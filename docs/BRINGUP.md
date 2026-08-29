@@ -64,6 +64,21 @@ make check-env                            # tools, platforms, cards, in one look
 xbutil examine
 ```
 
+**TOOLING VERDICT (2026-08-29): hardware bitstreams for this platform
+require era-matched tools.** Vivado 2026.1 cannot decrypt the shell's
+2022-era encrypted IP (`clk_metadata_adapter` fails with Synth 8-5809
+"encrypted envelope" - AMD obsoletes IP encryption keys after ~5
+years), so `v++ -l -t hw` is impossible from 2026.1 no matter what the
+kernel does. The build flow is **Vitis 2022.2**, bare-metal on Ubuntu
+24.04 with two legacy libs (libtinfo5/libncurses5 from jammy, staged
+in ~/installers on the build box; 22.04 container is the fallback if
+bare-metal misbehaves). 2026.1 was removed from the Linux box (it
+could neither build hw nor run hw_emu for this platform) and remains
+on Windows for kernel packaging and OOC QoR work, where the encrypted
+shell IP never enters the picture. xclbins built by 2022.2 run under
+the newer XRT 2.19 runtime - that pairing is what AMD's own 2024.1
+U50 deployment re-release ships.
+
 **Licensing (resolved 2026-08-29, applies to 2026.1+ tools).** The
 2026.1 release gates Vivado's *launch* on a license; the free BASIC
 tier does not cover xcu50 (Virtex UltraScale+ needs CORE+, Alveo has
