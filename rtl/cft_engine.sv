@@ -31,7 +31,7 @@
 `timescale 1ns/1ps
 
 module cft_engine #(
-    parameter int LATENCY = 3
+    parameter int LATENCY = 15
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,

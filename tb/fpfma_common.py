@@ -85,7 +85,7 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     dut.in_valid.value = 0
 
     # drain the pipe
-    for _ in range(16):
+    for _ in range(32):
         await RisingEdge(dut.clk)
     chk.kill()
 

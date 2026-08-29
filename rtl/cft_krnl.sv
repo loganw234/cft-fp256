@@ -102,7 +102,7 @@ module cft_krnl (
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
   );
 
-  cft_engine #(.LATENCY(3)) u_engine (
+  cft_engine #(.LATENCY(15)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_n(cfg_n),

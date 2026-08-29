@@ -15,7 +15,7 @@ module tb_fpfma_fp256 (
     output logic [255:0] d,
     output logic [4:0]   flags
 );
-  cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(3)) u_dut (
+  cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(15)) u_dut (
       .clk(clk), .rst_n(rst_n), .in_valid(in_valid),
       .a(a), .b(b), .c(c),
       .out_valid(out_valid), .d(d), .flags(flags));
