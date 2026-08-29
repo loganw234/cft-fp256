@@ -47,11 +47,20 @@ kernel flow, XRT host runtime.
   `softfloat.steer`, and this document.
 - **cft_csr** - AXI4-Lite slave, Vitis ap_ctrl_hs protocol, argument
   registers, and the read-only FLAGS/MAGIC/VERSION/CAPS block.
-- **cft_engine** - the sequencer: per 256-bit beat, read A, B, C,
-  push the beat through the bank MODE selects, collect through a
-  latency-matched delay line, write D, advance. All four banks share
-  the one delay line because every `cft_fpfma_pipe` instance has the
-  same structural depth regardless of width.
+- **cft_engine_stream** - the v1 streaming sequencer the kernel
+  instantiates: burst reads into three per-stream FIFOs (arbitrated
+  a > b > c, one AR outstanding, 4KB-safe), one beat issued per cycle
+  into the bank MODE selects whenever operands and result space
+  exist, collection through a latency-matched delay line into a D
+  FIFO, index-order burst writes out. Read, compute and write overlap
+  across beats; issue and write order stay total, so determinism is
+  untouched. All four banks share the one delay line because every
+  `cft_fpfma_pipe` instance has the same structural depth regardless
+  of width.
+- **cft_engine** - the naive one-beat-at-a-time reference engine
+  (read A, read B, read C, compute, write, advance - ~40 cycles per
+  beat). Not instantiated; kept as the readable spec the streamer is
+  scored against, the same role cft_fpfma plays for the pipe.
 
 ## Datapath geometry
 
@@ -111,20 +120,23 @@ rungs it carries; the beat stays 256 bits regardless.
 - One run per ap_start; poll CTRL for ap_done (XRT does this
   natively); read FLAGS before the next start if you want them.
 
-## AXI behaviour (v0, deliberately naive)
+## AXI behaviour (v1 streamer)
 
-Single ID, single outstanding transaction, ARLEN/AWLEN=0 (one 32-byte
-beat per burst), INCR, full write strobes. Per beat the engine costs
-three read round-trips, ~LATENCY+2 compute cycles, and one write
-round-trip - correctness and auditability first. The v1 engine adds
-long bursts, outstanding transactions, and stream-overlapped compute
-behind the same CSR contract; numerics do not change when it does.
+Single ID, INCR bursts up to 16 beats (512 B), never crossing a 4KB
+boundary, full write strobes. One AR outstanding at a time, streams
+arbitrated a > b > c into 32-beat FIFOs; writes drain the result
+FIFO in full bursts (the tail is always fully buffered, so short
+final bursts need no special case). Read, compute and write overlap:
+steady state costs 4 transfers per beat on the one shared 256-bit
+port (3 reads + 1 write), so the engine is port-bound at ~5
+cycles/beat with burst-amortized latency - versus ~40 for the naive
+reference engine. At 100 MHz that is ~20M beats/s: ~160M fp32 FMA/s,
+~20M fp256 FMA/s, per tile.
 
-Throughput honesty: v0 at, say, 100 MHz with ~40-cycle beats is on the
-order of tens of MB/s per stream - a bring-up vehicle, not a product.
-The architecture's headroom is the point: 8 lanes x 300 MHz is 2.4
-GFMA/s fp32 per tile once the engine stops being polite, and tiles
-replicate as CUs.
+The remaining engine knobs - multiple outstanding ARs, per-stream
+HBM pseudo-channels, multiple CUs - are roadmap items; none change
+numerics. The naive engine remains in rtl/ as the auditable
+reference for the same CSR contract.
 
 ## Timing (v1 core, measured OOC on xcu50)
 

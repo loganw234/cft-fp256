@@ -67,8 +67,16 @@ way atlas-darkroom records a census.
   fracture needs, so this work is its foundation, and the four-bank
   version just landed is its behavioural spec: the array replaces
   the banks only when it produces identical bits.
-- Engine: AXI bursts, multiple outstanding, overlapped read/compute/
-  write; multiple CUs with per-CU HBM pseudo-channel groups.
+- [x] **Streaming engine (2026-08-29):** cft_engine_stream - burst
+      reads (16-beat, 4KB-safe) into per-stream FIFOs, one beat
+      issued per cycle, index-order burst writes, read/compute/write
+      overlapped. Measured in the kernel bench: ~4.4 cycles/beat net
+      of CSR overhead - the shared-port bound (4 transfers/beat) -
+      vs ~40 for the naive engine, which stays in rtl/ as the
+      readable reference. Order of issue and writeback remains
+      total, so the determinism argument is unchanged.
+- Engine knobs still open: multiple outstanding ARs, per-CU HBM
+  pseudo-channel groups, multiple CUs.
 - Directed rounding modes (RZ/RU/RD) in the reserved MODE field -
   the interval-arithmetic unlock for scientific users.
 - Reduction ops (dot, sum) with the index-fixed tree the contract

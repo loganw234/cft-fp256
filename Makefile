@@ -57,7 +57,8 @@ sim:
 # port (docs/ROADMAP.md) a wrapper instead of a fork.
 yosys-lint:
 	yosys -q -p "read_verilog -sv rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv \
-	  rtl/cft_opmux.sv rtl/cft_csr.sv rtl/cft_engine.sv rtl/cft_krnl.sv; \
+	  rtl/cft_opmux.sv rtl/cft_csr.sv rtl/cft_fifo.sv rtl/cft_engine.sv \
+	  rtl/cft_engine_stream.sv rtl/cft_krnl.sv; \
 	  hierarchy -top cft_krnl; proc; opt -fast; stat -top cft_krnl"
 
 docker-image:

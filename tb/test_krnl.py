@@ -55,7 +55,8 @@ def gen_stream(fmt, n, rng):
     return out
 
 
-async def run_op(dut, axil, ram, fmt, op, n, seed):
+async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None):
+    ba, bb, bc, bd = bases if bases else (A_BASE, B_BASE, C_BASE, D_BASE)
     ebytes = fmt.width // 8
     rng = random.Random(seed)
     va = gen_stream(fmt, n, rng)
@@ -68,17 +69,17 @@ async def run_op(dut, axil, ram, fmt, op, n, seed):
     for e in exp:
         exp_f |= e[1]
 
-    ram.write(A_BASE, b"".join(v.to_bytes(ebytes, "little") for v in va))
-    ram.write(B_BASE, b"".join(v.to_bytes(ebytes, "little") for v in vb))
-    ram.write(C_BASE, b"".join(v.to_bytes(ebytes, "little") for v in vc))
-    ram.write(D_BASE, b"\xAA" * (n * ebytes))  # prove full overwrite
+    ram.write(ba, b"".join(v.to_bytes(ebytes, "little") for v in va))
+    ram.write(bb, b"".join(v.to_bytes(ebytes, "little") for v in vb))
+    ram.write(bc, b"".join(v.to_bytes(ebytes, "little") for v in vc))
+    ram.write(bd, b"\xAA" * (n * ebytes))  # prove full overwrite
 
     await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 4))
     await write64(axil, NREG, n)
-    await write64(axil, APTR, A_BASE)
-    await write64(axil, BPTR, B_BASE)
-    await write64(axil, CPTR, C_BASE)
-    await write64(axil, DPTR, D_BASE)
+    await write64(axil, APTR, ba)
+    await write64(axil, BPTR, bb)
+    await write64(axil, CPTR, bc)
+    await write64(axil, DPTR, bd)
     await axil.write_dword(CTRL, 1)
 
     for _ in range(5000):
@@ -89,7 +90,7 @@ async def run_op(dut, axil, ram, fmt, op, n, seed):
     else:
         raise AssertionError(f"{fmt.name} {OP_NAMES[op]}: kernel never finished")
 
-    got = ram.read(D_BASE, n * ebytes)
+    got = ram.read(bd, n * ebytes)
     bad = 0
     for i in range(n):
         g = int.from_bytes(got[i * ebytes:(i + 1) * ebytes], "little")
@@ -139,3 +140,11 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP128, OP_FMA, 8, seed=110)
     await run_op(dut, axil, ram, FP128, OP_ADD, 6, seed=111)
     await run_op(dut, axil, ram, FP64, OP_MUL, 4, seed=112)  # single-beat run
+
+    # stream-engine stressors: multi-burst runs, a ragged tail, and
+    # buffers placed so bursts must split at 4KB AXI boundaries
+    await run_op(dut, axil, ram, FP32, OP_FMA, 296, seed=113)  # 37 beats
+    await run_op(dut, axil, ram, FP64, OP_ADD, 128, seed=114)  # 32 beats
+    await run_op(dut, axil, ram, FP256, OP_FMA, 40, seed=115)  # 3 bursts
+    await run_op(dut, axil, ram, FP32, OP_MUL, 64, seed=116,
+                 bases=(0x00FE0, 0x41FC0, 0x82FA0, 0xC3F20))
