@@ -155,7 +155,24 @@ contract is scored against. Record the run.
   deployment package generation before the first link.
 - Whether `interrupt="false"` polling latency is acceptable for the
   intended run lengths, or the v1 CSR should export the interrupt.
-- Behavioural-core synthesis QoR: LUT cost of the fp256 unit as
-  written (the wide priority encoders and shifters are the suspects).
-  This number decides how much of v1's pipelining lands before or
-  after first light.
+- ~~Behavioural-core synthesis QoR~~ **answered 2026-08-28** with
+  `hw/synth_ooc.tcl` on Vivado 2026.1, xcu50-fsvh2104-2-e:
+
+  | instance | LUTs | regs | DSPs | critical path | tolerable clock |
+  |---|---|---|---|---|---|
+  | fp32 lane (LATENCY=3) | 2,428 (0.28%) | 171 | 2 | ~15.3 ns | ~65 MHz |
+  | fp256 unit (LATENCY=3) | 27,774 (3.19%) | 1,291 | 196 (3.3%) | ~68 ns | ~14 MHz |
+
+  Area is a non-issue - the full v0 kernel (8 lanes + 1 wide unit +
+  engine) is on the order of 6% of the part. Speed says the bring-up
+  clock is set by the fp256 cloud: link the first bitstream at ~12
+  MHz (both banks correct, everything provable), and make pipelining
+  the wide core the first post-first-light task. Correctness claims
+  are clock-independent; only throughput waits on v1.
+
+  Also measured, so nobody retries it: LATENCY=8 plus `synth_design
+  -retiming` changes nothing (WNS identical, the extra stages collapse
+  into shift registers instead of migrating into the cloud). There is
+  no parameter-level shortcut - v1's speed comes from real stage
+  boundaries in the RTL (unpack | multiply | align | add | normalize |
+  round), behind the same cft_fpfma_pipe ports and testbenches.
