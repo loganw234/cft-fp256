@@ -64,6 +64,19 @@ make check-env                            # tools, platforms, cards, in one look
 xbutil examine
 ```
 
+**Licensing (resolved 2026-08-29, applies to 2026.1+ tools).** The
+2026.1 release gates Vivado's *launch* on a license; the free BASIC
+tier does not cover xcu50 (Virtex UltraScale+ needs CORE+, Alveo has
+its own tier). What works: the **Alveo-tier license** that comes with
+an Alveo card purchase, generated on the AMD portal, node-locked to
+the build box's NIC MAC. On amd-arc-box: `~/.Xilinx/Xilinx.lic`,
+HOSTID = eno1 (fc:aa:14:2e:43:5a), features Vivado_Alveo_Package +
+Synthesis + Implementation + Simulation, **valid through 2027-08-29**
+- calendar the renewal; synthesis stops when it lapses. The account
+allows one node-lock per entitlement: it lives where v++ runs. The
+CLI AuthTokenGen flow produced tokens the installer rejected twice;
+the GUI installer's interactive login worked - prefer it.
+
 `xbutil examine` names the shell the card actually runs. The Makefile
 default is `xilinx_u50_gen3x16_xdma_5_202210_1`; a U50C may report a
 different platform name/generation - pass `PLATFORM=<what xbutil
