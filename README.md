@@ -25,7 +25,7 @@ a simple library; the tile only makes it faster.
 |---|---|
 | `python/cft_golden` | exact fp32/fp64/fp128/fp256 fma/add/sub/mul + flags, dependency-free; **16 pytest gates green** against native binary64, `math.fma`, mpmath, and hand-computed 754 anchors |
 | `rtl/` | parameterized behavioural FMA core (one source for fp32 and fp256), operand steering, ap_ctrl_hs CSR block, v0 vector engine, Vitis kernel top |
-| `tb/` | cocotb: streamed unit benches (fp32, fp256) + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model |
+| `tb/` | cocotb: streamed unit benches (fp32, fp256) + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green**: 4000 fp32 + 1300 fp256 vectors and 7 kernel runs bit-exact (Icarus 12, cocotb 1.9.2, in the `docker/` container) |
 | `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg - written to the documented flow, **not yet run against a live Vitis** (docs/BRINGUP.md gates that honestly) |
 | `host/` | pyxrt example that runs a vector op and verifies it against the golden model |
 | `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |

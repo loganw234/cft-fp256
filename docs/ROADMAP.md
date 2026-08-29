@@ -17,6 +17,9 @@ the golden model that everything else is scored against.
       contract; ap_ctrl_hs; sticky FLAGS CSR.
 - [x] cocotb benches: streamed unit vectors (fp32, fp256) and the
       full-kernel AXI end-to-end, all against the golden model.
+      First full run 2026-08-28: 4000 + 1300 vectors and 7 kernel runs
+      bit-exact, flags included, zero RTL fixes required after the
+      compile-clean pass.
 - [x] Vitis packaging collateral (kernel.xml, package_xo script, HBM
       link.cfg) and the pyxrt host example.
 - [x] Conformance vector emitter (vectors/gen_vectors.py).
