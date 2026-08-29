@@ -8,7 +8,8 @@ element against the golden model.
 
 The host contract (docs/ARCHITECTURE.md): buffers are 64-byte aligned
 (XRT BOs always are), elements little-endian, and N a whole number of
-512-bit beats - 16 elements for fp32, 2 for fp256.
+256-bit beats - 8 elements for fp32, 4 for fp64, 2 for fp128, 1 for
+fp256.
 
 Requires XRT's Python bindings (pyxrt) on the machine with the card;
 everything else in this repo runs without them.
@@ -27,14 +28,15 @@ from cft_golden import (  # noqa: E402
 )
 
 OPS = {"fma": OP_FMA, "add": OP_ADD, "sub": OP_SUB, "mul": OP_MUL}
-ELEMS_PER_BEAT = {"fp32": 8, "fp256": 1}
+ELEMS_PER_BEAT = {"fp32": 8, "fp64": 4, "fp128": 2, "fp256": 1}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("xclbin")
     ap.add_argument("--device", type=int, default=0)
-    ap.add_argument("--format", choices=("fp32", "fp256"), default="fp32")
+    ap.add_argument("--format", choices=tuple(ELEMS_PER_BEAT),
+                    default="fp32")
     ap.add_argument("--op", choices=tuple(OPS), default="fma")
     ap.add_argument("--n", type=int, default=4096)
     ap.add_argument("--seed", type=int, default=1)

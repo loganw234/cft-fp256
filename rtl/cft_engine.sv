@@ -6,15 +6,19 @@
 // one 256-bit beat at a time.
 //
 // Datapath geometry: the beat IS the tile's compute width - 256 bits,
-// which is 8 fp32 lanes or 1 fp256 operand, selected per run by
-// cfg_prec (0 = fp32x8, 3 = fp256; 1 and 2 are reserved for the
-// fp64/fp128 rungs of the fractured array, v1). Elements per beat:
-// fp32 -> 8, fp256 -> 1. v0 requires N to be a whole number of beats
-// (host contract; see docs/ARCHITECTURE.md). 256 bits is also the
-// native width of an HBM pseudo-channel, so no width converter sits
-// between the kernel and memory - in hardware or in emulation, where
-// a 512-bit master demonstrably lost write payloads through the
-// 2022-era platform's converter models (see docs/BRINGUP.md).
+// carrying 8 fp32 / 4 fp64 / 2 fp128 lanes or 1 fp256 operand,
+// selected per run by cfg_prec (0..3 = the PREC_CODE ladder). All
+// four rungs share the one beat, the one delay line, and the one
+// flags rail; only the lane slicing differs. N must be a whole
+// number of beats (host contract; see docs/ARCHITECTURE.md). The
+// EN_FP64/EN_FP128/EN_FP256 parameters let a trimmed tile (open-core
+// conformance nodes, docs/ROADMAP.md) drop banks it cannot fit; what
+// remains is advertised in the CAPS CSR and behaves identically.
+// 256 bits is also the native width of an HBM pseudo-channel, so no
+// width converter sits between the kernel and memory - in hardware or
+// in emulation, where a 512-bit master demonstrably lost write
+// payloads through the 2022-era platform's converter models (see
+// docs/BRINGUP.md).
 //
 // Determinism: element i of D depends only on element i of A, B, C and
 // the op - there is no cross-element arithmetic in v0, so ordering
@@ -31,7 +35,10 @@
 `timescale 1ns/1ps
 
 module cft_engine #(
-    parameter int LATENCY = 15
+    parameter int LATENCY  = 15,
+    parameter bit EN_FP64  = 1'b1,
+    parameter bit EN_FP128 = 1'b1,
+    parameter bit EN_FP256 = 1'b1
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -89,8 +96,10 @@ module cft_engine #(
     output logic         m00_axi_rready
 );
 
-  localparam logic [3:0] PREC_FP32  = 4'd0;
-  localparam logic [3:0] PREC_FP256 = 4'd3;
+  localparam logic [1:0] PREC_FP32  = 2'd0;
+  localparam logic [1:0] PREC_FP64  = 2'd1;
+  localparam logic [1:0] PREC_FP128 = 2'd2;
+  localparam logic [1:0] PREC_FP256 = 2'd3;
 
   // ---- FSM ----------------------------------------------------------
   localparam int S_IDLE  = 0;
@@ -111,8 +120,12 @@ module cft_engine #(
   logic [3:0]   state;
   logic [63:0]  beats_total, beat_idx;
   logic [255:0] abuf, bbuf, cbuf, dbuf;
-  logic         is_wide;
+  logic [1:0]   prec_r;
   logic         captured;
+
+  // elements per beat = 8 >> prec, so beats = n >> (3 - prec)
+  logic [63:0] beats_new;
+  assign beats_new = cfg_n >> (2'd3 - cfg_prec[1:0]);
 
   // constant AXI attributes
   assign m00_axi_awid    = 1'b0;
@@ -167,7 +180,7 @@ module cft_engine #(
           .fa(fa), .fb(fb), .fc(fc));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(ex_valid && !is_wide),
+          .in_valid(ex_valid && (prec_r == PREC_FP32)),
           .a(fa), .b(fb), .c(fc),
           .out_valid(), .d(dd), .flags(f32_l[gi]));
       assign d32[gi*32 +: 32] = dd;
@@ -178,22 +191,100 @@ module cft_engine #(
     for (int i = 0; i < 8; i = i + 1) f32_or = f32_or | f32_l[i];
   end
 
+  // 4 x fp64 lanes
+  logic [255:0] d64;
+  logic [4:0]   f64_or;
+  generate
+    if (EN_FP64) begin : g_bank64
+      logic [4:0] f64_l [0:3];
+      for (gi = 0; gi < 4; gi = gi + 1) begin : g_lane64
+        logic [63:0] sa, sb, sc, fa, fb, fc, dd;
+        assign sa = abuf[gi*64 +: 64];
+        assign sb = bbuf[gi*64 +: 64];
+        assign sc = cbuf[gi*64 +: 64];
+        cft_opmux #(.EXP_W(11), .MAN_W(52)) u_mux (
+            .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+            .fa(fa), .fb(fb), .fc(fc));
+        cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
+            .clk(ap_clk), .rst_n(ap_rst_n),
+            .in_valid(ex_valid && (prec_r == PREC_FP64)),
+            .a(fa), .b(fb), .c(fc),
+            .out_valid(), .d(dd), .flags(f64_l[gi]));
+        assign d64[gi*64 +: 64] = dd;
+      end
+      always_comb begin
+        f64_or = 5'b0;
+        for (int i = 0; i < 4; i = i + 1) f64_or = f64_or | f64_l[i];
+      end
+    end else begin : g_bank64_off
+      assign d64 = '0;
+      assign f64_or = 5'b0;
+    end
+  endgenerate
+
+  // 2 x fp128 lanes
+  logic [255:0] d128;
+  logic [4:0]   f128_or;
+  generate
+    if (EN_FP128) begin : g_bank128
+      logic [4:0] f128_l [0:1];
+      for (gi = 0; gi < 2; gi = gi + 1) begin : g_lane128
+        logic [127:0] sa, sb, sc, fa, fb, fc, dd;
+        assign sa = abuf[gi*128 +: 128];
+        assign sb = bbuf[gi*128 +: 128];
+        assign sc = cbuf[gi*128 +: 128];
+        cft_opmux #(.EXP_W(15), .MAN_W(112)) u_mux (
+            .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+            .fa(fa), .fb(fb), .fc(fc));
+        cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
+            .clk(ap_clk), .rst_n(ap_rst_n),
+            .in_valid(ex_valid && (prec_r == PREC_FP128)),
+            .a(fa), .b(fb), .c(fc),
+            .out_valid(), .d(dd), .flags(f128_l[gi]));
+        assign d128[gi*128 +: 128] = dd;
+      end
+      always_comb begin
+        f128_or = 5'b0;
+        for (int i = 0; i < 2; i = i + 1) f128_or = f128_or | f128_l[i];
+      end
+    end else begin : g_bank128_off
+      assign d128 = '0;
+      assign f128_or = 5'b0;
+    end
+  endgenerate
+
   // 1 x fp256 unit
-  logic [255:0] w_fa, w_fb, w_fc, d256;
+  logic [255:0] d256;
   logic [4:0]   f256;
-  cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
-      .op(cfg_op[1:0]), .a(abuf), .b(bbuf), .c(cbuf),
-      .fa(w_fa), .fb(w_fb), .fc(w_fc));
-  cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
-      .clk(ap_clk), .rst_n(ap_rst_n),
-      .in_valid(ex_valid && is_wide),
-      .a(w_fa), .b(w_fb), .c(w_fc),
-      .out_valid(), .d(d256), .flags(f256));
+  generate
+    if (EN_FP256) begin : g_bank256
+      logic [255:0] w_fa, w_fb, w_fc;
+      cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
+          .op(cfg_op[1:0]), .a(abuf), .b(bbuf), .c(cbuf),
+          .fa(w_fa), .fb(w_fb), .fc(w_fc));
+      cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
+          .clk(ap_clk), .rst_n(ap_rst_n),
+          .in_valid(ex_valid && (prec_r == PREC_FP256)),
+          .a(w_fa), .b(w_fb), .c(w_fc),
+          .out_valid(), .d(d256), .flags(f256));
+    end else begin : g_bank256_off
+      assign d256 = '0;
+      assign f256 = 5'b0;
+    end
+  endgenerate
 
   logic [255:0] beat_d;
   logic [4:0]   beat_f;
-  assign beat_d = is_wide ? d256 : d32;
-  assign beat_f = is_wide ? f256 : f32_or;
+  always_comb begin
+    beat_d = d32;
+    beat_f = f32_or;
+    case (prec_r)
+      PREC_FP64:  begin beat_d = d64;  beat_f = f64_or;  end
+      PREC_FP128: begin beat_d = d128; beat_f = f128_or; end
+      PREC_FP256: begin beat_d = d256; beat_f = f256;    end
+      default: ;  // PREC_FP32 falls through to the defaults
+    endcase
+  end
 
   // issue delay line, matched to the banks' fixed latency
   logic [LATENCY-1:0] vdl;
@@ -208,7 +299,7 @@ module cft_engine #(
       captured <= 1'b0;
       beat_idx <= '0;
       beats_total <= '0;
-      is_wide <= 1'b0;
+      prec_r <= 2'd0;
     end else begin
       done <= 1'b0;
 
@@ -219,7 +310,7 @@ module cft_engine #(
         flags_acc <= flags_acc | beat_f;
         captured <= 1'b1;
         // synthesis translate_off
-        $display("[CFT-ENG] beat%0d EXQ wide=%b d[127:0]=0x%h flags=%b", beat_idx, is_wide, beat_d[127:0], beat_f);
+        $display("[CFT-ENG] beat%0d EXQ prec=%0d d[127:0]=0x%h flags=%b", beat_idx, prec_r, beat_d[127:0], beat_f);
         // synthesis translate_on
       end
 
@@ -230,11 +321,11 @@ module cft_engine #(
             $display("[CFT-ENG] START op=%0d prec=%0d n=%0d a=0x%h b=0x%h c=0x%h d=0x%h",
                      cfg_op, cfg_prec, cfg_n, cfg_a, cfg_b, cfg_c, cfg_d);
             // synthesis translate_on
-            is_wide <= (cfg_prec == PREC_FP256);
-            beats_total <= (cfg_prec == PREC_FP256) ? cfg_n : (cfg_n >> 3);
+            prec_r <= cfg_prec[1:0];
+            beats_total <= beats_new;
             beat_idx <= '0;
             flags_acc <= 5'b0;
-            if (((cfg_prec == PREC_FP256) ? cfg_n : (cfg_n >> 3)) == 0) begin
+            if (beats_new == 0) begin
               state <= S_DONE;
             end else begin
               state <= S_AR_A;

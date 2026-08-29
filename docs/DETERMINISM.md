@@ -40,9 +40,9 @@ names the example itself: "binary256 would have p = 237 and
 emax = 262143" (3.6, Table 3.5). No bfloat, no TF32, no vendor
 variants: identity needs one definition per width.
 
-v0 hardware implements the fp32 and fp256 rungs; fp64/fp128 arrive
-with the fractured array (docs/ROADMAP.md). The golden model
-implements all four today.
+Hardware and golden model both implement all four rungs; a trimmed
+tile advertises what it carries in the CAPS CSR
+(docs/ARCHITECTURE.md) and is bit-identical on those rungs.
 
 ## Operations
 

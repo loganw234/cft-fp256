@@ -45,15 +45,28 @@ way atlas-darkroom records a census.
       clock rises 10 -> ~100 MHz. Remaining nanoseconds live in the
       DSP column cascades (split columns, +1 stage) and the round
       stage - chase when a platform clock demands it.
+- [x] **fp64 and fp128 rungs (2026-08-29):** wired through
+      MODE[7:4] = 1, 2 as 4x/2x lane banks of the same parameterized
+      pipe (the golden model and vector sets already covered them -
+      hardware caught up to the contract, with zero core-RTL fixes:
+      the chunked multiplier degenerates to 3/5 columns). Kernel
+      VERSION 0x200 adds the CAPS CSR (0x4C, precision bitmask) and
+      cft_krnl EN_FP64/EN_FP128/EN_FP256 trim parameters for
+      constrained open-core targets. Suite grew to 4000+4000+2100+
+      1300 unit vectors + 12 kernel AXI runs, all bit-exact. Measured
+      OOC ladder on xcu50-2 (per lane): fp32 ~232 MHz 2.5k LUT
+      2 DSP, fp64 ~201 MHz 4.7k LUT 9 DSP, fp128 ~188 MHz 11.5k LUT
+      35 DSP, fp256 ~148 MHz 31k LUT 140 DSP - full four-bank tile
+      ~93k LUT / 262 DSP (~11% / 4.4% of VU35P), every rung >45%
+      margin over the 100 MHz kernel clock.
 - The fused significand array: one physical multiplier serving
-  1x fp256 / 2x fp128 / 4x fp64 / 8x fp32 per half-beat with
+  1x fp256 / 2x fp128 / 4x fp64 / 8x fp32 per beat with
   mode-gated partial products (granule tiling study in
   docs/ARCHITECTURE.md), pipelined to platform clock - the chunked
   column decomposition above is exactly the granule structure the
-  fracture needs, so this work is its foundation.
-- fp64 and fp128 rungs wired through MODE[7:4] = 1, 2 (the golden
-  model and vector sets already cover them - hardware catches up to
-  the contract, not the reverse).
+  fracture needs, so this work is its foundation, and the four-bank
+  version just landed is its behavioural spec: the array replaces
+  the banks only when it produces identical bits.
 - Engine: AXI bursts, multiple outstanding, overlapped read/compute/
   write; multiple CUs with per-CU HBM pseudo-channel groups.
 - Directed rounding modes (RZ/RU/RD) in the reserved MODE field -

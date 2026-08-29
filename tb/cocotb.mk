@@ -19,6 +19,8 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_engine.sv \
     $(RTLDIR)/cft_krnl.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp32.sv \
+    $(TBDIR)/wrappers/tb_fpfma_fp64.sv \
+    $(TBDIR)/wrappers/tb_fpfma_fp128.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp256.sv
 
 ifeq ($(SIM),icarus)

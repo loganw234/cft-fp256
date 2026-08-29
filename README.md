@@ -19,20 +19,21 @@ precision up to fp256 when the problem needs it (deep-zoom orbits,
 reference oracles, interval arithmetic to come). The entry point stays
 a simple library; the tile only makes it faster.
 
-## What exists today (v0)
+## What exists today
 
 | piece | state |
 |---|---|
 | `python/cft_golden` | exact fp32/fp64/fp128/fp256 fma/add/sub/mul + flags, dependency-free; **16 pytest gates green** against native binary64, `math.fma`, mpmath, and hand-computed 754 anchors |
-| `rtl/` | parameterized behavioural FMA core (one source for fp32 and fp256), operand steering, ap_ctrl_hs CSR block, v0 vector engine, Vitis kernel top |
-| `tb/` | cocotb: streamed unit benches (fp32, fp256) + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green**: 4000 fp32 + 1300 fp256 vectors and 7 kernel runs bit-exact (Icarus 12, cocotb 1.9.2, in the `docker/` container) |
-| `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg - written to the documented flow, **not yet run against a live Vitis** (docs/BRINGUP.md gates that honestly) |
+| `rtl/` | the v1 15-stage pipelined FMA core (one parameterized source serving all four rungs: 8x fp32 / 4x fp64 / 2x fp128 / 1x fp256 per 256-bit beat), operand steering, ap_ctrl_hs CSR block with CAPS discovery, vector engine, Vitis kernel top; the v0 behavioural core stays as the readable reference; **Yosys-clean** (CI-enforced portability) |
+| `tb/` | cocotb: streamed unit benches for all four widths + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green**: 4000 fp32 + 4000 fp64 + 2100 fp128 + 1300 fp256 vectors and 12 kernel runs bit-exact (Icarus 12, cocotb 1.9.2, in the `docker/` container) |
+| `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg, the era-matched `rebuild-2022.sh` pipeline - **packaging and hw_emu gates MET** (bit-exact vs golden through real XRT), hw bitstreams built (docs/BRINGUP.md records each gate honestly) |
 | `host/` | pyxrt example that runs a vector op and verifies it against the golden model |
 | `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |
 
-Nothing here has met a physical card yet. The claim v0 makes is
+No physical card yet (it is in the mail). The claim made so far is
 narrower and checkable: the RTL is bit-exact against a golden model
-that is itself proven against implementations sharing no code with it.
+that is itself proven against implementations sharing no code with
+it, through the same interfaces XRT drives on silicon.
 
 ## Quickstart
 

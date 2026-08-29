@@ -24,14 +24,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from cocotbext.axi import AxiBus, AxiLiteBus, AxiLiteMaster, AxiRam  # noqa: E402
 
 from cft_golden import (  # noqa: E402
-    FP32, FP256, PREC_CODE, OP_FMA, OP_ADD, OP_SUB, OP_MUL, OP_NAMES,
+    FP32, FP64, FP128, FP256, PREC_CODE,
+    OP_FMA, OP_ADD, OP_SUB, OP_MUL, OP_NAMES,
     compute, vectors,
 )
 
 # CSR map (cft_csr.sv / hw/kernel.xml)
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
-FLAGS, MAGIC, VERSION = 0x40, 0x44, 0x48
+FLAGS, MAGIC, VERSION, CAPS = 0x40, 0x44, 0x48, 0x4C
 
 A_BASE, B_BASE, C_BASE, D_BASE = 0x00000, 0x40000, 0x80000, 0xC0000
 
@@ -121,7 +122,8 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000100
+    assert await axil.read_dword(VERSION) == 0x00000200
+    assert await axil.read_dword(CAPS) == 0xF, "full tile advertises all rungs"
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
 
@@ -132,3 +134,8 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP256, OP_FMA, 6, seed=105)
     await run_op(dut, axil, ram, FP256, OP_MUL, 4, seed=106)
     await run_op(dut, axil, ram, FP32, OP_FMA, 16, seed=107)  # single-beat run
+    await run_op(dut, axil, ram, FP64, OP_FMA, 24, seed=108)
+    await run_op(dut, axil, ram, FP64, OP_SUB, 16, seed=109)
+    await run_op(dut, axil, ram, FP128, OP_FMA, 8, seed=110)
+    await run_op(dut, axil, ram, FP128, OP_ADD, 6, seed=111)
+    await run_op(dut, axil, ram, FP64, OP_MUL, 4, seed=112)  # single-beat run

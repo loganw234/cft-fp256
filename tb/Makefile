@@ -5,20 +5,30 @@
 # and what docker/Dockerfile.sim exists to run.
 #
 #   make sim                  everything (icarus)
-#   make fp32 | fp256 | krnl  one bench
+#   make fp32 | fp64 | fp128 | fp256 | krnl   one bench
 #   make SIM=verilator sim    alternative simulator
 #   CFT_RANDOM=20000 make fp32   crank the vector count
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp256 krnl clean
+.PHONY: sim fp32 fp64 fp128 fp256 krnl clean
 
-sim: fp32 fp256 krnl
+sim: fp32 fp64 fp128 fp256 krnl
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
 		MODULE=test_fpfma_fp32 SIM_BUILD=sim_build/fp32 \
 		COCOTB_RESULTS_FILE=sim_build/fp32/results.xml
+
+fp64:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp64 \
+		MODULE=test_fpfma_fp64 SIM_BUILD=sim_build/fp64 \
+		COCOTB_RESULTS_FILE=sim_build/fp64/results.xml
+
+fp128:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp128 \
+		MODULE=test_fpfma_fp128 SIM_BUILD=sim_build/fp128 \
+		COCOTB_RESULTS_FILE=sim_build/fp128/results.xml
 
 fp256:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 \

@@ -10,7 +10,14 @@
 
 `timescale 1ns/1ps
 
-module cft_krnl (
+module cft_krnl #(
+    // Bank trims for constrained targets (open-core conformance
+    // nodes); the full Alveo tile keeps all four rungs. fp32 is the
+    // baseline and always present. Advertised in the CAPS CSR.
+    parameter bit EN_FP64  = 1'b1,
+    parameter bit EN_FP128 = 1'b1,
+    parameter bit EN_FP256 = 1'b1
+) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
 
@@ -98,11 +105,13 @@ module cft_krnl (
       .s_axi_control_rvalid(s_axi_control_rvalid),
       .s_axi_control_rready(s_axi_control_rready),
       .start(start), .busy(busy), .done(done), .eng_flags(eng_flags),
+      .prec_caps({EN_FP256, EN_FP128, EN_FP64, 1'b1}),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
   );
 
-  cft_engine #(.LATENCY(15)) u_engine (
+  cft_engine #(.LATENCY(15), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
+               .EN_FP256(EN_FP256)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_n(cfg_n),

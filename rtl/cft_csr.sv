@@ -14,7 +14,9 @@
 //   0x08  IER     storage only
 //   0x0C  ISR     reads 0
 //   0x10  MODE    [3:0] op: 0 fma, 1 add, 2 sub, 3 mul
-//                 [7:4] precision: 0 fp32x8, 3 fp256 (1,2 reserved)
+//                 [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2,
+//                 3 fp256 - the PREC_CODE ladder; issue only
+//                 precisions advertised in CAPS
 //   0x18  N       element count, 64-bit (lo at 0x18, hi at 0x1C)
 //   0x20  A_PTR   64-bit HBM byte address, 64-byte aligned
 //   0x28  B_PTR   64-bit
@@ -24,7 +26,10 @@
 //                 {inexact,underflow,overflow,divzero,invalid};
 //                 cleared by hardware at ap_start
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000100 (v0.1.0)
+//   0x48  VERSION RO: 0x00000200 (v0.2.0)
+//   0x4C  CAPS    RO: [3:0] precision bitmask, bit p = MODE prec p
+//                 implemented (full tile: 0xF; trimmed open-core
+//                 tiles clear the banks they cannot fit)
 
 `timescale 1ns/1ps
 
@@ -56,6 +61,7 @@ module cft_csr (
     input  logic        busy,
     input  logic        done,        // one-cycle pulse
     input  logic [4:0]  eng_flags,
+    input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     output logic [3:0]  cfg_op,
     output logic [3:0]  cfg_prec,
     output logic [63:0] cfg_n,
@@ -66,7 +72,7 @@ module cft_csr (
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  localparam [31:0] VERSION = 32'h0000_0100;
+  localparam [31:0] VERSION = 32'h0000_0200;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
@@ -202,6 +208,7 @@ module cft_csr (
           10'h010: s_axi_control_rdata <= {27'b0, eng_flags};
           10'h011: s_axi_control_rdata <= MAGIC;
           10'h012: s_axi_control_rdata <= VERSION;
+          10'h013: s_axi_control_rdata <= {28'b0, prec_caps};
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end

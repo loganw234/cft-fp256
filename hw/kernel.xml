@@ -3,9 +3,9 @@
 
   Vitis kernel description for cft_krnl. The argument offsets ARE the
   register map in rtl/cft_csr.sv; change them together or not at all.
-  Read-only CSRs (FLAGS 0x40, MAGIC 0x44, VERSION 0x48) are not
-  arguments and deliberately absent here - hosts reach them with
-  xrt::kernel::read_register / pyxrt read_register.
+  Read-only CSRs (FLAGS 0x40, MAGIC 0x44, VERSION 0x48, CAPS 0x4C)
+  are not arguments and deliberately absent here - hosts reach them
+  with xrt::kernel::read_register / pyxrt read_register.
 -->
 <root versionMajor="1" versionMinor="6">
   <kernel name="cft_krnl" language="ip_c"
