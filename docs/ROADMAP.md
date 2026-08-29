@@ -106,7 +106,8 @@ conformance story no closed flow can tell.
 
 | target | open flow | fits | role |
 |---|---|---|---|
-| **Alchitry Pt V2 (XC7A100T-2) - CHOSEN, 2026-08-29** | openXC7 (well-documented part; DSP inference immature) | full tile via free-tier Vivado day one (~79% LUTs, 165/240 DSPs); nano-tile via openXC7 now; open full tile when DSP support lands or via a serialized-multiplier variant | the platform: SparkFun-backed longevity, published schematics, 256MB DDR3L, FTDI JTAG, GTPs (future LitePCIe host link) |
+| **Arty A7-100T - dev board, ORDERED 2026-08-29** | openXC7 + LiteX treat it as their reference target - open bring-up on rails | full tile (~79% LUTs, 165/240 DSPs) | where the open full tile comes up first; Ethernet/Etherbone streaming; no transceivers ever (CSG324) |
+| **Alchitry Pt V2 (XC7A100T-2) - the module, x4 when bundled** | same silicon as Arty; port is an afternoon | full tile | the carrier/quad future: GTPs -> LitePCIe, module ring, verified execution modes |
 | Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | quarter-tile (4x fp32 + engine, ~67%) or one fp64 rung; fp256 physically impossible (needs 27.8k of 20.8k LUTs) | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
 | ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | 8x fp32 bank + engine only | fallback nano-tile if boards resurface (scarce as of 2026-08) |
 | Artix-7 200T | openXC7 | full tile even with LUT-fallback multipliers | the headroom alternative if open-full-tile-today ever becomes a hard requirement |
@@ -143,6 +144,22 @@ non-ECC DRAM flips, marginal timing, toolchain miscompiles under
 diversity) and can never catch a DESIGN bug - all modules agree on a
 wrong answer with perfect confidence. Logic correctness remains the
 golden model and conformance vectors' jurisdiction.
+
+### The scale-out doctrine (open path to 4-8 tiles)
+
+No open toolchain reaches 4-8-tile monolithic silicon (prjxray ends
+at 7-series ~134k LUTs; prjuray is immature; big Lattice is closed) -
+so the open machine scales OUT: a backplane of open-flow modules
+(quad-Pt carriers; or used SQRL Acorn/NiteFury A200T M.2 modules -
+openXC7's biggest part, PCIe-native, LiteX-supported, mining surplus)
+joined by the deterministic module ring. The contract's index-fixed
+reduction ordering makes scale-out coherence-free by construction:
+the ring IS the "Coordinated" in CFT. The pragmatic monolithic
+alternative stays vendor-flow: used Alveo U200/U250 (VU9P: 8+ tiles,
+64GB DDR4 - fine per the memory analysis) are covered by the SAME
+Alveo-tier license and the same XRT flow as the U50C. Watch prjuray
+and Apicula for the open ceiling moving; open-ASIC PDKs are the
+distant flagpole for a fully-open fp32 lane chip.
 
 Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
 fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
