@@ -169,6 +169,27 @@ testified. Era-emulation prerequisites beyond the tools: XRT 2.14
 build-essential (the platform's SystemC models compile at link time),
 python3-numpy (this pyxrt's readback path).
 
+**Re-met on the v1 design (2026-08-29), all four rungs and the
+streaming engine.** `hw/emu_smoke.sh` runs one op per precision
+through the same stack: fp32/fp64/fp128/fp256 fma all bit-exact
+against the golden model, including the sticky-flag word. Then the
+case that matters for the burst engine - fp32 fma n=296, i.e. 37
+beats, so each stream issues two full 16-beat bursts plus a ragged
+5-beat tail, with reads, compute and writes overlapping - **PASSES
+bit-exact** against Xilinx's own interconnect and HBM models. That
+is the evidence cocotb's RAM model cannot give: the burst geometry
+(4KB-boundary safety, ARLEN/AWLEN encoding, WLAST placement,
+back-pressure) is validated against the vendor's checkers, not
+against our own testbench's assumptions.
+
+Field note on reading smoke output: a *numerical* failure always
+prints MISMATCH/FAIL lines. A case that prints no verdict line at
+all is an infrastructure fault - the first hw_emu launch after a
+fresh link is a cold start and has been seen to die silently, where
+the same case passes immediately when rerun alone. The script now
+reports the exit code in that situation so the two are never
+confused.
+
 The tooling-skew record below is kept for the field notes it contains.
 
 ### The original 2026.1 attempt - blocked by tooling, evidence recorded

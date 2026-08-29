@@ -56,9 +56,12 @@ way atlas-darkroom records a census.
       1300 unit vectors + 12 kernel AXI runs, all bit-exact. Measured
       OOC ladder on xcu50-2 (per lane): fp32 ~232 MHz 2.5k LUT
       2 DSP, fp64 ~201 MHz 4.7k LUT 9 DSP, fp128 ~188 MHz 11.5k LUT
-      35 DSP, fp256 ~148 MHz 31k LUT 140 DSP - full four-bank tile
-      ~93k LUT / 262 DSP (~11% / 4.4% of VU35P), every rung >45%
-      margin over the 100 MHz kernel clock.
+      35 DSP, fp256 ~148 MHz 31k LUT 140 DSP. The whole kernel
+      synthesized out of context (hw/synth_krnl_ooc.tcl) closes
+      **WNS +3.62 ns at 100 MHz** at 95,537 LUT / 46,617 FF / 262
+      DSP - ~11% and 4.4% of the VU35P, and confirmation that the
+      engine, CSR and bank muxes add no critical path the per-core
+      probe would have missed.
 - The fused significand array: one physical multiplier serving
   1x fp256 / 2x fp128 / 4x fp64 / 8x fp32 per beat with
   mode-gated partial products (granule tiling study in
@@ -74,7 +77,10 @@ way atlas-darkroom records a census.
       of CSR overhead - the shared-port bound (4 transfers/beat) -
       vs ~40 for the naive engine, which stays in rtl/ as the
       readable reference. Order of issue and writeback remains
-      total, so the determinism argument is unchanged.
+      total, so the determinism argument is unchanged. Validated
+      against the vendor's own interconnect models, not just our
+      testbench: fp32 n=296 (37 beats = two full bursts + a ragged
+      tail) is bit-exact through hw_emu.
 - Engine knobs still open: multiple outstanding ARs, per-CU HBM
   pseudo-channel groups, multiple CUs.
 - Directed rounding modes (RZ/RU/RD) in the reserved MODE field -
