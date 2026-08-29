@@ -22,6 +22,7 @@ bench proves an operation cannot pick up its neighbour's attribute.
 """
 
 import os
+import random
 import sys
 from collections import deque
 from pathlib import Path
@@ -59,14 +60,22 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     # here so every op still exercises it. The RTL steering mux is
     # covered by the kernel-level test.
     #
-    # Each case is issued once per attribute, interleaved mode-major
-    # within a case so consecutive cycles carry different attributes.
+    # Each case is issued once per attribute, then the whole stream is
+    # shuffled. The shuffle is the point, not cosmetic: issuing the
+    # attributes in a fixed rotation gives the stream period 5, and the
+    # pipeline is 15 stages deep - so a delay-line misalignment by any
+    # multiple of 5 stages would deliver every operation an attribute
+    # equal to its own and pass the entire suite. An aperiodic order
+    # has no such blind spot, and adjacent operations still differ in
+    # attribute most of the time, which is what proves an operation
+    # cannot pick up its neighbour's.
     work = []
     for op, xa, xb, xc in cases:
         fa, fb, fc = steer(fmt, op, xa, xb, xc)
         for rnd in modes:
             want_d, want_f = fma(fmt, fa, fb, fc, rnd)
             work.append((op, rnd, fa, fb, fc, want_d, want_f))
+    random.Random(seed ^ 0x5EED).shuffle(work)
 
     cocotb.start_soon(Clock(dut.clk, 4, units="ns").start())
     dut.in_valid.value = 0

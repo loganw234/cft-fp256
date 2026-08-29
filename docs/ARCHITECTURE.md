@@ -33,7 +33,8 @@ kernel flow, XRT host runtime.
 - **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
   staged significand multiplier (24-bit chunk columns + four
   registered tree levels), coarse/fine alignment with the sticky
-  marker, split-carry add, per-64 LZC normalize, single RNE rounding
+  marker, split-carry add, per-64 LZC normalize, a single rounding
+  under the operation's own 754 attribute
   with after-rounding tininess, pack, flags. Fixed latency, no
   stalls; ordering is structural. The stage map and the marker/sticky
   safety argument are in the header comment.

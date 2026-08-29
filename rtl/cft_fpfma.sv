@@ -33,9 +33,14 @@
 //   kept-1 with a nonzero remainder, exactly floor semantics.
 //   Safety argument for the marker (mirrored from the golden model):
 //   the marker can only be set when the operands' LSB weights differ
-//   by more than SH, and then no cancellation is possible, so the
-//   rounding position sits at least 3 bits above the marker and the
-//   marker can never be the guard or tie bit.
+//   by more than SH. Cancellation IS still possible in that regime -
+//   an addend-anchored case with a small subnormal addend cancels to
+//   an all-zero window with the marker surviving - but such an addend
+//   pins its exponent at the subnormal minimum, which puts the whole
+//   result below the grid and the rounding position at least 3 bits
+//   above the marker. Either way the marker can never be the guard or
+//   tie bit; the reason is subnormality, not the absence of
+//   cancellation.
 
 `timescale 1ns/1ps
 

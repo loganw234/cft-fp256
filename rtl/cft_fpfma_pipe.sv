@@ -32,8 +32,8 @@
 //         appended marker into the explicit sticky rail
 //   S11   LZC (per-64 chunk tree) + coarse normalize shift
 //   S12   fine normalize shift
-//   S13   round-window extraction (clamped and as-if-unbounded), RNE
-//         increment, tininess-after-rounding
+//   S13   round-window extraction (clamped and as-if-unbounded),
+//         attribute-directed increment, tininess-after-rounding
 //   S14   pack + specials mux -> output registers
 //
 // Marker/sticky safety carries over from v0 strengthened: the
@@ -41,7 +41,10 @@
 // remainder), then becomes an explicit sticky bit for rounding, so
 // no shift can move its weight. An all-zero value window is an exact
 // zero ONLY when that residue is also clear; otherwise the value is a
-// bare epsilon and rounds to zero with underflow+inexact.
+// bare epsilon, below the smallest subnormal, and each rounding
+// attribute disposes of it its own way (toward zero under RTZ and on
+// the far side under a directed attribute; away from it under RUP for
+// a positive value, giving the minimum subnormal).
 
 `timescale 1ns/1ps
 
@@ -124,9 +127,44 @@ module cft_fpfma_pipe #(
   endfunction
 
   localparam int DEPTH = 15;
+
+  // Elaboration-time guards. These have to be in generate scope, not in
+  // an `initial` block: synthesis ignores `initial` entirely, so a
+  // simulation-only check is no guard at all for the thing it is
+  // guarding against. Both matter -
+  //   LATENCY is structural. It does not shorten or lengthen anything;
+  //   the engines size their result-capture delay lines from the same
+  //   parameter, so an override would desynchronise the capture window
+  //   from the real depth and silently latch every beat at the wrong
+  //   cycle, with no error anywhere.
+  //   NMC is the multiplier's chunk count. The partial-product array
+  //   and its reduction tree are fixed at 16 entries, so a mantissa
+  //   wide enough to need a 17th chunk would silently drop the top of
+  //   the product. MAN_W <= 383 is the real ceiling.
+  // Measured tool behaviour, which is why both forms are here: Yosys
+  // and Vivado honour the generate-scope $error and ignore `initial`;
+  // Icarus is the reverse. Neither form alone refuses a bad build
+  // everywhere we build. (Yosys prints the message without expanding
+  // format arguments, so these strings carry no %0d - the numbers are
+  // in the simulation message below.)
+  generate
+    if (LATENCY != DEPTH) begin : g_bad_latency
+      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (15)");
+    end
+    if (NMC > 16) begin : g_too_many_chunks
+      $error("cft_fpfma_pipe: MAN_W too wide - the multiplier tree holds 16 chunks (max MAN_W 383)");
+    end
+  endgenerate
+
   initial begin
     if (LATENCY != DEPTH) begin
-      $display("FATAL: cft_fpfma_pipe LATENCY (%0d) != structural depth (%0d)", LATENCY, DEPTH);
+      $display("FATAL: cft_fpfma_pipe LATENCY (%0d) != structural depth (%0d)",
+               LATENCY, DEPTH);
+      $fatal(1);
+    end
+    if (NMC > 16) begin
+      $display("FATAL: cft_fpfma_pipe MAN_W (%0d) needs %0d multiplier chunks; the tree holds 16",
+               MAN_W, NMC);
       $fatal(1);
     end
   end
@@ -496,10 +534,19 @@ module cft_fpfma_pipe #(
       if (chunk == -1 && (padded[ci*64 +: 64] != 0)) chunk = ci;
     end
     if (chunk == -1) begin
-      // exact zero only without sticky residue; else a bare epsilon:
-      // force an exponent below EMIN-P (g here = ec_min - SH, since an
-      // empty window implies a zero-valued anchor) so S13 rounds to
-      // zero with underflow+inexact and the true sign.
+      // Exact zero only without sticky residue; else a bare epsilon,
+      // and s10_g already places it below the subnormal grid so S13
+      // rounds it per the attribute, carrying the true sign.
+      //
+      // Why that holds - it is NOT because the anchor is zero (a
+      // nonzero subnormal addend reaches here too: fp32
+      // a=0x1ef3ab49 b=0x1ef536f9 c=0x80074b3a cancels to an empty
+      // window with the marker set). It is because an empty window
+      // with a surviving residue requires the anchor's significand
+      // below 2^(P-4), which forces it subnormal or zero - and any
+      // subnormal pins its exponent at EMIN-MAN_W, so g = EMIN-MAN_W-SH
+      // and S13's K is negative. Change SH or the far-alignment
+      // threshold and this is the argument to re-derive.
       s11_zero <= !s10_mag[0];
       s11_valw <= '0;
       s11_enorm <= s10_g;
