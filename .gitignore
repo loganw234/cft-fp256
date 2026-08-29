@@ -1,0 +1,33 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# simulation
+tb/sim_build/
+tb/results.xml
+tb/*.fst
+tb/*.vcd
+dump.fst
+dump.vcd
+
+# vitis / vivado
+build/
+_x/
+.Xil/
+*.xo
+*.xclbin
+*.ltx
+*.log
+*.jou
+*.str
+vivado*.backup*
+tmp_kernel_pack/
+packaged_kernel/
+.run/
+.ipcache/
+
+# generated vectors (regenerate with vectors/gen_vectors.py)
+vectors/out/

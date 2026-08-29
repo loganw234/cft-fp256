@@ -1,0 +1,7 @@
+# Pinned as a known-good set: cocotb 1.9.x + cocotbext-axi 0.1.x are the
+# battle-tested pairing (cocotb 2.x changed the runner API; migrate
+# deliberately, not by accident).
+cocotb==1.9.2
+cocotbext-axi==0.1.28
+pytest>=8
+mpmath>=1.3

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cft-golden"
+version = "0.1.0"
+description = "Exact IEEE 754-2019 reference model and conformance vectors for the cft-fp256 tile (fp32/fp64/fp128/fp256)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Logan W." }]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "mpmath>=1.3"]
+
+[tool.setuptools.packages.find]
+include = ["cft_golden*"]

@@ -1,0 +1,36 @@
+# Copyright 2026 Logan W.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The gates. Job one proves the golden model against arbiters that
+# share no code with it (native binary64, math.fma, mpmath, and the
+# hand-written IEEE 754 anchors). Job two proves the RTL against the
+# golden model, streamed, plus the full kernel through AXI.
+#
+# What a green tick does NOT cover: synthesis, timing, package_xo,
+# v++ linking, and behaviour on a physical card. Those gates live in
+# docs/BRINGUP.md and need licensed tools and hardware.
+
+name: gates
+on: [push, pull_request]
+
+jobs:
+  golden:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pytest mpmath
+      - run: python -m pytest python/tests -q
+
+  rtl:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog
+      - run: pip install -r tb/requirements.txt
+      - run: make -C tb sim

@@ -1,0 +1,27 @@
+# Simulation environment for cft-fp256: Icarus Verilog (default sim),
+# Verilator (alternative), cocotb + cocotbext-axi + the golden model's
+# test deps. Used identically on a developer box (Docker Desktop works)
+# and in CI, so "green locally" and "green in CI" are the same claim.
+#
+#   docker build -t cft-sim -f docker/Dockerfile.sim .
+#   docker run --rm -v <repo>:/work -w /work/tb cft-sim make sim
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        iverilog \
+        verilator \
+        python3 \
+        python3-pip \
+        python3-venv \
+        make \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
+COPY tb/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+WORKDIR /work
