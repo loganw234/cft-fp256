@@ -32,9 +32,10 @@ fi
 pass=0
 fail=0
 run_one() {
-  fmt=$1; n=$2; op=$3
-  echo "=== $fmt $op n=$n"
-  out=$(python3 host/examples/vector_fma.py "$XCLBIN" --format "$fmt" --op "$op" --n "$n" 2>&1)
+  fmt=$1; n=$2; op=$3; rnd=${4:-rne}
+  echo "=== $fmt $op $rnd n=$n"
+  out=$(python3 host/examples/vector_fma.py "$XCLBIN" --format "$fmt" \
+        --op "$op" --n "$n" --rounding "$rnd" 2>&1)
   rc=$?
   echo "$out" | grep -E "PASS|FAIL|MISMATCH|Traceback|rror" | head -4
   if echo "$out" | grep -q "^PASS"; then
@@ -67,6 +68,11 @@ if [ "${CFT_SMOKE_DEEP:-0}" != "0" ]; then
   run_one fp32 296 fma
   run_one fp64 128 mul
   run_one fp256 40 fma
+  # every rounding attribute, through the MODE field on real silicon
+  for r in rtz rdn rup rmm; do
+    run_one fp32 32 fma "$r"
+  done
+  run_one fp256 4 fma rdn
 fi
 
 echo "=== smoke: $pass pass, $fail fail"
