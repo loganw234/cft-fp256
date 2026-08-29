@@ -248,7 +248,14 @@ Three bitstreams are banked on amd-arc-box, oldest first:
 | `cft_hw_v0_10mhz.xclbin` | v0 behavioural core, naive engine | 10 MHz |
 | `cft_hw_v1_2bank_100mhz.xclbin` | v1 pipelined core, fp32+fp256 banks | 100 MHz |
 | `cft_hw_v1_4rung_90mhz_prereview.xclbin` | four rungs, streaming engine, rounding attributes | 90 MHz |
-| `cft_hw.xclbin` | the same, plus the control-review fixes (STATUS, latched run config) - the card-day image | 90 MHz |
+| `cft_hw.xclbin` | the same, plus the control-review fixes (STATUS, latched run config) - **the card-day image** | 90 MHz |
+
+Build cost on amd-arc-box, measured on the four-rung design: synthesis
+18m, logic opt 3m, placement 44m, routing 18m, bitstream 25m - 1h47m
+end to end, or ~1h25m if a run only needs the timing report and stops
+after routing. One link peaks at ~12 GB, so the 31 GB box runs two
+concurrently; that is the binding constraint on any frequency sweep,
+not the 36 cores.
 
 **Calibration, and a correction to how it was first read.** Two
 routed builds:
@@ -257,8 +264,9 @@ routed builds:
 |---|---|---|---|
 | v1 core, two banks | 100 MHz | +0.051 ns | 480,929 |
 | four rungs + streaming engine | 90 MHz | +0.055 ns | 523,123 |
+| the same + control-review fixes | 90 MHz | +0.055 ns | 523,361 |
 
-Both land ~50 ps above zero, at different clocks and with a 3x
+All three land ~50 ps above zero, across different clocks and a 3x
 difference in logic. The first was recorded here as "the shell and
 routing eat essentially all the margin" - that reading does not
 survive the second data point. Vivado's implementation is
