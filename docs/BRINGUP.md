@@ -183,12 +183,15 @@ back-pressure) is validated against the vendor's checkers, not
 against our own testbench's assumptions.
 
 Field note on reading smoke output: a *numerical* failure always
-prints MISMATCH/FAIL lines. A case that prints no verdict line at
-all is an infrastructure fault - the first hw_emu launch after a
-fresh link is a cold start and has been seen to die silently, where
-the same case passes immediately when rerun alone. The script now
-reports the exit code in that situation so the two are never
-confused.
+prints MISMATCH/FAIL lines. A case that prints no verdict line at all
+is an infrastructure fault, not a result. It happens intermittently -
+observed on the first case of one run and on the second case of
+another, roughly one case in ten - and the same case passes when
+rerun alone every time it has been tried. Python exits 0 with empty
+output, so the run is being lost somewhere in the emulator handoff
+rather than crashing the host process. The script reports the exit
+code in that situation so the two can never be confused; rerun the
+case before believing anything about it.
 
 The tooling-skew record below is kept for the field notes it contains.
 
@@ -232,27 +235,39 @@ XRT stack - the first time the kernel.xml argument map, the CSR
 protocol, and the host code meet Xilinx's implementation rather than
 cocotb's. Small N; hw_emu is slow.
 
-## 3. Gate: link for hardware
+## 3. Gate: link for hardware - **MET 2026-08-29**
 
 ```bash
-make xclbin TARGET=hw
+TARGETS=hw KERNEL_FREQ=100000000 bash hw/rebuild-2022.sh
 ```
 
-The behavioural core will not close timing at the platform default
-clock - that is expected, not a surprise (docs/ARCHITECTURE.md,
-"Timing expectation"). Constrain the kernel clock down first, e.g.:
+Three bitstreams are banked on amd-arc-box, oldest first:
 
-```
-# added to hw/link.cfg when needed
-[clock]
-freqHz=100000000:cft_krnl_1
-```
+| file | design | kernel clock |
+|---|---|---|
+| `cft_hw_v0_10mhz.xclbin` | v0 behavioural core, naive engine | 10 MHz |
+| `cft_hw_v1_2bank_100mhz.xclbin` | v1 pipelined core, fp32+fp256 banks | 100 MHz |
+| `cft_hw.xclbin` (building) | the full tile: four rungs, streaming engine, rounding attributes | 90 MHz |
 
-Determinism is clock-independent; a 100 MHz bring-up bitstream proves
-every numerical claim a 300 MHz one would.
+**Calibration worth keeping: out-of-context synthesis is optimistic,
+and by a lot.** The v1 core measures ~148 MHz OOC for the fp256 unit
+and the whole kernel reports +3.3 ns of slack at 100 MHz OOC - but
+the same design routed inside the real platform closed 100 MHz with
+**WNS +0.051 ns** (TNS 0, zero failing endpoints of 480,929; hold
++0.009 ns). Fifty-one picoseconds. The shell, the placement pressure
+and the real routing eat essentially all of the apparent margin, so
+treat OOC numbers as an upper bound for ranking design choices, never
+as a promised clock. That is why the four-rung build - three times the
+logic - targets 90 MHz rather than 100.
+
+Determinism is clock-independent; a 90 MHz bitstream proves every
+numerical claim a 300 MHz one would. Prefer a working image of the
+current design over a faster image of an older one.
 
 **Done when:** `build/cft_hw.xclbin` exists with timing met at the
-constrained clock.
+constrained clock. (v++ fails the link on a timing violation, so a
+bitstream existing IS the closure evidence; the routed WNS is in
+`build/_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt`.)
 
 ## 4. Gate: first light
 

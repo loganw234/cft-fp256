@@ -42,12 +42,12 @@ run_one() {
     pass=$((pass+1))
   else
     fail=$((fail+1))
-    # A crash (or a kill) leaves no PASS/FAIL line at all, so say what
-    # happened instead of reporting a bare "fail": under hw_emu the
-    # first launch is a cold start and has been seen to die this way,
-    # where the same case passes on its own. Numerical failures always
-    # print MISMATCH/FAIL above - a silent exit is an infrastructure
-    # fault, not a result.
+    # No PASS/FAIL line at all means the run was lost in the emulator
+    # handoff (python exits 0 with empty output), which happens
+    # intermittently under hw_emu - roughly one case in ten, and the
+    # same case has passed on every rerun tried. Numerical failures
+    # always print MISMATCH/FAIL above, so a silent exit is an
+    # infrastructure fault, never a result.
     echo "    (no verdict line; exit code $rc - rerun this case alone before believing it)"
   fi
 }

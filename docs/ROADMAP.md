@@ -94,7 +94,9 @@ way atlas-darkroom records a census.
       implementation: test_rounding.py decodes each result to an
       exact rational and re-derives 754's requirement by rational
       floor division, then RTL matches the model across every
-      attribute in the unit benches and end to end through the CSR.
+      attribute in the unit benches and end to end through the CSR -
+      and through the real XRT stack in hw_emu, all five attributes
+      bit-exact.
 - Reduction ops (dot, sum) with the index-fixed tree the contract
   already specifies.
 
