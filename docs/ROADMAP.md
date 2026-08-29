@@ -107,6 +107,7 @@ conformance story no closed flow can tell.
 | target | open flow | fits | role |
 |---|---|---|---|
 | **Alchitry Pt V2 (XC7A100T-2) - CHOSEN, 2026-08-29** | openXC7 (well-documented part; DSP inference immature) | full tile via free-tier Vivado day one (~79% LUTs, 165/240 DSPs); nano-tile via openXC7 now; open full tile when DSP support lands or via a serialized-multiplier variant | the platform: SparkFun-backed longevity, published schematics, 256MB DDR3L, FTDI JTAG, GTPs (future LitePCIe host link) |
+| Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | quarter-tile (4x fp32 + engine, ~67%) or one fp64 rung; fp256 physically impossible (needs 27.8k of 20.8k LUTs) | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
 | ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | 8x fp32 bank + engine only | fallback nano-tile if boards resurface (scarce as of 2026-08) |
 | Artix-7 200T | openXC7 | full tile even with LUT-fallback multipliers | the headroom alternative if open-full-tile-today ever becomes a hard requirement |
 | Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile (138k LUT4) | cheapest option - verify Apicula status first |
