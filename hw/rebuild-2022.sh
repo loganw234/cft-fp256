@@ -45,6 +45,10 @@ fi
 [ -d "$PLATFORM_REPO_PATHS/$PLATFORM" ] || { echo "ERROR: platform $PLATFORM not found under $PLATFORM_REPO_PATHS"; exit 1; }
 
 mkdir -p build
+# stale cross-era artifacts poison the flow: package_xo inspects an
+# existing .xo before replacing it and refuses newer-version files
+rm -f build/cft_krnl.xo
+rm -rf build/packaged_kernel build/tmp_kernel_pack
 
 echo "== package_xo (Vivado $(vivado -version | head -1))"
 vivado -mode batch -nolog -nojournal -source hw/package_kernel.tcl \
