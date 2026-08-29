@@ -37,10 +37,20 @@ way atlas-darkroom records a census.
 
 ## v1 - the fractured array and a real engine
 
+- [x] **The pipelined core (2026-08-29):** 15-stage cft_fpfma_pipe
+      with a structurally staged multiplier (24-bit chunk columns +
+      four registered tree levels). Measured OOC on xcu50:
+      fp32 ~232 MHz (3.6x v0), fp256 ~148 MHz (10.5x v0), DSPs down
+      196->140, full suite bit-exact, Yosys-clean. Card-day kernel
+      clock rises 10 -> ~100 MHz. Remaining nanoseconds live in the
+      DSP column cascades (split columns, +1 stage) and the round
+      stage - chase when a platform clock demands it.
 - The fused significand array: one physical multiplier serving
   1x fp256 / 2x fp128 / 4x fp64 / 8x fp32 per half-beat with
   mode-gated partial products (granule tiling study in
-  docs/ARCHITECTURE.md), pipelined to platform clock.
+  docs/ARCHITECTURE.md), pipelined to platform clock - the chunked
+  column decomposition above is exactly the granule structure the
+  fracture needs, so this work is its foundation.
 - fp64 and fp128 rungs wired through MODE[7:4] = 1, 2 (the golden
   model and vector sets already cover them - hardware catches up to
   the contract, not the reverse).
