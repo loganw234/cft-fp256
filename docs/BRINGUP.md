@@ -154,7 +154,24 @@ linking on Linux is a legitimate split while the Linux Vitis lands.
 Still holds for any future RTL change: the testbenches guard the RTL,
 so changes loop through `make sim-docker` before repackaging.
 
-## 2. Gate: hardware emulation - **BLOCKED BY TOOLING, evidence recorded (2026-08-29)**
+## 2. Gate: hardware emulation - **MET under the era stack (2026-08-29)**
+
+Final state first: with the fully era-matched stack (Vitis 2022.2
+link + the 202210 platform + XRT 2.14.354, in the cft2204 WSL distro),
+`host/examples/vector_fma.py` **PASSES bit-exact against cft_golden
+on both precisions** - fp32 fma n=32 (specials-laced stream, sticky
+flags matching) and fp256 fma (the 237-bit datapath correct to the
+last bit) - through the complete XRT/shell/CSR/engine/HBM-model
+chain. The 2026.1-era write-payload ghost was confirmed pure version
+skew; the kernel was innocent throughout, exactly as the AXI traces
+testified. Era-emulation prerequisites beyond the tools: XRT 2.14
+22.04 deb (via the amdOpenDownload endpoint with browser headers),
+build-essential (the platform's SystemC models compile at link time),
+python3-numpy (this pyxrt's readback path).
+
+The tooling-skew record below is kept for the field notes it contains.
+
+### The original 2026.1 attempt - blocked by tooling, evidence recorded
 
 Attempted in full on amd-arc-box: the hw_emu xclbin links and boots,
 and instrumented runs proved through real XRT + the real shell design:
