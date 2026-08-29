@@ -1,0 +1,31 @@
+# The era-matched build environment for this platform's bitstreams.
+#
+# The U50 shell (xilinx_u50_gen3x16_xdma_5_202210_1) carries IP
+# encrypted with 2022-era keys that current Vivado releases can no
+# longer decrypt (AMD 5-year key obsolescence; BRINGUP.md gate 3), so
+# hardware links happen in Vitis 2022.2 on its native Ubuntu 22.04 -
+# in a container, wherever disk is plentiful. Vitis itself is
+# installed into a bind mount at /opt/Xilinx (the ~65 GB does not
+# live in the image); this image only carries the OS prerequisites.
+#
+#   docker build -t cft-vitis2022 -f docker/Dockerfile.vitis2022 .
+#   docker run -d --name cft-vitis \
+#     -v <big-disk>/opt:/opt/Xilinx -v <big-disk>:/staging \
+#     -v <repo>:/work cft-vitis2022 sleep infinity
+#   docker exec cft-vitis /staging/<installer>.bin --noexec --target /staging/x2022
+#   ... AuthTokenGen/ConfigGen/Install per BRINGUP.md
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libtinfo5 libncurses5 \
+        locales lsb-release ca-certificates \
+        libx11-6 libxext6 libxrender1 libxtst6 libxi6 \
+        libfontconfig1 libfreetype6 libgtk-3-0 \
+        python3 python3-pip \
+        make git wget unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && locale-gen en_US.UTF-8
+
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+WORKDIR /work

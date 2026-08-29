@@ -79,6 +79,46 @@ shell IP never enters the picture. xclbins built by 2022.2 run under
 the newer XRT 2.19 runtime - that pairing is what AMD's own 2024.1
 U50 deployment re-release ships.
 
+**The era-build environments (2026-08-29).** Two interchangeable
+Vitis 2022.2 homes, both driven by `hw/rebuild-2022.sh` from the repo
+root:
+
+- amd-arc-box: `/data/Xilinx` on the Micron 256 GB (label
+  `vitisdata`, fstab nofail; the drive rides a PCIe x1 adapter and is
+  not hot-plug - reseat means reboot). Shims libtinfo5/libncurses5
+  installed.
+- Windows box: WSL distro `cft2204` (Ubuntu 22.04 on D:\wsl, ~1 TB
+  virtual disk), Vitis at `/opt/Xilinx`, installer + dev-platform deb
+  staged in `/mnt/d/cft-vitis2022`. Enter with
+  `wsl -d cft2204 -u root`.
+
+Auth for AMD installers, learned the hard way: `AuthTokenGen` tokens
+from this account are rejected at Install time on every machine and
+both installer generations - the GUI login works every time. Use the
+GUI (on the box's desktop, or via WSLg from the distro).
+
+**Network note for future debugging on amd-arc-box:** its "wired"
+path is switch -> Wi-Fi extender -> router. The extender bridges
+wired MACs by ARP-NAT translation, and that state table wedges after
+port flapping (measured 2026-08-29: LAN unicast kept flowing while
+ARP/ND to the router alone failed, both IP versions). If the box
+drops off the network, power-cycle the extender FIRST - and never
+dual-home it on Wi-Fi + wire simultaneously (ARP flux). A direct
+cable or powerline run is the long-term fix. Also: www.amd.com
+requires a browser user-agent from scripts; bare wget fails on the
+front door (download.amd.com is fine).
+
+**Card-day kernel prep:** XRT 2.19's DKMS drivers do not build
+against the box's 7.0-series kernel and no 6.8 GA kernel is
+installed. Before flashing, run:
+
+```bash
+sudo apt install -y linux-image-generic linux-headers-generic
+sudo dpkg-reconfigure xrt   # rebuilds DKMS for the 6.8 kernel
+```
+
+then boot the 6.8 entry from GRUB for card sessions.
+
 **Licensing (resolved 2026-08-29, applies to 2026.1+ tools).** The
 2026.1 release gates Vivado's *launch* on a license; the free BASIC
 tier does not cover xcu50 (Virtex UltraScale+ needs CORE+, Alveo has
