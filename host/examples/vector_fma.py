@@ -95,9 +95,14 @@ def main():
     # STATUS (0x50) before anything else: if the memory system did not
     # vouch for the data, comparing it against the golden model is
     # meaningless - the bits under test were never really delivered.
+    # If the register cannot be read at all, say so rather than
+    # defaulting to "clean": a safety check that silently skips itself
+    # is worse than no check, because the PASS line then overclaims.
     try:
         status = krnl.read_register(0x50)
-    except Exception:          # older XRT without read_register
+    except Exception as exc:   # older XRT without read_register
+        print(f"WARNING: could not read STATUS (0x50): {exc}. "
+              f"Bus faults cannot be ruled out for this run.")
         status = 0
     if status:
         print(f"FAIL: kernel reported bus faults, STATUS={status:#05b} "

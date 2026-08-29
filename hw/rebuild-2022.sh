@@ -16,6 +16,11 @@ PLATFORM=${PLATFORM:-xilinx_u50_gen3x16_xdma_5_202210_1}
 PART=${PART:-xcu50-fsvh2104-2-e}
 KERNEL_FREQ=${KERNEL_FREQ:-10000000}   # v0 behavioural core: ~10 MHz
 TARGETS=${TARGETS:-"hw hw_emu"}
+# Output directory. Parameterized so several links can run side by
+# side on one host at different clocks (a frequency sweep); each
+# needs its own .xo, temp dir and xclbin or they overwrite one
+# another.
+BUILD=${BUILD:-build}
 
 # locate Vitis 2022.2
 for root in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
@@ -44,28 +49,28 @@ if [ ! -d "$PLATFORM_REPO_PATHS/$PLATFORM" ]; then
 fi
 [ -d "$PLATFORM_REPO_PATHS/$PLATFORM" ] || { echo "ERROR: platform $PLATFORM not found under $PLATFORM_REPO_PATHS"; exit 1; }
 
-mkdir -p build
+mkdir -p "$BUILD"
 # stale cross-era artifacts poison the flow: package_xo inspects an
 # existing .xo before replacing it and refuses newer-version files
-rm -f build/cft_krnl.xo
-rm -rf build/packaged_kernel build/tmp_kernel_pack
+rm -f "$BUILD/cft_krnl.xo"
+rm -rf "$BUILD/packaged_kernel" "$BUILD/tmp_kernel_pack"
 
 echo "== package_xo (Vivado $(vivado -version | head -1))"
 vivado -mode batch -nolog -nojournal -source hw/package_kernel.tcl \
-    -tclargs "$PART" build
+    -tclargs "$PART" "$BUILD"
 
 for t in $TARGETS; do
   echo "== v++ link -t $t"
   extra=""
   [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:cft_krnl_1"
   v++ -l -t "$t" --platform "$PLATFORM" --config hw/link.cfg $extra \
-      --save-temps --temp_dir "build/_x_$t" \
-      -o "build/cft_$t.xclbin" build/cft_krnl.xo
+      --save-temps --temp_dir "$BUILD/_x_$t" \
+      -o "$BUILD/cft_$t.xclbin" "$BUILD/cft_krnl.xo"
 done
 
 if [[ "$TARGETS" == *hw_emu* ]]; then
-  emconfigutil --platform "$PLATFORM" --od build
+  emconfigutil --platform "$PLATFORM" --od "$BUILD"
 fi
 
 echo "== done:"
-ls -la build/*.xclbin 2>/dev/null
+ls -la "$BUILD"/*.xclbin 2>/dev/null
