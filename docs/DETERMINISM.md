@@ -61,12 +61,51 @@ exactly, where any double-rounded implementation returns +0.
 
 ## Rounding
 
-roundTiesToEven, only, in v0. The MODE register reserves a
-rounding-mode field; RZ/RU/RD are roadmap (they are what interval
-arithmetic needs, and the datapath rounds in one place, so adding them
-is contained). Every rounding in the implementation happens at exactly
-one site in each of the golden model (`round_pack`) and the RTL (the
-tail of `cft_fpfma`), which is what makes the claim auditable.
+All five 754-2019 rounding-direction attributes (4.3.1, 4.3.2),
+selected per operation in MODE[10:8] using RISC-V's `frm` encoding:
+
+| code | attribute | name here |
+|---|---|---|
+| 0 | roundTiesToEven | `rne` - the default, and what "the contract" means unless a run says otherwise |
+| 1 | roundTowardZero | `rtz` |
+| 2 | roundTowardNegative | `rdn` |
+| 3 | roundTowardPositive | `rup` |
+| 4 | roundTiesToAway | `rmm` |
+
+Encodings 5-7 are reserved: the hardware treats them as `rne`, and the
+golden model rejects them outright, so no conforming host can depend
+on a value the contract does not define.
+
+**Each attribute is its own deterministic contract** - the same inputs
+under the same attribute always give the same bits, on every device
+that implements this specification. Determinism was never a property
+of round-to-nearest specifically; it is a property of the rounding
+being *specified*.
+
+Two consequences that catch implementations out, both of them
+mode-dependent and both pinned by named tests:
+
+- **Overflow (7.4)** is signalled in every attribute, but what gets
+  delivered differs: `rne`/`rmm` give an infinity; `rtz` never does
+  (it gives the largest finite magnitude); `rdn` gives -infinity only
+  on the negative side and `rup` +infinity only on the positive one.
+- **The sign of an exact zero (6.3)** is +0 in every attribute except
+  `rdn`, where it is -0.
+
+The attribute travels with its operation down the pipeline rather than
+being latched per run, so adjacent operations may use different ones.
+That is what interval arithmetic wants: a lower and an upper bound
+from a single pass. `test_directed_modes_bracket_the_exact_value`
+proves the pair brackets the exact result and, when inexact, that the
+two bounds are adjacent - the tightest interval the format admits.
+
+Every rounding in the implementation still happens at exactly one site
+in each of the golden model (`round_pack`) and the RTL (stage 13 of
+`cft_fpfma_pipe`), which is what makes the claim auditable. The
+attributes are verified against the *definition* rather than against
+another implementation: `python/tests/test_rounding.py` decodes each
+result into an exact rational and re-derives what 754 requires by
+exact rational floor division, sharing no code path with the model.
 
 ## Subnormals
 
@@ -95,8 +134,9 @@ Per 6.3, and the standard's words carry the two rules people miss:
 
 - "When the sum of two operands with opposite signs (or the difference
   of two operands with like signs) is exactly zero, the sign of that
-  sum (or difference) shall be +0" under RNE (it is -0 only under
-  roundTowardNegative, a reserved mode here).
+  sum (or difference) shall be +0" in every attribute except
+  roundTowardNegative, where it is -0. Implemented in both the model
+  and the RTL; `test_exact_cancellation_sign` pins all five.
 - "However, ... when x is zero, x + x and x − (−x) have the sign of x"
   - like-signed zeros keep their sign.
 - The zero product keeps XOR of the operand signs, which is why MUL's
@@ -128,8 +168,12 @@ The underflow flag rises only when the result is both tiny and inexact
 raised. If the rounded result is exact, no flag is raised"). Exact
 subnormal results are flagless.
 
-Overflow follows 7.4: RNE overflow delivers infinity with overflow and
-inexact both raised.
+Overflow follows 7.4: overflow and inexact are both raised in every
+attribute, and the delivered value is the one that attribute's table
+requires (see Rounding above) - infinity under `rne`/`rmm`, the
+largest finite magnitude under `rtz`, and one or the other under the
+directed attributes depending on which side of zero the result lies.
+`test_overflow_response_table` holds all ten combinations as literals.
 
 ## Ordering
 

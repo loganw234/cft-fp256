@@ -50,6 +50,7 @@ module cft_engine #(
     output logic [4:0]   flags_acc,
     input  logic [3:0]   cfg_op,
     input  logic [3:0]   cfg_prec,
+    input  logic [2:0]   cfg_rnd,
     input  logic [63:0]  cfg_n,
     input  logic [63:0]  cfg_a,
     input  logic [63:0]  cfg_b,
@@ -181,6 +182,7 @@ module cft_engine #(
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP32)),
+          .rnd(cfg_rnd),
           .a(fa), .b(fb), .c(fc),
           .out_valid(), .d(dd), .flags(f32_l[gi]));
       assign d32[gi*32 +: 32] = dd;
@@ -208,6 +210,7 @@ module cft_engine #(
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
+          .rnd(cfg_rnd),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]));
         assign d64[gi*64 +: 64] = dd;
@@ -239,6 +242,7 @@ module cft_engine #(
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
+          .rnd(cfg_rnd),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]));
         assign d128[gi*128 +: 128] = dd;
@@ -265,6 +269,7 @@ module cft_engine #(
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
+          .rnd(cfg_rnd),
           .a(w_fa), .b(w_fb), .c(w_fc),
           .out_valid(), .d(d256), .flags(f256));
     end else begin : g_bank256_off

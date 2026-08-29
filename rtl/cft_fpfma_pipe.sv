@@ -53,6 +53,7 @@ module cft_fpfma_pipe #(
     input  logic                 clk,
     input  logic                 rst_n,
     input  logic                 in_valid,
+    input  logic [2:0]           rnd,      // rounding attribute, per op
     input  logic [EXP_W+MAN_W:0] a,
     input  logic [EXP_W+MAN_W:0] b,
     input  logic [EXP_W+MAN_W:0] c,
@@ -85,6 +86,43 @@ module cft_fpfma_pipe #(
   localparam int FL_UNDERFLOW = 3;
   localparam int FL_INEXACT   = 4;
 
+  // Rounding attributes (IEEE 754-2019 4.3), encoded as RISC-V frm -
+  // the same table as cft_golden.softfloat. Encodings 5-7 are reserved
+  // and fall back to RNE here; no conforming host issues them (the
+  // golden model rejects them outright).
+  localparam logic [2:0] RND_RNE = 3'd0;
+  localparam logic [2:0] RND_RTZ = 3'd1;
+  localparam logic [2:0] RND_RDN = 3'd2;
+  localparam logic [2:0] RND_RUP = 3'd3;
+  localparam logic [2:0] RND_RMM = 3'd4;
+
+  // Should the retained magnitude be incremented? Everything in this
+  // datapath is sign-and-magnitude, so the directed attributes are
+  // just "away from zero on one side of it".
+  function automatic logic round_up(input logic [2:0] mode, input logic sgn,
+                                    input logic g, input logic s,
+                                    input logic lsb);
+    case (mode)
+      RND_RTZ: round_up = 1'b0;
+      RND_RDN: round_up =  sgn && (g || s);
+      RND_RUP: round_up = !sgn && (g || s);
+      RND_RMM: round_up = g;
+      default: round_up = g && (s || lsb);   // RNE, and reserved
+    endcase
+  endfunction
+
+  // 754 7.4: which overflows deliver an infinity, and which deliver
+  // the largest finite magnitude instead.
+  function automatic logic overflow_to_inf(input logic [2:0] mode,
+                                           input logic sgn);
+    case (mode)
+      RND_RTZ: overflow_to_inf = 1'b0;
+      RND_RDN: overflow_to_inf =  sgn;
+      RND_RUP: overflow_to_inf = !sgn;
+      default: overflow_to_inf = 1'b1;       // RNE, RMM, and reserved
+    endcase
+  endfunction
+
   localparam int DEPTH = 15;
   initial begin
     if (LATENCY != DEPTH) begin
@@ -106,6 +144,22 @@ module cft_fpfma_pipe #(
   logic [W-1:0] s0_a, s0_b, s0_c;
   always_ff @(posedge clk) begin
     s0_a <= a; s0_b <= b; s0_c <= c;
+  end
+
+  // The rounding attribute travels with its operation rather than
+  // being sampled once per run, so back-to-back operations may use
+  // different attributes - which is what an interval-arithmetic
+  // consumer wants (a lower and an upper bound from one stream). Only
+  // stages 1, 13 and 14 consult it, so a delay line is cheaper and far
+  // less error-prone than threading a field through every stage.
+  // rd_dly[k] is aligned with the s{k}_* stage registers: it holds the
+  // attribute of the operation whose data those registers hold. The
+  // last consumer is stage 14, which reads s13_*, so the line stops at
+  // DEPTH-2 rather than carrying a register nothing reads.
+  logic [2:0] rd_dly [0:DEPTH-2];
+  always_ff @(posedge clk) begin
+    rd_dly[0] <= rnd;
+    for (int i = 1; i <= DEPTH-2; i = i + 1) rd_dly[i] <= rd_dly[i-1];
   end
 
   // ------------------------------------------------------------------
@@ -179,7 +233,11 @@ module cft_fpfma_pipe #(
       s1_spec_d  <= {sc, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
     end else if (a_zero || b_zero) begin
       s1_special <= 1'b1;
-      if (c_zero) s1_spec_d <= {(sc == spx) ? sc : 1'b0, {(W-1){1'b0}}};
+      // 754 6.3: a zero product plus a zero addend keeps a shared
+      // sign; when they disagree the sum is an exact zero, which is
+      // +0 in every attribute except roundTowardNegative.
+      if (c_zero) s1_spec_d <= {(sc == spx) ? sc : (rd_dly[0] == RND_RDN),
+                                {(W-1){1'b0}}};
       else        s1_spec_d <= s0_c;
     end
   end
@@ -505,17 +563,19 @@ module cft_fpfma_pipe #(
       kept_u   = s12_norm[NW-1 -: P];
       guard_u  = s12_norm[NW-1-P];
       sticky_u = (|s12_norm[NW-2-P:0]) | s12_stk;
-      up_u     = guard_u && (sticky_u || kept_u[0]);
+      up_u     = round_up(rd_dly[DEPTH-3], s12_rsign, guard_u, sticky_u,
+                          kept_u[0]);
       carry_u  = (&kept_u) && up_u;
       s13_tiny <= (s12_enorm + (carry_u ? 1 : 0)) < EMIN;
 
       if (K <= 0) begin
-        guard = (K == 0) ? 1'b1 : 1'b0;
+        // Entirely below the subnormal grid. K == 0 puts the value's
+        // MSB in the guard position; K < 0 puts everything into the
+        // sticky. Either way the result is inexact, and only the
+        // attribute decides whether it becomes zero or one ulp.
+        guard  = (K == 0);
         sticky = (K == 0) ? ((|s12_norm[NW-2:0]) | s12_stk) : 1'b1;
-        kept = '0;
-        up = (K == 0) ? (guard && sticky) : 1'b0;
-        s13_kept_r  <= kept + {{P{1'b0}}, up};
-        s13_inexact <= 1'b1;
+        kept   = '0;
       end else begin
         sh_amt  = NW - K;
         shifted = s12_norm >> sh_amt;
@@ -527,10 +587,10 @@ module cft_fpfma_pipe #(
         end else begin
           sticky = s12_stk;
         end
-        up = guard && (sticky || kept[0]);
-        s13_kept_r  <= kept + {{P{1'b0}}, up};
-        s13_inexact <= guard || sticky;
       end
+      up = round_up(rd_dly[DEPTH-3], s12_rsign, guard, sticky, kept[0]);
+      s13_kept_r  <= kept + {{P{1'b0}}, up};
+      s13_inexact <= guard || sticky;
     end
   end
 
@@ -558,7 +618,8 @@ module cft_fpfma_pipe #(
       res = s13_spd;
       fl  = s13_spf;
     end else if (s13_zero) begin
-      res = '0;
+      // exact cancellation (754 6.3): +0, except toward -infinity
+      res = {(rd_dly[DEPTH-2] == RND_RDN), {(W-1){1'b0}}};
     end else begin
       kr = s13_kept_r;
       fl[FL_INEXACT] = s13_inexact;
@@ -569,7 +630,13 @@ module cft_fpfma_pipe #(
         bl = bitlen_p1(kr);
         e_res = s13_q + bl - 1;
         if (e_res > EMAX) begin
-          res = {s13_rsign, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
+          // 754 7.4: overflow is signalled in every attribute, but
+          // only some of them deliver an infinity; the rest deliver
+          // the largest finite magnitude.
+          if (overflow_to_inf(rd_dly[DEPTH-2], s13_rsign))
+            res = {s13_rsign, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
+          else
+            res = {s13_rsign, {(EXP_W-1){1'b1}}, 1'b0, {MAN_W{1'b1}}};
           fl[FL_OVERFLOW] = 1'b1;
           fl[FL_INEXACT]  = 1'b1;
         end else begin

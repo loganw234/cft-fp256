@@ -11,6 +11,14 @@ turn the crank harder:
     CFT_DIRECTED  directed-case budget (default per-format below)
     CFT_RANDOM    random-case count
     CFT_SEED      vector seed (default 3)
+    CFT_ROUNDING  "all" (default) sweeps every rounding attribute;
+                  a mode name or number restricts to that one
+
+The rounding attribute is driven per operation and CHANGES between
+adjacent operations in flight, which is the whole point of carrying
+it down the pipeline instead of latching it per run: an interval
+consumer wants a lower and an upper bound from one stream, and this
+bench proves an operation cannot pick up its neighbour's attribute.
 """
 
 import os
@@ -24,26 +32,45 @@ from cocotb.triggers import ReadOnly, RisingEdge
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from cft_golden import OP_NAMES, fma, steer, vectors  # noqa: E402
+from cft_golden import (  # noqa: E402
+    OP_NAMES, RND_NAMES, RND_MODES, fma, steer, vectors,
+)
+
+
+def _rounding_plan():
+    """Which attributes to sweep, from the environment."""
+    want = os.getenv("CFT_ROUNDING", "all").strip().lower()
+    if want in ("all", ""):
+        return list(RND_MODES)
+    by_name = {v: k for k, v in RND_NAMES.items()}
+    if want in by_name:
+        return [by_name[want]]
+    return [int(want)]
 
 
 async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     directed = int(os.getenv("CFT_DIRECTED", str(directed_default)))
     rand_n = int(os.getenv("CFT_RANDOM", str(random_default)))
     seed = int(os.getenv("CFT_SEED", "3"))
+    modes = _rounding_plan()
     cases = vectors.testset(fmt, directed, rand_n, seed)
 
     # The pipe is the raw FMA core: apply the golden operand steering
     # here so every op still exercises it. The RTL steering mux is
     # covered by the kernel-level test.
+    #
+    # Each case is issued once per attribute, interleaved mode-major
+    # within a case so consecutive cycles carry different attributes.
     work = []
     for op, xa, xb, xc in cases:
         fa, fb, fc = steer(fmt, op, xa, xb, xc)
-        want_d, want_f = fma(fmt, fa, fb, fc)
-        work.append((op, fa, fb, fc, want_d, want_f))
+        for rnd in modes:
+            want_d, want_f = fma(fmt, fa, fb, fc, rnd)
+            work.append((op, rnd, fa, fb, fc, want_d, want_f))
 
     cocotb.start_soon(Clock(dut.clk, 4, units="ns").start())
     dut.in_valid.value = 0
+    dut.rnd.value = 0
     dut.rst_n.value = 0
     for _ in range(4):
         await RisingEdge(dut.clk)
@@ -60,12 +87,13 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
             await RisingEdge(dut.clk)
             await ReadOnly()
             if dut.out_valid.value:
-                op, fa, fb, fc, want_d, want_f = expected.popleft()
+                op, rnd, fa, fb, fc, want_d, want_f = expected.popleft()
                 got_d = int(dut.d.value)
                 got_f = int(dut.flags.value)
                 if got_d != want_d or got_f != want_f:
                     errors.append(
-                        f"{fmt.name} {OP_NAMES[op]} a={fa:#x} b={fb:#x} "
+                        f"{fmt.name} {OP_NAMES[op]} {RND_NAMES[rnd]} "
+                        f"a={fa:#x} b={fb:#x} "
                         f"c={fc:#x}: got d={got_d:#x} f={got_f:#05b}, "
                         f"want d={want_d:#x} f={want_f:#05b}")
                     if len(errors) <= 20:
@@ -75,10 +103,11 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     chk = cocotb.start_soon(checker())
 
     for item in work:
-        _, fa, fb, fc, _, _ = item
+        _, rnd, fa, fb, fc, _, _ = item
         dut.a.value = fa
         dut.b.value = fb
         dut.c.value = fc
+        dut.rnd.value = rnd
         dut.in_valid.value = 1
         expected.append(item)
         await RisingEdge(dut.clk)
@@ -93,4 +122,8 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     assert checked == len(work)
     assert not errors, \
         f"{len(errors)} of {checked} mismatches (first: {errors[0]})"
-    dut._log.info(f"{fmt.name}: {checked} vectors bit-exact against cft_golden")
+    dut._log.info(
+        f"{fmt.name}: {checked} vectors bit-exact against cft_golden "
+        f"({len(cases)} cases x {len(modes)} rounding "
+        f"{'attributes' if len(modes) > 1 else 'attribute'}: "
+        f"{', '.join(RND_NAMES[m] for m in modes)})")

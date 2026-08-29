@@ -17,6 +17,9 @@
 //                 [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2,
 //                 3 fp256 - the PREC_CODE ladder; issue only
 //                 precisions advertised in CAPS
+//                 [10:8] rounding attribute (754 4.3), RISC-V frm
+//                 encoding: 0 RNE, 1 RTZ, 2 RDN, 3 RUP, 4 RMM;
+//                 5-7 reserved and behave as RNE
 //   0x18  N       element count, 64-bit (lo at 0x18, hi at 0x1C)
 //   0x20  A_PTR   64-bit HBM byte address, 64-byte aligned
 //   0x28  B_PTR   64-bit
@@ -26,7 +29,7 @@
 //                 {inexact,underflow,overflow,divzero,invalid};
 //                 cleared by hardware at ap_start
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000200 (v0.2.0)
+//   0x48  VERSION RO: 0x00000300 (v0.3.0)
 //   0x4C  CAPS    RO: [3:0] precision bitmask, bit p = MODE prec p
 //                 implemented (full tile: 0xF; trimmed open-core
 //                 tiles clear the banks they cannot fit)
@@ -64,6 +67,7 @@ module cft_csr (
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     output logic [3:0]  cfg_op,
     output logic [3:0]  cfg_prec,
+    output logic [2:0]  cfg_rnd,
     output logic [63:0] cfg_n,
     output logic [63:0] cfg_a,
     output logic [63:0] cfg_b,
@@ -72,7 +76,7 @@ module cft_csr (
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  localparam [31:0] VERSION = 32'h0000_0200;
+  localparam [31:0] VERSION = 32'h0000_0300;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
@@ -82,6 +86,7 @@ module cft_csr (
   assign ap_idle  = !busy;
   assign cfg_op   = mode_q[3:0];
   assign cfg_prec = mode_q[7:4];
+  assign cfg_rnd  = mode_q[10:8];
   assign cfg_n = n_q;
   assign cfg_a = a_q;
   assign cfg_b = b_q;

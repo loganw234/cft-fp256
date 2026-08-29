@@ -83,8 +83,18 @@ way atlas-darkroom records a census.
       tail) is bit-exact through hw_emu.
 - Engine knobs still open: multiple outstanding ARs, per-CU HBM
   pseudo-channel groups, multiple CUs.
-- Directed rounding modes (RZ/RU/RD) in the reserved MODE field -
-  the interval-arithmetic unlock for scientific users.
+- [x] **Directed rounding attributes (2026-08-29):** all five of
+      754-2019's attributes in MODE[10:8] (RISC-V frm encoding),
+      carried with each operation down the pipeline rather than
+      latched per run - so one pass can produce both interval bounds.
+      The mode-dependent rules came with it: the 7.4 overflow table
+      (rtz never yields an infinity; the directed attributes only on
+      their own side) and the 6.3 signed zero of an exact
+      cancellation. Verified against the *definition*, not another
+      implementation: test_rounding.py decodes each result to an
+      exact rational and re-derives 754's requirement by rational
+      floor division, then RTL matches the model across every
+      attribute in the unit benches and end to end through the CSR.
 - Reduction ops (dot, sum) with the index-fixed tree the contract
   already specifies.
 

@@ -23,12 +23,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
 
 from cft_golden import (  # noqa: E402
-    FORMATS, PREC_CODE, OP_FMA, OP_ADD, OP_SUB, OP_MUL,
+    FORMATS, PREC_CODE, OP_FMA, OP_ADD, OP_SUB, OP_MUL, RND_NAMES,
     compute, vectors,
 )
 
 OPS = {"fma": OP_FMA, "add": OP_ADD, "sub": OP_SUB, "mul": OP_MUL}
 ELEMS_PER_BEAT = {"fp32": 8, "fp64": 4, "fp128": 2, "fp256": 1}
+RNDS = {v: k for k, v in RND_NAMES.items()}
 
 
 def main():
@@ -38,6 +39,8 @@ def main():
     ap.add_argument("--format", choices=tuple(ELEMS_PER_BEAT),
                     default="fp32")
     ap.add_argument("--op", choices=tuple(OPS), default="fma")
+    ap.add_argument("--rounding", choices=tuple(RNDS), default="rne",
+                    help="IEEE 754 rounding attribute (default rne)")
     ap.add_argument("--n", type=int, default=4096)
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
@@ -46,6 +49,7 @@ def main():
 
     fmt = FORMATS[args.format]
     op = OPS[args.op]
+    rnd = RNDS[args.rounding]
     epb = ELEMS_PER_BEAT[args.format]
     if args.n % epb:
         ap.error(f"--n must be a multiple of {epb} for {args.format}")
@@ -60,10 +64,11 @@ def main():
                 else rng.getrandbits(fmt.width) for _ in range(args.n)]
 
     va, vb, vc = stream(), stream(), stream()
-    expect = [compute(fmt, op, va[i], vb[i], vc[i])[0] for i in range(args.n)]
+    golden = [compute(fmt, op, va[i], vb[i], vc[i], rnd) for i in range(args.n)]
+    expect = [g[0] for g in golden]
     exp_flags = 0
-    for i in range(args.n):
-        exp_flags |= compute(fmt, op, va[i], vb[i], vc[i])[1]
+    for g in golden:
+        exp_flags |= g[1]
 
     dev = pyxrt.device(args.device)
     uuid = dev.load_xclbin(pyxrt.xclbin(args.xclbin))
@@ -80,7 +85,7 @@ def main():
     bo_a, bo_b, bo_c = make_bo(2, va), make_bo(3, vb), make_bo(4, vc)
     bo_d = make_bo(5)
 
-    mode = op | (PREC_CODE[args.format] << 4)
+    mode = op | (PREC_CODE[args.format] << 4) | (rnd << 8)
     run = krnl(mode, args.n, bo_a, bo_b, bo_c, bo_d)
     run.wait()
 
@@ -98,8 +103,9 @@ def main():
     if bad:
         print(f"FAIL: {bad}/{args.n} elements differ from cft_golden")
         return 1
-    print(f"PASS: {args.n} {args.format} {args.op} elements bit-exact "
-          f"against cft_golden (expected sticky flags {exp_flags:#07b})")
+    print(f"PASS: {args.n} {args.format} {args.op} [{args.rounding}] elements "
+          f"bit-exact against cft_golden "
+          f"(expected sticky flags {exp_flags:#07b})")
     return 0
 
 

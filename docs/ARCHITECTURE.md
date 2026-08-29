@@ -89,7 +89,7 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x04 | GIER | RW | storage only; no interrupt exported in v0 |
 | 0x08 | IER  | RW | storage only |
 | 0x0C | ISR  | RO | 0 |
-| 0x10 | MODE | RW | [3:0] op: 0 fma, 1 add, 2 sub, 3 mul; [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 (issue only precisions set in CAPS); [31:8] reserved, write 0 (a rounding-mode field will land here) |
+| 0x10 | MODE | RW | [3:0] op: 0 fma, 1 add, 2 sub, 3 mul; [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 (issue only precisions set in CAPS); [10:8] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne); [31:11] reserved, write 0 |
 | 0x18 | N    | RW | element count, 64-bit |
 | 0x20 | A_PTR | RW | 64-bit HBM byte address |
 | 0x28 | B_PTR | RW | 64-bit |
@@ -97,7 +97,7 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x38 | D_PTR | RW | 64-bit |
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at ap_start |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
-| 0x48 | VERSION | RO | 0x00000200 (v0.2.0: fp64/fp128 rungs + CAPS) |
+| 0x48 | VERSION | RO | 0x00000300 (v0.3.0: directed rounding attributes) |
 | 0x4C | CAPS | RO | [3:0] precision bitmask, bit p = MODE precision p implemented; full tile reads 0xF |
 
 ## Host contract

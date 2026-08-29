@@ -11,6 +11,7 @@ from .formats import FP32, FP64, FP128, FP256, FORMATS, PREC_CODE, FpFormat
 from .softfloat import (
     FLAG_INVALID, FLAG_DIVZERO, FLAG_OVERFLOW, FLAG_UNDERFLOW, FLAG_INEXACT,
     OP_FMA, OP_ADD, OP_SUB, OP_MUL, OP_NAMES,
+    RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES, RND_MODES,
     add, sub, mul, fma, compute, steer, unpack,
     zero_bits, one_bits, inf_bits, qnan_bits, snan_bits,
     min_subnormal_bits, max_subnormal_bits, min_normal_bits, max_normal_bits,
@@ -23,6 +24,8 @@ __all__ = [
     "FLAG_INVALID", "FLAG_DIVZERO", "FLAG_OVERFLOW", "FLAG_UNDERFLOW",
     "FLAG_INEXACT",
     "OP_FMA", "OP_ADD", "OP_SUB", "OP_MUL", "OP_NAMES",
+    "RND_RNE", "RND_RTZ", "RND_RDN", "RND_RUP", "RND_RMM",
+    "RND_NAMES", "RND_MODES",
     "add", "sub", "mul", "fma", "compute", "steer", "unpack",
     "zero_bits", "one_bits", "inf_bits", "qnan_bits", "snan_bits",
     "min_subnormal_bits", "max_subnormal_bits", "min_normal_bits",

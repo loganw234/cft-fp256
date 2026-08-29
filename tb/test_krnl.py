@@ -26,6 +26,7 @@ from cocotbext.axi import AxiBus, AxiLiteBus, AxiLiteMaster, AxiRam  # noqa: E40
 from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE,
     OP_FMA, OP_ADD, OP_SUB, OP_MUL, OP_NAMES,
+    RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES,
     compute, vectors,
 )
 
@@ -55,7 +56,7 @@ def gen_stream(fmt, n, rng):
     return out
 
 
-async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None):
+async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     ba, bb, bc, bd = bases if bases else (A_BASE, B_BASE, C_BASE, D_BASE)
     ebytes = fmt.width // 8
     rng = random.Random(seed)
@@ -63,7 +64,7 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None):
     vb = gen_stream(fmt, n, rng)
     vc = gen_stream(fmt, n, rng)
 
-    exp = [compute(fmt, op, va[i], vb[i], vc[i]) for i in range(n)]
+    exp = [compute(fmt, op, va[i], vb[i], vc[i], rnd) for i in range(n)]
     exp_d = [e[0] for e in exp]
     exp_f = 0
     for e in exp:
@@ -74,7 +75,7 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None):
     ram.write(bc, b"".join(v.to_bytes(ebytes, "little") for v in vc))
     ram.write(bd, b"\xAA" * (n * ebytes))  # prove full overwrite
 
-    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 4))
+    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 4) | (rnd << 8))
     await write64(axil, NREG, n)
     await write64(axil, APTR, ba)
     await write64(axil, BPTR, bb)
@@ -105,7 +106,8 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None):
     got_f = await axil.read_dword(FLAGS)
     assert got_f == exp_f, \
         f"{fmt.name} {OP_NAMES[op]}: FLAGS {got_f:#07b} want {exp_f:#07b}"
-    dut._log.info(f"{fmt.name} {OP_NAMES[op]} n={n}: bit-exact, flags {got_f:#07b}")
+    dut._log.info(f"{fmt.name} {OP_NAMES[op]} {RND_NAMES[rnd]} n={n}: "
+                  f"bit-exact, flags {got_f:#07b}")
 
 
 @cocotb.test()
@@ -123,7 +125,7 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000200
+    assert await axil.read_dword(VERSION) == 0x00000300
     assert await axil.read_dword(CAPS) == 0xF, "full tile advertises all rungs"
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
@@ -148,3 +150,17 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP256, OP_FMA, 40, seed=115)  # 3 bursts
     await run_op(dut, axil, ram, FP32, OP_MUL, 64, seed=116,
                  bases=(0x00FE0, 0x41FC0, 0x82FA0, 0xC3F20))
+
+    # every rounding attribute, end to end through the CSR field
+    for rnd in (RND_RTZ, RND_RDN, RND_RUP, RND_RMM):
+        await run_op(dut, axil, ram, FP32, OP_FMA, 32, seed=120 + rnd, rnd=rnd)
+    await run_op(dut, axil, ram, FP64, OP_FMA, 16, seed=130, rnd=RND_RDN)
+    await run_op(dut, axil, ram, FP128, OP_MUL, 6, seed=131, rnd=RND_RUP)
+    await run_op(dut, axil, ram, FP256, OP_FMA, 4, seed=132, rnd=RND_RTZ)
+
+    # back-to-back runs that differ only in attribute must differ in
+    # results the way the contract says, and the CSR must not leak the
+    # previous run's mode into the next one
+    await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=140, rnd=RND_RUP)
+    await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=140, rnd=RND_RDN)
+    await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=140, rnd=RND_RNE)

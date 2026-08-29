@@ -12,13 +12,20 @@ here.)
 
 Semantics implemented - the determinism contract of docs/DETERMINISM.md:
 
-* rounding: roundTiesToEven only (mode field reserved for RZ/RU/RD)
+* rounding: all five IEEE 754-2019 rounding-direction attributes
+  (4.3.1, 4.3.2), selected per operation and defaulting to
+  roundTiesToEven. Every mode is a separate deterministic contract:
+  the same inputs and the same mode always give the same bits.
 * subnormals: full support, never flushed, in or out
 * NaN: any NaN in -> the one canonical qNaN out (sign 0, quiet bit set,
   payload 0); a signaling NaN in raises invalid
-* signed zero: IEEE 754-2019 6.3 - exact zero sums/differences of
-  non-zero operands are +0 under RNE; zero sums of like-signed zeros
-  keep the sign; the zero product keeps the XOR sign
+* signed zero: IEEE 754-2019 6.3 - an exact zero sum or difference of
+  non-zero operands is +0 in every mode except roundTowardNegative,
+  where it is -0; zero sums of like-signed zeros keep the sign; the
+  zero product keeps the XOR sign
+* overflow: 7.4 - the delivered result depends on the mode and the
+  sign, so roundTowardZero never produces an infinity and the two
+  directed modes produce one only on their own side
 * fusedMultiplyAdd: the product is exact internally (it cannot
   overflow or underflow before the addend joins); one rounding at
   the end
@@ -40,6 +47,22 @@ FLAG_INEXACT = 1 << 4
 
 # unpacked kinds
 ZERO, SUB, NORM, INF, NAN = "zero", "sub", "norm", "inf", "nan"
+
+# rounding-direction attributes (IEEE 754-2019 4.3). The encoding is
+# RISC-V's frm, which this project already follows for tininess, so
+# anyone porting between the two reads one table, not two. MODE[10:8]
+# in the CSR carries it; encodings 5-7 are reserved (the hardware
+# treats them as RNE, but no conforming host issues them, so the model
+# rejects them rather than blessing a value the contract does not
+# define).
+RND_RNE = 0  # roundTiesToEven      - the default
+RND_RTZ = 1  # roundTowardZero
+RND_RDN = 2  # roundTowardNegative  - toward -infinity
+RND_RUP = 3  # roundTowardPositive  - toward +infinity
+RND_RMM = 4  # roundTiesToAway
+RND_NAMES = {RND_RNE: "rne", RND_RTZ: "rtz", RND_RDN: "rdn",
+             RND_RUP: "rup", RND_RMM: "rmm"}
+RND_MODES = tuple(RND_NAMES)
 
 
 class Unpacked:
@@ -119,9 +142,48 @@ def is_nan(fmt, bits):
 
 # ---- rounding --------------------------------------------------------
 
-def _round_at(m: int, e: int, q: int):
-    """Round the exact value m * 2^e (m > 0) to an integer multiple of
-    2^q, roundTiesToEven. Returns (kept, inexact) with value kept * 2^q."""
+def _check_mode(rnd: int):
+    if rnd not in RND_NAMES:
+        raise ValueError(f"bad rounding mode {rnd}; contract defines 0-4")
+
+
+def _round_up(rnd: int, sign: int, guard: int, sticky: int, lsb: int) -> bool:
+    """Should the retained magnitude be incremented? Everything here is
+    magnitude-and-sign, never two's complement, so the directed modes
+    are just 'away from zero on one side of it'."""
+    if rnd == RND_RNE:
+        return bool(guard and (sticky or lsb))
+    if rnd == RND_RMM:
+        return bool(guard)
+    if rnd == RND_RTZ:
+        return False
+    if rnd == RND_RDN:
+        return bool(sign and (guard or sticky))
+    return bool((not sign) and (guard or sticky))  # RND_RUP
+
+
+def _overflow_gives_inf(rnd: int, sign: int) -> bool:
+    """IEEE 754-2019 7.4: which overflows deliver an infinity, and
+    which deliver the largest finite magnitude instead."""
+    if rnd in (RND_RNE, RND_RMM):
+        return True
+    if rnd == RND_RTZ:
+        return False
+    if rnd == RND_RDN:
+        return bool(sign)
+    return not sign  # RND_RUP
+
+
+def zero_sign_for_exact_cancellation(rnd: int) -> int:
+    """754 6.3: an exact zero sum of oppositely-signed operands is +0
+    in every attribute except roundTowardNegative."""
+    return 1 if rnd == RND_RDN else 0
+
+
+def _round_at(m: int, e: int, q: int, sign: int = 0, rnd: int = RND_RNE):
+    """Round the exact value (-1)^sign * m * 2^e (m > 0) to an integer
+    multiple of 2^q under `rnd`. Returns (kept, inexact) with magnitude
+    kept * 2^q."""
     shift = q - e
     if shift <= 0:
         return m << (-shift), False
@@ -130,39 +192,47 @@ def _round_at(m: int, e: int, q: int):
     if rem == 0:
         return kept, False
     half = 1 << (shift - 1)
-    if rem > half or (rem == half and (kept & 1)):
+    guard = 1 if rem >= half else 0
+    sticky = 1 if (rem & (half - 1)) else 0
+    if _round_up(rnd, sign, guard, sticky, kept & 1):
         kept += 1
     return kept, True
 
 
-def round_pack(fmt: FpFormat, sign: int, m: int, e: int):
+def round_pack(fmt: FpFormat, sign: int, m: int, e: int, rnd: int = RND_RNE):
     """Round the exact non-zero value (-1)^sign * m * 2^e into the
-    format, RNE. Returns (bits, flags)."""
+    format under `rnd`. Returns (bits, flags)."""
     assert m > 0
+    _check_mode(rnd)
     p = fmt.prec
     e_norm = e + m.bit_length() - 1  # unbiased exponent of the value
 
     # Tininess after rounding: round as if the exponent range were
     # unbounded and ask whether the result lands below 2^emin.
     q_unb = e_norm - (p - 1)
-    kept_u, _ = _round_at(m, e, q_unb)
+    kept_u, _ = _round_at(m, e, q_unb, sign, rnd)
     e_after_unb = q_unb + kept_u.bit_length() - 1
     tiny = e_after_unb < fmt.emin
 
     # The real rounding position: the format's ulp, clamped so that
     # nothing below the subnormal ulp is ever representable.
     q = max(e_norm, fmt.emin) - (p - 1)
-    kept, inexact = _round_at(m, e, q)
+    kept, inexact = _round_at(m, e, q, sign, rnd)
     flags = FLAG_INEXACT if inexact else 0
 
     if kept == 0:
-        # Underflowed past the smallest subnormal.
+        # Underflowed past the smallest subnormal. (Only the modes that
+        # round toward this side of zero can land here: RUP never does
+        # so for a positive value, nor RDN for a negative one.)
         return zero_bits(fmt, sign), flags | FLAG_UNDERFLOW
 
     e_res = q + kept.bit_length() - 1
     if e_res > fmt.emax:
-        # RNE overflow response: infinity, and overflow implies inexact.
-        return inf_bits(fmt, sign), flags | FLAG_OVERFLOW | FLAG_INEXACT
+        # Overflow: signalled in every mode (the unbounded-exponent
+        # result exceeded the format), but what gets delivered differs.
+        if _overflow_gives_inf(rnd, sign):
+            return inf_bits(fmt, sign), flags | FLAG_OVERFLOW | FLAG_INEXACT
+        return max_normal_bits(fmt, sign), flags | FLAG_OVERFLOW | FLAG_INEXACT
 
     if tiny and inexact:
         flags |= FLAG_UNDERFLOW
@@ -187,8 +257,9 @@ def _nan_result(fmt, *ops):
     return qnan_bits(fmt), (FLAG_INVALID if invalid else 0)
 
 
-def fma(fmt: FpFormat, xa: int, xb: int, xc: int):
+def fma(fmt: FpFormat, xa: int, xb: int, xc: int, rnd: int = RND_RNE):
     """(bits, flags) of fusedMultiplyAdd(a, b, c) = a*b + c, one rounding."""
+    _check_mode(rnd)
     ua, ub, uc = unpack(fmt, xa), unpack(fmt, xb), unpack(fmt, xc)
     if NAN in (ua.kind, ub.kind, uc.kind):
         return _nan_result(fmt, ua, ub, uc)
@@ -206,23 +277,25 @@ def fma(fmt: FpFormat, xa: int, xb: int, xc: int):
     if ZERO in (ua.kind, ub.kind):
         if uc.kind == ZERO:
             # exact zero + exact zero: keep the sign only when they agree
-            rs = uc.sign if uc.sign == sp else 0
+            rs = uc.sign if uc.sign == sp else \
+                zero_sign_for_exact_cancellation(rnd)
             return zero_bits(fmt, rs), 0
         return xc, 0  # 0*b + c == c exactly, c representable
 
     mp, ep = ua.m * ub.m, ua.e + ub.e  # exact product, never overflows
     if uc.kind == ZERO:
-        return round_pack(fmt, sp, mp, ep)
+        return round_pack(fmt, sp, mp, ep, rnd)
 
     e0 = min(ep, uc.e)
     t = (mp << (ep - e0)) * (-1 if sp else 1) \
         + (uc.m << (uc.e - e0)) * (-1 if uc.sign else 1)
     if t == 0:
-        return zero_bits(fmt, 0), 0  # exact cancellation: +0 under RNE
-    return round_pack(fmt, 1 if t < 0 else 0, abs(t), e0)
+        return zero_bits(fmt, zero_sign_for_exact_cancellation(rnd)), 0
+    return round_pack(fmt, 1 if t < 0 else 0, abs(t), e0, rnd)
 
 
-def add(fmt: FpFormat, xa: int, xb: int):
+def add(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
+    _check_mode(rnd)
     ua, ub = unpack(fmt, xa), unpack(fmt, xb)
     if NAN in (ua.kind, ub.kind):
         return _nan_result(fmt, ua, ub)
@@ -233,7 +306,8 @@ def add(fmt: FpFormat, xa: int, xb: int):
     if ub.kind == INF:
         return inf_bits(fmt, ub.sign), 0
     if ua.kind == ZERO and ub.kind == ZERO:
-        rs = ua.sign if ua.sign == ub.sign else 0
+        rs = ua.sign if ua.sign == ub.sign else \
+            zero_sign_for_exact_cancellation(rnd)
         return zero_bits(fmt, rs), 0
     if ua.kind == ZERO:
         return xb, 0
@@ -243,15 +317,16 @@ def add(fmt: FpFormat, xa: int, xb: int):
     t = (ua.m << (ua.e - e0)) * (-1 if ua.sign else 1) \
         + (ub.m << (ub.e - e0)) * (-1 if ub.sign else 1)
     if t == 0:
-        return zero_bits(fmt, 0), 0
-    return round_pack(fmt, 1 if t < 0 else 0, abs(t), e0)
+        return zero_bits(fmt, zero_sign_for_exact_cancellation(rnd)), 0
+    return round_pack(fmt, 1 if t < 0 else 0, abs(t), e0, rnd)
 
 
-def sub(fmt: FpFormat, xa: int, xb: int):
-    return add(fmt, xa, negate(fmt, xb))
+def sub(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
+    return add(fmt, xa, negate(fmt, xb), rnd)
 
 
-def mul(fmt: FpFormat, xa: int, xb: int):
+def mul(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
+    _check_mode(rnd)
     ua, ub = unpack(fmt, xa), unpack(fmt, xb)
     if NAN in (ua.kind, ub.kind):
         return _nan_result(fmt, ua, ub)
@@ -262,7 +337,7 @@ def mul(fmt: FpFormat, xa: int, xb: int):
         return inf_bits(fmt, sp), 0
     if ZERO in (ua.kind, ub.kind):
         return zero_bits(fmt, sp), 0
-    return round_pack(fmt, sp, ua.m * ub.m, ua.e + ub.e)
+    return round_pack(fmt, sp, ua.m * ub.m, ua.e + ub.e, rnd)
 
 
 # The four ops as the engine sees them: an opcode plus three streams,
@@ -293,6 +368,7 @@ def steer(fmt: FpFormat, op: int, xa: int, xb: int, xc: int):
     raise ValueError(f"bad op {op}")
 
 
-def compute(fmt: FpFormat, op: int, xa: int, xb: int, xc: int):
+def compute(fmt: FpFormat, op: int, xa: int, xb: int, xc: int,
+            rnd: int = RND_RNE):
     """The engine's view: steer, then one FMA. (bits, flags)."""
-    return fma(fmt, *steer(fmt, op, xa, xb, xc))
+    return fma(fmt, *steer(fmt, op, xa, xb, xc), rnd=rnd)
