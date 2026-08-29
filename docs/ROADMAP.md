@@ -158,8 +158,22 @@ the ring IS the "Coordinated" in CFT. The pragmatic monolithic
 alternative stays vendor-flow: used Alveo U200/U250 (VU9P: 8+ tiles,
 64GB DDR4 - fine per the memory analysis) are covered by the SAME
 Alveo-tier license and the same XRT flow as the U50C. Watch prjuray
-and Apicula for the open ceiling moving; open-ASIC PDKs are the
-distant flagpole for a fully-open fp32 lane chip.
+and Apicula for the open ceiling moving.
+
+**The chiplet flagpole (napkin study, 2026-08-29).** The scale-out
+doctrine terminates in ASIC chiplets on the same carrier/ring
+architecture the FPGA modules prototype. On 130nm open PDKs (IHP
+SG13G2 open shuttles; Sky130-class): full tile ~1M gates ~15-25mm2
+(just over an MPW slot); the serialized-multiplier variant ~6-10mm2 -
+shuttle-sized. Realistic 50-150 MHz pipelined. Cost tiers: prototype
+shuttles ~free-$10k; one mask set ~$100-150k NRE -> ~$100-150/part at
+1k; ~$4-6/part at volume. No SerDes/DDR PHY at 130nm open -> hybrid
+carrier by construction: chiplets on parallel source-synchronous
+neighbor links (the ring, in copper), an FPGA module (the Pt) as
+per-carrier hub for host/DRAM, SO-DIMM-style sockets for form-factor
+scaling. The project's golden-model + vectors + cocotb stack is
+already tapeout-grade DV scaffolding - normally the expensive missing
+piece.
 
 Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
 fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
