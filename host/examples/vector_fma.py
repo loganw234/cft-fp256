@@ -27,7 +27,7 @@ from cft_golden import (  # noqa: E402
 )
 
 OPS = {"fma": OP_FMA, "add": OP_ADD, "sub": OP_SUB, "mul": OP_MUL}
-ELEMS_PER_BEAT = {"fp32": 16, "fp256": 2}
+ELEMS_PER_BEAT = {"fp32": 8, "fp256": 1}
 
 
 def main():

@@ -99,7 +99,30 @@ linking on Linux is a legitimate split while the Linux Vitis lands.
 Still holds for any future RTL change: the testbenches guard the RTL,
 so changes loop through `make sim-docker` before repackaging.
 
-## 2. Gate: hardware emulation
+## 2. Gate: hardware emulation - **BLOCKED BY TOOLING, evidence recorded (2026-08-29)**
+
+Attempted in full on amd-arc-box: the hw_emu xclbin links and boots,
+and instrumented runs proved through real XRT + the real shell design:
+argument marshaling to the CSR (every offset exact), the ap_ctrl_hs
+protocol against XRT's scheduler, BO addressing, the read path
+end-to-end, and the engine emitting byte-perfect writes the platform
+acknowledges OKAY. Then the write PAYLOAD arrives at memory as zeros -
+at 512-bit and at native 256-bit, single-bank and grouped, ERT on and
+off, while host-only sync round-trips work. Verdict: the 2022-built
+platform simulation models lose W-channel payloads under 2026.1's
+emulation libraries (the sim log's XTLM deprecation warnings are the
+tell). Nothing in that failing path exists in hardware.
+
+Waived accordingly: correctness weight rests on the cocotb suite and
+the on-card vector gates below. If emulation is ever needed again,
+the fix is era-matched tools (Vitis 2022.2 + XRT 2.13) in an Ubuntu
+22.04 container - not more debugging of the skewed stack. The
+campaign's lasting artifacts: synthesis-guarded $display tracing in
+cft_csr/cft_engine, and the move to a 256-bit m00_axi (native HBM
+pseudo-channel width, no converters anywhere, simpler engine, looser
+host contract).
+
+Original plan for reference:
 
 ```bash
 make xclbin TARGET=hw_emu

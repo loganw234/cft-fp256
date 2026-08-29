@@ -130,6 +130,10 @@ module cft_csr (
         have_aw <= 1'b0;
         have_w  <= 1'b0;
         s_axi_control_bvalid <= 1'b1;
+        // synthesis translate_off
+        $display("[CFT-CSR] WR addr=0x%03h data=0x%08h strb=%b",
+                 {awaddr_q[11:2], 2'b00}, wdata_q, wstrb_q);
+        // synthesis translate_on
         case (awaddr_q[11:2])
           10'h000: begin
             if (start_req && !ap_start_q && !busy) begin

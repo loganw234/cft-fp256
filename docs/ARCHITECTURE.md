@@ -48,13 +48,16 @@ HBM2), Vitis RTL kernel flow, XRT host runtime.
 
 ## Datapath geometry
 
-The tile's compute width is a **half-beat: 256 bits** - 8 fp32 lanes
-or 1 fp256 operand. An AXI beat (512 bits) is two half-beats,
-processed back-to-back. This is the shape the fractured array keeps in
-v1: one physical array that computes 1x fp256, 2x fp128, 4x fp64, or
-8x fp32 per half-beat, precision selected per run.
+The tile's compute width is the **beat: 256 bits** - 8 fp32 lanes or
+1 fp256 operand, and also the native width of an HBM pseudo-channel,
+so no width converter sits between the kernel and memory (in fabric
+or in emulation - a 512-bit master demonstrably lost write payloads
+through the 2022-era platform's emulation converter models; see
+BRINGUP.md). This is the shape the fractured array keeps in v1: one
+physical array that computes 1x fp256, 2x fp128, 4x fp64, or 8x fp32
+per beat, precision selected per run.
 
-Elements per beat: fp32 -> 16, fp256 -> 2.
+Elements per beat: fp32 -> 8, fp256 -> 1.
 
 ## CSR map (== hw/kernel.xml == cft_csr.sv)
 
@@ -76,11 +79,11 @@ Elements per beat: fp32 -> 16, fp256 -> 2.
 
 ## Host contract
 
-- Buffers 64-byte aligned (XRT BOs are), elements little-endian,
+- Buffers 32-byte aligned (XRT BOs are), elements little-endian,
   arrays dense.
-- **N must be a whole number of beats**: a multiple of 16 for fp32, 2
-  for fp256. v0 processes whole beats only; hosts pad the tail (any
-  padding values are computed and written to D's padding region -
+- **N must be a whole number of beats**: a multiple of 8 for fp32;
+  any N for fp256. v0 processes whole beats only; hosts pad the tail
+  (any padding values are computed and written to D's padding region -
   harmless, and their flags DO join the sticky OR, so pad with zeros,
   not junk, when flags matter).
 - Operand semantics per op: FMA uses A,B,C; ADD/SUB use A,C (B
@@ -91,7 +94,7 @@ Elements per beat: fp32 -> 16, fp256 -> 2.
 
 ## AXI behaviour (v0, deliberately naive)
 
-Single ID, single outstanding transaction, ARLEN/AWLEN=0 (one 64-byte
+Single ID, single outstanding transaction, ARLEN/AWLEN=0 (one 32-byte
 beat per burst), INCR, full write strobes. Per beat the engine costs
 three read round-trips, ~LATENCY+2 compute cycles, and one write
 round-trip - correctness and auditability first. The v1 engine adds

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // cft_krnl: Vitis RTL kernel top for the Coordinated Fusion Tile.
-// ap_ctrl_hs control protocol on s_axi_control, one 512-bit AXI4
-// master (m00_axi) into the HBM subsystem. Port names follow the
+// ap_ctrl_hs control protocol on s_axi_control, one 256-bit AXI4
+// master (m00_axi) into the HBM subsystem (256 = native HBM
+// pseudo-channel width; no width converter in fabric or emulation). Port names follow the
 // Vitis RTL kernel conventions so package_xo infers the interfaces;
 // hw/kernel.xml describes the argument map (which is cft_csr's).
 
@@ -44,8 +45,8 @@ module cft_krnl (
     output logic [3:0]   m00_axi_awqos,
     output logic         m00_axi_awvalid,
     input  logic         m00_axi_awready,
-    output logic [511:0] m00_axi_wdata,
-    output logic [63:0]  m00_axi_wstrb,
+    output logic [255:0] m00_axi_wdata,
+    output logic [31:0]  m00_axi_wstrb,
     output logic         m00_axi_wlast,
     output logic         m00_axi_wvalid,
     input  logic         m00_axi_wready,
@@ -65,7 +66,7 @@ module cft_krnl (
     output logic         m00_axi_arvalid,
     input  logic         m00_axi_arready,
     input  logic [0:0]   m00_axi_rid,
-    input  logic [511:0] m00_axi_rdata,
+    input  logic [255:0] m00_axi_rdata,
     input  logic [1:0]   m00_axi_rresp,
     input  logic         m00_axi_rlast,
     input  logic         m00_axi_rvalid,
