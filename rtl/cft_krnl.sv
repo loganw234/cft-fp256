@@ -82,6 +82,7 @@ module cft_krnl #(
 
   logic        start, busy, done;
   logic [4:0]  eng_flags;
+  logic [2:0]  eng_err;
   logic [3:0]  cfg_op, cfg_prec;
   logic [2:0]  cfg_rnd;
   logic [63:0] cfg_n, cfg_a, cfg_b, cfg_c, cfg_d;
@@ -106,6 +107,7 @@ module cft_krnl #(
       .s_axi_control_rvalid(s_axi_control_rvalid),
       .s_axi_control_rready(s_axi_control_rready),
       .start(start), .busy(busy), .done(done), .eng_flags(eng_flags),
+      .eng_err(eng_err),
       .prec_caps({EN_FP256, EN_FP128, EN_FP64, 1'b1}),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
@@ -115,6 +117,7 @@ module cft_krnl #(
                       .EN_FP256(EN_FP256)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
+      .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
       .m00_axi_awid(m00_axi_awid), .m00_axi_awaddr(m00_axi_awaddr),

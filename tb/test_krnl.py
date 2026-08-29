@@ -17,7 +17,7 @@ from pathlib import Path
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge
+from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
@@ -33,7 +33,7 @@ from cft_golden import (  # noqa: E402
 # CSR map (cft_csr.sv / hw/kernel.xml)
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
-FLAGS, MAGIC, VERSION, CAPS = 0x40, 0x44, 0x48, 0x4C
+FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
 
 A_BASE, B_BASE, C_BASE, D_BASE = 0x00000, 0x40000, 0x80000, 0xC0000
 
@@ -106,6 +106,11 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     got_f = await axil.read_dword(FLAGS)
     assert got_f == exp_f, \
         f"{fmt.name} {OP_NAMES[op]}: FLAGS {got_f:#07b} want {exp_f:#07b}"
+    # the memory system vouched for every beat: a clean STATUS is what
+    # makes the bit-exactness above mean anything
+    got_err = await axil.read_dword(STATUS)
+    assert got_err == 0, \
+        f"{fmt.name} {OP_NAMES[op]}: STATUS {got_err:#05b}, bus faults during the run"
     dut._log.info(f"{fmt.name} {OP_NAMES[op]} {RND_NAMES[rnd]} n={n}: "
                   f"bit-exact, flags {got_f:#07b}")
 
@@ -125,7 +130,7 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000300
+    assert await axil.read_dword(VERSION) == 0x00000310
     assert await axil.read_dword(CAPS) == 0xF, "full tile advertises all rungs"
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
@@ -164,3 +169,86 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=140, rnd=RND_RUP)
     await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=140, rnd=RND_RDN)
     await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=140, rnd=RND_RNE)
+
+
+# ---- raw AXI4-Lite corner cases --------------------------------------
+#
+# cocotbext-axi's AxiLiteMaster issues one write at a time and waits for
+# BVALID before starting the next, which is also what XRT's MMIO path
+# does. That politeness hides a whole class of CSR bugs: anything the
+# slave gets wrong about WHEN it samples the bus is invisible to a
+# master that never changes the bus. These tests drive the control
+# signals by hand to close that gap.
+
+async def _raw_idle(dut):
+    dut.s_axi_control_awvalid.value = 0
+    dut.s_axi_control_wvalid.value = 0
+    dut.s_axi_control_arvalid.value = 0
+    dut.s_axi_control_bready.value = 1
+    dut.s_axi_control_rready.value = 1
+    dut.s_axi_control_wstrb.value = 0xF
+
+
+async def _raw_read(dut, addr):
+    await RisingEdge(dut.ap_clk)
+    dut.s_axi_control_araddr.value = addr
+    dut.s_axi_control_arvalid.value = 1
+    while True:
+        await ReadOnly()
+        accepted = int(dut.s_axi_control_arready.value)
+        await RisingEdge(dut.ap_clk)
+        if accepted:
+            break
+    dut.s_axi_control_arvalid.value = 0
+    while True:
+        await ReadOnly()
+        if int(dut.s_axi_control_rvalid.value):
+            val = int(dut.s_axi_control_rdata.value)
+            await RisingEdge(dut.ap_clk)
+            return val
+        await RisingEdge(dut.ap_clk)
+
+
+@cocotb.test()
+async def csr_latches_the_handshake_beat(dut):
+    """A register must keep the WDATA that was on the bus at the W
+    handshake, not whatever the master drives afterwards.
+
+    AXI4-Lite requires WDATA to be valid only while WVALID is asserted;
+    once the handshake completes the master may drive anything. This
+    slave commits the write a cycle later (it waits for both AW and W),
+    so reading the live bus at commit time captures the wrong cycle.
+    Here the master hands over a value and immediately drives garbage,
+    which is exactly what a pipelined master or a FIFO-fed W channel
+    does between beats."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    await _raw_idle(dut)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    POISON = 0xDEADBEEF
+    for addr, want in ((NREG, 0x12345678), (MODE, 0x00000123),
+                       (APTR, 0x0000BEE0)):
+        await RisingEdge(dut.ap_clk)
+        dut.s_axi_control_awaddr.value = addr
+        dut.s_axi_control_awvalid.value = 1
+        dut.s_axi_control_wdata.value = want
+        dut.s_axi_control_wvalid.value = 1
+        await ReadOnly()
+        assert int(dut.s_axi_control_awready.value) == 1
+        assert int(dut.s_axi_control_wready.value) == 1
+        await RisingEdge(dut.ap_clk)      # the handshake edge
+        # the master moves on the very next cycle
+        dut.s_axi_control_awvalid.value = 0
+        dut.s_axi_control_wvalid.value = 0
+        dut.s_axi_control_wdata.value = POISON
+        dut.s_axi_control_awaddr.value = 0
+        await ClockCycles(dut.ap_clk, 6)
+
+        got = await _raw_read(dut, addr)
+        assert got == want, (
+            f"CSR {addr:#x}: read back {got:#010x}, wrote {want:#010x} "
+            f"(bus carried {POISON:#010x} the cycle after the handshake)")
+    dut._log.info("CSR latches the handshake beat, not the following cycle")

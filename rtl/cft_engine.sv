@@ -48,6 +48,7 @@ module cft_engine #(
     output logic         busy,
     output logic         done,
     output logic [4:0]   flags_acc,
+    output logic [2:0]   err_acc,
     input  logic [3:0]   cfg_op,
     input  logic [3:0]   cfg_prec,
     input  logic [2:0]   cfg_rnd,
@@ -121,7 +122,9 @@ module cft_engine #(
   logic [3:0]   state;
   logic [63:0]  beats_total, beat_idx;
   logic [255:0] abuf, bbuf, cbuf, dbuf;
-  logic [1:0]   prec_r;
+  logic [1:0]   prec_r, op_r;
+  logic [2:0]   rnd_r;
+  logic [63:0]  base_a, base_b, base_c, base_d;
   logic         captured;
 
   // elements per beat = 8 >> prec, so beats = n >> (3 - prec)
@@ -149,12 +152,16 @@ module cft_engine #(
   assign m00_axi_wlast   = 1'b1;
 
   assign m00_axi_arvalid = (state == S_AR_A) || (state == S_AR_B) || (state == S_AR_C);
-  assign m00_axi_araddr  = (state == S_AR_A) ? (cfg_a + (beat_idx << 5)) :
-                           (state == S_AR_B) ? (cfg_b + (beat_idx << 5)) :
-                                               (cfg_c + (beat_idx << 5));
+  // Addresses come from the per-run snapshot, never from the live CSR
+  // outputs: AXI requires ARADDR/AWADDR to be stable from VALID until
+  // READY, and a pointer written mid-run would otherwise change an
+  // address while VALID is asserted.
+  assign m00_axi_araddr  = (state == S_AR_A) ? (base_a + (beat_idx << 5)) :
+                           (state == S_AR_B) ? (base_b + (beat_idx << 5)) :
+                                               (base_c + (beat_idx << 5));
   assign m00_axi_rready  = (state == S_R_A) || (state == S_R_B) || (state == S_R_C);
   assign m00_axi_awvalid = (state == S_AW);
-  assign m00_axi_awaddr  = cfg_d + (beat_idx << 5);
+  assign m00_axi_awaddr  = base_d + (beat_idx << 5);
   assign m00_axi_wvalid  = (state == S_W);
   assign m00_axi_wdata   = dbuf;
   assign m00_axi_bready  = (state == S_B);
@@ -177,12 +184,12 @@ module cft_engine #(
       assign sb = bbuf[gi*32 +: 32];
       assign sc = cbuf[gi*32 +: 32];
       cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
-          .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+          .op(op_r), .a(sa), .b(sb), .c(sc),
           .fa(fa), .fb(fb), .fc(fc));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP32)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
           .a(fa), .b(fb), .c(fc),
           .out_valid(), .d(dd), .flags(f32_l[gi]));
       assign d32[gi*32 +: 32] = dd;
@@ -205,12 +212,12 @@ module cft_engine #(
         assign sb = bbuf[gi*64 +: 64];
         assign sc = cbuf[gi*64 +: 64];
         cft_opmux #(.EXP_W(11), .MAN_W(52)) u_mux (
-            .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+            .op(op_r), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]));
         assign d64[gi*64 +: 64] = dd;
@@ -237,12 +244,12 @@ module cft_engine #(
         assign sb = bbuf[gi*128 +: 128];
         assign sc = cbuf[gi*128 +: 128];
         cft_opmux #(.EXP_W(15), .MAN_W(112)) u_mux (
-            .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+            .op(op_r), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]));
         assign d128[gi*128 +: 128] = dd;
@@ -264,12 +271,12 @@ module cft_engine #(
     if (EN_FP256) begin : g_bank256
       logic [255:0] w_fa, w_fb, w_fc;
       cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
-          .op(cfg_op[1:0]), .a(abuf), .b(bbuf), .c(cbuf),
+          .op(op_r), .a(abuf), .b(bbuf), .c(cbuf),
           .fa(w_fa), .fb(w_fb), .fc(w_fc));
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
           .a(w_fa), .b(w_fb), .c(w_fc),
           .out_valid(), .d(d256), .flags(f256));
     end else begin : g_bank256_off
@@ -305,8 +312,20 @@ module cft_engine #(
       beat_idx <= '0;
       beats_total <= '0;
       prec_r <= 2'd0;
+      op_r <= 2'd0;
+      rnd_r <= 3'd0;
+      err_acc <= 3'b0;
+      base_a <= '0; base_b <= '0; base_c <= '0; base_d <= '0;
     end else begin
       done <= 1'b0;
+
+      // The memory system's verdict on this run's data (see the STATUS
+      // CSR). ARLEN is always 0 here, so there is no burst-length
+      // check to make - only the responses.
+      if (m00_axi_rready && m00_axi_rvalid && (m00_axi_rresp != 2'b00))
+        err_acc[0] <= 1'b1;
+      if ((state == S_B) && m00_axi_bvalid && (m00_axi_bresp != 2'b00))
+        err_acc[1] <= 1'b1;
 
       // delay line runs unconditionally; capture on emergence
       vdl <= {vdl[LATENCY-2:0], ex_valid};
@@ -327,9 +346,14 @@ module cft_engine #(
                      cfg_op, cfg_prec, cfg_n, cfg_a, cfg_b, cfg_c, cfg_d);
             // synthesis translate_on
             prec_r <= cfg_prec[1:0];
+            op_r   <= cfg_op[1:0];
+            rnd_r  <= cfg_rnd;
+            base_a <= cfg_a; base_b <= cfg_b;
+            base_c <= cfg_c; base_d <= cfg_d;
             beats_total <= beats_new;
             beat_idx <= '0;
             flags_acc <= 5'b0;
+            err_acc <= 3'b0;
             if (beats_new == 0) begin
               state <= S_DONE;
             end else begin

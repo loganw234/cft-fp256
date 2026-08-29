@@ -46,6 +46,7 @@ module cft_engine_stream #(
     output logic         busy,
     output logic         done,
     output logic [4:0]   flags_acc,
+    output logic [2:0]   err_acc,
     input  logic [3:0]   cfg_op,
     input  logic [3:0]   cfg_prec,
     input  logic [2:0]   cfg_rnd,
@@ -103,6 +104,25 @@ module cft_engine_stream #(
   localparam int BURST_MAX = 1 << BURST_LOG2;
   localparam int FDEPTH    = 1 << FIFO_LOG2;
 
+  // The writer starts a burst only once the result FIFO holds the
+  // whole burst, so a burst longer than the FIFO can never start and
+  // the engine would deadlock with beats still outstanding. Equality
+  // is legal but degenerate (writes could only begin with the FIFO
+  // completely full, stalling read and compute for the whole burst),
+  // so demand real headroom.
+  initial begin
+    if (BURST_MAX >= FDEPTH) begin
+      $display("FATAL: cft_engine_stream needs BURST_LOG2 (%0d) < FIFO_LOG2 (%0d)",
+               BURST_LOG2, FIFO_LOG2);
+      $fatal(1);
+    end
+  end
+
+  // sticky bus faults, reported through the STATUS CSR
+  localparam int ERR_RRESP = 0;
+  localparam int ERR_BRESP = 1;
+  localparam int ERR_RLEN  = 2;
+
   // constant AXI attributes
   assign m00_axi_awid    = 1'b0;
   assign m00_axi_awsize  = 3'd5;      // 32 bytes
@@ -123,6 +143,8 @@ module cft_engine_stream #(
   // ---- run control ---------------------------------------------------
   logic         running;
   logic [1:0]   prec_r;
+  logic [1:0]   op_r;
+  logic [2:0]   rnd_r;
   logic [63:0]  beats_total;
   logic [63:0]  base_a, base_b, base_c, base_d;
 
@@ -139,6 +161,8 @@ module cft_engine_stream #(
       running <= 1'b0;
       done <= 1'b0;
       prec_r <= 2'd0;
+      op_r <= 2'd0;
+      rnd_r <= 3'd0;
       beats_total <= '0;
       base_a <= '0; base_b <= '0; base_c <= '0; base_d <= '0;
     end else begin
@@ -148,7 +172,16 @@ module cft_engine_stream #(
         $display("[CFT-ENGS] START op=%0d prec=%0d n=%0d beats=%0d a=0x%h b=0x%h c=0x%h d=0x%h",
                  cfg_op, cfg_prec, cfg_n, beats_new, cfg_a, cfg_b, cfg_c, cfg_d);
         // synthesis translate_on
+        // Everything the run depends on is snapshot here. op and rnd
+        // used to be read combinationally, which meant a MODE write
+        // landing mid-run changed the arithmetic partway through the
+        // array - and the split point depended on memory timing, so
+        // the same host program could produce different bits on
+        // different runs. That is the exact failure this design
+        // exists to rule out.
         prec_r <= cfg_prec[1:0];
+        op_r   <= cfg_op[1:0];
+        rnd_r  <= cfg_rnd;
         beats_total <= beats_new;
         base_a <= cfg_a; base_b <= cfg_b; base_c <= cfg_c; base_d <= cfg_d;
         if (beats_new == 0) done <= 1'b1;
@@ -186,7 +219,7 @@ module cft_engine_stream #(
 
   logic [1:0]  rd_state, cur_s;
   logic [63:0] rd_issued0, rd_issued1, rd_issued2;
-  logic [7:0]  ar_len;
+  logic [7:0]  ar_len, r_beats;
 
   logic [63:0] rem0, rem1, rem2, addr0, addr1, addr2;
   assign rem0 = beats_total - rd_issued0;
@@ -228,9 +261,11 @@ module cft_engine_stream #(
       cur_s <= 2'd0;
       rd_issued0 <= '0; rd_issued1 <= '0; rd_issued2 <= '0;
       ar_len <= 8'd0;
+      r_beats <= 8'd0;
     end else if (!running) begin
       rd_state <= R_IDLE;
       rd_issued0 <= '0; rd_issued1 <= '0; rd_issued2 <= '0;
+      r_beats <= 8'd0;
     end else begin
       case (rd_state)
         R_IDLE: begin
@@ -244,17 +279,21 @@ module cft_engine_stream #(
         end
         R_AR: if (m00_axi_arready) begin
           rd_state <= R_DATA;
+          r_beats <= 8'd0;
           // synthesis translate_off
           $display("[CFT-ENGS] AR s=%0d addr=0x%h len=%0d", cur_s, m00_axi_araddr, ar_len);
           // synthesis translate_on
         end
-        R_DATA: if (m00_axi_rvalid && m00_axi_rlast) begin
-          case (cur_s)
-            2'd0: rd_issued0 <= rd_issued0 + {56'd0, ar_len};
-            2'd1: rd_issued1 <= rd_issued1 + {56'd0, ar_len};
-            default: rd_issued2 <= rd_issued2 + {56'd0, ar_len};
-          endcase
-          rd_state <= R_IDLE;
+        R_DATA: if (m00_axi_rvalid) begin
+          r_beats <= r_beats + 8'd1;
+          if (m00_axi_rlast) begin
+            case (cur_s)
+              2'd0: rd_issued0 <= rd_issued0 + {56'd0, ar_len};
+              2'd1: rd_issued1 <= rd_issued1 + {56'd0, ar_len};
+              default: rd_issued2 <= rd_issued2 + {56'd0, ar_len};
+            endcase
+            rd_state <= R_IDLE;
+          end
         end
         default: rd_state <= R_IDLE;
       endcase
@@ -315,12 +354,12 @@ module cft_engine_stream #(
       assign sb = b_q[gi*32 +: 32];
       assign sc = c_q[gi*32 +: 32];
       cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
-          .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+          .op(op_r), .a(sa), .b(sb), .c(sc),
           .fa(fa), .fb(fb), .fc(fc));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP32)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
           .a(fa), .b(fb), .c(fc),
           .out_valid(), .d(dd), .flags(f32_l[gi]));
       assign d32[gi*32 +: 32] = dd;
@@ -343,12 +382,12 @@ module cft_engine_stream #(
         assign sb = b_q[gi*64 +: 64];
         assign sc = c_q[gi*64 +: 64];
         cft_opmux #(.EXP_W(11), .MAN_W(52)) u_mux (
-            .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+            .op(op_r), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]));
         assign d64[gi*64 +: 64] = dd;
@@ -375,12 +414,12 @@ module cft_engine_stream #(
         assign sb = b_q[gi*128 +: 128];
         assign sc = c_q[gi*128 +: 128];
         cft_opmux #(.EXP_W(15), .MAN_W(112)) u_mux (
-            .op(cfg_op[1:0]), .a(sa), .b(sb), .c(sc),
+            .op(op_r), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]));
         assign d128[gi*128 +: 128] = dd;
@@ -402,12 +441,12 @@ module cft_engine_stream #(
     if (EN_FP256) begin : g_bank256
       logic [255:0] w_fa, w_fb, w_fc;
       cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
-          .op(cfg_op[1:0]), .a(a_q), .b(b_q), .c(c_q),
+          .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .fa(w_fa), .fb(w_fb), .fc(w_fc));
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
-          .rnd(cfg_rnd),
+          .rnd(rnd_r),
           .a(w_fa), .b(w_fb), .c(w_fc),
           .out_valid(), .d(d256), .flags(f256));
     end else begin : g_bank256_off
@@ -507,6 +546,35 @@ module cft_engine_stream #(
 
   assign wfinish = (wr_state == W_B) && m00_axi_bvalid &&
                    ((wr_done + {56'd0, w_len}) == beats_total);
+
+  // ---- sticky bus faults ---------------------------------------------
+  //
+  // The memory system's own verdict on the data this run consumed and
+  // produced. Without it a DECERR on an out-of-range pointer is
+  // indistinguishable from success: the engine would compute on
+  // whatever the interconnect drove, write it out, and report done
+  // with clean IEEE flags. A determinism claim that cannot tell
+  // "these are the bits" from "the memory never answered" is not
+  // worth much, so a run ending with STATUS non-zero is a run whose
+  // output must be discarded.
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n) begin
+      err_acc <= 3'b0;
+    end else if (start_accept) begin
+      err_acc <= 3'b0;
+    end else begin
+      if ((rd_state == R_DATA) && m00_axi_rvalid && (m00_axi_rresp != 2'b00))
+        err_acc[ERR_RRESP] <= 1'b1;
+      if ((wr_state == W_B) && m00_axi_bvalid && (m00_axi_bresp != 2'b00))
+        err_acc[ERR_BRESP] <= 1'b1;
+      // RLAST must land on exactly the beat ARLEN asked for. A short
+      // burst would otherwise starve compute forever and a long one
+      // would overrun an unguarded FIFO - both silent hangs today.
+      if ((rd_state == R_DATA) && m00_axi_rvalid &&
+          (m00_axi_rlast != (r_beats == ar_len - 8'd1)))
+        err_acc[ERR_RLEN] <= 1'b1;
+    end
+  end
 
   // ---- sticky flags --------------------------------------------------
   always_ff @(posedge ap_clk) begin

@@ -10,9 +10,11 @@
 # kernel packaging sequence.
 #
 # Validated 2026-08-28 against Vivado 2026.1 (Windows): ran clean on
-# first contact, interfaces auto-inferred, .xo written with all six
-# sources and the kernel.xml arg map embedded. (.xo files are portable;
-# packaging on Windows and linking on Linux is a supported split.)
+# first contact, interfaces auto-inferred, .xo written with every
+# source in rtl/ (globbed below, so new modules are picked up
+# automatically) and the kernel.xml arg map embedded. (.xo files are
+# portable; packaging on Windows and linking on Linux is a supported
+# split.)
 
 set part      "xcu50-fsvh2104-2-e"
 set build_dir "build"

@@ -21,7 +21,8 @@
 //                 encoding: 0 RNE, 1 RTZ, 2 RDN, 3 RUP, 4 RMM;
 //                 5-7 reserved and behave as RNE
 //   0x18  N       element count, 64-bit (lo at 0x18, hi at 0x1C)
-//   0x20  A_PTR   64-bit HBM byte address, 64-byte aligned
+//   0x20  A_PTR   64-bit HBM byte address, 32-byte aligned (one beat;
+//                 XRT buffer objects are 4 KB aligned anyway)
 //   0x28  B_PTR   64-bit
 //   0x30  C_PTR   64-bit
 //   0x38  D_PTR   64-bit
@@ -29,10 +30,17 @@
 //                 {inexact,underflow,overflow,divzero,invalid};
 //                 cleared by hardware at ap_start
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000300 (v0.3.0)
+//   0x48  VERSION RO: 0x00000310 (v0.3.1)
 //   0x4C  CAPS    RO: [3:0] precision bitmask, bit p = MODE prec p
 //                 implemented (full tile: 0xF; trimmed open-core
 //                 tiles clear the banks they cannot fit)
+//   0x50  STATUS  RO: sticky bus faults from the last run, cleared by
+//                 hardware at ap_start. A run that ends with STATUS
+//                 non-zero computed on data the memory system did not
+//                 vouch for, and its D buffer must not be trusted:
+//                 [0] a read response was not OKAY
+//                 [1] a write response was not OKAY
+//                 [2] a read burst delivered the wrong beat count
 
 `timescale 1ns/1ps
 
@@ -64,6 +72,7 @@ module cft_csr (
     input  logic        busy,
     input  logic        done,        // one-cycle pulse
     input  logic [4:0]  eng_flags,
+    input  logic [2:0]  eng_err,     // sticky bus/protocol faults, see STATUS
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     output logic [3:0]  cfg_op,
     output logic [3:0]  cfg_prec,
@@ -76,7 +85,7 @@ module cft_csr (
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  localparam [31:0] VERSION = 32'h0000_0300;
+  localparam [31:0] VERSION = 32'h0000_0310;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
@@ -104,6 +113,13 @@ module cft_csr (
   assign s_axi_control_awready = !have_aw && !s_axi_control_bvalid;
   assign s_axi_control_wready  = !have_w && !s_axi_control_bvalid;
   assign do_write = have_aw && have_w;
+  // Both the mask and the data come from the REGISTERED beat, never
+  // from the live bus: do_write is at least one cycle after the W
+  // handshake, and AXI4-Lite only requires WDATA to be valid while
+  // WVALID is asserted. A master that pipelines its writes (or drives
+  // zeros between them) would otherwise have each register commit its
+  // successor's payload - invisible to a testbench that waits for
+  // BVALID between writes, which is what both of ours do.
   assign wmask = {{8{wstrb_q[3]}}, {8{wstrb_q[2]}}, {8{wstrb_q[1]}}, {8{wstrb_q[0]}}};
   assign s_axi_control_bresp = 2'b00;
 
@@ -150,22 +166,27 @@ module cft_csr (
             if (start_req && !ap_start_q && !busy) begin
               ap_start_q <= 1'b1;
               start      <= 1'b1;
+              // Drop any done left over from the previous run. A host
+              // that starts again without reading CTRL first would
+              // otherwise see the OLD done immediately and read a
+              // half-written D buffer.
+              ap_done_q  <= 1'b0;
             end
           end
-          10'h001: gier_q <= (gier_q & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h002: ier_q  <= (ier_q  & ~wmask) | (s_axi_control_wdata & wmask);
+          10'h001: gier_q <= (gier_q & ~wmask) | (wdata_q & wmask);
+          10'h002: ier_q  <= (ier_q  & ~wmask) | (wdata_q & wmask);
           // 0x0C ISR: write-1-to-clear semantics unneeded (no interrupt)
-          10'h004: mode_q <= (mode_q & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h006: n_q[31:0]  <= (n_q[31:0]  & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h007: n_q[63:32] <= (n_q[63:32] & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h008: a_q[31:0]  <= (a_q[31:0]  & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h009: a_q[63:32] <= (a_q[63:32] & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h00A: b_q[31:0]  <= (b_q[31:0]  & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h00B: b_q[63:32] <= (b_q[63:32] & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h00C: c_q[31:0]  <= (c_q[31:0]  & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h00D: c_q[63:32] <= (c_q[63:32] & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h00E: d_q[31:0]  <= (d_q[31:0]  & ~wmask) | (s_axi_control_wdata & wmask);
-          10'h00F: d_q[63:32] <= (d_q[63:32] & ~wmask) | (s_axi_control_wdata & wmask);
+          10'h004: mode_q <= (mode_q & ~wmask) | (wdata_q & wmask);
+          10'h006: n_q[31:0]  <= (n_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h007: n_q[63:32] <= (n_q[63:32] & ~wmask) | (wdata_q & wmask);
+          10'h008: a_q[31:0]  <= (a_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h009: a_q[63:32] <= (a_q[63:32] & ~wmask) | (wdata_q & wmask);
+          10'h00A: b_q[31:0]  <= (b_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h00B: b_q[63:32] <= (b_q[63:32] & ~wmask) | (wdata_q & wmask);
+          10'h00C: c_q[31:0]  <= (c_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h00D: c_q[63:32] <= (c_q[63:32] & ~wmask) | (wdata_q & wmask);
+          10'h00E: d_q[31:0]  <= (d_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h00F: d_q[63:32] <= (d_q[63:32] & ~wmask) | (wdata_q & wmask);
           default: ;
         endcase
       end
@@ -214,6 +235,7 @@ module cft_csr (
           10'h011: s_axi_control_rdata <= MAGIC;
           10'h012: s_axi_control_rdata <= VERSION;
           10'h013: s_axi_control_rdata <= {28'b0, prec_caps};
+          10'h014: s_axi_control_rdata <= {29'b0, eng_err};
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end

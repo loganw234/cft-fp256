@@ -97,13 +97,19 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x38 | D_PTR | RW | 64-bit |
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at ap_start |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
-| 0x48 | VERSION | RO | 0x00000300 (v0.3.0: directed rounding attributes) |
+| 0x48 | VERSION | RO | 0x00000310 (v0.3.1: STATUS register) |
 | 0x4C | CAPS | RO | [3:0] precision bitmask, bit p = MODE precision p implemented; full tile reads 0xF |
+| 0x50 | STATUS | RO | sticky bus faults of the last run, cleared at ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count. **Non-zero means the D buffer must not be trusted** |
 
 ## Host contract
 
-- Buffers 32-byte aligned (XRT BOs are), elements little-endian,
-  arrays dense.
+- **Buffers must be 32-byte aligned** - one beat. This is the single
+  normative statement of the requirement; XRT buffer objects are 4 KB
+  aligned, so it costs a host nothing. The engine's burst sizing
+  assumes it, and an unaligned pointer whose low 12 bits exceed 4064
+  yields a zero-length burst and hangs the run rather than failing
+  loudly, so do not treat it as advisory.
+- Elements little-endian, arrays dense.
 - **N must be a whole number of beats**: a multiple of 8 for fp32, 4
   for fp64, 2 for fp128; any N for fp256. The engine processes whole
   beats only; hosts pad the tail (any padding values are computed and
@@ -118,7 +124,16 @@ rungs it carries; the beat stays 256 bits regardless.
   ignored); MUL uses A,B (C ignored). D = op result. SUB computes
   A - C.
 - One run per ap_start; poll CTRL for ap_done (XRT does this
-  natively); read FLAGS before the next start if you want them.
+  natively); read FLAGS **and STATUS** before the next start. A clean
+  STATUS is what makes a bit-exactness claim mean anything: without
+  it, a run that computed on data the memory system never delivered
+  is indistinguishable from one that succeeded.
+- **Argument registers must be left alone while a run is in flight.**
+  The engine snapshots everything it needs at ap_start - op,
+  precision, rounding attribute, N and all four pointers - so a
+  mid-run write cannot corrupt the run in progress. That snapshot is
+  the guarantee; the registers are still yours to reprogram for the
+  next run as soon as ap_done is observed.
 
 ## AXI behaviour (v1 streamer)
 

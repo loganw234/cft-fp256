@@ -6,10 +6,10 @@ element against the golden model.
     python3 host/examples/vector_fma.py build/cft_hw.xclbin \
         --format fp256 --op fma --n 4096
 
-The host contract (docs/ARCHITECTURE.md): buffers are 64-byte aligned
-(XRT BOs always are), elements little-endian, and N a whole number of
-256-bit beats - 8 elements for fp32, 4 for fp64, 2 for fp128, 1 for
-fp256.
+The host contract (docs/ARCHITECTURE.md): buffers are 32-byte aligned
+(XRT BOs are 4 KB aligned, so this is free), elements little-endian,
+and N a whole number of 256-bit beats - 8 elements for fp32, 4 for
+fp64, 2 for fp128, 1 for fp256.
 
 Requires XRT's Python bindings (pyxrt) on the machine with the card;
 everything else in this repo runs without them.
@@ -91,6 +91,20 @@ def main():
 
     bo_d.sync(pyxrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE, nbytes, 0)
     raw = bo_d.read(nbytes, 0)
+
+    # STATUS (0x50) before anything else: if the memory system did not
+    # vouch for the data, comparing it against the golden model is
+    # meaningless - the bits under test were never really delivered.
+    try:
+        status = krnl.read_register(0x50)
+    except Exception:          # older XRT without read_register
+        status = 0
+    if status:
+        print(f"FAIL: kernel reported bus faults, STATUS={status:#05b} "
+              f"(bit0 read resp, bit1 write resp, bit2 burst length). "
+              f"The output buffer is not trustworthy; check that the "
+              f"buffers are in range and 32-byte aligned.")
+        return 1
 
     bad = 0
     for i in range(args.n):
