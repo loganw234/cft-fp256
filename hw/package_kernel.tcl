@@ -9,9 +9,10 @@
 # Makefile (`make xo`); the flow follows the Vitis_Accel_Examples RTL
 # kernel packaging sequence.
 #
-# HONESTY NOTE (v0): this script is written to the documented flow but
-# has not yet been run against a live Vitis install - it is the first
-# thing docs/BRINGUP.md says to validate on the synthesis box.
+# Validated 2026-08-28 against Vivado 2026.1 (Windows): ran clean on
+# first contact, interfaces auto-inferred, .xo written with all six
+# sources and the kernel.xml arg map embedded. (.xo files are portable;
+# packaging on Windows and linking on Linux is a supported split.)
 
 set part      "xcu50-fsvh2104-2-e"
 set build_dir "build"

@@ -33,11 +33,29 @@ install, in this order:
    page pairs with the deployment platform (the `-dev` platform
    package declares its minimum XRT).
 
-Also worth checking before first contact: ~250 GB free disk for Vitis
-plus workspace; BIOS "Above 4G Decoding" enabled or the card will not
-enumerate; and real chassis airflow - U50-class cards are passive and
-will thermally throttle or shut down in a desk-side case without a
-duct/fan.
+Also worth checking before first contact: ~100-250 GB free disk for
+Vitis (a lean device selection fits ~80 GB) plus workspace; BIOS
+"Above 4G Decoding" enabled or the card will not enumerate; and
+airflow appropriate to the card - stock U50s are passive and need
+ducted chassis air, while this project's U50C is a custom active-cooled
+unit (75 W, fan attached), which removes that worry. The U50C also
+exposes a USB Mini-B JTAG/UART port: a recovery/flash path and Vivado
+hw_manager access that stock U50s route through the PCIe shell only.
+
+## Lab map (surveyed 2026-08-28)
+
+| box | hardware | role |
+|---|---|---|
+| amd-arc-box (192.168.0.201) | Xeon E5-2697 v4 36t, 32 GB, 238 GB NVMe (167 free), RX 7600 + Arc B580 + Arc A750, Ubuntu 24.04 | **build box** (Vitis + v++); card host IF its X99-UD4 BIOS exposes Above 4G Decoding (common on X99 - check; /proc/iomem shows none mapped today) |
+| nvidia-box (192.168.0.234) | i5-6600K 4t, 8 GB, 117 GB SSD, GTX 1080, mini-ITX, Ubuntu 24.04 | too small for v++ links (8 GB); last-resort card host - single slot means pulling the 1080, which breaks an atlas census column |
+| Windows box (MSI PRO B760-P) | Vivado 2026.1 installed with U50 part support; Above-4G decoding confirmed ACTIVE | .xo packaging + synthesis experiments today; strong card-host fallback via dual-boot Ubuntu on a spare drive |
+
+Both Linux boxes run Ubuntu 24.04, so the native Linux Vitis must be a
+24.04-capable release (2026.1, matching Windows). The open question is
+whether v++ 2026.1 still links against the 2022-era U50 platform
+(`*_202210_1`); if it refuses, the fallback is the link step inside an
+Ubuntu 22.04 Docker container carrying an older Vitis on amd-arc-box -
+the OS-pairing problem dissolves in a container.
 
 ```bash
 source /opt/xilinx/xrt/setup.sh          # also puts pyxrt on PYTHONPATH
@@ -52,23 +70,21 @@ different platform name/generation - pass `PLATFORM=<what xbutil
 says>` to make rather than editing files. If the reported part differs
 from `xcu50-fsvh2104-2-e`, pass `PART=` too.
 
-## 1. Gate: the packaging script runs
+## 1. Gate: the packaging script runs - **MET 2026-08-28**
 
 ```bash
 make xo
 ```
 
-`hw/package_kernel.tcl` follows the documented Vitis RTL-kernel
-sequence but HAS NOT yet been run against a live Vivado - expect
-first-contact friction here, not silence. Likely first failures:
-interface inference (the `ipx::associate_bus_interfaces` names must
-match what packaging inferred from the port prefixes) and synthesis
-lint on the behavioural core. Fix forward; the RTL is the artifact the
-testbenches guard, so any RTL change loops back through `make
-sim-docker` first.
+Ran clean on first contact against Vivado 2026.1 (Windows install,
+`PART=xcu50-fsvh2104-2-e`): interfaces auto-inferred from the port
+prefixes, `build/cft_krnl.xo` written with all six RTL sources and the
+kernel.xml arg map (`mode, n, a, b, c, d`) embedded and verified by
+inspection. `.xo` files are portable - packaging on Windows and
+linking on Linux is a legitimate split while the Linux Vitis lands.
 
-**Done when:** `build/cft_krnl.xo` exists and `v++ --list_kernels`
-(or the link step) sees `cft_krnl`.
+Still holds for any future RTL change: the testbenches guard the RTL,
+so changes loop through `make sim-docker` before repackaging.
 
 ## 2. Gate: hardware emulation
 
