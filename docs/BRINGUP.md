@@ -11,9 +11,38 @@ is a bring-up you do not have.
 
 ## 0. Environment
 
+**Linux only, the whole flow.** Vivado alone runs on Windows, but v++
+linking, XRT, pyxrt, and the Alveo platform packages (.deb/.rpm) are
+Linux-only - keep packaging, linking, and the card on one Ubuntu box
+rather than splitting the flow across OSes. WSL2 can *build* (it is a
+Linux userland) but cannot reach the card; treat it as a compiler at
+most.
+
+Before installing anything, three pairings have to agree - check, then
+install, in this order:
+
+1. **Ubuntu release <-> Vitis release.** Vitis versions support
+   specific Ubuntu point releases (2022.2 tops out at 22.04.1-era;
+   24.04 needs a newer Vitis). `lsb_release -a` first, then pick the
+   Vitis whose supported-OS table names it (UG1301 / release notes).
+2. **Vitis release <-> platform package.** The platform here
+   (`*_202210_1`) is the 2022.2-generation U50 platform; later Vitis
+   releases still link against it while U50 remains in their support
+   matrix.
+3. **XRT <-> platform.** Install the XRT .deb the AMD U50 download
+   page pairs with the deployment platform (the `-dev` platform
+   package declares its minimum XRT).
+
+Also worth checking before first contact: ~250 GB free disk for Vitis
+plus workspace; BIOS "Above 4G Decoding" enabled or the card will not
+enumerate; and real chassis airflow - U50-class cards are passive and
+will thermally throttle or shut down in a desk-side case without a
+duct/fan.
+
 ```bash
-source /opt/xilinx/xrt/setup.sh
+source /opt/xilinx/xrt/setup.sh          # also puts pyxrt on PYTHONPATH
 source /tools/Xilinx/Vitis/2022.2/settings64.sh   # your version here
+make check-env                            # tools, platforms, cards, in one look
 xbutil examine
 ```
 
@@ -45,9 +74,13 @@ sim-docker` first.
 
 ```bash
 make xclbin TARGET=hw_emu
-XCL_EMULATION_MODE=hw_emu python3 host/examples/vector_fma.py \
-    build/cft_hw_emu.xclbin --format fp32 --op fma --n 64
+make emconfig     # emits build/emconfig.json - hw_emu refuses to run without it
+cd build && XCL_EMULATION_MODE=hw_emu python3 ../host/examples/vector_fma.py \
+    cft_hw_emu.xclbin --format fp32 --op fma --n 64
 ```
+
+(XRT looks for emconfig.json in the working directory or EMCONFIG_PATH;
+running from build/ is the simplest arrangement.)
 
 Runs the RTL against the platform's SystemC HBM model with the real
 XRT stack - the first time the kernel.xml argument map, the CSR
@@ -98,8 +131,12 @@ contract is scored against. Record the run.
 
 ## Known open questions to settle on the box
 
-- Exact U50C platform naming and whether the deployment shell
-  generation matches the development platform installed.
+- U50C shell confirmation. No `xilinx_u50c_*` platform exists in AMD's
+  published packages (checked 2026-08-28); "U50C"-branded cards run
+  standard U50 shells, and the part on this card
+  (`xcu50-fsvh2104-2-e`) is standard U50 silicon. `xbmgmt examine`
+  is ground truth - confirm the running shell matches the installed
+  deployment package generation before the first link.
 - Whether `interrupt="false"` polling latency is acceptable for the
   intended run lengths, or the v1 CSR should export the interrupt.
 - Behavioural-core synthesis QoR: LUT cost of the fp256 unit as

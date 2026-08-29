@@ -15,7 +15,7 @@ PART     ?= xcu50-fsvh2104-2-e
 TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
-.PHONY: golden vectors sim docker-image sim-docker xo xclbin clean help
+.PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin clean help
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
@@ -23,8 +23,25 @@ help:
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
 	@echo "sim-docker   run the cocotb RTL suite inside the container"
+	@echo "check-env    report Vitis/Vivado/XRT tool and card visibility"
+	@echo "emconfig     emit build/emconfig.json for hw_emu runs"
 	@echo "xo           package rtl/ into build/cft_krnl.xo (needs Vivado)"
 	@echo "xclbin       link for $(PLATFORM), TARGET=$(TARGET) (needs Vitis)"
+
+check-env:
+	@echo "--- tools ---"
+	@vivado -version 2>/dev/null | head -1 || echo "vivado: NOT FOUND (source Vitis settings64.sh)"
+	@v++ --version 2>/dev/null | grep -m1 -i v++ || echo "v++: NOT FOUND (source Vitis settings64.sh)"
+	@xbutil --version 2>/dev/null | head -2 || echo "xbutil: NOT FOUND (source /opt/xilinx/xrt/setup.sh)"
+	@echo "--- platforms visible to v++ ---"
+	@platforminfo -l 2>/dev/null | grep -i baseName || echo "platforminfo: none found (install the -dev platform package)"
+	@echo "--- cards ---"
+	@xbutil examine 2>/dev/null | sed -n '1,25p' || echo "no card visible (XRT not sourced, or no card in this box)"
+
+emconfig: $(BUILD)/emconfig.json
+$(BUILD)/emconfig.json:
+	mkdir -p $(BUILD)
+	emconfigutil --platform $(PLATFORM) --od $(BUILD)
 
 golden:
 	$(PYTHON) -m pytest python/tests -q
