@@ -116,6 +116,33 @@ consolation: a multi-cycle 237-bit significand multiply built for
 open flows produces identical bits by contract - determinism makes
 "slower but exact" an honorable configuration.
 
+### Verified execution modes (multi-module redundancy)
+
+Bit-determinism makes cross-device redundancy trivial where it is
+normally a numerical-policy nightmare: compare is memcmp, any
+mismatch is a hardware fault by definition, and bit-reproducible
+retry auto-classifies faults (vanishes = transient/SEU; repeats =
+persistent -> attribute against a third module and quarantine).
+Planned modes, cheapest first:
+
+1. **Host-library lockstep** - `run_redundant(devices, policy)` with
+   pair-retry (1/2 throughput) and quorum (1/4) policies; works
+   across ANY engines: two CUs on one card, card vs card, silicon vs
+   golden model on sampled elements. No RTL.
+2. **Build-diversity pairing** - one Vivado-built + one
+   openXC7-built module in lockstep cross-checks the toolchains'
+   place-and-route continuously (dissimilar redundancy, flight-
+   control style), courtesy of the two-toolchain infrastructure.
+3. **Carrier-ring voting** (quad carrier) - modules exchange result
+   hashes over the spare-GTP neighbor ring and vote before readback;
+   verified mode then costs one PCIe transfer, not four.
+
+Boundary, stated plainly: redundancy guards the SILICON (SEUs,
+non-ECC DRAM flips, marginal timing, toolchain miscompiles under
+diversity) and can never catch a DESIGN bug - all modules agree on a
+wrong answer with perfect confidence. Logic correctness remains the
+golden model and conformance vectors' jurisdiction.
+
 Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
 fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
 is why the full tile needs the bigger parts.
