@@ -68,6 +68,52 @@ way atlas-darkroom records a census.
   `measure.mjs` plays today (atlas-engine docs/DETERMINISM.md, Phase
   1) with a reference whose own arithmetic is contract-bound.
 
+## Memory strategy and the family ladder (analysis, 2026-08-29)
+
+**DDR4 costs this workload far less than HBM branding implies.** From
+the tile's own numbers: elementwise streaming is 0.125 flops/byte, so
+one tile at the v1 target (300 MHz) saturates ~38 GB/s - two DDR4
+channels. HBM's 316 GB/s only pays when many tiles stream at once.
+The workloads this project exists for (iterated orbits, oracles) are
+compute-dense and barely touch memory. The one HBM-native pattern -
+scattered deposition - gets architected away on ANY memory by binning
+deposits into on-chip URAM tiles (27 MB on VU35P; a 2048-square count
+tile is 16 MB) and committing them as fixed-order linear bursts,
+which determinism wants regardless. Verdict: a custom carrier or a
+current-line part with hardened DDR4/LPDDR4 loses multi-tile
+streaming headroom and nothing else.
+
+**Family ladder:**
+
+- **Alveo U55C** - the scale-up sibling: same 2022-era flow, VU47P
+  (1.3M LUTs), 16 GB HBM2 @ 460 GB/s, same
+  discontinued-hardware-gets-cheap dynamics as the U50C.
+- **Versal Prime + DDR4** - the custom-carrier line: hardened memory
+  controllers, current tools, covered by the analysis above.
+- **Open-toolchain targets** - see below.
+
+## The open core
+
+The core RTL is deliberately vendor-clean and, as of 2026-08-29,
+**the complete kernel elaborates in Yosys** (`make yosys-lint`, CI
+job `portability`) - so the open-core port is a thin platform wrapper
+(LiteX is the intended harness) around the same rtl/, gated by the
+same conformance vectors, never a fork. The determinism contract
+makes low clocks irrelevant to correctness, so cheap open boards
+produce bit-identical results to the U50C - "verify our silicon
+claims on hardware you can audit down to place-and-route" is a
+conformance story no closed flow can tell.
+
+| target | open flow | fits | role |
+|---|---|---|---|
+| ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | 8x fp32 bank + engine ("nano tile") | atlas parity column on fully-open silicon |
+| Artix-7 200T | openXC7 (prjxray), DSP inference still rough | full tile (native 6-LUT fabric) | open-vs-vendor bit-identity demo: one board, two toolchains, same bits |
+| Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile (138k LUT4) | cheapest full tile - verify Apicula status first |
+
+Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
+fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
+is why the full tile needs the bigger parts.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on

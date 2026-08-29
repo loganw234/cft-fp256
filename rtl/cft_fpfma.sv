@@ -155,9 +155,23 @@ module cft_fpfma #(
     logic [W-1:0] res;
     logic [4:0] fl;
 
-    // defaults
+    // defaults - every block-local gets one so no tool can infer a
+    // latch from a branch that leaves a temporary unassigned (Yosys
+    // enforces combinational completeness strictly; Vivado and Icarus
+    // are permissive - the open flow keeps us honest)
     res = '0;
     fl = '0;
+    mp_w = '0;  mc_w = '0;  gbig = '0;  gsml_v = '0;
+    bigf = '0;  smlf = '0;  sumh = '0;  magg = '0;
+    marker = 1'b0;  sbig = 1'b0;  ssml = 1'b0;  rsign = 1'b0;
+    sml_mask_lo = '0;  sml2_mask_lo = '0;
+    kept_r = '0;  kept_ur = '0;  biased_f = '0;
+    kept_w = '0;  kept_uw = '0;  low_mask = '0;  ones = '0;
+    dd = 0;  t = 0;  g = 0;  msb = 0;  e_norm = 0;  e_use = 0;
+    q = 0;  j = 0;  ju = 0;  e_res = 0;  bl = 0;  e_after_u = 0;
+    guard = 1'b0;  sticky = 1'b0;  up = 1'b0;  inexact = 1'b0;
+    kept_zero = 1'b0;  guard_u = 1'b0;  sticky_u = 1'b0;
+    up_u = 1'b0;  carry_u = 1'b0;  tiny = 1'b0;
     sp = sa ^ sb;
     mp = ma * mb;                 // context-widened: full 2P-bit product
     ep = ea + eb;

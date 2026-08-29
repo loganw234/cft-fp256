@@ -52,6 +52,14 @@ vectors:
 sim:
 	$(MAKE) -C tb sim SIM=$(SIM)
 
+# Open-toolchain portability gate: the whole kernel must elaborate in
+# Yosys with no latches and no errors. This is what keeps the open-core
+# port (docs/ROADMAP.md) a wrapper instead of a fork.
+yosys-lint:
+	yosys -q -p "read_verilog -sv rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv \
+	  rtl/cft_opmux.sv rtl/cft_csr.sv rtl/cft_engine.sv rtl/cft_krnl.sv; \
+	  hierarchy -top cft_krnl; proc; opt -fast; stat -top cft_krnl"
+
 docker-image:
 	docker build -t $(DOCKER_IMAGE) -f docker/Dockerfile.sim .
 
