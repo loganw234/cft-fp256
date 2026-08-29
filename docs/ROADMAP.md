@@ -106,9 +106,15 @@ conformance story no closed flow can tell.
 
 | target | open flow | fits | role |
 |---|---|---|---|
-| ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | 8x fp32 bank + engine ("nano tile") | atlas parity column on fully-open silicon |
-| Artix-7 200T | openXC7 (prjxray), DSP inference still rough | full tile (native 6-LUT fabric) | open-vs-vendor bit-identity demo: one board, two toolchains, same bits |
-| Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile (138k LUT4) | cheapest full tile - verify Apicula status first |
+| **Alchitry Pt V2 (XC7A100T-2) - CHOSEN, 2026-08-29** | openXC7 (well-documented part; DSP inference immature) | full tile via free-tier Vivado day one (~79% LUTs, 165/240 DSPs); nano-tile via openXC7 now; open full tile when DSP support lands or via a serialized-multiplier variant | the platform: SparkFun-backed longevity, published schematics, 256MB DDR3L, FTDI JTAG, GTPs (future LitePCIe host link) |
+| ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | 8x fp32 bank + engine only | fallback nano-tile if boards resurface (scarce as of 2026-08) |
+| Artix-7 200T | openXC7 | full tile even with LUT-fallback multipliers | the headroom alternative if open-full-tile-today ever becomes a hard requirement |
+| Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile (138k LUT4) | cheapest option - verify Apicula status first |
+
+The Pt's serialized-multiplier note is a real design option, not a
+consolation: a multi-cycle 237-bit significand multiply built for
+open flows produces identical bits by contract - determinism makes
+"slower but exact" an honorable configuration.
 
 Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
 fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
