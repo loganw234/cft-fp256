@@ -175,6 +175,20 @@ scaling. The project's golden-model + vectors + cocotb stack is
 already tapeout-grade DV scaffolding - normally the expensive missing
 piece.
 
+**Commercial-node endgame (if demand proves out):** a 130nm-proven
+design retargets to modern nodes as a routine design-services
+engagement (~\$300k-1M physical implementation; RTL + DV carry over
+whole) - 28nm is the sweet spot (~15x density, ~1 GHz, licensed
+SerDes/DDR PHYs so chiplets grow their own host links; ~\$1-2M masks;
+sub-\$2/tile at volume; roughly 100-1000x per die over 130nm).
+Openness survives the closed fab because determinism converts trust
+from structural to behavioral: RTL/netlists/DV/vectors stay
+published, and every commercial part is continuously ATTESTED against
+the open ladder (golden model, FPGA tiles, 130nm reference silicon) -
+the OpenTitan posture with a stronger proof story. The founding
+two-tier doctrine, one level down: the open chip is the reference
+standard; the fast chip must prove itself identical.
+
 Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
 fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
 is why the full tile needs the bigger parts.
