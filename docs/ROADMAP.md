@@ -24,6 +24,31 @@ the golden model that everything else is scored against.
       link.cfg) and the pyxrt host example.
 - [x] Conformance vector emitter (vectors/gen_vectors.py).
 
+### Independent review (2026-08-29)
+
+Two adversarial reviews, one on the numeric datapath and one on the
+control/protocol logic, of code that already passed 57,000 vectors and
+26 kernel runs. What they found is a useful map of where testbenches
+are structurally blind:
+
+- The **datapath was clean** - confirmed by exhaustive transliteration
+  (23.6M operand triples x every rounding attribute on structurally
+  faithful small formats, plus tree exactness for every P in 2..384).
+  What it did surface: two elaboration guards that were
+  simulation-only and so guarded nothing in synthesis, three
+  load-bearing comments whose stated *reasons* were false, and a
+  period-5 blind spot in the bench's rounding-attribute ordering
+  against a 15-stage pipe.
+- The **control logic held one real bug**: the CSR sampled the AXI
+  write data one cycle after the handshake. Invisible to any master
+  that waits for the write response before moving on, which is both
+  of ours.
+
+The lesson worth keeping: a cooperative testbench and a cooperative
+memory model cannot find bugs in *when* a slave samples, in what a
+design does with an error response, or in a parameter combination
+nobody instantiates. Those need either a hostile driver or a reader.
+
 ## v0.x - hardware bring-up (needs the Vitis box + card)
 
 Gates in docs/BRINGUP.md, in order: package_xo validates; hw_emu run

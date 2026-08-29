@@ -247,18 +247,32 @@ Three bitstreams are banked on amd-arc-box, oldest first:
 |---|---|---|
 | `cft_hw_v0_10mhz.xclbin` | v0 behavioural core, naive engine | 10 MHz |
 | `cft_hw_v1_2bank_100mhz.xclbin` | v1 pipelined core, fp32+fp256 banks | 100 MHz |
-| `cft_hw.xclbin` (building) | the full tile: four rungs, streaming engine, rounding attributes | 90 MHz |
+| `cft_hw_v1_4rung_90mhz_prereview.xclbin` | four rungs, streaming engine, rounding attributes | 90 MHz |
+| `cft_hw.xclbin` | the same, plus the control-review fixes (STATUS, latched run config) - the card-day image | 90 MHz |
 
-**Calibration worth keeping: out-of-context synthesis is optimistic,
-and by a lot.** The v1 core measures ~148 MHz OOC for the fp256 unit
-and the whole kernel reports +3.3 ns of slack at 100 MHz OOC - but
-the same design routed inside the real platform closed 100 MHz with
-**WNS +0.051 ns** (TNS 0, zero failing endpoints of 480,929; hold
-+0.009 ns). Fifty-one picoseconds. The shell, the placement pressure
-and the real routing eat essentially all of the apparent margin, so
-treat OOC numbers as an upper bound for ranking design choices, never
-as a promised clock. That is why the four-rung build - three times the
-logic - targets 90 MHz rather than 100.
+**Calibration, and a correction to how it was first read.** Two
+routed builds:
+
+| design | target | routed WNS | endpoints |
+|---|---|---|---|
+| v1 core, two banks | 100 MHz | +0.051 ns | 480,929 |
+| four rungs + streaming engine | 90 MHz | +0.055 ns | 523,123 |
+
+Both land ~50 ps above zero, at different clocks and with a 3x
+difference in logic. The first was recorded here as "the shell and
+routing eat essentially all the margin" - that reading does not
+survive the second data point. Vivado's implementation is
+*constraint-driven*: it optimises until the constraint is met and then
+stops. A WNS of +0.05 ns is evidence that the design **met the clock
+it was asked for**, not that it barely scraped past a physical
+ceiling. The true maximum clock of either design is unknown and would
+need a frequency sweep to find.
+
+What still holds: out-of-context numbers (~148 MHz for the fp256 unit,
++3.3 ns at 100 MHz for the whole kernel) are not promises. They rank
+design choices; they do not tell you what will close inside the shell.
+Ask for a clock you actually want, and read the routed report rather
+than the OOC one.
 
 Determinism is clock-independent; a 90 MHz bitstream proves every
 numerical claim a 300 MHz one would. Prefer a working image of the
@@ -278,9 +292,18 @@ python3 host/examples/vector_fma.py build/cft_hw.xclbin \
     --format fp256 --op fma --n 512
 ```
 
-**Done when:** PASS on both precisions and all four ops, across
-several N and seeds, and the FLAGS register matches the golden OR
-each time.
+or, for one op per precision plus the whole rounding contract:
+
+```bash
+CFT_SMOKE_MODE=hw CFT_SMOKE_DEEP=1 bash hw/emu_smoke.sh build/cft_hw.xclbin
+```
+
+**Done when:** PASS on all four precisions and all four ops, across
+several N and seeds, with the FLAGS register matching the golden OR
+each time and STATUS reading zero every time. A non-zero STATUS means
+the memory system did not deliver what the kernel computed on, and the
+comparison against the golden model is meaningless until it is clean -
+check the pointers are in range and 32-byte aligned first.
 
 ## 5. Gate: the vectors
 
