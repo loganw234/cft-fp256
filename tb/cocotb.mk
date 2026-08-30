@@ -18,6 +18,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_simpleops.sv \
     $(RTLDIR)/cft_csr.sv \
     $(RTLDIR)/cft_fifo.sv \
+    $(RTLDIR)/cft_mulfrac.sv \
     $(RTLDIR)/cft_engine.sv \
     $(RTLDIR)/cft_engine_stream.sv \
     $(RTLDIR)/cft_krnl.sv \

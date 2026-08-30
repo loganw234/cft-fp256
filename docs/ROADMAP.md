@@ -95,6 +95,54 @@ way atlas-darkroom records a census.
   fracture needs, so this work is its foundation, and the four-bank
   version just landed is its behavioural spec: the array replaces
   the banks only when it produces identical bits.
+
+  **Why this and not trimmed tiles (decided 2026-08-30).** Area
+  measurement put three options on the table, and heterogeneous tiles
+  looked cheapest: `EN_FP64`/`EN_FP128`/`EN_FP256` already exist, an
+  fp32+fp64 tile is 45% smaller, and nine of them fit where four full
+  tiles do. It is still the wrong trade for this product.
+
+  **Every tile stays fp256-capable, and precision stays a runtime
+  choice.** Scaling has to work on the largest supported rung, not on
+  which bitstream happens to be loaded. A device whose CUs disagree
+  about what they implement turns precision into a deployment
+  question - the host must know which tiles can take an fp256 slice,
+  the conformance argument has to cover a mixed device, and choosing
+  fp256 becomes "reload the card" rather than "set MODE". One
+  bitstream, identical tiles, `MODE[11:8]` selects the rung: that is
+  what makes the software tier and the hardware tier the same
+  contract rather than two.
+
+  The fused array is the only option that buys area without buying
+  that problem: measured 119.5k LUT/tile today, an estimated 91.7k
+  fused, which is the difference between four tiles and six under the
+  85% routing limit - with every tile still doing every format.
+
+  Note DSPs are NOT the constraint on this part and will not become
+  one: the quad sits at 17.7% of them against 69.2% of LUTs. Judge
+  area work on LUTs. The fused array's 47% DSP saving is a bonus that
+  buys nothing here, though it is decisive on the open-toolchain
+  targets where an Artix-7 has 240 DSPs against this part's 5,952.
+
+- **Dedicated-rung builds, as a performance option rather than an area
+  one (noted 2026-08-30).** The decision above rejects heterogeneous
+  tiles as the way to fit more compute. It does not reject a
+  single-rung build as a way to go *faster* at one precision.
+
+  A tile that implements only fp32 spends none of its silicon on the
+  wide rungs, so the same die holds far more of them - and every lane
+  is fp32, so peak fp32 throughput is several times a mixed device's.
+  The same argument runs for a fp256-only tile, where the narrow banks
+  are the dead weight. That is a genuinely different product from the
+  general-purpose card: an image whose whole area is committed to one
+  precision, for a workload known in advance to want exactly that.
+
+  The parameters to build it already exist and are proven by the
+  quarter-tile bench. What is missing is the host story - capability-
+  aware partitioning, and a conformance argument for a device that
+  answers CAPS with less than 0xF. Worth building once the general
+  image is done and there is a workload measured well enough to say
+  which rung to commit to.
 - [x] **Streaming engine (2026-08-29):** cft_engine_stream - burst
       reads (16-beat, 4KB-safe) into per-stream FIFOs, one beat
       issued per cycle, index-order burst writes, read/compute/write

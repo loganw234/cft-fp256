@@ -11,9 +11,18 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 krnl quarter clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac krnl quarter clean
 
-sim: fp32 fp64 fp128 fp256 krnl quarter
+sim: fp32 fp64 fp128 fp256 mulfrac krnl quarter
+
+# The fractured significand array, scored against exact integer
+# arithmetic rather than against another implementation. No rounding
+# and no format semantics are involved in a significand multiply, so
+# the reference is unarguable.
+mulfrac:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_mulfrac \
+		MODULE=test_mulfrac SIM_BUILD=sim_build/mulfrac \
+		COCOTB_RESULTS_FILE=sim_build/mulfrac/results.xml
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
