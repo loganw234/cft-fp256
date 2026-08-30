@@ -1,10 +1,15 @@
 /* Copyright 2026 Logan W.
  * SPDX-License-Identifier: Apache-2.0
  *
- * cft-selftest - report what this build of libcft is, and replay the
+ * cft-selftest - report what a libcft device is, and replay the
  * published conformance vectors through it.
  *
- *     cft-selftest [vector-directory]
+ *     cft-selftest [vector-directory] [artifact.xclbin]
+ *
+ * With no artifact it exercises the software backend. With one it
+ * opens that device and replays every case through the hardware,
+ * which is the run docs/CARDDAY.md keeps: 228,000 published cases,
+ * the claim this project exists to make, checked on silicon.
  *
  * Exit status is 0 only if every case in every set matched. This is
  * the thing to run after building the library, after porting it, and
@@ -22,6 +27,7 @@
 int main(int argc, char **argv)
 {
     const char *dir = (argc > 1) ? argv[1] : "vectors/out";
+    const char *artifact = (argc > 2) ? argv[2] : NULL;
     cft_device *dev = NULL;
     cft_caps caps;
     char report[8192];
@@ -34,9 +40,12 @@ int main(int argc, char **argv)
     printf("libcft ABI %u.%u\n", (unsigned)(abi >> 16),
            (unsigned)(abi & 0xffffu));
 
-    st = cft_open(NULL, 0, &dev);
+    st = cft_open(artifact, 0, &dev);
     if (st != CFT_OK) {
-        fprintf(stderr, "cft_open: %s\n", cft_strerror(st));
+        fprintf(stderr, "cft_open(%s): %s\n",
+                artifact ? artifact : "software", cft_strerror(st));
+        if (*cft_last_error())
+            fprintf(stderr, "  %s\n", cft_last_error());
         return 2;
     }
 

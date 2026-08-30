@@ -66,10 +66,16 @@ golden model.
 
 **4. The conformance vectors, on the card.**
 
-    cft-selftest vectors/out          # after pointing it at the device
+    ./host/cft-selftest vectors/out cardday/single/cft_hw.xclbin
 
-228,000 published cases replayed through the hardware. This is the
-claim the project is for, so it is the run whose output gets kept.
+228,000 published cases replayed through the hardware, each one twice:
+element at a time for exact flags, then as arrays. This is the claim
+the project is for, so it is the run whose output gets kept.
+
+Every case is a separate kernel launch in the element pass, so budget
+for launch overhead rather than arithmetic - on the order of tens of
+seconds, not minutes. If it is much slower than that, something is
+wrong with the driver path rather than with the tile.
 
 **5. Four tiles are correct, and identical to one.**
 
