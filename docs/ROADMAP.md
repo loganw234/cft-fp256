@@ -206,7 +206,40 @@ way atlas-darkroom records a census.
 
 ## v2 - the coordinated part
 
-- **Orbit/walk engine**: a micro-sequencer running iterated maps
+- [x] **Orbit sequencer: design, model and software backend
+      (2026-08-29):** docs/SEQUENCER.md is the ISA and the argument;
+      python/cft_golden/seq.py is the definition of correct;
+      host/src/program.c is libcft's executor, and the two agree over a
+      shared fuzz corpus on deposits, deposit counts, exception flags,
+      status, and which programs to refuse. A program can be written
+      and run today, on any machine, with no card - what the hardware
+      adds is the on-chip iteration that makes it worth building.
+
+      Three determinism properties, each a test rather than a claim:
+      the ALU is the existing verified pipeline; deposits are addressed
+      by element index so splitting lanes across tiles cannot change
+      the answer; and the all-lanes-done early exit changes the
+      instruction count and nothing else.
+
+      A review found the third one false. HALT is the only instruction
+      whose effect is not per-lane, so the active mask cannot gate it:
+      with every lane inactive, skipping a loop containing one
+      continues the program while entering it stops the program - and
+      it drags the deposit-addressing property down with it, because
+      lane i's deposit count then depends on whether some other lane
+      was still active. Four partitionings of one program gave four
+      different answers. It is refused inside a loop now, and a fuzz
+      with the rule removed confirms the rule is what holds the
+      property up.
+
+      The same review found the ISA had been specified as though
+      execution were single-cycle, against a 15-stage pipeline with no
+      stall path. The answer is that lanes are independent, so a block
+      of at least LATENCY lanes fills the pipe on its own - which makes
+      the lane block the design's central sizing constraint and puts
+      the register file at L*16*element_bytes beside the deposit
+      buffer.
+- **Orbit/walk engine** (the RTL): a micro-sequencer running iterated maps
   on-chip (the atlas positive's inner loop: fma chains, exact
   selections, integer/bit ops, the hash), with point deposition into
   HBM and deterministic-by-index accumulation. This is where the
