@@ -13,16 +13,39 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#ifdef CFT_ENABLE_XRT
+#include "backend.h"
+#endif
 
-#define CFT_BACKEND_SW 0
+#define CFT_BACKEND_SW  0
+#define CFT_BACKEND_XRT 1
 
 struct cft_device {
     int         backend;
     int         index;
     uint32_t    format_mask;
+    uint32_t    op_groups;      /* CAPS[15:8]; software carries them all */
     uint32_t    tiles;
+    uint32_t    device_version;
+    int         flags_readable;
     const char *backend_name;
+    void       *hw;             /* backend handle, NULL for software */
 };
+
+/* Which CAPS opcode-group bit covers an opcode. The groups exist
+ * because opcodes arrive in groups and a bit per opcode is a register
+ * nobody keeps current; see rtl/cft_csr.sv, which is the normative
+ * map. Returns -1 for an unassigned opcode, which belongs to no group
+ * and is never "supported". */
+static int op_group_bit(int op)
+{
+    if (op >= 0  && op <= 3)  return 0;   /* arithmetic */
+    if (op >= 4  && op <= 6)  return 1;   /* sign */
+    if (op >= 7  && op <= 10) return 2;   /* min/max */
+    if (op >= 11 && op <= 14) return 3;   /* predicate */
+    if (op >= 16 && op <= 23) return 4;   /* integer */
+    return -1;
+}
 
 struct cft_buffer {
     cft_device *dev;
@@ -102,31 +125,78 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     *out = NULL;
     if (index < 0)
         return CFT_ERR_INVALID_ARGUMENT;
+
     if (artifact) {
+#ifdef CFT_ENABLE_XRT
+        uint32_t fmask = 0, groups = 0, tiles = 0, ver = 0;
+        int readable = 1;
+        void *hw = NULL;
+        int st = cftx_open(artifact, index, &hw, &fmask, &groups, &tiles,
+                           &ver, &readable);
+        if (st != CFT_OK)
+            return (cft_status)st;
+        dev = (cft_device *)calloc(1, sizeof *dev);
+        if (!dev) {
+            cftx_close(hw);
+            return CFT_ERR_OUT_OF_MEMORY;
+        }
+        dev->backend        = CFT_BACKEND_XRT;
+        dev->index          = index;
+        dev->format_mask    = fmask;
+        dev->op_groups      = groups;
+        dev->tiles          = tiles;
+        dev->device_version = ver;
+        dev->flags_readable = readable;
+        dev->backend_name   = "xrt";
+        dev->hw             = hw;
+        *out = dev;
+        return CFT_OK;
+#else
         /* No device backend is compiled into this build, so there is
          * genuinely no such device here - not a bad artifact, and not
          * an unsupported operation. */
         return CFT_ERR_NO_DEVICE;
+#endif
     }
+
     if (index != 0)
         return CFT_ERR_NO_DEVICE;   /* one software backend, and it is 0 */
 
     dev = (cft_device *)calloc(1, sizeof *dev);
     if (!dev)
         return CFT_ERR_OUT_OF_MEMORY;
-    dev->backend      = CFT_BACKEND_SW;
-    dev->index        = index;
-    dev->format_mask  = (1u << CFT_FP32) | (1u << CFT_FP64) |
-                        (1u << CFT_FP128) | (1u << CFT_FP256);
-    dev->tiles        = 1;
-    dev->backend_name = "software";
+    dev->backend        = CFT_BACKEND_SW;
+    dev->index          = index;
+    dev->format_mask    = (1u << CFT_FP32) | (1u << CFT_FP64) |
+                          (1u << CFT_FP128) | (1u << CFT_FP256);
+    dev->op_groups      = 0x1Fu;    /* every assigned group */
+    dev->tiles          = 1;
+    dev->device_version = 0;
+    dev->flags_readable = 1;
+    dev->backend_name   = "software";
+    dev->hw             = NULL;
     *out = dev;
     return CFT_OK;
 }
 
 CFT_API void cft_close(cft_device *dev)
 {
+    if (!dev)
+        return;
+#ifdef CFT_ENABLE_XRT
+    if (dev->hw)
+        cftx_close(dev->hw);
+#endif
     free(dev);
+}
+
+CFT_API const char *cft_last_error(void)
+{
+#ifdef CFT_ENABLE_XRT
+    return cftx_last_error();
+#else
+    return "";
+#endif
 }
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
@@ -144,11 +214,11 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
     c.format_mask    = dev->format_mask;
     c.tiles          = dev->tiles;
     c.abi_version    = cft_abi_version();
-    /* The hardware contract version, which a software backend does not
-     * have. It models one, but reporting a version it is not would let
-     * a host believe it had talked to a device. */
-    c.device_version = 0;
-    c.flags_readable = 1;
+    /* The hardware contract version. A software backend does not have
+     * one: it models a contract, but reporting a version it is not
+     * would let a host believe it had talked to a device. */
+    c.device_version = dev->device_version;
+    c.flags_readable = dev->flags_readable;
     strncpy(c.backend, dev->backend_name, sizeof c.backend - 1);
 
     if (want > sizeof c)
@@ -163,13 +233,23 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
 
 CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
 {
+    int group;
     if (!dev)
         return 0;
     if ((int)fmt < 0 || (int)fmt > 3)
         return 0;
     if (!(dev->format_mask & (1u << (int)fmt)))
         return 0;
-    return cft_sf_op_assigned((int)op);
+    if (!cft_sf_op_assigned((int)op))
+        return 0;
+    /* A device may carry fewer opcode groups than the contract
+     * assigns - that is what CAPS[15:8] is for, and asking is the
+     * whole point of a portable binary running against several
+     * generations of hardware. */
+    group = op_group_bit((int)op);
+    if (group < 0)
+        return 0;
+    return (dev->op_groups & (1u << group)) ? 1 : 0;
 }
 
 /* ---------------------------------------------------------------
@@ -228,6 +308,18 @@ CFT_API cft_status cft_run(cft_device *dev,
     esz = (size_t)f->width / 8;
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+
+#ifdef CFT_ENABLE_XRT
+    if (dev->backend == CFT_BACKEND_XRT) {
+        uint32_t fl = 0;
+        cft_status st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
+                                             (int)rnd, a, b, c, d, n,
+                                             &fl, bus_out);
+        if (st == CFT_OK && flags_out)
+            *flags_out = fl;
+        return st;
+    }
+#endif
 
     pa = (const uint8_t *)a;
     pb = (const uint8_t *)b;

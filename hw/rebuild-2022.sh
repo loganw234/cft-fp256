@@ -33,9 +33,21 @@ LINK_CFG=${LINK_CFG:-hw/link.cfg}
 # whose constraint names only cft_krnl_1 leaves the other three at the
 # platform default (300 MHz on this shell, roughly double the design's
 # ceiling), and you learn that after a full ~1h45m implementation run.
-# The nk= line already lists every CU, dot-separated, which is exactly
-# the form --clock.freqHz wants - so there is one source of truth and
-# it is the file that defines the CUs.
+# The nk= line already lists every CU, so there is one source of truth
+# and it is the file that defines them.
+#
+# The two syntaxes are NOT the same, which is easy to miss because both
+# use dots. nk= separates CU names with dots; --clock.freqHz separates
+# entries with COMMAS and uses the dot inside an entry to separate the
+# instance from its clock pin. Handing it the nk= list verbatim gets
+#
+#   ERROR: [CFGEN 83-2243] Malformed --clock.freqHz switch argument
+#
+# which is at least loud and immediate. Probed against cfgen directly:
+# "f:cu1.ap_clk,cu2.ap_clk", "f:cu1,cu2", "f:cu1" and "f:cu1.ap_clk"
+# are all accepted; only the dot-joined list is not. The explicit
+# instance.pin form is used below because it is the documented shape
+# and it stays unambiguous if a kernel ever carries a second clock.
 if [ -z "${CLOCK_CUS:-}" ]; then
   CLOCK_CUS=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$LINK_CFG" \
               | tr -d ' ' | head -1)
@@ -59,7 +71,13 @@ case "$CLOCK_CUS" in
     printf '       got: %s\n' "$(printf '%q' "$CLOCK_CUS")" >&2
     exit 1 ;;
 esac
+
+# nk= form -> --clock.freqHz form: split on dots, give each CU its
+# clock pin, rejoin with commas.
+CLOCK_ARG=$(printf '%s\n' "$CLOCK_CUS" | tr '.' '\n' | sed 's/$/.ap_clk/' \
+            | paste -sd,)
 echo "Clock constraint targets: $CLOCK_CUS"
+echo "Clock constraint argument: ${KERNEL_FREQ}:${CLOCK_ARG}"
 
 # locate Vitis 2022.2
 for root in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
@@ -101,7 +119,7 @@ vivado -mode batch -nolog -nojournal -source hw/package_kernel.tcl \
 for t in $TARGETS; do
   echo "== v++ link -t $t"
   extra=""
-  [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:${CLOCK_CUS}"
+  [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:${CLOCK_ARG}"
   v++ -l -t "$t" --platform "$PLATFORM" --config "$LINK_CFG" $extra \
       --save-temps --temp_dir "$BUILD/_x_$t" \
       -o "$BUILD/cft_$t.xclbin" "$BUILD/cft_krnl.xo"
@@ -141,6 +159,7 @@ for t in $TARGETS; do
     echo "link_cfg:      $LINK_CFG"
     echo "kernel_freq:   $KERNEL_FREQ"
     echo "clock_cus:     $CLOCK_CUS"
+    echo "clock_arg:     ${KERNEL_FREQ}:${CLOCK_ARG}"
     echo "vivado:        $(vivado -version 2>/dev/null | head -1)"
     rpt="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt"
     if [ -f "$rpt" ]; then

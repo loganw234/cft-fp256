@@ -126,6 +126,14 @@ typedef enum cft_status {
 /* Static, human-readable; never NULL, never needs freeing. */
 CFT_API const char *cft_strerror(cft_status s);
 
+/* Detail on the most recent failure, or "" if there is none to add.
+ * cft_strerror() says what kind of thing went wrong; this says what
+ * the device runtime said about it, which on a bad night at the bench
+ * is the only explanation anybody is going to get. Static storage,
+ * overwritten by the next failure, and not thread-safe - consistent
+ * with cft_device, which is not either. Never NULL. */
+CFT_API const char *cft_last_error(void);
+
 /* ---------------------------------------------------------------
  * Formats, operations, rounding
  *

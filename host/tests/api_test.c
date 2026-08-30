@@ -334,6 +334,54 @@ int main(void)
                   one, CFT_FLAG_INEXACT);
     }
 
+    /* --- the argument beat padding rests on ----------------------
+     *
+     * The tile computes in whole 256-bit beats, so the device backend
+     * pads a partial tail with zero operands. That is only sound if a
+     * zero operand raises nothing - otherwise a caller's exception
+     * flags would depend on the length of their array, which is
+     * precisely the kind of silent, length-dependent result this
+     * project exists to remove.
+     *
+     * So check it rather than assert it, across every opcode the byte
+     * can hold, every format and every attribute. An unassigned opcode
+     * raises invalid, and that is fine: it raises invalid for the real
+     * elements too, so the OR the backend reports is unchanged. */
+    {
+        int f_i, op_i, r_i, bad = 0;
+        uint8_t zero[32], out[32];
+        memset(zero, 0, sizeof zero);
+        for (f_i = 0; f_i < 4 && bad < 4; f_i++) {
+            size_t esz = cft_format_size((cft_format)f_i);
+            for (op_i = 0; op_i < 256 && bad < 4; op_i++) {
+                uint32_t want = cft_supports(dev, (cft_op)op_i,
+                                             (cft_format)f_i)
+                                ? 0u : CFT_FLAG_INVALID;
+                for (r_i = 0; r_i < 5; r_i++) {
+                    uint32_t fl = 0xdead;
+                    memset(out, 0xa5, sizeof out);
+                    st = cft_run(dev, (cft_op)op_i, (cft_format)f_i,
+                                 (cft_round)r_i, zero, zero, zero, out, 1,
+                                 &fl, NULL);
+                    if (st != CFT_OK || fl != want) {
+                        bad++;
+                        CHECK(0, "zero padding raises flags: %s op %d "
+                                 "rnd %d -> status %s flags 0x%02x, "
+                                 "want 0x%02x",
+                              cft_format_name((cft_format)f_i), op_i, r_i,
+                              cft_strerror(st), (unsigned)fl,
+                              (unsigned)want);
+                        break;
+                    }
+                    (void)esz;
+                }
+            }
+        }
+        if (!bad)
+            printf("  zero operands are flag-free for all 256 opcodes "
+                   "x 4 formats x 5 attributes\n");
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));
