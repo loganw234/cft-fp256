@@ -92,6 +92,7 @@
 #include <xrt/xrt_kernel.h>
 
 #include "backend.h"
+#include "slice.h"
 
 /* mirrors cft_status; see backend.h */
 enum {
@@ -389,12 +390,7 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     if (esz == 0)
         return ST_INVALID_ARGUMENT;
 
-    /* Elements per 256-bit beat: the engine's indivisible unit. */
-    const size_t epb = 32 / esz;
-    const size_t beats_total = (n + epb - 1) / epb;
     const size_t ntiles = D.tiles.size();
-    const size_t beats_per_tile = (beats_total + ntiles - 1) / ntiles;
-
     const uint32_t mode = static_cast<uint32_t>(op & 0xFF) |
                           (static_cast<uint32_t>(fmt & 0xF) << 8) |
                           (static_cast<uint32_t>(rnd & 0x7) << 12);
@@ -404,33 +400,27 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     const auto *pc = static_cast<const uint8_t *>(c);
     auto *pd = static_cast<uint8_t *>(d);
 
-    struct Slice { size_t tile, first_elem, real, padded; };
-    std::vector<Slice> slices;
+    /* The split itself is in slice.h, as a pure function, so that
+     * host/tests can exercise it over every interesting n and tile
+     * count without a card - which is where the arithmetic that
+     * decides whether every element is computed exactly once belongs.
+     */
+    std::vector<cft_slice> slices(ntiles);
+    slices.resize(cft_plan_slices(n, esz, ntiles, slices.data()));
 
     /* Staging touches only host-visible buffers and starts nothing, so
      * a failure here leaves every compute unit idle and the device
      * perfectly reusable. */
     try {
-        for (size_t t = 0; t < ntiles; t++) {
-            const size_t first_beat = t * beats_per_tile;
-            if (first_beat >= beats_total)
-                break;                       /* fewer beats than tiles */
-            const size_t nbeats =
-                std::min(beats_per_tile, beats_total - first_beat);
-            const size_t first_elem = first_beat * epb;
-            const size_t padded = nbeats * epb;
-            const size_t real = std::min(padded, n - first_elem);
-
-            Tile &tile = D.tiles[t];
-            ensure_capacity(D, tile, padded * esz);
-            stage(tile.a, pa ? pa + first_elem * esz : nullptr,
-                  real * esz, padded * esz);
-            stage(tile.b, pb ? pb + first_elem * esz : nullptr,
-                  real * esz, padded * esz);
-            stage(tile.c, pc ? pc + first_elem * esz : nullptr,
-                  real * esz, padded * esz);
-
-            slices.push_back({t, first_elem, real, padded});
+        for (const auto &s : slices) {
+            Tile &tile = D.tiles[s.tile];
+            ensure_capacity(D, tile, s.padded * esz);
+            stage(tile.a, pa ? pa + s.first_elem * esz : nullptr,
+                  s.real * esz, s.padded * esz);
+            stage(tile.b, pb ? pb + s.first_elem * esz : nullptr,
+                  s.real * esz, s.padded * esz);
+            stage(tile.c, pc ? pc + s.first_elem * esz : nullptr,
+                  s.real * esz, s.padded * esz);
         }
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging operands");

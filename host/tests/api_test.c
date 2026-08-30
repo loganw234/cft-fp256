@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "cft.h"
+#include "../src/slice.h"
 
 static int failures;
 
@@ -380,6 +381,123 @@ int main(void)
         if (!bad)
             printf("  zero operands are flag-free for all 256 opcodes "
                    "x 4 formats x 5 attributes\n");
+    }
+
+    /* --- how work is split across compute units -------------------
+     *
+     * This is the arithmetic that decides whether a four-tile run
+     * computes every element exactly once and writes it to the right
+     * offset. Until it was factored out of the XRT backend, reaching
+     * it needed a card - which is a poor place to discover an
+     * off-by-one. It needs nothing here, so it is checked over every
+     * interesting size and tile count.
+     */
+    {
+        static const size_t sizes[] = {
+            1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65,
+            127, 128, 129, 255, 256, 257, 1000, 4096, 4097, 100000
+        };
+        static const size_t esizes[] = {4, 8, 16, 32};
+        cft_slice sl[17];
+        size_t si, ei, tiles;
+        int bad = 0;
+
+        for (ei = 0; ei < 4 && !bad; ei++) {
+            size_t esz = esizes[ei], epb = 32 / esz;
+            for (si = 0; si < sizeof sizes / sizeof sizes[0] && !bad; si++) {
+                size_t n = sizes[si];
+                size_t beats = (n + epb - 1) / epb;
+                size_t reference_padded = 0;
+                for (tiles = 1; tiles <= 16 && !bad; tiles++) {
+                    size_t k = cft_plan_slices(n, esz, tiles, sl);
+                    size_t covered = 0, total_padded = 0, j;
+
+                    if (k == 0 || k > tiles) {
+                        CHECK(0, "esz %lu n %lu tiles %lu: %lu slices",
+                              (unsigned long)esz, (unsigned long)n,
+                              (unsigned long)tiles, (unsigned long)k);
+                        bad = 1;
+                        break;
+                    }
+                    for (j = 0; j < k; j++) {
+                        /* contiguous, in order, starting at zero */
+                        if (sl[j].first_elem != covered) {
+                            CHECK(0, "esz %lu n %lu tiles %lu slice %lu "
+                                     "starts at %lu, expected %lu",
+                                  (unsigned long)esz, (unsigned long)n,
+                                  (unsigned long)tiles, (unsigned long)j,
+                                  (unsigned long)sl[j].first_elem,
+                                  (unsigned long)covered);
+                            bad = 1;
+                            break;
+                        }
+                        /* a whole number of beats, or the engine's
+                         * beat count truncates the tail away */
+                        if (sl[j].padded % epb) {
+                            CHECK(0, "esz %lu n %lu tiles %lu slice %lu "
+                                     "is %lu elements, not whole beats",
+                                  (unsigned long)esz, (unsigned long)n,
+                                  (unsigned long)tiles, (unsigned long)j,
+                                  (unsigned long)sl[j].padded);
+                            bad = 1;
+                            break;
+                        }
+                        if (sl[j].real == 0 || sl[j].real > sl[j].padded) {
+                            CHECK(0, "esz %lu n %lu tiles %lu slice %lu "
+                                     "real %lu padded %lu",
+                                  (unsigned long)esz, (unsigned long)n,
+                                  (unsigned long)tiles, (unsigned long)j,
+                                  (unsigned long)sl[j].real,
+                                  (unsigned long)sl[j].padded);
+                            bad = 1;
+                            break;
+                        }
+                        covered += sl[j].real;
+                        total_padded += sl[j].padded;
+                    }
+                    if (bad)
+                        break;
+                    if (covered != n) {
+                        CHECK(0, "esz %lu n %lu tiles %lu covers %lu",
+                              (unsigned long)esz, (unsigned long)n,
+                              (unsigned long)tiles, (unsigned long)covered);
+                        bad = 1;
+                        break;
+                    }
+                    /* The property the flags depend on: the total
+                     * amount of padding does not vary with the tile
+                     * count, so neither does the sticky word. */
+                    if (tiles == 1)
+                        reference_padded = total_padded;
+                    else if (total_padded != reference_padded) {
+                        CHECK(0, "esz %lu n %lu: %lu tiles pad %lu "
+                                 "elements, 1 tile pads %lu - the flags "
+                                 "would depend on the tile count",
+                              (unsigned long)esz, (unsigned long)n,
+                              (unsigned long)tiles,
+                              (unsigned long)total_padded,
+                              (unsigned long)reference_padded);
+                        bad = 1;
+                        break;
+                    }
+                    if (total_padded != beats * epb) {
+                        CHECK(0, "esz %lu n %lu tiles %lu: padded total "
+                                 "%lu, expected %lu",
+                              (unsigned long)esz, (unsigned long)n,
+                              (unsigned long)tiles,
+                              (unsigned long)total_padded,
+                              (unsigned long)(beats * epb));
+                        bad = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        CHECK(cft_plan_slices(0, 4, 4, sl) == 0, "n = 0 makes no slices");
+        if (!bad)
+            printf("  work splits correctly for 27 sizes x 4 formats x "
+                   "16 tile counts, and the padding total never depends "
+                   "on the tile count\n");
     }
 
     /* --- buffers ------------------------------------------------- */
