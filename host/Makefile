@@ -152,5 +152,6 @@ clean:
 	      libcft.a libcft.dll.a \
 	      cft.dll libcft.so libcft.dylib \
 	      cft-selftest cft-selftest.exe api-test api-test.exe \
+	      device-test device-test.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
 	      .out-c.txt .out-py.txt
