@@ -121,7 +121,8 @@ def corrupt(insns, rng):
     out = list(insns)
     loop_at = [i for i, w in enumerate(out)
                if seq.decode(w)["ctrl"] and seq.decode(w)["op"] == seq.REPEAT]
-    choices = ["repeat0", "stray_field", "alu_imm", "reserved", "unbalanced"]
+    choices = ["repeat0", "stray_field", "alu_imm", "reserved", "unbalanced",
+               "huge_trip", "bad_const"]
     if loop_at:
         choices += ["halt_in_loop", "actall_in_loop"]
     what = rng.choice(choices)
@@ -143,6 +144,14 @@ def corrupt(insns, rng):
         out.insert(0, seq.encode(seq.sf.OP_FMA, 0, imm=1))
     elif what == "reserved":
         out.insert(0, seq.encode(seq.sf.OP_FMA, 0) | (1 << 30))
+    elif what == "huge_trip":
+        # the termination bound: finite is not the same as bounded, and
+        # the two implementations compute the worst case separately
+        out = ([seq.repeat(0xFFFFFFFF)] * 4 +
+               [seq.alu(seq.sf.OP_ADD, 0, 0, 0, 0)] +
+               [seq.endrep()] * 4 + out)
+    elif what == "bad_const":
+        out.insert(0, seq.encode(seq.sf.OP_FMA, 0, rb=15, kb=True))
     else:                                   # unbalanced
         out.insert(0, seq.endrep())
     return out, what
