@@ -20,6 +20,8 @@
 #ifndef CFT_SOFTFLOAT_H
 #define CFT_SOFTFLOAT_H
 
+#include <stddef.h>     /* size_t, for the reduction tree's index range */
+
 #include "bigint.h"
 
 typedef struct {
@@ -80,9 +82,38 @@ extern const cft_fmt_desc cft_sf_formats[4];
 #define CFT_SF_ISHR     22
 #define CFT_SF_ICMPLT   23
 
+/* Reductions. n inputs, one output - a different calling convention
+ * from everything above, which is why the API exposes them through
+ * cft_reduce() rather than cft_run(). They share the opcode space so
+ * the device's opcode field stays one field. */
+#define CFT_SF_SUM      24
+#define CFT_SF_DOT      25
+
 /* Is `op` one of the assigned opcodes? Unassigned ones still compute -
  * see above - but cft_supports() answers with this. */
 int cft_sf_op_assigned(int op);
+
+/* Is `op` a reduction? Reductions are assigned, so op_assigned() says
+ * yes, but they cannot be evaluated elementwise and cft_run() refuses
+ * them on that basis. */
+int cft_sf_is_reduction(int op);
+
+/* The reduction tree over elements [lo, hi) of a (and b, for dot).
+ *
+ * The shape is the single thing this has to get right, and it is the
+ * same shape python/cft_golden/reduce.py defines: split at the floor
+ * midpoint of the half-open range, recurse, add. Not a sequential
+ * accumulation, and not a padded power-of-two tree - see that module
+ * for why padding with +0.0 is not the identity it looks like.
+ *
+ * Recursion depth is ceil(log2(hi-lo)), so at most 64 frames for any
+ * size a host can express.
+ *
+ * Returns 0, or 1 on an internal invariant failure. */
+int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
+                  const void *a, const void *b, size_t esz,
+                  size_t lo, size_t hi,
+                  cft_bn *out, uint32_t *flags);
 
 /* Which of a, b, c the opcode reads, as bits 1, 2, 4. The steering
  * makes ADD ignore b and MUL ignore c, so a caller may legitimately

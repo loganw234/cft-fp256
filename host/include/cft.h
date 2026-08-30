@@ -200,7 +200,18 @@ typedef enum cft_op {
     CFT_ISUB     = 20,
     CFT_ISHL     = 21,  /* count from b, modulo the format width */
     CFT_ISHR     = 22,  /* logical, never arithmetic */
-    CFT_ICMPLT   = 23   /* unsigned; yields 1.0 or +0.0 */
+    CFT_ICMPLT   = 23,  /* unsigned; yields 1.0 or +0.0 */
+
+    /* Reductions: n inputs, ONE output. They take the same opcode
+     * space so the device's opcode field stays one field, but they do
+     * not share the elementwise calling convention, so they are issued
+     * through cft_reduce() and cft_run() refuses them.
+     *
+     * The tree shape is fixed by element index and is part of the
+     * contract, not an implementation detail - see docs/DETERMINISM.md
+     * and python/cft_golden/reduce.py, which is the definition. */
+    CFT_SUM      = 24,  /* d = sum a[i] */
+    CFT_DOT      = 25   /* d = sum round(a[i] * b[i]) */
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance
@@ -338,6 +349,50 @@ CFT_API cft_status cft_run(cft_device *dev,
                            size_t      n,
                            uint32_t   *flags_out,
                            uint32_t   *bus_out);
+
+/* ---------------------------------------------------------------
+ * Reductions
+ *
+ *     d[0] = sum over i in [0, n) of a[i]              CFT_SUM
+ *     d[0] = sum over i in [0, n) of round(a[i]*b[i])  CFT_DOT
+ *
+ * d receives exactly ONE element - cft_format_size(fmt) bytes - not n.
+ * That is the whole reason this is a separate entry point: cft_run's
+ * promise is that element i of the output depends on element i of the
+ * inputs, and a reduction cannot keep it. Issuing CFT_SUM or CFT_DOT
+ * through cft_run() is CFT_ERR_INVALID_ARGUMENT rather than a
+ * plausible-looking array.
+ *
+ * b is unused by CFT_SUM and may be NULL.
+ *
+ * THE TREE SHAPE IS PART OF THE CONTRACT. Results are the balanced
+ * binary tree over the index range, split at the floor midpoint,
+ * evaluated with the given rounding attribute at every node - never a
+ * sequential accumulation, never reassociated, never padded to a power
+ * of two. Two conforming implementations therefore return the same
+ * bits, and a reduction split across four tiles returns what one tile
+ * returns. python/cft_golden/reduce.py is the definition; that shape
+ * is why a float reduction can be part of a determinism contract at
+ * all.
+ *
+ * Consequences worth knowing before they surprise you:
+ *   n == 0 gives +0.0 and raises nothing.
+ *   n == 1 gives a[0] verbatim and raises nothing - one leaf means
+ *          zero additions, so not even a signalling NaN is quieted.
+ *
+ * A device that does not implement the reduction opcode group returns
+ * CFT_ERR_UNSUPPORTED; ask cft_supports() to know in advance.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_reduce(cft_device *dev,
+                              cft_op      op,
+                              cft_format  fmt,
+                              cft_round   rnd,
+                              const void *a,
+                              const void *b,
+                              void       *d,
+                              size_t      n,
+                              uint32_t   *flags_out,
+                              uint32_t   *bus_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)

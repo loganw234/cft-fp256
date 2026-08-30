@@ -44,6 +44,7 @@ static int op_group_bit(int op)
     if (op >= 7  && op <= 10) return 2;   /* min/max */
     if (op >= 11 && op <= 14) return 3;   /* predicate */
     if (op >= 16 && op <= 23) return 4;   /* integer */
+    if (op >= 24 && op <= 25) return 5;   /* reduction */
     return -1;
 }
 
@@ -98,16 +99,18 @@ CFT_API const char *cft_format_name(cft_format f)
 
 CFT_API const char *cft_op_name(cft_op op)
 {
-    static const char *const names[24] = {
+    static const char *const names[26] = {
         "fma", "add", "sub", "mul",
         "abs", "neg", "copysign",
         "min", "max", "minnum", "maxnum",
         "select", "cmplt", "cmple", "cmpeq",
         0,
         "iand", "ior", "ixor", "iadd",
-        "isub", "ishl", "ishr", "icmplt"
+        "isub", "ishl", "ishr", "icmplt",
+        "sum", "dot"
     };
-    if ((int)op >= 0 && (int)op < 24 && names[(int)op])
+    if ((int)op >= 0 && (int)op < (int)(sizeof names / sizeof names[0]) &&
+        names[(int)op])
         return names[(int)op];
     return "reserved";
 }
@@ -169,7 +172,11 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     dev->index          = index;
     dev->format_mask    = (1u << CFT_FP32) | (1u << CFT_FP64) |
                           (1u << CFT_FP128) | (1u << CFT_FP256);
-    dev->op_groups      = 0x1Fu;    /* every assigned group */
+    /* Every assigned group, reductions (bit 5) included. The software
+     * backend is the contract, so it implements all of it; a device
+     * advertises what its bitstream actually contains, which for the
+     * reduction group is currently nothing. */
+    dev->op_groups      = 0x3Fu;
     dev->tiles          = 1;
     dev->device_version = 0;
     dev->flags_readable = 1;
@@ -291,6 +298,15 @@ CFT_API cft_status cft_run(cft_device *dev,
         return CFT_ERR_INVALID_ARGUMENT;
     if (!(dev->format_mask & (1u << (int)fmt)))
         return CFT_ERR_UNSUPPORTED;
+    /* A reduction cannot be evaluated elementwise, so this is not the
+     * call for it. Refused BEFORE the backend dispatch below, so the
+     * software and device paths give the same answer - the alternative
+     * is software returning an error while a device that has never
+     * heard of opcode 24 returns the unassigned-opcode result, and two
+     * backends disagreeing is the one outcome this project cannot
+     * ship. */
+    if (cft_sf_is_reduction((int)op))
+        return CFT_ERR_INVALID_ARGUMENT;
     /* An assigned opcode whose group this device lacks is refused
      * here, not issued and hoped for. A trimmed bitstream does not
      * fault on an opcode it does not implement - it returns whatever
@@ -357,6 +373,86 @@ CFT_API cft_status cft_run(cft_device *dev,
 
     if (flags_out)
         *flags_out = acc;
+    return CFT_OK;
+}
+
+/* ---------------------------------------------------------------
+ * Reductions
+ * --------------------------------------------------------------- */
+
+CFT_API cft_status cft_reduce(cft_device *dev,
+                              cft_op      op,
+                              cft_format  fmt,
+                              cft_round   rnd,
+                              const void *a,
+                              const void *b,
+                              void       *d,
+                              size_t      n,
+                              uint32_t   *flags_out,
+                              uint32_t   *bus_out)
+{
+    const cft_fmt_desc *f;
+    size_t esz;
+    unsigned need;
+    uint32_t fl = 0;
+    cft_bn bo;
+
+    if (bus_out)
+        *bus_out = 0;
+    if (!dev)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if ((int)fmt < 0 || (int)fmt > 3)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if ((int)rnd < 0 || (int)rnd > 4)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* The mirror of cft_run's refusal: this entry point is for
+     * reductions, and handing it an elementwise opcode would otherwise
+     * quietly compute something nobody asked for. */
+    if (!cft_sf_is_reduction((int)op))
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (!(dev->format_mask & (1u << (int)fmt)))
+        return CFT_ERR_UNSUPPORTED;
+    {
+        int group = op_group_bit((int)op);
+        if (group < 0 || !(dev->op_groups & (1u << group)))
+            return CFT_ERR_UNSUPPORTED;
+    }
+    if (!d)
+        return CFT_ERR_INVALID_ARGUMENT;
+
+    f   = &cft_sf_formats[(int)fmt];
+    esz = (size_t)f->width / 8;
+
+    /* n == 0 is +0.0 and raises nothing: the additive identity, and
+     * the only result here that is not a function of any input. It is
+     * handled before the operand check because a sum of nothing does
+     * not need anything to sum. */
+    if (n == 0) {
+        cft_bn z;
+        cft_bn_zero(&z);
+        cft_bn_store(&z, (uint8_t *)d, (int)esz);
+        if (flags_out)
+            *flags_out = 0;
+        return CFT_OK;
+    }
+
+    need = cft_sf_op_operands((int)op);
+    if (((need & 1u) && !a) || ((need & 2u) && !b))
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (n > ((size_t)-1) / esz)
+        return CFT_ERR_INVALID_ARGUMENT;
+
+    /* No device path yet. A bitstream that implements the reduction
+     * group will advertise bit 5 in CAPS and be refused above until it
+     * does, so there is no silent fallback to software behind a
+     * caller's back - which would be a performance surprise, not a
+     * correctness one, but a surprise either way. */
+
+    if (cft_sf_reduce(f, (int)op, (int)rnd, a, b, esz, 0, n, &bo, &fl))
+        return CFT_ERR_INTERNAL;
+    cft_bn_store(&bo, (uint8_t *)d, (int)esz);
+    if (flags_out)
+        *flags_out = fl;
     return CFT_OK;
 }
 

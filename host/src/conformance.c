@@ -169,9 +169,19 @@ static int op_from_name(const char *s)
             p++;
             digits++;
         }
-        return (digits && *p == '\0' && v <= 255) ? v : -1;
+        if (!digits || *p != '\0' || v > 255)
+            return -1;
+        /* A set generated before an opcode was assigned still names it
+         * "reservedNN", and replaying it would now exercise a DIFFERENT
+         * operation than the one whose answer was recorded. Caught here
+         * and reported as its own thing: this is not a corrupt file, it
+         * is a stale one, and the two want different responses from
+         * whoever is reading the error. */
+        if (strcmp(cft_op_name((cft_op)v), "reserved") != 0)
+            return -2;
+        return v;
     }
-    for (i = 0; i < 24; i++)
+    for (i = 0; i < 26; i++)
         if (i != 15 && strcmp(cft_op_name((cft_op)i), s) == 0)
             return i;
     return -1;
@@ -394,7 +404,13 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                     const char *why = NULL;
                     if (field_string(line, "op", tok, sizeof tok))
                         why = "no \"op\" field";
-                    else if ((op = op_from_name(tok)) < 0)
+                    else if ((op = op_from_name(tok)) == -2)
+                        why = "this set records an opcode as reserved that "
+                              "the contract has since assigned - the case "
+                              "would now exercise a different operation "
+                              "than the one its answer was recorded for. "
+                              "Regenerate the set.";
+                    else if (op < 0)
                         why = "unknown opcode name";
                     else if (field_string(line, "rnd", tok, sizeof tok))
                         why = "no \"rnd\" field - regenerate this set";

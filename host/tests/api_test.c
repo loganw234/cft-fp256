@@ -355,9 +355,27 @@ int main(void)
         for (f_i = 0; f_i < 4 && bad < 4; f_i++) {
             size_t esz = cft_format_size((cft_format)f_i);
             for (op_i = 0; op_i < 256 && bad < 4; op_i++) {
-                uint32_t want = cft_supports(dev, (cft_op)op_i,
-                                             (cft_format)f_i)
-                                ? 0u : CFT_FLAG_INVALID;
+                uint32_t want;
+                /* Reductions are not elementwise and cft_run refuses
+                 * them, so there is no padded tail to reason about.
+                 * Skipping them here rather than deleting the opcode
+                 * from the sweep, because the refusal itself is worth
+                 * asserting - checked immediately below. */
+                if (op_i == CFT_SUM || op_i == CFT_DOT) {
+                    st = cft_run(dev, (cft_op)op_i, (cft_format)f_i,
+                                 CFT_RNE, zero, zero, zero, out, 1,
+                                 NULL, NULL);
+                    if (st != CFT_ERR_INVALID_ARGUMENT) {
+                        bad++;
+                        CHECK(0, "cft_run(%s) must refuse the reduction "
+                                 "opcode %d, got %s",
+                              cft_format_name((cft_format)f_i), op_i,
+                              cft_strerror(st));
+                    }
+                    continue;
+                }
+                want = cft_supports(dev, (cft_op)op_i, (cft_format)f_i)
+                       ? 0u : CFT_FLAG_INVALID;
                 for (r_i = 0; r_i < 5; r_i++) {
                     uint32_t fl = 0xdead;
                     memset(out, 0xa5, sizeof out);

@@ -173,7 +173,12 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
     shifty = [0, 1, 2, fmt.man_w, fmt.width - 1, fmt.width, fmt.width + 1,
               2 * fmt.width - 1]
     cases = []
-    for op in sf.SIMPLE_OPS + (15, 24, 255):
+    # 15, 26 and 255 are unassigned: one inside the float block, one
+    # just past the reductions, one at the top of the byte. 24 used to
+    # stand here and cannot any more - it is CFT_SUM now, which is the
+    # exact hazard docs/DETERMINISM.md warns about for anyone who
+    # issued an unassigned opcode early.
+    for op in sf.SIMPLE_OPS + (15, 26, 255):
         is_shift = op in (sf.OP_ISHL, sf.OP_ISHR)
         for i in range(per_op):
             if i % 3 == 0:

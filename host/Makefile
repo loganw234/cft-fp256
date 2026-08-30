@@ -10,6 +10,18 @@
 #                        the published vectors through the library
 #   make CC=clang        or any other C99 compiler
 #
+# On Windows, match the compiler's word size to the PYTHON you will run
+# the ctypes checks with. An MSYS2 install puts an i686 gcc on PATH as
+# `cc` while the system Python is 64-bit, and the mismatch does not
+# surface until ctypes says
+#
+#   OSError: [WinError 193] %1 is not a valid Win32 application
+#
+# which reads like a corrupt DLL rather than a wrong architecture. The
+# 64-bit compiler is the mingw64 one:
+#
+#   PATH="/c/msys64/mingw64/bin:$PATH" make CC=gcc test
+#
 # The shared library is what the ctypes, Julia and Fortran callers
 # load; the static one is for embedding.
 
@@ -71,7 +83,7 @@ TOOLS := cft-selftest$(EXE) cft-bench$(EXE)
 TESTS := api-test$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
-.PHONY: all test difftest seqtest coverage fortran clean
+.PHONY: all test difftest seqtest reducetest coverage fortran clean
 
 all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
 
@@ -158,6 +170,13 @@ difftest: all
 seqtest: all
 	$(PYTHON) tests/seq_check.py --trials 250 \
 		--formats fp32 fp64 fp128 fp256
+
+# Reductions are the one place where the two ports have to agree about
+# a SHAPE rather than about arithmetic, and a shape that matches on
+# powers of two can still diverge on 5. Hence its own target and a
+# sweep that covers every small n exhaustively.
+reducetest: all
+	$(PYTHON) tests/reduce_check.py --trials 1500
 
 coverage: all
 	$(PYTHON) tests/diff_check.py --coverage --trials 3000

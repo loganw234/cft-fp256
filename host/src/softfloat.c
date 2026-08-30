@@ -631,7 +631,13 @@ static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
 
 int cft_sf_op_assigned(int op)
 {
-    return (op >= 0 && op <= 14) || (op >= 16 && op <= 23);
+    return (op >= 0 && op <= 14) || (op >= 16 && op <= 23) ||
+           (op >= CFT_SF_SUM && op <= CFT_SF_DOT);
+}
+
+int cft_sf_is_reduction(int op)
+{
+    return op == CFT_SF_SUM || op == CFT_SF_DOT;
 }
 
 unsigned cft_sf_op_operands(int op)
@@ -644,8 +650,80 @@ unsigned cft_sf_op_operands(int op)
     case CFT_SF_ABS:
     case CFT_SF_NEG:      return 1u;
     case CFT_SF_SELECT:   return 1u | 2u | 4u;
+    case CFT_SF_SUM:      return 1u;
+    case CFT_SF_DOT:      return 1u | 2u;
     default:              return cft_sf_op_assigned(op) ? (1u | 2u) : 0u;
     }
+}
+
+/* ---- the reduction tree ------------------------------------------
+ *
+ * Mirrors python/cft_golden/reduce.py exactly, including the two edges
+ * that look like oversights and are not: a single element is returned
+ * verbatim with no flags (one leaf means zero adds, so nothing can be
+ * raised - not even for a signalling NaN), and an empty range is +0.0.
+ */
+
+/* One leaf. For sum that is the element itself; for dot it is the
+ * ROUNDED product, which is what makes dot(a,b) == sum(mul(a,b)). */
+static int reduce_leaf(const cft_fmt_desc *f, int op, int rnd,
+                       const void *a, const void *b, size_t esz, size_t i,
+                       cft_bn *out, uint32_t *flags)
+{
+    cft_bn ba, bb, bz;
+
+    cft_bn_zero(&ba);
+    cft_bn_zero(&bb);
+    cft_bn_zero(&bz);
+    cft_bn_load(&ba, (const uint8_t *)a + i * esz, (int)esz);
+
+    if (op == CFT_SF_DOT) {
+        cft_bn_load(&bb, (const uint8_t *)b + i * esz, (int)esz);
+        return cft_sf_compute(f, CFT_SF_MUL, rnd, &ba, &bb, &bz, out, flags);
+    }
+    *out = ba;
+    *flags = 0;
+    return 0;
+}
+
+int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
+                  const void *a, const void *b, size_t esz,
+                  size_t lo, size_t hi,
+                  cft_bn *out, uint32_t *flags)
+{
+    cft_bn left, right, dummy;
+    uint32_t lf = 0, rf = 0, af = 0;
+    size_t mid;
+
+    *flags = 0;
+    if (hi < lo)
+        return 1;
+    if (hi == lo) {
+        sf_zero(f, 0, out);
+        return 0;
+    }
+    if (hi - lo == 1)
+        return reduce_leaf(f, op, rnd, a, b, esz, lo, out, flags);
+
+    /* The one place the shape is written down on this side of the
+     * fence. Floor division, extra element to the RIGHT, matching
+     * cft_golden.reduce.split(). */
+    mid = lo + (hi - lo) / 2;
+
+    if (cft_sf_reduce(f, op, rnd, a, b, esz, lo, mid, &left, &lf))
+        return 1;
+    if (cft_sf_reduce(f, op, rnd, a, b, esz, mid, hi, &right, &rf))
+        return 1;
+
+    /* ADD reads a and c - b is steered to 1.0 - so the two addends go
+     * in the first and THIRD slots. Passing them as a and b would
+     * silently compute a*1.0 + 0.0 and drop the right subtree. */
+    cft_bn_zero(&dummy);
+    if (cft_sf_compute(f, CFT_SF_ADD, rnd, &left, &dummy, &right, out, &af))
+        return 1;
+
+    *flags = lf | rf | af;
+    return 0;
 }
 
 int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
