@@ -42,7 +42,11 @@ XRT      ?= 0
 XRT_ROOT ?= /opt/xilinx/xrt
 ifeq ($(XRT),1)
   XRTDEF  := -DCFT_ENABLE_XRT
-  XRTINC  := -I$(XRT_ROOT)/include
+  # -isystem, not -I: XRT's own headers trip -Wshadow and friends by
+  # the hundred, and they are not ours to fix. Warnings you cannot act
+  # on are warnings you learn to ignore, which is how a real one gets
+  # missed.
+  XRTINC  := -isystem $(XRT_ROOT)/include
   XRTLIBS := -L$(XRT_ROOT)/lib -lxrt_coreutil -lstdc++ -lpthread -luuid
   OBJ     += src/backend_xrt.o
   PICOBJ  += src/backend_xrt.lo

@@ -209,9 +209,13 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
     for (int i = 1; i <= MAX_TILES; i++) {
         std::string nm = "cft_krnl:{cft_krnl_" + std::to_string(i) + "}";
         try {
-            Tile t{xrt::kernel(D->dev, D->uuid, nm,
-                               xrt::kernel::cu_access_mode::exclusive)};
-            D->tiles.push_back(std::move(t));
+            /* Construct first, append second: if the kernel does not
+             * exist this throws before the vector grows, so the tile
+             * count is always the number that actually opened. */
+            xrt::kernel k(D->dev, D->uuid, nm,
+                          xrt::kernel::cu_access_mode::exclusive);
+            D->tiles.emplace_back();
+            D->tiles.back().k = std::move(k);
         } catch (const std::exception &) {
             break;
         }
