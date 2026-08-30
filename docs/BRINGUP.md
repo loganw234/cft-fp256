@@ -79,7 +79,45 @@ shell IP never enters the picture. xclbins built by 2022.2 run under
 the newer XRT 2.19 runtime - that pairing is what AMD's own 2024.1
 U50 deployment re-release ships.
 
-### hw_emu did not complete a run on 2026-08-29, and it is not libcft
+### hw_emu: it was stale simulator state, and the fix is in the runner
+
+**Resolved 2026-08-30.** The investigation below is kept because the
+narrowing is what made the answer findable, and because the failure
+mode recurs.
+
+An interrupted emulation leaves its `xsimk` alive holding a socket
+under `/tmp/$USER` and a directory under `.run`. Every later run then
+talks to the wreckage of the earlier one and hangs at startup or after
+its first kernel launch - which looks exactly like a design bug, and
+cost this project an evening once before under the name "flakiness".
+`hw/run-device-test.sh` now reaps them before every run, and with that
+in place emulation completes:
+
+    opened exclusive
+    MAGIC 0x43465430  VERSION 0x00000410  CAPS 0x00001f0f
+    wait returned state 4        <- ERT_CMD_STATE_COMPLETED
+    FLAGS 0x0  STATUS 0x0        PROBE OK
+
+and the engine's own trace confirms it, on all four tiles of the quad
+image at once:
+
+    [CFT-ENGS] DONE beats=1 flags=10100 err=000
+    [CFT-ENGS] DONE beats=1 flags=10000 err=000
+    [CFT-ENGS] DONE beats=1 flags=10100 err=000
+    [CFT-ENGS] DONE beats=1 flags=10100 err=000
+
+Four compute units, each on its own HBM group, each finishing with no
+bus errors. **So the multi-tile host path is validated in emulation
+with no card present**, which is what it was built for.
+
+Two things made the diagnosis slower than it needed to be. The `DONE`
+line did not exist, so a run that finished and a run that stalled
+looked identical in the trace - it exists now. And the first two
+hypotheses were both wrong (the higher HBM groups; exclusive CU
+access), which is why the table below is worth keeping: it is the list
+of things that are *not* the cause.
+
+### The narrowing, kept for the next time
 
 Recorded because a later reader will otherwise repeat the evening.
 
@@ -93,7 +131,7 @@ different HBM base addresses (`0x0`, `0x8000_0000`, `0xc000_0000`,
 `hw/link_quad.cfg` requires. Each run reads its three operand streams,
 computes, and issues its write.
 
-What does not happen is completion: `xrt::run::wait` never returns.
+What did not happen was completion: `xrt::run::wait` never returned.
 Narrowed as far as it is worth narrowing:
 
 | varied | result |
@@ -102,16 +140,19 @@ Narrowed as far as it is worth narrowing:
 | exclusive vs shared CU access | same |
 | libcft vs a 40-line XRT program using neither | same |
 
-So it is not a libcft defect and not multi-tile - a minimal XRT
-program reproduces it. Two further observations: the emulation
-environment here is fragile in its own right (an interrupted run
-leaves an orphan `xsimk` holding a socket, which
-`hw/run-device-test.sh` now reaps), and on the last attempt the
-simulator kernel did not start at all while the host process spun.
+So it was neither a libcft defect nor a multi-tile one - a minimal XRT
+program reproduced it. The observation that turned out to be the whole
+answer was the one that looked incidental at the time: the emulation
+environment is fragile in its own right, an interrupted run leaves an
+orphan `xsimk` holding a socket, and on one attempt the simulator
+kernel did not start at all while the host process spun at 99% CPU.
 
-The engine now logs `[CFT-ENGS] DONE` on completion, which is the
-missing evidence: it distinguishes "the kernel finished and XRT did
-not notice" from "the kernel stalled waiting for a write response".
+Two lessons rather than one. Ruling things out was necessary and not
+sufficient - the cause was never in the list of things being varied,
+so varying them harder would never have found it. And the instrument
+that settled it (`[CFT-ENGS] DONE`) had to be built before the
+question could be asked at all, which is worth doing earlier next
+time.
 That is the first thing to look at when this is picked up again.
 
 None of it affects the hardware images. `-t hw` builds are unaffected,
