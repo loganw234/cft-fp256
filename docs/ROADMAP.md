@@ -197,7 +197,8 @@ way atlas-darkroom records a census.
       never sees the congestion that decides a shell build. Trust the
       in-shell number or do not run the experiment. And **the next
       nanoseconds are in the round stage, not the normalizer.**
-- **The round stage is the ceiling, and the fix is specific.** Two
+- [x] **The round stage was the ceiling, and the fix worked
+  (2026-08-30).** Two
   independent measurements now agree that the critical path is S12
   into S13 - the exponent register through the round window into the
   rounded significand - at 39 logic levels, 21 of them CARRY8, and
@@ -217,10 +218,34 @@ way atlas-darkroom records a census.
   logic in the design and the 441,000-case suite is what would have to
   agree afterwards.
 
-  Not attempted yet, deliberately: it would invalidate the card-day
-  images mid-build, and it wants an in-shell measurement rather than
-  an out-of-context one, which is two hours on a free box. If it
-  lands, 7753428 (the reverted S11 split) is worth cherry-picking back
+  **Done, and measured in shell rather than out of context.** The
+  round stage now computes `kept` and `kept + 1` in parallel with the
+  guard/sticky reduction and selects between them, so the 238-bit
+  ripple carry hides behind the OR-reduction instead of queueing after
+  it. Latency, stage count and arithmetic are unchanged, and the full
+  suite agrees afterwards.
+
+  In-shell result, single tile on the U50 platform: **145 MHz closes
+  at kernel WNS +0.116 ns**, where the same design at 130 MHz reports
+  +0.137. The whole 0.22 ns the sweep said was missing came back.
+
+  Two cautions attached to those numbers. They are the KERNEL clock's
+  slack (`clk_out1_ulp_clk_wiz_0`), not the global WNS the manifest
+  used to record - the global figure is a shell transceiver path,
+  identical in every build on this platform, and quoting it as this
+  design's headroom is what happened here first. And a passing run
+  never reveals a ceiling: Vivado stops optimising once the asked
+  clock is met, so +0.116 at 145 MHz is a floor on the margin, not a
+  measure of how much further the design could go.
+
+  The quad tells the other half of the story. Four tiles at 130 MHz
+  close at only **+0.022 ns**, with the critical path still landing in
+  `g_bank256.u_wfma` S12 -> S13 (38 levels, 21 CARRY8) - which both
+  confirms the diagnosis and shows that congestion, not logic depth,
+  is what four tiles add: the same design pays ~0.115 ns more per path
+  at four instances than at one.
+
+  7753428 (the reverted S11 split) is still worth cherry-picking back
   and retesting as a pair, since S11 was only ever second-worst.
 - Reduction ops (dot, sum) with the index-fixed tree the contract
   already specifies.
