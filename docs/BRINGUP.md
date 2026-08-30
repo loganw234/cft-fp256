@@ -384,12 +384,42 @@ Three bitstreams are banked on amd-arc-box, oldest first:
 | `sweep/f115/cft_hw.xclbin` | four rungs, from the sweep | 115 MHz |
 | `sweep/f145/cft_hw.xclbin` | four rungs, from the sweep | 145 MHz |
 
-**Card-day clock: 145 MHz.** It closes with ~9% margin below the
-measured ~159 MHz ceiling, and is 1.6x the 90 MHz image. The final
-card-day pair - one tile and four tiles, both on the current RTL -
-gets built at 145 ahead of the card arriving; the sweep bitstreams
-predate the non-arithmetic opcodes and are timing evidence, not
-deliverables.
+**Card-day clock: 130 MHz** (decided 2026-08-30). Both pairs were
+built, so this was a choice between finished artifacts rather than a
+prediction:
+
+| set | tile | commit | kernel WNS | HBM | build |
+|---|---|---|---|---|---|
+| **130** | `cardday/single` | 53bbba7 | +0.137 ns | 450.0 | 1h46m |
+| **130** | `cardday/quad` | 53bbba7 | +0.022 ns | 449.8 (1 endpoint, -0.001 ns) | 1h46m |
+| 145 | `cardday/single145` | eb8a97a | +0.116 ns | 450.0 | ~1h50m |
+| 145 | `cardday/quad145` | 5cc559a | +0.028 ns | 450.0 | 3h56m |
+
+130 wins on the two things that were being optimised for. Build cost:
+3h56m for the 145 quad against 1h46m, because Vivado works a path
+exactly as hard as the constraint demands and then stops - the
+difference is entirely the ask, not the design. And provenance: the
+130 pair is one commit and one directory, both trees clean, while the
+145 pair spans two commits in two directories and its quad manifest
+needed a hand annotation to explain a `tree: DIRTY` flag that was
+about host-side files.
+
+**One fact points the other way, and it is recorded rather than
+buried.** The 130 quad is the only one of the four with a violating
+clock: `hbm_aclk` misses by 0.001 ns on 1 endpoint of 39,282, and
+Vivado auto-scales HBM from 450.0 to 449.8 MHz - a 0.04% adjustment on
+a shell clock. The 145 quad closes HBM clean at 450.0. This does not
+touch the kernel clock and cannot affect a result: correctness in this
+design is clock-independent by construction, which is the same
+property that let the first bitstream be linked at 12 MHz. It is a
+throughput footnote, not a determinism one. If the card ever shows
+memory trouble, `cardday/quad145` is the built, closed alternative to
+try before anything is rebuilt.
+
+The sweep bitstreams predate the non-arithmetic opcodes and are timing
+evidence, not deliverables. For the measured ceiling itself see the
+frequency table below: 145 closes and 175 misses by 0.562 ns, so
+either choice sits well inside the envelope.
 
 Build cost on amd-arc-box, measured on the four-rung design: synthesis
 18m, logic opt 3m, placement 44m, routing 18m, bitstream 25m - 1h47m
