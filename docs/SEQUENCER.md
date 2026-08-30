@@ -1,8 +1,16 @@
 # The orbit sequencer
 
-STATUS: design and golden model. The RTL follows, and is verified
-against `python/cft_golden/seq.py` exactly as the FMA core was
-verified against `softfloat.py`.
+STATUS: design, golden model, and a working software implementation.
+`python/cft_golden/seq.py` is the definition of correct;
+`host/src/program.c` is libcft's executor and agrees with it over a
+shared fuzz corpus (`make libcft-seq`) on deposits, deposit counts,
+exception flags and status - and on which programs to refuse. The RTL
+follows, and will be verified against the same model, exactly as the
+FMA core was verified against `softfloat.py`.
+
+So a program can be written and run today, on any machine, with no
+card. What the hardware adds is speed and the on-chip iteration that
+makes the whole thing worth building.
 
 ## Why this exists, and why it is a multi-tile problem
 
