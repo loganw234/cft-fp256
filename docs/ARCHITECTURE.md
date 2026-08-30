@@ -130,8 +130,8 @@ does not work yet.
 | 0x38 | D_PTR | RW | 64-bit |
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at ap_start |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
-| 0x48 | VERSION | RO | 0x00000410 (v0.4.1: opcode-group discovery in CAPS) |
-| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 conversion (the last three reserved and currently clear). Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current |
+| 0x48 | VERSION | RO | 0x00000500. **Guards the REGISTER MAP, not the feature set** - a host accepts a SET of known versions and lets CAPS decide what an image can do. One accepted value would orphan a still-good bitstream every time a feature landed, which nearly happened when reductions bumped 0x410 to 0x500 and the card-day images were already built at 0x410 |
+| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 conversion (14 and 15 reserved and currently clear; 13 set from VERSION 0x500 onward). Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current |
 | 0x50 | STATUS | RO | sticky bus faults of the last run, cleared at ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count. **Non-zero means the D buffer must not be trusted** |
 
 ### Opcodes (MODE[7:0])
@@ -268,6 +268,15 @@ single outstanding AR the reader waits out the full memory latency
 after every RLAST, and a 16-beat burst followed by a ~60-cycle bubble
 is ~4.8 cycles/beat, which is where it started. Pipelining the ARs is
 what converts four ports into four times the throughput.
+
+**Measured: 1.25 cycles/beat, against the shared port's ~4.4.** That
+is a 3.5x, and it is a simulation number taken against cocotbext-axi's
+memory model - which is cooperative in exactly the way a real HBM
+controller is not obliged to be, so it is a ceiling rather than a
+promise. What it does settle is that the port was the bottleneck and
+splitting it removed that bottleneck; where the number lands on
+silicon is a card-day measurement, and CARDDAY.md step 6 is where it
+gets taken.
 
 FIFO space is reserved at AR time, not at R time. Two bursts in flight
 can together exceed the free space each looked at separately, and the

@@ -21,6 +21,13 @@ One call does the work:
 cft_run(dev, CFT_FMA, CFT_FP256, CFT_RNE, a, b, c, d, n, &flags, NULL);
 ```
 
+with one sibling for the case that call cannot express, where the
+output is one element rather than n:
+
+```c
+cft_reduce(dev, CFT_SUM, CFT_FP256, CFT_RNE, a, NULL, d, n, &flags, NULL);
+```
+
 and one call decides what "dev" means:
 
 ```c
@@ -70,11 +77,11 @@ Python caller reaching it through pyxrt cannot.
 ## What the library absorbs so callers never see it
 
 Every one of these is a place the hardware contract is sharper than a
-user should have to care about. **These are properties of the device
-backend, which is not built yet** - listed here because they are what
-the API was shaped to allow, and because a reader should not have to
-guess which parts of this document describe code and which describe
-intent.
+user should have to care about. All of them are now built and
+exercised against a four-tile hw_emu image; the *(device backend)*
+tags are kept because they say which properties are the device's
+rather than the software backend's, which is still useful when reading
+a failure.
 
 - **Beat padding** *(device backend)*. The tile works in whole 256-bit
   beats. `cft_run` takes an arbitrary `n`, pads the tail internally,
@@ -84,7 +91,16 @@ intent.
   has four sets of FLAGS and STATUS registers. The library splits the
   work, ORs the sticky words, and reports one result. Callers never
   learn tiles exist; `cft_get_caps` reports the count for the curious.
-  Nothing can drive `hw/link_quad.cfg` until this exists.
+  This is what drives `hw/link_quad.cfg`, and it now scales to 64 -
+  see docs/SCALING.md.
+
+  **A reduction splits differently, and that difference is the whole
+  determinism argument.** An elementwise op can be cut anywhere,
+  because element i does not care which tile produced it. A reduction
+  can only be cut at canonical NODES of its tree, or the answer
+  changes - so the library computes the node boundaries, hands one
+  range to each tile, and folds the partials with the same tree. A sum
+  over four tiles returns exactly what one tile returns, bit for bit.
 - **Buffer staging** *(device backend)*. `cft_run` takes host pointers
   and does the device round trip itself. `cft_alloc` exists for when
   that round trip is the bottleneck; today it is a plain allocation
@@ -160,12 +176,38 @@ The same binary is what to run on the card. Only the xclbin changes.
 - **Card validation.** Everything above has been exercised in
   emulation. Nothing has touched silicon.
 
+## Reductions, and why they are a second entry point
+
+`cft_reduce` landed in VERSION 0x500. It is separate from `cft_run`
+rather than another opcode through it, and the reason is a promise
+`cft_run` makes: element i of the output depends on element i of the
+inputs. A reduction cannot keep that promise - it returns ONE element
+however large n is - so issuing `CFT_SUM` through `cft_run` is
+`CFT_ERR_INVALID_ARGUMENT` rather than a plausible-looking array.
+
+The tree shape is part of the contract, not an implementation detail:
+each node splits so its left child is the largest power of two
+strictly below the range, evaluated with the caller's rounding
+attribute at every node. Never a sequential accumulation, never
+reassociated, never padded. That is what lets two conforming
+implementations agree bit for bit, and what lets four tiles agree with
+one. `python/cft_golden/reduce.py` is the definition.
+
+Two consequences that surprise people, so they are written into the
+header: n = 0 gives +0.0 and raises nothing, and n = 1 gives a[0]
+verbatim - one leaf means zero additions, so not even a signalling NaN
+is quieted.
+
+`CFT_DOT` is advertised and is not separate hardware. The contract
+makes `dot(a,b) == sum(mul(a,b))` exact, flags included, so the
+library issues an elementwise MUL and then a SUM. The alternative was
+a multiply pass sharing the accumulator's pipe with tagged results and
+arbitration between muls and adds - the most schedule-sensitive logic
+in the engine, for one saved round trip. The composition property went
+into the contract partly so this choice would exist.
+
 ## What is deliberately not in the first version
 
-- **Reductions** (`dot`, `sum`). They change the output shape and the
-  determinism argument - the tree order must be fixed by element index
-  - so they get their own entry point rather than an overloaded
-  `cft_run`.
 - **Programs.** When the on-chip sequencer lands, a `cft_program`
   family sits beside `cft_run` rather than replacing it. `cft_run` was
   designed knowing this is coming.
@@ -251,6 +293,21 @@ As of the commit that added the library, on x86-64 Windows with GCC
 | differential vs the golden model | 213,000 | every case, bits and flags |
 | contract tests (`api-test`) | every check | pass |
 | C example vs Python example | 4 checksums | identical |
+
+Reductions were added later and are checked the same two ways - the
+tree against the golden model, and the multi-tile split against the
+whole-array answer:
+
+| check | cases | result |
+|---|---|---|
+| `reduce_check.py`, libcft vs the golden model | 7,640 reductions across 4 formats | tree, bits and flags agree |
+| `reduce-parts`, every canonical partition vs the whole | 4,060 partitions (4 formats x 29 sizes x 7 part counts x 5 attributes) | every partition reproduces the whole |
+
+The second table is the one that matters for tiles. It is the software
+statement of the property the hardware has to keep: cutting a
+reduction into k canonical ranges and folding the partials gives the
+same bits as not cutting it, for every k the library would ever
+choose.
 
 And the part that is actually the product. The same source built by
 **GCC 13.3 on Ubuntu 24.04 against glibc**, running in the project's

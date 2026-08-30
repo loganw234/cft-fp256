@@ -373,7 +373,9 @@ cocotb's. Small N; hw_emu is slow.
 TARGETS=hw KERNEL_FREQ=100000000 bash hw/rebuild-2022.sh
 ```
 
-Three bitstreams are banked on amd-arc-box, oldest first:
+Bitstreams banked on amd-arc-box, oldest first. The first six are
+history - kept because they are the timing evidence behind the clock
+choice, not because any of them would go on a card:
 
 | file | design | kernel clock |
 |---|---|---|
@@ -383,6 +385,16 @@ Three bitstreams are banked on amd-arc-box, oldest first:
 | `cft_hw.xclbin` | the same, plus the control-review fixes (STATUS, latched run config) | 90 MHz |
 | `sweep/f115/cft_hw.xclbin` | four rungs, from the sweep | 115 MHz |
 | `sweep/f145/cft_hw.xclbin` | four rungs, from the sweep | 145 MHz |
+
+And the four card-day candidates, built on the round-stage RTL after
+the sweep bitstreams aged out from under it:
+
+| file | design | kernel clock | kernel WNS |
+|---|---|---|---|
+| **`~/cardday-130/cft_hw_single.xclbin`** | **one tile - card-day set** | **130 MHz** | **+0.137 ns** |
+| **`~/cardday-130/cft_hw_quad.xclbin`** | **four tiles - card-day set** | **130 MHz** | **+0.022 ns** |
+| `cardday/single145/cft_hw.xclbin` | one tile | 145 MHz | +0.116 ns |
+| `~/cft-exp/cardday/quad145/cft_hw.xclbin` | four tiles | 145 MHz | +0.028 ns |
 
 **Card-day clock: 130 MHz** (decided 2026-08-30). Both pairs were
 built, so this was a choice between finished artifacts rather than a
