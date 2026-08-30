@@ -162,15 +162,34 @@ int elem_bytes(int fmt)
  * indefinite wait turns that into a hung process with no diagnosis,
  * because the fault register can only be read after the wait returns.
  *
- * Emulation runs orders of magnitude slower than silicon and its
- * wall-clock means nothing, so it gets an hour. */
+ * Emulation runs orders of magnitude slower than silicon, so it wants
+ * a long timeout - but not an arbitrarily long one.
+ *
+ * CAP is 20 minutes because a timeout past about 35 minutes does not
+ * work: 2^31 microseconds is 2147 seconds, and a value beyond that
+ * overflows somewhere below this API. The symptom is not a spurious
+ * timeout, which would be obvious - it is a wait that never returns
+ * at all, on a kernel that has already finished. That cost an evening
+ * here: the engine's own trace showed the run completing while the
+ * host sat in a polling loop, which reads exactly like a hardware or
+ * scheduler fault and is neither.
+ *
+ * So the cap is deliberate and the margin is generous. If a run
+ * legitimately needs longer than twenty minutes, something else is
+ * wrong and a timeout is the right answer. */
 long timeout_ms()
 {
+    const long CAP = 20L * 60L * 1000L;
+    long ms;
     if (const char *e = std::getenv("CFT_TIMEOUT_MS"))
-        return std::strtol(e, nullptr, 10);
-    if (std::getenv("XCL_EMULATION_MODE"))
-        return 3600L * 1000L;
-    return 60L * 1000L;
+        ms = std::strtol(e, nullptr, 10);
+    else if (std::getenv("XCL_EMULATION_MODE"))
+        ms = CAP;
+    else
+        ms = 60L * 1000L;
+    if (ms <= 0 || ms > CAP)
+        ms = CAP;
+    return ms;
 }
 
 struct Tile {
