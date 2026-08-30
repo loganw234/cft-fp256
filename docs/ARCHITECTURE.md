@@ -98,7 +98,7 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x04 | GIER | RW | storage only; no interrupt exported in v0 |
 | 0x08 | IER  | RW | storage only |
 | 0x0C | ISR  | RO | 0 |
-| 0x10 | MODE | RW | [3:0] op: 0 fma, 1 add, 2 sub, 3 mul, 4 abs, 5 neg, 6 copysign, 7 min, 8 max, 9 minnum, 10 maxnum (4-10 are non-arithmetic: no rounding, the attribute field is ignored); [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 (issue only precisions set in CAPS); [10:8] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne); [31:11] reserved, write 0 |
+| 0x10 | MODE | RW | [7:0] op (see the opcode table below); [11:8] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 - issue only precisions set in CAPS; [14:12] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne; ignored by the non-arithmetic opcodes); [31:15] reserved, write 0 |
 | 0x18 | N    | RW | element count, 64-bit |
 | 0x20 | A_PTR | RW | 64-bit HBM byte address |
 | 0x28 | B_PTR | RW | 64-bit |
@@ -106,9 +106,53 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x38 | D_PTR | RW | 64-bit |
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at ap_start |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
-| 0x48 | VERSION | RO | 0x00000310 (v0.3.1: STATUS register) |
+| 0x48 | VERSION | RO | 0x00000400 (v0.4.0: 8-bit opcode field, non-arithmetic and integer groups) |
 | 0x4C | CAPS | RO | [3:0] precision bitmask, bit p = MODE precision p implemented; full tile reads 0xF |
 | 0x50 | STATUS | RO | sticky bus faults of the last run, cleared at ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count. **Non-zero means the D buffer must not be trusted** |
+
+### Opcodes (MODE[7:0])
+
+| code | op | group | notes |
+|---|---|---|---|
+| 0 | `fma` | arithmetic | `a*b + c`, one rounding |
+| 1 | `add` | arithmetic | steered: `b := 1.0` |
+| 2 | `sub` | arithmetic | steered: `b := 1.0`, `c` sign-flipped |
+| 3 | `mul` | arithmetic | steered: `c := signed zero` |
+| 4 | `abs` | sign | quiet; preserves NaN payloads |
+| 5 | `neg` | sign | quiet |
+| 6 | `copysign` | sign | magnitude of `a`, sign of `b` |
+| 7 | `min` | min/max | NaN propagates; `min(+0,-0)` is -0 |
+| 8 | `max` | min/max | |
+| 9 | `minnum` | min/max | returns the number when one operand is NaN |
+| 10 | `maxnum` | min/max | |
+| 11 | `select` | data | `c` non-zero ? `a` : `b`; moves NaNs intact |
+| 12 | `cmplt` | predicate | yields 1.0 or +0.0 |
+| 13 | `cmple` | predicate | |
+| 14 | `cmpeq` | predicate | |
+| 16 | `iand` | integer | the encoding as a W-bit unsigned word |
+| 17 | `ior` | integer | |
+| 18 | `ixor` | integer | |
+| 19 | `iadd` | integer | wraps mod 2^W |
+| 20 | `isub` | integer | |
+| 21 | `ishl` | integer | count from `b` mod W |
+| 22 | `ishr` | integer | logical, never arithmetic |
+| 23 | `icmplt` | integer | unsigned; yields 1.0 or +0.0 |
+
+Opcode 15 and everything from 24 up are unassigned. The field was four
+bits until the integer group needed a fifteenth opcode; it is a byte
+now so that divide, square root, conversions and the reductions have
+somewhere to go without moving the precision and rounding fields again.
+
+**There is no `cmpgt` or `cmpge`, and none is needed.** The engine
+reads three independent pointers, so `a > b` is `cmplt` with the A and
+B buffers swapped, for free. Only orderings unreachable by swapping
+earn an opcode.
+
+The predicates deliberately yield a float rather than a condition
+code: the result has to live in the same arrays as everything else and
+be consumable by `select`. Together, `cmp*` and `select` are branchless
+conditional code, which is what the atlas det library needs from
+hardware far more than it needs a transcendental.
 
 ## Host contract
 

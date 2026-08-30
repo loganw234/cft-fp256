@@ -365,6 +365,17 @@ OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
 # read. Only the orderings that cannot be reached by swapping operands
 # earn an opcode - MODE[3:0] has one slot left after these.
 OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
+# Integer and bitwise operations on the encoding, treated as a W-bit
+# unsigned word. Not floating point at all: they never round, never
+# signal, and never canonicalise a NaN - the bits are just bits.
+#
+# These exist because the det library's algebraic kernels start from
+# integer seeds. det_sqrt's first estimate is 0x5F375A86 - (m >> 1) on
+# the bit pattern, and its special-case guards are unsigned magnitude
+# compares. Without an integer group the tile can compute the Newton
+# refinement but not the value it refines from.
+OP_IAND, OP_IOR, OP_IXOR, OP_IADD = 16, 17, 18, 19
+OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT = 20, 21, 22, 23
 OP_NAMES = {
     OP_FMA: "fma", OP_ADD: "add", OP_SUB: "sub", OP_MUL: "mul",
     OP_ABS: "abs", OP_NEG: "neg", OP_COPYSIGN: "copysign",
@@ -372,11 +383,18 @@ OP_NAMES = {
     OP_MINNUM: "minnum", OP_MAXNUM: "maxnum",
     OP_SELECT: "select", OP_CMPLT: "cmplt",
     OP_CMPLE: "cmple", OP_CMPEQ: "cmpeq",
+    OP_IAND: "iand", OP_IOR: "ior", OP_IXOR: "ixor", OP_IADD: "iadd",
+    OP_ISUB: "isub", OP_ISHL: "ishl", OP_ISHR: "ishr",
+    OP_ICMPLT: "icmplt",
 }
+INT_OPS = (OP_IAND, OP_IOR, OP_IXOR, OP_IADD,
+           OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT)
 ARITH_OPS = (OP_FMA, OP_ADD, OP_SUB, OP_MUL)
 SIMPLE_OPS = (OP_ABS, OP_NEG, OP_COPYSIGN,
               OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM,
-              OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ)
+              OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ,
+              OP_IAND, OP_IOR, OP_IXOR, OP_IADD,
+              OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT)
 
 
 # ---- non-arithmetic operations ---------------------------------------
@@ -505,12 +523,59 @@ def select(fmt: FpFormat, xa: int, xb: int, xc: int = 0):
     return (xa if (xc & ~fmt.sign_mask) != 0 else xb), 0
 
 
+def _mask(fmt, v):
+    return v & ((1 << fmt.width) - 1)
+
+
+def _shift_amount(fmt, xb):
+    """Shifts take their count from b's low bits, modulo the width. Every
+    format here is a power-of-two number of bits, so this is exactly the
+    low log2(width) bits and no count can be out of range."""
+    return xb & (fmt.width - 1)
+
+
+def iand(fmt, xa, xb, *_):
+    return xa & xb, 0
+
+
+def ior(fmt, xa, xb, *_):
+    return xa | xb, 0
+
+
+def ixor(fmt, xa, xb, *_):
+    return xa ^ xb, 0
+
+
+def iadd(fmt, xa, xb, *_):
+    return _mask(fmt, xa + xb), 0
+
+
+def isub(fmt, xa, xb, *_):
+    return _mask(fmt, xa - xb), 0
+
+
+def ishl(fmt, xa, xb, *_):
+    return _mask(fmt, xa << _shift_amount(fmt, xb)), 0
+
+
+def ishr(fmt, xa, xb, *_):
+    return xa >> _shift_amount(fmt, xb), 0        # logical, never arithmetic
+
+
+def icmplt(fmt, xa, xb, *_):
+    """Unsigned compare of the encodings, yielding 1.0 or +0.0 so that
+    a select consumes it exactly like a floating-point predicate."""
+    return (one_bits(fmt) if xa < xb else zero_bits(fmt)), 0
+
+
 SIMPLE_IMPL = {
     OP_ABS: fabs, OP_NEG: neg, OP_COPYSIGN: copysign,
     OP_MIN: fmin, OP_MAX: fmax,
     OP_MINNUM: fminnum, OP_MAXNUM: fmaxnum,
     OP_SELECT: select, OP_CMPLT: cmplt,
     OP_CMPLE: cmple, OP_CMPEQ: cmpeq,
+    OP_IAND: iand, OP_IOR: ior, OP_IXOR: ixor, OP_IADD: iadd,
+    OP_ISUB: isub, OP_ISHL: ishl, OP_ISHR: ishr, OP_ICMPLT: icmplt,
 }
 
 

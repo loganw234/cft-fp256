@@ -76,7 +76,7 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     ram.write(bc, b"".join(v.to_bytes(ebytes, "little") for v in vc))
     ram.write(bd, b"\xAA" * (n * ebytes))  # prove full overwrite
 
-    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 4) | (rnd << 8))
+    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 8) | (rnd << 12))
     await write64(axil, NREG, n)
     await write64(axil, APTR, ba)
     await write64(axil, BPTR, bb)
@@ -131,7 +131,7 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000310
+    assert await axil.read_dword(VERSION) == 0x00000400
     assert await axil.read_dword(CAPS) == 0xF, "full tile advertises all rungs"
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"

@@ -49,7 +49,7 @@ module cft_engine #(
     output logic         done,
     output logic [4:0]   flags_acc,
     output logic [2:0]   err_acc,
-    input  logic [3:0]   cfg_op,
+    input  logic [7:0]   cfg_op,
     input  logic [3:0]   cfg_prec,
     input  logic [2:0]   cfg_rnd,
     input  logic [63:0]  cfg_n,
@@ -123,7 +123,7 @@ module cft_engine #(
   logic [63:0]  beats_total, beat_idx;
   logic [255:0] abuf, bbuf, cbuf, dbuf;
   logic [1:0]   prec_r;
-  logic [3:0]   op_r;
+  logic [7:0]   op_r;
   logic [2:0]   rnd_r;
   logic [63:0]  base_a, base_b, base_c, base_d;
   logic         captured;
@@ -329,7 +329,7 @@ module cft_engine #(
       beat_idx <= '0;
       beats_total <= '0;
       prec_r <= 2'd0;
-      op_r <= 4'd0;
+      op_r <= 8'd0;
       rnd_r <= 3'd0;
       err_acc <= 3'b0;
       base_a <= '0; base_b <= '0; base_c <= '0; base_d <= '0;

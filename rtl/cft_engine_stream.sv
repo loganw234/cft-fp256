@@ -47,7 +47,7 @@ module cft_engine_stream #(
     output logic         done,
     output logic [4:0]   flags_acc,
     output logic [2:0]   err_acc,
-    input  logic [3:0]   cfg_op,
+    input  logic [7:0]   cfg_op,
     input  logic [3:0]   cfg_prec,
     input  logic [2:0]   cfg_rnd,
     input  logic [63:0]  cfg_n,
@@ -143,7 +143,7 @@ module cft_engine_stream #(
   // ---- run control ---------------------------------------------------
   logic         running;
   logic [1:0]   prec_r;
-  logic [3:0]   op_r;
+  logic [7:0]   op_r;
   logic [2:0]   rnd_r;
   logic [63:0]  beats_total;
   logic [63:0]  base_a, base_b, base_c, base_d;
@@ -161,7 +161,7 @@ module cft_engine_stream #(
       running <= 1'b0;
       done <= 1'b0;
       prec_r <= 2'd0;
-      op_r <= 4'd0;
+      op_r <= 8'd0;
       rnd_r <= 3'd0;
       beats_total <= '0;
       base_a <= '0; base_b <= '0; base_c <= '0; base_d <= '0;

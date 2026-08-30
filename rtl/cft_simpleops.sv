@@ -34,7 +34,7 @@ module cft_simpleops #(
     parameter int EXP_W = 8,
     parameter int MAN_W = 23
 ) (
-    input  logic [3:0]           op,
+    input  logic [7:0]           op,
     input  logic [EXP_W+MAN_W:0] a,
     input  logic [EXP_W+MAN_W:0] b,
     input  logic [EXP_W+MAN_W:0] c,
@@ -46,19 +46,28 @@ module cft_simpleops #(
   localparam int W = 1 + EXP_W + MAN_W;
   localparam int FL_INVALID = 0;
 
-  localparam logic [3:0] OP_ABS      = 4'd4;
-  localparam logic [3:0] OP_NEG      = 4'd5;
-  localparam logic [3:0] OP_COPYSIGN = 4'd6;
-  localparam logic [3:0] OP_MIN      = 4'd7;
-  localparam logic [3:0] OP_MAX      = 4'd8;
-  localparam logic [3:0] OP_MINNUM   = 4'd9;
-  localparam logic [3:0] OP_MAXNUM   = 4'd10;
-  localparam logic [3:0] OP_SELECT   = 4'd11;
-  localparam logic [3:0] OP_CMPLT    = 4'd12;
-  localparam logic [3:0] OP_CMPLE    = 4'd13;
-  localparam logic [3:0] OP_CMPEQ    = 4'd14;
+  localparam logic [7:0] OP_ABS = 8'd4;
+  localparam logic [7:0] OP_NEG = 8'd5;
+  localparam logic [7:0] OP_COPYSIGN = 8'd6;
+  localparam logic [7:0] OP_MIN = 8'd7;
+  localparam logic [7:0] OP_MAX = 8'd8;
+  localparam logic [7:0] OP_MINNUM = 8'd9;
+  localparam logic [7:0] OP_MAXNUM = 8'd10;
+  localparam logic [7:0] OP_SELECT = 8'd11;
+  localparam logic [7:0] OP_CMPLT = 8'd12;
+  localparam logic [7:0] OP_CMPLE = 8'd13;
+  localparam logic [7:0] OP_CMPEQ = 8'd14;
+  localparam logic [7:0] OP_IAND   = 8'd16;
+  localparam logic [7:0] OP_IOR    = 8'd17;
+  localparam logic [7:0] OP_IXOR   = 8'd18;
+  localparam logic [7:0] OP_IADD   = 8'd19;
+  localparam logic [7:0] OP_ISUB   = 8'd20;
+  localparam logic [7:0] OP_ISHL   = 8'd21;
+  localparam logic [7:0] OP_ISHR   = 8'd22;
+  localparam logic [7:0] OP_ICMPLT = 8'd23;
 
   localparam int BIAS = (1 << (EXP_W - 1)) - 1;
+  localparam int SHB  = $clog2(W);   // every W here is a power of two
 
   logic [W-1:0]     qnan, one, pzero;
   logic [EXP_W-1:0] bias_f;
@@ -121,9 +130,18 @@ module cft_simpleops #(
   assign unord  = a_nan || b_nan;
   assign is_cmp = (op == OP_CMPLT) || (op == OP_CMPLE) || (op == OP_CMPEQ);
 
+  // Integer group: the encoding as a W-bit unsigned word. Shift counts
+  // come from b's low SHB bits, so no count can be out of range.
+  logic is_int;
+  logic [SHB-1:0] shamt;
+  assign shamt  = b[SHB-1:0];
+  assign is_int = (op == OP_IAND) || (op == OP_IOR) || (op == OP_IXOR) ||
+                  (op == OP_IADD) || (op == OP_ISUB) || (op == OP_ISHL) ||
+                  (op == OP_ISHR) || (op == OP_ICMPLT);
+
   assign valid = (op == OP_ABS) || (op == OP_NEG) ||
                  (op == OP_COPYSIGN) || is_minmax ||
-                 (op == OP_SELECT) || is_cmp;
+                 (op == OP_SELECT) || is_cmp || is_int;
 
   always_comb begin
     d     = a;
@@ -135,6 +153,14 @@ module cft_simpleops #(
       // Data movement: inspects c's magnitude and nothing else, so it
       // carries NaNs and infinities through intact and signals nothing.
       OP_SELECT:   d = (c[W-2:0] != 0) ? a : b;
+      OP_IAND:     d = a & b;
+      OP_IOR:      d = a | b;
+      OP_IXOR:     d = a ^ b;
+      OP_IADD:     d = a + b;
+      OP_ISUB:     d = a - b;
+      OP_ISHL:     d = a << shamt;
+      OP_ISHR:     d = a >> shamt;            // logical, never arithmetic
+      OP_ICMPLT:   d = (a < b) ? one : pzero; // unsigned, yields a float
       default: begin
         if (is_minmax) begin
           flags[FL_INVALID] = a_snan || b_snan;

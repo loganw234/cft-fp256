@@ -20,7 +20,7 @@ module cft_opmux #(
     parameter int EXP_W = 8,
     parameter int MAN_W = 23
 ) (
-    input  logic [3:0]           op,
+    input  logic [7:0]           op,
     input  logic [EXP_W+MAN_W:0] a,
     input  logic [EXP_W+MAN_W:0] b,
     input  logic [EXP_W+MAN_W:0] c,
@@ -32,10 +32,10 @@ module cft_opmux #(
   localparam int W    = 1 + EXP_W + MAN_W;
   localparam int BIAS = (1 << (EXP_W - 1)) - 1;
 
-  localparam logic [3:0] OP_FMA = 4'd0;
-  localparam logic [3:0] OP_ADD = 4'd1;
-  localparam logic [3:0] OP_SUB = 4'd2;
-  localparam logic [3:0] OP_MUL = 4'd3;
+  localparam logic [7:0] OP_FMA = 8'd0;
+  localparam logic [7:0] OP_ADD = 8'd1;
+  localparam logic [7:0] OP_SUB = 8'd2;
+  localparam logic [7:0] OP_MUL = 8'd3;
 
   logic [EXP_W-1:0] bias_f;
   logic [W-1:0]     one;

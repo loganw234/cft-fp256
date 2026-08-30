@@ -83,7 +83,8 @@ module cft_krnl #(
   logic        start, busy, done;
   logic [4:0]  eng_flags;
   logic [2:0]  eng_err;
-  logic [3:0]  cfg_op, cfg_prec;
+  logic [7:0]  cfg_op;
+  logic [3:0]  cfg_prec;
   logic [2:0]  cfg_rnd;
   logic [63:0] cfg_n, cfg_a, cfg_b, cfg_c, cfg_d;
 

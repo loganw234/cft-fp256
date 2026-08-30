@@ -85,7 +85,7 @@ def main():
     bo_a, bo_b, bo_c = make_bo(2, va), make_bo(3, vb), make_bo(4, vc)
     bo_d = make_bo(5)
 
-    mode = op | (PREC_CODE[args.format] << 4) | (rnd << 8)
+    mode = op | (PREC_CODE[args.format] << 8) | (rnd << 12)
     run = krnl(mode, args.n, bo_a, bo_b, bo_c, bo_d)
     run.wait()
 

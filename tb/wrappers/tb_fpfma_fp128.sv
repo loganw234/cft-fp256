@@ -11,7 +11,7 @@ module tb_fpfma_fp128 (
     input  logic         rst_n,
     input  logic         in_valid,
     input  logic [2:0]   rnd,
-    input  logic [3:0]   op,
+    input  logic [7:0]   op,
     input  logic [127:0] a,
     input  logic [127:0] b,
     input  logic [127:0] c,
