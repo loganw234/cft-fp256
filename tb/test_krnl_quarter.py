@@ -41,6 +41,7 @@ from cft_golden import (  # noqa: E402
 from test_krnl import (run_op, check_op_groups,  # noqa: E402
                        CAPS, MAGIC, VERSION, CTRL)
 from test_krnl_reduce import run_sum  # noqa: E402
+import busfx  # noqa: E402
 
 
 @cocotb.test()
@@ -53,15 +54,18 @@ async def quarter_tile_end_to_end(dut):
     ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
                        dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
                        size=2 ** 20)
-    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
-               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
-               size=2 ** 20, mem=ram_a.mem)
-    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
-               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
-               size=2 ** 20, mem=ram_a.mem)
-    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
-                dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
-                size=2 ** 20, mem=ram_a.mem)
+    # Bound rather than discarded: the backpressure below has to reach
+    # every channel of every master, and a slave nothing holds a
+    # reference to is a slave nothing can stall.
+    ram_b = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20, mem=ram_a.mem)
+    ram_c = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20, mem=ram_a.mem)
+    ram_d = AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                        dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                        size=2 ** 20, mem=ram_a.mem)
     ram = ram_a
 
     dut.ap_rst_n.value = 0
@@ -124,6 +128,35 @@ async def quarter_tile_end_to_end(dut):
     await run_sum(dut, axil, ram, FP64, 1, RND_RNE, seed=326)
     await run_sum(dut, axil, ram, FP64, 7, RND_RNE, seed=327)
     await run_sum(dut, axil, ram, FP32, 9, RND_RDN, seed=328)
+
+    # ---- across a 4KB page ------------------------------------------
+    #
+    # AXI4 forbids a burst from crossing a 4KB boundary, so both the
+    # reader and the writer shorten a burst that would. No bench had
+    # ever reached a boundary at any geometry: every base here is
+    # page-aligned and the largest run was 64 elements, which at 8
+    # bytes per beat is 512 bytes into a 4096-byte page.
+    #
+    # That is where the write path's hardcoded shift hid. It divided
+    # the distance-to-boundary by 32 bytes per beat instead of this
+    # tile's 8, so near a page end it computed ZERO beats - and a zero
+    # target clears w_go permanently, which is a hang rather than a
+    # wrong answer: wr_done stops advancing, ap_done never asserts, and
+    # the only thing left is the host's timeout.
+    #
+    # 1100 fp32 is 550 beats, so it crosses one boundary on every
+    # stream and on the writer. 600 fp64 is 600 beats and crosses on a
+    # different element size, so a shift that is wrong per-format
+    # rather than globally still shows.
+    await run_op(dut, axil, ram, FP32, OP_FMA, 1100, seed=340)
+    await run_op(dut, axil, ram, FP64, OP_ADD, 600, seed=341)
+
+    # And once more with the bus stalling, because the boundary case
+    # and the refill case interact: a burst shortened by the boundary
+    # is also the burst most likely to be in flight when a FIFO drains.
+    busfx.stall(ram_a, ram_b, ram_c, ram_d, seed=7700, duty=0.4)
+    await run_op(dut, axil, ram, FP32, OP_FMA, 1100, seed=342)
+    busfx.unstall(ram_a, ram_b, ram_c, ram_d)
 
     dut._log.info("quarter tile (BEAT_BITS=64, fp32+fp64): bit-exact "
                   "against the same golden model as the full tile, "

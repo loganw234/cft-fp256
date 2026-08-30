@@ -11,9 +11,11 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl quarter clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl \
+        quarter faults clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl quarter
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl quarter \
+     faults
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -79,6 +81,16 @@ quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \
 		COCOTB_RESULTS_FILE=sim_build/quarter/results.xml
+
+# What the kernel does when the memory system misbehaves: error
+# responses on every master, and burst-length violations in both
+# directions. The only bench where STATUS is ever non-zero, and the
+# only one that asserts ap_done arrives at all - a design that latches
+# a fault and then waits forever passes every other target here.
+faults:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_faults SIM_BUILD=sim_build/faults \
+		COCOTB_RESULTS_FILE=sim_build/faults/results.xml
 
 clean:
 	rm -rf sim_build results.xml

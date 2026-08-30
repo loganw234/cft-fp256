@@ -362,6 +362,9 @@ module cft_engine_stream #(
                      : (cfg_n >> beat_sh);
 
   logic start_accept, fifo_clear, wfinish;
+  // Abandoning a run because the memory system broke the protocol.
+  // Driven in the abort block near the sticky fault registers.
+  logic abort, afinish;
   assign start_accept = start && !running;
   assign fifo_clear   = start_accept;
   assign busy = running;
@@ -418,7 +421,7 @@ module cft_engine_stream #(
         if (beats_new == 0) done <= 1'b1;
         else running <= 1'b1;
       end
-      if (wfinish) begin
+      if (wfinish || afinish) begin
         running <= 1'b0;
         done <= 1'b1;
         // synthesis translate_off
@@ -617,7 +620,11 @@ module cft_engine_stream #(
       // so the next candidate address is computed from a state that
       // already includes it. Deciding at handshake instead would let the
       // combinational len re-derive the same burst twice.
-      assign launch = running && !ar_pend && (len != 8'd0) &&
+      // !abort: once the run is being abandoned no NEW burst is
+      // issued. An AR already asserted is left alone - ARVALID must
+      // hold until ARREADY (AXI4 A3.1.2) - and `!ar_pend` above
+      // already prevents this from disturbing one.
+      assign launch = running && !abort && !ar_pend && (len != 8'd0) &&
                       (rd_outst[rs] < AR_MAX);
 
       assign rd_araddr[rs]  = ar_addr_q;
@@ -1232,7 +1239,10 @@ module cft_engine_stream #(
   end
 
   logic w_go;
-  assign w_go = running && (w_target != 8'd0) && (d_cnt >= w_target);
+  // No NEW burst once the run is being abandoned. A burst already
+  // committed still finishes - see the abort block.
+  assign w_go = running && !abort && (w_target != 8'd0) &&
+                (d_cnt >= w_target);
 
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
@@ -1272,10 +1282,26 @@ module cft_engine_stream #(
   assign m_axi_d_awvalid = (wr_state == W_AW);
   assign m_axi_d_awaddr  = addr_w;
   assign m_axi_d_awlen   = w_len - 8'd1;
-  assign m_axi_d_wvalid  = (wr_state == W_DATA) && (d_cnt != 0);
+  // A burst that has been committed with AWVALID must deliver exactly
+  // AWLEN+1 W beats - AXI4 A3.4.1, and there is no way to withdraw it.
+  //
+  // Normally d_cnt is guaranteed by w_go, which only starts a burst
+  // once the whole thing is buffered. On an ABORT that guarantee is
+  // gone: compute was starved by the fault, so the result FIFO can run
+  // dry mid-burst and WVALID would drop forever, which is the deadlock
+  // this whole mechanism exists to remove - just moved to the write
+  // channel. So while aborting the engine keeps WVALID asserted and
+  // finishes the burst with whatever d_qout happens to hold.
+  //
+  // Sending stale data is correct here, not a compromise. The run is
+  // being reported as failed: STATUS is non-zero, the host discards
+  // the buffer without reading it, and the alternative is hanging the
+  // interconnect on a burst nobody can complete.
+  assign m_axi_d_wvalid  = (wr_state == W_DATA) && ((d_cnt != 0) || abort);
   assign m_axi_d_wdata   = d_qout;
   assign m_axi_d_wlast   = (w_cnt == w_len - 8'd1);
-  assign d_rd            = m_axi_d_wvalid && m_axi_d_wready;
+  // ...but never pop a FIFO that has nothing in it.
+  assign d_rd            = m_axi_d_wvalid && m_axi_d_wready && (d_cnt != 0);
   assign m_axi_d_bready  = (wr_state == W_B);
 
   assign wfinish = (wr_state == W_B) && m_axi_d_bvalid &&
@@ -1310,6 +1336,56 @@ module cft_engine_stream #(
         err_acc[ERR_RLEN] <= 1'b1;
     end
   end
+
+  // ---- abandoning a run the memory system broke -----------------------
+  //
+  // ERR_RRESP and ERR_BRESP need nothing here: the beat still arrives,
+  // RVALID is asserted alongside the error response, so the run
+  // completes on its own and STATUS tells the host to discard it.
+  //
+  // ERR_RLEN is different in kind. A short burst means beats that were
+  // promised never arrive: the FIFO never fills, compute stalls, and
+  // ap_done never asserts. The fault is latched in a register nothing
+  // can read, because nothing can read anything until the run ends -
+  // and it does not end. The host's only recourse was a twenty-minute
+  // timeout and a poisoned device handle.
+  //
+  // So a length error now ends the run. AXI4 requires a slave to
+  // return exactly AxLEN+1 transfers (A3.4.1) and says nothing about
+  // what a master does when one does not, but every neighbouring
+  // convention says the same thing: PCIe logs the error and completes
+  // the transaction, a Xilinx AXI interconnect answers SLVERR rather
+  // than stalling the fabric, and ap_ctrl_hs has no representation for
+  // a run that never finishes. A hang costs a card reset. A clean
+  // CFT_ERR_BUS_FAULT costs a retry.
+  //
+  // Abandoning is not the same as stopping. Three things must still
+  // happen or the abort is itself a protocol violation:
+  //
+  //   1. No new AR or AW is issued (see `launch` and `w_go`).
+  //   2. A write burst already committed with AWVALID delivers all
+  //      AWLEN+1 beats, with junk if the FIFO has run dry - see
+  //      m_axi_d_wvalid.
+  //   3. Outstanding read bursts are allowed to land before done is
+  //      asserted, so their beats cannot arrive during the NEXT run
+  //      and corrupt it. RREADY is tied high, so they drain without
+  //      help; afinish just waits for the count to reach zero.
+  //
+  // What this deliberately does NOT cover: a slave that stops
+  // answering entirely, sending neither the remaining beats nor RLAST.
+  // Nothing here can distinguish that from a slow slave, and guessing
+  // is worse than waiting - so that case still belongs to the host's
+  // timeout, which is why the timeout stays.
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n)                 abort <= 1'b0;
+    else if (start_accept)         abort <= 1'b0;
+    else if (running && |rlen_err) abort <= 1'b1;
+  end
+
+  assign afinish = abort && (wr_state == W_IDLE) &&
+                   (rd_outst[0] == 8'd0) &&
+                   (rd_outst[1] == 8'd0) &&
+                   (rd_outst[2] == 8'd0);
 
   // ---- sticky flags --------------------------------------------------
   //

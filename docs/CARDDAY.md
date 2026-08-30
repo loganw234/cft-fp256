@@ -201,8 +201,29 @@ spirit - enough to replay, not enough to be a chore.
   2 against what is being issued.
 - **A bus fault** (`CFT_ERR_BUS_FAULT`) means the memory system did not
   vouch for the data - a bad pointer or alignment, not arithmetic.
-  `cft_last_error()` carries what XRT said.
-- **A hang** is most likely a short or long read burst; the engine
-  records it in `err_acc` and then never completes, which is why the
-  library has a timeout. `CFT_ERR_TIMEOUT` plus the STATUS bits is the
-  diagnosis.
+  `cft_last_error()` carries what XRT said, and STATUS says which of
+  the three faults it was: [0] a read response was not OKAY, [1] a
+  write response was not OKAY, [2] a read burst delivered the wrong
+  number of beats.
+
+  A **wrong beat count** (STATUS bit 2) is worth separating from the
+  other two. The other two are the memory refusing an address; this
+  one is the memory breaking the AXI protocol, which on a working
+  interconnect should not happen at all and points at the shell, the
+  pseudo-channel mapping in `link.cfg`, or a pointer that made a burst
+  cross a 4KB boundary.
+- **A hang should no longer be how a bus fault presents.** It used to
+  be: a short read burst starves compute, so the engine latched the
+  error and never completed, and the host's timeout was the only
+  recourse. Since 2026-08-30 a length error ENDS the run - the engine
+  stops issuing new bursts, finishes any write burst it had already
+  committed, lets outstanding reads land, and asserts `ap_done` with
+  STATUS non-zero. So a length fault now arrives as a prompt
+  `CFT_ERR_BUS_FAULT` rather than a twenty-minute wait.
+
+  A genuine `CFT_ERR_TIMEOUT` therefore means something the engine
+  cannot see: a slave that stopped answering entirely, sending neither
+  the remaining beats nor `RLAST`. Nothing in the kernel can tell that
+  from a slow slave, which is why the timeout still exists. Read the
+  STATUS bits the timeout path now reports alongside it - clean STATUS
+  with a timeout is a stalled interconnect, not a kernel bug.

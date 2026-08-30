@@ -39,6 +39,8 @@ CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
 FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
 
+import busfx  # noqa: E402
+
 A_BASE, B_BASE, C_BASE, D_BASE = 0x00000, 0x40000, 0x80000, 0xC0000
 
 # CAPS[15:8] is one bit per opcode group. Checked by NAME rather than
@@ -252,6 +254,59 @@ async def krnl_end_to_end(dut):
     # that bank's own operand. Run it on every rung, not just two.
     await run_op(dut, axil, ram, FP64, OP_SELECT, 16, seed=215)
     await run_op(dut, axil, ram, FP128, OP_SELECT, 8, seed=216)
+
+    # ---- across a 4KB page -------------------------------------------
+    #
+    # AXI4 forbids a burst from crossing a 4KB boundary, so both reader
+    # and writer shorten a burst that would. Nothing here had ever
+    # reached a boundary: every base is page-aligned and the largest
+    # run above is 48 elements, which at 32 bytes per beat is 192 bytes
+    # into a 4096-byte page. The shortening logic on both paths was
+    # therefore carried by inspection alone.
+    #
+    # 1104 fp32 is 138 beats and 600 fp64 is 150, so each crosses one
+    # boundary on all four masters. Both are whole numbers of beats,
+    # which elementwise requires - the host pads and the kernel relies
+    # on it. The stock cocotbext-axi slave asserts if a burst it
+    # receives crosses a page, so a DUT that forgot to shorten fails
+    # here rather than quietly reading the wrong memory.
+    await run_op(dut, axil, ram, FP32, OP_FMA, 1104, seed=250)
+    await run_op(dut, axil, ram, FP64, OP_ADD, 600, seed=251)
+
+    # ---- and now with a slave that is not cooperative ----------------
+    #
+    # Everything above ran against a memory that answers in zero cycles
+    # and never withholds a handshake. That is the schedule this design
+    # is LEAST likely to be wrong on, and it is the only one the suite
+    # had ever seen.
+    #
+    # The assertion is not "it still works". run_op scores every result
+    # against the golden model, and the model has no notion of a cycle
+    # - so a run that survives a hostile schedule and still matches is
+    # a statement that the schedule did not reach the answer. That is
+    # the product claim, tested against the most plausible thing that
+    # could quietly break it.
+    #
+    # Three duties rather than one: light stalling changes arrival
+    # order without emptying anything, heavy stalling drains the FIFOs
+    # and exercises the refill path, and they fail differently.
+    for i, duty in enumerate((0.15, 0.45, 0.75)):
+        busfx.stall(ram_a, ram_b, ram_c, ram_d, seed=9000 + i, duty=duty)
+        dut._log.info(f"backpressure: duty {duty} on every channel")
+        await run_op(dut, axil, ram, FP32, OP_FMA, 40, seed=300 + i)
+        await run_op(dut, axil, ram, FP64, OP_ADD, 20, seed=310 + i)
+        await run_op(dut, axil, ram, FP256, OP_FMA, 5, seed=320 + i)
+        # 136 fp32 is 17 beats: one full 16-beat burst plus a single
+        # ragged one. That is the awkward size for an ELEMENTWISE run -
+        # a whole number of beats that is not a whole number of bursts.
+        #
+        # Not 37. n must be a whole number of beats for elementwise;
+        # the host pads and the kernel relies on it, so 37 leaves the
+        # last 5 elements untouched and the bench reports 5 of 37
+        # differing. Which it duly did on the first backpressure run -
+        # a fault in the test, caught by the test.
+        await run_op(dut, axil, ram, FP32, OP_MUL, 136, seed=330 + i)
+    busfx.unstall(ram_a, ram_b, ram_c, ram_d)
 
 
 # ---- raw AXI4-Lite corner cases --------------------------------------
