@@ -106,6 +106,28 @@ if [ ! -d "$PLATFORM_REPO_PATHS/$PLATFORM" ]; then
 fi
 [ -d "$PLATFORM_REPO_PATHS/$PLATFORM" ] || { echo "ERROR: platform $PLATFORM not found under $PLATFORM_REPO_PATHS"; exit 1; }
 
+# Capture the provenance NOW, not when the build ends.
+#
+# A link takes about two hours, and the tree does not stop moving for
+# it. Reading `git rev-parse HEAD` in the manifest step - which is
+# where this used to happen - records whatever the checkout had become
+# by then, which for a long build is routinely a different commit from
+# the one that was packaged. The manifest would then name a commit the
+# artifact was not built from, which is worse than naming none: the
+# whole point of it is that a result can be traced to the exact RTL
+# that produced it.
+#
+# Nearly done wrong on 2026-08-29, when a second build was about to
+# sync the checkout forward while a quad link still had an hour to go.
+SRC_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+SRC_DESCRIBE=$(git describe --tags --always --dirty 2>/dev/null || echo unknown)
+if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+  SRC_TREE="DIRTY - this artifact does not correspond to any commit"
+else
+  SRC_TREE="clean"
+fi
+SRC_STAMP=$(date -Iseconds)
+
 mkdir -p "$BUILD"
 # stale cross-era artifacts poison the flow: package_xo inspects an
 # existing .xo before replacing it and refuses newer-version files
@@ -145,14 +167,12 @@ for t in $TARGETS; do
     echo "sha256:        $(sha256sum "$xb" | cut -d' ' -f1)"
     echo "bytes:         $(stat -c%s "$xb")"
     echo "built:         $(date -Iseconds)"
+    echo "started:       $SRC_STAMP"
     echo "host:          $(hostname)"
-    echo "commit:        $(git rev-parse HEAD 2>/dev/null || echo unknown)"
-    echo "describe:      $(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
-    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-      echo "tree:          DIRTY - this artifact does not correspond to any commit"
-    else
-      echo "tree:          clean"
-    fi
+    # Sampled before package_xo, not here - see the comment there.
+    echo "commit:        $SRC_COMMIT"
+    echo "describe:      $SRC_DESCRIBE"
+    echo "tree:          $SRC_TREE"
     echo "target:        $t"
     echo "platform:      $PLATFORM"
     echo "part:          $PART"
