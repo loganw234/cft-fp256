@@ -104,10 +104,16 @@ dropping the wide rungs with it. Both directions are bounded -
 instance rather than a loop and would silently compute only the low
 element.
 
-| configuration | beat | lanes (32/64/128/256) | for |
-|---|---|---|---|
-| full tile | 256 | 8 / 4 / 2 / 1 | Alveo; 256 is the HBM pseudo-channel width |
-| quarter tile | 64 | 2 / 1 / - / - | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+| configuration | beat | lanes (32/64/128/256) | LUT | for |
+|---|---|---|---|---|
+| full tile | 256 | 8 / 4 / 2 / 1 | 119,543 measured | Alveo; 256 is the HBM pseudo-channel width |
+| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated | the largest an Artix-7 100T can hold - see ROADMAP's open-core sizing |
+| quarter tile | 64 | 2 / 1 / - / - | ~20k estimated | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+
+**The width is a real constraint, not a preference.** A full tile is
+119,543 LUTs and 262 DSPs, which exceeds an Artix-7 100T on both counts
+(189% and 109%). Only the 200T takes a full tile among 7-series parts.
+That is why BEAT_BITS exists and why it is tested rather than declared.
 
 The quarter tile is not hypothetical - `tb/test_krnl_quarter.py` runs
 it against the same golden model, so the parameter is proven rather

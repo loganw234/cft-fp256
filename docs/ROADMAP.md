@@ -539,14 +539,57 @@ produce bit-identical results to the U50C - "verify our silicon
 claims on hardware you can audit down to place-and-route" is a
 conformance story no closed flow can tell.
 
-| target | open flow | fits | role |
+#### What a tile actually costs (measured 2026-08-30, corrected)
+
+The fits below were originally estimated by summing the fp32 and fp256
+OOC numbers. That undercounted by more than half, because a full tile
+carries **all four rungs**, and the earlier arithmetic left out the
+fp64 and fp128 banks entirely. The real numbers, from differencing
+routed in-shell builds on the U50:
+
+| | LUT | DSP |
+|---|---|---|
+| 8x fp32 lanes | 20,000 | 16 |
+| 4x fp64 lanes | 18,800 | 36 |
+| 2x fp128 lanes | 23,000 | 70 |
+| 1x fp256 unit | 31,000 | 140 |
+| arithmetic subtotal | 92,800 | **262** |
+| engine, FIFOs, AXI plumbing, steering | 26,743 | 0 |
+| **one 256-bit tile, measured** | **119,543** | **262** |
+| one tile with four AXI masters | 128,741 | 262 |
+
+The DSP column reconciles **exactly** - 262 predicted from the per-lane
+ladder, 262 measured in the routed design - which is the reason to
+trust the LUT column too, and the reason this table is usable for
+sizing any other part.
+
+Two consequences, and the first one is unwelcome:
+
+**A full 256-bit tile does not fit on an Artix-7 100T.** 119,543 LUTs
+against 63,400 is 189%, and 262 DSPs against 240 is 109%. The board was
+ordered on a "full tile, ~79% LUTs" estimate that was simply wrong.
+It is still the right dev board - it is openXC7 and LiteX's reference
+target, which is worth more than width - but what comes up on it is a
+narrower tile, not the U50's.
+
+**7-series will be worse than these numbers, not better.** They are
+UltraScale+ figures, and the carry structure differs: the fp256 adder
+uses 21 CARRY8 per critical path, which becomes 42 CARRY4 on Artix.
+Wide-significand arithmetic is exactly the pattern that penalty falls
+on, so treat every 7-series estimate below as optimistic.
+
+BEAT_BITS is the knob that makes this a configuration rather than a
+problem, and it is already a working, tested one - `tb_krnl_quarter`
+runs the same RTL at 64-bit beats against the same golden model.
+
+| target | open flow | what actually fits | role |
 |---|---|---|---|
-| **Arty A7-100T - dev board, ORDERED 2026-08-29** | openXC7 + LiteX treat it as their reference target - open bring-up on rails | full tile (~79% LUTs, 165/240 DSPs) | where the open full tile comes up first; Ethernet/Etherbone streaming; no transceivers ever (CSG324) |
-| **Alchitry Pt V2 (XC7A100T-2) - the module, x4 when bundled** | same silicon as Arty; port is an afternoon | full tile | the carrier/quad future: GTPs -> LitePCIe, module ring, verified execution modes |
-| Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | quarter-tile (4x fp32 + engine, ~67%) or one fp64 rung; fp256 physically impossible (needs 27.8k of 20.8k LUTs) | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
-| ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | 8x fp32 bank + engine only | fallback nano-tile if boards resurface (scarce as of 2026-08) |
-| Artix-7 200T | openXC7 | full tile even with LUT-fallback multipliers | the headroom alternative if open-full-tile-today ever becomes a hard requirement |
-| Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile (138k LUT4) | cheapest option - verify Apicula status first |
+| **Arty A7-100T - dev board, ORDERED 2026-08-29** | openXC7 + LiteX treat it as their reference target - open bring-up on rails | NOT a full tile (189% LUT, 109% DSP). Estimated: a 128-bit-beat tile through the fp128 rung, ~44k LUT / ~69%, or a 256-bit fp32-only tile at ~74% | where the open tile comes up first, at reduced width; Ethernet/Etherbone streaming; no transceivers ever (CSG324) |
+| **Alchitry Pt V2 (XC7A100T-2) - the module, x4 when bundled** | same silicon as Arty; port is an afternoon | same as Arty - reduced width, not a full tile | the carrier/quad future: GTPs -> LitePCIe, module ring, verified execution modes |
+| Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | the quarter tile as already built: 64-bit beats, 2x fp32 + 1x fp64, ~20k LUT estimated against 20,800 - tight, and the first thing to measure. fp256 remains physically impossible at any width | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
+| ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | fp32 bank + engine at reduced width | fallback nano-tile if boards resurface (scarce as of 2026-08) |
+| **Artix-7 200T** | openXC7 | **the only 7-series part that takes a full tile**: 119,543 of 134,600 LUT is 89%, and 262 of 740 DSPs is 35% - no LUT-fallback multipliers needed, contrary to the earlier note | the headroom option, and now the *only* open route to a full-width tile |
+| Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile on LUT count (138k LUT4) but LUT4s are not LUT6s - assume worse, and the DSP story is unverified | cheapest option - verify Apicula status first |
 
 The Pt's serialized-multiplier note is a real design option, not a
 consolation: a multi-cycle 237-bit significand multiply built for
