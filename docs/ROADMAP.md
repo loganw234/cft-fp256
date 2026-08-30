@@ -295,6 +295,46 @@ way atlas-darkroom records a census.
 
   7753428 (the reverted S11 split) is still worth cherry-picking back
   and retesting as a pair, since S11 was only ever second-worst.
+- [x] **One AXI master per stream (2026-08-30):** the engine used to
+  share one 256-bit port between three operand reads and one result
+  write. Steady state costs 4 transfers per beat and a port retires
+  one per cycle, so it was pinned at ~4.4 cycles/beat no matter how
+  fast the arithmetic ran - the pipe accepts a beat every cycle.
+  Four masters, `AR_DEPTH=4` bursts in flight per stream, and each
+  master its own HBM pseudo-channel group: **1.25 cycles/beat, a
+  3.5x.**
+
+  A dedicated port alone would not have done it. With a single
+  outstanding AR the reader waits out the full memory latency after
+  every RLAST, and a 16-beat burst followed by a ~60-cycle bubble is
+  ~4.8 cycles/beat - back where it started. Pipelining the address
+  phases is what converts four ports into four times the throughput.
+
+  Two bugs found in the building of it, both of the kind a cooperative
+  testbench does not catch. `ARADDR`/`ARLEN` were combinational on a
+  FIFO count while `ARVALID` was asserted, which violates AXI4 A3.2.1
+  - payload must be stable until handshake - and is invisible to a
+  memory model that samples once. And `len[FIFO_LOG2+1:0]` selected
+  bit 8 of an 8-bit signal, a width trap that reads as correct.
+  FIFO space is now reserved at AR issue rather than at R arrival,
+  because two bursts in flight can together exceed the space each
+  looked at separately, and that overflow would corrupt operands
+  rather than stall.
+
+  **The 1.25 is a simulation number and is labelled as one.**
+  cocotbext-axi's memory model is cooperative in exactly the way an
+  HBM controller is not obliged to be. What it settles is that the
+  port was the bottleneck and that splitting it removed that
+  bottleneck; where the number lands on silicon is CARDDAY step 6.
+
+  What is NOT yet known is the area. Per-CU AXI plumbing was already
+  24k LUT - 20% of a tile, as large as the whole fp128 bank - and this
+  is four masters per tile against one, on a quad that already sits at
+  69% of the device. A single-tile measurement against the known
+  243,440-LUT baseline is the outstanding number, and if sixteen
+  masters do not route on a quad then the honest summary is "3.5x per
+  tile, at the cost of tile count", which is a decision rather than a
+  detail.
 - [x] **Reduction ops (2026-08-30):** `CFT_SUM` (24) and `CFT_DOT` (25),
   with the index-fixed tree the contract had already promised. Golden
   model, libcft, RTL and the device path, plus the multi-tile
