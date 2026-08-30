@@ -625,7 +625,7 @@ module cft_fpfma_pipe #(
   always_ff @(posedge clk) begin : stage13
     int K, sh_amt;
     logic [NW-1:0] shifted, low_mask, ones;
-    logic [P:0] kept;
+    logic [P:0] kept, kept_p1;
     logic guard, sticky, up;
     logic [P-1:0] kept_u;
     logic guard_u, sticky_u, up_u, carry_u;
@@ -668,8 +668,26 @@ module cft_fpfma_pipe #(
           sticky = s12_stk;
         end
       end
+      // Round by SELECTING between kept and kept+1, not by adding up.
+      //
+      // These are the same value. They are not the same circuit, and
+      // this stage is the measured critical path of the whole design
+      // (S12 -> S13, 39 logic levels, 21 of them CARRY8, ~61% route).
+      //
+      // `up` depends on guard, sticky and kept[0], all of which come
+      // out of the variable shift above - so `kept + up` cannot begin
+      // until the guard/sticky reduction and round_up have finished,
+      // and a 238-bit ripple carry then sits at the END of an already
+      // long path. Computing kept+1 as soon as `kept` exists runs that
+      // carry in PARALLEL with the reduction that produces `up`, and
+      // leaves one multiplexer where the adder used to be.
+      //
+      // Nothing about the arithmetic changes, which is the point: this
+      // is the most safety-critical logic here, and the 441,000-case
+      // suite is what has to agree afterwards.
+      kept_p1 = kept + {{P{1'b0}}, 1'b1};
       up = round_up(rd_dly[DEPTH-3], s12_rsign, guard, sticky, kept[0]);
-      s13_kept_r  <= kept + {{P{1'b0}}, up};
+      s13_kept_r  <= up ? kept_p1 : kept;
       s13_inexact <= guard || sticky;
     end
   end
