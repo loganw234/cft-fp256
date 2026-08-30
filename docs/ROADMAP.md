@@ -295,8 +295,49 @@ way atlas-darkroom records a census.
 
   7753428 (the reverted S11 split) is still worth cherry-picking back
   and retesting as a pair, since S11 was only ever second-worst.
-- Reduction ops (dot, sum) with the index-fixed tree the contract
-  already specifies.
+- [x] **Reduction ops (2026-08-30):** `CFT_SUM` (24) and `CFT_DOT` (25),
+  with the index-fixed tree the contract had already promised. Golden
+  model, libcft, RTL and the device path, plus the multi-tile
+  partitioning that a reduction needs and an elementwise op does not.
+
+  **The tree changed once, deliberately, before any hardware existed.**
+  The first version split at the midpoint - the tidier balanced tree.
+  It is index-fixed and satisfies the contract, and it is not
+  streamable. The natural hardware is a binary-counter accumulator
+  (one add per element, ceil(log2 n) levels, carry when a level is
+  occupied), and that machine produces the LARGEST-POWER-OF-TWO split,
+  agreeing with the midpoint only when n is a power of two. Rather than
+  build a walker for a shape nothing wanted, the model moved. Depth is
+  ceil(log2 n) either way, so the accuracy argument - textbook pairwise
+  summation - is unchanged. `stream_reduce()` is that machine written
+  in Python and is the RTL's specification.
+
+  **Carries are deferred, and that is measured.** The adder is 15
+  stages and a carry at level j+1 needs level j's result, so resolving
+  eagerly costs ADD_LATENCY per LEVEL: ~15.5 cycles per input against
+  ~1.0 when the levels are allowed to be in flight together. Total adds
+  is n-1 either way.
+
+  **CFT_DOT is advertised but is not separate hardware.** The contract
+  makes `dot(a,b) == sum(mul(a,b))` exact, flags included, so the host
+  issues an elementwise MUL and then a SUM. The alternative was a
+  multiply pass sharing the accumulator's pipe with tagged results and
+  arbitration between muls and adds - the most schedule-sensitive logic
+  in the engine, for one saved round trip. The composition property
+  went into the contract partly so this choice would exist.
+
+  It also surfaced a pre-existing engine bug that had been invisible:
+  the beat count is a truncating shift, which is correct for
+  elementwise (N is a whole number of beats and the host pads) and
+  silently drops the tail for a reduction, which must be given the true
+  element count. n=1 fp32 computed zero beats and finished having
+  summed nothing.
+
+  VERSION 0x410 -> 0x500, and VERSION's meaning is now written down: it
+  guards the REGISTER MAP, not the feature set, so the host accepts a
+  SET of versions and lets CAPS decide features. One value would have
+  orphaned the card-day images over a feature they were not going to
+  use.
 
 ## v2 - the coordinated part
 

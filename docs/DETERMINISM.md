@@ -166,13 +166,21 @@ and this table is that definition.
 
 ### Unassigned opcodes
 
-Opcode 15 and everything from 24 up are unassigned. They return the
+Opcode 15 and everything from **26** up are unassigned. They return the
 canonical quiet NaN with **invalid** raised, in the hardware and in
 the golden model alike. Deterministic, and visible in the flags -
-which matters because those codes are where divide, square root,
-conversions and the reductions will land, so a host that issues one
-early should learn it now rather than get a plausible number that
-changes meaning under a later bitstream.
+which matters because those codes are where divide, square root and
+conversions will land, so a host that issues one early should learn it
+now rather than get a plausible number that changes meaning under a
+later bitstream.
+
+24 and 25 were unassigned and are not any more: they are `sum` and
+`dot`, assigned 2026-08-30. That is exactly the hazard this section
+warns about, and it played out as designed - a vector set generated
+before the assignment still names opcode 24 "reserved24", and
+replaying one now would score a sum against an answer recorded for the
+unassigned-opcode result. `cft_conformance` detects that specifically
+and says so, rather than reporting a mismatch.
 
 ## Subnormals
 
@@ -244,14 +252,39 @@ directed attributes depending on which side of zero the result lies.
 
 ## Ordering
 
-v0 is elementwise: element i of the output depends on element i of the
-inputs and nothing else, so no ordering question can arise - the flags
-OR is the only cross-element artifact and OR is commutative. When
-reduction ops land (v2), their tree shape is fixed by element index,
+Elementwise work raises no ordering question at all: element i of the
+output depends on element i of the inputs and nothing else, so the
+flags OR is the only cross-element artifact and OR is commutative.
+
+**Reductions landed 2026-08-30 and keep the promise this section made
+before they existed:** their tree shape is fixed by element index,
 never by arrival time or lane availability. A float accumulation whose
-order depends on scheduling is the GPU failure mode this design
-refuses (the darkroom measured it directly: a compare-and-swap deposit
-chain measures warp arrival order, not the plate).
+order depends on scheduling is the GPU failure mode this design refuses
+(the darkroom measured it directly: a compare-and-swap deposit chain
+measures warp arrival order, not the plate).
+
+What that fixes, and what it deliberately leaves free, is worth being
+precise about, because the freedom is load-bearing:
+
+- **Fixed: the pairing.** Which values are added together, and at which
+  level of the tree. `python/cft_golden/reduce.py` defines it - split at
+  the largest power of two inside the index range - and everything else
+  calls that one function.
+- **Free: the schedule.** Adds may be issued in any order and be in
+  flight together. A pair's operands are both determined before it
+  issues, so when it issues cannot reach the answer. The hardware
+  accumulator relies on this: it defers carries so several adds run at
+  once, which is the difference between ~1 and ~15 cycles per element.
+- **Free: the operand side.** `add(a,b) == add(b,a)` bit for bit here -
+  magnitude is symmetric, the sign of an exact cancellation comes from
+  the rounding attribute (6.3) rather than operand order, and NaN
+  results are always the canonical quiet NaN rather than a propagated
+  payload. Verified over 80,000 pairs and pinned by a test, because it
+  is a property three implementations quietly depend on.
+- **Free: which tile.** A partial result is reusable if its range is a
+  node of the tree; which physical tile evaluated that node cannot
+  enter the answer. See docs/SCALING.md - this is why dynamic load
+  balancing is available to a deterministic machine.
 
 ## The verification lattice
 
