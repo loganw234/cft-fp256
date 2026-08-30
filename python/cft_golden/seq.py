@@ -1,0 +1,372 @@
+# Copyright 2026 Logan W.
+# SPDX-License-Identifier: Apache-2.0
+"""The orbit sequencer, in software. This file is the definition of
+correct for programs, as softfloat.py is for arithmetic.
+
+docs/SEQUENCER.md is the design and the argument; this is the
+executable form of it. The RTL will be verified against this, and a
+program's output on hardware must match what `run()` produces here,
+bit for bit.
+
+Two things about the execution model are worth reading before the
+code, because they are the whole determinism argument:
+
+* **Lanes run in lockstep, not independently.** Modelling each lane to
+  completion in turn would be simpler and would give the same answers,
+  but it could not express the early exit - a cross-lane condition -
+  and so could not be used to test that the early exit is invisible.
+  This runs the machine the way the hardware will.
+
+* **The active mask gates flags, not just writes.** An inactive lane
+  contributes nothing: no register write, no deposit, and no exception
+  flag. Masking only the writes would let a dead lane's stale
+  registers raise `invalid` into the run's sticky word, and then the
+  flags would depend on how many lanes were still running - which is
+  exactly the kind of result-depends-on-convergence behaviour the
+  contract exists to forbid.
+"""
+
+import struct
+
+from .formats import FORMATS, PREC_CODE, FpFormat
+from . import softfloat as sf
+
+MAGIC = 0x50544643        # "CFTP" little-endian
+VERSION = 1
+HEADER_WORDS = 8
+INSN_BYTES = 8
+NREG = 16
+MAX_LOOP_DEPTH = 4
+
+# control codes (instruction bit 31 set)
+HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL = 0, 1, 2, 3, 4, 5
+CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
+              DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall"}
+
+# STATUS bits. 0..2 are the engine's bus faults (rtl/cft_csr.sv); the
+# sequencer adds one. It is deliberately not an IEEE flag: the five in
+# FLAGS mean what 754 says they mean, and "your buffer was too small"
+# is not one of them.
+STATUS_DEPOSIT_OVERFLOW = 1 << 3
+
+
+class ProgramError(ValueError):
+    """A program the loader must refuse. Raised at validate() time, so
+    a bad program never reaches a device."""
+
+
+# ---- encoding --------------------------------------------------------
+
+def encode(op, rd=0, ra=0, rb=0, rc=0, rnd=sf.RND_RNE,
+           ka=False, kb=False, kc=False, ctrl=False, imm=0):
+    for name, v in (("rd", rd), ("ra", ra), ("rb", rb), ("rc", rc)):
+        if not 0 <= v < NREG:
+            raise ProgramError(f"{name}={v} outside 0..{NREG - 1}")
+    if not 0 <= op < 256:
+        raise ProgramError(f"op={op} does not fit the opcode byte")
+    if not 0 <= rnd <= 4:
+        raise ProgramError(f"rnd={rnd}; the contract defines 0..4")
+    if not 0 <= imm < (1 << 32):
+        raise ProgramError(f"imm={imm} does not fit 32 bits")
+    return (op | (rd << 8) | (ra << 12) | (rb << 16) | (rc << 20)
+            | (rnd << 24) | (int(bool(ka)) << 27) | (int(bool(kb)) << 28)
+            | (int(bool(kc)) << 29) | (int(bool(ctrl)) << 31)
+            | (imm << 32))
+
+
+def decode(word):
+    """-> dict. Field names match docs/SEQUENCER.md."""
+    return {
+        "op": word & 0xFF,
+        "rd": (word >> 8) & 0xF,
+        "ra": (word >> 12) & 0xF,
+        "rb": (word >> 16) & 0xF,
+        "rc": (word >> 20) & 0xF,
+        "rnd": (word >> 24) & 0x7,
+        "ka": bool((word >> 27) & 1),
+        "kb": bool((word >> 28) & 1),
+        "kc": bool((word >> 29) & 1),
+        "rsv": (word >> 30) & 1,
+        "ctrl": bool((word >> 31) & 1),
+        "imm": (word >> 32) & 0xFFFFFFFF,
+    }
+
+
+# ---- a small assembler, for tests and for writing programs by hand ---
+
+def alu(op, rd, ra=0, rb=0, rc=0, rnd=sf.RND_RNE, ka=False, kb=False,
+        kc=False):
+    return encode(op, rd, ra, rb, rc, rnd, ka, kb, kc, ctrl=False)
+
+
+def halt():
+    return encode(HALT, ctrl=True)
+
+
+def repeat(trip):
+    if trip < 1:
+        raise ProgramError("repeat trip count must be at least 1")
+    return encode(REPEAT, ctrl=True, imm=trip)
+
+
+def endrep():
+    return encode(ENDREP, ctrl=True)
+
+
+def deposit(ra):
+    return encode(DEPOSIT, ra=ra, ctrl=True)
+
+
+def setact(ra):
+    return encode(SETACT, ra=ra, ctrl=True)
+
+
+def actall():
+    return encode(ACTALL, ctrl=True)
+
+
+# ---- the program object ---------------------------------------------
+
+class Program:
+    """Header, constant bank, instruction stream - the bytes the host
+    DMAs to the tile and can read back to attest what ran."""
+
+    def __init__(self, fmt: FpFormat, insns, consts=(), max_deposits=1):
+        self.fmt = fmt
+        self.insns = list(insns)
+        self.consts = list(consts)
+        self.max_deposits = max_deposits
+        self.validate()
+
+    # -- validation ----------------------------------------------------
+
+    def validate(self):
+        if self.max_deposits < 0 or self.max_deposits >= (1 << 32):
+            raise ProgramError(f"max_deposits={self.max_deposits}")
+        for k in self.consts:
+            if not 0 <= k < (1 << self.fmt.width):
+                raise ProgramError("constant does not fit the format")
+
+        depth = 0
+        for pc, word in enumerate(self.insns):
+            d = decode(word)
+            if d["rsv"]:
+                raise ProgramError(f"[{pc}] reserved bit 30 must be zero")
+            if not d["ctrl"]:
+                for key, flag in (("ra", "ka"), ("rb", "kb"), ("rc", "kc")):
+                    if d[flag] and d[key] >= len(self.consts):
+                        raise ProgramError(
+                            f"[{pc}] {key} names constant {d[key]} but the "
+                            f"bank holds {len(self.consts)}")
+                if d["rnd"] > 4:
+                    raise ProgramError(f"[{pc}] rnd={d['rnd']} is reserved")
+                continue
+
+            code = d["op"]
+            if code == REPEAT:
+                depth += 1
+                if depth > MAX_LOOP_DEPTH:
+                    raise ProgramError(
+                        f"[{pc}] loops nest deeper than {MAX_LOOP_DEPTH}")
+            elif code == ENDREP:
+                depth -= 1
+                if depth < 0:
+                    raise ProgramError(f"[{pc}] endrep without repeat")
+            elif code == ACTALL and depth > 0:
+                # docs/SEQUENCER.md P3: the early exit is only provably
+                # invisible if nothing inside a loop can reactivate a
+                # lane. Refusing the program is the cheapest way to
+                # keep that true.
+                raise ProgramError(
+                    f"[{pc}] actall inside a loop would make the "
+                    f"all-lanes-done early exit observable")
+            elif code not in CTRL_NAMES:
+                raise ProgramError(f"[{pc}] unknown control code {code}")
+        if depth != 0:
+            raise ProgramError(f"{depth} loop(s) left open at the end")
+
+    # -- serialisation -------------------------------------------------
+
+    def to_bytes(self):
+        ebytes = self.fmt.width // 8
+        out = struct.pack("<8I", MAGIC, VERSION, len(self.insns),
+                          len(self.consts), self.max_deposits,
+                          PREC_CODE[self.fmt.name], 0, 0)
+        for k in self.consts:
+            out += k.to_bytes(ebytes, "little")
+        for w in self.insns:
+            out += struct.pack("<Q", w)
+        return out
+
+    @classmethod
+    def from_bytes(cls, data):
+        if len(data) < HEADER_WORDS * 4:
+            raise ProgramError("shorter than a header")
+        magic, ver, n_insns, n_consts, maxdep, prec, _, _ = struct.unpack(
+            "<8I", data[:HEADER_WORDS * 4])
+        if magic != MAGIC:
+            raise ProgramError(f"bad magic {magic:#010x}, expected "
+                               f"{MAGIC:#010x}")
+        if ver != VERSION:
+            raise ProgramError(f"program version {ver}, this loader "
+                               f"speaks {VERSION}")
+        name = next((k for k, v in PREC_CODE.items() if v == prec), None)
+        if name is None:
+            raise ProgramError(f"precision code {prec} is not on the ladder")
+        fmt = FORMATS[name]
+        ebytes = fmt.width // 8
+        off = HEADER_WORDS * 4
+        want = off + n_consts * ebytes + n_insns * INSN_BYTES
+        if len(data) < want:
+            raise ProgramError(f"truncated: {len(data)} bytes, needs {want}")
+        consts = [int.from_bytes(data[off + i * ebytes:
+                                      off + (i + 1) * ebytes], "little")
+                  for i in range(n_consts)]
+        off += n_consts * ebytes
+        insns = [struct.unpack("<Q", data[off + i * INSN_BYTES:
+                                          off + (i + 1) * INSN_BYTES])[0]
+                 for i in range(n_insns)]
+        return cls(fmt, insns, consts, maxdep)
+
+
+# ---- execution -------------------------------------------------------
+
+class Result:
+    __slots__ = ("deposits", "flags", "status", "regs", "active",
+                 "counts", "insns_executed")
+
+    def __init__(self, deposits, flags, status, regs, active, counts,
+                 insns_executed):
+        self.deposits = deposits            # n * max_deposits values
+        self.flags = flags                  # sticky IEEE flags
+        self.status = status                # bus / sequencer faults
+        self.regs = regs                    # final register file
+        self.active = active                # final active mask
+        self.counts = counts                # deposits made, per lane
+        self.insns_executed = insns_executed
+
+    def state(self):
+        """Everything observable. Used to prove the early exit changes
+        nothing but the instruction count."""
+        return (self.deposits, self.flags, self.status, self.regs,
+                self.active, self.counts)
+
+
+def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None):
+    """Execute `prog` over len(a) lanes.
+
+    The three input streams initialise r0, r1 and r2 - the same three
+    the elementwise engine already reads, so a sequencer run needs no
+    new input path in the hardware. Registers r3..r15 start at +0.
+
+    early_exit=False forces every loop to run its full trip count. The
+    results must be identical either way; that is P3 in
+    docs/SEQUENCER.md and test_seq.py checks it.
+    """
+    fmt = prog.fmt
+    n = len(a)
+    if len(b) != n or (c is not None and len(c) != n):
+        raise ValueError("input streams differ in length")
+    if c is None:
+        c = [0] * n
+
+    zero = sf.zero_bits(fmt, 0)
+    regs = [[zero] * NREG for _ in range(n)]
+    for i in range(n):
+        regs[i][0], regs[i][1], regs[i][2] = a[i], b[i], c[i]
+    active = [True] * n
+    counts = [0] * n
+    deposits = [zero] * (n * prog.max_deposits)
+    flags = 0
+    status = 0
+    executed = 0
+
+    def src(lane, idx, is_const):
+        return prog.consts[idx] if is_const else regs[lane][idx]
+
+    pc = 0
+    stack = []                      # (body_start_pc, iterations_left)
+    while pc < len(prog.insns):
+        if insn_budget is not None and executed >= insn_budget:
+            raise RuntimeError("instruction budget exhausted")
+        d = decode(prog.insns[pc])
+        executed += 1
+
+        if not d["ctrl"]:
+            for i in range(n):
+                if not active[i]:
+                    continue        # no write, no deposit, and no flags
+                res, fl = sf.compute(
+                    fmt, d["op"],
+                    src(i, d["ra"], d["ka"]),
+                    src(i, d["rb"], d["kb"]),
+                    src(i, d["rc"], d["kc"]),
+                    d["rnd"])
+                regs[i][d["rd"]] = res
+                flags |= fl
+            pc += 1
+            continue
+
+        code = d["op"]
+        if code == HALT:
+            break
+        if code == REPEAT:
+            if early_exit and not any(active):
+                # Skip to the matching endrep. Nothing inside can
+                # reactivate a lane (validate() guarantees it), so the
+                # body is a no-op.
+                pc = _matching_endrep(prog.insns, pc) + 1
+                continue
+            stack.append([pc + 1, d["imm"]])
+            pc += 1
+            continue
+        if code == ENDREP:
+            frame = stack[-1]
+            frame[1] -= 1
+            if frame[1] > 0 and not (early_exit and not any(active)):
+                pc = frame[0]
+            else:
+                stack.pop()
+                pc += 1
+            continue
+        if code == DEPOSIT:
+            for i in range(n):
+                if not active[i]:
+                    continue
+                if counts[i] >= prog.max_deposits:
+                    status |= STATUS_DEPOSIT_OVERFLOW
+                    continue
+                deposits[i * prog.max_deposits + counts[i]] = \
+                    regs[i][d["ra"]]
+                counts[i] += 1
+            pc += 1
+            continue
+        if code == SETACT:
+            for i in range(n):
+                if active[i]:
+                    mag = regs[i][d["ra"]] & ~fmt.sign_mask
+                    active[i] = mag != 0
+            pc += 1
+            continue
+        if code == ACTALL:
+            active = [True] * n
+            pc += 1
+            continue
+        raise ProgramError(f"[{pc}] unknown control code {code}")
+
+    return Result(deposits, flags, status, regs, active, counts, executed)
+
+
+def _matching_endrep(insns, pc):
+    depth = 0
+    for j in range(pc, len(insns)):
+        d = decode(insns[j])
+        if not d["ctrl"]:
+            continue
+        if d["op"] == REPEAT:
+            depth += 1
+        elif d["op"] == ENDREP:
+            depth -= 1
+            if depth == 0:
+                return j
+    raise ProgramError("unbalanced loop reached execution")
