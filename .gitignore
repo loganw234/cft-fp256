@@ -32,3 +32,18 @@ packaged_kernel/
 
 # generated vectors (regenerate with vectors/gen_vectors.py)
 vectors/out/
+
+# libcft build products (make -C host)
+host/*.o
+host/src/*.o
+host/src/*.lo
+host/*.a
+host/*.so
+host/*.dylib
+host/*.dll
+host/*.exe
+host/cft-selftest
+host/api-test
+host/vector-fma
+host/vector-fma-f
+host/.out-*.txt

@@ -3,9 +3,11 @@
  *
  * libcft - the Coordinated Fusion Tile host API.
  *
- * STATUS: design artifact. This header is the contract; the
- * implementation follows. It is published first, deliberately, so the
- * shape can be argued with before anything depends on it.
+ * STATUS: the software backend is implemented and is checked against
+ * the golden model over the whole interesting input space (see
+ * host/tests/). The device backend is not built yet, so cft_open()
+ * with an artifact path reports CFT_ERR_UNSUPPORTED; nothing above
+ * this API will change when it lands, which is the point.
  *
  * ---------------------------------------------------------------
  * What this library promises
@@ -47,9 +49,9 @@
  * How you check we are telling the truth
  * ---------------------------------------------------------------
  *
- * cft_conformance() replays the project's published vector sets
- * (vectors/*.jsonl) through whatever backend you opened and reports
- * the first disagreement. A backend, a binding, a port, or somebody
+ * cft_conformance() replays the project's published vector sets - the
+ * .jsonl files under vectors/ - through whatever backend you opened
+ * and reports the first disagreement. A backend, a binding, a port, or somebody
  * else's independent implementation is correct if and only if it
  * replays those files exactly. Do not take the guarantee above on
  * trust; it is machine-checkable, so check it.
@@ -65,6 +67,24 @@
 extern "C" {
 #endif
 
+/* Everything not marked CFT_API is internal and not exported, so the
+ * shared library's surface is exactly this header. Define
+ * CFT_BUILD_SHARED when building the DLL and CFT_USE_SHARED when
+ * linking against it; static builds need neither. */
+#if defined(_WIN32) || defined(__CYGWIN__)
+#  if defined(CFT_BUILD_SHARED)
+#    define CFT_API __declspec(dllexport)
+#  elif defined(CFT_USE_SHARED)
+#    define CFT_API __declspec(dllimport)
+#  else
+#    define CFT_API
+#  endif
+#elif defined(__GNUC__) && __GNUC__ >= 4
+#  define CFT_API __attribute__((visibility("default")))
+#else
+#  define CFT_API
+#endif
+
 /* ---------------------------------------------------------------
  * ABI version
  *
@@ -77,7 +97,7 @@ extern "C" {
 #define CFT_ABI_VERSION_MINOR 1
 
 /* Returns (major << 16) | minor of the library actually loaded. */
-uint32_t cft_abi_version(void);
+CFT_API uint32_t cft_abi_version(void);
 
 /* ---------------------------------------------------------------
  * Status
@@ -88,7 +108,10 @@ typedef enum cft_status {
     CFT_ERR_UNSUPPORTED,   /* op or format not available on this device;
                             * ask cft_supports() first */
     CFT_ERR_NO_DEVICE,
-    CFT_ERR_ARTIFACT,      /* xclbin missing, unreadable, or not a tile */
+    CFT_ERR_ARTIFACT,      /* a file this library was told to load is
+                            * missing, unreadable, or not what it claims:
+                            * an xclbin that is not a tile, a vector set
+                            * that is not a vector set */
     CFT_ERR_BUS_FAULT,     /* the memory system did not vouch for the
                             * data. The output buffer is NOT valid: a
                             * bad pointer or a fabric error means the
@@ -101,7 +124,7 @@ typedef enum cft_status {
 } cft_status;
 
 /* Static, human-readable; never NULL, never needs freeing. */
-const char *cft_strerror(cft_status s);
+CFT_API const char *cft_strerror(cft_status s);
 
 /* ---------------------------------------------------------------
  * Formats, operations, rounding
@@ -117,7 +140,11 @@ typedef enum cft_format {
     CFT_FP256 = 3    /* IEEE binary256 - 32 bytes, 237-bit significand */
 } cft_format;
 
-size_t cft_format_size(cft_format f);   /* bytes per element; 0 if invalid */
+CFT_API size_t cft_format_size(cft_format f); /* bytes per element; 0 if bad */
+
+/* Canonical names, so a binding, a log line and a conformance report
+ * all say "fp128" rather than 2. Static storage, never NULL. */
+CFT_API const char *cft_format_name(cft_format f);
 
 typedef enum cft_op {
     /* Arithmetic. These round, and consult the rounding attribute. */
@@ -168,6 +195,11 @@ typedef enum cft_op {
     CFT_ICMPLT   = 23   /* unsigned; yields 1.0 or +0.0 */
 } cft_op;
 
+/* The canonical name, so a binding, a log line and a conformance
+ * report all say "minnum" rather than 9. Static storage, never NULL;
+ * anything unassigned reads back as "reserved". */
+CFT_API const char *cft_op_name(cft_op op);
+
 /* Rounding-direction attributes, IEEE 754-2019 clause 4.3. Ignored by
  * every operation from CFT_ABS onward - those do not round. */
 typedef enum cft_round {
@@ -206,8 +238,9 @@ typedef struct cft_device cft_device;
  * calls yourself. Opening several handles to the same physical device
  * is allowed.
  */
-cft_status cft_open(const char *artifact, int index, cft_device **out);
-void       cft_close(cft_device *dev);
+CFT_API cft_status cft_open(const char *artifact, int index,
+                            cft_device **out);
+CFT_API void       cft_close(cft_device *dev);
 
 /* What this device actually implements.
  *
@@ -229,10 +262,15 @@ typedef struct cft_caps {
     char     backend[32];      /* "software", "xrt", ... */
 } cft_caps;
 
-cft_status cft_get_caps(cft_device *dev, cft_caps *out);
+CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
 
-/* Is this (op, format) pair implemented here? Returns 1, or 0. */
-int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
+/* Is this (op, format) pair implemented here? Returns 1, or 0.
+ *
+ * An unassigned opcode answers 0 while still being runnable - see
+ * cft_run below. The two are not in conflict: this reports what the
+ * device implements, cft_run reports what it does when you ask
+ * anyway. */
+CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
 
 /* ---------------------------------------------------------------
  * The core call
@@ -252,23 +290,36 @@ int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
  * is the library's problem, not yours: a partial tail is padded and
  * masked internally, and padding never contributes to the flags.
  *
+ * d may alias a, b or c. Each element is read before it is written and
+ * elements are independent, so computing in place is well defined -
+ * which matters for the long chains of elementwise steps that
+ * branchless code turns into.
+ *
+ * An opcode the contract leaves unassigned (15, and 24 upward) is not
+ * an error: it returns CFT_OK having written the canonical quiet NaN
+ * and raised invalid, because that is exactly what the device does,
+ * and "the same call returns the same bits" has to hold for the
+ * uninteresting inputs too. Ask cft_supports() if you want to know
+ * before issuing one. Values outside 0..255 do not fit the device's
+ * opcode field and are CFT_ERR_INVALID_ARGUMENT.
+ *
  * flags_out and bus_out may be NULL if you do not want them. If
  * bus_out is non-NULL and the call returns CFT_ERR_BUS_FAULT, it
  * carries the raw fault bits for diagnosis.
  *
  * On any error the contents of d are unspecified. Do not read them.
  */
-cft_status cft_run(cft_device *dev,
-                   cft_op      op,
-                   cft_format  fmt,
-                   cft_round   rnd,
-                   const void *a,
-                   const void *b,
-                   const void *c,
-                   void       *d,
-                   size_t      n,
-                   uint32_t   *flags_out,
-                   uint32_t   *bus_out);
+CFT_API cft_status cft_run(cft_device *dev,
+                           cft_op      op,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           const void *c,
+                           void       *d,
+                           size_t      n,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
@@ -284,11 +335,12 @@ cft_status cft_run(cft_device *dev,
  * --------------------------------------------------------------- */
 typedef struct cft_buffer cft_buffer;
 
-cft_status cft_alloc(cft_device *dev, size_t bytes, cft_buffer **out);
-void      *cft_buffer_data(cft_buffer *buf);   /* host-visible pointer */
-cft_status cft_buffer_to_device(cft_buffer *buf);
-cft_status cft_buffer_from_device(cft_buffer *buf);
-void       cft_buffer_free(cft_buffer *buf);
+CFT_API cft_status cft_alloc(cft_device *dev, size_t bytes,
+                             cft_buffer **out);
+CFT_API void      *cft_buffer_data(cft_buffer *buf); /* host-visible ptr */
+CFT_API cft_status cft_buffer_to_device(cft_buffer *buf);
+CFT_API cft_status cft_buffer_from_device(cft_buffer *buf);
+CFT_API void       cft_buffer_free(cft_buffer *buf);
 
 /* ---------------------------------------------------------------
  * Conformance
@@ -297,14 +349,20 @@ void       cft_buffer_free(cft_buffer *buf);
  * first disagreement. This is how a port, a backend, or an independent
  * implementation proves itself - and how you audit ours.
  *
- * dir is the directory holding the .jsonl sets (vectors/out by
- * default). Returns CFT_OK when every case matched; on a mismatch,
- * fills report (if non-NULL) with a human-readable description of the
- * first failing case, truncated to report_size.
+ * dir is the directory holding the .jsonl sets (vectors/out when
+ * NULL). Returns CFT_OK when every case matched, CFT_ERR_INTERNAL on a
+ * disagreement - which is a bug in this library, since the vectors are
+ * the definition - and CFT_ERR_ARTIFACT if no set could be read.
+ *
+ * report (if non-NULL) is filled in every case, not only on failure:
+ * on success it names the sets that ran and the ones skipped because
+ * this device lacks the format. A conformance pass that quietly
+ * checked nothing would be worse than a failing one, so the summary is
+ * not optional.
  * --------------------------------------------------------------- */
-cft_status cft_conformance(cft_device *dev, const char *dir,
-                           char *report, size_t report_size,
-                           uint64_t *cases_checked);
+CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
+                                   char *report, size_t report_size,
+                                   uint64_t *cases_checked);
 
 #ifdef __cplusplus
 }  /* extern "C" */

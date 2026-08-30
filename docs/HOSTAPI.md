@@ -1,9 +1,17 @@
 # The host API
 
 `host/include/cft.h` is the contract between this project and the
-people using it. The header is written; the implementation follows.
-Publishing the shape first is deliberate - an ABI is far cheaper to
-argue with before anything depends on it than after.
+people using it. The header was published before the implementation,
+deliberately - an ABI is far cheaper to argue with before anything
+depends on it than after.
+
+**The software backend is now implemented**, in `host/src/`: about
+1,700 lines of C99 in four files, with no dependencies, no configure
+step and no generated bindings. `make -C host` builds a static library, a shared
+library, and the tools below. The device backend is not built yet, so
+`cft_open()` with an artifact path reports `CFT_ERR_NO_DEVICE`;
+nothing above the API changes when it lands, which is the point of
+having written the API first.
 
 ## The shape of the thing
 
@@ -53,30 +61,48 @@ behind one ABI keeps the guarantee checkable.
 
 It also closes a hole we already have: pyxrt exposes no way to read a
 kernel's status registers in either XRT version this project has
-tested (2.14 and 2.19), so `FLAGS` and `STATUS` are currently
-unreadable from Python. XRT's C++ API does expose them. The C library
-fixes that as a side effect rather than as a special effort.
+tested (2.14 and 2.19), so `FLAGS` and `STATUS` are unreadable from
+Python. XRT's C++ API does expose them, so the device backend will
+close that hole as a side effect rather than as a special effort - a
+Python caller reaching the card through `libcft` gets flags that a
+Python caller reaching it through pyxrt cannot.
 
 ## What the library absorbs so callers never see it
 
 Every one of these is a place the hardware contract is sharper than a
-user should have to care about:
+user should have to care about. **These are properties of the device
+backend, which is not built yet** - listed here because they are what
+the API was shaped to allow, and because a reader should not have to
+guess which parts of this document describe code and which describe
+intent.
 
-- **Beat padding.** The tile works in whole 256-bit beats. `cft_run`
-  takes an arbitrary `n`, pads the tail internally, and makes sure
-  padding contributes nothing to the flags.
-- **Multi-tile partitioning.** A four-CU bitstream has four sets of
-  FLAGS and STATUS registers. The library splits the work, ORs the
-  sticky words, and reports one result. Callers never learn tiles
-  exist; `cft_get_caps` reports the count for the curious.
-- **Buffer staging.** `cft_run` takes host pointers and does the
-  device round trip itself. `cft_alloc` exists for when that round
-  trip is the bottleneck, and degrades to plain allocation on the
-  software backend so the code stays portable.
-- **Bus faults.** A bad pointer or a fabric error becomes
-  `CFT_ERR_BUS_FAULT`, distinct from a wrong answer, because
+- **Beat padding** *(device backend)*. The tile works in whole 256-bit
+  beats. `cft_run` takes an arbitrary `n`, pads the tail internally,
+  and makes sure padding contributes nothing to the flags. The
+  software backend has no beats, so `n` is already arbitrary there.
+- **Multi-tile partitioning** *(device backend)*. A four-CU bitstream
+  has four sets of FLAGS and STATUS registers. The library splits the
+  work, ORs the sticky words, and reports one result. Callers never
+  learn tiles exist; `cft_get_caps` reports the count for the curious.
+  Nothing can drive `hw/link_quad.cfg` until this exists.
+- **Buffer staging** *(device backend)*. `cft_run` takes host pointers
+  and does the device round trip itself. `cft_alloc` exists for when
+  that round trip is the bottleneck; today it is a plain allocation
+  and the sync calls are no-ops, which is what keeps code written that
+  way portable rather than dual-path.
+- **Bus faults** *(device backend)*. A bad pointer or a fabric error
+  becomes `CFT_ERR_BUS_FAULT`, distinct from a wrong answer, because
   "the memory never delivered this" and "the arithmetic is wrong" want
-  different responses.
+  different responses. The software backend cannot produce one.
+
+## What is not there yet
+
+- **The device backend.** `cft_open()` with an artifact path returns
+  `CFT_ERR_NO_DEVICE` - not a bad artifact and not an unsupported
+  operation, but an honest "there is no such device in this build". It
+  needs XRT's C++ API and a machine with the card, and it is the next
+  file rather than a refactor: the four bullets above are its whole
+  job description.
 
 ## What is deliberately not in the first version
 
@@ -94,16 +120,105 @@ New capability gets new functions. That keeps `cft_run` positional and
 FFI-friendly rather than hiding behind an extensible descriptor struct
 that every binding then has to lay out by hand.
 
+## The one place the C is not a transliteration
+
+Everything in `host/src/softfloat.c` follows
+`python/cft_golden/softfloat.py` line for line, on purpose, so the two
+can be read side by side and a divergence shows up as a structural
+difference rather than as a subtle one. There is exactly one exception,
+and it is worth stating plainly because it is where a bug would hide.
+
+The model computes the fused multiply-add's sum **exactly**: it shifts
+both terms to a common exponent and adds, in unbounded integers. For
+fp256 that alignment can span the entire exponent range - the product
+of two large normals against the smallest subnormal addend is about
+790,000 bits wide. Correct, and unusable: a hundred kilobytes of
+shifting per element.
+
+So `libcft` bounds the alignment. When the two terms' leading bits are
+more than `2p+4` apart, the smaller one lies entirely below the
+larger's last bit and cannot influence anything except a sticky bit, so
+it becomes one. When they are closer than that, the intermediate is
+provably narrow - at most about `5p+3` bits, 1188 for fp256 - and the
+sum is computed exactly, as the model does. The derivation, including
+why `2p+4` and not something smaller, is written out in the comment
+above `sf_fma()`.
+
+That argument is checked rather than trusted, three ways:
+
+- `host/tests/diff_check.py` builds operand triples whose exponent
+  separation lands **on and around the cutoff**, in both directions,
+  and compares against the model at every precision under every
+  rounding attribute. Random operands essentially never land near that
+  line, and never land beyond it with the addend dominating, so those
+  cases have to be constructed deliberately.
+- `--coverage` on the same script reports which path the cases
+  actually took. A boundary test that never reaches the boundary passes
+  for the wrong reason, and passing for the wrong reason is
+  indistinguishable from passing until the day it matters.
+- Every width bound is enforced at runtime. The bignum operations
+  return an overflow indication rather than truncating, and
+  `cft_run()` turns one into `CFT_ERR_INTERNAL`. If the derivation
+  above were wrong, the library would refuse to answer rather than
+  answer incorrectly.
+
 ## Verifying a port
 
-`cft_conformance()` replays `vectors/*.jsonl` through whichever backend
-is open and reports the first disagreement.
+`cft_conformance()` replays the vector sets under `vectors/out`
+through whichever backend is open and reports the first disagreement.
+`cft-selftest` is that function with a `main()` around it.
 
 This is the acceptance test for a new language binding, a new backend,
 a new device generation, or somebody else's independent
 implementation. The guarantee at the top of this document is not
 something to take on trust - it is machine-checkable, and the vectors
 have existed since before the hardware did.
+
+On success it reports what it checked, not just that it passed: a run
+that quietly skipped every set would otherwise be indistinguishable
+from a clean one.
+
+## What has actually been run
+
+    make vectors            # 20 sets: 4 formats x 5 rounding attributes
+    make libcft             # build
+    make libcft-test        # contract tests, replay, C-vs-Python
+    make libcft-diff        # against the golden model, boundary-targeted
+
+As of the commit that added the library, on x86-64 Windows with GCC 16:
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay | 228,000 | every case, bits and flags |
+| differential vs the golden model | 213,000 | every case, bits and flags |
+| contract tests (`api-test`) | every check | pass |
+| C example vs Python example | 4 checksums | identical |
+
+The differential run reached the far path 1,146 times at fp256 with
+the product dominating and 885 times with the addend dominating,
+roughly evenly split between like and unlike operand signs, and the
+widest exact intermediate it produced was 952 bits against a container
+sized for 2048. Those numbers come from `make -C host coverage`, so
+they are re-derivable rather than remembered.
+
+## Calling it from somewhere else
+
+`host/examples/` has the same program three times:
+
+- `vector_fma.c` - C, linked against the static library.
+- `vector_fma_ctypes.py` - Python, via `ctypes.CDLL` and eight
+  `argtypes` lines. No build step, no binding generator, no pyxrt.
+- `vector_fma.f90` - Fortran, via `iso_c_binding`. A native
+  `real(c_double)` array goes straight to `c_loc()` and is used in
+  place, because the buffers are specified as dense little-endian
+  interchange encodings rather than as a struct. (This one has not
+  been compiled yet - see its header; `make -C host fortran` is the
+  command that changes that.)
+
+The C and Python versions print a checksum of the output buffer, and
+`make libcft-test` diffs them. Identical output from two languages
+through one library is the cross-language claim reduced to something
+that either passes or fails.
 
 ## Weak links this exposes in the hardware contract
 

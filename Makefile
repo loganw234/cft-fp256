@@ -15,11 +15,15 @@ PART     ?= xcu50-fsvh2104-2-e
 TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
-.PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin clean help
+.PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin \
+        libcft libcft-test libcft-diff clean help
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
 	@echo "vectors      emit conformance vector sets to vectors/out/"
+	@echo "libcft       build the C library (host/), no dependencies"
+	@echo "libcft-test  contract tests + vector replay + the C/Python check"
+	@echo "libcft-diff  libcft against the golden model, boundary-targeted"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
 	@echo "sim-docker   run the cocotb RTL suite inside the container"
@@ -46,8 +50,23 @@ $(BUILD)/emconfig.json:
 golden:
 	$(PYTHON) -m pytest python/tests -q
 
+# Every format and every rounding attribute. Each attribute is its own
+# deterministic contract, so a set covering only roundTiesToEven scores
+# only the default and says nothing about the other four.
 vectors:
-	$(PYTHON) vectors/gen_vectors.py --out vectors/out
+	$(PYTHON) vectors/gen_vectors.py --out vectors/out \
+		--formats fp32 fp64 fp128 fp256 \
+		--rounding rne rtz rdn rup rmm \
+		--directed 3000 --random 4000 --simple 200
+
+libcft:
+	$(MAKE) -C host
+
+libcft-test:
+	$(MAKE) -C host test PYTHON=$(PYTHON)
+
+libcft-diff:
+	$(MAKE) -C host difftest PYTHON=$(PYTHON)
 
 sim:
 	$(MAKE) -C tb sim SIM=$(SIM)
