@@ -266,7 +266,16 @@ Three bitstreams are banked on amd-arc-box, oldest first:
 | `cft_hw_v0_10mhz.xclbin` | v0 behavioural core, naive engine | 10 MHz |
 | `cft_hw_v1_2bank_100mhz.xclbin` | v1 pipelined core, fp32+fp256 banks | 100 MHz |
 | `cft_hw_v1_4rung_90mhz_prereview.xclbin` | four rungs, streaming engine, rounding attributes | 90 MHz |
-| `cft_hw.xclbin` | the same, plus the control-review fixes (STATUS, latched run config) - **the card-day image** | 90 MHz |
+| `cft_hw.xclbin` | the same, plus the control-review fixes (STATUS, latched run config) | 90 MHz |
+| `sweep/f115/cft_hw.xclbin` | four rungs, from the sweep | 115 MHz |
+| `sweep/f145/cft_hw.xclbin` | four rungs, from the sweep | 145 MHz |
+
+**Card-day clock: 145 MHz.** It closes with ~9% margin below the
+measured ~159 MHz ceiling, and is 1.6x the 90 MHz image. The final
+card-day pair - one tile and four tiles, both on the current RTL -
+gets built at 145 ahead of the card arriving; the sweep bitstreams
+predate the non-arithmetic opcodes and are timing evidence, not
+deliverables.
 
 Build cost on amd-arc-box, measured on the four-rung design: synthesis
 18m, logic opt 3m, placement 44m, routing 18m, bitstream 25m - 1h47m
@@ -275,30 +284,46 @@ after routing. One link peaks at ~12 GB, so the 31 GB box runs two
 concurrently; that is the binding constraint on any frequency sweep,
 not the 36 cores.
 
-**Calibration, and a correction to how it was first read.** Two
-routed builds:
+### Calibration: read the path delay, not the slack
 
-| design | target | routed WNS | endpoints |
+This note has been rewritten twice as data arrived, and the final
+version is the useful one. Six routed builds of the same design
+family:
+
+| design | target | routed WNS | implied path delay |
 |---|---|---|---|
-| v1 core, two banks | 100 MHz | +0.051 ns | 480,929 |
-| four rungs + streaming engine | 90 MHz | +0.055 ns | 523,123 |
-| the same + control-review fixes | 90 MHz | +0.055 ns | 523,361 |
+| v1 core, two banks | 100 MHz | +0.051 ns | 9.949 ns |
+| four rungs + streaming | 90 MHz | +0.055 ns | 11.056 ns |
+| the same + review fixes | 90 MHz | +0.055 ns | 11.056 ns |
+| four rungs | 115 MHz | +0.036 ns | 8.660 ns |
+| four rungs | 145 MHz | +0.055 ns | 6.842 ns |
+| four rungs | **175 MHz** | **-0.562 ns** | 6.276 ns |
 
-All three land ~50 ps above zero, across different clocks and a 3x
-difference in logic. The first was recorded here as "the shell and
-routing eat essentially all the margin" - that reading does not
-survive the second data point. Vivado's implementation is
-*constraint-driven*: it optimises until the constraint is met and then
-stops. A WNS of +0.05 ns is evidence that the design **met the clock
-it was asked for**, not that it barely scraped past a physical
-ceiling. The true maximum clock of either design is unknown and would
-need a frequency sweep to find.
+**The path delay shrinks as the constraint tightens** - 11.06, 8.66,
+6.84, 6.28 ns for the same RTL. That is what constraint-driven
+implementation looks like measured rather than asserted: the tool
+works the critical path exactly as hard as it must and then stops. It
+also explains why every closing build lands ~50 ps above zero, which
+was first misread here as the shell eating all the margin.
 
-What still holds: out-of-context numbers (~148 MHz for the fp256 unit,
-+3.3 ns at 100 MHz for the whole kernel) are not promises. They rank
-design choices; they do not tell you what will close inside the shell.
-Ask for a clock you actually want, and read the routed report rather
-than the OOC one.
+So a routed WNS tells you the design met what it was asked for and
+almost nothing about headroom. **The number that predicts the ceiling
+is the path delay**, and at maximum effort it asymptotes: 6.276 ns
+at 175 MHz implies a real ceiling near **159 MHz** for this design.
+Verified from both sides - 145 MHz closes, 175 MHz misses by 0.562 ns.
+
+The out-of-context probe was right about both things that matter, and
+was only misleading in the one number this note originally quoted:
+
+- it named the critical path exactly - `s10_mag` -> `s11_valw` in the
+  fp256 unit, the leading-zero-count and coarse-normalize stage - and
+  the 175 MHz failure is that same path, register for register;
+- its **path delay** of 6.666 ns implied ~150 MHz against a measured
+  ~159 MHz, accurate to about 6%;
+- its **slack** at a loose constraint (+3.3 ns at 100 MHz) meant
+  nothing at all, for exactly the reason above.
+
+Read the OOC path delay. Ignore the OOC slack.
 
 Determinism is clock-independent; a 90 MHz bitstream proves every
 numerical claim a 300 MHz one would. Prefer a working image of the
