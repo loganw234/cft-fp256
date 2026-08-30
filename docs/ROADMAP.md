@@ -38,7 +38,7 @@ are structurally blind:
   simulation-only and so guarded nothing in synthesis, three
   load-bearing comments whose stated *reasons* were false, and a
   period-5 blind spot in the bench's rounding-attribute ordering
-  against a 16-stage pipe.
+  against a 15-stage pipe.
 - The **control logic held one real bug**: the CSR sampled the AXI
   write data one cycle after the handshake. Invisible to any master
   that waits for the write response before moving on, which is both
@@ -62,7 +62,7 @@ way atlas-darkroom records a census.
 
 ## v1 - the fractured array and a real engine
 
-- [x] **The pipelined core (2026-08-29):** 16-stage cft_fpfma_pipe
+- [x] **The pipelined core (2026-08-29):** 15-stage cft_fpfma_pipe
       with a structurally staged multiplier (24-bit chunk columns +
       four registered tree levels). Measured OOC on xcu50:
       fp32 ~232 MHz (3.6x v0), fp256 ~148 MHz (10.5x v0), DSPs down
@@ -122,6 +122,43 @@ way atlas-darkroom records a census.
       attribute in the unit benches and end to end through the CSR -
       and through the real XRT stack in hw_emu, all five attributes
       bit-exact.
+- [x] **In-shell frequency ceiling, and a negative result
+      (2026-08-29):** four full platform links on the U50 shell, same
+      RTL, same link config, only `--clock.freqHz` changed. 115 and
+      145 MHz close (145 at WNS +0.055 ns); 175 fails at -0.562 ns
+      with 2,753 failing endpoints. Read the **path delay, not the
+      slack**: Vivado optimises until the asked clock is met and then
+      stops, so the 145 MHz run reports 6.842 ns while the 175 MHz
+      run - where the tool tried its hardest - reports 6.276 ns. The
+      ceiling is that second number, **~159 MHz**.
+
+      The S11 split (commit 7753428) was then tested at 175 MHz and
+      **made it worse: -0.673 ns, a ~157 MHz ceiling.** It has been
+      reverted.
+
+      The interesting part is why, because it did what it claimed. S11
+      is no longer the critical path, and failing endpoints nearly
+      halved (2,753 -> 1,484) - the fan-in/fan-out seam was real and
+      splitting it fixed a broad shallow class of paths. What surfaced
+      underneath is narrower and deeper: **S12 -> S13**, the
+      exponent-normalise register into the rounded significand, 34
+      logic levels of which 20 are CARRY8 (the 237-bit round
+      increment, carried as a ripple), and still 68% routing. The
+      split's 653 extra registers cost enough placement pressure to
+      push that path past where S11 had been.
+
+      Two things to carry forward. **The out-of-context core
+      measurement is not a valid predictor for this design** - it said
+      5.871 -> 5.746 ns, a 2% improvement, and the in-shell answer was
+      a regression. It did not merely understate the gain; it pointed
+      the wrong way, because a core placed alone in a small region
+      never sees the congestion that decides a shell build. Trust the
+      in-shell number or do not run the experiment. And **the next
+      nanoseconds are in the round stage, not the normalizer** - a
+      237-bit ripple increment is the thing to restructure (select
+      between kept and kept+1, or split the carry) if the ceiling ever
+      needs to move. If that lands, 7753428 is worth cherry-picking
+      back and retesting as a pair.
 - Reduction ops (dot, sum) with the index-fixed tree the contract
   already specifies.
 

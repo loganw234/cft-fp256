@@ -30,7 +30,7 @@ kernel flow, XRT host runtime.
               each lane: cft_opmux -> cft_fpfma_pipe
 ```
 
-- **cft_fpfma_pipe** - the parameterized 16-stage FMA core (v1):
+- **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
   staged significand multiplier (24-bit chunk columns + four
   registered tree levels), coarse/fine alignment with the sticky
   marker, split-carry add, per-64 LZC normalize, a single rounding
@@ -262,17 +262,32 @@ HBM pseudo-channels, multiple CUs - are roadmap items; none change
 numerics. The naive engine remains in rtl/ as the auditable
 reference for the same CSR contract.
 
-## Timing (v1 core, measured OOC on xcu50)
+## Timing (v1, measured)
 
-The 16-stage core closes ~232 MHz fp32 / ~148 MHz fp256 out of
-context (fp64/fp128 land between; QoR numbers recorded in
-ROADMAP.md). Kernel clock for full-platform builds: ~100 MHz via
-`hw/rebuild-2022.sh KERNEL_FREQ=` - conservative margin under the
-shell, raised as the QoR chase (DSP column splits, round-stage
-balance) lands. A reduced clock changes nothing about results -
-determinism is clock-independent by construction. The v0 behavioural
-core (one combinational cloud, ~65/14 MHz) remains in rtl/ as the
-readable reference.
+The 15-stage core closes ~232 MHz fp32 / ~148 MHz fp256 **out of
+context** (fp64/fp128 land between; QoR numbers recorded in
+ROADMAP.md).
+
+**In the shell, which is the number that matters, the ceiling is
+~159 MHz.** 145 MHz closes with margin and is the kernel clock for
+card-day builds via `hw/rebuild-2022.sh KERNEL_FREQ=`; 175 MHz misses
+by 0.562 ns. The critical path is the round stage - the 237-bit
+attribute-directed increment, S12 into S13 - and it is two-thirds
+routing, so it is a placement problem as much as a logic one.
+
+Two cautions, both learned the expensive way and written up in
+ROADMAP.md. Read the **path delay, not the slack**: Vivado stops
+optimising once the asked clock is met, so a passing run understates
+what the design can do and only a failing run reveals the ceiling.
+And **do not predict shell timing from an out-of-context core run** -
+on the one occasion the two were compared directly, the OOC proxy
+reported a 2% improvement for a change that was a regression in the
+shell.
+
+A reduced clock changes nothing about results - determinism is
+clock-independent by construction. The v0 behavioural core (one
+combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
+reference.
 
 ## The fractured array (v1 sketch, why this scales)
 

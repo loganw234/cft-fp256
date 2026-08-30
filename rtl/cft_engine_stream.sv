@@ -31,7 +31,7 @@
 `timescale 1ns/1ps
 
 module cft_engine_stream #(
-    parameter int LATENCY    = 16,
+    parameter int LATENCY    = 15,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
     parameter bit EN_FP256   = 1'b1,

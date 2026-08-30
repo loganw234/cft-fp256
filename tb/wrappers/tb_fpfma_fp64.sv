@@ -22,7 +22,7 @@ module tb_fpfma_fp64 (
   logic bv; logic [63:0] bd; logic [4:0] bf;
   cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
       .op(op), .a(a), .b(b), .c(c), .valid(bv), .d(bd), .flags(bf));
-  cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(16)) u_dut (
+  cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(15)) u_dut (
       .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd), .byp(bv), .byp_d(bd), .byp_f(bf),
       .a(a), .b(b), .c(c),
       .out_valid(out_valid), .d(d), .flags(flags));

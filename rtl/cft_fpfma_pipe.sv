@@ -17,7 +17,7 @@
 // 24/48/96/192-bit shifts. Narrow formats degenerate gracefully
 // (fp32: one chunk, the tree levels are pass-through registers).
 //
-// Stage map (LATENCY = 16 edges, S0..S15):
+// Stage map (LATENCY = 15 edges, S0..S14):
 //   S0    input registers
 //   S1    unpack, classify, specials sideband
 //   S2    partial products  pp[k] = ma * mb[24k +: 24]
@@ -30,16 +30,11 @@
 //   S9    split add low halves: sum, big-small, small-big in parallel
 //   S10   split add high halves + magnitude/sign select; strip the
 //         appended marker into the explicit sticky rail
-//   S11a  LZC (per-64 chunk tree) - the fan-in half
-//   S11b  coarse normalize shift - the fan-out half
+//   S11   LZC (per-64 chunk tree) + coarse normalize shift
 //   S12   fine normalize shift
 //   S13   round-window extraction (clamped and as-if-unbounded),
 //         attribute-directed increment, tininess-after-rounding
 //   S14   pack + specials mux -> output registers
-//
-// S11 is two stages because it was the measured critical path of the
-// whole kernel: it reduced all NW bits to one shift count and then
-// broadcast that count back over all NW bits in a single cycle.
 //
 // Marker/sticky safety carries over from v0 strengthened: the
 // appended LSB participates in the S9/S10 subtract exactly (floor +
@@ -56,7 +51,7 @@
 module cft_fpfma_pipe #(
     parameter int EXP_W   = 8,
     parameter int MAN_W   = 23,
-    parameter int LATENCY = 16
+    parameter int LATENCY = 15
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
@@ -139,7 +134,7 @@ module cft_fpfma_pipe #(
     endcase
   endfunction
 
-  localparam int DEPTH = 16;
+  localparam int DEPTH = 15;
 
   // Elaboration-time guards. These have to be in generate scope, not in
   // an `initial` block: synthesis ignores `initial` entirely, so a
@@ -162,7 +157,7 @@ module cft_fpfma_pipe #(
   // in the simulation message below.)
   generate
     if (LATENCY != DEPTH) begin : g_bad_latency
-      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (16)");
+      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (15)");
     end
     if (NMC > 16) begin : g_too_many_chunks
       $error("cft_fpfma_pipe: MAN_W too wide - the multiplier tree holds 16 chunks (max MAN_W 383)");
@@ -207,20 +202,21 @@ module cft_fpfma_pipe #(
   // consumer wants (a lower and an upper bound from one stream). Only
   // stages 1, 13 and 14 consult it, so a delay line is cheaper and far
   // less error-prone than threading a field through every stage.
-  // The invariant is by pipeline DEPTH, not by register name:
-  // rd_dly[k] loads on the same edge as pipeline level k+1, so it
-  // holds the attribute of whatever operation sits at that level.
+  // The invariant is by pipeline level, not by register name:
+  // rd_dly[k] holds the attribute of whatever operation currently sits
+  // at level k, because both advance on the same edge.
   //
-  // Do NOT read it as "rd_dly[k] goes with s{k}_*". That was true
-  // until S11 was split in two, and it is now off by one past that
-  // point - s12_* is at level 14, so its attribute is rd_dly[13].
-  // The taps are therefore written relative to DEPTH and stay correct
-  // through any further split BEFORE the round stage: the round stage
-  // is always second-to-last (DEPTH-3) and pack always last (DEPTH-2).
-  // "Correcting" them to match the register names would hand every
-  // operation its neighbour's rounding attribute - which the shuffled
-  // unit bench would catch, but only because it was made aperiodic
-  // for exactly this reason.
+  // In THIS arrangement the register names happen to agree - rd_dly[12]
+  // is read beside s12_*, and DEPTH-3 is 12. Do not rely on that. It
+  // holds only because no stage before the round stage is split, and it
+  // stopped holding once one was: while S11 was briefly two stages,
+  // s12_* sat at level 13 and took rd_dly[13], and every tap written
+  // as a literal would have handed each operation its neighbour's
+  // rounding attribute. So the taps stay written relative to DEPTH -
+  // the round stage is always second-to-last (DEPTH-3), pack always
+  // last (DEPTH-2) - and they survive the next split without being
+  // touched. The shuffled unit bench catches this class of error, but
+  // only because it was made aperiodic for exactly this reason.
   //
   // The line stops at DEPTH-2 because that is the last level any
   // consumer reads; a further entry would be a register nothing uses.
@@ -554,43 +550,22 @@ module cft_fpfma_pipe #(
     end
   endfunction
 
-  // S11 is split in two. Measured: it was the critical path of the
-  // whole kernel by a wide margin, and the reason is structural rather
-  // than deep logic - it reduces all NW bits down to one shift count
-  // and then broadcasts that count back across all NW bits again. On
-  // fp256 that is 717 bits fanning in and out in a single stage, which
-  // is why two thirds of its delay was wire rather than gate.
-  //
-  // Splitting it at the natural seam - count first, shift second -
-  // puts the fan-in and the fan-out in different cycles, so neither
-  // has to span the whole structure. It costs one cycle of latency,
-  // which is free here: latency is fixed, not pipelined-away work, and
-  // the engines size their capture delay lines from the same LATENCY
-  // parameter.
-  logic [NW-1:0] s11a_valw;
-  logic          s11a_stk, s11a_zero, s11a_rsign, s11a_spc;
-  logic [W-1:0]  s11a_spd;
-  logic [4:0]    s11a_spf;
-  int            s11a_enorm, s11a_fine, s11a_lsh;
-
   logic [NW-1:0] s11_valw;
   logic          s11_stk, s11_zero, s11_rsign, s11_spc;
   logic [W-1:0]  s11_spd;
   logic [4:0]    s11_spf;
   int            s11_enorm, s11_fine;
 
-  // S11a: leading-zero count only - the fan-in half.
-  always_ff @(posedge clk) begin : stage11a
+  always_ff @(posedge clk) begin : stage11
     logic [NCH*64-1:0] padded;
     logic [NW-1:0] valw;
-    int chunk, cl, msb;
+    int chunk, cl, msb, lsh_coarse;
     valw = s10_mag[GW:1];
     padded = {{(NCH*64-NW){1'b0}}, valw};
     chunk = -1;
     for (int ci = NCH - 1; ci >= 0; ci = ci - 1) begin
       if (chunk == -1 && (padded[ci*64 +: 64] != 0)) chunk = ci;
     end
-    s11a_valw <= valw;
     if (chunk == -1) begin
       // Exact zero only without sticky residue; else a bare epsilon,
       // and s10_g already places it below the subnormal grid so S13
@@ -605,34 +580,22 @@ module cft_fpfma_pipe #(
       // subnormal pins its exponent at EMIN-MAN_W, so g = EMIN-MAN_W-SH
       // and S13's K is negative. Change SH or the far-alignment
       // threshold and this is the argument to re-derive.
-      s11a_zero  <= !s10_mag[0];
-      s11a_enorm <= s10_g;
-      s11a_fine  <= 0;
-      s11a_lsh   <= 0;
+      s11_zero <= !s10_mag[0];
+      s11_valw <= '0;
+      s11_enorm <= s10_g;
+      s11_fine <= 0;
     end else begin
       cl  = lzc64(padded[chunk*64 +: 64]);
       msb = chunk * 64 + (63 - cl);
-      s11a_zero  <= 1'b0;
-      s11a_enorm <= s10_g + msb;
-      s11a_lsh   <= (NW - 1 - msb) >> 6;
-      s11a_fine  <= (NW - 1 - msb) & 63;
+      s11_zero  <= 1'b0;
+      s11_enorm <= s10_g + msb;
+      lsh_coarse = (NW - 1 - msb) >> 6;
+      s11_valw <= valw << (lsh_coarse * 64);
+      s11_fine <= (NW - 1 - msb) & 63;
     end
-    s11a_stk   <= s10_mag[0];
-    s11a_rsign <= s10_rsign;
-    s11a_spc <= s10_spc; s11a_spd <= s10_spd; s11a_spf <= s10_spf;
-  end
-
-  // S11b: the coarse normalize shift - the fan-out half. An exact zero
-  // is forced here rather than in S11a so that the zero decision and
-  // the shift never share a cycle.
-  always_ff @(posedge clk) begin : stage11b
-    s11_valw  <= s11a_zero ? '0 : (s11a_valw << (s11a_lsh * 64));
-    s11_zero  <= s11a_zero;
-    s11_enorm <= s11a_enorm;
-    s11_fine  <= s11a_fine;
-    s11_stk   <= s11a_stk;
-    s11_rsign <= s11a_rsign;
-    s11_spc <= s11a_spc; s11_spd <= s11a_spd; s11_spf <= s11a_spf;
+    s11_stk   <= s10_mag[0];
+    s11_rsign <= s10_rsign;
+    s11_spc <= s10_spc; s11_spd <= s10_spd; s11_spf <= s10_spf;
   end
 
   logic [NW-1:0] s12_norm;
