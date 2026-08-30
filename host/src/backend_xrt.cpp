@@ -190,14 +190,25 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
     *out = nullptr;
     g_err.clear();
 
-    Dev *D = nullptr;
+    /* Opening the card and loading the bitstream fail for completely
+     * different reasons and want completely different responses - "no
+     * card visible" is a driver or a slot, "bad xclbin" is a build.
+     * Reporting both as one status is the sort of small dishonesty
+     * that costs an hour at a bench. */
+    Dev *D = new Dev();
     try {
-        D = new Dev();
-        D->dev  = xrt::device(static_cast<unsigned int>(index));
+        D->dev = xrt::device(static_cast<unsigned int>(index));
+    } catch (const std::exception &e) {
+        delete D;
+        set_err(std::string("opening device ") + std::to_string(index) +
+                ": " + e.what());
+        return ST_NO_DEVICE;
+    }
+    try {
         D->uuid = D->dev.load_xclbin(artifact);
     } catch (const std::exception &e) {
         delete D;
-        set_err(std::string("opening ") + artifact + ": " + e.what());
+        set_err(std::string("loading ") + artifact + ": " + e.what());
         return ST_ARTIFACT;
     }
 
