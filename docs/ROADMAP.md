@@ -196,11 +196,32 @@ way atlas-darkroom records a census.
       the wrong way, because a core placed alone in a small region
       never sees the congestion that decides a shell build. Trust the
       in-shell number or do not run the experiment. And **the next
-      nanoseconds are in the round stage, not the normalizer** - a
-      237-bit ripple increment is the thing to restructure (select
-      between kept and kept+1, or split the carry) if the ceiling ever
-      needs to move. If that lands, 7753428 is worth cherry-picking
-      back and retesting as a pair.
+      nanoseconds are in the round stage, not the normalizer.**
+- **The round stage is the ceiling, and the fix is specific.** Two
+  independent measurements now agree that the critical path is S12
+  into S13 - the exponent register through the round window into the
+  rounded significand - at 39 logic levels, 21 of them CARRY8, and
+  about 61% routing. Reading `stage13` shows why: it does a variable
+  right shift of the 717-bit normalised significand AND a 238-bit
+  increment **in series in one cycle**, because `up` depends on the
+  guard and sticky bits the shift produces, and `kept + up` then waits
+  for `up`.
+
+  The increment does not have to be on that path. `kept` and
+  `kept + 1` both depend only on the shift, so both can be computed
+  while the guard/sticky reduction and `round_up` are still resolving,
+  and `up` then selects between them. A 238-bit ripple carry becomes a
+  238-bit multiplexer, the adder hides behind the sticky OR-reduction,
+  and nothing about the latency, the stage count or the arithmetic
+  changes - which matters, because this is the most safety-critical
+  logic in the design and the 441,000-case suite is what would have to
+  agree afterwards.
+
+  Not attempted yet, deliberately: it would invalidate the card-day
+  images mid-build, and it wants an in-shell measurement rather than
+  an out-of-context one, which is two hours on a free box. If it
+  lands, 7753428 (the reverted S11 split) is worth cherry-picking back
+  and retesting as a pair, since S11 was only ever second-worst.
 - Reduction ops (dot, sum) with the index-fixed tree the contract
   already specifies.
 
