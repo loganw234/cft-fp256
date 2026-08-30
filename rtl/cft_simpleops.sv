@@ -139,9 +139,32 @@ module cft_simpleops #(
                   (op == OP_IADD) || (op == OP_ISUB) || (op == OP_ISHL) ||
                   (op == OP_ISHR) || (op == OP_ICMPLT);
 
+  // Unassigned opcodes answer with the canonical quiet NaN and raise
+  // invalid, rather than falling through to the FMA datapath and
+  // returning a plausible number. Both behaviours are deterministic,
+  // so neither breaks the contract - but a host that issues an opcode
+  // this bitstream predates should learn that from the flags, not
+  // discover it when the arithmetic changes under a later build. It
+  // also gives the host library's UNSUPPORTED error something real to
+  // report. 15 and everything above 23 are the current holes; divide,
+  // square root, conversions and the reductions will fill them.
+  logic is_reserved;
+  assign is_reserved = (op == 8'd15) || (op > 8'd23);
+
   assign valid = (op == OP_ABS) || (op == OP_NEG) ||
                  (op == OP_COPYSIGN) || is_minmax ||
-                 (op == OP_SELECT) || is_cmp || is_int;
+                 (op == OP_SELECT) || is_cmp || is_int || is_reserved;
+
+  // The shift-count rule (b modulo W) is only equivalent to taking the
+  // low $clog2(W) bits when W is a power of two. Every format on the
+  // interchange ladder is, but nothing in the parameterization forces
+  // it, and a non-power-of-two rung would diverge from the golden
+  // model silently rather than loudly.
+  generate
+    if (W != (1 << SHB)) begin : g_bad_width
+      $error("cft_simpleops: format width must be a power of two");
+    end
+  endgenerate
 
   always_comb begin
     d     = a;
@@ -188,6 +211,9 @@ module cft_simpleops #(
               default:  d = eq            ? one : pzero;  // OP_CMPEQ
             endcase
           end
+        end else if (is_reserved) begin
+          d = qnan;
+          flags[FL_INVALID] = 1'b1;
         end
       end
     endcase

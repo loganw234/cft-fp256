@@ -106,7 +106,7 @@ of the list *is* the distance to general purpose.
 |---|---|---|
 | sign operations (5.5.1) | `abs`, `negate`, `copySign` | **yes** |
 | sign operations (5.5.1) | `copy` | **no** - a memcpy; nothing needs the tile for it |
-| min/max (5.3.1, 9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **yes** |
+| min/max (9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **yes** - 754-2019 moved these out of 5.3.1 and changed the sNaN rule; this follows the 2019 semantics |
 | comparisons (5.6.1, 5.11) | `compareQuietLess`, `LessEqual`, `Equal` - as floats a select can consume; **greater/greaterEqual come free by swapping the operand pointers** | **yes** |
 | comparisons (5.6.1, 5.11) | `compareSignaling*`, the remaining predicates, condition codes | **no** |
 | conversions (5.4.2) | int -> float, float -> int (all five roundings) | **no** |
@@ -158,7 +158,7 @@ That means the distance to running it on-chip is short and specific:
 |---|---|
 | correctly-rounded `fma` | **yes** |
 | bit reinterpretation (float <-> uint) | free - the same register, no operation needed |
-| integer add / subtract / shift on the bit pattern | **no** - needed for seeds like `0x5F375A86 - (m >> 1)` |
+| integer add / subtract / shift on the bit pattern | **yes** |
 | compare and branchless select | **yes** |
 | `abs`, `min`, `max` | **yes** |
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
@@ -230,12 +230,11 @@ Three things, in the order they matter:
    `copySign` and the four min/max forms landed on 2026-08-29 and cost
    a comparator each - they ride the pipeline's existing
    precomputed-result path, so they added no stage and no latency.
-   What remains in the same class: comparison predicates, select,
-   `roundToIntegral`, classification, and integer/bit operations on
-   the pattern. All shallow logic on data the datapath already
-   unpacks, absent because nothing needed them yet rather than because
-   they are hard. Together with (1) they are what the det library
-   actually requires.
+   Comparison predicates, select and the integer group followed the
+   same day and the same way. What remains in this class is
+   `roundToIntegral` and the classification predicates - shallow logic
+   on data the datapath already unpacks, absent because nothing has
+   needed them yet rather than because they are hard.
 
 3. **Division and square root.** The genuinely expensive additions,
    and the least urgent: the det library already implements both from

@@ -604,4 +604,13 @@ def compute(fmt: FpFormat, op: int, xa: int, xb: int, xc: int,
     """
     if op in SIMPLE_IMPL:
         return SIMPLE_IMPL[op](fmt, xa, xb, xc)
-    return fma(fmt, *steer(fmt, op, xa, xb, xc), rnd=rnd)
+    if op in ARITH_OPS:
+        return fma(fmt, *steer(fmt, op, xa, xb, xc), rnd=rnd)
+    # An unassigned opcode is a defined result, not an exception. The
+    # model used to raise here while the hardware quietly computed an
+    # FMA - a divergence across 232 of the 256 opcode values, which is
+    # a hole in "the model is the definition of correct" even though no
+    # conforming host reaches it. Both now answer with the canonical
+    # quiet NaN and raise invalid, so a host that issues an opcode this
+    # build predates sees it in the flags.
+    return qnan_bits(fmt), FLAG_INVALID

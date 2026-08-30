@@ -82,10 +82,24 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     # arithmetic ones: a bypassed operation and a computed one are in
     # flight together on every cycle, which is the only way to catch a
     # sideband that carries the wrong one to the output.
-    for op in SIMPLE_OPS:
-        for _, xa, xb, xc in cases[:max(1, len(cases) // 4)]:
+    # The rounding attribute is varied across them even though they
+    # ignore it. That is the point: the contract asserts they ignore
+    # it, and an assertion nothing exercises is an assumption. It holds
+    # by construction - the bypass overrides before any rounding logic
+    # is reached - but construction arguments are what this project
+    # checks rather than trusts.
+    for i, op in enumerate(SIMPLE_OPS):
+        for j, (_, xa, xb, xc) in enumerate(cases[:max(1, len(cases) // 4)]):
+            rnd = modes[(i + j) % len(modes)]
             want_d, want_f = compute(fmt, op, xa, xb, xc)
-            work.append((op, RND_MODES[0], xa, xb, xc, want_d, want_f))
+            work.append((op, rnd, xa, xb, xc, want_d, want_f))
+
+    # Unassigned opcodes are part of the contract too: canonical quiet
+    # NaN, invalid raised, in hardware and model alike.
+    for op in (15, 24, 200, 255):
+        for _, xa, xb, xc in cases[:8]:
+            want_d, want_f = compute(fmt, op, xa, xb, xc)
+            work.append((op, modes[0], xa, xb, xc, want_d, want_f))
 
     random.Random(seed ^ 0x5EED).shuffle(work)
 
@@ -114,7 +128,7 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
                 got_f = int(dut.flags.value)
                 if got_d != want_d or got_f != want_f:
                     errors.append(
-                        f"{fmt.name} {OP_NAMES[op]} {RND_NAMES[rnd]} "
+                        f"{fmt.name} {OP_NAMES.get(op, f'op{op}')} {RND_NAMES[rnd]} "
                         f"a={fa:#x} b={fb:#x} "
                         f"c={fc:#x}: got d={got_d:#x} f={got_f:#05b}, "
                         f"want d={want_d:#x} f={want_f:#05b}")
@@ -145,7 +159,7 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     assert checked == len(work)
     assert not errors, \
         f"{len(errors)} of {checked} mismatches (first: {errors[0]})"
-    n_simple = len(SIMPLE_OPS) * max(1, len(cases) // 4)
+    n_simple = len(SIMPLE_OPS) * max(1, len(cases) // 4) + 4 * 8
     dut._log.info(
         f"{fmt.name}: {checked} vectors bit-exact against cft_golden "
         f"({len(cases)} cases x {len(modes)} rounding "

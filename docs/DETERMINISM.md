@@ -46,8 +46,11 @@ tile advertises what it carries in the CAPS CSR
 
 ## Operations
 
-v0: `fma(a,b,c) = a*b + c`, `add`, `sub`, `mul` - elementwise over
-vectors. ADD/SUB/MUL are defined as operand-steered FMA (see
+The arithmetic core: `fma(a,b,c) = a*b + c`, `add`, `sub`, `mul` -
+elementwise over vectors. Everything else the tile implements is
+non-arithmetic and is specified further down.
+
+ADD/SUB/MUL are defined as operand-steered FMA (see
 `cft_golden.softfloat.steer` and rtl/cft_opmux.sv); the steering is
 proven equivalent to the direct IEEE definitions by
 `test_steering_composition`, signed zeros and specials included.
@@ -109,26 +112,67 @@ exact rational floor division, sharing no code path with the model.
 
 ## The non-arithmetic operations
 
-`abs`, `negate` and `copySign` (5.5.1) together with `minimum`,
-`maximum`, `minimumNumber` and `maximumNumber` (9.6) do not round, do
-not consult the rounding attribute, and cannot be inexact. Two of
-their rules are worth stating because they are the ones implementations
-get wrong:
+Nineteen opcodes that do not round, do not consult the rounding
+attribute, and cannot be inexact:
 
-- **`min(+0, -0)` is -0 and `max(+0, -0)` is +0.** Signed zeros compare
-  equal but are not interchangeable, so a min/max that just returns
-  "either, they're equal" is non-conforming and, worse, free to return
-  a different one on a different device.
-- **`abs`, `negate` and `copySign` preserve NaN payloads and signal
-  nothing**, even for a signaling NaN. This is the single exception to
-  the canonical-NaN rule below, and it does not weaken determinism: the
-  canonical rule exists because in arithmetic *which operand's payload
-  survives* is where implementations diverge, and here there is exactly
-  one source. Canonicalising would also make `copySign` lossy, which
-  the standard does not permit.
+| group | operations | clause |
+|---|---|---|
+| sign | `abs`, `negate`, `copySign` | 5.5.1 |
+| min/max | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | 9.6 |
+| predicate | `cmplt`, `cmple`, `cmpeq` (quiet comparisons) | 5.11 |
+| data | `select` | - |
+| integer | `iand`, `ior`, `ixor`, `iadd`, `isub`, `ishl`, `ishr`, `icmplt` | - |
 
-The `...Number` forms return the non-NaN operand where the plain forms
-propagate the NaN; all four signal invalid on a signaling NaN.
+Rules worth stating because they are the ones implementations get
+wrong:
+
+- **`min(+0, -0)` is -0 and `max(+0, -0)` is +0.** Not a choice: 9.6
+  says "for this operation, -0 compares less than +0", which takes ±0
+  out of the "either operand" case. A min/max that returns "either,
+  they're equal" is non-conforming and free to differ per device.
+- **The `...Number` forms return the NUMBER when one operand is a
+  signaling NaN**, raising invalid but not converting it - 9.6 says
+  the sNaN "is otherwise ignored and not converted to a quiet NaN".
+  This changed from 754-2008's minNum/maxNum; implementing the old
+  behaviour is the common mistake.
+- **The plain `minimum`/`maximum` forms return the canonical quiet
+  NaN**, per the canonicalisation rule below - they do not forward the
+  operand's payload.
+- **`cmplt`/`cmple`/`cmpeq` are the QUIET predicates** (5.11): they
+  signal only on a signaling NaN, and an unordered pair makes every
+  predicate false. They yield 1.0 or +0.0 rather than a condition
+  code; 5.6.1 calls the result boolean and nowhere fixes its
+  representation, so this conforms and lets `select` consume it.
+
+### Where the canonical-NaN rule does not apply
+
+The rule below - any NaN in, one canonical quiet NaN out, sNaN raises
+invalid - governs **arithmetic**. Three groups are outside it, and
+saying so precisely matters because this document is what an
+independent implementation is scored against:
+
+| group | NaN behaviour |
+|---|---|
+| `abs`, `negate`, `copySign` | pass the pattern through, payload intact, signal **nothing** even for a signaling NaN (5.5.1: "they only affect the sign bit... and signal no exception"; 6.2.3 exempts exactly these) |
+| `select` | moves whichever operand it selects through intact, payload and all, and signals nothing |
+| the integer group | there are no NaNs - the operand is a W-bit unsigned word, and no bit pattern means anything but itself |
+
+None of this weakens determinism. The canonical rule exists because in
+arithmetic *which operand's payload survives* is where implementations
+diverge; in every case above the result is a function of the input
+bits with no choice to make. 754-2019 7.1 leaves the signalling
+behaviour of operations outside the standard to the implementation,
+and this table is that definition.
+
+### Unassigned opcodes
+
+Opcode 15 and everything from 24 up are unassigned. They return the
+canonical quiet NaN with **invalid** raised, in the hardware and in
+the golden model alike. Deterministic, and visible in the flags -
+which matters because those codes are where divide, square root,
+conversions and the reductions will land, so a host that issues one
+early should learn it now rather than get a plausible number that
+changes meaning under a later bitstream.
 
 ## Subnormals
 

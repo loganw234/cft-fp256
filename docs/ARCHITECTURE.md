@@ -138,7 +138,9 @@ rungs it carries; the beat stays 256 bits regardless.
 | 22 | `ishr` | integer | logical, never arithmetic |
 | 23 | `icmplt` | integer | unsigned; yields 1.0 or +0.0 |
 
-Opcode 15 and everything from 24 up are unassigned. The field was four
+Opcode 15 and everything from 24 up are unassigned, and return
+the canonical quiet NaN with invalid raised - in hardware and in the
+golden model alike. The field was four
 bits until the integer group needed a fifteenth opcode; it is a byte
 now so that divide, square root, conversions and the reductions have
 somewhere to go without moving the precision and rounding fields again.
@@ -173,9 +175,24 @@ hardware far more than it needs a transcendental.
   trimmed open-core tiles clear what they dropped. Issuing a
   non-advertised precision is undefined (no arithmetic hazard - the
   run completes - but D's contents are meaningless).
-- Operand semantics per op: FMA uses A,B,C; ADD/SUB use A,C (B
-  ignored); MUL uses A,B (C ignored). D = op result. SUB computes
-  A - C.
+- **Operand semantics per op - read this before changing an
+  opcode.** The convention is not uniform, because ADD and SUB are
+  steered FMAs (`a*1 + c`) while everything else takes its operands
+  in order. A host that lays out buffers for `add` and then switches
+  to `min` reads the wrong array and gets plausible numbers.
+
+  | op | reads | result |
+  |---|---|---|
+  | `fma` | A, B, C | `a*b + c` |
+  | `add` | **A, C** (B ignored) | `a + c` |
+  | `sub` | **A, C** (B ignored) | `a - c` |
+  | `mul` | A, B (C ignored) | `a * b` |
+  | `abs`, `neg` | A only | |
+  | `copysign`, `min`, `max`, `minnum`, `maxnum` | A, B | |
+  | `cmplt`, `cmple`, `cmpeq`, `icmplt` | A, B | 1.0 or +0.0 |
+  | all other integer ops | A, B | |
+  | `select` | A, B, C | `c != 0 ? a : b` |
+
 - One run per ap_start; poll CTRL for ap_done (XRT does this
   natively); read FLAGS **and STATUS** before the next start - *if
   your host language can*. See the caveat below. A clean
