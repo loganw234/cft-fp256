@@ -485,62 +485,6 @@ def test_nested_loops_execute():
 
 # ---- the property, fuzzed -------------------------------------------
 
-def _random_program(fmt, rng, allow_halt_in_loop=False):
-    """A random program that validate() accepts (unless the caller asks
-    for the one construction that breaks P3, which is how the fuzz
-    demonstrates the rule is load-bearing rather than decorative)."""
-    insns = []
-    depth = 0
-    nconst = 3
-    for _ in range(rng.randint(4, 22)):
-        pick = rng.random()
-        if pick < 0.45:
-            op = rng.choice([sf.OP_FMA, sf.OP_ADD, sf.OP_SUB, sf.OP_MUL,
-                             sf.OP_ABS, sf.OP_MIN, sf.OP_MAXNUM,
-                             sf.OP_CMPLT, sf.OP_SELECT, sf.OP_IXOR])
-            # pick the constant flag FIRST, then draw the operand from
-            # the range that flag makes legal - otherwise most
-            # instructions name a constant the bank does not have and
-            # the fuzz spends its time being rejected
-            kb = rng.random() < 0.3
-            kc = rng.random() < 0.2
-            insns.append(seq.alu(
-                op,
-                rd=rng.randrange(seq.NREG),
-                ra=rng.randrange(seq.NREG),
-                rb=rng.randrange(nconst) if kb else rng.randrange(seq.NREG),
-                rc=rng.randrange(nconst) if kc else rng.randrange(seq.NREG),
-                rnd=rng.randrange(5), kb=kb, kc=kc))
-        elif pick < 0.6 and depth < seq.MAX_LOOP_DEPTH:
-            insns.append(seq.repeat(rng.randint(1, 4)))
-            depth += 1
-        elif pick < 0.7 and depth > 0:
-            insns.append(seq.endrep())
-            depth -= 1
-        elif pick < 0.8:
-            insns.append(seq.deposit(rng.randrange(seq.NREG)))
-        elif pick < 0.92:
-            insns.append(seq.setact(rng.randrange(seq.NREG)))
-        elif depth == 0:
-            insns.append(seq.actall())
-        elif allow_halt_in_loop:
-            insns.append(seq.halt())
-    insns += [seq.endrep()] * depth
-    insns.append(seq.halt())
-    consts = [sf.zero_bits(fmt), sf.one_bits(fmt),
-              sf.max_normal_bits(fmt)][:nconst]
-    return insns, consts
-
-
-def _fuzz_inputs(fmt, rng, n):
-    pool = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.one_bits(fmt),
-            sf.inf_bits(fmt), sf.inf_bits(fmt, 1), sf.qnan_bits(fmt),
-            sf.snan_bits(fmt, 1), sf.min_subnormal_bits(fmt),
-            sf.max_normal_bits(fmt)]
-    return [rng.choice(pool) if rng.random() < 0.5
-            else rng.getrandbits(fmt.width) for _ in range(n)]
-
-
 def test_p3_fuzz_early_exit_is_invisible():
     """The real gate on P3: random valid programs, run with the
     optimisation forced on and off, whole machine state compared."""
@@ -549,13 +493,13 @@ def test_p3_fuzz_early_exit_is_invisible():
     checked = 0
     saved = 0
     for _ in range(400):
-        insns, consts = _random_program(fmt, rng)
+        insns, consts = seq.random_program(fmt, rng)
         try:
             prog = seq.Program(fmt, insns, consts, max_deposits=3)
         except seq.ProgramError:
             continue
         n = rng.randint(1, 6)
-        a, b, c = (_fuzz_inputs(fmt, rng, n) for _ in range(3))
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
         fast = seq.run(prog, a, b, c, early_exit=True)
         slow = seq.run(prog, a, b, c, early_exit=False)
         assert fast.state() == slow.state(), (
@@ -576,14 +520,14 @@ def test_p3_fuzz_finds_the_halt_hole_when_the_rule_is_removed():
     fmt = FP32
     diverged = 0
     for _ in range(600):
-        insns, consts = _random_program(fmt, rng, allow_halt_in_loop=True)
+        insns, consts = seq.random_program(fmt, rng, allow_halt_in_loop=True)
         # bypass the validator deliberately - this is the program shape
         # validate() exists to refuse
         prog = seq.Program.__new__(seq.Program)
         prog.fmt, prog.insns, prog.consts, prog.max_deposits = \
             fmt, insns, consts, 3
         n = rng.randint(2, 6)
-        a, b, c = (_fuzz_inputs(fmt, rng, n) for _ in range(3))
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
         try:
             fast = seq.run(prog, a, b, c, early_exit=True)
             slow = seq.run(prog, a, b, c, early_exit=False)
@@ -604,13 +548,13 @@ def test_p2_fuzz_partitioning_is_invisible():
     rng = random.Random(99)
     fmt = FP32
     for _ in range(250):
-        insns, consts = _random_program(fmt, rng)
+        insns, consts = seq.random_program(fmt, rng)
         try:
             prog = seq.Program(fmt, insns, consts, max_deposits=3)
         except seq.ProgramError:
             continue
         n = 8
-        a, b, c = (_fuzz_inputs(fmt, rng, n) for _ in range(3))
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
         whole = seq.run(prog, a, b, c)
         for cuts in ([8], [4, 4], [1, 3, 4], [2, 2, 2, 2], [1] * 8):
             dep, fl, stt, off = [], 0, 0, 0

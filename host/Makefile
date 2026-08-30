@@ -23,7 +23,8 @@ CXXSTD  := -std=c++17
 WARN    := -Wall -Wextra -Wpedantic -Wshadow
 INC     := -Iinclude
 
-SRC     := src/bigint.c src/softfloat.c src/device.c src/conformance.c
+SRC     := src/bigint.c src/softfloat.c src/device.c src/program.c \
+           src/conformance.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
@@ -70,7 +71,7 @@ TOOLS := cft-selftest$(EXE)
 TESTS := api-test$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
-.PHONY: all test difftest coverage fortran clean
+.PHONY: all test difftest seqtest coverage fortran clean
 
 all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
 
@@ -139,6 +140,15 @@ fortran: libcft.a
 
 difftest: all
 	$(PYTHON) tests/diff_check.py --trials 3000
+
+# The same idea as difftest, for programs rather than arithmetic: two
+# independent ports of the sequencer, one in Python and one in C, over
+# the same fuzz corpus. It also checks that they REFUSE the same
+# programs, because two validators that disagree about what is legal
+# are a device executing something the host believed it had rejected.
+seqtest: all
+	$(PYTHON) tests/seq_check.py --trials 250 \
+		--formats fp32 fp64 fp128 fp256
 
 coverage: all
 	$(PYTHON) tests/diff_check.py --coverage --trials 3000

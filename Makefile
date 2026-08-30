@@ -16,7 +16,7 @@ TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
 .PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin \
-        libcft libcft-test libcft-diff libcft-docker clean help
+        libcft libcft-test libcft-diff libcft-seq libcft-docker clean help
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
@@ -24,6 +24,7 @@ help:
 	@echo "libcft       build the C library (host/), no dependencies"
 	@echo "libcft-test  contract tests + vector replay + the C/Python check"
 	@echo "libcft-diff  libcft against the golden model, boundary-targeted"
+	@echo "libcft-seq   the sequencer: C against the model, over fuzzed programs"
 	@echo "libcft-docker  the same library tests on a second platform"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
@@ -65,6 +66,9 @@ libcft:
 
 libcft-test:
 	$(MAKE) -C host test PYTHON=$(PYTHON)
+
+libcft-seq:
+	$(MAKE) -C host seqtest PYTHON=$(PYTHON)
 
 libcft-diff:
 	$(MAKE) -C host difftest PYTHON=$(PYTHON)

@@ -485,6 +485,79 @@ def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None,
     return Result(deposits, flags, status, regs, active, counts, executed)
 
 
+def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False):
+    """A random program, for fuzzing. Returns (insns, consts).
+
+    It lives here rather than in a test file because two different
+    checks need the same generator - the model's own property tests and
+    the cross-check against libcft's C implementation - and a fuzz
+    corpus that differs between them would compare two things neither
+    of which is the thing under test.
+
+    `allow_halt_in_loop` emits the one construction validate() refuses,
+    so a test can confirm the rule is load-bearing by watching the fuzz
+    break without it.
+    """
+    insns = []
+    depth = 0
+    for _ in range(rng.randint(4, 22)):
+        pick = rng.random()
+        if pick < 0.45:
+            op = rng.choice([OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_, OP_ABS_,
+                             OP_MIN_, OP_MAXNUM_, OP_CMPLT_, OP_SELECT_,
+                             OP_IXOR_])
+            # choose the constant flags first, then draw each operand
+            # from the range that flag makes legal - otherwise most
+            # instructions name a constant the bank does not hold and
+            # the fuzz spends its time being rejected
+            kb = rng.random() < 0.3
+            kc = rng.random() < 0.2
+            insns.append(alu(
+                op,
+                rd=rng.randrange(NREG),
+                ra=rng.randrange(NREG),
+                rb=rng.randrange(nconst) if kb else rng.randrange(NREG),
+                rc=rng.randrange(nconst) if kc else rng.randrange(NREG),
+                rnd=rng.randrange(5), kb=kb, kc=kc))
+        elif pick < 0.6 and depth < MAX_LOOP_DEPTH:
+            insns.append(repeat(rng.randint(1, 4)))
+            depth += 1
+        elif pick < 0.7 and depth > 0:
+            insns.append(endrep())
+            depth -= 1
+        elif pick < 0.8:
+            insns.append(deposit(rng.randrange(NREG)))
+        elif pick < 0.92:
+            insns.append(setact(rng.randrange(NREG)))
+        elif depth == 0:
+            insns.append(actall())
+        elif allow_halt_in_loop:
+            insns.append(halt())
+    insns += [endrep()] * depth
+    insns.append(halt())
+    consts = [sf.zero_bits(fmt), sf.one_bits(fmt),
+              sf.max_normal_bits(fmt)][:nconst]
+    return insns, consts
+
+
+def random_inputs(fmt, rng, n):
+    """Operands weighted toward the values that make opcodes differ:
+    signed zeros, infinities, both NaN kinds, the subnormal edge."""
+    pool = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.one_bits(fmt),
+            sf.inf_bits(fmt), sf.inf_bits(fmt, 1), sf.qnan_bits(fmt),
+            sf.snan_bits(fmt, 1), sf.min_subnormal_bits(fmt),
+            sf.max_normal_bits(fmt)]
+    return [rng.choice(pool) if rng.random() < 0.5
+            else rng.getrandbits(fmt.width) for _ in range(n)]
+
+
+# Opcode aliases, so the generator above reads as a list of operations
+# rather than a list of attribute lookups.
+OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_ = sf.OP_FMA, sf.OP_ADD, sf.OP_SUB, sf.OP_MUL
+OP_ABS_, OP_MIN_, OP_MAXNUM_ = sf.OP_ABS, sf.OP_MIN, sf.OP_MAXNUM
+OP_CMPLT_, OP_SELECT_, OP_IXOR_ = sf.OP_CMPLT, sf.OP_SELECT, sf.OP_IXOR
+
+
 def _matching_endrep(insns, pc):
     depth = 0
     for j in range(pc, len(insns)):

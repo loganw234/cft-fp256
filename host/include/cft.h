@@ -361,6 +361,76 @@ CFT_API cft_status cft_buffer_from_device(cft_buffer *buf);
 CFT_API void       cft_buffer_free(cft_buffer *buf);
 
 /* ---------------------------------------------------------------
+ * Programs - the orbit sequencer
+ *
+ * cft_run applies one operation to every element. A program applies a
+ * SEQUENCE to every element, on-chip, without the operands making a
+ * round trip to memory between steps - which is the difference
+ * between 0.125 flops per byte and something worth putting four
+ * compute units behind.
+ *
+ * This sits beside cft_run rather than replacing it, exactly as
+ * docs/HOSTAPI.md said it would. docs/SEQUENCER.md is the design and
+ * the instruction encoding; python/cft_golden/seq.py is the
+ * definition of correct.
+ *
+ * A program is a flat byte image - header, constant bank, instruction
+ * stream - so it is the same bytes on disk, in this call, and in the
+ * device's instruction memory. cft_program_load validates it: a
+ * program a device could execute ambiguously is refused here rather
+ * than interpreted there.
+ * --------------------------------------------------------------- */
+typedef struct cft_program cft_program;
+
+/* Sticky status bits, reported through cft_program_run's bus_out.
+ * Bits 0..2 are the engine's bus faults and mean the output is not
+ * valid; this one does not. A lane that deposits more than the
+ * program's max_deposits drops the excess and sets it: what fit is
+ * correct and reproducible, and what was lost is the tail. */
+#define CFT_STATUS_DEPOSIT_OVERFLOW (1u << 3)
+
+CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
+                                    size_t bytes, cft_program **out);
+CFT_API void       cft_program_free(cft_program *prog);
+
+/* What the loaded program is, so a caller can size its buffers
+ * without parsing the image itself. */
+typedef struct cft_program_info {
+    size_t     struct_size;    /* in: sizeof; out: bytes filled */
+    cft_format format;
+    uint32_t   max_deposits;   /* deposit slots per element */
+    uint32_t   n_insns;
+    uint32_t   n_consts;
+} cft_program_info;
+
+CFT_API cft_status cft_program_get_info(cft_program *prog,
+                                        cft_program_info *out);
+
+/* Run a program over n elements.
+ *
+ *   a, b, c    initialise each lane's r0, r1 and r2 - the same three
+ *              streams cft_run reads. b and c may be NULL, in which
+ *              case those registers start at +0.
+ *   deposits   n * max_deposits elements. Every slot is written: one
+ *              a lane never deposited into reads as +0, and that is
+ *              normative, because a run whose untouched slots kept
+ *              whatever the buffer held would not be reproducible.
+ *   counts     n deposit counts, or NULL. Needed to tell a deposited
+ *              +0 from an untouched slot, which the buffer alone
+ *              cannot express.
+ *
+ * Deposit i,d lands at index i * max_deposits + d, which depends on
+ * the element's own index and nothing else - so a run split across
+ * four tiles writes the same bytes to the same places as a run on one.
+ */
+CFT_API cft_status cft_program_run(cft_program *prog,
+                                   const void *a, const void *b,
+                                   const void *c,
+                                   void *deposits, uint32_t *counts,
+                                   size_t n,
+                                   uint32_t *flags, uint32_t *bus);
+
+/* ---------------------------------------------------------------
  * Conformance
  *
  * Replay the published vector sets through this device and report the
