@@ -32,6 +32,17 @@ merely be re-confirmed.
       and `cardday/quad/`, each with `cft_hw.manifest.txt` naming the
       commit, the tree state, the clock and the routed WNS. An image
       whose manifest says `tree: DIRTY` does not go on the card.
+- [ ] If the manifest's commit is not HEAD - and it usually will not
+      be, because a link takes two hours and work continues - check
+      whether that matters rather than assuming it does:
+
+          git diff <manifest commit>..HEAD -- rtl/
+
+      An empty diff means the image is HEAD's hardware. So does a diff
+      that touches only `synthesis translate_off` regions, since
+      nothing inside one reaches the netlist. Rebuilding a good image
+      because a documentation commit landed afterwards costs two hours
+      and buys nothing.
 - [ ] `sha256sum` of both xclbins recorded somewhere that is not the
       build box.
 - [ ] `make libcft-test` green on the machine that will host the card.
