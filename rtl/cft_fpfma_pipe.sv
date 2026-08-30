@@ -17,7 +17,7 @@
 // 24/48/96/192-bit shifts. Narrow formats degenerate gracefully
 // (fp32: one chunk, the tree levels are pass-through registers).
 //
-// Stage map (LATENCY = 15 edges, S0..S14):
+// Stage map (LATENCY = 16 edges, S0..S15):
 //   S0    input registers
 //   S1    unpack, classify, specials sideband
 //   S2    partial products  pp[k] = ma * mb[24k +: 24]
@@ -30,11 +30,16 @@
 //   S9    split add low halves: sum, big-small, small-big in parallel
 //   S10   split add high halves + magnitude/sign select; strip the
 //         appended marker into the explicit sticky rail
-//   S11   LZC (per-64 chunk tree) + coarse normalize shift
+//   S11a  LZC (per-64 chunk tree) - the fan-in half
+//   S11b  coarse normalize shift - the fan-out half
 //   S12   fine normalize shift
 //   S13   round-window extraction (clamped and as-if-unbounded),
 //         attribute-directed increment, tininess-after-rounding
 //   S14   pack + specials mux -> output registers
+//
+// S11 is two stages because it was the measured critical path of the
+// whole kernel: it reduced all NW bits to one shift count and then
+// broadcast that count back over all NW bits in a single cycle.
 //
 // Marker/sticky safety carries over from v0 strengthened: the
 // appended LSB participates in the S9/S10 subtract exactly (floor +
@@ -51,7 +56,7 @@
 module cft_fpfma_pipe #(
     parameter int EXP_W   = 8,
     parameter int MAN_W   = 23,
-    parameter int LATENCY = 15
+    parameter int LATENCY = 16
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
@@ -134,7 +139,7 @@ module cft_fpfma_pipe #(
     endcase
   endfunction
 
-  localparam int DEPTH = 15;
+  localparam int DEPTH = 16;
 
   // Elaboration-time guards. These have to be in generate scope, not in
   // an `initial` block: synthesis ignores `initial` entirely, so a
@@ -157,7 +162,7 @@ module cft_fpfma_pipe #(
   // in the simulation message below.)
   generate
     if (LATENCY != DEPTH) begin : g_bad_latency
-      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (15)");
+      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (16)");
     end
     if (NMC > 16) begin : g_too_many_chunks
       $error("cft_fpfma_pipe: MAN_W too wide - the multiplier tree holds 16 chunks (max MAN_W 383)");
@@ -536,22 +541,43 @@ module cft_fpfma_pipe #(
     end
   endfunction
 
+  // S11 is split in two. Measured: it was the critical path of the
+  // whole kernel by a wide margin, and the reason is structural rather
+  // than deep logic - it reduces all NW bits down to one shift count
+  // and then broadcasts that count back across all NW bits again. On
+  // fp256 that is 717 bits fanning in and out in a single stage, which
+  // is why two thirds of its delay was wire rather than gate.
+  //
+  // Splitting it at the natural seam - count first, shift second -
+  // puts the fan-in and the fan-out in different cycles, so neither
+  // has to span the whole structure. It costs one cycle of latency,
+  // which is free here: latency is fixed, not pipelined-away work, and
+  // the engines size their capture delay lines from the same LATENCY
+  // parameter.
+  logic [NW-1:0] s11a_valw;
+  logic          s11a_stk, s11a_zero, s11a_rsign, s11a_spc;
+  logic [W-1:0]  s11a_spd;
+  logic [4:0]    s11a_spf;
+  int            s11a_enorm, s11a_fine, s11a_lsh;
+
   logic [NW-1:0] s11_valw;
   logic          s11_stk, s11_zero, s11_rsign, s11_spc;
   logic [W-1:0]  s11_spd;
   logic [4:0]    s11_spf;
   int            s11_enorm, s11_fine;
 
-  always_ff @(posedge clk) begin : stage11
+  // S11a: leading-zero count only - the fan-in half.
+  always_ff @(posedge clk) begin : stage11a
     logic [NCH*64-1:0] padded;
     logic [NW-1:0] valw;
-    int chunk, cl, msb, lsh_coarse;
+    int chunk, cl, msb;
     valw = s10_mag[GW:1];
     padded = {{(NCH*64-NW){1'b0}}, valw};
     chunk = -1;
     for (int ci = NCH - 1; ci >= 0; ci = ci - 1) begin
       if (chunk == -1 && (padded[ci*64 +: 64] != 0)) chunk = ci;
     end
+    s11a_valw <= valw;
     if (chunk == -1) begin
       // Exact zero only without sticky residue; else a bare epsilon,
       // and s10_g already places it below the subnormal grid so S13
@@ -566,22 +592,34 @@ module cft_fpfma_pipe #(
       // subnormal pins its exponent at EMIN-MAN_W, so g = EMIN-MAN_W-SH
       // and S13's K is negative. Change SH or the far-alignment
       // threshold and this is the argument to re-derive.
-      s11_zero <= !s10_mag[0];
-      s11_valw <= '0;
-      s11_enorm <= s10_g;
-      s11_fine <= 0;
+      s11a_zero  <= !s10_mag[0];
+      s11a_enorm <= s10_g;
+      s11a_fine  <= 0;
+      s11a_lsh   <= 0;
     end else begin
       cl  = lzc64(padded[chunk*64 +: 64]);
       msb = chunk * 64 + (63 - cl);
-      s11_zero  <= 1'b0;
-      s11_enorm <= s10_g + msb;
-      lsh_coarse = (NW - 1 - msb) >> 6;
-      s11_valw <= valw << (lsh_coarse * 64);
-      s11_fine <= (NW - 1 - msb) & 63;
+      s11a_zero  <= 1'b0;
+      s11a_enorm <= s10_g + msb;
+      s11a_lsh   <= (NW - 1 - msb) >> 6;
+      s11a_fine  <= (NW - 1 - msb) & 63;
     end
-    s11_stk   <= s10_mag[0];
-    s11_rsign <= s10_rsign;
-    s11_spc <= s10_spc; s11_spd <= s10_spd; s11_spf <= s10_spf;
+    s11a_stk   <= s10_mag[0];
+    s11a_rsign <= s10_rsign;
+    s11a_spc <= s10_spc; s11a_spd <= s10_spd; s11a_spf <= s10_spf;
+  end
+
+  // S11b: the coarse normalize shift - the fan-out half. An exact zero
+  // is forced here rather than in S11a so that the zero decision and
+  // the shift never share a cycle.
+  always_ff @(posedge clk) begin : stage11b
+    s11_valw  <= s11a_zero ? '0 : (s11a_valw << (s11a_lsh * 64));
+    s11_zero  <= s11a_zero;
+    s11_enorm <= s11a_enorm;
+    s11_fine  <= s11a_fine;
+    s11_stk   <= s11a_stk;
+    s11_rsign <= s11a_rsign;
+    s11_spc <= s11a_spc; s11_spd <= s11a_spd; s11_spf <= s11a_spf;
   end
 
   logic [NW-1:0] s12_norm;

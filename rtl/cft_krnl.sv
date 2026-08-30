@@ -114,7 +114,7 @@ module cft_krnl #(
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
   );
 
-  cft_engine_stream #(.LATENCY(15), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
+  cft_engine_stream #(.LATENCY(16), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
                       .EN_FP256(EN_FP256)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
