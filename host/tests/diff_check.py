@@ -51,20 +51,25 @@ RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
 def load_library():
     """Find and bind libcft. No build step, no generated bindings - the
     header is the whole contract, and this is what it costs to call it
-    from another language."""
+    from another language.
+
+    One candidate, chosen by platform: a tree built from two platforms
+    holds both libraries, and falling back to whichever exists loads
+    the foreign one and reports an ELF header problem rather than a
+    missing build."""
     override = os.environ.get("CFT_LIB")
-    names = [override] if override else [
-        ROOT / "host" / "cft.dll",
-        ROOT / "host" / "libcft.so",
-        ROOT / "host" / "libcft.dylib",
-    ]
-    for name in names:
-        if name and Path(name).exists():
-            return ctypes.CDLL(str(name))
-    raise SystemExit(
-        "libcft not found - build it first:\n"
-        "    make -C host\n"
-        "or point CFT_LIB at the shared library.")
+    if override:
+        path = Path(override)
+    else:
+        name = {"win32": "cft.dll", "cygwin": "cft.dll",
+                "darwin": "libcft.dylib"}.get(sys.platform, "libcft.so")
+        path = ROOT / "host" / name
+    if not path.exists():
+        raise SystemExit(
+            f"{path} not found - build it first:\n"
+            "    make -C host\n"
+            "or point CFT_LIB at the shared library.")
+    return ctypes.CDLL(str(path))
 
 
 def bind(lib):

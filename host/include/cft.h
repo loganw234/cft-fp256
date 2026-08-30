@@ -247,9 +247,19 @@ CFT_API void       cft_close(cft_device *dev);
  * A trimmed build may carry fewer formats than the full tile, and a
  * future one will carry more operations. Ask rather than assume: the
  * whole point of a portable contract is that the same binary runs
- * against several generations of device. */
+ * against several generations of device.
+ *
+ * Zero the struct, set struct_size to sizeof(cft_caps), then call. On
+ * return struct_size is how many bytes were actually filled, so a
+ * caller built against a newer header can tell what it got instead of
+ * reading its own zeroes as answers.
+ *
+ * Fields are only ever appended to this struct, never reordered or
+ * resized. That is what makes the size handshake safe in both
+ * directions: an older caller's struct always ends on a field
+ * boundary of the newer one. */
 typedef struct cft_caps {
-    size_t   struct_size;      /* set by caller to sizeof(cft_caps) */
+    size_t   struct_size;      /* in: sizeof(cft_caps); out: bytes filled */
     uint32_t format_mask;      /* bit (1u << cft_format) per format */
     uint32_t tiles;            /* compute units; partitioning is
                                 * internal and invisible to callers */

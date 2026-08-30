@@ -16,7 +16,7 @@ TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
 .PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin \
-        libcft libcft-test libcft-diff clean help
+        libcft libcft-test libcft-diff libcft-docker clean help
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
@@ -24,6 +24,7 @@ help:
 	@echo "libcft       build the C library (host/), no dependencies"
 	@echo "libcft-test  contract tests + vector replay + the C/Python check"
 	@echo "libcft-diff  libcft against the golden model, boundary-targeted"
+	@echo "libcft-docker  the same library tests on a second platform"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
 	@echo "sim-docker   run the cocotb RTL suite inside the container"
@@ -67,6 +68,16 @@ libcft-test:
 
 libcft-diff:
 	$(MAKE) -C host difftest PYTHON=$(PYTHON)
+
+# The library's own tests on a second platform. The point is the
+# checksum lines printed by the examples: identical here and on the
+# developer's own machine, or "the same bits everywhere" is not true.
+# Cleans either side because the objects it leaves are Linux ELF and
+# would confuse the next native build.
+libcft-docker:
+	docker run --rm -v "$(CURDIR):/work" -w /work $(DOCKER_IMAGE) \
+		sh -c "make -C host clean && make -C host test PYTHON=python3 && \
+		       make -C host clean"
 
 sim:
 	$(MAKE) -C tb sim SIM=$(SIM)

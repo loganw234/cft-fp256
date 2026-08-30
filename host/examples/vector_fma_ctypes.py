@@ -40,19 +40,27 @@ GEOM = [
 NAMES = ["fp32", "fp64", "fp128", "fp256"]
 
 
-def load():
+def library_path():
+    """Exactly one candidate, chosen by platform.
+
+    Listing every name and taking the first that exists looks tolerant
+    and is not: a repository checked out on a shared volume and built
+    from two platforms ends up holding both, and the fallback then
+    loads the foreign one and fails with "invalid ELF header" instead
+    of "build it first"."""
     override = os.environ.get("CFT_LIB")
-    names = [override] if override else [
-        ROOT / "host" / "cft.dll",
-        ROOT / "host" / "libcft.so",
-        ROOT / "host" / "libcft.dylib",
-    ]
-    for name in names:
-        if name and Path(name).exists():
-            lib = ctypes.CDLL(str(name))
-            break
-    else:
-        raise SystemExit("libcft not found - run `make -C host` first")
+    if override:
+        return Path(override)
+    name = {"win32": "cft.dll", "cygwin": "cft.dll",
+            "darwin": "libcft.dylib"}.get(sys.platform, "libcft.so")
+    return ROOT / "host" / name
+
+
+def load():
+    path = library_path()
+    if not path.exists():
+        raise SystemExit(f"{path} not found - run `make -C host` first")
+    lib = ctypes.CDLL(str(path))
 
     u32p = ctypes.POINTER(ctypes.c_uint32)
     lib.cft_open.argtypes = [ctypes.c_char_p, ctypes.c_int,

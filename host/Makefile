@@ -103,6 +103,13 @@ difftest: all
 coverage: all
 	$(PYTHON) tests/diff_check.py --coverage --trials 3000
 
+# Removes every platform's products, not just this one's. A tree on a
+# shared volume gets built from more than one platform, and a clean
+# that leaves the other platform's shared library behind leaves
+# something for a loader to find.
 clean:
-	rm -f $(OBJ) $(PICOBJ) libcft.a libcft.dll.a $(SHLIB) $(TOOLS) \
-	      $(TESTS) $(EXAMPLES) vector-fma-f$(EXE) .out-c.txt .out-py.txt
+	rm -f $(OBJ) $(PICOBJ) libcft.a libcft.dll.a \
+	      cft.dll libcft.so libcft.dylib \
+	      cft-selftest cft-selftest.exe api-test api-test.exe \
+	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
+	      .out-c.txt .out-py.txt

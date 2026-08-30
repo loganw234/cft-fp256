@@ -184,8 +184,10 @@ from a clean one.
     make libcft             # build
     make libcft-test        # contract tests, replay, C-vs-Python
     make libcft-diff        # against the golden model, boundary-targeted
+    make libcft-docker      # the same tests on a second platform
 
-As of the commit that added the library, on x86-64 Windows with GCC 16:
+As of the commit that added the library, on x86-64 Windows with GCC
+16.1 (MinGW, msvcrt):
 
 | check | cases | result |
 |---|---|---|
@@ -193,6 +195,28 @@ As of the commit that added the library, on x86-64 Windows with GCC 16:
 | differential vs the golden model | 213,000 | every case, bits and flags |
 | contract tests (`api-test`) | every check | pass |
 | C example vs Python example | 4 checksums | identical |
+
+And the part that is actually the product. The same source built by
+**GCC 13.3 on Ubuntu 24.04 against glibc**, running in the project's
+own simulation container, prints:
+
+    fp32   n=4096 rne  checksum 0x9af9d3973816adcf  flags 0x10
+    fp64   n=4096 rne  checksum 0x04110a4c30c6df4d  flags 0x10
+    fp128  n=4096 rne  checksum 0xb815aa4a3a3eb024  flags 0x10
+    fp256  n=4096 rne  checksum 0x0eea048c14040a4e  flags 0x10
+
+character for character what the Windows build prints. Two operating
+systems, two C libraries, two compiler major versions, 16,384 fused
+multiply-adds per line at four precisions - and one set of bits. That
+is the claim this project exists to make, made on the cheapest
+hardware in the building, with no card involved.
+
+Running it on a second platform is also what found the two portability
+bugs worth having: `make clean` removed only the current platform's
+shared library, and the Python loader took the first library it found
+rather than the one for the platform it was running on. Both are the
+same mistake - assuming one machine - which is the mistake this
+library is supposed to be immune to.
 
 The differential run reached the far path 1,146 times at fp256 with
 the product dominating and 885 times with the addend dominating,
