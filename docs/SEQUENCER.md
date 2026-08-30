@@ -326,6 +326,46 @@ Trading compute width for deposit depth is the real design axis there,
 and it is why `BEAT_BITS` is already a parameter and why the quarter
 tile exists.
 
+## What the RTL will look like
+
+Written down now, while the analysis above is fresh, so the
+implementation starts from a settled shape rather than re-deriving
+one.
+
+`cft_seq` is a peer of `cft_engine_stream`, not a replacement: it
+shares the same AXI master and the same CSR block, and a MODE bit
+selects which one owns a run. The ALU array is the same array - the
+same `cft_opmux` / `cft_simpleops` / `cft_fpfma_pipe` per lane per
+beat - because P1 says the sequencer introduces no arithmetic, and
+sharing the instances is how that stops being a promise and becomes a
+fact about the netlist.
+
+Three structures, sized in the section above:
+
+- **Register file**, organised beat-wide rather than lane-wise:
+  `regs[reg][beat]` is one 256-bit word, so a whole beat's worth of
+  one register is a single read. Three reads per cycle (a, b, c) means
+  three read ports, which is a dual-port BRAM plus one mirrored copy -
+  a familiar shape, and the reason the file is indexed this way rather
+  than by lane.
+- **Instruction memory**, written through the AXI master before the
+  run and readable back for attestation.
+- **Deposit buffer**, written by lane index, drained to memory in
+  index order.
+
+The control is an issue/drain state machine, and the counts fall out
+of the sizing: issue `LATENCY` beats of one instruction back to back,
+then drain `LATENCY` cycles while the results retire and write back,
+then advance the program counter. Every ALU is busy during issue, so a
+dependent chain costs `2 * LATENCY` cycles per instruction rather than
+`LATENCY` with one ALU busy - a factor of `lanes_per_beat * LATENCY`
+more work per cycle than the naive schedule.
+
+Two things the state machine does not need, both because the early
+exit is allowed to be late (P3): the `any(active)` reduction can use
+the mask as it stood an iteration ago, and the loop back-edge needs no
+pipeline drain to evaluate it.
+
 ## What the host sees
 
 `cft_run` is unchanged. A new call sits beside it rather than
