@@ -243,13 +243,45 @@ int main(int argc, char **argv)
     cft_device *sw = NULL, *hw = NULL;
     cft_caps caps;
     cft_status st;
-    size_t n = (argc > 2) ? (size_t)strtoul(argv[2], NULL, 10) : 256;
-    int f, o, r;
+    const char *artifact = NULL;
+    size_t n = 256;
+    int only_fmt = -1;      /* -1 = every format the device carries */
+    int quick = 0;          /* one opcode, one attribute */
+    int f, o, r, argi;
 
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s <artifact.xclbin> [elements]\n", argv[0]);
+    /* Emulation is orders of magnitude slower than silicon, so the
+     * full matrix is a card-day run and -q is what fits in an evening.
+     * The scope is a flag rather than a smaller hard-coded list
+     * because the two runs should be the same program. */
+    for (argi = 1; argi < argc; argi++) {
+        if (!strcmp(argv[argi], "-q")) {
+            quick = 1;
+        } else if (!strcmp(argv[argi], "-n") && argi + 1 < argc) {
+            n = (size_t)strtoul(argv[++argi], NULL, 10);
+        } else if (!strcmp(argv[argi], "-f") && argi + 1 < argc) {
+            const char *want = argv[++argi];
+            int i;
+            for (i = 0; i < 4; i++)
+                if (!strcmp(want, cft_format_name((cft_format)i)))
+                    only_fmt = i;
+            if (only_fmt < 0) {
+                fprintf(stderr, "unknown format %s\n", want);
+                return 2;
+            }
+        } else if (argv[argi][0] != '-' && !artifact) {
+            artifact = argv[argi];
+        } else {
+            fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
+                            "[-f fp32|fp64|fp128|fp256] [-q]\n", argv[0]);
+            return 2;
+        }
+    }
+    if (!artifact) {
+        fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
+                        "[-f fp32|fp64|fp128|fp256] [-q]\n", argv[0]);
         return 2;
     }
+    argv[1] = (char *)artifact;
 
     st = cft_open(NULL, 0, &sw);
     if (st != CFT_OK) {
@@ -282,18 +314,28 @@ int main(int argc, char **argv)
 
     for (f = 0; f < 4; f++) {
         cft_format fmt = (cft_format)f;
+        int nops = quick ? 1 : (int)(sizeof ops / sizeof ops[0]);
+        int nrnd = quick ? 1 : (int)(sizeof rnds / sizeof rnds[0]);
+
+        if (only_fmt >= 0 && f != only_fmt)
+            continue;
         if (!cft_supports(hw, CFT_FMA, fmt)) {
             printf("%-6s not on this device, skipped\n",
                    cft_format_name(fmt));
             continue;
         }
         printf("%s\n", cft_format_name(fmt));
-        for (o = 0; o < (int)(sizeof ops / sizeof ops[0]); o++) {
+        fflush(stdout);
+        for (o = 0; o < nops; o++) {
             if (!cft_supports(hw, ops[o], fmt))
                 continue;
-            for (r = 0; r < (int)(sizeof rnds / sizeof rnds[0]); r++)
+            for (r = 0; r < nrnd; r++) {
                 compare(sw, hw, fmt, ops[o], rnds[r], n,
                         0x51ce0000u + (uint32_t)(f * 100 + o * 10 + r));
+                printf("  %s %s: %d checks so far, %d failed\n",
+                       cft_op_name(ops[o]), "ok", checks, failures);
+                fflush(stdout);
+            }
         }
 
         /* Sizes chosen to straddle the awkward boundaries: one
@@ -302,13 +344,19 @@ int main(int argc, char **argv)
         {
             static const size_t odd[] = {1, 2, 3, 7, 8, 9, 31, 32, 33, 37};
             static const size_t cuts[] = {1, 2, 5, 8, 16, 64, 1024};
-            size_t i;
-            for (i = 0; i < sizeof odd / sizeof odd[0]; i++)
+            size_t i, nodd = quick ? 6 : sizeof odd / sizeof odd[0];
+            for (i = 0; i < nodd; i++)
                 compare(sw, hw, fmt, CFT_FMA, CFT_RNE, odd[i],
                         0x0dd00000u + (uint32_t)(f * 50 + i));
+            printf("  boundary sizes done: %d checks, %d failed\n",
+                   checks, failures);
+            fflush(stdout);
             compare_partitioned(hw, fmt, CFT_FMA, CFT_RNE, n, cuts,
                                 sizeof cuts / sizeof cuts[0],
                                 0x5717000u + (uint32_t)f);
+            printf("  partition invariance done: %d checks, %d failed\n",
+                   checks, failures);
+            fflush(stdout);
         }
     }
 

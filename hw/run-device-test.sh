@@ -5,7 +5,7 @@
 # Run host/tests/device-test against an artifact, in emulation or on a
 # card.
 #
-#   bash hw/run-device-test.sh <artifact.xclbin> [elements]
+#   bash hw/run-device-test.sh <artifact.xclbin> [-n N] [-f fp32] [-q]
 #
 # Emulation is selected by the artifact's name: an xclbin built for
 # hw_emu needs XCL_EMULATION_MODE set, needs EMCONFIG_PATH pointing at
@@ -20,8 +20,8 @@
 # on card day with a different file.
 set -euo pipefail
 
-ART=${1:?usage: run-device-test.sh <artifact.xclbin> [elements]}
-N=${2:-64}
+ART=${1:?usage: run-device-test.sh <artifact.xclbin> [device-test args...]}
+shift
 
 [ -f "$ART" ] || { echo "no such artifact: $ART" >&2; exit 1; }
 ART=$(readlink -f "$ART")
@@ -65,4 +65,4 @@ BIN="$ROOT/host/device-test"
 # emconfig.json is found relative to the working directory by some XRT
 # versions and by EMCONFIG_PATH in others, so satisfy both.
 cd "$ARTDIR"
-exec "$BIN" "$ART" "$N"
+exec "$BIN" "$ART" "$@"
