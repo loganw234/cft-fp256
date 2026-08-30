@@ -207,10 +207,23 @@ module cft_fpfma_pipe #(
   // consumer wants (a lower and an upper bound from one stream). Only
   // stages 1, 13 and 14 consult it, so a delay line is cheaper and far
   // less error-prone than threading a field through every stage.
-  // rd_dly[k] is aligned with the s{k}_* stage registers: it holds the
-  // attribute of the operation whose data those registers hold. The
-  // last consumer is stage 14, which reads s13_*, so the line stops at
-  // DEPTH-2 rather than carrying a register nothing reads.
+  // The invariant is by pipeline DEPTH, not by register name:
+  // rd_dly[k] loads on the same edge as pipeline level k+1, so it
+  // holds the attribute of whatever operation sits at that level.
+  //
+  // Do NOT read it as "rd_dly[k] goes with s{k}_*". That was true
+  // until S11 was split in two, and it is now off by one past that
+  // point - s12_* is at level 14, so its attribute is rd_dly[13].
+  // The taps are therefore written relative to DEPTH and stay correct
+  // through any further split BEFORE the round stage: the round stage
+  // is always second-to-last (DEPTH-3) and pack always last (DEPTH-2).
+  // "Correcting" them to match the register names would hand every
+  // operation its neighbour's rounding attribute - which the shuffled
+  // unit bench would catch, but only because it was made aperiodic
+  // for exactly this reason.
+  //
+  // The line stops at DEPTH-2 because that is the last level any
+  // consumer reads; a further entry would be a register nothing uses.
   logic [2:0] rd_dly [0:DEPTH-2];
   always_ff @(posedge clk) begin
     rd_dly[0] <= rnd;

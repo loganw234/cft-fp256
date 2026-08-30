@@ -59,5 +59,7 @@ FP256 = FpFormat("fp256", 19, 236)
 
 FORMATS = {f.name: f for f in (FP32, FP64, FP128, FP256)}
 
-# Precision-mode encoding shared with rtl/ (CSR MODE[7:4]) and hw/kernel.xml.
+# Precision-mode encoding shared with rtl/ (the CSR MODE precision
+# field, currently MODE[11:8]) and hw/kernel.xml. Prefer the name to
+# the bit position: docs/ARCHITECTURE.md is the one normative map.
 PREC_CODE = {"fp32": 0, "fp64": 1, "fp128": 2, "fp256": 3}

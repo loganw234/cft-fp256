@@ -50,7 +50,7 @@ ZERO, SUB, NORM, INF, NAN = "zero", "sub", "norm", "inf", "nan"
 
 # rounding-direction attributes (IEEE 754-2019 4.3). The encoding is
 # RISC-V's frm, which this project already follows for tininess, so
-# anyone porting between the two reads one table, not two. MODE[10:8]
+# anyone porting between the two reads one table, not two. MODE[14:12]
 # in the CSR carries it; encodings 5-7 are reserved (the hardware
 # treats them as RNE, but no conforming host issues them, so the model
 # rejects them rather than blessing a value the contract does not
@@ -363,7 +363,7 @@ OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
 # reads three independent pointers, so a > b is compute(LT, b, a) with
 # the buffers swapped, at no cost. NE is SELECT over EQ, or an inverted
 # read. Only the orderings that cannot be reached by swapping operands
-# earn an opcode - MODE[3:0] has one slot left after these.
+# earn an opcode. MODE[7:0] is a byte; 15 and 24-255 are unassigned.
 OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 # Integer and bitwise operations on the encoding, treated as a W-bit
 # unsigned word. Not floating point at all: they never round, never

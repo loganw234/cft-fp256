@@ -9,17 +9,23 @@
 #   vivado -mode batch -source hw/synth_ooc.tcl -tclargs <exp_w> <man_w> <freq_mhz> [latency] [retime] [part] [build_dir]
 #
 #   fp32 lane:            -tclargs 8 23 300
-#   fp32 retimed deeper:  -tclargs 8 23 300 8 1
-#   fp256 unit:           -tclargs 19 236 100   (expect a long run)
+#   fp256 unit:           -tclargs 19 236 250   (expect a long run)
 #
-# latency > 3 with retime=1 measures how far Vivado's register
-# retiming can push the v0 cloud without any RTL change - the number
-# that picks the bring-up clock and sizes the v1 pipelining work.
+# LATENCY is no longer a knob: the pipe is structurally staged and its
+# elaboration guard refuses any value but its own depth, so the
+# default here must track that depth. It is 16. The retime argument
+# survives for experiments but has nothing left to retime.
+#
+# Read the PATH DELAY, not the slack: implementation is
+# constraint-driven and stops once the ask is met, so slack tells you
+# the design met its target and nothing about headroom. Path delay is
+# period minus WNS, and it is what predicts a ceiling
+# (docs/BRINGUP.md gate 3).
 
 set exp_w 8
 set man_w 23
 set freq  100
-set latency 3
+set latency 16
 set retime 0
 set part  "xcu50-fsvh2104-2-e"
 set build_dir "build"

@@ -64,7 +64,7 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     # Each case is issued once per attribute, then the whole stream is
     # shuffled. The shuffle is the point, not cosmetic: issuing the
     # attributes in a fixed rotation gives the stream period 5, and the
-    # pipeline is 15 stages deep - so a delay-line misalignment by any
+    # pipeline is 16 stages deep - so a delay-line misalignment by any
     # multiple of 5 stages would deliver every operation an attribute
     # equal to its own and pass the entire suite. An aperiodic order
     # has no such blind spot, and adjacent operations still differ in

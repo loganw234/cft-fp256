@@ -30,7 +30,7 @@ kernel flow, XRT host runtime.
               each lane: cft_opmux -> cft_fpfma_pipe
 ```
 
-- **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
+- **cft_fpfma_pipe** - the parameterized 16-stage FMA core (v1):
   staged significand multiplier (24-bit chunk columns + four
   registered tree levels), coarse/fine alignment with the sticky
   marker, split-carry add, per-64 LZC normalize, a single rounding
@@ -223,7 +223,7 @@ reference for the same CSR contract.
 
 ## Timing (v1 core, measured OOC on xcu50)
 
-The 15-stage core closes ~232 MHz fp32 / ~148 MHz fp256 out of
+The 16-stage core closes ~232 MHz fp32 / ~148 MHz fp256 out of
 context (fp64/fp128 land between; QoR numbers recorded in
 ROADMAP.md). Kernel clock for full-platform builds: ~100 MHz via
 `hw/rebuild-2022.sh KERNEL_FREQ=` - conservative margin under the

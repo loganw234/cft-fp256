@@ -26,7 +26,21 @@ BUILD=${BUILD:-build}
 # in step: every CU in the connectivity section must appear here,
 # or the unnamed ones run at the platform default clock.
 LINK_CFG=${LINK_CFG:-hw/link.cfg}
-CLOCK_CUS=${CLOCK_CUS:-cft_krnl_1}
+
+# The CUs the kernel clock constraint names. DERIVED from the link
+# configuration rather than defaulted, because the failure mode of
+# getting it wrong is expensive and silent until the end: a quad build
+# whose constraint names only cft_krnl_1 leaves the other three at the
+# platform default (300 MHz on this shell, roughly double the design's
+# ceiling), and you learn that after a full ~1h45m implementation run.
+# The nk= line already lists every CU, dot-separated, which is exactly
+# the form --clock.freqHz wants - so there is one source of truth and
+# it is the file that defines the CUs.
+if [ -z "${CLOCK_CUS:-}" ]; then
+  CLOCK_CUS=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$//p'               "$LINK_CFG" | tr -d ' ' | head -1)
+  [ -n "$CLOCK_CUS" ] || CLOCK_CUS=cft_krnl_1
+fi
+echo "Clock constraint targets: $CLOCK_CUS" 
 
 # locate Vitis 2022.2
 for root in /data/Xilinx /opt/Xilinx /tools/Xilinx; do

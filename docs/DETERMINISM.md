@@ -62,7 +62,7 @@ exactly, where any double-rounded implementation returns +0.
 ## Rounding
 
 All five 754-2019 rounding-direction attributes (4.3.1, 4.3.2),
-selected per operation in MODE[10:8] using RISC-V's `frm` encoding:
+selected per operation in MODE[14:12] using RISC-V's `frm` encoding:
 
 | code | attribute | name here |
 |---|---|---|

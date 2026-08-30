@@ -182,6 +182,11 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP256, OP_MAX, 4, seed=212)
     await run_op(dut, axil, ram, FP64, OP_CMPLT, 16, seed=213)
     await run_op(dut, axil, ram, FP256, OP_SELECT, 4, seed=214)
+    # select is the only non-arithmetic opcode that reads c, so it is
+    # the only end-to-end check that each bank's c slice is wired to
+    # that bank's own operand. Run it on every rung, not just two.
+    await run_op(dut, axil, ram, FP64, OP_SELECT, 16, seed=215)
+    await run_op(dut, axil, ram, FP128, OP_SELECT, 8, seed=216)
 
 
 # ---- raw AXI4-Lite corner cases --------------------------------------

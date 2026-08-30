@@ -38,7 +38,7 @@ are structurally blind:
   simulation-only and so guarded nothing in synthesis, three
   load-bearing comments whose stated *reasons* were false, and a
   period-5 blind spot in the bench's rounding-attribute ordering
-  against a 15-stage pipe.
+  against a 16-stage pipe.
 - The **control logic held one real bug**: the CSR sampled the AXI
   write data one cycle after the handshake. Invisible to any master
   that waits for the write response before moving on, which is both
@@ -62,7 +62,7 @@ way atlas-darkroom records a census.
 
 ## v1 - the fractured array and a real engine
 
-- [x] **The pipelined core (2026-08-29):** 15-stage cft_fpfma_pipe
+- [x] **The pipelined core (2026-08-29):** 16-stage cft_fpfma_pipe
       with a structurally staged multiplier (24-bit chunk columns +
       four registered tree levels). Measured OOC on xcu50:
       fp32 ~232 MHz (3.6x v0), fp256 ~148 MHz (10.5x v0), DSPs down
@@ -71,7 +71,7 @@ way atlas-darkroom records a census.
       DSP column cascades (split columns, +1 stage) and the round
       stage - chase when a platform clock demands it.
 - [x] **fp64 and fp128 rungs (2026-08-29):** wired through
-      MODE[7:4] = 1, 2 as 4x/2x lane banks of the same parameterized
+      the MODE precision field = 1, 2 as 4x/2x lane banks of the same
       pipe (the golden model and vector sets already covered them -
       hardware caught up to the contract, with zero core-RTL fixes:
       the chunked multiplier degenerates to 3/5 columns). Kernel
@@ -109,7 +109,7 @@ way atlas-darkroom records a census.
 - Engine knobs still open: multiple outstanding ARs, per-CU HBM
   pseudo-channel groups, multiple CUs.
 - [x] **Directed rounding attributes (2026-08-29):** all five of
-      754-2019's attributes in MODE[10:8] (RISC-V frm encoding),
+      754-2019's attributes in the MODE rounding field (RISC-V frm),
       carried with each operation down the pipeline rather than
       latched per run - so one pass can produce both interval bounds.
       The mode-dependent rules came with it: the 7.4 overflow table
