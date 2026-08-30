@@ -126,6 +126,23 @@ if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; th
 else
   SRC_TREE="clean"
 fi
+
+# Dirtiness SCOPED to what can reach a bitstream.
+#
+# The whole-tree flag above is the honest headline and stays, but on its
+# own it throws away a good artifact for a bad reason. quad145 built on
+# 2026-08-30 came out DIRTY because host/src and python/ had uncommitted
+# work in flight - none of which a place-and-route run can observe. The
+# RTL and the packaging/link configuration were byte-identical to the
+# recorded commit, and that is the fact card day actually needs.
+#
+# So report both. A run whose rtl/ and hw/ match the commit is
+# reproducible even if the tree around them was moving.
+if git diff --quiet "$SRC_COMMIT" -- rtl/ hw/ 2>/dev/null; then
+  SRC_BITS="rtl/ and hw/ identical to $SRC_COMMIT"
+else
+  SRC_BITS="MODIFIED - rtl/ or hw/ differs from $SRC_COMMIT, this bitstream is not reproducible"
+fi
 SRC_STAMP=$(date -Iseconds)
 
 mkdir -p "$BUILD"
@@ -173,6 +190,7 @@ for t in $TARGETS; do
     echo "commit:        $SRC_COMMIT"
     echo "describe:      $SRC_DESCRIBE"
     echo "tree:          $SRC_TREE"
+    echo "bitstream_sources: $SRC_BITS"
     echo "target:        $t"
     echo "platform:      $PLATFORM"
     echo "part:          $PART"
