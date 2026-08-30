@@ -41,6 +41,40 @@ FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
 
 A_BASE, B_BASE, C_BASE, D_BASE = 0x00000, 0x40000, 0x80000, 0xC0000
 
+# CAPS[15:8] is one bit per opcode group. Checked by NAME rather than
+# against a literal, and the reason is a bug this assertion had:
+# op_caps was written 8'b0010_1111, which sets the reduction bit and
+# clears the integer bit, and both benches were updated to expect that
+# number. Eight implemented opcodes stopped being advertised, the suite
+# stayed green, and device-test skipped them silently because a skip is
+# not a failure. The assertion's own message still said "integer ...
+# groups present" while asserting they were absent.
+#
+# A literal cannot say WHICH bit is wrong. This can.
+OP_GROUPS = {
+    0: "arithmetic",
+    1: "sign",
+    2: "min/max",
+    3: "predicate+select",
+    4: "integer",
+    5: "reduction",
+}
+OP_GROUPS_NOT_BUILT = {6: "divide/sqrt", 7: "conversion"}
+
+
+def check_op_groups(caps):
+    """Every implemented opcode group advertised, and nothing else."""
+    groups = (caps >> 8) & 0xFF
+    missing = [n for b, n in sorted(OP_GROUPS.items()) if not groups & (1 << b)]
+    assert not missing, (
+        f"CAPS fails to advertise implemented opcode group(s): "
+        f"{', '.join(missing)} - op groups are {groups:#010b}")
+    claimed = [n for b, n in sorted(OP_GROUPS_NOT_BUILT.items())
+               if groups & (1 << b)]
+    assert not claimed, (
+        f"CAPS advertises group(s) that are not built: {', '.join(claimed)} "
+        f"- op groups are {groups:#010b}")
+
 
 async def write64(axil, addr, val):
     await axil.write_dword(addr, val & 0xFFFFFFFF)
@@ -163,9 +197,7 @@ async def krnl_end_to_end(dut):
     assert await axil.read_dword(VERSION) == 0x00000500
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0xF, "full tile advertises all four rungs"
-    assert ((caps >> 8) & 0xFF) == 0b0010_1111, (
-        "arithmetic, sign, min/max, predicate, integer and reduction "
-        "groups present; divide/sqrt and conversion not yet built")
+    check_op_groups(caps)
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
 

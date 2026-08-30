@@ -35,10 +35,12 @@ from cocotbext.axi import (  # noqa: E402
 
 from cft_golden import (  # noqa: E402
     FP32, FP64, OP_FMA, OP_ADD, OP_MUL, OP_MIN, OP_ISHR, OP_SELECT,
-    RND_RDN, RND_RUP,
+    RND_RDN, RND_RNE, RND_RUP,
 )
 
-from test_krnl import run_op, CAPS, MAGIC, VERSION, CTRL  # noqa: E402
+from test_krnl import (run_op, check_op_groups,  # noqa: E402
+                       CAPS, MAGIC, VERSION, CTRL)
+from test_krnl_reduce import run_sum  # noqa: E402
 
 
 @cocotb.test()
@@ -73,9 +75,9 @@ async def quarter_tile_end_to_end(dut):
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0b0011, (
         f"quarter tile must advertise fp32+fp64 only, got {caps & 0xF:#06b}")
-    assert ((caps >> 8) & 0xFF) == 0b0010_1111, (
-        "trimming rungs must not trim opcode groups - every group still "
-        "works on the formats that remain, reductions included")
+    # Trimming rungs must not trim opcode groups - every group still
+    # works on the formats that remain, reductions included.
+    check_op_groups(caps)
 
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
@@ -97,5 +99,32 @@ async def quarter_tile_end_to_end(dut):
     await run_op(dut, axil, ram, FP32, OP_FMA, 32, seed=309, rnd=RND_RDN)
     await run_op(dut, axil, ram, FP64, OP_FMA, 16, seed=310, rnd=RND_RUP)
 
+    # Reductions, which this bench asserted CAPS for and never ran.
+    #
+    # That gap had already cost something. The serializer's
+    # elements-per-beat was a hardcoded 8/4/2/1 while the beat COUNT
+    # was derived from LANE_SH, and the two only agree at
+    # BEAT_BITS=256. Here a beat holds 2 fp32, not 8, so the
+    # serializer walked four elements off the end of every beat and
+    # the remaining-element count underflowed on the second beat -
+    # twelve "elements" folded for an n of four. Nothing could see it,
+    # because the only bench at this geometry ran no reductions and
+    # the only reduction bench ran at 256.
+    #
+    # The sizes are chosen against that: n=4 is the exact case above,
+    # and 1, 3 and 5 are partial final beats at 2 elements per beat.
+    # fp64 is 1 element per beat here, so its beats are all full and
+    # it isolates the count rather than the serializer.
+    await run_sum(dut, axil, ram, FP32, 1, RND_RNE, seed=320)
+    await run_sum(dut, axil, ram, FP32, 2, RND_RNE, seed=321)
+    await run_sum(dut, axil, ram, FP32, 3, RND_RNE, seed=322)
+    await run_sum(dut, axil, ram, FP32, 4, RND_RNE, seed=323)
+    await run_sum(dut, axil, ram, FP32, 5, RND_RNE, seed=324)
+    await run_sum(dut, axil, ram, FP32, 33, RND_RNE, seed=325)
+    await run_sum(dut, axil, ram, FP64, 1, RND_RNE, seed=326)
+    await run_sum(dut, axil, ram, FP64, 7, RND_RNE, seed=327)
+    await run_sum(dut, axil, ram, FP32, 9, RND_RDN, seed=328)
+
     dut._log.info("quarter tile (BEAT_BITS=64, fp32+fp64): bit-exact "
-                  "against the same golden model as the full tile")
+                  "against the same golden model as the full tile, "
+                  "elementwise and reductions")

@@ -279,8 +279,12 @@ precise about, because the freedom is load-bearing:
   magnitude is symmetric, the sign of an exact cancellation comes from
   the rounding attribute (6.3) rather than operand order, and NaN
   results are always the canonical quiet NaN rather than a propagated
-  payload. Verified over 80,000 pairs and pinned by a test, because it
-  is a property three implementations quietly depend on.
+  payload. Verified exhaustively over the interesting-operand pool
+  crossed with itself, plus 80,000 random pairs across four formats and
+  five attributes, and pinned by a test that asserts its own pair count
+  - because it is a property three implementations quietly depend on,
+  and because this line claimed 80,000 for a while when the test was
+  doing 10,000.
 - **Free: which tile.** A partial result is reusable if its range is a
   node of the tree; which physical tile evaluated that node cannot
   enter the answer. See docs/SCALING.md - this is why dynamic load

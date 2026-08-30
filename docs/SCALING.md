@@ -165,8 +165,32 @@ Done:
   slices tile the range and that the padding total - and therefore the
   flag word - never depends on the tile count.
 - Reduction `canonical_ranges`/`combine` checked at **1, 2, 4, 8, 16,
-  32, 64** parts in the golden model, and 2 through 64 in the libcft
-  cross-check.
+  32, 64** parts, three ways: the model's own partitioner in
+  `python/tests`, the C partitioner's fold property against the whole
+  array in `reduce-parts` (6,294 partitions), and the C partitioner
+  against the model itself in `reduce_check.py` (2,100 partitions).
+
+  That third one was missing until 2026-08-30 and its absence had
+  hidden something. The two partitioners **do not always agree**, and
+  both are right: the C one stops splitting when another pass would
+  exceed its 64-range output cap, so at n=280 with 64 parts it returns
+  32 eight-wide nodes followed by 24 singletons - a mixed depth that
+  equals `canonical_ranges(280, p)` for no `p` at all. It is still a
+  valid canonical partition and still folds to the same bits. 199 of
+  the 2,100 cases differ this way.
+
+  So the cross-check asserts the PROPERTY rather than equality: every
+  range is a node of the tree over `[0, n)`, the ranges tile `[0, n)`
+  in order, and the count fits the cap. Demanding equality would have
+  failed 57 correct cases and taught us to weaken the test.
+
+  Also worth knowing before sizing anything: **the range count is not
+  bounded by the part count.** Cutting the top levels yields one extra
+  range whenever n is a power of two plus a remainder, so four tiles
+  get five ranges at n = 5, 9, 17, 33, 65, and eight tiles exceed eight
+  for 49 of the first thousand n. A caller with one buffer per tile
+  must run them in waves and re-stage between waves; doing that wrong
+  is a silent wrong answer, not an error.
 - `MAX_TILES` in the XRT backend raised 16 -> 64. CU discovery is a
   loop over names and tiles are a vector, so the number costs nothing;
   a limit that binds before the hardware does is one discovered on card

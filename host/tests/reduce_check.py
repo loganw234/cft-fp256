@@ -28,6 +28,7 @@ import argparse
 import ctypes
 import os
 import random
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from cft_golden import (  # noqa: E402
 )
 from cft_golden.reduce import (  # noqa: E402
     OP_SUM, OP_DOT, canonical_ranges, combine, fdot, fsum, reduce_bits,
+    split,
 )
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
@@ -204,6 +206,101 @@ def check_refusals(lib, dev, fmt):
     return bad
 
 
+def check_c_partitioner():
+    """The C partitioner against the model, range for range.
+
+    check_partition below uses the MODEL's canonical_ranges, so it
+    proves the tree property and says nothing about the C code that
+    actually runs on a multi-tile device. cft_sf_canonical_ranges is
+    internal and not exported from the shared library, so it cannot be
+    reached through ctypes - hence `reduce-parts --dump`, which prints
+    what the C code produces for a fixed sweep.
+
+    What is checked is the PROPERTY, not equality, and the difference
+    matters. The C version stops splitting when another pass would
+    exceed its output cap, and a pass does not split single-element
+    ranges - so at n=280, parts=64 it returns 32 eight-wide nodes
+    followed by 24 singletons, a mixed depth that is not equal to
+    canonical_ranges(280, p) for ANY p. It is still a perfectly valid
+    partition, and demanding equality would fail 57 cases that are all
+    correct.
+
+    The contract the fold actually needs is three things, so those are
+    what get asserted: the ranges tile [0, n) in order with no gap or
+    overlap, every range is a NODE of the tree over [0, n) - which is
+    what makes combining the partials reproduce T(0, n) - and the count
+    fits the cap. Exact agreement with the model is reported as a
+    number rather than required.
+    """
+    exe = None
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in ("reduce-parts", "reduce-parts.exe"):
+        p = os.path.join(here, os.pardir, cand)
+        if os.path.exists(p):
+            exe = p
+            break
+    if exe is None:
+        print("SKIP C partitioner cross-check: reduce-parts not built "
+              "(make -C host reduce-parts)")
+        return 0
+
+    def nodes(n):
+        """Every (lo, hi) the model's tree over [0, n) contains."""
+        seen, stack = set(), [(0, n)]
+        while stack:
+            lo, hi = stack.pop()
+            seen.add((lo, hi))
+            if hi - lo >= 2:
+                mid = split(lo, hi)
+                stack.append((lo, mid))
+                stack.append((mid, hi))
+        return seen
+
+    out = subprocess.run([exe, "--dump"], capture_output=True, text=True,
+                         check=True).stdout
+    bad = same = differ = 0
+    node_cache = {}
+    for line in out.splitlines():
+        f = line.split()
+        n, parts = int(f[0]), int(f[1])
+        got = [tuple(int(v) for v in tok.split(":")) for tok in f[2:]]
+
+        if n == 0:
+            if got:
+                print(f"FAIL C partitioner n=0 parts={parts}: {got}")
+                bad += 1
+            continue
+
+        if n not in node_cache:
+            node_cache[n] = nodes(n)
+        tree = node_cache[n]
+
+        why = None
+        if len(got) > 64:
+            why = f"{len(got)} ranges exceeds the cap of 64"
+        elif not got or got[0][0] != 0 or got[-1][1] != n:
+            why = f"does not span [0, {n})"
+        elif any(got[i][0] != got[i - 1][1] for i in range(1, len(got))):
+            why = "gap or overlap between consecutive ranges"
+        else:
+            outside = [r for r in got if r not in tree]
+            if outside:
+                why = f"not tree nodes: {outside[:4]}"
+
+        if why:
+            print(f"FAIL C partitioner n={n} parts={parts}: {why}")
+            bad += 1
+        elif got == [tuple(r) for r in canonical_ranges(n, parts)]:
+            same += 1
+        else:
+            differ += 1
+
+    print(f"  C partitioner: {same + differ} partitions, all canonical "
+          f"({same} identical to the model, {differ} a different valid "
+          f"cut), {bad} bad")
+    return bad
+
+
 def check_partition(lib, dev, fmt, rng, trials):
     """A reduction split across tiles must equal the whole.
 
@@ -278,6 +375,7 @@ def main():
 
         bad += check_refusals(lib, dev, fmt)
         bad += check_partition(lib, dev, fmt, rng, 60)
+    bad += check_c_partitioner()
 
     lib.cft_close(dev)
 

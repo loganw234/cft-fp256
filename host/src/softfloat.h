@@ -101,10 +101,13 @@ int cft_sf_is_reduction(int op);
 /* The reduction tree over elements [lo, hi) of a (and b, for dot).
  *
  * The shape is the single thing this has to get right, and it is the
- * same shape python/cft_golden/reduce.py defines: split at the floor
- * midpoint of the half-open range, recurse, add. Not a sequential
- * accumulation, and not a padded power-of-two tree - see that module
- * for why padding with +0.0 is not the identity it looks like.
+ * same shape python/cft_golden/reduce.py defines: split so the LEFT
+ * child is the largest power of two strictly below the range length,
+ * recurse, add. Not the floor midpoint - that was the first version
+ * and is a different tree at every n that is not a power of two; see
+ * the implementation for why it moved. Not a sequential accumulation,
+ * and not a padded power-of-two tree - see that module for why padding
+ * with +0.0 is not the identity it looks like.
  *
  * Recursion depth is ceil(log2(hi-lo)), so at most 64 frames for any
  * size a host can express.
@@ -130,9 +133,22 @@ int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
  * it sits. Combining the partials with the same tree over `parts`
  * elements rebuilds the levels that were cut.
  *
- * Writes at most `cap` ranges and returns how many it produced; fewer
- * than `parts` when n is too small to cut that far. Mirrors
- * cft_golden.reduce.canonical_ranges(). */
+ * Writes at most `cap` ranges and returns how many it produced. That
+ * count is NOT bounded by `parts`: cutting the top levels of this tree
+ * yields one extra range whenever n is a power of two plus a
+ * remainder, so parts=4 gives five ranges at n = 5, 9, 17, 33 and so
+ * on. Fewer than `parts` come back when n is too small to cut that far.
+ * A caller must size its arrays from `cap`, not from `parts`, and must
+ * not assume one range per tile.
+ *
+ * Mirrors cft_golden.reduce.canonical_ranges() EXCEPT that this one is
+ * capped: it stops splitting when another pass would exceed `cap`,
+ * where the model is unbounded. The two therefore differ once `parts`
+ * reaches `cap` - at cap=64 and parts=64 the model returns 65 ranges
+ * for n=65 and this returns 33. Both are valid canonical partitions
+ * and both fold to the same answer; this one just uses fewer tiles
+ * than it could. tests/reduce_parts_test.c checks the property, and
+ * tests/reduce_check.py checks this function against the model. */
 size_t cft_sf_canonical_ranges(size_t n, size_t parts,
                                size_t *lo_out, size_t *hi_out, size_t cap);
 

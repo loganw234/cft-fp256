@@ -399,6 +399,22 @@ module cft_engine_stream #(
         // not the identity on this type.
         n_elems <= cfg_n;
         base_a <= cfg_a; base_b <= cfg_b; base_c <= cfg_c; base_d <= cfg_d;
+        // beats_new == 0 finishes immediately WITHOUT writing anything.
+        //
+        // That is right for an elementwise run - zero elements, zero
+        // results - but for a REDUCTION the contract says n=0 returns
+        // +0.0, and this path writes no D beat at all, so the
+        // destination keeps whatever it held. FLAGS is correctly zero,
+        // which makes it look like a clean answer.
+        //
+        // The contract is kept by the HOST: cft_reduce returns +0.0
+        // before it ever reaches a backend, so n=0 never arrives here.
+        // cft_reduce_acc's own "nothing was accumulated" branch is
+        // therefore unreachable through the engine and untested. If
+        // that short-circuit is ever removed, or a non-libcft host
+        // drives the CSRs directly, THIS is the line that has to
+        // change - emit one beat of +0.0 for a reduction instead of
+        // finishing silently.
         if (beats_new == 0) done <= 1'b1;
         else running <= 1'b1;
       end
@@ -727,15 +743,16 @@ module cft_engine_stream #(
   // real in the LAST beat. Padding a reduction with +0.0 is not the
   // identity - see the model - so the serializer stops at the true
   // element count rather than running to the end of the beat.
+  //
+  // DERIVED from LANE_SH, not a case on prec_r. It has to be the same
+  // function the beat COUNT uses (beat_sh above) or the two disagree
+  // about how many elements a beat holds: 8/4/2/1 is only right at
+  // BEAT_BITS=256, and at the quarter tile's 64 a beat holds 2 fp32,
+  // not 8. The serializer would then walk four elements off the end of
+  // every beat, and `n_elems - beat*epb` would underflow on the second
+  // beat and fold twelve "elements" for an n of four.
   logic [5:0] epb;
-  always_comb begin
-    case (prec_r)
-      PREC_FP64:  epb = 6'd4;
-      PREC_FP128: epb = 6'd2;
-      PREC_FP256: epb = 6'd1;
-      default:    epb = 6'd8;
-    endcase
-  end
+  assign epb = 6'd1 << (6'(LANE_SH) - {4'b0, prec_r[1:0]});
 
   logic [63:0] ser_beat_idx;
   logic [5:0]  ser_idx, ser_cnt;
@@ -1201,7 +1218,13 @@ module cft_engine_stream #(
   logic [7:0] w_target;
   always_comb begin
     logic [63:0] bound, l;
-    bound = (64'd4096 - {52'd0, addr_w[11:0]}) >> 5;
+    // ADDR_SH, not a literal 5 - the same trap the read path documents
+    // at burst_len(). A hardcoded 5 is only right at BEAT_BITS=256. At
+    // the quarter tile's 64 it understates by 4x and reaches ZERO for
+    // the last beats of a 4KB page (addr_w[11:0]=4072 gives 24>>5=0),
+    // which clears w_go permanently: wr_done stops, ap_done never
+    // asserts, and the run hangs until the host's timeout.
+    bound = (64'd4096 - {52'd0, addr_w[11:0]}) >> ADDR_SH;
     l = BURST_MAX;
     if (rem_w < l) l = rem_w;
     if (bound < l) l = bound;

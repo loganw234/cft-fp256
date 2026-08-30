@@ -48,8 +48,16 @@ int  cftx_run(void *hw, int op, int fmt, int rnd,
               const void *a, const void *b, const void *c, void *d,
               size_t n, uint32_t *flags, uint32_t *bus);
 
-/* Reduce index ranges of `a`, one per tile where there are tiles to
- * spare, writing ONE element per range into `partials`.
+/* Reduce index ranges of `a`, writing ONE element per range into
+ * `partials`.
+ *
+ * `nranges` MAY EXCEED THE TILE COUNT, and routinely does - the tree's
+ * canonical cut of [0, n) into at most `parts` nodes needs one extra
+ * range whenever n is a power of two plus a remainder, so four tiles
+ * get five ranges at n = 5, 9, 17, 33, 65 and so on. The backend runs
+ * them in waves and must re-stage a tile's operands before each wave
+ * rather than staging every range up front, or a later range silently
+ * overwrites an earlier one's data before it has been computed.
  *
  * The caller folds the partials with the reduction tree, and the ranges
  * must be canonical NODES of that tree for the fold to be valid - which

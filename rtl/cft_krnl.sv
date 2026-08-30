@@ -179,7 +179,18 @@ module cft_krnl #(
       // issues an elementwise MUL and then a SUM. Advertising the group
       // is therefore honest - both opcodes deliver the contract's
       // answer, one of them via two runs.
-      .op_caps(8'b0010_1111),
+      // CAPS[15:8]: arithmetic, sign, min/max, predicate+select,
+      // integer, reduction. Divide/sqrt and conversion are not built.
+      // Write this as a bit per group and not as a number: it was
+      // briefly 8'b0010_1111, which adds reduction and silently drops
+      // integer, and eight working opcodes stopped being reachable.
+      .op_caps({2'b00,      // [7:6] conversion, divide/sqrt - not built
+                1'b1,       // [5]   reduction
+                1'b1,       // [4]   integer
+                1'b1,       // [3]   predicate + select
+                1'b1,       // [2]   min/max
+                1'b1,       // [1]   sign
+                1'b1}),     // [0]   arithmetic
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
   );

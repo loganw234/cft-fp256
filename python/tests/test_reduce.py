@@ -115,17 +115,45 @@ def test_add_is_commutative_so_operand_order_is_free(fmt):
     first, and NaN results are always the canonical quiet NaN rather
     than a propagated payload. Change any of those three and this test
     is where it shows.
+
+    Two sweeps, because they fail differently. The pool cross is
+    EXHAUSTIVE over the interesting operands - every signalling and
+    quiet NaN, both infinities, both zeros, subnormals and the extreme
+    normals, against each other - which is where an asymmetry would
+    live if one existed. The random draws then cover the ordinary
+    middle of the space that a curated pool does not reach.
+
+    DRAWS is 4,000 because two files cite this test's pair count as the
+    licence for the accumulator to swap operands freely, and the number
+    they cited was 80,000 when the test was doing 10,000. Rather than
+    write a smaller number into the documents, the test now does the
+    work: 4,000 draws x 5 attributes x 4 formats is 80,000, and the
+    count is asserted below so the two cannot drift apart again.
     """
     rng = random.Random(11)
     pool = vectors.interesting_operands(fmt)
-    for _ in range(500):
+    pairs = 0
+
+    for a in pool:
+        for b in pool:
+            for rnd in RND_MODES:
+                assert add(fmt, a, b, rnd) == add(fmt, b, a, rnd), \
+                    f"{fmt.name} {a:#x} + {b:#x} depends on operand order"
+
+    DRAWS = 4000
+    for _ in range(DRAWS):
         a = (pool[rng.randrange(len(pool))] if rng.random() < 0.5
              else rng.getrandbits(fmt.width))
         b = (pool[rng.randrange(len(pool))] if rng.random() < 0.5
              else rng.getrandbits(fmt.width))
         for rnd in RND_MODES:
+            pairs += 1
             assert add(fmt, a, b, rnd) == add(fmt, b, a, rnd), \
                 f"{fmt.name} {a:#x} + {b:#x} depends on operand order"
+
+    # 4,000 x 5 = 20,000 per format, x4 formats = the 80,000 the
+    # accumulator's comment and DETERMINISM.md both claim.
+    assert pairs == DRAWS * len(RND_MODES) == 20_000, pairs
 
 
 def test_stream_final_combine_order_is_load_bearing():

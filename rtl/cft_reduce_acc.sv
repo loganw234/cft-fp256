@@ -56,10 +56,14 @@
 //   rounding attribute rather than operand order (754-2019 6.3), and
 //   NaN results are always the canonical quiet NaN rather than a
 //   propagated payload. So a pair may be presented to the adder either
-//   way round. Verified over 80,000 pairs across four formats and five
-//   attributes; test_add_is_commutative_so_operand_order_is_free keeps
-//   it true, and it is the reason this module never has to reason about
-//   which side a value came from.
+//   way round. Verified two ways by
+//   test_add_is_commutative_so_operand_order_is_free: EXHAUSTIVELY over
+//   the interesting-operand pool crossed with itself - every signalling
+//   and quiet NaN, both infinities, both zeros, subnormals and the
+//   extreme normals against each other - plus 80,000 random pairs
+//   across four formats and five attributes. That test asserts its own
+//   pair count so this number cannot drift away from it again; it read
+//   80,000 here while the test was doing 10,000.
 //
 // The adder is external. This module issues (a, b) and expects the sum
 // ADD_LATENCY cycles later; it carries the destination level alongside

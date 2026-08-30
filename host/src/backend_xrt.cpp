@@ -176,6 +176,16 @@ std::string g_err;
 
 void set_err(const std::string &s) { g_err = s; }
 
+/* A status word as eight hex digits. STATUS is a bit field and the
+ * bits are what the reader needs; decimal would have to be converted
+ * by hand at the exact moment nobody wants to. */
+std::string hex32(uint32_t v)
+{
+    char b[9];
+    std::snprintf(b, sizeof b, "%08x", static_cast<unsigned>(v));
+    return std::string(b);
+}
+
 int elem_bytes(int fmt)
 {
     switch (fmt) {
@@ -539,8 +549,36 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
 
     if (status != ST_OK) {
         D.poisoned = true;
+        /* Read STATUS anyway, best effort.
+         *
+         * This is the whole reason the timeout exists rather than an
+         * indefinite wait: the engine records a short or long read
+         * burst in err_acc and then never completes, and err_acc can
+         * only be read once the wait has returned. Returning here
+         * without reading it throws away the one diagnosis the timeout
+         * was introduced to obtain, and leaves "a compute unit did not
+         * complete" as the entire explanation of a bus fault.
+         *
+         * Reading a status register of a CU that may still be running
+         * is safe - it is an AXI-Lite read of a sticky word, and the
+         * value is what it is. The DATA buffers stay untouched. */
+        uint32_t st_acc = 0;
+        try {
+            for (const auto &s : slices)
+                st_acc |= D.tiles[s.tile].k.read_register(CSR_STATUS);
+        } catch (const std::exception &) {
+            st_acc = 0;           /* the handle is going away regardless */
+        }
+        if (bus)
+            *bus = st_acc;
         set_err(err + " - compute units may still be active, so this "
-                      "handle is finished; close and reopen it");
+                      "handle is finished; close and reopen it" +
+                (st_acc ? " (STATUS 0x" + hex32(st_acc) +
+                          " - the memory system reported a fault, so this "
+                          "is a bus problem rather than a slow run)"
+                        : " (STATUS clean on every unit that ran, so this "
+                          "is a hang or a genuinely slow run rather than "
+                          "a bus fault)"));
         return status;
     }
 
@@ -625,33 +663,30 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
     const auto *pa = static_cast<const uint8_t *>(a);
     auto *pp = static_cast<uint8_t *>(partials);
 
-    /* Stage first: this touches only host-visible buffers and starts
-     * nothing, so a failure here leaves every unit idle. */
-    try {
-        for (size_t k = 0; k < nranges; k++) {
-            const size_t m = hi[k] - lo[k];
-            const size_t padded = ((m + epb - 1) / epb) * epb;
-            Tile &tile = D.tiles[k % ntiles];
-            ensure_capacity(D, tile, padded * esz);
-            stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
-            /* b and c are unread by a sum, but the engine streams all
-             * three - one read enable feeds all three FIFOs - so they
-             * must be real, readable memory of the same length. */
-            stage(tile.b, nullptr, m * esz, padded * esz);
-            stage(tile.c, nullptr, m * esz, padded * esz);
-        }
-    } catch (const std::bad_alloc &) {
-        set_err("out of memory staging a reduction");
-        return ST_OUT_OF_MEMORY;
-    } catch (const std::exception &e) {
-        set_err(std::string("staging a reduction: ") + e.what());
-        return ST_INTERNAL;
-    }
-
     /* Ranges beyond the tile count reuse a tile, so they cannot all be
      * in flight at once. Launch a wave per tile-sized group and wait
      * before reusing a unit - the RTL silently drops a start issued to
-     * a busy CU, which would return the previous range's answer. */
+     * a busy CU, which would return the previous range's answer.
+     *
+     * THERE ARE ROUTINELY MORE RANGES THAN TILES. It is not an edge
+     * case and it is not only about huge n: the tree's canonical cut
+     * of [0, n) into at most `parts` NODES needs one extra range
+     * whenever n is a power of two plus a remainder, so four tiles get
+     * five ranges at n = 5, 9, 17, 33, 65, ... and eight tiles get
+     * more than eight for 49 of the first thousand n.
+     *
+     * Which is why staging happens HERE, per wave, and not once up
+     * front for every range. Staging all of them first wrote range k
+     * into tile k % ntiles, so with five ranges and four tiles range 4
+     * overwrote range 0's operands before range 0 had ever been
+     * launched - and wave 0 then reduced the wrong data with the right
+     * length, giving a wrong sum with clean STATUS and plausible
+     * flags. Nothing reported an error.
+     *
+     * The cost is that a staging failure in a later wave happens after
+     * earlier waves have already run. That is harmless: a reduction
+     * leaves nothing behind on the device but the tiles' own buffers,
+     * and the host discards every partial on any error. */
     int status = ST_OK;
     std::string err;
     uint32_t fl = 0, bs = 0;
@@ -660,6 +695,29 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         const size_t wave = std::min(ntiles, nranges - base);
         std::vector<xrt::run> runs;
         runs.reserve(wave);
+
+        try {
+            for (size_t j = 0; j < wave; j++) {
+                const size_t k = base + j;
+                const size_t m = hi[k] - lo[k];
+                const size_t padded = ((m + epb - 1) / epb) * epb;
+                Tile &tile = D.tiles[j];
+                ensure_capacity(D, tile, padded * esz);
+                stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
+                /* b and c are unread by a sum, but the engine streams
+                 * all three - one read enable feeds all three FIFOs -
+                 * so they must be real, readable memory of the same
+                 * length. */
+                stage(tile.b, nullptr, m * esz, padded * esz);
+                stage(tile.c, nullptr, m * esz, padded * esz);
+            }
+        } catch (const std::bad_alloc &) {
+            set_err("out of memory staging a reduction");
+            return ST_OUT_OF_MEMORY;
+        } catch (const std::exception &e) {
+            set_err(std::string("staging a reduction: ") + e.what());
+            return ST_INTERNAL;
+        }
 
         for (size_t j = 0; j < wave; j++) {
             const size_t k = base + j;
@@ -695,6 +753,18 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         }
         if (status != ST_OK) {
             D.poisoned = true;
+            /* Same best-effort STATUS read as cftx_run: the timeout is
+             * how a fabric fault becomes readable at all, so breaking
+             * out before reading it discards the diagnosis. */
+            try {
+                for (size_t j = 0; j < wave; j++)
+                    bs |= D.tiles[j].k.read_register(CSR_STATUS);
+            } catch (const std::exception &) {
+                /* handle is finished either way */
+            }
+            err += bs ? " (STATUS 0x" + hex32(bs) + " - a memory fault, "
+                        "not merely a slow run)"
+                      : " (STATUS clean on every unit in this wave)";
             break;
         }
 
@@ -722,14 +792,23 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
     }
 
     if (bus) *bus = bs;
+
+    /* The run's own failure is reported BEFORE the status word, which
+     * is the opposite order to the success path and deliberate. A
+     * reduction that timed out has a STATUS read taken from a unit
+     * that may still be running, so letting a non-zero bs turn a
+     * ST_TIMEOUT into a ST_BUS_FAULT would relabel the failure on the
+     * strength of a register sampled mid-flight. The status word is
+     * still delivered through *bus and named in the message, which is
+     * the part that helps. */
+    if (status != ST_OK) {
+        set_err(err);
+        return status;
+    }
     if (bs != 0) {
         set_err("the memory system reported a fault during a reduction; "
                 "the result is not to be trusted");
         return ST_BUS_FAULT;
-    }
-    if (status != ST_OK) {
-        set_err(err);
-        return status;
     }
     if (flags) *flags = fl;
     return ST_OK;

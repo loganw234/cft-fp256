@@ -138,10 +138,25 @@ fi
 #
 # So report both. A run whose rtl/ and hw/ match the commit is
 # reproducible even if the tree around them was moving.
-if git diff --quiet "$SRC_COMMIT" -- rtl/ hw/ 2>/dev/null; then
+#
+# `git status --porcelain -uall`, NOT `git diff`. git diff reports
+# tracked files only, and hw/package_kernel.tcl adds sources with
+# `glob $rtl_dir/*.sv` - so an UNTRACKED .sv is invisible to git diff
+# and compiled into the .xo anyway. The manifest would then say
+# "identical to <commit>" beside a bitstream containing a module that
+# exists in no commit, which is worse than saying nothing, because the
+# sha256 next to it is what card day trusts. Not hypothetical: both
+# cft_reduce_acc.sv and cft_mulfrac.sv were new files this week, and a
+# forgotten `git add` was the only thing between here and that
+# manifest.
+SRC_BITS_DIRT=$(git status --porcelain --untracked-files=all \
+                  -- rtl/ hw/ 2>/dev/null)
+if [ -z "$SRC_BITS_DIRT" ]; then
   SRC_BITS="rtl/ and hw/ identical to $SRC_COMMIT"
 else
-  SRC_BITS="MODIFIED - rtl/ or hw/ differs from $SRC_COMMIT, this bitstream is not reproducible"
+  SRC_BITS="MODIFIED - rtl/ or hw/ differs from $SRC_COMMIT, this bitstream is not reproducible:"
+  # Name them. "something differs" sends you looking; a list does not.
+  SRC_BITS="$SRC_BITS $(echo "$SRC_BITS_DIRT" | awk '{print $NF}' | tr '\n' ' ')"
 fi
 SRC_STAMP=$(date -Iseconds)
 
@@ -251,9 +266,18 @@ for t in $TARGETS; do
 
       # If the global WNS is negative, name the clock responsible, so a
       # shell-owned violation is not mistaken for a kernel failure.
+      #
+      # Both tables, and flattened onto ONE line. A manifest is
+      # key:value per line and anything reading it will treat a
+      # continuation line as a key it does not recognise - and with two
+      # violating clocks this printed exactly that. Inter-clock paths
+      # are included because the motivating case is a negative GLOBAL
+      # WNS, and a global violation can sit on a clock crossing, which
+      # a scan that stops at "Inter Clock Table" would report as no
+      # violating clocks at all with no explanation.
       worst=$(awk '/Intra Clock Table/{f=1}
-                   f && /Inter Clock Table/{exit}
-                   f && $2 ~ /^-[0-9]+\.[0-9]+$/ {print $1, $2, $4, $5}' "$rpt")
+                   f && $2 ~ /^-[0-9]+\.[0-9]+$/ {
+                     printf "%s%s %s %s/%s", sep, $1, $2, $4, $5; sep="; " }' "$rpt")
       [ -n "$worst" ] && printf 'violating_clocks: %s\n' "$worst"
 
       # Vitis auto-frequency scaling writes what it actually settled on.

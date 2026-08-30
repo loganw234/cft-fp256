@@ -187,9 +187,21 @@ def canonical_ranges(n: int, parts: int):
     reduction be split across tiles without the tile count reaching the
     answer.
 
-    Fewer than `parts` ranges come back when n is too small to split
-    that far - a range of one element has no midpoint. Callers handle
-    that by using the ranges they get; the combine tree adapts.
+    The count is NOT bounded by `parts`, in either direction. Fewer
+    come back when n is too small to split that far - a range of one
+    element cannot be cut. But MORE come back whenever n is a power of
+    two plus a remainder, because a level cut of this tree splits the
+    perfect left subtree and leaves the remainder beside it: parts=4
+    gives five ranges at n = 5, 9, 17, 33, 65, and parts=8 exceeds
+    eight for 49 of the first thousand n.
+
+    Callers handle both by using the ranges they get - the combine tree
+    adapts - but a caller with one buffer per tile must size for the
+    RANGES, not for `parts`, and must not assume it can run them all at
+    once. cft_sf_canonical_ranges() in the C library is this function
+    with a hard cap on the output count, so the two diverge once
+    `parts` reaches that cap; tests/reduce_check.py is what compares
+    them.
     """
     if parts < 1 or (parts & (parts - 1)) != 0:
         raise ValueError("parts must be a power of two: only a clean cut "

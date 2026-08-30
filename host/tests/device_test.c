@@ -50,6 +50,30 @@
 static int failures;
 static int checks;
 
+/* What CAPS said the device could not do.
+ *
+ * A skip is not a failure, which is correct, and it is also how a
+ * whole opcode group can vanish without anyone noticing: op_caps was
+ * once written so that it advertised reductions and silently dropped
+ * the integer group, and every integer opcode was then skipped rather
+ * than run. The suite stayed green. So the count is kept, the names
+ * are kept, and the final summary refuses to say "the device and the
+ * software backend agree on every case" when cases never ran. */
+#define MAX_SKIP 32
+static int  skipped;
+static const char *skip_name[MAX_SKIP];
+
+static void note_skip(const char *what)
+{
+    int i;
+    for (i = 0; i < skipped && i < MAX_SKIP; i++)
+        if (!strcmp(skip_name[i], what))
+            return;               /* one line per thing, not per format */
+    if (skipped < MAX_SKIP)
+        skip_name[skipped] = what;
+    skipped++;
+}
+
 #define CHECK(cond, ...)                                                 \
     do {                                                                 \
         checks++;                                                        \
@@ -565,8 +589,10 @@ int main(int argc, char **argv)
         printf("%s\n", cft_format_name(fmt));
         fflush(stdout);
         for (o = 0; o < nops; o++) {
-            if (!cft_supports(hw, ops[o], fmt))
+            if (!cft_supports(hw, ops[o], fmt)) {
+                note_skip(cft_op_name(ops[o]));
                 continue;
+            }
             for (r = 0; r < nrnd; r++) {
                 compare(sw, hw, fmt, ops[o], rnds[r], n,
                         0x51ce0000u + (uint32_t)(f * 100 + o * 10 + r));
@@ -660,7 +686,8 @@ int main(int argc, char **argv)
                 printf("    dot: %d checks, %d failed\n", checks, failures);
                 fflush(stdout);
             }
-        } else if (only_reduce) {
+        } else {
+            note_skip(cft_op_name(CFT_SUM));
             printf("  no reduction opcode group on this device "
                    "(CAPS says so) - nothing to check\n");
         }
@@ -669,8 +696,24 @@ int main(int argc, char **argv)
     cft_close(hw);
     cft_close(sw);
     printf("\n%d checks, %d failed\n", checks, failures);
+
+    if (skipped) {
+        int i, n_named = skipped < MAX_SKIP ? skipped : MAX_SKIP;
+        printf("SKIPPED %d opcode%s this device says it does not "
+               "implement:", skipped, skipped == 1 ? "" : "s");
+        for (i = 0; i < n_named; i++)
+            printf(" %s", skip_name[i]);
+        printf("\n  A skip is not a failure, but it is not a pass "
+               "either. If the device\n"
+               "  should implement one of these, CAPS is wrong and "
+               "nothing above tested it.\n");
+    }
+
     if (!failures)
-        printf("the device and the software backend agree on every "
-               "case, bits and flags\n");
+        printf(skipped
+               ? "the device and the software backend agree on every case "
+                 "that RAN, bits and flags\n"
+               : "the device and the software backend agree on every "
+                 "case, bits and flags\n");
     return failures ? 1 : 0;
 }

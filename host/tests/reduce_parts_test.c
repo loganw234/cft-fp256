@@ -72,8 +72,44 @@ static void fill(uint8_t *buf, const cft_fmt_desc *f, size_t n)
     }
 }
 
-int main(void)
+/* --dump: print what the C partitioner produces, so something outside
+ * this program can compare it against the golden model.
+ *
+ * cft_sf_canonical_ranges is internal and is NOT exported from the
+ * shared library, so tests/reduce_check.py cannot reach it through
+ * ctypes the way it reaches the rest of libcft. Without this the C
+ * partitioner is checked only against a property - which is real, but
+ * a property both implementations could satisfy while disagreeing, and
+ * they DO disagree: the C one stops splitting when another pass would
+ * exceed its output cap and the model is unbounded, so at parts=64 the
+ * model returns 65 ranges for n=65 and this returns 33. Both fold to
+ * the same answer. Neither is wrong. But nothing was comparing them,
+ * and "two implementations of one contract" is the entire product.
+ *
+ * Format, one line per (n, parts): "n parts lo:hi lo:hi ..." */
+static int dump(void)
 {
+    static const size_t parts_list[] = { 1, 2, 4, 8, 16, 32, 64 };
+    size_t lo[64], hi[64];
+    size_t n, pi;
+
+    for (n = 0; n <= 300; n++)
+        for (pi = 0; pi < sizeof parts_list / sizeof parts_list[0]; pi++) {
+            size_t parts = parts_list[pi], k;
+            size_t got = cft_sf_canonical_ranges(n, parts, lo, hi, 64);
+            printf("%lu %lu", (unsigned long)n, (unsigned long)parts);
+            for (k = 0; k < got; k++)
+                printf(" %lu:%lu", (unsigned long)lo[k], (unsigned long)hi[k]);
+            printf("\n");
+        }
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc > 1 && !strcmp(argv[1], "--dump"))
+        return dump();
+
     static const size_t sizes[] = {
         1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 16, 17, 23, 31, 32, 33,
         63, 64, 65, 100, 127, 128, 129, 255, 256, 257, 500
@@ -175,6 +211,64 @@ int main(void)
                 }
             }
         }
+    }
+
+    /* THERE ARE ROUTINELY MORE RANGES THAN PARTS, and the schedule
+     * that consumes them has to survive it.
+     *
+     * This is not an edge case: the canonical cut of [0, n) needs one
+     * extra range whenever n is a power of two plus a remainder, so
+     * four parts get five ranges at n = 5, 9, 17, 33, 65 and eight
+     * parts exceed eight for 49 of the first thousand n. The device
+     * backend runs the ranges in waves of `ntiles` and reuses tiles
+     * between waves, and it staged EVERY range up front - so range 4
+     * overwrote range 0's operands before range 0 had been launched,
+     * and wave 0 reduced the wrong data with the right length. Clean
+     * STATUS, plausible flags, wrong sum.
+     *
+     * The bug lives in code that needs XRT, so it is modelled here
+     * instead: the schedule is pure index arithmetic, and this asserts
+     * the invariant that arithmetic has to keep - every tile, at the
+     * moment it is launched, holds the data of the range it is about
+     * to compute. Staging up front breaks it; staging per wave does
+     * not. Runs on any machine, with no card and no emulator. */
+    {
+        size_t excess = 0, pi, si;
+        for (pi = 0; pi < NPARTS; pi++) {
+            size_t nt = parts_list[pi];
+            for (si = 0; si < NSIZES; si++) {
+                size_t n = sizes[si], base, j;
+                size_t got = cft_sf_canonical_ranges(n, nt, lo, hi, 64);
+                size_t holds[64];
+                if (got == 0) continue;
+                if (got > nt) excess++;
+                for (j = 0; j < 64; j++) holds[j] = (size_t)-1;
+
+                for (base = 0; base < got; base += nt) {
+                    size_t wave = (nt < got - base) ? nt : got - base;
+                    /* stage this wave, and only this wave */
+                    for (j = 0; j < wave; j++) holds[j] = base + j;
+                    /* launch it */
+                    for (j = 0; j < wave; j++) {
+                        checks++;
+                        CHECK(holds[j] == base + j,
+                              "n=%lu parts=%lu: tile %lu was launched for "
+                              "range %lu but holds range %lu - a later "
+                              "range overwrote it before it ran",
+                              (unsigned long)n, (unsigned long)nt,
+                              (unsigned long)j, (unsigned long)(base + j),
+                              (unsigned long)holds[j]);
+                    }
+                }
+            }
+        }
+        CHECK(excess > 0,
+              "no (n, parts) in this test produces more ranges than "
+              "parts - the case the wave schedule exists for is not "
+              "being covered, so this check proves nothing");
+        printf("  %lu of %lu (n, parts) pairs need more ranges than "
+               "parts\n", (unsigned long)excess,
+               (unsigned long)(NSIZES * NPARTS));
     }
 
     /* A non-power-of-two must be refused rather than quietly producing
