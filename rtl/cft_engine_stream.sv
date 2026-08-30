@@ -7,26 +7,36 @@
 // engine, which stays in rtl/ as readable spec) - the difference is
 // pure microarchitecture:
 //
-//   - reads are AXI INCR bursts (up to 2^BURST_LOG2 beats, 4KB-
-//     boundary safe) into three per-stream FIFOs, streams arbitrated
-//     a > b > c with one AR outstanding at a time;
+//   - each operand stream has its OWN read-only AXI master, issuing
+//     INCR bursts (up to 2^BURST_LOG2 beats, 4KB-boundary safe) with
+//     up to AR_DEPTH outstanding, into its own FIFO;
 //   - compute issues one beat per cycle whenever all three operand
 //     FIFOs are non-empty and the result FIFO has room for
 //     everything already in flight;
 //   - results collect through the latency-matched delay line into
-//     the D FIFO and drain as write bursts.
+//     the D FIFO and drain as write bursts on a write-only master.
 //
 // Read, compute and write all overlap across beats. Element order is
 // still total: beats are popped in index order by the single issue
 // point and written in index order by the single writer, so the
 // determinism contract is untouched - flags remain an order-free OR.
+// Four masters do not weaken that argument, because the argument was
+// never about the memory system: it is about the single issue point,
+// and there is still exactly one.
 //
-// Steady-state cost on the shared 256-bit port is 4 transfers per
-// beat (3 reads + 1 write), so the engine is port-bound rather than
-// handshake-bound: ~5 cycles/beat with burst-amortized latency,
-// versus ~40 for the naive engine. The next knobs (multiple
-// outstanding ARs, per-stream HBM pseudo-channels, multiple CUs) are
-// roadmap items; none of them change numerics.
+// The four-master arrangement replaced a single shared port, which was
+// the throughput ceiling and nothing else. Steady state costs four
+// transfers per beat - three operand reads and one result write - and
+// one 256-bit port retires one transfer per cycle, so the engine sat
+// at ~4.4 cycles/beat however fast the arithmetic ran. The pipe
+// accepts a beat every cycle; four ports let it, and pipelined ARs
+// stop the per-burst memory latency from putting the bubble straight
+// back. Both were roadmap items ("multiple outstanding ARs, per-stream
+// HBM pseudo-channels") and neither changes numerics.
+//
+// hw/link.cfg gives each master its own HBM pseudo-channel group.
+// Four masters sharing one group would relocate the bottleneck rather
+// than remove it.
 
 `timescale 1ns/1ps
 
@@ -37,7 +47,18 @@ module cft_engine_stream #(
     parameter bit EN_FP256   = 1'b1,
     parameter int BEAT_BITS  = 256,
     parameter int BURST_LOG2 = 4,   // max beats per AXI burst
-    parameter int FIFO_LOG2  = 5    // per-stream buffer depth (beats)
+    // Per-stream buffer depth (beats). Deeper than the shared-port
+    // design needed, because in-flight bursts now reserve space: with
+    // AR_DEPTH bursts of BURST_MAX outstanding, that reservation alone
+    // is AR_DEPTH*BURST_MAX beats, and anything left over is what
+    // actually smooths the stream.
+    parameter int FIFO_LOG2  = 7,
+    // Bursts in flight per stream. Sized against memory latency, not
+    // against the FIFO: a burst is BURST_MAX beats, so hiding an
+    // L-cycle latency wants roughly L/BURST_MAX bursts queued behind
+    // the one streaming. HBM read latency on this shell is order 60
+    // cycles, 16-beat bursts, hence 4.
+    parameter int AR_DEPTH   = 4
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -57,44 +78,103 @@ module cft_engine_stream #(
     input  logic [63:0]  cfg_c,
     input  logic [63:0]  cfg_d,
 
-    // AXI4 master (m00_axi)
-    output logic [0:0]   m00_axi_awid,
-    output logic [63:0]  m00_axi_awaddr,
-    output logic [7:0]   m00_axi_awlen,
-    output logic [2:0]   m00_axi_awsize,
-    output logic [1:0]   m00_axi_awburst,
-    output logic         m00_axi_awlock,
-    output logic [3:0]   m00_axi_awcache,
-    output logic [2:0]   m00_axi_awprot,
-    output logic [3:0]   m00_axi_awqos,
-    output logic         m00_axi_awvalid,
-    input  logic         m00_axi_awready,
-    output logic [BEAT_BITS-1:0] m00_axi_wdata,
-    output logic [BEAT_BITS/8-1:0] m00_axi_wstrb,
-    output logic         m00_axi_wlast,
-    output logic         m00_axi_wvalid,
-    input  logic         m00_axi_wready,
-    input  logic [0:0]   m00_axi_bid,
-    input  logic [1:0]   m00_axi_bresp,
-    input  logic         m00_axi_bvalid,
-    output logic         m00_axi_bready,
-    output logic [0:0]   m00_axi_arid,
-    output logic [63:0]  m00_axi_araddr,
-    output logic [7:0]   m00_axi_arlen,
-    output logic [2:0]   m00_axi_arsize,
-    output logic [1:0]   m00_axi_arburst,
-    output logic         m00_axi_arlock,
-    output logic [3:0]   m00_axi_arcache,
-    output logic [2:0]   m00_axi_arprot,
-    output logic [3:0]   m00_axi_arqos,
-    output logic         m00_axi_arvalid,
-    input  logic         m00_axi_arready,
-    input  logic [0:0]   m00_axi_rid,
-    input  logic [BEAT_BITS-1:0] m00_axi_rdata,
-    input  logic [1:0]   m00_axi_rresp,
-    input  logic         m00_axi_rlast,
-    input  logic         m00_axi_rvalid,
-    output logic         m00_axi_rready
+    // ---- AXI4 masters: one per stream ----------------------------------
+    //
+    // a, b and c are READ-ONLY masters and d is WRITE-ONLY, which is
+    // both what the engine needs and cheaper than four full-duplex
+    // ports: Vivado infers the direction from the channels present, so
+    // the interconnect never builds a write path for an operand stream.
+    //
+    // The single shared port this replaces was the design's throughput
+    // ceiling and nothing else. Steady state costs four transfers per
+    // beat - three operand reads and one result write - and one 256-bit
+    // port can retire one transfer per cycle, so the engine sat at
+    // ~4.4 cycles/beat no matter how fast the arithmetic was. The
+    // arithmetic pipe accepts a beat every cycle. Four ports let it.
+    //
+    // This is the "per-stream HBM pseudo-channels" roadmap item, and it
+    // is why hw/link.cfg now assigns each master its own HBM group:
+    // four masters sharing one group would move the bottleneck rather
+    // than remove it.
+
+    // a (read-only)
+    output logic [0:0]   m_axi_a_arid,
+    output logic [63:0]  m_axi_a_araddr,
+    output logic [7:0]   m_axi_a_arlen,
+    output logic [2:0]   m_axi_a_arsize,
+    output logic [1:0]   m_axi_a_arburst,
+    output logic         m_axi_a_arlock,
+    output logic [3:0]   m_axi_a_arcache,
+    output logic [2:0]   m_axi_a_arprot,
+    output logic [3:0]   m_axi_a_arqos,
+    output logic         m_axi_a_arvalid,
+    input  logic         m_axi_a_arready,
+    input  logic [0:0]   m_axi_a_rid,
+    input  logic [BEAT_BITS-1:0] m_axi_a_rdata,
+    input  logic [1:0]   m_axi_a_rresp,
+    input  logic         m_axi_a_rlast,
+    input  logic         m_axi_a_rvalid,
+    output logic         m_axi_a_rready,
+
+    // b (read-only)
+    output logic [0:0]   m_axi_b_arid,
+    output logic [63:0]  m_axi_b_araddr,
+    output logic [7:0]   m_axi_b_arlen,
+    output logic [2:0]   m_axi_b_arsize,
+    output logic [1:0]   m_axi_b_arburst,
+    output logic         m_axi_b_arlock,
+    output logic [3:0]   m_axi_b_arcache,
+    output logic [2:0]   m_axi_b_arprot,
+    output logic [3:0]   m_axi_b_arqos,
+    output logic         m_axi_b_arvalid,
+    input  logic         m_axi_b_arready,
+    input  logic [0:0]   m_axi_b_rid,
+    input  logic [BEAT_BITS-1:0] m_axi_b_rdata,
+    input  logic [1:0]   m_axi_b_rresp,
+    input  logic         m_axi_b_rlast,
+    input  logic         m_axi_b_rvalid,
+    output logic         m_axi_b_rready,
+
+    // c (read-only)
+    output logic [0:0]   m_axi_c_arid,
+    output logic [63:0]  m_axi_c_araddr,
+    output logic [7:0]   m_axi_c_arlen,
+    output logic [2:0]   m_axi_c_arsize,
+    output logic [1:0]   m_axi_c_arburst,
+    output logic         m_axi_c_arlock,
+    output logic [3:0]   m_axi_c_arcache,
+    output logic [2:0]   m_axi_c_arprot,
+    output logic [3:0]   m_axi_c_arqos,
+    output logic         m_axi_c_arvalid,
+    input  logic         m_axi_c_arready,
+    input  logic [0:0]   m_axi_c_rid,
+    input  logic [BEAT_BITS-1:0] m_axi_c_rdata,
+    input  logic [1:0]   m_axi_c_rresp,
+    input  logic         m_axi_c_rlast,
+    input  logic         m_axi_c_rvalid,
+    output logic         m_axi_c_rready,
+
+    // d (write-only)
+    output logic [0:0]   m_axi_d_awid,
+    output logic [63:0]  m_axi_d_awaddr,
+    output logic [7:0]   m_axi_d_awlen,
+    output logic [2:0]   m_axi_d_awsize,
+    output logic [1:0]   m_axi_d_awburst,
+    output logic         m_axi_d_awlock,
+    output logic [3:0]   m_axi_d_awcache,
+    output logic [2:0]   m_axi_d_awprot,
+    output logic [3:0]   m_axi_d_awqos,
+    output logic         m_axi_d_awvalid,
+    input  logic         m_axi_d_awready,
+    output logic [BEAT_BITS-1:0] m_axi_d_wdata,
+    output logic [BEAT_BITS/8-1:0] m_axi_d_wstrb,
+    output logic         m_axi_d_wlast,
+    output logic         m_axi_d_wvalid,
+    input  logic         m_axi_d_wready,
+    input  logic [0:0]   m_axi_d_bid,
+    input  logic [1:0]   m_axi_d_bresp,
+    input  logic         m_axi_d_bvalid,
+    output logic         m_axi_d_bready
 );
 
   localparam logic [1:0] PREC_FP32  = 2'd0;
@@ -158,6 +238,7 @@ module cft_engine_stream #(
 
   localparam int BURST_MAX = 1 << BURST_LOG2;
   localparam int FDEPTH    = 1 << FIFO_LOG2;
+  localparam logic [7:0] AR_MAX = AR_DEPTH;
 
   // The writer starts a burst only once the result FIFO holds the
   // whole burst, so a burst longer than the FIFO can never start and
@@ -169,13 +250,32 @@ module cft_engine_stream #(
   // spell out: Yosys and Vivado honour the elaboration-time $error and
   // ignore `initial`, Icarus is the reverse, so one form alone leaves
   // some toolchain able to build a deadlocking design.
+  //
+  // The second guard is new with pipelined ARs and is the sharper of
+  // the two. AR_DEPTH bursts in flight reserve AR_DEPTH*BURST_MAX
+  // beats; if that exceeds the FIFO, the reservation arithmetic
+  // saturates at zero free space and the stream deadlocks with ARs
+  // issued and nowhere to put their data. Caught at elaboration
+  // because the symptom - a run that starts and never completes - is
+  // indistinguishable from a dozen other faults at runtime.
   generate
     if (BURST_MAX >= FDEPTH) begin : g_burst_exceeds_fifo
       $error("cft_engine_stream: BURST_LOG2 must be less than FIFO_LOG2");
     end
+    if (AR_DEPTH < 1) begin : g_ar_depth_zero
+      $error("cft_engine_stream: AR_DEPTH must be at least 1");
+    end
+    if (AR_DEPTH * BURST_MAX > FDEPTH) begin : g_ar_depth_exceeds_fifo
+      $error("cft_engine_stream: AR_DEPTH*BURST_MAX must fit the stream FIFO");
+    end
   endgenerate
 
   initial begin
+    if (AR_DEPTH < 1 || AR_DEPTH * BURST_MAX > FDEPTH) begin
+      $display("FATAL: cft_engine_stream AR_DEPTH (%0d) * BURST_MAX (%0d) must fit FDEPTH (%0d)",
+               AR_DEPTH, BURST_MAX, FDEPTH);
+      $finish;
+    end
     if (BURST_MAX >= FDEPTH) begin
       $display("FATAL: cft_engine_stream needs BURST_LOG2 (%0d) < FIFO_LOG2 (%0d)",
                BURST_LOG2, FIFO_LOG2);
@@ -188,22 +288,41 @@ module cft_engine_stream #(
   localparam int ERR_BRESP = 1;
   localparam int ERR_RLEN  = 2;
 
-  // constant AXI attributes
-  assign m00_axi_awid    = 1'b0;
-  assign m00_axi_awsize  = ADDR_SH[2:0];   // log2(BEAT_BYTES)
-  assign m00_axi_awburst = 2'd1;      // INCR
-  assign m00_axi_awlock  = 1'b0;
-  assign m00_axi_awcache = 4'b0011;
-  assign m00_axi_awprot  = 3'b000;
-  assign m00_axi_awqos   = 4'd0;
-  assign m00_axi_arid    = 1'b0;
-  assign m00_axi_arsize  = ADDR_SH[2:0];
-  assign m00_axi_arburst = 2'd1;
-  assign m00_axi_arlock  = 1'b0;
-  assign m00_axi_arcache = 4'b0011;
-  assign m00_axi_arprot  = 3'b000;
-  assign m00_axi_arqos   = 4'd0;
-  assign m00_axi_wstrb   = {BEAT_BYTES{1'b1}};
+  // constant AXI attributes. One ID per master, and only one: read
+  // responses on a single ID return in issue order, which is what lets
+  // ARs be pipelined without any reorder buffer.
+  assign m_axi_a_arid    = 1'b0;
+  assign m_axi_a_arsize  = ADDR_SH[2:0];   // log2(BEAT_BYTES)
+  assign m_axi_a_arburst = 2'd1;           // INCR
+  assign m_axi_a_arlock  = 1'b0;
+  assign m_axi_a_arcache = 4'b0011;
+  assign m_axi_a_arprot  = 3'b000;
+  assign m_axi_a_arqos   = 4'd0;
+
+  assign m_axi_b_arid    = 1'b0;
+  assign m_axi_b_arsize  = ADDR_SH[2:0];
+  assign m_axi_b_arburst = 2'd1;
+  assign m_axi_b_arlock  = 1'b0;
+  assign m_axi_b_arcache = 4'b0011;
+  assign m_axi_b_arprot  = 3'b000;
+  assign m_axi_b_arqos   = 4'd0;
+
+  assign m_axi_c_arid    = 1'b0;
+  assign m_axi_c_arsize  = ADDR_SH[2:0];
+  assign m_axi_c_arburst = 2'd1;
+  assign m_axi_c_arlock  = 1'b0;
+  assign m_axi_c_arcache = 4'b0011;
+  assign m_axi_c_arprot  = 3'b000;
+  assign m_axi_c_arqos   = 4'd0;
+
+  assign m_axi_d_awid    = 1'b0;
+  assign m_axi_d_awsize  = ADDR_SH[2:0];
+  assign m_axi_d_awburst = 2'd1;
+  assign m_axi_d_awlock  = 1'b0;
+  assign m_axi_d_awcache = 4'b0011;
+  assign m_axi_d_awprot  = 3'b000;
+  assign m_axi_d_awqos   = 4'd0;
+  assign m_axi_d_wstrb   = {BEAT_BYTES{1'b1}};
 
   // ---- run control ---------------------------------------------------
   logic         running;
@@ -277,43 +396,124 @@ module cft_engine_stream #(
 
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_a (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
-      .wr_en(a_wr), .wr_data(m00_axi_rdata),
+      .wr_en(a_wr), .wr_data(m_axi_a_rdata),
       .rd_en(abc_rd), .rd_data(a_q), .count(a_cnt));
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_b (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
-      .wr_en(b_wr), .wr_data(m00_axi_rdata),
+      .wr_en(b_wr), .wr_data(m_axi_b_rdata),
       .rd_en(abc_rd), .rd_data(b_q), .count(b_cnt));
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_c (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
-      .wr_en(c_wr), .wr_data(m00_axi_rdata),
+      .wr_en(c_wr), .wr_data(m_axi_c_rdata),
       .rd_en(abc_rd), .rd_data(c_q), .count(c_cnt));
 
-  // ---- reader: one AR outstanding, streams arbitrated a > b > c ------
-  localparam logic [1:0] R_IDLE = 2'd0, R_AR = 2'd1, R_DATA = 2'd2;
+  // ---- readers: one per stream, ARs pipelined ------------------------
+  //
+  // Three identical readers, each owning a master. There is no
+  // arbitration left to get wrong - the a > b > c priority existed only
+  // because one port had to be shared, and sharing was the bottleneck.
+  //
+  // Each reader keeps up to AR_DEPTH bursts in flight. That is not a
+  // refinement, it is what makes the dedicated port worth having: with
+  // a single outstanding AR the reader must wait out the full memory
+  // latency after every RLAST before the next burst's first beat
+  // arrives, and on HBM that bubble is comparable to the burst itself.
+  // A 16-beat burst followed by a ~60-cycle bubble is ~4.8 cycles/beat,
+  // which is where the shared port already was. Pipelining the ARs is
+  // what turns four ports into four times the throughput.
+  //
+  // Ordering is safe with a single AXI ID: responses on one ID return
+  // in issue order, so beats arrive in address order and the FIFO stays
+  // an index-ordered stream. The determinism argument is untouched -
+  // it was never about the memory system, only about issue order at the
+  // single compute point, which is unchanged.
+  //
+  // FIFO space is reserved at AR time, not at R time. Two bursts in
+  // flight can together exceed the free space that each looked at
+  // separately, and the resulting overflow would corrupt operands
+  // rather than stall - so `reserved` counts beats promised by
+  // in-flight ARs and every free-space test subtracts it.
 
-  logic [1:0]  rd_state, cur_s;
-  logic [63:0] rd_issued0, rd_issued1, rd_issued2;
-  logic [7:0]  ar_len, r_beats;
+  logic [63:0] rd_issued [0:2];   // beats whose AR has gone out
+  logic [7:0]  rd_outst  [0:2];   // bursts in flight
+  // Beats promised by in-flight ARs and not yet arrived. Sixteen bits,
+  // not FIFO_LOG2-derived: the value is bounded by AR_DEPTH*BURST_MAX
+  // (at most 256, since ARLEN is a byte) and a width tied to FIFO_LOG2
+  // makes every add and part-select depend on a parameter, which is how
+  // `len[FIFO_LOG2+1:0]` came to select bit 8 of an 8-bit signal.
+  logic [15:0] rd_resv   [0:2];
 
-  logic [63:0] rem0, rem1, rem2, addr0, addr1, addr2;
-  assign rem0 = beats_total - rd_issued0;
-  assign rem1 = beats_total - rd_issued1;
-  assign rem2 = beats_total - rd_issued2;
-  assign addr0 = base_a + (rd_issued0 << ADDR_SH);
-  assign addr1 = base_b + (rd_issued1 << ADDR_SH);
-  assign addr2 = base_c + (rd_issued2 << ADDR_SH);
+  // per-stream port fan-out, so the readers can be one generate block
+  logic [63:0]        rd_araddr  [0:2];
+  logic [7:0]         rd_arlen   [0:2];
+  logic               rd_arvalid [0:2];
+  logic               rd_arready [0:2];
+  logic               rd_rvalid  [0:2];
+  logic               rd_rlast   [0:2];
+  logic               rd_wr      [0:2];
+  logic [63:0]        rd_base    [0:2];
+  logic [FIFO_LOG2:0] rd_cnt     [0:2];
+  logic [2:0]         rlen_err;
+
+  assign rd_base[0] = base_a;
+  assign rd_base[1] = base_b;
+  assign rd_base[2] = base_c;
+  assign rd_cnt[0]  = a_cnt;
+  assign rd_cnt[1]  = b_cnt;
+  assign rd_cnt[2]  = c_cnt;
+
+  assign m_axi_a_arvalid = rd_arvalid[0];
+  assign m_axi_a_araddr  = rd_araddr[0];
+  assign m_axi_a_arlen   = rd_arlen[0] - 8'd1;
+  assign m_axi_a_rready  = 1'b1;
+  assign rd_arready[0]   = m_axi_a_arready;
+  assign rd_rvalid[0]    = m_axi_a_rvalid;
+  assign rd_rlast[0]     = m_axi_a_rlast;
+
+  assign m_axi_b_arvalid = rd_arvalid[1];
+  assign m_axi_b_araddr  = rd_araddr[1];
+  assign m_axi_b_arlen   = rd_arlen[1] - 8'd1;
+  assign m_axi_b_rready  = 1'b1;
+  assign rd_arready[1]   = m_axi_b_arready;
+  assign rd_rvalid[1]    = m_axi_b_rvalid;
+  assign rd_rlast[1]     = m_axi_b_rlast;
+
+  assign m_axi_c_arvalid = rd_arvalid[2];
+  assign m_axi_c_araddr  = rd_araddr[2];
+  assign m_axi_c_arlen   = rd_arlen[2] - 8'd1;
+  assign m_axi_c_rready  = 1'b1;
+  assign rd_arready[2]   = m_axi_c_arready;
+  assign rd_rvalid[2]    = m_axi_c_rvalid;
+  assign rd_rlast[2]     = m_axi_c_rlast;
+
+  // RREADY is tied high on all three, and that is safe BECAUSE space
+  // was reserved at AR time: the engine never asks for a beat it has
+  // nowhere to put. Holding RREADY low to throttle would be the
+  // alternative and it costs a cycle of latency on every beat.
+  assign a_wr = rd_wr[0];
+  assign b_wr = rd_wr[1];
+  assign c_wr = rd_wr[2];
 
   // beats this burst may cover: min(BURST_MAX, remaining, beats to the
-  // 4KB AXI boundary, FIFO free space). Addresses are 32B-aligned by
-  // the host contract, so the boundary term is never zero.
+  // 4KB AXI boundary, UNRESERVED FIFO space). Addresses are 32B-aligned
+  // by the host contract, so the boundary term is never zero.
   function automatic logic [7:0] burst_len(
       input logic [63:0] rem,
       input logic [63:0] addr,
-      input logic [FIFO_LOG2:0] cnt);
-    logic [63:0] bound, free, l;
+      input logic [FIFO_LOG2:0] cnt,
+      input logic [15:0]        resv);
+    logic [63:0] bound, free, used, l;
     begin
-      bound = (64'd4096 - {52'd0, addr[11:0]}) >> 5;
-      free  = FDEPTH - {{(63-FIFO_LOG2){1'b0}}, cnt};
+      // Beats to the next 4KB boundary. The shift is ADDR_SH, not a
+      // literal 5: 5 is log2(32) and only correct while BEAT_BITS is
+      // 256. The quarter tile (BEAT_BITS=64) has 8-byte beats, where a
+      // hardcoded 5 understates the distance by 4x. Harmless today
+      // because BURST_MAX bounds it first either way, but it is a
+      // parameterization bug sitting in the one function whose job is
+      // to respect a hard AXI rule.
+      bound = (64'd4096 - {52'd0, addr[11:0]}) >> ADDR_SH;
+      used  = {{(63-FIFO_LOG2){1'b0}}, cnt} + {48'd0, resv};
+      free  = (used >= FDEPTH) ? 64'd0 : (FDEPTH - used);
       l = BURST_MAX;
       if (rem   < l) l = rem;
       if (bound < l) l = bound;
@@ -322,67 +522,147 @@ module cft_engine_stream #(
     end
   endfunction
 
-  logic [7:0] len0, len1, len2;
-  always_comb begin
-    len0 = burst_len(rem0, addr0, a_cnt);
-    len1 = burst_len(rem1, addr1, b_cnt);
-    len2 = burst_len(rem2, addr2, c_cnt);
-  end
+  genvar rs;
+  generate
+    for (rs = 0; rs < 3; rs = rs + 1) begin : g_reader
+      logic [63:0] rem, addr;
+      logic [7:0]  len;
+      logic        launch;
 
-  always_ff @(posedge ap_clk) begin
-    if (!ap_rst_n) begin
-      rd_state <= R_IDLE;
-      cur_s <= 2'd0;
-      rd_issued0 <= '0; rd_issued1 <= '0; rd_issued2 <= '0;
-      ar_len <= 8'd0;
-      r_beats <= 8'd0;
-    end else if (!running) begin
-      rd_state <= R_IDLE;
-      rd_issued0 <= '0; rd_issued1 <= '0; rd_issued2 <= '0;
-      r_beats <= 8'd0;
-    end else begin
-      case (rd_state)
-        R_IDLE: begin
-          if (len0 != 0) begin
-            cur_s <= 2'd0; ar_len <= len0; rd_state <= R_AR;
-          end else if (len1 != 0) begin
-            cur_s <= 2'd1; ar_len <= len1; rd_state <= R_AR;
-          end else if (len2 != 0) begin
-            cur_s <= 2'd2; ar_len <= len2; rd_state <= R_AR;
+      // The function's arguments are read into local SCALARS first, and
+      // that is not stylistic. Passing unpacked-array elements
+      // (rd_cnt[rs], rd_resv[rs]) straight into a function called from
+      // always_comb leaves Icarus unable to build a correct implicit
+      // sensitivity list for them, and the block then re-triggers on
+      // itself: the simulation spins at time 0 at full CPU and never
+      // reaches the first clock edge. The original code passed scalars
+      // and worked; the array indexing arrived with the per-stream
+      // generate loop and took the sensitivity inference with it.
+      logic [FIFO_LOG2:0] cnt_s;
+      logic [15:0]        resv_s;
+      logic [63:0]        issued_s;
+      logic [63:0]        base_s;
+
+      assign cnt_s    = rd_cnt[rs];
+      assign resv_s   = rd_resv[rs];
+      assign issued_s = rd_issued[rs];
+      assign base_s   = rd_base[rs];
+
+      assign rem  = beats_total - issued_s;
+      assign addr = base_s + (issued_s << ADDR_SH);
+      assign len  = burst_len(rem, addr, cnt_s, resv_s);
+
+      // The AR request is REGISTERED, and it has to be. addr and len
+      // above are combinational on rd_cnt, the FIFO occupancy, which
+      // falls every time compute pops a beat - so driving them straight
+      // at the port would change ARADDR and ARLEN while ARVALID was
+      // asserted and waiting for ARREADY. AXI4 forbids that (A3.2.1:
+      // the source must hold payload stable until the handshake), and
+      // the failure it produces is not a clean protocol error: the
+      // slave latches one length and the reader accounts for another,
+      // so the FIFO reservation stops matching the beats that arrive.
+      logic [63:0] ar_addr_q;
+      logic [7:0]  ar_len_q;
+      logic        ar_pend;
+
+      // Commit at LAUNCH, not at handshake: rd_issued, the reservation
+      // and the outstanding count all advance when the burst is decided,
+      // so the next candidate address is computed from a state that
+      // already includes it. Deciding at handshake instead would let the
+      // combinational len re-derive the same burst twice.
+      assign launch = running && !ar_pend && (len != 8'd0) &&
+                      (rd_outst[rs] < AR_MAX);
+
+      assign rd_araddr[rs]  = ar_addr_q;
+      assign rd_arlen[rs]   = ar_len_q;
+      assign rd_arvalid[rs] = ar_pend;
+      assign rd_wr[rs]      = rd_rvalid[rs];
+
+      always_ff @(posedge ap_clk) begin
+        if (!ap_rst_n || !running) begin
+          rd_issued[rs] <= '0;
+          rd_outst[rs]  <= '0;
+          rd_resv[rs]   <= '0;
+          ar_pend       <= 1'b0;
+          ar_addr_q     <= '0;
+          ar_len_q      <= '0;
+        end else begin
+          logic r_go;
+          r_go = rd_rvalid[rs];
+
+          if (launch) begin
+            ar_addr_q <= addr;
+            ar_len_q  <= len;
+            ar_pend   <= 1'b1;
+            rd_issued[rs] <= rd_issued[rs] + {56'd0, len};
+            // synthesis translate_off
+            $display("[CFT-ENGS] AR s=%0d addr=0x%h len=%0d", rs, addr, len);
+            // synthesis translate_on
+          end else if (ar_pend && rd_arready[rs]) begin
+            ar_pend <= 1'b0;
+          end
+
+          // outstanding: +1 per launch, -1 per RLAST. Both can happen in
+          // the same cycle once bursts are pipelined, so the update is
+          // written as a single expression rather than two ifs - the
+          // sequential form loses one of them.
+          rd_outst[rs] <= rd_outst[rs]
+                          + (launch ? 8'd1 : 8'd0)
+                          - ((r_go && rd_rlast[rs]) ? 8'd1 : 8'd0);
+
+          // reserved: +len per launch, -1 per beat received. Same reason.
+          rd_resv[rs] <= rd_resv[rs]
+                         + (launch ? {8'd0, len} : 16'd0)
+                         - (r_go   ? 16'd1 : 16'd0);
+        end
+      end
+
+      // ---- RLAST placement check ------------------------------------
+      //
+      // RLAST must land on exactly the beat ARLEN asked for. A short
+      // burst starves compute forever; a long one overruns the FIFO
+      // past its reservation and corrupts operands. Both are silent
+      // without this.
+      //
+      // Pipelined ARs made it need a queue: with several bursts in
+      // flight the length to check against is the OLDEST outstanding
+      // one, not the most recently issued. Depth AR_DEPTH, which is
+      // exactly how many can be waiting.
+      logic [7:0] len_q [0:AR_DEPTH-1];
+      logic [7:0] beat_ctr;
+      logic [$clog2(AR_DEPTH):0] len_wp, len_rp;
+
+      always_ff @(posedge ap_clk) begin
+        if (!ap_rst_n || !running) begin
+          beat_ctr <= 8'd0;
+          len_wp   <= '0;
+          len_rp   <= '0;
+          rlen_err[rs] <= 1'b0;
+        end else begin
+          // Pushed at launch, matching where the burst is committed.
+          if (launch) begin
+            len_q[len_wp[$clog2(AR_DEPTH)-1:0]] <= len;
+            len_wp <= len_wp + 1'b1;
+          end
+          if (rd_rvalid[rs]) begin
+            if (rd_rlast[rs]) begin
+              // last beat of this burst: the count must match
+              if ((beat_ctr + 8'd1) != len_q[len_rp[$clog2(AR_DEPTH)-1:0]])
+                rlen_err[rs] <= 1'b1;
+              beat_ctr <= 8'd0;
+              len_rp <= len_rp + 1'b1;
+            end else begin
+              // not last: overrunning the expected length is the
+              // other half of the same fault
+              if ((beat_ctr + 8'd1) >= len_q[len_rp[$clog2(AR_DEPTH)-1:0]])
+                rlen_err[rs] <= 1'b1;
+              beat_ctr <= beat_ctr + 8'd1;
+            end
           end
         end
-        R_AR: if (m00_axi_arready) begin
-          rd_state <= R_DATA;
-          r_beats <= 8'd0;
-          // synthesis translate_off
-          $display("[CFT-ENGS] AR s=%0d addr=0x%h len=%0d", cur_s, m00_axi_araddr, ar_len);
-          // synthesis translate_on
-        end
-        R_DATA: if (m00_axi_rvalid) begin
-          r_beats <= r_beats + 8'd1;
-          if (m00_axi_rlast) begin
-            case (cur_s)
-              2'd0: rd_issued0 <= rd_issued0 + {56'd0, ar_len};
-              2'd1: rd_issued1 <= rd_issued1 + {56'd0, ar_len};
-              default: rd_issued2 <= rd_issued2 + {56'd0, ar_len};
-            endcase
-            rd_state <= R_IDLE;
-          end
-        end
-        default: rd_state <= R_IDLE;
-      endcase
+      end
     end
-  end
-
-  assign m00_axi_arvalid = (rd_state == R_AR);
-  assign m00_axi_araddr  = (cur_s == 2'd0) ? addr0 :
-                           (cur_s == 2'd1) ? addr1 : addr2;
-  assign m00_axi_arlen   = ar_len - 8'd1;
-  assign m00_axi_rready  = (rd_state == R_DATA);
-
-  assign a_wr = (rd_state == R_DATA) && m00_axi_rvalid && (cur_s == 2'd0);
-  assign b_wr = (rd_state == R_DATA) && m00_axi_rvalid && (cur_s == 2'd1);
-  assign c_wr = (rd_state == R_DATA) && m00_axi_rvalid && (cur_s == 2'd2);
+  endgenerate
 
   // ---- compute issue and collection ----------------------------------
   logic [63:0] issued_beats;
@@ -606,17 +886,17 @@ module cft_engine_stream #(
           w_cnt <= 8'd0;
           wr_state <= W_AW;
         end
-        W_AW: if (m00_axi_awready) begin
+        W_AW: if (m_axi_d_awready) begin
           wr_state <= W_DATA;
           // synthesis translate_off
-          $display("[CFT-ENGS] AW addr=0x%h len=%0d", m00_axi_awaddr, w_len);
+          $display("[CFT-ENGS] AW addr=0x%h len=%0d", m_axi_d_awaddr, w_len);
           // synthesis translate_on
         end
-        W_DATA: if (m00_axi_wvalid && m00_axi_wready) begin
+        W_DATA: if (m_axi_d_wvalid && m_axi_d_wready) begin
           w_cnt <= w_cnt + 8'd1;
           if (w_cnt + 8'd1 == w_len) wr_state <= W_B;
         end
-        W_B: if (m00_axi_bvalid) begin
+        W_B: if (m_axi_d_bvalid) begin
           wr_done <= wr_done + {56'd0, w_len};
           wr_state <= W_IDLE;
         end
@@ -625,16 +905,16 @@ module cft_engine_stream #(
     end
   end
 
-  assign m00_axi_awvalid = (wr_state == W_AW);
-  assign m00_axi_awaddr  = addr_w;
-  assign m00_axi_awlen   = w_len - 8'd1;
-  assign m00_axi_wvalid  = (wr_state == W_DATA) && (d_cnt != 0);
-  assign m00_axi_wdata   = d_qout;
-  assign m00_axi_wlast   = (w_cnt == w_len - 8'd1);
-  assign d_rd            = m00_axi_wvalid && m00_axi_wready;
-  assign m00_axi_bready  = (wr_state == W_B);
+  assign m_axi_d_awvalid = (wr_state == W_AW);
+  assign m_axi_d_awaddr  = addr_w;
+  assign m_axi_d_awlen   = w_len - 8'd1;
+  assign m_axi_d_wvalid  = (wr_state == W_DATA) && (d_cnt != 0);
+  assign m_axi_d_wdata   = d_qout;
+  assign m_axi_d_wlast   = (w_cnt == w_len - 8'd1);
+  assign d_rd            = m_axi_d_wvalid && m_axi_d_wready;
+  assign m_axi_d_bready  = (wr_state == W_B);
 
-  assign wfinish = (wr_state == W_B) && m00_axi_bvalid &&
+  assign wfinish = (wr_state == W_B) && m_axi_d_bvalid &&
                    ((wr_done + {56'd0, w_len}) == beats_total);
 
   // ---- sticky bus faults ---------------------------------------------
@@ -653,15 +933,16 @@ module cft_engine_stream #(
     end else if (start_accept) begin
       err_acc <= 3'b0;
     end else begin
-      if ((rd_state == R_DATA) && m00_axi_rvalid && (m00_axi_rresp != 2'b00))
+      // Every read master's verdict, not just the one that used to be
+      // shared. A DECERR on stream c is exactly as fatal as one on a.
+      if ((m_axi_a_rvalid && (m_axi_a_rresp != 2'b00)) ||
+          (m_axi_b_rvalid && (m_axi_b_rresp != 2'b00)) ||
+          (m_axi_c_rvalid && (m_axi_c_rresp != 2'b00)))
         err_acc[ERR_RRESP] <= 1'b1;
-      if ((wr_state == W_B) && m00_axi_bvalid && (m00_axi_bresp != 2'b00))
+      if ((wr_state == W_B) && m_axi_d_bvalid && (m_axi_d_bresp != 2'b00))
         err_acc[ERR_BRESP] <= 1'b1;
-      // RLAST must land on exactly the beat ARLEN asked for. A short
-      // burst would otherwise starve compute forever and a long one
-      // would overrun an unguarded FIFO - both silent hangs today.
-      if ((rd_state == R_DATA) && m00_axi_rvalid &&
-          (m00_axi_rlast != (r_beats == ar_len - 8'd1)))
+      // Raised per stream by the length queues in the reader generate.
+      if (|rlen_err)
         err_acc[ERR_RLEN] <= 1'b1;
     end
   end

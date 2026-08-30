@@ -51,7 +51,9 @@ set_property supported_families { } $core
 set_property auto_family_support_level level_2 $core
 ipx::create_xgui_files $core
 ipx::associate_bus_interfaces -busif s_axi_control -clock ap_clk $core
-ipx::associate_bus_interfaces -busif m00_axi -clock ap_clk $core
+foreach busif {m_axi_a m_axi_b m_axi_c m_axi_d} {
+  ipx::associate_bus_interfaces -busif $busif -clock ap_clk $core
+}
 ipx::update_checksums $core
 ipx::save_core $core
 close_project -delete

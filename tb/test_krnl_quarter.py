@@ -28,7 +28,10 @@ from cocotb.triggers import ClockCycles
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from cocotbext.axi import AxiBus, AxiLiteBus, AxiLiteMaster, AxiRam  # noqa: E402
+from cocotbext.axi import (  # noqa: E402
+    AxiLiteBus, AxiLiteMaster, AxiRamRead, AxiRamWrite,
+    AxiReadBus, AxiWriteBus,
+)
 
 from cft_golden import (  # noqa: E402
     FP32, FP64, OP_FMA, OP_ADD, OP_MUL, OP_MIN, OP_ISHR, OP_SELECT,
@@ -43,9 +46,21 @@ async def quarter_tile_end_to_end(dut):
     cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
     axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
                          dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
-    ram = AxiRam(AxiBus.from_prefix(dut, "m00_axi"),
-                 dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
-                 size=2 ** 20)
+    # Four masters, one shared memory - see test_krnl for why the
+    # sharing is what makes this bench able to fail.
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 20, mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 20, mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                size=2 ** 20, mem=ram_a.mem)
+    ram = ram_a
 
     dut.ap_rst_n.value = 0
     await ClockCycles(dut.ap_clk, 8)

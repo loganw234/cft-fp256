@@ -2,11 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // cft_krnl: Vitis RTL kernel top for the Coordinated Fusion Tile.
-// ap_ctrl_hs control protocol on s_axi_control, one 256-bit AXI4
-// master (m00_axi) into the HBM subsystem (256 = native HBM
-// pseudo-channel width; no width converter in fabric or emulation). Port names follow the
-// Vitis RTL kernel conventions so package_xo infers the interfaces;
-// hw/kernel.xml describes the argument map (which is cft_csr's).
+// ap_ctrl_hs control protocol on s_axi_control, and FOUR 256-bit
+// AXI4 masters into the HBM subsystem - one per operand stream
+// (m_axi_a/b/c read-only, m_axi_d write-only). 256 bits is the
+// native HBM pseudo-channel width, so there is no width converter
+// in fabric or emulation.
+//
+// One master per stream rather than one shared master because the
+// shared one was the throughput ceiling: four transfers per beat
+// through a port that retires one per cycle. See
+// cft_engine_stream's header for the full argument.
+//
+// Port names follow the Vitis RTL kernel conventions so package_xo
+// infers the interfaces; hw/kernel.xml describes the argument map
+// (which is cft_csr's).
 
 `timescale 1ns/1ps
 
@@ -45,44 +54,89 @@ module cft_krnl #(
     output logic         s_axi_control_rvalid,
     input  logic         s_axi_control_rready,
 
-    // AXI4 master to HBM
-    output logic [0:0]   m00_axi_awid,
-    output logic [63:0]  m00_axi_awaddr,
-    output logic [7:0]   m00_axi_awlen,
-    output logic [2:0]   m00_axi_awsize,
-    output logic [1:0]   m00_axi_awburst,
-    output logic         m00_axi_awlock,
-    output logic [3:0]   m00_axi_awcache,
-    output logic [2:0]   m00_axi_awprot,
-    output logic [3:0]   m00_axi_awqos,
-    output logic         m00_axi_awvalid,
-    input  logic         m00_axi_awready,
-    output logic [BEAT_BITS-1:0] m00_axi_wdata,
-    output logic [BEAT_BITS/8-1:0] m00_axi_wstrb,
-    output logic         m00_axi_wlast,
-    output logic         m00_axi_wvalid,
-    input  logic         m00_axi_wready,
-    input  logic [0:0]   m00_axi_bid,
-    input  logic [1:0]   m00_axi_bresp,
-    input  logic         m00_axi_bvalid,
-    output logic         m00_axi_bready,
-    output logic [0:0]   m00_axi_arid,
-    output logic [63:0]  m00_axi_araddr,
-    output logic [7:0]   m00_axi_arlen,
-    output logic [2:0]   m00_axi_arsize,
-    output logic [1:0]   m00_axi_arburst,
-    output logic         m00_axi_arlock,
-    output logic [3:0]   m00_axi_arcache,
-    output logic [2:0]   m00_axi_arprot,
-    output logic [3:0]   m00_axi_arqos,
-    output logic         m00_axi_arvalid,
-    input  logic         m00_axi_arready,
-    input  logic [0:0]   m00_axi_rid,
-    input  logic [BEAT_BITS-1:0] m00_axi_rdata,
-    input  logic [1:0]   m00_axi_rresp,
-    input  logic         m00_axi_rlast,
-    input  logic         m00_axi_rvalid,
-    output logic         m00_axi_rready
+    // AXI4 masters to HBM - one per stream. Generated from
+    // cft_engine_stream's port list by
+    // scratchpad/gen_krnl_ports.py; they are the same list by
+    // construction, so they are not maintained twice.
+
+    // a
+    output logic [0:0] m_axi_a_arid,
+    output logic [63:0] m_axi_a_araddr,
+    output logic [7:0] m_axi_a_arlen,
+    output logic [2:0] m_axi_a_arsize,
+    output logic [1:0] m_axi_a_arburst,
+    output logic m_axi_a_arlock,
+    output logic [3:0] m_axi_a_arcache,
+    output logic [2:0] m_axi_a_arprot,
+    output logic [3:0] m_axi_a_arqos,
+    output logic m_axi_a_arvalid,
+    input  logic m_axi_a_arready,
+    input  logic [0:0] m_axi_a_rid,
+    input  logic [BEAT_BITS-1:0] m_axi_a_rdata,
+    input  logic [1:0] m_axi_a_rresp,
+    input  logic m_axi_a_rlast,
+    input  logic m_axi_a_rvalid,
+    output logic m_axi_a_rready,
+
+    // b
+    output logic [0:0] m_axi_b_arid,
+    output logic [63:0] m_axi_b_araddr,
+    output logic [7:0] m_axi_b_arlen,
+    output logic [2:0] m_axi_b_arsize,
+    output logic [1:0] m_axi_b_arburst,
+    output logic m_axi_b_arlock,
+    output logic [3:0] m_axi_b_arcache,
+    output logic [2:0] m_axi_b_arprot,
+    output logic [3:0] m_axi_b_arqos,
+    output logic m_axi_b_arvalid,
+    input  logic m_axi_b_arready,
+    input  logic [0:0] m_axi_b_rid,
+    input  logic [BEAT_BITS-1:0] m_axi_b_rdata,
+    input  logic [1:0] m_axi_b_rresp,
+    input  logic m_axi_b_rlast,
+    input  logic m_axi_b_rvalid,
+    output logic m_axi_b_rready,
+
+    // c
+    output logic [0:0] m_axi_c_arid,
+    output logic [63:0] m_axi_c_araddr,
+    output logic [7:0] m_axi_c_arlen,
+    output logic [2:0] m_axi_c_arsize,
+    output logic [1:0] m_axi_c_arburst,
+    output logic m_axi_c_arlock,
+    output logic [3:0] m_axi_c_arcache,
+    output logic [2:0] m_axi_c_arprot,
+    output logic [3:0] m_axi_c_arqos,
+    output logic m_axi_c_arvalid,
+    input  logic m_axi_c_arready,
+    input  logic [0:0] m_axi_c_rid,
+    input  logic [BEAT_BITS-1:0] m_axi_c_rdata,
+    input  logic [1:0] m_axi_c_rresp,
+    input  logic m_axi_c_rlast,
+    input  logic m_axi_c_rvalid,
+    output logic m_axi_c_rready,
+
+    // d
+    output logic [0:0] m_axi_d_awid,
+    output logic [63:0] m_axi_d_awaddr,
+    output logic [7:0] m_axi_d_awlen,
+    output logic [2:0] m_axi_d_awsize,
+    output logic [1:0] m_axi_d_awburst,
+    output logic m_axi_d_awlock,
+    output logic [3:0] m_axi_d_awcache,
+    output logic [2:0] m_axi_d_awprot,
+    output logic [3:0] m_axi_d_awqos,
+    output logic m_axi_d_awvalid,
+    input  logic m_axi_d_awready,
+    output logic [BEAT_BITS-1:0] m_axi_d_wdata,
+    output logic [BEAT_BITS/8-1:0] m_axi_d_wstrb,
+    output logic m_axi_d_wlast,
+    output logic m_axi_d_wvalid,
+    input  logic m_axi_d_wready,
+    input  logic [0:0] m_axi_d_bid,
+    input  logic [1:0] m_axi_d_bresp,
+    input  logic m_axi_d_bvalid,
+    output logic m_axi_d_bready
 );
 
   logic        start, busy, done;
@@ -130,25 +184,30 @@ module cft_krnl #(
       .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
-      .m00_axi_awid(m00_axi_awid), .m00_axi_awaddr(m00_axi_awaddr),
-      .m00_axi_awlen(m00_axi_awlen), .m00_axi_awsize(m00_axi_awsize),
-      .m00_axi_awburst(m00_axi_awburst), .m00_axi_awlock(m00_axi_awlock),
-      .m00_axi_awcache(m00_axi_awcache), .m00_axi_awprot(m00_axi_awprot),
-      .m00_axi_awqos(m00_axi_awqos), .m00_axi_awvalid(m00_axi_awvalid),
-      .m00_axi_awready(m00_axi_awready), .m00_axi_wdata(m00_axi_wdata),
-      .m00_axi_wstrb(m00_axi_wstrb), .m00_axi_wlast(m00_axi_wlast),
-      .m00_axi_wvalid(m00_axi_wvalid), .m00_axi_wready(m00_axi_wready),
-      .m00_axi_bid(m00_axi_bid), .m00_axi_bresp(m00_axi_bresp),
-      .m00_axi_bvalid(m00_axi_bvalid), .m00_axi_bready(m00_axi_bready),
-      .m00_axi_arid(m00_axi_arid), .m00_axi_araddr(m00_axi_araddr),
-      .m00_axi_arlen(m00_axi_arlen), .m00_axi_arsize(m00_axi_arsize),
-      .m00_axi_arburst(m00_axi_arburst), .m00_axi_arlock(m00_axi_arlock),
-      .m00_axi_arcache(m00_axi_arcache), .m00_axi_arprot(m00_axi_arprot),
-      .m00_axi_arqos(m00_axi_arqos), .m00_axi_arvalid(m00_axi_arvalid),
-      .m00_axi_arready(m00_axi_arready), .m00_axi_rid(m00_axi_rid),
-      .m00_axi_rdata(m00_axi_rdata), .m00_axi_rresp(m00_axi_rresp),
-      .m00_axi_rlast(m00_axi_rlast), .m00_axi_rvalid(m00_axi_rvalid),
-      .m00_axi_rready(m00_axi_rready)
+      .m_axi_a_arid(m_axi_a_arid), .m_axi_a_araddr(m_axi_a_araddr), .m_axi_a_arlen(m_axi_a_arlen),
+      .m_axi_a_arsize(m_axi_a_arsize), .m_axi_a_arburst(m_axi_a_arburst), .m_axi_a_arlock(m_axi_a_arlock),
+      .m_axi_a_arcache(m_axi_a_arcache), .m_axi_a_arprot(m_axi_a_arprot), .m_axi_a_arqos(m_axi_a_arqos),
+      .m_axi_a_arvalid(m_axi_a_arvalid), .m_axi_a_arready(m_axi_a_arready), .m_axi_a_rid(m_axi_a_rid),
+      .m_axi_a_rdata(m_axi_a_rdata), .m_axi_a_rresp(m_axi_a_rresp), .m_axi_a_rlast(m_axi_a_rlast),
+      .m_axi_a_rvalid(m_axi_a_rvalid), .m_axi_a_rready(m_axi_a_rready), .m_axi_b_arid(m_axi_b_arid),
+      .m_axi_b_araddr(m_axi_b_araddr), .m_axi_b_arlen(m_axi_b_arlen), .m_axi_b_arsize(m_axi_b_arsize),
+      .m_axi_b_arburst(m_axi_b_arburst), .m_axi_b_arlock(m_axi_b_arlock), .m_axi_b_arcache(m_axi_b_arcache),
+      .m_axi_b_arprot(m_axi_b_arprot), .m_axi_b_arqos(m_axi_b_arqos), .m_axi_b_arvalid(m_axi_b_arvalid),
+      .m_axi_b_arready(m_axi_b_arready), .m_axi_b_rid(m_axi_b_rid), .m_axi_b_rdata(m_axi_b_rdata),
+      .m_axi_b_rresp(m_axi_b_rresp), .m_axi_b_rlast(m_axi_b_rlast), .m_axi_b_rvalid(m_axi_b_rvalid),
+      .m_axi_b_rready(m_axi_b_rready), .m_axi_c_arid(m_axi_c_arid), .m_axi_c_araddr(m_axi_c_araddr),
+      .m_axi_c_arlen(m_axi_c_arlen), .m_axi_c_arsize(m_axi_c_arsize), .m_axi_c_arburst(m_axi_c_arburst),
+      .m_axi_c_arlock(m_axi_c_arlock), .m_axi_c_arcache(m_axi_c_arcache), .m_axi_c_arprot(m_axi_c_arprot),
+      .m_axi_c_arqos(m_axi_c_arqos), .m_axi_c_arvalid(m_axi_c_arvalid), .m_axi_c_arready(m_axi_c_arready),
+      .m_axi_c_rid(m_axi_c_rid), .m_axi_c_rdata(m_axi_c_rdata), .m_axi_c_rresp(m_axi_c_rresp),
+      .m_axi_c_rlast(m_axi_c_rlast), .m_axi_c_rvalid(m_axi_c_rvalid), .m_axi_c_rready(m_axi_c_rready),
+      .m_axi_d_awid(m_axi_d_awid), .m_axi_d_awaddr(m_axi_d_awaddr), .m_axi_d_awlen(m_axi_d_awlen),
+      .m_axi_d_awsize(m_axi_d_awsize), .m_axi_d_awburst(m_axi_d_awburst), .m_axi_d_awlock(m_axi_d_awlock),
+      .m_axi_d_awcache(m_axi_d_awcache), .m_axi_d_awprot(m_axi_d_awprot), .m_axi_d_awqos(m_axi_d_awqos),
+      .m_axi_d_awvalid(m_axi_d_awvalid), .m_axi_d_awready(m_axi_d_awready), .m_axi_d_wdata(m_axi_d_wdata),
+      .m_axi_d_wstrb(m_axi_d_wstrb), .m_axi_d_wlast(m_axi_d_wlast), .m_axi_d_wvalid(m_axi_d_wvalid),
+      .m_axi_d_wready(m_axi_d_wready), .m_axi_d_bid(m_axi_d_bid), .m_axi_d_bresp(m_axi_d_bresp),
+      .m_axi_d_bvalid(m_axi_d_bvalid), .m_axi_d_bready(m_axi_d_bready)
   );
 
 endmodule

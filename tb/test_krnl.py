@@ -21,7 +21,10 @@ from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from cocotbext.axi import AxiBus, AxiLiteBus, AxiLiteMaster, AxiRam  # noqa: E402
+from cocotbext.axi import (  # noqa: E402
+    AxiLiteBus, AxiLiteMaster, AxiRamRead, AxiRamWrite,
+    AxiReadBus, AxiWriteBus,
+)
 
 from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE,
@@ -121,9 +124,35 @@ async def krnl_end_to_end(dut):
     cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
     axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
                          dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
-    ram = AxiRam(AxiBus.from_prefix(dut, "m00_axi"),
-                 dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
-                 size=2 ** 20)
+    # Four masters, ONE memory.
+    #
+    # The engine has a dedicated port per stream now, but a, b, c and d
+    # are regions of a single address space - the same HBM - so the four
+    # attachments must share a backing store. Give them separate ones
+    # and the test still passes for the wrong reason: each reader sees
+    # the operands the test wrote into its own private copy, and a
+    # genuine address-decode bug in the engine goes unnoticed because
+    # every stream reads from a memory where only its own data exists.
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20)
+    ram_b = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20, mem=ram_a.mem)
+    ram_c = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20, mem=ram_a.mem)
+    ram_d = AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                        dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                        size=2 ** 20, mem=ram_a.mem)
+    # Staging and readback both go through the shared store; which
+    # attachment is used to reach it does not matter, and naming one
+    # `ram` keeps run_op unchanged.
+    ram = ram_a
+    assert ram_b.mem is ram_a.mem and ram_c.mem is ram_a.mem \
+        and ram_d.mem is ram_a.mem, \
+        "the four masters must address one memory or this bench proves " \
+        "nothing about address decode"
 
     dut.ap_rst_n.value = 0
     await ClockCycles(dut.ap_clk, 8)

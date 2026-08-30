@@ -15,7 +15,17 @@
     <ports>
       <port name="s_axi_control" mode="slave" range="0x1000" dataWidth="32"
             portType="addressable" base="0x0"/>
-      <port name="m00_axi" mode="master" range="0xFFFFFFFFFFFFFFFF"
+      <!-- One master per operand stream. Each argument binds to its own
+           port, which is what lets hw/link.cfg give each stream its own
+           HBM pseudo-channel group - four masters on one group would
+           relocate the bottleneck rather than remove it. -->
+      <port name="m_axi_a" mode="master" range="0xFFFFFFFFFFFFFFFF"
+            dataWidth="256" portType="addressable" base="0x0"/>
+      <port name="m_axi_b" mode="master" range="0xFFFFFFFFFFFFFFFF"
+            dataWidth="256" portType="addressable" base="0x0"/>
+      <port name="m_axi_c" mode="master" range="0xFFFFFFFFFFFFFFFF"
+            dataWidth="256" portType="addressable" base="0x0"/>
+      <port name="m_axi_d" mode="master" range="0xFFFFFFFFFFFFFFFF"
             dataWidth="256" portType="addressable" base="0x0"/>
     </ports>
     <args>
@@ -25,16 +35,16 @@
       <arg name="n" addressQualifier="0" id="1" port="s_axi_control"
            size="0x8" offset="0x18" type="unsigned long long"
            hostOffset="0x0" hostSize="0x8"/>
-      <arg name="a" addressQualifier="1" id="2" port="m00_axi"
+      <arg name="a" addressQualifier="1" id="2" port="m_axi_a"
            size="0x8" offset="0x20" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
-      <arg name="b" addressQualifier="1" id="3" port="m00_axi"
+      <arg name="b" addressQualifier="1" id="3" port="m_axi_b"
            size="0x8" offset="0x28" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
-      <arg name="c" addressQualifier="1" id="4" port="m00_axi"
+      <arg name="c" addressQualifier="1" id="4" port="m_axi_c"
            size="0x8" offset="0x30" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
-      <arg name="d" addressQualifier="1" id="5" port="m00_axi"
+      <arg name="d" addressQualifier="1" id="5" port="m_axi_d"
            size="0x8" offset="0x38" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
     </args>

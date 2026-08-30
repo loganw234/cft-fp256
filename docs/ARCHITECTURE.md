@@ -246,21 +246,52 @@ hardware far more than it needs a transcendental.
 
 ## AXI behaviour (v1 streamer)
 
-Single ID, INCR bursts up to 16 beats (512 B), never crossing a 4KB
-boundary, full write strobes. One AR outstanding at a time, streams
-arbitrated a > b > c into 32-beat FIFOs; writes drain the result
-FIFO in full bursts (the tail is always fully buffered, so short
-final bursts need no special case). Read, compute and write overlap:
-steady state costs 4 transfers per beat on the one shared 256-bit
-port (3 reads + 1 write), so the engine is port-bound at ~5
-cycles/beat with burst-amortized latency - versus ~40 for the naive
-reference engine. At 100 MHz that is ~20M beats/s: ~160M fp32 FMA/s,
-~20M fp256 FMA/s, per tile.
+**Four masters, one per stream.** `m_axi_a`, `m_axi_b` and `m_axi_c`
+are read-only; `m_axi_d` is write-only. Vivado infers the direction
+from the channels present, so the interconnect never builds a write
+path for an operand stream - four half-duplex masters cost less than
+one full-duplex master would suggest.
 
-The remaining engine knobs - multiple outstanding ARs, per-stream
-HBM pseudo-channels, multiple CUs - are roadmap items; none change
-numerics. The naive engine remains in rtl/ as the auditable
-reference for the same CSR contract.
+Single ID per master, INCR bursts up to 16 beats (512 B), never
+crossing a 4KB boundary, full write strobes. Up to `AR_DEPTH` (4)
+bursts in flight per stream into 128-beat FIFOs; writes drain the
+result FIFO in full bursts (the tail is always fully buffered, so
+short final bursts need no special case).
+
+Both of those are the same fix. The design used to share one 256-bit
+port between three operand reads and one result write, and steady
+state costs 4 transfers per beat while a port retires one per cycle:
+~4.4 cycles/beat measured, however fast the arithmetic ran. The
+arithmetic pipe accepts a beat every cycle. Splitting the port is what
+lets it - but a dedicated port alone is not enough, because with a
+single outstanding AR the reader waits out the full memory latency
+after every RLAST, and a 16-beat burst followed by a ~60-cycle bubble
+is ~4.8 cycles/beat, which is where it started. Pipelining the ARs is
+what converts four ports into four times the throughput.
+
+FIFO space is reserved at AR time, not at R time. Two bursts in flight
+can together exceed the free space each looked at separately, and the
+overflow would corrupt operands rather than stall - so a per-stream
+`reserved` count tracks beats promised by in-flight ARs, and every
+free-space test subtracts it. That reservation is also what makes
+RREADY safe to tie high: the engine never asks for a beat it has
+nowhere to put.
+
+hw/link.cfg gives each master its own HBM pseudo-channel group, and
+the quad gives all sixteen their own. Four masters sharing one group
+would relocate the bottleneck rather than remove it.
+
+**Determinism is untouched, and the reason is worth stating because
+"four memory ports" sounds like it should matter.** It does not. The
+contract rests on the single compute issue point, which pops all three
+operand FIFOs together in index order, and on the single writer, which
+emits in index order. Neither changed. The streams may now run ahead of
+each other in the memory system by arbitrary amounts; compute still
+consumes beat i of all three before beat i+1 of any. Flags remain an
+order-free OR.
+
+The naive engine remains in rtl/ as the auditable reference for the
+same CSR contract.
 
 ## Timing (v1, measured)
 
