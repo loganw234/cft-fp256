@@ -18,7 +18,7 @@
  * before any hardware exists. The same binary is what to run on the
  * card, and the only thing that changes is which xclbin it is given.
  *
- * Three things are checked, in increasing order of what they can
+ * Four things are checked, in increasing order of what they can
  * catch:
  *
  *   1. every supported (format, opcode, attribute) agrees with
@@ -27,7 +27,16 @@
  *      answer as several calls over consecutive slices of it, which is
  *      what the library does internally across tiles;
  *   3. sizes that straddle a beat and a tile boundary, because that is
- *      where a slice arithmetic error lives.
+ *      where a slice arithmetic error lives;
+ *   4. reductions, which are the only path where element i of the
+ *      output does not come from element i of the input. That makes
+ *      them the only path where the number of elements is a real
+ *      operand rather than a loop bound, and the engine's beat count
+ *      was silently wrong for exactly that reason - a truncating
+ *      shift, correct for elementwise because the host pads, and
+ *      short by the tail for a reduction. n=1 fp32 computed zero
+ *      beats and returned having summed nothing. Every awkward n
+ *      below is there because of that bug.
  */
 
 #include <stdio.h>
@@ -71,6 +80,121 @@ static void fill(uint8_t *p, size_t n, size_t esz)
     size_t i;
     for (i = 0; i < n * esz; i++)
         p[i] = rbyte();
+}
+
+/* ---------------------------------------------------------------
+ * Finite operands, for the reductions
+ *
+ * fill() above draws from the whole encoding space, which is the right
+ * choice for elementwise: every case is independent, so a NaN in
+ * element 3 tests NaN handling in element 3 and nothing else.
+ *
+ * A reduction is not like that. One NaN anywhere poisons the single
+ * output, so every check after the first degenerates into "is it the
+ * same NaN". That is worth asking once - quiet-NaN payload propagation
+ * through a tree is a genuine determinism question - and useless as
+ * the only question, because it would hide every arithmetic and
+ * tree-shape bug behind a NaN that matches for the wrong reason.
+ *
+ * So reductions are run both ways: random bit patterns for propagation
+ * and payload rules, and ordinary normal numbers for the arithmetic.
+ * --------------------------------------------------------------- */
+struct fmt_layout { int total_bits, exp_bits; };
+
+/* 1 sign + exp + significand = total; fp256 is 1 + 19 + 236, giving
+ * the 237-bit significand the contract specifies. The same table as
+ * host/tools/cft_bench.c, and check_layout() below proves every row
+ * against the library rather than trusting that it was typed right -
+ * a wrong exponent width here would not crash, it would quietly
+ * generate operands that miss the case they were meant to cover. */
+static const struct fmt_layout LAYOUT[4] = {
+    {  32,  8 }, {  64, 11 }, { 128, 15 }, { 256, 19 }
+};
+
+static void put_bits(uint8_t *e, int lo, int nbits, uint64_t val)
+{
+    int i;
+    for (i = 0; i < nbits; i++) {
+        int b = lo + i;
+        uint8_t m = (uint8_t)(1u << (b & 7));
+        if ((val >> i) & 1u) e[b >> 3] |= m;
+        else                 e[b >> 3] = (uint8_t)(e[b >> 3] & ~m);
+    }
+}
+
+/* The bit pattern of 2^k for this format, k small. */
+static void make_pow2(uint8_t *e, cft_format fmt, int k)
+{
+    int total = LAYOUT[(int)fmt].total_bits;
+    int ebits = LAYOUT[(int)fmt].exp_bits;
+    int sbits = total - 1 - ebits;
+    uint64_t bias = ((uint64_t)1 << (ebits - 1)) - 1;
+
+    memset(e, 0, (size_t)total / 8);
+    put_bits(e, sbits, ebits, bias + (uint64_t)k);
+}
+
+/* Normal numbers with a full random significand and an exponent within
+ * +/-SPREAD of the bias. The spread is small on purpose: a sum of n of
+ * these stays finite, so the answer depends on alignment, cancellation
+ * and rounding rather than on how quickly it reached infinity. */
+#define SPREAD 3
+static void fill_finite(uint8_t *buf, cft_format fmt, size_t n)
+{
+    size_t sz = cft_format_size(fmt);
+    int total = LAYOUT[(int)fmt].total_bits;
+    int ebits = LAYOUT[(int)fmt].exp_bits;
+    int sbits = total - 1 - ebits;
+    uint64_t bias = ((uint64_t)1 << (ebits - 1)) - 1;
+    size_t i, j;
+
+    for (i = 0; i < n; i++) {
+        uint8_t *e = buf + i * sz;
+        for (j = 0; j < sz; j++)
+            e[j] = rbyte();
+        put_bits(e, sbits, ebits, bias + (rbyte() % (2 * SPREAD + 1)) - SPREAD);
+        put_bits(e, total - 1, 1, rbyte() & 1u);   /* both signs: cancel */
+    }
+}
+
+/* Prove LAYOUT, using the backend that has been replayed against the
+ * golden model. Build 1.0 and 2.0 from the table, then require
+ * 1.0 * 1.0 == 1.0 and 1.0 + 1.0 == 2.0. A wrong exponent width puts
+ * the field in the wrong place, so "1.0" is some other number and
+ * doubling it does not land on the pattern the table predicts for
+ * 2.0. Cheap, and it turns a transcribed constant into a checked one. */
+static void check_layout(cft_device *sw)
+{
+    uint8_t one[MAXE], two[MAXE], got[MAXE];
+    int f;
+
+    for (f = 0; f < 4; f++) {
+        cft_format fmt = (cft_format)f;
+        size_t esz = cft_format_size(fmt);
+
+        CHECK(LAYOUT[f].total_bits == (int)esz * 8,
+              "%s: LAYOUT says %d bits, the library says %d",
+              cft_format_name(fmt), LAYOUT[f].total_bits, (int)esz * 8);
+
+        make_pow2(one, fmt, 0);
+        make_pow2(two, fmt, 1);
+
+        memset(got, 0, sizeof got);
+        if (cft_run(sw, CFT_MUL, fmt, CFT_RNE, one, one, NULL, got, 1,
+                    NULL, NULL) != CFT_OK)
+            continue;
+        CHECK(memcmp(got, one, esz) == 0,
+              "%s: LAYOUT is wrong - the pattern it calls 1.0 is not "
+              "idempotent under multiplication", cft_format_name(fmt));
+
+        memset(got, 0, sizeof got);
+        if (cft_run(sw, CFT_ADD, fmt, CFT_RNE, one, one, NULL, got, 1,
+                    NULL, NULL) != CFT_OK)
+            continue;
+        CHECK(memcmp(got, two, esz) == 0,
+              "%s: LAYOUT is wrong - 1.0 + 1.0 is not the pattern it "
+              "calls 2.0", cft_format_name(fmt));
+    }
 }
 
 static void hex(const uint8_t *p, size_t esz, char *out)
@@ -233,6 +357,105 @@ static void compare_partitioned(cft_device *hw, cft_format fmt, cft_op op,
     free_buffers(&B);
 }
 
+/* One reduction, both backends. The output is ONE element however
+ * large n is, which is the whole reason cft_reduce is a separate entry
+ * point, and the reason this cannot reuse compare() above.
+ *
+ * `finite` picks the operand distribution - see fill_finite. b is
+ * passed as NULL for CFT_SUM, because the header says it may be and a
+ * device path that dereferences it anyway should fail here rather than
+ * on the card. */
+static void compare_reduce(cft_device *sw, cft_device *hw, cft_format fmt,
+                           cft_op op, cft_round rnd, size_t n,
+                           uint32_t seed, int finite)
+{
+    size_t esz = cft_format_size(fmt);
+    size_t bytes = (n ? n : 1) * esz;      /* malloc(0) may return NULL */
+    uint32_t fsw = 0, fhw = 0, bus = 0;
+    uint8_t *a = malloc(bytes), *b = malloc(bytes);
+    uint8_t dsw[MAXE], dhw[MAXE];
+    cft_status ssw, shw;
+    const char *kind = finite ? "finite" : "any-bits";
+
+    if (!a || !b) {
+        printf("  FAIL: out of memory\n");
+        failures++;
+        free(a); free(b);
+        return;
+    }
+    rs = seed ? seed : 1;
+    if (finite) {
+        fill_finite(a, fmt, n);
+        fill_finite(b, fmt, n);
+    } else {
+        fill(a, n, esz);
+        fill(b, n, esz);
+    }
+    memset(dsw, 0, sizeof dsw);
+    memset(dhw, 0, sizeof dhw);
+
+    ssw = cft_reduce(sw, op, fmt, rnd, a, op == CFT_SUM ? NULL : b,
+                     dsw, n, &fsw, NULL);
+    shw = cft_reduce(hw, op, fmt, rnd, a, op == CFT_SUM ? NULL : b,
+                     dhw, n, &fhw, &bus);
+
+    CHECK(ssw == CFT_OK, "software %s %s n=%lu: %s", cft_format_name(fmt),
+          cft_op_name(op), (unsigned long)n, cft_strerror(ssw));
+    CHECK(shw == CFT_OK, "device %s %s n=%lu: %s (bus 0x%x) %s",
+          cft_format_name(fmt), cft_op_name(op), (unsigned long)n,
+          cft_strerror(shw), (unsigned)bus, cft_last_error());
+
+    if (ssw == CFT_OK && shw == CFT_OK) {
+        char h1[2 * MAXE + 1], h2[2 * MAXE + 1];
+        checks++;
+        if (memcmp(dsw, dhw, esz) != 0) {
+            hex(dsw, esz, h1);
+            hex(dhw, esz, h2);
+            printf("  FAIL: %s %s %s n=%lu rnd=%d\n"
+                   "        software %s\n        device   %s\n",
+                   cft_format_name(fmt), cft_op_name(op), kind,
+                   (unsigned long)n, (int)rnd, h1, h2);
+            failures++;
+        }
+        CHECK(fsw == fhw, "%s %s %s n=%lu flags: software 0x%02x, "
+              "device 0x%02x", cft_format_name(fmt), cft_op_name(op),
+              kind, (unsigned long)n, (unsigned)fsw, (unsigned)fhw);
+    }
+    free(a);
+    free(b);
+}
+
+/* CFT_SUM must ignore b entirely. Cheap to promise, easy to break the
+ * day someone reuses the b stream for something, and a device that got
+ * this wrong would disagree with software only for callers who passed
+ * a non-NULL b - which is to say, not in any other test here. */
+static void check_sum_ignores_b(cft_device *hw, cft_format fmt, size_t n,
+                                uint32_t seed)
+{
+    size_t esz = cft_format_size(fmt);
+    uint8_t *a = malloc(n * esz), *b = malloc(n * esz);
+    uint8_t d_null[MAXE], d_b[MAXE];
+    uint32_t f1 = 0, f2 = 0;
+
+    if (!a || !b) { free(a); free(b); return; }
+    rs = seed ? seed : 1;
+    fill_finite(a, fmt, n);
+    fill_finite(b, fmt, n);
+    memset(d_null, 0, sizeof d_null);
+    memset(d_b, 0, sizeof d_b);
+
+    if (cft_reduce(hw, CFT_SUM, fmt, CFT_RNE, a, NULL, d_null, n, &f1, NULL)
+            == CFT_OK &&
+        cft_reduce(hw, CFT_SUM, fmt, CFT_RNE, a, b, d_b, n, &f2, NULL)
+            == CFT_OK) {
+        CHECK(memcmp(d_null, d_b, esz) == 0 && f1 == f2,
+              "%s CFT_SUM n=%lu: passing b changed the answer",
+              cft_format_name(fmt), (unsigned long)n);
+    }
+    free(a);
+    free(b);
+}
+
 int main(int argc, char **argv)
 {
     static const cft_op ops[] = {CFT_FMA, CFT_ADD, CFT_SUB, CFT_MUL,
@@ -247,6 +470,7 @@ int main(int argc, char **argv)
     size_t n = 256;
     int only_fmt = -1;      /* -1 = every format the device carries */
     int quick = 0;          /* one opcode, one attribute */
+    int only_reduce = 0;    /* skip elementwise; reductions are slow enough */
     int f, o, r, argi;
 
     /* Emulation is orders of magnitude slower than silicon, so the
@@ -256,6 +480,8 @@ int main(int argc, char **argv)
     for (argi = 1; argi < argc; argi++) {
         if (!strcmp(argv[argi], "-q")) {
             quick = 1;
+        } else if (!strcmp(argv[argi], "-r")) {
+            only_reduce = 1;
         } else if (!strcmp(argv[argi], "-n") && argi + 1 < argc) {
             n = (size_t)strtoul(argv[++argi], NULL, 10);
         } else if (!strcmp(argv[argi], "-f") && argi + 1 < argc) {
@@ -272,7 +498,8 @@ int main(int argc, char **argv)
             artifact = argv[argi];
         } else {
             fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
-                            "[-f fp32|fp64|fp128|fp256] [-q]\n", argv[0]);
+                            "[-f fp32|fp64|fp128|fp256] [-q] [-r]\n",
+                    argv[0]);
             return 2;
         }
     }
@@ -288,7 +515,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "software backend: %s\n", cft_strerror(st));
         return 2;
     }
-    st = cft_open(argv[1], 0, &hw);
+    /* "sw" opens the software backend as the device under test. Both
+     * sides are then the same code, so every comparison passes by
+     * construction - which is the point: it exercises this program on
+     * a machine with no XRT and no artifact, so a bug in the harness
+     * is found before an hour of emulation is spent finding it. Inject
+     * a fault into the library and this mode is what shows the checks
+     * can fail at all. */
+    st = cft_open(strcmp(argv[1], "sw") ? argv[1] : NULL, 0, &hw);
     if (st != CFT_OK) {
         fprintf(stderr, "device %s: %s\n  %s\n", argv[1], cft_strerror(st),
                 cft_last_error());
@@ -312,9 +546,13 @@ int main(int argc, char **argv)
     printf("comparing %lu elements per case against the software "
            "backend\n", (unsigned long)n);
 
+    check_layout(sw);
+
     for (f = 0; f < 4; f++) {
         cft_format fmt = (cft_format)f;
-        int nops = quick ? 1 : (int)(sizeof ops / sizeof ops[0]);
+        int nops = only_reduce ? 0
+                 : quick      ? 1
+                 : (int)(sizeof ops / sizeof ops[0]);
         int nrnd = quick ? 1 : (int)(sizeof rnds / sizeof rnds[0]);
 
         if (only_fmt >= 0 && f != only_fmt)
@@ -341,7 +579,7 @@ int main(int argc, char **argv)
         /* Sizes chosen to straddle the awkward boundaries: one
          * element, one beat, one more than a beat, an odd count that
          * cannot divide evenly across four tiles, and a prime. */
-        {
+        if (!only_reduce) {
             static const size_t odd[] = {1, 2, 3, 7, 8, 9, 31, 32, 33, 37};
             static const size_t cuts[] = {1, 2, 5, 8, 16, 64, 1024};
             size_t i, nodd = quick ? 6 : sizeof odd / sizeof odd[0];
@@ -357,6 +595,74 @@ int main(int argc, char **argv)
             printf("  partition invariance done: %d checks, %d failed\n",
                    checks, failures);
             fflush(stdout);
+        }
+
+        /* Reductions.
+         *
+         * The n list is the interesting part. A reduction is handed
+         * the true element count rather than a padded one, so every
+         * value here that is not a whole number of beats is a case the
+         * elementwise path never generates: 1, 3, 5, 7 and 9 are all
+         * partial beats in at least one format, and n=1 is the exact
+         * case the truncating shift returned nothing for.
+         *
+         * Powers of two are in the list for the opposite reason. The
+         * tree splits at the largest power of two below the range, and
+         * that agrees with the floor midpoint only when n is a power
+         * of two - so 2, 4, 8, 16 are the sizes where a wrong split
+         * would still produce the right answer, and 3, 5, 7, 9 are the
+         * sizes where it could not.
+         *
+         * 0 is there because the contract says so: +0.0, nothing
+         * raised, and both backends have to agree about it. */
+        if (cft_supports(hw, CFT_SUM, fmt)) {
+            static const size_t rn[] = {0, 1, 2, 3, 4, 5, 7, 8, 9,
+                                        15, 16, 17, 31, 33, 37, 64};
+            size_t i, nrn = quick ? 9 : sizeof rn / sizeof rn[0];
+
+            printf("  reductions\n");
+            fflush(stdout);
+            for (i = 0; i < nrn; i++)
+                compare_reduce(sw, hw, fmt, CFT_SUM, CFT_RNE, rn[i],
+                               0x5000000u + (uint32_t)(f * 50 + i), 1);
+            printf("    sum, finite operands: %d checks, %d failed\n",
+                   checks, failures);
+            fflush(stdout);
+
+            /* Once with the whole encoding space, so quiet-NaN payload
+             * and infinity propagation through the tree are checked
+             * too - see fill_finite for why this is not the default. */
+            compare_reduce(sw, hw, fmt, CFT_SUM, CFT_RNE, quick ? 9 : 37,
+                           0x5aa0000u + (uint32_t)f, 0);
+            printf("    sum, any bit pattern: %d checks, %d failed\n",
+                   checks, failures);
+            fflush(stdout);
+
+            if (!quick) {
+                for (r = 0; r < (int)(sizeof rnds / sizeof rnds[0]); r++)
+                    compare_reduce(sw, hw, fmt, CFT_SUM, rnds[r], 37,
+                                   0x5bb0000u + (uint32_t)(f * 10 + r), 1);
+                printf("    sum, all five attributes: %d checks, %d "
+                       "failed\n", checks, failures);
+                fflush(stdout);
+                check_sum_ignores_b(hw, fmt, 37, 0x5cc0000u + (uint32_t)f);
+            }
+
+            /* CFT_DOT is not separate hardware - the library issues a
+             * MUL and then a SUM, because the contract makes
+             * dot(a,b) == sum(mul(a,b)) exact. That composition is
+             * precisely what this checks: two device round trips
+             * against one software call. */
+            if (cft_supports(hw, CFT_DOT, fmt)) {
+                for (i = 0; i < (quick ? 4u : 8u) && i < nrn; i++)
+                    compare_reduce(sw, hw, fmt, CFT_DOT, CFT_RNE, rn[i],
+                                   0xd0700000u + (uint32_t)(f * 50 + i), 1);
+                printf("    dot: %d checks, %d failed\n", checks, failures);
+                fflush(stdout);
+            }
+        } else if (only_reduce) {
+            printf("  no reduction opcode group on this device "
+                   "(CAPS says so) - nothing to check\n");
         }
     }
 

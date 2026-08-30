@@ -365,15 +365,24 @@ CFT_API cft_status cft_run(cft_device *dev,
  *
  * b is unused by CFT_SUM and may be NULL.
  *
- * THE TREE SHAPE IS PART OF THE CONTRACT. Results are the balanced
- * binary tree over the index range, split at the floor midpoint,
- * evaluated with the given rounding attribute at every node - never a
- * sequential accumulation, never reassociated, never padded to a power
- * of two. Two conforming implementations therefore return the same
- * bits, and a reduction split across four tiles returns what one tile
- * returns. python/cft_golden/reduce.py is the definition; that shape
- * is why a float reduction can be part of a determinism contract at
- * all.
+ * THE TREE SHAPE IS PART OF THE CONTRACT. Results are the fixed
+ * binary tree over the index range, evaluated with the given rounding
+ * attribute at every node - never a sequential accumulation, never
+ * reassociated, never padded to a power of two.
+ *
+ * A node splits so that its LEFT child is the largest power of two
+ * strictly smaller than the range: T(0,5) is add(T(0,4), a[4]). Not
+ * the floor midpoint, which is the tidier-looking balanced tree and
+ * was the first version of this. The two agree only when n is a power
+ * of two, and this one is the shape a streaming binary-counter
+ * accumulator produces - which is what the hardware is. Depth is
+ * ceil(log2 n) either way, so the accuracy argument for pairwise
+ * summation is the same for both.
+ *
+ * Two conforming implementations therefore return the same bits, and
+ * a reduction split across four tiles returns what one tile returns.
+ * python/cft_golden/reduce.py is the definition; that shape is why a
+ * float reduction can be part of a determinism contract at all.
  *
  * Consequences worth knowing before they surprise you:
  *   n == 0 gives +0.0 and raises nothing.
