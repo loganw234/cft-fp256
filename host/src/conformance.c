@@ -30,6 +30,24 @@
 #define LINE_MAX   4096
 #define TOKEN_MAX  128
 
+/* One parsed case, held so a set can be replayed twice: once an
+ * element at a time, and once as arrays.
+ *
+ * Both passes are needed and they catch different things. Element at a
+ * time is the only way to check a case's exception flags exactly,
+ * because flags are sticky and a batch reports their OR. But a device
+ * backend splits an array across compute units, and a replay that only
+ * ever passes n=1 drives one beat on one tile - so every partitioning
+ * bug there is, up to and including "tiles 2 to 4 are never used", is
+ * invisible to it. A set that is the published acceptance test for a
+ * new backend should not be structurally incapable of failing on the
+ * backend's hardest code. */
+typedef struct {
+    int      op;
+    uint8_t  a[MAX_ELEM], b[MAX_ELEM], c[MAX_ELEM], d[MAX_ELEM];
+    uint32_t flags;
+} cft_case;
+
 /* ---- a scanner for this one schema ------------------------------ *
  *
  * Not a JSON parser. The generator emits a flat object with known
@@ -193,6 +211,108 @@ static void rep_add(rep *r, const char *fmt, ...)
     }
 }
 
+/* ---- the array pass ----------------------------------------------- *
+ *
+ * Replay a whole set again as arrays, one cft_run per opcode. On the
+ * software backend this proves the element loop; on a device backend
+ * it is the only thing here that splits work across compute units, and
+ * so the only thing that can catch a slice boundary that is off by
+ * one, a tile that is never given work, or a result written to the
+ * wrong offset.
+ *
+ * Flags are checked as the OR over the batch, which is what a sticky
+ * word means for an array. The per-element pass has already pinned
+ * each case's flags exactly, so between them nothing is unchecked. */
+static cft_status array_pass(cft_device *dev, int fi, int rnd, int esz,
+                             const cft_case *cases, size_t ncases,
+                             const char *path, rep *r,
+                             const char *const *rnames)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    uint8_t *a = NULL, *b = NULL, *c = NULL, *got = NULL;
+    cft_status ret = CFT_OK;
+    int op;
+
+    if (ncases == 0)
+        return CFT_OK;
+    a   = (uint8_t *)malloc(ncases * (size_t)esz);
+    b   = (uint8_t *)malloc(ncases * (size_t)esz);
+    c   = (uint8_t *)malloc(ncases * (size_t)esz);
+    got = (uint8_t *)malloc(ncases * (size_t)esz);
+    if (!a || !b || !c || !got) {
+        free(a); free(b); free(c); free(got);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+
+    for (op = 0; op < 256 && ret == CFT_OK; op++) {
+        size_t k = 0, i, batch;
+        uint32_t want_flags = 0, got_flags = 0;
+        cft_status st;
+
+        for (i = 0; i < ncases; i++) {
+            if (cases[i].op != op)
+                continue;
+            memcpy(a + k * (size_t)esz, cases[i].a, (size_t)esz);
+            memcpy(b + k * (size_t)esz, cases[i].b, (size_t)esz);
+            memcpy(c + k * (size_t)esz, cases[i].c, (size_t)esz);
+            want_flags |= cases[i].flags;
+            k++;
+        }
+        if (k == 0)
+            continue;
+        batch = k;
+
+        memset(got, 0, k * (size_t)esz);
+        st = cft_run(dev, (cft_op)op, (cft_format)fi, (cft_round)rnd,
+                     a, b, c, got, k, &got_flags, NULL);
+        if (st != CFT_OK) {
+            rep_add(r, "%s: array pass, %s x%lu: cft_run failed: %s\n",
+                    path, cft_op_name((cft_op)op), (unsigned long)k,
+                    cft_strerror(st));
+            ret = st;
+            break;
+        }
+
+        k = 0;
+        for (i = 0; i < ncases && ret == CFT_OK; i++) {
+            if (cases[i].op != op)
+                continue;
+            if (memcmp(got + k * (size_t)esz, cases[i].d, (size_t)esz) != 0) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                format_hex_elem(cases[i].d, esz, hw);
+                format_hex_elem(got + k * (size_t)esz, esz, hg);
+                r->used = 0;
+                if (r->buf && r->size)
+                    r->buf[0] = '\0';
+                rep_add(r, "%s: ARRAY PASS element %lu of %lu (%s %s %s)\n"
+                           "  expected %s\n  got      %s\n"
+                           "  the same case passes one element at a time, "
+                           "so this is the array path - partitioning, "
+                           "padding, or a slice offset\n",
+                        path, (unsigned long)k, (unsigned long)batch,
+                        f->name, cft_op_name((cft_op)op), rnames[rnd],
+                        hw, hg);
+                ret = CFT_ERR_INTERNAL;
+            }
+            k++;
+        }
+        if (ret == CFT_OK && got_flags != want_flags) {
+            r->used = 0;
+            if (r->buf && r->size)
+                r->buf[0] = '\0';
+            rep_add(r, "%s: ARRAY PASS flags for %s %s over %lu elements: "
+                       "got 0x%02x, expected the OR of the cases 0x%02x\n",
+                    path, cft_op_name((cft_op)op), rnames[rnd],
+                    (unsigned long)batch, (unsigned)got_flags,
+                    (unsigned)want_flags);
+            ret = CFT_ERR_INTERNAL;
+        }
+    }
+
+    free(a); free(b); free(c); free(got);
+    return ret;
+}
+
 /* ---- the replay --------------------------------------------------- */
 
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
@@ -226,6 +346,9 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
             char path[512], line[LINE_MAX];
             FILE *fp;
             unsigned long lineno = 0;
+            cft_case *cases = NULL;
+            size_t ncases = 0, ccap = 0;
+            cft_status arr;
 
             if (ri == 0)
                 snprintf(path, sizeof path, "%s/%s.jsonl", dir, f->name);
@@ -336,10 +459,41 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                             hw, (unsigned)want_flags, hg, (unsigned)got_flags);
                     if (cases_checked)
                         *cases_checked = total;
+                    free(cases);
                     return CFT_ERR_INTERNAL;
                 }
+
+                if (ncases == ccap) {
+                    size_t want = ccap ? ccap * 2 : 4096;
+                    cft_case *bigger = (cft_case *)realloc(
+                        cases, want * sizeof *cases);
+                    if (!bigger) {
+                        fclose(fp);
+                        free(cases);
+                        rep_add(&r, "out of memory holding %s\n", path);
+                        return CFT_ERR_OUT_OF_MEMORY;
+                    }
+                    cases = bigger;
+                    ccap = want;
+                }
+                cases[ncases].op = op;
+                cases[ncases].flags = want_flags;
+                memcpy(cases[ncases].a, ea, (size_t)esz);
+                memcpy(cases[ncases].b, eb, (size_t)esz);
+                memcpy(cases[ncases].c, ec, (size_t)esz);
+                memcpy(cases[ncases].d, want_d, (size_t)esz);
+                ncases++;
             }
             fclose(fp);
+
+            arr = array_pass(dev, fi, ri, esz, cases, ncases, path, &r,
+                             rnames);
+            free(cases);
+            if (arr != CFT_OK) {
+                if (cases_checked)
+                    *cases_checked = total;
+                return arr;
+            }
         }
     }
 
@@ -350,7 +504,10 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 dir);
         return CFT_ERR_ARTIFACT;
     }
-    rep_add(&r, "%d set%s, %lu cases, all matching\n",
+    rep_add(&r, "%d set%s, %lu cases, all matching "
+                "(each replayed twice: one element at a time for exact "
+                "flags, then as arrays so a device backend's "
+                "partitioning is exercised)\n",
             sets, sets == 1 ? "" : "s", (unsigned long)total);
     return CFT_OK;
 }
