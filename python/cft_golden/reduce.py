@@ -12,24 +12,55 @@ That sentence is the whole design. Everything below is what it forces.
 
 THE TREE
 
-The shape is a balanced binary tree over the half-open index range,
-split at the midpoint:
+The shape is a binary tree over the half-open index range, split at the
+largest power of two strictly inside it:
 
-    T(lo, hi) = xs[lo]                            if hi - lo == 1
-              = add(T(lo, mid), T(mid, hi))       mid = lo + (hi-lo)//2
+    T(lo, hi) = xs[lo]                        if hi - lo == 1
+              = add(T(lo, mid), T(mid, hi))   mid = lo + 2**floor(log2(hi-lo-1))
 
 One function, `split`, is the only place the shape is written down.
 Anything that needs to agree about the tree - the software backend, the
-sequencer, a future RTL walker, a host partitioning across tiles - calls
-it rather than re-deriving it, because a reduction where two
-implementations disagree about the shape is not a reduction, it is two
-different answers with the same name.
+sequencer, the RTL, a host partitioning across tiles - calls it rather
+than re-deriving it, because a reduction where two implementations
+disagree about the shape is not a reduction, it is two answers with the
+same name.
 
-Depth is ceil(log2 n), which is also why the accuracy is better than a
-sequential accumulation. That is a happy side effect and NOT the reason:
-the reason is that the shape is a pure function of the index range, so
-it cannot vary with how many tiles ran, how fast they were, or which
+WHY THE POWER OF TWO AND NOT THE MIDPOINT
+
+The first version of this split at the midpoint, which is the obvious
+balanced tree. It is a perfectly good tree and it is index-fixed, so it
+satisfied the contract. It is also not streamable, and that turned out
+to matter more.
+
+The natural hardware for a reduction is a binary-counter accumulator
+stack: hold a partial result per level, add each arriving element into
+level 0, and carry upward whenever a level is already occupied. One add
+per element, ceil(log2 n) registers, no index arithmetic at all. That
+machine produces the power-of-two split exactly - and produces the
+midpoint split only when n happens to be a power of two. At n = 3, 5,
+6, 7, 9, 11 the two disagree.
+
+So the choice was between a tree the hardware wants and a tree that
+merely looks tidier, made before any hardware existed. `stream_reduce`
+below is the accumulator algorithm written out, and a test asserts it
+agrees with the recursive definition for every n up to several hundred.
+That function is the RTL's specification.
+
+Depth is still ceil(log2 n), so the accuracy argument is unchanged -
+this is textbook pairwise summation, with error growing as log n rather
+than n. That is a happy side effect and NOT the reason for the shape:
+the reason is that it is a pure function of the index range, so it
+cannot vary with how many tiles ran, how fast they were, or which
 finished first.
+
+The final combine is the part that is easy to get wrong. Leftover
+accumulator levels are folded LOWEST FIRST, right-associating outward,
+so the largest (and lowest-indexed) subtree ends up outermost:
+
+    r = acc[j0]; then r = add(acc[j], r) for each higher occupied j
+
+Folding the other way is also a fixed shape, and also wrong - it is not
+the tree this file defines, and it disagrees at n = 7.
 
 WHY THERE IS NO PADDING
 
@@ -92,7 +123,7 @@ from .softfloat import (
 __all__ = [
     "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
     "split", "tree_adds", "canonical_ranges",
-    "reduce_bits", "fsum", "fdot", "combine",
+    "reduce_bits", "fsum", "fdot", "combine", "stream_reduce",
 ]
 
 # Opcodes. docs/DETERMINISM.md reserves 15 and everything from 24 up,
@@ -110,15 +141,18 @@ REDUCE_OP_NAMES = {OP_SUM: "sum", OP_DOT: "dot"}
 
 
 def split(lo: int, hi: int) -> int:
-    """The midpoint of a tree node. The one definition of the shape.
+    """Where a tree node divides. The one definition of the shape.
 
-    Floor division, so an odd range puts the extra element on the RIGHT:
-    T(0,3) is add(xs[0], add(xs[1], xs[2])). Either convention would be
-    deterministic; this one is written down so both sides pick the same.
+    The largest power of two strictly less than the range length, so the
+    LEFT child is always a perfect subtree and the right child carries
+    the remainder: T(0,5) is add(T(0,4), xs[4]). That is what makes the
+    tree equal to a streaming binary-counter accumulation - see the
+    module docstring and `stream_reduce`.
     """
-    if hi - lo < 2:
+    n = hi - lo
+    if n < 2:
         raise ValueError("split() needs a range of at least two elements")
-    return lo + (hi - lo) // 2
+    return lo + (1 << ((n - 1).bit_length() - 1))
 
 
 def tree_adds(n: int):
@@ -195,6 +229,53 @@ def reduce_bits(fmt: FpFormat, xs, rnd: int = RND_RNE, lo: int = 0, hi=None):
     ra, rf = reduce_bits(fmt, xs, rnd, mid, hi)
     s, sf = _add(fmt, la, ra, rnd)
     return s, lf | rf | sf
+
+
+def stream_reduce(fmt: FpFormat, xs, rnd: int = RND_RNE):
+    """The same tree, computed the way hardware will compute it.
+
+    A binary-counter stack of accumulators. Element i goes into level 0;
+    whenever a level is already occupied its contents (the LOWER indices)
+    are added to the incoming value and the sum carries up a level, the
+    same way a ripple counter carries. At the end the occupied levels are
+    folded lowest first, right-associating outward.
+
+    Properties the RTL inherits from this and needs:
+
+      - one add per element, in index order, no lookahead
+      - ceil(log2 n) accumulator registers plus their occupancy bits;
+        64 levels covers any n a 64-bit count can express
+      - n is not needed in advance. The stack does not care how long the
+        stream is, which means a tile can start reducing before the host
+        has told it how much there is - and it means the same machine
+        handles every n with no special cases for the tail.
+
+    Returns (bits, flags), identical to reduce_bits for every input.
+    test_stream_matches_recursive is what holds that to be true.
+    """
+    _check_mode(rnd)
+    xs = list(xs)
+    if not xs:
+        return zero_bits(fmt, 0), 0
+
+    acc = {}                 # level -> partial result
+    flags = 0
+    for x in xs:
+        v, j = x, 0
+        while j in acc:
+            v, f = _add(fmt, acc.pop(j), v, rnd)   # acc[j] is the lower half
+            flags |= f
+            j += 1
+        acc[j] = v
+
+    r = None
+    for j in sorted(acc):
+        if r is None:
+            r = acc[j]
+        else:
+            r, f = _add(fmt, acc[j], r, rnd)
+            flags |= f
+    return r, flags
 
 
 def combine(fmt: FpFormat, partials, rnd: int = RND_RNE):

@@ -24,11 +24,12 @@ from cft_golden import (
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_MODES,
     FLAG_INVALID, FLAG_INEXACT,
     add, mul, zero_bits, one_bits, inf_bits, qnan_bits, snan_bits,
-    negate, is_nan,
+    negate, is_nan, vectors,
 )
 from cft_golden.reduce import (
     OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
+    stream_reduce,
 )
 
 ALL_FORMATS = (FP32, FP64, FP128, FP256)
@@ -64,14 +65,107 @@ def seq_sum(fmt, xs, rnd=RND_RNE):
 # ---------------------------------------------------------------
 # the shape
 # ---------------------------------------------------------------
-def test_split_is_floor_midpoint():
+def test_split_is_the_largest_power_of_two_inside():
+    """The left child is always a perfect subtree; the remainder goes
+    right. This is what makes the tree a streaming accumulation."""
     assert split(0, 2) == 1
-    assert split(0, 3) == 1        # extra element goes RIGHT
+    assert split(0, 3) == 2        # T(0,3) = add(add(x0,x1), x2)
     assert split(0, 4) == 2
-    assert split(0, 5) == 2
-    assert split(3, 10) == 6
+    assert split(0, 5) == 4        # T(0,5) = add(T(0,4), x4)
+    assert split(0, 7) == 4
+    assert split(0, 8) == 4
+    assert split(0, 9) == 8
+    assert split(3, 10) == 3 + 4   # offsets do not change the rule
     with pytest.raises(ValueError):
         split(0, 1)
+
+
+@pytest.mark.parametrize("fmt", ALL_FORMATS)
+def test_stream_matches_recursive(fmt):
+    """The accumulator algorithm IS the tree.
+
+    stream_reduce is the RTL's specification: one add per element in
+    index order, ceil(log2 n) accumulator levels, carry when a level is
+    occupied, then fold the leftovers lowest-first. If it ever stops
+    agreeing with the recursive definition, the hardware and the
+    contract have parted company and this is where that shows.
+    """
+    rng = random.Random(31337)
+    for n in list(range(0, 40)) + [64, 65, 100, 127, 128, 129, 255, 300]:
+        xs = [rand_finite(fmt, rng, spread=20) for _ in range(n)]
+        for rnd in RND_MODES:
+            assert stream_reduce(fmt, xs, rnd) == reduce_bits(fmt, xs, rnd), \
+                f"{fmt.name} n={n} rnd={rnd}: streaming and recursive differ"
+
+
+@pytest.mark.parametrize("fmt", ALL_FORMATS)
+def test_add_is_commutative_so_operand_order_is_free(fmt):
+    """add(a,b) == add(b,a), bit for bit, in every attribute.
+
+    This lives here rather than with the softfloat tests because it is
+    what the reduction hardware leans on. The accumulator pairs values
+    by index but is free to present a pair to the adder in either order,
+    which removes a whole class of thing that could otherwise go wrong
+    in the RTL - and it means an injected "swap the operands" bug is a
+    genuine no-op rather than a missed defect.
+
+    It holds because this design has no order-dependent add: magnitude
+    is symmetric, the sign of an exact cancellation is set by the
+    rounding attribute (754-2019 6.3) and not by which operand came
+    first, and NaN results are always the canonical quiet NaN rather
+    than a propagated payload. Change any of those three and this test
+    is where it shows.
+    """
+    rng = random.Random(11)
+    pool = vectors.interesting_operands(fmt)
+    for _ in range(500):
+        a = (pool[rng.randrange(len(pool))] if rng.random() < 0.5
+             else rng.getrandbits(fmt.width))
+        b = (pool[rng.randrange(len(pool))] if rng.random() < 0.5
+             else rng.getrandbits(fmt.width))
+        for rnd in RND_MODES:
+            assert add(fmt, a, b, rnd) == add(fmt, b, a, rnd), \
+                f"{fmt.name} {a:#x} + {b:#x} depends on operand order"
+
+
+def test_stream_final_combine_order_is_load_bearing():
+    """Negative control for the test above.
+
+    Folding leftover accumulator levels the other way round - highest
+    first, left-associating - is also a fixed, deterministic shape. It
+    is simply a DIFFERENT tree, and the difference first appears at
+    n = 7. Without this, 'the streaming form matches' could be true of
+    an implementation that had the fold backwards and happened to agree
+    on the sizes tested.
+    """
+    def wrong_fold(fmt, xs, rnd):
+        acc, flags = {}, 0
+        for x in xs:
+            v, j = x, 0
+            while j in acc:
+                v, f = add(fmt, acc.pop(j), v, rnd)
+                flags |= f
+                j += 1
+            acc[j] = v
+        r = None
+        for j in sorted(acc, reverse=True):        # highest first
+            if r is None:
+                r = acc[j]
+            else:
+                r, f = add(fmt, r, acc[j], rnd)    # left-associating
+                flags |= f
+        return r, flags
+
+    rng = random.Random(7)
+    differed = 0
+    for _ in range(300):
+        xs = [rand_finite(FP64, rng, spread=20) for _ in range(7)]
+        if wrong_fold(FP64, xs, RND_RNE)[0] != reduce_bits(FP64, xs, RND_RNE)[0]:
+            differed += 1
+    assert differed > 0, (
+        "folding the leftovers the other way produced the same answer on "
+        "every trial at n=7; the fold order is then not load-bearing and "
+        "the docstring claiming it is needs correcting")
 
 
 @pytest.mark.parametrize("n", list(range(2, 40)) + [64, 100, 1000])

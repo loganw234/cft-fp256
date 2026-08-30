@@ -19,6 +19,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_csr.sv \
     $(RTLDIR)/cft_fifo.sv \
     $(RTLDIR)/cft_mulfrac.sv \
+    $(RTLDIR)/cft_reduce_acc.sv \
     $(RTLDIR)/cft_engine.sv \
     $(RTLDIR)/cft_engine_stream.sv \
     $(RTLDIR)/cft_krnl.sv \
@@ -27,7 +28,8 @@ VERILOG_SOURCES = \
     $(TBDIR)/wrappers/tb_fpfma_fp128.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp256.sv \
     $(TBDIR)/wrappers/tb_krnl_quarter.sv \
-    $(TBDIR)/wrappers/tb_mulshare.sv
+    $(TBDIR)/wrappers/tb_mulshare.sv \
+    $(TBDIR)/wrappers/tb_reduce_acc.sv
 
 ifeq ($(SIM),icarus)
 COMPILE_ARGS += -g2012

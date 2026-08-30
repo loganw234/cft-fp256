@@ -11,9 +11,9 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare krnl quarter clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc krnl quarter clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare krnl quarter
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc krnl quarter
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -32,6 +32,14 @@ mulshare:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulshare \
 		MODULE=test_mulshare SIM_BUILD=sim_build/mulshare \
 		COCOTB_RESULTS_FILE=sim_build/mulshare/results.xml
+
+# The streaming reduction accumulator against the model's tree. Every
+# length from 1 to 40, because the shape varies with n and powers of two
+# are the easy case.
+reduceacc:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_reduce_acc \
+		MODULE=test_reduce_acc SIM_BUILD=sim_build/reduceacc \
+		COCOTB_RESULTS_FILE=sim_build/reduceacc/results.xml
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \

@@ -28,6 +28,7 @@ from .softfloat import (
 from .reduce import (
     OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
+    stream_reduce,
 )
 from . import vectors
 
@@ -53,7 +54,7 @@ __all__ = [
     "max_normal_bits", "negate", "is_nan", "vectors",
     "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
     "split", "tree_adds", "canonical_ranges", "reduce_bits",
-    "fsum", "fdot", "combine",
+    "fsum", "fdot", "combine", "stream_reduce",
 ]
 
 __version__ = "0.1.0"

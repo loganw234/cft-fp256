@@ -706,9 +706,22 @@ int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
         return reduce_leaf(f, op, rnd, a, b, esz, lo, out, flags);
 
     /* The one place the shape is written down on this side of the
-     * fence. Floor division, extra element to the RIGHT, matching
-     * cft_golden.reduce.split(). */
-    mid = lo + (hi - lo) / 2;
+     * fence: the largest power of two strictly inside the range, so the
+     * LEFT child is always a perfect subtree and the remainder goes
+     * right. Matches cft_golden.reduce.split().
+     *
+     * Not the midpoint, and the difference is the whole reason the
+     * shape is this one: this tree is exactly what a streaming
+     * binary-counter accumulator produces - one add per element,
+     * ceil(log2 n) levels, carry when a level is occupied - which is
+     * what the RTL will be. The midpoint tree agrees only when n is a
+     * power of two. */
+    {
+        size_t m = hi - lo, k = 1;
+        while (k < m)
+            k <<= 1;                 /* smallest power of two >= m */
+        mid = lo + (k >> 1);         /* m >= 2 here, so k >= 2 */
+    }
 
     if (cft_sf_reduce(f, op, rnd, a, b, esz, lo, mid, &left, &lf))
         return 1;
