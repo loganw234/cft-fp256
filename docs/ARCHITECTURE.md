@@ -269,11 +269,30 @@ context** (fp64/fp128 land between; QoR numbers recorded in
 ROADMAP.md).
 
 **In the shell, which is the number that matters, the ceiling is
-~159 MHz.** 145 MHz closes with margin and is the kernel clock for
-card-day builds via `hw/rebuild-2022.sh KERNEL_FREQ=`; 175 MHz misses
-by 0.562 ns. The critical path is the round stage - the 237-bit
-attribute-directed increment, S12 into S13 - and it is two-thirds
-routing, so it is a placement problem as much as a logic one.
+~141 MHz and it has moved.** The critical path is the round stage -
+the 237-bit attribute-directed increment, S12 into S13 - and it is
+about two-thirds routing, so it is a placement problem as much as a
+logic one.
+
+| commit | ask | routed WNS | implied path delay |
+|---|---|---|---|
+| 1cab0c3 (sweep) | 145 MHz | **+0.055** closes | 6.842 ns |
+| 1cab0c3 (sweep) | 175 MHz | -0.562 fails | 6.276 ns |
+| b55004b (2026-08-29) | 145 MHz | **-0.165** fails | 7.062 ns |
+
+The design lost about 0.22 ns between those two points, and the work
+in between is the reason: the integer and bitwise group added eight
+opcodes and widened `MODE`'s opcode field from four bits to a byte,
+and the unassigned-opcode handling, CAPS discovery and elaboration
+guards each added a little more. None of it touched the round stage,
+but all of it added logic and congestion to a path that is two-thirds
+wire.
+
+So **145 MHz closed for the design that was measured, not for the
+design that exists**, and a sweep result ages as soon as the RTL
+changes. Card-day images are built at **130 MHz**, which leaves real
+margin rather than the 0.08 ns that 140 would; 140 is probably
+reachable and costs a two-hour link to find out.
 
 Two cautions, both learned the expensive way and written up in
 ROADMAP.md. Read the **path delay, not the slack**: Vivado stops
