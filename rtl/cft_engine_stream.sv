@@ -255,6 +255,15 @@ module cft_engine_stream #(
       if (wfinish) begin
         running <= 1'b0;
         done <= 1'b1;
+        // synthesis translate_off
+        // The engine logs its start, its bursts and each result beat,
+        // but never logged finishing - so a run that executed and a
+        // run that stalled waiting for a write response looked
+        // identical from the log, and telling them apart is exactly
+        // what you need when a host says a kernel never completed.
+        $display("[CFT-ENGS] DONE beats=%0d flags=%b err=%b",
+                 beats_total, flags_acc, err_acc);
+        // synthesis translate_on
       end
     end
   end
