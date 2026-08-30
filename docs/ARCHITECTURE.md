@@ -278,7 +278,9 @@ logic one.
 |---|---|---|---|
 | 1cab0c3 (sweep) | 145 MHz | **+0.055** closes | 6.842 ns |
 | 1cab0c3 (sweep) | 175 MHz | -0.562 fails | 6.276 ns |
-| b55004b (2026-08-29) | 145 MHz | **-0.165** fails | 7.062 ns |
+| 53bbba7 (2026-08-29) | 145 MHz | **-0.165** fails | 7.062 ns |
+| 53bbba7 | 130 MHz | **+0.055** closes | 7.637 ns |
+| a5cce4e, round-stage restructured | 145 MHz | **+0.055** closes | 6.842 ns |
 
 The design lost about 0.22 ns between those two points, and the work
 in between is the reason: the integer and bitwise group added eight
@@ -290,9 +292,21 @@ wire.
 
 So **145 MHz closed for the design that was measured, not for the
 design that exists**, and a sweep result ages as soon as the RTL
-changes. Card-day images are built at **130 MHz**, which leaves real
-margin rather than the 0.08 ns that 140 would; 140 is probably
-reachable and costs a two-hour link to find out.
+changes.
+
+**And then it closed again.** The round stage now selects between
+`kept` and `kept+1` rather than adding the round bit to it, which
+takes a 238-bit ripple carry off the end of the path and hides it
+behind the guard/sticky reduction that was already running. Same
+latency, same stage count, same arithmetic - the 111,278-vector RTL
+suite agrees bit for bit - and the 0.22 ns comes back exactly: 145 MHz
+goes from -0.165 to +0.055.
+
+That is worth reading twice, because the last time this design was
+restructured for timing (the S11 split) the out-of-context proxy
+promised 2% and the shell delivered a regression. The difference is
+not that the reasoning was better; it is that this was measured in the
+shell before being believed.
 
 Two cautions, both learned the expensive way and written up in
 ROADMAP.md. Read the **path delay, not the slack**: Vivado stops
