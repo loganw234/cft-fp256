@@ -130,10 +130,13 @@ test: all $(TESTS)
 	@echo "C and Python reached the same library and got the same bits"
 	@rm -f .out-c.txt .out-py.txt
 
-# The Fortran example is the one artifact here that has not been run -
-# see its header. This target is what changes that, on any machine
-# with a Fortran compiler.
-FC ?= gfortran
+# `FC ?= gfortran` looks right and does nothing: make defines FC as a
+# built-in (f77), so ?= never fires and the target silently used
+# whatever f77 happens to be. Overriding only the DEFAULT leaves
+# `make FC=...` working.
+ifeq ($(origin FC),default)
+  FC := gfortran
+endif
 fortran: libcft.a
 	$(FC) examples/vector_fma.f90 libcft.a -o vector-fma-f$(EXE)
 	./vector-fma-f$(EXE)

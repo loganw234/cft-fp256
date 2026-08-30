@@ -288,12 +288,16 @@ they are re-derivable rather than remembered.
 - `vector_fma.c` - C, linked against the static library.
 - `vector_fma_ctypes.py` - Python, via `ctypes.CDLL` and eight
   `argtypes` lines. No build step, no binding generator, no pyxrt.
-- `vector_fma.f90` - Fortran, via `iso_c_binding`. A native
-  `real(c_double)` array goes straight to `c_loc()` and is used in
-  place, because the buffers are specified as dense little-endian
-  interchange encodings rather than as a struct. (This one has not
-  been compiled yet - see its header; `make -C host fortran` is the
-  command that changes that.)
+- `vector_fma.f90` - Fortran, via `iso_c_binding`, verified with
+  gfortran 13.3. A native `real(c_double)` array goes straight to
+  `c_loc()` and is used in place: no conversion step, because the
+  buffers are specified as dense little-endian interchange encodings
+  rather than as a struct. That is the argument at the top of this
+  document - that Fortran is the language this contract most needs to
+  reach, and that reaching it should cost an interface block and
+  nothing else - demonstrated rather than asserted. `make -C host
+  fortran` runs it, and the simulation container carries gfortran so
+  CI can too.
 
 The C and Python versions print a checksum of the output buffer, and
 `make libcft-test` diffs them. Identical output from two languages

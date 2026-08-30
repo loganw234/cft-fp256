@@ -18,16 +18,13 @@
 ! buffers as dense little-endian interchange encodings rather than as
 ! a struct.
 !
-! STATUS: this example has not been compiled in the environment it was
-! written in - no Fortran compiler was installed there - so unlike
-! everything else under host/ it is unverified. `make -C host fortran`
-! builds and runs it wherever gfortran exists, and that is the one
-! command that turns this note into a result. Expected output:
+! Verified with gfortran 13.3 (`make -C host fortran`, and the
+! simulation container carries gfortran so CI can run it):
 !
-!     1.0 * 0.5 + 1.0 = 1.5
-!     2.0 * 0.25 + 1.0 = 1.5
-!     3.0 * 2.0 + -6.0 = 0.0
-!     4.0 * 8.0 + 0.0 = 32.0
+!     1.0 * .50 + 1.0 = 1.5
+!     2.0 * .25 + 1.0 = 1.5
+!     3.0 * 2.00 + -6.0 = .0
+!     4.0 * 8.00 + .0 = 32.0
 !     flags 0x00
 
 program vector_fma_fortran
