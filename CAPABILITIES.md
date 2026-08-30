@@ -163,7 +163,7 @@ That means the distance to running it on-chip is short and specific:
 | `abs`, `min`, `max` | **yes** |
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
 | `floor`, `round`, `step` | **no** - `roundToIntegral` is the next cheap win |
-| a sequencer to run a chain on-chip | **no** - the v2 orbit engine |
+| a sequencer to run a chain on-chip | **not in hardware.** The ISA is specified (docs/SEQUENCER.md), the golden model executes it, and libcft runs programs today on the software backend - so a program can be written and checked now. The RTL is v2 |
 
 Six rows, two still missing after the 2026-08-29 work. Grouped by
 what they would unlock:
@@ -199,12 +199,17 @@ not a product, it is an existence proof.
 
 ### Host access
 
-The Python host cannot read the status registers. Checked against XRT
+**Fixed by libcft (2026-08-29).** The C library's XRT backend reads
+FLAGS, STATUS and CAPS, and refuses to open a device where it cannot -
+so a Python caller reaching the card through `ctypes` and libcft gets
+what a Python caller reaching it through pyxrt cannot.
+
+The original limitation stands for pyxrt itself. Checked against XRT
 2.14.354 and 2.19.194: `pyxrt.kernel` exposes `group_id` and the CU
 access modes and nothing else - no `read_register`, and no `pyxrt.ip`.
-So FLAGS, STATUS and CAPS are reachable from the C++ API and from the
-cocotb bench, but not from `host/examples/vector_fma.py`, which warns
-rather than pretending the check ran.
+So FLAGS, STATUS and CAPS are unreachable from
+`host/examples/vector_fma.py`, which warns rather than pretending the
+check ran.
 
 This costs diagnosis rather than correctness: the result-buffer
 comparison against the golden model is the real gate, and a bus fault
@@ -225,6 +230,14 @@ Three things, in the order they matter:
    orbit/micro-sequencer engine is what turns this from a vector ALU
    into a processor, and it is worth more than every missing operation
    below combined.
+
+   As of 2026-08-29 the design is settled and executable rather than
+   sketched: docs/SEQUENCER.md has the instruction encoding and the
+   determinism argument, python/cft_golden/seq.py is the definition of
+   correct, and libcft runs programs on the software backend and
+   agrees with it over a fuzz corpus. What is missing is the RTL - so
+   a program can be written and its results checked today, at software
+   speed, and the tile still cannot run one.
 
 2. **The cheap operations, which are cheap.** `abs`, `negate`,
    `copySign` and the four min/max forms landed on 2026-08-29 and cost
