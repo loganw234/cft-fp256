@@ -23,11 +23,11 @@ a simple library; the tile only makes it faster.
 
 | piece | state |
 |---|---|
-| `python/cft_golden` | exact fp32/fp64/fp128/fp256 fma/add/sub/mul + flags, dependency-free; **16 pytest gates green** against native binary64, `math.fma`, mpmath, and hand-computed 754 anchors |
+| `python/cft_golden` | exact fp32/fp64/fp128/fp256, 23 opcodes (arithmetic, sign, min/max, predicates, integer/bitwise) under all five 754 rounding attributes, plus the orbit sequencer's execution model; dependency-free; **pytest green** against native binary64, `math.fma`, mpmath, and hand-computed 754 anchors |
 | `rtl/` | the v1 15-stage pipelined FMA core (one parameterized source serving all four rungs: 8x fp32 / 4x fp64 / 2x fp128 / 1x fp256 per 256-bit beat), operand steering, ap_ctrl_hs CSR block with CAPS discovery, vector engine, Vitis kernel top; the v0 behavioural core stays as the readable reference; **Yosys-clean** (CI-enforced portability) |
 | `tb/` | cocotb: streamed unit benches for all four widths + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green**: 4000 fp32 + 4000 fp64 + 2100 fp128 + 1300 fp256 vectors and 12 kernel runs bit-exact (Icarus 12, cocotb 1.9.2, in the `docker/` container) |
 | `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg, the era-matched `rebuild-2022.sh` pipeline - **packaging and hw_emu gates MET** (bit-exact vs golden through real XRT), hw bitstreams built (docs/BRINGUP.md records each gate honestly) |
-| `host/` | pyxrt example that runs a vector op and verifies it against the golden model |
+| `host/` | **libcft** - ~1,700 lines of C99, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++. The software backend replays 228,000 conformance cases and agrees with the golden model on 213,000 differential cases; an XRT backend drives one or four compute units and has been exercised against a **four-tile hw_emu image with no card present**. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt |
 | `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |
 
 No physical card yet (it is in the mail). The claim made so far is
@@ -66,7 +66,23 @@ before running these):
 make xo                                  # package rtl/ -> build/cft_krnl.xo
 make xclbin TARGET=hw_emu                # emulation link
 make xclbin PLATFORM=$(xbutil-reported)  # hardware link
-python3 host/examples/vector_fma.py build/cft_hw.xclbin --format fp256 --op fma --n 512
+```
+
+The host library, which needs none of that:
+
+```bash
+make libcft            # C99, no dependencies
+make libcft-test       # contract tests, 228k-case replay, C vs Python
+make libcft-diff       # against the golden model, boundary-targeted
+make libcft-docker     # the same tests on a second platform
+```
+
+And against a device, in emulation or on a card - the same command
+either way, because the artifact's name selects the environment:
+
+```bash
+make -C host XRT=1 device-test
+bash hw/run-device-test.sh cardday/quad/cft_hw.xclbin -n 4096
 ```
 
 ## Layout
@@ -77,18 +93,23 @@ python/tests/        golden proven against native f64, math.fma, mpmath, 754 anc
 rtl/                 cft_fpfma (core) / _pipe / cft_opmux / cft_csr / cft_engine / cft_krnl
 tb/                  cocotb benches + Makefiles (SIM=icarus default, verilator alt)
 hw/                  kernel.xml, package_kernel.tcl, link.cfg
-host/examples/       pyxrt host, verifies against the golden model
+host/include/cft.h   the C ABI: the contract between this and its users
+host/src/            libcft - software backend, XRT backend, conformance
+host/tests/          contract tests, device-vs-software, differential
+host/examples/       the same program in C, Python (ctypes) and Fortran
 vectors/             conformance-set emitter (JSONL)
 docker/              the simulation container CI and dev boxes share
-docs/                DETERMINISM (the contract), ARCHITECTURE, ROADMAP, BRINGUP
+docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
+                     SEQUENCER, ROADMAP, BRINGUP, CARDDAY
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
 
 **Start with [CAPABILITIES.md](CAPABILITIES.md)** if you want to know
 whether this is useful to you. It is deliberately unflattering: four
-of the six arithmetic operations IEEE 754 requires, none of the
-comparison or conversion operations, and no way to express a sequence
-on-chip. What it does do, it does bit-exactly.
+of the six arithmetic operations IEEE 754 requires, no conversions in
+either direction, and no way yet to express a sequence on-chip - the
+orbit sequencer is a design and an executable model, not silicon.
+What it does do, it does bit-exactly.
 
 ## Design rules the repo is built around
 
