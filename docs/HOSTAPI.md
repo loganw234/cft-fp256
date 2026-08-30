@@ -95,14 +95,70 @@ intent.
   "the memory never delivered this" and "the arithmetic is wrong" want
   different responses. The software backend cannot produce one.
 
+## The device backend
+
+`host/src/backend_xrt.cpp` implements all four of those bullets. It is
+the only C++ in the library, because XRT's API is C++, and it exports
+nothing but the C functions in `src/backend.h` - so the library still
+builds with no dependencies at all when XRT is absent, which is the
+whole reason the software backend exists.
+
+    make -C host XRT=1
+
+Multi-tile is the substance of it. A four-CU bitstream is not four
+times one CU from the host's side: each CU's AXI master is wired to
+its own group of HBM pseudo-channels, so a buffer allocated for tile 1
+is not reachable by tile 2. There is no "the input array" to share.
+Each tile gets its own buffers in its own memory group holding its own
+slice, and `cft_run` still takes one pointer per operand.
+
+Two things about it are worth stating because they are unusual:
+
+**A failed run poisons the handle.** If a launch or a wait throws,
+compute units are still running - XRT's run destructor frees a command
+slot, it does not stop a CU, and this RTL has no abort. `cft_csr.sv`
+gates the start pulse on `!busy` and answers every write with BRESP
+OKAY, so a start issued to a busy CU is dropped *silently*, and the
+next poll of CTRL sees the previous run's done bit and reports
+success. A caller who retried would receive the aborted attempt's
+output. There is no way to make the device safe again from inside the
+library, so every later call on that handle refuses until it is closed
+and reopened.
+
+**It refuses to open a device whose status registers it cannot read.**
+`FLAGS` carries the IEEE exceptions, which are half of what this
+library promises to reproduce, and `STATUS` carries the bus faults,
+which are how a caller learns its results were computed on bits the
+memory system never delivered. Without them every run would return
+`CFT_OK` with unverifiable data, and `CAPS` would have to be guessed -
+which on a trimmed bitstream means issuing a precision it does not
+carry and receiving a buffer of zeros with clean flags. A library
+whose product is exception-exact reproducibility cannot run in that
+mode, so it says so and stops.
+
+### How it is tested without a card
+
+`host/tests/device_test.c` opens the device backend and the software
+backend at once, feeds them identical data, and compares - bits and
+flags, every supported format, opcode and attribute. Anything that
+differs is a device-path bug by definition, because the software
+backend is the one replayed against the golden model.
+
+    bash hw/run-device-test.sh cardday/quad_emu/cft_hw_emu.xclbin 64
+
+It runs against a **hw_emu image with no card present**, which is the
+point: four-CU partitioning gets exercised, and its bugs found, before
+any hardware exists. Beyond agreement it checks partition invariance -
+one call over n against a sequence of calls over slices of it, which
+is what the library does internally across tiles - at sizes chosen to
+straddle beat and tile boundaries (1, 2, 3, 7, 8, 9, 31, 32, 33, 37).
+
+The same binary is what to run on the card. Only the xclbin changes.
+
 ## What is not there yet
 
-- **The device backend.** `cft_open()` with an artifact path returns
-  `CFT_ERR_NO_DEVICE` - not a bad artifact and not an unsupported
-  operation, but an honest "there is no such device in this build". It
-  needs XRT's C++ API and a machine with the card, and it is the next
-  file rather than a refactor: the four bullets above are its whole
-  job description.
+- **Card validation.** Everything above has been exercised in
+  emulation. Nothing has touched silicon.
 
 ## What is deliberately not in the first version
 

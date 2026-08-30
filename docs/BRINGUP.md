@@ -79,9 +79,43 @@ shell IP never enters the picture. xclbins built by 2022.2 run under
 the newer XRT 2.19 runtime - that pairing is what AMD's own 2024.1
 U50 deployment re-release ships.
 
-**The era-build environments (2026-08-29).** Two interchangeable
-Vitis 2022.2 homes, both driven by `hw/rebuild-2022.sh` from the repo
-root:
+**The two homes are NOT interchangeable for hw_emu (2026-08-29).**
+`-t hw` works on both. `-t hw_emu` works only on the 22.04 one, and
+the reason is worth knowing because it will recur with every host OS
+upgrade.
+
+Emulation links a `libdpi.so` at elaboration time using the linker
+Vivado ships - **binutils 2.37**, which predates the `SHT_RELR` (0x13)
+relocation section type. Ubuntu 24.04's glibc uses it, so on
+amd-arc-box that linker cannot read the system libm at all:
+
+    ld: /lib/x86_64-linux-gnu/libm.so.6: unknown type [0x13] section `.relr.dyn'
+    ld: skipping incompatible /lib/x86_64-linux-gnu/libm.so.6
+    ERROR: [XSIM 43-4452] Linking failed for "libdpi.so"
+
+Nothing about the design is involved and no flag fixes it: a 2022 tool
+cannot link a 2024 libc. `readelf -S /lib/x86_64-linux-gnu/libm.so.6 |
+grep relr` is the one-line test - a hit means that host cannot run
+hw_emu under 2022.2. amd-arc-box (glibc 2.39) hits; cft2204 (glibc
+2.35) does not.
+
+So the split is:
+
+| job | where | why |
+|---|---|---|
+| `-t hw` links, timing, bitstreams | amd-arc-box | 36 threads, 46 GB - a link is ~1h50m and ~12 GB |
+| `-t hw_emu` and anything that runs under emulation | cft2204 (WSL, Ubuntu 22.04) | its glibc is old enough for Vivado's bundled linker |
+| kernel packaging, OOC QoR | Windows / Vivado 2026.1 | no encrypted shell IP in the picture |
+
+`hw/run-device-test.sh` sets the emulation environment (it needs the
+full Vitis environment, not just XRT, plus `EMCONFIG_PATH`) so this
+does not have to be remembered.
+
+**The era-build environments (2026-08-29).** Two Vitis 2022.2 homes,
+both driven by `hw/rebuild-2022.sh` from the repo root, and both now
+real git checkouts rather than file copies - `hw/sync-worktree.sh`
+puts an exact commit on either one, so the build manifests can name
+the commit an artifact came from instead of recording "unknown":
 
 - amd-arc-box: `/data/Xilinx` on the Micron 256 GB (label
   `vitisdata`, fstab nofail; the drive rides a PCIe x1 adapter and is
