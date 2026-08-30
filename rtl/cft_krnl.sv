@@ -169,10 +169,17 @@ module cft_krnl #(
       .start(start), .busy(busy), .done(done), .eng_flags(eng_flags),
       .eng_err(eng_err),
       .prec_caps({EN_FP256, EN_FP128, EN_FP64, 1'b1}),
-      // arithmetic, sign, min/max, predicate, integer are all
-      // present; reduction, divide/sqrt and conversion are not
-      // yet built and their bits stay clear.
-      .op_caps(8'b0001_1111),
+      // arithmetic, sign, min/max, predicate, integer and reduction
+      // are present; divide/sqrt and conversion are not yet built and
+      // their bits stay clear.
+      //
+      // The reduction bit covers CFT_SUM. CFT_DOT is in the same group
+      // and is NOT separate hardware: the contract makes
+      // dot(a,b) == sum(mul(a,b)) exact, flags included, so the host
+      // issues an elementwise MUL and then a SUM. Advertising the group
+      // is therefore honest - both opcodes deliver the contract's
+      // answer, one of them via two runs.
+      .op_caps(8'b0010_1111),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
   );

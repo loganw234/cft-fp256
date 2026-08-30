@@ -11,9 +11,9 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc krnl quarter clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl quarter clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc krnl quarter
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl quarter
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -40,6 +40,15 @@ reduceacc:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_reduce_acc \
 		MODULE=test_reduce_acc SIM_BUILD=sim_build/reduceacc \
 		COCOTB_RESULTS_FILE=sim_build/reduceacc/results.xml
+
+# CFT_SUM through the whole kernel: CSR, engine serializer, borrowed
+# adder, single-beat writer. Sizes straddle the beat boundary at every
+# precision, because the partial tail must stop at the real element
+# count - the padding is zeros and adding +0.0 is not the identity.
+reduce:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reduce \
+		COCOTB_RESULTS_FILE=sim_build/reduce/results.xml
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \

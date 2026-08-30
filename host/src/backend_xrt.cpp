@@ -128,11 +128,34 @@ constexpr uint32_t CSR_CAPS    = 0x4C;
 constexpr uint32_t CSR_STATUS  = 0x50;
 constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
 
-/* The hardware contract this library speaks. A bitstream announcing
- * anything else has a register map or an opcode meaning this code does
- * not know, and guessing is how a host reads a result it has
- * misinterpreted. Bump both together, deliberately. */
-constexpr uint32_t KNOWN_VERSION = 0x00000410u;
+/* The hardware contracts this library speaks.
+ *
+ * VERSION guards the REGISTER MAP. A bitstream announcing something not
+ * in this list has a register at an address this code does not know,
+ * and guessing is how a host reads a result it has misinterpreted.
+ *
+ * It is a LIST rather than one value, and that is the point. Adding an
+ * opcode group does not move a register, so a tile at 0x500 and a tile
+ * at 0x410 are read identically; what differs is what they implement,
+ * and that is CAPS's job, which every call already consults through
+ * cft_supports(). Insisting on a single version would have orphaned the
+ * card-day images the moment reductions landed - a host refusing a
+ * bitstream whose registers it understands perfectly, over a feature it
+ * was not going to use.
+ *
+ *   0x410  v0.4.1  four rungs, five rounding attributes
+ *   0x500  v0.5.0  adds the reduction group (CAPS bit 13)
+ *
+ * Add a version here only when the map is genuinely unchanged; move the
+ * map and this list should shrink to the versions that share it. */
+constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u };
+
+inline bool version_known(uint32_t v)
+{
+    for (uint32_t k : KNOWN_VERSIONS)
+        if (v == k) return true;
+    return false;
+}
 
 /* kernel.xml argument ids */
 constexpr int ARG_A = 2, ARG_B = 3, ARG_C = 4, ARG_D = 5;
@@ -376,13 +399,14 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         set_err(buf);
         return ST_ARTIFACT;
     }
-    if (ver != KNOWN_VERSION) {
-        char buf[200];
+    if (!version_known(ver)) {
+        char buf[256];
         std::snprintf(buf, sizeof buf,
-                      "hardware contract 0x%08x, this library speaks "
-                      "0x%08x - the register map or an opcode meaning may "
-                      "differ, and guessing is how a host misreads a result",
-                      ver, KNOWN_VERSION);
+                      "hardware contract 0x%08x is not one this library "
+                      "knows (0x%08x, 0x%08x) - the register map may "
+                      "differ, and guessing is how a host misreads a "
+                      "result. What a tile IMPLEMENTS is CAPS, not this.",
+                      ver, KNOWN_VERSIONS[0], KNOWN_VERSIONS[1]);
         delete D;
         set_err(buf);
         return ST_UNSUPPORTED;

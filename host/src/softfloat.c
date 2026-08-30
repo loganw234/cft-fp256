@@ -805,3 +805,60 @@ int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
         return 0;
     }
 }
+
+/* ---- canonical tile ranges ---------------------------------------- */
+
+size_t cft_sf_canonical_ranges(size_t n, size_t parts,
+                               size_t *lo_out, size_t *hi_out, size_t cap)
+{
+    size_t count, i, k;
+
+    if (n == 0 || parts == 0 || cap == 0)
+        return 0;
+    /* Only a power of two corresponds to a clean cut of whole levels. */
+    if (parts & (parts - 1))
+        return 0;
+
+    lo_out[0] = 0;
+    hi_out[0] = n;
+    count = 1;
+
+    while (count < parts) {
+        size_t next = count;
+        /* Capacity is decided BEFORE the pass, never during it. A pass
+         * splits every range it can, so it may double the count; a
+         * check inside the loop that bailed out partway left the array
+         * half-updated - some ranges split, some not - and the result
+         * no longer tiled [0, n). It reported a plausible smaller
+         * partition covering only part of the array, which is the worst
+         * shape a bug like this could take. */
+        if (count > cap / 2)
+            break;
+        /* Split every range once; walk backwards so an in-place
+         * expansion never overwrites a range it has not read. */
+        for (i = count; i-- > 0; ) {
+            size_t lo = lo_out[i], hi = hi_out[i], m = hi - lo, half;
+            if (m < 2)
+                continue;
+            /* the same split() the tree uses: largest power of two
+             * strictly inside the range */
+            half = 1;
+            while (half < m)
+                half <<= 1;
+            half >>= 1;
+            /* shift the tail up by one to make room for the right half */
+            for (k = next; k > i + 1; k--) {
+                lo_out[k] = lo_out[k - 1];
+                hi_out[k] = hi_out[k - 1];
+            }
+            hi_out[i]     = lo + half;
+            lo_out[i + 1] = lo + half;
+            hi_out[i + 1] = hi;
+            next++;
+        }
+        if (next == count)
+            break;                 /* every range is a single element */
+        count = next;
+    }
+    return count;
+}

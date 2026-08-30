@@ -68,14 +68,14 @@ async def quarter_tile_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000410
+    assert await axil.read_dword(VERSION) == 0x00000500
 
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0b0011, (
         f"quarter tile must advertise fp32+fp64 only, got {caps & 0xF:#06b}")
-    assert ((caps >> 8) & 0xFF) == 0b0001_1111, (
+    assert ((caps >> 8) & 0xFF) == 0b0010_1111, (
         "trimming rungs must not trim opcode groups - every group still "
-        "works on the formats that remain")
+        "works on the formats that remain, reductions included")
 
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"

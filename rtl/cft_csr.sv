@@ -32,7 +32,9 @@
 //                 {inexact,underflow,overflow,divzero,invalid};
 //                 cleared by hardware at ap_start
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000410 (v0.4.1)
+//   0x48  VERSION RO: 0x00000500 (v0.5.0). Guards the REGISTER MAP,
+//                 not the feature set - features are announced in CAPS.
+//                 A host accepts any version whose map it knows.
 //   0x4C  CAPS    RO: what this bitstream actually implements.
 //                 [3:0]  precision bitmask, bit p = MODE precision p
 //                        (full tile 0xF; a trimmed open-core tile
@@ -43,7 +45,7 @@
 //                        [10] min/max     the four 9.6 forms
 //                        [11] predicate   select/cmplt/cmple/cmpeq
 //                        [12] integer     the eight bitwise/integer
-//                        [13] reduction   reserved
+//                        [13] reduction   sum (dot via the host)
 //                        [14] divide/sqrt reserved
 //                        [15] conversion  reserved
 //                 Groups rather than 256 individual bits, because
@@ -104,7 +106,17 @@ module cft_csr (
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  localparam [31:0] VERSION = 32'h0000_0410;
+  // v0.5.0: the reduction opcode group (CFT_SUM at 24) exists.
+  //
+  // VERSION guards the REGISTER MAP, not the feature set. Adding an
+  // opcode group does not move a register, so a host built for 0x410
+  // reads every register correctly from a 0x500 tile and vice versa -
+  // and it will not issue opcode 24 to a tile whose CAPS bit 13 is
+  // clear, because asking CAPS is the protocol. That is why the host
+  // accepts a SET of contract versions rather than one: bumping this
+  // must not orphan a bitstream whose registers it understands
+  // perfectly, and the card-day images are 0x410.
+  localparam [31:0] VERSION = 32'h0000_0500;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;

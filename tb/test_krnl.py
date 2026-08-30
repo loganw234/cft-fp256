@@ -160,12 +160,12 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000410
+    assert await axil.read_dword(VERSION) == 0x00000500
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0xF, "full tile advertises all four rungs"
-    assert ((caps >> 8) & 0xFF) == 0b0001_1111, (
-        "arithmetic, sign, min/max, predicate and integer groups present; "
-        "reduction, divide/sqrt and conversion not yet built")
+    assert ((caps >> 8) & 0xFF) == 0b0010_1111, (
+        "arithmetic, sign, min/max, predicate, integer and reduction "
+        "groups present; divide/sqrt and conversion not yet built")
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
 

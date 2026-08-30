@@ -115,6 +115,27 @@ int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
                   size_t lo, size_t hi,
                   cft_bn *out, uint32_t *flags);
 
+/* The `parts` index ranges that are exact NODES of the reduction tree
+ * over [0, n), for splitting a reduction across tiles.
+ *
+ * An arbitrary partition will not do: a partial result is only reusable
+ * if its range is a node, and the even slicing used for elementwise
+ * work generally is not one. Cutting the top log2(parts) levels gives
+ * nodes, which is why parts must be a power of two.
+ *
+ * A node's SHAPE depends only on its length - the split is at the
+ * largest power of two inside the range, wherever the range starts - so
+ * a tile handed [lo, hi) computes the same tree the whole-array
+ * reduction would have computed for that node, without being told where
+ * it sits. Combining the partials with the same tree over `parts`
+ * elements rebuilds the levels that were cut.
+ *
+ * Writes at most `cap` ranges and returns how many it produced; fewer
+ * than `parts` when n is too small to cut that far. Mirrors
+ * cft_golden.reduce.canonical_ranges(). */
+size_t cft_sf_canonical_ranges(size_t n, size_t parts,
+                               size_t *lo_out, size_t *hi_out, size_t cap);
+
 /* Which of a, b, c the opcode reads, as bits 1, 2, 4. The steering
  * makes ADD ignore b and MUL ignore c, so a caller may legitimately
  * pass NULL for those; anything an opcode does read must be there. */

@@ -80,7 +80,7 @@ else
 endif
 
 TOOLS := cft-selftest$(EXE) cft-bench$(EXE)
-TESTS := api-test$(EXE)
+TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 .PHONY: all test difftest seqtest reducetest coverage fortran clean
@@ -119,6 +119,11 @@ cft-bench$(EXE): tools/cft_bench.c libcft.a
 api-test$(EXE): tests/api_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
+# Built against src/ as well as include/: the canonical partitioner is
+# internal, and a host never sees it - it calls cft_reduce.
+reduce-parts$(EXE): tests/reduce_parts_test.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -Isrc $^ -o $@ $(XRTLIBS)
+
 vector-fma$(EXE): examples/vector_fma.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
@@ -141,6 +146,7 @@ device-test$(EXE): tests/device_test.c libcft.a
 #                   few minutes, so it is its own target.
 test: all $(TESTS)
 	./api-test$(EXE)
+	./reduce-parts$(EXE)
 	./cft-selftest$(EXE) ../vectors/out
 	./vector-fma$(EXE) > .out-c.txt
 	$(PYTHON) examples/vector_fma_ctypes.py > .out-py.txt
@@ -191,6 +197,7 @@ clean:
 	      cft.dll libcft.so libcft.dylib \
 	      cft-selftest cft-selftest.exe api-test api-test.exe \
 	      cft-bench cft-bench.exe \
+	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
 	      .out-c.txt .out-py.txt

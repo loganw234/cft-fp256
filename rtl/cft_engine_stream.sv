@@ -335,10 +335,31 @@ module cft_engine_stream #(
   logic [7:0]   op_r;
   logic [2:0]   rnd_r;
   logic [63:0]  beats_total;
+  logic [63:0]  n_elems;      // elements, for the reduction serializer
   logic [63:0]  base_a, base_b, base_c, base_d;
 
+  // Beats this run will stream.
+  //
+  // Elementwise TRUNCATES, and that is the long-standing contract: N is
+  // a whole number of beats, the host pads the tail with zeros, and
+  // zero operands raise nothing so the flags cannot depend on the
+  // padding (api_test checks exactly that for all 256 opcodes).
+  //
+  // A reduction cannot use that contract. Padding a sum with +0.0 is
+  // not the identity - it destroys a negative-zero result and perturbs
+  // the directed attributes - so the host hands over the TRUE element
+  // count and the engine reads ceil(n / elements-per-beat) beats,
+  // consuming only the real elements from the last one. Truncating here
+  // silently drops the tail: n=1 fp32 became zero beats and finished
+  // having summed nothing, and n=7 fp128 summed six of seven.
+  logic [5:0]  beat_sh;
   logic [63:0] beats_new;
-  assign beats_new = cfg_n >> (LANE_SH - cfg_prec[1:0]);
+  logic        cfg_is_reduce;
+  assign beat_sh       = 6'(LANE_SH) - {4'b0, cfg_prec[1:0]};
+  assign cfg_is_reduce = (cfg_op == 8'd24);
+  assign beats_new = cfg_is_reduce
+                     ? ((cfg_n + ((64'd1 << beat_sh) - 64'd1)) >> beat_sh)
+                     : (cfg_n >> beat_sh);
 
   logic start_accept, fifo_clear, wfinish;
   assign start_accept = start && !running;
@@ -353,6 +374,7 @@ module cft_engine_stream #(
       op_r <= 8'd0;
       rnd_r <= 3'd0;
       beats_total <= '0;
+      n_elems <= '0;
       base_a <= '0; base_b <= '0; base_c <= '0; base_d <= '0;
     end else begin
       done <= 1'b0;
@@ -372,6 +394,10 @@ module cft_engine_stream #(
         op_r   <= cfg_op;
         rnd_r  <= cfg_rnd;
         beats_total <= beats_new;
+        // Element count, not beat count. A reduction must stop at the
+        // real elements: the beat padding is zeros, and adding +0.0 is
+        // not the identity on this type.
+        n_elems <= cfg_n;
         base_a <= cfg_a; base_b <= cfg_b; base_c <= cfg_c; base_d <= cfg_d;
         if (beats_new == 0) done <= 1'b1;
         else running <= 1'b1;
@@ -669,15 +695,166 @@ module cft_engine_stream #(
     end
   endgenerate
 
+  // ---- reductions ----------------------------------------------------
+  //
+  // CFT_SUM (opcode 24) folds the whole array into ONE element using
+  // the tree python/cft_golden/reduce.py defines. The hardware for it
+  // is cft_reduce_acc, a streaming binary-counter accumulator; this
+  // block feeds it and borrows an adder for it.
+  //
+  // CFT_DOT (25) is NOT built, and does not need to be. The contract
+  // says dot(a,b) == sum(mul(a,b)) exactly, flags included, so the host
+  // issues an elementwise MUL and then a SUM and gets bit-identical
+  // results from hardware that already exists. Building a second
+  // datapath - a multiply pass sharing the same pipe as the
+  // accumulator's adds, with tagged results and arbitration between
+  // them - would buy one saved round trip at the cost of the most
+  // schedule-sensitive logic in the engine. The composition property
+  // was put in the contract partly so this choice would be available.
+  localparam logic [7:0] OP_SUM = 8'd24;
+  localparam logic [7:0] OP_DOT = 8'd25;
+
+  // Declared here rather than beside the bank mux that drives them: the
+  // accumulator borrows the active bank's adder, so it needs the bank
+  // result before the mux appears further down.
+  logic [BEAT_BITS-1:0] beat_d;
+  logic [4:0]           beat_f;
+
+  logic is_reduce;
+  assign is_reduce = (op_r == OP_SUM);
+
+  // Elements per beat at the active precision, and how many of them are
+  // real in the LAST beat. Padding a reduction with +0.0 is not the
+  // identity - see the model - so the serializer stops at the true
+  // element count rather than running to the end of the beat.
+  logic [5:0] epb;
+  always_comb begin
+    case (prec_r)
+      PREC_FP64:  epb = 6'd4;
+      PREC_FP128: epb = 6'd2;
+      PREC_FP256: epb = 6'd1;
+      default:    epb = 6'd8;
+    endcase
+  end
+
+  logic [63:0] ser_beat_idx;
+  logic [5:0]  ser_idx, ser_cnt;
+  logic        ser_busy;
+  logic [BEAT_BITS-1:0] ser_data;
+
+  logic red_in_valid, red_in_ready;
+  logic [BEAT_BITS-1:0] red_in_elem;
+
+  // The active element, right-aligned. Everything above the element's
+  // width is zero and the accumulator never looks at it; the adder it
+  // hands work to is the one for this precision.
+  always_comb begin
+    red_in_elem = '0;
+    case (prec_r)
+      PREC_FP64:  red_in_elem[63:0]  = ser_data[ser_idx*64  +: 64];
+      PREC_FP128: red_in_elem[127:0] = ser_data[ser_idx*128 +: 128];
+      PREC_FP256: red_in_elem        = ser_data;
+      default:    red_in_elem[31:0]  = ser_data[ser_idx*32  +: 32];
+    endcase
+  end
+
+  assign red_in_valid = ser_busy && (ser_idx < ser_cnt);
+
+  logic red_take_beat;            // pop a beat into the serializer
+  // All three operand FIFOs share one read enable, so a reduction that
+  // only looks at `a` still pops b and c - and cft_fifo has no underflow
+  // guard by design ("callers check count"). So all three must be
+  // non-empty, exactly as the elementwise path requires.
+  assign red_take_beat = is_reduce && running && !ser_busy &&
+                         (a_cnt != 0) && (b_cnt != 0) && (c_cnt != 0) &&
+                         (ser_beat_idx < beats_total);
+
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || !running) begin
+      ser_busy     <= 1'b0;
+      ser_idx      <= '0;
+      ser_cnt      <= '0;
+      ser_beat_idx <= '0;
+      ser_data     <= '0;
+    end else if (is_reduce) begin
+      if (red_take_beat) begin
+        ser_data <= a_q;
+        ser_idx  <= '0;
+        // real elements left, capped at one beat
+        ser_cnt  <= ((n_elems - ser_beat_idx * {58'd0, epb}) < {58'd0, epb})
+                    ? (n_elems - ser_beat_idx * {58'd0, epb})
+                    : {58'd0, epb};
+        ser_beat_idx <= ser_beat_idx + 64'd1;
+        ser_busy <= 1'b1;
+      end else if (ser_busy && red_in_valid && red_in_ready) begin
+        if ((ser_idx + 6'd1) >= ser_cnt) ser_busy <= 1'b0;
+        ser_idx <= ser_idx + 6'd1;
+      end
+    end
+  end
+
+  logic                 red_add_valid;
+  logic [BEAT_BITS-1:0] red_add_a, red_add_b;
+  logic                 red_flush, red_out_valid;
+  logic [BEAT_BITS-1:0] red_out_data;
+  logic [4:0]           red_out_flags;
+
+  // Flush once every element has been handed over.
+  assign red_flush = is_reduce && running && !ser_busy &&
+                     (ser_beat_idx >= beats_total);
+
+  // The bank result, masked to the active element. Lanes 1..7 are
+  // computing nothing meaningful while a reduction runs, so their bits
+  // of the beat are noise; keeping them out of the accumulator means
+  // the value it eventually writes is the element and nothing else.
+  logic [BEAT_BITS-1:0] red_add_res;
+  always_comb begin
+    red_add_res = '0;
+    case (prec_r)
+      PREC_FP64:  red_add_res[63:0]  = beat_d[63:0];
+      PREC_FP128: red_add_res[127:0] = beat_d[127:0];
+      PREC_FP256: red_add_res        = beat_d;
+      default:    red_add_res[31:0]  = beat_d[31:0];
+    endcase
+  end
+
+  cft_reduce_acc #(.W(BEAT_BITS), .LEVELS(40), .ADD_LATENCY(LATENCY))
+  u_reduce (
+      .clk(ap_clk), .rst_n(ap_rst_n), .clear(start_accept),
+      .in_valid(red_in_valid && is_reduce), .in_data(red_in_elem),
+      .in_ready(red_in_ready),
+      .flush(red_flush),
+      .add_valid(red_add_valid), .add_a(red_add_a), .add_b(red_add_b),
+      .add_res(red_add_res), .add_flags(beat_f),
+      .out_valid(red_out_valid), .out_data(red_out_data),
+      .out_flags(red_out_flags));
+
+  // The result is pushed once. out_valid latches high and stays there
+  // until the next clear, so an edge is what the FIFO wants.
+  logic red_pushed, red_push;
+  assign red_push = is_reduce && red_out_valid && !red_pushed;
+
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || start_accept) red_pushed <= 1'b0;
+    else if (red_push)             red_pushed <= 1'b1;
+  end
+
   // ---- compute issue and collection ----------------------------------
   logic [63:0] issued_beats;
   logic [7:0]  inflight;
   logic        ex_valid, collect;
 
-  assign ex_valid = running && (issued_beats < beats_total) &&
+  // In reduction mode the elementwise path is idle: the only work the
+  // banks do is the accumulator's adds, issued through lane 0.
+  assign ex_valid = running && !is_reduce &&
+                    (issued_beats < beats_total) &&
                     (a_cnt != 0) && (b_cnt != 0) && (c_cnt != 0) &&
                     ((d_cnt + inflight) < FDEPTH);
-  assign abc_rd = ex_valid;
+
+  // The serializer owns the operand FIFOs while reducing. It pops only
+  // the `a` stream's beat, but all three advance together because they
+  // share one read enable and the host supplies all three pointers.
+  assign abc_rd = is_reduce ? red_take_beat : ex_valid;
 
   logic [LATENCY-1:0] vdl;
   assign collect = vdl[LATENCY-1];
@@ -698,7 +875,15 @@ module cft_engine_stream #(
     end
   end
 
-  assign d_wr = collect;
+  // Elementwise pushes a beat per result; a reduction pushes one beat,
+  // once, when the accumulator has folded everything.
+  assign d_wr = is_reduce ? red_push : collect;
+
+  // The writer's beat count. One for a reduction, whatever the run
+  // asked for otherwise - and it has to be a separate signal from
+  // beats_total, which is still what the READERS stream.
+  logic [63:0] wr_total;
+  assign wr_total = is_reduce ? 64'd1 : beats_total;
 
   // ---- the fractured significand array -------------------------------
   //
@@ -819,12 +1004,25 @@ module cft_engine_stream #(
       cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
           .op(op_r), .a(sa), .b(sb), .c(sc),
           .valid(bv), .d(bd), .flags(bf));
+      // Lane 0 doubles as the accumulator's adder while a reduction
+      // runs. Steered the way cft_opmux steers ADD - fma(x, 1.0, y) -
+      // because the product is exact and the pipe is already there.
+      // The other lanes idle; their outputs are masked out of the
+      // accumulator's view.
+      logic        rv;
+      logic [31:0] ra, rc;
+      assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP32) &&
+                  red_add_valid;
+      assign ra = is_reduce ? red_add_a[31:0] : fa;
+      assign rc = is_reduce ? red_add_b[31:0] : fc;
+
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                        .EXT_MUL(USE_FUSED_MUL)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(ex_valid && (prec_r == PREC_FP32)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
-          .a(fa), .b(fb), .c(fc),
+          .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP32))),
+          .rnd(rnd_r),
+          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+          .a(ra), .b(is_reduce ? 32'h3F80_0000 : fb), .c(rc),
           .out_valid(), .d(dd), .flags(f32_l[gi]),
           .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
           .mul_p(mf_p[gi*48 +: 48]));
@@ -854,12 +1052,20 @@ module cft_engine_stream #(
         cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
+        logic        rv;
+        logic [63:0] ra, rc;
+        assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP64) &&
+                    red_add_valid;
+        assign ra = is_reduce ? red_add_a[63:0] : fa;
+        assign rc = is_reduce ? red_add_b[63:0] : fc;
+
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
-            .in_valid(ex_valid && (prec_r == PREC_FP64)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
-            .a(fa), .b(fb), .c(fc),
+            .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP64))),
+          .rnd(rnd_r),
+          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+            .a(ra), .b(is_reduce ? 64'h3FF0_0000_0000_0000 : fb), .c(rc),
             .out_valid(), .d(dd), .flags(f64_l[gi]),
             .mul_a(mfa64[gi]), .mul_b(mfb64[gi]),
             .mul_p(mf_p[gi*106 +: 106]));
@@ -893,12 +1099,22 @@ module cft_engine_stream #(
         cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
+        logic         rv;
+        logic [127:0] ra, rc;
+        assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP128) &&
+                    red_add_valid;
+        assign ra = is_reduce ? red_add_a[127:0] : fa;
+        assign rc = is_reduce ? red_add_b[127:0] : fc;
+
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
-            .in_valid(ex_valid && (prec_r == PREC_FP128)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
-            .a(fa), .b(fb), .c(fc),
+            .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP128))),
+          .rnd(rnd_r),
+          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+            .a(ra),
+            .b(is_reduce ? {1'b0, 15'h3FFF, 112'd0} : fb),
+            .c(rc),
             .out_valid(), .d(dd), .flags(f128_l[gi]),
             .mul_a(mfa128[gi]), .mul_b(mfb128[gi]),
             .mul_p(mf_p[gi*226 +: 226]));
@@ -927,12 +1143,19 @@ module cft_engine_stream #(
       cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
           .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .valid(bv), .d(bd), .flags(bf));
+      logic rv256;
+      assign rv256 = is_reduce && (prec_r == PREC_FP256) && red_add_valid;
+
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                        .EXT_MUL(USE_FUSED_MUL)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(ex_valid && (prec_r == PREC_FP256)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
-          .a(w_fa), .b(w_fb), .c(w_fc),
+          .in_valid(is_reduce ? rv256
+                              : (ex_valid && (prec_r == PREC_FP256))),
+          .rnd(rnd_r),
+          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+          .a(is_reduce ? red_add_a : w_fa),
+          .b(is_reduce ? {1'b0, 19'h3FFFF, 236'd0} : w_fb),
+          .c(is_reduce ? red_add_b : w_fc),
           .out_valid(), .d(d256), .flags(f256),
           .mul_a(mfa256), .mul_b(mfb256), .mul_p(mf_p[0 +: 474]));
     end else begin : g_bank256_off
@@ -941,8 +1164,6 @@ module cft_engine_stream #(
     end
   endgenerate
 
-  logic [BEAT_BITS-1:0] beat_d;
-  logic [4:0]   beat_f;
   always_comb begin
     beat_d = d32;
     beat_f = f32_or;
@@ -954,9 +1175,13 @@ module cft_engine_stream #(
     endcase
   end
 
+  // A reduction writes exactly one beat, holding the single result in
+  // its low bits. Everything above the element is zero because the
+  // accumulator was fed masked values; the host copies back one element
+  // and ignores the rest.
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_d (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
-      .wr_en(d_wr), .wr_data(beat_d),
+      .wr_en(d_wr), .wr_data(is_reduce ? red_out_data : beat_d),
       .rd_en(d_rd), .rd_data(d_qout), .count(d_cnt));
 
   // ---- writer: index-order bursts from the D FIFO --------------------
@@ -967,7 +1192,7 @@ module cft_engine_stream #(
   logic [7:0]  w_len, w_cnt;
 
   logic [63:0] rem_w, addr_w;
-  assign rem_w  = beats_total - wr_done;
+  assign rem_w  = wr_total - wr_done;
   assign addr_w = base_d + (wr_done << ADDR_SH);
 
   // target burst: full-size when possible; the tail is always fully
@@ -1031,7 +1256,7 @@ module cft_engine_stream #(
   assign m_axi_d_bready  = (wr_state == W_B);
 
   assign wfinish = (wr_state == W_B) && m_axi_d_bvalid &&
-                   ((wr_done + {56'd0, w_len}) == beats_total);
+                   ((wr_done + {56'd0, w_len}) == wr_total);
 
   // ---- sticky bus faults ---------------------------------------------
   //
@@ -1064,9 +1289,23 @@ module cft_engine_stream #(
   end
 
   // ---- sticky flags --------------------------------------------------
+  //
+  // Elementwise accumulates a beat at a time as results are collected.
+  // A reduction collects nothing - its adds go through lane 0 and its
+  // one result arrives from the accumulator - so it contributes its OR
+  // once, when that result appears. cft_reduce_acc has been ORing every
+  // add's flags along the way, which is the same set the elementwise
+  // path would have gathered and in an order that cannot matter.
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n)          flags_acc <= 5'b0;
     else if (start_accept)  flags_acc <= 5'b0;
+    else if (red_push) begin
+      flags_acc <= flags_acc | red_out_flags;
+      // synthesis translate_off
+      $display("[CFT-ENGS] RED prec=%0d d[127:0]=0x%h flags=%b",
+               prec_r, red_out_data[127:0], red_out_flags);
+      // synthesis translate_on
+    end
     else if (collect) begin
       flags_acc <= flags_acc | beat_f;
       // synthesis translate_off
