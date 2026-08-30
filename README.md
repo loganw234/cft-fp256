@@ -81,7 +81,14 @@ host/examples/       pyxrt host, verifies against the golden model
 vectors/             conformance-set emitter (JSONL)
 docker/              the simulation container CI and dev boxes share
 docs/                DETERMINISM (the contract), ARCHITECTURE, ROADMAP, BRINGUP
+CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
+
+**Start with [CAPABILITIES.md](CAPABILITIES.md)** if you want to know
+whether this is useful to you. It is deliberately unflattering: four
+of the six arithmetic operations IEEE 754 requires, none of the
+comparison or conversion operations, and no way to express a sequence
+on-chip. What it does do, it does bit-exactly.
 
 ## Design rules the repo is built around
 
