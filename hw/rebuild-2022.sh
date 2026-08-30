@@ -21,6 +21,12 @@ TARGETS=${TARGETS:-"hw hw_emu"}
 # needs its own .xo, temp dir and xclbin or they overwrite one
 # another.
 BUILD=${BUILD:-build}
+# Link configuration and the CUs the clock constraint names.
+# hw/link.cfg is one tile; hw/link_quad.cfg is four. Keep the two
+# in step: every CU in the connectivity section must appear here,
+# or the unnamed ones run at the platform default clock.
+LINK_CFG=${LINK_CFG:-hw/link.cfg}
+CLOCK_CUS=${CLOCK_CUS:-cft_krnl_1}
 
 # locate Vitis 2022.2
 for root in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
@@ -62,8 +68,8 @@ vivado -mode batch -nolog -nojournal -source hw/package_kernel.tcl \
 for t in $TARGETS; do
   echo "== v++ link -t $t"
   extra=""
-  [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:cft_krnl_1"
-  v++ -l -t "$t" --platform "$PLATFORM" --config hw/link.cfg $extra \
+  [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:${CLOCK_CUS}"
+  v++ -l -t "$t" --platform "$PLATFORM" --config "$LINK_CFG" $extra \
       --save-temps --temp_dir "$BUILD/_x_$t" \
       -o "$BUILD/cft_$t.xclbin" "$BUILD/cft_krnl.xo"
 done

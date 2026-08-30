@@ -350,7 +350,108 @@ def mul(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
 #   MUL: d = a*b          (c := zero signed with sign(a)^sign(b), which
 #                          preserves the sign of an exact zero product)
 OP_FMA, OP_ADD, OP_SUB, OP_MUL = 0, 1, 2, 3
-OP_NAMES = {OP_FMA: "fma", OP_ADD: "add", OP_SUB: "sub", OP_MUL: "mul"}
+# Non-arithmetic operations. These do not round, do not depend on the
+# rounding attribute, and reach the output through the pipeline's
+# existing precomputed-result path rather than the datapath.
+OP_ABS, OP_NEG, OP_COPYSIGN = 4, 5, 6
+OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
+OP_NAMES = {
+    OP_FMA: "fma", OP_ADD: "add", OP_SUB: "sub", OP_MUL: "mul",
+    OP_ABS: "abs", OP_NEG: "neg", OP_COPYSIGN: "copysign",
+    OP_MIN: "min", OP_MAX: "max",
+    OP_MINNUM: "minnum", OP_MAXNUM: "maxnum",
+}
+ARITH_OPS = (OP_FMA, OP_ADD, OP_SUB, OP_MUL)
+SIMPLE_OPS = (OP_ABS, OP_NEG, OP_COPYSIGN,
+              OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM)
+
+
+# ---- non-arithmetic operations ---------------------------------------
+#
+# 754-2019 5.5.1 calls abs/negate/copySign "quiet-computational": they
+# manipulate the sign bit and nothing else, signal no exception at all
+# (not even on a signaling NaN), and pass every other bit through
+# unchanged - including a NaN's payload.
+#
+# That is a deliberate exception to this contract's canonical-NaN rule,
+# and it does not weaken it. The canonical rule exists because in
+# ARITHMETIC the choice of which operand's payload survives is where
+# implementations diverge. Here there is exactly one source for the
+# payload, so the result is still a deterministic function of the
+# input bits - and canonicalising instead would make copySign lossy,
+# which the standard does not permit.
+
+def fabs(fmt: FpFormat, xa: int, *_):
+    return xa & ~fmt.sign_mask, 0
+
+
+def neg(fmt: FpFormat, xa: int, *_):
+    return xa ^ fmt.sign_mask, 0
+
+
+def copysign(fmt: FpFormat, xa: int, xb: int, *_):
+    return (xa & ~fmt.sign_mask) | (xb & fmt.sign_mask), 0
+
+
+def _numeric_lt(fmt: FpFormat, xa: int, xb: int) -> bool:
+    """x < y for non-NaN operands, IEEE comparison (so -0 == +0)."""
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    if ua.kind == ZERO and ub.kind == ZERO:
+        return False                      # +-0 compare equal
+    if ua.sign != ub.sign:
+        return bool(ua.sign)              # negative < positive
+    # same sign: the magnitude ordering of the encoding is monotone,
+    # so the payload-free bit pattern compares directly
+    ma, mb = xa & ~fmt.sign_mask, xb & ~fmt.sign_mask
+    return (ma > mb) if ua.sign else (ma < mb)
+
+
+def _minmax(fmt: FpFormat, xa: int, xb: int, want_max: bool, number: bool):
+    """754-2019 9.6. `number` selects the ...Number variants, which
+    return the non-NaN operand instead of propagating the NaN."""
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    a_nan, b_nan = ua.kind == NAN, ub.kind == NAN
+    flags = FLAG_INVALID if ((a_nan and ua.signaling) or
+                             (b_nan and ub.signaling)) else 0
+    if a_nan or b_nan:
+        if not number or (a_nan and b_nan):
+            return qnan_bits(fmt), flags
+        return (xb if a_nan else xa), flags
+    # Signed zeros compare equal but are not interchangeable here: the
+    # standard requires min(+0, -0) to be -0 and max(+0, -0) to be +0.
+    if ua.kind == ZERO and ub.kind == ZERO:
+        if ua.sign == ub.sign:
+            return xa, flags
+        neg_one = xa if ua.sign else xb
+        pos_one = xb if ua.sign else xa
+        return (pos_one if want_max else neg_one), flags
+    a_lt_b = _numeric_lt(fmt, xa, xb)
+    if want_max:
+        return (xb if a_lt_b else xa), flags
+    return (xa if a_lt_b else xb), flags
+
+
+def fmin(fmt, xa, xb, *_):
+    return _minmax(fmt, xa, xb, want_max=False, number=False)
+
+
+def fmax(fmt, xa, xb, *_):
+    return _minmax(fmt, xa, xb, want_max=True, number=False)
+
+
+def fminnum(fmt, xa, xb, *_):
+    return _minmax(fmt, xa, xb, want_max=False, number=True)
+
+
+def fmaxnum(fmt, xa, xb, *_):
+    return _minmax(fmt, xa, xb, want_max=True, number=True)
+
+
+SIMPLE_IMPL = {
+    OP_ABS: fabs, OP_NEG: neg, OP_COPYSIGN: copysign,
+    OP_MIN: fmin, OP_MAX: fmax,
+    OP_MINNUM: fminnum, OP_MAXNUM: fmaxnum,
+}
 
 
 def steer(fmt: FpFormat, op: int, xa: int, xb: int, xc: int):
@@ -370,5 +471,12 @@ def steer(fmt: FpFormat, op: int, xa: int, xb: int, xc: int):
 
 def compute(fmt: FpFormat, op: int, xa: int, xb: int, xc: int,
             rnd: int = RND_RNE):
-    """The engine's view: steer, then one FMA. (bits, flags)."""
+    """The engine's view of one element. (bits, flags).
+
+    Arithmetic goes through the operand steering and the one FMA;
+    everything else is a direct function of the operand bits and
+    ignores the rounding attribute entirely.
+    """
+    if op in SIMPLE_IMPL:
+        return SIMPLE_IMPL[op](fmt, xa, xb, xc)
     return fma(fmt, *steer(fmt, op, xa, xb, xc), rnd=rnd)

@@ -11,6 +11,7 @@ module tb_fpfma_fp32 (
     input  logic        rst_n,
     input  logic        in_valid,
     input  logic [2:0]  rnd,
+    input  logic [3:0]  op,
     input  logic [31:0] a,
     input  logic [31:0] b,
     input  logic [31:0] c,
@@ -18,8 +19,11 @@ module tb_fpfma_fp32 (
     output logic [31:0] d,
     output logic [4:0]  flags
 );
+  logic bv; logic [31:0] bd; logic [4:0] bf;
+  cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
+      .op(op), .a(a), .b(b), .valid(bv), .d(bd), .flags(bf));
   cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(15)) u_dut (
-      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd), .byp(bv), .byp_d(bd), .byp_f(bf),
       .a(a), .b(b), .c(c),
       .out_valid(out_valid), .d(d), .flags(flags));
 endmodule

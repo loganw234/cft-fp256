@@ -57,6 +57,14 @@ module cft_fpfma_pipe #(
     input  logic                 rst_n,
     input  logic                 in_valid,
     input  logic [2:0]           rnd,      // rounding attribute, per op
+    // Precomputed result. When byp is high the datapath's answer is
+    // discarded and byp_d/byp_f are delivered at the output instead,
+    // carried down the same sideband the specials already use. This is
+    // how the non-arithmetic operations (cft_simpleops) reach the
+    // output without a latency-matching delay line of their own.
+    input  logic                 byp,
+    input  logic [EXP_W+MAN_W:0] byp_d,
+    input  logic [4:0]           byp_f,
     input  logic [EXP_W+MAN_W:0] a,
     input  logic [EXP_W+MAN_W:0] b,
     input  logic [EXP_W+MAN_W:0] c,
@@ -180,8 +188,12 @@ module cft_fpfma_pipe #(
   // S0: input registers
   // ------------------------------------------------------------------
   logic [W-1:0] s0_a, s0_b, s0_c;
+  logic         s0_byp;
+  logic [W-1:0] s0_byp_d;
+  logic [4:0]   s0_byp_f;
   always_ff @(posedge clk) begin
     s0_a <= a; s0_b <= b; s0_c <= c;
+    s0_byp <= byp; s0_byp_d <= byp_d; s0_byp_f <= byp_f;
   end
 
   // The rounding attribute travels with its operation rather than
@@ -250,7 +262,14 @@ module cft_fpfma_pipe #(
     s1_special <= 1'b0;
     s1_spec_d  <= '0;
     s1_spec_fl <= '0;
-    if (a_nan || b_nan || c_nan) begin
+    // A precomputed result wins over every classification below: the
+    // operation was not arithmetic, so nothing the operands look like
+    // can change its answer or raise a flag it did not raise.
+    if (s0_byp) begin
+      s1_special <= 1'b1;
+      s1_spec_d  <= s0_byp_d;
+      s1_spec_fl <= s0_byp_f;
+    end else if (a_nan || b_nan || c_nan) begin
       s1_special <= 1'b1;
       s1_spec_d  <= qnan;
       s1_spec_fl <= (a_snan || b_snan || c_snan) ? (5'b1 << FL_INVALID) : 5'b0;

@@ -34,7 +34,8 @@ from cocotb.triggers import ReadOnly, RisingEdge
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from cft_golden import (  # noqa: E402
-    OP_NAMES, RND_NAMES, RND_MODES, fma, steer, vectors,
+    OP_NAMES, RND_NAMES, RND_MODES, SIMPLE_OPS,
+    compute, fma, steer, vectors,
 )
 
 
@@ -75,11 +76,23 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
         for rnd in modes:
             want_d, want_f = fma(fmt, fa, fb, fc, rnd)
             work.append((op, rnd, fa, fb, fc, want_d, want_f))
+
+    # The non-arithmetic operations take the same operands but bypass
+    # the datapath entirely, so they are issued interleaved with the
+    # arithmetic ones: a bypassed operation and a computed one are in
+    # flight together on every cycle, which is the only way to catch a
+    # sideband that carries the wrong one to the output.
+    for op in SIMPLE_OPS:
+        for _, xa, xb, xc in cases[:max(1, len(cases) // 4)]:
+            want_d, want_f = compute(fmt, op, xa, xb, xc)
+            work.append((op, RND_MODES[0], xa, xb, xc, want_d, want_f))
+
     random.Random(seed ^ 0x5EED).shuffle(work)
 
     cocotb.start_soon(Clock(dut.clk, 4, units="ns").start())
     dut.in_valid.value = 0
     dut.rnd.value = 0
+    dut.op.value = 0
     dut.rst_n.value = 0
     for _ in range(4):
         await RisingEdge(dut.clk)
@@ -112,11 +125,12 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     chk = cocotb.start_soon(checker())
 
     for item in work:
-        _, rnd, fa, fb, fc, _, _ = item
+        op, rnd, fa, fb, fc, _, _ = item
         dut.a.value = fa
         dut.b.value = fb
         dut.c.value = fc
         dut.rnd.value = rnd
+        dut.op.value = op
         dut.in_valid.value = 1
         expected.append(item)
         await RisingEdge(dut.clk)
@@ -131,8 +145,10 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
     assert checked == len(work)
     assert not errors, \
         f"{len(errors)} of {checked} mismatches (first: {errors[0]})"
+    n_simple = len(SIMPLE_OPS) * max(1, len(cases) // 4)
     dut._log.info(
         f"{fmt.name}: {checked} vectors bit-exact against cft_golden "
         f"({len(cases)} cases x {len(modes)} rounding "
-        f"{'attributes' if len(modes) > 1 else 'attribute'}: "
-        f"{', '.join(RND_NAMES[m] for m in modes)})")
+        f"{'attributes' if len(modes) > 1 else 'attribute'} "
+        f"[{', '.join(RND_NAMES[m] for m in modes)}], plus {n_simple} "
+        f"non-arithmetic across {len(SIMPLE_OPS)} opcodes)")

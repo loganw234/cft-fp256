@@ -143,7 +143,7 @@ module cft_engine_stream #(
   // ---- run control ---------------------------------------------------
   logic         running;
   logic [1:0]   prec_r;
-  logic [1:0]   op_r;
+  logic [3:0]   op_r;
   logic [2:0]   rnd_r;
   logic [63:0]  beats_total;
   logic [63:0]  base_a, base_b, base_c, base_d;
@@ -161,7 +161,7 @@ module cft_engine_stream #(
       running <= 1'b0;
       done <= 1'b0;
       prec_r <= 2'd0;
-      op_r <= 2'd0;
+      op_r <= 4'd0;
       rnd_r <= 3'd0;
       beats_total <= '0;
       base_a <= '0; base_b <= '0; base_c <= '0; base_d <= '0;
@@ -180,7 +180,7 @@ module cft_engine_stream #(
         // different runs. That is the exact failure this design
         // exists to rule out.
         prec_r <= cfg_prec[1:0];
-        op_r   <= cfg_op[1:0];
+        op_r   <= cfg_op;
         rnd_r  <= cfg_rnd;
         beats_total <= beats_new;
         base_a <= cfg_a; base_b <= cfg_b; base_c <= cfg_c; base_d <= cfg_d;
@@ -356,10 +356,14 @@ module cft_engine_stream #(
       cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
           .op(op_r), .a(sa), .b(sb), .c(sc),
           .fa(fa), .fb(fb), .fc(fc));
+      logic bv; logic [31:0] bd; logic [4:0] bf;
+      cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
+          .op(op_r), .a(sa), .b(sb),
+          .valid(bv), .d(bd), .flags(bf));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP32)),
-          .rnd(rnd_r),
+          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(fa), .b(fb), .c(fc),
           .out_valid(), .d(dd), .flags(f32_l[gi]));
       assign d32[gi*32 +: 32] = dd;
@@ -384,10 +388,14 @@ module cft_engine_stream #(
         cft_opmux #(.EXP_W(11), .MAN_W(52)) u_mux (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
+        logic bv; logic [63:0] bd; logic [4:0] bf;
+        cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
+            .op(op_r), .a(sa), .b(sb),
+            .valid(bv), .d(bd), .flags(bf));
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
-          .rnd(rnd_r),
+          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]));
         assign d64[gi*64 +: 64] = dd;
@@ -416,10 +424,14 @@ module cft_engine_stream #(
         cft_opmux #(.EXP_W(15), .MAN_W(112)) u_mux (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
+        logic bv; logic [127:0] bd; logic [4:0] bf;
+        cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
+            .op(op_r), .a(sa), .b(sb),
+            .valid(bv), .d(bd), .flags(bf));
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
-          .rnd(rnd_r),
+          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]));
         assign d128[gi*128 +: 128] = dd;
@@ -443,10 +455,14 @@ module cft_engine_stream #(
       cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
           .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .fa(w_fa), .fb(w_fb), .fc(w_fc));
+      logic bv; logic [255:0] bd; logic [4:0] bf;
+      cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
+          .op(op_r), .a(a_q), .b(b_q),
+          .valid(bv), .d(bd), .flags(bf));
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
-          .rnd(rnd_r),
+          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(w_fa), .b(w_fb), .c(w_fc),
           .out_valid(), .d(d256), .flags(f256));
     end else begin : g_bank256_off

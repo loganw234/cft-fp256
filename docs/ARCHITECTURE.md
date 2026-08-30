@@ -46,6 +46,14 @@ kernel flow, XRT host runtime.
   steered operands (b:=1.0, c sign-flip, signed-zero c). The table
   lives in three places that must move together: this module,
   `softfloat.steer`, and this document.
+- **cft_simpleops** - the operations that are not arithmetic: `abs`,
+  `negate`, `copySign` (754 5.5.1) and the four min/max forms (9.6).
+  A sign bit and a magnitude comparison, computed combinationally.
+  Its answer reaches the output through the pipe's precomputed-result
+  sideband - the same path infinities and NaNs already take - so it
+  arrives at exactly the arithmetic latency with no delay line of its
+  own, and one bypassed operation can be in flight beside a computed
+  one on every cycle.
 - **cft_csr** - AXI4-Lite slave, Vitis ap_ctrl_hs protocol, argument
   registers, and the read-only FLAGS/MAGIC/VERSION/CAPS block.
 - **cft_engine_stream** - the v1 streaming sequencer the kernel
@@ -90,7 +98,7 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x04 | GIER | RW | storage only; no interrupt exported in v0 |
 | 0x08 | IER  | RW | storage only |
 | 0x0C | ISR  | RO | 0 |
-| 0x10 | MODE | RW | [3:0] op: 0 fma, 1 add, 2 sub, 3 mul; [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 (issue only precisions set in CAPS); [10:8] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne); [31:11] reserved, write 0 |
+| 0x10 | MODE | RW | [3:0] op: 0 fma, 1 add, 2 sub, 3 mul, 4 abs, 5 neg, 6 copysign, 7 min, 8 max, 9 minnum, 10 maxnum (4-10 are non-arithmetic: no rounding, the attribute field is ignored); [7:4] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 (issue only precisions set in CAPS); [10:8] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne); [31:11] reserved, write 0 |
 | 0x18 | N    | RW | element count, 64-bit |
 | 0x20 | A_PTR | RW | 64-bit HBM byte address |
 | 0x28 | B_PTR | RW | 64-bit |

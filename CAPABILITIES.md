@@ -83,14 +83,28 @@ and the clause 6.3 signed zero of an exact cancellation.
 Reading the flags from the host is currently blocked by a tooling gap,
 not a hardware one - see "Host access" below.
 
+## Non-arithmetic operations
+
+These do not round, ignore the rounding attribute, and reach the
+output through the pipeline's precomputed-result path rather than the
+datapath - so they cost a comparator and a sign bit, not a stage.
+
+| operation | status | notes |
+|---|---|---|
+| `abs`, `negate`, `copySign` | **yes** | quiet: signal nothing, preserve NaN payloads |
+| `minimum`, `maximum` | **yes** | NaN propagates; `min(+0,-0)` is -0 |
+| `minimumNumber`, `maximumNumber` | **yes** | returns the number when one operand is NaN |
+
 ## Everything else in clause 5 - the gap
 
-None of this exists. It is listed in full because the length of the
-list *is* the distance to general purpose.
+Most of this does not exist. It is listed in full because the length
+of the list *is* the distance to general purpose.
 
 | group | operations | status |
 |---|---|---|
-| sign operations (5.5.1) | `copy`, `negate`, `abs`, `copySign` | **no** |
+| sign operations (5.5.1) | `abs`, `negate`, `copySign` | **yes** |
+| sign operations (5.5.1) | `copy` | **no** - a memcpy; nothing needs the tile for it |
+| min/max (5.3.1, 9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **yes** |
 | comparisons (5.6.1, 5.11) | `compareQuiet*`, `compareSignaling*`, all 22 predicates | **no** |
 | conversions (5.4.2) | int -> float, float -> int (all five roundings) | **no** |
 | format conversion (5.4.2) | fp32 <-> fp64 <-> fp128 <-> fp256 | **no** |
@@ -98,7 +112,6 @@ list *is* the distance to general purpose.
 | remainder (5.3.1) | `remainder` | **no** |
 | scaling (5.3.3) | `scaleB`, `logB` | **no** |
 | next (5.3.1) | `nextUp`, `nextDown` | **no** |
-| min/max (5.3.1, 9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **no** |
 | classification (5.7.2) | `class`, `isNaN`, `isInfinite`, `isNormal`, `isSubnormal`, `isZero`, `isSignMinus`, `isCanonical` | **no** |
 | total order (5.10) | `totalOrder`, `totalOrderMag` | **no** |
 | NaN payloads (6.2.3) | payload propagation | **out** | 
@@ -144,10 +157,13 @@ That means the distance to running it on-chip is short and specific:
 | bit reinterpretation (float <-> uint) | free - the same register, no operation needed |
 | integer add / subtract / shift on the bit pattern | **no** - needed for seeds like `0x5F375A86 - (m >> 1)` |
 | compare and branchless select | **no** - every special-case guard in the library is one |
-| `abs`, `min`, `max`, `clamp`, `floor`, `round`, `step` | **no** |
+| `abs`, `min`, `max` | **yes** |
+| `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
+| `floor`, `round`, `step` | **no** - `roundToIntegral` is the next cheap win |
 | a sequencer to run a chain on-chip | **no** - the v2 orbit engine |
 
-Six rows, five of them missing. Grouped by what they would unlock:
+Six rows, three still missing after the 2026-08-29 work. Grouped by
+what they would unlock:
 
 | family | functions |
 |---|---|
@@ -207,12 +223,16 @@ Three things, in the order they matter:
    into a processor, and it is worth more than every missing operation
    below combined.
 
-2. **The cheap operations, which are cheap.** Comparison, select,
-   `abs`, `copySign`, `min`/`max`, `roundToIntegral`, classification
-   and the integer/bit operations are all shallow logic on data that
-   is already unpacked in the datapath. They are absent because
-   nothing has needed them yet, not because they are hard. Together
-   with (1) they are what the det library actually requires.
+2. **The cheap operations, which are cheap.** `abs`, `negate`,
+   `copySign` and the four min/max forms landed on 2026-08-29 and cost
+   a comparator each - they ride the pipeline's existing
+   precomputed-result path, so they added no stage and no latency.
+   What remains in the same class: comparison predicates, select,
+   `roundToIntegral`, classification, and integer/bit operations on
+   the pattern. All shallow logic on data the datapath already
+   unpacks, absent because nothing needed them yet rather than because
+   they are hard. Together with (1) they are what the det library
+   actually requires.
 
 3. **Division and square root.** The genuinely expensive additions,
    and the least urgent: the det library already implements both from

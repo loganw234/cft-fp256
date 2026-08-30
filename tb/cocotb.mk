@@ -15,6 +15,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_fpfma.sv \
     $(RTLDIR)/cft_fpfma_pipe.sv \
     $(RTLDIR)/cft_opmux.sv \
+    $(RTLDIR)/cft_simpleops.sv \
     $(RTLDIR)/cft_csr.sv \
     $(RTLDIR)/cft_fifo.sv \
     $(RTLDIR)/cft_engine.sv \

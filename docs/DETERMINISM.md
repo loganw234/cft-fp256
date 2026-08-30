@@ -107,6 +107,29 @@ another implementation: `python/tests/test_rounding.py` decodes each
 result into an exact rational and re-derives what 754 requires by
 exact rational floor division, sharing no code path with the model.
 
+## The non-arithmetic operations
+
+`abs`, `negate` and `copySign` (5.5.1) together with `minimum`,
+`maximum`, `minimumNumber` and `maximumNumber` (9.6) do not round, do
+not consult the rounding attribute, and cannot be inexact. Two of
+their rules are worth stating because they are the ones implementations
+get wrong:
+
+- **`min(+0, -0)` is -0 and `max(+0, -0)` is +0.** Signed zeros compare
+  equal but are not interchangeable, so a min/max that just returns
+  "either, they're equal" is non-conforming and, worse, free to return
+  a different one on a different device.
+- **`abs`, `negate` and `copySign` preserve NaN payloads and signal
+  nothing**, even for a signaling NaN. This is the single exception to
+  the canonical-NaN rule below, and it does not weaken determinism: the
+  canonical rule exists because in arithmetic *which operand's payload
+  survives* is where implementations diverge, and here there is exactly
+  one source. Canonicalising would also make `copySign` lossy, which
+  the standard does not permit.
+
+The `...Number` forms return the non-NaN operand where the plain forms
+propagate the NaN; all four signal invalid on a signaling NaN.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
