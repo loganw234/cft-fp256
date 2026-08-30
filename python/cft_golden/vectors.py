@@ -141,6 +141,52 @@ def random_cases(fmt: FpFormat, count: int, seed: int = 2):
 
 
 def testset(fmt: FpFormat, directed_budget: int, random_count: int, seed: int = 3):
-    """The canonical combined set used by the RTL testbenches."""
+    """The canonical combined set used by the RTL testbenches.
+
+    Arithmetic only. The non-arithmetic opcodes take the same operands
+    but do not go through the steering mux, so the benches build them
+    separately; simple_cases() below is what the published vector sets
+    use for them.
+    """
     return directed_cases(fmt, directed_budget, seed) + \
         random_cases(fmt, random_count, seed + 1)
+
+
+def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
+    """Cases for every non-arithmetic opcode, plus the unassigned ones.
+
+    These belong in the published sets for the same reason the
+    arithmetic does: the vectors are how an independent implementation
+    is scored, and a set covering four of twenty-three opcodes scores
+    almost nothing. The specials pool is weighted heavily here because
+    that is where these operations differ from each other at all -
+    min and minnum agree on every ordinary pair and part company only
+    on NaNs, and abs/select part company from arithmetic only on NaN
+    payloads and signed zeros.
+
+    Shift counts get their own treatment: a uniformly random b is
+    almost always a huge shift, so the interesting small counts and the
+    modulo-width wrap points would never appear by chance.
+    """
+    rng = random.Random(seed ^ (fmt.width * 7919))
+    pool = interesting_operands(fmt)
+    shifty = [0, 1, 2, fmt.man_w, fmt.width - 1, fmt.width, fmt.width + 1,
+              2 * fmt.width - 1]
+    cases = []
+    for op in sf.SIMPLE_OPS + (15, 24, 255):
+        is_shift = op in (sf.OP_ISHL, sf.OP_ISHR)
+        for i in range(per_op):
+            if i % 3 == 0:
+                xa, xb = rng.choice(pool), rng.choice(pool)
+            else:
+                xa = _rand_bits(rng, fmt)
+                xb = rng.choice(pool) if i % 3 == 1 else _rand_bits(rng, fmt)
+            if is_shift:
+                xb = rng.choice(shifty)
+            # select reads c, and a c of +-0 versus anything else is
+            # the whole decision, so make both outcomes common
+            xc = rng.choice(pool + [sf.zero_bits(fmt, 0), sf.zero_bits(fmt, 1),
+                                    sf.one_bits(fmt)])
+            cases.append((op, xa, xb, xc))
+    rng.shuffle(cases)
+    return cases

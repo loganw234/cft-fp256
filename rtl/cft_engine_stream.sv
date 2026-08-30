@@ -110,6 +110,16 @@ module cft_engine_stream #(
   // is legal but degenerate (writes could only begin with the FIFO
   // completely full, stalling read and compute for the whole burst),
   // so demand real headroom.
+  // Generate scope AND initial, for the reason cft_fpfma_pipe's guards
+  // spell out: Yosys and Vivado honour the elaboration-time $error and
+  // ignore `initial`, Icarus is the reverse, so one form alone leaves
+  // some toolchain able to build a deadlocking design.
+  generate
+    if (BURST_MAX >= FDEPTH) begin : g_burst_exceeds_fifo
+      $error("cft_engine_stream: BURST_LOG2 must be less than FIFO_LOG2");
+    end
+  endgenerate
+
   initial begin
     if (BURST_MAX >= FDEPTH) begin
       $display("FATAL: cft_engine_stream needs BURST_LOG2 (%0d) < FIFO_LOG2 (%0d)",

@@ -32,10 +32,26 @@
 //                 {inexact,underflow,overflow,divzero,invalid};
 //                 cleared by hardware at ap_start
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000400 (v0.4.0)
-//   0x4C  CAPS    RO: [3:0] precision bitmask, bit p = MODE prec p
-//                 implemented (full tile: 0xF; trimmed open-core
-//                 tiles clear the banks they cannot fit)
+//   0x48  VERSION RO: 0x00000410 (v0.4.1)
+//   0x4C  CAPS    RO: what this bitstream actually implements.
+//                 [3:0]  precision bitmask, bit p = MODE precision p
+//                        (full tile 0xF; a trimmed open-core tile
+//                        clears the banks it cannot fit)
+//                 [15:8] opcode-group bitmask:
+//                        [8]  arithmetic  fma/add/sub/mul
+//                        [9]  sign        abs/neg/copysign
+//                        [10] min/max     the four 9.6 forms
+//                        [11] predicate   select/cmplt/cmple/cmpeq
+//                        [12] integer     the eight bitwise/integer
+//                        [13] reduction   reserved
+//                        [14] divide/sqrt reserved
+//                        [15] conversion  reserved
+//                 Groups rather than 256 individual bits, because
+//                 opcodes arrive in groups and a bit per opcode is a
+//                 register nobody would keep current. A host asks
+//                 before issuing; the alternative is guessing from
+//                 VERSION, which stops working the moment one build
+//                 ships without a group.
 //   0x50  STATUS  RO: sticky bus faults from the last run, cleared by
 //                 hardware at ap_start. A run that ends with STATUS
 //                 non-zero computed on data the memory system did not
@@ -76,6 +92,7 @@ module cft_csr (
     input  logic [4:0]  eng_flags,
     input  logic [2:0]  eng_err,     // sticky bus/protocol faults, see STATUS
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
+    input  logic [7:0]  op_caps,     // constant; opcode groups present
     output logic [7:0]  cfg_op,
     output logic [3:0]  cfg_prec,
     output logic [2:0]  cfg_rnd,
@@ -87,7 +104,7 @@ module cft_csr (
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  localparam [31:0] VERSION = 32'h0000_0400;
+  localparam [31:0] VERSION = 32'h0000_0410;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
@@ -236,7 +253,7 @@ module cft_csr (
           10'h010: s_axi_control_rdata <= {27'b0, eng_flags};
           10'h011: s_axi_control_rdata <= MAGIC;
           10'h012: s_axi_control_rdata <= VERSION;
-          10'h013: s_axi_control_rdata <= {28'b0, prec_caps};
+          10'h013: s_axi_control_rdata <= {16'b0, op_caps, 4'b0, prec_caps};
           10'h014: s_axi_control_rdata <= {29'b0, eng_err};
           default: s_axi_control_rdata <= 32'h0;
         endcase

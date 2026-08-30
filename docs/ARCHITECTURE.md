@@ -106,8 +106,8 @@ rungs it carries; the beat stays 256 bits regardless.
 | 0x38 | D_PTR | RW | 64-bit |
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at ap_start |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
-| 0x48 | VERSION | RO | 0x00000400 (v0.4.0: 8-bit opcode field, non-arithmetic and integer groups) |
-| 0x4C | CAPS | RO | [3:0] precision bitmask, bit p = MODE precision p implemented; full tile reads 0xF |
+| 0x48 | VERSION | RO | 0x00000410 (v0.4.1: opcode-group discovery in CAPS) |
+| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 conversion (the last three reserved and currently clear). Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current |
 | 0x50 | STATUS | RO | sticky bus faults of the last run, cleared at ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count. **Non-zero means the D buffer must not be trusted** |
 
 ### Opcodes (MODE[7:0])

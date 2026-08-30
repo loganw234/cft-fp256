@@ -110,6 +110,10 @@ module cft_krnl #(
       .start(start), .busy(busy), .done(done), .eng_flags(eng_flags),
       .eng_err(eng_err),
       .prec_caps({EN_FP256, EN_FP128, EN_FP64, 1'b1}),
+      // arithmetic, sign, min/max, predicate, integer are all
+      // present; reduction, divide/sqrt and conversion are not
+      // yet built and their bits stay clear.
+      .op_caps(8'b0001_1111),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d)
   );

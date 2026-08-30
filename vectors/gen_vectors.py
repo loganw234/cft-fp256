@@ -13,6 +13,12 @@ Every line is one case with the golden result and flags:
     {"op": "fma", "rnd": "rne", "a": "0x...", "b": "0x...",
      "c": "0x...", "d": "0x...", "flags": 17}
 
+Every opcode the tile implements appears here, arithmetic and
+non-arithmetic alike, plus the unassigned codes whose defined
+answer (canonical qNaN, invalid raised) is also part of the
+contract. A set covering only the arithmetic would score almost
+nothing.
+
 These files are the cross-implementation contract: the RTL testbenches
 regenerate the same cases from the same seed, and a GPU-side det
 library (or any other implementation claiming identity) is scored by
@@ -44,6 +50,8 @@ def main():
                     help="rounding attributes to emit (default: rne only)")
     ap.add_argument("--directed", type=int, default=4000)
     ap.add_argument("--random", type=int, default=6000)
+    ap.add_argument("--simple", type=int, default=400,
+                    help="cases per non-arithmetic opcode")
     ap.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
 
@@ -52,7 +60,8 @@ def main():
     for name in args.formats:
         fmt = FORMATS[name]
         hexw = fmt.width // 4
-        cases = vectors.testset(fmt, args.directed, args.random, args.seed)
+        cases = (vectors.testset(fmt, args.directed, args.random, args.seed)
+                 + vectors.simple_cases(fmt, args.simple, args.seed + 2))
         for rname in args.rounding:
             rnd = RND_BY_NAME[rname]
             # the default attribute keeps the plain filename, so an
@@ -63,7 +72,7 @@ def main():
                 for op, xa, xb, xc in cases:
                     d, flags = compute(fmt, op, xa, xb, xc, rnd)
                     f.write(json.dumps({
-                        "op": OP_NAMES[op],
+                        "op": OP_NAMES.get(op, f"reserved{op}"),
                         "rnd": rname,
                         "a": f"0x{xa:0{hexw}x}",
                         "b": f"0x{xb:0{hexw}x}",

@@ -107,26 +107,27 @@ have existed since before the hardware did.
 
 ## Weak links this exposes in the hardware contract
 
-Writing the header surfaced two places where the device side is not
-yet future-proof enough to sit behind a stable ABI. Both are worth
-fixing while breaking changes are still free:
+Writing the header surfaced two places where the device side was not
+future-proof enough to sit behind a stable ABI. **Both are now
+fixed** - which is the argument for writing a header before an
+implementation: neither gap was visible until something had to be
+promised to a caller.
 
-1. **`CAPS` reports precisions but not operations.** A host can ask
-   which formats a bitstream carries and cannot ask which opcodes it
-   implements. That is fine while every build has every op and
-   actively wrong as soon as one does not - `cft_supports()` would
-   have to guess from the version number. The fix is a compact
-   **opcode-group bitmask** alongside the precision mask: arithmetic,
-   sign, min/max, predicate, integer, and room for reduction and
-   transcendental. Groups rather than 256 individual bits, because ops
-   arrive in groups and a bitmask per opcode is a register nobody
-   wants to maintain.
+1. **`CAPS` reported precisions but not operations.** A host could ask
+   which formats a bitstream carried and not which opcodes it
+   implemented - fine while every build has every op, actively wrong
+   the moment one does not, and `cft_supports()` would have had to
+   guess from the version number. CAPS[15:8] is now an opcode-group
+   bitmask: arithmetic, sign, min/max, predicate, integer, with
+   reserved bits for reduction, divide/sqrt and conversion. Groups
+   rather than 256 individual bits, because opcodes arrive in groups
+   and a bit per opcode is a register nobody keeps current.
 
-2. **Unassigned opcodes silently do arithmetic.** Opcode 15, and
-   everything from 24 up, currently falls through to the FMA datapath
-   with unsteered operands. It is deterministic, so the contract is
-   not violated, but it is the wrong failure: a host that issues an
-   opcode this bitstream predates gets a plausible number instead of
-   an error. Returning the canonical quiet NaN with **invalid** raised
-   would make the mistake visible in the flags, cost almost nothing,
-   and give `CFT_ERR_UNSUPPORTED` something real to report.
+2. **Unassigned opcodes silently did arithmetic.** Opcode 15 and
+   everything from 24 up fell through to the FMA datapath with
+   unsteered operands - deterministic, so the contract held, but the
+   wrong failure: a host issuing an opcode its bitstream predates got
+   a plausible number rather than an error. They now return the
+   canonical quiet NaN with **invalid** raised, in hardware and in the
+   golden model alike, which is what `CFT_ERR_UNSUPPORTED` reports
+   against.
