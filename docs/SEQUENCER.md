@@ -169,29 +169,36 @@ would cost more than the arithmetic intensity the sequencer exists to
 buy, and the whole design would be pointless.
 
 The fix is not a bypass network. It is that **lanes are independent**,
-so one instruction issued across a block of L lanes is L independent
-operations, and they fill the pipe on their own:
+so one instruction issued across a block of lanes is that many
+independent operations, and they fill the pipe on their own.
 
-    L >= LATENCY
+The engine already instantiates one ALU per lane per beat - eight at
+fp32, one at fp256 - and issues one beat per cycle. So to keep a
+15-stage pipeline full the sequencer must hold
 
-is the design's central sizing constraint. Sixteen is the practical
-number. At fp32 a beat is 8 lanes, so L=16 is two beats; at fp256 a
-beat is one lane, so L=16 is sixteen beats held on-chip at once. A
-dependent chain then runs at one instruction per L cycles with the
-pipeline full, rather than one per 15 with it empty.
+    LATENCY beats  =  LATENCY * lanes_per_beat  lanes
 
-That constraint, not the deposit depth alone, sets the on-chip memory:
+on-chip, and issue one instruction across all of them before it needs
+the first result. A dependent chain then costs `LATENCY + LATENCY`
+cycles per instruction with every ALU busy, instead of `LATENCY` with
+all but one idle.
 
-| structure | size | fp256, L=16 |
-|---|---|---|
-| register file | `L * 16 * element_bytes` | 8 KiB |
-| deposit buffer | `L * max_deposits * element_bytes` | 32 KiB at `max_deposits=64` |
+The pleasing part is that this makes the register file
+**precision-independent**. A beat is 32 bytes whatever the format, so
 
-So the deposit buffer dominates once `max_deposits > 16`, which is the
-regime an orbit actually wants - but *only* then, and the earlier claim
-that it simply dominates was written before the lane-block floor was
-worked out. On a 130 nm chiplet both numbers are the design, and
-trading L against `max_deposits` is the axis.
+    register file  =  16 registers * LATENCY beats * 32 bytes  =  7.5 KiB
+
+at fp32, fp64, fp128 and fp256 alike - 120 fp32 lanes or 15 fp256
+lanes, the same silicon. The deposit buffer scales the same way:
+
+    deposit buffer  =  max_deposits * LATENCY beats * 32 bytes
+
+so it passes the register file at `max_deposits > 16` and dominates
+from there, which is the regime an orbit actually wants. The earlier
+claim that the deposit buffer simply dominates was written before the
+lane-block floor was worked out; both numbers are the design, and
+trading pipeline depth against deposit depth is the axis a chiplet
+turns.
 
 Two consequences worth stating now, because they constrain the RTL:
 
