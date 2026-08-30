@@ -1,4 +1,25 @@
 * text=auto eol=lf
+
+# `text=auto` asks git to sniff whether a file is text, and a file it
+# decides is binary is never normalised. hw/rebuild-2022.sh spent
+# several commits classified that way - a mangled sed backreference had
+# left one 0x01 byte in it - so it kept its CRLF endings and would not
+# have run on the Linux box it exists to drive. These entries say
+# `text` rather than `auto`: for a shell script, a Tcl script or RTL,
+# "it looks binary" means the file is damaged, not that it should be
+# left alone.
+*.sh     text eol=lf
+*.tcl    text eol=lf
+*.cfg    text eol=lf
+*.mk     text eol=lf
+*.sv     text eol=lf
+*.v      text eol=lf
+*.py     text eol=lf
+*.c      text eol=lf
+*.h      text eol=lf
+*.f90    text eol=lf
+Makefile text eol=lf
+
 *.png binary
 *.jpg binary
 *.xclbin binary

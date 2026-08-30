@@ -37,10 +37,29 @@ LINK_CFG=${LINK_CFG:-hw/link.cfg}
 # the form --clock.freqHz wants - so there is one source of truth and
 # it is the file that defines the CUs.
 if [ -z "${CLOCK_CUS:-}" ]; then
-  CLOCK_CUS=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$//p'               "$LINK_CFG" | tr -d ' ' | head -1)
-  [ -n "$CLOCK_CUS" ] || CLOCK_CUS=cft_krnl_1
+  CLOCK_CUS=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$LINK_CFG" \
+              | tr -d ' ' | head -1)
 fi
-echo "Clock constraint targets: $CLOCK_CUS" 
+
+# Validate, do not merely default. An EMPTY result would fall back
+# harmlessly; a GARBLED one will not, because it is non-empty and so
+# sails through any "is it set?" test straight into --clock.freqHz,
+# naming a compute unit that does not exist.
+#
+# That is not hypothetical. This line shipped with its sed
+# backreference mangled into a literal 0x01 byte, in the very commit
+# that added it to stop a silent clock misconfiguration. It survived
+# review because the corrupt value was non-empty and the character is
+# invisible in a terminal. CU names are identifiers joined by dots, so
+# anything else is a parse failure - and it stops the run here rather
+# than an hour and three quarters from now.
+case "$CLOCK_CUS" in
+  "" | *[!A-Za-z0-9_.]* )
+    echo "ERROR: no usable CU names from the nk= line of $LINK_CFG" >&2
+    printf '       got: %s\n' "$(printf '%q' "$CLOCK_CUS")" >&2
+    exit 1 ;;
+esac
+echo "Clock constraint targets: $CLOCK_CUS"
 
 # locate Vitis 2022.2
 for root in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
