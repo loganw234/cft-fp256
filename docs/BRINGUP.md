@@ -79,6 +79,45 @@ shell IP never enters the picture. xclbins built by 2022.2 run under
 the newer XRT 2.19 runtime - that pairing is what AMD's own 2024.1
 U50 deployment re-release ships.
 
+### hw_emu did not complete a run on 2026-08-29, and it is not libcft
+
+Recorded because a later reader will otherwise repeat the evening.
+
+The multi-tile host path was built and taken as far as emulation
+allows. Against the quad hw_emu image it **opens the device,
+enumerates four compute units, reads MAGIC / VERSION / CAPS from the
+card's own registers, and partitions the work correctly** - the
+engine's own trace shows four runs of 8 elements each, at four
+different HBM base addresses (`0x0`, `0x8000_0000`, `0xc000_0000`,
+...), which is exactly the per-CU memory-group discipline
+`hw/link_quad.cfg` requires. Each run reads its three operand streams,
+computes, and issues its write.
+
+What does not happen is completion: `xrt::run::wait` never returns.
+Narrowed as far as it is worth narrowing:
+
+| varied | result |
+|---|---|
+| 4 compute units vs 1 | same |
+| exclusive vs shared CU access | same |
+| libcft vs a 40-line XRT program using neither | same |
+
+So it is not a libcft defect and not multi-tile - a minimal XRT
+program reproduces it. Two further observations: the emulation
+environment here is fragile in its own right (an interrupted run
+leaves an orphan `xsimk` holding a socket, which
+`hw/run-device-test.sh` now reaps), and on the last attempt the
+simulator kernel did not start at all while the host process spun.
+
+The engine now logs `[CFT-ENGS] DONE` on completion, which is the
+missing evidence: it distinguishes "the kernel finished and XRT did
+not notice" from "the kernel stalled waiting for a write response".
+That is the first thing to look at when this is picked up again.
+
+None of it affects the hardware images. `-t hw` builds are unaffected,
+the RTL is bit-exact in cocotb against a compliant AXI model, and
+docs/CARDDAY.md step 3 is the same comparison against real silicon.
+
 **The two homes are NOT interchangeable for hw_emu (2026-08-29).**
 `-t hw` works on both. `-t hw_emu` works only on the 22.04 one, and
 the reason is worth knowing because it will recur with every host OS
