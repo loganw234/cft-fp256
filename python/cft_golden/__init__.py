@@ -25,6 +25,10 @@ from .softfloat import (
     min_subnormal_bits, max_subnormal_bits, min_normal_bits, max_normal_bits,
     negate, is_nan,
 )
+from .reduce import (
+    OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
+    split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
+)
 from . import vectors
 
 __all__ = [
@@ -47,6 +51,9 @@ __all__ = [
     "zero_bits", "one_bits", "inf_bits", "qnan_bits", "snan_bits",
     "min_subnormal_bits", "max_subnormal_bits", "min_normal_bits",
     "max_normal_bits", "negate", "is_nan", "vectors",
+    "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
+    "split", "tree_adds", "canonical_ranges", "reduce_bits",
+    "fsum", "fdot", "combine",
 ]
 
 __version__ = "0.1.0"
