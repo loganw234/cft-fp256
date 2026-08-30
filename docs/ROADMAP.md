@@ -588,8 +588,26 @@ runs the same RTL at 64-bit beats against the same golden model.
 | **Alchitry Pt V2 (XC7A100T-2) - the module, x4 when bundled** | same silicon as Arty; port is an afternoon | same as Arty - reduced width, not a full tile | the carrier/quad future: GTPs -> LitePCIe, module ring, verified execution modes |
 | Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | the quarter tile as already built: 64-bit beats, 2x fp32 + 1x fp64, ~20k LUT estimated against 20,800 - tight, and the first thing to measure. fp256 remains physically impossible at any width | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
 | ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | fp32 bank + engine at reduced width | fallback nano-tile if boards resurface (scarce as of 2026-08) |
-| **Artix-7 200T** | openXC7 | **the only 7-series part that takes a full tile**: 119,543 of 134,600 LUT is 89%, and 262 of 740 DSPs is 35% - no LUT-fallback multipliers needed, contrary to the earlier note | the headroom option, and now the *only* open route to a full-width tile |
-| Tang Mega 138K (GW5A) | Apicula, youngest flow | full tile on LUT count (138k LUT4) but LUT4s are not LUT6s - assume worse, and the DSP story is unverified | cheapest option - verify Apicula status first |
+| **Artix-7 200T** (Nexys Video, ALINX AX7A200) | openXC7 | a full tile at 89% LUT / 35% DSP - no LUT-fallback multipliers needed, contrary to the earlier note | the smallest part that takes a full-width tile |
+| **Kintex-7 325T - QMTech core board, ~$100** | openXC7 supports Kintex7 **325/420/480T**, with working `xc7k325t-picosoc-nextpnr` and `xc7k325t-blinky-nextpnr` examples on this exact part; LiteX ships `qmtech_kintex7_devboard.py` with a yosys+nextpnr toolchain option | **a full tile at 59% LUT / 31% DSP** - room left for the sequencer's register file and deposit buffer | **the open full-tile target.** Same price class as the Au, twice the Arty's density, and the flow is already demonstrated on the part |
+| Kintex-7 480T (surplus) | openXC7 | **two full tiles**: 40% LUT, 14% DSP | the open multi-tile option - see the scale-out note below |
+| Zynq-7045 (ZC706) | openXC7 covers Zynq7; a fully open Zynq-7000 flow was presented at FOSDEM 2025 | a full tile at 55% LUT / 29% DSP | viable but the PS is complexity this design does not need |
+| ~~Tang Mega 138K (GW5A)~~ | ~~Apicula~~ | **ruled out 2026-08-30**: Apicula does not support the GW5A family (YosysHQ/apicula#204), so the part has no open flow regardless of its LUT count | revisit only if GW5A support lands |
+
+**Kintex-7 is the correction that matters here.** The table above used
+to consider only Artix-7, ECP5 and Gowin, and concluded the open story
+was necessarily a reduced-width one. openXC7 covers Kintex-7 as well,
+which puts a full tile on a ~$100 board with 40% of the LUTs to spare -
+a better open target than the Arty on every axis except maturity, since
+prjxray's most-travelled ground is Artix and the Kintex support is
+newer.
+
+**Read every percentage in this table as optimistic.** They compare
+against UltraScale+ measurements, and 7-series carry structure is worse
+for exactly this arithmetic - 21 CARRY8 per fp256 adder path becomes 42
+CARRY4. The K325T's 59% has margin to absorb that. The 480T's two-tile
+claim is the one to measure before trusting, because 80% of a part is
+where routing, not logic, starts deciding.
 
 The Pt's serialized-multiplier note is a real design option, not a
 consolation: a multi-cycle 237-bit significand multiply built for
@@ -625,12 +643,21 @@ golden model and conformance vectors' jurisdiction.
 
 ### The scale-out doctrine (open path to 4-8 tiles)
 
-No open toolchain reaches 4-8-tile monolithic silicon (prjxray ends
-at 7-series ~134k LUTs; prjuray is immature; big Lattice is closed) -
-so the open machine scales OUT: a backplane of open-flow modules
-(quad-Pt carriers; or used SQRL Acorn/NiteFury A200T M.2 modules -
-openXC7's biggest part, PCIe-native, LiteX-supported, mining surplus)
-joined by the deterministic module ring. The contract's index-fixed
+No open toolchain reaches 4-8-tile monolithic silicon (prjuray is
+immature; big Lattice is closed) - so the open machine scales OUT: a
+backplane of open-flow modules (quad-Pt carriers; or used SQRL
+Acorn/NiteFury A200T M.2 modules - PCIe-native, LiteX-supported,
+mining surplus) joined by the deterministic module ring.
+
+**Two tiles, though, are now monolithic and open** (revised
+2026-08-30). This paragraph used to say openXC7 topped out around
+134k LUTs, which was the largest Artix-7; openXC7 also covers
+Kintex-7 through the 480T at 298,600 LUTs, and two measured tiles fit
+in 40% of it with 14% of the DSPs. So the open ladder is no longer
+"one reduced-width tile, then a ring" - it is one comfortable tile on
+a ~$100 K325T, two on a 480T, and the ring above that. The A200T is
+also no longer openXC7's biggest part, and the M.2 modules are worth
+keeping for their PCIe rather than their density. The contract's index-fixed
 reduction ordering makes scale-out coherence-free by construction:
 the ring IS the "Coordinated" in CFT. The pragmatic monolithic
 alternative stays vendor-flow: used Alveo U200/U250 (VU9P: 8+ tiles,
