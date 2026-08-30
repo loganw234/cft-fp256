@@ -58,7 +58,12 @@ module cft_engine_stream #(
     // L-cycle latency wants roughly L/BURST_MAX bursts queued behind
     // the one streaming. HBM read latency on this shell is order 60
     // cycles, 16-beat bursts, hence 4.
-    parameter int AR_DEPTH   = 4
+    parameter int AR_DEPTH   = 4,
+    // Share one cft_mulfrac across every lane instead of giving each its
+    // own multiplier. Measured NOT to pay on this fabric - see the
+    // USE_FUSED_MUL comment below for the numbers and the reason - so it
+    // is off, and stays available for the granule-grid work that would.
+    parameter bit FUSE_MUL   = 1'b0
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -702,16 +707,43 @@ module cft_engine_stream #(
   // about what the fp256 one alone did; see cft_mulfrac's header for
   // why the slots line up and why its reduction tree needs no shifts.
   //
-  // ONLY FOR THE FULL TILE. The array's geometry is the 256-bit beat's:
-  // eight fp32 lanes of 24 bits, four fp64 of 53, two fp128 of 113, one
-  // fp256 of 237. A trimmed build has neither those lane counts nor, in
-  // the fp32+fp64 quarter tile, the fp256 rung the array is sized for -
-  // sharing a 237-wide array between two fp32 lanes and one fp64 lane
-  // would be worse than not sharing at all. Those targets are the open
-  // toolchain ones (docs/ROADMAP.md), where the part is small and the
-  // saving would be negative, so they keep private multipliers and the
-  // lanes below fall back to EXT_MUL=0 with no other change.
-  localparam bit USE_FUSED_MUL = (BEAT_BITS == 256) &&
+  // OFF BY DEFAULT, AND THE REASON IS A MEASUREMENT.
+  //
+  // Out-of-context synthesis of cft_krnl at 145 MHz, same commit, only
+  // this switch changed:
+  //
+  //             LUT       DSP    WNS
+  //   private   124,589   262    +0.959
+  //   fused     125,282   259    -0.181
+  //
+  // No LUT saving, no DSP saving, and timing stops closing - with the
+  // new critical path running prec_r into this array's own mode muxes.
+  //
+  // The estimate that justified the work assumed the multiplier was
+  // about 45% of a lane's LUTs. It is not: the multipliers are
+  // DSP-mapped, so removing them saves DSPs rather than LUTs. And the
+  // DSP saving did not appear either, because each private multiplier
+  // is sized for ITS OWN format - fp32's is 24x24, two DSPs - while
+  // every slot of this array is sized for fp256 at 237x27 and every
+  // mode uses full-width slots. Ten fp256-width slots cost about what
+  // four banks of right-sized multipliers cost. Fusing this way throws
+  // away exactly the efficiency separate banks already had.
+  //
+  // The array is correct - tb_mulshare proves bit-identity across every
+  // format, attribute and precision switch - so it stays, and stays
+  // tested. What it is not is cheaper. The version that would be cheaper
+  // is the granule grid docs/ARCHITECTURE.md originally sketched:
+  // fracture the WIDTH, tiling 237x237 into 24x24 granules with gated
+  // cross-terms, so fp32 mode lights eight granules rather than eight
+  // full-width slots. This module is the correctness scaffolding for
+  // that, not a replacement for it.
+  //
+  // Also requires the full-tile geometry when enabled. The array's shape
+  // IS the 256-bit beat's - eight fp32 lanes of 24 bits, four fp64 of
+  // 53, two fp128 of 113, one fp256 of 237 - and the quarter tile
+  // (BEAT_BITS=64, fp32+fp64) does not even build the fp256 rung it is
+  // sized for.
+  localparam bit USE_FUSED_MUL = FUSE_MUL && (BEAT_BITS == 256) &&
                                  EN_FP64 && EN_FP128 && EN_FP256;
 
   localparam int MF_PMAX = 237;
