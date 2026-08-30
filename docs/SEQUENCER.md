@@ -48,30 +48,49 @@ writes its *d*-th deposit to
 
     base + (i * max_deposits + d) * element_bytes
 
-which depends on nothing but the element's own index and its own
-deposit count. Two tiles cannot race for a slot because no slot is
-reachable from two indices. This is the property that makes multi-tile
-sequencing deterministic, and it is why deposition is bounded rather
-than appended: an append order is an arrival order, and an arrival
-order is a race.
+No slot is reachable from two indices, so two tiles cannot race for
+one. This is why deposition is bounded rather than appended: an append
+order is an arrival order, and an arrival order is a race.
+
+That much is structural. But the address also contains *d*, the lane's
+own deposit count - and *d* depends on the shared program counter,
+which depends on the early exit, which is a **cross-lane** condition.
+So **P2 is a corollary of P3, not an independent property.** If the
+early exit were observable, splitting lanes across tiles would change
+their deposit counts and therefore their addresses, and the collision-
+free arithmetic above would be laying different answers into different
+places very tidily. The two are fuzzed together for that reason.
 
 **P3. The early exit is invisible.** A loop stops as soon as no lane
 is active. That must change how long the run takes and nothing else -
 if it could change a result, the sequencer would be a machine whose
-output depended on how fast its inputs converged. Two rules make the
+output depended on how fast its inputs converged. Three rules make the
 invisibility provable rather than probable:
 
-- every register write and every deposit is masked by the lane's
-  active bit, so an all-inactive loop body is a no-op by construction;
+- every register write, every deposit **and every exception flag** is
+  masked by the lane's active bit, so an all-inactive loop body is a
+  no-op by construction;
 - `ACTALL`, the only instruction that can reactivate a lane, is
-  illegal inside a loop body, and the loader rejects a program that
-  contains one.
+  illegal inside a loop body;
+- `HALT` is illegal inside a loop body too.
 
-Given those, "no lane is active" means the remaining iterations
-provably cannot write a register, deposit a point, or raise a flag.
-`test_seq.py` checks it the hard way regardless, by running every
-program twice with the optimisation forced on and off and comparing
-the full machine state.
+The third rule is the one that is easy to miss, and a review found it
+missing. `HALT` is the only instruction whose effect is not per-lane,
+so the active mask cannot gate it: with every lane inactive, skipping
+the loop continues the program while entering it stops the program.
+Those differ in deposits, in flags, and in the final register file -
+and in deposit counts, which drags P2 down with P3. A fuzz over 40,000
+valid programs found divergence *only* ever through that instruction,
+and none at all once it is refused.
+
+The loader rejects both, so a program that could observe the
+optimisation cannot reach a device.
+
+`test_seq.py` checks the property rather than the argument: 400 random
+valid programs run twice with the optimisation forced on and off, whole
+machine state compared, plus a negative control that removes the
+`HALT` rule and confirms the fuzz then *does* find divergence. A rule
+nobody can show the need for is a rule that gets deleted later.
 
 ## The shape of a program
 
@@ -117,6 +136,68 @@ word. The flags would then depend on how many lanes were still
 running, which is a result that depends on convergence - precisely
 what the contract forbids. An inactive lane contributes nothing at
 all.
+
+**Padding lanes start inactive.** The engine reads whole beats, so a
+caller's `n` is rounded up and the tail lanes hold whatever padding
+the library wrote. For an elementwise operation that is harmless -
+zero operands are quiet for every opcode, which is checked - but a
+sequencer program is arbitrary, and **no padding value can be relied
+on to stay quiet through thirty iterations of an unknown map.**
+Padding lanes would push exceptions into the sticky word, deposit into
+slots past the caller's buffer, and hold `any(active)` true so the
+early exit never fires at all.
+
+So a lane whose index is at or beyond `n` starts inactive. The
+hardware knows both numbers, the mask costs one comparator, and the
+whole class of problem goes away. This is a real difference from
+`cft_run`, where padding is genuinely free.
+
+## Execution model, and why the lane block has a floor
+
+The ALU is `cft_fpfma_pipe`: **15 stages, fixed latency, no stall path
+and no ready signal.** A sequencer that issued one instruction and
+waited for its result would bubble 14 cycles out of every 15 - which
+would cost more than the arithmetic intensity the sequencer exists to
+buy, and the whole design would be pointless.
+
+The fix is not a bypass network. It is that **lanes are independent**,
+so one instruction issued across a block of L lanes is L independent
+operations, and they fill the pipe on their own:
+
+    L >= LATENCY
+
+is the design's central sizing constraint. Sixteen is the practical
+number. At fp32 a beat is 8 lanes, so L=16 is two beats; at fp256 a
+beat is one lane, so L=16 is sixteen beats held on-chip at once. A
+dependent chain then runs at one instruction per L cycles with the
+pipeline full, rather than one per 15 with it empty.
+
+That constraint, not the deposit depth alone, sets the on-chip memory:
+
+| structure | size | fp256, L=16 |
+|---|---|---|
+| register file | `L * 16 * element_bytes` | 8 KiB |
+| deposit buffer | `L * max_deposits * element_bytes` | 32 KiB at `max_deposits=64` |
+
+So the deposit buffer dominates once `max_deposits > 16`, which is the
+regime an orbit actually wants - but *only* then, and the earlier claim
+that it simply dominates was written before the lane-block floor was
+worked out. On a 130 nm chiplet both numbers are the design, and
+trading L against `max_deposits` is the axis.
+
+Two consequences worth stating now, because they constrain the RTL:
+
+- **`n` below `L` cannot fill the pipe.** At fp256 that means fewer
+  than 16 elements runs at pipeline speed rather than throughput
+  speed. It is correct, just slow, and the library should not pretend
+  otherwise.
+- **The early exit may fire late, and that is free.** `any(active)` is
+  a cross-lane reduction over a mask that the last `SETACT` writes 15
+  cycles after it issues, so testing it exactly at the loop back-edge
+  would cost a drain every iteration. It does not have to be exact:
+  firing an iteration or two late is *still invisible*, because those
+  iterations are no-ops by P3. The hardware can use whatever mask it
+  has to hand.
 
 ## Instruction encoding
 
@@ -165,9 +246,35 @@ stay out, which is what an escape-time iteration wants and what makes
 the early exit meaningful. Widening is `ACTALL`'s job alone, and it is
 confined to the top level so that P3 holds.
 
-Loops nest four deep. Trip counts are immediates, so a run's
-instruction budget is known before it starts - there is no unbounded
-loop and therefore no program that fails to terminate.
+Loops nest four deep, and `HALT` and `ACTALL` are legal only at the
+top level.
+
+### What the loader refuses
+
+A program that reaches a device has been checked for all of this, so
+the hardware does not have to be:
+
+- unbalanced or over-deep loops; `ACTALL` or `HALT` inside one
+- `REPEAT 0` - the doc says *`imm` iterations*, so zero must mean
+  zero, and an implementation that ran the body once instead would be
+  a silent divergence. (The executor treats it as a skip anyway, so
+  that the model and the obvious RTL agree even about a program
+  neither should accept.)
+- a **worst-case instruction count** above 2^40. Trip counts being
+  immediates makes a program finite; it does not make it bounded. Four
+  nested `REPEAT 0xffffffff` fit in 104 bytes and describe 3.4e38
+  iterations, which terminates in the same sense the heat death of the
+  universe does. The loader multiplies the nest out and refuses.
+- a constant index outside the bank, a reserved bit, a reserved header
+  word, or trailing bytes after the instruction stream
+- **any field an instruction does not read being non-zero.** An ALU
+  instruction has no immediate; `DEPOSIT` reads only `ra`. Leaving
+  those free would mean one operation had many encodings, and then a
+  readback hash is not a hash of the program - which is the whole
+  point of being able to read the program back. It also keeps the
+  natural RTL honest, since a shared operand-fetch mux would otherwise
+  see a stray `ka` on a `DEPOSIT` and index a constant bank that may
+  be empty.
 
 ## Deposition, and the buffer that bounds it
 
@@ -175,7 +282,20 @@ loop and therefore no program that fails to terminate.
 `n * max_deposits` elements. A lane whose deposits exceed it drops the
 excess and raises a sticky **deposit-overflow** bit in `STATUS`, not
 in `FLAGS`: the five IEEE flags mean what 754 says they mean, and
-"your buffer was too small" is not one of them.
+"your buffer was too small" is not one of them. (`STATUS` bits 0..2
+are the engine's bus faults today and `cft_csr.sv` hardwires the rest
+to zero, so bit 3 needs a path out before this can be reported at
+all - a small RTL change, listed here so it is not forgotten.)
+
+**A slot a lane never wrote reads as `+0`, and that is normative.** It
+has to be: a run whose untouched slots kept whatever the host buffer
+happened to contain would not be bit-exact, and two machines would
+disagree about memory neither of them computed. So the device writes
+every slot in the window, whether or not the lane deposited into it.
+
+Because `+0` is also a perfectly good thing to deposit, the count is
+not recoverable from the buffer, and `cft_program_run` returns the
+per-lane deposit counts alongside it.
 
 Dropping rather than growing is deliberate. A buffer that grew would
 make the output length depend on the data, and an output length that
@@ -199,8 +319,18 @@ replacing it, exactly as `docs/HOSTAPI.md` said it would:
     cft_status cft_program_load(cft_device *dev, const void *program,
                                 size_t bytes, cft_program **out);
     cft_status cft_program_run(cft_program *prog,
-                               const void *seed, void *deposits,
-                               size_t n, uint32_t *flags, uint32_t *bus);
+                               const void *a, const void *b,
+                               const void *c,
+                               void *deposits, uint32_t *counts,
+                               size_t n,
+                               uint32_t *flags, uint32_t *bus);
+
+Three input streams, not one: `r0`, `r1` and `r2` load from `a`, `b`
+and `c`, exactly as `cft_run` reads them, which is what lets a
+sequencer run reuse the engine's existing input path. `counts` is the
+per-lane deposit count, and it is an output rather than a convenience
+because `+0` is both a legal deposit and the defined value of an
+untouched slot.
 
 Partitioning across tiles, beat padding and flag accumulation stay the
 library's problem, and stay invisible. Because deposit addresses

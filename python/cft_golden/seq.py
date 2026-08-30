@@ -38,6 +38,17 @@ INSN_BYTES = 8
 NREG = 16
 MAX_LOOP_DEPTH = 4
 
+# A program's worst-case instruction count must be finite AND small
+# enough to be a bound rather than a formality. Four nested
+# `repeat 0xffffffff` fit in 104 bytes and describe 3.4e38 iterations,
+# which is "terminating" only in the sense that the heat death of the
+# universe is.
+MAX_INSTRUCTIONS = 1 << 40
+
+# The output buffer is n * max_deposits elements, so this is a bound on
+# how much memory a 104-byte program can ask a host to allocate.
+MAX_DEPOSITS = 1 << 20
+
 # control codes (instruction bit 31 set)
 HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL = 0, 1, 2, 3, 4, 5
 CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
@@ -141,17 +152,27 @@ class Program:
     # -- validation ----------------------------------------------------
 
     def validate(self):
-        if self.max_deposits < 0 or self.max_deposits >= (1 << 32):
-            raise ProgramError(f"max_deposits={self.max_deposits}")
+        if not 0 <= self.max_deposits <= MAX_DEPOSITS:
+            raise ProgramError(
+                f"max_deposits={self.max_deposits}, cap {MAX_DEPOSITS}")
         for k in self.consts:
             if not 0 <= k < (1 << self.fmt.width):
                 raise ProgramError("constant does not fit the format")
 
         depth = 0
+        # `mult` tracks how many times the instruction at the current
+        # nesting level can execute, so the worst-case instruction
+        # count is known before the program runs rather than
+        # discovered by waiting.
+        mult = [1]
+        worst = 0
+
         for pc, word in enumerate(self.insns):
             d = decode(word)
             if d["rsv"]:
                 raise ProgramError(f"[{pc}] reserved bit 30 must be zero")
+            worst += mult[-1]
+
             if not d["ctrl"]:
                 for key, flag in (("ra", "ka"), ("rb", "kb"), ("rc", "kc")):
                     if d[flag] and d[key] >= len(self.consts):
@@ -160,30 +181,99 @@ class Program:
                             f"bank holds {len(self.consts)}")
                 if d["rnd"] > 4:
                     raise ProgramError(f"[{pc}] rnd={d['rnd']} is reserved")
+                if d["imm"]:
+                    raise ProgramError(
+                        f"[{pc}] an ALU instruction has no immediate, so "
+                        f"bits 63:32 must be zero - otherwise the same "
+                        f"operation has many encodings and a readback "
+                        f"hash stops being a hash of the program")
                 continue
 
             code = d["op"]
+            if code not in CTRL_NAMES:
+                raise ProgramError(f"[{pc}] unknown control code {code}")
+
+            # Every field a control instruction does not read must be
+            # zero. Two reasons: attestation, as above; and the natural
+            # RTL shares one operand-fetch mux across control and ALU
+            # instructions, so a stray ka on a DEPOSIT would index a
+            # constant bank that may be empty.
+            used = {HALT: (), REPEAT: ("imm",), ENDREP: (),
+                    DEPOSIT: ("ra",), SETACT: ("ra",), ACTALL: ()}[code]
+            for field in ("rd", "ra", "rb", "rc", "rnd", "ka", "kb", "kc",
+                          "imm"):
+                if field not in used and d[field]:
+                    raise ProgramError(
+                        f"[{pc}] {CTRL_NAMES[code]} does not read {field}, "
+                        f"so it must be zero")
+
             if code == REPEAT:
+                if d["imm"] == 0:
+                    raise ProgramError(
+                        f"[{pc}] repeat 0 is not a loop; omit it")
                 depth += 1
                 if depth > MAX_LOOP_DEPTH:
                     raise ProgramError(
                         f"[{pc}] loops nest deeper than {MAX_LOOP_DEPTH}")
+                mult.append(mult[-1] * d["imm"])
             elif code == ENDREP:
                 depth -= 1
                 if depth < 0:
                     raise ProgramError(f"[{pc}] endrep without repeat")
+                mult.pop()
             elif code == ACTALL and depth > 0:
-                # docs/SEQUENCER.md P3: the early exit is only provably
-                # invisible if nothing inside a loop can reactivate a
-                # lane. Refusing the program is the cheapest way to
+                # P3 holds only if nothing inside a loop can reactivate
+                # a lane. Refusing the program is the cheapest way to
                 # keep that true.
                 raise ProgramError(
                     f"[{pc}] actall inside a loop would make the "
                     f"all-lanes-done early exit observable")
-            elif code not in CTRL_NAMES:
-                raise ProgramError(f"[{pc}] unknown control code {code}")
+            elif code == HALT and depth > 0:
+                # The subtle one, and the reason P3 needs a second
+                # rule rather than one.
+                #
+                # HALT is the only instruction whose effect is not
+                # per-lane, so the active mask cannot gate it. With
+                # every lane inactive, a loop body containing a HALT is
+                # NOT a no-op: skipping the loop continues the program,
+                # entering it stops the program. Those differ in
+                # deposits, in flags, and in the final register file.
+                #
+                # It breaks P2 with it, because the deposit count of
+                # lane i then depends on whether some OTHER lane was
+                # still active - which makes the answer depend on how
+                # the library split lanes across compute units.
+                #
+                # A fuzz over 40,000 valid programs found divergence
+                # only ever through this instruction, and none at all
+                # once it is refused here.
+                raise ProgramError(
+                    f"[{pc}] halt inside a loop: the active mask cannot "
+                    f"gate it, so the all-lanes-done early exit would "
+                    f"be observable")
+
+            if worst > MAX_INSTRUCTIONS:
+                raise ProgramError(
+                    f"[{pc}] worst-case instruction count exceeds "
+                    f"{MAX_INSTRUCTIONS}; the loop bounds are finite but "
+                    f"not a bound")
+
         if depth != 0:
             raise ProgramError(f"{depth} loop(s) left open at the end")
+        if worst > MAX_INSTRUCTIONS:
+            raise ProgramError(
+                f"worst-case instruction count {worst} exceeds "
+                f"{MAX_INSTRUCTIONS}")
+
+    def digest(self):
+        """sha256 of the exact bytes a device would be given.
+
+        The program is loaded through the AXI master and can be read
+        back, so what executed can be attested rather than assumed -
+        but only if the encoding is canonical, which is what the
+        must-be-zero checks above are for."""
+        import hashlib
+        return hashlib.sha256(self.to_bytes()).hexdigest()
 
     # -- serialisation -------------------------------------------------
 
@@ -202,14 +292,18 @@ class Program:
     def from_bytes(cls, data):
         if len(data) < HEADER_WORDS * 4:
             raise ProgramError("shorter than a header")
-        magic, ver, n_insns, n_consts, maxdep, prec, _, _ = struct.unpack(
-            "<8I", data[:HEADER_WORDS * 4])
+        magic, ver, n_insns, n_consts, maxdep, prec, rsv0, rsv1 = \
+            struct.unpack("<8I", data[:HEADER_WORDS * 4])
         if magic != MAGIC:
             raise ProgramError(f"bad magic {magic:#010x}, expected "
                                f"{MAGIC:#010x}")
         if ver != VERSION:
             raise ProgramError(f"program version {ver}, this loader "
                                f"speaks {VERSION}")
+        if rsv0 or rsv1:
+            # Instruction bit 30 is refused for being reserved; header
+            # words cannot be laxer than instruction bits.
+            raise ProgramError("reserved header words must be zero")
         name = next((k for k, v in PREC_CODE.items() if v == prec), None)
         if name is None:
             raise ProgramError(f"precision code {prec} is not on the ladder")
@@ -217,8 +311,11 @@ class Program:
         ebytes = fmt.width // 8
         off = HEADER_WORDS * 4
         want = off + n_consts * ebytes + n_insns * INSN_BYTES
-        if len(data) < want:
-            raise ProgramError(f"truncated: {len(data)} bytes, needs {want}")
+        if len(data) != want:
+            raise ProgramError(
+                f"{len(data)} bytes, header describes {want} - a program "
+                f"is exactly its header, constants and instructions, so "
+                f"anything else is a different program")
         consts = [int.from_bytes(data[off + i * ebytes:
                                       off + (i + 1) * ebytes], "little")
                   for i in range(n_consts)]
@@ -252,12 +349,27 @@ class Result:
                 self.active, self.counts)
 
 
-def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None):
+def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None,
+        n_active=None):
     """Execute `prog` over len(a) lanes.
 
     The three input streams initialise r0, r1 and r2 - the same three
     the elementwise engine already reads, so a sequencer run needs no
     new input path in the hardware. Registers r3..r15 start at +0.
+
+    `n_active` is the caller's real element count. Lanes at or beyond
+    it start INACTIVE and stay that way unless a program reactivates
+    them, which is how beat padding is made harmless.
+
+    That matters more here than it does for an elementwise op. There, a
+    zero-filled tail is quiet for every opcode and the padding is
+    genuinely free. A sequencer program is arbitrary, so no padding
+    VALUE can be relied on to stay quiet through thirty iterations of
+    an unknown map: padding lanes would push exceptions into the sticky
+    word, deposit into slots past the caller's buffer, and hold
+    `any(active)` true so the early exit never fires. The lane index is
+    known to the hardware and so is n, so the mask costs one comparator
+    and removes the whole problem.
 
     early_exit=False forces every loop to run its full trip count. The
     results must be identical either way; that is P3 in
@@ -269,12 +381,22 @@ def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None):
         raise ValueError("input streams differ in length")
     if c is None:
         c = [0] * n
+    if n_active is None:
+        n_active = n
+    if not 0 <= n_active <= n:
+        raise ValueError(f"n_active={n_active} outside 0..{n}")
 
     zero = sf.zero_bits(fmt, 0)
+    mask = (1 << fmt.width) - 1
     regs = [[zero] * NREG for _ in range(n)]
     for i in range(n):
-        regs[i][0], regs[i][1], regs[i][2] = a[i], b[i], c[i]
-    active = [True] * n
+        # Registers are format-width; the hardware truncates and so
+        # does this, rather than carrying a wider value that could
+        # never have been loaded.
+        regs[i][0] = a[i] & mask
+        regs[i][1] = b[i] & mask
+        regs[i][2] = c[i] & mask
+    active = [i < n_active for i in range(n)]
     counts = [0] * n
     deposits = [zero] * (n * prog.max_deposits)
     flags = 0
@@ -311,10 +433,16 @@ def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None):
         if code == HALT:
             break
         if code == REPEAT:
-            if early_exit and not any(active):
+            if d["imm"] == 0 or (early_exit and not any(active)):
                 # Skip to the matching endrep. Nothing inside can
-                # reactivate a lane (validate() guarantees it), so the
-                # body is a no-op.
+                # reactivate a lane or halt the program (validate()
+                # guarantees both), so the body is a no-op.
+                #
+                # A trip count of zero takes the same path. validate()
+                # rejects it, so no valid program arrives here - but
+                # the obvious RTL tests imm == 0 and skips, and a model
+                # that ran the body once instead would disagree with
+                # the hardware about a program neither should accept.
                 pc = _matching_endrep(prog.insns, pc) + 1
                 continue
             stack.append([pc + 1, d["imm"]])
