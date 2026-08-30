@@ -11,9 +11,9 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac krnl quarter clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare krnl quarter clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac krnl quarter
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare krnl quarter
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -23,6 +23,15 @@ mulfrac:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_mulfrac \
 		MODULE=test_mulfrac SIM_BUILD=sim_build/mulfrac \
 		COCOTB_RESULTS_FILE=sim_build/mulfrac/results.xml
+
+# Equivalence: the same four banks built twice, once with a private
+# multiplier per lane and once with all lanes fed by one shared array,
+# compared against each other rather than against the model. The fused
+# array only ships if this is bit-identical.
+mulshare:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulshare \
+		MODULE=test_mulshare SIM_BUILD=sim_build/mulshare \
+		COCOTB_RESULTS_FILE=sim_build/mulshare/results.xml
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \

@@ -51,7 +51,11 @@
 module cft_fpfma_pipe #(
     parameter int EXP_W   = 8,
     parameter int MAN_W   = 23,
-    parameter int LATENCY = 15
+    parameter int LATENCY = 15,
+    // Take the significand product from mul_p instead of building a
+    // multiplier here. See the mul_* ports for the contract. Default 0
+    // keeps every existing instantiation bit-identical.
+    parameter bit EXT_MUL = 1'b0
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
@@ -70,7 +74,30 @@ module cft_fpfma_pipe #(
     input  logic [EXP_W+MAN_W:0] c,
     output logic                 out_valid,
     output logic [EXP_W+MAN_W:0] d,
-    output logic [4:0]           flags
+    output logic [4:0]           flags,
+
+    // ---- shared-multiplier port (EXT_MUL) ---------------------------
+    //
+    // With EXT_MUL = 0 (the default, and what every existing
+    // instantiation gets) these are inert: mul_a/mul_b still carry the
+    // stage-1 significands out for whoever wants them, mul_p is
+    // ignored, and the internal multiplier runs exactly as before. The
+    // point of the default is that adding this port changed nothing.
+    //
+    // With EXT_MUL = 1 the internal multiplier is not built. The lane
+    // hands its stage-1 significands out and expects their product back
+    // FIVE cycles later, which is precisely the depth the internal
+    // multiplier had (S2 partial products, then four tree levels). That
+    // equality is why sharing the multiplier moves no other stage: the
+    // alignment, normalisation and rounding downstream are untouched
+    // and still see their operand arrive at exactly stage 6.
+    //
+    // cft_mulfrac is the intended supplier - one array serving a whole
+    // bank of lanes - but nothing here depends on that. Anything that
+    // returns a*b with five cycles of latency will do.
+    output logic [MAN_W:0]       mul_a,
+    output logic [MAN_W:0]       mul_b,
+    input  logic [2*MAN_W+1:0]   mul_p
 );
 
   localparam int W    = 1 + EXP_W + MAN_W;
@@ -346,33 +373,52 @@ module cft_fpfma_pipe #(
   // S2..S6: staged significand multiplier
   // ------------------------------------------------------------------
   localparam int NPP = (NMC < 1) ? 1 : NMC;
-  logic [PPW-1:0] s2_pp [0:15];
-  logic [PPW-1:0] s3_q  [0:7];
-  logic [PPW-1:0] s4_t  [0:3];
-  logic [PPW-1:0] s5_u  [0:1];
   logic [2*P-1:0] s6_mp;
 
-  logic [NMC*MCH-1:0] mb_pad;
-  assign mb_pad = {{(NMC*MCH-P){1'b0}}, s1_mb};
+  // The lane's significands, out to whoever is multiplying them. Driven
+  // in both modes so a shared array and an internal one see the same
+  // operands - which is what makes the two configurations comparable.
+  assign mul_a = s1_ma;
+  assign mul_b = s1_mb;
 
-  always_ff @(posedge clk) begin : mult_stages
-    // S2: partial products (each a short DSP column)
-    for (int k = 0; k < 16; k = k + 1) begin
-      if (k < NMC) s2_pp[k] <= s1_ma * mb_pad[k*MCH +: MCH];
-      else         s2_pp[k] <= '0;
+  generate
+    if (EXT_MUL) begin : g_mul_shared
+      // Someone else owns the array. The contract is five cycles, the
+      // same depth this used to build, so s6_mp lands where it always
+      // did and nothing downstream moves.
+      assign s6_mp = mul_p;
+    end else begin : g_mul_local
+      logic [PPW-1:0] s2_pp [0:15];
+      logic [PPW-1:0] s3_q  [0:7];
+      logic [PPW-1:0] s4_t  [0:3];
+      logic [PPW-1:0] s5_u  [0:1];
+      logic [2*P-1:0] s6_mp_r;
+
+      logic [NMC*MCH-1:0] mb_pad;
+      assign mb_pad = {{(NMC*MCH-P){1'b0}}, s1_mb};
+
+      always_ff @(posedge clk) begin : mult_stages
+        // S2: partial products (each a short DSP column)
+        for (int k = 0; k < 16; k = k + 1) begin
+          if (k < NMC) s2_pp[k] <= s1_ma * mb_pad[k*MCH +: MCH];
+          else         s2_pp[k] <= '0;
+        end
+        // S3: L1 pairs, shift 24
+        for (int j = 0; j < 8; j = j + 1)
+          s3_q[j] <= s2_pp[2*j] + (s2_pp[2*j+1] << MCH);
+        // S4: L2 pairs, shift 48
+        for (int i = 0; i < 4; i = i + 1)
+          s4_t[i] <= s3_q[2*i] + (s3_q[2*i+1] << (2*MCH));
+        // S5: L3 pairs, shift 96
+        for (int i = 0; i < 2; i = i + 1)
+          s5_u[i] <= s4_t[2*i] + (s4_t[2*i+1] << (4*MCH));
+        // S6: L4 final, shift 192
+        s6_mp_r <= s5_u[0] + (s5_u[1] << (8*MCH));
+      end
+
+      assign s6_mp = s6_mp_r;
     end
-    // S3: L1 pairs, shift 24
-    for (int j = 0; j < 8; j = j + 1)
-      s3_q[j] <= s2_pp[2*j] + (s2_pp[2*j+1] << MCH);
-    // S4: L2 pairs, shift 48
-    for (int i = 0; i < 4; i = i + 1)
-      s4_t[i] <= s3_q[2*i] + (s3_q[2*i+1] << (2*MCH));
-    // S5: L3 pairs, shift 96
-    for (int i = 0; i < 2; i = i + 1)
-      s5_u[i] <= s4_t[2*i] + (s4_t[2*i+1] << (4*MCH));
-    // S6: L4 final, shift 192
-    s6_mp <= s5_u[0] + (s5_u[1] << (8*MCH));
-  end
+  endgenerate
 
   // ------------------------------------------------------------------
   // S6 (parallel): alignment prep from the sideband exponents

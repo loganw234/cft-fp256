@@ -26,7 +26,8 @@ VERILOG_SOURCES = \
     $(TBDIR)/wrappers/tb_fpfma_fp64.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp128.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp256.sv \
-    $(TBDIR)/wrappers/tb_krnl_quarter.sv
+    $(TBDIR)/wrappers/tb_krnl_quarter.sv \
+    $(TBDIR)/wrappers/tb_mulshare.sv
 
 ifeq ($(SIM),icarus)
 COMPILE_ARGS += -g2012
