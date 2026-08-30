@@ -103,6 +103,11 @@ api-test$(EXE): tests/api_test.c libcft.a
 vector-fma$(EXE): examples/vector_fma.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
+# Only meaningful in an XRT build, and only useful with an artifact:
+#   ./device-test cardday/quad_emu/cft_hw_emu.xclbin 256
+device-test$(EXE): tests/device_test.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
 # The library is checked four ways, and they catch different things.
 #
 #   api-test        the promises the vectors cannot express: aliasing,
