@@ -106,8 +106,50 @@ way atlas-darkroom records a census.
       against the vendor's own interconnect models, not just our
       testbench: fp32 n=296 (37 beats = two full bursts + a ragged
       tail) is bit-exact through hw_emu.
+- [x] **The host library, and multi-tile (2026-08-29):** libcft, about
+      1,700 lines of C99 with no dependencies, plus an XRT backend that
+      is the only C++ in the tree. The software backend replays 228,000
+      conformance cases and agrees with the golden model on 213,000
+      differential cases including the ones built to straddle its one
+      structural difference, bounded operand alignment. GCC 13.3 on
+      Ubuntu against glibc and GCC 16.1 on Windows against msvcrt print
+      the same four checksums character for character, which is the
+      product claim demonstrated on the cheapest hardware in the
+      building.
+
+      Multi-tile lives in the library because a four-CU bitstream is
+      not four times one CU from the host's side: each CU's master is
+      wired to its own HBM group, so there is no shared input array.
+      The library gives each tile its own buffers and its own slice,
+      ORs four sets of sticky registers into one answer, and callers
+      never learn tiles exist.
+
+      Tested with **no card present**, against a quad hw_emu image:
+      `host/tests/device_test.c` runs the device and software backends
+      side by side and compares bits and flags, then checks partition
+      invariance - one call over n against a sequence of calls over
+      slices of it - at sizes chosen to straddle beat and tile
+      boundaries. The same binary is what runs on the card.
+
+      A review pass over the untested backend found four
+      silent-wrong-answer paths, all closed: a failed run left compute
+      units active and the RTL silently drops a start issued to a busy
+      CU, so a retry would have returned the previous run's output; the
+      bus-fault register went unread when the flags were unreadable;
+      flags_out was written as a clean zero for a word never read; and
+      unreadable CAPS were replaced with a guess of maximum capability,
+      which on a trimmed bitstream returns a buffer of zeros with clean
+      flags. The last three shared a root - carrying on without the
+      status registers - and the backend now refuses to open at all in
+      that state.
+
+      The same review found that `cft_conformance`, the published
+      acceptance test for a new backend, replayed every case at n=1 and
+      was therefore structurally incapable of failing on a partitioning
+      bug. Each set is now replayed twice, and the array pass was
+      verified by injecting a slice off-by-one.
 - Engine knobs still open: multiple outstanding ARs, per-CU HBM
-  pseudo-channel groups, multiple CUs.
+  pseudo-channel groups.
 - [x] **Directed rounding attributes (2026-08-29):** all five of
       754-2019's attributes in the MODE rounding field (RISC-V frm),
       carried with each operation down the pipeline rather than
