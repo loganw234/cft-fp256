@@ -52,6 +52,31 @@ case "$(basename "$ART")" in
     export XCL_EMULATION_MODE=hw_emu
     export EMCONFIG_PATH="$ARTDIR"
     echo "== emulation: XCL_EMULATION_MODE=hw_emu EMCONFIG_PATH=$ARTDIR"
+
+    # Reap orphaned simulators before starting.
+    #
+    # An emulation run that is interrupted leaves its xsimk alive,
+    # holding a socket under /tmp/$USER and a directory under .run.
+    # The next run then talks to, or is confused by, the wreckage of
+    # the last one - which presents as an emulation that hangs at
+    # startup, or as intermittent failure that looks like a design
+    # bug. This project has already lost an evening to it once,
+    # diagnosing 53 stale run directories and 55 stale sockets as
+    # "flakiness".
+    #
+    # Nothing here should be running if the previous run finished, so
+    # killing unconditionally is safe - and if two emulations are
+    # wanted at once, they need separate machines anyway.
+    if pgrep -f 'xsimk|xsim ' >/dev/null 2>&1; then
+      echo "   reaping orphaned simulators from an earlier run"
+      pkill -f xsimk 2>/dev/null || true
+      pkill -f 'bin/xsim ' 2>/dev/null || true
+      sleep 2
+      pkill -9 -f xsimk 2>/dev/null || true
+    fi
+    rm -rf "/tmp/${USER:-root}"/device* 2>/dev/null || true
+    find "$ROOT" "$ARTDIR" -maxdepth 2 -name '.run' -type d \
+         -exec rm -rf {} + 2>/dev/null || true
     ;;
   *)
     echo "== hardware"
