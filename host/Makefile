@@ -67,7 +67,7 @@ else
   EXE     :=
 endif
 
-TOOLS := cft-selftest$(EXE)
+TOOLS := cft-selftest$(EXE) cft-bench$(EXE)
 TESTS := api-test$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
@@ -96,6 +96,12 @@ $(SHLIB): $(PICOBJ)
 	$(CC) $(SHFLAGS) -o $@ $^ $(XRTLIBS)
 
 cft-selftest$(EXE): tools/cft_selftest.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+# Reports ns/element per format and per op, for the software backend or
+# for an artifact. Same binary either way, so the two tiers are compared
+# with one measurement rather than two.
+cft-bench$(EXE): tools/cft_bench.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
 api-test$(EXE): tests/api_test.c libcft.a
@@ -165,6 +171,7 @@ clean:
 	      libcft.a libcft.dll.a \
 	      cft.dll libcft.so libcft.dylib \
 	      cft-selftest cft-selftest.exe api-test api-test.exe \
+	      cft-bench cft-bench.exe \
 	      device-test device-test.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
 	      .out-c.txt .out-py.txt
