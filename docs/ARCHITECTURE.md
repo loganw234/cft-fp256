@@ -353,27 +353,68 @@ clock-independent by construction. The v0 behavioural core (one
 combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
 reference.
 
-## The fractured array (v1 sketch, why this scales)
+## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 
-A 237x237-bit significand multiplier decomposes into a grid of
-sub-multipliers. Choose the granule at the fp32 significand (24x24);
-the full array is a 10x10 granule grid (240x240) with mode-gated
-cross-granule partial products:
+One physical partial-product array computing, per beat and by mode,
+8x(24x24), 4x(53x53), 2x(113x113) or 1x(237x237). It replaces the
+fifteen per-lane multipliers the four banks used to carry; Yosys counts
+40 multiplier cells in cft_krnl before and 10 after.
 
-- fp32 mode: 8 granules run independently, cross-terms gated off, 8
-  results per half-beat.
-- fp64 mode: 2x2 granule clusters fuse (48>=53? no - fp64 needs 53
-  bits: 3x3 granules = 72x72 covers it; the exact tiling is the v1
-  design work, including whether DSP48E2 27x18 tiling beats a uniform
-  24x24 granule on this fabric), 4 results.
-- fp256 mode: the whole array plus the accumulation tree, 1 result.
+The decomposition is NOT the granule grid this section used to sketch.
+It is the chunk-column structure the pipelined core already had:
+pp[k] = ma * mb[k*MCH +: MCH], one column per chunk. Slot demand per
+mode is then lanes x ceil(P/MCH), and MCH alone decides how many
+physical slots the array needs:
 
-The alignment/normalize/round tail is shared, with lane-sliced flag
-and exception plumbing. VU35P carries 5952 DSP48E2 slices; a full
-uniform 237x237 product costs ~140 DSPs unfractured (10x14 tiling of
-27x17 unsigned use), so the array is affordable and Karatsuba can cut
-it further at the cost of the clean fracture geometry - a measured
-trade for v1, not a guess to make now.
+| MCH | fp32 | fp64 | fp128 | fp256 | slots |
+|---|---|---|---|---|---|
+| 24 | 8 | 12 | 10 | 10 | 12 |
+| 27 | 8 | 8 | 10 | 9 | **10** |
+
+The old sketch left "whether DSP48E2 27x18 tiling beats a uniform 24x24
+granule" as v1 design work. It does, and for a reason the sketch did
+not anticipate: 27 wins on SLOT COUNT before it wins on DSP mapping.
+Ten slots of 237x27 is about what the fp256 bank alone already spent,
+which is the whole economics of the thing - the array costs what the
+widest rung costs and serves every rung.
+
+**The reduction tree carries no shifts and no mode awareness.** The
+obvious fractured tree sums within a lane and never across, which is
+fiddly. It is also unnecessary: a P x P product is at most 2P bits and
+lane L is placed at L*2P, so lanes occupy disjoint fields and no lane's
+sum can carry into its neighbour - the value that would have to
+overflow is a product that already fits exactly. Every slot is
+therefore shifted into final position at S2, the tree becomes a plain
+16-to-1 sum, and all mode-dependence collapses into one 4:1 mux per
+slot on elaboration constants. That is what keeps the fracture cheap.
+
+**The alignment/normalise/round tail is NOT shared**, contrary to the
+sketch. Eight fp32 results need eight roundings, and fracturing a
+717-bit normaliser and a 238-bit round increment into independent lanes
+is a much harder problem than fracturing a multiplier - in the most
+safety-critical logic in the design. So each lane keeps its own tail
+and only the multiplier is shared. That caps the saving well below what
+a full datapath fracture would give, and it is the right first step:
+the tail is where the contract lives, and it is untouched.
+
+Depth is 5 - products plus four tree levels - matching the multiplier
+segment of cft_fpfma_pipe exactly, so sharing moves no other stage.
+cft_fpfma_pipe's EXT_MUL parameter is the seam: at 0 a lane builds its
+own multiplier as before, at 1 it hands its stage-1 significands out
+and expects their product back five cycles later.
+
+**Full tile only.** The array's geometry IS the 256-bit beat's. The
+quarter tile (BEAT_BITS=64, fp32+fp64) has two and one lanes and does
+not build the fp256 rung the array is sized for, so sharing there would
+cost more than it saved. USE_FUSED_MUL requires BEAT_BITS==256 and all
+three trim parameters; open-toolchain targets fall back to private
+multipliers with no other change.
+
+Verified by equivalence rather than by argument: tb_mulshare builds all
+four banks twice from the same inputs on the same cycle, once private
+and once shared, and asserts identical bits and flags. 480 beats across
+four formats and five rounding attributes, 64 across eight precision
+switches with the pipe draining, 160 of nothing but specials.
 
 ## HBM
 
