@@ -695,6 +695,79 @@ module cft_engine_stream #(
 
   assign d_wr = collect;
 
+  // ---- the fractured significand array -------------------------------
+  //
+  // One cft_mulfrac replaces the per-lane multipliers in all four
+  // banks. Fifteen private multipliers become one array that costs
+  // about what the fp256 one alone did; see cft_mulfrac's header for
+  // why the slots line up and why its reduction tree needs no shifts.
+  //
+  // ONLY FOR THE FULL TILE. The array's geometry is the 256-bit beat's:
+  // eight fp32 lanes of 24 bits, four fp64 of 53, two fp128 of 113, one
+  // fp256 of 237. A trimmed build has neither those lane counts nor, in
+  // the fp32+fp64 quarter tile, the fp256 rung the array is sized for -
+  // sharing a 237-wide array between two fp32 lanes and one fp64 lane
+  // would be worse than not sharing at all. Those targets are the open
+  // toolchain ones (docs/ROADMAP.md), where the part is small and the
+  // saving would be negative, so they keep private multipliers and the
+  // lanes below fall back to EXT_MUL=0 with no other change.
+  localparam bit USE_FUSED_MUL = (BEAT_BITS == 256) &&
+                                 EN_FP64 && EN_FP128 && EN_FP256;
+
+  localparam int MF_PMAX = 237;
+  localparam int MF_MCH  = 27;
+  localparam int MF_ACCW = 2 * MF_PMAX + 2 * MF_MCH;
+
+  logic [MF_PMAX-1:0] mf_a, mf_b;
+  logic [MF_ACCW-1:0] mf_p;
+
+  // Significands out of each lane, waiting to be packed.
+  logic [23:0]  mfa32  [0:7],  mfb32  [0:7];
+  logic [52:0]  mfa64  [0:3],  mfb64  [0:3];
+  logic [112:0] mfa128 [0:1],  mfb128 [0:1];
+  logic [236:0] mfa256,        mfb256;
+
+  generate
+    if (USE_FUSED_MUL) begin : g_mulfrac
+      cft_mulfrac #(.PMAX(MF_PMAX), .MCH(MF_MCH), .SLOTS(16)) u_mulfrac (
+          .clk(ap_clk), .mode(prec_r), .in_valid(ex_valid),
+          .a(mf_a), .b(mf_b), .out_valid(), .p(mf_p));
+
+      // Pack whichever bank is live. prec_r is snapshot at start and
+      // never moves while anything is in flight - running does not drop
+      // until wfinish, by which point every result has been collected
+      // and written - so the array's mode always matches the operands
+      // it is being handed. That is the same argument that makes op_r
+      // and rnd_r safe to latch per run.
+      always_comb begin
+        mf_a = '0;
+        mf_b = '0;
+        case (prec_r)
+          PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
+                        mf_a[i*24 +: 24] = mfa32[i];
+                        mf_b[i*24 +: 24] = mfb32[i];
+                      end
+          PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
+                        mf_a[i*53 +: 53] = mfa64[i];
+                        mf_b[i*53 +: 53] = mfb64[i];
+                      end
+          PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
+                        mf_a[i*113 +: 113] = mfa128[i];
+                        mf_b[i*113 +: 113] = mfb128[i];
+                      end
+          default:    begin
+                        mf_a = mfa256;
+                        mf_b = mfb256;
+                      end
+        endcase
+      end
+    end else begin : g_no_mulfrac
+      assign mf_a = '0;
+      assign mf_b = '0;
+      assign mf_p = '0;
+    end
+  endgenerate
+
   // ---- compute banks (identical structure to cft_engine) -------------
   // 8 x fp32 lanes
   logic [BEAT_BITS-1:0] d32;
@@ -714,12 +787,15 @@ module cft_engine_stream #(
       cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
           .op(op_r), .a(sa), .b(sb), .c(sc),
           .valid(bv), .d(bd), .flags(bf));
-      cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
+      cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
+                       .EXT_MUL(USE_FUSED_MUL)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP32)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(fa), .b(fb), .c(fc),
-          .out_valid(), .d(dd), .flags(f32_l[gi]));
+          .out_valid(), .d(dd), .flags(f32_l[gi]),
+          .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
+          .mul_p(mf_p[gi*48 +: 48]));
       assign d32[gi*32 +: 32] = dd;
     end
   endgenerate
@@ -746,12 +822,15 @@ module cft_engine_stream #(
         cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
-        cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
+        cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
+                         .EXT_MUL(USE_FUSED_MUL)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
-            .out_valid(), .d(dd), .flags(f64_l[gi]));
+            .out_valid(), .d(dd), .flags(f64_l[gi]),
+            .mul_a(mfa64[gi]), .mul_b(mfb64[gi]),
+            .mul_p(mf_p[gi*106 +: 106]));
         assign d64[gi*64 +: 64] = dd;
       end
       always_comb begin
@@ -782,12 +861,15 @@ module cft_engine_stream #(
         cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
-        cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
+        cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
+                         .EXT_MUL(USE_FUSED_MUL)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
-            .out_valid(), .d(dd), .flags(f128_l[gi]));
+            .out_valid(), .d(dd), .flags(f128_l[gi]),
+            .mul_a(mfa128[gi]), .mul_b(mfb128[gi]),
+            .mul_p(mf_p[gi*226 +: 226]));
         assign d128[gi*128 +: 128] = dd;
       end
       always_comb begin
@@ -813,12 +895,14 @@ module cft_engine_stream #(
       cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
           .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .valid(bv), .d(bd), .flags(bf));
-      cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
+      cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
+                       .EXT_MUL(USE_FUSED_MUL)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(w_fa), .b(w_fb), .c(w_fc),
-          .out_valid(), .d(d256), .flags(f256));
+          .out_valid(), .d(d256), .flags(f256),
+          .mul_a(mfa256), .mul_b(mfb256), .mul_p(mf_p[0 +: 474]));
     end else begin : g_bank256_off
       assign d256 = '0;
       assign f256 = 5'b0;
