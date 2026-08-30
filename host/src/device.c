@@ -15,6 +15,12 @@
 #include "softfloat.h"
 #ifdef CFT_ENABLE_XRT
 #include "backend.h"
+
+/* Ranges a device reduction may be split into. One per tile, so this
+ * is MAX_TILES in the XRT backend - kept as its own name because it
+ * sizes two stack arrays here and a wrong value would overflow them
+ * quietly. */
+#define CFT_MAX_REDUCE_PARTS 64
 #endif
 
 #define CFT_BACKEND_SW  0
@@ -442,11 +448,85 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
 
-    /* No device path yet. A bitstream that implements the reduction
-     * group will advertise bit 5 in CAPS and be refused above until it
-     * does, so there is no silent fallback to software behind a
-     * caller's back - which would be a performance surprise, not a
-     * correctness one, but a surprise either way. */
+#ifdef CFT_ENABLE_XRT
+    if (dev->backend == CFT_BACKEND_XRT) {
+        /* CFT_DOT is not device hardware, and does not need to be: the
+         * contract makes dot(a,b) == sum(mul(a,b)) exact, flags
+         * included. So an elementwise MUL on the device, then a SUM on
+         * the device, and the bits are the contract's. The scratch
+         * buffer is the only cost. */
+        if (op == CFT_DOT) {
+            void *tmp = malloc(n * esz);
+            uint32_t mf = 0, sf = 0;
+            cft_status st;
+            if (!tmp)
+                return CFT_ERR_OUT_OF_MEMORY;
+            st = cft_run(dev, CFT_MUL, fmt, rnd, a, b, NULL, tmp, n,
+                         &mf, bus_out);
+            if (st == CFT_OK)
+                st = cft_reduce(dev, CFT_SUM, fmt, rnd, tmp, NULL, d, n,
+                                &sf, bus_out);
+            free(tmp);
+            if (st == CFT_OK && flags_out)
+                *flags_out = mf | sf;
+            return st;
+        }
+
+        /* A reduction cannot be split evenly the way an elementwise run
+         * can: a partial is only reusable if its range is a NODE of the
+         * tree. Cut the top levels to get nodes, run one per tile, and
+         * fold the partials here with the same tree - which reproduces
+         * the levels that were cut.
+         *
+         * Only a power-of-two part count corresponds to a clean cut, so
+         * a device with a non-power-of-two tile count uses the largest
+         * power of two of them. Fewer tiles, never a wrong answer. */
+        {
+            size_t lo[CFT_MAX_REDUCE_PARTS], hi[CFT_MAX_REDUCE_PARTS];
+            size_t parts = 1, nr;
+            uint8_t *partials;
+            cft_status st;
+
+            while (parts * 2 <= dev->tiles && parts * 2 <= CFT_MAX_REDUCE_PARTS)
+                parts *= 2;
+
+            nr = cft_sf_canonical_ranges(n, parts, lo, hi,
+                                         CFT_MAX_REDUCE_PARTS);
+            if (nr == 0)
+                return CFT_ERR_INTERNAL;
+
+            partials = (uint8_t *)malloc(nr * esz);
+            if (!partials)
+                return CFT_ERR_OUT_OF_MEMORY;
+
+            st = (cft_status)cftx_reduce(dev->hw, (int)op, (int)fmt,
+                                         (int)rnd, a, lo, hi, nr,
+                                         partials, &fl, bus_out);
+            if (st != CFT_OK) {
+                free(partials);
+                return st;
+            }
+
+            /* Fold the partials with the same tree. nr is small - one
+             * per tile - so this is a handful of adds, and it has to
+             * happen here rather than on a tile because no tile has all
+             * the partials. */
+            {
+                uint32_t cf = 0;
+                int bad = cft_sf_reduce(f, CFT_SF_SUM, (int)rnd, partials,
+                                        NULL, esz, 0, nr, &bo, &cf);
+                free(partials);
+                if (bad)
+                    return CFT_ERR_INTERNAL;
+                fl |= cf;
+            }
+            cft_bn_store(&bo, (uint8_t *)d, (int)esz);
+            if (flags_out)
+                *flags_out = fl;
+            return CFT_OK;
+        }
+    }
+#endif
 
     if (cft_sf_reduce(f, (int)op, (int)rnd, a, b, esz, 0, n, &bo, &fl))
         return CFT_ERR_INTERNAL;

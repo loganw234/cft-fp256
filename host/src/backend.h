@@ -48,6 +48,27 @@ int  cftx_run(void *hw, int op, int fmt, int rnd,
               const void *a, const void *b, const void *c, void *d,
               size_t n, uint32_t *flags, uint32_t *bus);
 
+/* Reduce index ranges of `a`, one per tile where there are tiles to
+ * spare, writing ONE element per range into `partials`.
+ *
+ * The caller folds the partials with the reduction tree, and the ranges
+ * must be canonical NODES of that tree for the fold to be valid - which
+ * is why the caller computes them (cft_sf_canonical_ranges) rather than
+ * this function inventing a split. The division of labour is the same
+ * one the rest of this header draws: the tree lives in C where the
+ * contract is defined, and the backend only knows how to make tiles
+ * run.
+ *
+ * A range's SHAPE depends only on its length, so a tile handed
+ * [lo, hi) computes exactly the subtree the whole-array reduction would
+ * have, without being told where the range sits.
+ *
+ * flags is the OR across every tile used; bus likewise, and only
+ * meaningful on CFT_ERR_BUS_FAULT. */
+int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
+                 const size_t *lo, const size_t *hi, size_t nranges,
+                 void *partials, uint32_t *flags, uint32_t *bus);
+
 /* The message from the most recent failure, or "". Static storage,
  * overwritten by the next one. XRT's exceptions carry the only
  * explanation of most device failures that anybody will ever get, and

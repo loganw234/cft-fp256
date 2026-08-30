@@ -586,3 +586,151 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
         *flags = flag_acc;
     return ST_OK;
 }
+
+/* ---- reductions ---------------------------------------------------
+ *
+ * One range per tile, round-robin when there are more ranges than
+ * tiles. Each tile is handed the TRUE element count for its range,
+ * not a padded one: the engine takes ceil(n / elements-per-beat) beats
+ * for a reduction and consumes only the real elements from the last,
+ * because padding a sum with +0.0 is not the identity. The buffer
+ * still has to hold whole beats, so the staging pads the memory - the
+ * arithmetic simply never reaches it.
+ */
+extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
+                           const void *a,
+                           const size_t *lo, const size_t *hi,
+                           size_t nranges, void *partials,
+                           uint32_t *flags, uint32_t *bus)
+{
+    if (!hw || !a || !lo || !hi || !partials || nranges == 0)
+        return ST_INVALID_ARGUMENT;
+
+    Dev &D = *static_cast<Dev *>(hw);
+    if (D.poisoned) {
+        set_err("device handle is poisoned by an earlier failure");
+        return ST_INTERNAL;
+    }
+
+    const size_t esz = static_cast<size_t>(elem_bytes(fmt));
+    if (esz == 0)
+        return ST_INVALID_ARGUMENT;
+    const size_t epb = 32u / esz;              /* elements per 256-bit beat */
+
+    const size_t ntiles = D.tiles.size();
+    const uint32_t mode = static_cast<uint32_t>(op & 0xFF) |
+                          (static_cast<uint32_t>(fmt & 0xF) << 8) |
+                          (static_cast<uint32_t>(rnd & 0x7) << 12);
+
+    const auto *pa = static_cast<const uint8_t *>(a);
+    auto *pp = static_cast<uint8_t *>(partials);
+
+    /* Stage first: this touches only host-visible buffers and starts
+     * nothing, so a failure here leaves every unit idle. */
+    try {
+        for (size_t k = 0; k < nranges; k++) {
+            const size_t m = hi[k] - lo[k];
+            const size_t padded = ((m + epb - 1) / epb) * epb;
+            Tile &tile = D.tiles[k % ntiles];
+            ensure_capacity(D, tile, padded * esz);
+            stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
+            /* b and c are unread by a sum, but the engine streams all
+             * three - one read enable feeds all three FIFOs - so they
+             * must be real, readable memory of the same length. */
+            stage(tile.b, nullptr, m * esz, padded * esz);
+            stage(tile.c, nullptr, m * esz, padded * esz);
+        }
+    } catch (const std::bad_alloc &) {
+        set_err("out of memory staging a reduction");
+        return ST_OUT_OF_MEMORY;
+    } catch (const std::exception &e) {
+        set_err(std::string("staging a reduction: ") + e.what());
+        return ST_INTERNAL;
+    }
+
+    /* Ranges beyond the tile count reuse a tile, so they cannot all be
+     * in flight at once. Launch a wave per tile-sized group and wait
+     * before reusing a unit - the RTL silently drops a start issued to
+     * a busy CU, which would return the previous range's answer. */
+    int status = ST_OK;
+    std::string err;
+    uint32_t fl = 0, bs = 0;
+
+    for (size_t base = 0; base < nranges && status == ST_OK; base += ntiles) {
+        const size_t wave = std::min(ntiles, nranges - base);
+        std::vector<xrt::run> runs;
+        runs.reserve(wave);
+
+        for (size_t j = 0; j < wave; j++) {
+            const size_t k = base + j;
+            const size_t m = hi[k] - lo[k];
+            try {
+                Tile &tile = D.tiles[j];
+                runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
+                                      tile.a, tile.b, tile.c, tile.d));
+            } catch (const std::exception &e) {
+                err = std::string("starting tile ") + std::to_string(j) +
+                      " for a reduction: " + e.what();
+                status = ST_INTERNAL;
+                break;
+            }
+        }
+
+        for (auto &r : runs) {
+            try {
+                ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
+                if (st != ERT_CMD_STATE_COMPLETED && status == ST_OK) {
+                    status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
+                                                           : ST_INTERNAL;
+                    err = "a compute unit did not complete a reduction "
+                          "(state " + std::to_string(static_cast<int>(st)) +
+                          ")";
+                }
+            } catch (const std::exception &e) {
+                if (status == ST_OK) {
+                    status = ST_INTERNAL;
+                    err = std::string("waiting on a reduction: ") + e.what();
+                }
+            }
+        }
+        if (status != ST_OK) {
+            D.poisoned = true;
+            break;
+        }
+
+        /* Collect this wave before the next one reuses the tiles.
+         * Faults before results, for the reason cftx_run gives: if the
+         * memory system did not vouch for the data then the partial is
+         * meaningless, and only the tiles that ran are read, because an
+         * idle tile still holds its previous run's sticky words. */
+        for (size_t j = 0; j < wave; j++) {
+            const size_t k = base + j;
+            try {
+                Tile &tile = D.tiles[j];
+                bs |= tile.k.read_register(CSR_STATUS);
+                fl |= tile.k.read_register(CSR_FLAGS);
+                /* One beat comes back; one element of it is the answer,
+                 * and the engine zeroed the rest. */
+                tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, 32, 0);
+                std::memcpy(pp + k * esz, tile.d.map<uint8_t *>(), esz);
+            } catch (const std::exception &e) {
+                D.poisoned = true;
+                set_err(std::string("reading a reduction result: ") + e.what());
+                return ST_INTERNAL;
+            }
+        }
+    }
+
+    if (bus) *bus = bs;
+    if (bs != 0) {
+        set_err("the memory system reported a fault during a reduction; "
+                "the result is not to be trusted");
+        return ST_BUS_FAULT;
+    }
+    if (status != ST_OK) {
+        set_err(err);
+        return status;
+    }
+    if (flags) *flags = fl;
+    return ST_OK;
+}
