@@ -189,7 +189,7 @@ def test_tree_differs_from_sequential_somewhere(fmt):
 # partition invariance - the property the whole design is for
 # ---------------------------------------------------------------
 @pytest.mark.parametrize("fmt", ALL_FORMATS)
-@pytest.mark.parametrize("parts", [1, 2, 4, 8])
+@pytest.mark.parametrize("parts", [1, 2, 4, 8, 16, 32, 64])
 def test_canonical_partition_reproduces_the_whole(fmt, parts):
     """Splitting the work across `parts` tiles and combining the partial
     results must give bit-identical output and identical flags. This is

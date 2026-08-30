@@ -137,7 +137,17 @@ constexpr uint32_t KNOWN_VERSION = 0x00000410u;
 /* kernel.xml argument ids */
 constexpr int ARG_A = 2, ARG_B = 3, ARG_C = 4, ARG_D = 5;
 
-constexpr int MAX_TILES = 16;
+/* The most compute units this backend will bind on one device.
+ *
+ * Not a prediction that 64 will ever be built as one bitstream - the
+ * area and HBM pseudo-channel budgets cap a monolithic tile at about
+ * eight (docs/SCALING.md), and past that the shape is many devices
+ * rather than many CUs. It is here because the number is free: CU
+ * discovery is a loop over names, tiles are a std::vector, and every
+ * partitioning property is already tested to 64 in api_test. A limit
+ * that binds before the hardware does is a limit that gets discovered
+ * on card day. */
+constexpr int MAX_TILES = 64;
 
 std::string g_err;
 

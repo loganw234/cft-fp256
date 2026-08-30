@@ -416,7 +416,16 @@ int main(void)
             127, 128, 129, 255, 256, 257, 1000, 4096, 4097, 100000
         };
         static const size_t esizes[] = {4, 8, 16, 32};
-        cft_slice sl[17];
+        /* Sized for the largest tile count the contract is checked at,
+         * not the largest one any device has. The property being tested
+         * - that the answer and the padding total do not depend on how
+         * the work was split - has to hold at counts no bitstream can
+         * reach yet, because it is impossible to retrofit once the
+         * abstraction has leaked and there is no way to bisect a
+         * 64-tile disagreement after the fact. Testing it is free; the
+         * hardware existing is not a prerequisite. */
+#define SLICE_MAX_TILES 64
+        cft_slice sl[SLICE_MAX_TILES + 1];
         size_t si, ei, tiles;
         int bad = 0;
 
@@ -426,7 +435,7 @@ int main(void)
                 size_t n = sizes[si];
                 size_t beats = (n + epb - 1) / epb;
                 size_t reference_padded = 0;
-                for (tiles = 1; tiles <= 16 && !bad; tiles++) {
+                for (tiles = 1; tiles <= SLICE_MAX_TILES && !bad; tiles++) {
                     size_t k = cft_plan_slices(n, esz, tiles, sl);
                     size_t covered = 0, total_padded = 0, j;
 
@@ -514,7 +523,7 @@ int main(void)
         CHECK(cft_plan_slices(0, 4, 4, sl) == 0, "n = 0 makes no slices");
         if (!bad)
             printf("  work splits correctly for 27 sizes x 4 formats x "
-                   "16 tile counts, and the padding total never depends "
+                   "64 tile counts, and the padding total never depends "
                    "on the tile count\n");
     }
 

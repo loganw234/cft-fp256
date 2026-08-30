@@ -222,7 +222,7 @@ def check_partition(lib, dev, fmt, rng, trials):
             print(f"FAIL partition base call status {st}")
             bad += 1
             continue
-        for parts in (2, 4, 8):
+        for parts in (2, 4, 8, 16, 32, 64):
             partials, flags = [], 0
             for lo, hi in canonical_ranges(n, parts):
                 p, f = reduce_bits(fmt, xs, rnd, lo, hi)
