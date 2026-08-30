@@ -11,9 +11,9 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 krnl clean
+.PHONY: sim fp32 fp64 fp128 fp256 krnl quarter clean
 
-sim: fp32 fp64 fp128 fp256 krnl
+sim: fp32 fp64 fp128 fp256 krnl quarter
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
@@ -39,6 +39,11 @@ krnl:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnl \
 		COCOTB_RESULTS_FILE=sim_build/krnl/results.xml
+
+quarter:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
+		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \
+		COCOTB_RESULTS_FILE=sim_build/quarter/results.xml
 
 clean:
 	rm -rf sim_build results.xml

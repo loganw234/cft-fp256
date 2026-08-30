@@ -16,7 +16,12 @@ module cft_krnl #(
     // baseline and always present. Advertised in the CAPS CSR.
     parameter bit EN_FP64  = 1'b1,
     parameter bit EN_FP128 = 1'b1,
-    parameter bit EN_FP256 = 1'b1
+    parameter bit EN_FP256 = 1'b1,
+    // The beat is the tile's compute AND memory width; see
+    // cft_engine_stream for why they cannot disagree. 256 is
+    // correct for Alveo (the HBM pseudo-channel width); narrow it
+    // only together with the wide rungs, for a smaller tile.
+    parameter int BEAT_BITS = 256
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -52,8 +57,8 @@ module cft_krnl #(
     output logic [3:0]   m00_axi_awqos,
     output logic         m00_axi_awvalid,
     input  logic         m00_axi_awready,
-    output logic [255:0] m00_axi_wdata,
-    output logic [31:0]  m00_axi_wstrb,
+    output logic [BEAT_BITS-1:0] m00_axi_wdata,
+    output logic [BEAT_BITS/8-1:0] m00_axi_wstrb,
     output logic         m00_axi_wlast,
     output logic         m00_axi_wvalid,
     input  logic         m00_axi_wready,
@@ -73,7 +78,7 @@ module cft_krnl #(
     output logic         m00_axi_arvalid,
     input  logic         m00_axi_arready,
     input  logic [0:0]   m00_axi_rid,
-    input  logic [255:0] m00_axi_rdata,
+    input  logic [BEAT_BITS-1:0] m00_axi_rdata,
     input  logic [1:0]   m00_axi_rresp,
     input  logic         m00_axi_rlast,
     input  logic         m00_axi_rvalid,
@@ -119,7 +124,7 @@ module cft_krnl #(
   );
 
   cft_engine_stream #(.LATENCY(16), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
-                      .EN_FP256(EN_FP256)) u_engine (
+                      .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
       .err_acc(eng_err),

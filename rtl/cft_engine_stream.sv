@@ -35,6 +35,7 @@ module cft_engine_stream #(
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
     parameter bit EN_FP256   = 1'b1,
+    parameter int BEAT_BITS  = 256,
     parameter int BURST_LOG2 = 4,   // max beats per AXI burst
     parameter int FIFO_LOG2  = 5    // per-stream buffer depth (beats)
 ) (
@@ -68,8 +69,8 @@ module cft_engine_stream #(
     output logic [3:0]   m00_axi_awqos,
     output logic         m00_axi_awvalid,
     input  logic         m00_axi_awready,
-    output logic [255:0] m00_axi_wdata,
-    output logic [31:0]  m00_axi_wstrb,
+    output logic [BEAT_BITS-1:0] m00_axi_wdata,
+    output logic [BEAT_BITS/8-1:0] m00_axi_wstrb,
     output logic         m00_axi_wlast,
     output logic         m00_axi_wvalid,
     input  logic         m00_axi_wready,
@@ -89,7 +90,7 @@ module cft_engine_stream #(
     output logic         m00_axi_arvalid,
     input  logic         m00_axi_arready,
     input  logic [0:0]   m00_axi_rid,
-    input  logic [255:0] m00_axi_rdata,
+    input  logic [BEAT_BITS-1:0] m00_axi_rdata,
     input  logic [1:0]   m00_axi_rresp,
     input  logic         m00_axi_rlast,
     input  logic         m00_axi_rvalid,
@@ -100,6 +101,60 @@ module cft_engine_stream #(
   localparam logic [1:0] PREC_FP64  = 2'd1;
   localparam logic [1:0] PREC_FP128 = 2'd2;
   localparam logic [1:0] PREC_FP256 = 2'd3;
+
+  // ---- beat geometry -------------------------------------------------
+  //
+  // BEAT_BITS is the ONE parameter here. Lane counts are not
+  // independent knobs: a beat holds BEAT_BITS/width elements of each
+  // format, so 256 bits gives 8/4/2/1 and narrowing the beat narrows
+  // every bank together. That is the honest shape of the thing - the
+  // beat is the tile's compute width AND its memory width, and the two
+  // cannot disagree without a width converter, which is exactly what
+  // this design refuses to have.
+  //
+  // A format wider than the beat would need multi-beat elements and an
+  // assembly buffer; rather than pretend, the guards below refuse the
+  // configuration. So narrowing the beat means dropping the wide rungs
+  // with it: BEAT_BITS=64 with fp32+fp64 only is a quarter-tile that
+  // fits an Alchitry Au (docs/ROADMAP.md's conformance node), and a
+  // 130nm chiplet that wants area back for deposition buffering makes
+  // the same trade.
+  //
+  // 256 is correct for the Alveo path and should stay there: it is the
+  // native width of an HBM pseudo-channel, which is why no width
+  // converter sits between kernel and memory.
+  localparam int BEAT_BYTES = BEAT_BITS / 8;
+  localparam int ADDR_SH    = $clog2(BEAT_BYTES);   // byte address step
+  localparam int LANE_SH    = $clog2(BEAT_BITS / 32);
+  localparam int LANES32    = BEAT_BITS / 32;
+  localparam int LANES64    = (BEAT_BITS >= 64)  ? BEAT_BITS / 64  : 0;
+  localparam int LANES128   = (BEAT_BITS >= 128) ? BEAT_BITS / 128 : 0;
+  localparam int LANES256   = (BEAT_BITS >= 256) ? BEAT_BITS / 256 : 0;
+
+  generate
+    if (BEAT_BITS != (1 << ADDR_SH) * 8)
+      $error("BEAT_BITS must be a power of two");
+    if (BEAT_BITS < 32)
+      $error("BEAT_BITS must hold at least one fp32 element");
+    if (EN_FP64 && BEAT_BITS < 64)
+      $error("EN_FP64 needs BEAT_BITS >= 64");
+    if (EN_FP128 && BEAT_BITS < 128)
+      $error("EN_FP128 needs BEAT_BITS >= 128");
+    if (EN_FP256 && BEAT_BITS < 256)
+      $error("EN_FP256 needs BEAT_BITS >= 256");
+    // Upper bound, deliberately. This parameterization exists to make
+    // the tile SMALLER - a quarter-tile for an open-core conformance
+    // node, or a chiplet trading lanes for deposition buffer. Going
+    // wider than 256 would put two fp256 elements in a beat, and the
+    // fp256 bank is a single instance rather than a generate loop, so
+    // it would silently compute only the low one. Refuse instead.
+    // (256 is also the native HBM pseudo-channel width, and a 512-bit
+    // master demonstrably lost write payloads through this platform's
+    // emulation models - see docs/BRINGUP.md.)
+    if (BEAT_BITS > 256)
+      $error("BEAT_BITS > 256 needs the fp256 bank to become a loop");
+  endgenerate
+
 
   localparam int BURST_MAX = 1 << BURST_LOG2;
   localparam int FDEPTH    = 1 << FIFO_LOG2;
@@ -135,20 +190,20 @@ module cft_engine_stream #(
 
   // constant AXI attributes
   assign m00_axi_awid    = 1'b0;
-  assign m00_axi_awsize  = 3'd5;      // 32 bytes
+  assign m00_axi_awsize  = ADDR_SH[2:0];   // log2(BEAT_BYTES)
   assign m00_axi_awburst = 2'd1;      // INCR
   assign m00_axi_awlock  = 1'b0;
   assign m00_axi_awcache = 4'b0011;
   assign m00_axi_awprot  = 3'b000;
   assign m00_axi_awqos   = 4'd0;
   assign m00_axi_arid    = 1'b0;
-  assign m00_axi_arsize  = 3'd5;
+  assign m00_axi_arsize  = ADDR_SH[2:0];
   assign m00_axi_arburst = 2'd1;
   assign m00_axi_arlock  = 1'b0;
   assign m00_axi_arcache = 4'b0011;
   assign m00_axi_arprot  = 3'b000;
   assign m00_axi_arqos   = 4'd0;
-  assign m00_axi_wstrb   = {32{1'b1}};
+  assign m00_axi_wstrb   = {BEAT_BYTES{1'b1}};
 
   // ---- run control ---------------------------------------------------
   logic         running;
@@ -159,7 +214,7 @@ module cft_engine_stream #(
   logic [63:0]  base_a, base_b, base_c, base_d;
 
   logic [63:0] beats_new;
-  assign beats_new = cfg_n >> (2'd3 - cfg_prec[1:0]);
+  assign beats_new = cfg_n >> (LANE_SH - cfg_prec[1:0]);
 
   logic start_accept, fifo_clear, wfinish;
   assign start_accept = start && !running;
@@ -208,7 +263,7 @@ module cft_engine_stream #(
 
   // ---- stream FIFOs --------------------------------------------------
   logic         a_wr, b_wr, c_wr, abc_rd, d_wr, d_rd;
-  logic [255:0] a_q, b_q, c_q, d_qout;
+  logic [BEAT_BITS-1:0] a_q, b_q, c_q, d_qout;
   logic [FIFO_LOG2:0] a_cnt, b_cnt, c_cnt, d_cnt;
 
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_a (
@@ -235,9 +290,9 @@ module cft_engine_stream #(
   assign rem0 = beats_total - rd_issued0;
   assign rem1 = beats_total - rd_issued1;
   assign rem2 = beats_total - rd_issued2;
-  assign addr0 = base_a + (rd_issued0 << 5);
-  assign addr1 = base_b + (rd_issued1 << 5);
-  assign addr2 = base_c + (rd_issued2 << 5);
+  assign addr0 = base_a + (rd_issued0 << ADDR_SH);
+  assign addr1 = base_b + (rd_issued1 << ADDR_SH);
+  assign addr2 = base_c + (rd_issued2 << ADDR_SH);
 
   // beats this burst may cover: min(BURST_MAX, remaining, beats to the
   // 4KB AXI boundary, FIFO free space). Addresses are 32B-aligned by
@@ -353,12 +408,12 @@ module cft_engine_stream #(
 
   // ---- compute banks (identical structure to cft_engine) -------------
   // 8 x fp32 lanes
-  logic [255:0] d32;
-  logic [4:0]   f32_l [0:7];
+  logic [BEAT_BITS-1:0] d32;
+  logic [4:0]   f32_l [0:LANES32-1];
   logic [4:0]   f32_or;
   genvar gi;
   generate
-    for (gi = 0; gi < 8; gi = gi + 1) begin : g_lane32
+    for (gi = 0; gi < LANES32; gi = gi + 1) begin : g_lane32
       logic [31:0] sa, sb, sc, fa, fb, fc, dd;
       assign sa = a_q[gi*32 +: 32];
       assign sb = b_q[gi*32 +: 32];
@@ -381,16 +436,16 @@ module cft_engine_stream #(
   endgenerate
   always_comb begin
     f32_or = 5'b0;
-    for (int i = 0; i < 8; i = i + 1) f32_or = f32_or | f32_l[i];
+    for (int i = 0; i < LANES32; i = i + 1) f32_or = f32_or | f32_l[i];
   end
 
   // 4 x fp64 lanes
-  logic [255:0] d64;
+  logic [BEAT_BITS-1:0] d64;
   logic [4:0]   f64_or;
   generate
-    if (EN_FP64) begin : g_bank64
-      logic [4:0] f64_l [0:3];
-      for (gi = 0; gi < 4; gi = gi + 1) begin : g_lane64
+    if (EN_FP64 && LANES64 > 0) begin : g_bank64
+      logic [4:0] f64_l [0:LANES64-1];
+      for (gi = 0; gi < LANES64; gi = gi + 1) begin : g_lane64
         logic [63:0] sa, sb, sc, fa, fb, fc, dd;
         assign sa = a_q[gi*64 +: 64];
         assign sb = b_q[gi*64 +: 64];
@@ -412,7 +467,7 @@ module cft_engine_stream #(
       end
       always_comb begin
         f64_or = 5'b0;
-        for (int i = 0; i < 4; i = i + 1) f64_or = f64_or | f64_l[i];
+        for (int i = 0; i < LANES64; i = i + 1) f64_or = f64_or | f64_l[i];
       end
     end else begin : g_bank64_off
       assign d64 = '0;
@@ -421,12 +476,12 @@ module cft_engine_stream #(
   endgenerate
 
   // 2 x fp128 lanes
-  logic [255:0] d128;
+  logic [BEAT_BITS-1:0] d128;
   logic [4:0]   f128_or;
   generate
-    if (EN_FP128) begin : g_bank128
-      logic [4:0] f128_l [0:1];
-      for (gi = 0; gi < 2; gi = gi + 1) begin : g_lane128
+    if (EN_FP128 && LANES128 > 0) begin : g_bank128
+      logic [4:0] f128_l [0:LANES128-1];
+      for (gi = 0; gi < LANES128; gi = gi + 1) begin : g_lane128
         logic [127:0] sa, sb, sc, fa, fb, fc, dd;
         assign sa = a_q[gi*128 +: 128];
         assign sb = b_q[gi*128 +: 128];
@@ -448,7 +503,7 @@ module cft_engine_stream #(
       end
       always_comb begin
         f128_or = 5'b0;
-        for (int i = 0; i < 2; i = i + 1) f128_or = f128_or | f128_l[i];
+        for (int i = 0; i < LANES128; i = i + 1) f128_or = f128_or | f128_l[i];
       end
     end else begin : g_bank128_off
       assign d128 = '0;
@@ -457,11 +512,11 @@ module cft_engine_stream #(
   endgenerate
 
   // 1 x fp256 unit
-  logic [255:0] d256;
+  logic [BEAT_BITS-1:0] d256;
   logic [4:0]   f256;
   generate
-    if (EN_FP256) begin : g_bank256
-      logic [255:0] w_fa, w_fb, w_fc;
+    if (EN_FP256 && LANES256 > 0) begin : g_bank256
+      logic [BEAT_BITS-1:0] w_fa, w_fb, w_fc;
       cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
           .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .fa(w_fa), .fb(w_fb), .fc(w_fc));
@@ -481,7 +536,7 @@ module cft_engine_stream #(
     end
   endgenerate
 
-  logic [255:0] beat_d;
+  logic [BEAT_BITS-1:0] beat_d;
   logic [4:0]   beat_f;
   always_comb begin
     beat_d = d32;
@@ -508,7 +563,7 @@ module cft_engine_stream #(
 
   logic [63:0] rem_w, addr_w;
   assign rem_w  = beats_total - wr_done;
-  assign addr_w = base_d + (wr_done << 5);
+  assign addr_w = base_d + (wr_done << ADDR_SH);
 
   // target burst: full-size when possible; the tail is always fully
   // buffered by the time rem_w is what is left, so d_cnt >= target

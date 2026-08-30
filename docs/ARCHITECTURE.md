@@ -84,11 +84,35 @@ of four separate banks, precision still selected per run.
 
 Elements per beat: fp32 -> 8, fp64 -> 4, fp128 -> 2, fp256 -> 1.
 
-Bank trims: `cft_krnl` takes `EN_FP64/EN_FP128/EN_FP256` parameters
-(default all on) so constrained targets - the open-core conformance
-nodes in ROADMAP.md - can drop banks they cannot fit. What remains
-is advertised in CAPS and is bit-identical to the full tile on the
-rungs it carries; the beat stays 256 bits regardless.
+### Geometry parameters
+
+`cft_krnl` takes `EN_FP64/EN_FP128/EN_FP256` to drop rungs and
+`BEAT_BITS` to narrow the beat itself. What remains is advertised in
+CAPS and is bit-identical to the full tile on the rungs it carries.
+
+**Lane counts are not independent parameters.** A beat holds
+`BEAT_BITS/width` elements of each format, so the beat width sets all
+four at once: 256 gives 8/4/2/1, and 64 gives 2/1/-/-. That is the
+honest shape - the beat is simultaneously the compute width and the
+memory width, and they cannot disagree without the width converter
+this design exists to avoid.
+
+A format wider than the beat would need multi-beat elements and an
+assembly buffer, so the guards refuse it: narrowing the beat means
+dropping the wide rungs with it. Both directions are bounded -
+`BEAT_BITS > 256` is refused too, because the fp256 bank is a single
+instance rather than a loop and would silently compute only the low
+element.
+
+| configuration | beat | lanes (32/64/128/256) | for |
+|---|---|---|---|
+| full tile | 256 | 8 / 4 / 2 / 1 | Alveo; 256 is the HBM pseudo-channel width |
+| quarter tile | 64 | 2 / 1 / - / - | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+
+The quarter tile is not hypothetical - `tb/test_krnl_quarter.py` runs
+it against the same golden model, so the parameter is proven rather
+than declared. A parameter nothing instantiates is a parameter that
+does not work yet.
 
 ## CSR map (== hw/kernel.xml == cft_csr.sv)
 
