@@ -92,6 +92,8 @@ datapath - so they cost a comparator and a sign bit, not a stage.
 | operation | status | notes |
 |---|---|---|
 | `abs`, `negate`, `copySign` | **yes** | quiet: signal nothing, preserve NaN payloads |
+| `select` | **yes** | `c` non-zero ? `a` : `b`; moves NaNs intact, signals nothing |
+| `cmplt`, `cmple`, `cmpeq` | **yes** | quiet predicates yielding 1.0 or +0.0 |
 | `minimum`, `maximum` | **yes** | NaN propagates; `min(+0,-0)` is -0 |
 | `minimumNumber`, `maximumNumber` | **yes** | returns the number when one operand is NaN |
 
@@ -105,7 +107,8 @@ of the list *is* the distance to general purpose.
 | sign operations (5.5.1) | `abs`, `negate`, `copySign` | **yes** |
 | sign operations (5.5.1) | `copy` | **no** - a memcpy; nothing needs the tile for it |
 | min/max (5.3.1, 9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **yes** |
-| comparisons (5.6.1, 5.11) | `compareQuiet*`, `compareSignaling*`, all 22 predicates | **no** |
+| comparisons (5.6.1, 5.11) | `compareQuietLess`, `LessEqual`, `Equal` - as floats a select can consume; **greater/greaterEqual come free by swapping the operand pointers** | **yes** |
+| comparisons (5.6.1, 5.11) | `compareSignaling*`, the remaining predicates, condition codes | **no** |
 | conversions (5.4.2) | int -> float, float -> int (all five roundings) | **no** |
 | format conversion (5.4.2) | fp32 <-> fp64 <-> fp128 <-> fp256 | **no** |
 | round to integral (5.3.1) | `roundToIntegral{TiesToEven,TowardZero,...,Exact}` | **no** |
@@ -156,13 +159,13 @@ That means the distance to running it on-chip is short and specific:
 | correctly-rounded `fma` | **yes** |
 | bit reinterpretation (float <-> uint) | free - the same register, no operation needed |
 | integer add / subtract / shift on the bit pattern | **no** - needed for seeds like `0x5F375A86 - (m >> 1)` |
-| compare and branchless select | **no** - every special-case guard in the library is one |
+| compare and branchless select | **yes** |
 | `abs`, `min`, `max` | **yes** |
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
 | `floor`, `round`, `step` | **no** - `roundToIntegral` is the next cheap win |
 | a sequencer to run a chain on-chip | **no** - the v2 orbit engine |
 
-Six rows, three still missing after the 2026-08-29 work. Grouped by
+Six rows, two still missing after the 2026-08-29 work. Grouped by
 what they would unlock:
 
 | family | functions |

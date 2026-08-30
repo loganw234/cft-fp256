@@ -355,15 +355,28 @@ OP_FMA, OP_ADD, OP_SUB, OP_MUL = 0, 1, 2, 3
 # existing precomputed-result path rather than the datapath.
 OP_ABS, OP_NEG, OP_COPYSIGN = 4, 5, 6
 OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
+# Comparison predicates and the select that consumes them. Together
+# these are branchless conditional code, which is what the det library
+# needs from hardware far more than it needs a sin().
+#
+# There is no GT or GE opcode and there does not need to be: the engine
+# reads three independent pointers, so a > b is compute(LT, b, a) with
+# the buffers swapped, at no cost. NE is SELECT over EQ, or an inverted
+# read. Only the orderings that cannot be reached by swapping operands
+# earn an opcode - MODE[3:0] has one slot left after these.
+OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 OP_NAMES = {
     OP_FMA: "fma", OP_ADD: "add", OP_SUB: "sub", OP_MUL: "mul",
     OP_ABS: "abs", OP_NEG: "neg", OP_COPYSIGN: "copysign",
     OP_MIN: "min", OP_MAX: "max",
     OP_MINNUM: "minnum", OP_MAXNUM: "maxnum",
+    OP_SELECT: "select", OP_CMPLT: "cmplt",
+    OP_CMPLE: "cmple", OP_CMPEQ: "cmpeq",
 }
 ARITH_OPS = (OP_FMA, OP_ADD, OP_SUB, OP_MUL)
 SIMPLE_OPS = (OP_ABS, OP_NEG, OP_COPYSIGN,
-              OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM)
+              OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM,
+              OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ)
 
 
 # ---- non-arithmetic operations ---------------------------------------
@@ -447,10 +460,57 @@ def fmaxnum(fmt, xa, xb, *_):
     return _minmax(fmt, xa, xb, want_max=True, number=True)
 
 
+def _compare(fmt: FpFormat, xa: int, xb: int, want):
+    """754-2019 5.11 quiet comparison. Returns (1.0 or +0.0, flags).
+
+    A predicate that yields a float rather than a condition code is the
+    point: it is the operand a later select consumes, and it lives in
+    the same arrays as everything else. Quiet comparisons signal only
+    on a signaling NaN; an unordered pair is simply false.
+    """
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    a_nan, b_nan = ua.kind == NAN, ub.kind == NAN
+    flags = FLAG_INVALID if ((a_nan and ua.signaling) or
+                             (b_nan and ub.signaling)) else 0
+    if a_nan or b_nan:
+        return zero_bits(fmt), flags          # unordered: every predicate false
+    lt = _numeric_lt(fmt, xa, xb)
+    gt = _numeric_lt(fmt, xb, xa)
+    eq = not lt and not gt
+    truth = {"lt": lt, "le": lt or eq, "eq": eq}[want]
+    return (one_bits(fmt) if truth else zero_bits(fmt)), flags
+
+
+def cmplt(fmt, xa, xb, *_):
+    return _compare(fmt, xa, xb, "lt")
+
+
+def cmple(fmt, xa, xb, *_):
+    return _compare(fmt, xa, xb, "le")
+
+
+def cmpeq(fmt, xa, xb, *_):
+    return _compare(fmt, xa, xb, "eq")
+
+
+def select(fmt: FpFormat, xa: int, xb: int, xc: int = 0):
+    """d = c is not zero ? a : b. Signals nothing and inspects nothing
+    but c's magnitude, so it moves NaNs and infinities intact.
+
+    "Not zero" means not +0 and not -0. The comparison opcodes produce
+    exactly 1.0 or +0.0, so the pairing is unambiguous in practice; the
+    rule is stated in terms of the bit pattern so that any other
+    producer is unambiguous too.
+    """
+    return (xa if (xc & ~fmt.sign_mask) != 0 else xb), 0
+
+
 SIMPLE_IMPL = {
     OP_ABS: fabs, OP_NEG: neg, OP_COPYSIGN: copysign,
     OP_MIN: fmin, OP_MAX: fmax,
     OP_MINNUM: fminnum, OP_MAXNUM: fmaxnum,
+    OP_SELECT: select, OP_CMPLT: cmplt,
+    OP_CMPLE: cmple, OP_CMPEQ: cmpeq,
 }
 
 

@@ -358,7 +358,7 @@ module cft_engine_stream #(
           .fa(fa), .fb(fb), .fc(fc));
       logic bv; logic [31:0] bd; logic [4:0] bf;
       cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
-          .op(op_r), .a(sa), .b(sb),
+          .op(op_r), .a(sa), .b(sb), .c(sc),
           .valid(bv), .d(bd), .flags(bf));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
@@ -390,7 +390,7 @@ module cft_engine_stream #(
             .fa(fa), .fb(fb), .fc(fc));
         logic bv; logic [63:0] bd; logic [4:0] bf;
         cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
-            .op(op_r), .a(sa), .b(sb),
+            .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
@@ -426,7 +426,7 @@ module cft_engine_stream #(
             .fa(fa), .fb(fb), .fc(fc));
         logic bv; logic [127:0] bd; logic [4:0] bf;
         cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
-            .op(op_r), .a(sa), .b(sb),
+            .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
@@ -457,7 +457,7 @@ module cft_engine_stream #(
           .fa(w_fa), .fb(w_fb), .fc(w_fc));
       logic bv; logic [255:0] bd; logic [4:0] bf;
       cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
-          .op(op_r), .a(a_q), .b(b_q),
+          .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .valid(bv), .d(bd), .flags(bf));
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),

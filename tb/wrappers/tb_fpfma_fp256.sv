@@ -19,7 +19,7 @@ module tb_fpfma_fp256 (
 );
   logic bv; logic [255:0] bd; logic [4:0] bf;
   cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
-      .op(op), .a(a), .b(b), .valid(bv), .d(bd), .flags(bf));
+      .op(op), .a(a), .b(b), .c(c), .valid(bv), .d(bd), .flags(bf));
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(15)) u_dut (
       .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd), .byp(bv), .byp_d(bd), .byp_f(bf),
       .a(a), .b(b), .c(c),

@@ -37,6 +37,7 @@ module cft_simpleops #(
     input  logic [3:0]           op,
     input  logic [EXP_W+MAN_W:0] a,
     input  logic [EXP_W+MAN_W:0] b,
+    input  logic [EXP_W+MAN_W:0] c,
     output logic                 valid,   // this opcode is handled here
     output logic [EXP_W+MAN_W:0] d,
     output logic [4:0]           flags
@@ -52,9 +53,23 @@ module cft_simpleops #(
   localparam logic [3:0] OP_MAX      = 4'd8;
   localparam logic [3:0] OP_MINNUM   = 4'd9;
   localparam logic [3:0] OP_MAXNUM   = 4'd10;
+  localparam logic [3:0] OP_SELECT   = 4'd11;
+  localparam logic [3:0] OP_CMPLT    = 4'd12;
+  localparam logic [3:0] OP_CMPLE    = 4'd13;
+  localparam logic [3:0] OP_CMPEQ    = 4'd14;
 
-  logic [W-1:0] qnan;
-  assign qnan = {1'b0, {EXP_W{1'b1}}, 1'b1, {(MAN_W-1){1'b0}}};
+  localparam int BIAS = (1 << (EXP_W - 1)) - 1;
+
+  logic [W-1:0]     qnan, one, pzero;
+  logic [EXP_W-1:0] bias_f;
+  assign qnan   = {1'b0, {EXP_W{1'b1}}, 1'b1, {(MAN_W-1){1'b0}}};
+  // 1.0: build the exponent from BIAS rather than a bit pattern. The
+  // hand-written {(EXP_W-1){1'b1}, 1'b0} spelling is off by one binade
+  // - it is 2^BIAS, not 1.0 - which is exactly the mistake this
+  // replaced, caught by the kernel bench.
+  assign bias_f = BIAS;
+  assign one    = {1'b0, bias_f, {MAN_W{1'b0}}};
+  assign pzero  = '0;
 
   logic             sa, sb;
   logic [EXP_W-1:0] ea, eb;
@@ -98,8 +113,17 @@ module cft_simpleops #(
   assign is_minmax      = (op == OP_MIN) || (op == OP_MAX) ||
                           (op == OP_MINNUM) || (op == OP_MAXNUM);
 
+  // Numeric equality for non-NaN operands. Two different patterns can
+  // only be numerically equal when both are zero, so outside that case
+  // the patterns compare directly.
+  logic eq, unord, is_cmp;
+  assign eq     = both_zero || (a == b);
+  assign unord  = a_nan || b_nan;
+  assign is_cmp = (op == OP_CMPLT) || (op == OP_CMPLE) || (op == OP_CMPEQ);
+
   assign valid = (op == OP_ABS) || (op == OP_NEG) ||
-                 (op == OP_COPYSIGN) || is_minmax;
+                 (op == OP_COPYSIGN) || is_minmax ||
+                 (op == OP_SELECT) || is_cmp;
 
   always_comb begin
     d     = a;
@@ -108,6 +132,9 @@ module cft_simpleops #(
       OP_ABS:      d = {1'b0,  a[W-2:0]};
       OP_NEG:      d = {~sa,   a[W-2:0]};
       OP_COPYSIGN: d = {sb,    a[W-2:0]};
+      // Data movement: inspects c's magnitude and nothing else, so it
+      // carries NaNs and infinities through intact and signals nothing.
+      OP_SELECT:   d = (c[W-2:0] != 0) ? a : b;
       default: begin
         if (is_minmax) begin
           flags[FL_INVALID] = a_snan || b_snan;
@@ -121,6 +148,19 @@ module cft_simpleops #(
           end else begin
             if (want_max) d = a_lt_b ? b : a;
             else          d = a_lt_b ? a : b;
+          end
+        end else if (is_cmp) begin
+          // 754 5.11 quiet comparison: signals only on a signaling
+          // NaN, and an unordered pair makes every predicate false.
+          // The result is a float so a later select can consume it.
+          flags[FL_INVALID] = a_snan || b_snan;
+          if (unord) d = pzero;
+          else begin
+            case (op)
+              OP_CMPLT: d = a_lt_b        ? one : pzero;
+              OP_CMPLE: d = (a_lt_b || eq) ? one : pzero;
+              default:  d = eq            ? one : pzero;  // OP_CMPEQ
+            endcase
           end
         end
       end

@@ -26,7 +26,7 @@ from cocotbext.axi import AxiBus, AxiLiteBus, AxiLiteMaster, AxiRam  # noqa: E40
 from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE,
     OP_FMA, OP_ADD, OP_SUB, OP_MUL, OP_NAMES, SIMPLE_OPS,
-    OP_COPYSIGN, OP_MAX, OP_MINNUM,
+    OP_COPYSIGN, OP_MAX, OP_MINNUM, OP_SELECT, OP_CMPLT,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES,
     compute, vectors,
 )
@@ -180,6 +180,8 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP64, OP_MINNUM, 16, seed=210)
     await run_op(dut, axil, ram, FP128, OP_COPYSIGN, 8, seed=211)
     await run_op(dut, axil, ram, FP256, OP_MAX, 4, seed=212)
+    await run_op(dut, axil, ram, FP64, OP_CMPLT, 16, seed=213)
+    await run_op(dut, axil, ram, FP256, OP_SELECT, 4, seed=214)
 
 
 # ---- raw AXI4-Lite corner cases --------------------------------------
