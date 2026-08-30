@@ -81,6 +81,23 @@ enum {
     ST_INTERNAL
 };
 
+/* XRT 2.19 deprecates xrt::kernel::read_register and points at
+ * xrt::ip instead. That advice does not apply here: xrt::ip is for
+ * user-managed IPs, and this kernel is ap_ctrl_hs and deliberately run
+ * BY XRT - the two cannot both hold a CU. Reading four read-only
+ * status registers after a run has completed is exactly what the call
+ * is for, and there is no supported alternative that keeps XRT
+ * managing execution.
+ *
+ * If a future XRT removes it rather than deprecating it, the fallback
+ * already exists and is already honest: cftx_open catches the failure,
+ * reports flags_readable = 0, and cft_get_caps tells the caller its
+ * exception flags cannot be trusted. That is the same hole pyxrt has
+ * had all along, and the reason this backend exists. */
+#if defined(__GNUC__)
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 namespace {
 
 /* rtl/cft_csr.sv is the normative map; these must move together. */

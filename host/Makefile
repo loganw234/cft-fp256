@@ -43,7 +43,7 @@ XRT_ROOT ?= /opt/xilinx/xrt
 ifeq ($(XRT),1)
   XRTDEF  := -DCFT_ENABLE_XRT
   XRTINC  := -I$(XRT_ROOT)/include
-  XRTLIBS := -L$(XRT_ROOT)/lib -lxrt_coreutil -lstdc++ -lpthread
+  XRTLIBS := -L$(XRT_ROOT)/lib -lxrt_coreutil -lstdc++ -lpthread -luuid
   OBJ     += src/backend_xrt.o
   PICOBJ  += src/backend_xrt.lo
 endif
