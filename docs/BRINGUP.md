@@ -182,16 +182,34 @@ is the evidence cocotb's RAM model cannot give: the burst geometry
 back-pressure) is validated against the vendor's checkers, not
 against our own testbench's assumptions.
 
-Field note on reading smoke output: a *numerical* failure always
-prints MISMATCH/FAIL lines. A case that prints no verdict line at all
-is an infrastructure fault, not a result. It happens intermittently -
-observed on the first case of one run and on the second case of
-another, roughly one case in ten - and the same case passes when
-rerun alone every time it has been tried. Python exits 0 with empty
-output, so the run is being lost somewhere in the emulator handoff
-rather than crashing the host process. The script reports the exit
-code in that situation so the two can never be confused; rerun the
-case before believing anything about it.
+**Field note: clear the emulator scratch, or runs start failing.**
+A case that prints no verdict line at all is an infrastructure fault,
+not a result - a *numerical* failure always prints MISMATCH/FAIL.
+Run one unfiltered and the cause is visible:
+
+```
+[libprotobuf ERROR message_lite.cc:133] Can't parse message of type
+"xclCopyBufferHost2Device_response" because it is missing required
+fields: size
+SIMULATION EXITED
+```
+
+The XRT-to-simulator transport truncates a message on the
+host-to-device buffer copy, before the kernel runs at all. Root cause
+found 2026-08-29: **`/usr/bin/.run/<pid>` scratch directories and
+`/tmp/root` sockets accumulate, one pair per emulation run, and the
+failure rate climbs with them.** At 53 stale directories one case had
+failed four times running; after
+
+```bash
+rm -rf /usr/bin/.run/* /tmp/root/*      # no xsim processes running
+```
+
+the same case passed three times out of three. Disk and memory were
+never the constraint (833 GB free, no leaked processes) - it is the
+accumulated state itself. Clear it between sessions. This was written
+off as random flakiness for most of a day before anyone ran the case
+without a grep filter in the way, which is its own lesson.
 
 The tooling-skew record below is kept for the field notes it contains.
 

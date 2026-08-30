@@ -125,10 +125,25 @@ rungs it carries; the beat stays 256 bits regardless.
   ignored); MUL uses A,B (C ignored). D = op result. SUB computes
   A - C.
 - One run per ap_start; poll CTRL for ap_done (XRT does this
-  natively); read FLAGS **and STATUS** before the next start. A clean
+  natively); read FLAGS **and STATUS** before the next start - *if
+  your host language can*. See the caveat below. A clean
   STATUS is what makes a bit-exactness claim mean anything: without
   it, a run that computed on data the memory system never delivered
   is indistinguishable from one that succeeded.
+- **Known gap: pyxrt cannot read the status CSRs.** Checked on both
+  XRT 2.14.354 (era emulation) and 2.19.194 (2025.1, what the card
+  will run): `pyxrt.kernel` exposes only `group_id` and the CU access
+  modes - no `read_register`, and there is no `pyxrt.ip` class. So
+  FLAGS, STATUS and CAPS are reachable from the C++ API and from
+  cocotb, but **not** from the Python host example. What that costs
+  is diagnosis, not correctness: the D-buffer comparison against the
+  golden model is the actual gate, and a bus fault corrupts D, so a
+  fault still fails the run - it just fails as "wrong answer" rather
+  than "the memory never delivered". Closing it properly means giving
+  the kernel a small status output buffer so the sticky words come
+  back through the AXI master like everything else, readable by any
+  host language. Until then `vector_fma.py` prints a warning rather
+  than pretending the check ran.
 - **Argument registers must be left alone while a run is in flight.**
   The engine snapshots everything it needs at ap_start - op,
   precision, rounding attribute, N and all four pointers - so a
