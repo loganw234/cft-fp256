@@ -291,6 +291,19 @@ CFT_API cft_status cft_run(cft_device *dev,
         return CFT_ERR_INVALID_ARGUMENT;
     if (!(dev->format_mask & (1u << (int)fmt)))
         return CFT_ERR_UNSUPPORTED;
+    /* An assigned opcode whose group this device lacks is refused
+     * here, not issued and hoped for. A trimmed bitstream does not
+     * fault on an opcode it does not implement - it returns whatever
+     * the absent bank drives, which is zeros with clean flags, and
+     * that is the worst possible shape for a wrong answer. An
+     * UNASSIGNED opcode is a different case and still runs: the
+     * contract gives it a defined result, the canonical quiet NaN
+     * with invalid raised, and the device produces it. */
+    {
+        int group = op_group_bit((int)op);
+        if (group >= 0 && !(dev->op_groups & (1u << group)))
+            return CFT_ERR_UNSUPPORTED;
+    }
 
     if (n == 0) {
         if (flags_out)
