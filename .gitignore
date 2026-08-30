@@ -28,6 +28,7 @@ vivado*.backup*
 tmp_kernel_pack/
 packaged_kernel/
 .run/
+.run.prev/
 .ipcache/
 
 # generated vectors (regenerate with vectors/gen_vectors.py)

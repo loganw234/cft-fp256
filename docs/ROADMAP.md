@@ -379,6 +379,80 @@ way atlas-darkroom records a census.
   orphaned the card-day images over a feature they were not going to
   use.
 
+### Second independent review, and the hostile driver it argued for (2026-08-30)
+
+Two more adversarial reviews, on the same split as the first: one on
+the numeric datapath and contract, one on control, protocol and
+integration. Four real bugs, one of which was a wrong answer rather
+than a wrong margin.
+
+- **`cftx_reduce` computed the wrong sum on any quad image.** Staging
+  wrote every range into `D.tiles[k % ntiles]` up front and the launch
+  loop then reused tiles in waves, so with more ranges than tiles -
+  which is routine, since the canonical cut needs an extra range at
+  n = 5, 9, 17, 33, 65 - range 4 overwrote range 0's operands before
+  range 0 had run. Clean STATUS, plausible flags, wrong answer: fp32
+  over four CUs at n=9 gave 51.0 instead of 45.0.
+- **CAPS dropped the integer opcode group** while gaining reduction,
+  making eight implemented opcodes unreachable. Both benches had been
+  updated to assert the wrong literal, and `device-test` skipped the
+  opcodes silently, because a skip is not a failure.
+- **Two latent quarter-tile faults**, invisible at 256-bit beats: a
+  hardcoded shift in the write path's 4KB term that reaches zero near
+  a page end and hangs, and a hardcoded elements-per-beat in the
+  reduction serializer.
+- **The manifest could call a build reproducible when it was not**,
+  because `git diff` does not see untracked files and the packaging
+  tcl globs `rtl/*.sv`.
+
+The first review's closing line was that the bugs it found "need
+either a hostile driver or a reader". The reader has now run twice, so
+this round built the driver.
+
+- [x] **A hostile bus (2026-08-30):** `tb/busfx.py`. Backpressure on
+  every channel of every master, seeded per channel; error responses
+  (SLVERR/DECERR) on any master; and burst-length violations in both
+  directions. Eleven bench targets, 27 tests.
+
+  For this design backpressure asks a sharper question than "does it
+  still work". Results are scored against a golden model that has no
+  notion of a cycle, so a run that survives a hostile schedule AND
+  matches is a statement that the SCHEDULE DID NOT REACH THE ANSWER -
+  which is the product claim, tested against the most plausible thing
+  that could quietly break it.
+
+  It also closed the 4KB-boundary gap. No bench had ever reached a
+  page boundary at any geometry: every base is page-aligned and the
+  largest run was 48 elements, 192 bytes into a 4096-byte page. Both
+  tiles now cross one, and the shortening is visible rather than
+  assumed - bursts landing at `0xfe0 len=1`, `0x41fc0 len=2`,
+  `0x82fa0 len=3`, each ending exactly on a boundary.
+
+- [x] **A bus fault ends the run (2026-08-30):** the three `err_acc`
+  bits were never equivalent. A bad RESPONSE still carries its beat,
+  so the run completes and STATUS is read after. A bad LENGTH withholds
+  beats that were promised, so compute starves, `ap_done` never
+  asserts, and the fault sits in a register nobody can read - because
+  nothing can be read until a run that will not end, ends. The host's
+  twenty-minute timeout was the only recourse.
+
+  AXI4 requires exactly AxLEN+1 transfers (A3.4.1) and says nothing
+  about master recovery, so the behaviour was taken from the
+  neighbouring conventions, which agree: PCIe logs and completes, an
+  AXI interconnect answers SLVERR rather than stalling the fabric, and
+  ap_ctrl_hs cannot express a run that never finishes. A hang costs a
+  card reset; a clean `CFT_ERR_BUS_FAULT` costs a retry.
+
+  Abandoning is not stopping. No new AR or AW; any burst already
+  committed finishes, holding WVALID with stale data if the FIFO ran
+  dry, because there is no way to withdraw a committed burst and the
+  run is being reported failed anyway; outstanding reads land before
+  done, so their beats cannot arrive during the next run.
+
+  Not covered, deliberately: a slave that stops answering entirely.
+  Nothing in the kernel can tell that from a slow slave, so it stays
+  with the host timeout.
+
 ## v2 - the coordinated part
 
 - [x] **Orbit sequencer: design, model and software backend

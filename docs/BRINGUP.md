@@ -93,6 +93,28 @@ cost this project an evening once before under the name "flakiness".
 `hw/run-device-test.sh` now reaps them before every run, and with that
 in place emulation completes:
 
+> **The first version of that reap was incomplete, and it bit again on
+> 2026-08-30.** The shim creates TWO sockets per run -
+> `device0_0_<pid>` and `D2X_unix_sock_device0_0_<pid>` - and the
+> reaper globbed `device*`, which matches only the first. Half the
+> litter was swept and half accumulated: 26 sockets built up over about
+> eighteen hours, and then runs began dying at startup with a protobuf
+> parse failure on `xclCopyBufferHost2Device_response` followed by
+> `SIMULATION EXITED`.
+>
+> That signature reads like a corrupt artifact or a version-skewed
+> toolchain, which is where four runs and most of a three-way bisection
+> went before anyone listed the directory. The reaper now clears the
+> whole of `/tmp/$USER`, because a pattern that has to be kept in step
+> with a vendor's socket naming will drift out of step silently and
+> present as something expensive.
+>
+> A related harness flaw made it worse and is also fixed: `.run`
+> directories were deleted at the START of a run, so every failure
+> destroyed the previous failure's simulator log. Four failed runs, four
+> erased post-mortems, and the one piece of evidence that would have
+> named the cause was gone each time it was wanted.
+
     opened exclusive
     MAGIC 0x43465430  VERSION 0x00000410  CAPS 0x00001f0f
     wait returned state 4        <- ERT_CMD_STATE_COMPLETED
