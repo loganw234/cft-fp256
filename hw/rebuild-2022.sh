@@ -88,6 +88,51 @@ for t in $TARGETS; do
       -o "$BUILD/cft_$t.xclbin" "$BUILD/cft_krnl.xo"
 done
 
+# A manifest per built artifact. The determinism claim is only worth
+# something if a result can be traced to the exact RTL that produced
+# it, and a git tag cannot do that once the tag starts moving - which
+# it will, because most of this design is verifiable without the card
+# and the verified point advances daily.
+#
+# The xclbin's own hash is the key: hash the file you ran and look it
+# up. That works even if the tree moved on, the tag moved on, or the
+# file was copied to another machine under a different name. Recorded
+# the way BRINGUP.md asks a bring-up to be recorded, so first light is
+# replayable rather than remembered.
+for t in $TARGETS; do
+  xb="$BUILD/cft_$t.xclbin"
+  [ -f "$xb" ] || continue
+  man="$BUILD/cft_$t.manifest.txt"
+  {
+    echo "artifact:      $(basename "$xb")"
+    echo "sha256:        $(sha256sum "$xb" | cut -d' ' -f1)"
+    echo "bytes:         $(stat -c%s "$xb")"
+    echo "built:         $(date -Iseconds)"
+    echo "host:          $(hostname)"
+    echo "commit:        $(git rev-parse HEAD 2>/dev/null || echo unknown)"
+    echo "describe:      $(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+      echo "tree:          DIRTY - this artifact does not correspond to any commit"
+    else
+      echo "tree:          clean"
+    fi
+    echo "target:        $t"
+    echo "platform:      $PLATFORM"
+    echo "part:          $PART"
+    echo "link_cfg:      $LINK_CFG"
+    echo "kernel_freq:   $KERNEL_FREQ"
+    echo "clock_cus:     $CLOCK_CUS"
+    echo "vivado:        $(vivado -version 2>/dev/null | head -1)"
+    rpt="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt"
+    if [ -f "$rpt" ]; then
+      wns=$(grep -A6 'Design Timing Summary' "$rpt" | tail -1 | awk '{print $1}')
+      echo "routed_wns_ns: ${wns:-unknown}"
+    fi
+  } > "$man"
+  echo "== manifest: $man"
+  cat "$man"
+done
+
 if [[ "$TARGETS" == *hw_emu* ]]; then
   emconfigutil --platform "$PLATFORM" --od "$BUILD"
 fi

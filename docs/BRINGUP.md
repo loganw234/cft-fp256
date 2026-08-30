@@ -284,6 +284,31 @@ after routing. One link peaks at ~12 GB, so the 31 GB box runs two
 concurrently; that is the binding constraint on any frequency sweep,
 not the 36 cores.
 
+### Which RTL is in this bitstream?
+
+Hash the file and read the manifest beside it:
+
+```bash
+sha256sum build/cft_hw.xclbin
+cat build/cft_hw.manifest.txt
+```
+
+`hw/rebuild-2022.sh` writes one manifest per artifact carrying the
+commit, `git describe`, whether the tree was dirty, the platform,
+part, link config, kernel clock, Vivado version and the routed WNS.
+
+The hash is the key rather than the filename, because filenames get
+copied and renamed and the tag does not stay put. **`cardday-base` is
+a moving marker**: it names the last state that passed everything, and
+it advances as the week does, because most of this design is
+verifiable without the card and there is no reason to sit on a stale
+point. That makes the tag useless for provenance by design, which is
+exactly why the manifest exists.
+
+A bitstream built from a dirty tree says so, in those words. It should
+never reach the card; if it does, its results correspond to no commit
+and cannot be reproduced.
+
 ### Calibration: read the path delay, not the slack
 
 This note has been rewritten twice as data arrived, and the final
