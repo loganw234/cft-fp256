@@ -181,10 +181,66 @@ for t in $TARGETS; do
     echo "clock_cus:     $CLOCK_CUS"
     echo "clock_arg:     ${KERNEL_FREQ}:${CLOCK_ARG}"
     echo "vivado:        $(vivado -version 2>/dev/null | head -1)"
-    rpt="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt"
-    if [ -f "$rpt" ]; then
-      wns=$(grep -A6 'Design Timing Summary' "$rpt" | tail -1 | awk '{print $1}')
-      echo "routed_wns_ns: ${wns:-unknown}"
+    # Timing, reported two ways, because ONE number is misleading.
+    #
+    # The global WNS covers every clock in the design, and the design
+    # includes the whole Alveo shell - PCIe, HBM, GTY transceivers. Those
+    # are static-region paths, identical from build to build, and nothing
+    # to do with our logic. The tell that this had been recorded wrong:
+    # the 130 MHz and 145 MHz single-tile builds BOTH reported exactly
+    # 0.055 ns. Same shell, same transceiver path, same number - while the
+    # kernel margins were actually 0.137 and 0.116.
+    #
+    # So record both, and label them. The kernel number is the one that
+    # answers "how close is this design to its limit"; the global one is
+    # what Vitis decides pass/fail on, which is why a negative global with
+    # a healthy kernel is a real and confusing state (2026-08-30: quad@130
+    # came in at global -0.001 on an HBM interconnect path, kernel +0.022,
+    # and Vitis fixed it itself by scaling hbm_aclk 450 -> 449.8 MHz).
+    #
+    # Prefer the routed summary: it exists earlier than dr_timing_summary
+    # and it carries the per-clock Intra Clock Table that the split needs.
+    imp="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/impl_1"
+    rpt=""
+    for cand in "$imp/hw_bb_locked_timing_summary_routed.rpt" \
+                "$imp/dr_timing_summary.rpt"; do
+      [ -f "$cand" ] && { rpt="$cand"; break; }
+    done
+    if [ -n "$rpt" ]; then
+      echo "timing_report:  $(basename "$rpt")"
+      wns=$(awk '/Design Timing Summary/{f=1}
+                 f && $1 ~ /^-?[0-9]+\.[0-9]+$/ {print $1; exit}' "$rpt")
+      echo "routed_wns_ns: ${wns:-unknown}   # whole design, shell included"
+
+      # Our logic sits on the ULP clock wizard output. Overridable because
+      # the name is a property of the platform, not of this design; if a
+      # future shell renames it the fallback is an honest "unknown" rather
+      # than a wrong number.
+      kclk=${KERNEL_CLK:-clk_out1_ulp_clk_wiz_0}
+      kline=$(awk -v c="$kclk" '
+                /Intra Clock Table/{f=1}
+                f && /Inter Clock Table/{exit}
+                f && $1 == c {print $2, $4, $5; exit}' "$rpt")
+      if [ -n "$kline" ]; then
+        set -- $kline
+        echo "kernel_clock:  $kclk"
+        echo "kernel_wns_ns: $1   # THIS is the design's margin"
+        echo "kernel_failing_endpoints: $2 of $3"
+      else
+        echo "kernel_clock:  $kclk (not found in Intra Clock Table)"
+        echo "kernel_wns_ns: unknown"
+      fi
+
+      # If the global WNS is negative, name the clock responsible, so a
+      # shell-owned violation is not mistaken for a kernel failure.
+      worst=$(awk '/Intra Clock Table/{f=1}
+                   f && /Inter Clock Table/{exit}
+                   f && $2 ~ /^-[0-9]+\.[0-9]+$/ {print $1, $2, $4, $5}' "$rpt")
+      [ -n "$worst" ] && printf 'violating_clocks: %s\n' "$worst"
+
+      # Vitis auto-frequency scaling writes what it actually settled on.
+      [ -f "$imp/_new_clk_freq" ] && \
+        printf 'final_clocks:  %s\n' "$(tr '\n' ' ' < "$imp/_new_clk_freq")"
     fi
   } > "$man"
   echo "== manifest: $man"
