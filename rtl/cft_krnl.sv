@@ -30,7 +30,14 @@ module cft_krnl #(
     // cft_engine_stream for why they cannot disagree. 256 is
     // correct for Alveo (the HBM pseudo-channel width); narrow it
     // only together with the wide rungs, for a smaller tile.
-    parameter int BEAT_BITS = 256
+    parameter int BEAT_BITS = 256,
+    // Resource sharing across the banks, both default OFF and both
+    // pass-through only - the engine's own headers carry the argument
+    // and the measurements. They are exposed here because a parameter
+    // no top-level can set cannot be built, measured, or refuted, and
+    // FUSE_MUL spent a release in exactly that state.
+    parameter bit FUSE_MUL  = 1'b0,
+    parameter bit FUSE_NORM = 1'b0
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -196,7 +203,8 @@ module cft_krnl #(
   );
 
   cft_engine_stream #(.LATENCY(15), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
-                      .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS)) u_engine (
+                      .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS),
+                      .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
       .err_acc(eng_err),

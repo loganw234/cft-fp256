@@ -55,7 +55,22 @@ module cft_fpfma_pipe #(
     // Take the significand product from mul_p instead of building a
     // multiplier here. See the mul_* ports for the contract. Default 0
     // keeps every existing instantiation bit-identical.
-    parameter bit EXT_MUL = 1'b0
+    parameter bit EXT_MUL = 1'b0,
+    // Take the normalised significand from nrm_d instead of building
+    // the two normalise shifters here. See the nrm_* ports. Default 0
+    // keeps every existing instantiation bit-identical, and the two
+    // parameters are independent - a lane may share either, both or
+    // neither.
+    parameter bit EXT_NORM = 1'b0,
+    // Width of the normalise window, for the nrm_* ports only - the
+    // localparam NW below is the one the datapath uses, and it is
+    // declared after the port list so it cannot be named here. DERIVED:
+    // do not override. NW = GW = VW+1 = 2P + SH + 2 with P = MAN_W+1
+    // and SH = P+4, which reduces to 3*MAN_W + 9. An elaboration guard
+    // below asserts the two agree, because a silent disagreement would
+    // truncate a significand window and return a wrong result with
+    // clean flags.
+    parameter int NRM_W = 3 * MAN_W + 9
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
@@ -97,7 +112,33 @@ module cft_fpfma_pipe #(
     // returns a*b with five cycles of latency will do.
     output logic [MAN_W:0]       mul_a,
     output logic [MAN_W:0]       mul_b,
-    input  logic [2*MAN_W+1:0]   mul_p
+    input  logic [2*MAN_W+1:0]   mul_p,
+
+    // ---- shared-normaliser port (EXT_NORM) --------------------------
+    //
+    // With EXT_NORM = 0 (the default) the lane builds both normalise
+    // shifters and these are inert, exactly as for EXT_MUL.
+    //
+    // With EXT_NORM = 1 the lane hands out the value to normalise and
+    // the two halves of its shift distance, and expects the normalised
+    // value back TWO cycles later - precisely the depth the internal
+    // shifters had (S11 coarse, S12 fine). That equality is what makes
+    // sharing move no other stage: the leading-zero count, the exponent
+    // and the zero/sticky rails all stay here and are unaffected.
+    //
+    // The distance is split the way the pipe already splits it: nrm_csh
+    // counts whole 64-bit granules and nrm_fsh is the 0..63 remainder,
+    // so the total is nrm_csh*64 + nrm_fsh and a supplier can simply
+    // concatenate them.
+    //
+    // cft_normseg is the intended supplier - one segmented ladder
+    // serving every bank - but nothing here depends on that. Anything
+    // that returns the value left-shifted by the given distance, two
+    // cycles later, will do.
+    output logic [NRM_W-1:0]     nrm_v,
+    output logic [3:0]           nrm_csh,
+    output logic [5:0]           nrm_fsh,
+    input  logic [NRM_W-1:0]     nrm_d
 );
 
   localparam int W    = 1 + EXP_W + MAN_W;
@@ -189,6 +230,9 @@ module cft_fpfma_pipe #(
     if (NMC > 16) begin : g_too_many_chunks
       $error("cft_fpfma_pipe: MAN_W too wide - the multiplier tree holds 16 chunks (max MAN_W 383)");
     end
+    if (NRM_W != NW) begin : g_bad_nrm_w
+      $error("cft_fpfma_pipe: NRM_W must equal NW - do not override it");
+    end
   endgenerate
 
   initial begin
@@ -200,6 +244,14 @@ module cft_fpfma_pipe #(
     if (NMC > 16) begin
       $display("FATAL: cft_fpfma_pipe MAN_W (%0d) needs %0d multiplier chunks; the tree holds 16",
                MAN_W, NMC);
+      $fatal(1);
+    end
+    // NRM_W exists only because the nrm_* ports are declared before NW
+    // can be. If the two ever disagree the shared normaliser silently
+    // truncates a significand window, which is a wrong answer with
+    // clean flags - the worst failure this design has.
+    if (NRM_W != NW) begin
+      $display("FATAL: cft_fpfma_pipe NRM_W (%0d) != NW (%0d)", NRM_W, NW);
       $fatal(1);
     end
   end
@@ -596,49 +648,99 @@ module cft_fpfma_pipe #(
     end
   endfunction
 
-  logic [NW-1:0] s11_valw;
+  // s11_valw and s11_fine are the private shifter's own intermediate
+  // and live inside the generate below, so a shared lane does not carry
+  // an undriven register it never reads.
   logic          s11_stk, s11_zero, s11_rsign, s11_spc;
   logic [W-1:0]  s11_spd;
   logic [4:0]    s11_spf;
-  int            s11_enorm, s11_fine;
+  int            s11_enorm;
 
-  always_ff @(posedge clk) begin : stage11
+  // ---- S11 combinational: the leading-zero scan and the distance ----
+  //
+  // Split out of the register process below so that a shared normaliser
+  // can be handed exactly the values the private one uses. Nothing here
+  // changed when it was split: the scan, the msb and the two halves of
+  // the distance are what stage11 always computed, they are just named
+  // now instead of being locals inside an always_ff.
+  //
+  // n11_lsh is the total left shift, NW-1-msb, and the pipe's own split
+  // of it into whole 64-bit granules plus a 0..63 remainder is what the
+  // nrm_csh/nrm_fsh ports carry. Taking the halves as bit-selects of
+  // n11_lsh rather than by arithmetic keeps csh*64 + fsh == lsh true by
+  // construction.
+  logic [NW-1:0] n11_valw;
+  logic          n11_empty;
+  logic [9:0]    n11_lsh;
+  logic [3:0]    n11_csh;
+  logic [5:0]    n11_fsh;
+  int            n11_msb;
+
+  always_comb begin
     logic [NCH*64-1:0] padded;
-    logic [NW-1:0] valw;
-    int chunk, cl, msb, lsh_coarse;
-    valw = s10_mag[GW:1];
-    padded = {{(NCH*64-NW){1'b0}}, valw};
+    logic [31:0] lsh_full;
+    int chunk, cl;
+    // Default-assigned before the branch. `cl` is only meaningful in
+    // the non-empty case, but a block-local written on one path of an
+    // always_comb is a latch, and Yosys refuses it - which is the whole
+    // reason the portability gate exists. This was a clocked process
+    // before the split, where the same code is unremarkable.
+    cl = 0;
+    lsh_full = '0;
+    n11_valw = s10_mag[GW:1];
+    padded = {{(NCH*64-NW){1'b0}}, n11_valw};
     chunk = -1;
     for (int ci = NCH - 1; ci >= 0; ci = ci - 1) begin
       if (chunk == -1 && (padded[ci*64 +: 64] != 0)) chunk = ci;
     end
     if (chunk == -1) begin
-      // Exact zero only without sticky residue; else a bare epsilon,
-      // and s10_g already places it below the subnormal grid so S13
-      // rounds it per the attribute, carrying the true sign.
-      //
-      // Why that holds - it is NOT because the anchor is zero (a
-      // nonzero subnormal addend reaches here too: fp32
-      // a=0x1ef3ab49 b=0x1ef536f9 c=0x80074b3a cancels to an empty
-      // window with the marker set). It is because an empty window
-      // with a surviving residue requires the anchor's significand
-      // below 2^(P-4), which forces it subnormal or zero - and any
-      // subnormal pins its exponent at EMIN-MAN_W, so g = EMIN-MAN_W-SH
-      // and S13's K is negative. Change SH or the far-alignment
-      // threshold and this is the argument to re-derive.
-      s11_zero <= !s10_mag[0];
-      s11_valw <= '0;
-      s11_enorm <= s10_g;
-      s11_fine <= 0;
+      // An empty window: n11_valw is zero by definition here, so any
+      // shift of it is zero and the distance is a don't-care. Driving
+      // zero rather than leaving it undefined matters for the shared
+      // path, where this lane's amount reaches a ladder other lanes
+      // are also using.
+      n11_empty = 1'b1;
+      n11_msb   = 0;
+      n11_lsh   = '0;
     end else begin
-      cl  = lzc64(padded[chunk*64 +: 64]);
-      msb = chunk * 64 + (63 - cl);
-      s11_zero  <= 1'b0;
-      s11_enorm <= s10_g + msb;
-      lsh_coarse = (NW - 1 - msb) >> 6;
-      s11_valw <= valw << (lsh_coarse * 64);
-      s11_fine <= (NW - 1 - msb) & 63;
+      cl        = lzc64(padded[chunk*64 +: 64]);
+      n11_msb   = chunk * 64 + (63 - cl);
+      n11_empty = 1'b0;
+      // NW-1-msb is at most 716 (fp256), so ten bits hold it. Taken as
+      // an explicit slice of a named 32-bit intermediate rather than by
+      // implicit truncation: the truncation is intended, and saying so
+      // in the source is what keeps it distinguishable from the ones
+      // that are not. (A width cast would read better still, but Icarus
+      // is uneven about casts - cft_mulfrac's own comment records it.)
+      lsh_full  = NW - 1 - n11_msb;
+      n11_lsh   = lsh_full[9:0];
     end
+    n11_csh = n11_lsh[9:6];
+    n11_fsh = n11_lsh[5:0];
+  end
+
+  assign nrm_v   = n11_valw;
+  assign nrm_csh = n11_csh;
+  assign nrm_fsh = n11_fsh;
+
+  // S11 registers, less the shift itself. The empty-window case:
+  //
+  // Exact zero only without sticky residue; else a bare epsilon,
+  // and s10_g already places it below the subnormal grid so S13
+  // rounds it per the attribute, carrying the true sign.
+  //
+  // Why that holds - it is NOT because the anchor is zero (a
+  // nonzero subnormal addend reaches here too: fp32
+  // a=0x1ef3ab49 b=0x1ef536f9 c=0x80074b3a cancels to an empty
+  // window with the marker set). It is because an empty window
+  // with a surviving residue requires the anchor's significand
+  // below 2^(P-4), which forces it subnormal or zero - and any
+  // subnormal pins its exponent at EMIN-MAN_W, so g = EMIN-MAN_W-SH
+  // and S13's K is negative. Change SH or the far-alignment
+  // threshold and this is the argument to re-derive.
+  always_ff @(posedge clk) begin : stage11
+    s11_zero  <= n11_empty && !s10_mag[0];
+    s11_enorm <= n11_empty ? s10_g : (s10_g + n11_msb);
     s11_stk   <= s10_mag[0];
     s11_rsign <= s10_rsign;
     s11_spc <= s10_spc; s11_spd <= s10_spd; s11_spf <= s10_spf;
@@ -651,13 +753,39 @@ module cft_fpfma_pipe #(
   int            s12_enorm;
 
   always_ff @(posedge clk) begin : stage12
-    s12_norm  <= s11_valw << s11_fine;
     s12_stk   <= s11_stk;
     s12_zero  <= s11_zero;
     s12_enorm <= s11_enorm;
     s12_rsign <= s11_rsign;
     s12_spc <= s11_spc; s12_spd <= s11_spd; s12_spf <= s11_spf;
   end
+
+  // ---- the two normalise shifters, here or elsewhere ----------------
+  //
+  // Private: exactly what stage11 and stage12 did before the split -
+  // coarse by whole granules into s11_valw, then the remainder into
+  // s12_norm. The empty-window case needs no special handling because
+  // n11_valw IS zero then and n11_csh/n11_fsh are driven zero, so
+  // `n11_valw << 0` reproduces the old `s11_valw <= '0` exactly.
+  //
+  // Shared: s12_norm is a wire from the supplier, which must return the
+  // value two cycles later. It still arrives as a register - the
+  // supplier's - so S13 sees the same timing either way.
+  generate
+    if (EXT_NORM) begin : g_norm_shared
+      assign s12_norm = nrm_d;
+    end else begin : g_norm_priv
+      logic [NW-1:0] s11_valw;
+      logic [5:0]    s11_fine;
+      always_ff @(posedge clk) begin
+        s11_valw <= n11_valw << (n11_csh * 64);
+        s11_fine <= n11_fsh;
+      end
+      always_ff @(posedge clk) begin
+        s12_norm <= s11_valw << s11_fine;
+      end
+    end
+  endgenerate
 
   // ------------------------------------------------------------------
   // S13: rounding (clamped and as-if-unbounded windows)

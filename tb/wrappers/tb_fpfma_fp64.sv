@@ -29,5 +29,6 @@ module tb_fpfma_fp64 (
       // EXT_MUL defaults off, so these are inert - but a pin
       // that is not named is fatal to Verilator, and that is
       // what kept `make SIM=verilator` from ever running.
-      .mul_a(), .mul_b(), .mul_p('0));
+      .mul_a(), .mul_b(), .mul_p('0),
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
 endmodule

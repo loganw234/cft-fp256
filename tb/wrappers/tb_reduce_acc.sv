@@ -50,6 +50,7 @@ module tb_reduce_acc #(
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(add_a), .b(FP32_ONE), .c(add_b),
       .out_valid(), .d(add_res), .flags(add_flags),
-      .mul_a(), .mul_b(), .mul_p('0));
+      .mul_a(), .mul_b(), .mul_p('0),
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
 
 endmodule

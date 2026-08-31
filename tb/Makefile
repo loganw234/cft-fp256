@@ -11,11 +11,11 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normprobe \
-        reduceacc reduce krnl quarter faults clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
+        normprobe reduceacc reduce krnl quarter faults clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg reduceacc reduce \
-     krnl quarter faults
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
+     reduceacc reduce krnl quarter faults
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -64,6 +64,18 @@ normseg:
 	$(MAKE) -f cocotb.mk SIM=$(NORMSEG_SIM) TOPLEVEL=tb_normseg \
 		MODULE=test_normseg SIM_BUILD=sim_build/normseg \
 		COCOTB_RESULTS_FILE=sim_build/normseg/results.xml
+
+# The same claim one level up: not "does the ladder shift correctly"
+# (normseg answers that) but "is a LANE unchanged when its normalised
+# significand comes from outside". Four banks built twice, EXT_NORM=0
+# against EXT_NORM=1 fed by one cft_normseg, every result and flag word
+# compared. Catches the plumbing - a cycle of skew, the two halves of
+# the distance swapped, a lane reading its neighbour's slice - none of
+# which tb_normseg can see, because it never goes through a pipe.
+normshare:
+	$(MAKE) -f cocotb.mk SIM=$(NORMSEG_SIM) TOPLEVEL=tb_normshare \
+		MODULE=test_normshare SIM_BUILD=sim_build/normshare \
+		COCOTB_RESULTS_FILE=sim_build/normshare/results.xml
 
 # Diagnostic probe for tb_normseg, not part of `make sim`. Drives one
 # known vector into a quiet pipeline and prints both halves every

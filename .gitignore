@@ -49,3 +49,9 @@ host/api-test
 host/vector-fma
 host/vector-fma-f
 host/.out-*.txt
+
+# downloaded reference material, kept locally and never redistributed.
+# This repo is Apache-2.0 and public; third-party pages carry their own
+# copyright (the Cornell FP page that landed here says so at the foot),
+# and a `git add -A` will sweep them in without asking.
+Data/

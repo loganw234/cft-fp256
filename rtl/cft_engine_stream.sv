@@ -63,7 +63,14 @@ module cft_engine_stream #(
     // own multiplier. Measured NOT to pay on this fabric - see the
     // USE_FUSED_MUL comment below for the numbers and the reason - so it
     // is off, and stays available for the granule-grid work that would.
-    parameter bit FUSE_MUL   = 1'b0
+    parameter bit FUSE_MUL   = 1'b0,
+    // Share ONE segmented normalise ladder across every lane instead of
+    // giving each its own two shifters. Unlike FUSE_MUL this collapses
+    // LUTs rather than DSP, which is the resource that constrains this
+    // design - but it is off until an in-shell before/after says the
+    // saving survives the gather multiplexer, because that is the step
+    // the fused multiplier failed at.
+    parameter bit FUSE_NORM  = 1'b0
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -1028,6 +1035,102 @@ module cft_engine_stream #(
     end
   endgenerate
 
+  // ---- the shared normalise ladder -----------------------------------
+  //
+  // Same argument as the fused multiplier and the same gating, but the
+  // trade points the other way. cft_mulfrac collapses DSP, which sits
+  // at 4.4% and is not the constraint, and measured +693 LUT for it.
+  // The normalise shifters are LUTs, which ARE the constraint: measured
+  // by ablation, the two shift paths together are 37,788 LUT - 32% of
+  // the kernel - and one segmented ladder replaces fifteen private
+  // normalisers at 5,269 LUT against 10,405.
+  //
+  // Still default OFF until a before/after in-shell build says the
+  // saving survives the gather multiplexer this block adds, because
+  // that is exactly the step cft_mulfrac failed at.
+  //
+  // Requires the full-tile geometry for the same reason the fused
+  // multiplier does: the slot pitch IS the 256-bit beat's shape, and a
+  // quarter tile does not build the rungs it is sized for.
+  localparam bit USE_FUSED_NORM = FUSE_NORM && (BEAT_BITS == 256) &&
+                                  EN_FP64 && EN_FP128 && EN_FP256;
+
+  // Eight uniform slots of 90 bits: the smallest slot holding an fp32
+  // window (78) whose eight-fold tiling holds an fp256 one (717). Lane
+  // l of mode m sits at l*(NSEG_SLOTW<<m). See cft_normseg's header for
+  // why the pitch is uniform rather than the natural width.
+  localparam int NSEG_SLOTW = 90;
+  localparam int NSEG_W     = 8 * NSEG_SLOTW;
+  localparam int NW32  = 78;
+  localparam int NW64  = 165;
+  localparam int NW128 = 345;
+  localparam int NW256 = 717;
+
+  logic [NSEG_W-1:0] ns_din, ns_dout;
+  logic [3:0]        ns_csh [0:7];
+  logic [5:0]        ns_fsh [0:7];
+
+  // Windows and distances out of each lane, waiting to be packed. Fixed
+  // sizes rather than LANES-derived, matching the mulfrac arrays above:
+  // only the first LANES* of each are driven, and the fused path is
+  // gated on the geometry where that is all of them.
+  logic [NW32-1:0]  nv32  [0:7];
+  logic [NW64-1:0]  nv64  [0:3];
+  logic [NW128-1:0] nv128 [0:1];
+  logic [NW256-1:0] nv256;
+  logic [3:0] nc32 [0:7], nc64 [0:3], nc128 [0:1], nc256;
+  logic [5:0] nf32 [0:7], nf64 [0:3], nf128 [0:1], nf256;
+
+  generate
+    if (USE_FUSED_NORM) begin : g_normseg
+      cft_normseg #(.PMAX(237), .SLOTS(8)) u_normseg (
+          .clk(ap_clk), .mode(prec_r), .din(ns_din),
+          .csh(ns_csh), .fsh(ns_fsh), .dout(ns_dout));
+
+      // Pack whichever bank is live, by the same argument that makes
+      // the fused multiplier's mode safe: prec_r is snapshot at start
+      // and cannot move while anything is in flight.
+      always_comb begin
+        ns_din = '0;
+        for (int i = 0; i < 8; i = i + 1) begin
+          ns_csh[i] = '0;
+          ns_fsh[i] = '0;
+        end
+        case (prec_r)
+          PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
+                        ns_din[i*NSEG_SLOTW +: NW32] = nv32[i];
+                        ns_csh[i] = nc32[i];
+                        ns_fsh[i] = nf32[i];
+                      end
+          PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
+                        ns_din[i*2*NSEG_SLOTW +: NW64] = nv64[i];
+                        ns_csh[i] = nc64[i];
+                        ns_fsh[i] = nf64[i];
+                      end
+          PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
+                        ns_din[i*4*NSEG_SLOTW +: NW128] = nv128[i];
+                        ns_csh[i] = nc128[i];
+                        ns_fsh[i] = nf128[i];
+                      end
+          default:    begin
+                        ns_din[0 +: NW256] = nv256;
+                        ns_csh[0] = nc256;
+                        ns_fsh[0] = nf256;
+                      end
+        endcase
+      end
+    end else begin : g_no_normseg
+      assign ns_din  = '0;
+      assign ns_dout = '0;
+      always_comb begin
+        for (int i = 0; i < 8; i = i + 1) begin
+          ns_csh[i] = '0;
+          ns_fsh[i] = '0;
+        end
+      end
+    end
+  endgenerate
+
   // ---- compute banks (identical structure to cft_engine) -------------
   // 8 x fp32 lanes
   logic [BEAT_BITS-1:0] d32;
@@ -1060,7 +1163,7 @@ module cft_engine_stream #(
       assign rc = is_reduce ? red_add_b[31:0] : fc;
 
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL)) u_fma (
+                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP32))),
           .rnd(rnd_r),
@@ -1068,7 +1171,9 @@ module cft_engine_stream #(
           .a(ra), .b(is_reduce ? 32'h3F80_0000 : fb), .c(rc),
           .out_valid(), .d(dd), .flags(f32_l[gi]),
           .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
-          .mul_p(mf_p[gi*48 +: 48]));
+          .mul_p(mf_p[gi*48 +: 48]),
+          .nrm_v(nv32[gi]), .nrm_csh(nc32[gi]), .nrm_fsh(nf32[gi]),
+          .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]));
       assign d32[gi*32 +: 32] = dd;
     end
   endgenerate
@@ -1103,7 +1208,7 @@ module cft_engine_stream #(
         assign rc = is_reduce ? red_add_b[63:0] : fc;
 
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
-                         .EXT_MUL(USE_FUSED_MUL)) u_fma (
+                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP64))),
           .rnd(rnd_r),
@@ -1111,7 +1216,9 @@ module cft_engine_stream #(
             .a(ra), .b(is_reduce ? 64'h3FF0_0000_0000_0000 : fb), .c(rc),
             .out_valid(), .d(dd), .flags(f64_l[gi]),
             .mul_a(mfa64[gi]), .mul_b(mfb64[gi]),
-            .mul_p(mf_p[gi*106 +: 106]));
+            .mul_p(mf_p[gi*106 +: 106]),
+          .nrm_v(nv64[gi]), .nrm_csh(nc64[gi]), .nrm_fsh(nf64[gi]),
+          .nrm_d(ns_dout[gi*2*NSEG_SLOTW +: NW64]));
         assign d64[gi*64 +: 64] = dd;
       end
       always_comb begin
@@ -1150,7 +1257,7 @@ module cft_engine_stream #(
         assign rc = is_reduce ? red_add_b[127:0] : fc;
 
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
-                         .EXT_MUL(USE_FUSED_MUL)) u_fma (
+                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP128))),
           .rnd(rnd_r),
@@ -1160,7 +1267,9 @@ module cft_engine_stream #(
             .c(rc),
             .out_valid(), .d(dd), .flags(f128_l[gi]),
             .mul_a(mfa128[gi]), .mul_b(mfb128[gi]),
-            .mul_p(mf_p[gi*226 +: 226]));
+            .mul_p(mf_p[gi*226 +: 226]),
+          .nrm_v(nv128[gi]), .nrm_csh(nc128[gi]), .nrm_fsh(nf128[gi]),
+          .nrm_d(ns_dout[gi*4*NSEG_SLOTW +: NW128]));
         assign d128[gi*128 +: 128] = dd;
       end
       always_comb begin
@@ -1190,7 +1299,7 @@ module cft_engine_stream #(
       assign rv256 = is_reduce && (prec_r == PREC_FP256) && red_add_valid;
 
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL)) u_wfma (
+                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(is_reduce ? rv256
                               : (ex_valid && (prec_r == PREC_FP256))),
@@ -1200,7 +1309,9 @@ module cft_engine_stream #(
           .b(is_reduce ? {1'b0, 19'h3FFFF, 236'd0} : w_fb),
           .c(is_reduce ? red_add_b : w_fc),
           .out_valid(), .d(d256), .flags(f256),
-          .mul_a(mfa256), .mul_b(mfb256), .mul_p(mf_p[0 +: 474]));
+          .mul_a(mfa256), .mul_b(mfb256), .mul_p(mf_p[0 +: 474]),
+          .nrm_v(nv256), .nrm_csh(nc256), .nrm_fsh(nf256),
+          .nrm_d(ns_dout[0 +: NW256]));
     end else begin : g_bank256_off
       assign d256 = '0;
       assign f256 = 5'b0;
