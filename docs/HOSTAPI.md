@@ -106,6 +106,16 @@ a failure.
   that round trip is the bottleneck; today it is a plain allocation
   and the sync calls are no-ops, which is what keeps code written that
   way portable rather than dual-path.
+- **A per-run size ceiling** *(device backend, 2026-08-31)*. Each
+  master owns exactly one HBM pseudo-channel (hw/link.cfg - done for
+  response ordering, see there), so each argument buffer is capped at
+  that channel's **256 MB per tile**: 64M fp32 elements, 8M fp256, per
+  tile per run. The library does NOT split by capacity - slice.h
+  divides by tile count only - so an oversized run fails loudly at
+  buffer allocation rather than being quietly serialised. Callers with
+  more data than that split across runs; if a real workload makes that
+  painful, the fix is capacity splitting in `cft_plan_slices`, not
+  widening the channel group back.
 - **Bus faults** *(device backend)*. A bad pointer or a fabric error
   becomes `CFT_ERR_BUS_FAULT`, distinct from a wrong answer, because
   "the memory never delivered this" and "the arithmetic is wrong" want

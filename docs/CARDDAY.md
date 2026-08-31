@@ -26,26 +26,34 @@ Everything else - correctness, flags, partitioning, the ABI, the
 opcode set, the rounding attributes - is already checked and should
 merely be re-confirmed.
 
-**One exception, and it is the newest thing here.** The reduction path
-(`CFT_SUM`, `CFT_DOT`) is proven in cocotb, in the golden model and in
-C, and as of this writing has not yet been exercised through a real
-AXI stack even in emulation, because every emulation artifact built
-before 2026-08-30 predates the opcode group. Until an emulation run at
-contract 0x500 is green, treat reductions as bring-up work on the day
-rather than as re-confirmation - which is why step 3 and step 5 below
-call them out separately.
+**One near-exception, now retired.** The reduction path (`CFT_SUM`,
+`CFT_DOT`) was the newest thing here, and this paragraph used to say
+it had never been exercised through a real AXI stack. That is no
+longer true: on 2026-08-30 hw_emu at contract 0x500 ran reductions
+green on a single tile (64 checks, 0 failed) and on the quad -
+including the five-ranges-across-four-tiles case (n=33) that
+validates the wave-staging fix, the one bug class that only appears
+with more canonical ranges than tiles. Steps 3 and 5 still call
+reductions out separately, because they remain the only path where
+the element count is an operand rather than a loop bound.
 
 ## Before the day
 
-- [x] **Both images built, staged and verified** (2026-08-30). The
-      card-day set is the 130 MHz pair - see the card-day clock section
-      of BRINGUP.md for why, and for the one measurement that argues
-      the other way. They are staged together on the build box:
+- [x] **Both images built, staged and verified** (updated 2026-08-31).
+      The card-day set is the 130 MHz pair at bac9f550 - one AXI master
+      per stream, reductions at VERSION 0x500, the bus-fault abort,
+      both closed with hbm_aclk clean at 450.0:
 
-          ~/cardday-130/cft_hw_single.xclbin    one tile,  53bbba7
-          ~/cardday-130/cft_hw_quad.xclbin      four tiles, 53bbba7
-          ~/cardday-130/SHA256SUMS
-          ~/cardday-130/README
+          ~/cardday-130b/cft_hw_single.xclbin   one tile,   kernel_wns +0.271
+          ~/cardday-130b/cft_hw_quad.xclbin     four tiles, kernel_wns +0.019
+          ~/cardday-130b/SHA256SUMS             (+ both manifests, README)
+
+      The 53bbba7 pair stays in ~/cardday-130 as the FALLBACK - shared
+      port, no reductions, but the configuration hw_emu validated
+      longest. If the new pair misbehaves on silicon, fall back and the
+      day still produces first light. Neither set carries the shared
+      shifter ladders or the BRAM FIFOs (2026-08-31 work, in-shell
+      unproven); the single-channel link.cfg also postdates both.
 
       Each was checked against the sha256 its own manifest recorded at
       build time, and again after the copy. Re-check on arrival with
@@ -108,7 +116,7 @@ bitstream to say.
 
 **3. One tile is correct.**
 
-    bash hw/run-device-test.sh ~/cardday-130/cft_hw_single.xclbin -n 4096
+    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_single.xclbin -n 4096
 
 Full matrix: every format, ten opcodes, five rounding attributes,
 against the software backend, plus the boundary sizes. This is the
@@ -119,7 +127,7 @@ Reductions are part of that matrix and run automatically, but they are
 worth being able to run alone when something goes wrong, because they
 are the only path where the element count is an operand:
 
-    bash hw/run-device-test.sh ~/cardday-130/cft_hw_single.xclbin -r
+    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_single.xclbin -r
 
 One tile means one canonical range and no fold, so a failure here is
 the reduction datapath itself rather than the split.
@@ -139,7 +147,7 @@ wrong with the driver path rather than with the tile.
 
 **5. Four tiles are correct, and identical to one.**
 
-    bash hw/run-device-test.sh ~/cardday-130/cft_hw_quad.xclbin -n 4096
+    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_quad.xclbin -n 4096
 
 Then the part that matters most: **run the same inputs through the
 single-tile image and the quad image and compare the output buffers
@@ -150,7 +158,7 @@ notice later.
 Reductions carry the sharpest version of that test, and it is worth
 doing explicitly rather than trusting the matrix:
 
-    bash hw/run-device-test.sh ~/cardday-130/cft_hw_quad.xclbin -r
+    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_quad.xclbin -r
 
 An elementwise op splits across tiles trivially - element i does not
 care which tile computed it. A reduction does not: the array is cut

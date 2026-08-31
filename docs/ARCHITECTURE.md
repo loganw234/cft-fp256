@@ -106,13 +106,22 @@ element.
 
 | configuration | beat | lanes (32/64/128/256) | LUT | for |
 |---|---|---|---|---|
-| full tile | 256 | 8 / 4 / 2 / 1 | 119,543 measured | Alveo; 256 is the HBM pseudo-channel width |
-| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated | the largest an Artix-7 100T can hold - see ROADMAP's open-core sizing |
+| full tile | 256 | 8 / 4 / 2 / 1 | 116,932 OOC; **98,310 with the shared ladders on** | Alveo; 256 is the HBM pseudo-channel width |
+| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated | see ROADMAP's open-core sizing |
 | quarter tile | 64 | 2 / 1 / - / - | ~20k estimated | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
 
-**The width is a real constraint, not a preference.** A full tile is
-119,543 LUTs and 262 DSPs, which exceeds an Artix-7 100T on both counts
-(189% and 109%). Only the 200T takes a full tile among 7-series parts.
+The two full-tile numbers are the same RTL: FUSE_NORM and FUSE_ALIGN
+(cft_krnl parameters, default off) replace the thirty per-lane
+alignment and normalise shifters with two segmented 720-bit ladders,
+measured -18.6k LUT together and equivalence-proven per lane
+(2026-08-31; docs/ROADMAP.md carries the campaign table). Sharing is
+per-build: the Alveo image can decline it while an area-bound open
+build takes it.
+
+**The width is a real constraint, not a preference.** Even at the
+campaign figure a full tile is ~98k LUTs and 262 DSPs, which exceeds
+an Artix-7 100T on both counts. Only the 200T takes a full tile among
+7-series Artix parts, and the DSP count still wants a Kintex.
 That is why BEAT_BITS exists and why it is tested rather than declared.
 
 The quarter tile is not hypothetical - `tb/test_krnl_quarter.py` runs

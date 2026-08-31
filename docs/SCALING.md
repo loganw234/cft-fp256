@@ -58,14 +58,26 @@ demand at 130 MHz and 1.25 cycles/beat). Four per tile against 32 is a
 **hard wall at eight tiles**. Raw bandwidth would not bind until
 roughly 23 tiles, so this is an interface limit, not a throughput one.
 
-**LUTs.** Shell 123,897 fixed; 119,543 per tile. Four tiles is 69.15%
-of the device and the practical routing limit is around 85%, so the
-U50 holds four comfortably and five uncomfortably. A VU47P or VU9P
-roughly doubles that.
+*As of 2026-08-31 the mapping matches this analysis: hw/link.cfg and
+hw/link_quad.cfg place each master on exactly one pseudo-channel. That
+was done for ORDERING (same-ID responses in issue order by
+construction, not by trusting the HBM switch across destinations), and
+the wall it implies is now the wall the configs actually have. The
+cost is a 256 MB cap per argument buffer per tile, which libcft does
+not capacity-split - an oversized run fails loudly at allocation.*
 
-Those two numbers now sit close together, which is the useful summary:
-on this generation, area and pseudo-channels run out at about the same
-place, and it is around eight.
+**LUTs.** Shell 123,897 fixed. The tile is 119,543 in the shipped
+(pre-sharing) configuration; the 2026-08-31 size campaign brings the
+kernel to **98,310 out of context with FUSE_NORM/FUSE_ALIGN on and the
+BRAM FIFOs** (in-shell unproven at this writing). Four pre-sharing
+tiles are 69.15% of the device against a practical routing limit
+around 85%, so the U50 holds four comfortably; at the campaign figure
+**six tiles are ~81%** - which is why the interface wall above at
+eight is no longer comfortably beyond the area wall.
+
+Those two numbers still sit close together, which is the useful
+summary: on this generation, area and pseudo-channels run out at about
+the same place, and it is around six to eight.
 
 ## What scales badly, in order of when it bites
 
