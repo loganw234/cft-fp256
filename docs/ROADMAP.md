@@ -742,6 +742,49 @@ build is nowhere near that clock - at 120 MHz the shared version
 already carries +2.399 ns. Footprint is the whole objective there, and
 the parameter is per-build, so Alveo and Kintex need not agree.
 
+#### EXT_ALIGN measured at the kernel (2026-08-31)
+
+The same trick against the larger target. The alignment shifters
+ablate at 22,302 LUT to the normaliser's 15,533, and unlike the
+normaliser the shift is bidirectional - left when the addend anchors,
+right when the product does, lanes free to disagree - which is what
+`cft_normseg`'s BIDIR mode exists for. Sticky never enters the shared
+ladder: the two incremental lost-bit masks are equivalent to one mask
+on the pre-shift operand, so the marker is computed in the lane and
+delayed beside the shift. The far case gates the value to zero at
+hand-off.
+
+| | LUT | FF | WNS @130 | levels |
+|---|---|---|---|---|
+| neither shared | 116,932 | 50,707 | +2.411 | 22 |
+| norm shared | 112,003 | 46,068 | +2.521 | 21 |
+| **both shared** | **101,264** | **40,464** | +0.327 | 28 |
+
+**FUSE_ALIGN is -10,739 LUT and -5,604 FF on top of the shared
+normaliser - nearly double the normaliser's own saving.** The FF drop
+is the fifteen private `s7_sml` staging registers collapsing into the
+ladder. DSP 262 throughout.
+
+Two honest notes. The neither-shared baseline moved +1,029 against the
+pre-restructure tree (116,932 vs 115,903): the S7/S8 split pays a
+small price in the PRIVATE configuration, where one 10-bit-amount
+thermometer mask replaces two narrower ones. And the both-shared
+timing is thin at +0.327 - the critical path is the same LZC-fed
+norm-ladder path that set SPLIT=1, now at 78% ROUTING estimate, which
+is the OOC placer pricing the density of two 720-bit ladders plus
+gathers. Whether that congestion is real is an in-shell question, and
+OOC slack does not predict shell slack in either direction.
+
+**Running total for the campaign: 131,860 -> 101,264 LUT (-23.2%) and
+59,999 -> 40,464 FF (-32.6%),** all equivalence-proven, all behind
+per-build parameters, DSP untouched. 1,264 LUT from the sub-100k goal
+with the FIFO work still queued.
+
+Two tiles, both shared, plus a 20k platform budget: 222,528 LUT -
+74.5% of a 480T, 87.5% of a 410T, still over a 325T. The 325T
+two-tile story remains trims (through-fp64), whose own numbers will
+also shrink with sharing - unmeasured.
+
 The module is built, proven against 2,977 comparisons at every legal
 shift and every rung, and measured. What is NOT done is `EXT_NORM`
 plumbing through `cft_fpfma_pipe`, which is the bit-exact core and a

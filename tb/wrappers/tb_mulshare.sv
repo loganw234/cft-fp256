@@ -79,7 +79,8 @@ module tb_mulshare #(
           .c(c_beat[gi*32 +: 32]),
           .out_valid(v32_l[gi]), .d(di), .flags(f32_il[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                        .EXT_MUL(1'b1)) u_shr (
           .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
@@ -89,7 +90,8 @@ module tb_mulshare #(
           .out_valid(), .d(ds), .flags(f32_sl[gi]),
           .mul_a(a32_s[gi]), .mul_b(b32_s[gi]),
           .mul_p(mf_p[gi*48 +: 48]),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       assign d32_i[gi*32 +: 32] = di;
       assign d32_s[gi*32 +: 32] = ds;
     end
@@ -107,7 +109,8 @@ module tb_mulshare #(
           .c(c_beat[gi*64 +: 64]),
           .out_valid(), .d(di), .flags(f64_il[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                        .EXT_MUL(1'b1)) u_shr (
           .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
@@ -117,7 +120,8 @@ module tb_mulshare #(
           .out_valid(), .d(ds), .flags(f64_sl[gi]),
           .mul_a(a64_s[gi]), .mul_b(b64_s[gi]),
           .mul_p(mf_p[gi*106 +: 106]),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       assign d64_i[gi*64 +: 64] = di;
       assign d64_s[gi*64 +: 64] = ds;
     end
@@ -135,7 +139,8 @@ module tb_mulshare #(
           .c(c_beat[gi*128 +: 128]),
           .out_valid(), .d(di), .flags(f128_il[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                        .EXT_MUL(1'b1)) u_shr (
           .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
@@ -145,7 +150,8 @@ module tb_mulshare #(
           .out_valid(), .d(ds), .flags(f128_sl[gi]),
           .mul_a(a128_s[gi]), .mul_b(b128_s[gi]),
           .mul_p(mf_p[gi*226 +: 226]),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       assign d128_i[gi*128 +: 128] = di;
       assign d128_s[gi*128 +: 128] = ds;
     end
@@ -159,7 +165,8 @@ module tb_mulshare #(
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_i), .flags(f256_i),
       .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                    .EXT_MUL(1'b1)) u_shr256 (
       .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
@@ -167,7 +174,8 @@ module tb_mulshare #(
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_s), .flags(f256_s),
       .mul_a(a256_s), .mul_b(b256_s), .mul_p(mf_p[0 +: 474]),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
 
   // ---- pack the active format's significands for the array ----------
   //

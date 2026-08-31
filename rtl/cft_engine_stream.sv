@@ -70,7 +70,12 @@ module cft_engine_stream #(
     // design - but it is off until an in-shell before/after says the
     // saving survives the gather multiplexer, because that is the step
     // the fused multiplier failed at.
-    parameter bit FUSE_NORM  = 1'b0
+    parameter bit FUSE_NORM  = 1'b0,
+    // Share ONE bidirectional segmented ladder for the ALIGNMENT
+    // shifters, the same trade as FUSE_NORM against a larger target -
+    // the align path ablates at 22,302 LUT to the normaliser's 15,533.
+    // Off until measured in-shell, like everything else here.
+    parameter bit FUSE_ALIGN = 1'b0
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -1134,6 +1139,90 @@ module cft_engine_stream #(
     end
   endgenerate
 
+  // ---- the shared ALIGN ladder ---------------------------------------
+  //
+  // The same argument and the same gating as the normaliser above, with
+  // the direction added: alignment shifts left when the addend anchors
+  // and right when the product does, and adjacent lanes disagree
+  // freely, which is what cft_normseg's BIDIR exists for. Sticky never
+  // enters the ladder - each lane computes its marker from the
+  // pre-shift value and carries it beside the shift (see the aln_*
+  // header in cft_fpfma_pipe).
+  localparam bit USE_FUSED_ALIGN = FUSE_ALIGN && (BEAT_BITS == 256) &&
+                                   EN_FP64 && EN_FP128 && EN_FP256;
+
+  // AW = 3*MAN_W + 8 per rung - one bit under the normalise window.
+  localparam int AW32  = 77;
+  localparam int AW64  = 164;
+  localparam int AW128 = 344;
+  localparam int AW256 = 716;
+
+  logic [NSEG_W-1:0] as_din, as_dout;
+  logic [3:0]        as_csh [0:7];
+  logic [5:0]        as_fsh [0:7];
+  logic              as_dir [0:7];
+
+  logic [AW32-1:0]  av32  [0:7];
+  logic [AW64-1:0]  av64  [0:3];
+  logic [AW128-1:0] av128 [0:1];
+  logic [AW256-1:0] av256;
+  logic [3:0] ac32 [0:7], ac64 [0:3], ac128 [0:1], ac256;
+  logic [5:0] af32 [0:7], af64 [0:3], af128 [0:1], af256;
+  logic       ad32 [0:7], ad64 [0:3], ad128 [0:1], ad256;
+
+  generate
+    if (USE_FUSED_ALIGN) begin : g_alignseg
+      cft_normseg #(.PMAX(237), .SLOTS(8), .BIDIR(1'b1)) u_alignseg (
+          .clk(ap_clk), .mode(prec_r), .din(as_din),
+          .csh(as_csh), .fsh(as_fsh), .dir(as_dir), .dout(as_dout));
+
+      always_comb begin
+        as_din = '0;
+        for (int i = 0; i < 8; i = i + 1) begin
+          as_csh[i] = '0;
+          as_fsh[i] = '0;
+          as_dir[i] = 1'b0;
+        end
+        case (prec_r)
+          PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
+                        as_din[i*NSEG_SLOTW +: AW32] = av32[i];
+                        as_csh[i] = ac32[i];
+                        as_fsh[i] = af32[i];
+                        as_dir[i] = ad32[i];
+                      end
+          PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
+                        as_din[i*2*NSEG_SLOTW +: AW64] = av64[i];
+                        as_csh[i] = ac64[i];
+                        as_fsh[i] = af64[i];
+                        as_dir[i] = ad64[i];
+                      end
+          PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
+                        as_din[i*4*NSEG_SLOTW +: AW128] = av128[i];
+                        as_csh[i] = ac128[i];
+                        as_fsh[i] = af128[i];
+                        as_dir[i] = ad128[i];
+                      end
+          default:    begin
+                        as_din[0 +: AW256] = av256;
+                        as_csh[0] = ac256;
+                        as_fsh[0] = af256;
+                        as_dir[0] = ad256;
+                      end
+        endcase
+      end
+    end else begin : g_no_alignseg
+      assign as_din  = '0;
+      assign as_dout = '0;
+      always_comb begin
+        for (int i = 0; i < 8; i = i + 1) begin
+          as_csh[i] = '0;
+          as_fsh[i] = '0;
+          as_dir[i] = 1'b0;
+        end
+      end
+    end
+  endgenerate
+
   // ---- compute banks (identical structure to cft_engine) -------------
   // 8 x fp32 lanes
   logic [BEAT_BITS-1:0] d32;
@@ -1166,7 +1255,8 @@ module cft_engine_stream #(
       assign rc = is_reduce ? red_add_b[31:0] : fc;
 
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_fma (
+                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
+                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP32))),
           .rnd(rnd_r),
@@ -1176,7 +1266,9 @@ module cft_engine_stream #(
           .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
           .mul_p(mf_p[gi*48 +: 48]),
           .nrm_v(nv32[gi]), .nrm_csh(nc32[gi]), .nrm_fsh(nf32[gi]),
-          .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]));
+          .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]),
+          .aln_v(av32[gi]), .aln_csh(ac32[gi]), .aln_fsh(af32[gi]),
+          .aln_dir(ad32[gi]), .aln_d(as_dout[gi*NSEG_SLOTW +: AW32]));
       assign d32[gi*32 +: 32] = dd;
     end
   endgenerate
@@ -1211,7 +1303,8 @@ module cft_engine_stream #(
         assign rc = is_reduce ? red_add_b[63:0] : fc;
 
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
-                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_fma (
+                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
+                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP64))),
           .rnd(rnd_r),
@@ -1221,7 +1314,9 @@ module cft_engine_stream #(
             .mul_a(mfa64[gi]), .mul_b(mfb64[gi]),
             .mul_p(mf_p[gi*106 +: 106]),
           .nrm_v(nv64[gi]), .nrm_csh(nc64[gi]), .nrm_fsh(nf64[gi]),
-          .nrm_d(ns_dout[gi*2*NSEG_SLOTW +: NW64]));
+          .nrm_d(ns_dout[gi*2*NSEG_SLOTW +: NW64]),
+          .aln_v(av64[gi]), .aln_csh(ac64[gi]), .aln_fsh(af64[gi]),
+          .aln_dir(ad64[gi]), .aln_d(as_dout[gi*2*NSEG_SLOTW +: AW64]));
         assign d64[gi*64 +: 64] = dd;
       end
       always_comb begin
@@ -1260,7 +1355,8 @@ module cft_engine_stream #(
         assign rc = is_reduce ? red_add_b[127:0] : fc;
 
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
-                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_fma (
+                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
+                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP128))),
           .rnd(rnd_r),
@@ -1272,7 +1368,9 @@ module cft_engine_stream #(
             .mul_a(mfa128[gi]), .mul_b(mfb128[gi]),
             .mul_p(mf_p[gi*226 +: 226]),
           .nrm_v(nv128[gi]), .nrm_csh(nc128[gi]), .nrm_fsh(nf128[gi]),
-          .nrm_d(ns_dout[gi*4*NSEG_SLOTW +: NW128]));
+          .nrm_d(ns_dout[gi*4*NSEG_SLOTW +: NW128]),
+          .aln_v(av128[gi]), .aln_csh(ac128[gi]), .aln_fsh(af128[gi]),
+          .aln_dir(ad128[gi]), .aln_d(as_dout[gi*4*NSEG_SLOTW +: AW128]));
         assign d128[gi*128 +: 128] = dd;
       end
       always_comb begin
@@ -1302,7 +1400,8 @@ module cft_engine_stream #(
       assign rv256 = is_reduce && (prec_r == PREC_FP256) && red_add_valid;
 
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM)) u_wfma (
+                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
+                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(is_reduce ? rv256
                               : (ex_valid && (prec_r == PREC_FP256))),
@@ -1314,7 +1413,9 @@ module cft_engine_stream #(
           .out_valid(), .d(d256), .flags(f256),
           .mul_a(mfa256), .mul_b(mfb256), .mul_p(mf_p[0 +: 474]),
           .nrm_v(nv256), .nrm_csh(nc256), .nrm_fsh(nf256),
-          .nrm_d(ns_dout[0 +: NW256]));
+          .nrm_d(ns_dout[0 +: NW256]),
+          .aln_v(av256), .aln_csh(ac256), .aln_fsh(af256),
+          .aln_dir(ad256), .aln_d(as_dout[0 +: AW256]));
     end else begin : g_bank256_off
       assign d256 = '0;
       assign f256 = 5'b0;

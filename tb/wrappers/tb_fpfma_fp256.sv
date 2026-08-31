@@ -28,5 +28,6 @@ module tb_fpfma_fp256 (
       // that is not named is fatal to Verilator, and that is
       // what kept `make SIM=verilator` from ever running.
       .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
 endmodule

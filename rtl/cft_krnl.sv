@@ -37,7 +37,8 @@ module cft_krnl #(
     // no top-level can set cannot be built, measured, or refuted, and
     // FUSE_MUL spent a release in exactly that state.
     parameter bit FUSE_MUL  = 1'b0,
-    parameter bit FUSE_NORM = 1'b0
+    parameter bit FUSE_NORM = 1'b0,
+    parameter bit FUSE_ALIGN = 1'b0
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -204,7 +205,8 @@ module cft_krnl #(
 
   cft_engine_stream #(.LATENCY(15), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
                       .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS),
-                      .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM)) u_engine (
+                      .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
+                      .FUSE_ALIGN(FUSE_ALIGN)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
       .err_acc(eng_err),

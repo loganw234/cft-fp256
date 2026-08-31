@@ -70,7 +70,15 @@ module cft_fpfma_pipe #(
     // below asserts the two agree, because a silent disagreement would
     // truncate a significand window and return a wrong result with
     // clean flags.
-    parameter int NRM_W = 3 * MAN_W + 9
+    parameter int NRM_W = 3 * MAN_W + 9,
+    // Take the ALIGNED small operand from aln_d instead of building the
+    // two alignment shifters here. Same shape as EXT_NORM; independent
+    // of it and of EXT_MUL. Default 0 keeps every existing
+    // instantiation bit-identical.
+    parameter bit EXT_ALIGN = 1'b0,
+    // Width of the alignment window, for the aln_* ports only. DERIVED,
+    // do not override: GW-1 = 3*MAN_W + 8, guarded below.
+    parameter int ALN_W = 3 * MAN_W + 8
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
@@ -138,7 +146,36 @@ module cft_fpfma_pipe #(
     output logic [NRM_W-1:0]     nrm_v,
     output logic [3:0]           nrm_csh,
     output logic [5:0]           nrm_fsh,
-    input  logic [NRM_W-1:0]     nrm_d
+    input  logic [NRM_W-1:0]     nrm_d,
+
+    // ---- shared-aligner port (EXT_ALIGN) ----------------------------
+    //
+    // With EXT_ALIGN = 0 (the default) the lane builds both alignment
+    // shifters and these are inert, exactly as for EXT_MUL/EXT_NORM.
+    //
+    // With EXT_ALIGN = 1 the lane hands out the small operand BEFORE
+    // any shifting, the two halves of the distance, and the direction,
+    // and expects the shifted value back TWO cycles later - the depth
+    // the internal shifters had (S7 coarse, S8 fine). Unlike the
+    // normalise port this one is bidirectional: alignment shifts left
+    // when the addend anchors and right when the product does.
+    //
+    // What deliberately does NOT travel: the sticky. The marker is a
+    // function of the pre-shift value and the total distance - the two
+    // incremental lost-bit masks are equivalent to one mask on the
+    // original operand - so it is computed in the lane and delayed two
+    // cycles beside the shift. A supplier moves values only. The far
+    // case is also the lane's: the value handed out is gated to zero,
+    // and zero shifted is zero.
+    //
+    // cft_normseg with BIDIR=1 is the intended supplier; anything that
+    // returns the value shifted the given way, two cycles later, will
+    // do.
+    output logic [ALN_W-1:0]     aln_v,
+    output logic [3:0]           aln_csh,
+    output logic [5:0]           aln_fsh,
+    output logic                 aln_dir,   // 0 left, 1 right
+    input  logic [ALN_W-1:0]     aln_d
 );
 
   localparam int W    = 1 + EXP_W + MAN_W;
@@ -233,6 +270,9 @@ module cft_fpfma_pipe #(
     if (NRM_W != NW) begin : g_bad_nrm_w
       $error("cft_fpfma_pipe: NRM_W must equal NW - do not override it");
     end
+    if (ALN_W != GW - 1) begin : g_bad_aln_w
+      $error("cft_fpfma_pipe: ALN_W must equal GW-1 - do not override it");
+    end
   endgenerate
 
   initial begin
@@ -252,6 +292,10 @@ module cft_fpfma_pipe #(
     // clean flags - the worst failure this design has.
     if (NRM_W != NW) begin
       $display("FATAL: cft_fpfma_pipe NRM_W (%0d) != NW (%0d)", NRM_W, NW);
+      $fatal(1);
+    end
+    if (ALN_W != GW - 1) begin
+      $display("FATAL: cft_fpfma_pipe ALN_W (%0d) != GW-1 (%0d)", ALN_W, GW - 1);
       $fatal(1);
     end
   end
@@ -519,36 +563,72 @@ module cft_fpfma_pipe #(
   // ------------------------------------------------------------------
   // S7: coarse align; S8: fine align + appended-marker operands
   // ------------------------------------------------------------------
-  logic [GW-2:0] s7_big, s7_sml;
-  logic          s7_sbig, s7_ssml, s7_marker, s7_right, s7_spc;
-  logic [W-1:0]  s7_spd;
-  logic [4:0]    s7_spf;
-  int            s7_g, s7_fsh;
+  // ---- S7 combinational: operand steering, and the whole sticky -----
+  //
+  // Split out of the register process so a shared aligner can be handed
+  // exactly what the private one consumes. Two changes of FORM and none
+  // of function:
+  //
+  //   * the marker is computed from the PRE-shift value and the total
+  //     distance, replacing the two incremental masks (coarse in S7,
+  //     fine in S8). They are the same set: the coarse shift discards
+  //     the low csh*64 bits of smlv and the fine shift then discards
+  //     the next fsh, so together they discard the low csh*64+fsh -
+  //     one mask on the original operand. At amt=0 the mask is empty,
+  //     which is why the old (csh != 0)/(fsh != 0) guards have no
+  //     replacement: they were already implied.
+  //   * the far case gates the VALUE to zero instead of assigning zero
+  //     after the shift. Zero shifted is zero, and it means the far
+  //     rail does not need to exist inside a shared supplier.
+  logic [GW-2:0] n7_smlv, n7_bigv;
+  logic          n7_marker;
 
-  always_ff @(posedge clk) begin : stage7
-    logic [GW-2:0] bigv, smlv, onesv, lost_mask;
+  always_comb begin
+    logic [GW-2:0] smlv0, onesv;
+    logic [9:0]    amt;
+    logic [31:0]   cshw, fshw;
     onesv = {(GW-1){1'b1}};
     if (s6_big_is_p) begin
-      bigv = {{(GW-1-2*P){1'b0}}, s6_mp} << SH;
-      smlv = {{(GW-1-P){1'b0}}, s6_mc};
+      n7_bigv = {{(GW-1-2*P){1'b0}}, s6_mp} << SH;
+      smlv0   = {{(GW-1-P){1'b0}}, s6_mc};
     end else begin
-      bigv = {{(GW-1-P){1'b0}}, s6_mc} << SH;
-      smlv = {{(GW-1-2*P){1'b0}}, s6_mp};
+      n7_bigv = {{(GW-1-P){1'b0}}, s6_mc} << SH;
+      smlv0   = {{(GW-1-2*P){1'b0}}, s6_mp};
     end
-    s7_big <= bigv;
-    if (s6_far) begin
-      s7_sml <= '0;
-      s7_marker <= s6_mkpre;
-    end else if (s6_right) begin
-      s7_sml <= smlv >> (s6_csh * 64);
-      lost_mask = ~(onesv << (s6_csh * 64));
-      s7_marker <= (s6_csh != 0) && (|(smlv & lost_mask));
-    end else begin
-      s7_sml <= smlv << (s6_csh * 64);
-      s7_marker <= 1'b0;
-    end
-    s7_right <= s6_right;
-    s7_fsh <= s6_fsh;
+    n7_smlv = s6_far ? '0 : smlv0;
+    // s6_csh/s6_fsh are ints. The slices are safe by range - csh is at
+    // most 7 (right bound 2P+1 < 512) and fsh at most 63 - and taken
+    // through named intermediates so the narrowing is visible.
+    cshw = s6_csh;
+    fshw = s6_fsh;
+    amt = {cshw[3:0], fshw[5:0]};
+    if (s6_far)
+      n7_marker = s6_mkpre;
+    else if (s6_right)
+      n7_marker = |(smlv0 & ~(onesv << amt));
+    else
+      n7_marker = 1'b0;
+  end
+
+  logic [31:0] aln_cshw, aln_fshw;
+  always_comb begin
+    aln_cshw = s6_csh;
+    aln_fshw = s6_fsh;
+  end
+  assign aln_v   = n7_smlv;
+  assign aln_csh = aln_cshw[3:0];
+  assign aln_fsh = aln_fshw[5:0];
+  assign aln_dir = s6_right;
+
+  logic [GW-2:0] s7_big;
+  logic          s7_sbig, s7_ssml, s7_marker, s7_spc;
+  logic [W-1:0]  s7_spd;
+  logic [4:0]    s7_spf;
+  int            s7_g;
+
+  always_ff @(posedge clk) begin : stage7
+    s7_big    <= n7_bigv;
+    s7_marker <= n7_marker;
     s7_sbig <= s6_sbig; s7_ssml <= s6_ssml;
     s7_g <= s6_g;
     s7_spc <= s6_spc; s7_spd <= s6_spd; s7_spf <= s6_spf;
@@ -561,21 +641,48 @@ module cft_fpfma_pipe #(
   int            s8_g;
 
   always_ff @(posedge clk) begin : stage8
-    logic [GW-2:0] onesv, fmask;
-    logic fmarker;
-    onesv = {(GW-1){1'b1}};
     s8_bigf <= {s7_big, 1'b0};
-    if (s7_right) begin
-      fmask = ~(onesv << s7_fsh);
-      fmarker = s7_marker | ((s7_fsh != 0) && (|(s7_sml & fmask)));
-      s8_smlf <= {s7_sml >> s7_fsh, fmarker};
-    end else begin
-      s8_smlf <= {s7_sml << s7_fsh, s7_marker};
-    end
     s8_sbig <= s7_sbig; s8_ssml <= s7_ssml;
     s8_g <= s7_g;
     s8_spc <= s7_spc; s8_spd <= s7_spd; s8_spf <= s7_spf;
   end
+
+  // ---- the two alignment shifters, here or elsewhere ----------------
+  //
+  // Private: the same data movement the merged stages performed -
+  // coarse by whole granules into s7_sml, then the remainder - with the
+  // amounts and direction registered beside the value so each stage
+  // uses ITS operand's amount. Shared: the value comes back from the
+  // supplier as the supplier's own register, so S9 sees the same
+  // timing either way; the marker was computed in-lane at S7 and rides
+  // the s7/s8 registers to be appended below the value.
+  generate
+    if (EXT_ALIGN) begin : g_align_shared
+      // The marker needs its own second register: aln_d is two
+      // registers deep (the supplier's stages) while s7_marker is one,
+      // and s8_smlf is a wire here rather than the register it is in
+      // the private arm. Without this the marker rides one cycle ahead
+      // of its operand - correct on isolated operations, wrong on the
+      // streams the engine actually issues.
+      logic s8_marker;
+      always_ff @(posedge clk) s8_marker <= s7_marker;
+      assign s8_smlf = {aln_d[GW-2:0], s8_marker};
+    end else begin : g_align_priv
+      logic [GW-2:0] s7_sml;
+      logic [5:0]    s7_fsh;
+      logic          s7_right;
+      always_ff @(posedge clk) begin
+        s7_sml   <= s6_right ? (n7_smlv >> (s6_csh * 64))
+                             : (n7_smlv << (s6_csh * 64));
+        s7_fsh   <= aln_fshw[5:0];
+        s7_right <= s6_right;
+      end
+      always_ff @(posedge clk) begin
+        s8_smlf <= {s7_right ? (s7_sml >> s7_fsh) : (s7_sml << s7_fsh),
+                    s7_marker};
+      end
+    end
+  endgenerate
 
   // ------------------------------------------------------------------
   // S9, S10: split-carry arithmetic; sum and both differences race

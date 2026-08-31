@@ -261,7 +261,8 @@ module cft_engine #(
           // which is why `make SIM=verilator sim` has never run despite
           // being advertised at the top of tb/Makefile.
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       assign d32[gi*32 +: 32] = dd;
     end
   endgenerate
@@ -295,7 +296,8 @@ module cft_engine #(
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]),
             .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
         assign d64[gi*64 +: 64] = dd;
       end
       always_comb begin
@@ -333,7 +335,8 @@ module cft_engine #(
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]),
             .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
         assign d128[gi*128 +: 128] = dd;
       end
       always_comb begin
@@ -366,7 +369,8 @@ module cft_engine #(
           .a(w_fa), .b(w_fb), .c(w_fc),
           .out_valid(), .d(d256), .flags(f256),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
     end else begin : g_bank256_off
       assign d256 = '0;
       assign f256 = 5'b0;

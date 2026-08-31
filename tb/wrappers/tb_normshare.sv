@@ -61,6 +61,8 @@ module tb_normshare #(
 
   // NW = 3*MAN_W + 9, the pipe's own normalise window.
   localparam int NW32 = 78, NW64 = 165, NW128 = 345, NW256 = 717;
+  // AW = 3*MAN_W + 8, the align window - one bit narrower.
+  localparam int AW32 = 77, AW64 = 164, AW128 = 344, AW256 = 716;
 
   // ---- the shared ladder ---------------------------------------------
   logic [WT-1:0] nrm_din, nrm_dout;
@@ -73,6 +75,59 @@ module tb_normshare #(
   cft_normseg #(.PMAX(237), .SLOTS(SLOTS)) u_normseg (
       .clk(clk), .mode(mode), .din(nrm_din),
       .csh(nrm_csh), .fsh(nrm_fsh), .dir(nrm_dir0), .dout(nrm_dout));
+
+  // ---- the shared ALIGNER: the same ladder, bidirectional -----------
+  logic [WT-1:0] aln_din, aln_dout;
+  logic [3:0]    aln_csh [0:SLOTS-1];
+  logic [5:0]    aln_fsh [0:SLOTS-1];
+  logic          aln_dir [0:SLOTS-1];
+
+  cft_normseg #(.PMAX(237), .SLOTS(SLOTS), .BIDIR(1'b1)) u_alnseg (
+      .clk(clk), .mode(mode), .din(aln_din),
+      .csh(aln_csh), .fsh(aln_fsh), .dir(aln_dir), .dout(aln_dout));
+
+  logic [AW32-1:0]  av32  [0:7];
+  logic [AW64-1:0]  av64  [0:3];
+  logic [AW128-1:0] av128 [0:1];
+  logic [AW256-1:0] av256;
+  logic [3:0] ac32 [0:7], ac64 [0:3], ac128 [0:1], ac256;
+  logic [5:0] af32 [0:7], af64 [0:3], af128 [0:1], af256;
+  logic       ad32 [0:7], ad64 [0:3], ad128 [0:1], ad256;
+
+  always_comb begin
+    aln_din = '0;
+    for (int i = 0; i < SLOTS; i = i + 1) begin
+      aln_csh[i] = '0;
+      aln_fsh[i] = '0;
+      aln_dir[i] = 1'b0;
+    end
+    case (mode)
+      M32: for (int i = 0; i < 8; i = i + 1) begin
+             aln_din[i*SLOTW +: AW32] = av32[i];
+             aln_csh[i] = ac32[i];
+             aln_fsh[i] = af32[i];
+             aln_dir[i] = ad32[i];
+           end
+      M64: for (int i = 0; i < 4; i = i + 1) begin
+             aln_din[i*2*SLOTW +: AW64] = av64[i];
+             aln_csh[i] = ac64[i];
+             aln_fsh[i] = af64[i];
+             aln_dir[i] = ad64[i];
+           end
+      M128: for (int i = 0; i < 2; i = i + 1) begin
+             aln_din[i*4*SLOTW +: AW128] = av128[i];
+             aln_csh[i] = ac128[i];
+             aln_fsh[i] = af128[i];
+             aln_dir[i] = ad128[i];
+           end
+      default: begin
+             aln_din[0 +: AW256] = av256;
+             aln_csh[0] = ac256;
+             aln_fsh[0] = af256;
+             aln_dir[0] = ad256;
+           end
+    endcase
+  end
 
   // Per-lane exports from the shared halves, waiting to be packed.
   logic [NW32-1:0]  v32  [0:7];
@@ -132,9 +187,10 @@ module tb_normshare #(
           .c(c_beat[gi*32 +: 32]),
           .out_valid(v32_l[gi]), .d(di), .flags(f32_il[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
-                       .EXT_NORM(1'b1)) u_shr (
+                       .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr (
           .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*32 +: 32]), .b(b_beat[gi*32 +: 32]),
@@ -142,7 +198,9 @@ module tb_normshare #(
           .out_valid(), .d(ds), .flags(f32_sl[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
           .nrm_v(v32[gi]), .nrm_csh(c32[gi]), .nrm_fsh(g32[gi]),
-          .nrm_d(nrm_dout[gi*SLOTW +: NW32]));
+          .nrm_d(nrm_dout[gi*SLOTW +: NW32]),
+          .aln_v(av32[gi]), .aln_csh(ac32[gi]), .aln_fsh(af32[gi]),
+          .aln_dir(ad32[gi]), .aln_d(aln_dout[gi*SLOTW +: AW32]));
       assign d32_i[gi*32 +: 32] = di;
       assign d32_s[gi*32 +: 32] = ds;
     end
@@ -159,9 +217,10 @@ module tb_normshare #(
           .c(c_beat[gi*64 +: 64]),
           .out_valid(), .d(di), .flags(f64_il[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
-                       .EXT_NORM(1'b1)) u_shr (
+                       .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr (
           .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*64 +: 64]), .b(b_beat[gi*64 +: 64]),
@@ -169,7 +228,9 @@ module tb_normshare #(
           .out_valid(), .d(ds), .flags(f64_sl[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
           .nrm_v(v64[gi]), .nrm_csh(c64[gi]), .nrm_fsh(g64[gi]),
-          .nrm_d(nrm_dout[gi*2*SLOTW +: NW64]));
+          .nrm_d(nrm_dout[gi*2*SLOTW +: NW64]),
+          .aln_v(av64[gi]), .aln_csh(ac64[gi]), .aln_fsh(af64[gi]),
+          .aln_dir(ad64[gi]), .aln_d(aln_dout[gi*2*SLOTW +: AW64]));
       assign d64_i[gi*64 +: 64] = di;
       assign d64_s[gi*64 +: 64] = ds;
     end
@@ -186,9 +247,10 @@ module tb_normshare #(
           .c(c_beat[gi*128 +: 128]),
           .out_valid(), .d(di), .flags(f128_il[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
-                       .EXT_NORM(1'b1)) u_shr (
+                       .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr (
           .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*128 +: 128]), .b(b_beat[gi*128 +: 128]),
@@ -196,7 +258,9 @@ module tb_normshare #(
           .out_valid(), .d(ds), .flags(f128_sl[gi]),
           .mul_a(), .mul_b(), .mul_p('0),
           .nrm_v(v128[gi]), .nrm_csh(c128[gi]), .nrm_fsh(g128[gi]),
-          .nrm_d(nrm_dout[gi*4*SLOTW +: NW128]));
+          .nrm_d(nrm_dout[gi*4*SLOTW +: NW128]),
+          .aln_v(av128[gi]), .aln_csh(ac128[gi]), .aln_fsh(af128[gi]),
+          .aln_dir(ad128[gi]), .aln_d(aln_dout[gi*4*SLOTW +: AW128]));
       assign d128_i[gi*128 +: 128] = di;
       assign d128_s[gi*128 +: 128] = ds;
     end
@@ -209,16 +273,19 @@ module tb_normshare #(
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_i), .flags(f256_i),
       .mul_a(), .mul_b(), .mul_p('0),
-      .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0));
+      .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
-                   .EXT_NORM(1'b1)) u_shr256 (
+                   .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr256 (
       .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_s), .flags(f256_s),
       .mul_a(), .mul_b(), .mul_p('0),
       .nrm_v(v256), .nrm_csh(c256), .nrm_fsh(g256),
-      .nrm_d(nrm_dout[0 +: NW256]));
+      .nrm_d(nrm_dout[0 +: NW256]),
+      .aln_v(av256), .aln_csh(ac256), .aln_fsh(af256),
+      .aln_dir(ad256), .aln_d(aln_dout[0 +: AW256]));
 
   // ---- flag reduction and output selection ---------------------------
   always_comb begin
