@@ -92,6 +92,12 @@ def test_recip_seed_value_level(fmt):
         ua = unpack(fmt, xa)
         if ua.kind in (NAN, INF, ZERO):
             continue
+        if ((xa >> fmt.man_w) & fmt.exp_mask) == 0:
+            # subnormal: flush-at-input is spec - zero-class result
+            sgn = xa >> (fmt.width - 1)
+            b, fl = recip_seed(fmt, xa)
+            assert fl == 0 and b == inf_bits(fmt, sgn)
+            continue
         v = Fraction(ua.m) * Fraction(2) ** ua.e
         if ua.sign:
             v = -v
@@ -131,6 +137,10 @@ def test_rsqrt_seed_value_level(fmt):
         ua = unpack(fmt, xa)
         if ua.kind in (NAN, INF, ZERO):
             continue
+        if ((xa >> fmt.man_w) & fmt.exp_mask) == 0:
+            b, fl = rsqrt_seed(fmt, xa)
+            assert fl == 0 and b == inf_bits(fmt, 0)
+            continue
         v = Fraction(ua.m) * Fraction(2) ** ua.e
         bits, fl = rsqrt_seed(fmt, xa)
         assert fl == 0
@@ -160,6 +170,8 @@ def test_seed_specials_are_quiet(fmt):
         (inf_bits(fmt, 1), lambda b: b == zero_bits(fmt, 1)),
         (zero_bits(fmt, 0), lambda b: b == inf_bits(fmt, 0)),
         (zero_bits(fmt, 1), lambda b: b == inf_bits(fmt, 1)),
+        (min_subnormal_bits(fmt, 0), lambda b: b == inf_bits(fmt, 0)),
+        (min_subnormal_bits(fmt, 1), lambda b: b == inf_bits(fmt, 1)),
     ]
     for xa, ok in cases_r:
         b, fl = recip_seed(fmt, xa)
@@ -170,6 +182,8 @@ def test_seed_specials_are_quiet(fmt):
         (inf_bits(fmt, 0), lambda b: b == zero_bits(fmt, 0)),
         (zero_bits(fmt, 0), lambda b: b == inf_bits(fmt, 0)),
         (zero_bits(fmt, 1), lambda b: b == inf_bits(fmt, 1)),
+        (min_subnormal_bits(fmt, 0), lambda b: b == inf_bits(fmt, 0)),
+        (min_subnormal_bits(fmt, 1), lambda b: b == inf_bits(fmt, 1)),
         (one_bits(fmt, 1), lambda b: is_nan(fmt, b)),
         (inf_bits(fmt, 1), lambda b: is_nan(fmt, b)),
     ]

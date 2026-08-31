@@ -503,7 +503,8 @@ def _seed_pack(fmt: FpFormat, sign: int, m: int, e: int) -> int:
 def recip_seed(fmt: FpFormat, xa: int, *_):
     """(bits, 0): an approximation of 1/a, relative error < 2^-8.5.
 
-    NaN -> canonical qNaN (quiet). +/-inf -> +/-0, +/-0 -> +/-inf,
+    NaN -> canonical qNaN (quiet). +/-inf -> +/-0. +/-0 and every
+    +/-subnormal -> +/-inf (flush-at-input; see the body),
     which lets a composed divide inherit the right special without a
     branch. Finite nonzero, including subnormal, is value-based: the
     operand is normalised first, so the seed's accuracy does not decay
@@ -517,15 +518,21 @@ def recip_seed(fmt: FpFormat, xa: int, *_):
         return qnan_bits(fmt), 0
     if ua.kind == INF:
         return zero_bits(fmt, ua.sign), 0
-    if ua.kind == ZERO:
+    biased = (xa >> fmt.man_w) & fmt.exp_mask
+    if biased == 0:
+        # Zero OR subnormal: the zero-class result. Flush-at-input is a
+        # deliberate spec choice made for the hardware - a value-based
+        # seed on subnormals needs a leading-zero count and a
+        # normalising shift per lane, most of a normaliser, spent on a
+        # case NOTHING uses: the composed sequences prenormalise (exact
+        # multiply by 2^p) before ever seeding, and sequences.py asserts
+        # it. This keeps the seed datapath to exponent arithmetic and
+        # one shared ROM.
         return inf_bits(fmt, ua.sign), 0
-    # normalise: value = f * 2^E with f in [1, 2)
-    nbits = ua.m.bit_length()
-    E = ua.e + nbits - 1
-    frac_top = (ua.m << (SEED_INDEX_BITS + 1)) >> nbits  # 1.iiiiiiiii
-    i = frac_top & (SEED_TABLE_SIZE - 1)
+    E = biased - fmt.bias
+    i = (xa >> (fmt.man_w - SEED_INDEX_BITS)) & (SEED_TABLE_SIZE - 1)
     r = _seed_recip_entry(i)
-    # 1/(f * 2^E) ~ (r / 2^18) * 2^-E
+    # 1/(1.f * 2^E) ~ (r / 2^18) * 2^-E
     e_out = -E - 18
     if e_out + r.bit_length() - 1 > fmt.emax:
         return inf_bits(fmt, ua.sign), 0
@@ -544,19 +551,21 @@ def rsqrt_seed(fmt: FpFormat, xa: int, *_):
     ua = unpack(fmt, xa)
     if ua.kind == NAN:
         return qnan_bits(fmt), 0
-    if ua.kind == ZERO:
+    biased = (xa >> fmt.man_w) & fmt.exp_mask
+    if biased == 0:
+        # Zero-class (including every subnormal, by the flush-at-input
+        # choice recip_seed documents): the correspondingly-signed
+        # infinity, matching the limit where 754 defines it.
         return inf_bits(fmt, ua.sign), 0
     if ua.sign:
         return qnan_bits(fmt), 0
     if ua.kind == INF:
         return zero_bits(fmt), 0
-    nbits = ua.m.bit_length()
-    E = ua.e + nbits - 1
-    frac_top = (ua.m << (SEED_INDEX_BITS + 1)) >> nbits
-    i = frac_top & (SEED_TABLE_SIZE - 1)
+    E = biased - fmt.bias
+    i = (xa >> (fmt.man_w - SEED_INDEX_BITS)) & (SEED_TABLE_SIZE - 1)
     odd = E & 1
     r = _seed_rsqrt_entry((odd << SEED_INDEX_BITS) | i)
-    # 1/sqrt(f * 2^odd * 2^(E-odd)) ~ (r / 2^17) * 2^-((E-odd)/2)
+    # 1/sqrt(1.f * 2^odd * 2^(E-odd)) ~ (r / 2^17) * 2^-((E-odd)/2)
     e_out = -((E - odd) // 2) - 17
     return _seed_pack(fmt, 0, r, e_out), 0
 

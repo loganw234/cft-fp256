@@ -131,6 +131,7 @@ def _sqrt_core(fmt: FpFormat, acen: int, D2: int, rnd: int):
     half = _pow2_bits(fmt, -1)
     three_half = (fmt.bias << fmt.man_w) | (1 << (fmt.man_w - 1))  # 1.5
 
+    assert ((acen >> fmt.man_w) & fmt.exp_mask) != 0  # see recip note
     y = _v(fmt, OP_RSQRT_SEED, acen)
     nah = _v(fmt, OP_MUL, _v(fmt, OP_NEG, acen), half)   # -(a/2), exact
     for _ in range(_NEWTON[fmt.man_w + 1]):
@@ -223,6 +224,11 @@ def sqrt_seq(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
 def _refine_recip(fmt: FpFormat, b_eff: int):
     """Newton-refined reciprocal of a normal operand, under RNE."""
     one = one_bits(fmt)
+    # The seed spec flushes subnormal INPUTS (hardware economics; see
+    # recip_seed). The sequences must therefore never seed one - and
+    # never do, because operands are prenormalised and centred first.
+    # Asserted, not assumed.
+    assert ((b_eff >> fmt.man_w) & fmt.exp_mask) != 0
     y = _v(fmt, OP_RECIP_SEED, b_eff)
     nb = _v(fmt, OP_NEG, b_eff)
     for _ in range(_NEWTON[fmt.man_w + 1]):
