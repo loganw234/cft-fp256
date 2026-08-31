@@ -35,12 +35,14 @@ Semantics implemented - the determinism contract of docs/DETERMINISM.md:
   (bits, flags)
 """
 
+import math
+
 from .formats import FpFormat
 
 # flag bits (sticky, OR-accumulated by callers; matches rtl/cft_fpfma.sv
 # and the FLAGS CSR)
 FLAG_INVALID = 1 << 0
-FLAG_DIVZERO = 1 << 1  # reserved: no divide op in v0
+FLAG_DIVZERO = 1 << 1  # raised only by div (754 7.3)
 FLAG_OVERFLOW = 1 << 2
 FLAG_UNDERFLOW = 1 << 3
 FLAG_INEXACT = 1 << 4
@@ -349,6 +351,90 @@ def mul(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
 #   SUB: d = a - c        (b := 1.0, c sign-flipped)
 #   MUL: d = a*b          (c := zero signed with sign(a)^sign(b), which
 #                          preserves the sign of an exact zero product)
+def _fold_sticky(q: int, rem_nonzero: bool) -> int:
+    """Append a sticky bit below an integer's LSB.
+
+    Long division and integer square root produce a floor `q` plus the
+    fact that something nonzero was discarded. Rounding needs that
+    residue only as "is there anything below the last computed bit" -
+    so shift q up one and OR the fact in. round_pack then derives its
+    guard bit from q's own exact bits and its sticky from this appended
+    one, which is faithful as long as the round position sits at least
+    two bits above the fold - the p+3 computed bits below guarantee it.
+
+    The same trick, in hardware, is the FMA pipe's appended-marker LSB.
+    """
+    return (q << 1) | (1 if rem_nonzero else 0)
+
+
+def div(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
+    """(bits, flags) of division(a, b), correctly rounded (754 5.4.1)."""
+    _check_mode(rnd)
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    if NAN in (ua.kind, ub.kind):
+        return _nan_result(fmt, ua, ub)
+    sq = ua.sign ^ ub.sign
+
+    if ua.kind == INF:
+        if ub.kind == INF:
+            return qnan_bits(fmt), FLAG_INVALID           # inf / inf
+        return inf_bits(fmt, sq), 0                        # inf / finite
+    if ub.kind == INF:
+        return zero_bits(fmt, sq), 0                       # finite / inf
+    if ub.kind == ZERO:
+        if ua.kind == ZERO:
+            return qnan_bits(fmt), FLAG_INVALID            # 0 / 0
+        return inf_bits(fmt, sq), FLAG_DIVZERO             # x / 0
+    if ua.kind == ZERO:
+        return zero_bits(fmt, sq), 0
+
+    # Exact long division carried to at least p+3 quotient bits, with
+    # everything below the last computed bit folded into one sticky.
+    p = fmt.prec
+    k = (p + 3) + ub.m.bit_length() - ua.m.bit_length() + 1
+    if k < 0:
+        k = 0
+    q, rem = divmod(ua.m << k, ub.m)
+    assert q.bit_length() >= p + 3
+    m = _fold_sticky(q, rem != 0)
+    e = (ua.e - ub.e) - k - 1
+    return round_pack(fmt, sq, m, e, rnd)
+
+
+def sqrt(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """(bits, flags) of squareRoot(a), correctly rounded (754 5.4.1)."""
+    _check_mode(rnd)
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return _nan_result(fmt, ua)
+    if ua.kind == ZERO:
+        return xa, 0                        # sqrt(+/-0) is +/-0
+    if ua.sign:
+        return qnan_bits(fmt), FLAG_INVALID # negative, including -inf
+    if ua.kind == INF:
+        return xa, 0
+
+    # Exact integer square root of m * 2^e with e made even, carried to
+    # at least p+3 result bits, remainder folded into one sticky.
+    p = fmt.prec
+    m, e = ua.m, ua.e
+    t = 2 * (p + 3) - m.bit_length()
+    if t < 0:
+        t = 0
+    t += (t ^ e) & 1                        # keep e - t even
+    m <<= t
+    e -= t
+    assert (e & 1) == 0
+    r = math.isqrt(m)
+    assert r.bit_length() >= p + 3
+    mres = _fold_sticky(r, r * r != m)
+    eres = e // 2 - 1
+    # A positive finite operand's root is finite, positive, and inside
+    # the exponent range (|e_root| ~ |e|/2), so round_pack cannot
+    # overflow or underflow here.
+    return round_pack(fmt, 0, mres, eres, rnd)
+
+
 OP_FMA, OP_ADD, OP_SUB, OP_MUL = 0, 1, 2, 3
 # Non-arithmetic operations. These do not round, do not depend on the
 # rounding attribute, and reach the output through the pipeline's

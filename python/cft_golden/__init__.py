@@ -20,7 +20,7 @@ from .softfloat import (
     ARITH_OPS, SIMPLE_OPS, SIMPLE_IMPL,
     fabs, neg, copysign, fmin, fmax, fminnum, fmaxnum,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES, RND_MODES,
-    add, sub, mul, fma, compute, steer, unpack,
+    add, sub, mul, fma, div, sqrt, compute, steer, unpack,
     zero_bits, one_bits, inf_bits, qnan_bits, snan_bits,
     min_subnormal_bits, max_subnormal_bits, min_normal_bits, max_normal_bits,
     negate, is_nan,
