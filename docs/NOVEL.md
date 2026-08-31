@@ -230,7 +230,13 @@ for all of them), with multiply/FMA occupying the 12-stage pipe for
 12 cycles, i.e. multi-pass but not cracked; quad FMA throughput is
 52x worse than double FMA on the same core. z14 and POWER9 both
 landed in 2017, so neither can safely be called the first hardware
-binary128 FMA. In open RTL the strongest is CORE-V Wally's Q
+binary128 FMA - and both are ITERATIVE designs: the z14 patent
+(US10303438B2) runs seven passes through a 113x113 carry-save
+multiplier, and POWER9 occupies its 12-stage pipe for 12 cycles per
+FMA. A fully pipelined binary128 FMA - one issue per cycle - appears
+to have no commercial precedent at any date, which makes this tile's
+fp128 bank (two lanes, each one FMA per cycle) unpublished in a
+second, narrower sense before the fp256 rung is even counted. In open RTL the strongest is CORE-V Wally's Q
 configuration; Berkeley HardFloat is tested at quad; robfinch/Float
 has a full binary128 module set with, per its author, "rudimentary
 testing."
