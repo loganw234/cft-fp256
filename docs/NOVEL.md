@@ -179,6 +179,85 @@ implementer knows the freedom is deliberate rather than accidental.
 
 ---
 
+### 10. The binary256 datapath itself has no published hardware precedent
+
+Surveyed 2026-08-31 (an ~70-search sweep: web, arXiv, IEEE Xplore
+titles, authenticated GitHub code search, OpenCores, vendor IP
+catalogues; primary sources downloaded and read where they existed).
+**No hardware implementation of IEEE 754 binary256 was found anywhere**
+- not in commercial silicon, not in academic FPGA/ASIC work, not in
+open RTL, not in vendor IP, not as an ISA proposal. A 2025
+peer-reviewed statement agrees: Zhang & Aiken (SC'25,
+doi:10.1145/3712285.3759876) - "no processors have ever featured
+hardware support beyond quadruple precision."
+
+What this tile's fp256 rung does therefore appears to be unpublished
+as hardware: an IEEE binary256 FMA datapath with all five rounding
+attributes, tininess-after-rounding, gradual underflow, and
+single-rounded fused multiply-add, running beside fp32/64/128 under
+one contract.
+
+**The nearest miss, and it is worth respecting: GRAPE-MP /
+GRAPE9-MPX** (Daisaka, Nakasato, Ishikawa et al.; structured ASIC
+2011, Arria V FPGAs 2014-2018; arXiv:1410.3252, arXiv:1803.07224).
+The only published hardware computing floating-point arithmetic at
+octuple SCALE. Its own table says why it is not binary256: a
+1+19+240 format, 260 bits internally, truncated to 256 on host
+transfer - the exponent width was borrowed from binary256, the
+significand was not. Add and multiply only, no FMA; divide is a
+software Newton iteration off a low-precision rsqrt seed; rounding
+modes, subnormals and exception semantics are undocumented in every
+accessible paper. Honest framing: octuple-scale FPGA arithmetic has
+been done once, in a custom format; a CONFORMANT binary256 unit has
+not.
+
+**The fp128 rung is rarer company than expected, too.** Hardware
+binary128 exists in exactly three commercial families, and none of
+the three does what this tile's fp128 bank does. IBM z13+ computes
+quad in the decimal engine's 140-bit dataflow but has NO quad FMA
+(verified against the z/Architecture Principles of Operation:
+MULTIPLY AND ADD exists only for short and long formats). NEC
+SX-Aurora has scalar quad add/sub/mul only - no FMA, no divide, and
+its own manual says subnormals "are cut down to zero." POWER9/10 has
+the full set including FMA (cracked into two passes through a
+12-stage pipe). In open RTL the strongest is CORE-V Wally's Q
+configuration; Berkeley HardFloat is tested at quad; robfinch/Float
+has a full binary128 module set with, per its author, "rudimentary
+testing."
+
+**Why nobody did it, probably - and it is not area.** Berkeley
+SoftFloat/TestFloat, the reference tooling every credible quad
+implementation verifies against, stops at f128. There is no f256
+reference model, no standard vector generator, nothing to be checked
+against. A binary256 datapath obliges its builder to supply the
+definition of correct before writing the hardware - which is
+precisely the golden-model-first discipline this repo was built on,
+for its own reasons. The missing precondition elsewhere was this
+project's starting point.
+
+**What is not new:** wide-significand hardware per se. The bounding
+prior art is real and worth citing: CEA's variable-precision RISC-V
+units (UNUM-derived, up to 512-bit significands, silicon in 22nm);
+APFP's 512/1024-bit FPGA multiply-add (non-IEEE, 63-bit exponent, no
+rounding modes); quad-double MAC units (256 bits of storage, double's
+exponent range); Kulisch accumulators and the posit quire (wide
+FIXED-point exactness, not a floating-point format). Every one of
+these buys width by leaving IEEE semantics behind, which is exactly
+the part this design refuses to leave.
+
+**What we could not find:** any of - a binary256 arithmetic unit; an
+octuple-precision FMA in any format; an ISA extension beyond
+binary128 for binary FP; a taped-out chip or patent claiming either.
+GitHub code search for RTL with binary256 geometry returns one
+untested 445-line file (no FMA, non-IEEE rounding, flushes
+subnormals) and one format-decoder. Searches that returned zero are
+listed in the survey provenance, held with this file's usual caveat:
+"we could not find it published" is not "it is unpublished," and the
+survey itself caught a 2025 peer-reviewed absence claim that missed
+two real quad implementations (IBM z, NEC) - expert surveys
+under-count in this area, so this entry claims "none found," never
+"none exists."
+
 ## Negative
 
 Negative results are the entries most likely to be genuinely
@@ -385,6 +464,26 @@ the appropriate first step is measurement rather than construction.
 ---
 
 ## Provenance
+
+**The 2026-08-31 fp256/fp128 hardware survey (entry 10)** ran ~70 web
+searches and ~25 authenticated GitHub code searches, and downloaded
+and read primary sources where they existed: both GRAPE9-MPX arXiv
+papers, the ARITH-23 z13 quad paper, the z/Architecture Principles of
+Operation (SA22-7832-13, instruction tables), the POWER9 User's Manual
+(DFU section and Table A-1), the NEC SX-Aurora Architecture Guide Rev
+1.1, Zhang & Aiken SC'25, and the full source of every RTL candidate
+(mcjtag/fpx, robfinch/Float, CORE-V Wally configs, cvfpu's
+fpnew_pkg.sv, libre-soc, SPEX-128). Zero-result searches recorded:
+"binary256"/"octuple precision" hardware across web, arXiv, IEEE
+titles and patents; GitHub RTL with EXP_W=19/MAN_W=236 geometry
+(one untested file); "FLEN=128" RTL (zero); vendor IP above 80-bit
+extended (zero). Blocked fetches recorded so they are not mistaken
+for negatives: IET/ScienceDirect/ACM full texts (HTTP 403), Synopsys
+DesignWare parameter tables (account-gated). One item explicitly
+not-independently-verified: Fujitsu SPARC64 (Oracle's "any SPARC FPU"
+statement and SC'25 both point to no-quad-hardware, but no Fujitsu
+datasheet was obtained).
+
 
 Entries 6 and 7 are measurements taken in this repository and are
 reproducible from it. Entries 1-5 are design decisions whose novelty
