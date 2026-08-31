@@ -683,13 +683,64 @@ include: the shared input must select among four banks per bit, about
 720 LUT. So the realistic figure is **~4,400 LUT and ~4,000 FF, 3.8%
 of the kernel**, for the normaliser alone.
 
-**Whether to spend it.** The pressure is off - the quad closes at
-130 MHz with 30% of the device free - so this is no longer about
-making a build fit. It is about the FIFTH TILE. At 121,158 LUT per
-tile plus the 123,897-LUT shell, five tiles is 83.8% of the device;
-take ~10% off the tile (the normaliser plus the aligner, the same
-trick against a 22,302-LUT target) and five tiles is ~76.8%, which is
-plausibly routable for 25% more throughput.
+#### EXT_NORM measured at the kernel (2026-08-31)
+
+`FUSE_NORM` wires the ladder into the engine. Same tree, same script,
+same machine, one generic apart - the shape that caught `cft_mulfrac`
+not paying:
+
+| | LUT | FF | DSP | WNS @130 | levels |
+|---|---|---|---|---|---|
+| `FUSE_NORM=0` | 115,903 | 50,293 | 262 | +2.456 | 21 |
+| `FUSE_NORM=1` | 109,971 | 45,955 | 262 | +1.758 | 25 |
+| delta | **-5,932** | **-4,338** | 0 | -0.698 | +4 |
+
+**The gather multiplexer is nearly free.** It was budgeted at ~720 LUT
+against the 5,136 the shifters alone saved; the kernel delta is larger
+than that standalone figure, not smaller. Vivado absorbs it, most bit
+positions having fewer than four real sources.
+
+**And the S11 split paid for itself before any sharing.** The
+`FUSE_NORM=0` baseline is 115,903 against 117,530 measured the same
+night at the previous commit - **-1,627 LUT** purely from pulling the
+leading-zero scan out of the register process, because the old form
+duplicated the shift expression across both arms of the empty-window
+`if`. Bit-identical, and it lands whether sharing is ever enabled.
+
+**Where the slack goes, which is the part worth knowing.** The
+critical path WITHOUT sharing is not the normaliser at all:
+
+    FUSE_NORM=0   s12_enorm_reg -> s13_kept_r_reg        21 levels
+    FUSE_NORM=1   s10_mag_reg   -> normseg/cs_r_reg[592] 25 levels
+
+Sharing inserts a 25-level path into the ladder's first register and
+that takes over from the S13 rounding stage. The two halves of the
+ladder are not symmetric: the first stage's amount bits come live off
+the leading-zero count, so its path is LZC + slot mux + SPLIT levels,
+while the second stage's bits are already registered and its path is
+just the remaining levels. Balancing the LEVEL COUNTS is therefore the
+wrong instinct - and rebalancing 4/6 to 5/5 measured very slightly
+WORSE (+1.758 against +1.788), because it moved a level into the stage
+that carries the LZC.
+
+The split is now a parameter, `SPLIT`, and every value computes the
+same function - the equivalence bench passes at 1, 2, 3, 4, 5, 7 and 9.
+The target is arithmetic rather than taste: the ladder path must come
+down about four levels to stop being critical, which is SPLIT near 1.
+
+**Whether to spend it.** On Alveo the pressure is off - the quad
+closes at 130 MHz with 30% of the device free - so this is about the
+FIFTH TILE there. At 121,158 LUT per tile plus the 123,897-LUT shell,
+five tiles is 83.8% of the device; take ~10% off the tile (the
+normaliser plus the aligner, the same trick against a 22,302-LUT
+target) and five tiles is ~76.8%, plausibly routable for 25% more
+throughput.
+
+**On the open-core target the answer is simpler: turn it on.** The
+0.698 ns objection is a defence of 130 MHz, and an openXC7 Kintex-7
+build is nowhere near that clock - at 120 MHz the shared version
+already carries +2.399 ns. Footprint is the whole objective there, and
+the parameter is per-build, so Alveo and Kintex need not agree.
 
 The module is built, proven against 2,977 comparisons at every legal
 shift and every rung, and measured. What is NOT done is `EXT_NORM`
@@ -1028,10 +1079,30 @@ mining surplus) joined by the deterministic module ring.
 **Two tiles, though, are now monolithic and open** (revised
 2026-08-30). This paragraph used to say openXC7 topped out around
 134k LUTs, which was the largest Artix-7; openXC7 also covers
-Kintex-7 through the 480T at 298,600 LUTs, and two measured tiles fit
-in 40% of it with 14% of the DSPs. So the open ladder is no longer
-"one reduced-width tile, then a ring" - it is one comfortable tile on
-a ~$100 K325T, two on a 480T, and the ring above that. The A200T is
+Kintex-7 through the 480T at 298,600 LUTs.
+
+**Corrected 2026-08-31: the "two tiles fit in 40%" in the previous
+version of this paragraph was wrong by about 2x, and it is the number
+the board plan was being made against.** 40% of a 480T is roughly ONE
+tile. Against the measured tile - 121,158 LUT in shell, or 115,903 /
+110,822 out of context with the shared normaliser off / on:
+
+| part | LUT | two full tiles |
+|---|---|---|
+| XC7K325T | 203,800 | **109 - 119%, does not fit** |
+| XC7K410T | 254,200 | 87 - 95%, not routable in practice |
+| XC7K480T | 298,600 | **74 - 81%, tight but real** |
+
+DSP is not the constraint anywhere: two tiles is 524 of the 480T's
+1,920, 27%.
+
+So the open ladder is one comfortable tile on a ~$100 K325T (now 54%
+of it, down from 68% after the 2026-08-30/31 area work), two tiles on
+a **480T** and not on the 325T or 410T, and the ring above that.
+Reaching two full tiles on a 325T would need ~92,000 LUT each after a
+platform budget; sharing both shift paths projects to ~96,000, and
+7-series carry structure makes these UltraScale+ figures optimistic
+rather than pessimistic. It is not reachable by sharing alone. The A200T is
 also no longer openXC7's biggest part, and the M.2 modules are worth
 keeping for their PCIe rather than their density. The contract's index-fixed
 reduction ordering makes scale-out coherence-free by construction:

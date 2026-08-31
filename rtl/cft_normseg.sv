@@ -52,11 +52,31 @@
 // THE LADDER
 //
 // The pipe's shift amount is `lsh_coarse * 64 + fine` with fine in
-// 0..63, so the concatenation {csh, fsh} IS the total amount and the
-// ten stages split at exactly the pipe's own register boundary:
-// stages 6..9 (64, 128, 256, 512) are the coarse stage, stages 0..5
-// (1, 2, 4, 8, 16, 32) are the fine one. Latency is 2, matching
-// S11 -> S12, so nothing else in the pipeline moves.
+// 0..63, so the concatenation {csh, fsh} IS the total amount: ten
+// levels, shifting by 1 through 512. Latency is 2, matching S11 -> S12,
+// so nothing else in the pipeline moves.
+//
+// WHERE THE REGISTER GOES
+//
+// SPLIT levels run before the register and NST-SPLIT after, and every
+// value computes the same function - it is purely a timing knob. The
+// pipe's own csh/fsh boundary is 4, but that is a 64-granule split in
+// the ARITHMETIC and there is no reason a pipeline boundary should
+// coincide with it.
+//
+// The two halves are not symmetric in delay, which is the thing to
+// understand before touching this. The first stage's amount bits come
+// live off the leading-zero count of s10_mag, so its path is
+// LZC + slot mux + SPLIT levels. The second stage's bits are already
+// registered, so its path is NST-SPLIT levels and nothing else.
+// Balancing the LEVEL COUNTS is therefore the wrong instinct: the
+// first stage starts with a large fixed cost the second does not have,
+// so the balance point sits well below five.
+//
+// Measured at the kernel, the 4/6 split cost 0.668 ns of slack against
+// FUSE_NORM=0 - and the shared version differs from the private one
+// only by adding the slot mux to that first stage, which is itself
+// evidence the first stage is the critical one.
 //
 // Each stage is `out[i] = en[i] ? in[i - 2^k] : in[i]`, where en is the
 // owning lane's amount bit gated by an ALLOW constant that stops a
@@ -73,7 +93,12 @@ module cft_normseg #(
     // Derived. Do not override: SLOTW is the smallest slot that holds
     // an fp32 window and tiles to an fp256 one, and WT is the ladder.
     parameter int SLOTW = ((3 * PMAX + 6) + SLOTS - 1) / SLOTS,
-    parameter int WT    = SLOTS * SLOTW
+    parameter int WT    = SLOTS * SLOTW,
+    // How many of the ten levels run BEFORE the register. See "WHERE THE
+    // REGISTER GOES" in the header - this is a timing knob, not a
+    // correctness one, and every value from 1 to 9 computes the same
+    // function.
+    parameter int SPLIT = 4
 ) (
     input  logic             clk,
     input  logic [1:0]       mode,          // 0 fp32, 1 fp64, 2 fp128, 3 fp256
@@ -84,6 +109,7 @@ module cft_normseg #(
 );
 
   localparam int NST  = 10;                 // 2^9 = 512 covers 717
+  localparam int LO   = NST - SPLIT;        // levels after the register
   localparam int LOGS = $clog2(SLOTS);      // modes 0..LOGS
 
   // The interchange ladder. These are the formats, not knobs - GW is
@@ -116,6 +142,9 @@ module cft_normseg #(
     if ((1 << (NST - 1)) < WT / 2) begin : g_stages
       $error("cft_normseg: NST too small for the ladder width");
     end
+    if (SPLIT < 1 || SPLIT > NST - 1) begin : g_split
+      $error("cft_normseg: SPLIT must leave at least one level on each side");
+    end
   endgenerate
 
   initial begin
@@ -126,22 +155,32 @@ module cft_normseg #(
     end
   end
 
-  // The fine amount and the mode TRAVEL WITH THE DATA. The coarse
-  // stage consumes csh in the cycle the operand arrives; the fine
-  // stage runs a cycle later and must use that operand's fsh, not
-  // whatever is on the port by then. cft_fpfma_pipe does this by
-  // registering s11_fine and reading it in S12, and a shared shifter
-  // has to do the same or it silently mixes two operations' shifts
-  // whenever the amounts change cycle to cycle.
+  // The amount and the mode TRAVEL WITH THE DATA. The first stage
+  // consumes its bits in the cycle the operand arrives; the second runs
+  // a cycle later and must use THAT operand's bits, not whatever is on
+  // the port by then. cft_fpfma_pipe does the same thing by registering
+  // s11_fine and reading it in S12, and a shared ladder has to, or it
+  // silently mixes two operations' shifts whenever the amounts change
+  // cycle to cycle.
   //
-  // The mode is registered for the same reason. In the engine it is
-  // constant for a whole run - prec_r cannot move while anything is in
-  // flight - so this costs two flip-flops and buys independence from
-  // that argument.
-  logic [5:0] fsh_r [0:SLOTS-1];
-  logic [1:0] mode_r;
+  // The whole distance as one number. csh counts 64-bit granules and
+  // fsh is the 0..63 remainder, so {csh, fsh} IS the amount and level k
+  // simply reads bit k of it. The pipe's csh/fsh boundary is arithmetic,
+  // not structural, and nothing requires the register to sit there.
+  logic [NST-1:0] amt [0:SLOTS-1];
+  always_comb begin
+    for (int l = 0; l < SLOTS; l++) amt[l] = {csh[l], fsh[l]};
+  end
+
+  // Only the levels that run in the SECOND stage need their amount bits
+  // registered; the first stage consumes its bits live, in the cycle
+  // the operand arrives. The mode is registered for the same reason -
+  // in the engine prec_r cannot move mid-flight, so this costs two
+  // flip-flops and buys independence from that argument.
+  logic [LO-1:0] amt_lo_r [0:SLOTS-1];
+  logic [1:0]    mode_r;
   always_ff @(posedge clk) begin
-    for (int l = 0; l < SLOTS; l++) fsh_r[l] <= fsh[l];
+    for (int l = 0; l < SLOTS; l++) amt_lo_r[l] <= amt[l][LO-1:0];
     mode_r <= mode;
   end
 
@@ -149,12 +188,23 @@ module cft_normseg #(
   // lane s >> mode, which is the whole benefit of the uniform pitch:
   // this is eighty 4:1 muxes, and it is the entire runtime cost of
   // being segmented.
-  logic [3:0] slot_csh [0:SLOTS-1];
-  logic [5:0] slot_fsh [0:SLOTS-1];
+  // BALANCED 5/5, not 4/6. The distance is one ten-bit number and the
+  // register may sit anywhere in it; the pipe's own csh/fsh split is a
+  // 64-granule boundary, not a pipeline boundary. Splitting there put
+  // four mux levels in the first stage and six in the second, so the
+  // second stage set the clock. Moving the 32-bit level up makes it
+  // five and five.
+  //
+  // slot_hi is amount bits 9..5 = {csh, fsh[5]}, taken live because the
+  // first stage consumes them in the cycle the operand arrives.
+  // slot_lo is bits 4..0, registered, because the second stage runs a
+  // cycle later and must use ITS operand's amount.
+  logic [SPLIT-1:0] slot_hi [0:SLOTS-1];
+  logic [LO-1:0]    slot_lo [0:SLOTS-1];
   always_comb begin
     for (int s = 0; s < SLOTS; s++) begin
-      slot_csh[s] = csh[s >> mode];
-      slot_fsh[s] = fsh_r[s >> mode_r];
+      slot_hi[s] = amt[s >> mode][NST-1:LO];
+      slot_lo[s] = amt_lo_r[s >> mode_r];
     end
   end
 
@@ -186,8 +236,8 @@ module cft_normseg #(
   // A comment whose first word is the tool's own name is read as a
   // pragma, so this one deliberately does not start that way.
   /* verilator lint_off UNOPTFLAT */
-  logic [WT-1:0] cs [0:4];
-  logic [WT-1:0] fs [0:6];
+  logic [WT-1:0] cs [0:SPLIT];
+  logic [WT-1:0] fs [0:LO];
   /* verilator lint_on UNOPTFLAT */
   logic [WT-1:0] cs_r;
 
@@ -197,8 +247,8 @@ module cft_normseg #(
   genvar gk, gb;
   generate
     // ---- coarse: stages 6..9, the 64-granule half ------------------
-    for (gk = 0; gk < 4; gk = gk + 1) begin : g_coarse
-      localparam int K  = 6 + gk;
+    for (gk = 0; gk < SPLIT; gk = gk + 1) begin : g_hi
+      localparam int K  = LO + gk;
       localparam int SH = 1 << K;
       localparam logic [WT-1:0] A0 = allow_mask(1, K);
       localparam logic [WT-1:0] A1 = allow_mask(2, K);
@@ -223,22 +273,22 @@ module cft_normseg #(
           // The source is below the ladder's own base, so a stage that
           // shifts fills zero here and a stage that does not passes
           // through.
-          assign cs[gk+1][gb] = slot_csh[S][K-6] ? 1'b0 : cs[gk][gb];
+          assign cs[gk+1][gb] = slot_hi[S][K-LO] ? 1'b0 : cs[gk][gb];
         end else if (AM == 4'b1111) begin : g_free
           // Interior in every mode: a plain 2:1 mux, no gate.
-          assign cs[gk+1][gb] = slot_csh[S][K-6] ? cs[gk][gb-SH]
+          assign cs[gk+1][gb] = slot_hi[S][K-LO] ? cs[gk][gb-SH]
                                                  : cs[gk][gb];
         end else if (AM == 4'b0000) begin : g_edge
           // Crosses a boundary in every mode: the source is never
           // reachable, so shifting always fills zero.
-          assign cs[gk+1][gb] = slot_csh[S][K-6] ? 1'b0 : cs[gk][gb];
+          assign cs[gk+1][gb] = slot_hi[S][K-LO] ? 1'b0 : cs[gk][gb];
         end else begin : g_mux
           // Mode-dependent. Three cases, not two: not shifting passes
           // through; shifting takes from below; shifting ACROSS A
           // BOUNDARY fills zero. Collapsing the last two into one
           // enable is the obvious mistake and it leaks the neighbour's
           // unshifted bits.
-          assign cs[gk+1][gb] = slot_csh[S][K-6]
+          assign cs[gk+1][gb] = slot_hi[S][K-LO]
                                   ? (AM[mode] ? cs[gk][gb-SH] : 1'b0)
                                   : cs[gk][gb];
         end
@@ -246,7 +296,7 @@ module cft_normseg #(
     end
 
     // ---- fine: stages 0..5 -----------------------------------------
-    for (gk = 0; gk < 6; gk = gk + 1) begin : g_fine
+    for (gk = 0; gk < LO; gk = gk + 1) begin : g_lo
       localparam int K  = gk;
       localparam int SH = 1 << K;
       localparam logic [WT-1:0] A0 = allow_mask(1, K);
@@ -258,14 +308,14 @@ module cft_normseg #(
         localparam int S = gb / SLOTW;
         localparam bit [3:0] AM = {A3[gb], A2[gb], A1[gb], A0[gb]};
         if (gb < SH) begin : g_below
-          assign fs[gk+1][gb] = slot_fsh[S][K] ? 1'b0 : fs[gk][gb];
+          assign fs[gk+1][gb] = slot_lo[S][K] ? 1'b0 : fs[gk][gb];
         end else if (AM == 4'b1111) begin : g_free
-          assign fs[gk+1][gb] = slot_fsh[S][K] ? fs[gk][gb-SH]
+          assign fs[gk+1][gb] = slot_lo[S][K] ? fs[gk][gb-SH]
                                                : fs[gk][gb];
         end else if (AM == 4'b0000) begin : g_edge
-          assign fs[gk+1][gb] = slot_fsh[S][K] ? 1'b0 : fs[gk][gb];
+          assign fs[gk+1][gb] = slot_lo[S][K] ? 1'b0 : fs[gk][gb];
         end else begin : g_mux
-          assign fs[gk+1][gb] = slot_fsh[S][K]
+          assign fs[gk+1][gb] = slot_lo[S][K]
                                   ? (AM[mode_r] ? fs[gk][gb-SH] : 1'b0)
                                   : fs[gk][gb];
         end
@@ -275,8 +325,8 @@ module cft_normseg #(
 
   // Two registers, at exactly the pipe's S11 -> S12 -> S13 boundaries.
   always_ff @(posedge clk) begin
-    cs_r <= cs[4];
-    dout <= fs[6];
+    cs_r <= cs[SPLIT];
+    dout <= fs[LO];
   end
 
 endmodule

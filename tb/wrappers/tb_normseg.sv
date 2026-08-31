@@ -29,7 +29,12 @@ module tb_normseg #(
     parameter int PMAX  = 237,
     parameter int SLOTS = 8,
     parameter int SLOTW = ((3 * PMAX + 6) + SLOTS - 1) / SLOTS,
-    parameter int WT    = SLOTS * SLOTW
+    parameter int WT    = SLOTS * SLOTW,
+    // Forwarded so the equivalence bench can be run at each value.
+    // cft_normseg's header claims every split computes the same
+    // function; this is what lets that be demonstrated rather than
+    // asserted.
+    parameter int SPLIT = 4
 ) (
     input  logic          clk,
     input  logic [1:0]    mode,
@@ -61,7 +66,7 @@ module tb_normseg #(
     end
   end
 
-  cft_normseg #(.PMAX(PMAX), .SLOTS(SLOTS)) u_seg (
+  cft_normseg #(.PMAX(PMAX), .SLOTS(SLOTS), .SPLIT(SPLIT)) u_seg (
       .clk(clk), .mode(mode), .din(din), .csh(csh), .fsh(fsh), .dout(dout));
 
   genvar gl;
