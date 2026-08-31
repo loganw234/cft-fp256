@@ -217,6 +217,37 @@ means the alignment shifter, the significand adder and the normaliser
 - which the same ASIC papers also segment, and which are the parts
 worth copying.
 
+**Addendum (2026-08-30): the second criterion, which is about shape
+rather than fabric, and which decides the question before anything is
+built.** The banks here are mutually exclusive - one precision is live
+per run - so time-sharing them needs no arbitration and no buffering.
+What decides whether sharing pays is whether the structure's width is
+**linear or quadratic** in the format width.
+
+The tile is fed by a fixed memory beat, so every bank consumes exactly
+one 256-bit beat: eight fp32, four fp64, two fp128, one fp256.
+**Aggregate operand width is therefore identical in every mode.** A
+linear-width structure shared across the banks is exactly as wide as
+the widest bank and the narrow modes waste nothing. A quadratic one
+must be sized for the widest mode and cannot be subdivided by the
+narrow modes - which is exactly the +693 LUT measured above, and why
+the failure was not a tuning problem.
+
+The FMA's aligner is `3P + 7` bits, so per bank it aggregates to 632 /
+664 / 692 / 718 against a widest bank of 718: **3.77x collapses to 1x
+with under 14% slack.** The normaliser is the same shape. The
+multiplier, at `P x P`, aggregates to 4,608 / 11,236 / 25,538 / 56,169
+against 56,169 - no collapse at all, because the narrowest mode needs
+8% of the widest bank's bit-products and gets 100% of them.
+
+**What we could not find:** the beat invariant used this way - as an
+a-priori test for which parts of a multi-precision datapath are worth
+sharing, decided from the memory interface rather than from
+synthesising both. The multi-precision FMA literature segments
+everything it can and reports the aggregate; we found no statement
+that a fixed-beat interface makes the linear parts free to share and
+the quadratic parts impossible.
+
 **What we could not find:** any FPGA measurement of a fractured
 significand multiplier, positive or negative. The ASIC results are
 well cited and, as far as we can tell, have not been checked against a

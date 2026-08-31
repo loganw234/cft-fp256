@@ -104,7 +104,42 @@ module cft_reduce_acc #(
 
   localparam int LW = $clog2(LEVELS + 1);
 
-  logic [W-1:0]  slot [0:LEVELS-1];
+  // ---- the levels, as one register and one distributed RAM ----------
+  //
+  // Measured, this module is 5,955 LUT and 10,853 FF of a 120,303-LUT
+  // kernel. The flip-flops are the giveaway: 40 x 256 is 10,240 bits,
+  // so the whole array had been inferred as registers with a 40:1
+  // multiplexer in front of it, and that multiplexer is most of the
+  // LUTs. Nothing here wants registers - the array is written once per
+  // add and read once per issue, which is a memory.
+  //
+  // Two things stopped Vivado inferring one, and both are fixable
+  // without changing what the module does:
+  //
+  //   * TWO write statements. `slot[res_lvl]` for a returning result
+  //     and `slot[0]` for an arriving input, in the same process. A
+  //     distributed RAM has one write port, so two writes force
+  //     registers no matter what else is true.
+  //   * the writes sat inside the reset process. Nothing resets the
+  //     array, but inference is more reliable from a process that
+  //     contains the write and nothing else.
+  //
+  // The first is not a real conflict, and the reason is already load
+  // bearing elsewhere in this file: a result NEVER targets level 0.
+  // An issue from level t targets t+1, the input path targets 1, and
+  // the fold targets ptr, which is at least 1 because the seed
+  // consumed the lower index before fold_started went high. The
+  // arbitration comment above relies on exactly this to argue that a
+  // result and an input cannot contend for a slot. So level 0 has one
+  // writer and levels 1..LEVELS-1 have one writer, and splitting them
+  // gives each a single port.
+  //
+  // The invariant is checked in simulation rather than assumed - if it
+  // ever stops holding, a result would silently land in the wrong
+  // level instead of colliding visibly.
+  logic [W-1:0]  slot0;                  // level 0: the input path only
+  (* ram_style = "distributed" *)
+  logic [W-1:0]  slotm [0:LEVELS-2];     // levels 1..LEVELS-1
   logic [LEVELS-1:0] occ;
 
   // Destination level travelling with an in-flight add. The adder does
@@ -188,7 +223,42 @@ module cft_reduce_acc #(
     else if (seed_read)       slot_idx = ptr;
     else                      slot_idx = '0;   // the input path reads level 0
   end
-  assign slot_rd = slot[slot_idx];
+
+  // Level 0 is a register and the rest is a RAM, so the one read port
+  // is one 2:1 mux wide rather than 40:1. The address is forced to
+  // zero for the level-0 case rather than left to wrap to all-ones:
+  // the mux discards it either way, but an out-of-range read is an X
+  // in simulation and a needless decode in hardware.
+  logic [LW-1:0] rd_addr, wr_addr;
+  assign rd_addr = (slot_idx == '0) ? '0 : (slot_idx - 1'b1);
+  assign wr_addr = res_lvl - 1'b1;
+  assign slot_rd = (slot_idx == '0) ? slot0 : slotm[rd_addr];
+
+  // The two write ports, each in its own process with no reset, which
+  // is the shape distributed-RAM inference wants. The enables are the
+  // same conditions the placement block below uses, with the reset
+  // term made explicit because that block's `else` no longer covers
+  // them.
+  logic res_place, in_place;
+  assign res_place = rst_n && !clear && res_v && (st != S_WAIT) &&
+                     !occ[res_lvl];
+  assign in_place  = rst_n && !clear && (st == S_ACC) &&
+                     in_valid && in_ready && !occ[0];
+
+  always_ff @(posedge clk) begin
+    if (in_place) slot0 <= in_data;
+  end
+
+  always_ff @(posedge clk) begin
+    if (res_place) slotm[wr_addr] <= add_res;
+  end
+
+  // synthesis translate_off
+  always_ff @(posedge clk) begin
+    if (res_place && (res_lvl == '0))
+      $fatal(1, "cft_reduce_acc: a result targeted level 0 - the split of slot0 from slotm is invalid");
+  end
+  // synthesis translate_on
 
   always_comb begin
     add_valid = 1'b0;
@@ -257,20 +327,18 @@ module cft_reduce_acc #(
       // A returning result either lands in its level or collides and is
       // re-issued (the issue itself is handled above); either way the
       // level it came from is now free.
+      // The value itself is written by the two single-port processes
+      // above; what stays here is the occupancy bit, which does need
+      // the reset. res_place and in_place are the same conditions as
+      // the `else` arms below.
       if (res_v && (st != S_WAIT)) begin
         if (occ[res_lvl]) occ[res_lvl] <= 1'b0;      // consumed by the re-issue
-        else begin
-          slot[res_lvl] <= add_res;
-          occ[res_lvl]  <= 1'b1;
-        end
+        else              occ[res_lvl] <= 1'b1;
       end
 
       if (st == S_ACC && in_valid && in_ready) begin
         if (occ[0]) occ[0] <= 1'b0;                  // consumed by the issue
-        else begin
-          slot[0] <= in_data;
-          occ[0]  <= 1'b1;
-        end
+        else        occ[0] <= 1'b1;
       end
 
       // ---- flush ------------------------------------------------------

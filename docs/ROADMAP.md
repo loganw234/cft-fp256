@@ -527,6 +527,76 @@ streaming headroom and nothing else.
   controllers, current tools, covered by the analysis above.
 - **Open-toolchain targets** - see below.
 
+## What can be shared, and what only looks like it can (analysis, 2026-08-30)
+
+Two axes get proposed whenever area is short, and they are worth very
+different amounts.
+
+**Across the four tiles: nothing, and that is structural rather than an
+oversight.** The tiles exist to run in parallel; anything shared
+between them becomes a single issue point that all four queue behind,
+which needs buffering and sequencing to hide and gives back more than
+it saves. The only block genuinely duplicated without being a datapath
+is `cft_csr` at 624 LUT, and it cannot be shared anyway: the Vitis CU
+model gives every compute unit its own AXI4-Lite control interface, and
+4 x 624 is 0.5% of a quad - not a reason to leave the standard flow.
+Anything else that is four-of-a-kind is four-of-a-kind *because* it is
+computing four things at once.
+
+**Inside one tile, across the precision banks: this is the real axis,
+and it is free of the sequencing problem.** `prec_r` is snapshot at
+start and cannot move while anything is in flight, so exactly one bank
+is live for the duration of a run. The fp256 bank is idle for every
+fp32 job and vice versa. Sharing between them needs no arbitration, no
+buffering and no schedule - only a mode input.
+
+**The rule, and it has been measured in both directions: share what is
+LINEAR in the format width, not what is QUADRATIC.** NOVEL.md entry 6
+states the FPGA half of this ("fracture what the fabric implements in
+LUTs, not what it implements in hard blocks"); the sizing argument is
+what makes it predictive rather than a rule of thumb.
+
+Every bank consumes exactly one 256-bit beat - eight fp32, four fp64,
+two fp128, one fp256 - so **aggregate operand width is identical across
+the ladder.** For a structure whose width is linear in the format
+width, the shared version is therefore exactly as wide as the widest
+bank, and the narrow modes waste nothing. For a quadratic structure the
+shared version must be sized for the widest mode and the narrow modes
+cannot subdivide it, which is precisely what `cft_mulfrac` measured:
+ten fp256-width slots cost about what four banks of right-sized
+multipliers cost, for +693 LUT, -3 DSP and lost timing closure.
+
+What that predicts, for the parts of the FMA pipe that are linear.
+`AW = 3P + 7`, so the aligner is 79 / 166 / 346 / 718 bits per lane:
+
+| bank | lanes | AW/lane | aggregate |
+|---|---|---|---|
+| fp32 | 8 | 79 | 632 |
+| fp64 | 4 | 166 | 664 |
+| fp128 | 2 | 346 | 692 |
+| fp256 | 1 | 718 | 718 |
+| | | | **2,706** |
+
+**A segmented aligner sized for fp256 is 718 bits and hosts every bank:
+3.77x the width collapses into 1x, with under 14% slack at the narrow
+end.** The normaliser is the same shape (`NW = 3P + 6`) and the same
+ratio. These are the two structures the ASIC multi-precision papers
+segment, and unlike the multiplier they are LUTs here, so the trade
+does not invert.
+
+**This is a ratio, not a LUT promise.** The FMA pipes hold 95,120 LUT
+and no measurement here says what fraction of that the two shifters
+are. It is also a redesign of the one part of this project that is
+proven bit-exact, which is a different risk class from rewriting the
+block that bypasses the arithmetic. The ratio is recorded so the work
+can be scoped; it should not be started without first measuring the
+shifters inside the pipe the way `cft_simpleops` was measured.
+
+**What none of this buys: low-precision throughput.** Lane count is
+pinned by the 256-bit beat - 8x32, 4x64, 2x128 and 1x256 all consume
+exactly one beat - so freed area cannot become more fp32 lanes. It
+becomes more tiles.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,
@@ -610,6 +680,108 @@ plus two bit-reversals would do. Nothing had looked at this module
 before 2026-08-30, because until the hierarchy was preserved it was
 invisible.
 
+#### Acting on it: -11,557 LUT from one file (2026-08-30, measured)
+
+Rewritten at 2377054 and measured the way a shipping change has to be -
+two full-kernel OOC runs at 130 MHz on the same machine with the same
+script, differing in exactly one file:
+
+| | LUT | as logic | LUTRAM | FF | DSP | WNS |
+|---|---|---|---|---|---|---|
+| base (7ab02b3) | 131,860 | 124,880 | 6,980 | 59,999 | 262 | +1.754 |
+| new (2377054) | **120,303** | 113,323 | 6,980 | 59,598 | 262 | +1.754 |
+| delta | **-11,557** | -11,557 | 0 | -401 | 0 | 0.000 |
+
+**-8.8% of the kernel, from the block nobody had looked at.** The whole
+saving is `LUT as Logic` and LUTRAM is unchanged to the bit, so nothing
+was relocated rather than removed. DSP is unchanged, as it must be -
+this module does not multiply, and the ladder check still reads 262.
+
+The shifts were the smallest of the four causes, not the largest. What
+dominated was **mux source count**: on this fabric a 4:1 mux is one
+LUT6 and MUXF7/MUXF8 are free, so a wide mux costs 2 LUT/bit per
+octave of *sources* - 8:1 costs 2, 16:1 costs 4. A `case (op)` that
+assigns a W-bit value per opcode prices itself by opcode count, and
+there were twenty-odd. Grouping the opcodes by the SHAPE of the answer
+gets it to eight. abs, negate and copySign were three separate sources
+for what is `a` with a different sign bit; they now override bit W-1
+alone and cost one LUT between them.
+
+**On the two numbers, because they look contradictory and are not.**
+22,418 is the module's cost with `-flatten_hierarchy none`, which is
+what makes per-module attribution possible at all. 11,557 is what
+actually left the kernel under the flatten settings that ship. The gap
+is not error: with boundaries dissolved Vivado had already been merging
+some of this logic into its neighbours, so the unflattened figure is an
+**upper bound** on what a rewrite can reach, and the rewrite captured
+about half of it. Attribution runs say where to look; only a
+before/after under shipping settings says what a change is worth.
+
+The new flattened report re-earns that warning in the opposite
+direction: `u_fifo_a` is charged 7,644 LUT for a module holding 592
+LUTRAM, and the fp32/fp64/fp128 `cft_simpleops` instances do not appear
+at all.
+
+**Equivalence, not inspection.** `tb/wrappers/cft_simpleops_ref.sv`
+freezes the previous implementation and `tb_simpleops` runs both at all
+four rungs from one operand word: 453,424 comparisons of `d`, `flags`
+and `valid`, zero mismatches, plus the full 12-bench suite green. Two
+negative controls, both caught - an off-by-one in the output bit
+reversal, and dropping the equality term from the substituted
+comparator. Comparing the two forms to each other rather than each to
+the model is the `tb_mulshare` argument, and it reaches ground the
+model has no opinion about: the 233 reserved opcodes, the arithmetic
+group's unread default, and flags on operands the model never emits.
+
+#### `cft_reduce_acc`: the levels were a memory pretending to be registers
+
+The same report charged `u_reduce` **5,955 LUT and 10,853 FF**. The
+flip-flops are the giveaway - 40 levels x 256 bits is 10,240 bits - so
+the array had been inferred as registers behind a 40:1 multiplexer, and
+that multiplexer is most of the LUTs. Nothing here wants registers: the
+array is written once per add and read once per issue, which is a
+memory.
+
+Two things blocked distributed-RAM inference, and neither is a
+behavioural requirement. There were **two write statements** in one
+process (`slot[res_lvl]` for a returning result, `slot[0]` for an
+arriving input) where a distributed RAM has one write port; and the
+writes sat inside the reset process, which nothing about them needs.
+
+The two writes are not a real conflict, and the reason was already
+load-bearing in that file for a different purpose - the issue
+arbitration relies on it to argue a result and an input can never
+contend for a slot: **a result never targets level 0.** An issue from
+level t targets t+1, the input path targets 1, and the fold targets
+`ptr`, which is at least 1 because the seed consumed the lower index
+before `fold_started` went high. So level 0 has exactly one writer and
+levels 1..39 have exactly one writer. Split them and each gets a single
+port; level 0 becomes a plain register and the read port becomes one
+2:1 mux instead of 40:1.
+
+| | LUT | as logic | LUTRAM | FF |
+|---|---|---|---|---|
+| `u_reduce` before | 5,955 | 5,948 | 0 | 10,853 |
+| `u_reduce` after | **2,868** | 2,565 | 296 | **867** |
+| kernel before | 120,303 | 113,323 | 6,980 | 59,598 |
+| kernel after | **117,530** | 110,254 | 7,276 | **49,846** |
+
+**-2,773 LUT and -9,752 FF at the kernel, DSP and WNS again unchanged.**
+The module shed 3,087 LUT and took on 296 LUTRAM, which is the trade
+working exactly as intended - a 39 x 256 array in SLICEM instead of
+10,240 flip-flops and a 40-input mux.
+
+The invariant is asserted in simulation rather than assumed, because
+its failure mode is silent: a result would land in the wrong level
+instead of colliding visibly. The assertion was inverted once to prove
+it is live and not dead code - it fires at 304 ns.
+
+**Running total for the evening: 131,860 -> 117,530 LUT (-10.9%) and
+-10,153 FF, from two files, with DSP and OOC WNS unchanged throughout.**
+The next target is the FMA pipes at 95,120 LUT, which is a different
+risk class - see the sharing analysis above for the ratio it would buy
+and why it should be measured before it is started.
+
 Two consequences, and the first one is unwelcome:
 
 **A full 256-bit tile does not fit on an Artix-7 100T, and no longer
@@ -621,6 +793,16 @@ axes. It stays the right board to bring the open flow up on, because
 it is openXC7 and LiteX's reference target and that is worth more than
 width - but the full tile has to live somewhere else. See the Kintex-7
 row below, which is where it now lives.
+
+*Updated after the `cft_simpleops` rewrite (-11,557 LUT), which puts
+the tile at ~126,500: the 100T is 200% and the 200T is 94%. The 200T
+crossing back under 100% does not move the conclusion and should not be
+planned on - a 94%-full 7-series part is not a part an open
+place-and-route flow routes, and the DSP-to-LUT ratio penalty in the
+next paragraph applies on top. The Kintex-7 row stays the target; what
+the saving actually buys there is headroom (325T falls 68% -> 62%),
+which is the difference between "fits" and "fits with somewhere to put
+the next thing".*
 
 **7-series will be worse than these numbers, not better.** They are
 UltraScale+ figures, and the carry structure differs: the fp256 adder
