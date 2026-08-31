@@ -216,11 +216,42 @@ arbitration between muls and adds - the most schedule-sensitive logic
 in the engine, for one saved round trip. The composition property went
 into the contract partly so this choice would exist.
 
+## Division and square root: composed, not opcodes
+
+`cft_div` and `cft_sqrt` landed with CAPS opcode-group bit 14. They
+are correctly rounded per 754-2019 5.4.1 in the caller's attribute,
+with the full flag set - and they are not opcodes, because the tile's
+divide hardware is deliberately two small seed tables
+(`CFT_RECIP_SEED`/`CFT_RSQRT_SEED`, exposed through `cft_run` like any
+opcode) and the FMA it already had. The library composes them:
+prenormalise, centre, seed, Newton, a truncating Markstein finish
+driven to floor by a restore step, the guard MEASURED from an exact
+residual, one rounding.
+
+The composition is the same fixed sequence on every backend. Floating
+steps are `cft_run` calls - on a device they run on the tile - and
+the integer bookkeeping between them (classify, the ulp steps, the
+final pack) is exact host arithmetic, the same division of labour the
+reduction fold draws. `python/cft_golden/sequences.py` is the
+sequence's specification, held bit-identical to the contract `div`
+and `sqrt` by its own test matrix; `host/tests/divsqrt_check.py`
+re-proves the C port over the same operand families, flags compared
+per element.
+
+Flags follow the per-run granularity rule: every step is its own run,
+so the scaffolding's flags are discarded, and what the caller sees is
+derived the way the contract derives it - invalid and divideByZero
+from operand classes, inexact/underflow/overflow from the single real
+rounding. A device whose bitstream predates the seed group answers
+`CFT_ERR_UNSUPPORTED` rather than running a sequence it cannot start.
+
+The cost is honest: roughly 25-30 elementwise passes per call. That
+is the price of correct rounding built from an FMA - on any
+implementation of this route - and it buys the property the project
+exists for: the same bits from the laptop and the card.
+
 ## What is deliberately not in the first version
 
-- **Programs.** When the on-chip sequencer lands, a `cft_program`
-  family sits beside `cft_run` rather than replacing it. `cft_run` was
-  designed knowing this is coming.
 - **Asynchronous submission.** Everything blocks today. A future
   `cft_run_async` returning a handle is additive.
 

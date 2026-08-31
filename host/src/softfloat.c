@@ -627,12 +627,146 @@ static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
     }
 }
 
+/* ---- divide/sqrt seeds --------------------------------------------
+ *
+ * Mirrors of _seed_recip_entry/_seed_rsqrt_entry and recip_seed/
+ * rsqrt_seed in the model, per the standing rule that constants are
+ * derived, never transcribed: both entry functions compute the
+ * nearest integer by exact integer arithmetic, the same arithmetic
+ * the model states, and the RTL's ROM is generated from the same
+ * definitions. Quiet by specification - no flags, ever - and
+ * subnormal INPUTS flush to their zero-class result, a deliberate
+ * spec choice the model documents at recip_seed.
+ */
+
+/* Nearest integer to 2^18 / (1 + (i + 1/2)/2^9); ties (impossible,
+ * proven by test_seeds.py) would round to even. In (2^17, 2^18). */
+static uint32_t seed_recip_entry(uint32_t i)
+{
+    uint32_t num = 1u << 28;              /* 2^18 * 2^10 */
+    uint32_t den = (1u << 10) + (i << 1) + 1u;
+    uint32_t q = num / den, r = num % den;
+    if (2u * r > den || (2u * r == den && (q & 1u)))
+        q++;
+    return q;
+}
+
+/* Nearest integer to 2^17 / sqrt(mid), mid = (1 + (i + 1/2)/2^9) *
+ * 2^odd, decided by exact comparison against the squared midpoint -
+ * no floating point anywhere. In (2^16, 2^17). */
+static uint32_t seed_rsqrt_entry(uint32_t j)
+{
+    uint32_t odd = j >> 9, i = j & 511u;
+    uint64_t m2 = (uint64_t)(((1u << 10) + (i << 1) + 1u)) << odd;
+    uint64_t target = 1ull << 44;
+    uint64_t t = target / m2;
+    uint64_t q = 0, bit;
+    /* floor(sqrt(t)); t < 2^34, so 18 candidate bits cover it */
+    for (bit = 1ull << 17; bit; bit >>= 1) {
+        uint64_t c = q | bit;
+        if (c * c <= t)
+            q = c;
+    }
+    while ((q + 1) * (q + 1) * m2 <= target)
+        q++;
+    /* round up when (q + 1/2)^2 * m2 < 2^44 */
+    if ((2 * q + 1) * (2 * q + 1) * m2 < (1ull << 46))
+        q++;
+    return (uint32_t)q;
+}
+
+/* round_pack without the flags: the pack of the seed value into a
+ * subnormal result at the range edges is defined as RNE and is part
+ * of the spec, not a mode choice. */
+static void seed_pack(const cft_fmt_desc *f, int sign, uint32_t r, int e,
+                      cft_bn *out)
+{
+    cft_bn m;
+    uint32_t discard = 0;
+    cft_bn_set_u32(&m, r);
+    (void)sf_round_pack(f, sign, &m, e, 0, CFT_SF_RNE, out, &discard);
+}
+
+static int sf_recip_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
+{
+    int sign = cft_bn_bit(x, f->width - 1);
+    uint32_t ef = cft_bn_extract(x, f->man_w, f->exp_w);
+    cft_bn frac;
+    int E, e_out, rbits;
+    uint32_t r;
+
+    cft_bn_copy(&frac, x);
+    cft_bn_mask(&frac, f->man_w);
+    if (ef == f->exp_mask) {
+        if (!cft_bn_is_zero(&frac)) {
+            sf_qnan(f, out);                     /* NaN, quietly */
+            return 0;
+        }
+        sf_zero(f, sign, out);                   /* +/-inf -> +/-0 */
+        return 0;
+    }
+    if (ef == 0) {
+        /* Zero OR subnormal: flush-at-input, see the model. */
+        sf_inf(f, sign, out);
+        return 0;
+    }
+    E = (int)ef - f->bias;
+    r = seed_recip_entry(cft_bn_extract(x, f->man_w - 9, 9));
+    e_out = -E - 18;
+    rbits = 18;                                  /* msb always set */
+    if (e_out + rbits - 1 > f->emax) {
+        sf_inf(f, sign, out);
+        return 0;
+    }
+    seed_pack(f, sign, r, e_out, out);
+    return 0;
+}
+
+static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
+{
+    int sign = cft_bn_bit(x, f->width - 1);
+    uint32_t ef = cft_bn_extract(x, f->man_w, f->exp_w);
+    cft_bn frac;
+    int E, odd, e_out;
+    uint32_t r;
+
+    cft_bn_copy(&frac, x);
+    cft_bn_mask(&frac, f->man_w);
+    if (ef == f->exp_mask && !cft_bn_is_zero(&frac)) {
+        sf_qnan(f, out);
+        return 0;
+    }
+    if (ef == 0) {
+        /* Zero-class (subnormals included, by flush-at-input): the
+         * correspondingly-signed infinity, the 754 limit. */
+        sf_inf(f, sign, out);
+        return 0;
+    }
+    if (sign) {
+        sf_qnan(f, out);                         /* negative */
+        return 0;
+    }
+    if (ef == f->exp_mask) {
+        sf_zero(f, 0, out);                      /* +inf -> +0 */
+        return 0;
+    }
+    E = (int)ef - f->bias;
+    odd = E & 1;
+    r = seed_rsqrt_entry(((uint32_t)odd << 9) |
+                         cft_bn_extract(x, f->man_w - 9, 9));
+    /* (E - odd) is even, so C's truncating division is the model's
+     * floor division here. */
+    e_out = -((E - odd) / 2) - 17;
+    seed_pack(f, 0, r, e_out, out);
+    return 0;
+}
+
 /* ---- dispatch ---------------------------------------------------- */
 
 int cft_sf_op_assigned(int op)
 {
     return (op >= 0 && op <= 14) || (op >= 16 && op <= 23) ||
-           (op >= CFT_SF_SUM && op <= CFT_SF_DOT);
+           (op >= CFT_SF_SUM && op <= CFT_SF_RSQRT_SEED);
 }
 
 int cft_sf_is_reduction(int op)
@@ -649,6 +783,8 @@ unsigned cft_sf_op_operands(int op)
     case CFT_SF_MUL:      return 1u | 2u;          /* c steered to zero */
     case CFT_SF_ABS:
     case CFT_SF_NEG:      return 1u;
+    case CFT_SF_RECIP_SEED:
+    case CFT_SF_RSQRT_SEED: return 1u;
     case CFT_SF_SELECT:   return 1u | 2u | 4u;
     case CFT_SF_SUM:      return 1u;
     case CFT_SF_DOT:      return 1u | 2u;
@@ -795,6 +931,10 @@ int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
     case CFT_SF_ISHR:
     case CFT_SF_ICMPLT:
         return sf_integer_op(f, op, a, b, out);
+    case CFT_SF_RECIP_SEED:
+        return sf_recip_seed(f, a, out);
+    case CFT_SF_RSQRT_SEED:
+        return sf_rsqrt_seed(f, a, out);
     default:
         /* Unassigned. A defined result, not an exception: the device
          * answers the same way, so a host issuing an opcode its
@@ -861,4 +1001,31 @@ size_t cft_sf_canonical_ranges(size_t n, size_t parts,
         count = next;
     }
     return count;
+}
+
+/* ---- exposure for the library's own compositions -------------------
+ *
+ * divsqrt.c rounds and builds specials through these rather than
+ * through copies, so there is exactly one round_pack in the library -
+ * the same single-authority rule the model follows. The statics stay
+ * static; these are the only doors.
+ */
+
+int cft_sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
+                      int e, int sticky, int rnd,
+                      cft_bn *out, uint32_t *flags)
+{
+    return sf_round_pack(f, sign, m, e, sticky, rnd, out, flags);
+}
+
+void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out) { sf_qnan(f, out); }
+
+void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out)
+{
+    sf_inf(f, sign, out);
+}
+
+void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out)
+{
+    sf_zero(f, sign, out);
 }

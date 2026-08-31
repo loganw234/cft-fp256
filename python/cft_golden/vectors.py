@@ -173,12 +173,19 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
     shifty = [0, 1, 2, fmt.man_w, fmt.width - 1, fmt.width, fmt.width + 1,
               2 * fmt.width - 1]
     cases = []
-    # 15, 26 and 255 are unassigned: one inside the float block, one
-    # just past the reductions, one at the top of the byte. 24 used to
-    # stand here and cannot any more - it is CFT_SUM now, which is the
-    # exact hazard docs/DETERMINISM.md warns about for anyone who
-    # issued an unassigned opcode early.
-    for op in sf.SIMPLE_OPS + (15, 26, 255):
+    # 15, 28 and 255 are unassigned: one inside the float block, one
+    # just past the seeds, one at the top of the byte. This list has
+    # now shed a member TWICE - 24 became CFT_SUM, then 26 became
+    # RECIP_SEED - which is the exact hazard docs/DETERMINISM.md warns
+    # about for anyone who issued an unassigned opcode early: the
+    # conformance replayer refuses a set whose "reserved" case has
+    # since been assigned, and that refusal is what caught 26 here.
+    #
+    # The seed opcodes themselves get the same per-op budget as the
+    # rest: they are unary and quiet, but their special classes (the
+    # limit values, and the flush-at-input rule for subnormals) are
+    # contract surface an independent implementation can get wrong.
+    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 28, 255):
         is_shift = op in (sf.OP_ISHL, sf.OP_ISHR)
         for i in range(per_op):
             if i % 3 == 0:

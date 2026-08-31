@@ -527,6 +527,118 @@ int main(void)
                    "on the tile count\n");
     }
 
+    /* --- divide and square root ----------------------------------
+     *
+     * The arithmetic proof lives in tests/divsqrt_check.py (the whole
+     * operand matrix against the model); what belongs here is the API
+     * contract and the answers an independent reading of 754 pins
+     * down: special classes, the two divide flags, exactness where
+     * the result is representable, and the aliasing promise. 1/3 and
+     * sqrt(2) are the two inexact literals, derived by hand from the
+     * standard the way this file's other constants are. */
+    CHECK(cft_supports(dev, CFT_RECIP_SEED, CFT_FP32) == 1,
+          "recip_seed supported");
+    CHECK(cft_supports(dev, CFT_RSQRT_SEED, CFT_FP256) == 1,
+          "rsqrt_seed supported");
+    CHECK(strcmp(cft_op_name(CFT_RECIP_SEED), "recip_seed") == 0 &&
+          strcmp(cft_op_name(CFT_RSQRT_SEED), "rsqrt_seed") == 0,
+          "seed op names");
+
+    {
+        uint8_t a[8], b[8], d[8];
+        uint32_t f2;
+
+        /* the seed opcodes are QUIET, and their special classes are
+         * the limit values - both facts cft_div depends on */
+        f2 = 0xdead;
+        put32(a, 0x7f800000u);                       /* +inf */
+        st = cft_run(dev, CFT_RECIP_SEED, CFT_FP32, CFT_RNE, a, NULL, NULL,
+                     d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0 && f2 == 0,
+              "recip_seed(+inf) = +0, quietly");
+        put32(a, 0x80000000u);                       /* -0 */
+        st = cft_run(dev, CFT_RECIP_SEED, CFT_FP32, CFT_RNE, a, NULL, NULL,
+                     d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u && f2 == 0,
+              "recip_seed(-0) = -inf, quietly");
+        put32(a, 0xbf800000u);                       /* -1 */
+        st = cft_run(dev, CFT_RSQRT_SEED, CFT_FP32, CFT_RNE, a, NULL, NULL,
+                     d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7fc00000u && f2 == 0,
+              "rsqrt_seed(-1) = qNaN, quietly");
+
+        /* divide: specials and both divide flags */
+        put32(a, 0x3f800000u); put32(b, 0x40000000u);
+        f2 = 0xdead;
+        st = cft_div(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x3f000000u && f2 == 0,
+              "1/2 = 0.5 exactly, no flags");
+        put32(a, 0x3f800000u); put32(b, 0);
+        st = cft_div(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f2 == CFT_FLAG_DIVBYZERO, "1/0 = +inf, divideByZero");
+        put32(a, 0); put32(b, 0);
+        st = cft_div(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7fc00000u &&
+              f2 == CFT_FLAG_INVALID, "0/0 = qNaN, invalid");
+        put32(a, 0x3f800000u); put32(b, 0x40400000u);
+        st = cft_div(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x3eaaaaabu &&
+              f2 == CFT_FLAG_INEXACT,
+              "1/3 rounds to 0x3eaaaaab, inexact");
+
+        /* d may alias a - each chunk reads its slice before writing */
+        put32(a, 0x40400000u); put32(b, 0x40000000u);
+        st = cft_div(dev, CFT_FP32, CFT_RNE, a, b, a, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(a) == 0x3fc00000u,
+              "3/2 in place = 1.5");
+
+        /* square root */
+        put32(a, 0x40800000u);
+        st = cft_sqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x40000000u && f2 == 0,
+              "sqrt(4) = 2 exactly, no flags");
+        put32(a, 0x80000000u);
+        st = cft_sqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f2 == 0,
+              "sqrt(-0) = -0, no flags");
+        put32(a, 0xbf800000u);
+        st = cft_sqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7fc00000u &&
+              f2 == CFT_FLAG_INVALID, "sqrt(-1) = qNaN, invalid");
+        put32(a, 0x40000000u);
+        st = cft_sqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x3fb504f3u &&
+              f2 == CFT_FLAG_INEXACT,
+              "sqrt(2) rounds to 0x3fb504f3, inexact");
+
+        /* argument contract, mirroring cft_run's shape */
+        CHECK(cft_div(dev, CFT_FP32, CFT_RNE, a, b, d, 0, &f2, NULL)
+              == CFT_OK && f2 == 0, "n = 0 succeeds with clean flags");
+        CHECK(cft_div(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, NULL, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "divide needs b");
+        CHECK(cft_div(dev, CFT_FP32, CFT_RNE, NULL, b, d, 1, NULL, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "divide needs a");
+        CHECK(cft_sqrt(dev, (cft_format)6, CFT_RNE, a, d, 1, NULL, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "bad format refused");
+    }
+
+    {
+        /* fp256, the format no host hardware anchors: 1/1 and sqrt(1)
+         * are exact identities the field layout pins by hand. */
+        uint8_t a[32], b[32], d[32];
+        uint32_t f2 = 0xdead;
+        fp256_one(a);
+        fp256_one(b);
+        st = cft_div(dev, CFT_FP256, CFT_RNE, a, b, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && memcmp(d, a, 32) == 0 && f2 == 0,
+              "fp256 1/1 = 1 exactly");
+        memset(d, 0xAA, sizeof d);
+        st = cft_sqrt(dev, CFT_FP256, CFT_RNE, a, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && memcmp(d, a, 32) == 0 && f2 == 0,
+              "fp256 sqrt(1) = 1 exactly");
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));

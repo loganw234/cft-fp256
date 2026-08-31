@@ -51,6 +51,7 @@ static int op_group_bit(int op)
     if (op >= 11 && op <= 14) return 3;   /* predicate */
     if (op >= 16 && op <= 23) return 4;   /* integer */
     if (op >= 24 && op <= 25) return 5;   /* reduction */
+    if (op >= 26 && op <= 27) return 6;   /* divide/sqrt (the seeds) */
     return -1;
 }
 
@@ -105,7 +106,7 @@ CFT_API const char *cft_format_name(cft_format f)
 
 CFT_API const char *cft_op_name(cft_op op)
 {
-    static const char *const names[26] = {
+    static const char *const names[28] = {
         "fma", "add", "sub", "mul",
         "abs", "neg", "copysign",
         "min", "max", "minnum", "maxnum",
@@ -113,7 +114,8 @@ CFT_API const char *cft_op_name(cft_op op)
         0,
         "iand", "ior", "ixor", "iadd",
         "isub", "ishl", "ishr", "icmplt",
-        "sum", "dot"
+        "sum", "dot",
+        "recip_seed", "rsqrt_seed"
     };
     if ((int)op >= 0 && (int)op < (int)(sizeof names / sizeof names[0]) &&
         names[(int)op])
@@ -178,11 +180,11 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     dev->index          = index;
     dev->format_mask    = (1u << CFT_FP32) | (1u << CFT_FP64) |
                           (1u << CFT_FP128) | (1u << CFT_FP256);
-    /* Every assigned group, reductions (bit 5) included. The software
-     * backend is the contract, so it implements all of it; a device
-     * advertises what its bitstream actually contains, which for the
-     * reduction group is currently nothing. */
-    dev->op_groups      = 0x3Fu;
+    /* Every assigned group, reductions (bit 5) and the divide/sqrt
+     * seeds (bit 6) included. The software backend is the contract,
+     * so it implements all of it; a device advertises what its
+     * bitstream actually contains. */
+    dev->op_groups      = 0x7Fu;
     dev->tiles          = 1;
     dev->device_version = 0;
     dev->flags_readable = 1;

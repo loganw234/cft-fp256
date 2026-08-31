@@ -35,8 +35,8 @@ CXXSTD  := -std=c++17
 WARN    := -Wall -Wextra -Wpedantic -Wshadow
 INC     := -Iinclude
 
-SRC     := src/bigint.c src/softfloat.c src/device.c src/program.c \
-           src/conformance.c
+SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
+           src/program.c src/conformance.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
@@ -167,6 +167,13 @@ fortran: libcft.a
 
 difftest: all
 	$(PYTHON) tests/diff_check.py --trials 3000
+
+# cft_div/cft_sqrt and the seed opcodes against the model: the same
+# operand matrix test_sequences.py runs at model level, driven through
+# the C port, flags compared per element. Its own target for the same
+# reason difftest is - it needs Python and the model.
+divsqrttest: all
+	$(PYTHON) tests/divsqrt_check.py
 
 # The same idea as difftest, for programs rather than arithmetic: two
 # independent ports of the sequencer, one in Python and one in C, over

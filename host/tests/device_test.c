@@ -381,6 +381,67 @@ static void compare_partitioned(cft_device *hw, cft_format fmt, cft_op op,
     free_buffers(&B);
 }
 
+/* Divide and square root, both backends. These are compositions of
+ * cft_run steps rather than single opcodes, so on the device side
+ * every floating step in the sequence runs on the tile - which makes
+ * this the check that the tile's seeds and FMA compose to the same
+ * bits the software backend's do, flags included. Any-bits operands
+ * exercise the special-class merging; the sequence core is what the
+ * finite fractions of those patterns land in. */
+static void compare_divsqrt(cft_device *sw, cft_device *hw, cft_format fmt,
+                            cft_round rnd, size_t n, uint32_t seed)
+{
+    size_t esz = cft_format_size(fmt);
+    uint32_t fsw = 0, fhw = 0, bus = 0;
+    uint8_t *a = malloc(n * esz), *b = malloc(n * esz);
+    uint8_t *dsw = malloc(n * esz), *dhw = malloc(n * esz);
+    cft_status ssw, shw;
+
+    if (!a || !b || !dsw || !dhw) {
+        printf("  FAIL: out of memory\n");
+        failures++;
+        goto out;
+    }
+    rs = seed ? seed : 1;
+    fill(a, n, esz);
+    fill(b, n, esz);
+
+    ssw = cft_div(sw, fmt, rnd, a, b, dsw, n, &fsw, NULL);
+    shw = cft_div(hw, fmt, rnd, a, b, dhw, n, &fhw, &bus);
+    CHECK(ssw == CFT_OK, "software %s div n=%lu: %s", cft_format_name(fmt),
+          (unsigned long)n, cft_strerror(ssw));
+    CHECK(shw == CFT_OK, "device %s div n=%lu: %s (bus 0x%x) %s",
+          cft_format_name(fmt), (unsigned long)n, cft_strerror(shw),
+          (unsigned)bus, cft_last_error());
+    if (ssw == CFT_OK && shw == CFT_OK) {
+        CHECK(memcmp(dsw, dhw, n * esz) == 0,
+              "%s div rnd=%d: backends disagree", cft_format_name(fmt),
+              (int)rnd);
+        CHECK(fsw == fhw, "%s div rnd=%d: FLAGS sw=0x%02x hw=0x%02x",
+              cft_format_name(fmt), (int)rnd, (unsigned)fsw,
+              (unsigned)fhw);
+    }
+
+    fsw = fhw = 0;
+    ssw = cft_sqrt(sw, fmt, rnd, a, dsw, n, &fsw, NULL);
+    shw = cft_sqrt(hw, fmt, rnd, a, dhw, n, &fhw, &bus);
+    CHECK(ssw == CFT_OK, "software %s sqrt n=%lu: %s", cft_format_name(fmt),
+          (unsigned long)n, cft_strerror(ssw));
+    CHECK(shw == CFT_OK, "device %s sqrt n=%lu: %s (bus 0x%x) %s",
+          cft_format_name(fmt), (unsigned long)n, cft_strerror(shw),
+          (unsigned)bus, cft_last_error());
+    if (ssw == CFT_OK && shw == CFT_OK) {
+        CHECK(memcmp(dsw, dhw, n * esz) == 0,
+              "%s sqrt rnd=%d: backends disagree", cft_format_name(fmt),
+              (int)rnd);
+        CHECK(fsw == fhw, "%s sqrt rnd=%d: FLAGS sw=0x%02x hw=0x%02x",
+              cft_format_name(fmt), (int)rnd, (unsigned)fsw,
+              (unsigned)fhw);
+    }
+out:
+    free(a); free(b); free(dsw); free(dhw);
+}
+
 /* One reduction, both backends. The output is ONE element however
  * large n is, which is the whole reason cft_reduce is a separate entry
  * point, and the reason this cannot reuse compare() above.
@@ -484,7 +545,8 @@ int main(int argc, char **argv)
 {
     static const cft_op ops[] = {CFT_FMA, CFT_ADD, CFT_SUB, CFT_MUL,
                                  CFT_MIN, CFT_MAXNUM, CFT_CMPLT,
-                                 CFT_SELECT, CFT_IXOR, CFT_ISHR};
+                                 CFT_SELECT, CFT_IXOR, CFT_ISHR,
+                                 CFT_RECIP_SEED, CFT_RSQRT_SEED};
     static const cft_round rnds[] = {CFT_RNE, CFT_RTZ, CFT_RDN, CFT_RUP,
                                      CFT_RMM};
     cft_device *sw = NULL, *hw = NULL;
@@ -599,6 +661,26 @@ int main(int argc, char **argv)
                 printf("  %s %s: %d checks so far, %d failed\n",
                        cft_op_name(ops[o]), "ok", checks, failures);
                 fflush(stdout);
+            }
+        }
+
+        /* The composed divide and square root. Every floating step
+         * runs on whichever backend is under test, so this is where
+         * the tile's seeds and FMA are proven to compose to the
+         * contract - the closest thing to "general purpose" a matrix
+         * can assert. Gated on the seed group: a bitstream that
+         * predates CAPS bit 6 cannot run the sequence and says so. */
+        if (!only_reduce) {
+            if (!cft_supports(hw, CFT_RECIP_SEED, fmt)) {
+                note_skip("div/sqrt");
+            } else {
+                for (r = 0; r < nrnd; r++) {
+                    compare_divsqrt(sw, hw, fmt, rnds[r], n,
+                                    0xd15c0000u + (uint32_t)(f * 10 + r));
+                    printf("  div/sqrt %s: %d checks so far, %d failed\n",
+                           "ok", checks, failures);
+                    fflush(stdout);
+                }
             }
         }
 

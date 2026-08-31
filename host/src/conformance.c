@@ -181,7 +181,7 @@ static int op_from_name(const char *s)
             return -2;
         return v;
     }
-    for (i = 0; i < 26; i++)
+    for (i = 0; i < 28; i++)
         if (i != 15 && strcmp(cft_op_name((cft_op)i), s) == 0)
             return i;
     return -1;

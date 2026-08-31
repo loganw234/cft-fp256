@@ -54,7 +54,7 @@ extern const cft_fmt_desc cft_sf_formats[4];
 #define CFT_SF_RUP 3
 #define CFT_SF_RMM 4
 
-/* Opcodes. 15 and 24..255 are unassigned and answer with the canonical
+/* Opcodes. 15 and 28..255 are unassigned and answer with the canonical
  * quiet NaN and invalid - a defined result, because a host issuing an
  * opcode its device predates should see that in the flags rather than
  * receive a plausible number. */
@@ -88,6 +88,12 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * the device's opcode field stays one field. */
 #define CFT_SF_SUM      24
 #define CFT_SF_DOT      25
+
+/* Divide/sqrt seeds: quiet unary table lookups, mirrors of the
+ * model's recip_seed/rsqrt_seed including the flush-at-input rule for
+ * subnormal operands. divsqrt.c refines them to full precision. */
+#define CFT_SF_RECIP_SEED 26
+#define CFT_SF_RSQRT_SEED 27
 
 /* Is `op` one of the assigned opcodes? Unassigned ones still compute -
  * see above - but cft_supports() answers with this. */
@@ -162,5 +168,26 @@ unsigned cft_sf_op_operands(int op);
 int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
                    const cft_bn *a, const cft_bn *b, const cft_bn *c,
                    cft_bn *out, uint32_t *flags);
+
+/* ---------------------------------------------------------------
+ * Pieces the library's own compositions build with (divsqrt.c).
+ *
+ * These exist so that composed operations round and build specials
+ * through the SAME authority as everything else - a second
+ * round_pack would be a second place for the contract to be wrong.
+ * Still internal to libcft; nothing here is API.
+ * --------------------------------------------------------------- */
+
+/* Round the exact non-zero magnitude (m + eps) * 2^e into the format
+ * under `rnd`, delivering inexact/underflow/overflow exactly as the
+ * model's round_pack does. See the static sf_round_pack above its
+ * definition for the m/sticky preconditions. */
+int cft_sf_round_pack(const cft_fmt_desc *f, int sign, const cft_bn *m,
+                      int e, int sticky, int rnd,
+                      cft_bn *out, uint32_t *flags);
+
+void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out);
+void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out);
+void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out);
 
 #endif /* CFT_SOFTFLOAT_H */

@@ -831,6 +831,44 @@ pinned by the 256-bit beat - 8x32, 4x64, 2x128 and 1x256 all consume
 exactly one beat - so freed area cannot become more fp32 lanes. It
 becomes more tiles.
 
+## General purpose: divide and square root (status, 2026-08-31)
+
+The gap named when the binary256 novelty claim was calibrated -
+"general purpose" gated on divide/sqrt - is now closed at every level
+except silicon:
+
+- **Contract.** `div` and `sqrt` are contract operations in the golden
+  model (integer-exact, round_pack as the single rounding authority),
+  and the published vector sets cover them via the seed opcodes plus
+  the composed route below.
+- **Hardware.** The tile's whole divide datapath is opcodes 26/27 -
+  `recip_seed`/`rsqrt_seed`, two ROMs derived from the model
+  (never transcribed, drift-locked by test), rel. error < 2^-8.5,
+  proven by 85,264 RTL comparisons. CAPS bit 14 advertises them. Cost
+  was ~6.5k LUT interim (per-lane ROMs; BRAM sharing recorded as a
+  later refinement), which is what "over 100k temporarily" bought.
+- **Sequence.** `python/cft_golden/sequences.py` composes the seeds
+  and FMA into correctly-rounded div/sqrt - Markstein with a floor
+  restore and a MEASURED guard, after the test matrix killed five
+  constructions that fabricated rounding information - and is held
+  bit-identical to the contract across formats, modes and the hard
+  families.
+- **Library.** `cft_div`/`cft_sqrt` in libcft replay that sequence as
+  `cft_run` steps (floats on the backend, exact integer bookkeeping on
+  the host - the reduction fold's division of labour). Proven against
+  the model: 29,124 cases across all formats and modes including a
+  chunk-boundary crossing, zero disagreements; 392,000 regenerated
+  conformance cases replay clean; `device_test` gained div/sqrt and
+  seed coverage for the emulation and card-day runs.
+
+Remaining for the milestone build: rebuild the contract-0x500 image
+with the seed opcodes (CAPS bit 14 set), run `device-test` under
+hw_emu on the build box, and then card day makes it real. The
+sequence's ~25-30 passes per call are the honest price of correct
+rounding composed from FMA; a fused on-chip program via the orbit
+sequencer is the recorded path to cutting the round trips without
+touching the contract.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,

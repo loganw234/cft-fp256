@@ -5,9 +5,9 @@
  *
  * STATUS: the software backend is implemented and is checked against
  * the golden model over the whole interesting input space (see
- * host/tests/). The device backend is not built yet, so cft_open()
- * with an artifact path reports CFT_ERR_UNSUPPORTED; nothing above
- * this API will change when it lands, which is the point.
+ * host/tests/). The XRT device backend is implemented behind the same
+ * calls (build with CFT_ENABLE_XRT); a build without it reports
+ * CFT_ERR_NO_DEVICE from cft_open() with an artifact path.
  *
  * ---------------------------------------------------------------
  * What this library promises
@@ -211,7 +211,25 @@ typedef enum cft_op {
      * contract, not an implementation detail - see docs/DETERMINISM.md
      * and python/cft_golden/reduce.py, which is the definition. */
     CFT_SUM      = 24,  /* d = sum a[i] */
-    CFT_DOT      = 25   /* d = sum round(a[i] * b[i]) */
+    CFT_DOT      = 25,  /* d = sum round(a[i] * b[i]) */
+
+    /* Divide/sqrt seeds: quiet table lookups, relative error < 2^-8.5,
+     * from which cft_div and cft_sqrt Newton-refine to full precision.
+     * Elementwise and unary (b and c ignored), they run through
+     * cft_run like any other opcode, raise no flags ever, and ignore
+     * the rounding attribute. Exposed rather than hidden inside
+     * cft_div because a caller building its own iteration deserves the
+     * same starting point the library uses.
+     *
+     * Special classes give the limit values: seed(NaN) is the
+     * canonical quiet NaN, recip_seed of +/-inf is +/-0, rsqrt_seed of
+     * a negative is NaN - and ZERO AND EVERY SUBNORMAL give the
+     * correspondingly-signed infinity. That last one is deliberate
+     * (flush-at-input): a value-based seed on a subnormal would cost
+     * hardware that nothing uses, because cft_div and cft_sqrt
+     * pre-normalise before seeding. */
+    CFT_RECIP_SEED = 26,   /* ~ 1/a   */
+    CFT_RSQRT_SEED = 27    /* ~ 1/sqrt(a) */
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance
@@ -233,7 +251,7 @@ typedef enum cft_round {
 /* Sticky exception flags, OR-accumulated across a whole call. */
 typedef enum cft_exception {
     CFT_FLAG_INVALID   = 1u << 0,
-    CFT_FLAG_DIVBYZERO = 1u << 1,   /* reserved: no divide yet */
+    CFT_FLAG_DIVBYZERO = 1u << 1,   /* raised by cft_div for x/0 */
     CFT_FLAG_OVERFLOW  = 1u << 2,
     CFT_FLAG_UNDERFLOW = 1u << 3,   /* tiny AND inexact */
     CFT_FLAG_INEXACT   = 1u << 4
@@ -324,7 +342,7 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
  * which matters for the long chains of elementwise steps that
  * branchless code turns into.
  *
- * An opcode the contract leaves unassigned (15, and 24 upward) is not
+ * An opcode the contract leaves unassigned (15, and 28 upward) is not
  * an error: it returns CFT_OK having written the canonical quiet NaN
  * and raised invalid, because that is exactly what the device does,
  * and "the same call returns the same bits" has to hold for the
@@ -402,6 +420,61 @@ CFT_API cft_status cft_reduce(cft_device *dev,
                               size_t      n,
                               uint32_t   *flags_out,
                               uint32_t   *bus_out);
+
+/* ---------------------------------------------------------------
+ * Division and square root
+ *
+ *     d[i] = a[i] / b[i]          cft_div
+ *     d[i] = squareRoot(a[i])     cft_sqrt
+ *
+ * Correctly rounded per IEEE 754-2019 5.4.1, in the caller's rounding
+ * attribute, with the contract flags: invalid (sNaN, 0/0, inf/inf,
+ * sqrt of a negative), divideByZero (x/0), and inexact / underflow /
+ * overflow from the single final rounding. python/cft_golden's div
+ * and sqrt are the definition of these bits.
+ *
+ * These are NOT single opcodes, and that is a fact about the design
+ * rather than a gap in it: the tile's divide hardware is the two seed
+ * tables (CFT_RECIP_SEED / CFT_RSQRT_SEED) and its FMA. This call
+ * composes them - seed, Newton refinement, an exactly-measured
+ * residual, one rounding - as a fixed sequence of cft_run steps, the
+ * same on every backend. On the software backend that reproduces the
+ * contract functions bit for bit; on a device the floating-point
+ * steps run on the tile and this library keeps only the exact
+ * integer bookkeeping between them, the same division of labour
+ * cft_reduce draws when it folds partial sums.
+ * python/cft_golden/sequences.py is the sequence's specification and
+ * is held bit-identical to the contract by its own test matrix.
+ *
+ * Because the sequence issues many elementwise runs, each element
+ * costs roughly 25-30 opcode passes; this is the price of correct
+ * rounding built from an FMA, and it is the same price on every
+ * conforming implementation of this route.
+ *
+ * d may alias a or b. b unused by cft_sqrt. A device whose bitstream
+ * lacks the seed opcodes (CAPS group bit 6), the arithmetic group or
+ * the sign group cannot run the sequence and answers
+ * CFT_ERR_UNSUPPORTED; ask cft_supports(dev, CFT_RECIP_SEED, fmt)
+ * to know in advance.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_div(cft_device *dev,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           void       *d,
+                           size_t      n,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out);
+
+CFT_API cft_status cft_sqrt(cft_device *dev,
+                            cft_format  fmt,
+                            cft_round   rnd,
+                            const void *a,
+                            void       *d,
+                            size_t      n,
+                            uint32_t   *flags_out,
+                            uint32_t   *bus_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
