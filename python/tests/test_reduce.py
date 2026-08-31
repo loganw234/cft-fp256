@@ -16,17 +16,26 @@ number for boring reasons rather than because the machinery works.
 """
 
 import random
+import sys
+from pathlib import Path
 
 import pytest
 
-from cft_golden import (
+# CI runs `python -m pytest python/tests -q` from the repo root, where
+# python/ is not on the path and cft_golden is not installed. Every
+# other test here does this; this one did not, and imported fine on any
+# machine whose shell already had the package reachable - which is why
+# it was green locally and red the moment it was pushed.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, FORMATS,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_MODES,
     FLAG_INVALID, FLAG_INEXACT,
     add, mul, zero_bits, one_bits, inf_bits, qnan_bits, snan_bits,
     negate, is_nan, vectors,
 )
-from cft_golden.reduce import (
+from cft_golden.reduce import (  # noqa: E402
     OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
     stream_reduce,
