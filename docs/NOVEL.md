@@ -228,25 +228,48 @@ The tile is fed by a fixed memory beat, so every bank consumes exactly
 one 256-bit beat: eight fp32, four fp64, two fp128, one fp256.
 **Aggregate operand width is therefore identical in every mode.** A
 linear-width structure shared across the banks is exactly as wide as
-the widest bank and the narrow modes waste nothing. A quadratic one
-must be sized for the widest mode and cannot be subdivided by the
-narrow modes - which is exactly the +693 LUT measured above, and why
-the failure was not a tuning problem.
+the widest bank and the narrow modes waste nothing. For a quadratic
+structure the widest bank alone is most of the total, so the same
+collapse buys much less.
 
-The FMA's aligner is `3P + 7` bits, so per bank it aggregates to 632 /
-664 / 692 / 718 against a widest bank of 718: **3.77x collapses to 1x
-with under 14% slack.** The normaliser is the same shape. The
-multiplier, at `P x P`, aggregates to 4,608 / 11,236 / 25,538 / 56,169
-against 56,169 - no collapse at all, because the narrowest mode needs
-8% of the widest bank's bit-products and gets 100% of them.
+The FMA's aligner is `3P + 7` bits, aggregating to 632 / 664 / 692 /
+718 against a widest bank of 718: **3.77x collapses to 1x with under
+14% slack.** The normaliser is the same shape. The multiplier, at
+`P x P`, aggregates to 4,608 / 11,236 / 25,538 / 56,169 = **97,551
+bit-products against a shared array's 63,990: 1.52x** - a real
+collapse, but half the aligner's, because the fp256 bank alone is 58%
+of the total.
+
+*(An earlier draft of this addendum reported 1.0x for the multiplier by
+putting the fp256 bank in the aggregate column rather than the sum over
+banks - an inconsistency with the aligner row, not a measurement.
+Corrected the same evening.)*
+
+**The collapse ratio is the secondary reason, and the DSP column above
+is the primary one.** 262 -> 259 says the fractured array saved no DSP
+at all: a wide cascaded multiplier is less DSP-efficient per
+bit-product than a narrow one - about 246 against 372 - so the 1.52x
+is spent on cascade overhead before it reaches the resource count.
+Sharing a hard block that sits at 4.4% utilisation cannot pay, whatever
+the geometry says; the geometry only decides how badly it loses.
+
+**A distinction the measurement makes that the ratio does not.** The
+array *does* gang the lanes - mode 0 is eight independent 24x24
+products per beat, mode 3 is one 237x237, and `tb_mulshare` proves
+bit-identity across all four. What it shares is the NUMBER of partial
+products, not their WIDTH: every slot is `PMAX x MCH` = 237x27 in every
+mode, so an fp32 lane runs a 24x24 job through hardware built for
+237x27 - **9% occupancy of the silicon it sits on, at 100% lane
+utilisation.** "Every lane busy" and "every gate busy" are different
+claims, and only the first one held.
 
 **What we could not find:** the beat invariant used this way - as an
 a-priori test for which parts of a multi-precision datapath are worth
 sharing, decided from the memory interface rather than from
 synthesising both. The multi-precision FMA literature segments
 everything it can and reports the aggregate; we found no statement
-that a fixed-beat interface makes the linear parts free to share and
-the quadratic parts impossible.
+that a fixed-beat interface makes the linear parts nearly free to share
+while leaving the quadratic parts barely worth it.
 
 **What we could not find:** any FPGA measurement of a fractured
 significand multiplier, positive or negative. The ASIC results are

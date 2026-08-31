@@ -561,10 +561,54 @@ two fp128, one fp256 - so **aggregate operand width is identical across
 the ladder.** For a structure whose width is linear in the format
 width, the shared version is therefore exactly as wide as the widest
 bank, and the narrow modes waste nothing. For a quadratic structure the
-shared version must be sized for the widest mode and the narrow modes
-cannot subdivide it, which is precisely what `cft_mulfrac` measured:
-ten fp256-width slots cost about what four banks of right-sized
-multipliers cost, for +693 LUT, -3 DSP and lost timing closure.
+widest bank alone is most of the total, so the same collapse buys far
+less:
+
+| structure | scaling | aggregate across banks | shared | collapse |
+|---|---|---|---|---|
+| aligner / normaliser | linear, `3P + 7` | 2,706 bits | 718 | **3.77x** |
+| significand multiplier | quadratic, `P x P` | 97,551 bit-products | 63,990 | **1.52x** |
+
+**Corrected 2026-08-30 (evening): an earlier version of this table put
+the fp256 bank in the multiplier's aggregate column instead of the sum
+over banks, and reported 1.0x - "no collapse at all". That was an
+inconsistency with the aligner row, not a result.** The multiplier does
+collapse; it collapses about half as well.
+
+**And that is not why `cft_mulfrac` lost, which is the more important
+correction.** The measured numbers are `262 -> 259 DSP` and `+693 LUT`:
+
+| | LUT | DSP | WNS |
+|---|---|---|---|
+| private multipliers | 124,589 | 262 | +0.959 ns |
+| fractured array | 125,282 | 259 | -0.181 ns |
+
+Ten live slots of 237x27 cost essentially what four banks of
+right-sized multipliers cost, because **a wide cascaded multiplier is
+less DSP-efficient per bit-product than a narrow one** - roughly 246
+bit-products per DSP against 372 - and the cascade overhead eats the
+1.52x before it reaches the resource count. What the array added
+instead was operand packing and product distribution, which are LUTs.
+It spent the scarce resource to save none of the abundant one; DSP sits
+at 4.4% and is not the constraint. That is NOVEL.md entry 6's original
+finding, and the scaling argument above is a refinement of it, not a
+replacement.
+
+**A second axis, and the one `cft_mulfrac` got wrong.** The array does
+gang the lanes exactly as intended - mode 0 is eight independent 24x24
+products in one beat, mode 3 is one 237x237, and `tb_mulshare` proves
+bit-identity. But it shares the *number* of partial products, not their
+*width*: `prod = aop * bch` is `[PMAX-1:0] x [MCH-1:0]`, a 237x27
+multiplier, in every mode. At fp32 that is a 24x24 job in hardware
+built for 237x27 - **9% of the silicon it occupies.** Every lane is
+utilized and almost none of the hardware is. Cutting the width instead
+- the granule grid `docs/ARCHITECTURE.md` sketched, tiling 237x237 into
+24x24 granules with gated cross-terms so fp32 lights eight small
+granules - is the version that would pay, and remains unbuilt.
+
+This cuts in favour of the aligner work rather than against it: the
+aligner is LUTs, which are the constraint, so its 3.77x lands where the
+multiplier's 1.52x could not.
 
 What that predicts, for the parts of the FMA pipe that are linear.
 `AW = 3P + 7`, so the aligner is 79 / 166 / 346 / 718 bits per lane:
