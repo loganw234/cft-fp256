@@ -758,8 +758,14 @@ module cft_engine_stream #(
   // not 8. The serializer would then walk four elements off the end of
   // every beat, and `n_elems - beat*epb` would underflow on the second
   // beat and fold twelve "elements" for an n of four.
+  //
+  // The shift amount is named because two places need it: `epb`
+  // itself, and the serializer's element index, which must multiply
+  // by epb and would otherwise infer a DSP for a power of two.
+  logic [5:0] beat_sh_r;
+  assign beat_sh_r = 6'(LANE_SH) - {4'b0, prec_r[1:0]};
   logic [5:0] epb;
-  assign epb = 6'd1 << (6'(LANE_SH) - {4'b0, prec_r[1:0]});
+  assign epb = 6'd1 << beat_sh_r;
 
   logic [63:0] ser_beat_idx;
   logic [5:0]  ser_idx, ser_cnt;
@@ -804,9 +810,22 @@ module cft_engine_stream #(
       if (red_take_beat) begin
         ser_data <= a_q;
         ser_idx  <= '0;
-        // real elements left, capped at one beat
-        ser_cnt  <= ((n_elems - ser_beat_idx * {58'd0, epb}) < {58'd0, epb})
-                    ? (n_elems - ser_beat_idx * {58'd0, epb})
+        // real elements left, capped at one beat.
+        //
+        // Shift, not multiply. `epb` is 1 << beat_sh by construction -
+        // it is derived from LANE_SH and the precision, both powers of
+        // two - so `ser_beat_idx * epb` is a shift wearing a
+        // multiply's clothes. Vivado believed the clothes: the
+        // hierarchical report showed 4 DSP blocks inside the engine's
+        // own logic, against a per-lane ladder that accounts for every
+        // one of the 262 DSPs in the arithmetic and predicts zero here.
+        // The kernel measured 266.
+        //
+        // That makes the DSP count a standing check on this line: the
+        // ladder says 262, and any excess is a multiply that should
+        // have been a shift.
+        ser_cnt  <= ((n_elems - (ser_beat_idx << beat_sh_r)) < {58'd0, epb})
+                    ? (n_elems - (ser_beat_idx << beat_sh_r))
                     : {58'd0, epb};
         ser_beat_idx <= ser_beat_idx + 64'd1;
         ser_busy <= 1'b1;

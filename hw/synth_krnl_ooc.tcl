@@ -27,6 +27,29 @@ read_verilog -sv [glob $rtl_dir/*.sv]
 synth_design -top cft_krnl -mode out_of_context
 create_clock -period [format %.3f [expr {1000.0 / $freq}]] -name ap_clk [get_ports ap_clk]
 report_utilization    -file $build_dir/krnl_util.rpt
+
+# Per-module utilization, which the flat report above cannot give.
+#
+# Every area figure this project has quoted was a SUBTRACTION between
+# whole builds - tile total minus the arithmetic banks, or one commit
+# minus another. That works, and it is how the 119,543-LUT tile and the
+# +9,198 four-master delta were measured, but it cannot say which
+# module inside the engine holds the LUTs. Three separate analyses of
+# where to save area all had to estimate, and all three estimated
+# differently.
+#
+# Ten seconds of reporting replaces that. Depth 3 reaches
+# cft_krnl -> cft_engine_stream -> the banks, the FIFOs and
+# cft_reduce_acc, which is the level the open questions live at.
+#
+# AREA attribution is OOC-stable in a way TIMING is not: this file's
+# own header warns that OOC WNS does not predict shell WNS, and
+# ROADMAP records an OOC run predicting +2% for what became a shell
+# regression. That caution is about timing. Utilization out of context
+# is the same netlist the shell build starts from.
+report_utilization -hierarchical -hierarchical_depth 3 \
+                   -file $build_dir/krnl_util_hier.rpt
+
 report_timing_summary -file $build_dir/krnl_timing.rpt -no_detailed_paths
 report_timing -max_paths 3 -file $build_dir/krnl_paths.rpt
 

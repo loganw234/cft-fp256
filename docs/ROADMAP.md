@@ -547,30 +547,61 @@ carries **all four rungs**, and the earlier arithmetic left out the
 fp64 and fp128 banks entirely. The real numbers, from differencing
 routed in-shell builds on the U50:
 
+Superseded once more on 2026-08-30 by a `report_utilization
+-hierarchical` run, which is a measurement per module rather than a
+difference between builds. Per lane, from `build_ooc_hier`:
+
+| rung | P | LUT/lane | DSP | lanes | bank LUT | LUT per significand bit |
+|---|---|---|---|---|---|---|
+| fp32 | 24 | 2,580 | 2 | 8 | 20,640 | 107.5 |
+| fp64 | 53 | 5,100 | 9 | 4 | 20,400 | 96.2 |
+| fp128 | 113 | 11,670 | 35 | 2 | 23,340 | 103.3 |
+| **fp256** | 237 | **31,831** | 140 | 1 | **31,831** | **134.3** |
+| | | | | | **96,211** | |
+
+**Each bank costs about the same, because lane count halves as
+precision doubles - until fp256, which cannot halve further and pays a
+30% per-bit penalty on top.** The area exponent across the ladder is
+0.86, then 1.09, then 1.35. That last rung therefore carries roughly
+**8,000 LUT of superlinear excess**, and it is the concrete target for
+any narrowing work on the aligner and normaliser.
+
+Whole tile, and the figure to size other parts with:
+
 | | LUT | DSP |
 |---|---|---|
-| 8x fp32 lanes | 20,000 | 16 |
-| 4x fp64 lanes | 18,800 | 36 |
-| 2x fp128 lanes | 23,000 | 70 |
-| 1x fp256 unit | 31,000 | 140 |
-| arithmetic subtotal | 92,800 | **262** |
-| engine, FIFOs, AXI plumbing, steering | 26,743 | 0 |
-| **one 256-bit tile, measured** | **119,543** | **262** |
-| one tile with four AXI masters | 128,741 | 262 |
+| arithmetic, 15 lanes | 96,211 | 262 |
+| four stream FIFOs | ~2,400 LUTRAM | 0 |
+| operand steering (`cft_opmux` x15) | ~25,000 | 0 |
+| `cft_reduce_acc` | 8,171 | 0 |
+| engine glue + CSR | ~1,800 | 4 |
+| **kernel, out of context** | **134,697** | **266** |
+| **one tile in shell, four masters + reductions** | **138,083** | **267** |
 
-The DSP column reconciles **exactly** - 262 predicted from the per-lane
-ladder, 262 measured in the routed design - which is the reason to
-trust the LUT column too, and the reason this table is usable for
-sizing any other part.
+The DSP column is the load-bearing check: the per-lane ladder predicts
+`8x2 + 4x9 + 2x35 + 1x140 = 262`, and the arithmetic reports exactly
+262. The four extra in the kernel total were a variable multiply in the
+reduction serializer where a shift belonged - found *because* the
+ladder disagreed, which is what makes it worth keeping as a standing
+check.
+
+**Read the steering row with suspicion.** Vivado flattens `cft_opmux`,
+so its logic is charged to whichever instance it merged into - in the
+depth-3 report, to the four FIFOs, which duly reported 14,092 / 9,741 /
+1,431 / 202 logic LUTs for four *identical* modules. `hw/synth_attrib.tcl`
+exists to settle it with the hierarchy preserved.
 
 Two consequences, and the first one is unwelcome:
 
-**A full 256-bit tile does not fit on an Artix-7 100T.** 119,543 LUTs
-against 63,400 is 189%, and 262 DSPs against 240 is 109%. The board was
-ordered on a "full tile, ~79% LUTs" estimate that was simply wrong.
-It is still the right dev board - it is openXC7 and LiteX's reference
-target, which is worth more than width - but what comes up on it is a
-narrower tile, not the U50's.
+**A full 256-bit tile does not fit on an Artix-7 100T, and no longer
+fits a 200T either.** Against the measured 138,083 LUT / 267 DSP:
+the 100T is **218% / 111%**, and the 200T is **103% / 36%** - it fit
+at 89% on the pre-reduction figure and does not any more. The Arty was
+ordered on a "full tile, ~79% LUTs" estimate that was wrong on both
+axes. It stays the right board to bring the open flow up on, because
+it is openXC7 and LiteX's reference target and that is worth more than
+width - but the full tile has to live somewhere else. See the Kintex-7
+row below, which is where it now lives.
 
 **7-series will be worse than these numbers, not better.** They are
 UltraScale+ figures, and the carry structure differs: the fp256 adder
@@ -584,8 +615,11 @@ runs the same RTL at 64-bit beats against the same golden model.
 
 | target | open flow | what actually fits | role |
 |---|---|---|---|
-| **Arty A7-100T - dev board, ORDERED 2026-08-29** | openXC7 + LiteX treat it as their reference target - open bring-up on rails | NOT a full tile (189% LUT, 109% DSP). Estimated: a 128-bit-beat tile through the fp128 rung, ~44k LUT / ~69%, or a 256-bit fp32-only tile at ~74% | where the open tile comes up first, at reduced width; Ethernet/Etherbone streaming; no transceivers ever (CSG324) |
-| **Alchitry Pt V2 (XC7A100T-2) - the module, x4 when bundled** | same silicon as Arty; port is an afternoon | same as Arty - reduced width, not a full tile | the carrier/quad future: GTPs -> LitePCIe, module ring, verified execution modes |
+| **Arty A7-100T - dev board, ORDERED 2026-08-29** | openXC7 + LiteX treat it as their reference target - open bring-up on rails | NOT a full tile (218% LUT, 111% DSP). Estimated: a 128-bit-beat tile through the fp128 rung, or a 256-bit fp32-only tile | where the open flow comes up first, at reduced width; Ethernet/Etherbone streaming; no transceivers ever (CSG324) |
+| ~~Alchitry Pt V2 (XC7A100T-2), x4 when bundled~~ | ~~same silicon as Arty~~ | **superseded 2026-08-30.** Same 218% problem as the Arty, so the "quad carrier of full tiles" it was chosen for was never possible on that silicon | replaced by the PZ SOM family below, which is the same idea on a part that fits |
+| **PZ-K7325T-SOM (XC7K325T), ~$379** | openXC7 **supports 325T** and ships working `xc7k325t-picosoc-nextpnr` / `xc7k325t-blinky-nextpnr` examples on this exact die; LiteX has `qmtech_kintex7_devboard.py` with a yosys+nextpnr option | **a full tile at 68% LUT / 32% DSP** | **the open full-tile target.** 2 GB 64-bit DDR3 and 16 GTX pairs on the module |
+| **PZ-K7410T-SOM (XC7K410T), same footprint** | **410T is NOT in openXC7's supported list** (70T, 160T, 325T, 420T, 480T). The adjacent 420T *is*, so adding it is plausible work rather than new science - but it is unproven | **a full tile at 54% LUT / 17% DSP**, leaving 46% for the sequencer; two *lean* tiles would be 78% | the headroom part, reachable without redesigning the carrier |
+| **PZ-K7325T-KFB / K7410T-KFB carrier, ~$499** | as the SOM it carries | PCIe, dual SFP, HDMI, SATA, DDR4 | turns either SOM into an actual card rather than a dev board |
 | Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | the quarter tile as already built: 64-bit beats, 2x fp32 + 1x fp64, ~20k LUT estimated against 20,800 - tight, and the first thing to measure. fp256 remains physically impossible at any width | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
 | ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | fp32 bank + engine at reduced width | fallback nano-tile if boards resurface (scarce as of 2026-08) |
 | **Artix-7 200T** (Nexys Video, ALINX AX7A200) | openXC7 | a full tile at 89% LUT / 35% DSP - no LUT-fallback multipliers needed, contrary to the earlier note | the smallest part that takes a full-width tile |
@@ -597,17 +631,54 @@ runs the same RTL at 64-bit beats against the same golden model.
 **Kintex-7 is the correction that matters here.** The table above used
 to consider only Artix-7, ECP5 and Gowin, and concluded the open story
 was necessarily a reduced-width one. openXC7 covers Kintex-7 as well,
-which puts a full tile on a ~$100 board with 40% of the LUTs to spare -
+which puts a full tile on a board costing a few hundred dollars -
 a better open target than the Arty on every axis except maturity, since
 prjxray's most-travelled ground is Artix and the Kintex support is
 newer.
 
-**Read every percentage in this table as optimistic.** They compare
-against UltraScale+ measurements, and 7-series carry structure is worse
-for exactly this arithmetic - 21 CARRY8 per fp256 adder path becomes 42
-CARRY4. The K325T's 59% has margin to absorb that. The 480T's two-tile
-claim is the one to measure before trusting, because 80% of a part is
-where routing, not logic, starts deciding.
+**Why the PZ SOM family replaces the Pt plan** (2026-08-30). The Pt was
+chosen as a module that could be bundled x4 behind a carrier, with
+GTPs for a deterministic module ring - the scale-out doctrine's whole
+mechanism. That plan was built on the belief that a Pt held a full
+tile. It does not; it holds 46% of one. The PZ modules keep every
+property the Pt was picked for and fix the one that was wrong:
+
+  - **a full tile fits**, with room (68% on the 325T, 54% on the 410T);
+  - **16 GTX pairs**, so PCIe and the module ring are both reachable -
+    the Arty has no transceivers at all and the Au none either;
+  - **2 GB of 64-bit DDR3 per module**, which the memory analysis
+    below already argues is sufficient for this workload;
+  - **one footprint, two dice.** The 325T and the 410T are the same
+    SOM, so the carrier is designed once. That is what makes the
+    toolchain risk tolerable: bring up on the 325T, which openXC7
+    supports today, and move to the 410T later if the extra 50k LUT is
+    wanted - without touching the board.
+  - **a PCIe carrier exists** (~$499), so the open path ends at a card
+    rather than a dev board on a bench.
+
+The residual risk is named rather than buried: **the 410T is not in
+openXC7's device list.** Buying into the family is safe because the
+325T is; buying *the 410T specifically* on the assumption that the
+open flow will reach it is not, until someone checks.
+
+**Read every percentage in this table as optimistic**, for two reasons
+that stack.
+
+They compare against UltraScale+ measurements, and 7-series carry
+structure is worse for exactly this arithmetic - 21 CARRY8 per fp256
+adder path becomes 42 CARRY4. The K325T's 68% has margin to absorb
+that; the K410T's 54% has a great deal.
+
+**And the DSP assumption is unverified.** Every row credits the design
+with 266 hard DSPs carrying the significand multipliers. If
+`nextpnr-xilinx` cannot place clocked DSP48E1 - the reported error is
+`Clocked DSP48E1s are currently unsupported`, with `yosys -nodsp` as
+the documented workaround - then an openXC7 build puts all four
+multiplier trees in fabric, and every LUT figure here is far too low.
+**This is the single question that decides whether the open full-tile
+story is real**, it applies identically to every 7-series row, and it
+has not been checked. Check it before buying anything on the strength
+of this table.
 
 The Pt's serialized-multiplier note is a real design option, not a
 consolation: a multi-cycle 237-bit significand multiply built for

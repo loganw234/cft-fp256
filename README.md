@@ -100,7 +100,8 @@ host/examples/       the same program in C, Python (ctypes) and Fortran
 vectors/             conformance-set emitter (JSONL)
 docker/              the simulation container CI and dev boxes share
 docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
-                     SEQUENCER, ROADMAP, BRINGUP, CARDDAY
+                     SEQUENCER, SCALING, ROADMAP, BRINGUP, CARDDAY,
+                     NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
 

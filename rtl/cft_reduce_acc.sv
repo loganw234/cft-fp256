@@ -149,7 +149,46 @@ module cft_reduce_acc #(
   assign fold_issue = (st == S_SCAN) && fold_started &&
                       (ptr < LEVELS[LW-1:0]) && occ[ptr];
 
+  // The scan's first hit, which seeds the fold rather than issuing an
+  // add. Named because the read port below has to know about it.
+  logic seed_read;
+  assign seed_read = (st == S_SCAN) && !fold_started &&
+                     (ptr < LEVELS[LW-1:0]) && occ[ptr];
+
   assign in_ready = (st == S_ACC) && !(res_needs_issue && in_needs_issue);
+
+  // ---- one read port, not four ---------------------------------------
+  //
+  // `slot` is LEVELS x W - 40 x 256 bits as instantiated - and it was
+  // being read at four places, three of them at a variable index. Each
+  // one is a 40:1 multiplexer 256 bits wide, and Vivado has no reason
+  // to merge them because nothing in the source says they are
+  // exclusive. Measured, this module is 8,171 LUT of a 134,697-LUT
+  // kernel: 6% of the tile for an accumulator whose datapath is one
+  // add wide.
+  //
+  // All four reads ARE exclusive, so one port serves them:
+  //
+  //   - the three adder sources are branches of a single if/else chain
+  //     (fold, returning result, new input), so at most one is live;
+  //   - the fold SEED reads slot[ptr] when !fold_started, and the fold
+  //     ISSUE reads slot[ptr] when fold_started. `fold_started` gates
+  //     them apart, so they cannot want the port in the same cycle.
+  //   - a result cannot land during the seed cycle: S_DRAIN does not
+  //     hand over to S_SCAN until `inflight == 0 && !add_valid`, and
+  //     no add is issued before fold_started.
+  //
+  // So the multiplexer becomes 6 bits wide instead of 256, and the
+  // array keeps one read port instead of four.
+  logic [LW-1:0] slot_idx;
+  logic [W-1:0]  slot_rd;
+  always_comb begin
+    if      (fold_issue)      slot_idx = ptr;
+    else if (res_needs_issue) slot_idx = res_lvl;
+    else if (seed_read)       slot_idx = ptr;
+    else                      slot_idx = '0;   // the input path reads level 0
+  end
+  assign slot_rd = slot[slot_idx];
 
   always_comb begin
     add_valid = 1'b0;
@@ -162,15 +201,15 @@ module cft_reduce_acc #(
       // in this design and test_add_is_commutative_so_operand_order_is_free
       // holds it so. Swapping these two is a verified no-op.
       add_valid = 1'b1;
-      add_a     = slot[ptr];
+      add_a     = slot_rd;
       add_b     = fold_r;
     end else if (res_needs_issue) begin
       add_valid = 1'b1;
-      add_a     = slot[res_lvl];
+      add_a     = slot_rd;
       add_b     = add_res;
     end else if (in_valid && in_ready && in_needs_issue) begin
       add_valid = 1'b1;
-      add_a     = slot[0];
+      add_a     = slot_rd;
       add_b     = in_data;
     end
   end
@@ -254,7 +293,7 @@ module cft_reduce_acc #(
               fold_r <= '0;
               st <= S_DONE;
             end else if (occ[ptr]) begin
-              fold_r <= slot[ptr];
+              fold_r <= slot_rd;          // seed_read selected slot[ptr]
               occ[ptr] <= 1'b0;
               fold_started <= 1'b1;
               ptr <= ptr + 1'b1;
