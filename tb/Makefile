@@ -12,10 +12,10 @@
 SIM ?= icarus
 
 .PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-        normprobe reduceacc reduce krnl quarter faults clean
+        normprobe seedop reduceacc reduce krnl quarter faults clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-     reduceacc reduce krnl quarter faults
+     seedop reduceacc reduce krnl quarter faults
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -84,6 +84,16 @@ normprobe:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_normseg \
 		MODULE=test_normseg_probe SIM_BUILD=sim_build/normprobe \
 		COCOTB_RESULTS_FILE=sim_build/normprobe/results.xml
+
+# The divide/sqrt seed opcodes against the golden model: every table
+# index at both exponent parities across the exponent range, the recip
+# subnormal-landing exponents, every special class, at all four rungs.
+# The ROM itself is drift-locked to the model on the python side; this
+# proves the RTL around it.
+seedop:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_seedop \
+		MODULE=test_seedop SIM_BUILD=sim_build/seedop \
+		COCOTB_RESULTS_FILE=sim_build/seedop/results.xml
 
 # The streaming reduction accumulator against the model's tree. Every
 # length from 1 to 40, because the shape varies with n and powers of two

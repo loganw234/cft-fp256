@@ -18,7 +18,10 @@ reach at all. Three examples that matter here:
 
   * reserved opcodes. 15 and everything above 23 must answer with the
     canonical qNaN and raise invalid. The model has no opinion about
-    an opcode it does not define.
+    an opcode it does not define. (Since 2026-08 two of those codes,
+    26/27, belong to cft_seedop and the live module stays quiet on
+    them - see REASSIGNED_OPS below for how this bench handles the
+    one deliberate divergence from the frozen ref.)
   * the arithmetic group. Opcodes 0-3 leave `valid` low and `d`
     unread, but the rewrite still has to produce the same unread
     value, because "unread" is a property of the engine and not of
@@ -72,6 +75,16 @@ OP_NAMES = {
 # Everything this module answers, plus the arithmetic group whose
 # unread default still has to match.
 HANDLED_OPS = [o for o in range(24) if o != 15]
+
+# Opcodes 26/27 were reassigned from the reserved space to the
+# divide/sqrt seeds (2026-08, cft_seedop). The frozen ref predates the
+# reassignment and still traps them; the live module now stays quiet
+# so the engine can merge the seed module's result over the same
+# sideband. That makes these two codes the ONE place ref and new are
+# allowed to differ: the sweeps skip them, and test_reassigned_quiet
+# pins down what the live module does instead. Correctness of the seed
+# results themselves is tb_seedop's job.
+REASSIGNED_OPS = (26, 27)
 
 
 def _int(sig):
@@ -148,12 +161,13 @@ def _widen(value, fmt, rng):
 
 @cocotb.test()
 async def test_opcode_map(dut):
-    """Every one of the 256 opcodes, including all 233 reserved ones.
+    """Every opcode except the two reassigned ones - 254 of 256.
 
     The reserved trap is the reason to sweep the whole space rather
-    than the defined subset: `is_reserved` is (op == 15) || (op > 23),
-    and an off-by-one there is invisible to any bench that only drives
-    opcodes it knows the names of.
+    than the defined subset: an off-by-one in `is_reserved` is
+    invisible to any bench that only drives opcodes it knows the names
+    of. The sweep brackets REASSIGNED_OPS on both sides (25 must trap,
+    28 must trap), so the carve-out is exactly two codes wide.
     """
     rng = random.Random(int(os.environ.get("CFT_SEED", "7")))
     chk = Checker(dut)
@@ -169,10 +183,38 @@ async def test_opcode_map(dut):
             ))
 
     for op in range(256):
+        if op in REASSIGNED_OPS:
+            continue
         for a, b, c in operands:
             await chk.drive(op, a, b, c, note="opcode sweep")
 
-    dut._log.info("opcode sweep: %d comparisons over 256 opcodes", chk.checks)
+    dut._log.info("opcode sweep: %d comparisons over 254 opcodes", chk.checks)
+
+
+@cocotb.test()
+async def test_reassigned_quiet(dut):
+    """The live module's side of the 26/27 carve-out, stated directly.
+
+    The engine merges cft_seedop's result over the bypass sideband with
+    a plain OR, which is only sound if this module leaves valid low and
+    flags zero on the seed opcodes. That contract is what the sweep
+    stopped checking when it skipped them, so it is asserted here
+    against the new instance alone - the ref has nothing to say.
+    """
+    rng = random.Random(int(os.environ.get("CFT_SEED", "7")) + 2)
+    for op in REASSIGNED_OPS:
+        for _ in range(8):
+            dut.op.value = op
+            dut.a.value = rng.getrandbits(256)
+            dut.b.value = rng.getrandbits(256)
+            dut.c.value = rng.getrandbits(256)
+            await Timer(SETTLE_NS, units="ns")
+            for name, _fmt, _width in RUNGS:
+                v_n = _int(getattr(dut, f"v{name}_n"))
+                f_n = _int(getattr(dut, f"f{name}_n"))
+                assert v_n == 0 and f_n == 0, (
+                    f"fp{name} op {op}: live simpleops must stay quiet on a "
+                    f"seed opcode (valid={v_n} flags=0b{f_n:05b})")
 
 
 @cocotb.test()
@@ -260,6 +302,8 @@ async def test_random(dut):
             return rng.getrandbits(256)
 
         op = rng.choice(HANDLED_OPS) if rng.random() < 0.9 else rng.getrandbits(8)
+        if op in REASSIGNED_OPS:
+            op = 25  # still reserved in both; keeps the trap exercised
         await chk.drive(op, operand(), operand(), operand(), note="random")
 
     dut._log.info("random: %d comparisons over %d drives", chk.checks, budget)

@@ -237,7 +237,14 @@ module cft_simpleops #(
   // report. 15 and everything above 23 are the current holes; divide,
   // square root, conversions and the reductions will fill them.
   logic is_reserved;
-  assign is_reserved = (op == 8'd15) || (op > 8'd23);
+  // 26 and 27 left the reserved set on 2026-08-31: they are the
+  // divide/sqrt seed opcodes, answered by cft_seedop through the same
+  // bypass sideband this module uses. 24 is the reduction (the engine
+  // routes it around the banks entirely), 25 is CFT_DOT (host-composed,
+  // never issued raw), and both still trap here if an element-wise run
+  // somehow presents them - deterministically, as before.
+  assign is_reserved = (op == 8'd15) || (op == 8'd24) || (op == 8'd25) ||
+                       (op > 8'd27);
 
   assign valid = (op == OP_ABS) || (op == OP_NEG) ||
                  (op == OP_COPYSIGN) || is_minmax ||

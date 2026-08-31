@@ -1242,6 +1242,17 @@ module cft_engine_stream #(
       cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
           .op(op_r), .a(sa), .b(sb), .c(sc),
           .valid(bv), .d(bd), .flags(bf));
+      // Divide/sqrt seeds: quiet unary precomputed results, delivered
+      // through the SAME bypass sideband as simpleops - which is why no
+      // new collection plumbing exists for them. Opcode sets disjoint,
+      // so the merge is an OR.
+      logic sev; logic [31:0] sed;
+      cft_seedop #(.EXP_W(8), .MAN_W(23)) u_seed (
+          .op(op_r), .a(sa), .valid(sev), .d(sed));
+      logic bv_m; logic [31:0] bd_m; logic [4:0] bf_m;
+      assign bv_m = bv | sev;
+      assign bd_m = sev ? sed : bd;
+      assign bf_m = sev ? 5'b0 : bf;
       // Lane 0 doubles as the accumulator's adder while a reduction
       // runs. Steered the way cft_opmux steers ADD - fma(x, 1.0, y) -
       // because the product is exact and the pipe is already there.
@@ -1260,7 +1271,7 @@ module cft_engine_stream #(
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP32))),
           .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
           .a(ra), .b(is_reduce ? 32'h3F80_0000 : fb), .c(rc),
           .out_valid(), .d(dd), .flags(f32_l[gi]),
           .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
@@ -1295,6 +1306,13 @@ module cft_engine_stream #(
         cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
+        logic sev; logic [63:0] sed;
+        cft_seedop #(.EXP_W(11), .MAN_W(52)) u_seed (
+            .op(op_r), .a(sa), .valid(sev), .d(sed));
+        logic bv_m; logic [63:0] bd_m; logic [4:0] bf_m;
+        assign bv_m = bv | sev;
+        assign bd_m = sev ? sed : bd;
+        assign bf_m = sev ? 5'b0 : bf;
         logic        rv;
         logic [63:0] ra, rc;
         assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP64) &&
@@ -1308,7 +1326,7 @@ module cft_engine_stream #(
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP64))),
           .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
             .a(ra), .b(is_reduce ? 64'h3FF0_0000_0000_0000 : fb), .c(rc),
             .out_valid(), .d(dd), .flags(f64_l[gi]),
             .mul_a(mfa64[gi]), .mul_b(mfb64[gi]),
@@ -1347,6 +1365,13 @@ module cft_engine_stream #(
         cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
+        logic sev; logic [127:0] sed;
+        cft_seedop #(.EXP_W(15), .MAN_W(112)) u_seed (
+            .op(op_r), .a(sa), .valid(sev), .d(sed));
+        logic bv_m; logic [127:0] bd_m; logic [4:0] bf_m;
+        assign bv_m = bv | sev;
+        assign bd_m = sev ? sed : bd;
+        assign bf_m = sev ? 5'b0 : bf;
         logic         rv;
         logic [127:0] ra, rc;
         assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP128) &&
@@ -1360,7 +1385,7 @@ module cft_engine_stream #(
             .clk(ap_clk), .rst_n(ap_rst_n),
             .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP128))),
           .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
             .a(ra),
             .b(is_reduce ? {1'b0, 15'h3FFF, 112'd0} : fb),
             .c(rc),
@@ -1396,6 +1421,13 @@ module cft_engine_stream #(
       cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
           .op(op_r), .a(a_q), .b(b_q), .c(c_q),
           .valid(bv), .d(bd), .flags(bf));
+      logic sev; logic [255:0] sed;
+      cft_seedop #(.EXP_W(19), .MAN_W(236)) u_seed (
+          .op(op_r), .a(a_q), .valid(sev), .d(sed));
+      logic bv_m; logic [255:0] bd_m; logic [4:0] bf_m;
+      assign bv_m = bv | sev;
+      assign bd_m = sev ? sed : bd;
+      assign bf_m = sev ? 5'b0 : bf;
       logic rv256;
       assign rv256 = is_reduce && (prec_r == PREC_FP256) && red_add_valid;
 
@@ -1406,7 +1438,7 @@ module cft_engine_stream #(
           .in_valid(is_reduce ? rv256
                               : (ex_valid && (prec_r == PREC_FP256))),
           .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv), .byp_d(bd), .byp_f(bf),
+          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
           .a(is_reduce ? red_add_a : w_fa),
           .b(is_reduce ? {1'b0, 19'h3FFFF, 236'd0} : w_fb),
           .c(is_reduce ? red_add_b : w_fc),

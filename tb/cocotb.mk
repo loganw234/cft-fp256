@@ -21,6 +21,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_mulfrac.sv \
     $(RTLDIR)/cft_reduce_acc.sv \
     $(RTLDIR)/cft_normseg.sv \
+    $(RTLDIR)/cft_seedop.sv \
     $(RTLDIR)/cft_engine.sv \
     $(RTLDIR)/cft_engine_stream.sv \
     $(RTLDIR)/cft_krnl.sv \
@@ -34,10 +35,12 @@ VERILOG_SOURCES = \
     $(TBDIR)/wrappers/tb_simpleops.sv \
     $(TBDIR)/wrappers/tb_normseg.sv \
     $(TBDIR)/wrappers/tb_normshare.sv \
+    $(TBDIR)/wrappers/tb_seedop.sv \
     $(TBDIR)/wrappers/tb_reduce_acc.sv
 
 ifeq ($(SIM),icarus)
-COMPILE_ARGS += -g2012
+# -I: cft_seedop.sv includes the generated ROM from rtl/.
+COMPILE_ARGS += -g2012 -I$(RTLDIR)
 endif
 
 ifeq ($(SIM),verilator)
@@ -54,7 +57,7 @@ ifeq ($(SIM),verilator)
 # design stops working. Auditing them one at a time, with the vector
 # suite as the gate, is its own task and should not ride along with a
 # change to the normaliser.
-EXTRA_ARGS += -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
+EXTRA_ARGS += -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -I$(RTLDIR)
 endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim

@@ -192,7 +192,10 @@ module cft_krnl #(
       // Write this as a bit per group and not as a number: it was
       // briefly 8'b0010_1111, which adds reduction and silently drops
       // integer, and eight working opcodes stopped being reachable.
-      .op_caps({2'b00,      // [7:6] conversion, divide/sqrt - not built
+      .op_caps({1'b0,       // [7]   conversion - not built
+                1'b1,       // [6]   divide/sqrt (seed opcodes; the
+                            //       full operations are FMA-composed
+                            //       sequences in the host library)
                 1'b1,       // [5]   reduction
                 1'b1,       // [4]   integer
                 1'b1,       // [3]   predicate + select

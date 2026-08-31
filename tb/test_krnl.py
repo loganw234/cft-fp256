@@ -30,6 +30,7 @@ from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE,
     OP_FMA, OP_ADD, OP_SUB, OP_MUL, OP_NAMES, SIMPLE_OPS,
     OP_COPYSIGN, OP_MAX, OP_MINNUM, OP_SELECT, OP_CMPLT,
+    OP_RECIP_SEED, OP_RSQRT_SEED,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES,
     compute, vectors,
 )
@@ -60,8 +61,9 @@ OP_GROUPS = {
     3: "predicate+select",
     4: "integer",
     5: "reduction",
+    6: "divide/sqrt",   # seed opcodes 26/27; sequences composed on host
 }
-OP_GROUPS_NOT_BUILT = {6: "divide/sqrt", 7: "conversion"}
+OP_GROUPS_NOT_BUILT = {7: "conversion"}
 
 
 def check_op_groups(caps):
@@ -254,6 +256,16 @@ async def krnl_end_to_end(dut):
     # that bank's own operand. Run it on every rung, not just two.
     await run_op(dut, axil, ram, FP64, OP_SELECT, 16, seed=215)
     await run_op(dut, axil, ram, FP128, OP_SELECT, 8, seed=216)
+
+    # The divide/sqrt seeds ride the same bypass sideband but from a
+    # different module (cft_seedop), so the simpleops runs above vouch
+    # for none of their wiring. One run per rung. Both opcodes are
+    # quiet by specification, so FLAGS must come back zero even though
+    # gen_stream salts the operands with specials.
+    await run_op(dut, axil, ram, FP32, OP_RECIP_SEED, 32, seed=217)
+    await run_op(dut, axil, ram, FP64, OP_RSQRT_SEED, 16, seed=218)
+    await run_op(dut, axil, ram, FP128, OP_RSQRT_SEED, 8, seed=219)
+    await run_op(dut, axil, ram, FP256, OP_RECIP_SEED, 4, seed=220)
 
     # ---- across a 4KB page -------------------------------------------
     #
