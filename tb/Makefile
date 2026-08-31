@@ -11,10 +11,10 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops reduceacc \
-        reduce krnl quarter faults clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normprobe \
+        reduceacc reduce krnl quarter faults clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops reduceacc reduce \
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg reduceacc reduce \
      krnl quarter faults
 
 # The fractured significand array, scored against exact integer
@@ -35,9 +35,6 @@ mulshare:
 		MODULE=test_mulshare SIM_BUILD=sim_build/mulshare \
 		COCOTB_RESULTS_FILE=sim_build/mulshare/results.xml
 
-# The streaming reduction accumulator against the model's tree. Every
-# length from 1 to 40, because the shape varies with n and powers of two
-# are the easy case.
 # Equivalence again, for the block that is not arithmetic: the flat
 # case(op) form frozen at 7ab02b3 beside the eight-source form that
 # replaced it, at all four rungs from one operand word. Area was the
@@ -48,6 +45,37 @@ simpleops:
 		MODULE=test_simpleops SIM_BUILD=sim_build/simpleops \
 		COCOTB_RESULTS_FILE=sim_build/simpleops/results.xml
 
+# One segmented normalise shifter against the fifteen private ones it
+# would replace. Geometry says 2,706 bits of ladder collapse into 717;
+# this says whether the bits come out the same. Area is a separate
+# question and hw/synth_shiftcmp.tcl answers it - cft_mulfrac was
+# correct and still did not pay.
+#
+# PINNED TO VERILATOR, and it is the only target that is. The DUT is
+# 720 bits by twenty stages of multiplexer plus fifteen reference
+# shifters beside it; Icarus spends over three hours on the sweep and
+# Verilator does it in one second. It has its own variable rather than
+# reading SIM, so `make sim` gets the fast simulator here and the
+# default everywhere else; to check the two agree, run
+# `make NORMSEG_SIM=icarus normseg` and bring a book.
+NORMSEG_SIM ?= verilator
+
+normseg:
+	$(MAKE) -f cocotb.mk SIM=$(NORMSEG_SIM) TOPLEVEL=tb_normseg \
+		MODULE=test_normseg SIM_BUILD=sim_build/normseg \
+		COCOTB_RESULTS_FILE=sim_build/normseg/results.xml
+
+# Diagnostic probe for tb_normseg, not part of `make sim`. Drives one
+# known vector into a quiet pipeline and prints both halves every
+# cycle, which pins latency and mode handling together.
+normprobe:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_normseg \
+		MODULE=test_normseg_probe SIM_BUILD=sim_build/normprobe \
+		COCOTB_RESULTS_FILE=sim_build/normprobe/results.xml
+
+# The streaming reduction accumulator against the model's tree. Every
+# length from 1 to 40, because the shape varies with n and powers of two
+# are the easy case.
 reduceacc:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_reduce_acc \
 		MODULE=test_reduce_acc SIM_BUILD=sim_build/reduceacc \

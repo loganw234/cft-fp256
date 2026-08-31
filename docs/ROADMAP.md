@@ -636,6 +636,66 @@ block that bypasses the arithmetic. The ratio is recorded so the work
 can be scoped; it should not be started without first measuring the
 shifters inside the pipe the way `cft_simpleops` was measured.
 
+#### Both halves measured (2026-08-31)
+
+**What the shifters cost.** By ablation - freezing the four variable
+shift amounts to constants so the ladders and their sticky masks
+collapse to wiring, and differencing whole-kernel OOC synthesis. The
+LZC is left alive, so what this isolates is the shifts:
+
+| tree | LUT | vs base | share |
+|---|---|---|---|
+| base | 117,530 | | |
+| alignment frozen | 95,228 | **-22,302** | 19.0% |
+| normalise frozen | 101,997 | **-15,533** | 13.2% |
+| both frozen | 79,742 | **-37,788** | **32.2%** |
+
+The two are additive to within 47 LUT of each other, which is the
+internal check that the ablations isolate what they claim. `base`
+reproduced to the digit across two separate batches. **A third of the
+kernel is barrel shifter**, three times what the ladder widths alone
+predicted, because depth counts as well as width.
+
+**What sharing recovers.** `rtl/cft_normseg.sv` is the segmented
+version of the normalise shifter, and `hw/synth_shiftcmp.tcl` measures
+it against the fifteen it replaces, hierarchy preserved:
+
+| | LUT | FF |
+|---|---|---|
+| fifteen private | 10,405 | 5,475 |
+| one shared | **5,269** | **1,490** |
+| saving | 5,136 (**1.97x**) | 3,985 |
+
+**1.97x, not the 3.77x the bit counts predicted, and the per-instance
+numbers say why.** A private shifter costs 0.46 LUT per stage-bit at
+every rung - fp32 253, fp64 558, fp128 1,411, fp256 3,327, all within
+4% of that constant. The shared ladder costs 0.73. It pays fp256's
+full ten-stage depth in every mode where fp32 privately needs seven,
+and segmentation itself costs about 1.6x per stage-bit.
+
+That 1.6x is not a coding artifact. It was rewritten to split the
+boundary gate into explicit per-bit cases so the constant masks could
+not hide from the optimiser, and the result was **5,269 LUT before and
+after** - Vivado folds them either way.
+
+Integration adds a gather multiplexer this comparison does not
+include: the shared input must select among four banks per bit, about
+720 LUT. So the realistic figure is **~4,400 LUT and ~4,000 FF, 3.8%
+of the kernel**, for the normaliser alone.
+
+**Whether to spend it.** The pressure is off - the quad closes at
+130 MHz with 30% of the device free - so this is no longer about
+making a build fit. It is about the FIFTH TILE. At 121,158 LUT per
+tile plus the 123,897-LUT shell, five tiles is 83.8% of the device;
+take ~10% off the tile (the normaliser plus the aligner, the same
+trick against a 22,302-LUT target) and five tiles is ~76.8%, which is
+plausibly routable for 25% more throughput.
+
+The module is built, proven against 2,977 comparisons at every legal
+shift and every rung, and measured. What is NOT done is `EXT_NORM`
+plumbing through `cft_fpfma_pipe`, which is the bit-exact core and a
+different risk class from everything above it.
+
 **What none of this buys: low-precision throughput.** Lane count is
 pinned by the 256-bit beat - 8x32, 4x64, 2x128 and 1x256 all consume
 exactly one beat - so freed area cannot become more fp32 lanes. It
