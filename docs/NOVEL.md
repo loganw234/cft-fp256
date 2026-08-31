@@ -212,15 +212,25 @@ been done once, in a custom format; a CONFORMANT binary256 unit has
 not.
 
 **The fp128 rung is rarer company than expected, too.** Hardware
-binary128 exists in exactly three commercial families, and none of
-the three does what this tile's fp128 bank does. IBM z13+ computes
-quad in the decimal engine's 140-bit dataflow but has NO quad FMA
-(verified against the z/Architecture Principles of Operation:
-MULTIPLY AND ADD exists only for short and long formats). NEC
-SX-Aurora has scalar quad add/sub/mul only - no FMA, no divide, and
-its own manual says subnormals "are cut down to zero." POWER9/10 has
-the full set including FMA (cracked into two passes through a
-12-stage pipe). In open RTL the strongest is CORE-V Wally's Q
+binary128 exists in exactly three commercial families - IBM z
+(continuously since the S/390 G5 in 1998, multi-pass through the BFU
+until z13 moved it onto the decimal engine's 140-bit pipelined
+dataflow), IBM POWER (9 onward), and NEC SX-Aurora - and their
+capabilities are narrower than they look. IBM z has NO SCALAR quad
+FMA (verified against the z/Architecture Principles of Operation:
+scalar MULTIPLY AND ADD exists only for short and long formats);
+z14 (2017) added a binary128 FMA in the VECTOR instruction set
+(WFMAXB family, single-element, confirmed in LLVM's SystemZ backend:
+"We only have fused f128 multiply-addition on vector registers").
+NEC SX-Aurora has scalar quad add/sub/mul only - no FMA, no divide,
+and its own manual says subnormals "are cut down to zero." POWER9/10
+has the full set including FMA - each QP instruction is a single
+internal op (the User's Manual's cracked/expanded column reads "-"
+for all of them), with multiply/FMA occupying the 12-stage pipe for
+12 cycles, i.e. multi-pass but not cracked; quad FMA throughput is
+52x worse than double FMA on the same core. z14 and POWER9 both
+landed in 2017, so neither can safely be called the first hardware
+binary128 FMA. In open RTL the strongest is CORE-V Wally's Q
 configuration; Berkeley HardFloat is tested at quad; robfinch/Float
 has a full binary128 module set with, per its author, "rudimentary
 testing."
@@ -248,6 +258,15 @@ the part this design refuses to leave.
 **What we could not find:** any of - a binary256 arithmetic unit; an
 octuple-precision FMA in any format; an ISA extension beyond
 binary128 for binary FP; a taped-out chip or patent claiming either.
+One paper qualifier: Synopsys DesignWare's DW_fp_* ASIC synthesis
+components have a REPORTED (login-walled, not independently verified)
+parameter range of sig_width 2-253 / exp_width 3-31, which would
+admit binary256 geometry on paper. Synopsys advertises nothing above
+double, no characterisation at such widths is public, and a legal
+parameter range is not an implementation - but "no vendor IP reaches
+fp256" should be read with that asterisk, where "no vendor FPGA IP
+reaches even fp128" (AMD PG060 verbatim: "binary128 (Quadruple
+Format) - not supported"; Intel caps at 64 bits total) needs none.
 GitHub code search for RTL with binary256 geometry returns one
 untested 445-line file (no FMA, non-IEEE rounding, flushes
 subnormals) and one format-decoder. Searches that returned zero are
