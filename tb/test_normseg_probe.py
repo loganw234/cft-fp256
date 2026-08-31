@@ -81,3 +81,34 @@ async def probe(dut):
                 sorted(i for i in range(WT) if (shared >> i) & 1) or "0",
                 sorted(i for i in range(WT) if (ref >> i) & 1) or "0",
             )
+
+
+@cocotb.test()
+async def probe_dir(dut):
+    """One right shift through the BIDIR instance, watched per cycle."""
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+    dut.mode.value = 0
+    dut.dir_v.value = 0
+    await quiet(dut)
+
+    # ones in every fp32 lane, shift right 64, all lanes right
+    din = 0
+    for lane in range(8):
+        din |= ((1 << 78) - 1) << (lane * SLOTW)
+    dut.din.value = din
+    dut.csh_v.value = pack([1] * 8, 4)   # csh=1 -> 64
+    dut.fsh_v.value = pack([0] * 8, 6)
+    dut.dir_v.value = 0xFF
+    await RisingEdge(dut.clk)
+    dut.din.value = 0
+    dut.csh_v.value = 0
+    dut.fsh_v.value = 0
+    dut.dir_v.value = 0
+
+    for cyc in range(1, 5):
+        await RisingEdge(dut.clk)
+        b = int(dut.dout_b.value)
+        r = int(dut.r0.value)
+        lane0_b = (b >> 0) & ((1 << 90) - 1)
+        lane0_r = (r >> 0) & ((1 << 90) - 1)
+        dut._log.info("cycle %d lane0 bidir=%023x ref=%023x", cyc, lane0_b, lane0_r)

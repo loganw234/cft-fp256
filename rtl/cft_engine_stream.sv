@@ -1083,9 +1083,12 @@ module cft_engine_stream #(
 
   generate
     if (USE_FUSED_NORM) begin : g_normseg
+      logic ns_dir0 [0:7];
+      always_comb for (int i = 0; i < 8; i++) ns_dir0[i] = 1'b0;
+
       cft_normseg #(.PMAX(237), .SLOTS(8)) u_normseg (
           .clk(ap_clk), .mode(prec_r), .din(ns_din),
-          .csh(ns_csh), .fsh(ns_fsh), .dout(ns_dout));
+          .csh(ns_csh), .fsh(ns_fsh), .dir(ns_dir0), .dout(ns_dout));
 
       // Pack whichever bank is live, by the same argument that makes
       // the fused multiplier's mode safe: prec_r is snapshot at start

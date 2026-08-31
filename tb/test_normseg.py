@@ -110,6 +110,7 @@ class Bench:
         dut.mode.value = mode
         mask = live_mask(mode)
         pending = deque()
+        dut.dir_v.value = 0
 
         # A vector written now is captured by the NEXT edge, and both
         # halves have two register stages, so the output settling after
@@ -147,6 +148,16 @@ class Bench:
         dut = self.dut
         got = int(getattr(dut, "dout").value) & mask
         want = int(getattr(dut, f"r{mode}").value) & mask
+        # The bidirectional build of the same ladder, driven left: the
+        # BIDIR generate must collapse to the identical function, and
+        # this holds it to that at every vector of every test.
+        got_b = int(getattr(dut, "dout_b").value) & mask
+        if got_b != got:
+            raise AssertionError(
+                f"{MODE_NAME[mode]} {note}: BIDIR=1 at dir=0 diverges from "
+                f"the left-only ladder\n"
+                f"  left  = 0x{got:0180x}\n"
+                f"  bidir = 0x{got_b:0180x}")
         if got != want:
             din, cshs, fshs = vec
             diff = got ^ want
@@ -280,3 +291,82 @@ async def independent_lanes(dut):
 
     dut._log.info("independent lanes: %d comparisons over %d vectors",
                   b.checks, budget * 4)
+
+
+@cocotb.test()
+async def directions(dut):
+    """The aligner contract: per-lane left OR right, neighbours free to
+    disagree, boundaries zero-filling in both orientations.
+
+    The reference shifts each lane's window right with a plain `>>`, so
+    the shared ladder's right path is held to the same bits the private
+    aligner would produce. The leak this exists to catch is the mirror
+    of the left one: a right shift pulling the HIGHER neighbour's bits
+    down across a slot boundary, which only shows when neighbours hold
+    different data - `id` patterns name the offender.
+    """
+    await start(dut)
+    rng = random.Random(int(os.environ.get("CFT_SEED", "11")) + 3)
+    chk = Bench(dut)
+    budget = int(os.environ.get("CFT_RANDOM", "400"))
+
+    for mode in range(4):
+        lanes = LN[mode]
+        mask = live_mask(mode)
+        pending = deque()
+        dut.mode.value = mode
+
+        vectors = []
+        # Directed: every-lane-right at boundary-crossing amounts with
+        # loud neighbours, alternating directions, then random.
+        for total in (1, 63, 64, 65, NW[mode] - 1):
+            vectors.append(("ones", [total] * lanes, (1 << lanes) - 1))
+            vectors.append(("id",   [total] * lanes, (1 << lanes) - 1))
+            vectors.append(("id",   [total] * lanes,
+                            sum(1 << i for i in range(0, lanes, 2))))
+        for _ in range(budget // 4):
+            st = rng.choice(["random", "ones", "id", "high"])
+            sh = [rng.randrange(NW[mode]) for _ in range(lanes)]
+            vectors.append((st, sh, rng.getrandbits(lanes)))
+
+        for st, shifts, dirs in vectors:
+            din = 0
+            for lane in range(lanes):
+                din |= lane_word(rng, mode, lane, st) << (lane * pitch(mode))
+            cshs = [0] * SLOTS
+            fshs = [0] * SLOTS
+            for lane in range(lanes):
+                c, f = split_amount(shifts[lane])
+                cshs[lane] = c
+                fshs[lane] = f
+            dut.din.value = din
+            dut.csh_v.value = pack(cshs, 4)
+            dut.fsh_v.value = pack(fshs, 6)
+            dut.dir_v.value = dirs
+            pending.append((din, shifts, dirs))
+            await RisingEdge(dut.clk)
+            await Timer(SAMPLE_NS, units="ns")
+            if len(pending) >= LATENCY:
+                _dircheck(dut, chk, mode, mask, pending.popleft())
+        while pending:
+            await RisingEdge(dut.clk)
+            await Timer(SAMPLE_NS, units="ns")
+            _dircheck(dut, chk, mode, mask, pending.popleft())
+
+    dut._log.info("directions: %d comparisons", chk.checks)
+
+
+def _dircheck(dut, chk, mode, mask, vec):
+    got = int(dut.dout_b.value) & mask
+    want = int(getattr(dut, f"r{mode}").value) & mask
+    if got != want:
+        din, shifts, dirs = vec
+        diff = got ^ want
+        lane = (diff.bit_length() - 1) // pitch(mode)
+        raise AssertionError(
+            f"{MODE_NAME[mode]} directions: highest differing bit in lane {lane}\n"
+            f"  shifts = {shifts}  dirs = 0b{dirs:08b}\n"
+            f"  din   = 0x{din:0180x}\n"
+            f"  bidir = 0x{got:0180x}\n"
+            f"  ref   = 0x{want:0180x}")
+    chk.checks += 1

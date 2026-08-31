@@ -67,9 +67,12 @@ module tb_normshare #(
   logic [3:0]    nrm_csh [0:SLOTS-1];
   logic [5:0]    nrm_fsh [0:SLOTS-1];
 
+  logic nrm_dir0 [0:SLOTS-1];
+  always_comb for (int l = 0; l < SLOTS; l++) nrm_dir0[l] = 1'b0;
+
   cft_normseg #(.PMAX(237), .SLOTS(SLOTS)) u_normseg (
       .clk(clk), .mode(mode), .din(nrm_din),
-      .csh(nrm_csh), .fsh(nrm_fsh), .dout(nrm_dout));
+      .csh(nrm_csh), .fsh(nrm_fsh), .dir(nrm_dir0), .dout(nrm_dout));
 
   // Per-lane exports from the shared halves, waiting to be packed.
   logic [NW32-1:0]  v32  [0:7];

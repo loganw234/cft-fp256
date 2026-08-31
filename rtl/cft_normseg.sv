@@ -97,14 +97,39 @@ module cft_normseg #(
     // How many of the ten levels run BEFORE the register. See "WHERE THE
     // REGISTER GOES" in the header - this is a timing knob, not a
     // correctness one, and every value from 1 to 9 computes the same
-    // function.
-    parameter int SPLIT = 4
+    // function (the equivalence bench passes at 1, 2, 3, 4, 5, 7, 9).
+    //
+    // 1 is measured, not guessed. Swept at the kernel against the
+    // unshared baseline's +2.456 ns:
+    //
+    //   SPLIT   LUT       WNS      levels   critical path
+    //     -   115,903   +2.456       21     S13 rounding
+    //     1   110,780   +2.474       21     S13 rounding
+    //     2   110,612   +2.051       23     this ladder
+    //     3   110,532   +2.141       22     this ladder
+    //     4   110,940   +2.038       22     this ladder
+    //
+    // Only at 1 does the ladder stop being critical and hand the clock
+    // back to the rounding stage, which is what makes sharing free
+    // rather than merely cheap. 2 and 3 are ~250 LUT smaller and cost
+    // 0.4 ns; that is the wrong side of the trade.
+    parameter int SPLIT = 1,
+    // Per-lane shift DIRECTION. The normaliser only ever shifts left,
+    // and with BIDIR=0 the dir port is ignored and the generated logic
+    // is exactly the left-only ladder. The ALIGNER shifts either way -
+    // left when the addend anchors, right when the product does, and
+    // adjacent lanes disagree freely - so BIDIR=1 gives each slot a
+    // direction and the boundary masks exist in both orientations:
+    // left must not pull from below the group, right must not pull
+    // from above it, and both fill zero at their own edge.
+    parameter bit BIDIR = 1'b0
 ) (
     input  logic             clk,
     input  logic [1:0]       mode,          // 0 fp32, 1 fp64, 2 fp128, 3 fp256
     input  logic [WT-1:0]    din,           // lanes packed at slot pitch
     input  logic [3:0]       csh [0:SLOTS-1],   // coarse, in 64-bit granules
     input  logic [5:0]       fsh [0:SLOTS-1],   // fine, 0..63
+    input  logic             dir [0:SLOTS-1],   // per lane: 0 left, 1 right (BIDIR only)
     output logic [WT-1:0]    dout
 );
 
@@ -179,8 +204,12 @@ module cft_normseg #(
   // flip-flops and buys independence from that argument.
   logic [LO-1:0] amt_lo_r [0:SLOTS-1];
   logic [1:0]    mode_r;
+  logic          dir_r [0:SLOTS-1];
   always_ff @(posedge clk) begin
-    for (int l = 0; l < SLOTS; l++) amt_lo_r[l] <= amt[l][LO-1:0];
+    for (int l = 0; l < SLOTS; l++) begin
+      amt_lo_r[l] <= amt[l][LO-1:0];
+      dir_r[l]    <= dir[l];
+    end
     mode_r <= mode;
   end
 
@@ -201,10 +230,14 @@ module cft_normseg #(
   // cycle later and must use ITS operand's amount.
   logic [SPLIT-1:0] slot_hi [0:SLOTS-1];
   logic [LO-1:0]    slot_lo [0:SLOTS-1];
+  logic             slot_dhi [0:SLOTS-1];   // direction, first stage
+  logic             slot_dlo [0:SLOTS-1];   // direction, second stage
   always_comb begin
     for (int s = 0; s < SLOTS; s++) begin
-      slot_hi[s] = amt[s >> mode][NST-1:LO];
-      slot_lo[s] = amt_lo_r[s >> mode_r];
+      slot_hi[s]  = amt[s >> mode][NST-1:LO];
+      slot_lo[s]  = amt_lo_r[s >> mode_r];
+      slot_dhi[s] = BIDIR ? dir[s >> mode]     : 1'b0;
+      slot_dlo[s] = BIDIR ? dir_r[s >> mode_r] : 1'b0;
     end
   end
 
@@ -222,6 +255,20 @@ module cft_normseg #(
       v  = '0;
       for (int i = 0; i < WT; i++) v[i] = ((i % gw) >= (1 << k));
       allow_mask = v;
+    end
+  endfunction
+
+  // The mirror image, for right shifts: bit i may take from i + 2^k
+  // only when the source is still inside i's own group.
+  function automatic logic [WT-1:0] allow_mask_r(input int slots_per_lane,
+                                                 input int k);
+    logic [WT-1:0] v;
+    int gw;
+    begin
+      gw = slots_per_lane * SLOTW;
+      v  = '0;
+      for (int i = 0; i < WT; i++) v[i] = ((i % gw) < (gw - (1 << k)));
+      allow_mask_r = v;
     end
   endfunction
 
@@ -255,43 +302,38 @@ module cft_normseg #(
       localparam logic [WT-1:0] A2 = allow_mask(4, K);
       localparam logic [WT-1:0] A3 = allow_mask(8, K);
 
+      localparam logic [WT-1:0] R0 = allow_mask_r(1, K);
+      localparam logic [WT-1:0] R1 = allow_mask_r(2, K);
+      localparam logic [WT-1:0] R2 = allow_mask_r(4, K);
+      localparam logic [WT-1:0] R3 = allow_mask_r(8, K);
+
       for (gb = 0; gb < WT; gb = gb + 1) begin : g_bit
         localparam int S = gb / SLOTW;
-        // The four masks are elaboration constants, so whether this bit
-        // needs a boundary gate at all is known now, and the three cases
-        // are split out explicitly.
-        //
-        // This is for the reader, NOT for area. It was written to
-        // recover the gap between this ladder at 0.73 LUT per stage-bit
-        // and a plain shifter at 0.46, on the theory that selecting the
-        // whole 720-bit mask with a case(mode) hid the constants from
-        // the optimiser. It did not: measured before and after, the
-        // module is 5,269 LUT either way. Vivado folds the masks
-        // regardless, and the 1.6x is what segmentation actually costs.
-        localparam bit [3:0] AM = {A3[gb], A2[gb], A1[gb], A0[gb]};
-        if (gb < SH) begin : g_below
-          // The source is below the ladder's own base, so a stage that
-          // shifts fills zero here and a stage that does not passes
-          // through.
-          assign cs[gk+1][gb] = slot_hi[S][K-LO] ? 1'b0 : cs[gk][gb];
-        end else if (AM == 4'b1111) begin : g_free
-          // Interior in every mode: a plain 2:1 mux, no gate.
-          assign cs[gk+1][gb] = slot_hi[S][K-LO] ? cs[gk][gb-SH]
-                                                 : cs[gk][gb];
-        end else if (AM == 4'b0000) begin : g_edge
-          // Crosses a boundary in every mode: the source is never
-          // reachable, so shifting always fills zero.
-          assign cs[gk+1][gb] = slot_hi[S][K-LO] ? 1'b0 : cs[gk][gb];
-        end else begin : g_mux
-          // Mode-dependent. Three cases, not two: not shifting passes
-          // through; shifting takes from below; shifting ACROSS A
-          // BOUNDARY fills zero. Collapsing the last two into one
-          // enable is the obvious mistake and it leaks the neighbour's
-          // unshifted bits.
-          assign cs[gk+1][gb] = slot_hi[S][K-LO]
-                                  ? (AM[mode] ? cs[gk][gb-SH] : 1'b0)
-                                  : cs[gk][gb];
+        // The masks are elaboration constants: whether this bit can
+        // reach its left or right source in each mode is known now, and
+        // Vivado folds the AM[mode] selects (measured: writing the
+        // folded cases out by hand changed nothing - 5,269 LUT either
+        // way). Three outcomes per direction: not shifting passes
+        // through, shifting takes from the source, shifting ACROSS A
+        // BOUNDARY fills zero - and collapsing the last two into one
+        // enable is the mistake that leaks a neighbour's unshifted
+        // bits.
+        localparam bit [3:0] AML = {A3[gb], A2[gb], A1[gb], A0[gb]};
+        localparam bit [3:0] AMR = {R3[gb], R2[gb], R1[gb], R0[gb]};
+        logic sl, sr;
+        if (gb >= SH) begin : g_sl
+          assign sl = AML[mode] ? cs[gk][gb-SH] : 1'b0;
+        end else begin : g_sl0
+          assign sl = 1'b0;    // below the ladder base: zero-fill
         end
+        if (BIDIR && (gb + SH < WT)) begin : g_sr
+          assign sr = AMR[mode] ? cs[gk][gb+SH] : 1'b0;
+        end else begin : g_sr0
+          assign sr = 1'b0;    // above the top, or a left-only ladder
+        end
+        assign cs[gk+1][gb] = slot_hi[S][K-LO]
+                                ? (slot_dhi[S] ? sr : sl)
+                                : cs[gk][gb];
       end
     end
 
@@ -304,21 +346,29 @@ module cft_normseg #(
       localparam logic [WT-1:0] A2 = allow_mask(4, K);
       localparam logic [WT-1:0] A3 = allow_mask(8, K);
 
+      localparam logic [WT-1:0] R0 = allow_mask_r(1, K);
+      localparam logic [WT-1:0] R1 = allow_mask_r(2, K);
+      localparam logic [WT-1:0] R2 = allow_mask_r(4, K);
+      localparam logic [WT-1:0] R3 = allow_mask_r(8, K);
+
       for (gb = 0; gb < WT; gb = gb + 1) begin : g_bit
         localparam int S = gb / SLOTW;
-        localparam bit [3:0] AM = {A3[gb], A2[gb], A1[gb], A0[gb]};
-        if (gb < SH) begin : g_below
-          assign fs[gk+1][gb] = slot_lo[S][K] ? 1'b0 : fs[gk][gb];
-        end else if (AM == 4'b1111) begin : g_free
-          assign fs[gk+1][gb] = slot_lo[S][K] ? fs[gk][gb-SH]
-                                               : fs[gk][gb];
-        end else if (AM == 4'b0000) begin : g_edge
-          assign fs[gk+1][gb] = slot_lo[S][K] ? 1'b0 : fs[gk][gb];
-        end else begin : g_mux
-          assign fs[gk+1][gb] = slot_lo[S][K]
-                                  ? (AM[mode_r] ? fs[gk][gb-SH] : 1'b0)
-                                  : fs[gk][gb];
+        localparam bit [3:0] AML = {A3[gb], A2[gb], A1[gb], A0[gb]};
+        localparam bit [3:0] AMR = {R3[gb], R2[gb], R1[gb], R0[gb]};
+        logic sl, sr;
+        if (gb >= SH) begin : g_sl
+          assign sl = AML[mode_r] ? fs[gk][gb-SH] : 1'b0;
+        end else begin : g_sl0
+          assign sl = 1'b0;
         end
+        if (BIDIR && (gb + SH < WT)) begin : g_sr
+          assign sr = AMR[mode_r] ? fs[gk][gb+SH] : 1'b0;
+        end else begin : g_sr0
+          assign sr = 1'b0;
+        end
+        assign fs[gk+1][gb] = slot_lo[S][K]
+                                ? (slot_dlo[S] ? sr : sl)
+                                : fs[gk][gb];
       end
     end
   endgenerate
