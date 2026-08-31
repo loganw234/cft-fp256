@@ -435,6 +435,132 @@ def sqrt(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
     return round_pack(fmt, 0, mres, eres, rnd)
 
 
+# ---- seed operations for the composed divide and square root --------
+#
+# div and sqrt above are the CONTRACT operations - what a caller gets.
+# The implementation route is the CFT_DOT one: the hardware supplies
+# only what FMA cannot, and libcft composes the rest as a fixed
+# sequence of ordinary operations (Newton iterations under RNE, then a
+# Markstein-style exact-residual correction rounded once in the
+# caller's attribute). What FMA cannot supply is the STARTING POINT,
+# so these two opcodes exist: an initial approximation of 1/x and of
+# 1/sqrt(x), from a 2^9-entry table plus exponent arithmetic.
+#
+# The definition below IS the table. The hardware ROM is generated
+# from these functions - never transcribed - and the tests assert the
+# error bound the Newton iteration counts are derived from:
+# relative error < 2^-8.5 everywhere.
+#
+# Both are quiet: no flags, ever, like the sign operations. They are
+# helpers on the way to a rounded result, not results. Both ignore the
+# rounding attribute; the pack of the (10-bit-exact) seed value into a
+# subnormal result at the range edges is defined as round-to-nearest-
+# even and is part of the spec, not a mode choice.
+
+SEED_INDEX_BITS = 9
+SEED_TABLE_SIZE = 1 << SEED_INDEX_BITS
+
+
+def _seed_recip_entry(i: int) -> int:
+    """Table entry: nearest integer to 2^18 / (1 + (i + 1/2)/2^9),
+    ties (impossible here, asserted by the tests) would round to even.
+    Entries lie in (2^8, 2^9]."""
+    num = 1 << (18 + 10)                 # 2^18 * 2^10
+    den = (1 << 10) + (i << 1) + 1       # 2^10 + 2i + 1  (= mid * 2^10)
+    q, r = divmod(num, den)
+    if 2 * r > den or (2 * r == den and (q & 1)):
+        q += 1
+    return q
+
+
+def _seed_rsqrt_entry(j: int) -> int:
+    """Table entry j = (odd_exponent << 9) | i: nearest integer to
+    2^17 / sqrt(mid), mid = (1 + (i + 1/2)/2^9) * 2^odd. Computed by
+    exact integer comparison against the squared midpoint - no
+    floating point anywhere in the spec. Entries lie in [2^16/2, 2^17)."""
+    odd = j >> SEED_INDEX_BITS
+    i = j & (SEED_TABLE_SIZE - 1)
+    # mid = m2 / 2^10 with m2 = (2^10 + 2i + 1) << odd
+    m2 = ((1 << 10) + (i << 1) + 1) << odd
+    # want q = round(2^17 / sqrt(m2 / 2^10)) = round(2^22 / sqrt(m2))
+    # floor first: largest q with q^2 * m2 <= 2^44
+    target = 1 << 44
+    q = math.isqrt(target // m2)
+    while (q + 1) * (q + 1) * m2 <= target:
+        q += 1
+    # round: up when (q + 1/2)^2 * m2 < 2^44, i.e. (2q+1)^2 * m2 < 2^46
+    if (2 * q + 1) * (2 * q + 1) * m2 < (1 << 46):
+        q += 1
+    return q
+
+
+def _seed_pack(fmt: FpFormat, sign: int, m: int, e: int) -> int:
+    """round_pack without the flags: seeds are quiet by specification."""
+    bits, _ = round_pack(fmt, sign, m, e, RND_RNE)
+    return bits
+
+
+def recip_seed(fmt: FpFormat, xa: int, *_):
+    """(bits, 0): an approximation of 1/a, relative error < 2^-8.5.
+
+    NaN -> canonical qNaN (quiet). +/-inf -> +/-0, +/-0 -> +/-inf,
+    which lets a composed divide inherit the right special without a
+    branch. Finite nonzero, including subnormal, is value-based: the
+    operand is normalised first, so the seed's accuracy does not decay
+    at the bottom of the range. Range-edge results (1/x outside the
+    finite range, or subnormal) saturate to infinity or round to the
+    subnormal grid; the library sequences prescale so neither is ever
+    hit mid-sequence, but the definition is total.
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return qnan_bits(fmt), 0
+    if ua.kind == INF:
+        return zero_bits(fmt, ua.sign), 0
+    if ua.kind == ZERO:
+        return inf_bits(fmt, ua.sign), 0
+    # normalise: value = f * 2^E with f in [1, 2)
+    nbits = ua.m.bit_length()
+    E = ua.e + nbits - 1
+    frac_top = (ua.m << (SEED_INDEX_BITS + 1)) >> nbits  # 1.iiiiiiiii
+    i = frac_top & (SEED_TABLE_SIZE - 1)
+    r = _seed_recip_entry(i)
+    # 1/(f * 2^E) ~ (r / 2^18) * 2^-E
+    e_out = -E - 18
+    if e_out + r.bit_length() - 1 > fmt.emax:
+        return inf_bits(fmt, ua.sign), 0
+    return _seed_pack(fmt, ua.sign, r, e_out), 0
+
+
+def rsqrt_seed(fmt: FpFormat, xa: int, *_):
+    """(bits, 0): an approximation of 1/sqrt(a), relative error
+    < 2^-8.5. Quiet, like recip_seed.
+
+    NaN -> qNaN. +inf -> +0, +0 -> +inf, -0 -> -inf (the limits the
+    exact operations take, matching 754's rsqrt conventions where they
+    exist). Negative -> qNaN, quietly - the INVALID for a real negative
+    sqrt is raised by the contract-level sqrt, not by its scaffolding.
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return qnan_bits(fmt), 0
+    if ua.kind == ZERO:
+        return inf_bits(fmt, ua.sign), 0
+    if ua.sign:
+        return qnan_bits(fmt), 0
+    if ua.kind == INF:
+        return zero_bits(fmt), 0
+    nbits = ua.m.bit_length()
+    E = ua.e + nbits - 1
+    frac_top = (ua.m << (SEED_INDEX_BITS + 1)) >> nbits
+    i = frac_top & (SEED_TABLE_SIZE - 1)
+    odd = E & 1
+    r = _seed_rsqrt_entry((odd << SEED_INDEX_BITS) | i)
+    # 1/sqrt(f * 2^odd * 2^(E-odd)) ~ (r / 2^17) * 2^-((E-odd)/2)
+    e_out = -((E - odd) // 2) - 17
+    return _seed_pack(fmt, 0, r, e_out), 0
+
+
 OP_FMA, OP_ADD, OP_SUB, OP_MUL = 0, 1, 2, 3
 # Non-arithmetic operations. These do not round, do not depend on the
 # rounding attribute, and reach the output through the pipeline's
@@ -462,6 +588,9 @@ OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 # refinement but not the value it refines from.
 OP_IAND, OP_IOR, OP_IXOR, OP_IADD = 16, 17, 18, 19
 OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT = 20, 21, 22, 23
+# Seed opcodes for the composed divide/sqrt (24 and 25 are the
+# reductions, in reduce.py). Quiet, unary, attribute-independent.
+OP_RECIP_SEED, OP_RSQRT_SEED = 26, 27
 OP_NAMES = {
     OP_FMA: "fma", OP_ADD: "add", OP_SUB: "sub", OP_MUL: "mul",
     OP_ABS: "abs", OP_NEG: "neg", OP_COPYSIGN: "copysign",
@@ -472,6 +601,7 @@ OP_NAMES = {
     OP_IAND: "iand", OP_IOR: "ior", OP_IXOR: "ixor", OP_IADD: "iadd",
     OP_ISUB: "isub", OP_ISHL: "ishl", OP_ISHR: "ishr",
     OP_ICMPLT: "icmplt",
+    OP_RECIP_SEED: "recip_seed", OP_RSQRT_SEED: "rsqrt_seed",
 }
 INT_OPS = (OP_IAND, OP_IOR, OP_IXOR, OP_IADD,
            OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT)
@@ -481,6 +611,7 @@ SIMPLE_OPS = (OP_ABS, OP_NEG, OP_COPYSIGN,
               OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ,
               OP_IAND, OP_IOR, OP_IXOR, OP_IADD,
               OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT)
+SEED_OPS = (OP_RECIP_SEED, OP_RSQRT_SEED)
 
 
 # ---- non-arithmetic operations ---------------------------------------
@@ -662,6 +793,7 @@ SIMPLE_IMPL = {
     OP_CMPLE: cmple, OP_CMPEQ: cmpeq,
     OP_IAND: iand, OP_IOR: ior, OP_IXOR: ixor, OP_IADD: iadd,
     OP_ISUB: isub, OP_ISHL: ishl, OP_ISHR: ishr, OP_ICMPLT: icmplt,
+    OP_RECIP_SEED: recip_seed, OP_RSQRT_SEED: rsqrt_seed,
 }
 
 
