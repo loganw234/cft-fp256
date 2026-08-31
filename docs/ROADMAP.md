@@ -775,15 +775,51 @@ is the OOC placer pricing the density of two 720-bit ladders plus
 gathers. Whether that congestion is real is an in-shell question, and
 OOC slack does not predict shell slack in either direction.
 
-**Running total for the campaign: 131,860 -> 101,264 LUT (-23.2%) and
-59,999 -> 40,464 FF (-32.6%),** all equivalence-proven, all behind
-per-build parameters, DSP untouched. 1,264 LUT from the sub-100k goal
-with the FIFO work still queued.
+#### The FIFOs move to block RAM, and the kernel crosses 100k (2026-08-31)
 
-Two tiles, both shared, plus a 20k platform budget: 222,528 LUT -
-74.5% of a 480T, 87.5% of a 410T, still over a 325T. The 325T
-two-tile story remains trims (through-fp64), whose own numbers will
-also shrink with sharing - unmeasured.
+The last queued item. `cft_fifo`'s async read (`rd_data = mem[rp]`,
+same cycle) is what foreclosed BRAM, and the callers depend on that
+contract twice over: rd_data valid the same cycle `count` reads
+nonzero, and `count` moving at the write edge so the readers'
+free-space reservation never overestimates. So the conversion happens
+INSIDE the port list: a sync-read RAM whose address is led by the pop
+(`rp + rd_en`), plus a two-cycle head bypass covering the only cases
+that break - a write landing at the read head. The capture condition
+(`count==0 || (count==1 && rd_en)`) IS the address compare, evaluated
+where the answer is already known, and it forces count to 1, so the
+bypass can never mask a different word than the RAM would present.
+
+Proof: the four FIFO-heavy benches green (krnl with backpressure at
+three duties and page crossings, quarter, reduce, faults with error
+injection); negative control - dropping the head-pop capture term -
+fails 4 of 4 with element mismatches.
+
+| | LUT | as memory | FF | BRAM | WNS @130 |
+|---|---|---|---|---|---|
+| both shared, LUTRAM FIFOs | 101,264 | 7,276 | 40,464 | 0 | +0.327 |
+| both shared, BRAM FIFOs | **98,310** | 4,671 | 41,295 | 16 | +0.327 |
+
+-2,954 LUT for 16 of 1,344 block RAMs the design had never touched,
+timing-neutral.
+
+**The campaign, end to end - every step equivalence-proven, every
+sharing behind a per-build parameter, DSP at 262 throughout:**
+
+| | LUT | FF | note |
+|---|---|---|---|
+| start (2026-08-30 evening) | 131,860 | 59,999 | |
+| cft_simpleops rewrite | 120,303 | 59,598 | mux sources, not opcodes |
+| cft_reduce_acc as memory | 117,530 | 49,846 | the 40:1 mux dissolves |
+| + FUSE_NORM, SPLIT=1 | 110,780 | 46,048 | timing-free at the measured split |
+| + FUSE_ALIGN | 101,264 | 40,464 | bidirectional ladder, sticky in-lane |
+| + BRAM FIFOs | **98,310** | 41,295 | **-25.4% / -31.2%** |
+
+Two tiles at 98,310 plus a 20k platform budget: 216,620 LUT -
+**72.5% of a 480T, 85.2% of a 410T, 83.1% of a 420T** - and still over
+a 325T, whose two-tile story remains through-fp64 trims (their own
+numbers also shrink with sharing; unmeasured). The 7-series caveat
+stands: these are UltraScale+ figures and CARRY4 makes them
+optimistic.
 
 The module is built, proven against 2,977 comparisons at every legal
 shift and every rung, and measured. What is NOT done is `EXT_NORM`
