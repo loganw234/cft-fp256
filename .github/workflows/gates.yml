@@ -31,7 +31,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog
+      # verilator alongside iverilog: the segmented shifter bench is 720
+      # bits by twenty stages of multiplexer and Icarus takes hours on
+      # it where Verilator takes a second, so tb/Makefile pins that one
+      # target. Every other target still runs on Icarus, which keeps the
+      # default simulator the one the rest of the suite is written for.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
       - run: pip install -r tb/requirements.txt
       - run: make -C tb sim
 

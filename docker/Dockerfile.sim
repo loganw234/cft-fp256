@@ -6,6 +6,17 @@
 #   docker build -t cft-sim -f docker/Dockerfile.sim .
 #   docker run --rm -v <repo>:/work -w /work/tb cft-sim make sim
 #
+# g++ is here because Verilator needs one and did not have one. The
+# testbench Makefile has advertised `make SIM=verilator sim` as the
+# alternative simulator since it was written, and in this image that
+# command could never have worked: verilator translates to C++ and then
+# shells out to build it, which failed with a bare `Error 127` -
+# command not found - rather than anything naming the missing tool.
+# Nobody noticed because Icarus is the default and the alternative was
+# never exercised. It matters now: the segmented shifter is 720 bits by
+# twenty stages of multiplexer, and Icarus spent three hours on a sweep
+# Verilator finishes in seconds.
+#
 # gcc is here for libcft, and for a reason beyond convenience. The
 # library's claim is that the same call returns the same bits on every
 # machine; running its checksum test on exactly one machine is not
@@ -26,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         verilator \
         yosys \
         gcc \
+        g++ \
         libc6-dev \
         gfortran \
         python3 \
