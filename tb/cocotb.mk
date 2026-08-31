@@ -29,6 +29,8 @@ VERILOG_SOURCES = \
     $(TBDIR)/wrappers/tb_fpfma_fp256.sv \
     $(TBDIR)/wrappers/tb_krnl_quarter.sv \
     $(TBDIR)/wrappers/tb_mulshare.sv \
+    $(TBDIR)/wrappers/cft_simpleops_ref.sv \
+    $(TBDIR)/wrappers/tb_simpleops.sv \
     $(TBDIR)/wrappers/tb_reduce_acc.sv
 
 ifeq ($(SIM),icarus)

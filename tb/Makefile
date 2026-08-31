@@ -11,11 +11,11 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl \
-        quarter faults clean
+.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops reduceacc \
+        reduce krnl quarter faults clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare reduceacc reduce krnl quarter \
-     faults
+sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops reduceacc reduce \
+     krnl quarter faults
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -38,6 +38,16 @@ mulshare:
 # The streaming reduction accumulator against the model's tree. Every
 # length from 1 to 40, because the shape varies with n and powers of two
 # are the easy case.
+# Equivalence again, for the block that is not arithmetic: the flat
+# case(op) form frozen at 7ab02b3 beside the eight-source form that
+# replaced it, at all four rungs from one operand word. Area was the
+# only thing meant to change, so the two must be bit-identical -
+# results, flags and valid - or the rewrite does not ship.
+simpleops:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_simpleops \
+		MODULE=test_simpleops SIM_BUILD=sim_build/simpleops \
+		COCOTB_RESULTS_FILE=sim_build/simpleops/results.xml
+
 reduceacc:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_reduce_acc \
 		MODULE=test_reduce_acc SIM_BUILD=sim_build/reduceacc \
