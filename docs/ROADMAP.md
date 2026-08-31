@@ -568,28 +568,47 @@ any narrowing work on the aligner and normaliser.
 
 Whole tile, and the figure to size other parts with:
 
-| | LUT | DSP |
-|---|---|---|
-| arithmetic, 15 lanes | 96,211 | 262 |
-| four stream FIFOs | ~2,400 LUTRAM | 0 |
-| operand steering (`cft_opmux` x15) | ~25,000 | 0 |
-| `cft_reduce_acc` | 8,171 | 0 |
-| engine glue + CSR | ~1,800 | 4 |
-| **kernel, out of context** | **134,697** | **266** |
-| **one tile in shell, four masters + reductions** | **138,083** | **267** |
+Whole tile, by module, from `hw/synth_attrib.tcl` with the hierarchy
+preserved - so every instance is charged what it actually contains:
+
+| module | instances | LUT | share | DSP |
+|---|---|---|---|---|
+| `cft_fpfma_pipe` | 15 | 95,120 | 71.1% | 262 |
+| **`cft_simpleops`** | **15** | **22,418** | **16.7%** | 0 |
+| `cft_reduce_acc` | 1 | 7,138 | 5.3% | 0 |
+| engine own logic | - | 4,505 | 3.4% | 4 |
+| `cft_fifo` | 4 | 3,196 | 2.4% | 0 |
+| `cft_opmux` | 15 | 788 | 0.6% | 0 |
+| `cft_csr` | 1 | 415 | 0.3% | 0 |
+| **kernel, hierarchy preserved** | | **133,852** | | **266** |
+| kernel, flattened (normal build) | | 134,697 | | 266 |
+| one tile in shell, 4 masters + reductions | | 138,083 | | 267 |
 
 The DSP column is the load-bearing check: the per-lane ladder predicts
-`8x2 + 4x9 + 2x35 + 1x140 = 262`, and the arithmetic reports exactly
-262. The four extra in the kernel total were a variable multiply in the
-reduction serializer where a shift belonged - found *because* the
-ladder disagreed, which is what makes it worth keeping as a standing
-check.
+`8x2 + 4x9 + 2x35 + 1x140 = 262` and the arithmetic reports exactly
+262. The four extra were a variable multiply in the reduction
+serializer where a shift belonged - found *because* the ladder
+disagreed, which is what makes it worth keeping as a standing check.
 
-**Read the steering row with suspicion.** Vivado flattens `cft_opmux`,
-so its logic is charged to whichever instance it merged into - in the
-depth-3 report, to the four FIFOs, which duly reported 14,092 / 9,741 /
-1,431 / 202 logic LUTs for four *identical* modules. `hw/synth_attrib.tcl`
-exists to settle it with the hierarchy preserved.
+**Why this table needed its own synthesis run.** The flattened report
+charges merged logic to whichever instance survived, and it put
+`cft_simpleops` inside the four FIFOs: they came out at 14,092 / 9,741
+/ 1,431 / 202 logic LUTs for four *identical* modules. With the
+boundaries kept they are 896 / 770 / 769 / 761, as four copies of one
+module must be. Two successive readings of that flattened report were
+wrong in opposite directions - first that the FIFOs were negligible,
+then that they were 27,834 LUT and the largest non-arithmetic block.
+Neither survived contact with an attribution run.
+
+**`cft_simpleops` is the finding.** 22,418 LUT - larger than the whole
+fp64 FMA bank - for the opcodes that BYPASS the arithmetic: min/max,
+predicates, select, and the eight integer/bitwise ops. It scales with
+width (6,378 at fp256, 2,912 at fp128, 1,338 at fp64, 608 at fp32),
+which points at the integer shifts: `ishl` and `ishr` are two
+independent barrel shifters per lane on a W-bit word, where one shifter
+plus two bit-reversals would do. Nothing had looked at this module
+before 2026-08-30, because until the hierarchy was preserved it was
+invisible.
 
 Two consequences, and the first one is unwelcome:
 

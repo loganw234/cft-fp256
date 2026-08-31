@@ -16,6 +16,7 @@ dump.vcd
 # vitis / vivado
 build/
 build_ooc*/
+build_attrib*/
 _x/
 .Xil/
 *.xo
