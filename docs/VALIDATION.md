@@ -376,3 +376,21 @@ more invocations of an already-proven round-trip also work. The
 composed sequence's remaining validation belongs to first light,
 where those invocations cost microseconds; 13 hours of zero-error
 saturation is the emulation's testimony.
+
+## 2026-09-01 - the contract validates in a browser tab
+
+bindings/wasm: the software backend compiled to WebAssembly (pinned
+emsdk container, two clean builds byte-identical) behind a single
+self-contained HTML page that works from file:// - no server, no
+install, no network. Bit-exactness is by construction: the softfloat
+is integer-only and wasm integer semantics are fully specified. The
+page replayed its embedded 4,015-case sample (every opcode name in
+every one of the 20 sets, seeds included) clean, then a drag-drop of
+all 20 real vector sets: 236,000 cases, library matches the vectors
+exactly, ~13 s. A wrongly-named file yields "NOTHING WAS CHECKED" in
+red rather than a quiet pass, and the per-build negative control (one
+corrupted expected value) fails loudly with the library's own
+disagreement detail, screenshotted. The compute panel runs every
+elementwise op plus the composed div/sqrt at all four formats -
+binary256 square root, correctly rounded, in a browser tab. The bar
+of entry is now one compliant browser.
