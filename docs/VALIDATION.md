@@ -106,3 +106,31 @@ around-1.0, inf/NaN, negative and random-banded operands - 0 value
 and 0 flag disagreements. Negative control (CFT_SOAK_SABOTAGE=1)
 detected 65,536/65,536 injected corruptions. Campaign results on the
 build box get their own entry when they land.
+
+## 2026-08-31 - image verifier commissioned (hw/verify-image.sh)
+
+Static verification that a staged xclbin IS the build its manifest
+describes - the wrong-file-staged failure class, caught before a card
+is involved. Eight checks: sha256 (the artifact's only trustworthy
+identity; filenames are deliberately not checked, the card-day set is
+renamed on purpose), platform VBNV, Bitstream-content-vs-target,
+CU set vs clock_cus, link config and the 130 MHz kernel constraint
+recovered from BUILD_METADATA's recorded v++ line (NOT from
+CLOCK_FREQ_TOPOLOGY - this shell realises the constraint as a
+statically-configured ULP clock wizard, so the topology section only
+shows the shell's own clocks), clock-topology sanity, and the memory
+intent: every master on HBM, no pseudo-channel shared between two
+masters anywhere in the image. Absent sections SKIP by name - and
+under a target-hw manifest, absence is a FAIL.
+
+Commissioned against the real card-day pair on the box: both
+bac9f550 images pass 8/8. Four negative controls behaved: an altered
+kernel_freq failed exactly that check with sha256 still green; the
+quad image under the single manifest failed on five independent axes;
+a section-stripped image SKIPped by name under an emu manifest and
+FAILED under a hw one. Finding recorded en route: the bac9f550
+masters each span 2 (quad) or 4 (single) HBM channels - they predate
+the one-channel-per-master link.cfg - with disjointness holding, so
+same-ID ordering rests on the HBM switch there. The milestone pair
+building from b1a014c carries the audited single-channel config and
+should verify as one channel per master.
