@@ -67,7 +67,7 @@ from .softfloat import (
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM,
     FLAG_INVALID, FLAG_DIVZERO, FLAG_INEXACT, FLAG_UNDERFLOW,
     OP_RECIP_SEED, OP_RSQRT_SEED,
-    OP_FMA, OP_MUL, OP_NEG, OP_SUB,
+    OP_FMA, OP_MUL, OP_NEG, OP_SUB, OP_ADD, OP_COPYSIGN,
     compute, unpack, NAN, INF, ZERO,
     zero_bits, one_bits, inf_bits, qnan_bits,
 )
@@ -366,3 +366,105 @@ def div_seq(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
     m = (u2.m << 2) | (guard << 1) | sticky
     e = u2.e + D - 2
     return sf.round_pack(fmt, sq, m, e, rnd)
+
+
+# ---- roundToIntegral as a sequence -----------------------------------
+
+def rint_seq(fmt: FpFormat, xa: int, rnd: int = RND_RNE,
+             exact: bool = False):
+    """roundToIntegral as backend passes. Bit-identical to sf.round_int.
+
+    The construction is the classic magic-constant addition, made
+    total: with C = 2^(p-1) carrying the operand's sign,
+
+        t = (x + copysign(C, x)) - copysign(C, x)
+
+    rounds x at integer weight under the caller's own attribute - the
+    sum lands in [C, 2C), where the format's ulp is exactly 1, and the
+    subtraction is exact by Sterbenz's bound. A final copySign restores
+    the operand's sign so the zero of roundToIntegral(-0.4) comes back
+    -0, which the trick alone loses.
+
+    What the passes cannot do, the library does per element in integer
+    bookkeeping, exactly as cft_div does:
+
+      * lanes with biased exponent >= bias + (p-1) are already integral
+        (their ulp is >= 1) AND would break the trick's Sterbenz
+        argument, so their original bits are substituted - a test that
+        also catches the infinities;
+      * NaN lanes take the contract result directly (the final copySign
+        pass would otherwise stamp the operand's sign onto the
+        canonical quiet NaN);
+      * flags are synthesised, not accumulated: the adds raise inexact
+        as scaffolding, but the named roundToIntegral operations signal
+        nothing except invalid for sNaN, and the Exact variant's
+        inexact is precisely "did the bits change on a finite lane".
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return sf.round_int(fmt, xa, rnd, exact)
+    ef = (xa >> fmt.man_w) & fmt.exp_mask
+    if ua.kind == INF or ef >= fmt.bias + fmt.man_w:
+        return xa, 0
+    cbits = _pow2_bits(fmt, fmt.man_w)               # 2^(p-1)
+    m = _v(fmt, OP_COPYSIGN, cbits, xa)
+    t = _v(fmt, OP_ADD, xa, c=m, rnd=rnd)
+    u = _v(fmt, OP_SUB, t, c=m, rnd=rnd)
+    r = _v(fmt, OP_COPYSIGN, u, xa)
+    flags = FLAG_INEXACT if (exact and r != xa) else 0
+    return r, flags
+
+
+# ---- scaleB as a sequence --------------------------------------------
+
+def _scale_factor_bits(fmt: FpFormat, e: int) -> int:
+    """The float 2^e as bits, subnormal encodings included - every one
+    of them exact, which is what makes a multiply by it a SINGLE
+    rounding of the true scaled value."""
+    if e >= fmt.emin:
+        return _pow2_bits(fmt, e)
+    lo = fmt.emin - fmt.man_w
+    assert e >= lo, e
+    return 1 << (e - lo)
+
+
+def scaleb_seq(fmt: FpFormat, xa: int, n: int, rnd: int = RND_RNE):
+    """scaleB as backend passes. Bit-identical to sf.scaleb.
+
+    One multiply by the exact float 2^n whenever that float exists
+    (n down to emin - (p-1), the smallest subnormal): the factor is
+    exact, so the multiply IS scaleB - one rounding, and the mul's own
+    flags are the contract flags, invalid-on-sNaN included. Above emax
+    the factor is staged in chunks of 2^emax; every chunk but the last
+    is exact for every lane (any finite value times 2^emax is normal or
+    overflows, and an overflow there means the true result overflows
+    too, with the per-attribute saturation delivering the same bits at
+    every subsequent stage). Flags are the OR of the stages: pre-final
+    stages contribute either nothing or the true overflow.
+
+    BELOW the smallest subnormal power there is no exact factor and no
+    safe uniform staging - a lane driven inexactly subnormal mid-chain
+    would round twice, and the matrix that killed the div shortcuts
+    would kill this one. Those calls (|n| beyond ~emax + p, far outside
+    any real use) take the contract path on the host instead, exactly
+    as special lanes do everywhere else in this module.
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return sf.scaleb(fmt, xa, n, rnd)
+    if ua.kind in (INF, ZERO):
+        return xa, 0
+    if n < fmt.emin - fmt.man_w:
+        return sf.scaleb(fmt, xa, n, rnd)            # the host path
+    # Beyond 3*emax every nonzero finite lane saturates identically
+    # (the full exponent span is 2*emax + p - 1 and emax >= p on every
+    # rung of the ladder), so the chunk walk is bounded at three.
+    remaining = min(n, 3 * fmt.emax)
+    x, flags = xa, 0
+    while True:
+        step = min(remaining, fmt.emax)
+        x, fl = _op(fmt, OP_MUL, x, _scale_factor_bits(fmt, step), rnd=rnd)
+        flags |= fl
+        remaining -= step
+        if remaining == 0:
+            return x, flags

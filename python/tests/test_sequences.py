@@ -100,3 +100,60 @@ def test_sqrt_seq_stress_binary64():
         a = rng.getrandbits(64)
         rnd = rng.choice(RND_MODES)
         assert sqrt_seq(FP64, a, rnd) == sf.sqrt(FP64, a, rnd)
+
+
+# ---- the clause-5 sequences: rint and scaleb -------------------------
+#
+# Same discipline as div/sqrt above: the sequence is the library's
+# route, the contract function is the definition, and this matrix holds
+# them bit-identical - bits AND flags - over the operand pool, every
+# format, every attribute, both variants. The pool already carries the
+# families that matter here: values just under 2^(p-1) (the trick's
+# Sterbenz boundary), exact halves and integers, subnormals, signed
+# zeros, and the NaN zoo the fixup lanes must not mangle.
+
+from cft_golden.sequences import rint_seq, scaleb_seq  # noqa: E402
+
+
+@pytest.mark.parametrize("fmt,nrand", [
+    (FP32, 60), (FP64, 60), (FP128, 24), (FP256, 16),
+], ids=lambda v: getattr(v, "name", str(v)))
+def test_rint_seq_matches_contract(fmt, nrand):
+    pool = pool_for(fmt, nrand)
+    # the trick's own boundary: 2^(p-1) and its neighbours, both signs
+    c = (fmt.man_w + fmt.bias) << fmt.man_w
+    pool += [c, c - 1, c + 1, c | fmt.sign_mask, (c - 1) | fmt.sign_mask]
+    # exact halves, the tie families
+    for k in (1, 3, 5):
+        bits, fl = sf.round_pack(fmt, 0, k, -1, sf.RND_RNE)
+        assert fl == 0
+        pool += [bits, bits | fmt.sign_mask]
+    for rnd in RND_MODES:
+        for xa in pool:
+            for exact in (False, True):
+                want = sf.round_int(fmt, xa, rnd, exact)
+                got = rint_seq(fmt, xa, rnd, exact)
+                assert got == want, \
+                    (fmt.name, rnd, exact, hex(xa), got, want)
+
+
+@pytest.mark.parametrize("fmt,nrand", [
+    (FP32, 40), (FP64, 40), (FP128, 16), (FP256, 10),
+], ids=lambda v: getattr(v, "name", str(v)))
+def test_scaleb_seq_matches_contract(fmt, nrand):
+    pool = pool_for(fmt, nrand)
+    # every regime of n: exact single-factor (normal and subnormal
+    # factors), the staged upward chunks, the host path below the
+    # subnormal floor, and the saturation clamp
+    ns = [0, 1, -1, fmt.man_w, -fmt.man_w,
+          fmt.emax, fmt.emax + 1, 2 * fmt.emax, 2 * fmt.emax + fmt.prec,
+          3 * fmt.emax + 5,
+          fmt.emin, fmt.emin - fmt.man_w,          # smallest exact factor
+          fmt.emin - fmt.man_w - 1,                # first host-path n
+          -(2 * fmt.emax), -(3 * fmt.emax) - 7]
+    for rnd in RND_MODES:
+        for xa in pool:
+            for n in ns:
+                want = sf.scaleb(fmt, xa, n, rnd)
+                got = scaleb_seq(fmt, xa, n, rnd)
+                assert got == want, (fmt.name, rnd, hex(xa), n, got, want)
