@@ -841,3 +841,353 @@ def compute(fmt: FpFormat, op: int, xa: int, xb: int, xc: int,
     # quiet NaN and raise invalid, so a host that issues an opcode this
     # build predates sees it in the flags.
     return qnan_bits(fmt), FLAG_INVALID
+
+
+# ---- the remaining clause-5 operations -------------------------------
+#
+# Everything below is CONTRACT level, like div and sqrt above: these are
+# what a caller gets from libcft, not opcodes the engine decodes. None
+# of them needs new hardware - they are round_pack, bit surgery on the
+# encoding, and (for remainder) exact integer division, which is the
+# whole reason they can be added to the contract without touching RTL.
+#
+# Semantics follow IEEE 754-2019 clause 5 with this contract's two
+# standing choices applied throughout: any NaN in yields the canonical
+# quiet NaN out (payloads are canonicalised even where 754 merely
+# recommends propagation - the documented deviation), and a signaling
+# NaN raises invalid except where 754 defines the operation as
+# non-computational (classification, totalOrder), which signal nothing
+# at all.
+
+
+def round_int(fmt: FpFormat, xa: int, rnd: int = RND_RNE,
+              exact: bool = False):
+    """(bits, flags) of roundToIntegral (754 5.3.1, 5.9).
+
+    With exact=False this is the five named operations
+    roundToIntegral{TiesToEven..TiesToAway} - the direction comes from
+    `rnd`, and inexact is NEVER signalled, per the standard. With
+    exact=True it is roundToIntegralExact: same value, and inexact is
+    signalled when the value changed.
+
+    The sign of a zero result is the sign of the operand (5.9), which
+    is how roundToIntegral(-0.4) comes back -0 rather than +0.
+    """
+    _check_mode(rnd)
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return _nan_result(fmt, ua)
+    if ua.kind in (INF, ZERO):
+        return xa, 0
+    if ua.e >= 0:
+        return xa, 0                       # ulp >= 1: already integral
+    kept, inexact = _round_at(ua.m, ua.e, 0, ua.sign, rnd)
+    flags = FLAG_INEXACT if (exact and inexact) else 0
+    if kept == 0:
+        return zero_bits(fmt, ua.sign), flags
+    bits, packfl = round_pack(fmt, ua.sign, kept, 0, rnd)
+    # A finite value below 2^p rounds to an integer of at most p+1
+    # bits: always representable, so the pack is exact and in range.
+    assert packfl == 0
+    return bits, flags
+
+
+def convert(sfmt: FpFormat, dfmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """(bits in dfmt, flags) of formatOf-convertFormat (754 5.4.2).
+
+    Widening along the fp32->fp64->fp128->fp256 ladder is exact by
+    construction (every narrower value is a wider value) and signals
+    nothing. Narrowing is one round_pack of the exact source value:
+    single rounding, with overflow / underflow / inexact exactly as any
+    arithmetic result gets them. NaNs canonicalise into the destination
+    (the contract's standing deviation from 754's payload-preservation
+    recommendation), sNaN raising invalid.
+    """
+    _check_mode(rnd)
+    ua = unpack(sfmt, xa)
+    if ua.kind == NAN:
+        return qnan_bits(dfmt), (FLAG_INVALID if ua.signaling else 0)
+    if ua.kind == INF:
+        return inf_bits(dfmt, ua.sign), 0
+    if ua.kind == ZERO:
+        return zero_bits(dfmt, ua.sign), 0
+    return round_pack(dfmt, ua.sign, ua.m, ua.e, rnd)
+
+
+def from_int(fmt: FpFormat, v: int, rnd: int = RND_RNE):
+    """(bits, flags) of formatOf-convertFromInt (754 5.4.1).
+
+    Takes any Python integer, which covers every intFormat at once;
+    libcft narrows this to its int32/uint32/int64/uint64 entry points.
+    Zero converts to +0 (there is no signed integer zero to preserve).
+    Inexact when the integer needs more than p bits; overflow is
+    reachable only for integers wider than any supported intFormat, but
+    the definition is total anyway.
+    """
+    _check_mode(rnd)
+    if v == 0:
+        return zero_bits(fmt, 0), 0
+    sign = 1 if v < 0 else 0
+    return round_pack(fmt, sign, -v if v < 0 else v, 0, rnd)
+
+
+def to_int(fmt: FpFormat, xa: int, width: int, signed: bool,
+           rnd: int = RND_RNE, exact: bool = False):
+    """(integer, flags) of intFormatOf-convertToInteger (754 5.4.1).
+
+    exact=False is convertToInteger{TiesToEven..}: rounds in the given
+    direction, never signals inexact. exact=True is the ...Exact
+    family, which signals inexact when rounding changed the value.
+
+    754 leaves the DELIVERED value for the invalid cases (NaN,
+    infinity, out of range) to the implementation; determinism cannot,
+    so this contract fixes them to RISC-V's FCVT table - the encoding
+    this project already follows for frm and tininess:
+
+        NaN            -> the type's maximum   (+ invalid)
+        +inf, too big  -> the type's maximum   (+ invalid)
+        -inf, too small-> the type's minimum   (+ invalid)
+
+    A negative value that ROUNDS to zero converts to unsigned 0 without
+    invalid (the rounded result is representable); a value that rounds
+    below zero is invalid and delivers the minimum, i.e. 0. When
+    invalid is signalled, inexact is not (7.2: invalid pre-empts).
+    """
+    _check_mode(rnd)
+    assert width >= 1
+    if signed:
+        lo, hi = -(1 << (width - 1)), (1 << (width - 1)) - 1
+    else:
+        lo, hi = 0, (1 << width) - 1
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return hi, FLAG_INVALID
+    if ua.kind == INF:
+        return (lo if ua.sign else hi), FLAG_INVALID
+    if ua.kind == ZERO:
+        return 0, 0
+    kept, inexact = _round_at(ua.m, ua.e, 0, ua.sign, rnd)
+    v = -kept if ua.sign else kept
+    if v < lo:
+        return lo, FLAG_INVALID
+    if v > hi:
+        return hi, FLAG_INVALID
+    return v, (FLAG_INEXACT if (exact and inexact) else 0)
+
+
+def scaleb(fmt: FpFormat, xa: int, n: int, rnd: int = RND_RNE):
+    """(bits, flags) of scaleB(x, n) = x * 2^n (754 5.3.3).
+
+    One round_pack at the shifted exponent: single rounding, full
+    overflow / underflow / inexact behaviour. NaN canonicalises (sNaN
+    raising invalid); infinities and zeros pass through untouched, as
+    scaling cannot move them.
+    """
+    _check_mode(rnd)
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return _nan_result(fmt, ua)
+    if ua.kind in (INF, ZERO):
+        return xa, 0
+    return round_pack(fmt, ua.sign, ua.m, ua.e + n, rnd)
+
+
+def logb(fmt: FpFormat, xa: int):
+    """(bits, flags) of logB(x) (754 5.3.3), logBFormat chosen as the
+    operand's own floating-point format.
+
+    The exponent E with 1 <= |x|*2^-E < 2, VALUE-based: a subnormal
+    reports its true exponent, not emin. Always exact (|E| is a small
+    integer, representable in every format here, asserted). The
+    specials are 754's: logB(NaN) is a NaN, logB(+-inf) is +inf with no
+    signal, logB(+-0) is -inf and signals divideByZero.
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return _nan_result(fmt, ua)
+    if ua.kind == INF:
+        return inf_bits(fmt, 0), 0
+    if ua.kind == ZERO:
+        return inf_bits(fmt, 1), FLAG_DIVZERO
+    E = ua.e + ua.m.bit_length() - 1
+    if E == 0:
+        return zero_bits(fmt, 0), 0
+    bits, packfl = round_pack(fmt, 1 if E < 0 else 0, abs(E), 0, RND_RNE)
+    assert packfl == 0
+    return bits, 0
+
+
+def next_up(fmt: FpFormat, xa: int):
+    """(bits, flags) of nextUp (754 5.3.1): the least value that
+    compares greater than x.
+
+    On the encoding this is one increment or decrement of the
+    sign-magnitude integer, because the encoding is monotone. The
+    standard's own edges: nextUp(+-0) is the smallest positive
+    subnormal; nextUp of the negative number of least magnitude is -0
+    (that is the standard's explicit choice of zero); nextUp(-inf) is
+    the negative finite of largest magnitude; nextUp(+inf) stays +inf;
+    nextUp of the largest finite is +inf WITHOUT overflow - the only
+    signal these operations ever raise is invalid, for a signaling NaN.
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return _nan_result(fmt, ua)
+    if ua.kind == INF:
+        return (max_normal_bits(fmt, 1) if ua.sign else xa), 0
+    if ua.kind == ZERO:
+        return min_subnormal_bits(fmt, 0), 0
+    mag = xa & ~fmt.sign_mask
+    if ua.sign:
+        mag -= 1
+        return (zero_bits(fmt, 1) if mag == 0 else fmt.sign_mask | mag), 0
+    return mag + 1, 0        # +max_normal + 1 IS the +inf encoding
+
+
+def next_down(fmt: FpFormat, xa: int):
+    """(bits, flags) of nextDown (754 5.3.1) = -nextUp(-x), stated by
+    the standard as exactly that identity. NaN is handled first so the
+    canonical quiet NaN comes back sign-positive rather than riding
+    through two negations."""
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return _nan_result(fmt, ua)
+    bits, flags = next_up(fmt, negate(fmt, xa))
+    return negate(fmt, bits), flags
+
+
+# Classification (754 5.7.2). Non-computational: no operation below
+# signals anything, even for a signaling NaN. The ten class values are
+# RISC-V's fclass bit INDICES, so anyone porting between the two reads
+# one table - the same reasoning that chose frm for the rounding
+# encoding.
+CLASS_NEG_INF = 0
+CLASS_NEG_NORM = 1
+CLASS_NEG_SUB = 2
+CLASS_NEG_ZERO = 3
+CLASS_POS_ZERO = 4
+CLASS_POS_SUB = 5
+CLASS_POS_NORM = 6
+CLASS_POS_INF = 7
+CLASS_SNAN = 8
+CLASS_QNAN = 9
+CLASS_NAMES = {
+    CLASS_NEG_INF: "negativeInfinity", CLASS_NEG_NORM: "negativeNormal",
+    CLASS_NEG_SUB: "negativeSubnormal", CLASS_NEG_ZERO: "negativeZero",
+    CLASS_POS_ZERO: "positiveZero", CLASS_POS_SUB: "positiveSubnormal",
+    CLASS_POS_NORM: "positiveNormal", CLASS_POS_INF: "positiveInfinity",
+    CLASS_SNAN: "signalingNaN", CLASS_QNAN: "quietNaN",
+}
+
+
+def classify(fmt: FpFormat, xa: int) -> int:
+    """754 5.7.2 class(x), as one of the ten CLASS_* values. Every is*
+    predicate of 5.7.2 is a subset test on this value; isCanonical is
+    constantly true (binary interchange formats have no non-canonical
+    encodings) and radix is constantly 2, so neither earns a function.
+    """
+    ua = unpack(fmt, xa)
+    if ua.kind == NAN:
+        return CLASS_SNAN if ua.signaling else CLASS_QNAN
+    if ua.kind == INF:
+        return CLASS_NEG_INF if ua.sign else CLASS_POS_INF
+    if ua.kind == ZERO:
+        return CLASS_NEG_ZERO if ua.sign else CLASS_POS_ZERO
+    if ua.kind == SUB:
+        return CLASS_NEG_SUB if ua.sign else CLASS_POS_SUB
+    return CLASS_NEG_NORM if ua.sign else CLASS_POS_NORM
+
+
+def _total_order_key(fmt: FpFormat, x: int) -> int:
+    """The order-embedding of 5.10 into the unsigned integers: negative
+    encodings complement, positive encodings set the sign bit. One
+    unsigned compare of these keys IS totalOrder - including both
+    zeros, both infinities, and the NaN ordering (sign, then quiet bit,
+    then payload), because on the encoding those are all just
+    magnitude."""
+    if x & fmt.sign_mask:
+        return ((1 << fmt.width) - 1) ^ x
+    return x | fmt.sign_mask
+
+
+def total_order(fmt: FpFormat, xa: int, xb: int):
+    """(bits, flags) of totalOrder(x, y) (754 5.10): 1.0 when x is
+    ordered at or before y, else +0.0 - a predicate a SELECT consumes,
+    like the comparisons. Signals nothing, on anything: totalOrder is
+    defined on the whole encoding space, NaNs included, which is what
+    makes it the right sort key where compareQuiet* is three-valued."""
+    a_le = _total_order_key(fmt, xa) <= _total_order_key(fmt, xb)
+    return (one_bits(fmt) if a_le else zero_bits(fmt)), 0
+
+
+def total_order_mag(fmt: FpFormat, xa: int, xb: int):
+    """totalOrderMag(x, y) = totalOrder(|x|, |y|) (754 5.10)."""
+    return total_order(fmt, xa & ~fmt.sign_mask, xb & ~fmt.sign_mask)
+
+
+def _compare_sig(fmt: FpFormat, xa: int, xb: int, want):
+    """754 5.6.1 signaling comparison: identical truth table to the
+    quiet predicates, but invalid is raised for ANY NaN operand, quiet
+    included. This is the variant meant for ordered code that considers
+    an unordered pair a mistake rather than a case."""
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    if ua.kind == NAN or ub.kind == NAN:
+        return zero_bits(fmt), FLAG_INVALID
+    lt = _numeric_lt(fmt, xa, xb)
+    gt = _numeric_lt(fmt, xb, xa)
+    eq = not lt and not gt
+    truth = {"lt": lt, "le": lt or eq, "eq": eq}[want]
+    return (one_bits(fmt) if truth else zero_bits(fmt)), 0
+
+
+def cmplt_sig(fmt, xa, xb, *_):
+    return _compare_sig(fmt, xa, xb, "lt")
+
+
+def cmple_sig(fmt, xa, xb, *_):
+    return _compare_sig(fmt, xa, xb, "le")
+
+
+def cmpeq_sig(fmt, xa, xb, *_):
+    return _compare_sig(fmt, xa, xb, "eq")
+
+
+def remainder(fmt: FpFormat, xa: int, xb: int):
+    """(bits, flags) of remainder(x, y) (754 5.3.1): r = x - y*n with n
+    the integer nearest x/y, ties to even. EXACT, always - r is proven
+    representable, asserted here, and no rounding attribute is consumed
+    because none is ever used. A zero result takes the sign of x.
+
+    Specials: remainder(inf, y) and remainder(x, 0) are invalid;
+    remainder(x, inf) is x and remainder(+-0, y) is x, both exact and
+    silent, for finite x and nonzero y respectively.
+
+    The computation is one exact integer divmod at the common exponent
+    - the magnitudes as integers can reach half a million bits at
+    fp256, which Python evaluates exactly and libcft's port walks
+    iteratively instead; host/tests holds the two identical.
+    """
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    if NAN in (ua.kind, ub.kind):
+        return _nan_result(fmt, ua, ub)
+    if ua.kind == INF or ub.kind == ZERO:
+        return qnan_bits(fmt), FLAG_INVALID
+    if ub.kind == INF or ua.kind == ZERO:
+        return xa, 0
+
+    e0 = min(ua.e, ub.e)
+    X = ua.m << (ua.e - e0)
+    Y = ub.m << (ub.e - e0)
+    q, rem = divmod(X, Y)
+    if 2 * rem > Y or (2 * rem == Y and (q & 1)):
+        rem -= Y                       # nearest is q+1: negative residue
+    if rem == 0:
+        return zero_bits(fmt, ua.sign), 0
+    sign_r = ua.sign ^ (1 if rem < 0 else 0)
+    bits, packfl = round_pack(fmt, sign_r, abs(rem), e0, RND_RNE)
+    # |r| <= |y|/2 and r is an integer multiple of the coarser of the
+    # two operands' ulps, so it is representable: the pack must be
+    # exact, and the operation therefore never signals inexact,
+    # overflow or underflow.
+    assert packfl == 0
+    return bits, 0
