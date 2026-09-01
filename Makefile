@@ -108,6 +108,18 @@ yosys-lint:
 	  rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_krnl.sv; \
 	  hierarchy -check -top cft_krnl; proc; opt -fast; stat -top cft_krnl"
 
+# The formal property gate (formal/README.md): unbounded FIFO proof,
+# complete seedop special-routing proof, and the simpleops-vs-frozen-
+# ref equivalence miter, all inside the pinned cft-formal image. The
+# recipe exits nonzero unless every proof passes AND the negative
+# control is refuted.
+formal: formal-image
+	docker run --rm -v "$(CURDIR):/work" -w /work cft-formal \
+	  ./formal/run.sh
+
+formal-image:
+	docker build -t cft-formal -f docker/Dockerfile.formal docker
+
 docker-image:
 	docker build -t $(DOCKER_IMAGE) -f docker/Dockerfile.sim .
 

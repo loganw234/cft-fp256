@@ -134,3 +134,36 @@ the one-channel-per-master link.cfg - with disjointness holding, so
 same-ID ordering rests on the HBM switch there. The milestone pair
 building from b1a014c carries the audited single-channel config and
 should verify as one channel per master.
+
+## 2026-08-31 - formal gate commissioned (formal/, `make formal`)
+
+Property proofs for the modules whose correctness is a control
+argument rather than an arithmetic one, in a pinned container
+(Yosys 0.68, SBY, bitwuzla). Seven proofs, ~37 s total:
+
+  * cft_fifo at 8x8: count consistency, the full/empty contract, and
+    head-data integrity/ordering against a port-only shadow FIFO -
+    UNBOUNDED (mode prove, abc pdr), with covers proving all eight
+    control shapes reachable (both bypass captures, the two-cycle
+    age-out, wrap, mid-stream clear included).
+  * cft_seedop at fp32: decode exactness plus every special-class
+    routing including flush-at-input, complete over all 2^40 inputs;
+    expected encodings derived from field expressions, never typed.
+  * cft_simpleops == the frozen pre-rewrite ref on valid/d/flags for
+    ALL 2^104 inputs with op != 26/27 (the sanctioned reassignment
+    divergence) - the area rewrite's equivalence, which the benches
+    sampled, is now a theorem at the fp32 rung. Budgeted 30 minutes
+    as a stretch; bitwuzla closed it in two seconds.
+
+The commissioning's most valuable output is a failure mode: Yosys's
+open frontend silently drops `bind` and elaborates hierarchical
+references as fresh dangling wires, and the first FIFO "proof" passed
+with ZERO assertions in the model. The gate now counts assertion
+cells per elaborated model before trusting any verdict, the FIFO
+proof uses pdr (the engine synthesises the inductive invariant the
+frontend won't let a human write), and a negative control - a
+deliberately false "the bypass was never needed" claim - must be
+refuted (counterexample at step 3, the write-at-read-head capture)
+for the gate to report green. Each harness was also mutation-tested
+before first commit. Scope limits are in formal/README.md and are
+part of the claim.
