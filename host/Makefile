@@ -190,8 +190,17 @@ divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
 # Guarded: with EXE empty the alias would be a circular self-edge.
 ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
-.PHONY: divsqrt-soak
+mpfr-check: mpfr-check$(EXE)
+.PHONY: divsqrt-soak mpfr-check
 endif
+
+# MPFR parity: the third oracle, and the only independent one that
+# reaches fp128/fp256. Needs libmpfr/libgmp (mingw64 carries them as
+# gcc dependencies; Linux wants libmpfr-dev). See the tool's header
+# for the RMM construction and the flag-derivation policy.
+mpfr-check$(EXE): tools/mpfr_check.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
+	  -o $@ $(LDLIBS) -lmpfr -lgmp -lm
 
 # The same idea as difftest, for programs rather than arithmetic: two
 # independent ports of the sequencer, one in Python and one in C, over

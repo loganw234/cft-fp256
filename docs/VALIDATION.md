@@ -243,3 +243,31 @@ diff/seq/reduce 33s together, soak-quick with its sabotage control
 because they looked wrong until measured: divsqrt_check's 29,124
 cases take 0.6 s - the model is microseconds per case at fp32/64 and
 the library is C - so sub-second stages are honest, not cached.
+
+## 2026-08-31 - MPFR parity: the third oracle, first to reach every rung
+
+host/tools/mpfr_check.c (make mpfr-check; `mpfr` stage of
+verify/run.sh): add/sub/mul/fma/div/sqrt against GNU MPFR 4.2.2 -
+the arbitrary-precision library the rest of the world treats as the
+reference for correct rounding, and the first INDEPENDENT oracle
+that reaches binary128 and binary256 (the CPU stops at binary64; the
+golden model shares an author with the library). IEEE emulation per
+the MPFR manual's own recipe; results compared in the MPFR domain,
+NaN as a class; over/underflow derived from an unbounded-range
+recompute so tininess-after-rounding matches round_pack's definition
+rather than reconciling flag semantics; RMM (no MPFR mode exists)
+built from pure-MPFR intermediates by the p+1 guard/sticky
+construction, with subnormal landings quantised on the fixed grid.
+
+Results: 999,000 cases clean - 177,240 in commissioning plus two
+full-pool runs of 410,880 (seeds 7 and 1913) - across all four
+formats x six operations x five modes, specials, hard families and
+exponent-banded randoms, values AND flags, zero disagreements.
+Commissioning also worked as designed in the other direction: the
+harness's first draft had two bugs (its invalid rule consulted
+operands the op does not read; its subnormal RMM rounded at a
+precision instead of the fixed grid) and the fp32/fp64 rows - already
+proven against 23.9B CPU cases - convicted the harness immediately,
+while the library was right in every disagreement, including the
+tie-at-the-subnormal-grid case. That is the self-calibration a new
+oracle owes before its fp128/fp256 verdicts count.

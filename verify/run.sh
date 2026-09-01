@@ -131,6 +131,7 @@ divsqrt      cft_div/cft_sqrt + seeds vs the model, per-element flags
 diff         library vs model over the alignment boundary
 seq          the sequencer: C vs model over fuzzed programs
 reduce       reduction ranges: C vs model
+mpfr         MPFR parity - the only external oracle reaching fp128/fp256
 soak-quick   native-oracle soak, QUICK depth + sabotage control
 images       hw/verify-image.sh over $IMAGES (XRT hosts, if staged)
 EOF
@@ -250,6 +251,10 @@ need() {  # docker|host-cc|xclbinutil ...
         || STAGE_SKIP_REASON="no python";;
       xclbinutil) command -v xclbinutil >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="xclbinutil not present (XRT hosts only)";;
+      mpfr) [ -f /c/msys64/mingw64/include/mpfr.h ] || \
+            [ -f /usr/include/mpfr.h ] || \
+            [ -f /usr/include/x86_64-linux-gnu/mpfr.h ] \
+        || STAGE_SKIP_REASON="libmpfr headers not found";;
       images-env) [ -n "${IMAGES:-}" ] \
         || STAGE_SKIP_REASON="no IMAGES=... exported (nothing staged to verify)";;
     esac
@@ -324,6 +329,11 @@ need host-cc python
 stage reduce "reduction ranges C-vs-model" -- \
   PY "$ROOT/host/tests/reduce_check.py" --trials 1500
 
+do_mpfr() {
+  HOSTMAKE "mpfr-check$EXE" || return 1
+  (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7)
+}
+
 do_soakquick() {
   # Pre-build via HOSTMAKE so run-soak.sh's own plain `make` finds the
   # binary fresh and never compiles - which is what lets the script
@@ -331,6 +341,9 @@ do_soakquick() {
   HOSTMAKE "divsqrt-soak$EXE" || return 1
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
+need host-cc mpfr
+stage mpfr "MPFR parity: all rungs, all modes, flags (third oracle)" -- do_mpfr
+
 need host-cc
 stage soak-quick "native-oracle soak (QUICK) + sabotage control" -- do_soakquick
 
