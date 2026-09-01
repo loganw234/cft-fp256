@@ -487,3 +487,43 @@ refusals, the hand-derived edges, and in-place-equals-separate for
 the composed ops. Everything else it attacked held: aliasing, UB,
 bn preconditions, the rem parity argument, the cvt_to cutoff,
 validation parity with cft_div, chunking, memory.
+
+## 2026-09-01 - MPFR reaches the rest of clause 5
+
+host/tools/mpfr_check.c grew ~1,200 lines and the only external
+oracle that reaches binary128/256 now covers the completion set:
+rint (all five attributes + the Exact variant), scaleB across every
+n regime including the emin-p host-path boundary and the INT64
+extremes, all 16 convert pairs with destination-grid tie families,
+the eight integer conversions (MPFR in range; the invalid deliveries
+hardcoded from the contract's RISC-V table, which is the contract's
+own choice and says so), logB, nextUp/nextDown - the grid-quantized
+mpfr_nextabove reproduces the standard's -0 and saturation edges
+from the machinery rather than special cases - and remainder with
+exactness asserted from MPFR's own ternary. class/totalOrder/the
+signaling compares are deliberately absent: MPFR has no independent
+notion of them, and an oracle that restates the encoding walk would
+be the harness testing itself.
+
+Two campaigns, zero mismatches, values AND flags: 24,900,800 cases
+each (4,356,800 on the new operations; the old div/sqrt-era checks
+ran alongside and stayed green), once at a398a6b and again at
+6ffffc4 after the review-round hardening landed mid-task. The same
+harness prints an identical 238,328-case ledger on Windows/mingw64
+and Linux. And because a zero-on-first-contact harness proves
+nothing by itself, its convicting power was demonstrated before
+being believed: deliberate mutations (a wrong RDN mapping, flipped
+zero-signs, a swapped NaN delivery) fired 2,282 and 696 mismatches
+respectively, then were reverted and the clean build rerun green.
+No harness bugs this time - and no library bugs.
+
+Environment note for reproducibility: amd-arc-box carried no MPFR
+dev packages, so GMP 6.3.0 + MPFR 4.2.2 were built from SHA-verified
+GNU sources into a prefix under ~/c5-mpfr (both upstream test suites
+green), static-linked, nothing installed system-wide.
+
+The clause-5 completion set now stands where div/sqrt stands: model
+tests, sequence parity, 142,920 C-vs-model checks, ~3M adversarial
+review checks, 24.9M MPFR cases at all four formats - and the
+CPU-hardware soak's 285M-case quick campaign green with its 38.7B
+exhaustive fp32 campaign running.
