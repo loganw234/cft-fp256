@@ -43,6 +43,10 @@ VERILOG_SOURCES = \
 ifeq ($(SIM),icarus)
 # -I: cft_seedop.sv includes the generated ROM from rtl/.
 COMPILE_ARGS += -g2012 -I$(RTLDIR)
+# Top-level parameter overrides, Icarus form (-P<top>.<PARAM>=<value>),
+# so one bench can run the kernel in a configuration the RTL default
+# does not select - the fused-ladder build, for one. Empty by default.
+COMPILE_ARGS += $(KRNL_PARAMS)
 endif
 
 ifeq ($(SIM),verilator)

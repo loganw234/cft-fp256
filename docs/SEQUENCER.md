@@ -5,7 +5,8 @@ integration - and, as of 2026-09-01, **the RTL core itself, benched
 bit-exact against the model**. `python/cft_golden/seq.py` is the
 definition of correct; `host/src/program.c` is libcft's executor and
 agrees with it over a shared fuzz corpus (`make libcft-seq`);
-`rtl/cft_seq.sv` (with its lane array `cft_seq_lanes.sv`) is the
+`rtl/cft_seq.sv`, computing on the kernel's ONE `cft_lanes` array (shared
+with the streaming engine since 2026-09-01 - see below), is the
 hardware, and `tb/test_seq_core.py` holds it to seq.py the way the
 FMA core is held to softfloat.py: 9/9 suites green - deposits,
 counts, flags and STATUS compared exactly, across all four formats,
@@ -31,15 +32,26 @@ deposits, counts, FLAGS and STATUS. The plumbing is therefore testable
 ahead of the core, which is the point of writing the contract down
 first.
 
-The core itself is no longer a stub - `cft_seq` has a fetch, execute
-and drain body, and `tb/test_seq_core.py` scores it against `seq.py`
-directly - but it is not green yet: a sequencer run currently stalls
-in simulation rather than reaching `done`. That is why both sequencer
-targets, `krnlseq` and `seq_core`, are deliberately out of `make sim`
-and wrapped in external timeouts, and why the aggregate suite is still
-a statement about the elementwise engine alone. They fold in on the
-day the core passes, which is the only day the claim would mean
-anything.
+The core is green - `tb/test_seq_core.py` scores its fetch, execute
+and drain body against `seq.py` directly, 9/9 suites - and both
+sequencer targets, `krnlseq` and `seq_core`, are in `make sim`, folded
+in on the day the core passed, which was the only day the claim would
+mean anything.
+
+The one v1 deviation from the shape below is gone. The first RTL gave
+the sequencer a PRIVATE copy of the lane array (`cft_seq_lanes`, the
+same per-lane recipe instantiated a second time, without the fused
+ladders) because the engine's array was woven through the streaming
+datapath and the tree was staged for card day. Out-of-context
+synthesis then put the sequencer-era tile at 288,764 LUT against
+98,310 - the copy was 124,057 of it - and the quad build asked for
+1.32M LUTs of an 871k part. So the array was extracted into
+`rtl/cft_lanes.sv`, ONE instance per tile that `cft_krnl` owns and
+both engines drive through a per-issue request (valid, opcode,
+attribute, precision, three operands) under the same `MODE[15]`
+select that already chose the AXI owner. No arbitration - the two
+never run at once - and P1 became a fact about the netlist rather than
+a claim about two copies of the same source.
 
 So a program can be written and run today, on any machine, with no
 card. What the hardware adds is speed and the on-chip iteration that

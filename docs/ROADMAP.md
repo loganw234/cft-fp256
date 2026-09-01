@@ -494,7 +494,8 @@ this round built the driver.
       forward from this section's own schedule on the open-core
       argument - a DDR- or PCIe-fed tile cannot afford a memory pass
       per step, so the sequencer is the architecture there, not a
-      refinement. rtl/cft_seq.sv + cft_seq_lanes.sv behind MODE[15]
+      refinement. rtl/cft_seq.sv behind MODE[15], driving the kernel's
+      one cft_lanes array (shared with the engine since 2026-09-01)
       (VERSION 0x600, CAPS bit 15, PROG/CNT pointers at 0x54/0x5C),
       sharing the A and D masters under a select registered at start.
       Held bit-exact to seq.py by tb/test_seq_core.py (9/9 suites:

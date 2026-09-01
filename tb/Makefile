@@ -155,6 +155,19 @@ krnlseq:
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \
 		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml
 
+# The kernel with BOTH fused ladders on - the configuration the size
+# campaign built, measured and equivalence-proved lane by lane, and
+# then never ran through the full-kernel bench, because Alveo had
+# room and hw/package_kernel.tcl strips user parameters so no
+# bitstream ever carried it. The quad tile with the sequencer needs
+# the area, so it ships; this is the bench that says the kernel,
+# not just the ladder, is bit-exact with it on.
+krnlfused:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlfused \
+		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1" \
+		COCOTB_RESULTS_FILE=sim_build/krnlfused/results.xml
+
 quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \
