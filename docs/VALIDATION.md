@@ -590,3 +590,20 @@ capability statement" lesson from the ceiling bracket, observed now
 in the favourable direction. CARDDAY.md's decision box is checked;
 the fallback chain is 135 -> 130 general-purpose (~/cardday-ms) ->
 bac9f550 -> 53bbba7.
+
+## 2026-09-01 - correction: the single@147 attempt never ran
+
+The ceiling-bracket entry above says a single @147 was "running to
+pin the number". The box says otherwise: no build-147 directory
+exists in any tree, so the launch died silently at startup - the
+known nohup failure class - and the watcher that timed out today was
+watching for a verdict that was never coming. It is NOT being
+relaunched: the decision that matters ("135 for card day, high-speed
+testing after first light") was made with the bracket's existing
+numbers (~148 single from the 70 ps miss at 150), and a build to
+sharpen 148 into 147-or-148 buys nothing the decision needs. The
+bracket entry's claim stands corrected rather than quietly deleted,
+because a ledger that edits its past is not a ledger.
+
+With it, the box is fully idle for the first time in two days: the
+135 pair staged, the soak complete, no builds in flight.
