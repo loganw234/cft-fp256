@@ -186,8 +186,12 @@ divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
 	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ $(LDLIBS) -lm
 
+# Convenience alias for Windows, where the real target carries .exe.
+# Guarded: with EXE empty the alias would be a circular self-edge.
+ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
 .PHONY: divsqrt-soak
+endif
 
 # The same idea as difftest, for programs rather than arithmetic: two
 # independent ports of the sequencer, one in Python and one in C, over
