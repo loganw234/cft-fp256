@@ -43,6 +43,16 @@ shared library (or link the static one), declare a dozen functions,
 drive the same vectors, diff the checksums. A binding that needs more
 than that is evidence the ABI failed at its one job.
 
+**ABI 0.2 (2026-09-01)** widened the surface with the clause-5
+completion set - cft_rint, cft_convert, the integer conversions,
+cft_scaleb/cft_logb, cft_next_up/_down, cft_class, cft_total_order,
+cft_cmp_sig, cft_rem - all plain positional C functions reachable
+through exactly the FFI each row above already uses. The verified
+column stays honest: every example above exercises the original
+vector_fma surface, and none has been extended to the new calls yet.
+host/tests/clause5_check.py is the reference consumer (ctypes,
+every entry point) a new binding can crib declarations from.
+
 ## Drop-ins
 
 Higher-level packages that slot into an existing ecosystem's shape,
