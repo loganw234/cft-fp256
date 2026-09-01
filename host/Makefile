@@ -260,12 +260,24 @@ divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
 	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ $(LDLIBS) -lm
 
+# The same oracle, aimed at the clause-5 completion set: rint, scaleb,
+# the conversions, logb, next, class and remainder against libm and
+# the CPU's own casts. Same flags for the same reasons; C5DEFS is how
+# hw/run-c5-soak.sh feeds in its roundeven probe result. Driven at
+# scale by that script; the tool's header says which oracle each
+# operation gets and why the flags are compared the way they are.
+clause5-soak$(EXE): tools/clause5_soak.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+	  -frounding-math $(C5DEFS) tools/clause5_soak.c libcft.a -o $@ \
+	  $(LDLIBS) -lm
+
 # Convenience alias for Windows, where the real target carries .exe.
 # Guarded: with EXE empty the alias would be a circular self-edge.
 ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
+clause5-soak: clause5-soak$(EXE)
 mpfr-check: mpfr-check$(EXE)
-.PHONY: divsqrt-soak mpfr-check
+.PHONY: divsqrt-soak clause5-soak mpfr-check
 endif
 
 # MPFR parity: the third oracle, and the only independent one that
