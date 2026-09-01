@@ -130,6 +130,7 @@ formal       property proofs + negative control (docker cft-formal)
 libcft       host library: build + contract tests + conformance replay
 selfcheck    device-test harness, software-vs-software full matrix
 divsqrt      cft_div/cft_sqrt + seeds vs the model, per-element flags
+clause5      the clause-5 completion set vs the model, all entry points
 diff         library vs model over the alignment boundary
 seq          the sequencer: C vs model over fuzzed programs
 reduce       reduction ranges: C vs model
@@ -145,7 +146,7 @@ fi
 # skipped", and crash the census mid-print with an unbound variable -
 # exit 0. A compliance runner must refuse names it does not know.
 STAGELIST="golden vectors sim lint formal libcft selfcheck divsqrt \
-diff seq reduce mpfr soak-quick images"
+clause5 diff seq reduce mpfr soak-quick images"
 check_names() {  # <flagname> <comma-list>
   local n
   for n in $(echo "$2" | tr ',' ' '); do
@@ -367,6 +368,10 @@ stage selfcheck "device-test software self-matrix (seeds + div/sqrt included)" \
 need host-cc python
 stage divsqrt "cft_div/cft_sqrt/seeds vs model" -- \
   PY "$ROOT/host/tests/divsqrt_check.py"
+
+need host-cc python
+stage clause5 "clause-5 completion set vs model" -- \
+  PY "$ROOT/host/tests/clause5_check.py"
 
 need host-cc python
 stage diff "library vs model, alignment boundary" -- \
