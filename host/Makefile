@@ -207,7 +207,30 @@ examples-lang: all
 	else \
 		echo "SKIP rust: no rustc on PATH"; \
 	fi
-	@rm -f .out-c.txt .out-jl.txt .out-rs.txt
+	@if command -v go >/dev/null 2>&1; then \
+		go run examples/vector_fma.go > .out-go.txt && \
+		diff --strip-trailing-cr .out-c.txt .out-go.txt && \
+		echo "go: same library, same bits"; \
+	else \
+		echo "SKIP go: no go on PATH"; \
+	fi
+	@if command -v dotnet >/dev/null 2>&1; then \
+		dotnet run --project examples/vector_fma_cs.csproj \
+			> .out-cs.txt && \
+		diff --strip-trailing-cr .out-c.txt .out-cs.txt && \
+		echo "csharp: same library, same bits"; \
+	else \
+		echo "SKIP csharp: no dotnet on PATH"; \
+	fi
+	@if command -v Rscript >/dev/null 2>&1; then \
+		Rscript examples/vector_fma.R > .out-r.txt && \
+		diff --strip-trailing-cr .out-c.txt .out-r.txt && \
+		echo "r: same library, same bits"; \
+	else \
+		echo "SKIP r: no Rscript on PATH"; \
+	fi
+	@rm -f .out-c.txt .out-jl.txt .out-rs.txt .out-go.txt .out-cs.txt \
+		.out-r.txt
 
 difftest: all
 	$(PYTHON) tests/diff_check.py --trials 3000

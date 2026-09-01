@@ -31,9 +31,9 @@ than its diff has shown.
 | Python (package) | `bindings/python/cftmpfr/` | full package: Context/Float scalar ops, batch ops, gmpy2 interop | Windows (69 tests; 300k/300k bit-identical to gmpy2) | see Drop-ins below |
 | Rust | `host/examples/vector_fma.rs` | single-file example, plain rustc, static-links libcft.a (MSVC rustc included) | Windows | why the static link survives MSVC is in its header |
 | Julia | `host/examples/vector_fma.jl` | single-file example, stdlib ccall | Linux (julia 1.12.7); checksums also match the Windows set | born UNVERIFIED, asterisk lasted one day |
-| Go | `host/examples/vector_fma.go` | in progress (agent, cgo single file) | pending | |
-| C# / .NET | `host/examples/VectorFma.cs` | in progress (agent, P/Invoke, no NuGet) | pending | |
-| R | `host/examples/vector_fma.R` | in progress (agent, base R dyn.load) | pending | namechecked in cft.h's pitch since day one |
+| Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux (go 1.18) | static-links libcft.a as a direct linker input |
+| C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows (dotnet 10) + Linux (dotnet 8) | resolver maps to exactly one candidate; error paths byte-identical |
+| R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux (R 4.1.2) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
 | Browser / WASM | `bindings/wasm/` | in progress (agent): software backend compiled to WebAssembly + a single-file conformance page | pending | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |

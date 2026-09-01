@@ -57,3 +57,7 @@ host/.out-*.txt
 # copyright (the Cornell FP page that landed here says so at the foot),
 # and a `git add -A` will sweep them in without asking.
 Data/
+# dotnet run's build litter beside the C# example; go's local binary
+host/examples/bin/
+host/examples/obj/
+host/vector-fma-go
