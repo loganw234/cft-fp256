@@ -1,0 +1,225 @@
+# Copyright 2026 Logan W.
+# SPDX-License-Identifier: Apache-2.0
+"""Whole-array operations: one libcft call per op, zero Python per element.
+
+This module is where the acceleration lives. The scalar path in
+core.py crosses the ctypes boundary once per operation per value; a
+pure-gmpy2 loop crosses the interpreter's dispatch machinery the same
+way. Here the interpreter is crossed ONCE and libcft's C loop does the
+elements - and on the device backend the same single call is a DMA and
+a kernel launch. Batch semantics are the header's: element i of the
+output depends on element i of the inputs, the returned flag word is
+the OR over every element (padding never contributes), and the tests
+prove batch output is bit-identical to a loop of scalar calls.
+
+Operands may be, in any mix:
+
+* a ``list``/``tuple`` of Float (or of ints/floats, coerced through
+  the context's exact-or-refuse constructors),
+* ``bytes``/``bytearray``/``memoryview`` holding packed little-endian
+  encodings (length a multiple of the element size),
+* a numpy ndarray, when numpy is installed: any dtype whose itemsize
+  equals the element size (float32/float64 for those formats, or a
+  void/structured dtype such as ``V32`` for binary256), or a uint8
+  array of packed encodings,
+* a single ``Float``, which broadcasts - the Horner-step coefficient
+  case. Only a Float broadcasts: a one-element bytes object is a
+  sequence of one, because a rule you have to guess is a bug factory.
+
+The result mirrors the container of the first sequence operand (list
+in, list out; bytes in, bytes out; ndarray in, ndarray of the same
+dtype and shape out) and arrives with the call's flag word:
+
+    out, flags = batch.fma(ctx, xs, ys, zs)
+
+``tree_sum`` and ``tree_dot`` are the contract's REDUCTIONS: the fixed
+index-shaped binary tree of docs/DETERMINISM.md, identical bits on
+one tile or four. They are deliberately not called "sum": MPFR's
+mpfr_sum is a single correctly-rounded operation with different
+results, and a name that invited the confusion would cost somebody a
+week.
+"""
+
+from . import _lib
+from .core import Float
+
+try:
+    import numpy as _np
+except ImportError:  # optional; arrays simply cannot arrive without it
+    _np = None
+
+
+def _as_operand(ctx, x):
+    """-> (payload, n_or_None, mirror) where payload is packed bytes
+    (or a bytes-like buffer), n is the element count (None for a
+    broadcast scalar), and mirror is a callable rebuilding this
+    operand's container style from result bytes (None if this operand
+    should not shape the output)."""
+    esz = ctx._fi.esz
+
+    if isinstance(x, Float):
+        if x._ctx._fi.prec != ctx._fi.prec:
+            raise ValueError(
+                f"mixed precisions: {x._ctx._fi.ieee_name} Float in a "
+                f"{ctx._fi.ieee_name} batch")
+        return x.to_bytes(), None, None
+
+    if isinstance(x, (bytes, bytearray, memoryview)):
+        buf = bytes(x)
+        if len(buf) % esz:
+            raise ValueError(
+                f"{len(buf)} bytes is not a whole number of "
+                f"{ctx._fi.ieee_name} encodings ({esz} bytes each)")
+        return buf, len(buf) // esz, lambda out: out
+
+    if isinstance(x, (list, tuple)):
+        encs = [ctx._coerce(v).to_bytes() for v in x]
+        return (b"".join(encs), len(encs),
+                lambda out: [Float(ctx, out[i * esz:(i + 1) * esz])
+                             for i in range(len(out) // esz)])
+
+    if _np is not None and isinstance(x, _np.ndarray):
+        if x.dtype.itemsize == esz:
+            n = x.size
+            mirror = (lambda out, dt=x.dtype, sh=x.shape:
+                      _np.frombuffer(out, dtype=dt).reshape(sh).copy())
+        elif x.dtype.itemsize == 1:
+            if x.size % esz:
+                raise ValueError(
+                    f"uint8 array of {x.size} bytes is not a whole number "
+                    f"of {esz}-byte {ctx._fi.ieee_name} encodings")
+            n = x.size // esz
+            mirror = (lambda out, dt=x.dtype:
+                      _np.frombuffer(out, dtype=dt).copy())
+        else:
+            raise ValueError(
+                f"dtype {x.dtype} has {x.dtype.itemsize}-byte elements; a "
+                f"{ctx._fi.ieee_name} batch needs {esz}-byte elements "
+                f"(e.g. dtype 'V{esz}'), or uint8 holding packed "
+                f"encodings. A different float width is a different "
+                f"format - convert explicitly.")
+        # tobytes() copies (and linearises any non-contiguous view).
+        # The copy runs at memory bandwidth and the arithmetic does
+        # not; measuring before optimising said leave it alone.
+        return x.tobytes(), n, mirror
+
+    raise TypeError(f"cannot use {type(x).__name__} as a batch operand")
+
+
+def _normalise(ctx, operands):
+    """Resolve counts and broadcasts across one call's operands.
+    Returns (payload list, n, mirror-of-first-sequence-operand)."""
+    parts = [_as_operand(ctx, x) for x in operands]
+    counts = {n for _, n, _ in parts if n is not None}
+    if not counts:
+        raise TypeError(
+            "every operand is a broadcast scalar; batch needs at least "
+            "one sequence to set the element count (for scalars, the "
+            "Context methods are the right call)")
+    if len(counts) != 1:
+        raise ValueError(f"operand lengths disagree: {sorted(counts)}")
+    n = counts.pop()
+    payloads = []
+    mirror = None
+    for buf, cnt, mk in parts:
+        if cnt is None:
+            buf = buf * n          # broadcast: replicate the encoding
+        payloads.append(buf)
+        if mirror is None and mk is not None:
+            mirror = mk
+    return payloads, n, mirror
+
+
+def _finish(ctx, out, fl, mirror):
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return mirror(out), fl
+
+
+# ---------------------------------------------------------------------
+# Elementwise. Operand slots follow cft.h exactly: ADD/SUB read a and
+# c (b unused), MUL reads a and b (c unused), FMA reads all three.
+# ---------------------------------------------------------------------
+
+def add(ctx, x, y):
+    """out[i] = x[i] + y[i]. Returns (results, flag word)."""
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.run(ctx._dev, _lib.OP_ADD, ctx._fi.code, ctx._rnd,
+                       bx, None, by, n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def sub(ctx, x, y):
+    """out[i] = x[i] - y[i]."""
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.run(ctx._dev, _lib.OP_SUB, ctx._fi.code, ctx._rnd,
+                       bx, None, by, n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def mul(ctx, x, y):
+    """out[i] = x[i] * y[i]."""
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.run(ctx._dev, _lib.OP_MUL, ctx._fi.code, ctx._rnd,
+                       bx, by, None, n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def fma(ctx, x, y, z):
+    """out[i] = x[i]*y[i] + z[i], one rounding (the exact product is
+    never rounded on its own) - mpfr_fma element by element."""
+    (bx, by, bz), n, mirror = _normalise(ctx, (x, y, z))
+    out, fl = _lib.run(ctx._dev, _lib.OP_FMA, ctx._fi.code, ctx._rnd,
+                       bx, by, bz, n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def div(ctx, x, y):
+    """out[i] = x[i] / y[i], correctly rounded via libcft's fixed
+    seed/Newton/residual sequence - some 25-30 elementwise passes per
+    call, the honest price of correct rounding built from an FMA. On
+    the software backend that price is real; on the tile the passes
+    run at hardware speed."""
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.div(ctx._dev, ctx._fi.code, ctx._rnd, bx, by,
+                       n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def sqrt(ctx, x):
+    """out[i] = squareRoot(x[i]), correctly rounded; same sequence
+    story as div."""
+    (bx,), n, mirror = _normalise(ctx, (x,))
+    out, fl = _lib.sqrt(ctx._dev, ctx._fi.code, ctx._rnd, bx,
+                        n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+# ---------------------------------------------------------------------
+# Reductions: n in, ONE out, over the contract's fixed tree.
+# ---------------------------------------------------------------------
+
+def tree_sum(ctx, x):
+    """The contract reduction: sum over the fixed index-shaped binary
+    tree, rounded at every node in the context's attribute. NOT
+    mpfr_sum (a single correctly-rounded sum) - same inputs, different
+    and equally deterministic bits. n=0 yields +0 and raises nothing;
+    n=1 yields the element verbatim. Returns (Float, flag word)."""
+    (bx,), n, _ = _normalise(ctx, (x,))
+    out, fl = _lib.reduce(ctx._dev, _lib.OP_SUM, ctx._fi.code, ctx._rnd,
+                          bx, None, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), fl
+
+
+def tree_dot(ctx, x, y):
+    """sum over the fixed tree of round(x[i]*y[i]): each product is
+    rounded once, then summed like tree_sum. Same non-mpfr_sum caveat.
+    Returns (Float, flag word)."""
+    (bx, by), n, _ = _normalise(ctx, (x, y))
+    out, fl = _lib.reduce(ctx._dev, _lib.OP_DOT, ctx._fi.code, ctx._rnd,
+                          bx, by, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), fl
