@@ -47,8 +47,13 @@ kernel flow, XRT host runtime.
   lives in three places that must move together: this module,
   `softfloat.steer`, and this document.
 - **cft_simpleops** - the operations that are not arithmetic: `abs`,
-  `negate`, `copySign` (754 5.5.1) and the four min/max forms (9.6).
-  A sign bit and a magnitude comparison, computed combinationally.
+  `negate`, `copySign` (754 5.5.1), the four min/max forms (9.6), the
+  quiet predicates + `select`, and the integer/bitwise group. A sign
+  bit, one magnitude comparison and one shifter, computed
+  combinationally - and proven bit-identical to its pre-rewrite self
+  over all 2^104 inputs by the formal gate. Beside it, **cft_seedop**
+  answers the divide/sqrt seed opcodes (26/27) from two model-derived
+  ROMs.
   Its answer reaches the output through the pipe's precomputed-result
   sideband - the same path infinities and NaNs already take - so it
   arrives at exactly the arithmetic latency with no delay line of its

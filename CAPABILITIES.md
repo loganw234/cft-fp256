@@ -5,20 +5,27 @@ against IEEE 754-2019 and against the workload it was built to serve.
 
 **The empty boxes are the point.** This file exists so that "is it
 general purpose yet?" has an answer you can check rather than a
-feeling, and so the gap between *a very good fused-multiply-add engine*
-and *a general floating-point processor* is written down instead of
-implied. Today the tile is emphatically the former.
+feeling. For a long time the honest answer was *a very good
+fused-multiply-add engine and not more*. As of 2026-08-31 the six
+required arithmetic operations all exist and are proven; the word
+"general purpose" now hangs on programmability, and the boxes below
+say exactly where.
 
 | mark | meaning |
 |---|---|
 | **yes** | in the RTL and verified bit-exact against the golden model, in simulation and through the real XRT stack |
+| **composed** | the hardware supplies the primitive (the divide/sqrt seed opcodes + FMA); libcft composes the full correctly-rounded operation as a fixed sequence of those calls, identical on every backend, with the integer bookkeeping done exactly on the host - the same division of labour the multi-tile reduction fold uses. Bit-identical to the contract, and proven against three independent oracles |
 | **model** | defined in `python/cft_golden` and covered by conformance vectors, but no hardware - a host can use it, the tile cannot |
 | **no** | not implemented anywhere |
 | **out** | deliberately excluded; the reason is given |
 
-Anything marked **yes** is bit-identical across every device that
-implements this contract - that is the whole product. Anything marked
-**no** is not slow here, it is *absent*: the host must do it.
+Anything marked **yes** or **composed** is bit-identical across every
+device that implements this contract - that is the whole product.
+Anything marked **no** is not slow here, it is *absent*: the host must
+do it. You can check the central claim yourself with a browser and
+nothing else: https://loganw234.github.io/cft-fp256/ replays the
+published conformance vectors through the real library compiled to
+WebAssembly.
 
 ## Formats
 
@@ -32,14 +39,17 @@ implements this contract - that is the whole product. Anything marked
 | bfloat16, TF32, FP8 | **out** | not interchange formats. Identity needs one definition per width, and these have several |
 | decimal64/128 | **out** | a different arithmetic, not a wider one |
 
-A build may drop the fp64/fp128/fp256 banks (`EN_FP64` and friends);
-what remains is advertised in the CAPS register and behaves
-identically on the rungs it keeps.
+A build may drop the fp64/fp128/fp256 banks (`EN_FP64` and friends) or
+narrow the beat itself (`BEAT_BITS`); what remains is advertised in
+CAPS and behaves identically on the rungs it keeps. A MODE selecting a
+precision the build lacks is **refused** - STATUS[3], engine never
+starts, no memory touched - rather than answered with plausible
+garbage from banks that are not there.
 
 ## Arithmetic operations (754-2019 clause 5.4.1)
 
 These are the *required* homogeneous general-computational operations.
-Four of six exist.
+**All six exist.**
 
 | operation | status | notes |
 |---|---|---|
@@ -47,8 +57,17 @@ Four of six exist.
 | `addition` | **yes** | steered through the FMA (b := 1.0) |
 | `subtraction` | **yes** | steered (b := 1.0, c sign-flipped) |
 | `multiplication` | **yes** | steered (c := signed zero) |
-| `division` | **no** | see "What general purpose would take" |
-| `squareRoot` | **no** | same |
+| `division` | **composed** | `cft_div`: recip seed (opcode 26, in hardware, rel. error < 2^-8.5 proven exhaustively) + Newton + a truncating Markstein finish driven to floor by exact residual signs + a MEASURED guard + one rounding. Correctly rounded in all five attributes, full flags |
+| `squareRoot` | **composed** | `cft_sqrt`: same shape from the rsqrt seed (opcode 27) and the exact midpoint discriminant |
+
+The evidence behind **composed**, because the mark is new: bit-identical
+to the contract `div`/`sqrt` over the model matrix (29,124 cases, every
+format and attribute, per-element flags); **23.875 billion cases
+against the host CPU's own IEEE hardware** at fp32/fp64 - exhaustive
+fp32 square root under every attribute - zero disagreements, flags
+included; and **999,000 cases against GNU MPFR** across all four
+formats, the only external oracle that reaches binary128/256. All in
+docs/VALIDATION.md.
 
 ## Rounding (clause 4.3)
 
@@ -75,13 +94,10 @@ and the clause 6.3 signed zero of an exact cancellation.
 | inexact | **yes** | sticky, OR-accumulated over the run |
 | underflow | **yes** | tininess after rounding, raised only when tiny **and** inexact |
 | overflow | **yes** | with the per-attribute delivered result |
-| invalid | **yes** | sNaN operand, `inf * 0`, `inf - inf` |
-| divideByZero | **no** | bit reserved; there is no division to raise it |
+| invalid | **yes** | sNaN operand, `inf * 0`, `inf - inf`, `0/0`, `inf/inf`, sqrt of a negative |
+| divideByZero | **yes** | raised by `cft_div` for finite/0, exactly per 7.3 |
 | trap handling | **out** | flags are sticky data, never control flow. Deterministic by construction |
 | per-element flags | **no** | the FLAGS register is the OR over the run, not per lane |
-
-Reading the flags from the host is currently blocked by a tooling gap,
-not a hardware one - see "Host access" below.
 
 ## Non-arithmetic operations
 
@@ -96,11 +112,12 @@ datapath - so they cost a comparator and a sign bit, not a stage.
 | `cmplt`, `cmple`, `cmpeq` | **yes** | quiet predicates yielding 1.0 or +0.0 |
 | `minimum`, `maximum` | **yes** | NaN propagates; `min(+0,-0)` is -0 |
 | `minimumNumber`, `maximumNumber` | **yes** | returns the number when one operand is NaN |
+| `recip_seed`, `rsqrt_seed` | **yes** | the divide/sqrt starting points, exposed as opcodes 26/27 (quiet, no flags, subnormal inputs flush to their zero-class result by spec) - a caller building its own iteration gets the same seed the library uses |
 
-## Everything else in clause 5 - the gap
+## Everything else in clause 5 - the remaining gap
 
-Most of this does not exist. It is listed in full because the length
-of the list *is* the distance to general purpose.
+Listed in full because the length of the list *is* the distance to
+full 754 coverage.
 
 | group | operations | status |
 |---|---|---|
@@ -109,6 +126,7 @@ of the list *is* the distance to general purpose.
 | min/max (9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **yes** - 754-2019 moved these out of 5.3.1 and changed the sNaN rule; this follows the 2019 semantics |
 | comparisons (5.6.1, 5.11) | `compareQuietLess`, `LessEqual`, `Equal` - as floats a select can consume; **greater/greaterEqual come free by swapping the operand pointers** | **yes** |
 | comparisons (5.6.1, 5.11) | `compareSignaling*`, the remaining predicates, condition codes | **no** |
+| reductions | `sum`, `dot` with the index-fixed tree | **yes** - contract 0x500; the tree shape is part of the contract, four tiles return what one returns, and `dot(a,b) == sum(mul(a,b))` exactly, flags included |
 | conversions (5.4.2) | int -> float, float -> int (all five roundings) | **no** |
 | format conversion (5.4.2) | fp32 <-> fp64 <-> fp128 <-> fp256 | **no** |
 | round to integral (5.3.1) | `roundToIntegral{TiesToEven,TowardZero,...,Exact}` | **no** |
@@ -117,8 +135,7 @@ of the list *is* the distance to general purpose.
 | next (5.3.1) | `nextUp`, `nextDown` | **no** |
 | classification (5.7.2) | `class`, `isNaN`, `isInfinite`, `isNormal`, `isSubnormal`, `isZero`, `isSignMinus`, `isCanonical` | **no** |
 | total order (5.10) | `totalOrder`, `totalOrderMag` | **no** |
-| NaN payloads (6.2.3) | payload propagation | **out** | 
-| reductions | `dot`, `sum` with index-fixed tree order | **no** - roadmap, and the headline feature when it lands: deterministic reduction is what no GPU can promise |
+| NaN payloads (6.2.3) | payload propagation | **out** |
 
 The NaN row is a deliberate deviation from a *recommendation*: any NaN
 in produces one canonical quiet NaN out, because payload propagation
@@ -131,28 +148,23 @@ docs/DETERMINISM.md.
 `hypot`, `pow`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`,
 `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `rSqrt`,
 `compound`, `rootn`, `pown`, `powr` - **all no**, and mostly by
-choice rather than by omission. See the next section: the atlas det
-library computes these *in software from fused multiply-add*, exactly
-so their results do not depend on anyone's hardware transcendental.
-The tile's job is to make that software exact and fast, not to grow
-its own `sin`.
+choice rather than by omission. The atlas det library computes these
+*in software from fused multiply-add*, exactly so their results do not
+depend on anyone's hardware transcendental. The tile's job is to make
+that software exact and fast, not to grow its own `sin`. The composed
+divide and square root are the template for how such a function ships
+here when one is genuinely wanted: hardware seed, FMA composition,
+proof against oracles - never a black-box unit.
 
 ## The atlas-engine det_* library
 
 `atlas-engine`'s deterministic library is the workload this tile
 exists to serve, and the most useful measure of readiness. It is 38
-functions, and **none of them run on the tile today** - but the reason
-is not the one the empty column suggests.
+functions built almost entirely from `fma` (51 uses against a handful
+of everything else), deliberately, so a GLSL driver's quirks cannot
+reach the results.
 
-The library is *self-contained software*. `det_sqrt` is a bit-pattern
-seed refined by Newton iterations on `fma`; `det_div` is a reciprocal
-refined the same way; `det_sincos`, `det_exp2` and `det_log2` are
-range reduction plus polynomials. Across the library the primitive
-mix is 51 uses of `fma` against a handful of everything else. It is
-built that way deliberately - a GLSL driver may flush denormals or
-differ on `sin`, so the library trusts almost nothing but fma.
-
-That means the distance to running it on-chip is short and specific:
+The distance to running it on-chip:
 
 | what det_* needs | status |
 |---|---|
@@ -162,113 +174,77 @@ That means the distance to running it on-chip is short and specific:
 | compare and branchless select | **yes** |
 | `abs`, `min`, `max` | **yes** |
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
+| division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright |
 | `floor`, `round`, `step` | **no** - `roundToIntegral` is the next cheap win |
 | a sequencer to run a chain on-chip | **not in hardware.** The ISA is specified (docs/SEQUENCER.md), the golden model executes it, and libcft runs programs today on the software backend - so a program can be written and checked now. The RTL is v2 |
 
-Six rows, two still missing after the 2026-08-29 work. Grouped by
-what they would unlock:
-
-| family | functions |
-|---|---|
-| algebraic | `det_div`, `det_div2`, `det_recip`, `det_sqrt`, `det_isqrt`, `det_scale48` |
-| transcendental | `det_exp2`, `det_log2`, `det_pow`, `det_sin`, `det_cos`, `det_sincos`, `det_tan`, `det_asin`, `det_acos`, `det_atan`, `det_sinh`, `det_cosh`, `det_tanh` |
-| rounding / piecewise | `det_fract`, `det_mod`, `det_mix`, `det_mix3`, `det_smoothstep` |
-| vector | `det_dot3`, `det_cross`, `det_len`, `det_len2`, `det_len3`, `det_len3v`, `det_normalize3`, `det_rodrigues` |
-| complex | `det_cmul`, `det_cdiv`, `det_cinv`, `det_csqrt` |
-| atlas-specific | `det_pal`, `det_pal1` |
-
-Today a det_* function could in principle be evaluated as a hybrid -
-the tile doing the fma passes, the host doing the integer and select
-work between them - and the result would be bit-exact. It would also
-be absurdly slow, one memory round trip per arithmetic step. That is
-not a product, it is an existence proof.
+Today a det_* function could be evaluated as a hybrid - the tile doing
+the fma passes, the host doing the integer and select work between
+them - and the result would be bit-exact. `cft_div` and `cft_sqrt` ARE
+that hybrid, shipped and proven: ~25-30 passes per call, which is the
+honest price of correct rounding composed from FMA, and the measured
+reason the sequencer is v2's headline (the same sequence as one
+on-chip program is the ~25x traffic win).
 
 ## Engine and host
 
 | capability | status | notes |
 |---|---|---|
 | elementwise over three input arrays | **yes** | D = op(A, B, C) |
-| burst AXI, overlapped read/compute/write | **yes** | ~4.4 cycles/beat, port-bound |
+| burst AXI, overlapped read/compute/write | **yes** | one AXI master per stream, one HBM pseudo-channel per master |
 | precision and rounding selected per run | **yes** | snapshot at start; a mid-run change cannot corrupt a run |
-| capability discovery (CAPS) | **yes** | which rungs this bitstream carries |
-| bus-fault reporting (STATUS) | **yes** in RTL | see Host access |
-| multiple compute units | **no** | one CU per bitstream today |
+| capability discovery (CAPS) | **yes** | formats and opcode groups this bitstream carries |
+| unsupported precision | **refused** | STATUS[3]: engine never starts, memory untouched, done still asserts - an error, not an output |
+| bus-fault reporting (STATUS) | **yes** | including the abandon-on-length-violation path, so a protocol fault is a prompt error rather than a hang |
+| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. The quad image is built and verified |
+| reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | strided or gathered access | **no** | three dense linear streams |
-| on-chip program / loop | **no** | one operation per pass over memory |
-| in-place operation (D aliasing A/B/C) | works, undocumented | the write pointer trails the read pointers by construction |
+| on-chip program / loop | **no** | one operation per pass over memory; the sequencer is v2 |
+| in-place operation (D aliasing A/B/C) | **yes** | documented in cft.h: each element is read before written |
 
 ### Host access
 
-**Fixed by libcft (2026-08-29).** The C library's XRT backend reads
-FLAGS, STATUS and CAPS, and refuses to open a device where it cannot -
-so a Python caller reaching the card through `ctypes` and libcft gets
-what a Python caller reaching it through pyxrt cannot.
+libcft's XRT backend reads FLAGS, STATUS and CAPS and refuses to open
+a device where it cannot. The old pyxrt limitation stands for pyxrt
+itself (no `read_register` as of XRT 2.19), so
+`host/examples/vector_fma.py` warns rather than pretending the check
+ran - but every caller going through libcft (which is every language
+in docs/COMPATIBILITY.md) gets the full story.
 
-The original limitation stands for pyxrt itself. Checked against XRT
-2.14.354 and 2.19.194: `pyxrt.kernel` exposes `group_id` and the CU
-access modes and nothing else - no `read_register`, and no `pyxrt.ip`.
-So FLAGS, STATUS and CAPS are unreachable from
-`host/examples/vector_fma.py`, which warns rather than pretending the
-check ran.
+## What "general purpose" would take from here
 
-This costs diagnosis rather than correctness: the result-buffer
-comparison against the golden model is the real gate, and a bus fault
-corrupts the results, so a fault still fails the run - just as "wrong
-answer" instead of "the memory never delivered". The fix is to give
-the kernel a small status output buffer so the sticky words come back
-through the AXI master like every other result.
+1. **Programmability.** The one remaining structural gap. Every
+   operation today is one pass over memory; a det_* function is ten to
+   thirty dependent steps, and the composed div/sqrt measure the cost
+   precisely (~25-30 passes per call). The v2 orbit sequencer is what
+   turns this from a vector ALU into a processor. The design is
+   settled and executable - docs/SEQUENCER.md, seq.py, and libcft's
+   software-backend program runner agree over a fuzz corpus - so a
+   program can be written and checked today; the tile just cannot run
+   one yet.
 
-## What "general purpose" would take
+2. **The cheap operations, which are cheap.** `roundToIntegral` and
+   the classification predicates: shallow logic on data the datapath
+   already unpacks, absent because nothing has needed them yet.
+   Format conversions follow the same way.
 
-Three things, in the order they matter:
-
-1. **Programmability.** The single largest gap is not an arithmetic
-   operation, it is that the tile has no way to express *a sequence*.
-   Every operation today is one pass over memory. A det_* function is
-   ten to thirty dependent steps; at one memory round trip each, the
-   arithmetic is free and the traffic is everything. The v2
-   orbit/micro-sequencer engine is what turns this from a vector ALU
-   into a processor, and it is worth more than every missing operation
-   below combined.
-
-   As of 2026-08-29 the design is settled and executable rather than
-   sketched: docs/SEQUENCER.md has the instruction encoding and the
-   determinism argument, python/cft_golden/seq.py is the definition of
-   correct, and libcft runs programs on the software backend and
-   agrees with it over a fuzz corpus. What is missing is the RTL - so
-   a program can be written and its results checked today, at software
-   speed, and the tile still cannot run one.
-
-2. **The cheap operations, which are cheap.** `abs`, `negate`,
-   `copySign` and the four min/max forms landed on 2026-08-29 and cost
-   a comparator each - they ride the pipeline's existing
-   precomputed-result path, so they added no stage and no latency.
-   Comparison predicates, select and the integer group followed the
-   same day and the same way. What remains in this class is
-   `roundToIntegral` and the classification predicates - shallow logic
-   on data the datapath already unpacks, absent because nothing has
-   needed them yet rather than because they are hard.
-
-3. **Division and square root.** The genuinely expensive additions,
-   and the least urgent: the det library already implements both from
-   fma to better precision than a hardware unit would give it, and
-   with a rounding it controls. Worth building when someone needs a
-   correctly-rounded `divide` per the standard, not before.
-
-Format conversions and the remaining clause 5 operations follow from
-(2). Transcendentals in hardware are not on the path at all - the
-software-from-fma approach is the more defensible answer for a project
-whose claim is reproducibility.
+3. ~~Division and square root.~~ **Done** (2026-08-31): seed opcodes
+   in hardware, composition in libcft, correctly rounded per 5.4.1
+   with full flags, three independent oracles. The gap this file was
+   originally written around no longer exists.
 
 ## Summary
 
 - As an **FMA engine**: complete. Four interchange formats, all five
   rounding attributes, correct flags and edge cases, verified against
   the definition rather than against another implementation.
-- As an **IEEE 754 implementation**: four of six required arithmetic
-  operations, and none of the comparison, conversion, classification
-  or auxiliary operations.
-- As a **general-purpose float processor**: not yet, and the blocker
-  is programmability rather than arithmetic.
-- For the **atlas det library**: the hard part is done and the easy
-  parts are missing.
+- As an **IEEE 754 implementation**: **all six required arithmetic
+  operations**, reductions with a contractual tree, and the quiet
+  comparison/min-max/sign set. Still absent: conversions,
+  roundToIntegral, classification, signaling comparisons, remainder,
+  and the auxiliary operations.
+- As a **general-purpose float processor**: the blocker is
+  programmability alone now - the sequencer, not arithmetic.
+- For the **atlas det library**: every primitive it refines from
+  exists on the tile, including its seeds; what is missing is the
+  on-chip sequence to chain them without a memory round trip per step.

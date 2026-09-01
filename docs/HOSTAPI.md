@@ -5,12 +5,14 @@ people using it. The header was published before the implementation,
 deliberately - an ABI is far cheaper to argue with before anything
 depends on it than after.
 
-**The software backend is now implemented**, in `host/src/`: about
-1,700 lines of C99 in four files, with no dependencies, no configure
-step and no generated bindings. `make -C host` builds a static library, a shared
-library, and the tools below. The device backend is not built yet, so
-`cft_open()` with an artifact path reports `CFT_ERR_NO_DEVICE`;
-nothing above the API changes when it lands, which is the point of
+**Both backends are implemented** in `host/src/`: the software
+backend (C99, no dependencies, no configure step, no generated
+bindings) and the XRT device backend (`backend_xrt.cpp`, compiled in
+with `XRT=1`, driving up to 64 compute units with the tree-aware
+reduction split). `make -C host` builds a static library, a shared
+library, and the tools below; without `XRT=1`, `cft_open()` with an
+artifact path reports `CFT_ERR_NO_DEVICE`. Nothing above the API
+changed when the device backend landed - which was the point of
 having written the API first.
 
 ## The shape of the thing
@@ -343,6 +345,16 @@ whole-array answer:
 |---|---|---|
 | `reduce_check.py`, libcft vs the golden model | 7,640 reductions across 4 formats | tree, bits and flags agree |
 | `reduce-parts`, every canonical partition vs the whole | 4,060 partitions (4 formats x 29 sizes x 7 part counts x 5 attributes) | every partition reproduces the whole |
+
+And the divide/sqrt era (2026-08-31 onward), same discipline, more
+oracles - current numbers, with docs/VALIDATION.md as the ledger:
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay (regenerated sets incl. the seed opcodes) | 392,000 | every case, bits and flags |
+| `divsqrt_check.py`, cft_div/cft_sqrt vs the model | 29,124 + a chunk-boundary batch | zero disagreements, per-element flags |
+| native-oracle soak vs the host CPU's IEEE hardware | 23.875 billion (exhaustive fp32 sqrt, all five attributes) | zero value or flag disagreements |
+| MPFR parity, all four formats, all five attributes | 999,000 | zero disagreements |
 
 The second table is the one that matters for tiles. It is the software
 statement of the property the hardware has to keep: cutting a
