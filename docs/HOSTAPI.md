@@ -252,6 +252,54 @@ is the price of correct rounding built from an FMA - on any
 implementation of this route - and it buys the property the project
 exists for: the same bits from the laptop and the card.
 
+## The clause-5 completion set (ABI 0.2)
+
+Everything clause 5 still asked for after div/sqrt landed on
+2026-09-01, in one additive ABI bump: `cft_rint`, `cft_scaleb`,
+`cft_cmp_sig`, `cft_convert`, `cft_cvt_from_/to_{i32,u32,i64,u64}`,
+`cft_logb`, `cft_next_up`/`_down`, `cft_class`, `cft_total_order`
+(`_mag`), `cft_rem`. The full semantics live in cft.h's own doc
+comments and docs/DETERMINISM.md; what belongs HERE is the design
+split, because it explains every signature:
+
+**Three are composed**, exactly as cft_div is. `cft_rint` is the
+magic-constant addition - `(x + copysign(2^(p-1), x)) -
+copysign(2^(p-1), x)` under the caller's attribute, two adds whose
+rounding at integer weight IS the operation - with host bookkeeping
+substituting the already-integral, infinite and NaN lanes and
+synthesising the contract flags (the named variants signal nothing;
+only `Exact` reports inexact). `cft_scaleb` multiplies by the exact
+float `2^n` whenever it exists, so the multiply's own flags are the
+contract flags; above emax it stages in chunks whose saturation is
+proven consistent, and beyond the subnormal floor - where no exact
+factor exists and uniform staging would round twice - it packs each
+lane once on the host instead. `cft_cmp_sig` takes the quiet
+predicate's value from the tile and synthesises invalid-for-any-NaN.
+`python/cft_golden/sequences.py` specifies the first two routes and
+holds them bit-identical to the contract.
+
+**The rest are host operations**, and the reason is worth stating
+plainly: they contain no floating-point arithmetic AT ALL. A format
+conversion is one `round_pack` of an exactly-known value; nextUp is
+an increment on the encoding; totalOrder is an unsigned compare of a
+key transform; remainder is exact integer reduction. There is nothing
+for a device to accelerate, so no backend pass is issued and the
+device argument is context. They are bit-identical across backends by
+construction rather than by testing - and tested anyway.
+
+Two contract choices a porter must not miss: `cft_cvt_to_*` pins the
+invalid-case delivered values (which 754 leaves open) to RISC-V's
+FCVT table, and `cft_class` pins its ten values to RISC-V's fclass
+bit indices - both because this project already speaks RISC-V for
+rounding encodings and tininess, and one table beats two.
+
+`cft_rem` is the one entry point with a cost note: the C walks the
+exponent gap a quotient bit at a time in p-bit integer work (the
+model does one unbounded divmod; `clause5_check.py` holds the two
+identical, full-gap fp256 case included). Typical calls are a
+handful of steps; the adversarial fp256 pair is ~786k of them - tens
+of milliseconds, on the host, once.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future
@@ -353,6 +401,7 @@ oracles - current numbers, with docs/VALIDATION.md as the ledger:
 |---|---|---|
 | `cft_conformance` replay (regenerated sets incl. the seed opcodes) | 392,000 | every case, bits and flags |
 | `divsqrt_check.py`, cft_div/cft_sqrt vs the model | 29,124 + a chunk-boundary batch | zero disagreements, per-element flags |
+| `clause5_check.py`, the completion set vs the model | 112,372 (all entry points, 16 conversion pairs, chunk-crossing batches, the fp256 full-gap remainder) | zero disagreements, per-element flags |
 | native-oracle soak vs the host CPU's IEEE hardware | 23.875 billion (exhaustive fp32 sqrt, all five attributes) | zero value or flag disagreements |
 | MPFR parity, all four formats, all five attributes | 999,000 | zero disagreements |
 

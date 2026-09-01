@@ -47,8 +47,13 @@ tile advertises what it carries in the CAPS CSR
 ## Operations
 
 The arithmetic core: `fma(a,b,c) = a*b + c`, `add`, `sub`, `mul` -
-elementwise over vectors. Everything else the tile implements is
-non-arithmetic and is specified further down.
+elementwise over vectors. Division and square root are contract
+operations composed from the tile's seed opcodes and FMA; the rest of
+clause 5 - roundToIntegral, the conversions, scaleB/logB, nextUp/
+nextDown, classification, totalOrder, the signaling comparisons,
+remainder - are contract operations too, specified in their own
+section below. Everything is scored the same way regardless of route:
+`python/cft_golden/softfloat.py` defines the bits.
 
 ADD/SUB/MUL are defined as operand-steered FMA (see
 `cft_golden.softfloat.steer` and rtl/cft_opmux.sv); the steering is
@@ -166,21 +171,88 @@ and this table is that definition.
 
 ### Unassigned opcodes
 
-Opcode 15 and everything from **26** up are unassigned. They return the
+Opcode 15 and everything from **28** up are unassigned. They return the
 canonical quiet NaN with **invalid** raised, in the hardware and in
-the golden model alike. Deterministic, and visible in the flags -
-which matters because those codes are where divide, square root and
-conversions will land, so a host that issues one early should learn it
-now rather than get a plausible number that changes meaning under a
-later bitstream.
+the golden model alike. Deterministic, and visible in the flags, so a
+host that issues one early learns it now rather than getting a
+plausible number that changes meaning under a later bitstream.
 
-24 and 25 were unassigned and are not any more: they are `sum` and
-`dot`, assigned 2026-08-30. That is exactly the hazard this section
-warns about, and it played out as designed - a vector set generated
-before the assignment still names opcode 24 "reserved24", and
-replaying one now would score a sum against an answer recorded for the
-unassigned-opcode result. `cft_conformance` detects that specifically
-and says so, rather than reporting a mismatch.
+The hazard is not hypothetical; it has now fired twice. 24 and 25
+became `sum` and `dot` (2026-08-30), and 26 and 27 became the
+divide/sqrt seeds (2026-08-31) - each time, a vector set generated
+before the assignment still named the opcode "reservedNN", and
+replaying one would score the new operation against an answer recorded
+for the unassigned-opcode result. `cft_conformance` detects that
+specifically and says so, rather than reporting a mismatch. Note that
+the rest of clause 5 landed WITHOUT consuming opcode space: the new
+operations are library entry points over existing opcodes plus exact
+host bookkeeping, so no further reassignment hazard was created.
+
+## Division, square root, and the clause-5 completion set
+
+These are contract operations with library entry points (`cft_div`,
+`cft_rint`, `cft_convert`, ...) rather than engine opcodes. The route
+differs - composed sequences of contract opcodes for div/sqrt/rint/
+scaleB/the signaling compares, pure host bit surgery for operations
+containing no floating-point arithmetic at all - but the scoring does
+not: the golden model defines every bit and flag, and the same call
+returns the same bits on every backend. The load-bearing choices:
+
+- **`division` and `squareRoot` (5.4.1) are correctly rounded** in all
+  five attributes with full flags - divideByZero for finite/0 per 7.3,
+  invalid for 0/0, inf/inf and the negative root. The composition
+  (seed, Newton, an exactly-measured residual, one rounding) is
+  specified in `python/cft_golden/sequences.py` and held bit-identical
+  to the contract functions by its own matrix; three independent
+  oracles score the result (docs/VALIDATION.md).
+- **`roundToIntegral{TiesToEven..TiesToAway}` (5.3.1, 5.9) signal
+  NOTHING except invalid on sNaN** - never inexact, per the standard.
+  `roundToIntegralExact` alone signals inexact, when the value
+  changed. The sign of a zero result is the sign of the operand:
+  rint(-0.4) is -0 in every attribute.
+- **`convertFormat` (5.4.2)** between any two rungs of the ladder:
+  widening is exact and silent, narrowing is one rounding with the
+  full overflow/underflow/inexact behaviour of any arithmetic result.
+  NaNs canonicalise into the destination (the standing deviation).
+- **`convertToInteger` (5.4.1): 754 leaves the delivered value of the
+  invalid cases to the implementation, and determinism cannot**, so
+  this contract pins them to RISC-V's FCVT table: NaN and +inf deliver
+  the integer type's maximum, -inf and negative overflow its minimum,
+  a negative that rounds below zero delivers unsigned 0 - all with
+  invalid raised, and invalid pre-empts inexact (7.2). A negative that
+  rounds TO zero is simply zero, no signal. The named directions never
+  signal inexact; the `...Exact` family alone does. `convertFromInt`
+  converts zero to +0 and can signal nothing but inexact.
+- **`scaleB` and `logB` (5.3.3)**, logBFormat chosen as the operand's
+  own floating-point format. scaleB is one rounding at the shifted
+  exponent. logB is value-based (a subnormal reports its true
+  exponent), always exact; logB(+-0) is -inf and **signals
+  divideByZero** per the standard, logB(+-inf) is +inf silently.
+- **`nextUp`/`nextDown` (5.3.1)**: one step on the encoding. The
+  standard's own edges are contract: nextUp(+-0) is the smallest
+  positive subnormal, nextUp of the most negative subnormal is **-0**,
+  the largest finite steps to infinity with **no overflow signal** -
+  invalid on sNaN is the only signal these can raise.
+- **`class` (5.7.2)** delivers one of ten values fixed to RISC-V's
+  fclass bit indices (0 = negativeInfinity ... 9 = quietNaN; the full
+  table is `cft_class_value` in cft.h) - one table for anyone porting,
+  the same reasoning that chose frm. Non-computational: signals
+  nothing, even for sNaN. isCanonical is constantly true (binary
+  interchange formats have no non-canonical encodings); radix is 2.
+- **`totalOrder`/`totalOrderMag` (5.10)** are defined on the entire
+  encoding space and signal nothing on anything. The definition used
+  is the order-embedding: complement negative encodings, set the sign
+  bit on positive ones, compare unsigned - which reproduces 5.10's
+  ordering exactly, NaN sign/quiet-bit/payload ordering included.
+- **The signaling comparisons (5.6.1)** have the same truth table as
+  the quiet predicates - unordered is false - and raise invalid for
+  ANY NaN operand, quiet included. Like the quiet set, only lt/le/eq
+  exist; greater and greaterEqual are the operand swap.
+- **`remainder` (5.3.1) is EXACT, always**: r = x - y*n with n the
+  integer nearest x/y, ties to even; no rounding attribute is consumed
+  because none is ever used, and inexact/overflow/underflow cannot
+  occur. A zero result takes x's sign. remainder(inf, y) and
+  remainder(x, 0) are invalid; remainder(x, inf) is x exactly.
 
 ## Subnormals
 
@@ -224,9 +296,10 @@ Per 6.3, and the standard's words carry the two rules people miss:
 ## Underflow and the flags
 
 Flags are sticky data, never traps: every element yields a 5-bit set
-`{inexact, underflow, overflow, divzero, invalid}` (divzero reserved
-until a divide op exists), and a run's FLAGS CSR is the OR over all
-elements - order-independent by construction.
+`{inexact, underflow, overflow, divzero, invalid}` (divzero raised by
+`cft_div` for finite/0 and by `logB(+-0)`, exactly per 7.3), and a
+run's FLAGS CSR is the OR over all elements - order-independent by
+construction.
 
 Tininess is detected **after rounding**: a result is tiny when "a
 non-zero result computed as though the exponent range were unbounded
@@ -297,8 +370,12 @@ Every claim above is a test somewhere, and the layers share no code:
 | layer | proves | against |
 |---|---|---|
 | `python/tests/test_softfloat.py` | golden model semantics | CPython native binary64, `math.fma`, mpmath (all four formats), hand-computed 754 anchors |
+| `python/tests/test_clause5.py` | the clause-5 completion semantics | math.remainder/nextafter/ldexp/frexp, struct's double-to-float, an exact-rational rounding reference, hand-derived 754 edges |
+| `python/tests/test_sequences.py` | the composed routes == the contract | bit-for-bit, every format and attribute |
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
+| `host/tests/divsqrt_check.py` / `clause5_check.py` | the C library's ports of every contract operation | golden model, per-element flags |
+| `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 
 What is deliberately NOT claimed yet: behaviour on a physical card
@@ -307,6 +384,10 @@ What is deliberately NOT claimed yet: behaviour on a physical card
 ## Clause locator index
 
 For auditors with the standard open: format parameters 3.6 Table 3.5;
-fusedMultiplyAdd 5.4.1; NaN semantics 6.2 (payload recommendation
-6.2.3); sign bit rules 6.3; invalid 7.2; overflow 7.4; underflow and
-tininess 7.5.
+roundToIntegral, nextUp/nextDown and remainder 5.3.1 (rint details
+5.9); scaleB and logB 5.3.3; fusedMultiplyAdd, division, squareRoot
+and the integer conversions 5.4.1; convertFormat 5.4.2; signaling
+comparisons 5.6.1; classification predicates 5.7.2; totalOrder 5.10;
+quiet comparisons 5.11; NaN semantics 6.2 (payload recommendation
+6.2.3); sign bit rules 6.3; invalid 7.2; divideByZero 7.3; overflow
+7.4; underflow and tininess 7.5.

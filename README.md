@@ -23,11 +23,11 @@ a simple library; the tile only makes it faster.
 
 | piece | state |
 |---|---|
-| `python/cft_golden` | exact fp32/fp64/fp128/fp256, 25 opcodes (arithmetic, sign, min/max, predicates, integer/bitwise, and reductions with an index-fixed tree) under all five 754 rounding attributes, plus the orbit sequencer's execution model; dependency-free; **pytest green** against native binary64, `math.fma`, mpmath, and hand-computed 754 anchors |
+| `python/cft_golden` | exact fp32/fp64/fp128/fp256, 25 opcodes (arithmetic, sign, min/max, predicates, integer/bitwise, and reductions with an index-fixed tree) under all five 754 rounding attributes, plus the full clause-5 contract function set (div/sqrt, roundToIntegral, every conversion, scaleB/logB, nextUp/nextDown, class, totalOrder, signaling compares, remainder) and the orbit sequencer's execution model; dependency-free; **pytest green** against native binary64, `math.fma`, mpmath, math.remainder/nextafter/ldexp, an exact-rational rounding reference, and hand-computed 754 anchors |
 | `rtl/` | the v1 15-stage pipelined FMA core (one parameterized source serving all four rungs: 8x fp32 / 4x fp64 / 2x fp128 / 1x fp256 per 256-bit beat), operand steering, ap_ctrl_hs CSR block with CAPS discovery, streaming engine with one AXI master per operand stream and pipelined address phases, a streaming reduction accumulator, optional shared segmented shifter ladders (`FUSE_NORM`/`FUSE_ALIGN` - the 2026-08-31 size campaign: kernel 131,860 -> 98,310 LUT, every step equivalence-proven), BRAM-backed stream FIFOs, Vitis kernel top; the v0 behavioural core stays as the readable reference; **Yosys-clean** (CI-enforced portability) |
 | `tb/` | cocotb: streamed unit benches for all four widths + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green** across 15 targets / 40 tests, including the reduction accumulator, full-kernel reductions, the divide/sqrt seed opcodes (85,264 comparisons), trimmed-build precision refusal, and bus-fault injection (Icarus 12, cocotb 1.9.2, in the `docker/` container). Beside it, `formal/`: machine-checked proofs - the stream FIFO unbounded, the seed special-cases complete, and the simpleops area rewrite proven equivalent over all 2^104 inputs |
 | `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg, the era-matched `rebuild-2022.sh` pipeline - **packaging and hw_emu gates MET** (bit-exact vs golden through real XRT), hw bitstreams built (docs/BRINGUP.md records each gate honestly) |
-| `host/` | **libcft** - ~2,800 lines of C99 across `src/`, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++. The software backend replays 392,000 conformance cases and agrees with the golden model on 216,000 differential cases; `cft_div`/`cft_sqrt` compose the tile's seed opcodes into correctly-rounded division and square root, proven against **23.9 billion cases of the host CPU's own IEEE hardware and 999,000 cases of GNU MPFR** (docs/VALIDATION.md); an XRT backend drives up to 64 compute units and has been exercised against a **four-tile hw_emu image with no card present**. Reductions add the tree-aware multi-tile split, so a sum over four tiles returns what one tile returns. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt - as do Fortran, Rust, Julia, Go, C# and R (docs/COMPATIBILITY.md). **Validate the contract in your browser, nothing installed: https://loganw234.github.io/cft-fp256/** - the software backend compiled to WebAssembly, replaying the published vectors |
+| `host/` | **libcft** - ~5,200 lines of C99 across `src/`, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++. The software backend replays 392,000 conformance cases and agrees with the golden model on 216,000 differential cases; `cft_div`/`cft_sqrt` compose the tile's seed opcodes into correctly-rounded division and square root, proven against **23.9 billion cases of the host CPU's own IEEE hardware and 999,000 cases of GNU MPFR** (docs/VALIDATION.md); as of 2026-09-01 the **rest of clause 5** ships too - roundToIntegral, every conversion, scaleB/logB, nextUp/nextDown, class, totalOrder, signaling compares, exact remainder - composed or host-exact, zero new RTL, held identical to the model over 112,372 per-element checks; an XRT backend drives up to 64 compute units and has been exercised against a **four-tile hw_emu image with no card present**. Reductions add the tree-aware multi-tile split, so a sum over four tiles returns what one tile returns. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt - as do Fortran, Rust, Julia, Go, C# and R (docs/COMPATIBILITY.md). **Validate the contract in your browser, nothing installed: https://loganw234.github.io/cft-fp256/** - the software backend compiled to WebAssembly, replaying the published vectors |
 | `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |
 
 No physical card yet (it is in the mail). The claim made so far is
@@ -124,13 +124,15 @@ CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 
 **Start with [CAPABILITIES.md](CAPABILITIES.md)** if you want to know
 whether this is useful to you. It stays deliberately unflattering:
-all six required IEEE 754 arithmetic operations now exist and are
-proven (division and square root composed from the tile's own seed
-opcodes and FMA), reductions carry a contractual tree - but there are
-still no conversions in either direction, and no way yet to express a
-sequence on-chip: the orbit sequencer is a design and an executable
-model, not silicon. What it does do, it does bit-exactly, and the
-file names every gap that remains.
+IEEE 754-2019 clause 5 is now covered on the binary side - the six
+required arithmetic operations (division and square root composed
+from the tile's own seed opcodes and FMA), reductions with a
+contractual tree, and the full completion set from roundToIntegral to
+exact remainder - but the character-sequence conversions are still
+absent, and there is no way yet to express a sequence on-chip: the
+orbit sequencer is a design and an executable model, not silicon.
+What it does do, it does bit-exactly, and the file names every gap
+that remains.
 
 ## Design rules the repo is built around
 

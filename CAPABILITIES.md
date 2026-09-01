@@ -7,14 +7,19 @@ against IEEE 754-2019 and against the workload it was built to serve.
 general purpose yet?" has an answer you can check rather than a
 feeling. For a long time the honest answer was *a very good
 fused-multiply-add engine and not more*. As of 2026-08-31 the six
-required arithmetic operations all exist and are proven; the word
-"general purpose" now hangs on programmability, and the boxes below
-say exactly where.
+required arithmetic operations all exist and are proven; as of
+2026-09-01 the REST of clause 5 does too - roundToIntegral, the
+conversions, scaleB/logB, nextUp/nextDown, classification,
+totalOrder, the signaling comparisons, remainder - every one with
+zero new RTL, which is the composition methodology paying out. The
+word "general purpose" now hangs on programmability alone, and the
+boxes below say exactly where.
 
 | mark | meaning |
 |---|---|
 | **yes** | in the RTL and verified bit-exact against the golden model, in simulation and through the real XRT stack |
-| **composed** | the hardware supplies the primitive (the divide/sqrt seed opcodes + FMA); libcft composes the full correctly-rounded operation as a fixed sequence of those calls, identical on every backend, with the integer bookkeeping done exactly on the host - the same division of labour the multi-tile reduction fold uses. Bit-identical to the contract, and proven against three independent oracles |
+| **composed** | the hardware supplies the primitive; libcft composes the full operation as a fixed sequence of those calls, identical on every backend, with the integer bookkeeping done exactly on the host - the same division of labour the multi-tile reduction fold uses. Bit-identical to the contract |
+| **library** | in libcft and defined by the golden model, but the operation contains NO floating-point arithmetic at all - it is rounding-position bit surgery - so there is no backend pass to issue and nothing for a tile to accelerate. Bit-identical on every backend by construction |
 | **model** | defined in `python/cft_golden` and covered by conformance vectors, but no hardware - a host can use it, the tile cannot |
 | **no** | not implemented anywhere |
 | **out** | deliberately excluded; the reason is given |
@@ -114,10 +119,16 @@ datapath - so they cost a comparator and a sign bit, not a stage.
 | `minimumNumber`, `maximumNumber` | **yes** | returns the number when one operand is NaN |
 | `recip_seed`, `rsqrt_seed` | **yes** | the divide/sqrt starting points, exposed as opcodes 26/27 (quiet, no flags, subnormal inputs flush to their zero-class result by spec) - a caller building its own iteration gets the same seed the library uses |
 
-## Everything else in clause 5 - the remaining gap
+## Everything else in clause 5 - now covered
 
-Listed in full because the length of the list *is* the distance to
-full 754 coverage.
+This table used to be titled "the remaining gap", and its length was
+the distance to full 754 coverage. On 2026-09-01 the distance closed:
+every remaining operation landed as a contract function - composed
+from existing opcodes where floating-point work exists, host bit
+surgery where none does - with **zero new RTL**, which was the point
+of the composition methodology. `python/cft_golden/softfloat.py`
+defines each one; `host/tests/clause5_check.py` holds libcft identical
+to it (112,372 comparisons, every format and attribute).
 
 | group | operations | status |
 |---|---|---|
@@ -125,17 +136,26 @@ full 754 coverage.
 | sign operations (5.5.1) | `copy` | **no** - a memcpy; nothing needs the tile for it |
 | min/max (9.6) | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | **yes** - 754-2019 moved these out of 5.3.1 and changed the sNaN rule; this follows the 2019 semantics |
 | comparisons (5.6.1, 5.11) | `compareQuietLess`, `LessEqual`, `Equal` - as floats a select can consume; **greater/greaterEqual come free by swapping the operand pointers** | **yes** |
-| comparisons (5.6.1, 5.11) | `compareSignaling*`, the remaining predicates, condition codes | **no** |
+| comparisons (5.6.1) | `compareSignaling{Less,LessEqual,Equal}` (`cft_cmp_sig`) | **composed** - the quiet predicate's value from the tile, invalid-for-any-NaN synthesised exactly on the host |
 | reductions | `sum`, `dot` with the index-fixed tree | **yes** - contract 0x500; the tree shape is part of the contract, four tiles return what one returns, and `dot(a,b) == sum(mul(a,b))` exactly, flags included |
-| conversions (5.4.2) | int -> float, float -> int (all five roundings) | **no** |
-| format conversion (5.4.2) | fp32 <-> fp64 <-> fp128 <-> fp256 | **no** |
-| round to integral (5.3.1) | `roundToIntegral{TiesToEven,TowardZero,...,Exact}` | **no** |
-| remainder (5.3.1) | `remainder` | **no** |
-| scaling (5.3.3) | `scaleB`, `logB` | **no** |
-| next (5.3.1) | `nextUp`, `nextDown` | **no** |
-| classification (5.7.2) | `class`, `isNaN`, `isInfinite`, `isNormal`, `isSubnormal`, `isZero`, `isSignMinus`, `isCanonical` | **no** |
-| total order (5.10) | `totalOrder`, `totalOrderMag` | **no** |
+| round to integral (5.3.1) | `roundToIntegral{TiesToEven..TiesToAway}` + `Exact` (`cft_rint`) | **composed** - the magic-constant addition under the caller's attribute, made total by host bookkeeping; the named variants signal nothing, per the standard |
+| scaling (5.3.3) | `scaleB` (`cft_scaleb`) | **composed** - multiplies by exact powers of two; one rounding, the mul's flags ARE the contract flags |
+| conversions (5.4.1) | int32/uint32/int64/uint64 -> float, float -> int, all five roundings + Exact variants (`cft_cvt_*`) | **library** - with the invalid-case delivery 754 leaves open pinned to RISC-V's FCVT table |
+| format conversion (5.4.2) | fp32 <-> fp64 <-> fp128 <-> fp256, any pair (`cft_convert`) | **library** - widening exact and silent, narrowing one `round_pack` |
+| remainder (5.3.1) | `remainder` (`cft_rem`) | **library** - exact always, by one bounded integer walk; the model's unbounded divmod and the C walk agree over every matrix including the fp256 full-gap case |
+| scaling (5.3.3) | `logB` (`cft_logb`) | **library** - value-based on subnormals; logB(0) is -inf + divideByZero |
+| next (5.3.1) | `nextUp`, `nextDown` (`cft_next_up/_down`) | **library** - one step on the encoding, the standard's -0 edge included |
+| classification (5.7.2) | `class` + every is* predicate as a subset test (`cft_class`) | **library** - ten values pinned to RISC-V fclass bit indices |
+| total order (5.10) | `totalOrder`, `totalOrderMag` (`cft_total_order*`) | **library** - the order-embedding key; defined on the whole encoding space, signals nothing |
 | NaN payloads (6.2.3) | payload propagation | **out** |
+
+What **library** rows would take to become **yes** is the same short
+list it always was - a handful of comb opcodes in `cft_simpleops`
+(which now carries an exhaustive-equivalence proof methodology to
+absorb them safely) and, for beat-rate conversions, the one
+structurally new datapath in the whole set: cross-width lane steering.
+Neither buys correctness; both are throughput decisions for after the
+sequencer.
 
 The NaN row is a deliberate deviation from a *recommendation*: any NaN
 in produces one canonical quiet NaN out, because payload propagation
@@ -175,7 +195,7 @@ The distance to running it on-chip:
 | `abs`, `min`, `max` | **yes** |
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
 | division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright |
-| `floor`, `round`, `step` | **no** - `roundToIntegral` is the next cheap win |
+| `floor`, `round`, `step` | **composed** (2026-09-01) - `cft_rint` under the directed attributes IS floor/ceil/trunc/round; `step` was always cmple+select |
 | a sequencer to run a chain on-chip | **not in hardware.** The ISA is specified (docs/SEQUENCER.md), the golden model executes it, and libcft runs programs today on the software backend - so a program can be written and checked now. The RTL is v2 |
 
 Today a det_* function could be evaluated as a hybrid - the tile doing
@@ -223,10 +243,10 @@ in docs/COMPATIBILITY.md) gets the full story.
    program can be written and checked today; the tile just cannot run
    one yet.
 
-2. **The cheap operations, which are cheap.** `roundToIntegral` and
-   the classification predicates: shallow logic on data the datapath
-   already unpacks, absent because nothing has needed them yet.
-   Format conversions follow the same way.
+2. ~~The cheap operations, which are cheap.~~ **Done** (2026-09-01):
+   `roundToIntegral`, the conversions, classification, and the rest of
+   clause 5 landed as compositions and library operations - zero new
+   RTL, which was always the claim about why they were cheap.
 
 3. ~~Division and square root.~~ **Done** (2026-08-31): seed opcodes
    in hardware, composition in libcft, correctly rounded per 5.4.1
@@ -238,13 +258,22 @@ in docs/COMPATIBILITY.md) gets the full story.
 - As an **FMA engine**: complete. Four interchange formats, all five
   rounding attributes, correct flags and edge cases, verified against
   the definition rather than against another implementation.
-- As an **IEEE 754 implementation**: **all six required arithmetic
-  operations**, reductions with a contractual tree, and the quiet
-  comparison/min-max/sign set. Still absent: conversions,
-  roundToIntegral, classification, signaling comparisons, remainder,
-  and the auxiliary operations.
+- As an **IEEE 754 implementation**: **clause 5 is covered on the
+  binary side** - the six required arithmetic operations, reductions
+  with a contractual tree, and as of 2026-09-01 the entire completion
+  set: roundToIntegral, every conversion, scaleB/logB, nextUp/
+  nextDown, classification, totalOrder, the signaling comparisons,
+  remainder. What remains outside: the character-sequence conversions
+  of 5.4.2/5.12 (inherently host-library work, hex trivial, decimal
+  needing big-integer scaling - planned, not blocking any numeric
+  path), NaN payload propagation (**out**, deliberately), and clause
+  9's recommended transcendentals (**out** by design - the det-library
+  route computes them from FMA).
 - As a **general-purpose float processor**: the blocker is
-  programmability alone now - the sequencer, not arithmetic.
+  programmability alone - the sequencer, not arithmetic. That
+  sentence was true yesterday about the operation set with six ops;
+  it is simply more visibly true now.
 - For the **atlas det library**: every primitive it refines from
-  exists on the tile, including its seeds; what is missing is the
-  on-chip sequence to chain them without a memory round trip per step.
+  exists on the tile, including its seeds and now floor/round; what is
+  missing is the on-chip sequence to chain them without a memory round
+  trip per step.
