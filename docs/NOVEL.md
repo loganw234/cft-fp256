@@ -197,6 +197,20 @@ attributes, tininess-after-rounding, gradual underflow, and
 single-rounded fused multiply-add, running beside fp32/64/128 under
 one contract.
 
+*(Updated 2026-08-31.)* The division/square-root gap that kept
+"general purpose" out of this entry's vocabulary has since closed
+above the silicon line: hardware seed opcodes (relative error
+< 2^-8.5, proven exhaustively) plus a composed Markstein sequence
+held bit-identical to the contract div/sqrt at every format and
+attribute, correctly rounded with full 754 flags. The contrast with
+GRAPE below sharpens accordingly: GRAPE also divides by Newton off a
+hardware rsqrt seed, but in software, in a non-IEEE format, with
+rounding semantics undocumented; here the same architectural move
+lands on a specified, machine-checked 754 contract. The claim stays
+calibrated the same way as before: proven in simulation and against
+two independent oracles (the golden model and, at fp32/64, the host
+CPU's own IEEE hardware), not yet on a card.
+
 **The nearest miss, and it is worth respecting: GRAPE-MP /
 GRAPE9-MPX** (Daisaka, Nakasato, Ishikawa et al.; structured ASIC
 2011, Arria V FPGAs 2014-2018; arXiv:1410.3252, arXiv:1803.07224).
