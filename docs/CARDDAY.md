@@ -75,8 +75,8 @@ the element count is an operand rather than a loop bound.
       per stream, reductions at VERSION 0x500, the bus-fault abort,
       both closed with hbm_aclk clean at 450.0:
 
-          ~/cardday-135/cft_hw_single.xclbin   one tile,   kernel_wns +0.271
-          ~/cardday-135/cft_hw_quad.xclbin     four tiles, kernel_wns +0.019
+          ~/cardday-130b/cft_hw_single.xclbin   one tile,   kernel_wns +0.271
+          ~/cardday-130b/cft_hw_quad.xclbin     four tiles, kernel_wns +0.019
           ~/cardday-130b/SHA256SUMS             (+ both manifests, README)
 
       The 53bbba7 pair stays in ~/cardday-130 as the THIRD fallback - shared
