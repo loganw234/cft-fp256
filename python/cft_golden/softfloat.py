@@ -185,10 +185,24 @@ def zero_sign_for_exact_cancellation(rnd: int) -> int:
 def _round_at(m: int, e: int, q: int, sign: int = 0, rnd: int = RND_RNE):
     """Round the exact value (-1)^sign * m * 2^e (m > 0) to an integer
     multiple of 2^q under `rnd`. Returns (kept, inexact) with magnitude
-    kept * 2^q."""
+    kept * 2^q.
+
+    Total in memory as well as in math: a shift beyond the value's own
+    width (scaleB can ask for billions) never materialises a mask that
+    size - everything is below the grid, so guard is the top bit at
+    exactly shift == bit_length and zero past it, and sticky is 1."""
     shift = q - e
     if shift <= 0:
         return m << (-shift), False
+    length = m.bit_length()
+    if shift >= length:
+        # kept is 0 before rounding; the guard position holds m's top
+        # bit only when the shift lands exactly on it, and something
+        # nonzero sits below the guard in every other configuration.
+        guard = 1 if shift == length else 0
+        sticky = 1 if shift > length or m != 1 << (length - 1) else 0
+        kept = 1 if _round_up(rnd, sign, guard, sticky, 0) else 0
+        return kept, True
     kept = m >> shift
     rem = m & ((1 << shift) - 1)
     if rem == 0:

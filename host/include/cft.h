@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 1
+#define CFT_ABI_VERSION_MINOR 2   /* 0.2: the clause-5 completion set */
 
 /* Returns (major << 16) | minor of the library actually loaded. */
 CFT_API uint32_t cft_abi_version(void);
@@ -475,6 +475,171 @@ CFT_API cft_status cft_sqrt(cft_device *dev,
                             size_t      n,
                             uint32_t   *flags_out,
                             uint32_t   *bus_out);
+
+/* ---------------------------------------------------------------
+ * The remaining clause-5 operations
+ *
+ * Everything IEEE 754-2019 clause 5 still asked of this library after
+ * division and square root landed. python/cft_golden/softfloat.py
+ * defines every bit and flag below; none of it needed new hardware,
+ * and the entry points say which of two shapes each operation takes:
+ *
+ *   COMPOSED (cft_rint, cft_scaleb, cft_cmp_sig): the floating-point
+ *   work is cft_run() passes - on a device it runs on the tile - with
+ *   the host keeping exact integer bookkeeping, like cft_div.
+ *   python/cft_golden/sequences.py specifies the routes.
+ *
+ *   HOST (everything else): no floating-point arithmetic exists in
+ *   the operation at all - it is rounding-position bit surgery - so
+ *   there is no pass to issue and nothing to accelerate. The device
+ *   argument is context; results are bit-identical on every backend
+ *   by construction. These do not gate on the device's format mask
+ *   for the same reason.
+ *
+ * Common rules, from the contract: any NaN in yields the canonical
+ * quiet NaN out (payloads canonicalise; the documented deviation), a
+ * signaling NaN raises invalid except in the non-computational
+ * operations (class, totalOrder), which signal nothing ever.
+ * --------------------------------------------------------------- */
+
+/* roundToIntegral (5.3.1). exact = 0: the five named operations -
+ * direction from `rnd`, inexact NEVER signalled. exact != 0:
+ * roundToIntegralExact, which signals inexact when the value changed.
+ * The zero result keeps the operand's sign: rint(-0.4) is -0.
+ * Composed: needs CFT_ADD and CFT_COPYSIGN on the device. */
+CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
+                            int exact, const void *a, void *d, size_t n,
+                            uint32_t *flags_out, uint32_t *bus_out);
+
+/* scaleB (5.3.3): d[i] = a[i] * 2^nexp, one rounding, full flags.
+ * Composed as multiplies by exact powers of two (needs CFT_MUL);
+ * |nexp| beyond the subnormal floor takes an equivalent host path. */
+CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, int64_t nexp, void *d, size_t n,
+                              uint32_t *flags_out, uint32_t *bus_out);
+
+/* Signaling comparisons (5.6.1): same 1.0/+0.0 predicate values as
+ * the quiet opcodes - unordered is false - but invalid is raised for
+ * ANY NaN operand, quiet included. cmp selects CFT_CMPLT, CFT_CMPLE
+ * or CFT_CMPEQ; greater/greaterEqual are the usual operand swap. */
+CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out,
+                               uint32_t *bus_out);
+
+/* formatOf-convertFormat (5.4.2), any of the four formats to any
+ * other. Widening is exact and silent; narrowing rounds once with
+ * full overflow/underflow/inexact; NaNs canonicalise into the
+ * destination. d MUST NOT overlap a - elements change size, so
+ * in-place conversion is not well defined here. */
+CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
+                               cft_format dfmt, cft_round rnd,
+                               const void *a, void *d, size_t n,
+                               uint32_t *flags_out);
+
+/* convertFromInt (5.4.1). Zero converts to +0; inexact where the
+ * integer outruns the significand; nothing else can signal. */
+CFT_API cft_status cft_cvt_from_i32(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const int32_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_cvt_from_u32(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const uint32_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_cvt_from_i64(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const int64_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_cvt_from_u64(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const uint64_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+
+/* convertToInteger (5.4.1), direction from `rnd`; exact != 0 selects
+ * the ...Exact family, which alone reports inexact. 754 leaves the
+ * delivered value of the invalid cases open; determinism cannot, so
+ * this contract fixes them to RISC-V's FCVT table: NaN and +inf to
+ * the type's maximum, -inf and negative overflow to its minimum, a
+ * negative rounded BELOW zero to unsigned 0 - always with invalid,
+ * which pre-empts inexact. A negative that rounds TO zero is simply
+ * zero. */
+CFT_API cft_status cft_cvt_to_i32(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  int32_t *dst, size_t n,
+                                  uint32_t *flags_out);
+CFT_API cft_status cft_cvt_to_u32(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  uint32_t *dst, size_t n,
+                                  uint32_t *flags_out);
+CFT_API cft_status cft_cvt_to_i64(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  int64_t *dst, size_t n,
+                                  uint32_t *flags_out);
+CFT_API cft_status cft_cvt_to_u64(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  uint64_t *dst, size_t n,
+                                  uint32_t *flags_out);
+
+/* logB (5.3.3), delivered in the operand's own format. Value-based:
+ * a subnormal reports its true exponent. Always exact. logB(0) is
+ * -inf and signals divideByZero; logB(+-inf) is +inf, silently. */
+CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
+                            void *d, size_t n, uint32_t *flags_out);
+
+/* nextUp / nextDown (5.3.1). One step on the encoding. The edges are
+ * the standard's own: nextUp(+-0) is the smallest positive subnormal,
+ * nextUp of the most negative subnormal is -0, the largest finite
+ * steps to infinity WITHOUT overflow - invalid on sNaN is the only
+ * signal these can raise. */
+CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
+                               const void *a, void *d, size_t n,
+                               uint32_t *flags_out);
+CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
+                                 const void *a, void *d, size_t n,
+                                 uint32_t *flags_out);
+
+/* class (5.7.2), one byte per element. The values are RISC-V fclass
+ * bit INDICES - one table for anyone porting between the two, the
+ * same reasoning that chose frm for the rounding encoding. Every is*
+ * predicate of 5.7.2 is a subset test on this byte; isCanonical is
+ * constantly true here and radix constantly 2. Non-computational:
+ * signals nothing, so there is no flags argument to mislead. */
+typedef enum cft_class_value {
+    CFT_CLASS_NEG_INF  = 0,
+    CFT_CLASS_NEG_NORM = 1,
+    CFT_CLASS_NEG_SUB  = 2,
+    CFT_CLASS_NEG_ZERO = 3,
+    CFT_CLASS_POS_ZERO = 4,
+    CFT_CLASS_POS_SUB  = 5,
+    CFT_CLASS_POS_NORM = 6,
+    CFT_CLASS_POS_INF  = 7,
+    CFT_CLASS_SNAN     = 8,
+    CFT_CLASS_QNAN     = 9
+} cft_class_value;
+
+CFT_API cft_status cft_class(cft_device *dev, cft_format fmt, const void *a,
+                             uint8_t *cls, size_t n);
+
+/* totalOrder / totalOrderMag (5.10), as 1.0/+0.0 predicates a SELECT
+ * consumes. Defined on the entire encoding space - NaNs ordered by
+ * sign, then quiet bit, then payload - and signals nothing on
+ * anything, which is what makes it the sort key compareQuiet* cannot
+ * be. */
+CFT_API cft_status cft_total_order(cft_device *dev, cft_format fmt,
+                                   const void *a, const void *b, void *d,
+                                   size_t n);
+CFT_API cft_status cft_total_order_mag(cft_device *dev, cft_format fmt,
+                                       const void *a, const void *b, void *d,
+                                       size_t n);
+
+/* remainder (5.3.1): d[i] = a[i] - b[i]*n, n the integer nearest
+ * a[i]/b[i], ties to even. EXACT always - no rounding attribute is
+ * consumed because none is used, and inexact/overflow/underflow
+ * cannot occur. A zero result takes a's sign. remainder(inf, y) and
+ * remainder(x, 0) are invalid; remainder(x, inf) is x. The host walks
+ * the exponent gap a quotient bit at a time - a handful of steps
+ * normally, tens of milliseconds once for an adversarial fp256 pair -
+ * where the model does one unbounded division. */
+CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
+                           const void *b, void *d, size_t n,
+                           uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)

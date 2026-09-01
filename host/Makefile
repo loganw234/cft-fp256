@@ -41,7 +41,7 @@ WARN    := -Wall -Wextra -Wpedantic -Wshadow
 INC     := -Iinclude
 
 SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
-           src/program.c src/conformance.c
+           src/clause5.c src/program.c src/conformance.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
@@ -241,6 +241,13 @@ difftest: all
 # reason difftest is - it needs Python and the model.
 divsqrttest: all
 	$(PYTHON) tests/divsqrt_check.py
+
+# The clause-5 completion set against the model: every new entry point
+# (rint, scaleb, the conversions, the signaling compares, logB, next,
+# class, totalOrder, remainder), per element for exact flags plus the
+# chunk-crossing batches. Same shape and reasoning as divsqrttest.
+clause5test: all
+	$(PYTHON) tests/clause5_check.py
 
 # The native-oracle soak: cft_div/cft_sqrt against the host CPU's own
 # IEEE division and square root, which nobody in this repository
