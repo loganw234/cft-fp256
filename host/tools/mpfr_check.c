@@ -48,6 +48,14 @@
  * intermediate is MPFR's own arithmetic; it is labelled where it
  * runs, because an oracle with a footnote should say so.
  *
+ * The clause-5 completion set (ABI 0.2) is checked here too - rint,
+ * scaleB, convertFormat, the eight integer conversions, logB,
+ * nextUp/nextDown and remainder - by the same machinery: see the
+ * banner comment above c5_round_into() for what maps onto what, which
+ * expectations are MPFR-derived and which are the contract's own
+ * (cvt_to's invalid-case delivery table), and why class, totalOrder
+ * and the signaling comparisons are left to the other oracles.
+ *
  * Usage:  mpfr-check [randoms-per-format] [seed]
  *         (directed specials always run; randoms are exponent-banded)
  */
@@ -96,6 +104,27 @@ static const int OP_NARGS[NOPS] = { 2, 2, 2, 3, 2, 1 };
 static uint64_t mismatches, flag_mismatches, cases;
 static int shown;
 static cft_device *dev;
+
+/* Per-op, per-format case ledger, printed at the end - the campaign's
+ * receipt. The first six rows are the arithmetic this file always
+ * checked; the rest are the clause-5 completion set. convert is
+ * tallied by SOURCE format; rint and rint_x are the named attributes
+ * and the Exact variant respectively. */
+enum {
+    T_ADD, T_SUB, T_MUL, T_FMA, T_DIV, T_SQRT,
+    T_RINT, T_RINTX, T_SCALEB, T_CONVERT,
+    T_FROM_I32, T_FROM_U32, T_FROM_I64, T_FROM_U64,
+    T_TO_I32, T_TO_U32, T_TO_I64, T_TO_U64,
+    T_LOGB, T_NEXTUP, T_NEXTDOWN, T_REM, NTALLY
+};
+static const char *const TALLY_NAME[NTALLY] = {
+    "add", "sub", "mul", "fma", "div", "sqrt",
+    "rint", "rint_x", "scaleb", "convert",
+    "from_i32", "from_u32", "from_i64", "from_u64",
+    "to_i32", "to_u32", "to_i64", "to_u64",
+    "logb", "next_up", "next_down", "rem"
+};
+static uint64_t tally[NTALLY][4];
 
 /* ---- bit-level classify (works on the little-endian encoding) ----- */
 
@@ -517,6 +546,1126 @@ static int build_pool(const fdesc *f, uint8_t pool[][32], int randoms)
     return n;
 }
 
+/* =================================================================
+ * The clause-5 completion set (ABI 0.2), against the same oracle.
+ *
+ * Everything below reuses the machinery above rather than restating
+ * it: enc_to_mpfr for exact operands, agree() for the verdict, and
+ * c5_round_into() - the one new piece - which is oracle()'s delivery
+ * logic (unbounded p-bit rounding as the over/underflow authority,
+ * tininess after rounding by construction, fixed-grid subnormal
+ * landings, the p+1 RMM build) applied to a value that is already
+ * EXACT in an mpfr variable. That is the shape of every rounding
+ * clause-5 operation: convert, scaleB and the integer conversions
+ * are each ONE rounding of an exactly-representable value, which is
+ * why they share a router where add/mul/div needed a recompute.
+ *
+ * What maps onto what:
+ *   rint      mpfr_rint under RNDN (ties-to-even) / trunc / floor /
+ *             ceil / round (ties-to-away). The named variants signal
+ *             nothing but sNaN invalid; the Exact variant adds
+ *             inexact iff the value moved; a zero result's sign is
+ *             the operand's - pinned by the contract and derived
+ *             here rather than trusted to MPFR's rint family.
+ *   scaleb    mpfr_mul_2si in unbounded range (exact), then
+ *             c5_round_into. n is clamped in the ORACLE only, at
+ *             +-(4*emax + 2p + 64): past that, every nonzero finite
+ *             operand overflows (resp. lands below half a subnormal
+ *             grid step) whatever its exponent, so delivery and
+ *             flags are constant in n - the library is called with
+ *             the raw n, INT64_MIN/MAX included.
+ *   convert   c5_round_into at the destination grid; NaN as class.
+ *   cvt_from  the integer exactly via mpz, then c5_round_into.
+ *   cvt_to    mpfr_rint at p+2 bits (always exact: the integer part
+ *             of a p-bit value carries at most p+1 bits), the range
+ *             test in mpz. The DELIVERED value of the invalid cases
+ *             is the contract's own RISC-V FCVT table - cft.h
+ *             documents the choice, 754 leaves it open - so those
+ *             expectations are hardcoded from the doc, not derived
+ *             from MPFR. Invalid pre-empts inexact, and only the
+ *             Exact variants report inexact at all.
+ *   logb      mpfr_get_exp minus one (MPFR holds the mantissa in
+ *             [1/2,1), IEEE's logB in [1,2)); value-based, so a
+ *             subnormal reports its true exponent; delivery is
+ *             asserted exact since |logB| <= emax + man_w fits every
+ *             format's significand with room to spare.
+ *   next_up   mpfr_nextabove at p bits in UNBOUNDED range, then
+ *             c5_round_into toward +inf. On the format's grid the
+ *             step is at most one p-bit ulp, so the directed
+ *             re-round lands exactly one grid position up - and the
+ *             standard's edges fall out instead of being restated:
+ *             nextabove(-min_sub) is a sub-grid negative that RUP
+ *             delivers as -0, nextabove(max_normal) trips the
+ *             overflow branch whose RUP delivery is +inf, and
+ *             nextabove(-inf) is a huge negative whose RUP overflow
+ *             delivery is -max_normal. Quantisation flags are
+ *             discarded - the contract signal is sNaN invalid and
+ *             nothing else, asserted separately. next_down is the
+ *             mirror through nextbelow/RDN.
+ *   rem       mpfr_remainder, exact by the standard theorem (a
+ *             nonzero ternary is surfaced as a mismatch, never
+ *             absorbed). MPFR documents a zero result's sign as x's,
+ *             which is also the contract's rule; the sign is still
+ *             forced from the operand here so the expectation is the
+ *             contract's own. The flag comparison doubles as the
+ *             exactness assertion: the expected mask never contains
+ *             inexact/overflow/underflow, so the library raising any
+ *             of them fails the case.
+ *
+ * cft_class and cft_total_order* are not checked here: MPFR has no
+ * independent notion of either (an oracle would just restate the
+ * encoding walk), and cmp_sig's value is the quiet predicate the
+ * golden model already pins while its flag rule is one classify()
+ * away from the harness testing itself. next_up/next_down DID make
+ * the cut because the construction above is honest MPFR arithmetic
+ * end to end.
+ * ================================================================= */
+
+static uint64_t get_field(const uint8_t *b, int lo, int n)
+{
+    uint64_t v = 0;
+    int i;
+    for (i = 0; i < n; i++)
+        v |= (uint64_t)bit_at(b, lo + i) << i;
+    return v;
+}
+
+/* +-1 on the little-endian encoding: one grid step on a finite
+ * magnitude, which is how the directed generators reach "the
+ * neighbour of" a boundary value without restating nextUp. */
+static void enc_step(const fdesc *f, uint8_t *b, int up)
+{
+    size_t i;
+    for (i = 0; i < f->esz; i++) {
+        if (up) { if (++b[i] != 0) break; }
+        else    { if (b[i]-- != 0) break; }
+    }
+}
+
+static void enc_neg(const fdesc *f, uint8_t *b)
+{
+    int w = 1 + f->exp_w + f->man_w;
+    b[(w - 1) >> 3] ^= (uint8_t)(1u << ((w - 1) & 7));
+}
+
+/* Encode (-1)^sign * m * 2^e2 exactly, if the format can. Returns 1
+ * and fills b on success, 0 when the value is not representable -
+ * directed generators simply skip those. Every success is verified
+ * against enc_to_mpfr before it is used, because a generator bug
+ * here would silently test the wrong value. */
+static int enc_from_val(const fdesc *f, int sign, uint64_t m, long e2,
+                        uint8_t *b)
+{
+    int msb = 63, w = 1 + f->exp_w + f->man_w;
+    long E;
+
+    if (m == 0)
+        return 0;
+    while (!((m >> msb) & 1))
+        msb--;
+    E = e2 + msb;
+    memset(b, 0, 32);
+    if (E > f->emax)
+        return 0;
+    if (E >= f->emin) {
+        int shift = f->man_w - msb;
+        if (shift >= 0) {
+            set_field(b, shift, msb + 1, m);
+        } else {
+            if (-shift > 63 || (m & ((1ull << -shift) - 1)))
+                return 0;                    /* low bits would be lost */
+            set_field(b, 0, msb + 1 + shift, m >> -shift);
+        }
+        set_field(b, f->man_w, f->exp_w, (uint64_t)(E + f->emax));
+    } else {
+        long pos = e2 - (f->emin - f->man_w);
+        if (pos >= 0) {
+            if (msb + pos >= f->man_w)
+                return 0;                    /* cannot happen: E < emin */
+            set_field(b, (int)pos, msb + 1, m);
+        } else {
+            if (-pos > 63 || (m & ((1ull << -pos) - 1)))
+                return 0;                    /* below the subnormal grid */
+            set_field(b, 0, msb + 1 + (int)pos, m >> -pos);
+        }
+    }
+    if (sign)
+        set_field(b, w - 1, 1, 1);
+    {
+        mpfr_t chk, ref;
+        mpfr_init2(chk, f->p);
+        mpfr_init2(ref, 70);
+        enc_to_mpfr(f, b, chk);
+        mpfr_set_ui(ref, (unsigned long)(m >> 32), MPFR_RNDN);
+        mpfr_mul_2ui(ref, ref, 32, MPFR_RNDN);
+        mpfr_add_ui(ref, ref, (unsigned long)(m & 0xffffffffu),
+                    MPFR_RNDN);              /* both steps exact at 70b */
+        mpfr_mul_2si(ref, ref, e2, MPFR_RNDN);
+        if (sign)
+            mpfr_neg(ref, ref, MPFR_RNDN);
+        if (!mpfr_equal_p(chk, ref)) {
+            fprintf(stderr,
+                    "enc_from_val self-check failed: %s sign=%d "
+                    "m=0x%llx e2=%ld\n", f->name, sign,
+                    (unsigned long long)m, e2);
+            exit(3);
+        }
+        mpfr_clear(chk);
+        mpfr_clear(ref);
+    }
+    return 1;
+}
+
+/* Round the EXACT finite value x into format f under MODES[mi], with
+ * oracle()'s own delivery derivation: the unbounded p-bit rounding is
+ * the overflow/underflow authority (tininess after rounding by
+ * construction), subnormal landings re-round the true value on the
+ * fixed grid, RMM goes through the p+1 guard/sticky build. Where
+ * oracle() recomputes the operation, this rounds a known value -
+ * every clause-5 rounding is one rounding of an exactly-held value,
+ * so mpfr_set IS the operation here. */
+static void c5_round_into(const fdesc *f, const mpfr_t x, int mi,
+                          mpfr_t out, uint32_t *flags)
+{
+    mpfr_t runb, y;
+    int inexact, is_rmm = (MODES[mi].cr == CFT_RMM);
+    mpfr_rnd_t rnd = MODES[mi].mr;
+    uint32_t fl = 0;
+
+    if (mpfr_zero_p(x)) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set(out, x, MPFR_RNDN);         /* signed zero rides along */
+        *flags = 0;
+        return;
+    }
+
+    mpfr_init2(runb, f->p);
+    mpfr_init2(y, f->p + 1);
+    if (is_rmm) {
+        int t1 = mpfr_set(y, x, MPFR_RNDZ);
+        rmm_round(runb, y, t1 != 0, f->p);
+    } else {
+        (void)mpfr_set(runb, x, rnd);
+    }
+    inexact = !mpfr_equal_p(runb, x);
+
+    {
+        mpfr_exp_t e_unb = mpfr_get_exp(runb);
+        long e_res = (long)e_unb - 1;
+
+        if (e_res > f->emax) {
+            /* after-rounding overflow, delivery per mode - the same
+             * block oracle() applies */
+            int away = (rnd == MPFR_RNDU && mpfr_sgn(runb) > 0) ||
+                       (rnd == MPFR_RNDD && mpfr_sgn(runb) < 0) ||
+                       rnd == MPFR_RNDN || is_rmm;
+            if (rnd == MPFR_RNDZ)
+                away = 0;
+            mpfr_set_prec(out, f->p);
+            if (away)
+                mpfr_set_inf(out, mpfr_sgn(runb));
+            else {
+                mpfr_set_ui_2exp(out, 1, f->emax + 1, MPFR_RNDN);
+                mpfr_nextbelow(out);
+                if (mpfr_sgn(runb) < 0)
+                    mpfr_neg(out, out, MPFR_RNDN);
+            }
+            *flags = fl | CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        } else if (e_res >= f->emin) {
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, runb, MPFR_RNDN);
+            *flags = inexact ? (fl | CFT_FLAG_INEXACT) : fl;
+        } else if (!is_rmm) {
+            /* subnormal landing, native modes: the MPFR recipe at the
+             * format's range, on the exact value */
+            mpfr_exp_t save_emin = mpfr_get_emin();
+            mpfr_exp_t save_emax = mpfr_get_emax();
+            mpfr_t r;
+            int t2;
+            mpfr_init2(r, f->p);
+            mpfr_set_emin(f->emin - f->p + 2);
+            mpfr_set_emax(f->emax + 1);
+            t2 = mpfr_set(r, x, rnd);
+            t2 = mpfr_check_range(r, t2, rnd);
+            t2 = mpfr_subnormalize(r, t2, rnd);
+            mpfr_set_emin(save_emin);
+            mpfr_set_emax(save_emax);
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, r, MPFR_RNDN);
+            if (t2 != 0 || inexact)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            *flags = fl;
+            mpfr_clear(r);
+        } else {
+            /* RMM on the fixed subnormal grid - oracle()'s block, on
+             * the p+1 truncation of the exact value. The granularity
+             * of the truncated fraction in grid units is 2^(exp-emin-2)
+             * <= 1/4 and the truncation error is below one granule, so
+             * the >= 1/2 decision cannot be crossed by truncating. */
+            int t1b, up, sgn;
+            long grid = f->emin - f->man_w;
+            mpz_t nn;
+            mpfr_t scaled, frac, half;
+            t1b = mpfr_set(y, x, MPFR_RNDZ);
+            sgn = mpfr_sgn(y) < 0;
+            mpz_init(nn);
+            mpfr_init2(scaled, f->p + 4);
+            mpfr_init2(frac, f->p + 4);
+            mpfr_init2(half, 8);
+            mpfr_abs(scaled, y, MPFR_RNDN);
+            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);   /* exact */
+            mpfr_get_z(nn, scaled, MPFR_RNDZ);                /* floor */
+            mpfr_sub_z(frac, scaled, nn, MPFR_RNDN);          /* exact */
+            mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+            up = (mpfr_cmp(frac, half) >= 0);
+            if (up)
+                mpz_add_ui(nn, nn, 1);
+            mpfr_set_prec(out, f->p);
+            mpfr_set_z_2exp(out, nn, grid, MPFR_RNDN);        /* exact */
+            if (sgn)
+                mpfr_neg(out, out, MPFR_RNDN);
+            if (!mpfr_zero_p(frac) || t1b)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            mpz_clear(nn);
+            mpfr_clear(scaled);
+            mpfr_clear(frac);
+            mpfr_clear(half);
+            *flags = fl;
+        }
+    }
+    mpfr_clear(runb);
+    mpfr_clear(y);
+}
+
+/* roundToIntegral by attribute. RNDN under mpfr_rint is ties-to-even;
+ * mpfr_round is ties-to-away; the directed three are their names. The
+ * target's p+2 bits always hold the integer exactly, so there is no
+ * second rounding hiding in the call. */
+static int rint_by_mode(mpfr_t r, const mpfr_t v, int mi)
+{
+    switch (MODES[mi].cr) {
+    case CFT_RNE: return mpfr_rint(r, v, MPFR_RNDN);
+    case CFT_RTZ: return mpfr_trunc(r, v);
+    case CFT_RDN: return mpfr_floor(r, v);
+    case CFT_RUP: return mpfr_ceil(r, v);
+    default:      return mpfr_round(r, v);
+    }
+}
+
+static void report_c5(const char *opn, const char *mode, const fdesc *fa,
+                      const uint8_t *a, const uint8_t *b, const fdesc *fg,
+                      const uint8_t *got, mpfr_srcptr want, uint32_t gf,
+                      uint32_t wf, int value_bad, const char *extra)
+{
+    char ha[65], hb[65], hg[65];
+    if (shown >= 16)
+        return;
+    shown++;
+    if (a) hexdump(a, fa->esz, ha); else strcpy(ha, "-");
+    if (b) hexdump(b, fa->esz, hb); else strcpy(hb, "-");
+    hexdump(got, fg->esz, hg);
+    printf("  %s %s %s %s a=0x%s b=0x%s %s\n",
+           value_bad ? "MISMATCH" : "FLAGS", fa->name, opn, mode, ha, hb,
+           extra ? extra : "");
+    printf("    lib=0x%s flags=0x%02x  mpfr=", hg, (unsigned)gf);
+    mpfr_out_str(stdout, 16, 0, want, MPFR_RNDN);
+    printf(" flags=0x%02x\n", (unsigned)wf);
+}
+
+/* One case's verdict: value plus flags, ledger, first-16 reporting. */
+static void c5_judge(int ti, int fj, const char *opn, const char *mode,
+                     const fdesc *fa, const uint8_t *a, const uint8_t *b,
+                     const fdesc *fg, const uint8_t *got, mpfr_srcptr want,
+                     uint32_t gf, uint32_t wf, cft_status st,
+                     const char *extra)
+{
+    int vbad = (st != CFT_OK) || !agree(fg, got, want);
+    int fbad = (gf != wf);
+    if (vbad)
+        mismatches++;
+    if (fbad)
+        flag_mismatches++;
+    if (vbad || fbad)
+        report_c5(opn, mode, fa, a, b, fg, got, want, gf, wf, vbad,
+                  st != CFT_OK ? "(status!=OK)" : extra);
+    cases++;
+    tally[ti][fj]++;
+}
+
+/* ---- roundToIntegral ---------------------------------------------- */
+
+static void check_rint(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t extra[64][32];
+    uint8_t d[32];
+    int ne = 0, i, mi, exact, s;
+
+    /* the tie families: n + 1/2 both signs, quarters, and the
+     * integral threshold 2^(p-1) with its neighbours - enc-1 of the
+     * threshold is 2^(p-1) - 1/2, the last value with a fraction */
+    for (s = 0; s <= 1; s++) {
+        uint64_t k;
+        for (k = 0; k <= 7; k++)
+            if (enc_from_val(f, s, 2 * k + 1, -1, extra[ne]))
+                ne++;
+        if (enc_from_val(f, s, 45, -1, extra[ne])) ne++;      /* 22.5 */
+        if (enc_from_val(f, s, 1, -2, extra[ne])) ne++;
+        if (enc_from_val(f, s, 3, -2, extra[ne])) ne++;
+        if (enc_from_val(f, s, 5, -2, extra[ne])) ne++;
+        if (enc_from_val(f, s, 7, -2, extra[ne])) ne++;
+        if (enc_from_val(f, 0, 1, f->p - 1, extra[ne])) {
+            if (s)
+                enc_neg(f, extra[ne]);
+            memcpy(extra[ne + 1], extra[ne], 32);
+            enc_step(f, extra[ne + 1], 0);
+            memcpy(extra[ne + 2], extra[ne], 32);
+            enc_step(f, extra[ne + 2], 1);
+            ne += 3;
+        }
+    }
+
+    for (mi = 0; mi < 5; mi++)
+        for (exact = 0; exact <= 1; exact++)
+            for (i = 0; i < pn + ne; i++) {
+                const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
+                uint32_t gf = 0, wf = 0;
+                mpfr_t av, want;
+                cls ca;
+                cft_status st;
+                char note[24];
+
+                classify(f, a, &ca);
+                mpfr_init2(av, f->p);
+                mpfr_init2(want, f->p);
+                enc_to_mpfr(f, a, av);
+                if (ca.is_nan) {
+                    mpfr_set_nan(want);
+                    if (ca.is_snan)
+                        wf |= CFT_FLAG_INVALID;
+                } else {
+                    int tern = rint_by_mode(want, av, mi);
+                    if (mpfr_zero_p(want))
+                        mpfr_setsign(want, want, ca.sign, MPFR_RNDN);
+                    if (exact && tern != 0)
+                        wf |= CFT_FLAG_INEXACT;
+                }
+                memset(d, 0, sizeof d);
+                st = cft_rint(dev, f->fmt, MODES[mi].cr, exact, a, d, 1,
+                              &gf, NULL);
+                snprintf(note, sizeof note, "exact=%d", exact);
+                c5_judge(exact ? T_RINTX : T_RINT, fj, "rint",
+                         MODES[mi].name, f, a, NULL, f, d, want, gf, wf,
+                         st, note);
+                mpfr_clear(av);
+                mpfr_clear(want);
+            }
+}
+
+/* ---- scaleB ------------------------------------------------------- */
+
+static void check_scaleb(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    int64_t ns[24];
+    uint8_t d[32];
+    int nn = 0, i, mi, k;
+    int64_t emax = f->emax, p = f->p;
+
+    /* every n regime: zero, small, the precision, the range edges,
+     * the staging chunks above emax, past every saturation clamp,
+     * the composed/host boundary at emin - p + 1, and the raw int64
+     * extremes */
+    ns[nn++] = 0;  ns[nn++] = 1;  ns[nn++] = -1;
+    ns[nn++] = 2;  ns[nn++] = -2;
+    ns[nn++] = p;  ns[nn++] = -p; ns[nn++] = f->man_w;
+    ns[nn++] = emax;      ns[nn++] = emax + 1;
+    ns[nn++] = -emax;     ns[nn++] = 2 * emax + p;
+    ns[nn++] = 3 * emax;  ns[nn++] = 3 * emax + 1;
+    ns[nn++] = 3 * emax + 1234567;
+    ns[nn++] = f->emin - f->man_w;          /* deepest composed n */
+    ns[nn++] = f->emin - p;                 /* first host-path n */
+    ns[nn++] = -2 * emax;
+    ns[nn++] = -(4 * emax + 2 * p) + 1;     /* the host clamp, straddled */
+    ns[nn++] = -(4 * emax + 2 * p);
+    ns[nn++] = -(4 * emax + 2 * p) - 1;
+    ns[nn++] = INT64_MAX;
+    ns[nn++] = INT64_MIN;
+
+    for (k = 0; k < nn; k++)
+        for (mi = 0; mi < 5; mi++)
+            for (i = 0; i < pn; i++) {
+                const uint8_t *a = pool[i];
+                uint32_t gf = 0, wf = 0;
+                mpfr_t av, want;
+                cls ca;
+                cft_status st;
+                char note[40];
+
+                classify(f, a, &ca);
+                mpfr_init2(av, f->p);
+                mpfr_init2(want, f->p);
+                enc_to_mpfr(f, a, av);
+                if (ca.is_nan) {
+                    mpfr_set_nan(want);
+                    if (ca.is_snan)
+                        wf |= CFT_FLAG_INVALID;
+                } else if (ca.is_inf || ca.is_zero) {
+                    mpfr_set(want, av, MPFR_RNDN);
+                } else {
+                    int64_t nc = ns[k];
+                    int64_t lim = 4 * emax + 2 * p + 64;
+                    if (nc > lim) nc = lim;
+                    if (nc < -lim) nc = -lim;
+                    mpfr_mul_2si(av, av, (long)nc, MPFR_RNDN); /* exact */
+                    c5_round_into(f, av, mi, want, &wf);
+                }
+                memset(d, 0, sizeof d);
+                st = cft_scaleb(dev, f->fmt, MODES[mi].cr, a, ns[k], d, 1,
+                                &gf, NULL);
+                snprintf(note, sizeof note, "n=%lld", (long long)ns[k]);
+                c5_judge(T_SCALEB, fj, "scaleb", MODES[mi].name, f, a,
+                         NULL, f, d, want, gf, wf, st, note);
+                mpfr_clear(av);
+                mpfr_clear(want);
+            }
+}
+
+/* ---- convertFormat ------------------------------------------------ */
+
+static void check_convert(int sfi, int dfi, uint8_t pool[][32], int pn)
+{
+    const fdesc *fs = &FMTS[sfi], *fd = &FMTS[dfi];
+    uint8_t extra[24][32];
+    uint8_t d[32];
+    int ne = 0, i, mi;
+    char note[16];
+
+    if (fs->man_w > fd->man_w) {
+        /* narrowing stress: destination-grid ties built in the wider
+         * source - a one at the destination's rounding position
+         * (exact tie), and the same with the sticky bit lit (just
+         * above the tie) - at a plain exponent, at the destination's
+         * emax, and down on its subnormal grid */
+        long Es[5];
+        int nE = 0, t, s, v;
+        Es[nE++] = 0;
+        Es[nE++] = fd->emax;
+        Es[nE++] = fd->emin;
+        Es[nE++] = fd->emin - 3;
+        Es[nE++] = fd->emin - fd->man_w + 1;
+        for (t = 0; t < nE; t++)
+            for (s = 0; s <= 1; s++)
+                for (v = 0; v <= 1; v++) {
+                    uint8_t *b = extra[ne];
+                    memset(b, 0, 32);
+                    set_field(b, fs->man_w, fs->exp_w,
+                              (uint64_t)(Es[t] + fs->emax));
+                    set_field(b, fs->man_w - (fd->man_w + 1), 1, 1);
+                    if (v)
+                        set_field(b, 0, 1, 1);
+                    if (s)
+                        enc_neg(fs, b);
+                    ne++;
+                }
+    }
+    snprintf(note, sizeof note, "->%s", fd->name);
+
+    for (mi = 0; mi < 5; mi++)
+        for (i = 0; i < pn + ne; i++) {
+            const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
+            uint32_t gf = 0, wf = 0;
+            mpfr_t av, want;
+            cls ca;
+            cft_status st;
+
+            classify(fs, a, &ca);
+            mpfr_init2(av, fs->p);
+            mpfr_init2(want, fd->p);
+            enc_to_mpfr(fs, a, av);
+            if (ca.is_nan) {
+                mpfr_set_nan(want);
+                if (ca.is_snan)
+                    wf |= CFT_FLAG_INVALID;
+            } else if (ca.is_inf) {
+                mpfr_set_inf(want, ca.sign ? -1 : 1);
+            } else {
+                c5_round_into(fd, av, mi, want, &wf);
+            }
+            memset(d, 0, sizeof d);
+            st = cft_convert(dev, fs->fmt, fd->fmt, MODES[mi].cr, a, d, 1,
+                             &gf);
+            c5_judge(T_CONVERT, sfi, "convert", MODES[mi].name, fs, a,
+                     NULL, fd, d, want, gf, wf, st, note);
+            mpfr_clear(av);
+            mpfr_clear(want);
+        }
+}
+
+/* ---- convertFromInt ----------------------------------------------- */
+
+static void check_cvt_from(int fj, int nrand)
+{
+    const fdesc *f = &FMTS[fj];
+    static const uint64_t DI[] = {
+        0, 1, 2, 3, 5, 7, 0xff,
+        (1ull << 23) - 1, 1ull << 23, (1ull << 23) + 1,
+        (1ull << 24) - 1, 1ull << 24, (1ull << 24) + 1,
+        (1ull << 24) + 2, (1ull << 25) + 2,
+        (1ull << 31) - 1, 1ull << 31, (1ull << 31) + 1,
+        (1ull << 32) - 1, 1ull << 32, (1ull << 32) + 1,
+        (1ull << 52) - 1, 1ull << 52, (1ull << 52) + 1,
+        (1ull << 53) - 1, 1ull << 53, (1ull << 53) + 1, (1ull << 53) + 2,
+        1ull << 62, (1ull << 63) - 1, 1ull << 63, (1ull << 63) + 1,
+        ~0ull, ~0ull - 1,
+        0xaaaaaaaaaaaaaaaaull, 0x5555555555555555ull,
+        0x7fffffffull, 0x80000000ull, 0x80000001ull,
+        0x7fffffffffffffffull,
+    };
+    enum { NDI = (int)(sizeof DI / sizeof DI[0]) };
+    uint64_t vals[NDI + 96];
+    uint8_t d[32];
+    int nv = 0, ty, mi, i;
+
+    for (i = 0; i < (int)NDI; i++)
+        vals[nv++] = DI[i];
+    for (i = 0; i < nrand && nv < (int)NDI + 96; i++)
+        vals[nv++] = rng() >> (rng() & 63);
+
+    for (ty = 0; ty < 4; ty++)
+        for (mi = 0; mi < 5; mi++)
+            for (i = 0; i < nv; i++) {
+                uint64_t raw = vals[i], mag = 0;
+                int neg = 0, ti = 0;
+                const char *opn = "?";
+                uint32_t gf = 0, wf = 0;
+                mpfr_t ex, want;
+                mpz_t z;
+                cft_status st = CFT_ERR_INTERNAL;
+                char note[32];
+
+                switch (ty) {
+                case 0: {
+                    int32_t x = (int32_t)(uint32_t)raw;
+                    neg = x < 0;
+                    mag = neg ? ~(uint64_t)(uint32_t)x + 1 : (uint64_t)x;
+                    mag &= 0xffffffffull;
+                    ti = T_FROM_I32; opn = "from_i32";
+                    break;
+                }
+                case 1:
+                    mag = (uint32_t)raw;
+                    ti = T_FROM_U32; opn = "from_u32";
+                    break;
+                case 2: {
+                    int64_t x = (int64_t)raw;
+                    neg = x < 0;
+                    mag = neg ? ~(uint64_t)x + 1 : (uint64_t)x;
+                    ti = T_FROM_I64; opn = "from_i64";
+                    break;
+                }
+                default:
+                    mag = raw;
+                    ti = T_FROM_U64; opn = "from_u64";
+                    break;
+                }
+
+                mpz_init(z);
+                mpz_import(z, 1, -1, 8, 0, 0, &mag);
+                if (neg)
+                    mpz_neg(z, z);
+                mpfr_init2(ex, 70);
+                mpfr_init2(want, f->p);
+                mpfr_set_z(ex, z, MPFR_RNDN);      /* <= 64 bits: exact */
+                c5_round_into(f, ex, mi, want, &wf);
+
+                memset(d, 0, sizeof d);
+                switch (ty) {
+                case 0: {
+                    int32_t x = (int32_t)(uint32_t)raw;
+                    st = cft_cvt_from_i32(dev, f->fmt, MODES[mi].cr, &x,
+                                          d, 1, &gf);
+                    break;
+                }
+                case 1: {
+                    uint32_t x = (uint32_t)raw;
+                    st = cft_cvt_from_u32(dev, f->fmt, MODES[mi].cr, &x,
+                                          d, 1, &gf);
+                    break;
+                }
+                case 2: {
+                    int64_t x = (int64_t)raw;
+                    st = cft_cvt_from_i64(dev, f->fmt, MODES[mi].cr, &x,
+                                          d, 1, &gf);
+                    break;
+                }
+                default: {
+                    uint64_t x = raw;
+                    st = cft_cvt_from_u64(dev, f->fmt, MODES[mi].cr, &x,
+                                          d, 1, &gf);
+                    break;
+                }
+                }
+                snprintf(note, sizeof note, "v=0x%llx",
+                         (unsigned long long)raw);
+                c5_judge(ti, fj, opn, MODES[mi].name, f, NULL, NULL, f, d,
+                         want, gf, wf, st, note);
+                mpz_clear(z);
+                mpfr_clear(ex);
+                mpfr_clear(want);
+            }
+}
+
+/* ---- convertToInteger --------------------------------------------- */
+
+static void check_cvt_to(int fj, uint8_t pool[][32], int pn, int nrand)
+{
+    const fdesc *f = &FMTS[fj];
+    /* The delivered values of the invalid cases are the CONTRACT's
+     * RISC-V FCVT table, hardcoded from cft.h's doc - NaN and +inf to
+     * the type's maximum, -inf and negative overflow to its minimum,
+     * a negative rounded below zero to unsigned 0. 754 leaves these
+     * open; the contract does not, and MPFR cannot derive a choice. */
+    static const struct {
+        const char *name;
+        int ti, width, is_signed;
+        uint64_t maxv, minv;
+    } TY[4] = {
+        { "to_i32", T_TO_I32, 32, 1, 0x7fffffffull, 0x80000000ull },
+        { "to_u32", T_TO_U32, 32, 0, 0xffffffffull, 0 },
+        { "to_i64", T_TO_I64, 64, 1, 0x7fffffffffffffffull,
+          0x8000000000000000ull },
+        { "to_u64", T_TO_U64, 64, 0, 0xffffffffffffffffull, 0 },
+    };
+    uint8_t extra[112][32];
+    int ne = 0, ty, mi, exact, i, s;
+
+    /* halves and quarters both signs, plus the representable
+     * boundary ties (2^31 +- 1/2, 2^32 + 1/2, 2^63 - 1/2, 2^63 + 1) */
+    for (s = 0; s <= 1; s++) {
+        static const struct { uint64_t m; long e; } HV[6] = {
+            {1, -1}, {3, -1}, {5, -1}, {7, -1}, {1, -2}, {3, -2},
+        };
+        for (i = 0; i < 6; i++)
+            if (enc_from_val(f, s, HV[i].m, HV[i].e, extra[ne]))
+                ne++;
+        if (enc_from_val(f, s, (1ull << 32) + 1, -1, extra[ne])) ne++;
+        if (enc_from_val(f, s, (1ull << 32) - 1, -1, extra[ne])) ne++;
+        if (enc_from_val(f, s, (1ull << 33) + 1, -1, extra[ne])) ne++;
+        if (enc_from_val(f, s, ~0ull, -1, extra[ne])) ne++;
+        if (enc_from_val(f, s, (1ull << 63) + 1, 0, extra[ne])) ne++;
+    }
+    /* the powers at the type edges with their nearest neighbours,
+     * both signs - 66 is past the implementation's early-out and past
+     * every 64-bit range whatever the rounding */
+    {
+        static const long BE[5] = { 31, 32, 63, 64, 66 };
+        for (i = 0; i < 5; i++) {
+            if (!enc_from_val(f, 0, 1, BE[i], extra[ne]))
+                continue;
+            memcpy(extra[ne + 1], extra[ne], 32);
+            enc_step(f, extra[ne + 1], 0);
+            memcpy(extra[ne + 2], extra[ne], 32);
+            enc_step(f, extra[ne + 2], 1);
+            memcpy(extra[ne + 3], extra[ne], 32);
+            enc_neg(f, extra[ne + 3]);
+            memcpy(extra[ne + 4], extra[ne + 1], 32);
+            enc_neg(f, extra[ne + 4]);
+            memcpy(extra[ne + 5], extra[ne + 2], 32);
+            enc_neg(f, extra[ne + 5]);
+            ne += 6;
+        }
+    }
+    /* integer-range randoms: exponents banded into [-6, 71], where
+     * the rounding is interesting - the shared pool's own randoms
+     * already cover the far-out-of-range mass */
+    for (i = 0; i < nrand && ne < 112; i++) {
+        long E = (long)(rng() % 78) - 6;
+        rand_enc(f, extra[ne]);
+        set_field(extra[ne], f->man_w, f->exp_w, (uint64_t)(E + f->emax));
+        ne++;
+    }
+
+    for (ty = 0; ty < 4; ty++) {
+        mpz_t zmax, zmin, zr, zt;
+        mpz_init(zmax); mpz_init(zmin); mpz_init(zr); mpz_init(zt);
+        mpz_import(zmax, 1, -1, 8, 0, 0, &TY[ty].maxv);
+        if (TY[ty].is_signed) {
+            mpz_import(zmin, 1, -1, 8, 0, 0, &TY[ty].minv);
+            mpz_neg(zmin, zmin);
+        }
+
+        for (mi = 0; mi < 5; mi++)
+            for (exact = 0; exact <= 1; exact++)
+                for (i = 0; i < pn + ne; i++) {
+                    const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
+                    uint32_t gf = 0, wf = 0;
+                    uint64_t want64 = 0, got64 = 0, mask;
+                    mpfr_t av, R;
+                    cls ca;
+                    cft_status st = CFT_ERR_INTERNAL;
+
+                    mask = TY[ty].width == 32 ? 0xffffffffull : ~0ull;
+                    classify(f, a, &ca);
+                    mpfr_init2(av, f->p);
+                    mpfr_init2(R, f->p + 2);
+                    enc_to_mpfr(f, a, av);
+
+                    if (ca.is_nan) {
+                        want64 = TY[ty].maxv;
+                        wf = CFT_FLAG_INVALID;
+                    } else if (ca.is_inf) {
+                        want64 = ca.sign ? TY[ty].minv : TY[ty].maxv;
+                        wf = CFT_FLAG_INVALID;
+                    } else {
+                        int tern = rint_by_mode(R, av, mi);
+                        int oor = 0;
+                        if (mpfr_zero_p(R)) {
+                            mpz_set_ui(zr, 0);
+                        } else if (mpfr_get_exp(R) > 70) {
+                            oor = mpfr_sgn(R) < 0 ? -1 : 1;
+                        } else {
+                            mpfr_get_z(zr, R, MPFR_RNDZ); /* R integral */
+                            if (mpz_cmp(zr, zmin) < 0)
+                                oor = -1;
+                            else if (mpz_cmp(zr, zmax) > 0)
+                                oor = 1;
+                        }
+                        if (oor) {
+                            want64 = oor < 0 ? TY[ty].minv : TY[ty].maxv;
+                            wf = CFT_FLAG_INVALID;  /* pre-empts inexact */
+                        } else {
+                            if (mpz_sgn(zr) >= 0) {
+                                uint64_t wv = 0;
+                                mpz_export(&wv, NULL, -1, 8, 0, 0, zr);
+                                want64 = wv;
+                            } else {
+                                uint64_t wv = 0;
+                                mpz_neg(zt, zr);
+                                mpz_export(&wv, NULL, -1, 8, 0, 0, zt);
+                                want64 = ~wv + 1;
+                            }
+                            if (exact && tern != 0)
+                                wf = CFT_FLAG_INEXACT;
+                        }
+                    }
+
+                    switch (ty) {
+                    case 0: {
+                        int32_t o = 0;
+                        st = cft_cvt_to_i32(dev, f->fmt, MODES[mi].cr,
+                                            exact, a, &o, 1, &gf);
+                        got64 = (uint64_t)(uint32_t)o;
+                        break;
+                    }
+                    case 1: {
+                        uint32_t o = 0;
+                        st = cft_cvt_to_u32(dev, f->fmt, MODES[mi].cr,
+                                            exact, a, &o, 1, &gf);
+                        got64 = o;
+                        break;
+                    }
+                    case 2: {
+                        int64_t o = 0;
+                        st = cft_cvt_to_i64(dev, f->fmt, MODES[mi].cr,
+                                            exact, a, &o, 1, &gf);
+                        got64 = (uint64_t)o;
+                        break;
+                    }
+                    default: {
+                        uint64_t o = 0;
+                        st = cft_cvt_to_u64(dev, f->fmt, MODES[mi].cr,
+                                            exact, a, &o, 1, &gf);
+                        got64 = o;
+                        break;
+                    }
+                    }
+
+                    {
+                        int vbad = (st != CFT_OK) ||
+                                   (got64 & mask) != (want64 & mask);
+                        int fbad = (gf != wf);
+                        if (vbad)
+                            mismatches++;
+                        if (fbad)
+                            flag_mismatches++;
+                        if ((vbad || fbad) && shown < 16) {
+                            char ha[65];
+                            shown++;
+                            hexdump(a, f->esz, ha);
+                            printf("  %s %s %s %s exact=%d a=0x%s\n",
+                                   vbad ? "MISMATCH" : "FLAGS", f->name,
+                                   TY[ty].name, MODES[mi].name, exact,
+                                   ha);
+                            printf("    lib=0x%llx flags=0x%02x  "
+                                   "want=0x%llx flags=0x%02x\n",
+                                   (unsigned long long)(got64 & mask),
+                                   (unsigned)gf,
+                                   (unsigned long long)(want64 & mask),
+                                   (unsigned)wf);
+                        }
+                        cases++;
+                        tally[TY[ty].ti][fj]++;
+                    }
+                    mpfr_clear(av);
+                    mpfr_clear(R);
+                }
+        mpz_clear(zmax); mpz_clear(zmin); mpz_clear(zr); mpz_clear(zt);
+    }
+}
+
+/* ---- logB --------------------------------------------------------- */
+
+static void check_logb(int fj, uint8_t pool[][32], int pn, int nrand)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t extra[80][32];
+    uint8_t d[32];
+    int ne = 0, i, s;
+
+    for (s = 0; s <= 1; s++) {
+        if (enc_from_val(f, s, 1, f->emin - f->man_w, extra[ne])) ne++;
+        if (enc_from_val(f, s, 3, f->emin - f->man_w, extra[ne])) ne++;
+        if (enc_from_val(f, s, 1, f->emin - 1, extra[ne])) ne++;
+        if (enc_from_val(f, s, 1, f->emin, extra[ne])) ne++;
+        if (enc_from_val(f, s, 1, f->emax, extra[ne])) ne++;
+        if (enc_from_val(f, s, 3, -1, extra[ne])) ne++;       /* 1.5 */
+    }
+    for (i = 0; i < nrand && ne < 80; i++) {
+        rand_enc(f, extra[ne]);
+        set_field(extra[ne], f->man_w, f->exp_w, 0);  /* subnormal band */
+        ne++;
+    }
+
+    for (i = 0; i < pn + ne; i++) {
+        const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
+        uint32_t gf = 0, wf = 0;
+        mpfr_t av, want;
+        cls ca;
+        cft_status st;
+
+        classify(f, a, &ca);
+        mpfr_init2(av, f->p);
+        mpfr_init2(want, f->p);
+        enc_to_mpfr(f, a, av);
+        if (ca.is_nan) {
+            mpfr_set_nan(want);
+            if (ca.is_snan)
+                wf |= CFT_FLAG_INVALID;
+        } else if (ca.is_zero) {
+            mpfr_set_inf(want, -1);
+            wf |= CFT_FLAG_DIVBYZERO;
+        } else if (ca.is_inf) {
+            mpfr_set_inf(want, 1);            /* both signs, silently */
+        } else {
+            /* mpfr_get_exp sees the mantissa in [1/2, 1); IEEE's logB
+             * sees [1, 2), one binade lower. Value-based, so
+             * subnormals report their true exponent. |logB| <= emax +
+             * man_w < 2^19 even at fp256, so the delivery is exact in
+             * every format - asserted, not hoped. */
+            long E = (long)mpfr_get_exp(av) - 1;
+            if (mpfr_set_si(want, E, MPFR_RNDN) != 0) {
+                fprintf(stderr, "logb oracle: E=%ld inexact in %s?!\n",
+                        E, f->name);
+                exit(3);
+            }
+        }
+        memset(d, 0, sizeof d);
+        st = cft_logb(dev, f->fmt, a, d, 1, &gf);
+        c5_judge(T_LOGB, fj, "logb", "-", f, a, NULL, f, d, want, gf, wf,
+                 st, NULL);
+        mpfr_clear(av);
+        mpfr_clear(want);
+    }
+}
+
+/* ---- nextUp / nextDown -------------------------------------------- */
+
+static void check_next(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t d[32], aflip[32];
+    int i, dirn, s;
+
+    for (dirn = 0; dirn < 2; dirn++)          /* 0 up, 1 down */
+        for (s = 0; s <= 1; s++)
+            for (i = 0; i < pn; i++) {
+                const uint8_t *a;
+                uint32_t gf = 0, wf = 0, discard = 0;
+                mpfr_t av, want;
+                cls ca;
+                cft_status st;
+
+                if (s) {
+                    memcpy(aflip, pool[i], 32);
+                    enc_neg(f, aflip);
+                    a = aflip;
+                } else {
+                    a = pool[i];
+                }
+                classify(f, a, &ca);
+                mpfr_init2(av, f->p);
+                mpfr_init2(want, f->p);
+                enc_to_mpfr(f, a, av);
+                if (ca.is_nan) {
+                    mpfr_set_nan(want);
+                    if (ca.is_snan)
+                        wf |= CFT_FLAG_INVALID;
+                } else {
+                    /* one representable step in unbounded range, then
+                     * a directed re-round onto the format's grid;
+                     * MODES[3] is rup, MODES[2] is rdn. The
+                     * quantisation's flags are discarded: nextUp's
+                     * only signal is the sNaN invalid above. */
+                    if (dirn == 0)
+                        mpfr_nextabove(av);
+                    else
+                        mpfr_nextbelow(av);
+                    if (mpfr_inf_p(av))
+                        mpfr_set(want, av, MPFR_RNDN); /* the fixed point */
+                    else
+                        c5_round_into(f, av, dirn == 0 ? 3 : 2, want,
+                                      &discard);
+                }
+                memset(d, 0, sizeof d);
+                st = dirn == 0
+                    ? cft_next_up(dev, f->fmt, a, d, 1, &gf)
+                    : cft_next_down(dev, f->fmt, a, d, 1, &gf);
+                c5_judge(dirn == 0 ? T_NEXTUP : T_NEXTDOWN, fj,
+                         dirn == 0 ? "next_up" : "next_down", "-", f, a,
+                         NULL, f, d, want, gf, wf, st, NULL);
+                mpfr_clear(av);
+                mpfr_clear(want);
+            }
+}
+
+/* ---- remainder ---------------------------------------------------- */
+
+static void check_rem(int fj, uint8_t pool[][32], int pn, int nrand)
+{
+    const fdesc *f = &FMTS[fj];
+    static uint8_t xa[160][32], xb[160][32];
+    uint8_t d[32];
+    int np = 0, i, j, s;
+
+    /* exact ties: (2k+1)/2 rem 1 - the quotient sits exactly on a
+     * half and ties-to-even decides; both signs of x */
+    for (s = 0; s <= 1; s++)
+        for (i = 0; i <= 7 && np < 160; i++)
+            if (enc_from_val(f, s, 2 * (uint64_t)i + 1, -1, xa[np]) &&
+                enc_from_val(f, 0, 1, 0, xb[np]))
+                np++;
+    /* the same against an odd divisor: 3(2m+1)/2 rem 3 */
+    for (s = 0; s <= 1; s++)
+        for (i = 0; i <= 3 && np < 160; i++)
+            if (enc_from_val(f, s, 6 * (uint64_t)i + 3, -1, xa[np]) &&
+                enc_from_val(f, 0, 3, 0, xb[np]))
+                np++;
+    /* one encoding step either side of a tie: near-half quotients */
+    for (s = 0; s <= 1; s++)
+        for (i = 0; i < 2 && np < 157; i++) {
+            uint64_t m = i ? 33 : 9;
+            if (!enc_from_val(f, s, m, -1, xa[np]))
+                continue;
+            (void)enc_from_val(f, 0, 3, 0, xb[np]);
+            memcpy(xa[np + 1], xa[np], 32);
+            enc_step(f, xa[np + 1], 0);
+            memcpy(xb[np + 1], xb[np], 32);
+            memcpy(xa[np + 2], xa[np], 32);
+            enc_step(f, xa[np + 2], 1);
+            memcpy(xb[np + 2], xb[np], 32);
+            np += 3;
+        }
+    /* the adversarial exponent gap, once per divisor: max_normal
+     * against the smallest subnormals - at fp256 this is the
+     * documented ~786k-step quotient-bit walk */
+    if (np < 159) {
+        memset(xa[np], 0, 32);
+        set_field(xa[np], f->man_w, f->exp_w, (1ull << f->exp_w) - 2);
+        for (i = 0; i < f->man_w; i++)
+            set_field(xa[np], i, 1, 1);
+        memset(xb[np], 0, 32);
+        set_field(xb[np], 0, 1, 1);
+        memcpy(xa[np + 1], xa[np], 32);
+        memset(xb[np + 1], 0, 32);
+        set_field(xb[np + 1], 0, 2, 3);
+        np += 2;
+    }
+    /* gap-banded random pairs: y's exponent pulled within +-600 of
+     * x's, so the walk is exercised without owning the clock */
+    for (i = 0; i < nrand && np < 160; i++) {
+        long ea, eb;
+        long delta = (long)(rng() % 1201) - 600;
+        rand_enc(f, xa[np]);
+        rand_enc(f, xb[np]);
+        ea = (long)get_field(xa[np], f->man_w, f->exp_w);
+        eb = ea + delta;
+        if (eb < 0)
+            eb = 0;
+        if (eb > (long)((1ull << f->exp_w) - 2))
+            eb = (long)((1ull << f->exp_w) - 2);
+        set_field(xb[np], f->man_w, f->exp_w, (uint64_t)eb);
+        np++;
+    }
+
+    for (i = 0; i < pn + np; i++) {
+        int jmax = i < pn ? pn : 1;
+        for (j = 0; j < jmax; j++) {
+            const uint8_t *pa = i < pn ? pool[i] : xa[i - pn];
+            const uint8_t *pb = i < pn ? pool[j] : xb[i - pn];
+            uint32_t gf = 0, wf = 0;
+            mpfr_t av, bv, want;
+            cls ca, cb;
+            cft_status st;
+            int tern = 0;
+
+            classify(f, pa, &ca);
+            classify(f, pb, &cb);
+            mpfr_init2(av, f->p);
+            mpfr_init2(bv, f->p);
+            mpfr_init2(want, f->p);
+            enc_to_mpfr(f, pa, av);
+            enc_to_mpfr(f, pb, bv);
+            if (ca.is_nan || cb.is_nan) {
+                mpfr_set_nan(want);
+                if (ca.is_snan || cb.is_snan)
+                    wf |= CFT_FLAG_INVALID;
+            } else if (ca.is_inf || cb.is_zero) {
+                mpfr_set_nan(want);
+                wf |= CFT_FLAG_INVALID;
+            } else if (cb.is_inf || ca.is_zero) {
+                mpfr_set(want, av, MPFR_RNDN);   /* x, sign included */
+            } else {
+                tern = mpfr_remainder(want, av, bv, MPFR_RNDN);
+                if (mpfr_zero_p(want))
+                    mpfr_setsign(want, want, ca.sign, MPFR_RNDN);
+            }
+            if (tern != 0) {
+                /* the remainder of two p-bit values is representable
+                 * in p bits (the standard theorem); a nonzero ternary
+                 * is a harness-assumption failure, surfaced rather
+                 * than absorbed */
+                mismatches++;
+                if (shown < 16) {
+                    shown++;
+                    printf("  REM-TERNARY %s: mpfr_remainder claims "
+                           "inexact\n", f->name);
+                }
+            }
+            memset(d, 0, sizeof d);
+            st = cft_rem(dev, f->fmt, pa, pb, d, 1, &gf);
+            /* the flag equality below IS the exactness assertion: wf
+             * never contains inexact/overflow/underflow, so the
+             * library raising any of them fails the case */
+            c5_judge(T_REM, fj, "rem", "-", f, pa, pb, f, d, want, gf,
+                     wf, st, NULL);
+            mpfr_clear(av);
+            mpfr_clear(bv);
+            mpfr_clear(want);
+        }
+    }
+}
+
 /* ---- driver -------------------------------------------------------- */
 
 static void report(const fdesc *f, mop op, int mi, const uint8_t *a,
@@ -582,6 +1731,7 @@ int main(int argc, char **argv)
                                    gf, wf, vbad);
                         mpfr_clear(want);
                         cases++; fmt_cases++;
+                        tally[oi][fi]++;
                     }
                 }
             }
@@ -592,6 +1742,56 @@ int main(int argc, char **argv)
                (unsigned long long)mismatches,
                (unsigned long long)flag_mismatches);
         fflush(stdout);
+    }
+
+    /* The clause-5 completion set. Fresh pools (the rng has moved on,
+     * so these randoms differ from the arithmetic phase's), and the
+     * wide rungs get double the random weight: fp128/fp256 are the
+     * formats only MPFR can arbitrate. */
+    for (fi = 0; fi < 4; fi++) {
+        const fdesc *f = &FMTS[fi];
+        int pn = build_pool(f, pool, randoms);
+        int mult = fi >= 2 ? 2 : 1;
+        uint64_t before = cases;
+        check_rint(fi, pool, pn);
+        check_scaleb(fi, pool, pn);
+        check_cvt_from(fi, 24 * mult);
+        check_cvt_to(fi, pool, pn, 24 * mult);
+        check_logb(fi, pool, pn, 24 * mult);
+        check_next(fi, pool, pn);
+        check_rem(fi, pool, pn, 48 * mult);
+        printf("%s clause5: %llu cases done (running mismatches: "
+               "%llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+    }
+    for (fi = 0; fi < 4; fi++) {
+        int pn = build_pool(&FMTS[fi], pool, randoms);
+        int dfi;
+        uint64_t before = cases;
+        for (dfi = 0; dfi < 4; dfi++)
+            check_convert(fi, dfi, pool, pn);
+        printf("%s convert: %llu cases done (running mismatches: "
+               "%llu value, %llu flag)\n", FMTS[fi].name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+    }
+
+    {
+        int t, k;
+        printf("\nper-op case counts (convert by source format):\n");
+        printf("  %-10s %12s %12s %12s %12s\n", "op", "fp32", "fp64",
+               "fp128", "fp256");
+        for (t = 0; t < NTALLY; t++) {
+            printf("  %-10s", TALLY_NAME[t]);
+            for (k = 0; k < 4; k++)
+                printf(" %12llu", (unsigned long long)tally[t][k]);
+            printf("\n");
+        }
     }
 
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
