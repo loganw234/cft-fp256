@@ -19,9 +19,17 @@ was loaded on one, through `cftx_program_run` on a single compute unit;
 and `tb/test_krnl_seq.py` scores a full-kernel run against `seq.py` on
 deposits, counts, FLAGS and STATUS. The plumbing is therefore testable
 ahead of the core, which is the point of writing the contract down
-first - and the bench is honest about the difference: against the
-refuse-everything stub the refusal cases pass and the compute cases
-fail with per-slot comparisons rather than hanging.
+first.
+
+The core itself is no longer a stub - `cft_seq` has a fetch, execute
+and drain body, and `tb/test_seq_core.py` scores it against `seq.py`
+directly - but it is not green yet: a sequencer run currently stalls
+in simulation rather than reaching `done`. That is why both sequencer
+targets, `krnlseq` and `seq_core`, are deliberately out of `make sim`
+and wrapped in external timeouts, and why the aggregate suite is still
+a statement about the elementwise engine alone. They fold in on the
+day the core passes, which is the only day the claim would mean
+anything.
 
 So a program can be written and run today, on any machine, with no
 card. What the hardware adds is speed and the on-chip iteration that
