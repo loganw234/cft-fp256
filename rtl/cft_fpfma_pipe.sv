@@ -383,7 +383,10 @@ module cft_fpfma_pipe #(
     c_inf  = (&efc) && (frc == 0);
     a_zero = (efa == 0) && (fra == 0); b_zero = (efb == 0) && (frb == 0);
     c_zero = (efc == 0) && (frc == 0);
-    efa_i = efa; efb_i = efb; efc_i = efc;
+    // The biased fields into int, explicitly: the sideband exponent
+    // algebra runs signed at 32 bits, with EXP_W <= 19 there is no
+    // value a field can hold that the cast moves.
+    efa_i = 32'(efa); efb_i = 32'(efb); efc_i = 32'(efc);
     spx = sa ^ sb;
 
     s1_sp <= spx;
@@ -508,8 +511,15 @@ module cft_fpfma_pipe #(
         // S5: L3 pairs, shift 96
         for (int i = 0; i < 2; i = i + 1)
           s5_u[i] <= s4_t[2*i] + (s4_t[2*i+1] << (4*MCH));
-        // S6: L4 final, shift 192
+        // S6: L4 final, shift 192. The add runs at the tree's uniform
+        // PPW = 2P+48 bits and lands in 2P: the sum IS the exact
+        // product ma*mb < 2^2P, so the 48 bits dropped are zero by
+        // arithmetic, not by luck. Left as written - restaging the
+        // final add to please a width lint is exactly the edit this
+        // file's history warns against.
+        /* verilator lint_off WIDTHTRUNC */
         s6_mp_r <= s5_u[0] + (s5_u[1] << (8*MCH));
+        /* verilator lint_on WIDTHTRUNC */
       end
 
       assign s6_mp = s6_mp_r;
@@ -990,6 +1000,7 @@ module cft_fpfma_pipe #(
     logic [4:0] fl;
     logic [P:0] kr;
     logic [EXP_W-1:0] biased_f;
+    logic [31:0] e_biased;
     int bl, e_res;
 
     res = '0; fl = '0;
@@ -1024,7 +1035,10 @@ module cft_fpfma_pipe #(
             res = {s13_rsign, {EXP_W{1'b0}}, kr[MAN_W-1:0]};
           end else begin
             if (bl == P + 1) kr = kr >> 1;
-            biased_f = e_res + BIAS;
+            // In this branch EMIN <= e_res <= EMAX, so the biased sum
+            // sits in [1, 2^EXP_W - 2] and the field select is exact.
+            e_biased = e_res + BIAS;
+            biased_f = e_biased[EXP_W-1:0];
             res = {s13_rsign, biased_f, kr[MAN_W-1:0]};
           end
         end

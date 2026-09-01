@@ -289,7 +289,7 @@ module cft_reduce_acc #(
   always_comb begin
     if (fold_issue)                                 issue_lvl = ptr;
     else if (res_needs_issue)                       issue_lvl = res_lvl + 1'b1;
-    else                                            issue_lvl = 1'b1;
+    else                                            issue_lvl = {{(LW-1){1'b0}}, 1'b1};
   end
 
   integer i;

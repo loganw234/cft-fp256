@@ -82,9 +82,18 @@ module cft_seedop #(
 
   assign valid = (op == OP_RECIP_SEED) || (op == OP_RSQRT_SEED);
 
-  // Signed exponent arithmetic, two bits of headroom.
+  // Signed exponent arithmetic, two bits of headroom. Each of the
+  // three assignments below deliberately computes at int width and
+  // lands in EXP_W+2 bits; the headroom is what makes every value fit,
+  // and truncation of two's complement is congruent either way. Verified
+  // exhaustively over the exponent range by tb/test_seedop.py.
   logic signed [EXP_W+1:0] E, be_r, be_s;
+  // unbias: |E| <= 2^(EXP_W-1), two bits inside the headroom.
+  /* verilator lint_off WIDTHEXPAND */
+  /* verilator lint_off WIDTHTRUNC */
   assign E = $signed({2'b00, ef}) - BIAS;
+  /* verilator lint_on WIDTHTRUNC */
+  /* verilator lint_on WIDTHEXPAND */
 
   // ---- reciprocal ----------------------------------------------------
   // value = r * 2^(-18 - E) = 1.f17 * 2^(-1 - E); be = BIAS - 1 - E.
@@ -95,7 +104,12 @@ module cft_seedop #(
   logic [MAN_W-1:0] frac_rec;
   logic [W-1:0]     d_rec;
   assign r_rec = seed_recip(idx);
+  // be_r in [-2, 2^EXP_W - 3]: inside the headroom.
+  /* verilator lint_off WIDTHEXPAND */
+  /* verilator lint_off WIDTHTRUNC */
   assign be_r  = BIAS - 1 - E;
+  /* verilator lint_on WIDTHTRUNC */
+  /* verilator lint_on WIDTHEXPAND */
   always_comb begin
     if (be_r >= 1) begin
       frac_rec = {r_rec[16:0], {(MAN_W-17){1'b0}}};
@@ -122,7 +136,13 @@ module cft_seedop #(
   logic [W-1:0]     d_rs;
   assign oddE = E[0];
   assign r_rs = seed_rsqrt({oddE, idx});
+  // The >>> needs the true sign, which the int width preserves; be_s
+  // lands strictly inside the normal exponent range for any normal a.
+  /* verilator lint_off WIDTHEXPAND */
+  /* verilator lint_off WIDTHTRUNC */
   assign be_s = BIAS - 1 - ((E - $signed({{EXP_W+1{1'b0}}, oddE})) >>> 1);
+  /* verilator lint_on WIDTHTRUNC */
+  /* verilator lint_on WIDTHEXPAND */
   assign d_rs = {1'b0, be_s[EXP_W-1:0],
                  r_rs[15:0], {(MAN_W-16){1'b0}}};
 

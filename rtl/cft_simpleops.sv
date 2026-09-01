@@ -144,7 +144,8 @@ module cft_simpleops #(
   // hand-written {(EXP_W-1){1'b1}, 1'b0} spelling is off by one binade
   // - it is 2^BIAS, not 1.0 - which is exactly the mistake this
   // replaced, caught by the kernel bench.
-  assign bias_f = BIAS;
+  // BIAS is 2^(EXP_W-1)-1, so the field select loses nothing.
+  assign bias_f = BIAS[EXP_W-1:0];
   assign one    = {1'b0, bias_f, {MAN_W{1'b0}}};
   assign pzero  = '0;
 

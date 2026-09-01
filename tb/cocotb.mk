@@ -44,20 +44,22 @@ COMPILE_ARGS += -g2012 -I$(RTLDIR)
 endif
 
 ifeq ($(SIM),verilator)
-# Verilator is new to this suite - it could not run at all until the sim
-# image gained g++ - so it is linting cft_fpfma_pipe for the first time
-# and reports width warnings that all predate this work: an EXP_W field
-# widened into an int at S1, the multiplier tree's final add at S6, and
-# the exponent arithmetic at S13.
+# No width warnings are suppressed here any more. The blanket
+# -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC that used to sit on this line was a
+# concession from Verilator's first run against this suite; the audit
+# it asked for has been done. Every site was triaged one at a time with
+# the vector suite as the gate: most became explicit widths (zero-fill
+# concatenation or a field select, provably the same bits), and the
+# handful where a rewrite would obscure working arithmetic carry a
+# lint_off pair scoped to the line, with the safety argument beside it
+# (cft_fpfma_pipe S6, cft_seedop's exponent algebra, the frozen
+# simpleops ref, and cft_engine_stream's hardcoded-width FIFOs - the
+# last one an open finding, not a blessing).
 #
-# Suppressed, not "fixed". Every one is intentional, and the pipe is
-# verified bit-exact against the golden model at four formats and five
-# rounding attributes - a far stronger check than a width lint. Editing
-# arithmetic in the bit-exact core to quiet a linter is how a working
-# design stops working. Auditing them one at a time, with the vector
-# suite as the gate, is its own task and should not ride along with a
-# change to the normaliser.
-EXTRA_ARGS += -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -I$(RTLDIR)
+# So a width warning from a Verilator build is now a regression, and
+# fatal by default - which is the point. Argue a new site where it
+# lives, not here.
+EXTRA_ARGS += -I$(RTLDIR)
 endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
