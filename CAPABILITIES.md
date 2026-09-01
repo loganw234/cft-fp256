@@ -197,7 +197,7 @@ The distance to running it on-chip:
 | compare and branchless select | **yes** |
 | `abs`, `min`, `max` | **yes** |
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
-| division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright |
+| division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright; on a program-capable device the whole composition issues as ONE sequencer program rather than ~28 elementwise round trips |
 | `floor`, `round`, `step` | **composed** (2026-09-01) - `cft_rint` under the directed attributes IS floor/ceil/trunc/round; `step` was always cmple+select |
 | a sequencer to run a chain on-chip | **benched** (2026-09-01) - `cft_seq` exists in RTL, its own lane array of the verified per-lane recipe behind it, and holds bit-exact to `seq.py` on deposits, counts, flags and status: 9/9 unit-bench suites across all four formats (single-op through nested-loop escape maps, ragged blocks, a 62-program fuzz corpus) plus the full-kernel bench through the CSR exactly as XRT will drive it. hw_emu and silicon are the remaining distance |
 

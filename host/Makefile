@@ -247,9 +247,13 @@ difftest: all
 # cft_div/cft_sqrt and the seed opcodes against the model: the same
 # operand matrix test_sequences.py runs at model level, driven through
 # the C port, flags compared per element. Its own target for the same
-# reason difftest is - it needs Python and the model.
+# reason difftest is - it needs Python and the model. Runs twice: the
+# chunk route, then the sequencer-program route forced through the
+# software executor (CFT_DIVSQRT_SEQ=1) - the same matrix over the
+# route a program-capable device takes.
 divsqrttest: all
 	$(PYTHON) tests/divsqrt_check.py
+	CFT_DIVSQRT_SEQ=1 $(PYTHON) tests/divsqrt_check.py
 
 # The clause-5 completion set against the model: every new entry point
 # (rint, scaleb, the conversions, the signaling compares, logB, next,

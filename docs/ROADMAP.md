@@ -606,11 +606,15 @@ shape is a `DIVSQRT_UNIT` parameter in the FUSE_* mold - private in a
 single-tile build, arbitrated behind 2-4 tiles in a quad - and the
 754-2019 answer for correctness stays what it is today: the unit would
 be verified against the same golden model bit-for-bit, or it does not
-ship. Until then, the free win is software: the composed sequence
-expressed as a sequencer program over register-resident operands
-(cft_seq_lanes already carries the seed opcodes), which keeps the pass
-count but deletes the per-pass host round-trip and the 28x HBM
-traffic that cft_div pays through the elementwise path today.
+ship. The free win landed the same day it was named: the composed
+sequence now ships as a sequencer program (cft_golden/seqprogs.py is
+the specification, divsqrt.c's program route the port, and
+`cft_div`/`cft_sqrt` take it by default on program-capable devices) -
+same pass count, one round trip, no 28x HBM traffic. The restore
+loop's per-lane conditionals became branchless CMPLT/SELECT with
+IADD/ISUB ulp steps, which is precisely the code shape those opcodes
+were put in the ISA for; the model's early break needed no bookkeeping
+at all, because a settled lane re-evaluates to zero steps.
 
 **Inside one tile, across the precision banks: this is the real axis,
 and it is free of the sequencing problem.** `prec_r` is snapshot at

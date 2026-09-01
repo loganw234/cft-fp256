@@ -451,6 +451,16 @@ CFT_API cft_status cft_reduce(cft_device *dev,
  * rounding built from an FMA, and it is the same price on every
  * conforming implementation of this route.
  *
+ * On a device that can execute sequencer programs (docs/SEQUENCER.md)
+ * the same sequence is issued as ONE on-chip program instead - the
+ * identical steps over register-resident lanes, so the pass count
+ * stands but the per-pass round trip and its memory traffic do not.
+ * The choice is automatic and invisible in the results, which the
+ * test matrix holds bit-identical across both routes; setting
+ * CFT_DIVSQRT_SEQ=0 (or =1) in the environment forces the elementwise
+ * (or program) route when a measurement wants one of them
+ * specifically.
+ *
  * d may alias a or b. b unused by cft_sqrt. A device whose bitstream
  * lacks the seed opcodes (CAPS group bit 6), the arithmetic group or
  * the sign group cannot run the sequence and answers

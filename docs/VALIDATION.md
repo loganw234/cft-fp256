@@ -674,3 +674,39 @@ programs device-vs-software, the driver for the hw_emu gate ahead.
 
 Still between "benched" and CAPABILITIES' "yes": hw_emu through the
 real XRT stack, a bitstream, silicon - in that order, next.
+
+## div/sqrt as sequencer programs (2026-09-01)
+
+The sequencer's first customer is the library itself: `cft_div` and
+`cft_sqrt` now issue their whole composed sequence as ONE program on
+program-capable devices - the identical steps, restated with the
+restore loop's per-lane conditionals as branchless CMPLT/SELECT and
+IADD/ISUB ulp steps - in place of ~25-30 elementwise round trips.
+python/cft_golden/seqprogs.py specifies the programs (47-60
+instructions, 6-9 derived constants, three deposits per lane);
+divsqrt.c's program route is the port; routing is automatic on
+hardware backends, falls back to the chunk route on bitstreams that
+cannot run programs, and CFT_DIVSQRT_SEQ forces either route.
+
+Evidence, all green on 2026-09-01:
+
+    test_seqprogs.py       22 tests: the program route against the
+                           contract, bits AND flags, four formats,
+                           all five attributes, the named hard
+                           families per element (exact-tie divisors,
+                           binade crossings, negative divisors, the
+                           sqrt midpoint fabrications), mixed-special
+                           batches exercising lane filtering and
+                           deposit indexing
+    divsqrt_check.py x2    29,124 cases through the chunk route and
+                           29,124 through the program route forced
+                           over the software executor - zero
+                           disagreements; `make divsqrttest` now runs
+                           both, permanently
+    make test / seqtest    unchanged and green with the route in the
+                           library: 392,000-case replay, C-vs-Python
+                           identity, 695-program sequencer fuzz
+
+Pending: the same comparison through hw_emu's device executor - the
+gate in flight predates this commit, so the NEXT emulation image is
+the one whose compare_divsqrt exercises the program route on-device.

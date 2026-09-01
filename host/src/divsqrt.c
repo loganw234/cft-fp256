@@ -787,6 +787,606 @@ static cft_status sqrt_chunk(cft_device *dev, const cft_fmt_desc *f,
     return CFT_OK;
 }
 
+/* ---- the sequencer-program route -----------------------------------
+ *
+ * The same construction as div_chunk/sqrt_chunk - the SAME steps, in
+ * the same order, under the same rounding attributes - restated as one
+ * sequencer program per call instead of ~25-30 elementwise runs.
+ * python/cft_golden/seqprogs.py is this section's specification, the
+ * same way sequences.py specifies the chunk routes, and
+ * test_seqprogs.py holds the program bit-identical to the contract.
+ *
+ * What moves on-chip: the entire floating-point core plus the restore
+ * loop's per-lane conditionals, which become branchless CMPLT/SELECT
+ * with IADD/ISUB ulp steps on the encoding. The model's early break
+ * needs no bookkeeping: a settled lane re-evaluates to the same
+ * decisions and steps zero times, so two unconditional passes are the
+ * loop. What stays host: classification and centring (integer surgery
+ * on encodings the host holds anyway) and round_pack from the three
+ * deposits (q/result, exact residual, midpoint probe).
+ *
+ * Route choice: a hardware-backed device takes this path - one round
+ * trip instead of ~28 - and falls back to the chunk route if the
+ * bitstream cannot run programs (load or first run answers
+ * UNSUPPORTED; d has not been touched yet at that point, which is what
+ * keeps the fallback legal under d-aliases-a). The software backend
+ * keeps the chunk route, where there is no round trip to save.
+ * CFT_DIVSQRT_SEQ=1|0 in the environment forces the choice either way
+ * - =1 is how the tests drive this route through the software
+ * executor's program interpreter without a device.
+ */
+
+#include "backend.h"
+
+enum { RG_A = 0, RG_B = 1, RG_Y = 3, RG_NB = 4, RG_T1 = 5, RG_T2 = 6,
+       RG_Q = 7, RG_PW = 8, RG_DN = 9, RG_UP = 10, RG_TMP = 11,
+       RG_SP = 12 };
+enum { CK_ZERO = 0, CK_ONE, CK_INT1, CK_EXP, CK_MW, CK_MW1,
+       CK_HALF, CK_3H, CK_SQ };
+#define CK_NDIV  6
+#define CK_NSQRT 9
+
+typedef struct { uint64_t w[80]; int n; } sq_prog;
+
+static void sq_push(sq_prog *p, uint64_t w)
+{
+    p->w[p->n++] = w;
+}
+
+static uint64_t sq_word(int op, int rd, int ra, int rb, int rc, int rnd,
+                        int ka, int kb, int kc)
+{
+    return (uint64_t)((uint32_t)op | ((uint32_t)rd << 8) |
+                      ((uint32_t)ra << 12) | ((uint32_t)rb << 16) |
+                      ((uint32_t)rc << 20) | ((uint32_t)rnd << 24) |
+                      ((uint32_t)(ka != 0) << 27) |
+                      ((uint32_t)(kb != 0) << 28) |
+                      ((uint32_t)(kc != 0) << 29));
+}
+
+static uint64_t sq_ctrlw(int code, int ra)
+{
+    return (uint64_t)((uint32_t)code | ((uint32_t)ra << 12) | (1u << 31));
+}
+#define SQ_CTRL_HALT    0
+#define SQ_CTRL_DEPOSIT 3
+
+/* One restore pass, division. Mirrors seqprogs._restore_pass_div. */
+static void sq_restore_div(sq_prog *p)
+{
+    const int R = CFT_SF_RNE;
+    sq_push(p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_Q, RG_A, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_CMPLT, RG_DN, RG_T2, CK_ZERO, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_ISUB, RG_TMP, RG_Q, CK_INT1, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_SELECT, RG_Q, RG_TMP, RG_Q, RG_DN, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_IAND, RG_PW, RG_Q, CK_EXP, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_ISUB, RG_PW, RG_PW, CK_MW, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_FMA, RG_UP, RG_NB, RG_PW, RG_T2, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_CMPLT, RG_UP, CK_ZERO, RG_UP, 0, R, 1, 0, 0));
+    sq_push(p, sq_word(CFT_SUB, RG_TMP, CK_ONE, 0, RG_DN, R, 1, 0, 0));
+    sq_push(p, sq_word(CFT_MUL, RG_UP, RG_UP, RG_TMP, 0, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_IADD, RG_TMP, RG_Q, CK_INT1, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_SELECT, RG_Q, RG_TMP, RG_Q, RG_UP, R, 0, 0, 0));
+}
+
+/* One restore pass, square root. Mirrors seqprogs._restore_pass_sqrt. */
+static void sq_restore_sqrt(sq_prog *p)
+{
+    const int R = CFT_SF_RNE;
+    sq_push(p, sq_word(CFT_NEG, RG_NB, RG_Q, 0, 0, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_Q, RG_A, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_CMPLT, RG_DN, RG_T2, CK_ZERO, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_ISUB, RG_TMP, RG_Q, CK_INT1, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_SELECT, RG_Q, RG_TMP, RG_Q, RG_DN, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_IADD, RG_SP, RG_Q, CK_INT1, 0, R, 0, 1, 0));
+    sq_push(p, sq_word(CFT_NEG, RG_NB, RG_SP, 0, 0, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_FMA, RG_UP, RG_NB, RG_SP, RG_A, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_CMPLE, RG_UP, CK_ZERO, RG_UP, 0, R, 1, 0, 0));
+    sq_push(p, sq_word(CFT_SUB, RG_TMP, CK_ONE, 0, RG_DN, R, 1, 0, 0));
+    sq_push(p, sq_word(CFT_MUL, RG_UP, RG_UP, RG_TMP, 0, R, 0, 0, 0));
+    sq_push(p, sq_word(CFT_SELECT, RG_Q, RG_SP, RG_Q, RG_UP, R, 0, 0, 0));
+}
+
+static void sq_put_le32(uint8_t *d, uint32_t v)
+{
+    d[0] = (uint8_t)v;
+    d[1] = (uint8_t)(v >> 8);
+    d[2] = (uint8_t)(v >> 16);
+    d[3] = (uint8_t)(v >> 24);
+}
+
+/* The constant bank, derived from the format's own fields. Index
+ * order is the CK_* enum; the sqrt bank extends the div bank. */
+static void sq_const(const cft_fmt_desc *f, int idx, cft_bn *v)
+{
+    switch (idx) {
+    case CK_ZERO:
+        cft_bn_zero(v);
+        break;
+    case CK_ONE:
+        bn_one(f, v);
+        break;
+    case CK_INT1:
+        cft_bn_zero(v);
+        cft_bn_set_u32(v, 1);
+        break;
+    case CK_EXP:
+        cft_bn_zero(v);
+        cft_bn_set_u32(v, f->exp_mask);
+        (void)cft_bn_shl(v, v, f->man_w);
+        break;
+    case CK_MW:
+        cft_bn_zero(v);
+        cft_bn_set_u32(v, (uint32_t)f->man_w);
+        (void)cft_bn_shl(v, v, f->man_w);
+        break;
+    case CK_MW1:
+        cft_bn_zero(v);
+        cft_bn_set_u32(v, (uint32_t)(f->man_w + 1));
+        (void)cft_bn_shl(v, v, f->man_w);
+        break;
+    case CK_HALF:
+        bn_pow2(f, -1, v);
+        break;
+    case CK_3H:
+        bn_one(f, v);
+        cft_bn_setbit(v, f->man_w - 1);
+        break;
+    case CK_SQ:
+        /* Turns (exp field << 1) into 2^(2e-2): the target field is
+         * 2E - bias - 2*man_w - 2, and the shifted field holds 2E. */
+        cft_bn_zero(v);
+        cft_bn_set_u32(v, (uint32_t)(f->bias + 2 * f->man_w + 2));
+        (void)cft_bn_shl(v, v, f->man_w);
+        break;
+    }
+}
+
+/* Emit a complete program image - header, constants, instructions -
+ * into buf (which must hold SQ_IMAGE_MAX). Returns the byte count. */
+#define SQ_IMAGE_MAX (32 + 9 * 32 + 80 * 8)
+
+static size_t sq_emit(const cft_fmt_desc *f, cft_format fmt, int is_sqrt,
+                      uint8_t *buf)
+{
+    const int R = CFT_SF_RNE;
+    sq_prog p;
+    int N = newton_steps(f), it, k, nconst;
+    size_t off, esz = (size_t)(f->width / 8);
+    cft_bn v;
+
+    p.n = 0;
+    if (!is_sqrt) {
+        sq_push(&p, sq_word(CFT_RECIP_SEED, RG_Y, RG_B, 0, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_NEG, RG_NB, RG_B, 0, 0, R, 0, 0, 0));
+        for (it = 0; it < N; it++) {
+            sq_push(&p, sq_word(CFT_FMA, RG_T1, RG_NB, RG_Y, CK_ONE,
+                                R, 0, 0, 1));
+            sq_push(&p, sq_word(CFT_FMA, RG_Y, RG_Y, RG_T1, RG_Y,
+                                R, 0, 0, 0));
+        }
+        sq_push(&p, sq_word(CFT_MUL, RG_T1, RG_A, RG_Y, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_T1, RG_A, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_Q, RG_T2, RG_Y, RG_T1, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_Q, RG_A, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_Q, RG_T2, RG_Y, RG_Q,
+                            CFT_SF_RTZ, 0, 0, 0));
+        sq_restore_div(&p);
+        sq_restore_div(&p);
+        sq_push(&p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_Q, RG_A, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_IAND, RG_PW, RG_Q, CK_EXP, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_ISUB, RG_PW, RG_PW, CK_MW1, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_UP, RG_NB, RG_PW, RG_T2,
+                            R, 0, 0, 0));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_DEPOSIT, RG_Q));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_DEPOSIT, RG_T2));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_DEPOSIT, RG_UP));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_HALT, 0));
+        nconst = CK_NDIV;
+    } else {
+        sq_push(&p, sq_word(CFT_RSQRT_SEED, RG_Y, RG_A, 0, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_NEG, RG_NB, RG_A, 0, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_MUL, RG_NB, RG_NB, CK_HALF, 0, R, 0, 1, 0));
+        for (it = 0; it < N; it++) {
+            sq_push(&p, sq_word(CFT_MUL, RG_T1, RG_Y, RG_Y, 0, R, 0, 0, 0));
+            sq_push(&p, sq_word(CFT_FMA, RG_T1, RG_NB, RG_T1, CK_3H,
+                                R, 0, 0, 1));
+            sq_push(&p, sq_word(CFT_MUL, RG_Y, RG_Y, RG_T1, 0, R, 0, 0, 0));
+        }
+        sq_push(&p, sq_word(CFT_MUL, RG_T1, RG_A, RG_Y, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_MUL, RG_UP, RG_Y, CK_HALF, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_NEG, RG_NB, RG_T1, 0, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_T1, RG_A, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_Q, RG_T2, RG_UP, RG_T1, R, 0, 0, 0));
+        sq_restore_sqrt(&p);
+        sq_restore_sqrt(&p);
+        sq_push(&p, sq_word(CFT_NEG, RG_NB, RG_Q, 0, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_FMA, RG_T2, RG_NB, RG_Q, RG_A, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_IAND, RG_PW, RG_Q, CK_EXP, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_ISUB, RG_UP, RG_PW, CK_MW, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_MUL, RG_UP, RG_Q, RG_UP, 0, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_SUB, RG_TMP, RG_T2, 0, RG_UP, R, 0, 0, 0));
+        sq_push(&p, sq_word(CFT_ISHL, RG_PW, RG_PW, CK_INT1, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_ISUB, RG_PW, RG_PW, CK_SQ, 0, R, 0, 1, 0));
+        sq_push(&p, sq_word(CFT_SUB, RG_TMP, RG_TMP, 0, RG_PW, R, 0, 0, 0));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_DEPOSIT, RG_Q));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_DEPOSIT, RG_T2));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_DEPOSIT, RG_TMP));
+        sq_push(&p, sq_ctrlw(SQ_CTRL_HALT, 0));
+        nconst = CK_NSQRT;
+    }
+
+    sq_put_le32(buf + 0, 0x50544643u);           /* "CFTP" */
+    sq_put_le32(buf + 4, 1u);
+    sq_put_le32(buf + 8, (uint32_t)p.n);
+    sq_put_le32(buf + 12, (uint32_t)nconst);
+    sq_put_le32(buf + 16, 3u);                   /* max_deposits */
+    sq_put_le32(buf + 20, (uint32_t)fmt);
+    sq_put_le32(buf + 24, 0u);
+    sq_put_le32(buf + 28, 0u);
+    off = 32;
+    for (k = 0; k < nconst; k++) {
+        sq_const(f, k, &v);
+        cft_bn_store(&v, buf + off, esz);
+        off += esz;
+    }
+    for (k = 0; k < p.n; k++) {
+        sq_put_le32(buf + off, (uint32_t)p.w[k]);
+        sq_put_le32(buf + off + 4, (uint32_t)(p.w[k] >> 32));
+        off += 8;
+    }
+    return off;
+}
+
+/* Exact host multiply for the prenormalise step - the same op the
+ * chunk route issues to the backend, computed by the same softfloat. */
+static void sq_host_mul_pow2(const cft_fmt_desc *f, cft_bn *x, int e)
+{
+    cft_bn p2, z, out;
+    uint32_t fl = 0;
+    bn_pow2(f, e, &p2);
+    cft_bn_zero(&z);
+    (void)cft_sf_compute(f, CFT_MUL, CFT_SF_RNE, x, &p2, &z, &out, &fl);
+    cft_bn_copy(x, &out);
+}
+
+typedef struct {
+    uint8_t *ac, *bc;        /* centred operand streams */
+    uint8_t *sv;             /* specials' results, held until finish */
+    uint8_t *deps;           /* n * 3 deposit slots */
+    uint32_t *cnt;
+    int *D;
+    uint8_t *core, *sq;
+} pscratch;
+
+static void pscratch_free(pscratch *s)
+{
+    free(s->ac); free(s->bc); free(s->sv); free(s->deps);
+    free(s->cnt); free(s->D); free(s->core); free(s->sq);
+    memset(s, 0, sizeof *s);
+}
+
+static int pscratch_alloc(pscratch *s, size_t esz)
+{
+    memset(s, 0, sizeof *s);
+    s->ac   = (uint8_t *)malloc(CHUNK * esz);
+    s->bc   = (uint8_t *)malloc(CHUNK * esz);
+    s->sv   = (uint8_t *)malloc(CHUNK * esz);
+    s->deps = (uint8_t *)malloc(CHUNK * 3 * esz);
+    s->cnt  = (uint32_t *)malloc(CHUNK * sizeof *s->cnt);
+    s->D    = (int *)malloc(CHUNK * sizeof *s->D);
+    s->core = (uint8_t *)malloc(CHUNK);
+    s->sq   = (uint8_t *)malloc(CHUNK);
+    if (!s->ac || !s->bc || !s->sv || !s->deps || !s->cnt || !s->D ||
+        !s->core || !s->sq) {
+        pscratch_free(s);
+        return 1;
+    }
+    return 0;
+}
+
+/* Centre one operand: significand kept, exponent field replaced by
+ * the bias, sign stripped. Returns the true unbiased exponent. */
+static int sq_centre(const cft_fmt_desc *f, cft_bn *x)
+{
+    cft_bn v;
+    int e = (int)cft_bn_extract(x, f->man_w, f->exp_w) - f->bias;
+    cft_bn_mask(x, f->man_w);
+    cft_bn_set_u32(&v, (uint32_t)f->bias);
+    (void)cft_bn_shl(&v, &v, f->man_w);
+    cft_bn_or(x, x, &v);
+    return e;
+}
+
+static cft_status div_prog_chunk(const cft_fmt_desc *f, int rnd,
+                                 cft_program *prog,
+                                 const uint8_t *a, const uint8_t *b,
+                                 uint8_t *d, size_t n, pscratch *s,
+                                 uint32_t *acc, uint32_t *bus_out)
+{
+    cft_bn v, w;
+    cft_status st;
+    size_t i;
+
+    for (i = 0; i < n; i++) {
+        lane_cls ka, kb;
+        cft_bn xa, xb;
+        int is_special = 1;
+        lane_load(f, a, i, &xa);
+        lane_load(f, b, i, &xb);
+        classify(f, &xa, &ka);
+        classify(f, &xb, &kb);
+        s->sq[i] = (uint8_t)(ka.sign ^ kb.sign);
+        s->core[i] = 0;
+        s->D[i] = 0;
+
+        if (ka.kind == K_NAN || kb.kind == K_NAN) {
+            cft_sf_qnan(f, &v);
+            if (ka.signaling || kb.signaling)
+                *acc |= CFT_SF_INVALID;
+        } else if (ka.kind == K_INF) {
+            if (kb.kind == K_INF) {
+                cft_sf_qnan(f, &v);
+                *acc |= CFT_SF_INVALID;
+            } else {
+                cft_sf_inf(f, s->sq[i], &v);
+            }
+        } else if (kb.kind == K_INF) {
+            cft_sf_zero(f, s->sq[i], &v);
+        } else if (kb.kind == K_ZERO) {
+            if (ka.kind == K_ZERO) {
+                cft_sf_qnan(f, &v);
+                *acc |= CFT_SF_INVALID;
+            } else {
+                cft_sf_inf(f, s->sq[i], &v);
+                *acc |= CFT_SF_DIVZERO;
+            }
+        } else if (ka.kind == K_ZERO) {
+            cft_sf_zero(f, s->sq[i], &v);
+        } else {
+            int ea, eb, d_adj = 0;
+            is_special = 0;
+            s->core[i] = 1;
+            if (ka.kind == K_SUB) {
+                sq_host_mul_pow2(f, &xa, f->prec);
+                d_adj -= f->prec;
+            }
+            if (kb.kind == K_SUB) {
+                sq_host_mul_pow2(f, &xb, f->prec);
+                d_adj += f->prec;
+            }
+            ea = sq_centre(f, &xa);
+            eb = sq_centre(f, &xb);
+            s->D[i] = ea - eb + d_adj;
+            lane_store(f, s->ac, i, &xa);
+            lane_store(f, s->bc, i, &xb);
+        }
+        if (is_special) {
+            lane_store(f, s->sv, i, &v);
+            bn_one(f, &w);
+            lane_store(f, s->ac, i, &w);        /* benign core operands */
+            lane_store(f, s->bc, i, &w);
+        }
+    }
+
+    st = cft_program_run(prog, s->ac, s->bc, NULL, s->deps, s->cnt, n,
+                         NULL, bus_out);
+    if (st != CFT_OK)
+        return st;
+
+    for (i = 0; i < n; i++) {
+        cft_bn q, m;
+        uint32_t fl = 0;
+        int guard, sticky, e_v;
+        if (!s->core[i]) {
+            lane_load(f, s->sv, i, &v);
+            lane_store(f, d, i, &v);
+            continue;
+        }
+        if (s->cnt[i] != 3)
+            return CFT_ERR_INTERNAL;
+        if (lane_mag_zero(f, s->deps, i * 3 + 1)) {
+            guard = 0;
+            sticky = 0;
+        } else if (lane_mag_zero(f, s->deps, i * 3 + 2)) {
+            guard = 1;                           /* exact tie */
+            sticky = 0;
+        } else if (lane_negbit(f, s->deps, i * 3 + 2)) {
+            guard = 0;                           /* below the midpoint */
+            sticky = 1;
+        } else {
+            guard = 1;                           /* above the midpoint */
+            sticky = 1;
+        }
+        lane_load(f, s->deps, i * 3 + 0, &q);
+        e_v = (int)cft_bn_extract(&q, f->man_w, f->exp_w)
+              - f->bias - f->man_w;
+        cft_bn_mask(&q, f->man_w);
+        cft_bn_setbit(&q, f->man_w);
+        if (cft_bn_shl(&m, &q, 2))
+            return CFT_ERR_INTERNAL;
+        if (guard)
+            cft_bn_setbit(&m, 1);
+        if (sticky)
+            cft_bn_setbit(&m, 0);
+        if (cft_sf_round_pack(f, s->sq[i], &m, e_v + s->D[i] - 2, 0, rnd,
+                              &v, &fl))
+            return CFT_ERR_INTERNAL;
+        *acc |= fl;
+        lane_store(f, d, i, &v);
+    }
+    return CFT_OK;
+}
+
+static cft_status sqrt_prog_chunk(const cft_fmt_desc *f, int rnd,
+                                  cft_program *prog,
+                                  const uint8_t *a, uint8_t *d, size_t n,
+                                  pscratch *s, uint32_t *acc,
+                                  uint32_t *bus_out)
+{
+    cft_bn v, w;
+    cft_status st;
+    size_t i;
+    int k2 = f->prec + (f->prec & 1);
+
+    for (i = 0; i < n; i++) {
+        lane_cls ka;
+        cft_bn xa;
+        int is_special = 1;
+        lane_load(f, a, i, &xa);
+        classify(f, &xa, &ka);
+        s->core[i] = 0;
+        s->D[i] = 0;
+
+        if (ka.kind == K_NAN) {
+            cft_sf_qnan(f, &v);
+            if (ka.signaling)
+                *acc |= CFT_SF_INVALID;
+        } else if (ka.kind == K_ZERO) {
+            cft_bn_copy(&v, &xa);
+        } else if (ka.sign) {
+            cft_sf_qnan(f, &v);
+            *acc |= CFT_SF_INVALID;
+        } else if (ka.kind == K_INF) {
+            cft_bn_copy(&v, &xa);
+        } else {
+            int E, odd, adj = 0;
+            is_special = 0;
+            s->core[i] = 1;
+            if (ka.kind == K_SUB) {
+                sq_host_mul_pow2(f, &xa, k2);
+                adj = -(k2 / 2);
+            }
+            E = (int)cft_bn_extract(&xa, f->man_w, f->exp_w) - f->bias;
+            odd = E & 1;
+            cft_bn_mask(&xa, f->man_w);
+            cft_bn_set_u32(&v, (uint32_t)f->bias);
+            (void)cft_bn_shl(&v, &v, f->man_w);
+            cft_bn_or(&xa, &xa, &v);
+            if (odd)
+                sq_host_mul_pow2(f, &xa, 1);
+            s->D[i] = (E - odd) / 2 + adj;
+            lane_store(f, s->ac, i, &xa);
+        }
+        if (is_special) {
+            lane_store(f, s->sv, i, &v);
+            bn_one(f, &w);
+            lane_store(f, s->ac, i, &w);
+        }
+    }
+
+    memset(s->bc, 0, n * (size_t)(f->width / 8));    /* unused b stream */
+    st = cft_program_run(prog, s->ac, s->bc, NULL, s->deps, s->cnt, n,
+                         NULL, bus_out);
+    if (st != CFT_OK)
+        return st;
+
+    for (i = 0; i < n; i++) {
+        cft_bn q, m;
+        uint32_t fl = 0;
+        int guard, sticky, e_v;
+        if (!s->core[i]) {
+            lane_load(f, s->sv, i, &v);
+            lane_store(f, d, i, &v);
+            continue;
+        }
+        if (s->cnt[i] != 3)
+            return CFT_ERR_INTERNAL;
+        if (lane_mag_zero(f, s->deps, i * 3 + 1)) {
+            guard = 0;
+            sticky = 0;
+        } else {
+            guard = lane_negbit(f, s->deps, i * 3 + 2) ? 0 : 1;
+            sticky = 1;
+        }
+        lane_load(f, s->deps, i * 3 + 0, &q);
+        e_v = (int)cft_bn_extract(&q, f->man_w, f->exp_w)
+              - f->bias - f->man_w;
+        cft_bn_mask(&q, f->man_w);
+        cft_bn_setbit(&q, f->man_w);
+        if (cft_bn_shl(&m, &q, 2))
+            return CFT_ERR_INTERNAL;
+        if (guard)
+            cft_bn_setbit(&m, 1);
+        if (sticky)
+            cft_bn_setbit(&m, 0);
+        if (cft_sf_round_pack(f, 0, &m, e_v + s->D[i] - 2, 0, rnd, &v, &fl))
+            return CFT_ERR_INTERNAL;
+        *acc |= fl;
+        lane_store(f, d, i, &v);
+    }
+    return CFT_OK;
+}
+
+/* Route choice; see the section banner. */
+static int divsqrt_route_program(cft_device *dev)
+{
+    const char *e = getenv("CFT_DIVSQRT_SEQ");
+    if (e && e[0] == '0' && !e[1])
+        return 0;
+    if (e && e[0] == '1' && !e[1])
+        return 1;
+#ifdef CFT_ENABLE_XRT
+    return cft_device_backend((const struct cft_device *)dev) != NULL;
+#else
+    (void)dev;
+    return 0;
+#endif
+}
+
+/* The whole call through the program route. Returns UNSUPPORTED only
+ * before anything has been written to d, so the caller may legally
+ * fall back to the chunk route even when d aliases a or b. */
+static cft_status divsqrt_via_program(cft_device *dev,
+                                      const cft_fmt_desc *f,
+                                      cft_format fmt, int rnd, int is_sqrt,
+                                      const uint8_t *a, const uint8_t *b,
+                                      uint8_t *d, size_t n,
+                                      uint32_t *acc, uint32_t *bus_out)
+{
+    uint8_t image[SQ_IMAGE_MAX];
+    size_t bytes, off = 0, esz = (size_t)(f->width / 8);
+    cft_program *prog = NULL;
+    pscratch s;
+    cft_status st;
+    int wrote_any = 0;
+
+    bytes = sq_emit(f, fmt, is_sqrt, image);
+    st = cft_program_load(dev, image, bytes, &prog);
+    if (st != CFT_OK)
+        return st;
+    if (pscratch_alloc(&s, esz)) {
+        cft_program_free(prog);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+    while (off < n) {
+        size_t c = n - off > CHUNK ? CHUNK : n - off;
+        st = is_sqrt
+            ? sqrt_prog_chunk(f, rnd, prog, a + off * esz,
+                              d + off * esz, c, &s, acc, bus_out)
+            : div_prog_chunk(f, rnd, prog, a + off * esz, b + off * esz,
+                             d + off * esz, c, &s, acc, bus_out);
+        if (st != CFT_OK) {
+            /* After any chunk has written d, an UNSUPPORTED answer can
+             * no longer be handed to the caller as "fall back": the
+             * fallback would reread inputs a finished chunk may have
+             * overwritten under aliasing. It cannot happen - support
+             * does not change between chunks of one call - so it is an
+             * internal error if it does. */
+            if (st == CFT_ERR_UNSUPPORTED && wrote_any)
+                st = CFT_ERR_INTERNAL;
+            pscratch_free(&s);
+            cft_program_free(prog);
+            return st;
+        }
+        wrote_any = 1;
+        off += c;
+    }
+    pscratch_free(&s);
+    cft_program_free(prog);
+    return CFT_OK;
+}
+
 /* ---- entry points ------------------------------------------------- */
 
 static cft_status divsqrt_validate(cft_device *dev, cft_format fmt,
@@ -840,6 +1440,19 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+
+    if (divsqrt_route_program(dev)) {
+        st = divsqrt_via_program(dev, f, fmt, (int)rnd, 0,
+                                 (const uint8_t *)a, (const uint8_t *)b,
+                                 (uint8_t *)d, n, &acc, bus_out);
+        if (st != CFT_ERR_UNSUPPORTED) {
+            if (st == CFT_OK && flags_out)
+                *flags_out = acc;
+            return st;
+        }
+        acc = 0;         /* bitstream cannot run programs; d untouched */
+    }
+
     if (scratch_alloc(&s, esz))
         return CFT_ERR_OUT_OF_MEMORY;
 
@@ -884,6 +1497,19 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+
+    if (divsqrt_route_program(dev)) {
+        st = divsqrt_via_program(dev, f, fmt, (int)rnd, 1,
+                                 (const uint8_t *)a, NULL,
+                                 (uint8_t *)d, n, &acc, bus_out);
+        if (st != CFT_ERR_UNSUPPORTED) {
+            if (st == CFT_OK && flags_out)
+                *flags_out = acc;
+            return st;
+        }
+        acc = 0;         /* bitstream cannot run programs; d untouched */
+    }
+
     if (scratch_alloc(&s, esz))
         return CFT_ERR_OUT_OF_MEMORY;
 

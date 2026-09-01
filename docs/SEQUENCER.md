@@ -426,3 +426,18 @@ library's problem, and stay invisible. Because deposit addresses
 derive from the global element index (P2), the library can hand tile
 *t* a contiguous index range and its own slice of the deposit buffer
 with no further coordination.
+
+## The first customer
+
+The library itself (2026-09-01): `cft_div` and `cft_sqrt` issue their
+whole composed sequence as one program on any device that can run one
+- seed, Newton, the truncating Markstein finish, the restore passes
+as branchless CMPLT/SELECT with IADD/ISUB ulp steps - instead of
+~25-30 elementwise round trips. python/cft_golden/seqprogs.py is the
+program's specification (mirroring sequences.py the way sequences.py
+mirrors softfloat.py), divsqrt.c's program route is the C port, and
+the matrix holds all three bit-identical, flags included. It is a
+useful existence proof of the design's claim: a real correctly-rounded
+algorithm - conditionals, encoding surgery and all - fits the
+six-control-code ISA with no additions, in under fifty instructions
+and six constants.
