@@ -321,3 +321,12 @@ against bac9f550's +0.019 is the seed ROMs' cost made visible.
 SHA256SUMS verified after staging; the 145 MHz single attempt against
 the measured 142.7 ceiling launched from the same tree immediately
 after, and gets its own entry when it lands.
+
+## 2026-09-01 - standardized verification run at the merged HEAD
+
+verify/run.sh at 6a888b0 (clean tree): 13 stages executed, 0 failed,
+1 skipped (images - xclbinutil, named). First census carrying the
+refusal feature, the reviewed runner, and the mpfr stage: golden
+148s, vectors 9s, sim 1778s, lint 48s, formal 34s, the library
+chain 35s together, mpfr parity 2s, soak-quick + control 103s.
+Run id 20260831-222657-6a888b0.
