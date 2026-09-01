@@ -230,7 +230,8 @@ returns the same bits on every backend. The load-bearing choices:
   divideByZero** per the standard, logB(+-inf) is +inf silently.
 - **`nextUp`/`nextDown` (5.3.1)**: one step on the encoding. The
   standard's own edges are contract: nextUp(+-0) is the smallest
-  positive subnormal, nextUp of the most negative subnormal is **-0**,
+  positive subnormal, nextUp of the negative subnormal of LEAST
+  magnitude is **-0** (that is the standard's explicit zero choice),
   the largest finite steps to infinity with **no overflow signal** -
   invalid on sNaN is the only signal these can raise.
 - **`class` (5.7.2)** delivers one of ten values fixed to RISC-V's

@@ -639,6 +639,81 @@ int main(void)
               "fp256 sqrt(1) = 1 exactly");
     }
 
+    /* --- the clause-5 completion set ------------------------------
+     *
+     * The check harness proves these against the model at scale; what
+     * belongs HERE is this file's charter - refusals, aliasing, and a
+     * few edges whose expected bits come from reading 754 by hand.
+     * The rnd refusals exist because of a real bug: a (cft_round)-1
+     * once slid through a shared validator and computed under a
+     * rounding no legal attribute produces. */
+    {
+        uint8_t a[4 * 8], d[4 * 8];
+        int32_t i32out;
+        uint32_t f2 = 0xdead;
+        int k;
+
+        put32(a, 0x3f000000u);               /* 0.5 */
+        CHECK(cft_rint(dev, CFT_FP32, (cft_round)-1, 0, a, d, 1, &f2, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "rint refuses rnd = -1");
+        CHECK(cft_rint(dev, CFT_FP32, (cft_round)5, 0, a, d, 1, &f2, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "rint refuses rnd = 5");
+        CHECK(cft_scaleb(dev, CFT_FP32, (cft_round)-1, a, -2000000000,
+                         d, 1, &f2, NULL)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "scaleb refuses rnd = -1 on the host path too");
+        CHECK(cft_convert(dev, CFT_FP64, CFT_FP32, (cft_round)-1, a, d, 1,
+                          &f2) == CFT_ERR_INVALID_ARGUMENT,
+              "convert refuses rnd = -1");
+        CHECK(cft_cvt_to_i32(dev, CFT_FP32, (cft_round)-1, 0, a, &i32out,
+                             1, &f2) == CFT_ERR_INVALID_ARGUMENT,
+              "cvt_to refuses rnd = -1");
+        CHECK(cft_rem(dev, CFT_FP32, a, NULL, d, 1, &f2)
+              == CFT_ERR_INVALID_ARGUMENT, "remainder needs b");
+        f2 = 0xdead;
+        CHECK(cft_rint(dev, CFT_FP32, CFT_RNE, 0, a, d, 0, &f2, NULL)
+              == CFT_OK && f2 == 0, "rint n = 0 succeeds, clean flags");
+
+        /* hand-derived edges: rint(-0.5, RNE) is MINUS zero (5.9's
+         * operand-sign rule); nextUp of the least-magnitude negative
+         * subnormal is -0 (5.3.1's explicit choice); logB(+0) is -inf
+         * with divideByZero; convertToInteger(NaN) delivers INT32_MAX
+         * with invalid (the contract's RISC-V table). */
+        put32(a, 0xbf000000u);
+        st = cft_rint(dev, CFT_FP32, CFT_RNE, 0, a, d, 1, &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f2 == 0,
+              "rint(-0.5, rne) = -0, silent");
+        put32(a, 0x80000001u);
+        st = cft_next_up(dev, CFT_FP32, a, d, 1, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f2 == 0,
+              "nextUp(-min_subnormal) = -0");
+        put32(a, 0x00000000u);
+        st = cft_logb(dev, CFT_FP32, a, d, 1, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f2 == CFT_FLAG_DIVBYZERO, "logB(+0) = -inf, divideByZero");
+        put32(a, 0x7fc00000u);
+        st = cft_cvt_to_i32(dev, CFT_FP32, CFT_RNE, 0, a, &i32out, 1, &f2);
+        CHECK(st == CFT_OK && i32out == 2147483647 &&
+              f2 == CFT_FLAG_INVALID, "cvt_to_i32(NaN) = INT32_MAX, invalid");
+
+        /* aliasing: d == a must equal the separate-buffer answer for
+         * the same-format entry points, per the header's promise */
+        for (k = 0; k < 8; k++)
+            put32(a + 4 * k, 0x3f000000u + (uint32_t)k * 0x00100000u);
+        st = cft_rint(dev, CFT_FP32, CFT_RUP, 1, a, d, 8, &f2, NULL);
+        CHECK(st == CFT_OK, "rint separate buffers");
+        st = cft_rint(dev, CFT_FP32, CFT_RUP, 1, a, a, 8, &f2, NULL);
+        CHECK(st == CFT_OK && memcmp(a, d, 32) == 0,
+              "rint in place matches");
+        for (k = 0; k < 8; k++)
+            put32(a + 4 * k, 0x3f000000u + (uint32_t)k * 0x00100000u);
+        st = cft_scaleb(dev, CFT_FP32, CFT_RNE, a, 130, d, 8, &f2, NULL);
+        CHECK(st == CFT_OK, "scaleb separate buffers");
+        st = cft_scaleb(dev, CFT_FP32, CFT_RNE, a, 130, a, 8, &f2, NULL);
+        CHECK(st == CFT_OK && memcmp(a, d, 32) == 0,
+              "scaleb in place matches (staged path)");
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));

@@ -499,7 +499,10 @@ CFT_API cft_status cft_sqrt(cft_device *dev,
  * Common rules, from the contract: any NaN in yields the canonical
  * quiet NaN out (payloads canonicalise; the documented deviation), a
  * signaling NaN raises invalid except in the non-computational
- * operations (class, totalOrder), which signal nothing ever.
+ * operations (class, totalOrder), which signal nothing ever. Every
+ * same-format entry point keeps cft_run's aliasing rule - d may alias
+ * a or b, each element read before it is written; cft_convert is the
+ * one exception and says so.
  * --------------------------------------------------------------- */
 
 /* roundToIntegral (5.3.1). exact = 0: the five named operations -
@@ -635,8 +638,9 @@ CFT_API cft_status cft_total_order_mag(cft_device *dev, cft_format fmt,
  * cannot occur. A zero result takes a's sign. remainder(inf, y) and
  * remainder(x, 0) are invalid; remainder(x, inf) is x. The host walks
  * the exponent gap a quotient bit at a time - a handful of steps
- * normally, tens of milliseconds once for an adversarial fp256 pair -
- * where the model does one unbounded division. */
+ * normally, up to ~524.5k (about ten milliseconds) PER LANE for an
+ * adversarial fp256 pair, paid per element over an array - where the
+ * model does one unbounded division. */
 CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
                            const void *b, void *d, size_t n,
                            uint32_t *flags_out);

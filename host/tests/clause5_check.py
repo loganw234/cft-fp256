@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import (  # noqa: E402
-    FORMATS, PREC_CODE, RND_MODES, vectors,
+    FORMATS, PREC_CODE, RND_MODES, vectors, is_nan,
     one_bits, zero_bits, inf_bits, qnan_bits, snan_bits,
     min_subnormal_bits, max_subnormal_bits, min_normal_bits,
     max_normal_bits,
@@ -127,14 +127,32 @@ def note(k=1):
     CHECKED += k
 
 
-def run1(lib, fn, dev, fmt, out_esz, *args):
-    """Call an n=1 entry point returning (bits_or_raw, flags)."""
-    dbuf = ctypes.create_string_buffer(out_esz)
-    flags = ctypes.c_uint32(0xdead)
-    st = fn(dev, *args, dbuf, 1, ctypes.byref(flags))
-    if st != 0:
-        raise SystemExit(f"call failed: {st}")
-    return dbuf.raw, flags.value
+def check_bad_rnd(lib, dev):
+    """Every rnd-consuming entry point must refuse an attribute outside
+    0..4 outright - the F1 regression: a (cft_round)-1 once sailed
+    through the shared validator and computed under a rounding no legal
+    attribute produces."""
+    fmt = FORMATS["fp32"]
+    fi = PREC_CODE["fp32"]
+    a = enc(fmt, [one_bits(fmt)])
+    d = ctypes.create_string_buffer(4)
+    i32 = ctypes.c_int32(1)
+    fl = ctypes.c_uint32()
+    INVAL = 1                                    # CFT_ERR_INVALID_ARGUMENT
+    for bad in (-1, 5, 7, 255):
+        assert lib.cft_rint(dev, fi, bad, 0, a, d, 1,
+                            ctypes.byref(fl), None) == INVAL, bad
+        assert lib.cft_scaleb(dev, fi, bad, a, 0, d, 1,
+                              ctypes.byref(fl), None) == INVAL, bad
+        assert lib.cft_scaleb(dev, fi, bad, a, -(10 ** 9), d, 1,
+                              ctypes.byref(fl), None) == INVAL, bad
+        assert lib.cft_convert(dev, fi, fi, bad, a, d, 1,
+                               ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_cvt_from_i32(dev, fi, bad, ctypes.byref(i32), d, 1,
+                                    ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_cvt_to_i32(dev, fi, bad, 0, a, ctypes.byref(i32), 1,
+                                  ctypes.byref(fl)) == INVAL, bad
+        note(6)
 
 
 def check_rint(lib, dev, fmt, trials):
@@ -255,9 +273,27 @@ def check_convert(lib, dev, fmt, trials, formats):
                 note()
 
 
+def _int_boundary_pool(fmt):
+    """Values whose magnitudes sit in the 2^28..2^70 window - the
+    integer-conversion range edges. interesting_operands() never lands
+    there for the wide formats (the adversarial review counted zero),
+    so the 66-bit cutoff, the kept>64 check, INT64_MIN and the
+    unsigned-high boundary were structurally unreached at fp128/fp256
+    until these were added."""
+    pool = []
+    for e in (28, 30, 31, 32, 33, 52, 62, 63, 64, 65, 66, 67, 70):
+        if e - 1 > fmt.emax:
+            continue
+        for m, de in ((1, 0), (3, -1), ((1 << fmt.prec) - 1,
+                                        -(fmt.prec - 1))):
+            bits, _ = sf.round_pack(fmt, 0, m, e + de, sf.RND_RNE)
+            pool += [bits, bits | fmt.sign_mask]
+    return pool
+
+
 def check_cvt_int(lib, dev, fmt, trials):
     fi = PREC_CODE[fmt.name]
-    pool = pool_for(fmt, trials)
+    pool = pool_for(fmt, trials) + _int_boundary_pool(fmt)
     variants = [("cft_cvt_to_i32", 32, True, ctypes.c_int32),
                 ("cft_cvt_to_u32", 32, False, ctypes.c_uint32),
                 ("cft_cvt_to_i64", 64, True, ctypes.c_int64),
@@ -280,9 +316,6 @@ def check_cvt_int(lib, dev, fmt, trials):
                         (nm, fmt.name, rnd, exact, hex(xa), got, want)
                     note()
     rng = random.Random(17)
-    ivals = [0, 1, -1, 2**31 - 1, -(2**31), 2**32 - 1, 2**53 + 1,
-             2**63 - 1, -(2**63), 2**64 - 1]
-    ivals += [rng.randint(-(2**63), 2**63 - 1) for _ in range(trials)]
     fr = [("cft_cvt_from_i32", 32, True, ctypes.c_int32),
           ("cft_cvt_from_u32", 32, False, ctypes.c_uint32),
           ("cft_cvt_from_i64", 64, True, ctypes.c_int64),
@@ -291,10 +324,17 @@ def check_cvt_int(lib, dev, fmt, trials):
         fn = getattr(lib, nm)
         lo = -(1 << (width - 1)) if signed else 0
         hi = (1 << (width - 1)) - 1 if signed else (1 << width) - 1
+        # per-width values: the type's own edges, high-bit patterns
+        # (the review found 32-bit randoms drawn from a 64-bit range
+        # were vacuous), and in-range randoms for THIS width
+        ivals = [0, 1, lo, lo + 1, hi, hi - 1, hi // 3,
+                 (hi >> 1) + 1, (hi >> 1) + 3]
+        if not signed:
+            ivals += [hi - 1023, (1 << (width - 1)) | 1,
+                      0xAAAAAAAB & hi, (0xAAAAAAAAAAAAAAAB & hi)]
+        ivals += [rng.randint(lo, hi) for _ in range(max(trials, 20))]
         for rnd in RND_MODES:
             for v in ivals:
-                if not (lo <= v <= hi):
-                    continue
                 src = ctype(v)
                 d = ctypes.create_string_buffer(fmt.width // 8)
                 fl = ctypes.c_uint32()
@@ -349,9 +389,16 @@ def check_torder_rem(lib, dev, fmt, trials):
             got = dec(fmt, d.raw, 1)[0]
             assert got == want, (nm, fmt.name, hex(xa), hex(xb))
             note()
-    # remainder: pairs plus the exponent-gap extremes; the max/min pair
-    # is the full walk - once per format is the point, not the sweep
+    # remainder: pairs plus the exponent-gap extremes. The min_subnormal
+    # divisor is a power of two, so its walk EXITS EARLY when the
+    # residue hits zero after <= p steps - a real case, but not the
+    # full walk this comment once claimed it was (the adversarial
+    # review's F2). The genuine full-gap walk needs an ODD divisor
+    # significand: bits value 3 is the 3-ulp... no - the 2-bit
+    # subnormal 0b11, whose walk runs the whole emax-emin+p-2 gap
+    # (~524.5k steps at fp256), once per format, on purpose.
     directed = [(max_normal_bits(fmt, 0), min_subnormal_bits(fmt, 0)),
+                (max_normal_bits(fmt, 0), 3),
                 (max_normal_bits(fmt, 1), one_bits(fmt) | 1),
                 (min_subnormal_bits(fmt, 0), max_normal_bits(fmt, 0))]
     for xa, xb in pairs + directed:
@@ -366,6 +413,53 @@ def check_torder_rem(lib, dev, fmt, trials):
         note()
 
 
+def check_host_batches(lib, dev, fmt):
+    """Host-side entry points at n > 1: the per-element loops, the flag
+    OR, and a NaN parked in the LAST lane so late-lane classification
+    is what sets the batch's flags."""
+    fi = PREC_CODE[fmt.name]
+    rng = random.Random(23 ^ fmt.width)
+    pool = pool_for(fmt, 30)
+    finite = [x for x in pool if not is_nan(fmt, x)]
+    n = 1000
+    xs = [rng.choice(finite) for _ in range(n - 1)] + [snan_bits(fmt)]
+    ys = [rng.choice(finite) for _ in range(n)]
+    a, b = enc(fmt, xs), enc(fmt, ys)
+
+    d = ctypes.create_string_buffer(len(a))
+    fl = ctypes.c_uint32()
+    assert lib.cft_next_up(dev, fi, a, d, n, ctypes.byref(fl)) == 0
+    want_or = 0
+    for x, g in zip(xs, dec(fmt, d.raw, n)):
+        wb, wf = sf.next_up(fmt, x)
+        assert g == wb, (fmt.name, hex(x))
+        want_or |= wf
+    assert fl.value == want_or and want_or  # the last-lane sNaN showed up
+    note(n)
+
+    assert lib.cft_cmp_sig(dev, OPC["cmplt"], fi, a, b, d, n,
+                           ctypes.byref(fl), None) == 0
+    for x, y, g in zip(xs, ys, dec(fmt, d.raw, n)):
+        assert g == sf.cmplt_sig(fmt, x, y)[0], (fmt.name, hex(x), hex(y))
+    assert fl.value == 1  # FLAG_INVALID from the last lane alone
+    note(n)
+
+    assert lib.cft_rem(dev, fi, a, b, d, n, ctypes.byref(fl)) == 0
+    want_or = 0
+    for x, y, g in zip(xs, ys, dec(fmt, d.raw, n)):
+        wb, wf = sf.remainder(fmt, x, y)
+        assert g == wb, (fmt.name, hex(x), hex(y))
+        want_or |= wf
+    assert fl.value == want_or
+    note(n)
+
+    cls = (ctypes.c_uint8 * n)()
+    assert lib.cft_class(dev, fi, a, cls, n) == 0
+    for x, g in zip(xs, cls):
+        assert g == sf.classify(fmt, x), (fmt.name, hex(x))
+    note(n)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--formats", default="fp32,fp64,fp128,fp256")
@@ -377,6 +471,7 @@ def main():
     bind(lib)
     dev = open_dev(lib)
     try:
+        check_bad_rnd(lib, dev)
         for name in formats:
             fmt = FORMATS[name]
             t = args.trials if fmt.width <= 64 else max(6, args.trials // 5)
@@ -387,6 +482,7 @@ def main():
             check_cvt_int(lib, dev, fmt, t)
             check_unary(lib, dev, fmt, t)
             check_torder_rem(lib, dev, fmt, t)
+            check_host_batches(lib, dev, fmt)
             print(f"  {name}: clause-5 entry points agree with the model "
                   f"({CHECKED} comparisons so far)")
     finally:

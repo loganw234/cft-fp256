@@ -440,3 +440,50 @@ materialises a mask that size), pinned by the same rational
 reference. verify/run.sh gained a clause5 stage. MPFR and CPU-oracle
 extensions for the new set are running; their numbers get their own
 entry when they land.
+
+## 2026-09-01 - the adversarial pair reports on the completion set
+
+Two independent reviewers, per house practice, both required to
+reproduce before reporting.
+
+The NUMERICS reviewer ran ~3 million adversarial checks against
+oracles sharing no code with the model - a Fraction-based 754
+reference derived from the standard's own rules, CPython natives, a
+rule-by-rule 5.10 restatement - including EXHAUSTIVE sweeps on three
+toy formats (every encoding x mode x variant, all-pairs for binary
+ops) with ladder reproduction required for any hit. Verdict: ZERO
+contract bugs. It also confirmed the fp256->fp32 double-rounding trap
+family is discriminating (the two-step route diverges on 1,200
+constructed midpoint traps; the direct path passes all), and that the
+staged-scaleB saturation delivers identical bits under the directed
+attributes specifically. Findings: one DETERMINISM.md wording error
+(the -0 edge of nextUp belongs to the negative subnormal of least
+magnitude, not "most negative") and two loose comments - all fixed.
+
+The ENGINEERING reviewer ran 28,973 C checks (aliasing differentials,
+chunk equivalence, guard canaries, validation matrix) plus 22,272
+model differentials, and found the day's one real bug: F1, the
+internal "no rounding attribute" sentinel value -1 was accepted from
+the PUBLIC API by ten entry points, computing under a chimera rounding
+(increment rule from one default branch, overflow delivery from
+another) that no legal attribute produces. Fixed by removing the
+sentinel from the shared validator entirely - the operations that
+consume an attribute now range-check it themselves - with a refusal
+matrix in both the harness and api-test as regression. Also fixed on
+its evidence: the "full-gap fp256 remainder" directed case actually
+exited early (power-of-two divisor; the true full-gap walk needs an
+odd significand and runs ~524.5k steps, not the ~786k two comments
+claimed - both corrected, and the per-LANE cost stated honestly);
+integer conversions now load/store the caller's arrays through their
+declared native types instead of little-endian bytes (a silent
+byte-swap on any big-endian host, plus an implementation-defined
+cast, both gone); the integer-side size guard; and its test-gap list
+- 32-bit conversion randoms that never landed in range, the
+2^28..2^70 boundary window structurally unreachable at fp128/fp256,
+host ops never batched, aliasing promised in a comment but tested
+nowhere - all closed. clause5_check.py now runs 142,920 comparisons
+(was 112,372), C == model on every one; api-test carries the
+refusals, the hand-derived edges, and in-place-equals-separate for
+the composed ops. Everything else it attacked held: aliasing, UB,
+bn preconditions, the rem parity argument, the cvt_to cutoff,
+validation parity with cft_div, chunking, memory.

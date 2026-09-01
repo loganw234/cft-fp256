@@ -42,7 +42,7 @@ from .formats import FpFormat
 # flag bits (sticky, OR-accumulated by callers; matches rtl/cft_fpfma.sv
 # and the FLAGS CSR)
 FLAG_INVALID = 1 << 0
-FLAG_DIVZERO = 1 << 1  # raised only by div (754 7.3)
+FLAG_DIVZERO = 1 << 1  # raised by div for finite/0 and logb(+-0) (754 7.3)
 FLAG_OVERFLOW = 1 << 2
 FLAG_UNDERFLOW = 1 << 3
 FLAG_INEXACT = 1 << 4
@@ -900,8 +900,12 @@ def round_int(fmt: FpFormat, xa: int, rnd: int = RND_RNE,
     if kept == 0:
         return zero_bits(fmt, ua.sign), flags
     bits, packfl = round_pack(fmt, ua.sign, kept, 0, rnd)
-    # A finite value below 2^p rounds to an integer of at most p+1
-    # bits: always representable, so the pack is exact and in range.
+    # Values reaching here have e <= -1, so their magnitude is below
+    # 2^(p-1) and the rounded integer is at most 2^(p-1): exactly
+    # representable, and in range because every ladder format has
+    # emax >= p - 1 (a property of the interchange ladder, not of
+    # arbitrary formats - a toy format with emax < p-1 would fire
+    # this).
     assert packfl == 0
     return bits, flags
 
@@ -1011,10 +1015,14 @@ def logb(fmt: FpFormat, xa: int):
     operand's own floating-point format.
 
     The exponent E with 1 <= |x|*2^-E < 2, VALUE-based: a subnormal
-    reports its true exponent, not emin. Always exact (|E| is a small
-    integer, representable in every format here, asserted). The
-    specials are 754's: logB(NaN) is a NaN, logB(+-inf) is +inf with no
-    signal, logB(+-0) is -inf and signals divideByZero.
+    reports its true exponent, not emin. Always exact - |E| tops out
+    at max(emax, man_w - emin), which every LADDER format represents
+    exactly because its precision dwarfs its exponent width (149,
+    1074, 16494, 262378 against p of 24..237; asserted rather than
+    assumed, since a toy format with a fat exponent and thin
+    significand would violate it). The specials are 754's: logB(NaN)
+    is a NaN, logB(+-inf) is +inf with no signal, logB(+-0) is -inf
+    and signals divideByZero.
     """
     ua = unpack(fmt, xa)
     if ua.kind == NAN:

@@ -32,9 +32,12 @@
  *
  * cft_rem walks the exponent gap one quotient bit per step, bounded
  * p-bit integer work throughout where the model does one unbounded
- * divmod. The gap can reach ~786k steps for an adversarial fp256
- * pair - tens of milliseconds, once, on the host - and is typically a
- * handful. host/tests/clause5_check.py holds the two identical.
+ * divmod. The gap tops out at emax - emin + p - 2 steps (~524.5k for
+ * fp256) - roughly ten milliseconds PER adversarial lane on the host,
+ * so an array full of adversarial pairs pays it per element - and is
+ * typically a handful. A power-of-two divisor exits the walk early,
+ * which is why the check harness's full-gap case carries an odd
+ * significand. host/tests/clause5_check.py holds the two identical.
  */
 
 #include <stdlib.h>
@@ -142,23 +145,32 @@ static cft_status step(cft_device *dev, cft_op op, cft_format fmt, int rnd,
                    NULL, bus_out);
 }
 
-/* The shared argument checks. rnd < 0 means "this operation does not
- * consume a rounding attribute". Support requirements differ per
- * entry, so callers check those themselves before this. */
-static cft_status c5_validate(cft_device *dev, cft_format fmt, int rnd,
+/* The shared argument checks. The rounding attribute is deliberately
+ * NOT here: an early version admitted a "no attribute" sentinel
+ * through the same range check the public entry points used, and a
+ * caller's (cft_round)-1 sailed through to compute under a rounding
+ * no legal attribute produces (the adversarial review's F1). The
+ * operations that consume `rnd` now range-check it themselves with
+ * rnd_ok(); the ones that do not consume it never look at it at all.
+ * Support requirements differ per entry, so callers check those
+ * themselves too. */
+static cft_status c5_validate(cft_device *dev, cft_format fmt,
                               const void *a, const void *d, size_t n)
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)fmt < 0 || (int)fmt > 3)
         return CFT_ERR_INVALID_ARGUMENT;
-    if (rnd != -1 && (rnd < 0 || rnd > 4))
-        return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)
         return CFT_OK;
     if (!a || !d)
         return CFT_ERR_INVALID_ARGUMENT;
     return CFT_OK;
+}
+
+static int rnd_ok(cft_round rnd)
+{
+    return (int)rnd >= 0 && (int)rnd <= 4;
 }
 
 static int size_overflows(const cft_fmt_desc *f, size_t n)
@@ -195,7 +207,9 @@ CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
 
     if (bus_out)
         *bus_out = 0;
-    st = c5_validate(dev, fmt, (int)rnd, a, d, n);
+    if (!rnd_ok(rnd))
+        return CFT_ERR_INVALID_ARGUMENT;
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (!cft_supports(dev, CFT_ADD, fmt) ||
@@ -331,7 +345,9 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
 
     if (bus_out)
         *bus_out = 0;
-    st = c5_validate(dev, fmt, (int)rnd, a, d, n);
+    if (!rnd_ok(rnd))
+        return CFT_ERR_INVALID_ARGUMENT;
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (!cft_supports(dev, CFT_MUL, fmt))
@@ -454,7 +470,7 @@ CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
         *bus_out = 0;
     if (cmp != CFT_CMPLT && cmp != CFT_CMPLE && cmp != CFT_CMPEQ)
         return CFT_ERR_INVALID_ARGUMENT;
-    st = c5_validate(dev, fmt, -1, a, d, n);
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (!cft_supports(dev, cmp, fmt))
@@ -509,7 +525,9 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
 
     if ((int)dfmt < 0 || (int)dfmt > 3)
         return CFT_ERR_INVALID_ARGUMENT;
-    st = c5_validate(dev, sfmt, (int)rnd, a, d, n);
+    if (!rnd_ok(rnd))
+        return CFT_ERR_INVALID_ARGUMENT;
+    st = c5_validate(dev, sfmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -583,7 +601,9 @@ static cft_status cvt_from_core(cft_device *dev, cft_format fmt,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, (int)rnd, src, d, n);
+    if (!rnd_ok(rnd))
+        return CFT_ERR_INVALID_ARGUMENT;
+    st = c5_validate(dev, fmt, src, d, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -592,19 +612,29 @@ static cft_status cvt_from_core(cft_device *dev, cft_format fmt,
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
-    if (size_overflows(f, n))
+    if (size_overflows(f, n) || n > ((size_t)-1) / (size_t)elem_sz)
         return CFT_ERR_INVALID_ARGUMENT;
 
     for (i = 0; i < n; i++) {
-        const uint8_t *p = (const uint8_t *)src + i * (size_t)elem_sz;
-        uint64_t raw = 0, mag;
-        int sign = 0, b;
+        uint64_t raw, mag;
+        int sign = 0;
         cft_bn m, v;
         uint32_t fl = 0;
-        for (b = 0; b < elem_sz; b++)
-            raw |= (uint64_t)p[b] << (8 * b);
-        if (is_signed && elem_sz == 4)
-            raw = (uint64_t)(int64_t)(int32_t)(uint32_t)raw;
+        /* Native typed loads, matching the pointee type each public
+         * wrapper actually declares - these arrays are the caller's
+         * ints, not interchange byte strings, so reading them as
+         * little-endian bytes would silently swap on a big-endian
+         * host (the adversarial review's F3). Widening a signed value
+         * through int64_t and then to uint64_t is fully defined and
+         * preserves the two's-complement pattern. */
+        if (elem_sz == 4)
+            raw = is_signed
+                ? (uint64_t)(int64_t)((const int32_t *)src)[i]
+                : (uint64_t)((const uint32_t *)src)[i];
+        else
+            raw = is_signed
+                ? (uint64_t)((const int64_t *)src)[i]
+                : ((const uint64_t *)src)[i];
         if (is_signed && (raw >> 63)) {
             sign = 1;
             mag = ~raw + 1;                  /* two's complement, exact */
@@ -761,7 +791,9 @@ static cft_status cvt_to_core(cft_device *dev, cft_format fmt, cft_round rnd,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, (int)rnd, a, dst, n);
+    if (!rnd_ok(rnd))
+        return CFT_ERR_INVALID_ARGUMENT;
+    st = c5_validate(dev, fmt, a, dst, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -770,21 +802,24 @@ static cft_status cvt_to_core(cft_device *dev, cft_format fmt, cft_round rnd,
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
-    if (size_overflows(f, n))
+    if (size_overflows(f, n) || n > ((size_t)-1) / (size_t)elem_sz)
         return CFT_ERR_INVALID_ARGUMENT;
 
     for (i = 0; i < n; i++) {
         cft_bn xa;
         uint64_t out64;
         uint32_t fl;
-        uint8_t *p = (uint8_t *)dst + i * (size_t)elem_sz;
-        int b;
         lane_load(f, (const uint8_t *)a, i, &xa);
         cvt_to_lane(f, &xa, elem_sz * 8, is_signed, (int)rnd, exact,
                     &out64, &fl);
         acc |= fl;
-        for (b = 0; b < elem_sz; b++)
-            p[b] = (uint8_t)(out64 >> (8 * b));
+        /* Native typed stores, the mirror of cvt_from_core's loads
+         * (writing through the unsigned counterpart of the declared
+         * pointee type, which the aliasing rules permit). */
+        if (elem_sz == 4)
+            ((uint32_t *)dst)[i] = (uint32_t)out64;
+        else
+            ((uint64_t *)dst)[i] = out64;
     }
     if (flags_out)
         *flags_out = acc;
@@ -833,7 +868,7 @@ CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, -1, a, d, n);
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -931,7 +966,7 @@ CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, -1, a, d, n);
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -962,7 +997,7 @@ CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, -1, a, d, n);
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {
@@ -1013,7 +1048,7 @@ CFT_API cft_status cft_class(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, -1, a, cls, n);
+    st = c5_validate(dev, fmt, a, cls, n);
     if (st != CFT_OK || n == 0)
         return st;
     f = &cft_sf_formats[(int)fmt];
@@ -1069,7 +1104,7 @@ static cft_status torder_run(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, -1, a, d, n);
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK || n == 0)
         return st;
     if (!b)
@@ -1244,7 +1279,7 @@ CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
     size_t i;
     cft_status st;
 
-    st = c5_validate(dev, fmt, -1, a, d, n);
+    st = c5_validate(dev, fmt, a, d, n);
     if (st != CFT_OK)
         return st;
     if (n == 0) {

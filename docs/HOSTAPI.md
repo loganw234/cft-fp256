@@ -296,9 +296,13 @@ rounding encodings and tininess, and one table beats two.
 `cft_rem` is the one entry point with a cost note: the C walks the
 exponent gap a quotient bit at a time in p-bit integer work (the
 model does one unbounded divmod; `clause5_check.py` holds the two
-identical, full-gap fp256 case included). Typical calls are a
-handful of steps; the adversarial fp256 pair is ~786k of them - tens
-of milliseconds, on the host, once.
+identical, true full-gap fp256 case included - "true" because a
+power-of-two divisor exits the walk early, which is exactly how the
+first version of that directed case fooled itself). Typical calls
+are a handful of steps; the walk tops out at emax - emin + p - 2,
+~524.5k steps at fp256 - about ten milliseconds on the host, PER
+adversarial lane, so an array full of such pairs pays it per
+element.
 
 ## What is deliberately not in the first version
 
