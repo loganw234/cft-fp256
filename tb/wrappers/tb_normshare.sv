@@ -65,22 +65,21 @@ module tb_normshare #(
   localparam int AW32 = 77, AW64 = 164, AW128 = 344, AW256 = 716;
 
   // ---- the shared ladder ---------------------------------------------
-  logic [WT-1:0] nrm_din, nrm_dout;
-  logic [3:0]    nrm_csh [0:SLOTS-1];
-  logic [5:0]    nrm_fsh [0:SLOTS-1];
-
-  logic nrm_dir0 [0:SLOTS-1];
-  always_comb for (int l = 0; l < SLOTS; l++) nrm_dir0[l] = 1'b0;
+  // The amounts are packed at cft_normseg's per-lane pitch: lane l at
+  // l*4 / l*6, direction at bit l.
+  logic [WT-1:0]      nrm_din, nrm_dout;
+  logic [SLOTS*4-1:0] nrm_csh;
+  logic [SLOTS*6-1:0] nrm_fsh;
 
   cft_normseg #(.PMAX(237), .SLOTS(SLOTS)) u_normseg (
       .clk(clk), .mode(mode), .din(nrm_din),
-      .csh(nrm_csh), .fsh(nrm_fsh), .dir(nrm_dir0), .dout(nrm_dout));
+      .csh(nrm_csh), .fsh(nrm_fsh), .dir('0), .dout(nrm_dout));
 
   // ---- the shared ALIGNER: the same ladder, bidirectional -----------
-  logic [WT-1:0] aln_din, aln_dout;
-  logic [3:0]    aln_csh [0:SLOTS-1];
-  logic [5:0]    aln_fsh [0:SLOTS-1];
-  logic          aln_dir [0:SLOTS-1];
+  logic [WT-1:0]      aln_din, aln_dout;
+  logic [SLOTS*4-1:0] aln_csh;
+  logic [SLOTS*6-1:0] aln_fsh;
+  logic [SLOTS-1:0]   aln_dir;
 
   cft_normseg #(.PMAX(237), .SLOTS(SLOTS), .BIDIR(1'b1)) u_alnseg (
       .clk(clk), .mode(mode), .din(aln_din),
@@ -96,34 +95,32 @@ module tb_normshare #(
 
   always_comb begin
     aln_din = '0;
-    for (int i = 0; i < SLOTS; i = i + 1) begin
-      aln_csh[i] = '0;
-      aln_fsh[i] = '0;
-      aln_dir[i] = 1'b0;
-    end
+    aln_csh = '0;
+    aln_fsh = '0;
+    aln_dir = '0;
     case (mode)
       M32: for (int i = 0; i < 8; i = i + 1) begin
              aln_din[i*SLOTW +: AW32] = av32[i];
-             aln_csh[i] = ac32[i];
-             aln_fsh[i] = af32[i];
+             aln_csh[i*4 +: 4] = ac32[i];
+             aln_fsh[i*6 +: 6] = af32[i];
              aln_dir[i] = ad32[i];
            end
       M64: for (int i = 0; i < 4; i = i + 1) begin
              aln_din[i*2*SLOTW +: AW64] = av64[i];
-             aln_csh[i] = ac64[i];
-             aln_fsh[i] = af64[i];
+             aln_csh[i*4 +: 4] = ac64[i];
+             aln_fsh[i*6 +: 6] = af64[i];
              aln_dir[i] = ad64[i];
            end
       M128: for (int i = 0; i < 2; i = i + 1) begin
              aln_din[i*4*SLOTW +: AW128] = av128[i];
-             aln_csh[i] = ac128[i];
-             aln_fsh[i] = af128[i];
+             aln_csh[i*4 +: 4] = ac128[i];
+             aln_fsh[i*6 +: 6] = af128[i];
              aln_dir[i] = ad128[i];
            end
       default: begin
              aln_din[0 +: AW256] = av256;
-             aln_csh[0] = ac256;
-             aln_fsh[0] = af256;
+             aln_csh[0 +: 4] = ac256;
+             aln_fsh[0 +: 6] = af256;
              aln_dir[0] = ad256;
            end
     endcase
@@ -139,30 +136,28 @@ module tb_normshare #(
 
   always_comb begin
     nrm_din = '0;
-    for (int i = 0; i < SLOTS; i = i + 1) begin
-      nrm_csh[i] = '0;
-      nrm_fsh[i] = '0;
-    end
+    nrm_csh = '0;
+    nrm_fsh = '0;
     case (mode)
       M32: for (int i = 0; i < 8; i = i + 1) begin
              nrm_din[i*SLOTW +: NW32] = v32[i];
-             nrm_csh[i] = c32[i];
-             nrm_fsh[i] = g32[i];
+             nrm_csh[i*4 +: 4] = c32[i];
+             nrm_fsh[i*6 +: 6] = g32[i];
            end
       M64: for (int i = 0; i < 4; i = i + 1) begin
              nrm_din[i*2*SLOTW +: NW64] = v64[i];
-             nrm_csh[i] = c64[i];
-             nrm_fsh[i] = g64[i];
+             nrm_csh[i*4 +: 4] = c64[i];
+             nrm_fsh[i*6 +: 6] = g64[i];
            end
       M128: for (int i = 0; i < 2; i = i + 1) begin
              nrm_din[i*4*SLOTW +: NW128] = v128[i];
-             nrm_csh[i] = c128[i];
-             nrm_fsh[i] = g128[i];
+             nrm_csh[i*4 +: 4] = c128[i];
+             nrm_fsh[i*6 +: 6] = g128[i];
            end
       default: begin
              nrm_din[0 +: NW256] = v256;
-             nrm_csh[0] = c256;
-             nrm_fsh[0] = g256;
+             nrm_csh[0 +: 4] = c256;
+             nrm_fsh[0 +: 6] = g256;
            end
     endcase
   end
