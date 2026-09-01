@@ -90,7 +90,8 @@
 //                   slice. 16 regs x NBEATS beats x 32 B = 8 KiB, the
 //                   same silicon at every precision.
 //   imem / kmem     the instruction stream, and the 16 addressable
-//                   constants broadcast at issue time.
+//                   constants, held already broadcast across the beat
+//                   because a run's format never changes.
 //   deposit buffer  eight 32-bit banks, one per 32-bit word position
 //                   within a beat - a wider lane occupies adjacent
 //                   banks at one address - so divergent per-lane
@@ -240,9 +241,14 @@ module cft_seq #(
   // ---- program state --------------------------------------------------
   logic [31:0] h_ninsns, h_nconsts, h_maxdep;
   logic [63:0] imem [0:IMEM_D-1];
-  logic [255:0] kmem [0:KREG-1];      // low esz*8 bits hold the value
+  logic [BEAT_BITS-1:0] kmem [0:KREG-1];   // broadcast across the beat
 
-  // broadcast a constant across the beat's lanes
+  // broadcast a constant across the beat's lanes. Applied ONCE, as
+  // the constant is parsed out of the image, so kmem holds the
+  // broadcast form and issue reads it straight through: the same
+  // three operands were each carrying their own copy of this
+  // multiplexer on the issue path, for a value that cannot change
+  // during a run.
   function automatic [BEAT_BITS-1:0] kbroad(input [255:0] k);
     case (prec_q)
       PREC_FP32:  kbroad = {8{k[31:0]}};
@@ -558,22 +564,41 @@ module cft_seq #(
     slot_of = LB'((32'(beat[NBSH-1:0]) << WSH) + p);
   endfunction
 
-  // magnitude-nonzero of lane position `posn` in a beat (SETACT)
-  function automatic logic lane_mag_nz(input [BEAT_BITS-1:0] v,
-                                       input [2:0] posn);
-    logic [BEAT_BITS-1:0] s;
+  // magnitude-nonzero of lane position `posn` in a beat (SETACT),
+  // asked of the beat's per-word OR terms rather than of the beat.
+  // A lane's field is a run of whole 32-bit words and its sign bit is
+  // the top bit of the run's top word, so the only word that needs
+  // the sign masked off is that one, and nothing needs shifting. The
+  // first version shifted the whole 256-bit beat down by posn * esz *
+  // 8 - and its predecessor got the shift's self-determined width
+  // wrong, so every SETACT beyond lane position 2 judged somebody
+  // else's magnitude. There is no shift left to get wrong.
+  logic [WORDS-1:0] sa_wor, sa_worm;
+  generate
+    for (genvar gs = 0; gs < WORDS; gs = gs + 1) begin : g_sa
+      assign sa_wor[gs]  = |rf_rdata_a[gs*32 +: 32];
+      assign sa_worm[gs] = |(rf_rdata_a[gs*32 +: 32] & 32'h7fff_ffff);
+    end
+  endgenerate
+
+  // (the OR terms are named word_or/word_orm because `wor` is a
+  // Verilog net type and an argument called that parses as one)
+  function automatic logic lane_mag_nz(input [WORDS-1:0] word_or,
+                                       input [WORDS-1:0] word_orm,
+                                       input [2:0] posn,
+                                       input [1:0] wsh);
+    logic acc;
     begin
-      // full 32-bit shift arithmetic: the first version's 6-bit
-      // self-determined shift wrapped at lane position 2, so every
-      // SETACT beyond the first two lanes judged somebody else's
-      // magnitude
-      s = v >> (32'(posn) << (32'(wpe_sh) + 5));        // posn*esz*8
-      case (prec_q)
-        PREC_FP32:  lane_mag_nz = |(s[31:0]  & 32'h7fff_ffff);
-        PREC_FP64:  lane_mag_nz = |(s[63:0]  & {1'b0, {63{1'b1}}});
-        PREC_FP128: lane_mag_nz = |(s[127:0] & {1'b0, {127{1'b1}}});
-        default:    lane_mag_nz = |(s[255:0] & {1'b0, {255{1'b1}}});
-      endcase
+      acc = 1'b0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        if ((32'(w) >> wsh) == 32'({29'b0, posn})) begin
+          if ((32'(w) & ((32'd1 << wsh) - 32'd1)) ==
+              ((32'd1 << wsh) - 32'd1))
+            acc = acc | word_orm[w];      // the element's top word
+          else
+            acc = acc | word_or[w];
+        end
+      lane_mag_nz = acc;
     end
   endfunction
 
@@ -660,12 +685,20 @@ module cft_seq #(
                       + (32'(lc[LB-1:0]) & 32'(lanes - 1)));
   endfunction
 
+  // The cursor lane's deposit count, selected once. Both the drain
+  // ("has this lane reached this slot?") and the count pack want it,
+  // and each selecting it for itself was a second 128-entry lookup
+  // into a 896-bit vector. dcnt is read in the assign itself, not
+  // through a function's scope, so it is in the sensitivity.
+  logic [CW-1:0] cur_cnt;
+  assign cur_cnt =
+    dcnt[32'(cur_slot_fn(lane_cursor, lpb, lpb_sh)) * CW +: CW];
+
   function automatic [255:0] drain_elem_fn(input [LB:0] lc,
                                            input [31:0] sc,
+                                           input [CW-1:0] cnt,
                                            input [WORDS*32-1:0] rdata,
-                                           input [BLK_LANES*CW-1:0] cnts,
                                            input [3:0] lanes,
-                                           input [1:0] lsh,
                                            input [1:0] wsh);
     logic [2:0] posn;
     logic [255:0] v;
@@ -676,14 +709,14 @@ module cft_seq #(
         if (w < (32'd1 << wsh))
           v[w*32 +: 32] =
             rdata[(32'({29'b0, posn} << wsh) + w) * 32 +: 32];
-      if (sc >= 32'(cnts[32'(cur_slot_fn(lc, lanes, lsh)) * CW +: CW]))
+      if (sc >= 32'(cnt))
         v = '0;
       drain_elem_fn = v;
     end
   endfunction
   logic [255:0] drain_elem;
-  assign drain_elem = drain_elem_fn(lane_cursor, slot_cursor,
-                                    db_rdata, dcnt, lpb, lpb_sh, wpe_sh);
+  assign drain_elem = drain_elem_fn(lane_cursor, slot_cursor, cur_cnt,
+                                    db_rdata, lpb, wpe_sh);
 
 
   // ==== the machine ====================================================
@@ -841,8 +874,8 @@ module cft_seq #(
           // starved forever.
           if (kons_left != 0 && pw_have >= {1'b0, esz}) begin
             if (kons_i < KREG)
-              kmem[kons_i[3:0]] <= 256'(pw[255:0]) &
-                                   ~(~256'b0 << ({26'b0, esz} << 3));
+              kmem[kons_i[3:0]] <= kbroad(256'(pw[255:0]) &
+                                   ~(~256'b0 << ({26'b0, esz} << 3)));
             pw <= pw >> ({26'b0, esz} << 3);
             pw_have <= pw_have - {1'b0, esz};
             kons_i <= kons_i + 1;
@@ -1064,9 +1097,9 @@ module cft_seq #(
             al_valid <= 1'b1;
             al_op <= c_op;
             al_rnd <= c_rnd;
-            al_a <= c_ka ? kbroad(kmem[c_ra]) : rf_rdata_a;
-            al_b <= c_kb ? kbroad(kmem[c_rb]) : rf_rdata_b;
-            al_c <= c_kc ? kbroad(kmem[c_rc]) : rf_rdata_c;
+            al_a <= c_ka ? kmem[c_ra] : rf_rdata_a;
+            al_b <= c_kb ? kmem[c_rb] : rf_rdata_b;
+            al_c <= c_kc ? kmem[c_rc] : rf_rdata_c;
           end
           bt <= bt + 1;
           if (bt == 6'({1'b0, nb_blk} + 1))
@@ -1157,7 +1190,8 @@ module cft_seq #(
           // same eight answers reached the expensive way.
           for (int q = 0; q < WORDS; q = q + 1)
             if (32'(q) < 32'(lpb) && active[slot_of(bt, q)])
-              active[slot_of(bt, q)] <= lane_mag_nz(rf_rdata_a, 3'(q));
+              active[slot_of(bt, q)] <=
+                lane_mag_nz(sa_wor, sa_worm, 3'(q), wpe_sh);
           bt <= bt + 1;
           if (bt == 6'({1'b0, nb_blk} - 1)) begin
             pc <= pc + 1;
@@ -1268,9 +1302,7 @@ module cft_seq #(
           // slot fixed at four bytes.
           for (int w = 0; w < WORDS; w = w + 1)
             if (32'(w) == (32'(as_fill) >> 2)) begin
-              as_data[w*32 +: 32] <=
-                32'(dcnt[32'(cur_slot_fn(lane_cursor, lpb, lpb_sh))
-                         * CW +: CW]);
+              as_data[w*32 +: 32] <= 32'(cur_cnt);
               as_strb[w*4 +: 4] <= 4'hf;
             end
           as_fill <= as_fill + 6'd4;
