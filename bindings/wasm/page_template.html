@@ -1,0 +1,740 @@
+<!doctype html>
+<!-- Copyright 2026 Logan W.
+     SPDX-License-Identifier: Apache-2.0
+
+     Template for bindings/wasm/conformance.html. Do not open this
+     file directly: the three @CFT_*@ tokens below are filled in by
+     make_page.py during build.sh, and until they are, there is no
+     library and no sample here. The built page is self-contained on
+     purpose - one file, no server, no CDN, no external request - so
+     that "check the contract" costs exactly one browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>libcft wasm conformance</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --dim: #666666; --line: #d8d8d8;
+  --accent: #0a5cad; --pass-bg: #e8f5e9; --pass-fg: #1b5e20;
+  --fail-bg: #fdecea; --fail-fg: #b71c1c; --warn-bg: #fff8e1;
+  --warn-fg: #8d6e00; --code-bg: #f5f5f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --fg: #e4e4e4; --dim: #9a9a9a; --line: #33373d;
+    --accent: #5ea2e0; --pass-bg: #12310f; --pass-fg: #a3e0a0;
+    --fail-bg: #3d1210; --fail-fg: #ffb3ab; --warn-bg: #3a2f0a;
+    --warn-fg: #ffd970; --code-bg: #1d2025;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto; padding: 1.2rem 1rem 4rem; max-width: 62rem;
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 1.5rem; margin: 0.2rem 0 0.4rem; }
+h2 { font-size: 1.1rem; margin: 2.2rem 0 0.5rem; border-bottom: 1px solid var(--line); padding-bottom: 0.25rem; }
+p  { margin: 0.4rem 0; }
+a  { color: var(--accent); }
+.dim { color: var(--dim); }
+small, .small { font-size: 0.85rem; }
+code, pre, .mono, table.sets, input[type=text], select {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", Menlo, monospace;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line);
+  padding: 0.6rem 0.8rem; overflow-x: auto; margin: 0.5rem 0;
+  font-size: 0.85rem; white-space: pre;
+}
+.verdict {
+  margin: 0.8rem 0; padding: 0.8rem 1rem; border-radius: 4px;
+  font-size: 1.25rem; font-weight: 700; border: 1px solid var(--line);
+}
+.verdict .sub { display: block; font-size: 0.85rem; font-weight: 400; margin-top: 0.3rem; }
+.verdict.pending { background: var(--code-bg); color: var(--dim); font-size: 1rem; font-weight: 400; }
+.verdict.pass { background: var(--pass-bg); color: var(--pass-fg); border-color: var(--pass-fg); }
+.verdict.fail { background: var(--fail-bg); color: var(--fail-fg); border-color: var(--fail-fg); }
+.verdict.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-fg); }
+table.sets { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin: 0.5rem 0; }
+table.sets th, table.sets td {
+  text-align: left; padding: 0.2rem 0.7rem 0.2rem 0;
+  border-bottom: 1px solid var(--line); vertical-align: top;
+}
+table.sets th { color: var(--dim); font-weight: 600; }
+table.sets td.num { text-align: right; padding-right: 1.4rem; }
+td.ok { color: var(--pass-fg); }
+td.bad { color: var(--fail-fg); font-weight: 700; }
+tr.detail pre { margin: 0.3rem 0 0.6rem; color: var(--fail-fg); }
+#dropzone {
+  border: 2px dashed var(--line); border-radius: 6px; padding: 1.6rem 1rem;
+  text-align: center; color: var(--dim); cursor: pointer; margin: 0.6rem 0;
+}
+#dropzone.hover { border-color: var(--accent); color: var(--accent); }
+button {
+  font: inherit; padding: 0.3rem 0.9rem; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--code-bg); color: var(--fg); cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+fieldset { border: 1px solid var(--line); border-radius: 4px; margin: 0.6rem 0; padding: 0.7rem 0.9rem; }
+label.f { display: inline-block; margin: 0.25rem 1.1rem 0.25rem 0; }
+label.f span { display: block; font-size: 0.75rem; color: var(--dim); }
+input[type=text] { width: 100%; padding: 0.25rem 0.4rem; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); color: var(--fg); }
+input[type=text]:disabled { opacity: 0.35; }
+.operand { margin: 0.4rem 0; }
+.negctl-banner {
+  background: var(--fail-bg); color: var(--fail-fg); border: 2px solid var(--fail-fg);
+  padding: 0.6rem 1rem; font-weight: 700; margin: 0.8rem 0; border-radius: 4px;
+}
+footer { margin-top: 3rem; border-top: 1px solid var(--line); padding-top: 0.8rem; font-size: 0.85rem; color: var(--dim); }
+footer pre { font-size: 0.75rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>libcft, compiled to WebAssembly, checked in your browser</h1>
+  <p class="dim">The claim under test: <em>the same call, with the same
+  inputs, returns the same bits - on every backend, on every machine, on
+  every day</em> (host/include/cft.h). This page loads the library's
+  software backend as wasm and replays the project's published
+  conformance vectors through it, in this tab, with no server and no
+  network. The backend's arithmetic is integer-only - uint32 limbs,
+  uint64 intermediates - and WebAssembly integer semantics are fully
+  specified, so what runs here is not a lookalike of libcft: it is
+  libcft, and it must produce the library's exact bits or fail below.</p>
+</header>
+
+<!--@CFT_NEGCTL@-->
+
+<section id="identity-section">
+  <h2>1 &middot; the library that loaded</h2>
+  <pre id="identity">loading the wasm module&hellip;</pre>
+</section>
+
+<section id="builtin-section">
+  <h2>2 &middot; embedded sample replay</h2>
+  <p>This page carries a deterministic sample of the published vector
+  sets and replays it automatically on load, through
+  <code>cft_conformance()</code> itself - the library's own parser,
+  per-element pass (exact flags per case), array pass (batching), and
+  its refusal to let a run that checked nothing read as a pass. Not a
+  JavaScript reimplementation of the replay: the same C code path every
+  other backend is judged by.</p>
+  <p class="small dim">Sampling rule (deterministic, restated in
+  build.sh): regenerate the published sets with
+  <code id="gen-cmd"></code>; from each of the 20 sets
+  (4&nbsp;formats &times; 5&nbsp;rounding attributes, 11,800 cases
+  each) take every 59th line - 0-based lines 0, 59, 118, &hellip; - then
+  add the set's first line for any opcode name the stride missed, so
+  every opcode class is present per set by construction, the seed
+  opcodes <code>recip_seed</code>/<code>rsqrt_seed</code> and the
+  unassigned <code>reserved15/28/255</code> included.</p>
+  <div id="builtin-verdict" class="verdict pending">waiting for the wasm module&hellip;</div>
+  <table class="sets" id="builtin-table" hidden>
+    <thead><tr><th>set</th><th class="num">cases</th><th>result</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p><button id="rerun" disabled>replay the embedded sample again</button></p>
+</section>
+
+<section id="drop-section">
+  <h2>3 &middot; full replay: drop the published sets</h2>
+  <p>The embedded sample is a sample. For the full claim, generate the
+  complete sets in a checkout of this repo -
+  <code>make vectors</code>, which writes 236,000 cases to
+  <code>vectors/out/</code> - and drop any or all of the
+  <code>.jsonl</code> files here. Same code path as section 2, whole
+  files this time.</p>
+  <div id="dropzone">drop <code>vectors/out/*.jsonl</code> here &mdash; or click to pick files</div>
+  <input type="file" id="filepick" multiple accept=".jsonl" hidden>
+  <div id="drop-verdict" class="verdict pending" hidden></div>
+  <table class="sets" id="drop-table" hidden>
+    <thead><tr><th>set</th><th class="num">cases</th><th>result</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="small dim">Only the generator's fixed names are accepted
+  (<span class="mono">fp32.jsonl &hellip; fp256-rmm.jsonl</span>) -
+  cft_conformance enumerates sets by name rather than by scanning, and
+  a file this page cannot map to a set is refused loudly rather than
+  skipped quietly.</p>
+</section>
+
+<section id="compute-section">
+  <h2>4 &middot; compute</h2>
+  <p>The same library, called forward: one element through
+  <code>cft_run()</code> (or the composed <code>cft_div()</code> /
+  <code>cft_sqrt()</code> sequence), operands and result as raw
+  encodings. This is a working binary32/64/128/256 calculator, and every
+  answer it gives is pinned by the replay above.</p>
+  <fieldset>
+    <div>
+      <label class="f"><span>operation</span><select id="op-sel"></select></label>
+      <label class="f"><span>format</span><select id="fmt-sel"></select></label>
+      <label class="f"><span>rounding</span><select id="rnd-sel"></select></label>
+    </div>
+    <p class="small dim" id="op-formula"></p>
+    <div class="operand"><label class="f" style="width:100%"><span>a (hex encoding, left-padded to the format width)</span><input type="text" id="in-a" spellcheck="false"></label></div>
+    <div class="operand"><label class="f" style="width:100%"><span>b</span><input type="text" id="in-b" spellcheck="false"></label></div>
+    <div class="operand"><label class="f" style="width:100%"><span>c</span><input type="text" id="in-c" spellcheck="false"></label></div>
+    <p><button id="compute-btn" disabled>compute</button></p>
+    <pre id="compute-out" hidden></pre>
+  </fieldset>
+</section>
+
+<footer>
+  <p><strong>Scope, honestly.</strong> This is the <em>software
+  backend</em> in a browser: full contract validation and full
+  computation, at software speed. Device acceleration is not a browser
+  thing - the FPGA tile speaks XRT over PCIe - and browser GPU floating
+  point (WebGL/WebGPU) is exactly the vendor-shaped nondeterminism this
+  project exists to remove, so nothing here touches it. The sequencer
+  (cft_program_*) is compiled into this module but not exported; no
+  panel drives it yet, and an exercised surface is the only kind this
+  page claims. If the replay above is green, this build of the library
+  matches the published vectors on your machine; the fuller statement of
+  what that means is in <span class="mono">bindings/wasm/README.md</span>
+  and <span class="mono">docs/DETERMINISM.md</span>.</p>
+  <p><strong>Build provenance</strong> (reproducible: <span class="mono">bindings/wasm/build.sh</span>):</p>
+  <pre id="provenance"></pre>
+</footer>
+
+<script>
+/*@CFT_RUNTIME_JS@*/
+</script>
+<script>
+"use strict";
+
+/* Filled in by make_page.py. CFT_SAMPLE maps each set's canonical file
+ * name to its sampled .jsonl text; CFT_BUILD is the provenance block. */
+const CFT_SAMPLE = /*@CFT_SAMPLE_JSON@*/ null;
+const CFT_BUILD  = /*@CFT_BUILD_JSON@*/ null;
+
+const $ = (id) => document.getElementById(id);
+
+const FORMATS   = ["fp32", "fp64", "fp128", "fp256"];
+const ROUNDINGS = ["rne", "rtz", "rdn", "rup", "rmm"];
+const CANONICAL = [];
+for (const f of FORMATS)
+  for (const r of ROUNDINGS)
+    CANONICAL.push(r === "rne" ? f + ".jsonl" : f + "-" + r + ".jsonl");
+
+const FLAG_NAMES = [
+  [1, "invalid"], [2, "divbyzero"], [4, "overflow"],
+  [8, "underflow"], [16, "inexact"],
+];
+
+let M = null;      /* the emscripten module */
+let C = null;      /* cwrapped cftw_* entry points */
+let dev = 0;       /* cft_device*, software backend */
+
+/* ---- module load ------------------------------------------------- */
+
+function bootFailed(err) {
+  const el = $("identity");
+  el.textContent = "FAILED TO LOAD THE WASM MODULE: " + err + "\n" +
+    "Nothing was checked. This page has not validated anything.";
+  const v = $("builtin-verdict");
+  v.className = "verdict fail";
+  v.textContent = "NOTHING WAS CHECKED - the wasm module did not load";
+}
+
+createCftModule().then((mod) => {
+  M = mod;
+  try { init(); } catch (e) { bootFailed(e); throw e; }
+}).catch(bootFailed);
+
+function init() {
+  const n = "number", s = "string";
+  C = {
+    abi:          M.cwrap("cftw_abi_version", n, []),
+    strerror:     M.cwrap("cftw_strerror", s, [n]),
+    fmtSize:      M.cwrap("cftw_format_size", n, [n]),
+    fmtName:      M.cwrap("cftw_format_name", s, [n]),
+    opName:       M.cwrap("cftw_op_name", s, [n]),
+    openSoftware: M.cwrap("cftw_open_software", n, [n]),
+    supports:     M.cwrap("cftw_supports", n, [n, n, n]),
+    capsMask:     M.cwrap("cftw_caps_format_mask", n, [n]),
+    capsTiles:    M.cwrap("cftw_caps_tiles", n, [n]),
+    capsFlagsOk:  M.cwrap("cftw_caps_flags_readable", n, [n]),
+    capsBackend:  M.cwrap("cftw_caps_backend", s, [n]),
+    run:          M.cwrap("cftw_run", n, [n,n,n,n,n,n,n,n,n,n,n]),
+    div:          M.cwrap("cftw_div", n, [n,n,n,n,n,n,n,n,n]),
+    sqrt:         M.cwrap("cftw_sqrt", n, [n,n,n,n,n,n,n,n]),
+    conformance:  M.cwrap("cftw_conformance", n, [n,s,n,n,n,n]),
+  };
+
+  const pp = M._malloc(4);
+  const st = C.openSoftware(pp);
+  dev = M.HEAPU32[pp >> 2];
+  M._free(pp);
+  if (st !== 0 || !dev) {
+    bootFailed("cft_open(software): " + C.strerror(st));
+    return;
+  }
+
+  renderIdentity();
+  renderProvenance();
+  initComputePanel();
+  wireDrop();
+  $("rerun").disabled = false;
+  $("rerun").addEventListener("click", replayBuiltin);
+  replayBuiltin();
+}
+
+/* ---- identity ---------------------------------------------------- */
+
+function renderIdentity() {
+  const abi = C.abi() >>> 0;
+  const mask = C.capsMask(dev) >>> 0;
+  let fmts = "";
+  for (let i = 0; i < 4; i++)
+    if (mask & (1 << i))
+      fmts += C.fmtName(i) + " (" + C.fmtSize(i) + " bytes)  ";
+  $("identity").textContent =
+    "libcft ABI      " + (abi >>> 16) + "." + (abi & 0xffff) + "\n" +
+    "backend         " + C.capsBackend(dev) + " (wasm32 build of the same C sources)\n" +
+    "tiles           " + C.capsTiles(dev) + "\n" +
+    "flags readable  " + (C.capsFlagsOk(dev) ? "yes" :
+                          "NO - flags cannot be trusted on this backend") + "\n" +
+    "formats         " + fmts.trim();
+}
+
+function renderProvenance() {
+  if (!CFT_BUILD) { $("provenance").textContent = "(no build info embedded)"; return; }
+  const b = CFT_BUILD;
+  $("gen-cmd").textContent = b.gen_command;
+  $("provenance").textContent =
+    "toolchain   " + b.image + "\n" +
+    "            emcc " + b.emcc_version + " (containerized; no host toolchain involved)\n" +
+    "vectors     " + b.gen_command + "\n" +
+    "            combined sha256 of the 20 source sets: " + b.vectors_digest + "\n" +
+    "sample      " + b.sample_rule + "\n" +
+    "            " + b.sample_cases + " cases embedded of " + b.total_cases + " published\n" +
+    "module      " + b.wasm_note;
+}
+
+/* ---- replay ------------------------------------------------------ *
+ *
+ * One cft_conformance() call per set: the page writes the file into
+ * MEMFS under its canonical name in a fresh directory and hands the
+ * library the directory, so per-set counts come from the same code
+ * that replays them. The library stops a run at the first
+ * disagreement and its report IS the failure detail (op, operands,
+ * expected vs got, flags); this page displays it verbatim.
+ */
+
+let replaySeq = 0;
+
+function replayOneSet(name, text) {
+  const dir = "/replay" + (replaySeq++);
+  M.FS.mkdir(dir);
+  M.FS.writeFile(dir + "/" + name, text);
+  const repSize = 65536;
+  const rep = M._malloc(repSize);
+  const cases64 = M._malloc(8);
+  let status, report, cases;
+  try {
+    status = C.conformance(dev, dir, rep, repSize, cases64, cases64 + 4);
+    report = M.UTF8ToString(rep);
+    cases = M.HEAPU32[cases64 >> 2] + M.HEAPU32[(cases64 + 4) >> 2] * 4294967296;
+  } finally {
+    M._free(rep);
+    M._free(cases64);
+    try { M.FS.unlink(dir + "/" + name); } catch (e) { /* keep the real error */ }
+    try { M.FS.rmdir(dir); } catch (e) { /* ditto */ }
+  }
+  return { name, status, report, cases };
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+function sectionUI(prefix) {
+  const table = $(prefix + "-table");
+  const body = table.querySelector("tbody");
+  const verdict = $(prefix + "-verdict");
+  return {
+    reset() {
+      body.textContent = "";
+      table.hidden = false;
+      verdict.hidden = false;
+      verdict.className = "verdict pending";
+      verdict.textContent = "replaying…";
+    },
+    row(name) {
+      const tr = document.createElement("tr");
+      const td0 = document.createElement("td");
+      const td1 = document.createElement("td");
+      const td2 = document.createElement("td");
+      td0.textContent = name;
+      td1.className = "num";
+      td1.textContent = "…";
+      td2.textContent = "replaying…";
+      tr.append(td0, td1, td2);
+      body.append(tr);
+      return { tr, td1, td2 };
+    },
+    finish(row, r) {
+      row.td1.textContent = r.cases.toLocaleString("en-US");
+      if (r.status === 0) {
+        row.td2.textContent = "all matching";
+        row.td2.className = "ok";
+        row.td2.title = r.report.trim();
+      } else {
+        row.td2.textContent = "FAILED: " + C.strerror(r.status);
+        row.td2.className = "bad";
+        const tr = document.createElement("tr");
+        tr.className = "detail";
+        const td = document.createElement("td");
+        td.colSpan = 3;
+        const pre = document.createElement("pre");
+        pre.textContent = r.report.trim() || "(the library returned no detail)";
+        td.append(pre);
+        tr.append(td);
+        row.tr.after(tr);
+      }
+    },
+    refusal(name, why) {
+      const tr = document.createElement("tr");
+      const td0 = document.createElement("td");
+      const td1 = document.createElement("td");
+      const td2 = document.createElement("td");
+      td0.textContent = name;
+      td1.className = "num";
+      td1.textContent = "0";
+      td2.textContent = "REFUSED: " + why;
+      td2.className = "bad";
+      tr.append(td0, td1, td2);
+      body.append(tr);
+    },
+    verdictEl: verdict,
+  };
+}
+
+function setVerdict(el, cls, main, sub) {
+  el.className = "verdict " + cls;
+  el.textContent = main;
+  if (sub) {
+    const s = document.createElement("span");
+    s.className = "sub";
+    s.textContent = sub;
+    el.append(s);
+  }
+}
+
+async function replaySets(files, ui, sourceNote) {
+  ui.reset();
+  await tick();
+
+  const accepted = [];
+  let refused = 0;
+  for (const f of files) {
+    if (CANONICAL.includes(f.name)) {
+      accepted.push(f);
+    } else {
+      refused++;
+      ui.refusal(f.name, "not one of the generator's set names, so " +
+        "cft_conformance would never have read it; refusing beats " +
+        "guessing which set it claims to be");
+    }
+  }
+
+  let setsRun = 0, cases = 0, failed = null;
+  for (const f of accepted) {
+    const row = ui.row(f.name);
+    await tick();
+    const r = replayOneSet(f.name, f.text);
+    ui.finish(row, r);
+    cases += r.cases;
+    if (r.status !== 0) { failed = r; break; }
+    setsRun++;
+    await tick();
+  }
+
+  const summary = setsRun + " set" + (setsRun === 1 ? "" : "s") +
+    " run / " + cases.toLocaleString("en-US") + " cases checked" +
+    (refused ? " / " + refused + " file" + (refused === 1 ? "" : "s") +
+               " refused" : "");
+
+  if (failed) {
+    setVerdict(ui.verdictEl, "fail",
+      "CONFORMANCE FAILED — " + failed.name + ": " +
+      C.strerror(failed.status),
+      summary + "; the replay stopped at the first disagreement, as " +
+      "cft_conformance does - detail above, verbatim from the library");
+  } else if (setsRun === 0 || cases === 0) {
+    setVerdict(ui.verdictEl, "fail",
+      "NOTHING WAS CHECKED — 0 cases ran",
+      summary + "; an empty replay is not a pass and will never be " +
+      "rendered as one");
+  } else if (refused > 0) {
+    setVerdict(ui.verdictEl, "warn",
+      cases.toLocaleString("en-US") +
+      " cases matched, BUT " + refused + " dropped file" +
+      (refused === 1 ? " was" : "s were") + " refused — not a full pass",
+      summary + "; " + sourceNote);
+  } else {
+    setVerdict(ui.verdictEl, "pass",
+      cases.toLocaleString("en-US") +
+      " cases, library matches the vectors exactly",
+      summary + "; each set replayed twice - one element at a time for " +
+      "exact per-case flags, then as arrays - " + sourceNote);
+  }
+}
+
+/* ---- section 2: the embedded sample ------------------------------ */
+
+let builtinRunning = false;
+
+async function replayBuiltin() {
+  if (builtinRunning || !CFT_SAMPLE) return;
+  builtinRunning = true;
+  $("rerun").disabled = true;
+  try {
+    const files = Object.keys(CFT_SAMPLE).map(
+      (name) => ({ name, text: CFT_SAMPLE[name] }));
+    await replaySets(files, sectionUI("builtin"),
+      "this is the embedded sample, not the full published set - " +
+      "section 3 replays all 236,000 cases");
+  } finally {
+    builtinRunning = false;
+    $("rerun").disabled = false;
+  }
+}
+
+/* ---- section 3: drag and drop ------------------------------------ */
+
+/* The drop handler and the file picker both funnel into
+ * replayDropped(), which is also reachable from a console
+ * (window.cftReplayDropped) - the replay path does not care how the
+ * bytes arrived, only what they are. */
+async function replayDropped(files) {
+  await replaySets(files, sectionUI("drop"),
+    "these files came from your disk; regenerate them with " +
+    "`make vectors` if in doubt");
+}
+window.cftReplayDropped = replayDropped;
+
+function wireDrop() {
+  const dz = $("dropzone");
+  const pick = $("filepick");
+
+  dz.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dz.classList.add("hover");
+  });
+  dz.addEventListener("dragleave", () => dz.classList.remove("hover"));
+  dz.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    dz.classList.remove("hover");
+    const list = [];
+    for (const f of e.dataTransfer.files)
+      list.push({ name: f.name, text: await f.text() });
+    if (list.length) replayDropped(list);
+  });
+  dz.addEventListener("click", () => pick.click());
+  pick.addEventListener("change", async () => {
+    const list = [];
+    for (const f of pick.files)
+      list.push({ name: f.name, text: await f.text() });
+    pick.value = "";
+    if (list.length) replayDropped(list);
+  });
+}
+
+/* ---- section 4: compute ------------------------------------------ */
+
+/* Operand usage and formulas mirror host/include/cft.h and
+ * cft_sf_op_operands() in host/src/softfloat.c; the numeric opcodes
+ * and their names come from the library itself at runtime. "div" and
+ * "sqrt" are cft_div()/cft_sqrt(), the composed seed/Newton sequence,
+ * not single opcodes - cft.h explains why that is a design fact. */
+const PANEL_OPS = [
+  { v: 0,  use: "abc", f: "d = a*b + c — one rounding, exact product" },
+  { v: 1,  use: "ac",  f: "d = a + c (b ignored)" },
+  { v: 2,  use: "ac",  f: "d = a - c (b ignored)" },
+  { v: 3,  use: "ab",  f: "d = a * b (c ignored)" },
+  { v: 4,  use: "a",   f: "d = |a| — quiet, raises nothing" },
+  { v: 5,  use: "a",   f: "d = -a — quiet" },
+  { v: 6,  use: "ab",  f: "d = magnitude of a, sign of b — quiet" },
+  { v: 7,  use: "ab",  f: "754-2019 9.6: min(+0,-0) = -0; NaN propagates" },
+  { v: 8,  use: "ab",  f: "754-2019 9.6: max(+0,-0) = +0; NaN propagates" },
+  { v: 9,  use: "ab",  f: "min, but one NaN operand yields the number" },
+  { v: 10, use: "ab",  f: "max, but one NaN operand yields the number" },
+  { v: 11, use: "abc", f: "d = (c != 0) ? a : b — moves NaNs intact" },
+  { v: 12, use: "ab",  f: "a < b → 1.0 else +0.0 (a > b is cmplt swapped)" },
+  { v: 13, use: "ab",  f: "a <= b → 1.0 else +0.0" },
+  { v: 14, use: "ab",  f: "a == b → 1.0 else +0.0" },
+  { v: 16, use: "ab",  f: "bitwise: the encodings as unsigned integers" },
+  { v: 17, use: "ab",  f: "bitwise or" },
+  { v: 18, use: "ab",  f: "bitwise xor" },
+  { v: 19, use: "ab",  f: "integer add, wraps modulo 2^width" },
+  { v: 20, use: "ab",  f: "integer subtract, wraps" },
+  { v: 21, use: "ab",  f: "shift left; count from b, modulo the width" },
+  { v: 22, use: "ab",  f: "shift right, logical, never arithmetic" },
+  { v: 23, use: "ab",  f: "unsigned compare → 1.0 or +0.0" },
+  { v: 26, use: "a",   f: "seed table ~1/a; quiet; subnormals flush to ±inf at input (cft.h says why)" },
+  { v: 27, use: "a",   f: "seed table ~1/√a; quiet; same flush rule" },
+  { v: "div",  use: "ab", f: "d = a / b — correctly rounded via the seed/Newton/exact-residual sequence (cft_div)" },
+  { v: "sqrt", use: "a",  f: "d = √a — same construction (cft_sqrt)" },
+];
+
+/* IEEE 754-2019 interchange field widths, display-only (the classifier
+ * under the result line); cross-checked against
+ * python/cft_golden/formats.py, which is the repo's authority. */
+const FIELD = { fp32: {e: 8, m: 23}, fp64: {e: 11, m: 52},
+                fp128: {e: 15, m: 112}, fp256: {e: 19, m: 236} };
+
+function initComputePanel() {
+  const opSel = $("op-sel"), fmtSel = $("fmt-sel"), rndSel = $("rnd-sel");
+  for (const o of PANEL_OPS) {
+    const opt = document.createElement("option");
+    opt.value = String(o.v);
+    opt.textContent = typeof o.v === "number"
+      ? C.opName(o.v) + " (op " + o.v + ")" : o.v + " (composed sequence)";
+    opSel.append(opt);
+  }
+  for (let i = 0; i < 4; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = C.fmtName(i);
+    fmtSel.append(opt);
+  }
+  const rndLong = ["roundTiesToEven", "roundTowardZero", "roundTowardNegative",
+                   "roundTowardPositive", "roundTiesToAway"];
+  ROUNDINGS.forEach((r, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = r + " — " + rndLong[i];
+    rndSel.append(opt);
+  });
+
+  const sync = () => {
+    const o = PANEL_OPS[opSel.selectedIndex];
+    $("op-formula").textContent = o.f;
+    for (const x of ["a", "b", "c"])
+      $("in-" + x).disabled = !o.use.includes(x);
+  };
+  opSel.addEventListener("change", sync);
+
+  /* fp64 1.0 * 2.0 + 1.5: an exact fma, so the expected first answer
+   * is 0x400c000000000000 with no flags - checkable by eye. */
+  fmtSel.value = "1";
+  $("in-a").value = "0x3ff0000000000000";
+  $("in-b").value = "0x4000000000000000";
+  $("in-c").value = "0x3ff8000000000000";
+  sync();
+
+  $("compute-btn").disabled = false;
+  $("compute-btn").addEventListener("click", computeOnce);
+}
+
+function parseHexOperand(label, s, esz) {
+  let t = s.trim().toLowerCase();
+  if (t.startsWith("0x")) t = t.slice(2);
+  if (t === "")
+    throw "operand " + label + " is empty - this page does not guess operands";
+  if (!/^[0-9a-f]+$/.test(t))
+    throw "operand " + label + " is not hex: \"" + s.trim() + "\"";
+  if (t.length > 2 * esz)
+    throw "operand " + label + " has " + t.length + " hex digits; " +
+          "the selected format takes at most " + 2 * esz;
+  t = t.padStart(2 * esz, "0");
+  const bytes = new Uint8Array(esz);          /* little-endian, per cft.h */
+  for (let i = 0; i < esz; i++)
+    bytes[i] = parseInt(t.slice(2 * esz - 2 * i - 2, 2 * esz - 2 * i), 16);
+  return bytes;
+}
+
+function hexOfBytes(bytes) {
+  let s = "0x";
+  for (let i = bytes.length - 1; i >= 0; i--)
+    s += bytes[i].toString(16).padStart(2, "0");
+  return s;
+}
+
+function classify(hex, fmtName) {
+  const fw = FIELD[fmtName];
+  const v = BigInt(hex);
+  const m = BigInt(fw.m), e = BigInt(fw.e);
+  const man = v & ((1n << m) - 1n);
+  const exp = (v >> m) & ((1n << e) - 1n);
+  const sign = (v >> (m + e)) & 1n;
+  const sgn = sign ? "-" : "+";
+  if (exp === (1n << e) - 1n) {
+    if (man === 0n) return sgn + "inf";
+    return (man >> (m - 1n)) & 1n ? "qNaN" : "sNaN";
+  }
+  if (exp === 0n) return man === 0n ? sgn + "zero" : sgn + "subnormal";
+  return sgn + "normal";
+}
+
+function flagsText(fl) {
+  const names = FLAG_NAMES.filter(([bit]) => fl & bit).map(([, nm]) => nm);
+  return names.length ? names.join(" ") : "(none)";
+}
+
+function computeOnce() {
+  const out = $("compute-out");
+  out.hidden = false;
+  const o = PANEL_OPS[$("op-sel").selectedIndex];
+  const fmt = Number($("fmt-sel").value);
+  const rnd = Number($("rnd-sel").value);
+  const fmtName = C.fmtName(fmt);
+  const esz = C.fmtSize(fmt);
+  let pa = 0, pb = 0, pc = 0, pd = 0, pfl = 0;
+  try {
+    const bufs = {};
+    for (const x of ["a", "b", "c"])
+      if (o.use.includes(x))
+        bufs[x] = parseHexOperand(x, $("in-" + x).value, esz);
+    pd = M._malloc(esz);
+    pfl = M._malloc(4);
+    M.HEAPU32[pfl >> 2] = 0;
+    const put = (arr) => {
+      const p = M._malloc(esz);
+      M.HEAPU8.set(arr, p);
+      return p;
+    };
+    if (bufs.a) pa = put(bufs.a);
+    if (bufs.b) pb = put(bufs.b);
+    if (bufs.c) pc = put(bufs.c);
+
+    let st;
+    if (o.v === "div")
+      st = C.div(dev, fmt, rnd, pa, pb, pd, 1, pfl, 0);
+    else if (o.v === "sqrt")
+      st = C.sqrt(dev, fmt, rnd, pa, pd, 1, pfl, 0);
+    else
+      st = C.run(dev, o.v, fmt, rnd, pa, pb, pc, pd, 1, pfl, 0);
+
+    if (st !== 0) {
+      out.textContent = "cft call FAILED: " + C.strerror(st) + "\n" +
+        "(on any error the contents of d are unspecified - not shown)";
+      return;
+    }
+    const dbytes = M.HEAPU8.slice(pd, pd + esz);
+    const dhex = hexOfBytes(dbytes);
+    const fl = M.HEAPU32[pfl >> 2];
+    const lines = [];
+    for (const x of ["a", "b", "c"])
+      if (bufs[x])
+        lines.push(x.padEnd(6) + hexOfBytes(bufs[x]) +
+                   "  (" + classify(hexOfBytes(bufs[x]), fmtName) + ")");
+    lines.push("op    " + (typeof o.v === "number" ? C.opName(o.v) : o.v) +
+               "  " + fmtName + "  " + ROUNDINGS[rnd]);
+    lines.push("d  =  " + dhex + "  (" + classify(dhex, fmtName) + ")");
+    lines.push("flags " + flagsText(fl));
+    out.textContent = lines.join("\n");
+  } catch (err) {
+    out.textContent = "refused: " + err;
+  } finally {
+    for (const p of [pa, pb, pc, pd, pfl])
+      if (p) M._free(p);
+  }
+}
+</script>
+</body>
+</html>
