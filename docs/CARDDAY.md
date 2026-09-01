@@ -39,6 +39,15 @@ the element count is an operand rather than a loop bound.
 
 ## Before the day
 
+- [ ] **DECISION 2026-09-01: the card-day clock is 135 MHz, both
+      geometries.** The measured ceilings are ~148 single / ~139 quad
+      (docs/VALIDATION.md, the bracket entry), so 135 carries real
+      margin on both instead of the quad's nine-picosecond squeak at
+      130. A 135 pair is building from the same b1a014c tree; when it
+      closes and verifies it REPLACES the 130 pair below as primary,
+      and the 130 pair joins the fallback chain. High-speed testing
+      (145+) is deliberately deferred past first light.
+
 - [x] **Both images built, staged and verified** (updated 2026-09-01).
       The card-day set is now the GENERAL-PURPOSE pair at b1a014c in
       `~/cardday-ms` - the first images carrying the divide/sqrt seed
