@@ -8,6 +8,10 @@
 #   make                 static + shared library and the tools
 #   make test            build, then run the contract tests and replay
 #                        the published vectors through the library
+#   make examples-lang   the C/Python identity check again, for the
+#                        optional toolchains: julia and rustc are each
+#                        run and diffed if present, SKIPped by name if
+#                        not
 #   make CC=clang        or any other C99 compiler
 #
 # On Windows, match the compiler's word size to the PYTHON you will run
@@ -22,8 +26,9 @@
 #
 #   PATH="/c/msys64/mingw64/bin:$PATH" make CC=gcc test
 #
-# The shared library is what the ctypes, Julia and Fortran callers
-# load; the static one is for embedding.
+# The shared library is what the ctypes and Julia callers load; the
+# static one is for embedding, and is what the C, Fortran and Rust
+# examples link.
 
 CC      ?= cc
 CXX     ?= g++
@@ -83,7 +88,8 @@ TOOLS := cft-selftest$(EXE) cft-bench$(EXE)
 TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
-.PHONY: all test difftest seqtest reducetest coverage fortran clean
+.PHONY: all test difftest seqtest reducetest coverage fortran \
+        examples-lang clean
 
 all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
 
@@ -139,7 +145,9 @@ device-test$(EXE): tests/device_test.c libcft.a
 #   cft-selftest    replay of the published vector sets
 #   the C/Python    the cross-language claim. Two languages, one
 #   comparison      library, and the output has to be identical or the
-#                   ABI is not doing its job
+#                   ABI is not doing its job (examples-lang re-runs
+#                   this one for julia and rustc, whichever this
+#                   machine carries)
 #   diff_check.py   this library against the golden model right now,
 #                   over the far/near alignment boundary that neither
 #                   of the first two reaches. Needs Python and takes a
@@ -164,6 +172,42 @@ endif
 fortran: libcft.a
 	$(FC) examples/vector_fma.f90 libcft.a -o vector-fma-f$(EXE)
 	./vector-fma-f$(EXE)
+
+# The C/Python identity check from `test`, re-run for the language
+# toolchains this Makefile does not get to assume. Julia and Rust are
+# optional here: a machine that lacks one says SKIP with the language's
+# name and checks what it has, because a log that quietly checked
+# nothing must not read as a pass - the rule cft_conformance applies
+# to its own summary, applied to make. A toolchain that IS present and
+# prints different bits fails the build outright; that is a broken
+# ABI story, not a warning.
+#
+# --strip-trailing-cr: on Windows the C example's stdout passes
+# through msvcrt text mode and picks up \r\n, while Rust and Julia
+# write \n on every platform. The CR is the C runtime's contribution,
+# not the library's, and the characters of the checksum lines are
+# what is under test - so the diff strips it rather than teaching two
+# more languages to imitate msvcrt. (On Linux both sides are already
+# \n and the flag changes nothing.)
+examples-lang: all
+	./vector-fma$(EXE) > .out-c.txt
+	@if command -v julia >/dev/null 2>&1; then \
+		julia examples/vector_fma.jl > .out-jl.txt && \
+		diff --strip-trailing-cr .out-c.txt .out-jl.txt && \
+		echo "julia: same library, same bits"; \
+	else \
+		echo "SKIP julia: no julia on PATH"; \
+	fi
+	@if command -v rustc >/dev/null 2>&1; then \
+		rustc --edition 2021 -L native=. examples/vector_fma.rs \
+			-o vector-fma-rs$(EXE) && \
+		./vector-fma-rs$(EXE) > .out-rs.txt && \
+		diff --strip-trailing-cr .out-c.txt .out-rs.txt && \
+		echo "rust: same library, same bits"; \
+	else \
+		echo "SKIP rust: no rustc on PATH"; \
+	fi
+	@rm -f .out-c.txt .out-jl.txt .out-rs.txt
 
 difftest: all
 	$(PYTHON) tests/diff_check.py --trials 3000
@@ -234,4 +278,5 @@ clean:
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
-	      .out-c.txt .out-py.txt
+	      vector-fma-rs vector-fma-rs.exe vector-fma-rs.pdb \
+	      .out-c.txt .out-py.txt .out-jl.txt .out-rs.txt

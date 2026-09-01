@@ -96,7 +96,7 @@ hw/                  kernel.xml, package_kernel.tcl, link.cfg
 host/include/cft.h   the C ABI: the contract between this and its users
 host/src/            libcft - software backend, XRT backend, conformance
 host/tests/          contract tests, device-vs-software, differential
-host/examples/       the same program in C, Python (ctypes) and Fortran
+host/examples/       the same program in C, Python (ctypes), Fortran, Julia and Rust
 vectors/             conformance-set emitter (JSONL)
 docker/              the simulation container CI and dev boxes share
 docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,

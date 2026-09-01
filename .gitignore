@@ -48,6 +48,8 @@ host/cft-selftest
 host/api-test
 host/vector-fma
 host/vector-fma-f
+host/vector-fma-rs
+host/*.pdb
 host/.out-*.txt
 
 # downloaded reference material, kept locally and never redistributed.
