@@ -267,6 +267,32 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP128, OP_RSQRT_SEED, 8, seed=219)
     await run_op(dut, axil, ram, FP256, OP_RECIP_SEED, 4, seed=220)
 
+    # A MODE precision code outside 0-3 is refused on EVERY build, the
+    # full tile included: STATUS[3], done still asserted, memory
+    # untouched, and the next accepted run clears the sticky (run_op's
+    # own STATUS==0 assert proves that part). The trimmed-build
+    # refusals - real precisions this build lacks - live in
+    # test_krnl_quarter, which is the only bench that HAS a trimmed
+    # build to point at.
+    ram.write(D_BASE, b"\xAA" * 64)
+    await axil.write_dword(MODE, 0 | (9 << 8))
+    await write64(axil, NREG, 4)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await axil.write_dword(CTRL, 1)
+    refused_done = False
+    for _ in range(200):
+        await ClockCycles(dut.ap_clk, 5)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            refused_done = True
+            break
+    assert refused_done, "a refused run must still complete"
+    assert (await axil.read_dword(STATUS)) == 0x8, "want the refusal bit"
+    assert ram.read(D_BASE, 64) == b"\xAA" * 64, "a refused run wrote"
+    await run_op(dut, axil, ram, FP32, OP_ADD, 8, seed=221)
+
     # ---- across a 4KB page -------------------------------------------
     #
     # AXI4 forbids a burst from crossing a 4KB boundary, so both reader

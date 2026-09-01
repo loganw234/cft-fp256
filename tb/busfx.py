@@ -90,12 +90,23 @@ def stall(*rams, seed=0, duty=0.35):
 
 
 def unstall(*rams):
-    """Back to the cooperative slave, for a clean reference run."""
+    """Back to the cooperative slave, for a clean reference run.
+
+    set_pause_generator(None) alone is NOT that: it kills the pause
+    coroutine and leaves `pause` FROZEN at whatever the generator last
+    yielded, so at duty 0.35 roughly a third of the channels stay
+    wedged - VALID or READY withheld forever. Latent since the day
+    this file was written, because every bench that unstalled ended
+    right there; the first test to drive traffic AFTER an unstall
+    hung on its first read burst and spent an evening looking like a
+    refusal-logic bug. Hence the explicit release below.
+    """
     for ram in rams:
         for name in _CHANNELS:
             ch = getattr(ram, name, None)
             if ch is not None:
                 ch.set_pause_generator(None)
+                ch.pause = False
 
 
 # --------------------------------------------------------------------
