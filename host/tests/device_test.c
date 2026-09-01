@@ -541,6 +541,232 @@ static void check_sum_ignores_b(cft_device *hw, cft_format fmt, size_t n,
     free(b);
 }
 
+/* ---------------------------------------------------------------
+ * Sequencer programs, device vs software
+ *
+ * cft_program_run's floating steps execute on whichever backend the
+ * program was loaded against, so running the SAME image on both and
+ * comparing deposits, counts, flags and status is the on-device proof
+ * that MODE[15] reaches a working cft_seq - the same
+ * device-vs-software shape every other section here uses. Images are
+ * packed by hand below; the layout is seq.py's to_bytes(), which is
+ * also program.c's parser, so a byte out of place fails loudly at
+ * load rather than quietly at compare.
+ * --------------------------------------------------------------- */
+
+static uint64_t seq_alu(unsigned op, unsigned rd, unsigned ra,
+                        unsigned rb, unsigned rc, unsigned rnd,
+                        unsigned kb, unsigned kc)
+{
+    return (uint64_t)op | ((uint64_t)rd << 8) | ((uint64_t)ra << 12) |
+           ((uint64_t)rb << 16) | ((uint64_t)rc << 20) |
+           ((uint64_t)rnd << 24) | ((uint64_t)kb << 28) |
+           ((uint64_t)kc << 29);
+}
+
+static uint64_t seq_ctrl(unsigned code, unsigned ra, uint32_t imm)
+{
+    return (uint64_t)code | ((uint64_t)ra << 12) |
+           ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
+}
+
+static void put_le32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+}
+
+/* Pack header + constants + instructions; returns the byte length. */
+static size_t seq_image(uint8_t *out, cft_format fmt,
+                        const uint64_t *insns, unsigned n_insns,
+                        const uint8_t *consts, unsigned n_consts,
+                        uint32_t max_deposits)
+{
+    size_t esz = cft_format_size(fmt), off = 32;
+    unsigned i;
+    put_le32(out + 0, 0x50544643u);          /* "CFTP" */
+    put_le32(out + 4, 1);
+    put_le32(out + 8, n_insns);
+    put_le32(out + 12, n_consts);
+    put_le32(out + 16, max_deposits);
+    put_le32(out + 20, (uint32_t)fmt);
+    put_le32(out + 24, 0);
+    put_le32(out + 28, 0);
+    memcpy(out + off, consts, n_consts * esz);
+    off += n_consts * esz;
+    for (i = 0; i < n_insns; i++) {
+        uint64_t w = insns[i];
+        int b;
+        for (b = 0; b < 8; b++)
+            out[off + (size_t)b] = (uint8_t)(w >> (8 * b));
+        off += 8;
+    }
+    return off;
+}
+
+static void compare_seq_one(cft_device *sw, cft_device *hw,
+                            cft_format fmt, const uint8_t *image,
+                            size_t bytes, uint32_t maxdep, size_t n,
+                            uint32_t seed, const char *label)
+{
+    size_t esz = cft_format_size(fmt);
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *c = (uint8_t *)malloc(n * esz);
+    uint8_t *dep_sw = (uint8_t *)malloc(n * maxdep * esz + 1);
+    uint8_t *dep_hw = (uint8_t *)malloc(n * maxdep * esz + 1);
+    uint32_t *cnt_sw = (uint32_t *)malloc(n * 4);
+    uint32_t *cnt_hw = (uint32_t *)malloc(n * 4);
+    cft_program *ps = NULL, *ph = NULL;
+    uint32_t fl_sw = 0, fl_hw = 0, bus_sw = 0, bus_hw = 0;
+    cft_status st_sw, st_hw;
+
+    if (!a || !b || !c || !dep_sw || !dep_hw || !cnt_sw || !cnt_hw) {
+        printf("  FAIL %s: out of memory\n", label);
+        failures++;
+        goto out;
+    }
+    rs = seed;
+    fill(a, n, esz);
+    fill(b, n, esz);
+    fill(c, n, esz);
+    memset(dep_sw, 0x5a, n * maxdep * esz);
+    memset(dep_hw, 0x5a, n * maxdep * esz);
+
+    st_sw = cft_program_load(sw, image, bytes, &ps);
+    st_hw = cft_program_load(hw, image, bytes, &ph);
+    checks++;
+    if (st_sw != st_hw) {
+        printf("  FAIL %s: load disagrees (sw %s, hw %s)\n", label,
+               cft_strerror(st_sw), cft_strerror(st_hw));
+        failures++;
+        goto out;
+    }
+    if (st_sw != CFT_OK) {
+        printf("  %s: both refuse the image (%s) - agreed\n", label,
+               cft_strerror(st_sw));
+        goto out;
+    }
+
+    st_sw = cft_program_run(ps, a, b, c, dep_sw, cnt_sw, n,
+                            &fl_sw, &bus_sw);
+    st_hw = cft_program_run(ph, a, b, c, dep_hw, cnt_hw, n,
+                            &fl_hw, &bus_hw);
+    checks++;
+    if (st_sw != st_hw) {
+        printf("  FAIL %s: run status disagrees (sw %s, hw %s)\n", label,
+               cft_strerror(st_sw), cft_strerror(st_hw));
+        failures++;
+        goto out;
+    }
+    if (st_sw == CFT_OK) {
+        checks++;
+        if (maxdep != 0 && memcmp(dep_sw, dep_hw, n * maxdep * esz) != 0) {
+            size_t i;
+            for (i = 0; i < n * maxdep * esz; i++)
+                if (dep_sw[i] != dep_hw[i])
+                    break;
+            printf("  FAIL %s: deposits differ first at byte %lu "
+                   "(element %lu)\n", label, (unsigned long)i,
+                   (unsigned long)(i / esz));
+            failures++;
+        }
+        checks++;
+        if (memcmp(cnt_sw, cnt_hw, n * 4) != 0) {
+            printf("  FAIL %s: deposit counts differ\n", label);
+            failures++;
+        }
+        checks++;
+        if (fl_sw != fl_hw || bus_sw != bus_hw) {
+            printf("  FAIL %s: flags/status differ (sw %02x/%02x, "
+                   "hw %02x/%02x)\n", label, fl_sw, bus_sw, fl_hw,
+                   bus_hw);
+            failures++;
+        }
+    }
+out:
+    cft_program_free(ps);
+    cft_program_free(ph);
+    free(a); free(b); free(c);
+    free(dep_sw); free(dep_hw); free(cnt_sw); free(cnt_hw);
+}
+
+static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
+                        size_t n, uint32_t seed)
+{
+    uint8_t image[1024];
+    uint8_t konst[32];
+    size_t bytes;
+
+    /* the constant 1.5, packed per format: biased exponent of 1.0
+     * with the top fraction bit set */
+    memset(konst, 0, sizeof konst);
+    {
+        int man_w = fmt == CFT_FP32 ? 23 : fmt == CFT_FP64 ? 52
+                  : fmt == CFT_FP128 ? 112 : 236;
+        uint64_t bias = fmt == CFT_FP32 ? 127 : fmt == CFT_FP64 ? 1023
+                      : fmt == CFT_FP128 ? 16383 : 262143;
+        int bit;
+        konst[(man_w - 1) / 8] |= (uint8_t)(1u << ((man_w - 1) % 8));
+        for (bit = 0; bit < 20; bit++)
+            if (bias & (1ull << bit))
+                konst[(man_w + bit) / 8] |=
+                    (uint8_t)(1u << ((man_w + bit) % 8));
+    }
+
+    /* 1. fma then deposit: r4 = r0*r1 + r2; deposit r4 */
+    {
+        uint64_t insns[3];
+        insns[0] = seq_alu(0, 4, 0, 1, 2, 0, 0, 0);
+        insns[1] = seq_ctrl(3, 4, 0);
+        insns[2] = seq_ctrl(0, 0, 0);
+        bytes = seq_image(image, fmt, insns, 3, konst, 0, 1);
+        compare_seq_one(sw, hw, fmt, image, bytes, 1, n, seed,
+                        "seq fma+deposit");
+    }
+
+    /* 2. constants and per-instruction attributes: the interval
+     *    pattern - r5 = r0*K under rtz, r6 = r0*K under rup */
+    {
+        uint64_t insns[5];
+        insns[0] = seq_alu(3, 5, 0, 0, 0, 1, 1, 0);
+        insns[1] = seq_alu(3, 6, 0, 0, 0, 3, 1, 0);
+        insns[2] = seq_ctrl(3, 5, 0);
+        insns[3] = seq_ctrl(3, 6, 0);
+        insns[4] = seq_ctrl(0, 0, 0);
+        bytes = seq_image(image, fmt, insns, 5, konst, 1, 2);
+        compare_seq_one(sw, hw, fmt, image, bytes, 2, n, seed + 1,
+                        "seq interval");
+    }
+
+    /* 3. the escape shape: square, deposit, drop out on zero */
+    {
+        uint64_t insns[7];
+        insns[0] = seq_alu(3, 4, 0, 0, 0, 0, 0, 0);
+        insns[1] = seq_ctrl(1, 0, 6);
+        insns[2] = seq_alu(3, 4, 4, 4, 0, 0, 0, 0);
+        insns[3] = seq_ctrl(3, 4, 0);
+        insns[4] = seq_ctrl(4, 4, 0);
+        insns[5] = seq_ctrl(2, 0, 0);
+        insns[6] = seq_ctrl(0, 0, 0);
+        bytes = seq_image(image, fmt, insns, 7, konst, 0, 8);
+        compare_seq_one(sw, hw, fmt, image, bytes, 8, n, seed + 2,
+                        "seq escape loop");
+    }
+
+    /* 4. max_deposits == 0: legal; every deposit overflows into
+     *    STATUS and the counts come back all zero */
+    {
+        uint64_t insns[3];
+        insns[0] = seq_alu(1, 4, 0, 0, 2, 0, 0, 0);
+        insns[1] = seq_ctrl(3, 4, 0);
+        insns[2] = seq_ctrl(0, 0, 0);
+        bytes = seq_image(image, fmt, insns, 3, konst, 0, 0);
+        compare_seq_one(sw, hw, fmt, image, bytes, 0, n, seed + 3,
+                        "seq zero-budget");
+    }
+}
+
 int main(int argc, char **argv)
 {
     static const cft_op ops[] = {CFT_FMA, CFT_ADD, CFT_SUB, CFT_MUL,
@@ -557,6 +783,7 @@ int main(int argc, char **argv)
     int only_fmt = -1;      /* -1 = every format the device carries */
     int quick = 0;          /* one opcode, one attribute */
     int only_reduce = 0;    /* skip elementwise; reductions are slow enough */
+    int only_seq = 0;       /* sequencer programs only */
     int f, o, r, argi;
 
     /* Emulation is orders of magnitude slower than silicon, so the
@@ -566,6 +793,8 @@ int main(int argc, char **argv)
     for (argi = 1; argi < argc; argi++) {
         if (!strcmp(argv[argi], "-q")) {
             quick = 1;
+        } else if (!strcmp(argv[argi], "-s")) {
+            only_seq = 1;
         } else if (!strcmp(argv[argi], "-r")) {
             only_reduce = 1;
         } else if (!strcmp(argv[argi], "-n") && argi + 1 < argc) {
@@ -584,7 +813,7 @@ int main(int argc, char **argv)
             artifact = argv[argi];
         } else {
             fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
-                            "[-f fp32|fp64|fp128|fp256] [-q] [-r]\n",
+                            "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s]\n",
                     argv[0]);
             return 2;
         }
@@ -636,7 +865,7 @@ int main(int argc, char **argv)
 
     for (f = 0; f < 4; f++) {
         cft_format fmt = (cft_format)f;
-        int nops = only_reduce ? 0
+        int nops = (only_reduce || only_seq) ? 0
                  : quick      ? 1
                  : (int)(sizeof ops / sizeof ops[0]);
         int nrnd = quick ? 1 : (int)(sizeof rnds / sizeof rnds[0]);
@@ -670,6 +899,21 @@ int main(int argc, char **argv)
          * contract - the closest thing to "general purpose" a matrix
          * can assert. Gated on the seed group: a bitstream that
          * predates CAPS bit 6 cannot run the sequence and says so. */
+        /* Sequencer programs, device vs software. An image whose
+         * contract predates 0x600 answers CFT_ERR_UNSUPPORTED from
+         * the device-side load, which reports as a load
+         * disagreement - run -s only against 0x600+ images. */
+        if (only_seq || !only_reduce) {
+            size_t nseq = n > 200 ? 200 : n;
+            compare_seq(sw, hw, fmt, nseq,
+                        0x5e9c0000u + (uint32_t)f * 16u);
+            printf("  sequencer programs: %d checks so far, %d failed\n",
+                   checks, failures);
+            fflush(stdout);
+        }
+        if (only_seq)
+            continue;
+
         if (!only_reduce) {
             if (!cft_supports(hw, CFT_RECIP_SEED, fmt)) {
                 note_skip("div/sqrt");

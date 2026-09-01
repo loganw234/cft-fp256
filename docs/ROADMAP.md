@@ -489,6 +489,26 @@ this round built the driver.
       the lane block the design's central sizing constraint and puts
       the register file at L*16*element_bytes beside the deposit
       buffer.
+
+- [x] **Orbit sequencer: the RTL, benched (2026-09-01).** Pulled
+      forward from this section's own schedule on the open-core
+      argument - a DDR- or PCIe-fed tile cannot afford a memory pass
+      per step, so the sequencer is the architecture there, not a
+      refinement. rtl/cft_seq.sv + cft_seq_lanes.sv behind MODE[15]
+      (VERSION 0x600, CAPS bit 15, PROG/CNT pointers at 0x54/0x5C),
+      sharing the A and D masters under a select registered at start.
+      Held bit-exact to seq.py by tb/test_seq_core.py (9/9 suites:
+      all four formats, loops, convergence, deposition, ragged
+      blocks, 62 fuzz programs, the refusal matrix with zero write
+      traffic) and tb/test_krnl_seq.py through the CSR as XRT drives
+      it. The bench-first build paid for itself the same day: it
+      forced out an Icarus function-sensitivity livelock and its
+      stale-data twin, a parser that dropped accepted beats, a
+      one-cycle read-latency skew on every banked memory, a 6-bit
+      shift wrap that made SETACT judge the wrong lane, and a block
+      capacity clamped at fp32's geometry that overran the register
+      file at every wider format. Still ahead, in order: hw_emu
+      through the real XRT stack, a bitstream, first light.
 - **Orbit/walk engine** (the RTL): a micro-sequencer running iterated maps
   on-chip (the atlas positive's inner loop: fma chains, exact
   selections, integer/bit ops, the hash), with point deposition into

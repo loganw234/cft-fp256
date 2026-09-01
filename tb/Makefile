@@ -16,7 +16,7 @@ SIM ?= icarus
         seq_core seqprobe clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-     seedop reduceacc reduce krnl quarter faults
+     seedop reduceacc reduce krnl quarter faults seq_core krnlseq
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -145,9 +145,11 @@ krnl:
 # sequencer run, an elementwise run, another sequencer run - because
 # the mux is one claim and testing half of it proves nothing.
 #
-# Out of `make sim` for as long as seq_core is, and for its reason: an
-# aggregate target that goes red for a module still being written
-# trains people to ignore it. Both fold in on the same day.
+# Folded into `make sim` on 2026-09-01, the day the core went green -
+# the aggregate stayed clear of both targets while the module was
+# still being written, because an aggregate that is red for months
+# trains people to ignore it, and folded in the moment that stopped
+# being true.
 krnlseq:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \

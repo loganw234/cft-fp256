@@ -12,14 +12,17 @@ required arithmetic operations all exist and are proven; as of
 conversions, scaleB/logB, nextUp/nextDown, classification,
 totalOrder, the signaling comparisons, remainder - every one with
 zero new RTL, which is the composition methodology paying out. The
-word "general purpose" now hangs on programmability alone, and the
-boxes below say exactly where.
+word "general purpose" hung on programmability alone - and later the
+SAME day, the orbit sequencer's RTL landed and benched bit-exact
+against its model. The boxes below say exactly where everything
+stands, including the honest distance between "benched" and "yes".
 
 | mark | meaning |
 |---|---|
 | **yes** | in the RTL and verified bit-exact against the golden model, in simulation and through the real XRT stack |
 | **composed** | the hardware supplies the primitive; libcft composes the full operation as a fixed sequence of those calls, identical on every backend, with the integer bookkeeping done exactly on the host - the same division of labour the multi-tile reduction fold uses. Bit-identical to the contract |
 | **library** | in libcft and defined by the golden model, but the operation contains NO floating-point arithmetic at all - it is rounding-position bit surgery - so there is no backend pass to issue and nothing for a tile to accelerate. Bit-identical on every backend by construction |
+| **benched** | in the RTL and held bit-exact against the golden model by the cocotb benches - but not yet through the real XRT stack, which is the last mile a **yes** requires. What remains is plumbing validation (hw_emu, then silicon), not design |
 | **model** | defined in `python/cft_golden` and covered by conformance vectors, but no hardware - a host can use it, the tile cannot |
 | **no** | not implemented anywhere |
 | **out** | deliberately excluded; the reason is given |
@@ -196,7 +199,7 @@ The distance to running it on-chip:
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
 | division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright |
 | `floor`, `round`, `step` | **composed** (2026-09-01) - `cft_rint` under the directed attributes IS floor/ceil/trunc/round; `step` was always cmple+select |
-| a sequencer to run a chain on-chip | **not in hardware.** The ISA is specified (docs/SEQUENCER.md), the golden model executes it, and libcft runs programs today on the software backend - so a program can be written and checked now. The RTL is v2 |
+| a sequencer to run a chain on-chip | **benched** (2026-09-01) - `cft_seq` exists in RTL, its own lane array of the verified per-lane recipe behind it, and holds bit-exact to `seq.py` on deposits, counts, flags and status: 9/9 unit-bench suites across all four formats (single-op through nested-loop escape maps, ragged blocks, a 62-program fuzz corpus) plus the full-kernel bench through the CSR exactly as XRT will drive it. hw_emu and silicon are the remaining distance |
 
 Today a det_* function could be evaluated as a hybrid - the tile doing
 the fma passes, the host doing the integer and select work between
@@ -219,7 +222,7 @@ on-chip program is the ~25x traffic win).
 | multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. The quad image is built and verified |
 | reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | strided or gathered access | **no** | three dense linear streams |
-| on-chip program / loop | **no** | one operation per pass over memory; the sequencer is v2 |
+| on-chip program / loop | **benched** | `cft_seq` behind MODE[15] (VERSION 0x600, CAPS bit 15): programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level. Not yet through hw_emu |
 | in-place operation (D aliasing A/B/C) | **yes** | documented in cft.h: each element is read before written |
 
 ### Host access
@@ -233,15 +236,15 @@ in docs/COMPATIBILITY.md) gets the full story.
 
 ## What "general purpose" would take from here
 
-1. **Programmability.** The one remaining structural gap. Every
-   operation today is one pass over memory; a det_* function is ten to
-   thirty dependent steps, and the composed div/sqrt measure the cost
-   precisely (~25-30 passes per call). The v2 orbit sequencer is what
-   turns this from a vector ALU into a processor. The design is
-   settled and executable - docs/SEQUENCER.md, seq.py, and libcft's
-   software-backend program runner agree over a fuzz corpus - so a
-   program can be written and checked today; the tile just cannot run
-   one yet.
+1. **Programmability.** The structural gap, now closing fast: the
+   orbit sequencer's RTL landed 2026-09-01 - pulled forward from v2 on
+   the open-core argument that a DDR- or PCIe-fed tile cannot afford a
+   memory pass per step - and holds bit-exact to seq.py at unit and
+   full-kernel bench level (see the **benched** rows above). What made
+   the tile a vector ALU rather than a processor is now a plumbing
+   distance, not a design one: hw_emu through the real XRT stack, a
+   bitstream, silicon. Until those, a det_* function still runs as
+   ~25-30 host-issued passes; after them, one launch.
 
 2. ~~The cheap operations, which are cheap.~~ **Done** (2026-09-01):
    `roundToIntegral`, the conversions, classification, and the rest of
@@ -269,11 +272,13 @@ in docs/COMPATIBILITY.md) gets the full story.
   path), NaN payload propagation (**out**, deliberately), and clause
   9's recommended transcendentals (**out** by design - the det-library
   route computes them from FMA).
-- As a **general-purpose float processor**: the blocker is
-  programmability alone - the sequencer, not arithmetic. That
-  sentence was true yesterday about the operation set with six ops;
-  it is simply more visibly true now.
+- As a **general-purpose float processor**: the blocker was
+  programmability alone, and programmability now exists in RTL and is
+  benched against its model. What separates "benched" from "yes" is
+  the XRT stack and a slot in a card - validation distance, not
+  design distance.
 - For the **atlas det library**: every primitive it refines from
-  exists on the tile, including its seeds and now floor/round; what is
-  missing is the on-chip sequence to chain them without a memory round
-  trip per step.
+  exists on the tile, including its seeds and now floor/round; the
+  on-chip sequence to chain them exists in RTL and is benched. The
+  remaining work on this axis is the det_* -> program port itself and
+  the parity harness against the GLSL bits - software, startable now.

@@ -1377,30 +1377,29 @@ async def fuzz_programs(dut):
 # ======================================================================
 
 @cocotb.test()
-async def refuses_zero_max_deposits(dut):
-    """`max_deposits == 0` must refuse, and this case is deliberately
-    the LAST test in the file.
+async def zero_max_deposits_is_legal(dut):
+    """`max_deposits == 0` is ACCEPTED, and every deposit overflows.
 
-    It is the other half of the deposit-cap check in refusal_matrix,
-    separated because of how it fails rather than because of what it
-    tests. `max_deposits` sizes the drain: a module that accepts zero
-    has a drain loop whose bound underflows, and the failure mode is
-    not a wrong answer but a simulator that stops making progress.
-    Every timeout this bench has is a SIMULATION-TIME timeout, and a
-    simulation-time timeout cannot fire while the simulator is stuck
-    inside one timestep - so a module with that defect takes down
-    whatever runs after it, whatever that is.
-
-    Putting it last means it is nothing. The other tests have already
-    reported by the time it runs, and the only thing at risk is a
-    result nobody was waiting on. Wrap the target in an external
-    timeout (`timeout 900 make seq_core`) if a hang would block a
-    pipeline; that is the only guard that works from outside a
-    livelock, and it is a CI setting rather than a bench one.
+    This test asserted a refusal until the adversarial review of
+    2026-09-01 traced the claim to its sources and found it standing
+    alone: the model's validator accepts zero, SEQUENCER.md's
+    loader-refusal list never mentions it, cft_seq's contract header
+    calls it legal, and the RTL's drain has an explicit zero guard
+    rather than an underflowing loop bound. The dangerous "fix" would
+    have been teaching the RTL to refuse - diverging the tile from
+    libcft in one edit - so the test inverted instead: the run
+    completes, the deposit window is zero bytes wide and never
+    written, every deposit attempt lands in STATUS[4], and the counts
+    stream is n zeroes. All of that is what seq.run says, so the
+    standard whole-machine comparison scores it.
     """
     bench = Bench(dut)
     await bench.start()
-    body = [seq.alu(sf.OP_ADD, 4, 0, 1, 2), seq.deposit(4), seq.halt()]
-    await bench.refuse(
-        FP32, raw_image(FP32, body, [sf.one_bits(FP32)], max_deposits=0),
-        "max_deposits 0 shapes an output buffer of nothing")
+    prog = seq.Program(FP32, [seq.alu(sf.OP_ADD, 4, 0, 1, 2),
+                              seq.deposit(4), seq.halt()],
+                       [sf.one_bits(FP32)], max_deposits=0)
+    n = 12
+    await bench.program(FP32, prog,
+                        operands(FP32, n, 990), operands(FP32, n, 991),
+                        operands(FP32, n, 992), n,
+                        "fp32 max_deposits=0: accepted, all overflow")

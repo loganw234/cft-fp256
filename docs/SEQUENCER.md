@@ -1,13 +1,23 @@
 # The orbit sequencer
 
-STATUS: design, golden model, a working software implementation, and
-the kernel integration around an RTL core that is being written.
-`python/cft_golden/seq.py` is the definition of correct;
-`host/src/program.c` is libcft's executor and agrees with it over a
-shared fuzz corpus (`make libcft-seq`) on deposits, deposit counts,
-exception flags and status - and on which programs to refuse. The RTL
-follows, and will be verified against the same model, exactly as the
-FMA core was verified against `softfloat.py`.
+STATUS: design, golden model, software implementation, kernel
+integration - and, as of 2026-09-01, **the RTL core itself, benched
+bit-exact against the model**. `python/cft_golden/seq.py` is the
+definition of correct; `host/src/program.c` is libcft's executor and
+agrees with it over a shared fuzz corpus (`make libcft-seq`);
+`rtl/cft_seq.sv` (with its lane array `cft_seq_lanes.sv`) is the
+hardware, and `tb/test_seq_core.py` holds it to seq.py the way the
+FMA core is held to softfloat.py: 9/9 suites green - deposits,
+counts, flags and STATUS compared exactly, across all four formats,
+single-instruction programs through nested-loop escape maps, ragged
+block edges, a 62-program fuzz corpus, and the refusal matrix with
+zero write traffic on every refusal - plus `tb/test_krnl_seq.py`
+driving the whole kernel through the CSR exactly as XRT will.
+Remaining distance: hw_emu through the real XRT stack, a bitstream,
+silicon. The RTL was pulled forward from v2 deliberately: an open
+core fed by DDR or PCIe-to-host-RAM cannot afford a memory pass per
+step, so the sequencer stops being a throughput refinement there and
+becomes the architecture.
 
 What exists around it as of 2026-09-01: `cft_seq` is instantiated in
 `cft_krnl` as a peer of `cft_engine_stream`, sharing the A and D

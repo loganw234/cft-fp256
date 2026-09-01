@@ -607,3 +607,70 @@ because a ledger that edits its past is not a ledger.
 
 With it, the box is fully idle for the first time in two days: the
 135 pair staged, the soak complete, no builds in flight.
+
+## 2026-09-01 - the orbit sequencer exists in RTL and matches its model
+
+Pulled forward from v2 on Logan's open-core argument - a DDR- or
+PCIe-fed tile cannot afford a memory pass per step, so the sequencer
+is the architecture there, not a refinement. Built bench-first: the
+unit bench (tb/test_seq_core.py, by the Opus review agent) was
+written against the behavioural contract while the body was being
+implemented, and validated so that against the refuse-everything stub
+its refusal matrix PASSED and every compute case failed with a
+labelled comparison rather than a hang.
+
+That bench then earned its keep six times over before going green:
+
+    1. an Icarus livelock - always_comb evaluating a function
+       automatic freezes simulation time the moment its inputs
+       change; the semantically identical assign form is immune
+    2. its stale-data twin - a continuous assign's function call
+       re-evaluates only when ARGUMENTS change, so functions reading
+       db_rdata/dcnt through static scope shipped the whole drain
+       stream one element behind itself; every function read is now
+       an argument
+    3. a parser that held rready while peeling, so the memory handed
+       over beats the parser dropped - any image over one beat
+       starved forever
+    4. a one-cycle read-latency skew on every banked memory consumer
+    5. a 6-bit self-determined shift that wrapped at lane position 2,
+       making SETACT judge the wrong lane's magnitude - lanes
+       survived or died on their neighbours' values
+    6. a block capacity clamped at fp32's 128 lanes for every
+       precision, overrunning the 16-beat register file (beat 16
+       aliasing beat 0 through the 4-bit beat field) at every wider
+       format and skipping lane 64 outright
+
+plus the structural round the first draft already paid: the beat-0
+writeback that retires DURING the last issue cycles when NBEATS >
+LATENCY, single-site B-response accounting, and the banked register
+file itself (a byte-enable loop over a 256-bit word made yosys
+flatten 8 KiB of BRAM into 130k registers; word enables ARE lane
+enables here).
+
+The verdicts, all green on 2026-09-01:
+
+    tb/test_seq_core.py    9/9 suites - all four formats, single-op
+                           through nested escape maps, ragged blocks,
+                           deposition incl. overflow and the legal
+                           zero budget, 62 fuzz programs, the refusal
+                           matrix with zero write traffic per refusal
+    tb/test_krnl_seq.py    PASS - the whole kernel through the CSR as
+                           XRT drives it (by the integration agent,
+                           with kernel.xml's missing STATUS row fixed
+                           and the XRT device path compile-checked on
+                           cft2204)
+    make sim (15 targets)  45/45 - the sequencer integration changed
+                           nothing the existing suite measures
+    yosys lint             PASS, .ok verified
+
+One bench expectation was itself corrected: refuses_zero_max_deposits
+asserted a refusal that contradicted the model, the docs, and the
+RTL's own contract in four places; it is now zero_max_deposits_is_
+legal, scoring an ACCEPTED run whose every deposit lands in STATUS[4].
+The seq_core and krnlseq targets folded into make sim the same day,
+per the aggregate's own rule. device-test gained -s: sequencer
+programs device-vs-software, the driver for the hw_emu gate ahead.
+
+Still between "benched" and CAPABILITIES' "yes": hw_emu through the
+real XRT stack, a bitstream, silicon - in that order, next.
