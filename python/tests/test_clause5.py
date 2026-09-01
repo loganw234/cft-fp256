@@ -598,3 +598,76 @@ def test_remainder_specials():
         assert remainder(fmt, snan_bits(fmt), one) == \
             (qnan_bits(fmt), FLAG_INVALID)
         assert remainder(fmt, one, qnan_bits(fmt) | 7) == (qnan_bits(fmt), 0)
+
+
+# ---- the double-rounding trap family (from the adversarial review) ---
+
+def test_convert_fp256_to_fp32_midpoint_traps():
+    """fp32 midpoints nudged by +-2^-200, encoded exactly in fp256 and
+    narrowed directly. The nudge lives ~170 bits below anything fp64
+    can carry, so a two-step route through fp64 provably loses it -
+    the review measured the divergence on 1,200 of these - while the
+    direct single-rounding path must not. Scored against ref754, the
+    Fraction oracle that shares no code with the model; the test also
+    asserts the two-step route DOES diverge somewhere, because a trap
+    family that nothing falls into proves nothing about the trap."""
+    import random
+    sys.path.insert(0, str(
+        __import__("pathlib").Path(__file__).resolve().parent))
+    import ref754 as orc
+
+    o32, o256 = orc.Fmt(8, 23), orc.Fmt(19, 236)
+    rng = random.Random(0xD0B1)
+    two_step_divergences = 0
+    checked = 0
+    for _ in range(400):
+        f32bits = (rng.randrange(1, 0xFE) << 23) | rng.getrandbits(23)
+        kind, _s, v = orc.dec(o32, f32bits)
+        assert kind == "num"
+        ulp = Fraction(2) ** (orc.floor_log2(abs(v)) - 23)
+        eps = Fraction(2) ** (orc.floor_log2(abs(v)) - 200)
+        for nudge in (0, 1, -1):
+            mid = v + ulp / 2 + nudge * eps
+            sb = orc.enc_exact(o256, mid)
+            if sb is None:
+                continue
+            for rnd in RND_MODES:
+                got = convert(FP256, FP32, sb, rnd)
+                want = orc.ref_convert(o256, o32, sb, rnd)
+                assert got == want, (hex(f32bits), nudge, rnd, got, want)
+                mid64, _ = convert(FP256, FP64, sb, rnd)
+                two, _ = convert(FP64, FP32, mid64, rnd)
+                if two != got[0]:
+                    two_step_divergences += 1
+                checked += 1
+    assert checked > 4000
+    assert two_step_divergences > 0     # the family discriminates
+
+
+def test_total_order_nan_zoo_vs_ref754():
+    """Every pair from a NaN-heavy fp64 zoo, against ref754's
+    rule-by-rule 5.10 restatement - the model's key transform never
+    consulted on the expected side."""
+    sys.path.insert(0, str(
+        __import__("pathlib").Path(__file__).resolve().parent))
+    import ref754 as orc
+
+    o64 = orc.Fmt(11, 52)
+    fmt = FP64
+    zoo = [zero_bits(fmt, 0), zero_bits(fmt, 1),
+           one_bits(fmt), one_bits(fmt, 1),
+           inf_bits(fmt, 0), inf_bits(fmt, 1),
+           min_subnormal_bits(fmt, 0), min_subnormal_bits(fmt, 1),
+           max_normal_bits(fmt, 0), max_normal_bits(fmt, 1),
+           qnan_bits(fmt), qnan_bits(fmt) | fmt.sign_mask,
+           qnan_bits(fmt) | 1, qnan_bits(fmt) | 0x7ffffffffffff,
+           (qnan_bits(fmt) | 5) | fmt.sign_mask,
+           snan_bits(fmt, 1), snan_bits(fmt, 2),
+           snan_bits(fmt, (1 << 51) - 1),
+           snan_bits(fmt, 1) | fmt.sign_mask,
+           snan_bits(fmt, 7) | fmt.sign_mask]
+    t, f = one_bits(fmt), zero_bits(fmt)
+    for x in zoo:
+        for y in zoo:
+            want = t if orc.ref_total_order(o64, x, y) else f
+            assert total_order(fmt, x, y) == (want, 0), (hex(x), hex(y))

@@ -372,6 +372,47 @@ def check_unary(lib, dev, fmt, trials):
         note()
 
 
+def _fbits(fmt, num, den=1):
+    """Encoding of the exactly-representable num/den, den a power of 2."""
+    bits, fl = sf.round_pack(fmt, 0, num, -(den.bit_length() - 1),
+                             sf.RND_RNE)
+    assert fl == 0
+    return bits
+
+
+def _rem_families(fmt):
+    """The adversarial review's remainder torture set, kept as standing
+    coverage: explicit x = (2k+1)*y/2 tie families (both quotient
+    parities), the half-boundary neighbours of the ea<eb wide branch,
+    raw subnormal pairs for the normalisation shifts, forced small
+    exponent gaps with random significands, and a sign grid."""
+    p = fmt.prec
+    ints = [1, 2, 3, 4, 5, 6, 7, 9, 11, 15, 21, 2 ** 20 + 1, 2 ** 23 - 1]
+    vals = [(_fbits(fmt, x), _fbits(fmt, y)) for x in ints for y in ints]
+    for y in (2, 3, 5, 7):
+        for k in (0, 1, 2, 3, 8):
+            vals.append((_fbits(fmt, (2 * k + 1) * y, 2), _fbits(fmt, y)))
+    half, one = _fbits(fmt, 1, 2), _fbits(fmt, 1)
+    vals += [(half, one), (half + 1, one), (half - 1, one)]
+    for xm in (1, 3, 5, 0x55):
+        for ym in (1, 2, 3, 7):
+            vals.append((xm, ym))            # raw subnormal encodings
+    rng = random.Random(0xBEEF ^ fmt.width)
+    for gap in (0, 1, 2, 3):
+        for _ in range(40):
+            mb = (1 << (p - 1)) | rng.getrandbits(p - 1)
+            ma = (1 << (p - 1)) | rng.getrandbits(p - 1)
+            eb = rng.randint(fmt.emin + p, fmt.emax - p) - (p - 1)
+            vals.append((sf.round_pack(fmt, 0, ma, eb + gap,
+                                       sf.RND_RNE)[0],
+                         sf.round_pack(fmt, 0, mb, eb, sf.RND_RNE)[0]))
+    for xa, xb in list(vals[:40]):
+        for sa in (0, fmt.sign_mask):
+            for sb in (0, fmt.sign_mask):
+                vals.append((xa | sa, xb | sb))
+    return vals
+
+
 def check_torder_rem(lib, dev, fmt, trials):
     fi = PREC_CODE[fmt.name]
     pool = pool_for(fmt, trials)
@@ -401,6 +442,7 @@ def check_torder_rem(lib, dev, fmt, trials):
                 (max_normal_bits(fmt, 0), 3),
                 (max_normal_bits(fmt, 1), one_bits(fmt) | 1),
                 (min_subnormal_bits(fmt, 0), max_normal_bits(fmt, 0))]
+    directed += _rem_families(fmt)
     for xa, xb in pairs + directed:
         a, b = enc(fmt, [xa]), enc(fmt, [xb])
         d = ctypes.create_string_buffer(fmt.width // 8)

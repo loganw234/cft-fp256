@@ -67,6 +67,22 @@ device-test runs. They are machine- and schedule-bound, keep their
 own drivers, and earn their own entries in docs/VALIDATION.md. This
 runner is the recurring floor, not the ceiling.
 
+## Bootstrapping the MPFR oracle
+
+The `mpfr` stage needs libmpfr/libgmp. Package managers are the easy
+route (mingw64 carries them as gcc dependencies; Debian wants
+libmpfr-dev) - but a bench box often has neither packages nor sudo,
+which is exactly where the third oracle was needed on 2026-09-01. So:
+
+    bash verify/build-mpfr-oracle.sh
+
+builds m4 (only if missing), GMP 6.3.0 and MPFR 4.2.2 from pinned,
+SHA-256-verified GNU sources into `verify/_mpfr-prefix` (gitignored),
+running the upstream test suites on the way (`CHECK=0` skips them).
+Static libraries, no root, nothing outside the prefix. The `mpfr`
+stage prefers this prefix over system packages when it exists,
+because a version-pinned oracle is the same oracle on every host.
+
 ## The census
 
 The report ends with a block shaped for docs/VALIDATION.md. Paste it

@@ -298,10 +298,11 @@ need() {  # docker|host-cc|xclbinutil ...
         || STAGE_SKIP_REASON="no python";;
       xclbinutil) command -v xclbinutil >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="xclbinutil not present (XRT hosts only)";;
-      mpfr) [ -f /c/msys64/mingw64/include/mpfr.h ] || \
+      mpfr) [ -f "$ROOT/verify/_mpfr-prefix/include/mpfr.h" ] || \
+            [ -f /c/msys64/mingw64/include/mpfr.h ] || \
             [ -f /usr/include/mpfr.h ] || \
             [ -f /usr/include/x86_64-linux-gnu/mpfr.h ] \
-        || STAGE_SKIP_REASON="libmpfr headers not found";;
+        || STAGE_SKIP_REASON="libmpfr headers not found (verify/build-mpfr-oracle.sh builds them from pinned sources, no root needed)";;
       images-env) [ -n "${IMAGES:-}" ] \
         || STAGE_SKIP_REASON="no IMAGES=... exported (nothing staged to verify)";;
     esac
@@ -387,7 +388,16 @@ stage reduce "reduction ranges C-vs-model" -- \
   PY "$ROOT/host/tests/reduce_check.py" --trials 1500
 
 do_mpfr() {
-  HOSTMAKE "mpfr-check$EXE" || return 1
+  # A repo-local prefix (verify/build-mpfr-oracle.sh) outranks system
+  # packages: it is version-pinned, SHA-verified, and static, so the
+  # oracle is the same everywhere it runs.
+  local pfx="$ROOT/verify/_mpfr-prefix"
+  if [ -f "$pfx/include/mpfr.h" ]; then
+    HOSTMAKE "mpfr-check$EXE" CFLAGS="-O2 -I$pfx/include" \
+      LDLIBS="-L$pfx/lib" || return 1
+  else
+    HOSTMAKE "mpfr-check$EXE" || return 1
+  fi
   (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7)
 }
 

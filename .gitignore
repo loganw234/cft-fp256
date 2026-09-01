@@ -61,3 +61,5 @@ Data/
 host/examples/bin/
 host/examples/obj/
 host/vector-fma-go
+verify/_mpfr-prefix/
+verify/_mpfr-prefix-build/
