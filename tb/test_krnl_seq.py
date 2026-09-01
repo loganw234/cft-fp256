@@ -332,6 +332,30 @@ def prog_overflow(fmt):
     ], consts=[], max_deposits=1)
 
 
+def prog_zero_deposits(fmt):
+    """A budget of nothing, which is LEGAL and is not the same thing as
+    a refusal.
+
+    The model's validator accepts `0 <= max_deposits <= MAX_DEPOSITS`,
+    cft_seq refuses only `max_deposits > MAXD`, and SEQUENCER.md's list
+    of what the loader throws back does not mention zero. So the run
+    happens: every DEPOSIT finds `counts[i] >= 0` already true, drops
+    its value, and raises STATUS[4]. The deposit window is `n * 0`
+    elements wide, so the whole of it is guard - which makes this the
+    sharpest form of "the tile wrote nothing it was not asked to",
+    since there is no legitimate byte for a stray write to hide in.
+
+    Counts are still written, and are all zero. That is the distinction
+    the run has to make: a lane that deposited nothing is not a lane the
+    tile forgot, and a host reading n untouched poison words could not
+    tell those apart."""
+    return seq.Program(fmt, [
+        seq.alu(OP_ADD, rd=3, ra=0, rc=1),
+        seq.deposit(3),
+        seq.halt(),
+    ], consts=[], max_deposits=0)
+
+
 @cocotb.test()
 async def krnl_sequencer(dut):
     cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
@@ -455,6 +479,20 @@ async def krnl_sequencer(dut):
         "the overflow program must overflow in the model"
     await run_prog(dut, axil, ram, povf, va, vb, vc, "fp32 deposit overflow")
 
+    # The degenerate budget, which is legal. Every deposit overflows and
+    # the deposit window has no legitimate bytes at all, so this is the
+    # one run where ANY write to D is a bug. It is a compute case and
+    # not a refusal: STATUS must read exactly bit 4, and a tile that
+    # answers 0x8 here has refused a program the loader would have
+    # passed and the model would have run.
+    pzero = prog_zero_deposits(FP32)
+    vz = (gen_stream(FP32, n8, rng), gen_stream(FP32, n8, rng),
+          gen_stream(FP32, n8, rng))
+    rzero = seq.run(pzero, *vz)
+    assert rzero.status == ST_DEPOSIT_OVF and not rzero.deposits, \
+        "max_deposits=0 must run, overflow, and produce no deposit slots"
+    await run_prog(dut, axil, ram, pzero, *vz, "fp32 max_deposits=0")
+
     # ---- the elementwise engine, mid-file ----------------------------
     #
     # MODE[15] clear must still reach cft_engine_stream with the A and D
@@ -466,7 +504,21 @@ async def krnl_sequencer(dut):
     await run_op(dut, axil, ram, FP64, OP_ADD, 16, seed=902, bases=EW_BASES)
 
     # ---- the wide rungs ----------------------------------------------
-    n4 = 8
+    # Six, and not the eight that would fill the beats exactly. ACTALL
+    # widens the active mask, and the one thing it must NOT widen it to
+    # is the padding: a 256-bit beat carries four fp64 lanes, so n=6 is
+    # two beats with lanes 6 and 7 present in the hardware and absent
+    # from the caller's problem. Those two start inactive and must stay
+    # so, because `active := true` means the n lanes that exist and not
+    # the lanes the beat happens to be made of.
+    #
+    # The model is run on exactly the six, so it has no opinion about 6
+    # and 7 to compare against - which is the point. A tile that
+    # reactivated them would deposit past `n * max_deposits` and write
+    # a seventh and eighth count, and both land in the guard bands the
+    # run already checks. At n=8 that bug is invisible, which is why
+    # the count moved.
+    n4 = 6
     await run_prog(dut, axil, ram, prog_actall(FP64),
                    gen_stream(FP64, n4, rng), gen_stream(FP64, n4, rng),
                    gen_stream(FP64, n4, rng), "fp64 actall")
