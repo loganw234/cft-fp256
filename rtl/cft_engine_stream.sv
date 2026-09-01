@@ -1072,8 +1072,8 @@ module cft_engine_stream #(
   localparam int NW256 = 717;
 
   logic [NSEG_W-1:0] ns_din, ns_dout;
-  logic [3:0]        ns_csh [0:7];
-  logic [5:0]        ns_fsh [0:7];
+  logic [8*4-1:0]    ns_csh;               // lane l at l*4, the ladder's pitch
+  logic [8*6-1:0]    ns_fsh;               // lane l at l*6
 
   // Windows and distances out of each lane, waiting to be packed. Fixed
   // sizes rather than LANES-derived, matching the mulfrac arrays above:
@@ -1088,54 +1088,45 @@ module cft_engine_stream #(
 
   generate
     if (USE_FUSED_NORM) begin : g_normseg
-      logic ns_dir0 [0:7];
-      always_comb for (int i = 0; i < 8; i++) ns_dir0[i] = 1'b0;
-
       cft_normseg #(.PMAX(237), .SLOTS(8)) u_normseg (
           .clk(ap_clk), .mode(prec_r), .din(ns_din),
-          .csh(ns_csh), .fsh(ns_fsh), .dir(ns_dir0), .dout(ns_dout));
+          .csh(ns_csh), .fsh(ns_fsh), .dir('0), .dout(ns_dout));
 
       // Pack whichever bank is live, by the same argument that makes
       // the fused multiplier's mode safe: prec_r is snapshot at start
       // and cannot move while anything is in flight.
       always_comb begin
         ns_din = '0;
-        for (int i = 0; i < 8; i = i + 1) begin
-          ns_csh[i] = '0;
-          ns_fsh[i] = '0;
-        end
+        ns_csh = '0;
+        ns_fsh = '0;
         case (prec_r)
           PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
                         ns_din[i*NSEG_SLOTW +: NW32] = nv32[i];
-                        ns_csh[i] = nc32[i];
-                        ns_fsh[i] = nf32[i];
+                        ns_csh[i*4 +: 4] = nc32[i];
+                        ns_fsh[i*6 +: 6] = nf32[i];
                       end
           PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
                         ns_din[i*2*NSEG_SLOTW +: NW64] = nv64[i];
-                        ns_csh[i] = nc64[i];
-                        ns_fsh[i] = nf64[i];
+                        ns_csh[i*4 +: 4] = nc64[i];
+                        ns_fsh[i*6 +: 6] = nf64[i];
                       end
           PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
                         ns_din[i*4*NSEG_SLOTW +: NW128] = nv128[i];
-                        ns_csh[i] = nc128[i];
-                        ns_fsh[i] = nf128[i];
+                        ns_csh[i*4 +: 4] = nc128[i];
+                        ns_fsh[i*6 +: 6] = nf128[i];
                       end
           default:    begin
                         ns_din[0 +: NW256] = nv256;
-                        ns_csh[0] = nc256;
-                        ns_fsh[0] = nf256;
+                        ns_csh[0 +: 4] = nc256;
+                        ns_fsh[0 +: 6] = nf256;
                       end
         endcase
       end
     end else begin : g_no_normseg
       assign ns_din  = '0;
       assign ns_dout = '0;
-      always_comb begin
-        for (int i = 0; i < 8; i = i + 1) begin
-          ns_csh[i] = '0;
-          ns_fsh[i] = '0;
-        end
-      end
+      assign ns_csh  = '0;
+      assign ns_fsh  = '0;
     end
   endgenerate
 
@@ -1158,9 +1149,9 @@ module cft_engine_stream #(
   localparam int AW256 = 716;
 
   logic [NSEG_W-1:0] as_din, as_dout;
-  logic [3:0]        as_csh [0:7];
-  logic [5:0]        as_fsh [0:7];
-  logic              as_dir [0:7];
+  logic [8*4-1:0]    as_csh;               // lane l at l*4, as above
+  logic [8*6-1:0]    as_fsh;               // lane l at l*6
+  logic [7:0]        as_dir;               // lane l at bit l
 
   logic [AW32-1:0]  av32  [0:7];
   logic [AW64-1:0]  av64  [0:3];
@@ -1178,34 +1169,32 @@ module cft_engine_stream #(
 
       always_comb begin
         as_din = '0;
-        for (int i = 0; i < 8; i = i + 1) begin
-          as_csh[i] = '0;
-          as_fsh[i] = '0;
-          as_dir[i] = 1'b0;
-        end
+        as_csh = '0;
+        as_fsh = '0;
+        as_dir = '0;
         case (prec_r)
           PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
                         as_din[i*NSEG_SLOTW +: AW32] = av32[i];
-                        as_csh[i] = ac32[i];
-                        as_fsh[i] = af32[i];
+                        as_csh[i*4 +: 4] = ac32[i];
+                        as_fsh[i*6 +: 6] = af32[i];
                         as_dir[i] = ad32[i];
                       end
           PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
                         as_din[i*2*NSEG_SLOTW +: AW64] = av64[i];
-                        as_csh[i] = ac64[i];
-                        as_fsh[i] = af64[i];
+                        as_csh[i*4 +: 4] = ac64[i];
+                        as_fsh[i*6 +: 6] = af64[i];
                         as_dir[i] = ad64[i];
                       end
           PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
                         as_din[i*4*NSEG_SLOTW +: AW128] = av128[i];
-                        as_csh[i] = ac128[i];
-                        as_fsh[i] = af128[i];
+                        as_csh[i*4 +: 4] = ac128[i];
+                        as_fsh[i*6 +: 6] = af128[i];
                         as_dir[i] = ad128[i];
                       end
           default:    begin
                         as_din[0 +: AW256] = av256;
-                        as_csh[0] = ac256;
-                        as_fsh[0] = af256;
+                        as_csh[0 +: 4] = ac256;
+                        as_fsh[0 +: 6] = af256;
                         as_dir[0] = ad256;
                       end
         endcase
@@ -1213,13 +1202,9 @@ module cft_engine_stream #(
     end else begin : g_no_alignseg
       assign as_din  = '0;
       assign as_dout = '0;
-      always_comb begin
-        for (int i = 0; i < 8; i = i + 1) begin
-          as_csh[i] = '0;
-          as_fsh[i] = '0;
-          as_dir[i] = 1'b0;
-        end
-      end
+      assign as_csh  = '0;
+      assign as_fsh  = '0;
+      assign as_dir  = '0;
     end
   endgenerate
 

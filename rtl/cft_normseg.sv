@@ -124,13 +124,18 @@ module cft_normseg #(
     // from above it, and both fill zero at their own edge.
     parameter bit BIDIR = 1'b0
 ) (
-    input  logic             clk,
-    input  logic [1:0]       mode,          // 0 fp32, 1 fp64, 2 fp128, 3 fp256
-    input  logic [WT-1:0]    din,           // lanes packed at slot pitch
-    input  logic [3:0]       csh [0:SLOTS-1],   // coarse, in 64-bit granules
-    input  logic [5:0]       fsh [0:SLOTS-1],   // fine, 0..63
-    input  logic             dir [0:SLOTS-1],   // per lane: 0 left, 1 right (BIDIR only)
-    output logic [WT-1:0]    dout
+    input  logic               clk,
+    input  logic [1:0]         mode,        // 0 fp32, 1 fp64, 2 fp128, 3 fp256
+    input  logic [WT-1:0]      din,         // lanes packed at slot pitch
+    // Per-lane amounts, packed at a fixed pitch - lane l at l*4, l*6
+    // and bit l - rather than one unpacked array each. Unpacked-array
+    // PORTS are the one construct in this file Yosys 0.33 cannot
+    // parse, and packing them is what keeps the module inside the
+    // open-toolchain lint gate's read list.
+    input  logic [SLOTS*4-1:0] csh,         // coarse, in 64-bit granules
+    input  logic [SLOTS*6-1:0] fsh,         // fine, 0..63
+    input  logic [SLOTS-1:0]   dir,         // per lane: 0 left, 1 right (BIDIR only)
+    output logic [WT-1:0]      dout
 );
 
   localparam int NST  = 10;                 // 2^9 = 512 covers 717
@@ -194,7 +199,8 @@ module cft_normseg #(
   // not structural, and nothing requires the register to sit there.
   logic [NST-1:0] amt [0:SLOTS-1];
   always_comb begin
-    for (int l = 0; l < SLOTS; l++) amt[l] = {csh[l], fsh[l]};
+    for (int l = 0; l < SLOTS; l++)
+      amt[l] = {csh[l*4 +: 4], fsh[l*6 +: 6]};
   end
 
   // Only the levels that run in the SECOND stage need their amount bits

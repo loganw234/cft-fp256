@@ -39,9 +39,9 @@ module tb_normseg #(
     input  logic          clk,
     input  logic [1:0]    mode,
     input  logic [WT-1:0] din,
-    // Packed rather than unpacked arrays, so the bench can drive them
-    // as plain integers on every simulator rather than depending on
-    // how each one exposes an unpacked array port.
+    // Packed, so the bench can drive them as plain integers on every
+    // simulator - and at cft_normseg's own per-lane pitch, so they
+    // feed straight through with no adapter.
     input  logic [SLOTS*4-1:0] csh_v,
     input  logic [SLOTS*6-1:0] fsh_v,
 
@@ -62,44 +62,29 @@ module tb_normseg #(
   localparam int NW2 = 3 * 113 + 6;
   localparam int NW3 = 3 * 237 + 6;
 
-  logic [3:0] csh [0:SLOTS-1];
-  logic [5:0] fsh [0:SLOTS-1];
-  always_comb begin
-    for (int l = 0; l < SLOTS; l++) begin
-      csh[l] = csh_v[l*4 +: 4];
-      fsh[l] = fsh_v[l*6 +: 6];
-    end
-  end
-
   // Left-only here: this bench holds the normaliser contract. The
   // bidirectional mode gets its own coverage in test_normseg's
-  // direction tests via tb_normseg_bidir below.
-  logic dir0 [0:SLOTS-1];
-  always_comb for (int l = 0; l < SLOTS; l++) dir0[l] = 1'b0;
-
+  // direction tests via u_bid below.
   cft_normseg #(.PMAX(PMAX), .SLOTS(SLOTS), .SPLIT(SPLIT)) u_seg (
-      .clk(clk), .mode(mode), .din(din), .csh(csh), .fsh(fsh),
-      .dir(dir0), .dout(dout));
+      .clk(clk), .mode(mode), .din(din), .csh(csh_v), .fsh(fsh_v),
+      .dir('0), .dout(dout));
 
   // The same ladder with directions live. Driven with dir_v = 0 it must
   // match u_seg bit for bit (the BIDIR generate collapses to the same
   // function), and with directions set it holds the aligner contract:
   // per-lane left OR right, boundaries zero-filling in both
   // orientations, neighbours free to disagree.
-  logic dirb [0:SLOTS-1];
-  always_comb for (int l = 0; l < SLOTS; l++) dirb[l] = dir_v[l];
-
   cft_normseg #(.PMAX(PMAX), .SLOTS(SLOTS), .SPLIT(SPLIT),
                 .BIDIR(1'b1)) u_bid (
-      .clk(clk), .mode(mode), .din(din), .csh(csh), .fsh(fsh),
-      .dir(dirb), .dout(dout_b));
+      .clk(clk), .mode(mode), .din(din), .csh(csh_v), .fsh(fsh_v),
+      .dir(dir_v), .dout(dout_b));
 
   genvar gl;
   generate
     for (gl = 0; gl < 8; gl = gl + 1) begin : g_ref32
       cft_normref #(.NW(NW0)) u (
           .clk(clk), .din(din[gl*SLOTW +: NW0]),
-          .csh(csh[gl]), .fsh(fsh[gl]), .dir(dir_v[gl]),
+          .csh(csh_v[gl*4 +: 4]), .fsh(fsh_v[gl*6 +: 6]), .dir(dir_v[gl]),
           .dout(r0[gl*SLOTW +: NW0]));
       if (SLOTW > NW0) assign r0[gl*SLOTW + NW0 +: (SLOTW - NW0)] = '0;
     end
@@ -107,7 +92,7 @@ module tb_normseg #(
     for (gl = 0; gl < 4; gl = gl + 1) begin : g_ref64
       cft_normref #(.NW(NW1)) u (
           .clk(clk), .din(din[gl*2*SLOTW +: NW1]),
-          .csh(csh[gl]), .fsh(fsh[gl]), .dir(dir_v[gl]),
+          .csh(csh_v[gl*4 +: 4]), .fsh(fsh_v[gl*6 +: 6]), .dir(dir_v[gl]),
           .dout(r1[gl*2*SLOTW +: NW1]));
       if (2*SLOTW > NW1) assign r1[gl*2*SLOTW + NW1 +: (2*SLOTW - NW1)] = '0;
     end
@@ -115,7 +100,7 @@ module tb_normseg #(
     for (gl = 0; gl < 2; gl = gl + 1) begin : g_ref128
       cft_normref #(.NW(NW2)) u (
           .clk(clk), .din(din[gl*4*SLOTW +: NW2]),
-          .csh(csh[gl]), .fsh(fsh[gl]), .dir(dir_v[gl]),
+          .csh(csh_v[gl*4 +: 4]), .fsh(fsh_v[gl*6 +: 6]), .dir(dir_v[gl]),
           .dout(r2[gl*4*SLOTW +: NW2]));
       if (4*SLOTW > NW2) assign r2[gl*4*SLOTW + NW2 +: (4*SLOTW - NW2)] = '0;
     end
@@ -123,7 +108,7 @@ module tb_normseg #(
 
   cft_normref #(.NW(NW3)) u_ref256 (
       .clk(clk), .din(din[0 +: NW3]),
-      .csh(csh[0]), .fsh(fsh[0]), .dir(dir_v[0]),
+      .csh(csh_v[0 +: 4]), .fsh(fsh_v[0 +: 6]), .dir(dir_v[0]),
       .dout(r3[0 +: NW3]));
   generate
     if (WT > NW3) assign r3[NW3 +: (WT - NW3)] = '0;
