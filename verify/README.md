@@ -1,0 +1,65 @@
+# verify/ - the standardized verification run
+
+One command that exercises every gate this project has accumulated,
+with per-stage logs, resumability, honest skip reporting, and a
+census block for docs/VALIDATION.md at the end. `make verify` from
+the repo root, or `bash verify/run.sh` with the flags below.
+
+    bash verify/run.sh                # the standard set, in order
+    bash verify/run.sh --list         # stage names and descriptions
+    bash verify/run.sh --skip formal,soak-quick
+    bash verify/run.sh --only golden,sim
+    bash verify/run.sh --resume       # continue the most recent run
+    bash verify/run.sh --fresh        # force a new run id
+    bash verify/run.sh --require-all  # skips become failures
+
+## The stages
+
+| stage | what it proves | needs |
+|---|---|---|
+| golden | the model's own invariants and oracles | python |
+| vectors | the conformance sets regenerate from the model | python |
+| sim | RTL == model across all 15 cocotb targets | docker |
+| lint | every RTL file elaborates in Yosys, no latches | docker |
+| formal | the FIFO/seedop/simpleops theorems + negative control | docker |
+| libcft | C library contract + 392k-case conformance replay | cc, python |
+| selfcheck | device-test harness can detect, full sw matrix | cc |
+| divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
+| diff | the alignment-boundary sweep vs the model | cc, python |
+| seq | sequencer C-vs-model over fuzzed programs | cc, python |
+| reduce | canonical reduction ranges vs the model | cc, python |
+| soak-quick | native-oracle spot check + the sabotage control | cc |
+| images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
+
+Wall time for the standard set is dominated by `sim` (~40 min in the
+container); everything else together is ~20-30 min.
+
+## Resume semantics
+
+Each run gets an id (timestamp + commit) under `verify/state/`, and
+each stage leaves a `.ok`/`.fail` marker beside its log. Interrupt
+anywhere; `--resume` reruns only what lacks a `.ok`. Resuming across
+COMMITS is refused: a report stitched from two trees certifies
+nothing. `--fresh` starts over on purpose.
+
+## Skips are named, never silent
+
+A stage whose tools are missing on this host reports SKIP with the
+reason and the run can still PASS - a laptop without XRT is allowed
+to verify everything else. `--require-all` inverts that for machines
+that claim to be full verification hosts: there, a skip is a failure.
+This is the knob a future open-core compliance run should set.
+
+## What is deliberately not here
+
+The multi-hour campaigns: the full native-oracle soak
+(hw/run-soak.sh without QUICK), the RTL deep soak, hw_emu and on-card
+device-test runs. They are machine- and schedule-bound, keep their
+own drivers, and earn their own entries in docs/VALIDATION.md. This
+runner is the recurring floor, not the ceiling.
+
+## The census
+
+The report ends with a block shaped for docs/VALIDATION.md. Paste it
+(or summarize a failure honestly) - the ledger is append-only and the
+run id links back to the full per-stage logs under `verify/state/`.

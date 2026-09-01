@@ -86,18 +86,18 @@ fi
 
 # Negative control: a sabotaged run over a range whose results are
 # never NaN (so the flipped bit cannot hide in the NaN class) must
-# FAIL, or the harness's green means nothing.
+# FAIL, or the harness's green means nothing. Its log is NOT named
+# *.log on purpose: the summary below sweeps every job log, and the
+# control's 65,536 intentional mismatches poisoned the aggregate the
+# first time this ran - a negative control that fails the run it just
+# validated is the control eating the experiment.
 if CFT_SOAK_SABOTAGE=1 "$BIN" sqrt32 0x3F800000 0x3F810000 rne \
-     > "$OUT/control-sabotage.log" 2>&1; then
+     > "$OUT/control-sabotage.out" 2>&1; then
   echo "== NEGATIVE CONTROL FAILED TO FAIL - harness cannot detect"
   exit 1
 fi
 echo "== negative control: sabotaged run detected, harness can fail"
 
-fails=$(grep -l "mismatch" "$OUT"/*.log 2>/dev/null | while read -r f; do
-          grep -qE " [1-9][0-9]* (value|flag) mismatch" "$f" && echo "$f"
-        done | wc -l)
-bad=$(grep -cL "mismatches" "$OUT"/*.log 2>/dev/null | true)
 echo "== summary"
 cat "$OUT"/*.log | grep -E "cases," | \
   awk '{c+=$3; v+=$5; f+=$8} END {printf "   %d cases, %d value mismatches, %d flag mismatches\n", c, v, f}'

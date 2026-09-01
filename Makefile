@@ -26,6 +26,7 @@ help:
 	@echo "libcft-diff  libcft against the golden model, boundary-targeted"
 	@echo "libcft-seq   the sequencer: C against the model, over fuzzed programs"
 	@echo "libcft-docker  the same library tests on a second platform"
+	@echo "verify       the standardized verification run (verify/README.md)"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
 	@echo "sim-docker   run the cocotb RTL suite inside the container"
@@ -100,6 +101,13 @@ yosys-lint:
 	  rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv \
 	  rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_krnl.sv; \
 	  hierarchy -check -top cft_krnl; proc; opt -fast; stat -top cft_krnl"
+
+# The standardized verification run: every gate, one command,
+# resumable and logged, census block at the end. verify/README.md.
+verify:
+	bash verify/run.sh
+
+.PHONY: verify formal formal-image yosys-lint
 
 # The formal property gate (formal/README.md): unbounded FIFO proof,
 # complete seedop special-routing proof, and the simpleops-vs-frozen-

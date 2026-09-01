@@ -167,3 +167,50 @@ refuted (counterexample at step 3, the write-at-read-head capture)
 for the gate to report green. Each harness was also mutation-tested
 before first commit. Scope limits are in formal/README.md and are
 part of the claim.
+
+## 2026-08-31 - RTL deep soak on the build box (clean)
+
+The cocotb suite far past its CI depth, in the cft-sim container on
+amd-arc-box under nice -19 beside two Vivado routes: one full
+baseline pass of all 15 targets, then deep-random fpfma passes at two
+seeds (fp32/fp64 at 120k vectors each, fp128 at 60k, fp256 at 40k,
+Verilator) plus 60k-vector simpleops passes - roughly 800,000
+deep-random vectors against the golden model over the same RTL the
+milestone images were built from. Every results file FAIL=0.
+
+## 2026-08-31 - Verilator width-warning audit (merged b127a7a)
+
+The blanket WIDTHEXPAND/WIDTHTRUNC suppression came off tb/cocotb.mk:
+225 warnings across 25 source lines triaged to ZERO - twelve lines
+made explicitly-widthed where provably bit-identical, thirteen kept
+under tightly-scoped waivers each carrying its safety argument. Width
+warnings are now FATAL under Verilator, so the compile is a standing
+gate. Proven behind it: equivalence benches with warnings fatal, the
+full suite 40/40, yosys clean, and the simpleops formal theorem
+re-proven after that file's edits. Three findings deliberately NOT
+fixed (no bit-level-NOP fix exists) and recorded for design action:
+the stream FIFOs hardcode WIDTH(256) so a quarter tile carries 4x the
+BRAM it needs; AR_DEPTH >= 256 would silently wrap AR_MAX and hang a
+run (wants a generate $error); and prec_caps is readback-only - the
+engine never refuses a cfg_prec outside its caps, which matters the
+moment trimmed open-core builds exist. Also recorded: 95 pre-existing
+SELRANGE warnings (a different lint class, never covered by the old
+blanket) and a Verilator 5.020 internal error keep mulfrac/mulshare/
+quarter Icarus-only, as they already were.
+
+## 2026-08-31 - standardized verification runner commissioned (verify/)
+
+verify/run.sh: every accumulated gate in one resumable, skippable,
+logged invocation - 13 stages from the golden model through the
+native-oracle spot check, per-stage .ok/.fail markers, resume that
+refuses to cross commits, a per-run lock (added after a killed
+wrapper's orphaned stage ran beside its own resume and interleaved
+two runs' state), skips named with reasons and --require-all to turn
+them into failures, and a census block for this file at the end.
+Commissioning run at e0db303 on the dev box: 11 stages ran, sim's 15
+targets and the formal proofs included; the single failure was the
+soak stage's own aggregator counting the negative control's 65,536
+intentional mismatches into the totals - the control eating the
+experiment - fixed by keeping the control's output outside the
+sweep's glob. The runner's clean first full run is recorded below
+when it lands post-merge.

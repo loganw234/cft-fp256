@@ -1,0 +1,3 @@
+# Run state and logs are per-machine evidence, not source. The census
+# (docs/VALIDATION.md) is where results that matter get recorded.
+state/
