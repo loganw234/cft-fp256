@@ -527,3 +527,28 @@ tests, sequence parity, 142,920 C-vs-model checks, ~3M adversarial
 review checks, 24.9M MPFR cases at all four formats - and the
 CPU-hardware soak's 285M-case quick campaign green with its 38.7B
 exhaustive fp32 campaign running.
+
+## 2026-09-01 - the review's instruments become standing gates
+
+Retained from the adversarial round, per Logan's call, so the
+one-shot attack becomes recurring coverage: ref754.py (the
+independent Fraction oracle, deliberately outside cft_golden),
+test_tiny_formats.py (exhaustive 8-bit-format sweeps of every
+clause-5 operation, every attribute, every PAIR through
+remainder/totalOrder/the signaling compares - 29 seconds in pytest,
+and its port immediately re-caught the e5m2 logb ladder-scope assert
+the review had found, which is the sign it has teeth), the
+fp256->fp32 midpoint-trap family with its the-traps-must-catch-
+something assertion, the totalOrder NaN zoo, and the remainder
+torture set in clause5_check.py (now 145,032 comparisons, green).
+
+The MPFR campaign's from-source recipe is now
+verify/build-mpfr-oracle.sh: m4/GMP 6.3.0/MPFR 4.2.2 from pinned
+SHA-256-verified GNU sources into a repo-local static prefix,
+upstream suites run on the way, no root. Validated end-to-end on
+amd-arc-box from a clean directory: fetch, hash-check, build, both
+upstream test suites green, then mpfr-check built against the fresh
+prefix and run - 100,736 cases, 0 value / 0 flag mismatches. The
+verify runner's mpfr stage prefers the prefix over system packages,
+and the same stage ran green locally through mingw64's system MPFR
+(238,328 cases) in this machine's census, so both routes are proven.
