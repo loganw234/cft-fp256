@@ -401,16 +401,55 @@ module cft_krnl #(
   logic eng_sees_bus;
   assign eng_sees_bus = ~mode_seq_q;
 
+  // ---- the ONE ALU array ---------------------------------------------
+  //
+  // cft_engine_stream and cft_seq each present a per-issue request -
+  // valid, opcode, attribute, precision, three operands - and the
+  // owner of the run (MODE[15], registered at start as mode_seq_q) is
+  // the one whose request reaches the array. No arbitration: the two
+  // never run at once, the idle one holds valid low, and the select
+  // is a register, so this costs one mux level between registered
+  // operands and the array's steering. The results fan out to both;
+  // each consumes only during its own run. cft_lanes' header says why
+  // this is not optional: two copies of the array put the quad tile
+  // at 1.32M LUTs on an 871k part.
+  logic                      eng_lv, seq_lv;
+  logic [7:0]                eng_lop, seq_lop;
+  logic [2:0]                eng_lrnd, seq_lrnd;
+  logic [1:0]                eng_lprec, seq_lprec;
+  logic [BEAT_BITS-1:0]      eng_la, eng_lb, eng_lc;
+  logic [BEAT_BITS-1:0]      seq_la, seq_lb, seq_lc;
+  logic                      arr_ov;
+  logic [BEAT_BITS-1:0]      arr_d;
+  logic [BEAT_BITS/32*5-1:0] arr_lf;
+
+  cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(15),
+              .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+              .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
+              .FUSE_ALIGN(FUSE_ALIGN)) u_lanes (
+      .clk(ap_clk), .rst_n(ap_rst_n),
+      .in_valid (mode_seq_q ? seq_lv    : eng_lv),
+      .op       (mode_seq_q ? seq_lop   : eng_lop),
+      .rnd      (mode_seq_q ? seq_lrnd  : eng_lrnd),
+      .prec     (mode_seq_q ? seq_lprec : eng_lprec),
+      .a        (mode_seq_q ? seq_la    : eng_la),
+      .b        (mode_seq_q ? seq_lb    : eng_lb),
+      .c        (mode_seq_q ? seq_lc    : eng_lc),
+      .out_valid(arr_ov), .d(arr_d), .lane_flags(arr_lf));
+
   cft_engine_stream #(.LATENCY(15), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
                       .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS),
                       .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
-                      .FUSE_ALIGN(FUSE_ALIGN)) u_engine (
+                      .FUSE_ALIGN(FUSE_ALIGN), .OWN_LANES(1'b0)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start && prec_ok && !cfg_seq), .busy(eng_busy), .done(eng_done),
       .flags_acc(eng_flags),
       .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
+      .lane_valid(eng_lv), .lane_op(eng_lop), .lane_rnd(eng_lrnd),
+      .lane_prec(eng_lprec), .lane_a(eng_la), .lane_b(eng_lb), .lane_c(eng_lc),
+      .lane_d(arr_d), .lane_flags(arr_lf),
       .m_axi_a_arid(m_axi_a_arid), .m_axi_a_araddr(eng_a_araddr), .m_axi_a_arlen(eng_a_arlen),
       .m_axi_a_arsize(m_axi_a_arsize), .m_axi_a_arburst(m_axi_a_arburst), .m_axi_a_arlock(m_axi_a_arlock),
       .m_axi_a_arcache(m_axi_a_arcache), .m_axi_a_arprot(m_axi_a_arprot), .m_axi_a_arqos(m_axi_a_arqos),
@@ -446,7 +485,7 @@ module cft_krnl #(
   cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(15), .NBEATS(16), .MAXD(64),
             .IMEM_D(1024), .KMEM_D(256), .ADDR_W(64),
             .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
-            .EN_FP256(EN_FP256)) u_seq (
+            .EN_FP256(EN_FP256), .OWN_LANES(1'b0)) u_seq (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start && prec_ok && cfg_seq),
       // prec_ok has already proved cfg_prec[3:2] is zero, so the top
@@ -455,6 +494,9 @@ module cft_krnl #(
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
       .cfg_prog(cfg_prog), .cfg_cnt(cfg_cnt),
       .busy(seq_busy), .done(seq_done), .refuse(seq_refuse),
+      .lane_valid(seq_lv), .lane_op(seq_lop), .lane_rnd(seq_lrnd),
+      .lane_prec(seq_lprec), .lane_a(seq_la), .lane_b(seq_lb), .lane_c(seq_lc),
+      .lane_ov(arr_ov), .lane_d(arr_d), .lane_flags(arr_lf),
       .flags(seq_flags), .err(seq_err),
       // ARLEN and AWLEN are AXI-encoded here, beats minus one, the way
       // they leave cft_engine_stream and the way they arrive at the

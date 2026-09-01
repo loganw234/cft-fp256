@@ -5,9 +5,11 @@
 // python/cft_golden/seq.py is the definition of correct; this module
 // is verified against that model exactly as the FMA core was against
 // softfloat.py. It is a peer of cft_engine_stream behind the same CSR
-// block - MODE[15] selects which engine owns a run - computing with
-// its own instance of the same verified lane recipe (cft_seq_lanes;
-// see that header for the v1 instance-sharing deviation).
+// block - MODE[15] selects which engine owns a run - computing on the
+// kernel's ONE cft_lanes array, handed in through the lane_* ports
+// (OWN_LANES=0); the unit bench elaborates a private instance instead
+// (OWN_LANES=1, the default). cft_lanes' header records the area
+// finding that ended the v1 second-copy deviation.
 //
 // ---------------------------------------------------------------
 // Behavioural contract (what the bench holds this module to)
@@ -115,7 +117,10 @@ module cft_seq #(
     parameter int ADDR_W     = 64,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
-    parameter bit EN_FP256   = 1'b1
+    parameter bit EN_FP256   = 1'b1,
+    // Own ALU array (1, the unit bench's configuration) or the
+    // kernel's shared one through the lane_* ports (0).
+    parameter bit OWN_LANES  = 1'b1
 )(
     input  logic              ap_clk,
     input  logic              ap_rst_n,
@@ -135,6 +140,21 @@ module cft_seq #(
     output logic              refuse,     // valid with done
     output logic [4:0]        flags,      // valid from done to next start
     output logic [3:0]        err,        // [2:0] bus faults, [3] dep ovf
+
+    // ---- the ALU array (cft_lanes) ---------------------------------
+    // The per-issue request the issue machine builds, and the array's
+    // answer. With OWN_LANES the instance below closes the loop; in
+    // cft_krnl these reach the array cft_engine_stream also drives.
+    output logic                 lane_valid,
+    output logic [7:0]           lane_op,
+    output logic [2:0]           lane_rnd,
+    output logic [1:0]           lane_prec,
+    output logic [BEAT_BITS-1:0] lane_a,
+    output logic [BEAT_BITS-1:0] lane_b,
+    output logic [BEAT_BITS-1:0] lane_c,
+    input  logic                 lane_ov,
+    input  logic [BEAT_BITS-1:0] lane_d,
+    input  logic [BEAT_BITS/32*5-1:0] lane_flags,
 
     // AXI4 read master (single outstanding burst)
     output logic [ADDR_W-1:0] m_rd_araddr,
@@ -318,14 +338,30 @@ module cft_seq #(
   logic [BEAT_BITS-1:0] al_d;
   logic [WORDS*5-1:0]   al_lf;
 
-  cft_seq_lanes #(
-      .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
-      .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256)
-  ) u_lanes (
-      .clk(ap_clk), .rst_n(ap_rst_n),
-      .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
-      .a(al_a), .b(al_b), .c(al_c),
-      .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
+  assign lane_valid = al_valid;
+  assign lane_op    = al_op;
+  assign lane_rnd   = al_rnd;
+  assign lane_prec  = prec_q;
+  assign lane_a     = al_a;
+  assign lane_b     = al_b;
+  assign lane_c     = al_c;
+
+  generate
+    if (OWN_LANES) begin : g_own_lanes
+      cft_lanes #(
+          .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
+          .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256)
+      ) u_lanes (
+          .clk(ap_clk), .rst_n(ap_rst_n),
+          .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
+          .a(al_a), .b(al_b), .c(al_c),
+          .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
+    end else begin : g_shared_lanes
+      assign al_ov = lane_ov;
+      assign al_d  = lane_d;
+      assign al_lf = lane_flags;
+    end
+  endgenerate
 
   // ---- block bookkeeping ----------------------------------------------
   // The lane-block CAPACITY is per-precision: NBEATS beats hold

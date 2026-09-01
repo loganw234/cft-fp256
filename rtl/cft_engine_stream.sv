@@ -75,7 +75,13 @@ module cft_engine_stream #(
     // shifters, the same trade as FUSE_NORM against a larger target -
     // the align path ablates at 22,302 LUT to the normaliser's 15,533.
     // Off until measured in-shell, like everything else here.
-    parameter bit FUSE_ALIGN = 1'b0
+    parameter bit FUSE_ALIGN = 1'b0,
+    // Instantiate the ALU array here (1) or drive one the kernel owns
+    // through the lane_* ports (0). A bench that elaborates this
+    // module on its own takes the default; cft_krnl passes 0 and hands
+    // the same cft_lanes to the sequencer - see cft_lanes' header for
+    // the area finding that made sharing mandatory.
+    parameter bit OWN_LANES  = 1'b1
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -94,6 +100,22 @@ module cft_engine_stream #(
     input  logic [63:0]  cfg_b,
     input  logic [63:0]  cfg_c,
     input  logic [63:0]  cfg_d,
+
+    // ---- the ALU array (cft_lanes) -------------------------------------
+    // Everything this module asks of the arithmetic, as one per-issue
+    // request: op/rnd travel with the beat, prec is the run's. With
+    // OWN_LANES these outputs feed the private instance and the two
+    // inputs are ignored; with OWN_LANES=0 the kernel wires them to
+    // the array it shares with cft_seq.
+    output logic                 lane_valid,
+    output logic [7:0]           lane_op,
+    output logic [2:0]           lane_rnd,
+    output logic [1:0]           lane_prec,
+    output logic [BEAT_BITS-1:0] lane_a,
+    output logic [BEAT_BITS-1:0] lane_b,
+    output logic [BEAT_BITS-1:0] lane_c,
+    input  logic [BEAT_BITS-1:0] lane_d,
+    input  logic [BEAT_BITS/32*5-1:0] lane_flags,
 
     // ---- AXI4 masters: one per stream ----------------------------------
     //
@@ -965,514 +987,95 @@ module cft_engine_stream #(
   logic [63:0] wr_total;
   assign wr_total = is_reduce ? 64'd1 : beats_total;
 
-  // ---- the fractured significand array -------------------------------
+  // ---- the ALU array ---------------------------------------------------
   //
-  // One cft_mulfrac replaces the per-lane multipliers in all four
-  // banks. Fifteen private multipliers become one array that costs
-  // about what the fp256 one alone did; see cft_mulfrac's header for
-  // why the slots line up and why its reduction tree needs no shifts.
+  // The banks and the fused ladders used to be woven in here - five
+  // hundred lines of per-lane instantiation that cft_seq_lanes then
+  // repeated without the ladders, which is how the sequencer-era kernel
+  // came to synthesise at 288,764 LUT against this engine's 98,310.
+  // They live in cft_lanes now, and this module presents ONE per-issue
+  // request:
   //
-  // OFF BY DEFAULT, AND THE REASON IS A MEASUREMENT.
+  //   * elementwise: op_r/rnd_r/prec_r with the three streamed
+  //     operands - exactly what the banks were handed before;
+  //   * reduction: the accumulator's adds as fma(x, 1.0, y) through the
+  //     SAME request - opcode FMA, b = 1.0 in every lane - because the
+  //     product is exact and the pipe is already there. Lane 0 carries
+  //     the add; the accumulator keeps every value zero-extended above
+  //     its element, so lanes 1.. compute fma(+0, 1.0, +0) = +0 with no
+  //     flags, and beat_f (the OR below) sees only the real add. That
+  //     replaces the old per-lane in_valid gating with something the
+  //     shared array does not have to know about.
   //
-  // Out-of-context synthesis of cft_krnl at 145 MHz, same commit, only
-  // this switch changed:
-  //
-  //             LUT       DSP    WNS
-  //   private   124,589   262    +0.959
-  //   fused     125,282   259    -0.181
-  //
-  // No LUT saving, no DSP saving, and timing stops closing - with the
-  // new critical path running prec_r into this array's own mode muxes.
-  //
-  // The estimate that justified the work assumed the multiplier was
-  // about 45% of a lane's LUTs. It is not: the multipliers are
-  // DSP-mapped, so removing them saves DSPs rather than LUTs. And the
-  // DSP saving did not appear either, because each private multiplier
-  // is sized for ITS OWN format - fp32's is 24x24, two DSPs - while
-  // every slot of this array is sized for fp256 at 237x27 and every
-  // mode uses full-width slots. Ten fp256-width slots cost about what
-  // four banks of right-sized multipliers cost. Fusing this way throws
-  // away exactly the efficiency separate banks already had.
-  //
-  // The array is correct - tb_mulshare proves bit-identity across every
-  // format, attribute and precision switch - so it stays, and stays
-  // tested. What it is not is cheaper. The version that would be cheaper
-  // is the granule grid docs/ARCHITECTURE.md originally sketched:
-  // fracture the WIDTH, tiling 237x237 into 24x24 granules with gated
-  // cross-terms, so fp32 mode lights eight granules rather than eight
-  // full-width slots. This module is the correctness scaffolding for
-  // that, not a replacement for it.
-  //
-  // Also requires the full-tile geometry when enabled. The array's shape
-  // IS the 256-bit beat's - eight fp32 lanes of 24 bits, four fp64 of
-  // 53, two fp128 of 113, one fp256 of 237 - and the quarter tile
-  // (BEAT_BITS=64, fp32+fp64) does not even build the fp256 rung it is
-  // sized for.
-  localparam bit USE_FUSED_MUL = FUSE_MUL && (BEAT_BITS == 256) &&
-                                 EN_FP64 && EN_FP128 && EN_FP256;
-
-  localparam int MF_PMAX = 237;
-  localparam int MF_MCH  = 27;
-  localparam int MF_ACCW = 2 * MF_PMAX + 2 * MF_MCH;
-
-  logic [MF_PMAX-1:0] mf_a, mf_b;
-  logic [MF_ACCW-1:0] mf_p;
-
-  // Significands out of each lane, waiting to be packed.
-  logic [23:0]  mfa32  [0:7],  mfb32  [0:7];
-  logic [52:0]  mfa64  [0:3],  mfb64  [0:3];
-  logic [112:0] mfa128 [0:1],  mfb128 [0:1];
-  logic [236:0] mfa256,        mfb256;
-
-  generate
-    if (USE_FUSED_MUL) begin : g_mulfrac
-      cft_mulfrac #(.PMAX(MF_PMAX), .MCH(MF_MCH), .SLOTS(16)) u_mulfrac (
-          .clk(ap_clk), .mode(prec_r), .in_valid(ex_valid),
-          .a(mf_a), .b(mf_b), .out_valid(), .p(mf_p));
-
-      // Pack whichever bank is live. prec_r is snapshot at start and
-      // never moves while anything is in flight - running does not drop
-      // until wfinish, by which point every result has been collected
-      // and written - so the array's mode always matches the operands
-      // it is being handed. That is the same argument that makes op_r
-      // and rnd_r safe to latch per run.
-      always_comb begin
-        mf_a = '0;
-        mf_b = '0;
-        case (prec_r)
-          PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
-                        mf_a[i*24 +: 24] = mfa32[i];
-                        mf_b[i*24 +: 24] = mfb32[i];
-                      end
-          PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
-                        mf_a[i*53 +: 53] = mfa64[i];
-                        mf_b[i*53 +: 53] = mfb64[i];
-                      end
-          PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
-                        mf_a[i*113 +: 113] = mfa128[i];
-                        mf_b[i*113 +: 113] = mfb128[i];
-                      end
-          default:    begin
-                        mf_a = mfa256;
-                        mf_b = mfb256;
-                      end
-        endcase
-      end
-    end else begin : g_no_mulfrac
-      assign mf_a = '0;
-      assign mf_b = '0;
-      assign mf_p = '0;
-    end
-  endgenerate
-
-  // ---- the shared normalise ladder -----------------------------------
-  //
-  // Same argument as the fused multiplier and the same gating, but the
-  // trade points the other way. cft_mulfrac collapses DSP, which sits
-  // at 4.4% and is not the constraint, and measured +693 LUT for it.
-  // The normalise shifters are LUTs, which ARE the constraint: measured
-  // by ablation, the two shift paths together are 37,788 LUT - 32% of
-  // the kernel - and one segmented ladder replaces fifteen private
-  // normalisers at 5,269 LUT against 10,405.
-  //
-  // Still default OFF until a before/after in-shell build says the
-  // saving survives the gather multiplexer this block adds, because
-  // that is exactly the step cft_mulfrac failed at.
-  //
-  // Requires the full-tile geometry for the same reason the fused
-  // multiplier does: the slot pitch IS the 256-bit beat's shape, and a
-  // quarter tile does not build the rungs it is sized for.
-  localparam bit USE_FUSED_NORM = FUSE_NORM && (BEAT_BITS == 256) &&
-                                  EN_FP64 && EN_FP128 && EN_FP256;
-
-  // Eight uniform slots of 90 bits: the smallest slot holding an fp32
-  // window (78) whose eight-fold tiling holds an fp256 one (717). Lane
-  // l of mode m sits at l*(NSEG_SLOTW<<m). See cft_normseg's header for
-  // why the pitch is uniform rather than the natural width.
-  localparam int NSEG_SLOTW = 90;
-  localparam int NSEG_W     = 8 * NSEG_SLOTW;
-  localparam int NW32  = 78;
-  localparam int NW64  = 165;
-  localparam int NW128 = 345;
-  localparam int NW256 = 717;
-
-  logic [NSEG_W-1:0] ns_din, ns_dout;
-  logic [8*4-1:0]    ns_csh;               // lane l at l*4, the ladder's pitch
-  logic [8*6-1:0]    ns_fsh;               // lane l at l*6
-
-  // Windows and distances out of each lane, waiting to be packed. Fixed
-  // sizes rather than LANES-derived, matching the mulfrac arrays above:
-  // only the first LANES* of each are driven, and the fused path is
-  // gated on the geometry where that is all of them.
-  logic [NW32-1:0]  nv32  [0:7];
-  logic [NW64-1:0]  nv64  [0:3];
-  logic [NW128-1:0] nv128 [0:1];
-  logic [NW256-1:0] nv256;
-  logic [3:0] nc32 [0:7], nc64 [0:3], nc128 [0:1], nc256;
-  logic [5:0] nf32 [0:7], nf64 [0:3], nf128 [0:1], nf256;
-
-  generate
-    if (USE_FUSED_NORM) begin : g_normseg
-      cft_normseg #(.PMAX(237), .SLOTS(8)) u_normseg (
-          .clk(ap_clk), .mode(prec_r), .din(ns_din),
-          .csh(ns_csh), .fsh(ns_fsh), .dir('0), .dout(ns_dout));
-
-      // Pack whichever bank is live, by the same argument that makes
-      // the fused multiplier's mode safe: prec_r is snapshot at start
-      // and cannot move while anything is in flight.
-      always_comb begin
-        ns_din = '0;
-        ns_csh = '0;
-        ns_fsh = '0;
-        case (prec_r)
-          PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
-                        ns_din[i*NSEG_SLOTW +: NW32] = nv32[i];
-                        ns_csh[i*4 +: 4] = nc32[i];
-                        ns_fsh[i*6 +: 6] = nf32[i];
-                      end
-          PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
-                        ns_din[i*2*NSEG_SLOTW +: NW64] = nv64[i];
-                        ns_csh[i*4 +: 4] = nc64[i];
-                        ns_fsh[i*6 +: 6] = nf64[i];
-                      end
-          PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
-                        ns_din[i*4*NSEG_SLOTW +: NW128] = nv128[i];
-                        ns_csh[i*4 +: 4] = nc128[i];
-                        ns_fsh[i*6 +: 6] = nf128[i];
-                      end
-          default:    begin
-                        ns_din[0 +: NW256] = nv256;
-                        ns_csh[0 +: 4] = nc256;
-                        ns_fsh[0 +: 6] = nf256;
-                      end
-        endcase
-      end
-    end else begin : g_no_normseg
-      assign ns_din  = '0;
-      assign ns_dout = '0;
-      assign ns_csh  = '0;
-      assign ns_fsh  = '0;
-    end
-  endgenerate
-
-  // ---- the shared ALIGN ladder ---------------------------------------
-  //
-  // The same argument and the same gating as the normaliser above, with
-  // the direction added: alignment shifts left when the addend anchors
-  // and right when the product does, and adjacent lanes disagree
-  // freely, which is what cft_normseg's BIDIR exists for. Sticky never
-  // enters the ladder - each lane computes its marker from the
-  // pre-shift value and carries it beside the shift (see the aln_*
-  // header in cft_fpfma_pipe).
-  localparam bit USE_FUSED_ALIGN = FUSE_ALIGN && (BEAT_BITS == 256) &&
-                                   EN_FP64 && EN_FP128 && EN_FP256;
-
-  // AW = 3*MAN_W + 8 per rung - one bit under the normalise window.
-  localparam int AW32  = 77;
-  localparam int AW64  = 164;
-  localparam int AW128 = 344;
-  localparam int AW256 = 716;
-
-  logic [NSEG_W-1:0] as_din, as_dout;
-  logic [8*4-1:0]    as_csh;               // lane l at l*4, as above
-  logic [8*6-1:0]    as_fsh;               // lane l at l*6
-  logic [7:0]        as_dir;               // lane l at bit l
-
-  logic [AW32-1:0]  av32  [0:7];
-  logic [AW64-1:0]  av64  [0:3];
-  logic [AW128-1:0] av128 [0:1];
-  logic [AW256-1:0] av256;
-  logic [3:0] ac32 [0:7], ac64 [0:3], ac128 [0:1], ac256;
-  logic [5:0] af32 [0:7], af64 [0:3], af128 [0:1], af256;
-  logic       ad32 [0:7], ad64 [0:3], ad128 [0:1], ad256;
-
-  generate
-    if (USE_FUSED_ALIGN) begin : g_alignseg
-      cft_normseg #(.PMAX(237), .SLOTS(8), .BIDIR(1'b1)) u_alignseg (
-          .clk(ap_clk), .mode(prec_r), .din(as_din),
-          .csh(as_csh), .fsh(as_fsh), .dir(as_dir), .dout(as_dout));
-
-      always_comb begin
-        as_din = '0;
-        as_csh = '0;
-        as_fsh = '0;
-        as_dir = '0;
-        case (prec_r)
-          PREC_FP32:  for (int i = 0; i < 8; i = i + 1) begin
-                        as_din[i*NSEG_SLOTW +: AW32] = av32[i];
-                        as_csh[i*4 +: 4] = ac32[i];
-                        as_fsh[i*6 +: 6] = af32[i];
-                        as_dir[i] = ad32[i];
-                      end
-          PREC_FP64:  for (int i = 0; i < 4; i = i + 1) begin
-                        as_din[i*2*NSEG_SLOTW +: AW64] = av64[i];
-                        as_csh[i*4 +: 4] = ac64[i];
-                        as_fsh[i*6 +: 6] = af64[i];
-                        as_dir[i] = ad64[i];
-                      end
-          PREC_FP128: for (int i = 0; i < 2; i = i + 1) begin
-                        as_din[i*4*NSEG_SLOTW +: AW128] = av128[i];
-                        as_csh[i*4 +: 4] = ac128[i];
-                        as_fsh[i*6 +: 6] = af128[i];
-                        as_dir[i] = ad128[i];
-                      end
-          default:    begin
-                        as_din[0 +: AW256] = av256;
-                        as_csh[0 +: 4] = ac256;
-                        as_fsh[0 +: 6] = af256;
-                        as_dir[0] = ad256;
-                      end
-        endcase
-      end
-    end else begin : g_no_alignseg
-      assign as_din  = '0;
-      assign as_dout = '0;
-      assign as_csh  = '0;
-      assign as_fsh  = '0;
-      assign as_dir  = '0;
-    end
-  endgenerate
-
-  // ---- compute banks (identical structure to cft_engine) -------------
-  // 8 x fp32 lanes
-  logic [BEAT_BITS-1:0] d32;
-  logic [4:0]   f32_l [0:LANES32-1];
-  logic [4:0]   f32_or;
-  genvar gi;
-  generate
-    for (gi = 0; gi < LANES32; gi = gi + 1) begin : g_lane32
-      logic [31:0] sa, sb, sc, fa, fb, fc, dd;
-      assign sa = a_q[gi*32 +: 32];
-      assign sb = b_q[gi*32 +: 32];
-      assign sc = c_q[gi*32 +: 32];
-      cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
-          .op(op_r), .a(sa), .b(sb), .c(sc),
-          .fa(fa), .fb(fb), .fc(fc));
-      logic bv; logic [31:0] bd; logic [4:0] bf;
-      cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
-          .op(op_r), .a(sa), .b(sb), .c(sc),
-          .valid(bv), .d(bd), .flags(bf));
-      // Divide/sqrt seeds: quiet unary precomputed results, delivered
-      // through the SAME bypass sideband as simpleops - which is why no
-      // new collection plumbing exists for them. Opcode sets disjoint,
-      // so the merge is an OR.
-      logic sev; logic [31:0] sed;
-      cft_seedop #(.EXP_W(8), .MAN_W(23)) u_seed (
-          .op(op_r), .a(sa), .valid(sev), .d(sed));
-      logic bv_m; logic [31:0] bd_m; logic [4:0] bf_m;
-      assign bv_m = bv | sev;
-      assign bd_m = sev ? sed : bd;
-      assign bf_m = sev ? 5'b0 : bf;
-      // Lane 0 doubles as the accumulator's adder while a reduction
-      // runs. Steered the way cft_opmux steers ADD - fma(x, 1.0, y) -
-      // because the product is exact and the pipe is already there.
-      // The other lanes idle; their outputs are masked out of the
-      // accumulator's view.
-      logic        rv;
-      logic [31:0] ra, rc;
-      assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP32) &&
-                  red_add_valid;
-      assign ra = is_reduce ? red_add_a[31:0] : fa;
-      assign rc = is_reduce ? red_add_b[31:0] : fc;
-
-      cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-          .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP32))),
-          .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
-          .a(ra), .b(is_reduce ? 32'h3F80_0000 : fb), .c(rc),
-          .out_valid(), .d(dd), .flags(f32_l[gi]),
-          .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
-          .mul_p(mf_p[gi*48 +: 48]),
-          .nrm_v(nv32[gi]), .nrm_csh(nc32[gi]), .nrm_fsh(nf32[gi]),
-          .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]),
-          .aln_v(av32[gi]), .aln_csh(ac32[gi]), .aln_fsh(af32[gi]),
-          .aln_dir(ad32[gi]), .aln_d(as_dout[gi*NSEG_SLOTW +: AW32]));
-      assign d32[gi*32 +: 32] = dd;
-    end
-  endgenerate
+  // Timing: the request is a mux between registers (a_q and the
+  // accumulator's outputs; op_r, prec_r and is_reduce are per-run
+  // registers) ahead of the array's own steering - the depth the
+  // per-lane reduce muxes had, moved in front of the opmux rather than
+  // behind it so the array's interface stays "three operands and an
+  // opcode", which is the whole reason it can be shared.
+  // 1.0's top 32-bit word for the two wide rungs, assembled from the
+  // exponent-field literals rather than transcribed as hex: the first
+  // draft typed 0x7FFF_0000 for {1'b0, 15'h3FFF, 112'd0} - one bit
+  // high in the exponent, 2^16383 instead of 1.0 - and the reduction
+  // bench caught it in every wide format.
+  localparam logic [31:0] ONE128_HI = {1'b0, 15'h3FFF, 16'd0};
+  localparam logic [31:0] ONE256_HI = {1'b0, 19'h3FFFF, 12'd0};
+  logic [BEAT_BITS-1:0] one_beat;      // 1.0 in every lane at prec_r
   always_comb begin
-    f32_or = 5'b0;
-    for (int i = 0; i < LANES32; i = i + 1) f32_or = f32_or | f32_l[i];
+    one_beat = '0;
+    case (prec_r)
+      PREC_FP32:
+        for (int i = 0; i < LANES32; i = i + 1)
+          one_beat[i*32 +: 32] = 32'h3F80_0000;
+      PREC_FP64:
+        for (int i = 0; i < LANES64; i = i + 1)
+          one_beat[i*64 +: 64] = 64'h3FF0_0000_0000_0000;
+      PREC_FP128:
+        // Only the lane's top word is nonzero; derived below from the
+        // same literal the lanes used to carry, not retyped.
+        for (int i = 0; i < LANES128; i = i + 1)
+          one_beat[i*128 + 96 +: 32] = ONE128_HI;
+      default:
+        // Only the beat's top word is nonzero, and only a full-width
+        // beat has an fp256 bank at all.
+        one_beat[(LANES32-1)*32 +: 32] = (LANES32 == 8) ? ONE256_HI : 32'h0;
+    endcase
   end
 
-  // 4 x fp64 lanes
-  logic [BEAT_BITS-1:0] d64;
-  logic [4:0]   f64_or;
+  assign lane_valid = is_reduce ? red_add_valid : ex_valid;
+  assign lane_op    = is_reduce ? 8'd0 : op_r;           // 0 = CFT_FMA
+  assign lane_rnd   = rnd_r;
+  assign lane_prec  = prec_r;
+  assign lane_a     = is_reduce ? red_add_a : a_q;
+  assign lane_b     = is_reduce ? one_beat  : b_q;
+  assign lane_c     = is_reduce ? red_add_b : c_q;
+
+  logic [BEAT_BITS-1:0]      arr_d;
+  logic [BEAT_BITS/32*5-1:0] arr_lf;
   generate
-    if (EN_FP64 && LANES64 > 0) begin : g_bank64
-      logic [4:0] f64_l [0:LANES64-1];
-      for (gi = 0; gi < LANES64; gi = gi + 1) begin : g_lane64
-        logic [63:0] sa, sb, sc, fa, fb, fc, dd;
-        assign sa = a_q[gi*64 +: 64];
-        assign sb = b_q[gi*64 +: 64];
-        assign sc = c_q[gi*64 +: 64];
-        cft_opmux #(.EXP_W(11), .MAN_W(52)) u_mux (
-            .op(op_r), .a(sa), .b(sb), .c(sc),
-            .fa(fa), .fb(fb), .fc(fc));
-        logic bv; logic [63:0] bd; logic [4:0] bf;
-        cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
-            .op(op_r), .a(sa), .b(sb), .c(sc),
-            .valid(bv), .d(bd), .flags(bf));
-        logic sev; logic [63:0] sed;
-        cft_seedop #(.EXP_W(11), .MAN_W(52)) u_seed (
-            .op(op_r), .a(sa), .valid(sev), .d(sed));
-        logic bv_m; logic [63:0] bd_m; logic [4:0] bf_m;
-        assign bv_m = bv | sev;
-        assign bd_m = sev ? sed : bd;
-        assign bf_m = sev ? 5'b0 : bf;
-        logic        rv;
-        logic [63:0] ra, rc;
-        assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP64) &&
-                    red_add_valid;
-        assign ra = is_reduce ? red_add_a[63:0] : fa;
-        assign rc = is_reduce ? red_add_b[63:0] : fc;
-
-        cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
-                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-            .clk(ap_clk), .rst_n(ap_rst_n),
-            .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP64))),
-          .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
-            .a(ra), .b(is_reduce ? 64'h3FF0_0000_0000_0000 : fb), .c(rc),
-            .out_valid(), .d(dd), .flags(f64_l[gi]),
-            .mul_a(mfa64[gi]), .mul_b(mfb64[gi]),
-            .mul_p(mf_p[gi*106 +: 106]),
-          .nrm_v(nv64[gi]), .nrm_csh(nc64[gi]), .nrm_fsh(nf64[gi]),
-          .nrm_d(ns_dout[gi*2*NSEG_SLOTW +: NW64]),
-          .aln_v(av64[gi]), .aln_csh(ac64[gi]), .aln_fsh(af64[gi]),
-          .aln_dir(ad64[gi]), .aln_d(as_dout[gi*2*NSEG_SLOTW +: AW64]));
-        assign d64[gi*64 +: 64] = dd;
-      end
-      always_comb begin
-        f64_or = 5'b0;
-        for (int i = 0; i < LANES64; i = i + 1) f64_or = f64_or | f64_l[i];
-      end
-    end else begin : g_bank64_off
-      assign d64 = '0;
-      assign f64_or = 5'b0;
-    end
-  endgenerate
-
-  // 2 x fp128 lanes
-  logic [BEAT_BITS-1:0] d128;
-  logic [4:0]   f128_or;
-  generate
-    if (EN_FP128 && LANES128 > 0) begin : g_bank128
-      logic [4:0] f128_l [0:LANES128-1];
-      for (gi = 0; gi < LANES128; gi = gi + 1) begin : g_lane128
-        logic [127:0] sa, sb, sc, fa, fb, fc, dd;
-        assign sa = a_q[gi*128 +: 128];
-        assign sb = b_q[gi*128 +: 128];
-        assign sc = c_q[gi*128 +: 128];
-        cft_opmux #(.EXP_W(15), .MAN_W(112)) u_mux (
-            .op(op_r), .a(sa), .b(sb), .c(sc),
-            .fa(fa), .fb(fb), .fc(fc));
-        logic bv; logic [127:0] bd; logic [4:0] bf;
-        cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
-            .op(op_r), .a(sa), .b(sb), .c(sc),
-            .valid(bv), .d(bd), .flags(bf));
-        logic sev; logic [127:0] sed;
-        cft_seedop #(.EXP_W(15), .MAN_W(112)) u_seed (
-            .op(op_r), .a(sa), .valid(sev), .d(sed));
-        logic bv_m; logic [127:0] bd_m; logic [4:0] bf_m;
-        assign bv_m = bv | sev;
-        assign bd_m = sev ? sed : bd;
-        assign bf_m = sev ? 5'b0 : bf;
-        logic         rv;
-        logic [127:0] ra, rc;
-        assign rv = is_reduce && (gi == 0) && (prec_r == PREC_FP128) &&
-                    red_add_valid;
-        assign ra = is_reduce ? red_add_a[127:0] : fa;
-        assign rc = is_reduce ? red_add_b[127:0] : fc;
-
-        cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
-                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-            .clk(ap_clk), .rst_n(ap_rst_n),
-            .in_valid(is_reduce ? rv : (ex_valid && (prec_r == PREC_FP128))),
-          .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
-            .a(ra),
-            .b(is_reduce ? {1'b0, 15'h3FFF, 112'd0} : fb),
-            .c(rc),
-            .out_valid(), .d(dd), .flags(f128_l[gi]),
-            .mul_a(mfa128[gi]), .mul_b(mfb128[gi]),
-            .mul_p(mf_p[gi*226 +: 226]),
-          .nrm_v(nv128[gi]), .nrm_csh(nc128[gi]), .nrm_fsh(nf128[gi]),
-          .nrm_d(ns_dout[gi*4*NSEG_SLOTW +: NW128]),
-          .aln_v(av128[gi]), .aln_csh(ac128[gi]), .aln_fsh(af128[gi]),
-          .aln_dir(ad128[gi]), .aln_d(as_dout[gi*4*NSEG_SLOTW +: AW128]));
-        assign d128[gi*128 +: 128] = dd;
-      end
-      always_comb begin
-        f128_or = 5'b0;
-        for (int i = 0; i < LANES128; i = i + 1) f128_or = f128_or | f128_l[i];
-      end
-    end else begin : g_bank128_off
-      assign d128 = '0;
-      assign f128_or = 5'b0;
-    end
-  endgenerate
-
-  // 1 x fp256 unit
-  logic [BEAT_BITS-1:0] d256;
-  logic [4:0]   f256;
-  generate
-    if (EN_FP256 && LANES256 > 0) begin : g_bank256
-      logic [BEAT_BITS-1:0] w_fa, w_fb, w_fc;
-      cft_opmux #(.EXP_W(19), .MAN_W(236)) u_wmux (
-          .op(op_r), .a(a_q), .b(b_q), .c(c_q),
-          .fa(w_fa), .fb(w_fb), .fc(w_fc));
-      logic bv; logic [255:0] bd; logic [4:0] bf;
-      cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
-          .op(op_r), .a(a_q), .b(b_q), .c(c_q),
-          .valid(bv), .d(bd), .flags(bf));
-      logic sev; logic [255:0] sed;
-      cft_seedop #(.EXP_W(19), .MAN_W(236)) u_seed (
-          .op(op_r), .a(a_q), .valid(sev), .d(sed));
-      logic bv_m; logic [255:0] bd_m; logic [4:0] bf_m;
-      assign bv_m = bv | sev;
-      assign bd_m = sev ? sed : bd;
-      assign bf_m = sev ? 5'b0 : bf;
-      logic rv256;
-      assign rv256 = is_reduce && (prec_r == PREC_FP256) && red_add_valid;
-
-      cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_wfma (
+    if (OWN_LANES) begin : g_own_lanes
+      cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
+                  .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+                  .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
+                  .FUSE_ALIGN(FUSE_ALIGN)) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(is_reduce ? rv256
-                              : (ex_valid && (prec_r == PREC_FP256))),
-          .rnd(rnd_r),
-          .byp(is_reduce ? 1'b0 : bv_m), .byp_d(bd_m), .byp_f(bf_m),
-          .a(is_reduce ? red_add_a : w_fa),
-          .b(is_reduce ? {1'b0, 19'h3FFFF, 236'd0} : w_fb),
-          .c(is_reduce ? red_add_b : w_fc),
-          .out_valid(), .d(d256), .flags(f256),
-          .mul_a(mfa256), .mul_b(mfb256), .mul_p(mf_p[0 +: 474]),
-          .nrm_v(nv256), .nrm_csh(nc256), .nrm_fsh(nf256),
-          .nrm_d(ns_dout[0 +: NW256]),
-          .aln_v(av256), .aln_csh(ac256), .aln_fsh(af256),
-          .aln_dir(ad256), .aln_d(as_dout[0 +: AW256]));
-    end else begin : g_bank256_off
-      assign d256 = '0;
-      assign f256 = 5'b0;
+          .in_valid(lane_valid), .op(lane_op), .rnd(lane_rnd),
+          .prec(lane_prec), .a(lane_a), .b(lane_b), .c(lane_c),
+          .out_valid(), .d(arr_d), .lane_flags(arr_lf));
+    end else begin : g_shared_lanes
+      assign arr_d  = lane_d;
+      assign arr_lf = lane_flags;
     end
   endgenerate
 
+  // The beat's result and the OR of its lanes' flags. Positions at or
+  // beyond lanes_per_beat read zero from the array, so one loop over
+  // the fp32 count serves every precision.
   always_comb begin
-    beat_d = d32;
-    beat_f = f32_or;
-    case (prec_r)
-      PREC_FP64:  begin beat_d = d64;  beat_f = f64_or;  end
-      PREC_FP128: begin beat_d = d128; beat_f = f128_or; end
-      PREC_FP256: begin beat_d = d256; beat_f = f256;    end
-      default: ;  // PREC_FP32 falls through to the defaults
-    endcase
+    beat_d = arr_d;
+    beat_f = 5'b0;
+    for (int i = 0; i < LANES32; i = i + 1)
+      beat_f = beat_f | arr_lf[i*5 +: 5];
   end
 
   // A reduction writes exactly one beat, holding the single result in

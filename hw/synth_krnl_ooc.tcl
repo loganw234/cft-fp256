@@ -17,6 +17,13 @@ set build_dir "build_ooc_krnl"
 if {$argc >= 1} { set freq [lindex $argv 0] }
 if {$argc >= 2} { set part [lindex $argv 1] }
 if {$argc >= 3} { set build_dir [lindex $argv 2] }
+# Optional generic overrides as one argument, e.g. "FUSE_NORM=1 FUSE_ALIGN=1"
+# - the per-build parameters cft_krnl exposes - so a probe can measure
+# exactly the configuration a bitstream would carry rather than the
+# RTL defaults. Empty means defaults, which is what every run before
+# 2026-09-01 measured.
+set generics {}
+if {$argc >= 4} { set generics [lindex $argv 3] }
 
 set hw_dir  [file dirname [file normalize [info script]]]
 set rtl_dir [file normalize "$hw_dir/../rtl"]
@@ -24,7 +31,9 @@ file mkdir $build_dir
 
 create_project -in_memory -part $part
 read_verilog -sv [glob $rtl_dir/*.sv]
-synth_design -top cft_krnl -mode out_of_context
+set gargs {}
+foreach g $generics { lappend gargs -generic $g }
+synth_design -top cft_krnl -mode out_of_context {*}$gargs
 create_clock -period [format %.3f [expr {1000.0 / $freq}]] -name ap_clk [get_ports ap_clk]
 report_utilization    -file $build_dir/krnl_util.rpt
 
@@ -54,7 +63,7 @@ report_timing_summary -file $build_dir/krnl_timing.rpt -no_detailed_paths
 report_timing -max_paths 3 -file $build_dir/krnl_paths.rpt
 
 set wns [get_property SLACK [lindex [get_timing_paths -max_paths 1 -nworst 1 -setup] 0]]
-puts "QOR_TAG: krnl_${freq}mhz"
+puts "QOR_TAG: krnl_${freq}mhz [expr {$generics eq {} ? "defaults" : $generics}]"
 puts "QOR_WNS_NS: $wns (at [format %.1f $freq] MHz; negative = does not close)"
 set util [report_utilization -return_string]
 foreach line [split $util "\n"] {
