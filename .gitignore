@@ -63,3 +63,6 @@ host/examples/obj/
 host/vector-fma-go
 verify/_mpfr-prefix/
 verify/_mpfr-prefix-build/
+
+# agent worktrees (transient; never part of the tree)
+.claude/worktrees/
