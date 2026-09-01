@@ -214,3 +214,32 @@ intentional mismatches into the totals - the control eating the
 experiment - fixed by keeping the control's output outside the
 sweep's glob. The runner's clean first full run is recorded below
 when it lands post-merge.
+
+## 2026-08-31 - native-oracle campaign COMPLETE on the build box (clean)
+
+The full campaign hw/run-soak.sh was commissioned for: 332 of 332
+jobs, 23.875 billion cases, ZERO value mismatches, ZERO flag
+mismatches. That is exhaustive fp32 square root - every one of the
+2^32 encodings - under all five rounding attributes (21.47B cases;
+RMM rode the RNE oracle, sqrt having no ties), plus 2.4 billion
+exponent-banded random div32/div64/sqrt64 under the four native
+modes. cft_div and cft_sqrt never once disagreed with the host CPU's
+own IEEE hardware, results or exception flags; the only mismatches in
+the raw logs were the negative control's 65,536 injected corruptions,
+all detected. Ran at nice -19 beside two Vivado routes and the RTL
+soak, ~6 hours wall. (The box ran the pre-fix aggregator whose
+summary line counts the control's log; the verdict above is taken
+from the 332 job logs directly, control excluded - the fixed
+aggregator is in hw/run-soak.sh as of 86b136b.)
+
+## 2026-08-31 - standardized verification run (DESKTOP-T33SK86)
+
+verify/run.sh at 86b136b, clean tree: 13 stages; 0 failed, 1 skipped
+(images - xclbinutil not present on this host, named as such). The
+runner's first full clean census: golden 148s, vectors 8s, sim (all
+15 targets) 1826s, lint 51s, formal 37s, libcft/selfcheck/divsqrt/
+diff/seq/reduce 33s together, soak-quick with its sabotage control
+121s. Run id 20260831-2019-86b136b. A note on the small numbers,
+because they looked wrong until measured: divsqrt_check's 29,124
+cases take 0.6 s - the model is microseconds per case at fp32/64 and
+the library is C - so sub-second stages are honest, not cached.
