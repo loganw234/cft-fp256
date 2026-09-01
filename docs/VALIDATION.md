@@ -552,3 +552,23 @@ prefix and run - 100,736 cases, 0 value / 0 flag mismatches. The
 verify runner's mpfr stage prefers the prefix over system packages,
 and the same stage ran green locally through mingw64's system MPFR
 (238,328 cases) in this machine's census, so both routes are proven.
+
+## 2026-09-01 - the exhaustive CPU-hardware campaign closes clean
+
+hw/run-c5-soak.sh, full depth, on amd-arc-box against pushed HEAD
+6ffffc4: **40,658,293,642 cases, 0 value mismatches, 0 flag
+mismatches**, all 618 shards ok, SOAK CLEAN. That includes EXHAUSTIVE
+fp32 - every one of the 2^32 encodings - through roundToIntegral
+under all five attributes (both the named variants and Exact),
+nextUp, nextDown, logB and class, plus banded fp64 and the
+integer-conversion, scaleB, convert and remainder campaigns, value
+AND hardware-flag comparison behind directed probes that all read
+RELIABLE on this box. The end-of-run negative control detected its
+sabotaged run before the green was believed, per house rule. Worker
+count self-throttled to 12 while the 135 MHz quad route held the
+box; the campaign ran to completion beside it without touching it.
+
+With this, every operation the clause-5 completion added stands on
+the same four legs div/sqrt stood on: the golden model's own tests,
+C-vs-model parity, GNU MPFR at all four formats, and the host CPU's
+IEEE hardware at exhaustive-fp32 scale.
