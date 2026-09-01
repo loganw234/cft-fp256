@@ -121,8 +121,16 @@ case "$(basename "$ART")" in
     ;;
 esac
 
-BIN="$ROOT/host/device-test"
-[ -x "$BIN" ] || { echo "build it first: make -C host XRT=1 device-test" >&2
+# RUN_BIN swaps the binary while keeping everything above - the
+# environment dance and both reaping lessons apply to ANY program that
+# talks to an emulated device, and cycle-count runs drive
+# host/cft-bench through here rather than re-learning them:
+#
+#   RUN_BIN=host/cft-bench bash hw/run-device-test.sh <emu.xclbin> -n 256
+BIN="${RUN_BIN:-$ROOT/host/device-test}"
+BIN=$(readlink -f "$BIN")
+[ -x "$BIN" ] || { echo "not executable: $BIN" >&2
+                   echo "build it first: make -C host XRT=1 device-test cft-bench" >&2
                    exit 1; }
 
 # emconfig.json is found relative to the working directory by some XRT

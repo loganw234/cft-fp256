@@ -564,6 +564,54 @@ model gives every compute unit its own AXI4-Lite control interface, and
 Anything else that is four-of-a-kind is four-of-a-kind *because* it is
 computing four things at once.
 
+**Amended 2026-09-01: one narrow cross-tile share survives that
+argument, and only in one regime - a low-duty serial divide/sqrt unit
+for the sequencer's dependent chains.** The objection above prices
+sharing by demand rate, so it has to be answered by regime, and the
+two regimes come out opposite:
+
+*Streamed arrays: the composed route already won, and a dedicated
+divider cannot beat it.* Division by Newton/Goldschmidt on the tile's
+own 237-bit multiplier costs ~25-30 FMA-class passes per element
+(host/include/cft.h documents the shape), which at one beat per cycle
+prices fp256 divide near `f/28` per tile - ~4.8 M/s at 135 MHz, zero
+new area. A compact radix-4 SRT unit (2 quotient bits per cycle,
+LUT-only, no DSP, roughly 5-8k LUT for the 237-bit recurrence with
+sqrt sharing the same datapath) delivers ~125 cycles per result: ~1.1
+M/s. The big multiplier out-throughputs the small recurrence more than
+fourfold *before* sharing divides it further. For elementwise arrays
+the FMA array is the best divider per unit area this design owns, and
+the standing verdict holds.
+
+*Serial dependent chains - the sequencer's home regime - invert it.*
+In an orbit program each step waits for the last, so latency IS
+throughput. The composed sequence is ~28 *dependent* register-file
+passes at pipeline latency each: ~480 cycles per divide. The SRT unit
+answers in ~125, a ~3.8x speedup per divide in a chain, and it runs
+BESIDE the lane array, so the program's fused work overlaps the
+recurrence instead of queueing behind it. And because a real orbit
+program issues a divide once per many instructions, per-tile duty is
+low - which is exactly the condition under which the
+one-issue-point objection stops binding: two to four sequencer tiles
+can share one unit behind the same round-robin the deposit banks
+already use, at ~1.3-2% of a quad's LUT, while a single-tile build
+instantiates it privately.
+
+Neither half is a work order yet. It gates on two measurements: hw_emu
+cycle counts pricing the composed route exactly (the wrapper's RUN_BIN
+hook exists for this), and evidence from real sequencer workloads that
+divides actually appear inside dependent chains (deep-zoom orbit maps
+mostly do not divide; Newton and rational maps do). If both land, the
+shape is a `DIVSQRT_UNIT` parameter in the FUSE_* mold - private in a
+single-tile build, arbitrated behind 2-4 tiles in a quad - and the
+754-2019 answer for correctness stays what it is today: the unit would
+be verified against the same golden model bit-for-bit, or it does not
+ship. Until then, the free win is software: the composed sequence
+expressed as a sequencer program over register-resident operands
+(cft_seq_lanes already carries the seed opcodes), which keeps the pass
+count but deletes the per-pass host round-trip and the 28x HBM
+traffic that cft_div pays through the elementwise path today.
+
 **Inside one tile, across the precision banks: this is the real axis,
 and it is free of the sequencing problem.** `prec_r` is snapshot at
 start and cannot move while anything is in flight, so exactly one bank
