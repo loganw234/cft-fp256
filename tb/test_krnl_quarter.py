@@ -77,7 +77,7 @@ async def quarter_tile_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000500
+    assert await axil.read_dword(VERSION) == 0x00000600
 
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0b0011, (

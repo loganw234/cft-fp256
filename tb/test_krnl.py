@@ -62,8 +62,12 @@ OP_GROUPS = {
     4: "integer",
     5: "reduction",
     6: "divide/sqrt",   # seed opcodes 26/27; sequences composed on host
+    7: "sequencer",     # MODE[15] runs a program; cft_seq is instantiated
 }
-OP_GROUPS_NOT_BUILT = {7: "conversion"}
+# Bit 7 read "conversion - reserved" until the conversions landed as
+# library entry points composed from opcodes that already exist, so the
+# group will never take a MODE opcode and the bit was genuinely free.
+OP_GROUPS_NOT_BUILT = {}
 
 
 def check_op_groups(caps):
@@ -198,7 +202,7 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000500
+    assert await axil.read_dword(VERSION) == 0x00000600
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0xF, "full tile advertises all four rungs"
     check_op_groups(caps)

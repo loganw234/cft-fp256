@@ -142,17 +142,27 @@ does not work yet.
 | 0x04 | GIER | RW | storage only; no interrupt exported in v0 |
 | 0x08 | IER  | RW | storage only |
 | 0x0C | ISR  | RO | 0 |
-| 0x10 | MODE | RW | [7:0] op (see the opcode table below); [11:8] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 - issue only precisions set in CAPS; [14:12] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne; ignored by the non-arithmetic opcodes); [31:15] reserved, write 0 |
+| 0x10 | MODE | RW | [7:0] op (see the opcode table below); [11:8] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 - issue only precisions set in CAPS; [14:12] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne; ignored by the non-arithmetic opcodes); **[15] SEQUENCER RUN** - this run belongs to `cft_seq` and the op field is ignored, because the program says what to compute and carries a rounding attribute on every instruction. Precision still applies and is still refused the same way: a program is compiled for one format (its constants are format-width values), so a rung the build lacks is exactly as unrunnable here as it is for an elementwise op. CAPS[15] says whether there is a sequencer at all; [31:16] reserved, write 0 |
 | 0x18 | N    | RW | element count, 64-bit |
 | 0x20 | A_PTR | RW | 64-bit HBM byte address |
 | 0x28 | B_PTR | RW | 64-bit |
 | 0x30 | C_PTR | RW | 64-bit |
-| 0x38 | D_PTR | RW | 64-bit |
+| 0x38 | D_PTR | RW | 64-bit. On a sequencer run this is the DEPOSIT buffer, `n * max_deposits` elements rather than `n` |
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at an ACCEPTED ap_start - a refused start (STATUS[3]) leaves them untouched, because a refusal is not a run |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
-| 0x48 | VERSION | RO | 0x00000500. **Guards the REGISTER MAP, not the feature set** - a host accepts a SET of known versions and lets CAPS decide what an image can do. One accepted value would orphan a still-good bitstream every time a feature landed, which nearly happened when reductions bumped 0x410 to 0x500 and the card-day images were already built at 0x410 |
-| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 conversion (15 reserved and currently clear; 13 set from VERSION 0x500 onward, 14 with the seed opcodes). **Bit 13 means opcode 24 only.** The group nominally covers 24 and 25, but `dot` (25) is a host-side composition of `mul` then `sum` - the kernel treats 25 as a reserved opcode and answers with canonical qNaN and invalid raised. A host that reads bit 13 and issues 25 to the tile directly gets that, not a dot product; libcft never does, because `cft_reduce` decomposes it. **Bit 14 means opcodes 26 and 27** - `recip_seed`/`rsqrt_seed`, the quiet table lookups the composed divide and square root start from. The full operations are not single opcodes at all: they are FMA sequences the host library issues (python/cft_golden/sequences.py is the specification), and bit 14 is what tells it the starting points exist in this bitstream. Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current |
-| 0x50 | STATUS | RO | sticky faults of the last run, cleared at an accepted ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count, [3] the run was REFUSED - MODE selected a precision this build does not implement (or a code above 3); the engine never started, no memory was read or written, and `ap_done` still asserted, so a refusal costs a register read rather than a timeout. CAPS[3:0] says in advance which precisions exist; the refusal is what a host that did not ask gets instead of plausible garbage from banks that are not there. **Non-zero means the D buffer must not be trusted.** [0] and [1] do not disturb the run - the beat still arrives, so it completes and STATUS is read after. [2] does: withheld beats starve compute, so the engine ABANDONS the run rather than waiting - no new bursts, any committed write burst finished (with stale data if the FIFO ran dry, since AXI4 A3.4.1 permits no way to withdraw it), outstanding reads allowed to land, then `ap_done`. A protocol violation ends as a prompt fault instead of a hang; a slave that stops answering altogether is indistinguishable from a slow one and still belongs to the host's timeout |
+| 0x48 | VERSION | RO | 0x00000600. **Guards the REGISTER MAP, not the feature set** - a host accepts a SET of known versions and lets CAPS decide what an image can do. One accepted value would orphan a still-good bitstream every time a feature landed, which nearly happened when reductions bumped 0x410 to 0x500 and the card-day images were already built at 0x410. 0x600 is the first bump that GREW the map rather than only adding a capability: PROG_PTR and CNT_PTR exist at 0x54 and 0x5C, and two kernel arguments exist that did not. The older versions stay accepted because their registers are still read correctly; what they cannot do is run a program, and libcft refuses that outright rather than binding an eight-argument call to a six-argument xclbin |
+| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 sequencer (13 set from VERSION 0x500 onward, 14 with the seed opcodes, 15 from 0x600). **Bit 15 read "conversion - reserved" until 0x600.** The conversions landed as library entry points - `cft_convert`, the integer forms, the rest of clause 5 - composed from opcodes that already exist, so the group will never take a MODE opcode and the bit was never going to be spent on it. A group bit nothing can ever set is a reserved bit; the sequencer is a real thing a host must ask about before it writes PROG_PTR, so it takes the bit. **Bit 15 means MODE[15] reaches a `cft_seq`,** and nothing about which programs it will accept - the on-chip instruction, constant and deposit capacities are the tile's, and a program past them is refused at run time with STATUS[3]. **Bit 13 means opcode 24 only.** The group nominally covers 24 and 25, but `dot` (25) is a host-side composition of `mul` then `sum` - the kernel treats 25 as a reserved opcode and answers with canonical qNaN and invalid raised. A host that reads bit 13 and issues 25 to the tile directly gets that, not a dot product; libcft never does, because `cft_reduce` decomposes it. **Bit 14 means opcodes 26 and 27** - `recip_seed`/`rsqrt_seed`, the quiet table lookups the composed divide and square root start from. The full operations are not single opcodes at all: they are FMA sequences the host library issues (python/cft_golden/sequences.py is the specification), and bit 14 is what tells it the starting points exist in this bitstream. Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current |
+| 0x50 | STATUS | RO | sticky faults of the last run, cleared at an accepted ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count, [3] the run was REFUSED, [4] DEPOSIT OVERFLOW on a sequencer run. **[3] covers two refusals with one answer.** Either MODE selected a precision this build does not implement (or a code above 3), in which case neither engine started and no memory was touched at all; or a sequencer run's program image failed the tile's own header check - bad magic, a format that is not MODE's, more instructions, constants or deposit slots than the tile holds. The second kind may have READ the image before refusing it, but it wrote nothing and computed nothing, and a host's response to both is the same: the run did not happen and the output buffer holds what it held. `ap_done` still asserts either way, so a refusal costs a register read rather than a timeout, and FLAGS is left at the previous run's value because a refusal is not a run. CAPS[3:0] says in advance which precisions exist and CAPS[15] whether there is a sequencer; the refusal is what a host that did not ask gets instead of plausible garbage. **[4] is a report, not a fault** - a lane deposited past the program's `max_deposits`, the excess was dropped, and what fit is correct and reproducible. It is deliberately not an IEEE flag: the five in FLAGS mean what 754 says they mean and "your buffer was too small" is not one of them. It moved here from bit 3 on 2026-09-01, when the precision refusal took that position in silicon-bound RTL and the sequencer's bit had still never crossed a device boundary. **Bits [2:0] non-zero mean the D buffer must not be trusted.** [0] and [1] do not disturb the run - the beat still arrives, so it completes and STATUS is read after. [2] does: withheld beats starve compute, so the engine ABANDONS the run rather than waiting - no new bursts, any committed write burst finished (with stale data if the FIFO ran dry, since AXI4 A3.4.1 permits no way to withdraw it), outstanding reads allowed to land, then `ap_done`. A protocol violation ends as a prompt fault instead of a hang; a slave that stops answering altogether is indistinguishable from a slow one and still belongs to the host's timeout |
+| 0x54 | PROG_PTR | RW | 64-bit HBM byte address of the program image - header, constant bank, instruction stream, exactly as `cft_program_load` validated it (docs/SEQUENCER.md). 32-byte aligned. Read by the sequencer at start; ignored when MODE[15] is clear |
+| 0x5C | CNT_PTR | RW | 64-bit HBM byte address of the per-lane deposit counts, `n` uint32s, 4-byte aligned. An output rather than a convenience: `+0` is both a legal deposit and the defined value of a slot no lane wrote, so the count cannot be recovered from the deposit buffer |
+
+The last two sit **above** the read-only block rather than beside the
+other pointers, and that is not tidiness losing to history. `A_PTR`
+through `D_PTR` are `hw/kernel.xml` argument ids 2 to 5, and an id is a
+position in every host's kernel call - moving them to open a gap would
+silently rebind every existing binary's operands to the wrong ports.
+Appending is the only change a shipped argument list can take, so the
+sequencer's pointers are ids 6 and 7 at the first free offsets.
 
 ### Opcodes (MODE[7:0])
 
@@ -214,11 +224,23 @@ hardware far more than it needs a transcendental.
   beats only; hosts pad the tail (any padding values are computed and
   written to D's padding region - harmless, and their flags DO join
   the sticky OR, so pad with zeros, not junk, when flags matter).
+- **A SEQUENCER run (MODE[15]) takes N differently.** N is the
+  caller's real element count, not a padded one: a lane whose index is
+  at or beyond it starts INACTIVE, deposits nothing and gets no count,
+  so the tail of the deposit and count buffers is untouched. The
+  buffers still have to hold whole beats, because the masters move
+  whole beats - the arithmetic simply never reaches the padding. This
+  is a real difference from `cft_run`, where a zero-filled tail is
+  harmless because every opcode is quiet on zeros; a program is
+  arbitrary, and no padding value stays quiet through thirty
+  iterations of an unknown map (docs/SEQUENCER.md).
 - Read CAPS once at open: bit p set means MODE precision p is
   implemented in this bitstream. The full Alveo tile reads 0xF;
   trimmed open-core tiles clear what they dropped. Issuing a
   non-advertised precision is undefined (no arithmetic hazard - the
-  run completes - but D's contents are meaningless).
+  run completes - but D's contents are meaningless). Bit 15 says
+  whether MODE[15] reaches a sequencer at all; without it, PROG_PTR
+  and CNT_PTR may not exist either, and VERSION is what says so.
 - **Operand semantics per op - read this before changing an
   opcode.** The convention is not uniform, because ADD and SUB are
   steered FMAs (`a*1 + c`) while everything else takes its operands
@@ -262,7 +284,11 @@ hardware far more than it needs a transcendental.
   precision, rounding attribute, N and all four pointers - so a
   mid-run write cannot corrupt the run in progress. That snapshot is
   the guarantee; the registers are still yours to reprogram for the
-  next run as soon as ap_done is observed.
+  next run as soon as ap_done is observed. **MODE[15] is part of the
+  snapshot** and has to be: it selects which engine owns the shared A
+  and D masters, so reading it live would let a mid-run write hand
+  them over partway through a burst - a corrupted run and an AXI
+  protocol violation together.
 
 ## AXI behaviour (v1 streamer)
 

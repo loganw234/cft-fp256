@@ -136,8 +136,8 @@ async def sum_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000500, \
-        "reductions are v0.5.0"
+    assert await axil.read_dword(VERSION) == 0x00000600, \
+        "reductions arrived at v0.5.0; the map grew again at v0.6.0"
     caps = await axil.read_dword(CAPS)
     assert (caps >> 8) & (1 << 5), \
         "CAPS must advertise the reduction group once SUM is built"

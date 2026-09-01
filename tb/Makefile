@@ -12,7 +12,8 @@
 SIM ?= icarus
 
 .PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-        normprobe seedop reduceacc reduce krnl quarter faults clean
+        normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
+        clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
      seedop reduceacc reduce krnl quarter faults
@@ -136,6 +137,21 @@ krnl:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnl \
 		COCOTB_RESULTS_FILE=sim_build/krnl/results.xml
+
+# The orbit sequencer through the same kernel: program image staged in
+# RAM, PROG_PTR and CNT_PTR written, MODE[15] set, deposits and counts
+# scored against python/cft_golden/seq.py. It shares the A and D
+# masters with the elementwise engine, so the bench runs BOTH - a
+# sequencer run, an elementwise run, another sequencer run - because
+# the mux is one claim and testing half of it proves nothing.
+#
+# Out of `make sim` while cft_seq is being written: an aggregate target
+# that goes red for a module still under construction trains people to
+# ignore it. It folds in the day the core is green.
+krnlseq:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \
+		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml
 
 quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \

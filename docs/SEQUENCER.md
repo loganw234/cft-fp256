@@ -1,12 +1,27 @@
 # The orbit sequencer
 
-STATUS: design, golden model, and a working software implementation.
+STATUS: design, golden model, a working software implementation, and
+the kernel integration around an RTL core that is being written.
 `python/cft_golden/seq.py` is the definition of correct;
 `host/src/program.c` is libcft's executor and agrees with it over a
 shared fuzz corpus (`make libcft-seq`) on deposits, deposit counts,
 exception flags and status - and on which programs to refuse. The RTL
 follows, and will be verified against the same model, exactly as the
 FMA core was verified against `softfloat.py`.
+
+What exists around it as of 2026-09-01: `cft_seq` is instantiated in
+`cft_krnl` as a peer of `cft_engine_stream`, sharing the A and D
+masters under a `MODE[15]` select registered at the accepted start;
+the CSR map carries `PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C (VERSION
+0x600, CAPS bit 15) and `hw/kernel.xml` carries the matching arguments
+6 and 7; `cft_program_run` dispatches to the device when the program
+was loaded on one, through `cftx_program_run` on a single compute unit;
+and `tb/test_krnl_seq.py` scores a full-kernel run against `seq.py` on
+deposits, counts, FLAGS and STATUS. The plumbing is therefore testable
+ahead of the core, which is the point of writing the contract down
+first - and the bench is honest about the difference: against the
+refuse-everything stub the refusal cases pass and the compute cases
+fail with per-slot comparisons rather than hanging.
 
 So a program can be written and run today, on any machine, with no
 card. What the hardware adds is speed and the on-chip iteration that

@@ -99,7 +99,8 @@ yosys-lint:
 	yosys -q -p "read_verilog -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv \
 	  rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_seedop.sv rtl/cft_csr.sv \
 	  rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv \
-	  rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_krnl.sv; \
+	  rtl/cft_engine.sv rtl/cft_engine_stream.sv \
+	  rtl/cft_seq_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv; \
 	  hierarchy -check -top cft_krnl; proc; opt -fast; stat -top cft_krnl"
 
 # The standardized verification run: every gate, one command,

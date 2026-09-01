@@ -145,10 +145,21 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  *
  *   0x410  v0.4.1  four rungs, five rounding attributes
  *   0x500  v0.5.0  adds the reduction group (CAPS bit 13)
+ *   0x600  v0.6.0  adds PROG_PTR and CNT_PTR, and two kernel arguments
  *
  * Add a version here only when the map is genuinely unchanged; move the
- * map and this list should shrink to the versions that share it. */
-constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u };
+ * map and this list should shrink to the versions that share it.
+ *
+ * 0x600 is the first bump that GREW the map rather than only adding a
+ * capability, and the old entries stay for exactly the reason the list
+ * exists: 0x410 and 0x500 tiles are still read correctly by this code,
+ * they simply have nothing at 0x54. What they cannot do is run a
+ * program, and SEQ_VERSION below is what says so - a kernel call with
+ * eight arguments against a six-argument xclbin does not misbehave
+ * subtly, it throws, and a clear refusal beats an XRT exception. */
+constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u,
+                                        0x00000600u };
+constexpr uint32_t SEQ_VERSION = 0x00000600u;   /* first map with PROG_PTR */
 
 inline bool version_known(uint32_t v)
 {
@@ -159,6 +170,25 @@ inline bool version_known(uint32_t v)
 
 /* kernel.xml argument ids */
 constexpr int ARG_A = 2, ARG_B = 3, ARG_C = 4, ARG_D = 5;
+constexpr int ARG_PROG = 6, ARG_CNT = 7;
+
+/* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
+constexpr uint32_t MODE_SEQ = 1u << 15;
+
+/* STATUS, as rtl/cft_csr.sv lays it out. Bit 4 is also
+ * CFT_STATUS_DEPOSIT_OVERFLOW in the public header; the two must not
+ * drift, and this file cannot include cft.h. */
+constexpr uint32_t ST_BUS_BITS  = 0x7u;
+constexpr uint32_t ST_REFUSED   = 0x8u;
+constexpr uint32_t ST_DEPOSIT_OVERFLOW = 0x10u;
+
+/* Round `n` up to a whole 256-bit beat's worth of bytes. The masters
+ * move whole beats whatever the format, so a buffer that ends mid-beat
+ * is a buffer the last transfer runs off the end of. */
+inline size_t beat_round(size_t bytes)
+{
+    return (bytes + 31u) & ~static_cast<size_t>(31u);
+}
 
 /* The most compute units this backend will bind on one device.
  *
@@ -239,12 +269,21 @@ struct Tile {
     xrt::kernel k;
     xrt::bo     a, b, c, d;
     size_t      cap = 0;         /* bytes per buffer, 0 if unallocated */
+    /* The sequencer's two extra buffers. They are separate rather than
+     * folded into `cap` because they are not operand-shaped: the
+     * program image is tens of bytes and never grows with n, and the
+     * counts are four bytes per element whatever the format. Growing
+     * them with the operands would allocate a megabyte of HBM to hold
+     * a hundred-byte program. */
+    xrt::bo     pg, cn;
+    size_t      pg_cap = 0, cn_cap = 0;
 };
 
 struct Dev {
     xrt::device       dev;
     xrt::uuid         uuid;
     std::vector<Tile> tiles;
+    uint32_t          version = 0;
     long              wait_ms = 60000;
     /* Set when a run failed with compute units possibly still active.
      * See the header comment: there is no way to make the device safe
@@ -278,6 +317,21 @@ void ensure_capacity(Dev &D, Tile &t, size_t bytes)
                            t.k.group_id(args[i]));
     }
     t.cap = bytes;
+}
+
+/* Grow one buffer, for the two that are not operand-shaped. Same
+ * release-before-request discipline as ensure_capacity, and the same
+ * reason: an HBM group is finite, and asking for the new size while
+ * still holding the old one fails at half the group. */
+void ensure_one(Dev &D, Tile &t, xrt::bo &bo, size_t &cap, int arg,
+                size_t bytes)
+{
+    if (cap >= bytes)
+        return;
+    cap = 0;
+    bo = xrt::bo();
+    bo = xrt::bo(D.dev, bytes, xrt::bo::flags::normal, t.k.group_id(arg));
+    cap = bytes;
 }
 
 /* Copy one operand slice in, zero-filling the beat padding. A null
@@ -422,6 +476,7 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         return ST_UNSUPPORTED;
     }
 
+    D->version      = ver;
     *format_mask    = caps & 0xFu;
     *op_groups      = (caps >> 8) & 0xFFu;
     *tiles          = static_cast<uint32_t>(D->tiles.size());
@@ -467,6 +522,16 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
      * host/tests can exercise it over every interesting n and tile
      * count without a card - which is where the arithmetic that
      * decides whether every element is computed exactly once belongs.
+     *
+     * A SEQUENCER run does not come through here and is NOT split:
+     * cftx_program_run below uses tile 0 and only tile 0. An
+     * elementwise element depends on its own index and nothing else,
+     * which is what makes this partitioning unobservable; a sequencer
+     * lane depends on its own index too, but the early exit is a
+     * CROSS-LANE condition, so "four tiles give the same bits as one"
+     * is a claim about P3 (docs/SEQUENCER.md) rather than a corollary
+     * of the dataflow. It is very probably true and it is not yet
+     * fuzzed, so v1 does not assume it.
      */
     std::vector<cft_slice> slices(ntiles);
     slices.resize(cft_plan_slices(n, esz, ntiles, slices.data()));
@@ -647,6 +712,233 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
 
     if (flags)
         *flags = flag_acc;
+    return ST_OK;
+}
+
+/* ---- sequencer programs -------------------------------------------
+ *
+ * ONE compute unit, and the comment beside cftx_run's partitioning
+ * says why: the early exit is a cross-lane condition, so splitting
+ * lanes across tiles is a claim about P3 rather than a corollary of
+ * the dataflow, and v1 does not make claims it has not fuzzed.
+ *
+ * Six buffers rather than four. The program image rides the A master
+ * (the sequencer borrows it for the image AND the three input
+ * streams, which never overlap in time) and the deposit counts ride
+ * the D master beside the deposits - which is what puts each in the
+ * HBM group its master can reach, per hw/kernel.xml and hw/link.cfg.
+ *
+ * The deposit buffer is NOT pre-zeroed here. Every slot in the window
+ * is the tile's to write, including the ones no lane deposited into -
+ * SEQUENCER.md calls the +0 normative for exactly that reason - so
+ * zeroing first would make a tile that skipped a slot indistinguishable
+ * from one that wrote the zero it promised.
+ */
+extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
+                                size_t image_bytes, uint32_t max_deposits,
+                                const void *a, const void *b, const void *c,
+                                void *deposits, uint32_t *counts, size_t n,
+                                uint32_t *flags, uint32_t *bus)
+{
+    if (!hw || !image || image_bytes == 0)
+        return ST_INVALID_ARGUMENT;
+
+    Dev &D = *static_cast<Dev *>(hw);
+    g_err.clear();
+
+    if (D.poisoned) {
+        set_err("this device handle was left in an unknown state by an "
+                "earlier failure; close it and open it again");
+        return ST_INTERNAL;
+    }
+
+    const size_t esz = static_cast<size_t>(elem_bytes(fmt));
+    if (esz == 0)
+        return ST_INVALID_ARGUMENT;
+
+    /* A tile whose map predates PROG_PTR has no register to write it
+     * to and no seventh argument to bind. Refuse here rather than let
+     * an eight-argument kernel call throw from inside XRT, where the
+     * message is about argument counts and not about what is actually
+     * wrong: this bitstream cannot run programs. */
+    if (D.version < SEQ_VERSION) {
+        char buf[224];
+        std::snprintf(buf, sizeof buf,
+                      "this bitstream's contract is 0x%08x, which has no "
+                      "PROG_PTR - the sequencer arrived at 0x%08x. Run the "
+                      "program on the software backend, or load a newer "
+                      "image; CAPS bit 15 says in advance which it is.",
+                      D.version, SEQ_VERSION);
+        set_err(buf);
+        return ST_UNSUPPORTED;
+    }
+
+    if (n == 0) {
+        if (flags) *flags = 0;
+        if (bus)   *bus   = 0;
+        return ST_OK;
+    }
+    if (max_deposits && !deposits)
+        return ST_INVALID_ARGUMENT;
+    if (max_deposits && n > (static_cast<size_t>(-1) / max_deposits / esz))
+        return ST_INVALID_ARGUMENT;
+
+    const size_t epb        = 32u / esz;         /* elements per beat */
+    const size_t real_bytes = n * esz;
+    const size_t opnd_bytes = ((n + epb - 1) / epb) * epb * esz;
+    const size_t dep_bytes  = beat_round(n * max_deposits * esz);
+    const size_t cnt_bytes  = beat_round(n * 4);
+    const size_t img_bytes  = beat_round(image_bytes);
+
+    /* One cap covers a, b, c and d together, so the operand buffers
+     * come out as large as the deposit window - max_deposits times
+     * bigger than they need to be. That is the price of leaving the
+     * elementwise path's allocator alone for v1; the fix when it bites
+     * is a cap per buffer rather than one for four, not a second
+     * allocator. */
+    const size_t need = std::max(opnd_bytes, dep_bytes);
+
+    Tile &tile = D.tiles[0];
+
+    /* Staging touches only host-visible buffers and starts nothing, so
+     * a failure here leaves the compute unit idle and reusable. */
+    try {
+        ensure_capacity(D, tile, need);
+        ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, img_bytes);
+        ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, cnt_bytes);
+        stage(tile.a, static_cast<const uint8_t *>(a), real_bytes, opnd_bytes);
+        stage(tile.b, static_cast<const uint8_t *>(b), real_bytes, opnd_bytes);
+        stage(tile.c, static_cast<const uint8_t *>(c), real_bytes, opnd_bytes);
+        stage(tile.pg, static_cast<const uint8_t *>(image), image_bytes,
+              img_bytes);
+    } catch (const std::bad_alloc &) {
+        set_err("out of memory staging a program");
+        return ST_OUT_OF_MEMORY;
+    } catch (const std::exception &e) {
+        const std::string what = e.what();
+        if (what.find("alloc") != std::string::npos ||
+            what.find("memory") != std::string::npos ||
+            what.find("Memory") != std::string::npos) {
+            set_err("device buffer allocation failed (a program's deposit "
+                    "window is n * max_deposits elements, so it outgrows an "
+                    "HBM group sooner than an elementwise run does): " + what);
+            return ST_OUT_OF_MEMORY;
+        }
+        set_err("staging a program: " + what);
+        return ST_INTERNAL;
+    }
+
+    /* MODE[7:0] is not written because it is ignored: the program says
+     * what to compute. So is the rounding field - every instruction
+     * carries its own attribute, which is the whole reason one pass
+     * can produce both interval bounds. N is the caller's element
+     * count and NOT the padded one: lanes at or beyond it start
+     * inactive, which is how beat padding is made harmless for a
+     * program whose map nobody has read. */
+    const uint32_t mode = MODE_SEQ |
+                          (static_cast<uint32_t>(fmt & 0xF) << 8);
+
+    int status = ST_OK;
+    std::string err;
+    try {
+        xrt::run r = tile.k(mode, static_cast<uint64_t>(n),
+                            tile.a, tile.b, tile.c, tile.d,
+                            tile.pg, tile.cn);
+        ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
+        if (st != ERT_CMD_STATE_COMPLETED) {
+            status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT : ST_INTERNAL;
+            err = "the compute unit did not complete a program (state " +
+                  std::to_string(static_cast<int>(st)) + ")";
+        }
+    } catch (const std::exception &e) {
+        status = ST_INTERNAL;
+        err = std::string("running a program: ") + e.what();
+    }
+
+    if (status != ST_OK) {
+        D.poisoned = true;
+        /* Same best-effort read as cftx_run, and the same reason: the
+         * fault register can only be read once the wait has returned,
+         * so breaking out before reading it throws away the diagnosis
+         * the timeout exists to obtain. */
+        uint32_t st_acc = 0;
+        try {
+            st_acc = tile.k.read_register(CSR_STATUS);
+        } catch (const std::exception &) {
+            st_acc = 0;
+        }
+        if (bus)
+            *bus = st_acc & ST_DEPOSIT_OVERFLOW;
+        set_err(err + " - the compute unit may still be active, so this "
+                      "handle is finished; close and reopen it" +
+                (st_acc ? " (STATUS 0x" + hex32(st_acc) + ")"
+                        : " (STATUS clean, so this is a hang or a genuinely "
+                          "long program rather than a bus fault)"));
+        return status;
+    }
+
+    uint32_t status_acc = 0, flag_acc = 0;
+    try {
+        status_acc = tile.k.read_register(CSR_STATUS);
+        flag_acc   = tile.k.read_register(CSR_FLAGS);
+    } catch (const std::exception &e) {
+        D.poisoned = true;
+        set_err(std::string("reading status after a program: ") + e.what());
+        return ST_INTERNAL;
+    }
+
+    /* Faults before results, as everywhere in this file. Three
+     * outcomes rather than the elementwise path's two, because a
+     * sequencer adds a bit that is a REPORT and not a failure. */
+    if ((status_acc & ST_REFUSED) && !(status_acc & ST_BUS_BITS)) {
+        /* Two things reach this bit: a precision the bitstream does
+         * not carry, and a program image the tile threw back. The
+         * library checked CAPS before loading the program, and
+         * cft_program_load validated the image, so either one means
+         * the device and this code disagree about something both
+         * thought was settled - which is worth naming rather than
+         * folding into a bus story. The run did not happen: the
+         * deposit buffer holds whatever it held, and the image may
+         * have been READ but nothing was written. */
+        set_err("kernel REFUSED the program (STATUS 0x" + hex32(status_acc) +
+                "): either MODE selected a precision this bitstream does "
+                "not implement, or the tile rejected the program image - "
+                "too many instructions, constants or deposit slots for its "
+                "on-chip memories, or a header it did not recognise. "
+                "Nothing was computed and nothing was written.");
+        return ST_UNSUPPORTED;
+    }
+    if (status_acc & ST_BUS_BITS) {
+        if (bus)
+            *bus = status_acc;
+        set_err("kernel reported bus faults during a program; the deposits "
+                "are not valid");
+        return ST_BUS_FAULT;
+    }
+
+    try {
+        tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, dep_bytes, 0);
+        if (deposits && max_deposits)
+            std::memcpy(deposits, tile.d.map<uint8_t *>(),
+                        n * max_deposits * esz);
+        tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, cnt_bytes, 0);
+        if (counts)
+            std::memcpy(counts, tile.cn.map<uint8_t *>(), n * 4);
+    } catch (const std::exception &e) {
+        set_err(std::string("reading program results: ") + e.what());
+        return ST_INTERNAL;
+    }
+
+    if (flags)
+        *flags = flag_acc;
+    /* The deposit overflow travels in *bus on a SUCCESSFUL run, which
+     * is the one place this library puts something there without
+     * returning CFT_ERR_BUS_FAULT. It is not a fault: the deposits
+     * that fit are correct and reproducible, and what the caller lost
+     * is the tail. Telling it the results are invalid would be a
+     * worse lie than saying nothing. */
+    if (bus)
+        *bus = status_acc & ST_DEPOSIT_OVERFLOW;
     return ST_OK;
 }
 

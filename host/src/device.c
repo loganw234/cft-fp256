@@ -194,6 +194,20 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     return CFT_OK;
 }
 
+#ifdef CFT_ENABLE_XRT
+/* program.c asks this to decide which executor a program run belongs
+ * to. It is the only thing outside this file that needs to know a
+ * device has a backend at all, and it deliberately returns the opaque
+ * handle rather than the struct: the shape of cft_device stays this
+ * file's business. */
+void *cft_device_backend(const struct cft_device *dev)
+{
+    if (!dev || dev->backend != CFT_BACKEND_XRT)
+        return NULL;
+    return dev->hw;
+}
+#endif
+
 CFT_API void cft_close(cft_device *dev)
 {
     if (!dev)

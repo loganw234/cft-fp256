@@ -36,6 +36,9 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#ifdef CFT_ENABLE_XRT
+#include "backend.h"
+#endif
 
 #define SEQ_MAGIC        0x50544643u   /* "CFTP" */
 #define SEQ_VERSION      1u
@@ -61,6 +64,16 @@ struct cft_program {
     uint32_t            n_consts;
     uint64_t           *insns;
     cft_bn             *consts;
+    /* The exact bytes that were loaded, kept whole.
+     *
+     * A device is given the IMAGE, not this parsed form - "the same
+     * bytes on disk, in this call, and in the device's instruction
+     * memory" is what makes a readback able to attest what ran, and
+     * re-serialising from the fields above would be a second encoder
+     * to keep in step with the first. A program is a hundred bytes or
+     * so, so the copy costs nothing worth counting. */
+    uint8_t            *image;
+    size_t              image_bytes;
 };
 
 typedef struct {
@@ -244,6 +257,10 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
         prog->consts = (cft_bn *)calloc(n_consts, sizeof(cft_bn));
         if (!prog->consts) { cft_program_free(prog); return CFT_ERR_OUT_OF_MEMORY; }
     }
+    prog->image = (uint8_t *)malloc(bytes);
+    if (!prog->image) { cft_program_free(prog); return CFT_ERR_OUT_OF_MEMORY; }
+    memcpy(prog->image, p, bytes);
+    prog->image_bytes = bytes;
 
     for (i = 0; i < n_consts; i++)
         cft_bn_load(&prog->consts[i], p + SEQ_HEADER_BYTES + i * esz,
@@ -267,6 +284,7 @@ CFT_API void cft_program_free(cft_program *prog)
         return;
     free(prog->insns);
     free(prog->consts);
+    free(prog->image);
     free(prog);
 }
 
@@ -466,6 +484,45 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     if (prog->max_deposits &&
         n > ((size_t)-1) / prog->max_deposits / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+
+#ifdef CFT_ENABLE_XRT
+    /* The device runs the program if the device is where it was
+     * loaded. Everything above this line is argument checking that
+     * both executors need; everything below is the software one.
+     *
+     * The two must agree bit for bit, and that is not an aspiration:
+     * the tile's ALU is the same pipeline softfloat.c models
+     * (docs/SEQUENCER.md P1), the deposit address is a function of the
+     * element index alone (P2), and the early exit changes only how
+     * long the run takes (P3). So this is a dispatch and not a second
+     * implementation - which is why it hands over the IMAGE and the
+     * caller's own pointers and does nothing else.
+     *
+     * One divergence is known and deliberately not papered over here:
+     * a program with max_deposits == 0 loads and runs in software
+     * (every deposit overflows, nothing is written) and is REFUSED by
+     * the tile, whose header check requires at least one slot. The
+     * refusal surfaces as CFT_ERR_UNSUPPORTED with the reason in
+     * cft_last_error rather than being pre-empted, because inventing a
+     * host-side rule the contract does not state is how the two
+     * executors start drifting for real. */
+    {
+        void *hw = cft_device_backend(prog->dev);
+        if (hw) {
+            uint32_t fl = 0, bs = 0;
+            cft_status st = (cft_status)cftx_program_run(
+                hw, prog->fmt_code, prog->image, prog->image_bytes,
+                prog->max_deposits, a, b, c, deposits, counts, n, &fl, &bs);
+            if (st == CFT_OK) {
+                if (flags)
+                    *flags = fl;
+                if (bus)
+                    *bus = bs;
+            }
+            return st;
+        }
+    }
+#endif
 
     /* Every slot is written, including ones no lane deposits into: an
      * untouched slot reads as +0 by definition, and a run that left

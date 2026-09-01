@@ -77,6 +77,43 @@ int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
                  const size_t *lo, const size_t *hi, size_t nranges,
                  void *partials, uint32_t *flags, uint32_t *bus);
 
+/* Run a sequencer program (docs/SEQUENCER.md) on ONE compute unit.
+ *
+ * `image` is the exact byte image cft_program_load validated, DMA'd
+ * into the tile whole rather than reassembled from the parsed form -
+ * so what executes is what was loaded, and a readback can attest it.
+ * `max_deposits` comes from the image's header and shapes `deposits`
+ * at n * max_deposits elements; `counts` may be NULL, though the tile
+ * writes the counts regardless and the backend supplies a buffer for
+ * them either way.
+ *
+ * flags is the run's sticky IEEE word. bus carries STATUS: bits 0..2
+ * only on CFT_ERR_BUS_FAULT, as everywhere else in this header, and
+ * CFT_STATUS_DEPOSIT_OVERFLOW (bit 4) on success - which is a report
+ * rather than an error, because what fit is correct.
+ *
+ * ONE compute unit, deliberately. See the note in the implementation
+ * beside cftx_run's partitioning: an elementwise element depends on
+ * its own index alone, and a sequencer lane does too - but the early
+ * exit is a CROSS-LANE condition, so splitting lanes across tiles is
+ * a claim about P3 that wants its own fuzz before it ships. */
+int  cftx_program_run(void *hw, int fmt, const void *image,
+                      size_t image_bytes, uint32_t max_deposits,
+                      const void *a, const void *b, const void *c,
+                      void *deposits, uint32_t *counts, size_t n,
+                      uint32_t *flags, uint32_t *bus);
+
+/* The backend handle behind a device, or NULL if it was opened without
+ * an artifact and is therefore the software one.
+ *
+ * The other direction to everything above: device.c owns struct
+ * cft_device, and program.c has to ask it which executor a program
+ * belongs to. Declared here because here is where the two sides
+ * already meet, and a bare extern in a .c file is how a signature
+ * drifts out of step with its definition. */
+struct cft_device;
+void *cft_device_backend(const struct cft_device *dev);
+
 /* The message from the most recent failure, or "". Static storage,
  * overwritten by the next one. XRT's exceptions carry the only
  * explanation of most device failures that anybody will ever get, and

@@ -47,6 +47,27 @@
       <arg name="d" addressQualifier="1" id="5" port="m_axi_d"
            size="0x8" offset="0x38" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
+      <!-- The sequencer's two pointers, APPENDED. New arguments go on
+           the end and nowhere else: an id is a position in every
+           host's kernel call, so inserting one would silently renumber
+           a, b, c and d and every existing binary would bind its
+           operands to the wrong ports. Their offsets sit ABOVE the
+           read-only CSR block (0x40..0x50) for the same reason - the
+           gap that would have kept them beside the other pointers does
+           not exist, and moving those to make one is the same ABI
+           break by another route.
+
+           prog is READ, so it binds to the port the sequencer reads
+           through (m_axi_a, which it borrows from the elementwise
+           engine); counts are WRITTEN, so cnt binds to m_axi_d. That
+           is what puts each buffer in the HBM group its master can
+           actually reach - see hw/link.cfg. -->
+      <arg name="prog" addressQualifier="1" id="6" port="m_axi_a"
+           size="0x8" offset="0x54" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
+      <arg name="cnt" addressQualifier="1" id="7" port="m_axi_d"
+           size="0x8" offset="0x5C" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
     </args>
   </kernel>
 </root>
