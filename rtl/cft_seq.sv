@@ -228,6 +228,14 @@ module cft_seq #(
       default:    wpe_sh = 2'd3;
     endcase
   end
+  // ...and the same number as a SHIFT AMOUNT on bytes: esz == 1 <<
+  // esz_sh. An element is (1 << wpe_sh) words and a word is
+  // BEAT_BYTES/WORDS bytes, so this is derived from the decode above
+  // rather than written down a second time. Every address in this
+  // module scales by esz; a fifth transcription of 4/8/16/32 is a
+  // fifth chance to get one of them wrong.
+  logic [2:0] esz_sh;
+  assign esz_sh = {1'b0, wpe_sh} + 3'($clog2(BEAT_BYTES / WORDS));
 
   // ---- program state --------------------------------------------------
   logic [31:0] h_ninsns, h_nconsts, h_maxdep;
@@ -376,8 +384,45 @@ module cft_seq #(
   logic [LB:0] blk_n;              // 1..BLK_LANES
   logic [4:0]  nb_blk;             // beats holding them
 
+  // Where this block sits in the caller's buffers, carried forward a
+  // block at a time instead of multiplied out. One block covers
+  // blk_cap * esz bytes of input, and that is NBEATS * BEAT_BYTES at
+  // EVERY precision - blk_cap is NBEATS << lpb_sh and esz is
+  // BEAT_BYTES >> lpb_sh, so the shifts cancel. The input stride is
+  // therefore a compile-time constant, and the deposit stride is that
+  // constant scaled by max_deposits: one shift of a header field,
+  // taken once per run.
+  //
+  // Written the obvious way - d_q + blk_base * esz * h_maxdep - that
+  // address was a 64x6x32 product in a single cycle, four DSP48
+  // slices in cascade feeding a 64-bit adder, and it was the kernel's
+  // worst path by 0.17 ns at 135 MHz.
+  localparam int BLK_BYTES = NBEATS * BEAT_BYTES;
+  localparam int BLK_SH    = $clog2(BLK_BYTES);
+  logic [ADDR_W-1:0] in_off;       // blk_base * esz
+  logic [ADDR_W-1:0] dep_off;      // blk_base * esz * h_maxdep
+  logic [ADDR_W-1:0] dep_stride;   // BLK_BYTES * h_maxdep
+
+  // blk_n * max_deposits, the block's deposit-element count. Both
+  // factors are run-time values, so this is the one product in the
+  // module that no shift replaces; it is formed one bit of the
+  // multiplier per cycle inside the register-file wipe, which is RF_D
+  // cycles long and has CW of them to spare.
+  logic [31:0]   dep_elems;
+  logic [31:0]   dep_addend;
+  logic [CW-1:0] dep_mult;
+
   // ---- byte-stream image parser (constants + instructions) -----------
-  logic [2*BEAT_BITS-1:0] pw;
+  // The peel window never holds more than one absorbed beat plus the
+  // residue that made room for it, and rready is asserted ONLY when
+  // that residue is about to fall below 8 bytes (see S_IMG_PARSE), so
+  // its high-water mark is BEAT_BYTES + 7. Sized at two beats and
+  // filled with a shift by the full 7-bit byte count, the absorb was
+  // a 512-bit barrel shifter with 512 positions - nine stages of
+  // 512-bit multiplexer for a value that only ever lands on one of
+  // eight byte offsets.
+  localparam int PWW = BEAT_BITS + 64;
+  logic [PWW-1:0] pw;
   logic [6:0]  pw_have;
   logic [255:0] hdr_q;              // the header beat, verbatim
   logic [31:0] kons_left, insn_left;
@@ -581,6 +626,7 @@ module cft_seq #(
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0;
       blk_base <= '0; active <= '0; dcnt <= '0;
+      in_off <= '0; dep_off <= '0;
       rd_addr <= '0; wr_addr <= '0;
 
     end else begin
@@ -679,6 +725,9 @@ module cft_seq #(
           h_ninsns  <= hdr_q[95:64];
           h_nconsts <= hdr_q[127:96];
           h_maxdep  <= hdr_q[159:128];
+          // one block's deposit window: BLK_BYTES of input lanes
+          // times max_deposits slots each
+          dep_stride <= ADDR_W'({32'b0, hdr_q[159:128]} << BLK_SH);
           if (hdr_q[31:0] != 32'h5054_4643 || hdr_q[63:32] != 32'd1 ||
               hdr_q[191:160] != {30'b0, prec_q} ||
               hdr_q[95:64] > IMEM_D || hdr_q[127:96] > KMEM_D ||
@@ -693,7 +742,7 @@ module cft_seq #(
         S_IMG_GO: begin
           rd_addr <= prog_q + 32;
           rd_beats_left <=
-            (h_nconsts * {26'b0, esz} + h_ninsns * 32'd8 + 32'd31) >> 5;
+            ((h_nconsts << esz_sh) + (h_ninsns << 3) + 32'd31) >> 5;
           rd_stream_on <= 1'b1;
           kons_left <= h_nconsts;
           insn_left <= h_ninsns;
@@ -732,14 +781,20 @@ module cft_seq #(
             m_rd_rready <= ((pw_have - 7'd8) < 7'd8) &&
                            (insn_left != 1);
           end else if (m_rd_rvalid && m_rd_rready) begin
-            pw <= pw | ({{BEAT_BITS{1'b0}}, m_rd_rdata}
-                        << ({2'b0, pw_have} << 3));
+            // Only the low three bits of pw_have: every assignment to
+            // rready above sets it from a window that will hold FEWER
+            // THAN 8 bytes, so a beat is never accepted at any other
+            // offset. Shifting by all seven bits asked for 512
+            // landing places instead of 8.
+            pw <= pw | (PWW'(m_rd_rdata) << ({4'b0, pw_have[2:0]} << 3));
             pw_have <= pw_have + 7'(BEAT_BYTES);
             m_rd_rready <= 1'b0;         // window now needs draining
           end else if (kons_left == 0 && insn_left == 0) begin
             m_rd_rready <= 1'b0;
             rd_stream_on <= 1'b0;
             blk_base <= '0;
+            in_off   <= '0;
+            dep_off  <= '0;
             st <= S_BLK_SETUP;
           end else
             m_rd_rready <= (pw_have < 7'd8);
@@ -766,11 +821,32 @@ module cft_seq #(
           rf_wdata <= '0;
           rf_wwe <= {WORDS{1'b1}};
           zaddr <= zaddr + 1;
+          // ...and, in the same window, blk_n * max_deposits, one bit
+          // of the multiplier per cycle. RF_D is 16 * NBEATS and
+          // NBEATS is at least LATENCY+1, so the CW steps this takes
+          // always finish long before the wipe does.
+          if (zaddr == 0) begin
+            dep_elems  <= '0;
+            dep_addend <= 32'(blk_n);
+            dep_mult   <= h_maxdep[CW-1:0];
+          end else begin
+            if (dep_mult[0]) dep_elems <= dep_elems + dep_addend;
+            dep_addend <= dep_addend << 1;
+            dep_mult   <= dep_mult >> 1;
+          end
           if (zaddr == 9'(RF_D - 1)) begin
+            // A lane is active iff its index is below the block's
+            // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
+            // computed one state ago. The first version asked each of
+            // the 128 lanes the two questions separately, which is
+            // 128 64-bit adds against n_q and 128 64-bit compares.
             for (int l = 0; l < BLK_LANES; l = l + 1)
-              active[l] <= (l < 32'(blk_cap)) && (blk_base + l < n_q);
+              active[l] <= (l < 32'(blk_n));
             dcnt <= '0;
-            nb_blk <= 5'(({58'b0, esz} * blk_n + BEAT_BYTES - 1) >> 5);
+            // beats holding blk_n lanes = ceil(blk_n / lanes-per-beat):
+            // esz * lpb is BEAT_BYTES at every precision, so dividing
+            // esz * blk_n by BEAT_BYTES is dividing blk_n by lpb.
+            nb_blk <= 5'(({1'b0, blk_n} + 9'(lpb) - 9'd1) >> lpb_sh);
             ld_reg <= 2'd0;
             pc <= '0;
             lp_sp <= '0;
@@ -780,7 +856,7 @@ module cft_seq #(
 
         S_LD_GO: begin
           rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
-                     + blk_base * {58'b0, esz};
+                     + in_off;
           rd_beats_left <= {27'b0, nb_blk};
           rd_stream_on <= 1'b1;
           m_rd_rready <= 1'b1;
@@ -863,8 +939,7 @@ module cft_seq #(
               end
               C_ACTALL: begin
                 for (int l = 0; l < BLK_LANES; l = l + 1)
-                  active[l] <= (l < 32'(blk_cap)) &&
-                               (blk_base + l < n_q);
+                  active[l] <= (l < 32'(blk_n));
                 pc <= pc + 1;
                 st <= S_FETCH;
               end
@@ -1016,10 +1091,9 @@ module cft_seq #(
           slot_cursor <= '0;
           as_fill <= '0; as_strb <= '0; as_data <= '0;
           drain_last <= 1'b0;
-          wr_addr <= d_q + blk_base * {58'b0, esz} * {32'b0, h_maxdep};
-          wr_beats_left <= 32'(({32'b0, blk_n} * {58'b0, esz}
-                                * {32'b0, h_maxdep}
-                                + BEAT_BYTES - 1) >> 5);
+          wr_addr <= d_q + dep_off;
+          wr_beats_left <= ((dep_elems << esz_sh)
+                            + 32'(BEAT_BYTES) - 32'd1) >> 5;
           wr_stream_on <= 1'b1;
           wr_bresp_left <= '0;
           m_wr_bready <= 1'b1;
@@ -1090,9 +1164,9 @@ module cft_seq #(
           // to go quiet before switching targets
           if (wr_burst_left == 0 && !m_wr_awvalid && !wr_aw_open &&
               !m_wr_wvalid && wr_beats_left == 0) begin
-            wr_addr <= cnt_q + blk_base * 4;
-            wr_beats_left <= (32'({32'b0, blk_n} * 4)
-                              + BEAT_BYTES - 1) >> 5;
+            wr_addr <= cnt_q + (blk_base << 2);
+            wr_beats_left <= ((32'(blk_n) << 2)
+                              + 32'(BEAT_BYTES) - 32'd1) >> 5;
             st <= S_CNT_PACK;
           end
         end
@@ -1136,6 +1210,8 @@ module cft_seq #(
 
         S_NEXT_BLK: begin
           blk_base <= blk_base + {56'b0, blk_cap};
+          in_off   <= in_off  + ADDR_W'(BLK_BYTES);
+          dep_off  <= dep_off + dep_stride;
           st <= S_BLK_SETUP;
         end
 
