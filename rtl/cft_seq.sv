@@ -1113,11 +1113,21 @@ module cft_seq #(
         S_DRAIN_W8: st <= S_DRAIN_PACK;
 
         S_DRAIN_PACK: begin
-          for (int by = 0; by < 32; by = by + 1)
-            if (by < 32'(esz)) begin
-              as_data[(32'(as_fill) + by) * 8 +: 8] <=
-                drain_elem[by*8 +: 8];
-              as_strb[32'(as_fill) + by] <= 1'b1;
+          // An element lands on an ELEMENT boundary, never an
+          // arbitrary byte one: as_fill starts at zero and advances by
+          // esz, so a beat is a row of lpb slots and this fills slot
+          // as_fill >> esz_sh - whole 32-bit words, because every
+          // format's element is a whole number of words. Expressed as
+          // a byte loop over a variable base it was a 256-bit
+          // variable byte shifter: 32 output bytes each selected from
+          // 32 sources, for a value that only ever lands on one of at
+          // most eight slots.
+          for (int w = 0; w < WORDS; w = w + 1)
+            if ((32'(w) >> wpe_sh) == (32'(as_fill) >> esz_sh)) begin
+              as_data[w*32 +: 32] <=
+                drain_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1))
+                           * 32 +: 32];
+              as_strb[w*4 +: 4] <= 4'hf;
             end
           as_fill <= as_fill + esz;
           if (32'(lane_cursor) == 32'(blk_n) - 1 &&
@@ -1172,10 +1182,15 @@ module cft_seq #(
         end
 
         S_CNT_PACK: begin
-          as_data[32'(as_fill) * 8 +: 32] <=
-            32'(dcnt[32'(lane_cursor[LB-1:0]) * CW +: CW]);
-          for (int by = 0; by < 4; by = by + 1)
-            as_strb[32'(as_fill) + by] <= 1'b1;
+          // A count is one word and as_fill advances by four, so the
+          // same word-slot argument as S_DRAIN_PACK applies, with the
+          // slot fixed at four bytes.
+          for (int w = 0; w < WORDS; w = w + 1)
+            if (32'(w) == (32'(as_fill) >> 2)) begin
+              as_data[w*32 +: 32] <=
+                32'(dcnt[32'(lane_cursor[LB-1:0]) * CW +: CW]);
+              as_strb[w*4 +: 4] <= 4'hf;
+            end
           as_fill <= as_fill + 6'd4;
           if (32'(lane_cursor) == 32'(blk_n) - 1)
             drain_last <= 1'b1;
