@@ -39,7 +39,8 @@ module cft_opmux #(
 
   logic [EXP_W-1:0] bias_f;
   logic [W-1:0]     one;
-  assign bias_f = BIAS;
+  // BIAS is 2^(EXP_W-1)-1, so the field select loses nothing.
+  assign bias_f = BIAS[EXP_W-1:0];
   assign one = {1'b0, bias_f, {MAN_W{1'b0}}};
 
   always_comb begin

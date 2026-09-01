@@ -255,7 +255,12 @@ module cft_engine_stream #(
 
   localparam int BURST_MAX = 1 << BURST_LOG2;
   localparam int FDEPTH    = 1 << FIFO_LOG2;
-  localparam logic [7:0] AR_MAX = AR_DEPTH;
+  // Explicitly the low byte. rd_outst counts in 8 bits, so an AR_DEPTH
+  // above 255 would wrap here and stall the launch compare - nothing
+  // guards that (every build uses the default 4; the reservation guard
+  // below binds first for any FIFO this design has ever built, but it
+  // is not a proof). Flagged by the width audit as an open finding.
+  localparam logic [7:0] AR_MAX = AR_DEPTH[7:0];
 
   // The writer starts a burst only once the result FIFO holds the
   // whole burst, so a burst longer than the FIFO can never start and
@@ -456,6 +461,14 @@ module cft_engine_stream #(
   logic [BEAT_BITS-1:0] a_q, b_q, c_q, d_qout;
   logic [FIFO_LOG2:0] a_cnt, b_cnt, c_cnt, d_cnt;
 
+  // WIDTH is a hardcoded 256 while the beats are BEAT_BITS wide, so the
+  // quarter tile zero-extends every 64-bit beat into a 256-bit FIFO and
+  // drops the zeros again at the read port. The bits are safe - what
+  // goes in comes out - but the tile carries 4x the BRAM it needs,
+  // which is the same parameterization trap burst_len() and w_target
+  // document. Shrinking the FIFO is not a bit-level no-op, so the width
+  // audit left it as a finding rather than a fix.
+  /* verilator lint_off WIDTHEXPAND */
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_a (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
       .wr_en(a_wr), .wr_data(m_axi_a_rdata),
@@ -468,6 +481,7 @@ module cft_engine_stream #(
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
       .wr_en(c_wr), .wr_data(m_axi_c_rdata),
       .rd_en(abc_rd), .rd_data(c_q), .count(c_cnt));
+  /* verilator lint_on WIDTHEXPAND */
 
   // ---- readers: one per stream, ARs pipelined ------------------------
   //
@@ -575,8 +589,10 @@ module cft_engine_stream #(
       // to respect a hard AXI rule.
       bound = (64'd4096 - {52'd0, addr[11:0]}) >> ADDR_SH;
       used  = {{(63-FIFO_LOG2){1'b0}}, cnt} + {48'd0, resv};
-      free  = (used >= FDEPTH) ? 64'd0 : (FDEPTH - used);
-      l = BURST_MAX;
+      // FDEPTH/BURST_MAX zero-filled to the working width; both are
+      // positive powers of two, so sign never enters into it.
+      free  = (used >= {32'd0, FDEPTH}) ? 64'd0 : ({32'd0, FDEPTH} - used);
+      l = {32'd0, BURST_MAX};
       if (rem   < l) l = rem;
       if (bound < l) l = bound;
       if (free  < l) l = free;
@@ -783,6 +799,11 @@ module cft_engine_stream #(
   logic [5:0]  ser_idx, ser_cnt;
   logic        ser_busy;
   logic [BEAT_BITS-1:0] ser_data;
+  // Real elements not yet serialized. Named once: the beat-load below
+  // used to spell this expression twice, in the compare and again in
+  // the arm it selected.
+  logic [63:0] ser_rem;
+  assign ser_rem = n_elems - (ser_beat_idx << beat_sh_r);
 
   logic red_in_valid, red_in_ready;
   logic [BEAT_BITS-1:0] red_in_elem;
@@ -836,9 +857,9 @@ module cft_engine_stream #(
         // That makes the DSP count a standing check on this line: the
         // ladder says 262, and any excess is a multiply that should
         // have been a shift.
-        ser_cnt  <= ((n_elems - (ser_beat_idx << beat_sh_r)) < {58'd0, epb})
-                    ? (n_elems - (ser_beat_idx << beat_sh_r))
-                    : {58'd0, epb};
+        // min(ser_rem, epb). The chosen value is at most epb < 64, so
+        // the six-bit select keeps it exactly.
+        ser_cnt  <= (ser_rem < {58'd0, epb}) ? ser_rem[5:0] : epb;
         ser_beat_idx <= ser_beat_idx + 64'd1;
         ser_busy <= 1'b1;
       end else if (ser_busy && red_in_valid && red_in_ready) begin
@@ -901,10 +922,14 @@ module cft_engine_stream #(
 
   // In reduction mode the elementwise path is idle: the only work the
   // banks do is the accumulator's adds, issued through lane 0.
+  // The occupancy sum is done at 32 bits, zero-filled explicitly - at
+  // its own width a full FIFO plus the pipe's in-flight beats could
+  // wrap the compare and overfill the D FIFO.
   assign ex_valid = running && !is_reduce &&
                     (issued_beats < beats_total) &&
                     (a_cnt != 0) && (b_cnt != 0) && (c_cnt != 0) &&
-                    ((d_cnt + inflight) < FDEPTH);
+                    (({{(31-FIFO_LOG2){1'b0}}, d_cnt} + {24'd0, inflight})
+                     < FDEPTH);
 
   // The serializer owns the operand FIFOs while reducing. It pops only
   // the `a` stream's beat, but all three advance together because they
@@ -1454,10 +1479,14 @@ module cft_engine_stream #(
   // its low bits. Everything above the element is zero because the
   // accumulator was fed masked values; the host copies back one element
   // and ignores the rest.
+  // Same hardcoded WIDTH as the three operand FIFOs above, same
+  // finding: bits safe, quarter-tile area wrong.
+  /* verilator lint_off WIDTHEXPAND */
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_d (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
       .wr_en(d_wr), .wr_data(is_reduce ? red_out_data : beat_d),
       .rd_en(d_rd), .rd_data(d_qout), .count(d_cnt));
+  /* verilator lint_on WIDTHEXPAND */
 
   // ---- writer: index-order bursts from the D FIFO --------------------
   localparam logic [1:0] W_IDLE = 2'd0, W_AW = 2'd1, W_DATA = 2'd2, W_B = 2'd3;
@@ -1483,7 +1512,7 @@ module cft_engine_stream #(
     // which clears w_go permanently: wr_done stops, ap_done never
     // asserts, and the run hangs until the host's timeout.
     bound = (64'd4096 - {52'd0, addr_w[11:0]}) >> ADDR_SH;
-    l = BURST_MAX;
+    l = {32'd0, BURST_MAX};
     if (rem_w < l) l = rem_w;
     if (bound < l) l = bound;
     w_target = l[7:0];

@@ -17,6 +17,11 @@
 // It is a testbench artifact. Nothing synthesises it, and it must not
 // be edited to track changes in the real module - a reference that
 // follows the thing it checks is not a reference.
+//
+// One concession since the freeze, in comments only: a lint pragma
+// pair around `bias_f = BIAS`, added when the width-warning blanket
+// came off tb/cocotb.mk. The live module made that select explicit;
+// this file keeps the frozen spelling, waived and justified in place.
 
 `timescale 1ns/1ps
 
@@ -62,7 +67,10 @@ module cft_simpleops_ref #(
   logic [W-1:0]     qnan, one, pzero;
   logic [EXP_W-1:0] bias_f;
   assign qnan   = {1'b0, {EXP_W{1'b1}}, 1'b1, {(MAN_W-1){1'b0}}};
+  // Frozen spelling; BIAS is 2^(EXP_W-1)-1 and fits the field exactly.
+  /* verilator lint_off WIDTHTRUNC */
   assign bias_f = BIAS;
+  /* verilator lint_on WIDTHTRUNC */
   assign one    = {1'b0, bias_f, {MAN_W{1'b0}}};
   assign pzero  = '0;
 

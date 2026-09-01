@@ -76,7 +76,9 @@ module cft_fifo #(
     end else begin
       if (wr_en) wp <= wp + 1'b1;
       if (rd_en) rp <= rp + 1'b1;
-      count <= count + (wr_en ? 1'b1 : 1'b0) - (rd_en ? 1'b1 : 1'b0);
+      // The enables zero-extended to count's width: +1, +0, or -1.
+      count <= count + {{DEPTH_LOG2{1'b0}}, wr_en}
+                     - {{DEPTH_LOG2{1'b0}}, rd_en};
     end
   end
 
