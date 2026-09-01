@@ -333,7 +333,7 @@ module cft_seq #(
   // simulation time the first time the drain phase ran. Packed bits
   // have neither problem, and any(active) collapses to a reduction.
   //
-  // Indexed by SLOT - (beat << WSH) + position-within-beat - and NOT
+  // Indexed by SLOT - beat * WORDS + position-within-beat - and NOT
   // by the dense lane index. The two agree at fp32 and part below it:
   // an fp64 beat holds four lanes but still owns eight slots, four of
   // them permanently empty. The vector is the same NBEATS * WORDS
@@ -350,7 +350,6 @@ module cft_seq #(
   // of BLK_LANES. It is also the register file's own shape: that has
   // always been addressed {reg, beat} with one enable per word.
   localparam int CW   = $clog2(MAXD + 1);
-  localparam int WSH  = $clog2(WORDS);       // slot stride, in bits
   localparam int NBSH = $clog2(NBEATS);      // beat index width
   logic [BLK_LANES-1:0]    active;
   logic [BLK_LANES*CW-1:0] dcnt;
@@ -550,19 +549,82 @@ module cft_seq #(
   assign refuse = refuse_q;
   assign busy   = (st != S_IDLE);
 
-  // first block-lane of beat `beat` is beat << lpb_sh; lane l sits in
-  // beat (l >> lpb_sh) at position (l & (lpb-1))
-  function automatic logic lane_in_beat(input int l, input [5:0] beat);
-    lane_in_beat = ((l >> lpb_sh) == {26'b0, beat});
+  // ---- reaching one beat's row of lane state ------------------------
+  // NOTHING below indexes `active` or `dcnt` with a computed
+  // expression. Every select and every write here is a loop over
+  // CONSTANT indices with an equality test picking the beat, and that
+  // is the whole trick: a variable part-select of a wide packed
+  // vector is a promise the tool cannot check, so it hedges. On the
+  // read side it builds a multiplexer over every offset the
+  // expression's range allows; on the WRITE side it is worse, because
+  // it must decide per bit whether the window covers it, and dcnt is
+  // 896 bits. `dcnt[<expr> +: CW] <= v` cost 6,933 LUTs - more than
+  // half of everything left in the module - and the same behaviour
+  // written as sixteen constant-index alternatives costs the sixteen
+  // comparators, because the flip-flops then take their own enables.
+  // The beat index is truncated to the NBSH bits the register file
+  // already addresses with (rf_waddr carries wb_bt[NBSH-1:0]), so no
+  // caller needs a range guard.
+  function automatic [WORDS-1:0] row_act_fn(input [BLK_LANES-1:0] act,
+                                            input [5:0] beat);
+    logic [WORDS-1:0] r;
+    begin
+      r = '0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        if (b == 32'(beat[NBSH-1:0]))
+          r = act[b*WORDS +: WORDS];
+      row_act_fn = r;
+    end
   endfunction
 
-  // slot of lane position p in beat `beat`. The beat index is
-  // truncated to the NBSH bits the register file already addresses
-  // with (rf_waddr carries wb_bt[NBSH-1:0]), so the result is always
-  // a slot that exists and no caller needs a range guard.
-  function automatic [LB-1:0] slot_of(input [5:0] beat, input int p);
-    slot_of = LB'((32'(beat[NBSH-1:0]) << WSH) + p);
+  function automatic [WORDS*CW-1:0] row_cnt_fn(
+                                       input [BLK_LANES*CW-1:0] cnts,
+                                       input [5:0] beat);
+    logic [WORDS*CW-1:0] r;
+    begin
+      r = '0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        if (b == 32'(beat[NBSH-1:0]))
+          r = cnts[b*WORDS*CW +: WORDS*CW];
+      row_cnt_fn = r;
+    end
   endfunction
+
+  function automatic [CW-1:0] pick_cnt_fn(input [WORDS*CW-1:0] row,
+                                          input [2:0] posn);
+    logic [CW-1:0] r;
+    begin
+      r = '0;
+      for (int q = 0; q < WORDS; q = q + 1)
+        if (q == 32'({29'b0, posn}))
+          r = row[q*CW +: CW];
+      pick_cnt_fn = r;
+    end
+  endfunction
+
+  // The row DEPOSIT and SETACT are working on, and the row retiring
+  // into the register file.
+  logic [WORDS-1:0]    bt_act, wb_act;
+  logic [WORDS*CW-1:0] bt_cnt;
+  assign bt_act = row_act_fn(active, bt);
+  assign wb_act = row_act_fn(active, wb_bt);
+  assign bt_cnt = row_cnt_fn(dcnt, bt);
+
+  // DEPOSIT's whole decision for the row: which positions may append,
+  // which have run out of slots, and what their counts become. Eight
+  // incrementers and eight comparators serve all sixteen beats,
+  // because the write below only selects between them.
+  logic [WORDS*CW-1:0] bt_cnt_inc;
+  logic [WORDS-1:0]    bt_dep_go, bt_dep_ovf;
+  generate
+    for (genvar gq = 0; gq < WORDS; gq = gq + 1) begin : g_dep
+      assign bt_cnt_inc[gq*CW +: CW] = bt_cnt[gq*CW +: CW] + CW'(1);
+      assign bt_dep_go[gq]  = (gq < 32'(lpb)) && bt_act[gq] &&
+                              (32'(bt_cnt[gq*CW +: CW]) < h_maxdep);
+      assign bt_dep_ovf[gq] = (gq < 32'(lpb)) && bt_act[gq] &&
+                              !(32'(bt_cnt[gq*CW +: CW]) < h_maxdep);
+    end
+  endgenerate
 
   // magnitude-nonzero of lane position `posn` in a beat (SETACT),
   // asked of the beat's per-word OR terms rather than of the beat.
@@ -583,6 +645,7 @@ module cft_seq #(
 
   // (the OR terms are named word_or/word_orm because `wor` is a
   // Verilog net type and an argument called that parses as one)
+  // sa_nz below is SETACT's answer for all eight positions.
   function automatic logic lane_mag_nz(input [WORDS-1:0] word_or,
                                        input [WORDS-1:0] word_orm,
                                        input [2:0] posn,
@@ -601,6 +664,12 @@ module cft_seq #(
       lane_mag_nz = acc;
     end
   endfunction
+  logic [WORDS-1:0] sa_nz;
+  generate
+    for (genvar gn = 0; gn < WORDS; gn = gn + 1) begin : g_nz
+      assign sa_nz[gn] = lane_mag_nz(sa_wor, sa_worm, 3'(gn), wpe_sh);
+    end
+  endgenerate
 
   // the drain element for (lane_cursor, slot_cursor), +0 when the
   // lane never reached the slot; db_rdata was addressed last cycle
@@ -617,21 +686,20 @@ module cft_seq #(
   // element behind itself with a zero at the front. (burst_len never
   // misbehaved for exactly this reason - its reads were always
   // arguments.)
-  function automatic [4:0] wb_flags_fn(input [5:0] beat,
-                                       input [BLK_LANES-1:0] act,
+  function automatic [4:0] wb_flags_fn(input [WORDS-1:0] act,
                                        input [WORDS*5-1:0] lf,
                                        input [3:0] lanes);
     logic [4:0] acc;
     begin
       acc = 5'b0;
       for (int p = 0; p < WORDS; p = p + 1)
-        if (p < 32'(lanes) && act[(32'(beat[NBSH-1:0]) << WSH) + p])
+        if (p < 32'(lanes) && act[p])
           acc = acc | lf[p*5 +: 5];
       wb_flags_fn = acc;
     end
   endfunction
   logic [4:0] wb_flags_or;
-  assign wb_flags_or = wb_flags_fn(wb_bt, active, al_lf, lpb);
+  assign wb_flags_or = wb_flags_fn(wb_act, al_lf, lpb);
 
   // Per-word register-file write enables for the beat retiring now:
   // word w carries lane position w >> wpe_sh, and a word enable IS a
@@ -639,19 +707,18 @@ module cft_seq #(
   // words. Built once here rather than twice in the state machine -
   // the issue state and the wait state retire beats through the same
   // masking and were carrying a copy each.
-  function automatic [WORDS-1:0] wb_wwe_fn(input [5:0] beat,
-                                           input [BLK_LANES-1:0] act,
+  function automatic [WORDS-1:0] wb_wwe_fn(input [WORDS-1:0] act,
                                            input [1:0] wsh);
     logic [WORDS-1:0] e;
     begin
       e = '0;
       for (int w = 0; w < WORDS; w = w + 1)
-        e[w] = act[(32'(beat[NBSH-1:0]) << WSH) + (32'(w) >> wsh)];
+        e[w] = act[32'(w) >> wsh];
       wb_wwe_fn = e;
     end
   endfunction
   logic [WORDS-1:0] wb_wwe;
-  assign wb_wwe = wb_wwe_fn(wb_bt, active, wpe_sh);
+  assign wb_wwe = wb_wwe_fn(wb_act, wpe_sh);
 
   // The block's opening active mask: slot (b, p) belongs to a lane
   // the caller has iff the position exists at this format and the
@@ -678,45 +745,48 @@ module cft_seq #(
   // lane_cursor counts lanes densely - the drain visits them in the
   // caller's index order - while the lane state is addressed by slot,
   // so the two meet here.
-  function automatic [LB-1:0] cur_slot_fn(input [LB:0] lc,
-                                          input [3:0] lanes,
-                                          input [1:0] lsh);
-    cur_slot_fn = LB'(((32'(lc[LB-1:0]) >> lsh) << WSH)
-                      + (32'(lc[LB-1:0]) & 32'(lanes - 1)));
-  endfunction
+  // The drain cursor's beat and position. lane_cursor counts lanes
+  // densely - the drain visits them in the caller's index order -
+  // while the lane state is addressed by (beat, position).
+  logic [5:0] dc_beat;
+  logic [2:0] dc_posn;
+  assign dc_beat = 6'(32'(lane_cursor[LB-1:0]) >> lpb_sh);
+  assign dc_posn = 3'(lane_cursor[LB-1:0] & {3'(lpb - 1)});
 
   // The cursor lane's deposit count, selected once. Both the drain
   // ("has this lane reached this slot?") and the count pack want it,
   // and each selecting it for itself was a second 128-entry lookup
   // into a 896-bit vector. dcnt is read in the assign itself, not
   // through a function's scope, so it is in the sensitivity.
-  logic [CW-1:0] cur_cnt;
-  assign cur_cnt =
-    dcnt[32'(cur_slot_fn(lane_cursor, lpb, lpb_sh)) * CW +: CW];
+  logic [WORDS*CW-1:0] dc_row;
+  logic [CW-1:0]       cur_cnt;
+  assign dc_row  = row_cnt_fn(dcnt, dc_beat);
+  assign cur_cnt = pick_cnt_fn(dc_row, dc_posn);
 
-  function automatic [255:0] drain_elem_fn(input [LB:0] lc,
+  function automatic [255:0] drain_elem_fn(input [2:0] posn,
                                            input [31:0] sc,
                                            input [CW-1:0] cnt,
                                            input [WORDS*32-1:0] rdata,
-                                           input [3:0] lanes,
                                            input [1:0] wsh);
-    logic [2:0] posn;
     logic [255:0] v;
     begin
-      posn = 3'(lc[LB-1:0] & {3'(lanes - 1)});
       v = '0;
+      // lane `posn` occupies banks posn << wsh upward; both sides of
+      // this are constant selects with an equality picking the bank,
+      // for the reason row_act_fn gives.
       for (int w = 0; w < WORDS; w = w + 1)
-        if (w < (32'd1 << wsh))
-          v[w*32 +: 32] =
-            rdata[(32'({29'b0, posn} << wsh) + w) * 32 +: 32];
+        for (int src = 0; src < WORDS; src = src + 1)
+          if (w < (32'd1 << wsh) &&
+              src == 32'({29'b0, posn} << wsh) + w)
+            v[w*32 +: 32] = rdata[src*32 +: 32];
       if (sc >= 32'(cnt))
         v = '0;
       drain_elem_fn = v;
     end
   endfunction
   logic [255:0] drain_elem;
-  assign drain_elem = drain_elem_fn(lane_cursor, slot_cursor, cur_cnt,
-                                    db_rdata, lpb, wpe_sh);
+  assign drain_elem = drain_elem_fn(dc_posn, slot_cursor, cur_cnt,
+                                    db_rdata, wpe_sh);
 
 
   // ==== the machine ====================================================
@@ -1146,28 +1216,23 @@ module cft_seq #(
           // makes one beat per cycle possible even after SETACT has
           // left the beat's lanes with divergent counts.
           for (int p = 0; p < WORDS; p = p + 1)
-            if ((32'(p) >> wpe_sh) < 32'(lpb) &&
-                active[slot_of(bt, 32'(p) >> wpe_sh)] &&
-                32'(dcnt[32'(slot_of(bt, 32'(p) >> wpe_sh)) * CW
-                         +: CW]) < h_maxdep) begin
+            if (bt_dep_go[32'(p) >> wpe_sh]) begin
               db_we[p] <= 1'b1;
               db_waddr[p*DBA +: DBA] <= DBA'(32'(bt) * MAXD +
-                  32'(dcnt[32'(slot_of(bt, 32'(p) >> wpe_sh)) * CW
-                           +: CW]));
+                  32'(pick_cnt_fn(bt_cnt, 3'(32'(p) >> wpe_sh))));
               db_wdata[p*32 +: 32] <= rf_rdata_a[p*32 +: 32];
             end
-          // the counts advance once per LANE, so this loop runs over
-          // the beat's lane POSITIONS rather than over every slot in
-          // the block: eight counters can move in a cycle, and the
-          // other 120 cannot.
-          for (int q = 0; q < WORDS; q = q + 1)
-            if (32'(q) < 32'(lpb) && active[slot_of(bt, q)]) begin
-              if (32'(dcnt[32'(slot_of(bt, q)) * CW +: CW]) < h_maxdep)
-                dcnt[32'(slot_of(bt, q)) * CW +: CW] <=
-                  dcnt[32'(slot_of(bt, q)) * CW +: CW] + CW'(1);
-              else
-                dep_ovf_q <= 1'b1;
-            end
+          // The counts advance once per LANE. Only the eight
+          // positions of beat bt can move, and the value each moves
+          // to was formed once above, so this is a selection over
+          // constant indices and not 128 counters with a decoder in
+          // front of them.
+          for (int b = 0; b < NBEATS; b = b + 1)
+            for (int q = 0; q < WORDS; q = q + 1)
+              if (b == 32'(bt[NBSH-1:0]) && bt_dep_go[q])
+                dcnt[(b*WORDS + q)*CW +: CW] <= bt_cnt_inc[q*CW +: CW];
+          if (|bt_dep_ovf)
+            dep_ovf_q <= 1'b1;
           bt <= bt + 1;
           if (bt == 6'({1'b0, nb_blk} - 1)) begin
             pc <= pc + 1;
@@ -1188,10 +1253,11 @@ module cft_seq #(
           // index only ever entered this through `l & (lpb - 1)`,
           // which is the position, so 120 of the 128 tests were the
           // same eight answers reached the expensive way.
-          for (int q = 0; q < WORDS; q = q + 1)
-            if (32'(q) < 32'(lpb) && active[slot_of(bt, q)])
-              active[slot_of(bt, q)] <=
-                lane_mag_nz(sa_wor, sa_worm, 3'(q), wpe_sh);
+          for (int b = 0; b < NBEATS; b = b + 1)
+            for (int q = 0; q < WORDS; q = q + 1)
+              if (b == 32'(bt[NBSH-1:0]) && 32'(q) < 32'(lpb) &&
+                  bt_act[q])
+                active[b*WORDS + q] <= sa_nz[q];
           bt <= bt + 1;
           if (bt == 6'({1'b0, nb_blk} - 1)) begin
             pc <= pc + 1;
