@@ -302,3 +302,22 @@ first bench to do so was the refusal block itself.
 
 Suite after everything: 15 targets / 40 tests green, yosys clean,
 XRT backend compiled against real headers.
+
+## 2026-09-01 - the general-purpose milestone pair (b1a014c, amd-arc-box)
+
+Both 130 MHz images closed and staged to ~/cardday-ms - the first
+card images on which every 754 operation the contract defines runs
+(seed opcodes in hardware, div/sqrt composed by libcft):
+
+    cft_hw_single.xclbin  kernel_wns +0.220 ns  (0 of 104,664 failing)
+    cft_hw_quad.xclbin    kernel_wns +0.009 ns  (0 of 418,294 failing)
+
+hw/verify-image.sh: 8/8 checks on both, and the memory intent reads
+EXACTLY one HBM pseudo-channel per master - the audited link.cfg
+property, now confirmed in silicon-bound metadata (the bac9f550 pair
+spans 2-4 channels per master; same-ID ordering there rests on the
+HBM switch, here on the channel by construction). The quad's +0.009
+against bac9f550's +0.019 is the seed ROMs' cost made visible.
+SHA256SUMS verified after staging; the 145 MHz single attempt against
+the measured 142.7 ceiling launched from the same tree immediately
+after, and gets its own entry when it lands.

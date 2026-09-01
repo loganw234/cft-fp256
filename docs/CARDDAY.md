@@ -39,16 +39,31 @@ the element count is an operand rather than a loop bound.
 
 ## Before the day
 
-- [x] **Both images built, staged and verified** (updated 2026-08-31).
-      The card-day set is the 130 MHz pair at bac9f550 - one AXI master
-      per stream, reductions at VERSION 0x500, the bus-fault abort,
-      both closed with hbm_aclk clean at 450.0:
+- [x] **Both images built, staged and verified** (updated 2026-09-01).
+      The card-day set is now the GENERAL-PURPOSE pair at b1a014c in
+      `~/cardday-ms` - the first images carrying the divide/sqrt seed
+      opcodes (CAPS bit 14), one HBM pseudo-channel per master
+      (verified in the image metadata: hw/verify-image.sh 8/8 on
+      both, exactly one channel per master), reductions at 0x500, the
+      bus-fault abort:
+
+          ~/cardday-ms/cft_hw_single.xclbin   kernel_wns +0.220
+          ~/cardday-ms/cft_hw_quad.xclbin     kernel_wns +0.009
+          ~/cardday-ms/SHA256SUMS             (verified after staging)
+
+      The STATUS[3] precision-refusal post-dates these images and is
+      in main only. The bac9f550 pair below moves to FIRST fallback.
+
+      The previous entry, kept for the fallback chain: the 130 MHz
+      pair at bac9f550 - one AXI master per stream, reductions at
+      VERSION 0x500, the bus-fault abort, both closed with hbm_aclk
+      clean at 450.0:
 
           ~/cardday-130b/cft_hw_single.xclbin   one tile,   kernel_wns +0.271
           ~/cardday-130b/cft_hw_quad.xclbin     four tiles, kernel_wns +0.019
           ~/cardday-130b/SHA256SUMS             (+ both manifests, README)
 
-      The 53bbba7 pair stays in ~/cardday-130 as the FALLBACK - shared
+      The 53bbba7 pair stays in ~/cardday-130 as the SECOND fallback - shared
       port, no reductions, but the configuration hw_emu validated
       longest. If the new pair misbehaves on silicon, fall back and the
       day still produces first light. Neither set carries the shared
