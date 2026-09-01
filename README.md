@@ -27,7 +27,7 @@ a simple library; the tile only makes it faster.
 | `rtl/` | the v1 15-stage pipelined FMA core (one parameterized source serving all four rungs: 8x fp32 / 4x fp64 / 2x fp128 / 1x fp256 per 256-bit beat), operand steering, ap_ctrl_hs CSR block with CAPS discovery, streaming engine with one AXI master per operand stream and pipelined address phases, a streaming reduction accumulator, optional shared segmented shifter ladders (`FUSE_NORM`/`FUSE_ALIGN` - the 2026-08-31 size campaign: kernel 131,860 -> 98,310 LUT, every step equivalence-proven), BRAM-backed stream FIFOs, Vitis kernel top; the v0 behavioural core stays as the readable reference; **Yosys-clean** (CI-enforced portability) |
 | `tb/` | cocotb: streamed unit benches for all four widths + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green** across 14 benches, including the reduction accumulator and a full-kernel reduction run (Icarus 12, cocotb 1.9.2, in the `docker/` container) |
 | `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg, the era-matched `rebuild-2022.sh` pipeline - **packaging and hw_emu gates MET** (bit-exact vs golden through real XRT), hw bitstreams built (docs/BRINGUP.md records each gate honestly) |
-| `host/` | **libcft** - ~2,800 lines of C99 across `src/`, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++. The software backend replays 228,000 conformance cases and agrees with the golden model on 213,000 differential cases; an XRT backend drives up to 64 compute units and has been exercised against a **four-tile hw_emu image with no card present**. Reductions add the tree-aware multi-tile split, so a sum over four tiles returns what one tile returns. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt |
+| `host/` | **libcft** - ~2,800 lines of C99 across `src/`, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++. The software backend replays 228,000 conformance cases and agrees with the golden model on 213,000 differential cases; an XRT backend drives up to 64 compute units and has been exercised against a **four-tile hw_emu image with no card present**. Reductions add the tree-aware multi-tile split, so a sum over four tiles returns what one tile returns. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt - as do Fortran, Rust, Julia, Go, C# and R (docs/COMPATIBILITY.md). **Validate the contract in your browser, nothing installed: https://loganw234.github.io/cft-fp256/** - the software backend compiled to WebAssembly, replaying the published vectors |
 | `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |
 
 No physical card yet (it is in the mail). The claim made so far is
@@ -96,7 +96,8 @@ hw/                  kernel.xml, package_kernel.tcl, link.cfg
 host/include/cft.h   the C ABI: the contract between this and its users
 host/src/            libcft - software backend, XRT backend, conformance
 host/tests/          contract tests, device-vs-software, differential
-host/examples/       the same program in C, Python (ctypes), Fortran, Julia and Rust
+host/examples/       the same program in C, Python (ctypes), Fortran, Julia,
+                     Rust, Go, C# and R - byte-identical checksums everywhere
                      (byte-identical checksums; the full language/drop-in
                      matrix with per-row verification status is
                      docs/COMPATIBILITY.md)

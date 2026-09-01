@@ -1,0 +1,44 @@
+# Publish the browser conformance page to GitHub Pages.
+#
+# The page is a COMMITTED build product (bindings/wasm/conformance.html,
+# byte-reproducible from the pinned emsdk container - see
+# bindings/wasm/README.md), so this workflow builds nothing: it serves
+# the file the repo already vouches for, as index.html at the site
+# root. Anyone with a browser can then replay the published conformance
+# vectors against the real library - the same wasm, the same bits -
+# without cloning anything.
+name: pages
+on:
+  push:
+    branches: [main]
+    paths:
+      - bindings/wasm/conformance.html
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: stage the page as the site root
+        run: |
+          mkdir -p _site
+          cp bindings/wasm/conformance.html _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
