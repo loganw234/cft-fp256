@@ -917,7 +917,15 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     }
 
     try {
-        tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, dep_bytes, 0);
+        /* dep_bytes is zero when max_deposits is, and max_deposits of
+         * zero is a legal program rather than a rejected one: the
+         * model validates it, the tile accepts it, and every DEPOSIT
+         * overflows into STATUS[4]. There is nothing to bring back, so
+         * the transfer is skipped rather than issued for no bytes -
+         * the memcpy below is already guarded and a zero-length DMA is
+         * at best a no-op that XRT is under no obligation to define. */
+        if (dep_bytes)
+            tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, dep_bytes, 0);
         if (deposits && max_deposits)
             std::memcpy(deposits, tile.d.map<uint8_t *>(),
                         n * max_deposits * esz);

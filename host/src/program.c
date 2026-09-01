@@ -498,14 +498,18 @@ CFT_API cft_status cft_program_run(cft_program *prog,
      * implementation - which is why it hands over the IMAGE and the
      * caller's own pointers and does nothing else.
      *
-     * One divergence is known and deliberately not papered over here:
-     * a program with max_deposits == 0 loads and runs in software
-     * (every deposit overflows, nothing is written) and is REFUSED by
-     * the tile, whose header check requires at least one slot. The
-     * refusal surfaces as CFT_ERR_UNSUPPORTED with the reason in
-     * cft_last_error rather than being pre-empted, because inventing a
-     * host-side rule the contract does not state is how the two
-     * executors start drifting for real. */
+     * max_deposits == 0 was once listed here as a known divergence -
+     * legal in software, refused by the tile. It is not one. The
+     * model's validator accepts a zero budget, cft_seq refuses only
+     * max_deposits > MAXD, and SEQUENCER.md's list of what the loader
+     * throws back never mentioned zero; a header check that demanded
+     * one slot would have been the hardware inventing a rule the
+     * contract does not state. Both executors now run such a program,
+     * overflow every deposit into the status bit, and write nothing -
+     * which is the agreement this comment used to apologise for
+     * lacking. Nothing here pre-empts it either way, for the reason
+     * that has not changed: a host-side rule neither the model nor the
+     * tile states is how two executors start drifting for real. */
     {
         void *hw = cft_device_backend(prog->dev);
         if (hw) {
