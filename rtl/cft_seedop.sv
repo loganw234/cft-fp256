@@ -51,12 +51,17 @@ module cft_seedop #(
 
   `include "cft_seed_rom.svh"
 
-  // The seed index is the top 9 fraction bits; the tables need
-  // MAN_W >= 18 to place their entries exactly (true for every rung,
-  // and refused loudly for anything narrower).
+  // The seed index is the top 9 fraction bits, and the recip
+  // subnormal placement's left shift is (MAN_W-18)+be with be as low
+  // as -1 - so the module needs MAN_W >= 19, not the 18 the table
+  // width alone suggests. The guard said 18 until the adversarial
+  // review noticed that at exactly 18 the shift count goes to -1,
+  // which SystemVerilog reads as a huge unsigned shift: the guard
+  // admitted precisely the one width it existed to refuse. True for
+  // every shipped rung (23/52/112/236); refused loudly for less.
   generate
-    if (MAN_W < 18) begin : g_too_narrow
-      $error("cft_seedop: MAN_W must be at least 18");
+    if (MAN_W < 19) begin : g_too_narrow
+      $error("cft_seedop: MAN_W must be at least 19");
     end
   endgenerate
 
@@ -85,8 +90,11 @@ module cft_seedop #(
   // Signed exponent arithmetic, two bits of headroom. Each of the
   // three assignments below deliberately computes at int width and
   // lands in EXP_W+2 bits; the headroom is what makes every value fit,
-  // and truncation of two's complement is congruent either way. Verified
-  // exhaustively over the exponent range by tb/test_seedop.py.
+  // and truncation of two's complement is congruent either way.
+  // Verified by tb/test_seedop.py at every table index across a
+  // directed exponent spread that includes the headroom corners -
+  // the INDEX sweep is exhaustive, the exponent spread is directed,
+  // and this comment used to blur that distinction.
   logic signed [EXP_W+1:0] E, be_r, be_s;
   // unbias: |E| <= 2^(EXP_W-1), two bits inside the headroom.
   /* verilator lint_off WIDTHEXPAND */

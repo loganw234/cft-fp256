@@ -155,6 +155,36 @@ module cft_krnl #(
   logic [2:0]  cfg_rnd;
   logic [63:0] cfg_n, cfg_a, cfg_b, cfg_c, cfg_d;
 
+  // A run whose MODE selects a precision this build does not carry is
+  // REFUSED: the engine never starts, nothing is read or written, the
+  // run completes immediately with STATUS[3] set. Before this gate, a
+  // trimmed build handed such a run to banks that do not exist - the
+  // lanes idled, the writer wrote whatever the absent datapath drove,
+  // and the failure shape was plausible-looking garbage with clean
+  // flags, indistinguishable from a wrong answer. CAPS[3:0] already
+  // told an honest host not to ask; this makes the answer to a
+  // dishonest one an error instead of an output. Codes 4-15 of the
+  // 4-bit field are refused on every build for the same reason.
+  localparam [3:0] PREC_CAPS = {EN_FP256, EN_FP128, EN_FP64, 1'b1};
+
+  logic prec_ok, refused_q, refuse_done_q;
+  assign prec_ok = (cfg_prec[3:2] == 2'b00) && PREC_CAPS[cfg_prec[1:0]];
+
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n) begin
+      refused_q     <= 1'b0;
+      refuse_done_q <= 1'b0;
+    end else begin
+      // The refusal's done arrives one cycle after start, matching the
+      // one-cycle-pulse contract the CSR expects from the engine; the
+      // sticky clears on the next ACCEPTED start, same lifetime as the
+      // engine's own error sticky.
+      refuse_done_q <= start && !prec_ok;
+      if (start)
+        refused_q <= !prec_ok;
+    end
+  end
+
   cft_csr u_csr (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .s_axi_control_awaddr(s_axi_control_awaddr),
@@ -174,12 +204,18 @@ module cft_krnl #(
       .s_axi_control_rresp(s_axi_control_rresp),
       .s_axi_control_rvalid(s_axi_control_rvalid),
       .s_axi_control_rready(s_axi_control_rready),
-      .start(start), .busy(busy), .done(done), .eng_flags(eng_flags),
-      .eng_err(eng_err),
-      .prec_caps({EN_FP256, EN_FP128, EN_FP64, 1'b1}),
-      // arithmetic, sign, min/max, predicate, integer and reduction
-      // are present; divide/sqrt and conversion are not yet built and
-      // their bits stay clear.
+      .start(start), .busy(busy), .done(done | refuse_done_q),
+      .eng_flags(eng_flags),
+      // While the LAST start was a refusal, the engine's sticky bits
+      // are by definition from an earlier run - the engine never
+      // started, so nothing could have cleared them - and STATUS is
+      // documented as the last run's truth. Masking them here is what
+      // keeps a refusal reading as exactly 0x8: the adversarial
+      // review simulated fault-run -> refusal and read 0xA, two runs'
+      // truths ORed together, which the host then misfiled as a bus
+      // fault on a run that never touched the bus.
+      .eng_err({refused_q, eng_err & {3{~refused_q}}}),
+      .prec_caps(PREC_CAPS),
       //
       // The reduction bit covers CFT_SUM. CFT_DOT is in the same group
       // and is NOT separate hardware: the contract makes
@@ -211,7 +247,8 @@ module cft_krnl #(
                       .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
                       .FUSE_ALIGN(FUSE_ALIGN)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
-      .start(start), .busy(busy), .done(done), .flags_acc(eng_flags),
+      .start(start && prec_ok), .busy(busy), .done(done),
+      .flags_acc(eng_flags),
       .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),

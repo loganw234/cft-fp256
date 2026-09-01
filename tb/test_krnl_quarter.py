@@ -9,10 +9,13 @@ a deposition-buffer-heavy chiplet both want.
 
 Two things it checks that the full-tile bench structurally cannot:
 
-* **CAPS tells the truth about a trimmed build.** The precision mask
-  must report fp32 and fp64 only. A host that trusted the full tile's
-  0xF here would issue fp256 and get a deterministic but meaningless
-  all-zero beat, which is exactly why capability discovery exists.
+* **CAPS tells the truth about a trimmed build - and the build backs
+  it up.** The precision mask must report fp32 and fp64 only, and a
+  MODE that selects anything else must be REFUSED: STATUS[3], no
+  memory touched, done asserted anyway. Before that gate existed, a
+  host that trusted the full tile's 0xF here got a deterministic but
+  meaningless beat from banks that do not exist - garbage with clean
+  flags, the worst shape a wrong answer can take.
 * **The beat arithmetic follows the parameter.** Elements per beat,
   the AXI transfer size, and the byte address step are all derived
   from BEAT_BITS; if any of them stayed at 256 the run would read the
@@ -158,6 +161,51 @@ async def quarter_tile_end_to_end(dut):
     await run_op(dut, axil, ram, FP32, OP_FMA, 1100, seed=342)
     busfx.unstall(ram_a, ram_b, ram_c, ram_d)
 
+    # ---- refusal: the trimmed build's answer to a precision it lacks.
+    #
+    # Drive MODE at the two precisions this build does not carry, and
+    # at two codes no build carries (4-15 of the field). Each attempt
+    # must complete - ap_done, because a hang costs a card reset - with
+    # STATUS[3] set, FLAGS clean, and the D buffer byte-identical to
+    # the pattern written before the attempt: the engine never started,
+    # so nothing may have moved. The accepted run afterwards proves the
+    # sticky clears at the next real start (run_op asserts STATUS==0).
+    from test_krnl import (MODE, NREG, APTR, BPTR, CPTR, DPTR, FLAGS,
+                           STATUS, A_BASE, B_BASE, C_BASE, D_BASE, write64)
+    for prec_code in (2, 3, 5, 15):
+        ram.write(D_BASE, b"\xAA" * 64)
+        fl_before = await axil.read_dword(FLAGS)
+        await axil.write_dword(MODE, 0 | (prec_code << 8))   # FMA
+        await write64(axil, NREG, 4)
+        await write64(axil, APTR, A_BASE)
+        await write64(axil, BPTR, B_BASE)
+        await write64(axil, CPTR, C_BASE)
+        await write64(axil, DPTR, D_BASE)
+        await axil.write_dword(CTRL, 1)
+        got_done = False
+        for _ in range(200):
+            await ClockCycles(dut.ap_clk, 5)
+            if (await axil.read_dword(CTRL)) & 0x2:
+                got_done = True
+                break
+        assert got_done, (
+            f"prec code {prec_code}: a refused run must still complete")
+        st = await axil.read_dword(STATUS)
+        fl = await axil.read_dword(FLAGS)
+        assert st == 0x8, (
+            f"prec code {prec_code}: STATUS {st:#x}, want the refusal "
+            f"bit alone (0x8)")
+        # FLAGS clears at an ACCEPTED start, so a refusal must leave it
+        # exactly as it was - a refused run that scrubbed the previous
+        # run's flags would be quietly rewriting history.
+        assert fl == fl_before, (
+            f"prec code {prec_code}: refusal changed FLAGS "
+            f"{fl_before:#04x} -> {fl:#04x}")
+        assert ram.read(D_BASE, 64) == b"\xAA" * 64, (
+            f"prec code {prec_code}: a refused run wrote to memory")
+    await run_op(dut, axil, ram, FP32, OP_ADD, 8, seed=343)
+
     dut._log.info("quarter tile (BEAT_BITS=64, fp32+fp64): bit-exact "
                   "against the same golden model as the full tile, "
-                  "elementwise and reductions")
+                  "elementwise and reductions - and fp128/fp256/"
+                  "unassigned MODE codes refused with STATUS[3]")

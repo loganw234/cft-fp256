@@ -30,7 +30,10 @@
 //   0x38  D_PTR   64-bit
 //   0x40  FLAGS   RO: sticky IEEE flags of the last run
 //                 {inexact,underflow,overflow,divzero,invalid};
-//                 cleared by hardware at ap_start
+//                 cleared by hardware at an ACCEPTED ap_start. A
+//                 refused start (STATUS[3]) leaves them untouched:
+//                 a refusal is not a run, and scrubbing the previous
+//                 run's flags would be quietly rewriting history
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
 //   0x48  VERSION RO: 0x00000500 (v0.5.0). Guards the REGISTER MAP,
 //                 not the feature set - features are announced in CAPS.
@@ -54,13 +57,20 @@
 //                 before issuing; the alternative is guessing from
 //                 VERSION, which stops working the moment one build
 //                 ships without a group.
-//   0x50  STATUS  RO: sticky bus faults from the last run, cleared by
-//                 hardware at ap_start. A run that ends with STATUS
-//                 non-zero computed on data the memory system did not
-//                 vouch for, and its D buffer must not be trusted:
+//   0x50  STATUS  RO: sticky faults from the last run, cleared by
+//                 hardware at an accepted ap_start. A run that ends
+//                 with STATUS non-zero either computed on data the
+//                 memory system did not vouch for or never computed at
+//                 all; its D buffer must not be trusted either way:
 //                 [0] a read response was not OKAY
 //                 [1] a write response was not OKAY
 //                 [2] a read burst delivered the wrong beat count
+//                 [3] the run was REFUSED: MODE selected a precision
+//                     this build does not implement (or a code above
+//                     3). The engine never started and no memory was
+//                     touched. CAPS[3:0] says in advance which
+//                     precisions exist; this bit is what a host that
+//                     did not ask gets instead of plausible garbage.
 
 `timescale 1ns/1ps
 
@@ -92,7 +102,7 @@ module cft_csr (
     input  logic        busy,
     input  logic        done,        // one-cycle pulse
     input  logic [4:0]  eng_flags,
-    input  logic [2:0]  eng_err,     // sticky bus/protocol faults, see STATUS
+    input  logic [3:0]  eng_err,     // sticky faults + refusal, see STATUS
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     input  logic [7:0]  op_caps,     // constant; opcode groups present
     output logic [7:0]  cfg_op,
@@ -266,7 +276,7 @@ module cft_csr (
           10'h011: s_axi_control_rdata <= MAGIC;
           10'h012: s_axi_control_rdata <= VERSION;
           10'h013: s_axi_control_rdata <= {16'b0, op_caps, 4'b0, prec_caps};
-          10'h014: s_axi_control_rdata <= {29'b0, eng_err};
+          10'h014: s_axi_control_rdata <= {28'b0, eng_err};
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end

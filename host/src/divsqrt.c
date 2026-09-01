@@ -799,16 +799,19 @@ static cft_status divsqrt_validate(cft_device *dev, cft_format fmt,
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
         return CFT_ERR_INVALID_ARGUMENT;
-    if (n == 0)
-        return CFT_OK;
-    if (!a || !d)
-        return CFT_ERR_INVALID_ARGUMENT;
-    /* The sequence needs the arithmetic group, the sign group and the
-     * seeds; ask the same question a caller would. */
+    /* Support is checked BEFORE the n==0 shortcut, mirroring cft_run:
+     * an unsupported (device, format) pair is unsupported at every n,
+     * and answering OK at zero elements would make the two entry
+     * points disagree about the same device (the adversarial review's
+     * F8). */
     if (!cft_supports(dev, CFT_FMA, fmt) ||
         !cft_supports(dev, CFT_NEG, fmt) ||
         !cft_supports(dev, seed_op, fmt))
         return CFT_ERR_UNSUPPORTED;
+    if (n == 0)
+        return CFT_OK;
+    if (!a || !d)
+        return CFT_ERR_INVALID_ARGUMENT;
     return CFT_OK;
 }
 

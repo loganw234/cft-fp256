@@ -573,7 +573,11 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
             *bus = st_acc;
         set_err(err + " - compute units may still be active, so this "
                       "handle is finished; close and reopen it" +
-                (st_acc ? " (STATUS 0x" + hex32(st_acc) +
+                (st_acc == 0x8u
+                     ? " (STATUS 0x8 - only a REFUSAL is latched; the "
+                       "units never started this run's work, so this is "
+                       "a hang or a slow run, not a memory fault)"
+                 : st_acc ? " (STATUS 0x" + hex32(st_acc) +
                           " - the memory system reported a fault, so this "
                           "is a bus problem rather than a slow run)"
                         : " (STATUS clean on every unit that ran, so this "
@@ -602,6 +606,27 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
         return ST_INTERNAL;
     }
     if (status_acc) {
+        /* STATUS[3] is the precision refusal, not a bus fault: the run
+         * never started and no memory moved. Reaching it through
+         * libcft means the device's CAPS and its refusal logic
+         * disagree with each other - the library checks CAPS before
+         * issuing - so name that loudly rather than folding it into
+         * "the memory system misbehaved". A single tile can never
+         * report both (the kernel masks the engine's stale sticky
+         * while its last start was refused - the adversarial review
+         * caught the ORed-truths version); bits 2:0 beside bit 3 can
+         * only mean DIFFERENT tiles refused and faulted, and the
+         * faulting tile's invalid data is the worse fact. */
+        if ((status_acc & 0x8u) && !(status_acc & 0x7u)) {
+            /* the contract scopes *bus to CFT_ERR_BUS_FAULT, so the
+             * refusal keeps its detail in the message alone */
+            set_err("kernel REFUSED the run: MODE selected a precision "
+                    "this bitstream does not implement (STATUS 0x" +
+                    hex32(status_acc) + "). CAPS advertised otherwise, "
+                    "which is a device/library disagreement worth "
+                    "reporting");
+            return ST_UNSUPPORTED;
+        }
         if (bus)
             *bus = status_acc;
         set_err("kernel reported bus faults; the output is not valid");
@@ -791,7 +816,6 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         }
     }
 
-    if (bus) *bus = bs;
 
     /* The run's own failure is reported BEFORE the status word, which
      * is the opposite order to the success path and deliberate. A
@@ -806,6 +830,18 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         return status;
     }
     if (bs != 0) {
+        /* Same split as the elementwise path: STATUS[3] alone is the
+         * precision refusal - no run, no data - and a device refusing
+         * what its CAPS advertised is its own report, not a bus story. */
+        if ((bs & 0x8u) && !(bs & 0x7u)) {
+            /* *bus stays scoped to CFT_ERR_BUS_FAULT, as backend.h and
+             * cft.h promise */
+            set_err("kernel REFUSED the reduction: MODE selected a "
+                    "precision this bitstream does not implement "
+                    "(STATUS 0x" + hex32(bs) + ")");
+            return ST_UNSUPPORTED;
+        }
+        if (bus) *bus = bs;
         set_err("the memory system reported a fault during a reduction; "
                 "the result is not to be trusted");
         return ST_BUS_FAULT;

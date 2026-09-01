@@ -175,6 +175,21 @@ async def a_write_response_fault_is_reported(dut):
         f"STATUS {st:#x} has no write-response bit; a memory that refused "
         f"the result would look like a successful run")
 
+    # A refusal RIGHT AFTER that fault must read as exactly the refusal
+    # bit - not the fault ORed in. The engine's sticky only clears at an
+    # engine start, and a refused start is not one, so the kernel masks
+    # the stale bits while its last start was refused. The adversarial
+    # review simulated this exact sequence against the unmasked version
+    # and read 0xA - two runs' truths in one register, which the host
+    # then misfiled as a bus fault on a run that never touched the bus.
+    await axil.write_dword(MODE, 0 | (9 << 8))     # reserved prec code
+    await axil.write_dword(CTRL, 1)
+    await _await_done(dut, axil, "refusal after a faulted run")
+    st = await axil.read_dword(STATUS)
+    assert st == 0x8, (
+        f"refusal after a fault: STATUS {st:#x}, want 0x8 alone - stale "
+        f"engine fault bits must not survive into a refusal's report")
+
 
 @cocotb.test()
 async def a_short_burst_ends_the_run_instead_of_hanging(dut):
