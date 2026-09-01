@@ -344,3 +344,19 @@ and a single at 150 launched immediately to bracket it, and 145 is
 now a real candidate clock for a future card-day set (+11.5%
 throughput over the staged 130 pair) once emulation and first light
 vouch for the 130s.
+
+## 2026-09-01 - the ceiling bracket completes
+
+    single @145  CLOSED  kernel_wns +0.032   (image verified 8/8)
+    single @150  failed  WNS -0.070, 163 of ~540k endpoints, hold clean
+    quad   @145  failed  WNS -0.302, 4,132 of 903,889 endpoints, hold clean
+
+Single-tile ceiling: ~148 MHz (the 150 miss is 70 ps wide). Quad
+ceiling: ~139 MHz - and note what the quad numbers say about
+measurement bias a second time: at 130 the router stopped at +0.009
+because it only needed to, while pushed to 145 it achieved a period
+equivalent to ~138.9 MHz. A router's slack at a met target is a
+stopping point, not a capability statement; only a failed target
+measures the edge. A single @147 attempt (predicted ~+66 ps from the
+bracket) is running to pin the number; quad attempts past ~139 are
+not worth the hours.
