@@ -360,3 +360,19 @@ stopping point, not a capability statement; only a failed target
 measures the edge. A single @147 attempt (predicted ~+66 ps from the
 bracket) is running to pin the number; quad attempts past ~139 are
 not worth the hours.
+
+## 2026-09-01 - hw_emu on the seed image: stopped by decision, clean
+
+device-test -q against the b1a014c hw_emu image on cft2204: 33
+kernel invocations over ~13 hours of saturated simulation, every one
+completing with err=000 - the CSR programming, AXI DMA, buffer
+staging and start/done handshake of the seed-bearing image, the fp32
+FMA comparison (12 checks, 0 failed), and roughly half of the first
+composed-divide sequence's steps, all through the real shell stack.
+Stopped at Logan's call: at ~24 minutes per invocation the fp32
+div/sqrt verdict alone was another ~14 hours away and the full
+four-format matrix a multi-day affair, for confirmation that ~200
+more invocations of an already-proven round-trip also work. The
+composed sequence's remaining validation belongs to first light,
+where those invocations cost microseconds; 13 hours of zero-error
+saturation is the emulation's testimony.
