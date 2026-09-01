@@ -13,7 +13,7 @@ SIM ?= icarus
 
 .PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
-        clean
+        seq_core seqprobe clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
      seedop reduceacc reduce krnl quarter faults
@@ -167,6 +167,42 @@ faults:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_faults SIM_BUILD=sim_build/faults \
 		COCOTB_RESULTS_FILE=sim_build/faults/results.xml
+
+# The orbit sequencer against the golden model, bit for bit: deposits
+# including the +0 of the slots no lane reached, per-lane deposit
+# counts, FLAGS, the overflow bit, and which programs get refused.
+# docs/SEQUENCER.md is the design; python/cft_golden/seq.py is the
+# definition of correct, and this scores the RTL against it the way
+# the FMA core was scored against softfloat.py.
+#
+# NOT in `make sim` yet, deliberately. cft_seq is being written, and an
+# aggregate target that goes red for a module still under construction
+# trains people to ignore it. Fold it in the day it is green - the
+# suite is the place a finished module proves it stays finished.
+#
+# Wrapped in a timeout, and that is not belt and braces. Every timeout
+# inside the bench is a SIMULATION-time timeout, and a simulation-time
+# timeout cannot fire while the simulator is stuck inside one timestep
+# - which is exactly how cft_seq failed the first time this target was
+# pointed at it. Without this line the failure mode is a job that runs
+# until someone notices; with it, it is a failure. Raise
+# SEQ_TIMEOUT for a deliberately long run.
+SEQ_TIMEOUT ?= 2400
+
+seq_core:
+	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_core \
+		COCOTB_RESULTS_FILE=sim_build/seq_core/results.xml
+
+# Diagnostic probe for seq_core, not part of `make sim`. One trivial
+# program into a quiet cft_seq, printing the state register, both bus
+# channels and the WALL-CLOCK cost of every cycle - which is what
+# separates "this simulator is slow" from "this simulator has stopped".
+# Follows normprobe, one level down.
+seqprobe:
+	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_probe SIM_BUILD=sim_build/seqprobe \
+		COCOTB_RESULTS_FILE=sim_build/seqprobe/results.xml
 
 clean:
 	rm -rf sim_build results.xml
