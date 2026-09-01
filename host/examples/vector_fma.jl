@@ -16,16 +16,12 @@
 # test harness rather than the product; everything the library
 # guarantees still happens inside the library.
 #
-# *** UNVERIFIED ***
-# The machine this file was written on has no Julia toolchain - none
-# on PATH, none in the usual install directories, none in the repo's
-# containers - so unlike every other file in examples/ this one has
-# not been run against the library it binds. The claim it makes is
-# still machine-checkable: `make -C host examples-lang` diffs its
-# output against the C example's on any machine that does have julia.
-# Run that before trusting this file, and delete this block when it
-# passes - an example should not keep its asterisk one commit longer
-# than the asterisk is true.
+# Verified 2026-09-01: julia 1.12.7 on Linux (the cft2204 WSL
+# distro), byte-identical to the C example on the same machine - and
+# the four checksums also match the Windows C/Python/Rust outputs, so
+# the identity holds across platforms as well as languages. This file
+# was born with an UNVERIFIED asterisk because its author's machine
+# had no Julia; the asterisk lasted one day, as it should.
 
 using Libdl
 using Printf
