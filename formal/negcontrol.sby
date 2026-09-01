@@ -1,0 +1,26 @@
+# The negative control - see tb_negcontrol_formal.sv. The asserted
+# property ("cft_fifo never needed its head bypass") is deliberately
+# false; `expect fail` makes the refutation the passing outcome, so
+# this file returns rc=0 exactly when the toolchain demonstrably still
+# catches a broken property. If it ever "proves" the claim instead,
+# the gate itself is broken - a dropped assertion, an over-constrained
+# world - and sby's nonzero exit stops run.sh loudly.
+#
+# Run from formal/ (run.sh does), so the relative paths below resolve.
+
+[options]
+mode bmc
+depth 10
+expect fail
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -formal -sv cft_fifo.sv
+read_verilog -formal -sv tb_negcontrol_formal.sv
+prep -top tb_negcontrol_formal
+
+[files]
+../rtl/cft_fifo.sv
+tb_negcontrol_formal.sv

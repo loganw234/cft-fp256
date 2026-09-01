@@ -1,0 +1,34 @@
+# Formal gate for rtl/cft_fifo.sv - see tb_fifo_formal.sv for the
+# properties, the honest-scope statement (WIDTH=8, DEPTH_LOG2=3) and
+# why the proof engine is pdr rather than hand-invariant k-induction.
+#
+#   sby -f fifo.sby prove    unbounded proof (pdr synthesises the
+#                            inductive invariant; mode prove, so this
+#                            is not a bounded claim)
+#   sby -f fifo.sby cover    reachability of every control shape the
+#                            proof relies on; fails if the assumptions
+#                            over-constrain the world
+#
+# Run from formal/ (run.sh does), so the relative paths below resolve.
+
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+cover: mode cover
+cover: depth 24
+
+[engines]
+prove: abc pdr
+cover: smtbmc bitwuzla
+
+[script]
+read_verilog -formal -sv cft_fifo.sv
+read_verilog -formal -sv tb_fifo_formal.sv
+prep -top tb_fifo_formal
+
+[files]
+../rtl/cft_fifo.sv
+tb_fifo_formal.sv

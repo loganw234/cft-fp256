@@ -1,0 +1,52 @@
+# Formal-verification environment for cft-fp256: Yosys + SymbiYosys +
+# SMT solvers, for the property proofs under formal/.
+#
+#   docker build -t cft-formal -f docker/Dockerfile.formal docker
+#   MSYS_NO_PATHCONV=1 docker run --rm -v <repo>:/work -w /work cft-formal ./formal/run.sh
+#
+# The build context is docker/, not the repo root: nothing here is
+# COPYed, and a root context would ship the vector corpus to the
+# daemon for no reason.
+#
+# Why not apt, when Dockerfile.sim gets its yosys that way: probed on
+# 2026-08-31, noble carries yosys 0.33, boolector and z3 - but no
+# SymbiYosys at all, and no bitwuzla or yices2. A formal gate without
+# sby is not a gate, and 0.33 predates two years of the smtbmc flow's
+# fixes, so the whole toolchain comes from one place instead: the
+# YosysHQ oss-cad-suite bundle, which packages yosys, sby and the
+# solvers (bitwuzla, boolector, yices2, z3) as a single relocatable
+# tree with its own interpreter. One artifact, one hash, no partial
+# upgrades.
+#
+# Both pins below are measurements, not transcriptions:
+#
+#   * The base image digest is what `docker pull ubuntu:24.04` resolved
+#     to on 2026-08-31 (`docker inspect --format '{{index .RepoDigests
+#     0}}'`). The tag moves; the digest does not.
+#   * The tarball sha256 was computed by downloading this exact release
+#     asset inside a clean ubuntu:24.04 container on 2026-08-31 and
+#     running sha256sum (741,029,004 bytes). YosysHQ attaches no
+#     checksum files to these releases, so the first download is
+#     necessarily trust-on-first-use - but every build after it either
+#     reproduces that measurement or stops.
+
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Release 2026-08-31 of https://github.com/YosysHQ/oss-cad-suite-build.
+ARG OCS_URL=https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-08-31/oss-cad-suite-linux-x64-20260831.tgz
+ARG OCS_SHA256=9f4cc9cd6a99d4cb31e92b502301b18706dcf4f5cc592fe10f4f4b2a7f93424a
+
+RUN curl -fL -o /tmp/oss-cad-suite.tgz "$OCS_URL" \
+    && echo "$OCS_SHA256  /tmp/oss-cad-suite.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/oss-cad-suite.tgz -C /opt \
+    && rm /tmp/oss-cad-suite.tgz
+
+ENV PATH=/opt/oss-cad-suite/bin:$PATH
+
+WORKDIR /work
