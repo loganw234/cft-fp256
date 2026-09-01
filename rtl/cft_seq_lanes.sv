@@ -59,9 +59,12 @@ module cft_seq_lanes #(
 
     output logic                 out_valid,   // in_valid, LATENCY later
     output logic [BEAT_BITS-1:0] d,
-    // Per-lane flags at the CURRENT precision: entry i is lane i's
-    // 5-bit set; entries at or beyond lanes_per_beat read zero.
-    output logic [4:0]           lane_flags [0:BEAT_BITS/32-1]
+    // Per-lane flags at the CURRENT precision, packed 5 bits per
+    // lane position (bits [i*5 +: 5] are lane i's set); positions at
+    // or beyond lanes_per_beat read zero. Packed because yosys's
+    // frontend refuses unpacked-array ports, and the portability
+    // lint gate is CI law here.
+    output logic [BEAT_BITS/32*5-1:0] lane_flags
 );
 
   localparam logic [1:0] PREC_FP32  = 2'd0;
@@ -266,21 +269,20 @@ module cft_seq_lanes #(
   end
 
   always_comb begin
-    for (int i = 0; i < LANES32; i = i + 1)
-      lane_flags[i] = 5'b0;
+    lane_flags = '0;
     case (prec)
       PREC_FP32:
         for (int i = 0; i < LANES32; i = i + 1)
-          lane_flags[i] = f32_l[i];
+          lane_flags[i*5 +: 5] = f32_l[i];
       PREC_FP64:
         for (int i = 0; i < LANES64; i = i + 1)
-          lane_flags[i] = f64_l[i];
+          lane_flags[i*5 +: 5] = f64_l[i];
       PREC_FP128:
         for (int i = 0; i < LANES128; i = i + 1)
-          lane_flags[i] = f128_l[i];
+          lane_flags[i*5 +: 5] = f128_l[i];
       default:
         if (LANES256 > 0)
-          lane_flags[0] = f256_l;
+          lane_flags[4:0] = f256_l;
     endcase
   end
 
