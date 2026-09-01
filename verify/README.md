@@ -36,11 +36,20 @@ container); everything else together is ~20-30 min.
 
 ## Resume semantics
 
-Each run gets an id (timestamp + commit) under `verify/state/`, and
-each stage leaves a `.ok`/`.fail` marker beside its log. Interrupt
-anywhere; `--resume` reruns only what lacks a `.ok`. Resuming across
+Each run gets an id (timestamp to the second + commit, bumped on
+collision) under `verify/state/`, and each stage leaves a
+`.ok`/`.fail` marker beside its log. Interrupt anywhere; `--resume`
+reruns only what lacks a `.ok`, and a stage that already passed stays
+passed - `--skip` cannot re-verdict green work. Resuming across
 COMMITS is refused: a report stitched from two trees certifies
-nothing. `--fresh` starts over on purpose.
+nothing. `--fresh` starts over on purpose and contradicts `--resume`
+loudly. Flags are PER-INVOCATION: a resume does not remember the
+original run's `--only`/`--skip`, so restate them. `report.jsonl` is
+an append-only event log across invocations of one run (resumes add
+rows, including `ok-cached` entries); the census line counts executed
+vs cached explicitly so a resumed report cannot pass as a full run.
+Stage names in `--only`/`--skip` are validated against the known list
+- a typo is a refusal, not a silent empty PASS.
 
 ## Skips are named, never silent
 

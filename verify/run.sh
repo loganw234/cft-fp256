@@ -107,8 +107,10 @@ REQUIRE_ALL=0
 LIST=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --skip)   SKIP="$SKIP,$2"; shift 2;;
-    --only)   ONLY="$ONLY,$2"; shift 2;;
+    --skip)   [ $# -ge 2 ] || { echo "--skip needs a value" >&2; exit 2; }
+              SKIP="$SKIP,$2"; shift 2;;
+    --only)   [ $# -ge 2 ] || { echo "--only needs a value" >&2; exit 2; }
+              ONLY="$ONLY,$2"; shift 2;;
     --resume) if [ $# -gt 1 ] && [[ ${2:-} != --* ]]; then RESUME=$2; shift 2
               else RESUME=last; shift; fi;;
     --fresh)  FRESH=1; shift;;
@@ -138,9 +140,34 @@ EOF
   exit 0
 fi
 
+# ---- stage-name validation ------------------------------------------
+# A typo'd --only used to select NOTHING, print "PASS, nothing
+# skipped", and crash the census mid-print with an unbound variable -
+# exit 0. A compliance runner must refuse names it does not know.
+STAGELIST="golden vectors sim lint formal libcft selfcheck divsqrt \
+diff seq reduce mpfr soak-quick images"
+check_names() {  # <flagname> <comma-list>
+  local n
+  for n in $(echo "$2" | tr ',' ' '); do
+    [ -z "$n" ] && continue
+    case " $STAGELIST " in
+      *" $n "*) ;;
+      *) echo "ERROR: $1 names unknown stage '$n'" >&2
+         echo "       stages: $STAGELIST" >&2
+         exit 2;;
+    esac
+  done
+}
+check_names --skip "$SKIP"
+check_names --only "$ONLY"
+
 # ---- run identity --------------------------------------------------
 mkdir -p "$STATEROOT"
-if [ -n "$RESUME" ] && [ "$FRESH" = 0 ]; then
+if [ -n "$RESUME" ] && [ "$FRESH" = 1 ]; then
+  echo "ERROR: --resume and --fresh contradict each other - pick one" >&2
+  exit 2
+fi
+if [ -n "$RESUME" ]; then
   if [ "$RESUME" = last ]; then
     RUNID=$(ls -1 "$STATEROOT" 2>/dev/null | sort | tail -1)
     [ -n "$RUNID" ] || { echo "nothing to resume" >&2; exit 2; }
@@ -158,9 +185,19 @@ if [ -n "$RESUME" ] && [ "$FRESH" = 0 ]; then
   fi
   echo "== resuming $RUNID"
 else
-  RUNID="$(date +%Y%m%d-%H%M)-$COMMIT"
+  # Second resolution plus a collision bump: the minute-resolution id
+  # let a second invocation in the same minute silently ADOPT the
+  # first one's .ok markers and PASS having run nothing - and made
+  # --fresh a no-op inside the minute. mkdir without -p is the atomic
+  # claim; an existing dir bumps the suffix.
+  base="$(date +%Y%m%d-%H%M%S)-$COMMIT"
+  RUNID=$base
+  bump=2
+  while ! mkdir "$STATEROOT/$RUNID" 2>/dev/null; do
+    RUNID="$base-$bump"
+    bump=$((bump + 1))
+  done
   RUNDIR="$STATEROOT/$RUNID"
-  mkdir -p "$RUNDIR"
   echo "$COMMIT" > "$RUNDIR/commit"
   echo "== run $RUNID"
 fi
@@ -182,7 +219,9 @@ trap 'rmdir "$RUNDIR/.lock" 2>/dev/null' EXIT
 # ---- stage machinery -----------------------------------------------
 FAILED=0
 SKIPPED=0
-declare -a ROWS
+RAN=0
+CACHED=0
+declare -a ROWS=()
 
 in_list() {  # name, comma-list
   case ",$2," in *",$1,"*) return 0;; esac
@@ -198,12 +237,17 @@ stage() {  # <name> <description> -- command...
   if [ -n "$ONLY" ] && ! in_list "$name" "$ONLY"; then
     return 0                       # not selected: not even reported
   fi
-  if in_list "$name" "$SKIP"; then
-    verdict=SKIP; reason="requested"
-  elif [ -f "$RUNDIR/$name.ok" ]; then
+  if [ -f "$RUNDIR/$name.ok" ]; then
+    # A stage that already PASSED in this run stays passed - --skip on
+    # a resume must not re-verdict green work as skipped (under
+    # --require-all that inverted a finished PASS into a FAIL).
+    CACHED=$((CACHED+1))
     note "$(printf '%-12s %-7s %s' "$name" "ok" "(cached from earlier in this run)")"
     echo "{\"stage\":\"$name\",\"verdict\":\"ok-cached\"}" >> "$JSONL"
     return 0
+  fi
+  if in_list "$name" "$SKIP"; then
+    verdict=SKIP; reason="requested"
   elif [ -n "${STAGE_SKIP_REASON:-}" ]; then
     verdict=SKIP; reason=$STAGE_SKIP_REASON
   fi
@@ -221,12 +265,14 @@ stage() {  # <name> <description> -- command...
   if ( set -o pipefail; "$@" ) > "$RUNDIR/$name.log" 2>&1; then
     t1=$(date +%s); dur=$((t1-t0))
     : > "$RUNDIR/$name.ok"
+    RAN=$((RAN+1))
     rm -f "$RUNDIR/$name.fail"
     note "$(printf '%-12s %-7s %ss' "$name" "ok" "$dur")"
     echo "{\"stage\":\"$name\",\"verdict\":\"ok\",\"seconds\":$dur}" >> "$JSONL"
   else
     t1=$(date +%s); dur=$((t1-t0))
     : > "$RUNDIR/$name.fail"
+    RAN=$((RAN+1))
     FAILED=$((FAILED+1))
     note "$(printf '%-12s %-7s %ss  log: verify/state/%s/%s.log' \
            "$name" "FAIL" "$dur" "$RUNID" "$name")"
@@ -279,7 +325,7 @@ stage vectors "regenerate conformance sets (all five attributes)" -- \
 
 ensure_sim_image() {
   docker image inspect cft-sim >/dev/null 2>&1 && return 0
-  DOCKER build -t cft-sim -f "$ROOT/docker/Dockerfile.sim" "$ROOT"
+  DOCKER build -t cft-sim -f "$MOUNT/docker/Dockerfile.sim" "$MOUNT"
 }
 do_sim()  { ensure_sim_image && \
             DOCKER run --rm -v "$MOUNT:/work" -w /work/tb cft-sim make sim; }
@@ -294,15 +340,21 @@ stage lint "yosys elaboration gate" -- do_lint
 
 do_formal() {
   docker image inspect cft-formal >/dev/null 2>&1 || \
-    DOCKER build -t cft-formal -f "$ROOT/docker/Dockerfile.formal" "$ROOT/docker" || return 1
+    DOCKER build -t cft-formal -f "$MOUNT/docker/Dockerfile.formal" "$MOUNT/docker" || return 1
   DOCKER run --rm -v "$MOUNT:/work" -w /work cft-formal ./formal/run.sh
 }
 need docker
 stage formal "formal proofs + negative control" -- do_formal
 
+# One interpreter for every python-touching stage, chosen by PY()'s
+# rule - the libcft stage used to hand make `command -v python3`,
+# which on Windows is the WindowsApps alias PY() exists to avoid.
+PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
+          command -v python
+        else command -v python3 2>/dev/null || command -v python; fi)
 need host-cc python
 stage libcft "host library contract tests + conformance replay" -- \
-  HOSTMAKE test PYTHON="$(command -v python3 || command -v python)"
+  HOSTMAKE test PYTHON="$PYBIN"
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1
@@ -379,8 +431,9 @@ stage images "verify staged artifacts against their manifests" -- do_images
   echo "-- census block (paste into docs/VALIDATION.md) --------------"
   echo "## $(date +%Y-%m-%d) - standardized verification run ($HOSTNM)"
   echo
-  echo "verify/run.sh at $COMMIT: ${#ROWS[@]} stage(s);" \
-       "$FAILED failed, $SKIPPED skipped."
+  echo "verify/run.sh at $COMMIT: $RAN stage(s) executed," \
+       "$CACHED cached from earlier in the run, $FAILED failed," \
+       "$SKIPPED skipped."
   echo "Run id $RUNID; per-stage logs under verify/state/."
 } | tee "$SUMMARY"
 
