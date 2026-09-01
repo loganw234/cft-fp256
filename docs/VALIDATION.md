@@ -394,3 +394,49 @@ disagreement detail, screenshotted. The compute panel runs every
 elementwise op plus the composed div/sqrt at all four formats -
 binary256 square root, correctly rounded, in a browser tab. The bar
 of entry is now one compliant browser.
+
+## 2026-09-01 - clause 5, completed with zero new RTL
+
+The operations the capability sheet still listed as absent -
+roundToIntegral (named + Exact), formatOf-convertFormat (all 16
+pairs), int32/uint32/int64/uint64 conversions both ways, scaleB,
+logB, nextUp/nextDown, class, totalOrder/totalOrderMag, the
+signaling comparisons, and exact remainder - landed as contract
+functions in one day, in three layers, each proven before the next
+was built:
+
+    golden model     +42 pytest, arbiters sharing no code with it:
+                     math.remainder/nextafter/ldexp/frexp, round/
+                     floor/ceil/trunc, struct's double->float, an
+                     exact-rational reference for all five attributes,
+                     hand-derived 754 edges (nextUp's -0, rint's
+                     signed zero, logB(0)'s divideByZero, the
+                     totalOrder chain over the encoding zoo)
+    sequences        rint_seq (the magic-constant addition made total)
+                     and scaleb_seq (exact-power multiplies, staged
+                     saturation proven consistent) bit-identical to
+                     the contract over every format, attribute, and
+                     each construction's own boundary families
+    libcft           18 entry points (ABI 0.2), composed where
+                     floating-point work exists, host-exact where none
+                     does; clause5_check.py holds C == model over
+                     112,372 per-element comparisons - all four
+                     formats, all five attributes, the 16-pair
+                     conversion matrix, chunk-crossing batches, and
+                     the fp256 max-normal/min-subnormal remainder
+                     (the ~786k-step walk), flags compared exactly
+
+Design choices pinned into the contract on the way (DETERMINISM.md):
+the RISC-V FCVT table for convertToInteger's invalid deliveries,
+RISC-V fclass indices for class, the 5.10 order-embedding for
+totalOrder, remainder consuming no rounding attribute because it
+never rounds. The named roundToIntegral variants signal nothing, per
+the standard - the composed route's scaffolding inexact is discarded
+by the same flag discipline cft_div established.
+
+The one model change beyond additions: _round_at became total in
+memory as well as math (a scaleB shift of a billion no longer
+materialises a mask that size), pinned by the same rational
+reference. verify/run.sh gained a clause5 stage. MPFR and CPU-oracle
+extensions for the new set are running; their numbers get their own
+entry when they land.
