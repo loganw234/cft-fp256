@@ -3,9 +3,12 @@
 
   Vitis kernel description for cft_krnl. The argument offsets ARE the
   register map in rtl/cft_csr.sv; change them together or not at all.
-  Read-only CSRs (FLAGS 0x40, MAGIC 0x44, VERSION 0x48, CAPS 0x4C)
-  are not arguments and deliberately absent here - hosts reach them
-  with xrt::kernel::read_register / pyxrt read_register.
+  Read-only CSRs (FLAGS 0x40, MAGIC 0x44, VERSION 0x48, CAPS 0x4C,
+  STATUS 0x50) are not arguments and deliberately absent here - hosts
+  reach them with xrt::kernel::read_register / pyxrt read_register.
+  STATUS especially: a sequencer run reports both its refusal and its
+  deposit overflow there and nowhere else, so a host that binds only
+  the arguments below cannot tell a refused run from a completed one.
 -->
 <root versionMajor="1" versionMinor="6">
   <kernel name="cft_krnl" language="ip_c"
