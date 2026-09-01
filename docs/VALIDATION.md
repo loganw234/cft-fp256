@@ -330,3 +330,17 @@ refusal feature, the reviewed runner, and the mpfr stage: golden
 148s, vectors 9s, sim 1778s, lint 48s, formal 34s, the library
 chain 35s together, mpfr parity 2s, soak-quick + control 103s.
 Run id 20260831-222657-6a888b0.
+
+## 2026-09-01 - the ceiling moves: 145 MHz closes with margin
+
+The single-tile attempt at 145 MHz - launched against the "measured
+~142.7 ceiling" the 260 failure implied - CLOSED: kernel_wns
++0.032 ns, image verified 8/8 (sha256 91c9f322...), seeds aboard,
+staged in build-145 on the box. The lesson is about the measurement,
+not just the design: an achieved-period reading from a hopelessly
+over-constrained run understates what the router does for an
+achievable target. The true ceiling is >= 145; a quad attempt at 145
+and a single at 150 launched immediately to bracket it, and 145 is
+now a real candidate clock for a future card-day set (+11.5%
+throughput over the staged 130 pair) once emulation and first light
+vouch for the 130s.
