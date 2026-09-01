@@ -271,3 +271,34 @@ proven against 23.9B CPU cases - convicted the harness immediately,
 while the library was right in every disagreement, including the
 tie-at-the-subnormal-grid case. That is the self-calibration a new
 oracle owes before its fp128/fp256 verdicts count.
+
+## 2026-08-31 - precision refusal (STATUS[3]) + the adversarial pair
+
+A trimmed build now REFUSES a MODE precision it does not carry (and
+codes 4-15 on every build): engine never starts, no memory moves,
+done still asserts, STATUS[3] sticky until the next accepted start,
+FLAGS untouched. Proven at both geometries: the quarter tile refuses
+fp128/fp256/code-5/code-15 with the D pattern intact and the sticky
+clearing on the next accepted run; the full tile refuses code 9; the
+faults bench pins fault-run-then-refusal reading exactly 0x8.
+
+Before it merged, two adversarial reviewers went over it plus the
+week's tooling - the pattern that previously found four bugs. This
+round: 16 confirmed findings between them, every one closed. The
+hardware half SIMULATED the worst one (a refusal's STATUS ORed with
+the previous run's stale fault bits, misfiled by the host as a bus
+fault on a run that never touched the bus - fixed by masking the
+engine's sticky while the last start was refused), and found
+cft_seedop's width guard admitting the one width its own shift cannot
+survive. The tooling half demonstrated four real misbehaviors of
+verify/run.sh (same-minute run adoption, typo'd --only passing with a
+crashed census, Windows docker-build paths, --skip re-verdicting
+finished work), independently derived the STATUS bug, and cleared
+divsqrt.c's core after a 176k-case forced lane-state interrogation.
+Collateral finds en route: busfx.unstall had left a third of the AXI
+channels frozen paused since the day it was written - invisible
+because no test had ever driven traffic after unstalling - and the
+first bench to do so was the refusal block itself.
+
+Suite after everything: 15 targets / 40 tests green, yosys clean,
+XRT backend compiled against real headers.
