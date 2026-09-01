@@ -118,6 +118,8 @@ vectors/             conformance-set emitter (JSONL)
 docker/              the simulation container CI and dev boxes share
 docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      SEQUENCER, SCALING, ROADMAP, BRINGUP, CARDDAY,
+                     BENCHMARKS (the software tier measured against
+                     MPFR, __float128 and the CPU itself),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```

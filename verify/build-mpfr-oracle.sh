@@ -52,8 +52,13 @@ fetch() {  # <url> <file> <sha256>
     echo "== fetching $2"
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL -o "$2.part" "$1"
-    else
+    elif command -v wget >/dev/null 2>&1; then
       wget -q -O "$2.part" "$1"
+    else
+      # The sim container has python3 but neither curl nor wget; the
+      # SHA-256 gate below is the integrity check either way.
+      python3 -c 'import sys, urllib.request as u; u.urlretrieve(sys.argv[1], sys.argv[2])' \
+        "$1" "$2.part"
     fi
     mv "$2.part" "$2"
   fi

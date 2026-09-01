@@ -286,7 +286,8 @@ ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
 clause5-soak: clause5-soak$(EXE)
 mpfr-check: mpfr-check$(EXE)
-.PHONY: divsqrt-soak clause5-soak mpfr-check
+cft-bench-peers: cft-bench-peers$(EXE)
+.PHONY: divsqrt-soak clause5-soak mpfr-check cft-bench-peers
 endif
 
 # MPFR parity: the third oracle, and the only independent one that
@@ -296,6 +297,18 @@ endif
 mpfr-check$(EXE): tools/mpfr_check.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(LDLIBS) -lmpfr -lgmp -lm
+
+# The software backend priced against the libraries people already
+# use: MPFR at matched precision (raw, and emulating the binary format
+# by its manual's recipe), __float128 for fp128, the CPU itself for
+# fp32/fp64. Same prefix as mpfr-check; -fno-math-errno so the cpu-hw
+# rows are the CPU's price, not errno bookkeeping's. The tool's header
+# says what each row means and why call shape is part of the price;
+# docs/BENCHMARKS.md holds measured numbers.
+cft-bench-peers$(EXE): tools/cft_bench_peers.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+	  tools/cft_bench_peers.c libcft.a -o $@ $(LDLIBS) -lmpfr -lgmp \
+	  -lquadmath -lm
 
 # The same idea as difftest, for programs rather than arithmetic: two
 # independent ports of the sequencer, one in Python and one in C, over
@@ -326,6 +339,9 @@ clean:
 	      cft.dll libcft.so libcft.dylib \
 	      cft-selftest cft-selftest.exe api-test api-test.exe \
 	      cft-bench cft-bench.exe \
+	      cft-bench-peers cft-bench-peers.exe \
+	      divsqrt-soak divsqrt-soak.exe clause5-soak clause5-soak.exe \
+	      mpfr-check mpfr-check.exe \
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
