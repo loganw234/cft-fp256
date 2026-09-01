@@ -175,6 +175,20 @@ difftest: all
 divsqrttest: all
 	$(PYTHON) tests/divsqrt_check.py
 
+# The native-oracle soak: cft_div/cft_sqrt against the host CPU's own
+# IEEE division and square root, which nobody in this repository
+# defined. -fno-math-errno keeps sqrt a bare instruction and
+# -frounding-math keeps the compiler from folding across fesetround;
+# both matter for the oracle to BE the hardware. Driven at scale by
+# hw/run-soak.sh; see the tool's header for what it can and cannot
+# validate.
+divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
+	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ $(LDLIBS) -lm
+
+divsqrt-soak: divsqrt-soak$(EXE)
+.PHONY: divsqrt-soak
+
 # The same idea as difftest, for programs rather than arithmetic: two
 # independent ports of the sequencer, one in Python and one in C, over
 # the same fuzz corpus. It also checks that they REFUSE the same

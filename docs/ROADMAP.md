@@ -58,7 +58,8 @@ the same at every N and both precisions, plus flags.
 
 **Done when:** the card reproduces `vectors/out/*.jsonl` exactly, and
 the run is recorded (platform, XRT, tool versions, xclbin hash) the
-way atlas-darkroom records a census.
+way atlas-darkroom records a census - the census lives in
+docs/VALIDATION.md.
 
 ## v1 - the fractured array and a real engine
 
