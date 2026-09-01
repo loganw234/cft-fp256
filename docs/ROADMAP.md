@@ -1143,16 +1143,57 @@ structure is worse for exactly this arithmetic - 21 CARRY8 per fp256
 adder path becomes 42 CARRY4. The K325T's 68% has margin to absorb
 that; the K410T's 54% has a great deal.
 
-**And the DSP assumption is unverified.** Every row credits the design
-with 266 hard DSPs carrying the significand multipliers. If
-`nextpnr-xilinx` cannot place clocked DSP48E1 - the reported error is
-`Clocked DSP48E1s are currently unsupported`, with `yosys -nodsp` as
-the documented workaround - then an openXC7 build puts all four
-multiplier trees in fabric, and every LUT figure here is far too low.
-**This is the single question that decides whether the open full-tile
-story is real**, it applies identically to every 7-series row, and it
-has not been checked. Check it before buying anything on the strength
-of this table.
+**And the DSP assumption, checked (2026-08-31): it holds.** Every row
+credits the design with 266 hard DSPs carrying the significand
+multipliers, and an earlier version of this paragraph held that up as
+the single unverified question deciding whether the open full-tile
+story is real, quoting a reported `Clocked DSP48E1s are currently
+unsupported` error with `yosys -nodsp` as the documented workaround.
+That error is history, not the current state: it was the 2020
+placeholder in gatecat's preliminary DSP support (what the 2022-era
+LiteX reports were hitting, enjoy-digital/litex#1372), and the openXC7
+fork deleted it on 2023-03-07 when it implemented real DSP48E1 FASM
+generation, cascades included (openXC7/nextpnr-xilinx 24113d1 and the
+commits that follow it). As of the released toolchain (nextpnr-xilinx
+0.9.3, 2026-08-18) the whole chain is present: `synth_xilinx` infers
+`$mul` into DSP48E1 *by default* for xc7 and `-nodsp` is how you turn
+it off - neither openXC7's demo flow nor LiteX's yosys+nextpnr backend
+passes it any more - the packer places clocked and cascaded DSP48E1,
+the FASM writer emits the full register configuration, the fork's
+README states "DSP48E1 (cascading works)", and prjxray's Kintex-7
+database carries the DSP48 segbits (register and constant-pin bits
+verified present), so the bitstream side exists for every part in this
+table. Direct instantiation goes through the same packer as inference -
+openXC7's own primitive-tests drive a raw clocked DSP48E1 - so a
+primitive-shim wrapper remains available as a structural control over
+the decomposition, not as an escape hatch: the caveat below hits both
+paths identically.
+
+Two consequences for the table. **Count openXC7 DSPs in 18x18, not
+25x18:** Yosys splits wide multiplies into 18x18 partials to ride the
+PCOUT->PCIN cascade, so an openXC7 tile should run near the schoolbook
+ceil(P/17)^2 ladder - call it 390-400 DSPs against Vivado's 262-267,
+un-measured - which raises every DSP percentage here by ~1.5x and
+flips no verdict (the 325T goes 32% -> ~47%; the 100T was already over
+on both axes). **And one correctness bug is open, not a missing
+subsystem** (openXC7/nextpnr-xilinx#159, opened 2026-08-20, unmerged
+as of this check): DSP48E1 control pins reachable only by tile
+constant bits - INMODE0-4, ALUMODE2/3, OPMODE6 - never get those bits
+emitted, so on silicon they can read back complemented, INMODE[1]=1
+gates the multiplier's A operand to zero, and an inferred multiply
+returns garbage. Demonstrated with vectors on Zynq-7010 hardware, with
+a hardware-validated fix attached to the issue; the maintainer could
+not reproduce it on Spartan-7 and put a standing serial-verified DSP
+board test into demo-projects CI (`dsp-test-arty-s7`, 2026-08-26), and
+the openXC7 regression suite carries the case expected-red until the
+fix lands. Registered-DSP paths are also still invisible to timing
+analysis (combinational-only modeling, merged 2026-08-01) - a threat
+to reported fmax, never to bits. So multipliers land in DSP48E1 on
+every 7-series row and the LUTs-for-multipliers disaster scenario is
+off the table, but bit-correct DSP results through the released
+toolchain are one in-flight fix away, and the bring-up check is the
+one this repo always runs anyway: the conformance vectors, which would
+catch a complemented INMODE in the first multiply.
 
 The Pt's serialized-multiplier note is a real design option, not a
 consolation: a multi-cycle 237-bit significand multiply built for
