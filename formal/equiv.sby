@@ -1,0 +1,37 @@
+# Equivalence miter: rtl/cft_simpleops.sv (the area rewrite) against
+# tb/wrappers/cft_simpleops_ref.sv (the frozen flat form it replaced),
+# op constrained off the two reassigned seed codes - see
+# tb_simpleops_equiv.sv for the story and the carve-out's provenance.
+#
+# Both modules are combinational, so bmc at depth 2 is a complete
+# equivalence proof over the whole input space at this rung, not a
+# bounded sample of it.
+#
+#   sby -f equiv.sby check    the proof
+#   sby -f equiv.sby cover    the carve-out's neighbours stay reachable
+#
+# Run from formal/ (run.sh does), so the relative paths below resolve.
+
+[tasks]
+check
+cover
+
+[options]
+check: mode bmc
+check: depth 2
+cover: mode cover
+cover: depth 2
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -formal -sv cft_simpleops.sv
+read_verilog -formal -sv cft_simpleops_ref.sv
+read_verilog -formal -sv tb_simpleops_equiv.sv
+prep -top tb_simpleops_equiv
+
+[files]
+../rtl/cft_simpleops.sv
+../tb/wrappers/cft_simpleops_ref.sv
+tb_simpleops_equiv.sv
