@@ -690,10 +690,13 @@ typedef struct cft_program cft_program;
 
 /* Sticky status bits, reported through cft_program_run's bus_out.
  * Bits 0..2 are the engine's bus faults and mean the output is not
- * valid; this one does not. A lane that deposits more than the
- * program's max_deposits drops the excess and sets it: what fit is
- * correct and reproducible, and what was lost is the tail. */
-#define CFT_STATUS_DEPOSIT_OVERFLOW (1u << 3)
+ * valid; bit 3 is the trimmed-build precision refusal - which is why
+ * this one moved to bit 4 on 2026-09-01, before any device had ever
+ * reported it. It does NOT invalidate the output: a lane that
+ * deposits more than the program's max_deposits drops the excess and
+ * sets it - what fit is correct and reproducible, and what was lost
+ * is the tail. */
+#define CFT_STATUS_DEPOSIT_OVERFLOW (1u << 4)
 
 CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                                     size_t bytes, cft_program **out);

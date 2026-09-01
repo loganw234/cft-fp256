@@ -295,12 +295,13 @@ the hardware does not have to be:
 
 `max_deposits` is declared in the header and fixes the output shape at
 `n * max_deposits` elements. A lane whose deposits exceed it drops the
-excess and raises a sticky **deposit-overflow** bit in `STATUS`, not
-in `FLAGS`: the five IEEE flags mean what 754 says they mean, and
-"your buffer was too small" is not one of them. (`STATUS` bits 0..2
-are the engine's bus faults today and `cft_csr.sv` hardwires the rest
-to zero, so bit 3 needs a path out before this can be reported at
-all - a small RTL change, listed here so it is not forgotten.)
+excess and raises a sticky **deposit-overflow** bit in `STATUS` - bit
+**4** - not in `FLAGS`: the five IEEE flags mean what 754 says they
+mean, and "your buffer was too small" is not one of them. (This bit
+lived at 3 until 2026-09-01, when the trimmed-build precision refusal
+took STATUS[3] in the RTL; the sequencer's bit moved while it had
+never crossed a device boundary, which is the last moment moving it
+cost nothing.)
 
 **A slot a lane never wrote reads as `+0`, and that is normative.** It
 has to be: a run whose untouched slots kept whatever the host buffer

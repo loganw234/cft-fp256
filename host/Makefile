@@ -93,6 +93,15 @@ EXAMPLES := vector-fma$(EXE)
 
 all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
 
+# Every object depends on every header. Crude next to real dependency
+# generation, but this bit twice in one day - a stale device.o
+# reported the old ABI version against a fresh api-test, then a stale
+# program.o reported a STATUS bit the model had moved - and the build
+# is small enough that over-rebuilding costs seconds where a stale
+# object costs a debugging session.
+HDRS := include/cft.h $(wildcard src/*.h)
+$(OBJ) $(PICOBJ): $(HDRS)
+
 %.o: %.c
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) -c $< -o $@
 

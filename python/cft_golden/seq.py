@@ -54,11 +54,15 @@ HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL = 0, 1, 2, 3, 4, 5
 CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
               DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall"}
 
-# STATUS bits. 0..2 are the engine's bus faults (rtl/cft_csr.sv); the
-# sequencer adds one. It is deliberately not an IEEE flag: the five in
-# FLAGS mean what 754 says they mean, and "your buffer was too small"
-# is not one of them.
-STATUS_DEPOSIT_OVERFLOW = 1 << 3
+# STATUS bits. 0..2 are the engine's bus faults and 3 is the
+# precision refusal (rtl/cft_csr.sv); the sequencer adds bit 4. It
+# held bit 3 until 2026-09-01, when the trimmed-build refusal took
+# that position in silicon-bound RTL - moved while this word had
+# never crossed a device boundary, which is the last moment moving it
+# was free. It is deliberately not an IEEE flag: the five in FLAGS
+# mean what 754 says they mean, and "your buffer was too small" is
+# not one of them.
+STATUS_DEPOSIT_OVERFLOW = 1 << 4
 
 
 class ProgramError(ValueError):
