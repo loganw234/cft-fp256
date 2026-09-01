@@ -145,9 +145,9 @@ krnl:
 # sequencer run, an elementwise run, another sequencer run - because
 # the mux is one claim and testing half of it proves nothing.
 #
-# Out of `make sim` while cft_seq is being written: an aggregate target
-# that goes red for a module still under construction trains people to
-# ignore it. It folds in the day the core is green.
+# Out of `make sim` for as long as seq_core is, and for its reason: an
+# aggregate target that goes red for a module still being written
+# trains people to ignore it. Both fold in on the same day.
 krnlseq:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \
