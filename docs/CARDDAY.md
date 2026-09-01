@@ -160,9 +160,16 @@ the reduction datapath itself rather than the split.
 
     ./host/cft-selftest vectors/out cardday/single/cft_hw.xclbin
 
-228,000 published cases replayed through the hardware, each one twice:
-element at a time for exact flags, then as arrays. This is the claim
-the project is for, so it is the run whose output gets kept.
+392,000 published cases replayed through the hardware, each one twice:
+element at a time for exact flags, then as arrays (the sets were
+regenerated when the seed opcodes joined the contract - regenerate
+locally with `make vectors` before the day so the card replays the
+current 20 sets). This is the claim the project is for, so it is the
+run whose output gets kept. Follow it with the composed divide and
+square root - `bash hw/run-device-test.sh <image> -q` includes them -
+because on silicon the ~30-invocation sequence costs microseconds,
+and that run completes the general-purpose story emulation priced in
+days.
 
 Every case is a separate kernel launch in the element pass, so budget
 for launch overhead rather than arithmetic - on the order of tens of
