@@ -1,0 +1,24 @@
+<!-- Copyright 2026 Logan W.
+     SPDX-License-Identifier: Apache-2.0
+
+     The entire build for VectorFma.cs: `dotnet run` with the project
+     flag pointed here, no NuGet packages, nothing restored from the
+     network. Kept to the properties that earn their line. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Any 8.0-or-newer runtime may run this; the example claims
+         nothing newer than 8.0 has. -->
+    <RollForward>LatestMajor</RollForward>
+    <!-- The same executable name shape as vector-fma-rs and
+         vector-fma-f. -->
+    <AssemblyName>vector-fma-cs</AssemblyName>
+    <!-- The lines this program prints are diffed character for
+         character against the C example's. Number formatting that
+         consulted the machine's locale would put that at the mercy
+         of a control panel; invariant globalization takes the
+         question off the table. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>
