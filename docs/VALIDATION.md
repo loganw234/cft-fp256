@@ -572,3 +572,21 @@ With this, every operation the clause-5 completion added stands on
 the same four legs div/sqrt stood on: the golden model's own tests,
 C-vs-model parity, GNU MPFR at all four formats, and the host CPU's
 IEEE hardware at exhaustive-fp32 scale.
+
+## 2026-09-01 - the 135 MHz card-day pair closes, verifies and stages
+
+Both geometries at the decided clock, from the 39fc2c0 tree whose
+rtl/ and hw/ are byte-identical to the general-purpose b1a014c:
+
+    single @135  CLOSED  kernel_wns +0.255   verify-image 8/8
+    quad   @135  CLOSED  kernel_wns +0.042   verify-image 8/8
+
+staged to ~/cardday-135 with the copies re-hashed against the
+manifests' build-time sha256 - byte-identical both. The quad number
+is worth a sentence: +0.042 ns at 135 against +0.009 ns at 130. A
+router handed a realistic target closed a HIGHER clock with MORE
+slack, which is the "met-target slack is a stopping point, not a
+capability statement" lesson from the ceiling bracket, observed now
+in the favourable direction. CARDDAY.md's decision box is checked;
+the fallback chain is 135 -> 130 general-purpose (~/cardday-ms) ->
+bac9f550 -> 53bbba7.

@@ -39,40 +39,47 @@ the element count is an operand rather than a loop bound.
 
 ## Before the day
 
-- [ ] **DECISION 2026-09-01: the card-day clock is 135 MHz, both
-      geometries.** The measured ceilings are ~148 single / ~139 quad
-      (docs/VALIDATION.md, the bracket entry), so 135 carries real
-      margin on both instead of the quad's nine-picosecond squeak at
-      130. A 135 pair is building from the same b1a014c tree; when it
-      closes and verifies it REPLACES the 130 pair below as primary,
-      and the 130 pair joins the fallback chain. High-speed testing
-      (145+) is deliberately deferred past first light.
+- [x] **DECISION 2026-09-01: the card-day clock is 135 MHz, both
+      geometries - EXECUTED the same day.** The measured ceilings are
+      ~148 single / ~139 quad (docs/VALIDATION.md, the bracket
+      entry), so 135 carries real margin on both instead of the
+      quad's nine-picosecond squeak at 130. High-speed testing (145+)
+      stays deliberately deferred past first light.
 
-- [x] **Both images built, staged and verified** (updated 2026-09-01).
-      The card-day set is now the GENERAL-PURPOSE pair at b1a014c in
-      `~/cardday-ms` - the first images carrying the divide/sqrt seed
-      opcodes (CAPS bit 14), one HBM pseudo-channel per master
-      (verified in the image metadata: hw/verify-image.sh 8/8 on
-      both, exactly one channel per master), reductions at 0x500, the
-      bus-fault abort:
+- [x] **The PRIMARY pair: 135 MHz, staged and verified**
+      (2026-09-01). Built at 39fc2c0, whose rtl/ and hw/ are
+      byte-identical to the b1a014c general-purpose tree (the only
+      diff is a soak script that never reaches a netlist) - seed
+      opcodes (CAPS bit 14), one HBM pseudo-channel per master,
+      reductions at 0x500, the bus-fault abort. hw/verify-image.sh
+      8/8 on both; staged copies re-hashed against the manifests'
+      build-time sha256, byte-identical:
 
-          ~/cardday-ms/cft_hw_single.xclbin   kernel_wns +0.220
-          ~/cardday-ms/cft_hw_quad.xclbin     kernel_wns +0.009
-          ~/cardday-ms/SHA256SUMS             (verified after staging)
+          ~/cardday-135/cft_hw_single.xclbin   kernel_wns +0.255
+          ~/cardday-135/cft_hw_quad.xclbin     kernel_wns +0.042
+          ~/cardday-135/SHA256SUMS             (+ both manifests)
 
-      The STATUS[3] precision-refusal post-dates these images and is
-      in main only. The bac9f550 pair below moves to FIRST fallback.
+      Note the quad's margin: +0.042 ns at 135 against +0.009 at
+      130 - the router given a realistic target closed HIGHER with
+      MORE slack, which is the met-target-slack lesson from the
+      ceiling bracket paying out in the right direction.
 
-      The previous entry, kept for the fallback chain: the 130 MHz
-      pair at bac9f550 - one AXI master per stream, reductions at
-      VERSION 0x500, the bus-fault abort, both closed with hbm_aclk
-      clean at 450.0:
+      The STATUS[3] precision-refusal and the sequencer post-date
+      these images and are in main only.
 
-          ~/cardday-130b/cft_hw_single.xclbin   one tile,   kernel_wns +0.271
-          ~/cardday-130b/cft_hw_quad.xclbin     four tiles, kernel_wns +0.019
+      FIRST fallback: the 130 MHz general-purpose pair at b1a014c in
+      `~/cardday-ms` (single +0.220, quad +0.009, verified 8/8),
+      identical hardware one notch slower.
+
+      SECOND fallback: the 130 MHz pair at bac9f550 - one AXI master
+      per stream, reductions at VERSION 0x500, the bus-fault abort,
+      both closed with hbm_aclk clean at 450.0:
+
+          ~/cardday-135/cft_hw_single.xclbin   one tile,   kernel_wns +0.271
+          ~/cardday-135/cft_hw_quad.xclbin     four tiles, kernel_wns +0.019
           ~/cardday-130b/SHA256SUMS             (+ both manifests, README)
 
-      The 53bbba7 pair stays in ~/cardday-130 as the SECOND fallback - shared
+      The 53bbba7 pair stays in ~/cardday-130 as the THIRD fallback - shared
       port, no reductions, but the configuration hw_emu validated
       longest. If the new pair misbehaves on silicon, fall back and the
       day still produces first light. Neither set carries the shared
@@ -140,7 +147,7 @@ bitstream to say.
 
 **3. One tile is correct.**
 
-    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_single.xclbin -n 4096
+    bash hw/run-device-test.sh ~/cardday-135/cft_hw_single.xclbin -n 4096
 
 Full matrix: every format, ten opcodes, five rounding attributes,
 against the software backend, plus the boundary sizes. This is the
@@ -151,7 +158,7 @@ Reductions are part of that matrix and run automatically, but they are
 worth being able to run alone when something goes wrong, because they
 are the only path where the element count is an operand:
 
-    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_single.xclbin -r
+    bash hw/run-device-test.sh ~/cardday-135/cft_hw_single.xclbin -r
 
 One tile means one canonical range and no fold, so a failure here is
 the reduction datapath itself rather than the split.
@@ -178,7 +185,7 @@ wrong with the driver path rather than with the tile.
 
 **5. Four tiles are correct, and identical to one.**
 
-    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_quad.xclbin -n 4096
+    bash hw/run-device-test.sh ~/cardday-135/cft_hw_quad.xclbin -n 4096
 
 Then the part that matters most: **run the same inputs through the
 single-tile image and the quad image and compare the output buffers
@@ -189,7 +196,7 @@ notice later.
 Reductions carry the sharpest version of that test, and it is worth
 doing explicitly rather than trusting the matrix:
 
-    bash hw/run-device-test.sh ~/cardday-130b/cft_hw_quad.xclbin -r
+    bash hw/run-device-test.sh ~/cardday-135/cft_hw_quad.xclbin -r
 
 An elementwise op splits across tiles trivially - element i does not
 care which tile computed it. A reduction does not: the array is cut
