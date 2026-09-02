@@ -9,7 +9,7 @@ digit. Two things follow from that, and they are the reason this file
 exists rather than being a paragraph in the documentation:
 
 * Reaching the library from another language costs a ctypes.CDLL and
-  eight argtypes. No binding generator, no build step, no compiler on
+  seven argtypes. No binding generator, no build step, no compiler on
   the user's machine, no pyxrt.
 
 * The port is a shim. Nothing about the arithmetic is reimplemented
@@ -28,16 +28,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# cft_op and cft_round - the values are normative (cft.h), so a caller
+# writes the names and never the register layout behind them.
 FMA, RNE = 0, 0
 N = 4096
+
+# width, exp_w, man_w, bias - the geometry table vector_fma.c carries.
+# Operand-stream machinery, not format knowledge the caller should own:
+# element sizes and names come from the library, because a size or a
+# name the caller guesses is one that goes stale.
 GEOM = [
-    # width, exp_w, man_w, bias
     (32, 8, 23, 127),
     (64, 11, 52, 1023),
     (128, 15, 112, 16383),
     (256, 19, 236, 262143),
 ]
-NAMES = ["fp32", "fp64", "fp128", "fp256"]
 
 
 def library_path():
@@ -77,6 +82,8 @@ def load():
     lib.cft_supports.restype = ctypes.c_int
     lib.cft_format_size.argtypes = [ctypes.c_int]
     lib.cft_format_size.restype = ctypes.c_size_t
+    lib.cft_format_name.argtypes = [ctypes.c_int]
+    lib.cft_format_name.restype = ctypes.c_char_p
     lib.cft_strerror.argtypes = [ctypes.c_int]
     lib.cft_strerror.restype = ctypes.c_char_p
     return lib
@@ -123,18 +130,24 @@ def fnv1a(data):
 
 def main():
     artifact = sys.argv[1].encode() if len(sys.argv) > 1 else None
+    backend = artifact.decode() if artifact else "software"
     lib = load()
 
     dev = ctypes.c_void_p()
     st = lib.cft_open(artifact, 0, ctypes.byref(dev))
     if st != 0:
-        raise SystemExit(f"cft_open: {lib.cft_strerror(st).decode()}")
-    print(f"cft-fp256 vector fma, "
-          f"{artifact.decode() if artifact else 'software'} backend")
+        raise SystemExit(
+            f"cft_open({backend}): {lib.cft_strerror(st).decode()}")
+    print(f"cft-fp256 vector fma, {backend} backend")
 
     for f, (width, exp_w, man_w, bias) in enumerate(GEOM):
+        # The name comes from the library, not a local table - cft.h
+        # provides cft_format_name precisely so a binding, a log line
+        # and a conformance report all say the same thing.
+        name = lib.cft_format_name(f).decode()
+
         if not lib.cft_supports(dev, FMA, f):
-            print(f"{NAMES[f]:<6} not available on this device")
+            print(f"{name:<6} not available on this device")
             continue
         esz = lib.cft_format_size(f)
         rng = Rng(0x1234567 + f)
@@ -152,9 +165,10 @@ def main():
         st = lib.cft_run(dev, FMA, f, RNE, buf_a, buf_b, buf_c, buf_d, N,
                          ctypes.byref(flags), None)
         if st != 0:
-            raise SystemExit(f"cft_run: {lib.cft_strerror(st).decode()}")
+            raise SystemExit(
+                f"cft_run {name}: {lib.cft_strerror(st).decode()}")
 
-        print(f"{NAMES[f]:<6} n={N} rne  "
+        print(f"{name:<6} n={N} rne  "
               f"checksum 0x{fnv1a(buf_d.raw):016x}  "
               f"flags 0x{flags.value:02x}")
 
