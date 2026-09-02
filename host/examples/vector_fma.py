@@ -104,11 +104,30 @@ def main():
         print(f"WARNING: could not read STATUS (0x50): {exc}. "
               f"Bus faults cannot be ruled out for this run.")
         status = 0
-    if status:
-        print(f"FAIL: kernel reported bus faults, STATUS={status:#05b} "
+    # STATUS grew two bits since this check was first written, and they
+    # do not mean what bits 0-2 mean (docs/ARCHITECTURE.md, 0x50): [3]
+    # says the run was REFUSED - nothing computed, D untouched - and [4]
+    # is a sequencer run's deposit overflow, which an elementwise run
+    # cannot set. Reporting either as a bus fault would name the wrong
+    # thing on the one occasion the message is read at all.
+    if status & 0b111:
+        print(f"FAIL: kernel reported bus faults, STATUS={status:#07b} "
               f"(bit0 read resp, bit1 write resp, bit2 burst length). "
               f"The output buffer is not trustworthy; check that the "
               f"buffers are in range and 32-byte aligned.")
+        return 1
+    if status & (1 << 3):
+        print(f"FAIL: the kernel REFUSED the run, STATUS={status:#07b} "
+              f"(bit3). Nothing was computed and D holds whatever it held. "
+              f"For an elementwise run that means this bitstream does not "
+              f"implement precision {PREC_CODE[args.format]}: read CAPS "
+              f"(0x4C) bit {PREC_CODE[args.format]} before issuing it.")
+        return 1
+    if status:
+        print(f"FAIL: STATUS={status:#07b} carries a bit this example does "
+              f"not know. The CSR map defines [2:0] bus faults, [3] refused "
+              f"and [4] deposit overflow on a sequencer run, and this is "
+              f"not one - so the result is not being called checked.")
         return 1
 
     bad = 0

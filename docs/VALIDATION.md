@@ -1021,3 +1021,18 @@ dead-arm constant slices; fixed in c8123b9 by clamping the offsets),
 and `quarter` stops Verilator with an internal error on the reduce
 serialiser's fp128 arm at BEAT_BITS=64 - identical on the pristine
 tip, fine under Icarus, recorded in docs/ROADMAP.md.
+
+## 2026-09-02 - the case-ROM single closes at 135 MHz with +0.433 in the kernel
+
+    build-single-135r-rom   0e7264e (seed ROM as case tables), one tile,
+                            135 MHz, RETIMING=1, hw/link.cfg
+    routed WNS +0.055 (whole design: the shell's free-running clock,
+                       the same figure every single build reports)
+    kernel worst path  +0.433 ns  s12_enorm_reg -> s13_kept_r_reg, 19 levels
+    xclbin              35,701,603 bytes, manifest clean, sources == commit
+
+The same tree one commit earlier closed the same clock at +0.045; the
+ROM change bought +0.39 ns in the shell against +0.445 out of context.
+The worst kernel paths are all S12->S13 now, which 9f73107 moves up a
+stage; the seed-ROM family does not appear. This image is a candidate
+single for card day pending hw/verify-image.sh and a matching quad.

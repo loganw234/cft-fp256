@@ -78,6 +78,20 @@ the element count is an operand rather than a loop bound.
       Whichever closes goes through hw/verify-image.sh and SHA256SUMS
       before it is called a pair, exactly as above.
 
+      The single half is staged (2026-09-02, evening): built at
+      0e7264e, 135 MHz, retimed, kernel WNS **+0.433** (where the
+      same clock had +0.045 before the case-table ROM), verify-image
+      8/8, copied and re-hashed against the manifest's build-time
+      sha256, byte-identical:
+
+          ~/cardday-tip/cft_hw_single.xclbin    kernel_wns +0.433
+          ~/cardday-tip/SHA256SUMS              (+ manifest, README)
+          sha256 6e6d878d129c746902ddb1a6f6df0067eecd6fb87f8c1c2b1828a894020d401c
+
+      It carries the sequencer's bank fix and the seed ROM as case
+      tables, not the round-stage precompute (9f73107). Its quad is
+      the open half: the tip quads at 135 on both hosts, 130 behind.
+
       FIRST fallback: the 130 MHz general-purpose pair at b1a014c in
       `~/cardday-ms` (single +0.220, quad +0.009, verified 8/8),
       identical hardware one notch slower.
