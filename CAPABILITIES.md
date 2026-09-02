@@ -22,7 +22,7 @@ stands, including the honest distance between "benched" and "yes".
 | **yes** | in the RTL and verified bit-exact against the golden model, in simulation and through the real XRT stack |
 | **composed** | the hardware supplies the primitive; libcft composes the full operation as a fixed sequence of those calls, identical on every backend, with the integer bookkeeping done exactly on the host - the same division of labour the multi-tile reduction fold uses. Bit-identical to the contract |
 | **library** | in libcft and defined by the golden model, but the operation contains NO floating-point arithmetic at all - it is rounding-position bit surgery - so there is no backend pass to issue and nothing for a tile to accelerate. Bit-identical on every backend by construction |
-| **benched** | in the RTL and held bit-exact against the golden model by the cocotb benches - but not yet through the real XRT stack, which is the last mile a **yes** requires. What remains is plumbing validation (hw_emu, then silicon), not design |
+| **benched** | in the RTL and held bit-exact against the golden model by the cocotb benches - but not yet through the real XRT stack, which is the last mile a **yes** requires. The remaining NUMERIC work is plumbing validation (hw_emu, then silicon); the remaining engineering is not, and 2026-09-01 is the proof - fitting the sequencer tile on the part meant deleting a duplicated ALU array, and closing timing in the shell meant a register on the reduction path. Neither gate is finished |
 | **model** | defined in `python/cft_golden` and covered by conformance vectors, but no hardware - a host can use it, the tile cannot |
 | **no** | not implemented anywhere |
 | **out** | deliberately excluded; the reason is given |
@@ -199,7 +199,7 @@ The distance to running it on-chip:
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
 | division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright; on a program-capable device the whole composition issues as ONE sequencer program rather than ~28 elementwise round trips |
 | `floor`, `round`, `step` | **composed** (2026-09-01) - `cft_rint` under the directed attributes IS floor/ceil/trunc/round; `step` was always cmple+select |
-| a sequencer to run a chain on-chip | **benched** (2026-09-01) - `cft_seq` exists in RTL, the kernel's one ALU array behind it (shared with the streaming engine since 2026-09-01 - its private copy had tripled the tile), and holds bit-exact to `seq.py` on deposits, counts, flags and status: 9/9 unit-bench suites across all four formats (single-op through nested-loop escape maps, ragged blocks, a 62-program fuzz corpus) plus the full-kernel bench through the CSR exactly as XRT will drive it. hw_emu and silicon are the remaining distance |
+| a sequencer to run a chain on-chip | **benched** (2026-09-01) - `cft_seq` exists in RTL, the kernel's one ALU array behind it (shared with the streaming engine since 2026-09-01 - its private copy had tripled the tile), and holds bit-exact to `seq.py` on deposits, counts, flags and status: 9/9 unit-bench suites across all four formats (single-op through nested-loop escape maps, ragged blocks, a 62-program fuzz corpus) plus the full-kernel bench through the CSR exactly as XRT will drive it. The remaining distance is open at every step as of 2026-09-01 evening: a hw_emu image from this commit executes the design but has run no program and did not complete every stage, a single and a quad are still building at 135 MHz so no sequencer bitstream has closed, and there is no card |
 
 Today a det_* function could be evaluated as a hybrid - the tile doing
 the fma passes, the host doing the integer and select work between
@@ -219,10 +219,10 @@ on-chip program is the ~25x traffic win).
 | capability discovery (CAPS) | **yes** | formats and opcode groups this bitstream carries |
 | unsupported precision | **refused** | STATUS[3]: engine never starts, memory untouched, done still asserts - an error, not an output |
 | bus-fault reporting (STATUS) | **yes** | including the abandon-on-length-violation path, so a protocol fault is a prompt error rather than a hang |
-| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. The quad image is built and verified |
+| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. The quad image is built and verified - on the pre-sequencer design; the sequencer-era quad is still building |
 | reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | strided or gathered access | **no** | three dense linear streams |
-| on-chip program / loop | **benched** | `cft_seq` behind MODE[15] (VERSION 0x600, CAPS bit 15): programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level. Not yet through hw_emu |
+| on-chip program / loop | **benched** | `cft_seq` behind MODE[15] (VERSION 0x600, CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level. No program has been through hw_emu, and no bitstream carries one |
 | in-place operation (D aliasing A/B/C) | **yes** | documented in cft.h: each element is read before written |
 
 ### Host access
@@ -236,15 +236,19 @@ in docs/COMPATIBILITY.md) gets the full story.
 
 ## What "general purpose" would take from here
 
-1. **Programmability.** The structural gap, now closing fast: the
-   orbit sequencer's RTL landed 2026-09-01 - pulled forward from v2 on
-   the open-core argument that a DDR- or PCIe-fed tile cannot afford a
+1. **Programmability.** The structural gap, now closing: the orbit
+   sequencer's RTL landed 2026-09-01 - pulled forward from v2 on the
+   open-core argument that a DDR- or PCIe-fed tile cannot afford a
    memory pass per step - and holds bit-exact to seq.py at unit and
    full-kernel bench level (see the **benched** rows above). What made
-   the tile a vector ALU rather than a processor is now a plumbing
-   distance, not a design one: hw_emu through the real XRT stack, a
-   bitstream, silicon. Until those, a det_* function still runs as
-   ~25-30 host-issued passes; after them, one launch.
+   the tile a vector ALU rather than a processor is no longer a
+   NUMERIC question. It is still an engineering one, and that was
+   underestimated here: the first sequencer tile did not fit the part
+   at all, sharing the ALU array to make it fit put a real timing
+   regression on the reduction path, and as of 2026-09-01 evening
+   hw_emu is part-run, no sequencer bitstream has closed, and there is
+   no card. Until those, a det_* function still runs as ~25-30
+   host-issued passes; after them, one launch.
 
 2. ~~The cheap operations, which are cheap.~~ **Done** (2026-09-01):
    `roundToIntegral`, the conversions, classification, and the rest of
@@ -275,8 +279,13 @@ in docs/COMPATIBILITY.md) gets the full story.
 - As a **general-purpose float processor**: the blocker was
   programmability alone, and programmability now exists in RTL and is
   benched against its model. What separates "benched" from "yes" is
-  the XRT stack and a slot in a card - validation distance, not
-  design distance.
+  the XRT stack, a bitstream that closes, and a slot in a card. This
+  file called that validation distance rather than design distance
+  until 2026-09-01, when fitting the sequencer took a duplicated ALU
+  array out of the tile and closing timing put a register on the
+  reduction path. Neither moved a result - the numbers are the same
+  numbers - but calling the remaining work plumbing was wrong, and
+  docs/BRINGUP.md is where it is now tracked honestly.
 - For the **atlas det library**: every primitive it refines from
   exists on the tile, including its seeds and now floor/round; the
   on-chip sequence to chain them exists in RTL and is benched. The
