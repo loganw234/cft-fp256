@@ -161,21 +161,39 @@ async def quarter_tile_end_to_end(dut):
     await run_op(dut, axil, ram, FP32, OP_FMA, 1100, seed=342)
     busfx.unstall(ram_a, ram_b, ram_c, ram_d)
 
-    # ---- refusal: the trimmed build's answer to a precision it lacks.
+    # ---- refusal: the trimmed build's answer to a run it cannot do.
     #
-    # Drive MODE at the two precisions this build does not carry, and
-    # at two codes no build carries (4-15 of the field). Each attempt
-    # must complete - ap_done, because a hang costs a card reset - with
-    # STATUS[3] set, FLAGS clean, and the D buffer byte-identical to
-    # the pattern written before the attempt: the engine never started,
-    # so nothing may have moved. The accepted run afterwards proves the
-    # sticky clears at the next real start (run_op asserts STATUS==0).
+    # Drive MODE at the two precisions this build does not carry, at
+    # two codes no build carries (4-15 of the field), and - at a
+    # precision it DOES carry - with MODE[15] asking for the sequencer,
+    # whose program image needs a 256-bit beat and this tile's is 64.
+    # Each attempt must complete - ap_done, because a hang costs a card
+    # reset - with STATUS[3] set, FLAGS clean, and the D buffer
+    # byte-identical to the pattern written before the attempt: nothing
+    # started, so nothing may have moved. The accepted run afterwards
+    # proves the sticky clears at the next real start (run_op asserts
+    # STATUS==0).
     from test_krnl import (MODE, NREG, APTR, BPTR, CPTR, DPTR, FLAGS,
                            STATUS, A_BASE, B_BASE, C_BASE, D_BASE, write64)
-    for prec_code in (2, 3, 5, 15):
+    attempts = [(f"prec code {c}", 0 | (c << 8)) for c in (2, 3, 5, 15)]
+    attempts.append(("sequencer on a 64-bit beat", (1 << 15) | (0 << 8)))
+    for prec_code, mode_word in attempts:
         ram.write(D_BASE, b"\xAA" * 64)
+        if mode_word & (1 << 15):
+            # A VALID image header at A, not operand data: magic and
+            # version sit in the low 64 bits, so on this tile's 64-bit
+            # beat they arrive intact while the precision field and all
+            # three counts read as zero - and zero counts pass the
+            # loader's limits. Without the kernel's refusal that is an
+            # ACCEPTED fp32 run of no instructions with clean flags,
+            # which is exactly the plausible-looking nothing the refusal
+            # exists to prevent; with it, STATUS[3] and nothing read.
+            # The negative control (run_ok reverted to prec_ok) turns
+            # this attempt's STATUS from 0x8 to 0x0 (2026-09-02).
+            ram.write(A_BASE, (0x5054_4643).to_bytes(4, "little")
+                              + (1).to_bytes(4, "little") + bytes(56))
         fl_before = await axil.read_dword(FLAGS)
-        await axil.write_dword(MODE, 0 | (prec_code << 8))   # FMA
+        await axil.write_dword(MODE, mode_word)              # FMA, fp32 for the seq case
         await write64(axil, NREG, 4)
         await write64(axil, APTR, A_BASE)
         await write64(axil, BPTR, B_BASE)
@@ -189,23 +207,24 @@ async def quarter_tile_end_to_end(dut):
                 got_done = True
                 break
         assert got_done, (
-            f"prec code {prec_code}: a refused run must still complete")
+            f"{prec_code}: a refused run must still complete")
         st = await axil.read_dword(STATUS)
         fl = await axil.read_dword(FLAGS)
         assert st == 0x8, (
-            f"prec code {prec_code}: STATUS {st:#x}, want the refusal "
+            f"{prec_code}: STATUS {st:#x}, want the refusal "
             f"bit alone (0x8)")
         # FLAGS clears at an ACCEPTED start, so a refusal must leave it
         # exactly as it was - a refused run that scrubbed the previous
         # run's flags would be quietly rewriting history.
         assert fl == fl_before, (
-            f"prec code {prec_code}: refusal changed FLAGS "
+            f"{prec_code}: refusal changed FLAGS "
             f"{fl_before:#04x} -> {fl:#04x}")
         assert ram.read(D_BASE, 64) == b"\xAA" * 64, (
-            f"prec code {prec_code}: a refused run wrote to memory")
+            f"{prec_code}: a refused run wrote to memory")
     await run_op(dut, axil, ram, FP32, OP_ADD, 8, seed=343)
 
     dut._log.info("quarter tile (BEAT_BITS=64, fp32+fp64): bit-exact "
                   "against the same golden model as the full tile, "
                   "elementwise and reductions - and fp128/fp256/"
-                  "unassigned MODE codes refused with STATUS[3]")
+                  "unassigned MODE codes and a sequencer start "
+                  "refused with STATUS[3]")

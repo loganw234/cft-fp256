@@ -833,13 +833,25 @@ module cft_engine_stream #(
   // The active element, right-aligned. Everything above the element's
   // width is zero and the accumulator never looks at it; the adder it
   // hands work to is the one for this precision.
+  // The fp128 arm's slice is clipped to the beat at elaboration. On a
+  // quarter tile (BEAT_BITS=64) that arm can never execute - prec_ok
+  // refuses fp128 there, so prec_r is never 2 - but the expression
+  // still elaborates, and a 128-bit select of a 64-bit vector stops
+  // the Verilator front end with an internal error before it can
+  // prove the arm dead (2026-09-02; Icarus is unbothered). At 256 the
+  // clip is 128 and the netlist is unchanged. (A comment line must
+  // not begin with the simulator's name: it is read as a pragma.)
+  // The same clip serves the result mask below: two sites, one pair of
+  // widths, so a narrower beat cannot be legal at one and not the other.
+  localparam int RED_W64  = (BEAT_BITS < 64)  ? BEAT_BITS : 64;
+  localparam int RED_W128 = (BEAT_BITS < 128) ? BEAT_BITS : 128;
   always_comb begin
     red_in_elem = '0;
     case (prec_r)
-      PREC_FP64:  red_in_elem[63:0]  = ser_data[ser_idx*64  +: 64];
-      PREC_FP128: red_in_elem[127:0] = ser_data[ser_idx*128 +: 128];
-      PREC_FP256: red_in_elem        = ser_data;
-      default:    red_in_elem[31:0]  = ser_data[ser_idx*32  +: 32];
+      PREC_FP64:  red_in_elem[RED_W64-1:0]  = ser_data[ser_idx*RED_W64  +: RED_W64];
+      PREC_FP128: red_in_elem[RED_W128-1:0] = ser_data[ser_idx*RED_W128 +: RED_W128];
+      PREC_FP256: red_in_elem               = ser_data;
+      default:    red_in_elem[31:0]         = ser_data[ser_idx*32 +: 32];
     endcase
   end
 
@@ -909,10 +921,10 @@ module cft_engine_stream #(
   always_comb begin
     red_add_res = '0;
     case (prec_r)
-      PREC_FP64:  red_add_res[63:0]  = beat_d[63:0];
-      PREC_FP128: red_add_res[127:0] = beat_d[127:0];
-      PREC_FP256: red_add_res        = beat_d;
-      default:    red_add_res[31:0]  = beat_d[31:0];
+      PREC_FP64:  red_add_res[RED_W64-1:0]  = beat_d[RED_W64-1:0];
+      PREC_FP128: red_add_res[RED_W128-1:0] = beat_d[RED_W128-1:0];
+      PREC_FP256: red_add_res               = beat_d;
+      default:    red_add_res[31:0]         = beat_d[31:0];
     endcase
   end
 
@@ -1326,14 +1338,16 @@ module cft_engine_stream #(
     else if (red_push) begin
       flags_acc <= flags_acc | red_out_flags;
       // synthesis translate_off
-      $display("[CFT-ENGS] RED prec=%0d d[127:0]=0x%h flags=%b",
-               prec_r, red_out_data[127:0], red_out_flags);
+      // RED_W128-wide, not [127:0]: a quarter tile's beat is 64 bits, and
+      // the simulator lints inside translate_off (a synthesis pragma).
+      $display("[CFT-ENGS] RED prec=%0d d=0x%h flags=%b",
+               prec_r, red_out_data[RED_W128-1:0], red_out_flags);
       // synthesis translate_on
     end
     else if (collect) begin
       flags_acc <= flags_acc | beat_f;
       // synthesis translate_off
-      $display("[CFT-ENGS] EXQ prec=%0d d[127:0]=0x%h flags=%b", prec_r, beat_d[127:0], beat_f);
+      $display("[CFT-ENGS] EXQ prec=%0d d=0x%h flags=%b", prec_r, beat_d[RED_W128-1:0], beat_f);
       // synthesis translate_on
     end
   end
