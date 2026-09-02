@@ -157,20 +157,26 @@ krnlseq:
 
 # The kernel with BOTH fused ladders on - the configuration the size
 # campaign built, measured and equivalence-proved lane by lane, and
-# then never ran through the full-kernel bench, because Alveo had
-# room and hw/package_kernel.tcl strips user parameters so no
-# bitstream ever carried it. The quad tile with the sequencer needs
-# the area, so it ships; this is the bench that says the kernel,
-# not just the ladder, is bit-exact with it on.
+# then never ran through the full-kernel bench, because Alveo had room
+# and hw/package_kernel.tcl strips user parameters so no bitstream
+# ever carried it. This bench says the kernel, not just the ladder, is
+# bit-exact with them on. They do NOT ship at 135 MHz - they cost more
+# slack than their 16k LUT is worth (docs/ROADMAP.md) - so this target
+# is what keeps the configuration honest for the slower clock and the
+# smaller open-core part where it does pay.
 krnlfused:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlfused \
 		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1" \
 		COCOTB_RESULTS_FILE=sim_build/krnlfused/results.xml
 
-# The kernel with both fused ladders OFF - the pre-2026-09-01 default,
-# kept covered now that the shipping default is on. Same bit-exact
-# result; the ladders are a resource trade, not a numeric one.
+# The kernel with both fused ladders pinned OFF by explicit parameter.
+# That is also the shipping default as of 2026-09-01 (they cost more
+# timing than the area is worth at 135 MHz - docs/ROADMAP.md), so this
+# duplicates `krnl` today and is kept anyway: it pins the configuration
+# rather than inheriting it, so a future default flip cannot silently
+# take the off path out of coverage. Neither variant is in `sim`; the
+# aggregate runs the default, and these two bracket it.
 krnlplain:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlplain \

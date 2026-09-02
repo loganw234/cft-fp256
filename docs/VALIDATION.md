@@ -710,3 +710,103 @@ Evidence, all green on 2026-09-01:
 Pending: the same comparison through hw_emu's device executor - the
 gate in flight predates this commit, so the NEXT emulation image is
 the one whose compare_divsqrt exercises the program route on-device.
+
+## 2026-09-01 - one ALU array, and the two bugs that cost
+
+The sequencer shipped with a PRIVATE second copy of the lane array
+(`cft_seq_lanes`), a v1 deviation its own header documented and its
+bench was built against. Nothing scored the deviation at the kernel
+until the sequencer-era tile was synthesised whole, and then it was not
+close:
+
+    tile, OOC @135 MHz, xcu50    LUT        note
+    pre-sequencer                 98,310
+    sequencer, private array     288,764    the copy is 124,057 of it
+    quad link of that tile     1,316,831    of 871,680 - PLACER NOT RUN
+
+`VPL UTLZ-1`, LUT-as-logic over-utilised: the quad did not fail
+timing, it failed to exist. The array is now one `rtl/cft_lanes.sv`
+that `cft_krnl` owns, driven by both engines through a per-issue
+request under the `MODE[15]` select that already chose the AXI owner -
+no arbitration, because the two never run at once. `OWN_LANES` keeps a
+private instance for each module's unit bench.
+
+    one shared array, ladders off     162,482    -0.065 ns
+    + sequencer control diet          139,404    +0.307 ns
+    + fused ladders on                123,599    +0.097 ns
+
+**The diet.** `cft_seq`'s address arithmetic multiplied by `esz` and
+`max_deposits` and landed in DSP columns, owning the kernel's critical
+path. Every multiply is by a power of two, so they became shifts; the
+variable part-selects into the packed lane-state and deposit-count
+vectors became loops over constant indices. cft_seq went 15 DSP -> 0,
+49,657 -> 26,586 LUT in-kernel, and its worst path -0.065 -> +4.268 ns.
+Simulation times identical to the picosecond at every step, which is
+the cheap proof that no cycle moved. The largest single item was not
+the one predicted: the variable part-select on the WRITE side of the
+deposit counters was 8,064 of 14,887 logic LUTs and became 229, because
+synthesis must decide per bit of an 896-bit vector whether the write
+window covers it. Recorded negative result: splitting that index
+arithmetic - the obvious fix - bought only -2,116; the construct was
+the cost, not the parenthesisation.
+
+**Then the shell said no, and it was our bug.** A single tile linked at
+135 MHz with the ladders on missed at **WNS -0.577 ns, 776 failing
+endpoints**, and the worst path was not the ladder:
+
+    u_engine/u_reduce/dly_lvl_reg[14][0]
+      -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[15]   25 levels, DSP
+
+While the reduction accumulator fed lane 0 of a PRIVATE array its
+operands went straight to the pipe's `a`/`c` ports, past `cft_opmux`
+(a passthrough for FMA) and past `cft_simpleops` entirely. Putting both
+engines on one operand bus put the accumulator's combinational output
+onto the bus that also feeds `cft_simpleops` - and `cft_fpfma_pipe`
+latches that block's result into `s0_byp_d` UNCONDITIONALLY, no clock
+enable - so every reduction operand crossed the accumulator's level
+decode, its memory read and the whole simpleops mux tree in one cycle.
+Out of context the same path read **+0.307** and hid.
+
+One register on the accumulator's operands, with `cft_reduce_acc` told
+`ADD_LATENCY = LATENCY + 1` so the destination level still arrives with
+its sum (`dly_lvl[ADD_LATENCY-1]` is that module's stated contract),
+makes the reduce path structurally the elementwise path that already
+closes. Not a numeric change: the tree shape and the order of every add
+are fixed by element index, never by timing.
+
+**Two lessons, both paid for.** Out-of-context slack hid a cross-module
+path - +0.307 became -0.577, a 0.88 ns swing, because OOC places the
+kernel alone and the shell places it as one compute unit among many.
+And sharing a datapath means sharing everything attached to it: the
+win was real (-126k LUT) but the operand bus carried the accumulator
+into a combinational block it had never touched, which is not something
+an area argument surfaces.
+
+**The ladders go back off.** 123,599 LUT against 139,404 - about 75% of
+the device for a quad against 80% - but +0.097 ns OOC does not survive
+the shell, and five points of area is not worth a bitstream that does
+not close. They stay proven bit-exact and parameterised for a slower
+clock or the smaller open-core part.
+
+**Evidence on the final tree (8f5f149):**
+
+    seq_core      9/9      krnlfused   2/2 (ladders on)
+    krnlseq       1/1      krnlplain   2/2 (ladders off)
+    krnl          2/2      quarter     1/1
+    reduce        3/3      faults      4/4
+    reduceacc     5/5      golden      370 passed
+    make yosys-lint clean; Verilator width gate clean
+
+The width gate earned its keep: it is fatal-on-width here and caught
+seven implicitly-sized sites in the diet's new shift arithmetic that
+Icarus and yosys both accepted. All seven were correct by truncation
+and are now explicit, so synthesis and every number above are
+unchanged.
+
+**Pending, and not to be read as done:** a single and a quad are
+building at 135 MHz from this commit with the ladders off; the routed
+result is not yet known. hw_emu was rebuilt from this commit and IS
+executing the design - a reduction ran to completion through the real
+XRT stack with correct flags - but two gate stages failed to START on
+the stale-emulation-state race `hw/run-device-test.sh` documents, and
+are being re-run. No bitstream has closed, and there is still no card.
