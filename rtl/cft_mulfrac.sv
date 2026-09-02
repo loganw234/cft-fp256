@@ -165,6 +165,21 @@ module cft_mulfrac #(
       localparam int BN2 = (PW2 - C2 * MCH > MCH) ? MCH : PW2 - C2 * MCH;
       localparam int BN3 = (PW3 - C3 * MCH > MCH) ? MCH : PW3 - C3 * MCH;
 
+      // A slot a mode does not use has a lane index past that mode's
+      // lane count, and its offsets point past the end of the operand.
+      // The `if (V*)` in each arm below keeps such a slot from ever
+      // being READ in that mode, but the slice constants are
+      // elaborated regardless, and Verilator's SELRANGE gate - fatal
+      // in this project's flow - refuses a select it can prove is out
+      // of range even in an arm that cannot execute (84 warnings, all
+      // here, on 2026-09-02). So the dead arm's offsets are clamped to
+      // zero at elaboration: nothing changes for a live slot, and a
+      // dead slot's unread slice is now a legal one.
+      localparam int AO0c = V0 ? AO0 : 0, BO0c = V0 ? BO0 : 0;
+      localparam int AO1c = V1 ? AO1 : 0, BO1c = V1 ? BO1 : 0;
+      localparam int AO2c = V2 ? AO2 : 0, BO2c = V2 ? BO2 : 0;
+      localparam int AO3c = V3 ? AO3 : 0, BO3c = V3 ? BO3 : 0;
+
       logic [PMAX-1:0] aop;
       logic [MCH-1:0]  bch;
       logic [PMAX+MCH-1:0] prod;
@@ -176,20 +191,20 @@ module cft_mulfrac #(
         bch = '0;
         case (mode)
           2'd0: if (V0) begin
-                  aop = {{(PMAX - PW0){1'b0}}, a[AO0 +: PW0]};
-                  bch = {{(MCH - BN0){1'b0}}, b[BO0 +: BN0]};
+                  aop = {{(PMAX - PW0){1'b0}}, a[AO0c +: PW0]};
+                  bch = {{(MCH - BN0){1'b0}}, b[BO0c +: BN0]};
                 end
           2'd1: if (V1) begin
-                  aop = {{(PMAX - PW1){1'b0}}, a[AO1 +: PW1]};
-                  bch = {{(MCH - BN1){1'b0}}, b[BO1 +: BN1]};
+                  aop = {{(PMAX - PW1){1'b0}}, a[AO1c +: PW1]};
+                  bch = {{(MCH - BN1){1'b0}}, b[BO1c +: BN1]};
                 end
           2'd2: if (V2) begin
-                  aop = {{(PMAX - PW2){1'b0}}, a[AO2 +: PW2]};
-                  bch = {{(MCH - BN2){1'b0}}, b[BO2 +: BN2]};
+                  aop = {{(PMAX - PW2){1'b0}}, a[AO2c +: PW2]};
+                  bch = {{(MCH - BN2){1'b0}}, b[BO2c +: BN2]};
                 end
           default: if (V3) begin
-                  aop = a[AO3 +: PW3];
-                  bch = {{(MCH - BN3){1'b0}}, b[BO3 +: BN3]};
+                  aop = a[AO3c +: PW3];
+                  bch = {{(MCH - BN3){1'b0}}, b[BO3c +: BN3]};
                 end
         endcase
       end
