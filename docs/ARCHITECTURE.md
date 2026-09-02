@@ -159,23 +159,49 @@ element.
 
 | configuration | beat | lanes (32/64/128/256) | LUT | for |
 |---|---|---|---|---|
-| full tile | 256 | 8 / 4 / 2 / 1 | 116,932 OOC; **98,310 with the shared ladders on** | Alveo; 256 is the HBM pseudo-channel width |
-| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated | see ROADMAP's open-core sizing |
-| quarter tile | 64 | 2 / 1 / - / - | ~20k estimated | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+| full tile | 256 | 8 / 4 / 2 / 1 | **139,404 OOC** (292 DSP); 123,599 with the fused ladders on (277 DSP) | Alveo; 256 is the HBM pseudo-channel width |
+| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated, **pre-sequencer** | see ROADMAP's open-core sizing |
+| quarter tile | 64 | 2 / 1 / - / - | ~20k estimated, **pre-sequencer** | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+
+Both full-tile numbers are measured out of context, Vivado 2022.2,
+xcu50-fsvh2104-2-e, 135 MHz, on the tile as it now stands: one
+`cft_lanes` array, and the sequencer in it. Per module, with the
+ladders off: `u_lanes` 105,379, `u_seq` 26,586, `u_engine` 6,053,
+`u_csr` 818.
+
+**Both trimmed rows are estimates that predate `cft_seq`**, and they
+are left marked rather than rescaled, because `cft_krnl` instantiates
+the sequencer unconditionally - a quarter tile carries one, and no
+measurement of that build exists here. The full-tile row is the one to
+reason from until someone synthesises the others.
 
 The two full-tile numbers are the same RTL: FUSE_NORM and FUSE_ALIGN
-(cft_krnl parameters, default off) replace the thirty per-lane
+(cft_krnl parameters, **default off**) replace the thirty per-lane
 alignment and normalise shifters with two segmented 720-bit ladders,
-measured -18.6k LUT together and equivalence-proven per lane
-(2026-08-31; docs/ROADMAP.md carries the campaign table). Sharing is
-per-build: the Alveo image can decline it while an area-bound open
-build takes it.
+equivalence-proven per lane in the 2026-08-31 campaign (-18.6k LUT
+against the pre-sequencer tile, 116,932 -> 98,310; docs/ROADMAP.md
+carries that table) and now through the whole kernel by `make
+krnlfused` / `make krnlplain`. In the tile that exists they are worth
+139,404 - 123,599 = **15,805 LUT**, and they are off anyway: out of
+context they leave +0.097 ns of slack against ladders-off's +0.307,
+and a shell build at 135 MHz is what settled it. Sharing stays
+per-build - the Alveo image declines it, an area-bound open build
+takes it - and `hw/package_kernel.tcl` strips user parameters, so a
+bitstream carries whatever the RTL default is and nothing else.
+All three ladders self-gate on the full-tile geometry, so a quarter
+tile ignores them either way.
 
-**The width is a real constraint, not a preference.** Even at the
-campaign figure a full tile is ~98k LUTs and 262 DSPs, which exceeds
-an Artix-7 100T on both counts. Only the 200T takes a full tile among
-7-series Artix parts, and the DSP count still wants a Kintex.
-That is why BEAT_BITS exists and why it is tested rather than declared.
+**The width is a real constraint, not a preference, and the sequencer
+tightened it.** A full tile is now 139,404 LUT and 292 DSPs with the
+ladders off, 123,599 and 277 with them on. ROADMAP.md's part-by-part
+arithmetic has its anchor at a measured 138,083-LUT tile, which it
+records as 103% of an Artix-7 200T - so the 200T is about 134,000
+LUTs, the shipping ladders-off tile at 139,404 is over it, and the
+ladders-on tile at 123,599 is about 92% of it. That is the case the
+ladders were kept parameterised for: not Alveo, where they cost
+timing, but the part where footprint is the whole objective. The DSP
+count still wants a Kintex either way. This is why BEAT_BITS exists and
+why it is tested rather than declared.
 
 The quarter tile is not hypothetical - `tb/test_krnl_quarter.py` runs
 it against the same golden model, so the parameter is proven rather
