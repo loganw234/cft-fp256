@@ -984,3 +984,17 @@ earlier `XRT=1` build, which the clean-first stage removes, and
 untracked emulation build directories and a card-day staging copy
 that made the runner refuse to certify; those were moved aside, not
 deleted, and the clean run above followed.
+
+## 2026-09-02 - the retimed quad at 135 MHz misses in the shell
+
+    build-quad-135r  40149b1 + bank fix, four tiles, 135 MHz, RETIMING=1
+    routed WNS -0.141  TNS -45.890  failing endpoints 836  (no xclbin)
+    the same design without retiming: -0.113 / -22.993 / 463
+
+Retiming's +1.374 ns out of context (docs/ROADMAP.md) did not survive
+four tiles in the shell; it was slightly worse. Post-place both builds
+read +0.055 and both lost the margin in routing, which is wire, not
+logic. The worst paths are the seed-ROM DSP cloud (6 of 10), the S10->
+S11 normalise (3) and the S12->S13 round (1). The next quad is from
+the tip - case-table ROM, retiming, phys_opt - at 135, then 130 if it
+misses.

@@ -1147,6 +1147,28 @@ rather than letting it ship, and LATENCY proved to be threaded properly
 - only three hardcoded sites - so the plumbing is sound and the timing
 balance is the work.
 
+**In the shell, retiming does not close the quad (2026-09-02).** The
+same tree as the single that closed +0.045 (40149b1, plus the bank
+fix), four tiles at 135 MHz with `-retiming`:
+
+| quad @135 | routed WNS | TNS | failing endpoints |
+|---|---|---|---|
+| without retiming | -0.113 | -23.0 | 463 |
+| **with retiming** | **-0.141** | -45.9 | 836 |
+
+Slightly worse, and the reason is visible in the router's own
+trajectory: both builds left placement at exactly +0.055 - the placer
+met its target and stopped, the met-target lesson again - and both
+lost a nanosecond in routing. Retiming shortens logic; at 98% CLB
+occupancy across both SLRs the loss is wire, and the two trajectories
+track each other within 0.03 ns from iteration 0 to the end. The ten
+worst routed paths are the three families named in the next entry:
+six through the seed ROM's index-multiply DSP into `s0_byp_d`, three
+S10->S11 (LZC and coarse normalise), one S12->S13. The first family
+is gone at the tip; the other two sit at -0.14 in this placement, and
+whether 44k LUT less congestion and phys_opt lift them is the next
+quad's question, with 130 behind it.
+
 **Order of attack, if this is ever picked up:** retiming first, because
 it is a flag and a verification question rather than a redesign; the
 pipe re-balance second, if the ceiling still binds after the card has
