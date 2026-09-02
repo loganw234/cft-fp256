@@ -47,28 +47,39 @@ def render() -> str:
     w("//   17 bits, msb always set.\n")
     w("// Relative error < 2^-8.5, proven exhaustively in test_seeds.py.\n\n")
 
-    # Packed vectors with variable part-select, not unpacked-array
-    # assignment patterns: Icarus rejects the latter for localparams.
-    # Entry i lives at [i*W +: W], so the concatenation is emitted
-    # highest-index first.
-    w("localparam bit [512*18-1:0] SEED_RECIP_P = {\n")
-    for i in range(511, -1, -8):
-        chunk = [f"18'd{recip[j]}" for j in range(i, max(i - 8, -1), -1)]
-        sep = "," if i - 8 >= 0 else ""
-        w("  " + ", ".join(chunk) + sep + "\n")
-    w("};\n")
+    # Case tables, not a flat vector with a variable part-select. The
+    # flat form was chosen because Icarus rejects unpacked-array
+    # assignment patterns for localparams - but `SEED_P[i*18 +: 18]`
+    # asks synthesis for i*18 followed by a variable shift of a
+    # 9216-bit constant, and Vivado obliges: a DSP48 multiply per lane
+    # (the fifteen DPIP-2 items), its 14-bit product fanning out to
+    # ~460 loads, all combinational between the operand bus and S0.
+    # That was the critical path of every routed build since the seeds
+    # landed, including the ones retiming could not close. A case in a
+    # function is a ROM - each output bit a 9- or 10-input function of
+    # the index, no multiply, no shifter - and it elaborates in Icarus,
+    # Yosys 0.33, Verilator and Vivado alike (measured 2026-09-02:
+    # seedop 85,264/85,264 under Icarus and Verilator, kernel lint
+    # under Yosys).
+    w("// Case tables, not a variable part-select of one flat vector:\n")
+    w("// the part-select form costs a DSP48 multiply (index*width)\n")
+    w("// feeding a wide shifter, and that multiply sat on the critical\n")
+    w("// path of every routed build. A case is a ROM.\n\n")
+
     w("function automatic bit [17:0] seed_recip(input bit [8:0] i);\n")
-    w("  seed_recip = SEED_RECIP_P[i*18 +: 18];\n")
+    w("  case (i)\n")
+    for i, r in enumerate(recip):
+        w(f"    9'd{i}: seed_recip = 18'd{r};\n")
+    w("    default: seed_recip = 18'd0;  // unreachable: every index is listed\n")
+    w("  endcase\n")
     w("endfunction\n\n")
 
-    w("localparam bit [1024*17-1:0] SEED_RSQRT_P = {\n")
-    for i in range(1023, -1, -8):
-        chunk = [f"17'd{rsqrt[j]}" for j in range(i, max(i - 8, -1), -1)]
-        sep = "," if i - 8 >= 0 else ""
-        w("  " + ", ".join(chunk) + sep + "\n")
-    w("};\n")
     w("function automatic bit [16:0] seed_rsqrt(input bit [9:0] j);\n")
-    w("  seed_rsqrt = SEED_RSQRT_P[j*17 +: 17];\n")
+    w("  case (j)\n")
+    for j, r in enumerate(rsqrt):
+        w(f"    10'd{j}: seed_rsqrt = 17'd{r};\n")
+    w("    default: seed_rsqrt = 17'd0;  // unreachable: every index is listed\n")
+    w("  endcase\n")
     w("endfunction\n")
     return out.getvalue()
 

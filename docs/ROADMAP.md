@@ -1070,6 +1070,12 @@ a stage.
 among its sixteen levels, and the quad's -0.113 ns path had the same
 shape. Those are the stages MREG and PREG exist to cut.
 
+*Corrected 2026-09-02 - see "The DSP on the critical path was never the
+multiplier" below: the six-primitive DSP chain in those paths belongs to
+the seed ROM's index multiply, `u_seed/seed_rsqrt_return0`, not to the
+significand multiplier. The DPOP counts were real; the attribution was
+not.*
+
 **Which makes this the most concrete Fmax lead the project has**, and
 also the riskiest to take. `cft_fpfma_pipe` is the bit-exact core; its
 stage map is a documented contract (LATENCY = 15 edges, S0..S14) that
@@ -1145,6 +1151,146 @@ balance is the work.
 it is a flag and a verification question rather than a redesign; the
 pipe re-balance second, if the ceiling still binds after the card has
 said what the shell really does.
+
+#### The DSP on the critical path was never the multiplier (2026-09-02)
+
+The cell chains, read rather than inferred. Every routed report since
+the seeds landed carries the same six-primitive DSP chain on its worst
+kernel path, and the section above took it for the significand
+multiplier. The instance in the reports is `u_seed/seed_rsqrt_return0`,
+one per lane - the fifteen DPIP-2 items - and its A input is the seed
+index. It is the seed ROM's lookup:
+
+    seed_recip = SEED_RECIP_P[i*18 +: 18];   // 9216-bit constant, variable part-select
+
+Vivado builds `i*18` as a DSP48 multiply and the part-select as a
+variable shift over the flat constant, so the 14-bit product fans out
+into every output bit's mux tree - 462 loads on one net. All of it is
+combinational between the operand bus and S0: FIFO block RAM (0.86 ns
+clock-to-out) -> head-bypass mux -> the tile's owner mux (fanout 66,
+1.00 ns of route) -> the DSP (1.5 ns, no pipeline registers) -> the
+fanout-462 net (1.29 ns) -> six LUT levels of seedop/simpleops merge ->
+`s0_byp_d`. 7.29 ns, 16 to 20 levels, 55% route.
+
+Where it stood in the two builds that matter:
+
+| build | worst kernel paths | of which this family |
+|---|---|---|
+| quad @135, no retiming (WNS -0.113, 463 failing endpoints) | ten violators listed | **5**; the other five are S12->S13 rounding (3, at -0.112) and the reader's 64-bit `burst_len` arithmetic (2, at -0.106) |
+| single @135, retimed (WNS +0.045) | ten worst, unique endpoints | **10 of 10** |
+
+Retiming absorbed a PREG into 188 multiplier DSPs and took those paths
+off the list; it could not touch this one, because moving `s0_byp_d`
+backward means registering the far side of a fanout-462 shifter whose
+other inputs are the raw bus. The S12->S13 path, for the record: it
+starts at `s12_enorm`, spends four CARRY8 and two LUTs deriving K and
+the shift amount, then launches a fanout-625 net (1.22 ns) into the
+717-bit shifter and the 238-bit increment - 25 levels, 73% route. The
+reservation path is three chained 64-bit compares for quantities that
+fit in eight bits: 17 CARRY8, 71% route. Both have latency-neutral fixes
+(precompute the amount and K-class in S12, where `s11_enorm` already is;
+narrow `burst_len` to the widths its operands can hold) and neither has
+been made yet.
+
+**The fix is the ROM idiom, not a pipeline stage.** The flat vector was
+chosen because Icarus rejects unpacked-array assignment patterns for
+localparams. A `case` inside the function has no such problem and IS a
+ROM - each output bit a 9- or 10-input function of the index, no
+multiply, no shifter. `python/gen_seed_rom.py` now emits that; the
+tables are the same values in the same order (checked entry by entry
+against the committed flat form before anything was simulated) and the
+drift test regenerates and compares exactly as before.
+
+Portability, measured rather than argued: Yosys elaborates the full
+kernel; the exhaustive seedop bench passes under Icarus (85,264
+comparisons, 2/2) and under Verilator (the same, with the width gate
+fatal on warning); the kernel bench under Verilator. Then the A/B, same
+commit, out of context at 135 MHz with retiming - the flow the shipping
+builds now use:
+
+| | LUT | FF | DSP | WNS | worst path |
+|---|---|---|---|---|---|
+| flat vector, part-select (cc84ecb) | 140,580 | 55,718 | 277 | +1.681 | seedop bypass cloud, 18 levels |
+| case tables | **129,708** | 55,722 | **262** | **+2.126** | S10->S11 LZC + coarse normalise, 22 levels |
+| delta | **-10,872 (-7.7%)** | +4 | -15 | **+0.445** | |
+
+Seven hundred LUTs a lane were shift-amount mux trees that a ROM does
+not need. For scale: FUSE_NORM saved 5,932 and cost 0.7 ns; FUSE_ALIGN
+saved 10,739 and left the slack thin. This saves 10,872 from a generated
+file, and the slack goes the other way.
+
+**What this does not establish.** Shell slack: out-of-context has
+mispredicted the shell by 0.88 ns this week, and the quad routing as
+this is written (40149b1, retimed, 135 MHz) does NOT carry the change -
+its number measures retiming alone, which is the question it was built
+to answer. What surfaced next, at +2.126 out of context, is the LZC-fed
+coarse normalise into `s11_valw` - the path the SPLIT sweep found under
+the shared ladder, now visible in the private one.
+
+**Two things worth keeping from the exercise.** A DRC count is not a
+critical path: DPOP-3/4 were real and pointed at the multiplier, and
+the multiplier was never the worst path - reading the chain is what
+found the seed lookup. And `NBEATS >= LATENCY + 1` in cft_seq is a
+comment, not a guard: every option above is latency-neutral because
+LATENCY 16 forces NBEATS to 32 and changes the block model seq.py is
+bit-exact to. A guard belongs there before anyone changes the depth.
+
+##### What would move the ceiling itself (considered 2026-09-02)
+
+The core is within roughly 10-15% of what its width allows at this
+depth. Per stage, the fp256 lane's structures cost: the 359-bit
+split-add halves 2.5-3.4 ns (45 CARRY8 at the measured 0.05-0.075 ns
+each), the 717-bit shifter halves 2-2.5 ns, the 238-bit round increment
+about 2 ns, and 1-2 ns of die-spanning routing on top of any of them.
+That is a 4-5 ns floor per balanced stage: ~200-250 MHz out of context,
+~170-200 in the shell, against 135-145 today at fifteen stages. Nothing
+in the datapath is spent wastefully - 3P+6 is the single-rounding
+window, and the width is the cost of doing fp256 correctly. And the
+widest rung sets the clock for all four: out of context the same pipe
+closes 232 MHz at fp32 and 148 at fp256, so the narrow rungs idle at
+about 60% of their own ceiling.
+
+Two changes retain the contract and move that:
+
+- **Heterogeneous tiles at their own clocks - no core RTL.** `EN_FP256`
+  exists, `prec_ok` and CAPS refuse and advertise per tile, the
+  platform has two kernel clocks, and `v++ --clock.freqHz <f>:<cu>`
+  assigns per compute unit. Three or four narrow tiles at their ceiling
+  plus one fp256 tile at its own. The cost is on the host: backend.h
+  says "device.c never learns that tiles exist" - one format mask, work
+  split across every CU - so the backend needs per-CU capabilities and
+  a precision-aware split, and fp256 throughput becomes one tile's.
+  A build-time layout, not a runtime one: the tile mix, each tile's
+  rungs and each CU's clock are fixed when v++ links, and a different
+  mix is a different xclbin - hours to build, but seconds to load, since
+  the xclbin is the shell's partial bitstream and swapping one is what
+  the dynamic region exists for. A library of pre-built layouts chosen
+  per workload is the practical shape.
+- **A ~2x deeper, rebalanced pipeline (LATENCY ~24-28)**, worth perhaps
+  1.3-1.5x: the bypass cloud behind S0, MREG or a PCIN cascade in S2,
+  carry-select on the wider tree levels, a leading-zero anticipator
+  beside S9/S10 so S11 starts from a registered amount, the round
+  increment off S13. Every split is the "S7 consumes product and
+  sideband" class from the experiment above, NBEATS goes to 32, and the
+  S11-split lesson holds until every path is rebalanced. Days of work
+  on the one file the contract rests on, gated by the suite - and not
+  worth starting until the card has said what the shell really does.
+
+What does not pay, and why: near/far two-path FMA (cuts latency, costs
+~1.5x adder and shifter area, leaves the per-stage floor alone);
+carry-save and redundant-form tricks (they beat a slow carry-propagate
+adder, and this fabric's carry chains are fast - NOVEL.md entry 6's
+lesson again); a multi-cycle fp256 rung (loses 25% of fp256 for ~20% on
+the others, which the first option gets without the loss); Booth or
+fractured multipliers (measured, entry 6). And one lever that is
+neither RTL nor architecture: the quad sits at 98% CLB occupancy across
+both SLRs, and an SLR crossing costs about a nanosecond -
+`PLACE_DIRECTIVE=SSI_*` and per-kernel pblocks are what the directive
+support exists for.
+
+For throughput, tiles beat megahertz: a fifth tile is +25% with the
+area campaign already measured feasible, and this fix just paid for
+most of it.
 
 ## General purpose: divide and square root (status, 2026-08-31)
 
