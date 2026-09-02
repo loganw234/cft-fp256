@@ -898,3 +898,89 @@ was confirmed working on 2026-09-01 from the trace alone. cft_seq has
 ZERO. During a sequencer run the simulator log goes silent, so "stuck
 or merely slow" cost an hour of guessing tonight and would cost more on
 a card, where the only observable is pass or fail.
+
+## 2026-09-02 - standardized verification runs on the shared-lanes tip, both platforms
+
+Two censuses, one per platform, on the tree that carries the shared
+ALU array, the sequencer's bank fix, retiming in the build flow, the
+seed ROM as case tables and the layout catalogue. Each is quoted as
+the runner printed it; the paragraphs after say what the first
+attempts found, because three of the four things they found were
+defects in the census machinery itself and one was real.
+
+**Windows (Git Bash + Docker Desktop), the full standard set:**
+
+    ## 2026-09-02 - standardized verification run (DESKTOP-T33SK86)
+
+    verify/run.sh at b6aeccd: 15 stage(s) executed, 2 cached from earlier in the run, 0 failed, 1 skipped.
+    Run id 20260902-120454-b6aeccd; per-stage logs under verify/state/.
+
+    golden ok 166s | vectors ok 7s | sim ok 591s | lint ok 44s | formal ok 27s
+    libcft ok 12s | selfcheck ok 1s | divsqrt ok 1s | clause5 ok 3s | diff ok 4s
+    seq ok 2s | reduce ok 23s | bindings ok 2s | mpfr ok 5s | soak-quick ok 106s
+    images SKIP (xclbinutil not present)
+
+**Linux (WSL cft2204, its own clone), the host and model stages:**
+
+    ## 2026-09-02 - standardized verification run (DESKTOP-T33SK86)
+
+    verify/run.sh at 1515bae: 12 stage(s) executed, 0 cached from earlier in the run, 0 failed, 4 skipped.
+    Run id 20260902-122143-1515bae; per-stage logs under verify/state/.
+
+    golden ok 224s | vectors ok 4s | sim/lint/formal SKIP (docker not usable on this host)
+    libcft ok 5s | selfcheck ok 1s | divsqrt ok 0s | clause5 ok 3s | diff ok 2s
+    seq ok 1s | reduce ok 14s | bindings ok 1s | mpfr ok 3s | soak-quick ok 94s
+    images SKIP (xclbinutil not present)
+
+One label needs a footnote. The Windows run's id names b6aeccd, the
+commit the tree was at when it started; by the time its `bindings`
+stage ran, the working tree also held the three binding fixes below,
+committed minutes later as b694a3f, 8c347fd and 1515bae. On gmpy2
+2.2.1 the stage passes either way, so the result is not in question -
+but a census that says one commit and tested another is the kind of
+thing this file exists to say out loud. The Linux run is at 1515bae
+throughout.
+
+**What the first attempts found.**
+
+*A Windows run at 0e7264e passed golden, vectors, the full sim suite,
+lint and formal, then failed libcft in 0 s and every host-binary stage
+after it in 1-3 s - ten FAILs.* The link errors (`undefined reference
+to cft_open`, glibc's `__snprintf_chk`) read like a source defect.
+`objdump -f` said otherwise: libcft.a and every object under host/src
+were elf64-x86-64, left by a WSL build of the same checkout through
+/mnt/c at 01:01, and Windows make took them as up to date. After
+`make clean` the native build links cft.dll and the test target passes
+- 392,000 conformance cases, C and Python the same bits. The runner's
+libcft stage now cleans first (fb2463a); a census that depends on
+which platform touched the tree last is not a census. Two Linux
+executables that had been committed as build products, and that the
+clean deletes, are untracked and ignored (b6aeccd).
+
+*A Linux run at 0e7264e failed sim, lint and formal in 0 s each.* The
+WSL distro has Docker Desktop's shim on PATH without the integration
+enabled, and `command -v docker` is satisfied by a program whose only
+output is how to enable it. `need docker` now asks whether docker
+works, so the three stages skip by name, as above.
+
+*The same Linux run failed `bindings` at every precision, and that one
+was real.* `test_str_roundtrip` took -0 to "-0" and back to +0. Not the
+library and not the codec: gmpy2 2.1.2 (MPFR 4.1.0) parses "-0" inside
+the ieee() context the binding rounds in to a zero with no sign, and
+from_mpfr takes the sign from is_signed. The same version refuses
+every spelling of inf and nan ("invalid digits"), trailing whitespace,
+and "+0" - all of which to_str can emit and 2.2.1 accepts, which is
+why the Windows host had never seen any of it. from_str now takes the
+sign of a zero result from the decimal (754: rounding never changes a
+sign, so a negative decimal that is zero or underflows to zero is -0
+in every attribute), lexes the special tokens itself (a token is
+recognised, never rounded), strips whitespace and a leading plus, and
+still hands a minus to MPFR with the digits because directed rounding
+is not sign-symmetric. Two tests pin it at every precision. The
+binding suite: 77 of 77 on gmpy2 2.2.1, 77 of 77 on 2.1.2.
+
+The Linux clone also carried a stale XRT-flavoured libcft.a from an
+earlier `XRT=1` build, which the clean-first stage removes, and
+untracked emulation build directories and a card-day staging copy
+that made the runner refuse to certify; those were moved aside, not
+deleted, and the clean run above followed.
