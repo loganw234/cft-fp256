@@ -977,8 +977,17 @@ tree:**
 | full tile | LUT | WNS | quad estimate |
 |---|---|---|---|
 | private arrays (pre-refactor) | 288,764 | -0.065 | 1,316,831 - did not place |
-| shared array, seq diet, ladders off | 139,404 | **+0.307** | ~80% of the device |
-| shared array, seq diet, **ladders on** | **123,599** | **+0.097** | **~75%** |
+| shared array, seq diet, ladders off | 139,404 | **+0.307** | **82.5%** |
+| shared array, seq diet, **ladders on** | **123,599** | **+0.097** | **75.3%** |
+
+The quad column is `4 x tile + 161,775`, over the part's 871,680.
+That overhead is not a guess and not the single-tile shell figure:
+it is DIFFERENCED from the private-array quad link that failed -
+1,316,831 requested minus 4 x 288,764 of tile - so it carries this
+design's own four-CU interconnect. An earlier draft of this table
+said "~80%" for the ladders-off quad; it does not reproduce under
+either that method (82.5%) or the fixed single-tile shell (78.2%),
+and the honest figure is the one with its assumption attached.
 
 The fused normalise and align ladders - this section's own -16.7k-LUT
 result, proven bit-exact (now including the full kernel, `make
@@ -1027,7 +1036,7 @@ had never touched, which is the kind of coupling an area argument does
 not surface.
 
 **Ladders off is what ships at 135.** With them on the tile is 123,599
-LUT (~75% for a quad) against 139,404 off (~80%), but the ladder's own
+LUT (75.3% for a quad) against 139,404 off (82.5%), but the ladder's own
 LZC-fed shift leaves only +0.097 ns OOC, and the shell does not forgive
 that. Five points of device area is not worth a bitstream that does not
 close; the ladders stay proven, parameterised and off, for a slower

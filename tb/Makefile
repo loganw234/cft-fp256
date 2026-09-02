@@ -13,7 +13,7 @@ SIM ?= icarus
 
 .PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
-        seq_core seqprobe clean
+        seq_core seqprobe krnlfused krnlplain clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
      seedop reduceacc reduce krnl quarter faults seq_core krnlseq

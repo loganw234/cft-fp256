@@ -56,7 +56,11 @@ module cft_lanes #(
     // (collapses DSP, which is not the constraint, and measured +693
     // LUT - off); FUSE_NORM shares one segmented normalise ladder;
     // FUSE_ALIGN one bidirectional ladder for the alignment shifters.
-    // The latter two are what the shipping builds carry.
+    // The latter two are NOT what the shipping builds carry: they save
+    // ~16k LUT a tile but cost more slack than that is worth at
+    // 135 MHz, measured 2026-09-01 (docs/ROADMAP.md). All three
+    // default off; turn the ladders on for a slower clock or a
+    // smaller part, where footprint is the objective.
     parameter bit FUSE_MUL   = 1'b0,
     parameter bit FUSE_NORM  = 1'b0,
     parameter bit FUSE_ALIGN = 1'b0
