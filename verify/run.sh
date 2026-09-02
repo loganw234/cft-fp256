@@ -367,9 +367,21 @@ SHLIB_NAME=$(if [ "$WIN" = 1 ]; then echo cft.dll; else echo libcft.so; fi)
 PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
           command -v python
         else command -v python3 2>/dev/null || command -v python; fi)
-need host-cc python
-stage libcft "host library contract tests + conformance replay" -- \
+# Clean before building, always. The host tree is one checkout shared
+# between Windows (Git Bash) and WSL (through /mnt/c), and a WSL build
+# leaves elf64 objects that Windows make then sees as up to date and
+# hands to the mingw linker - which reports `undefined reference to
+# cft_open` and glibc's `__snprintf_chk`, not a format error. On
+# 2026-09-02 that failed this stage in 0 s and every host-binary stage
+# after it in 1-3 s, ten FAILs from one stale build. The library
+# builds in seconds; a census that could be poisoned by whichever
+# platform touched the tree last is not a census.
+do_libcft() {
+  HOSTMAKE clean >/dev/null 2>&1
   HOSTMAKE test PYTHON="$PYBIN"
+}
+need host-cc python
+stage libcft "host library contract tests + conformance replay" -- do_libcft
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1
