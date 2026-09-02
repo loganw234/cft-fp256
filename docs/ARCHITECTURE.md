@@ -477,6 +477,65 @@ on the one occasion the two were compared directly, the OOC proxy
 reported a 2% improvement for a change that was a regression in the
 shell.
 
+### The shared array's own path (2026-09-01)
+
+Everything above was measured on a tile with one driver and no
+sequencer in it. The restructuring that gave the tile one `cft_lanes`
+array between two drivers was measured out of context at 135 MHz,
+Vivado 2022.2, xcu50-fsvh2104-2-e:
+
+| tile configuration | LUT | WNS (OOC) |
+|---|---|---|
+| private arrays (before this work) | 288,764 | -0.065 ns |
+| one shared array, ladders off | 162,482 | -0.065 ns |
+| + the sequencer's control diet | 139,404 | **+0.307 ns** |
+| + fused ladders on | 123,599 | +0.097 ns |
+
+Then a single tile was linked at 135 MHz with the ladders on, and it
+**missed: WNS -0.577 ns, 776 failing endpoints.** The worst path was
+not the ladder the build existed to test:
+
+    u_engine/u_reduce/dly_lvl_reg[14][0]
+      -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[15]
+    25 levels, through a DSP cascade
+
+That is the restructuring's own regression, and it is the reason the
+reduction accumulator's operands are registered. While the accumulator
+fed lane 0 of the engine's *private* array, its operands went straight
+to the pipe's `a`/`c` ports - past `cft_opmux` (a passthrough for FMA
+anyway) and past `cft_simpleops` entirely. Merging both drivers onto
+one operand bus put the accumulator's combinational output onto the bus
+that also feeds `cft_simpleops`, and `cft_fpfma_pipe` latches that
+block's result into `s0_byp_d` **unconditionally, with no clock
+enable** - so every reduction operand had to cross the accumulator's
+level decode, its memory read and the whole simpleops mux tree inside
+one cycle, whether or not the bypass was selected. One register on the
+operands makes the reduce path structurally the elementwise path that
+already closes; `ADD_LATENCY` is `LATENCY + 1` so the destination level
+still arrives with its sum. Not a numeric change - the tree shape and
+the order of every add are fixed by element index, never by timing.
+
+**Two things this file has been asserting for months now have a number
+on them.** +0.307 out of context became -0.577 in the shell: a 0.88 ns
+swing, in the direction the caution above names, because OOC places the
+kernel alone and the shell places it as one compute unit among many.
+And sharing a datapath means sharing everything attached to it - the
+area win was real, -126k LUT, but the operand bus carried the
+accumulator into a combinational block it had never touched, which is
+not a coupling an area argument surfaces.
+
+**FUSE_NORM/FUSE_ALIGN are therefore off.** They fit better (123,599
+against 139,404, about 75% of the device against 80% for a quad) but
+leave +0.097 ns OOC where off leaves +0.307, and this build is the
+evidence that a thin OOC margin does not survive the shell. Five points
+of device area is not worth a bitstream that does not close.
+
+**Status, honestly: pending.** A single tile and a quad are building at
+135 MHz from this commit with the ladders off. Neither result is known
+at this writing, so nothing here claims a closed bitstream and nothing
+here claims silicon; the out-of-context figures above are what has
+actually been measured.
+
 A reduced clock changes nothing about results - determinism is
 clock-independent by construction. The v0 behavioural core (one
 combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
@@ -535,9 +594,11 @@ and expects their product back five cycles later.
 **Full tile only.** The array's geometry IS the 256-bit beat's. The
 quarter tile (BEAT_BITS=64, fp32+fp64) has two and one lanes and does
 not build the fp256 rung the array is sized for, so sharing there would
-cost more than it saved. USE_FUSED_MUL requires BEAT_BITS==256 and all
-three trim parameters; open-toolchain targets fall back to private
-multipliers with no other change.
+cost more than it saved. `USE_FUSED_MUL`, the localparam in
+`cft_lanes` that gates it, requires `FUSE_MUL` **and** BEAT_BITS==256
+**and** all three trim parameters; the other two ladders self-gate the
+same way. Open-toolchain targets fall back to private multipliers with
+no other change.
 
 Verified by equivalence rather than by argument: tb_mulshare builds all
 four banks twice from the same inputs on the same cycle, once private
