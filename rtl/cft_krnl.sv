@@ -210,6 +210,18 @@ module cft_krnl #(
   logic prec_ok, refused_q, refuse_done_q;
   assign prec_ok = (cfg_prec[3:2] == 2'b00) && PREC_CAPS[cfg_prec[1:0]];
 
+  // A sequencer run needs a 256-bit beat: the program image's header is
+  // one beat, its constants are broadcast across one, and the lane block
+  // is sized from one (docs/SEQUENCER.md). cft_seq elaborates on a
+  // narrower tile - the quarter tile compiles the whole kernel - but a
+  // program handed to it there would be parsed from a quarter of its
+  // header, so the start is refused the same way an absent precision
+  // is: STATUS[3], nothing computed, D untouched. run_ok is what the
+  // engines and the refusal registers consult; at 256 it IS prec_ok.
+  localparam bit SEQ_OK = (BEAT_BITS == 256);
+  logic run_ok;
+  assign run_ok = prec_ok && (SEQ_OK || !cfg_seq);
+
   // Which engine owns the run in flight, and whether the sequencer
   // threw its program image back. The image refusal is not known at
   // start the way a precision refusal is - the header has to be read
@@ -251,9 +263,9 @@ module cft_krnl #(
       // one-cycle-pulse contract the CSR expects from the engine; the
       // sticky clears on the next ACCEPTED start, same lifetime as the
       // engine's own error sticky.
-      refuse_done_q <= start && !prec_ok;
+      refuse_done_q <= start && !run_ok;
       if (start) begin
-        refused_q     <= !prec_ok;
+        refused_q     <= !run_ok;
         seq_refused_q <= 1'b0;
         // Sampled once, here, and read by every mux below for the
         // whole run - so for the START CYCLE ITSELF the muxes still
@@ -510,7 +522,7 @@ module cft_krnl #(
                       .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
                       .FUSE_ALIGN(FUSE_ALIGN), .OWN_LANES(1'b0)) u_engine (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
-      .start(start && prec_ok && !cfg_seq), .busy(eng_busy), .done(eng_done),
+      .start(start && run_ok && !cfg_seq), .busy(eng_busy), .done(eng_done),
       .flags_acc(eng_flags),
       .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
@@ -555,7 +567,7 @@ module cft_krnl #(
             .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
             .EN_FP256(EN_FP256), .OWN_LANES(1'b0)) u_seq (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
-      .start(start && prec_ok && cfg_seq),
+      .start(start && run_ok && cfg_seq),
       // prec_ok has already proved cfg_prec[3:2] is zero, so the top
       // two bits carry nothing the sequencer needs.
       .cfg_prec(cfg_prec[1:0]), .cfg_n(cfg_n),

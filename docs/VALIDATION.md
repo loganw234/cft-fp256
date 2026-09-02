@@ -1061,6 +1061,9 @@ Both passes report `rc=2` with every test passing: the eighteenth
 target, `quarter`, stops Verilator with the internal error recorded on
 2026-09-02 (cft_engine_stream.sv's reduce serialiser at BEAT_BITS=64)
 and produces no result under it. It passes under Icarus, its default.
+Closed later the same evening - the arm's slice is clipped to the
+beat at elaboration - so a rerun of this benchmark would build all
+eighteen and return rc=0.
 
 The same day, `make -C host examples-lang` under MSYS2 make on the
 Windows host: rust and csharp same bits as the C example; julia, go

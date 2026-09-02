@@ -1310,8 +1310,27 @@ on constant slices in dead generate arms - fixed the same day by
 clamping the offsets), and `quarter` (BEAT_BITS=64) stops Verilator
 with an internal error on cft_engine_stream.sv's reduce serialiser,
 where the fp128 arm names a 128-bit slice of a 64-bit beat. Icarus,
-the default for both, is unaffected; the quarter arm wants a generate
-guard on BEAT_BITS. Not done here.
+the default for both, is unaffected. Closed the same evening, and it
+was more than one arm: once that internal error was out of the way
+Verilator's lint found eleven more sites written for a 256-bit beat
+- the reduce path's result mask and two simulation-only $display
+selects in cft_engine_stream, and in cft_seq the constant
+broadcast's replication counts, the header and constant reads and
+a lane-block width. All are clipped or cast to the beat at
+elaboration, so at 256 the netlist is byte-for-byte what it was.
+And one consequence that turned out to matter rather than merely
+tidy: a sequencer program needs a 256-bit beat (its header is one),
+and on a 64-bit beat a VALID fp32 image passes the loader - magic
+and version are in the low 64 bits, the precision field and the
+three counts above them read as zero, and zero counts are within
+limits - so it was ACCEPTED, and then, measured on the bench, never
+completed: a hang on a valid image, which on a card costs a reset.
+cft_krnl now refuses a sequencer start on a narrower tile through
+the same STATUS[3] path an absent precision takes; the quarter bench
+presents exactly that header and its negative control (the refusal
+reverted) fails on "a refused run must still complete", as it
+must. quarter passes under Verilator and Icarus; the whole suite
+builds under Verilator, eighteen of eighteen.
 
 ##### What would move the ceiling itself (considered 2026-09-02)
 

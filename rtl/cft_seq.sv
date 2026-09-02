@@ -274,12 +274,21 @@ module cft_seq #(
   // three operands were each carrying their own copy of this
   // multiplexer on the issue path, for a value that cannot change
   // during a run.
+  // Replication counts and slice widths follow the beat, so the
+  // function elaborates on a narrower tile (the quarter tile's 64-bit
+  // beat compiles this module even though its sequencer is refused at
+  // start - cft_krnl needs the whole kernel to elaborate under every
+  // simulator, Verilator included). At 256 every value below is what
+  // was written here before: 8/4/2/1 copies of 32/64/128/256 bits.
+  localparam int KW64  = (BEAT_BITS < 64)  ? BEAT_BITS : 64;
+  localparam int KW128 = (BEAT_BITS < 128) ? BEAT_BITS : 128;
+  localparam int KW256 = (BEAT_BITS < 256) ? BEAT_BITS : 256;
   function automatic [BEAT_BITS-1:0] kbroad(input [255:0] k);
     case (prec_q)
-      PREC_FP32:  kbroad = {8{k[31:0]}};
-      PREC_FP64:  kbroad = {4{k[63:0]}};
-      PREC_FP128: kbroad = {2{k[127:0]}};
-      default:    kbroad = k[255:0];
+      PREC_FP32:  kbroad = {(BEAT_BITS / 32){k[31:0]}};
+      PREC_FP64:  kbroad = {(BEAT_BITS / KW64){k[KW64-1:0]}};
+      PREC_FP128: kbroad = {(BEAT_BITS / KW128){k[KW128-1:0]}};
+      default:    kbroad = k[KW256-1:0];
     endcase
   endfunction
 
@@ -923,7 +932,9 @@ module cft_seq #(
         end
         S_HDR_R: begin
           if (m_rd_rvalid && m_rd_rready) begin
-            hdr_q <= m_rd_rdata[255:0];
+            // 256'() rather than [255:0]: the beat is BEAT_BITS wide, and a
+            // select past its top does not elaborate on a narrow tile.
+            hdr_q <= 256'(m_rd_rdata);
             m_rd_rready <= 1'b0;
             rd_stream_on <= 1'b0;
             st <= S_CHECK;
@@ -973,7 +984,7 @@ module cft_seq #(
           // starved forever.
           if (kons_left != 0 && pw_have >= {1'b0, esz}) begin
             if (kons_i < KREG)
-              kmem[kons_i[3:0]] <= kbroad(256'(pw[255:0]) &
+              kmem[kons_i[3:0]] <= kbroad(256'(pw) &
                                    ~(~256'b0 << ({26'b0, esz} << 3)));
             pw <= pw >> ({26'b0, esz} << 3);
             pw_have <= pw_have - {1'b0, esz};
@@ -1055,7 +1066,9 @@ module cft_seq #(
             // beats holding blk_n lanes = ceil(blk_n / lanes-per-beat):
             // esz * lpb is BEAT_BYTES at every precision, so dividing
             // esz * blk_n by BEAT_BYTES is dividing blk_n by lpb.
-            nb_blk <= 5'(({1'b0, blk_n} + 9'(lpb) - 9'd1) >> lpb_sh);
+            // 9'(blk_n), not {1'b0, blk_n}: blk_n's width follows the lane
+            // block, and the concatenation is only nine bits at 256.
+            nb_blk <= 5'((9'(blk_n) + 9'(lpb) - 9'd1) >> lpb_sh);
             ld_reg <= 2'd0;
             pc <= '0;
             lp_sp <= '0;
