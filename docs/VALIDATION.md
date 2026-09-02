@@ -810,3 +810,53 @@ executing the design - a reduction ran to completion through the real
 XRT stack with correct flags - but two gate stages failed to START on
 the stale-emulation-state race `hw/run-device-test.sh` documents, and
 are being re-run. No bitstream has closed, and there is still no card.
+
+## 2026-09-02 - the sequencer fails on the device, and the engine does not
+
+The first emulation of the sequencer-era image through the real XRT
+stack. The elementwise engine passed on that image - `fma ok: 12 checks
+so far, 0 failed` at fp32, and an earlier campaign run reached 24 fp64
+FMA checks with 0 failed - and a reduction ran to completion with
+correct flags. **Every sequencer program failed:**
+
+    FAIL seq fma+deposit:  run status disagrees (sw ok, hw memory
+                           system fault: the output is not valid)
+    FAIL seq interval:     ... hw memory system fault
+    FAIL seq escape loop:  ... hw memory system fault
+    FAIL seq zero-budget:  ... hw memory system fault
+    sequencer programs: 16 checks so far, 4 failed
+
+"Memory system fault" is STATUS[2:0] - the engine's bus-fault bits - so
+the device is reporting that the sequencer's own AXI traffic did not
+complete cleanly. The failure is total (four of four programs, every
+shape from a single deposit to a nested escape map) and it is isolated
+to the sequencer: same image, same run, same masters, the elementwise
+path is clean.
+
+What has been ruled out already, by reading rather than guessing:
+
+  * NOT the HBM bank binding. hw/kernel.xml puts `prog` (arg 6) on
+    m_axi_a and `cnt` (arg 7) on m_axi_d, and hw/link.cfg binds those
+    ports to HBM[0] and HBM[3]; verify-image confirms 4 masters, no
+    channel shared.
+  * NOT unbound arguments. cftx_program_run passes all eight in order,
+    tile.pg and tile.cn included.
+  * NOT the 4 KB burst rule. cft_seq's burst_len() clamps to
+    (4096 - addr[11:0]) >> 5 exactly as the engine's does.
+
+What this says about the benches: `seq_core` and `krnlseq` are green and
+have been for a day, against cocotbext-axi's AxiRam. The device is
+enforcing something that model does not - the classic shape of an
+integration bug, and the reason the emulation gate exists at all. The
+cocotb benches proved the sequencer's SEMANTICS against seq.py; they
+never proved its bus behaviour against an interconnect that pushes back.
+
+Evidence lost and being re-collected: run-device-test.sh keeps one
+generation of .run, and the reductions gate overwrote the sequencer's
+simulate.log before it was read. A sequencer-only re-run that snapshots
+its own trace is queued.
+
+**Status change.** The sequencer's row has read "benched - hw_emu
+pending" since 2026-09-01. hw_emu has now run, and it fails. Until this
+is root-caused the honest reading is: bit-exact against its model in
+simulation, and NOT working on a device.
