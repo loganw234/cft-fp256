@@ -1245,7 +1245,15 @@ file, and the slack goes the other way.
 mispredicted the shell by 0.88 ns this week, and the quad routing as
 this is written (40149b1, retimed, 135 MHz) does NOT carry the change -
 its number measures retiming alone, which is the question it was built
-to answer. What surfaced next, at +2.126 out of context, is the LZC-fed
+to answer.
+
+*Established the same evening.* A single tile from the case-ROM
+commit's RTL (0e7264e), 135 MHz, retimed, in the shell: routed, image
+written, **kernel WNS +0.433 ns** where the same clock closed at
++0.045 before the change - +0.39 ns delivered of +0.445 promised,
+which is the closest OOC and shell have agreed all week. The seed
+ROM family is gone from the worst ten; the head of the list is
+S12->S13 at +0.433, the family the next entry moves. What surfaced next, at +2.126 out of context, is the LZC-fed
 coarse normalise into `s11_valw` - the path the SPLIT sweep found under
 the shared ladder, now visible in the private one.
 
