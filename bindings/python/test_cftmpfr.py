@@ -256,13 +256,13 @@ def test_from_str_negative_zero(prec):
     ctx = Context(prec)
     for s in ("-0", "-0.0", "-0e0", " -0.0e+00", "-1e-99999"):
         f = ctx.from_str(s)
-        assert f.is_zero and f.sign == 1, (s, hex(f.bits))
+        assert f.is_zero and f.sign == 1, (s, f)
     for s in ("0", "+0", "0.0", "1e-99999"):
         f = ctx.from_str(s)
-        assert f.is_zero and f.sign == 0, (s, hex(f.bits))
+        assert f.is_zero and f.sign == 0, (s, f)
     # and the round trip that found it, on both zeros explicitly
     for f in (ctx.zero(0), ctx.zero(1)):
-        assert ctx.from_str(f.to_str()).same_bits(f), hex(f.bits)
+        assert ctx.from_str(f.to_str()).same_bits(f), f
 
 
 @pytest.mark.parametrize("prec", PRECISIONS)
@@ -282,7 +282,7 @@ def test_from_str_specials_need_no_library(prec):
         assert f.is_inf and f.sign == sign, s
     for f in (ctx.nan(), ctx.inf(0), ctx.inf(1), ctx.zero(0), ctx.zero(1)):
         back = ctx.from_str(f.to_str())
-        assert back.is_nan if f.is_nan else back.same_bits(f), hex(f.bits)
+        assert back.is_nan if f.is_nan else back.same_bits(f), f
 
 
 @needs_gmpy2

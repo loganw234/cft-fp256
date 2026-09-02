@@ -581,6 +581,13 @@ class Context:
         if low in ("inf", "infinity"):
             self.last_flags = 0
             return self.inf(1 if neg else 0)
+        # A leading plus carries no information and gmpy2 2.1.2 refuses
+        # "+0" with "invalid digits", so it is dropped here. A leading
+        # MINUS is not: under a directed attribute the rounding of -x is
+        # not the negation of the rounding of x, so the sign must reach
+        # MPFR with the digits.
+        if t.startswith("+"):
+            t = t[1:]
         result = self._rounded_via_gmpy2(
             lambda: gmpy2.mpfr(t), f"decimal string {s!r}")
         # The sign of a zero comes from the DECIMAL, not from gmpy2.
