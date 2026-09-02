@@ -63,25 +63,29 @@ LIMIT_PCT           = 85.0   # docs/SCALING.md's practical routing limit
 
 # ---- what a tile costs, out of context ---------------------------------
 #
-# FULL: cft_krnl with every rung, ladders off, retimed, at eb8ef2a
-#   (the case-ROM commit): 129,708 LUT from the 2026-09-02 A/B in
-#   docs/ROADMAP.md. A narrow variant is FULL minus the banks it does
-#   not build; the bank costs are per-module figures with the hierarchy
-#   preserved (hw/synth_attrib.tcl on the same tree), each bank being
-#   its lanes' pipe + simpleops + seedop + opmux. The remainder -
-#   engine, sequencer and its register file, FIFOs, reduction
-#   accumulator, CSR, lane steering - is BEAT_BITS-wide and does not
-#   shrink with the rungs.
-#
-# Placeholder values are marked; replace them from the attrib run and
-# re-run this script. A wrong bank cost moves a tile count by one, and
-# the table says which counts sit within one tile of the budget.
-LUT_FULL_TILE = 129_708
-BANK_LUT = {                 # provenance: see docs/LAYOUTS.md "Costs"
-    "fp32":  14_840,         # PLACEHOLDER (2026-08-30 per-lane x8, less the ROM saving)
-    "fp64":  17_500,         # PLACEHOLDER
-    "fp128": 21_890,         # PLACEHOLDER
-    "fp256": 31_106,         # PLACEHOLDER
+# FULL and the four banks come from ONE run so the subtraction is
+#   internally consistent: hw/synth_attrib.tcl (hierarchy preserved) on
+#   the RTL of eb8ef2a, the case-ROM commit, 2026-09-02. Top-level
+#   cft_krnl reads 131,386 there; the same tree flattened for QoR reads
+#   129,708 (the A/B in docs/ROADMAP.md), 1.3% less, because flattening
+#   optimises across module boundaries. A bank is its lanes' pipe +
+#   opmux + simpleops + seedop, per lane, times lanes:
+#     fp32   (2,472 +  34 +   360 + 458) x 8 = 26,592
+#     fp64   (5,014 +  66 +   758 + 488) x 4 = 25,304
+#     fp128 (11,649 + 131 + 1,401 + 565) x 2 = 27,492
+#     fp256 (31,258 + 262 + 3,139 + 674) x 1 = 35,333
+#   which is the ladder's known shape - each bank about the same,
+#   because lanes halve as precision doubles, until fp256 cannot halve.
+#   The remainder (sequencer 8,565, engine 5,352 with its FIFOs and
+#   accumulator, CSR 576, lane steering ~800) is BEAT_BITS-wide and
+#   does not shrink with the rungs. A narrow variant is FULL minus the
+#   banks it does not build.
+LUT_FULL_TILE = 131_386
+BANK_LUT = {
+    "fp32":  26_592,
+    "fp64":  25_304,
+    "fp128": 27_492,
+    "fp256": 35_333,
 }
 
 # ---- the kernel variants ----------------------------------------------
@@ -256,7 +260,38 @@ def main(argv=None) -> int:
                 stale.append(dest.name)
         else:
             dest.write_text(text, encoding="utf-8", newline="\n")
-    print(f"tile costs (OOC model): " + ", ".join(f"{SHORT[v]} {tile_lut(v):,}" for v in VARIANTS))
+    # A config the family no longer produces is stale by definition -
+    # a count moved when a cost was measured - so it is removed rather
+    # than left to be built by someone reading the directory.
+    wanted = {f"{name}.cfg" for name, _, _ in rows}
+    for old in sorted(OUT.glob("u50-*.cfg")):
+        if old.name not in wanted:
+            if args.check:
+                stale.append(old.name + " (orphan)")
+            else:
+                old.unlink()
+                print(f"removed orphan {old.name}")
+    # The doc's table is this script's output, placed between markers,
+    # so the catalogue cannot say one thing and the configs another.
+    doc = HW.parent / "docs" / "LAYOUTS.md"
+    begin, end = "<!-- layouts:begin -->\n", "<!-- layouts:end -->\n"
+    if doc.exists():
+        d = doc.read_text(encoding="utf-8")
+        if d.count(begin) == 1 and d.count(end) == 1:
+            i = d.index(begin) + len(begin)
+            j = d.index(end)
+            block = ("\n" + render_table(rows) + "\n"
+                     "*(this table is written by `python hw/gen_layouts.py`; the two "
+                     "\"built\" rows are `hw/link_quad.cfg` and `hw/link.cfg` by another "
+                     "name - identical connectivity)*\n\n")
+            if d[i:j] != block:
+                if args.check:
+                    stale.append(doc.name)
+                else:
+                    doc.write_text(d[:i] + block + d[j:], encoding="utf-8", newline="\n")
+        else:
+            print(f"note: {doc} has no layouts:begin/end markers; table not written")
+    print(f"tile costs (hierarchy-preserved OOC): " + ", ".join(f"{SHORT[v]} {tile_lut(v):,}" for v in VARIANTS))
     print(f"shell: {SHELL_1CU:,} + {SHELL_PER_EXTRA_CU:,} per extra CU; budget {FITS_PCT:.0f}% of {LUT_DEVICE:,}; HBM wall {MAX_TILES} tiles")
     print()
     print(render_table(rows))
@@ -264,9 +299,9 @@ def main(argv=None) -> int:
         if stale:
             print("STALE: " + ", ".join(stale) + " - run python hw/gen_layouts.py")
             return 1
-        print("hw/layouts up to date")
+        print("hw/layouts and docs/LAYOUTS.md up to date")
     else:
-        print(f"wrote {len(rows)} configs to {OUT}")
+        print(f"wrote {len(rows)} configs to {OUT} and the table in {doc}")
     return 0
 
 
