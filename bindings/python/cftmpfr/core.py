@@ -562,19 +562,37 @@ class Context:
         in dispute the way tininess is."""
         if not isinstance(s, str):
             raise TypeError(f"from_str wants a str, got {type(s).__name__}")
+        # Specials are lexed here, not by gmpy2. to_str emits "nan",
+        # "inf", "-inf" and the two zeros without a library, so the
+        # parse has to read them back without one - and gmpy2 2.1.2
+        # refuses every spelling of inf and nan ("invalid digits")
+        # where 2.2 accepts them. Recognising a token is not rounding;
+        # what follows the token still goes through MPFR. Whitespace
+        # is stripped for the same reason: 2.1.2 rejects it trailing,
+        # 2.2 accepts it either side, and a parse should not depend on
+        # which one is installed.
+        t = s.strip()
+        neg = t.startswith("-")
+        body = t[1:] if t[:1] in "+-" else t
+        low = body.lower()
+        if low == "nan":
+            self.last_flags = 0
+            return self.nan()
+        if low in ("inf", "infinity"):
+            self.last_flags = 0
+            return self.inf(1 if neg else 0)
         result = self._rounded_via_gmpy2(
-            lambda: gmpy2.mpfr(s), f"decimal string {s!r}")
+            lambda: gmpy2.mpfr(t), f"decimal string {s!r}")
         # The sign of a zero comes from the DECIMAL, not from gmpy2.
-        # gmpy2 2.1.2 (MPFR 4.1.0) parses "-0" to a zero whose
-        # is_signed() is False - inside the ieee() context this method
-        # rounds in, it comes back as +0 outright - and from_mpfr takes
-        # the sign from is_signed, so every zero parsed from a negative
-        # decimal lost its sign on that version (2.2.1 is correct).
-        # 754 settles what the answer is: rounding never changes a
-        # sign, so a negative decimal that is zero, or that underflows
-        # to zero in this format, is -0 in every attribute. The parse
-        # flags stand; only the sign bit is restored.
-        if result.is_zero and s.lstrip().startswith("-"):
+        # gmpy2 2.1.2 (MPFR 4.1.0) parses "-0" inside the ieee() context
+        # this method rounds in to a zero with no sign at all, and
+        # from_mpfr takes the sign from is_signed, so every zero parsed
+        # from a negative decimal lost its sign on that version (2.2.1
+        # is correct). 754 settles what the answer is: rounding never
+        # changes a sign, so a negative decimal that is zero, or that
+        # underflows to zero in this format, is -0 in every attribute.
+        # The parse flags stand; only the sign bit is restored.
+        if result.is_zero and neg:
             flags = self.last_flags
             result = self.zero(1)
             self.last_flags = flags

@@ -265,6 +265,26 @@ def test_from_str_negative_zero(prec):
         assert ctx.from_str(f.to_str()).same_bits(f), hex(f.bits)
 
 
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_from_str_specials_need_no_library(prec):
+    """to_str writes nan, inf, -inf and the zeros without gmpy2, so
+    from_str reads them back without it - and without gmpy2 2.1.2's
+    opinion, which is "invalid digits" for every spelling of inf and
+    nan. Whitespace either side is tolerated on every version."""
+    ctx = Context(prec)
+    for s in ("nan", "NaN", "-nan", "+NAN", " nan "):
+        f = ctx.from_str(s)
+        assert f.is_nan, s
+        assert ctx.last_flags == 0
+    for s, sign in (("inf", 0), ("+inf", 0), ("Infinity", 0), ("-inf", 1),
+                    ("-INFINITY", 1), (" -inf ", 1)):
+        f = ctx.from_str(s)
+        assert f.is_inf and f.sign == sign, s
+    for f in (ctx.nan(), ctx.inf(0), ctx.inf(1), ctx.zero(0), ctx.zero(1)):
+        back = ctx.from_str(f.to_str())
+        assert back.is_nan if f.is_nan else back.same_bits(f), hex(f.bits)
+
+
 @needs_gmpy2
 def test_to_float_narrowing_from_fp256():
     ctx = Context(237)
