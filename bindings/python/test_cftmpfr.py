@@ -556,6 +556,61 @@ def test_type_refusals():
 
 
 # ---------------------------------------------------------------------
+# the bind-time audit of the transcribed constants
+# ---------------------------------------------------------------------
+
+def _rebind():
+    """Force _lib to bind (and audit) a fresh handle, restoring the
+    module's singleton afterwards whatever happens."""
+    from cftmpfr import _lib
+    saved = _lib._LIB
+    _lib._LIB = None
+    try:
+        _lib.lib()
+    finally:
+        _lib._LIB = saved
+
+
+def test_audit_accepts_the_library_it_ships_with():
+    """The audit runs on every bind, so this is mostly a statement that
+    the transcription and the built library agree right now."""
+    _rebind()
+
+
+def test_audit_rejects_a_mistranscribed_opcode():
+    """The audit is why the numbers in _lib.py are allowed to be typed
+    by hand at all; an audit never seen failing would not be. Move one
+    opcode to a number the library calls something else and the bind
+    must refuse - the failure it prevents is a wrong operation computed
+    quietly, not a crash."""
+    from cftmpfr import _lib
+    saved = _lib.OP_MUL
+    _lib.OP_MUL = _lib.OP_ABS          # the library calls 4 "abs"
+    try:
+        with pytest.raises(RuntimeError, match="disagrees with the library"):
+            _rebind()
+    finally:
+        _lib.OP_MUL = saved
+    _rebind()                          # and the restored value binds again
+
+
+def test_audit_rejects_a_foreign_abi_major():
+    """cft.h says to check the ABI of the library actually loaded, not
+    the header this was written against. A different major means the
+    opcode and format numbers cannot be assumed to still mean what they
+    say, so the bind refuses rather than guessing."""
+    from cftmpfr import _lib
+    saved = _lib.ABI_MAJOR
+    _lib.ABI_MAJOR = saved + 1
+    try:
+        with pytest.raises(RuntimeError, match="reports ABI"):
+            _rebind()
+    finally:
+        _lib.ABI_MAJOR = saved
+    _rebind()
+
+
+# ---------------------------------------------------------------------
 # the negative control: prove the comparison can fail
 # ---------------------------------------------------------------------
 

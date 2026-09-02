@@ -70,7 +70,7 @@ Run the demo and the tests:
 
 ```bash
 python demo_mpfr_dropin.py        # 100k-element binary256 workload
-python -m pytest test_cftmpfr.py  # 69 tests; skips gmpy2/numpy parts if absent
+python -m pytest test_cftmpfr.py  # 80 tests; skips gmpy2/numpy parts if absent
 ```
 
 ## What the demo measures, honestly
@@ -78,24 +78,38 @@ python -m pytest test_cftmpfr.py  # 69 tests; skips gmpy2/numpy parts if absent
 A degree-8 Horner polynomial (8 fma), a square root and a division
 per element, 100,000 elements at binary256, gmpy2 loop vs cftmpfr
 batch, then **every phase compared element by element** - 300,000
-encodings, bit-identical. Timings from this machine (Windows,
-mingw64-built cft.dll, software backend):
+encodings, bit-identical. The parity is the claim and it does not
+move. The timings do, so they are dated. Windows, mingw64-built
+cft.dll, software backend, gmpy2 2.2.1 / MPFR 4.2.1, **2026-09-02**:
 
 | phase  | gmpy2 loop | cftmpfr batch | speedup |
 |--------|-----------:|--------------:|--------:|
-| horner (8 fma) | 3617 ns/elem | 3401 ns/elem | 1.06x |
-| sqrt   | 662 ns/elem | 14046 ns/elem | 0.05x |
-| div    | 795 ns/elem | 11873 ns/elem | 0.07x |
+| horner (8 fma) | 2625 ns/elem | 3058 ns/elem | 0.86x |
+| sqrt   | 494 ns/elem | 10747 ns/elem | 0.05x |
+| div    | 619 ns/elem | 8798 ns/elem | 0.07x |
 
-Read it straight. The fma family crosses the interpreter once
-instead of N times and edges out a very well-tuned MPFR even though
-libcft's softfloat is portable C99 - that is the batch story, and it
-grows as the per-element cost shrinks (lower precisions, simpler
-ops). div and sqrt are honest losses on the *software* backend:
-libcft computes them as a fixed seed/Newton/exact-residual sequence
-of 25-30 elementwise passes (the price of correct rounding built
-from an FMA, and the same sequence on every backend), while MPFR
-divides natively. On the tile those passes run at hardware speed;
+One run of three; the horner speedup came out 0.85x, 0.86x and 0.94x.
+The first recording of this table, on 2026-08-31, had that row at
+3617 vs 3401 ns/elem - a 1.06x win - and said the fma family "edges
+out a very well-tuned MPFR". It does not, here, today: the gmpy2 loop
+got about a quarter faster on this machine while libcft's batch
+barely moved, and the phase crossed from a small win to a small loss.
+
+Neither number is the batch story. What the batch path actually buys
+is one interpreter crossing instead of N, and at binary256 that is
+worth about as much as MPFR's own per-element cost, so which side
+wins is decided by whatever else changed that week. A spot check at
+the narrower formats on 2026-09-02 put the same workload shape at
+1.2-1.6x in libcft's favour at binary32/64/128 - but that was an
+ad-hoc script, not this demo, which is fixed at binary256; nothing in
+this repository regenerates those three numbers, so treat them as an
+indication and not as a measurement.
+
+div and sqrt are honest losses on the *software* backend, and that
+part has not moved: libcft computes them as a fixed
+seed/Newton/exact-residual sequence of 25-30 elementwise passes (the
+price of correct rounding built from an FMA, and the same sequence on
+every backend), while MPFR divides natively. On the tile those passes run at hardware speed;
 the table is the cost of the contract on a laptop, not the cost of
 the contract.
 

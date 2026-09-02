@@ -122,6 +122,25 @@ contract.
 * **The sequencer is compiled in but not exported.** No panel drives
   `cft_program_*` yet, and this page only claims surfaces it
   exercises.
+* **The committed page predates ABI 0.2, and says 0.1.**
+  `conformance.html` was built at 5ec0883 on 2026-09-01, about eighty
+  minutes before the clause-5 completion set landed and moved
+  `CFT_ABI_VERSION_MINOR` to 2, and it has not been rebuilt since. Its
+  module answers `cftw_abi_version()` with 1, so the page's identity
+  line reads *libcft ABI 0.1* where `cft-selftest` on the same tree
+  reads 0.2. What the page *replays* is unaffected: the 236,000
+  published cases and their result bits are the same cases and the
+  same bits, and `make -C host test` replays all twenty sets clean
+  against today's library. `build.sh` is stale in the same way and for
+  the same reason - it compiles six sources where `host/Makefile` now
+  builds seven, the seventh being `host/src/clause5.c`. Nothing in the
+  other six references it, so the wasm build still links; but a
+  rebuild today would report ABI 0.2 while still carrying none of the
+  clause-5 entry points, so the source list and `wasm_api.c` want
+  looking at in the same pass. (Measured 2026-09-02 by instantiating
+  the page's embedded module directly - 50,153 bytes, the size its own
+  build info records - and calling the export. Emscripten was not
+  installed on that host, so nothing was rebuilt to check it.)
 * Reproducibility claim, precisely: same pinned image + same repo
   state → same page. The vectors are seeded and the sampling is a
   pure function of them; `emcc` is deterministic within the pinned

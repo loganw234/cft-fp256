@@ -53,10 +53,21 @@ from pathlib import Path
 # ---------------------------------------------------------------------
 # Constants transcribed from cft.h. The header is normative; these are
 # the names, not a reinterpretation. cft_format_name()/cft_op_name()
-# exist so a mistranscription here would show up as a name mismatch in
-# any log line that prints both - which is the audit the header
-# designed for.
+# exist so that a mistranscription here shows up as a name mismatch
+# rather than as a wrong answer - which is the audit the header
+# designed for, and _audit() below is where it is actually performed,
+# once, against whatever shared library this process loaded. The
+# expected name is not written out anywhere: it is the Python
+# constant's own name, lowercased, so there is one transcription here
+# and not two.
+#
+# The rounding attributes and the exception flags get no such audit
+# because the header publishes no accessor for them - the ABI major
+# check is all that stands behind those five and those five bits.
 # ---------------------------------------------------------------------
+
+ABI_MAJOR = 0        # cft.h CFT_ABI_VERSION_MAJOR; a different major
+                     # breaks source or binary compatibility outright
 
 FP32, FP64, FP128, FP256 = 0, 1, 2, 3
 
@@ -202,7 +213,56 @@ def _bind(lib):
                              c_void_p, c_void_p,
                              c_size_t, u32p, u32p]
     lib.cft_sqrt.restype = c_int
+    _audit(lib)
     return lib
+
+
+def _audit(lib):
+    """Ask the loaded library whether the constants above mean what
+    their names say, and refuse to run if they do not.
+
+    cft.h says to check the ABI at run time rather than trust the
+    header you compiled against, "because a binding loaded against a
+    different shared library is the normal case, not the exceptional
+    one" - and it publishes cft_format_name()/cft_op_name() so that a
+    mistranscribed number is visible as a name. Both of those are only
+    worth anything if something performs the comparison, so this does,
+    once, at bind time. It costs one call per constant, each returning
+    a pointer to static storage.
+
+    A mismatch is not something to work around: every number below
+    travels into an opcode field, so the failure it prevents is a
+    plausible-looking wrong answer rather than a crash."""
+    abi = lib.cft_abi_version()
+    if (abi >> 16) != ABI_MAJOR:
+        raise RuntimeError(
+            f"libcft reports ABI {abi >> 16}.{abi & 0xffff}; this package "
+            f"is written against major {ABI_MAJOR}. A major change breaks "
+            f"source or binary compatibility (cft.h), so the opcode and "
+            f"format numbers below cannot be assumed to still mean what "
+            f"they say. Update cftmpfr, or point CFT_LIB at a matching "
+            f"library.")
+
+    wrong = []
+    for name in sorted(globals()):
+        value = globals()[name]
+        if name.startswith("OP_"):
+            want, got = name[3:].lower(), lib.cft_op_name(value)
+        elif name in ("FP32", "FP64", "FP128", "FP256"):
+            want, got = name.lower(), lib.cft_format_name(value)
+        else:
+            continue
+        got = got.decode("ascii", "replace")
+        if got != want:
+            wrong.append(f"{name} = {value}, but the library calls "
+                         f"{value} {got!r}")
+    if wrong:
+        detail = "\n".join(f"    {w}" for w in wrong)
+        raise RuntimeError(
+            "cftmpfr's transcription of cft.h disagrees with the library "
+            "it loaded:\n" + detail + "\nThese numbers go into opcode and "
+            "format fields, so continuing would compute the wrong "
+            "operation and say nothing about it.")
 
 
 class Caps(ctypes.Structure):
