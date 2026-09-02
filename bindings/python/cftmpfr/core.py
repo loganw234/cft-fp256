@@ -562,8 +562,23 @@ class Context:
         in dispute the way tininess is."""
         if not isinstance(s, str):
             raise TypeError(f"from_str wants a str, got {type(s).__name__}")
-        return self._rounded_via_gmpy2(
+        result = self._rounded_via_gmpy2(
             lambda: gmpy2.mpfr(s), f"decimal string {s!r}")
+        # The sign of a zero comes from the DECIMAL, not from gmpy2.
+        # gmpy2 2.1.2 (MPFR 4.1.0) parses "-0" to a zero whose
+        # is_signed() is False - inside the ieee() context this method
+        # rounds in, it comes back as +0 outright - and from_mpfr takes
+        # the sign from is_signed, so every zero parsed from a negative
+        # decimal lost its sign on that version (2.2.1 is correct).
+        # 754 settles what the answer is: rounding never changes a
+        # sign, so a negative decimal that is zero, or that underflows
+        # to zero in this format, is -0 in every attribute. The parse
+        # flags stand; only the sign bit is restored.
+        if result.is_zero and s.lstrip().startswith("-"):
+            flags = self.last_flags
+            result = self.zero(1)
+            self.last_flags = flags
+        return result
 
     def from_mpfr(self, x):
         """A gmpy2.mpfr, adopted EXACTLY - integer significand and

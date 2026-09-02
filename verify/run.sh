@@ -299,8 +299,12 @@ need() {  # docker|host-cc|xclbinutil ...
   STAGE_SKIP_REASON=""
   for t in "$@"; do
     case "$t" in
-      docker) command -v docker >/dev/null 2>&1 \
-        || STAGE_SKIP_REASON="docker not present on this host";;
+      # Present is not usable: a WSL distro without Docker Desktop's
+      # integration has a `docker` shim on PATH that only prints how to
+      # enable it, and on 2026-09-02 that FAILED sim, lint and formal
+      # in 0 s each instead of skipping them by name.
+      docker) docker version >/dev/null 2>&1 \
+        || STAGE_SKIP_REASON="docker not usable on this host (absent, or present without a reachable engine)";;
       host-cc) if [ "$WIN" = 1 ]; then
                  [ -x /c/msys64/mingw64/bin/gcc.exe ] \
                    || STAGE_SKIP_REASON="mingw64 gcc not found";
