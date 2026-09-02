@@ -120,11 +120,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# KEEP IN STEP with the `stage` calls below. This block is written by
+# hand, which makes it a second source of truth for a list that already
+# drifted once: clause5 and mpfr were added to the run without being
+# added here, and the sim line claimed 15 cocotb targets after the
+# aggregate grew to 17. If you add a stage, add a line here in the same
+# order, or --list quietly lies about what `make verify` does.
 if [ "$LIST" = 1 ]; then
   cat <<'EOF'
 golden       golden-model pytest suite (the definition of correct)
 vectors      regenerate the conformance sets from the model
-sim          cocotb RTL suite, all 15 targets (docker cft-sim)
+sim          cocotb RTL suite, all 17 targets (docker cft-sim)
 lint         yosys elaboration gate, every RTL file (docker cft-sim)
 formal       property proofs + negative control (docker cft-formal)
 libcft       host library: build + contract tests + conformance replay
@@ -134,6 +140,7 @@ clause5      the clause-5 completion set vs the model, all entry points
 diff         library vs model over the alignment boundary
 seq          the sequencer: C vs model over fuzzed programs
 reduce       reduction ranges: C vs model
+bindings     the cftmpfr drop-in vs gmpy2's IEEE emulation
 mpfr         MPFR parity - the only external oracle reaching fp128/fp256
 soak-quick   native-oracle soak, QUICK depth + sabotage control
 images       hw/verify-image.sh over $IMAGES (XRT hosts, if staged)
@@ -145,8 +152,13 @@ fi
 # A typo'd --only used to select NOTHING, print "PASS, nothing
 # skipped", and crash the census mid-print with an unbound variable -
 # exit 0. A compliance runner must refuse names it does not know.
+# THIRD copy of the stage names, after the --list heredoc above and the
+# `stage` calls below. All three are hand-maintained and all three must
+# be edited together; clause5 and mpfr had already reached two of the
+# three, and `bindings` needed all three. If this list grows again,
+# deriving it is worth more than another comment.
 STAGELIST="golden vectors sim lint formal libcft selfcheck divsqrt \
-clause5 diff seq reduce mpfr soak-quick images"
+clause5 diff seq reduce bindings mpfr soak-quick images"
 check_names() {  # <flagname> <comma-list>
   local n
   for n in $(echo "$2" | tr ',' ' '); do
@@ -351,6 +363,7 @@ stage formal "formal proofs + negative control" -- do_formal
 # One interpreter for every python-touching stage, chosen by PY()'s
 # rule - the libcft stage used to hand make `command -v python3`,
 # which on Windows is the WindowsApps alias PY() exists to avoid.
+SHLIB_NAME=$(if [ "$WIN" = 1 ]; then echo cft.dll; else echo libcft.so; fi)
 PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
           command -v python
         else command -v python3 2>/dev/null || command -v python; fi)
@@ -386,6 +399,26 @@ stage seq "sequencer C-vs-model over fuzzed programs" -- \
 need host-cc python
 stage reduce "reduction ranges C-vs-model" -- \
   PY "$ROOT/host/tests/reduce_check.py" --trials 1500
+
+# The MPFR-compatible Python binding, which is a different claim from
+# the MPFR ORACLE below. do_mpfr asks whether libcft's arithmetic agrees
+# with GNU MPFR; this asks whether the drop-in that advertises that
+# agreement actually delivers it - the context/precision/rounding
+# plumbing, the batch path against the scalar path, the flag words, and
+# the refusals. A binding can be wrong in every one of those while the
+# arithmetic under it is perfect.
+#
+# gmpy2 is optional by the test's own design: without it the interop
+# comparisons skip and the refusal and batch-vs-scalar checks still run.
+# So this stage is useful on a bare box and sharper on one with gmpy2.
+do_bindings() {
+  HOSTMAKE "$SHLIB_NAME" >/dev/null 2>&1 || HOSTMAKE all >/dev/null 2>&1 || true
+  CFT_LIB="$ROOT/host/$SHLIB_NAME" PY -m pytest -q \
+    "$ROOT/bindings/python/test_cftmpfr.py"
+}
+need host-cc python
+stage bindings "cftmpfr drop-in: encodings, flags and refusals vs gmpy2" \
+  -- do_bindings
 
 do_mpfr() {
   # A repo-local prefix (verify/build-mpfr-oracle.sh) outranks system

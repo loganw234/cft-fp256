@@ -19,15 +19,18 @@ the repo root, or `bash verify/run.sh` with the flags below.
 |---|---|---|
 | golden | the model's own invariants and oracles | python |
 | vectors | the conformance sets regenerate from the model | python |
-| sim | RTL == model across all 15 cocotb targets | docker |
+| sim | RTL == model across all 17 cocotb targets | docker |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO/seedop/simpleops theorems + negative control | docker |
 | libcft | C library contract + 392k-case conformance replay | cc, python |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
+| clause5 | the clause-5 completion set vs model | cc, python |
 | diff | the alignment-boundary sweep vs the model | cc, python |
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |
+| bindings | the cftmpfr drop-in vs gmpy2's IEEE emulation | cc, python |
+| mpfr | GNU MPFR parity, every rung and mode (third oracle) | cc, python |
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
 
