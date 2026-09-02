@@ -1036,3 +1036,35 @@ ROM change bought +0.39 ns in the shell against +0.445 out of context.
 The worst kernel paths are all S12->S13 now, which 9f73107 moves up a
 stage; the seed-ROM family does not appear. This image is a candidate
 single for card day pending hw/verify-image.sh and a matching quad.
+
+## 2026-09-02 - the cocotb suite in parallel on the 36-core box
+
+`make -k SIM=verilator sim` at 9f73107 on amd-arc-box, the whole suite
+under Verilator, run twice back to back by tb/box_parallel_sim.sh:
+
+    serial   (-j1)    wall 1522 s    17 targets, 50 tests, 50 passed
+    parallel (-j12)   wall   57 s    17 targets, 50 tests, 50 passed
+
+Read carefully, because the two numbers do not measure the same thing.
+The serial pass compiled every Verilator model from nothing and then
+simulated; the parallel pass found those models already built under
+tb/sim_build/ and simulated them twelve at a time. So 57 s is what the
+suite's SIMULATION costs on that box once the models exist, and most
+of the 1522 s was compilation - eighteen targets, eight of which
+compile the identical full kernel. A cold `-j12` run, which would
+parallelise the compiles too, was not taken because the box had
+already been claimed by the next quad; the honest expectation is a few
+minutes. De-duplicating the kernel compiles (one model, eight benches)
+is the larger lever for cold runs and is recorded as such.
+
+Both passes report `rc=2` with every test passing: the eighteenth
+target, `quarter`, stops Verilator with the internal error recorded on
+2026-09-02 (cft_engine_stream.sv's reduce serialiser at BEAT_BITS=64)
+and produces no result under it. It passes under Icarus, its default.
+
+The same day, `make -C host examples-lang` under MSYS2 make on the
+Windows host: rust and csharp same bits as the C example; julia, go
+and R skipped by name for want of toolchains. The C# leg had been
+failing on that host in a way that read as a bit mismatch - dotnet
+missing the profile and PROGRAMFILES variables that MSYS make does not
+pass to recipes - and now names a failed `dotnet run` as what it is.

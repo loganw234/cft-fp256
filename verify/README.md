@@ -35,7 +35,10 @@ the repo root, or `bash verify/run.sh` with the flags below.
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
 
 Wall time for the standard set is dominated by `sim` (~40 min in the
-container); everything else together is ~20-30 min.
+container, ~25 min under Verilator on a 36-core box - almost all of
+it compilation; the simulations themselves run in under a minute at
+-j12 once the models exist, docs/VALIDATION.md 2026-09-02);
+everything else together is ~20-30 min.
 
 Two things the runner learned on 2026-09-02, both now built in: the
 libcft stage cleans `host/` before building it, because a checkout

@@ -76,7 +76,49 @@ ifeq ($(OS),Windows_NT)
   SHDEF   := -DCFT_BUILD_SHARED
   PIC     :=
   EXE     := .exe
+  # make under MSYS2 hands recipes a stripped environment - HOME, PATH
+  # and a few system variables, no USERPROFILE, no APPDATA, no TEMP -
+  # and without those NuGet cannot locate its packages folder ("Value
+  # cannot be null. (Parameter 'path1')"), so the C# example failed in
+  # a way that read as a checksum mismatch (2026-09-02). Measured under
+  # `env -i`: USERPROFILE alone is not enough; the set below is. All
+  # taken from the registry - HKCU\Volatile Environment\USERPROFILE is
+  # the profile Windows itself uses, and reg.exe reads it regardless of
+  # what the process environment lost - because HOME is no use here:
+  # under MSYS2 make it is /home/<user>, which cygpath maps to
+  # C:\Program Files\Git\home\<user>, a profile that does not exist
+  # (measured: "Access to the path ... is denied"). cygpath of HOME
+  # stays as the fallback for a shell that has a real HOME and no
+  # reg.exe. Plus dotnet's own switches that keep a first run from
+  # writing sentinels and notices into the log.
+  # `//v`, not `/v`: from an MSYS shell a lone `/v` is rewritten into a
+  # path before reg.exe sees it and the query fails with "Invalid
+  # syntax"; the doubled slash is the documented escape.
+  WINHOME    := $(strip $(shell reg query "HKCU\Volatile Environment" //v USERPROFILE 2>/dev/null \
+                  | sed -n 's/.*REG_SZ[[:space:]]*//p' | tr -d '\r'))
+  ifeq ($(WINHOME),)
+    WINHOME  := $(strip $(shell powershell -NoProfile -NonInteractive -Command \
+                  "[Environment]::GetFolderPath('UserProfile')" 2>/dev/null | tr -d '\r'))
+  endif
+  ifeq ($(WINHOME),)
+    WINHOME  := $(shell cygpath -w "$(HOME)" 2>/dev/null || echo "$(HOME)")
+  endif
+  # PROGRAMFILES is the one NuGet's "path1" actually came from - with
+  # the profile set alone it still failed; with this it passes. Passed
+  # through `env` because the x86 name carries parentheses, which the
+  # shell's VAR=value prefix form does not accept.
+  SYSTEMDRIVE ?= C:
+  DOTNET_ENV := env USERPROFILE="$(WINHOME)" \
+                APPDATA="$(WINHOME)\AppData\Roaming" \
+                LOCALAPPDATA="$(WINHOME)\AppData\Local" \
+                TEMP="$(WINHOME)\AppData\Local\Temp" \
+                TMP="$(WINHOME)\AppData\Local\Temp" \
+                PROGRAMFILES="$(SYSTEMDRIVE)\Program Files" \
+                "PROGRAMFILES(X86)=$(SYSTEMDRIVE)\Program Files (x86)" \
+                DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_NOLOGO=1 \
+                DOTNET_CLI_TELEMETRY_OPTOUT=1
 else
+  DOTNET_ENV :=
   SHLIB   := libcft.so
   SHFLAGS := -shared
   SHDEF   :=
@@ -224,8 +266,11 @@ examples-lang: all
 		echo "SKIP go: no go on PATH"; \
 	fi
 	@if command -v dotnet >/dev/null 2>&1; then \
-		dotnet run --project examples/vector_fma_cs.csproj \
-			> .out-cs.txt && \
+		if ! $(DOTNET_ENV) dotnet run --project examples/vector_fma_cs.csproj \
+			> .out-cs.txt 2> .out-cs.err; then \
+			echo "csharp: dotnet run FAILED - a build or runtime problem, NOT a bit mismatch:"; \
+			tail -5 .out-cs.err; exit 1; \
+		fi; \
 		diff --strip-trailing-cr .out-c.txt .out-cs.txt && \
 		echo "csharp: same library, same bits"; \
 	else \
@@ -239,7 +284,7 @@ examples-lang: all
 		echo "SKIP r: no Rscript on PATH"; \
 	fi
 	@rm -f .out-c.txt .out-jl.txt .out-rs.txt .out-go.txt .out-cs.txt \
-		.out-r.txt
+		.out-cs.err .out-r.txt
 
 difftest: all
 	$(PYTHON) tests/diff_check.py --trials 3000
@@ -350,4 +395,7 @@ clean:
 	      device-test device-test.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
 	      vector-fma-rs vector-fma-rs.exe vector-fma-rs.pdb \
-	      .out-c.txt .out-py.txt .out-jl.txt .out-rs.txt
+	      vector-fma-go vector-fma-go.exe \
+	      .out-c.txt .out-py.txt .out-jl.txt .out-rs.txt \
+	      .out-go.txt .out-cs.txt .out-cs.err .out-r.txt
+	rm -rf examples/bin examples/obj
