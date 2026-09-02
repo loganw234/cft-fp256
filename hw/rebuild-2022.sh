@@ -27,6 +27,22 @@ BUILD=${BUILD:-build}
 # or the unnamed ones run at the platform default clock.
 LINK_CFG=${LINK_CFG:-hw/link.cfg}
 
+# RETIMING=1 asks Vivado to retime the KERNEL's synthesis run - to move
+# registers across combinational logic, which is function-preserving by
+# construction and costs almost nothing in area. Measured out of context
+# at 135 MHz on 2026-09-02: WNS +0.307 -> +1.681 ns for +141 LUT and
+# +354 FF, with 188 DSPs picking up the output register the DPOP-3
+# warnings were about (docs/ROADMAP.md).
+#
+# OFF by default, and the reason is a verification gap rather than
+# doubt about the transform. Every cocotb target in tb/ simulates the
+# RTL SOURCE; retiming is applied afterwards, inside synthesis, so a
+# retiming defect would pass the entire suite untouched and appear only
+# in hw_emu or on the card. A retimed artifact is exactly as trustworthy
+# as the conformance vectors that have been replayed THROUGH it, and no
+# further - so turn it on deliberately, and gate it on vectors.
+RETIMING=${RETIMING:-0}
+
 # The CUs the kernel clock constraint names. DERIVED from the link
 # configuration rather than defaulted, because the failure mode of
 # getting it wrong is expensive and silent until the end: a quad build
@@ -174,7 +190,18 @@ for t in $TARGETS; do
   echo "== v++ link -t $t"
   extra=""
   [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:${CLOCK_ARG}"
+  vprop=()
+  if [ "$RETIMING" = 1 ] && [ "$t" = "hw" ]; then
+    # The kernel's own OOC synthesis run inside the vpl project. The
+    # name is the packaged IP's, observed in prj.runs of a completed
+    # build; if a future platform renames it, v++ says so loudly rather
+    # than silently skipping the property.
+    vprop+=(--vivado.prop
+      "run.ulp_cft_krnl_1_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true")
+    echo "== RETIMING enabled on the kernel synthesis run"
+  fi
   v++ -l -t "$t" --platform "$PLATFORM" --config "$LINK_CFG" $extra \
+      "${vprop[@]}" \
       --save-temps --temp_dir "$BUILD/_x_$t" \
       -o "$BUILD/cft_$t.xclbin" "$BUILD/cft_krnl.xo"
 done
@@ -211,6 +238,7 @@ for t in $TARGETS; do
     echo "part:          $PART"
     echo "link_cfg:      $LINK_CFG"
     echo "kernel_freq:   $KERNEL_FREQ"
+    echo "retiming:      $RETIMING"
     echo "clock_cus:     $CLOCK_CUS"
     echo "clock_arg:     ${KERNEL_FREQ}:${CLOCK_ARG}"
     echo "vivado:        $(vivado -version 2>/dev/null | head -1)"
