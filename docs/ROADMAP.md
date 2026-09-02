@@ -1086,6 +1086,66 @@ plenty of designs ship exactly like this. They matter here only because
 this design is 0.045 ns from its own edge at 135 MHz, and this is the
 one lead that points at the structure the slack is actually spent in.
 
+#### Two experiments against that finding (2026-09-02)
+
+**A - retiming, no RTL change: +1.374 ns for 141 LUTs.** `synth_design
+-retiming` is allowed to move registers across combinational logic.
+Same source, same commit, one flag, out of context at 135 MHz:
+
+| | WNS | LUT | FF | DSP | DSPs using PREG |
+|---|---|---|---|---|---|
+| baseline | +0.307 | 139,404 | 55,362 | 292 | - |
+| `-retiming` | **+1.681** | 139,545 | 55,716 | 277 | **188** |
+
+The slack more than quintuples for +141 LUT and +354 FF, and 188 DSPs
+pick up their output register (PREG) - the very thing DPOP-3 was
+complaining about. MREG stays at zero, so the 237x24 cascade is still
+not internally pipelined; what retiming found was the OUTPUT register,
+which it could move because a register existed downstream to move.
+Implied ceiling at that slack is around 175 MHz out of context.
+
+**Two caveats, both load-bearing.** Out-of-context slack has already
+mispredicted the shell by 0.88 ns once this week, so +1.681 is a
+direction, not a delivery. And more seriously: **retiming is a synthesis
+transformation the RTL benches cannot see.** Every cocotb target
+simulates the source; retiming happens afterwards, so a retiming defect
+would pass the entire suite and show up only in hw_emu or on the card
+against the conformance vectors. Vivado's retiming is function-
+preserving by construction, but "by construction" is exactly the kind of
+claim this project measures rather than accepts. Turning it on means
+the vectors become the gate that matters.
+
+**B - adding a pipeline stage: the core refuses, and correctly.** The
+other way to feed the DSPs is to give the cascade a register of its own.
+One extra edge on the product path (`s2b_pp`, DEPTH 15 -> 16, the three
+hardcoded depths in cft_krnl moved to 16):
+
+    fp256    build refused - the pipe's own depth guard fired
+    krnl     1 of 2 FAIL - got=0x7f800000 want=0x23ac02af
+    reduce   0 of 3
+    krnlseq  0 of 1
+
+Not rounding drift: garbage, infinities where finite values belong. The
+reason is structural and worth writing down. **cft_fpfma_pipe is a
+SYNCHRONISED MULTI-PATH pipeline, not a linear one.** S7 consumes the
+product `s6_mp` combinationally alongside `s6_sbig`, `s6_ssml` and
+`s6_g` - sign, exponent and alignment control that travel their own
+S1->S6 path. Delay the multiply alone and every FMA pairs a product with
+the wrong operand's control word.
+
+So the DSP work is not "insert a register". It is "re-balance every
+parallel path in the core at once", against the one file whose
+bit-exactness the whole contract rests on, with the equivalence benches
+gating each step. The depth guard caught the mismatch at elaboration
+rather than letting it ship, and LATENCY proved to be threaded properly
+- only three hardcoded sites - so the plumbing is sound and the timing
+balance is the work.
+
+**Order of attack, if this is ever picked up:** retiming first, because
+it is a flag and a verification question rather than a redesign; the
+pipe re-balance second, if the ceiling still binds after the card has
+said what the shell really does.
+
 ## General purpose: divide and square root (status, 2026-08-31)
 
 The gap named when the binary256 novelty claim was calibrated -
