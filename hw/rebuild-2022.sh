@@ -43,6 +43,48 @@ LINK_CFG=${LINK_CFG:-hw/link.cfg}
 # further - so turn it on deliberately, and gate it on vectors.
 RETIMING=${RETIMING:-0}
 
+# ---- implementation exploration -------------------------------------
+#
+# A design sitting near its edge does not have ONE achievable WNS; it
+# has a distribution, and the way to sample it is to vary how the tools
+# get there. This tile is exactly that design - the quad missed 135 MHz
+# by 0.113 ns, which is well inside the spread a directive change moves.
+#
+# NOTE, because it is the first thing anyone reaches for: Vivado has no
+# placer "seed". `place_design` takes -directive, not -seed. The
+# supported exploration axis is the DIRECTIVE, and place and route each
+# have their own valid set - passing a route directive to the placer is
+# an error, not a no-op:
+#
+#   PLACE_DIRECTIVE   Explore, ExtraTimingOpt, ExtraPostPlacementOpt,
+#                     AltSpreadLogic_{high,medium,low},
+#                     ExtraNetDelay_{high,low}, WLDrivenBlockPlacement,
+#                     EarlyBlockPlacement, SSI_* (SLR-aware), Quick,
+#                     RuntimeOptimized, Default
+#   ROUTE_DIRECTIVE   Explore, AggressiveExplore, NoTimingRelaxation,
+#                     MoreGlobalIterations, HigherDelayCost,
+#                     AlternateCLBRouting, Quick, RuntimeOptimized,
+#                     Default
+#
+# PHYS_OPT=1 turns on the physical-optimisation passes either side of
+# routing; they are off in the default Vitis strategy and are usually
+# the cheapest tenths of a nanosecond available.
+#
+# VPP_PROPS is the escape hatch: any additional --vivado.prop entries,
+# space separated, so a sweep can reach knobs this script never named
+# (including STEPS.*.ARGS.{MORE OPTIONS} for anything Vivado does
+# expose per-step) without being edited.
+#
+#   PLACE_DIRECTIVE=Explore ROUTE_DIRECTIVE=AggressiveExplore \
+#   PHYS_OPT=1 bash hw/rebuild-2022.sh
+#
+# Everything set here lands in the artifact's manifest, because a build
+# that closed and cannot say HOW is a build nobody can reproduce.
+PLACE_DIRECTIVE=${PLACE_DIRECTIVE:-}
+ROUTE_DIRECTIVE=${ROUTE_DIRECTIVE:-}
+PHYS_OPT=${PHYS_OPT:-0}
+VPP_PROPS=${VPP_PROPS:-}
+
 # The CUs the kernel clock constraint names. DERIVED from the link
 # configuration rather than defaulted, because the failure mode of
 # getting it wrong is expensive and silent until the end: a quad build
@@ -191,6 +233,27 @@ for t in $TARGETS; do
   extra=""
   [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:${CLOCK_ARG}"
   vprop=()
+  if [ "$t" = "hw" ]; then
+    [ -n "$PLACE_DIRECTIVE" ] && vprop+=(--vivado.prop
+      "run.impl_1.{STEPS.PLACE_DESIGN.ARGS.DIRECTIVE}=$PLACE_DIRECTIVE")
+    [ -n "$ROUTE_DIRECTIVE" ] && vprop+=(--vivado.prop
+      "run.impl_1.{STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE}=$ROUTE_DIRECTIVE")
+    if [ "$PHYS_OPT" = 1 ]; then
+      vprop+=(--vivado.prop "run.impl_1.{STEPS.PHYS_OPT_DESIGN.IS_ENABLED}=true")
+      vprop+=(--vivado.prop
+        "run.impl_1.{STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED}=true")
+    fi
+    # NOT `extra` as the loop variable: that name already holds
+    # --clock.freqHz, and reusing it silently dropped the clock
+    # constraint - a bitstream built at the platform default while
+    # still reporting success. Caught by the stub-v++ argv test.
+    for vp in $VPP_PROPS; do vprop+=(--vivado.prop "$vp"); done
+    if [ ${#vprop[@]} -gt 0 ]; then
+      echo "== implementation exploration: place='${PLACE_DIRECTIVE:-default}'" \
+           "route='${ROUTE_DIRECTIVE:-default}' phys_opt=$PHYS_OPT" \
+           "extra='${VPP_PROPS:-none}'"
+    fi
+  fi
   if [ "$RETIMING" = 1 ] && [ "$t" = "hw" ]; then
     # The kernel's own OOC synthesis run inside the vpl project. The
     # name is the packaged IP's, observed in prj.runs of a completed
@@ -239,6 +302,10 @@ for t in $TARGETS; do
     echo "link_cfg:      $LINK_CFG"
     echo "kernel_freq:   $KERNEL_FREQ"
     echo "retiming:      $RETIMING"
+    echo "place_directive: ${PLACE_DIRECTIVE:-default}"
+    echo "route_directive: ${ROUTE_DIRECTIVE:-default}"
+    echo "phys_opt:      $PHYS_OPT"
+    echo "vpp_props:     ${VPP_PROPS:-none}"
     echo "clock_cus:     $CLOCK_CUS"
     echo "clock_arg:     ${KERNEL_FREQ}:${CLOCK_ARG}"
     echo "vivado:        $(vivado -version 2>/dev/null | head -1)"
