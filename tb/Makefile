@@ -168,6 +168,15 @@ krnlfused:
 		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1" \
 		COCOTB_RESULTS_FILE=sim_build/krnlfused/results.xml
 
+# The kernel with both fused ladders OFF - the pre-2026-09-01 default,
+# kept covered now that the shipping default is on. Same bit-exact
+# result; the ladders are a resource trade, not a numeric one.
+krnlplain:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlplain \
+		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=0 -Pcft_krnl.FUSE_ALIGN=0" \
+		COCOTB_RESULTS_FILE=sim_build/krnlplain/results.xml
+
 quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \

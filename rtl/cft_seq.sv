@@ -751,7 +751,7 @@ module cft_seq #(
   logic [5:0] dc_beat;
   logic [2:0] dc_posn;
   assign dc_beat = 6'(32'(lane_cursor[LB-1:0]) >> lpb_sh);
-  assign dc_posn = 3'(lane_cursor[LB-1:0] & {3'(lpb - 1)});
+  assign dc_posn = lane_cursor[2:0] & 3'(lpb - 4'd1);
 
   // The cursor lane's deposit count, selected once. Both the drain
   // ("has this lane reached this slot?") and the count pack want it,
@@ -1172,7 +1172,7 @@ module cft_seq #(
             al_c <= c_kc ? kmem[c_rc] : rf_rdata_c;
           end
           bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} + 1))
+          if (bt == 6'({1'b0, nb_blk} + 6'd1))
             st <= S_ALU_WAIT;
           // With NBEATS > LATENCY the first result retires DURING the
           // last issue cycles - beat 0 lands exactly at issue cycle
@@ -1196,7 +1196,7 @@ module cft_seq #(
             rf_wwe <= wb_wwe;
             flags_q <= flags_q | wb_flags_or;
             wb_bt <= wb_bt + 1;
-            if (wb_bt == 6'({1'b0, nb_blk} - 1)) begin
+            if (wb_bt == 6'({1'b0, nb_blk} - 6'd1)) begin
               pc <= pc + 1;
               st <= S_FETCH;
             end
@@ -1234,7 +1234,7 @@ module cft_seq #(
           if (|bt_dep_ovf)
             dep_ovf_q <= 1'b1;
           bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 1)) begin
+          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
             pc <= pc + 1;
             st <= S_FETCH;
           end else
@@ -1259,7 +1259,7 @@ module cft_seq #(
                   bt_act[q])
                 active[b*WORDS + q] <= sa_nz[q];
           bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 1)) begin
+          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
             pc <= pc + 1;
             st <= S_FETCH;
           end else
@@ -1287,7 +1287,7 @@ module cft_seq #(
         end
 
         S_DRAIN_RD: begin
-          db_raddr <= DBA'(32'(lane_cursor >> lpb_sh) * MAXD
+          db_raddr <= DBA'((32'(lane_cursor) >> lpb_sh) * MAXD
                            + slot_cursor);
           st <= S_DRAIN_W8;
         end

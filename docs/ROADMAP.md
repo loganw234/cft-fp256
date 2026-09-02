@@ -905,6 +905,97 @@ pinned by the 256-bit beat - 8x32, 4x64, 2x128 and 1x256 all consume
 exactly one beat - so freed area cannot become more fp32 lanes. It
 becomes more tiles.
 
+#### The sequencer's second array, extracted (2026-09-01)
+
+The size campaign above was fought over ONE ALU array. Then the orbit
+sequencer shipped with a PRIVATE second copy - `cft_seq_lanes`, the
+same per-lane recipe instantiated again, and without the fused ladders
+this section spent a week earning - because the engine's array was
+woven through the streaming datapath and staged for card day. The v1
+deviation was documented and benched, but it was never priced at the
+kernel until the sequencer-era tile was synthesised whole:
+
+| tile (OOC, 135 MHz, ladders off) | LUT |
+|---|---|
+| pre-sequencer (one array) | 98,310 |
+| **sequencer, private second array** | **288,764** |
+| of which the second array | 124,057 |
+
+The quad link of that tile asked for **1,316,831 LUT of an 871,680-LUT
+part** and died in placement (`VPL UTLZ-1`, LUT-as-logic
+over-utilised). The array is now one instance, `rtl/cft_lanes.sv`, that
+`cft_krnl` owns and BOTH engines drive through a per-issue request
+(valid, opcode, attribute, precision, three operands) under the same
+`MODE[15]` select that already picks the AXI owner. No arbitration -
+they never run at once - and the reduction adder rides the same request
+as `fma(x, 1.0, y)` through lane 0. cft_engine_stream and cft_seq each
+carry `OWN_LANES` (default 1 for their unit benches; cft_krnl passes 0).
+
+| kernel (OOC, 135 MHz, ladders off) | LUT | vs private |
+|---|---|---|
+| private arrays | 288,764 | |
+| **one shared array** | **162,482** | **-43.7%** |
+
+This is the "share what only looks shareable" analysis's own rule, one
+level up: not a datapath fractured across formats, but a whole
+redundant COPY of the datapath removed, on the free axis (the two
+engines never run at once, exactly like one precision bank live per
+run). Every elementwise, reduction and sequencer bench green on the
+shared array; yosys-lint clean.
+
+#### The sequencer's control logic, halved (2026-09-01)
+
+Extraction fixed area but left the sequencer's OWN critical path: an
+address computation multiplying by `esz` and `max_deposits` mapped to a
+DSP cascade, `prec_q -> wr_addr` at 28 logic levels, -0.065 ns at 135
+MHz. Every such multiply is by a power of two (`esz` in {4,8,16,32},
+`MAXD` a constant), so they became shifts and carried block offsets;
+the variable part-selects that indexed the packed lane-state and
+deposit-count vectors became loops over constant indices with an
+equality picking the beat.
+
+| cft_seq (in-kernel OOC, 135 MHz) | before | after |
+|---|---|---|
+| DSP48 | 15 | **0** |
+| `(u_seq)` LUT | 49,657 | **26,586** (-46.5%) |
+| worst cft_seq path | -0.065 ns, 28 levels | **+4.268 ns, 16 levels** |
+| kernel WNS | -0.065 (misses) | **+0.307 (closes)** |
+
+The largest single item was not on the suspect list: the variable
+part-select on the WRITE side of the deposit counters
+(`dcnt[<expr>] <= v`) was 8,064 of 14,887 logic LUTs, because synthesis
+must decide, per bit of an 896-bit vector, whether the write window
+covers it - 229 LUTs once rewritten as constant-index loops. Recorded
+negative result: splitting the index arithmetic into
+`q*CW + beat*WORDS*CW` (the obvious fix) bought only -2,116; the
+construct, not the parenthesisation, was the cost. Benches identical to
+the picosecond - proof no cycle moved.
+
+**Where that leaves the quad, measured OOC at 135 MHz on the merged
+tree:**
+
+| full tile | LUT | WNS | quad estimate |
+|---|---|---|---|
+| private arrays (pre-refactor) | 288,764 | -0.065 | 1,316,831 - did not place |
+| shared array, seq diet, ladders off | 139,404 | **+0.307** | ~80% of the device |
+| shared array, seq diet, **ladders on** | **123,599** | **+0.097** | **~75%** |
+
+The fused normalise and align ladders - this section's own -16.7k-LUT
+result, proven bit-exact (now including the full kernel, `make
+krnlfused`) - are what return the sequencer tile to near the
+pre-sequencer footprint, so four of them plus the shell sit in the
+~25-30%-free envelope the pre-sequencer quad had. They default ON for
+the full tile as of 2026-09-01, because `hw/package_kernel.tcl` strips
+user parameters and the default is the only value a bitstream carries;
+they self-gate off for the quarter tile. The cost is timing headroom:
+ladders on is +0.097 OOC where off is +0.307, and the critical path
+moves to the ladder's own LZC-fed shift (`s10_mag -> normseg`, 27
+levels) - exactly where the 2026-08-31 measurement put it. **The
+measured card-day pair settles which ships**: OOC does not predict
+shell slack in either direction, so if the ladders-on quad misses at
+135 in the shell, the ladders-off tile (+0.307, ~80%) is the standing
+fallback and reverting one default line reaches it.
+
 ## General purpose: divide and square root (status, 2026-08-31)
 
 The gap named when the binary256 novelty claim was calibrated -

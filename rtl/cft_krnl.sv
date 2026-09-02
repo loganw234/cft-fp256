@@ -54,14 +54,21 @@ module cft_krnl #(
     // correct for Alveo (the HBM pseudo-channel width); narrow it
     // only together with the wide rungs, for a smaller tile.
     parameter int BEAT_BITS = 256,
-    // Resource sharing across the banks, both default OFF and both
-    // pass-through only - the engine's own headers carry the argument
-    // and the measurements. They are exposed here because a parameter
-    // no top-level can set cannot be built, measured, or refuted, and
-    // FUSE_MUL spent a release in exactly that state.
+    // Resource sharing across the banks. FUSE_MUL stays off - it costs
+    // LUTs to save DSP, the resource that is not scarce (NOVEL.md
+    // entry 6). FUSE_NORM and FUSE_ALIGN are ON by default as of
+    // 2026-09-01: the size campaign proved them bit-exact and measured
+    // -16.7k LUT at the kernel, and once the sequencer's shared ALU
+    // array is the ONE array on the tile, that saving lands on the
+    // path to fitting four of them. hw/package_kernel.tcl strips user
+    // parameters, so the DEFAULT is the only value a bitstream can
+    // carry - which is why this is a default and not a build flag. Both
+    // self-gate on the full-tile geometry (USE_FUSED_* below), so a
+    // quarter tile ignores them. krnlfused holds the full kernel
+    // bit-exact with them on; krnlplain keeps the off path covered.
     parameter bit FUSE_MUL  = 1'b0,
-    parameter bit FUSE_NORM = 1'b0,
-    parameter bit FUSE_ALIGN = 1'b0
+    parameter bit FUSE_NORM = 1'b1,
+    parameter bit FUSE_ALIGN = 1'b1
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
