@@ -110,6 +110,21 @@ if [ -z "${CLOCK_CUS:-}" ]; then
   CLOCK_CUS=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$LINK_CFG" \
               | tr -d ' ' | head -1)
 fi
+# One kernel variant per build, for now. hw/layouts/ carries configs
+# with a second nk= line - a narrow variant beside the full tile at its
+# own clock (docs/LAYOUTS.md) - and `head -1` above would silently take
+# only the FIRST line's CUs, leaving the second variant's on the
+# platform default. That is the exact failure the comment above
+# describes, so a multi-variant config is refused here until the flow
+# packages one .xo per variant and passes the config's own [clock]
+# lines.
+NK_LINES=$(grep -cE '^[[:space:]]*nk=' "$LINK_CFG" || true)
+if [ "${NK_LINES:-0}" -gt 1 ]; then
+  echo "ERROR: $LINK_CFG declares $NK_LINES kernel variants (nk= lines);" >&2
+  echo "       this flow packages one variant and clocks one nk= line." >&2
+  echo "       See docs/LAYOUTS.md, 'What makes a placeholder a build'." >&2
+  exit 1
+fi
 
 # Validate, do not merely default. An EMPTY result would fall back
 # harmlessly; a GARBLED one will not, because it is non-empty and so

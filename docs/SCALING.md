@@ -268,6 +268,14 @@ partitions one logical operation across every tile. That is an API gap,
 not an architecture gap - and it is a scheduling decision rather than a
 bitstream decision only because capability is homogeneous.
 
+*2026-09-02: the bitstream decision now has a catalogue. docs/LAYOUTS.md
+derives every tile mix the U50 could carry - the homogeneous quad,
+then one fp256 anchor with the rest of the ladder filled at each lower
+rung, then the same pattern a rung down - from measured costs, with a
+mark on the layouts that keep fp256 capability. The homogeneous
+decision above is what that mark records; the narrow layouts give it
+up deliberately, for the clock the widest rung no longer sets.*
+
 ## Designing for 64 now: what that means in practice
 
 The number that has to scale to 64 today is **the test matrix, not the
