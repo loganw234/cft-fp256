@@ -41,8 +41,9 @@ kernel flow, XRT host runtime.
         | fp32 bank | fp64 bank  | fp128 bank  | fp256 unit  |
         +-----------+------------+-------------+-------------+
               each lane: cft_opmux -> cft_fpfma_pipe
-              optional, off by default: FUSE_MUL / FUSE_NORM /
-              FUSE_ALIGN, one shared ladder in place of the per-lane ones
+              optional, all off by default: FUSE_MUL / FUSE_NORM /
+              FUSE_ALIGN - one shared multiplier or shift ladder in
+              place of the per-lane ones
 ```
 
 - **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
