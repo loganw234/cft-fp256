@@ -70,6 +70,16 @@ homogeneous-tile decision ("every tile can do fp256, so precision is a
 runtime choice rather than a deployment one") guarantees for the first
 two rows and gives up, deliberately, on the rest.
 
+**A note on the narrow rows.** Raw fp32 and fp64 throughput is not
+what this project is for. Every CPU and GPU made serves those formats
+at clocks and lane counts this fabric will not match. They are here
+because binary32 and binary64 are rungs of the same IEEE 754 ladder as
+binary128 and binary256, and carrying the whole ladder is what lets
+one contract - bit-exact, deterministic, the same result on every
+backend - cover all of them. Read the fp32- and fp64-heavy layouts as
+a convenience and a conformance story, not as a performance target;
+the numbers that matter are the fp128 and fp256 ones.
+
 <!-- layouts:begin -->
 
 | layout | tiles | CUs | HBM PCs | clocks (MHz) | model LUT | of device | fit | fp256 contract | status |

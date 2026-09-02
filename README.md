@@ -19,6 +19,17 @@ precision up to fp256 when the problem needs it (deep-zoom orbits,
 reference oracles, interval arithmetic to come). The entry point stays
 a simple library; the tile only makes it faster.
 
+**What this is not for.** Raw fp32 and fp64 throughput. Every CPU and
+GPU made serves those formats at clocks and lane counts an FPGA fabric
+will not match, and nothing here tries to. binary32 and binary64 are
+carried because they are rungs of the same IEEE 754 ladder as
+binary128 and binary256, and carrying the whole ladder is what lets
+one contract - bit-exact, deterministic, the same result on every
+backend - cover all of them. Their support is a convenience and a
+conformance story; the tile's reason to exist is the precision
+commodity hardware does not offer, and docs/LAYOUTS.md says the same
+of the fp32- and fp64-heavy tile mixes.
+
 ## What exists today
 
 | piece | state |
