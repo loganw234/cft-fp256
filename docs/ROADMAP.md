@@ -1042,6 +1042,50 @@ that. Five points of device area is not worth a bitstream that does not
 close; the ladders stay proven, parameterised and off, for a slower
 clock or the smaller open-core part where footprint is the objective.
 
+#### The DSP48s are running with their pipeline registers bypassed (2026-09-02)
+
+Found by `hw/report_cdc.tcl` on the routed single tile - a review added
+to answer a different question (are there unconstrained paths? no:
+`unconstrained_internal_endpoints (0)`, `no_clock (0)`, and the kernel's
+own CDC report is EMPTY because one clock reaches it). The DRC output
+was the surprise. 475 of the design's 547 DRC items are in the kernel,
+and they are all one story:
+
+| rule | count | what Vivado says |
+|---|---|---|
+| DPOP-4 | 277 | MREG output pipelining - `u_fma/g_mul_local.s2_pp_reg` |
+| DPOP-3 | 183 | PREG output pipelining - `u_fma/p_0_out` |
+| DPIP-2 | 15 | input pipelining - `u_seed/seed_rsqrt*_return0` |
+
+A DSP48 carries its own pipeline registers: A/B on the inputs, M after
+the multiplier, P on the output. **This design uses none of them.** The
+partial-product register the RTL does write (`s2_pp_reg`, stage S2 of
+cft_fpfma_pipe) lands in fabric beside the DSP rather than inside it, so
+each DSP resolves its multiply and its accumulate combinationally within
+a stage.
+
+**That is where the slack went.** Every critical path measured on
+2026-09-01 ran through a DSP chain - the single at 135 MHz reported
+`DSP_A_B_DATA -> DSP_M_DATA -> DSP_MULTIPLIER -> DSP_ALU -> DSP_OUTPUT`
+among its sixteen levels, and the quad's -0.113 ns path had the same
+shape. Those are the stages MREG and PREG exist to cut.
+
+**Which makes this the most concrete Fmax lead the project has**, and
+also the riskiest to take. `cft_fpfma_pipe` is the bit-exact core; its
+stage map is a documented contract (LATENCY = 15 edges, S0..S14) that
+the engine's delay lines, the sequencer's two-ahead issue and
+cft_reduce_acc's ADD_LATENCY all count on. Moving a register into a DSP
+either preserves that count or breaks every consumer at once. So it is
+a campaign of its own, with the equivalence benches as the gate, not an
+afternoon's edit - and it should be measured before it is believed,
+like FUSE_MUL was (NOVEL.md entry 6: the last confident DSP prediction
+here evaporated on contact with the fabric).
+
+Worth stating plainly: these are ADVISORY warnings. Nothing is wrong;
+plenty of designs ship exactly like this. They matter here only because
+this design is 0.045 ns from its own edge at 135 MHz, and this is the
+one lead that points at the structure the slack is actually spent in.
+
 ## General purpose: divide and square root (status, 2026-08-31)
 
 The gap named when the binary256 novelty claim was calibrated -
