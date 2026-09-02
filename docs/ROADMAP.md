@@ -1257,6 +1257,54 @@ comment, not a guard: every option above is latency-neutral because
 LATENCY 16 forces NBEATS to 32 and changes the block model seq.py is
 bit-exact to. A guard belongs there before anyone changes the depth.
 
+##### The round stage's arithmetic moves up a stage (2026-09-02)
+
+The second family in the failing quad - `s12_enorm_reg[0] ->
+s13_kept_r_reg`, 25 levels, 15 CARRY8, 73% route, -0.133 ns - began
+with four CARRY8 and two LUTs deriving K and the window's shift
+amount from s12_enorm, then launched that amount onto a fanout-625 net
+into a 717-bit right shifter. Every one of those quantities is a
+function of s11_enorm alone, the value s12_enorm is registered from,
+so S12 now computes K, the shift, q and both tininess compares and
+S13 reads registers. And the window itself is extracted from the P+1
+bits that can reach it plus a zero above them, shifted right by
+delta = P - K: bit i of the kept window is s12_norm[NW-K+i] either
+way, zero above K, so an 8-level shifter over P+2 bits replaces a
+10-level one over NW, with the sticky's variable share named by a
+mask that is also a register. The K <= 0 branch is untouched.
+
+Out of context at 135 MHz with retiming, against the tip:
+
+| | LUT | FF | WNS | worst path |
+|---|---|---|---|---|
+| tip (case ROM) | 129,708 | 55,722 | +2.126 | S10->S11 |
+| + S12 precompute, narrow window | **123,420** | 57,657 | +2.222 | S10->S11 |
+
+-6,288 LUT, most of it the shifter and the 717-bit thermometer mask
+that no longer exist, for +1,935 FF of precomputed state. That puts a
+tile within 200 LUT of the fused-ladders figure with none of the
+ladders' slack cost. The S13 path does not appear in the OOC top ten
+either before or after - S10->S11 sits above it out of context - so
+the shell decides what it bought; in the routed quad it was the
+-0.133 family, and the quad from the tip carries it.
+
+What is left of the third family, S10->S11 (LZC and coarse
+normalise, -0.140 in the quad): the coarse granule count is
+`(NW-1-msb) >> 6` - a subtraction the shift select waits on - and
+the chunk index that produced msb already knows the granule to within
+one; deriving csh from the chunk index and a compare would take the
+CARRY8s off that head the same way. Recorded, not done.
+
+Two Verilator-only findings from running the whole suite under it for
+this gate, neither caused by the change and both worth knowing: the
+`mulfrac`/`mulshare` targets had never built under Verilator (SELRANGE
+on constant slices in dead generate arms - fixed the same day by
+clamping the offsets), and `quarter` (BEAT_BITS=64) stops Verilator
+with an internal error on cft_engine_stream.sv's reduce serialiser,
+where the fp128 arm names a 128-bit slice of a 64-bit beat. Icarus,
+the default for both, is unaffected; the quarter arm wants a generate
+guard on BEAT_BITS. Not done here.
+
 ##### What would move the ceiling itself (considered 2026-09-02)
 
 The core is within roughly 10-15% of what its width allows at this

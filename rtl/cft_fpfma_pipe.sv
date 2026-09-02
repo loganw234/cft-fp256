@@ -868,13 +868,42 @@ module cft_fpfma_pipe #(
   logic [W-1:0]  s12_spd;
   logic [4:0]    s12_spf;
   int            s12_enorm;
+  // S13's exponent arithmetic, done here. K (how many significand bits
+  // the format keeps at this exponent), the round window's shift, q,
+  // and the two tininess compares are all functions of s11_enorm
+  // alone, and S13 was deriving them from s12_enorm - the same value
+  // one register later - at the head of the design's measured critical
+  // path: four CARRY8 and two LUTs of subtraction before a shift amount
+  // that fans out to 625 loads (routed quad @135, 2026-09-02, -0.133 ns
+  // on s12_enorm_reg[0] -> s13_kept_r_reg). Computed here they arrive
+  // as registers, the fanout leaves from flip-flops the placer can
+  // replicate, and the value of every one of them is unchanged.
+  int            s12_k;        // = K as S13 computed it
+  int            s12_delta;    // = P - K, the round window's own shift (K > 0)
+  int            s12_q;        // = s13_q as S13 computed it
+  logic          s12_tiny0;    // s11_enorm     < EMIN
+  logic          s12_tiny1;    // s11_enorm + 1 < EMIN
+  logic [P+1:0]  s12_ymask;    // the delta low bits of the window: sticky's share
 
   always_ff @(posedge clk) begin : stage12
+    int k12, d12;
+    logic [P+1:0] ones_y;
+    ones_y = {(P+2){1'b1}};
+    k12 = (s11_enorm >= EMIN) ? P : (P - (EMIN - s11_enorm));
+    d12 = P - k12;
     s12_stk   <= s11_stk;
     s12_zero  <= s11_zero;
     s12_enorm <= s11_enorm;
     s12_rsign <= s11_rsign;
     s12_spc <= s11_spc; s12_spd <= s11_spd; s12_spf <= s11_spf;
+    s12_k     <= k12;
+    s12_delta <= d12;
+    s12_q     <= ((s11_enorm >= EMIN) ? s11_enorm : EMIN) - (P - 1);
+    s12_tiny0 <= (s11_enorm < EMIN);
+    s12_tiny1 <= ((s11_enorm + 1) < EMIN);
+    // Only meaningful for K in 1..P (delta in 0..P-1); the K <= 0 branch
+    // never reads it, and a delta past the window just masks everything.
+    s12_ymask <= ~(ones_y << ((d12 < 0) ? 0 : ((d12 > P + 1) ? (P + 1) : d12)));
   end
 
   // ---- the two normalise shifters, here or elsewhere ----------------
@@ -914,16 +943,15 @@ module cft_fpfma_pipe #(
   int           s13_q;
 
   always_ff @(posedge clk) begin : stage13
-    int K, sh_amt;
-    logic [NW-1:0] shifted, low_mask, ones;
+    int K;
+    logic [P+1:0] ywin, zwin;
     logic [P:0] kept, kept_p1;
     logic guard, sticky, up;
     logic [P-1:0] kept_u;
     logic guard_u, sticky_u, up_u, carry_u;
 
-    ones = {NW{1'b1}};
-    K = (s12_enorm >= EMIN) ? P : (P - (EMIN - s12_enorm));
-    s13_q     <= ((s12_enorm >= EMIN) ? s12_enorm : EMIN) - (P - 1);
+    K = s12_k;
+    s13_q     <= s12_q;
     s13_zero  <= s12_zero;
     s13_rsign <= s12_rsign;
     s13_spc <= s12_spc; s13_spd <= s12_spd; s13_spf <= s12_spf;
@@ -937,7 +965,7 @@ module cft_fpfma_pipe #(
       up_u     = round_up(rd_dly[DEPTH-3], s12_rsign, guard_u, sticky_u,
                           kept_u[0]);
       carry_u  = (&kept_u) && up_u;
-      s13_tiny <= (s12_enorm + (carry_u ? 1 : 0)) < EMIN;
+      s13_tiny <= carry_u ? s12_tiny1 : s12_tiny0;
 
       if (K <= 0) begin
         // Entirely below the subnormal grid. K == 0 puts the value's
@@ -948,22 +976,32 @@ module cft_fpfma_pipe #(
         sticky = (K == 0) ? ((|s12_norm[NW-2:0]) | s12_stk) : 1'b1;
         kept   = '0;
       end else begin
-        sh_amt  = NW - K;
-        shifted = s12_norm >> sh_amt;
-        kept    = shifted[P:0];
-        guard   = s12_norm[sh_amt-1];
-        if (sh_amt >= 2) begin
-          low_mask = ~(ones << (sh_amt - 1));
-          sticky = (|(s12_norm & low_mask)) | s12_stk;
-        end else begin
-          sticky = s12_stk;
-        end
+        // The clamped window, extracted from the P+1 bits that can
+        // reach it rather than by shifting all NW. With sh = NW - K
+        // the old form was kept = (s12_norm >> sh)[P:0] and
+        // guard = s12_norm[sh-1]; the bits those can name are
+        // s12_norm[NW-1 : NW-P-1] - the top P plus the guard position -
+        // and a zero above them. Shifting that window right by
+        // delta = P - K lands the same bits in the same places (bit i
+        // of kept is s12_norm[NW-K+i] either way, zero above K), so the
+        // shifter is 8 levels over P+2 bits instead of 10 over NW, and
+        // its amount is a register instead of a subtraction. Sticky is
+        // everything below the guard: the part that is below the
+        // window at every K, plus the delta window bits the shift
+        // dropped, which s12_ymask names.
+        ywin   = {1'b0, s12_norm[NW-1 : NW-P-1]};
+        zwin   = ywin >> s12_delta;
+        kept   = zwin[P+1:1];
+        guard  = zwin[0];
+        sticky = (|s12_norm[NW-P-2:0]) | (|(ywin & s12_ymask)) | s12_stk;
       end
       // Round by SELECTING between kept and kept+1, not by adding up.
       //
       // These are the same value. They are not the same circuit, and
       // this stage is the measured critical path of the whole design
-      // (S12 -> S13, 39 logic levels, 21 of them CARRY8, ~61% route).
+      // (S12 -> S13, 39 logic levels, 21 of them CARRY8, ~61% route
+      // when this was written; 25 levels, 15 CARRY8 and 73% route on
+      // the routed quad of 2026-09-02, before the amount moved to S12).
       //
       // `up` depends on guard, sticky and kept[0], all of which come
       // out of the variable shift above - so `kept + up` cannot begin
