@@ -16,18 +16,33 @@ kernel flow, XRT host runtime.
                        +---------+
                        | cft_csr |  ap_ctrl_hs + args + FLAGS/MAGIC/VERSION/CAPS
                        +---------+
-                            |  start/done/cfg
-                       +------------+
-   m00_axi (AXI4-256) <-> cft_engine |  beat FSM, A/B/C reads, D write
-                       +------------+
+                            |  start/done/cfg; MODE[15] names the run's owner
+              +-------------+--------------+
+              |                            |
+    +-------------------+           +-----------+
+    | cft_engine_stream |           |  cft_seq  |  on-chip programs,
+    +-------------------+           +-----------+  index-addressed deposits
+     m_axi_a/b/c/d (AXI4-256)        m_axi_a/d - the same two masters,
+     beat FSM, A/B/C reads,          handed over by MODE[15]
+     D write, reduction accumulator
+              |                            |
+              +-------------+--------------+
+                            |
+        one per-issue request: valid, op, rnd, prec, a, b, c
+                            |
+                      +-----------+
+                      | cft_lanes |  ONE array per tile, owned by cft_krnl
+                      +-----------+
                             |
                     256-bit beat, one per element group
                             |
-        +----------+----------+-----------+-----------+
+        +-----------+------------+-------------+-------------+
         | 8x (8,23) | 4x (11,52) | 2x (15,112) | 1x (19,236) |
-        |  fp32 bank |  fp64 bank |  fp128 bank |  fp256 unit |
-        +-----------+-----------+------------+------------+
+        | fp32 bank | fp64 bank  | fp128 bank  | fp256 unit  |
+        +-----------+------------+-------------+-------------+
               each lane: cft_opmux -> cft_fpfma_pipe
+              optional, off by default: FUSE_MUL / FUSE_NORM /
+              FUSE_ALIGN, one shared ladder in place of the per-lane ones
 ```
 
 - **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
@@ -59,18 +74,51 @@ kernel flow, XRT host runtime.
   arrives at exactly the arithmetic latency with no delay line of its
   own, and one bypassed operation can be in flight beside a computed
   one on every cycle.
+- **cft_lanes** - the tile's **one** beat-wide ALU array: eight fp32 /
+  four fp64 / two fp128 lanes or one fp256 unit, each lane the recipe
+  above (`cft_opmux` into `cft_fpfma_pipe`, with `cft_simpleops` and
+  `cft_seedop` merged through the pipe's bypass sideband), plus the
+  optional fused ladders, which live here because they are properties
+  of the array rather than of whoever drives it. `cft_krnl` owns the
+  single instance. `cft_engine_stream` and `cft_seq` each present a
+  per-issue request - valid, opcode, rounding attribute, precision,
+  three operands - and MODE[15], registered at start, selects whose
+  request reaches the array. **No arbitration is needed, because the
+  two never run at once**, so the sharing is a static mux and costs one
+  mux level between registered operands and the array's steering.
+  Both drivers carry an `OWN_LANES` parameter, default 1 so their unit
+  benches still elaborate a private array; `cft_krnl` passes 0.
+
+  Until 2026-09-01 the sequencer had a private second copy of the
+  array (`cft_seq_lanes`, a documented v1 deviation). It was benched
+  and it worked; what it had never been was priced at the kernel. The
+  configuration table below is what that cost, and it is why this
+  module exists - "the sequencer introduces no arithmetic, only a
+  schedule" is now a statement about the netlist rather than a claim
+  about two copies of the same source.
+- **cft_seq** - the orbit sequencer: on-chip programs over the
+  existing opcodes, entered by MODE[15], reading its image from
+  PROG_PTR and writing per-lane deposits and counts. It borrows the A
+  and D masters from the streaming engine and issues into the same
+  `cft_lanes`. docs/SEQUENCER.md is the design and
+  `python/cft_golden/seq.py` the definition of correct; benched
+  bit-exact against it, hw_emu and silicon still ahead.
 - **cft_csr** - AXI4-Lite slave, Vitis ap_ctrl_hs protocol, argument
   registers, and the read-only FLAGS/MAGIC/VERSION/CAPS block.
 - **cft_engine_stream** - the v1 streaming sequencer the kernel
   instantiates: burst reads into three per-stream FIFOs (arbitrated
   a > b > c, one AR outstanding, 4KB-safe), one beat issued per cycle
-  into the bank MODE selects whenever operands and result space
-  exist, collection through a latency-matched delay line into a D
-  FIFO, index-order burst writes out. Read, compute and write overlap
-  across beats; issue and write order stay total, so determinism is
-  untouched. All four banks share the one delay line because every
-  `cft_fpfma_pipe` instance has the same structural depth regardless
-  of width.
+  to `cft_lanes` at the precision MODE selects, whenever operands and
+  result space exist, collection through a latency-matched delay line
+  into a D FIFO, index-order burst writes out. Read, compute and write
+  overlap across beats; issue and write order stay total, so
+  determinism is untouched. All four banks share the one delay line
+  because every `cft_fpfma_pipe` instance has the same structural
+  depth regardless of width. `cft_reduce_acc`, the streaming reduction
+  accumulator, hangs off the same issue point: its adds ride the
+  shared request as `fma(x, 1.0, y)` through lane 0, with its operands
+  **registered** on the way in and `ADD_LATENCY` set to `LATENCY + 1`
+  to match. That register is not tidiness - see the timing section.
 - **cft_engine** - the naive one-beat-at-a-time reference engine
   (read A, read B, read C, compute, write, advance - ~40 cycles per
   beat). Not instantiated; kept as the readable spec the streamer is
