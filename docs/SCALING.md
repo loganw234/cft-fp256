@@ -124,6 +124,56 @@ these are area figures and nothing more. A single and a quad are
 building at 135 MHz with the ladders off as this is written; neither
 result is known.
 
+### What one tile retires, in cycles (measured 2026-09-02)
+
+Until now every throughput figure here was calculated from the beat
+geometry. `make cycles` (tb/test_krnl_cycles.py) measures it instead, on
+the same `cft_krnl` the bitstream carries, by counting `run_busy` high
+to low. It times TWO sizes per rung - 64 and 512 beats - and fits a
+line, because a single size cannot tell a per-beat cost from a fixed
+one: at 128 beats every rung reported the same 196 cycles, which looks
+like 1.53 cycles/beat and is really about 36 cycles of fill and drain
+plus a bit over one cycle a beat.
+
+| rung | op | cyc @64 | cyc @512 | marginal cyc/beat | fixed | at 135 MHz |
+|---|---|---|---|---|---|---|
+| fp32 | fma | 116 | 676 | **1.250** | 36 | 864.0 Me/s |
+| fp64 | fma | 116 | 676 | **1.250** | 36 | 432.0 Me/s |
+| fp128 | fma | 116 | 676 | **1.250** | 36 | 216.0 Me/s |
+| fp256 | fma | 116 | 676 | **1.250** | 36 | 108.0 Me/s |
+| fp32 | sum | 923 | 6058 | **11.462** | 189 | 94.2 Me/s |
+
+**The rung does not change the cycle count, which is the design working
+as intended.** One 256-bit beat is the unit of work at every precision -
+eight fp32 lanes or one fp256 - so the identical column is the fracture
+paying off, and the element rate divides by the lane count rather than
+the cycle cost rising.
+
+**1.250, not 1.000, and the honest reading is that this is not purely
+the datapath.** The compute pipe accepts a beat every cycle by
+construction. What the bench measures is the whole kernel against
+cocotbext-axi's `AxiRam`, so the extra quarter-cycle is the streaming
+engine plus that memory model's response pattern - burst turnaround, AR
+pipelining, page-boundary splits - and `AxiRam` is not HBM. Read 1.250
+as an upper bound on cycles per beat under a plausible memory, not as a
+property of the arithmetic, and note that hw_emu cannot settle it either
+(its own banner warns that global memory and interconnect are
+approximate models). The card settles it, under docs/CARDDAY.md gate 6.
+
+**The fixed 36 cycles is the number the sequencer argument needs.** A
+run pays it once, so it is invisible across 512 beats and dominant
+across four. That is exactly why a short dependent chain issued as
+thirty separate elementwise runs is overhead-bound, and why
+docs/SEQUENCER.md wants the chain expressed as one program instead: the
+same arithmetic, one fixed cost rather than thirty.
+
+**The reduction is a different shape and costs like one.** 11.462
+cycles a beat against 1.250 is the accumulator's serialised carries -
+a level's result feeds the next, so the adder's latency is exposed
+rather than hidden - and 189 cycles of fixed cost is the tree walk at
+the end. It is the price of the contract's index-fixed ordering, which
+is what makes a sum over four tiles equal a sum over one.
+
 ## What scales badly, in order of when it bites
 
 **1. Control-plane round trips. This is the one that forces an

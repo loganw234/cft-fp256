@@ -9,8 +9,12 @@ only performance numbers that can currently be measured honestly:
   numbers. When there are, they get measured under docs/CARDDAY.md's
   gate 6 ("Throughput. Now, and not before, measure.") and recorded
   here. Until then this repo publishes no projected hardware
-  throughput next to measured software throughput; a calculated bound
-  lives in docs/SCALING.md and is labelled as one.
+  throughput next to measured software throughput; the projection
+  lives in docs/SCALING.md and is labelled as one. As of 2026-09-02
+  that projection is no longer a bound calculated from the beat
+  geometry - `make cycles` measures cycles per beat on the RTL itself
+  (1.250 marginal, 36 fixed, every rung) - but cycles x period is
+  still a prediction, and it stays on that side of the line.
 - Emulation produces no throughput numbers at all. hw_emu is an RTL
   simulation running many orders of magnitude below fabric speed; its
   wall clock measures the simulator. (Its cycle counts are real, and
