@@ -290,7 +290,18 @@ linking on Linux is a legitimate split while the Linux Vitis lands.
 Still holds for any future RTL change: the testbenches guard the RTL,
 so changes loop through `make sim-docker` before repackaging.
 
-## 2. Gate: hardware emulation - **MET on v1 (2026-08-29); NOT re-met on the sequencer tile (2026-09-01)**
+## 2. Gate: hardware emulation - **MET on v1 (2026-08-29); MET on the sequencer tile at fp32 (2026-09-02); fp64 and wider programs not yet through**
+
+**2026-09-02.** The gate that condemned the sequencer that morning
+passed it that night: at 8f5f149 every program failed with a bus
+fault (16 checks, 4 failed - all three operand reads left through
+`m_axi_a`, which `link.cfg` binds to one HBM pseudo-channel); at
+40149b1, with `cft_seq` naming the buffer each read belongs to and
+`cft_krnl` steering it at the master that owns that bank, the same
+image pipeline returned **28 checks, 0 failed** through real XRT. fp32
+completed its whole program set; the 90-minute emulation cap stopped
+the run in fp64, so the wider rungs are not yet through on a device.
+Emulation is not silicon.
 
 **Where this stands on the sequencer tile (2026-09-01, evening).** A
 fresh `hw_emu` image was built from the shared-lanes commit and it **is
@@ -421,7 +432,15 @@ XRT stack - the first time the kernel.xml argument map, the CSR
 protocol, and the host code meet Xilinx's implementation rather than
 cocotb's. Small N; hw_emu is slow.
 
-## 3. Gate: link for hardware - **MET 2026-08-29 on the pre-sequencer design; the sequencer tile is BUILDING (2026-09-01)**
+## 3. Gate: link for hardware - **MET 2026-08-29 on the pre-sequencer design; the sequencer tile's single closes at 135 MHz (2026-09-02), its quad has not**
+
+**2026-09-02.** The shared-array sequencer tile links as a single at
+135 MHz with +0.045 of slack (with retiming and without; +0.050 at
+130) and as a quad it has missed 135 twice, -0.113 and -0.141, with
+no image either time. The quad's worst paths are three named
+families (docs/ROADMAP.md); the tree that removes the largest and
+shortens the next is building as a quad at 135 on two hosts with 130
+queued behind. The bitstreams below are unchanged by any of this.
 
 ```bash
 TARGETS=hw KERNEL_FREQ=100000000 bash hw/rebuild-2022.sh
