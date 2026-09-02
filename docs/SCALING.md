@@ -2,8 +2,12 @@
 
 What gets harder as tile count rises, what does not, and where the
 shape of the machine has to change. Numbers here are measured on the
-U50 unless marked otherwise; the derivations are in the commit history
-and the figures come from differencing routed builds.
+U50 unless marked otherwise, and the derivations are in the commit
+history. The older figures come from differencing routed builds; the
+2026-09-01 tile figures are **out-of-context synthesis**, which is a
+weaker thing and is marked as such wherever it is used - this project
+has one recent, expensive demonstration that OOC slack does not survive
+the shell.
 
 The target ladder is powers of two - **1, 2, 4, 8, 16, 32, 64** - with
 one tile a first-class configuration rather than a degenerate case.
@@ -41,14 +45,21 @@ the nodes; `combine()` folds them. Tested to 64 parts.
 | tiles | shape | limited by |
 |---|---|---|
 | 1-4 | one bitstream, one device | **shipping today** |
-| 8 | one bitstream, bigger part | LUTs, HBM pseudo-channels |
+| 8 | one bitstream, bigger part | **LUTs first** - the sequencer-era tile caps this part at four - then HBM pseudo-channels |
 | 16-64 | many devices, or the chiplet ring | control plane, interconnect |
 
 The break between 8 and 16 is not gradual. Below it you are placing
 more compute units in one dynamic region; above it you are building a
 different machine.
 
-### What caps a monolithic tile at about eight
+The middle row used to read "LUTs, HBM pseudo-channels" as a pair that
+bound at about the same place. They no longer do: the sequencer put
+about 40% onto the tile even after its array was shared and its control
+logic cut (98,310 -> 139,404), so on this device area runs out at four
+where the pseudo-channels would have lasted to eight. The next section
+shows the arithmetic.
+
+### What caps a monolithic tile - and as of 2026-09-01 it is area
 
 **HBM pseudo-channels, and the four-master engine made this tighter.**
 The U50 exposes 32. Each tile now has four AXI masters - one per
@@ -66,18 +77,52 @@ the wall it implies is now the wall the configs actually have. The
 cost is a 256 MB cap per argument buffer per tile, which libcft does
 not capacity-split - an oversized run fails loudly at allocation.*
 
-**LUTs.** Shell 123,897 fixed. The tile is 119,543 in the shipped
-(pre-sharing) configuration; the 2026-08-31 size campaign brings the
-kernel to **98,310 out of context with FUSE_NORM/FUSE_ALIGN on and the
-BRAM FIFOs** (in-shell unproven at this writing). Four pre-sharing
-tiles are 69.15% of the device against a practical routing limit
-around 85%, so the U50 holds four comfortably; at the campaign figure
-**six tiles are ~81%** - which is why the interface wall above at
-eight is no longer comfortably beyond the area wall.
+**LUTs, and the orbit sequencer moved this wall a long way in.** Shell
+123,897 fixed, device 871,680, practical routing limit around 85%.
 
-Those two numbers still sit close together, which is the useful
-summary: on this generation, area and pseudo-channels run out at about
-the same place, and it is around six to eight.
+The history first, because the conclusion below used to be drawn from
+it. The tile was 119,543 in the shipped pre-sharing configuration, and
+the 2026-08-31 size campaign brought the kernel to **98,310 out of
+context with FUSE_NORM/FUSE_ALIGN on and the BRAM FIFOs**. Four
+pre-sharing tiles are 69.15% of the device, so the U50 held four
+comfortably; at the campaign figure six were ~81%, and "six to eight"
+was the answer.
+
+**None of those tiles had a sequencer in them.** `cft_seq` landed on
+2026-09-01, and it arrived with a private second copy of the ALU array
+that took the tile to 288,764 LUT - a quad of which asked for
+**1,316,831 LUT of the 871,680 the part has** and died in placement
+(`VPL UTLZ-1`, LUT-as-logic over-utilised). Extracting the array into
+one shared `cft_lanes` and putting the sequencer's control logic on a
+diet gets it back to **139,404 LUT out of context at 135 MHz** with the
+fused ladders off, which is what the current builds carry, or 123,599
+with them on. Against the fixed shell, the same arithmetic this
+section has always done:
+
+| tiles | ladders off (139,404) | ladders on (123,599) |
+|---|---|---|
+| 4 | 557,616 + 123,897 = 681,513, **78%** | 494,396 + 123,897 = 618,293, **71%** |
+| 5 | 697,020 + 123,897 = 820,917, **94%** | 617,995 + 123,897 = 741,892, **85%** |
+
+**So the area wall is four.** Five does not route in either
+configuration - one is 9 points past the practical limit and the other
+is sitting on it - where the pre-sequencer tile reached six. The
+interface wall at eight is no longer the binding one; area is, and by
+a comfortable margin.
+
+Two cautions on that table. It uses the SINGLE-tile shell for every
+row, which is what ROADMAP.md's five-tile sizing does, and it
+understates a quad: differencing the failed pre-refactor quad link
+(1,316,831 asked against 4 x 288,764 = 1,155,056 in the kernels) puts
+the quad's own fixed cost near 161,775 LUT, sixteen masters' worth of
+crossbar rather than four. Carry that instead and a quad is 719,391
+(82.5%) with the ladders off and 656,171 (75.3%) with them on, which is
+where ROADMAP.md's and `rtl/cft_krnl.sv`'s ~80% / ~75% come from. And
+all of it is **out of context**: a single tile linked at 135 MHz with
+the ladders on missed timing at -0.577 ns where OOC had read +0.097, so
+these are area figures and nothing more. A single and a quad are
+building at 135 MHz with the ladders off as this is written; neither
+result is known.
 
 ## What scales badly, in order of when it bites
 
@@ -93,12 +138,16 @@ per run before any arithmetic happens**. Nothing about the data plane
 is wrong at that point; the host simply cannot issue work fast enough
 to keep the tiles busy.
 
-**2. Per-CU AXI plumbing.** 24k LUT per tile - 20% of a tile, as much
-as the entire fp128 bank. Linear per tile, but the shell crossbar
-behind it grows with port count and goes superlinear eventually. The
-four-master change probably made this worse: out-of-context synthesis
-went from 95.5k LUT (single master, 100 MHz) to 124.6k (four masters,
-145 MHz), and not all of that gap is the tighter clock.
+**2. Per-CU AXI plumbing.** 24k LUT per tile - 20% of the pre-sequencer
+tile, ~17% of the 139,404-LUT one, and either way as much as the entire
+fp128 bank. Linear per tile, but the shell crossbar behind it grows
+with port count and goes superlinear eventually. The four-master change
+probably made this worse: out-of-context synthesis went from 95.5k LUT
+(single master, 100 MHz) to 124.6k (four masters, 145 MHz), and not all
+of that gap is the tighter clock. The quad gives the crossbar claim a
+number: differencing the failed quad link above leaves ~161,775 LUT
+outside the four kernels against the single tile's 123,897 shell, so
+sixteen masters cost about 38k more of it than four do.
 
 **3. Host-side reduction combine and flag aggregation.** Both O(tiles)
 per call today. Fine at four, silly at sixty-four, and both want to be
@@ -115,8 +164,12 @@ become the only workable path.
 - **Arithmetic.** Elementwise work is embarrassingly parallel and each
   tile is independent.
 - **HBM bandwidth.** ~13.3 GB/s per tile against 316 GB/s available.
-- **DSPs.** 17.67% at four tiles. Not a constraint on this part and it
-  will not become one.
+- **DSPs.** 292 per tile with the ladders off, 277 with them on, so
+  four tiles are 1,168 or 1,108 of the part's 5,952 - **19.6% or
+  18.6%**, up from 17.67% before the sequencer. Not a constraint on
+  this part and it will not become one; `cft_seq` contributes none of
+  them at all since its address arithmetic came off the DSP columns
+  (15 -> 0), which is why area moved and this barely did.
 - **Determinism.** Invariant by construction, as above.
 
 ## The orchestrator
@@ -130,13 +183,18 @@ by anything in the data path. Its job:
 - optionally hold a work queue so tiles pull rather than being pushed,
   which the determinism property above makes safe
 
-**Most of this is already being designed.** The orbit sequencer
-(docs/SEQUENCER.md, v2) is a micro-sequencer running programs on-chip
-with deposition addressed by index, and its three determinism
-properties are already argued and tested. Adding a fan-out dimension to
-it is a smaller step than designing an orchestrator from nothing, and
-the P1/P2/P3 arguments carry over. Treat orchestrator and sequencer as
-one component.
+**Most of this is already built.** The orbit sequencer
+(docs/SEQUENCER.md) is a micro-sequencer running programs on-chip with
+deposition addressed by index, and it is RTL now - `rtl/cft_seq.sv`,
+benched bit-exact against `python/cft_golden/seq.py`, hw_emu and
+silicon still ahead of it. Its three determinism properties are argued
+and tested, and P1 - "the sequencer introduces no arithmetic, only a
+schedule" - stopped being an argument on 2026-09-01, when the private
+second lane array went away: there is one `cft_lanes` per tile and the
+sequencer issues into it, so P1 is a fact about the netlist. Adding a
+fan-out dimension is a smaller step than designing an orchestrator from
+nothing, and the P1/P2/P3 arguments carry over. Treat orchestrator and
+sequencer as one component.
 
 For the chiplet endgame the orchestrator is not optional: there is no
 shared HBM, the pseudo-channel wall is replaced by ring bandwidth, and
@@ -214,7 +272,11 @@ Deliberately not done:
   rather than typed, and the generator extends to any power of two, but
   16 CUs do not fit and 16 x 4 masters exceeds the pseudo-channel
   budget. Generate 1, 2, 4, 8 when a part can hold them.
-- **The orchestrator itself.** Design the interface when the sequencer
-  RTL is designed; build it when a device needs it. Speculating on the
-  fan-out mechanism before first light is how it gets built for the
-  wrong bottleneck.
+- **The orchestrator itself.** The gate on this was "design the
+  interface when the sequencer RTL is designed", and as of 2026-09-01
+  that has happened - so the interface is now designable and nobody has
+  designed it. Build it when a device needs one. Speculating on the
+  fan-out mechanism before first light is still how it gets built for
+  the wrong bottleneck, and the area arithmetic above is a reason to
+  wait rather than a reason to hurry: four tiles is what fits, and four
+  tiles is what the host already drives without an orchestrator.
