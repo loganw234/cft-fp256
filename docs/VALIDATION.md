@@ -860,3 +860,41 @@ its own trace is queued.
 pending" since 2026-09-01. hw_emu has now run, and it fails. Until this
 is root-caused the honest reading is: bit-exact against its model in
 simulation, and NOT working on a device.
+
+## 2026-09-02 - the sequencer passes on a device
+
+The bank fix, through the same gate that condemned it this morning:
+
+    before (8f5f149)   sequencer programs: 16 checks so far, 4 failed
+                       FAIL seq fma+deposit / interval / escape loop /
+                       zero-budget - all "hw memory system fault"
+    after  (40149b1)   sequencer programs: 28 checks so far, 0 failed
+
+Same image pipeline, same gate, same XRT stack; the only difference is
+that cft_seq now says which buffer each read belongs to and cft_krnl
+steers the request at the master that owns that bank. fp32 completed
+its whole program set - every shape from one fma+deposit to the nested
+escape map to the zero-deposit refusal - and the run had moved on to
+fp64 when the 90-minute emulation cap stopped it.
+
+**What this does and does not establish.** It establishes that the
+sequencer's reads now reach the right memory on a banked device, which
+is what failed before, and that all four program shapes execute
+correctly at fp32 against the software backend. It does NOT establish
+fp64/fp128/fp256 on a device (the cap cut fp64 short), and emulation is
+not silicon.
+
+The simulation-side proof arrived first and is the more reusable one:
+tb/test_krnl_seq_banks.py gives each master a private store and checks
+r0/r1/r2 arrive from A, B and C. Sabotaged back to the old routing it
+fails on lane 0 with "operand b did not come from the B master" - 1.0
+where 2.0 belonged - so the bench refutes rather than decorates, and it
+runs in ninety seconds where this gate takes ninety minutes.
+
+**An instrumentation gap this exposed, worth closing before the card.**
+cft_engine_stream carries eight $display statements and narrates itself
+through a run - START, each AR, RED, DONE - which is how the reduction
+was confirmed working on 2026-09-01 from the trace alone. cft_seq has
+ZERO. During a sequencer run the simulator log goes silent, so "stuck
+or merely slow" cost an hour of guessing tonight and would cost more on
+a card, where the only observable is pass or fail.
