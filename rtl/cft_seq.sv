@@ -158,6 +158,31 @@ module cft_seq #(
     input  logic [BEAT_BITS/32*5-1:0] lane_flags,
 
     // AXI4 read master (single outstanding burst)
+    //
+    // m_rd_sel names the buffer each read belongs to: 0 = the program
+    // image and the A operand, 1 = B, 2 = C. It exists because an
+    // ADDRESS is not always enough to reach a buffer.
+    //
+    // On this platform every master is bound to one HBM pseudo-channel
+    // (hw/link.cfg), so the A master cannot reach an address in HBM[1]
+    // however correct that address is - which is precisely how this
+    // module's first device run failed: DECERR on every program,
+    // because r1 and r2 are loaded from buffers XRT places in HBM[1]
+    // and HBM[2]. cft_krnl uses this select to steer the request at
+    // the master that owns the bank.
+    //
+    // FOR A DIFFERENT MEMORY SYSTEM, which is where the open cores are
+    // going: with ONE flat port - DDR3/4 behind a single controller, or
+    // PCIe into host RAM - the select is redundant. Tie the masters
+    // together and the address alone suffices, because there is only
+    // one place an address can mean. The single-master shape this
+    // module already had is the RIGHT one there and the cheaper one
+    // (a single AR channel, no arbitration, no replicated read data
+    // path); it is BANKED memory that forces the fan-out, not the
+    // sequencer. So the select is an output rather than a parameter:
+    // a single-port integration ignores it and pays nothing, and no
+    // second version of this module has to exist.
+    output logic [1:0]        m_rd_sel,
     output logic [ADDR_W-1:0] m_rd_araddr,
     output logic [7:0]        m_rd_arlen,
     output logic              m_rd_arvalid,
@@ -454,6 +479,7 @@ module cft_seq #(
 
   // ---- AXI read side (single outstanding burst) -----------------------
   logic [ADDR_W-1:0] rd_addr;
+  logic [1:0]        rd_sel;   // which buffer rd_addr points into
   logic [31:0]       rd_beats_left;   // beats not yet requested
   logic [8:0]        rd_burst_left;   // beats left in the open burst
   logic              rd_stream_on;    // a state wants read traffic
@@ -796,7 +822,7 @@ module cft_seq #(
       done <= 1'b0; refuse_q <= 1'b0;
       flags_q <= '0; dep_ovf_q <= 1'b0;
       rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
-      m_rd_arvalid <= 1'b0; m_rd_rready <= 1'b0;
+      m_rd_arvalid <= 1'b0; m_rd_rready <= 1'b0; m_rd_sel <= 2'd0;
       m_wr_awvalid <= 1'b0; m_wr_wvalid <= 1'b0; m_wr_bready <= 1'b0;
       al_valid <= 1'b0; rf_we <= 1'b0;
       db_we <= '0;
@@ -808,7 +834,7 @@ module cft_seq #(
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0;
       blk_base <= '0; active <= '0; dcnt <= '0;
       in_off <= '0; dep_off <= '0;
-      rd_addr <= '0; wr_addr <= '0;
+      rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
 
     end else begin
       done <= 1'b0;
@@ -830,6 +856,7 @@ module cft_seq #(
       if (rd_stream_on && !m_rd_arvalid && rd_burst_left == 0 &&
           rd_beats_left != 0) begin
         m_rd_araddr   <= rd_addr;
+        m_rd_sel      <= rd_sel;
         m_rd_arlen    <= rd_bl;
         m_rd_arvalid  <= 1'b1;
         rd_burst_left <= {1'b0, rd_bl} + 9'd1;
@@ -888,6 +915,7 @@ module cft_seq #(
         // ---- header: one aligned beat --------------------------------
         S_HDR_GO: begin
           rd_addr <= prog_q;
+          rd_sel  <= 2'd0;    // the image sits with the A operand
           rd_beats_left <= 32'd1;
           rd_stream_on <= 1'b1;
           m_rd_rready <= 1'b1;
@@ -922,6 +950,7 @@ module cft_seq #(
         // ---- constants + instructions: dense byte stream -------------
         S_IMG_GO: begin
           rd_addr <= prog_q + 32;
+          rd_sel  <= 2'd0;
           rd_beats_left <=
             ((h_nconsts << esz_sh) + (h_ninsns << 3) + 32'd31) >> 5;
           rd_stream_on <= 1'b1;
@@ -1037,6 +1066,7 @@ module cft_seq #(
         S_LD_GO: begin
           rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
                      + in_off;
+          rd_sel  <= ld_reg;   // ld_reg IS the stream index
           rd_beats_left <= {27'b0, nb_blk};
           rd_stream_on <= 1'b1;
           m_rd_rready <= 1'b1;

@@ -13,10 +13,11 @@ SIM ?= icarus
 
 .PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
-        seq_core seqprobe krnlfused krnlplain cycles clean
+        seq_core seqprobe krnlfused krnlplain cycles seqbanks clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-     seedop reduceacc reduce krnl quarter faults seq_core krnlseq
+     seedop reduceacc reduce krnl quarter faults seq_core krnlseq \
+     seqbanks
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -193,6 +194,17 @@ cycles:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cycles \
 		COCOTB_RESULTS_FILE=sim_build/cycles/results.xml
+
+# The sequencer against BANKED memory: one private store per master,
+# nothing mirrored. test_krnl_seq.py shares a single store on purpose
+# and therefore cannot see a read that leaves through the wrong
+# master - which is how the operand loads reached the card wired to
+# m_axi_a alone and answered DECERR on every program. This target is
+# the regression that would have caught it.
+seqbanks:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanks \
+		COCOTB_RESULTS_FILE=sim_build/seqbanks/results.xml
 
 quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \

@@ -367,6 +367,11 @@ module cft_krnl #(
   logic [7:0]             eng_a_arlen;
   logic                   eng_a_arvalid, eng_a_rready;
   logic                   eng_b_arvalid, eng_c_arvalid;
+  // B and C now need their address channels muxed too - a sequencer
+  // run reads operands through whichever master owns the bank.
+  logic [63:0]            eng_b_araddr, eng_c_araddr;
+  logic [7:0]             eng_b_arlen,  eng_c_arlen;
+  logic                   eng_b_rready, eng_c_rready;
   logic [63:0]            eng_d_awaddr;
   logic [7:0]             eng_d_awlen;
   logic                   eng_d_awvalid;
@@ -374,6 +379,7 @@ module cft_krnl #(
   logic [BEAT_BITS/8-1:0] eng_d_wstrb;
   logic                   eng_d_wlast, eng_d_wvalid, eng_d_bready;
 
+  logic [1:0]             seq_rd_sel;
   logic [63:0]            seq_araddr, seq_awaddr;
   logic [7:0]             seq_arlen, seq_awlen;
   logic                   seq_arvalid, seq_rready, seq_awvalid;
@@ -381,18 +387,68 @@ module cft_krnl #(
   logic [BEAT_BITS/8-1:0] seq_wstrb;
   logic                   seq_wlast, seq_wvalid, seq_bready;
 
-  assign m_axi_a_araddr  = mode_seq_q ? seq_araddr  : eng_a_araddr;
-  assign m_axi_a_arlen   = mode_seq_q ? seq_arlen   : eng_a_arlen;
-  assign m_axi_a_arvalid = mode_seq_q ? seq_arvalid : eng_a_arvalid;
-  assign m_axi_a_rready  = mode_seq_q ? seq_rready  : eng_a_rready;
+  // ---- the sequencer's reads go to the bank that holds them ----------
+  //
+  // A sequencer run loads r0/r1/r2 from the caller's A, B and C buffers
+  // through ONE read port, and this used to be wired to m_axi_a alone.
+  // That is wrong on a banked memory and it failed on the first device
+  // run: hw/link.cfg binds each master to one HBM pseudo-channel, XRT
+  // places the B buffer in HBM[1] at 0x10000000, and the A master's
+  // window ends at 0x0FFFFFFF - so every program died on DECERR while
+  // the elementwise engine, which has a master per stream, passed on
+  // the same image (docs/VALIDATION.md, 2026-09-02).
+  //
+  // cft_seq now says which buffer each read belongs to and the request
+  // is steered here. One outstanding burst means the select is stable
+  // for the whole burst, so no reordering question arises.
+  //
+  // On a single-port memory - DDR3/4 behind one controller, PCIe to
+  // host RAM - none of this is needed: tie the three masters together,
+  // ignore the select, and the address alone reaches the buffer. That
+  // is the cheaper structure and the one the open-core targets want;
+  // it is HBM's per-master bank binding that buys bandwidth by making
+  // an address insufficient on its own.
+  logic seq_rd_a, seq_rd_b, seq_rd_c;
+  assign seq_rd_a = mode_seq_q && (seq_rd_sel == 2'd0);
+  assign seq_rd_b = mode_seq_q && (seq_rd_sel == 2'd1);
+  assign seq_rd_c = mode_seq_q && (seq_rd_sel == 2'd2);
 
-  // B and C are held quiet in a sequencer run rather than merely left
-  // idle. The engine cannot drive them while it is not running, so
-  // this is belt and braces - but it is the statement that ONE owner
-  // exists per run, and a statement the interconnect can rely on
-  // should not depend on reading another module's FSM.
-  assign m_axi_b_arvalid = mode_seq_q ? 1'b0 : eng_b_arvalid;
-  assign m_axi_c_arvalid = mode_seq_q ? 1'b0 : eng_c_arvalid;
+  assign m_axi_a_araddr  = seq_rd_a ? seq_araddr : eng_a_araddr;
+  assign m_axi_a_arlen   = seq_rd_a ? seq_arlen  : eng_a_arlen;
+  assign m_axi_a_arvalid = mode_seq_q ? (seq_rd_a && seq_arvalid)
+                                      : eng_a_arvalid;
+  assign m_axi_a_rready  = mode_seq_q ? (seq_rd_a && seq_rready)
+                                      : eng_a_rready;
+
+  assign m_axi_b_araddr  = seq_rd_b ? seq_araddr : eng_b_araddr;
+  assign m_axi_b_arlen   = seq_rd_b ? seq_arlen  : eng_b_arlen;
+  assign m_axi_b_arvalid = mode_seq_q ? (seq_rd_b && seq_arvalid)
+                                      : eng_b_arvalid;
+  assign m_axi_b_rready  = mode_seq_q ? (seq_rd_b && seq_rready)
+                                      : eng_b_rready;
+
+  assign m_axi_c_araddr  = seq_rd_c ? seq_araddr : eng_c_araddr;
+  assign m_axi_c_arlen   = seq_rd_c ? seq_arlen  : eng_c_arlen;
+  assign m_axi_c_arvalid = mode_seq_q ? (seq_rd_c && seq_arvalid)
+                                      : eng_c_arvalid;
+  assign m_axi_c_rready  = mode_seq_q ? (seq_rd_c && seq_rready)
+                                      : eng_c_rready;
+
+  // The read data the sequencer sees, from whichever master it asked.
+  logic                 seq_rd_arready, seq_rd_rvalid, seq_rd_rlast;
+  logic [1:0]           seq_rd_rresp;
+  logic [BEAT_BITS-1:0] seq_rd_rdata;
+  assign seq_rd_arready = seq_rd_b ? m_axi_b_arready
+                        : seq_rd_c ? m_axi_c_arready : m_axi_a_arready;
+  assign seq_rd_rvalid  = mode_seq_q &&
+                          (seq_rd_b ? m_axi_b_rvalid
+                         : seq_rd_c ? m_axi_c_rvalid : m_axi_a_rvalid);
+  assign seq_rd_rlast   = seq_rd_b ? m_axi_b_rlast
+                        : seq_rd_c ? m_axi_c_rlast : m_axi_a_rlast;
+  assign seq_rd_rresp   = seq_rd_b ? m_axi_b_rresp
+                        : seq_rd_c ? m_axi_c_rresp : m_axi_a_rresp;
+  assign seq_rd_rdata   = seq_rd_b ? m_axi_b_rdata
+                        : seq_rd_c ? m_axi_c_rdata : m_axi_a_rdata;
 
   assign m_axi_d_awaddr  = mode_seq_q ? seq_awaddr  : eng_d_awaddr;
   assign m_axi_d_awlen   = mode_seq_q ? seq_awlen   : eng_d_awlen;
@@ -468,17 +524,17 @@ module cft_krnl #(
       .m_axi_a_arvalid(eng_a_arvalid), .m_axi_a_arready(m_axi_a_arready), .m_axi_a_rid(m_axi_a_rid),
       .m_axi_a_rdata(m_axi_a_rdata), .m_axi_a_rresp(m_axi_a_rresp), .m_axi_a_rlast(m_axi_a_rlast),
       .m_axi_a_rvalid(m_axi_a_rvalid & eng_sees_bus), .m_axi_a_rready(eng_a_rready), .m_axi_b_arid(m_axi_b_arid),
-      .m_axi_b_araddr(m_axi_b_araddr), .m_axi_b_arlen(m_axi_b_arlen), .m_axi_b_arsize(m_axi_b_arsize),
+      .m_axi_b_araddr(eng_b_araddr), .m_axi_b_arlen(eng_b_arlen), .m_axi_b_arsize(m_axi_b_arsize),
       .m_axi_b_arburst(m_axi_b_arburst), .m_axi_b_arlock(m_axi_b_arlock), .m_axi_b_arcache(m_axi_b_arcache),
       .m_axi_b_arprot(m_axi_b_arprot), .m_axi_b_arqos(m_axi_b_arqos), .m_axi_b_arvalid(eng_b_arvalid),
       .m_axi_b_arready(m_axi_b_arready), .m_axi_b_rid(m_axi_b_rid), .m_axi_b_rdata(m_axi_b_rdata),
       .m_axi_b_rresp(m_axi_b_rresp), .m_axi_b_rlast(m_axi_b_rlast), .m_axi_b_rvalid(m_axi_b_rvalid & eng_sees_bus),
-      .m_axi_b_rready(m_axi_b_rready), .m_axi_c_arid(m_axi_c_arid), .m_axi_c_araddr(m_axi_c_araddr),
-      .m_axi_c_arlen(m_axi_c_arlen), .m_axi_c_arsize(m_axi_c_arsize), .m_axi_c_arburst(m_axi_c_arburst),
+      .m_axi_b_rready(eng_b_rready), .m_axi_c_arid(m_axi_c_arid), .m_axi_c_araddr(eng_c_araddr),
+      .m_axi_c_arlen(eng_c_arlen), .m_axi_c_arsize(m_axi_c_arsize), .m_axi_c_arburst(m_axi_c_arburst),
       .m_axi_c_arlock(m_axi_c_arlock), .m_axi_c_arcache(m_axi_c_arcache), .m_axi_c_arprot(m_axi_c_arprot),
       .m_axi_c_arqos(m_axi_c_arqos), .m_axi_c_arvalid(eng_c_arvalid), .m_axi_c_arready(m_axi_c_arready),
       .m_axi_c_rid(m_axi_c_rid), .m_axi_c_rdata(m_axi_c_rdata), .m_axi_c_rresp(m_axi_c_rresp),
-      .m_axi_c_rlast(m_axi_c_rlast), .m_axi_c_rvalid(m_axi_c_rvalid & eng_sees_bus), .m_axi_c_rready(m_axi_c_rready),
+      .m_axi_c_rlast(m_axi_c_rlast), .m_axi_c_rvalid(m_axi_c_rvalid & eng_sees_bus), .m_axi_c_rready(eng_c_rready),
       .m_axi_d_awid(m_axi_d_awid), .m_axi_d_awaddr(eng_d_awaddr), .m_axi_d_awlen(eng_d_awlen),
       .m_axi_d_awsize(m_axi_d_awsize), .m_axi_d_awburst(m_axi_d_awburst), .m_axi_d_awlock(m_axi_d_awlock),
       .m_axi_d_awcache(m_axi_d_awcache), .m_axi_d_awprot(m_axi_d_awprot), .m_axi_d_awqos(m_axi_d_awqos),
@@ -514,10 +570,11 @@ module cft_krnl #(
       // they leave cft_engine_stream and the way they arrive at the
       // slave. The sequencer's ports carry AXI signal names, so they
       // carry AXI meanings; there is no adjustment on this path.
+      .m_rd_sel(seq_rd_sel),
       .m_rd_araddr(seq_araddr), .m_rd_arlen(seq_arlen),
-      .m_rd_arvalid(seq_arvalid), .m_rd_arready(m_axi_a_arready),
-      .m_rd_rdata(m_axi_a_rdata), .m_rd_rlast(m_axi_a_rlast),
-      .m_rd_rresp(m_axi_a_rresp), .m_rd_rvalid(m_axi_a_rvalid & mode_seq_q),
+      .m_rd_arvalid(seq_arvalid), .m_rd_arready(seq_rd_arready),
+      .m_rd_rdata(seq_rd_rdata), .m_rd_rlast(seq_rd_rlast),
+      .m_rd_rresp(seq_rd_rresp), .m_rd_rvalid(seq_rd_rvalid),
       .m_rd_rready(seq_rready),
       .m_wr_awaddr(seq_awaddr), .m_wr_awlen(seq_awlen),
       .m_wr_awvalid(seq_awvalid), .m_wr_awready(m_axi_d_awready),
