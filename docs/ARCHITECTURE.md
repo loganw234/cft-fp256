@@ -16,18 +16,34 @@ kernel flow, XRT host runtime.
                        +---------+
                        | cft_csr |  ap_ctrl_hs + args + FLAGS/MAGIC/VERSION/CAPS
                        +---------+
-                            |  start/done/cfg
-                       +------------+
-   m00_axi (AXI4-256) <-> cft_engine |  beat FSM, A/B/C reads, D write
-                       +------------+
+                            |  start/done/cfg; MODE[15] names the run's owner
+              +-------------+--------------+
+              |                            |
+    +-------------------+           +-----------+
+    | cft_engine_stream |           |  cft_seq  |  on-chip programs,
+    +-------------------+           +-----------+  index-addressed deposits
+     m_axi_a/b/c/d (AXI4-256)        m_axi_a/d - the same two masters,
+     beat FSM, A/B/C reads,          handed over by MODE[15]
+     D write, reduction accumulator
+              |                            |
+              +-------------+--------------+
+                            |
+        one per-issue request: valid, op, rnd, prec, a, b, c
+                            |
+                      +-----------+
+                      | cft_lanes |  ONE array per tile, owned by cft_krnl
+                      +-----------+
                             |
                     256-bit beat, one per element group
                             |
-        +----------+----------+-----------+-----------+
+        +-----------+------------+-------------+-------------+
         | 8x (8,23) | 4x (11,52) | 2x (15,112) | 1x (19,236) |
-        |  fp32 bank |  fp64 bank |  fp128 bank |  fp256 unit |
-        +-----------+-----------+------------+------------+
+        | fp32 bank | fp64 bank  | fp128 bank  | fp256 unit  |
+        +-----------+------------+-------------+-------------+
               each lane: cft_opmux -> cft_fpfma_pipe
+              optional, all off by default: FUSE_MUL / FUSE_NORM /
+              FUSE_ALIGN - one shared multiplier or shift ladder in
+              place of the per-lane ones
 ```
 
 - **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
@@ -59,18 +75,51 @@ kernel flow, XRT host runtime.
   arrives at exactly the arithmetic latency with no delay line of its
   own, and one bypassed operation can be in flight beside a computed
   one on every cycle.
+- **cft_lanes** - the tile's **one** beat-wide ALU array: eight fp32 /
+  four fp64 / two fp128 lanes or one fp256 unit, each lane the recipe
+  above (`cft_opmux` into `cft_fpfma_pipe`, with `cft_simpleops` and
+  `cft_seedop` merged through the pipe's bypass sideband), plus the
+  optional fused ladders, which live here because they are properties
+  of the array rather than of whoever drives it. `cft_krnl` owns the
+  single instance. `cft_engine_stream` and `cft_seq` each present a
+  per-issue request - valid, opcode, rounding attribute, precision,
+  three operands - and MODE[15], registered at start, selects whose
+  request reaches the array. **No arbitration is needed, because the
+  two never run at once**, so the sharing is a static mux and costs one
+  mux level between registered operands and the array's steering.
+  Both drivers carry an `OWN_LANES` parameter, default 1 so their unit
+  benches still elaborate a private array; `cft_krnl` passes 0.
+
+  Until 2026-09-01 the sequencer had a private second copy of the
+  array (`cft_seq_lanes`, a documented v1 deviation). It was benched
+  and it worked; what it had never been was priced at the kernel. The
+  configuration table below is what that cost, and it is why this
+  module exists - "the sequencer introduces no arithmetic, only a
+  schedule" is now a statement about the netlist rather than a claim
+  about two copies of the same source.
+- **cft_seq** - the orbit sequencer: on-chip programs over the
+  existing opcodes, entered by MODE[15], reading its image from
+  PROG_PTR and writing per-lane deposits and counts. It borrows the A
+  and D masters from the streaming engine and issues into the same
+  `cft_lanes`. docs/SEQUENCER.md is the design and
+  `python/cft_golden/seq.py` the definition of correct; benched
+  bit-exact against it, hw_emu and silicon still ahead.
 - **cft_csr** - AXI4-Lite slave, Vitis ap_ctrl_hs protocol, argument
   registers, and the read-only FLAGS/MAGIC/VERSION/CAPS block.
 - **cft_engine_stream** - the v1 streaming sequencer the kernel
   instantiates: burst reads into three per-stream FIFOs (arbitrated
   a > b > c, one AR outstanding, 4KB-safe), one beat issued per cycle
-  into the bank MODE selects whenever operands and result space
-  exist, collection through a latency-matched delay line into a D
-  FIFO, index-order burst writes out. Read, compute and write overlap
-  across beats; issue and write order stay total, so determinism is
-  untouched. All four banks share the one delay line because every
-  `cft_fpfma_pipe` instance has the same structural depth regardless
-  of width.
+  to `cft_lanes` at the precision MODE selects, whenever operands and
+  result space exist, collection through a latency-matched delay line
+  into a D FIFO, index-order burst writes out. Read, compute and write
+  overlap across beats; issue and write order stay total, so
+  determinism is untouched. All four banks share the one delay line
+  because every `cft_fpfma_pipe` instance has the same structural
+  depth regardless of width. `cft_reduce_acc`, the streaming reduction
+  accumulator, hangs off the same issue point: its adds ride the
+  shared request as `fma(x, 1.0, y)` through lane 0, with its operands
+  **registered** on the way in and `ADD_LATENCY` set to `LATENCY + 1`
+  to match. That register is not tidiness - see the timing section.
 - **cft_engine** - the naive one-beat-at-a-time reference engine
   (read A, read B, read C, compute, write, advance - ~40 cycles per
   beat). Not instantiated; kept as the readable spec the streamer is
@@ -111,23 +160,49 @@ element.
 
 | configuration | beat | lanes (32/64/128/256) | LUT | for |
 |---|---|---|---|---|
-| full tile | 256 | 8 / 4 / 2 / 1 | 116,932 OOC; **98,310 with the shared ladders on** | Alveo; 256 is the HBM pseudo-channel width |
-| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated | see ROADMAP's open-core sizing |
-| quarter tile | 64 | 2 / 1 / - / - | ~20k estimated | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+| full tile | 256 | 8 / 4 / 2 / 1 | **139,404 OOC** (292 DSP); 123,599 with the fused ladders on (277 DSP) | Alveo; 256 is the HBM pseudo-channel width |
+| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated, **pre-sequencer** | see ROADMAP's open-core sizing |
+| quarter tile | 64 | 2 / 1 / - / - | ~20k estimated, **pre-sequencer** | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
+
+Both full-tile numbers are measured out of context, Vivado 2022.2,
+xcu50-fsvh2104-2-e, 135 MHz, on the tile as it now stands: one
+`cft_lanes` array, and the sequencer in it. Per module, with the
+ladders off: `u_lanes` 105,379, `u_seq` 26,586, `u_engine` 6,053,
+`u_csr` 818.
+
+**Both trimmed rows are estimates that predate `cft_seq`**, and they
+are left marked rather than rescaled, because `cft_krnl` instantiates
+the sequencer unconditionally - a quarter tile carries one, and no
+measurement of that build exists here. The full-tile row is the one to
+reason from until someone synthesises the others.
 
 The two full-tile numbers are the same RTL: FUSE_NORM and FUSE_ALIGN
-(cft_krnl parameters, default off) replace the thirty per-lane
+(cft_krnl parameters, **default off**) replace the thirty per-lane
 alignment and normalise shifters with two segmented 720-bit ladders,
-measured -18.6k LUT together and equivalence-proven per lane
-(2026-08-31; docs/ROADMAP.md carries the campaign table). Sharing is
-per-build: the Alveo image can decline it while an area-bound open
-build takes it.
+equivalence-proven per lane in the 2026-08-31 campaign (-18.6k LUT
+against the pre-sequencer tile, 116,932 -> 98,310; docs/ROADMAP.md
+carries that table) and now through the whole kernel by `make
+krnlfused` / `make krnlplain`. In the tile that exists they are worth
+139,404 - 123,599 = **15,805 LUT**, and they are off anyway: out of
+context they leave +0.097 ns of slack against ladders-off's +0.307,
+and a shell build at 135 MHz is what settled it. Sharing stays
+per-build - the Alveo image declines it, an area-bound open build
+takes it - and `hw/package_kernel.tcl` strips user parameters, so a
+bitstream carries whatever the RTL default is and nothing else.
+All three ladders self-gate on the full-tile geometry, so a quarter
+tile ignores them either way.
 
-**The width is a real constraint, not a preference.** Even at the
-campaign figure a full tile is ~98k LUTs and 262 DSPs, which exceeds
-an Artix-7 100T on both counts. Only the 200T takes a full tile among
-7-series Artix parts, and the DSP count still wants a Kintex.
-That is why BEAT_BITS exists and why it is tested rather than declared.
+**The width is a real constraint, not a preference, and the sequencer
+tightened it.** A full tile is now 139,404 LUT and 292 DSPs with the
+ladders off, 123,599 and 277 with them on. ROADMAP.md's part-by-part
+arithmetic has its anchor at a measured 138,083-LUT tile, which it
+records as 103% of an Artix-7 200T - so the 200T is about 134,000
+LUTs, the shipping ladders-off tile at 139,404 is over it, and the
+ladders-on tile at 123,599 is about 92% of it. That is the case the
+ladders were kept parameterised for: not Alveo, where they cost
+timing, but the part where footprint is the whole objective. The DSP
+count still wants a Kintex either way. This is why BEAT_BITS exists and
+why it is tested rather than declared.
 
 The quarter tile is not hypothetical - `tb/test_krnl_quarter.py` runs
 it against the same golden model, so the parameter is proven rather
@@ -403,6 +478,65 @@ on the one occasion the two were compared directly, the OOC proxy
 reported a 2% improvement for a change that was a regression in the
 shell.
 
+### The shared array's own path (2026-09-01)
+
+Everything above was measured on a tile with one driver and no
+sequencer in it. The restructuring that gave the tile one `cft_lanes`
+array between two drivers was measured out of context at 135 MHz,
+Vivado 2022.2, xcu50-fsvh2104-2-e:
+
+| tile configuration | LUT | WNS (OOC) |
+|---|---|---|
+| private arrays (before this work) | 288,764 | -0.065 ns |
+| one shared array, ladders off | 162,482 | -0.065 ns |
+| + the sequencer's control diet | 139,404 | **+0.307 ns** |
+| + fused ladders on | 123,599 | +0.097 ns |
+
+Then a single tile was linked at 135 MHz with the ladders on, and it
+**missed: WNS -0.577 ns, 776 failing endpoints.** The worst path was
+not the ladder the build existed to test:
+
+    u_engine/u_reduce/dly_lvl_reg[14][0]
+      -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[15]
+    25 levels, through a DSP cascade
+
+That is the restructuring's own regression, and it is the reason the
+reduction accumulator's operands are registered. While the accumulator
+fed lane 0 of the engine's *private* array, its operands went straight
+to the pipe's `a`/`c` ports - past `cft_opmux` (a passthrough for FMA
+anyway) and past `cft_simpleops` entirely. Merging both drivers onto
+one operand bus put the accumulator's combinational output onto the bus
+that also feeds `cft_simpleops`, and `cft_fpfma_pipe` latches that
+block's result into `s0_byp_d` **unconditionally, with no clock
+enable** - so every reduction operand had to cross the accumulator's
+level decode, its memory read and the whole simpleops mux tree inside
+one cycle, whether or not the bypass was selected. One register on the
+operands makes the reduce path structurally the elementwise path that
+already closes; `ADD_LATENCY` is `LATENCY + 1` so the destination level
+still arrives with its sum. Not a numeric change - the tree shape and
+the order of every add are fixed by element index, never by timing.
+
+**Two things this file has been asserting for months now have a number
+on them.** +0.307 out of context became -0.577 in the shell: a 0.88 ns
+swing, in the direction the caution above names, because OOC places the
+kernel alone and the shell places it as one compute unit among many.
+And sharing a datapath means sharing everything attached to it - the
+area win was real, -126k LUT, but the operand bus carried the
+accumulator into a combinational block it had never touched, which is
+not a coupling an area argument surfaces.
+
+**FUSE_NORM/FUSE_ALIGN are therefore off.** They fit better (123,599
+against 139,404, about 75% of the device against 80% for a quad) but
+leave +0.097 ns OOC where off leaves +0.307, and this build is the
+evidence that a thin OOC margin does not survive the shell. Five points
+of device area is not worth a bitstream that does not close.
+
+**Status, honestly: pending.** A single tile and a quad are building at
+135 MHz from this commit with the ladders off. Neither result is known
+at this writing, so nothing here claims a closed bitstream and nothing
+here claims silicon; the out-of-context figures above are what has
+actually been measured.
+
 A reduced clock changes nothing about results - determinism is
 clock-independent by construction. The v0 behavioural core (one
 combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
@@ -461,9 +595,11 @@ and expects their product back five cycles later.
 **Full tile only.** The array's geometry IS the 256-bit beat's. The
 quarter tile (BEAT_BITS=64, fp32+fp64) has two and one lanes and does
 not build the fp256 rung the array is sized for, so sharing there would
-cost more than it saved. USE_FUSED_MUL requires BEAT_BITS==256 and all
-three trim parameters; open-toolchain targets fall back to private
-multipliers with no other change.
+cost more than it saved. `USE_FUSED_MUL`, the localparam in
+`cft_lanes` that gates it, requires `FUSE_MUL` **and** BEAT_BITS==256
+**and** all three trim parameters; the other two ladders self-gate the
+same way. Open-toolchain targets fall back to private multipliers with
+no other change.
 
 Verified by equivalence rather than by argument: tb_mulshare builds all
 four banks twice from the same inputs on the same cycle, once private

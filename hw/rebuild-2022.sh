@@ -27,6 +27,64 @@ BUILD=${BUILD:-build}
 # or the unnamed ones run at the platform default clock.
 LINK_CFG=${LINK_CFG:-hw/link.cfg}
 
+# RETIMING=1 asks Vivado to retime the KERNEL's synthesis run - to move
+# registers across combinational logic, which is function-preserving by
+# construction and costs almost nothing in area. Measured out of context
+# at 135 MHz on 2026-09-02: WNS +0.307 -> +1.681 ns for +141 LUT and
+# +354 FF, with 188 DSPs picking up the output register the DPOP-3
+# warnings were about (docs/ROADMAP.md).
+#
+# OFF by default, and the reason is a verification gap rather than
+# doubt about the transform. Every cocotb target in tb/ simulates the
+# RTL SOURCE; retiming is applied afterwards, inside synthesis, so a
+# retiming defect would pass the entire suite untouched and appear only
+# in hw_emu or on the card. A retimed artifact is exactly as trustworthy
+# as the conformance vectors that have been replayed THROUGH it, and no
+# further - so turn it on deliberately, and gate it on vectors.
+RETIMING=${RETIMING:-0}
+
+# ---- implementation exploration -------------------------------------
+#
+# A design sitting near its edge does not have ONE achievable WNS; it
+# has a distribution, and the way to sample it is to vary how the tools
+# get there. This tile is exactly that design - the quad missed 135 MHz
+# by 0.113 ns, which is well inside the spread a directive change moves.
+#
+# NOTE, because it is the first thing anyone reaches for: Vivado has no
+# placer "seed". `place_design` takes -directive, not -seed. The
+# supported exploration axis is the DIRECTIVE, and place and route each
+# have their own valid set - passing a route directive to the placer is
+# an error, not a no-op:
+#
+#   PLACE_DIRECTIVE   Explore, ExtraTimingOpt, ExtraPostPlacementOpt,
+#                     AltSpreadLogic_{high,medium,low},
+#                     ExtraNetDelay_{high,low}, WLDrivenBlockPlacement,
+#                     EarlyBlockPlacement, SSI_* (SLR-aware), Quick,
+#                     RuntimeOptimized, Default
+#   ROUTE_DIRECTIVE   Explore, AggressiveExplore, NoTimingRelaxation,
+#                     MoreGlobalIterations, HigherDelayCost,
+#                     AlternateCLBRouting, Quick, RuntimeOptimized,
+#                     Default
+#
+# PHYS_OPT=1 turns on the physical-optimisation passes either side of
+# routing; they are off in the default Vitis strategy and are usually
+# the cheapest tenths of a nanosecond available.
+#
+# VPP_PROPS is the escape hatch: any additional --vivado.prop entries,
+# space separated, so a sweep can reach knobs this script never named
+# (including STEPS.*.ARGS.{MORE OPTIONS} for anything Vivado does
+# expose per-step) without being edited.
+#
+#   PLACE_DIRECTIVE=Explore ROUTE_DIRECTIVE=AggressiveExplore \
+#   PHYS_OPT=1 bash hw/rebuild-2022.sh
+#
+# Everything set here lands in the artifact's manifest, because a build
+# that closed and cannot say HOW is a build nobody can reproduce.
+PLACE_DIRECTIVE=${PLACE_DIRECTIVE:-}
+ROUTE_DIRECTIVE=${ROUTE_DIRECTIVE:-}
+PHYS_OPT=${PHYS_OPT:-0}
+VPP_PROPS=${VPP_PROPS:-}
+
 # The CUs the kernel clock constraint names. DERIVED from the link
 # configuration rather than defaulted, because the failure mode of
 # getting it wrong is expensive and silent until the end: a quad build
@@ -51,6 +109,21 @@ LINK_CFG=${LINK_CFG:-hw/link.cfg}
 if [ -z "${CLOCK_CUS:-}" ]; then
   CLOCK_CUS=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$LINK_CFG" \
               | tr -d ' ' | head -1)
+fi
+# One kernel variant per build, for now. hw/layouts/ carries configs
+# with a second nk= line - a narrow variant beside the full tile at its
+# own clock (docs/LAYOUTS.md) - and `head -1` above would silently take
+# only the FIRST line's CUs, leaving the second variant's on the
+# platform default. That is the exact failure the comment above
+# describes, so a multi-variant config is refused here until the flow
+# packages one .xo per variant and passes the config's own [clock]
+# lines.
+NK_LINES=$(grep -cE '^[[:space:]]*nk=' "$LINK_CFG" || true)
+if [ "${NK_LINES:-0}" -gt 1 ]; then
+  echo "ERROR: $LINK_CFG declares $NK_LINES kernel variants (nk= lines);" >&2
+  echo "       this flow packages one variant and clocks one nk= line." >&2
+  echo "       See docs/LAYOUTS.md, 'What makes a placeholder a build'." >&2
+  exit 1
 fi
 
 # Validate, do not merely default. An EMPTY result would fall back
@@ -174,7 +247,39 @@ for t in $TARGETS; do
   echo "== v++ link -t $t"
   extra=""
   [ "$t" = "hw" ] && extra="--clock.freqHz ${KERNEL_FREQ}:${CLOCK_ARG}"
+  vprop=()
+  if [ "$t" = "hw" ]; then
+    [ -n "$PLACE_DIRECTIVE" ] && vprop+=(--vivado.prop
+      "run.impl_1.{STEPS.PLACE_DESIGN.ARGS.DIRECTIVE}=$PLACE_DIRECTIVE")
+    [ -n "$ROUTE_DIRECTIVE" ] && vprop+=(--vivado.prop
+      "run.impl_1.{STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE}=$ROUTE_DIRECTIVE")
+    if [ "$PHYS_OPT" = 1 ]; then
+      vprop+=(--vivado.prop "run.impl_1.{STEPS.PHYS_OPT_DESIGN.IS_ENABLED}=true")
+      vprop+=(--vivado.prop
+        "run.impl_1.{STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED}=true")
+    fi
+    # NOT `extra` as the loop variable: that name already holds
+    # --clock.freqHz, and reusing it silently dropped the clock
+    # constraint - a bitstream built at the platform default while
+    # still reporting success. Caught by the stub-v++ argv test.
+    for vp in $VPP_PROPS; do vprop+=(--vivado.prop "$vp"); done
+    if [ ${#vprop[@]} -gt 0 ]; then
+      echo "== implementation exploration: place='${PLACE_DIRECTIVE:-default}'" \
+           "route='${ROUTE_DIRECTIVE:-default}' phys_opt=$PHYS_OPT" \
+           "extra='${VPP_PROPS:-none}'"
+    fi
+  fi
+  if [ "$RETIMING" = 1 ] && [ "$t" = "hw" ]; then
+    # The kernel's own OOC synthesis run inside the vpl project. The
+    # name is the packaged IP's, observed in prj.runs of a completed
+    # build; if a future platform renames it, v++ says so loudly rather
+    # than silently skipping the property.
+    vprop+=(--vivado.prop
+      "run.ulp_cft_krnl_1_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true")
+    echo "== RETIMING enabled on the kernel synthesis run"
+  fi
   v++ -l -t "$t" --platform "$PLATFORM" --config "$LINK_CFG" $extra \
+      "${vprop[@]}" \
       --save-temps --temp_dir "$BUILD/_x_$t" \
       -o "$BUILD/cft_$t.xclbin" "$BUILD/cft_krnl.xo"
 done
@@ -211,6 +316,11 @@ for t in $TARGETS; do
     echo "part:          $PART"
     echo "link_cfg:      $LINK_CFG"
     echo "kernel_freq:   $KERNEL_FREQ"
+    echo "retiming:      $RETIMING"
+    echo "place_directive: ${PLACE_DIRECTIVE:-default}"
+    echo "route_directive: ${ROUTE_DIRECTIVE:-default}"
+    echo "phys_opt:      $PHYS_OPT"
+    echo "vpp_props:     ${VPP_PROPS:-none}"
     echo "clock_cus:     $CLOCK_CUS"
     echo "clock_arg:     ${KERNEL_FREQ}:${CLOCK_ARG}"
     echo "vivado:        $(vivado -version 2>/dev/null | head -1)"

@@ -5,9 +5,11 @@
 // python/cft_golden/seq.py is the definition of correct; this module
 // is verified against that model exactly as the FMA core was against
 // softfloat.py. It is a peer of cft_engine_stream behind the same CSR
-// block - MODE[15] selects which engine owns a run - computing with
-// its own instance of the same verified lane recipe (cft_seq_lanes;
-// see that header for the v1 instance-sharing deviation).
+// block - MODE[15] selects which engine owns a run - computing on the
+// kernel's ONE cft_lanes array, handed in through the lane_* ports
+// (OWN_LANES=0); the unit bench elaborates a private instance instead
+// (OWN_LANES=1, the default). cft_lanes' header records the area
+// finding that ended the v1 second-copy deviation.
 //
 // ---------------------------------------------------------------
 // Behavioural contract (what the bench holds this module to)
@@ -88,7 +90,8 @@
 //                   slice. 16 regs x NBEATS beats x 32 B = 8 KiB, the
 //                   same silicon at every precision.
 //   imem / kmem     the instruction stream, and the 16 addressable
-//                   constants broadcast at issue time.
+//                   constants, held already broadcast across the beat
+//                   because a run's format never changes.
 //   deposit buffer  eight 32-bit banks, one per 32-bit word position
 //                   within a beat - a wider lane occupies adjacent
 //                   banks at one address - so divergent per-lane
@@ -115,7 +118,10 @@ module cft_seq #(
     parameter int ADDR_W     = 64,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
-    parameter bit EN_FP256   = 1'b1
+    parameter bit EN_FP256   = 1'b1,
+    // Own ALU array (1, the unit bench's configuration) or the
+    // kernel's shared one through the lane_* ports (0).
+    parameter bit OWN_LANES  = 1'b1
 )(
     input  logic              ap_clk,
     input  logic              ap_rst_n,
@@ -136,7 +142,47 @@ module cft_seq #(
     output logic [4:0]        flags,      // valid from done to next start
     output logic [3:0]        err,        // [2:0] bus faults, [3] dep ovf
 
+    // ---- the ALU array (cft_lanes) ---------------------------------
+    // The per-issue request the issue machine builds, and the array's
+    // answer. With OWN_LANES the instance below closes the loop; in
+    // cft_krnl these reach the array cft_engine_stream also drives.
+    output logic                 lane_valid,
+    output logic [7:0]           lane_op,
+    output logic [2:0]           lane_rnd,
+    output logic [1:0]           lane_prec,
+    output logic [BEAT_BITS-1:0] lane_a,
+    output logic [BEAT_BITS-1:0] lane_b,
+    output logic [BEAT_BITS-1:0] lane_c,
+    input  logic                 lane_ov,
+    input  logic [BEAT_BITS-1:0] lane_d,
+    input  logic [BEAT_BITS/32*5-1:0] lane_flags,
+
     // AXI4 read master (single outstanding burst)
+    //
+    // m_rd_sel names the buffer each read belongs to: 0 = the program
+    // image and the A operand, 1 = B, 2 = C. It exists because an
+    // ADDRESS is not always enough to reach a buffer.
+    //
+    // On this platform every master is bound to one HBM pseudo-channel
+    // (hw/link.cfg), so the A master cannot reach an address in HBM[1]
+    // however correct that address is - which is precisely how this
+    // module's first device run failed: DECERR on every program,
+    // because r1 and r2 are loaded from buffers XRT places in HBM[1]
+    // and HBM[2]. cft_krnl uses this select to steer the request at
+    // the master that owns the bank.
+    //
+    // FOR A DIFFERENT MEMORY SYSTEM, which is where the open cores are
+    // going: with ONE flat port - DDR3/4 behind a single controller, or
+    // PCIe into host RAM - the select is redundant. Tie the masters
+    // together and the address alone suffices, because there is only
+    // one place an address can mean. The single-master shape this
+    // module already had is the RIGHT one there and the cheaper one
+    // (a single AR channel, no arbitration, no replicated read data
+    // path); it is BANKED memory that forces the fan-out, not the
+    // sequencer. So the select is an output rather than a parameter:
+    // a single-port integration ignores it and pays nothing, and no
+    // second version of this module has to exist.
+    output logic [1:0]        m_rd_sel,
     output logic [ADDR_W-1:0] m_rd_araddr,
     output logic [7:0]        m_rd_arlen,
     output logic              m_rd_arvalid,
@@ -208,13 +254,26 @@ module cft_seq #(
       default:    wpe_sh = 2'd3;
     endcase
   end
+  // ...and the same number as a SHIFT AMOUNT on bytes: esz == 1 <<
+  // esz_sh. An element is (1 << wpe_sh) words and a word is
+  // BEAT_BYTES/WORDS bytes, so this is derived from the decode above
+  // rather than written down a second time. Every address in this
+  // module scales by esz; a fifth transcription of 4/8/16/32 is a
+  // fifth chance to get one of them wrong.
+  logic [2:0] esz_sh;
+  assign esz_sh = {1'b0, wpe_sh} + 3'($clog2(BEAT_BYTES / WORDS));
 
   // ---- program state --------------------------------------------------
   logic [31:0] h_ninsns, h_nconsts, h_maxdep;
   logic [63:0] imem [0:IMEM_D-1];
-  logic [255:0] kmem [0:KREG-1];      // low esz*8 bits hold the value
+  logic [BEAT_BITS-1:0] kmem [0:KREG-1];   // broadcast across the beat
 
-  // broadcast a constant across the beat's lanes
+  // broadcast a constant across the beat's lanes. Applied ONCE, as
+  // the constant is parsed out of the image, so kmem holds the
+  // broadcast form and issue reads it straight through: the same
+  // three operands were each carrying their own copy of this
+  // multiplexer on the issue path, for a value that cannot change
+  // during a run.
   function automatic [BEAT_BITS-1:0] kbroad(input [255:0] k);
     case (prec_q)
       PREC_FP32:  kbroad = {8{k[31:0]}};
@@ -298,7 +357,25 @@ module cft_seq #(
   // read-modify-write of the whole thing - the combination that froze
   // simulation time the first time the drain phase ran. Packed bits
   // have neither problem, and any(active) collapses to a reduction.
-  localparam int CW = $clog2(MAXD + 1);
+  //
+  // Indexed by SLOT - beat * WORDS + position-within-beat - and NOT
+  // by the dense lane index. The two agree at fp32 and part below it:
+  // an fp64 beat holds four lanes but still owns eight slots, four of
+  // them permanently empty. The vector is the same NBEATS * WORDS
+  // bits either way, because that is what BLK_LANES is.
+  //
+  // What the fixed stride buys is that "which lanes belong to beat
+  // bt" stops being a question about all 128 of them. Under the dense
+  // index it read `(l >> lpb_sh) == bt`, a run-time shift asked of
+  // every lane, so DEPOSIT carried 128 counter increments and 128
+  // enable terms and SETACT carried 128 magnitude tests - for eight
+  // lanes of work. With the stride fixed it is a compare against the
+  // slot's own constant beat number, one decoder shared by the eight
+  // positions, and every one of those loops runs over WORDS instead
+  // of BLK_LANES. It is also the register file's own shape: that has
+  // always been addressed {reg, beat} with one enable per word.
+  localparam int CW   = $clog2(MAXD + 1);
+  localparam int NBSH = $clog2(NBEATS);      // beat index width
   logic [BLK_LANES-1:0]    active;
   logic [BLK_LANES*CW-1:0] dcnt;
   logic any_active;
@@ -318,14 +395,30 @@ module cft_seq #(
   logic [BEAT_BITS-1:0] al_d;
   logic [WORDS*5-1:0]   al_lf;
 
-  cft_seq_lanes #(
-      .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
-      .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256)
-  ) u_lanes (
-      .clk(ap_clk), .rst_n(ap_rst_n),
-      .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
-      .a(al_a), .b(al_b), .c(al_c),
-      .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
+  assign lane_valid = al_valid;
+  assign lane_op    = al_op;
+  assign lane_rnd   = al_rnd;
+  assign lane_prec  = prec_q;
+  assign lane_a     = al_a;
+  assign lane_b     = al_b;
+  assign lane_c     = al_c;
+
+  generate
+    if (OWN_LANES) begin : g_own_lanes
+      cft_lanes #(
+          .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
+          .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256)
+      ) u_lanes (
+          .clk(ap_clk), .rst_n(ap_rst_n),
+          .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
+          .a(al_a), .b(al_b), .c(al_c),
+          .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
+    end else begin : g_shared_lanes
+      assign al_ov = lane_ov;
+      assign al_d  = lane_d;
+      assign al_lf = lane_flags;
+    end
+  endgenerate
 
   // ---- block bookkeeping ----------------------------------------------
   // The lane-block CAPACITY is per-precision: NBEATS beats hold
@@ -340,8 +433,45 @@ module cft_seq #(
   logic [LB:0] blk_n;              // 1..BLK_LANES
   logic [4:0]  nb_blk;             // beats holding them
 
+  // Where this block sits in the caller's buffers, carried forward a
+  // block at a time instead of multiplied out. One block covers
+  // blk_cap * esz bytes of input, and that is NBEATS * BEAT_BYTES at
+  // EVERY precision - blk_cap is NBEATS << lpb_sh and esz is
+  // BEAT_BYTES >> lpb_sh, so the shifts cancel. The input stride is
+  // therefore a compile-time constant, and the deposit stride is that
+  // constant scaled by max_deposits: one shift of a header field,
+  // taken once per run.
+  //
+  // Written the obvious way - d_q + blk_base * esz * h_maxdep - that
+  // address was a 64x6x32 product in a single cycle, four DSP48
+  // slices in cascade feeding a 64-bit adder, and it was the kernel's
+  // worst path by 0.17 ns at 135 MHz.
+  localparam int BLK_BYTES = NBEATS * BEAT_BYTES;
+  localparam int BLK_SH    = $clog2(BLK_BYTES);
+  logic [ADDR_W-1:0] in_off;       // blk_base * esz
+  logic [ADDR_W-1:0] dep_off;      // blk_base * esz * h_maxdep
+  logic [ADDR_W-1:0] dep_stride;   // BLK_BYTES * h_maxdep
+
+  // blk_n * max_deposits, the block's deposit-element count. Both
+  // factors are run-time values, so this is the one product in the
+  // module that no shift replaces; it is formed one bit of the
+  // multiplier per cycle inside the register-file wipe, which is RF_D
+  // cycles long and has CW of them to spare.
+  logic [31:0]   dep_elems;
+  logic [31:0]   dep_addend;
+  logic [CW-1:0] dep_mult;
+
   // ---- byte-stream image parser (constants + instructions) -----------
-  logic [2*BEAT_BITS-1:0] pw;
+  // The peel window never holds more than one absorbed beat plus the
+  // residue that made room for it, and rready is asserted ONLY when
+  // that residue is about to fall below 8 bytes (see S_IMG_PARSE), so
+  // its high-water mark is BEAT_BYTES + 7. Sized at two beats and
+  // filled with a shift by the full 7-bit byte count, the absorb was
+  // a 512-bit barrel shifter with 512 positions - nine stages of
+  // 512-bit multiplexer for a value that only ever lands on one of
+  // eight byte offsets.
+  localparam int PWW = BEAT_BITS + 64;
+  logic [PWW-1:0] pw;
   logic [6:0]  pw_have;
   logic [255:0] hdr_q;              // the header beat, verbatim
   logic [31:0] kons_left, insn_left;
@@ -349,6 +479,7 @@ module cft_seq #(
 
   // ---- AXI read side (single outstanding burst) -----------------------
   logic [ADDR_W-1:0] rd_addr;
+  logic [1:0]        rd_sel;   // which buffer rd_addr points into
   logic [31:0]       rd_beats_left;   // beats not yet requested
   logic [8:0]        rd_burst_left;   // beats left in the open burst
   logic              rd_stream_on;    // a state wants read traffic
@@ -444,30 +575,127 @@ module cft_seq #(
   assign refuse = refuse_q;
   assign busy   = (st != S_IDLE);
 
-  // first block-lane of beat `beat` is beat << lpb_sh; lane l sits in
-  // beat (l >> lpb_sh) at position (l & (lpb-1))
-  function automatic logic lane_in_beat(input int l, input [5:0] beat);
-    lane_in_beat = ((l >> lpb_sh) == {26'b0, beat});
-  endfunction
-
-  // magnitude-nonzero of lane position `posn` in a beat (SETACT)
-  function automatic logic lane_mag_nz(input [BEAT_BITS-1:0] v,
-                                       input [2:0] posn);
-    logic [BEAT_BITS-1:0] s;
+  // ---- reaching one beat's row of lane state ------------------------
+  // NOTHING below indexes `active` or `dcnt` with a computed
+  // expression. Every select and every write here is a loop over
+  // CONSTANT indices with an equality test picking the beat, and that
+  // is the whole trick: a variable part-select of a wide packed
+  // vector is a promise the tool cannot check, so it hedges. On the
+  // read side it builds a multiplexer over every offset the
+  // expression's range allows; on the WRITE side it is worse, because
+  // it must decide per bit whether the window covers it, and dcnt is
+  // 896 bits. `dcnt[<expr> +: CW] <= v` cost 6,933 LUTs - more than
+  // half of everything left in the module - and the same behaviour
+  // written as sixteen constant-index alternatives costs the sixteen
+  // comparators, because the flip-flops then take their own enables.
+  // The beat index is truncated to the NBSH bits the register file
+  // already addresses with (rf_waddr carries wb_bt[NBSH-1:0]), so no
+  // caller needs a range guard.
+  function automatic [WORDS-1:0] row_act_fn(input [BLK_LANES-1:0] act,
+                                            input [5:0] beat);
+    logic [WORDS-1:0] r;
     begin
-      // full 32-bit shift arithmetic: the first version's 6-bit
-      // self-determined shift wrapped at lane position 2, so every
-      // SETACT beyond the first two lanes judged somebody else's
-      // magnitude
-      s = v >> (32'(posn) << (32'(wpe_sh) + 5));        // posn*esz*8
-      case (prec_q)
-        PREC_FP32:  lane_mag_nz = |(s[31:0]  & 32'h7fff_ffff);
-        PREC_FP64:  lane_mag_nz = |(s[63:0]  & {1'b0, {63{1'b1}}});
-        PREC_FP128: lane_mag_nz = |(s[127:0] & {1'b0, {127{1'b1}}});
-        default:    lane_mag_nz = |(s[255:0] & {1'b0, {255{1'b1}}});
-      endcase
+      r = '0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        if (b == 32'(beat[NBSH-1:0]))
+          r = act[b*WORDS +: WORDS];
+      row_act_fn = r;
     end
   endfunction
+
+  function automatic [WORDS*CW-1:0] row_cnt_fn(
+                                       input [BLK_LANES*CW-1:0] cnts,
+                                       input [5:0] beat);
+    logic [WORDS*CW-1:0] r;
+    begin
+      r = '0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        if (b == 32'(beat[NBSH-1:0]))
+          r = cnts[b*WORDS*CW +: WORDS*CW];
+      row_cnt_fn = r;
+    end
+  endfunction
+
+  function automatic [CW-1:0] pick_cnt_fn(input [WORDS*CW-1:0] row,
+                                          input [2:0] posn);
+    logic [CW-1:0] r;
+    begin
+      r = '0;
+      for (int q = 0; q < WORDS; q = q + 1)
+        if (q == 32'({29'b0, posn}))
+          r = row[q*CW +: CW];
+      pick_cnt_fn = r;
+    end
+  endfunction
+
+  // The row DEPOSIT and SETACT are working on, and the row retiring
+  // into the register file.
+  logic [WORDS-1:0]    bt_act, wb_act;
+  logic [WORDS*CW-1:0] bt_cnt;
+  assign bt_act = row_act_fn(active, bt);
+  assign wb_act = row_act_fn(active, wb_bt);
+  assign bt_cnt = row_cnt_fn(dcnt, bt);
+
+  // DEPOSIT's whole decision for the row: which positions may append,
+  // which have run out of slots, and what their counts become. Eight
+  // incrementers and eight comparators serve all sixteen beats,
+  // because the write below only selects between them.
+  logic [WORDS*CW-1:0] bt_cnt_inc;
+  logic [WORDS-1:0]    bt_dep_go, bt_dep_ovf;
+  generate
+    for (genvar gq = 0; gq < WORDS; gq = gq + 1) begin : g_dep
+      assign bt_cnt_inc[gq*CW +: CW] = bt_cnt[gq*CW +: CW] + CW'(1);
+      assign bt_dep_go[gq]  = (gq < 32'(lpb)) && bt_act[gq] &&
+                              (32'(bt_cnt[gq*CW +: CW]) < h_maxdep);
+      assign bt_dep_ovf[gq] = (gq < 32'(lpb)) && bt_act[gq] &&
+                              !(32'(bt_cnt[gq*CW +: CW]) < h_maxdep);
+    end
+  endgenerate
+
+  // magnitude-nonzero of lane position `posn` in a beat (SETACT),
+  // asked of the beat's per-word OR terms rather than of the beat.
+  // A lane's field is a run of whole 32-bit words and its sign bit is
+  // the top bit of the run's top word, so the only word that needs
+  // the sign masked off is that one, and nothing needs shifting. The
+  // first version shifted the whole 256-bit beat down by posn * esz *
+  // 8 - and its predecessor got the shift's self-determined width
+  // wrong, so every SETACT beyond lane position 2 judged somebody
+  // else's magnitude. There is no shift left to get wrong.
+  logic [WORDS-1:0] sa_wor, sa_worm;
+  generate
+    for (genvar gs = 0; gs < WORDS; gs = gs + 1) begin : g_sa
+      assign sa_wor[gs]  = |rf_rdata_a[gs*32 +: 32];
+      assign sa_worm[gs] = |(rf_rdata_a[gs*32 +: 32] & 32'h7fff_ffff);
+    end
+  endgenerate
+
+  // (the OR terms are named word_or/word_orm because `wor` is a
+  // Verilog net type and an argument called that parses as one)
+  // sa_nz below is SETACT's answer for all eight positions.
+  function automatic logic lane_mag_nz(input [WORDS-1:0] word_or,
+                                       input [WORDS-1:0] word_orm,
+                                       input [2:0] posn,
+                                       input [1:0] wsh);
+    logic acc;
+    begin
+      acc = 1'b0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        if ((32'(w) >> wsh) == 32'({29'b0, posn})) begin
+          if ((32'(w) & ((32'd1 << wsh) - 32'd1)) ==
+              ((32'd1 << wsh) - 32'd1))
+            acc = acc | word_orm[w];      // the element's top word
+          else
+            acc = acc | word_or[w];
+        end
+      lane_mag_nz = acc;
+    end
+  endfunction
+  logic [WORDS-1:0] sa_nz;
+  generate
+    for (genvar gn = 0; gn < WORDS; gn = gn + 1) begin : g_nz
+      assign sa_nz[gn] = lane_mag_nz(sa_wor, sa_worm, 3'(gn), wpe_sh);
+    end
+  endgenerate
 
   // the drain element for (lane_cursor, slot_cursor), +0 when the
   // lane never reached the slot; db_rdata was addressed last cycle
@@ -484,47 +712,107 @@ module cft_seq #(
   // element behind itself with a zero at the front. (burst_len never
   // misbehaved for exactly this reason - its reads were always
   // arguments.)
-  function automatic [4:0] wb_flags_fn(input [5:0] beat,
-                                       input [BLK_LANES-1:0] act,
+  function automatic [4:0] wb_flags_fn(input [WORDS-1:0] act,
                                        input [WORDS*5-1:0] lf,
-                                       input [3:0] lanes,
-                                       input [1:0] lsh);
+                                       input [3:0] lanes);
     logic [4:0] acc;
     begin
       acc = 5'b0;
       for (int p = 0; p < WORDS; p = p + 1)
-        if (p < 32'(lanes) && (32'(beat) << lsh) + p < BLK_LANES &&
-            act[(32'(beat) << lsh) + p])
+        if (p < 32'(lanes) && act[p])
           acc = acc | lf[p*5 +: 5];
       wb_flags_fn = acc;
     end
   endfunction
   logic [4:0] wb_flags_or;
-  assign wb_flags_or = wb_flags_fn(wb_bt, active, al_lf, lpb, lpb_sh);
+  assign wb_flags_or = wb_flags_fn(wb_act, al_lf, lpb);
 
-  function automatic [255:0] drain_elem_fn(input [LB:0] lc,
-                                           input [31:0] sc,
-                                           input [WORDS*32-1:0] rdata,
-                                           input [BLK_LANES*CW-1:0] cnts,
-                                           input [3:0] lanes,
+  // Per-word register-file write enables for the beat retiring now:
+  // word w carries lane position w >> wpe_sh, and a word enable IS a
+  // lane enable because every format's element is a whole number of
+  // words. Built once here rather than twice in the state machine -
+  // the issue state and the wait state retire beats through the same
+  // masking and were carrying a copy each.
+  function automatic [WORDS-1:0] wb_wwe_fn(input [WORDS-1:0] act,
                                            input [1:0] wsh);
-    logic [2:0] posn;
+    logic [WORDS-1:0] e;
+    begin
+      e = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        e[w] = act[32'(w) >> wsh];
+      wb_wwe_fn = e;
+    end
+  endfunction
+  logic [WORDS-1:0] wb_wwe;
+  assign wb_wwe = wb_wwe_fn(wb_act, wpe_sh);
+
+  // The block's opening active mask: slot (b, p) belongs to a lane
+  // the caller has iff the position exists at this format and the
+  // lane's index within the block is below blk_n. Both the per-block
+  // wipe and ACTALL want exactly this, and ACTALL's contract is that
+  // it reactivates every lane THE CALLER HAS, so the two must not be
+  // allowed to drift apart.
+  function automatic [BLK_LANES-1:0] blk_act_fn(input [LB:0] bn,
+                                                input [3:0] lanes,
+                                                input [1:0] lsh);
+    logic [BLK_LANES-1:0] m;
+    begin
+      m = '0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        for (int p = 0; p < WORDS; p = p + 1)
+          m[b*WORDS + p] = (p < 32'(lanes)) &&
+                           (((32'(b) << lsh) + p) < 32'(bn));
+      blk_act_fn = m;
+    end
+  endfunction
+  logic [BLK_LANES-1:0] blk_act;
+  assign blk_act = blk_act_fn(blk_n, lpb, lpb_sh);
+
+  // lane_cursor counts lanes densely - the drain visits them in the
+  // caller's index order - while the lane state is addressed by slot,
+  // so the two meet here.
+  // The drain cursor's beat and position. lane_cursor counts lanes
+  // densely - the drain visits them in the caller's index order -
+  // while the lane state is addressed by (beat, position).
+  logic [5:0] dc_beat;
+  logic [2:0] dc_posn;
+  assign dc_beat = 6'(32'(lane_cursor[LB-1:0]) >> lpb_sh);
+  assign dc_posn = lane_cursor[2:0] & 3'(lpb - 4'd1);
+
+  // The cursor lane's deposit count, selected once. Both the drain
+  // ("has this lane reached this slot?") and the count pack want it,
+  // and each selecting it for itself was a second 128-entry lookup
+  // into a 896-bit vector. dcnt is read in the assign itself, not
+  // through a function's scope, so it is in the sensitivity.
+  logic [WORDS*CW-1:0] dc_row;
+  logic [CW-1:0]       cur_cnt;
+  assign dc_row  = row_cnt_fn(dcnt, dc_beat);
+  assign cur_cnt = pick_cnt_fn(dc_row, dc_posn);
+
+  function automatic [255:0] drain_elem_fn(input [2:0] posn,
+                                           input [31:0] sc,
+                                           input [CW-1:0] cnt,
+                                           input [WORDS*32-1:0] rdata,
+                                           input [1:0] wsh);
     logic [255:0] v;
     begin
-      posn = 3'(lc[LB-1:0] & {3'(lanes - 1)});
       v = '0;
+      // lane `posn` occupies banks posn << wsh upward; both sides of
+      // this are constant selects with an equality picking the bank,
+      // for the reason row_act_fn gives.
       for (int w = 0; w < WORDS; w = w + 1)
-        if (w < (32'd1 << wsh))
-          v[w*32 +: 32] =
-            rdata[(32'({29'b0, posn} << wsh) + w) * 32 +: 32];
-      if (sc >= 32'(cnts[32'(lc[LB-1:0]) * CW +: CW]))
+        for (int src = 0; src < WORDS; src = src + 1)
+          if (w < (32'd1 << wsh) &&
+              src == 32'({29'b0, posn} << wsh) + w)
+            v[w*32 +: 32] = rdata[src*32 +: 32];
+      if (sc >= 32'(cnt))
         v = '0;
       drain_elem_fn = v;
     end
   endfunction
   logic [255:0] drain_elem;
-  assign drain_elem = drain_elem_fn(lane_cursor, slot_cursor,
-                                    db_rdata, dcnt, lpb, wpe_sh);
+  assign drain_elem = drain_elem_fn(dc_posn, slot_cursor, cur_cnt,
+                                    db_rdata, wpe_sh);
 
 
   // ==== the machine ====================================================
@@ -534,7 +822,7 @@ module cft_seq #(
       done <= 1'b0; refuse_q <= 1'b0;
       flags_q <= '0; dep_ovf_q <= 1'b0;
       rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
-      m_rd_arvalid <= 1'b0; m_rd_rready <= 1'b0;
+      m_rd_arvalid <= 1'b0; m_rd_rready <= 1'b0; m_rd_sel <= 2'd0;
       m_wr_awvalid <= 1'b0; m_wr_wvalid <= 1'b0; m_wr_bready <= 1'b0;
       al_valid <= 1'b0; rf_we <= 1'b0;
       db_we <= '0;
@@ -545,7 +833,8 @@ module cft_seq #(
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0;
       blk_base <= '0; active <= '0; dcnt <= '0;
-      rd_addr <= '0; wr_addr <= '0;
+      in_off <= '0; dep_off <= '0;
+      rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
 
     end else begin
       done <= 1'b0;
@@ -567,6 +856,7 @@ module cft_seq #(
       if (rd_stream_on && !m_rd_arvalid && rd_burst_left == 0 &&
           rd_beats_left != 0) begin
         m_rd_araddr   <= rd_addr;
+        m_rd_sel      <= rd_sel;
         m_rd_arlen    <= rd_bl;
         m_rd_arvalid  <= 1'b1;
         rd_burst_left <= {1'b0, rd_bl} + 9'd1;
@@ -625,6 +915,7 @@ module cft_seq #(
         // ---- header: one aligned beat --------------------------------
         S_HDR_GO: begin
           rd_addr <= prog_q;
+          rd_sel  <= 2'd0;    // the image sits with the A operand
           rd_beats_left <= 32'd1;
           rd_stream_on <= 1'b1;
           m_rd_rready <= 1'b1;
@@ -643,6 +934,9 @@ module cft_seq #(
           h_ninsns  <= hdr_q[95:64];
           h_nconsts <= hdr_q[127:96];
           h_maxdep  <= hdr_q[159:128];
+          // one block's deposit window: BLK_BYTES of input lanes
+          // times max_deposits slots each
+          dep_stride <= ADDR_W'({32'b0, hdr_q[159:128]} << BLK_SH);
           if (hdr_q[31:0] != 32'h5054_4643 || hdr_q[63:32] != 32'd1 ||
               hdr_q[191:160] != {30'b0, prec_q} ||
               hdr_q[95:64] > IMEM_D || hdr_q[127:96] > KMEM_D ||
@@ -656,8 +950,9 @@ module cft_seq #(
         // ---- constants + instructions: dense byte stream -------------
         S_IMG_GO: begin
           rd_addr <= prog_q + 32;
+          rd_sel  <= 2'd0;
           rd_beats_left <=
-            (h_nconsts * {26'b0, esz} + h_ninsns * 32'd8 + 32'd31) >> 5;
+            ((h_nconsts << esz_sh) + (h_ninsns << 3) + 32'd31) >> 5;
           rd_stream_on <= 1'b1;
           kons_left <= h_nconsts;
           insn_left <= h_ninsns;
@@ -678,8 +973,8 @@ module cft_seq #(
           // starved forever.
           if (kons_left != 0 && pw_have >= {1'b0, esz}) begin
             if (kons_i < KREG)
-              kmem[kons_i[3:0]] <= 256'(pw[255:0]) &
-                                   ~(~256'b0 << ({26'b0, esz} << 3));
+              kmem[kons_i[3:0]] <= kbroad(256'(pw[255:0]) &
+                                   ~(~256'b0 << ({26'b0, esz} << 3)));
             pw <= pw >> ({26'b0, esz} << 3);
             pw_have <= pw_have - {1'b0, esz};
             kons_i <= kons_i + 1;
@@ -696,14 +991,20 @@ module cft_seq #(
             m_rd_rready <= ((pw_have - 7'd8) < 7'd8) &&
                            (insn_left != 1);
           end else if (m_rd_rvalid && m_rd_rready) begin
-            pw <= pw | ({{BEAT_BITS{1'b0}}, m_rd_rdata}
-                        << ({2'b0, pw_have} << 3));
+            // Only the low three bits of pw_have: every assignment to
+            // rready above sets it from a window that will hold FEWER
+            // THAN 8 bytes, so a beat is never accepted at any other
+            // offset. Shifting by all seven bits asked for 512
+            // landing places instead of 8.
+            pw <= pw | (PWW'(m_rd_rdata) << ({4'b0, pw_have[2:0]} << 3));
             pw_have <= pw_have + 7'(BEAT_BYTES);
             m_rd_rready <= 1'b0;         // window now needs draining
           end else if (kons_left == 0 && insn_left == 0) begin
             m_rd_rready <= 1'b0;
             rd_stream_on <= 1'b0;
             blk_base <= '0;
+            in_off   <= '0;
+            dep_off  <= '0;
             st <= S_BLK_SETUP;
           end else
             m_rd_rready <= (pw_have < 7'd8);
@@ -730,11 +1031,31 @@ module cft_seq #(
           rf_wdata <= '0;
           rf_wwe <= {WORDS{1'b1}};
           zaddr <= zaddr + 1;
+          // ...and, in the same window, blk_n * max_deposits, one bit
+          // of the multiplier per cycle. RF_D is 16 * NBEATS and
+          // NBEATS is at least LATENCY+1, so the CW steps this takes
+          // always finish long before the wipe does.
+          if (zaddr == 0) begin
+            dep_elems  <= '0;
+            dep_addend <= 32'(blk_n);
+            dep_mult   <= h_maxdep[CW-1:0];
+          end else begin
+            if (dep_mult[0]) dep_elems <= dep_elems + dep_addend;
+            dep_addend <= dep_addend << 1;
+            dep_mult   <= dep_mult >> 1;
+          end
           if (zaddr == 9'(RF_D - 1)) begin
-            for (int l = 0; l < BLK_LANES; l = l + 1)
-              active[l] <= (l < 32'(blk_cap)) && (blk_base + l < n_q);
+            // A lane is active iff its index is below the block's
+            // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
+            // computed one state ago. The first version asked each of
+            // the 128 lanes the two questions separately, which is
+            // 128 64-bit adds against n_q and 128 64-bit compares.
+            active <= blk_act;
             dcnt <= '0;
-            nb_blk <= 5'(({58'b0, esz} * blk_n + BEAT_BYTES - 1) >> 5);
+            // beats holding blk_n lanes = ceil(blk_n / lanes-per-beat):
+            // esz * lpb is BEAT_BYTES at every precision, so dividing
+            // esz * blk_n by BEAT_BYTES is dividing blk_n by lpb.
+            nb_blk <= 5'(({1'b0, blk_n} + 9'(lpb) - 9'd1) >> lpb_sh);
             ld_reg <= 2'd0;
             pc <= '0;
             lp_sp <= '0;
@@ -744,7 +1065,8 @@ module cft_seq #(
 
         S_LD_GO: begin
           rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
-                     + blk_base * {58'b0, esz};
+                     + in_off;
+          rd_sel  <= ld_reg;   // ld_reg IS the stream index
           rd_beats_left <= {27'b0, nb_blk};
           rd_stream_on <= 1'b1;
           m_rd_rready <= 1'b1;
@@ -826,9 +1148,7 @@ module cft_seq #(
                 st <= S_SET_RD;
               end
               C_ACTALL: begin
-                for (int l = 0; l < BLK_LANES; l = l + 1)
-                  active[l] <= (l < 32'(blk_cap)) &&
-                               (blk_base + l < n_q);
+                active <= blk_act;
                 pc <= pc + 1;
                 st <= S_FETCH;
               end
@@ -877,12 +1197,12 @@ module cft_seq #(
             al_valid <= 1'b1;
             al_op <= c_op;
             al_rnd <= c_rnd;
-            al_a <= c_ka ? kbroad(kmem[c_ra]) : rf_rdata_a;
-            al_b <= c_kb ? kbroad(kmem[c_rb]) : rf_rdata_b;
-            al_c <= c_kc ? kbroad(kmem[c_rc]) : rf_rdata_c;
+            al_a <= c_ka ? kmem[c_ra] : rf_rdata_a;
+            al_b <= c_kb ? kmem[c_rb] : rf_rdata_b;
+            al_c <= c_kc ? kmem[c_rc] : rf_rdata_c;
           end
           bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} + 1))
+          if (bt == 6'({1'b0, nb_blk} + 6'd1))
             st <= S_ALU_WAIT;
           // With NBEATS > LATENCY the first result retires DURING the
           // last issue cycles - beat 0 lands exactly at issue cycle
@@ -892,9 +1212,7 @@ module cft_seq #(
             rf_we <= 1'b1;
             rf_waddr <= {c_rd, wb_bt[3:0]};
             rf_wdata <= al_d;
-            for (int w = 0; w < WORDS; w = w + 1)
-              rf_wwe[w] <=
-                active[(32'(wb_bt) << lpb_sh) + (w >> wpe_sh)];
+            rf_wwe <= wb_wwe;
             flags_q <= flags_q | wb_flags_or;
             wb_bt <= wb_bt + 1;
           end
@@ -905,12 +1223,10 @@ module cft_seq #(
             rf_we <= 1'b1;
             rf_waddr <= {c_rd, wb_bt[3:0]};
             rf_wdata <= al_d;
-            for (int w = 0; w < WORDS; w = w + 1)
-              rf_wwe[w] <=
-                active[(32'(wb_bt) << lpb_sh) + (w >> wpe_sh)];
+            rf_wwe <= wb_wwe;
             flags_q <= flags_q | wb_flags_or;
             wb_bt <= wb_bt + 1;
-            if (wb_bt == 6'({1'b0, nb_blk} - 1)) begin
+            if (wb_bt == 6'({1'b0, nb_blk} - 6'd1)) begin
               pc <= pc + 1;
               st <= S_FETCH;
             end
@@ -930,26 +1246,25 @@ module cft_seq #(
           // makes one beat per cycle possible even after SETACT has
           // left the beat's lanes with divergent counts.
           for (int p = 0; p < WORDS; p = p + 1)
-            if ((p >> wpe_sh) < 32'(lpb) &&
-                (32'(bt) << lpb_sh) + (p >> wpe_sh) < BLK_LANES &&
-                active[(32'(bt) << lpb_sh) + (p >> wpe_sh)] &&
-                32'(dcnt[((32'(bt) << lpb_sh) + (p >> wpe_sh)) * CW
-                         +: CW]) < h_maxdep) begin
+            if (bt_dep_go[32'(p) >> wpe_sh]) begin
               db_we[p] <= 1'b1;
               db_waddr[p*DBA +: DBA] <= DBA'(32'(bt) * MAXD +
-                  32'(dcnt[((32'(bt) << lpb_sh) + (p >> wpe_sh)) * CW
-                           +: CW]));
+                  32'(pick_cnt_fn(bt_cnt, 3'(32'(p) >> wpe_sh))));
               db_wdata[p*32 +: 32] <= rf_rdata_a[p*32 +: 32];
             end
-          for (int l = 0; l < BLK_LANES; l = l + 1)
-            if ((l >> lpb_sh) == 32'(bt) && active[l]) begin
-              if (32'(dcnt[l*CW +: CW]) < h_maxdep)
-                dcnt[l*CW +: CW] <= dcnt[l*CW +: CW] + CW'(1);
-              else
-                dep_ovf_q <= 1'b1;
-            end
+          // The counts advance once per LANE. Only the eight
+          // positions of beat bt can move, and the value each moves
+          // to was formed once above, so this is a selection over
+          // constant indices and not 128 counters with a decoder in
+          // front of them.
+          for (int b = 0; b < NBEATS; b = b + 1)
+            for (int q = 0; q < WORDS; q = q + 1)
+              if (b == 32'(bt[NBSH-1:0]) && bt_dep_go[q])
+                dcnt[(b*WORDS + q)*CW +: CW] <= bt_cnt_inc[q*CW +: CW];
+          if (|bt_dep_ovf)
+            dep_ovf_q <= 1'b1;
           bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 1)) begin
+          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
             pc <= pc + 1;
             st <= S_FETCH;
           end else
@@ -963,11 +1278,18 @@ module cft_seq #(
         end
         S_SET_W8: st <= S_SET_AP;
         S_SET_AP: begin
-          for (int l = 0; l < BLK_LANES; l = l + 1)
-            if ((l >> lpb_sh) == 32'(bt) && active[l])
-              active[l] <= lane_mag_nz(rf_rdata_a, 3'(l & (lpb - 1)));
+          // Eight magnitude tests, one per lane position in the beat
+          // on rf_rdata_a - not one per lane in the block. The lane
+          // index only ever entered this through `l & (lpb - 1)`,
+          // which is the position, so 120 of the 128 tests were the
+          // same eight answers reached the expensive way.
+          for (int b = 0; b < NBEATS; b = b + 1)
+            for (int q = 0; q < WORDS; q = q + 1)
+              if (b == 32'(bt[NBSH-1:0]) && 32'(q) < 32'(lpb) &&
+                  bt_act[q])
+                active[b*WORDS + q] <= sa_nz[q];
           bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 1)) begin
+          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
             pc <= pc + 1;
             st <= S_FETCH;
           end else
@@ -980,10 +1302,9 @@ module cft_seq #(
           slot_cursor <= '0;
           as_fill <= '0; as_strb <= '0; as_data <= '0;
           drain_last <= 1'b0;
-          wr_addr <= d_q + blk_base * {58'b0, esz} * {32'b0, h_maxdep};
-          wr_beats_left <= 32'(({32'b0, blk_n} * {58'b0, esz}
-                                * {32'b0, h_maxdep}
-                                + BEAT_BYTES - 1) >> 5);
+          wr_addr <= d_q + dep_off;
+          wr_beats_left <= ((dep_elems << esz_sh)
+                            + 32'(BEAT_BYTES) - 32'd1) >> 5;
           wr_stream_on <= 1'b1;
           wr_bresp_left <= '0;
           m_wr_bready <= 1'b1;
@@ -996,18 +1317,28 @@ module cft_seq #(
         end
 
         S_DRAIN_RD: begin
-          db_raddr <= DBA'(32'(lane_cursor >> lpb_sh) * MAXD
+          db_raddr <= DBA'((32'(lane_cursor) >> lpb_sh) * MAXD
                            + slot_cursor);
           st <= S_DRAIN_W8;
         end
         S_DRAIN_W8: st <= S_DRAIN_PACK;
 
         S_DRAIN_PACK: begin
-          for (int by = 0; by < 32; by = by + 1)
-            if (by < 32'(esz)) begin
-              as_data[(32'(as_fill) + by) * 8 +: 8] <=
-                drain_elem[by*8 +: 8];
-              as_strb[32'(as_fill) + by] <= 1'b1;
+          // An element lands on an ELEMENT boundary, never an
+          // arbitrary byte one: as_fill starts at zero and advances by
+          // esz, so a beat is a row of lpb slots and this fills slot
+          // as_fill >> esz_sh - whole 32-bit words, because every
+          // format's element is a whole number of words. Expressed as
+          // a byte loop over a variable base it was a 256-bit
+          // variable byte shifter: 32 output bytes each selected from
+          // 32 sources, for a value that only ever lands on one of at
+          // most eight slots.
+          for (int w = 0; w < WORDS; w = w + 1)
+            if ((32'(w) >> wpe_sh) == (32'(as_fill) >> esz_sh)) begin
+              as_data[w*32 +: 32] <=
+                drain_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1))
+                           * 32 +: 32];
+              as_strb[w*4 +: 4] <= 4'hf;
             end
           as_fill <= as_fill + esz;
           if (32'(lane_cursor) == 32'(blk_n) - 1 &&
@@ -1054,18 +1385,22 @@ module cft_seq #(
           // to go quiet before switching targets
           if (wr_burst_left == 0 && !m_wr_awvalid && !wr_aw_open &&
               !m_wr_wvalid && wr_beats_left == 0) begin
-            wr_addr <= cnt_q + blk_base * 4;
-            wr_beats_left <= (32'({32'b0, blk_n} * 4)
-                              + BEAT_BYTES - 1) >> 5;
+            wr_addr <= cnt_q + (blk_base << 2);
+            wr_beats_left <= ((32'(blk_n) << 2)
+                              + 32'(BEAT_BYTES) - 32'd1) >> 5;
             st <= S_CNT_PACK;
           end
         end
 
         S_CNT_PACK: begin
-          as_data[32'(as_fill) * 8 +: 32] <=
-            32'(dcnt[32'(lane_cursor[LB-1:0]) * CW +: CW]);
-          for (int by = 0; by < 4; by = by + 1)
-            as_strb[32'(as_fill) + by] <= 1'b1;
+          // A count is one word and as_fill advances by four, so the
+          // same word-slot argument as S_DRAIN_PACK applies, with the
+          // slot fixed at four bytes.
+          for (int w = 0; w < WORDS; w = w + 1)
+            if (32'(w) == (32'(as_fill) >> 2)) begin
+              as_data[w*32 +: 32] <= 32'(cur_cnt);
+              as_strb[w*4 +: 4] <= 4'hf;
+            end
           as_fill <= as_fill + 6'd4;
           if (32'(lane_cursor) == 32'(blk_n) - 1)
             drain_last <= 1'b1;
@@ -1100,6 +1435,8 @@ module cft_seq #(
 
         S_NEXT_BLK: begin
           blk_base <= blk_base + {56'b0, blk_cap};
+          in_off   <= in_off  + ADDR_W'(BLK_BYTES);
+          dep_off  <= dep_off + dep_stride;
           st <= S_BLK_SETUP;
         end
 

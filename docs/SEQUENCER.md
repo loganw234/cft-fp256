@@ -5,7 +5,8 @@ integration - and, as of 2026-09-01, **the RTL core itself, benched
 bit-exact against the model**. `python/cft_golden/seq.py` is the
 definition of correct; `host/src/program.c` is libcft's executor and
 agrees with it over a shared fuzz corpus (`make libcft-seq`);
-`rtl/cft_seq.sv` (with its lane array `cft_seq_lanes.sv`) is the
+`rtl/cft_seq.sv`, computing on the kernel's ONE `cft_lanes` array (shared
+with the streaming engine since 2026-09-01 - see below), is the
 hardware, and `tb/test_seq_core.py` holds it to seq.py the way the
 FMA core is held to softfloat.py: 9/9 suites green - deposits,
 counts, flags and STATUS compared exactly, across all four formats,
@@ -14,32 +15,98 @@ block edges, a 62-program fuzz corpus, and the refusal matrix with
 zero write traffic on every refusal - plus `tb/test_krnl_seq.py`
 driving the whole kernel through the CSR exactly as XRT will.
 Remaining distance: hw_emu through the real XRT stack, a bitstream,
-silicon. The RTL was pulled forward from v2 deliberately: an open
-core fed by DDR or PCIe-to-host-RAM cannot afford a memory pass per
-step, so the sequencer stops being a throughput refinement there and
-becomes the architecture.
+silicon - all three still open on the evening of 2026-09-01, and the
+paragraphs below say how far each of them got. The RTL was pulled
+forward from v2 deliberately: an open core fed by DDR or
+PCIe-to-host-RAM cannot afford a memory pass per step, so the
+sequencer stops being a throughput refinement there and becomes the
+architecture.
 
 What exists around it as of 2026-09-01: `cft_seq` is instantiated in
 `cft_krnl` as a peer of `cft_engine_stream`, sharing the A and D
-masters under a `MODE[15]` select registered at the accepted start;
-the CSR map carries `PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C (VERSION
-0x600, CAPS bit 15) and `hw/kernel.xml` carries the matching arguments
-6 and 7; `cft_program_run` dispatches to the device when the program
-was loaded on one, through `cftx_program_run` on a single compute unit;
+masters *and the tile's one `cft_lanes` array* under a `MODE[15]`
+select registered at the accepted start; the CSR map carries
+`PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C (VERSION 0x600, CAPS bit 15)
+and `hw/kernel.xml` carries the matching arguments 6 and 7;
+`cft_program_run` dispatches to the device when the program was loaded
+on one, through `cftx_program_run` on a single compute unit;
 and `tb/test_krnl_seq.py` scores a full-kernel run against `seq.py` on
 deposits, counts, FLAGS and STATUS. The plumbing is therefore testable
 ahead of the core, which is the point of writing the contract down
 first.
 
-The core itself is no longer a stub - `cft_seq` has a fetch, execute
-and drain body, and `tb/test_seq_core.py` scores it against `seq.py`
-directly - but it is not green yet: a sequencer run currently stalls
-in simulation rather than reaching `done`. That is why both sequencer
-targets, `krnlseq` and `seq_core`, are deliberately out of `make sim`
-and wrapped in external timeouts, and why the aggregate suite is still
-a statement about the elementwise engine alone. They fold in on the
-day the core passes, which is the only day the claim would mean
-anything.
+The core is green - `tb/test_seq_core.py` scores its fetch, execute
+and drain body against `seq.py` directly, 9/9 suites - and both
+sequencer targets, `krnlseq` and `seq_core`, are in `make sim`, folded
+in on the day the core passed, which was the only day the claim would
+mean anything. On this tree the whole set holds: seq_core 9/9, krnlseq
+1/1, krnl 2/2, reduce 3/3, reduceacc 5/5, krnlfused 2/2, krnlplain 2/2,
+quarter 1/1, faults 4/4, the golden model's own 370 pytest cases, `make
+yosys-lint` clean, and the Verilator width gate clean. The last of
+those is not decoration: it is fatal-on-width here, and it caught seven
+implicit-width sites in `cft_seq.sv` that Icarus and yosys both
+passed.
+
+The one v1 deviation from the shape below is gone. The first RTL gave
+the sequencer a PRIVATE copy of the lane array (`cft_seq_lanes`, the
+same per-lane recipe instantiated a second time, without the fused
+ladders) because the engine's array was woven through the streaming
+datapath and the tree was staged for card day. Out-of-context
+synthesis then put the sequencer-era tile at 288,764 LUT against
+98,310 - the copy was 124,057 of it - and the quad build asked for
+1.32M LUTs of an 871k part. So the array was extracted into
+`rtl/cft_lanes.sv`, ONE instance per tile that `cft_krnl` owns and
+both engines drive through a per-issue request (valid, opcode,
+attribute, precision, three operands) under the same `MODE[15]`
+select that already chose the AXI owner. No arbitration - the two
+never run at once - and P1 became a fact about the netlist rather than
+a claim about two copies of the same source.
+
+Two consequences, recorded because neither was in the plan. Once the
+second array stopped dominating, the sequencer's OWN address arithmetic
+was the kernel's critical path - it multiplied by `esz` and
+`max_deposits`, and those mapped to a DSP cascade - so the multiplies
+became shifts (every one of them is by a power of two) and the variable
+part-selects into the packed lane-state and deposit-count vectors
+became loops over constant indices. `cft_seq` went 15 DSP48 to **0**,
+49,657 to **26,586** LUT in-kernel, and its worst path -0.065 ns to
+**+4.268 ns**, with the benches identical to the picosecond, which is
+the proof that no cycle moved. And sharing the operand bus put the
+reduction accumulator's combinational output through `cft_simpleops`,
+whose result `cft_fpfma_pipe` latches unconditionally - a path that did
+not exist while the accumulator fed a private array directly, and worth
+**-0.577 ns in the shell**. One register on the accumulator's operands,
+with `cft_reduce_acc`'s `ADD_LATENCY` raised to `LATENCY + 1` so the
+destination level still arrives with its sum, fixes it; it is not a
+numeric change, because the tree shape and the order of every add are
+fixed by element index and never by timing. Sharing a datapath shares
+everything attached to it, and an area argument does not surface that.
+
+Where the tile landed, out of context (Vivado 2022.2, xcu50, 135 MHz):
+**139,404 LUT at +0.307 ns**, against 288,764 for the private-array
+tile and 98,310 for the pre-sequencer one. The fused ladders
+(`FUSE_NORM`/`FUSE_ALIGN`) reach 123,599 but leave only +0.097 ns, and
+the single tile linked at 135 MHz with them on is the build that
+returned -0.577; they default OFF, and stay proven bit-exact (`make
+krnlfused` and `krnlplain` cover both defaults) and parameterised for a
+slower clock or the smaller open-core part. **Out-of-context synthesis
+is not shell timing** - that build is what this project paid to learn
+it, and docs/ROADMAP.md carries the full accounting.
+
+Where the hardware gates stand, 2026-09-01 evening. A fresh `hw_emu`
+image built from this commit **is executing the design**: a reduction
+ran to completion through the real XRT stack with the correct flags.
+But no sequencer program has been through it, and two of that gate's
+stages did not start at all, with `Can't parse message of type
+"xclCopyBufferHost2Device_response"` and `Failed to connect to device
+process` - the stale-emulation-state startup race that
+`hw/run-device-test.sh`'s own header documents at length, not a design
+fault; those stages are being re-run with settling delays. **So the
+emulation gate is not met on this design.** A single tile and a quad
+are building at 135 MHz from this commit with the ladders off and the
+result is not known yet, so there is no closed bitstream for the
+sequencer tile either - and there is still no card in the machine.
+docs/BRINGUP.md is the gate record.
 
 So a program can be written and run today, on any machine, with no
 card. What the hardware adds is speed and the on-chip iteration that
@@ -83,6 +150,10 @@ carries, executed by the same `cft_fpfma_pipe` and `cft_simpleops`
 that 441,000 conformance and differential cases already cover. A
 sequencer program is a schedule over verified operations, so the
 numerics need no new verification surface - only the scheduling does.
+Since the array was extracted this is structural rather than
+argumentative: there is one `cft_lanes` per tile and both engines drive
+it, so "the same pipeline" is a property of the netlist that a second
+copy cannot quietly drift away from.
 
 **P2. Deposition is addressed by index, never by arrival.** Lane *i*
 writes its *d*-th deposit to
@@ -360,11 +431,14 @@ Trading compute width for deposit depth is the real design axis there,
 and it is why `BEAT_BITS` is already a parameter and why the quarter
 tile exists.
 
-## What the RTL will look like
+## What the RTL looks like
 
-Written down now, while the analysis above is fresh, so the
-implementation starts from a settled shape rather than re-deriving
-one.
+Written down before the implementation, while the analysis above was
+fresh, so it started from a settled shape rather than re-deriving one -
+and left standing here because the shape held. v1 deviated from it in
+exactly one place, the ALU array, and was charged 124,057 LUT for the
+deviation before coming back to it; the paragraphs at the top of this
+file are that history.
 
 `cft_seq` is a peer of `cft_engine_stream`, not a replacement: it
 shares the same AXI master and the same CSR block, and a MODE bit

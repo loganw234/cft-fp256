@@ -290,7 +290,39 @@ linking on Linux is a legitimate split while the Linux Vitis lands.
 Still holds for any future RTL change: the testbenches guard the RTL,
 so changes loop through `make sim-docker` before repackaging.
 
-## 2. Gate: hardware emulation - **MET under the era stack (2026-08-29)**
+## 2. Gate: hardware emulation - **MET on v1 (2026-08-29); NOT re-met on the sequencer tile (2026-09-01)**
+
+**Where this stands on the sequencer tile (2026-09-01, evening).** A
+fresh `hw_emu` image was built from the shared-lanes commit and it **is
+executing the design**: a reduction ran to completion through the real
+XRT stack with the correct flags. That is the shared `cft_lanes` array,
+the sequencer's control diet and the registered reduce operands running
+against Xilinx's models rather than cocotb's, and it is real evidence.
+
+It is not the gate. Two of the run's stages never started at all, with
+two signatures this file already knows:
+
+    [libprotobuf ERROR] Can't parse message of type
+    "xclCopyBufferHost2Device_response"
+    Failed to connect to device process
+
+Both are the stale-emulation-state startup race documented at length in
+`hw/run-device-test.sh`'s own header - not a design fault, and a
+failure mode that header records having twice been diagnosed as
+something more expensive. Those stages are being re-run with settling
+delays. Until they pass, what has been shown is that the image builds
+and the design runs - **not** that it is correct through the stack; and
+no sequencer PROGRAM has been through emulation at all, on any image.
+
+**Done when:** every stage of `hw/run-device-test.sh` completes against
+a hw_emu image built from the commit under test, bit-exact against the
+golden model, FLAGS matching and STATUS zero each time - and, for the
+sequencer, with at least one program run scored against `seq.py`. A
+stage that did not start is not a stage that passed, which is the whole
+reason the startup race gets a paragraph rather than a footnote.
+
+The v1 record below is unchanged and stands for the design it was taken
+on.
 
 Final state first: with the fully era-matched stack (Vitis 2022.2
 link + the 202210 platform + XRT 2.14.354, in the cft2204 WSL distro),
@@ -389,7 +421,7 @@ XRT stack - the first time the kernel.xml argument map, the CSR
 protocol, and the host code meet Xilinx's implementation rather than
 cocotb's. Small N; hw_emu is slow.
 
-## 3. Gate: link for hardware - **MET 2026-08-29**
+## 3. Gate: link for hardware - **MET 2026-08-29 on the pre-sequencer design; the sequencer tile is BUILDING (2026-09-01)**
 
 ```bash
 TARGETS=hw KERNEL_FREQ=100000000 bash hw/rebuild-2022.sh
@@ -462,6 +494,42 @@ after routing. One link peaks at ~12 GB, so the 31 GB box runs two
 concurrently; that is the binding constraint on any frequency sweep,
 not the 36 cores.
 
+### The sequencer tile: one miss, and a pending pair (2026-09-01)
+
+Every bitstream above predates the orbit sequencer. The sequencer-era
+tile has not closed one, and the attempt that has finished is a failure
+worth the space.
+
+**The 135 MHz single with the fused ladders on missed timing: WNS
+-0.577 ns, 776 failing endpoints.** The worst path was not the ladder
+the build existed to test:
+
+    u_engine/u_reduce/dly_lvl_reg[14][0]
+      -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[15]
+    25 levels, through a DSP cascade
+
+That is the shared-array refactor's own regression, and the build is
+what found it. While the reduction accumulator fed lane 0 of the
+engine's PRIVATE array its operands went straight to the pipe's `a`/`c`
+ports; putting both engines on one operand bus put the accumulator's
+combinational output onto the bus that also feeds `cft_simpleops`,
+whose result `cft_fpfma_pipe` latches unconditionally. Fixed at 8f5f149
+by registering the accumulator's operands and raising
+`cft_reduce_acc`'s `ADD_LATENCY` to `LATENCY + 1` - not a numeric
+change, since the tree shape and the order of every add are fixed by
+element index. docs/ROADMAP.md carries the full accounting.
+
+**Building now, outcome unknown:** a single and a quad, 135 MHz, from
+the fixed commit, with `FUSE_NORM`/`FUSE_ALIGN` off. Nothing about them
+may be reported as closed until a manifest says so, and no result of
+theirs is in this file yet.
+
+Note the clock: 135, not the 130 chosen above. That choice was made
+between finished artifacts of the **pre-sequencer** design, and 135 is
+the frequency every out-of-context measurement of the sequencer tile
+has been taken at. Different designs, and the choice has not been
+re-made on this one.
+
 ### Which RTL is in this bitstream?
 
 Hash the file and read the manifest beside it:
@@ -528,13 +596,27 @@ was only misleading in the one number this note originally quoted:
 
 Read the OOC path delay. Ignore the OOC slack.
 
+**And do not read either as shell timing (2026-09-01).** Everything
+above compares one module measured two ways; a shell build asks a
+different question. Out of context the kernel is placed alone, and in
+the shell it is one compute unit among the platform's own logic, so a
+path that crosses module boundaries can be routed very differently. The
+sequencer tile read **+0.307 ns OOC with the ladders off and +0.097
+with them on**; the ladders-on link came back at **-0.577 ns** - a
+swing larger than either OOC margin, on a path OOC had not named in
+either configuration. An OOC number is a screen, useful for deciding
+what is worth linking. It is never the report of what closed.
+
 Determinism is clock-independent; a 90 MHz bitstream proves every
 numerical claim a 300 MHz one would. Prefer a working image of the
 current design over a faster image of an older one.
 
 **Done when:** `build/cft_hw.xclbin` exists with timing met at the
-constrained clock. (v++ fails the link on a timing violation, so a
-bitstream existing IS the closure evidence; the routed WNS is in
+constrained clock, **for the design being taken to the card** - this
+gate is earned per design, not once and for all, which is why the
+sequencer tile has to earn it again. (v++ fails the link on a timing
+violation, so a bitstream existing IS the closure evidence; the routed
+WNS is in
 `build/_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt`.)
 
 ## 4. Gate: first light

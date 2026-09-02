@@ -710,3 +710,291 @@ Evidence, all green on 2026-09-01:
 Pending: the same comparison through hw_emu's device executor - the
 gate in flight predates this commit, so the NEXT emulation image is
 the one whose compare_divsqrt exercises the program route on-device.
+
+## 2026-09-01 - one ALU array, and the two bugs that cost
+
+The sequencer shipped with a PRIVATE second copy of the lane array
+(`cft_seq_lanes`), a v1 deviation its own header documented and its
+bench was built against. Nothing scored the deviation at the kernel
+until the sequencer-era tile was synthesised whole, and then it was not
+close:
+
+    tile, OOC @135 MHz, xcu50    LUT        note
+    pre-sequencer                 98,310
+    sequencer, private array     288,764    the copy is 124,057 of it
+    quad link of that tile     1,316,831    of 871,680 - PLACER NOT RUN
+
+`VPL UTLZ-1`, LUT-as-logic over-utilised: the quad did not fail
+timing, it failed to exist. The array is now one `rtl/cft_lanes.sv`
+that `cft_krnl` owns, driven by both engines through a per-issue
+request under the `MODE[15]` select that already chose the AXI owner -
+no arbitration, because the two never run at once. `OWN_LANES` keeps a
+private instance for each module's unit bench.
+
+    one shared array, ladders off     162,482    -0.065 ns
+    + sequencer control diet          139,404    +0.307 ns
+    + fused ladders on                123,599    +0.097 ns
+
+**The diet.** `cft_seq`'s address arithmetic multiplied by `esz` and
+`max_deposits` and landed in DSP columns, owning the kernel's critical
+path. Every multiply is by a power of two, so they became shifts; the
+variable part-selects into the packed lane-state and deposit-count
+vectors became loops over constant indices. cft_seq went 15 DSP -> 0,
+49,657 -> 26,586 LUT in-kernel, and its worst path -0.065 -> +4.268 ns.
+Simulation times identical to the picosecond at every step, which is
+the cheap proof that no cycle moved. The largest single item was not
+the one predicted: the variable part-select on the WRITE side of the
+deposit counters was 8,064 of 14,887 logic LUTs and became 229, because
+synthesis must decide per bit of an 896-bit vector whether the write
+window covers it. Recorded negative result: splitting that index
+arithmetic - the obvious fix - bought only -2,116; the construct was
+the cost, not the parenthesisation.
+
+**Then the shell said no, and it was our bug.** A single tile linked at
+135 MHz with the ladders on missed at **WNS -0.577 ns, 776 failing
+endpoints**, and the worst path was not the ladder:
+
+    u_engine/u_reduce/dly_lvl_reg[14][0]
+      -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[15]   25 levels, DSP
+
+While the reduction accumulator fed lane 0 of a PRIVATE array its
+operands went straight to the pipe's `a`/`c` ports, past `cft_opmux`
+(a passthrough for FMA) and past `cft_simpleops` entirely. Putting both
+engines on one operand bus put the accumulator's combinational output
+onto the bus that also feeds `cft_simpleops` - and `cft_fpfma_pipe`
+latches that block's result into `s0_byp_d` UNCONDITIONALLY, no clock
+enable - so every reduction operand crossed the accumulator's level
+decode, its memory read and the whole simpleops mux tree in one cycle.
+Out of context the same path read **+0.307** and hid.
+
+One register on the accumulator's operands, with `cft_reduce_acc` told
+`ADD_LATENCY = LATENCY + 1` so the destination level still arrives with
+its sum (`dly_lvl[ADD_LATENCY-1]` is that module's stated contract),
+makes the reduce path structurally the elementwise path that already
+closes. Not a numeric change: the tree shape and the order of every add
+are fixed by element index, never by timing.
+
+**Two lessons, both paid for.** Out-of-context slack hid a cross-module
+path - +0.307 became -0.577, a 0.88 ns swing, because OOC places the
+kernel alone and the shell places it as one compute unit among many.
+And sharing a datapath means sharing everything attached to it: the
+win was real (-126k LUT) but the operand bus carried the accumulator
+into a combinational block it had never touched, which is not something
+an area argument surfaces.
+
+**The ladders go back off.** 123,599 LUT against 139,404 - about 75% of
+the device for a quad against 80% - but +0.097 ns OOC does not survive
+the shell, and five points of area is not worth a bitstream that does
+not close. They stay proven bit-exact and parameterised for a slower
+clock or the smaller open-core part.
+
+**Evidence on the final tree (8f5f149):**
+
+    seq_core      9/9      krnlfused   2/2 (ladders on)
+    krnlseq       1/1      krnlplain   2/2 (ladders off)
+    krnl          2/2      quarter     1/1
+    reduce        3/3      faults      4/4
+    reduceacc     5/5      golden      370 passed
+    make yosys-lint clean; Verilator width gate clean
+
+The width gate earned its keep: it is fatal-on-width here and caught
+seven implicitly-sized sites in the diet's new shift arithmetic that
+Icarus and yosys both accepted. All seven were correct by truncation
+and are now explicit, so synthesis and every number above are
+unchanged.
+
+**Pending, and not to be read as done:** a single and a quad are
+building at 135 MHz from this commit with the ladders off; the routed
+result is not yet known. hw_emu was rebuilt from this commit and IS
+executing the design - a reduction ran to completion through the real
+XRT stack with correct flags - but two gate stages failed to START on
+the stale-emulation-state race `hw/run-device-test.sh` documents, and
+are being re-run. No bitstream has closed, and there is still no card.
+
+## 2026-09-02 - the sequencer fails on the device, and the engine does not
+
+The first emulation of the sequencer-era image through the real XRT
+stack. The elementwise engine passed on that image - `fma ok: 12 checks
+so far, 0 failed` at fp32, and an earlier campaign run reached 24 fp64
+FMA checks with 0 failed - and a reduction ran to completion with
+correct flags. **Every sequencer program failed:**
+
+    FAIL seq fma+deposit:  run status disagrees (sw ok, hw memory
+                           system fault: the output is not valid)
+    FAIL seq interval:     ... hw memory system fault
+    FAIL seq escape loop:  ... hw memory system fault
+    FAIL seq zero-budget:  ... hw memory system fault
+    sequencer programs: 16 checks so far, 4 failed
+
+"Memory system fault" is STATUS[2:0] - the engine's bus-fault bits - so
+the device is reporting that the sequencer's own AXI traffic did not
+complete cleanly. The failure is total (four of four programs, every
+shape from a single deposit to a nested escape map) and it is isolated
+to the sequencer: same image, same run, same masters, the elementwise
+path is clean.
+
+What has been ruled out already, by reading rather than guessing:
+
+  * NOT the HBM bank binding. hw/kernel.xml puts `prog` (arg 6) on
+    m_axi_a and `cnt` (arg 7) on m_axi_d, and hw/link.cfg binds those
+    ports to HBM[0] and HBM[3]; verify-image confirms 4 masters, no
+    channel shared.
+  * NOT unbound arguments. cftx_program_run passes all eight in order,
+    tile.pg and tile.cn included.
+  * NOT the 4 KB burst rule. cft_seq's burst_len() clamps to
+    (4096 - addr[11:0]) >> 5 exactly as the engine's does.
+
+What this says about the benches: `seq_core` and `krnlseq` are green and
+have been for a day, against cocotbext-axi's AxiRam. The device is
+enforcing something that model does not - the classic shape of an
+integration bug, and the reason the emulation gate exists at all. The
+cocotb benches proved the sequencer's SEMANTICS against seq.py; they
+never proved its bus behaviour against an interconnect that pushes back.
+
+Evidence lost and being re-collected: run-device-test.sh keeps one
+generation of .run, and the reductions gate overwrote the sequencer's
+simulate.log before it was read. A sequencer-only re-run that snapshots
+its own trace is queued.
+
+**Status change.** The sequencer's row has read "benched - hw_emu
+pending" since 2026-09-01. hw_emu has now run, and it fails. Until this
+is root-caused the honest reading is: bit-exact against its model in
+simulation, and NOT working on a device.
+
+## 2026-09-02 - the sequencer passes on a device
+
+The bank fix, through the same gate that condemned it this morning:
+
+    before (8f5f149)   sequencer programs: 16 checks so far, 4 failed
+                       FAIL seq fma+deposit / interval / escape loop /
+                       zero-budget - all "hw memory system fault"
+    after  (40149b1)   sequencer programs: 28 checks so far, 0 failed
+
+Same image pipeline, same gate, same XRT stack; the only difference is
+that cft_seq now says which buffer each read belongs to and cft_krnl
+steers the request at the master that owns that bank. fp32 completed
+its whole program set - every shape from one fma+deposit to the nested
+escape map to the zero-deposit refusal - and the run had moved on to
+fp64 when the 90-minute emulation cap stopped it.
+
+**What this does and does not establish.** It establishes that the
+sequencer's reads now reach the right memory on a banked device, which
+is what failed before, and that all four program shapes execute
+correctly at fp32 against the software backend. It does NOT establish
+fp64/fp128/fp256 on a device (the cap cut fp64 short), and emulation is
+not silicon.
+
+The simulation-side proof arrived first and is the more reusable one:
+tb/test_krnl_seq_banks.py gives each master a private store and checks
+r0/r1/r2 arrive from A, B and C. Sabotaged back to the old routing it
+fails on lane 0 with "operand b did not come from the B master" - 1.0
+where 2.0 belonged - so the bench refutes rather than decorates, and it
+runs in ninety seconds where this gate takes ninety minutes.
+
+**An instrumentation gap this exposed, worth closing before the card.**
+cft_engine_stream carries eight $display statements and narrates itself
+through a run - START, each AR, RED, DONE - which is how the reduction
+was confirmed working on 2026-09-01 from the trace alone. cft_seq has
+ZERO. During a sequencer run the simulator log goes silent, so "stuck
+or merely slow" cost an hour of guessing tonight and would cost more on
+a card, where the only observable is pass or fail.
+
+## 2026-09-02 - standardized verification runs on the shared-lanes tip, both platforms
+
+Two censuses, one per platform, on the tree that carries the shared
+ALU array, the sequencer's bank fix, retiming in the build flow, the
+seed ROM as case tables and the layout catalogue. Each is quoted as
+the runner printed it; the paragraphs after say what the first
+attempts found, because three of the four things they found were
+defects in the census machinery itself and one was real.
+
+**Windows (Git Bash + Docker Desktop), the full standard set:**
+
+    ## 2026-09-02 - standardized verification run (DESKTOP-T33SK86)
+
+    verify/run.sh at b6aeccd: 15 stage(s) executed, 2 cached from earlier in the run, 0 failed, 1 skipped.
+    Run id 20260902-120454-b6aeccd; per-stage logs under verify/state/.
+
+    golden ok 166s | vectors ok 7s | sim ok 591s | lint ok 44s | formal ok 27s
+    libcft ok 12s | selfcheck ok 1s | divsqrt ok 1s | clause5 ok 3s | diff ok 4s
+    seq ok 2s | reduce ok 23s | bindings ok 2s | mpfr ok 5s | soak-quick ok 106s
+    images SKIP (xclbinutil not present)
+
+**Linux (WSL cft2204, its own clone), the host and model stages:**
+
+    ## 2026-09-02 - standardized verification run (DESKTOP-T33SK86)
+
+    verify/run.sh at 1515bae: 12 stage(s) executed, 0 cached from earlier in the run, 0 failed, 4 skipped.
+    Run id 20260902-122143-1515bae; per-stage logs under verify/state/.
+
+    golden ok 224s | vectors ok 4s | sim/lint/formal SKIP (docker not usable on this host)
+    libcft ok 5s | selfcheck ok 1s | divsqrt ok 0s | clause5 ok 3s | diff ok 2s
+    seq ok 1s | reduce ok 14s | bindings ok 1s | mpfr ok 3s | soak-quick ok 94s
+    images SKIP (xclbinutil not present)
+
+One label needs a footnote. The Windows run's id names b6aeccd, the
+commit the tree was at when it started; by the time its `bindings`
+stage ran, the working tree also held the three binding fixes below,
+committed minutes later as b694a3f, 8c347fd and 1515bae. On gmpy2
+2.2.1 the stage passes either way, so the result is not in question -
+but a census that says one commit and tested another is the kind of
+thing this file exists to say out loud. The Linux run is at 1515bae
+throughout.
+
+**What the first attempts found.**
+
+*A Windows run at 0e7264e passed golden, vectors, the full sim suite,
+lint and formal, then failed libcft in 0 s and every host-binary stage
+after it in 1-3 s - ten FAILs.* The link errors (`undefined reference
+to cft_open`, glibc's `__snprintf_chk`) read like a source defect.
+`objdump -f` said otherwise: libcft.a and every object under host/src
+were elf64-x86-64, left by a WSL build of the same checkout through
+/mnt/c at 01:01, and Windows make took them as up to date. After
+`make clean` the native build links cft.dll and the test target passes
+- 392,000 conformance cases, C and Python the same bits. The runner's
+libcft stage now cleans first (fb2463a); a census that depends on
+which platform touched the tree last is not a census. Two Linux
+executables that had been committed as build products, and that the
+clean deletes, are untracked and ignored (b6aeccd).
+
+*A Linux run at 0e7264e failed sim, lint and formal in 0 s each.* The
+WSL distro has Docker Desktop's shim on PATH without the integration
+enabled, and `command -v docker` is satisfied by a program whose only
+output is how to enable it. `need docker` now asks whether docker
+works, so the three stages skip by name, as above.
+
+*The same Linux run failed `bindings` at every precision, and that one
+was real.* `test_str_roundtrip` took -0 to "-0" and back to +0. Not the
+library and not the codec: gmpy2 2.1.2 (MPFR 4.1.0) parses "-0" inside
+the ieee() context the binding rounds in to a zero with no sign, and
+from_mpfr takes the sign from is_signed. The same version refuses
+every spelling of inf and nan ("invalid digits"), trailing whitespace,
+and "+0" - all of which to_str can emit and 2.2.1 accepts, which is
+why the Windows host had never seen any of it. from_str now takes the
+sign of a zero result from the decimal (754: rounding never changes a
+sign, so a negative decimal that is zero or underflows to zero is -0
+in every attribute), lexes the special tokens itself (a token is
+recognised, never rounded), strips whitespace and a leading plus, and
+still hands a minus to MPFR with the digits because directed rounding
+is not sign-symmetric. Two tests pin it at every precision. The
+binding suite: 77 of 77 on gmpy2 2.2.1, 77 of 77 on 2.1.2.
+
+The Linux clone also carried a stale XRT-flavoured libcft.a from an
+earlier `XRT=1` build, which the clean-first stage removes, and
+untracked emulation build directories and a card-day staging copy
+that made the runner refuse to certify; those were moved aside, not
+deleted, and the clean run above followed.
+
+## 2026-09-02 - the retimed quad at 135 MHz misses in the shell
+
+    build-quad-135r  40149b1 + bank fix, four tiles, 135 MHz, RETIMING=1
+    routed WNS -0.141  TNS -45.890  failing endpoints 836  (no xclbin)
+    the same design without retiming: -0.113 / -22.993 / 463
+
+Retiming's +1.374 ns out of context (docs/ROADMAP.md) did not survive
+four tiles in the shell; it was slightly worse. Post-place both builds
+read +0.055 and both lost the margin in routing, which is wire, not
+logic. The worst paths are the seed-ROM DSP cloud (6 of 10), the S10->
+S11 normalise (3) and the S12->S13 round (1). The next quad is from
+the tip - case-table ROM, retiming, phys_opt - at 135, then 130 if it
+misses.

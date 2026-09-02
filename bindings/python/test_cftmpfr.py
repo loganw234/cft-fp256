@@ -245,6 +245,47 @@ def test_str_roundtrip(prec):
 
 
 @needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_from_str_negative_zero(prec):
+    """The sign of a parsed zero is the decimal's sign, on every gmpy2.
+    gmpy2 2.1.2 parses "-0" to an unsigned zero inside an ieee()
+    context, which turned -0 into +0 through from_str on that version
+    and failed test_str_roundtrip at every precision (2026-09-02). A
+    negative decimal below the format's smallest subnormal rounds to
+    -0 under RNDN as well: rounding never changes a sign."""
+    ctx = Context(prec)
+    for s in ("-0", "-0.0", "-0e0", " -0.0e+00", "-1e-99999"):
+        f = ctx.from_str(s)
+        assert f.is_zero and f.sign == 1, (s, f)
+    for s in ("0", "+0", "0.0", "1e-99999"):
+        f = ctx.from_str(s)
+        assert f.is_zero and f.sign == 0, (s, f)
+    # and the round trip that found it, on both zeros explicitly
+    for f in (ctx.zero(0), ctx.zero(1)):
+        assert ctx.from_str(f.to_str()).same_bits(f), f
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_from_str_specials_need_no_library(prec):
+    """to_str writes nan, inf, -inf and the zeros without gmpy2, so
+    from_str reads them back without it - and without gmpy2 2.1.2's
+    opinion, which is "invalid digits" for every spelling of inf and
+    nan. Whitespace either side is tolerated on every version."""
+    ctx = Context(prec)
+    for s in ("nan", "NaN", "-nan", "+NAN", " nan "):
+        f = ctx.from_str(s)
+        assert f.is_nan, s
+        assert ctx.last_flags == 0
+    for s, sign in (("inf", 0), ("+inf", 0), ("Infinity", 0), ("-inf", 1),
+                    ("-INFINITY", 1), (" -inf ", 1)):
+        f = ctx.from_str(s)
+        assert f.is_inf and f.sign == sign, s
+    for f in (ctx.nan(), ctx.inf(0), ctx.inf(1), ctx.zero(0), ctx.zero(1)):
+        back = ctx.from_str(f.to_str())
+        assert back.is_nan if f.is_nan else back.same_bits(f), f
+
+
+@needs_gmpy2
 def test_to_float_narrowing_from_fp256():
     ctx = Context(237)
     third = ctx.div(ctx(1), ctx(3))

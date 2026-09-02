@@ -24,7 +24,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_seedop.sv \
     $(RTLDIR)/cft_engine.sv \
     $(RTLDIR)/cft_engine_stream.sv \
-    $(RTLDIR)/cft_seq_lanes.sv \
+    $(RTLDIR)/cft_lanes.sv \
     $(RTLDIR)/cft_seq.sv \
     $(RTLDIR)/cft_krnl.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp32.sv \
@@ -43,6 +43,10 @@ VERILOG_SOURCES = \
 ifeq ($(SIM),icarus)
 # -I: cft_seedop.sv includes the generated ROM from rtl/.
 COMPILE_ARGS += -g2012 -I$(RTLDIR)
+# Top-level parameter overrides, Icarus form (-P<top>.<PARAM>=<value>),
+# so one bench can run the kernel in a configuration the RTL default
+# does not select - the fused-ladder build, for one. Empty by default.
+COMPILE_ARGS += $(KRNL_PARAMS)
 endif
 
 ifeq ($(SIM),verilator)

@@ -13,10 +13,11 @@ SIM ?= icarus
 
 .PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
-        seq_core seqprobe clean
+        seq_core seqprobe krnlfused krnlplain cycles seqbanks clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-     seedop reduceacc reduce krnl quarter faults seq_core krnlseq
+     seedop reduceacc reduce krnl quarter faults seq_core krnlseq \
+     seqbanks
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -154,6 +155,56 @@ krnlseq:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \
 		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml
+
+# The kernel with BOTH fused ladders on - the configuration the size
+# campaign built, measured and equivalence-proved lane by lane, and
+# then never ran through the full-kernel bench, because Alveo had room
+# and hw/package_kernel.tcl strips user parameters so no bitstream
+# ever carried it. This bench says the kernel, not just the ladder, is
+# bit-exact with them on. They do NOT ship at 135 MHz - they cost more
+# slack than their 16k LUT is worth (docs/ROADMAP.md) - so this target
+# is what keeps the configuration honest for the slower clock and the
+# smaller open-core part where it does pay.
+krnlfused:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlfused \
+		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1" \
+		COCOTB_RESULTS_FILE=sim_build/krnlfused/results.xml
+
+# The kernel with both fused ladders pinned OFF by explicit parameter.
+# That is also the shipping default as of 2026-09-01 (they cost more
+# timing than the area is worth at 135 MHz - docs/ROADMAP.md), so this
+# duplicates `krnl` today and is kept anyway: it pins the configuration
+# rather than inheriting it, so a future default flip cannot silently
+# take the off path out of coverage. Neither variant is in `sim`; the
+# aggregate runs the default, and these two bracket it.
+krnlplain:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlplain \
+		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=0 -Pcft_krnl.FUSE_ALIGN=0" \
+		COCOTB_RESULTS_FILE=sim_build/krnlplain/results.xml
+
+# Cycle counts on the RTL, which is where they actually live: hw_emu's
+# wall clock measures the simulator, and its XRT timeline trace came
+# back empty (2026-09-01). Prints cycles per 256-bit beat per rung
+# and the rate those imply at the shipping clock, labelled a
+# prediction. Out of `sim` on purpose - it measures rather than
+# checks, and its numbers move for legitimate reasons.
+cycles:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cycles \
+		COCOTB_RESULTS_FILE=sim_build/cycles/results.xml
+
+# The sequencer against BANKED memory: one private store per master,
+# nothing mirrored. test_krnl_seq.py shares a single store on purpose
+# and therefore cannot see a read that leaves through the wrong
+# master - which is how the operand loads reached the card wired to
+# m_axi_a alone and answered DECERR on every program. This target is
+# the regression that would have caught it.
+seqbanks:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanks \
+		COCOTB_RESULTS_FILE=sim_build/seqbanks/results.xml
 
 quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \

@@ -63,3 +63,16 @@ host/examples/obj/
 host/vector-fma-go
 verify/_mpfr-prefix/
 verify/_mpfr-prefix-build/
+
+# agent worktrees (transient; never part of the tree)
+.claude/worktrees/
+# extensionless Linux build products of host/ (the .exe forms are above);
+# make clean removes these and none of them belong in the tree
+host/cft-selftest
+host/cft-bench
+host/api-test
+host/reduce-parts
+host/vector-fma
+host/device-test
+host/divsqrt-soak
+host/clause5-soak
