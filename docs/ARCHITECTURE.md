@@ -435,6 +435,18 @@ the 237-bit attribute-directed increment, S12 into S13 - and it is
 about two-thirds routing, so it is a placement problem as much as a
 logic one.
 
+*2026-09-02, a correction and two results.* The DSP chain on every
+routed critical path was never the significand multiplier: it was the
+seed ROM's index multiply, `SEED_P[i*18 +: 18]` built as a DSP48 and
+a 9216-bit shifter (docs/ROADMAP.md, "The DSP on the critical path
+was never the multiplier"). Retiming closes a single at 135 MHz at
++0.045 - exactly what the same tree closes without it - and does not
+close a quad (-0.141 against -0.113 unretimed): both leave placement
+at +0.055 and lose the margin in routing, which is wire. The ROM is a
+case table now and the round stage's arithmetic sits in S12; what is
+left at the head of the list is S10->S11, the LZC-fed coarse
+normalise. The quad from that tree is the open question.
+
 | commit | ask | routed WNS | implied path delay |
 |---|---|---|---|
 | 1cab0c3 (sweep) | 145 MHz | **+0.055** closes | 6.842 ns |
@@ -491,6 +503,8 @@ Vivado 2022.2, xcu50-fsvh2104-2-e:
 | one shared array, ladders off | 162,482 | -0.065 ns |
 | + the sequencer's control diet | 139,404 | **+0.307 ns** |
 | + fused ladders on | 123,599 | +0.097 ns |
+| + seed ROM as case tables (eb8ef2a), retimed | 129,708 | +2.126 ns |
+| + round stage precomputed in S12, window narrowed (9f73107), retimed | **123,420** | +2.222 ns |
 
 Then a single tile was linked at 135 MHz with the ladders on, and it
 **missed: WNS -0.577 ns, 776 failing endpoints.** The worst path was
@@ -531,11 +545,15 @@ leave +0.097 ns OOC where off leaves +0.307, and this build is the
 evidence that a thin OOC margin does not survive the shell. Five points
 of device area is not worth a bitstream that does not close.
 
-**Status, honestly: pending.** A single tile and a quad are building at
-135 MHz from this commit with the ladders off. Neither result is known
-at this writing, so nothing here claims a closed bitstream and nothing
-here claims silicon; the out-of-context figures above are what has
-actually been measured.
+**Status (2026-09-02).** Ladders off, 135 MHz, in the shell: the
+single closes at +0.045 with retiming and at +0.045 without it, and
+at +0.050 at 130; the quad has not closed at 135 - -0.113 without
+retiming, -0.141 with it - and its worst paths are named in
+docs/ROADMAP.md. The tree with the case-table ROM and the S12
+precompute is building as a quad on two hosts at 135 with 130 queued
+behind; until one of those returns an image, the closed quads are
+the 130 MHz pairs already staged for card day. Nothing here claims
+silicon.
 
 A reduced clock changes nothing about results - determinism is
 clock-independent by construction. The v0 behavioural core (one

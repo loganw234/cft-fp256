@@ -67,6 +67,17 @@ the element count is an operand rather than a loop bound.
       The STATUS[3] precision-refusal and the sequencer post-date
       these images and are in main only.
 
+      So does the sequencer's bank fix (40149b1, 2026-09-02): an image
+      built between the sequencer's arrival and that commit fails
+      every program on a banked device - all three operand reads left
+      through one master bound to one HBM pseudo-channel. The staged
+      135 and 130 pairs predate the sequencer entirely and are not
+      affected. Candidates from the tip - seed ROM as case tables, the
+      round stage precomputed - are building as quads at 135 on both
+      hosts with 130 queued behind; a case-ROM single is routing.
+      Whichever closes goes through hw/verify-image.sh and SHA256SUMS
+      before it is called a pair, exactly as above.
+
       FIRST fallback: the 130 MHz general-purpose pair at b1a014c in
       `~/cardday-ms` (single +0.220, quad +0.009, verified 8/8),
       identical hardware one notch slower.

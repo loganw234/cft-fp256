@@ -132,6 +132,13 @@ full tile less the banks it drops; the remainder does not shrink with
 the rungs. Every narrow figure is a model until a narrow tile has been
 linked; the first one built will recalibrate this table.
 
+Since these costs were measured (eb8ef2a) the round stage's
+precompute took the full tile to 123,420 flattened, -6,288 (9f73107,
+docs/ROADMAP.md); the bank costs above are one commit behind and the
+counts are conservative by about that much. They will be re-measured
+with `hw/synth_attrib.tcl` on the same tree before any narrow tile is
+packaged.
+
 ## What makes a placeholder a build
 
 Every layout that names a narrow variant is a complete, correct link

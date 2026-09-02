@@ -19,10 +19,10 @@ the repo root, or `bash verify/run.sh` with the flags below.
 |---|---|---|
 | golden | the model's own invariants and oracles | python |
 | vectors | the conformance sets regenerate from the model | python |
-| sim | RTL == model across all 17 cocotb targets | docker |
+| sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO/seedop/simpleops theorems + negative control | docker |
-| libcft | C library contract + 392k-case conformance replay | cc, python |
+| libcft | C library contract + 392k-case conformance replay; cleans host/ first | cc, python |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
@@ -36,6 +36,15 @@ the repo root, or `bash verify/run.sh` with the flags below.
 
 Wall time for the standard set is dominated by `sim` (~40 min in the
 container); everything else together is ~20-30 min.
+
+Two things the runner learned on 2026-09-02, both now built in: the
+libcft stage cleans `host/` before building it, because a checkout
+shared between Windows and WSL can hold the other platform's objects
+and the link errors that produces look like source defects; and
+`need docker` asks whether docker works, because a WSL distro without
+Docker Desktop's integration has a shim on PATH that only prints how
+to enable it. A stage that cannot run is skipped by name, never
+failed by accident.
 
 ## Resume semantics
 

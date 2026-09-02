@@ -448,6 +448,20 @@ beat - because P1 says the sequencer introduces no arithmetic, and
 sharing the instances is how that stops being a promise and becomes a
 fact about the netlist.
 
+One thing the shape did not say, and silicon-adjacent evidence did
+(2026-09-02): the sequencer's three operand buffers live in three
+different memories on a banked device. `link.cfg` binds each of the
+tile's masters to its own HBM pseudo-channel, for ordering; a read
+of buffer B through master A therefore reaches a bank that does not
+hold it, and the first hw_emu run failed every program with a bus
+fault. `cft_seq` now names the buffer each read belongs to
+(`m_rd_sel`) and `cft_krnl` steers the request at the master that
+owns that bank; the bench that proves it gives each master a private
+store and refuses the old routing by name. Note for other memory
+systems: on a board where all masters reach one DDR or one PCIe
+window, the steering is a no-op and any master would do - the fix
+costs nothing there and is required here.
+
 Three structures, sized in the section above:
 
 - **Register file**, organised beat-wide rather than lane-wise:

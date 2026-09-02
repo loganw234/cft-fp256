@@ -124,6 +124,17 @@ these are area figures and nothing more. A single and a quad are
 building at 135 MHz with the ladders off as this is written; neither
 result is known.
 
+*Known now (2026-09-02):* the single closed (+0.045, with or without
+retiming); the quad missed 135 twice (-0.113, -0.141). Since then the
+tile lost 16k LUT out of context without touching the ladders - the
+seed ROM as case tables (129,708) and the round stage's arithmetic
+moved up a stage (123,420) - which is within 200 LUT of the
+ladders-on figure with none of its slack cost. Re-run the arithmetic
+above with the quad's own fixed cost and a fifth tile is still over
+the line: 5 x 123,420 + 174,401 of shell for five CUs = 791,521,
+90.9%. Four remains the wall. docs/LAYOUTS.md now derives every mix
+the part could carry from measured bank costs, narrow tiles included.
+
 ### What one tile retires, in cycles (measured 2026-09-02)
 
 Until now every throughput figure here was calculated from the beat

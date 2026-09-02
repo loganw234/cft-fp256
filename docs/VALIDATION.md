@@ -998,3 +998,26 @@ logic. The worst paths are the seed-ROM DSP cloud (6 of 10), the S10->
 S11 normalise (3) and the S12->S13 round (1). The next quad is from
 the tip - case-table ROM, retiming, phys_opt - at 135, then 130 if it
 misses.
+
+## 2026-09-02 - the round stage's precompute, gated
+
+rtl/cft_fpfma_pipe.sv at 9f73107: K, the round window's shift, q and
+both tininess compares computed in S12; the window extracted with a
+(P+2)-bit shifter. The gate, run under Verilator so the whole suite
+compiled the changed file:
+
+    make -k SIM=verilator sim   15 targets built, 43 tests, 43 passed, 0 failed
+                                (fp32/fp64/fp128/fp256 unit benches, simpleops,
+                                 normseg, normshare, seedop, reduceacc, reduce,
+                                 krnl, faults, seq_core, krnlseq, seqbanks)
+    make quarter                1/1 under Icarus (its default)
+    make mulfrac SIM=verilator  4/4, mulshare 3/3 - after c8123b9
+    make yosys-lint             clean
+    OOC @135, retimed           129,708 -> 123,420 LUT, +2.126 -> +2.222 ns
+
+Two Verilator-only findings from that run, neither caused by the
+change: mulfrac/mulshare had never built under Verilator (SELRANGE on
+dead-arm constant slices; fixed in c8123b9 by clamping the offsets),
+and `quarter` stops Verilator with an internal error on the reduce
+serialiser's fp128 arm at BEAT_BITS=64 - identical on the pristine
+tip, fine under Icarus, recorded in docs/ROADMAP.md.
