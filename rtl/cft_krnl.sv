@@ -54,21 +54,26 @@ module cft_krnl #(
     // correct for Alveo (the HBM pseudo-channel width); narrow it
     // only together with the wide rungs, for a smaller tile.
     parameter int BEAT_BITS = 256,
-    // Resource sharing across the banks. FUSE_MUL stays off - it costs
-    // LUTs to save DSP, the resource that is not scarce (NOVEL.md
-    // entry 6). FUSE_NORM and FUSE_ALIGN are ON by default as of
-    // 2026-09-01: the size campaign proved them bit-exact and measured
-    // -16.7k LUT at the kernel, and once the sequencer's shared ALU
-    // array is the ONE array on the tile, that saving lands on the
-    // path to fitting four of them. hw/package_kernel.tcl strips user
-    // parameters, so the DEFAULT is the only value a bitstream can
-    // carry - which is why this is a default and not a build flag. Both
-    // self-gate on the full-tile geometry (USE_FUSED_* below), so a
-    // quarter tile ignores them. krnlfused holds the full kernel
-    // bit-exact with them on; krnlplain keeps the off path covered.
+    // Resource sharing across the banks, all three default OFF.
+    //
+    // FUSE_MUL costs LUTs to save DSP, the resource that is not scarce
+    // (NOVEL.md entry 6). FUSE_NORM and FUSE_ALIGN are the size
+    // campaign's -16.7k-LUT result and are bit-exact (krnlfused holds
+    // the whole kernel to it), but they were MEASURED NOT TO CLOSE at
+    // 135 MHz on 2026-09-01: out of context they leave +0.097 ns
+    // against ladders-off's +0.307, with the critical path moving to
+    // the ladder's own LZC-fed shift, and out-of-context slack does not
+    // survive the shell. The tile fits either way - 123,599 LUT with
+    // them, 139,404 without, about 75% and 80% of the device for a quad
+    // - so the five points of area are not worth a bitstream that does
+    // not close. Turn them on for a slower clock or a smaller part
+    // (the open-core target, where footprint is the objective);
+    // hw/package_kernel.tcl strips user parameters, so a bitstream can
+    // only carry these defaults. Both self-gate on the full-tile
+    // geometry, so a quarter tile ignores them either way.
     parameter bit FUSE_MUL  = 1'b0,
-    parameter bit FUSE_NORM = 1'b1,
-    parameter bit FUSE_ALIGN = 1'b1
+    parameter bit FUSE_NORM = 1'b0,
+    parameter bit FUSE_ALIGN = 1'b0
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,

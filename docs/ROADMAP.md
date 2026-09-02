@@ -982,19 +982,56 @@ tree:**
 
 The fused normalise and align ladders - this section's own -16.7k-LUT
 result, proven bit-exact (now including the full kernel, `make
-krnlfused`) - are what return the sequencer tile to near the
-pre-sequencer footprint, so four of them plus the shell sit in the
-~25-30%-free envelope the pre-sequencer quad had. They default ON for
-the full tile as of 2026-09-01, because `hw/package_kernel.tcl` strips
-user parameters and the default is the only value a bitstream carries;
-they self-gate off for the quarter tile. The cost is timing headroom:
-ladders on is +0.097 OOC where off is +0.307, and the critical path
-moves to the ladder's own LZC-fed shift (`s10_mag -> normseg`, 27
-levels) - exactly where the 2026-08-31 measurement put it. **The
-measured card-day pair settles which ships**: OOC does not predict
-shell slack in either direction, so if the ladders-on quad misses at
-135 in the shell, the ladders-off tile (+0.307, ~80%) is the standing
-fallback and reverting one default line reaches it.
+krnlfused`) - return the sequencer tile to near the pre-sequencer
+footprint. They were switched on, built, and **switched back off**; see
+below.
+
+#### The shell says no, twice, and the second one is a real bug (2026-09-01)
+
+A single tile was linked at 135 MHz with the ladders on. It **missed
+timing: WNS -0.577 ns, 776 failing endpoints**, and the worst path was
+not the ladder at all:
+
+    u_engine/u_reduce/dly_lvl_reg[14][0]
+      -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[15]
+    25 levels, through a DSP cascade
+
+**That path is the shared-array refactor's own regression, and it had
+been hiding in plain sight at +0.307 out of context.** While the
+reduction accumulator fed lane 0 of the engine's PRIVATE array, its
+operands went straight to the pipe's `a`/`c` ports - past `cft_opmux`
+(a passthrough for FMA anyway) and past `cft_simpleops` entirely. Merging
+the two engines onto one operand bus put the accumulator's combinational
+output onto the bus that also feeds `cft_simpleops`, and
+`cft_fpfma_pipe` latches that block's result into `s0_byp_d`
+**unconditionally, with no clock enable** - so every reduction operand
+now had to traverse the accumulator's level decode, its memory read, and
+the whole simpleops mux tree inside one cycle, whether or not the bypass
+was selected.
+
+The fix is one register on the accumulator's operands, with
+`cft_reduce_acc`'s `ADD_LATENCY` raised to `LATENCY + 1` to match: the
+reduce path becomes structurally the elementwise path that already
+closes (register -> mux -> steering -> S0). It is not a numeric change -
+the tree shape and the order of every add are fixed by element index,
+never by timing - and `reduce`/`reduceacc` hold it to the model.
+
+Two lessons worth the cost. **Out-of-context slack hid a cross-module
+path**: +0.307 OOC became -0.577 in the shell, a 0.88 ns swing, because
+OOC places the kernel alone and the shell places it as one compute unit
+among many - exactly the direction this file has warned about since the
+first OOC run, now with a number on it. And **sharing a datapath means
+sharing everything attached to it**: the win was real (-126k LUT) but
+the operand bus carried the accumulator into a combinational block it
+had never touched, which is the kind of coupling an area argument does
+not surface.
+
+**Ladders off is what ships at 135.** With them on the tile is 123,599
+LUT (~75% for a quad) against 139,404 off (~80%), but the ladder's own
+LZC-fed shift leaves only +0.097 ns OOC, and the shell does not forgive
+that. Five points of device area is not worth a bitstream that does not
+close; the ladders stay proven, parameterised and off, for a slower
+clock or the smaller open-core part where footprint is the objective.
 
 ## General purpose: divide and square root (status, 2026-08-31)
 

@@ -916,7 +916,13 @@ module cft_engine_stream #(
     endcase
   end
 
-  cft_reduce_acc #(.W(BEAT_BITS), .LEVELS(40), .ADD_LATENCY(LATENCY))
+  // ADD_LATENCY is LATENCY + 1, not LATENCY: the operands are
+  // registered on their way into the shared array (see the lane
+  // request below), so a sum comes back one cycle later than the
+  // pipe's own depth. The accumulator carries the destination level
+  // in a delay line of exactly this length, so the two must agree or
+  // carries land at the wrong level.
+  cft_reduce_acc #(.W(BEAT_BITS), .LEVELS(40), .ADD_LATENCY(LATENCY + 1))
   u_reduce (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(start_accept),
       .in_valid(red_in_valid && is_reduce), .in_data(red_in_elem),
@@ -1042,13 +1048,49 @@ module cft_engine_stream #(
     endcase
   end
 
-  assign lane_valid = is_reduce ? red_add_valid : ex_valid;
+  // The accumulator's operands are REGISTERED here, and the reason is
+  // a measured shell failure rather than caution.
+  //
+  // The elementwise operands arrive from the stream FIFOs already
+  // registered (a_q/b_q/c_q), so their path into the array is
+  // register -> steering -> the pipe's S0. The accumulator's were not:
+  // red_add_a/red_add_b are combinational out of its level decode and
+  // memory read, and this module now hands them to an array that also
+  // feeds cft_simpleops - whose result the pipe latches into s0_byp_d
+  // UNCONDITIONALLY, with no clock enable. So a reduction's operands ran
+  // through the accumulator's arithmetic AND the whole simpleops mux
+  // tree in one cycle, a path that did not exist while the reduce fed
+  // lane 0 of a private array directly. Out of context it read +0.307;
+  // in the shell, at 135 MHz, it was -0.577 ns over 25 levels
+  // (u_reduce/dly_lvl_reg -> u_lanes/g_lane32[0].u_fma/s0_byp_d_reg) and
+  // the single tile missed timing.
+  //
+  // One register makes the reduce path structurally the same as the
+  // elementwise one that already closes: register -> mux -> steering ->
+  // S0. The cost is one cycle of adder latency, which is not a numeric
+  // change - the tree shape and the order of every add are fixed by
+  // element index, not by timing - and cft_reduce_acc is told above.
+  logic                 red_add_valid_q;
+  logic [BEAT_BITS-1:0] red_add_a_q, red_add_b_q;
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n) begin
+      red_add_valid_q <= 1'b0;
+      red_add_a_q     <= '0;
+      red_add_b_q     <= '0;
+    end else begin
+      red_add_valid_q <= red_add_valid;
+      red_add_a_q     <= red_add_a;
+      red_add_b_q     <= red_add_b;
+    end
+  end
+
+  assign lane_valid = is_reduce ? red_add_valid_q : ex_valid;
   assign lane_op    = is_reduce ? 8'd0 : op_r;           // 0 = CFT_FMA
   assign lane_rnd   = rnd_r;
   assign lane_prec  = prec_r;
-  assign lane_a     = is_reduce ? red_add_a : a_q;
-  assign lane_b     = is_reduce ? one_beat  : b_q;
-  assign lane_c     = is_reduce ? red_add_b : c_q;
+  assign lane_a     = is_reduce ? red_add_a_q : a_q;
+  assign lane_b     = is_reduce ? one_beat    : b_q;
+  assign lane_c     = is_reduce ? red_add_b_q : c_q;
 
   logic [BEAT_BITS-1:0]      arr_d;
   logic [BEAT_BITS/32*5-1:0] arr_lf;
