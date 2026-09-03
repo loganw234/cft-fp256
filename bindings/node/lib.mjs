@@ -81,8 +81,9 @@ export const CLASS_NAMES = [
   "+zero", "+subnormal", "+normal", "+inf", "snan", "qnan",
 ];
 
-/** The transcendentals, by arity: phase 1's nine (ABI 0.3) and then
- *  phase 2's eleven (ABI 0.4). These are not opcodes - cft.h gives
+/** The transcendentals, by arity: phase 1's nine (ABI 0.3), then
+ *  phase 2's eleven (ABI 0.4), then phase 3's nine (ABI 0.5). These
+ *  are not opcodes - cft.h gives
  *  each its own entry point, because correct rounding here is a
  *  library algorithm rather than a tile pass - so they are addressed
  *  by name at every layer: the cftw_* export, the "fn" field in the
@@ -95,7 +96,9 @@ export const CLASS_NAMES = [
 export const TRANSCEND_UNARY = ["exp", "expm1", "exp2", "log", "log1p",
                                 "log2", "log10",
                                 "sinpi", "cospi", "tanpi", "asin", "acos",
-                                "atan", "asinpi", "acospi", "atanpi"];
+                                "atan", "asinpi", "acospi", "atanpi",
+                                "sin", "cos", "tan", "sinh", "cosh",
+                                "tanh", "asinh", "acosh", "atanh"];
 export const TRANSCEND_BINARY = ["pow", "hypot", "atan2", "atan2pi"];
 
 // ---------------------------------------------------------------------
@@ -177,7 +180,7 @@ async function instantiate() {
     conformance:  M.cwrap("cftw_conformance", n, [n,s,n,n,n,n]),
   };
 
-  // ABI 0.3's nine and ABI 0.4's eleven, the transcendentals. Named
+  // ABI 0.3's nine, 0.4's eleven and 0.5's nine, the transcendentals. Named
   // rather than numbered: these are library entry points, not opcodes,
   // so there is no field to mistranscribe and audit() has nothing to
   // ask the module about them - a missing export shows up as a missing

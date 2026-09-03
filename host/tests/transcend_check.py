@@ -61,16 +61,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "host" / "tools"))
 
 from cft_golden import FORMATS, PREC_CODE, RND_MODES, RND_NAMES  # noqa: E402
 from cft_golden import softfloat as sf                            # noqa: E402
 from cft_golden import transcend as tr                            # noqa: E402
+import pi_worstcase                                              # noqa: E402
 
 UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10")
 BINARY = ("pow", "hypot")
 TRIG_UNARY = ("sinpi", "cospi", "tanpi", "asin", "acos", "atan",
               "asinpi", "acospi", "atanpi")
 TRIG_BINARY = ("atan2", "atan2pi")
+RADIAN = ("sin", "cos", "tan")
+HYPER = ("sinh", "cosh", "tanh", "asinh", "acosh", "atanh")
+
+#: How coarsely host/tools/pi_worstcase.py sweeps the binades when it
+#: builds this harness's adversarial pool, and how many of the deepest
+#: it keeps. fp32 and fp64 are swept completely; fp128 and fp256 are
+#: sampled, because a full sweep of 262,144 binades would spend minutes
+#: refining a number no design decision rests on. The tool's own CLI is
+#: what produces the figures docs/TRANSCENDENTALS.md quotes.
+WORST_SWEEP = {"fp32": (1, 8), "fp64": (8, 8),
+               "fp128": (512, 6), "fp256": (8192, 6)}
 CHECKED = 0
 
 
@@ -97,7 +110,7 @@ def bind(lib):
     lib.cft_open.restype = i
     lib.cft_close.argtypes = [vp]
     lib.cft_close.restype = None
-    for nm in UNARY + TRIG_UNARY:
+    for nm in UNARY + TRIG_UNARY + RADIAN + HYPER:
         fn = getattr(lib, "cft_" + nm)
         fn.argtypes = [vp, i, i, vp, vp, sz, u32p]
         fn.restype = i
@@ -434,6 +447,170 @@ def atan2_pairs(fmt, trials, seed):
     return pairs
 
 
+def radian_pool(fmt, trials, seed):
+    """Operands where a RADIAN sine can be got wrong, which is a third
+    list again - the families that catch sinPi do not catch sin.
+
+    The argument reduction is the whole of what is new, so the pool is
+    built from what stresses it:
+
+      * every power of two the format holds, across the whole exponent
+        range, because the reduction's window START is the argument's
+        exponent and a power of two is the cleanest probe of it;
+      * the deepest cancellations host/tools/pi_worstcase.py finds, per
+        binade, each with a grid neighbour on both sides - these are
+        the arguments that make the window WIDEN, and at fp32 and fp64
+        the search that produces them independently rediscovers the two
+        published worst cases;
+      * the tiny-argument thresholds of sin, cos and tan, one step
+        either side, so an exactness test has to be right rather than
+        optimistic;
+      * the specials and a spray of randoms, which by themselves score
+        almost nothing here."""
+    p = fmt.prec
+    rng = random.Random(seed ^ (fmt.width * 307))
+    out = [
+        sf.zero_bits(fmt), sf.zero_bits(fmt, 1),
+        sf.one_bits(fmt), sf.one_bits(fmt, 1),
+        sf.one_bits(fmt) + 1, sf.one_bits(fmt) - 1,
+        sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+        sf.max_subnormal_bits(fmt), sf.min_normal_bits(fmt),
+        sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+        sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+        sf.qnan_bits(fmt), sf.snan_bits(fmt),
+    ]
+    # powers of two over the whole exponent range, sampled at the wide
+    # formats so the pool stays a pool rather than a sweep
+    step = 1 if fmt.width <= 64 else max(1, (fmt.emax + 1) // 64)
+    for k in range(fmt.emin - fmt.man_w, fmt.emax + 1, step):
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, k)
+            if b is not None:
+                out.append(b)
+    for k in (fmt.emax, fmt.emax - 1, 0, 1, 2, p, 2 * p, fmt.emin,
+              fmt.emin - fmt.man_w):
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, k)
+            if b is not None:
+                out += [b, b - 1]
+    # the deepest cancellations the continued-fraction search finds
+    stride, top = WORST_SWEEP[fmt.name]
+    out += pi_worstcase.worst_encodings(fmt, stride, top)
+    # the neighbour thresholds of sin, cos and tan, straddled
+    for k in (p // 2 - 1, p // 2, p // 2 + 1, p // 2 + 2, p, p + 2, 2 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                b = Vopt(fmt, sgn, m, e)
+                if b is not None:
+                    out.append(b)
+    out += [rng.getrandbits(fmt.width) for _ in range(trials)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def hyper_pool(fmt, trials, seed):
+    """Operands for the six hyperbolics, whose domains differ from each
+    other and from everything else in the set.
+
+      * around 1 from both sides, which is acosh's domain edge and
+        atanh's pole, and the neighbourhood where the exact-difference
+        forms in both are the only ones that survive;
+      * the sinh/cosh overflow threshold - emax*ln2 and its neighbours,
+        walked two ulps either way - so the screen has to fire in
+        exactly the right place;
+      * the argument where tanh stops being separable from 1, and one
+        step either side;
+      * every tiny-argument threshold in the family, straddled;
+      * negatives everywhere, since three of the six are odd, two are
+        invalid below their domain and one is even."""
+    import mpmath
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 409))
+    out = [
+        sf.zero_bits(fmt), sf.zero_bits(fmt, 1),
+        one, sf.one_bits(fmt, 1), one + 1, one - 1,
+        sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1,
+        sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+        sf.max_subnormal_bits(fmt), sf.max_subnormal_bits(fmt, 1),
+        sf.min_normal_bits(fmt), sf.min_normal_bits(fmt, 1),
+        sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+        sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+        sf.qnan_bits(fmt), sf.snan_bits(fmt), sf.qnan_bits(fmt) | 0x5,
+    ]
+    # small integers and half-integers on both sides of 1
+    for m, e in [(k, 0) for k in (1, 2, 3, 4, 5, 8, 17, 100)] + \
+                [(k, -1) for k in (1, 3, 5, 7, 9)] + \
+                [(k, -2) for k in (1, 3, 5, 7)]:
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, m, e)
+            if b is not None:
+                out += [b, b + 1, b - 1]
+    # the sinh/cosh overflow edge, where the screen must fire
+    mpmath.mp.prec = 4 * p + 64
+    for n in (fmt.emax, fmt.emax + 1, fmt.emax + 2, fmt.emin,
+              fmt.emin - fmt.man_w):
+        t = mpmath.mpf(n) * mpmath.log(2)
+        man, ex = mpmath.libmp.to_man_exp(t._mpf_)
+        b = sf.round_pack(fmt, 1 if man < 0 else 0, abs(int(man)),
+                          int(ex), sf.RND_RNE)[0]
+        for d in (-2, -1, 0, 1, 2):
+            out += [b + d, (b + d) | fmt.sign_mask]
+    # where tanh stops being separable from 1: 2^bitlen(p+2), straddled
+    bl = (p + 2).bit_length()
+    for k in (bl - 1, bl, bl + 1):
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, k)
+            if b is not None:
+                out += [b, b - 1, b + 1]
+    # every tiny threshold in the family, straddled
+    for k in (p // 2 - 1, p // 2, p // 2 + 1, p // 2 + 2, p, p + 2, 2 * p,
+              4 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                b = Vopt(fmt, sgn, m, e)
+                if b is not None:
+                    out.append(b)
+    out += [rng.getrandbits(fmt.width) for _ in range(trials)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def check_named_unary(lib, dev, fmt, names, pool):
+    for fn in names:
+        for rnd in RND_MODES:
+            for xa in pool:
+                got, fl, st = call(lib, dev, fmt, fn, rnd, [xa])
+                assert st == 0, (fn, fmt.name, RND_NAMES[rnd], hex(xa), st)
+                want = tr.compute(fmt, fn, xa, 0, rnd)
+                assert (got[0], fl) == want, \
+                    (fn, fmt.name, RND_NAMES[rnd], hex(xa),
+                     (hex(got[0]), fl), (hex(want[0]), want[1]))
+                note()
+
+
+def check_phase3_batches(lib, dev, fmt, rpool, hpool):
+    """The array path for the nine, with a signaling NaN in the last
+    lane so late-lane classification is what sets the flag word."""
+    rng = random.Random(929 ^ fmt.width)
+    n = 300
+    for fn, pool, rnd in (("sin", rpool, sf.RND_RDN),
+                          ("cos", rpool, sf.RND_RUP),
+                          ("tan", rpool, sf.RND_RNE),
+                          ("sinh", hpool, sf.RND_RTZ),
+                          ("tanh", hpool, sf.RND_RMM),
+                          ("asinh", hpool, sf.RND_RUP),
+                          ("atanh", hpool, sf.RND_RDN)):
+        xs = [rng.choice(pool) for _ in range(n - 1)] + [sf.snan_bits(fmt)]
+        got, fl, st = call(lib, dev, fmt, fn, rnd, xs)
+        assert st == 0, (fn, st)
+        want_or = 0
+        for x, g in zip(xs, got):
+            wb, wf = tr.compute(fmt, fn, x, 0, rnd)
+            assert g == wb, ("batch", fn, fmt.name, hex(x), hex(g), hex(wb))
+            want_or |= wf
+        assert fl == want_or and (want_or & 1), (fn, fl, want_or)
+        note(n)
+
+
 def check_trig_unary(lib, dev, fmt, pool):
     for fn in TRIG_UNARY:
         for rnd in RND_MODES:
@@ -553,13 +730,19 @@ def check_refusals(lib, dev):
                              ctypes.byref(fl)) == INVAL, bad
         assert lib.cft_atan2(dev, fi, bad, a, a, d, 1,
                              ctypes.byref(fl)) == INVAL, bad
-        note(4)
+        assert lib.cft_sin(dev, fi, bad, a, d, 1,
+                           ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_acosh(dev, fi, bad, a, d, 1,
+                             ctypes.byref(fl)) == INVAL, bad
+        note(6)
     for bad_fmt in (-1, 4, 99):
         assert lib.cft_log(dev, bad_fmt, 0, a, d, 1,
                            ctypes.byref(fl)) == INVAL, bad_fmt
         assert lib.cft_atan(dev, bad_fmt, 0, a, d, 1,
                             ctypes.byref(fl)) == INVAL, bad_fmt
-        note(2)
+        assert lib.cft_tanh(dev, bad_fmt, 0, a, d, 1,
+                            ctypes.byref(fl)) == INVAL, bad_fmt
+        note(3)
     # the second operand is not optional for any binary entry point
     assert lib.cft_pow(dev, fi, 0, a, None, d, 1,
                        ctypes.byref(fl)) == INVAL
@@ -570,10 +753,10 @@ def check_refusals(lib, dev):
     assert lib.cft_atan2pi(dev, fi, 0, a, None, d, 1,
                            ctypes.byref(fl)) == INVAL
     note(2)
-    # the library actually loaded says 0.4, not the header it was
+    # the library actually loaded says 0.5, not the header it was
     # written against
     v = lib.cft_abi_version()
-    assert (v >> 16) == 0 and (v & 0xFFFF) >= 4, hex(v)
+    assert (v >> 16) == 0 and (v & 0xFFFF) >= 5, hex(v)
     note()
     # n == 0 touches nothing and clears the flags
     fl.value = 0xDEAD
@@ -630,6 +813,8 @@ def main():
             hpairs = hypot_pairs(fmt, t, args.seed)
             tpool = trig_pool(fmt, t, args.seed)
             apairs = atan2_pairs(fmt, t, args.seed)
+            rpool = radian_pool(fmt, t, args.seed)
+            hpool = hyper_pool(fmt, t, args.seed)
             check_unary(lib, dev, fmt, pool)
             check_binary(lib, dev, fmt, "pow", ppairs)
             check_binary(lib, dev, fmt, "hypot", hpairs)
@@ -638,14 +823,18 @@ def main():
             check_binary(lib, dev, fmt, "atan2pi", apairs)
             check_batches(lib, dev, fmt, pool, ppairs)
             check_trig_batches(lib, dev, fmt, tpool, apairs)
+            check_named_unary(lib, dev, fmt, RADIAN, rpool)
+            check_named_unary(lib, dev, fmt, HYPER, hpool)
+            check_phase3_batches(lib, dev, fmt, rpool, hpool)
             check_aliasing(lib, dev, fmt, pool)
             print(f"  {name}: the transcendental entry points agree with "
                   f"the model ({CHECKED} comparisons so far)")
     finally:
         lib.cft_close(dev)
     st = tr.STATS
-    print(f"transcend_check: {CHECKED} comparisons over "
-          f"{len(UNARY) + len(BINARY) + len(TRIG_UNARY) + len(TRIG_BINARY)} "
+    nfn = (len(UNARY) + len(BINARY) + len(TRIG_UNARY) + len(TRIG_BINARY)
+           + len(RADIAN) + len(HYPER))
+    print(f"transcend_check: {CHECKED} comparisons over {nfn} "
           "functions, C == model on every one")
     print(f"  the model's evaluator: {st['ziv_calls']} enclosures, "
           f"{st['escalations']} escalations, deepest working precision "

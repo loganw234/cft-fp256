@@ -529,6 +529,18 @@ void check_format(cft::device &dev, cft_device *ref)
             TRIG1(asinpi);
             TRIG1(acospi);
             TRIG1(atanpi);
+            /* The phase-3 nine (ABI 0.5): the same marshalling check,
+             * and for sin, cos and tan the pool's huge operands drive
+             * the reduction against pi through both routes. */
+            TRIG1(sin);
+            TRIG1(cos);
+            TRIG1(tan);
+            TRIG1(sinh);
+            TRIG1(cosh);
+            TRIG1(tanh);
+            TRIG1(asinh);
+            TRIG1(acosh);
+            TRIG1(atanh);
 #undef TRIG1
 
             fw = ctx.atan2(a, b, dw);

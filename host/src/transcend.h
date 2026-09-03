@@ -19,9 +19,10 @@
 #include "../include/cft.h"
 
 /* The canonical order: the ABI's, the vector sets', the model's
- * TRANSCEND_FNS, and cft_tr_name's. Phase 1's nine first and phase 2's
- * eleven after, and it never changes - a name inserted rather than
- * appended silently renumbers every committed vector set. */
+ * TRANSCEND_FNS, and cft_tr_name's. Phase 1's nine first, phase 2's
+ * eleven after and phase 3's nine after those, and it never changes - a
+ * name inserted rather than appended silently renumbers every committed
+ * vector set. */
 enum {
     CFT_TR_EXP = 0,
     CFT_TR_EXPM1,
@@ -46,6 +47,19 @@ enum {
     CFT_TR_ACOSPI,
     CFT_TR_ATANPI,
     CFT_TR_ATAN2PI,
+    /* phase 3 (ABI 0.5): the radian trigonometry, whose argument
+     * reduction against pi is the thing phase 2 was defined to exclude,
+     * and the hyperbolics, which need no reduction and no new
+     * constant at all. */
+    CFT_TR_SIN,
+    CFT_TR_COS,
+    CFT_TR_TAN,
+    CFT_TR_SINH,
+    CFT_TR_COSH,
+    CFT_TR_TANH,
+    CFT_TR_ASINH,
+    CFT_TR_ACOSH,
+    CFT_TR_ATANH,
     CFT_TR_COUNT
 };
 
@@ -54,6 +68,29 @@ enum {
  * implementations must give up in the same place, or they disagree
  * about which inputs are answerable. */
 #define CFT_TR_PREC_CAP_CEILING 832
+
+/* ---- the phase-3 argument reduction ------------------------------- *
+ *
+ * The widest window of 2/pi one reduction may read, in bits. It is the
+ * cancellation allowance, and it is the number the reduction REFUSES
+ * past: a window of W bits delivers a reduced argument to the working
+ * precision as long as
+ *
+ *     W >= p + 2 + (bits of cancellation) + Wi + 10
+ *
+ * so 8192 provides for 7,006 bits of cancellation at fp256 and 7,478 at
+ * fp64 (host/src/transcend.c derives both, docs/TRANSCENDENTALS.md
+ * prints them). The measured worst case over every fp32 and fp64 binade
+ * is 29 and 61 bits, and the counting argument puts fp256's near 256,
+ * so the allowance is more than an order of magnitude clear of anything
+ * expected - and a call that needed more would get CFT_ERR_INTERNAL
+ * rather than a plausible sine.
+ *
+ * host/tools/gen_2opi.py reads this number: the stored constant is
+ * (fp256's deepest window start) + this, so raising it here without
+ * regenerating mp_2opi.h would read off the end of the array.
+ * python/tests/test_mp_consts.py fails if the two disagree. */
+#define CFT_TR_PH_WINDOW_MAX 8192
 
 const char *cft_tr_name(int fn);
 int         cft_tr_from_name(const char *s);
@@ -71,6 +108,14 @@ extern uint64_t cft_tr_escalations;  /* precision raises inside it */
 extern uint64_t cft_tr_max_prec;     /* deepest working precision used */
 extern uint64_t cft_tr_exact;        /* elements decided exactly */
 extern uint64_t cft_tr_neighbour;    /* elements decided by side */
+
+/* Phase 3's reduction, instrumented the same way and for the same
+ * reason: "how wide a window did it ever need" is a measurement in
+ * docs/TRANSCENDENTALS.md rather than a belief. */
+extern uint64_t cft_tr_reduce_calls;   /* arguments reduced mod pi/2 */
+extern uint64_t cft_tr_reduce_widen;   /* window widenings inside them */
+extern uint64_t cft_tr_max_window;     /* widest window used, in bits */
+extern uint64_t cft_tr_max_cancel;     /* deepest cancellation seen, bits */
 
 void cft_tr_reset_stats(void);
 

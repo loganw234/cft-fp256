@@ -1813,3 +1813,55 @@ an ABSOLUTE window around zero). Neither produced a wrong answer at
 any precision the contract uses - the forced-low run is what reached
 them - and both are fixed on the tree above, with the MPFR campaign
 re-run on the repaired pool.
+
+## 2026-09-03 - phase 3 of the transcendentals: the reduction against pi, and the hyperbolics (ABI 0.5)
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12. The first half
+of this phase - the constant, the model, the library with its
+reduction - was built by an agent that was stopped twice by server
+errors; the reviewer finished the tests, the harnesses, the bindings,
+the JavaScript surface and the docs in the same worktree, and every
+number here is from a run the reviewer made on the tree that ships.
+
+    2/pi                  270,336 bits generated (host/tools/gen_2opi.py), re-derived to
+                          the last bit from Chudnovsky in plain Python integers
+    worst-case search     fp32 29 bits (128 binades, every one), fp64 61 (1,024, every one),
+                          fp128 121 (every 16th of 16,384), fp256 245 (every 512th of 262,144);
+                          --validate: 219 instances vs exhaustive search, 0 disagreements
+    python/tests          944 passed, 1 skipped
+    transcend_check       280,670 comparisons over 29 functions, C == model;
+                          264,430 more with the C forced to start at 64 bits
+    make vectors          40 sets, 478,915 cases (242,915 transcendental)
+    make -C host test     api-test all contract checks passed (the phase-3 block included);
+                          478,915 cases replayed twice
+    mpfr-check            451,988 cases, 37,980 for the nine: 0 value, 0 flag mismatches;
+                          again with CFT_TRANSCEND_MINPREC=64: 0 mismatches, 48,301 escalations
+    reduction             9,855 arguments reduced, 0 widenings,
+                          widest window 1,184 bits, deepest cancellation 239 bits
+    cpptest               4,111 checks at C++17 and at C++20
+    test_cftmpfr          576 tests
+    node                  79 tests; page 69ff0ff911e9ce1e..., wasm 5718aa19e85dad2b...,
+                          67 exports, 140,869 bytes, two clean builds byte-identical
+    runner                20260903-073156-d729aef: vectors, libcft, transcend, mpfr, cpp, bindings,
+                          node, wasm - PASS, nothing skipped; libcft replays 634,915 cases at
+                          the generator's defaults (the runner regenerates rather than trusting
+                          vectors/out); node 425 s, wasm 312 s, cpp 426 s, transcend 244 s
+
+The two published worst cases of the reduction - 16367173 * 2^72 at
+binary32 and 0x1.6ac5b262ca1ffp+849 at binary64 - are in
+host/tests/api_test.c with their sines decided by the rule beside 1
+and their cosines (the reduced arguments themselves) with bits mpmath
+derived at 700 bits. A reduction that dropped the wrong bits of 2/pi
+would return the sine of a slightly different number, and those two
+lines would fail first.
+
+Negative control, run and restored: the SIDE of sin's neighbour
+witness inverted in `do_radian`, so sin is claimed to lie above a tiny
+argument. Caught by api-test ("sin(min subnormal) downward is +0"),
+by transcend_check.py at fp32 under roundTowardZero, by the
+conformance replay and by MPFR parity.
+
+Repeated on the tree that ships, after the docs above were committed:
+run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
+libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
+wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.

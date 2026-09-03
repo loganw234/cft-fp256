@@ -53,10 +53,11 @@ clause 5 - roundToIntegral, the conversions, scaleB/logB, nextUp/
 nextDown, classification, totalOrder, the signaling comparisons,
 remainder - are contract operations too, specified in their own
 section below, and so are the nine phase-1 transcendentals of clause 9
-(exp, expm1, exp2, log, log1p, log2, log10, pow, hypot) and the eleven
+(exp, expm1, exp2, log, log1p, log2, log10, pow, hypot), the eleven
 phase-2 trigonometrics (sinPi, cosPi, tanPi, asin, acos, atan, atan2,
-asinPi, acosPi, atanPi, atan2Pi), correctly
-rounded. Everything is scored the same way regardless of route:
+asinPi, acosPi, atanPi, atan2Pi) and the nine of phase 3 (sin, cos
+and tan of a radian argument; sinh, cosh, tanh, asinh, acosh, atanh),
+correctly rounded. Everything is scored the same way regardless of route:
 `python/cft_golden/softfloat.py` defines the bits.
 
 ADD/SUB/MUL are defined as operand-steered FMA (see
@@ -342,7 +343,7 @@ reduces by `x mod 2` and every operand is a dyadic rational, so the
 reduction is a mask on the encoding at every magnitude; the inverse
 functions have nothing to reduce and meet pi only as a factor of the
 answer. `sin`, `cos` and `tan` of a radian argument - the reduction
-against pi itself - are not in this contract yet.
+against pi itself - arrived as phase 3, below.
 
 What belongs here is what an independent implementation is scored on:
 
@@ -383,6 +384,64 @@ What belongs here is what an independent implementation is scored on:
   the same terms as phase 1.
 
 Like the nine, these issue no device pass: the device argument is
+context and the results are bit-identical across backends by
+construction.
+
+## The phase-3 radian trigonometry and the hyperbolics (clause 9.2)
+
+sin, cos, tan of a RADIAN argument, and sinh, cosh, tanh, asinh, acosh,
+atanh are contract operations with library entry points, added
+2026-09-03 as ABI 0.5, on exactly the terms the twenty above are:
+**correctly rounded, in all five attributes, at all four formats, with
+exact flags.**
+
+The first three are the reduction against pi that the two phases
+before them were defined to exclude. It is a Payne-Hanek reduction
+against a stored 2/pi of 270,336 bits - generated, never transcribed,
+derived twice - that measures the cancellation an argument causes and
+widens its window by exactly the deficit; past what the constant
+covers it refuses with a status. How close a representable argument
+can come to a multiple of pi/2 is a MEASUREMENT (29 bits at fp32 and
+61 at fp64 over every binade, 121 and 245 over sampled fp128 and fp256
+binades, against an allowance of about 7,000), not a theorem: the
+irrationality measure of pi is far too weak to bound it at this
+exponent range, and docs/TRANSCENDENTALS.md says so plainly. The
+reference does not share that reduction - mpmath reduces on its own
+inside its interval sine - so agreement is evidence rather than a
+shared derivation. The six hyperbolics are exp and log in different
+clothes and need no reduction at all.
+
+What belongs here is what an independent implementation is scored on:
+
+- **The exact cases are the zeros, and that is a theorem.**
+  Hermite-Lindemann makes sin, tan, sinh, tanh, asinh and atanh exact
+  only at +-0, cos and cosh only at 0 (giving 1), acosh only at 1
+  (giving +0). Every other result is inexact. `tanh(+-inf) = +-1` is a
+  limit that happens to be representable and raises nothing.
+- **sin, cos and tan of an infinity are invalid.** No limit exists.
+- **tan never signals divideByZero** - an odd multiple of pi/2 is
+  irrational, so no representable argument is a pole - but it CAN
+  overflow near one. sinh and cosh overflow for a large argument;
+  sin, cos, tanh, asinh, acosh and atanh cannot. Underflow occurs for
+  the six odd functions of a tiny argument and follows clause 7
+  through the same round_pack.
+- **`atanh(+-1) = +-infinity` with divideByZero**, 7.3's exact
+  infinity from a finite operand; `|x| > 1` is invalid, infinities
+  included. **acosh below 1 is invalid**, zeros and -infinity
+  included; `acosh(+inf) = +inf`.
+- **A tiny argument is decided by a SIDE.** sin, tanh and asinh lie
+  strictly on the zero side of a tiny x, tan, sinh and atanh strictly
+  on the far side, cos strictly below 1 and cosh strictly above it -
+  each with a threshold derived from the series, so a directed
+  rounding delivers the neighbour and no working precision was ever
+  needed to separate them.
+- **An input that cannot be shown correctly rounded is REFUSED**, on
+  the same terms as the other phases - here that includes an argument
+  whose cancellation against pi exceeds the stored constant's coverage,
+  which the measurement above puts more than an order of magnitude
+  beyond anything the formats have produced.
+
+Like the twenty, these issue no device pass: the device argument is
 context and the results are bit-identical across backends by
 construction.
 
@@ -507,7 +566,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` | the C library's ports of every contract operation | golden model, per-element flags |
-| `host/tests/transcend_check.py` | the twenty transcendentals, and again through the escalation path | golden model, per-element flags |
+| `host/tests/transcend_check.py` | the twenty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 

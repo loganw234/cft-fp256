@@ -81,6 +81,10 @@ uint64_t cft_tr_escalations;
 uint64_t cft_tr_max_prec;
 uint64_t cft_tr_exact;
 uint64_t cft_tr_neighbour;
+uint64_t cft_tr_reduce_calls;
+uint64_t cft_tr_reduce_widen;
+uint64_t cft_tr_max_window;
+uint64_t cft_tr_max_cancel;
 
 void cft_tr_reset_stats(void)
 {
@@ -90,6 +94,10 @@ void cft_tr_reset_stats(void)
     cft_tr_max_prec = 0;
     cft_tr_exact = 0;
     cft_tr_neighbour = 0;
+    cft_tr_reduce_calls = 0;
+    cft_tr_reduce_widen = 0;
+    cft_tr_max_window = 0;
+    cft_tr_max_cancel = 0;
 }
 
 /* ---- the working-precision schedule (mirrors the model) ----------- */
@@ -835,6 +843,426 @@ static int mp_over_pi(cft_mp *r, const cft_mp *a, int W)
     return cft_mp_mul(r, a, &inv, W);
 }
 
+/* ---- phase 3: the Payne-Hanek reduction against pi/2 ---------------- *
+ *
+ * `x mod (pi/2)` for a dyadic x of any magnitude the formats allow, in
+ * integer arithmetic, with the quadrant.
+ *
+ * THE IDENTITY. Write |x| = m * 2^e with m the p-bit significand, and
+ * 2/pi = sum_(j>=1) b_j 2^-j. Then
+ *
+ *     |x| * (2/pi) = m * sum_j b_j 2^(e-j)
+ *
+ * and every term with e - j >= 2 is m times a multiple of 4. Those
+ * terms cannot change the quadrant and cannot change the fraction, so
+ * they are dropped EXACTLY: the window of 2/pi starts at bit
+ * j0 = max(1, e-1) and the bits above it are never read. That is the
+ * whole of why a quarter-megabit constant is enough for an argument as
+ * large as 2^262143 - the window's START is an exponent-range question
+ * and its WIDTH is a precision question, and they are separate.
+ *
+ * THE CANCELLATION IS A MEASUREMENT. Take the low `wbits` of the
+ * product, read the quadrant off the two bits above the binary point,
+ * and the reduced fraction off the rest. If |x| happens to sit very
+ * close to a multiple of pi/2 that fraction has leading zeros, and the
+ * window must be that many bits wider to still deliver the working
+ * precision. How many is not a theorem: the irrationality measure of pi
+ * (mu < 7.104, Zeilberger-Zudilin 2020) permits 2^-1600000 at fp256,
+ * which is useless. So this routine MEASURES the cancellation from the
+ * bits it has, widens the window by exactly the deficit, and repeats -
+ * escalate, never guess - and refuses with CFT_ERR_INTERNAL past
+ * CFT_TR_PH_WINDOW_MAX. host/tools/pi_worstcase.py measures the real
+ * depth per format: 29 bits at fp32 and 61 at fp64 over every binade,
+ * 121 and 245 over sampled fp128 and fp256 binades, against an
+ * allowance of about seven thousand.
+ *
+ * The scratch below is a plain limb array rather than a cft_bn on
+ * purpose: cft_bn is 2048 bits, which would cap the cancellation
+ * allowance at a few hundred and make the CONTAINER the thing the
+ * contract refuses on. Nothing else in this file needs an integer this
+ * wide, and nothing else is allowed to use this one.
+ */
+
+#include "mp_2opi.h"
+
+#define TR_PH_LIMBS ((CFT_TR_PH_WINDOW_MAX + 512) / 32)
+
+typedef struct {
+    uint32_t v[TR_PH_LIMBS];        /* little-endian */
+} ph_int;
+
+/* Bits j0 .. j0+wbits-1 of 2/pi as a wbits-bit integer, most
+ * significant first. wbits is always a multiple of 32, which is what
+ * makes this one masked shift per limb rather than a bit loop. */
+static int ph_window(ph_int *B, long j0, int wbits)
+{
+    long s = j0 - 1;                     /* 0-based index into the stream */
+    int wi = (int)(s >> 5), off = (int)(s & 31);
+    int nw = wbits / 32, i;
+
+    if (s < 0 || wbits <= 0 || nw > TR_PH_LIMBS)
+        return 1;
+    if (wi + nw + 1 >= CFT_TWO_OVER_PI_WORDS)
+        return 1;                        /* would read past the constant */
+    memset(B->v, 0, sizeof B->v);
+    for (i = 0; i < nw; i++) {
+        uint32_t lo = cft_two_over_pi[wi + i];
+        uint32_t hi = cft_two_over_pi[wi + i + 1];
+        B->v[nw - 1 - i] = off ? ((lo << off) | (hi >> (32 - off))) : lo;
+    }
+    return 0;
+}
+
+/* P = B * m, schoolbook. m is a significand, so at most eight limbs. */
+static int ph_mul(ph_int *P, const ph_int *B, int bw, const cft_bn *m)
+{
+    int i, j, k;
+    memset(P->v, 0, sizeof P->v);
+    for (i = 0; i < m->n; i++) {
+        uint64_t carry = 0;
+        uint32_t mi = m->v[i];
+        if (!mi)
+            continue;
+        for (j = 0; j < bw; j++) {
+            uint64_t t;
+            if (i + j >= TR_PH_LIMBS)
+                return 1;
+            t = (uint64_t)B->v[j] * mi + P->v[i + j] + carry;
+            P->v[i + j] = (uint32_t)t;
+            carry = t >> 32;
+        }
+        for (k = i + bw; carry; k++) {
+            uint64_t t;
+            if (k >= TR_PH_LIMBS)
+                return 1;
+            t = (uint64_t)P->v[k] + carry;
+            P->v[k] = (uint32_t)t;
+            carry = t >> 32;
+        }
+    }
+    return 0;
+}
+
+static int ph_bit(const ph_int *P, long i)
+{
+    if (i < 0 || i >= (long)TR_PH_LIMBS * 32)
+        return 0;
+    return (int)((P->v[i >> 5] >> (i & 31)) & 1u);
+}
+
+static long ph_bitlen(const ph_int *P)
+{
+    int i;
+    for (i = TR_PH_LIMBS - 1; i >= 0; i--) {
+        if (P->v[i]) {
+            uint32_t w = P->v[i];
+            int b = 0;
+            while (w) { b++; w >>= 1; }
+            return (long)i * 32 + b;
+        }
+    }
+    return 0;
+}
+
+/* R = (2^d - P) for 0 < P < 2^d, as ~P + 1 over d bits. */
+static void ph_neg_mod_pow2(ph_int *R, const ph_int *P, long d)
+{
+    int nw = (int)((d + 31) >> 5), i;
+    uint64_t carry = 1;
+    if (nw > TR_PH_LIMBS)
+        nw = TR_PH_LIMBS;
+    memset(R->v, 0, sizeof R->v);
+    for (i = 0; i < nw; i++)
+        R->v[i] = ~P->v[i];
+    if (d & 31)
+        R->v[nw - 1] &= (uint32_t)((1u << (d & 31)) - 1u);
+    for (i = 0; i < nw && carry; i++) {
+        uint64_t t = (uint64_t)R->v[i] + carry;
+        R->v[i] = (uint32_t)t;
+        carry = t >> 32;
+    }
+    if (d & 31)
+        R->v[nw - 1] &= (uint32_t)((1u << (d & 31)) - 1u);
+}
+
+/* The low `d` bits of P, in place. */
+static void ph_mask_low(ph_int *P, long d)
+{
+    int nw = (int)((d + 31) >> 5), i;
+    if (nw >= TR_PH_LIMBS)
+        return;                          /* d covers the whole scratch */
+    for (i = nw; i < TR_PH_LIMBS; i++)
+        P->v[i] = 0;
+    if (d & 31)
+        P->v[nw - 1] &= (uint32_t)((1u << (d & 31)) - 1u);
+}
+
+/* The top `keep` bits of V (whose length is `b`) into a cft_bn, with
+ * the shift that was applied. */
+static void ph_top_bits(cft_bn *out, long *shift, const ph_int *V, long b,
+                        int keep)
+{
+    long s = b > (long)keep ? b - (long)keep : 0;
+    int wi = (int)(s >> 5), off = (int)(s & 31);
+    int need = (int)(((b - s) + 31) / 32) + 1, i;
+
+    if (need > CFT_BN_LIMBS)
+        need = CFT_BN_LIMBS;
+    cft_bn_zero(out);
+    for (i = 0; i < need; i++) {
+        uint32_t lo = (wi + i < TR_PH_LIMBS) ? V->v[wi + i] : 0u;
+        uint32_t hi = (wi + i + 1 < TR_PH_LIMBS) ? V->v[wi + i + 1] : 0u;
+        out->v[i] = off ? ((lo >> off) | (hi << (32 - off))) : lo;
+    }
+    out->n = need;
+    while (out->n > 0 && out->v[out->n - 1] == 0)
+        out->n--;
+    *shift = s;
+}
+
+/* The reduction constant, checked two ways that prove different things.
+ *
+ * 1. The TOP of the array against 2/pi derived from the pi in
+ *    mp_consts.h - which cft_mp_consts_selfcheck has already re-derived
+ *    from Machin's formula out of small-integer arithmetic that touches
+ *    no stored constant. That says the stored bit stream really is
+ *    2/pi, to the 1088 bits the other header carries. It says nothing
+ *    whatever about bit 1089 onward.
+ *
+ * 2. An FNV-1a checksum over every word, against the value the
+ *    generator computed. That says the array in this binary is the
+ *    array gen_2opi.py emitted - it catches a truncation, a byte swap,
+ *    a corrupted object file, an edit - and it says nothing about those
+ *    deep bits being 2/pi's either.
+ *
+ * Only regeneration proves the deep bits, and that is what
+ * python/tests/test_mp_consts.py does on every test run, twice: once
+ * against the generator and once against an INDEPENDENT Chudnovsky
+ * derivation in plain Python integers that shares nothing with mpmath.
+ * Saying which of the three proves what is the point of having three.
+ *
+ * Cached, with a sticky failure, for the reason phase 2's Machin
+ * derivation is cached: it is a property of compile-time data, and a
+ * bad header must not become good on the second call. */
+static int tr_2opi_ok(void)
+{
+    static int state;                    /* 0 not run, 1 ok, 2 failed */
+    const int W = 512;
+    ph_int B;
+    cft_bn bn, dm;
+    cft_mp got, pi, two, want;
+    uint64_t h = UINT64_C(0xcbf29ce484222325);
+    int i, k;
+
+    if (state)
+        return state == 1 ? 0 : 1;
+    state = 2;
+
+    for (i = 0; i < CFT_TWO_OVER_PI_WORDS; i++)
+        for (k = 0; k < 4; k++) {
+            h ^= (uint64_t)((cft_two_over_pi[i] >> (8 * k)) & 0xffu);
+            h *= UINT64_C(0x100000001b3);
+        }
+    if (h != CFT_TWO_OVER_PI_FNV1A)
+        return 1;
+
+    if (ph_window(&B, 1, W))
+        return 1;
+    cft_bn_zero(&bn);
+    for (i = 0; i < W / 32; i++)
+        bn.v[i] = B.v[i];
+    bn.n = W / 32;
+    while (bn.n > 0 && bn.v[bn.n - 1] == 0)
+        bn.n--;
+    if (cft_mp_set_bn(&got, W, 0, &bn, -W))
+        return 1;
+    if (cft_mp_const(&pi, CFT_MP_C_PI, W))
+        return 1;
+    if (cft_mp_set_ui(&two, W, 0, 1, 1))
+        return 1;
+    if (cft_mp_div(&want, &two, &pi, W))
+        return 1;
+    /* Both are W-bit normalisations of the same number, so the
+     * exponents match and the significands differ by the handful of
+     * units two truncations and one division cost. A WRONG constant
+     * differs by about 2^(W-1) of them. The comparison is done on the
+     * significands rather than through cft_mp_sub because that routine
+     * treats an exact cancellation of two inexact operands as a
+     * failure, and these two agreeing to the last bit is the case this
+     * check most hopes for. */
+    if (got.exp != want.exp)
+        return 1;
+    if (cft_bn_cmp(&got.m, &want.m) >= 0)
+        cft_bn_sub(&dm, &got.m, &want.m);
+    else
+        cft_bn_sub(&dm, &want.m, &got.m);
+    if (cft_bn_bitlen(&dm) > 32)
+        return 1;
+
+    state = 1;
+    return 0;
+}
+
+/* The reduction's answer. `t` is |x|*(2/pi) - n as a tracked mp with
+ * |t| <= about 1/2, and `quadrant` is n mod 4; the reduced argument
+ * itself is t * (pi/2) and is formed at each working precision by
+ * tr_eval, because the constant it multiplies is precision-dependent
+ * where t is not. */
+typedef struct {
+    int    quadrant;
+    long   t_exp2;                  /* floor(log2 |t|) */
+    cft_mp t;
+} tr_pi_red;
+
+static int tr_ph_reduce(tr_pi_red *R, const lane *a, const cft_fmt_desc *f)
+{
+    int p = f->prec;
+    int Wr = tr_wint(f, tr_prec_cap(f));    /* the deepest attempt's width */
+    long e = a->e;
+    long j0 = e - 1 < 1 ? 1 : e - 1;
+    int wbits = ((p + Wr + 64) + 31) & ~31;
+
+    cft_tr_reduce_calls++;
+    for (;;) {
+        ph_int B, P, T;
+        cft_bn tm;
+        long d, tb, vt, avail, sh;
+        int i2, n, tneg;
+
+        if (wbits > CFT_TR_PH_WINDOW_MAX)
+            return 1;                    /* deeper than the contract covers */
+        if (ph_window(&B, j0, wbits))
+            return 1;
+        if (ph_mul(&P, &B, wbits / 32, &a->m))
+            return 1;
+        d = j0 + wbits - 1 - e;          /* |x|*(2/pi) == P * 2^-d, mod 4 */
+        if (d <= 1)
+            return 1;                    /* wbits > p keeps this away */
+
+        /* The two bits above the point are the quadrant; the bit just
+         * below decides whether the nearest integer is that one or the
+         * next, and the remainder is the reduced fraction. Both are
+         * exact integer arithmetic on the window - no rounding decides
+         * a sign here, which is the same discipline phase 2 keeps with
+         * its mask. */
+        i2 = ph_bit(&P, d) | (ph_bit(&P, d + 1) << 1);
+        if (ph_bit(&P, d - 1)) {
+            ph_int Fr;
+            Fr = P;
+            ph_mask_low(&Fr, d);
+            ph_neg_mod_pow2(&T, &Fr, d);     /* |t| = 1 - phi */
+            n = i2 + 1;
+            tneg = 1;
+        } else {
+            T = P;
+            ph_mask_low(&T, d);
+            n = i2;
+            tneg = 0;
+        }
+        tb = ph_bitlen(&T);
+        if (tb == 0) {
+            /* The window saw an exact multiple of pi/2, which no
+             * nonzero dyadic is: it means the cancellation is at least
+             * as deep as the window, and there is nothing to widen BY.
+             * Double and look again. */
+            cft_tr_reduce_widen++;
+            wbits *= 2;
+            continue;
+        }
+        vt = tb - 1 - d;                 /* floor(log2 |t|) */
+
+        /* The dropped tail of 2/pi is below 2^-(j0+wbits-1), so the
+         * absolute error in |x|*(2/pi) is below 2^-avail. Relative to
+         * |t| that is 2^-(avail+vt), and the reduced argument has to
+         * carry the deepest working precision plus a guard. */
+        avail = j0 + wbits - 1 - e - p;
+        if (avail + vt < (long)Wr + 8) {
+            long deficit = (long)Wr + 8 - (avail + vt);
+            long want = (long)wbits + deficit + 32;
+            cft_tr_reduce_widen++;
+            wbits = (int)((want + 31) & ~(long)31);
+            continue;
+        }
+
+        if ((uint64_t)wbits > cft_tr_max_window)
+            cft_tr_max_window = (uint64_t)wbits;
+        if (lane_vexp(a) >= 0 && vt < -1) {
+            uint64_t c = (uint64_t)(-vt - 1);
+            if (c > cft_tr_max_cancel)
+                cft_tr_max_cancel = c;
+        }
+
+        ph_top_bits(&tm, &sh, &T, tb, Wr + 64);
+        if (cft_mp_set_bn(&R->t, Wr, tneg, &tm, sh - d))
+            return 1;
+        mp_bump(&R->t, 1);               /* the window's truncated tail */
+        R->quadrant = n & 3;
+        R->t_exp2 = vt;
+        return 0;
+    }
+}
+
+/* log(v) for an mp v > 1, treating its stored significand as exact and
+ * charging the value's own error back afterwards.
+ *
+ * mp_log_exact takes an exactly-known dyadic, which is what every
+ * phase-1 caller had. asinh, acosh and atanh do not: their logarithm's
+ * argument is itself computed. If the true value is within eps
+ * relatively of the stored one then the logarithms differ by at most
+ * 2*eps ABSOLUTELY, and dividing that by the result's own magnitude
+ * turns it back into the relative bound the type carries. Every caller
+ * here keeps |log v| above 0.48, so the conversion costs at most three
+ * doublings; a caller that did not would get a refusal and an
+ * escalation rather than a silent widening. */
+static int mp_log_of_mp(cft_mp *r, const cft_mp *v, int W)
+{
+    cft_mp l;
+    uint64_t add;
+    long E0;
+    int sh;
+
+    if (v->zero || v->sign)
+        return 1;
+    if (mp_log_exact(&l, &v->m, v->exp, W))
+        return 1;
+    if (l.zero)
+        return 1;                        /* v was exactly 1 */
+    E0 = cft_mp_exp2_of(&l);
+    if (E0 < -32)
+        return 1;                        /* too near 1 to convert the bound */
+    add = v->err;
+    sh = 1 - (int)E0;
+    if (sh > 0) {
+        if (sh >= 40 || add > (CFT_MP_ERR_MAX >> sh))
+            add = CFT_MP_ERR_MAX;
+        else
+            add <<= sh;
+    } else if (sh < 0) {
+        add >>= (-sh > 63 ? 63 : -sh);
+    }
+    mp_bump(&l, add);
+    cft_mp_copy(r, &l);
+    return 0;
+}
+
+/* log1p of a computed (not exactly known) positive value, in the two
+ * regimes phase 1's log1p already justifies: below 1 the atanh form
+ * never forms 1 + w, and above it the ordinary logarithm applies with
+ * no cancellation, because log(1 + w) is then above log 2. */
+static int mp_log1p_of_mp(cft_mp *r, const cft_mp *w, int W)
+{
+    cft_mp one, s;
+    if (w->zero)
+        return 1;                        /* the callers screen it */
+    if (cft_mp_exp2_of(w) < 0)
+        return mp_log1p_small(r, w, W);
+    if (cft_mp_set_ui(&one, W, 0, 1, 0))
+        return 1;
+    if (cft_mp_add(&s, &one, w, W))
+        return 1;
+    return mp_log_of_mp(r, &s, W);
+}
+
 /* ---- the evaluator ------------------------------------------------- */
 
 /* An internal function code, past the ABI's: the magnitude is
@@ -859,6 +1287,12 @@ typedef struct {
     int    want_cos;
     int    x_neg;
     int    quarters;
+    /* phase 3. The reduction against pi/2 is done ONCE, before the Ziv
+     * loop, at the width the deepest attempt could need: the quadrant
+     * is exact integer arithmetic and must not change between
+     * attempts, because the result's SIGN comes off it. Only the
+     * multiplication by pi/2 is redone per precision. */
+    tr_pi_red red;
 } tr_args;
 
 /* |f(a[,b])| at working precision W. The SIGN of the result is decided
@@ -1132,6 +1566,214 @@ static int tr_eval(const tr_args *A, int W, cft_mp *r)
         cft_mp_copy(r, &a);
         return 0;
     }
+
+    /* ---- phase 3 ---------------------------------------------- */
+
+    case CFT_TR_SIN:
+    case CFT_TR_COS:
+    case CFT_TR_TAN: {
+        cft_mp pi, v, sn, cs;
+        /* |r| = |t| * pi/2, with |t| <= about 1/2 from the reduction,
+         * so v lands in [0, pi/4] - exactly mp_sincos's domain, and
+         * exactly what phase 2 said phase 3 would inherit. */
+        if (cft_mp_const(&pi, CFT_MP_C_PI, Wi))
+            return 1;
+        cft_mp_shift(&pi, -1);                 /* pi/2, exactly */
+        if (cft_mp_mul(&v, &A->red.t, &pi, Wi))
+            return 1;
+        if (v.sign)
+            cft_mp_neg(&v);
+        if (mp_sincos(&sn, &cs, &v, Wi))
+            return 1;
+        if (A->fn == CFT_TR_TAN)
+            return A->k_even ? cft_mp_div(r, &sn, &cs, Wi)
+                             : cft_mp_div(r, &cs, &sn, Wi);
+        cft_mp_copy(r, A->want_cos ? &cs : &sn);
+        return 0;
+    }
+
+    case CFT_TR_SINH: {
+        cft_mp ax, u, s, q;
+        long v = lane_vexp(&A->a);
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (v <= -2) {
+            /* sinh(x) = u(u+2) / (2(u+1)) with u = expm1(x). For a
+             * small x every factor is positive and bounded away from
+             * zero, so nothing cancels - where (e^x - e^-x)/2 would
+             * lose every bit the answer has. */
+            if (mp_expm1_core(&u, &ax, Wi))
+                return 1;
+            if (cft_mp_set_ui(&s, Wi, 0, 1, 1))
+                return 1;
+            if (cft_mp_add(&t, &u, &s, Wi))         /* u + 2 */
+                return 1;
+            if (cft_mp_mul(&q, &u, &t, Wi))
+                return 1;
+            if (cft_mp_set_ui(&s, Wi, 0, 1, 0))
+                return 1;
+            if (cft_mp_add(&t, &u, &s, Wi))         /* u + 1 */
+                return 1;
+            if (cft_mp_div(r, &q, &t, Wi))
+                return 1;
+            cft_mp_shift(r, -1);
+            return 0;
+        }
+        /* |x| >= 1/2 puts e^|x| above 1.64 and 1/e^|x| below 0.61, so
+         * the difference keeps more than four fifths of the larger and
+         * costs at most one bit. */
+        if (mp_exp_full(&u, &ax, Wi))
+            return 1;
+        if (cft_mp_set_ui(&s, Wi, 0, 1, 0))
+            return 1;
+        if (cft_mp_div(&q, &s, &u, Wi))
+            return 1;
+        if (cft_mp_sub(r, &u, &q, Wi))
+            return 1;
+        cft_mp_shift(r, -1);
+        return 0;
+    }
+
+    case CFT_TR_COSH: {
+        cft_mp ax, E, one, q;
+        /* (E + 1/E)/2, and both terms are positive: cosh is the one
+         * function in this set with no cancellation anywhere. */
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (mp_exp_full(&E, &ax, Wi))
+            return 1;
+        if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+            return 1;
+        if (cft_mp_div(&q, &one, &E, Wi))
+            return 1;
+        if (cft_mp_add(r, &E, &q, Wi))
+            return 1;
+        cft_mp_shift(r, -1);
+        return 0;
+    }
+
+    case CFT_TR_TANH: {
+        cft_mp ax, u, two, d;
+        long v = lane_vexp(&A->a);
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        cft_mp_shift(&ax, 1);                       /* 2|x| */
+        if (cft_mp_set_ui(&two, Wi, 0, 1, 1))
+            return 1;
+        if (v <= -2) {
+            /* tanh(x) = u/(u+2) with u = expm1(2x): for a small x the
+             * numerator is about 2x and the denominator about 2, and
+             * neither is a difference. */
+            if (mp_expm1_core(&u, &ax, Wi))
+                return 1;
+        } else {
+            cft_mp E, one;
+            if (mp_exp_full(&E, &ax, Wi))
+                return 1;
+            if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+                return 1;
+            if (cft_mp_sub(&u, &E, &one, Wi))       /* e^2x - 1 >= e - 1 */
+                return 1;
+        }
+        if (cft_mp_add(&d, &u, &two, Wi))
+            return 1;
+        return cft_mp_div(r, &u, &d, Wi);
+    }
+
+    case CFT_TR_ASINH: {
+        cft_mp ax, sq, one, rt, w;
+        long v = lane_vexp(&A->a);
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+            return 1;
+        if (cft_mp_mul(&sq, &ax, &ax, Wi))
+            return 1;
+        if (cft_mp_add(&t, &sq, &one, Wi))          /* 1 + x^2 */
+            return 1;
+        if (cft_mp_sqrt(&rt, &t, Wi))
+            return 1;
+        if (v <= -2) {
+            /* asinh(x) = log1p(x + x^2/(1 + sqrt(1+x^2))). The second
+             * term is sqrt(1+x^2) - 1 written so that it is never
+             * formed as a difference; for |x| < 1/2 the whole argument
+             * stays below 0.62 and log1p's small regime finishes it. */
+            if (cft_mp_add(&t, &rt, &one, Wi))
+                return 1;
+            if (cft_mp_div(&w, &sq, &t, Wi))
+                return 1;
+            if (cft_mp_add(&t, &ax, &w, Wi))
+                return 1;
+            return mp_log1p_small(r, &t, Wi);
+        }
+        /* |x| >= 1/2 puts x + sqrt(1+x^2) above 1.618, so its logarithm
+         * is above 0.48 and the conversion in mp_log_of_mp costs three
+         * doublings of the bound and nothing else. */
+        if (cft_mp_add(&w, &ax, &rt, Wi))
+            return 1;
+        return mp_log_of_mp(r, &w, Wi);
+    }
+
+    case CFT_TR_ACOSH: {
+        cft_mp ax, one, d, s, pr, rt, w;
+        /* acosh(x) = log1p((x-1) + sqrt((x-1)(x+1))). For x near 1 the
+         * factor x - 1 is EXACT at the working precision - both
+         * operands are exact dyadics and Sterbenz applies - so the
+         * cancellation amplifies an error of zero, where sqrt(x^2 - 1)
+         * formed directly would lose every bit the answer has. Phase
+         * 1's log(m') and phase 2's asin root are the same shape. */
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+            return 1;
+        if (cft_mp_sub(&d, &ax, &one, Wi))
+            return 1;
+        if (d.zero || d.sign)
+            return 1;                    /* x <= 1 was handled upstream */
+        if (cft_mp_add(&s, &ax, &one, Wi))
+            return 1;
+        if (cft_mp_mul(&pr, &d, &s, Wi))
+            return 1;
+        if (cft_mp_sqrt(&rt, &pr, Wi))
+            return 1;
+        if (cft_mp_add(&w, &d, &rt, Wi))
+            return 1;
+        return mp_log1p_of_mp(r, &w, Wi);
+    }
+
+    case CFT_TR_ATANH: {
+        cft_mp ax, one, den, u;
+        long v = lane_vexp(&A->a);
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (v <= -3) {
+            /* |x| <= 1/4: the atanh series on the EXACT operand, which
+             * is the one place in this set where the argument carries
+             * no error at all. mp_atanh2 returns twice the value. */
+            if (mp_atanh2(r, &ax, Wi))
+                return 1;
+            cft_mp_shift(r, -1);
+            return 0;
+        }
+        /* atanh(x) = log1p(2x/(1-x))/2, and 1 - |x| is exact at every
+         * working precision this reaches (|x| > 1/8 there, so the
+         * difference needs at most p + 3 bits), which is what keeps the
+         * cancellation next to 1 free. */
+        if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+            return 1;
+        if (cft_mp_sub(&den, &one, &ax, Wi))
+            return 1;
+        if (den.zero || den.sign)
+            return 1;                    /* |x| >= 1 was handled upstream */
+        if (cft_mp_div(&u, &ax, &den, Wi))
+            return 1;
+        cft_mp_shift(&u, 1);
+        if (mp_log1p_of_mp(r, &u, Wi))
+            return 1;
+        cft_mp_shift(r, -1);
+        return 0;
+    }
+
     default:
         return 1;
     }
@@ -1235,6 +1877,14 @@ static int tr_log2_estimate(const tr_args *A, cft_mp *q)
     case CFT_TR_EXP:
     case CFT_TR_EXPM1:
         if (cft_mp_set_bn(&x, W, A->a.sign, &A->a.m, A->a.e))
+            return 1;
+        return cft_mp_mul(q, &x, &e2, W);
+    case CFT_TR_SINH:
+    case CFT_TR_COSH:
+        /* log2 of e^|x|, which brackets both: sinh and cosh lie between
+         * e^|x|/4 and e^|x| for every |x| >= 1, so an enclosure of this
+         * above emax + 3 proves the result is above 2^(emax+1). */
+        if (cft_mp_set_bn(&x, W, 0, &A->a.m, A->a.e))
             return 1;
         return cft_mp_mul(q, &x, &e2, W);
     case CFT_TR_EXP2:
@@ -2388,6 +3038,335 @@ static cft_status do_atan2_family(const cft_fmt_desc *f, int fn,
     return tr_ziv(&A, sign, rnd, out, flags);
 }
 
+/* ---- phase 3 drivers ------------------------------------------------ */
+
+/* sin, cos and tan of a RADIAN argument.
+ *
+ * Everything above the reduction is phase 2's do_pi_trig, line for
+ * line: the same quadrant-to-sign table, the same "which series is the
+ * magnitude" rule, the same insistence that no evaluation decides a
+ * sign. What changed is where the quadrant comes from - a mask on the
+ * encoding there, a Payne-Hanek window here - and that the exact cases
+ * collapsed to one. sin(x), cos(x) and tan(x) of a nonzero dyadic x are
+ * transcendental (Hermite-Lindemann: sin(x) = a algebraic would make
+ * e^(ix) a root of z^2 - 2iaz - 1 and hence algebraic), so the only
+ * exact arguments are the zeros - where sinPi and tanPi had the half-
+ * and quarter-integers and cosPi had a pole-free table of its own. */
+static cft_status do_radian(const cft_fmt_desc *f, int fn, const lane *a,
+                            int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    long ex, vr;
+    int sin_neg, cos_neg, sign, k, k_even;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        /* No limit exists: 9.2.1 makes all three invalid, exactly as it
+         * does for sinPi, cosPi and tanPi. */
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        if (fn == CFT_TR_COS)
+            put_one(f, 0, out);                 /* cos(+-0) = 1 */
+        else
+            cft_sf_zero(f, a->sign, out);       /* sin/tan(+-0) = +-0 */
+        return CFT_OK;
+    }
+
+    /* The tiny-argument rules, on the OPERAND: there the reduction is
+     * the identity, so these are statements about x itself.
+     *   sin(x) - x = -x^3/6 + ...   below x, by at most |x|^3/6
+     *   tan(x) - x = +x^3/3 + ...   above x, by at most 0.357|x|^3
+     *   1 - cos(x) <= x^2/2         below 1
+     * Each compared against a quarter of the grid step, the way phase
+     * 2 derives asin's and atan's; cos's threshold is one worse than
+     * cosh's because the gap below 1 is half the gap above it. */
+    ex = lane_vexp(a);
+    if (fn == CFT_TR_SIN && 2 * ex + (long)f->prec + 2 <= 0)
+        return round_neighbour(f, a, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    if (fn == CFT_TR_TAN && 2 * ex + (long)f->prec + 3 <= 0)
+        return round_neighbour(f, a, 1, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    if (fn == CFT_TR_COS && 2 * ex + (long)f->prec + 3 <= 0)
+        return round_side_of(f, 0, 0, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    if (tr_ph_reduce(&A.red, a, f))
+        return CFT_ERR_INTERNAL;         /* the loud refusal, and the only
+                                          * one this phase adds */
+    k = A.red.quadrant;
+    k_even = !(k & 1);
+    A.k_even = k_even;
+
+    switch (k & 3) {
+    case 0:  sin_neg = A.red.t.sign;  cos_neg = 0;                break;
+    case 1:  sin_neg = 0;             cos_neg = !A.red.t.sign;    break;
+    case 2:  sin_neg = !A.red.t.sign; cos_neg = 1;                break;
+    default: sin_neg = 1;             cos_neg = A.red.t.sign;     break;
+    }
+    if (fn == CFT_TR_SIN)
+        sign = a->sign ^ sin_neg;               /* odd function */
+    else if (fn == CFT_TR_COS)
+        sign = cos_neg;                         /* even function */
+    else
+        sign = a->sign ^ sin_neg ^ cos_neg;     /* the quotient's */
+
+    A.want_cos = (fn == CFT_TR_COS) ? k_even : !k_even;
+
+    /* The one rule the reduced argument needs. When the magnitude is
+     * cos(v) and v is tiny - which is x sitting a hair from a multiple
+     * of pi/2, the deep-cancellation case - the answer is inside half
+     * the gap below 1 and no working precision separates it. |r| is at
+     * most 2^(t_exp2+1), so 2v + p + 3 <= 0 is the same condition
+     * cosPi's rule has, on the reduced argument rather than on a mask.
+     *
+     * tan gets no such rule: |tan| near 1 would need |r| within
+     * 2^-(p+2) of pi/4, which is a coincidence of a different order
+     * from any this reduction has measured, and if one occurred the
+     * loop would refuse rather than guess. */
+    vr = A.red.t_exp2 + 1;
+    if (fn != CFT_TR_TAN && A.want_cos && 2 * vr + (long)f->prec + 3 <= 0)
+        return round_side_of(f, sign, 0, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
+/* sinh and cosh: one exponential each, and the overflow screen that
+ * keeps mp_exp_full from ever being asked for e^(2^262143). */
+static cft_status do_sinh_cosh(const cft_fmt_desc *f, int fn, const lane *a,
+                               int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    int is_cosh = (fn == CFT_TR_COSH);
+    int sign = is_cosh ? 0 : a->sign;
+    long ex;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        cft_sf_inf(f, is_cosh ? 0 : a->sign, out);
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        if (is_cosh)
+            put_one(f, 0, out);                 /* cosh(+-0) = 1 */
+        else
+            cft_sf_zero(f, a->sign, out);       /* sinh(+-0) = +-0 */
+        return CFT_OK;
+    }
+
+    ex = lane_vexp(a);
+    if (!is_cosh && 2 * ex + (long)f->prec + 2 <= 0)
+        /* sinh(x) - x = x^3/6 + ... has the sign of x and is at most
+         * 0.17|x|^3: asin's threshold, for the series that differs from
+         * sin's only in the sign of every second term. */
+        return round_neighbour(f, a, 1, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    if (is_cosh && 2 * ex + (long)f->prec + 2 <= 0)
+        /* cosh(x) - 1 = x^2/2 + ... > 0, at most 0.51x^2, against half
+         * the gap ABOVE 1, which is 2^-p - twice the gap below it. */
+        return round_side_of(f, 0, 0, 1, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    A.a.sign = 0;
+
+    {
+        cft_mp q;
+        if (tr_log2_estimate(&A, &q))
+            return CFT_ERR_INTERNAL;
+        if (cft_mp_cmp_int(&q, (int64_t)f->emax + 3) > 0)
+            return round_overflowing(f, sign, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
+/* tanh, the one function in this phase whose infinity is an exact
+ * finite value. */
+static cft_status do_tanh(const cft_fmt_desc *f, const lane *a, int rnd,
+                          cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    long ex;
+    int bl, v;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        put_one(f, a->sign, out);               /* tanh(+-inf) = +-1 */
+        return CFT_OK;                          /* a limit, and exact */
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);
+        return CFT_OK;
+    }
+
+    ex = lane_vexp(a);
+    if (2 * ex + (long)f->prec + 3 <= 0)
+        /* tanh(x) - x = -x^3/3 + ... lies on the zero side of x, by at
+         * most 0.357|x|^3: atan's rule for atan's series with the signs
+         * flipped. */
+        return round_neighbour(f, a, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    for (bl = 0, v = f->prec + 2; v; v >>= 1)
+        bl++;
+    if (ex >= bl)
+        /* 1 - tanh(x) = 2/(e^2x + 1) < 2 e^-2x, inside half the gap
+         * below 1 once x > 0.347(p+2). 2^ex >= p+2 implies that with
+         * room, and it is an integer test on the encoding. */
+        return round_side_of(f, a->sign, 0, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_TANH;
+    A.a = *a;
+    A.a.sign = 0;
+    return tr_ziv(&A, a->sign, rnd, out, flags);
+}
+
+static cft_status do_asinh(const cft_fmt_desc *f, const lane *a, int rnd,
+                           cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    long ex;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        cft_sf_inf(f, a->sign, out);
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);
+        return CFT_OK;
+    }
+
+    ex = lane_vexp(a);
+    if (2 * ex + (long)f->prec + 2 <= 0)
+        /* asinh(x) - x = -x^3/6 + ... lies on the zero side of x: sin's
+         * rule exactly, and the mirror of sinh's. */
+        return round_neighbour(f, a, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    /* No overflow screen, and none is possible: |asinh(x)| is below
+     * log(2|x| + 1), about 181,705 at the top of fp256. */
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_ASINH;
+    A.a = *a;
+    A.a.sign = 0;
+    return tr_ziv(&A, a->sign, rnd, out, flags);
+}
+
+/* acosh, whose domain is [1, +inf) and whose only exact case is its
+ * left endpoint. No neighbour rule: near 1 the answer behaves like
+ * sqrt(2(x-1)), which is not beside anything the format holds - the
+ * same reason phase 2's acos has none near 1. */
+static cft_status do_acosh(const cft_fmt_desc *f, const lane *a, int rnd,
+                           cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        if (a->sign) {
+            cft_sf_qnan(f, out);
+            *flags = CFT_SF_INVALID;
+        } else {
+            cft_sf_inf(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO || a->sign || lane_vexp(a) < 0) {
+        cft_sf_qnan(f, out);                    /* x < 1 */
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (lane_is_one(a)) {
+        cft_tr_exact++;
+        cft_sf_zero(f, 0, out);                 /* acosh(1) = +0 */
+        return CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_ACOSH;
+    A.a = *a;
+    return tr_ziv(&A, 0, rnd, out, flags);
+}
+
+static cft_status do_atanh(const cft_fmt_desc *f, const lane *a, int rnd,
+                           cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    long ex;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);
+        return CFT_OK;
+    }
+    if (lane_is_one(a)) {
+        /* The pole. 754-2019 7.3 raises divideByZero exactly where an
+         * operation on finite operands has an exact infinite result,
+         * which is the row tanPi takes at a half-integer. */
+        cft_sf_inf(f, a->sign, out);
+        *flags = CFT_SF_DIVZERO;
+        return CFT_OK;
+    }
+    if (lane_mag_gt_one(a)) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+
+    ex = lane_vexp(a);
+    if (2 * ex + (long)f->prec + 3 <= 0)
+        /* atanh(x) - x = x^3/3 + ... has the sign of x: tan's rule, and
+         * the mirror of tanh's. */
+        return round_neighbour(f, a, 1, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_ATANH;
+    A.a = *a;
+    A.a.sign = 0;
+    return tr_ziv(&A, a->sign, rnd, out, flags);
+}
+
 /* ---- the public entry points ---------------------------------------- */
 
 static int rnd_ok(cft_round rnd)
@@ -2437,6 +3416,8 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
         return CFT_ERR_INVALID_ARGUMENT;
     if (cft_mp_consts_selfcheck())
         return CFT_ERR_INTERNAL;
+    if (fn >= CFT_TR_SIN && fn <= CFT_TR_TAN && tr_2opi_ok())
+        return CFT_ERR_INTERNAL;         /* only these three read 2/pi */
 
     for (i = 0; i < n; i++) {
         lane la, lb;
@@ -2487,6 +3468,27 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
         case CFT_TR_ATAN2:
         case CFT_TR_ATAN2PI:
             st = do_atan2_family(f, fn, &la, &lb, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_SIN:
+        case CFT_TR_COS:
+        case CFT_TR_TAN:
+            st = do_radian(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_SINH:
+        case CFT_TR_COSH:
+            st = do_sinh_cosh(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_TANH:
+            st = do_tanh(f, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ASINH:
+            st = do_asinh(f, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ACOSH:
+            st = do_acosh(f, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ATANH:
+            st = do_atanh(f, &la, (int)rnd, &out, &fl);
             break;
         default:
             return CFT_ERR_INVALID_ARGUMENT;
@@ -2558,6 +3560,16 @@ CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
     return tr_batch(dev, CFT_TR_ATAN2PI, fmt, rnd, a, b, d, n, flags_out);
 }
 
+TR_UNARY(cft_sin,   CFT_TR_SIN)
+TR_UNARY(cft_cos,   CFT_TR_COS)
+TR_UNARY(cft_tan,   CFT_TR_TAN)
+TR_UNARY(cft_sinh,  CFT_TR_SINH)
+TR_UNARY(cft_cosh,  CFT_TR_COSH)
+TR_UNARY(cft_tanh,  CFT_TR_TANH)
+TR_UNARY(cft_asinh, CFT_TR_ASINH)
+TR_UNARY(cft_acosh, CFT_TR_ACOSH)
+TR_UNARY(cft_atanh, CFT_TR_ATANH)
+
 const char *cft_tr_name(int fn)
 {
     switch (fn) {
@@ -2581,6 +3593,15 @@ const char *cft_tr_name(int fn)
     case CFT_TR_ACOSPI:  return "acospi";
     case CFT_TR_ATANPI:  return "atanpi";
     case CFT_TR_ATAN2PI: return "atan2pi";
+    case CFT_TR_SIN:     return "sin";
+    case CFT_TR_COS:     return "cos";
+    case CFT_TR_TAN:     return "tan";
+    case CFT_TR_SINH:    return "sinh";
+    case CFT_TR_COSH:    return "cosh";
+    case CFT_TR_TANH:    return "tanh";
+    case CFT_TR_ASINH:   return "asinh";
+    case CFT_TR_ACOSH:   return "acosh";
+    case CFT_TR_ATANH:   return "atanh";
     default:             return "unknown";
     }
 }

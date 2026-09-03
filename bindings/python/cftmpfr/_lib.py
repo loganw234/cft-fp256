@@ -214,13 +214,15 @@ def _bind(lib):
                              c_size_t, u32p, u32p]
     lib.cft_sqrt.restype = c_int
 
-    # The phase-1 transcendentals (ABI 0.3). Host operations, so no
-    # bus word: the argument list ends at the flags pointer.
+    # The transcendentals (ABI 0.3, 0.4 and 0.5). Host operations, so
+    # no bus word: the argument list ends at the flags pointer.
     for _name in ("cft_exp", "cft_expm1", "cft_exp2", "cft_log",
                   "cft_log1p", "cft_log2", "cft_log10",
                   "cft_sinpi", "cft_cospi", "cft_tanpi", "cft_asin",
                   "cft_acos", "cft_atan", "cft_asinpi", "cft_acospi",
-                  "cft_atanpi"):
+                  "cft_atanpi",
+                  "cft_sin", "cft_cos", "cft_tan", "cft_sinh", "cft_cosh",
+                  "cft_tanh", "cft_asinh", "cft_acosh", "cft_atanh"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_size_t, ctypes.POINTER(c_uint32)]
@@ -391,18 +393,24 @@ def sqrt(handle, fmt, rnd, a, n, esz):
 # ABI 0.4's eleven are on the same footing. The Pi-variants are the ones
 # a numerics stack most often has to fake - Python's own math module has
 # no sinpi at all - and they are the ones whose exact cases are largest.
+#
+# ABI 0.5's nine complete the elementary set: sin, cos and tan of a
+# RADIAN argument, reduced against pi inside the library at any
+# magnitude, and the six hyperbolics.
 # ---------------------------------------------------------------------
 
 TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
                    "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
-                   "asinpi", "acospi", "atanpi")
+                   "asinpi", "acospi", "atanpi",
+                   "sin", "cos", "tan", "sinh", "cosh", "tanh",
+                   "asinh", "acosh", "atanh")
 TRANSCEND_BINARY = ("pow", "hypot", "atan2", "atan2pi")
 TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY
 
 
 def transcend(handle, name, fmt, rnd, a, b, n, esz):
-    """One of the twenty, over n elements. b is None for the unary
-    sixteen. Returns (result bytes, flag word)."""
+    """One of the twenty-nine, over n elements. b is None for the unary
+    twenty-five. Returns (result bytes, flag word)."""
     if name not in TRANSCEND:
         raise ValueError(f"unknown transcendental {name!r}")
     d = ctypes.create_string_buffer(n * esz)

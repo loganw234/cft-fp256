@@ -374,6 +374,18 @@ export class Float {
   atan2(x) { return this._ctx.atan2(this, x); }
   atan2pi(x) { return this._ctx.atan2pi(this, x); }
 
+  /** The phase-3 radian trigonometry and the hyperbolics (ABI 0.5),
+   *  same terms. sin, cos and tan take RADIANS. */
+  sin() { return this._ctx.sin(this); }
+  cos() { return this._ctx.cos(this); }
+  tan() { return this._ctx.tan(this); }
+  sinh() { return this._ctx.sinh(this); }
+  cosh() { return this._ctx.cosh(this); }
+  tanh() { return this._ctx.tanh(this); }
+  asinh() { return this._ctx.asinh(this); }
+  acosh() { return this._ctx.acosh(this); }
+  atanh() { return this._ctx.atanh(this); }
+
   lt(y) { return this._ctx.lt(this, y); }
   le(y) { return this._ctx.le(this, y); }
   eq(y) { return this._ctx.eq(this, y); }
@@ -955,6 +967,57 @@ export class Context {
    *  atan2 of the same operands is an inexact +-pi, which is in one
    *  line why this is a separate function. */
   atan2pi(y, x) { return this._transcend2("atan2pi", y, x); }
+
+  // -- the phase-3 radian trigonometry and the hyperbolics (ABI 0.5) --
+  //
+  // What phase 2 was defined to exclude: sin, cos and tan of a RADIAN
+  // argument, reduced against pi INSIDE the library - a Payne-Hanek
+  // reduction against a stored 2/pi of a quarter of a million bits, at
+  // any magnitude the format holds - and the six hyperbolics, which
+  // are exp and log in different clothes and need no reduction at all.
+  // Same promise, same machinery, same loud refusal past what the
+  // constant covers (cft.h, docs/TRANSCENDENTALS.md).
+  //
+  // The exact cases are the zeros, and that is a theorem
+  // (Hermite-Lindemann): sin, tan, sinh, tanh, asinh and atanh at +-0,
+  // cos and cosh at 0 (giving 1), acosh at 1 (giving +0). Everything
+  // else is inexact.
+
+  /** sin(x), x in RADIANS. Exact only at +-0, where it is +-0; an
+   *  infinity is invalid, there being no limit. */
+  sin(x) { return this._transcend1("sin", x); }
+
+  /** cos(x) in radians. cos(+-0) = 1 is the only exact case; an
+   *  infinity is invalid. */
+  cos(x) { return this._transcend1("cos", x); }
+
+  /** tan(x) in radians. Exact only at +-0. No representable argument is
+   *  a pole (an odd multiple of pi/2 is irrational), so it never
+   *  signals divideByZero - but it can overflow near one. */
+  tan(x) { return this._transcend1("tan", x); }
+
+  /** sinh(x). Odd, exact only at +-0, sinh(+-inf) = +-inf, and it
+   *  overflows for a large argument like any exponential. */
+  sinh(x) { return this._transcend1("sinh", x); }
+
+  /** cosh(x). Even, never below 1, exact only at cosh(+-0) = 1. */
+  cosh(x) { return this._transcend1("cosh", x); }
+
+  /** tanh(x). Odd, exact at +-0, and tanh(+-inf) = +-1 EXACTLY - a
+   *  limit that happens to be representable, raising nothing. */
+  tanh(x) { return this._transcend1("tanh", x); }
+
+  /** asinh(x). Odd, exact only at +-0; asinh(+-inf) = +-inf. */
+  asinh(x) { return this._transcend1("asinh", x); }
+
+  /** acosh(x) on [1, +inf). acosh(1) = +0 exactly; every x below 1 is
+   *  invalid - zeros, negatives and -inf included. */
+  acosh(x) { return this._transcend1("acosh", x); }
+
+  /** atanh(x) on (-1, 1). Exact only at +-0; atanh(+-1) is +-inf with
+   *  divideByZero (7.3's exact infinity, the row tanPi takes at a
+   *  pole); |x| > 1 is invalid, infinities included. */
+  atanh(x) { return this._transcend1("atanh", x); }
 
   // -- clause 5 ----------------------------------------------------
 
