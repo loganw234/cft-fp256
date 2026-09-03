@@ -24,3 +24,5 @@ Makefile text eol=lf
 *.jpg binary
 *.xclbin binary
 *.xo binary
+# WebAssembly modules are binary; say so rather than let git sniff it
+*.wasm binary
