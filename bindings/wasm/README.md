@@ -73,8 +73,11 @@ emcc version these images carry, and `build.sh` checks that at
 runtime: an emcc that is not 6.0.9 **refuses to build** unless
 `CFT_WASM_EMCC_ANY=1` says otherwise, because the page is a committed
 build product whose provenance block names its toolchain, and a page
-built by a different one should never be committable by accident.
-Stages:
+built by a different one should never be committable by accident. The
+check is stage 0, before the minute of vector generation, and it was
+watched working on 2026-09-02 with a stub `emcc` earlier on `PATH`:
+it refuses at once with the pinned version in the message, and under
+the override it warns and proceeds. Stages:
 
 1. regenerate the published vector sets into `build/vectors/` with
    the exact `make vectors` arguments (deterministic, seed 3; the

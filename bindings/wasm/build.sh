@@ -18,6 +18,9 @@
 #
 # Stages (all inside the container):
 #
+#   0  refuse an emcc that is not the pinned version, before spending
+#      a minute on vectors. CFT_WASM_EMCC_ANY=1 downgrades it to a
+#      warning, for trying a new emsdk on purpose.
 #   1  regenerate the published vector sets into build/vectors/ with
 #      the exact `make vectors` arguments. Vectors are derived data
 #      (gitignored); the build regenerates its own copy rather than
@@ -105,6 +108,38 @@ die() { echo "build.sh: $*" >&2; exit 1; }
 OUT=bindings/wasm/build
 mkdir -p "$OUT"
 
+# The toolchain check comes FIRST, before a minute of vector
+# generation, because a build that is going to be refused should be
+# refused immediately. "6.0.9 (4e42238...)": the version and commit,
+# not the banner prose.
+EMCC_BANNER="$(emcc --version)"
+EMCC_VERSION="$(printf '%s\n' "$EMCC_BANNER" |
+    grep -oE '[0-9]+\.[0-9]+\.[0-9]+ \([0-9a-f]+\)' | sed -n '1p')"
+EMCC_DOTTED="${EMCC_VERSION%% *}"
+echo "== stage 0: toolchain =="
+echo "emcc ${EMCC_VERSION:-$(printf '%s\n' "$EMCC_BANNER" | sed -n '1p')}"
+
+# The page is a committed build product and its provenance block names
+# the toolchain that made it, so a build from a DIFFERENT emcc would
+# either produce a page whose provenance is a surprise to the next
+# reader or, worse, get committed as if it were the pinned one. It is
+# refused. The escape hatch exists because trying a new emsdk is a
+# legitimate thing to do - it is just never the thing you ship without
+# saying so.
+if [ "$EMCC_DOTTED" != "$EMCC_EXPECT" ]; then
+    if [ "${CFT_WASM_EMCC_ANY:-0}" = "1" ]; then
+        echo "build.sh: WARNING - emcc ${EMCC_DOTTED:-?}, expected" \
+             "$EMCC_EXPECT (CFT_WASM_EMCC_ANY=1). The page this produces" \
+             "is NOT the pinned build; do not commit it without changing" \
+             "EMSDK_TAG and saying why." >&2
+    else
+        die "emcc ${EMCC_DOTTED:-?}, but this build is pinned to $EMCC_EXPECT
+    (image $IMAGE). Run the script without --inside and let it pull the
+    pinned image, or set CFT_WASM_EMCC_ANY=1 to build with this one
+    anyway - knowing the result is not the pinned page."
+    fi
+fi
+
 # The user-facing regeneration command: identical arguments to `make
 # vectors`, and to stage 1 below except for --out. It is what the
 # page tells people to run for droppable full sets, so the sample and
@@ -118,34 +153,6 @@ echo "== stage 1: vectors (deterministic, seed 3) =="
 python3 vectors/gen_vectors.py --out "$OUT/vectors" $GEN_ARGS
 
 echo "== stage 2: emcc =="
-# "6.0.9 (4e42238...)": the version and commit, not the banner prose.
-EMCC_BANNER="$(emcc --version)"
-EMCC_VERSION="$(printf '%s\n' "$EMCC_BANNER" |
-    grep -oE '[0-9]+\.[0-9]+\.[0-9]+ \([0-9a-f]+\)' | sed -n '1p')"
-EMCC_DOTTED="${EMCC_VERSION%% *}"
-echo "emcc $EMCC_VERSION"
-
-# The page is a committed build product and its provenance block names
-# the toolchain that made it, so a build from a DIFFERENT emcc would
-# either produce a page whose provenance is a surprise to the next
-# reader or, worse, get committed as if it were the pinned one. It is
-# refused. The escape hatch exists because trying a new emsdk is a
-# legitimate thing to do - it is just never the thing you ship without
-# saying so.
-if [ "$EMCC_DOTTED" != "$EMCC_EXPECT" ]; then
-    if [ "${CFT_WASM_EMCC_ANY:-0}" = "1" ]; then
-        echo "build.sh: WARNING - emcc $EMCC_DOTTED, expected " \
-             "$EMCC_EXPECT (CFT_WASM_EMCC_ANY=1). The page this " \
-             "produces is NOT the pinned build; do not commit it " \
-             "without changing EMSDK_TAG and saying why." >&2
-    else
-        die "emcc $EMCC_DOTTED, but this build is pinned to $EMCC_EXPECT
-    (image $IMAGE). Run the script without --inside and let it pull the
-    pinned image, or set CFT_WASM_EMCC_ANY=1 to build with this one
-    anyway - knowing the result is not the pinned page."
-    fi
-fi
-
 # The library sources, asked of host/Makefile rather than typed here.
 # --eval injects a target into the real Makefile, so SRC is whatever
 # that file says today, with its own conditionals applied (XRT stays
