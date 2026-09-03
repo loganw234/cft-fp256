@@ -1,0 +1,28 @@
+{
+  "name": "cft-node",
+  "version": "0.2.0",
+  "private": true,
+  "description": "libcft (IEEE binary32/64/128/256, bit-exact) in Node, through the same wasm module the browser conformance page runs",
+  "license": "Apache-2.0",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./lib": "./lib.mjs",
+    "./core": "./core.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test.mjs",
+    "conformance": "node conformance.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "lib.mjs",
+    "core.mjs",
+    "cft_node.js",
+    "cft_node.wasm",
+    "README.md"
+  ]
+}
