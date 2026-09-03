@@ -22,7 +22,7 @@ per row and updated when it changes, the census way: no row says more
 than its diff has shown.
 
 Worth stating once, because it is why this comparison survives being
-run from seven languages: the checksum is FNV-1a over the raw output
+run from eight languages: the checksum is FNV-1a over the raw output
 encodings, printed as hex. No port formats or parses a decimal
 floating-point number anywhere in the line being diffed, so a locale,
 a printf rounding rule, a `-0` spelling and a language's idea of `inf`
@@ -39,6 +39,7 @@ output lives in its own header and is compared by eye.
 | Language | Path | What exists | Verified | Notes |
 |---|---|---|---|---|
 | C | `host/examples/vector_fma.c` | the reference example; the header IS the binding | Windows 2026-09-02 + Linux 2026-09-01 | `cft.h` is the whole contract surface |
+| C++ | `host/include/cft.hpp`, `host/examples/vector_fma.cpp`, `host/tests/cpp_api_test.cpp` | header-only wrapper: RAII for the three handles, a fixed-width byte type per format, span batches, and a Context/Float layer of the same shape as cftmpfr's and bindings/node's; plus the example and a test that issues every entry point twice | Windows 2026-09-02 (mingw64 g++ 16.1.0), at **both** `-std=c++17` and `-std=c++20`: the example's four checksums diff clean against the C example (`make -C host examples-lang`), and `make -C host cpptest` passes 2,871 checks each way including a 236,000-case `cft_conformance` replay through the wrapper | computes nothing: every result is a libcft call, and the test is the proof - each entry point is issued through `cft.hpp` and through `cft.h` on the same bytes, compared for identical encodings AND identical flags. Operators are bound to an explicit Context (format + attribute) because a free `operator+` on a bare value type would need a hidden global attribute; the header says so at length |
 | Fortran | `host/examples/vector_fma.f90` | example via iso_c_binding | Linux, gfortran 13.3 (`make -C host fortran`); the example's header carries no date | the constituency the C ABI was chosen for |
 | Python (ctypes) | `host/examples/vector_fma.py`, `vector_fma_ctypes.py` | example + the diff/seq/reduce/divsqrt check harnesses | Windows 2026-09-02 + Linux 2026-09-01, every `make -C host test` | no build step, no generated bindings |
 | Python (package) | `bindings/python/cftmpfr/` | full package: Context/Float scalar ops, batch ops, gmpy2 interop | Windows 2026-09-02 (80 tests; 300k/300k bit-identical to gmpy2) | see Drop-ins below |
@@ -69,6 +70,23 @@ cases, clean. Fortran, Julia, Go and R were NOT re-run: that host
 carries no gfortran, julia, go or Rscript, so those four rows stand on
 their dated Linux runs above and on nothing newer.
 
+**C++ added 2026-09-02**, same host and toolchain. `host/include/cft.hpp`
+is header-only over the same ABI, so its example links `libcft.a` and
+its output is diffed like every other language's: `examples-lang`'s
+new `c++` leg printed the canonical four and matched. The wrapper's
+own gate is `make -C host cpptest`, which builds
+`host/tests/cpp_api_test.cpp` twice - once at C++17, where the batch
+views are the header's own pointer+size type, and once at C++20, where
+they are `std::span` - and runs both: **2,871 checks each, zero
+failures**, covering every entry point at all four formats under all
+five rounding attributes, the specials (both NaNs, both infinities,
+both zeros, the subnormal edge), the reductions at n = 0/1/5/64/257
+against `cft_reduce`, the sequencer-program and device-buffer handles,
+and a 236,000-case `cft_conformance` replay issued through the
+wrapper. Negative control run the same day: swapping the two operands
+of the wrapper's `sub` fails 20 of those checks and exits non-zero, so
+the comparison can distinguish a wrong wrapper from a right one.
+
 One wrinkle for whoever runs `make -C host examples-lang` on Windows
 next. Under MSYS2 make the recipe environment arrives stripped of
 `USERPROFILE`, NuGet then cannot locate its packages folder, and the
@@ -96,7 +114,14 @@ clause 5. `bindings/node` is the first binding outside
 `host/tests/clause5_check.py` that actually drives them - rint,
 scaleb, logb, nextUp/nextDown, class, totalOrder, the signaling
 compares, convert, the integer conversions and remainder each have a
-test - on the wasm build rather than the native library.
+test - on the wasm build rather than the native library. As of
+2026-09-02 the C++ row drives the same twenty entry points against the
+**native** library, and against the C calls rather than against
+expected values: `host/tests/cpp_api_test.cpp` issues each one through
+`cft.hpp` and through `cft.h` on the same operands and compares
+encodings and flags. That is a marshalling check, not a second opinion
+on the semantics - the semantics have one implementation, which is the
+point.
 
 ## Drop-ins
 
