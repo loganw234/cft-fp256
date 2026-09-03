@@ -54,7 +54,8 @@ Python at all.
 | Julia | `ccall` | none |
 | Python | `ctypes` / `cffi` | none; no build step, no pyxrt |
 | Rust | `extern "C"` / bindgen | none |
-| C, C++ | include the header | none |
+| C | include `cft.h` | none |
+| C++ | include `cft.hpp`, header-only over `cft.h` (RAII, typed byte encodings, span batches, context-bound operators) | none |
 | MATLAB, R, Go, C#, Java | each has a standard C FFI | a thin shim |
 
 Fortran matters more here than its reputation suggests: an enormous
