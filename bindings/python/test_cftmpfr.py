@@ -644,3 +644,169 @@ def test_negative_control_wrong_rounding_detected():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------
+# The phase-1 transcendentals (ABI 0.3)
+#
+# The package's claim is that libcft and MPFR return the same bits.
+# For add and mul that is a claim about rounding; for exp and pow it is
+# a claim about the FUNCTION, since a merely accurate implementation
+# would differ from MPFR in the last bit on a percent or so of inputs
+# and there would be no way to say which was right. So these tests are
+# the ones that would fail loudest if the accelerator were not doing
+# what this package says it does.
+# ---------------------------------------------------------------------
+
+TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10")
+TRANSCEND_BINARY = ("pow", "hypot")
+
+
+def gmpy_transcend(prec, mode, fn, args):
+    save = gmpy2.get_context()
+    gctx = gmpy2.ieee(WIDTH[prec])
+    gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+    gmpy2.set_context(gctx)
+    try:
+        if fn == "pow":
+            return args[0] ** args[1]
+        if fn == "hypot":
+            return gmpy2.hypot(args[0], args[1])
+        return getattr(gmpy2, fn)(args[0])
+    finally:
+        gmpy2.set_context(save)
+
+
+def is_snan(ctx, f):
+    """A signaling NaN, on the encoding. MPFR has none, so these are
+    excluded from the interop comparison and checked against the
+    contract instead - the same one-sided help host/tools/mpfr_check.c
+    documents."""
+    bits = f.to_bits()
+    fi = core._format_for(ctx.precision)
+    if not f.is_nan:
+        return False
+    return not (bits >> (fi.man_w - 1)) & 1
+
+
+def transcend_pool(prec, seed):
+    """Operands where these functions are worth testing: the specials,
+    a few exact cases, and randoms."""
+    ctx = Context(prec)
+    out = [ctx.from_float(v) for v in
+           (0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 0.5, 3.0, 4.0, 9.0, 10.0,
+            100.0, 0.25, 1.5, -0.5, 8.0, 1e-8, 7.0)]
+    out += [ctx.from_bits(b) for b in pool(prec, count=14, seed=seed)]
+    return out
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+@pytest.mark.parametrize("fn", TRANSCEND_UNARY + TRANSCEND_BINARY)
+def test_transcend_matches_gmpy2(prec, mode, fn):
+    """Bit for bit against MPFR at a matching IEEE context. RNDNA is
+    absent because MPFR has no ties-to-away - the same asterisk the
+    package docstring carries for the arithmetic."""
+    ctx = Context(prec, rounding=mode)
+    ops = transcend_pool(prec, seed=17)
+    checked = 0
+    for i, x in enumerate(ops):
+        args = [x] if fn in TRANSCEND_UNARY else [x, ops[(i * 7 + 3) % len(ops)]]
+        if any(is_snan(ctx, a) for a in args):
+            continue          # MPFR has no signaling NaN to compare against
+        got = getattr(ctx, fn)(*args)
+        want = gmpy_transcend(prec, mode, fn,
+                              [a.to_mpfr() for a in args])
+        if got.is_nan:
+            assert gmpy2.is_nan(want), (fn, i)
+        else:
+            assert got.same_bits(ctx.from_mpfr(want)), \
+                f"{fn} {prec} {mode} arg {i}: {got.to_str()} vs {want}"
+        checked += 1
+    assert checked >= 20
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", TRANSCEND_UNARY + TRANSCEND_BINARY)
+def test_transcend_batch_matches_scalar(prec, fn):
+    """One C call for the array must equal N calls for the elements.
+    Correct rounding makes that a THEOREM rather than a hope - there is
+    no vectorised approximation here to drift from a scalar one - so a
+    difference would be a marshalling bug, which is exactly what this
+    checks."""
+    ctx = Context(prec)
+    ops = transcend_pool(prec, seed=23)
+    ys = [ops[(i * 5 + 1) % len(ops)] for i in range(len(ops))]
+    want, want_or = [], 0
+    if fn in TRANSCEND_UNARY:
+        got, fl = getattr(batch, fn)(ctx, ops)
+        for x in ops:
+            want.append(getattr(ctx, fn)(x))
+            want_or |= ctx.last_flags
+    else:
+        got, fl = getattr(batch, fn)(ctx, ops, ys)
+        for x, y in zip(ops, ys):
+            want.append(getattr(ctx, fn)(x, y))
+            want_or |= ctx.last_flags
+    assert len(got) == len(want)
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or, f"{fn} {prec}: batch flags are the OR"
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_transcend_exact_cases_raise_nothing(prec):
+    """Where the contract says a case is exact, the flags must be
+    EMPTY - which is the observable difference between a correctly
+    rounded implementation and an accurate one."""
+    ctx = Context(prec)
+    ctx.clear_flags()
+    cases = [
+        ("exp", (0.0,), 1.0),
+        ("expm1", (0.0,), 0.0),
+        ("exp2", (10.0,), 1024.0),
+        ("log", (1.0,), 0.0),
+        ("log1p", (0.0,), 0.0),
+        ("log2", (8.0,), 3.0),
+        ("log10", (1000.0,), 3.0),
+        ("pow", (3.0, 4.0), 81.0),
+        ("hypot", (3.0, 4.0), 5.0),
+    ]
+    for fn, args, want in cases:
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(*args)
+        assert got.to_float() == want, fn
+        assert ctx.last_flags == 0, (fn, ctx.flag_names())
+    # and an inexact one really is inexact
+    ctx.clear_flags()
+    ctx.exp(1.0)
+    assert "inexact" in ctx.flag_names()
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_transcend_special_rows(prec):
+    """The clause 9.2.1 rows a drop-in replacement has to keep, and the
+    two implementations most often differ on."""
+    ctx = Context(prec)
+    assert ctx.exp(ctx.inf(1)).is_zero
+    assert ctx.exp(ctx.inf(1)).sign == 0
+    assert ctx.expm1(ctx.inf(1)).to_float() == -1.0
+    assert ctx.log(ctx.zero()).is_inf
+    assert ctx.log(ctx.zero()).sign == 1
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    assert ctx.log(ctx.from_float(-1.0)).is_nan
+    assert ctx.log1p(ctx.from_float(-1.0)).is_inf
+    # pow(x, +-0) is 1 for ANY x, including a quiet NaN
+    assert ctx.pow(ctx.nan(), ctx.zero()).to_float() == 1.0
+    assert ctx.pow(ctx.nan(), ctx.zero(1)).to_float() == 1.0
+    # pow(1, y) is 1 for ANY y
+    assert ctx.pow(ctx.from_float(1.0), ctx.nan()).to_float() == 1.0
+    # pow(-1, +-inf) is 1
+    assert ctx.pow(ctx.from_float(-1.0), ctx.inf()).to_float() == 1.0
+    # an infinity beats a quiet NaN in hypot
+    assert ctx.hypot(ctx.inf(1), ctx.nan()).is_inf
+    assert ctx.hypot(ctx.inf(1), ctx.nan()).sign == 0
+    # the signed zero survives expm1 and log1p, which is why they exist
+    assert ctx.expm1(ctx.zero(1)).sign == 1
+    assert ctx.log1p(ctx.zero(1)).sign == 1

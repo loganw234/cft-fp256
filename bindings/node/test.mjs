@@ -69,8 +69,8 @@ const c64 = ctxs[64];
 // identity
 // ---------------------------------------------------------------------
 
-test("the module is ABI 0.2 on the software backend", () => {
-  eq(c64.abiVersion, "0.2", "abi: ");
+test("the module is ABI 0.3 on the software backend", () => {
+  eq(c64.abiVersion, "0.3", "abi: ");
   eq(c64.backend, "software", "backend: ");
 });
 

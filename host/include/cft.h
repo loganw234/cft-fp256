@@ -94,9 +94,16 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 2   /* 0.2: the clause-5 completion set */
+#define CFT_ABI_VERSION_MINOR 3   /* 0.3: the phase-1 transcendentals */
 
-/* Returns (major << 16) | minor of the library actually loaded. */
+/* Returns (major << 16) | minor of the library actually loaded.
+ *
+ * The minor version is a floor on what is present, and each step of it
+ * is additive: 0.1 was the elementwise opcodes, the reductions and the
+ * composed div/sqrt; 0.2 added the clause-5 completion set; 0.3 added
+ * the nine correctly-rounded transcendentals below. A caller that
+ * needs one of those checks the number rather than the header it
+ * compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
 /* ---------------------------------------------------------------
@@ -654,6 +661,112 @@ CFT_API cft_status cft_total_order_mag(cft_device *dev, cft_format fmt,
 CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
                            const void *b, void *d, size_t n,
                            uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The phase-1 transcendental set (ABI 0.3)
+ *
+ *   d[i] = exp(a[i])        cft_exp        d[i] = log(a[i])    cft_log
+ *   d[i] = exp(a[i]) - 1    cft_expm1      d[i] = log(1+a[i])  cft_log1p
+ *   d[i] = 2 ** a[i]        cft_exp2       d[i] = log2(a[i])   cft_log2
+ *                                          d[i] = log10(a[i])  cft_log10
+ *   d[i] = a[i] ** b[i]     cft_pow
+ *   d[i] = sqrt(a[i]^2 + b[i]^2)           cft_hypot
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, at every format, with
+ * exact flags - not "accurate to an ulp", not "faithful", not
+ * "algorithm-defined". A result here is defined by the mathematics
+ * alone, so every correct implementation agrees bit for bit and this
+ * library's answer is checkable against any of them. That is the whole
+ * reason these are in a determinism contract at all: an "accurate"
+ * transcendental is precisely the thing this project exists to
+ * replace, because two of them never agree and neither can be scored.
+ * python/cft_golden/transcend.py is the definition;
+ * docs/TRANSCENDENTALS.md is the design and its proofs.
+ *
+ * HOST operations, like most of the clause-5 set: they issue no device
+ * pass, so there is no bus word and no bus_out argument, and the
+ * device argument is context. That is a design choice with a reason -
+ * see docs/TRANSCENDENTALS.md - and not a gap: division composes from
+ * the tile's opcodes because it has an exactly measurable residual,
+ * and an exponential has none. A tile-assisted fast path for the
+ * narrow formats would have to reproduce these bits exactly, and is a
+ * later optimisation rather than a different answer.
+ *
+ * INEXACT is raised for every result except the ones that are exactly
+ * representable, and those are decided by exact arithmetic rather than
+ * by a tolerance: exp and expm1 are exact only at zero; log and log1p
+ * only at 1 and 0; exp2 exactly when the argument is an integer whose
+ * power the format holds; log2 exactly at the powers of two; log10
+ * exactly at the powers of ten the format represents; pow exactly when
+ * the true value is a representable dyadic rational; hypot exactly
+ * when x^2 + y^2 is a perfect square. Overflow, underflow and the
+ * signed zero follow clause 7 through the same round_pack every
+ * arithmetic result uses.
+ *
+ * The 754-2019 clause 9.2.1 special values apply in full. The ones
+ * implementations most often differ on, stated here so a porter does
+ * not have to infer them:
+ *
+ *   exp(-inf) = +0            expm1(-inf) = -1      exp2(-inf) = +0
+ *   log(+-0)  = -inf, divideByZero      log(x < 0) = qNaN, invalid
+ *   log1p(-1) = -inf, divideByZero      log1p(x < -1) = qNaN, invalid
+ *   expm1(+-0) = +-0 and log1p(+-0) = +-0 - the operand's sign, which
+ *     is half of why those two functions exist
+ *   pow(x, +-0) = 1 for ANY x, including a quiet NaN or an infinity
+ *   pow(+1, y)  = 1 for ANY y, including a quiet NaN
+ *   pow(-1, +-inf) = 1
+ *   pow(x, y) with x finite negative and y a non-integer is invalid
+ *   pow(+-0, y) for finite y < 0 signals divideByZero; pow(+-0, -inf)
+ *     is +inf and signals NOTHING - that is the |x| < 1 row, and the
+ *     divideByZero is the pole at a finite exponent, not the limit
+ *   hypot(+-inf, y) = +inf for any y, INCLUDING a quiet NaN
+ *
+ * A SIGNALING NaN operand is not covered by those rows - 9.2.1's
+ * wording is "even a quiet NaN" - so it raises invalid and delivers
+ * the canonical quiet NaN, exactly as every other operation in this
+ * contract does. That differs from C's pow(sNaN, 0), and the
+ * difference is deliberate and documented rather than accidental.
+ *
+ * If an input cannot be shown correctly rounded within the library's
+ * working-precision cap, the call returns CFT_ERR_INTERNAL and writes
+ * nothing useful to d. It does not return a plausible number. The cap
+ * is sized so that no input the formats can express should reach it
+ * (docs/TRANSCENDENTALS.md does that arithmetic); if one ever does,
+ * that is a bug worth a report, and a status is how you would find
+ * out.
+ *
+ * d may alias a or b: each element is read before it is written.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_exp(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_expm1(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_exp2(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_log(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_log1p(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_log2(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_log10(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* b[i] is the exponent for cft_pow and the second leg for cft_hypot;
+ * neither may be NULL. */
+CFT_API cft_status cft_pow(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, const void *b, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_hypot(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const void *b, void *d, size_t n,
+                             uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)

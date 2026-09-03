@@ -424,6 +424,21 @@ need host-cc python
 stage clause5 "the clause-5 completion set vs the model, all entry points" -- \
   PY "$ROOT/host/tests/clause5_check.py"
 
+# The transcendentals, twice. The first run is at the contract's
+# own working precision, where the Ziv loop has never once
+# escalated; the second forces the library to START below the
+# precision it needs, so the escalation path runs - against an
+# UNESCALATED model, which is what makes it a comparison rather
+# than a coincidence. That second run is what found the
+# exact-cancellation hole in the evaluator's error bound.
+do_transcend() {
+  PY "$ROOT/host/tests/transcend_check.py" || return 1
+  PY "$ROOT/host/tests/transcend_check.py" --min-prec 64 --trials 16
+}
+need host-cc python
+stage transcend "the nine transcendentals vs the model, and again through the escalation path" -- \
+  do_transcend
+
 need host-cc python
 stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000

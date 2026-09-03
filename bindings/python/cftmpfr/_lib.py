@@ -213,6 +213,20 @@ def _bind(lib):
                              c_void_p, c_void_p,
                              c_size_t, u32p, u32p]
     lib.cft_sqrt.restype = c_int
+
+    # The phase-1 transcendentals (ABI 0.3). Host operations, so no
+    # bus word: the argument list ends at the flags pointer.
+    for _name in ("cft_exp", "cft_expm1", "cft_exp2", "cft_log",
+                  "cft_log1p", "cft_log2", "cft_log10"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
+                        c_size_t, ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
+    for _name in ("cft_pow", "cft_hypot"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
+                        c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
     _audit(lib)
     return lib
 
@@ -363,4 +377,32 @@ def sqrt(handle, fmt, rnd, a, n, esz):
     flags = ctypes.c_uint32(0)
     check(lib().cft_sqrt(handle, fmt, rnd, a, d, n,
                          ctypes.byref(flags), None), "cft_sqrt")
+    return d.raw, flags.value
+
+
+# ---------------------------------------------------------------------
+# The phase-1 transcendentals. Correctly rounded, which is the whole
+# reason they are worth calling from here: MPFR's own are too, so the
+# two agree bit for bit, and nothing else in a Python numerics stack
+# does.
+# ---------------------------------------------------------------------
+
+TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10")
+TRANSCEND_BINARY = ("pow", "hypot")
+TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY
+
+
+def transcend(handle, name, fmt, rnd, a, b, n, esz):
+    """One of the nine, over n elements. b is None for the unary
+    seven. Returns (result bytes, flag word)."""
+    if name not in TRANSCEND:
+        raise ValueError(f"unknown transcendental {name!r}")
+    d = ctypes.create_string_buffer(n * esz)
+    flags = ctypes.c_uint32(0)
+    fn = getattr(lib(), "cft_" + name)
+    if name in TRANSCEND_BINARY:
+        st = fn(handle, fmt, rnd, a, b, d, n, ctypes.byref(flags))
+    else:
+        st = fn(handle, fmt, rnd, a, d, n, ctypes.byref(flags))
+    check(st, "cft_" + name)
     return d.raw, flags.value

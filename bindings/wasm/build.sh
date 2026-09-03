@@ -144,8 +144,18 @@ fi
 # vectors`, and to stage 1 below except for --out. It is what the
 # page tells people to run for droppable full sets, so the sample and
 # the files they drop come from the same deterministic generator run.
+#
+# --transcend 0 for two reasons, and both are worth stating. The page
+# samples the twenty OPCODE sets by name and drives cft_run; the
+# transcendental sets name library entry points it has no UI for, so
+# they would be generated and then ignored. And this generator runs
+# inside the pinned emscripten image, which carries no mpmath - the
+# transcendental reference needs one, because a transcendental value is
+# not a rational number and integer arithmetic cannot write it down.
+# Adding mpmath to that image would change its digest, which is the one
+# thing this build refuses to do casually.
 GEN_ARGS="--formats fp32 fp64 fp128 fp256 --rounding rne rtz rdn rup rmm \
---directed 3000 --random 4000 --simple 200"
+--directed 3000 --random 4000 --simple 200 --transcend 0"
 GEN_COMMAND="python3 vectors/gen_vectors.py --out vectors/out $GEN_ARGS"
 
 echo "== stage 1: vectors (deterministic, seed 3) =="

@@ -32,12 +32,19 @@ from .softfloat import (
     CLASS_POS_ZERO, CLASS_POS_SUB, CLASS_POS_NORM, CLASS_POS_INF,
     CLASS_SNAN, CLASS_QNAN, CLASS_NAMES,
 )
+from .transcend import (
+    TRANSCEND_FNS, TRANSCEND_ARITY, TRANSCEND_IMPL, ZivEscalation,
+    FN_EXP, FN_EXPM1, FN_EXP2, FN_LOG, FN_LOG1P, FN_LOG2, FN_LOG10,
+    FN_POW, FN_HYPOT,
+    exp, expm1, exp2, log, log1p, log2, log10, pow, hypot,
+    prec_cap, start_prec,
+)
 from .reduce import (
     OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
     stream_reduce,
 )
-from . import vectors
+from . import transcend, vectors
 
 __all__ = [
     "FP32", "FP64", "FP128", "FP256", "FORMATS", "PREC_CODE", "FpFormat",
@@ -66,6 +73,11 @@ __all__ = [
     "CLASS_NEG_INF", "CLASS_NEG_NORM", "CLASS_NEG_SUB", "CLASS_NEG_ZERO",
     "CLASS_POS_ZERO", "CLASS_POS_SUB", "CLASS_POS_NORM", "CLASS_POS_INF",
     "CLASS_SNAN", "CLASS_QNAN", "CLASS_NAMES",
+    "TRANSCEND_FNS", "TRANSCEND_ARITY", "TRANSCEND_IMPL",
+    "ZivEscalation", "FN_EXP", "FN_EXPM1", "FN_EXP2", "FN_LOG",
+    "FN_LOG1P", "FN_LOG2", "FN_LOG10", "FN_POW", "FN_HYPOT",
+    "exp", "expm1", "exp2", "log", "log1p", "log2", "log10", "pow",
+    "hypot", "prec_cap", "start_prec", "transcend",
     "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
     "split", "tree_adds", "canonical_ranges", "reduce_bits",
     "fsum", "fdot", "combine", "stream_reduce",
