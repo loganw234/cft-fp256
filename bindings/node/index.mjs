@@ -28,5 +28,6 @@
 export { Context, Float, NotExact, formatFor } from "./core.mjs";
 export {
   ABI_MAJOR, CLASS_NAMES, FLAG_DIVBYZERO, FLAG_INEXACT, FLAG_INVALID,
-  FLAG_OVERFLOW, FLAG_UNDERFLOW, OPS_BY_NAME, flagNames, loadModule,
+  FLAG_OVERFLOW, FLAG_UNDERFLOW, OPS_BY_NAME, TRANSCEND_BINARY,
+  TRANSCEND_UNARY, flagNames, loadModule,
 } from "./lib.mjs";
