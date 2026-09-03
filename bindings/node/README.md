@@ -7,9 +7,9 @@ binary128 and binary256, all five rounding attributes, exact flags,
 and results that are libcft's bits and nothing else.
 
 ```bash
-node bindings/node/test.mjs         # 74 tests, no dependencies
+node bindings/node/test.mjs         # 79 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 365,845 published cases
+node bindings/node/conformance.mjs  # 478,915 published cases
 ```
 
 ```js
@@ -31,8 +31,11 @@ Since ABI 0.3 the package carries the phase-1 set - `exp`, `expm1`,
 `exp2`, `log`, `log1p`, `log2`, `log10`, `pow`, `hypot` - and since
 ABI 0.4 the phase-2 trigonometrics as well - `sinpi`, `cospi`,
 `tanpi`, `asin`, `acos`, `atan`, `asinpi`, `acospi`, `atanpi`,
-`atan2`, `atan2pi` - all twenty on all three layers: the raw `cftw_*`
-exports, `Context`/`Float` scalars, and `map()` over an array.
+`atan2`, `atan2pi` - and since ABI 0.5 the phase-3 set: `sin`, `cos`,
+`tan` of a RADIAN argument, reduced against pi inside the library at
+any magnitude the format holds, and `sinh`, `cosh`, `tanh`, `asinh`,
+`acosh`, `atanh` - all twenty-nine on all three layers: the raw
+`cftw_*` exports, `Context`/`Float` scalars, and `map()` over an array.
 
 ```js
 const ctx = await Context.open(128);
@@ -315,11 +318,35 @@ reads 0.4):
   was: it takes y first, so a swap answers a plausible number for every
   input rather than failing loudly anywhere.
 
+**2026-09-03, later again, same host and node, wasm module sha256
+`5718aa19e85dad2b…`** - the rebuild that gave the nine phase-3 functions
+their `cftw_*` wrappers, in the library's own step to 0.5 (package
+0.5.0; the ABI test reads 0.5):
+
+* `node conformance.mjs` - **478,915 cases over 40 sets, zero
+  mismatches**: the 236,000 opcode cases through `cft_conformance()`,
+  then **242,915 transcendental cases in 154.4 s driven
+  through this package's own `Context` methods** - the same twenty
+  files, carrying all twenty-nine functions now, including sin, cos
+  and tan of every power of two binary64 holds and of the arguments
+  nearest a multiple of pi/2 that the reduction's worst-case search
+  finds - per case and then once per family through `map()`.
+* `node test.mjs` - **79 tests, 0 failures**: the 74 above plus
+  the nine's exact cases (the zeros, and `tanh(±inf) = ±1` raising
+  nothing), sin/cos/tan of an infinity invalid, acosh below 1 and
+  atanh past 1 invalid with `atanh(±1)` a pole signalling divideByZero,
+  one directed rounding per neighbour family at the smallest
+  subnormal, and the binary64 worst case of the reduction -
+  `sin(0x1.6ac5b262ca1ffp+849)` = 1 to nearest and nextDown(1)
+  downward, its cosine the reduced argument with mpmath's bits - and
+  `sin(2^1023)` finite and nonzero through the wasm.
+
 Not verified: no other JS runtime, no device backend (wasm32 has no
 PCIe; `Context.open` is always the software backend here), and no
-performance claim. The 108.2 s for 129,845 transcendental cases is a
-measurement, not a promise: it is one `_malloc` per scalar call across
-a wasm boundary, at binary256 for a quarter of them.
+performance claim. The 154.4 s for 242,915 transcendental
+cases is a measurement, not a promise: it is one `_malloc` per scalar
+call across a wasm boundary, at binary256 for a quarter of them, and
+the radian three reduce against pi inside the module.
 
 ## Files
 

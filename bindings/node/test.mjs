@@ -28,7 +28,8 @@
 // one-bit change before they are believed.
 
 import { Context, formatFor } from "./index.mjs";
-import { FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO, FLAG_OVERFLOW }
+import { FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO, FLAG_OVERFLOW,
+         FLAG_UNDERFLOW }
   from "./lib.mjs";
 
 let passed = 0, failed = 0;
@@ -69,8 +70,8 @@ const c64 = ctxs[64];
 // identity
 // ---------------------------------------------------------------------
 
-test("the module is ABI 0.4 on the software backend", () => {
-  eq(c64.abiVersion, "0.4", "abi: ");
+test("the module is ABI 0.5 on the software backend", () => {
+  eq(c64.abiVersion, "0.5", "abi: ");
   eq(c64.backend, "software", "backend: ");
 });
 
@@ -1136,6 +1137,146 @@ test("cft_reduce returns the tree cft.h documents, not a running sum", () => {
   ok(!seq.sameBits(got), "a sequential sum should differ here");
   eq(c64.reduce("sum", []).toString(), "0", "n == 0 is +0: ");
   ok(c64.reduce("sum", [xs[0]]).sameBits(xs[0]), "n == 1 is a[0] verbatim");
+});
+
+// ---------------------------------------------------------------------
+// the phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
+// ---------------------------------------------------------------------
+
+test("the exact cases of the nine are the zeros, and they raise nothing", () => {
+  // Hermite-Lindemann: sin, tan, sinh, tanh, asinh and atanh of a
+  // nonzero dyadic are transcendental, cos and cosh are 1 only at 0,
+  // acosh is 0 only at 1 - and tanh(+-inf) is a limit that happens to
+  // be representable. Every one leaves the flag word EMPTY.
+  const rows = [
+    ["sin(-0)", () => c64.sin(c64.zero(1)), 0, 1],
+    ["cos(-0)", () => c64.cos(c64.zero(1)), 1, 0],
+    ["tan(+0)", () => c64.tan(c64.zero(0)), 0, 0],
+    ["sinh(-0)", () => c64.sinh(c64.zero(1)), 0, 1],
+    ["cosh(-0)", () => c64.cosh(c64.zero(1)), 1, 0],
+    ["tanh(-0)", () => c64.tanh(c64.zero(1)), 0, 1],
+    ["asinh(-0)", () => c64.asinh(c64.zero(1)), 0, 1],
+    ["acosh(1)", () => c64.acosh(1), 0, 0],
+    ["atanh(-0)", () => c64.atanh(c64.zero(1)), 0, 1],
+    ["tanh(+inf)", () => c64.tanh(c64.inf(0)), 1, 0],
+    ["tanh(-inf)", () => c64.tanh(c64.inf(1)), -1, 1],
+  ];
+  for (const [name, f, want, sign] of rows) {
+    c64.clearFlags();
+    const r = f();
+    eq(r.toNumber(), want, `${name}: `);
+    eq(r.sign, sign, `${name} sign: `);
+    eq(c64.lastFlags, 0, `${name} raises nothing: `);
+  }
+  const inexact = [
+    ["sin(1)", () => c64.sin(1)], ["cos(1)", () => c64.cos(1)],
+    ["tan(1/2)", () => c64.tan(c64.from("0.5"))],
+    ["sinh(1)", () => c64.sinh(1)], ["cosh(1)", () => c64.cosh(1)],
+    ["tanh(1/2)", () => c64.tanh(c64.from("0.5"))],
+    ["asinh(1)", () => c64.asinh(1)], ["acosh(2)", () => c64.acosh(2)],
+    ["atanh(1/2)", () => c64.atanh(c64.from("0.5"))],
+  ];
+  for (const [name, f] of inexact) {
+    c64.clearFlags();
+    f();
+    ok(c64.lastFlags & FLAG_INEXACT, `${name} is inexact`);
+  }
+});
+
+test("sin, cos and tan of an infinity are invalid: no limit exists", () => {
+  for (const fn of ["sin", "cos", "tan"]) {
+    for (const s of [0, 1]) {
+      c64.clearFlags();
+      const r = c64[fn](c64.inf(s));
+      ok(r.isNaN, `${fn}(${s ? "-" : "+"}inf) is a NaN`);
+      ok(c64.lastFlags & FLAG_INVALID, `${fn}(inf) raises invalid`);
+    }
+  }
+});
+
+test("the hyperbolics' domains: acosh below 1 and atanh past 1 are invalid, atanh(+-1) is a pole", () => {
+  for (const x of [c64.zero(0), c64.zero(1), c64.from("0.5"), -2, c64.inf(1)]) {
+    c64.clearFlags();
+    ok(c64.acosh(x).isNaN, "acosh below 1 is a NaN");
+    ok(c64.lastFlags & FLAG_INVALID, "and invalid");
+  }
+  c64.clearFlags();
+  ok(c64.acosh(c64.inf(0)).isInf, "acosh(+inf) is +inf");
+  eq(c64.lastFlags, 0, "silently: ");
+  c64.clearFlags();
+  const p = c64.atanh(1);
+  ok(p.isInf && p.sign === 0, "atanh(1) is +inf");
+  ok(c64.lastFlags & FLAG_DIVBYZERO, "with divideByZero: 7.3's exact infinity");
+  eq(c64.lastFlags & FLAG_INVALID, 0, "and NOT invalid: ");
+  const m = c64.atanh(-1);
+  ok(m.isInf && m.sign === 1, "atanh(-1) is -inf");
+  for (const x of [2, c64.from("-1.5"), c64.inf(0), c64.inf(1)]) {
+    c64.clearFlags();
+    ok(c64.atanh(x).isNaN, "atanh past 1 is a NaN");
+    ok(c64.lastFlags & FLAG_INVALID, "and invalid");
+  }
+  ok(c64.sinh(c64.inf(1)).isInf && c64.sinh(c64.inf(1)).sign === 1,
+     "sinh(-inf) is -inf: odd");
+  ok(c64.cosh(c64.inf(1)).isInf && c64.cosh(c64.inf(1)).sign === 0,
+     "cosh(-inf) is +inf: even");
+  ok(c64.asinh(c64.inf(1)).isInf && c64.asinh(c64.inf(1)).sign === 1,
+     "asinh(-inf) is -inf");
+});
+
+test("tiny arguments take a SIDE, and the neighbour rules give it", () => {
+  // sin, tanh and asinh lie on the zero side of a tiny x; tan, sinh and
+  // atanh on the far side; cos below 1 and cosh above it. A directed
+  // rounding is the only thing that can see which, and the value it
+  // sees is the library's.
+  const m = c64.fromBits(1n);                    // the smallest subnormal
+  const two = c64.fromBits(2n);
+  const rows = [
+    ["rdn", "sin", "zero"], ["rup", "sin", "same"],
+    ["rup", "tan", "next"], ["rtz", "tan", "same"],
+    ["rup", "sinh", "next"], ["rdn", "sinh", "same"],
+    ["rdn", "tanh", "zero"], ["rne", "tanh", "same"],
+    ["rdn", "asinh", "zero"], ["rup", "asinh", "same"],
+    ["rup", "atanh", "next"], ["rne", "atanh", "same"],
+  ];
+  for (const [attr, fn, want] of rows) {
+    const c = c64.withRounding(attr);
+    c.clearFlags();
+    const r = c[fn](m);
+    if (want === "zero") ok(r.isZero && r.sign === 0, `${fn} ${attr} is +0`);
+    else if (want === "same") ok(r.sameBits(m), `${fn} ${attr} stays put`);
+    else ok(r.sameBits(two), `${fn} ${attr} steps off it`);
+    ok((c.lastFlags & FLAG_INEXACT) && (c.lastFlags & FLAG_UNDERFLOW),
+       `${fn} ${attr} is tiny and inexact`);
+  }
+  const one = c64.from("1");
+  ok(c64.withRounding("rdn").cos(m).sameBits(c64.nextDown(one)),
+     "cos(min) downward is nextDown(1)");
+  ok(c64.withRounding("rne").cos(m).sameBits(one), "cos(min) to nearest is 1");
+  ok(c64.withRounding("rup").cosh(m).sameBits(c64.nextUp(one)),
+     "cosh(min) upward is nextUp(1)");
+  ok(c64.withRounding("rne").cosh(m).sameBits(one), "cosh(min) to nearest is 1");
+});
+
+test("the reduction against pi, through the wasm: the binary64 worst case", () => {
+  // 0x1.6ac5b262ca1ffp+849 is the double nearest a multiple of pi/2;
+  // host/tools/pi_worstcase.py rediscovers it. Its sine is 1 minus
+  // about 2^-123, inside the half gap below 1, so the neighbour rule
+  // beside 1 answers: 1 to nearest, nextDown(1) downward. Its cosine
+  // is the reduced argument itself, and those bits are mpmath's at 700
+  // bits - host/tests/api_test.c carries the same case in C.
+  const x = c64.fromBits(0x7506ac5b262ca1ffn);
+  const one = c64.from("1");
+  c64.clearFlags();
+  ok(c64.sin(x).sameBits(one), "sin(worst) to nearest is 1");
+  ok(c64.lastFlags & FLAG_INEXACT, "and inexact");
+  ok(c64.withRounding("rdn").sin(x).sameBits(c64.nextDown(one)),
+     "sin(worst) downward is nextDown(1)");
+  eq(c64.cos(x).bits, 0xbc214ae72e6ba22fn,
+     "cos(worst) is the reduced argument: ");
+  // and a huge argument reduces to a finite nonzero sine: sin(2^1023)
+  const big = c64.fromBits(0x7fe0000000000000n);
+  const s = c64.sin(big);
+  ok(!s.isNaN && !s.isZero && !s.isInf, "sin(2^1023) is a finite nonzero number");
 });
 
 // ---------------------------------------------------------------------
