@@ -2147,14 +2147,6 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn)
                     cft_status st = CFT_OK;
                     mpfr_t want;
 
-                    if (getenv("TRACE")) {
-                        char ta[65], tb[65];
-                        hexdump(a, f->esz, ta); hexdump(b, f->esz, tb);
-                        fprintf(stderr, "%s %s %s a=%s b=%s\n",
-                                f->name, TFN_NAME[fn], MODES[mi].name,
-                                ta, tb);
-                        fflush(stderr);
-                    }
                     mpfr_init2(want, f->p);
                     t_oracle(f, fn, mi, a, b, want, &wf);
                     memset(d, 0, sizeof d);

@@ -1307,14 +1307,21 @@ A gate that cannot fail is not a gate, and that is what the control is
 for.
 
 Standardized run, `bash verify/run.sh --only vectors,libcft,mpfr,transcend`
-at b9d390d:
+at 729d1ba, clean tree, run id 20260903-000408-729d1ba:
 
     vectors      ok      10s
-    libcft       ok      57s
-    transcend    ok      59s
+    libcft       ok      58s
+    transcend    ok      63s
     mpfr         ok      13s
 
     VERDICT: PASS, nothing skipped
+
+The seconds are honest, and the stage logs carry the counts: libcft's
+40 sets and 456,325 cases replayed twice each, transcend's 77,315 then
+72,275 comparisons with the model's own escalation numbers printed
+underneath, mpfr's 334,008 cases with the library's evaluator counters
+(95,680 elements, 15,350 through the Ziv loop, 0 escalations, deepest
+514 bits) after them.
 
 What did NOT run, and why: the RTL, formal and container stages
 (nothing in this change touches them, and the transcendentals issue no
