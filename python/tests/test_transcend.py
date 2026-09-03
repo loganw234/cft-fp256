@@ -410,9 +410,24 @@ def _brute_enclosure(fmt, fn, xa, xb, prec):
             return iv.log(x) / iv.log(2)
         if fn == "log10":
             return iv.log(x) / iv.log(10)
+        if fn in ("sinpi", "cospi", "tanpi"):
+            v = iv.pi * x
+            return {"sinpi": iv.sin, "cospi": iv.cos, "tanpi": iv.tan}[fn](v)
+        one = iv.mpf(1)
+        if fn in ("asin", "asinpi", "acos", "acospi"):
+            root = iv.sqrt((one - x) * (one + x))
+            a = iv.atan2(x, root) if fn.startswith("asin") \
+                else iv.atan2(root, x)
+            return a / iv.pi if fn.endswith("pi") else a
+        if fn in ("atan", "atanpi"):
+            a = iv.atan2(x, one)
+            return a / iv.pi if fn == "atanpi" else a
         y = val(xb)
         if fn == "pow":
             return iv.power(x, y)
+        if fn in ("atan2", "atan2pi"):
+            a = iv.atan2(x, y)
+            return a / iv.pi if fn == "atan2pi" else a
         return iv.sqrt(x * x + y * y)
     finally:
         iv.prec = saved
@@ -526,11 +541,14 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
         table = {"exp": gmpy2.exp, "expm1": gmpy2.expm1,
                  "exp2": gmpy2.exp2, "log": gmpy2.log,
                  "log1p": gmpy2.log1p, "log2": gmpy2.log2,
-                 "log10": gmpy2.log10}
+                 "log10": gmpy2.log10, "asin": gmpy2.asin,
+                 "acos": gmpy2.acos, "atan": gmpy2.atan}
         if fn in table:
             v = table[fn](a)
         elif fn == "pow":
             v = a ** conv(xb)
+        elif fn == "atan2":
+            v = gmpy2.atan2(a, conv(xb))
         else:
             v = gmpy2.hypot(a, conv(xb))
         if gmpy2.is_nan(v):
@@ -546,6 +564,17 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
         gmpy2.set_context(old)
 
 
+#: The functions gmpy2 exposes. MPFR itself grew sinPi, cosPi, tanPi,
+#: asinPi, acosPi, atanPi and atan2Pi in 4.2.0 and this host carries
+#: 4.2.1 - but gmpy2 2.2.1 binds none of them, so the Pi-variants are
+#: checked against MPFR in host/tools/mpfr_check.c, which calls the C
+#: entry points directly, and here only against the brute-force
+#: enclosure above. Claiming an MPFR comparison this file cannot make
+#: would be worse than naming the gap.
+MPFR_BOUND = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
+              "pow", "hypot", "asin", "acos", "atan", "atan2")
+
+
 @pytest.mark.parametrize("fmt", ALL)
 @pytest.mark.parametrize("rnd", (RND_RNE, RND_RTZ, RND_RDN, RND_RUP))
 def test_mpfr_parity(fmt, rnd):
@@ -556,7 +585,7 @@ def test_mpfr_parity(fmt, rnd):
     instead of claiming a native comparison.)"""
     pool = _brute_pool(fmt)
     checked = 0
-    for fn in tr.TRANSCEND_FNS:
+    for fn in MPFR_BOUND:
         arity = tr.TRANSCEND_ARITY[fn]
         pairs = ([(a, 0) for a in pool] if arity == 1
                  else [(a, b) for a in pool[:8] for b in pool[:8]])
@@ -708,7 +737,7 @@ def test_hypot_dominant_operand(fmt):
 
 def test_unknown_names_and_modes_are_refused():
     with pytest.raises(ValueError):
-        tr.compute(FP32, "atan", one_bits(FP32))
+        tr.compute(FP32, "arcsinh", one_bits(FP32))
     with pytest.raises(ValueError):
         tr.compute(FP32, "exp", one_bits(FP32), 0, 7)
 
@@ -752,3 +781,615 @@ def test_escalation_lands_on_the_same_answer(fmt):
     # either vacuous or wrong.
     assert tr.STATS["escalations"] > max(2, ordinary), tr.STATS
     assert tr.STATS["max_prec"] <= tr.prec_cap(fmt)
+
+
+# =====================================================================
+# Phase 2: the trigonometric functions that need no reduction against pi
+#
+# Same four arbiters. The special-value tables below were transcribed
+# from 754-2019 9.2.1 and then CONFIRMED against MPFR 4.2.1 - which is
+# the first release to carry sinpi/cospi/tanpi and the Pi-variants of
+# the inverses - before they were written down here. Where the two
+# could have differed the probe is quoted in the test.
+# =====================================================================
+
+TRIG = ("sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
+        "asinpi", "acospi", "atanpi", "atan2pi")
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_sinpi_specials(fmt, rnd):
+    """sinPi(+-0) is +-0; sinPi of an integer is a zero with the sign of
+    the ARGUMENT (MPFR 4.2.1: sinpi(1) = +0, sinpi(-1) = -0, so the rule
+    is not the parity of n); sinPi(n + 1/2) is +-1; an infinity is
+    invalid, because sin has no limit there."""
+    assert tr.sinpi(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.sinpi(fmt, zero_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    for n in (1, 2, 3, 4, 17):
+        b = V(fmt, 0, n, 0)
+        assert tr.sinpi(fmt, b, rnd) == (zero_bits(fmt), 0), n
+        assert tr.sinpi(fmt, V(fmt, 1, n, 0), rnd) == (zero_bits(fmt, 1), 0)
+    # sinPi(m/2) for odd m is +1 when m = 1 (mod 4) and -1 when m = 3
+    for m, want_neg in ((1, 0), (3, 1), (5, 0), (7, 1), (9, 0)):
+        assert tr.sinpi(fmt, V(fmt, 0, m, -1), rnd) == \
+            (one_bits(fmt, want_neg), 0), m
+        assert tr.sinpi(fmt, V(fmt, 1, m, -1), rnd) == \
+            (one_bits(fmt, 1 - want_neg), 0), m
+    # every value at or above 2^(p-1) is an integer, so the largest
+    # finite is one and its sinPi is a zero rather than a hard case
+    assert tr.sinpi(fmt, max_normal_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.sinpi(fmt, max_normal_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    assert tr.sinpi(fmt, inf_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.sinpi(fmt, inf_bits(fmt, 1), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.sinpi(fmt, qnan_bits(fmt), rnd) == (qnan_bits(fmt), 0)
+    assert tr.sinpi(fmt, snan_bits(fmt), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_cospi_specials(fmt, rnd):
+    """cosPi(+-0) is 1; cosPi(n) is (-1)^n; cosPi(n + 1/2) is +0 for
+    every n and BOTH signs of the argument - cosPi is even, so the zero
+    cannot carry a sign and MPFR delivers +0 throughout."""
+    assert tr.cospi(fmt, zero_bits(fmt), rnd) == (one_bits(fmt), 0)
+    assert tr.cospi(fmt, zero_bits(fmt, 1), rnd) == (one_bits(fmt), 0)
+    for n, neg in ((1, 1), (2, 0), (3, 1), (4, 0), (17, 1), (16, 0)):
+        assert tr.cospi(fmt, V(fmt, 0, n, 0), rnd) == (one_bits(fmt, neg), 0)
+        assert tr.cospi(fmt, V(fmt, 1, n, 0), rnd) == (one_bits(fmt, neg), 0)
+    for m in (1, 3, 5, 7):
+        assert tr.cospi(fmt, V(fmt, 0, m, -1), rnd) == (zero_bits(fmt), 0)
+        assert tr.cospi(fmt, V(fmt, 1, m, -1), rnd) == (zero_bits(fmt), 0)
+    # the largest finite is an even integer at every rung
+    assert tr.cospi(fmt, max_normal_bits(fmt), rnd) == (one_bits(fmt), 0)
+    assert tr.cospi(fmt, inf_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.cospi(fmt, snan_bits(fmt), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_tanpi_specials(fmt, rnd):
+    """tanPi is sinPi/cosPi in every respect, signs included.
+
+    Confirmed against MPFR 4.2.1, which is where the two rows an
+    implementation is likely to guess wrong were settled:
+
+        tanpi(1)   = -0        (sinPi(1) is +0, cosPi(1) is -1)
+        tanpi(1/2) = +Inf with divide-by-zero raised
+
+    A pole gives an exact infinity from finite operands, which is
+    exactly 754-2019 7.3's condition for divideByZero."""
+    assert tr.tanpi(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.tanpi(fmt, zero_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    for n, neg in ((1, 1), (2, 0), (3, 1), (4, 0)):
+        assert tr.tanpi(fmt, V(fmt, 0, n, 0), rnd) == (zero_bits(fmt, neg), 0)
+        assert tr.tanpi(fmt, V(fmt, 1, n, 0), rnd) == \
+            (zero_bits(fmt, 1 - neg), 0)
+    for m, neg in ((1, 0), (3, 1), (5, 0), (7, 1)):
+        assert tr.tanpi(fmt, V(fmt, 0, m, -1), rnd) == \
+            (inf_bits(fmt, neg), FLAG_DIVZERO), m
+        assert tr.tanpi(fmt, V(fmt, 1, m, -1), rnd) == \
+            (inf_bits(fmt, 1 - neg), FLAG_DIVZERO), m
+    # the quarter-odd-integers are exactly +-1 - Niven's other case
+    for m, neg in ((1, 0), (3, 1), (5, 0), (7, 1), (9, 0), (11, 1)):
+        assert tr.tanpi(fmt, V(fmt, 0, m, -2), rnd) == \
+            (one_bits(fmt, neg), 0), m
+        assert tr.tanpi(fmt, V(fmt, 1, m, -2), rnd) == \
+            (one_bits(fmt, 1 - neg), 0), m
+    assert tr.tanpi(fmt, inf_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.tanpi(fmt, snan_bits(fmt), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_tanpi_cannot_overflow(fmt):
+    """A representable argument cannot get closer than 2^-p to a pole -
+    the binade [1/2, 1) has that ulp and no other does better - so
+    |tanPi| stays below 2^p, which is far inside emax at every rung.
+    The worst cases at each end are checked rather than argued."""
+    p = fmt.prec
+    worst = [next_up(fmt, V(fmt, 0, 1, -1))[0],        # 1/2 + 2^-p
+             next_down(fmt, one_bits(fmt))[0],         # 1 - 2^-p
+             next_down(fmt, V(fmt, 0, 1, 1))[0],       # 2 - 2^(1-p)
+             next_up(fmt, V(fmt, 0, 3, -1))[0],        # 3/2 + 2^(1-p)
+             next_down(fmt, V(fmt, 0, 3, -1))[0]]
+    for b in worst:
+        for rnd in RND_MODES:
+            bits, flags = tr.tanpi(fmt, b, rnd)
+            assert not (flags & FLAG_OVERFLOW), (hex(b), RND_NAMES[rnd])
+            u = unpack(fmt, bits)
+            assert u.kind != sf.INF
+            assert _vexp(u) < p, (hex(b), _vexp(u))
+
+
+def _vexp(u):
+    return u.e + u.m.bit_length() - 1
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_asin_acos_atan_specials(fmt, rnd):
+    """The radian inverses. Only the ZEROS are exact - Hermite-Lindemann
+    puts asin, acos and atan of every other dyadic rational outside the
+    algebraic numbers, so no other argument can produce a value the
+    format holds."""
+    one, negone = one_bits(fmt), one_bits(fmt, 1)
+    assert tr.asin(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.asin(fmt, zero_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    assert tr.atan(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.atan(fmt, zero_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    assert tr.acos(fmt, one, rnd) == (zero_bits(fmt), 0)
+    # everything else is inexact, including asin(+-1) and acos(-1)
+    for fn, arg in (("asin", one), ("asin", negone), ("acos", negone),
+                    ("acos", zero_bits(fmt)), ("atan", one)):
+        bits, flags = getattr(tr, fn)(fmt, arg, rnd)
+        assert flags == FLAG_INEXACT, (fn, hex(arg), flags)
+    # out of domain
+    for fn in ("asin", "acos"):
+        f = getattr(tr, fn)
+        for bad in (V(fmt, 0, (1 << fmt.prec) - 1, -fmt.prec + 1),
+                    max_normal_bits(fmt), max_normal_bits(fmt, 1),
+                    inf_bits(fmt), inf_bits(fmt, 1),
+                    next_up(fmt, one)[0], next_down(fmt, negone)[0]):
+            assert f(fmt, bad, rnd) == (qnan_bits(fmt), FLAG_INVALID), \
+                (fn, hex(bad))
+        assert f(fmt, qnan_bits(fmt), rnd) == (qnan_bits(fmt), 0)
+        assert f(fmt, snan_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+    # atan takes the whole line, and the infinities are +-pi/2
+    for s in (0, 1):
+        bits, flags = tr.atan(fmt, inf_bits(fmt, s), rnd)
+        assert flags == FLAG_INEXACT
+        assert unpack(fmt, bits).sign == s
+    assert tr.atan(fmt, snan_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_pi_inverse_specials(fmt, rnd):
+    """The Pi-variants, whose exact table is a great deal larger:
+    Niven's theorem makes asinPi(+-1) = +-1/2, acosPi(+-0) = 1/2,
+    acosPi(-1) = 1, atanPi(+-1) = +-1/4 and atanPi(+-inf) = +-1/2 all
+    dyadic rationals the format holds. Every one of them raises
+    nothing - which is the observable difference between this and an
+    accurate implementation."""
+    one, negone = one_bits(fmt), one_bits(fmt, 1)
+    half, quarter = V(fmt, 0, 1, -1), V(fmt, 0, 1, -2)
+    assert tr.asinpi(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.asinpi(fmt, zero_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    assert tr.asinpi(fmt, one, rnd) == (half, 0)
+    assert tr.asinpi(fmt, negone, rnd) == (V(fmt, 1, 1, -1), 0)
+    assert tr.acospi(fmt, one, rnd) == (zero_bits(fmt), 0)
+    assert tr.acospi(fmt, zero_bits(fmt), rnd) == (half, 0)
+    assert tr.acospi(fmt, zero_bits(fmt, 1), rnd) == (half, 0)
+    assert tr.acospi(fmt, negone, rnd) == (one, 0)
+    assert tr.atanpi(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
+    assert tr.atanpi(fmt, zero_bits(fmt, 1), rnd) == (zero_bits(fmt, 1), 0)
+    assert tr.atanpi(fmt, one, rnd) == (quarter, 0)
+    assert tr.atanpi(fmt, negone, rnd) == (V(fmt, 1, 1, -2), 0)
+    assert tr.atanpi(fmt, inf_bits(fmt), rnd) == (half, 0)
+    assert tr.atanpi(fmt, inf_bits(fmt, 1), rnd) == (V(fmt, 1, 1, -1), 0)
+    # asinPi(1/2) is 1/6: RATIONAL, and not dyadic, so it is not an
+    # exact case and the loop still terminates on it
+    bits, flags = tr.asinpi(fmt, half, rnd)
+    assert flags == FLAG_INEXACT
+    for fn in ("asinpi", "acospi"):
+        f = getattr(tr, fn)
+        assert f(fmt, next_up(fmt, one)[0], rnd) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+        assert f(fmt, inf_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+        assert f(fmt, snan_bits(fmt), rnd) == (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.atanpi(fmt, snan_bits(fmt), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_atan2_table(fmt, rnd):
+    """The whole of 9.2.1's atan2 table, in both forms.
+
+    The row everyone gets wrong is atan2(+-0, -0) = +-pi: a MINUS zero
+    denominator names the negative real axis, so the answer is pi and
+    not zero. Its Pi-variant is +-1 and is EXACT, where the radian form
+    is a rounding of an irrational number - which is the whole reason
+    atan2Pi is a separate function."""
+    zp, zn = zero_bits(fmt), zero_bits(fmt, 1)
+    ip, inn = inf_bits(fmt), inf_bits(fmt, 1)
+    one, negone = one_bits(fmt), one_bits(fmt, 1)
+    two, negtwo = V(fmt, 0, 1, 1), V(fmt, 1, 1, 1)
+    Q = {0: zero_bits(fmt), 1: V(fmt, 0, 1, -2), 2: V(fmt, 0, 1, -1),
+         3: V(fmt, 0, 3, -2), 4: one_bits(fmt)}
+
+    def check(y, x, quarters, neg):
+        got, flags = tr.atan2pi(fmt, y, x, rnd)
+        want = Q[quarters] | (fmt.sign_mask if neg else 0)
+        if quarters == 0:
+            want = zero_bits(fmt, neg)
+        assert (got, flags) == (want, 0), \
+            (hex(y), hex(x), quarters, hex(got), hex(want), flags)
+        got, flags = tr.atan2(fmt, y, x, rnd)
+        assert flags == (0 if quarters == 0 else FLAG_INEXACT)
+        assert unpack(fmt, got).sign == neg or quarters == 0
+
+    # the axes, both signs of every zero
+    check(zp, zp, 0, 0)
+    check(zn, zp, 0, 1)
+    check(zp, zn, 4, 0)          # atan2(+0, -0) = +pi
+    check(zn, zn, 4, 1)          # atan2(-0, -0) = -pi
+    check(zp, one, 0, 0)
+    check(zp, negone, 4, 0)
+    check(zn, negone, 4, 1)
+    check(one, zp, 2, 0)
+    check(negone, zp, 2, 1)
+    check(one, zn, 2, 0)
+    check(negone, zn, 2, 1)
+    # the diagonals, and any pair of equal magnitudes on them
+    for y, x, q, n in ((one, one, 1, 0), (one, negone, 3, 0),
+                       (negone, one, 1, 1), (negone, negone, 3, 1),
+                       (two, two, 1, 0), (two, negtwo, 3, 0),
+                       (negtwo, negtwo, 3, 1),
+                       (min_subnormal_bits(fmt), min_subnormal_bits(fmt),
+                        1, 0)):
+        check(y, x, q, n)
+    # the infinities
+    check(ip, ip, 1, 0)
+    check(ip, inn, 3, 0)
+    check(inn, ip, 1, 1)
+    check(inn, inn, 3, 1)
+    check(ip, one, 2, 0)
+    check(inn, one, 2, 1)
+    check(one, ip, 0, 0)
+    check(one, inn, 4, 0)
+    check(negone, inn, 4, 1)
+    check(zp, ip, 0, 0)
+    check(zp, inn, 4, 0)
+    # NaNs
+    for fn in ("atan2", "atan2pi"):
+        f = getattr(tr, fn)
+        assert f(fmt, qnan_bits(fmt), one, rnd) == (qnan_bits(fmt), 0)
+        assert f(fmt, one, qnan_bits(fmt), rnd) == (qnan_bits(fmt), 0)
+        assert f(fmt, snan_bits(fmt), one, rnd) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+        assert f(fmt, one, snan_bits(fmt), rnd) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+        # a quiet NaN does NOT outrank the table here, unlike pow's
+        assert f(fmt, qnan_bits(fmt), zp, rnd) == (qnan_bits(fmt), 0)
+
+
+# =====================================================================
+# The neighbour rules, and the thresholds they are derived at
+# =====================================================================
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_asin_and_atan_of_a_tiny_argument_go_opposite_ways(fmt):
+    """asin(x) = x + x^3/6 + ... is strictly ABOVE x and atan(x) =
+    x - x^3/3 + ... strictly BELOW, for every x in (0, 1). No working
+    precision separates either from x once 2e + p + 3 <= 0, and none
+    needs to - the two directed attributes tell them apart, which is
+    precisely what a merely accurate implementation cannot do."""
+    p = fmt.prec
+    for k in (p // 2 + 2, p, 2 * p, 4 * p):
+        x = V(fmt, 0, 1, -k)
+        assert tr.asin(fmt, x, RND_RNE) == (x, FLAG_INEXACT), k
+        assert tr.asin(fmt, x, RND_RDN) == (x, FLAG_INEXACT), k
+        assert tr.asin(fmt, x, RND_RUP) == (next_up(fmt, x)[0], FLAG_INEXACT)
+        assert tr.atan(fmt, x, RND_RNE) == (x, FLAG_INEXACT), k
+        assert tr.atan(fmt, x, RND_RUP) == (x, FLAG_INEXACT), k
+        assert tr.atan(fmt, x, RND_RDN) == (next_down(fmt, x)[0],
+                                            FLAG_INEXACT)
+        nx = V(fmt, 1, 1, -k)
+        assert tr.asin(fmt, nx, RND_RDN) == (next_down(fmt, nx)[0],
+                                             FLAG_INEXACT)
+        assert tr.atan(fmt, nx, RND_RUP) == (next_up(fmt, nx)[0],
+                                             FLAG_INEXACT)
+    # the smallest subnormal is the extreme of both
+    sub = min_subnormal_bits(fmt)
+    assert tr.asin(fmt, sub, RND_RNE) == (sub, FLAG_INEXACT | FLAG_UNDERFLOW)
+    assert tr.atan(fmt, sub, RND_RTZ) == (zero_bits(fmt),
+                                          FLAG_INEXACT | FLAG_UNDERFLOW)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_asinpi_and_atanpi_of_a_tiny_argument_need_no_neighbour(fmt):
+    """asinPi(x) and atanPi(x) are about x/pi, which is not next to
+    anything the format holds, so the ordinary enclosure decides them -
+    and the answer is NOT x. This is the half of the design that says
+    the neighbour rules are derived rather than applied everywhere."""
+    p = fmt.prec
+    for k in (p, 2 * p, 4 * p):
+        x = V(fmt, 0, 1, -k)
+        bits, flags = tr.asinpi(fmt, x, RND_RNE)
+        assert flags & FLAG_INEXACT
+        assert bits != x, k                    # about 0.318 x, not x
+        bits2, _ = tr.atanpi(fmt, x, RND_RNE)
+        assert bits2 == bits, k                # they agree to this order
+    sub = min_subnormal_bits(fmt)
+    assert tr.asinpi(fmt, sub, RND_RNE) == \
+        (zero_bits(fmt), FLAG_INEXACT | FLAG_UNDERFLOW)
+    assert tr.asinpi(fmt, sub, RND_RUP) == \
+        (sub, FLAG_INEXACT | FLAG_UNDERFLOW)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_cospi_near_an_integer_lands_next_to_one(fmt):
+    """cosPi(n + s) for a tiny s is below 1 by 4.94 s^2 and no
+    precision resolves that; the SIDE does, and it is always downward.
+    The same rule serves sinPi next to a half-integer, where the
+    magnitude is the same cosine."""
+    p = fmt.prec
+    one = one_bits(fmt)
+    for k in (p // 2 + 4, p, 2 * p):
+        s = V(fmt, 0, 1, -k)
+        assert tr.cospi(fmt, s, RND_RNE) == (one, FLAG_INEXACT), k
+        assert tr.cospi(fmt, s, RND_RDN) == (next_down(fmt, one)[0],
+                                             FLAG_INEXACT), k
+    # Next to an integer or a half-integer the offset cannot be made
+    # arbitrarily small - the format's own grid is the floor - so the
+    # rule has to fire at ONE ulp, and 2(1-p) + p + 6 <= 0 says it does
+    # at every rung from binary32 up.
+    x = next_up(fmt, one)[0]                            # 1 + 2^(1-p)
+    assert tr.cospi(fmt, x, RND_RNE) == (one_bits(fmt, 1), FLAG_INEXACT)
+    assert tr.cospi(fmt, x, RND_RUP) ==         (next_up(fmt, one_bits(fmt, 1))[0], FLAG_INEXACT)
+    x = next_down(fmt, one)[0]                          # 1 - 2^-p
+    assert tr.cospi(fmt, x, RND_RNE) == (one_bits(fmt, 1), FLAG_INEXACT)
+    h = next_up(fmt, V(fmt, 0, 1, -1))[0]               # 1/2 + 2^-p
+    assert tr.sinpi(fmt, h, RND_RNE) == (one, FLAG_INEXACT)
+    assert tr.sinpi(fmt, h, RND_RDN) == (next_down(fmt, one)[0],
+                                         FLAG_INEXACT)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_acospi_near_a_half_and_atanpi_near_a_half(fmt):
+    """Two more values the format DOES hold: acosPi(x) sits beside 1/2
+    for a tiny x - below it for a positive x and above it for a
+    negative one - and atanPi(x) sits below 1/2 for a huge one. Their
+    radian twins need no rule at all, because pi/2 is not
+    representable."""
+    p = fmt.prec
+    half = V(fmt, 0, 1, -1)
+    for k in (p + 2, 2 * p, 4 * p):
+        x = V(fmt, 0, 1, -k)
+        assert tr.acospi(fmt, x, RND_RNE) == (half, FLAG_INEXACT), k
+        assert tr.acospi(fmt, x, RND_RDN) == (next_down(fmt, half)[0],
+                                              FLAG_INEXACT), k
+        nx = V(fmt, 1, 1, -k)
+        assert tr.acospi(fmt, nx, RND_RUP) == (next_up(fmt, half)[0],
+                                               FLAG_INEXACT), k
+    for k in (p + 1, 2 * p, fmt.emax):
+        x = V(fmt, 0, 1, k)
+        assert tr.atanpi(fmt, x, RND_RNE) == (half, FLAG_INEXACT), k
+        assert tr.atanpi(fmt, x, RND_RTZ) == (next_down(fmt, half)[0],
+                                              FLAG_INEXACT), k
+    assert tr.atanpi(fmt, max_normal_bits(fmt), RND_RDN) == \
+        (next_down(fmt, half)[0], FLAG_INEXACT)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_atan2_beside_an_exact_quotient(fmt):
+    """atan2(y, x) for a positive x is atan(y/x), and when that quotient
+    is itself a dyadic rational the answer sits a hair below it with no
+    precision able to say how far.
+
+    The second case is the one _round_neighbour could not have handled:
+    minSub/2 is not a representable number at all, it is the MIDPOINT
+    between zero and the smallest subnormal, and a value just below a
+    midpoint rounds differently from the midpoint itself."""
+    one = one_bits(fmt)
+    p = fmt.prec
+    for k in (p + 4, 2 * p, 4 * p):
+        y = V(fmt, 0, 1, -k)
+        assert tr.atan2(fmt, y, one, RND_RNE) == (y, FLAG_INEXACT), k
+        assert tr.atan2(fmt, y, one, RND_RDN) == (next_down(fmt, y)[0],
+                                                  FLAG_INEXACT), k
+        assert tr.atan2(fmt, y, one, RND_RUP) == (y, FLAG_INEXACT), k
+    sub = min_subnormal_bits(fmt)
+    two = V(fmt, 0, 1, 1)
+    # the quotient is exactly the subnormal midpoint
+    assert tr.atan2(fmt, sub, two, RND_RNE) == \
+        (zero_bits(fmt), FLAG_INEXACT | FLAG_UNDERFLOW)
+    assert tr.atan2(fmt, sub, two, RND_RUP) == \
+        (sub, FLAG_INEXACT | FLAG_UNDERFLOW)
+    # a quotient that is NOT dyadic takes the ordinary path and still
+    # lands correctly - three does not divide any odd significand
+    three = V(fmt, 0, 3, 0)
+    y = V(fmt, 0, 1, -(2 * p))
+    bits, flags = tr.atan2(fmt, y, three, RND_RNE)
+    assert flags & FLAG_INEXACT
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_atan2pi_beside_one_and_a_half(fmt):
+    """atan2Pi's two corners: a tiny quotient against a NEGATIVE x puts
+    the answer just below 1, and a dominant y puts it beside 1/2 - below
+    for a positive x, above for a negative one. Both are values the
+    format holds; neither radian twin is."""
+    p = fmt.prec
+    one, half = one_bits(fmt), V(fmt, 0, 1, -1)
+    tiny = V(fmt, 0, 1, -(p + 2))
+    big = V(fmt, 0, 1, p + 3)
+    for xneg in (V(fmt, 1, 1, 0),):
+        assert tr.atan2pi(fmt, tiny, xneg, RND_RNE) == (one, FLAG_INEXACT)
+        assert tr.atan2pi(fmt, tiny, xneg, RND_RDN) == \
+            (next_down(fmt, one)[0], FLAG_INEXACT)
+        # a negative y against a negative x puts the answer just ABOVE
+        # -1, so roundTowardNegative is the attribute that reaches -1
+        # and roundTowardPositive is the one that steps off it
+        assert tr.atan2pi(fmt, V(fmt, 1, 1, -(p + 2)), xneg, RND_RDN) ==             (one_bits(fmt, 1), FLAG_INEXACT)
+        assert tr.atan2pi(fmt, V(fmt, 1, 1, -(p + 2)), xneg, RND_RUP) ==             (next_up(fmt, one_bits(fmt, 1))[0], FLAG_INEXACT)
+    assert tr.atan2pi(fmt, big, one, RND_RNE) == (half, FLAG_INEXACT)
+    assert tr.atan2pi(fmt, big, one, RND_RDN) == \
+        (next_down(fmt, half)[0], FLAG_INEXACT)
+    assert tr.atan2pi(fmt, big, V(fmt, 1, 1, 0), RND_RUP) == \
+        (next_up(fmt, half)[0], FLAG_INEXACT)
+    assert tr.atan2pi(fmt, big, V(fmt, 1, 1, 0), RND_RNE) == \
+        (half, FLAG_INEXACT)
+
+
+# =====================================================================
+# Exactness, stated as an enumeration and checked as one
+# =====================================================================
+
+def _is_exact_by_the_table(fmt, fn, xa, xb):
+    """What the design document says should raise nothing, restated
+    here from the mathematics rather than from the implementation."""
+    u = unpack(fmt, xa)
+    if u.kind == sf.NAN or u.kind == sf.INF:
+        return fn in ("atanpi",) and u.kind == sf.INF
+    m, e = (0, 0) if u.kind == sf.ZERO else tr._dyadic(u)
+    if fn == "sinpi":
+        return u.kind == sf.ZERO or e >= -1
+    if fn == "cospi":
+        return u.kind == sf.ZERO or e >= -1
+    if fn == "tanpi":
+        return u.kind == sf.ZERO or e >= 0 or e == -2
+    if fn in ("asin", "atan"):
+        return u.kind == sf.ZERO
+    if fn == "acos":
+        return not u.sign and m == 1 and e == 0
+    if fn == "asinpi":
+        return u.kind == sf.ZERO or (m == 1 and e == 0)
+    if fn == "acospi":
+        return u.kind == sf.ZERO or (m == 1 and e == 0)
+    if fn == "atanpi":
+        return u.kind == sf.ZERO or (m == 1 and e == 0)
+    return None
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_exact_cases_are_exactly_the_enumerated_ones(fmt, rnd):
+    """Both directions. Where the enumeration says exact, the inexact
+    flag must be CLEAR; where it does not, it must be SET. A tolerance
+    dressed as a proof fails one half or the other."""
+    p = fmt.prec
+    pool = [zero_bits(fmt), zero_bits(fmt, 1), one_bits(fmt),
+            one_bits(fmt, 1), min_subnormal_bits(fmt),
+            max_subnormal_bits(fmt), min_normal_bits(fmt)]
+    for m, e in ((1, -1), (3, -1), (5, -1), (1, -2), (3, -2), (7, -2),
+                 (1, -3), (5, -3), (9, -4), (1, 0), (3, 0), (5, 0), (2, 0),
+                 (1, 1), (1, 2), (17, 0), (1, -(p - 2)), (3, -(p - 1))):
+        for s in (0, 1):
+            bits, fl = sf.round_pack(fmt, s, m, e, RND_RNE)
+            if fl == 0:
+                pool.append(bits)
+    seen_exact = 0
+    for fn in ("sinpi", "cospi", "tanpi", "asin", "acos", "atan",
+               "asinpi", "acospi", "atanpi"):
+        for xa in pool:
+            u = unpack(fmt, xa)
+            if fn in ("asin", "acos", "asinpi", "acospi") and \
+                    tr._mag_gt_one(u):
+                continue
+            want_exact = _is_exact_by_the_table(fmt, fn, xa, 0)
+            bits, flags = tr.compute(fmt, fn, xa, 0, rnd)
+            if flags & FLAG_DIVZERO:
+                continue                       # tanPi at a pole
+            got_exact = not (flags & FLAG_INEXACT)
+            assert got_exact == want_exact, \
+                (fn, fmt.name, hex(xa), flags, want_exact)
+            seen_exact += 1 if got_exact else 0
+    assert seen_exact > 40, seen_exact
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_asinpi_of_a_half_is_a_sixth_and_therefore_not_exact(fmt):
+    """Niven's theorem gives sin(pi/6) = 1/2, so asinPi(1/2) is exactly
+    1/6 - a RATIONAL value. It is not a dyadic rational, so it is not a
+    rounding boundary, so it is inexact and the loop terminates on it.
+    That distinction is the reason the enumeration stops where it
+    does."""
+    half = V(fmt, 0, 1, -1)
+    for rnd in RND_MODES:
+        bits, flags = tr.asinpi(fmt, half, rnd)
+        assert flags == FLAG_INEXACT
+    # and the value really is 1/6 to the format's precision
+    mpmath.mp.prec = 4 * fmt.prec + 64
+    want = sf.round_pack(fmt, 0, *mpmath.libmp.to_man_exp(
+        (mpmath.mpf(1) / 6)._mpf_)[:2], RND_RNE)
+    del want
+    lo = tr.asinpi(fmt, half, RND_RDN)[0]
+    hi = tr.asinpi(fmt, half, RND_RUP)[0]
+    assert next_up(fmt, lo)[0] == hi
+    # acosPi(1/2) is 1/3 by the same theorem, and equally inexact
+    assert tr.acospi(fmt, half, RND_RNE)[1] == FLAG_INEXACT
+
+
+# =====================================================================
+# Escalation over the phase-2 set
+# =====================================================================
+
+def _trig_pool(fmt):
+    p = fmt.prec
+    out = [one_bits(fmt), one_bits(fmt, 1), one_bits(fmt) + 1,
+           one_bits(fmt) - 1, V(fmt, 0, 3, -1), V(fmt, 1, 3, -1),
+           V(fmt, 0, 1, -1), V(fmt, 0, 3, -2), V(fmt, 0, 5, -3),
+           V(fmt, 0, 7, -4), V(fmt, 0, 1, -3), V(fmt, 1, 1, -3),
+           min_normal_bits(fmt), min_subnormal_bits(fmt),
+           max_subnormal_bits(fmt), V(fmt, 0, 1, -p), V(fmt, 1, 1, -p),
+           V(fmt, 0, (1 << p) - 1, -p), V(fmt, 0, (1 << p) - 1, -p + 1)]
+    return out
+
+
+def _trig_escalation_run(fmt):
+    """Force the loop to start below the precision it needs; the eleven
+    must not move a single bit. Raising the working precision only
+    narrows the enclosure, so a rounding decided at one precision is
+    decided the same way at every higher one - and this is the run that
+    proves it rather than the argument that asserts it."""
+    pool = _trig_pool(fmt)
+    tr.reset_stats()
+    baseline = {}
+    for fn in TRIG:
+        arity = tr.TRANSCEND_ARITY[fn]
+        pairs = ([(a, 0) for a in pool] if arity == 1
+                 else [(a, pool[(i * 5 + 2) % len(pool)])
+                       for i, a in enumerate(pool)])
+        for rnd in RND_MODES:
+            for xa, xb in pairs:
+                baseline[(fn, rnd, xa, xb)] = tr.compute(fmt, fn, xa, xb, rnd)
+    ordinary = tr.STATS["escalations"]
+
+    tr.reset_stats()
+    tr.START_PREC_OVERRIDE = fmt.prec + 8
+    try:
+        for (fn, rnd, xa, xb), want in baseline.items():
+            assert tr.compute(fmt, fn, xa, xb, rnd) == want, \
+                (fmt.name, fn, RND_NAMES[rnd], hex(xa), hex(xb))
+    finally:
+        tr.START_PREC_OVERRIDE = 0
+    # The counter has to have MOVED somewhere on the ladder, but not
+    # necessarily at every rung: start_prec floors the override at 64
+    # bits, which is already 40 bits of headroom at binary32 and decides
+    # everything there. What matters at every rung is that no answer
+    # moved; the companion test below is where the path is proven taken.
+    assert tr.STATS["max_prec"] <= tr.prec_cap(fmt)
+    return tr.STATS["escalations"], ordinary
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_trig_escalation_lands_on_the_same_answer(fmt):
+    _trig_escalation_run(fmt)
+
+
+def test_trig_escalation_is_taken_somewhere_on_the_ladder():
+    """Forcing a low start must actually drive the escalation path, or
+    the run above proves nothing about it."""
+    forced = ordinary = 0
+    for fmt in ALL:
+        a, b = _trig_escalation_run(fmt)
+        forced += a
+        ordinary += b
+    assert forced > max(4, ordinary), (forced, ordinary)
+
+
+def test_the_eleven_are_registered_and_named_once():
+    """One canonical order in three languages. The vector sets, the C
+    enum and this tuple index each other, so a name added in one place
+    and not the others is a silent renumbering."""
+    assert len(tr.TRANSCEND_FNS) == 20
+    assert tr.TRANSCEND_FNS[9:] == TRIG
+    for fn in TRIG:
+        assert fn in tr.TRANSCEND_IMPL
+        assert tr.TRANSCEND_ARITY[fn] == (2 if fn.startswith("atan2") else 1)
