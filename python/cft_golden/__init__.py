@@ -44,9 +44,11 @@ from .transcend import (
     prec_cap, start_prec,
 )
 from .reduce import (
-    OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
+    OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, REDUCE_OPS, REDUCE_OP_NAMES,
+    SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, SCALED_KINDS, SCALED_KIND_NAMES,
+    SCALE_MIN, SCALE_MAX, ScaleOverflow,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
-    stream_reduce,
+    stream_reduce, fsumsq, fsumabs, norm_split, scaled_prod,
 )
 from . import transcend, vectors
 
@@ -87,9 +89,14 @@ __all__ = [
     "hypot", "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "prec_cap", "start_prec", "transcend",
-    "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
+    "OP_SUM", "OP_DOT", "OP_SUMSQ", "OP_SUMABS",
+    "REDUCE_OPS", "REDUCE_OP_NAMES",
+    "SP_PROD", "SP_PROD_SUM", "SP_PROD_DIFF",
+    "SCALED_KINDS", "SCALED_KIND_NAMES", "SCALE_MIN", "SCALE_MAX",
+    "ScaleOverflow",
     "split", "tree_adds", "canonical_ranges", "reduce_bits",
     "fsum", "fdot", "combine", "stream_reduce",
+    "fsumsq", "fsumabs", "norm_split", "scaled_prod",
 ]
 
 __version__ = "0.1.0"
