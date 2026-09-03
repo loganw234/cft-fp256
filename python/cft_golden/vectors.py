@@ -489,24 +489,161 @@ def trig_atan2_pairs(fmt: FpFormat, extra: int, seed: int = 13):
     return [(a, b) for a, b in pairs if a is not None and b is not None]
 
 
-def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
-    """(fn, a, b) triples for all twenty transcendentals, in the order
-    gen_vectors.py writes them. b is 0 for the unary sixteen, which do
-    not emit it at all.
+#: How coarsely the reduction's worst-case search sweeps the binades
+#: when it seeds the radian pool, and how many of the deepest it keeps.
+#: Deliberately coarser than host/tests/transcend_check.py's sweep: a
+#: vector set is replayed by every consumer on every run, so its pool
+#: buys breadth where the check harness buys depth.
+_WORST_SWEEP = {"fp32": (8, 4), "fp64": (64, 4),
+                "fp128": (2048, 3), "fp256": (32768, 3)}
 
-    Two operand pools, because the families are different: the
+
+def _reduction_worst_cases(fmt: FpFormat):
+    """The arguments closest to a multiple of pi/2 that the measurement
+    finds, as encodings with a grid neighbour on either side.
+
+    Drawn from host/tools/pi_worstcase.py rather than typed, for the
+    reason every constant in this project is derived rather than
+    transcribed: a list of "known hard cases" copied from a paper is a
+    list nobody can regenerate, and one of them being wrong would make a
+    vector set that passes mean nothing. The tool reads the same
+    host/src/mp_2opi.h the library reduces against, so these are the
+    arguments that make THIS reduction work hardest."""
+    import sys
+    from pathlib import Path
+    tools = Path(__file__).resolve().parents[2] / "host" / "tools"
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    import pi_worstcase
+    stride, top = _WORST_SWEEP[fmt.name]
+    return pi_worstcase.worst_encodings(fmt, stride, top)
+
+
+def radian_unary_pool(fmt: FpFormat, extra: int, seed: int = 14):
+    """Operands where sin, cos or tan of a RADIAN argument can be got
+    wrong - a third list again, because what catches sinPi does not
+    catch sin.
+
+    The argument reduction is the whole of what phase 3 added, so the
+    pool is what stresses it: every power of two across the exponent
+    range, because the window's START is the argument's exponent; the
+    deepest cancellations the continued-fraction search finds, which are
+    what make the window WIDEN; and the tiny-argument thresholds of all
+    three functions, straddled."""
+    p = fmt.prec
+    rng = random.Random(seed ^ (fmt.width * 307))
+    out = list(interesting_operands(fmt))
+
+    step = 1 if fmt.width <= 64 else max(1, (fmt.emax + 1) // 48)
+    for k in range(fmt.emin - fmt.man_w, fmt.emax + 1, step):
+        for sgn in (0, 1):
+            _extend(out, _val(fmt, sgn, 1, k))
+    for k in (fmt.emax, fmt.emax - 1, 0, 1, 2, p, 2 * p, fmt.emin,
+              fmt.emin - fmt.man_w):
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, 1, k)
+            if b is not None:
+                _extend(out, b, b - 1)
+
+    out += _reduction_worst_cases(fmt)
+
+    for k in (p // 2 - 1, p // 2, p // 2 + 1, p // 2 + 2, p, p + 2, 2 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                _extend(out, _val(fmt, sgn, m, e))
+
+    out += [_rand_bits(rng, fmt) for _ in range(extra)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def hyperbolic_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
+    """Operands for the six hyperbolics, whose domains differ from each
+    other and from everything else in the set.
+
+    Around 1 from both sides, which is acosh's domain edge and atanh's
+    pole; the sinh/cosh overflow threshold walked two ulps either way;
+    the argument where tanh stops being separable from 1; every tiny
+    threshold in the family; and negatives throughout, since three of
+    the six are odd, two are invalid below their domain and one is
+    even."""
+    import mpmath
+
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 409))
+    out = list(interesting_operands(fmt))
+    _extend(out, one + 1, one - 1, sf.one_bits(fmt, 1) + 1,
+            sf.one_bits(fmt, 1) - 1)
+
+    for m, e in ([(k, 0) for k in (1, 2, 3, 4, 5, 8, 17, 100)] +
+                 [(k, -1) for k in (1, 3, 5, 7, 9)] +
+                 [(k, -2) for k in (1, 3, 5, 7)]):
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, m, e)
+            if b is not None:
+                _extend(out, b, b + 1, b - 1)
+
+    mpmath.mp.prec = 4 * p + 64
+    for n in (fmt.emax, fmt.emax + 1, fmt.emax + 2, fmt.emin,
+              fmt.emin - fmt.man_w):
+        t = mpmath.mpf(n) * mpmath.log(2)
+        man, ex = mpmath.libmp.to_man_exp(t._mpf_)
+        b = sf.round_pack(fmt, 1 if man < 0 else 0, abs(int(man)),
+                          int(ex), sf.RND_RNE)[0]
+        for d in (-2, -1, 0, 1, 2):
+            _extend(out, b + d, (b + d) | fmt.sign_mask)
+
+    bl = (p + 2).bit_length()
+    for k in (bl - 1, bl, bl + 1):
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, 1, k)
+            if b is not None:
+                _extend(out, b, b - 1, b + 1)
+
+    for k in (p // 2 - 1, p // 2, p // 2 + 1, p // 2 + 2, p, p + 2, 2 * p,
+              4 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                _extend(out, _val(fmt, sgn, m, e))
+
+    out += [_rand_bits(rng, fmt) for _ in range(extra)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
+    """(fn, a, b) triples for all twenty-nine transcendentals, in the
+    order gen_vectors.py writes them. b is 0 for the unary twenty-five,
+    which do not emit it at all.
+
+    Four operand pools, because the families are different: the
     exponential set turns on exact powers and overflow thresholds, the
-    trigonometric set on half-integers, the edge of the asin domain and
-    a different list of neighbour thresholds."""
+    Pi-trigonometric set on half-integers and the edge of the asin
+    domain, the radian set on the argument reduction's worst cases, and
+    the hyperbolic set on its own domain edges. Each slice of
+    TRANSCEND_FNS is named by INDEX below, so appending a phase does not
+    silently re-point an earlier one at the wrong pool."""
     from .transcend import TRANSCEND_ARITY, TRANSCEND_FNS
 
     pool = transcend_unary_pool(fmt, extra, seed)
     tpool = trig_unary_pool(fmt, extra, seed + 3)
-    trig = set(TRANSCEND_FNS[9:])
+    rpool = radian_unary_pool(fmt, extra, seed + 5)
+    hpool = hyperbolic_unary_pool(fmt, extra, seed + 6)
+    trig = set(TRANSCEND_FNS[9:20])
+    radian = set(TRANSCEND_FNS[20:23])
+    hyper = set(TRANSCEND_FNS[23:])
+    assert radian == {"sin", "cos", "tan"}, TRANSCEND_FNS[20:23]
     cases = []
     for fn in TRANSCEND_FNS:
         if TRANSCEND_ARITY[fn] == 1:
-            cases += [(fn, a, 0) for a in (tpool if fn in trig else pool)]
+            if fn in radian:
+                src = rpool
+            elif fn in hyper:
+                src = hpool
+            elif fn in trig:
+                src = tpool
+            else:
+                src = pool
+            cases += [(fn, a, 0) for a in src]
         elif fn == "pow":
             cases += [(fn, a, b)
                       for a, b in transcend_pow_pairs(fmt, extra, seed + 1)]

@@ -438,7 +438,7 @@ do_transcend() {
   PY "$ROOT/host/tests/transcend_check.py" --min-prec 64 --trials 16
 }
 need host-cc python
-stage transcend "the twenty transcendentals vs the model, and again through the escalation path" -- \
+stage transcend "the twenty-nine transcendentals vs the model, and again through the escalation path" -- \
   do_transcend
 
 need host-cc python
