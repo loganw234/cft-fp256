@@ -1860,3 +1860,8 @@ witness inverted in `do_radian`, so sin is claimed to lie above a tiny
 argument. Caught by api-test ("sin(min subnormal) downward is +0"),
 by transcend_check.py at fp32 under roundTowardZero, by the
 conformance replay and by MPFR parity.
+
+Repeated on the tree that ships, after the docs above were committed:
+run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
+libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
+wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.
