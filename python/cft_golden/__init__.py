@@ -48,7 +48,12 @@ from .reduce import (
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
     stream_reduce,
 )
-from . import transcend, vectors
+from .chars import (
+    CharacterSyntaxError, pmin, max_payload, nan_bits,
+    from_decimal, to_decimal, from_hex, to_hex,
+    get_payload, set_payload, set_payload_signaling,
+)
+from . import chars, transcend, vectors
 
 __all__ = [
     "FP32", "FP64", "FP128", "FP256", "FORMATS", "PREC_CODE", "FpFormat",
@@ -90,6 +95,9 @@ __all__ = [
     "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
     "split", "tree_adds", "canonical_ranges", "reduce_bits",
     "fsum", "fdot", "combine", "stream_reduce",
+    "CharacterSyntaxError", "pmin", "max_payload", "nan_bits",
+    "from_decimal", "to_decimal", "from_hex", "to_hex",
+    "get_payload", "set_payload", "set_payload_signaling", "chars",
 ]
 
 __version__ = "0.1.0"
