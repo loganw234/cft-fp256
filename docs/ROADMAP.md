@@ -1614,7 +1614,9 @@ What that closed, and what it did not:
   log2p1, log10p1, pown, powr, compound and rootn remain. None needs a
   reduction, a constant beyond ln 10, or a new idea; they are a
   smaller job than any phase so far. Nothing has been written, so
-  nothing is claimed.
+  nothing is claimed. *(Closed the same day - see the table-9.1 entry
+  below. The prediction held for the machinery and understated the
+  exactness work.)*
 - **Not closed: a tile-assisted fast path**, as before.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 phase-3 entry:
@@ -1622,6 +1624,64 @@ The measurements are in docs/VALIDATION.md's 2026-09-03 phase-3 entry:
 model comparisons over twenty-nine functions, 451,988 MPFR
 cases with zero value and zero flag mismatches, and a negative control
 that four gates caught.
+
+## Table 9.1, completed (status, 2026-09-03)
+
+exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound
+and rootn ship as part of the step to ABI 0.6, correctly rounded at all
+four formats under all five attributes with clause 9.2.1's special
+values and exact flags. Zero RTL, the same evaluator, no new constant.
+**With these ten the library implements every operation IEEE 754-2019
+table 9.1 lists for the binary formats.**
+
+What that closed, and what it did not:
+
+- **Closed: the exactness.** Ten enumerations, each proved rather than
+  observed - exp2m1 exact at EVERY integer, exp10 and exp10m1 at the
+  non-negative integers their format holds, log2p1 and log10p1 wherever
+  1 + x is a power of two or of ten, rSqrt at the even powers of two,
+  rootn wherever the odd significand is a perfect |n|-th power and |n|
+  divides the exponent, and pown, powr and compound by phase 1's
+  p+1-bit odd-part bound. 1 + x is formed exactly on the encoding and
+  never in the format, which is the whole reason log2p1 and compound
+  exist as separate operations.
+- **Closed: two neighbour rules the design did not predict.** The
+  sweeps found them: log2p1(2^k) is an exponentially small step above
+  the integer k, which is a grid point and which no precision
+  separates; and compound of a dominant operand sits inside a quarter
+  step of x^n. Both have derived thresholds, both are in the model and
+  the C with the same numbers, and both are written up rather than
+  quietly added. The interesting half is which functions get NO
+  tiny-argument rule - 2^x - 1 is 0.693x and log2(1+x) is 1.443x,
+  neither beside x, so the four m1/p1 forms of a base other than e get
+  none.
+- **Closed: the integer operand.** pown, compound and rootn take an
+  int64 per element, which is what 9.2.1 asks for, and it reaches the
+  vector schema (a new `"n"` field), the replay, the C++ span layer and
+  the Python binding.
+- **Closed: three rows where the standard and MPFR differ**, each
+  measured before it was written down and each decided for the
+  standard: rSqrt(-0) is -infinity, powr(+1, qNaN) is a quiet NaN, and
+  compound(x, 0) below -1 is invalid.
+- **Found: a defect in the oracle.** mpfr_compound_si is off by one
+  ulp for a NEGATIVE n when 1 + x is not representable at the working
+  precision - a double rounding, measured on 4.2.2 and characterised
+  over n in [-12, 12]. mpfr_pow_si and mpfr_rootn_si are sound. The
+  campaign keeps MPFR's own compound for n >= 0 and builds the
+  expectation from the exactly formed 1 + x and mpfr_pow_si for n < 0,
+  with the library's answers confirmed three independent ways first.
+  That is the second external arbiter to be wrong in this project and
+  the second time two implementations caught it.
+- **Not closed: a tile-assisted fast path.** rSqrt is host work like
+  the other thirty-eight, and the tile's RSQRT_SEED opcode remains an
+  optimisation nobody has built - it would have to reproduce these bits
+  exactly, which is what makes it an optimisation rather than a
+  different answer.
+- **Not closed: the decimal half of table 9.1**, which this library has
+  never claimed: the formats here are the binary interchange ladder.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 table-9.1
+entry.
 
 ## The open core
 

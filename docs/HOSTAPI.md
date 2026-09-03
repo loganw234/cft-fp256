@@ -538,6 +538,103 @@ arguments. A consumer built against ABI 0.4 and handed a 0.5 set fails
 on the NAME of a function it does not know, which is the refusal it
 should give.
 
+## The rest of table 9.1 (part of the 0.6 step)
+
+`cft_exp2m1`, `cft_exp10`, `cft_exp10m1`, `cft_log2p1`, `cft_log10p1`,
+`cft_rsqrt`, `cft_powr`, `cft_pown`, `cft_compound` and `cft_rootn`,
+added 2026-09-03. **Correctly rounded** at every format under every
+attribute, with clause 9.2.1's special values and exact flags, on
+exactly the terms the twenty-nine above are. With these ten the library
+implements every operation IEEE 754-2019 table 9.1 lists for the binary
+formats.
+
+**What these needed that the twenty-nine did not: nothing but
+exactness.** No reduction, no constant beyond the ln 10 and log10 e
+phase 1 generates, no new series. Each of the ten has a LARGER
+exact-case table than the function it is built from, and each table is
+proved closed in docs/TRANSCENDENTALS.md before the Ziv loop under it
+is allowed to run - a true value on a rounding boundary being precisely
+where that loop does not terminate. exp2m1 is exact at every integer
+argument; exp10 and exp10m1 at the non-negative integers their format
+can hold; log2p1 and log10p1 wherever 1 + x is a power of two or of
+ten, with 1 + x formed EXACTLY on the encoding and never as a rounded
+sum; rSqrt at the even powers of two; rootn wherever the odd
+significand is a perfect |n|-th power and |n| divides the exponent.
+
+Seven of the ten follow the shapes above:
+
+```c
+cft_exp2m1(dev, fmt, rnd, a, d, n, &flags);       /* unary */
+cft_powr  (dev, fmt, rnd, a, b, d, n, &flags);    /* two encodings */
+```
+
+**The other three do not, and 9.2.1 is why.** `pown`, `compound` and
+`rootn` read an INTEGER second operand - "n is a finite integral value
+in integralFormat" - so they take an `int64_t` array beside the
+encoding array rather than a second encoding that would have to be
+interrogated about whether it is integral. That is the question `pow`
+has to ask and the reason `pow` and `pown` are different functions at
+all. The element count moves to `count`, which is the one place in this
+header where those two names are not the same argument:
+
+```c
+const int64_t ns[3] = { 2, -3, 5 };
+cft_pown(dev, CFT_FP64, CFT_RNE, a, ns, d, 3, &flags);
+```
+
+`n` is read PER ELEMENT and must not be NULL; a NULL is
+`CFT_ERR_INVALID_ARGUMENT`, like the missing second operand of a binary
+entry point.
+
+Rows a porter should not have to infer, each confirmed against MPFR
+4.2.2 before it was written down - and **three of them are rows where
+this contract follows the standard and MPFR does not**:
+
+- **`rSqrt(+-0)` is `+-infinity`** with divideByZero: the sign
+  SURVIVES. `mpfr_rec_sqrt` returns +infinity for both zeros, which
+  predates 754-2019's rSqrt row. `rSqrt(+inf)` is +0; `x < 0` is
+  invalid. rSqrt can neither overflow nor underflow at any rung.
+- **`powr` is not `pow`.** `powr(x, y)` for x < 0 is invalid for EVERY
+  y, a NaN included; `powr(+-0, +-0)`, `powr(+inf, +-0)` and
+  `powr(+1, +-inf)` are invalid; and `powr(qNaN, y)` is a quiet NaN
+  where `pow(qNaN, 0)` is 1. **`powr(+1, qNaN)` is a quiet NaN** - the
+  standard's row is "powr(+1, y) is 1 for FINITE y" and it lists
+  `powr(x, qNaN)` for x >= 0 separately - where `mpfr_powr` returns 1.
+  `powr(+-0, y)` is +infinity with divideByZero for a finite y < 0 and
+  +infinity SILENTLY for y = -infinity, the same pole-versus-limit
+  distinction pow's table makes.
+- **`compound(x, 0)` for an x below -1 is invalid**, not 1: the row
+  reads "compound(x, 0) is 1 for x >= -1 or quiet NaN", which makes
+  that case rather than states it. `compound(qNaN, 0)` IS 1.
+  `compound(-1, n)` is +infinity with divideByZero for n < 0 and +0 for
+  n > 0; `compound(+-0, n)` is 1.
+- `pown(x, 0)` is 1 for any x that is not a signaling NaN, an infinity
+  and a quiet NaN included. `pown(+-0, n)` is `+-infinity` with
+  divideByZero for an odd n < 0 and `+infinity` for an even one.
+- **`rootn(x, 0)` is invalid for every x**, a quiet NaN included: zero
+  is outside the domain. `rootn(x, 1)` is x, exactly and silently. A
+  negative operand with an EVEN n is invalid. `rootn(x, 2)` is
+  `cft_sqrt(x)` on every input except `x = -0`, where the standard's
+  own NOTE says they differ: `rootn(-0, 2)` is +0 by the even-n row and
+  `squareRoot(-0)` is -0.
+- `log2p1(-1)` and `log10p1(-1)` are -infinity with **divideByZero**;
+  an operand below -1 is invalid, -infinity included.
+- A signaling NaN raises invalid and delivers the canonical quiet NaN,
+  as everywhere else in this contract.
+
+The vectors carry them in the same `<fmt>-transcend[-<rnd>].jsonl`
+files, which now name thirty-nine functions and carry one new field:
+`"n"`, a SIGNED DECIMAL rather than an encoding, present only for the
+three that read an integer exponent. A consumer that knows the names
+but not that field fails on a missing key, which is the refusal it
+should give.
+
+`rSqrt` is host work like the other thirty-eight - the evaluator's own
+square root and one division. The tile's RSQRT_SEED opcode is a
+plausible later fast path for the narrow formats, exactly as one is for
+exp; it would have to reproduce these bits exactly, which makes it an
+optimisation rather than a different answer, and nothing here reads it.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future

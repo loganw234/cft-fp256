@@ -3,7 +3,11 @@
 **Phase 1** (ABI 0.3, 2026-09-02) is exp, expm1, exp2, log, log1p,
 log2, log10, pow and hypot; **phase 2** (ABI 0.4, 2026-09-03) is
 sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
-and atan2Pi, and has its own section at the end of this file.
+and atan2Pi; **phase 3** (ABI 0.5, 2026-09-03) is sin, cos and tan of a
+radian argument and the six hyperbolics; and the last section, **table
+9.1 completed** (part of the 0.6 step, 2026-09-03), is the remaining
+ten - exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr,
+compound and rootn. Each has its own section, in that order, below.
 
 exp, expm1, exp2, log, log1p, log2, log10, pow and hypot - phase 1 of
 the transcendental set, landed 2026-09-02 as ABI 0.3. This is the
@@ -1253,3 +1257,400 @@ beyond ln 10, or a new idea; they are a smaller job than any phase so
 far and are recorded in docs/ROADMAP.md as such. A tile-assisted fast
 path for the narrow formats remains an optimisation, not a contract
 change.
+
+*Written 2026-09-03, and answered the same day.* The section below is
+those ten. The prediction held for the machinery - no reduction, no
+constant, no new series - and understated the work: the exactness
+tables are larger than any phase's, two of them needed neighbour rules
+nobody predicted, and the campaign found a one-ulp defect in MPFR's own
+`compound`. A tile-assisted fast path is still not here.
+
+---
+
+# Table 9.1, completed
+
+exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound
+and rootn - landed 2026-09-03 as part of the step to ABI 0.6. Same
+promise, same evaluator, same three-way split, same loud refusal. With
+these ten the library implements **every operation IEEE 754-2019 table
+9.1 lists for the binary formats**.
+
+The phase-3 section above ends by saying these are "a smaller job than
+any phase so far", and that was right about the machinery and wrong
+about where the work is. There is no reduction here, no constant beyond
+the ln 10 and log10 e phase 1 already generates, and no new series.
+What there is, is EXACTNESS: every one of the ten has a larger
+exact-case table than the function it is built from, and each table has
+to be proved closed before the Ziv loop under it is allowed to run,
+because a true value sitting on a rounding boundary is precisely where
+that loop does not terminate. Two of the ten also needed a neighbour
+rule that no reasoning-from-the-shape-of-the-series predicted; the
+sweep found them, and both are written up below rather than quietly
+added.
+
+## The exact cases, proved complete
+
+| function | exact exactly when | why the list is closed |
+|---|---|---|
+| exp2m1 | **every integer argument** | 2^n - 1 is a dyadic rational for every n, positive or negative, and a rounding boundary of a p-bit format exactly while \|n\| <= p+1. A non-integer dyadic argument gives an algebraic irrational (exp2's own argument), so nothing else can be one |
+| exp10 | a non-negative integer n whose 5^n fits in p+1 bits | 10^n = 2^n 5^n has odd part 5^n; a NEGATIVE power of ten is not a dyadic rational at all, and a non-integer dyadic exponent gives an algebraic irrational |
+| exp10m1 | a non-negative integer n whose 10^n - 1 fits in p+1 bits | 10^n - 1 is an ODD integer, so its odd part is itself |
+| log2p1 | 1 + x is a power of two | log2 of a positive rational is rational only for a power of two - unique factorisation, phase 1's log2 argument |
+| log10p1 | 1 + x is a power of ten | the same, and 1 + x is dyadic, so only the non-negative powers can occur |
+| rSqrt | x is an EVEN power of two | 1/sqrt(M 2^E) is rational only if sqrt(M) is, and dyadic only if sqrt(M) is a power of two; M odd forces M = 1, and then E must be even |
+| pown | pow's integer-exponent branch: \|x\| a power of two at any n, or n <= p+1 with M^n inside p+1 bits | phase 1's p+1-bit odd-part bound, restated on an integer exponent |
+| powr | the same, with the sign question deleted | the base is non-negative by domain |
+| compound | 1 + x formed EXACTLY, then pown's procedure on it | the odd part of (1+x)^n is odd(1+x)^n, so the same bound closes it |
+| rootn | the odd significand is a perfect \|n\|-th power AND \|n\| divides the exponent | (M 2^E)^(1/n) is rational only then; for a negative n the reciprocal of that is dyadic only when the root is 1, since 1/(odd > 1) is not |
+
+Three of those deserve their arithmetic written out.
+
+**exp2m1's table is the widest in the set and its boundary is the
+sharpest.** 2^n - 1 for n = p+1 is a MIDPOINT of the format - the
+value exactly halfway between 2^(p+1) - 2 and 2^(p+1) - and a midpoint
+is the one place an enclosure never decides, at any precision. So the
+exact case must reach it, and it does: |n| <= p+1 is computed by exact
+integer arithmetic. One step further out, at n >= p+2, the exact
+integer 2^n - 1 is up to 262,143 bits wide at fp256 and the 2048-bit
+container cannot hold it - but it does not have to. The value then sits
+in the top HALF of the gap below 2^n - the gap there is 2^(n-p) and
+1 < 2^(n-p-1), so the value is above the midpoint - and the side
+decides it; and for n <= -(p+2) the value
+-(1 - 2^n) sits in the half gap above -1. Both are `round_neighbour`
+witnesses, and both are exact statements rather than approximations.
+
+**exp10 and exp10m1 past their exact tables are the counting argument
+again, with one structured family worth doing by hand.** For an
+integer n whose 5^n needs L > p+1 bits, 10^n is not a boundary and its
+distance to the nearest one is at least 2^n absolute, hence 2^(1-L)
+relative; the worst case is therefore L bits, which at fp256 is
+about 183,000 and far past the cap. The expected number of n anywhere near
+that is the same 2^-83-shaped count phase 1 makes for pow, over a
+range of at most 78,913 integers per format, and the reasoning is
+identical: 5^n mod 2^(L-p-1) is an odd number with no structure, and
+the first attempt's 2p+40 bits decide it unless that residue is within
+2^-(p+39) of an end.
+
+exp10m1 has a family where the worst case IS attained, and it is
+bounded: for (p+1)/log2(10) < n <= p/log2(5) the value 10^n - 1 is
+exactly ONE below a multiple of the half-ulp, because 2^(e-p) divides
+10^n there. The distance to the boundary is then 1 absolute and the
+enclosure needs about e + 1 = log2(10)*n + 1 bits, which is at most
+1.4307(p+1) - 36 bits at fp32, 77 at fp64, 163 at fp128 and 341 at
+fp256, every one of them inside the FIRST attempt's 2p+40. That is a
+proof rather than a measurement, and it is why the family costs
+nothing.
+
+**rSqrt can neither overflow nor underflow at any rung.** The largest
+result is 1/sqrt(minSubnormal) = 2^((emax + p - 1)/2), and half of
+emax + p - 1 is below emax whenever emax > p - 1, which holds at all
+four (127 > 23, 1023 > 52, 16383 > 112, 262143 > 236). The smallest is
+1/sqrt(maxFinite), about 2^-(emax/2), nowhere near tiny. So rSqrt has
+no range screen and none is missing.
+
+## The neighbour rules, and the two the sweep found
+
+Five families, and the interesting half is which functions get NONE.
+
+| family | the true value | threshold |
+|---|---|---|
+| `exp2m1(n)` for an integer n >= p+2 | strictly inside the top HALF of the gap below 2^n, above its midpoint | an integer test on the exponent |
+| `exp2m1(x)`, `exp10m1(x)` for a very negative x | strictly inside the half gap above -1, since 2^x (or 10^x) has fallen below 2^-(p+2) | the screen's enclosure of `x` or `x log2(10)` below `-(p+3)` |
+| `exp10(x)` for a tiny x | strictly between 1 and its neighbour on the sign side of x: \|10^x - 1\| <= 2.64\|x\| | `e <= -(p+4)`, the same threshold exp and exp2 take, with 2.64 in place of 1.01 |
+| `pown`, `powr`, `compound`, `rootn` beside 1 | strictly inside the half gap next to 1, on the side the exact operand signs give | \|n log x\| (or \|log x / n\|) below 2^-(p+3) - pow's own rule, and for rootn it is what makes a huge \|n\| answerable at all |
+| `log2p1(2^k)`, `log10p1(10^k)` | strictly above the INTEGER k, by an exponentially small step | derived below |
+| `compound(x, n)` for a dominant x | strictly beside x^n, on the side of n's sign | `vexp(x) >= p + 2 + bits(\|n\|)`, with x^n an exact dyadic |
+
+**Which functions get no tiny-argument rule, and why that is the
+derivation rather than an omission.** For a tiny x,
+
+    2^x - 1  ~ x ln2  = 0.693 x        log2(1+x)  ~ x/ln2  = 1.443 x
+    10^x - 1 ~ x ln10 = 2.303 x        log10(1+x) ~ x/ln10 = 0.434 x
+
+and not one of those is beside x. Only a base of e puts the value
+inside the gap next to its own argument, which is exactly why expm1 and
+log1p have a rule and their siblings in other bases do not. The
+enclosure resolves all four to full relative precision, and round_pack
+carries the underflow. The four answers at the smallest subnormal are
+one subnormal, two subnormals, one subnormal and zero respectively -
+four different answers, none of them x - and `host/tests/api_test.c`
+asserts all four, because an implementation that reused expm1's rule
+here would return x every time and pass every other test in this file.
+
+rSqrt gets none either, and that one is a near miss worth stating:
+1/sqrt(1+u) - 1 is about -u/2, which would be inside the half gap next
+to 1 if \|u\| were below 2^-p - but the smallest nonzero u a
+representable operand can have is the ulp of 1, which is 2^(1-p). No
+operand comes close enough, so the rule is not needed and is not
+written.
+
+**The two rules the sweep found rather than the design predicted.**
+Both are cases where the true value is an exponentially small step from
+a value the format holds exactly, and neither has the shape of a
+tiny-argument series.
+
+*log2p1 of a power of two.* For x = 2^k the value is
+k + log2(1 + 2^-k), and k is a GRID POINT of every format on this
+ladder. An enclosure would have to separate the two and cannot, at any
+precision; the side is the whole answer, and it is a theorem
+(log2(1+u) > 0 for u > 0) rather than a measurement. The threshold is
+derived: the excess is at most 2^(-k+0.529), the nearest boundary above
+k is half an ulp away at 2^(g-p) with g = floor(log2 k), so the excess
+is inside it once k > p - g + 0.529 - that is, once **k >= p - g + 1**.
+And there is no band on the other side: at k = p - g the excess is at
+least 1.4 half-gaps, so the enclosure decides that one with two bits
+to spare. log10p1 of a power of ten is the same shape in another base;
+there the comparison is made in EXACT integers against 23025/10000, a
+rational below ln 10, and the closest that comparison comes to an
+equality over every k any format on this ladder holds is a factor of
+2^0.495 (fp128, k = 32), so five decimals of ln 10 decide it with room.
+
+Nothing else in those two functions needs a rule, and the reason is
+worth stating because it looks as though more should. x = 2^k plus one
+ulp puts the value about 2^(1-p) above k in RELATIVE terms, which the
+enclosure resolves in p + log2(k) bits; only the exact power, where the
+whole perturbation is the "+1", is out of its reach.
+
+*compound of a dominant operand.* For a large x the value is x^n times
+(1 + 1/x)^n, and when x^n is itself an exact dyadic the correction is
+below a quarter of the grid step there - so the side settles it,
+exactly as hypot's dominant operand is settled. Without this,
+`compound(2^1022, 1)` at binary64 is 2^1022 + 1: one unit above a grid
+point whose ulp is 2^970, and no precision under the cap separates
+them. The threshold: `vexp(x) >= p + 2 + bits(|n|)` makes |n/x| below
+2^-(p+2), the binomial tail |(1+1/x)^n - 1 - n/x| is below 2(n/x)^2 and
+so below it again, and a quarter of the relative grid step is
+2^-(p+1). The correction's SIGN is n's, because 1 + 1/x is above 1 for
+a positive x.
+
+Both rules are in both implementations with the same thresholds, which
+is the discipline the whole set keeps: the two may disagree about which
+path answers an input, but never about whether the input is
+answerable.
+
+## The integer operand
+
+`pown`, `compound` and `rootn` read an INTEGER second operand, and
+9.2.1 says so in as many words: "n is a finite integral value in
+integralFormat". So they take an `int64_t` array beside the encoding
+array rather than a second encoding that would have to be interrogated
+about whether it is integral - which is the question `pow` has to ask
+and the reason `pow` and `pown` are different functions in the first
+place.
+
+That decision reaches four places. `cft.h` gains three prototypes whose
+element count is called `count`, because `n` is taken; the vector sets
+gain an `"n"` field, a signed decimal rather than an encoding, which
+`host/src/conformance.c` parses with a `field_i64` of its own; the
+internal `cft_tr_apply` gains an `nn` argument that is NULL for the
+other thirty-six; and `cft.hpp` gains a `cspan<std::int64_t>` whose
+length is checked against the output the way an encoding operand's is.
+The whole int64 range is exercised - both ends of it, because INT64_MIN
+has no positive negation and is exactly the value a naive |n| gets
+wrong.
+
+`rootn(x, 2)` is `squareRoot(x)` on every input but one, and the
+exception is the standard's own NOTE: `rootn(-0, 2)` is +0 by the
+"rootn(+-0, n) is +0 for even n > 0" row, where `squareRoot(-0)` is -0.
+`host/tests/transcend_check.py` asserts the identity over the whole
+pool at every attribute AND asserts the difference at that one input,
+which is a stronger test than skipping the case.
+
+## Special values and flags, all of 9.2.1
+
+Every row was transcribed from the standard and then confirmed against
+MPFR 4.2.2 - the mingw64 build on this host, the first release line to
+carry `mpfr_exp2m1`, `mpfr_exp10m1`, `mpfr_log2p1`, `mpfr_log10p1`,
+`mpfr_powr`, `mpfr_compound_si` and `mpfr_rootn_si` (all 4.2.0), which
+`host/tools/mpfr_check.c` calls DIRECTLY. **Three rows differ, and in
+all three this contract follows the standard.** Each was measured
+before it was written down.
+
+- **`rSqrt(+-0)` is `+-infinity`** with divideByZero. The sign
+  survives. Measured: `mpfr_rec_sqrt(-0)` returns `+Inf`, which is what
+  MPFR has always documented and predates 754-2019's rSqrt row.
+  `rSqrt(+inf)` is +0 with no exception; `x < 0` is invalid,
+  -infinity included.
+- **`powr(1, qNaN)` is a quiet NaN.** The standard's row is
+  "powr(+1, y) is 1 for FINITE y", and it lists "powr(x, qNaN) is qNaN
+  for x >= 0" separately, so a NaN exponent is not covered by the
+  first. Measured: `mpfr_powr(1, NaN)` returns 1.
+- **`compound(x, 0)` for an x below -1 is invalid**, not 1. The row
+  reads "compound(x, 0) is 1 for x >= -1 or quiet NaN", which makes the
+  case below -1 rather than states it. MPFR agrees here - measured,
+  `mpfr_compound_si(-2, 0)` is NaN - and it is listed with the other
+  two because it is the row an implementation is most likely to get
+  wrong.
+
+The rest, and the ones a porter should not have to infer:
+
+- `exp2m1(+-0)` and `exp10m1(+-0)` are `+-0`; `exp10(+-0)` is 1;
+  `f(-inf)` is -1 for the two m1 forms and +0 for exp10; `f(+inf)` is
+  +inf for all three.
+- `log2p1(+-0)` and `log10p1(+-0)` are `+-0`; `f(-1)` is -infinity with
+  **divideByZero** - 7.3's rule for an exact infinity from a finite
+  operand, the row `atanh` takes at its pole - and an operand below -1
+  is invalid, -infinity included. `f(+inf)` is +inf.
+- **`powr` is not `pow`, and the differences are the point of having
+  both.** `powr(x, y)` for x < 0 is invalid for EVERY y, a NaN
+  included; `powr(+-0, +-0)`, `powr(+inf, +-0)` and `powr(+1, +-inf)`
+  are invalid; `powr(qNaN, y)` and `powr(x, qNaN)` for x >= 0 are quiet
+  NaNs with no exception - so `powr(qNaN, 0)` is a NaN where
+  `pow(qNaN, 0)` is 1. `powr(+-0, y)` is +infinity with divideByZero
+  for a finite y < 0, +infinity and SILENT for y = -infinity (the pole
+  is the finite exponent, not the limit - the same distinction pow's
+  table makes), and +0 for y > 0.
+- **`pown(x, 0)` is 1 for any x that is not a signaling NaN**, an
+  infinity and a quiet NaN included. `pown(+-0, n)` is `+-infinity`
+  with divideByZero for an odd n < 0 and `+infinity` for an even one;
+  `+-0` for an odd n > 0 and `+0` for an even one. The infinity rows
+  are the same table with the zeros and infinities exchanged.
+- `compound(-1, n)` is +infinity with divideByZero for n < 0 and +0 for
+  n > 0; `compound(+-0, n)` is 1; `compound(+inf, n)` is +infinity for
+  n > 0 and +0 for n < 0; `compound(qNaN, n)` is a quiet NaN for
+  n != 0.
+- **`rootn(x, 0)` is invalid for EVERY x, a quiet NaN included**: zero
+  is outside the domain, and 9.2's general rule for an operand outside
+  the domain is a quiet NaN with invalid. `rootn(x, 1)` is x, exactly
+  and silently. A negative operand with an even n is invalid,
+  -infinity included; the zero and infinity rows split on the parity of
+  n exactly as pown's do.
+- A signaling NaN raises invalid and delivers the canonical quiet NaN,
+  as everywhere else in this contract.
+
+## The oracle's own defect, and what was done about it
+
+Phase 1 found that mpmath's interval `power` is not quite rigorous and
+widened every endpoint by 256 units in response. This set found
+something sharper, in the other oracle.
+
+**`mpfr_compound_si` is off by one unit in the last place for a
+NEGATIVE n**, whenever 1 + x is not representable at the working
+precision - a double rounding of the intermediate sum. Measured on
+4.2.2, this host, 2026-09-03, at 24 bits of precision:
+
+    compound(1 + 2^-23, -1) toward zero returns 0x7.fffffp-4
+      where (2 + 2^-23)^-1 computed at 400 bits and rounded once
+      is 0x7.fffff8p-4
+    compound(3 - 2^-22, -1) to nearest returns 0x4p-4
+      where the same reference gives 0x4.000008p-4
+
+n = -2 and n = -4 do it too on the same operands; a non-negative n does
+not. `mpfr_pow_si` and `mpfr_rootn_si` were checked the same way over
+n in [-12, 12] and five attributes and are sound at every one, so the
+defect is specific to that entry point and that sign.
+
+The library's answers were confirmed independently three ways before
+the workaround was written: the golden model's rigorous mpmath
+enclosure, the C's own tracked error bound, and
+`python/tests/test_transcend.py`'s brute-force enclosure at four times
+the escalation cap all agree with the 400-bit reference and not with
+`mpfr_compound_si`. The campaign therefore keeps MPFR's own compound
+for n >= 0 - which is the comparison worth having - and for n < 0
+builds the expectation from the EXACTLY formed 1 + x and
+`mpfr_pow_si`: still MPFR arithmetic, still one rounding, and not the
+entry point with the defect. The domain rows (x <= -1) go through
+`mpfr_compound_si` either way, since it is right about those.
+
+That is the second time an external arbiter has been wrong in this
+project and the second time the two independent implementations caught
+it. It is the argument for having two.
+
+## Where the two implementations disagree about EFFORT
+
+They never disagree about an answer. They do disagree about how much
+precision one of them takes, and this set produced the clearest example
+the project has. Measured:
+
+    iv.log1p(10587189 * 2^-106) at 88 bits returns an interval of
+    RELATIVE width 4.8e-5; at 176 bits it is exact
+
+mpmath's interval log1p forms 1 + x and takes the logarithm of a value
+next to 1, so for an argument of magnitude 2^-83 it loses about
+eighty-three bits of relative accuracy. The C never forms 1 + x for a
+small argument - `mp_log1p_small` sums `2 atanh(u/(u+2))` on the EXACT
+operand - so it decides those inputs at the first attempt, and the
+model escalates once and agrees.
+
+That had never shown before because phase 1's log1p has a neighbour
+rule covering every |x| below 2^-(p+3), so the model was never asked
+for one. log2p1 and log10p1 deliberately have no such rule - their
+value is x/ln2 or x/ln10, which is not beside x - so they do ask. It is
+the Ziv loop working exactly as designed, and it is one more reason the
+two implementations are written differently on purpose.
+
+## What was actually run
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, 2026-09-03,
+with three other agents building on the same machine - so nothing below
+is a timing figure and none is quoted as one.
+
+| check | count | result |
+|---|---|---|
+| `python/tests`, the whole suite | 1,241 passed, 1 skipped | pass |
+| `host/tests/transcend_check.py`, C vs the model, thirty-nine functions | 607,217 comparisons | C == model on every one, bits and flags |
+| the same, forced to start below the precision it needs | 580,977 comparisons | identical through the escalation path |
+| `rootn(x, 2)` against `cft_sqrt`, per element and per attribute | 17,665 comparisons | identical everywhere except x = -0, where the standard's own NOTE says they differ - and that difference is asserted |
+| `make vectors` | 40 sets, 769,265 cases, of which 533,265 transcendental | regenerated from the model |
+| `cft_conformance` replay at `make vectors`' arguments | 40 sets, 769,265 cases | every case, twice - per element and as arrays |
+| `host/tests/api_test.c` | the table-9.1 block: the refusals, the exact cases, the three rows MPFR gets differently, one case from every neighbour family and from every family that has none | pass |
+| MPFR parity, all thirty-nine, four formats, five attributes | 544,788 cases, of which 92,800 for the ten | **zero value mismatches, zero flag mismatches** |
+| the same with `CFT_TRANSCEND_MINPREC=64` | 544,788 cases, 72,381 escalations | zero mismatches |
+| `cft.hpp` vs `cft.h` | 4,549 checks at C++17 and again at C++20 | identical encodings and flags |
+| the cftmpfr drop-in | 668 tests | pass, with exp10, rSqrt and rootn bit-for-bit against gmpy2 |
+| `make examples-lang` | C++, Rust, Go and C# against the C example; Julia and R absent | same library, same bits |
+
+**Escalation, measured.** Over the MPFR campaign's 306,460
+transcendental elements, 138,825 reached the Ziv loop and it escalated
+**nine** times - and all nine are phase 3's tanh, three per format from
+fp64 up, which is exactly the count phase 3 recorded. **Not one of the
+ten escalated there.** 32,585 elements were decided exactly and 56,835
+by a neighbour's side.
+
+Over `transcend_check.py`'s pools the model escalated 182 times, and
+those are worth breaking down because the breakdown says something:
+
+| function | escalations | deepest |
+|---|---|---|
+| powr | 12 per format at fp64, fp128, fp256 | 292, 532 and **832** bits |
+| log2p1, log10p1 | 25 each at fp32, 5 each at fp64 | 176 and 292 bits |
+| the other seven | none, at any format | - |
+
+powr's are phase 1's `pow(1+u, -(1+u))` family, inherited unchanged
+along with the analysis that bounds it at 3p bits - 832 is the fp256
+cap, exactly where phase 1 said that family lands. log2p1's and
+log10p1's are the model's own evaluator rather than the mathematics,
+and the section above explains them: mpmath's interval log1p forms
+1 + x, so a tiny argument costs it most of its relative accuracy and it
+needs the second attempt. The C decides those at the first. Every one
+of the 182 landed on the same answer as the C.
+
+Forced low: `CFT_TRANSCEND_MINPREC=64` drives 72,381 escalations
+through the MPFR campaign and finds the same answers, and
+`transcend_check.py --min-prec 64` drives the C's escalation path
+against an UNESCALATED model over 580,977 comparisons with identical
+results.
+
+**Negative control**, run and restored the same day. Inverting one
+character - the `away` argument of log2p1's neighbour witness in
+`do_logp1_family`, so `log2p1(2^k)` is claimed to lie BELOW the integer
+k rather than above it - is caught by `api-test` (1 FAILED, at "and
+upward it is nextUp(30)"), by `transcend_check.py` (fp32 rtz,
+`log2p1(2^24)`: `0x41bfffff` where the model says `0x41c00000`), by the
+conformance replay (which stops at 92,033 cases), and by MPFR parity
+(from the first fp32 log2p1 row under roundTowardZero). Four gates, and
+the rule it breaks is one of the two this set added.
+
+## What is NOT here
+
+- **The tile's RSQRT_SEED opcode.** `rSqrt` is host work like the other
+  thirty-eight: `cft_mp_sqrt` and one division inside the evaluator.
+  The tile has a reciprocal-square-root SEED opcode and a fast path
+  built on it - seed, Newton refinement, an exactly measured residual -
+  is a plausible later optimisation for the narrow formats, exactly as
+  it is for exp. It would have to reproduce these bits exactly, which
+  makes it an optimisation rather than a different answer, and nothing
+  in this set reads it.
+- **Anything else from table 9.1.** There is nothing else: with these
+  ten the binary half of the table is complete.
+

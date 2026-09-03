@@ -3877,8 +3877,9 @@ static void lane_one(const cft_fmt_desc *f, int sign, lane *u)
  * integer 2^n - 1 is up to 262,143 bits wide at fp256 and this
  * container is 2048:
  *
- *   n >= p+2   2^n - 1 sits in the top quarter of the gap below 2^n
- *              (the gap there is 2^(n-p) and 1 < 2^(n-p-1));
+ *   n >= p+2   2^n - 1 sits in the top HALF of the gap below 2^n,
+ *              above its midpoint (the gap there is 2^(n-p) and
+ *              1 < 2^(n-p-1));
  *   n <= -(p+2) -(1 - 2^n) sits in the half gap above -1, whose nearest
  *              boundary is -(1 - 2^-(p+1)).
  *
