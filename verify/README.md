@@ -29,6 +29,7 @@ the repo root, or `bash verify/run.sh` with the flags below.
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
 | transcend | the twenty-nine transcendentals vs model, then again with the library forced to start below the precision it needs, so the escalation path runs against an unescalated reference | cc, python |
+| augmented | the three clause-9.5 augmented operations vs model - both outputs and the flag word per element, the batch loop and its flag OR, the aliasing rules, and the pair identity `r + e == x op y` checked in exact integers on the library's own output | cc, python |
 | diff | the alignment-boundary sweep vs the model | cc, python |
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |

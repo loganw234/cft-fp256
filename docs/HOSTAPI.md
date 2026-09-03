@@ -538,6 +538,137 @@ arguments. A consumer built against ABI 0.4 and handed a 0.5 set fails
 on the NAME of a function it does not know, which is the refusal it
 should give.
 
+## The augmented arithmetic operations (754-2019 clause 9.5)
+
+`cft_augmented_add`, `cft_augmented_sub` and `cft_augmented_mul`,
+added 2026-09-03 as part of the 0.6 step. They are unlike everything
+above them in two visible ways, and both are the standard's doing
+rather than this library's.
+
+**They return a PAIR.** Each writes two arrays: `r`, the operation
+rounded, and `e`, the error that rounding made. Together they carry
+the exact result the format cannot hold.
+
+```c
+cft_augmented_add(dev, fmt, a, b, r, e, n, &flags);
+cft_augmented_mul(dev, fmt, a, b, r, e, n, &flags);
+```
+
+That is the primitive under compensated summation, exactly rounded dot
+products, and double-double arithmetic. Every one of those is written
+today out of TwoSum and Dekker splitting - sequences of ordinary
+operations that reconstruct the residual by hand, correctly only under
+assumptions about association, contraction and intermediate precision
+that a compiler is free to break and routinely does. Here it is a
+library call with a standard behind it and a vector set scoring it.
+
+**They take NO rounding attribute.** 9.5 fixes the rounding itself:
+
+> This standard specifies a single rounding direction to be used in the
+> operations in this subclause, defined as roundTiesTowardZero: the
+> floating-point number nearest to the infinitely precise result shall
+> be delivered; if the two nearest floating-point numbers bracketing an
+> unrepresentable infinitely precise result are equally near, the one
+> with smaller magnitude shall be delivered.
+
+That direction is not one of clause 4.3's five attributes, and this
+library does not add a sixth attribute for it. There is no `cft_round`
+parameter in the signature because there is nothing to pass. Inside,
+`round_pack` learns it as an internal rounding DIRECTION
+(`CFT_SF_RTTZ`, value 16 - outside the three-bit MODE field the five
+attributes encode into), reachable from `host/src/augmented.c` and from
+nowhere a caller can steer; the API layer's own attribute range check
+is 0..4 and always was.
+
+The tie rule differs from roundTiesToEven **only at an exact midpoint,
+and only where the lower neighbour's last bit is odd**. An
+implementation that quietly used roundTiesToEven would pass every test
+that did not aim at exactly that case, so the vector pools aim at it at
+every binade edge the format has.
+
+**HOST operations**, like the clause-5 set and the transcendentals: no
+`cft_run` pass is issued, no bus word is produced, `dev` is context. A
+tile-composed route - a TwoSum, or an FMA residual for the product -
+is a plausible later fast path and would have to reproduce these bits
+exactly; it is not what runs today, and the rounding is a reason as
+well as the arithmetic, since the tile's five attributes do not include
+this one.
+
+`r` and `e` must be different buffers - two writes to one buffer have
+no well-defined ordering, so that call is `CFT_ERR_INVALID_ARGUMENT`
+rather than a plausible answer. Either may alias `a` or `b`: each
+element is read before either output is written.
+
+### The rows a porter should not have to infer
+
+- **Any NaN operand gives the canonical quiet NaN as BOTH results**
+  ("propagates a NaN as both results"), invalid raised only for a
+  signaling one. An invalid operation - `inf + (-inf)` for the sum,
+  `inf * 0` for the product - "produces the same quiet NaN for both
+  outputs" with invalid raised.
+- **An infinite r gives that infinity as both results.** From an
+  infinite OPERAND it signals nothing; from overflow it signals
+  overflow and inexact.
+- **The overflow threshold is a midpoint, and landing ON it is
+  silent.** 9.5: a magnitude "greater than b^emax x (b - 1/2 b^(1-p))
+  shall round to infinity with no change in sign", and one "equal to
+  b^emax x (b - 1/2 b^(1-p)) shall round to b^emax x (b - b^(1-p))".
+  At binary32 that midpoint is `maxfinite + 2^103`: it delivers
+  maxfinite and raises **nothing**, because inexact is signalled "only
+  when roundTiesTowardZero(x + y) overflows". One ulp higher overflows
+  to an infinity in both outputs. Note that overflow here always
+  delivers an infinity, in both directions - "roundTiesTowardZero
+  carries all overflows to infinity with the sign of the intermediate
+  result" - unlike roundTowardZero, which never does.
+- **UNDERFLOW is a statement about the ERROR TERM.** It is raised when
+  e is "non-zero and lies strictly between +-b^emin". Since e is exact,
+  that is **underflow without inexact** - the one place in this
+  contract where those two part company, and the one flag combination
+  no other operation here can produce. A subnormal `r` with an exactly
+  representable residual raises nothing at all: "the operation's
+  subnormal and zero results are exact".
+- **The sign of a zero e is r's sign**, when the residual is exactly
+  zero: `augmentedAddition(-3, 0)` is `(-3, -0)`. r's own zero sign is
+  6.3's - `+0` for an exact cancellation (roundTiesTowardZero is not
+  roundTowardNegative), the operands' sign for like-signed zeros, the
+  XOR of the signs for a product. A residual that is non-zero and
+  merely ROUNDS to zero keeps the sign of the exact residual instead,
+  by 6.3's rule for a result "that is zero because of rounding".
+- **e is always representable for the sum and the difference.** Both
+  operands are integer multiples of the format's smallest quantum, so
+  the exact sum is one too; the residual is at most half an ulp of r,
+  which needs at most p significant bits on a grid the format has. 9.5
+  gives augmentedAddition no non-representable case at all, and the
+  model and the library both ASSERT it rather than trusting it - the
+  model raises, the library returns `CFT_ERR_INTERNAL`.
+- **`cft_augmented_mul` has the one exception 9.5 names**: a product
+  residual with "non-zero digits ... strictly between
+  +-b^(emin-p+1)". It delivers that residual ROUNDED the same way, with
+  underflow and inexact raised. That is the only case in which
+  `r + e` is not exactly `x op y`, and the only case in which either
+  operation raises inexact without overflowing.
+
+### How they are scored
+
+`python/cft_golden/augmented.py` defines every bit and flag. The
+vectors get a third schema and a third family of files -
+`<fmt>-augmented.jsonl`, one per format, with `"r"` and `"e"` per case
+and **no `"rnd"` field**, whose absence is normative: there is no
+attribute to record. `cft_conformance` replays them the same two ways
+as everything else, one element at a time for exact flags and then as
+arrays for the batch loop.
+
+`host/tests/augmented_check.py` is the C-against-model sweep, and it
+checks one thing the vectors cannot: the pair identity `r + e == x op
+y`, in exact Python integers, **on the library's own output**, over the
+whole pool with the two documented exclusions named rather than
+tolerated. `host/tools/mpfr_check.c` arbitrates the values against
+MPFR - which has no roundTiesTowardZero, so the harness takes the exact
+value from MPFR at a precision that provably holds it, proves it did
+by requiring a zero ternary, and applies 9.5's tie rule itself; the
+banner above `check_augmented` says exactly which half of that is an
+independent oracle and which is a restatement.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future

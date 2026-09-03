@@ -1623,6 +1623,55 @@ model comparisons over twenty-nine functions, 451,988 MPFR
 cases with zero value and zero flag mismatches, and a negative control
 that four gates caught.
 
+## The augmented arithmetic operations (status, 2026-09-03)
+
+augmentedAddition, augmentedSubtraction and augmentedMultiplication -
+IEEE 754-2019 clause 9.5 - ship as part of the 0.6 step:
+`cft_augmented_add`, `cft_augmented_sub`, `cft_augmented_mul`, all four
+formats, both outputs, exact flags. Zero RTL again, and no new
+constant; what they needed was a rounding the contract did not have.
+
+What that closed, and what it did not:
+
+- **Closed: the sixth rounding, without a sixth attribute.** 9.5's
+  roundTiesTowardZero is a rounding DIRECTION, not one of clause 4.3's
+  five, and the operations that use it take no attribute argument. So
+  it went into `round_pack` in both languages numbered outside the
+  three-bit MODE field, reachable only from the augmented operations,
+  and the gate that admits the five attributes rejects it. The five
+  came through bit-identical, which the full conformance replay is what
+  proves.
+- **Closed: the pair as a first-class result.** Three entry points that
+  write two arrays, a vector-set schema with `"r"` and `"e"` and
+  deliberately no `"rnd"`, a conformance replayer that scores both, and
+  a harness that checks `r + e == x op y` in exact integers on the
+  library's output rather than on the model's. That identity is what
+  the operations are FOR, so it is scored rather than assumed.
+- **Closed: the flag combination nothing else here produces.**
+  Underflow without inexact, because 9.5 raises underflow on a
+  subnormal ERROR TERM and that term is exact. It took a documented
+  exception in docs/DETERMINISM.md's tininess section, which was the
+  right place for it: the rule there was stated absolutely and is now
+  stated with its one exception.
+- **Closed: an oracle for a rounding MPFR does not have.** mpfr_check
+  computes the exact value at a precision that provably holds it -
+  proved by requiring a zero ternary, since the exact sum of two p-bit
+  values spans the whole exponent range and 2p bits would not do it -
+  then applies the tie rule itself. The harness says which half of that
+  is an independent oracle and which is a restatement.
+- **Not closed: a tile-composed fast path.** A TwoSum for the sum and
+  an FMA residual for the product would compute these on the tile, and
+  the note is in cft.h. It has a second obstacle the transcendentals
+  did not: the tile's five attributes cannot produce r, so a composed
+  route needs the residual AND a way to reach the tie rule. Nothing has
+  been written, so nothing is claimed.
+- **Not closed: clause 9.4's reduction operations** (scaledProd and
+  friends), which are a different shape again - a vector in, a scaled
+  pair out - and are not started.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.5
+entry.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,
