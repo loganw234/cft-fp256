@@ -36,21 +36,22 @@
 //      that path and not a tidier one: since ABI 0.3 the drop zone
 //      accepts the twenty transcendental sets as well, and they are
 //      replayed here for the same reason.
-//   5  The nine phase-1 transcendentals, driven THROUGH THEIR
-//      WRAPPERS from JavaScript. Step 4 would pass without them: the
-//      cft_conformance inside the module has replayed the
-//      transcendental sets since the module was first built from the
-//      0.3 sources, and it dispatches them internally, in C, never
-//      touching cftw_exp and friends. For a day that is exactly what
-//      the module was - ABI 0.3 by its own report, with no entry
-//      point a JavaScript caller could reach (docs/COMPATIBILITY.md
-//      called it the half-step). So this step reads the same vector
-//      files itself, calls cftw_exp / cftw_expm1 / cftw_exp2 /
-//      cftw_log / cftw_log1p / cftw_log2 / cftw_log10 / cftw_pow /
-//      cftw_hypot one element at a time for exact per-case flags,
-//      then once per family as an array, and compares encodings and
-//      flags against the file. A wrapper with its operands swapped,
-//      or missing, fails here and nowhere else.
+//   5  All TWENTY transcendentals - phase 1's nine and phase 2's
+//      eleven - driven THROUGH THEIR WRAPPERS from JavaScript. Step 4
+//      would pass without any of them: the cft_conformance inside the
+//      module has replayed the transcendental sets since the module
+//      was first built from sources that carried them, and it
+//      dispatches them internally, in C, never touching cftw_exp or
+//      cftw_atan2. For a day that is exactly what the module was -
+//      ABI 0.3 by its own report, with no entry point a JavaScript
+//      caller could reach (docs/COMPATIBILITY.md called it the
+//      half-step). So this step reads the same vector files itself,
+//      calls cftw_exp … cftw_hypot and cftw_sinpi … cftw_atan2pi one
+//      element at a time for exact per-case flags, then once per
+//      family as an array, and compares encodings and flags against
+//      the file. A wrapper with its operands swapped, or missing,
+//      fails here and nowhere else - which is why atan2's y-first
+//      order is checked by running it rather than by reading it.
 //
 // The loader comes from bindings/node/ if the package is there, else
 // from bindings/wasm/build/ after a build.sh run. Vectors come from
@@ -82,10 +83,13 @@ for (const f of FORMATS)
 // entry points rather than opcodes - vectors/gen_vectors.py says why.
 // The names below are the arities cft.h gives them, and they are also
 // the cftw_* export names and the sets' "fn" values: one spelling, all
-// the way down.
+// the way down. Phase 1's nine first, then phase 2's eleven; the same
+// twenty files carry both since ABI 0.4.
 const TRANSCEND_UNARY = ["exp", "expm1", "exp2", "log", "log1p",
-                         "log2", "log10"];
-const TRANSCEND_BINARY = ["pow", "hypot"];
+                         "log2", "log10",
+                         "sinpi", "cospi", "tanpi", "asin", "acos",
+                         "atan", "asinpi", "acospi", "atanpi"];
+const TRANSCEND_BINARY = ["pow", "hypot", "atan2", "atan2pi"];
 const TRANSCEND_SETS = [];
 for (const f of FORMATS)
   for (const r of ROUNDINGS)
@@ -224,9 +228,10 @@ const exported = WebAssembly.Module.exports(mod)
 console.log(`exports ${exported.length} cftw_* entry points`);
 // One name per ABI step, so a module built from a tree whose header
 // has moved on is caught by the missing operation and not only by the
-// version number: 0.1's cft_run, 0.2's clause-5 set, 0.3's nine. The
-// nine are listed in full because a module can carry eight of them and
-// still report 0.3, which is the failure mode this file is here for.
+// version number: 0.1's cft_run, 0.2's clause-5 set, 0.3's nine, 0.4's
+// eleven. The twenty are listed in full because a module can carry
+// nineteen of them and still report 0.4, which is the failure mode
+// this file is here for - it has happened twice, once per minor step.
 const NEEDED = ["cftw_run", "cftw_conformance", "cftw_convert",
                 "cftw_rint", "cftw_class", "cftw_rem",
                 ...TRANSCEND_UNARY.map((f) => `cftw_${f}`),
@@ -294,9 +299,9 @@ const C = {
   formatSize: M.cwrap("cftw_format_size", num, [num]),
   conformance: M.cwrap("cftw_conformance", num, [num, str, num, num, num, num]),
 };
-// The nine, by name. Seven take (dev, fmt, rnd, a, d, n, flags) and two
-// take (dev, fmt, rnd, a, b, d, n, flags) - no bus word either way,
-// because a host operation issues no device pass (cft.h).
+// The twenty, by name. Sixteen take (dev, fmt, rnd, a, d, n, flags)
+// and four take (dev, fmt, rnd, a, b, d, n, flags) - no bus word
+// either way, because a host operation issues no device pass (cft.h).
 for (const fn of TRANSCEND_UNARY)
   C[fn] = M.cwrap(`cftw_${fn}`, num, [num, num, num, num, num, num, num]);
 for (const fn of TRANSCEND_BINARY)
@@ -339,7 +344,8 @@ function replayOneSet(name, text) {
 // directory - which is exactly what the page does with a dropped file,
 // so this measures that path and not a convenient variant of it. The
 // transcendental sets are in the list since ABI 0.3 gave the page a
-// reason to accept them; a directory that has only the twenty opcode
+// reason to accept them, and since 0.4 the same files carry the eleven
+// as well; a directory that has only the twenty opcode
 // sets (the containerized build's own copy) replays those and says the
 // others were absent, rather than failing on a file nobody wrote.
 const present = [...CANONICAL,
@@ -374,7 +380,7 @@ else
       `${total.toLocaleString("en-US")} cases`);
 
 // ---------------------------------------------------------------------
-// 5. the nine, through their own wrappers
+// 5. the twenty, through their own wrappers
 //
 // Step 4 dispatches the transcendentals inside C and would be green
 // with no cftw_* wrapper for any of them at all - it was, for a day.
@@ -511,17 +517,17 @@ function driveTranscendSet(set, text) {
 const haveTranscend = TRANSCEND_SETS.every((s) =>
   existsSync(join(vdir, s.name)));
 if (!haveTranscend) {
-  console.log(`\nno transcendental sets in ${vdir} - the nine were NOT ` +
+  console.log(`\nno transcendental sets in ${vdir} - the twenty were NOT ` +
               `driven.`);
   console.log("Steps 1-4 stand. `make vectors` from the repo root writes " +
               "them; the containerized build cannot (no mpmath in the " +
               "pinned image), so build/vectors never has them.");
-  bad("the ABI 0.3 wrappers were not exercised - this is not a full pass");
+  bad("the ABI 0.4 wrappers were not exercised - this is not a full pass");
   console.log(failed ? "\nVERIFY FAILED" : "\nVERIFY OK");
   process.exit(1);
 }
 
-console.log("\nthe nine  (cftw_* called from JavaScript, per case then " +
+console.log("\nthe twenty  (cftw_* called from JavaScript, per case then " +
             "as arrays)");
 let tTotal = 0, tClean = 0;
 for (const set of TRANSCEND_SETS) {

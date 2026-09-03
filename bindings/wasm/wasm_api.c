@@ -476,3 +476,128 @@ WASM_EXPORT int cftw_hypot(cft_device *dev, int fmt, int rnd,
     return (int)cft_hypot(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
                           (size_t)n, flags_out);
 }
+
+/* ---- the phase-2 trigonometrics (ABI 0.4) ------------------------ *
+ *
+ * Added 2026-09-03, hours after the block above closed 0.3's
+ * half-step, and for the same reason one notch further along: the
+ * library reached ABI 0.4 while this module was still built from the
+ * 0.3 sources, so a rebuild on its own would have answered
+ * cftw_abi_version() with 4 while exporting none of the eleven
+ * operations 0.4 IS. That is the shape of untruth the clause-5 block
+ * ended once and the phase-1 block ended again; ending it a third
+ * time in the same commit as the rebuild is cheaper than recording a
+ * third half-step.
+ *
+ * One wrapper per declaration in cft.h, in cft.h's order: the nine
+ * unary entry points - sinpi, cospi, tanpi, asin, acos, atan and the
+ * three Pi-forms of the inverses - then atan2 and atan2pi, which read
+ * two operands.
+ *
+ * OPERAND ORDER, because it is the one thing a passthrough can get
+ * wrong while still returning a plausible number: a[i] is y and b[i]
+ * is x, the C order, y first, exactly as cft.h says. atan2(1, 0) is
+ * +pi/2 and atan2(0, 1) is +0, so a swap disagrees with the vectors
+ * almost everywhere and with the reader nowhere - which is what
+ * bindings/wasm/verify.mjs step 5 exists to notice, and what it was
+ * shown noticing before this file was believed.
+ *
+ * HOST operations again: no device pass, so no bus word and no
+ * bus_out parameter. The device argument is context. Everything else
+ * is the usual adaptation and nothing more - cft_format and cft_round
+ * as ints, size_t as wasm32's uint32, the flag word as a pointer into
+ * the heap. Correct rounding, the clause 9.2.1 rows and the exactness
+ * enumeration (Niven for the forward set, Hermite-Lindemann for the
+ * inverses) all live in the library; docs/TRANSCENDENTALS.md carries
+ * the proofs, and nothing here decides or second-guesses any of them.
+ */
+
+WASM_EXPORT int cftw_sinpi(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_sinpi(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_cospi(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_cospi(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_tanpi(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_tanpi(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_asin(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_asin(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_acos(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_acos(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_atan(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_atan(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_asinpi(cft_device *dev, int fmt, int rnd,
+                            const void *a, void *d, uint32_t n,
+                            uint32_t *flags_out)
+{
+    return (int)cft_asinpi(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                           (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_acospi(cft_device *dev, int fmt, int rnd,
+                            const void *a, void *d, uint32_t n,
+                            uint32_t *flags_out)
+{
+    return (int)cft_acospi(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                           (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_atanpi(cft_device *dev, int fmt, int rnd,
+                            const void *a, void *d, uint32_t n,
+                            uint32_t *flags_out)
+{
+    return (int)cft_atanpi(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                           (size_t)n, flags_out);
+}
+
+/* a[i] is y and b[i] is x - the C order, y first, because that is
+ * what every caller of atan2 expects (cft.h). Neither may be NULL. */
+WASM_EXPORT int cftw_atan2(cft_device *dev, int fmt, int rnd,
+                           const void *a, const void *b, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_atan2(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_atan2pi(cft_device *dev, int fmt, int rnd,
+                             const void *a, const void *b, void *d,
+                             uint32_t n, uint32_t *flags_out)
+{
+    return (int)cft_atan2pi(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
+                            (size_t)n, flags_out);
+}

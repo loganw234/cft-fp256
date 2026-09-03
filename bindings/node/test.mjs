@@ -69,8 +69,8 @@ const c64 = ctxs[64];
 // identity
 // ---------------------------------------------------------------------
 
-test("the module is ABI 0.3 on the software backend", () => {
-  eq(c64.abiVersion, "0.3", "abi: ");
+test("the module is ABI 0.4 on the software backend", () => {
+  eq(c64.abiVersion, "0.4", "abi: ");
   eq(c64.backend, "software", "backend: ");
 });
 
@@ -707,6 +707,382 @@ test("the batch call is the scalar call, for all nine", () => {
   throws(() => c64.map("exp", xs, ys), "exp takes one operand array");
   throws(() => c64.map("pow", xs), "pow needs its second array");
   throws(() => c64.map("hypot", xs, ys, xs), "no c slot on a transcendental");
+});
+
+// ---------------------------------------------------------------------
+// the phase-2 trigonometrics (ABI 0.4)
+//
+// Same division of labour as phase 1's block above: conformance.mjs
+// replays 129,845 transcendental cases through this package's own
+// methods, so what belongs here is what a vector set cannot say - the
+// exact cases that must raise NOTHING, the clause 9.2.1 rows
+// implementations most often differ on, the operand order of atan2,
+// and batch-equals-scalar.
+//
+// Every expectation is either a value cft.h and docs/TRANSCENDENTALS.md
+// state in words or one that is exactly representable and checkable by
+// eye. Nothing is compared against Math.sin: an ordinary libm is
+// neither correctly rounded nor reproducible, and JavaScript's Math is
+// explicitly implementation-defined - which is the whole reason these
+// functions are in this contract.
+// ---------------------------------------------------------------------
+
+test("sinPi's zeros carry the ARGUMENT's sign, not the result's", () => {
+  // The row cft.h states first and libms most often get by accident:
+  // sinPi of an integer is a zero, and its sign is the operand's.
+  c64.clearFlags();
+  const p1 = c64.sinpi(1), m1 = c64.sinpi(-1);
+  ok(p1.isZero && p1.sign === 0, "sinPi(1) is +0");
+  ok(m1.isZero && m1.sign === 1, "sinPi(-1) is -0");
+  eq(c64.lastFlags, 0, "and both are exact, so ");
+  ok(c64.sinpi(c64.zero(0)).sign === 0, "sinPi(+0) is +0");
+  ok(c64.sinpi(c64.zero(1)).sign === 1, "sinPi(-0) is -0");
+  // 2 and -2 are integers too, and 3 is the odd one
+  ok(c64.sinpi(2).isZero && c64.sinpi(2).sign === 0, "sinPi(2) is +0");
+  ok(c64.sinpi(-3).isZero && c64.sinpi(-3).sign === 1, "sinPi(-3) is -0");
+  // and the half-integers are the other half of Niven's exact set
+  eq(c64.sinpi(c64.from("0.5")).toNumber(), 1, "sinPi(1/2): ");
+  eq(c64.sinpi(c64.from("1.5")).toNumber(), -1, "sinPi(3/2): ");
+});
+
+test("cosPi is even, so its half-integer zero has no sign to carry", () => {
+  for (const x of ["0.5", "-0.5", "1.5", "-1.5", "2.5", "-2.5"]) {
+    c64.clearFlags();
+    const r = c64.cospi(c64.from(x));
+    ok(r.isZero, `cosPi(${x}) is a zero`);
+    eq(r.sign, 0, `cosPi(${x}) is +0, both signs of the argument: `);
+    eq(c64.lastFlags, 0, `cosPi(${x}) is exact, so `);
+  }
+  eq(c64.cospi(0).toNumber(), 1, "cosPi(+0) is 1: ");
+  eq(c64.cospi(1).toNumber(), -1, "cosPi(1) is (-1)^1: ");
+  eq(c64.cospi(2).toNumber(), 1, "cosPi(2) is (-1)^2: ");
+  eq(c64.cospi(-3).toNumber(), -1, "cosPi(-3), and cosPi is even: ");
+});
+
+test("tanPi is sinPi/cosPi in every respect, signs included", () => {
+  // tanPi(1) = -0 because sinPi(1) is +0 and cosPi(1) is -1. A sign
+  // this package computed itself would be a guess; this one is the
+  // library's.
+  c64.clearFlags();
+  const t1 = c64.tanpi(1);
+  ok(t1.isZero && t1.sign === 1, "tanPi(1) is -0");
+  eq(c64.lastFlags, 0, "and exact, so ");
+  const t0 = c64.tanpi(c64.zero(0));
+  ok(t0.isZero && t0.sign === 0, "tanPi(+0) is +0");
+  const t2 = c64.tanpi(2);
+  ok(t2.isZero && t2.sign === 0, "tanPi(2) is +0 - n even, sign unflipped");
+  // the quarter-integers are the exact nonzero ones
+  eq(c64.tanpi(c64.from("0.25")).toNumber(), 1, "tanPi(1/4): ");
+  eq(c64.tanpi(c64.from("0.75")).toNumber(), -1, "tanPi(3/4): ");
+});
+
+test("tanPi at a half-integer is a POLE: infinity with divideByZero", () => {
+  // 754-2019 7.3: an exact infinity from finite operands signals
+  // divideByZero. Not overflow, and not invalid.
+  c64.clearFlags();
+  const r = c64.tanpi(c64.from("0.5"));
+  ok(r.isInf && r.sign === 0, "tanPi(1/2) is +inf");
+  ok(c64.lastFlags & FLAG_DIVBYZERO, "and raises divideByZero");
+  eq(c64.lastFlags & FLAG_INVALID, 0, "and NOT invalid: ");
+  eq(c64.lastFlags & FLAG_OVERFLOW, 0, "and NOT overflow: ");
+  c64.clearFlags();
+  const n = c64.tanpi(c64.from("-0.5"));
+  ok(n.isInf && n.sign === 1, "tanPi(-1/2) is -inf");
+  ok(c64.lastFlags & FLAG_DIVBYZERO, "with divideByZero too");
+});
+
+test("the Pi-forms' exact table is larger, and atanPi(inf) is in it", () => {
+  // Dividing by pi turns irrational multiples into dyadic rationals,
+  // which is the whole reason these five functions exist separately.
+  const exact = [
+    ["asinPi(+0)", () => c64.asinpi(c64.zero(0)), 0],
+    ["asinPi(1)", () => c64.asinpi(1), 0.5],
+    ["asinPi(-1)", () => c64.asinpi(-1), -0.5],
+    ["acosPi(1)", () => c64.acospi(1), 0],
+    ["acosPi(+0)", () => c64.acospi(c64.zero(0)), 0.5],
+    ["acosPi(-1)", () => c64.acospi(-1), 1],
+    ["atanPi(+0)", () => c64.atanpi(c64.zero(0)), 0],
+    ["atanPi(1)", () => c64.atanpi(1), 0.25],
+    ["atanPi(-1)", () => c64.atanpi(-1), -0.25],
+    ["atanPi(+inf)", () => c64.atanpi(c64.inf(0)), 0.5],
+    ["atanPi(-inf)", () => c64.atanpi(c64.inf(1)), -0.5],
+  ];
+  for (const [what, call, want] of exact) {
+    c64.clearFlags();
+    const got = call();
+    eq(got.toNumber(), want, `${what}: `);
+    eq(c64.lastFlags, 0, `${what} is exact, so `);
+  }
+  // and the same argument through atan is NOT exact: atan(+inf) is
+  // pi/2, an irrational, so it rounds and says so.
+  c64.clearFlags();
+  const half = c64.atan(c64.inf(0));
+  ok(c64.lastFlags & FLAG_INEXACT, "atan(+inf) is pi/2 and rounds");
+  ok(!half.sameBits(c64.from("0.5")), "and is nothing like 1/2");
+});
+
+test("asinPi(1/2) is 1/6 - rational, NOT dyadic, so inexact", () => {
+  // The case docs/TRANSCENDENTALS.md calls out because it looks exact
+  // and is not: 1/6 is a rational Niven's theorem produces, but it has
+  // no finite binary expansion, so it is a rounding like any other.
+  //
+  // "Really 1/6" is checked by DERIVING 1/6 rather than transcribing
+  // it - cft_div of 1 by 6, correctly rounded in the same attribute.
+  // Two correctly rounded results of the same real number are the same
+  // encoding, so this holds in every attribute, and it holds for the
+  // directed pair too, which is what makes it more than a coincidence.
+  const half = c64.from("0.5");
+  for (const attr of ATTRS) {
+    const c = c64.withRounding(attr);
+    c.clearFlags();
+    const got = c.asinpi(half);
+    ok(c.lastFlags & FLAG_INEXACT, `asinPi(1/2) is inexact under ${attr}`);
+    ok(got.sameBits(c.div(1, 6)),
+       `asinPi(1/2) is the ${attr} rounding of 1/6`);
+    // acosPi(1/2) = 1/3 is the same story
+    c.clearFlags();
+    const third = c.acospi(half);
+    ok(c.lastFlags & FLAG_INEXACT, `acosPi(1/2) is inexact under ${attr}`);
+    ok(third.sameBits(c.div(1, 3)),
+       `acosPi(1/2) is the ${attr} rounding of 1/3`);
+  }
+  // and the directed pair really does straddle: one ulp apart
+  const lo = c64.withRounding("rdn").asinpi(half);
+  const hi = c64.withRounding("rup").asinpi(half);
+  eq(hi.bits, lo.bits + 1n, "rdn and rup bracket 1/6 by one ulp: ");
+});
+
+test("the inverses are exact only at their zeros", () => {
+  // Hermite-Lindemann: asin, atan and atan2 of a nonzero dyadic
+  // rational are transcendental, so the exact set is the zeros, plus
+  // acos(1) = +0.
+  const exact = [
+    ["asin(+0)", () => c64.asin(c64.zero(0)), 0],
+    ["atan(+0)", () => c64.atan(c64.zero(0)), 0],
+    ["acos(1)", () => c64.acos(1), 0],
+  ];
+  for (const [what, call, want] of exact) {
+    c64.clearFlags();
+    eq(call().toNumber(), want, `${what}: `);
+    eq(c64.lastFlags, 0, `${what} raises nothing, so `);
+  }
+  ok(c64.asin(c64.zero(1)).sign === 1, "asin(-0) is -0");
+  ok(c64.atan(c64.zero(1)).sign === 1, "atan(-0) is -0");
+  // and the corners that look exact are not
+  for (const [what, call] of [["asin(1)", () => c64.asin(1)],
+                              ["acos(-1)", () => c64.acos(-1)],
+                              ["atan(1)", () => c64.atan(1)]]) {
+    c64.clearFlags();
+    call();
+    ok(c64.lastFlags & FLAG_INEXACT, `${what} is a multiple of pi, so inexact`);
+  }
+});
+
+test("atan2's operands are y then x, and a minus zero names an axis", () => {
+  // The row cft.h says implementations most often miss: atan2(+-0, -0)
+  // is +-pi, because a MINUS zero denominator names the negative real
+  // axis. And it is inexact, while atan2Pi of the same operands is an
+  // exact +-1 - which is, in one line, why atan2Pi is its own function.
+  c64.clearFlags();
+  const pi = c64.atan2(c64.zero(0), c64.zero(1));
+  ok(c64.lastFlags & FLAG_INEXACT, "atan2(+0, -0) is pi and inexact");
+  ok(!pi.isZero && pi.sign === 0, "and it is a positive number, not a zero");
+  const mpi = c64.atan2(c64.zero(1), c64.zero(1));
+  ok(mpi.sign === 1, "atan2(-0, -0) is -pi");
+  ok(c64.sub(pi, c64.from("3.141592653589793")).isZero,
+     "and pi at binary64 is 3.141592653589793");
+
+  c64.clearFlags();
+  const one = c64.atan2pi(c64.zero(0), c64.zero(1));
+  eq(one.toNumber(), 1, "atan2Pi(+0, -0) is 1: ");
+  eq(c64.lastFlags, 0, "exactly, raising nothing: ");
+  eq(c64.atan2pi(c64.zero(1), c64.zero(1)).toNumber(), -1,
+     "atan2Pi(-0, -0): ");
+
+  // a PLUS zero denominator is the other row entirely
+  const z = c64.atan2(c64.zero(0), c64.zero(0));
+  ok(z.isZero && z.sign === 0, "atan2(+0, +0) is +0");
+  ok(c64.atan2(c64.zero(1), c64.zero(0)).sign === 1, "atan2(-0, +0) is -0");
+});
+
+test("swapping atan2's operands is a different answer, and says so", () => {
+  // atan2 is not symmetric in any of these, so a wrapper with its two
+  // operand pointers exchanged returns a plausible number everywhere.
+  // This is the check that notices - the negative control run against
+  // it is recorded in bindings/wasm/README.md.
+  eq(c64.atan2pi(1, 0).toNumber(), 0.5, "atan2Pi(1, 0) is +1/2: ");
+  eq(c64.atan2pi(0, 1).toNumber(), 0, "atan2Pi(0, 1) is +0, a different row: ");
+  eq(c64.atan2pi(1, 1).toNumber(), 0.25, "atan2Pi(1, 1), the diagonal: ");
+  eq(c64.atan2pi(1, -1).toNumber(), 0.75, "atan2Pi(1, -1), the other one: ");
+  eq(c64.atan2pi(-1, -1).toNumber(), -0.75, "atan2Pi(-1, -1): ");
+  eq(c64.atan2pi(c64.inf(0), c64.inf(0)).toNumber(), 0.25,
+     "atan2Pi(+inf, +inf) is +1/4: ");
+  eq(c64.atan2pi(c64.inf(0), c64.inf(1)).toNumber(), 0.75,
+     "atan2Pi(+inf, -inf) is +3/4: ");
+  // y = 0 with x > 0 is the one exact atan2 row, and it keeps y's sign
+  c64.clearFlags();
+  const r = c64.atan2(c64.zero(1), 1);
+  ok(r.isZero && r.sign === 1, "atan2(-0, +1) is -0");
+  eq(c64.lastFlags, 0, "exactly: ");
+});
+
+test("a NaN does not outrank atan2's table the way it beats pow's", () => {
+  // cft.h states the asymmetry: pow(qNaN, +-0) is 1, but atan2 of a
+  // NaN is a NaN.
+  c64.clearFlags();
+  ok(c64.atan2(c64.nan(), 1).isNaN, "atan2(qNaN, 1) is a NaN");
+  ok(c64.atan2(c64.zero(0), c64.nan()).isNaN, "atan2(+0, qNaN) is a NaN too");
+  ok(c64.atan2pi(c64.nan(), c64.nan()).isNaN, "and atan2Pi likewise");
+  eq(c64.lastFlags & FLAG_INVALID, 0,
+     "a QUIET NaN in is not itself an invalid: ");
+});
+
+test("|x| > 1 is a domain error in asin, acos and their Pi-forms", () => {
+  const canon = c64.nan();
+  const outside = [c64.from(2), c64.from(-2), c64.inf(0), c64.inf(1),
+                   c64.nextUp(c64.from(1))];
+  for (const fn of ["asin", "acos", "asinpi", "acospi"]) {
+    for (const x of outside) {
+      c64.clearFlags();
+      const r = c64[fn](x);
+      ok(r.sameBits(canon),
+         `${fn}(${x.toString()}) is THE canonical quiet NaN`);
+      ok(c64.lastFlags & FLAG_INVALID, `${fn}(${x.toString()}) raises invalid`);
+    }
+  }
+  // exactly 1 is inside, and atan takes the whole line
+  c64.clearFlags();
+  ok(!c64.asin(1).isNaN, "asin(1) is a number - the endpoint is in range");
+  ok(!c64.atan(c64.inf(0)).isNaN, "atan(+inf) is a number: every real is");
+});
+
+test("sinPi, cosPi and tanPi of an infinity are invalid - no limit", () => {
+  const canon = c64.nan();
+  for (const fn of ["sinpi", "cospi", "tanpi"]) {
+    for (const s of [0, 1]) {
+      c64.clearFlags();
+      const r = c64[fn](c64.inf(s));
+      ok(r.sameBits(canon), `${fn}(${s ? "-" : "+"}inf) is the canonical qNaN`);
+      ok(c64.lastFlags & FLAG_INVALID, `${fn} of an infinity raises invalid`);
+    }
+  }
+});
+
+test("a signaling NaN is invalid across all eleven, as everywhere else", () => {
+  // 9.2.1's "even a quiet NaN" wording does not reach a signaling one,
+  // and this contract is uniform about it: sNaN in, invalid and the
+  // canonical quiet NaN out, no exceptions and no per-function rows.
+  const snan = c64.fromBits(0x7ff0000000000001n);
+  eq(c64.classify(snan), "snan", "the operand really is signaling: ");
+  const unary = ["sinpi", "cospi", "tanpi", "asin", "acos", "atan",
+                 "asinpi", "acospi", "atanpi"];
+  for (const fn of unary) {
+    c64.clearFlags();
+    const r = c64[fn](snan);
+    ok(r.sameBits(c64.nan()), `${fn}(sNaN) delivers the canonical quiet NaN`);
+    ok(c64.lastFlags & FLAG_INVALID, `${fn}(sNaN) raises invalid`);
+  }
+  for (const fn of ["atan2", "atan2pi"]) {
+    for (const [y, x, what] of [[snan, c64.from(1), "sNaN, 1"],
+                                [c64.from(1), snan, "1, sNaN"]]) {
+      c64.clearFlags();
+      const r = c64[fn](y, x);
+      ok(r.sameBits(c64.nan()), `${fn}(${what}) is the canonical quiet NaN`);
+      ok(c64.lastFlags & FLAG_INVALID, `${fn}(${what}) raises invalid`);
+    }
+  }
+});
+
+test("sinPi's reduction is exact at every magnitude, not just small ones", () => {
+  // The claim that separates sinPi from sin: x mod 2 is a mask on the
+  // encoding, so a huge even integer is a zero decided by integer
+  // arithmetic rather than by a table of pi's bits. 2^80 is an even
+  // integer at binary64; so is the largest finite value.
+  c64.clearFlags();
+  const big = c64.sinpi(c64.fromBigInt(1n << 80n));
+  ok(big.isZero && big.sign === 0, "sinPi(2^80) is +0");
+  eq(c64.lastFlags, 0, "and exact: ");
+  const max = c64.fromBits(0x7fefffffffffffffn);
+  const huge = c64.sinpi(max);
+  ok(huge.isZero, "sinPi(maxFinite) is a zero, by the same reduction");
+  eq(c64.cospi(max).toNumber(), 1, "and cosPi(maxFinite) is 1: ");
+});
+
+test("all eleven reach every format, and the wide ones are wider", () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    ctx.clearFlags();
+    ok(ctx.sinpi(1).isZero && ctx.sinpi(1).sign === 0, `binary${w} sinPi(1)`);
+    eq(ctx.cospi(1).toNumber(), -1, `binary${w} cosPi(1): `);
+    eq(ctx.acospi(-1).toNumber(), 1, `binary${w} acosPi(-1): `);
+    eq(ctx.atanpi(ctx.inf(0)).toNumber(), 0.5, `binary${w} atanPi(+inf): `);
+    eq(ctx.atan2pi(1, -1).toNumber(), 0.75, `binary${w} atan2Pi(1, -1): `);
+    eq(ctx.lastFlags, 0, `binary${w}: every one of those is exact, so `);
+  }
+  // binary256 carries an atan(1) binary64 cannot, and it narrows back
+  // onto binary64's own correctly rounded answer
+  const wide = ctxs[256].atan(1);
+  const narrowed = c64.convert(wide);
+  ok(c64.lastFlags & FLAG_INEXACT, "narrowing binary256's atan(1) rounds");
+  ok(narrowed.sameBits(c64.atan(1)),
+     "and lands on binary64's own correctly rounded atan(1)");
+});
+
+test("Float carries the eleven as methods, y first on atan2", () => {
+  const x = c64.from(1);
+  ok(x.sinpi().sameBits(c64.sinpi(1)), "x.sinpi()");
+  ok(x.cospi().sameBits(c64.cospi(1)), "x.cospi()");
+  ok(x.tanpi().sameBits(c64.tanpi(1)), "x.tanpi()");
+  ok(x.asin().sameBits(c64.asin(1)), "x.asin()");
+  ok(x.acos().sameBits(c64.acos(1)), "x.acos()");
+  ok(x.atan().sameBits(c64.atan(1)), "x.atan()");
+  ok(x.asinpi().sameBits(c64.asinpi(1)), "x.asinpi()");
+  ok(x.acospi().sameBits(c64.acospi(1)), "x.acospi()");
+  ok(x.atanpi().sameBits(c64.atanpi(1)), "x.atanpi()");
+  // y.atan2(x) reads in cft.h's order, and the asymmetry proves it
+  ok(x.atan2(c64.zero(0)).sameBits(c64.atan2(1, c64.zero(0))), "y.atan2(x)");
+  eq(x.atan2pi(c64.zero(0)).toNumber(), 0.5, "1 .atan2Pi(+0) is +1/2: ");
+  eq(c64.zero(0).atan2pi(x).toNumber(), 0, "and +0 .atan2Pi(1) is +0: ");
+  const r = ctxs[128].withRounding("rup");
+  ok(r.from(1).asin().sameBits(r.asin(1)), "and through a derived context");
+});
+
+test("the batch call is the scalar call, for all eleven", () => {
+  const rand = mulberry32(0x51c0a);
+  const xs = [], ys = [], us = [];
+  for (let i = 0; i < 129; i++) {          // not a power of two
+    xs.push(c64.fromNumber(rand() * 8 - 4));      // sinPi's domain: all
+    us.push(c64.fromNumber(rand() * 2 - 1));      // the inverses': [-1,1]
+    ys.push(c64.fromNumber(rand() * 8 - 4));
+  }
+  const unary = [["sinpi", xs], ["cospi", xs], ["tanpi", xs],
+                 ["asin", us], ["acos", us], ["atan", xs],
+                 ["asinpi", us], ["acospi", us], ["atanpi", xs]];
+  for (const [fn, src] of unary) {
+    const batch = c64.map(fn, src);
+    const batchFlags = c64.lastFlags;
+    let flags = 0;
+    for (let i = 0; i < src.length; i++) {
+      const one = c64[fn](src[i]);
+      flags |= c64.lastFlags;
+      ok(batch[i].sameBits(one), `${fn} element ${i}`);
+    }
+    eq(batchFlags, flags, `${fn}: batch flags are the OR over elements: `);
+  }
+  for (const fn of ["atan2", "atan2pi"]) {
+    const batch = c64.map(fn, ys, xs);          // y first, as ever
+    const batchFlags = c64.lastFlags;
+    let flags = 0;
+    for (let i = 0; i < ys.length; i++) {
+      const one = c64[fn](ys[i], xs[i]);
+      flags |= c64.lastFlags;
+      ok(batch[i].sameBits(one), `${fn} element ${i}`);
+    }
+    eq(batchFlags, flags, `${fn}: batch flags are the OR over elements: `);
+  }
+  throws(() => c64.map("sinpi", xs, ys), "sinpi takes one operand array");
+  throws(() => c64.map("atan2", ys), "atan2 needs its second array");
+  throws(() => c64.map("atan2pi", ys, xs, xs), "no c slot on a transcendental");
 });
 
 // ---------------------------------------------------------------------
