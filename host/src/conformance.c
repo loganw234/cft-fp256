@@ -1299,8 +1299,10 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
         return CFT_ERR_ARTIFACT;
     }
     rep_add(&r, "%d set%s, %lu cases, all matching "
-                "(each replayed twice: one element at a time for exact "
-                "flags, then as arrays so a device backend's "
+                "(replayed one at a time for exact flags, then again as "
+                "arrays wherever the entry point takes one - every "
+                "opcode and transcendental case and the batch half of "
+                "the character sets - so a device backend's "
                 "partitioning is exercised)\n",
             sets, sets == 1 ? "" : "s", (unsigned long)total);
     return CFT_OK;

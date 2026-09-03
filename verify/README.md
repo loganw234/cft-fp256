@@ -24,10 +24,11 @@ the repo root, or `bash verify/run.sh` with the flags below.
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO/seedop/simpleops theorems + negative control | docker |
-| libcft | C library contract + 299k-case conformance replay (20 opcode sets + 20 transcendental sets); cleans host/ first | cc, python |
+| libcft | C library contract + 493k-case conformance replay (20 opcode sets + 20 transcendental sets + 20 character sets); cleans host/ first | cc, python |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
+| character | the clause-5.12 character conversions and the 9.7 payload operations vs model, both directions, five attributes, plus the round trip at Pmin and its collision at Pmin - 1 | cc, python |
 | transcend | the twenty-nine transcendentals vs model, then again with the library forced to start below the precision it needs, so the escalation path runs against an unescalated reference | cc, python |
 | diff | the alignment-boundary sweep vs the model | cc, python |
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
