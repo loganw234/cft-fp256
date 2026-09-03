@@ -1599,6 +1599,7 @@ is a timing figure and none is quoted as one.
 | `cft.hpp` vs `cft.h` | 4,549 checks at C++17 and again at C++20 | identical encodings and flags |
 | the cftmpfr drop-in | 668 tests | pass, with exp10, rSqrt and rootn bit-for-bit against gmpy2 |
 | `make examples-lang` | C++, Rust, Go and C# against the C example; Julia and R absent | same library, same bits |
+| `verify/run.sh --only vectors,libcft,mpfr,transcend,cpp,bindings` | two stages of six - vectors and libcft | ok; STOPPED during transcend under time pressure, so the runner has not been seen green end to end on this tree. Every stage it did not reach was run standalone above with the arguments it uses |
 
 **Escalation, measured.** Over the MPFR campaign's 306,460
 transcendental elements, 138,825 reached the Ziv loop and it escalated
@@ -1607,8 +1608,10 @@ fp64 up, which is exactly the count phase 3 recorded. **Not one of the
 ten escalated there.** 32,585 elements were decided exactly and 56,835
 by a neighbour's side.
 
-Over `transcend_check.py`'s pools the model escalated 182 times, and
-those are worth breaking down because the breakdown says something:
+Over `transcend_check.py`'s whole sweep the model escalated 182 times
+across all thirty-nine functions and every pass the harness makes. A
+separate run of the model ALONE over this set's own pools says where
+the ten's share comes from:
 
 | function | escalations | deepest |
 |---|---|---|
@@ -1622,8 +1625,11 @@ cap, exactly where phase 1 said that family lands. log2p1's and
 log10p1's are the model's own evaluator rather than the mathematics,
 and the section above explains them: mpmath's interval log1p forms
 1 + x, so a tiny argument costs it most of its relative accuracy and it
-needs the second attempt. The C decides those at the first. Every one
-of the 182 landed on the same answer as the C.
+needs the second attempt. The C decides those at the first. The balance
+of the 182 is phase 1's pow on its own pool - 36 of them, the number
+phase 3 recorded and unchanged by this set - and the batch passes
+re-running operands the per-element passes already escalated on. Every
+one of the 182 landed on the same answer as the C.
 
 Forced low: `CFT_TRANSCEND_MINPREC=64` drives 72,381 escalations
 through the MPFR campaign and finds the same answers, and

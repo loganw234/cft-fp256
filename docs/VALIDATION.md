@@ -1894,6 +1894,15 @@ number. With these ten the library implements every operation IEEE
     test_cftmpfr          668 tests (576 before)
     examples-lang         c++, rust, go, csharp: same library, same bits; julia and
                           R absent from this host
+    runner                INCOMPLETE. Run 20260903-104410-a285ad8 got two stages in -
+                          vectors ok 369 s, libcft ok 386 s - and was STOPPED during
+                          the transcend stage under time pressure, with three other
+                          agents on the box. mpfr, cpp and bindings were not reached
+                          by the runner; all three were run standalone above, on the
+                          same tree and with the same arguments the runner uses, and
+                          the two stages the runner did finish agree with the
+                          standalone runs. The runner has NOT been seen green
+                          end-to-end on this tree and nothing here says otherwise.
 
 Three rows follow 754-2019 where GNU MPFR 4.2.2 does not, each measured
 on this host before it was written down: `rSqrt(-0)` is -infinity where
