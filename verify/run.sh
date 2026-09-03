@@ -460,7 +460,7 @@ stage seq "the sequencer: C vs model over fuzzed programs" -- \
      --formats fp32 fp64 fp128 fp256
 
 need host-cc python
-stage reduce "reduction ranges: C vs model" -- \
+stage reduce "all seven clause-9.4 reductions: C vs model, the tree, the two composition identities, the scaled products' invariant" -- \
   PY "$ROOT/host/tests/reduce_check.py" --trials 1500
 
 # The MPFR-compatible Python binding, which is a different claim from

@@ -52,6 +52,25 @@ static int op_group_bit(int op)
     if (op >= 16 && op <= 23) return 4;   /* integer */
     if (op >= 24 && op <= 25) return 5;   /* reduction */
     if (op >= 26 && op <= 27) return 6;   /* divide/sqrt (the seeds) */
+    /* sumSquare and sumAbs are the reduction group too, although no
+     * accumulator streams them: they are issued as a dot (or an abs
+     * pass and a sum), so a device that carries the group carries
+     * them. They also need the ARITHMETIC group for the multiply and
+     * the SIGN group for the abs, which cft_reduce checks separately -
+     * one opcode cannot name two groups in a table shaped like this,
+     * and inventing a second group bit for an opcode no bitstream
+     * implements would put a lie in the CAPS register. */
+    if (op >= 28 && op <= 29) return 5;   /* reduction (composed)      */
+    return -1;
+}
+
+/* The extra opcode group a composed reduction needs beyond its own:
+ * arithmetic for sumSquare's multiply, sign for sumAbs's abs. -1 for
+ * everything else. */
+static int reduce_helper_group(int op)
+{
+    if (op == 28) return 0;               /* sumsq  -> mul  */
+    if (op == 29) return 1;               /* sumabs -> abs  */
     return -1;
 }
 
@@ -106,7 +125,7 @@ CFT_API const char *cft_format_name(cft_format f)
 
 CFT_API const char *cft_op_name(cft_op op)
 {
-    static const char *const names[28] = {
+    static const char *const names[30] = {
         "fma", "add", "sub", "mul",
         "abs", "neg", "copysign",
         "min", "max", "minnum", "maxnum",
@@ -115,7 +134,8 @@ CFT_API const char *cft_op_name(cft_op op)
         "iand", "ior", "ixor", "iadd",
         "isub", "ishl", "ishr", "icmplt",
         "sum", "dot",
-        "recip_seed", "rsqrt_seed"
+        "recip_seed", "rsqrt_seed",
+        "sumsq", "sumabs"
     };
     if ((int)op >= 0 && (int)op < (int)(sizeof names / sizeof names[0]) &&
         names[(int)op])
@@ -278,7 +298,17 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
     group = op_group_bit((int)op);
     if (group < 0)
         return 0;
-    return (dev->op_groups & (1u << group)) ? 1 : 0;
+    if (!(dev->op_groups & (1u << group)))
+        return 0;
+    /* A composed reduction is supported only if what it composes from
+     * is: sumSquare needs the arithmetic group for its multiply and
+     * sumAbs the sign group for its abs. Answering yes and then
+     * refusing the call would make cft_supports() the wrong question
+     * to ask. */
+    group = reduce_helper_group((int)op);
+    if (group >= 0 && !(dev->op_groups & (1u << group)))
+        return 0;
+    return 1;
 }
 
 /* ---------------------------------------------------------------
@@ -402,6 +432,70 @@ CFT_API cft_status cft_run(cft_device *dev,
  * Reductions
  * --------------------------------------------------------------- */
 
+/* 754-2019 9.4 orders the special values differently for sumSquare and
+ * sumAbs than for sum and dot:
+ *
+ *   "For sumSquare and sumAbs, if any operand element is an infinity,
+ *    +inf is returned. Otherwise, if any operand element is a NaN a
+ *    quiet NaN is returned."
+ *
+ * where sum and dot put NaN first. The tree cannot produce that - a
+ * NaN reaching an add propagates - so this overrides it, and ONLY on
+ * the one input where the two differ.
+ *
+ * Checked lazily, after the tree, because the check is equivalent to
+ * the model's pre-pass and much cheaper: every term of either
+ * operation is a square or a magnitude, so no term is negative, no
+ * inf - inf and no 0 x inf can arise, and therefore the tree's result
+ * is a NaN if and only if some ELEMENT was a NaN. The scan for an
+ * infinity then only happens on a vector that produced one, instead of
+ * on every call - which matters on a device backend, where it is the
+ * host reading the whole input array.
+ *
+ * The flags are 9.4's blanket signalling-NaN rule and nothing else:
+ * the result is decided by a table rather than computed, and 9.4 says
+ * "exceptions are not signaled for each exceptional intermediate
+ * operand or result".
+ *
+ * Returns 1 when it applied. */
+static int sumsq_abs_inf_override(const cft_fmt_desc *f, const void *a,
+                                  size_t esz, size_t n,
+                                  cft_bn *out, uint32_t *flags)
+{
+    size_t i;
+    int saw_inf = 0, saw_snan = 0;
+    cft_bn v, frac;
+
+    for (i = 0; i < n; i++) {
+        cft_bn_load(&v, (const uint8_t *)a + i * esz, (int)esz);
+        if (cft_bn_extract(&v, f->man_w, f->exp_w) != f->exp_mask)
+            continue;
+        cft_bn_copy(&frac, &v);
+        cft_bn_mask(&frac, f->man_w);
+        if (cft_bn_is_zero(&frac))
+            saw_inf = 1;
+        else if (!cft_bn_bit(&v, f->man_w - 1))
+            saw_snan = 1;
+    }
+    if (!saw_inf)
+        return 0;
+    cft_sf_inf(f, 0, out);
+    *flags = saw_snan ? CFT_FLAG_INVALID : 0u;
+    return 1;
+}
+
+/* Is the reduction's result a NaN? The trigger for the scan above. */
+static int result_is_nan(const cft_fmt_desc *f, const void *d)
+{
+    cft_bn v, frac;
+    cft_bn_load(&v, (const uint8_t *)d, f->width / 8);
+    if (cft_bn_extract(&v, f->man_w, f->exp_w) != f->exp_mask)
+        return 0;
+    cft_bn_copy(&frac, &v);
+    cft_bn_mask(&frac, f->man_w);
+    return !cft_bn_is_zero(&frac);
+}
+
 CFT_API cft_status cft_reduce(cft_device *dev,
                               cft_op      op,
                               cft_format  fmt,
@@ -438,6 +532,13 @@ CFT_API cft_status cft_reduce(cft_device *dev,
         int group = op_group_bit((int)op);
         if (group < 0 || !(dev->op_groups & (1u << group)))
             return CFT_ERR_UNSUPPORTED;
+        /* A composed reduction also needs the group its composition
+         * runs through - the multiply for sumSquare, the abs for
+         * sumAbs - and a device missing one must say so here rather
+         * than fail partway through the sequence. */
+        group = reduce_helper_group((int)op);
+        if (group >= 0 && !(dev->op_groups & (1u << group)))
+            return CFT_ERR_UNSUPPORTED;
     }
     if (!d)
         return CFT_ERR_INVALID_ARGUMENT;
@@ -463,6 +564,59 @@ CFT_API cft_status cft_reduce(cft_device *dev,
         return CFT_ERR_INVALID_ARGUMENT;
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+
+    /* sumSquare and sumAbs are COMPOSITIONS of what is already here,
+     * and are implemented as such rather than as a second tree walker.
+     * 754-2019 9.4 defines them as sums of squares and of magnitudes;
+     * this contract adds the part 9.4 leaves open - which tree - by
+     * making it the same tree, node for node:
+     *
+     *     sumSquare(a) == cft_reduce(CFT_DOT, a, a)
+     *     sumAbs(a)    == cft_run(CFT_ABS, a) then CFT_SUM
+     *
+     * Issuing exactly those calls is what makes the two backends
+     * agree: there is no separate code path to keep in step, and on a
+     * device the dot and the sum run on the tile like any other
+     * reduction. The cost is one scratch buffer for sumAbs, which is
+     * the same trade CFT_DOT already makes for its multiply pass.
+     *
+     * Recursion is one level deep and cannot be more: the calls below
+     * name CFT_DOT and CFT_SUM, which take the tree path directly. */
+    if (op == CFT_SUMSQ || op == CFT_SUMABS) {
+        uint32_t cf = 0;
+        cft_status st;
+
+        if (op == CFT_SUMSQ) {
+            st = cft_reduce(dev, CFT_DOT, fmt, rnd, a, a, d, n, &cf,
+                            bus_out);
+        } else {
+            void *tmp = malloc(n * esz);
+            uint32_t af = 0;
+            if (!tmp)
+                return CFT_ERR_OUT_OF_MEMORY;
+            st = cft_run(dev, CFT_ABS, fmt, rnd, a, NULL, NULL, tmp, n,
+                         &af, bus_out);
+            if (st == CFT_OK)
+                st = cft_reduce(dev, CFT_SUM, fmt, rnd, tmp, NULL, d, n,
+                                &cf, bus_out);
+            free(tmp);
+            cf |= af;          /* abs signals nothing (5.5.1); OR anyway */
+        }
+        if (st != CFT_OK)
+            return st;
+
+        if (result_is_nan(f, d)) {
+            cft_bn ov;
+            uint32_t of = 0;
+            if (sumsq_abs_inf_override(f, a, esz, n, &ov, &of)) {
+                cft_bn_store(&ov, (uint8_t *)d, (int)esz);
+                cf = of;
+            }
+        }
+        if (flags_out)
+            *flags_out = cf;
+        return CFT_OK;
+    }
 
 #ifdef CFT_ENABLE_XRT
     if (dev->backend == CFT_BACKEND_XRT) {

@@ -41,6 +41,23 @@ rounding to roundTiesTowardZero, which is not one of the five
 attributes, so there is no attribute to record and no per-attribute
 file. A replayer that demanded one would be asking the wrong question.
 
+The REDUCTIONS get a third schema - `fp32-reduce.jsonl` and friends -
+for the same reason, and the published sets carried none of them at
+all before this. A reduction's operand is a whole VECTOR whose length
+is part of the case, which neither schema above can express: both are
+one line per case with a fixed number of single-element operands.
+
+    {"fn": "sumsq", "rnd": "rne", "n": 5,
+     "a": ["0x...", ...], "d": "0x...", "flags": 16}
+
+    {"fn": "scaled_prod", "rnd": "rne", "n": 5, "a": ["0x...", ...],
+     "pr": "0x...", "sf": -137, "flags": 16}
+
+"b" appears for dot, scaled_prod_sum and scaled_prod_diff. The three
+scaled products carry "pr" and "sf" instead of "d", because they return
+a PAIR - the whole point of the operation - and a set that recorded
+only the significand would score half of it.
+
 Every opcode the tile implements appears here, arithmetic and
 non-arithmetic alike, plus the unassigned codes whose defined
 answer (canonical qNaN, invalid raised) is also part of the
@@ -65,6 +82,24 @@ from cft_golden import (  # noqa: E402
     FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, augmented, compute,
     transcend, vectors,
 )
+from cft_golden.reduce import (  # noqa: E402
+    SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, fdot, fsum, fsumabs, fsumsq,
+    scaled_prod,
+)
+
+# The seven of clause 9.4, by the name their set records.
+REDUCE_IMPL = {
+    "sum":     lambda fmt, xs, ys, rnd: fsum(fmt, xs, rnd),
+    "dot":     lambda fmt, xs, ys, rnd: fdot(fmt, xs, ys, rnd),
+    "sumsq":   lambda fmt, xs, ys, rnd: fsumsq(fmt, xs, rnd),
+    "sumabs":  lambda fmt, xs, ys, rnd: fsumabs(fmt, xs, rnd),
+    "scaled_prod":
+        lambda fmt, xs, ys, rnd: scaled_prod(fmt, xs, None, SP_PROD, rnd),
+    "scaled_prod_sum":
+        lambda fmt, xs, ys, rnd: scaled_prod(fmt, xs, ys, SP_PROD_SUM, rnd),
+    "scaled_prod_diff":
+        lambda fmt, xs, ys, rnd: scaled_prod(fmt, xs, ys, SP_PROD_DIFF, rnd),
+}
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
 
@@ -84,6 +119,9 @@ def main():
     ap.add_argument("--transcend", type=int, default=24,
                     help="random cases added to each transcendental "
                          "family's directed pool (0 to skip the sets)")
+    ap.add_argument("--reduce", type=int, default=2,
+                    help="random operand pools added to the reduction "
+                         "sets' directed ones (-1 to skip the sets)")
     ap.add_argument("--augmented", type=int, default=24,
                     help="random pairs added to the clause-9.5 pool "
                          "(0 to skip the augmented sets)")
@@ -117,10 +155,9 @@ def main():
                     }) + "\n")
             print(f"{path}: {len(cases)} cases (seed {args.seed}, {rname})")
 
-        if args.transcend <= 0:
-            continue
-        tcases = vectors.transcend_cases(fmt, args.transcend, args.seed + 6)
-        for rname in args.rounding:
+        tcases = (vectors.transcend_cases(fmt, args.transcend, args.seed + 6)
+                  if args.transcend > 0 else [])
+        for rname in args.rounding if tcases else ():
             rnd = RND_BY_NAME[rname]
             suffix = "" if rname == "rne" else f"-{rname}"
             path = outdir / f"{name}-transcend{suffix}.jsonl"
@@ -160,6 +197,38 @@ def main():
                 }) + "\n")
         print(f"{path}: {len(acases)} cases (seed {args.seed}, "
               f"roundTiesTowardZero - 9.5 fixes it)")
+
+        if args.reduce < 0:
+            continue
+        rcases = vectors.reduce_cases(fmt, args.reduce, args.seed + 8)
+        for rname in args.rounding:
+            rnd = RND_BY_NAME[rname]
+            suffix = "" if rname == "rne" else f"-{rname}"
+            path = outdir / f"{name}-reduce{suffix}.jsonl"
+            elems = 0
+            with open(path, "w") as f:
+                for fn, xs, ys in rcases:
+                    out = REDUCE_IMPL[fn](fmt, xs, ys, rnd)
+                    rec = {
+                        "fn": fn,
+                        "rnd": rname,
+                        "n": len(xs),
+                        "a": [f"0x{v:0{hexw}x}" for v in xs],
+                    }
+                    if ys is not None:
+                        rec["b"] = [f"0x{v:0{hexw}x}" for v in ys]
+                    if len(out) == 3:
+                        pr, sf_, flags = out
+                        rec["pr"] = f"0x{pr:0{hexw}x}"
+                        rec["sf"] = sf_
+                    else:
+                        d, flags = out
+                        rec["d"] = f"0x{d:0{hexw}x}"
+                    rec["flags"] = flags
+                    elems += len(xs)
+                    f.write(json.dumps(rec) + "\n")
+            print(f"{path}: {len(rcases)} cases, {elems} elements "
+                  f"(seed {args.seed}, {rname})")
 
 
 if __name__ == "__main__":

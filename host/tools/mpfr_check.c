@@ -73,6 +73,36 @@
  * the banner above check_augmented for why that is still an oracle and
  * exactly which part of it is not.
  *
+ * The seven REDUCTIONS of clause 9.4 are checked here too, and what
+ * this oracle can and cannot say about them is worth stating exactly,
+ * because the honest answer is "half of it".
+ *
+ * MPFR CAN ARBITRATE EVERY NODE. Each node of a reduction is one add
+ * or one multiply of two format values, correctly rounded in the
+ * caller's attribute, and that is precisely what oracle() above
+ * already decides - so the campaign REPLAYS the tree here with MPFR
+ * doing every node's arithmetic and compares the root against the
+ * library's, bits and flags. A node that rounded the wrong way, or
+ * raised the wrong flag, or lost a subnormal, fails here.
+ *
+ * MPFR CANNOT ARBITRATE THE TREE. Which values are paired, and at
+ * which level, is this CONTRACT's choice - 754-2019 9.4 explicitly
+ * allows an implementation to "associate in any order or evaluate in
+ * any wider format", so there is no external authority to appeal to
+ * and MPFR has no opinion. The harness therefore reproduces the split
+ * rather than judging it, and a reduction whose shape was wrong in
+ * BOTH the library and this file would pass. What guards the shape is
+ * a different thing entirely: two independent implementations of it
+ * (python/cft_golden/reduce.py and libcft) compared against each other
+ * by host/tests/reduce_check.py, the streaming accumulator's agreement
+ * with the recursive definition, and the published vector sets.
+ *
+ * The same division applies to the three scaled products: MPFR decides
+ * every node's multiply, and the binade extraction that follows it is
+ * exact bit surgery on the encoding, with nothing to round and so
+ * nothing to arbitrate. 9.4's special-value precedence is likewise the
+ * contract's table, replayed rather than judged.
+ *
  * Usage:  mpfr-check [randoms-per-format] [seed]
  *         (directed specials always run; randoms are exponent-banded)
  */
@@ -156,7 +186,15 @@ enum {
     T_SIN, T_COS, T_TAN, T_SINH, T_COSH, T_TANH, T_ASINH, T_ACOSH,
     T_ATANH,
     /* the augmented arithmetic operations of 754-2019 9.5 */
-    T_AUG_ADD, T_AUG_SUB, T_AUG_MUL, NTALLY
+    T_AUG_ADD, T_AUG_SUB, T_AUG_MUL,
+    /* the seven reductions of clause 9.4. A "case" here is a whole
+     * VECTOR, not an element - the element count is reported
+     * separately, because 400 cases over 20-element vectors is 8,000
+     * arbitrated nodes and reporting only the smaller number would
+     * undersell the campaign while reporting only the larger would
+     * oversell its independence. */
+    T_RSUM, T_RDOT, T_RSUMSQ, T_RSUMABS,
+    T_SPROD, T_SPROD_SUM, T_SPROD_DIFF, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -170,9 +208,14 @@ static const char *const TALLY_NAME[NTALLY] = {
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
     "atanh",
-    "aug_add", "aug_sub", "aug_mul"
+    "aug_add", "aug_sub", "aug_mul",
+    "sum", "dot", "sumsq", "sumabs",
+    "sprod", "sprod_sum", "sprod_diff"
 };
 static uint64_t tally[NTALLY][4];
+
+/* Arbitrated NODES, separately from the vector count above. */
+static uint64_t reduce_nodes;
 
 /* ---- bit-level classify (works on the little-endian encoding) ----- */
 
@@ -2988,6 +3031,474 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
     }
 }
 
+/* ---- the reductions of clause 9.4 ---------------------------------- *
+ *
+ * See the banner at the top of this file for what this can and cannot
+ * settle. In one line: MPFR decides every NODE, and the TREE is
+ * reproduced here rather than judged, because 9.4 leaves the
+ * association to the implementation and there is nothing to appeal to.
+ */
+
+/* An MPFR value already ON the format's grid -> its encoding. The
+ * nodes feed each other - oracle() consumes encodings and produces an
+ * mpfr value - so the replay needs the inverse of enc_to_mpfr.
+ *
+ * Not mpfr_to_enc() above, which takes normal values only and refuses
+ * everything else: a reduction's nodes produce infinities, signed
+ * zeros, subnormals and NaNs as a matter of course, and those classes
+ * are most of what its edges are about.
+ *
+ * It checks its own work, because a value this function could not
+ * represent exactly would silently corrupt every node above it and
+ * the campaign would report a library bug. */
+static void rd_to_enc(const fdesc *f, mpfr_srcptr x, uint8_t *out)
+{
+    memset(out, 0, f->esz);
+    if (mpfr_nan_p(x)) {
+        /* the canonical quiet NaN, which is the only NaN this contract
+         * emits and the only one MPFR can be said to have returned */
+        set_field(out, f->man_w, f->exp_w, (1ul << f->exp_w) - 1);
+        out[(f->man_w - 1) / 8] |= (uint8_t)(1u << ((f->man_w - 1) % 8));
+        return;
+    }
+    if (mpfr_signbit(x))
+        out[f->esz - 1] |= 0x80;
+    if (mpfr_inf_p(x)) {
+        set_field(out, f->man_w, f->exp_w, (1ul << f->exp_w) - 1);
+        return;
+    }
+    if (mpfr_zero_p(x))
+        return;                          /* the sign is already in */
+    {
+        mpz_t z;
+        mpfr_exp_t e;
+        long ee, ebiased;
+        size_t bits, i;
+        uint8_t tmp[32];
+
+        mpz_init(z);
+        e = mpfr_get_z_2exp(z, x);       /* x = z * 2^e, exactly */
+        mpz_abs(z, z);
+        bits = mpz_sizeinbase(z, 2);
+        ee = (long)e + (long)bits - 1;   /* IEEE-style exponent */
+        if (ee >= f->emin) {
+            long sh = (long)f->p - (long)bits;
+            if (sh > 0)
+                mpz_mul_2exp(z, z, (unsigned long)sh);
+            else if (sh < 0)
+                mpz_fdiv_q_2exp(z, z, (unsigned long)(-sh));
+            mpz_clrbit(z, f->man_w);     /* the hidden bit */
+            ebiased = ee + f->emax;
+        } else {
+            long sh = (long)e - (f->emin - f->man_w);
+            if (sh > 0)
+                mpz_mul_2exp(z, z, (unsigned long)sh);
+            else if (sh < 0)
+                mpz_fdiv_q_2exp(z, z, (unsigned long)(-sh));
+            ebiased = 0;
+        }
+        memset(tmp, 0, sizeof tmp);
+        mpz_export(tmp, NULL, -1, 1, 0, 0, z);
+        for (i = 0; i < f->esz; i++)
+            out[i] |= tmp[i];
+        if (ebiased)
+            set_field(out, f->man_w, f->exp_w, (unsigned long)ebiased);
+        mpz_clear(z);
+    }
+    if (!agree(f, out, x)) {
+        char h[70];
+        hexdump(out, f->esz, h);
+        printf("HARNESS BUG: rd_to_enc lost a value at %s -> 0x%s\n",
+               f->name, h);
+        mismatches++;
+    }
+}
+
+/* The contract's split: the largest power of two strictly inside the
+ * range, so the LEFT child is a perfect subtree. REPRODUCED, not
+ * arbitrated. */
+static size_t rd_split(size_t lo, size_t hi)
+{
+    size_t m = hi - lo, k = 1;
+    while (k < m)
+        k <<= 1;
+    return lo + (k >> 1);
+}
+
+/* enc (finite, non-zero) -> a significand in +-[1, 2) and the exact
+ * scale, the scaled products' leaf and node rule. Exact bit surgery:
+ * there is nothing here to round, so there is nothing here for MPFR
+ * to arbitrate, and saying so is the point. */
+static void rd_norm_split(const fdesc *f, const uint8_t *x, uint8_t *sig,
+                          long long *k)
+{
+    mpz_t enc, man;
+    unsigned long biased;
+    long e;
+    size_t bits, i;
+    uint8_t tmp[32];
+    int sign = (x[f->esz - 1] >> 7) & 1;
+
+    mpz_init(enc);
+    mpz_init(man);
+    mpz_import(enc, f->esz, -1, 1, 0, 0, x);
+    mpz_fdiv_r_2exp(man, enc, f->man_w);
+    mpz_fdiv_q_2exp(enc, enc, f->man_w);
+    biased = mpz_get_ui(enc) & ((1ul << f->exp_w) - 1);
+    if (biased) {
+        mpz_setbit(man, f->man_w);
+        e = (long)biased - f->emax - f->man_w;
+    } else {
+        e = f->emin - f->man_w;
+    }
+    bits = mpz_sizeinbase(man, 2);
+    *k = (long long)e + (long long)bits - 1;
+    mpz_mul_2exp(man, man, (unsigned long)(f->man_w - (bits - 1)));
+    mpz_clrbit(man, f->man_w);
+    memset(sig, 0, f->esz);
+    memset(tmp, 0, sizeof tmp);
+    mpz_export(tmp, NULL, -1, 1, 0, 0, man);
+    for (i = 0; i < f->esz; i++)
+        sig[i] |= tmp[i];
+    set_field(sig, f->man_w, f->exp_w, (unsigned long)f->emax);
+    if (sign)
+        sig[f->esz - 1] |= 0x80;
+    mpz_clear(enc);
+    mpz_clear(man);
+}
+
+/* The sum tree over already-transformed leaves, MPFR at every node. */
+static void rd_tree(const fdesc *f, int mi, const uint8_t (*leaf)[32],
+                    size_t lo, size_t hi, uint8_t *out, uint32_t *flags)
+{
+    uint8_t l[32], r[32], dummy[32];
+    uint32_t lf = 0, rf = 0, nf = 0;
+    mpfr_t v;
+    size_t mid;
+
+    *flags = 0;
+    if (hi - lo == 1) {
+        memcpy(out, leaf[lo], f->esz);
+        return;
+    }
+    mid = rd_split(lo, hi);
+    rd_tree(f, mi, leaf, lo, mid, l, &lf);
+    rd_tree(f, mi, leaf, mid, hi, r, &rf);
+    memset(dummy, 0, sizeof dummy);
+    mpfr_init2(v, f->p);
+    /* ADD reads a and c - b is steered to 1.0 - which oracle() and
+     * raw_op() already honour. */
+    oracle(f, OP_ADD, mi, l, dummy, r, v, &nf);
+    rd_to_enc(f, v, out);
+    mpfr_clear(v);
+    reduce_nodes++;
+    *flags = lf | rf | nf;
+}
+
+/* The scaled product tree: MPFR decides the multiply, the extraction
+ * is exact. */
+static void rd_sp_tree(const fdesc *f, int mi, const uint8_t (*fac)[32],
+                       size_t lo, size_t hi, uint8_t *sig,
+                       long long *scale, uint32_t *flags)
+{
+    uint8_t l[32], r[32], prod[32], dummy[32];
+    uint32_t lf = 0, rf = 0, nf = 0;
+    long long lk = 0, rk = 0, k = 0;
+    mpfr_t v;
+    size_t mid;
+
+    *flags = 0;
+    if (hi - lo == 1) {
+        rd_norm_split(f, fac[lo], sig, scale);
+        return;
+    }
+    mid = rd_split(lo, hi);
+    rd_sp_tree(f, mi, fac, lo, mid, l, &lk, &lf);
+    rd_sp_tree(f, mi, fac, mid, hi, r, &rk, &rf);
+    memset(dummy, 0, sizeof dummy);
+    mpfr_init2(v, f->p);
+    oracle(f, OP_MUL, mi, l, r, dummy, v, &nf);
+    rd_to_enc(f, v, prod);
+    mpfr_clear(v);
+    rd_norm_split(f, prod, sig, &k);
+    *scale = lk + rk + k;
+    reduce_nodes++;
+    *flags = lf | rf | nf;
+}
+
+/* The seven, by the order they are tallied in. */
+enum { RF_SUM, RF_DOT, RF_SUMSQ, RF_SUMABS,
+       RF_PROD, RF_PROD_SUM, RF_PROD_DIFF, RF_COUNT };
+static const char *const RFN_NAME[RF_COUNT] = {
+    "sum", "dot", "sumsq", "sumabs",
+    "scaled_prod", "scaled_prod_sum", "scaled_prod_diff"
+};
+static const int RFN_BINARY[RF_COUNT] = { 0, 1, 0, 0, 0, 1, 1 };
+
+/* 9.4's special-value tables, replayed. These are the CONTRACT's rows
+ * and MPFR has no opinion on them; what MPFR settles is the
+ * arithmetic underneath. */
+static void rd_classes(const fdesc *f, const uint8_t (*v)[32], size_t n,
+                       int *inf, int *zero, int *nan, int *snan, int *sign)
+{
+    size_t i;
+    *inf = *zero = *nan = *snan = *sign = 0;
+    for (i = 0; i < n; i++) {
+        cls c;
+        classify(f, v[i], &c);
+        *sign ^= c.sign;
+        if (c.is_nan) {
+            *nan = 1;
+            *snan |= c.is_snan;
+        } else if (c.is_inf) {
+            *inf = 1;
+        } else if (c.is_zero) {
+            *zero = 1;
+        }
+    }
+}
+
+#define RD_MAXN 65
+
+static void rd_oracle(const fdesc *f, int fn, int mi,
+                      const uint8_t (*a)[32], const uint8_t (*b)[32],
+                      size_t n, mpfr_t want, long long *want_sf,
+                      uint32_t *wf)
+{
+    uint8_t leaf[RD_MAXN][32], out[32], dummy[32];
+    uint32_t fl = 0, lf = 0;
+    int inf = 0, zero = 0, nan = 0, snan = 0, sign = 0;
+    size_t i;
+
+    *want_sf = 0;
+    memset(dummy, 0, sizeof dummy);
+
+    if (n == 0) {
+        if (fn >= RF_PROD) {
+            mpfr_set_ui(want, 1, MPFR_RNDN);      /* 9.4: pr = 1, sf = +0 */
+        } else {
+            mpfr_set_zero(want, 1);               /* 9.4: +0 */
+        }
+        *wf = 0;
+        return;
+    }
+
+    /* the leaves */
+    for (i = 0; i < n; i++) {
+        mpfr_t v;
+        switch (fn) {
+        case RF_SUM:
+            memcpy(leaf[i], a[i], f->esz);
+            break;
+        case RF_SUMABS:
+            /* abs: 5.5.1 says it touches the sign bit and signals
+             * nothing, so there is no arithmetic here to arbitrate */
+            memcpy(leaf[i], a[i], f->esz);
+            leaf[i][f->esz - 1] &= 0x7f;
+            break;
+        case RF_DOT:
+        case RF_SUMSQ:
+            mpfr_init2(v, f->p);
+            oracle(f, OP_MUL, mi, a[i], fn == RF_DOT ? b[i] : a[i], dummy,
+                   v, &lf);
+            rd_to_enc(f, v, leaf[i]);
+            mpfr_clear(v);
+            fl |= lf;
+            reduce_nodes++;
+            break;
+        case RF_PROD:
+            memcpy(leaf[i], a[i], f->esz);
+            break;
+        default:
+            mpfr_init2(v, f->p);
+            oracle(f, fn == RF_PROD_SUM ? OP_ADD : OP_SUB, mi, a[i], dummy,
+                   b[i], v, &lf);
+            rd_to_enc(f, v, leaf[i]);
+            mpfr_clear(v);
+            fl |= lf;
+            reduce_nodes++;
+            break;
+        }
+    }
+
+    if (fn < RF_PROD) {
+        uint32_t tf = 0;
+        /* 9.4 puts an infinity ahead of a NaN for sumSquare and sumAbs,
+         * and only for those two. The rows are stated over the OPERAND
+         * ELEMENTS, not over the leaves: an element whose square
+         * overflows to an infinity is not "an operand element that is
+         * an infinity", and squaring a signalling NaN produces a quiet
+         * one, so classifying the leaves gets this wrong in both
+         * directions. It did, until the campaign said so. */
+        rd_classes(f, a, n, &inf, &zero, &nan, &snan, &sign);
+        if ((fn == RF_SUMSQ || fn == RF_SUMABS) && inf && nan) {
+            mpfr_set_inf(want, 1);
+            *wf = snan ? CFT_FLAG_INVALID : 0u;
+            return;
+        }
+        rd_tree(f, mi, (const uint8_t (*)[32])leaf, 0, n, out, &tf);
+        enc_to_mpfr(f, out, want);
+        *wf = fl | tf;
+        return;
+    }
+
+    /* The scaled products' rows, in 9.4's order, over the FACTORS -
+     * which for scaledProdSum and scaledProdDiff are the rounded sums
+     * and differences, and for scaledProd are the elements. */
+    rd_classes(f, (const uint8_t (*)[32])leaf, n, &inf, &zero, &nan, &snan,
+               &sign);
+    if (nan) {
+        mpfr_set_nan(want);
+        *wf = fl | (snan ? CFT_FLAG_INVALID : 0u);
+        return;
+    }
+    if (inf && zero) {
+        mpfr_set_nan(want);
+        *wf = fl | CFT_FLAG_INVALID;
+        return;
+    }
+    if (inf) {
+        mpfr_set_inf(want, sign ? -1 : 1);
+        *wf = fl;
+        return;
+    }
+    if (zero) {
+        mpfr_set_zero(want, sign ? -1 : 1);
+        *wf = fl;
+        return;
+    }
+    {
+        uint32_t tf = 0;
+        rd_sp_tree(f, mi, (const uint8_t (*)[32])leaf, 0, n, out, want_sf,
+                   &tf);
+        enc_to_mpfr(f, out, want);
+        *wf = fl | tf;
+    }
+}
+
+static cft_status rd_lib(const fdesc *f, int fn, cft_round rnd,
+                         const uint8_t *a, const uint8_t *b, size_t n,
+                         uint8_t *d, long long *sf, uint32_t *flags)
+{
+    int64_t scale = 0;
+    cft_status st;
+    *flags = 0;
+    switch (fn) {
+    case RF_SUM:
+        st = cft_reduce(dev, CFT_SUM, f->fmt, rnd, a, NULL, d, n, flags,
+                        NULL);
+        break;
+    case RF_DOT:
+        st = cft_reduce(dev, CFT_DOT, f->fmt, rnd, a, b, d, n, flags, NULL);
+        break;
+    case RF_SUMSQ:
+        st = cft_reduce(dev, CFT_SUMSQ, f->fmt, rnd, a, NULL, d, n, flags,
+                        NULL);
+        break;
+    case RF_SUMABS:
+        st = cft_reduce(dev, CFT_SUMABS, f->fmt, rnd, a, NULL, d, n, flags,
+                        NULL);
+        break;
+    case RF_PROD:
+        st = cft_scaled_prod(dev, f->fmt, rnd, n ? a : NULL, d, &scale, n,
+                             flags);
+        break;
+    case RF_PROD_SUM:
+        st = cft_scaled_prod_sum(dev, f->fmt, rnd, n ? a : NULL,
+                                 n ? b : NULL, d, &scale, n, flags);
+        break;
+    default:
+        st = cft_scaled_prod_diff(dev, f->fmt, rnd, n ? a : NULL,
+                                  n ? b : NULL, d, &scale, n, flags);
+        break;
+    }
+    *sf = (long long)scale;
+    return st;
+}
+
+static void check_reduce(int fj, uint8_t pool[][32], int pn, int nvec)
+{
+    static const size_t LENS[] = { 0, 1, 2, 3, 5, 7, 8, 9, 15, 16, 17,
+                                   31, 32, 33, 63, 64, 65 };
+    const fdesc *f = &FMTS[fj];
+    uint8_t va[RD_MAXN][32], vb[RD_MAXN][32];
+    uint8_t flat_a[RD_MAXN * 32], flat_b[RD_MAXN * 32];
+    uint8_t d[32], big[32], tiny[32];
+    int fn, mi, li, v, i;
+    int nl = (int)(sizeof LENS / sizeof LENS[0]);
+
+    /* The two ends of the format, built here rather than taken from
+     * the pool by index. build_pool's ORDER is its own business -
+     * pool[0] is +0 and the tail is random - so a draw that claimed to
+     * alternate the extremes while taking pool[0] and pool[pn-1] would
+     * be describing something it does not do. It did, until this. */
+    memset(big, 0, sizeof big);
+    set_field(big, f->man_w, f->exp_w, (1ul << f->exp_w) - 2);
+    for (i = 0; i < f->man_w; i++)
+        set_field(big, i, 1, 1);                  /* max normal */
+    memset(tiny, 0, sizeof tiny);
+    set_field(tiny, 0, 1, 1);                     /* min subnormal */
+
+    for (fn = 0; fn < RF_COUNT; fn++) {
+        for (mi = 0; mi < 5; mi++) {
+            for (li = 0; li < nl; li++) {
+                size_t n = LENS[li];
+                for (v = 0; v < nvec; v++) {
+                    mpfr_t want;
+                    long long want_sf = 0, got_sf = 0;
+                    uint32_t gf = 0, wf = 0;
+                    cft_status st;
+                    char extra[96];
+
+                    /* Vectors are drawn from the pool by a stride that
+                     * changes with the draw, so a run covers the
+                     * specials-heavy pool in different combinations
+                     * rather than the same prefix every time. The
+                     * fourth draw of every length is the format's two
+                     * EXTREMES alternating - the largest finite value
+                     * and the smallest subnormal - which is the vector
+                     * a scaled product exists for: its true product
+                     * leaves the format by hundreds of binades in both
+                     * directions and the answer must not. */
+                    for (i = 0; i < (int)n; i++) {
+                        if (v % 4 == 3) {
+                            memcpy(va[i], (i & 1) ? tiny : big, f->esz);
+                            memcpy(vb[i], (i & 1) ? big : tiny, f->esz);
+                        } else {
+                            memcpy(va[i], pool[(i * (v + 1) + li) % pn],
+                                   f->esz);
+                            memcpy(vb[i], pool[(i * (v + 2) + fn + 1) % pn],
+                                   f->esz);
+                        }
+                        memcpy(flat_a + (size_t)i * f->esz, va[i], f->esz);
+                        memcpy(flat_b + (size_t)i * f->esz, vb[i], f->esz);
+                    }
+
+                    mpfr_init2(want, f->p);
+                    rd_oracle(f, fn, mi, (const uint8_t (*)[32])va,
+                              (const uint8_t (*)[32])vb, n, want, &want_sf,
+                              &wf);
+                    memset(d, 0, sizeof d);
+                    st = rd_lib(f, fn, MODES[mi].cr, flat_a,
+                                RFN_BINARY[fn] ? flat_b : NULL, n, d,
+                                &got_sf, &gf);
+                    snprintf(extra, sizeof extra,
+                             "n=%lu scale got %lld want %lld",
+                             (unsigned long)n, got_sf, want_sf);
+                    /* The scale is a second result, so a case that
+                     * agrees on pr and disagrees on sf must fail. */
+                    if (fn >= RF_PROD && got_sf != want_sf && st == CFT_OK)
+                        st = CFT_ERR_INTERNAL;
+                    c5_judge(T_RSUM + fn, fj, RFN_NAME[fn], MODES[mi].name,
+                             f, n ? va[0] : NULL, NULL, f, d, want, gf, wf,
+                             st, extra);
+                    mpfr_clear(want);
+                }
+            }
+        }
+    }
+}
+
 /* ---- driver -------------------------------------------------------- */
 
 static void report(const fdesc *f, mop op, int mi, const uint8_t *a,
@@ -3130,6 +3641,25 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
+    /* The seven reductions. Their pools are the arithmetic phase's -
+     * the specials are exactly what a reduction's edges turn on - and
+     * the campaign reports NODES as well as cases, because a case here
+     * is a whole vector and the node count is what MPFR actually
+     * arbitrated. */
+    for (fi = 0; fi < 4; fi++) {
+        const fdesc *f = &FMTS[fi];
+        int pn = build_pool(f, pool, randoms);
+        uint64_t before = cases, nodes_before = reduce_nodes;
+        check_reduce(fi, pool, pn, 4);
+        printf("%s reduce: %llu vectors done, %llu nodes arbitrated "
+               "(running mismatches: %llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)(reduce_nodes - nodes_before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+    }
+
     for (fi = 0; fi < 4; fi++) {
         int pn = build_pool(&FMTS[fi], pool, randoms);
         int dfi;
@@ -3176,6 +3706,12 @@ int main(int argc, char **argv)
            (unsigned long long)cft_tr_max_window,
            (unsigned long long)cft_tr_max_cancel,
            CFT_TR_PH_WINDOW_MAX);
+
+    printf("reductions: %llu tree nodes arbitrated by MPFR (the SHAPE of "
+           "the tree\n  is this contract's choice and is reproduced by the "
+           "harness, not judged\n  by it - 9.4 lets an implementation "
+           "associate in any order)\n",
+           (unsigned long long)reduce_nodes);
 
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
            "mismatches\n", (unsigned long long)cases,

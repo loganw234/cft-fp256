@@ -77,6 +77,7 @@ OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
 OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 OP_SUM, OP_DOT = 24, 25
 OP_RECIP_SEED, OP_RSQRT_SEED = 26, 27
+OP_SUMSQ, OP_SUMABS = 28, 29        # the other two of clause 9.4
 
 RNE, RTZ, RDN, RUP, RMM = 0, 1, 2, 3, 4
 
@@ -243,6 +244,23 @@ def _bind(lib):
         _fn.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_void_p,
                         c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
+
+    # The scaled product reductions (clause 9.4). Host operations like
+    # the transcendentals - no bus word - but they return a PAIR, so
+    # the argument list carries an int64 out-parameter for the scale
+    # before the length. Three named entry points rather than one with
+    # a kind argument, for the reason cft.h gives.
+    _i64p = ctypes.POINTER(ctypes.c_int64)
+    lib.cft_scaled_prod.argtypes = [c_void_p, c_int, c_int, c_void_p,
+                                    c_void_p, _i64p, c_size_t,
+                                    ctypes.POINTER(c_uint32)]
+    lib.cft_scaled_prod.restype = c_int
+    for _name in ("cft_scaled_prod_sum", "cft_scaled_prod_diff"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
+                        c_void_p, _i64p, c_size_t,
+                        ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
     _audit(lib)
     return lib
 
@@ -378,6 +396,31 @@ def reduce(handle, op, fmt, rnd, a, b, n, esz):
     check(lib().cft_reduce(handle, op, fmt, rnd, a, b, d, n,
                            ctypes.byref(flags), None), "cft_reduce")
     return d.raw, flags.value
+
+
+def scaled_prod(handle, kind, fmt, rnd, a, b, n, esz):
+    """cft_scaled_prod / _sum / _diff: n elements in, a PAIR out.
+
+    kind is 0, 1 or 2 for the product of the elements, of their
+    pairwise sums, and of their pairwise differences. Returns
+    (one-element bytes, int scale, flag word); scaleB(pr, scale) is the
+    product, and pr is always in +-[1, 2) so the operation cannot
+    overflow or underflow.
+    """
+    d = ctypes.create_string_buffer(esz)
+    scale = ctypes.c_int64(0)
+    flags = ctypes.c_uint32(0)
+    name = ("cft_scaled_prod", "cft_scaled_prod_sum",
+            "cft_scaled_prod_diff")[kind]
+    fn = getattr(lib(), name)
+    if kind == 0:
+        st = fn(handle, fmt, rnd, a, d, ctypes.byref(scale), n,
+                ctypes.byref(flags))
+    else:
+        st = fn(handle, fmt, rnd, a, b, d, ctypes.byref(scale), n,
+                ctypes.byref(flags))
+    check(st, name)
+    return d.raw, scale.value, flags.value
 
 
 def div(handle, fmt, rnd, a, b, n, esz):

@@ -190,22 +190,27 @@ and this table is that definition.
 
 ### Unassigned opcodes
 
-Opcode 15 and everything from **28** up are unassigned. They return the
+Opcode 15 and everything from **30** up are unassigned. They return the
 canonical quiet NaN with **invalid** raised, in the hardware and in
 the golden model alike. Deterministic, and visible in the flags, so a
 host that issues one early learns it now rather than getting a
 plausible number that changes meaning under a later bitstream.
 
-The hazard is not hypothetical; it has now fired twice. 24 and 25
-became `sum` and `dot` (2026-08-30), and 26 and 27 became the
-divide/sqrt seeds (2026-08-31) - each time, a vector set generated
+The hazard is not hypothetical; it has now fired three times. 24 and 25
+became `sum` and `dot` (2026-08-30), 26 and 27 became the
+divide/sqrt seeds (2026-08-31), and 28 and 29 became `sumsq` and
+`sumabs` (2026-09-03) - each time, a vector set generated
 before the assignment still named the opcode "reservedNN", and
 replaying one would score the new operation against an answer recorded
 for the unassigned-opcode result. `cft_conformance` detects that
-specifically and says so, rather than reporting a mismatch. Note that
+specifically and says so, rather than reporting a mismatch; on the
+third occasion that refusal is what caught it, in the generator's own
+"unassigned representative" list. Note that
 the rest of clause 5 landed WITHOUT consuming opcode space: the new
 operations are library entry points over existing opcodes plus exact
-host bookkeeping, so no further reassignment hazard was created.
+host bookkeeping, so no further reassignment hazard was created - and
+so did the three scaled products of clause 9.4, which return a pair and
+could not be `cft_reduce` opcodes even if one were free.
 
 ## Division, square root, and the clause-5 completion set
 
@@ -562,6 +567,170 @@ by construction. A tile-composed fast path (a TwoSum, or an FMA
 residual) would have to reproduce these bits exactly - and could not
 produce r from the tile's five attributes at all.
 
+## The rest of clause 9.4's reductions
+
+`sum` and `dot` were two of the seven reductions 754-2019 9.4 asks a
+language to define. **sumSquare, sumAbs, scaledProd, scaledProdSum and
+scaledProdDiff** are the other five, added 2026-09-03 as part of the
+0.6 step, on exactly the terms the first two are: **one tree fixed by
+element index, one rounding per node, in the caller's attribute.**
+
+The clause is unusually explicit that it leaves this open -
+"Implementations may associate in any order or evaluate in any wider
+format" - which is precisely the freedom a determinism contract cannot
+take. Everything below is what pinning it costs and buys.
+
+### sumSquare and sumAbs ARE the tree, over a different leaf
+
+    sumSquare(x) == dot(x, x)     node for node
+    sumAbs(x)    == sum(|x|)      node for node
+
+bit for bit and flag for flag. The library computes them by issuing
+exactly those calls, so the device and the software backend agree by
+CONSTRUCTION rather than by testing - there is no second tree walker to
+keep in step - and a caller who wants the pieces can have them without
+changing the answer. `host/tests/reduce_check.py` checks both
+identities through the library rather than assuming them.
+
+**One row is not the plain composition, and it is 9.4's own.** For
+these two the standard orders the special values differently from sum
+and dot:
+
+> "For sumSquare and sumAbs, if any operand element is an infinity,
+> +infinity is returned. Otherwise, if any operand element is a NaN a
+> quiet NaN is returned." (9.4)
+
+where sum and dot put NaN first. So a vector holding **both** an
+infinity and a NaN returns `+inf` here, where the tree alone would
+propagate the quiet NaN. Invalid is raised only if one of those NaNs is
+signalling - 9.4's blanket rule for every reduction - and no other flag
+is, because the result comes from that table rather than from an
+addition ("exceptions are not signaled for each exceptional
+intermediate operand or result"). With an infinity and NO NaN nothing
+is overridden: every term of either operation is a square or a
+magnitude, so no term is negative, no `inf - inf` can arise, and the
+tree returns `+inf` on its own.
+
+The `n == 1` edge is inherited from the tree and is worth stating
+because it deviates from 9.4's blanket signalling-NaN rule: one leaf is
+zero additions, so `sumAbs` of a lone sNaN is that pattern with its
+sign cleared, raising nothing (abs signals nothing at all, 5.5.1),
+while `sumSquare`'s leaf IS a multiply and so quiets it and raises
+invalid. That is the same "one leaf means zero adds" reading `sum`
+already carries.
+
+### The scaled products, and the scaling rule this contract pins
+
+`scaledProd(p, n)` returns `{pr, sf}` so that `scaleB(pr, sf)`
+approximates the product of the elements - an
+"implementation-defined approximation", in 9.4's words. Pinned here as:
+
+- **The same index-shaped tree.** A node multiplies its two children's
+  significands under the caller's attribute - the node's one rounding -
+  and adds their scales.
+- **Every node carries a pair**: a significand in `±[1, 2)` and an
+  exact integer scale. After each multiply the binade is extracted back
+  into the scale. Since `|m_L · m_R| < 4`, that extraction is a shift of
+  0, 1 or 2 binades and is **exact** - a power-of-two scaling of a
+  normal number never rounds.
+- **The leaf is that same extraction** applied to the element, exact for
+  every finite non-zero operand, subnormals included: a subnormal has
+  fewer significant bits than the format holds, so its normalised
+  significand always fits.
+
+That invariant is the whole design. Both operands of every multiply are
+in `±[1, 2)`, so every product is in `±[1, 4)`, which cannot leave any
+rung of the ladder. Hence 9.4's requirement -
+
+> "In the absence of any of the above, the scaled result, pr, shall not
+> be affected by overflow or underflow." (9.4)
+
+- holds **by construction rather than by testing**, and
+
+> "These operations should not signal the divideByZero exception, even
+> if implemented with logB." (9.4)
+
+is free: the binade comes out of the encoding rather than out of logB,
+and a zero never reaches the tree at all.
+
+`pr` is in `±[1, 2)` for every n, including `n == 0`, where 9.4 fixes
+the answer: "pr is 1 and sf is +0 without exception" - the
+multiplicative identity, where an empty sum gives the additive one.
+
+**scaledProdSum and scaledProdDiff** are the product of the pairwise
+sums and differences. The leaf is ONE contract rounding of `p_i + q_i`
+(or `p_i - q_i`) in the caller's attribute, with its full flags, and
+its result is the factor everything above sees. **Those two, and only
+those two, can signal overflow or underflow - and only from that
+addition, never from the product tree.** Both are compositions and hold
+as such:
+
+    scaledProdSum(p, q)  == scaledProd(add(p, q))   + the adds' flags
+    scaledProdDiff(p, q) == scaledProd(sub(p, q))   + the subs' flags
+
+### The exception rules, and the empty vector
+
+Stated as an independent implementation is scored on them:
+
+- **invalid** for a signalling NaN operand (9.4's blanket rule); for
+  `inf x 0` in the product; and for a scale that leaves the int64
+  range. Nothing else raises it - in particular an infinity in the
+  product with no zero does not, which 9.4 says explicitly.
+- **inexact** from any node's multiply (and from any leaf add or
+  subtract). 9.4 leaves this "not specified" outside overflow and
+  underflow; this contract pins it.
+- **overflow and underflow** cannot occur in a scaled product tree at
+  all, by the invariant above; scaledProdSum and scaledProdDiff can
+  raise them from the leaf addition, and then 9.4's infinity or zero
+  row takes over the result.
+- **divideByZero** never.
+- The special-value rows apply to the **factors** - which for the two
+  binary forms are the rounded sums, not the raw operands - in 9.4's
+  order: a NaN gives the canonical quiet NaN; an infinity together with
+  a zero is invalid and gives that NaN; an infinity alone gives an
+  infinity; a zero alone gives a zero. **The sign of that infinity or
+  zero is the sign of the true product** - the XOR over every factor's
+  sign bit. 9.4 leaves the sign open; a determinism contract cannot. A
+  sum of unlike infinities needs no row: that addition raises invalid
+  and produces a quiet NaN by itself.
+- The empty vector: `+0` and silent for sumSquare and sumAbs, `(1, +0)`
+  and silent for the three scaled products.
+
+### The scale's range
+
+`sf` is an **int64**, accumulated with checked additions in tree order;
+an addition that would leave the range signals **invalid** and delivers
+the canonical quiet NaN for `pr` with `sf = 0`, which is what 9.4
+requires when the scale is too large for integralFormat. Since
+integralFormat here is not a floating-point format, `sf` still needs a
+value and gets 0.
+
+The guard is unreachable in practice and is implemented anyway: a leaf
+contributes at most `emax + p - 1 = 262,379` to the magnitude at fp256
+and a node at most 2, so a vector would need about 3.5e13 elements -
+1.1 petabytes of fp256 - to reach it. The model applies the same
+per-addition check so that both sides refuse on exactly the same
+inputs, and a test exercises the RULE by narrowing the bound rather
+than claiming the constant.
+
+### What each layer can and cannot settle
+
+Worth being precise about, because the strongest oracle here is
+deliberately only half an oracle:
+
+| layer | settles | does not settle |
+|---|---|---|
+| `python/cft_golden/reduce.py` | every bit, by definition | - |
+| `host/tests/reduce_check.py` | the C against the model, tree shape included, plus both composition identities and the pr-in-[1,2) invariant | - |
+| `host/tools/mpfr_check.c` | **each node's rounding and flags**, arbitrated by GNU MPFR at the format's precision and the caller's mode | **the tree's SHAPE**, which 9.4 leaves to the implementation and which the harness therefore reproduces rather than judges |
+| `vectors/out/<fmt>-reduce*.jsonl` | any external implementation, replayably | - |
+
+A reduction whose shape were wrong in both libcft and the MPFR harness
+would pass the MPFR campaign. What guards the shape is that there are
+two independent implementations of it compared against each other, that
+the streaming accumulator agrees with the recursive definition, and
+that the published vector sets carry the answers.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -678,6 +847,13 @@ precise about, because the freedom is load-bearing:
   enter the answer. See docs/SCALING.md - this is why dynamic load
   balancing is available to a deterministic machine.
 
+All seven of clause 9.4's reductions now share that one tree, including
+the three scaled products, whose nodes carry a (significand, scale)
+pair rather than a value - see the section above. Nothing in the four
+bullets changes for them: the pairing is fixed, the schedule and the
+operand side are free, and a scaled product splits across tiles on the
+same canonical nodes.
+
 ## The verification lattice
 
 Every claim above is a test somewhere, and the layers share no code:
@@ -692,6 +868,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` / `augmented_check.py` | the C library's ports of every contract operation | golden model, per-element flags (and, for 9.5, the pair identity in exact integers) |
 | `host/tests/transcend_check.py` | the twenty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
+| `host/tests/reduce_check.py` | all seven of clause 9.4 - the tree at every n, both composition identities, the scaled products' invariant | golden model, plus the library against itself for the identities |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 
@@ -710,4 +887,5 @@ quiet comparisons 5.11; NaN semantics 6.2 (payload recommendation
 7.4; underflow and tininess 7.5; the recommended correctly-rounded
 functions and their special-value tables 9.2 (the table itself 9.2.1);
 the augmented arithmetic operations and roundTiesTowardZero 9.5;
-minimum/maximum 9.6; the reproducible-operation list 11.
+the reduction operations - sum, dot, sumSquare, sumAbs and the three
+scaled products - 9.4; minimum/maximum 9.6; the reproducible-operation list 11.

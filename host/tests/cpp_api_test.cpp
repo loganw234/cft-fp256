@@ -410,6 +410,158 @@ void check_format(cft::device &dev, cft_device *ref)
                   cft_format_name(F), z.hex().c_str());
         }
 
+        /* -- the rest of clause 9.4 (the 0.6 step) ---------------- *
+         *
+         * The same three lengths, plus the two claims that are about
+         * this WRAPPER rather than about the library: that sumsq and
+         * sumabs reach the right opcodes, and that a scaled product's
+         * SCALE survives the round trip - a pair whose second member
+         * the wrapper dropped would still pass a pr-only comparison.
+         */
+        {
+            static const std::size_t lens[] = { 0, 1, 5, 64, 257 };
+            for (std::size_t li = 0; li < sizeof lens / sizeof lens[0]; li++) {
+                const std::size_t m = lens[li];
+                cft::cspan<enc> av(m ? a.data() : nullptr, m);
+                cft::cspan<enc> bv(m ? b.data() : nullptr, m);
+                enc c1{};
+                std::uint32_t fc = 0;
+                cft_status st;
+
+                const cft::value<F> sq = ctx.sumsq(av);
+                st = cft_reduce(ref, CFT_SUMSQ, F, rnd, m ? a.data() : nullptr,
+                                nullptr, c1.data(), m, &fc, nullptr);
+                CHECK(st == CFT_OK && sq.bytes() == c1 &&
+                          ctx.last_flags() == fc,
+                      "%s %s sumsq n=%u: wrapper %s/0x%02x, C %s/0x%02x",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), sq.hex().c_str(),
+                      static_cast<unsigned>(ctx.last_flags()),
+                      cft::to_hex<F>(c1).c_str(), static_cast<unsigned>(fc));
+
+                const cft::value<F> ab = ctx.sumabs(av);
+                st = cft_reduce(ref, CFT_SUMABS, F, rnd, m ? a.data() : nullptr,
+                                nullptr, c1.data(), m, &fc, nullptr);
+                CHECK(st == CFT_OK && ab.bytes() == c1 &&
+                          ctx.last_flags() == fc,
+                      "%s %s sumabs n=%u: wrapper %s/0x%02x, C %s/0x%02x",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), ab.hex().c_str(),
+                      static_cast<unsigned>(ctx.last_flags()),
+                      cft::to_hex<F>(c1).c_str(), static_cast<unsigned>(fc));
+
+                /* The identity, through the wrapper's own two entry
+                 * points - and its documented exception, which this
+                 * operand array reaches: it carries infinities and
+                 * NaNs, so 9.4's infinity-over-NaN row applies at every
+                 * length but n <= 1 and the answer is +inf where the
+                 * plain dot gives the quiet NaN. Both branches are
+                 * asserted, because "they differ" is only evidence if
+                 * the difference is the one the standard names. */
+                if (m) {
+                    std::vector<std::uint8_t> kls(m);
+                    bool has_inf = false, has_nan = false;
+                    CHECK(cft_class(ref, F, a.data(), kls.data(), m) == CFT_OK,
+                          "cft_class over the reduction operands");
+                    for (std::size_t k = 0; k < m; k++) {
+                        has_inf |= kls[k] == CFT_CLASS_POS_INF ||
+                                   kls[k] == CFT_CLASS_NEG_INF;
+                        has_nan |= kls[k] == CFT_CLASS_QNAN ||
+                                   kls[k] == CFT_CLASS_SNAN;
+                    }
+                    const cft::value<F> dsq = ctx.dot(av, av);
+                    if (has_inf && has_nan) {
+                        CHECK(sq.bytes() == cft::inf_enc<F>(0),
+                              "%s %s n=%u: an infinity beside a NaN must "
+                              "make sumsq +inf, got %s",
+                              cft_format_name(F), cft::round_name(rnd),
+                              static_cast<unsigned>(m), sq.hex().c_str());
+                        CHECK(!(dsq.bytes() == sq.bytes()),
+                              "%s %s n=%u: the plain dot agreed there, so "
+                              "the override cannot be shown to do anything",
+                              cft_format_name(F), cft::round_name(rnd),
+                              static_cast<unsigned>(m));
+                    } else {
+                        CHECK(sq.bytes() == dsq.bytes(),
+                              "%s %s n=%u: sumsq %s != dot(a,a) %s through "
+                              "the wrapper", cft_format_name(F),
+                              cft::round_name(rnd), static_cast<unsigned>(m),
+                              sq.hex().c_str(), dsq.hex().c_str());
+                    }
+                }
+
+                std::int64_t sc64 = 0;
+                const auto sp = ctx.scaled_prod(av);
+                st = cft_scaled_prod(ref, F, rnd, m ? a.data() : nullptr,
+                                     c1.data(), &sc64, m, &fc);
+                CHECK(st == CFT_OK && sp.pr.bytes() == c1 &&
+                          sp.scale == sc64 && ctx.last_flags() == fc,
+                      "%s %s scaled_prod n=%u: wrapper %s/%lld/0x%02x, "
+                      "C %s/%lld/0x%02x",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), sp.pr.hex().c_str(),
+                      static_cast<long long>(sp.scale),
+                      static_cast<unsigned>(ctx.last_flags()),
+                      cft::to_hex<F>(c1).c_str(),
+                      static_cast<long long>(sc64),
+                      static_cast<unsigned>(fc));
+
+                const auto sps = ctx.scaled_prod_sum(av, bv);
+                st = cft_scaled_prod_sum(ref, F, rnd, m ? a.data() : nullptr,
+                                         m ? b.data() : nullptr, c1.data(),
+                                         &sc64, m, &fc);
+                CHECK(st == CFT_OK && sps.pr.bytes() == c1 &&
+                          sps.scale == sc64 && ctx.last_flags() == fc,
+                      "%s %s scaled_prod_sum n=%u: wrapper %s/%lld, "
+                      "C %s/%lld",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), sps.pr.hex().c_str(),
+                      static_cast<long long>(sps.scale),
+                      cft::to_hex<F>(c1).c_str(),
+                      static_cast<long long>(sc64));
+
+                const auto spd = ctx.scaled_prod_diff(av, bv);
+                st = cft_scaled_prod_diff(ref, F, rnd, m ? a.data() : nullptr,
+                                          m ? b.data() : nullptr, c1.data(),
+                                          &sc64, m, &fc);
+                CHECK(st == CFT_OK && spd.pr.bytes() == c1 &&
+                          spd.scale == sc64 && ctx.last_flags() == fc,
+                      "%s %s scaled_prod_diff n=%u: wrapper %s/%lld, "
+                      "C %s/%lld",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), spd.pr.hex().c_str(),
+                      static_cast<long long>(spd.scale),
+                      cft::to_hex<F>(c1).c_str(),
+                      static_cast<long long>(sc64));
+            }
+
+            /* An empty scaled product is 9.4's multiplicative identity,
+             * and it is the one answer here that is not a function of
+             * any input - worth a literal rather than a comparison. */
+            const auto e = ctx.scaled_prod(cft::cspan<enc>());
+            CHECK(e.pr.bytes() == cft::one_enc<F>() && e.scale == 0 &&
+                      ctx.last_flags() == 0,
+                  "%s: an empty scaled product is (1, 0), silently (%s/%lld)",
+                  cft_format_name(F), e.pr.hex().c_str(),
+                  static_cast<long long>(e.scale));
+
+            /* Length disagreement is the wrapper's own refusal, and it
+             * must be an exception rather than a read past the end of
+             * the caller's array. */
+            CHECK(refused_as_misuse([&] {
+                      ctx.scaled_prod_sum(cft::cspan<enc>(a.data(), 4),
+                                          cft::cspan<enc>(b.data(), 3));
+                  }),
+                  "%s: scaled_prod_sum refuses mismatched lengths",
+                  cft_format_name(F));
+            CHECK(refused_as_misuse([&] {
+                      ctx.scaled_prod_diff(cft::cspan<enc>(a.data(), 4),
+                                           cft::cspan<enc>(b.data(), 3));
+                  }),
+                  "%s: scaled_prod_diff refuses mismatched lengths",
+                  cft_format_name(F));
+        }
+
         /* -- clause 5 --------------------------------------------- */
         {
             std::uint32_t fw = 0, fc = 0;

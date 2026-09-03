@@ -377,7 +377,8 @@ int main(void)
                  * Skipping them here rather than deleting the opcode
                  * from the sweep, because the refusal itself is worth
                  * asserting - checked immediately below. */
-                if (op_i == CFT_SUM || op_i == CFT_DOT) {
+                if (op_i == CFT_SUM || op_i == CFT_DOT ||
+                    op_i == CFT_SUMSQ || op_i == CFT_SUMABS) {
                     st = cft_run(dev, (cft_op)op_i, (cft_format)f_i,
                                  CFT_RNE, zero, zero, zero, out, 1,
                                  NULL, NULL);
@@ -1322,6 +1323,171 @@ int main(void)
         st = cft_augmented_add(dev, CFT_FP32, r2, b, r2, e, 8, &fl);
         CHECK(st == CFT_OK && memcmp(r2, r, 32) == 0,
               "r may alias a: each element is read before it is written");
+    }
+
+    /* --- the rest of clause 9.4 ----------------------------------
+     *
+     * sumSquare, sumAbs and the three scaled products. Each claim the
+     * header makes gets a check, and the two that are worth doubting -
+     * "the same tree, so the composition is the answer" and "this
+     * cannot overflow" - get a NEGATIVE CONTROL beside them, because a
+     * property that holds for boring reasons is not evidence.
+     */
+    {
+        uint8_t v[4 * 4], w[4 * 4], d[4], d2[4];
+        uint32_t f2 = 0, f3 = 0;
+        int64_t scale = -12345;
+
+        CHECK(strcmp(cft_op_name(CFT_SUMSQ), "sumsq") == 0 &&
+              strcmp(cft_op_name(CFT_SUMABS), "sumabs") == 0,
+              "the two new reduction opcodes are named");
+        CHECK(strcmp(cft_op_name((cft_op)30), "reserved") == 0,
+              "30 is the first unassigned opcode now");
+        CHECK(cft_supports(dev, CFT_SUMSQ, CFT_FP256) == 1 &&
+              cft_supports(dev, CFT_SUMABS, CFT_FP32) == 1,
+              "software backend carries the composed reductions");
+        CHECK(cft_supports(dev, (cft_op)30, CFT_FP32) == 0,
+              "op 30 unassigned");
+
+        /* sumSquare([3, 4]) = 9 + 16 = 25, exactly. */
+        put32(v, 0x40400000u);          /* 3.0 */
+        put32(v + 4, 0x40800000u);      /* 4.0 */
+        st = cft_reduce(dev, CFT_SUMSQ, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x41c80000u && f2 == 0,
+              "sumsq([3,4]) = 25 exactly: %s 0x%08x/0x%02x",
+              cft_strerror(st), get32(d), (unsigned)f2);
+        /* the identity, on the same bytes: it IS the dot over (a, a) */
+        st = cft_reduce(dev, CFT_DOT, CFT_FP32, CFT_RNE, v, v, d2, 2,
+                        &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == get32(d) && f3 == f2,
+              "sumsq == dot(a, a)");
+
+        /* sumAbs([-3, 4]) = 7, and the same as an abs pass then a sum */
+        put32(v, 0xc0400000u);          /* -3.0 */
+        st = cft_reduce(dev, CFT_SUMABS, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x40e00000u && f2 == 0,
+              "sumabs([-3,4]) = 7: %s 0x%08x/0x%02x",
+              cft_strerror(st), get32(d), (unsigned)f2);
+        st = cft_run(dev, CFT_ABS, CFT_FP32, CFT_RNE, v, NULL, NULL, w, 2,
+                     &f3, NULL);
+        if (st == CFT_OK)
+            st = cft_reduce(dev, CFT_SUM, CFT_FP32, CFT_RNE, w, NULL, d2, 2,
+                            &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == get32(d) && f3 == f2,
+              "sumabs == abs pass then sum");
+
+        /* 9.4 puts an infinity AHEAD of a NaN for these two, which the
+         * tree cannot do - and the NEGATIVE CONTROL is the same vector
+         * through the plain dot, which returns the quiet NaN. */
+        put32(v, 0x7f800000u);          /* +inf */
+        put32(v + 4, 0x7fc00000u);      /* quiet NaN */
+        st = cft_reduce(dev, CFT_SUMSQ, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f2 == 0,
+              "sumsq(inf, NaN) is +inf with no flag: 0x%08x/0x%02x",
+              get32(d), (unsigned)f2);
+        st = cft_reduce(dev, CFT_SUMABS, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f2 == 0,
+              "sumabs(inf, NaN) is +inf");
+        st = cft_reduce(dev, CFT_DOT, CFT_FP32, CFT_RNE, v, v, d2, 2,
+                        &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == 0x7fc00000u,
+              "NEGATIVE CONTROL: the plain dot returns the quiet NaN "
+              "there, so the override is doing real work (0x%08x)",
+              get32(d2));
+
+        /* scaledProd of four copies of 2^100: the true product is
+         * 2^400, hundreds of binades outside fp32, and it comes back
+         * as (1.0, 400) with no flag at all. */
+        put32(v, 0x71800000u);
+        put32(v + 4, 0x71800000u);
+        put32(v + 8, 0x71800000u);
+        put32(v + 12, 0x71800000u);
+        f2 = 0xdead;
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 4, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && scale == 400 &&
+              f2 == 0,
+              "scaledProd(2^100 x 4) = (1.0, 400) silently: %s "
+              "0x%08x/%lld/0x%02x", cft_strerror(st), get32(d),
+              (long long)scale, (unsigned)f2);
+        /* the NEGATIVE CONTROL: the same operands through the multiply
+         * this composes from overflow to +inf on the FIRST pair. */
+        f3 = 0;
+        st = cft_run(dev, CFT_MUL, CFT_FP32, CFT_RNE, v, v, NULL, d2, 1,
+                     &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == 0x7f800000u &&
+              (f3 & CFT_FLAG_OVERFLOW),
+              "NEGATIVE CONTROL: 2^100 * 2^100 overflows to +inf with "
+              "the overflow flag (0x%08x/0x%02x)", get32(d2),
+              (unsigned)f3);
+
+        /* the empty vector: 9.4 fixes it at pr = 1, sf = +0, silent */
+        scale = -1;
+        f2 = 0xdead;
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, NULL, d, &scale, 0,
+                             &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && scale == 0 &&
+              f2 == 0, "scaledProd of nothing is (1.0, 0), silently");
+
+        /* the special-value rows, in 9.4's order */
+        put32(v, 0x7f800000u);          /* +inf */
+        put32(v + 4, 0x00000000u);      /* +0   */
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 2, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x7fc00000u && scale == 0 &&
+              f2 == CFT_FLAG_INVALID,
+              "inf x 0 is invalid and the canonical quiet NaN");
+        put32(v + 4, 0xc0000000u);      /* -2.0 */
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 2, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u && f2 == 0,
+              "an infinity with no zero takes the product's sign, "
+              "silently");
+        put32(v, 0x80000000u);          /* -0 */
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 2, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f2 == 0,
+              "-0 x -2 is +0, silently");
+
+        /* scaledProdSum / Diff: one rounding for the leaf, then the
+         * same tree. (1+1) * (3+1) = 8 -> (1.0, 3). */
+        put32(v, 0x3f800000u); put32(v + 4, 0x40400000u);
+        put32(w, 0x3f800000u); put32(w + 4, 0x3f800000u);
+        st = cft_scaled_prod_sum(dev, CFT_FP32, CFT_RNE, v, w, d, &scale, 2,
+                                 &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && scale == 3 &&
+              f2 == 0, "scaledProdSum = (1.0, 3): 0x%08x/%lld/0x%02x",
+              get32(d), (long long)scale, (unsigned)f2);
+        /* (1-1) * (3-1): a zero factor, so a zero result */
+        st = cft_scaled_prod_diff(dev, CFT_FP32, CFT_RNE, v, w, d, &scale, 2,
+                                  &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && scale == 0 &&
+              f2 == 0, "scaledProdDiff with a zero factor is +0");
+
+        /* the refusals: an output the caller cannot receive is an
+         * error, not a silent partial answer */
+        CHECK(cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, NULL, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "NULL pr refused");
+        CHECK(cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, NULL, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "NULL scale refused");
+        CHECK(cft_scaled_prod(NULL, CFT_FP32, CFT_RNE, v, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "NULL device refused");
+        CHECK(cft_scaled_prod(dev, (cft_format)4, CFT_RNE, v, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "bad format refused");
+        CHECK(cft_scaled_prod(dev, CFT_FP32, (cft_round)5, v, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "bad rounding attribute refused");
+        CHECK(cft_scaled_prod(dev, CFT_FP32, CFT_RNE, NULL, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "a non-empty call with no vector is refused");
+        CHECK(cft_scaled_prod_sum(dev, CFT_FP32, CFT_RNE, v, NULL, d,
+                                  &scale, 2, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "scaledProdSum needs b");
     }
 
     /* --- buffers ------------------------------------------------- */

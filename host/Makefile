@@ -56,7 +56,7 @@ INC     := -Iinclude
 
 SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
            src/clause5.c src/augmented.c src/mpfloat.c src/transcend.c \
-           src/program.c src/conformance.c
+           src/program.c src/reduce.c src/conformance.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 

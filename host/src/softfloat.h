@@ -68,7 +68,7 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * augmented.c is the only caller. */
 #define CFT_SF_RTTZ 16
 
-/* Opcodes. 15 and 28..255 are unassigned and answer with the canonical
+/* Opcodes. 15 and 30..255 are unassigned and answer with the canonical
  * quiet NaN and invalid - a defined result, because a host issuing an
  * opcode its device predates should see that in the flags rather than
  * receive a plausible number. */
@@ -108,6 +108,15 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * subnormal operands. divsqrt.c refines them to full precision. */
 #define CFT_SF_RECIP_SEED 26
 #define CFT_SF_RSQRT_SEED 27
+
+/* The other two of clause 9.4's sum reductions, appended (never
+ * inserted) after the seeds. No accumulator streams them and none
+ * needs to: sumSquare IS the dot tree over (a, a) and sumAbs IS the
+ * sum tree over |a|, so cft_reduce() issues exactly those and the
+ * device and software backends agree by construction. They take
+ * opcode numbers because cft_reduce()'s first argument is one. */
+#define CFT_SF_SUMSQ    28
+#define CFT_SF_SUMABS   29
 
 /* Is `op` one of the assigned opcodes? Unassigned ones still compute -
  * see above - but cft_supports() answers with this. */

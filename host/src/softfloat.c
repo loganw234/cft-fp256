@@ -774,12 +774,13 @@ static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
 int cft_sf_op_assigned(int op)
 {
     return (op >= 0 && op <= 14) || (op >= 16 && op <= 23) ||
-           (op >= CFT_SF_SUM && op <= CFT_SF_RSQRT_SEED);
+           (op >= CFT_SF_SUM && op <= CFT_SF_SUMABS);
 }
 
 int cft_sf_is_reduction(int op)
 {
-    return op == CFT_SF_SUM || op == CFT_SF_DOT;
+    return op == CFT_SF_SUM || op == CFT_SF_DOT ||
+           op == CFT_SF_SUMSQ || op == CFT_SF_SUMABS;
 }
 
 unsigned cft_sf_op_operands(int op)
@@ -796,6 +797,10 @@ unsigned cft_sf_op_operands(int op)
     case CFT_SF_SELECT:   return 1u | 2u | 4u;
     case CFT_SF_SUM:      return 1u;
     case CFT_SF_DOT:      return 1u | 2u;
+    /* One vector each: sumSquare squares a against ITSELF, so it does
+     * not read a second one, and b may be NULL for both. */
+    case CFT_SF_SUMSQ:
+    case CFT_SF_SUMABS:   return 1u;
     default:              return cft_sf_op_assigned(op) ? (1u | 2u) : 0u;
     }
 }

@@ -1866,6 +1866,154 @@ run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
 libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
 wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.
 
+## 2026-09-03 - the rest of clause 9.4: the five remaining reductions
+
+sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff, on the
+terms `sum` and `dot` have held since 2026-08-30: one tree fixed by
+element index, one rounding per node, in the caller's attribute. Part
+of the 0.6 step; `CFT_ABI_VERSION_MINOR` untouched, left for the
+integrator.
+
+What was measured, and by what:
+
+| gate | scope | result |
+|---|---|---|
+| `python/tests` (whole suite) | the golden model, which defines every bit | **1016 passed, 1 skipped** |
+| `python/tests/test_reduce.py` | the five, specifically | **213 passed**, from 24 test functions to 43 |
+| `make vectors` | the sets, Makefile arguments | 60 sets, of which **20 are new reduction sets** at 448 cases / 9,513 elements each |
+| `make -C host test` | api-test, reduce-parts, the conformance replay | **60 sets, 487,875 cases, all matching** over the sets `make vectors` emits (the runner's are larger - see below); api-test all contract checks passed; reduce-parts 6,294 partitions, all canonical |
+| `host/tests/reduce_check.py --trials 1500` | libcft against the model, four formats | **12,696 reductions, 0 failures** |
+| `host/tools/mpfr-check 24 7` | GNU MPFR as the arbiter of every node | **461,508 cases, 0 value and 0 flag mismatches**; of those, 9,520 reduction vectors and **231,975 tree nodes arbitrated** |
+| `make cpptest` | cft.hpp against cft.h, both standards | **4,891 checks each at C++17 and C++20**, 0 failed, from 4,771 |
+| `test_cftmpfr.py` | the drop-in | **581 passed**, from 43 test functions to 46 |
+| `device-test sw -n 96` | the composition across the backend boundary | **2,248 checks, 0 failed**, now including 48 sumsq and 48 sumabs |
+
+Two numbers in that table are worth reading twice. The reduction sets
+are the FIRST reductions the published vectors have ever carried - not
+even `sum` was in them before - and they needed a third schema, because
+a reduction's operand is a whole vector whose length is part of the
+case and the two existing schemas are one line per case with a fixed
+number of single-element operands. And the 231,975 MPFR-arbitrated
+nodes are nodes, not vectors: a case here is a whole reduction.
+
+**The identities, and the row that is not one.** reduce_check.py checks
+`sumSquare == dot(a, a)` and `sumAbs == abs pass then sum` THROUGH THE
+LIBRARY, because issuing exactly those calls is how the device and
+software backends are made to agree, and a run that assumed them would
+be taking the mechanism on trust. Over the standard sweep: **476
+vectors where both identities hold verbatim, 272 where 9.4's
+infinity-over-NaN row applies instead** - counted rather than skipped,
+checked against the override, with the plain dot's quiet NaN as the
+control. The check fails if the override is never exercised at all.
+
+**What the MPFR campaign does NOT settle, stated in the tool's own
+banner.** MPFR arbitrates every node - one add or one multiply of two
+format values, correctly rounded - and has no opinion on the TREE,
+because 9.4 says an implementation may "associate in any order or
+evaluate in any wider format". The harness therefore reproduces the
+split rather than judging it, and a reduction whose shape were wrong in
+both libcft and this file would pass. What guards the shape is two
+independent implementations of it compared against each other, the
+streaming accumulator's agreement with the recursive definition, and
+the published sets.
+
+**One bug, in the harness, with two faces - found the moment the oracle
+first ran.** The first campaign reported 36 value and 476 flag
+mismatches, and every one came from a single wrong choice: the harness
+classified the LEAVES rather than the operand elements when applying
+9.4's infinity-over-NaN row. That is wrong in both directions at once.
+An element whose SQUARE overflowed to an infinity fired an override the
+standard's text does not - 9.4 says "operand element", and a finite
+element is not an infinity however large its square. And a signalling
+NaN stopped raising invalid, because squaring quiets it before the
+classification ever saw it. The library was right both times, which is
+what a new oracle is for. Fixed; 0 mismatches after.
+
+**One overclaiming comment, found by re-reading rather than by a
+gate.** The campaign's fourth draw of every length said it alternated
+"the pool's extremes - maxfinite and the minimum subnormal". It did
+not: `build_pool`'s `pool[0]` is +0 and its tail is random. The two
+ends are now built from the format descriptor, the comment is true, and
+the node count rose from 226,295 to 231,975 with the coverage the
+comment had been claiming.
+
+**A third firing of the reassignment hazard.** Assigning 28 and 29 made
+`vectors.py`'s "unassigned, just past the seeds" representative stale,
+and `cft_conformance` refused the regenerated set by name -
+"this set records an opcode as reserved that the contract has since
+assigned" - rather than scoring sumSquare against an answer recorded
+for the unassigned-opcode result. 24 was the first (2026-08-30), 26 the
+second (2026-08-31). The representative is now 30, and
+docs/DETERMINISM.md's "everything from 28 up" now reads 30.
+
+### Negative control, run and restored
+
+The claim most worth attacking is the SCALING rule, because it is the
+one thing 9.4 leaves implementation-defined and therefore the one thing
+an oracle over values cannot check. So the control preserves the value
+exactly and breaks only the pinned form: `sp_split` in
+`host/src/reduce.c` was made to normalise into `±[2, 4)` instead of
+`±[1, 2)`, with the scale one lower. **`scaleB(pr, sf)` is bit-for-bit
+the same real number, every rounding in the tree is unchanged, and no
+flag moves** - only the pair the contract pins.
+
+Five gates caught it, and the sixth is worth recording because it
+could not:
+
+| gate | verdict on the broken tree |
+|---|---|
+| `api-test` | **2 FAILED** - `scaledProd(2^100 x 4)` returned `(2.0, 399)` for `(1.0, 400)`, and scaledProdSum `(2.0, 2)` for `(1.0, 3)` |
+| `reduce_check.py --trials 200 --formats fp32` | **86 failures** of 1,565, including the pr-in-[1,2) invariant |
+| `cft-selftest` conformance replay | **FAILED** at `fp32-reduce.jsonl:258` - expected `0x3f800000` scale -149, got `0x40000000` scale -150 |
+| `mpfr-check 2 7` | **1,092 value mismatches**, 273 per format - and **0 flag mismatches**, exactly as designed: the arithmetic never moved |
+| `test_cftmpfr.py` | **3 failed** of 581 |
+| `cpp-api-test` (C++17) | **1 of 4,891** - and that one is the conformance replay, not the wrapper comparison. All 4,890 wrapper-against-C checks PASSED, because both sides call the same library: a C++ layer that only compares itself to the C is structurally incapable of catching a change of this class, and it is worth knowing which of your gates are which. |
+
+Restored, rebuilt clean, api-test green again.
+
+### The standardized run
+
+`bash verify/run.sh --only vectors,libcft,reduce,mpfr,cpp,bindings` on
+DESKTOP-T33SK86 (Windows, MINGW64), run **20260903-103848-642b5e4, on a
+CLEAN tree**: vectors 56 s, libcft 164 s, reduce 16 s, bindings 15 s,
+cpp 591 s, mpfr 89 s - **VERDICT: PASS, nothing skipped**.
+
+The runner regenerates the sets with `gen_vectors.py`'s own defaults
+rather than the Makefile's, so its libcft stage replayed **643,875
+cases** where `make -C host test` replays 487,875 - the same 60 sets at
+different budgets. Its cpp stage replayed those 643,875 through the
+wrapper too, at both standards, 4,891 checks each. Its mpfr stage is
+the 461,508-case, 231,975-node campaign in the table above.
+
+An earlier run of the same six, 20260903-101107-aea195e, produced the
+same verdict with a DIRTY tree (the docs were uncommitted), and so
+certifies nothing on its own; it is mentioned only because it is where
+the numbers were first taken and because it is in verify/state/. Every
+number above was reproduced by the clean run - the reduction gates are
+deterministic by construction, so "reproduced" here means identical,
+not merely consistent: 12,696 reductions, the same 476/272 split, the
+same 231,975 nodes.
+
+The run was SCOPED to those six stages, so what it does not cover is
+worth naming rather than leaving to be inferred:
+
+- `golden` was not run under the runner; `python/tests` was run
+  directly instead, which is the same suite - 1016 passed, 1 skipped.
+- `sim` and `lint` need docker and cover the RTL. **This work adds no
+  RTL and changes none**: neither of the two new opcodes is streamed by
+  the accumulator, and a scaled product has no accumulator at all.
+- `node` and `wasm` are out of scope by instruction - a separate agent
+  adds the JavaScript surface. Both runners enumerate vector sets by
+  NAME and ignore anything else, so they see the twenty new sets as
+  "(ignoring fp32-reduce.jsonl, ...)": neither breaks on them, and
+  neither scores them yet.
+- `transcend`, `clause5`, `divsqrt`, `diff`, `seq`, `selfcheck` and the
+  language stages were not re-run. Nothing in this work touches their
+  code paths, and saying so is not the same as having measured it.
+
+`device-test sw -n 96` was run directly rather than through the
+`selfcheck` stage, which is what that stage runs.
+
 ## 2026-09-03 - the augmented arithmetic operations, IEEE 754-2019 clause 9.5
 
 augmentedAddition, augmentedSubtraction and augmentedMultiplication -
