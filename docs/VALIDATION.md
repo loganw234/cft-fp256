@@ -1071,3 +1071,36 @@ and R skipped by name for want of toolchains. The C# leg had been
 failing on that host in a way that read as a bit mismatch - dotnet
 missing the profile and PROGRAMFILES variables that MSYS make does not
 pass to recipes - and now names a failed `dotnet run` as what it is.
+
+## 2026-09-02 - the tip quad closes at 135 MHz: kernel +0.143, 0 failing endpoints
+
+    build-quad-tip-135   9f73107, four tiles, 135 MHz, RETIMING=1 PHYS_OPT=1
+    host                 DESKTOP-T33SK86 (WSL cft2204, 12 cores, 47 GB VM), 5h27m
+    routed WNS +0.018    TNS 0.000   failing endpoints 0 of 1,028,763   WHS +0.009
+    kernel worst path    +0.143 ns   g_bank128 lane 0, s10_mag -> s11_valw (LZC + coarse normalise)
+    xclbin               51,286,320 bytes, sha256 fef73969...d1a55, manifest clean,
+                         sources == commit, hw/verify-image.sh 8/8
+    router trajectory    place +0.055 -> iter 0 -0.446 -> iter 1 +0.018 -> iter 2 +0.018 (met, stopped)
+    second host          the box, same tree and flags, its own Vitis 2022.2: finished 19:39,
+                         +0.018 / WHS +0.009 / 0 failing, verify-image 8/8,
+                         xclbin 51,286,329 bytes, sha256 86ef3739...b5e7d;
+                         BITSTREAM sections byte-identical after the .bit header
+
+Against the two quads at 135 that missed (-0.113 unretimed, -0.141
+retimed, both 463-836 failing endpoints), the difference is the tree:
+the seed ROM as case tables (-11k LUT a tile, the DSP family gone),
+the round stage's arithmetic in S12 (-6k LUT a tile, that family
+gone), and the sequencer's bank fix. Staged as the quad half of the
+card-day pair.
+
+The box's copy of the same build - same tree, same flags, its own Vitis
+2022.2, 26 minutes behind the desktop's - finished at 19:39 with the
+same numbers to the picosecond (routed +0.018, hold +0.009, 0 failing of
+1,028,763) and the same bitstream: the two BITSTREAM sections are
+51,199,968 bytes each and differ in three bytes, all in the .bit
+header's timestamp; the xclbin hashes differ only through that, the
+xclbin UUID and the v++ install path in the build metadata (the box's is
+86ef3739...b5e7d, 51,286,329 bytes, verify-image 8/8). Vivado's
+determinism measured across two hosts rather than assumed: either image
+is the card-day quad, and ~/cardday-tip/REPRODUCED.txt on the box holds
+both hashes and the section hash.

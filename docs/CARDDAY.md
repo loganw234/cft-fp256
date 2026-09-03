@@ -92,6 +92,27 @@ the element count is an operand rather than a loop bound.
       tables, not the round-stage precompute (9f73107). Its quad is
       the open half: the tip quads at 135 on both hosts, 130 behind.
 
+      The quad half closed the same evening (2026-09-02, 19:13): 9f73107,
+      135 MHz, retiming + phys_opt, routed WNS +0.018 with 0 failing
+      endpoints, kernel WNS **+0.143**, verify-image 8/8, re-hashed
+      against its manifest after the copy, byte-identical:
+
+          ~/cardday-tip/cft_hw_quad.xclbin      kernel_wns +0.143
+          ~/cardday-tip/SHA256SUMS              (single + quad + manifests)
+          ~/cardday-tip/REPRODUCED.txt          (the second host's copy, hashed)
+          sha256 fef73969f505960908e92dd29521f4ef4783745499cd70f20aacf33ab49d1a55
+
+      The box rebuilt the same image independently (2026-09-02, 19:39):
+      sha256 86ef3739...b5e7d, 51,286,329 bytes, verify-image 8/8; its
+      BITSTREAM section is byte-identical to the staged copy's after the
+      .bit header's three timestamp bytes. Either copy is the quad;
+      REPRODUCED.txt records both hashes and the section hash.
+
+      The single there is 0e7264e, one commit before the round-stage
+      precompute; a single from 9f73107 is building so the pair is one
+      tree, and replaces it if it closes. First quad to close at 135
+      with the sequencer in it.
+
       FIRST fallback: the 130 MHz general-purpose pair at b1a014c in
       `~/cardday-ms` (single +0.220, quad +0.009, verified 8/8),
       identical hardware one notch slower.

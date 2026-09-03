@@ -1169,6 +1169,45 @@ is gone at the tip; the other two sit at -0.14 in this placement, and
 whether 44k LUT less congestion and phys_opt lift them is the next
 quad's question, with 130 behind it.
 
+**Answered the same evening: the quad from the tip closes at 135 MHz.**
+9f73107 - case-table ROM, the sequencer's bank fix, the round stage's
+precompute - four tiles, retiming and phys_opt, built on the desktop's
+WSL in 5h27m:
+
+| | routed WNS | failing endpoints | kernel WNS |
+|---|---|---|---|
+| quad @135, no retiming (8f5f149) | -0.113 | 463 | - |
+| quad @135, retimed (40149b1) | -0.141 | 836 | - |
+| **quad @135, tip (9f73107)** | **+0.018** | **0 of 1,028,763** | **+0.143** |
+
+The router's own trajectory tells the story: post-place +0.055 like
+every quad before it, then -0.446 after the first global iteration
+where the two misses read -0.968 and -1.161, then +0.018 after the
+second, at which point the router stopped iterating because the target
+was met. Sixty-nine thousand fewer LUTs to route and a rounding stage
+that no longer begins with a subtraction. The worst kernel paths are
+now S10->S11 (the LZC-fed coarse normalise, +0.143 on an fp128 lane)
+and the pack stage; neither of the two families that decided the
+misses appears. Image written, manifest clean, hw/verify-image.sh 8/8,
+staged in ~/cardday-tip on the box beside the case-ROM single.
+
+The box's copy of the same build - same tree, same flags, its own Vitis
+2022.2, 26 minutes behind the desktop's - finished at 19:39 with the
+same numbers to the picosecond (routed +0.018, hold +0.009, 0 failing of
+1,028,763) and the same bitstream: the two BITSTREAM sections are
+51,199,968 bytes each and differ in three bytes, all in the .bit
+header's timestamp; the xclbin hashes differ only through that, the
+xclbin UUID and the v++ install path in the build metadata (the box's is
+86ef3739...b5e7d, 51,286,329 bytes, verify-image 8/8). Vivado's
+determinism measured across two hosts rather than assumed: either image
+is the card-day quad, and ~/cardday-tip/REPRODUCED.txt on the box holds
+both hashes and the section hash.
+
+Two things this does not settle. +0.143 in the kernel is margin, not
+headroom - 145 MHz would need another ~0.5 ns, and the next path to
+shorten is S10->S11 as recorded above. And silicon has still not been
+touched.
+
 **Order of attack, if this is ever picked up:** retiming first, because
 it is a flag and a verification question rather than a redesign; the
 pipe re-balance second, if the ceiling still binds after the card has
