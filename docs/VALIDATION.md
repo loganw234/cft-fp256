@@ -1323,10 +1323,21 @@ underneath, mpfr's 334,008 cases with the library's evaluator counters
 (95,680 elements, 15,350 through the Ziv loop, 0 escalations, deepest
 514 bits) after them.
 
-What did NOT run, and why: the RTL, formal and container stages
-(nothing in this change touches them, and the transcendentals issue no
-device pass at all); the native-oracle soak (there is no CPU oracle for
-these functions); and the Node and WASM surfaces, which stay at ABI 0.2
-because rebuilding their committed artifacts is an emsdk run that did
-not fit here - recorded as PENDING in docs/COMPATIBILITY.md rather than
-left to be inferred.
+The wasm artifacts were rebuilt the next morning, because leaving them
+stale is not a documentation choice but a failing gate: both the page
+verifier and the Node test assert the module's ABI against the tree's,
+by design. `bash bindings/wasm/build.sh` against the pinned emsdk
+6.0.9, with `--transcend 0` added to its generator arguments - the
+emscripten image carries no mpmath, and the page samples the twenty
+opcode sets by name anyway. The module now reports ABI 0.3 and the
+`cft_conformance` inside it understands the new sets; no `cftw_*`
+wrapper or page control exists for any of the nine, so no JavaScript
+caller can invoke one, and docs/COMPATIBILITY.md says so in those
+words. `bash verify/run.sh --only wasm,node`: PASS, nothing skipped.
+
+What did NOT run, and why: the RTL, formal and container simulation
+stages (nothing in this change touches them, and the transcendentals
+issue no device pass at all); and the native-oracle soak, because there
+is no CPU oracle for these functions - libm is neither correctly
+rounded nor reproducible, which is the whole reason MPFR is the only
+external arbiter here.
