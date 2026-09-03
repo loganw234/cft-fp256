@@ -469,7 +469,16 @@ Windows 11, mingw64 gcc 16.1, MPFR 4.2.1, CPython 3.12, 2026-09-02.
 
 Escalation, measured over the MPFR campaign's 95,680 elements: 15,350
 reached the Ziv loop at all, and it escalated **zero** times - every
-one of them was decided at the first attempt. Over
+one of them was decided at the first attempt.
+
+*Corrected 2026-09-03.* That 15,350 was measured through a pool whose
+directed operands were being silently discarded - see the phase-2
+section's account of the inverted success test in `build_tpool`. The
+case COUNT above is unaffected (the pool was topped up with randoms to
+the same size), but the operands were not the ones intended, and the
+figures for the loop are therefore a measurement of a weaker campaign
+than the text implies. The phase-2 entry carries the numbers from the
+repaired pool, over all twenty functions. Over
 `transcend_check.py`'s pools, which include the `pow(1+u, -(1+u))`
 family on purpose, the model escalated 36 times and the deepest working
 precision any input needed was 832 bits, the fp256 cap itself, for that
