@@ -1503,8 +1503,13 @@ The seconds are honest and the stage logs carry the counts: vectors 40
 sets at the runner's own generation parameters, libcft's 521,845 cases
 replayed twice each, transcend's 154,269 then 143,069 comparisons with
 the model's escalation numbers printed underneath, and mpfr's 414,008
-cases with the library's evaluator counters after them. Everything
-committed after that run is documentation and one source comment.
+cases with the library's evaluator counters after them.
+
+Repeated on the finished tree, so the record is of the commit that
+ships rather than of one before it: run id 20260903-032203-a8ba574,
+vectors 12s, libcft 87s, transcend 100s, mpfr 62s - **PASS, nothing
+skipped**, and mpfr's log ends
+`TOTAL 414008 cases, 0 value mismatches, 0 flag mismatches`.
 
 What did NOT run, and why: the RTL, formal and container simulation
 stages (nothing in this change touches them - these eleven issue no
