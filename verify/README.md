@@ -28,7 +28,7 @@ the repo root, or `bash verify/run.sh` with the flags below.
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
-| transcend | the nine transcendentals vs model, then again with the library forced to start below the precision it needs, so the escalation path runs against an unescalated reference | cc, python |
+| transcend | the twenty-nine transcendentals vs model, then again with the library forced to start below the precision it needs, so the escalation path runs against an unescalated reference | cc, python |
 | diff | the alignment-boundary sweep vs the model | cc, python |
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |
