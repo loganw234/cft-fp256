@@ -12,6 +12,11 @@
 #                        optional toolchains: julia and rustc are each
 #                        run and diffed if present, SKIPped by name if
 #                        not
+#   make cpptest         cft.hpp against cft.h, at C++17 and C++20.
+#                        Its own target rather than part of `test`
+#                        because a C library whose point is that it
+#                        needs no toolchain should not make its own
+#                        test lane demand a C++ one
 #   make CC=clang        or any other C99 compiler
 #
 # On Windows, match the compiler's word size to the PYTHON you will run
@@ -37,6 +42,11 @@ PYTHON  ?= python3
 CFLAGS  ?= -O2
 CSTD    := -std=c99
 CXXSTD  := -std=c++17
+# cft.hpp is header-only and C++17 minimum, and uses std::span only
+# behind a feature check - so the header is compiled BOTH ways by
+# `cpptest`, because a feature check whose two branches were never
+# both built is a feature check nobody has tested.
+CXXSTD20 := -std=c++20
 WARN    := -Wall -Wextra -Wpedantic -Wshadow
 INC     := -Iinclude
 
@@ -130,7 +140,7 @@ TOOLS := cft-selftest$(EXE) cft-bench$(EXE)
 TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
-.PHONY: all test difftest seqtest reducetest coverage fortran \
+.PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
         examples-lang clean
 
 all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
@@ -184,6 +194,28 @@ reduce-parts$(EXE): tests/reduce_parts_test.c libcft.a
 vector-fma$(EXE): examples/vector_fma.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
+# cft.hpp against cft.h: every wrapper entry point issued twice on the
+# same bytes, compared for identical encodings and identical flags.
+# Built at both standards, from one source, because the header picks
+# std::span or its own view on a feature check and the answer must not
+# depend on which. Not $^ in the recipe: cft.hpp is a prerequisite so
+# that editing it rebuilds these, but handing a header to the compiler
+# would precompile it instead.
+cpp-api-test$(EXE): tests/cpp_api_test.cpp libcft.a include/cft.hpp
+	$(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) tests/cpp_api_test.cpp \
+		libcft.a -o $@ $(XRTLIBS)
+
+cpp-api-test20$(EXE): tests/cpp_api_test.cpp libcft.a include/cft.hpp
+	$(CXX) $(CXXSTD20) $(CFLAGS) $(WARN) $(INC) tests/cpp_api_test.cpp \
+		libcft.a -o $@ $(XRTLIBS)
+
+# The C++ layer's whole test story. Takes the vector directory the
+# same way cft-selftest does; the replay inside is cft_conformance
+# itself, reached through the wrapper.
+cpptest: all cpp-api-test$(EXE) cpp-api-test20$(EXE)
+	./cpp-api-test$(EXE) ../vectors/out
+	./cpp-api-test20$(EXE) ../vectors/out
+
 # Only meaningful in an XRT build, and only useful with an artifact:
 #   ./device-test cardday/quad_emu/cft_hw_emu.xclbin 256
 device-test$(EXE): tests/device_test.c libcft.a
@@ -233,6 +265,13 @@ fortran: libcft.a
 # prints different bits fails the build outright; that is a broken
 # ABI story, not a warning.
 #
+# The C++ leg is the same example again through host/include/cft.hpp,
+# so it checks the wrapper's marshalling with the checksum the other
+# six languages are already held to. It follows the C# leg's shape for
+# the same reason that one has it: a compile that fails must be
+# reported as a build failure and not left looking like a bit
+# mismatch.
+#
 # --strip-trailing-cr: on Windows the C example's stdout passes
 # through msvcrt text mode and picks up \r\n, while Rust and Julia
 # write \n on every platform. The CR is the C runtime's contribution,
@@ -242,6 +281,19 @@ fortran: libcft.a
 # \n and the flag changes nothing.)
 examples-lang: all
 	./vector-fma$(EXE) > .out-c.txt
+	@if command -v $(CXX) >/dev/null 2>&1; then \
+		if ! $(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) \
+			examples/vector_fma.cpp libcft.a -o vector-fma-cpp$(EXE) \
+			$(XRTLIBS) 2> .out-cpp.err; then \
+			echo "c++: $(CXX) FAILED - a build problem, NOT a bit mismatch:"; \
+			tail -5 .out-cpp.err; exit 1; \
+		fi; \
+		./vector-fma-cpp$(EXE) > .out-cpp.txt && \
+		diff --strip-trailing-cr .out-c.txt .out-cpp.txt && \
+		echo "c++: same library, same bits"; \
+	else \
+		echo "SKIP c++: no $(CXX) on PATH"; \
+	fi
 	@if command -v julia >/dev/null 2>&1; then \
 		julia examples/vector_fma.jl > .out-jl.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-jl.txt && \
@@ -283,8 +335,8 @@ examples-lang: all
 	else \
 		echo "SKIP r: no Rscript on PATH"; \
 	fi
-	@rm -f .out-c.txt .out-jl.txt .out-rs.txt .out-go.txt .out-cs.txt \
-		.out-cs.err .out-r.txt
+	@rm -f .out-c.txt .out-cpp.txt .out-cpp.err .out-jl.txt .out-rs.txt \
+		.out-go.txt .out-cs.txt .out-cs.err .out-r.txt
 
 difftest: all
 	$(PYTHON) tests/diff_check.py --trials 3000
@@ -393,9 +445,12 @@ clean:
 	      mpfr-check mpfr-check.exe \
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
+	      cpp-api-test cpp-api-test.exe \
+	      cpp-api-test20 cpp-api-test20.exe \
 	      vector-fma vector-fma.exe vector-fma-f vector-fma-f.exe \
 	      vector-fma-rs vector-fma-rs.exe vector-fma-rs.pdb \
 	      vector-fma-go vector-fma-go.exe \
-	      .out-c.txt .out-py.txt .out-jl.txt .out-rs.txt \
-	      .out-go.txt .out-cs.txt .out-cs.err .out-r.txt
+	      vector-fma-cpp vector-fma-cpp.exe \
+	      .out-c.txt .out-py.txt .out-cpp.txt .out-cpp.err .out-jl.txt \
+	      .out-rs.txt .out-go.txt .out-cs.txt .out-cs.err .out-r.txt
 	rm -rf examples/bin examples/obj
