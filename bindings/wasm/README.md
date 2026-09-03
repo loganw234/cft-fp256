@@ -44,34 +44,43 @@ it did not.**
 
 The embedded sample (4,015 cases; deterministic rule below) spans all
 four formats, all five rounding attributes and every opcode class,
-the divide/sqrt seeds 26/27 and the unassigned `reserved15/28/255`
-included. For the full 236,000-case claim, generate the sets in a
+the divide/sqrt seeds 26/27 and the unassigned `reserved15/30/255`
+included - that list lost 28 when ABI 0.6 assigned it to `sumsq`. For
+the full 881,657-case claim, generate the sets in a
 checkout (`make vectors`) and drag the `vectors/out/*.jsonl` files
 onto the page - same code path, whole files. Verified at build time:
 the full 20-set drop replays with zero mismatches, from both
 LF (Linux) and CRLF (Windows) generated files.
 
 Since 2026-09-03 the drop zone also accepts the **twenty
-transcendental sets** ABI 0.3 added (`<fmt>-transcend[-<rnd>].jsonl`,
-64,325 cases), which `cft_conformance` has understood since the module
+transcendental sets** ABI 0.3 added (`<fmt>-transcend[-<rnd>].jsonl`),
+which `cft_conformance` has understood since the module
 was first built from the 0.3 sources but which the page's own name
 list refused - so a `make vectors` drop, the thing this page tells the
 reader to do, had half its files bounced. Measured, not assumed:
-`verify.mjs` replays all forty sets one file per directory, which is
+`verify.mjs` replays every set one file per directory, which is
 exactly what the drop zone does with a dropped file, and the drop
 itself was watched working in Chromium (see the 2026-09-03 block
 below) - four transcendental sets and one opcode set, 32,465 cases,
 with a misnamed file still refused by name. Those same twenty files
-carry **242,915 cases** since ABI 0.5 added the nine phase-3
-functions to them (129,845 at 0.4, 64,325 at 0.3); the file names did
-not change, so the drop zone needed nothing.
+carry **533,265 cases** since ABI 0.6 completed table 9.1 in them
+(242,915 at 0.5, 129,845 at 0.4, 64,325 at 0.3); the file names did
+not change, so the drop zone needed nothing for those. It did need
+three more families at 0.6, and got them: `<fmt>-augmented.jsonl`
+(one per format - 9.5 fixes the rounding, so there is no attribute to
+sweep), `<fmt>-reduce[-<rnd>].jsonl` and
+`<fmt>-character[-<rnd>].jsonl`. **84 names in all.**
 
 The page is also a working binary32/64/128/256 calculator: one
 element through `cft_run()`, the composed `cft_div`/`cft_sqrt`
-sequence, or any of the twenty-nine transcendentals - phase 1's nine,
-phase 2's eleven and phase 3's nine - operands and results as raw
-encodings, flags
-decoded, every answer pinned by the replay above it.
+sequence, or any of the thirty-nine transcendentals - phase 1's nine,
+phase 2's eleven, phase 3's nine and the ten that complete table 9.1 -
+and since ABI 0.6 the character conversions of clause 5.12, the
+payload operations of 9.7, the augmented arithmetic of 9.5 and clause
+9.4's remaining reductions. Operands and results as raw encodings, a
+text field where the operation reads a sequence, two result lines
+where it returns a pair, flags decoded, every answer pinned by the
+replay above it.
 
 ## Building
 
@@ -201,21 +210,31 @@ the build directory:
    `cft_conformance()` over MEMFS - the page's own bytes, the
    library's own file-reading path, one call per set. One set per
    directory, which is what the page does with a dropped file, over
-   every name the drop zone accepts: the twenty opcode sets and, when
-   `make vectors` has written them, the twenty transcendental ones;
-5. drives the **twenty-nine transcendentals through their own
-   wrappers**, reading the same files itself: `cftw_exp` … `cftw_hypot`,
-   since ABI 0.4 `cftw_sinpi` … `cftw_atan2pi`, and since ABI 0.5
-   `cftw_sin` … `cftw_atanh`, one element at a time for
-   exact per-case flags and then once per family as an array,
-   comparing encodings and flags against the file. Step 4 cannot
+   every name the drop zone accepts: since ABI 0.6 that is all **84** -
+   the twenty opcode sets, the twenty transcendental ones and, when
+   `make vectors` has written them, the four augmented, twenty
+   reduction and twenty character sets;
+5. drives **every operation that is not an opcode through its own
+   wrapper**, reading the same files itself: the thirty-nine
+   transcendentals (`cftw_exp` … `cftw_hypot`, `cftw_sinpi` …
+   `cftw_atan2pi`, `cftw_sin` … `cftw_atanh`, and since ABI 0.6
+   `cftw_exp2m1` … `cftw_rootn`), clause 9.5's `cftw_augmented_add` …
+   `cftw_augmented_mul` with their two outputs, clause 9.4's four sum
+   reductions through `cftw_reduce` at opcodes 24/25/28/29 and the
+   three `cftw_scaled_prod*` with their int64 scale, and clause 5.12's
+   `cftw_from_decimal_char` … `cftw_set_payload_signaling` - the last
+   through the sizing protocol exactly as cft.h states it, short buffer
+   included. One element at a time for exact per-case flags, then as
+   arrays wherever the C has a batch shape, comparing encodings,
+   sequences, scales and flags against the file. Step 4 cannot
    substitute for this and it is worth being blunt about why:
-   `cft_conformance` dispatches all twenty-nine internally, in C, so it is
-   green whether or not a single `cftw_*` wrapper for them exists. For
+   `cft_conformance` dispatches all of it internally, in C, so it is
+   green whether or not a single `cftw_*` wrapper for it exists. For
    a day it was (docs/COMPATIBILITY.md's half-step). Step 5 is the one
    that fails when the JavaScript surface is missing, or present and
    wrong - including `atan2` with its two operands the wrong way
-   round, which is the negative control the 0.4 block below records.
+   round, which is the negative control the 0.4 block below records,
+   and `scaled_prod_diff` the same way at 0.6.
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
 rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
@@ -357,6 +376,96 @@ table, nine entries in the cwrap table, no new dispatch branch), and
 `verify.mjs` step 5 drives the same wrappers the panel calls; the
 claim stops there.
 
+**Measured 2026-09-03, later again**, node 22.19.0 on Windows 11,
+against the page rebuilt with the ABI 0.6 wrappers in it - the four
+packages in one step, so this module never reported a version whose
+operations it could not call: module **196,379 bytes**, sha256
+`e8611510973d1081…`, identical to the node loader's
+`bindings/node/cft_node.wasm` (and to `build/cft_node.wasm`);
+`cftw_abi_version()` = 6 = ABI 0.6, matching `cft.h`; **91 `cftw_*`
+exports**, against 67 at 0.5. Two clean container builds produced the
+same `conformance.html` (sha256 `ffb23acb113184ae…`) and the same
+module.
+
+* **881,657 cases over 84 sets** through `cft_conformance` - the
+  twenty opcode sets (236,000), the twenty transcendental ones
+  (533,265, now carrying all thirty-nine functions), and the three new
+  families: four augmented sets (89,616), twenty reduction sets
+  (8,960) and twenty character sets (13,816). `make vectors` writes
+  all 84; the drop zone accepts all 84.
+* **645,657 of those driven through the wrappers themselves**, which
+  is what step 5 grew into: 533,265 transcendental over 20 sets,
+  89,616 augmented over 4, 8,960 reduction over 20 and 13,816
+  character over 20 - 64 sets in all, since the opcode sets are
+  `cftw_run`'s and step 4 is their check. Per case for exact flags,
+  then as arrays wherever the C has a batch shape. Zero mismatches
+  either way, `VERIFY OK`.
+* The character family's step-5 pass runs the **sizing protocol** as
+  cft.h states it rather than reading it: a NULL buffer with capacity
+  0 must report the required length and refuse, a buffer one byte
+  short must refuse with the length still set and **nothing written**,
+  and only then does the real call run. All three are checked on every
+  `to_decimal` and `to_hex` case, including the fp256 exact decimals
+  that run to 183,600 characters.
+
+**How much of the growth is the wrappers**, since the module went from
+140,869 bytes at 0.5 to 196,379 here and the honest answer is "almost
+none of it". Measured rather than estimated: rebuilding the same 0.6
+library with the 0.5 `wasm_api.c` in place - 67 wrappers instead of 91,
+everything else identical - gives **193,895 bytes**, so the 24 new
+wrappers are **2,484 bytes**, 4.5 % of the 55,510-byte step. The rest
+is the library's own new code, which this build compiles because
+`build.sh` derives its source list from `host/Makefile`: `chars.c`,
+`augmented.c`, `reduce.c` and `transcend.c`'s ten new functions. The
+33 KiB 2/pi constant was already in the 0.5 module and is not part of
+this step at all.
+
+**The negative control moved with the surface again.** At 0.3 it was
+`cftw_pow`, at 0.4 and 0.5 `cftw_atan2`; here it is
+**`cftw_scaled_prod_diff`, whose two operand pointers were swapped**,
+and it is the sharpest of the four for the reason `atan2` was sharper
+than `pow`: the leaf is `a[i] - b[i]`, so a swap negates every factor
+and returns a well-formed pair with a correct scale, correct flags and
+one wrong sign bit. Nothing errors; the number is plausible everywhere.
+Swapped and rebuilt (module sha256 `11cff18d025adcb1…`, a different
+module):
+
+* `verify.mjs` **fails all 20 reduction sets in step 5** - the first
+  disagreement at `fp32-reduce.jsonl:386`, `expected 0x3fa59621 scale
+  25` against `got 0xbfa59621 scale 25`, the same value with the sign
+  flipped - while the other three families stay clean (40,000
+  transcendental, 8,000 augmented, 13,816 character) and **step 4
+  stays green at 110,776 cases over all 84 sets**, the reduction sets
+  included. That is the half-step's failure mode exactly: the internal
+  replay never calls the wrapper, so it cannot see it broken.
+* `bindings/node/test.mjs` fails **1 of 104** by name - *the scaled
+  sums and differences are their compositions, a first:
+  scaledProdDiff n=1: pr is the composition's*.
+* `bindings/node/conformance.mjs` fails **all 20 reduction sets**
+  through `Context`'s own methods while its own `cft_conformance` pass
+  reports 110,776 cases matching, again green throughout.
+
+Reverted, rebuilt: module sha256 back to `e8611510973d1081…` and
+`conformance.html` to `ffb23acb113184ae…`, so the tree round-tripped
+and the reproducibility claim above stands on three clean builds
+rather than two.
+
+Those three runs used a **truncated copy** of the sets - the 20
+reduction sets whole, since they carry the broken operation, and every
+other family headed to 2,000 lines - because the point was to watch
+the checker fail rather than to re-prove 1.5 M cases with a
+deliberately wrong module. The clean numbers above are the full sets.
+
+**The page was not opened in a browser for this step.** The markup
+changed more than it did at 0.4 or 0.5 - three new input controls, a
+two-line result for each pair, a rounding select that greys itself out
+for the augmented three, and five new dispatch branches - so this is a
+larger unchecked surface than the previous two steps left, and it is
+worth naming as such rather than implying otherwise. What stands is
+that `verify.mjs` step 5 drives every wrapper the panel calls, through
+the same argument shapes, including the sizing protocol; what does not
+stand is that anyone has watched a click reach them.
+
 ## Scope, honestly
 
 * **This is the software backend in a browser.** Full contract
@@ -455,8 +564,9 @@ page_template.html   the page, with three @CFT_*@ splice tokens open
 make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
 verify.mjs           the browserless check of that build product:
-                     identity, module hash, the vector replay, and the
-                     twenty driven through their own wrappers
+                     identity, module hash, the 84-set vector replay,
+                     and every non-opcode operation driven through its
+                     own wrapper
 build/               untracked: vectors, module, node loader,
                      negative control
 ```

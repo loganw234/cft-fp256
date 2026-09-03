@@ -7,9 +7,9 @@ binary128 and binary256, all five rounding attributes, exact flags,
 and results that are libcft's bits and nothing else.
 
 ```bash
-node bindings/node/test.mjs         # 79 tests, no dependencies
+node bindings/node/test.mjs         # 104 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 478,915 published cases
+node bindings/node/conformance.mjs  # 881,657 published cases
 ```
 
 ```js
@@ -34,8 +34,50 @@ ABI 0.4 the phase-2 trigonometrics as well - `sinpi`, `cospi`,
 `atan2`, `atan2pi` - and since ABI 0.5 the phase-3 set: `sin`, `cos`,
 `tan` of a RADIAN argument, reduced against pi inside the library at
 any magnitude the format holds, and `sinh`, `cosh`, `tanh`, `asinh`,
-`acosh`, `atanh` - all twenty-nine on all three layers: the raw
-`cftw_*` exports, `Context`/`Float` scalars, and `map()` over an array.
+`acosh`, `atanh`. **ABI 0.6 completes 754-2019 table 9.1** with
+`exp2m1`, `exp10`, `exp10m1`, `log2p1`, `log10p1`, `rsqrt`, `powr`,
+and `pown`, `compound`, `rootn` - the three that take an INTEGER
+exponent, which is a BigInt here (or a safe integer widened for you)
+because 9.2.1 asks for `integralFormat` and the contract's type is
+int64. All thirty-nine on all three layers: the raw `cftw_*` exports,
+`Context`/`Float` scalars, and `map()` over an array.
+
+ABI 0.6 also brings the three packages that are not transcendentals:
+clause 5.12's character conversions with clause 9.7's payload
+operations, clause 9.5's augmented arithmetic, and clause 9.4's
+remaining reductions.
+
+```js
+ctx.fromDecimal("1.5e-300");     // the library's own 5.12 parser, with
+                                 // H unbounded and no window - a
+                                 // sequence outside the syntax is
+                                 // REFUSED, never guessed at
+ctx.toDecimal(x);                // the exact conversion, every digit
+ctx.toDecimal(x, {digits: ctx.decimalDigits});   // Pmin: 9/17/36/73,
+                                 // where the round trip is guaranteed
+ctx.toHex(x);                    // the shortest EXACT hex sequence
+
+const {r, e} = ctx.augmentedAdd(x, y);   // r + e is exactly x + y,
+                                 // under roundTiesTowardZero, which
+                                 // 9.5 fixes and no attribute changes
+const {pr, sf} = ctx.scaledProd(xs);     // a significand in ±[1, 2)
+ctx.scaleb(pr, sf);              // and an int64 scale (a BigInt here)
+
+ctx.reduce("sumsq", xs);         // opcodes 28 and 29, the same fixed
+ctx.reduce("sumabs", xs);        // tree over a different leaf
+```
+
+**Two shapes are worth naming**, because both are the C's rather than
+a JavaScript convenience. The `to_` conversions keep cft.h's two-call
+sizing protocol underneath: `toDecimal()` runs it for you and hands
+back a string, and `toDecimalInto(x, cap)` exposes it raw - a `cap` of
+0 asks for the length and refuses, a `cap` one byte short refuses with
+the length still set and **nothing written**, because this library does
+not truncate a number. And every integer at this boundary is a BigInt:
+a scaled product's scale, `pown`'s exponent, `scaleb`'s. They are
+int64 in the contract, a JS number stops being an integer above 2^53,
+and a value that lost its low bits on the way in would be a wrong
+answer wearing a plausible one's clothes.
 
 ```js
 const ctx = await Context.open(128);
@@ -341,12 +383,71 @@ their `cftw_*` wrappers, in the library's own step to 0.5 (package
   downward, its cosine the reduced argument with mpmath's bits - and
   `sin(2^1023)` finite and nonzero through the wasm.
 
+**2026-09-03, later again, same host and node, wasm module sha256
+`e8611510973d1081…`** - the rebuild that gave the four packages of ABI
+0.6 their `cftw_*` wrappers, in the library's own step to 0.6 (package
+0.6.0; the ABI test reads 0.6). 24 new wrappers, 67 exports to **91**:
+
+* `node conformance.mjs` - **1,527,314 cases over 148 set replays,
+  zero mismatches**. The **881,657 published cases over all 84 sets**
+  through `cft_conformance()` in 669.5 s - 236,000 opcode, 533,265
+  transcendental, 89,616 augmented, 8,960 reduction, 13,816 character
+  - and then **645,657 of them again in 707.1 s through this package's
+  own `Context` methods**, over the 64 sets that are not opcode sets:
+  533,265 transcendental over 20, 89,616 augmented over 4, 8,960
+  reduction over 20 and 13,816 character over 20. Per case, so the
+  flag word compared is that case's, then as arrays wherever the C has
+  a batch shape - `map()` for the elementwise families,
+  `mapFromDecimal`/`mapFromHex` for 5.12's batch half. That second
+  pass is not redundancy: `cft_conformance` dispatches every one of
+  those internally in C and is green with or without a JavaScript
+  surface for them.
+* `node test.mjs` - **104 tests, 0 failures**: the 79 above plus 25
+  for the four packages. Table 9.1's new exact cases (`exp2m1` at
+  every integer, `exp10` where 5ⁿ fits, `log2p1`/`log10p1` with 1 + x
+  formed exactly - shown by `log2p1(2^-1000)` being x/ln 2 where a
+  rounded 1 + x would give an exact +0), `rSqrt(-0) = -inf` where
+  MPFR returns +inf, the seven rows where `powr` is not `pow`,
+  `pown(qNaN, 0) = 1` against `compound(-2, 0)` invalid, `rootn(-0, 2)
+  = +0` against `squareRoot(-0) = -0`, and the int64 extremes both
+  going through as BigInts. Then 5.12: `Pmin` from the library (9, 17,
+  36, 73) with a round trip at it over ~50 interesting encodings per
+  format, the exact conversion against a digit count, the sizing
+  protocol's three answers including a one-byte-short buffer refused
+  with nothing written, the syntax refusals (including `0x1.8` without
+  its required binary exponent), and an sNaN payload surviving both
+  directions as `snan(0x5)`. Then 9.5: `r + e` reconstructed exactly
+  in BigInt over 180 pairs and again through the library's own
+  binary128 add where the exact sum fits it, `roundTiesTowardZero`
+  shown differing from ties-to-even at a midpoint whose lower
+  neighbour is odd, underflow **without** inexact, and the NaN and
+  overflow rows giving the same value in both outputs. Then 9.4:
+  `sumsq == dot(x, x)` and `sumabs == sum(|x|)` at every format and
+  seven lengths, the one infinity-before-NaN row where they are not
+  the composition, `n == 1`'s different leaf for each, and a scaled
+  product's `pr * 2^sf` reconstructed through `scaleb` and again in
+  BigInt.
+* Negative control for the new surface, run and reverted:
+  `cftw_scaled_prod_diff`'s two operand pointers swapped in
+  `wasm_api.c` and the module rebuilt. **1 of the 104 tests fails by
+  name** (*the scaled sums and differences are their compositions, a
+  first: scaledProdDiff n=1: pr is the composition's*),
+  `conformance.mjs` fails **all 20 reduction sets** -
+  `expected 0x3fa59621 scale 25`, `got 0xbfa59621 scale 25`, the same
+  value with one sign bit - and, the part worth writing down, the
+  `cft_conformance` replay above **stays green throughout**, because
+  it never calls the wrapper. That is the half-step reproduced on
+  purpose, and the reason the second pass exists. Reverted and
+  rebuilt, the module hash reproduces.
+
 Not verified: no other JS runtime, no device backend (wasm32 has no
 PCIe; `Context.open` is always the software backend here), and no
-performance claim. The 154.4 s for 242,915 transcendental
-cases is a measurement, not a promise: it is one `_malloc` per scalar
-call across a wasm boundary, at binary256 for a quarter of them, and
-the radian three reduce against pi inside the module.
+performance claim. The timings above are measurements, not promises:
+they are one `_malloc` per scalar call across a wasm boundary, at
+binary256 for a quarter of them, the radian three reducing against pi
+inside the module, and - since 0.6 - the character conversions
+allocating a buffer the library sized, which for an fp256 exact
+decimal is 183,600 bytes.
 
 ## Files
 
@@ -358,8 +459,10 @@ cft_node.js      committed build product: emcc -sENVIRONMENT=node
 cft_node.wasm    committed build product: THE PAGE'S MODULE, byte for byte
 test.mjs         everything the vectors cannot express
 conformance.mjs  the vectors replay - the package's conformance test;
-                 cft_conformance for the opcode sets, this package's
-                 own methods for the twenty transcendental ones
+                 cft_conformance for all 84 sets, then this package's
+                 own methods for the four families that are not
+                 opcodes: transcendental, augmented, reduction,
+                 character
 ```
 
 `cft_node.js` and `cft_node.wasm` are built by
