@@ -1369,3 +1369,12 @@ does not touch and which are here to show it did not touch them:
 against that run's 8, not a change in the suite. The three skips are
 absent toolchains named by the runner, the same three this host has
 always lacked.
+
+The reviewer's gate on the merge, 2026-09-03 01:14 on the desktop with
+every toolchain present: verify/run.sh at d469ba0, run id
+20260903-011408-d469ba0, 26 stages executed, 0 failed, 1 skipped by
+name (images: xclbinutil is Linux-only), PASS - the transcend stage
+in 60 s, the conformance replay now 456,325 cases, mpfr 13 s over the
+nine as well. The one review fix before the merge was a README bullet
+that called the wasm page ABI 0.3 'surface included'; it reports 0.3
+and carries no wrapper for the nine, and the bullet now says so.
