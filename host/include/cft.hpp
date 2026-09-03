@@ -1226,6 +1226,45 @@ public:
         return r;
     }
 
+    /* -- the scaled product reductions (clause 9.4, the 0.6 step) --
+     *
+     * The three of 9.4 that return a PAIR: a significand always in
+     * +-[1, 2) and an integer scale, with scaleB(pr, scale) the
+     * product. Named rather than selected by an enum for the reason
+     * cft.h gives - these issue no device pass, so a `kind` argument
+     * would be a second opcode space with none of an opcode's meaning.
+     *
+     * The scale lands where the caller points; everything else is the
+     * shape every other call here has. */
+    call_result scaled_prod(cft_format fmt, cft_round rnd, const void *a,
+                            void *pr, std::int64_t *scale,
+                            std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_scaled_prod(dev_, fmt, rnd, a, pr, scale, n,
+                                   &r.flags);
+        return r;
+    }
+    call_result scaled_prod_sum(cft_format fmt, cft_round rnd,
+                                const void *a, const void *b, void *pr,
+                                std::int64_t *scale, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_scaled_prod_sum(dev_, fmt, rnd, a, b, pr, scale, n,
+                                       &r.flags);
+        return r;
+    }
+    call_result scaled_prod_diff(cft_format fmt, cft_round rnd,
+                                 const void *a, const void *b, void *pr,
+                                 std::int64_t *scale,
+                                 std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_scaled_prod_diff(dev_, fmt, rnd, a, b, pr, scale, n,
+                                        &r.flags);
+        return r;
+    }
+
 
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
@@ -1599,6 +1638,61 @@ public:
     value_type dot(cspan<encoding_type> a, cspan<encoding_type> b) &
     {
         return reduce(CFT_DOT, a, b);
+    }
+
+    /* -- the rest of clause 9.4's sum reductions (the 0.6 step) ----
+     *
+     * The same tree over a different leaf, and the library issues
+     * exactly that: sumsq IS dot(a, a) and sumabs IS an abs pass then
+     * sum, bit for bit and flag for flag - with the single row 9.4
+     * orders differently, where an infinity beside a NaN gives +inf
+     * rather than the quiet NaN the tree would give. cft.h's
+     * cft_reduce block is the full statement. */
+    value_type sumsq(cspan<encoding_type> a) &
+    {
+        return reduce(CFT_SUMSQ, a, cspan<encoding_type>());
+    }
+    value_type sumabs(cspan<encoding_type> a) &
+    {
+        return reduce(CFT_SUMABS, a, cspan<encoding_type>());
+    }
+
+    /* -- the scaled product reductions (clause 9.4, the 0.6 step) --
+     *
+     * These return a pair, so they return a struct: pr is always in
+     * +-[1, 2) and scaleB(pr, scale) is the product. The operation
+     * cannot overflow or underflow - both operands of every node's
+     * multiply are in +-[1, 2) by construction - so a product hundreds
+     * of binades outside the format comes back exactly as one inside
+     * it does. cft.h's block has the special-value rows and the
+     * scaling rule.
+     *
+     * scaledProdSum and scaledProdDiff take the product of the
+     * pairwise sums or differences, with ONE rounding per leaf; those
+     * two, and only those two, can signal overflow or underflow, and
+     * only from that addition. */
+    struct scaled_result {
+        value_type   pr;
+        std::int64_t scale;
+    };
+
+    scaled_result scaled_prod(cspan<encoding_type> a) &
+    {
+        encoding_type d{};
+        std::int64_t s = 0;
+        record(dev_->scaled_prod(F, rnd_, ptr(a), d.data(), &s, a.size()),
+               "cft_scaled_prod");
+        return scaled_result{ make(d), s };
+    }
+    scaled_result scaled_prod_sum(cspan<encoding_type> a,
+                                  cspan<encoding_type> b) &
+    {
+        return scaled_pair(a, b, false);
+    }
+    scaled_result scaled_prod_diff(cspan<encoding_type> a,
+                                   cspan<encoding_type> b) &
+    {
+        return scaled_pair(a, b, true);
     }
 
     /* ===========================================================
@@ -2210,6 +2304,30 @@ private:
                 std::string("cft: operand ") + name + " has " +
                 std::to_string(s.size()) + " elements, output has " +
                 std::to_string(d.size()));
+    }
+
+    /* scaledProdSum and scaledProdDiff differ in one C entry point and
+     * nothing else, so the length check and the pair-building live
+     * here once. */
+    scaled_result scaled_pair(cspan<encoding_type> a, cspan<encoding_type> b,
+                              bool difference) &
+    {
+        if (b.size() != a.size())
+            throw std::invalid_argument(
+                std::string("cft::scaled_prod_") +
+                (difference ? "diff" : "sum") +
+                ": b must be as long as a (" + std::to_string(b.size()) +
+                " vs " + std::to_string(a.size()) + ")");
+        encoding_type d{};
+        std::int64_t s = 0;
+        const call_result r =
+            difference ? dev_->scaled_prod_diff(F, rnd_, ptr(a), ptr(b),
+                                                d.data(), &s, a.size())
+                       : dev_->scaled_prod_sum(F, rnd_, ptr(a), ptr(b),
+                                               d.data(), &s, a.size());
+        record(r, difference ? "cft_scaled_prod_diff"
+                             : "cft_scaled_prod_sum");
+        return scaled_result{ make(d), s };
     }
 
     value_type one_of(cft_op op, const encoding_type &a, const encoding_type &b,

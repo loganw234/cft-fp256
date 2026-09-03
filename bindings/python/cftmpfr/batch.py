@@ -397,3 +397,85 @@ def tree_dot(ctx, x, y):
     ctx.last_flags = fl
     ctx.flags |= fl
     return Float(ctx, out), fl
+
+
+# ---------------------------------------------------------------------
+# The rest of clause 9.4 (the 0.6 step)
+#
+# The other five reductions 754-2019 9.4 asks a language to define.
+# Named tree_* like the two above, and for the same reason: nothing
+# here is mpfr_sum, mpfr_dot or any other single correctly-rounded
+# reduction, and a name that invited that reading would cost somebody a
+# week. What these are is the contract's fixed index-shaped tree,
+# rounded at every node in the context's attribute.
+# ---------------------------------------------------------------------
+
+def tree_sumsq(ctx, x):
+    """sum over the fixed tree of round(x[i]*x[i]) - 9.4's sumSquare.
+
+    Bit-identical to tree_dot(ctx, x, x), because the library issues
+    exactly that; the one exception is 9.4's own, where a vector
+    holding an infinity AND a NaN gives +inf rather than the quiet NaN
+    the tree would give. Returns (Float, flag word)."""
+    (bx,), n, _ = _normalise(ctx, (x,))
+    out, fl = _lib.reduce(ctx._dev, _lib.OP_SUMSQ, ctx._fi.code, ctx._rnd,
+                          bx, None, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), fl
+
+
+def tree_sumabs(ctx, x):
+    """sum over the fixed tree of |x[i]| - 9.4's sumAbs.
+
+    Bit-identical to an abs pass followed by tree_sum, with the same
+    single exception tree_sumsq carries. Returns (Float, flag word)."""
+    (bx,), n, _ = _normalise(ctx, (x,))
+    out, fl = _lib.reduce(ctx._dev, _lib.OP_SUMABS, ctx._fi.code, ctx._rnd,
+                          bx, None, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), fl
+
+
+def _scaled(ctx, kind, x, y=None):
+    if y is None:
+        (bx,), n, _ = _normalise(ctx, (x,))
+        by = None
+    else:
+        (bx, by), n, _ = _normalise(ctx, (x, y))
+    out, scale, fl = _lib.scaled_prod(ctx._dev, kind, ctx._fi.code,
+                                      ctx._rnd, bx, by, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), scale, fl
+
+
+def scaled_prod(ctx, x):
+    """9.4's scaledProd: the product of the elements as a PAIR.
+
+    Returns (Float pr, int scale, flag word), where ldexp(pr, scale) is
+    the product and pr is always in +-[1, 2). The operation cannot
+    overflow or underflow whatever the true product is - both operands
+    of every node's multiply are in +-[1, 2) by construction - which is
+    the reason 754 defines it at all. n = 0 gives (1, 0) silently, the
+    multiplicative identity."""
+    return _scaled(ctx, 0, x)
+
+
+def scaled_prod_sum(ctx, x, y):
+    """9.4's scaledProdSum: the product of (x[i] + y[i]) as a pair.
+
+    ONE contract rounding per leaf sum, then the same scaled tree. That
+    leaf addition is the only place this can signal overflow or
+    underflow; the product tree never does. Returns (Float, int, flag
+    word)."""
+    return _scaled(ctx, 1, x, y)
+
+
+def scaled_prod_diff(ctx, x, y):
+    """9.4's scaledProdDiff: the product of (x[i] - y[i]) as a pair.
+
+    scaled_prod_sum with a subtraction at the leaf, in every respect.
+    Returns (Float, int, flag word)."""
+    return _scaled(ctx, 2, x, y)

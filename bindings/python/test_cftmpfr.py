@@ -23,6 +23,7 @@ without numpy (container tests skip). A negative control proves the
 comparison machinery can actually fail.
 """
 
+import math
 import random
 import sys
 from pathlib import Path
@@ -439,6 +440,123 @@ def test_tree_reductions(prec):
     assert empty.is_zero and empty.sign == 0 and fl == 0
     lone, fl = batch.tree_sum(ctx, [ctx.nan()])
     assert lone.same_bits(ctx.nan()) and fl == 0
+
+
+@pytest.mark.parametrize("prec", (24, 237))
+def test_tree_sumsq_and_sumabs(prec):
+    """The other two of 9.4's sum reductions, and the identities that
+    are how the two backends are made to agree."""
+    ctx = Context(prec)
+    xs = [ctx.from_int(i) for i in range(1, 12)]     # 11: not a power of two
+    signed = [x if i % 2 else ctx.neg(x) for i, x in enumerate(xs)]
+
+    sq, fl = batch.tree_sumsq(ctx, xs)
+    assert sq.to_int() == sum(i * i for i in range(1, 12)) and fl == 0
+    ab, fl = batch.tree_sumabs(ctx, signed)
+    assert ab.to_int() == sum(range(1, 12)) and fl == 0
+
+    # the identities, through the binding's own entry points
+    dot, fdot = batch.tree_dot(ctx, signed, signed)
+    sq2, fsq = batch.tree_sumsq(ctx, signed)
+    assert sq2.same_bits(dot) and fsq == fdot
+
+    # abs signals nothing at all (5.5.1), so the pass contributes no
+    # flags and the tree's are the operation's
+    absed = [ctx.abs(v) for v in signed]
+    s, fs = batch.tree_sum(ctx, absed)
+    ab2, fab = batch.tree_sumabs(ctx, signed)
+    assert ab2.same_bits(s) and fab == fs
+
+    # 9.4 puts an infinity ahead of a NaN for these two and only these
+    mixed = [ctx.inf(), ctx.nan(), ctx(1)]
+    sq3, fl = batch.tree_sumsq(ctx, mixed)
+    assert sq3.same_bits(ctx.inf()) and fl == 0
+    ab3, fl = batch.tree_sumabs(ctx, mixed)
+    assert ab3.same_bits(ctx.inf()) and fl == 0
+    # the negative control: the plain tree returns the quiet NaN there
+    d3, _ = batch.tree_dot(ctx, mixed, mixed)
+    assert d3.is_nan
+
+    # the edges, which the sum tree decides
+    empty, fl = batch.tree_sumsq(ctx, [])
+    assert empty.is_zero and empty.sign == 0 and fl == 0
+    empty, fl = batch.tree_sumabs(ctx, [])
+    assert empty.is_zero and empty.sign == 0 and fl == 0
+
+
+@pytest.mark.parametrize("prec", (24, 237))
+def test_scaled_products(prec):
+    """The three that return a pair, and the property they exist for."""
+    ctx = Context(prec)
+    F = cftmpfr
+
+    # 2^100 four times over: the true product is 2^400, hundreds of
+    # binades outside binary32, and it comes back exactly.
+    big = ctx.from_int(2 ** 100)
+    pr, sf, fl = batch.scaled_prod(ctx, [big] * 4)
+    assert pr.to_int() == 1 and sf == 400 and fl == 0
+
+    # pr is always in [1, 2): the invariant the operation rests on
+    xs = [ctx.from_int(i) for i in range(1, 12)]
+    pr, sf, fl = batch.scaled_prod(ctx, xs)
+    one, two = ctx(1), ctx(2)
+    assert not (pr < one) and pr < two
+    # and the pair really is 11! = 39916800, which every rung holds
+    # exactly (2^8 x 155925, and 155925 needs 18 bits)
+    assert math.ldexp(pr.to_float(), sf) == 39916800.0 and fl == 0
+
+    # 9.4's empty case: the multiplicative identity, silently
+    pr, sf, fl = batch.scaled_prod(ctx, [])
+    assert pr.to_int() == 1 and sf == 0 and fl == 0
+    for fn in (batch.scaled_prod_sum, batch.scaled_prod_diff):
+        pr, sf, fl = fn(ctx, [], [])
+        assert pr.to_int() == 1 and sf == 0 and fl == 0
+
+    # the sums and differences: (1+1)*(3+1) = 8, (1-1)*(3-1) = 0
+    a = [ctx(1), ctx(3)]
+    b = [ctx(1), ctx(1)]
+    pr, sf, fl = batch.scaled_prod_sum(ctx, a, b)
+    assert pr.to_int() == 1 and sf == 3 and fl == 0
+    pr, sf, fl = batch.scaled_prod_diff(ctx, a, b)
+    assert pr.is_zero and pr.sign == 0 and sf == 0 and fl == 0
+
+    # 9.4's rows: inf x 0 is invalid, an infinity alone is not
+    pr, sf, fl = batch.scaled_prod(ctx, [ctx.inf(), ctx.zero()])
+    assert pr.is_nan and sf == 0 and fl == F.FLAG_INVALID
+    pr, sf, fl = batch.scaled_prod(ctx, [ctx.inf(), ctx(-2)])
+    assert pr.is_inf and pr.sign == 1 and sf == 0 and fl == 0
+    pr, sf, fl = batch.scaled_prod(ctx, [ctx.zero(1), ctx(-2)])
+    assert pr.is_zero and pr.sign == 0 and sf == 0 and fl == 0
+
+    # a length disagreement is a refusal, not a short read
+    with pytest.raises(ValueError):
+        batch.scaled_prod_sum(ctx, [ctx(1), ctx(2)], [ctx(1)])
+
+
+def test_scaled_prod_survives_what_the_plain_product_does_not():
+    """The NEGATIVE CONTROL for the whole operation, at binary32 where
+    the format's edge can be named by its bits: eight copies of the
+    largest finite value have a product 900-odd binades outside the
+    format, and scaledProd returns it with no overflow at all - where
+    ONE multiply of two of them is already an infinity."""
+    ctx = Context(24)
+    F = cftmpfr
+    big = ctx.from_bits(0x7F7FFFFF)                  # max normal
+    pr, sf, fl = batch.scaled_prod(ctx, [big] * 8)
+    assert not (fl & (F.FLAG_OVERFLOW | F.FLAG_UNDERFLOW | F.FLAG_INVALID))
+    assert not pr.is_inf and not pr.is_nan and not pr.is_zero
+    assert sf > 1000                                 # 8 x ~127 binades
+
+    sq, mfl = batch.mul(ctx, [big], [big])
+    assert sq[0].is_inf and (mfl & F.FLAG_OVERFLOW)
+
+    # and the same at the other end: eight minimum subnormals
+    tiny = ctx.from_bits(1)
+    pr, sf, fl = batch.scaled_prod(ctx, [tiny] * 8)
+    assert not (fl & (F.FLAG_OVERFLOW | F.FLAG_UNDERFLOW | F.FLAG_INVALID))
+    assert sf == -8 * 149 and pr.to_int() == 1
+    sq, mfl = batch.mul(ctx, [tiny], [tiny])
+    assert sq[0].is_zero and (mfl & F.FLAG_UNDERFLOW)
 
 
 # ---------------------------------------------------------------------
