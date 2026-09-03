@@ -121,8 +121,19 @@ ifeq ($(OS),Windows_NT)
   # the profile set alone it still failed; with this it passes. Passed
   # through `env` because the x86 name carries parentheses, which the
   # shell's VAR=value prefix form does not accept.
+  #
+  # Not only dotnet: every Windows-native toolchain a recipe runs is
+  # missing the same variables under MSYS make. go wants LOCALAPPDATA
+  # for its build cache and USERPROFILE for GOPATH (pacman's go says
+  # "%LocalAppData% is not defined" without it), julia keeps its depot
+  # under USERPROFILE, R its tempdir under TEMP. So the block is WINENV
+  # and the go, julia, csharp and r legs all run through it; on other
+  # platforms it is empty and the legs run bare. GOROOT rides along when
+  # the caller passes it as a make variable (verify/run.sh does, for
+  # pacman's trimmed go): MSYS2's env drops an INHERITED GOROOT on the
+  # way to a native child and keeps one assigned on its own command line.
   SYSTEMDRIVE ?= C:
-  DOTNET_ENV := env USERPROFILE="$(WINHOME)" \
+  WINENV := env USERPROFILE="$(WINHOME)" \
                 APPDATA="$(WINHOME)\AppData\Roaming" \
                 LOCALAPPDATA="$(WINHOME)\AppData\Local" \
                 TEMP="$(WINHOME)\AppData\Local\Temp" \
@@ -130,9 +141,10 @@ ifeq ($(OS),Windows_NT)
                 PROGRAMFILES="$(SYSTEMDRIVE)\Program Files" \
                 "PROGRAMFILES(X86)=$(SYSTEMDRIVE)\Program Files (x86)" \
                 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_NOLOGO=1 \
-                DOTNET_CLI_TELEMETRY_OPTOUT=1
+                DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+                $(if $(GOROOT),GOROOT="$(GOROOT)",)
 else
-  DOTNET_ENV :=
+  WINENV :=
   SHLIB   := libcft.so
   SHFLAGS := -shared
   SHDEF   :=
@@ -311,7 +323,7 @@ lang-cpp: all .out-c.txt
 
 lang-julia: all .out-c.txt
 	@if command -v julia >/dev/null 2>&1; then \
-		julia examples/vector_fma.jl > .out-jl.txt && \
+		$(WINENV) julia examples/vector_fma.jl > .out-jl.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-jl.txt && \
 		echo "julia: same library, same bits"; \
 	else \
@@ -331,7 +343,7 @@ lang-rust: all .out-c.txt
 
 lang-go: all .out-c.txt
 	@if command -v go >/dev/null 2>&1; then \
-		go run examples/vector_fma.go > .out-go.txt && \
+		$(WINENV) go run examples/vector_fma.go > .out-go.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-go.txt && \
 		echo "go: same library, same bits"; \
 	else \
@@ -340,7 +352,7 @@ lang-go: all .out-c.txt
 
 lang-csharp: all .out-c.txt
 	@if command -v dotnet >/dev/null 2>&1; then \
-		if ! $(DOTNET_ENV) dotnet run --project examples/vector_fma_cs.csproj \
+		if ! $(WINENV) dotnet run --project examples/vector_fma_cs.csproj \
 			> .out-cs.txt 2> .out-cs.err; then \
 			echo "csharp: dotnet run FAILED - a build or runtime problem, NOT a bit mismatch:"; \
 			tail -5 .out-cs.err; exit 1; \
@@ -353,7 +365,7 @@ lang-csharp: all .out-c.txt
 
 lang-r: all .out-c.txt
 	@if command -v Rscript >/dev/null 2>&1; then \
-		Rscript examples/vector_fma.R > .out-r.txt && \
+		$(WINENV) Rscript examples/vector_fma.R > .out-r.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-r.txt && \
 		echo "r: same library, same bits"; \
 	else \

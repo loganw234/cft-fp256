@@ -1203,6 +1203,10 @@ determinism measured across two hosts rather than assumed: either image
 is the card-day quad, and ~/cardday-tip/REPRODUCED.txt on the box holds
 both hashes and the section hash.
 
+The single from the same commit closed later that evening at kernel
++0.618 (routed +0.055, 0 failing of 572,783, verify-image 8/8), so the
+card-day pair is single and quad from one tree - docs/CARDDAY.md.
+
 Two things this does not settle. +0.143 in the kernel is margin, not
 headroom - 145 MHz would need another ~0.5 ns, and the next path to
 shorten is S10->S11 as recorded above. And silicon has still not been

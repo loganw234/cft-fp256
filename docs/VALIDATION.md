@@ -1158,3 +1158,65 @@ Windows host and 126 s on ubuntu, a gap measured here and not
 yet explained. The box's bindings stage passed 80 tests against gmpy2
 2.3.1, a release newer than the 2.1.2 and 2.2.1 the binding was
 written against.
+
+## 2026-09-02 - the tip single closes at 135 MHz: kernel +0.618, the pair is one tree
+
+    build-single-tip-135  9f73107, one tile, 135 MHz, RETIMING=1 PHYS_OPT=1
+    host                  DESKTOP-T33SK86 (WSL cft2204), 1h32m, beside the language runs
+    routed WNS +0.055     TNS 0.000   failing endpoints 0 of 572,783   WHS +0.009
+    kernel worst path     +0.618 ns   op_r -> g_bank128 lane 1 s0_byp_d (seedop bypass, 15 levels)
+    xclbin                35,805,116 bytes, sha256 afc483e2...dfda4, manifest clean,
+                          hw/verify-image.sh 8/8, staged as ~/cardday-tip/cft_hw_single.xclbin
+
+Against the case-ROM single from 0e7264e (kernel +0.433), the round
+stage's precompute buys another 0.19 ns on the single tile, and the
+worst path is the seedop bypass family again - the one the quad also
+shows nothing of at +0.143, because in four tiles it is placement and
+routing that set the margin, not logic depth. The card-day pair is
+now single and quad from one commit.
+
+## 2026-09-02 - the first census with nothing skipped: 26 of 26 on the desktop's WSL
+
+verify/run.sh at 47f4fbd on DESKTOP-T33SK86's WSL (Ubuntu 22.04, 12
+cores), every stage in the standard set executed and passed, images
+included. The desktop was given every toolchain the stages want that
+evening (docs/COMPATIBILITY.md has the recipe), and XRT's xclbinutil
+is there, so this is the one host where the whole set can run:
+
+    golden 260s   vectors 6s    sim 602s (SIM_JOBS=8, Icarus)   lint 91s
+    formal 41s    libcft 8s     selfcheck 0s   divsqrt 1s    clause5 2s
+    diff 3s       seq 1s        reduce 20s     bindings 0s   cpp 15s
+    lang-cpp 1s   lang-rust 0s  lang-julia 1s  lang-go 0s    lang-csharp 5s
+    lang-r 9s     lang-fortran 0s   node 105s  wasm 2s       mpfr 4s
+    soak-quick 114s   images 3s (both 9f73107 images, 8/8 each)
+
+    VERDICT: PASS, nothing skipped - 26 executed, 0 failed, 0 skipped
+    Run id 20260902-205134-47f4fbd; 22 minutes wall, with Vivado's
+    single build finishing beside it.
+
+The seconds are honest. The stages that read 0 or 1 s print their
+counts in their logs - the bindings' 80 tests, selfcheck's "agree on
+every case, bits and flags", divsqrt's 29,124 cases, clause5's 145,032
+comparisons, seq/diff/reduce agreeing on every program, case and tree,
+formal's 7 of 7 with the negative control refuted, mpfr's 238,328 cases
+with 0 mismatches - and a stage the runner marks ok is one whose
+command exited 0 after printing that.
+
+The Windows host, same evening, at f5a9176 - everything but images,
+which Windows can never run because xclbinutil is Linux-only - through
+Docker Desktop for the three container stages, SIM_JOBS=8:
+
+    golden 215s   vectors 7s    sim 502s       lint 59s      formal 37s
+    libcft 15s    selfcheck 1s  divsqrt 1s     clause5 4s    diff 4s
+    seq 2s        reduce 25s    bindings 1s    cpp 19s       lang-cpp 2s
+    lang-rust 1s  lang-julia 2s lang-go 1s     lang-csharp 6s   lang-r 9s
+    lang-fortran 0s   node 264s   wasm 3s      mpfr 4s       soak-quick 79s
+    images SKIP (xclbinutil not present - XRT hosts only)
+
+    VERDICT: PASS with 1 skip - 25 executed, 0 failed, 1 skipped by name
+    Run id 20260902-205823-f5a9176; 21 minutes wall.
+
+Two hosts, two operating systems, one tree, the same 25 verdicts; the
+26th runs where the tool exists. The Node unit tests remain the one
+stage that is slower on Windows (264 s against 105 s), still measured
+and still unexplained.

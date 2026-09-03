@@ -83,8 +83,18 @@ else
 fi
 HOSTMAKE() {
   if [ "$WIN" = 1 ]; then
+    # pacman's go (mingw-w64-x86_64-go) is a trimmed binary that
+    # cannot find its own GOROOT, and it is only reachable through
+    # the PATH prefix below. GOROOT goes in as a MAKE VARIABLE, like
+    # TMP and TEMP, because MSYS make hands recipes a stripped
+    # environment and an exported variable never arrives - and only
+    # when no other go is on the caller's PATH.
+    local goroot=()
+    if ! command -v go >/dev/null 2>&1 && [ -d /c/msys64/mingw64/lib/go ]; then
+      goroot=(GOROOT="${GOROOT:-C:/msys64/mingw64/lib/go}")
+    fi
     PATH="/c/msys64/mingw64/bin:$PATH" make -C "$ROOT/host" CC=gcc \
-      OS=Windows_NT TMP="$WTMP" TEMP="$WTMP" "$@"
+      OS=Windows_NT TMP="$WTMP" TEMP="$WTMP" "${goroot[@]}" "$@"
   else
     make -C "$ROOT/host" "$@"
   fi
@@ -325,9 +335,12 @@ need() {  # docker|host-cc|xclbinutil ...
                || STAGE_SKIP_REASON="no gfortran on PATH"; fi;;
       images-env) [ -n "${IMAGES:-}" ] \
         || STAGE_SKIP_REASON="no IMAGES=... exported (nothing staged to verify)";;
-      # Any other name is a command that must be on PATH: rustc,
-      # julia, go, dotnet, Rscript, node.
+      # Any other name is a command that must be on PATH - rustc,
+      # julia, go, dotnet, Rscript, node - or, on Windows, in the
+      # mingw64 bin directory HOSTMAKE prepends (pacman's go lives
+      # there and nowhere on the caller's PATH).
       *) command -v "$t" >/dev/null 2>&1 \
+        || { [ "$WIN" = 1 ] && [ -x "/c/msys64/mingw64/bin/$t.exe" ]; } \
         || STAGE_SKIP_REASON="no $t on PATH";;
     esac
     [ -n "$STAGE_SKIP_REASON" ] && return 0

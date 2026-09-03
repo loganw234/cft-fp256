@@ -48,7 +48,8 @@ bits differ, so a change to the library or to a binding says which
 language it broke. `.github/workflows/gates.yml`'s `host` job runs
 them on every push (ubuntu, `--require-all`, everything but Julia
 and R); a full census runs them wherever the toolchains are, and
-docs/COMPATIBILITY.md keeps the dated per-language rows.
+docs/COMPATIBILITY.md keeps the dated per-language rows, and the
+recipe for giving a Windows host every toolchain the stages want.
 
 Wall time for the standard set is dominated by `sim` when it runs
 serially: ~40 min in the container, ~25 min under Verilator on a
