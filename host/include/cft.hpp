@@ -85,6 +85,27 @@
  * throughput. (Same rule bindings/node states for the same reason.)
  *
  * ---------------------------------------------------------------
+ * No decimal I/O, on purpose
+ * ---------------------------------------------------------------
+ *
+ * bindings/python and bindings/node both carry a decimal contract -
+ * exact strings out, one library rounding on the way in. This header
+ * carries none: values move as bytes, as hex, or through cft_convert
+ * to a double, and that is all.
+ *
+ * Not an oversight. Those two packages needed decimals because they
+ * are how a Python or JavaScript user types a number in the first
+ * place; C++ code that reaches for a 237-bit significand did not get
+ * there from a string literal. And a decimal contract is real work
+ * with real ways to be subtly wrong - the exact decimal of the
+ * smallest binary256 subnormal runs to roughly 183,000 digits, and
+ * parsing needs either a bignum here or the exact-numerator/exact-
+ * denominator dance core.mjs does. Either would be new code in the
+ * one place this header refuses to have any: the path a value takes
+ * to become bits. If it is ever wanted, bindings/node/core.mjs is the
+ * design to port, not a strtod to reach for.
+ *
+ * ---------------------------------------------------------------
  * Errors: an exception at the top, a status at the bottom
  * ---------------------------------------------------------------
  *
