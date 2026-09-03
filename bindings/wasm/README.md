@@ -61,13 +61,16 @@ reader to do, had half its files bounced. Measured, not assumed:
 exactly what the drop zone does with a dropped file, and the drop
 itself was watched working in Chromium (see the 2026-09-03 block
 below) - four transcendental sets and one opcode set, 32,465 cases,
-with a misnamed file still refused by name.
+with a misnamed file still refused by name. Those same twenty files
+carry **129,845 cases** since ABI 0.4 added the eleven phase-2
+functions to them; the file names did not change, so the drop zone
+needed nothing.
 
 The page is also a working binary32/64/128/256 calculator: one
 element through `cft_run()`, the composed `cft_div`/`cft_sqrt`
-sequence, or any of the nine phase-1 transcendentals, operands and
-results as raw encodings, flags decoded - every answer pinned by the
-replay above it.
+sequence, or any of the twenty transcendentals - phase 1's nine and
+phase 2's eleven - operands and results as raw encodings, flags
+decoded, every answer pinned by the replay above it.
 
 ## Building
 
@@ -142,7 +145,7 @@ construction rather than by luck. `conformance.html` is a committed
 build product; rebuild it with the pinned image and the only intended
 diff is none.
 
-`wasm_api.c` is the module's complete exported surface: 47 `cftw_*`
+`wasm_api.c` is the module's complete exported surface: 58 `cftw_*`
 wrappers that project `host/include/cft.h` one declaration at a time,
 adapting only what JavaScript cannot reach (out-params, the sized
 caps struct, a uint64). No invented semantics; cft.h remains the
@@ -157,7 +160,13 @@ transcendentals: `cftw_exp`, `cftw_expm1`, `cftw_exp2`, `cftw_log`,
 Those nine end at their flag word - no `bus_out` - because cft.h gives
 them none: they are host operations that issue no device pass, and a
 wrapper that grew a parameter to match its neighbours would be
-describing a round trip that does not happen.
+describing a round trip that does not happen. Later the same day it
+gained the eleven phase-2 trigonometrics on the same terms:
+`cftw_sinpi`, `cftw_cospi`, `cftw_tanpi`, `cftw_asin`, `cftw_acos`,
+`cftw_atan`, `cftw_asinpi`, `cftw_acospi`, `cftw_atanpi`, and
+`cftw_atan2` / `cftw_atan2pi`, which take **y first, then x** - the C
+order, cft.h's, and the one thing in this file a passthrough could get
+wrong while still returning a plausible number for every input.
 
 ## Verifying it, without a browser
 
@@ -193,16 +202,18 @@ the build directory:
    directory, which is what the page does with a dropped file, over
    every name the drop zone accepts: the twenty opcode sets and, when
    `make vectors` has written them, the twenty transcendental ones;
-5. drives the **nine transcendentals through their own wrappers**,
-   reading the same files itself: `cftw_exp` … `cftw_hypot`, one
-   element at a time for exact per-case flags and then once per family
-   as an array, comparing encodings and flags against the file. Step 4
-   cannot substitute for this and it is worth being blunt about why:
-   `cft_conformance` dispatches the nine internally, in C, so it is
+5. drives the **twenty transcendentals through their own wrappers**,
+   reading the same files itself: `cftw_exp` … `cftw_hypot` and, since
+   ABI 0.4, `cftw_sinpi` … `cftw_atan2pi`, one element at a time for
+   exact per-case flags and then once per family as an array,
+   comparing encodings and flags against the file. Step 4 cannot
+   substitute for this and it is worth being blunt about why:
+   `cft_conformance` dispatches all twenty internally, in C, so it is
    green whether or not a single `cftw_*` wrapper for them exists. For
    a day it was (docs/COMPATIBILITY.md's half-step). Step 5 is the one
    that fails when the JavaScript surface is missing, or present and
-   wrong.
+   wrong - including `atan2` with its two operands the wrong way
+   round, which is the negative control the 0.4 block below records.
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
 rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
@@ -261,6 +272,45 @@ binary256 under roundTowardPositive. `build/negative_control.html` was
 opened in the same browser and failed red at `fp64.jsonl:2` with the
 library's own disagreement, so the checker was watched failing here
 too.
+
+**Measured 2026-09-03, later the same day**, node 22.19.0 on Windows
+11, against the page rebuilt with the eleven phase-2 wrappers in it:
+module **98,392 bytes**, sha256 `ee66812e4bd17de7…`, identical to the
+node loader's `bindings/node/cft_node.wasm` (and to
+`build/cft_node.wasm`); `cftw_abi_version()` = 4 = ABI 0.4, matching
+`cft.h`; **58 `cftw_*` exports**; **365,845 cases over 40 sets**
+through `cft_conformance` (236,000 opcode + 129,845 transcendental -
+the same twenty transcendental files, now carrying all twenty
+functions) and **129,845 more through the twenty wrappers
+themselves**, zero mismatches either way. Three clean container builds
+produced the same `conformance.html` (sha256 `b9ddcecc2dddf342…`) -
+two back to back and a third after the negative control was reverted,
+which is the stronger statement because it says the tree round-tripped.
+
+The negative control moved with the surface. At 0.3 it was `cftw_pow`,
+because pow is not symmetric; here it is **`cftw_atan2`, whose two
+operand pointers were swapped**, which is sharper for the same reason:
+atan2 takes y first, so a swap answers a plausible number everywhere
+rather than failing loudly anywhere. Swapped and rebuilt, **step 5
+fails all twenty transcendental sets while step 4 stays green at
+365,845 cases** - `atan2(+0, -0)` comes back `-0` where the vectors say
+pi, which is exactly the clause 9.2.1 row cft.h says implementations
+most often miss - and `bindings/node/test.mjs` fails 2 of 74 by name
+(`atan2(+0, -0) is pi and inexact`, `atan2(-0, +1) is -0`) while
+`bindings/node/conformance.mjs` fails all twenty sets. Reverted,
+rebuilt, hashes reproduce.
+
+**This rebuild was NOT opened in a browser**, and that is a step back
+from the previous block, which was. The markup changed again - eleven
+rows in the compute panel's table, eleven entries in the cwrap table -
+and no browser was driven on this host in the session that built it.
+So the claim here is narrower and stated as such: `verify.mjs` step 5
+calls the same eleven wrappers the panel calls, on the same operands,
+comparing the same encodings and flags, and the drop zone's
+accepted-names list did not change at all (it has taken the
+transcendental sets since the morning). What is unwitnessed is the
+markup between a click and those calls. The next person to open the
+page should say so here.
 
 ## Scope, honestly
 
@@ -323,6 +373,22 @@ too.
   wrappers the panel calls, and its step 4 replays one dropped set per
   directory the way the drop zone does - which is the only kind of
   claim this file is willing to make about a page nobody watched.
+* **The page is at ABI 0.4, surface included, and this time there was
+  no half-step at all (2026-09-03).** The library reached 0.4 an hour
+  before this rebuild, so a rebuild on its own would have answered
+  `cftw_abi_version()` with 4 while exporting none of the eleven
+  operations 0.4 names - the third occurrence of the failure the two
+  bullets above describe. It did not get a third occurrence: the
+  wrappers and the rebuild are one commit. 58 `cftw_*` exports, 98,392
+  bytes of wasm where the 0.3 build was 88,875 - the eleven wrappers
+  and the phase-2 arithmetic behind them together, which is why this
+  step is 9,517 bytes where the nine wrappers alone were 334. The
+  markup changed again, and contained the same way: eleven rows in the
+  panel's table, eleven entries in the cwrap table, no new dispatch
+  branch, because the two arity lists the dispatch reads already
+  covered both. The drop zone did not change - it has accepted the
+  twenty transcendental set names since the morning, and those same
+  files now carry all twenty functions.
 * Reproducibility claim, precisely: same pinned image + same repo
   state → same page. The vectors are seeded and the sampling is a
   pure function of them; `emcc` is deterministic within the pinned
@@ -340,7 +406,7 @@ make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
 verify.mjs           the browserless check of that build product:
                      identity, module hash, the vector replay, and the
-                     nine driven through their own wrappers
+                     twenty driven through their own wrappers
 build/               untracked: vectors, module, node loader,
                      negative control
 ```
