@@ -1305,11 +1305,9 @@ def test_asinpi_of_a_half_is_a_sixth_and_therefore_not_exact(fmt):
     for rnd in RND_MODES:
         bits, flags = tr.asinpi(fmt, half, rnd)
         assert flags == FLAG_INEXACT
-    # and the value really is 1/6 to the format's precision
-    mpmath.mp.prec = 4 * fmt.prec + 64
-    want = sf.round_pack(fmt, 0, *mpmath.libmp.to_man_exp(
-        (mpmath.mpf(1) / 6)._mpf_)[:2], RND_RNE)
-    del want
+    # the two directed attributes are ADJACENT, which is the tightest
+    # bracket the format admits and the shape a rational-but-not-dyadic
+    # value has to take
     lo = tr.asinpi(fmt, half, RND_RDN)[0]
     hi = tr.asinpi(fmt, half, RND_RUP)[0]
     assert next_up(fmt, lo)[0] == hi

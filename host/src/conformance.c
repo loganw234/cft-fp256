@@ -327,11 +327,17 @@ static cft_status array_pass(cft_device *dev, int fi, int rnd, int esz,
 /* ---- the transcendental sets -------------------------------------- *
  *
  * A different schema and a different dispatch, in their own files: the
- * phase-1 transcendentals are library entry points rather than opcodes,
- * so a case names a FUNCTION and there is no opcode field to put it in.
+ * transcendentals are library entry points rather than opcodes, so a
+ * case names a FUNCTION and there is no opcode field to put it in.
  * Keeping them separate also means a consumer that predates ABI 0.3
  * reads exactly the files it always read, and one that skips these
  * skips a file rather than failing a line.
+ *
+ * The dispatch is by NAME through cft_tr_from_name and cft_tr_arity,
+ * so ABI 0.4's eleven needed nothing here beyond the enum they were
+ * added to - and a replayer built against 0.3 and handed a 0.4 set
+ * refuses on the name of a function it does not know, which is the
+ * refusal it should give.
  *
  * Replayed the same two ways as the opcode sets, for the same two
  * reasons: one element at a time pins each case's flags exactly, and
