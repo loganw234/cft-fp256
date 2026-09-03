@@ -196,7 +196,7 @@ def sqrt(ctx, x):
 
 
 # ---------------------------------------------------------------------
-# The phase-1 transcendentals, one C call for the whole array. Every
+# The transcendentals, one C call for the whole array. Every
 # one is correctly rounded, so the array answer is the scalar answer
 # element by element - there is no vectorised approximation here to
 # differ from a scalar path, which is a property worth having and one
@@ -260,6 +260,65 @@ def pow(ctx, x, y):
 def hypot(ctx, x, y):
     """out[i] = sqrt(x[i]^2 + y[i]^2)."""
     return _t2(ctx, "hypot", x, y)
+
+
+# The phase-2 trigonometrics, on the same footing: one C call for the
+# array, and the array answer IS the scalar answer element by element,
+# because correct rounding leaves no vectorised approximation to drift.
+
+def sinpi(ctx, x):
+    """out[i] = sin(pi * x[i])."""
+    return _t1(ctx, "sinpi", x)
+
+
+def cospi(ctx, x):
+    """out[i] = cos(pi * x[i])."""
+    return _t1(ctx, "cospi", x)
+
+
+def tanpi(ctx, x):
+    """out[i] = tan(pi * x[i])."""
+    return _t1(ctx, "tanpi", x)
+
+
+def asin(ctx, x):
+    """out[i] = asin(x[i]), in radians."""
+    return _t1(ctx, "asin", x)
+
+
+def acos(ctx, x):
+    """out[i] = acos(x[i]), in radians."""
+    return _t1(ctx, "acos", x)
+
+
+def atan(ctx, x):
+    """out[i] = atan(x[i]), in radians."""
+    return _t1(ctx, "atan", x)
+
+
+def asinpi(ctx, x):
+    """out[i] = asin(x[i]) / pi."""
+    return _t1(ctx, "asinpi", x)
+
+
+def acospi(ctx, x):
+    """out[i] = acos(x[i]) / pi."""
+    return _t1(ctx, "acospi", x)
+
+
+def atanpi(ctx, x):
+    """out[i] = atan(x[i]) / pi."""
+    return _t1(ctx, "atanpi", x)
+
+
+def atan2(ctx, y, x):
+    """out[i] = atan2(y[i], x[i]), in radians - y first, as C has it."""
+    return _t2(ctx, "atan2", y, x)
+
+
+def atan2pi(ctx, y, x):
+    """out[i] = atan2(y[i], x[i]) / pi."""
+    return _t2(ctx, "atan2pi", y, x)
 
 
 # ---------------------------------------------------------------------

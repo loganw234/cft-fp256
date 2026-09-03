@@ -1171,6 +1171,47 @@ public:
         return r;
     }
 
+    /* ---------------------------------------------------------------
+     * The phase-2 trigonometrics (ABI 0.4)
+     *
+     * The eleven whose argument reduction is exact. Same shape, same
+     * promise: correctly rounded in the caller's attribute with the
+     * clause 9.2.1 special values - see cft.h. atan2 takes y first,
+     * as C does.
+     * --------------------------------------------------------------- */
+#define CFT_HPP_TRIG1(name)                                             \
+    call_result name(cft_format fmt, cft_round rnd, const void *a,      \
+                     void *d, std::size_t n) noexcept                   \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_##name(dev_, fmt, rnd, a, d, n, &r.flags);       \
+        return r;                                                       \
+    }
+    CFT_HPP_TRIG1(sinpi)
+    CFT_HPP_TRIG1(cospi)
+    CFT_HPP_TRIG1(tanpi)
+    CFT_HPP_TRIG1(asin)
+    CFT_HPP_TRIG1(acos)
+    CFT_HPP_TRIG1(atan)
+    CFT_HPP_TRIG1(asinpi)
+    CFT_HPP_TRIG1(acospi)
+    CFT_HPP_TRIG1(atanpi)
+#undef CFT_HPP_TRIG1
+    call_result atan2(cft_format fmt, cft_round rnd, const void *a,
+                      const void *b, void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_atan2(dev_, fmt, rnd, a, b, d, n, &r.flags);
+        return r;
+    }
+    call_result atan2pi(cft_format fmt, cft_round rnd, const void *a,
+                        const void *b, void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_atan2pi(dev_, fmt, rnd, a, b, d, n, &r.flags);
+        return r;
+    }
+
 
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
@@ -1771,6 +1812,50 @@ public:
                       "cft_hypot");
     }
 
+    /* ===========================================================
+     * The phase-2 trigonometrics (ABI 0.4)
+     *
+     * sinPi, cosPi and tanPi reduce by x mod 2, which is exact on a
+     * dyadic operand at every magnitude, so none of these needs the
+     * argument reduction against pi that the radian sin/cos/tan
+     * would. cft.h and docs/TRANSCENDENTALS.md carry the semantics.
+     * =========================================================== */
+#define CFT_HPP_CTX_TRIG1(name)                                         \
+    std::uint32_t name(cspan<encoding_type> a, span<encoding_type> d)   \
+    {                                                                   \
+        check_operand(a, d, "a");                                       \
+        return record(dev_->name(F, rnd_, ptr(a), ptr(d), d.size()),    \
+                      "cft_" #name);                                    \
+    }
+    CFT_HPP_CTX_TRIG1(sinpi)
+    CFT_HPP_CTX_TRIG1(cospi)
+    CFT_HPP_CTX_TRIG1(tanpi)
+    CFT_HPP_CTX_TRIG1(asin)
+    CFT_HPP_CTX_TRIG1(acos)
+    CFT_HPP_CTX_TRIG1(atan)
+    CFT_HPP_CTX_TRIG1(asinpi)
+    CFT_HPP_CTX_TRIG1(acospi)
+    CFT_HPP_CTX_TRIG1(atanpi)
+#undef CFT_HPP_CTX_TRIG1
+    /* y first, then x - C's order, and the one every caller expects. */
+    std::uint32_t atan2(cspan<encoding_type> a, cspan<encoding_type> b,
+                        span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->atan2(F, rnd_, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_atan2");
+    }
+    std::uint32_t atan2pi(cspan<encoding_type> a, cspan<encoding_type> b,
+                          span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->atan2pi(F, rnd_, ptr(a), ptr(b), ptr(d),
+                                    d.size()),
+                      "cft_atan2pi");
+    }
+
 
     /* ===========================================================
      * Scalar convenience - every one of these is the batch of one
@@ -1925,6 +2010,40 @@ public:
         record(dev_->hypot(F, rnd_, x.bytes().data(), y.bytes().data(),
                            d.data(), 1),
                "cft_hypot");
+        return make(d);
+    }
+#define CFT_HPP_SCALAR_TRIG1(name)                                      \
+    value_type name(const value_type &x) &                              \
+    {                                                                   \
+        encoding_type d{};                                              \
+        record(dev_->name(F, rnd_, x.bytes().data(), d.data(), 1),      \
+               "cft_" #name);                                           \
+        return make(d);                                                 \
+    }
+    CFT_HPP_SCALAR_TRIG1(sinpi)
+    CFT_HPP_SCALAR_TRIG1(cospi)
+    CFT_HPP_SCALAR_TRIG1(tanpi)
+    CFT_HPP_SCALAR_TRIG1(asin)
+    CFT_HPP_SCALAR_TRIG1(acos)
+    CFT_HPP_SCALAR_TRIG1(atan)
+    CFT_HPP_SCALAR_TRIG1(asinpi)
+    CFT_HPP_SCALAR_TRIG1(acospi)
+    CFT_HPP_SCALAR_TRIG1(atanpi)
+#undef CFT_HPP_SCALAR_TRIG1
+    value_type atan2(const value_type &y, const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->atan2(F, rnd_, y.bytes().data(), x.bytes().data(),
+                           d.data(), 1),
+               "cft_atan2");
+        return make(d);
+    }
+    value_type atan2pi(const value_type &y, const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->atan2pi(F, rnd_, y.bytes().data(), x.bytes().data(),
+                             d.data(), 1),
+               "cft_atan2pi");
         return make(d);
     }
     cft_class_value classify(const value_type &x)
