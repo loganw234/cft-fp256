@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 4   /* 0.4: the phase-2 trigonometrics */
+#define CFT_ABI_VERSION_MINOR 5   /* 0.5: the phase-3 radian trig and hyperbolics */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -886,6 +886,105 @@ CFT_API cft_status cft_atan2(cft_device *dev, cft_format fmt, cft_round rnd,
 CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
                                cft_round rnd, const void *a, const void *b,
                                void *d, size_t n, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
+ *
+ *   d[i] = sin  a[i]      d[i] = sinh  a[i]      d[i] = asinh a[i]
+ *   d[i] = cos  a[i]      d[i] = cosh  a[i]      d[i] = acosh a[i]
+ *   d[i] = tan  a[i]      d[i] = tanh  a[i]      d[i] = atanh a[i]
+ *
+ * CORRECTLY ROUNDED at every format under every attribute, with clause
+ * 9.2.1's special values and exact flags, on exactly the terms the
+ * twenty above are. **The argument of sin, cos and tan is in RADIANS**;
+ * cft_sinpi and friends are the same functions of a half-turn and are
+ * a different, cheaper problem.
+ *
+ * WHAT THESE NINE NEEDED THAT THE TWENTY DID NOT. One thing, and only
+ * the first three need it: `x mod (pi/2)` for an argument as large as
+ * 2^262143. That is a Payne-Hanek reduction against a stored 2/pi of
+ * 270,336 bits (host/src/mp_2opi.h, generated, never transcribed), and
+ * the cancellation it has to survive is a MEASUREMENT rather than a
+ * theorem - the irrationality measure of pi is far too weak to bound it
+ * usefully at this exponent range. The reduction measures the
+ * cancellation from the bits it has and widens its window until the
+ * working precision is covered; past what the stored constant covers it
+ * REFUSES with CFT_ERR_INTERNAL, as everything else in this contract
+ * does rather than return a plausible number.
+ *
+ * The six hyperbolics need no reduction and no new constant: they are
+ * exp and log in different clothes, in the cancellation-free forms
+ * phase 1 already justifies.
+ *
+ * HOST operations, like the twenty: no cft_run pass is issued, no bus
+ * word is produced, `dev` is context, `d` may alias `a`, `n` is
+ * arbitrary and the flag word is the OR across the batch.
+ *
+ * THE EXACT CASES ARE THE ZEROS, AND THAT IS A THEOREM. By
+ * Hermite-Lindemann, e^z is transcendental for every nonzero algebraic
+ * z; sin(x) = a algebraic makes e^(ix) a root of z^2 - 2iaz - 1, and
+ * sinh(x) = a makes e^x a root of z^2 - 2az - 1, so both force x = 0.
+ * Every operand here is a dyadic rational, hence algebraic. So:
+ *
+ *   sin, tan, sinh, tanh, asinh, atanh   exact only at +-0, giving +-0
+ *   cos, cosh                            exact only at 0, giving 1
+ *   acosh                                exact only at 1, giving +0
+ *
+ * and EVERY other result is inexact. There is no half-integer table
+ * here the way there is for sinPi: an odd multiple of pi/2 is
+ * irrational, so no representable argument is ever a zero of cos or a
+ * pole of tan.
+ *
+ * Rows a porter should not have to infer:
+ *
+ *   - sin, cos and tan of an INFINITY are invalid: no limit exists.
+ *   - `tanh(+-inf) = +-1`, EXACTLY, raising nothing. It is a limit that
+ *     happens to be representable.
+ *   - `atanh(+-1) = +-infinity` with **divideByZero** - 754-2019 7.3's
+ *     rule for an exact infinity from finite operands, the same row
+ *     tanPi takes at a pole - and `|x| > 1` is invalid, infinities
+ *     included.
+ *   - `acosh(x)` for any x below 1 is invalid: zeros, every negative
+ *     value, and -infinity. `acosh(+inf)` is +infinity.
+ *   - sinh and cosh OVERFLOW for a large argument, through round_pack
+ *     like any other overflow, so roundTowardZero delivers maxfinite.
+ *     tan can overflow too, near a pole; sin, cos, tanh, asinh, acosh
+ *     and atanh cannot.
+ *   - UNDERFLOW happens for sin, tan, sinh, asinh, atanh and tanh of a
+ *     tiny argument and follows clause 7 through the same round_pack.
+ *   - A signaling NaN raises invalid and delivers the canonical quiet
+ *     NaN, as everywhere else in this contract.
+ *
+ * docs/TRANSCENDENTALS.md's phase-3 section is the design, the
+ * reduction's error bound, and the measured cancellation per format.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_sin(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_cos(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_tan(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_sinh(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_cosh(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_tanh(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_asinh(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_acosh(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
