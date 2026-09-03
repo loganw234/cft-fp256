@@ -47,7 +47,7 @@ output lives in its own header and is compared by eye.
 | Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18) | static-links libcft.a as a direct linker input |
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8) | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
-| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm ~50 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. The committed page still carries the module built that morning, which reports ABI 0.1 - see its README | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
+| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm 66 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt; 38 `cftw_*` exports, the whole ABI 0.2 surface | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
@@ -86,6 +86,15 @@ column stays honest: every example above exercises the original
 vector_fma surface, and none has been extended to the new calls yet.
 host/tests/clause5_check.py is the reference consumer (ctypes,
 every entry point) a new binding can crib declarations from.
+
+One row now *carries* the new surface without exercising it, and the
+distinction is worth keeping: as of 2026-09-02 the wasm module
+exports all twenty clause-5 entry points (it had been built from six
+sources, missing `src/clause5.c` entirely), but nothing in the page
+or its replay calls them - the published vectors cover `cft_run`'s
+opcode space, not clause 5. Present and callable, unexercised here,
+and the only thing that has actually been run against them is
+`clause5_check.py` on the native library.
 
 ## Drop-ins
 
