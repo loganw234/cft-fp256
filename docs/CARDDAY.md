@@ -108,10 +108,19 @@ the element count is an operand rather than a loop bound.
       .bit header's three timestamp bytes. Either copy is the quad;
       REPRODUCED.txt records both hashes and the section hash.
 
-      The single there is 0e7264e, one commit before the round-stage
-      precompute; a single from 9f73107 is building so the pair is one
-      tree, and replaces it if it closes. First quad to close at 135
-      with the sequencer in it.
+      The single half followed from the same tree (2026-09-02, 20:48,
+      the desktop's WSL, 1h32m): 9f73107, 135 MHz, retiming + phys_opt,
+      routed WNS +0.055 with 0 failing endpoints of 572,783, kernel WNS
+      **+0.618** (worst path the seedop bypass into s0_byp_d, 15 logic
+      levels), verify-image 8/8, re-hashed after the copy:
+
+          ~/cardday-tip/cft_hw_single.xclbin    kernel_wns +0.618
+          sha256 afc483e2e78e09f870c0a1f95d270d7959b068f78e030b67950d0c70092dfda4
+
+      It replaces the 0e7264e single (kernel +0.433), kept beside it in
+      prev-0e7264e/; SHA256SUMS covers the pair and both manifests. The
+      pair is one tree, and the first pair with the sequencer in both
+      halves.
 
       FIRST fallback: the 130 MHz general-purpose pair at b1a014c in
       `~/cardday-ms` (single +0.220, quad +0.009, verified 8/8),

@@ -1158,3 +1158,19 @@ Windows host and 126 s on ubuntu, a gap measured here and not
 yet explained. The box's bindings stage passed 80 tests against gmpy2
 2.3.1, a release newer than the 2.1.2 and 2.2.1 the binding was
 written against.
+
+## 2026-09-02 - the tip single closes at 135 MHz: kernel +0.618, the pair is one tree
+
+    build-single-tip-135  9f73107, one tile, 135 MHz, RETIMING=1 PHYS_OPT=1
+    host                  DESKTOP-T33SK86 (WSL cft2204), 1h32m, beside the language runs
+    routed WNS +0.055     TNS 0.000   failing endpoints 0 of 572,783   WHS +0.009
+    kernel worst path     +0.618 ns   op_r -> g_bank128 lane 1 s0_byp_d (seedop bypass, 15 levels)
+    xclbin                35,805,116 bytes, sha256 afc483e2...dfda4, manifest clean,
+                          hw/verify-image.sh 8/8, staged as ~/cardday-tip/cft_hw_single.xclbin
+
+Against the case-ROM single from 0e7264e (kernel +0.433), the round
+stage's precompute buys another 0.19 ns on the single tile, and the
+worst path is the seedop bypass family again - the one the quad also
+shows nothing of at +0.143, because in four tiles it is placement and
+routing that set the margin, not logic depth. The card-day pair is
+now single and quad from one commit.
