@@ -22,6 +22,23 @@ extra-element-goes-left convention diverges.
 It also checks the two calling-convention refusals in both directions,
 since a reduction issued through cft_run() or an elementwise op issued
 through cft_reduce() must be an error rather than a plausible number.
+
+All seven of clause 9.4's reductions are here. The five that arrived
+with the 0.6 step bring two kinds of claim beyond "the C agrees with
+the model", and both are checked THROUGH THE LIBRARY rather than in the
+model, because they are claims about what the library does:
+
+  - the two COMPOSITION IDENTITIES. sumSquare is cft_reduce(CFT_DOT,
+    a, a) and sumAbs is an abs pass then CFT_SUM, bit for bit and flag
+    for flag, on every input except the one row 9.4 orders differently
+    (an infinity beside a NaN). Those are how the device and software
+    backends are made to agree, so a run that did not check them would
+    be taking the mechanism on trust.
+  - the SCALED PRODUCTS' invariant: pr is always in +-[1, 2), and a
+    plain scaledProd never signals overflow or underflow no matter how
+    far its true product leaves the format. Checked over pools built
+    to leave it - twenty maxfinites, twenty minimum subnormals, and
+    the two alternating.
 """
 
 import argparse
@@ -37,10 +54,14 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import (  # noqa: E402
     FORMATS, PREC_CODE, RND_NAMES,
+    FLAG_OVERFLOW, FLAG_UNDERFLOW, is_nan, max_normal_bits,
+    min_subnormal_bits, unpack,
 )
 from cft_golden.reduce import (  # noqa: E402
-    OP_SUM, OP_DOT, canonical_ranges, combine, fdot, fsum, reduce_bits,
-    split,
+    OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, SP_PROD, SP_PROD_SUM,
+    SP_PROD_DIFF, SCALED_KINDS, SCALED_KIND_NAMES,
+    canonical_ranges, combine, fdot, fsum, fsumabs, fsumsq, reduce_bits,
+    scaled_prod, split,
 )
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
@@ -50,6 +71,18 @@ CFT_ERR_INVALID_ARGUMENT = 1
 CFT_ERR_UNSUPPORTED = 2
 
 OP_FMA = 0          # an elementwise opcode, for the refusal check
+
+# The four reductions cft_reduce carries, and the model function each
+# is scored against. Keyed by opcode so a new one cannot be added to
+# the sweep without also being given a definition to be wrong against.
+REDUCE_REF = {
+    OP_SUM:    lambda fmt, xs, ys, rnd: fsum(fmt, xs, rnd),
+    OP_DOT:    lambda fmt, xs, ys, rnd: fdot(fmt, xs, ys, rnd),
+    OP_SUMSQ:  lambda fmt, xs, ys, rnd: fsumsq(fmt, xs, rnd),
+    OP_SUMABS: lambda fmt, xs, ys, rnd: fsumabs(fmt, xs, rnd),
+}
+REDUCE_NAMES = {OP_SUM: "sum", OP_DOT: "dot",
+                OP_SUMSQ: "sumsq", OP_SUMABS: "sumabs"}
 
 
 def load_library():
@@ -88,6 +121,18 @@ def bind(lib):
     lib.cft_op_name.restype = ctypes.c_char_p
     lib.cft_supports.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     lib.cft_supports.restype = ctypes.c_int
+    i64p = ctypes.POINTER(ctypes.c_int64)
+    lib.cft_scaled_prod.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_void_p,
+                                    ctypes.c_void_p, i64p, ctypes.c_size_t,
+                                    u32p]
+    lib.cft_scaled_prod.restype = ctypes.c_int
+    for name in ("cft_scaled_prod_sum", "cft_scaled_prod_diff"):
+        fn = getattr(lib, name)
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                       ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                       i64p, ctypes.c_size_t, u32p]
+        fn.restype = ctypes.c_int
 
 
 def to_bytes(fmt, values):
@@ -151,11 +196,9 @@ class Checker:
         return st, int.from_bytes(d.raw[:esz], "little"), flags.value
 
     def one(self, op, fmt, rnd, xs, ys):
-        st, got, gflags = self.call(op, fmt, rnd, xs, ys)
-        if op == OP_SUM:
-            want, wflags = fsum(fmt, xs, rnd)
-        else:
-            want, wflags = fdot(fmt, xs, ys, rnd)
+        st, got, gflags = self.call(op, fmt, rnd, xs, ys if op == OP_DOT
+                                    else None)
+        want, wflags = REDUCE_REF[op](fmt, xs, ys, rnd)
         self.checked += 1
         if st != CFT_OK:
             self.fail(op, fmt, rnd, xs, ys, f"status {st}")
@@ -164,14 +207,197 @@ class Checker:
                       f"got 0x{got:x}/{gflags:02x} "
                       f"want 0x{want:x}/{wflags:02x}")
 
+    def scaled(self, kind, fmt, rnd, xs, ys):
+        """One scaled product against the model, pr AND scale AND flags.
+
+        Also asserts the invariant the operation exists for, on every
+        call that reaches the tree: pr in +-[1, 2), and no overflow or
+        underflow from a plain scaledProd whatever its true product is.
+        """
+        esz = fmt.width // 8
+        n = len(xs)
+        a = ctypes.create_string_buffer(to_bytes(fmt, xs), max(n, 1) * esz)
+        b = ctypes.create_string_buffer(to_bytes(fmt, ys), max(n, 1) * esz)
+        pr = ctypes.create_string_buffer(esz)
+        scale = ctypes.c_int64(-0x5EED)
+        flags = ctypes.c_uint32(0xDEADBEEF)
+        fn = {SP_PROD: self.lib.cft_scaled_prod,
+              SP_PROD_SUM: self.lib.cft_scaled_prod_sum,
+              SP_PROD_DIFF: self.lib.cft_scaled_prod_diff}[kind]
+        args = [self.dev, PREC_CODE[fmt.name], rnd,
+                ctypes.cast(a, ctypes.c_void_p)]
+        if kind != SP_PROD:
+            args.append(ctypes.cast(b, ctypes.c_void_p))
+        args += [ctypes.cast(pr, ctypes.c_void_p), ctypes.byref(scale), n,
+                 ctypes.byref(flags)]
+        st = fn(*args)
+        self.checked += 1
+        if st != CFT_OK:
+            self.fail_scaled(kind, fmt, rnd, xs, ys, f"status {st}")
+            return
+        got = int.from_bytes(pr.raw[:esz], "little")
+        wpr, wsf, wfl = scaled_prod(fmt, xs, ys if kind != SP_PROD else None,
+                                    kind, rnd)
+        if got != wpr or scale.value != wsf or flags.value != wfl:
+            self.fail_scaled(kind, fmt, rnd, xs, ys,
+                             f"got 0x{got:x}/{scale.value}/{flags.value:02x} "
+                             f"want 0x{wpr:x}/{wsf}/{wfl:02x}")
+            return
+        # the invariant, asserted on the library's own answer
+        if kind == SP_PROD and (flags.value & (FLAG_OVERFLOW |
+                                               FLAG_UNDERFLOW)):
+            self.fail_scaled(kind, fmt, rnd, xs, ys,
+                             "a plain scaledProd raised overflow or "
+                             f"underflow (0x{flags.value:02x})")
+            return
+        if n and not is_nan(fmt, got) and \
+                (got & ~fmt.sign_mask) not in (0, fmt.exp_mask << fmt.man_w):
+            u = unpack(fmt, got)
+            if u.e + u.m.bit_length() - 1 != 0:
+                self.fail_scaled(kind, fmt, rnd, xs, ys,
+                                 f"pr 0x{got:x} is not in +-[1, 2)")
+
     def fail(self, op, fmt, rnd, xs, ys, why):
         self.failed += 1
         if self.failed <= 5:
-            name = "sum" if op == OP_SUM else "dot"
+            name = REDUCE_NAMES[op]
             print(f"FAIL {name} {fmt.name} {RND_NAMES[rnd]} n={len(xs)}: {why}")
             print(f"     a = {[hex(x) for x in xs[:6]]}")
             if op == OP_DOT:
                 print(f"     b = {[hex(y) for y in ys[:6]]}")
+
+    def fail_scaled(self, kind, fmt, rnd, xs, ys, why):
+        self.failed += 1
+        if self.failed <= 5:
+            print(f"FAIL {SCALED_KIND_NAMES[kind]} {fmt.name} "
+                  f"{RND_NAMES[rnd]} n={len(xs)}: {why}")
+            print(f"     a = {[hex(x) for x in xs[:6]]}")
+            if kind != SP_PROD:
+                print(f"     b = {[hex(y) for y in ys[:6]]}")
+
+
+def check_identities(ck, fmt, rng, trials):
+    """The two compositions, THROUGH THE LIBRARY.
+
+    sumSquare must be bit-identical to cft_reduce(CFT_DOT, a, a) and
+    sumAbs to an abs pass followed by CFT_SUM - flags included, at every
+    n and in every attribute. That is not a nice property that happens
+    to hold: it is the mechanism by which a device backend and the
+    software backend give the same bits, so it is checked here rather
+    than assumed from the fact that the library issues those calls.
+
+    The one input class 9.4 excludes - an infinity AND a NaN in the same
+    vector, where the standard puts +inf ahead of the quiet NaN - is
+    counted separately and checked against the OVERRIDE instead, with
+    the plain dot as the negative control. Skipping it silently would
+    hide the day the override stopped firing.
+    """
+    esz = fmt.width // 8
+    bad = 0
+    identical = overridden = 0
+    for _ in range(trials):
+        n = rng.choice([0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33,
+                        63, 64, 65, 127, 128, 129])
+        rnd = rng.choice(list(RND_NAMES))
+        xs = [rand_operand(fmt, rng) for _ in range(n)]
+        has_inf = any(((x >> fmt.man_w) & fmt.exp_mask) == fmt.exp_mask and
+                      not (x & fmt.man_mask) for x in xs)
+        has_nan = any(((x >> fmt.man_w) & fmt.exp_mask) == fmt.exp_mask and
+                      (x & fmt.man_mask) for x in xs)
+
+        st_sq, sq, f_sq = ck.call(OP_SUMSQ, fmt, rnd, xs)
+        st_dot, dot, f_dot = ck.call(OP_DOT, fmt, rnd, xs, xs)
+        st_ab, ab, f_ab = ck.call(OP_SUMABS, fmt, rnd, xs)
+        # the abs pass, through the library, then the sum
+        a = ctypes.create_string_buffer(to_bytes(fmt, xs), max(n, 1) * esz)
+        w = ctypes.create_string_buffer(max(n, 1) * esz)
+        fl = ctypes.c_uint32(0)
+        st_abs = ck.lib.cft_run(ck.dev, 4, PREC_CODE[fmt.name], rnd,
+                                ctypes.cast(a, ctypes.c_void_p), None, None,
+                                ctypes.cast(w, ctypes.c_void_p), n,
+                                ctypes.byref(fl), None)
+        absed = [int.from_bytes(w.raw[i * esz:(i + 1) * esz], "little")
+                 for i in range(n)]
+        st_sum, s, f_sum = ck.call(OP_SUM, fmt, rnd, absed)
+        ck.checked += 2
+        if CFT_OK not in (st_sq, st_dot, st_ab, st_sum) or st_abs != CFT_OK:
+            print(f"FAIL identity call status {fmt.name} n={n}")
+            bad += 1
+            continue
+
+        if has_inf and has_nan:
+            overridden += 1
+            want = (fmt.exp_mask << fmt.man_w)          # +inf
+            if sq != want or ab != want:
+                print(f"FAIL override {fmt.name} {RND_NAMES[rnd]} n={n}: "
+                      f"sumsq 0x{sq:x} sumabs 0x{ab:x}, want +inf")
+                bad += 1
+            # the negative control: the plain tree says NaN there
+            elif not is_nan(fmt, dot):
+                print(f"FAIL override {fmt.name} n={n}: the plain dot did "
+                      f"not return a NaN (0x{dot:x}), so the override "
+                      "cannot be shown to be doing anything")
+                bad += 1
+        else:
+            identical += 1
+            if (sq, f_sq) != (dot, f_dot):
+                print(f"FAIL sumsq != dot(a,a) {fmt.name} {RND_NAMES[rnd]} "
+                      f"n={n}: 0x{sq:x}/{f_sq:02x} vs 0x{dot:x}/{f_dot:02x}")
+                bad += 1
+            if (ab, f_ab) != (s, f_sum | fl.value):
+                print(f"FAIL sumabs != abs+sum {fmt.name} {RND_NAMES[rnd]} "
+                      f"n={n}: 0x{ab:x}/{f_ab:02x} vs 0x{s:x}/"
+                      f"{f_sum | fl.value:02x}")
+                bad += 1
+    print(f"  {fmt.name}: {identical} vectors where both identities hold "
+          f"verbatim, {overridden} where 9.4's infinity-over-NaN row "
+          f"applies instead")
+    if overridden == 0:
+        print("FAIL the override was never exercised - this check is not "
+              "checking what it says it is")
+        bad += 1
+    return bad
+
+
+def scaled_pools(fmt, rng):
+    """Vectors whose true product leaves the format many times over.
+
+    The point of a scaled product is that these are ordinary inputs to
+    it, so they are the ones it should be scored on.
+    """
+    big, tiny = max_normal_bits(fmt), min_subnormal_bits(fmt)
+    nbig, ntiny = max_normal_bits(fmt, 1), min_subnormal_bits(fmt, 1)
+    return [
+        [big] * 20,
+        [tiny] * 20,
+        [big, tiny] * 12,
+        [nbig, ntiny, big, tiny] * 6,
+        [big] * 9 + [tiny] * 3,
+        [rand_operand(fmt, rng) for _ in range(17)],
+        [rand_finite(fmt, rng, spread=fmt.emax - 2) for _ in range(33)],
+    ]
+
+
+def check_scaled(ck, fmt, rng, trials):
+    """The three scaled products against the model, over both the
+    adversarial pools and random vectors, at every length that changes
+    the tree's shape."""
+    bad = 0
+    lengths = [0, 1, 2, 3, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65]
+    for pool in scaled_pools(fmt, rng):
+        for kind in SCALED_KINDS:
+            for rnd in list(RND_NAMES):
+                n = min(len(pool), rng.choice(lengths))
+                xs = pool[:n]
+                ys = [rand_operand(fmt, rng) for _ in range(n)]
+                ck.scaled(kind, fmt, rnd, xs, ys)
+    for _ in range(trials):
+        n = rng.choice(lengths + [128, 129])
+        rnd = rng.choice(list(RND_NAMES))
+        xs = [rand_operand(fmt, rng) for _ in range(n)]
+        ys = [rand_operand(fmt, rng) for _ in range(n)]
+        ck.scaled(rng.choice(SCALED_KINDS), fmt, rnd, xs, ys)
+    return bad
 
 
 def check_refusals(lib, dev, fmt):
@@ -196,12 +422,30 @@ def check_refusals(lib, dev, fmt):
         print(f"FAIL cft_reduce(fma) returned {st}, want INVALID_ARGUMENT")
         bad += 1
 
-    if lib.cft_op_name(OP_SUM) != b"sum" or lib.cft_op_name(OP_DOT) != b"dot":
-        print("FAIL cft_op_name does not know the reduction opcodes")
-        bad += 1
+    for op, want in ((OP_SUM, b"sum"), (OP_DOT, b"dot"),
+                     (OP_SUMSQ, b"sumsq"), (OP_SUMABS, b"sumabs")):
+        if lib.cft_op_name(op) != want:
+            print(f"FAIL cft_op_name({op}) is not {want!r}")
+            bad += 1
+        if not lib.cft_supports(dev, op, PREC_CODE[fmt.name]):
+            print(f"FAIL software backend reports {want!r} unsupported")
+            bad += 1
+        # every one of them must be refused through cft_run
+        st = lib.cft_run(dev, op, PREC_CODE[fmt.name], 0,
+                         ctypes.cast(a, ctypes.c_void_p), None,
+                         ctypes.cast(a, ctypes.c_void_p),
+                         ctypes.cast(d, ctypes.c_void_p), 4, None, None)
+        if st != CFT_ERR_INVALID_ARGUMENT:
+            print(f"FAIL cft_run({want!r}) returned {st}, want "
+                  "INVALID_ARGUMENT")
+            bad += 1
 
-    if not lib.cft_supports(dev, OP_SUM, PREC_CODE[fmt.name]):
-        print("FAIL software backend reports sum unsupported")
+    # 30 is the first unassigned opcode now that 28 and 29 are taken
+    if lib.cft_op_name(30) != b"reserved":
+        print("FAIL opcode 30 should still be unassigned")
+        bad += 1
+    if lib.cft_supports(dev, 30, PREC_CODE[fmt.name]):
+        print("FAIL cft_supports says an unassigned opcode is supported")
         bad += 1
     return bad
 
@@ -363,18 +607,21 @@ def main():
             for rnd in rounds:
                 xs = [rand_operand(fmt, rng) for _ in range(n)]
                 ys = [rand_operand(fmt, rng) for _ in range(n)]
-                ck.one(OP_SUM, fmt, rnd, xs, ys)
-                ck.one(OP_DOT, fmt, rnd, xs, ys)
+                for op in (OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS):
+                    ck.one(op, fmt, rnd, xs, ys)
 
         for _ in range(args.trials):
             n = rng.randint(41, 400)
             rnd = rng.choice(rounds)
             xs = [rand_operand(fmt, rng) for _ in range(n)]
             ys = [rand_operand(fmt, rng) for _ in range(n)]
-            ck.one(rng.choice((OP_SUM, OP_DOT)), fmt, rnd, xs, ys)
+            ck.one(rng.choice((OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS)),
+                   fmt, rnd, xs, ys)
 
         bad += check_refusals(lib, dev, fmt)
         bad += check_partition(lib, dev, fmt, rng, 60)
+        bad += check_identities(ck, fmt, rng, max(120, args.trials // 8))
+        bad += check_scaled(ck, fmt, rng, max(200, args.trials // 4))
     bad += check_c_partitioner()
 
     lib.cft_close(dev)
@@ -382,13 +629,15 @@ def main():
     total = ck.checked
     bad += ck.failed
     print(f"{total} reductions checked across "
-          f"{len(args.formats)} formats, {bad} failures")
+          f"{len(args.formats)} formats, all seven of clause 9.4, "
+          f"{bad} failures")
     if total < 1000:
         raise SystemExit("suspiciously few checks ran - the sweep did not "
                          "cover what it claims to")
     if bad:
         raise SystemExit(1)
-    print("libcft and the golden model agree on the tree, bits and flags")
+    print("libcft and the golden model agree on the tree, the scaling, "
+          "the bits and the flags")
 
 
 if __name__ == "__main__":
