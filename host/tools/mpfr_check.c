@@ -64,6 +64,15 @@
  * (cvt_to's invalid-case delivery table), and why class, totalOrder
  * and the signaling comparisons are left to the other oracles.
  *
+ * The augmented arithmetic operations of clause 9.5 are checked here
+ * with one difference worth stating up front: MPFR has no
+ * roundTiesTowardZero, so this harness cannot ask it for the answer.
+ * It asks MPFR for the EXACT value at a precision that provably holds
+ * it - and proves it by requiring a zero ternary - then applies 9.5's
+ * tie rule itself and derives the error term by exact subtraction. See
+ * the banner above check_augmented for why that is still an oracle and
+ * exactly which part of it is not.
+ *
  * Usage:  mpfr-check [randoms-per-format] [seed]
  *         (directed specials always run; randoms are exponent-banded)
  */
@@ -145,7 +154,9 @@ enum {
     T_SINPI, T_COSPI, T_TANPI, T_ASIN, T_ACOS, T_ATAN, T_ATAN2,
     T_ASINPI, T_ACOSPI, T_ATANPI, T_ATAN2PI,
     T_SIN, T_COS, T_TAN, T_SINH, T_COSH, T_TANH, T_ASINH, T_ACOSH,
-    T_ATANH, NTALLY
+    T_ATANH,
+    /* the augmented arithmetic operations of 754-2019 9.5 */
+    T_AUG_ADD, T_AUG_SUB, T_AUG_MUL, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -158,7 +169,8 @@ static const char *const TALLY_NAME[NTALLY] = {
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
-    "atanh"
+    "atanh",
+    "aug_add", "aug_sub", "aug_mul"
 };
 static uint64_t tally[NTALLY][4];
 
@@ -1735,6 +1747,350 @@ static void check_rem(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 }
 
+/* ---- the augmented arithmetic operations (754-2019 9.5) ------------ *
+ *
+ * WHY THIS IS AN ORACLE, AND WHAT IT IS AN ORACLE FOR.
+ *
+ * MPFR has no roundTiesTowardZero. It has no mode that breaks a tie
+ * toward the smaller magnitude, and MPFR_RNDZ is not it - RNDZ
+ * truncates every inexact value, not only the ties. So this harness
+ * cannot ask MPFR for the answer; it asks MPFR for the EXACT VALUE and
+ * applies 9.5's rule itself:
+ *
+ *   1. compute x op y at a precision that holds the exact result with
+ *      no rounding at all, and PROVE it did by requiring MPFR's ternary
+ *      to be zero. That precision is not 2p: the exact sum of two
+ *      p-bit values whose exponents span the whole format is
+ *      emax - emin + p bits wide (524,522 at binary256), and the
+ *      product's residual against a subnormal result is nearly as wide.
+ *      AUG_PREC below covers both with margin, and the ternary check is
+ *      what makes "exact" a measurement rather than an assumption.
+ *   2. round that exact value to the format by 9.5's own definition -
+ *      scale to the format's grid, split into an integer and a
+ *      fraction with exact MPFR arithmetic, and compare the fraction
+ *      with one half: strictly above rounds away, equal keeps the
+ *      smaller magnitude ("the one with smaller magnitude shall be
+ *      delivered"), below truncates. Overflow is the rounded value's
+ *      exponent exceeding emax, and 9.5 sends it to an infinity.
+ *   3. subtract exactly for the error term, and decide representability
+ *      by rounding it the same way and asking whether the rounding
+ *      changed it - which is 9.5's "can be represented exactly as a
+ *      finite number in sourceFormat" tested rather than reasoned.
+ *
+ * Every arithmetic step above is MPFR's, every step is exact by
+ * construction and checked to be, and the only thing this file
+ * contributes is the tie rule and the flag policy - which are the two
+ * things 9.5 states in words and the library must be scored against.
+ * That makes this a genuine independent oracle for the VALUES and a
+ * restatement for the FLAGS, and saying which is which is the point of
+ * this paragraph.
+ *
+ * The flags are 9.5's, not clause 7's defaults: inexact "only when
+ * roundTiesTowardZero(x + y) overflows", underflow when the error term
+ * is "non-zero and lies strictly between +-b^emin" even though that
+ * error term is exact, and both together for the one case 9.5 gives
+ * augmentedMultiplication where the residual falls below the subnormal
+ * grid.
+ */
+
+#define AUG_COUNT 3
+static const char *const AUGN[AUG_COUNT] = { "aug_add", "aug_sub",
+                                             "aug_mul" };
+
+/* Wide enough to hold every exact intermediate: the widest is a SUM
+ * spanning the whole exponent range, emax - emin + p bits. */
+static long aug_prec(const fdesc *f)
+{
+    return (long)f->emax - f->emin + 2 * f->p + 16;
+}
+
+/* Round the exact non-zero finite value v into f's grid under 9.5's
+ * roundTiesTowardZero, into `out`. Returns 1 if it overflowed. */
+static int aug_rttz(const fdesc *f, mpfr_srcptr v, mpfr_ptr out)
+{
+    mpz_t n;
+    mpfr_t scaled, frac, half;
+    long E, q, er;
+    int sign = mpfr_signbit(v) ? 1 : 0, cmp, ovf = 0;
+
+    E = (long)mpfr_get_exp(v) - 1;               /* floor(log2 |v|) */
+    q = (E > f->emin ? E : f->emin) - (f->p - 1);
+    mpz_init(n);
+    mpfr_init2(scaled, aug_prec(f));
+    mpfr_init2(frac, aug_prec(f));
+    mpfr_init2(half, 8);
+    mpfr_abs(scaled, v, MPFR_RNDN);
+    mpfr_mul_2si(scaled, scaled, -q, MPFR_RNDN); /* exact: an exponent */
+    mpfr_get_z(n, scaled, MPFR_RNDZ);            /* floor */
+    mpfr_sub_z(frac, scaled, n, MPFR_RNDN);      /* exact */
+    mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+    cmp = mpfr_cmp(frac, half);
+    if (cmp > 0)
+        mpz_add_ui(n, n, 1);                     /* strictly above half */
+    /* cmp == 0 is the TIE, and 9.5 keeps the smaller magnitude: nothing
+     * happens here, and that one line is the whole difference from
+     * roundTiesToEven. */
+    if (mpz_sgn(n) == 0) {
+        mpfr_set_zero(out, sign ? -1 : 1);       /* 6.3: the exact sign */
+    } else {
+        er = q + (long)mpz_sizeinbase(n, 2) - 1;
+        if (er > f->emax) {
+            ovf = 1;
+            mpfr_set_inf(out, sign ? -1 : 1);
+        } else {
+            mpfr_set_z_2exp(out, n, q, MPFR_RNDN);       /* exact */
+            if (sign)
+                mpfr_neg(out, out, MPFR_RNDN);
+        }
+    }
+    mpz_clear(n);
+    mpfr_clear(scaled);
+    mpfr_clear(frac);
+    mpfr_clear(half);
+    return ovf;
+}
+
+/* The pair and the flags for one case. fn: 0 add, 1 sub, 2 mul. */
+static void aug_oracle(const fdesc *f, int fn, const uint8_t *ba,
+                       const uint8_t *bb, mpfr_ptr want_r, mpfr_ptr want_e,
+                       uint32_t *flags)
+{
+    mpfr_t a, b, exact, rv, err, emin_mag;
+    cls ca, cb;
+    uint32_t fl = 0;
+    int tern = 0, nan_in;
+    long P = aug_prec(f);
+
+    classify(f, ba, &ca);
+    classify(f, bb, &cb);
+    nan_in = ca.is_nan || cb.is_nan;
+    if (ca.is_snan || cb.is_snan)
+        fl |= CFT_FLAG_INVALID;
+
+    mpfr_init2(a, f->p);
+    mpfr_init2(b, f->p);
+    mpfr_init2(exact, P);
+    mpfr_init2(rv, P);
+    mpfr_init2(err, P);
+    mpfr_init2(emin_mag, 8);
+    enc_to_mpfr(f, ba, a);
+    enc_to_mpfr(f, bb, b);
+
+    if (fn == 2)
+        tern = mpfr_mul(exact, a, b, MPFR_RNDN);
+    else if (fn == 1)
+        tern = mpfr_sub(exact, a, b, MPFR_RNDN);
+    else
+        tern = mpfr_add(exact, a, b, MPFR_RNDN);
+    if (tern != 0) {
+        /* The working precision was supposed to make this impossible.
+         * A non-zero ternary means the harness, not the library, is
+         * wrong - surfaced rather than absorbed. */
+        mismatches++;
+        if (shown < 16) {
+            shown++;
+            printf("  AUG-TERNARY %s %s: the exact %s was rounded at %ld "
+                   "bits\n", f->name, AUGN[fn],
+                   fn == 2 ? "product" : "sum", P);
+        }
+    }
+
+    if (mpfr_nan_p(exact)) {
+        mpfr_set_nan(want_r);
+        mpfr_set_nan(want_e);
+        if (!nan_in)
+            fl |= CFT_FLAG_INVALID;      /* inf + (-inf), inf * 0 */
+        goto done;
+    }
+    if (!mpfr_number_p(exact) || mpfr_zero_p(exact)) {
+        /* An infinity at unbounded range can only come from an infinite
+         * OPERAND, so it signals nothing; a zero carries its own sign
+         * (6.3), and 9.5 gives both outputs the same value either way. */
+        mpfr_set(want_r, exact, MPFR_RNDN);
+        mpfr_set(want_e, exact, MPFR_RNDN);
+        goto done;
+    }
+
+    if (aug_rttz(f, exact, rv)) {
+        mpfr_set(want_r, rv, MPFR_RNDN);
+        mpfr_set(want_e, rv, MPFR_RNDN);
+        fl |= CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        goto done;
+    }
+    mpfr_set(want_r, rv, MPFR_RNDN);
+
+    tern = mpfr_sub(err, exact, rv, MPFR_RNDN);
+    if (tern != 0) {
+        mismatches++;
+        if (shown < 16) {
+            shown++;
+            printf("  AUG-TERNARY %s %s: the residual was rounded\n",
+                   f->name, AUGN[fn]);
+        }
+    }
+    if (mpfr_zero_p(err)) {
+        /* 9.5: an error term equal to zero "is returned with the sign of
+         * roundTiesTowardZero(x + y)". */
+        mpfr_set_zero(want_e, mpfr_signbit(rv) ? -1 : 1);
+        goto done;
+    }
+    {
+        mpfr_t rounded;
+        int tiny;
+        mpfr_set_ui_2exp(emin_mag, 1, f->emin, MPFR_RNDN);
+        tiny = mpfr_cmpabs(err, emin_mag) < 0;
+        mpfr_init2(rounded, P);
+        (void)aug_rttz(f, err, rounded);         /* cannot overflow */
+        if (mpfr_equal_p(rounded, err)) {
+            mpfr_set(want_e, err, MPFR_RNDN);    /* exactly representable */
+            if (tiny)
+                fl |= CFT_FLAG_UNDERFLOW;
+        } else {
+            /* 9.5's one non-representable delivery, augmentedMulti-
+             * plication only: the residual rounded the same way, with
+             * the underflow flag raised and inexact signalled. */
+            mpfr_set(want_e, rounded, MPFR_RNDN);
+            fl |= CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT;
+        }
+        mpfr_clear(rounded);
+    }
+
+done:
+    *flags = fl;
+    mpfr_clear(a); mpfr_clear(b); mpfr_clear(exact);
+    mpfr_clear(rv); mpfr_clear(err); mpfr_clear(emin_mag);
+}
+
+/* Both values and the flag word, as ONE case in the ledger. */
+static void aug_judge(int ti, int fj, int fn, const fdesc *f,
+                      const uint8_t *a, const uint8_t *b,
+                      const uint8_t *gr, const uint8_t *ge,
+                      mpfr_srcptr wr, mpfr_srcptr we,
+                      uint32_t gf, uint32_t wf, cft_status st)
+{
+    int rbad = (st != CFT_OK) || !agree(f, gr, wr);
+    int ebad = (st != CFT_OK) || !agree(f, ge, we);
+    int fbad = (gf != wf);
+    if (rbad || ebad)
+        mismatches++;
+    if (fbad)
+        flag_mismatches++;
+    if (rbad || fbad)
+        report_c5(AUGN[fn], "9.5", f, a, b, f, gr, wr, gf, wf, rbad,
+                  st != CFT_OK ? "(status!=OK)" : "(r)");
+    if (ebad && !rbad)
+        report_c5(AUGN[fn], "9.5", f, a, b, f, ge, we, gf, wf, ebad,
+                  "(e, the error term)");
+    cases++;
+    tally[ti][fj]++;
+}
+
+static cft_status aug_lib(const fdesc *f, int fn, const uint8_t *a,
+                          const uint8_t *b, uint8_t *r, uint8_t *e,
+                          uint32_t *fl)
+{
+    switch (fn) {
+    case 0:  return cft_augmented_add(dev, f->fmt, a, b, r, e, 1, fl);
+    case 1:  return cft_augmented_sub(dev, f->fmt, a, b, r, e, 1, fl);
+    default: return cft_augmented_mul(dev, f->fmt, a, b, r, e, 1, fl);
+    }
+}
+
+/* 2^E as a normal encoding (E must be >= emin). */
+static void aug_pow2(const fdesc *f, long E, int sign, uint8_t *b)
+{
+    memset(b, 0, 32);
+    set_field(b, f->man_w, f->exp_w, (uint64_t)(E + f->emax));
+    if (sign)
+        set_field(b, 1 + f->exp_w + f->man_w - 1, 1, 1);
+}
+
+static void check_augmented(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    static uint8_t xa[96][32], xb[96][32];
+    int np = 0, fn, i, j, s;
+    uint8_t gr[32], ge[32];
+
+    /* THE TIE, at binade edges: x is 2^k + 1 ulp (an ODD significand,
+     * which is the only place roundTiesTowardZero and roundTiesToEven
+     * can differ) and y is exactly half an ulp of that binade. */
+    {
+        long ks[6];
+        int nk = 0;
+        ks[nk++] = 0;
+        ks[nk++] = 1;
+        ks[nk++] = f->emin;
+        ks[nk++] = f->emin + f->p;
+        ks[nk++] = f->emax - 1;
+        ks[nk++] = f->emax / 2;
+        for (i = 0; i < nk; i++) {
+            long k = ks[i];
+            if (k - f->p < f->emin || np > 88)
+                continue;
+            for (s = 0; s <= 1; s++) {
+                aug_pow2(f, k, s, xa[np]);
+                set_field(xa[np], 0, 1, 1);            /* + 1 ulp: odd */
+                aug_pow2(f, k - f->p, 0, xb[np]);      /* half an ulp */
+                np++;
+                aug_pow2(f, k, s, xa[np]);
+                set_field(xa[np], 0, 1, 1);
+                aug_pow2(f, k - f->p, 1, xb[np]);      /* and below it */
+                np++;
+            }
+        }
+    }
+    /* THE OVERFLOW THRESHOLD: the largest finite plus exactly half an
+     * ulp is the midpoint 9.5 rounds DOWN, silently; one ulp is past
+     * it and goes to an infinity with overflow and inexact. */
+    for (s = 0; s <= 1 && np < 92; s++) {
+        int k;
+        for (k = 0; k < 2; k++) {
+            memset(xa[np], 0, 32);
+            set_field(xa[np], f->man_w, f->exp_w,
+                      (uint64_t)((1ull << f->exp_w) - 2));
+            for (i = 0; i < f->man_w; i++)
+                set_field(xa[np], i, 1, 1);            /* max normal */
+            if (s)
+                set_field(xa[np], 1 + f->exp_w + f->man_w - 1, 1, 1);
+            aug_pow2(f, f->emax - f->p + k, s, xb[np]);
+            np++;
+        }
+    }
+    /* A SUBNORMAL RESIDUAL: 1 against the bottom of the grid, which is
+     * underflow with no inexact - the combination 9.5 alone produces. */
+    for (i = 0; i < 3 && np < 95; i++) {
+        aug_pow2(f, i == 0 ? 0 : (i == 1 ? f->p : f->emax - 1), 0, xa[np]);
+        memset(xb[np], 0, 32);
+        set_field(xb[np], i, 1, 1);                    /* a tiny subnormal */
+        np++;
+    }
+
+    for (fn = 0; fn < AUG_COUNT; fn++) {
+        for (i = 0; i < pn + np; i++) {
+            int jmax = i < pn ? pn : 1;
+            for (j = 0; j < jmax; j++) {
+                const uint8_t *pa = i < pn ? pool[i] : xa[i - pn];
+                const uint8_t *pb = i < pn ? pool[j] : xb[i - pn];
+                uint32_t gf = 0, wf = 0;
+                mpfr_t wr, we;
+                cft_status st;
+
+                mpfr_init2(wr, f->p);
+                mpfr_init2(we, f->p);
+                aug_oracle(f, fn, pa, pb, wr, we, &wf);
+                memset(gr, 0, sizeof gr);
+                memset(ge, 0, sizeof ge);
+                st = aug_lib(f, fn, pa, pb, gr, ge, &gf);
+                aug_judge(T_AUG_ADD + fn, fj, fn, f, pa, pb, gr, ge, wr, we,
+                          gf, wf, st);
+                mpfr_clear(wr);
+                mpfr_clear(we);
+            }
+        }
+    }
+}
+
 /* ---- the transcendentals ------------------------------------------- *
  *
  * The nine functions of ABI 0.3 and the eleven of ABI 0.4 against
@@ -2729,7 +3085,8 @@ int main(int argc, char **argv)
         check_logb(fi, pool, pn, 24 * mult);
         check_next(fi, pool, pn);
         check_rem(fi, pool, pn, 48 * mult);
-        printf("%s clause5: %llu cases done (running mismatches: "
+        check_augmented(fi, pool, pn);
+        printf("%s clause5+9.5: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,

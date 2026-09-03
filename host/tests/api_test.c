@@ -1165,6 +1165,165 @@ int main(void)
               "scaleb in place matches (staged path)");
     }
 
+    /* --- the augmented arithmetic operations (754-2019 9.5) -------
+     *
+     * host/tests/augmented_check.py proves these against the model at
+     * scale and the published sets replay them; what belongs HERE is
+     * this file's charter - refusals, aliasing, and the rows whose
+     * expected bits come from reading 9.5 rather than from either
+     * implementation.
+     *
+     * Every anchor below is derivable with the subclause open:
+     *
+     *  - THE TIE. (1 + 2^-23) + 2^-24 is 1 + 3*2^-24, exactly halfway
+     *    between 1 + 2^-23 and 1 + 2^-22. 9.5 delivers "the one with
+     *    smaller magnitude", so r is 1 + 2^-23 = 0x3f800001 and the
+     *    residual is 2^-24 = 0x33800000. roundTiesToEven would step UP
+     *    to 0x3f800002, because the lower neighbour's last bit is odd -
+     *    which is why this exact case is the one that separates a
+     *    conforming implementation from a plausible one, and why it is
+     *    asserted here at binary32 and binary64 both.
+     *  - THE OVERFLOW THRESHOLD. 9.5: an infinitely precise result
+     *    "with magnitude equal to b^emax x (b - 1/2 b^(1-p)) shall
+     *    round to b^emax x (b - b^(1-p))". At binary32 that midpoint is
+     *    maxfinite + 2^103, and it lands on maxfinite raising NOTHING,
+     *    since inexact is signalled "only when roundTiesTowardZero
+     *    overflows". One ulp higher (2^104) is past it, and both
+     *    outputs become +infinity with overflow and inexact.
+     *  - UNDERFLOW WITHOUT INEXACT. 1 + 2^-149 has an exact residual of
+     *    2^-149, which is non-zero and strictly inside +-2^emin, so the
+     *    underflow flag rises alone - a combination no other operation
+     *    in this library can produce.
+     *  - THE ZERO SIGNS. e "is returned with the sign of
+     *    roundTiesTowardZero(x + y)" when the residual is zero, so
+     *    (-1) + 0 gives (-1, -0); r's own sign is 6.3's, so 1 + (-1)
+     *    gives (+0, +0) and -0 - (+0) gives (-0, -0).
+     */
+    {
+        uint8_t a[8 * 8], b[8 * 8], r[8 * 8], e[8 * 8], r2[8 * 8];
+        uint32_t fl = 0xdead;
+        int k;
+
+        put32(a, 0x3f800001u);               /* 1 + 2^-23 */
+        put32(b, 0x33800000u);               /* 2^-24: an exact tie */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x3f800001u &&
+              get32(e) == 0x33800000u && fl == 0,
+              "augmentedAddition breaks the tie toward the SMALLER "
+              "magnitude (got r=0x%08x e=0x%08x fl=0x%02x)",
+              (unsigned)get32(r), (unsigned)get32(e), (unsigned)fl);
+        /* the same operands through ordinary addition step up, which is
+         * what makes the line above a test rather than a coincidence */
+        st = cft_run(dev, CFT_ADD, CFT_FP32, CFT_RNE, a, NULL, b, r2, 1,
+                     NULL, NULL);
+        CHECK(st == CFT_OK && get32(r2) == 0x3f800002u,
+              "roundTiesToEven steps up from that midpoint");
+
+        put64(a, UINT64_C(0x3ff0000000000001));   /* 1 + 2^-52 */
+        put64(b, UINT64_C(0x3ca0000000000000));   /* 2^-53 */
+        st = cft_augmented_add(dev, CFT_FP64, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get64(r) == UINT64_C(0x3ff0000000000001) &&
+              get64(e) == UINT64_C(0x3ca0000000000000) && fl == 0,
+              "the same tie at binary64");
+
+        put32(a, 0x7f7fffffu);               /* the largest finite */
+        put32(b, 0x73000000u);               /* 2^103: half an ulp */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7f7fffffu &&
+              get32(e) == 0x73000000u && fl == 0,
+              "exactly ON the overflow threshold: maxfinite, silently");
+        put32(b, 0x73800000u);               /* 2^104: one ulp */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7f800000u &&
+              get32(e) == 0x7f800000u &&
+              fl == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "past it: +infinity in BOTH outputs, overflow and inexact");
+
+        put32(a, 0x3f800000u);               /* 1.0 */
+        put32(b, 0x00000001u);               /* 2^-149 */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x3f800000u &&
+              get32(e) == 0x00000001u && fl == CFT_FLAG_UNDERFLOW,
+              "a subnormal residual raises underflow and NOT inexact");
+        st = cft_augmented_mul(dev, CFT_FP32, b, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0 && get32(e) == 0 &&
+              fl == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "a product residual the format cannot hold: both raised");
+
+        put32(a, 0xbf800000u);               /* -1.0 */
+        put32(b, 0x00000000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0xbf800000u &&
+              get32(e) == 0x80000000u && fl == 0,
+              "a zero error term takes the sign of r, not of the sum");
+        put32(b, 0x3f800000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0 && get32(e) == 0 && fl == 0,
+              "exact cancellation is +0 in both outputs (6.3)");
+        put32(a, 0x80000000u);
+        put32(b, 0x00000000u);
+        st = cft_augmented_sub(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x80000000u &&
+              get32(e) == 0x80000000u && fl == 0,
+              "-0 - (+0) is (-0, -0)");
+
+        put32(a, 0x7f800000u);
+        put32(b, 0xff800000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7fc00000u &&
+              get32(e) == 0x7fc00000u && fl == CFT_FLAG_INVALID,
+              "inf + (-inf): the same quiet NaN for both outputs");
+        put32(a, 0x7f800001u);               /* a signaling NaN */
+        put32(b, 0x3f800000u);
+        st = cft_augmented_mul(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7fc00000u &&
+              get32(e) == 0x7fc00000u && fl == CFT_FLAG_INVALID,
+              "a signaling NaN propagates as both results, invalid raised");
+        put32(a, 0x7f800000u);
+        put32(b, 0x00000000u);
+        st = cft_augmented_mul(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7fc00000u &&
+              get32(e) == 0x7fc00000u && fl == CFT_FLAG_INVALID,
+              "inf * 0 likewise");
+        put32(a, 0x7f800000u);
+        put32(b, 0x3f800000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7f800000u &&
+              get32(e) == 0x7f800000u && fl == 0,
+              "an infinite OPERAND signals nothing - only overflow does");
+
+        /* refusals and aliasing, this file's charter */
+        put32(a, 0x3f800000u);
+        put32(b, 0x40000000u);
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, r, r, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "r and e must not be the same buffer");
+        CHECK(cft_augmented_mul(dev, CFT_FP32, NULL, b, r, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "a is not optional");
+        CHECK(cft_augmented_sub(dev, CFT_FP32, a, NULL, r, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "b is not optional");
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, NULL, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "r is not optional");
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, r, NULL, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "e is not optional");
+        CHECK(cft_augmented_add(dev, (cft_format)9, a, b, r, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "a bad format is refused");
+        fl = 0xdead;
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, r, e, 0, &fl)
+              == CFT_OK && fl == 0, "n = 0 succeeds with clean flags");
+
+        for (k = 0; k < 8; k++) {
+            put32(a + 4 * k, 0x3f800000u + (uint32_t)k);
+            put32(b + 4 * k, 0x33800000u + (uint32_t)k);
+        }
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 8, &fl);
+        CHECK(st == CFT_OK, "augmented batch, separate buffers");
+        memcpy(r2, a, 32);
+        st = cft_augmented_add(dev, CFT_FP32, r2, b, r2, e, 8, &fl);
+        CHECK(st == CFT_OK && memcmp(r2, r, 32) == 0,
+              "r may alias a: each element is read before it is written");
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));
