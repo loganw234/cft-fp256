@@ -73,6 +73,9 @@ host/cft-bench
 host/api-test
 host/reduce-parts
 host/vector-fma
+host/vector-fma-cpp
+host/cpp-api-test
+host/cpp-api-test20
 host/device-test
 host/divsqrt-soak
 host/clause5-soak
