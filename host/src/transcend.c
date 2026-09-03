@@ -1,10 +1,19 @@
 /* Copyright 2026 Logan W.
  * SPDX-License-Identifier: Apache-2.0
  *
- * The phase-1 transcendental set: exp, expm1, exp2, log, log1p, log2,
- * log10, pow and hypot - correctly rounded at all four formats under
- * all five rounding attributes, with the 754-2019 clause 9.2 special
- * values and the contract's exact flags.
+ * The transcendental set: phase 1's exp, expm1, exp2, log, log1p,
+ * log2, log10, pow and hypot, and phase 2's sinPi, cosPi, tanPi, asin,
+ * acos, atan, atan2, asinPi, acosPi, atanPi and atan2Pi - correctly
+ * rounded at all four formats under all five rounding attributes, with
+ * the 754-2019 clause 9.2 special values and the contract's exact
+ * flags.
+ *
+ * Phase 2 is the part of clause 9 whose argument reduction is EXACT.
+ * sinPi reduces by x mod 2 and x is a dyadic rational, so the
+ * reduction is a mask on the encoding at every magnitude; the inverse
+ * functions have nothing to reduce and meet pi only as a factor of the
+ * answer. sin, cos and tan of a radian argument - the reduction
+ * against pi itself - are not here.
  *
  * python/cft_golden/transcend.py is the definition of every bit here,
  * and the correspondence is deliberate: the same special-value order,
@@ -643,13 +652,213 @@ static int mp_log1p_small(cft_mp *r, const cft_mp *u, int W)
     return mp_atanh2(r, &z, W);
 }
 
+
+/* ---- phase 2: the trigonometric series ------------------------------ *
+ *
+ * Both series below split their terms into a POSITIVE and a NEGATIVE
+ * accumulator and subtract once at the end, instead of adding
+ * alternating terms into a single running sum. The reason is the error
+ * model: cft_mp_add's unlike-signs rule charges a factor of two per
+ * step even when nothing cancels, because the result can be half the
+ * larger operand. Over a hundred and thirty terms that is 2^130 and
+ * the bound saturates; split in two it is one doubling in total, and
+ * the accumulators themselves only ever add like signs.
+ *
+ * The final subtraction is safe by construction. For sin, the positive
+ * part is v + v^5/120 + ... and the negative v^3/6 + ..., so with
+ * |v| <= pi/4 the difference keeps more than four fifths of the larger;
+ * for cos it keeps two thirds; for atan, more than nine tenths. None of
+ * them is a cancellation.
+ */
+
+/* sin(v) and cos(v) together, for 0 <= v <= pi/4.
+ *
+ * term_n = v^n / n!, and n mod 4 says which of the four accumulators it
+ * belongs to: 0 cos+, 1 sin+, 2 cos-, 3 sin-. The terms decrease
+ * monotonically because v < 1, so the first one that falls below the
+ * working precision's reach ends the sum - and the test is against the
+ * SINE's accumulator, which is the smaller of the two whenever v is
+ * small and is therefore the one that sets the requirement. */
+static int mp_sincos(cft_mp *sn, cft_mp *cs, const cft_mp *v, int W)
+{
+    cft_mp term, tmp, acc[4];
+    uint32_t n;
+    int i;
+
+    for (i = 0; i < 4; i++)
+        cft_mp_set_zero(&acc[i]);
+    if (cft_mp_set_ui(&term, W, 0, 1, 0))          /* term_0 = 1 */
+        return 1;
+    cft_mp_copy(&acc[0], &term);
+    for (n = 1; n < 8192; n++) {
+        if (cft_mp_mul(&tmp, &term, v, W))
+            return 1;
+        if (cft_mp_div_ui(&term, &tmp, n, W))
+            return 1;
+        i = (int)(n & 3);
+        if (cft_mp_add(&tmp, &acc[i], &term, W))
+            return 1;
+        cft_mp_copy(&acc[i], &tmp);
+        if (n >= 3 && term_negligible(&term, &acc[1], W))
+            break;
+    }
+    for (i = 0; i < 4; i++)
+        mp_bump(&acc[i], 1);                       /* the truncated tail */
+    if (cft_mp_sub(sn, &acc[1], &acc[3], W))
+        return 1;
+    return cft_mp_sub(cs, &acc[0], &acc[2], W);
+}
+
+/* atan(z) for 0 < z <= 0.15, by its alternating series, split. */
+static int mp_atan_series(cft_mp *r, const cft_mp *z, int W)
+{
+    cft_mp z2, pw, q, pos, neg, tmp;
+    uint32_t k;
+
+    if (cft_mp_mul(&z2, z, z, W))
+        return 1;
+    cft_mp_copy(&pos, z);
+    cft_mp_set_zero(&neg);
+    cft_mp_copy(&pw, z);
+    for (k = 1; k < 16384; k++) {
+        if (cft_mp_mul(&tmp, &pw, &z2, W))
+            return 1;
+        cft_mp_copy(&pw, &tmp);
+        if (cft_mp_div_ui(&q, &pw, 2 * k + 1, W))
+            return 1;
+        if (term_negligible(&q, &pos, W))
+            break;
+        if (k & 1) {
+            if (cft_mp_add(&tmp, &neg, &q, W))
+                return 1;
+            cft_mp_copy(&neg, &tmp);
+        } else {
+            if (cft_mp_add(&tmp, &pos, &q, W))
+                return 1;
+            cft_mp_copy(&pos, &tmp);
+        }
+    }
+    mp_bump(&pos, 1);
+    mp_bump(&neg, 1);
+    return cft_mp_sub(r, &pos, &neg, W);
+}
+
+/* The number of halvings before the series. atan(u) =
+ * 2 atan(u/(1 + sqrt(1+u^2))) is exact, and three of them take the
+ * largest argument this routine ever sees - 2 - down to 0.1421, where
+ * the series needs about W/5.6 terms. Each halving costs one square
+ * root and one division and no cancellation at all: 1 + u^2 and
+ * 1 + sqrt are both like-signs adds. */
+#define TR_ATAN_HALVINGS 3
+
+/* atan(t) for any t > 0.
+ *
+ * t >= 2 goes through atan(t) = pi/2 - atan(1/t), where 1/t <= 1/2 puts
+ * atan(1/t) below 0.464 and the difference above 1.1 - so the
+ * subtraction loses no bits. Below 2 the halvings handle it directly;
+ * the threshold is 2 rather than 1 precisely so that the pi/2 branch
+ * never has to subtract something close to pi/2 from it. */
+static int mp_atan_pos(cft_mp *r, const cft_mp *t, int W)
+{
+    cft_mp u, one, s, d, q, a, pi;
+    int i, recip;
+
+    if (t->zero)
+        return 1;                         /* the callers screen zero out */
+    recip = cft_mp_exp2_of(t) >= 1;
+    if (cft_mp_set_ui(&one, W, 0, 1, 0))
+        return 1;
+    if (recip) {
+        if (cft_mp_div(&u, &one, t, W))
+            return 1;
+    } else {
+        cft_mp_copy(&u, t);
+    }
+    for (i = 0; i < TR_ATAN_HALVINGS; i++) {
+        if (cft_mp_mul(&s, &u, &u, W))
+            return 1;
+        if (cft_mp_add(&d, &s, &one, W))
+            return 1;
+        if (cft_mp_sqrt(&s, &d, W))
+            return 1;
+        if (cft_mp_add(&d, &s, &one, W))
+            return 1;
+        if (cft_mp_div(&q, &u, &d, W))
+            return 1;
+        cft_mp_copy(&u, &q);
+    }
+    if (mp_atan_series(&a, &u, W))
+        return 1;
+    cft_mp_shift(&a, TR_ATAN_HALVINGS);
+    if (!recip) {
+        cft_mp_copy(r, &a);
+        return 0;
+    }
+    if (cft_mp_const(&pi, CFT_MP_C_PI, W))
+        return 1;
+    cft_mp_shift(&pi, -1);                /* pi/2, exactly */
+    return cft_mp_sub(r, &pi, &a, W);
+}
+
+/* sqrt((1 - |x|)(1 + |x|)) for a lane with |x| < 1.
+ *
+ * The product form, not 1 - x^2. For |x| just below 1 the factor
+ * 1 - |x| is EXACT - both operands are exact at the working precision,
+ * so the cancellation amplifies an error of zero and costs nothing -
+ * where 1 - x^2 formed directly would lose every bit the answer has.
+ * Phase 1's log(m') is the same shape for the same reason. */
+static int mp_asin_root(cft_mp *r, const lane *x, int W)
+{
+    cft_mp ax, one, lo, hi, p;
+    if (cft_mp_set_bn(&ax, W, 0, &x->m, x->e))
+        return 1;
+    if (cft_mp_set_ui(&one, W, 0, 1, 0))
+        return 1;
+    if (cft_mp_sub(&lo, &one, &ax, W))
+        return 1;
+    if (cft_mp_add(&hi, &one, &ax, W))
+        return 1;
+    if (cft_mp_mul(&p, &lo, &hi, W))
+        return 1;
+    return cft_mp_sqrt(r, &p, W);
+}
+
+/* Multiply by the generated 1/pi, for the Pi-variants of the inverse
+ * functions. A division by pi would do as well and cost sixty times
+ * more; the constant carries its own two units of error and the
+ * multiply adds three. */
+static int mp_over_pi(cft_mp *r, const cft_mp *a, int W)
+{
+    cft_mp inv;
+    if (cft_mp_const(&inv, CFT_MP_C_INVPI, W))
+        return 1;
+    return cft_mp_mul(r, a, &inv, W);
+}
+
 /* ---- the evaluator ------------------------------------------------- */
+
+/* An internal function code, past the ABI's: the magnitude is
+ * `quarters` * pi/4. asin(+-1), acos(+-0), acos(-1), atan(+-inf) and
+ * every radian row of atan2's axis-and-diagonal table are that, and
+ * none of them is exact, so all of them go through the same Ziv loop
+ * as everything else. */
+#define TR_PI_QUARTERS 100
 
 typedef struct {
     const cft_fmt_desc *f;
     int fn;
     lane a;
     lane b;
+    /* phase 2. s is the exactly reduced |x| mod 2 argument of the
+     * Pi-variants; k_even and want_cos are the quadrant's answers to
+     * "which series is the magnitude"; x_neg is atan2's second
+     * operand's sign, which decides pi - a rather than a. */
+    cft_bn s_m;
+    long   s_e;
+    int    k_even;
+    int    want_cos;
+    int    x_neg;
+    int    quarters;
 } tr_args;
 
 /* |f(a[,b])| at working precision W. The SIGN of the result is decided
@@ -804,6 +1013,124 @@ static int tr_eval(const tr_args *A, int W, cft_mp *r)
         if (cft_mp_add(&s, &x, &y, Wi))
             return 1;
         return cft_mp_sqrt(r, &s, Wi);
+    }
+
+    /* ---- phase 2 ---------------------------------------------- */
+
+    case TR_PI_QUARTERS: {
+        cft_mp pi;
+        if (cft_mp_const(&pi, CFT_MP_C_PI, Wi))
+            return 1;
+        cft_mp_shift(&pi, -2);                 /* pi/4, exactly */
+        return cft_mp_mul_ui(r, &pi, (uint32_t)A->quarters, Wi);
+    }
+
+    case CFT_TR_SINPI:
+    case CFT_TR_COSPI:
+    case CFT_TR_TANPI: {
+        cft_mp s, pi, v, sn, cs;
+        /* |s| <= 1/4 is EXACT on the encoding, so v = pi|s| carries
+         * only the constant's own error - no argument reduction
+         * against pi happens here at all, which is the whole reason
+         * these three are in phase 2. */
+        if (cft_mp_set_bn(&s, Wi, 0, &A->s_m, A->s_e))
+            return 1;
+        if (cft_mp_const(&pi, CFT_MP_C_PI, Wi))
+            return 1;
+        if (cft_mp_mul(&v, &s, &pi, Wi))
+            return 1;
+        if (mp_sincos(&sn, &cs, &v, Wi))
+            return 1;
+        if (A->fn == CFT_TR_TANPI)
+            return A->k_even ? cft_mp_div(r, &sn, &cs, Wi)
+                             : cft_mp_div(r, &cs, &sn, Wi);
+        cft_mp_copy(r, A->want_cos ? &cs : &sn);
+        return 0;
+    }
+
+    case CFT_TR_ASIN:
+    case CFT_TR_ASINPI: {
+        cft_mp ax, rt, a;
+        if (mp_asin_root(&rt, &A->a, Wi))
+            return 1;
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_div(&t, &ax, &rt, Wi))
+            return 1;
+        if (mp_atan_pos(&a, &t, Wi))
+            return 1;
+        if (A->fn == CFT_TR_ASINPI)
+            return mp_over_pi(r, &a, Wi);
+        cft_mp_copy(r, &a);
+        return 0;
+    }
+
+    case CFT_TR_ACOS:
+    case CFT_TR_ACOSPI: {
+        cft_mp ax, rt, a, pi;
+        if (mp_asin_root(&rt, &A->a, Wi))
+            return 1;
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        /* atan(sqrt(1-x^2)/|x|) rather than pi/2 - asin: for |x| just
+         * below 1 the difference form cancels the whole answer away,
+         * and this one computes a small angle as a small angle. */
+        if (cft_mp_div(&t, &rt, &ax, Wi))
+            return 1;
+        if (mp_atan_pos(&a, &t, Wi))
+            return 1;
+        if (A->a.sign) {
+            /* acos(-|x|) = pi - acos(|x|), and acos(|x|) <= pi/2, so
+             * the result never drops below pi/2 and the subtraction
+             * costs at most one bit. */
+            if (cft_mp_const(&pi, CFT_MP_C_PI, Wi))
+                return 1;
+            if (cft_mp_sub(&tmp, &pi, &a, Wi))
+                return 1;
+            cft_mp_copy(&a, &tmp);
+        }
+        if (A->fn == CFT_TR_ACOSPI)
+            return mp_over_pi(r, &a, Wi);
+        cft_mp_copy(r, &a);
+        return 0;
+    }
+
+    case CFT_TR_ATAN:
+    case CFT_TR_ATANPI: {
+        cft_mp a;
+        if (cft_mp_set_bn(&t, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (mp_atan_pos(&a, &t, Wi))
+            return 1;
+        if (A->fn == CFT_TR_ATANPI)
+            return mp_over_pi(r, &a, Wi);
+        cft_mp_copy(r, &a);
+        return 0;
+    }
+
+    case CFT_TR_ATAN2:
+    case CFT_TR_ATAN2PI: {
+        cft_mp ay, ax, a, pi;
+        if (cft_mp_set_bn(&ay, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_set_bn(&ax, Wi, 0, &A->b.m, A->b.e))
+            return 1;
+        if (cft_mp_div(&t, &ay, &ax, Wi))
+            return 1;
+        if (mp_atan_pos(&a, &t, Wi))
+            return 1;
+        if (A->x_neg) {
+            /* pi - atan(|y/x|) with atan below pi/2: at most one bit. */
+            if (cft_mp_const(&pi, CFT_MP_C_PI, Wi))
+                return 1;
+            if (cft_mp_sub(&tmp, &pi, &a, Wi))
+                return 1;
+            cft_mp_copy(&a, &tmp);
+        }
+        if (A->fn == CFT_TR_ATAN2PI)
+            return mp_over_pi(r, &a, Wi);
+        cft_mp_copy(r, &a);
+        return 0;
     }
     default:
         return 1;
@@ -1472,6 +1799,570 @@ static cft_status do_hypot(const cft_fmt_desc *f, const lane *x, const lane *y,
     return tr_ziv(&A, 0, rnd, out, flags);
 }
 
+
+/* ---- phase 2: exact helpers on the encoding ------------------------- */
+
+/* q = a / b when b divides a exactly; returns 1 when it does not.
+ * Both operands here are ODD SIGNIFICANDS, so at most p bits wide, and
+ * schoolbook is the whole of it. bigint.h deliberately carries no
+ * division and this is the only place outside mpfloat.c that wants
+ * one. */
+static int bn_exact_div(cft_bn *q, const cft_bn *a, const cft_bn *b)
+{
+    cft_bn rem;
+    int i, nb = cft_bn_bitlen(a);
+    cft_bn_zero(q);
+    cft_bn_zero(&rem);
+    for (i = nb - 1; i >= 0; i--) {
+        if (cft_bn_shl(&rem, &rem, 1))
+            return 1;
+        if (cft_bn_bit(a, i))
+            cft_bn_setbit(&rem, 0);
+        if (cft_bn_shl(q, q, 1))
+            return 1;
+        if (cft_bn_cmp(&rem, b) >= 0) {
+            cft_bn_sub(&rem, &rem, b);
+            cft_bn_setbit(q, 0);
+        }
+    }
+    return cft_bn_is_zero(&rem) ? 0 : 1;
+}
+
+/* |a| == |b| for two finite nonzero lanes. The exponents are compared
+ * first so the alignment shift can never leave the container: two
+ * values with the same base-two exponent differ by at most p places. */
+static int lane_mag_eq(const lane *a, const lane *b)
+{
+    cft_bn ma, mb;
+    long e0;
+    if (lane_vexp(a) != lane_vexp(b))
+        return 0;
+    e0 = a->e < b->e ? a->e : b->e;
+    if (cft_bn_shl(&ma, &a->m, (int)(a->e - e0)))
+        return 0;
+    if (cft_bn_shl(&mb, &b->m, (int)(b->e - e0)))
+        return 0;
+    return cft_bn_cmp(&ma, &mb) == 0;
+}
+
+/* |y| / |x| as an exact dyadic m * 2^e with m odd, or 1 when the
+ * quotient is not a dyadic rational at all.
+ *
+ * |y|/|x| = (My/Mx) * 2^(Ey-Ex) with both odd parts, so it is dyadic
+ * exactly when Mx divides My - and the quotient's odd part is then no
+ * wider than My. That is why atan2's neighbour case never has to think
+ * about an odd part wider than p bits. */
+static int lane_exact_quotient(const lane *y, const lane *x, cft_bn *m,
+                               long *e)
+{
+    cft_bn My, Mx;
+    long Ey, Ex;
+    lane_odd(y, &My, &Ey);
+    lane_odd(x, &Mx, &Ex);
+    if (bn_exact_div(m, &My, &Mx))
+        return 1;
+    *e = Ey - Ex;
+    return 0;
+}
+
+/* Round a value known to lie strictly between the exact dyadic
+ * V = m * 2^e and V -+ a quarter of the format's grid step there.
+ *
+ * round_neighbour above starts from a representable ENCODING, which is
+ * not enough for atan2: the value it must sit beside is the quotient
+ * y/x, and that can land on a subnormal MIDPOINT rather than on the
+ * grid - atan2(minSubnormal, 2) is exactly that case, and a value just
+ * below a midpoint rounds differently from the midpoint itself. So this
+ * one works from the dyadic directly and derives the step.
+ *
+ * Returns 1 when V is not on the eighth-step grid, which the callers
+ * screen for; falling through to the enclosure is then correct, because
+ * a V that coarse is not a rounding boundary. */
+static int round_side(const cft_fmt_desc *f, int sign, const cft_bn *m,
+                      long e, int away, int rnd, cft_bn *out,
+                      uint32_t *flags)
+{
+    cft_bn w;
+    long vexp, g;
+
+    vexp = e + cft_bn_bitlen(m) - 1;
+    g = vexp - (long)f->prec + 1;
+    if (g < (long)f->emin - f->man_w)
+        g = (long)f->emin - f->man_w;
+    if (e < g - 3)
+        return 1;
+    cft_tr_neighbour++;
+    if (cft_bn_shl(&w, m, (int)(e - g + 3)))
+        return 1;
+    if (away) {
+        if (cft_bn_inc(&w))
+            return 1;
+    } else {
+        if (cft_bn_is_zero(&w))
+            return 1;
+        cft_bn_dec(&w);
+    }
+    return round_exact(f, sign, &w, g - 3, rnd, out, flags);
+}
+
+/* A witness beside the exactly representable 1 or 1/2. */
+static int round_side_of(const cft_fmt_desc *f, int sign, long e, int away,
+                         int rnd, cft_bn *out, uint32_t *flags)
+{
+    cft_bn one;
+    cft_bn_zero(&one);
+    cft_bn_set_u32(&one, 1);
+    return round_side(f, sign, &one, e, away, rnd, out, flags);
+}
+
+/* |x| mod 2 = k/2 + S * 2^e, EXACTLY, and that is the whole reason the
+ * Pi-variants belong to phase 2 rather than to the reduction problem:
+ * a dyadic operand reduced modulo 2 is a mask, at every magnitude, with
+ * no constant consumed and no cancellation possible. sinPi(2^262000) is
+ * decided by integer arithmetic where sin(2^262000) would need pi to a
+ * quarter of a million bits.
+ *
+ * Returns k in 0..4 and writes |S| with its sign. S == 0 exactly when
+ * |x| is a half-integer, which is where every exact case of the family
+ * lives - so the callers, which have already handled those, can assert
+ * that it is not. */
+static int lane_pi_reduce(const lane *L, cft_bn *smag, int *sneg, long *se)
+{
+    cft_bn tm, low;
+    long k2, d;
+    int k0, carry, k, nb;
+
+    cft_bn_zero(smag);
+    *sneg = 0;
+    *se = 0;
+    if (L->e >= 1)                       /* every bit is above 2^1 */
+        return 0;                        /* an even integer */
+    k2 = -L->e;
+    nb = cft_bn_bitlen(&L->m);
+    if (k2 >= (long)nb + 2) {
+        /* |x| < 1/4, so the reduction is the identity and k is 0 */
+        cft_bn_copy(smag, &L->m);
+        *se = L->e;
+        return 0;
+    }
+    cft_bn_copy(&tm, &L->m);
+    if (k2 + 1 < nb)
+        cft_bn_mask(&tm, (int)(k2 + 1));
+    if (k2 == 0)                         /* an integer: t is 0 or 1 */
+        return 2 * cft_bn_bit(&tm, 0);
+    d = k2 - 1;
+    if (d == 0)                          /* a half-integer: 2t is an int */
+        return (int)cft_bn_extract(&tm, 0, 2);
+    k0 = (int)cft_bn_extract(&tm, (int)d, 2);
+    carry = cft_bn_bit(&tm, (int)d - 1);
+    cft_bn_copy(&low, &tm);
+    cft_bn_mask(&low, (int)d);
+    *se = L->e;
+    if (carry) {
+        cft_bn p2;
+        cft_bn_zero(&p2);
+        cft_bn_setbit(&p2, (int)d);
+        cft_bn_sub(smag, &p2, &low);     /* |S| = 2^d - low, in (0, 2^(d-1)] */
+        *sneg = 1;
+        k = k0 + 1;
+    } else {
+        cft_bn_copy(smag, &low);
+        k = k0;
+    }
+    return k;
+}
+
+/* ---- phase 2 drivers ------------------------------------------------ */
+
+/* A result that is an exact multiple of pi/4: the axes and diagonals of
+ * atan2, asin(+-1), acos(+-0), acos(-1), atan(+-inf).
+ *
+ * In the Pi-variant every one of them is a dyadic rational the format
+ * holds exactly and the answer raises NOTHING; in radians every one but
+ * zero is a rounding of an irrational number and is inexact. That
+ * asymmetry is not an implementation detail - it is the reason the Pi
+ * forms are separate functions. */
+static cft_status deliver_quarters(const cft_fmt_desc *f, int sign,
+                                   int quarters, int over_pi, int rnd,
+                                   cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn m;
+
+    *flags = 0;
+    if (quarters == 0) {
+        cft_tr_exact++;
+        cft_sf_zero(f, sign, out);
+        return CFT_OK;
+    }
+    if (over_pi) {
+        cft_tr_exact++;
+        cft_bn_zero(&m);
+        cft_bn_set_u32(&m, (uint32_t)quarters);
+        return round_exact(f, sign, &m, -2, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = TR_PI_QUARTERS;
+    A.quarters = quarters;
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
+static int tr_nan_in(const cft_fmt_desc *f, const lane *a, const lane *b,
+                     cft_bn *out, uint32_t *flags)
+{
+    if ((a->kind == K_NAN && a->signaling) ||
+        (b && b->kind == K_NAN && b->signaling)) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return 1;
+    }
+    if (a->kind == K_NAN || (b && b->kind == K_NAN)) {
+        cft_sf_qnan(f, out);
+        *flags = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static cft_status do_pi_trig(const cft_fmt_desc *f, int fn, const lane *a,
+                             int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn M;
+    long E, sv;
+    int sneg, k, k_even, sin_neg, cos_neg, sign, want_cos;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF) {
+        /* sin, cos and tan of an infinity have no limit at all. */
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        if (fn == CFT_TR_COSPI)
+            put_one(f, 0, out);                 /* cosPi(+-0) = 1 */
+        else
+            cft_sf_zero(f, a->sign, out);       /* sinPi/tanPi(+-0) */
+        return CFT_OK;
+    }
+
+    /* The exact cases, and Niven's theorem says they are all of them:
+     * for a rational r, sin(pi r) is rational only at 0, +-1/2 and +-1,
+     * and a DYADIC r can never produce +-1/2 (that would need r = 1/6
+     * and its friends), so sinPi and cosPi are exact exactly at the
+     * half-integers. tan(pi r) is rational only at 0 and +-1, which
+     * puts tanPi's exact cases at the quarter-integers and its poles at
+     * the half-integers. Everything else is irrational, hence not a
+     * rounding boundary, hence decided by the enclosure in finite
+     * time. */
+    lane_odd(a, &M, &E);
+    if (E >= 0) {                               /* |x| is an integer n */
+        int odd_n = (E == 0);
+        cft_tr_exact++;
+        if (fn == CFT_TR_SINPI)
+            cft_sf_zero(f, a->sign, out);       /* the sign of n */
+        else if (fn == CFT_TR_COSPI)
+            put_one(f, odd_n, out);             /* (-1)^n */
+        else
+            cft_sf_zero(f, a->sign ^ odd_n, out);
+        return CFT_OK;
+    }
+    if (E == -1) {                              /* |x| is n + 1/2 */
+        int neg = a->sign ^ cft_bn_bit(&M, 1);
+        if (fn == CFT_TR_SINPI) {
+            cft_tr_exact++;
+            put_one(f, neg, out);               /* +-1 */
+            return CFT_OK;
+        }
+        if (fn == CFT_TR_COSPI) {
+            cft_tr_exact++;
+            cft_sf_zero(f, 0, out);             /* +0, for both signs */
+            return CFT_OK;
+        }
+        /* tanPi at a pole: an exact infinity from finite operands, so
+         * 754-2019 7.3 raises divideByZero. The sign is sinPi's,
+         * because cosPi there is +0. MPFR 4.2.1 delivers the same rows
+         * (tanpi(1/2) = +Inf, tanpi(3/2) = -Inf, divide-by-zero set). */
+        cft_sf_inf(f, neg, out);
+        *flags = CFT_SF_DIVZERO;
+        return CFT_OK;
+    }
+    if (E == -2 && fn == CFT_TR_TANPI) {        /* |x| is n/4, n odd */
+        cft_tr_exact++;
+        put_one(f, a->sign ^ cft_bn_bit(&M, 1), out);
+        return CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    k = lane_pi_reduce(a, &A.s_m, &sneg, &A.s_e);
+    if (cft_bn_is_zero(&A.s_m))
+        return CFT_ERR_INTERNAL;                /* a half-integer got past */
+    k_even = !(k & 1);
+    A.k_even = k_even;
+
+    /* The quadrant's signs, read off exactly. No evaluation decides the
+     * sign of a value it is about to round. */
+    switch (k & 3) {
+    case 0:  sin_neg = sneg;  cos_neg = 0;      break;
+    case 1:  sin_neg = 0;     cos_neg = !sneg;  break;
+    case 2:  sin_neg = !sneg; cos_neg = 1;      break;
+    default: sin_neg = 1;     cos_neg = sneg;   break;
+    }
+    if (fn == CFT_TR_SINPI)
+        sign = a->sign ^ sin_neg;               /* odd function */
+    else if (fn == CFT_TR_COSPI)
+        sign = cos_neg;                         /* even function */
+    else
+        sign = a->sign ^ sin_neg ^ cos_neg;     /* the quotient's */
+
+    /* |sin(pi t)| is sin(pi|s|) when k is even and cos(pi|s|) when it is
+     * odd; |cos(pi t)| is the other way round. */
+    want_cos = (fn == CFT_TR_COSPI) ? k_even : !k_even;
+    A.want_cos = want_cos;
+
+    /* The one neighbour rule this family needs. cos(u) < 1 for u != 0
+     * and 1 - cos(u) <= u^2/2, so with u = pi|s| the result sits below 1
+     * by less than 4.94 s^2; half the gap below 1 is 2^-(p+1), and
+     * 4.94 * 2^(2v+2) < 2^-(p+1) reduces to 2v + p + 6 <= 0. No working
+     * precision separates those from 1, and none needs to: the side is
+     * known, and it is always downward. */
+    sv = A.s_e + cft_bn_bitlen(&A.s_m) - 1;
+    if (fn != CFT_TR_TANPI && want_cos &&
+        2 * sv + (long)f->prec + 6 <= 0)
+        return round_side_of(f, sign, 0, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
+/* |x| > 1 for a finite lane. */
+static int lane_mag_gt_one(const lane *a)
+{
+    return lane_vexp(a) >= 0 && !lane_is_one(a);
+}
+
+static cft_status do_asin_family(const cft_fmt_desc *f, int fn, const lane *a,
+                                 int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    int over_pi = (fn == CFT_TR_ASINPI);
+    long ex;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF || (a->kind != K_ZERO && lane_mag_gt_one(a))) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);           /* asin(+-0) = +-0 */
+        return CFT_OK;
+    }
+    if (lane_is_one(a))                         /* +-pi/2, or +-1/2 */
+        return deliver_quarters(f, a->sign, 2, over_pi, rnd, out, flags);
+
+    ex = lane_vexp(a);
+    if (!over_pi && 2 * ex + (long)f->prec + 2 <= 0)
+        /* asin(x) - x = x^3/6 + 3x^5/40 + ... > 0, and |asin(x) - x| <=
+         * 0.2|x|^3 sits inside half the gap on the far side of x once
+         * 2e + p + 2 <= 0. asinPi rides no such rule: its answer is
+         * about x/pi, which is not next to anything. */
+        return round_side(f, a->sign, &a->m, a->e, 1, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    return tr_ziv(&A, a->sign, rnd, out, flags);
+}
+
+static cft_status do_acos_family(const cft_fmt_desc *f, int fn, const lane *a,
+                                 int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    int over_pi = (fn == CFT_TR_ACOSPI);
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_INF || (a->kind != K_ZERO && lane_mag_gt_one(a))) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO)                      /* pi/2, or exactly 1/2 */
+        return deliver_quarters(f, 0, 2, over_pi, rnd, out, flags);
+    if (lane_is_one(a)) {
+        if (!a->sign) {
+            cft_tr_exact++;
+            cft_sf_zero(f, 0, out);             /* acos(1) = +0 */
+            return CFT_OK;
+        }
+        return deliver_quarters(f, 0, 4, over_pi, rnd, out, flags);
+    }
+    if (over_pi && lane_vexp(a) <= -(long)(f->prec + 2))
+        /* acosPi(x) = 1/2 - asin(x)/pi and |asin(x)/pi| <= 0.33|x|,
+         * which is inside half the gap next to 1/2 once |x| <=
+         * 2^-(p+2). The side is the operand's: a positive x pulls the
+         * answer below 1/2. */
+        return round_side_of(f, 0, -1, a->sign ? 1 : 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    return tr_ziv(&A, 0, rnd, out, flags);
+}
+
+static cft_status do_atan_family(const cft_fmt_desc *f, int fn, const lane *a,
+                                 int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    int over_pi = (fn == CFT_TR_ATANPI);
+    long ex;
+
+    *flags = 0;
+    if (tr_nan_in(f, a, NULL, out, flags))
+        return CFT_OK;
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);
+        return CFT_OK;
+    }
+    if (a->kind == K_INF)                       /* +-pi/2, or +-1/2 */
+        return deliver_quarters(f, a->sign, 2, over_pi, rnd, out, flags);
+    if (over_pi && lane_is_one(a)) {            /* +-1/4, exactly */
+        cft_bn m;
+        cft_tr_exact++;
+        cft_bn_zero(&m);
+        cft_bn_set_u32(&m, 1);
+        return round_exact(f, a->sign, &m, -2, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    ex = lane_vexp(a);
+    if (!over_pi && 2 * ex + (long)f->prec + 3 <= 0)
+        /* atan(x) - x = -x^3/3 + x^5/5 - ... is NEGATIVE for x in
+         * (0, 1) and no bigger than x^3/3, so the true value lies on
+         * the zero side of x - the opposite side from asin's, which is
+         * what makes a pair of directed roundings tell the two apart. */
+        return round_side(f, a->sign, &a->m, a->e, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    if (over_pi && ex >= (long)f->prec + 1)
+        /* atanPi(x) = 1/2 - atan(1/x)/pi with atan(1/x) <= 1/|x|, so
+         * once |x| >= 2^(p+1) the answer is inside half the gap below
+         * 1/2. In radians the same corner sits next to pi/2, which the
+         * format does not hold, so no rule is needed there. */
+        return round_side_of(f, a->sign, -1, 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    return tr_ziv(&A, a->sign, rnd, out, flags);
+}
+
+/* atan2(y, x), y first as C has it, and the whole of 9.2.1's table.
+ *
+ * The row implementations most often get wrong is atan2(+-0, -0) =
+ * +-pi: a MINUS zero denominator names the negative real axis, so the
+ * answer is pi and not zero. Its Pi-variant is +-1 and is exact.
+ * Confirmed against MPFR 4.2.1 before it was written down. */
+static cft_status do_atan2_family(const cft_fmt_desc *f, int fn,
+                                  const lane *y, const lane *x, int rnd,
+                                  cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn qm;
+    long qe, ey, ex, qv, g;
+    int over_pi = (fn == CFT_TR_ATAN2PI);
+    int sign;
+
+    *flags = 0;
+    if (tr_nan_in(f, y, x, out, flags))
+        return CFT_OK;
+    sign = y->sign;
+    if (y->kind == K_INF) {
+        if (x->kind == K_INF)                   /* +-pi/4 or +-3pi/4 */
+            return deliver_quarters(f, sign, x->sign ? 3 : 1, over_pi, rnd,
+                                    out, flags);
+        return deliver_quarters(f, sign, 2, over_pi, rnd, out, flags);
+    }
+    if (x->kind == K_INF || y->kind == K_ZERO)
+        /* a finite y against an infinite x, and a zero y against
+         * anything: +-0 for a positive x, +-pi for a negative one -
+         * and the SIGN of a zero x decides, which is the row the whole
+         * table is remembered for. */
+        return deliver_quarters(f, sign, x->sign ? 4 : 0, over_pi, rnd,
+                                out, flags);
+    if (x->kind == K_ZERO)
+        return deliver_quarters(f, sign, 2, over_pi, rnd, out, flags);
+
+    /* The diagonals are the last exact rows, and Niven says there are
+     * no others: a dyadic multiple of pi has a rational tangent only at
+     * 0, +-1 and the pole. */
+    if (lane_mag_eq(y, x))
+        return deliver_quarters(f, sign, x->sign ? 3 : 1, over_pi, rnd,
+                                out, flags);
+
+    ey = lane_vexp(y);
+    ex = lane_vexp(x);
+
+    if (!over_pi && !x->sign && lane_exact_quotient(y, x, &qm, &qe) == 0) {
+        /* atan2(y, x>0) is atan(y/x), so when that quotient is itself a
+         * dyadic rational on the format's fine grid the answer is a hair
+         * below it and no precision can say how far. atan2(minSub, 2)
+         * lands on a subnormal MIDPOINT this way, which is why
+         * round_side and not round_neighbour. */
+        qv = qe + cft_bn_bitlen(&qm) - 1;
+        g = qv - (long)f->prec + 1;
+        if (g < (long)f->emin - f->man_w)
+            g = (long)f->emin - f->man_w;
+        if (2 * qv + (long)f->prec + 3 <= 0 && qe >= g - 1) {
+            if (round_side(f, sign, &qm, qe, 0, rnd, out, flags))
+                return CFT_ERR_INTERNAL;
+            return CFT_OK;
+        }
+    }
+    if (over_pi) {
+        /* Near +-1 (a tiny quotient against a negative x) and near
+         * +-1/2 (a dominant y), the answer is within half a gap of a
+         * value the format holds. In radians the same corners sit
+         * beside pi and pi/2, which it does not. */
+        if (x->sign && ey - ex <= -(long)(f->prec + 1))
+            return round_side_of(f, sign, 0, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        if (ex - ey <= -(long)(f->prec + 2))
+            return round_side_of(f, sign, -1, x->sign ? 1 : 0, rnd, out,
+                                 flags) ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *y;
+    A.a.sign = 0;
+    A.b = *x;
+    A.b.sign = 0;
+    A.x_neg = x->sign;
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
 /* ---- the public entry points ---------------------------------------- */
 
 static int rnd_ok(cft_round rnd)
@@ -1512,7 +2403,7 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
             *flags_out = 0;
         return CFT_OK;
     }
-    if (fn == CFT_TR_POW || fn == CFT_TR_HYPOT) {
+    if (cft_tr_arity(fn) == 2) {
         if (!b)
             return CFT_ERR_INVALID_ARGUMENT;
     }
@@ -1550,6 +2441,27 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
             break;
         case CFT_TR_HYPOT:
             st = do_hypot(f, &la, &lb, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_SINPI:
+        case CFT_TR_COSPI:
+        case CFT_TR_TANPI:
+            st = do_pi_trig(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ASIN:
+        case CFT_TR_ASINPI:
+            st = do_asin_family(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ACOS:
+        case CFT_TR_ACOSPI:
+            st = do_acos_family(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ATAN:
+        case CFT_TR_ATANPI:
+            st = do_atan_family(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ATAN2:
+        case CFT_TR_ATAN2PI:
+            st = do_atan2_family(f, fn, &la, &lb, (int)rnd, &out, &fl);
             break;
         default:
             return CFT_ERR_INVALID_ARGUMENT;
@@ -1594,6 +2506,33 @@ CFT_API cft_status cft_hypot(cft_device *dev, cft_format fmt, cft_round rnd,
     return tr_batch(dev, CFT_TR_HYPOT, fmt, rnd, a, b, d, n, flags_out);
 }
 
+TR_UNARY(cft_sinpi,  CFT_TR_SINPI)
+TR_UNARY(cft_cospi,  CFT_TR_COSPI)
+TR_UNARY(cft_tanpi,  CFT_TR_TANPI)
+TR_UNARY(cft_asin,   CFT_TR_ASIN)
+TR_UNARY(cft_acos,   CFT_TR_ACOS)
+TR_UNARY(cft_atan,   CFT_TR_ATAN)
+TR_UNARY(cft_asinpi, CFT_TR_ASINPI)
+TR_UNARY(cft_acospi, CFT_TR_ACOSPI)
+TR_UNARY(cft_atanpi, CFT_TR_ATANPI)
+
+/* y first, then x, as C's atan2 has it - and as every caller expects,
+ * which is worth more than matching the (a, b) naming of the operands
+ * everywhere else in this header. */
+CFT_API cft_status cft_atan2(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const void *b, void *d, size_t n,
+                             uint32_t *flags_out)
+{
+    return tr_batch(dev, CFT_TR_ATAN2, fmt, rnd, a, b, d, n, flags_out);
+}
+
+CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               void *d, size_t n, uint32_t *flags_out)
+{
+    return tr_batch(dev, CFT_TR_ATAN2PI, fmt, rnd, a, b, d, n, flags_out);
+}
+
 const char *cft_tr_name(int fn)
 {
     switch (fn) {
@@ -1604,15 +2543,27 @@ const char *cft_tr_name(int fn)
     case CFT_TR_LOG1P: return "log1p";
     case CFT_TR_LOG2:  return "log2";
     case CFT_TR_LOG10: return "log10";
-    case CFT_TR_POW:   return "pow";
-    case CFT_TR_HYPOT: return "hypot";
-    default:           return "unknown";
+    case CFT_TR_POW:     return "pow";
+    case CFT_TR_HYPOT:   return "hypot";
+    case CFT_TR_SINPI:   return "sinpi";
+    case CFT_TR_COSPI:   return "cospi";
+    case CFT_TR_TANPI:   return "tanpi";
+    case CFT_TR_ASIN:    return "asin";
+    case CFT_TR_ACOS:    return "acos";
+    case CFT_TR_ATAN:    return "atan";
+    case CFT_TR_ATAN2:   return "atan2";
+    case CFT_TR_ASINPI:  return "asinpi";
+    case CFT_TR_ACOSPI:  return "acospi";
+    case CFT_TR_ATANPI:  return "atanpi";
+    case CFT_TR_ATAN2PI: return "atan2pi";
+    default:             return "unknown";
     }
 }
 
 int cft_tr_arity(int fn)
 {
-    return (fn == CFT_TR_POW || fn == CFT_TR_HYPOT) ? 2 : 1;
+    return (fn == CFT_TR_POW || fn == CFT_TR_HYPOT ||
+            fn == CFT_TR_ATAN2 || fn == CFT_TR_ATAN2PI) ? 2 : 1;
 }
 
 int cft_tr_from_name(const char *s)

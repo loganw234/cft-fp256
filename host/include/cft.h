@@ -94,16 +94,18 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 3   /* 0.3: the phase-1 transcendentals */
+#define CFT_ABI_VERSION_MINOR 4   /* 0.4: the phase-2 trigonometrics */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
  * The minor version is a floor on what is present, and each step of it
  * is additive: 0.1 was the elementwise opcodes, the reductions and the
  * composed div/sqrt; 0.2 added the clause-5 completion set; 0.3 added
- * the nine correctly-rounded transcendentals below. A caller that
- * needs one of those checks the number rather than the header it
- * compiled against. */
+ * the nine correctly-rounded transcendentals below; 0.4 added the
+ * eleven trigonometric functions whose argument reduction is exact -
+ * sinPi, cosPi, tanPi, asin, acos, atan, atan2 and the four Pi-forms
+ * of the inverses. A caller that needs one of those checks the number
+ * rather than the header it compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
 /* ---------------------------------------------------------------
@@ -767,6 +769,123 @@ CFT_API cft_status cft_pow(cft_device *dev, cft_format fmt, cft_round rnd,
 CFT_API cft_status cft_hypot(cft_device *dev, cft_format fmt, cft_round rnd,
                              const void *a, const void *b, void *d, size_t n,
                              uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The phase-2 trigonometric set (ABI 0.4)
+ *
+ *   d[i] = sin(pi*a[i])     cft_sinpi      d[i] = asin(a[i])   cft_asin
+ *   d[i] = cos(pi*a[i])     cft_cospi      d[i] = acos(a[i])   cft_acos
+ *   d[i] = tan(pi*a[i])     cft_tanpi      d[i] = atan(a[i])   cft_atan
+ *   d[i] = asin(a[i])/pi    cft_asinpi     d[i] = atan2(a[i], b[i])
+ *   d[i] = acos(a[i])/pi    cft_acospi                         cft_atan2
+ *   d[i] = atan(a[i])/pi    cft_atanpi     d[i] = atan2(a,b)/pi
+ *                                                            cft_atan2pi
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, at every format, with
+ * exact flags, on the same terms as the nine above: the mathematics
+ * defines the bits, so every correct implementation agrees.
+ *
+ * WHAT THESE ELEVEN HAVE IN COMMON is what they do NOT need: an
+ * argument reduction against pi. sinPi's reduction is x mod 2, and
+ * every operand is a dyadic rational, so that reduction is a mask on
+ * the encoding and is exact at every magnitude - sinPi of the largest
+ * finite binary256 is a zero decided by integer arithmetic. The
+ * inverse functions take an argument in [-1, 1] or a ratio and meet pi
+ * only as a factor of the answer. `sin`, `cos` and `tan` of a RADIAN
+ * argument are a different problem and are not here.
+ *
+ * HOST operations, like the nine: no device pass, no bus word, the
+ * device argument is context, `d` may alias `a` or `b`.
+ *
+ * INEXACT is raised for every result except the exact ones, and the
+ * exact ones are an enumeration with a proof behind it rather than a
+ * tolerance. Niven's theorem bounds the forward set: sin(pi r) is
+ * rational for a rational r only at 0, +-1/2 and +-1, and a dyadic r
+ * cannot reach +-1/2 - so sinPi and cosPi are exact exactly at the
+ * half-integers and tanPi exactly at the quarter-integers.
+ * Hermite-Lindemann bounds the inverse set: asin, atan and atan2 of a
+ * nonzero dyadic rational are transcendental, so those are exact only
+ * where the answer is a zero, and acos only at acos(1) = +0. The
+ * Pi-forms get a much larger table for Niven's reason:
+ *
+ *   asinPi(+-0) = +-0      asinPi(+-1) = +-1/2
+ *   acosPi(1)   = +0       acosPi(+-0) = 1/2       acosPi(-1) = 1
+ *   atanPi(+-0) = +-0      atanPi(+-1) = +-1/4     atanPi(+-inf) = +-1/2
+ *   atan2Pi on every axis and diagonal: 0, +-1/4, +-1/2, +-3/4, +-1
+ *
+ * while asinPi(1/2) is exactly 1/6 - rational, but NOT a dyadic
+ * rational, so it is inexact and still decidable.
+ *
+ * The 754-2019 clause 9.2.1 special values apply in full. The rows a
+ * porter should not have to infer, each confirmed against MPFR 4.2.1:
+ *
+ *   sinPi(+-0) = +-0, and sinPi of an integer n is a zero with the
+ *     sign of the ARGUMENT: sinPi(1) = +0, sinPi(-1) = -0
+ *   cosPi(+-0) = 1, cosPi(n) = (-1)^n, cosPi(n + 1/2) = +0 for every n
+ *     and both signs - cosPi is even, so that zero has no sign to carry
+ *   tanPi is sinPi/cosPi in every respect: tanPi(1) = -0, and tanPi at
+ *     a half-integer is +-infinity with divideByZero (7.3's rule for an
+ *     exact infinity from finite operands)
+ *   tanPi cannot overflow at any format here: a representable argument
+ *     is at least 2^-p from a pole, so |tanPi| stays below 2^p
+ *   sinPi/cosPi/tanPi of an infinity is invalid - there is no limit
+ *   asin, acos, asinPi and acosPi of an operand with |x| > 1 are
+ *     invalid, infinities included
+ *   atan2(+-0, -0) = +-pi and atan2Pi(+-0, -0) = +-1: a MINUS zero
+ *     denominator names the negative real axis, so the answer is pi
+ *     and not zero. That is the row implementations most often miss
+ *   atan2(+-0, +0) = +-0; atan2(y, +-0) = +-pi/2; atan2(+-inf, +inf)
+ *     = +-pi/4 and (+-inf, -inf) = +-3pi/4
+ *   a quiet NaN operand does NOT outrank this table the way it does
+ *     pow's: atan2 of a NaN is a NaN
+ *
+ * Overflow cannot occur anywhere in this set. Underflow can, and comes
+ * through the same round_pack as everything else: sinPi of a tiny x is
+ * about pi*x and atanPi of one is about x/pi, and both land subnormal.
+ *
+ * A SIGNALING NaN raises invalid and delivers the canonical quiet NaN,
+ * as everywhere else in this contract.
+ *
+ * If an input cannot be shown correctly rounded within the working
+ * precision cap the call returns CFT_ERR_INTERNAL, never a plausible
+ * number. docs/TRANSCENDENTALS.md is the design and its proofs.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_sinpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_cospi(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_tanpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_asin(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_acos(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_atan(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_asinpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_acospi(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_atanpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+
+/* a[i] is y and b[i] is x - the C order, y first, because that is what
+ * every caller of atan2 expects; neither may be NULL. */
+CFT_API cft_status cft_atan2(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const void *b, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               void *d, size_t n, uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
