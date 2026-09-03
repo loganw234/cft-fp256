@@ -238,7 +238,26 @@ typedef enum cft_op {
      * hardware that nothing uses, because cft_div and cft_sqrt
      * pre-normalise before seeding. */
     CFT_RECIP_SEED = 26,   /* ~ 1/a   */
-    CFT_RSQRT_SEED = 27    /* ~ 1/sqrt(a) */
+    CFT_RSQRT_SEED = 27,   /* ~ 1/sqrt(a) */
+
+    /* The other two of clause 9.4's sum reductions, appended (never
+     * inserted, never renumbered - an opcode number is on the wire and
+     * in every published vector set). Issued through cft_reduce() like
+     * CFT_SUM and CFT_DOT.
+     *
+     * Neither is separate hardware, and neither needs to be: they are
+     * the SAME tree over a different leaf, so the library issues the
+     * composition and both backends get the same bits by
+     * construction -
+     *
+     *     CFT_SUMSQ  == CFT_DOT over (a, a)
+     *     CFT_SUMABS == CFT_ABS pass, then CFT_SUM
+     *
+     * with one documented exception in each, where 754-2019 9.4 orders
+     * an infinity ahead of a NaN for these two and ahead of nothing
+     * for sum and dot. See the cft_reduce block below. */
+    CFT_SUMSQ    = 28,  /* d = sum round(a[i] * a[i]) */
+    CFT_SUMABS   = 29   /* d = sum |a[i]|             */
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance
@@ -382,6 +401,8 @@ CFT_API cft_status cft_run(cft_device *dev,
  *
  *     d[0] = sum over i in [0, n) of a[i]              CFT_SUM
  *     d[0] = sum over i in [0, n) of round(a[i]*b[i])  CFT_DOT
+ *     d[0] = sum over i in [0, n) of round(a[i]*a[i])  CFT_SUMSQ
+ *     d[0] = sum over i in [0, n) of |a[i]|            CFT_SUMABS
  *
  * d receives exactly ONE element - cft_format_size(fmt) bytes - not n.
  * That is the whole reason this is a separate entry point: cft_run's
@@ -390,7 +411,7 @@ CFT_API cft_status cft_run(cft_device *dev,
  * through cft_run() is CFT_ERR_INVALID_ARGUMENT rather than a
  * plausible-looking array.
  *
- * b is unused by CFT_SUM and may be NULL.
+ * b is unused by CFT_SUM, CFT_SUMSQ and CFT_SUMABS and may be NULL.
  *
  * THE TREE SHAPE IS PART OF THE CONTRACT. Results are the fixed
  * binary tree over the index range, evaluated with the given rounding
@@ -415,9 +436,39 @@ CFT_API cft_status cft_run(cft_device *dev,
  *   n == 0 gives +0.0 and raises nothing.
  *   n == 1 gives a[0] verbatim and raises nothing - one leaf means
  *          zero additions, so not even a signalling NaN is quieted.
+ *          (For CFT_SUMSQ the leaf IS a multiply, so it quiets and
+ *          signals; for CFT_SUMABS the leaf is an abs, which by 5.5.1
+ *          signals nothing at all, so a lone sNaN comes back with its
+ *          sign cleared and no flag.)
+ *
+ * CFT_SUMSQ AND CFT_SUMABS ARE COMPOSITIONS, AND THAT IS THE CONTRACT.
+ * They are the same tree over a different leaf, so the library issues
+ * exactly `cft_reduce(CFT_DOT, a, a)` and `cft_run(CFT_ABS)` followed
+ * by `cft_reduce(CFT_SUM)`. There is no second tree walker to keep in
+ * step, so the device and software backends agree by construction
+ * rather than by testing - and a caller who wants the pieces can have
+ * them without changing the answer. Both identities hold bit for bit,
+ * flags included, on every input and every attribute EXCEPT one:
+ *
+ *   754-2019 9.4 says "For sumSquare and sumAbs, if any operand
+ *   element is an infinity, +inf is returned. Otherwise, if any
+ *   operand element is a NaN a quiet NaN is returned" - infinity
+ *   ahead of NaN, where sum and dot put NaN first.
+ *
+ * So a vector holding BOTH an infinity and a NaN returns +inf here,
+ * where the plain dot or sum would return a quiet NaN; invalid is
+ * raised only if one of those NaNs is signalling (9.4's blanket rule),
+ * and no other flag is. That single row is the whole difference, and
+ * it is the only place either operation is not the plain composition.
+ * With an infinity and no NaN the tree already returns +inf on its
+ * own, since no term of either operation is negative.
  *
  * A device that does not implement the reduction opcode group returns
- * CFT_ERR_UNSUPPORTED; ask cft_supports() to know in advance.
+ * CFT_ERR_UNSUPPORTED; ask cft_supports() to know in advance. The two
+ * composed reductions also need the group their composition runs
+ * through - arithmetic for CFT_SUMSQ, sign for CFT_SUMABS - and
+ * cft_supports() accounts for that, so asking about the opcode itself
+ * is the right question.
  * --------------------------------------------------------------- */
 CFT_API cft_status cft_reduce(cft_device *dev,
                               cft_op      op,
@@ -985,6 +1036,127 @@ CFT_API cft_status cft_acosh(cft_device *dev, cft_format fmt, cft_round rnd,
 CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
                              const void *a, void *d, size_t n,
                              uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The scaled product reductions (clause 9.4)
+ *
+ *   scaleB(pr, sf) ~ product over i in [0, n) of a[i]         cft_scaled_prod
+ *   scaleB(pr, sf) ~ product of (a[i] + b[i])             cft_scaled_prod_sum
+ *   scaleB(pr, sf) ~ product of (a[i] - b[i])            cft_scaled_prod_diff
+ *
+ * The last three operations of 754-2019 9.4, added 2026-09-03 as part
+ * of the 0.6 step. They return a PAIR - a significand and an integer
+ * scale - which is why they are not cft_reduce opcodes: that entry
+ * point delivers one element, and a pair does not fit through it.
+ *
+ * THREE NAMED ENTRY POINTS RATHER THAN ONE WITH A `kind` ARGUMENT.
+ * cft_run and cft_reduce take an opcode because an opcode is a field
+ * in a device word; these issue no device pass, so a `kind` enum would
+ * be a second opcode space living beside cft_op with none of its
+ * meaning - and docs/DETERMINISM.md records what a stale opcode number
+ * costs. The arities differ too (one vector, then two), so a single
+ * entry point would need a b-is-NULL-unless rule checked at run time
+ * where three functions check it at compile time. Every other
+ * pair-free host operation in this header - cft_div, cft_pow,
+ * cft_atan2 - is named, and these follow it.
+ *
+ *   pr        receives ONE element, cft_format_size(fmt) bytes.
+ *   scale_out receives the int64 scale. Neither may be NULL.
+ *   b         is required by _sum and _diff, and is not read by
+ *             cft_scaled_prod, which does not take it.
+ *
+ * WHY A SCALED PRODUCT EXISTS: a product of many elements leaves any
+ * format's range long before it stops being meaningful. This one
+ * cannot overflow or underflow at all, and that is a property of the
+ * construction rather than a claim about typical inputs:
+ *
+ *   THE TREE IS THE SAME TREE cft_reduce uses - the fixed
+ *   index-shaped one - and every node carries (significand, scale)
+ *   with the significand in +-[1, 2). A node multiplies its two
+ *   children's significands under the caller's attribute, which is the
+ *   node's ONE rounding, then extracts the binade back out: the
+ *   product is in +-[1, 4), so that extraction is a shift of 0, 1 or 2
+ *   binades and is exact. Both multiply operands are therefore always
+ *   in +-[1, 2), and no such product can leave any rung of the ladder.
+ *
+ * 754-2019 9.4 requires exactly that - "the scaled result, pr, shall
+ * not be affected by overflow or underflow" - and leaves the scaling
+ * itself implementation-defined, which a determinism contract may not:
+ * pinning the tree and the [1, 2) normalisation is what makes two
+ * conforming implementations return the same pair.
+ *
+ * pr is in +-[1, 2) for every n, INCLUDING n == 0, where 9.4 fixes the
+ * answer: "pr is 1 and sf is +0 without exception" - the
+ * multiplicative identity, where an empty sum gives the additive one.
+ *
+ * THE LEAF OF _sum AND _diff IS ONE CONTRACT ROUNDING of a[i] + b[i]
+ * (or a[i] - b[i]) in the caller's attribute, and its result is the
+ * factor everything below sees. Those two are therefore the ONLY ones
+ * that can signal overflow or underflow, and only from that addition -
+ * never from the product tree. Both are compositions, and hold as
+ * such bit for bit:
+ *
+ *     cft_scaled_prod_sum(a, b)  == cft_scaled_prod(cft_run(ADD, a, b))
+ *     cft_scaled_prod_diff(a, b) == cft_scaled_prod(cft_run(SUB, a, b))
+ *
+ * with the add's flags OR'd in.
+ *
+ * SPECIAL VALUES are 9.4's, in 9.4's order, applied to the FACTORS -
+ * which for _sum and _diff are the rounded sums, not the raw operands:
+ *
+ *   - any factor a NaN            -> quiet NaN, sf = 0. invalid only
+ *                                    if some operand was signalling.
+ *   - an infinity AND a zero      -> invalid, quiet NaN, sf = 0.
+ *                                    ("A product of inf x 0 signals
+ *                                     the invalid operation
+ *                                     exception.")
+ *   - an infinity, no zero        -> that infinity, sf = 0, NO
+ *                                    exception.
+ *   - a zero, no infinity         -> a zero, sf = 0, no exception.
+ *
+ * The sign of that infinity or zero is the sign of the true product,
+ * the XOR of every factor's sign bit. 9.4 leaves it open; a
+ * determinism contract cannot. A sum of unlike infinities needs no row
+ * of its own: that addition raises invalid and produces a quiet NaN by
+ * itself, and the NaN row then delivers it.
+ *
+ * divideByZero is NEVER signalled - 9.4 asks for that explicitly
+ * ("even if implemented with logB"), and this is not implemented with
+ * logB: the binade comes out of the encoding, and a zero never reaches
+ * the tree.
+ *
+ * THE SCALE is an int64 and is accumulated with checked additions. If
+ * one would leave the int64 range the call signals invalid and
+ * delivers the canonical quiet NaN for pr with sf = 0, which is what
+ * 9.4 requires of a scale factor too large for integralFormat. It is
+ * unreachable in practice - a leaf contributes at most emax + p - 1 =
+ * 262,379 at fp256 and a node at most 2, so a vector would need about
+ * 3.5e13 elements, 1.1 PB of fp256 - and it is implemented anyway,
+ * because "cannot happen" is not a result.
+ *
+ * HOST operations: no cft_run pass is issued, no bus word is produced
+ * and `dev` is context, exactly like the transcendentals. There is no
+ * tile accumulator for a scaled product - the accumulator streams
+ * ADDs - so there is nothing here for a device to carry, and the
+ * results are bit-identical across backends by construction.
+ *
+ * python/cft_golden/reduce.py's scaled_prod() is the definition of
+ * every bit; docs/DETERMINISM.md holds the contract's statement of it.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_scaled_prod(cft_device *dev, cft_format fmt,
+                                   cft_round rnd, const void *a,
+                                   void *pr, int64_t *scale_out,
+                                   size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_scaled_prod_sum(cft_device *dev, cft_format fmt,
+                                       cft_round rnd, const void *a,
+                                       const void *b, void *pr,
+                                       int64_t *scale_out, size_t n,
+                                       uint32_t *flags_out);
+CFT_API cft_status cft_scaled_prod_diff(cft_device *dev, cft_format fmt,
+                                        cft_round rnd, const void *a,
+                                        const void *b, void *pr,
+                                        int64_t *scale_out, size_t n,
+                                        uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
