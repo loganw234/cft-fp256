@@ -1155,8 +1155,29 @@ static cft_status tr_ziv(const tr_args *A, int sign, int rnd, cft_bn *out,
         first = 0;
         if ((uint64_t)W > cft_tr_max_prec)
             cft_tr_max_prec = (uint64_t)W;
-        if (tr_eval(A, W, &r))
-            return CFT_ERR_INTERNAL;
+        /* An evaluation that FAILS below the cap has run out of
+         * container width or off the end of an internal screen at a
+         * precision too coarse to see the answer - not proof that no
+         * precision can. pow(1 + 2^-112, 2^113) at fp128 does it when
+         * the loop is forced to start at 64 bits: the logarithm comes
+         * out as 2*atanh(1/2) instead of 2^-112, the exponential's
+         * argument-reduction multiple then lands past its own cap, and
+         * mp_exp_full refuses. The answer to that is the same as the
+         * answer to an undecided rounding - raise the precision - and
+         * only a failure AT the cap is a refusal.
+         *
+         * Found on 2026-09-03, once mpfr_check.c's transcendental pool
+         * started carrying the directed operands it had always meant
+         * to (its success test had been inverted since it was
+         * written), which put pow of a base one ulp from 1 against a
+         * huge exponent into the forced-escalation run for the first
+         * time. */
+        if (tr_eval(A, W, &r)) {
+            if (W >= cap)
+                return CFT_ERR_INTERNAL;
+            W = 2 * W < cap ? 2 * W : cap;
+            continue;
+        }
         /* A result that came out EXACTLY zero at this precision means
          * the working precision was too coarse to see the value at all
          * - log(1 + 2^-112) at fp128 does it once the precision drops
@@ -1164,8 +1185,12 @@ static cft_status tr_ziv(const tr_args *A, int sign, int rnd, cft_bn *out,
          * exact zeros of these functions are all decided long before
          * the loop. */
         if (!r.zero &&
-            cft_mp_round(&r, sign, f, rnd, out, flags, &decided))
-            return CFT_ERR_INTERNAL;
+            cft_mp_round(&r, sign, f, rnd, out, flags, &decided)) {
+            if (W >= cap)
+                return CFT_ERR_INTERNAL;
+            W = 2 * W < cap ? 2 * W : cap;
+            continue;
+        }
         if (decided)
             return CFT_OK;
         if (W >= cap)
@@ -2087,7 +2112,7 @@ static cft_status do_pi_trig(const cft_fmt_desc *f, int fn, const lane *a,
         }
         /* tanPi at a pole: an exact infinity from finite operands, so
          * 754-2019 7.3 raises divideByZero. The sign is sinPi's,
-         * because cosPi there is +0. MPFR 4.2.1 delivers the same rows
+         * because cosPi there is +0. MPFR 4.2.2 delivers the same rows
          * (tanpi(1/2) = +Inf, tanpi(3/2) = -Inf, divide-by-zero set). */
         cft_sf_inf(f, neg, out);
         *flags = CFT_SF_DIVZERO;
@@ -2282,7 +2307,7 @@ static cft_status do_atan_family(const cft_fmt_desc *f, int fn, const lane *a,
  * The row implementations most often get wrong is atan2(+-0, -0) =
  * +-pi: a MINUS zero denominator names the negative real axis, so the
  * answer is pi and not zero. Its Pi-variant is +-1 and is exact.
- * Confirmed against MPFR 4.2.1 before it was written down. */
+ * Confirmed against MPFR 4.2.2 before it was written down. */
 static cft_status do_atan2_family(const cft_fmt_desc *f, int fn,
                                   const lane *y, const lane *x, int rnd,
                                   cft_bn *out, uint32_t *flags)

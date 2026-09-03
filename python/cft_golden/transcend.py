@@ -1122,7 +1122,7 @@ def _sinpi_cospi_tanpi(fmt, xa, rnd, which):
             return zero_bits(fmt, 0), 0                 # +0, both signs
         # tanPi at a pole. 754-2019 7.3 raises divideByZero where an
         # exact infinity comes from finite operands, and the sign is
-        # sinPi's, because cosPi there is +0. MPFR 4.2.1 delivers the
+        # sinPi's, because cosPi there is +0. MPFR 4.2.2 delivers the
         # same rows: tanpi(1/2) = +inf, tanpi(3/2) = -inf, with
         # divide-by-zero raised.
         return inf_bits(fmt, neg), FLAG_DIVZERO
@@ -1399,7 +1399,7 @@ def atanpi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
 # implementation is most often wrong about. atan2(+-0, -0) is +-pi -
 # NOT +-0 - because the minus zero denominator names the negative real
 # axis; atan2Pi(+-0, -0) is +-1 and is EXACT, where its radian twin is
-# an inexact rounding of pi. Both were confirmed against MPFR 4.2.1
+# an inexact rounding of pi. Both were confirmed against MPFR 4.2.2
 # before they were written down.
 
 

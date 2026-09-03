@@ -817,7 +817,7 @@ CFT_API cft_status cft_hypot(cft_device *dev, cft_format fmt, cft_round rnd,
  * rational, so it is inexact and still decidable.
  *
  * The 754-2019 clause 9.2.1 special values apply in full. The rows a
- * porter should not have to infer, each confirmed against MPFR 4.2.1:
+ * porter should not have to infer, each confirmed against MPFR 4.2.2:
  *
  *   sinPi(+-0) = +-0, and sinPi of an integer n is a zero with the
  *     sign of the ARGUMENT: sinPi(1) = +0, sinPi(-1) = -0

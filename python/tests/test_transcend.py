@@ -566,7 +566,8 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
 
 #: The functions gmpy2 exposes. MPFR itself grew sinPi, cosPi, tanPi,
 #: asinPi, acosPi, atanPi and atan2Pi in 4.2.0 and this host carries
-#: 4.2.1 - but gmpy2 2.2.1 binds none of them, so the Pi-variants are
+#: 4.2.0 - but the gmpy2 2.2.1 here (which links MPFR 4.2.1 of its
+#: own) binds none of them, so the Pi-variants are
 #: checked against MPFR in host/tools/mpfr_check.c, which calls the C
 #: entry points directly, and here only against the brute-force
 #: enclosure above. Claiming an MPFR comparison this file cannot make
@@ -787,7 +788,7 @@ def test_escalation_lands_on_the_same_answer(fmt):
 # Phase 2: the trigonometric functions that need no reduction against pi
 #
 # Same four arbiters. The special-value tables below were transcribed
-# from 754-2019 9.2.1 and then CONFIRMED against MPFR 4.2.1 - which is
+# from 754-2019 9.2.1 and then CONFIRMED against MPFR 4.2.2 - which is
 # the first release to carry sinpi/cospi/tanpi and the Pi-variants of
 # the inverses - before they were written down here. Where the two
 # could have differed the probe is quoted in the test.
@@ -801,7 +802,7 @@ TRIG = ("sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
 @pytest.mark.parametrize("rnd", RND_MODES)
 def test_sinpi_specials(fmt, rnd):
     """sinPi(+-0) is +-0; sinPi of an integer is a zero with the sign of
-    the ARGUMENT (MPFR 4.2.1: sinpi(1) = +0, sinpi(-1) = -0, so the rule
+    the ARGUMENT (MPFR 4.2.2: sinpi(1) = +0, sinpi(-1) = -0, so the rule
     is not the parity of n); sinPi(n + 1/2) is +-1; an infinity is
     invalid, because sin has no limit there."""
     assert tr.sinpi(fmt, zero_bits(fmt), rnd) == (zero_bits(fmt), 0)
@@ -854,7 +855,7 @@ def test_cospi_specials(fmt, rnd):
 def test_tanpi_specials(fmt, rnd):
     """tanPi is sinPi/cosPi in every respect, signs included.
 
-    Confirmed against MPFR 4.2.1, which is where the two rows an
+    Confirmed against MPFR 4.2.2, which is where the two rows an
     implementation is likely to guess wrong were settled:
 
         tanpi(1)   = -0        (sinPi(1) is +0, cosPi(1) is -1)
