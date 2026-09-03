@@ -1731,17 +1731,44 @@ above: 392,000 opcode cases over twenty sets plus the same 129,845
 transcendental cases, **521,845 over 40 sets**, replayed clean by both
 stages, with `test.mjs`'s 74 tests inside the node stage.
 
-**What did NOT run, and why.** The page was not opened in a browser,
-though its markup changed - eleven rows in the compute panel's table,
-eleven entries in the cwrap table. The 2026-09-03 morning rebuild was
-watched in Chromium precisely because it could no longer lean on an
-unchanged template; this one has no such watching behind it, and the
-claim it makes instead is narrower and stated as such in
-bindings/wasm/README.md: `verify.mjs` step 5 calls the same eleven
-wrappers the panel calls, on the same operands, comparing the same
-encodings and flags. What is unwitnessed is the markup between a click
-and those calls. Also not run: the RTL, formal and container simulation
-stages, the libcft/transcend/mpfr stages and the language legs - this
-change touches no C source, no header, no generator and no golden
-model, and `git diff` against the phase-2 merge is confined to
-`bindings/` and the docs.
+**Watched in a browser**, because the markup changed again - eleven
+rows in the compute panel's table, eleven entries in the cwrap table -
+and `verify.mjs` step 5 checks the wrappers, not the markup between a
+click and them. Chromium 148 on Windows 11, the committed
+`conformance.html` served over a loopback `http.server`, `file://`
+still being unreachable from this session:
+
+- section 1 read **libcft ABI 0.4**;
+- section 2's embedded sample replayed **4,015 cases over 20 sets,
+  green**;
+- section 3 took a drop of four transcendental sets and one opcode set
+  - **45,569 cases, all matching** - with a deliberately misnamed
+  sixth file refused by name and the verdict correctly downgraded to
+  "not a full pass". The four transcendental sets carry the eleven's
+  cases, so the drop path saw them too;
+- section 4 offered all eleven new operations, each labelled with its
+  ABI step and entry point and each enabling exactly the operand
+  fields its arity uses. Computed through the button: `sinPi(1)` = +0
+  against `sinPi(-1)` = -0 with no flags either way; `tanPi(1)` = -0;
+  `tanPi(1/2)` = +inf **with divideByZero, not overflow**;
+  `cosPi(3/2)` = +0; `atanPi(+inf)` = `0x3fe0000000000000`, exactly
+  1/2, silent; `atan2(+0, -0)` = `0x400921fb54442d18` = pi and
+  *inexact* against `atan2Pi(+0, -0)` = 1 exactly; `atan2Pi(1, 0)` =
+  1/2 against `atan2Pi(0, 1)` = +0, which is the operand order made
+  visible in the UI; and at binary256 `asinPi(1)` = 1/2 and
+  `acosPi(-1)` = 1 both exact and silent, `acosPi(1/2)` =
+  `0x3fffd5555…5555` = 1/3 with inexact, `asin(2)` the canonical quiet
+  NaN with invalid. The panel refused a 65-hex-digit operand by count
+  rather than truncating it;
+- `build/negative_control.html` was opened in the same browser and
+  failed red at `fp64.jsonl:2` (`expected 0x7ff8000000000001 / got
+  0x7ff8000000000000`), so the checker was watched failing on this
+  build and not only on the previous one.
+
+**What did NOT run, and why.** The RTL, formal and container
+simulation stages, the libcft/transcend/mpfr stages and the language
+legs: this change touches no C source, no header, no generator and no
+golden model, and `git diff` against the phase-2 merge is confined to
+`bindings/` and the docs. No other JS runtime and no device backend -
+wasm32 has no PCIe, so `Context.open` here is always the software
+backend.

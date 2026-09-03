@@ -300,17 +300,41 @@ most often miss - and `bindings/node/test.mjs` fails 2 of 74 by name
 `bindings/node/conformance.mjs` fails all twenty sets. Reverted,
 rebuilt, hashes reproduce.
 
-**This rebuild was NOT opened in a browser**, and that is a step back
-from the previous block, which was. The markup changed again - eleven
-rows in the compute panel's table, eleven entries in the cwrap table -
-and no browser was driven on this host in the session that built it.
-So the claim here is narrower and stated as such: `verify.mjs` step 5
-calls the same eleven wrappers the panel calls, on the same operands,
-comparing the same encodings and flags, and the drop zone's
-accepted-names list did not change at all (it has taken the
-transcendental sets since the morning). What is unwitnessed is the
-markup between a click and those calls. The next person to open the
-page should say so here.
+**And the page was opened in a browser again**, because the markup
+changed again - eleven rows in the compute panel's table, eleven
+entries in the cwrap table - and `verify.mjs` step 5 checks the
+wrappers, not the markup between a click and them. Chromium 148 on
+Windows 11, the committed `conformance.html` served over a loopback
+`http.server` (`file://` is still not reachable from this session).
+
+* Section 1 read *libcft ABI 0.4*; section 2's embedded sample
+  replayed **4,015 cases over 20 sets, green**.
+* Section 3 took a drop of four transcendental sets and one opcode set
+  - **45,569 cases, all matching** - with a deliberately misnamed
+  sixth file (`fp64-transcend-rne.jsonl`, which is not a name the
+  generator writes) refused by name and the verdict correctly
+  downgraded to *not a full pass*. The transcendental sets dropped
+  there carry the eleven's cases, so that path saw them too.
+* Section 4's panel offered all eleven new operations, each labelled
+  with its ABI step and entry point, each enabling exactly the operand
+  fields its arity uses. Computed through the button: `sinPi(1)` = +0
+  and `sinPi(-1)` = -0, no flags either way, which is the sign rule
+  the argument decides; `tanPi(1)` = -0; `tanPi(1/2)` = +inf **with
+  divideByZero and not overflow**; `cosPi(3/2)` = +0; `atanPi(+inf)`
+  = `0x3fe0000000000000`, exactly 1/2, raising nothing;
+  `atan2(+0, -0)` = `0x400921fb54442d18` = pi, *inexact*, against
+  `atan2Pi(+0, -0)` = 1 exactly - the two answers side by side, which
+  is why atan2Pi is a separate function; and `atan2Pi(1, 0)` = 1/2
+  against `atan2Pi(0, 1)` = +0, which is the operand order visible in
+  the UI. At binary256: `asinPi(1)` = 1/2 and `acosPi(-1)` = 1, both
+  exact and silent, `acosPi(1/2)` = `0x3fffd5555…5555` = 1/3 with
+  inexact, and `asin(2)` = the canonical quiet NaN with invalid. A
+  65-hex-digit operand was refused by the panel with a count in the
+  message rather than truncated.
+* `build/negative_control.html` was opened in the same browser and
+  failed red at `fp64.jsonl:2` - `expected 0x7ff8000000000001 / got
+  0x7ff8000000000000` - so the checker was watched failing on this
+  build too, not only on the previous one.
 
 ## Scope, honestly
 
