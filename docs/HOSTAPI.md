@@ -219,6 +219,11 @@ arbitration between muls and adds - the most schedule-sensitive logic
 in the engine, for one saved round trip. The composition property went
 into the contract partly so this choice would exist.
 
+That choice paid twice: `CFT_SUMSQ` and `CFT_SUMABS` are the same
+composition over a different leaf, and the other three of clause 9.4 -
+the scaled products, which return a pair - are named host entry points.
+See "The rest of clause 9.4's reductions" below.
+
 ## Division and square root: composed, not opcodes
 
 `cft_div` and `cft_sqrt` landed with CAPS opcode-group bit 14. They
@@ -537,6 +542,85 @@ transcendental cases of 478,915 at `make vectors`'
 arguments. A consumer built against ABI 0.4 and handed a 0.5 set fails
 on the NAME of a function it does not know, which is the refusal it
 should give.
+
+## The rest of clause 9.4's reductions (part of the 0.6 step)
+
+`cft_reduce` shipped with two of the seven reductions 754-2019 9.4 asks
+a language to define. The other five landed 2026-09-03:
+**sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff.**
+docs/DETERMINISM.md holds the contract - the tree, the scaling rule,
+the exception rules; what belongs HERE is the API shape and why it is
+that shape, because the five did not all arrive through the same door.
+
+**Two are new `cft_reduce` opcodes, and they are COMPOSITIONS.**
+`CFT_SUMSQ` (28) and `CFT_SUMABS` (29) append to the enum after the
+divide/sqrt seeds. Neither is separate hardware and neither needs to
+be, for exactly the reason `CFT_DOT` is not: they are the same tree
+over a different leaf, so the library issues
+
+    CFT_SUMSQ  ->  cft_reduce(CFT_DOT, a, a)
+    CFT_SUMABS ->  cft_run(CFT_ABS, a), then cft_reduce(CFT_SUM)
+
+and the device and software backends agree by construction rather than
+by testing. The cost is one scratch buffer for sumAbs - the same trade
+`CFT_DOT` already makes for its multiply pass - and one dot for
+sumSquare, which costs nothing extra at all.
+
+9.4's one divergent row is applied above both backends, and lazily.
+The standard puts an infinity ahead of a NaN for these two, where sum
+and dot put NaN first, so a vector holding both returns `+inf`. That
+cannot come out of a tree, so the library overrides it - but only after
+checking, because no term of either operation is negative, that the
+tree's answer is a NaN at all. The scan for an infinity therefore runs
+only on a vector that produced one, instead of on every call, which on
+a device backend is the host reading the whole input array.
+
+`cft_supports()` accounts for the composition: `CFT_SUMSQ` also needs
+the arithmetic group and `CFT_SUMABS` the sign group, so asking about
+the opcode itself is the right question and a device missing one says
+`CFT_ERR_UNSUPPORTED` before the sequence starts.
+
+**Three are named host entry points**, because they return a PAIR:
+
+```c
+cft_scaled_prod     (dev, fmt, rnd, a,    pr, &scale, n, &flags);
+cft_scaled_prod_sum (dev, fmt, rnd, a, b, pr, &scale, n, &flags);
+cft_scaled_prod_diff(dev, fmt, rnd, a, b, pr, &scale, n, &flags);
+```
+
+A pair does not fit through `cft_reduce`, which delivers one element.
+Three names rather than one call with a `kind` argument, and the reason
+is the same one docs/DETERMINISM.md's reassignment hazard records:
+these issue no device pass, so a `kind` enum would be a second opcode
+space living beside `cft_op` with none of an opcode's meaning and all
+of its stale-number risk. The arities differ too - one vector, then
+two - so three functions check at compile time what one would check at
+run time. Every other pair-free host operation in the header is named
+this way (`cft_div`, `cft_pow`, `cft_atan2`), and these follow it.
+
+`scale` is an `int64_t` out-parameter; neither it nor `pr` may be NULL.
+`pr` receives ONE element. **These are HOST operations** - no `cft_run`
+pass, no bus word, `dev` is context - for the plainest possible reason:
+there is no tile accumulator for a scaled product. The accumulator
+streams ADDs. So there is nothing here for a device to carry, and the
+results are bit-identical across backends by construction, the same
+shape the transcendentals take.
+
+The cost note is short. `cft_scaled_prod` allocates nothing at all -
+its factors are the caller's own array - and the other two allocate one
+scratch buffer of `n` elements for the rounded leaf sums. Every node is
+one multiply and an exact binade extraction, so a scaled product is
+about the price of a dot.
+
+**The vectors carry all seven**, in a THIRD set type:
+`<fmt>-reduce[-<rnd>].jsonl`, 448 cases and 9,513 elements per file,
+20 files. It had to be a new type - a reduction's operand is a whole
+vector whose length is part of the case, and both existing schemas are
+one line per case with a fixed number of single-element operands. The
+scaled products' cases carry `pr` and `sf` where the others carry `d`,
+because a set that recorded only the significand would score half the
+operation. Before this the published sets carried no reductions at all,
+not even `sum`.
 
 ## What is deliberately not in the first version
 

@@ -1623,6 +1623,63 @@ model comparisons over twenty-nine functions, 451,988 MPFR
 cases with zero value and zero flag mismatches, and a negative control
 that four gates caught.
 
+## The rest of clause 9.4's reductions (status, 2026-09-03)
+
+sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff ship as
+part of the 0.6 step, completing the seven reductions 754-2019 9.4 asks
+a language to define - `sum` and `dot` having been the first two since
+2026-08-30. Zero RTL, two new opcodes, three new host entry points.
+
+What that closed, and what it did not:
+
+- **Closed: the two sum reductions, as COMPOSITIONS.** `CFT_SUMSQ` is
+  `cft_reduce(CFT_DOT, a, a)` and `CFT_SUMABS` is an abs pass then
+  `CFT_SUM`, node for node, so no second tree walker exists for the
+  two backends to disagree about. The composition property `dot` was
+  given in 2026-08-30 is what made that available; this is the second
+  time it has paid.
+- **Closed: the scaling rule, which 9.4 explicitly leaves open.** The
+  same index-shaped tree, one rounding per node, and a running
+  significand held in +-[1, 2) with the binade extracted into an int64
+  scale after every multiply. The invariant is what delivers the
+  standard's own requirement that pr "shall not be affected by
+  overflow or underflow" - both operands of every multiply are in
+  +-[1, 2), so no product can leave any rung - by construction rather
+  than by testing.
+- **Closed: the exception rules**, including the row that is not the
+  plain composition. 9.4 orders an infinity ahead of a NaN for
+  sumSquare and sumAbs and the other way round for sum and dot, so a
+  vector holding both returns +inf; that override is applied above both
+  backends and is checked lazily, only on a vector whose tree produced
+  a NaN.
+- **Closed: the reductions in the published vectors**, which carried
+  none of them before - not even `sum`. A third set type,
+  `<fmt>-reduce[-<rnd>].jsonl`, because a reduction's operand is a
+  whole vector whose length is part of the case.
+- **Closed: a third firing of the reassignment hazard.** Taking 28 and
+  29 made the generator's "unassigned representative" stale, and
+  `cft_conformance` refused the regenerated set by name rather than
+  scoring sumSquare against an answer recorded for an unassigned
+  opcode. Twice was a warning; three times is a working mechanism.
+- **Not closed: an accumulator that streams a scaled product.** There
+  is none, and none is planned: the tile's accumulator streams ADDs,
+  and a scaled product's node is a multiply plus a binade extraction.
+  The three are host operations for that reason, not as a staging post.
+- **Not closed: MPFR arbitrating the TREE.** It cannot - 9.4 lets an
+  implementation associate in any order - so the MPFR campaign settles
+  every node and reproduces the shape rather than judging it. What
+  guards the shape is two independent implementations of it, the
+  streaming accumulator, and the vector sets. The tool's banner says
+  so in those words.
+- **Not closed: clause 9.5's augmented arithmetic**, which sits beside
+  9.4 in the standard and is a genuinely different operation - one
+  rounding for a whole accumulation, in a rounding direction
+  (roundTiesTowardZero) this contract does not otherwise carry.
+  Nothing has been written, so nothing is claimed.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.4
+entry.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,
