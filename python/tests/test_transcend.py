@@ -422,6 +422,28 @@ def _brute_enclosure(fmt, fn, xa, xb, prec):
         if fn in ("atan", "atanpi"):
             a = iv.atan2(x, one)
             return a / iv.pi if fn == "atanpi" else a
+        # Phase 3, and every one of these is written DIFFERENTLY from
+        # the module and from host/src/transcend.c: the naive forms,
+        # which an interval library at four times the cap can afford
+        # and a library carrying a tracked error bound cannot.
+        if fn == "sin":
+            return iv.sin(x)
+        if fn == "cos":
+            return iv.cos(x)
+        if fn == "tan":
+            return iv.tan(x)
+        if fn == "sinh":
+            return (iv.exp(x) - iv.exp(-x)) / 2
+        if fn == "cosh":
+            return (iv.exp(x) + iv.exp(-x)) / 2
+        if fn == "tanh":
+            return (iv.exp(x) - iv.exp(-x)) / (iv.exp(x) + iv.exp(-x))
+        if fn == "asinh":
+            return iv.log(x + iv.sqrt(x * x + one))
+        if fn == "acosh":
+            return iv.log(x + iv.sqrt(x * x - one))
+        if fn == "atanh":
+            return iv.log((one + x) / (one - x)) / 2
         y = val(xb)
         if fn == "pow":
             return iv.power(x, y)
@@ -542,7 +564,11 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
                  "exp2": gmpy2.exp2, "log": gmpy2.log,
                  "log1p": gmpy2.log1p, "log2": gmpy2.log2,
                  "log10": gmpy2.log10, "asin": gmpy2.asin,
-                 "acos": gmpy2.acos, "atan": gmpy2.atan}
+                 "acos": gmpy2.acos, "atan": gmpy2.atan,
+                 "sin": gmpy2.sin, "cos": gmpy2.cos, "tan": gmpy2.tan,
+                 "sinh": gmpy2.sinh, "cosh": gmpy2.cosh,
+                 "tanh": gmpy2.tanh, "asinh": gmpy2.asinh,
+                 "acosh": gmpy2.acosh, "atanh": gmpy2.atanh}
         if fn in table:
             v = table[fn](a)
         elif fn == "pow":
@@ -573,7 +599,9 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
 #: enclosure above. Claiming an MPFR comparison this file cannot make
 #: would be worse than naming the gap.
 MPFR_BOUND = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
-              "pow", "hypot", "asin", "acos", "atan", "atan2")
+              "pow", "hypot", "asin", "acos", "atan", "atan2",
+              "sin", "cos", "tan", "sinh", "cosh", "tanh",
+              "asinh", "acosh", "atanh")
 
 
 @pytest.mark.parametrize("fmt", ALL)
@@ -1387,8 +1415,8 @@ def test_the_eleven_are_registered_and_named_once():
     """One canonical order in three languages. The vector sets, the C
     enum and this tuple index each other, so a name added in one place
     and not the others is a silent renumbering."""
-    assert len(tr.TRANSCEND_FNS) == 20
-    assert tr.TRANSCEND_FNS[9:] == TRIG
+    assert len(tr.TRANSCEND_FNS) == 29
+    assert tr.TRANSCEND_FNS[9:20] == TRIG
     for fn in TRIG:
         assert fn in tr.TRANSCEND_IMPL
         assert tr.TRANSCEND_ARITY[fn] == (2 if fn.startswith("atan2") else 1)

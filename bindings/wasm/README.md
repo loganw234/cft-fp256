@@ -62,14 +62,15 @@ exactly what the drop zone does with a dropped file, and the drop
 itself was watched working in Chromium (see the 2026-09-03 block
 below) - four transcendental sets and one opcode set, 32,465 cases,
 with a misnamed file still refused by name. Those same twenty files
-carry **129,845 cases** since ABI 0.4 added the eleven phase-2
-functions to them; the file names did not change, so the drop zone
-needed nothing.
+carry **242,915 cases** since ABI 0.5 added the nine phase-3
+functions to them (129,845 at 0.4, 64,325 at 0.3); the file names did
+not change, so the drop zone needed nothing.
 
 The page is also a working binary32/64/128/256 calculator: one
 element through `cft_run()`, the composed `cft_div`/`cft_sqrt`
-sequence, or any of the twenty transcendentals - phase 1's nine and
-phase 2's eleven - operands and results as raw encodings, flags
+sequence, or any of the twenty-nine transcendentals - phase 1's nine,
+phase 2's eleven and phase 3's nine - operands and results as raw
+encodings, flags
 decoded, every answer pinned by the replay above it.
 
 ## Building
@@ -202,13 +203,14 @@ the build directory:
    directory, which is what the page does with a dropped file, over
    every name the drop zone accepts: the twenty opcode sets and, when
    `make vectors` has written them, the twenty transcendental ones;
-5. drives the **twenty transcendentals through their own wrappers**,
-   reading the same files itself: `cftw_exp` … `cftw_hypot` and, since
-   ABI 0.4, `cftw_sinpi` … `cftw_atan2pi`, one element at a time for
+5. drives the **twenty-nine transcendentals through their own
+   wrappers**, reading the same files itself: `cftw_exp` … `cftw_hypot`,
+   since ABI 0.4 `cftw_sinpi` … `cftw_atan2pi`, and since ABI 0.5
+   `cftw_sin` … `cftw_atanh`, one element at a time for
    exact per-case flags and then once per family as an array,
    comparing encodings and flags against the file. Step 4 cannot
    substitute for this and it is worth being blunt about why:
-   `cft_conformance` dispatches all twenty internally, in C, so it is
+   `cft_conformance` dispatches all twenty-nine internally, in C, so it is
    green whether or not a single `cftw_*` wrapper for them exists. For
    a day it was (docs/COMPATIBILITY.md's half-step). Step 5 is the one
    that fails when the JavaScript surface is missing, or present and
@@ -336,6 +338,25 @@ Windows 11, the committed `conformance.html` served over a loopback
   0x7ff8000000000000` - so the checker was watched failing on this
   build too, not only on the previous one.
 
+**Measured 2026-09-03, later again**, node 22.19.0 on Windows 11,
+against the page rebuilt with the nine phase-3 wrappers in it - in the
+same commit as the library's own step to 0.5, so this page never
+reported a version whose operations it could not call: module
+**140,869 bytes**, sha256 `5718aa19e85dad2b…`, identical to the node
+loader's `bindings/node/cft_node.wasm`; `cftw_abi_version()` = 5 =
+ABI 0.5, matching `cft.h`; **67 `cftw_*` exports**; **478,915
+cases over 40 sets** through `cft_conformance` and the transcendental
+cases again through the twenty-nine wrappers themselves, zero
+mismatches either way. Two clean container builds produced the same
+`conformance.html` (sha256 `69ff0ff911e9ce1e…`). The nine reach the module
+with the library's 270,336-bit 2/pi compiled in - the reduction
+against pi runs inside the browser at every magnitude binary256
+holds. The page was not re-opened in a browser for this step: the
+markup changed the way it changed at 0.4 (nine rows in the panel's
+table, nine entries in the cwrap table, no new dispatch branch), and
+`verify.mjs` step 5 drives the same wrappers the panel calls; the
+claim stops there.
+
 ## Scope, honestly
 
 * **This is the software backend in a browser.** Full contract
@@ -397,7 +418,12 @@ Windows 11, the committed `conformance.html` served over a loopback
   wrappers the panel calls, and its step 4 replays one dropped set per
   directory the way the drop zone does - which is the only kind of
   claim this file is willing to make about a page nobody watched.
-* **The page is at ABI 0.4, surface included, and this time there was
+* **The page is at ABI 0.5, surface included, wrappers and rebuild in
+  the library's own step (2026-09-03).** Nine more `cftw_*` exports, 67
+  in all; 140,869 bytes of wasm where the 0.4 build was 98,392 - the
+  nine wrappers, the reduction, the hyperbolics and a 33 KiB constant
+  together. Measured above.
+* **The page was at ABI 0.4, surface included, and that time there was
   no half-step at all (2026-09-03).** The library reached 0.4 an hour
   before this rebuild, so a rebuild on its own would have answered
   `cftw_abi_version()` with 4 while exporting none of the eleven

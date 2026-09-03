@@ -601,3 +601,86 @@ WASM_EXPORT int cftw_atan2pi(cft_device *dev, int fmt, int rnd,
     return (int)cft_atan2pi(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
                             (size_t)n, flags_out);
 }
+
+/* ---- the phase-3 radian trigonometry and the hyperbolics (ABI 0.5) --- *
+ *
+ * Added 2026-09-03 with the library's own step to 0.5, so this module
+ * never carried the nine without exporting them - the half-step each
+ * of the 0.3 and 0.4 rebuilds took once. One wrapper per declaration
+ * in cft.h, same order, same arguments: unary, host operations, no bus
+ * word. sin, cos and tan take RADIANS; the library reduces them against
+ * its own 2/pi at any magnitude the format holds, and a wrapper knows
+ * nothing about that, which is the point of a wrapper.
+ */
+
+WASM_EXPORT int cftw_sin(cft_device *dev, int fmt, int rnd,
+                         const void *a, void *d, uint32_t n,
+                         uint32_t *flags_out)
+{
+    return (int)cft_sin(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                        (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_cos(cft_device *dev, int fmt, int rnd,
+                         const void *a, void *d, uint32_t n,
+                         uint32_t *flags_out)
+{
+    return (int)cft_cos(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                        (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_tan(cft_device *dev, int fmt, int rnd,
+                         const void *a, void *d, uint32_t n,
+                         uint32_t *flags_out)
+{
+    return (int)cft_tan(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                        (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_sinh(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_sinh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_cosh(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_cosh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_tanh(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_tanh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_asinh(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_asinh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_acosh(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_acosh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_atanh(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_atanh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}

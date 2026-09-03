@@ -1575,6 +1575,54 @@ entry: 456,325 conformance cases replayed, 77,315 model comparisons,
 negative control that three gates caught and a fourth was extended to
 catch.
 
+## The transcendentals, phase 3 (status, 2026-09-03)
+
+sin, cos and tan of a RADIAN argument, and sinh, cosh, tanh, asinh,
+acosh, atanh ship as ABI 0.5, correctly rounded at all four formats
+under all five attributes with clause 9.2.1's special values and exact
+flags. Zero RTL, the same evaluator, and the one thing the two phases
+before it were defined to exclude: the reduction against pi.
+
+What that closed, and what it did not:
+
+- **Closed: the reduction.** A Payne-Hanek reduction against a stored
+  2/pi of 270,336 bits - the size derived from the exponent range
+  rather than adopted from phase 2's half-million estimate, generated
+  from mpmath and re-derived to the last bit from Chudnovsky's series
+  in plain Python integers - that measures the cancellation an
+  argument causes and widens its window by exactly the deficit, and
+  refuses past an allowance of about 7,000 bits. The cancellation
+  itself is MEASURED, per format, by a continued-fraction descent that
+  agrees with exhaustive search on every instance small enough to
+  brute-force: 29 bits at fp32 and 61 at fp64 over every binade, 121
+  and 245 over sampled fp128 and fp256 binades. The irrationality
+  measure of pi cannot bound it usefully, and the note says so.
+- **Closed: the hyperbolics**, in the cancellation-free forms phase 1
+  justified, written differently in the model and in the C so that
+  agreement is evidence.
+- **Closed: the exact cases**, which collapsed to the zeros - a
+  theorem (Hermite-Lindemann) rather than a table - and seven
+  neighbour rules with derived thresholds, including the one that
+  needed reasoning rather than computation: sin and cos beside 1,
+  where the enclosure's top can never be got below 1 cheaply and the
+  low end plus the theorem is the whole proof.
+- **Closed: the JavaScript surface, in the same step.** The nine
+  wrappers, the page's controls and the Node layers landed with the
+  library's own bump to 0.5, so for the first time a minor step
+  shipped without a half-step in between.
+- **Not closed: the rest of table 9.1.** exp2m1, exp10, exp10m1,
+  log2p1, log10p1, pown, powr, compound and rootn remain. None needs a
+  reduction, a constant beyond ln 10, or a new idea; they are a
+  smaller job than any phase so far. Nothing has been written, so
+  nothing is claimed.
+- **Not closed: a tile-assisted fast path**, as before.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 phase-3 entry:
+478,915 conformance cases replayed, 280,670
+model comparisons over twenty-nine functions, 451,988 MPFR
+cases with zero value and zero flag mismatches, and a negative control
+that four gates caught.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,

@@ -988,3 +988,185 @@ def test_trig_special_rows(prec):
     # a quiet NaN does NOT outrank atan2's table the way it does pow's
     assert ctx.atan2(ctx.nan(), ctx.zero()).is_nan
     assert ctx.atan2pi(ctx.from_float(1.0), ctx.nan()).is_nan
+
+
+# ---- the phase-3 radian trigonometry and the hyperbolics (ABI 0.5) ------
+
+P3_UNARY = ("sin", "cos", "tan", "sinh", "cosh", "tanh",
+            "asinh", "acosh", "atanh")
+
+
+def p3_pool(prec, seed):
+    """Operands for the nine: the tiny and the huge (which is where the
+    reduction against pi earns its keep), the two sides of 1 (acosh's
+    edge and atanh's pole), the sinh/cosh overflow region, a few
+    multiples of pi/2 as doubles, and randoms."""
+    ctx = Context(prec)
+    out = [ctx.from_float(v) for v in
+           (0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0, 3.0, -3.0, 0.25,
+            1.5, 10.0, -10.0, 100.0, 1e-8, -1e-8, 1e-40, 0.9999, -0.9999,
+            1.0001, 1e6, 1e30, -1e30, 1e300, 1e-300,
+            3.141592653589793, 1.5707963267948966, 6.283185307179586,
+            0.7853981633974483, 88.0, 710.0, 11356.0, 181704.0)]
+    out += [ctx.from_bits(b) for b in pool(prec, count=10, seed=seed)]
+    return out
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+@pytest.mark.parametrize("fn", P3_UNARY)
+def test_p3_matches_gmpy2(prec, mode, fn):
+    """Bit for bit against MPFR at a matching IEEE context. gmpy2 binds
+    all nine, so unlike the Pi-variants every one of these has a Python-
+    side oracle - including sin of 1e300, which MPFR reduces against its
+    own pi."""
+    ctx = Context(prec, rounding=mode)
+    ops = p3_pool(prec, seed=41)
+    checked = 0
+    for i, x in enumerate(ops):
+        if is_snan(ctx, x):
+            continue
+        got = getattr(ctx, fn)(x)
+        save = gmpy2.get_context()
+        gctx = gmpy2.ieee(WIDTH[prec])
+        gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+        gmpy2.set_context(gctx)
+        try:
+            want = getattr(gmpy2, fn)(x.to_mpfr())
+        finally:
+            gmpy2.set_context(save)
+        if got.is_nan:
+            assert gmpy2.is_nan(want), (fn, i)
+        else:
+            assert got.same_bits(ctx.from_mpfr(want)), \
+                f"{fn} {prec} {mode} arg {i}: {got.to_str()} vs {want}"
+        checked += 1
+    assert checked >= 30
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", P3_UNARY)
+def test_p3_batch_matches_scalar(prec, fn):
+    """One C call for the array must equal N calls for the elements."""
+    ctx = Context(prec)
+    ops = p3_pool(prec, seed=43)
+    got, fl = getattr(batch, fn)(ctx, ops)
+    want, want_or = [], 0
+    for x in ops:
+        want.append(getattr(ctx, fn)(x))
+        want_or |= ctx.last_flags
+    assert len(got) == len(want)
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or, f"{fn} {prec}: batch flags are the OR"
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_p3_exact_cases_are_the_zeros(prec):
+    """Hermite-Lindemann: the only exact cases are the zeros, cos and
+    cosh at 0, acosh at 1 - and tanh at an infinity, which is a limit
+    that happens to be representable. Every one leaves the flag word
+    EMPTY, and every neighbour of the table is inexact."""
+    ctx = Context(prec)
+    cases = [
+        ("sin", 0.0, 0.0, 0), ("sin", -0.0, -0.0, 1),
+        ("cos", 0.0, 1.0, 0), ("cos", -0.0, 1.0, 0),
+        ("tan", -0.0, -0.0, 1),
+        ("sinh", -0.0, -0.0, 1), ("cosh", -0.0, 1.0, 0),
+        ("tanh", 0.0, 0.0, 0), ("asinh", -0.0, -0.0, 1),
+        ("acosh", 1.0, 0.0, 0), ("atanh", -0.0, -0.0, 1),
+    ]
+    for fn, arg, want, sign in cases:
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(ctx.from_float(arg))
+        assert got.to_float() == want and got.sign == sign, \
+            (fn, arg, got.to_str())
+        assert ctx.last_flags == 0, (fn, arg, ctx.flag_names())
+    ctx.clear_flags()
+    assert ctx.tanh(ctx.inf()).to_float() == 1.0
+    assert ctx.tanh(ctx.inf(1)).to_float() == -1.0
+    assert ctx.last_flags == 0
+    for fn, arg in (("sin", 1.0), ("cos", 1.0), ("tan", 0.5),
+                    ("sinh", 1.0), ("cosh", 1.0), ("tanh", 0.5),
+                    ("asinh", 1.0), ("acosh", 2.0), ("atanh", 0.5)):
+        ctx.clear_flags()
+        getattr(ctx, fn)(ctx.from_float(arg))
+        assert "inexact" in ctx.flag_names(), (fn, arg)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_p3_special_rows(prec):
+    """The clause 9.2.1 rows for the nine: no limit at an infinity for
+    the radian three, the hyperbolic infinities, acosh's domain, and
+    atanh's pole with divideByZero."""
+    ctx = Context(prec)
+    for fn in ("sin", "cos", "tan"):
+        for s in (0, 1):
+            ctx.clear_flags()
+            assert getattr(ctx, fn)(ctx.inf(s)).is_nan, (fn, s)
+            assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.sinh(ctx.inf(1)).is_inf and ctx.sinh(ctx.inf(1)).sign == 1
+    assert ctx.cosh(ctx.inf(1)).is_inf and ctx.cosh(ctx.inf(1)).sign == 0
+    assert ctx.asinh(ctx.inf(1)).is_inf and ctx.asinh(ctx.inf(1)).sign == 1
+    assert ctx.acosh(ctx.inf()).is_inf and ctx.acosh(ctx.inf()).sign == 0
+    assert ctx.last_flags == 0
+    for arg in (ctx.inf(1), ctx.zero(), ctx.zero(1), ctx.from_float(0.5),
+                ctx.from_float(-2.0)):
+        ctx.clear_flags()
+        assert ctx.acosh(arg).is_nan
+        assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    p = ctx.atanh(ctx.from_float(1.0))
+    assert p.is_inf and p.sign == 0
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    n = ctx.atanh(ctx.from_float(-1.0))
+    assert n.is_inf and n.sign == 1
+    for arg in (ctx.from_float(2.0), ctx.from_float(-1.5), ctx.inf(),
+                ctx.inf(1)):
+        ctx.clear_flags()
+        assert ctx.atanh(arg).is_nan
+        assert "invalid" in ctx.flag_names(ctx.last_flags)
+    # the odd ones keep a signed zero's sign; cosh does not
+    assert ctx.sinh(ctx.zero(1)).sign == 1
+    assert ctx.tanh(ctx.zero(1)).sign == 1
+    assert ctx.cosh(ctx.zero(1)).sign == 0
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_p3_tiny_arguments_take_a_side(prec):
+    """The neighbour rules, one directed rounding each: the true value
+    lies strictly on a known SIDE of the smallest subnormal (or of 1),
+    which no working precision could ever separate."""
+    one = Context(prec).from_float(1.0)
+    below_one = Context(prec).from_bits(one.to_bits() - 1)
+    above_one = Context(prec).from_bits(one.to_bits() + 1)
+    for mode, fn, want in (
+            ("RNDD", "sin", "zero"), ("RNDU", "sin", "same"),
+            ("RNDU", "tan", "next"), ("RNDZ", "tan", "same"),
+            ("RNDU", "sinh", "next"), ("RNDD", "sinh", "same"),
+            ("RNDD", "tanh", "zero"), ("RNDN", "tanh", "same"),
+            ("RNDD", "asinh", "zero"), ("RNDU", "asinh", "same"),
+            ("RNDU", "atanh", "next"), ("RNDN", "atanh", "same")):
+        ctx = Context(prec, rounding=mode)
+        m = ctx.from_bits(1)
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(m)
+        if want == "zero":
+            assert got.is_zero and got.sign == 0, (fn, mode)
+        elif want == "same":
+            assert got.same_bits(m), (fn, mode)
+        else:
+            assert got.same_bits(ctx.from_bits(2)), (fn, mode)
+        names = ctx.flag_names(ctx.last_flags)
+        assert "inexact" in names and "underflow" in names, (fn, mode)
+    for mode, fn, want in (("RNDD", "cos", below_one),
+                           ("RNDN", "cos", one),
+                           ("RNDU", "cosh", above_one),
+                           ("RNDN", "cosh", one)):
+        ctx = Context(prec, rounding=mode)
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(ctx.from_bits(1))
+        assert got.same_bits(want), (fn, mode, got.to_str())
+        assert tuple(ctx.flag_names(ctx.last_flags)) == ("inexact",), (fn, mode)

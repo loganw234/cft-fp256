@@ -90,13 +90,15 @@ FN_POW = "pow"
 FN_HYPOT = "hypot"
 
 #: Canonical order - the ABI's, the vector sets', the docs'. Phase 1's
-#: nine first, then phase 2's eleven, and the order never changes: a
-#: vector set names its function, but transcend.h's enum, cft_tr_name
-#: and this tuple are one list in three languages.
+#: nine first, then phase 2's eleven, then phase 3's nine, and the order
+#: never changes: a vector set names its function, but transcend.h's
+#: enum, cft_tr_name and this tuple are one list in three languages.
 TRANSCEND_FNS = (FN_EXP, FN_EXPM1, FN_EXP2, FN_LOG, FN_LOG1P, FN_LOG2,
                  FN_LOG10, FN_POW, FN_HYPOT,
                  "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
-                 "atan2", "asinpi", "acospi", "atanpi", "atan2pi")
+                 "atan2", "asinpi", "acospi", "atanpi", "atan2pi",
+                 "sin", "cos", "tan",
+                 "sinh", "cosh", "tanh", "asinh", "acosh", "atanh")
 
 #: How many operands each reads.
 TRANSCEND_ARITY = {fn: (2 if fn in (FN_POW, FN_HYPOT, "atan2", "atan2pi")
@@ -1507,6 +1509,515 @@ def atan2pi(fmt: FpFormat, ya: int, xa: int, rnd: int = RND_RNE):
     return _atan2_family(fmt, ya, xa, rnd, over_pi=True)
 
 
+# =====================================================================
+# Phase 3: the radian trigonometry and the hyperbolics
+#
+# sin, cos, tan of a RADIAN argument, and sinh, cosh, tanh, asinh, acosh
+# and atanh. What phase 2 was defined to exclude, plus the half of
+# clause 9 that needs nothing new at all.
+#
+# THE ARGUMENT REDUCTION, AND WHY THIS MODULE DOES NOT WRITE ONE.
+# host/src/transcend.c reduces `x mod (pi/2)` itself, Payne-Hanek style,
+# out of a 270,336-bit window of 2/pi and integer arithmetic, because a
+# C library has no arbitrary-precision floating point to lean on. This
+# module has mpmath, whose interval sine and cosine do their own
+# reduction internally and rigorously at whatever precision the
+# enclosure needs - so the reference does NOT reimplement the reduction,
+# and that is the point. Two implementations that share a reduction
+# agree about its bugs. Measured on this host, `iv.sin` of the largest
+# fp256 magnitudes costs a tenth of a second the first time (it computes
+# pi to a quarter of a million bits and caches it) and nothing after.
+#
+# THE SIGN. Phase 2's forward functions read their sign off an EXACT
+# reduction - `x mod 2` is a mask - so no evaluation ever decided the
+# sign of a value it was about to round. Here the reduction is not
+# exact, and the C reads the sign off the quadrant its integer
+# arithmetic produces. This module does the opposite on purpose: it
+# takes the sign FROM THE ENCLOSURE, and only when both endpoints agree
+# on it. That is sound because sin, cos and tan of a nonzero dyadic
+# rational are never zero (a zero would make the argument a rational
+# multiple of pi), so the enclosure separates from zero at some finite
+# precision - and it is a different derivation from the C's, which is
+# what an independent reference is for.
+#
+# EXACTNESS. Hermite-Lindemann again, and it closes the whole set:
+# if x is a nonzero algebraic number then e^x is transcendental, and
+# e^(ix) with it. So
+#
+#   sin(x) = a algebraic  =>  z = e^(ix) is a root of z^2 - 2iaz - 1
+#   sinh(x) = a algebraic =>  z = e^x  is a root of z^2 - 2az - 1
+#   cosh(x) = a algebraic =>  z = e^x  is a root of z^2 - 2az + 1
+#
+# and in each case z is algebraic, which forces x = 0. Every operand
+# here is a dyadic rational, hence algebraic, so:
+#
+#   sin, tan, sinh, tanh, asinh, atanh   exact only at +-0
+#   cos, cosh                            exact only at 0, where it is 1
+#   acosh                                exact only at 1, where it is +0
+#
+# and `tanh(+-inf) = +-1` is a limit rather than a value, so it is a
+# special-value row rather than an exact case - it raises nothing
+# either way. docs/TRANSCENDENTALS.md writes each argument out.
+# =====================================================================
+
+FN_SIN = "sin"
+FN_COS = "cos"
+FN_TAN = "tan"
+FN_SINH = "sinh"
+FN_COSH = "cosh"
+FN_TANH = "tanh"
+FN_ASINH = "asinh"
+FN_ACOSH = "acosh"
+FN_ATANH = "atanh"
+
+RADIAN_FNS = (FN_SIN, FN_COS, FN_TAN)
+HYPERBOLIC_FNS = (FN_SINH, FN_COSH, FN_TANH, FN_ASINH, FN_ACOSH, FN_ATANH)
+PHASE3_FNS = RADIAN_FNS + HYPERBOLIC_FNS
+
+
+# ---- an enclosure whose SIGN is part of what it decides ---------------
+
+def _signed_parts(enc):
+    """(sign, smaller-magnitude endpoint, larger-magnitude endpoint) for
+    an mpmath interval that provably excludes zero, else None.
+
+    None means "sharpen": the interval touches or straddles zero, or an
+    endpoint is not finite. Returning None rather than guessing is the
+    whole difference between deciding a sign and assuming one."""
+    lo_t, hi_t = enc._mpi_
+    ls, lm, le, _lb = lo_t
+    hs, hm, he, _hb = hi_t
+    if int(lm) == 0 or int(hm) == 0 or ls != hs:
+        return None
+    if ls:                              # both negative: |lo| >= |hi|
+        return 1, (0, hm, he, 0), (0, lm, le, 0)
+    return 0, (0, lm, le, 0), (0, hm, he, 0)
+
+
+def _mag_cmp(m, e, num, den_bits):
+    """sign of (m * 2^e) - (num * 2^-den_bits), exactly."""
+    k = e + den_bits
+    if k >= 0:
+        left, right = m << k, num
+    else:
+        left, right = m, num << -k
+    return (left > right) - (left < right)
+
+
+def _inside_half_gap_below_one(fmt, lo):
+    """Does the enclosure PROVE the magnitude is above the midpoint just
+    below 1?
+
+    Only the low end is asked, and the reason is the interesting one:
+    the high end can never be got below 1 cheaply - an enclosure of
+    cos(x) for an x a hair from a multiple of 2pi is [1-eps-w, 1-eps+w]
+    with w set by the working precision, and its top stays above 1 until
+    the precision passes -log2(eps), which is exactly the escalation the
+    rule exists to avoid. It does not need to: |sin x| and |cos x| are
+    STRICTLY below 1 for every nonzero dyadic x, by the same
+    Hermite-Lindemann argument that makes them inexact, so the low end
+    plus a theorem is the whole proof."""
+    return _mag_cmp(lo[0], lo[1], (1 << (fmt.prec + 1)) - 1,
+                    fmt.prec + 1) > 0
+
+
+def _ziv_signed(fmt, evaluate, rnd, beside_one=False):
+    """Correctly round a real value whose SIGN the enclosure decides.
+
+    Identical to _ziv except that the sign is read off the interval
+    rather than passed in, and that `beside_one` enables the one
+    neighbour rule the radian functions need against a value the
+    enclosure cannot bracket from above."""
+    iv = _iv()
+    saved = iv.prec
+    STATS["ziv_calls"] += 1
+    prec = 0
+    try:
+        for i, prec in enumerate(_prec_schedule(fmt)):
+            if i:
+                STATS["escalations"] += 1
+            STATS["max_prec"] = max(STATS["max_prec"], prec)
+            iv.prec = prec
+            parts = _signed_parts(evaluate(iv))
+            if parts is None:
+                continue                    # straddles zero: sharpen
+            sign, lo_t, hi_t = parts
+            lo = _endpoint(lo_t, prec, -1)
+            hi = _endpoint(hi_t, prec, +1)
+            if lo is None or hi is None:
+                continue
+            if beside_one and _inside_half_gap_below_one(fmt, lo):
+                return _round_neighbour(fmt, one_bits(fmt, sign), away=0,
+                                        rnd=rnd)
+            blo = round_pack(fmt, sign, lo[0], lo[1], rnd)
+            bhi = round_pack(fmt, sign, hi[0], hi[1], rnd)
+            if blo == bhi:
+                bits, flags = blo
+                return bits, flags | FLAG_INEXACT
+        raise ZivEscalation(
+            f"{fmt.name}: the enclosure still did not decide the "
+            f"rounding at {prec} bits of working precision. For a radian "
+            "argument that means the reduction against pi cancelled "
+            "deeper than the cap can see, which is the case the cap was "
+            "sized to exclude; the correct answer is a refusal.")
+    finally:
+        iv.prec = saved
+
+
+# ---- sin, cos, tan of a radian argument -------------------------------
+
+def _radian_family(fmt, xa, rnd, which):
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        # 754-2019 9.2.1: no limit exists, so all three are invalid -
+        # the same row sinPi, cosPi and tanPi take.
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        if which == "cos":
+            return one_bits(fmt, 0), 0                  # cos(+-0) = 1
+        return xa, 0                                    # sin/tan(+-0) = +-0
+
+    ex = _vexp(u)
+
+    # The three tiny-argument rules. Each is the leading term of the
+    # series and its SIGN, compared against a quarter of the grid step,
+    # exactly as phase 2 derives asin's and atan's:
+    #
+    #   sin(x) - x = -x^3/6 + ...   below x,  |.| <= |x|^3/6
+    #   tan(x) - x = +x^3/3 + ...   above x,  |.| <= 0.357|x|^3 for
+    #                               |x| <= 1/4
+    #   1 - cos(x) <= x^2/2         below 1
+    #
+    # and the reduction is the identity here, so these are statements
+    # about the operand rather than about a reduced argument.
+    if which == "sin" and 2 * ex + p + 2 <= 0:
+        return _round_neighbour(fmt, xa, away=0, rnd=rnd)
+    if which == "tan" and 2 * ex + p + 3 <= 0:
+        return _round_neighbour(fmt, xa, away=1, rnd=rnd)
+    if which == "cos" and 2 * ex + p + 3 <= 0:
+        return _round_neighbour(fmt, one_bits(fmt, 0), away=0, rnd=rnd)
+
+    val = _exact_value_iv(fmt, xa)
+    fn = {"sin": lambda iv_, v: iv_.sin(v),
+          "cos": lambda iv_, v: iv_.cos(v),
+          "tan": lambda iv_, v: iv_.tan(v)}[which]
+
+    def evaluate(iv):
+        return fn(iv, val(iv))
+
+    # sin and cos can land inside the half gap below 1 - that is the
+    # argument sitting a hair from a multiple of pi/2, which is the
+    # deep-cancellation case - and no working precision separates them
+    # from it. tan cannot: |tan| near 1 would need the reduced argument
+    # within 2^-(p+2) of pi/4, which is a coincidence of a different and
+    # far rarer order, and if one ever occurred the loop would refuse
+    # rather than guess.
+    return _ziv_signed(fmt, evaluate, rnd,
+                       beside_one=(which in ("sin", "cos")))
+
+
+def sin(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """sin(x), x in RADIANS. Exact only at +-0; sin(+-inf) is invalid.
+
+    The argument reduction against pi is what separates this from
+    phase 2's sinPi, and it is the whole of phase 3's new machinery."""
+    return _radian_family(fmt, xa, rnd, "sin")
+
+
+def cos(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """cos(x) in radians. cos(+-0) is 1 and is the only exact case;
+    cos(+-inf) is invalid."""
+    return _radian_family(fmt, xa, rnd, "cos")
+
+
+def tan(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """tan(x) in radians. Exact only at +-0; tan(+-inf) is invalid.
+
+    Unlike tanPi there is no pole a representable argument can land on -
+    an odd multiple of pi/2 is irrational - so tan never signals
+    divideByZero. It CAN overflow, which tanPi provably cannot: how
+    close an operand gets to a pole is the measurement in
+    docs/TRANSCENDENTALS.md rather than a bound, and the overflow
+    response comes through round_pack like every other."""
+    return _radian_family(fmt, xa, rnd, "tan")
+
+
+# ---- the hyperbolics --------------------------------------------------
+#
+# Every one of these is exp or log in different clothes, and the
+# cancellation-free forms are phase 1's. This module writes them
+# differently from host/src/transcend.c on purpose - the C uses the
+# doubling identity for sinh and expm1(2x) for tanh, and these use the
+# odd/even split of expm1 - so that agreement is evidence rather than a
+# shared derivation:
+#
+#   sinh(x)  = (expm1(x) - expm1(-x)) / 2
+#   cosh(x)  = (exp(x) + exp(-x)) / 2
+#   tanh(x)  = (expm1(x) - expm1(-x)) / (exp(x) + exp(-x))
+#   asinh(x) = log1p(x + x^2/(1 + sqrt(1 + x^2)))
+#   acosh(x) = log1p(d + sqrt(d*(x+1))),  d = x - 1 EXACTLY
+#   atanh(x) = log1p(2x/(1 - x)) / 2,     1 - x EXACTLY
+#
+# The two `EXACTLY` are the same trick phase 1's log(m') and phase 2's
+# asin root use: for x near 1 the difference is exact on the encoding,
+# so the cancellation amplifies an error of zero. Written the other way
+# - acosh through sqrt(x^2 - 1), atanh through log((1+x)/(1-x)) - both
+# lose every bit the answer has as x approaches 1.
+
+
+def _exact_minus_one(u):
+    """|x| - 1 as an exact dyadic (m, e), for a finite |x| > 1."""
+    if u.e >= 0:
+        return (u.m << u.e) - 1, 0
+    return u.m - (1 << -u.e), u.e
+
+
+def _exact_plus_one(u):
+    """|x| + 1 as an exact dyadic (m, e), for a finite |x|."""
+    if u.e >= 0:
+        return (u.m << u.e) + 1, 0
+    return u.m + (1 << -u.e), u.e
+
+
+def _exact_one_minus(u):
+    """1 - |x| as an exact dyadic (m, e), for a finite |x| < 1."""
+    assert u.e < 0
+    return (1 << -u.e) - u.m, u.e
+
+
+def _cosh_sinh_overflow(fmt, u, sign, rnd):
+    """The overflow response when sinh or cosh provably passes the
+    format, else None.
+
+    Both lie between e^|x|/4 and e^|x| for every |x| >= 1, so an
+    enclosure of |x|*log2(e) above emax + 3 proves the result is above
+    2^(emax+1), which is above every finite value. The screen exists so
+    that nothing downstream is ever asked for e^(2^262143); it fires
+    only when it PROVES the overflow, and falling through is always
+    safe."""
+    ax = _dyadic_iv(u.m, u.e)
+    lo, _hi = _bounds(fmt, lambda iv: ax(iv) / iv.log(2))
+    if lo > fmt.emax + 3:
+        return _round_overflowing(fmt, sign, rnd)
+    return None
+
+
+def sinh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """sinh(x). Odd, exact only at +-0, sinh(+-inf) = +-inf, and it
+    overflows for a large argument like any other exponential."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return inf_bits(fmt, u.sign), 0
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # sinh(+-0) = +-0
+
+    ex = _vexp(u)
+    if 2 * ex + p + 2 <= 0:
+        # sinh(x) - x = x^3/6 + ... has the sign of x, and
+        # |sinh(x) - x| <= 0.17|x|^3 sits inside half the gap on the far
+        # side of x once 2e + p + 2 <= 0. The same threshold asin gets,
+        # and for the same series shape with the opposite sign to sin's.
+        return _round_neighbour(fmt, xa, away=1, rnd=rnd)
+
+    screened = _cosh_sinh_overflow(fmt, u, u.sign, rnd)
+    if screened is not None:
+        return screened
+
+    ax = _dyadic_iv(u.m, u.e)
+
+    def evaluate(iv):
+        a = ax(iv)
+        return (iv.expm1(a) - iv.expm1(-a)) / 2
+
+    return _ziv(fmt, u.sign, evaluate, rnd)
+
+
+def cosh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """cosh(x). Even, never below 1, exact only at cosh(+-0) = 1, and
+    cosh(+-inf) = +inf."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return inf_bits(fmt, 0), 0
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return one_bits(fmt, 0), 0                      # cosh(+-0) = 1
+
+    ex = _vexp(u)
+    if 2 * ex + p + 2 <= 0:
+        # cosh(x) - 1 = x^2/2 + ... > 0, at most 0.51x^2, and half the
+        # gap ABOVE 1 is 2^-p - twice the gap below it, which is why
+        # this threshold is one better than cos's for the same series.
+        return _round_neighbour(fmt, one_bits(fmt, 0), away=1, rnd=rnd)
+
+    screened = _cosh_sinh_overflow(fmt, u, 0, rnd)
+    if screened is not None:
+        return screened
+
+    ax = _dyadic_iv(u.m, u.e)
+
+    def evaluate(iv):
+        a = ax(iv)
+        return (iv.exp(a) + iv.exp(-a)) / 2
+
+    return _ziv(fmt, 0, evaluate, rnd)
+
+
+def tanh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """tanh(x). Odd, exact at +-0, and **tanh(+-inf) = +-1 exactly** -
+    a limit that happens to be representable, so it raises nothing."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return one_bits(fmt, u.sign), 0                 # +-1, exact
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # tanh(+-0) = +-0
+
+    ex = _vexp(u)
+    if 2 * ex + p + 3 <= 0:
+        # tanh(x) - x = -x^3/3 + ... lies on the ZERO side of x and is
+        # no bigger than 0.357|x|^3 for |x| <= 1/4 - atan's rule with
+        # atan's threshold, for the series that differs only in sign.
+        return _round_neighbour(fmt, xa, away=0, rnd=rnd)
+    if ex >= (p + 2).bit_length():
+        # 1 - tanh(x) = 2/(e^2x + 1) < 2 e^-2x, which is inside half the
+        # gap below 1 once x > 0.347(p+2). 2^ex >= p + 2 implies it with
+        # room, and the integer form is the one both implementations
+        # can test without evaluating anything.
+        return _round_neighbour(fmt, one_bits(fmt, u.sign), away=0, rnd=rnd)
+
+    ax = _dyadic_iv(u.m, u.e)
+
+    def evaluate(iv):
+        a = ax(iv)
+        return (iv.expm1(a) - iv.expm1(-a)) / (iv.exp(a) + iv.exp(-a))
+
+    return _ziv(fmt, u.sign, evaluate, rnd)
+
+
+def asinh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """asinh(x). Odd, exact only at +-0, asinh(+-inf) = +-inf, and it
+    cannot overflow: |asinh(x)| <= log(2|x| + 1) is about 181,705 at the
+    top of fp256."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return inf_bits(fmt, u.sign), 0
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # asinh(+-0) = +-0
+
+    ex = _vexp(u)
+    if 2 * ex + p + 2 <= 0:
+        # asinh(x) - x = -x^3/6 + ... lies on the zero side of x, by at
+        # most |x|^3/6: sin's rule exactly, for the series that differs
+        # only in the sign of every second term.
+        return _round_neighbour(fmt, xa, away=0, rnd=rnd)
+
+    ax = _dyadic_iv(u.m, u.e)
+
+    def evaluate(iv):
+        a = ax(iv)
+        return iv.log1p(a + a * a / (1 + iv.sqrt(1 + a * a)))
+
+    return _ziv(fmt, u.sign, evaluate, rnd)
+
+
+def acosh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """acosh(x), defined on [1, +inf). acosh(1) is +0 and is the only
+    exact case; **every x below 1 is invalid**, zeros, negatives and
+    -inf included; acosh(+inf) is +inf.
+
+    No neighbour rule, and that is worth stating: near 1 the answer
+    behaves like sqrt(2(x-1)), which is not next to any representable
+    number, so the ordinary enclosure resolves it - the same reason
+    phase 2's acos has no rule near 1."""
+    u = unpack(fmt, xa)
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        if u.sign:
+            return qnan_bits(fmt), FLAG_INVALID
+        return inf_bits(fmt, 0), 0
+    if u.kind == ZERO or u.sign or _vexp(u) < 0:
+        return qnan_bits(fmt), FLAG_INVALID             # x < 1
+    if _is_one_mag(u):
+        STATS["exact"] += 1
+        return zero_bits(fmt, 0), 0                     # acosh(1) = +0
+
+    dm, de = _exact_minus_one(u)
+    pm, pe = _exact_plus_one(u)
+    d = _dyadic_iv(dm, de)
+    s = _dyadic_iv(pm, pe)
+
+    def evaluate(iv):
+        dd = d(iv)
+        return iv.log1p(dd + iv.sqrt(dd * s(iv)))
+
+    return _ziv(fmt, 0, evaluate, rnd)
+
+
+def atanh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """atanh(x), defined on (-1, 1). Odd, exact only at +-0;
+    **atanh(+-1) is +-infinity with divideByZero** - 754-2019 7.3's
+    rule, an exact infinity from finite operands, the same row tanPi
+    takes at a pole - and |x| > 1, infinities included, is invalid.
+
+    It cannot overflow either: the representable argument closest to 1
+    is 2^-p away, so |atanh| <= (p+1)ln2/2, about 82 at fp256."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # atanh(+-0) = +-0
+    if _is_one_mag(u):
+        return inf_bits(fmt, u.sign), FLAG_DIVZERO      # the pole
+    if _mag_gt_one(u):
+        return qnan_bits(fmt), FLAG_INVALID
+
+    ex = _vexp(u)
+    if 2 * ex + p + 3 <= 0:
+        # atanh(x) - x = x^3/3 + ... has the sign of x and is at most
+        # 0.357|x|^3 for |x| <= 1/4: tan's rule, for the series that
+        # differs only in sign, and the mirror of tanh's.
+        return _round_neighbour(fmt, xa, away=1, rnd=rnd)
+
+    ax = _dyadic_iv(u.m, u.e)
+    om, oe = _exact_one_minus(u)
+    one_minus = _dyadic_iv(om, oe)
+
+    def evaluate(iv):
+        return iv.log1p(2 * ax(iv) / one_minus(iv)) / 2
+
+    return _ziv(fmt, u.sign, evaluate, rnd)
+
+
 # ---- dispatch --------------------------------------------------------
 
 TRANSCEND_IMPL = {
@@ -1530,6 +2041,15 @@ TRANSCEND_IMPL = {
     FN_ACOSPI: acospi,
     FN_ATANPI: atanpi,
     FN_ATAN2PI: atan2pi,
+    FN_SIN: sin,
+    FN_COS: cos,
+    FN_TAN: tan,
+    FN_SINH: sinh,
+    FN_COSH: cosh,
+    FN_TANH: tanh,
+    FN_ASINH: asinh,
+    FN_ACOSH: acosh,
+    FN_ATANH: atanh,
 }
 
 

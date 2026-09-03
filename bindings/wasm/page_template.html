@@ -145,8 +145,8 @@ footer pre { font-size: 0.75rem; }
   <p>The embedded sample is a sample. For the full claim, generate the
   complete sets in a checkout of this repo -
   <code>make vectors</code>, which writes 236,000 cases over twenty
-  opcode sets plus 129,845 more over twenty transcendental sets - all
-  twenty functions since ABI 0.4 - to
+  opcode sets plus 242,915 more over twenty transcendental sets - all
+  twenty-nine functions since ABI 0.5 - to
   <code>vectors/out/</code> - and drop any or all of the
   <code>.jsonl</code> files here. Same code path as section 2, whole
   files this time.</p>
@@ -169,10 +169,12 @@ footer pre { font-size: 0.75rem; }
   <h2>4 &middot; compute</h2>
   <p>The same library, called forward: one element through
   <code>cft_run()</code>, or the composed <code>cft_div()</code> /
-  <code>cft_sqrt()</code> sequence, or any of the twenty
+  <code>cft_sqrt()</code> sequence, or any of the twenty-nine
   transcendentals - phase 1's nine (<code>cft_exp</code> &hellip;
-  <code>cft_hypot</code>, ABI 0.3) and phase 2's eleven
-  (<code>cft_sinpi</code> &hellip; <code>cft_atan2pi</code>, ABI 0.4) -
+  <code>cft_hypot</code>, ABI 0.3), phase 2's eleven
+  (<code>cft_sinpi</code> &hellip; <code>cft_atan2pi</code>, ABI 0.4)
+  and phase 3's nine (<code>cft_sin</code> &hellip; <code>cft_atanh</code>,
+  ABI 0.5, sin/cos/tan in radians) -
   operands and result as raw encodings. This is a working
   binary32/64/128/256 calculator, and every answer it gives is pinned by
   the replay above. The transcendentals are <em>correctly rounded</em>,
@@ -315,6 +317,18 @@ function init() {
     atanpi:       M.cwrap("cftw_atanpi", n, [n,n,n,n,n,n,n]),
     atan2:        M.cwrap("cftw_atan2", n, [n,n,n,n,n,n,n,n]),
     atan2pi:      M.cwrap("cftw_atan2pi", n, [n,n,n,n,n,n,n,n]),
+    /* The phase-3 radian trigonometry and the hyperbolics (ABI 0.5):
+     * unary, host operations, no bus word - sin, cos and tan in
+     * RADIANS, reduced against pi inside the library. */
+    sin:          M.cwrap("cftw_sin", n, [n,n,n,n,n,n,n]),
+    cos:          M.cwrap("cftw_cos", n, [n,n,n,n,n,n,n]),
+    tan:          M.cwrap("cftw_tan", n, [n,n,n,n,n,n,n]),
+    sinh:         M.cwrap("cftw_sinh", n, [n,n,n,n,n,n,n]),
+    cosh:         M.cwrap("cftw_cosh", n, [n,n,n,n,n,n,n]),
+    tanh:         M.cwrap("cftw_tanh", n, [n,n,n,n,n,n,n]),
+    asinh:        M.cwrap("cftw_asinh", n, [n,n,n,n,n,n,n]),
+    acosh:        M.cwrap("cftw_acosh", n, [n,n,n,n,n,n,n]),
+    atanh:        M.cwrap("cftw_atanh", n, [n,n,n,n,n,n,n]),
   };
 
   const pp = M._malloc(4);
@@ -603,8 +617,9 @@ function wireDrop() {
  * "sqrt" are cft_div()/cft_sqrt(), the composed seed/Newton sequence,
  * not single opcodes - cft.h explains why that is a design fact.
  *
- * The twenty named after them are the transcendentals - phase 1's
- * nine (ABI 0.3) and phase 2's eleven (ABI 0.4): separate library
+ * The twenty-nine named after them are the transcendentals - phase 1's
+ * nine (ABI 0.3), phase 2's eleven (ABI 0.4) and phase 3's nine
+ * (ABI 0.5): separate library
  * entry points, not opcodes and not compositions, because an
  * exponential has no exactly measurable residual for a tile pass to
  * correct (docs/TRANSCENDENTALS.md). Each is CORRECTLY ROUNDED in the
@@ -681,6 +696,24 @@ const PANEL_OPS = [
     f: "d = atan2(a, b) — a is y and b is x, the C order, y first. atan2(±0, -0) = ±π and INEXACT: a minus-zero denominator names the negative real axis, which is the row implementations most often miss. atan2(±0, +0) = ±0; atan2(y, ±0) = ±π/2; a NaN operand does NOT lose to this table the way it beats pow's" },
   { v: "atan2pi", use: "ab", k: "ABI 0.4, cft_atan2pi",
     f: "d = atan2(a, b)/π — y first again, and exact on every axis and every diagonal (|y| = |x| is an exact comparison on the encoding): 0, ±1/4, ±1/2, ±3/4, ±1. atan2Pi(±0, -0) = ±1 exactly where atan2 of the same operands is an inexact ±π — in one line, why this is a separate function" },
+  { v: "sin",    use: "a",  k: "ABI 0.5, cft_sin",
+    f: "d = sin a, a in RADIANS — reduced against π inside the library at any magnitude the format holds; exact only at ±0; an infinity is invalid (no limit)" },
+  { v: "cos",    use: "a",  k: "ABI 0.5, cft_cos",
+    f: "d = cos a in radians — exact only at cos(±0) = 1; an infinity is invalid" },
+  { v: "tan",    use: "a",  k: "ABI 0.5, cft_tan",
+    f: "d = tan a in radians — exact only at ±0; no representable argument is a pole (an odd multiple of π/2 is irrational), so never divideByZero — but it can overflow" },
+  { v: "sinh",   use: "a",  k: "ABI 0.5, cft_sinh",
+    f: "d = sinh a — odd, exact only at ±0; overflows for a large argument like any exponential" },
+  { v: "cosh",   use: "a",  k: "ABI 0.5, cft_cosh",
+    f: "d = cosh a — even, never below 1, exact only at cosh(±0) = 1" },
+  { v: "tanh",   use: "a",  k: "ABI 0.5, cft_tanh",
+    f: "d = tanh a — odd, exact at ±0, and tanh(±inf) = ±1 EXACTLY: a limit that happens to be representable" },
+  { v: "asinh",  use: "a",  k: "ABI 0.5, cft_asinh",
+    f: "d = asinh a — odd, exact only at ±0; asinh(±inf) = ±inf" },
+  { v: "acosh",  use: "a",  k: "ABI 0.5, cft_acosh",
+    f: "d = acosh a on [1, +inf) — acosh(1) = +0 exactly; every a below 1 is invalid, zeros and -inf included" },
+  { v: "atanh",  use: "a",  k: "ABI 0.5, cft_atanh",
+    f: "d = atanh a on (-1, 1) — exact only at ±0; atanh(±1) = ±inf with divideByZero (the pole); |a| > 1 is invalid, infinities included" },
 ];
 
 /* The two transcendental arities, spelled once. The names match both
@@ -688,11 +721,13 @@ const PANEL_OPS = [
  * use, which is not a coincidence: cft.h names these operations, and
  * every layer that carries them - the generator, the golden model, the
  * bindings - spells them the same way rather than inventing a table.
- * Phase 1's nine first, then phase 2's eleven. */
+ * Phase 1's nine first, then phase 2's eleven, then phase 3's nine. */
 const TRANSCEND_UNARY = ["exp", "expm1", "exp2", "log", "log1p",
                          "log2", "log10",
                          "sinpi", "cospi", "tanpi", "asin", "acos",
-                         "atan", "asinpi", "acospi", "atanpi"];
+                         "atan", "asinpi", "acospi", "atanpi",
+                         "sin", "cos", "tan", "sinh", "cosh", "tanh",
+                         "asinh", "acosh", "atanh"];
 const TRANSCEND_BINARY = ["pow", "hypot", "atan2", "atan2pi"];
 
 /* IEEE 754-2019 interchange field widths, display-only (the classifier

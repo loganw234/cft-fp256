@@ -321,6 +321,54 @@ def atan2pi(ctx, y, x):
     return _t2(ctx, "atan2pi", y, x)
 
 
+# The phase-3 radian trigonometry and the hyperbolics (ABI 0.5), on
+# the same footing again.
+
+def sin(ctx, x):
+    """out[i] = sin(x[i]), x in radians."""
+    return _t1(ctx, "sin", x)
+
+
+def cos(ctx, x):
+    """out[i] = cos(x[i]), x in radians."""
+    return _t1(ctx, "cos", x)
+
+
+def tan(ctx, x):
+    """out[i] = tan(x[i]), x in radians."""
+    return _t1(ctx, "tan", x)
+
+
+def sinh(ctx, x):
+    """out[i] = sinh(x[i])."""
+    return _t1(ctx, "sinh", x)
+
+
+def cosh(ctx, x):
+    """out[i] = cosh(x[i])."""
+    return _t1(ctx, "cosh", x)
+
+
+def tanh(ctx, x):
+    """out[i] = tanh(x[i])."""
+    return _t1(ctx, "tanh", x)
+
+
+def asinh(ctx, x):
+    """out[i] = asinh(x[i])."""
+    return _t1(ctx, "asinh", x)
+
+
+def acosh(ctx, x):
+    """out[i] = acosh(x[i])."""
+    return _t1(ctx, "acosh", x)
+
+
+def atanh(ctx, x):
+    """out[i] = atanh(x[i])."""
+    return _t1(ctx, "atanh", x)
+
+
 # ---------------------------------------------------------------------
 # Reductions: n in, ONE out, over the contract's fixed tree.
 # ---------------------------------------------------------------------

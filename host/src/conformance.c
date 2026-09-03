@@ -334,8 +334,9 @@ static cft_status array_pass(cft_device *dev, int fi, int rnd, int esz,
  * skips a file rather than failing a line.
  *
  * The dispatch is by NAME through cft_tr_from_name and cft_tr_arity,
- * so ABI 0.4's eleven needed nothing here beyond the enum they were
- * added to - and a replayer built against 0.3 and handed a 0.4 set
+ * so ABI 0.4's eleven and 0.5's nine needed nothing here beyond the
+ * enum they were added to - and a replayer built against 0.3 and handed
+ * a 0.4 or 0.5 set
  * refuses on the name of a function it does not know, which is the
  * refusal it should give.
  *

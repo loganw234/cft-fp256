@@ -467,6 +467,77 @@ files, which now name twenty functions rather than nine. A consumer
 built against ABI 0.3 and handed a 0.4 set fails on the NAME of a
 function it does not know, which is the refusal it should give.
 
+## The phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
+
+`cft_sin`, `cft_cos`, `cft_tan`, `cft_sinh`, `cft_cosh`, `cft_tanh`,
+`cft_asinh`, `cft_acosh` and `cft_atanh`, added 2026-09-03 in one
+additive bump. **Correctly rounded** at every format under every
+attribute, with clause 9.2.1's special values and exact flags, on
+exactly the terms the twenty above are. `sin`, `cos` and `tan` take
+their argument in RADIANS; `cft_sinpi` and friends are the same
+functions of a half-turn and are a different, cheaper problem.
+
+**What these needed that the twenty did not.** One thing, and only
+the first three need it: `x mod (pi/2)` for an argument as large as
+2^262143. That is a Payne-Hanek reduction against a stored 2/pi of
+270,336 bits (`host/src/mp_2opi.h`, generated, never transcribed,
+derived twice), and the cancellation it has to survive is a
+MEASUREMENT rather than a theorem - the irrationality measure of pi is
+far too weak to bound it at this exponent range. The reduction
+measures the cancellation from the bits it has and widens its window
+until the working precision is covered; past what the stored constant
+covers it REFUSES with `CFT_ERR_INTERNAL`, as everything else in this
+contract does rather than return a plausible number.
+docs/TRANSCENDENTALS.md has the design, the error bound and the
+measured cancellation per format. The six hyperbolics need no
+reduction and no new constant: they are exp and log in different
+clothes, in the cancellation-free forms phase 1 already justifies.
+
+The signatures follow the twenty exactly - unary, host operations, no
+bus word:
+
+```c
+cft_sin  (dev, fmt, rnd, a, d, n, &flags);
+cft_atanh(dev, fmt, rnd, a, d, n, &flags);
+```
+
+**The exact cases are the zeros, and that is a theorem.**
+Hermite-Lindemann: `e^z` is transcendental for every nonzero algebraic
+z; `sin(x) = a` algebraic makes `e^(ix)` a root of `z^2 - 2iaz - 1`,
+and `sinh(x) = a` makes `e^x` a root of `z^2 - 2az - 1`, so both force
+x = 0. So sin, tan, sinh, tanh, asinh and atanh are exact only at +-0,
+cos and cosh only at 0 (giving 1), acosh only at 1 (giving +0) - and
+every other result is inexact. There is no half-integer table here the
+way there is for sinPi: an odd multiple of pi/2 is irrational, so no
+representable argument is a zero of cos or a pole of tan.
+
+Rows a porter should not have to infer, each confirmed against MPFR
+4.2.2 before it was written down:
+
+- sin, cos and tan of an INFINITY are invalid: no limit exists.
+- `tanh(+-inf) = +-1` EXACTLY, raising nothing - a limit that happens
+  to be representable.
+- `atanh(+-1) = +-infinity` with **divideByZero**, 7.3's rule for an
+  exact infinity from finite operands; `|x| > 1` is invalid,
+  infinities included.
+- `acosh(x)` for any x below 1 is invalid - zeros, every negative
+  value, and -infinity. `acosh(+inf)` is +infinity.
+- sinh and cosh OVERFLOW for a large argument, through round_pack, so
+  roundTowardZero delivers maxfinite. tan can overflow too, near a
+  pole - how close a representable argument comes to one is measured,
+  not bounded; sin, cos, tanh, asinh, acosh and atanh cannot.
+- UNDERFLOW happens for sin, tan, sinh, asinh, atanh and tanh of a
+  tiny argument and follows clause 7 through the same round_pack.
+- A signaling NaN raises invalid and delivers the canonical quiet NaN,
+  as everywhere else in this contract.
+
+The vectors carry them in the same `<fmt>-transcend[-<rnd>].jsonl`
+files, which now name twenty-nine functions: 242,915
+transcendental cases of 478,915 at `make vectors`'
+arguments. A consumer built against ABI 0.4 and handed a 0.5 set fails
+on the NAME of a function it does not know, which is the refusal it
+should give.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future

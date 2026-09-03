@@ -143,7 +143,9 @@ enum {
     T_EXP, T_EXPM1, T_EXP2, T_LOG, T_LOG1P, T_LOG2, T_LOG10, T_POW,
     T_HYPOT,
     T_SINPI, T_COSPI, T_TANPI, T_ASIN, T_ACOS, T_ATAN, T_ATAN2,
-    T_ASINPI, T_ACOSPI, T_ATANPI, T_ATAN2PI, NTALLY
+    T_ASINPI, T_ACOSPI, T_ATANPI, T_ATAN2PI,
+    T_SIN, T_COS, T_TAN, T_SINH, T_COSH, T_TANH, T_ASINH, T_ACOSH,
+    T_ATANH, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -154,7 +156,9 @@ static const char *const TALLY_NAME[NTALLY] = {
     "exp", "expm1", "exp2", "log", "log1p", "log2", "log10", "pow",
     "hypot",
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
-    "asinpi", "acospi", "atanpi", "atan2pi"
+    "asinpi", "acospi", "atanpi", "atan2pi",
+    "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
+    "atanh"
 };
 static uint64_t tally[NTALLY][4];
 
@@ -1751,6 +1755,15 @@ static void check_rem(int fj, uint8_t pool[][32], int pn, int nrand)
  * agree to that. mpfr_asin, mpfr_acos, mpfr_atan and mpfr_atan2 exist
  * in every MPFR and need no guard.
  *
+ * Phase 3's nine - mpfr_sin, mpfr_cos, mpfr_tan and the six
+ * hyperbolics - exist in every MPFR too. What matters for the first
+ * three is that MPFR reduces a HUGE argument correctly, against a pi
+ * of its own computed to however many bits the exponent demands, so
+ * agreement on sin(2^262143) at fp256 is agreement between two
+ * independent reductions. It is slow there - a fraction of a second
+ * per call - which is why the phase-3 pool samples the exponent
+ * range rather than sweeping it.
+ *
  * The machinery is oracle()'s, with three differences worth stating:
  *
  *   * MPFR's OWN exponent range can overflow where the format's would
@@ -1777,17 +1790,22 @@ typedef enum {
     TF_EXP = 0, TF_EXPM1, TF_EXP2, TF_LOG, TF_LOG1P, TF_LOG2, TF_LOG10,
     TF_POW, TF_HYPOT,
     TF_SINPI, TF_COSPI, TF_TANPI, TF_ASIN, TF_ACOS, TF_ATAN, TF_ATAN2,
-    TF_ASINPI, TF_ACOSPI, TF_ATANPI, TF_ATAN2PI, TF_COUNT
+    TF_ASINPI, TF_ACOSPI, TF_ATANPI, TF_ATAN2PI,
+    TF_SIN, TF_COS, TF_TAN, TF_SINH, TF_COSH, TF_TANH, TF_ASINH,
+    TF_ACOSH, TF_ATANH, TF_COUNT
 } tfn;
 
 static const char *const TFN_NAME[TF_COUNT] = {
     "exp", "expm1", "exp2", "log", "log1p", "log2", "log10", "pow", "hypot",
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
-    "asinpi", "acospi", "atanpi", "atan2pi"
+    "asinpi", "acospi", "atanpi", "atan2pi",
+    "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
+    "atanh"
 };
 static const int TFN_NARGS[TF_COUNT] = {
     1, 1, 1, 1, 1, 1, 1, 2, 2,
-    1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2
+    1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2,
+    1, 1, 1, 1, 1, 1, 1, 1, 1
 };
 
 static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
@@ -1819,7 +1837,16 @@ static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
     case TF_ASINPI:  return mpfr_asinpi(r, a, rnd);
     case TF_ACOSPI:  return mpfr_acospi(r, a, rnd);
     case TF_ATANPI:  return mpfr_atanpi(r, a, rnd);
-    default:         return mpfr_atan2pi(r, a, b, rnd);
+    case TF_ATAN2PI: return mpfr_atan2pi(r, a, b, rnd);
+    case TF_SIN:     return mpfr_sin(r, a, rnd);
+    case TF_COS:     return mpfr_cos(r, a, rnd);
+    case TF_TAN:     return mpfr_tan(r, a, rnd);
+    case TF_SINH:    return mpfr_sinh(r, a, rnd);
+    case TF_COSH:    return mpfr_cosh(r, a, rnd);
+    case TF_TANH:    return mpfr_tanh(r, a, rnd);
+    case TF_ASINH:   return mpfr_asinh(r, a, rnd);
+    case TF_ACOSH:   return mpfr_acosh(r, a, rnd);
+    default:         return mpfr_atanh(r, a, rnd);
     }
 }
 
@@ -1926,6 +1953,50 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
         mpfr_abs(v, v, MPFR_RNDN);
         if (mpfr_cmp_si(v, 1) > 0)
             fl |= CFT_FLAG_INVALID;
+        mpfr_clear(v);
+        break;
+    }
+    case TF_SIN: case TF_COS: case TF_TAN:
+        if (ca.is_inf)
+            fl |= CFT_FLAG_INVALID;      /* no limit at infinity */
+        break;
+    case TF_ACOSH:
+        /* the domain is [1, +inf): every zero, every negative value
+         * and -infinity are invalid; +infinity is +infinity */
+        if (ca.is_nan)
+            break;
+        if (ca.is_zero || ca.sign) {
+            fl |= CFT_FLAG_INVALID;
+        } else if (!ca.is_inf) {
+            mpfr_t v;
+            mpfr_init2(v, f->p);
+            enc_to_mpfr(f, ba, v);
+            if (mpfr_cmp_si(v, 1) < 0)
+                fl |= CFT_FLAG_INVALID;
+            mpfr_clear(v);
+        }
+        break;
+    case TF_ATANH: {
+        /* the domain is (-1, 1); +-1 is a POLE - an exact infinity
+         * from a finite operand, 7.3's divideByZero, the row tanPi
+         * takes at a half-integer - and beyond it is invalid,
+         * infinities included */
+        mpfr_t v;
+        int c;
+        if (ca.is_nan)
+            break;
+        if (ca.is_inf) {
+            fl |= CFT_FLAG_INVALID;
+            break;
+        }
+        mpfr_init2(v, f->p);
+        enc_to_mpfr(f, ba, v);
+        mpfr_abs(v, v, MPFR_RNDN);
+        c = mpfr_cmp_si(v, 1);
+        if (c > 0)
+            fl |= CFT_FLAG_INVALID;
+        else if (c == 0)
+            fl |= CFT_FLAG_DIVBYZERO;
         mpfr_clear(v);
         break;
     }
@@ -2151,8 +2222,17 @@ static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
     case TF_ASINPI: *st = cft_asinpi(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_ACOSPI: *st = cft_acospi(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_ATANPI: *st = cft_atanpi(dev, f->fmt, rnd, a, d, 1, &fl); break;
-    default:        *st = cft_atan2pi(dev, f->fmt, rnd, a, b, d, 1, &fl);
+    case TF_ATAN2PI: *st = cft_atan2pi(dev, f->fmt, rnd, a, b, d, 1, &fl);
                     break;
+    case TF_SIN:    *st = cft_sin(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_COS:    *st = cft_cos(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_TAN:    *st = cft_tan(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_SINH:   *st = cft_sinh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_COSH:   *st = cft_cosh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_TANH:   *st = cft_tanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_ASINH:  *st = cft_asinh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_ACOSH:  *st = cft_acosh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    default:        *st = cft_atanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
     }
     return fl;
 }
@@ -2329,8 +2409,180 @@ static int build_trigpool(const fdesc *f, uint8_t pool[][32],
     return n;
 }
 
+/* An mpfr value already rounded into the format, as an encoding.
+ * Normal values only, which is all the phase-3 pool asks of it: the
+ * significand is exactly p bits, the exponent is in the normal range,
+ * and the fields are assembled with mpz so the wide formats need no
+ * 64-bit detour. */
+static int mpfr_to_enc(const fdesc *f, const mpfr_t v, uint8_t *b)
+{
+    mpz_t z, enc;
+    mpfr_exp_t e2;
+    long E;
+    int sign = mpfr_signbit(v) ? 1 : 0;
+
+    if (!mpfr_regular_p(v))
+        return 0;
+    mpz_init(z);
+    mpz_init(enc);
+    e2 = mpfr_get_z_2exp(z, v);                 /* v = z * 2^e2 */
+    mpz_abs(z, z);
+    if (mpz_sizeinbase(z, 2) != (size_t)f->p) {
+        mpz_clear(z); mpz_clear(enc);
+        return 0;
+    }
+    E = (long)e2 + f->p - 1;                    /* the unbiased exponent */
+    if (E < f->emin || E > f->emax) {
+        mpz_clear(z); mpz_clear(enc);
+        return 0;
+    }
+    mpz_clrbit(z, (mp_bitcnt_t)f->man_w);       /* the hidden bit */
+    mpz_set_si(enc, E + f->emax);
+    mpz_mul_2exp(enc, enc, (mp_bitcnt_t)f->man_w);
+    mpz_add(enc, enc, z);
+    if (sign)
+        mpz_setbit(enc, (mp_bitcnt_t)(f->exp_w + f->man_w));
+    memset(b, 0, 32);
+    mpz_export(b, NULL, -1, 1, 0, 0, enc);
+    mpz_clear(z);
+    mpz_clear(enc);
+    return 1;
+}
+
+#define P3POOL_MAX 224
+
+/* The phase-3 pool: what the reduction against pi and the hyperbolics'
+ * domain edges need, which neither pool above has. Nothing in it is a
+ * typed "known hard case". The arguments nearest a multiple of pi/2 are
+ * built here from MPFR's own pi, rounded into the format, with a grid
+ * neighbour either side; the sinh/cosh overflow edge from MPFR's ln 2
+ * the same way. So the pool is derived at run time from the oracle
+ * that judges it, and a wrong constant anywhere would show up as a
+ * disagreement rather than as a pool that quietly tested nothing. */
+static int build_p3pool(const fdesc *f, uint8_t pool[][32],
+                        uint8_t const base[][32], int nbase, int randoms)
+{
+    int n = 0, k;
+    static const long KS[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                               100, 355, 1000, 12345, 1000000 };
+    mpfr_t pi, l2, v, t;
+
+    memset(pool, 0, sizeof(uint8_t) * P3POOL_MAX * 32);
+    for (k = 0; k < nbase && k < 18 && n < P3POOL_MAX; k++)
+        memcpy(pool[n++], base[k], 32);
+
+    /* powers of two across the exponent range, both signs: the
+     * window's START is the argument's exponent, and a power of two is
+     * its cleanest probe. The wide formats are sampled - MPFR's own
+     * reduction of 2^262143 is the slow half of this campaign. */
+    {
+        long es[20];
+        int ne = 0;
+        es[ne++] = f->emin - f->man_w; es[ne++] = f->emin;
+        es[ne++] = -f->p; es[ne++] = -f->p / 2; es[ne++] = -2;
+        es[ne++] = -1; es[ne++] = 0; es[ne++] = 1; es[ne++] = 2;
+        es[ne++] = 3; es[ne++] = 5; es[ne++] = 10; es[ne++] = 20;
+        es[ne++] = f->p; es[ne++] = 2 * f->p; es[ne++] = 100;
+        es[ne++] = f->emax / 4; es[ne++] = f->emax / 2;
+        es[ne++] = f->emax - 1; es[ne++] = f->emax;
+        for (k = 0; k < ne && n < P3POOL_MAX - 4; k++)
+            if (enc_from_val(f, 0, 1, es[k], pool[n])) {
+                n++;
+                memcpy(pool[n], pool[n - 1], 32); enc_neg(f, pool[n]); n++;
+            }
+    }
+
+    mpfr_init2(pi, (mpfr_prec_t)f->p + 64);
+    mpfr_init2(l2, (mpfr_prec_t)f->p + 64);
+    mpfr_init2(t, (mpfr_prec_t)f->p + 64);
+    mpfr_init2(v, f->p);
+    mpfr_const_pi(pi, MPFR_RNDN);
+    mpfr_const_log2(l2, MPFR_RNDN);
+
+    /* the representable numbers nearest k*pi/2, from MPFR's pi rounded
+     * into the format, each with a grid neighbour either side and its
+     * negative: where the reduction cancels and its window widens */
+    for (k = 0; k < (int)(sizeof KS / sizeof KS[0]) &&
+                n < P3POOL_MAX - 8; k++) {
+        mpfr_mul_si(t, pi, KS[k], MPFR_RNDN);
+        mpfr_div_2ui(t, t, 1, MPFR_RNDN);
+        mpfr_set(v, t, MPFR_RNDN);
+        if (mpfr_to_enc(f, v, pool[n])) {
+            n++;
+            memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+            memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
+            memcpy(pool[n], pool[n - 3], 32); enc_neg(f, pool[n]); n++;
+        }
+    }
+
+    /* the sinh/cosh overflow edge: n*ln2 for n = emax, emax+1, emax+2,
+     * walked two ulps either way, so the screen fires in exactly the
+     * right place and the enclosure decides the rest */
+    {
+        long ns[3];
+        ns[0] = f->emax; ns[1] = f->emax + 1; ns[2] = f->emax + 2;
+        for (k = 0; k < 3 && n < P3POOL_MAX - 12; k++) {
+            mpfr_mul_si(t, l2, ns[k], MPFR_RNDN);
+            mpfr_set(v, t, MPFR_RNDN);
+            if (mpfr_to_enc(f, v, pool[n])) {
+                uint8_t c[32];
+                memcpy(c, pool[n], 32);
+                n++;
+                memcpy(pool[n], c, 32); enc_step(f, pool[n], 1); n++;
+                memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+                memcpy(pool[n], c, 32); enc_step(f, pool[n], 0); n++;
+                memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 0); n++;
+                memcpy(pool[n], c, 32); enc_neg(f, pool[n]); n++;
+            }
+        }
+    }
+    mpfr_clear(pi); mpfr_clear(l2); mpfr_clear(t); mpfr_clear(v);
+
+    /* where tanh stops being separable from 1: 2^bitlen(p+2), straddled */
+    {
+        int bl = 0, vv = f->p + 2;
+        while (vv) { bl++; vv >>= 1; }
+        for (k = bl - 1; k <= bl + 1 && n < P3POOL_MAX - 6; k++)
+            if (enc_from_val(f, 0, 1, k, pool[n])) {
+                n++;
+                memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+                memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
+            }
+    }
+    /* one ulp either side of +-1: acosh's domain edge and atanh's pole */
+    if (n < P3POOL_MAX - 6 && enc_from_val(f, 0, 1, 0, pool[n])) {
+        n++;
+        memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+        memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
+        memcpy(pool[n], pool[n - 3], 32); enc_neg(f, pool[n]); n++;
+        memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+        memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
+    }
+    /* every tiny threshold in the family, straddled */
+    {
+        long ks[8];
+        ks[0] = f->p / 2 - 1; ks[1] = f->p / 2; ks[2] = f->p / 2 + 1;
+        ks[3] = f->p / 2 + 2; ks[4] = f->p; ks[5] = f->p + 2;
+        ks[6] = 2 * f->p; ks[7] = 4 * f->p;
+        for (k = 0; k < 8 && n < P3POOL_MAX - 4; k++) {
+            if (enc_from_val(f, 0, 1, -ks[k], pool[n])) {
+                n++;
+                memcpy(pool[n], pool[n - 1], 32); enc_neg(f, pool[n]); n++;
+            }
+            if (enc_from_val(f, 0, 3, -ks[k] - 1, pool[n]))
+                n++;
+        }
+    }
+    while (n < P3POOL_MAX && randoms-- > 0) {
+        rand_enc(f, pool[n]);
+        n++;
+    }
+    return n;
+}
+
 static void check_transcend(int fj, uint8_t pool[][32], int pn,
-                            uint8_t tpool[][32], int tn, int first,
+                            uint8_t tpool[][32], int tn,
+                            uint8_t hpool[][32], int hn, int first,
                             int last)
 {
     const fdesc *f = &FMTS[fj];
@@ -2338,13 +2590,15 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
 
     for (fn = first; fn < last; fn++) {
         int nargs = TFN_NARGS[fn];
+        uint64_t esc_before = cft_tr_escalations;
         /* Unary: every operand. Binary: every operand against a strided
          * eighth of the pool, so the pair count stays linear - the full
          * cross product of two hundred operands times five attributes
          * times two functions is not a sharper test, only a longer
          * one. */
-        uint8_t (*P)[32] = fn >= TF_SINPI ? tpool : pool;
-        int np = fn >= TF_SINPI ? tn : pn;
+        uint8_t (*P)[32] = fn >= TF_SIN ? hpool
+                         : fn >= TF_SINPI ? tpool : pool;
+        int np = fn >= TF_SIN ? hn : fn >= TF_SINPI ? tn : pn;
         int jstep = nargs == 2 ? (np / 8 > 0 ? np / 8 : 1) : 1;
         for (mi = 0; mi < 5; mi++) {
             for (i = 0; i < np; i++) {
@@ -2368,6 +2622,13 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
                 }
             }
         }
+        /* Which function escalated, and how often - a total at the
+         * end would say that something did without saying what. */
+        if (cft_tr_escalations != esc_before)
+            printf("  %s %s: %llu Ziv escalation(s), deepest working "
+                   "precision so far %llu bits\n", f->name, TFN_NAME[fn],
+                   (unsigned long long)(cft_tr_escalations - esc_before),
+                   (unsigned long long)cft_tr_max_prec);
     }
 }
 
@@ -2398,6 +2659,7 @@ int main(int argc, char **argv)
     static uint8_t pool[MAXPOOL][32];
     static uint8_t tpool[TPOOL_MAX][32];
     static uint8_t gpool[TRIGPOOL_MAX][32];
+    static uint8_t hpool[P3POOL_MAX][32];
     int fi, oi, mi, i, j;
 
     if (cft_open(NULL, 0, &dev) != CFT_OK) {
@@ -2482,17 +2744,29 @@ int main(int argc, char **argv)
         int pn = build_tpool(f, tpool, randoms);
         int gn = build_trigpool(f, gpool, (const uint8_t (*)[32])pool,
                                 pn, randoms);
+        int hn = build_p3pool(f, hpool, (const uint8_t (*)[32])pool,
+                              pn, randoms);
         uint64_t before = cases;
-        check_transcend(fi, tpool, pn, gpool, gn, 0, TF_SINPI);
+        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, 0, TF_SINPI);
         printf("%s transcend: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,
                (unsigned long long)flag_mismatches);
         before = cases;
-        check_transcend(fi, tpool, pn, gpool, gn, TF_SINPI, TF_COUNT);
+        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SINPI,
+                        TF_SIN);
         printf("%s trig: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+        before = cases;
+        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SIN,
+                        TF_COUNT);
+        printf("%s radian+hyperbolic: %llu cases done (running "
+               "mismatches: %llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,
                (unsigned long long)flag_mismatches);
@@ -2536,6 +2810,15 @@ int main(int argc, char **argv)
            (unsigned long long)cft_tr_max_prec,
            (unsigned long long)cft_tr_exact,
            (unsigned long long)cft_tr_neighbour);
+
+    printf("reduction against pi: %llu arguments reduced, %llu window "
+           "widenings,\n  widest window %llu bits, deepest cancellation "
+           "seen %llu bits (allowance %d)\n",
+           (unsigned long long)cft_tr_reduce_calls,
+           (unsigned long long)cft_tr_reduce_widen,
+           (unsigned long long)cft_tr_max_window,
+           (unsigned long long)cft_tr_max_cancel,
+           CFT_TR_PH_WINDOW_MAX);
 
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
            "mismatches\n", (unsigned long long)cases,

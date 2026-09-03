@@ -1196,6 +1196,20 @@ public:
     CFT_HPP_TRIG1(asinpi)
     CFT_HPP_TRIG1(acospi)
     CFT_HPP_TRIG1(atanpi)
+    /* The phase-3 radian trigonometry and the hyperbolics (ABI 0.5).
+     * sin, cos and tan take RADIANS and are reduced against pi inside
+     * the library at any magnitude the format holds; the six
+     * hyperbolics need no reduction at all. Same shape, same promise,
+     * and cft.h has every special row. */
+    CFT_HPP_TRIG1(sin)
+    CFT_HPP_TRIG1(cos)
+    CFT_HPP_TRIG1(tan)
+    CFT_HPP_TRIG1(sinh)
+    CFT_HPP_TRIG1(cosh)
+    CFT_HPP_TRIG1(tanh)
+    CFT_HPP_TRIG1(asinh)
+    CFT_HPP_TRIG1(acosh)
+    CFT_HPP_TRIG1(atanh)
 #undef CFT_HPP_TRIG1
     call_result atan2(cft_format fmt, cft_round rnd, const void *a,
                       const void *b, void *d, std::size_t n) noexcept
@@ -1836,6 +1850,16 @@ public:
     CFT_HPP_CTX_TRIG1(asinpi)
     CFT_HPP_CTX_TRIG1(acospi)
     CFT_HPP_CTX_TRIG1(atanpi)
+    /* the phase-3 nine (ABI 0.5): radians for sin, cos and tan */
+    CFT_HPP_CTX_TRIG1(sin)
+    CFT_HPP_CTX_TRIG1(cos)
+    CFT_HPP_CTX_TRIG1(tan)
+    CFT_HPP_CTX_TRIG1(sinh)
+    CFT_HPP_CTX_TRIG1(cosh)
+    CFT_HPP_CTX_TRIG1(tanh)
+    CFT_HPP_CTX_TRIG1(asinh)
+    CFT_HPP_CTX_TRIG1(acosh)
+    CFT_HPP_CTX_TRIG1(atanh)
 #undef CFT_HPP_CTX_TRIG1
     /* y first, then x - C's order, and the one every caller expects. */
     std::uint32_t atan2(cspan<encoding_type> a, cspan<encoding_type> b,
@@ -2029,6 +2053,15 @@ public:
     CFT_HPP_SCALAR_TRIG1(asinpi)
     CFT_HPP_SCALAR_TRIG1(acospi)
     CFT_HPP_SCALAR_TRIG1(atanpi)
+    CFT_HPP_SCALAR_TRIG1(sin)
+    CFT_HPP_SCALAR_TRIG1(cos)
+    CFT_HPP_SCALAR_TRIG1(tan)
+    CFT_HPP_SCALAR_TRIG1(sinh)
+    CFT_HPP_SCALAR_TRIG1(cosh)
+    CFT_HPP_SCALAR_TRIG1(tanh)
+    CFT_HPP_SCALAR_TRIG1(asinh)
+    CFT_HPP_SCALAR_TRIG1(acosh)
+    CFT_HPP_SCALAR_TRIG1(atanh)
 #undef CFT_HPP_SCALAR_TRIG1
     value_type atan2(const value_type &y, const value_type &x) &
     {

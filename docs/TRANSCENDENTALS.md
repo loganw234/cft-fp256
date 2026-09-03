@@ -944,3 +944,312 @@ clothes, with the same cancellation questions phase 1 already answers
 `asinh(x) = log1p(x + x^2/(1 + sqrt(1+x^2)))`), and their exact cases
 are the zeros by Lindemann-Weierstrass. They are a smaller job than
 either phase so far.
+
+---
+
+# Phase 3: the reduction against pi, and the hyperbolics
+
+sin, cos, tan of a RADIAN argument, and sinh, cosh, tanh, asinh, acosh,
+atanh - landed 2026-09-03 as ABI 0.5. Same promise, same evaluator,
+same three-way split, same loud refusal. What is new is the one thing
+the first two phases were defined to exclude: `x mod (pi/2)` for a
+dyadic x of any magnitude the formats hold, up to 2^262143.
+
+## The constant, and why its size is set by the exponent range
+
+The reduction is Payne-Hanek: multiply the operand's integer
+significand into a WINDOW of the binary expansion of 2/pi. Write
+|x| = m * 2^e with m the p-bit significand. In
+
+    x * (2/pi) = m * sum_j b_j 2^(e-j)          2/pi = 0.b1 b2 b3 ...
+
+every term with e - j >= 2 is m times a multiple of 4, so it changes
+neither the quadrant (the integer part mod 4) nor the fraction: the
+window may START at bit j0 = max(1, e-1) and everything above it is
+dropped EXACTLY. So the window's start is an exponent-range question
+and its width a precision question, and the two are separate. The
+stored constant has to reach
+
+    (deepest window start) + (widest window) = 261,906 + 8,192 bits
+
+for fp256, whose emax - man_w = 261,907 is the largest exponent an
+integer significand can carry on the ladder: 270,336 bits, 8,448
+words, 33 KiB of const data in `host/src/mp_2opi.h`, rounded up to a
+whole number of limbs. `host/tools/gen_2opi.py` derives that number
+rather than adopting phase 2's estimate of half a million, which had
+put the width on the wrong side of the sum.
+
+The constant is GENERATED, never transcribed, and derived twice:
+`gen_2opi.py` emits it from mpmath; `python/tests/test_mp_consts.py`
+regenerates it and compares byte for byte, AND re-derives all 270,336
+bits from Chudnovsky's series with binary splitting in plain Python
+integers - no mpmath in it, nothing shared - and the two agree to the
+last bit. Machin in exact Fractions, which proves the 1088-bit pi, is
+hopeless at a quarter of a million bits; Chudnovsky's binary splitting
+takes seconds. A third test ties `CFT_TR_PH_WINDOW_MAX` to the
+constant's size, so widening the window without regenerating the header
+fails rather than reading past the end of the array. At run time
+`cft_mp_two_over_pi_selfcheck()` checks two things that prove different
+things: the top 512 bits against 2/pi derived from the independently
+re-derived pi in `mp_consts.h`, which says the stream really is 2/pi to
+the bits that other header carries; and an FNV-1a over every word,
+which says the array in the binary is the array the generator emitted
+and nothing at all about the deep bits. Only regeneration proves those,
+and the test does it on every run.
+
+## The cancellation, and why it is a measurement
+
+Take the low `wbits` of the product, read the quadrant off the two
+bits above the binary point, the half bit below it, and the reduced
+fraction off the rest - all exact integer arithmetic on the window, so
+no rounding decides a sign, which is the discipline phase 2 keeps with
+its mask. If |x| sits very close to a multiple of pi/2 that fraction
+has leading zeros, and the window must be that many bits wider to
+deliver the same working precision. How many is NOT a theorem: the only
+proven statement is the irrationality measure of pi, mu < 7.104
+(Zeilberger-Zudilin 2020), which permits a reduced argument as small
+as 2^-1,600,000 at fp256 - four hundred kilobits of cancellation
+against a stored constant of 270,336. The bound is true, useless, and
+stated here rather than quietly not mentioned.
+
+So the reduction MEASURES the cancellation from the bits it has,
+widens the window by exactly the deficit, and repeats: the dropped
+tail of 2/pi is below 2^-(j0+wbits-1), so the absolute error in
+|x|*(2/pi) is below 2^-(d-p) with d the fraction's width, and relative
+to |t| ~ 2^vt that is 2^-(avail+vt); the loop widens until
+avail + vt >= W + 8 for the deepest working precision W the format's
+schedule can reach, plus a guard. A window that sees an exact multiple
+of pi/2 - which no nonzero dyadic is - means the cancellation is at
+least as deep as the window, and there is nothing to widen BY, so it
+doubles. Past `CFT_TR_PH_WINDOW_MAX = 8192` bits it returns
+`CFT_ERR_INTERNAL`: a window of W bits delivers the reduced argument
+to the working precision as long as W >= p + 2 + cancellation + Wi +
+10, so 8,192 provides for about 7,000 bits of cancellation at fp256
+and 7,478 at fp64. The scratch is a plain limb array rather than a
+`cft_bn` on purpose - the 2048-bit container would cap the allowance
+at a few hundred bits and make the CONTAINER the thing the contract
+refuses on.
+
+**What the cancellation actually is.** `host/tools/pi_worstcase.py`
+measures it: a steepest descent on the continued-fraction basis of
+frac(2^e * 2/pi) per binade, each basis vector SOLVING for its best
+multiple rather than stepping to it (a partial quotient of a million
+would otherwise cost a million iterations), from a spread of anchors.
+`--validate` compares it against exhaustive search on 200 random
+instances and 19 real fp32 binades narrowed to a searchable slice, and
+reports no disagreement. Run on this host:
+
+| format | binades searched | deepest cancellation |
+|---|---|---|
+| fp32 | every one of 128 with \|x\| >= 1 | 29 bits |
+| fp64 | every one of 1,024 | 61 bits |
+| fp128 | every 16th of 16,384 | 121 bits |
+| fp256 | every 512th of 262,144 | 245 bits |
+
+The two published worst cases - 16367173 * 2^72 at binary32 and
+0x1.6ac5b262ca1ffp+849 at binary64 - are the minimisers of their own
+binades and sit at those depths; other binades tie them, which is what
+the counting argument predicts: the minimum over N binades of a p-bit
+format is about 2^-(p + 1 + log2 N), so roughly p + 8 bits at fp32
+through p + 8 at fp256. fp128 and fp256 are sampled because the
+constant is sized by the exponent range rather than by the depth
+found, so a full sweep of 262,144 binades would refine a number no
+design decision depends on. The reduction's own instrumentation over
+the MPFR campaign: 9,855 arguments reduced,
+0 window widenings, the widest window
+1,184 bits, the deepest cancellation seen 239
+bits - against an allowance of 8,192.
+
+## The exact cases, proved
+
+Hermite-Lindemann closes the whole set: if z is a nonzero algebraic
+number then e^z is transcendental, and e^(iz) with it. Every operand
+is a dyadic rational, hence algebraic, so:
+
+| function | exact exactly at | argument |
+|---|---|---|
+| sin, tan | +-0, giving +-0 | sin(x) = a algebraic makes e^(ix) a root of z^2 - 2iaz - 1, hence algebraic, so x = 0; tan through sin/cos |
+| cos | 0, giving 1 | the same root argument on cos |
+| sinh, tanh, asinh, atanh | +-0, giving +-0 | sinh(x) = a makes e^x a root of z^2 - 2az - 1; asinh(x) = y dyadic nonzero would make x = sinh(y) transcendental; atanh likewise through tanh |
+| cosh | 0, giving 1 | cosh(x) = a makes e^x a root of z^2 - 2az + 1 |
+| acosh | 1, giving +0 | acosh(x) = y dyadic nonzero would make x = cosh(y) transcendental |
+
+`tanh(+-inf) = +-1` is a limit that happens to be representable: a
+special-value row rather than an exact case, raising nothing either
+way. And there is no half-integer table here the way there is for
+sinPi - an odd multiple of pi/2 is irrational, so no representable
+argument is a zero of cos or a pole of tan, and tan never signals
+divideByZero.
+
+## The neighbour rules, and where each threshold comes from
+
+Seven families, each derived the way phases 1 and 2 derive theirs: the
+leading term of the series and its SIGN, against a quarter of the grid
+step, reduced to an integer condition on the argument's exponent e.
+
+| family | the true value | threshold |
+|---|---|---|
+| sin(x), asinh(x) | strictly on the ZERO side of x: -x^3/6 + ... | 2e + p + 2 <= 0 |
+| tan(x), atanh(x) | strictly on the far side of x: +x^3/3 + ..., at most 0.357\|x\|^3 for \|x\| <= 1/4 | 2e + p + 3 <= 0 |
+| sinh(x) | strictly on the far side: +x^3/6 + ..., at most 0.17\|x\|^3 | 2e + p + 2 <= 0 |
+| tanh(x) | strictly on the zero side: -x^3/3 + ... | 2e + p + 3 <= 0 |
+| cos(x) | strictly below 1: 1 - cos(x) <= x^2/2, against half the gap below 1, which is 2^-(p+1) | 2e + p + 3 <= 0 |
+| cosh(x) | strictly above 1: cosh(x) - 1 <= 0.51x^2, against half the gap ABOVE 1, which is 2^-p - twice the gap below | 2e + p + 2 <= 0 |
+| tanh(x) for a large x | inside the half gap below 1: 1 - tanh(x) = 2/(e^2x + 1) < 2e^-2x once x > 0.347(p+2) | 2^e >= p + 2, an integer test on the encoding |
+| sin, cos beside 1 | \|sin x\| and \|cos x\| are STRICTLY below 1 for every nonzero dyadic x, so when the enclosure's low end is inside the half gap below 1 the side is the whole answer | on the enclosure, not the operand |
+
+tanh's large-argument rule is deliberately an integer test on the
+encoding - `2^e >= p + 2` - rather than the tighter `x > 0.347(p+2)`
+the derivation allows, so that both implementations can apply it
+without evaluating anything. The price is a band between the two,
+where 1 - tanh(x) is below the first attempt's working precision and
+the enclosure decides at the second: measured, three arguments per
+format from fp64 up in the MPFR campaign, and none at fp32.
+
+The thresholds take a quarter of the step rather than a half because
+the step below a power of two is half the step above it: sin's rule
+must hold when x is exactly 2^e and the neighbour toward zero is
+2^(e-p) away, which is where `2e + p + 2` comes from with the leading
+constant 1/6; cos's threshold is one worse than cosh's because 1 is
+such a boundary and its gap below is half its gap above. Which
+functions get NO rule is the interesting half: acosh near 1 behaves
+like sqrt(2(x - 1)), which is beside nothing the format holds, so the
+ordinary enclosure resolves it - the same reason phase 2's acos has
+none.
+
+The last row is the one that needed the model to reason rather than
+compute. cos of an argument a hair from a multiple of 2pi is
+1 - eps with eps far below the working precision; an enclosure of it
+is [1 - eps - w, 1 - eps + w] and its top stays above 1 until the
+precision passes -log2(eps) - the escalation the rule exists to avoid.
+It does not need to: the low end plus the theorem is the proof, and
+both implementations use it. The C has the reduced argument in hand,
+so it applies cosPi's rule on it (2v + p + 3 <= 0 with v the reduced
+argument's exponent); the model reads the low endpoint of an interval
+mpmath reduced on its own.
+
+## Two reductions, two derivations
+
+The reference does NOT reimplement the argument reduction, and that is
+deliberate: `python/cft_golden/transcend.py` hands mpmath's interval
+sine and cosine an exact dyadic and lets them reduce internally, at
+whatever precision the enclosure needs; the C reduces with its own
+window of the stored 2/pi. Two implementations that shared a reduction
+would agree about its bugs. The SIGN is the other independent
+derivation: the C reads it off the quadrant its integer arithmetic
+produces and never lets an evaluation decide it, exactly as phase 2
+does with its mask; the model reads it off the enclosure, accepting a
+rounding only when both endpoints agree on the sign - sound because
+sin, cos and tan of a nonzero dyadic are never zero, so the enclosure
+separates from zero at some finite precision.
+
+The hyperbolics are written differently on the two sides too. The C
+uses the doubling identity for sinh, `expm1(2x)` for tanh, and
+`mp_log_of_mp`, a helper that converts a computed operand's relative
+error into an absolute one on its logarithm and back, for the three
+inverses; the model uses the odd/even split of expm1 and log1p forms:
+
+    sinh(x)  = (expm1(x) - expm1(-x)) / 2
+    cosh(x)  = (exp(x) + exp(-x)) / 2
+    tanh(x)  = (expm1(x) - expm1(-x)) / (exp(x) + exp(-x))
+    asinh(x) = log1p(x + x^2/(1 + sqrt(1 + x^2)))
+    acosh(x) = log1p(d + sqrt(d*(x+1))),   d = x - 1 EXACTLY
+    atanh(x) = log1p(2x/(1 - x)) / 2,      1 - x EXACTLY
+
+The two EXACTLY are the trick phase 1's log(m') and phase 2's asin root
+use: for x near 1 the difference is exact on the encoding, so the
+cancellation amplifies an error of zero. Written the other way - acosh
+through sqrt(x^2 - 1), atanh through log((1+x)/(1-x)) - both lose every
+bit the answer has as x approaches 1. sinh and cosh carry an overflow
+screen, `|x| log2(e)` enclosed above emax + 3 proving the result past
+2^(emax+1), so nothing downstream is ever asked for e^(2^262143); it
+fires only when it PROVES the overflow, and the response comes through
+round_pack like every other.
+
+## Special values and flags
+
+Every row below was confirmed against MPFR 4.2.2 before it was written
+down, and the ones a porter should not have to infer:
+
+- `sin`, `cos` and `tan` of an infinity are **invalid**: no limit
+  exists. The same row sinPi, cosPi and tanPi take.
+- `sin(+-0) = +-0`, `tan(+-0) = +-0`, `cos(+-0) = 1`, and every one of
+  them raises nothing.
+- **tan never signals divideByZero** - no representable argument is a
+  pole - but it CAN overflow near one, and how close a representable
+  argument gets to a pole is the measurement above rather than a bound.
+  sin, cos, tanh, asinh, acosh and atanh cannot overflow; sinh and cosh
+  do, for a large argument, through round_pack.
+- `tanh(+-inf) = +-1` EXACTLY, raising nothing.
+- `atanh(+-1) = +-infinity` with **divideByZero** - 7.3's rule for an
+  exact infinity from a finite operand, the row tanPi takes at a
+  half-integer - and `|x| > 1` is invalid, infinities included.
+- `acosh(x)` for any x below 1 is invalid: both zeros, every negative
+  value, and -infinity. `acosh(+inf) = +inf`; `acosh(1) = +0`.
+- `sinh` and `asinh` of `+-inf` are `+-inf`; `cosh(+-inf) = +inf`.
+- Underflow happens for sin, tan, sinh, tanh, asinh and atanh of a tiny
+  argument and follows clause 7 through the same round_pack.
+- A signaling NaN raises invalid and delivers the canonical quiet NaN,
+  as everywhere else in this contract.
+
+## What was actually run
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, 2026-09-03.
+The first half of this phase was built by one agent and the second
+half finished by the reviewer after the agent was stopped twice by
+server errors; every number below is from a run the reviewer made on
+the tree that ships.
+
+| check | count | result |
+|---|---|---|
+| `python/tests`, the whole suite | 944 passed, 1 skipped | pass |
+| `host/tests/transcend_check.py`, C vs the model, twenty-nine functions | 280,670 comparisons | C == model on every one, bits and flags |
+| the same, forced to start below the precision it needs | 264,430 comparisons | identical through the escalation path |
+| `cft_conformance` replay at `make vectors`' arguments | 40 sets, 478,915 cases, of which 242,915 transcendental | every case, twice - per element and as arrays |
+| MPFR parity, all twenty-nine, four formats, five attributes | 451,988 cases, of which 37,980 for the nine | **zero value mismatches, zero flag mismatches** |
+| the same with `CFT_TRANSCEND_MINPREC=64` | 451,988 cases, 48,301 escalations | zero mismatches |
+| `host/tests/api_test.c` | the phase-3 block: refusals, the exact cases, the special rows, one case from every neighbour family, and the two published worst cases with bits from mpmath at 700 bits | pass |
+| `cft.hpp` vs `cft.h` | 4,111 checks at C++17 and again at C++20, each replaying 478,915 | identical encodings and flags |
+| the cftmpfr drop-in | 576 tests, the nine bit-for-bit against gmpy2 at every precision and attribute MPFR has | pass |
+| the Node binding | 79 tests; the page's own module at 140,869 bytes with 67 `cftw_*` exports | pass |
+| `host/tools/pi_worstcase.py --validate` | 219 instances against exhaustive search | 0 disagreements |
+
+**Escalation, measured.** The reduction: 9,855 arguments
+reduced over the MPFR campaign, 0 window widenings,
+widest window 1,184 bits, deepest cancellation seen
+239 bits, and it never widened its window - the deepest
+cancellation in that pool sits in an argument below 1, where the
+window starts at bit 1 and has the argument's own exponent to spare.
+The Ziv loop: at the contract's own precisions the only escalations
+in the campaign are tanh's - three per format from fp64 up, nine in
+all, for arguments between about 0.35(p+2) and p+2, where
+1 - tanh(x) is already below the first attempt's precision but the
+integer-encoded rule fires only from 2^e >= p+2 - each decided at the
+next attempt. No radian argument and no other hyperbolic escalated.
+The forced-low runs drive the escalation path through the C over
+48,301 escalations and find the same answers.
+
+**Negative control**, run and restored the same day: flipping the
+SIDE of sin's neighbour witness in `do_radian` - so sin is claimed to
+lie above a tiny argument rather than below it - is caught by
+`api-test` ("sin(min subnormal) downward is +0"), by
+`transcend_check.py` at the first fp32 sin case under roundTowardZero,
+by the conformance replay, and by MPFR parity. The bits mpmath derived
+for the two published worst cases are a second, independent control:
+a reduction that dropped the wrong bits would return a plausible sine
+of a slightly different number, and those two cases would not match.
+
+## What remains of clause 9
+
+With the twenty-nine the elementary set is complete: every function
+754-2019 table 9.1 lists for which this library has a reduction and a
+proof. What table 9.1 also lists and this library does not have:
+`exp2m1`, `exp10`, `exp10m1`, `log2p1`, `log10p1` (exp and log again
+with another constant, and the same exactness questions phase 1
+answered), `pown`, `powr` and `compound` (pow with narrower domains),
+and `rootn` (x^(1/n), whose exact cases are the perfect n-th powers
+and need one more integer root). None needs a reduction, a constant
+beyond ln 10, or a new idea; they are a smaller job than any phase so
+far and are recorded in docs/ROADMAP.md as such. A tile-assisted fast
+path for the narrow formats remains an optimisation, not a contract
+change.
