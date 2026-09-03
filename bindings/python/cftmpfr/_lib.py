@@ -217,12 +217,15 @@ def _bind(lib):
     # The phase-1 transcendentals (ABI 0.3). Host operations, so no
     # bus word: the argument list ends at the flags pointer.
     for _name in ("cft_exp", "cft_expm1", "cft_exp2", "cft_log",
-                  "cft_log1p", "cft_log2", "cft_log10"):
+                  "cft_log1p", "cft_log2", "cft_log10",
+                  "cft_sinpi", "cft_cospi", "cft_tanpi", "cft_asin",
+                  "cft_acos", "cft_atan", "cft_asinpi", "cft_acospi",
+                  "cft_atanpi"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
-    for _name in ("cft_pow", "cft_hypot"):
+    for _name in ("cft_pow", "cft_hypot", "cft_atan2", "cft_atan2pi"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
@@ -381,20 +384,25 @@ def sqrt(handle, fmt, rnd, a, n, esz):
 
 
 # ---------------------------------------------------------------------
-# The phase-1 transcendentals. Correctly rounded, which is the whole
-# reason they are worth calling from here: MPFR's own are too, so the
-# two agree bit for bit, and nothing else in a Python numerics stack
-# does.
+# The transcendentals. Correctly rounded, which is the whole reason they
+# are worth calling from here: MPFR's own are too, so the two agree bit
+# for bit, and nothing else in a Python numerics stack does.
+#
+# ABI 0.4's eleven are on the same footing. The Pi-variants are the ones
+# a numerics stack most often has to fake - Python's own math module has
+# no sinpi at all - and they are the ones whose exact cases are largest.
 # ---------------------------------------------------------------------
 
-TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10")
-TRANSCEND_BINARY = ("pow", "hypot")
+TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
+                   "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
+                   "asinpi", "acospi", "atanpi")
+TRANSCEND_BINARY = ("pow", "hypot", "atan2", "atan2pi")
 TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY
 
 
 def transcend(handle, name, fmt, rnd, a, b, n, esz):
-    """One of the nine, over n elements. b is None for the unary
-    seven. Returns (result bytes, flag word)."""
+    """One of the twenty, over n elements. b is None for the unary
+    sixteen. Returns (result bytes, flag word)."""
     if name not in TRANSCEND:
         raise ValueError(f"unknown transcendental {name!r}")
     d = ctypes.create_string_buffer(n * esz)

@@ -859,6 +859,67 @@ class Context:
         quiet NaN."""
         return self._transcend2("hypot", x, y)
 
+    # ---- the phase-2 trigonometrics (ABI 0.4) --------------------
+    #
+    # The eleven whose argument reduction is exact, so they need no pi
+    # to hundreds of thousands of bits: sinPi reduces by x mod 2 on a
+    # dyadic operand, and the inverses have nothing to reduce. Their
+    # exact cases are a much larger table than the exponentials' -
+    # sinPi and cosPi at every half-integer, tanPi at every
+    # quarter-integer, asinPi(+-1) = +-1/2, acosPi(0) = 1/2,
+    # atanPi(+-1) = +-1/4 and atan2Pi on every axis and diagonal - and
+    # every one of them raises nothing at all.
+
+    def sinpi(self, x):
+        """sin(pi x). Exact at the half-integers: sinPi(n) is a zero
+        with the sign of n, sinPi(n + 1/2) is +-1."""
+        return self._transcend1("sinpi", x)
+
+    def cospi(self, x):
+        """cos(pi x). cosPi(n) is (-1)^n and cosPi(n + 1/2) is +0."""
+        return self._transcend1("cospi", x)
+
+    def tanpi(self, x):
+        """tan(pi x), which is sinPi/cosPi in every respect including
+        the signs - tanPi(1) is -0. The half-integers are poles:
+        +-infinity with divideByZero. It cannot overflow."""
+        return self._transcend1("tanpi", x)
+
+    def asin(self, x):
+        """asin(x) in radians; |x| > 1 is invalid. Exact only at +-0."""
+        return self._transcend1("asin", x)
+
+    def acos(self, x):
+        """acos(x) in radians, in [0, pi]; exact only at acos(1)."""
+        return self._transcend1("acos", x)
+
+    def atan(self, x):
+        """atan(x) in radians; atan(+-inf) is +-pi/2."""
+        return self._transcend1("atan", x)
+
+    def asinpi(self, x):
+        """asin(x)/pi. Exact at +-0 and at +-1, where it is +-1/2."""
+        return self._transcend1("asinpi", x)
+
+    def acospi(self, x):
+        """acos(x)/pi. Exact at 1 (+0), at +-0 (1/2) and at -1 (1)."""
+        return self._transcend1("acospi", x)
+
+    def atanpi(self, x):
+        """atan(x)/pi. Exact at +-0, +-1 (+-1/4) and +-inf (+-1/2)."""
+        return self._transcend1("atanpi", x)
+
+    def atan2(self, y, x):
+        """atan2(y, x) in radians, y first as C has it. atan2(+-0, -0)
+        is +-pi, which is the row of that table most often missed."""
+        return self._transcend2("atan2", y, x)
+
+    def atan2pi(self, y, x):
+        """atan2(y, x)/pi. Exact on every axis and diagonal - 0, +-1/4,
+        +-1/2, +-3/4, +-1 - where the radian form is an inexact
+        rounding of a multiple of pi."""
+        return self._transcend2("atan2pi", y, x)
+
     def neg(self, x):
         """Sign flip, 754 5.5.1: quiet even on signaling NaNs, payload
         preserved - deliberately NOT 0 - x."""

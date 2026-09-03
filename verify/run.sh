@@ -430,13 +430,15 @@ stage clause5 "the clause-5 completion set vs the model, all entry points" -- \
 # precision it needs, so the escalation path runs - against an
 # UNESCALATED model, which is what makes it a comparison rather
 # than a coincidence. That second run is what found the
-# exact-cancellation hole in the evaluator's error bound.
+# exact-cancellation hole in the evaluator's error bound, twice: once
+# in phase 1 and once on 2026-09-03, when the first repair turned out
+# to be unsound at any working precision above 41 bits.
 do_transcend() {
   PY "$ROOT/host/tests/transcend_check.py" || return 1
   PY "$ROOT/host/tests/transcend_check.py" --min-prec 64 --trials 16
 }
 need host-cc python
-stage transcend "the nine transcendentals vs the model, and again through the escalation path" -- \
+stage transcend "the twenty transcendentals vs the model, and again through the escalation path" -- \
   do_transcend
 
 need host-cc python
@@ -551,7 +553,7 @@ do_soakquick() {
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
 need host-cc mpfr
-stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the twenty transcendentals" -- do_mpfr
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick

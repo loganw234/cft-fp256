@@ -227,6 +227,35 @@ control that was run, caught by both new checks, and reverted. Three
 clean container builds of the final tree produced byte-identical
 artifacts.
 
+**ABI 0.4 (2026-09-03)** added the phase-2 trigonometrics -
+cft_sinpi, cft_cospi, cft_tanpi, cft_asin, cft_acos, cft_atan,
+cft_atan2, cft_asinpi, cft_acospi, cft_atanpi and cft_atan2pi -
+correctly rounded at all four formats under all five attributes, with
+clause 9.2.1's special values and exact flags. Same shape again: plain
+positional C functions, host operations, no bus word, reachable through
+exactly the FFI each row above already uses. `atan2` and `atan2pi` take
+y first, as C's atan2 does. docs/TRANSCENDENTALS.md is the design.
+
+Where each surface stands at ABI 0.4, stated per row because the honest
+answer differs. This table is separate from the 0.3 one above on
+purpose: the JavaScript rows there are being worked on independently
+and the 0.4 status of those two surfaces is simply "not started".
+
+| surface | status at ABI 0.4 |
+|---|---|
+| C (`cft.h`) | complete. `host/tests/api_test.c` covers the refusals, the aliasing rule, the exact cases and one case from every neighbour family; `host/tests/transcend_check.py` is the reference ctypes consumer, 154,269 comparisons against the model over twenty functions |
+| C++ (`cft.hpp`) | complete, all three layers, and `cpp_api_test` issues every one twice - through the wrapper and through `cft.h` - comparing encodings and flags: **3,751 checks** at C++17 and again at C++20, up from 3,267 |
+| Python (`cftmpfr`) | complete on `Context` and in `batch`, **384 tests** (up from 268), including asin/acos/atan/atan2 bit-for-bit against gmpy2's IEEE emulation at every precision and attribute MPFR has. gmpy2 2.2.1 binds none of MPFR 4.2.0's Pi-variants, so those are checked against MPFR in `host/tools/mpfr_check.c` instead, which calls `mpfr_sinpi` and friends directly |
+| conformance vectors | complete: the same 20 `<fmt>-transcend[-<rnd>].jsonl` files now carry all twenty functions - **129,845 transcendental cases** of 365,845 in 40 sets, replayed by `cft_conformance` |
+| Node (`bindings/node`) | **no ABI 0.4 surface.** The module was not rebuilt for 0.4 in this change, so it reports 0.3 and its `cft_conformance` does not know the eleven new names; a 0.4 vector set handed to it fails on the function name, which is the refusal it should give |
+| Browser / WASM page | the same: not rebuilt, no `cftw_*` wrapper, no page control. The 0.3 half-step recorded above is unchanged |
+
+The last two rows are deliberate and are the same honest half-step 0.3
+recorded, one notch further back: 0.3's JavaScript surfaces were
+rebuilt but got no wrappers, and 0.4's have not been rebuilt at all.
+The eleven have **no JavaScript surface**, and no test on either
+JavaScript surface drives one.
+
 ## Drop-ins
 
 Higher-level packages that slot into an existing ecosystem's shape,

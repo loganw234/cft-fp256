@@ -759,6 +759,145 @@ int main(void)
               "log1p(min subnormal) to nearest stays put, tiny+inexact");
     }
 
+    /* --- the phase-2 trigonometrics (ABI 0.4) ----------------------
+     *
+     * Same charter again: the refusals, the aliasing rule, the exact
+     * cases whose bits come from reading the standard rather than from
+     * running the library, and - because the 2026-09-02 sabotage run
+     * showed this file could not catch a flipped neighbour SIDE - one
+     * case from every neighbour family this set has.
+     */
+    {
+        uint8_t a[4], b[4], d[4];
+        uint32_t f3 = 0xdead;
+
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        CHECK(cft_sinpi(dev, CFT_FP32, (cft_round)-1, a, d, 1, &f3)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_sinpi refuses an out-of-range rounding attribute");
+        CHECK(cft_atan2(dev, CFT_FP32, (cft_round)7, a, a, d, 1, &f3)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_atan2 refuses an out-of-range rounding attribute");
+        CHECK(cft_atan(dev, (cft_format)9, CFT_RNE, a, d, 1, &f3)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_atan refuses an unknown format");
+        CHECK(cft_atan2pi(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f3)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_atan2pi refuses a NULL second operand");
+        f3 = 0xdead;
+        CHECK(cft_tanpi(dev, CFT_FP32, CFT_RNE, NULL, NULL, 0, &f3)
+                  == CFT_OK && f3 == 0,
+              "cft_tanpi with n == 0 touches nothing and clears the flags");
+
+        /* The exact cases, and they raise NOTHING - which is the whole
+         * observable difference between this and an accurate
+         * implementation. Niven's theorem is what makes the list
+         * finite. */
+        put32(a, 0x3f000000u);                       /* 0.5f */
+        st = cft_sinpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "sinPi(1/2) = 1 EXACTLY");
+        st = cft_cospi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f3 == 0,
+              "cosPi(1/2) = +0 EXACTLY");
+        st = cft_tanpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f3 == CFT_FLAG_DIVBYZERO,
+              "tanPi(1/2) = +inf with divideByZero");
+        put32(a, 0xbf000000u);                       /* -0.5f */
+        st = cft_tanpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f3 == CFT_FLAG_DIVBYZERO,
+              "tanPi(-1/2) = -inf with divideByZero");
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        st = cft_sinpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f3 == 0,
+              "sinPi(1) = +0: the sign of the ARGUMENT, not of (-1)^n");
+        st = cft_tanpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "tanPi(1) = -0, because it is sinPi over cosPi");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        st = cft_sinpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "sinPi(-1) = -0");
+        st = cft_acospi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "acosPi(-1) = 1 EXACTLY");
+        st = cft_atanpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xbe800000u && f3 == 0,
+              "atanPi(-1) = -1/4 EXACTLY");
+        put32(a, 0x3e800000u);                       /* 0.25f */
+        st = cft_tanpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "tanPi(1/4) = 1 EXACTLY");
+        st = cft_asinpi(dev, CFT_FP32, CFT_RNE, d, d, 1, &f3);  /* aliased */
+        CHECK(st == CFT_OK && get32(d) == 0x3f000000u && f3 == 0,
+              "asinPi(1) = 1/2 EXACTLY, and d may alias a");
+        put32(a, 0x00000000u);
+        put32(b, 0x80000000u);                       /* (+0, -0) */
+        st = cft_atan2pi(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "atan2Pi(+0, -0) = 1 EXACTLY - the row most often missed");
+        put32(a, 0x7f800000u);
+        st = cft_sinpi(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f3 == CFT_FLAG_INVALID,
+              "sinPi(+inf) is invalid: there is no limit there");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        st = cft_asin(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f3 == CFT_FLAG_INVALID,
+              "asin(2) is invalid");
+
+        /* One case from every neighbour family, each of which is a
+         * SIDE and not a value: no working precision separates these
+         * from the number beside them, so a flipped side is invisible
+         * to everything except a directed rounding. */
+        put32(a, 0x00000001u);                       /* min subnormal */
+        st = cft_asin(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "asin(min subnormal) stays put: asin is ABOVE its argument");
+        st = cft_asin(dev, CFT_FP32, CFT_RUP, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "asin(min subnormal) upward steps off it");
+        st = cft_atan(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "atan(min subnormal) toward zero is +0: atan is BELOW it");
+        st = cft_atan(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "atan(min subnormal) to nearest stays put");
+        st = cft_cospi(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f7fffffu &&
+              f3 == CFT_FLAG_INEXACT,
+              "cosPi(min subnormal) downward is nextDown(1)");
+        st = cft_acospi(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3effffffu &&
+              f3 == CFT_FLAG_INEXACT,
+              "acosPi(min subnormal) downward is nextDown(1/2)");
+        put32(a, 0x7f7fffffu);                       /* max finite */
+        st = cft_atanpi(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3effffffu &&
+              f3 == CFT_FLAG_INEXACT,
+              "atanPi(max finite) downward is nextDown(1/2)");
+        /* and atan2 beside an exactly dyadic quotient - here the
+         * quotient is the subnormal MIDPOINT minSub/2, which is not a
+         * representable number at all */
+        put32(a, 0x00000001u);
+        put32(b, 0x40000000u);                       /* 2.0f */
+        st = cft_atan2(dev, CFT_FP32, CFT_RUP, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "atan2(minSub, 2) upward reaches the smallest subnormal");
+        st = cft_atan2(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "atan2(minSub, 2) to nearest is +0: just below a midpoint");
+    }
+
     /* --- the clause-5 completion set ------------------------------
      *
      * The check harness proves these against the model at scale; what
