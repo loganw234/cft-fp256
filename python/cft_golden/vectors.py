@@ -173,19 +173,20 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
     shifty = [0, 1, 2, fmt.man_w, fmt.width - 1, fmt.width, fmt.width + 1,
               2 * fmt.width - 1]
     cases = []
-    # 15, 28 and 255 are unassigned: one inside the float block, one
-    # just past the seeds, one at the top of the byte. This list has
-    # now shed a member TWICE - 24 became CFT_SUM, then 26 became
-    # RECIP_SEED - which is the exact hazard docs/DETERMINISM.md warns
-    # about for anyone who issued an unassigned opcode early: the
-    # conformance replayer refuses a set whose "reserved" case has
-    # since been assigned, and that refusal is what caught 26 here.
+    # 15, 30 and 255 are unassigned: one inside the float block, one
+    # just past the composed reductions, one at the top of the byte.
+    # This list has now shed a member THREE times - 24 became CFT_SUM,
+    # 26 became RECIP_SEED, and on 2026-09-03 28 became CFT_SUMSQ -
+    # which is the exact hazard docs/DETERMINISM.md warns about for
+    # anyone who issued an unassigned opcode early: the conformance
+    # replayer refuses a set whose "reserved" case has since been
+    # assigned, and that refusal is what caught 26 here, and 28 again.
     #
     # The seed opcodes themselves get the same per-op budget as the
     # rest: they are unary and quiet, but their special classes (the
     # limit values, and the flush-at-input rule for subnormals) are
     # contract surface an independent implementation can get wrong.
-    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 28, 255):
+    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 30, 255):
         is_shift = op in (sf.OP_ISHL, sf.OP_ISHR)
         for i in range(per_op):
             if i % 3 == 0:
@@ -653,4 +654,130 @@ def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
         else:
             cases += [(fn, a, b)
                       for a, b in trig_atan2_pairs(fmt, extra, seed + 4)]
+    return cases
+
+
+# ---- the reduction sets ----------------------------------------------
+#
+# A THIRD set type, and it needed one: the published sets before this
+# carried no reductions at all. Both of the existing schemas are one
+# case per LINE with a fixed number of single-element operands, and a
+# reduction's operand is a whole vector whose length is part of the
+# case - so a reduction could not be expressed in either without
+# redefining what a line means for everything else.
+#
+# The scaled products need more than that again: they return a PAIR, so
+# their cases carry two answers.
+
+REDUCE_FNS = ("sum", "dot", "sumsq", "sumabs",
+              "scaled_prod", "scaled_prod_sum", "scaled_prod_diff")
+
+REDUCE_ARITY = {"sum": 1, "dot": 2, "sumsq": 1, "sumabs": 1,
+                "scaled_prod": 1, "scaled_prod_sum": 2,
+                "scaled_prod_diff": 2}
+
+# Which functions deliver (pr, sf) rather than one element.
+REDUCE_SCALED = ("scaled_prod", "scaled_prod_sum", "scaled_prod_diff")
+
+# Lengths. The tree's shape is a function of n and of nothing else, so
+# the sizes are the coverage: every small n, then each power of two
+# with its neighbours either side, where a perfect subtree gives way to
+# a lopsided one. A set that tried only round numbers would score a
+# midpoint-splitting implementation as conforming.
+REDUCE_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 16, 17,
+                  31, 32, 33, 63, 64, 65, 127, 128, 129)
+
+# Where the pools are sampled across every function as well - kept
+# short because a case's cost is its length.
+REDUCE_POOL_LENGTHS = (2, 5, 17, 33)
+
+
+def reduce_pools(fmt: FpFormat, extra: int, seed: int = 20):
+    """Named operand pools, each at least max(REDUCE_LENGTHS) long.
+
+    Adversarial in the ways a reduction is: products that leave the
+    format many times over in both directions, alternating magnitudes,
+    signed zeros, an infinity beside a zero (the invalid row of a
+    scaled product), NaNs beside infinities (the row 9.4 orders
+    differently for sumSquare and sumAbs), and subnormals - whose
+    normalised significands are what makes a scaled product's leaf
+    extraction non-trivial.
+    """
+    need = max(REDUCE_LENGTHS)
+    rng = random.Random(seed ^ fmt.width)
+    big = sf.max_normal_bits(fmt)
+    tiny = sf.min_subnormal_bits(fmt)
+    pools = {}
+
+    def cycle(values):
+        return [values[i % len(values)] for i in range(need)]
+
+    # ordinary work: exponents close enough together that the additions
+    # actually interact rather than reducing to "the largest one wins"
+    pools["ordinary"] = [_rand_finite(rng, fmt, fmt.bias - 6, fmt.bias + 6)
+                         for _ in range(need)]
+
+    # products that overflow and underflow the format many times over
+    pools["huge"] = cycle([big, sf.max_normal_bits(fmt, 1),
+                           big ^ 1, sf.max_normal_bits(fmt, 1) ^ 1])
+    pools["tiny"] = cycle([tiny, sf.min_subnormal_bits(fmt, 1),
+                           sf.max_subnormal_bits(fmt),
+                           sf.min_normal_bits(fmt)])
+    pools["alternating"] = cycle([big, tiny, sf.max_normal_bits(fmt, 1),
+                                  sf.min_subnormal_bits(fmt, 1)])
+
+    # signed zeros beside ordinary values: the sign of a scaled
+    # product's zero is the XOR over every factor, and an exact
+    # cancellation's zero follows the rounding attribute
+    pools["zeros"] = cycle([sf.zero_bits(fmt, 0), sf.one_bits(fmt),
+                            sf.zero_bits(fmt, 1), sf.one_bits(fmt, 1),
+                            sf.zero_bits(fmt, 1), sf.zero_bits(fmt, 0)])
+
+    # an infinity beside a zero: invalid for a scaled product, and
+    # nothing at all for sumSquare
+    pools["inf_zero"] = cycle([sf.inf_bits(fmt), sf.zero_bits(fmt),
+                               sf.one_bits(fmt), sf.inf_bits(fmt, 1),
+                               sf.zero_bits(fmt, 1), sf.one_bits(fmt, 1)])
+
+    # NaNs beside infinities: the one row where sumSquare and sumAbs
+    # are not the plain composition
+    pools["nan_inf"] = cycle([sf.qnan_bits(fmt), sf.inf_bits(fmt),
+                              sf.one_bits(fmt), sf.snan_bits(fmt),
+                              sf.inf_bits(fmt, 1), sf.qnan_bits(fmt) | 5])
+
+    # the whole exponent range in one vector
+    pools["wide"] = [_rand_finite(rng, fmt, 1, fmt.exp_mask - 1)
+                     for _ in range(need)]
+
+    for i in range(max(0, extra)):
+        pools["random%d" % i] = [_rand_bits(rng, fmt) for _ in range(need)]
+    return pools
+
+
+def reduce_cases(fmt: FpFormat, extra: int, seed: int = 20):
+    """(fn, xs, ys) triples for all seven of clause 9.4's reductions.
+
+    ys is None for the unary five. Coverage is deliberately shaped
+    around cost: every LENGTH is used for every function (rotating
+    through the pools), and every POOL is used for every function at a
+    few short lengths - because a case's size is its length, and a
+    cross of all lengths against all pools would make an fp256 set tens
+    of megabytes for coverage that repeats itself.
+    """
+    pools = reduce_pools(fmt, extra, seed)
+    names = sorted(pools)
+    cases = []
+    k = 0
+    for fn in REDUCE_FNS:
+        binary = REDUCE_ARITY[fn] == 2
+        for n in REDUCE_LENGTHS:
+            src = pools[names[k % len(names)]]
+            other = pools[names[(k + 3) % len(names)]]
+            k += 1
+            cases.append((fn, src[:n], other[:n] if binary else None))
+        for name in names:
+            for n in REDUCE_POOL_LENGTHS:
+                src = pools[name]
+                other = pools[names[(names.index(name) + 1) % len(names)]]
+                cases.append((fn, src[:n], other[:n] if binary else None))
     return cases
