@@ -7,9 +7,9 @@ binary128 and binary256, all five rounding attributes, exact flags,
 and results that are libcft's bits and nothing else.
 
 ```bash
-node bindings/node/test.mjs         # 43 tests, no dependencies
+node bindings/node/test.mjs         # 57 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 236,000 published cases
+node bindings/node/conformance.mjs  # 300,325 published cases
 ```
 
 ```js
@@ -24,6 +24,41 @@ const xs = Array.from({ length: 100000 }, (_, i) => ctx.fromBigInt(BigInt(i)));
 const roots = ctx.map("mul", xs, xs);         // ONE cft_run for the array
 const total = ctx.reduce("sum", roots);       // the contract's fixed tree
 ```
+
+## Correctly rounded transcendentals, at 237 bits
+
+Since ABI 0.3 the package carries the phase-1 set - `exp`, `expm1`,
+`exp2`, `log`, `log1p`, `log2`, `log10`, `pow`, `hypot` - on all three
+layers: the raw `cftw_*` exports, `Context`/`Float` scalars, and
+`map()` over an array.
+
+```js
+const ctx = await Context.open(128);
+ctx.exp(1).toString();                        // e to 113 bits, exactly
+ctx.withRounding("rup").log(2);               // the other direction
+ctx.map("hypot", xs, ys);                     // one call for the array
+```
+
+**Correctly rounded** is the whole point, and it is not the usual
+promise. Not "accurate to an ulp", not "faithful", not
+"algorithm-defined": the result is the mathematical value rounded once
+in the context's attribute, so every correct implementation returns
+the same encoding and this one can be scored against any of them.
+`Math.exp` cannot make that promise on any JavaScript engine, at any
+precision, and neither can libm. The exact cases are decided by exact
+arithmetic rather than by a tolerance - `exp(0)` is 1 with no inexact
+flag, `log2(1024)` is 10, `hypot(3, 4)` is 5 - and 754-2019 clause
+9.2.1's special values hold in full, including the rows
+implementations most often differ on: `pow(x, ±0)` is 1 for any `x`
+including a quiet NaN, `pow(1, y)` is 1 for any `y`, `hypot(±inf, y)`
+is +inf even against a NaN, and `log(±0)` is -inf with divideByZero
+rather than invalid. A *signaling* NaN is not covered by those rows
+and raises invalid like everywhere else in this contract - deliberately
+unlike C's `pow(sNaN, 0)`, and cft.h says so.
+
+These are host operations: no device pass, no bus word, and nothing
+here computes them - each call is one `cftw_*` call on bytes, exactly
+like every other operation in this package.
 
 ## What this is a drop-in for: nothing, on purpose
 
@@ -174,9 +209,45 @@ checks that, and refuses to report a replay if they differ):
   opcode and format number, and a disagreement refuses to run rather
   than computing the wrong operation quietly.
 
+**2026-09-03, same host and node, wasm module sha256
+`6ff4129e03d43682…`** - the rebuild that gave the nine their `cftw_*`
+wrappers, so this package could reach them at all (package 0.3.1;
+0.3.0 loaded a module that reported ABI 0.3 and exported none of the
+nine, which is docs/COMPATIBILITY.md's half-step):
+
+* `node conformance.mjs` - **300,325 cases over 40 sets, zero
+  mismatches**: the 236,000 opcode cases through `cft_conformance()` in
+  1.6 s as before, then **64,325 transcendental cases in 60.9 s driven
+  through this package's own `Context` methods** - per case, so the
+  flag word compared is that case's, then once per family through
+  `map()` so the batch call is held to the scalar answer. That second
+  pass is not redundancy: `cft_conformance` dispatches the nine
+  internally in C and is green with or without a JavaScript surface for
+  them.
+* `node test.mjs` - **57 tests, 0 failures**: the 43 above plus 14 for
+  the nine - the exact cases that must raise nothing at all, the
+  signed zeros `expm1`/`log1p` exist for, the infinite arguments,
+  `log`'s pole and its divideByZero, the canonical quiet NaN on every
+  domain error, `pow`'s identities over its NaNs and the difference
+  between its pole (`pow(±0, -1)`, divideByZero) and its limit
+  (`pow(±0, -inf)`, +inf, silent), `hypot` preferring an infinity to a
+  NaN and not overflowing on the way, the signaling-NaN break from C,
+  all nine at all four formats, the `Float` methods, and
+  batch-equals-scalar over 129 elements for each of the nine.
+* Negative control for the new surface, run and reverted: `cftw_pow`'s
+  two operand pointers swapped in `wasm_api.c` and the module rebuilt.
+  6 of the 57 tests fail by name (`pow(2,3): expected 8, got 9`),
+  `conformance.mjs` fails all twenty transcendental sets at
+  `fp32-transcend.jsonl:1543`, and - the part worth writing down -
+  the `cft_conformance` replay above stays green throughout, because
+  it never calls the wrapper. That is the half-step reproduced on
+  purpose, and the reason the second pass exists.
+
 Not verified: no other JS runtime, no device backend (wasm32 has no
 PCIe; `Context.open` is always the software backend here), and no
-performance claim.
+performance claim. The 60.9 s for 64,325 transcendental cases is a
+measurement, not a promise: it is one `_malloc` per scalar call across
+a wasm boundary, at binary256 for a quarter of them.
 
 ## Files
 
@@ -187,7 +258,9 @@ core.mjs         Context and Float, the codec, the decimal contract
 cft_node.js      committed build product: emcc -sENVIRONMENT=node
 cft_node.wasm    committed build product: THE PAGE'S MODULE, byte for byte
 test.mjs         everything the vectors cannot express
-conformance.mjs  the vectors replay - the package's conformance test
+conformance.mjs  the vectors replay - the package's conformance test;
+                 cft_conformance for the opcode sets, this package's
+                 own methods for the twenty transcendental ones
 ```
 
 `cft_node.js` and `cft_node.wasm` are built by

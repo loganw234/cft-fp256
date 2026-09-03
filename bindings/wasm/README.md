@@ -51,10 +51,23 @@ onto the page - same code path, whole files. Verified at build time:
 the full 20-set drop replays with zero mismatches, from both
 LF (Linux) and CRLF (Windows) generated files.
 
+Since 2026-09-03 the drop zone also accepts the **twenty
+transcendental sets** ABI 0.3 added (`<fmt>-transcend[-<rnd>].jsonl`,
+64,325 cases), which `cft_conformance` has understood since the module
+was first built from the 0.3 sources but which the page's own name
+list refused - so a `make vectors` drop, the thing this page tells the
+reader to do, had half its files bounced. Measured, not assumed:
+`verify.mjs` replays all forty sets one file per directory, which is
+exactly what the drop zone does with a dropped file, and the drop
+itself was watched working in Chromium (see the 2026-09-03 block
+below) - four transcendental sets and one opcode set, 32,465 cases,
+with a misnamed file still refused by name.
+
 The page is also a working binary32/64/128/256 calculator: one
-element through `cft_run()` (or the composed `cft_div`/`cft_sqrt`
-sequence), operands and results as raw encodings, flags decoded -
-every answer pinned by the replay above it.
+element through `cft_run()`, the composed `cft_div`/`cft_sqrt`
+sequence, or any of the nine phase-1 transcendentals, operands and
+results as raw encodings, flags decoded - every answer pinned by the
+replay above it.
 
 ## Building
 
@@ -84,9 +97,12 @@ the override it warns and proceeds. Stages:
    build trusts its own regeneration, not whatever `vectors/out`
    holds);
 2. `emcc` the library sources - **asked of `host/Makefile`, not
-   listed here** (see below), currently seven: bigint, softfloat,
-   device, divsqrt, clause5, program, conformance; the XRT backend is
-   not compiled, wasm32 having no PCIe to speak - plus `wasm_api.c`,
+   listed here** (see below), currently nine: bigint, softfloat,
+   device, divsqrt, clause5, mpfloat, transcend, program, conformance
+   - `mpfloat.c` and `transcend.c` arrived with ABI 0.3 and were
+   compiled in without anyone editing this directory, which is the
+   derivation doing its job; the XRT backend is not compiled, wasm32
+   having no PCIe to speak - plus `wasm_api.c`,
    twice with identical flags: split (`.js` + `.wasm`, so the
    reported wasm size is a measured fact) and `-sSINGLE_FILE` for
    embedding;
@@ -126,7 +142,7 @@ construction rather than by luck. `conformance.html` is a committed
 build product; rebuild it with the pinned image and the only intended
 diff is none.
 
-`wasm_api.c` is the module's complete exported surface: 38 `cftw_*`
+`wasm_api.c` is the module's complete exported surface: 47 `cftw_*`
 wrappers that project `host/include/cft.h` one declaration at a time,
 adapting only what JavaScript cannot reach (out-params, the sized
 caps struct, a uint64). No invented semantics; cft.h remains the
@@ -135,13 +151,19 @@ contract. Since 2026-09-02 that includes the clause-5 completion set
 `cftw_scaleb`/`cftw_logb`, `cftw_next_up`/`_down`, `cftw_class`,
 `cftw_total_order`(`_mag`), `cftw_cmp_sig`, `cftw_rem` - which the
 page does not call and a module claiming its ABI version should not be
-without.
+without. Since 2026-09-03 it includes the nine phase-1
+transcendentals: `cftw_exp`, `cftw_expm1`, `cftw_exp2`, `cftw_log`,
+`cftw_log1p`, `cftw_log2`, `cftw_log10`, `cftw_pow`, `cftw_hypot`.
+Those nine end at their flag word - no `bus_out` - because cft.h gives
+them none: they are host operations that issue no device pass, and a
+wrapper that grew a parameter to match its neighbours would be
+describing a round trip that does not happen.
 
 ## Verifying it, without a browser
 
 ```bash
 make vectors                       # from the repo root, once
-node bindings/wasm/verify.mjs      # 2 s, node 22
+node bindings/wasm/verify.mjs      # 2 min, node 22
 ```
 
 No build is needed: the loader it drives is `bindings/node`'s
@@ -167,7 +189,20 @@ the build directory:
 4. hands the extracted bytes to the node loader as
    `Module.wasmBinary` and replays the full sets through
    `cft_conformance()` over MEMFS - the page's own bytes, the
-   library's own file-reading path, one call per set.
+   library's own file-reading path, one call per set. One set per
+   directory, which is what the page does with a dropped file, over
+   every name the drop zone accepts: the twenty opcode sets and, when
+   `make vectors` has written them, the twenty transcendental ones;
+5. drives the **nine transcendentals through their own wrappers**,
+   reading the same files itself: `cftw_exp` … `cftw_hypot`, one
+   element at a time for exact per-case flags and then once per family
+   as an array, comparing encodings and flags against the file. Step 4
+   cannot substitute for this and it is worth being blunt about why:
+   `cft_conformance` dispatches the nine internally, in C, so it is
+   green whether or not a single `cftw_*` wrapper for them exists. For
+   a day it was (docs/COMPATIBILITY.md's half-step). Step 5 is the one
+   that fails when the JavaScript surface is missing, or present and
+   wrong.
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
 rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
@@ -185,6 +220,47 @@ a browser on this host (no browser could reach a `file://` path from
 the session that rebuilt it); what stands behind the page's UI is
 that `page_template.html` is byte-identical to the version Chrome ran
 on 2026-09-01.
+
+**Measured 2026-09-03**, node 22.19.0 on Windows 11, against the page
+rebuilt that day with the nine wrappers in it: module **88,875 bytes**,
+sha256 `6ff4129e03d43682…`, identical to the node loader's
+`bindings/node/cft_node.wasm` (and to `build/cft_node.wasm`);
+`cftw_abi_version()` = 3 = ABI 0.3, matching `cft.h`; **47 `cftw_*`
+exports**; **300,325 cases over 40 sets** through `cft_conformance`
+(236,000 opcode + 64,325 transcendental) and **64,325 more through the
+nine wrappers themselves**, zero mismatches either way, in 2 min.
+Three clean container builds produced the same `conformance.html`
+(sha256 `30292f731a4b553d…`) - two back to back, and a third after the
+negative control below was reverted, which is a stronger statement
+than two, since it says the tree round-tripped. The negative control
+for the new surface was the operand order: `cftw_pow`'s two operand
+pointers swapped, rebuilt, and then **step 5 fails all twenty
+transcendental sets while step 4 stays green** - `pow(+0, +inf)`
+returns 1 where the vectors say +0 - and `bindings/node/test.mjs`
+fails 6 of 57 by name (`pow(2,3): expected 8, got 9`). That is the
+half-step's failure mode reproduced on purpose: the internal replay
+cannot see a broken wrapper, and now something can.
+
+**And this time the page was opened in a browser** - which matters,
+because `page_template.html` did change (the compute panel gained the
+nine, the drop zone gained the twenty set names) and the two previous
+rebuilds could lean on it being byte-identical to the version Chrome
+ran on 2026-09-01. It cannot any more, so it was run: Chromium 148 on
+Windows 11, the committed `conformance.html` served over a loopback
+`http.server` because this session's browser will not open a `file://`
+path. Section 1 read *libcft ABI 0.3*; section 2's embedded sample
+replayed **4,015 cases over 20 sets, green**; section 3 accepted a
+drop of four transcendental sets and one opcode set - 32,465 cases,
+all matching, with a deliberately misnamed sixth file refused by name
+and the verdict correctly downgraded to "not a full pass"; section
+4's panel computed through the new controls, `exp(+0) = 1` with no
+flags, `exp(1) = 0x4005bf0a8b145769` inexact, `log(+0) = -inf` with
+divideByZero, `pow(2,3) = 8` against `pow(3,2) = 9` (the operand order,
+in the UI), `hypot(3,4) = 5`, and `log2(2^10) = 10` exactly at
+binary256 under roundTowardPositive. `build/negative_control.html` was
+opened in the same browser and failed red at `fp64.jsonl:2` with the
+library's own disagreement, so the checker was watched failing here
+too.
 
 ## Scope, honestly
 
@@ -228,6 +304,25 @@ on 2026-09-01.
   exactly what the previous bullet warns against, and
   docs/COMPATIBILITY.md's ledger says so in those words. The wrappers
   are the next rebuild's job.
+* **The half-step closed the same day: the page is at ABI 0.3,
+  surface included (2026-09-03).** `wasm_api.c` gained the nine -
+  `cftw_exp`, `cftw_expm1`, `cftw_exp2`, `cftw_log`, `cftw_log1p`,
+  `cftw_log2`, `cftw_log10`, `cftw_pow`, `cftw_hypot` - so the module
+  now contains the operations 0.3 names rather than only reporting the
+  number. 47 `cftw_*` exports, 88,875 bytes of wasm where the
+  wrapperless 0.3 build that morning was 88,541 - the nine wrappers
+  are 334 bytes, because the arithmetic they reach was already in the
+  module and only the doors were missing, which is exactly why a
+  version number could not tell the two builds apart. Unlike the 0.2
+  rebuild, the **markup did change**, because this time it could be
+  contained: the compute panel's operation list is built from a table
+  in the page's own script, so the nine are nine rows and one `else
+  if` in the dispatch, and the drop zone's accepted-names list gained
+  the twenty transcendental sets it had been bouncing. Both are
+  exercised without a browser - `verify.mjs` step 5 drives the same
+  wrappers the panel calls, and its step 4 replays one dropped set per
+  directory the way the drop zone does - which is the only kind of
+  claim this file is willing to make about a page nobody watched.
 * Reproducibility claim, precisely: same pinned image + same repo
   state → same page. The vectors are seeded and the sampling is a
   pure function of them; `emcc` is deterministic within the pinned
