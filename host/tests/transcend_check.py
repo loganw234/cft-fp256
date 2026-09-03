@@ -1,6 +1,6 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The phase-1 transcendental entry points against the golden model.
+"""The transcendental entry points against the golden model.
 
     python3 host/tests/transcend_check.py                 # standard sweep
     python3 host/tests/transcend_check.py --formats fp64
@@ -29,6 +29,27 @@ other and from a merely-accurate implementation:
   * hypot with operands whose exponents differ by more than half the
     precision, and with sums that are near-perfect squares;
   * subnormal inputs and subnormal results.
+
+Phase 2 (ABI 0.4) adds eleven more, with pools of their own, because
+the families that catch a trigonometric function are not the families
+that catch an exponential:
+
+  * the half-integers and quarter-integers, each with one ulp added and
+    subtracted, so sinPi's and tanPi's exactness tests have to be right
+    rather than merely optimistic - and the integers, where sinPi's
+    zero takes the sign of the ARGUMENT and tanPi's takes the parity
+    too;
+  * arguments just below and just above 1 for asin, acos and their Pi
+    forms, where the domain ends and where (1-x)(1+x) is the only form
+    that survives;
+  * tiny arguments straddling every neighbour threshold this set has -
+    asin above its argument, atan below it, cosPi below 1, acosPi and
+    atan2Pi beside 1/2 and 1, atanPi below 1/2 for a huge argument;
+  * atan2 ON the axes and the diagonals, and one ulp off them, in every
+    combination of signs and both zeros;
+  * atan2 with an exactly dyadic quotient - including minSubnormal over
+    two, whose quotient is a subnormal MIDPOINT;
+  * subnormal inputs and subnormal results.
 """
 
 import argparse
@@ -47,6 +68,9 @@ from cft_golden import transcend as tr                            # noqa: E402
 
 UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10")
 BINARY = ("pow", "hypot")
+TRIG_UNARY = ("sinpi", "cospi", "tanpi", "asin", "acos", "atan",
+              "asinpi", "acospi", "atanpi")
+TRIG_BINARY = ("atan2", "atan2pi")
 CHECKED = 0
 
 
@@ -73,14 +97,16 @@ def bind(lib):
     lib.cft_open.restype = i
     lib.cft_close.argtypes = [vp]
     lib.cft_close.restype = None
-    for nm in UNARY:
+    for nm in UNARY + TRIG_UNARY:
         fn = getattr(lib, "cft_" + nm)
         fn.argtypes = [vp, i, i, vp, vp, sz, u32p]
         fn.restype = i
-    for nm in BINARY:
+    for nm in BINARY + TRIG_BINARY:
         fn = getattr(lib, "cft_" + nm)
         fn.argtypes = [vp, i, i, vp, vp, vp, sz, u32p]
         fn.restype = i
+    lib.cft_abi_version.argtypes = []
+    lib.cft_abi_version.restype = ctypes.c_uint32
 
 
 def open_dev(lib):
@@ -110,7 +136,7 @@ def call(lib, dev, fmt, fn, rnd, xs, ys=None):
     d = ctypes.create_string_buffer(n * esz)
     fl = ctypes.c_uint32(0xDEAD)
     f = getattr(lib, "cft_" + fn)
-    if fn in BINARY:
+    if fn in BINARY or fn in TRIG_BINARY:
         b = ctypes.create_string_buffer(enc(fmt, ys), n * esz)
         st = f(dev, PREC_CODE[fmt.name], rnd, a, b, d, n, ctypes.byref(fl))
     else:
@@ -302,6 +328,156 @@ def hypot_pairs(fmt, trials, seed):
     return pairs
 
 
+def trig_pool(fmt, trials, seed):
+    """Operands where a trigonometric function can actually be got
+    wrong. Random bit patterns score almost nothing here: they never
+    land on a half-integer, never straddle 1, and never sit at a
+    neighbour threshold."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 101))
+    out = [
+        sf.zero_bits(fmt), sf.zero_bits(fmt, 1),
+        one, sf.one_bits(fmt, 1), one + 1, one - 1,
+        sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1,
+        sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+        sf.max_subnormal_bits(fmt), sf.max_subnormal_bits(fmt, 1),
+        sf.min_normal_bits(fmt), sf.min_normal_bits(fmt, 1),
+        sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+        sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+        sf.qnan_bits(fmt), sf.snan_bits(fmt), sf.qnan_bits(fmt) | 0x5,
+    ]
+    # the half-integers, quarter-integers and integers, each with a
+    # neighbour on both sides - sinPi and tanPi are exact on two of
+    # those three families and irrational on the rest of the line
+    for m, e in [(k, -1) for k in (1, 3, 5, 7, 9, 17, 33)] + \
+                [(k, -2) for k in (1, 3, 5, 7, 9, 11, 13)] + \
+                [(k, 0) for k in (1, 2, 3, 4, 5, 8, 17)] + \
+                [(k, -3) for k in (1, 3, 5, 7, 11, 13)]:
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, m, e)
+            if b is not None:
+                out += [b, b + 1, b - 1]
+    # the top of the finite range, where every value is an even integer
+    for k in (p - 1, p, p + 1, 2 * p, fmt.emax - 1, fmt.emax):
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, k)
+            if b is not None:
+                out += [b, b - 1]
+    # every neighbour threshold this set has, and one step either side
+    for k in (p // 2, p // 2 + 1, p // 2 + 2, p, p + 1, p + 2, p + 3,
+              2 * p, 4 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                b = Vopt(fmt, sgn, m, e)
+                if b is not None:
+                    out.append(b)
+    # just inside and just outside the asin/acos domain
+    for sgn in (0, 1):
+        out += [sf.one_bits(fmt, sgn), sf.one_bits(fmt, sgn) - 1,
+                sf.one_bits(fmt, sgn) + 1]
+        b = Vopt(fmt, sgn, (1 << p) - 1, -p)
+        if b is not None:
+            out += [b, b - 1]
+    out += [rng.getrandbits(fmt.width) for _ in range(trials)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def atan2_pairs(fmt, trials, seed):
+    """atan2 ON the axes and diagonals and one ulp off them.
+
+    Every axis and diagonal is an EXACT case of atan2Pi and an inexact
+    rounding of a multiple of pi for atan2, so the same pair scores both
+    halves of the design at once."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 211))
+    axes = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), one,
+            sf.one_bits(fmt, 1), sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+            sf.qnan_bits(fmt), sf.snan_bits(fmt), V(fmt, 0, 1, 1),
+            V(fmt, 1, 1, 1), V(fmt, 0, 3, 0), V(fmt, 1, 3, 0),
+            sf.max_normal_bits(fmt), sf.min_subnormal_bits(fmt),
+            sf.min_subnormal_bits(fmt, 1)]
+    pairs = [(a, b) for a in axes for b in axes]
+    # the diagonals proper, at several magnitudes and all four signs
+    for e in (0, 1, -1, p, -p, fmt.emax - 1, fmt.emin, fmt.emin - fmt.man_w):
+        b = Vopt(fmt, 0, 1, e)
+        if b is None:
+            continue
+        for sy in (0, 1):
+            for sx in (0, 1):
+                y = b | (fmt.sign_mask if sy else 0)
+                x = b | (fmt.sign_mask if sx else 0)
+                pairs += [(y, x), (y + 1, x), (y, x + 1), (y - 1, x)]
+    # a quotient that is exactly a dyadic rational, and tiny: the
+    # neighbour case round_neighbour could not have handled, because
+    # minSubnormal/2 is a MIDPOINT and not a representable number
+    two = V(fmt, 0, 1, 1)
+    sub = sf.min_subnormal_bits(fmt)
+    pairs += [(sub, two), (sub, V(fmt, 0, 1, 2)), (sub, one),
+              (sub | fmt.sign_mask, two), (sub, V(fmt, 1, 1, 1))]
+    for k in (p, p + 4, 2 * p, 4 * p):
+        y = Vopt(fmt, 0, 1, -k)
+        if y is None:
+            continue
+        pairs += [(y, one), (y, V(fmt, 1, 1, 0)), (y, two),
+                  (y | fmt.sign_mask, one), (y, V(fmt, 0, 3, 0))]
+    # a dominant y and a dominant x, straddling atan2Pi's two corners
+    for k in (p, p + 1, p + 2, p + 3, 2 * p):
+        big, small = Vopt(fmt, 0, 1, k), Vopt(fmt, 0, 1, -k)
+        if big is None or small is None:
+            continue
+        pairs += [(big, one), (one, big), (small, one), (one, small),
+                  (big, V(fmt, 1, 1, 0)), (small, V(fmt, 1, 1, 0))]
+    pairs += [(rng.getrandbits(fmt.width), rng.getrandbits(fmt.width))
+              for _ in range(trials)]
+    return pairs
+
+
+def check_trig_unary(lib, dev, fmt, pool):
+    for fn in TRIG_UNARY:
+        for rnd in RND_MODES:
+            for xa in pool:
+                got, fl, st = call(lib, dev, fmt, fn, rnd, [xa])
+                assert st == 0, (fn, fmt.name, RND_NAMES[rnd], hex(xa), st)
+                want = tr.compute(fmt, fn, xa, 0, rnd)
+                assert (got[0], fl) == want, \
+                    (fn, fmt.name, RND_NAMES[rnd], hex(xa),
+                     (hex(got[0]), fl), (hex(want[0]), want[1]))
+                note()
+
+
+def check_trig_batches(lib, dev, fmt, pool, pairs):
+    """The array path for the eleven, with a signaling NaN parked in the
+    last lane so late-lane classification is what sets the flag word."""
+    rng = random.Random(131 ^ fmt.width)
+    n = 400
+    xs = [rng.choice(pool) for _ in range(n - 1)] + [sf.snan_bits(fmt)]
+    for fn in ("sinpi", "tanpi", "asin", "atanpi"):
+        got, fl, st = call(lib, dev, fmt, fn, sf.RND_RUP, xs)
+        assert st == 0, (fn, st)
+        want_or = 0
+        for x, g in zip(xs, got):
+            wb, wf = tr.compute(fmt, fn, x, 0, sf.RND_RUP)
+            assert g == wb, ("batch", fn, fmt.name, hex(x), hex(g), hex(wb))
+            want_or |= wf
+        assert fl == want_or and (want_or & 1), (fn, fl, want_or)
+        note(n)
+    xs = [a for a, _ in pairs[:300]]
+    ys = [b for _, b in pairs[:300]]
+    for fn in TRIG_BINARY:
+        got, fl, st = call(lib, dev, fmt, fn, sf.RND_RTZ, xs, ys)
+        assert st == 0, (fn, st)
+        want_or = 0
+        for x, y, g in zip(xs, ys, got):
+            wb, wf = tr.compute(fmt, fn, x, y, sf.RND_RTZ)
+            assert g == wb, ("batch", fn, fmt.name, hex(x), hex(y),
+                             hex(g), hex(wb))
+            want_or |= wf
+        assert fl == want_or
+        note(len(xs))
+
+
 def check_unary(lib, dev, fmt, pool):
     for fn in UNARY:
         for rnd in RND_MODES:
@@ -373,16 +549,32 @@ def check_refusals(lib, dev):
                            ctypes.byref(fl)) == INVAL, bad
         assert lib.cft_pow(dev, fi, bad, a, a, d, 1,
                            ctypes.byref(fl)) == INVAL, bad
-        note(2)
+        assert lib.cft_sinpi(dev, fi, bad, a, d, 1,
+                             ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_atan2(dev, fi, bad, a, a, d, 1,
+                             ctypes.byref(fl)) == INVAL, bad
+        note(4)
     for bad_fmt in (-1, 4, 99):
         assert lib.cft_log(dev, bad_fmt, 0, a, d, 1,
                            ctypes.byref(fl)) == INVAL, bad_fmt
-        note()
-    # the second operand is not optional for the binary pair
+        assert lib.cft_atan(dev, bad_fmt, 0, a, d, 1,
+                            ctypes.byref(fl)) == INVAL, bad_fmt
+        note(2)
+    # the second operand is not optional for any binary entry point
     assert lib.cft_pow(dev, fi, 0, a, None, d, 1,
                        ctypes.byref(fl)) == INVAL
     assert lib.cft_hypot(dev, fi, 0, a, None, d, 1,
                          ctypes.byref(fl)) == INVAL
+    assert lib.cft_atan2(dev, fi, 0, a, None, d, 1,
+                         ctypes.byref(fl)) == INVAL
+    assert lib.cft_atan2pi(dev, fi, 0, a, None, d, 1,
+                           ctypes.byref(fl)) == INVAL
+    note(2)
+    # the library actually loaded says 0.4, not the header it was
+    # written against
+    v = lib.cft_abi_version()
+    assert (v >> 16) == 0 and (v & 0xFFFF) >= 4, hex(v)
+    note()
     # n == 0 touches nothing and clears the flags
     fl.value = 0xDEAD
     assert lib.cft_exp(dev, fi, 0, None, None, 0, ctypes.byref(fl)) == 0
@@ -436,18 +628,25 @@ def main():
             pool = unary_pool(fmt, t, args.seed)
             ppairs = pow_pairs(fmt, t, args.seed)
             hpairs = hypot_pairs(fmt, t, args.seed)
+            tpool = trig_pool(fmt, t, args.seed)
+            apairs = atan2_pairs(fmt, t, args.seed)
             check_unary(lib, dev, fmt, pool)
             check_binary(lib, dev, fmt, "pow", ppairs)
             check_binary(lib, dev, fmt, "hypot", hpairs)
+            check_trig_unary(lib, dev, fmt, tpool)
+            check_binary(lib, dev, fmt, "atan2", apairs)
+            check_binary(lib, dev, fmt, "atan2pi", apairs)
             check_batches(lib, dev, fmt, pool, ppairs)
+            check_trig_batches(lib, dev, fmt, tpool, apairs)
             check_aliasing(lib, dev, fmt, pool)
             print(f"  {name}: the transcendental entry points agree with "
                   f"the model ({CHECKED} comparisons so far)")
     finally:
         lib.cft_close(dev)
     st = tr.STATS
-    print(f"transcend_check: {CHECKED} comparisons, "
-          "C == model on every one")
+    print(f"transcend_check: {CHECKED} comparisons over "
+          f"{len(UNARY) + len(BINARY) + len(TRIG_UNARY) + len(TRIG_BINARY)} "
+          "functions, C == model on every one")
     print(f"  the model's evaluator: {st['ziv_calls']} enclosures, "
           f"{st['escalations']} escalations, deepest working precision "
           f"{st['max_prec']} bits,\n"

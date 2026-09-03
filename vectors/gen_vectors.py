@@ -13,18 +13,20 @@ Every line is one case with the golden result and flags:
     {"op": "fma", "rnd": "rne", "a": "0x...", "b": "0x...",
      "c": "0x...", "d": "0x...", "flags": 17}
 
-The phase-1 transcendentals get their own files - `fp32-transcend.jsonl`
-and `fp32-transcend-rtz.jsonl` and so on - because they are library
-entry points rather than opcodes, so a replayer dispatches them by NAME
+The transcendentals get their own files - `fp32-transcend.jsonl` and
+`fp32-transcend-rtz.jsonl` and so on - because they are library entry
+points rather than opcodes, so a replayer dispatches them by NAME
 rather than by opcode number and reads a different schema:
 
     {"fn": "pow", "rnd": "rne", "a": "0x...", "b": "0x...",
      "d": "0x...", "flags": 16}
 
-"b" appears only for the two binary functions. Keeping them in separate
-files means a consumer that predates ABI 0.3 reads exactly what it
-always read, and one that does not carry the transcendentals skips a
-file rather than failing a line.
+"b" appears only for the four binary functions (pow, hypot, atan2 and
+atan2Pi). Keeping them in separate files means a consumer that predates
+ABI 0.3 reads exactly what it always read, and one that does not carry
+the transcendentals skips a file rather than failing a line. A
+consumer built against 0.3 and handed a 0.4 set fails on the NAME of a
+function it does not know, which is the refusal it should give.
 
 Every opcode the tile implements appears here, arithmetic and
 non-arithmetic alike, plus the unassigned codes whose defined

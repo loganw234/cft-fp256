@@ -204,7 +204,7 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
     return cases
 
 
-# ---- the phase-1 transcendental sets ---------------------------------
+# ---- the transcendental sets -----------------------------------------
 
 def _val(fmt, sign, m, e):
     """The representable value (-1)^sign * m * 2^e, or None when the
@@ -384,21 +384,136 @@ def transcend_hypot_pairs(fmt: FpFormat, extra: int, seed: int = 11):
     return [(a, b) for a, b in pairs if a is not None and b is not None]
 
 
+def trig_unary_pool(fmt: FpFormat, extra: int, seed: int = 12):
+    """Operands where a TRIGONOMETRIC function can be got wrong, which
+    is a different list from the exponential's.
+
+    The families here are the ones an implementation passes by luck and
+    fails on purpose: the half-integers and quarter-integers where
+    sinPi and tanPi are exact, the integers where sinPi's zero takes the
+    sign of the argument rather than the parity of n, the two sides of
+    1 where asin's domain ends, and every neighbour threshold this set
+    has - each with a neighbour above and below, so an exactness test
+    has to be right rather than optimistic.
+    """
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 101))
+    out = list(interesting_operands(fmt))
+    _extend(out, one + 1, one - 1, sf.one_bits(fmt, 1) + 1,
+            sf.one_bits(fmt, 1) - 1)
+
+    # half-integers (sinPi = +-1, cosPi = +0, tanPi a pole),
+    # quarter-integers (tanPi = +-1) and integers (sinPi = +-0), each
+    # with a neighbour on both sides
+    for m, e in ([(k, -1) for k in (1, 3, 5, 7, 9, 17, 33)] +
+                 [(k, -2) for k in (1, 3, 5, 7, 9, 11, 13)] +
+                 [(k, 0) for k in (1, 2, 3, 4, 5, 8, 17)] +
+                 [(k, -3) for k in (1, 3, 5, 7, 11, 13)]):
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, m, e)
+            if b is not None:
+                _extend(out, b, b + 1, b - 1)
+
+    # the top of the range, where every representable value is an even
+    # integer and sinPi is decided by integer arithmetic alone
+    for k in (p - 1, p, p + 1, 2 * p, fmt.emax - 1, fmt.emax):
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, 1, k)
+            if b is not None:
+                _extend(out, b, b - 1)
+
+    # every neighbour threshold, and a step either side of it
+    for k in (p // 2, p // 2 + 1, p // 2 + 2, p, p + 1, p + 2, p + 3,
+              2 * p, 4 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                _extend(out, _val(fmt, sgn, m, e))
+
+    # just inside and just outside the asin/acos domain
+    for sgn in (0, 1):
+        b = _val(fmt, sgn, (1 << p) - 1, -p)
+        if b is not None:
+            _extend(out, b, b - 1)
+
+    out += [_rand_bits(rng, fmt) for _ in range(extra)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def trig_atan2_pairs(fmt: FpFormat, extra: int, seed: int = 13):
+    """atan2 ON the axes and diagonals and one ulp off them.
+
+    Every axis and diagonal is an EXACT case of atan2Pi and an inexact
+    rounding of a multiple of pi for atan2, so one pair scores both
+    halves of the design. The dyadic-quotient family is here too,
+    including minSubnormal over two, whose quotient is a subnormal
+    MIDPOINT rather than a representable number."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 211))
+    axes = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), one,
+            sf.one_bits(fmt, 1), sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+            sf.qnan_bits(fmt), sf.snan_bits(fmt), _val(fmt, 0, 1, 1),
+            _val(fmt, 1, 1, 1), _val(fmt, 0, 3, 0), _val(fmt, 1, 3, 0),
+            sf.max_normal_bits(fmt), sf.min_subnormal_bits(fmt),
+            sf.min_subnormal_bits(fmt, 1)]
+    pairs = [(a, b) for a in axes for b in axes]
+    for e in (0, 1, -1, p, -p, fmt.emax - 1, fmt.emin,
+              fmt.emin - fmt.man_w):
+        b = _val(fmt, 0, 1, e)
+        if b is None:
+            continue
+        for sy in (0, 1):
+            for sx in (0, 1):
+                y = b | (fmt.sign_mask if sy else 0)
+                x = b | (fmt.sign_mask if sx else 0)
+                pairs += [(y, x), (y + 1, x), (y, x + 1), (y - 1, x)]
+    two = _val(fmt, 0, 1, 1)
+    sub = sf.min_subnormal_bits(fmt)
+    pairs += [(sub, two), (sub, _val(fmt, 0, 1, 2)), (sub, one),
+              (sub | fmt.sign_mask, two), (sub, _val(fmt, 1, 1, 1))]
+    for k in (p, p + 4, 2 * p, 4 * p):
+        y = _val(fmt, 0, 1, -k)
+        if y is None:
+            continue
+        pairs += [(y, one), (y, _val(fmt, 1, 1, 0)), (y, two),
+                  (y | fmt.sign_mask, one), (y, _val(fmt, 0, 3, 0))]
+    for k in (p, p + 1, p + 2, p + 3, 2 * p):
+        big, small = _val(fmt, 0, 1, k), _val(fmt, 0, 1, -k)
+        if big is None or small is None:
+            continue
+        pairs += [(big, one), (one, big), (small, one), (one, small),
+                  (big, _val(fmt, 1, 1, 0)), (small, _val(fmt, 1, 1, 0))]
+    pairs += [(_rand_bits(rng, fmt), _rand_bits(rng, fmt))
+              for _ in range(extra)]
+    return [(a, b) for a, b in pairs if a is not None and b is not None]
+
+
 def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
-    """(fn, a, b) triples for the nine transcendentals, in the order
-    gen_vectors.py writes them. b is 0 for the unary seven, which do not
-    emit it at all."""
+    """(fn, a, b) triples for all twenty transcendentals, in the order
+    gen_vectors.py writes them. b is 0 for the unary sixteen, which do
+    not emit it at all.
+
+    Two operand pools, because the families are different: the
+    exponential set turns on exact powers and overflow thresholds, the
+    trigonometric set on half-integers, the edge of the asin domain and
+    a different list of neighbour thresholds."""
     from .transcend import TRANSCEND_ARITY, TRANSCEND_FNS
 
     pool = transcend_unary_pool(fmt, extra, seed)
+    tpool = trig_unary_pool(fmt, extra, seed + 3)
+    trig = set(TRANSCEND_FNS[9:])
     cases = []
     for fn in TRANSCEND_FNS:
         if TRANSCEND_ARITY[fn] == 1:
-            cases += [(fn, a, 0) for a in pool]
+            cases += [(fn, a, 0) for a in (tpool if fn in trig else pool)]
         elif fn == "pow":
             cases += [(fn, a, b)
                       for a, b in transcend_pow_pairs(fmt, extra, seed + 1)]
-        else:
+        elif fn == "hypot":
             cases += [(fn, a, b)
                       for a, b in transcend_hypot_pairs(fmt, extra, seed + 2)]
+        else:
+            cases += [(fn, a, b)
+                      for a, b in trig_atan2_pairs(fmt, extra, seed + 4)]
     return cases
