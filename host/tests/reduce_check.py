@@ -381,8 +381,11 @@ def scaled_pools(fmt, rng):
 def check_scaled(ck, fmt, rng, trials):
     """The three scaled products against the model, over both the
     adversarial pools and random vectors, at every length that changes
-    the tree's shape."""
-    bad = 0
+    the tree's shape.
+
+    Failures are counted by the Checker (ck.failed), which main() adds
+    in, so there is nothing to return - unlike check_partition, which
+    does its own comparing."""
     lengths = [0, 1, 2, 3, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65]
     for pool in scaled_pools(fmt, rng):
         for kind in SCALED_KINDS:
@@ -397,7 +400,6 @@ def check_scaled(ck, fmt, rng, trials):
         xs = [rand_operand(fmt, rng) for _ in range(n)]
         ys = [rand_operand(fmt, rng) for _ in range(n)]
         ck.scaled(rng.choice(SCALED_KINDS), fmt, rnd, xs, ys)
-    return bad
 
 
 def check_refusals(lib, dev, fmt):
@@ -621,7 +623,7 @@ def main():
         bad += check_refusals(lib, dev, fmt)
         bad += check_partition(lib, dev, fmt, rng, 60)
         bad += check_identities(ck, fmt, rng, max(120, args.trials // 8))
-        bad += check_scaled(ck, fmt, rng, max(200, args.trials // 4))
+        check_scaled(ck, fmt, rng, max(200, args.trials // 4))
     bad += check_c_partitioner()
 
     lib.cft_close(dev)

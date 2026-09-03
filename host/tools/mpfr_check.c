@@ -3067,9 +3067,21 @@ static void check_reduce(int fj, uint8_t pool[][32], int pn, int nvec)
     const fdesc *f = &FMTS[fj];
     uint8_t va[RD_MAXN][32], vb[RD_MAXN][32];
     uint8_t flat_a[RD_MAXN * 32], flat_b[RD_MAXN * 32];
-    uint8_t d[32];
+    uint8_t d[32], big[32], tiny[32];
     int fn, mi, li, v, i;
     int nl = (int)(sizeof LENS / sizeof LENS[0]);
+
+    /* The two ends of the format, built here rather than taken from
+     * the pool by index. build_pool's ORDER is its own business -
+     * pool[0] is +0 and the tail is random - so a draw that claimed to
+     * alternate the extremes while taking pool[0] and pool[pn-1] would
+     * be describing something it does not do. It did, until this. */
+    memset(big, 0, sizeof big);
+    set_field(big, f->man_w, f->exp_w, (1ul << f->exp_w) - 2);
+    for (i = 0; i < f->man_w; i++)
+        set_field(big, i, 1, 1);                  /* max normal */
+    memset(tiny, 0, sizeof tiny);
+    set_field(tiny, 0, 1, 1);                     /* min subnormal */
 
     for (fn = 0; fn < RF_COUNT; fn++) {
         for (mi = 0; mi < 5; mi++) {
@@ -3086,21 +3098,22 @@ static void check_reduce(int fj, uint8_t pool[][32], int pn, int nvec)
                      * changes with the draw, so a run covers the
                      * specials-heavy pool in different combinations
                      * rather than the same prefix every time. The
-                     * fourth draw of every length is deliberately the
-                     * pool's extremes back to back - maxfinite and the
-                     * minimum subnormal alternating - which is the
-                     * vector a scaled product exists for. */
+                     * fourth draw of every length is the format's two
+                     * EXTREMES alternating - the largest finite value
+                     * and the smallest subnormal - which is the vector
+                     * a scaled product exists for: its true product
+                     * leaves the format by hundreds of binades in both
+                     * directions and the answer must not. */
                     for (i = 0; i < (int)n; i++) {
-                        int ia, ib;
                         if (v % 4 == 3) {
-                            ia = (i & 1) ? 0 : pn - 1;
-                            ib = (i & 1) ? pn - 1 : 0;
+                            memcpy(va[i], (i & 1) ? tiny : big, f->esz);
+                            memcpy(vb[i], (i & 1) ? big : tiny, f->esz);
                         } else {
-                            ia = (i * (v + 1) + li) % pn;
-                            ib = (i * (v + 2) + fn + 1) % pn;
+                            memcpy(va[i], pool[(i * (v + 1) + li) % pn],
+                                   f->esz);
+                            memcpy(vb[i], pool[(i * (v + 2) + fn + 1) % pn],
+                                   f->esz);
                         }
-                        memcpy(va[i], pool[ia], f->esz);
-                        memcpy(vb[i], pool[ib], f->esz);
                         memcpy(flat_a + (size_t)i * f->esz, va[i], f->esz);
                         memcpy(flat_b + (size_t)i * f->esz, vb[i], f->esz);
                     }
