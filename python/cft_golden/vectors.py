@@ -202,3 +202,190 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
             cases.append((op, xa, xb, xc))
     rng.shuffle(cases)
     return cases
+
+
+# ---- the phase-1 transcendental sets ---------------------------------
+
+def _val(fmt, sign, m, e):
+    """The representable value (-1)^sign * m * 2^e, or None when the
+    format cannot hold it exactly - so a family can be written once and
+    thin itself out at fp32."""
+    bits, flags = sf.round_pack(fmt, sign, m, e, sf.RND_RNE)
+    return None if flags else bits
+
+
+def _extend(out, *values):
+    for v in values:
+        if v is not None:
+            out.append(v)
+
+
+def transcend_unary_pool(fmt: FpFormat, extra: int, seed: int = 9):
+    """Operands where a transcendental can actually be got wrong.
+
+    Random bit patterns score almost nothing here: they never land on an
+    exact case, never straddle an overflow threshold, and never sit close
+    enough to a rounding boundary to matter. Every family below is one an
+    implementation can pass by luck and fail on purpose.
+    """
+    import mpmath
+
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ fmt.width)
+    out = list(interesting_operands(fmt))
+    _extend(out, one + 1, one - 1, sf.one_bits(fmt, 1) + 1,
+            sf.one_bits(fmt, 1) - 1)
+
+    # integers: every exp2 exact case, and the ones past both ends
+    for k in list(range(1, 25)) + [p, 2 * p, fmt.emax - 1, fmt.emax,
+                                   fmt.emax + 1, fmt.emin, fmt.emin - 1,
+                                   fmt.emin - fmt.man_w,
+                                   fmt.emin - fmt.man_w - 1]:
+        _extend(out, _val(fmt, 0, abs(k), 0), _val(fmt, 1, abs(k), 0))
+
+    # powers of two (log2 is exact there) with a neighbour each side
+    for k in (-3, -1, 1, 2, 10, fmt.emax, fmt.emin,
+              fmt.emin - fmt.man_w + 1):
+        b = _val(fmt, 0, 1, k)
+        if b is not None:
+            _extend(out, b, b + 1, b - 1)
+
+    # powers of ten (log10 is exact there), likewise
+    k = 0
+    while 5 ** k < (1 << p):
+        b = _val(fmt, 0, 5 ** k, k)
+        if b is None:
+            break
+        _extend(out, b, b + 1, b - 1)
+        k += 1
+
+    # the exponential's overflow and underflow edges: n*ln2 for the n
+    # that matter, rounded and then walked a couple of ulps either way
+    mpmath.mp.prec = 4 * p + 64
+    for n in (fmt.emax, fmt.emax + 1, fmt.emin, fmt.emin - fmt.man_w,
+              fmt.emin - fmt.man_w - 1, -(p + 2), -(p + 3), p + 1):
+        t = mpmath.mpf(n) * mpmath.log(2)
+        man, ex = mpmath.libmp.to_man_exp(t._mpf_)
+        b = sf.round_pack(fmt, 1 if man < 0 else 0, abs(int(man)), int(ex),
+                          sf.RND_RNE)[0]
+        _extend(out, b, b + 1, b - 1, b + 2, b - 2)
+
+    # below the neighbour thresholds, and just above them
+    for k in (p + 2, p + 3, p + 4, p + 5, p + 10, 2 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            _extend(out, _val(fmt, 0, m, e), _val(fmt, 1, m, e))
+
+    out += [_rand_bits(rng, fmt) for _ in range(extra)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def transcend_pow_pairs(fmt: FpFormat, extra: int, seed: int = 10):
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 31))
+    pairs = []
+    specials = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+                sf.inf_bits(fmt, 1), sf.qnan_bits(fmt), sf.snan_bits(fmt),
+                one, sf.one_bits(fmt, 1), _val(fmt, 0, 3, -1),
+                _val(fmt, 1, 3, -1), _val(fmt, 0, 1, 1), _val(fmt, 1, 1, 1),
+                _val(fmt, 0, 3, 0), _val(fmt, 1, 3, 0),
+                sf.max_normal_bits(fmt), sf.min_subnormal_bits(fmt)]
+    for a in specials:
+        for b in specials:
+            pairs.append((a, b))
+    # integer exponents: exact until the odd part outruns the format
+    for base in (2, 3, 5, 7, 10, 4097):
+        if base.bit_length() > p:
+            continue
+        for n in (1, 2, 3, 4, 5, 8, 17, p - 1, p, p + 1, p + 2, -1, -2, -3,
+                  1000):
+            b = _val(fmt, 1 if n < 0 else 0, abs(n), 0)
+            if b is None:
+                continue
+            for sgn in (0, 1):
+                pairs.append((_val(fmt, sgn, base, 0), b))
+    # dyadic exponents against perfect powers and near-misses
+    for m in (4, 9, 16, 25, 81, 256, 625, 1024):
+        if m.bit_length() > p:
+            continue
+        mb = _val(fmt, 0, m, 0)
+        for ey in (-1, -2, -3):
+            pairs.append((mb, _val(fmt, 0, 1, ey)))
+            pairs.append((mb, _val(fmt, 0, 3, ey - 1)))
+            pairs.append((mb + 1, _val(fmt, 0, 1, ey)))
+            pairs.append((mb, _val(fmt, 1, 1, ey)))
+    # a base one ulp from 1 against exponents across the whole range -
+    # the family a fixed-point evaluator cannot survive
+    for dy in (1, 3, 1 << (p // 2), (1 << fmt.man_w) - 1):
+        for ey in (0, 10, p, 2 * p, fmt.emax // 2, fmt.emax - 1, fmt.emax,
+                   -(p + 20), -(p + 3)):
+            b = _val(fmt, 0, 1, ey)
+            if b is None:
+                continue
+            for base in (one + dy, one - dy):
+                pairs.append((base, b))
+                pairs.append((base, b | fmt.sign_mask))
+    for _ in range(extra):
+        pairs.append((_rand_bits(rng, fmt), _rand_bits(rng, fmt)))
+    return [(a, b) for a, b in pairs if a is not None and b is not None]
+
+
+def transcend_hypot_pairs(fmt: FpFormat, extra: int, seed: int = 11):
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 61))
+    pairs = []
+    for (x, y) in ((3, 4), (5, 12), (8, 15), (7, 24), (20, 21), (9, 40),
+                   (1, 1), (2, 2), (6, 8), (12, 16)):
+        if max(x, y).bit_length() > p:
+            continue
+        for sx in (0, 1):
+            for sy in (0, 1):
+                pairs.append((_val(fmt, sx, x, 0), _val(fmt, sy, y, 0)))
+        pairs.append((_val(fmt, 0, x, 0), _val(fmt, 0, y, 0) + 1))
+        pairs.append((_val(fmt, 0, x, 0) - 1, _val(fmt, 0, y, 0)))
+        for e in (fmt.emax - 8, fmt.emin + 2, -p, fmt.emin - fmt.man_w):
+            pairs.append((_val(fmt, 0, x, e), _val(fmt, 0, y, e)))
+    # widely different magnitudes, straddling the dominance threshold
+    for k in (1, 2, p // 2 - 1, p // 2, p // 2 + 1, p, 2 * p, fmt.emax // 2,
+              fmt.emax):
+        pairs.append((one, _val(fmt, 0, 1, -k)))
+        pairs.append((_val(fmt, 0, 1, -k), one))
+        pairs.append((sf.max_normal_bits(fmt), _val(fmt, 0, 1, fmt.emax - k)))
+    pairs += [
+        (sf.max_normal_bits(fmt), sf.max_normal_bits(fmt)),
+        (sf.max_normal_bits(fmt), sf.min_subnormal_bits(fmt)),
+        (sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt)),
+        (sf.max_subnormal_bits(fmt), sf.max_subnormal_bits(fmt)),
+        (sf.min_normal_bits(fmt), sf.min_subnormal_bits(fmt)),
+        (sf.zero_bits(fmt, 1), sf.zero_bits(fmt, 1)),
+        (sf.zero_bits(fmt), sf.max_normal_bits(fmt, 1)),
+        (sf.inf_bits(fmt), sf.qnan_bits(fmt)),
+        (sf.qnan_bits(fmt), sf.inf_bits(fmt, 1)),
+        (sf.snan_bits(fmt), sf.inf_bits(fmt)),
+        (sf.qnan_bits(fmt), sf.qnan_bits(fmt)),
+    ]
+    for _ in range(extra):
+        pairs.append((_rand_bits(rng, fmt), _rand_bits(rng, fmt)))
+    return [(a, b) for a, b in pairs if a is not None and b is not None]
+
+
+def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
+    """(fn, a, b) triples for the nine transcendentals, in the order
+    gen_vectors.py writes them. b is 0 for the unary seven, which do not
+    emit it at all."""
+    from .transcend import TRANSCEND_ARITY, TRANSCEND_FNS
+
+    pool = transcend_unary_pool(fmt, extra, seed)
+    cases = []
+    for fn in TRANSCEND_FNS:
+        if TRANSCEND_ARITY[fn] == 1:
+            cases += [(fn, a, 0) for a in pool]
+        elif fn == "pow":
+            cases += [(fn, a, b)
+                      for a, b in transcend_pow_pairs(fmt, extra, seed + 1)]
+        else:
+            cases += [(fn, a, b)
+                      for a, b in transcend_hypot_pairs(fmt, extra, seed + 2)]
+    return cases
