@@ -13,6 +13,7 @@
 #   bash verify/run.sh --resume 20260831-2130-ec86467
 #   bash verify/run.sh --fresh         # force a new run id
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
+#   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
 #
 # Why this exists: the gates grew one at a time - pytest, the cocotb
 # suite, yosys, the formal proofs, the library's contract tests, the
@@ -130,7 +131,7 @@ if [ "$LIST" = 1 ]; then
   cat <<'EOF'
 golden       golden-model pytest suite (the definition of correct)
 vectors      regenerate the conformance sets from the model
-sim          cocotb RTL suite, all 17 targets (docker cft-sim)
+sim          cocotb RTL suite, all 18 targets, SIM_JOBS at a time (docker cft-sim)
 lint         yosys elaboration gate, every RTL file (docker cft-sim)
 formal       property proofs + negative control (docker cft-formal)
 libcft       host library: build + contract tests + conformance replay
@@ -346,7 +347,7 @@ ensure_sim_image() {
   DOCKER build -t cft-sim -f "$MOUNT/docker/Dockerfile.sim" "$MOUNT"
 }
 do_sim()  { ensure_sim_image && \
-            DOCKER run --rm -v "$MOUNT:/work" -w /work/tb cft-sim make sim; }
+            DOCKER run --rm -v "$MOUNT:/work" -w /work/tb cft-sim make -k -j"${SIM_JOBS:-1}" sim; }
 do_lint() { ensure_sim_image && \
             DOCKER run --rm -v "$MOUNT:/work" -w /work cft-sim make yosys-lint; }
 
