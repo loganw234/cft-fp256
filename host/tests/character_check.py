@@ -34,8 +34,8 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import (  # noqa: E402
     FORMATS, PREC_CODE, RND_MODES, chars, vectors,
-    inf_bits, max_normal_bits, max_subnormal_bits, min_normal_bits,
-    min_subnormal_bits, one_bits, qnan_bits, snan_bits, zero_bits,
+    max_normal_bits, max_subnormal_bits, min_normal_bits,
+    min_subnormal_bits, one_bits, qnan_bits, snan_bits,
 )
 from cft_golden import softfloat as sf  # noqa: E402
 

@@ -662,7 +662,13 @@ static cft_status round_dyadic(const cft_fmt_desc *f, int sign, const nat *m,
         size_t drop = len - w;
         nat top;
         int rc;
-        for (i = 0; i < drop && !sticky; i++)
+        /* Anything below the window becomes the sticky bit. Scanned a
+         * limb at a time and then a bit at a time, because `drop` is
+         * bounded only by the caller's sequence: a hexadecimal
+         * significand of a million digits is in the syntax. */
+        for (i = 0; i < (drop >> 5) && !sticky; i++)
+            sticky = m->v[i] != 0;
+        for (i = (drop >> 5) << 5; i < drop && !sticky; i++)
             sticky = (m->v[i >> 5] >> (i & 31)) & 1u;
         nat_init(&top);
         rc = nat_shr(&top, m, drop);

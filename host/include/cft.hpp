@@ -1988,11 +1988,12 @@ public:
      * three bytes to 183,000. What this layer adds is that the length
      * comes back as a std::string rather than as a protocol.
      *
-     * to_decimal(x) with no digit count is 5.12.2's EXACT conversion -
-     * every digit of the value, which at the ends of fp256's range is
-     * tens of thousands of them. to_decimal(x, H) is H significant
-     * digits correctly rounded in this context's attribute, and
-     * decimal_digits() is the H at which the round trip is guaranteed.
+     * to_decimal_char(x) with no digit count is 5.12.2's EXACT
+     * conversion - every digit of the value, which at the ends of
+     * fp256's range is tens of thousands of them.
+     * to_decimal_char(x, H) is H significant digits correctly rounded
+     * in this context's attribute, and decimal_digits() is the H at
+     * which the round trip is guaranteed.
      *
      * These keep the C names - to_hex_char, not to_hex - and the
      * distinction is load-bearing rather than pedantic: to_hex_char(x)

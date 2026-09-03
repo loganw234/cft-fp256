@@ -34,7 +34,7 @@ import pytest
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 
 from cft_golden import (  # noqa: E402
-    FP32, FP64, FP128, FP256, FORMATS,
+    FP32, FP64, FP128, FP256,
     FLAG_INEXACT, FLAG_OVERFLOW, FLAG_UNDERFLOW,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_MODES,
     chars, vectors,

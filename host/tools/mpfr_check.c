@@ -145,7 +145,10 @@ enum {
     T_SINPI, T_COSPI, T_TANPI, T_ASIN, T_ACOS, T_ATAN, T_ATAN2,
     T_ASINPI, T_ACOSPI, T_ATANPI, T_ATAN2PI,
     T_SIN, T_COS, T_TAN, T_SINH, T_COSH, T_TANH, T_ASINH, T_ACOSH,
-    T_ATANH, NTALLY
+    T_ATANH,
+    /* clause 5.12, appended AFTER the transcendental block so
+     * check_transcend's T_EXP + fn indexing is untouched */
+    T_FROM_DEC, T_TO_DEC, T_FROM_HEX, T_TO_HEX, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -158,7 +161,8 @@ static const char *const TALLY_NAME[NTALLY] = {
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
-    "atanh"
+    "atanh",
+    "from_dec", "to_dec", "from_hex", "to_hex"
 };
 static uint64_t tally[NTALLY][4];
 
@@ -1735,6 +1739,594 @@ static void check_rem(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 }
 
+/* ---- clause 5.12: conversions to and from character sequences ------ *
+ *
+ * MPFR is the right arbiter for these and is used as one in both
+ * directions: mpfr_strtofr and mpfr_get_str are correctly rounded in
+ * every rounding mode, at any precision, and neither has ever seen
+ * this project. So the parse is scored against MPFR's parse and the
+ * write against MPFR's digits, values AND flags, in all five
+ * attributes at all four rungs.
+ *
+ * Four things about this block are worth stating rather than leaving
+ * to be discovered.
+ *
+ * 1. There is no mpfr_t that holds the exact value of a decimal
+ *    sequence - "0.1" is not dyadic - so c5_round_into cannot be
+ *    reused here and chars_round_str below is its derivation with the
+ *    source changed from mpfr_set to mpfr_strtofr. Same unbounded
+ *    p-bit rounding as the overflow/underflow authority, same
+ *    subnormal re-rounding on the format's fixed grid, same p+1
+ *    guard/sticky build for RMM - only the thing being rounded
+ *    differs. base 0 reads both radices: "0x..." is hexadecimal with a
+ *    p exponent, anything else is decimal.
+ *
+ * 2. RMM is built rather than compared, in both directions, because
+ *    MPFR has no ties-to-away. Reading in, it is the same p+1
+ *    construction the rest of this file uses. Writing out it is
+ *    simpler than that and exactly right: ties-to-away on a DECIMAL
+ *    grid rounds up exactly when digit H+1 is 5 or more, and no sticky
+ *    is needed for that decision - so the oracle asks mpfr_get_str for
+ *    H+1 digits truncated and rounds the last one half-up.
+ *
+ * 3. The EXACT conversion cannot be asked of mpfr_get_str, which
+ *    produces shortest-or-N digits and not the full expansion. It is
+ *    scored a different way that is just as strong: the sequence the
+ *    library wrote is handed back to mpfr_strtofr at the format's own
+ *    precision, and MPFR must report a ternary of ZERO - the parse was
+ *    exact - and the same value. A sequence that denotes exactly x is
+ *    what "exact" means, and MPFR decides it. Same check for the
+ *    hexadecimal form.
+ *
+ * 4. What is deliberately NOT scored here. The absurd exponents
+ *    ("1e999999999999") are outside MPFR's own exponent range, so
+ *    feeding them to the oracle would score MPFR's overflow rather
+ *    than the format's - the pools stay inside MPFR's range and well
+ *    outside every format's, and the bands are scored by the golden
+ *    model and the vectors instead. NaN PAYLOADS are not scored here
+ *    either: MPFR keeps no payload, so it cannot arbitrate the one
+ *    thing 5.12.1's suffix exists for. The 9.7 payload operations are
+ *    pure bit surgery with no arithmetic in them at all and belong to
+ *    the model, which is where character_check.py scores them.
+ */
+
+/* c5_round_into's derivation, on a character sequence. */
+static void chars_round_str(const fdesc *f, const char *s, int mi,
+                            mpfr_t out, uint32_t *flags)
+{
+    mpfr_t runb, y;
+    int inexact, is_rmm = (MODES[mi].cr == CFT_RMM);
+    mpfr_rnd_t rnd = MODES[mi].mr;
+    uint32_t fl = 0;
+    char *end = NULL;
+    int t1;
+
+    mpfr_init2(runb, f->p);
+    mpfr_init2(y, f->p + 1);
+    if (is_rmm) {
+        t1 = mpfr_strtofr(y, s, &end, 0, MPFR_RNDZ);
+        rmm_round(runb, y, t1 != 0, f->p);
+        inexact = (t1 != 0) || !mpfr_equal_p(y, runb);
+    } else {
+        t1 = mpfr_strtofr(runb, s, &end, 0, rnd);
+        inexact = (t1 != 0);
+    }
+
+    if (mpfr_zero_p(runb) && !inexact) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set(out, runb, MPFR_RNDN);          /* signed zero rides along */
+        *flags = 0;
+        mpfr_clear(runb);
+        mpfr_clear(y);
+        return;
+    }
+
+    {
+        long e_res;
+        if (mpfr_zero_p(runb)) {
+            /* rounded away below the smallest representable: the
+             * subnormal branch decides it */
+            e_res = (long)f->emin - 1;
+        } else {
+            e_res = (long)mpfr_get_exp(runb) - 1;
+        }
+
+        if (e_res > f->emax) {
+            int away = (rnd == MPFR_RNDU && mpfr_sgn(runb) > 0) ||
+                       (rnd == MPFR_RNDD && mpfr_sgn(runb) < 0) ||
+                       rnd == MPFR_RNDN || is_rmm;
+            if (rnd == MPFR_RNDZ)
+                away = 0;
+            mpfr_set_prec(out, f->p);
+            if (away)
+                mpfr_set_inf(out, mpfr_sgn(runb));
+            else {
+                mpfr_set_ui_2exp(out, 1, f->emax + 1, MPFR_RNDN);
+                mpfr_nextbelow(out);
+                if (mpfr_sgn(runb) < 0)
+                    mpfr_neg(out, out, MPFR_RNDN);
+            }
+            *flags = fl | CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        } else if (e_res >= f->emin) {
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, runb, MPFR_RNDN);
+            *flags = inexact ? (fl | CFT_FLAG_INEXACT) : fl;
+        } else if (!is_rmm) {
+            mpfr_exp_t save_emin = mpfr_get_emin();
+            mpfr_exp_t save_emax = mpfr_get_emax();
+            mpfr_t r;
+            int t2;
+            mpfr_init2(r, f->p);
+            mpfr_set_emin(f->emin - f->p + 2);
+            mpfr_set_emax(f->emax + 1);
+            t2 = mpfr_strtofr(r, s, &end, 0, rnd);
+            t2 = mpfr_check_range(r, t2, rnd);
+            t2 = mpfr_subnormalize(r, t2, rnd);
+            mpfr_set_emin(save_emin);
+            mpfr_set_emax(save_emax);
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, r, MPFR_RNDN);
+            if (t2 != 0 || inexact)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            *flags = fl;
+            mpfr_clear(r);
+        } else {
+            /* RMM on the fixed subnormal grid, from the p+1 truncation
+             * - c5_round_into's block, and its granularity argument
+             * holds unchanged because y is a truncation here too. */
+            int t1b, up, sgn;
+            long grid = f->emin - f->man_w;
+            mpz_t nn;
+            mpfr_t scaled, frac, half;
+            t1b = mpfr_strtofr(y, s, &end, 0, MPFR_RNDZ);
+            sgn = mpfr_signbit(y) ? 1 : 0;
+            mpz_init(nn);
+            mpfr_init2(scaled, f->p + 4);
+            mpfr_init2(frac, f->p + 4);
+            mpfr_init2(half, 8);
+            mpfr_abs(scaled, y, MPFR_RNDN);
+            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);
+            mpfr_get_z(nn, scaled, MPFR_RNDZ);
+            mpfr_sub_z(frac, scaled, nn, MPFR_RNDN);
+            mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+            up = (mpfr_cmp(frac, half) >= 0);
+            if (up)
+                mpz_add_ui(nn, nn, 1);
+            mpfr_set_prec(out, f->p);
+            mpfr_set_z_2exp(out, nn, grid, MPFR_RNDN);
+            if (sgn)
+                mpfr_neg(out, out, MPFR_RNDN);
+            if (!mpfr_zero_p(frac) || t1b)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            mpz_clear(nn);
+            mpfr_clear(scaled);
+            mpfr_clear(frac);
+            mpfr_clear(half);
+            *flags = fl;
+        }
+    }
+    mpfr_clear(runb);
+    mpfr_clear(y);
+}
+
+/* Read one sequence through the library, both ways compared. */
+static void chars_check_parse(int fj, const char *s, int hexform)
+{
+    const fdesc *f = &FMTS[fj];
+    int mi;
+    for (mi = 0; mi < 5; mi++) {
+        uint8_t d[32];
+        uint32_t gf = 0, wf = 0;
+        mpfr_t want;
+        cft_status st;
+        const char *one = s;
+        size_t bad = 0;
+
+        mpfr_init2(want, f->p);
+        chars_round_str(f, s, mi, want, &wf);
+        memset(d, 0, sizeof d);
+        st = hexform
+             ? cft_from_hex_char(dev, f->fmt, MODES[mi].cr, &one, d, 1, &bad,
+                                 &gf)
+             : cft_from_decimal_char(dev, f->fmt, MODES[mi].cr, &one, d, 1,
+                                     &bad, &gf);
+        /* A refusal is its own thing and gets its own line: "the
+         * library would not read a sequence MPFR read" and "it read a
+         * different number" want different responses from whoever is
+         * looking at the report. */
+        if (st != CFT_OK && shown < 16) {
+            shown++;
+            printf("  REFUSED %s %s %s: %.160s\n", f->name,
+                   hexform ? "from_hex" : "from_dec", MODES[mi].name, s);
+        }
+        c5_judge(hexform ? T_FROM_HEX : T_FROM_DEC, fj,
+                 hexform ? "from_hex" : "from_dec", MODES[mi].name, f, NULL,
+                 NULL, f, d, want, gf, wf, st, s);
+        mpfr_clear(want);
+    }
+}
+
+/* The library's answer, written into a fresh buffer. */
+static char *chars_write(int fj, int mi, const uint8_t *a, size_t digits,
+                         int hexform, uint32_t *flags, cft_status *st)
+{
+    const fdesc *f = &FMTS[fj];
+    size_t need = 0;
+    char *buf;
+
+    *flags = 0;
+    *st = hexform ? cft_to_hex_char(dev, f->fmt, a, NULL, 0, &need)
+                  : cft_to_decimal_char(dev, f->fmt, MODES[mi].cr, a, digits,
+                                        NULL, 0, &need, flags);
+    if (need < 2) {
+        *st = *st == CFT_OK ? CFT_ERR_INTERNAL : *st;
+        return NULL;
+    }
+    buf = (char *)malloc(need);
+    if (!buf) {
+        *st = CFT_ERR_OUT_OF_MEMORY;
+        return NULL;
+    }
+    *st = hexform ? cft_to_hex_char(dev, f->fmt, a, buf, need, &need)
+                  : cft_to_decimal_char(dev, f->fmt, MODES[mi].cr, a, digits,
+                                        buf, need, &need, flags);
+    if (*st != CFT_OK) {
+        free(buf);
+        return NULL;
+    }
+    return buf;
+}
+
+/* "the sequence denotes exactly this value" - MPFR's verdict, which is
+ * the whole content of an exact conversion. */
+static void chars_check_exact(int fj, const uint8_t *a, const char *s,
+                              const char *what, int ti)
+{
+    const fdesc *f = &FMTS[fj];
+    mpfr_t x, back;
+    char *end = NULL;
+    int t;
+
+    mpfr_init2(x, f->p);
+    mpfr_init2(back, f->p);
+    enc_to_mpfr(f, a, x);
+    t = mpfr_strtofr(back, s, &end, 0, MPFR_RNDN);
+    cases++;
+    tally[ti][fj]++;
+    if (t != 0 || !mpfr_equal_p(back, x) ||
+        (end && *end) || mpfr_signbit(back) != mpfr_signbit(x)) {
+        mismatches++;
+        if (shown < 16) {
+            char ha[65];
+            shown++;
+            hexdump(a, f->esz, ha);
+            printf("  MISMATCH %s %s a=0x%s\n", f->name, what, ha);
+            printf("    the library wrote %.*s%s\n", 120, s,
+                   strlen(s) > 120 ? "..." : "");
+            printf("    mpfr_strtofr reads it back ternary %d, equal %d, "
+                   "trailing %d\n", t, mpfr_equal_p(back, x),
+                   end && *end ? 1 : 0);
+        }
+    }
+    mpfr_clear(x);
+    mpfr_clear(back);
+}
+
+/* The library's H-digit sequence against mpfr_get_str's. */
+static void chars_check_digits(int fj, int mi, const uint8_t *a, size_t h)
+{
+    const fdesc *f = &FMTS[fj];
+    char *got;
+    uint32_t gf = 0;
+    cft_status st;
+    mpfr_t x;
+    mpfr_exp_t e10 = 0;
+    char *want;
+    char buf[512];
+    int is_rmm = (MODES[mi].cr == CFT_RMM);
+    size_t n = h + (is_rmm ? 1 : 0);
+    int bad = 0;
+
+    if (h < 2 || n + 4 > sizeof buf)
+        return;                            /* mpfr_get_str wants n >= 2 */
+
+    got = chars_write(fj, mi, a, h, 0, &gf, &st);
+    cases++;
+    tally[T_TO_DEC][fj]++;
+    if (!got) {
+        mismatches++;
+        if (shown < 16) {
+            shown++;
+            printf("  MISMATCH %s to_dec %s: status %s\n", f->name,
+                   MODES[mi].name, cft_strerror(st));
+        }
+        return;
+    }
+
+    mpfr_init2(x, f->p);
+    enc_to_mpfr(f, a, x);
+    want = mpfr_get_str(buf, &e10, 10, n,
+                        x, is_rmm ? MPFR_RNDZ : MODES[mi].mr);
+    if (!want) {
+        free(got);
+        mpfr_clear(x);
+        return;
+    }
+    {
+        /* mpfr_get_str writes 0.d1..dn * 10^e10 with the sign as a
+         * leading '-'; the library writes d1.d2..dn e (e10 - 1). */
+        char digits[520];
+        int neg = want[0] == '-';
+        long exp10;
+        size_t i, len;
+        char expect[560];
+
+        snprintf(digits, sizeof digits, "%s", want + (neg ? 1 : 0));
+        len = strlen(digits);
+        exp10 = (long)e10 - 1;
+        if (is_rmm && len == n) {
+            /* ties-to-away on a decimal grid: up exactly when the
+             * dropped digit is 5 or more, no sticky needed */
+            int up = digits[n - 1] >= '5';
+            digits[n - 1] = '\0';
+            len = n - 1;
+            if (up) {
+                size_t k = len;
+                while (k-- > 0) {
+                    if (digits[k] != '9') {
+                        digits[k]++;
+                        break;
+                    }
+                    digits[k] = '0';
+                    if (k == 0) {
+                        digits[0] = '1';
+                        exp10++;
+                    }
+                }
+            }
+        }
+        /* Assemble what the library should have written. */
+        {
+            char body[540];
+            size_t w = 0;
+            body[w++] = digits[0];
+            if (len > 1) {
+                body[w++] = '.';
+                for (i = 1; i < len && w + 2 < sizeof body; i++)
+                    body[w++] = digits[i];
+            }
+            body[w] = '\0';
+            snprintf(expect, sizeof expect, "%s%se%s%ld", neg ? "-" : "",
+                     body, exp10 >= 0 ? "+" : "-",
+                     exp10 >= 0 ? exp10 : -exp10);
+        }
+        if (strcmp(expect, got) != 0)
+            bad = 1;
+        if (bad) {
+            char ha[65];
+            mismatches++;
+            if (shown < 16) {
+                shown++;
+                hexdump(a, f->esz, ha);
+                printf("  MISMATCH %s to_dec %s a=0x%s h=%lu\n", f->name,
+                       MODES[mi].name, ha, (unsigned long)h);
+                printf("    lib  %s\n    mpfr %s\n", got, expect);
+            }
+        }
+    }
+    free(got);
+    mpfr_clear(x);
+}
+
+/* The exact decimal of the midpoint between an encoding and its
+ * successor, built with GMP - the tie only the attribute can decide,
+ * and generated by the ORACLE side so it owes the library nothing.
+ * Returns 0 when the expansion does not fit the caller's buffer, which
+ * is how the extremes of the wide formats are left out. */
+static int chars_midpoint(const fdesc *f, const uint8_t *a, char *buf,
+                          size_t cap)
+{
+    uint8_t up[32];
+    mpz_t m1, m2, mid, five;
+    mpfr_t v1, v2;
+    long e1, e2, e, p10;
+    int ok = 0;
+    cls ca;
+
+    classify(f, a, &ca);
+    if (ca.is_nan || ca.is_inf)
+        return 0;
+    memcpy(up, a, f->esz);
+    enc_step(f, up, 1);
+    classify(f, up, &ca);
+    if (ca.is_nan || ca.is_inf)
+        return 0;
+
+    mpfr_init2(v1, f->p);
+    mpfr_init2(v2, f->p);
+    enc_to_mpfr(f, a, v1);
+    enc_to_mpfr(f, up, v2);
+    if (mpfr_zero_p(v1) || mpfr_zero_p(v2) || mpfr_sgn(v1) != mpfr_sgn(v2)) {
+        mpfr_clear(v1);
+        mpfr_clear(v2);
+        return 0;
+    }
+    mpz_init(m1);
+    mpz_init(m2);
+    mpz_init(mid);
+    mpz_init(five);
+    e1 = (long)mpfr_get_z_2exp(m1, v1);
+    e2 = (long)mpfr_get_z_2exp(m2, v2);
+    e = (e1 < e2 ? e1 : e2) - 1;
+    mpz_mul_2exp(m1, m1, (unsigned long)(e1 - e));
+    mpz_mul_2exp(m2, m2, (unsigned long)(e2 - e));
+    mpz_add(mid, m1, m2);
+    mpz_tdiv_q_2exp(mid, mid, 1);              /* (m1 + m2) / 2, exact */
+    /* The sign is carried separately below - mpfr_get_z_2exp hands
+     * back a NEGATIVE significand for a negative value, and letting
+     * mpz_get_str write its own '-' as well produced "--..." */
+    mpz_abs(mid, mid);
+
+    /* mid * 2^e is mid * 5^-e * 10^e for e < 0, and mid << e for e >= 0 */
+    if (e >= 0) {
+        mpz_mul_2exp(mid, mid, (unsigned long)e);
+        p10 = 0;
+    } else {
+        mpz_ui_pow_ui(five, 5, (unsigned long)(-e));
+        mpz_mul(mid, mid, five);
+        p10 = e;
+    }
+    if (mpz_sizeinbase(mid, 10) + 24 < cap) {
+        char *digits = (char *)malloc(mpz_sizeinbase(mid, 10) + 4);
+        if (digits) {
+            size_t len, keep;
+            long exp10;
+            mpz_get_str(digits, 10, mid);
+            len = strlen(digits);
+            exp10 = (long)len - 1 + p10;
+            keep = len;
+            while (keep > 1 && digits[keep - 1] == '0')
+                keep--;
+            digits[keep] = '\0';
+            if (keep == 1)
+                snprintf(buf, cap, "%s%se%s%ld", mpfr_signbit(v1) ? "-" : "",
+                         digits, exp10 >= 0 ? "+" : "-",
+                         exp10 >= 0 ? exp10 : -exp10);
+            else
+                snprintf(buf, cap, "%s%c.%se%s%ld",
+                         mpfr_signbit(v1) ? "-" : "", digits[0], digits + 1,
+                         exp10 >= 0 ? "+" : "-", exp10 >= 0 ? exp10 : -exp10);
+            ok = 1;
+            free(digits);
+        }
+    }
+    mpz_clear(m1);
+    mpz_clear(m2);
+    mpz_clear(mid);
+    mpz_clear(five);
+    mpfr_clear(v1);
+    mpfr_clear(v2);
+    return ok;
+}
+
+static void check_chars(int fj, uint8_t pool[][32], int pn, int nrand)
+{
+    const fdesc *f = &FMTS[fj];
+    size_t h = cft_format_decimal_digits(f->fmt);
+    int i, mi, k;
+
+    /* -- writing out ------------------------------------------------ */
+    for (i = 0; i < pn; i++) {
+        cls ca;
+        classify(f, pool[i], &ca);
+        if (ca.is_nan || ca.is_inf || ca.is_zero)
+            continue;                     /* MPFR keeps no payload; the
+                                           * words are the model's */
+        for (mi = 0; mi < 5; mi++) {
+            chars_check_digits(fj, mi, pool[i], h);
+            chars_check_digits(fj, mi, pool[i], h - 1);
+            chars_check_digits(fj, mi, pool[i], h + 3);
+            chars_check_digits(fj, mi, pool[i], 5);
+            chars_check_digits(fj, mi, pool[i], 2);
+        }
+        /* The exact forms, in both radices, verified by reading them
+         * back through MPFR - which is what "exact" means. */
+        {
+            uint32_t gf = 0;
+            cft_status st;
+            char *s = chars_write(fj, 0, pool[i], 0, 0, &gf, &st);
+            if (s) {
+                if (gf == 0)
+                    chars_check_exact(fj, pool[i], s, "to_dec exact",
+                                      T_TO_DEC);
+                else {
+                    mismatches++;
+                    if (shown++ < 16)
+                        printf("  FLAGS %s to_dec exact raised 0x%02x\n",
+                               f->name, (unsigned)gf);
+                }
+                chars_check_parse(fj, s, 0);
+                free(s);
+            }
+            s = chars_write(fj, 0, pool[i], 0, 1, &gf, &st);
+            if (s) {
+                chars_check_exact(fj, pool[i], s, "to_hex", T_TO_HEX);
+                chars_check_parse(fj, s, 1);
+                free(s);
+            }
+        }
+    }
+
+    /* -- reading in: sequences this file builds itself --------------- */
+    {
+        static const char *const fixed[] = {
+            "0", "-0", "1", "-1", "0.1", "0.5", "2.5", "1.25",
+            "3.14159265358979323846264338327950288419716939937510",
+            "2.71828182845904523536028747135266249775724709369995",
+            "1e10", "1e-10", "1e100", "1e-100", "9.99999999999999999e2",
+            "123456789012345678901234567890e-15",
+            "0.000000000000000000000000000000000000001",
+            "99999999999999999999999999999999999999", NULL
+        };
+        for (k = 0; fixed[k]; k++)
+            chars_check_parse(fj, fixed[k], 0);
+    }
+    {
+        static const char *const fixedhex[] = {
+            "0x0p+0", "-0x0p+0", "0x1p+0", "-0x1p+0", "0X1P+0",
+            "0x1.8p+1", "0x.8p+1", "0x8.p-3", "0x1.fffffffffffffp+1023",
+            "0xfffffffffffffffffffffffffffffffffp-4",
+            "0x1.23456789abcdefp-100", "-0x1.fedcba9876543p+100", NULL
+        };
+        for (k = 0; fixedhex[k]; k++)
+            chars_check_parse(fj, fixedhex[k], 1);
+    }
+
+    /* Exponents inside MPFR's own range and well outside every
+     * format's, so overflow and underflow are scored by the oracle
+     * rather than assumed. */
+    for (k = 0; k < 8 * nrand; k++) {
+        char s[128];
+        int nd = 1 + (int)(rng() % 34), j, pos = 0;
+        long ex = (long)(rng() % 200001) - 100000;
+        if (rng() & 1)
+            s[pos++] = '-';
+        for (j = 0; j < nd; j++)
+            s[pos++] = (char)('0' + (int)(rng() % 10));
+        snprintf(s + pos, sizeof s - (size_t)pos, "e%ld", ex);
+        chars_check_parse(fj, s, 0);
+    }
+
+    /* Random hexadecimal significands, mostly WIDER than the format
+     * holds - which is the only way a hex sequence can need rounding
+     * at all, and so the only part of 5.12.3 an oracle can arbitrate
+     * beyond "did it read the bits back". */
+    for (k = 0; k < 4 * nrand; k++) {
+        char s[256];
+        int nd = 1 + (int)(rng() % (unsigned)(f->p / 4 + 6)), j, pos = 0;
+        long ex = (long)(rng() % (2u * (unsigned)f->emax + 61)) - f->emax - 30;
+        if (rng() & 1)
+            s[pos++] = '-';
+        s[pos++] = '0';
+        s[pos++] = 'x';
+        for (j = 0; j < nd; j++) {
+            s[pos++] = "0123456789abcdef"[rng() % 16];
+            if (j == 0 && (rng() & 1))
+                s[pos++] = '.';
+        }
+        snprintf(s + pos, sizeof s - (size_t)pos, "p%+ld", ex);
+        chars_check_parse(fj, s, 1);
+    }
+
+    /* The exact halfway sequences: the tie the attribute alone
+     * decides, built here from GMP and owing the library nothing. */
+    for (i = 0; i < pn; i++) {
+        char mid[4096];
+        if (chars_midpoint(f, pool[i], mid, sizeof mid))
+            chars_check_parse(fj, mid, 0);
+    }
+}
+
 /* ---- the transcendentals ------------------------------------------- *
  *
  * The nine functions of ABI 0.3 and the eleven of ABI 0.4 against
@@ -2729,6 +3321,7 @@ int main(int argc, char **argv)
         check_logb(fi, pool, pn, 24 * mult);
         check_next(fi, pool, pn);
         check_rem(fi, pool, pn, 48 * mult);
+        check_chars(fi, pool, pn, 48 * mult);
         printf("%s clause5: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
