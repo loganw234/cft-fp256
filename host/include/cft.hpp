@@ -1226,6 +1226,35 @@ public:
         return r;
     }
 
+    /* ---------------------------------------------------------------
+     * The augmented arithmetic operations (754-2019 clause 9.5)
+     *
+     * The only entry points here that return TWO results - the
+     * operation rounded, and the error rounding made - and the only
+     * ones that take no cft_round, because 9.5 fixes the rounding to
+     * roundTiesTowardZero and gives the operations no attribute
+     * argument to carry it. There is nothing to pass and so no
+     * parameter to pass it in; cft.h has the tie rule, the zero-sign
+     * rules and the flag policy.
+     *
+     * `out_r` and `out_e` must be different buffers. Either may alias
+     * `a` or `b`.
+     * --------------------------------------------------------------- */
+#define CFT_HPP_AUG(name)                                               \
+    call_result augmented_##name(cft_format fmt, const void *a,         \
+                                 const void *b, void *out_r,            \
+                                 void *out_e, std::size_t n) noexcept   \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_augmented_##name(dev_, fmt, a, b, out_r, out_e,  \
+                                        n, &r.flags);                   \
+        return r;                                                       \
+    }
+    CFT_HPP_AUG(add)
+    CFT_HPP_AUG(sub)
+    CFT_HPP_AUG(mul)
+#undef CFT_HPP_AUG
+
 
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
@@ -1879,6 +1908,35 @@ public:
                                     d.size()),
                       "cft_atan2pi");
     }
+
+    /* ===========================================================
+     * The augmented arithmetic operations (754-2019 clause 9.5)
+     *
+     * Two outputs, and no attribute: 9.5 fixes the rounding to
+     * roundTiesTowardZero, so THIS CONTEXT'S ATTRIBUTE IS NOT
+     * CONSULTED - which is worth saying here, where every other
+     * member on this class does consult it. `out_r` and `out_e` must
+     * be different spans; either may alias an operand. cft.h has the
+     * tie rule, the zero-sign rules and the flag policy.
+     * =========================================================== */
+#define CFT_HPP_CTX_AUG(name)                                           \
+    std::uint32_t augmented_##name(cspan<encoding_type> a,              \
+                                   cspan<encoding_type> b,              \
+                                   span<encoding_type> out_r,           \
+                                   span<encoding_type> out_e)           \
+    {                                                                   \
+        check_operand(a, out_r, "a");                                   \
+        check_operand(b, out_r, "b");                                   \
+        check_operand(out_e, out_r, "e");                               \
+        return record(dev_->augmented_##name(F, ptr(a), ptr(b),         \
+                                             ptr(out_r), ptr(out_e),    \
+                                             out_r.size()),             \
+                      "cft_augmented_" #name);                          \
+    }
+    CFT_HPP_CTX_AUG(add)
+    CFT_HPP_CTX_AUG(sub)
+    CFT_HPP_CTX_AUG(mul)
+#undef CFT_HPP_CTX_AUG
 
 
     /* ===========================================================

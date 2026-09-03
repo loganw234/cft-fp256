@@ -554,6 +554,37 @@ void check_format(cft::device &dev, cft_device *ref)
             CHECK(st == CFT_OK, "cft_atan2pi: %s", cft_strerror(st));
             expect<F>("atan2pi", rnd, dw, fw, dc, fc);
 
+            /* The augmented arithmetic operations (754-2019 9.5): two
+             * outputs each, and no attribute - the context's rounding
+             * is deliberately NOT consulted, so the same pair must come
+             * back under every `rnd` this loop is running. */
+            {
+                std::vector<enc> ew(n), ec(n);
+#define AUG(name)                                                         \
+                fw = ctx.augmented_##name(a, b, dw, ew);                  \
+                st = cft_augmented_##name(ref, F, a.data(), b.data(),     \
+                                          dc.data(), ec.data(), n, &fc);  \
+                CHECK(st == CFT_OK, "cft_augmented_" #name ": %s",        \
+                      cft_strerror(st));                                  \
+                expect<F>("augmented_" #name " (r)", rnd, dw, fw, dc, fc); \
+                expect<F>("augmented_" #name " (e)", rnd, ew, fw, ec, fc)
+                AUG(add);
+                AUG(sub);
+                AUG(mul);
+#undef AUG
+                /* r and e as one span is refused by the library and the
+                 * wrapper turns that into an exception, like every
+                 * other refusal on this class. */
+                bool threw = false;
+                try {
+                    ctx.augmented_add(a, b, dw, dw);
+                } catch (const cft::error &) {
+                    threw = true;
+                }
+                CHECK(threw, "%s: augmented_add(r, r) must be refused",
+                      cft_format_name(F));
+            }
+
             ctx.total_order(a, b, dw);
             st = cft_total_order(ref, F, a.data(), b.data(), dc.data(), n);
             CHECK(st == CFT_OK, "cft_total_order: %s", cft_strerror(st));

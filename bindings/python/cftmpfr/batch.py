@@ -370,6 +370,47 @@ def atanh(ctx, x):
 
 
 # ---------------------------------------------------------------------
+# The augmented arithmetic operations (754-2019 clause 9.5).
+#
+# The only calls here that return TWO arrays - the operation rounded,
+# and the error rounding made - and the only ones that ignore the
+# context's rounding attribute, because 9.5 fixes the rounding to
+# roundTiesTowardZero. Both arrays mirror the container of the first
+# sequence operand, exactly as one-output calls do:
+#
+#     r, e, flags = batch.augmented_add(ctx, xs, ys)
+#
+# and r[i] + e[i] is the exact sum, elementwise, which is the whole
+# reason to want them over an array rather than one at a time.
+# ---------------------------------------------------------------------
+
+def _aug(ctx, name, x, y):
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    br, be, fl = _lib.augmented(ctx._dev, name, ctx._fi.code, bx, by, n,
+                                ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return mirror(br), mirror(be), fl
+
+
+def augmented_add(ctx, x, y):
+    """(r, e, flags) with r[i] + e[i] the exact x[i] + y[i]."""
+    return _aug(ctx, "add", x, y)
+
+
+def augmented_sub(ctx, x, y):
+    """(r, e, flags) with r[i] + e[i] the exact x[i] - y[i]."""
+    return _aug(ctx, "sub", x, y)
+
+
+def augmented_mul(ctx, x, y):
+    """(r, e, flags) with r[i] + e[i] the exact x[i] * y[i], except
+    where the residual falls below the subnormal grid - 9.5's one
+    non-representable case, which arrives rounded and flagged."""
+    return _aug(ctx, "mul", x, y)
+
+
+# ---------------------------------------------------------------------
 # Reductions: n in, ONE out, over the contract's fixed tree.
 # ---------------------------------------------------------------------
 
