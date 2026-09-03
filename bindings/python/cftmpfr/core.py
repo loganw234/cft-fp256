@@ -793,6 +793,72 @@ class Context:
                             x.to_bytes(), 1, self._fi.esz)
         return self._finish(out, fl)
 
+    # ---- the phase-1 transcendentals (ABI 0.3) -------------------
+    #
+    # Correctly rounded at this context's precision under this
+    # context's attribute, with the 754-2019 clause 9.2.1 special
+    # values and exact flags - so gmpy2's exp/log/pow at a matching
+    # IEEE context return the same bits, and this package's whole
+    # claim extends to them. The exact cases raise nothing: exp only
+    # at zero, log only at one, exp2 at an integer, log2 at a power of
+    # two, log10 at a representable power of ten, pow at a dyadic
+    # result, hypot at a perfect square.
+
+    def _transcend1(self, name, x):
+        x = self._coerce(x)
+        out, fl = _lib.transcend(self._dev, name, self._fi.code, self._rnd,
+                                 x.to_bytes(), None, 1, self._fi.esz)
+        return self._finish(out, fl)
+
+    def _transcend2(self, name, x, y):
+        x, y = self._coerce(x), self._coerce(y)
+        out, fl = _lib.transcend(self._dev, name, self._fi.code, self._rnd,
+                                 x.to_bytes(), y.to_bytes(), 1,
+                                 self._fi.esz)
+        return self._finish(out, fl)
+
+    def exp(self, x):
+        """e ** x, correctly rounded."""
+        return self._transcend1("exp", x)
+
+    def expm1(self, x):
+        """exp(x) - 1, correctly rounded; expm1(-0) is -0."""
+        return self._transcend1("expm1", x)
+
+    def exp2(self, x):
+        """2 ** x, exact for an integer argument."""
+        return self._transcend1("exp2", x)
+
+    def log(self, x):
+        """The natural logarithm. log(+-0) is -inf with divideByZero,
+        a negative operand is invalid."""
+        return self._transcend1("log", x)
+
+    def log1p(self, x):
+        """log(1 + x), correctly rounded; log1p(-0) is -0 and
+        log1p(-1) is -inf with divideByZero."""
+        return self._transcend1("log1p", x)
+
+    def log2(self, x):
+        """Base-two logarithm, exact at the powers of two."""
+        return self._transcend1("log2", x)
+
+    def log10(self, x):
+        """Base-ten logarithm, exact at the powers of ten the format
+        represents."""
+        return self._transcend1("log10", x)
+
+    def pow(self, x, y):
+        """x ** y - 754-2019's `pow`, so pow(x, +-0) is 1 for any x
+        including a quiet NaN and pow(1, y) is 1 for any y."""
+        return self._transcend2("pow", x, y)
+
+    def hypot(self, x, y):
+        """sqrt(x^2 + y^2) computed as if with unbounded range and
+        rounded once; an infinite operand gives +inf even against a
+        quiet NaN."""
+        return self._transcend2("hypot", x, y)
+
     def neg(self, x):
         """Sign flip, 754 5.5.1: quiet even on signaling NaNs, payload
         preserved - deliberately NOT 0 - x."""

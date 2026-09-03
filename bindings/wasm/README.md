@@ -134,7 +134,7 @@ contract. Since 2026-09-02 that includes the clause-5 completion set
 - `cftw_rint`, `cftw_convert`, the eight integer conversions,
 `cftw_scaleb`/`cftw_logb`, `cftw_next_up`/`_down`, `cftw_class`,
 `cftw_total_order`(`_mag`), `cftw_cmp_sig`, `cftw_rem` - which the
-page does not call and a module claiming ABI 0.2 should not be
+page does not call and a module claiming its ABI version should not be
 without.
 
 ## Verifying it, without a browser
@@ -217,6 +217,17 @@ on 2026-09-01.
   of wasm where the old one was 50,153. The page's markup did not
   change: `page_template.html` is untouched, and the diff is the two
   spliced lines (runtime, build info).
+* **Rebuilt 2026-09-03 from the ABI 0.3 sources, and that is a
+  half-step, not a 0.3 page.** The build asks `host/Makefile` what it
+  compiles, so `mpfloat.c` and `transcend.c` came along on their own:
+  the module answers `cftw_abi_version()` with 3 and the
+  `cft_conformance` inside it replays the transcendental vector sets.
+  What it does NOT have is a `cftw_*` wrapper for any of the nine, or
+  a page control for them, so no JavaScript caller can invoke one -
+  the module reports a number its surface has not earned, which is
+  exactly what the previous bullet warns against, and
+  docs/COMPATIBILITY.md's ledger says so in those words. The wrappers
+  are the next rebuild's job.
 * Reproducibility claim, precisely: same pinned image + same repo
   state → same page. The vectors are seeded and the sampling is a
   pure function of them; `emcc` is deterministic within the pinned

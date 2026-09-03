@@ -13,6 +13,19 @@ Every line is one case with the golden result and flags:
     {"op": "fma", "rnd": "rne", "a": "0x...", "b": "0x...",
      "c": "0x...", "d": "0x...", "flags": 17}
 
+The phase-1 transcendentals get their own files - `fp32-transcend.jsonl`
+and `fp32-transcend-rtz.jsonl` and so on - because they are library
+entry points rather than opcodes, so a replayer dispatches them by NAME
+rather than by opcode number and reads a different schema:
+
+    {"fn": "pow", "rnd": "rne", "a": "0x...", "b": "0x...",
+     "d": "0x...", "flags": 16}
+
+"b" appears only for the two binary functions. Keeping them in separate
+files means a consumer that predates ABI 0.3 reads exactly what it
+always read, and one that does not carry the transcendentals skips a
+file rather than failing a line.
+
 Every opcode the tile implements appears here, arithmetic and
 non-arithmetic alike, plus the unassigned codes whose defined
 answer (canonical qNaN, invalid raised) is also part of the
@@ -34,7 +47,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from cft_golden import (  # noqa: E402
-    FORMATS, OP_NAMES, RND_NAMES, compute, vectors,
+    FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, compute, transcend,
+    vectors,
 )
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
@@ -52,6 +66,9 @@ def main():
     ap.add_argument("--random", type=int, default=6000)
     ap.add_argument("--simple", type=int, default=400,
                     help="cases per non-arithmetic opcode")
+    ap.add_argument("--transcend", type=int, default=24,
+                    help="random cases added to each transcendental "
+                         "family's directed pool (0 to skip the sets)")
     ap.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
 
@@ -81,6 +98,28 @@ def main():
                         "flags": flags,
                     }) + "\n")
             print(f"{path}: {len(cases)} cases (seed {args.seed}, {rname})")
+
+        if args.transcend <= 0:
+            continue
+        tcases = vectors.transcend_cases(fmt, args.transcend, args.seed + 6)
+        for rname in args.rounding:
+            rnd = RND_BY_NAME[rname]
+            suffix = "" if rname == "rne" else f"-{rname}"
+            path = outdir / f"{name}-transcend{suffix}.jsonl"
+            with open(path, "w") as f:
+                for fn, xa, xb in tcases:
+                    d, flags = transcend.compute(fmt, fn, xa, xb, rnd)
+                    rec = {
+                        "fn": fn,
+                        "rnd": rname,
+                        "a": f"0x{xa:0{hexw}x}",
+                    }
+                    if TRANSCEND_ARITY[fn] == 2:
+                        rec["b"] = f"0x{xb:0{hexw}x}"
+                    rec["d"] = f"0x{d:0{hexw}x}"
+                    rec["flags"] = flags
+                    f.write(json.dumps(rec) + "\n")
+            print(f"{path}: {len(tcases)} cases (seed {args.seed}, {rname})")
 
 
 if __name__ == "__main__":

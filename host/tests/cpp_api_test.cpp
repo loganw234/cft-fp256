@@ -461,6 +461,54 @@ void check_format(cft::device &dev, cft_device *ref)
             CHECK(st == CFT_OK, "cft_rem: %s", cft_strerror(st));
             expect<F>("rem", rnd, dw, fw, dc, fc);
 
+            /* The phase-1 transcendentals (ABI 0.3). Correctly
+             * rounded, so the wrapper has to marshal them exactly:
+             * one wrong pointer and the bits move. */
+            fw = ctx.exp(a, dw);
+            st = cft_exp(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_exp: %s", cft_strerror(st));
+            expect<F>("exp", rnd, dw, fw, dc, fc);
+
+            fw = ctx.expm1(a, dw);
+            st = cft_expm1(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_expm1: %s", cft_strerror(st));
+            expect<F>("expm1", rnd, dw, fw, dc, fc);
+
+            fw = ctx.exp2(a, dw);
+            st = cft_exp2(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_exp2: %s", cft_strerror(st));
+            expect<F>("exp2", rnd, dw, fw, dc, fc);
+
+            fw = ctx.log(a, dw);
+            st = cft_log(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_log: %s", cft_strerror(st));
+            expect<F>("log", rnd, dw, fw, dc, fc);
+
+            fw = ctx.log1p(a, dw);
+            st = cft_log1p(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_log1p: %s", cft_strerror(st));
+            expect<F>("log1p", rnd, dw, fw, dc, fc);
+
+            fw = ctx.log2(a, dw);
+            st = cft_log2(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_log2: %s", cft_strerror(st));
+            expect<F>("log2", rnd, dw, fw, dc, fc);
+
+            fw = ctx.log10(a, dw);
+            st = cft_log10(ref, F, rnd, a.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_log10: %s", cft_strerror(st));
+            expect<F>("log10", rnd, dw, fw, dc, fc);
+
+            fw = ctx.pow(a, b, dw);
+            st = cft_pow(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_pow: %s", cft_strerror(st));
+            expect<F>("pow", rnd, dw, fw, dc, fc);
+
+            fw = ctx.hypot(a, b, dw);
+            st = cft_hypot(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_hypot: %s", cft_strerror(st));
+            expect<F>("hypot", rnd, dw, fw, dc, fc);
+
             ctx.total_order(a, b, dw);
             st = cft_total_order(ref, F, a.data(), b.data(), dc.data(), n);
             CHECK(st == CFT_OK, "cft_total_order: %s", cft_strerror(st));
@@ -687,6 +735,44 @@ void check_format(cft::device &dev, cft_device *ref)
         got = ctx.rem(x, y);
         cft_rem(ref, F, a.data() + 9, b.data() + 9, one_c.data(), 1, &fc);
         CHECK(got.bytes() == one_c, "%s scalar rem", cft_format_name(F));
+
+        got = ctx.exp(x);
+        cft_exp(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar exp", cft_format_name(F));
+
+        got = ctx.expm1(x);
+        cft_expm1(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar expm1", cft_format_name(F));
+
+        got = ctx.exp2(x);
+        cft_exp2(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar exp2", cft_format_name(F));
+
+        got = ctx.log(x);
+        cft_log(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar log", cft_format_name(F));
+
+        got = ctx.log1p(x);
+        cft_log1p(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar log1p", cft_format_name(F));
+
+        got = ctx.log2(x);
+        cft_log2(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar log2", cft_format_name(F));
+
+        got = ctx.log10(x);
+        cft_log10(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar log10", cft_format_name(F));
+
+        got = ctx.pow(x, y);
+        cft_pow(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,
+                &fc);
+        CHECK(got.bytes() == one_c, "%s scalar pow", cft_format_name(F));
+
+        got = ctx.hypot(x, y);
+        cft_hypot(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,
+                  &fc);
+        CHECK(got.bytes() == one_c, "%s scalar hypot", cft_format_name(F));
 
         got = ctx.sqrt(x);
         cft_sqrt(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc, nullptr);

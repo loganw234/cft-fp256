@@ -196,6 +196,73 @@ def sqrt(ctx, x):
 
 
 # ---------------------------------------------------------------------
+# The phase-1 transcendentals, one C call for the whole array. Every
+# one is correctly rounded, so the array answer is the scalar answer
+# element by element - there is no vectorised approximation here to
+# differ from a scalar path, which is a property worth having and one
+# most math libraries cannot offer.
+# ---------------------------------------------------------------------
+
+def _t1(ctx, name, x):
+    (bx,), n, mirror = _normalise(ctx, (x,))
+    out, fl = _lib.transcend(ctx._dev, name, ctx._fi.code, ctx._rnd, bx,
+                             None, n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def _t2(ctx, name, x, y):
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.transcend(ctx._dev, name, ctx._fi.code, ctx._rnd, bx, by,
+                             n, ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def exp(ctx, x):
+    """out[i] = exp(x[i]), correctly rounded."""
+    return _t1(ctx, "exp", x)
+
+
+def expm1(ctx, x):
+    """out[i] = exp(x[i]) - 1."""
+    return _t1(ctx, "expm1", x)
+
+
+def exp2(ctx, x):
+    """out[i] = 2 ** x[i]."""
+    return _t1(ctx, "exp2", x)
+
+
+def log(ctx, x):
+    """out[i] = log(x[i])."""
+    return _t1(ctx, "log", x)
+
+
+def log1p(ctx, x):
+    """out[i] = log(1 + x[i])."""
+    return _t1(ctx, "log1p", x)
+
+
+def log2(ctx, x):
+    """out[i] = log2(x[i])."""
+    return _t1(ctx, "log2", x)
+
+
+def log10(ctx, x):
+    """out[i] = log10(x[i])."""
+    return _t1(ctx, "log10", x)
+
+
+def pow(ctx, x, y):
+    """out[i] = x[i] ** y[i]."""
+    return _t2(ctx, "pow", x, y)
+
+
+def hypot(ctx, x, y):
+    """out[i] = sqrt(x[i]^2 + y[i]^2)."""
+    return _t2(ctx, "hypot", x, y)
+
+
+# ---------------------------------------------------------------------
 # Reductions: n in, ONE out, over the contract's fixed tree.
 # ---------------------------------------------------------------------
 

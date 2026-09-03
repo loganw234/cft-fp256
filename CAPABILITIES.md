@@ -167,17 +167,37 @@ docs/DETERMINISM.md.
 
 ## Recommended operations (clause 9.2)
 
-`exp`, `expm1`, `exp2`, `exp10`, `log`, `log2`, `log10`, `log1p`,
-`hypot`, `pow`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`,
-`sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `rSqrt`,
-`compound`, `rootn`, `pown`, `powr` - **all no**, and mostly by
-choice rather than by omission. The atlas det library computes these
-*in software from fused multiply-add*, exactly so their results do not
-depend on anyone's hardware transcendental. The tile's job is to make
-that software exact and fast, not to grow its own `sin`. The composed
-divide and square root are the template for how such a function ships
-here when one is genuinely wanted: hardware seed, FMA composition,
-proof against oracles - never a black-box unit.
+**Nine of them are yes as of 2026-09-02** (ABI 0.3): `exp`, `expm1`,
+`exp2`, `log`, `log1p`, `log2`, `log10`, `pow` and `hypot`, correctly
+rounded at all four formats under all five rounding attributes with
+9.2.1's special values and exact flags. Not "accurate" - correctly
+rounded, which is the only version of these functions a determinism
+contract can score, because two accurate implementations disagree in
+the last bit and neither is wrong. In the library, not in the tile:
+they are host operations over a multiprecision evaluator built on the
+same bigint core, and unlike divide they could not have been anything
+else - division composes from FMA because it has an exactly measurable
+residual and an exponential has none. docs/TRANSCENDENTALS.md is the
+design; the numbers are in docs/VALIDATION.md's 2026-09-02 entry
+(95,680 cases against GNU MPFR, zero value and zero flag mismatches).
+
+`exp10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`,
+`cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `rSqrt`, `compound`,
+`rootn`, `pown`, `powr` - **still no**. The trigonometric family needs
+one thing the nine did not: an argument reduction against pi, which is
+a harder problem in its own right (the reduction constant has to be
+carried to hundreds of thousands of bits at fp256). The evaluator built
+for phase 1 is the right foundation for them and the work is scoped in
+docs/ROADMAP.md, but nothing is claimed until it runs.
+
+**Still none of this is a hardware transcendental**, and that remains
+deliberate. The atlas det library computes these *in software from
+fused multiply-add*, exactly so their results do not depend on anyone's
+`sin` unit; the tile's job is to make that software exact and fast, not
+to grow one. What phase 1 changes is that a caller who wants `exp`
+correctly rounded no longer has to build it - and what it does not
+change is that the tile has no transcendental datapath and is not
+getting one.
 
 ## The atlas-engine det_* library
 
@@ -270,12 +290,15 @@ in docs/COMPATIBILITY.md) gets the full story.
   with a contractual tree, and as of 2026-09-01 the entire completion
   set: roundToIntegral, every conversion, scaleB/logB, nextUp/
   nextDown, classification, totalOrder, the signaling comparisons,
-  remainder. What remains outside: the character-sequence conversions
-  of 5.4.2/5.12 (inherently host-library work, hex trivial, decimal
-  needing big-integer scaling - planned, not blocking any numeric
-  path), NaN payload propagation (**out**, deliberately), and clause
-  9's recommended transcendentals (**out** by design - the det-library
-  route computes them from FMA).
+  remainder. Nine of clause 9's recommended functions joined them on
+  2026-09-02 - exp, expm1, exp2, log, log1p, log2, log10, pow, hypot,
+  correctly rounded in the library rather than in the tile. What
+  remains outside: the character-sequence conversions of 5.4.2/5.12
+  (inherently host-library work, hex trivial, decimal needing
+  big-integer scaling - planned, not blocking any numeric path), NaN
+  payload propagation (**out**, deliberately), and the rest of clause 9
+  - the trigonometric and hyperbolic families, which need an argument
+  reduction against pi and are scoped but not started.
 - As a **general-purpose float processor**: the blocker was
   programmability alone, and programmability now exists in RTL and is
   benched against its model. What separates "benched" from "yes" is

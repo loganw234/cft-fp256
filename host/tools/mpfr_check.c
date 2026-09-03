@@ -48,6 +48,14 @@
  * intermediate is MPFR's own arithmetic; it is labelled where it
  * runs, because an oracle with a footnote should say so.
  *
+ * The phase-1 transcendentals (ABI 0.3) are checked here too, and for
+ * them this is not the third oracle but the ONLY one: libm is neither
+ * correctly rounded nor reproducible, so unlike div and sqrt there is
+ * no CPU campaign at fp32/fp64 to calibrate against. See the banner
+ * above check_transcend for how MPFR's own exponent range is handled
+ * (exp of the largest fp256 overflows MPFR too) and which expectations
+ * are the contract's rather than MPFR's.
+ *
  * The clause-5 completion set (ABI 0.2) is checked here too - rint,
  * scaleB, convertFormat, the eight integer conversions, logB,
  * nextUp/nextDown and remainder - by the same machinery: see the
@@ -69,6 +77,10 @@
 #include <mpfr.h>
 
 #include "../include/cft.h"
+/* Not API: the transcendental instrumentation, which this tool
+ * links statically and which is where docs/TRANSCENDENTALS.md's
+ * escalation numbers are measured rather than asserted. */
+#include "../src/transcend.h"
 
 typedef struct {
     const char *name;
@@ -115,14 +127,20 @@ enum {
     T_RINT, T_RINTX, T_SCALEB, T_CONVERT,
     T_FROM_I32, T_FROM_U32, T_FROM_I64, T_FROM_U64,
     T_TO_I32, T_TO_U32, T_TO_I64, T_TO_U64,
-    T_LOGB, T_NEXTUP, T_NEXTDOWN, T_REM, NTALLY
+    T_LOGB, T_NEXTUP, T_NEXTDOWN, T_REM,
+    /* the phase-1 transcendentals, in the ABI's order - check_transcend
+     * indexes this block as T_EXP + fn, so the two orders are one */
+    T_EXP, T_EXPM1, T_EXP2, T_LOG, T_LOG1P, T_LOG2, T_LOG10, T_POW,
+    T_HYPOT, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
     "rint", "rint_x", "scaleb", "convert",
     "from_i32", "from_u32", "from_i64", "from_u64",
     "to_i32", "to_u32", "to_i64", "to_u64",
-    "logb", "next_up", "next_down", "rem"
+    "logb", "next_up", "next_down", "rem",
+    "exp", "expm1", "exp2", "log", "log1p", "log2", "log10", "pow",
+    "hypot"
 };
 static uint64_t tally[NTALLY][4];
 
@@ -852,6 +870,39 @@ static int rint_by_mode(mpfr_t r, const mpfr_t v, int mi)
     }
 }
 
+/* An expected value, printed WITHOUT mpfr_out_str.
+ *
+ * mpfr_out_str with n = 0 segfaults on a zero in MPFR 4.2.1 as built
+ * here, and dies on an extreme exponent as well - measured 2026-09-02,
+ * both from this file. Either one turns the first reported mismatch
+ * into a dead process and takes the report with it, which is the worst
+ * possible failure mode for an oracle: it can only crash when it has
+ * something to say. So the mantissa and the exponent are printed
+ * directly, which is bounded work for any value MPFR can hold. */
+static void print_mpfr(mpfr_srcptr v)
+{
+    mpz_t m;
+    mpfr_exp_t e;
+    /* A caller-supplied buffer, not mpz_get_str(NULL, ...): GMP
+     * allocates with its own allocator and free() is not necessarily
+     * its deallocator, which corrupts the heap on this toolchain. The
+     * mantissa is at most p bits, so 128 bytes is generous. */
+    char buf[128];
+    if (mpfr_nan_p(v)) { printf("nan"); return; }
+    if (mpfr_inf_p(v)) { printf("%sinf", mpfr_signbit(v) ? "-" : ""); return; }
+    if (mpfr_zero_p(v)) { printf("%s0", mpfr_signbit(v) ? "-" : ""); return; }
+    mpz_init(m);
+    e = mpfr_get_z_2exp(m, v);
+    if (mpz_sizeinbase(m, 16) + 3 <= sizeof buf) {
+        mpz_get_str(buf, 16, m);
+        printf("0x%s p2^%ld", buf, (long)e);
+    } else {
+        printf("<%lu hex digits> p2^%ld",
+               (unsigned long)mpz_sizeinbase(m, 16), (long)e);
+    }
+    mpz_clear(m);
+}
+
 static void report_c5(const char *opn, const char *mode, const fdesc *fa,
                       const uint8_t *a, const uint8_t *b, const fdesc *fg,
                       const uint8_t *got, mpfr_srcptr want, uint32_t gf,
@@ -868,7 +919,7 @@ static void report_c5(const char *opn, const char *mode, const fdesc *fa,
            value_bad ? "MISMATCH" : "FLAGS", fa->name, opn, mode, ha, hb,
            extra ? extra : "");
     printf("    lib=0x%s flags=0x%02x  mpfr=", hg, (unsigned)gf);
-    mpfr_out_str(stdout, 16, 0, want, MPFR_RNDN);
+    print_mpfr(want);
     printf(" flags=0x%02x\n", (unsigned)wf);
 }
 
@@ -1666,6 +1717,450 @@ static void check_rem(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 }
 
+/* ---- the phase-1 transcendentals ----------------------------------- *
+ *
+ * The nine functions of ABI 0.3 against MPFR's own, which is the only
+ * external oracle that reaches fp128 and fp256 - and, for these
+ * operations, the only external oracle at all: the CPU's libm is
+ * neither correctly rounded nor reproducible, so there is nothing at
+ * fp32/fp64 to calibrate against either. Agreement here is therefore
+ * the whole external case for the transcendental set.
+ *
+ * The machinery is oracle()'s, with three differences worth stating:
+ *
+ *   * MPFR's OWN exponent range can overflow where the format's would
+ *     too. exp of the largest fp256 is e^(1.6e78913), which no
+ *     exponent field holds. So the unbounded evaluation runs with
+ *     MPFR's widest range and its overflow/underflow flags are read:
+ *     either one means the true value is past anything this format can
+ *     express, and the delivery is the attribute's overflow or
+ *     underflow response.
+ *
+ *   * Signaling NaNs are the documented one-sided help this harness
+ *     already gives MPFR elsewhere - MPFR has none - so an sNaN
+ *     operand's expectation is the contract's (invalid, canonical
+ *     quiet NaN) rather than MPFR's.
+ *
+ *   * divideByZero is derived from operand classes, as everywhere else
+ *     here: log and its friends at zero, log1p at -1, pow of a zero
+ *     base to a FINITE negative exponent. pow(+-0, -inf) is the
+ *     |x| < 1 row and signals nothing, which is the one row of that
+ *     table implementations most often get wrong.
+ */
+
+typedef enum {
+    TF_EXP = 0, TF_EXPM1, TF_EXP2, TF_LOG, TF_LOG1P, TF_LOG2, TF_LOG10,
+    TF_POW, TF_HYPOT, TF_COUNT
+} tfn;
+
+static const char *const TFN_NAME[TF_COUNT] = {
+    "exp", "expm1", "exp2", "log", "log1p", "log2", "log10", "pow", "hypot"
+};
+static const int TFN_NARGS[TF_COUNT] = { 1, 1, 1, 1, 1, 1, 1, 2, 2 };
+
+static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
+                   mpfr_rnd_t rnd)
+{
+    switch (fn) {
+    case TF_EXP:   return mpfr_exp(r, a, rnd);
+    case TF_EXPM1: return mpfr_expm1(r, a, rnd);
+    case TF_EXP2:  return mpfr_exp2(r, a, rnd);
+    case TF_LOG:   return mpfr_log(r, a, rnd);
+    case TF_LOG1P: return mpfr_log1p(r, a, rnd);
+    case TF_LOG2:  return mpfr_log2(r, a, rnd);
+    case TF_LOG10: return mpfr_log10(r, a, rnd);
+    case TF_POW:   return mpfr_pow(r, a, b, rnd);
+    default:       return mpfr_hypot(r, a, b, rnd);
+    }
+}
+
+/* Is v an integer, and is it an odd one? Decided on the encoding, so
+ * an infinity is neither. */
+static void enc_integrality(const fdesc *f, const uint8_t *b, int *is_int,
+                            int *is_odd)
+{
+    cls c;
+    long ef;
+    int i, lowest = -1, man_lsb_exp;
+    classify(f, b, &c);
+    *is_int = 0;
+    *is_odd = 0;
+    if (c.is_nan || c.is_inf)
+        return;
+    if (c.is_zero) {
+        *is_int = 1;
+        return;
+    }
+    ef = (long)get_field(b, f->man_w, f->exp_w);
+    for (i = 0; i < f->man_w; i++)
+        if (bit_at(b, i)) { lowest = i; break; }
+    if (ef == 0) {                       /* subnormal */
+        man_lsb_exp = (int)(f->emin - f->man_w) + (lowest < 0 ? 0 : lowest);
+    } else {
+        if (lowest < 0)
+            lowest = f->man_w;           /* the hidden bit is the lowest */
+        man_lsb_exp = (int)(ef - (f->emax) - f->man_w) + lowest;
+    }
+    *is_int = man_lsb_exp >= 0;
+    *is_odd = man_lsb_exp == 0;
+}
+
+/* The contract's invalid/divideByZero for one case, from classes. */
+static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
+                                const uint8_t *bb)
+{
+    cls ca, cb;
+    uint32_t fl = 0;
+    int y_int, y_odd;
+    classify(f, ba, &ca);
+    classify(f, bb, &cb);
+    if (ca.is_snan || (TFN_NARGS[fn] == 2 && cb.is_snan))
+        return CFT_FLAG_INVALID;
+    switch (fn) {
+    case TF_LOG: case TF_LOG2: case TF_LOG10:
+        if (ca.is_zero)
+            fl |= CFT_FLAG_DIVBYZERO;
+        else if (!ca.is_nan && ca.sign)
+            fl |= CFT_FLAG_INVALID;
+        break;
+    case TF_LOG1P:
+        if (!ca.is_nan && ca.sign) {
+            mpfr_t v;
+            mpfr_init2(v, f->p);
+            enc_to_mpfr(f, ba, v);
+            if (mpfr_cmp_si(v, -1) == 0)
+                fl |= CFT_FLAG_DIVBYZERO;
+            else if (mpfr_cmp_si(v, -1) < 0)
+                fl |= CFT_FLAG_INVALID;
+            mpfr_clear(v);
+        }
+        break;
+    case TF_POW:
+        if (cb.is_zero || ca.is_nan || cb.is_nan)
+            break;                       /* pow(x,+-0) is 1; NaNs pass */
+        enc_integrality(f, bb, &y_int, &y_odd);
+        if (ca.is_zero && cb.sign && !cb.is_inf)
+            fl |= CFT_FLAG_DIVBYZERO;
+        else if (ca.sign && !ca.is_zero && !ca.is_inf && !cb.is_inf &&
+                 !y_int)
+            fl |= CFT_FLAG_INVALID;
+        break;
+    default:
+        break;
+    }
+    return fl;
+}
+
+/* One transcendental case through MPFR, delivered into the format. */
+static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
+                     const uint8_t *bb, mpfr_t out, uint32_t *flags)
+{
+    mpfr_t a, b, runb, r, y;
+    cls ca, cb;
+    int tunb = 0, inexact, is_rmm = (MODES[mi].cr == CFT_RMM);
+    int ovf = 0, unf = 0;
+    mpfr_rnd_t rnd = MODES[mi].mr;
+    uint32_t fl = tfn_class_flags(f, fn, ba, bb);
+    mpfr_exp_t save_emin = mpfr_get_emin(), save_emax = mpfr_get_emax();
+
+    classify(f, ba, &ca);
+    classify(f, bb, &cb);
+
+    mpfr_init2(a, f->p);
+    mpfr_init2(b, f->p);
+    mpfr_init2(runb, f->p);
+    mpfr_init2(r, f->p);
+    mpfr_init2(y, f->p + 1);
+    enc_to_mpfr(f, ba, a);
+    enc_to_mpfr(f, bb, b);
+
+    if (ca.is_snan || (TFN_NARGS[fn] == 2 && cb.is_snan)) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set_nan(out);
+        *flags = CFT_FLAG_INVALID;
+        goto done;
+    }
+
+    /* The unbounded-range evaluation: MPFR's widest exponents, so that
+     * an overflow HERE means the true value is past anything the
+     * format could hold. */
+    mpfr_set_emin(mpfr_get_emin_min());
+    mpfr_set_emax(mpfr_get_emax_max());
+    mpfr_clear_flags();
+    if (is_rmm) {
+        int t1 = raw_tfn(y, fn, a, b, MPFR_RNDZ);
+        ovf = mpfr_overflow_p();
+        unf = mpfr_underflow_p();
+        if (!mpfr_number_p(y) || mpfr_zero_p(y)) {
+            mpfr_set(runb, y, MPFR_RNDN);
+            tunb = 0;
+        } else {
+            rmm_round(runb, y, t1 != 0, f->p);
+            tunb = !mpfr_equal_p(runb, y) || t1;
+        }
+    } else {
+        tunb = raw_tfn(runb, fn, a, b, rnd);
+        ovf = mpfr_overflow_p();
+        unf = mpfr_underflow_p();
+    }
+    mpfr_set_emin(save_emin);
+    mpfr_set_emax(save_emax);
+    inexact = (tunb != 0);
+
+    if (ovf || unf) {
+        /* mpfr_sgn of a signed zero is 0, and an underflow
+         * delivers exactly that - so the sign comes from the sign
+         * BIT. Getting this wrong turns pow of a negative base to
+         * an odd negative power, which underflows to -0, into +0. */
+        int sgn = mpfr_signbit(runb) ? -1 : 1;
+        mpfr_set_prec(out, f->p);
+        if (ovf) {
+            int away = (rnd == MPFR_RNDU && sgn > 0) ||
+                       (rnd == MPFR_RNDD && sgn < 0) ||
+                       rnd == MPFR_RNDN || is_rmm;
+            if (rnd == MPFR_RNDZ) away = 0;
+            if (away)
+                mpfr_set_inf(out, sgn);
+            else {
+                mpfr_set_ui_2exp(out, 1, f->emax + 1, MPFR_RNDN);
+                mpfr_nextbelow(out);
+                if (sgn < 0) mpfr_neg(out, out, MPFR_RNDN);
+            }
+            *flags = fl | CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        } else {
+            /* below half the smallest subnormal: zero, except where
+             * the attribute points away from it */
+            int up = (rnd == MPFR_RNDU && sgn > 0) ||
+                     (rnd == MPFR_RNDD && sgn < 0);
+            if (up) {
+                mpfr_set_ui_2exp(out, 1, f->emin - f->man_w, MPFR_RNDN);
+                if (sgn < 0) mpfr_neg(out, out, MPFR_RNDN);
+            } else {
+                mpfr_set_zero(out, sgn);
+            }
+            *flags = fl | CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT;
+        }
+        goto done;
+    }
+
+    if (mpfr_nan_p(runb) || mpfr_inf_p(runb) || mpfr_zero_p(runb)) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set(out, runb, MPFR_RNDN);
+        if (inexact) fl |= CFT_FLAG_INEXACT;
+        *flags = fl;
+        goto done;
+    }
+
+    {
+        mpfr_exp_t e_unb = mpfr_get_exp(runb);
+        long e_res = (long)e_unb - 1;
+
+        if (e_res > f->emax) {
+            int away = (rnd == MPFR_RNDU && mpfr_sgn(runb) > 0) ||
+                       (rnd == MPFR_RNDD && mpfr_sgn(runb) < 0) ||
+                       rnd == MPFR_RNDN || is_rmm;
+            if (rnd == MPFR_RNDZ) away = 0;
+            mpfr_set_prec(out, f->p);
+            if (away)
+                mpfr_set_inf(out, mpfr_sgn(runb));
+            else {
+                mpfr_set_ui_2exp(out, 1, f->emax + 1, MPFR_RNDN);
+                mpfr_nextbelow(out);
+                if (mpfr_sgn(runb) < 0) mpfr_neg(out, out, MPFR_RNDN);
+            }
+            *flags = fl | CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+            goto done;
+        }
+        if (e_res >= f->emin) {
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, runb, MPFR_RNDN);
+            if (inexact) fl |= CFT_FLAG_INEXACT;
+            *flags = fl;
+            goto done;
+        }
+        /* subnormal landing: re-round the TRUE value on the fixed grid */
+        if (!is_rmm) {
+            int t2;
+            mpfr_set_emin(f->emin - f->p + 2);
+            mpfr_set_emax(f->emax + 1);
+            t2 = raw_tfn(r, fn, a, b, rnd);
+            t2 = mpfr_check_range(r, t2, rnd);
+            t2 = mpfr_subnormalize(r, t2, rnd);
+            mpfr_set_emin(save_emin);
+            mpfr_set_emax(save_emax);
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, r, MPFR_RNDN);
+            if (t2 != 0 || inexact)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            *flags = fl;
+        } else {
+            int t1, up, sign;
+            long grid = f->emin - f->man_w;
+            mpz_t n;
+            mpfr_t scaled, frac, half;
+            t1 = raw_tfn(y, fn, a, b, MPFR_RNDZ);
+            sign = mpfr_sgn(y) < 0;
+            mpz_init(n);
+            mpfr_init2(scaled, f->p + 4);
+            mpfr_init2(frac, f->p + 4);
+            mpfr_init2(half, 8);
+            mpfr_abs(scaled, y, MPFR_RNDN);
+            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);
+            mpfr_get_z(n, scaled, MPFR_RNDZ);
+            mpfr_sub_z(frac, scaled, n, MPFR_RNDN);
+            mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+            up = (mpfr_cmp(frac, half) >= 0);
+            if (up)
+                mpz_add_ui(n, n, 1);
+            mpfr_set_prec(out, f->p);
+            mpfr_set_z_2exp(out, n, grid, MPFR_RNDN);
+            if (sign)
+                mpfr_neg(out, out, MPFR_RNDN);
+            if (!mpfr_zero_p(frac) || t1)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            mpz_clear(n);
+            mpfr_clear(scaled); mpfr_clear(frac); mpfr_clear(half);
+            *flags = fl;
+        }
+    }
+
+done:
+    mpfr_set_emin(save_emin);
+    mpfr_set_emax(save_emax);
+    mpfr_clear(a); mpfr_clear(b);
+    mpfr_clear(runb); mpfr_clear(r); mpfr_clear(y);
+}
+
+static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
+                        const uint8_t *a, const uint8_t *b, uint8_t *d,
+                        cft_status *st)
+{
+    uint32_t fl = 0;
+    switch (fn) {
+    case TF_EXP:   *st = cft_exp(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXPM1: *st = cft_expm1(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP2:  *st = cft_exp2(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_LOG:   *st = cft_log(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_LOG1P: *st = cft_log1p(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_LOG2:  *st = cft_log2(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_LOG10: *st = cft_log10(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_POW:   *st = cft_pow(dev, f->fmt, rnd, a, b, d, 1, &fl); break;
+    default:       *st = cft_hypot(dev, f->fmt, rnd, a, b, d, 1, &fl); break;
+    }
+    return fl;
+}
+
+
+/* Operands aimed at the transcendentals specifically, in their own
+ * larger pool: the families that matter here - the exact cases, the
+ * overflow and underflow thresholds, a base one ulp from 1 - are not
+ * the families that matter for an FMA, and the arithmetic phase's
+ * 64-operand pool is sized for a cross product this phase does not
+ * take. */
+#define TPOOL_MAX 208
+
+static int build_tpool(const fdesc *f, uint8_t pool[][32], int randoms)
+{
+    int n = build_pool(f, pool, randoms);
+    long ks[12];
+    int nk = 0, k;
+
+    ks[nk++] = 1; ks[nk++] = 2; ks[nk++] = 3; ks[nk++] = 10;
+    ks[nk++] = 17; ks[nk++] = f->p; ks[nk++] = f->emax;
+    ks[nk++] = f->emax + 1; ks[nk++] = f->emin; ks[nk++] = -1;
+    ks[nk++] = -3; ks[nk++] = f->emin - f->man_w;
+    for (k = 0; k < nk && n < TPOOL_MAX - 8; k++) {
+        uint64_t mag = (uint64_t)(ks[k] < 0 ? -ks[k] : ks[k]);
+        /* the integer itself: an exp2 exact case, and a pow exponent */
+        if (enc_from_val(f, 0, mag, 0, pool[n]) == 0) {
+            if (ks[k] < 0)
+                enc_neg(f, pool[n]);
+            n++;
+        }
+        /* 2^k: log2's exact cases, with a neighbour above and below */
+        if (enc_from_val(f, 0, 1, ks[k], pool[n]) == 0) {
+            n++;
+            memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+            memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
+        }
+    }
+    /* powers of ten: log10's exact cases, until the odd part 5^k
+     * outruns the significand */
+    {
+        uint64_t five = 1;
+        long e = 0;
+        while (n < TPOOL_MAX - 4 && five <= ((uint64_t)1 << 60)) {
+            if (enc_from_val(f, 0, five, e, pool[n]) != 0)
+                break;
+            n++;
+            memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+            five *= 5;
+            e++;
+        }
+    }
+    /* one ulp either side of 1 and of -1, and arguments below
+     * 2^-(p+3), where the answer is decided by a SIDE and not by any
+     * working precision */
+    if (n < TPOOL_MAX - 10 && enc_from_val(f, 0, 1, 0, pool[n]) == 0) {
+        n++;
+        memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+        memcpy(pool[n], pool[n - 2], 32); enc_step(f, pool[n], 0); n++;
+        memcpy(pool[n], pool[n - 3], 32); enc_neg(f, pool[n]); n++;
+        memcpy(pool[n], pool[n - 1], 32); enc_step(f, pool[n], 1); n++;
+    }
+    for (k = 2; k < 12 && n < TPOOL_MAX - 4; k++) {
+        if (enc_from_val(f, 0, 1, -(long)f->p - k, pool[n]) == 0) {
+            n++;
+            memcpy(pool[n], pool[n - 1], 32); enc_neg(f, pool[n]); n++;
+        }
+    }
+    /* top up with randoms, which cost nothing and occasionally find
+     * something the directed families did not think of */
+    while (n < TPOOL_MAX) {
+        rand_enc(f, pool[n]);
+        n++;
+    }
+    return n;
+}
+
+static void check_transcend(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    int fn, mi, i, j;
+
+    for (fn = 0; fn < TF_COUNT; fn++) {
+        int nargs = TFN_NARGS[fn];
+        /* Unary: every operand. Binary: every operand against a strided
+         * eighth of the pool, so the pair count stays linear - the full
+         * cross product of two hundred operands times five attributes
+         * times two functions is not a sharper test, only a longer
+         * one. */
+        int jstep = nargs == 2 ? (pn / 8 > 0 ? pn / 8 : 1) : 1;
+        for (mi = 0; mi < 5; mi++) {
+            for (i = 0; i < pn; i++) {
+                int jmax = nargs == 2 ? pn : 1;
+                for (j = (nargs == 2 ? i % jstep : 0); j < jmax; j += jstep) {
+                    const uint8_t *a = pool[i];
+                    const uint8_t *b = pool[j];
+                    uint8_t d[32];
+                    uint32_t gf, wf = 0;
+                    cft_status st = CFT_OK;
+                    mpfr_t want;
+
+                    mpfr_init2(want, f->p);
+                    t_oracle(f, fn, mi, a, b, want, &wf);
+                    memset(d, 0, sizeof d);
+                    gf = tfn_lib(f, fn, MODES[mi].cr, a, b, d, &st);
+                    c5_judge(T_EXP + fn, fj, TFN_NAME[fn], MODES[mi].name,
+                             f, a, nargs == 2 ? b : NULL, f, d, want, gf, wf,
+                             st, NULL);
+                    mpfr_clear(want);
+                }
+            }
+        }
+    }
+}
+
 /* ---- driver -------------------------------------------------------- */
 
 static void report(const fdesc *f, mop op, int mi, const uint8_t *a,
@@ -1691,6 +2186,7 @@ int main(int argc, char **argv)
     int randoms = argc > 1 ? atoi(argv[1]) : 24;
     rs = argc > 2 ? strtoull(argv[2], NULL, 0) | 1 : 0x5EEDF00Dull;
     static uint8_t pool[MAXPOOL][32];
+    static uint8_t tpool[TPOOL_MAX][32];
     int fi, oi, mi, i, j;
 
     if (cft_open(NULL, 0, &dev) != CFT_OK) {
@@ -1767,6 +2263,22 @@ int main(int argc, char **argv)
                (unsigned long long)flag_mismatches);
         fflush(stdout);
     }
+    /* The phase-1 transcendentals. Their own pools, because the
+     * families that matter here - exact cases, thresholds, a base one
+     * ulp from 1 - are not the families that matter for an FMA. */
+    for (fi = 0; fi < 4; fi++) {
+        const fdesc *f = &FMTS[fi];
+        int pn = build_tpool(f, tpool, randoms);
+        uint64_t before = cases;
+        check_transcend(fi, tpool, pn);
+        printf("%s transcend: %llu cases done (running mismatches: "
+               "%llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+    }
+
     for (fi = 0; fi < 4; fi++) {
         int pn = build_pool(&FMTS[fi], pool, randoms);
         int dfi;
@@ -1793,6 +2305,17 @@ int main(int argc, char **argv)
             printf("\n");
         }
     }
+
+    printf("\ntranscendental evaluator: %llu elements, %llu reached the "
+           "Ziv loop,\n  %llu escalations, deepest working precision %llu "
+           "bits, %llu decided exactly,\n  %llu decided by a neighbour's "
+           "side\n",
+           (unsigned long long)cft_tr_calls,
+           (unsigned long long)cft_tr_ziv_calls,
+           (unsigned long long)cft_tr_escalations,
+           (unsigned long long)cft_tr_max_prec,
+           (unsigned long long)cft_tr_exact,
+           (unsigned long long)cft_tr_neighbour);
 
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
            "mismatches\n", (unsigned long long)cases,

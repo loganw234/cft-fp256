@@ -305,6 +305,89 @@ are a handful of steps; the walk tops out at emax - emin + p - 2,
 adversarial lane, so an array full of such pairs pays it per
 element.
 
+## The phase-1 transcendentals (ABI 0.3)
+
+`cft_exp`, `cft_expm1`, `cft_exp2`, `cft_log`, `cft_log1p`, `cft_log2`,
+`cft_log10`, `cft_pow` and `cft_hypot`, added 2026-09-02 in one
+additive bump. **Correctly rounded** at every format under every
+attribute, with IEEE 754-2019 clause 9.2.1's special values and the
+contract's exact flags - not "accurate to an ulp", not "faithful".
+
+That distinction is the reason they are here at all. A correctly
+rounded result is defined by the mathematics, so every correct
+implementation returns the same bits and this library's answer can be
+scored against any of them - which is what the whole project is for. An
+*accurate* exponential is a different thing: two of them disagree in
+the last bit on a percentage of inputs, neither can be scored, and
+"the same bits everywhere" quietly stops being true in exactly the
+places nobody looks. A determinism contract that stopped at the
+arithmetic and shipped an approximate `exp` would have a hole in it the
+size of every application that uses one.
+
+**They are HOST operations, and that is a design decision with a
+reason.** No `cft_run` pass is issued, so there is no bus word and no
+`bus_out` argument, and the device argument is context - the same shape
+the clause-5 operations take when they contain no floating-point
+arithmetic. But the reason is different, and worth stating because it
+is what a phase-2 optimisation would have to work around:
+
+`cft_div` composes from the tile's opcodes because division has an
+exactly measurable residual. Given a candidate quotient q, `a - q*b` is
+one fused multiply away and is EXACT, so its sign says which side of
+the rounding boundary the true quotient falls on. `exp` has no such
+residual. Nothing an FMA can compute tells you which side of a boundary
+`e^x` lies on; only more precision does, and more precision means a
+multiprecision evaluator, which is integer work. A tile-assisted fast
+path for the narrow formats is a plausible later optimisation - the
+tile's FMA could carry a polynomial, with the host deciding only the
+cases it cannot - but it would have to reproduce these bits exactly,
+which makes it an optimisation and not a different answer.
+
+The signatures follow the clause-5 host operations exactly:
+
+```c
+cft_exp  (dev, fmt, rnd, a,    d, n, &flags);
+cft_pow  (dev, fmt, rnd, a, b, d, n, &flags);
+cft_hypot(dev, fmt, rnd, a, b, d, n, &flags);
+```
+
+`d` may alias `a` or `b`; `n` is arbitrary; `b` is not optional for the
+two binary functions. A batch is one C call and the flag word is the OR
+across it, as everywhere else.
+
+**inexact is raised for every result except the exact ones, and those
+are decided by exact arithmetic rather than by a tolerance**: exp and
+expm1 only at zero, log and log1p only at 1 and 0, exp2 at an integer
+argument, log2 at a power of two, log10 at a power of ten the format
+represents, pow when the true value is a dyadic rational, hypot when
+x^2 + y^2 is a perfect square. `hypot(3, 4)` is 5 and raises nothing at
+all, which is the observable difference between a correctly rounded
+implementation and an accurate one.
+
+**If an input cannot be shown correctly rounded, the call returns
+`CFT_ERR_INTERNAL`** rather than a plausible number. The library
+evaluates at a working precision and raises it until both ends of an
+enclosure round the same way; the cap on that escalation is sized so
+that no input the formats can express should reach it, and reaching it
+is a refusal. docs/TRANSCENDENTALS.md carries the arithmetic behind
+that sizing, the exact-case decision procedures, the error bounds and
+the Table Maker's Dilemma stated honestly.
+
+Two contract choices a porter must not miss. `pow(+-0, -inf)` is +inf
+and signals NOTHING - it is the |x| < 1 row, and the divideByZero is
+the pole at a FINITE negative exponent rather than the limit. And a
+signaling NaN is not covered by 9.2.1's "even a quiet NaN" rows, so
+`pow(sNaN, 0)` raises invalid and delivers the canonical quiet NaN
+where C returns 1; that deviation is deliberate and documented rather
+than accidental.
+
+The vectors carry them: `<fmt>-transcend[-<rnd>].jsonl`, twenty new
+sets in the published directory, replayed by `cft_conformance` like
+everything else. They are separate files because these are library
+entry points rather than opcodes - a case names a FUNCTION, and there
+is no opcode field to put that in - which also means a consumer that
+predates ABI 0.3 reads exactly the files it always read.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future
@@ -409,6 +492,19 @@ oracles - current numbers, with docs/VALIDATION.md as the ledger:
 | `clause5_check.py`, the completion set vs the model | 112,372 (all entry points, 16 conversion pairs, chunk-crossing batches, the fp256 full-gap remainder) | zero disagreements, per-element flags |
 | native-oracle soak vs the host CPU's IEEE hardware | 23.875 billion (exhaustive fp32 sqrt, all five attributes) | zero value or flag disagreements |
 | MPFR parity, all four formats, all five attributes | 999,000 | zero disagreements |
+
+And the transcendental era (2026-09-02), where MPFR is not the third
+oracle but the only one - libm is neither correctly rounded nor
+reproducible, so there is no CPU campaign to calibrate against even at
+fp32:
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay (40 sets: 20 opcode, 20 transcendental) | 456,325 | every case, bits and flags |
+| `transcend_check.py`, the nine vs the model | 77,315 | zero disagreements, per-element flags |
+| the same, with the library forced to start below the precision it needs | 72,275 | identical through the escalation path |
+| MPFR parity, the nine functions | 95,680 | zero value AND zero flag mismatches |
+| `cft.hpp` vs `cft.h`, every entry point twice | 3,267 at C++17 and again at C++20 | identical encodings and flags |
 
 The second table is the one that matters for tiles. It is the software
 statement of the property the hardware has to keep: cutting a

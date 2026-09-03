@@ -25,6 +25,7 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#include "transcend.h"
 
 #define MAX_ELEM   32       /* fp256 */
 #define LINE_MAX   4096
@@ -323,6 +324,239 @@ static cft_status array_pass(cft_device *dev, int fi, int rnd, int esz,
     return ret;
 }
 
+/* ---- the transcendental sets -------------------------------------- *
+ *
+ * A different schema and a different dispatch, in their own files: the
+ * phase-1 transcendentals are library entry points rather than opcodes,
+ * so a case names a FUNCTION and there is no opcode field to put it in.
+ * Keeping them separate also means a consumer that predates ABI 0.3
+ * reads exactly the files it always read, and one that skips these
+ * skips a file rather than failing a line.
+ *
+ * Replayed the same two ways as the opcode sets, for the same two
+ * reasons: one element at a time pins each case's flags exactly, and
+ * whole arrays exercise the batch loop and the flag OR.
+ */
+
+typedef struct {
+    int      fn;
+    uint8_t  a[MAX_ELEM], b[MAX_ELEM], d[MAX_ELEM];
+    uint32_t flags;
+} cft_tr_case;
+
+static cft_status transcend_array_pass(cft_device *dev, int fi, int rnd,
+                                       int esz, const cft_tr_case *cases,
+                                       size_t ncases, const char *path,
+                                       rep *r, const char *const *rnames)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    uint8_t *a = NULL, *b = NULL, *got = NULL;
+    cft_status ret = CFT_OK;
+    int fn;
+
+    if (ncases == 0)
+        return CFT_OK;
+    a   = (uint8_t *)malloc(ncases * (size_t)esz);
+    b   = (uint8_t *)malloc(ncases * (size_t)esz);
+    got = (uint8_t *)malloc(ncases * (size_t)esz);
+    if (!a || !b || !got) {
+        free(a); free(b); free(got);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+
+    for (fn = 0; fn < CFT_TR_COUNT && ret == CFT_OK; fn++) {
+        size_t k = 0, i, batch;
+        uint32_t want_flags = 0, got_flags = 0;
+        cft_status st;
+
+        for (i = 0; i < ncases; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            memcpy(a + k * (size_t)esz, cases[i].a, (size_t)esz);
+            memcpy(b + k * (size_t)esz, cases[i].b, (size_t)esz);
+            want_flags |= cases[i].flags;
+            k++;
+        }
+        if (k == 0)
+            continue;
+        batch = k;
+
+        memset(got, 0, k * (size_t)esz);
+        st = cft_tr_apply(dev, fn, (cft_format)fi, (cft_round)rnd, a,
+                          cft_tr_arity(fn) == 2 ? b : NULL, got, k,
+                          &got_flags);
+        if (st != CFT_OK) {
+            rep_add(r, "%s: array pass, %s x%lu: failed: %s\n",
+                    path, cft_tr_name(fn), (unsigned long)k,
+                    cft_strerror(st));
+            ret = st;
+            break;
+        }
+
+        k = 0;
+        for (i = 0; i < ncases && ret == CFT_OK; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            if (memcmp(got + k * (size_t)esz, cases[i].d, (size_t)esz) != 0) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                format_hex_elem(cases[i].d, esz, hw);
+                format_hex_elem(got + k * (size_t)esz, esz, hg);
+                r->used = 0;
+                if (r->buf && r->size)
+                    r->buf[0] = '\0';
+                rep_add(r, "%s: ARRAY PASS element %lu of %lu (%s %s %s)\n"
+                           "  expected %s\n  got      %s\n"
+                           "  the same case passes one element at a time, "
+                           "so this is the batch loop\n",
+                        path, (unsigned long)k, (unsigned long)batch,
+                        f->name, cft_tr_name(fn), rnames[rnd], hw, hg);
+                ret = CFT_ERR_INTERNAL;
+            }
+            k++;
+        }
+        if (ret == CFT_OK && got_flags != want_flags) {
+            r->used = 0;
+            if (r->buf && r->size)
+                r->buf[0] = '\0';
+            rep_add(r, "%s: ARRAY PASS flags for %s %s over %lu elements: "
+                       "got 0x%02x, expected the OR of the cases 0x%02x\n",
+                    path, cft_tr_name(fn), rnames[rnd],
+                    (unsigned long)batch, (unsigned)got_flags,
+                    (unsigned)want_flags);
+            ret = CFT_ERR_INTERNAL;
+        }
+    }
+
+    free(a); free(b); free(got);
+    return ret;
+}
+
+static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
+                                const char *path, rep *r,
+                                const char *const *rnames, uint64_t *total)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    char line[LINE_MAX];
+    unsigned long lineno = 0;
+    cft_tr_case *cases = NULL;
+    size_t ncases = 0, ccap = 0;
+    cft_status arr;
+    FILE *fp = fopen(path, "r");
+
+    if (!fp)
+        return CFT_OK;                    /* absent is not a failure */
+
+    while (fgets(line, (int)sizeof line, fp)) {
+        char tok[TOKEN_MAX];
+        uint8_t ea[MAX_ELEM], eb[MAX_ELEM];
+        uint8_t want_d[MAX_ELEM], got_d[MAX_ELEM];
+        uint32_t want_flags = 0, got_flags = 0;
+        int fn = -1, rnd = -1, binary;
+        cft_status st;
+
+        lineno++;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+            continue;
+        {
+            const char *why = NULL;
+            if (field_string(line, "fn", tok, sizeof tok))
+                why = "no \"fn\" field - this is not a transcendental set";
+            else if ((fn = cft_tr_from_name(tok)) < 0)
+                why = "unknown transcendental name";
+            else if (field_string(line, "rnd", tok, sizeof tok))
+                why = "no \"rnd\" field";
+            else if ((rnd = rnd_from_name(tok)) < 0)
+                why = "unknown rounding attribute";
+            else if (field_u32(line, "flags", &want_flags))
+                why = "no \"flags\" field";
+            if (why) {
+                fclose(fp);
+                free(cases);
+                rep_add(r, "%s:%lu: %s\n", path, lineno, why);
+                return CFT_ERR_ARTIFACT;
+            }
+        }
+        binary = cft_tr_arity(fn) == 2;
+        memset(eb, 0, sizeof eb);
+
+#define TGET(key, dst)                                                   \
+        if (field_string(line, key, tok, sizeof tok) ||                  \
+            parse_hex_elem(tok, dst, esz)) {                             \
+            fclose(fp);                                                  \
+            free(cases);                                                 \
+            rep_add(r, "%s:%lu: bad \"%s\" field\n", path, lineno, key); \
+            return CFT_ERR_ARTIFACT;                                     \
+        }
+        TGET("a", ea)
+        if (binary)
+            TGET("b", eb)
+        TGET("d", want_d)
+#undef TGET
+
+        memset(got_d, 0, (size_t)esz);
+        st = cft_tr_apply(dev, fn, (cft_format)fi, (cft_round)rnd, ea,
+                          binary ? eb : NULL, got_d, 1, &got_flags);
+        if (st != CFT_OK) {
+            fclose(fp);
+            free(cases);
+            rep_add(r, "%s:%lu: %s failed: %s\n", path, lineno,
+                    cft_tr_name(fn), cft_strerror(st));
+            return st;
+        }
+        (*total)++;
+
+        if (memcmp(got_d, want_d, (size_t)esz) != 0 ||
+            got_flags != want_flags) {
+            char ha[2 * MAX_ELEM + 3], hb[2 * MAX_ELEM + 3];
+            char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+            fclose(fp);
+            free(cases);
+            format_hex_elem(ea, esz, ha);
+            format_hex_elem(eb, esz, hb);
+            format_hex_elem(want_d, esz, hw);
+            format_hex_elem(got_d, esz, hg);
+            r->used = 0;
+            if (r->buf && r->size)
+                r->buf[0] = '\0';
+            rep_add(r, "%s:%lu: %s %s %s\n"
+                        "  a        %s\n"
+                        "  b        %s\n"
+                        "  expected %s flags 0x%02x\n"
+                        "  got      %s flags 0x%02x\n",
+                    path, lineno, f->name, cft_tr_name(fn), rnames[rnd],
+                    ha, binary ? hb : "-", hw, (unsigned)want_flags,
+                    hg, (unsigned)got_flags);
+            return CFT_ERR_INTERNAL;
+        }
+
+        if (ncases == ccap) {
+            size_t want = ccap ? ccap * 2 : 4096;
+            cft_tr_case *bigger = (cft_tr_case *)realloc(
+                cases, want * sizeof *cases);
+            if (!bigger) {
+                fclose(fp);
+                free(cases);
+                rep_add(r, "out of memory holding %s\n", path);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+            cases = bigger;
+            ccap = want;
+        }
+        cases[ncases].fn = fn;
+        cases[ncases].flags = want_flags;
+        memcpy(cases[ncases].a, ea, (size_t)esz);
+        memcpy(cases[ncases].b, eb, (size_t)esz);
+        memcpy(cases[ncases].d, want_d, (size_t)esz);
+        ncases++;
+    }
+    fclose(fp);
+
+    arr = transcend_array_pass(dev, fi, ri, esz, cases, ncases, path, r,
+                               rnames);
+    free(cases);
+    return arr;
+}
+
 /* ---- the replay --------------------------------------------------- */
 
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
@@ -509,6 +743,39 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 if (cases_checked)
                     *cases_checked = total;
                 return arr;
+            }
+        }
+
+        /* The transcendental sets, in their own files and with their
+         * own schema. A device that carries the format carries these
+         * too: they are host operations, so there is no capability to
+         * ask about. */
+        for (ri = 0; ri < 5; ri++) {
+            char path[512];
+            cft_status st;
+            FILE *probe;
+
+            if (ri == 0)
+                snprintf(path, sizeof path, "%s/%s-transcend.jsonl", dir,
+                         f->name);
+            else
+                snprintf(path, sizeof path, "%s/%s-transcend-%s.jsonl", dir,
+                         f->name, rnames[ri]);
+            probe = fopen(path, "r");
+            if (!probe)
+                continue;
+            fclose(probe);
+            if (!supported) {
+                rep_add(&r, "%s: skipped, %s not on this device\n",
+                        path, f->name);
+                continue;
+            }
+            sets++;
+            st = transcend_set(dev, fi, ri, esz, path, &r, rnames, &total);
+            if (st != CFT_OK) {
+                if (cases_checked)
+                    *cases_checked = total;
+                return st;
             }
         }
     }

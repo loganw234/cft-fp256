@@ -1470,6 +1470,49 @@ rounding composed from FMA; a fused on-chip program via the orbit
 sequencer is the recorded path to cutting the round trips without
 touching the contract.
 
+## The transcendentals, phase 1 (status, 2026-09-02)
+
+exp, expm1, exp2, log, log1p, log2, log10, pow and hypot ship as ABI
+0.3, correctly rounded at all four formats under all five rounding
+attributes with clause 9.2.1's special values and exact flags. Zero
+RTL: like most of the clause-5 completion set they are host operations,
+and unlike it they could not have been anything else. Division composes
+from the tile's opcodes because it has an exactly measurable residual -
+`a - q*b` is one fused multiply away and is exact - and an exponential
+has none. docs/TRANSCENDENTALS.md is the design, its proofs and its
+gaps.
+
+What that closed, and what it did not:
+
+- **Closed.** The largest remaining hole in the determinism claim. An
+  application that calls `exp` was, until now, calling something this
+  project could not score: two accurate implementations disagree in the
+  last bit on a percentage of inputs and neither is wrong. Correctly
+  rounded, they are the same operation, and the vectors score them like
+  everything else.
+- **Not closed: the rest of clause 9.** sin, cos, tan and the inverse
+  trigonometric and hyperbolic functions need one thing this set did
+  not - an argument reduction against pi. That is a different and
+  harder problem: the worst-case cancellation is famously deep, and the
+  reduction constant has to be carried to hundreds of thousands of bits
+  at fp256. The evaluator built here is the right foundation (the error
+  model, the enclosure decision, the escalation policy and the
+  exactness discipline all carry over unchanged), but the reduction is
+  its own design and its own entry.
+- **Not closed: a tile-assisted fast path.** Every one of the nine is
+  host work today, at hundreds of multiprecision operations per
+  element. A polynomial on the tile's FMA for fp32 and fp64, with the
+  host deciding only the cases the polynomial cannot, is the obvious
+  optimisation and is recorded here as one: it would have to reproduce
+  these bits exactly, which makes it a speed change and not a contract
+  change. Nothing has been measured, so nothing is claimed.
+
+The measurements that exist are in docs/VALIDATION.md's 2026-09-02
+entry: 456,325 conformance cases replayed, 77,315 model comparisons,
+95,680 MPFR cases with zero value and zero flag mismatches, and a
+negative control that three gates caught and a fourth was extended to
+catch.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,
