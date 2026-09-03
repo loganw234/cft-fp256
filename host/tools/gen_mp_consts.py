@@ -5,19 +5,31 @@
     python3 host/tools/gen_mp_consts.py                 # write the header
     python3 host/tools/gen_mp_consts.py --check         # verify it
 
-Four numbers, at 1088 bits each: ln 2, log2 e, ln 10 and log10 e. They
-are DERIVED, never transcribed. A hand-typed constant has been wrong in
-this project three times, and a wrong constant here would not crash -
-it would return a plausible number with a silently wrong low bit, which
-is the exact failure mode this library exists to make impossible.
+Six numbers, at 1088 bits each: ln 2, log2 e, ln 10, log10 e, pi and
+1/pi. They are DERIVED, never transcribed. A hand-typed constant has
+been wrong in this project three times, and a wrong constant here would
+not crash - it would return a plausible number with a silently wrong
+low bit, which is the exact failure mode this library exists to make
+impossible.
 
 So the header is generated from mpmath, `--check` regenerates it and
 compares byte for byte (python/tests/test_mp_consts.py runs that on
 every test run), and the C carries its own arithmetic self-test as
-well: cft_mp_consts_selfcheck() multiplies ln2 by log2e and ln10 by
-log10e and requires both products to be 1 to within a few units in the
-last place. The Python check catches a stale header; the C check
-catches a corrupted or truncated one at the point of use.
+well: cft_mp_consts_selfcheck() multiplies ln2 by log2e, ln10 by
+log10e and pi by 1/pi, and requires all three products to be 1 to
+within a few units in the last place. The Python check catches a stale
+header; the C check catches a corrupted or truncated one at the point
+of use.
+
+A reciprocal relation says the two halves of a pair agree with each
+other; it does not say either one is the number it claims to be. For
+pi - the phase-2 constant, and the one whose VALUE the trigonometric
+functions rest on - the C therefore also re-derives pi once per
+process from Machin's formula, pi/4 = 4 atan(1/5) - atan(1/239),
+summed at 256 bits out of small-integer arithmetic that shares nothing
+with this generator or with mpmath. That is an independent derivation
+rather than a consistency check, which is what "derive, don't
+transcribe" actually asks for.
 
 Why 1088 and not "enough": the widest working precision the evaluator
 can reach is 832 bits, plus 32 bits of guard, plus up to 19 bits of
@@ -66,6 +78,8 @@ def constants():
         ("LOG2E", "1 / ln 2", lambda: 1 / mpmath.log(2)),
         ("LN10", "ln 10", lambda: mpmath.log(10)),
         ("LOG10E", "1 / ln 10", lambda: 1 / mpmath.log(10)),
+        ("PI", "pi", lambda: +mpmath.pi),
+        ("INVPI", "1 / pi", lambda: 1 / mpmath.pi),
     ]
 
 

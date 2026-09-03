@@ -483,6 +483,8 @@ int cft_mp_const(cft_mp *r, cft_mp_constant which, int W)
     case CFT_MP_C_LOG2E:  limbs = cft_mp_log2e_limbs;  e = CFT_MP_LOG2E_EXP; break;
     case CFT_MP_C_LN10:   limbs = cft_mp_ln10_limbs;   e = CFT_MP_LN10_EXP; break;
     case CFT_MP_C_LOG10E: limbs = cft_mp_log10e_limbs; e = CFT_MP_LOG10E_EXP; break;
+    case CFT_MP_C_PI:     limbs = cft_mp_pi_limbs;     e = CFT_MP_PI_EXP; break;
+    case CFT_MP_C_INVPI:  limbs = cft_mp_invpi_limbs;  e = CFT_MP_INVPI_EXP; break;
     default: return 1;
     }
     if (W > CFT_MP_CONST_BITS)
@@ -501,15 +503,112 @@ int cft_mp_const(cft_mp *r, cft_mp_constant which, int W)
     return mp_norm(r, W, 0, &v, e, 1);
 }
 
+/* atan(1/n) at W bits, for a small integer n >= 2, by its alternating
+ * series: sum (-1)^k / ((2k+1) n^(2k+1)). Every operand is a small
+ * integer or a previous term divided by one, so this shares nothing at
+ * all with mp_consts.h - which is the point: it is a DERIVATION of pi,
+ * not a consistency check on one.
+ *
+ * The positive and negative terms are accumulated separately and
+ * subtracted once at the end, so the error bound never pays the factor
+ * of two an alternating sum charges per step. */
+static int mp_atan_recip(cft_mp *r, uint32_t n, int W)
+{
+    cft_mp pos, neg, pw, t, q, n2;
+    uint32_t k;
+
+    if (n < 2)
+        return 1;
+    if (cft_mp_set_ui(&pw, W, 0, 1, 0))          /* (1/n)^(2k+1), k=0 */
+        return 1;
+    if (cft_mp_div_ui(&pw, &pw, n, W))
+        return 1;
+    if (cft_mp_set_ui(&n2, W, 0, n, 0))
+        return 1;
+    if (cft_mp_mul(&n2, &n2, &n2, W))            /* n^2 */
+        return 1;
+    cft_mp_copy(&pos, &pw);
+    cft_mp_set_zero(&neg);
+    for (k = 1; k < 4096; k++) {
+        if (cft_mp_div(&pw, &pw, &n2, W))
+            return 1;
+        if (cft_mp_div_ui(&q, &pw, 2 * k + 1, W))
+            return 1;
+        if (q.zero || cft_mp_exp2_of(&q) < cft_mp_exp2_of(&pos) - (long)(W + 8))
+            break;
+        if (k & 1) {
+            if (cft_mp_add(&neg, &neg, &q, W))
+                return 1;
+        } else {
+            if (cft_mp_add(&pos, &pos, &q, W))
+                return 1;
+        }
+    }
+    if (cft_mp_sub(&t, &pos, &neg, W))
+        return 1;
+    cft_mp_copy(r, &t);
+    return 0;
+}
+
+/* Machin: pi = 16 atan(1/5) - 4 atan(1/239). */
+static int mp_pi_machin(cft_mp *r, int W)
+{
+    cft_mp a5, a239, t;
+    if (mp_atan_recip(&a5, 5, W))
+        return 1;
+    if (mp_atan_recip(&a239, 239, W))
+        return 1;
+    cft_mp_shift(&a5, 4);                        /* 16 atan(1/5) */
+    cft_mp_shift(&a239, 2);                      /*  4 atan(1/239) */
+    if (cft_mp_sub(&t, &a5, &a239, W))
+        return 1;
+    cft_mp_copy(r, &t);
+    return 0;
+}
+
+/* The stored pi against Machin's, once. See mpfloat.h for why this is
+ * cached where the reciprocal products are not: it is a derivation of
+ * compile-time data, and it costs about as much as one transcendental.
+ * The tri-state keeps a FAILURE sticky - a bad header must not become
+ * good on the second call. */
+static int pi_derivation_ok(void)
+{
+    static int state;            /* 0 not run, 1 ok, 2 failed */
+    const int W = 256;
+    cft_mp got, want, d;
+
+    if (state)
+        return state == 1 ? 0 : 1;
+    state = 2;
+    if (mp_pi_machin(&got, W))
+        return 1;
+    if (cft_mp_const(&want, CFT_MP_C_PI, W))
+        return 1;
+    if (cft_mp_sub(&d, &got, &want, W))
+        return 1;
+    /* Two W-bit truncations of the same number, one of them summed
+     * over ~150 series terms: a few thousand units in the last place
+     * apart at worst, where a WRONG constant is apart by 2^-1 of
+     * itself. 2^-(W-32) sits far outside the former and far inside the
+     * latter. */
+    if (!d.zero && cft_mp_exp2_of(&d) > -(long)(W - 32))
+        return 1;
+    state = 1;
+    return 0;
+}
+
 int cft_mp_consts_selfcheck(void)
 {
-    static const struct { cft_mp_constant a, b; } pairs[2] = {
+    static const struct { cft_mp_constant a, b; } pairs[3] = {
         { CFT_MP_C_LN2, CFT_MP_C_LOG2E },
         { CFT_MP_C_LN10, CFT_MP_C_LOG10E },
+        { CFT_MP_C_PI, CFT_MP_C_INVPI },
     };
     const int W = 256;
     int i;
-    for (i = 0; i < 2; i++) {
+    if (pi_derivation_ok())
+        return 1;
+    for (i = 0; i < 3; i++) {
         cft_mp x, y, p, one, d;
         if (cft_mp_const(&x, pairs[i].a, W) ||
             cft_mp_const(&y, pairs[i].b, W))
