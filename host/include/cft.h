@@ -987,6 +987,104 @@ CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
                              uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
+ * The augmented arithmetic operations (754-2019 clause 9.5)
+ *
+ *   augmentedAddition(x, y)        cft_augmented_add
+ *   augmentedSubtraction(x, y)     cft_augmented_sub
+ *   augmentedMultiplication(x, y)  cft_augmented_mul
+ *
+ * Each returns a PAIR: r[i], the operation rounded, and e[i], the error
+ * that rounding made. Together they carry the exact result the format
+ * alone cannot hold, which is what a compensated summation, a
+ * double-double product or an exactly-rounded dot product is built out
+ * of - and what those algorithms currently reconstruct by hand from
+ * TwoSum and Dekker splitting, correctly only under assumptions the
+ * compiler is free to break.
+ *
+ * THESE TAKE NO ROUNDING ATTRIBUTE, and that is the standard's choice
+ * rather than a simplification. 9.5 fixes the rounding itself:
+ *
+ *   "This standard specifies a single rounding direction to be used in
+ *    the operations in this subclause, defined as roundTiesTowardZero:
+ *    the floating-point number nearest to the infinitely precise result
+ *    shall be delivered; if the two nearest floating-point numbers
+ *    bracketing an unrepresentable infinitely precise result are
+ *    equally near, the one with smaller magnitude shall be delivered."
+ *
+ * That direction is not one of the five attributes of clause 4.3 and
+ * this library does not add a sixth attribute for it: passing a
+ * cft_round is impossible here because there is nothing to pass. The
+ * tie rule differs from roundTiesToEven only at an exact midpoint, and
+ * only where the lower neighbour's last bit is odd - so an
+ * implementation that quietly used roundTiesToEven would pass every
+ * test that did not aim at that case, which is why the vector sets aim
+ * at it at every binade edge.
+ *
+ * HOST operations, like the clause-5 set and the transcendentals: no
+ * cft_run pass is issued, no bus word is produced, `dev` is context,
+ * `n` is arbitrary and the flag word is the OR across the batch. r and
+ * e must not overlap each other; either may alias a or b, since each
+ * element is read before either output is written. A tile-composed
+ * route (a TwoSum, or an FMA residual for the product) is a plausible
+ * later fast path and would have to reproduce these bits exactly; it is
+ * not what runs today.
+ *
+ * THE SPECIAL CASES, from 9.5 rather than from habit:
+ *
+ *   - Any NaN operand gives the canonical quiet NaN as BOTH results
+ *     ("propagates a NaN as both results"), invalid raised only for a
+ *     signaling one. An invalid operation - inf + (-inf) for the sum,
+ *     inf * 0 for the product - "produces the same quiet NaN for both
+ *     outputs" with invalid raised.
+ *   - An infinite r gives that infinity as BOTH results. When it came
+ *     from an infinite OPERAND it signals nothing; when it came from
+ *     overflow it signals overflow and inexact.
+ *   - OVERFLOW happens strictly above 2^emax x (2 - 2^-p), and a result
+ *     landing exactly ON that midpoint rounds to the largest finite
+ *     "with no change in sign" - and raises NOTHING, because 9.5
+ *     signals inexact "only when roundTiesTowardZero(x + y) overflows".
+ *     Overflow always delivers an infinity here, in both directions:
+ *     "roundTiesTowardZero carries all overflows to infinity with the
+ *     sign of the intermediate result".
+ *   - UNDERFLOW is a statement about the ERROR TERM, not about r: it is
+ *     raised when e is "non-zero and lies strictly between +-b^emin".
+ *     Since e is exact, that is underflow WITHOUT inexact - the one
+ *     place in this contract where those two part company. A subnormal
+ *     r with an exactly representable residual raises nothing at all:
+ *     "the operation's subnormal and zero results are exact".
+ *   - THE SIGN OF A ZERO e is the sign of r when the residual is
+ *     exactly zero, so augmentedAddition(-3, 0) delivers (-3, -0) and
+ *     augmentedAddition(3, -3) delivers (+0, +0). r's own zero sign is
+ *     6.3's: +0 for an exact cancellation, the operands' sign for
+ *     like-signed zeros, the XOR of the signs for a product.
+ *   - e IS ALWAYS REPRESENTABLE for the sum and the difference: both
+ *     operands are multiples of the format's smallest quantum, so their
+ *     exact sum is, and the residual is at most half an ulp of r.
+ *     cft_augmented_mul has the one exception 9.5 names - a product
+ *     residual with "non-zero digits ... strictly between
+ *     +-b^(emin-p+1)" - and delivers that residual ROUNDED the same
+ *     way, raising underflow and inexact. That is the only case in
+ *     which r + e is not exactly x op y, and it is the only case in
+ *     which either operation raises inexact without overflowing.
+ *
+ * python/cft_golden/augmented.py defines every bit and flag;
+ * docs/DETERMINISM.md carries the contract statement and
+ * docs/HOSTAPI.md the design. Part of the 0.6 step.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_augmented_add(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
  *
  * cft_run copies host memory in and out. That is the right default -

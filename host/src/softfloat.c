@@ -123,20 +123,28 @@ static int sf_round_up(int rnd, int sign, int guard, int sticky, int lsb)
     case CFT_SF_RNE: return guard && (sticky || lsb);
     case CFT_SF_RMM: return guard;
     case CFT_SF_RTZ: return 0;
+    /* 754-2019 9.5's roundTiesTowardZero: nearest, and an exact tie
+     * keeps "the one with smaller magnitude" - so increment only
+     * STRICTLY above the midpoint. The lsb never enters, which is the
+     * whole difference from roundTiesToEven. */
+    case CFT_SF_RTTZ: return guard && sticky;
     case CFT_SF_RDN: return sign && (guard || sticky);
     default:         return !sign && (guard || sticky);   /* RUP */
     }
 }
 
 /* IEEE 754-2019 7.4: every mode signals overflow, but only some
- * deliver an infinity. */
+ * deliver an infinity. roundTiesTowardZero joins the two round-to-
+ * nearest attributes here and 9.5 says so in as many words:
+ * "roundTiesTowardZero carries all overflows (see 7.4) to infinity
+ * with the sign of the intermediate result". */
 static int sf_overflow_gives_inf(int rnd, int sign)
 {
     switch (rnd) {
     case CFT_SF_RTZ: return 0;
     case CFT_SF_RDN: return sign;
     case CFT_SF_RUP: return !sign;
-    default:         return 1;                            /* RNE, RMM */
+    default:         return 1;                     /* RNE, RMM, RTTZ */
     }
 }
 

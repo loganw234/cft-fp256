@@ -564,6 +564,269 @@ static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
     return arr;
 }
 
+/* ---- the augmented arithmetic sets (754-2019 9.5) ------------------ *
+ *
+ * A third schema, and the first with TWO outputs per case: an augmented
+ * operation returns the rounded result AND the error that rounding
+ * made, so a line carries "r" and "e" where every other set carries
+ * "d". There is also no "rnd" field, and its absence is normative
+ * rather than an omission - 9.5 fixes the rounding to
+ * roundTiesTowardZero, which is not one of the five attributes, so
+ * there is nothing to record and there is one file per format instead
+ * of one per attribute.
+ *
+ * Replayed the same two ways as everything else: one element at a time,
+ * where a sticky flag word means exactly one case, and then as whole
+ * arrays, which is the only thing here that exercises the batch loop
+ * and the flag OR.
+ */
+
+typedef struct {
+    int      fn;                /* index into AUG_NAMES */
+    uint8_t  a[MAX_ELEM], b[MAX_ELEM], r[MAX_ELEM], e[MAX_ELEM];
+    uint32_t flags;
+} cft_aug_case;
+
+#define AUG_COUNT 3
+static const char *const AUG_NAMES[AUG_COUNT] = {
+    "augmentedAddition", "augmentedSubtraction", "augmentedMultiplication"
+};
+
+static int aug_from_name(const char *s)
+{
+    int i;
+    for (i = 0; i < AUG_COUNT; i++)
+        if (strcmp(AUG_NAMES[i], s) == 0)
+            return i;
+    return -1;
+}
+
+static cft_status aug_apply(cft_device *dev, int fn, cft_format fmt,
+                            const void *a, const void *b, void *r, void *e,
+                            size_t n, uint32_t *flags)
+{
+    switch (fn) {
+    case 0:  return cft_augmented_add(dev, fmt, a, b, r, e, n, flags);
+    case 1:  return cft_augmented_sub(dev, fmt, a, b, r, e, n, flags);
+    default: return cft_augmented_mul(dev, fmt, a, b, r, e, n, flags);
+    }
+}
+
+static cft_status augmented_array_pass(cft_device *dev, int fi, int esz,
+                                       const cft_aug_case *cases,
+                                       size_t ncases, const char *path,
+                                       rep *rp)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    uint8_t *a = NULL, *b = NULL, *gr = NULL, *ge = NULL;
+    cft_status ret = CFT_OK;
+    int fn;
+
+    if (ncases == 0)
+        return CFT_OK;
+    a  = (uint8_t *)malloc(ncases * (size_t)esz);
+    b  = (uint8_t *)malloc(ncases * (size_t)esz);
+    gr = (uint8_t *)malloc(ncases * (size_t)esz);
+    ge = (uint8_t *)malloc(ncases * (size_t)esz);
+    if (!a || !b || !gr || !ge) {
+        free(a); free(b); free(gr); free(ge);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+
+    for (fn = 0; fn < AUG_COUNT && ret == CFT_OK; fn++) {
+        size_t k = 0, i, batch;
+        uint32_t want_flags = 0, got_flags = 0;
+        cft_status st;
+
+        for (i = 0; i < ncases; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            memcpy(a + k * (size_t)esz, cases[i].a, (size_t)esz);
+            memcpy(b + k * (size_t)esz, cases[i].b, (size_t)esz);
+            want_flags |= cases[i].flags;
+            k++;
+        }
+        if (k == 0)
+            continue;
+        batch = k;
+
+        memset(gr, 0, k * (size_t)esz);
+        memset(ge, 0, k * (size_t)esz);
+        st = aug_apply(dev, fn, (cft_format)fi, a, b, gr, ge, k, &got_flags);
+        if (st != CFT_OK) {
+            rep_add(rp, "%s: array pass, %s x%lu: failed: %s\n",
+                    path, AUG_NAMES[fn], (unsigned long)k, cft_strerror(st));
+            ret = st;
+            break;
+        }
+
+        k = 0;
+        for (i = 0; i < ncases && ret == CFT_OK; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            if (memcmp(gr + k * (size_t)esz, cases[i].r, (size_t)esz) != 0 ||
+                memcmp(ge + k * (size_t)esz, cases[i].e, (size_t)esz) != 0) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                char hw2[2 * MAX_ELEM + 3], hg2[2 * MAX_ELEM + 3];
+                format_hex_elem(cases[i].r, esz, hw);
+                format_hex_elem(gr + k * (size_t)esz, esz, hg);
+                format_hex_elem(cases[i].e, esz, hw2);
+                format_hex_elem(ge + k * (size_t)esz, esz, hg2);
+                rp->used = 0;
+                if (rp->buf && rp->size)
+                    rp->buf[0] = '\0';
+                rep_add(rp, "%s: ARRAY PASS element %lu of %lu (%s %s)\n"
+                            "  expected r %s e %s\n"
+                            "  got      r %s e %s\n"
+                            "  the same case passes one element at a time, "
+                            "so this is the batch loop\n",
+                        path, (unsigned long)k, (unsigned long)batch,
+                        f->name, AUG_NAMES[fn], hw, hw2, hg, hg2);
+                ret = CFT_ERR_INTERNAL;
+            }
+            k++;
+        }
+        if (ret == CFT_OK && got_flags != want_flags) {
+            rp->used = 0;
+            if (rp->buf && rp->size)
+                rp->buf[0] = '\0';
+            rep_add(rp, "%s: ARRAY PASS flags for %s over %lu elements: "
+                        "got 0x%02x, expected the OR of the cases 0x%02x\n",
+                    path, AUG_NAMES[fn], (unsigned long)batch,
+                    (unsigned)got_flags, (unsigned)want_flags);
+            ret = CFT_ERR_INTERNAL;
+        }
+    }
+
+    free(a); free(b); free(gr); free(ge);
+    return ret;
+}
+
+static cft_status augmented_set(cft_device *dev, int fi, int esz,
+                                const char *path, rep *rp, uint64_t *total)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    char line[LINE_MAX];
+    unsigned long lineno = 0;
+    cft_aug_case *cases = NULL;
+    size_t ncases = 0, ccap = 0;
+    cft_status arr;
+    FILE *fp = fopen(path, "r");
+
+    if (!fp)
+        return CFT_OK;                    /* absent is not a failure */
+
+    while (fgets(line, (int)sizeof line, fp)) {
+        char tok[TOKEN_MAX];
+        uint8_t ea[MAX_ELEM], eb[MAX_ELEM];
+        uint8_t want_r[MAX_ELEM], want_e[MAX_ELEM];
+        uint8_t got_r[MAX_ELEM], got_e[MAX_ELEM];
+        uint32_t want_flags = 0, got_flags = 0;
+        int fn = -1;
+        cft_status st;
+
+        lineno++;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+            continue;
+        {
+            const char *why = NULL;
+            if (field_string(line, "fn", tok, sizeof tok))
+                why = "no \"fn\" field - this is not an augmented set";
+            else if ((fn = aug_from_name(tok)) < 0)
+                why = "unknown augmented operation name";
+            else if (field_u32(line, "flags", &want_flags))
+                why = "no \"flags\" field";
+            if (why) {
+                fclose(fp);
+                free(cases);
+                rep_add(rp, "%s:%lu: %s\n", path, lineno, why);
+                return CFT_ERR_ARTIFACT;
+            }
+        }
+
+#define AGET(key, dst)                                                   \
+        if (field_string(line, key, tok, sizeof tok) ||                  \
+            parse_hex_elem(tok, dst, esz)) {                             \
+            fclose(fp);                                                  \
+            free(cases);                                                 \
+            rep_add(rp, "%s:%lu: bad \"%s\" field\n", path, lineno, key); \
+            return CFT_ERR_ARTIFACT;                                     \
+        }
+        AGET("a", ea)
+        AGET("b", eb)
+        AGET("r", want_r)
+        AGET("e", want_e)
+#undef AGET
+
+        memset(got_r, 0, (size_t)esz);
+        memset(got_e, 0, (size_t)esz);
+        st = aug_apply(dev, fn, (cft_format)fi, ea, eb, got_r, got_e, 1,
+                       &got_flags);
+        if (st != CFT_OK) {
+            fclose(fp);
+            free(cases);
+            rep_add(rp, "%s:%lu: %s failed: %s\n", path, lineno,
+                    AUG_NAMES[fn], cft_strerror(st));
+            return st;
+        }
+        (*total)++;
+
+        if (memcmp(got_r, want_r, (size_t)esz) != 0 ||
+            memcmp(got_e, want_e, (size_t)esz) != 0 ||
+            got_flags != want_flags) {
+            char ha[2 * MAX_ELEM + 3], hb[2 * MAX_ELEM + 3];
+            char hwr[2 * MAX_ELEM + 3], hwe[2 * MAX_ELEM + 3];
+            char hgr[2 * MAX_ELEM + 3], hge[2 * MAX_ELEM + 3];
+            fclose(fp);
+            free(cases);
+            format_hex_elem(ea, esz, ha);
+            format_hex_elem(eb, esz, hb);
+            format_hex_elem(want_r, esz, hwr);
+            format_hex_elem(want_e, esz, hwe);
+            format_hex_elem(got_r, esz, hgr);
+            format_hex_elem(got_e, esz, hge);
+            rp->used = 0;
+            if (rp->buf && rp->size)
+                rp->buf[0] = '\0';
+            rep_add(rp, "%s:%lu: %s %s\n"
+                        "  a        %s\n"
+                        "  b        %s\n"
+                        "  expected r %s e %s flags 0x%02x\n"
+                        "  got      r %s e %s flags 0x%02x\n",
+                    path, lineno, f->name, AUG_NAMES[fn], ha, hb,
+                    hwr, hwe, (unsigned)want_flags,
+                    hgr, hge, (unsigned)got_flags);
+            return CFT_ERR_INTERNAL;
+        }
+
+        if (ncases == ccap) {
+            size_t want = ccap ? ccap * 2 : 4096;
+            cft_aug_case *bigger = (cft_aug_case *)realloc(
+                cases, want * sizeof *cases);
+            if (!bigger) {
+                fclose(fp);
+                free(cases);
+                rep_add(rp, "out of memory holding %s\n", path);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+            cases = bigger;
+            ccap = want;
+        }
+        cases[ncases].fn = fn;
+        cases[ncases].flags = want_flags;
+        memcpy(cases[ncases].a, ea, (size_t)esz);
+        memcpy(cases[ncases].b, eb, (size_t)esz);
+        memcpy(cases[ncases].r, want_r, (size_t)esz);
+        memcpy(cases[ncases].e, want_e, (size_t)esz);
+        ncases++;
+    }
+    fclose(fp);
+
+    arr = augmented_array_pass(dev, fi, esz, cases, ncases, path, rp);
+    free(cases);
+    return arr;
+}
+
 /* ---- the replay --------------------------------------------------- */
 
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
@@ -783,6 +1046,34 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 if (cases_checked)
                     *cases_checked = total;
                 return st;
+            }
+        }
+
+        /* The augmented arithmetic set (754-2019 9.5): ONE file per
+         * format, because the standard fixes the rounding and there is
+         * no attribute to sweep. Two outputs per case. */
+        {
+            char path[512];
+            cft_status st;
+            FILE *probe;
+
+            snprintf(path, sizeof path, "%s/%s-augmented.jsonl", dir,
+                     f->name);
+            probe = fopen(path, "r");
+            if (probe) {
+                fclose(probe);
+                if (!supported) {
+                    rep_add(&r, "%s: skipped, %s not on this device\n",
+                            path, f->name);
+                } else {
+                    sets++;
+                    st = augmented_set(dev, fi, esz, path, &r, &total);
+                    if (st != CFT_OK) {
+                        if (cases_checked)
+                            *cases_checked = total;
+                        return st;
+                    }
+                }
             }
         }
     }
