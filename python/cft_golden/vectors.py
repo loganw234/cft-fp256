@@ -654,3 +654,171 @@ def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
             cases += [(fn, a, b)
                       for a, b in trig_atan2_pairs(fmt, extra, seed + 4)]
     return cases
+
+
+# ---- the character-conversion sets -----------------------------------
+
+# Sequences that are NOT in 5.12's syntax and must be refused rather
+# than guessed at. Kept free of quotes and backslashes so the emitted
+# JSON needs no escapes and cft_conformance's scanner needs no
+# unescaper - gen_vectors.py asserts that rather than trusting it.
+DECIMAL_REFUSALS = (
+    "", "+", "-", ".", "-.", "e5", "1e", "1e+", "1e-", "1 ", " 1", "1.5.5",
+    "1,5", "0x1p+0", "1p5", "--1", "1-", "nan(", "nan()", "nan(x)",
+    "nan(0x)", "nan(-1)", "infi", "nanx", "snan()", "1.5e5x", "1_000",
+)
+
+HEX_REFUSALS = (
+    "", "0x", "0x1", "0x.p+0", "0xp+1", "0x1p", "0x1p+", "0x1.8",
+    "1.8p+3", "0x1.8e+3", "0x1.8p+3x", "0xg.1p+0", "0x1..8p+0",
+    " 0x1p+0", "1e5", "0x1p+0.5",
+)
+
+# Every spelling of every special 5.12.1 names, read by both parsers.
+SPECIAL_SEQUENCES = (
+    "inf", "-inf", "+inf", "INF", "Inf", "infinity", "-INFINITY",
+    "nan", "-nan", "NaN", "NAN", "snan", "-snan", "SNaN",
+    "nan(1)", "nan(0x1)", "-nan(0x2)", "NAN(0X3)", "snan(0x1)",
+    "-snan(5)", "0", "-0", "+0", "0.0", "-0.0e10",
+)
+
+
+def character_cases(fmt: FpFormat, extra: int, seed: int = 20):
+    """The clause-5.12 and 9.7 cases, as tagged tuples gen_vectors.py
+    turns into records:
+
+        ("from_decimal", s)          a sequence to convert in
+        ("from_decimal_refuse", s)   a sequence that must be refused
+        ("to_decimal", bits, h)      an encoding to write out, h digits
+                                     (0 = the exact conversion)
+        ("from_hex", s) / ("from_hex_refuse", s) / ("to_hex", bits)
+        ("payload", op, bits)        one of the three 9.7 operations
+
+    The families are the ones a conversion is actually got wrong on:
+    exact halfway sequences that only the last digit decides, digit
+    strings far longer than the format's precision, exponents inside
+    and past the bands where the library answers without computing,
+    subnormal landings, the round-trip digit counts at exactly Pmin and
+    at Pmin - 1, and every spelling of every special. Random digit
+    strings are in there too, but they are the part that scores least:
+    a uniformly random decimal essentially never lands on a rounding
+    boundary."""
+    from . import chars
+
+    rng = random.Random(seed)
+    h = chars.pmin(fmt)
+    cases = []
+
+    # -- encodings to write out ------------------------------------
+    outs = list(interesting_operands(fmt))
+    outs += [sf.qnan_bits(fmt) | 1, sf.snan_bits(fmt, 1),
+             sf.qnan_bits(fmt) | (chars.max_payload(fmt) - 1),
+             fmt.sign_mask | sf.snan_bits(fmt, 3)]
+    for k in (1, 3, 5, 9, 11):
+        for s in (0, 1):
+            _extend(outs, _val(fmt, s, k, -3), _val(fmt, s, k * 5, -1))
+    span = 30 if fmt.width > 64 else fmt.emax
+    for _ in range(extra):
+        m = rng.getrandbits(fmt.prec) | (1 << (fmt.prec - 1))
+        outs.append(sf.round_pack(fmt, rng.getrandbits(1), m,
+                                  rng.randint(-span, span) - fmt.man_w,
+                                  sf.RND_RNE)[0])
+    for bits in outs:
+        # The wide formats' exponent extremes are left out of the dense
+        # sweep and covered deliberately just below. Their exact
+        # decimals run to tens of thousands of digits, which the
+        # library derives in full at every digit count (cft.h carries
+        # the cost note), so sweeping them here would put minutes of
+        # replay into every consumer's run and add no case the edge
+        # pass does not already carry.
+        kind, _, em, ee, _, _ = chars._decode(fmt, bits)
+        dense = (fmt.width <= 64 or kind != "finite" or
+                 abs(ee + em.bit_length() - 1) <= 400)
+        for digits in (0, 1, 2, h - 1, h, h + 3):
+            if dense:
+                cases.append(("to_decimal", bits, digits))
+        cases.append(("to_hex", bits))
+
+    # The ends of the exponent range, where the exact decimal runs to
+    # tens of thousands of digits and the powering path is the whole
+    # cost of the conversion. A deliberate handful, not a sample: at
+    # fp256 one of these is a 183,000-character sequence.
+    edges = [sf.min_subnormal_bits(fmt, 0), sf.min_subnormal_bits(fmt, 1),
+             sf.max_subnormal_bits(fmt, 0), sf.min_normal_bits(fmt, 0),
+             sf.max_normal_bits(fmt, 0)]
+    for bits in edges:
+        for digits in (0, 1, h - 1, h):
+            cases.append(("to_decimal", bits, digits))
+        cases.append(("to_hex", bits))
+
+    # -- sequences to read in --------------------------------------
+    seqs = list(SPECIAL_SEQUENCES)
+    seqs += ["1", "-1", "1.", ".5", "1.5", "1e0", "1E0", "1e+0", "10e-1",
+             "0.1", "2.5", "1.25", "9" * 30, "0." + "0" * 25 + "1",
+             "1e999999999999", "-1e-999999999999", "1e99999", "1e-99999"]
+    for bits in edges + [sf.one_bits(fmt, 0)]:
+        text, _ = chars.to_decimal(fmt, bits, 0)
+        seqs.append(text)
+        seqs.append(chars.to_decimal(fmt, bits, h)[0])
+        seqs.append(chars.to_decimal(fmt, bits, h - 1)[0])
+
+    # Exact halfway sequences between neighbouring encodings, and the
+    # same sequence nudged either side of the tie: the cases where the
+    # attribute, and nothing else, decides the answer.
+    for bits in (sf.one_bits(fmt, 0), sf.min_normal_bits(fmt, 0),
+                 sf.min_subnormal_bits(fmt, 0), _val(fmt, 0, 3, -1)):
+        if bits is None:
+            continue
+        k1, sign, m1, e1, _, _ = chars._decode(fmt, bits)
+        k2, _, m2, e2, _, _ = chars._decode(fmt, bits + 1)
+        if k1 != "finite" or k2 != "finite":
+            continue
+        e = min(e1, e2) - 1
+        mid = ((m1 << (e1 - e)) + (m2 << (e2 - e))) // 2
+        ds, exp10 = chars.exact_digits(mid, e)
+        seqs.append(chars._format_finite(sign, ds, exp10))
+        seqs.append(chars._format_finite(1, ds, exp10))
+        seqs.append(chars._format_finite(sign, ds + "1", exp10))
+        if ds[-1] != "0":
+            seqs.append(chars._format_finite(
+                sign, ds[:-1] + str(int(ds[-1]) - 1) + "9", exp10))
+
+    for _ in range(extra * 2):
+        nd = rng.randint(1, 40)
+        d = "".join(rng.choice("0123456789") for _ in range(nd))
+        k = rng.randint(-(fmt.emax // 3 + 20), fmt.emax // 3 + 20)
+        seqs.append(("-" if rng.getrandbits(1) else "") + d + "e" + str(k))
+
+    cases += [("from_decimal", s) for s in seqs]
+    cases += [("from_decimal_refuse", s) for s in DECIMAL_REFUSALS]
+    cases.append(("from_decimal_refuse", "nan(0x%x)" % chars.max_payload(fmt)))
+
+    hexes = list(SPECIAL_SEQUENCES[:20])
+    hexes += ["0x0p+0", "-0x0p+0", "0x1p+0", "-0x1p+0", "0X1P+0",
+              "0x1.8p+1", "0x.8p+1", "0x8.p-3", "0x1p+999999999999",
+              "0x1p-999999999999", "0xfffffffffffffffffffffffffffffffffp-4"]
+    for bits in edges + [sf.one_bits(fmt, 0)]:
+        hexes.append(chars.to_hex(fmt, bits))
+    for _ in range(extra):
+        nd = rng.randint(1, fmt.prec // 4 + 4)
+        d = "".join(rng.choice("0123456789abcdefABCDEF") for _ in range(nd))
+        e = rng.randint(-(fmt.emax + 30), fmt.emax + 30)
+        hexes.append(("-" if rng.getrandbits(1) else "") + "0x" + d + "p" +
+                     ("+" if e >= 0 else "") + str(e))
+    cases += [("from_hex", s) for s in hexes]
+    cases += [("from_hex_refuse", s) for s in HEX_REFUSALS]
+
+    # -- the 9.7 payload operations --------------------------------
+    pay = list(outs[:40])
+    pay += [sf.qnan_bits(fmt), sf.snan_bits(fmt, 1),
+            sf.qnan_bits(fmt) | (chars.max_payload(fmt) - 1),
+            sf.zero_bits(fmt, 0), sf.zero_bits(fmt, 1),
+            sf.one_bits(fmt, 0), sf.one_bits(fmt, 1)]
+    # the admissibility edge: the largest admissible payload, the first
+    # inadmissible one, and a non-integer just below both
+    for v in (chars.max_payload(fmt) - 1, chars.max_payload(fmt)):
+        _extend(pay, _val(fmt, 0, v, 0), _val(fmt, 1, v, 0),
+                _val(fmt, 0, 2 * v - 1, -1))
+    for op in ("get_payload", "set_payload", "set_payload_signaling"):
+        cases += [("payload", op, bits) for bits in pay]
+    return cases

@@ -1165,6 +1165,348 @@ int main(void)
               "scaleb in place matches (staged path)");
     }
 
+    /* --- the character conversions and the payload operations ------
+     *
+     * Part of the 0.6 step. character_check.py proves these against the
+     * model at scale and the vectors replay them; what belongs HERE is
+     * this file's charter - the refusals, the sizing protocol, the
+     * aliasing rule, and a handful of results whose expected bits and
+     * characters come from reading 754-2019 clauses 5.12 and 9.7 by
+     * hand rather than from running either implementation.
+     *
+     * Ending with a NEGATIVE CONTROL, because the headline claim here
+     * is a round trip, and a round trip is the easiest property in this
+     * library to pass for the wrong reason: an implementation that
+     * quietly ignored the digit count and always wrote the exact value
+     * would satisfy every round-trip check ever written. So the last
+     * block asserts that the round trip FAILS one digit below Pmin -
+     * which it can only do if the digit count is being honoured.
+     */
+    {
+        uint8_t a[8], d[8];
+        char text[64];
+        const char *in[4];
+        size_t need = 0, bad = 0;
+        uint32_t f4 = 0xdead;
+        cft_status s2;
+
+        /* Pmin(bf) = 1 + ceiling(p * log10 2). 5.12.2 lists 9, 17 and
+         * 36 for the first three rungs; 73 is the same formula at
+         * p = 237. */
+        CHECK(cft_format_decimal_digits(CFT_FP32) == 9 &&
+              cft_format_decimal_digits(CFT_FP64) == 17 &&
+              cft_format_decimal_digits(CFT_FP128) == 36 &&
+              cft_format_decimal_digits(CFT_FP256) == 73,
+              "Pmin per 5.12.2");
+        CHECK(cft_format_decimal_digits((cft_format)9) == 0,
+              "Pmin of an unknown format is 0");
+
+        /* -- reading a sequence in -- */
+        in[0] = "1.5";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, &bad,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3fc00000u && f4 == 0,
+              "1.5 is exact in binary32 and raises nothing");
+        in[0] = "0.1";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3dcccccdu &&
+              f4 == CFT_FLAG_INEXACT, "0.1 to nearest is 0x3dcccccd");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RTZ, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3dccccccu &&
+              f4 == CFT_FLAG_INEXACT, "0.1 toward zero is one ulp below");
+        /* 2^24 + 1 is exactly halfway between 2^24 and 2^24 + 2, so
+         * the attribute alone decides it - ties-to-even takes the even
+         * significand, ties-to-away the other one. */
+        in[0] = "16777217";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x4b800000u &&
+              f4 == CFT_FLAG_INEXACT, "2^24+1 ties to even");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RMM, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x4b800001u &&
+              f4 == CFT_FLAG_INEXACT, "2^24+1 ties away");
+        /* Below half the smallest subnormal in magnitude, so the
+         * result is decided by the attribute's side and both the tiny
+         * and the inexact flags rise (7.5). */
+        in[0] = "1e-45";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x00000001u &&
+              f4 == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "1e-45 rounds up to the smallest subnormal, tiny+inexact");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RTZ, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0u &&
+              f4 == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "1e-45 toward zero is +0, still tiny+inexact");
+        /* Overflow delivers per 7.4's table, exactly as any arithmetic
+         * result does - an infinity to nearest, the largest finite
+         * magnitude toward zero. */
+        in[0] = "3.5e38";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "3.5e38 overflows to +inf");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RTZ, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7f7fffffu &&
+              f4 == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "3.5e38 toward zero delivers maxfinite");
+        /* An exponent no arithmetic could reach still has a defined
+         * answer: the library decides the band without computing
+         * 10^999999999999. */
+        in[0] = "-1e999999999999";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0xff800000u &&
+              f4 == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "an absurd exponent overflows rather than hanging");
+        in[0] = "-1e-999999999999";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x80000000u &&
+              f4 == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "and an absurd negative one underflows to -0");
+        /* A zero decimal is a zero and rounding never changes a sign
+         * (6.3), so the minus survives in every attribute. */
+        in[0] = "-0.000";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RUP, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "-0.000 is -0 even rounding upward");
+
+        /* -- the 5.12.1 words, both directions -- */
+        in[0] = "-INFINITY";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0xff800000u && f4 == 0,
+              "-INFINITY, case insensitive, raises nothing");
+        in[0] = "snan(0x1)";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7f800001u && f4 == 0,
+              "a signaling NaN reads back signaling, and raises NOTHING - "
+              "5.12 exempts these conversions from the sNaN rule");
+        in[0] = "NaN(0X5)";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7fc00005u && f4 == 0,
+              "a payload suffix is read in either case");
+
+        /* -- writing a sequence out -- */
+        put32(a, 0x3f800000u);                            /* 1.0f */
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "1e+0") == 0 && need == 5 &&
+              f4 == 0, "the exact decimal of 1 is 1e+0");
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "1.00000000e+0") == 0 && f4 == 0,
+              "nine digits of 1 keeps its trailing zeros and stays exact");
+        put32(a, 0x3dcccccdu);                            /* the 0.1f above */
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && f4 == 0 &&
+              strcmp(text, "1.00000001490116119384765625e-1") == 0,
+              "the EXACT decimal of the nearest float to 0.1, all of it");
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "1.00000001e-1") == 0 &&
+              f4 == CFT_FLAG_INEXACT,
+              "nine digits of it drops something, so inexact");
+        put32(a, 0x80000000u);
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 17, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "-0") == 0 && f4 == 0,
+              "a zero is -0 at every digit count - it has no digits to pad");
+        put32(a, 0x7f800001u);
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "snan(0x1)") == 0 && f4 == 0,
+              "a signaling NaN writes snan and signals nothing");
+        put32(a, 0x7fc00005u);
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "nan(0x5)") == 0,
+              "a quiet NaN carries its payload out");
+
+        /* -- hexadecimal (5.12.3) -- */
+        put32(a, 0x40400000u);                            /* 3.0f */
+        CHECK(cft_to_hex_char(dev, CFT_FP32, a, text, sizeof text, &need)
+              == CFT_OK && strcmp(text, "0x1.8p+1") == 0,
+              "the shortest exact hex of 3 is 0x1.8p+1");
+        put32(a, 0x00000001u);
+        CHECK(cft_to_hex_char(dev, CFT_FP32, a, text, sizeof text, &need)
+              == CFT_OK && strcmp(text, "0x1p-149") == 0,
+              "a subnormal prints with its TRUE exponent, not a leading 0");
+        put32(a, 0x80000000u);
+        CHECK(cft_to_hex_char(dev, CFT_FP32, a, text, sizeof text, &need)
+              == CFT_OK && strcmp(text, "-0x0p+0") == 0, "-0 in hex");
+        in[0] = "0x1.8p+0";
+        s2 = cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3fc00000u && f4 == 0,
+              "0x1.8p+0 is 1.5 exactly");
+        /* One hex digit more than binary32 holds: 0x1.000001p+0 is
+         * 1 + 2^-24, exactly halfway to the next float, so ties-to-even
+         * takes 1 and toward-positive takes its successor. */
+        in[0] = "0x1.000001p+0";
+        s2 = cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3f800000u &&
+              f4 == CFT_FLAG_INEXACT, "a hex tie rounds to even");
+        s2 = cft_from_hex_char(dev, CFT_FP32, CFT_RUP, in, d, 1, NULL, &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3f800001u &&
+              f4 == CFT_FLAG_INEXACT, "the same tie upward is nextUp(1)");
+
+        /* -- refusals: a status, never a guess -- */
+        {
+            static const char *const bad_seq[] = {
+                "", "+", ".", "1e", "1 ", " 1", "1.5.5", "1,5", "0x1p+0",
+                "nan()", "nan(0x)", "nan(0x400000)", "1_000", NULL
+            };
+            int k2;
+            for (k2 = 0; bad_seq[k2]; k2++) {
+                in[0] = bad_seq[k2];
+                CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                            NULL, &f4)
+                      == CFT_ERR_INVALID_ARGUMENT,
+                      "refused: %s", bad_seq[k2]);
+            }
+        }
+        in[0] = "1.5";                     /* decimal is not hexadecimal */
+        CHECK(cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "the hex parser refuses a decimal sequence");
+        in[0] = "0x1.8";                   /* 5.12.3 requires an exponent */
+        CHECK(cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "5.12.3's grammar requires the binary exponent");
+        /* Which element failed, because a caller reading a file of
+         * numbers needs the line and not just the verdict. */
+        in[0] = "1"; in[1] = "2"; in[2] = "oops"; in[3] = "4";
+        bad = 99;
+        CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 4, &bad,
+                                    &f4) == CFT_ERR_INVALID_ARGUMENT &&
+              bad == 2, "the refusal names the element");
+
+        /* -- the sizing protocol: a short buffer is a status, and the
+         * buffer is not touched. A truncated number is a wrong answer
+         * that looks like a right one. -- */
+        put32(a, 0x3dcccccdu);
+        need = 0;
+        CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, NULL, 0,
+                                  &need, &f4) == CFT_ERR_INVALID_ARGUMENT &&
+              need == 32,
+              "cap 0 asks for the size: 31 characters and a NUL");
+        memset(text, 'Z', sizeof text);
+        CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                  need - 1, &need, &f4)
+              == CFT_ERR_INVALID_ARGUMENT && text[0] == 'Z',
+              "one byte short refuses and writes NOTHING");
+
+        /* -- the 9.7 payload operations (they signal nothing) -- */
+        put32(a, 0x7fc00005u);
+        CHECK(cft_get_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x40a00000u,
+              "getPayload of a NaN carrying 5 is the float 5");
+        put32(a, 0x3f800000u);
+        CHECK(cft_get_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0xbf800000u,
+              "getPayload of a non-NaN is -1, which is 9.7's own answer");
+        put32(a, 0x40a00000u);                            /* 5.0f */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x7fc00005u, "setPayload(5) is a quiet NaN");
+        CHECK(cft_set_payload_signaling(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x7f800005u,
+              "setPayloadSignaling(5) is the signaling form");
+        put32(a, 0x4a800000u);                            /* 2^22 */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u,
+              "2^22 is one past what binary32's payload field holds: +0");
+        put32(a, 0x80000000u);                            /* -0 */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x7fc00000u,
+              "-0 is the integer zero by value, so setPayload takes it");
+        CHECK(cft_set_payload_signaling(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u,
+              "but payload 0 cannot be signaling - that encoding is an "
+              "infinity - so setPayloadSignaling(-0) is +0");
+        put32(a, 0x3fc00000u);                            /* 1.5, not an int */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u, "a non-integer operand gives +0");
+        put32(a, 0xc0a00000u);                            /* -5.0f */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u, "a negative operand gives +0");
+        /* d may alias a. */
+        put32(a, 0x7fc00003u);
+        CHECK(cft_get_payload(dev, CFT_FP32, a, a, 1) == CFT_OK &&
+              get32(a) == 0x40400000u, "getPayload in place");
+        CHECK(cft_set_payload(dev, CFT_FP32, a, a, 1) == CFT_OK &&
+              get32(a) == 0x7fc00003u, "setPayload in place, and back again");
+
+        /* -- THE NEGATIVE CONTROL --
+         *
+         * 0x417ffff5 and 0x417ffff6 are neighbouring binary32
+         * encodings just below 16. At Pmin = 9 digits they write
+         * different sequences and each reads back to itself, which is
+         * 5.12.2's guarantee. At 8 - one digit short - they write the
+         * SAME sequence, so reading it back cannot recover both, and
+         * this asserts that it does not. An implementation that
+         * ignored the digit count and always wrote the exact value
+         * would pass every round-trip check above and fail here, which
+         * is the only reason this block exists.
+         */
+        {
+            char nine_a[64], nine_b[64], eight_a[64], eight_b[64];
+            uint32_t bits_a = 0x417ffff5u, bits_b = 0x417ffff6u;
+            uint32_t back_a, back_b;
+
+            put32(a, bits_a);
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, nine_a,
+                                      sizeof nine_a, &need, &f4) == CFT_OK,
+                  "nine digits of 0x417ffff5");
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 8, eight_a,
+                                      sizeof eight_a, &need, &f4) == CFT_OK,
+                  "eight digits of 0x417ffff5");
+            put32(a, bits_b);
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, nine_b,
+                                      sizeof nine_b, &need, &f4) == CFT_OK,
+                  "nine digits of 0x417ffff6");
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 8, eight_b,
+                                      sizeof eight_b, &need, &f4) == CFT_OK,
+                  "eight digits of 0x417ffff6");
+
+            CHECK(strcmp(nine_a, nine_b) != 0,
+                  "at Pmin the two neighbours write different sequences");
+            in[0] = nine_a;
+            CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                        NULL, &f4) == CFT_OK, "read back");
+            back_a = get32(d);
+            in[0] = nine_b;
+            CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                        NULL, &f4) == CFT_OK, "read back");
+            back_b = get32(d);
+            CHECK(back_a == bits_a && back_b == bits_b,
+                  "5.12.2: Pmin digits under a nearest attribute round trip");
+
+            CHECK(strcmp(eight_a, eight_b) == 0,
+                  "at Pmin - 1 the two neighbours COLLIDE (%s vs %s)",
+                  eight_a, eight_b);
+            in[0] = eight_a;
+            CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                        NULL, &f4) == CFT_OK, "read back");
+            CHECK(get32(d) != bits_a || get32(d) != bits_b,
+                  "one sequence cannot name two encodings");
+            CHECK((get32(d) == bits_a) != (get32(d) == bits_b),
+                  "so at Pmin - 1 the round trip loses one of them - which "
+                  "is the control: an implementation ignoring the digit "
+                  "count would recover both");
+        }
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));
