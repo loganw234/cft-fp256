@@ -205,7 +205,7 @@ on 2026-09-01.
 * **The sequencer is compiled in but not exported.** No panel drives
   `cft_program_*` yet, and this page only claims surfaces it
   exercises.
-* **The page is at ABI 0.3 as of 2026-09-03, surface included.** The
+* **The page is at ABI 0.2 as of 2026-09-02, surface included.** The
   page committed on 2026-09-01 (5ec0883) was built eighty minutes
   before the clause-5 completion set landed, so its module answered
   `cftw_abi_version()` with 1 and its identity line read *libcft ABI
@@ -217,6 +217,17 @@ on 2026-09-01.
   of wasm where the old one was 50,153. The page's markup did not
   change: `page_template.html` is untouched, and the diff is the two
   spliced lines (runtime, build info).
+* **Rebuilt 2026-09-03 from the ABI 0.3 sources, and that is a
+  half-step, not a 0.3 page.** The build asks `host/Makefile` what it
+  compiles, so `mpfloat.c` and `transcend.c` came along on their own:
+  the module answers `cftw_abi_version()` with 3 and the
+  `cft_conformance` inside it replays the transcendental vector sets.
+  What it does NOT have is a `cftw_*` wrapper for any of the nine, or
+  a page control for them, so no JavaScript caller can invoke one -
+  the module reports a number its surface has not earned, which is
+  exactly what the previous bullet warns against, and
+  docs/COMPATIBILITY.md's ledger says so in those words. The wrappers
+  are the next rebuild's job.
 * Reproducibility claim, precisely: same pinned image + same repo
   state → same page. The vectors are seeded and the sampling is a
   pure function of them; `emcc` is deterministic within the pinned
