@@ -56,7 +56,12 @@ from .reduce import (
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
     stream_reduce, fsumsq, fsumabs, norm_split, scaled_prod,
 )
-from . import augmented, transcend, vectors
+from .chars import (
+    CharacterSyntaxError, pmin, max_payload, nan_bits,
+    from_decimal, to_decimal, from_hex, to_hex,
+    get_payload, set_payload, set_payload_signaling,
+)
+from . import augmented, chars, transcend, vectors
 
 __all__ = [
     "FP32", "FP64", "FP128", "FP256", "FORMATS", "PREC_CODE", "FpFormat",
@@ -90,6 +95,9 @@ __all__ = [
     "start_prec", "transcend", "AUG_FNS", "AUG_IMPL", "FN_AUG_ADD",
     "FN_AUG_SUB", "FN_AUG_MUL", "augmented_add", "augmented_sub",
     "augmented_mul", "augmented", "OP_SUM", "OP_DOT", "REDUCE_OPS",
+    "CharacterSyntaxError", "pmin", "max_payload", "nan_bits",
+    "from_decimal", "to_decimal", "from_hex", "to_hex",
+    "get_payload", "set_payload", "set_payload_signaling", "chars",
     "REDUCE_OP_NAMES", "OP_SUMSQ", "OP_SUMABS", "SP_PROD", "SP_PROD_SUM",
     "SP_PROD_DIFF", "SCALED_KINDS", "SCALED_KIND_NAMES", "SCALE_MIN",
     "SCALE_MAX", "ScaleOverflow", "split", "tree_adds", "canonical_ranges",

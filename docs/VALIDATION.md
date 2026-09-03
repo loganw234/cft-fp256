@@ -1866,6 +1866,157 @@ run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
 libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
 wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.
 
+## 2026-09-03 - clause 5.12's character sequences and clause 9.7's payloads
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, on a twelve-core
+box running three other agents' builds throughout - so every wall clock
+below is longer than this tree deserves and none of them is a
+performance number. The last runner invocation was STOPPED before it
+finished; what did and did not run is spelled out below rather than
+estimated.
+
+This is the last REQUIRED part of clause 5 the library did not meet.
+5.12 opens with a **shall**, not a should: an implementation must
+convert between each supported binary format and external decimal
+character sequences such that the round trip under roundTiesToEven
+recovers the original representation. Every other numeric claim in this
+repository is about arithmetic; this one is about the edge where
+callers arrive, and until now every caller reaching libcft from a text
+format was reaching some other implementation's decimal rounding.
+
+### What ran, and what it said
+
+    python/tests            1083 passed, 5 skipped (321 s). 139 of them
+                            are new: chars.py against ref754's rational
+                            restatement of 754 in all five attributes,
+                            against CPython's own binary64 parse and
+                            "%.16e" write, and against the exact value
+                            of every sequence read back as a Fraction
+                            by the TEST rather than by the model
+    make vectors            60 sets, 492,731 cases; 13,816 of them the
+                            twenty new character sets
+    make -C host test       api-test all contract checks passed (the new
+                            block and its negative control included);
+                            reduce-parts 6,294 partitions; 492,731 cases
+                            replayed; C and Python examples identical
+    runner, stage vectors   ok 79 s - 60 sets at the generator's
+                            defaults, 13,816 character cases
+    runner, stage libcft    ok 333 s - clean rebuild, api-test,
+                            reduce-parts, 648,731 cases replayed over
+                            60 sets
+    runner, stage character ok 166 s - 20,819 comparisons over four
+                            formats and five attributes, C == model on
+                            every one, with the Pmin-1 collision
+                            exhibited per format
+    runner, stage bindings  ok 146 s - 640 tests (was 636)
+    runner, stage cpp       C++17 leg complete: 648,731 conformance
+                            cases through the wrapper and all 210,511
+                            checks passed. The C++20 leg was RUNNING
+                            when the run was stopped - see below
+    mpfr-check 24 7         458,300 cases, 0 value and 0 flag
+                            mismatches, 6,312 of them the four
+                            conversions
+    mpfr-check 2 7          298,904 cases, 0 value and 0 flag
+                            mismatches, 20,172 of them the four
+                            conversions, on the ENLARGED pools this
+                            tree ships
+    cpptest, standalone     210,511 checks at C++17 and again at C++20,
+                            492,731 conformance cases through the
+                            wrapper each time - run before the MPFR
+                            harness and the conformance summary line
+                            were last touched, neither of which the
+                            wrapper compiles against
+
+### What did NOT run, and why
+
+The runner invocation `--only vectors,libcft,character,mpfr,cpp,bindings`
+(run id 20260903-111141-60d046d) was **stopped under time pressure on a
+contended host**, with four of its six stages green and no failure
+anywhere. Specifically:
+
+  * `cpp` - the C++17 half passed with its counts above; the C++20 half
+    was mid-replay and has no verdict from THIS run. The same binary at
+    the same standard passed standalone earlier on the same wrapper
+    source (210,511 checks), so the gap is a missing re-run rather than
+    an unknown.
+  * `mpfr` - never started in that run. The campaign it would have run
+    (`mpfr-check 24 7`) completed twice earlier with zero mismatches,
+    but never once with BOTH the census random count and the enlarged
+    character pools this tree ships: the 24-argument run predates the
+    pool increase and the 2-argument run postdates it. That combination
+    is the one number this entry does not have.
+
+Nothing was skipped by the runner's own logic and nothing failed. There
+is no VERDICT line for that run, so it certifies nothing on its own;
+the four green stages are recorded as the individual stage results they
+are.
+
+### The round trip, held and cornered
+
+Pmin comes out 9, 17, 36 and 73 from `1 + ceiling(p * log10 2)`,
+derived rather than transcribed, and the standard lists the first three
+so the formula is checked before it is trusted at binary256. The round
+trip holds at Pmin in both directions under both nearest attributes.
+One digit short it does not, and that is shown rather than assumed:
+`0x417ffff5` and `0x417ffff6` are neighbouring binary32 encodings just
+below 16 that both write `1.5999990e+1` at eight digits, so reading
+that sequence back can recover at most one of them. The colliding pair
+is found by walking down from the top of each binade - where the
+decimal grid is coarsest relative to the binary one - and one is
+exhibited per format. binary64's is `0x3ffffffffffffffe` against
+`0x3fffffffffffffff`, and there BOTH are lost, because their shared
+sixteen-digit decimal `2.000000000000000e+0` rounds to a third
+encoding between them.
+
+**The negative control is the round trip itself.** An implementation
+that ignored the digit count and always wrote the exact value would
+satisfy every round-trip check ever written, so the last block of
+api_test.c asserts that the round trip FAILS at Pmin - 1, which it can
+only do if the digit count is being honoured.
+
+### What MPFR arbitrates here, and what it cannot
+
+mpfr_strtofr and mpfr_get_str are correctly rounded in every mode at
+any precision, so both directions are scored against them - values and
+flags, five attributes, four rungs. Three things are deliberately
+outside that, and are written where the harness runs: the absurd
+exponents (`1e999999999999`) are outside MPFR's own exponent range, so
+feeding them to the oracle would score MPFR's overflow rather than the
+format's; NaN PAYLOADS cannot be arbitrated by a library that keeps
+none; and the EXACT conversion cannot be asked of mpfr_get_str at all,
+which produces shortest-or-N digits. The exact conversion is scored a
+different way that is just as strong - the sequence the library wrote
+is handed back to mpfr_strtofr at the format's precision, and MPFR must
+report a ternary of ZERO and the same value. The halfway sequences the
+attribute alone decides are built on the oracle side with GMP, from the
+midpoint between an encoding and its successor, so they owe the library
+nothing.
+
+### cftmpfr's from_str moved off gmpy2, and the switch was measured first
+
+2,480 parses across four precisions and the four attributes MPFR has,
+the library's route against the gmpy2 one: ZERO encoding differences,
+and 32 flag differences, every one of them the same row - a decimal
+that lands exactly on a subnormal, where MPFR raises underflow and 754
+7.5 says "If the rounded result is exact, no flag is raised". The
+library is right and the package now says so. Two smaller changes rode
+along: `-nan` keeps its sign, and `snan` reads as a signaling NaN
+rather than as an error. `to_str` was NOT switched - it is the shortest
+sequence that reads back and the library's is the exact one, and no
+measurement can make those the same string.
+
+### A defect this work found in its own harness
+
+The MPFR side builds the exact decimal of a midpoint with GMP, and
+`mpfr_get_z_2exp` hands back a NEGATIVE significand for a negative
+value while the harness was also prepending its own sign - so every
+negative midpoint was written `--.1000...e+1` and the library correctly
+REFUSED all thirty of them. The refusal reached the report as a bare
+"status != OK" naming no sequence, so a `REFUSED` line that names it
+went in before the bug was found. Two oracles disagreeing is the normal
+case; an oracle that cannot say what it disagreed about is the problem.
+
+
 ## 2026-09-03 - the rest of table 9.1: exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn (part of the 0.6 step)
 
 Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, with three

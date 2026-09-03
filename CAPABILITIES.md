@@ -292,11 +292,15 @@ in docs/COMPATIBILITY.md) gets the full story.
   nextDown, classification, totalOrder, the signaling comparisons,
   remainder. Nine of clause 9's recommended functions joined them on
   2026-09-02 - exp, expm1, exp2, log, log1p, log2, log10, pow, hypot,
-  correctly rounded in the library rather than in the tile. What
-  remains outside: the character-sequence conversions of 5.4.2/5.12
-  (inherently host-library work, hex trivial, decimal needing
-  big-integer scaling - planned, not blocking any numeric path), NaN
-  payload propagation (**out**, deliberately), and the rest of clause 9
+  correctly rounded in the library rather than in the tile. The
+  character-sequence conversions of 5.4.2/5.4.3/5.12 - decimal and
+  hexadecimal, both directions, correctly rounded at every digit count
+  with no cap on the standard's H - and clause 9.7's three payload
+  operations landed on 2026-09-03, which closes clause 5 entirely.
+  What remains outside: NaN
+  payload propagation through ARITHMETIC (**out**, deliberately - the
+  9.7 operations read and write a payload, they do not carry one
+  through an add), and the rest of clause 9
   - the trigonometric and hyperbolic families, which need an argument
   reduction against pi and are scoped but not started.
 - As a **general-purpose float processor**: the blocker was

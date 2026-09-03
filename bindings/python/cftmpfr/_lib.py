@@ -274,6 +274,32 @@ def _bind(lib):
                         c_void_p, _i64p, c_size_t,
                         ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
+
+    # The clause-5.12 character conversions and the clause-9.7 payload
+    # operations (part of the 0.6 step). Host operations, so no bus
+    # word; the payload three signal nothing, so no flag word either.
+    szp = ctypes.POINTER(c_size_t)
+    cpp = ctypes.POINTER(c_char_p)
+    lib.cft_format_decimal_digits.argtypes = [c_int]
+    lib.cft_format_decimal_digits.restype = c_size_t
+    lib.cft_from_decimal_char.argtypes = [c_void_p, c_int, c_int, cpp,
+                                          c_void_p, c_size_t, szp, u32p]
+    lib.cft_from_hex_char.argtypes = [c_void_p, c_int, c_int, cpp, c_void_p,
+                                      c_size_t, szp, u32p]
+    lib.cft_to_decimal_char.argtypes = [c_void_p, c_int, c_int, c_void_p,
+                                        c_size_t, c_char_p, c_size_t, szp,
+                                        u32p]
+    lib.cft_to_hex_char.argtypes = [c_void_p, c_int, c_void_p, c_char_p,
+                                    c_size_t, szp]
+    for _name in ("cft_get_payload", "cft_set_payload",
+                  "cft_set_payload_signaling"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_size_t]
+        _fn.restype = c_int
+    for _name in ("cft_from_decimal_char", "cft_from_hex_char",
+                  "cft_to_decimal_char", "cft_to_hex_char"):
+        getattr(lib, _name).restype = c_int
+
     _audit(lib)
     return lib
 
@@ -464,6 +490,80 @@ def sqrt(handle, fmt, rnd, a, n, esz):
 # ABI 0.5's nine complete the elementary set: sin, cos and tan of a
 # RADIAN argument, reduced against pi inside the library at any
 # magnitude, and the six hyperbolics.
+
+
+# ---- character sequences (5.12) and NaN payloads (9.7) ---------------
+#
+# Part of the 0.6 step. The from_ conversions are batches like every
+# other call here; the to_ conversions are per element and use the
+# library's two-call sizing protocol, which these helpers absorb -
+# Python has a growable string, so a caller should never see it.
+
+def from_char(handle, fmt, rnd, seqs, esz, hex_form=False):
+    """cft_from_decimal_char / cft_from_hex_char over a list of str.
+    Returns (encoding bytes, flag word). A sequence outside 5.12's
+    syntax raises CftError naming which one it was, because a caller
+    reading a file of numbers needs the line and not just the
+    verdict."""
+    n = len(seqs)
+    arr = (ctypes.c_char_p * max(n, 1))(*[s.encode("ascii") for s in seqs])
+    d = ctypes.create_string_buffer(max(n, 1) * esz)
+    flags = ctypes.c_uint32(0)
+    bad = ctypes.c_size_t(0)
+    fn = (lib().cft_from_hex_char if hex_form
+          else lib().cft_from_decimal_char)
+    st = fn(handle, fmt, rnd, arr, d, n, ctypes.byref(bad),
+            ctypes.byref(flags))
+    if st != 0:
+        where = ("cft_from_hex_char" if hex_form
+                 else "cft_from_decimal_char")
+        if bad.value < n:
+            s = seqs[bad.value]
+            where += (" on sequence %d %r"
+                      % (bad.value, s if len(s) <= 60 else s[:60] + "..."))
+        check(st, where)
+    return d.raw[:n * esz], flags.value
+
+
+def to_char(handle, fmt, rnd, enc, digits=0, hex_form=False):
+    """cft_to_decimal_char / cft_to_hex_char for ONE encoding, sized by
+    the library. Returns (str, flag word)."""
+    need = ctypes.c_size_t(0)
+    flags = ctypes.c_uint32(0)
+    L = lib()
+    if hex_form:
+        st = L.cft_to_hex_char(handle, fmt, enc, None, 0,
+                               ctypes.byref(need))
+    else:
+        st = L.cft_to_decimal_char(handle, fmt, rnd, enc, digits, None, 0,
+                                   ctypes.byref(need), ctypes.byref(flags))
+    if need.value == 0:                  # a real argument error, not a size
+        check(st, "cft_to_hex_char" if hex_form else "cft_to_decimal_char")
+    buf = ctypes.create_string_buffer(need.value)
+    if hex_form:
+        st = L.cft_to_hex_char(handle, fmt, enc, buf, need.value,
+                               ctypes.byref(need))
+    else:
+        st = L.cft_to_decimal_char(handle, fmt, rnd, enc, digits, buf,
+                                   need.value, ctypes.byref(need),
+                                   ctypes.byref(flags))
+    check(st, "cft_to_hex_char" if hex_form else "cft_to_decimal_char")
+    return buf.value.decode("ascii"), flags.value
+
+
+def payload_op(handle, name, fmt, enc, n, esz):
+    """One of the three 9.7 operations. They signal no exceptions, so
+    there is no flag word to return and none is invented."""
+    d = ctypes.create_string_buffer(n * esz)
+    check(getattr(lib(), "cft_" + name)(handle, fmt, enc, d, n),
+          "cft_" + name)
+    return d.raw[:n * esz]
+
+
+def decimal_digits(fmt):
+    """Pmin(fmt) from 5.12.2 - the digit count at which the decimal
+    round trip is guaranteed. The LIBRARY's answer, not a table here."""
+    return lib().cft_format_decimal_digits(fmt)
 # ---------------------------------------------------------------------
 
 TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",

@@ -61,9 +61,14 @@ correctly rounded. The three augmented arithmetic operations of clause
 9.5 - augmentedAddition, augmentedSubtraction and
 augmentedMultiplication, each returning a PAIR under a rounding the
 five attributes do not include - are contract operations too, in their
-own section below. Everything is scored the same way regardless of
-route: `python/cft_golden/softfloat.py` defines the bits, with
-`transcend.py` and `augmented.py` beside it for the clause-9 sets.
+own section below. Clause 5's last requirement, 5.12's conversions
+between the formats and external character sequences - decimal and
+hexadecimal, both directions - joined them on 2026-09-03 along with
+clause 9.7's three NaN payload operations, and have their own section
+too. Everything is scored the same way regardless of route:
+`python/cft_golden/softfloat.py` defines the bits, with `transcend.py`
+and `augmented.py` beside it for the clause-9 sets and `chars.py` for
+the character conversions.
 
 ADD/SUB/MUL are defined as operand-steered FMA (see
 `cft_golden.softfloat.steer` and rtl/cft_opmux.sv); the steering is
@@ -171,7 +176,7 @@ wrong:
 ### Where the canonical-NaN rule does not apply
 
 The rule below - any NaN in, one canonical quiet NaN out, sNaN raises
-invalid - governs **arithmetic**. Three groups are outside it, and
+invalid - governs **arithmetic**. Four groups are outside it, and
 saying so precisely matters because this document is what an
 independent implementation is scored against:
 
@@ -179,6 +184,7 @@ independent implementation is scored against:
 |---|---|
 | `abs`, `negate`, `copySign` | pass the pattern through, payload intact, signal **nothing** even for a signaling NaN (5.5.1: "they only affect the sign bit... and signal no exception"; 6.2.3 exempts exactly these) |
 | `select` | moves whichever operand it selects through intact, payload and all, and signals nothing |
+| the clause-5.12 conversions and the clause-9.7 payload operations | carry the payload, the quiet bit and the sign through in both directions, and signal nothing - 6.2 exempts 5.12's conversions from the sNaN rule outright, and 9.7 says its three "signal no exceptions". See their section below |
 | the integer group | there are no NaNs - the operand is a W-bit unsigned word, and no bit pattern means anything but itself |
 
 None of this weakens determinism. The canonical rule exists because in
@@ -806,6 +812,106 @@ Like the twenty-nine, these issue no device pass: the device argument
 is context and the results are bit-identical across backends by
 construction.
 
+## Character sequences (clause 5.12) and NaN payloads (9.7)
+
+convertFromDecimalCharacter, convertToDecimalCharacter,
+convertFromHexCharacter, convertToHexCharacter, getPayload, setPayload
+and setPayloadSignaling are contract operations with library entry
+points, added 2026-09-03 as part of the 0.6 step. Unlike clause 9's
+functions these are not recommendations: 5.12 opens with a **shall**,
+and it is the last required part of clause 5 this contract had not
+met.
+
+**They are correctly rounded, in all five attributes, at all four
+formats, with exact flags - and the standard's H is unbounded here.**
+5.12.2 permits an implementation to cap the digit count it will round
+correctly at some H >= M + 3, and to incur "additional rounding of the
+order of 10^(M-H)" past it. This contract incurs none, at any length,
+and the reason belongs in a determinism document rather than in a
+manual: a capped conversion is not reproducible against an
+implementation with a different cap. Two conforming libraries that
+both round correctly agree bit for bit on every sequence; two that
+both round "to within a thousandth of an ulp" agree on most of them,
+and a vector set cannot tell you which ones.
+
+`python/cft_golden/chars.py` defines every result and every character.
+What belongs HERE is what an independent implementation is scored on:
+
+- **The arithmetic is exact and the rounding is round_pack's.** A
+  decimal sequence's value is a rational; the binary window is one
+  integer division producing p+3 or p+4 bits plus a remainder, which
+  is exactly round_pack's (m, e, sticky) precondition. So inexact,
+  overflow and underflow are the same flags the same value would get
+  from an arithmetic result, including 7.5's tininess-after-rounding
+  and 7.4's per-attribute delivered value - an infinity under
+  `rne`/`rmm`, the largest finite magnitude under `rtz`.
+- **The EXACT conversion is exact, and terminates.** Every binary
+  float is a finite decimal because `2^-k = 5^k * 10^-k`, so
+  `convertToDecimalCharacter` with no digit count writes the whole
+  value: 183,395 significant digits for the smallest binary256
+  subnormal and 78,914 for the largest binary256 normal. Those lengths
+  are a property of the format, not of this implementation.
+- **The round trip is guaranteed at Pmin and is NOT guaranteed one
+  digit short.** Pmin is `1 + ceiling(p * log10 2)` - 9, 17, 36 and 73
+  - and 5.12.2 promises that a to-decimal / from-decimal pair at that
+  many digits under a round-to-nearest attribute reproduces the
+  original encoding. This contract holds it and exhibits its edge
+  rather than asserting one: at Pmin - 1 there are neighbouring
+  encodings whose decimals collide, and both host/tests/character_check.py
+  and host/tests/api_test.c name a pair per format (0x417ffff5 and
+  0x417ffff6 at binary32, which both write `1.5999990e+1`).
+- **inexact is the only flag either output conversion can raise**, and
+  only when a digit was dropped. The exponent is written out in full,
+  so 5.12.2's "exponent not of sufficient width" overflow and
+  underflow cannot arise. The hexadecimal output is exact by
+  construction and raises nothing at all.
+- **The syntax is exactly 5.12's, and anything else is REFUSED.**
+  Optional sign, digits with an optional point, an optional exponent
+  part; or 5.12.1's words with an optional payload suffix; or, for the
+  hexadecimal parser, 5.12.3's grammar with its REQUIRED binary
+  exponent. No whitespace, no separators, no locale, no hexadecimal in
+  the decimal parser. A sequence outside it returns a status and
+  writes nothing - the same discipline the transcendentals keep when
+  they cannot show a result correctly rounded.
+- **These are ENCODING operations, so the canonical-NaN rule does not
+  reach them.** A NaN keeps its payload, its quiet bit and its sign in
+  both directions, because 5.12's own requirement is that the round
+  trip recover the original representation. This is the fourth group
+  outside that rule, alongside abs/negate/copySign, select and the
+  integer opcodes.
+- **A signaling NaN is written `snan` and raises NOTHING.** 6.2
+  exempts "the conversions described in 5.12" from the signaling-NaN
+  rule, and 5.12.1 offers two spellings: write `snan`, or write `nan`
+  and signal invalid. This contract takes the first, because the
+  second loses the distinction the round trip is required to keep. So
+  no conversion in this group ever raises invalid, in either
+  direction.
+- **The 9.7 payload set is the format's payload field.** Bits
+  d2..d(p-1) of the trailing significand (6.2.1), so `0` up to
+  `2^(man_w-1) - 1`, and `1` upward for setPayloadSignaling because
+  payload 0 with the quiet bit clear is an infinity encoding. Anything
+  outside gives `+0` and getPayload of a non-NaN gives `-1`, both of
+  which are 9.7's own words. The admissibility test is on the VALUE,
+  so `-0` passes it as the integer zero. All three signal nothing, for
+  any operand, signaling NaNs included.
+- **An exponent no arithmetic can reach still has a defined answer.**
+  `1e999999999999` is in the syntax. Rather than materialise
+  `10^999999999999`, the library answers from a band: a value whose
+  leading bit sits at emax + 1 or above overflows in every attribute,
+  and one below half the smallest subnormal rounds to zero or to that
+  subnormal by attribute and sign alone. Each band is replaced by one
+  representative inside it, so the answer is identical by construction
+  rather than approximately right, and the band test brackets log2(10)
+  with exact rational bounds and uses no floating point. An
+  implementation that computed the power instead lands on the same
+  bits; one that clamped to an infinity without checking the sign or
+  the attribute does not.
+
+Like the clause-5 host operations and all of clause 9, these issue no
+device pass: the work is exact integer division and digit generation,
+so the device argument is context and the results are bit-identical
+across backends by construction.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -928,6 +1034,7 @@ pair rather than a value - see the section above. Nothing in the four
 bullets changes for them: the pairing is fixed, the schedule and the
 operand side are free, and a scaled product splits across tiles on the
 same canonical nodes.
+| `host/tests/character_check.py` | the clause-5.12 conversions and the 9.7 payload operations, both directions | golden model, per-element flags, and the Pmin round trip with its collision at Pmin - 1 |
 
 ## The verification lattice
 
@@ -957,7 +1064,10 @@ roundToIntegral, nextUp/nextDown and remainder 5.3.1 (rint details
 5.9); scaleB and logB 5.3.3; fusedMultiplyAdd, division, squareRoot
 and the integer conversions 5.4.1; convertFormat 5.4.2; signaling
 comparisons 5.6.1; classification predicates 5.7.2; totalOrder 5.10;
-quiet comparisons 5.11; NaN semantics 6.2 (payload recommendation
+quiet comparisons 5.11; the character-sequence conversions 5.12
+(the words 5.12.1, decimal 5.12.2, hexadecimal 5.12.3; their
+formatOf entries 5.4.2 and 5.4.3); NaN semantics 6.2 (binary NaN
+encodings and the payload field 6.2.1, payload recommendation
 6.2.3); sign bit rules 6.3; invalid 7.2; divideByZero 7.3; overflow
 7.4; underflow and tininess 7.5; the recommended correctly-rounded
 functions and their special-value tables 9.2 (the table itself 9.2.1);

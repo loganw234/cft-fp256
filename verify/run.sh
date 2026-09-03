@@ -424,6 +424,16 @@ need host-cc python
 stage clause5 "the clause-5 completion set vs the model, all entry points" -- \
   PY "$ROOT/host/tests/clause5_check.py"
 
+# The clause-5.12 character conversions and the clause-9.7 payload
+# operations. The fp256 leg is the slow one and honestly so: the exact
+# decimal of a value at either end of that format's exponent range runs
+# to tens of thousands of digits and the library derives every one of
+# them (cft.h carries the cost note), so the sweep spends most of its
+# time on a handful of deliberate extremes rather than on the bulk.
+need host-cc python
+stage character "the clause-5.12 conversions and the 9.7 payloads vs the model, both directions and the Pmin round trip" -- \
+  PY "$ROOT/host/tests/character_check.py"
+
 # The transcendentals, twice. The first run is at the contract's
 # own working precision, where the Ziv loop has never once
 # escalated; the second forces the library to START below the

@@ -939,6 +939,214 @@ CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
                                void *d, size_t n, uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
+ * Character sequences (754-2019 clause 5.12) and NaN payloads (9.7)
+ * Part of the 0.6 step.
+ *
+ *   a decimal sequence  -> fmt   cft_from_decimal_char   (5.12.2)
+ *   fmt -> a decimal sequence    cft_to_decimal_char     (5.12.2)
+ *   a hex sequence      -> fmt   cft_from_hex_char       (5.12.3)
+ *   fmt -> a hex sequence        cft_to_hex_char         (5.12.3)
+ *   getPayload / setPayload / setPayloadSignaling        (9.7)
+ *
+ * These are the last REQUIRED part of clause 5 this library lacked.
+ * 5.12 opens with "Implementations shall provide conversions between
+ * each supported binary format and external decimal character
+ * sequences such that, under roundTiesToEven, conversion from the
+ * supported format to external decimal character sequence and back
+ * recovers the original floating-point representation" - a shall, not
+ * a should, and one this library now keeps at all four rungs.
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, with exact flags, and
+ * the standard's H is UNBOUNDED here. 5.12.2 allows an implementation
+ * to cap the digit count it will round correctly at some H >= M + 3;
+ * this one does not need a cap, because a decimal sequence's value is
+ * a rational and an encoding's value is a dyadic rational, and both
+ * are held exactly in integer arithmetic. Every digit count from 1
+ * upward is correctly rounded on the way out, and a sequence of any
+ * length at all is correctly rounded on the way in - no pre-rounding
+ * to H digits, no "additional rounding of the order of 10^(M-H)"
+ * which 5.12.2's NOTE 1 permits and which this library never incurs.
+ * python/cft_golden/chars.py is the definition of every result below.
+ *
+ * HOST operations, like most of the clause-5 set and all of clause 9:
+ * they issue no device pass, so there is no bus word and the device
+ * argument is context. There is nothing here for a tile to
+ * accelerate - the work is exact integer division and digit
+ * generation - so they are bit-identical on every backend by
+ * construction.
+ *
+ * WHY THE TWO DIRECTIONS HAVE DIFFERENT SHAPES, which is a decision
+ * rather than an oversight. The from_ calls are BATCHES: an array of
+ * C strings in, a dense array of encodings out, n arbitrary, the flag
+ * word the OR across the batch - the same shape as every other entry
+ * point in this header. The to_ calls are PER ELEMENT, one value and
+ * one buffer, and they have to be: an output sequence's length is not
+ * known until the conversion has run, it is wildly non-uniform (three
+ * bytes for "inf", about 183,000 for the exact decimal of the
+ * smallest binary256 subnormal), and no dense output array can hold
+ * that. A batch would mean three parallel arrays - buffers,
+ * capacities, lengths - that a caller could not size in advance
+ * anyway, so it would degenerate into the per-element two-call
+ * protocol with extra ceremony. One call per value is the honest
+ * shape; a caller batching them ORs the flag words itself, which is
+ * all cft_run does with them.
+ *
+ * SIZING AN OUTPUT BUFFER is the usual two-call protocol, and *len is
+ * ALWAYS set - on success and on refusal alike - to the number of
+ * bytes required INCLUDING the terminating NUL. Pass cap = 0 with out
+ * = NULL to ask, then call again with a buffer that size. A buffer
+ * too small for the answer is CFT_ERR_INVALID_ARGUMENT with *len set
+ * and NOTHING written: this library does not truncate a number.
+ *
+ * A SEQUENCE OUTSIDE THE SYNTAX IS REFUSED, not guessed at.
+ * cft_from_decimal_char and cft_from_hex_char return
+ * CFT_ERR_INVALID_ARGUMENT, write nothing to d, and - if bad_index is
+ * non-NULL - report which element of the batch was at fault, because
+ * a caller reading a file of numbers needs the line and not just the
+ * verdict. The syntax accepted is exactly:
+ *
+ *   decimal   sign? ( digit* "." digit* | digit+ )  ( [eE] sign? digit+ )?
+ *   hex       sign? "0" [xX] ( hexDigit* "." hexDigit* | hexDigit+ )
+ *                            [pP] sign? digit+
+ *   either    sign? ( "inf" | "infinity" | "nan" | "snan" ) payload?
+ *   payload   "(" ( digit+ | "0" [xX] hexDigit+ ) ")"
+ *
+ * with at least one digit in the significand, the words case
+ * insensitive, and the hex form's binary exponent REQUIRED - 5.12.3's
+ * grammar writes {decExponent}, not {decExponent}?. No leading or
+ * trailing whitespace, no digit separators, no locale, no hexadecimal
+ * in the decimal parser or decimal in the hex one. What this library
+ * writes, this library reads back.
+ *
+ * NaNs KEEP THEIR PAYLOAD AND THEIR SIGNALING BIT in both directions,
+ * and that is deliberate. docs/DETERMINISM.md's canonical-NaN rule
+ * governs arithmetic, where the divergence between implementations is
+ * over which operand's payload survives; these are ENCODING
+ * operations, like abs/negate/copySign/select, and 5.12's own
+ * requirement is that the round trip recover the original
+ * representation. A signaling NaN is written "snan" rather than
+ * "nan", which 5.12.1 allows and which is the spelling that raises
+ * NOTHING - the alternative it offers, writing "nan" and signaling
+ * invalid, would lose the distinction the round trip has to keep. So
+ * no conversion here ever raises invalid.
+ * --------------------------------------------------------------- */
+
+/* Pmin(fmt) from 5.12.2: the significant-digit count at which a
+ * to-decimal / from-decimal round trip under a round-to-nearest
+ * attribute is GUARANTEED to reproduce the original encoding - 9, 17,
+ * 36 and 73 for the four rungs. Derived from 1 + ceiling(p*log10 2),
+ * not tabulated. Returns 0 for a format this library does not carry.
+ *
+ * Fewer digits than this is not a rounding error, it is a different
+ * number: at Pmin - 1 there are encodings whose decimals collide, and
+ * host/tests/character_check.py exhibits one per format rather than
+ * asserting that none exists. */
+CFT_API size_t cft_format_decimal_digits(cft_format fmt);
+
+/* convertFromDecimalCharacter (5.4.2, 5.12.2), n sequences at a time.
+ *
+ * in[i] is a NUL-terminated sequence; d receives n encodings. Every
+ * sequence is converted exactly or correctly rounded under `rnd`, with
+ * inexact / overflow / underflow exactly as round_pack delivers them
+ * for an arithmetic result of the same value. A sequence outside the
+ * syntax refuses the WHOLE call (see the block comment); on any
+ * refusal the contents of d are unspecified. */
+CFT_API cft_status cft_from_decimal_char(cft_device *dev, cft_format fmt,
+                                         cft_round rnd,
+                                         const char *const *in, void *d,
+                                         size_t n, size_t *bad_index,
+                                         uint32_t *flags_out);
+
+/* convertToDecimalCharacter (5.4.2, 5.12.2), ONE value.
+ *
+ * digits == 0 is the EXACT conversion 5.12.2 asks for: every digit of
+ * the exact value, however many that is, trailing zeros removed. Every
+ * binary float is a finite decimal (2^-k = 5^k * 10^-k) so this always
+ * terminates - and for the extremes it is long: about 183,000
+ * significant digits for the smallest binary256 subnormal, 78,914 for
+ * the largest binary256 normal. `rnd` is not consulted and no flag is
+ * raised.
+ *
+ * digits >= 1 asks for exactly that many significant digits,
+ * correctly rounded under `rnd`, trailing zeros KEPT so a caller who
+ * asked for H digits can count H of them. inexact is raised when any
+ * digit was dropped and is the only flag possible: the exponent is
+ * written out in full, so 5.12.2's "exponent not of sufficient width"
+ * overflow and underflow cannot arise.
+ *
+ * The form is sign, one digit, a point, the rest, "e", an explicitly
+ * signed decimal exponent - "-1.5e+3", "1e+0", "5e-324". Zeros are
+ * "0" and "-0" at every digit count (a zero has no significant digit
+ * to round or to pad); the specials are the words above. */
+CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
+                                       cft_round rnd, const void *a,
+                                       size_t digits, char *out, size_t cap,
+                                       size_t *len, uint32_t *flags_out);
+
+/* convertFromHexCharacter (5.4.3, 5.12.3), n sequences at a time.
+ * Exact when the sequence fits the format, correctly rounded under
+ * `rnd` when it carries more bits than the format holds - a hex
+ * sequence's value is dyadic, so "exact" is the common case and the
+ * rounding is the same one round_pack performs anywhere else. */
+CFT_API cft_status cft_from_hex_char(cft_device *dev, cft_format fmt,
+                                     cft_round rnd, const char *const *in,
+                                     void *d, size_t n, size_t *bad_index,
+                                     uint32_t *flags_out);
+
+/* convertToHexCharacter (5.4.3, 5.12.3), ONE value: the shortest
+ * sequence that represents it EXACTLY, which is what 5.12.3 requires
+ * "in the absence of an explicit precision specification". Canonical:
+ * one leading 1, no trailing zeros in the fraction, an explicitly
+ * signed binary exponent - so a subnormal prints with its true
+ * exponent (0x1p-149 for the smallest binary32) and the spelling
+ * depends on the value rather than on which side of the format's
+ * subnormal boundary it sits. Zero is "0x0p+0".
+ *
+ * Exact always, so there is no rounding attribute to consult and no
+ * flag word to mislead - the same reason cft_class has neither. */
+CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
+                                   const void *a, char *out, size_t cap,
+                                   size_t *len);
+
+/* The 9.7 NaN payload operations, elementwise over arrays. 9.7 says
+ * these "signal no exceptions", so none of them has a flags argument.
+ * They are ENCODING operations and say so here for the same reason
+ * the conversions above do: the canonical-NaN rule is about
+ * arithmetic, and reading or writing a payload is not arithmetic.
+ *
+ * The payload is bits d2..d(p-1) of the trailing significand (6.2.1) -
+ * everything below the quiet bit - so the admissible set is
+ * 0 .. 2^(man_w - 1) - 1, and 1 upward for the signaling form, since
+ * payload 0 with the quiet bit clear is an INFINITY encoding rather
+ * than a NaN.
+ *
+ *   cft_get_payload   NaN -> the payload as a floating-point integer;
+ *                     anything else -> -1, which is 9.7's own answer.
+ *   cft_set_payload   a non-negative floating-point integer in the
+ *                     admissible set -> a quiet NaN carrying it;
+ *                     ANYTHING else -> +0, per 9.7.
+ *   cft_set_payload_signaling
+ *                     the same with a signaling NaN, and payload 0 is
+ *                     not admissible, so setPayloadSignaling(+-0) is
+ *                     +0.
+ *
+ * The admissibility test is on the VALUE, so -0 passes it as the
+ * integer zero - 754 settles that -0 equals 0, and every other
+ * value-based operation in this contract reads it the same way. The
+ * NaN a set produces has sign 0, matching the non-negative operand it
+ * came from; 9.7 fixes the sign of the +0 fallback and leaves the
+ * NaN's to the implementation.
+ *
+ * d may alias a: each element is read before it is written. */
+CFT_API cft_status cft_get_payload(cft_device *dev, cft_format fmt,
+                                   const void *a, void *d, size_t n);
+CFT_API cft_status cft_set_payload(cft_device *dev, cft_format fmt,
+                                   const void *a, void *d, size_t n);
+CFT_API cft_status cft_set_payload_signaling(cft_device *dev,
+                                             cft_format fmt, const void *a,
+                                             void *d, size_t n);
+
+/* ---------------------------------------------------------------
  * The rest of IEEE 754-2019 table 9.1 (part of the 0.6 step)
  *
  *   d[i] = 2^a[i] - 1        d[i] = log2(1 + a[i])    d[i] = 1/sqrt(a[i])

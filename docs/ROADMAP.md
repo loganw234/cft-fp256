@@ -1789,6 +1789,82 @@ What that closed, and what it did not:
 The measurements are in docs/VALIDATION.md's 2026-09-03 table-9.1
 entry.
 
+## Clause 5.12 and 9.7: character sequences and payloads (status, 2026-09-03)
+
+The conversions between the four binary formats and external character
+sequences - decimal and hexadecimal, both directions - and clause
+9.7's getPayload, setPayload and setPayloadSignaling ship as part of
+the 0.6 step. Zero RTL, zero new numerics beyond exact integer
+arithmetic, and no device pass: the work is integer division and digit
+generation.
+
+This one is different in kind from the phases before it. The
+transcendentals are clause 9, which 754 calls RECOMMENDED, and this
+project implemented them because a determinism contract with an
+approximate `exp` in it has a hole the size of every caller of `exp`.
+5.12 is clause 5, and it says **shall**. It was the last required part
+of clause 5 the library did not meet, and it was open at exactly the
+edge where callers arrive: a config file, a CSV, a REPL, a test
+fixture. Every one of those reached this library through some other
+implementation's decimal rounding.
+
+What that closed, and what it did not:
+
+- **Closed: correct rounding at every length, in both directions.**
+  5.12.2 lets an implementation cap the digit count it rounds
+  correctly at some H >= M + 3 and then incur "additional rounding of
+  the order of 10^(M-H)" past it. There is no cap here. A decimal
+  sequence's value is a rational and an encoding's is a dyadic
+  rational, both held exactly, so the whole conversion is one integer
+  division against `round_pack`'s own (m, e, sticky) precondition. A
+  capped conversion would not be reproducible against an
+  implementation with a different cap, which is why the uncapped
+  version is a determinism property and not a quality boast.
+- **Closed: the round trip, and its edge.** Pmin comes out 9, 17, 36
+  and 73 from `1 + ceiling(p * log10 2)`, derived rather than
+  tabulated, and the round trip is held at it - AND shown to fail one
+  digit short, with a named colliding pair per format rather than an
+  assertion that none exists.
+- **Closed: a growable bignum, in one file, for one reason.**
+  `bigint.h` is fixed at 2048 bits because softfloat.c bounds its
+  alignment; decimal conversion cannot be bounded that way, because
+  the exact decimal of the smallest binary256 subnormal is 183,395
+  digits and reading it back needs `10^262378`. Those lengths come
+  from the format. `host/src/chars.c` carries the limb vector that
+  handles them and nothing more.
+- **Closed: a hole in cftmpfr.** `from_str` routed through gmpy2/MPFR
+  because libcft had no decimal parser; it now routes through the
+  library, which removes the optional dependency from that path, gives
+  it roundTiesToAway (which MPFR does not have at all), and replaces
+  MPFR's underflow definition with the contract's. Measured before the
+  switch: 2,480 parses, zero encoding differences, and 32 flag
+  differences all on the one row where MPFR raises underflow for a
+  decimal that lands exactly on a subnormal and 754 7.5 says an exact
+  result raises nothing.
+- **Not closed: a shorter route for a small digit count.** The
+  H-digit mode derives the full exact expansion and rounds the digit
+  string, so writing five digits of a value at the end of fp256's
+  exponent range costs what writing all 183,000 costs - about 0.7 s.
+  One code path and one correctness argument was the trade; a second
+  route would have to reproduce these digits exactly, which makes it
+  an optimisation rather than a different answer. cft.h carries the
+  cost note, in the tradition of `cft_rem`'s.
+- **Not closed: decimal interchange formats.** 5.12.2's
+  quantum-preserving conversions and Pmin for decimal32/64/128 belong
+  to formats this contract does not carry and is not going to; the
+  ladder is the binary one, and identity needs one definition per
+  width.
+- **Not closed: the JavaScript surface.** The wasm and Node layers do
+  not reach these yet; that is a separate step and nothing is claimed
+  for it here.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 clause-5.12
+entry: 648,731 conformance cases replayed across sixty sets, 20,819
+model comparisons in both directions at four formats and five
+attributes, 20,172 conversion cases against MPFR with zero value and
+zero flag mismatches, and the round trip shown to hold at Pmin and to
+collide at Pmin - 1.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,

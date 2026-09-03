@@ -1194,6 +1194,476 @@ static cft_status reduce_set(cft_device *dev, int fi, int esz,
     return ret;
 }
 
+/* ---- the character sets -------------------------------------------- *
+ *
+ * A third schema in a third family of files, for the third time the
+ * same reason: a clause-5.12 case names a SEQUENCE, and neither the
+ * opcode sets nor the transcendental ones have a field to put one in.
+ * A consumer that predates the 0.6 step skips these files rather than
+ * failing a line.
+ *
+ * Two things here are unlike every other set. The lines are UNBOUNDED -
+ * the exact decimal of the smallest binary256 subnormal is a
+ * 183,000-character sequence, so the reader grows its buffer instead
+ * of refusing at LINE_MAX. And some cases assert a REFUSAL rather than
+ * a value: a sequence outside the syntax must be rejected, which is as
+ * much a part of the contract as any encoding and the one part a set
+ * of encodings cannot express.
+ *
+ * Replayed twice like the others, and for the same reason: one case at
+ * a time pins each case's flags exactly, then the from_ conversions -
+ * which are the batch-shaped half of this API - run again as arrays so
+ * the batch loop and the flag OR are exercised. The to_ conversions
+ * are per-element by design (cft.h says why), so their second pass is
+ * the one the first pass already is.
+ */
+
+typedef enum {
+    CH_FROM_DEC, CH_FROM_HEX, CH_TO_DEC, CH_TO_HEX,
+    CH_GET_PAYLOAD, CH_SET_PAYLOAD, CH_SET_PAYLOAD_SIG, CH_COUNT
+} ch_kind;
+
+static const char *const CH_NAME[CH_COUNT] = {
+    "from_decimal", "from_hex", "to_decimal", "to_hex",
+    "get_payload", "set_payload", "set_payload_signaling"
+};
+
+typedef struct {
+    int      kind;
+    char    *s;                      /* owned; the sequence to read in */
+    uint8_t  d[MAX_ELEM];
+    uint32_t flags;
+} ch_case;
+
+/* A line of any length. Returns 1 on a line, 0 at end of file. */
+static int read_line(FILE *fp, char **buf, size_t *cap, size_t *len)
+{
+    size_t used = 0;
+    int c;
+    if (*cap == 0) {
+        *cap = 4096;
+        *buf = (char *)malloc(*cap);
+        if (!*buf)
+            return 0;
+    }
+    while ((c = fgetc(fp)) != EOF) {
+        if (used + 2 > *cap) {
+            size_t want = *cap * 2;
+            char *bigger = (char *)realloc(*buf, want);
+            if (!bigger)
+                return 0;
+            *buf = bigger;
+            *cap = want;
+        }
+        if (c == '\n')
+            break;
+        (*buf)[used++] = (char)c;
+    }
+    (*buf)[used] = '\0';
+    *len = used;
+    return used > 0 || c != EOF;
+}
+
+/* A string field, allocated. The generator asserts that no sequence it
+ * writes needs a JSON escape, so reading to the closing quote is the
+ * whole of the parse. */
+static char *field_string_alloc(const char *line, const char *key)
+{
+    const char *p = find_field(line, key), *q;
+    char *out;
+    size_t n;
+    if (!p)
+        return NULL;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (*p != '"')
+        return NULL;
+    p++;
+    q = p;
+    while (*q && *q != '"')
+        q++;
+    if (*q != '"')
+        return NULL;
+    n = (size_t)(q - p);
+    out = (char *)malloc(n + 1);
+    if (!out)
+        return NULL;
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return out;
+}
+
+static int ch_from_name(const char *s)
+{
+    int i;
+    for (i = 0; i < CH_COUNT; i++)
+        if (strcmp(CH_NAME[i], s) == 0)
+            return i;
+    return -1;
+}
+
+/* One to_ conversion through the two-call sizing protocol, into a
+ * freshly allocated buffer. */
+static cft_status ch_write(cft_device *dev, int fi, int rnd, int kind,
+                           const uint8_t *a, size_t digits, char **out,
+                           uint32_t *flags)
+{
+    size_t need = 0;
+    cft_status st;
+    char *buf;
+
+    *out = NULL;
+    *flags = 0;
+    if (kind == CH_TO_DEC)
+        st = cft_to_decimal_char(dev, (cft_format)fi, (cft_round)rnd, a,
+                                 digits, NULL, 0, &need, flags);
+    else
+        st = cft_to_hex_char(dev, (cft_format)fi, a, NULL, 0, &need);
+    if (st != CFT_ERR_INVALID_ARGUMENT || need < 2)
+        return st == CFT_OK ? CFT_ERR_INTERNAL : st;
+    buf = (char *)malloc(need);
+    if (!buf)
+        return CFT_ERR_OUT_OF_MEMORY;
+    if (kind == CH_TO_DEC)
+        st = cft_to_decimal_char(dev, (cft_format)fi, (cft_round)rnd, a,
+                                 digits, buf, need, &need, flags);
+    else
+        st = cft_to_hex_char(dev, (cft_format)fi, a, buf, need, &need);
+    if (st != CFT_OK) {
+        free(buf);
+        return st;
+    }
+    *out = buf;
+    return CFT_OK;
+}
+
+/* The array pass over the from_ conversions: the same sequences again,
+ * a whole file at a time, so the batch loop and the flag OR run. */
+static cft_status character_array_pass(cft_device *dev, int fi, int rnd,
+                                       int esz, const ch_case *cases,
+                                       size_t ncases, const char *path,
+                                       rep *r, const char *const *rnames)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    cft_status ret = CFT_OK;
+    int kind;
+
+    for (kind = CH_FROM_DEC; kind <= CH_FROM_HEX && ret == CFT_OK; kind++) {
+        const char **in = NULL;
+        uint8_t *got = NULL;
+        uint32_t want_flags = 0, got_flags = 0;
+        size_t k = 0, i, bad = 0;
+        cft_status st;
+
+        for (i = 0; i < ncases; i++)
+            if (cases[i].kind == kind)
+                k++;
+        if (k == 0)
+            continue;
+        in = (const char **)malloc(k * sizeof *in);
+        got = (uint8_t *)malloc(k * (size_t)esz);
+        if (!in || !got) {
+            free((void *)in);
+            free(got);
+            return CFT_ERR_OUT_OF_MEMORY;
+        }
+        k = 0;
+        for (i = 0; i < ncases; i++) {
+            if (cases[i].kind != kind)
+                continue;
+            in[k] = cases[i].s;
+            want_flags |= cases[i].flags;
+            k++;
+        }
+        memset(got, 0, k * (size_t)esz);
+        st = kind == CH_FROM_DEC
+             ? cft_from_decimal_char(dev, (cft_format)fi, (cft_round)rnd,
+                                     in, got, k, &bad, &got_flags)
+             : cft_from_hex_char(dev, (cft_format)fi, (cft_round)rnd,
+                                 in, got, k, &bad, &got_flags);
+        if (st != CFT_OK) {
+            rep_add(r, "%s: array pass, %s x%lu: failed at element %lu "
+                       "(%.80s): %s\n", path, CH_NAME[kind],
+                    (unsigned long)k, (unsigned long)bad,
+                    bad < k ? in[bad] : "?", cft_strerror(st));
+            ret = st;
+        }
+        k = 0;
+        for (i = 0; i < ncases && ret == CFT_OK; i++) {
+            if (cases[i].kind != kind)
+                continue;
+            if (memcmp(got + k * (size_t)esz, cases[i].d, (size_t)esz) != 0) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                format_hex_elem(cases[i].d, esz, hw);
+                format_hex_elem(got + k * (size_t)esz, esz, hg);
+                r->used = 0;
+                if (r->buf && r->size)
+                    r->buf[0] = '\0';
+                rep_add(r, "%s: ARRAY PASS element %lu (%s %s %s) %.80s\n"
+                           "  expected %s\n  got      %s\n"
+                           "  the same case passes one at a time, so this "
+                           "is the batch loop\n",
+                        path, (unsigned long)k, f->name, CH_NAME[kind],
+                        rnames[rnd], cases[i].s, hw, hg);
+                ret = CFT_ERR_INTERNAL;
+            }
+            k++;
+        }
+        if (ret == CFT_OK && got_flags != want_flags) {
+            r->used = 0;
+            if (r->buf && r->size)
+                r->buf[0] = '\0';
+            rep_add(r, "%s: ARRAY PASS flags for %s %s over %lu sequences: "
+                       "got 0x%02x, expected the OR of the cases 0x%02x\n",
+                    path, CH_NAME[kind], rnames[rnd], (unsigned long)k,
+                    (unsigned)got_flags, (unsigned)want_flags);
+            ret = CFT_ERR_INTERNAL;
+        }
+        free((void *)in);
+        free(got);
+    }
+    return ret;
+}
+
+static void ch_free(ch_case *cases, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        free(cases[i].s);
+    free(cases);
+}
+
+static cft_status character_set(cft_device *dev, int fi, int ri, int esz,
+                                const char *path, rep *r,
+                                const char *const *rnames, uint64_t *total)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    char *line = NULL;
+    size_t cap = 0, len = 0;
+    unsigned long lineno = 0;
+    ch_case *cases = NULL;
+    size_t ncases = 0, ccases = 0;
+    cft_status arr, ret = CFT_OK;
+    FILE *fp = fopen(path, "r");
+
+    if (!fp)
+        return CFT_OK;                    /* absent is not a failure */
+
+    while (ret == CFT_OK && read_line(fp, &line, &cap, &len)) {
+        char tok[TOKEN_MAX];
+        char *seq = NULL, *want_s = NULL, *got_s = NULL;
+        uint8_t ea[MAX_ELEM], want_d[MAX_ELEM], got_d[MAX_ELEM];
+        uint32_t want_flags = 0, got_flags = 0, digits = 0;
+        int kind = -1, rnd = -1, refuse;
+        const char *why = NULL;
+        cft_status st;
+
+        lineno++;
+        if (len == 0)
+            continue;
+        refuse = find_field(line, "refuse") != NULL;
+        if (field_string(line, "fn", tok, sizeof tok))
+            why = "no \"fn\" field - this is not a character set";
+        else if ((kind = ch_from_name(tok)) < 0)
+            why = "unknown character-conversion name";
+        else if (field_string(line, "rnd", tok, sizeof tok))
+            why = "no \"rnd\" field";
+        else if ((rnd = rnd_from_name(tok)) < 0)
+            why = "unknown rounding attribute";
+        else if (!refuse && field_u32(line, "flags", &want_flags))
+            why = "no \"flags\" field";
+        if (why) {
+            rep_add(r, "%s:%lu: %s\n", path, lineno, why);
+            ret = CFT_ERR_ARTIFACT;
+            break;
+        }
+
+        if (kind == CH_FROM_DEC || kind == CH_FROM_HEX) {
+            seq = field_string_alloc(line, "s");
+            if (!seq || (!refuse &&
+                         (field_string(line, "d", tok, sizeof tok) ||
+                          parse_hex_elem(tok, want_d, esz)))) {
+                free(seq);
+                rep_add(r, "%s:%lu: bad \"s\" or \"d\" field\n", path,
+                        lineno);
+                ret = CFT_ERR_ARTIFACT;
+                break;
+            }
+            memset(got_d, 0, (size_t)esz);
+            got_flags = 0;
+            {
+                const char *one = seq;
+                size_t bad = 0;
+                st = kind == CH_FROM_DEC
+                     ? cft_from_decimal_char(dev, (cft_format)fi,
+                                             (cft_round)rnd, &one, got_d, 1,
+                                             &bad, &got_flags)
+                     : cft_from_hex_char(dev, (cft_format)fi, (cft_round)rnd,
+                                         &one, got_d, 1, &bad, &got_flags);
+            }
+            (*total)++;
+            if (refuse) {
+                /* The contract's refusal: a sequence outside 5.12's
+                 * syntax must be rejected rather than guessed at. */
+                if (st == CFT_OK) {
+                    r->used = 0;
+                    if (r->buf && r->size)
+                        r->buf[0] = '\0';
+                    rep_add(r, "%s:%lu: %s %s ACCEPTED a sequence that is "
+                               "not in the syntax: %.120s\n",
+                            path, lineno, f->name, CH_NAME[kind], seq);
+                    ret = CFT_ERR_INTERNAL;
+                }
+                free(seq);
+                if (ret != CFT_OK)
+                    break;
+                continue;
+            }
+            if (st != CFT_OK) {
+                rep_add(r, "%s:%lu: %s failed on %.120s: %s\n", path, lineno,
+                        CH_NAME[kind], seq, cft_strerror(st));
+                free(seq);
+                ret = st;
+                break;
+            }
+            if (memcmp(got_d, want_d, (size_t)esz) != 0 ||
+                got_flags != want_flags) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                format_hex_elem(want_d, esz, hw);
+                format_hex_elem(got_d, esz, hg);
+                r->used = 0;
+                if (r->buf && r->size)
+                    r->buf[0] = '\0';
+                rep_add(r, "%s:%lu: %s %s %s\n  s        %.200s\n"
+                           "  expected %s flags 0x%02x\n"
+                           "  got      %s flags 0x%02x\n",
+                        path, lineno, f->name, CH_NAME[kind], rnames[rnd],
+                        seq, hw, (unsigned)want_flags, hg,
+                        (unsigned)got_flags);
+                free(seq);
+                ret = CFT_ERR_INTERNAL;
+                break;
+            }
+            if (ncases == ccases) {
+                size_t want = ccases ? ccases * 2 : 512;
+                ch_case *bigger = (ch_case *)realloc(cases,
+                                                     want * sizeof *cases);
+                if (!bigger) {
+                    free(seq);
+                    ret = CFT_ERR_OUT_OF_MEMORY;
+                    break;
+                }
+                cases = bigger;
+                ccases = want;
+            }
+            cases[ncases].kind = kind;
+            cases[ncases].s = seq;
+            cases[ncases].flags = want_flags;
+            memcpy(cases[ncases].d, want_d, (size_t)esz);
+            ncases++;
+            continue;
+        }
+
+        /* Everything else reads an encoding. */
+        if (field_string(line, "a", tok, sizeof tok) ||
+            parse_hex_elem(tok, ea, esz)) {
+            rep_add(r, "%s:%lu: bad \"a\" field\n", path, lineno);
+            ret = CFT_ERR_ARTIFACT;
+            break;
+        }
+
+        if (kind == CH_TO_DEC || kind == CH_TO_HEX) {
+            if (kind == CH_TO_DEC && field_u32(line, "digits", &digits)) {
+                rep_add(r, "%s:%lu: no \"digits\" field\n", path, lineno);
+                ret = CFT_ERR_ARTIFACT;
+                break;
+            }
+            want_s = field_string_alloc(line, "s");
+            if (!want_s) {
+                rep_add(r, "%s:%lu: bad \"s\" field\n", path, lineno);
+                ret = CFT_ERR_ARTIFACT;
+                break;
+            }
+            st = ch_write(dev, fi, rnd, kind, ea, (size_t)digits, &got_s,
+                          &got_flags);
+            (*total)++;
+            if (st != CFT_OK) {
+                rep_add(r, "%s:%lu: %s failed: %s\n", path, lineno,
+                        CH_NAME[kind], cft_strerror(st));
+                free(want_s);
+                ret = st;
+                break;
+            }
+            if (strcmp(got_s, want_s) != 0 || got_flags != want_flags) {
+                char ha[2 * MAX_ELEM + 3];
+                format_hex_elem(ea, esz, ha);
+                r->used = 0;
+                if (r->buf && r->size)
+                    r->buf[0] = '\0';
+                rep_add(r, "%s:%lu: %s %s %s a=%s digits=%lu\n"
+                           "  expected %.200s flags 0x%02x\n"
+                           "  got      %.200s flags 0x%02x\n",
+                        path, lineno, f->name, CH_NAME[kind], rnames[rnd],
+                        ha, (unsigned long)digits, want_s,
+                        (unsigned)want_flags, got_s, (unsigned)got_flags);
+                ret = CFT_ERR_INTERNAL;
+            }
+            free(want_s);
+            free(got_s);
+            if (ret != CFT_OK)
+                break;
+            continue;
+        }
+
+        /* The three 9.7 payload operations: no attribute, no flags. */
+        if (field_string(line, "d", tok, sizeof tok) ||
+            parse_hex_elem(tok, want_d, esz)) {
+            rep_add(r, "%s:%lu: bad \"d\" field\n", path, lineno);
+            ret = CFT_ERR_ARTIFACT;
+            break;
+        }
+        memset(got_d, 0, (size_t)esz);
+        st = kind == CH_GET_PAYLOAD
+             ? cft_get_payload(dev, (cft_format)fi, ea, got_d, 1)
+             : (kind == CH_SET_PAYLOAD
+                ? cft_set_payload(dev, (cft_format)fi, ea, got_d, 1)
+                : cft_set_payload_signaling(dev, (cft_format)fi, ea,
+                                            got_d, 1));
+        (*total)++;
+        if (st != CFT_OK) {
+            rep_add(r, "%s:%lu: %s failed: %s\n", path, lineno,
+                    CH_NAME[kind], cft_strerror(st));
+            ret = st;
+            break;
+        }
+        if (memcmp(got_d, want_d, (size_t)esz) != 0) {
+            char ha[2 * MAX_ELEM + 3], hw[2 * MAX_ELEM + 3];
+            char hg[2 * MAX_ELEM + 3];
+            format_hex_elem(ea, esz, ha);
+            format_hex_elem(want_d, esz, hw);
+            format_hex_elem(got_d, esz, hg);
+            r->used = 0;
+            if (r->buf && r->size)
+                r->buf[0] = '\0';
+            rep_add(r, "%s:%lu: %s %s\n  a        %s\n"
+                       "  expected %s\n  got      %s\n",
+                    path, lineno, f->name, CH_NAME[kind], ha, hw, hg);
+            ret = CFT_ERR_INTERNAL;
+            break;
+        }
+    }
+    fclose(fp);
+    free(line);
+    if (ret != CFT_OK) {
+        ch_free(cases, ncases);
+        return ret;
+    }
+    arr = character_array_pass(dev, fi, ri, esz, cases, ncases, path, r,
+                               rnames);
+    ch_free(cases, ncases);
+    return arr;
+}
+
 /* ---- the replay --------------------------------------------------- */
 
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
@@ -1482,6 +1952,40 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 return st;
             }
         }
+
+        /* The clause-5.12 character conversions and the clause-9.7
+         * payload operations, in their own files and with their own
+         * schema - a case here names a SEQUENCE, which neither of the
+         * schemas above has a field for. Host operations, so there is
+         * no capability to ask about beyond the format itself. */
+        for (ri = 0; ri < 5; ri++) {
+            char path[512];
+            cft_status st;
+            FILE *probe;
+
+            if (ri == 0)
+                snprintf(path, sizeof path, "%s/%s-character.jsonl", dir,
+                         f->name);
+            else
+                snprintf(path, sizeof path, "%s/%s-character-%s.jsonl", dir,
+                         f->name, rnames[ri]);
+            probe = fopen(path, "r");
+            if (!probe)
+                continue;
+            fclose(probe);
+            if (!supported) {
+                rep_add(&r, "%s: skipped, %s not on this device\n",
+                        path, f->name);
+                continue;
+            }
+            sets++;
+            st = character_set(dev, fi, ri, esz, path, &r, rnames, &total);
+            if (st != CFT_OK) {
+                if (cases_checked)
+                    *cases_checked = total;
+                return st;
+            }
+        }
     }
 
     if (cases_checked)
@@ -1495,7 +1999,9 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 "(the elementwise and transcendental sets replayed "
                 "twice: one element at a time for exact flags, then as "
                 "arrays so a device backend's partitioning is "
-                "exercised. A reduction case IS an array call, so those "
+                "exercised, and the character sets likewise wherever the "
+                "entry point takes an array. A reduction case IS an "
+                "array call, so those "
                 "sets are replayed once and their flags are exact "
                 "already)\n",
             sets, sets == 1 ? "" : "s", (unsigned long)total);

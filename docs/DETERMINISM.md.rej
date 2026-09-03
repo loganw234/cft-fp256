@@ -1,9 +1,0 @@
---- docs/DETERMINISM.md
-+++ docs/DETERMINISM.md
-@@ -761,4 +938,5 @@ quiet comparisons 5.11; NaN semantics 6.2 (payload recommendation
- 6.2.3); sign bit rules 6.3; invalid 7.2; divideByZero 7.3; overflow
- 7.4; underflow and tininess 7.5; the recommended correctly-rounded
- functions and their special-value tables 9.2 (the table itself 9.2.1);
--minimum/maximum 9.6.
-+the reduction operations - sum, dot, sumSquare, sumAbs and the three
-+scaled products - 9.4; minimum/maximum 9.6.

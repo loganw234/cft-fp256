@@ -398,6 +398,80 @@ def log10p1(ctx, x):
     return _t1(ctx, "log10p1", x)
 
 
+
+# ---------------------------------------------------------------------
+# Character sequences (5.12) and NaN payloads (9.7). Part of the 0.6
+# step.
+#
+# Only one direction of 5.12 belongs here, and that is cft.h's shape
+# rather than this module's preference: reading sequences IN is a
+# genuine batch - an array of strings, one C call, a dense array of
+# encodings out - while writing one OUT is per element, because an
+# output sequence's length is not known until the conversion has run
+# and runs from three characters to 183,000. Float.to_decimal() is
+# where that direction lives, and a caller writing a whole array ORs
+# the flag words itself, which is all this module does with them.
+# ---------------------------------------------------------------------
+
+def _from_char(ctx, seqs, hex_form):
+    if isinstance(seqs, str):
+        raise TypeError(
+            "batch wants a sequence of strings; one string is "
+            "Context.from_decimal / Context.from_hex")
+    seqs = list(seqs)
+    for s in seqs:
+        if not isinstance(s, str):
+            raise TypeError(f"every element must be a str, got "
+                            f"{type(s).__name__}")
+    esz = ctx._fi.esz
+    out, fl = _lib.from_char(ctx._dev, ctx._fi.code, ctx._rnd, seqs, esz,
+                             hex_form=hex_form)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return ([Float(ctx, out[i * esz:(i + 1) * esz])
+             for i in range(len(seqs))], fl)
+
+
+def from_decimal(ctx, seqs):
+    """A list of decimal character sequences to Floats, one libcft call
+    for the array, each correctly rounded in ctx's attribute. Returns
+    (list of Float, flag word) - the flag word being the OR across the
+    batch, as everywhere else here. A sequence outside 5.12's syntax
+    refuses the whole call and names which one."""
+    return _from_char(ctx, seqs, False)
+
+
+def from_hex(ctx, seqs):
+    """The same for hexadecimal-significand sequences (5.12.3)."""
+    return _from_char(ctx, seqs, True)
+
+
+def _payload(ctx, name, x):
+    payloads, n, mirror = _normalise(ctx, (x,))
+    out = _lib.payload_op(ctx._dev, name, ctx._fi.code, payloads[0], n,
+                          ctx._fi.esz)
+    # 9.7: "These operations signal no exceptions." No flag word is
+    # recorded and none is returned, so ctx.last_flags is left alone.
+    return mirror(out)
+
+
+def get_payload(ctx, x):
+    """9.7 getPayload elementwise: each NaN's payload as a
+    floating-point integer, -1 for anything that is not a NaN."""
+    return _payload(ctx, "get_payload", x)
+
+
+def set_payload(ctx, x):
+    """9.7 setPayload elementwise: a quiet NaN carrying x[i] when that
+    value is an admissible payload, and +0 otherwise."""
+    return _payload(ctx, "set_payload", x)
+
+
+def set_payload_signaling(ctx, x):
+    """9.7 setPayloadSignaling elementwise. Payload 0 is not admissible,
+    so +-0 answers +0."""
+    return _payload(ctx, "set_payload_signaling", x)
+
 def rsqrt(ctx, x):
     """out[i] = 1/sqrt(x[i])."""
     return _t1(ctx, "rsqrt", x)

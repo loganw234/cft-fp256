@@ -850,6 +850,156 @@ plausible later fast path for the narrow formats, exactly as one is for
 exp; it would have to reproduce these bits exactly, which makes it an
 optimisation rather than a different answer, and nothing here reads it.
 
+## Character sequences and NaN payloads (part of the 0.6 step)
+
+`cft_from_decimal_char`, `cft_to_decimal_char`, `cft_from_hex_char`,
+`cft_to_hex_char`, `cft_format_decimal_digits`, `cft_get_payload`,
+`cft_set_payload` and `cft_set_payload_signaling`, added 2026-09-03.
+The last REQUIRED part of clause 5 this library lacked, and clause
+9.7's three payload operations alongside it.
+
+754-2019 5.12 opens with a **shall**: an implementation "shall provide
+conversions between each supported binary format and external decimal
+character sequences such that, under roundTiesToEven, conversion from
+the supported format to external decimal character sequence and back
+recovers the original floating-point representation". Until now this
+library provided none of them, which meant every caller who reached it
+from a text format - a config file, a CSV, a REPL - was reaching some
+other library's rounding on the way in, and some other library's
+opinion of "enough digits" on the way out. That is precisely the hole
+this project exists to close, and it was open at the edge of the API.
+
+**Correctly rounded in both directions, in the caller's attribute,
+with exact flags - and the standard's H is UNBOUNDED here.** 5.12.2
+lets an implementation cap the digit count it will round correctly at
+some H >= M + 3, and NOTE 1 spells out what a capped implementation
+then costs its users: "conversions of greater than H significant
+digits might incur additional rounding of the order of 10^(M-H)".
+This library incurs none of it, at any length, because the arithmetic
+is exact: a decimal sequence's value is a RATIONAL, an encoding's
+value is a dyadic rational, and both are held exactly in integers.
+
+### The exactness argument, in one paragraph
+
+A decimal sequence denotes `(-1)^s * D * 10^K` exactly - write it as
+`num/den`, with `den` either 1 or `10^-K`. The binary window is ONE
+integer division: with `q = bitlen(num) - bitlen(den) - (p + 3)`,
+`m = floor(num / (den * 2^q))` lands with `p+3` or `p+4` bits and the
+remainder says whether anything is left below it. The value is then
+exactly `(m + eps) * 2^q` with `eps` in [0, 1), non-zero exactly when
+the remainder is - which is `round_pack`'s own precondition. So the
+rounding and every flag come from the library's single rounding
+authority, on an exactly derived operand, at any length. The other
+direction needs no rounding authority at all in the exact mode:
+`m * 2^e` is `m * 5^-e * 10^e` for `e < 0` and `m << e` otherwise, both
+integers, and their decimal digits ARE the answer.
+
+`host/src/chars.c` carries its own growable natural number to do it,
+and that is not a preference. `bigint.h` is FIXED at 2048 bits, which
+is exactly right for what it was written for - softfloat.c bounds its
+alignment and needs about 1200. Decimal conversion cannot be bounded
+that way: the exact decimal of the smallest binary256 subnormal is
+`5^262378 * 10^-262378`, about 183,000 significant digits and 609,000
+bits, and reading that same sequence back needs `10^262378`, another
+872,000. Those lengths come from the FORMAT, not from a design choice.
+
+### The two shapes, and why they differ
+
+The `from_` calls are BATCHES - an array of C strings in, a dense
+array of encodings out, `n` arbitrary, the flag word the OR across it,
+the same shape as every other entry point in the header. The `to_`
+calls are PER ELEMENT, and have to be: an output sequence's length is
+not known until the conversion has run, and it is wildly non-uniform -
+three bytes for `inf`, about 183,000 for the exact decimal of the
+smallest binary256 subnormal. No dense output array can hold that, and
+a batch would need three parallel arrays (buffers, capacities,
+lengths) that a caller could not size in advance anyway, so it would
+degenerate into the per-element two-call protocol with extra ceremony.
+
+Sizing is that protocol and `*len` is ALWAYS set - on success and on
+refusal alike - to the bytes required including the NUL. Pass `cap = 0`
+with `out = NULL` to ask, then call again. A buffer too small is
+`CFT_ERR_INVALID_ARGUMENT` with `*len` set and NOTHING written: a
+truncated number is a wrong answer that looks like a right one.
+
+```c
+size_t need = 0;
+cft_to_decimal_char(dev, CFT_FP256, CFT_RNE, x, 0, NULL, 0, &need, &f);
+char *s = malloc(need);
+cft_to_decimal_char(dev, CFT_FP256, CFT_RNE, x, 0, s, need, &need, &f);
+```
+
+`digits == 0` is 5.12.2's EXACT conversion; `digits >= 1` is that many
+significant digits correctly rounded, trailing zeros kept so a caller
+who asked for H can count H. `cft_format_decimal_digits` returns
+Pmin - 9, 17, 36 and 73 - derived from `1 + ceiling(p * log10 2)`
+rather than tabulated, and that is the count at which the round trip is
+guaranteed.
+
+**The one cost note this set carries**, in the tradition of `cft_rem`'s:
+the H-digit mode derives the FULL exact expansion and then rounds the
+digit string, so writing a value near either end of fp128's or fp256's
+exponent range costs the same whether a caller asks for 5 digits or for
+all 183,000 - about 0.7 s for the widest fp256 case on the host these
+numbers come from, against about 5 microseconds for pi at binary64
+whether exact or at seventeen digits. Ordinary magnitudes are
+microseconds; the extremes are the price of the format. That
+keeps one code path and one correctness argument for both modes, which
+is the trade this library makes everywhere; a second, shorter route for
+small H would have to reproduce these digits exactly.
+
+### The syntax accepted, and the refusal
+
+```
+decimal   sign? ( digit* "." digit* | digit+ )  ( [eE] sign? digit+ )?
+hex       sign? "0" [xX] ( hexDigit* "." hexDigit* | hexDigit+ )
+                         [pP] sign? digit+
+either    sign? ( "inf" | "infinity" | "nan" | "snan" ) payload?
+payload   "(" ( digit+ | "0" [xX] hexDigit+ ) ")"
+```
+
+At least one digit in the significand, the words case-insensitive, and
+the hexadecimal form's binary exponent REQUIRED - 5.12.3's grammar
+writes `{decExponent}`, not `{decExponent}?`. No leading or trailing
+whitespace, no digit separators, no locale, no hexadecimal in the
+decimal parser or decimal in the hexadecimal one. Anything else is
+`CFT_ERR_INVALID_ARGUMENT` with nothing written, and `bad_index`
+reports WHICH element of the batch was at fault - a caller reading a
+file of numbers needs the line and not just the verdict. What this
+library writes, this library reads back.
+
+### Two contract choices a porter must not miss
+
+**A signaling NaN is written `snan`, not `nan`, and no conversion here
+raises invalid.** 6.2 exempts "the conversions described in 5.12" from
+the rule that a signaling NaN signals invalid, and 5.12.1 offers two
+spellings: write `snan`, or write `nan` and signal invalid. This
+contract takes the first, because the second loses the distinction the
+round trip is required to keep. NaNs carry their payload and their sign
+through both directions - these are ENCODING operations, like
+abs/negate/copySign/select, and docs/DETERMINISM.md's canonical-NaN
+rule governs arithmetic.
+
+**9.7's admissible payload set is the format's payload field**, bits
+d2..d(p-1) of the trailing significand (6.2.1): `0 .. 2^(man_w-1) - 1`,
+and `1` upward for the signaling form, because payload 0 with the quiet
+bit clear is an INFINITY encoding rather than a NaN. The test is on the
+VALUE, so `-0` passes it as the integer zero - 754 settles that `-0`
+equals `0`, and every other value-based operation in this contract
+reads it the same way. Anything outside the set gives `+0`, which is
+9.7's own answer, and `getPayload` of a non-NaN is `-1`, which is also
+9.7's. All three signal nothing, so none of them has a flags argument.
+
+### What has been run
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay (60 sets: 20 opcode, 20 transcendental, 20 character) | 648,731 at the generator's defaults, 492,731 at `make vectors`' | every case, bits, flags and refusals |
+| `character_check.py`, both directions vs the model | 20,819 | zero disagreements, per-element flags |
+| MPFR parity, the four conversions, five attributes, four rungs | 20,172 of 298,904 | zero value AND zero flag mismatches |
+| `cft.hpp` vs `cft.h`, every entry point twice | 210,511 at C++17 and again at C++20 | identical encodings, flags and characters |
+| `test_cftmpfr.py` | 640 | pass |
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future
