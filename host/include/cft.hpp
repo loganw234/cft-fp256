@@ -1099,6 +1099,79 @@ public:
         return r;
     }
 
+    /* ---------------------------------------------------------------
+     * The phase-1 transcendentals (ABI 0.3)
+     *
+     * Correctly rounded in the caller's attribute, with the clause
+     * 9.2.1 special values and exact flags - see cft.h. Host
+     * operations, so there is no bus word and nothing to ask
+     * cft_supports() about.
+     * --------------------------------------------------------------- */
+    call_result exp(cft_format fmt, cft_round rnd, const void *a, void *d,
+                    std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_exp(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result expm1(cft_format fmt, cft_round rnd, const void *a, void *d,
+                      std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_expm1(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result exp2(cft_format fmt, cft_round rnd, const void *a, void *d,
+                     std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_exp2(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result log(cft_format fmt, cft_round rnd, const void *a, void *d,
+                    std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_log(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result log1p(cft_format fmt, cft_round rnd, const void *a, void *d,
+                      std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_log1p(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result log2(cft_format fmt, cft_round rnd, const void *a, void *d,
+                     std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_log2(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result log10(cft_format fmt, cft_round rnd, const void *a, void *d,
+                      std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_log10(dev_, fmt, rnd, a, d, n, &r.flags);
+        return r;
+    }
+    call_result pow(cft_format fmt, cft_round rnd, const void *a,
+                    const void *b, void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_pow(dev_, fmt, rnd, a, b, d, n, &r.flags);
+        return r;
+    }
+    call_result hypot(cft_format fmt, cft_round rnd, const void *a,
+                      const void *b, void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_hypot(dev_, fmt, rnd, a, b, d, n, &r.flags);
+        return r;
+    }
+
+
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
     {
@@ -1631,6 +1704,75 @@ public:
     }
 
     /* ===========================================================
+     * The phase-1 transcendentals (ABI 0.3)
+     *
+     * Correctly rounded in this context's attribute, at this
+     * context's format, with the clause 9.2.1 special values and
+     * exact flags. Host operations, so there is no bus word and
+     * nothing to ask cft_supports() about; cft.h and
+     * docs/TRANSCENDENTALS.md carry the semantics.
+     * =========================================================== */
+    std::uint32_t exp(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->exp(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_exp");
+    }
+    std::uint32_t expm1(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->expm1(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_expm1");
+    }
+    std::uint32_t exp2(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->exp2(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_exp2");
+    }
+    std::uint32_t log(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->log(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_log");
+    }
+    std::uint32_t log1p(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->log1p(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_log1p");
+    }
+    std::uint32_t log2(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->log2(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_log2");
+    }
+    std::uint32_t log10(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        return record(dev_->log10(F, rnd_, ptr(a), ptr(d), d.size()),
+                      "cft_log10");
+    }
+    std::uint32_t pow(cspan<encoding_type> a, cspan<encoding_type> b,
+                      span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->pow(F, rnd_, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_pow");
+    }
+    std::uint32_t hypot(cspan<encoding_type> a, cspan<encoding_type> b,
+                        span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->hypot(F, rnd_, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_hypot");
+    }
+
+
+    /* ===========================================================
      * Scalar convenience - every one of these is the batch of one
      *
      * Offered for clarity, not for throughput: N of these is N round
@@ -1720,6 +1862,69 @@ public:
         encoding_type d{};
         record(dev_->rem(F, x.bytes().data(), y.bytes().data(), d.data(), 1),
                "cft_rem");
+        return make(d);
+    }
+    value_type exp(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->exp(F, rnd_, x.bytes().data(), d.data(), 1), "cft_exp");
+        return make(d);
+    }
+    value_type expm1(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->expm1(F, rnd_, x.bytes().data(), d.data(), 1),
+               "cft_expm1");
+        return make(d);
+    }
+    value_type exp2(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->exp2(F, rnd_, x.bytes().data(), d.data(), 1),
+               "cft_exp2");
+        return make(d);
+    }
+    value_type log(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->log(F, rnd_, x.bytes().data(), d.data(), 1), "cft_log");
+        return make(d);
+    }
+    value_type log1p(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->log1p(F, rnd_, x.bytes().data(), d.data(), 1),
+               "cft_log1p");
+        return make(d);
+    }
+    value_type log2(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->log2(F, rnd_, x.bytes().data(), d.data(), 1),
+               "cft_log2");
+        return make(d);
+    }
+    value_type log10(const value_type &x) &
+    {
+        encoding_type d{};
+        record(dev_->log10(F, rnd_, x.bytes().data(), d.data(), 1),
+               "cft_log10");
+        return make(d);
+    }
+    value_type pow(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->pow(F, rnd_, x.bytes().data(), y.bytes().data(),
+                         d.data(), 1),
+               "cft_pow");
+        return make(d);
+    }
+    value_type hypot(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->hypot(F, rnd_, x.bytes().data(), y.bytes().data(),
+                           d.data(), 1),
+               "cft_hypot");
         return make(d);
     }
     cft_class_value classify(const value_type &x)

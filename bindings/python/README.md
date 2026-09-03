@@ -169,3 +169,24 @@ test_cftmpfr.py       conversions, gmpy2 parity, batch==scalar, flags,
 No packaging ceremony: it is a plain package directory. Copy it, put
 it on `PYTHONPATH`, or vendor it next to your code; drop the shared
 library beside `_lib.py` or point `CFT_LIB` at it.
+
+## The transcendentals (ABI 0.3)
+
+`exp`, `expm1`, `exp2`, `log`, `log1p`, `log2`, `log10`, `pow` and
+`hypot` are on `Context` and in `batch`, correctly rounded at every
+supported precision under every attribute:
+
+```python
+from cftmpfr import Context, batch
+
+ctx = Context(237)                  # binary256, roundTiesToEven
+ctx.hypot(3, 4)                     # exactly 5 - and no inexact flag
+ctx.pow(3, 4)                       # exactly 81
+ys, flags = batch.exp(ctx, xs)      # one C call for the whole array
+```
+
+Correct rounding is what makes the batch path and the scalar path the
+same answer rather than nearly the same one, and what makes gmpy2's
+`exp` at a matching IEEE context return the same bits. The exact cases
+raise nothing at all, which is the observable difference between a
+correctly rounded implementation and an accurate one.

@@ -639,6 +639,97 @@ int main(void)
               "fp256 sqrt(1) = 1 exactly");
     }
 
+    /* --- the phase-1 transcendentals (ABI 0.3) ---------------------
+     *
+     * Same charter as the block below: host/tests/transcend_check.py
+     * and the MPFR oracle prove these at scale, so what belongs HERE
+     * is the refusals, the aliasing promise, and the handful of edges
+     * whose expected bits come from reading clause 9.2.1 by hand -
+     * including the two rows implementations most often get wrong. */
+    {
+        uint8_t a[8], b[8], d[8];
+        uint32_t f3 = 0xdead;
+
+        put32(a, 0x3f800000u);                        /* 1.0 */
+        put32(b, 0x40000000u);                        /* 2.0 */
+        CHECK(cft_exp(dev, CFT_FP32, (cft_round)-1, a, d, 1, &f3)
+              == CFT_ERR_INVALID_ARGUMENT, "exp refuses rnd = -1");
+        CHECK(cft_pow(dev, CFT_FP32, (cft_round)5, a, b, d, 1, &f3)
+              == CFT_ERR_INVALID_ARGUMENT, "pow refuses rnd = 5");
+        CHECK(cft_log(dev, (cft_format)9, CFT_RNE, a, d, 1, &f3)
+              == CFT_ERR_INVALID_ARGUMENT, "log refuses a bad format");
+        CHECK(cft_pow(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f3)
+              == CFT_ERR_INVALID_ARGUMENT, "pow needs b");
+        CHECK(cft_hypot(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f3)
+              == CFT_ERR_INVALID_ARGUMENT, "hypot needs b");
+        f3 = 0xdead;
+        CHECK(cft_exp(dev, CFT_FP32, CFT_RNE, NULL, NULL, 0, &f3)
+              == CFT_OK && f3 == 0, "exp n = 0 succeeds, clean flags");
+
+        /* Hand-derived clause 9.2.1 rows. exp(-inf) is +0 and silent;
+         * expm1(-0) keeps the sign, which is half of why expm1 exists;
+         * log(+0) is -inf with divideByZero; pow(qNaN, +0) is 1 for
+         * ANY x; and pow(+0, -inf) is the |x| < 1 row - +inf, and it
+         * signals NOTHING, because the divideByZero is the pole at a
+         * finite negative exponent rather than the limit. */
+        put32(a, 0xff800000u);
+        st = cft_exp(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f3 == 0,
+              "exp(-inf) = +0, silent");
+        put32(a, 0x80000000u);
+        st = cft_expm1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "expm1(-0) = -0, silent");
+        st = cft_log1p(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "log1p(-0) = -0, silent");
+        put32(a, 0x00000000u);
+        st = cft_log(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f3 == CFT_FLAG_DIVBYZERO, "log(+0) = -inf, divideByZero");
+        put32(a, 0xbf800000u);
+        st = cft_log1p(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f3 == CFT_FLAG_DIVBYZERO, "log1p(-1) = -inf, divideByZero");
+        put32(a, 0x7fc00000u);
+        put32(b, 0x00000000u);
+        st = cft_pow(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "pow(qNaN, +0) = 1, silent");
+        put32(a, 0x00000000u);
+        put32(b, 0xff800000u);
+        st = cft_pow(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f3 == 0,
+              "pow(+0, -inf) = +inf and signals NOTHING");
+        put32(a, 0x00000000u);
+        put32(b, 0xbf800000u);
+        st = cft_pow(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f3 == CFT_FLAG_DIVBYZERO,
+              "pow(+0, -1) = +inf with divideByZero");
+        put32(a, 0x7f800000u);
+        put32(b, 0x7fc00000u);
+        st = cft_hypot(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f3 == 0,
+              "hypot(+inf, qNaN) = +inf, silent");
+        put32(a, 0x40400000u);                        /* 3 */
+        put32(b, 0x40800000u);                        /* 4 */
+        st = cft_hypot(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x40a00000u && f3 == 0,
+              "hypot(3, 4) = 5 EXACTLY - no inexact");
+        put32(a, 0x41200000u);                        /* 10 */
+        st = cft_log10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "log10(10) = 1 EXACTLY");
+        put32(a, 0x41000000u);                        /* 8 */
+        st = cft_log2(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x40400000u && f3 == 0,
+              "log2(8) = 3 EXACTLY");
+        st = cft_exp2(dev, CFT_FP32, CFT_RNE, d, d, 1, &f3);   /* aliased */
+        CHECK(st == CFT_OK && get32(d) == 0x41000000u && f3 == 0,
+              "exp2(3) = 8 EXACTLY, and d may alias a");
+    }
+
     /* --- the clause-5 completion set ------------------------------
      *
      * The check harness proves these against the model at scale; what
