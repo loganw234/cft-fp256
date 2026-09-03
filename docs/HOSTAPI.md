@@ -628,8 +628,10 @@ guaranteed.
 the H-digit mode derives the FULL exact expansion and then rounds the
 digit string, so writing a value near either end of fp128's or fp256's
 exponent range costs the same whether a caller asks for 5 digits or for
-all 183,000 - about 0.7 s for the widest fp256 case on this host, and
-under a millisecond for anything a caller is likely to print. That
+all 183,000 - about 0.7 s for the widest fp256 case on the host these
+numbers come from, against about 5 microseconds for pi at binary64
+whether exact or at seventeen digits. Ordinary magnitudes are
+microseconds; the extremes are the price of the format. That
 keeps one code path and one correctness argument for both modes, which
 is the trade this library makes everywhere; a second, shorter route for
 small H would have to reproduce these digits exactly.
@@ -680,9 +682,9 @@ reads it the same way. Anything outside the set gives `+0`, which is
 
 | check | cases | result |
 |---|---|---|
-| `cft_conformance` replay (60 sets: 20 opcode, 20 transcendental, 20 character) | 492,731 | every case, bits, flags and refusals |
-| `character_check.py`, both directions vs the model | 17,835 | zero disagreements, per-element flags |
-| MPFR parity, the four conversions, five attributes, four rungs | see docs/VALIDATION.md | zero value AND zero flag mismatches |
+| `cft_conformance` replay (60 sets: 20 opcode, 20 transcendental, 20 character) | 648,731 at the generator's defaults, 492,731 at `make vectors`' | every case, bits, flags and refusals |
+| `character_check.py`, both directions vs the model | 20,819 | zero disagreements, per-element flags |
+| MPFR parity, the four conversions, five attributes, four rungs | 20,172 of 298,904 | zero value AND zero flag mismatches |
 | `cft.hpp` vs `cft.h`, every entry point twice | 210,511 at C++17 and again at C++20 | identical encodings, flags and characters |
 | `test_cftmpfr.py` | 640 | pass |
 

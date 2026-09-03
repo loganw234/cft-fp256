@@ -1662,7 +1662,7 @@ What that closed, and what it did not:
 - **Closed: a growable bignum, in one file, for one reason.**
   `bigint.h` is fixed at 2048 bits because softfloat.c bounds its
   alignment; decimal conversion cannot be bounded that way, because
-  the exact decimal of the smallest binary256 subnormal is 183,000
+  the exact decimal of the smallest binary256 subnormal is 183,395
   digits and reading it back needs `10^262378`. Those lengths come
   from the format. `host/src/chars.c` carries the limb vector that
   handles them and nothing more.
@@ -1693,10 +1693,11 @@ What that closed, and what it did not:
   for it here.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 clause-5.12
-entry: 492,731 conformance cases replayed across sixty sets, 17,835
+entry: 648,731 conformance cases replayed across sixty sets, 20,819
 model comparisons in both directions at four formats and five
-attributes, the MPFR campaign extended to the four conversions, and
-the round trip shown to hold at Pmin and to collide at Pmin - 1.
+attributes, 20,172 conversion cases against MPFR with zero value and
+zero flag mismatches, and the round trip shown to hold at Pmin and to
+collide at Pmin - 1.
 
 ## The open core
 

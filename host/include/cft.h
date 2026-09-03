@@ -1111,7 +1111,7 @@ CFT_API cft_status cft_from_decimal_char(cft_device *dev, cft_format fmt,
  * the exact value, however many that is, trailing zeros removed. Every
  * binary float is a finite decimal (2^-k = 5^k * 10^-k) so this always
  * terminates - and for the extremes it is long: about 183,000
- * significant digits for the smallest binary256 subnormal, 78,922 for
+ * significant digits for the smallest binary256 subnormal, 78,914 for
  * the largest binary256 normal. `rnd` is not consulted and no flag is
  * raised.
  *

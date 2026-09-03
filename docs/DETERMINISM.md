@@ -162,7 +162,7 @@ wrong:
 ### Where the canonical-NaN rule does not apply
 
 The rule below - any NaN in, one canonical quiet NaN out, sNaN raises
-invalid - governs **arithmetic**. Three groups are outside it, and
+invalid - governs **arithmetic**. Four groups are outside it, and
 saying so precisely matters because this document is what an
 independent implementation is scored against:
 
@@ -487,8 +487,8 @@ What belongs HERE is what an independent implementation is scored on:
 - **The EXACT conversion is exact, and terminates.** Every binary
   float is a finite decimal because `2^-k = 5^k * 10^-k`, so
   `convertToDecimalCharacter` with no digit count writes the whole
-  value: about 183,000 significant digits for the smallest binary256
-  subnormal, 78,922 for the largest binary256 normal. Those lengths
+  value: 183,395 significant digits for the smallest binary256
+  subnormal and 78,914 for the largest binary256 normal. Those lengths
   are a property of the format, not of this implementation.
 - **The round trip is guaranteed at Pmin and is NOT guaranteed one
   digit short.** Pmin is `1 + ceiling(p * log10 2)` - 9, 17, 36 and 73
