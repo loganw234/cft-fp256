@@ -28,6 +28,7 @@
 // one-bit change before they are believed.
 
 import { Context, formatFor } from "./index.mjs";
+import { decode } from "./core.mjs";
 import { FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO, FLAG_OVERFLOW,
          FLAG_UNDERFLOW }
   from "./lib.mjs";
@@ -70,8 +71,8 @@ const c64 = ctxs[64];
 // identity
 // ---------------------------------------------------------------------
 
-test("the module is ABI 0.5 on the software backend", () => {
-  eq(c64.abiVersion, "0.5", "abi: ");
+test("the module is ABI 0.6 on the software backend", () => {
+  eq(c64.abiVersion, "0.6", "abi: ");
   eq(c64.backend, "software", "backend: ");
 });
 
@@ -1277,6 +1278,862 @@ test("the reduction against pi, through the wasm: the binary64 worst case", () =
   const big = c64.fromBits(0x7fe0000000000000n);
   const s = c64.sin(big);
   ok(!s.isNaN && !s.isZero && !s.isInf, "sin(2^1023) is a finite nonzero number");
+});
+
+
+/** A random FINITE encoding within `span` binades of 1, built from the
+ *  bits rather than from a decimal string. The decimal parser has a
+ *  deliberately narrow window - it rounds with one exact library call
+ *  or refuses (core.mjs) - and at binary32 a seven-digit random decimal
+ *  falls outside it, so a test that wants operands rather than parsing
+ *  asks for bits. Finite because the identities under test have one
+ *  documented exception on an infinity beside a NaN, which gets its own
+ *  test rather than a random encounter here. */
+function randomFinite(ctx, rand, span = 20) {
+  const fi = ctx.format;
+  const sign = rand() < 0.5 ? 0n : 1n;
+  const e = BigInt(fi.bias + Math.floor(rand() * (2 * span + 1)) - span);
+  let man = 0n;
+  for (let i = 0; i < fi.manW; i += 30)
+    man = (man << 30n) | BigInt(Math.floor(rand() * (1 << 30)));
+  man &= (1n << BigInt(fi.manW)) - 1n;
+  return ctx.fromBits((sign << BigInt(fi.width - 1)) |
+                      (e << BigInt(fi.manW)) | man);
+}
+
+// ---------------------------------------------------------------------
+// the rest of IEEE 754-2019 table 9.1 (ABI 0.6)
+//
+// Ten operations, and what is new in them is EXACTNESS rather than
+// machinery: each has a larger exact-case table than the function it is
+// built from. The rows below are the ones cft.h writes down because a
+// porter should not have to infer them, and every expected value here
+// was taken from python/cft_golden rather than from memory.
+// ---------------------------------------------------------------------
+
+test("table 9.1's new exact cases are exact, and raise nothing", () => {
+  const rows = [
+    // 2^n - 1 is a dyadic rational for every n, so exp2m1 is exact at
+    // every integer argument - a much larger table than exp2's.
+    ["exp2m1(3) = 7", () => c64.exp2m1(3), 7],
+    ["exp2m1(-1) = -1/2", () => c64.exp2m1(-1), -0.5],
+    ["exp2m1(+0) = +0", () => c64.exp2m1(c64.zero(0)), 0],
+    // exp10 at the non-negative integers whose 5^n fits in p+1 bits
+    ["exp10(2) = 100", () => c64.exp10(2), 100],
+    ["exp10m1(2) = 99", () => c64.exp10m1(2), 99],
+    // log2p1 and log10p1 form 1 + x EXACTLY on the encoding
+    ["log2p1(7) = 3", () => c64.log2p1(7), 3],
+    ["log10p1(9) = 1", () => c64.log10p1(9), 1],
+    // rSqrt exactly at the even powers of two
+    ["rsqrt(4) = 1/2", () => c64.rsqrt(4), 0.5],
+    ["rsqrt(1/16) = 4", () => c64.rsqrt(c64.from("0.0625")), 4],
+    // powr and the integer-exponent three, on their exact rows
+    ["powr(2, 3) = 8", () => c64.powr(2, 3), 8],
+    ["pown(2, 10) = 1024", () => c64.pown(2, 10n), 1024],
+    ["compound(1/2, 4) = 5.0625", () => c64.compound(c64.from("0.5"), 4), 5.0625],
+    ["rootn(8, 3) = 2", () => c64.rootn(8, 3), 2],
+    ["rootn(8, 1) = 8", () => c64.rootn(8, 1), 8],
+  ];
+  for (const [name, f, want] of rows) {
+    c64.clearFlags();
+    const r = f();
+    eq(r.toNumber(), want, `${name}: `);
+    eq(c64.lastFlags, 0, `${name} raises nothing: `);
+  }
+  // and a negative power of ten is not dyadic at all, so it is not
+  // exact even though exp10 of a POSITIVE integer is
+  c64.clearFlags();
+  eq(c64.exp10(-1).bits, 0x3fb999999999999an, "exp10(-1): ");
+  ok(c64.lastFlags & FLAG_INEXACT, "exp10(-1) is inexact");
+});
+
+test("rSqrt(±0) is ±infinity with divideByZero, and the SIGN survives", () => {
+  // The standard's row is ±inf; GNU MPFR's mpfr_rec_sqrt returns +inf
+  // for both zeros, and this contract follows the standard (cft.h).
+  for (const s of [0, 1]) {
+    c64.clearFlags();
+    const r = c64.rsqrt(c64.zero(s));
+    ok(r.isInf, `rsqrt(${s ? "-" : "+"}0) is an infinity`);
+    eq(r.sign, s, `rsqrt(${s ? "-" : "+"}0) sign: `);
+    ok(c64.lastFlags & FLAG_DIVBYZERO, "with divideByZero");
+    eq(c64.lastFlags & FLAG_INVALID, 0, "and NOT invalid: ");
+  }
+  // it can neither overflow nor underflow at any rung
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    const fi = c.format;
+    c.clearFlags();
+    c.rsqrt(c.fromBits(1n));                       // smallest subnormal
+    eq(c.lastFlags & (FLAG_OVERFLOW | FLAG_UNDERFLOW), 0,
+       `rsqrt(min subnormal) at ${fi.ieeeName} neither over- nor underflows: `);
+    c.clearFlags();
+    c.rsqrt(c.fromBits((((1n << BigInt(fi.expW)) - 1n) <<
+                        BigInt(fi.manW)) - 1n));   // largest finite
+    eq(c.lastFlags & (FLAG_OVERFLOW | FLAG_UNDERFLOW), 0,
+       `rsqrt(maxfinite) at ${fi.ieeeName} neither: `);
+  }
+});
+
+test("powr is NOT pow, on every row where the two part company", () => {
+  // powr(x, y) for x < 0 is invalid for EVERY y, a NaN included, where
+  // pow(-1, 2) is 1; powr(±0, ±0), powr(+inf, ±0) and powr(+1, ±inf)
+  // are invalid where pow answers 1; and powr(qNaN, y) is a quiet NaN
+  // where pow(qNaN, 0) is 1.
+  const invalid = [
+    ["powr(-1, 2)", () => c64.powr(-1, 2)],
+    ["powr(+0, +0)", () => c64.powr(c64.zero(0), c64.zero(0))],
+    ["powr(-0, -0)", () => c64.powr(c64.zero(1), c64.zero(1))],
+    ["powr(+inf, +0)", () => c64.powr(c64.inf(0), c64.zero(0))],
+    ["powr(+1, +inf)", () => c64.powr(1, c64.inf(0))],
+    ["powr(+1, -inf)", () => c64.powr(1, c64.inf(1))],
+    ["powr(-1, qNaN)", () => c64.powr(-1, c64.nan())],
+  ];
+  for (const [name, f] of invalid) {
+    c64.clearFlags();
+    ok(f().isNaN, `${name} is a quiet NaN`);
+    ok(c64.lastFlags & FLAG_INVALID, `${name} raises invalid`);
+  }
+  // and the NaN rows, which raise NOTHING
+  for (const [name, f] of [["powr(qNaN, 2)", () => c64.powr(c64.nan(), 2)],
+                           ["powr(+1, qNaN)", () => c64.powr(1, c64.nan())]]) {
+    c64.clearFlags();
+    ok(f().isNaN, `${name} is a quiet NaN`);
+    eq(c64.lastFlags, 0, `${name} raises nothing: `);
+  }
+  // the same operands through pow, which answers differently
+  eq(c64.pow(-1, 2).toNumber(), 1, "pow(-1, 2): ");
+  eq(c64.pow(c64.nan(), 0).toNumber(), 1, "pow(qNaN, 0): ");
+  eq(c64.pow(1, c64.nan()).toNumber(), 1, "pow(1, qNaN): ");
+  eq(c64.pow(c64.zero(0), c64.zero(0)).toNumber(), 1, "pow(+0, +0): ");
+});
+
+test("the integer-exponent three follow 9.2.1's rows, not pow's", () => {
+  // pown(x, 0) is 1 for any x that is not a signaling NaN - an
+  // infinity and a quiet NaN included.
+  for (const [name, x] of [["1", 1], ["+inf", c64.inf(0)], ["-inf", c64.inf(1)],
+                           ["qNaN", c64.nan()], ["-0", c64.zero(1)]]) {
+    c64.clearFlags();
+    eq(c64.pown(x, 0).toNumber(), 1, `pown(${name}, 0): `);
+    eq(c64.lastFlags, 0, `pown(${name}, 0) raises nothing: `);
+  }
+  // compound(x, 0) is 1 "for x >= -1 or quiet NaN", so an x BELOW -1
+  // with n = 0 is INVALID rather than 1 - the row that separates it
+  // from pown.
+  c64.clearFlags();
+  ok(c64.compound(-2, 0).isNaN, "compound(-2, 0) is a quiet NaN");
+  ok(c64.lastFlags & FLAG_INVALID, "and invalid, where pown would answer 1");
+  eq(c64.pown(-2, 0).toNumber(), 1, "pown(-2, 0): ");
+  c64.clearFlags();
+  eq(c64.compound(-1, 0).toNumber(), 1, "compound(-1, 0): ");
+  eq(c64.compound(c64.zero(1), 5).toNumber(), 1, "compound(-0, 5): ");
+  // compound(-1, n): +inf with divideByZero for n < 0, +0 for n > 0
+  c64.clearFlags();
+  const pole = c64.compound(-1, -2);
+  ok(pole.isInf && pole.sign === 0, "compound(-1, -2) is +inf");
+  ok(c64.lastFlags & FLAG_DIVBYZERO, "with divideByZero");
+  c64.clearFlags();
+  const z = c64.compound(-1, 3);
+  ok(z.isZero && z.sign === 0, "compound(-1, 3) is +0");
+  eq(c64.lastFlags, 0, "silently: ");
+  // rootn(x, 0) is invalid for every x; rootn(x, 1) is x exactly and
+  // silently; and rootn(-0, 2) is +0 where squareRoot(-0) is -0, which
+  // is the difference the standard's own NOTE names.
+  c64.clearFlags();
+  ok(c64.rootn(8, 0).isNaN, "rootn(8, 0) is a quiet NaN");
+  ok(c64.lastFlags & FLAG_INVALID, "and invalid: zero is outside the domain");
+  const even = c64.rootn(c64.zero(1), 2);
+  ok(even.isZero && even.sign === 0, "rootn(-0, 2) is +0 (the even-n row)");
+  const odd = c64.rootn(c64.zero(1), 3);
+  ok(odd.isZero && odd.sign === 1, "rootn(-0, 3) is -0 (the odd-n row)");
+  ok(c64.sqrt(c64.zero(1)).sign === 1, "squareRoot(-0) is -0, which differs");
+});
+
+test("log2p1 and log10p1 have log's edges, one step over", () => {
+  for (const fn of ["log2p1", "log10p1"]) {
+    c64.clearFlags();
+    const p = c64[fn](-1);
+    ok(p.isInf && p.sign === 1, `${fn}(-1) is -inf`);
+    ok(c64.lastFlags & FLAG_DIVBYZERO, `${fn}(-1) signals divideByZero`);
+    eq(c64.lastFlags & FLAG_INVALID, 0, `${fn}(-1) is not invalid: `);
+    c64.clearFlags();
+    ok(c64[fn](-2).isNaN, `${fn}(-2) is a quiet NaN`);
+    ok(c64.lastFlags & FLAG_INVALID, `${fn} below -1 is invalid`);
+  }
+  // 1 + x is formed EXACTLY, never as a rounded sum - which is the
+  // whole reason these two functions exist. At x = 2^-1000 a rounded
+  // 1 + x would be exactly 1, and the answer would be an exact,
+  // silent +0. It is not: it is x/ln 2 and x/ln 10, inexact, and
+  // these bits are python/cft_golden's.
+  const x1000 = c64.scaleb(c64.from(1), -1000);
+  for (const [fn, want] of [["log2p1", 0x01771547652b82fen],
+                            ["log10p1", 0x015bcb7b1526e50en]]) {
+    c64.clearFlags();
+    const r = c64[fn](x1000);
+    eq(r.bits, want, `${fn}(2^-1000) - a rounded 1 + x would give +0: `);
+    ok(c64.lastFlags & FLAG_INEXACT, `${fn}(2^-1000) is inexact`);
+  }
+  // and at the subnormal floor the two land on opposite sides of the
+  // smallest subnormal, which only a directed attribute can see:
+  // 2^-1074/ln 2 is above it and 2^-1074/ln 10 is below.
+  const tiny = c64.fromBits(1n);
+  c64.clearFlags();
+  eq(c64.log2p1(tiny).bits, 1n, "log2p1(min subnormal) to nearest: ");
+  ok((c64.lastFlags & FLAG_UNDERFLOW) && (c64.lastFlags & FLAG_INEXACT),
+     "tiny and inexact");
+  eq(c64.log10p1(tiny).bits, 0n, "log10p1(min subnormal) to nearest is +0: ");
+  eq(c64.withRounding("rup").log10p1(tiny).bits, 1n,
+     "and upward it steps onto the smallest subnormal: ");
+});
+
+test("an integer operand is a BigInt or a safe integer, never a lost one", () => {
+  // int64 is why: a JS number stops being an integer above 2^53, so a
+  // value that large has already lost its identity before this package
+  // could see it, and it is refused rather than silently widened.
+  eq(c64.pown(2, 10).bits, c64.pown(2, 10n).bits, "10 and 10n agree: ");
+  throws(() => c64.pown(2, 2 ** 60), "a number past 2^53 is not an integer");
+  throws(() => c64.pown(2, 1.5), "a non-integer is not an exponent");
+  throws(() => c64.pown(2, "3"), "a string is not an exponent");
+  throws(() => c64.pown(2, 2n ** 63n), "2^63 is past INT64_MAX");
+  // and the int64 extremes, which the published sets carry, go through
+  const big = c64.pown(c64.from("1.5"), 9223372036854775807n);
+  ok(big.isInf, "pown(1.5, INT64_MAX) overflows to an infinity");
+  const small = c64.pown(c64.from("1.5"), -9223372036854775808n);
+  ok(small.isZero, "pown(1.5, INT64_MIN) underflows to a zero");
+});
+
+test("all ten of table 9.1 reach every format, and the batch is the scalar", () => {
+  const UNARY10 = ["exp2m1", "exp10", "exp10m1", "log2p1", "log10p1",
+                   "rsqrt"];
+  const INT10 = ["pown", "compound", "rootn"];
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    for (const fn of UNARY10) {
+      const r = c[fn](c.from("0.5"));
+      ok(!r.isNaN, `${fn} at ${c.format.ieeeName} is a number`);
+      eq(r.bytes.length, c.format.size, `${fn} at ${w} width: `);
+    }
+    ok(!c.powr(2, c.from("0.5")).isNaN, `powr at ${c.format.ieeeName}`);
+    for (const fn of INT10)
+      ok(!c[fn](c.from("0.5"), 3).isNaN, `${fn} at ${c.format.ieeeName}`);
+  }
+  // batch equals scalar, element for element, for all ten - the three
+  // with an integer exponent take their exponents as the SECOND array.
+  const n = 129;
+  const rand = mulberry32(0x0606);
+  const xs = [], ns = [];
+  for (let i = 0; i < n; i++) {
+    xs.push(c64.from(String((rand() * 8 - 2).toFixed(6))));
+    ns.push(BigInt(Math.floor(rand() * 9) - 4));
+  }
+  for (const fn of UNARY10) {
+    c64.clearFlags();
+    const batch = c64.map(fn, xs);
+    let union = 0;
+    xs.forEach((x, i) => {
+      const one = c64.withRounding("rne");
+      one.clearFlags();
+      const s = one[fn](x);
+      union |= one.lastFlags;
+      ok(batch[i].sameBits(s), `${fn}[${i}] batch equals scalar`);
+    });
+    eq(c64.lastFlags, union, `${fn} batch flags are the union: `);
+  }
+  const powrBatch = c64.map("powr", xs.map((x) => c64.abs(x)), xs);
+  xs.forEach((x, i) => ok(powrBatch[i].sameBits(c64.powr(c64.abs(x), x)),
+                          `powr[${i}] batch equals scalar`));
+  for (const fn of INT10) {
+    const batch = c64.map(fn, xs, ns);
+    xs.forEach((x, i) => ok(batch[i].sameBits(c64[fn](x, ns[i])),
+                            `${fn}[${i}] batch equals scalar`));
+  }
+});
+
+// ---------------------------------------------------------------------
+// clause 5.12's character conversions and clause 9.7's payloads
+// ---------------------------------------------------------------------
+
+test("Pmin is the library's, and the round trip at it recovers the bits", () => {
+  // 5.12.2 opens with a SHALL: under roundTiesToEven, format -> decimal
+  // sequence -> format recovers the original representation. Pmin is
+  // the digit count at which that is guaranteed - 9, 17, 36, 73 - and
+  // it comes from the library rather than a table here.
+  const want = { 32: 9, 64: 17, 128: 36, 256: 73 };
+  const rand = mulberry32(0x5120);
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    eq(c.decimalDigits, want[w], `Pmin(${c.format.ieeeName}): `);
+    let checked = 0;
+    for (const bits of interestingBits(c.format, rand)) {
+      const x = c.fromBits(bits);
+      const s = c.toDecimal(x, { digits: c.decimalDigits });
+      const back = c.fromDecimal(s);
+      ok(back.sameBits(x),
+         `${c.format.ieeeName} round trip at ${c.decimalDigits} digits: ` +
+         `0x${bits.toString(16)} -> ${s.slice(0, 60)} -> ` +
+         `0x${back.bits.toString(16)}`);
+      checked++;
+    }
+    ok(checked > 40, `${c.format.ieeeName}: ${checked} encodings round-tripped`);
+  }
+});
+
+test("the exact conversion is exact, and a digit count rounds", () => {
+  // digits = 0 is 5.12.2's exact conversion: every digit of the exact
+  // value, trailing zeros removed, no attribute consulted, no flag.
+  c64.clearFlags();
+  eq(c64.toDecimal(c64.from("1.5")), "1.5e+0", "exact 1.5: ");
+  eq(c64.lastFlags, 0, "the exact conversion raises nothing: ");
+  eq(c64.toDecimal(c64.zero(0)), "0", "+0: ");
+  eq(c64.toDecimal(c64.zero(1), { digits: 9 }), "-0",
+     "-0 at any digit count: ");
+  // digits >= 1 keeps trailing zeros, so a caller who asked for h can
+  // count h of them
+  c64.clearFlags();
+  eq(c64.toDecimal(c64.from("1.5"), { digits: 5 }), "1.5000e+0",
+     "1.5 at 5 digits: ");
+  eq(c64.lastFlags, 0, "nothing was dropped, so nothing is raised: ");
+  // and inexact is raised when a digit WAS dropped
+  c64.clearFlags();
+  eq(c64.toDecimal(c64.from("0.1"), { digits: 3 }), "1.00e-1",
+     "0.1 at 3 digits: ");
+  ok(c64.lastFlags & FLAG_INEXACT, "a dropped digit is inexact");
+  // the exact decimal of an extreme is long and still terminates
+  const tiny = ctxs[256].fromBits(1n);
+  const s = ctxs[256].toDecimal(tiny);
+  ok(s.length > 180000,
+     `the smallest binary256 subnormal's exact decimal is ${s.length} ` +
+     `characters`);
+});
+
+test("the sizing protocol is the C's: ask, allocate, and a short buffer refuses", () => {
+  // cft.h: *len is ALWAYS set, cap = 0 with a NULL buffer asks, and a
+  // buffer too small is CFT_ERR_INVALID_ARGUMENT with *len set and
+  // NOTHING written - this library does not truncate a number. All
+  // three are checked by running them, not by reading the header.
+  const x = c64.from("1.5");
+  const ask = c64.toDecimalInto(x, 0);
+  ok(ask.status !== 0, "the sizing call refuses rather than succeeding");
+  eq(ask.len, "1.5e+0".length + 1, "and reports the length including the NUL: ");
+  const short = c64.toDecimalInto(x, ask.len - 1);
+  ok(short.status !== 0, "a buffer one byte short is refused");
+  eq(short.len, ask.len, "and still reports the length: ");
+  eq(short.text, null, "with nothing written: ");
+  const exact = c64.toDecimalInto(x, ask.len);
+  eq(exact.status, 0, "the buffer it asked for succeeds: ");
+  eq(exact.text, "1.5e+0", "and carries the sequence: ");
+  // toDecimal() runs that protocol for you and hands back the string
+  eq(c64.toDecimal(x), exact.text, "toDecimal agrees with the raw protocol: ");
+});
+
+test("toHex is exact, canonical, and needs no attribute at all", () => {
+  eq(ctxs[32].toHex(ctxs[32].fromBits(1n)), "0x1p-149",
+     "the smallest binary32 subnormal prints its TRUE exponent: ");
+  eq(c64.toHex(c64.zero(0)), "0x0p+0", "+0: ");
+  eq(c64.toHex(c64.zero(1)), "-0x0p+0", "-0: ");
+  eq(c64.toHex(c64.from("1.5")), "0x1.8p+0", "1.5: ");
+  // exact always, in every attribute, and raising nothing. The operand
+  // is built BEFORE the flags are cleared: parsing "0.1" is itself an
+  // inexact library call, and a flag word measured across both would
+  // be measuring the parse.
+  const tenth = c64.from("0.1");
+  for (const a of ATTRS) {
+    const c = c64.withRounding(a);
+    c.clearFlags();
+    eq(c.toHex(tenth), c64.toHex(tenth), `toHex is the same under ${a}: `);
+    eq(c.lastFlags, 0, `toHex raises nothing under ${a}: `);
+  }
+  // and it reads back exactly
+  const rand = mulberry32(0x5123);
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    for (const bits of interestingBits(c.format, rand)) {
+      const x = c.fromBits(bits);
+      ok(c.fromHex(c.toHex(x)).sameBits(x),
+         `${c.format.ieeeName} hex round trip 0x${bits.toString(16)}`);
+    }
+  }
+});
+
+test("a sequence outside 5.12's syntax is REFUSED, not guessed at", () => {
+  // The refusal is as much a part of the contract as any value, and it
+  // is the one part a set of encodings cannot express.
+  for (const bad of ["1..2", "0x1.8", "", "1 000", " 1.5", "1.5 ",
+                     "0x1.8p", "nan()", "1,5", "0b101", "++1"])
+    throws(() => c64.fromDecimal(bad),
+           `fromDecimal(${JSON.stringify(bad)}) must refuse`);
+  // the hex form's binary exponent is REQUIRED - 5.12.3's grammar
+  // writes {decExponent}, not {decExponent}?
+  throws(() => c64.fromHex("0x1.8"), "a hex sequence needs its p exponent");
+  throws(() => c64.fromHex("1.5"), "a decimal is not a hex sequence");
+  eq(c64.fromHex("0x1.8p+0").bits, 0x3ff8000000000000n, "0x1.8p+0: ");
+  // and the decimal parser takes no hexadecimal, which is the same
+  // refusal from the other side
+  throws(() => c64.fromDecimal("0x10"), "no hexadecimal in the decimal parser");
+});
+
+test("a NaN keeps its payload and its signaling bit through both directions", () => {
+  // These are ENCODING operations, not arithmetic, so the
+  // canonical-NaN rule does not govern them (cft.h) - and 5.12's own
+  // requirement is that the round trip recover the representation. An
+  // sNaN is written "snan", the spelling that raises NOTHING.
+  const snan = c64.fromBits(0x7ff0000000000005n);
+  const s = c64.toDecimal(snan);
+  eq(s, "snan(0x5)", "an sNaN is written snan with its payload: ");
+  c64.clearFlags();
+  ok(c64.fromDecimal(s).sameBits(snan), "and reads back to the same bits");
+  eq(c64.lastFlags, 0, "no conversion here ever raises invalid: ");
+  const qnan = c64.fromBits(0x7ff8000000000005n);
+  ok(c64.fromDecimal(c64.toDecimal(qnan)).sameBits(qnan),
+     "a qNaN payload survives too");
+  ok(c64.fromHex(c64.toHex(snan)).sameBits(snan),
+     "and so does the hex round trip");
+});
+
+test("the from_ conversions batch, and their flag word is the OR", () => {
+  const list = ["1.5", "0.1", "2", "1e400", "5e-400", "-0", "inf", "nan"];
+  c64.clearFlags();
+  const batch = c64.mapFromDecimal(list);
+  const union = batch.map((_, i) => {
+    const c = c64.withRounding("rne");
+    c.clearFlags();
+    c.fromDecimal(list[i]);
+    return c.lastFlags;
+  }).reduce((a, b) => a | b, 0);
+  eq(c64.lastFlags, union, "the batch's flags are the OR of the cases: ");
+  list.forEach((s, i) =>
+    ok(batch[i].sameBits(c64.fromDecimal(s)),
+       `batch[${i}] (${s}) equals the scalar conversion`));
+  // one bad sequence refuses the WHOLE call and names the element
+  throws(() => c64.mapFromDecimal(["1.5", "1..2", "2"]),
+         "a batch with one bad sequence is refused whole");
+  const hexes = ["0x1.8p+0", "0x1p-149", "-0x1.fp+3"];
+  const hb = c64.mapFromHex(hexes);
+  hexes.forEach((s, i) => ok(hb[i].sameBits(c64.fromHex(s)),
+                             `hex batch[${i}] equals the scalar`));
+});
+
+test("the 9.7 payload operations, which signal nothing at all", () => {
+  const qnan5 = c64.fromBits(0x7ff8000000000005n);
+  c64.clearFlags();
+  eq(c64.getPayload(qnan5).toNumber(), 5, "getPayload(qNaN payload 5): ");
+  eq(c64.lastFlags, 0, "and signals nothing: ");
+  // anything that is not a NaN gives -1, which is 9.7's own answer
+  for (const [name, x] of [["1.0", 1], ["+inf", c64.inf(0)],
+                           ["+0", c64.zero(0)]])
+    eq(c64.getPayload(x).toNumber(), -1, `getPayload(${name}): `);
+  eq(c64.setPayload(5).bits, 0x7ff8000000000005n, "setPayload(5): ");
+  eq(c64.setPayloadSignaling(5).bits, 0x7ff0000000000005n,
+     "setPayloadSignaling(5): ");
+  // the admissibility test is on the VALUE, so -0 passes it as the
+  // integer zero - 754 settles that -0 equals 0
+  eq(c64.setPayload(c64.zero(1)).bits, 0x7ff8000000000000n,
+     "setPayload(-0) is the payload-0 quiet NaN: ");
+  // and payload 0 is NOT admissible for the signaling form, because
+  // payload 0 with the quiet bit clear is an INFINITY encoding
+  const z = c64.setPayloadSignaling(c64.zero(0));
+  ok(z.isZero && z.sign === 0, "setPayloadSignaling(+0) is +0");
+  // ANYTHING outside the admissible set is +0, per 9.7
+  for (const [name, x] of [["1.5", c64.from("1.5")], ["-1", -1],
+                           ["+inf", c64.inf(0)], ["qNaN", c64.nan()]]) {
+    const r = c64.setPayload(x);
+    ok(r.isZero && r.sign === 0, `setPayload(${name}) is +0`);
+  }
+  eq(c64.lastFlags, 0, "none of this signals: ");
+  // elementwise over an array, and no flag word in that shape either
+  const xs = [qnan5, c64.from(1), c64.inf(0)];
+  const got = c64.map("get_payload", xs);
+  xs.forEach((x, i) => ok(got[i].sameBits(c64.getPayload(x)),
+                          `get_payload batch[${i}] equals the scalar`));
+});
+
+// ---------------------------------------------------------------------
+// the augmented arithmetic (clause 9.5)
+// ---------------------------------------------------------------------
+
+/** The exact value of a list of Floats, summed in BigInt: each finite
+ *  value is sign * m * 2^e exactly, so putting them over a common power
+ *  of two and adding is exact arithmetic with no library and no
+ *  opinion. Returns null if any operand is not finite. */
+function exactSum(ctx, floats) {
+  const parts = floats.map((f) => decode(ctx.format, f.bits));
+  if (parts.some((p) => p.kind !== "finite" && p.kind !== "zero")) return null;
+  const es = parts.filter((p) => p.kind === "finite").map((p) => p.e);
+  const e0 = es.length ? Math.min(...es) : 0;
+  let acc = 0n;
+  for (const p of parts) {
+    if (p.kind === "zero") continue;
+    const v = p.m << BigInt(p.e - e0);
+    acc += p.sign ? -v : v;
+  }
+  return { m: acc, e: e0 };
+}
+
+function sameExact(A, B) {
+  if (A === null || B === null) return false;
+  const e = Math.min(A.e, B.e);
+  return (A.m << BigInt(A.e - e)) === (B.m << BigInt(B.e - e));
+}
+
+test("the augmented pair reconstructs its operation EXACTLY", () => {
+  // r + e is exactly x op y - that is the whole point of the pair, and
+  // it is what a compensated summation is built out of. Checked two
+  // ways, because the two say different things: in BigInt, which is
+  // exact for any operands at all, and through the LIBRARY'S OWN add
+  // on the wider format, which is an independent route to the same
+  // claim wherever the exact sum fits binary128's 113 bits.
+  const c128 = ctxs[128];
+  const rand = mulberry32(0x0905);
+  let checked = 0, widened = 0;
+  const pairs = [
+    [c64.from("1"), c64.fromBits(0x3ca0000000000000n)],   // 1, 2^-53
+    [c64.from("0.1"), c64.from("0.2")],
+    [c64.from("3"), c64.from("-3")],
+    [c64.from("-3"), c64.zero(0)],
+    [c64.fromBits(0x3ff0000000000001n), c64.fromBits(0x3ca0000000000000n)],
+    [c64.fromBits(1n), c64.fromBits(2n)],
+  ];
+  for (let i = 0; i < 60; i++) {
+    // operands within 40 binades of each other, so the exact sum fits
+    // binary128 and the library's own add can be the second witness
+    const e = Math.floor(rand() * 40) - 20;
+    pairs.push([c64.from(String((rand() * 4 - 2).toFixed(9))),
+                c64.scaleb(c64.from(String((rand() * 4 - 2).toFixed(9))), e)]);
+  }
+  for (const [x, y] of pairs) {
+    for (const [name, fn, wide] of [
+      ["augmentedAdd", "augmentedAdd", (a, b) => c128.add(a, b)],
+      ["augmentedSub", "augmentedSub", (a, b) => c128.sub(a, b)],
+      ["augmentedMul", "augmentedMul", (a, b) => c128.mul(a, b)],
+    ]) {
+      c64.clearFlags();
+      const { r, e } = c64[fn](x, y);
+      if (r.isNaN || r.isInf) continue;
+      // 9.5's one exception: augmentedMultiplication's residual can
+      // fail to be representable, and is then delivered ROUNDED with
+      // underflow AND inexact. That is the only case in which r + e is
+      // not exact, and the flag word says which case it is.
+      if (name === "augmentedMul" && (c64.lastFlags & FLAG_INEXACT)) continue;
+      const lhs = exactSum(c64, [r, e]);
+      const rhs = name === "augmentedSub"
+        ? exactSum(c64, [x, c64.neg(y)]) : null;
+      if (name !== "augmentedMul") {
+        ok(sameExact(lhs, rhs ?? exactSum(c64, [x, y])),
+           `${name}(${x.toString().slice(0, 20)}, ` +
+           `${y.toString().slice(0, 20)}): r + e is exactly the operation`);
+        checked++;
+      }
+      // the second witness: the LIBRARY's add on binary128, where the
+      // exact result fits it. Widening from binary64 is exact and
+      // silent, so any inexact here would be the 128-bit add's.
+      c128.clearFlags();
+      const wr = c128.convert(r), we = c128.convert(e);
+      const sum = c128.add(wr, we);
+      c128.clearFlags();
+      const truth = wide(c128.convert(x), c128.convert(y));
+      if (!(c128.lastFlags & FLAG_INEXACT) && !truth.isNaN) {
+        ok(sum.sameBits(truth),
+           `${name}: the library's binary128 add agrees that r + e is ` +
+           `the operation`);
+        widened++;
+      }
+    }
+  }
+  ok(checked > 100, `${checked} pairs reconstructed exactly in BigInt`);
+  ok(widened > 50, `${widened} confirmed by the library's own binary128 add`);
+});
+
+test("roundTiesTowardZero is 9.5's own direction, and is not ties-to-even", () => {
+  // The tie rule differs from roundTiesToEven only at an exact midpoint
+  // whose lower neighbour is odd - so an implementation that quietly
+  // used RNE would pass every test that did not aim there. This one
+  // aims there: nextUp(1) has an odd last bit, and adding half an ulp
+  // lands exactly on the midpoint above it.
+  const x = c64.fromBits(0x3ff0000000000001n);      // nextUp(1), odd
+  const y = c64.fromBits(0x3ca0000000000000n);      // 2^-53, half an ulp
+  const { r, e } = c64.augmentedAdd(x, y);
+  eq(r.bits, 0x3ff0000000000001n,
+     "roundTiesTowardZero takes the SMALLER magnitude at the tie: ");
+  eq(e.bits, 0x3ca0000000000000n, "and the residual is the other half: ");
+  eq(c64.add(x, y).bits, 0x3ff0000000000002n,
+     "roundTiesToEven takes the even neighbour instead: ");
+  // and no attribute changes the augmented answer, because there is
+  // none to pass
+  for (const a of ATTRS) {
+    const c = c64.withRounding(a);
+    eq(c.augmentedAdd(x, y).r.bits, r.bits,
+       `augmentedAdd is unchanged under ${a}: `);
+  }
+});
+
+test("the sign of a zero e is r's, and 9.5's special rows hold", () => {
+  // "augmentedAddition(-3, 0) delivers (-3, -0) and
+  //  augmentedAddition(3, -3) delivers (+0, +0)" - cft.h
+  let p = c64.augmentedAdd(-3, c64.zero(0));
+  eq(p.r.toNumber(), -3, "augmentedAdd(-3, +0) r: ");
+  ok(p.e.isZero && p.e.sign === 1, "and e is -0, taking r's sign");
+  p = c64.augmentedAdd(3, -3);
+  ok(p.r.isZero && p.r.sign === 0, "augmentedAdd(3, -3) r is +0");
+  ok(p.e.isZero && p.e.sign === 0, "and e is +0");
+  // any NaN operand gives the canonical quiet NaN as BOTH results, and
+  // an invalid operation produces the same quiet NaN for both outputs
+  c64.clearFlags();
+  p = c64.augmentedAdd(c64.inf(0), c64.inf(1));
+  ok(p.r.isNaN && p.e.isNaN, "inf + (-inf) is a NaN in both results");
+  ok(p.r.sameBits(p.e), "and the SAME quiet NaN for both outputs");
+  ok(c64.lastFlags & FLAG_INVALID, "with invalid");
+  c64.clearFlags();
+  p = c64.augmentedMul(c64.inf(0), c64.zero(0));
+  ok(p.r.isNaN && p.e.isNaN && p.r.sameBits(p.e),
+     "inf * 0 is the same quiet NaN in both");
+  ok(c64.lastFlags & FLAG_INVALID, "with invalid");
+  c64.clearFlags();
+  p = c64.augmentedAdd(c64.nan(), 1);
+  ok(p.r.isNaN && p.e.isNaN, "a quiet NaN propagates as both results");
+  eq(c64.lastFlags, 0, "and raises nothing, being quiet: ");
+  // an infinite r from an infinite OPERAND signals nothing; from
+  // OVERFLOW it signals overflow and inexact, and always delivers an
+  // infinity, because roundTiesTowardZero carries overflow to infinity
+  c64.clearFlags();
+  p = c64.augmentedAdd(c64.inf(0), 1);
+  ok(p.r.isInf && p.e.isInf, "an infinite operand gives infinity in both");
+  eq(c64.lastFlags, 0, "silently: ");
+  c64.clearFlags();
+  const big = c64.fromBits(0x7fefffffffffffffn);
+  p = c64.augmentedAdd(big, big);
+  ok(p.r.isInf && p.e.isInf, "overflow delivers an infinity in both");
+  ok(c64.lastFlags & FLAG_OVERFLOW, "with overflow");
+  ok(c64.lastFlags & FLAG_INEXACT, "and inexact");
+});
+
+test("underflow is a statement about e, and comes WITHOUT inexact", () => {
+  // "it is raised when e is non-zero and lies strictly between
+  //  +-b^emin. Since e is exact, that is underflow WITHOUT inexact -
+  //  the one place in this contract where those two part company."
+  c64.clearFlags();
+  const { r, e } = c64.augmentedAdd(1, c64.fromBits(1n));
+  eq(r.toNumber(), 1, "r is 1: ");
+  eq(e.bits, 1n, "e is the smallest subnormal, exactly: ");
+  ok(c64.lastFlags & FLAG_UNDERFLOW, "underflow is raised");
+  eq(c64.lastFlags & FLAG_INEXACT, 0, "and inexact is NOT: ");
+  // a subnormal r with an exactly representable residual raises
+  // nothing at all - "the operation's subnormal and zero results are
+  // exact"
+  c64.clearFlags();
+  c64.augmentedAdd(c64.fromBits(1n), c64.fromBits(2n));
+  eq(c64.lastFlags, 0, "a subnormal sum with an exact residual is silent: ");
+});
+
+test("the augmented three batch, with two arrays out", () => {
+  const n = 65;
+  const rand = mulberry32(0x0955);
+  const xs = [], ys = [];
+  for (let i = 0; i < n; i++) {
+    xs.push(c64.from(String((rand() * 8 - 4).toFixed(9))));
+    ys.push(c64.from(String((rand() * 8 - 4).toFixed(9))));
+  }
+  for (const [name, fn] of [["augmentedAddition", "augmentedAdd"],
+                            ["augmentedSubtraction", "augmentedSub"],
+                            ["augmentedMultiplication", "augmentedMul"]]) {
+    c64.clearFlags();
+    const batch = c64.map(name, xs, ys);
+    let union = 0;
+    xs.forEach((x, i) => {
+      const c = c64.withRounding("rne");
+      c.clearFlags();
+      const p = c[fn](x, ys[i]);
+      union |= c.lastFlags;
+      ok(batch.r[i].sameBits(p.r), `${name} batch r[${i}] equals the scalar`);
+      ok(batch.e[i].sameBits(p.e), `${name} batch e[${i}] equals the scalar`);
+    });
+    eq(c64.lastFlags, union, `${name} batch flags are the union: `);
+  }
+});
+
+// ---------------------------------------------------------------------
+// clause 9.4's remaining reductions and the scaled products
+// ---------------------------------------------------------------------
+
+test("sumSquare is dot(x, x) and sumAbs is sum(|x|), through the package", () => {
+  // They are the SAME tree over a different leaf, so the library issues
+  // exactly those compositions and both backends agree by construction
+  // rather than by testing. This drives all four through this package
+  // and holds the identity, bit for bit and flag for flag.
+  const rand = mulberry32(0x0904);
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    for (const n of [0, 1, 2, 5, 17, 64, 129]) {
+      const xs = [];
+      for (let i = 0; i < n; i++) xs.push(randomFinite(c, rand, 20));
+      c.clearFlags();
+      const sq = c.reduce("sumsq", xs);
+      const sqFlags = c.lastFlags;
+      c.clearFlags();
+      const dot = c.reduce("dot", xs, xs);
+      ok(sq.sameBits(dot),
+         `${c.format.ieeeName} n=${n}: sumsq == dot(x, x)`);
+      eq(sqFlags, c.lastFlags, `${c.format.ieeeName} n=${n} sumsq flags: `);
+      c.clearFlags();
+      const ab = c.reduce("sumabs", xs);
+      const abFlags = c.lastFlags;
+      c.clearFlags();
+      const sum = c.reduce("sum", xs.map((v) => c.abs(v)));
+      ok(ab.sameBits(sum),
+         `${c.format.ieeeName} n=${n}: sumabs == sum(|x|)`);
+      eq(abFlags, c.lastFlags, `${c.format.ieeeName} n=${n} sumabs flags: `);
+    }
+  }
+  throws(() => c64.reduce("sumsq", [c64.from(1)], [c64.from(1)]),
+         "only dot takes a second array");
+  throws(() => c64.reduce("product", [c64.from(1)]), "an unknown reduction");
+});
+
+test("the ONE row where sumsq and sumabs are not the composition", () => {
+  // 754-2019 9.4: "For sumSquare and sumAbs, if any operand element is
+  // an infinity, +inf is returned. Otherwise, if any operand element is
+  // a NaN a quiet NaN is returned" - infinity ahead of NaN, where sum
+  // and dot put the NaN first. That single row is the whole difference.
+  const mix = [c64.inf(0), c64.nan()];
+  for (const fn of ["sumsq", "sumabs"]) {
+    c64.clearFlags();
+    const r = c64.reduce(fn, mix);
+    ok(r.isInf && r.sign === 0, `${fn}([+inf, qNaN]) is +inf`);
+    eq(c64.lastFlags, 0, `${fn} raises nothing on a quiet NaN: `);
+  }
+  c64.clearFlags();
+  ok(c64.reduce("sum", mix).isNaN,
+     "sum of the same vector is a quiet NaN - the row that differs");
+  ok(c64.reduce("dot", mix, mix).isNaN, "and so is dot");
+  // invalid is raised only if one of those NaNs is SIGNALLING
+  const snan = c64.fromBits(0x7ff0000000000005n);
+  c64.clearFlags();
+  const r = c64.reduce("sumsq", [c64.inf(0), snan]);
+  ok(r.isInf, "sumsq([+inf, sNaN]) is still +inf");
+  ok(c64.lastFlags & FLAG_INVALID, "with invalid, by 9.4's blanket rule");
+  // n == 1: the leaf differs, and cft.h says how. sumsq's leaf IS a
+  // multiply, so it quiets and signals; sumabs's is an abs, which by
+  // 5.5.1 signals nothing at all.
+  c64.clearFlags();
+  ok(c64.reduce("sumsq", [snan]).isNaN, "sumsq([sNaN]) at n=1 is a quiet NaN");
+  ok(c64.lastFlags & FLAG_INVALID, "and signals: the leaf is a multiply");
+  c64.clearFlags();
+  const lone = c64.reduce("sumabs", [snan]);
+  eq(lone.bits, snan.bits,
+     "sumabs([sNaN]) at n=1 comes back with its sign cleared: ");
+  eq(c64.lastFlags, 0, "and NO flag: the leaf is an abs (5.5.1): ");
+  // n == 0 is +0 and raises nothing, for all four
+  for (const fn of ["sum", "sumsq", "sumabs"]) {
+    c64.clearFlags();
+    const z = c64.reduce(fn, []);
+    ok(z.isZero && z.sign === 0, `${fn}([]) is +0`);
+    eq(c64.lastFlags, 0, `${fn}([]) raises nothing: `);
+  }
+});
+
+test("a scaled product's pair reconstructs its product", () => {
+  // scaleB(pr, sf) is the answer, and pr is in +-[1, 2) for every n.
+  // Reconstructed two ways: through the library's own scaleB, and
+  // exactly in BigInt from the encoding.
+  const cases = [
+    [[12], 12],
+    [[3, 5], 15],
+    [[2, 2, 2, 2], 16],
+    [[1.5, -4], -6],
+    [[7], 7],
+  ];
+  for (const [vals, want] of cases) {
+    const xs = vals.map((v) => c64.from(v));
+    c64.clearFlags();
+    const { pr, sf } = c64.scaledProd(xs);
+    eq(typeof sf, "bigint", "the scale is a BigInt - it is int64: ");
+    // pr is in +-[1, 2): the exponent of |pr| is exactly 0
+    const parts = decode(c64.format, pr.bits);
+    eq(parts.e + parts.m.toString(2).length - 1, 0,
+       `pr for [${vals}] is in ±[1, 2): `);
+    ok(c64.scaleb(pr, sf).toNumber() === want,
+       `scaleB(pr, sf) for [${vals}] is ${want}`);
+    // and the same reconstruction in exact integers, no library at all
+    const ex = decode(c64.format, pr.bits);
+    const shift = BigInt(ex.e) + sf;
+    const exact = shift >= 0n ? ex.m << shift : null;
+    if (exact !== null)
+      eq(Number(ex.sign ? -exact : exact), want,
+         `pr * 2^sf for [${vals}] in BigInt: `);
+  }
+  // n == 0 is 9.4's multiplicative identity, "without exception"
+  c64.clearFlags();
+  const empty = c64.scaledProd([]);
+  eq(empty.pr.toNumber(), 1, "scaledProd([]) pr: ");
+  eq(empty.sf, 0n, "scaledProd([]) sf: ");
+  eq(c64.lastFlags, 0, "and raises nothing: ");
+  // it cannot overflow or underflow, by construction: a product far
+  // outside binary64's range still comes back as a pair
+  const huge = [];
+  for (let i = 0; i < 200; i++) huge.push(c64.fromBits(0x7fefffffffffffffn));
+  c64.clearFlags();
+  const h = c64.scaledProd(huge);
+  ok(!h.pr.isInf && !h.pr.isZero,
+     "200 copies of maxfinite give a finite normal pr");
+  ok(h.sf > 200000n, `and a large scale (${h.sf})`);
+  eq(c64.lastFlags & (FLAG_OVERFLOW | FLAG_UNDERFLOW), 0,
+     "with neither overflow nor underflow: ");
+});
+
+test("the scaled sums and differences are their compositions, a first", () => {
+  // cft.h: scaled_prod_sum(a, b) == scaled_prod(run(ADD, a, b)) and
+  // scaled_prod_diff(a, b) == scaled_prod(run(SUB, a, b)), with the
+  // add's flags OR'd in. Checked by running both.
+  const rand = mulberry32(0x0940);
+  for (const n of [1, 2, 5, 33]) {
+    const xs = [], ys = [];
+    for (let i = 0; i < n; i++) {
+      xs.push(c64.from(String((rand() * 20 - 10).toFixed(6))));
+      ys.push(c64.from(String((rand() * 20 - 10).toFixed(6))));
+    }
+    for (const [fn, op] of [["scaledProdSum", (a, b) => c64.add(a, b)],
+                            ["scaledProdDiff", (a, b) => c64.sub(a, b)]]) {
+      const got = c64[fn](xs, ys);
+      const leaves = xs.map((x, i) => op(x, ys[i]));
+      const want = c64.scaledProd(leaves);
+      ok(got.pr.sameBits(want.pr), `${fn} n=${n}: pr is the composition's`);
+      eq(got.sf, want.sf, `${fn} n=${n} sf: `);
+    }
+  }
+  // the operand order is visible: a - b, not b - a
+  const d1 = c64.scaledProdDiff([c64.from(1)], [c64.from(2)]);
+  const d2 = c64.scaledProdDiff([c64.from(2)], [c64.from(1)]);
+  eq(d1.pr.toNumber(), -1, "scaledProdDiff([1], [2]) pr: ");
+  eq(d2.pr.toNumber(), 1, "scaledProdDiff([2], [1]) pr: ");
+  eq(d1.sf, 0n, "scaledProdDiff([1], [2]) sf: ");
+  throws(() => c64.scaledProdSum([c64.from(1)], [c64.from(1), c64.from(2)]),
+         "mismatched operand arrays");
+});
+
+test("9.4's special rows for a scaled product, in 9.4's order", () => {
+  // any factor a NaN -> quiet NaN, sf = 0; an infinity AND a zero ->
+  // invalid; an infinity with no zero -> that infinity, no exception; a
+  // zero with no infinity -> a zero, no exception. divideByZero is
+  // NEVER signalled, which 9.4 asks for explicitly.
+  c64.clearFlags();
+  let p = c64.scaledProd([c64.inf(0), c64.zero(0)]);
+  ok(p.pr.isNaN, "inf x 0 is a quiet NaN");
+  eq(p.sf, 0n, "with sf 0: ");
+  ok(c64.lastFlags & FLAG_INVALID, "and invalid");
+  c64.clearFlags();
+  p = c64.scaledProd([c64.inf(0), c64.from(2)]);
+  ok(p.pr.isInf && p.pr.sign === 0, "an infinity with no zero is that infinity");
+  eq(p.sf, 0n, "sf 0: ");
+  eq(c64.lastFlags, 0, "and NO exception: ");
+  c64.clearFlags();
+  p = c64.scaledProd([c64.from(-2), c64.zero(0)]);
+  ok(p.pr.isZero && p.pr.sign === 1,
+     "a zero with no infinity is a zero with the true product's sign");
+  eq(c64.lastFlags, 0, "silently: ");
+  c64.clearFlags();
+  p = c64.scaledProd([c64.nan(), c64.from(2)]);
+  ok(p.pr.isNaN, "a NaN factor gives a quiet NaN");
+  eq(c64.lastFlags, 0, "and a QUIET NaN raises nothing: ");
+  // divideByZero never, even with a zero in the vector
+  eq(c64.lastFlags & FLAG_DIVBYZERO, 0, "no divideByZero anywhere: ");
 });
 
 // ---------------------------------------------------------------------

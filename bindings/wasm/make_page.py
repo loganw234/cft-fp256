@@ -22,13 +22,28 @@ a sample nobody can regenerate is a sample nobody can audit:
     it, so every opcode class is embedded per set by construction
     rather than by luck: arithmetic, sign, min/max, predicates,
     integer, the divide/sqrt seeds (26/27), and the unassigned
-    reserved15/28/255 whose defined qNaN+invalid answer is contract
+    reserved15/30/255 whose defined qNaN+invalid answer is contract
     surface too. Lines keep file order.
+
+ONLY THE OPCODE SETS ARE SAMPLED, and that is unchanged at ABI 0.6.
+The generator now writes five families - opcode, transcendental,
+augmented, reduction and character - but the embedded sample exists to
+give a page that has just loaded something to replay before anyone
+drops a file, and the opcode sets are the ones whose schema this rule
+can sample line by line and whose 28 opcode classes it can prove
+covered. The other four families are droppable in section 3, where
+they are replayed whole; embedding a sample of them would grow the
+committed page for a weaker version of the check the drop zone already
+makes. cft_conformance reads all five either way, so nothing here
+decides what the library will replay.
 
 The numbers 11,800 / 59 / 200 assume the generator arguments the repo
 publishes (`make vectors`); the asserts below pin that, so changing
 the generator without changing this file and the page prose fails the
-build instead of quietly shipping stale text.
+build instead of quietly shipping stale text. The reserved list has
+now shed a member three times - 24 became CFT_SUM, 26 CFT_RECIP_SEED
+and 28 CFT_SUMSQ at ABI 0.6 - which is why the opcode names above are
+worth keeping current rather than approximately right.
 
 --corrupt builds the NEGATIVE CONTROL page: identical except that one
 expected "d" value in the embedded sample has its low hex digit
