@@ -232,6 +232,17 @@ def _bind(lib):
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
+    # The augmented arithmetic operations (754-2019 9.5). Two outputs
+    # and NO rounding argument - the shortest possible summary of why
+    # they get their own loop: the standard fixes the rounding, so
+    # there is no c_int for an attribute between the format and the
+    # operands.
+    for _name in ("cft_augmented_add", "cft_augmented_sub",
+                  "cft_augmented_mul"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_void_p,
+                        c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
     _audit(lib)
     return lib
 
@@ -422,3 +433,30 @@ def transcend(handle, name, fmt, rnd, a, b, n, esz):
         st = fn(handle, fmt, rnd, a, d, n, ctypes.byref(flags))
     check(st, "cft_" + name)
     return d.raw, flags.value
+
+
+# ---------------------------------------------------------------------
+# The augmented arithmetic operations, 754-2019 clause 9.5.
+#
+# Two results per element - the operation rounded, and the error that
+# rounding made - and no rounding attribute, because 9.5 fixes the
+# rounding to roundTiesTowardZero and gives the operations no argument
+# to carry one. Note the missing `rnd` parameter below: it is not an
+# oversight and it is not a default, it is the standard.
+# ---------------------------------------------------------------------
+
+AUGMENTED = ("add", "sub", "mul")
+
+
+def augmented(handle, name, fmt, a, b, n, esz):
+    """One augmented operation over n elements. Returns
+    (r bytes, e bytes, flag word)."""
+    if name not in AUGMENTED:
+        raise ValueError(f"unknown augmented operation {name!r}")
+    r = ctypes.create_string_buffer(n * esz)
+    e = ctypes.create_string_buffer(n * esz)
+    flags = ctypes.c_uint32(0)
+    fn = getattr(lib(), "cft_augmented_" + name)
+    check(fn(handle, fmt, a, b, r, e, n, ctypes.byref(flags)),
+          "cft_augmented_" + name)
+    return r.raw, e.raw, flags.value

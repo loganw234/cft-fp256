@@ -22,6 +22,11 @@ import math
 
 RNE, RTZ, RDN, RUP, RMM = 0, 1, 2, 3, 4
 MODES = (RNE, RTZ, RDN, RUP, RMM)
+# 754-2019 9.5's roundTiesTowardZero, which is NOT an attribute and is
+# used by nothing but the augmented operations. Numbered here so this
+# oracle's rnd_int can express it; the number is local to this file and
+# is not the model's.
+RTTZ = 5
 NV, DZ, OF, UF, NX = 1, 2, 4, 8, 16
 
 
@@ -99,6 +104,8 @@ def rnd_int(t, rnd):
         return ce
     if rnd == RNE:
         return fl if fl % 2 == 0 else ce
+    if rnd == RTTZ:
+        return fl if t > 0 else ce      # 9.5: ties to the smaller magnitude
     return ce if t > 0 else fl          # RMM: ties away from zero
 
 
@@ -139,7 +146,7 @@ def ref_pack(f, v, rnd):
     flags = NX if inexact else 0
     if abs(rb) > f.maxfin_val():
         flags |= OF | NX
-        if rnd in (RNE, RMM):
+        if rnd in (RNE, RMM, RTTZ):
             return f.inf(s), flags
         if rnd == RTZ:
             return f.maxfin_bits(s), flags
@@ -293,3 +300,81 @@ def ref_total_order(f, xb, yb):
     if kx[1] != ky[1]:
         return kx[1] == 1
     return True
+
+
+# ---- the augmented operations (an independent reading of 9.5) --------
+#
+# Written from the subclause's own sentences and nothing else. The
+# model computes (r, e) from integer significands through round_pack;
+# this computes them from exact Fractions and the standard's prose, so
+# a shared mistake would have to be made twice in two idioms.
+#
+# The rules restated here, in the order 9.5 gives them:
+#   * r = roundTiesTowardZero(x op y); e = (x op y) - r when r is finite
+#   * an error term equal to zero takes the sign of r
+#   * any NaN in gives a NaN pair (this contract's canonical quiet NaN);
+#     an sNaN raises invalid; an invalid operation gives the same NaN
+#     for both outputs
+#   * an infinite r gives that infinity as both outputs; when it came
+#     from overflow, that raises overflow and inexact
+#   * a non-zero error term strictly inside +-2^emin raises underflow
+#   * multiplication alone may have a residual the format cannot hold;
+#     it delivers that residual rounded the same way, with underflow and
+#     inexact
+
+def ref_augmented(f, xb, yb, op):
+    """(r_bits, e_bits, flags) for op in {'add', 'sub', 'mul'}."""
+    kx, ky = dec(f, xb), dec(f, yb)
+    if kx[0] == "nan" or ky[0] == "nan":
+        sig = (kx[0] == "nan" and not kx[2]) or (ky[0] == "nan" and not ky[2])
+        return f.qnan(), f.qnan(), (NV if sig else 0)
+    if op == "sub":
+        yb ^= f.sign_mask
+        ky = dec(f, yb)
+
+    if op == "mul":
+        if (kx[0] == "inf" and ky[0] == "num" and ky[2] == 0) or \
+           (ky[0] == "inf" and kx[0] == "num" and kx[2] == 0):
+            return f.qnan(), f.qnan(), NV                 # inf * 0
+        if kx[0] == "inf" or ky[0] == "inf":
+            s = kx[1] ^ ky[1]
+            return f.inf(s), f.inf(s), 0
+        s = kx[1] ^ ky[1]
+        if kx[2] == 0 or ky[2] == 0:
+            return f.zero(s), f.zero(s), 0                # 6.3: XOR sign
+        exact = kx[2] * ky[2]
+    else:
+        if kx[0] == "inf" and ky[0] == "inf":
+            if kx[1] != ky[1]:
+                return f.qnan(), f.qnan(), NV             # inf - inf
+            return f.inf(kx[1]), f.inf(kx[1]), 0
+        if kx[0] == "inf":
+            return f.inf(kx[1]), f.inf(kx[1]), 0
+        if ky[0] == "inf":
+            return f.inf(ky[1]), f.inf(ky[1]), 0
+        if kx[2] == 0 and ky[2] == 0:
+            s = kx[1] if kx[1] == ky[1] else 0            # 6.3
+            return f.zero(s), f.zero(s), 0
+        if kx[2] == 0:
+            return yb, f.zero(ky[1]), 0
+        if ky[2] == 0:
+            return xb, f.zero(kx[1]), 0
+        exact = kx[2] + ky[2]
+
+    if exact == 0:                       # exact cancellation: 6.3 gives +0
+        return f.zero(0), f.zero(0), 0
+
+    rb, rf = ref_pack(f, exact, RTTZ)
+    if rf & OF:
+        return rb, rb, OF | NX
+    rv = dec(f, rb)[2]
+    err = exact - rv
+    if err == 0:
+        return rb, f.zero(dec(f, rb)[1]), 0
+    tiny = abs(err) < F(2) ** f.emin
+    eb = enc_exact(f, err)
+    if eb is not None:
+        return rb, eb, (UF if tiny else 0)
+    assert op == "mul", "only augmentedMultiplication may lose its residual"
+    eb, _ = ref_pack(f, err, RTTZ)
+    return rb, eb, UF | NX

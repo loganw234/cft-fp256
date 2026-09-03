@@ -28,6 +28,19 @@ the transcendentals skips a file rather than failing a line. A
 consumer built against 0.3 and handed a 0.4 set fails on the NAME of a
 function it does not know, which is the refusal it should give.
 
+The augmented arithmetic operations of 754-2019 clause 9.5 get a third
+schema and a third family of files - `fp32-augmented.jsonl` and one per
+format - because they are the only operations here with TWO outputs and
+no rounding attribute:
+
+    {"fn": "augmentedAddition", "a": "0x...", "b": "0x...",
+     "r": "0x...", "e": "0x...", "flags": 8}
+
+There is no "rnd" field and its absence is normative: 9.5 fixes the
+rounding to roundTiesTowardZero, which is not one of the five
+attributes, so there is no attribute to record and no per-attribute
+file. A replayer that demanded one would be asking the wrong question.
+
 Every opcode the tile implements appears here, arithmetic and
 non-arithmetic alike, plus the unassigned codes whose defined
 answer (canonical qNaN, invalid raised) is also part of the
@@ -49,8 +62,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from cft_golden import (  # noqa: E402
-    FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, compute, transcend,
-    vectors,
+    FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, augmented, compute,
+    transcend, vectors,
 )
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
@@ -71,6 +84,9 @@ def main():
     ap.add_argument("--transcend", type=int, default=24,
                     help="random cases added to each transcendental "
                          "family's directed pool (0 to skip the sets)")
+    ap.add_argument("--augmented", type=int, default=24,
+                    help="random pairs added to the clause-9.5 pool "
+                         "(0 to skip the augmented sets)")
     ap.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
 
@@ -122,6 +138,28 @@ def main():
                     rec["flags"] = flags
                     f.write(json.dumps(rec) + "\n")
             print(f"{path}: {len(tcases)} cases (seed {args.seed}, {rname})")
+
+        # The augmented arithmetic operations (754-2019 9.5). ONE file
+        # per format, whatever --rounding asked for: the rounding is
+        # fixed by the standard, so there is no attribute to sweep and
+        # no per-attribute file to write. Two outputs per case.
+        if args.augmented <= 0:
+            continue
+        acases = vectors.augmented_cases(fmt, args.augmented, args.seed + 7)
+        path = outdir / f"{name}-augmented.jsonl"
+        with open(path, "w") as f:
+            for fn, xa, xb in acases:
+                r, e, flags = augmented.compute(fmt, fn, xa, xb)
+                f.write(json.dumps({
+                    "fn": fn,
+                    "a": f"0x{xa:0{hexw}x}",
+                    "b": f"0x{xb:0{hexw}x}",
+                    "r": f"0x{r:0{hexw}x}",
+                    "e": f"0x{e:0{hexw}x}",
+                    "flags": flags,
+                }) + "\n")
+        print(f"{path}: {len(acases)} cases (seed {args.seed}, "
+              f"roundTiesTowardZero - 9.5 fixes it)")
 
 
 if __name__ == "__main__":

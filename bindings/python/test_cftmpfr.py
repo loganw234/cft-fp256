@@ -1170,3 +1170,215 @@ def test_p3_tiny_arguments_take_a_side(prec):
         got = getattr(ctx, fn)(ctx.from_bits(1))
         assert got.same_bits(want), (fn, mode, got.to_str())
         assert tuple(ctx.flag_names(ctx.last_flags)) == ("inexact",), (fn, mode)
+
+
+# ---------------------------------------------------------------------
+# The augmented arithmetic operations (754-2019 clause 9.5)
+#
+# What a binding can break here that it cannot break anywhere else:
+# there are TWO outputs, so the second could be dropped, swapped with
+# the first, or handed back stale; and there is NO rounding argument,
+# so the context's attribute could leak into the call. Both are
+# attacked below. The values are scored against the GOLDEN MODEL, the
+# way the rest of this repository scores them - gmpy2 is no oracle
+# here, because MPFR has no roundTiesTowardZero at all, which is
+# precisely why these three are worth exposing from a package that
+# otherwise matches it call for call.
+# ---------------------------------------------------------------------
+
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+    from cft_golden import FORMATS as _GFORMATS          # noqa: E402
+    from cft_golden import augmented as _gaug            # noqa: E402
+    from cft_golden import softfloat as _gsf             # noqa: E402
+    GOLDEN = {24: _GFORMATS["fp32"], 53: _GFORMATS["fp64"],
+              113: _GFORMATS["fp128"], 237: _GFORMATS["fp256"]}
+except ImportError:                                      # pragma: no cover
+    GOLDEN = None
+
+needs_golden = pytest.mark.skipif(GOLDEN is None,
+                                  reason="the golden model is not importable")
+
+AUG = ("augmented_add", "augmented_sub", "augmented_mul")
+
+
+def _aug_model(name):
+    return {"augmented_add": _gaug.augmented_add,
+            "augmented_sub": _gaug.augmented_sub,
+            "augmented_mul": _gaug.augmented_mul}[name]
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_pairs_match_the_model(prec):
+    """Both outputs and the flag word, per element, against
+    python/cft_golden/augmented.py - which is the definition."""
+    fmt = GOLDEN[prec]
+    ctx = Context(prec)
+    ops = pool(prec, count=26, seed=41)
+    checked = 0
+    for name in AUG:
+        for xb in ops:
+            for yb in ops:
+                ctx.clear_flags()
+                r, e = getattr(ctx, name)(ctx.from_bits(xb),
+                                          ctx.from_bits(yb))
+                want = _aug_model(name)(fmt, xb, yb)
+                assert (r.to_bits(), e.to_bits(), ctx.last_flags) == want, \
+                    (name, prec, hex(xb), hex(yb))
+                checked += 1
+    assert checked > 4000, checked
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_ignores_the_context_attribute(prec):
+    """9.5 fixes the rounding, so the SAME pair must come back under
+    every attribute - RNDNA included, which nothing else in this
+    package can even ask MPFR for. A binding that forwarded the
+    context's attribute would pass every other test in this file."""
+    ops = pool(prec, count=10, seed=43)
+    base = Context(prec, rounding="RNDN")
+    want = {}
+    for name in AUG:
+        for xb in ops:
+            for yb in ops:
+                r, e = getattr(base, name)(base.from_bits(xb),
+                                           base.from_bits(yb))
+                want[(name, xb, yb)] = (r.to_bits(), e.to_bits(),
+                                        base.last_flags)
+    for mode in ("RNDZ", "RNDD", "RNDU", "RNDNA"):
+        ctx = Context(prec, rounding=mode)
+        for (name, xb, yb), expected in want.items():
+            r, e = getattr(ctx, name)(ctx.from_bits(xb), ctx.from_bits(yb))
+            assert (r.to_bits(), e.to_bits(), ctx.last_flags) == expected, \
+                (name, mode, prec, hex(xb), hex(yb))
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_batch_equals_the_scalar_path(prec):
+    """One C call over an array must give, element for element, what n
+    calls of one element give - both arrays, and the flag OR."""
+    ctx = Context(prec)
+    ops = pool(prec, count=40, seed=47)
+    xs = [ctx.from_bits(b) for b in ops]
+    ys = [ctx.from_bits(b) for b in reversed(ops)]
+    for name in AUG:
+        ctx.clear_flags()
+        rs, es, flags = getattr(batch, name)(ctx, xs, ys)
+        assert len(rs) == len(xs) and len(es) == len(xs)
+        want_or = 0
+        for x, y, r, e in zip(xs, ys, rs, es):
+            ctx.clear_flags()
+            sr, se = getattr(ctx, name)(x, y)
+            assert r.same_bits(sr) and e.same_bits(se), (name, prec)
+            want_or |= ctx.last_flags
+        assert flags == want_or, (name, prec, flags, want_or)
+
+
+def _dyadic(fmt, bits):
+    """(m, e) with value m * 2^e and m odd - or None if not finite."""
+    u = _gsf.unpack(fmt, bits)
+    if u.kind in (_gsf.INF, _gsf.NAN):
+        return None
+    if u.kind == _gsf.ZERO:
+        return (0, 0)
+    m = -u.m if u.sign else u.m
+    t = (m & -m).bit_length() - 1
+    return (m >> t, u.e + t)
+
+
+def _dnorm(m, e):
+    if m == 0:
+        return (0, 0)
+    t = (m & -m).bit_length() - 1
+    return (m >> t, e + t)
+
+
+def _dadd(p, q):
+    e0 = min(p[1], q[1])
+    return _dnorm((p[0] << (p[1] - e0)) + (q[0] << (q[1] - e0)), e0)
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_pair_is_exact(prec):
+    """r + e is x op y EXACTLY, in Python integers rather than through
+    any floating-point arithmetic - the property the pair exists for.
+    Two documented exclusions: an overflowed result, where both outputs
+    are an infinity, and a product residual the format cannot hold,
+    which 9.5 delivers rounded with underflow AND inexact."""
+    fmt = GOLDEN[prec]
+    ctx = Context(prec)
+    ops = pool(prec, count=30, seed=53)
+    exact = lost = 0
+    for name in AUG:
+        for xb in ops:
+            for yb in ops:
+                dx, dy = _dyadic(fmt, xb), _dyadic(fmt, yb)
+                if dx is None or dy is None:
+                    continue
+                ctx.clear_flags()
+                r, e = getattr(ctx, name)(ctx.from_bits(xb),
+                                          ctx.from_bits(yb))
+                names = set(ctx.flag_names(ctx.last_flags))
+                if "overflow" in names:
+                    continue
+                if name == "augmented_mul" and "inexact" in names:
+                    lost += 1
+                    continue
+                if name == "augmented_mul":
+                    want = _dnorm(dx[0] * dy[0], dx[1] + dy[1])
+                elif name == "augmented_sub":
+                    want = _dadd(dx, (-dy[0], dy[1]))
+                else:
+                    want = _dadd(dx, dy)
+                got = _dadd(_dyadic(fmt, r.to_bits()),
+                            _dyadic(fmt, e.to_bits()))
+                assert got == want, (name, prec, hex(xb), hex(yb))
+                exact += 1
+    assert exact > 2000, exact
+    assert lost > 0, "the non-representable product residual was unreached"
+
+
+@needs_golden
+def test_augmented_named_rows():
+    """The rows 9.5 states in words, reached through the binding: the
+    tie toward the smaller magnitude, underflow without inexact, and
+    the zero error term that takes r's sign."""
+    ctx = Context(53)
+    one_u = ctx.from_bits(0x3FF0000000000001)           # 1 + 2^-52
+    half_u = ctx.from_bits(0x3CA0000000000000)          # 2^-53
+    ctx.clear_flags()
+    r, e = ctx.augmented_add(one_u, half_u)
+    assert r.to_bits() == 0x3FF0000000000001
+    assert e.to_bits() == 0x3CA0000000000000
+    assert ctx.last_flags == 0
+    # ordinary addition steps UP from the same midpoint, which is what
+    # makes the assertion above a test rather than a coincidence
+    assert ctx.add(one_u, half_u).to_bits() == 0x3FF0000000000002
+
+    ctx.clear_flags()
+    r, e = ctx.augmented_add(ctx.from_float(1.0), ctx.from_bits(1))
+    assert e.to_bits() == 1
+    assert tuple(ctx.flag_names(ctx.last_flags)) == ("underflow",)
+
+    ctx.clear_flags()
+    r, e = ctx.augmented_mul(ctx.from_bits(1), ctx.from_bits(1))
+    assert r.is_zero and e.is_zero
+    assert set(ctx.flag_names(ctx.last_flags)) == {"underflow", "inexact"}
+
+    ctx.clear_flags()
+    minus_one = ctx.from_float(-1.0)
+    r, e = ctx.augmented_add(minus_one, ctx.zero())
+    assert r.same_bits(minus_one)
+    assert e.is_zero and e.sign == 1, "a zero e takes the sign of r"
+    assert ctx.last_flags == 0
+
+
+def test_augmented_refuses_an_unknown_name():
+    ctx = Context(53)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.augmented(ctx._dev, "div", ctx._fi.code, b"", b"", 0,
+                               ctx._fi.esz)

@@ -441,6 +441,15 @@ need host-cc python
 stage transcend "the twenty-nine transcendentals vs the model, and again through the escalation path" -- \
   do_transcend
 
+# The augmented arithmetic operations of 754-2019 9.5. Their own stage
+# rather than a line inside clause5, because what they check is
+# different in kind: TWO outputs per element, a rounding that is not
+# one of the five attributes, and the pair identity r + e == x op y,
+# which the harness verifies in exact integers on the LIBRARY's output.
+need host-cc python
+stage augmented "the clause-9.5 augmented operations vs the model: both outputs, flags, and the exact pair identity" -- \
+  PY "$ROOT/host/tests/augmented_check.py"
+
 need host-cc python
 stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000

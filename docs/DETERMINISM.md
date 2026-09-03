@@ -57,8 +57,13 @@ section below, and so are the nine phase-1 transcendentals of clause 9
 phase-2 trigonometrics (sinPi, cosPi, tanPi, asin, acos, atan, atan2,
 asinPi, acosPi, atanPi, atan2Pi) and the nine of phase 3 (sin, cos
 and tan of a radian argument; sinh, cosh, tanh, asinh, acosh, atanh),
-correctly rounded. Everything is scored the same way regardless of route:
-`python/cft_golden/softfloat.py` defines the bits.
+correctly rounded. The three augmented arithmetic operations of clause
+9.5 - augmentedAddition, augmentedSubtraction and
+augmentedMultiplication, each returning a PAIR under a rounding the
+five attributes do not include - are contract operations too, in their
+own section below. Everything is scored the same way regardless of
+route: `python/cft_golden/softfloat.py` defines the bits, with
+`transcend.py` and `augmented.py` beside it for the clause-9 sets.
 
 ADD/SUB/MUL are defined as operand-steered FMA (see
 `cft_golden.softfloat.steer` and rtl/cft_opmux.sv); the steering is
@@ -88,6 +93,15 @@ selected per operation in MODE[14:12] using RISC-V's `frm` encoding:
 Encodings 5-7 are reserved: the hardware treats them as `rne`, and the
 golden model rejects them outright, so no conforming host can depend
 on a value the contract does not define.
+
+**Five, and exactly five.** 754-2019 9.5 defines a SIXTH rounding
+direction, roundTiesTowardZero, for the augmented arithmetic
+operations and for nothing else. It is not in this table because it is
+not an attribute: no operation here accepts it, no MODE encoding
+carries it, and the gate that admits these five rejects it. It lives
+inside `round_pack` numbered outside the three-bit attribute field, and
+the augmented operations - which take no attribute argument at all -
+are its only callers. See the clause-9.5 section below.
 
 **Each attribute is its own deterministic contract** - the same inputs
 under the same attribute always give the same bits, on every device
@@ -445,6 +459,109 @@ Like the twenty, these issue no device pass: the device argument is
 context and the results are bit-identical across backends by
 construction.
 
+## The augmented arithmetic operations (clause 9.5)
+
+augmentedAddition, augmentedSubtraction and augmentedMultiplication
+are contract operations with library entry points (`cft_augmented_add`
+and friends), added 2026-09-03 as part of the 0.6 step. They are the
+first operations in this contract that return **two results** - the
+operation rounded, and the error rounding made - and the first that
+take **no rounding attribute**, because 754-2019 9.5 fixes the
+rounding itself:
+
+> This standard specifies a single rounding direction to be used in the
+> operations in this subclause, defined as roundTiesTowardZero: the
+> floating-point number nearest to the infinitely precise result shall
+> be delivered; if the two nearest floating-point numbers bracketing an
+> unrepresentable infinitely precise result are equally near, the one
+> with smaller magnitude shall be delivered.
+
+**That is a sixth rounding direction, and it is deliberately NOT a
+sixth attribute.** The five of the Rounding section above are what
+MODE[14:12] encodes and what every other operation here consults; this
+one exists inside `round_pack` (`RND_RTTZ` in the model,
+`CFT_SF_RTTZ` in the library, both numbered 16 - outside the three-bit
+attribute field on purpose) and is reachable only from these three
+operations, which have no argument to carry it. The gate that admits
+the five rejects it, and no attribute can produce this rounding.
+
+**The five attributes' bits are unchanged, and the conformance replay
+is not what proves it.** `make vectors` regenerates the sets from the
+current model, so a change that moved the model and the library
+together would replay clean; that argument would be circular. What
+proves it is the layer that shares no code with either:
+`python/tests/test_rounding.py` re-derives every attribute from exact
+rationals, `test_augmented.py` holds addition under all five against
+the same independent reference, and the MPFR campaign arbitrates the
+library against an outside implementation. As a one-off at the time of
+the change, the current model was also compared directly against the
+model as it stood at the preceding commit over add/sub/mul/fma/div/sqrt
+- 216,480 cases across five attributes and four formats, bit-identical
+including flags (docs/VALIDATION.md, 2026-09-03).
+
+The tie rule differs from roundTiesToEven **only at an exact midpoint
+whose lower neighbour has an odd last bit**, so an implementation that
+quietly used roundTiesToEven would pass anything that did not aim at
+that case. The vector sets aim at it at every binade edge.
+
+What an independent implementation is scored on:
+
+- **Overflow still delivers an infinity, in both directions.** 9.5:
+  "roundTiesTowardZero carries all overflows (see 7.4) to infinity with
+  the sign of the intermediate result" - unlike roundTowardZero, which
+  never does. The threshold is a midpoint: a magnitude EQUAL to
+  `2^emax x (2 - 2^-p)` rounds to the largest finite "with no change in
+  sign" and raises **nothing**, because 9.5 signals inexact "only when
+  roundTiesTowardZero(x + y) overflows". Above it, both outputs are the
+  infinity and overflow and inexact are raised.
+- **Underflow is a statement about the ERROR TERM, not about r**: it is
+  raised when e is "non-zero and lies strictly between +-b^emin". The
+  error term is exact, so this is **underflow WITHOUT inexact** - the
+  one place in this contract where the two part company, and a
+  deliberate exception to the "tiny AND inexact" rule stated under
+  Underflow and the flags below. The tininess convention there
+  (after-rounding, 7.5 a) is untouched and simply does not decide this
+  case: 9.5 names the condition itself. A subnormal r whose residual
+  the format holds exactly raises nothing at all - "the operation's
+  subnormal and zero results are exact".
+- **The signs of the zeros are two different rules.** An error term
+  that is EXACTLY zero "is returned with the sign of
+  roundTiesTowardZero(x + y)" - r's sign, so augmentedAddition(-3, 0)
+  is (-3, -0). An error term that is non-zero and merely ROUNDS to zero
+  keeps the sign of the exact residual, by 6.3's rule for a result that
+  is "zero because of rounding". r's own zero sign is 6.3's as
+  everywhere else: +0 for an exact cancellation (roundTiesTowardZero is
+  not roundTowardNegative), the operand's sign for like-signed zeros,
+  the XOR of the signs for a product.
+- **Any NaN in gives the canonical quiet NaN as BOTH results**, invalid
+  for a signaling one; an invalid operation (inf + (-inf), inf * 0)
+  "produces the same quiet NaN for both outputs". An infinity from an
+  infinite OPERAND is both results and signals nothing.
+- **The error term is always representable for the sum and the
+  difference.** Both operands are integer multiples of the format's
+  smallest quantum, so the exact sum is one too, and the residual - at
+  most half an ulp of r - needs at most p significant bits on a grid
+  the format already has. 9.5 gives augmentedAddition no
+  non-representable case, and the model and the library both assert it
+  rather than trusting it. augmentedMultiplication has the one
+  exception 9.5 names, a residual with "non-zero digits ... strictly
+  between +-b^(emin-p+1)", and delivers it ROUNDED the same way with
+  underflow and inexact raised. **That is the only case in which
+  r + e is not exactly x op y**, and it is named rather than tolerated
+  wherever the identity is checked.
+
+Clause 11 lists 9.5 among the reproducible operations, which is the
+standard making this document's argument for it: "A reproducible
+operation is one of the operations described in Clause 5 or is a
+supported operation from 9.2, 9.3, 9.5 or 9.6."
+
+Like the clause-5 host operations and the transcendentals, these issue
+no device pass: the arithmetic is exact integer work, so the device
+argument is context and the results are bit-identical across backends
+by construction. A tile-composed fast path (a TwoSum, or an FMA
+residual) would have to reproduce these bits exactly - and could not
+produce r from the tile's five attributes at all.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -507,6 +624,13 @@ The underflow flag rises only when the result is both tiny and inexact
 raised. If the rounded result is exact, no flag is raised"). Exact
 subnormal results are flagless.
 
+One documented exception, and it is the standard's own: the augmented
+arithmetic operations of 9.5 raise underflow when their ERROR TERM is
+non-zero and subnormal, whether or not anything was inexact - 9.5
+states that condition itself rather than deferring to 7.5. See the
+clause-9.5 section above; nothing else in this contract raises
+underflow without inexact.
+
 Overflow follows 7.4: overflow and inexact are both raised in every
 attribute, and the delivered value is the one that attribute's table
 requires (see Rounding above) - infinity under `rne`/`rmm`, the
@@ -562,10 +686,11 @@ Every claim above is a test somewhere, and the layers share no code:
 |---|---|---|
 | `python/tests/test_softfloat.py` | golden model semantics | CPython native binary64, `math.fma`, mpmath (all four formats), hand-computed 754 anchors |
 | `python/tests/test_clause5.py` | the clause-5 completion semantics | math.remainder/nextafter/ldexp/frexp, struct's double-to-float, an exact-rational rounding reference, hand-derived 754 edges |
+| `python/tests/test_augmented.py` | the clause-9.5 pairs and their flags | an independent exact-rational restatement of 9.5, CPython's native binary64 away from the ties, hand-derived 754 edges, and the pair identity in exact integers |
 | `python/tests/test_sequences.py` | the composed routes == the contract | bit-for-bit, every format and attribute |
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
-| `host/tests/divsqrt_check.py` / `clause5_check.py` | the C library's ports of every contract operation | golden model, per-element flags |
+| `host/tests/divsqrt_check.py` / `clause5_check.py` / `augmented_check.py` | the C library's ports of every contract operation | golden model, per-element flags (and, for 9.5, the pair identity in exact integers) |
 | `host/tests/transcend_check.py` | the twenty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
@@ -584,4 +709,5 @@ quiet comparisons 5.11; NaN semantics 6.2 (payload recommendation
 6.2.3); sign bit rules 6.3; invalid 7.2; divideByZero 7.3; overflow
 7.4; underflow and tininess 7.5; the recommended correctly-rounded
 functions and their special-value tables 9.2 (the table itself 9.2.1);
-minimum/maximum 9.6.
+the augmented arithmetic operations and roundTiesTowardZero 9.5;
+minimum/maximum 9.6; the reproducible-operation list 11.

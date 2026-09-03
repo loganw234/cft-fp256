@@ -1865,3 +1865,108 @@ Repeated on the tree that ships, after the docs above were committed:
 run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
 libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
 wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.
+
+## 2026-09-03 - the augmented arithmetic operations, IEEE 754-2019 clause 9.5
+
+augmentedAddition, augmentedSubtraction and augmentedMultiplication -
+`cft_augmented_add`, `cft_augmented_sub`, `cft_augmented_mul` - at all
+four formats, both outputs and exact flags, under the one rounding
+754-2019 defines for them and for nothing else: roundTiesTowardZero.
+Part of the 0.6 step; the ABI minor is the integrator's to bump when
+the whole step lands, and this work leaves it at 5.
+
+Windows 11 (DESKTOP-T33SK86), mingw64 gcc 16.1.0, MPFR 4.2.1 as the C
+oracle (what the run printed), CPython 3.12.9 with gmpy2 2.2.1,
+2026-09-03. **Three other agents were building and running campaigns on
+the same machine throughout**, so the wall times below are not
+comparable with the earlier entries. The counts are.
+
+| check | count | result |
+|---|---|---|
+| `python/tests/test_augmented.py` | 20 tests | pass |
+| the whole `python/tests` suite | 964 passed, 1 skipped (was 944/1), 258 s | pass |
+| `make vectors` | 44 sets, 568,531 cases - 4 new augmented sets, 89,616 cases | written |
+| `cft_conformance` replay at the runner's generation | 44 sets, 724,531 cases, 89,616 of them augmented | every case, BOTH outputs and flags, replayed twice |
+| `host/tests/augmented_check.py` - the C against the model per element, plus batches, aliasing and refusals | 140,088 comparisons at the default pool; 149,112 at `--trials 400`; 158,712 more at `--trials 800` over the four formats in two halves | C == model on every one |
+| the pair identity `r + e == x op y`, exact integers, on the LIBRARY's output | 80,209 pairs | exact - plus 8,316 residuals delivered rounded, 9.5's one non-representable case |
+| the FAR/NEAR alignment split, walked across its decision at every magnitude and both signs | 70,200 comparisons | C == model on every one |
+| MPFR parity, the three operations, four formats | 21,492 augmented cases (5,373 per format), part of 473,480 | **zero value mismatches, zero flag mismatches** |
+| `cft.hpp` against `cft.h`, every entry point twice | 4,311 checks at C++17 and again at C++20 (was 4,111) | identical encodings and flags |
+| the cftmpfr drop-in | 594 tests (was 576) | pass |
+| `api-test` contract checks | all | pass |
+| neighbours, in case the shared `round_pack` moved: `divsqrt_check.py` / `clause5_check.py` | 29,124 / 145,032 | zero disagreements |
+
+**The five attributes are unchanged, and the conformance replay is not
+what proves it.** `make vectors` regenerates the sets from the current
+model, so a change that moved model and library together would replay
+clean - that argument is circular and saying so is the point of this
+paragraph. The evidence that is not: `python/tests/test_rounding.py`
+re-derives each attribute from exact rationals sharing no code with the
+model (it is in the 964), `test_augmented.py` holds addition under all
+five against the same independent reference, MPFR arbitrates the
+library from outside, and as a one-off the current model was compared
+directly against the model as it stood at the preceding commit
+(ef2348e) over add/sub/mul/fma/div/sqrt: **216,480 cases across five
+attributes and four formats, bit-identical including flags.**
+
+**The oracle, stated honestly.** MPFR has no roundTiesTowardZero, and
+`MPFR_RNDZ` is not it - RNDZ truncates every inexact value, not only
+the ties. So `check_augmented` cannot ask MPFR for the answer. It asks
+for the EXACT value at a precision that provably holds it - not 2p,
+because the exact sum of two p-bit values spans the whole exponent
+range (524,522 bits at binary256), and proved rather than assumed by
+requiring MPFR's ternary to be zero - then applies 9.5's tie rule
+itself and derives the error term by exact subtraction, deciding
+representability by rounding it and asking whether that changed it.
+Independent for the VALUES, a restatement for the FLAGS, and the banner
+above the function says which is which.
+
+**The flag words, enumerated.** Over the whole pool at every format the
+three operations produce exactly five flag words and no others: nothing,
+invalid, underflow alone, underflow with inexact, and overflow with
+inexact. Inexact never appears alone and divideByZero cannot appear at
+all. **Underflow alone is the one this contract admits nowhere else** -
+9.5 raises underflow on a subnormal error term that is EXACT - and it
+is asserted as a set equality, so a missing combination fails the test
+rather than passing quietly.
+
+**Negative control, run and restored.** `host/src/softfloat.c`'s
+`CFT_SF_RTTZ` arm changed from `guard && sticky` to
+`guard && (sticky || lsb)` - roundTiesToEven, which is the plausible
+mistake and the one an implementation makes by not reading 9.5. Caught
+by four independent gates: `api-test` at three named checks (the tie at
+binary32, the same tie at binary64, and the overflow threshold);
+`augmented_check.py` at its first fp32 pair; the conformance replay at
+`fp32-augmented.jsonl` **after 28,932 non-augmented cases had already
+passed**, which is the same evidence again that the five attributes do
+not see this rounding; and the MPFR campaign, which reported the
+mismatches from `aug_add` at fp32. Restored, rebuilt, `api-test` green
+again.
+
+**The pre-existing vector sets are byte-identical.** The new pool is a
+new function; it must not have perturbed the RNG streams the opcode and
+transcendental families draw from. Checked rather than reasoned: the
+generator as it stood at ef2348e was run out of a scratch checkout and
+its `fp32.jsonl`, `fp32-rtz.jsonl`, `fp32-transcend-rtz.jsonl`,
+`fp64.jsonl`, `fp64-transcend.jsonl` compared byte for byte against the
+current generator's. Identical.
+
+**Runner.** `bash verify/run.sh --only vectors,libcft,augmented,mpfr,cpp,bindings`
+at 04fcb56, run id 20260903-094456-04fcb56: vectors 61 s, libcft 162 s,
+augmented 4 s, bindings 15 s, cpp 541 s, mpfr 91 s - **PASS, nothing
+skipped.** Repeated on the tree that ships, after the docs above were
+committed and with a clean tree: run id 20260903-100057-a019cd5 -
+vectors 54 s, libcft 160 s, augmented 5 s, bindings 14 s, cpp 555 s,
+mpfr 109 s - **PASS, nothing skipped.** Both runs replayed 44 sets and
+724,531 cases and reported 473,480 MPFR cases with zero value and zero
+flag mismatches. The wall times are roughly double the earlier entries'
+for the same stages, which is the four-agent load on the box and not
+the work.
+
+Not run, and why: the RTL stages (`sim`, `lint`, `formal`) and the
+`node`/`wasm` stages were outside this work's brief - no opcode was
+consumed, no RTL file was touched, and the JavaScript surface is a
+separate step that will add the augmented sets to its own replayer. The
+`node` and `wasm` replayers already IGNORE an unknown `.jsonl` by name
+rather than failing on it, so the four new sets are listed as ignored
+there until that step lands.

@@ -974,6 +974,51 @@ class Context:
         with divideByZero; |x| > 1 is invalid, infinities included."""
         return self._transcend1("atanh", x)
 
+    # ---- the augmented arithmetic operations (754-2019 9.5) ------
+    #
+    # The only members here that return a PAIR, and the only ones that
+    # ignore this context's rounding attribute - 9.5 fixes the rounding
+    # to roundTiesTowardZero, which is not one of the five and which no
+    # other operation in this package can be asked for.
+    #
+    # What they are for: r is the operation rounded and e is the error
+    # rounding made, so r + e is the exact result the format cannot
+    # hold. That is the primitive under compensated summation, exact
+    # dot products and double-double arithmetic - written by hand as
+    # TwoSum and Dekker splitting everywhere else, correct only under
+    # assumptions a compiler is free to break, and here a library call
+    # with the standard behind it.
+    #
+    # gmpy2 has no equivalent: MPFR has no roundTiesTowardZero, so this
+    # is one of the few places where this package is not a drop-in for
+    # something that already exists but an addition to it.
+
+    def _augmented(self, name, x, y):
+        x, y = self._coerce(x), self._coerce(y)
+        r, e, fl = _lib.augmented(self._dev, name, self._fi.code,
+                                  x.to_bytes(), y.to_bytes(), 1,
+                                  self._fi.esz)
+        self.last_flags = fl
+        self.flags |= fl
+        return Float(self, r), Float(self, e)
+
+    def augmented_add(self, x, y):
+        """(r, e) with r = x + y rounded ties-toward-zero and e the
+        exact residual. e is always representable here; it is a zero
+        with r's SIGN when the sum is exact, and a subnormal e raises
+        underflow with no inexact."""
+        return self._augmented("add", x, y)
+
+    def augmented_sub(self, x, y):
+        """(r, e) for x - y, on every term of augmentedAddition."""
+        return self._augmented("sub", x, y)
+
+    def augmented_mul(self, x, y):
+        """(r, e) with r = x * y rounded ties-toward-zero. The one case
+        where r + e is not exact is a residual below the subnormal grid,
+        which arrives rounded with underflow AND inexact raised."""
+        return self._augmented("mul", x, y)
+
     def neg(self, x):
         """Sign flip, 754 5.5.1: quiet even on signaling NaNs, payload
         preserved - deliberately NOT 0 - x."""

@@ -21,6 +21,7 @@ from .softfloat import (
     ARITH_OPS, SIMPLE_OPS, SIMPLE_IMPL,
     fabs, neg, copysign, fmin, fmax, fminnum, fmaxnum,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES, RND_MODES,
+    RND_RTTZ, RND_RTTZ_NAME,
     add, sub, mul, fma, div, sqrt, compute, steer, unpack,
     zero_bits, one_bits, inf_bits, qnan_bits, snan_bits,
     min_subnormal_bits, max_subnormal_bits, min_normal_bits, max_normal_bits,
@@ -43,12 +44,16 @@ from .transcend import (
     asinpi, acospi, atanpi, atan2pi,
     prec_cap, start_prec,
 )
+from .augmented import (
+    AUG_FNS, AUG_IMPL, FN_AUG_ADD, FN_AUG_SUB, FN_AUG_MUL,
+    augmented_add, augmented_sub, augmented_mul,
+)
 from .reduce import (
     OP_SUM, OP_DOT, REDUCE_OPS, REDUCE_OP_NAMES,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
     stream_reduce,
 )
-from . import transcend, vectors
+from . import augmented, transcend, vectors
 
 __all__ = [
     "FP32", "FP64", "FP128", "FP256", "FORMATS", "PREC_CODE", "FpFormat",
@@ -66,7 +71,7 @@ __all__ = [
     "ARITH_OPS", "SIMPLE_OPS", "SIMPLE_IMPL",
     "fabs", "neg", "copysign", "fmin", "fmax", "fminnum", "fmaxnum",
     "RND_RNE", "RND_RTZ", "RND_RDN", "RND_RUP", "RND_RMM",
-    "RND_NAMES", "RND_MODES",
+    "RND_NAMES", "RND_MODES", "RND_RTTZ", "RND_RTTZ_NAME",
     "add", "sub", "mul", "fma", "compute", "steer", "unpack",
     "zero_bits", "one_bits", "inf_bits", "qnan_bits", "snan_bits",
     "min_subnormal_bits", "max_subnormal_bits", "min_normal_bits",
@@ -87,6 +92,8 @@ __all__ = [
     "hypot", "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "prec_cap", "start_prec", "transcend",
+    "AUG_FNS", "AUG_IMPL", "FN_AUG_ADD", "FN_AUG_SUB", "FN_AUG_MUL",
+    "augmented_add", "augmented_sub", "augmented_mul", "augmented",
     "OP_SUM", "OP_DOT", "REDUCE_OPS", "REDUCE_OP_NAMES",
     "split", "tree_adds", "canonical_ranges", "reduce_bits",
     "fsum", "fdot", "combine", "stream_reduce",
