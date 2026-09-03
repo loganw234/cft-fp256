@@ -1475,3 +1475,143 @@ rounded evaluations, a quarter of them at binary256, one `_malloc` per
 scalar call across a wasm boundary. The cost buys the only check that
 can see a broken wrapper, which this morning's module proved was
 worth having.
+## 2026-09-03 - the phase-2 trigonometrics, ABI 0.4
+
+sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+and atan2Pi, correctly rounded at all four formats under all five
+rounding attributes, with 754-2019 clause 9.2.1's special values and
+the contract's exact flags - the half of clause 9's trigonometry whose
+argument reduction is EXACT (`x mod 2` on a dyadic operand for the
+forward Pi-variants; nothing at all for the inverses).
+docs/TRANSCENDENTALS.md's phase-2 section is the design and its proofs.
+
+Windows 11 (DESKTOP-T33SK86), mingw64 gcc 16.1.0, MPFR 4.2.2 as the C
+oracle, CPython 3.12 with gmpy2 2.2.1 (which links its own MPFR 4.2.1),
+2026-09-03.
+
+| check | count | result |
+|---|---|---|
+| `python/tests/test_transcend.py` | 567 tests (was 389) | pass |
+| `python/tests/test_mp_consts.py` | 4 tests (was 3) | pass |
+| the whole `python/tests` suite | 941 tests, 1 skipped | pass |
+| `host/tests/transcend_check.py` - the C against the model, per element for exact flags plus batch calls, over TWENTY functions | 154,269 comparisons | C == model on every one, bits and flags |
+| the same, with the library forced to START below the precision it needs, against an unescalated model | 143,069 comparisons | identical results through the escalation path |
+| `cft_conformance` replay of the transcendental sets | 129,845 cases in 20 sets (part of 521,845 in 40 at the runner's generation, 365,845 at the Makefile's) | every case, bits and flags, replayed twice |
+| MPFR parity, all twenty functions, four formats, five attributes | 175,680 transcendental cases (95,680 phase 1 + 80,000 phase 2), part of 414,008 | **zero value mismatches, zero flag mismatches** |
+| the same campaign with `CFT_TRANSCEND_MINPREC=64` | 414,008 cases, 38,338 escalations | **zero mismatches** |
+| `cft.hpp` against `cft.h`, every entry point twice | 3,751 checks at C++17 and again at C++20 (was 3,267) | identical encodings and flags |
+| the cftmpfr drop-in | 384 tests (was 268) | pass, asin/acos/atan/atan2 bit-for-bit against gmpy2 |
+| `api-test` contract checks | all | pass |
+| `make -C host examples-lang`, the legs this host can run | c++, rust, csharp | the canonical four checksums, diff clean |
+
+MPFR is again not the third oracle but the ONLY one, and for the seven
+Pi-variants it is called directly: `mpfr_sinpi`, `mpfr_cospi`,
+`mpfr_tanpi`, `mpfr_asinpi`, `mpfr_acospi`, `mpfr_atanpi` and
+`mpfr_atan2pi` are MPFR 4.2.0 functions, asserted by a `#error` at the
+top of `host/tools/mpfr_check.c`. Composing sinPi out of
+`mpfr_sin(pi * x)` would compare against a ROUNDED product and would
+decide nothing about the last bit. `mpfr_asin`, `mpfr_acos`,
+`mpfr_atan` and `mpfr_atan2` exist in every MPFR.
+
+**Escalation, measured.** Over the MPFR campaign's 175,680
+transcendental elements, 74,755 reached the Ziv loop and it escalated
+**zero** times; the deepest working precision used was **514 bits** -
+fp256's own first attempt, `2p + 40`. **No input reached the cap.**
+18,520 elements were decided exactly and 43,155 by a neighbour's side
+rather than by any precision at all. Over `transcend_check.py`'s pools
+the model escalated 36 times, all of them still the phase-1
+`pow(1+u, -(1+u))` family, and the deepest precision any input needed
+was 832 bits, the fp256 cap itself, for that family. **No phase-2 input
+escalated at all** at the contract's own precisions.
+
+Forced low, the second run of the `transcend` stage: 143,069
+comparisons of an escalated C against an unescalated model with
+identical results, and 38,338 escalations driven through the MPFR
+campaign with zero mismatches.
+
+**Three defects, two of them pre-existing and invisible until this
+phase's gates were built.**
+
+- `host/tools/mpfr_check.c`'s `build_tpool` had tested `enc_from_val`
+  against 0 since it was written, where 1 is success. Every directed
+  transcendental operand it meant to add - the exp2 integers, the log2
+  powers of two, the log10 powers of ten, the neighbours of 1, the
+  arguments below `2^-(p+3)` - was discarded and a zeroed encoding kept
+  in its place, so the phase-1 MPFR campaign ran on `build_pool`'s
+  specials plus randoms. Found because the new trigonometric pool came
+  out at 42 entries where 192 were asked for. The 2026-09-02 entry's
+  escalation figures are annotated accordingly; its case COUNTS are
+  unaffected, because the pool was topped up with randoms to the same
+  size.
+- With the pool repaired, the forced-escalation run failed 75 cases,
+  all `pow` at fp128 with a base one ulp from 1. `tr_ziv` refused
+  outright when `tr_eval` failed, where a failure BELOW the cap means
+  the precision was too coarse rather than that no precision can
+  decide; it now escalates, and only a failure AT the cap is a
+  refusal.
+- Five cases survived that, and they were phase 1's exact-cancellation
+  repair being unsound. It returned the larger operand with a SATURATED
+  bound, on the reasoning that the enclosure would then reach zero. It
+  does not: `err` saturates at 2^40 while the significand is
+  `2^(W-1)`, so at any working precision above 41 bits the enclosure is
+  narrow, decidable and wrong - `pow(2 + ulp, ~10^4)` at fp128
+  overflowed where the true value is about `2^9888`. The true
+  difference is bounded only in ABSOLUTE terms, which a relative bound
+  around any value cannot express, so it is now a failure and the loop
+  escalates on it.
+
+**Negative control**, run and restored the same day. Inverting one
+character - the `away` argument of atan's neighbour witness in
+`do_atan_family`, so the true value is claimed to lie above its
+argument rather than below - is caught by:
+
+- `api-test`, at the new `atan(min subnormal)` toward-zero case:
+  `api-test: 1 FAILED`;
+- `transcend_check.py`, on its first atan case (`fp32 atan rtz`, the
+  smallest subnormal: `0x1` where the model says `0x0`);
+- the conformance replay, which stops at 68,542 cases with
+  `expected 0x00000000 flags 0x18 / got 0x00000001 flags 0x18`;
+- MPFR parity, with mismatches from the first `fp32 atan rtz` row;
+- the cftmpfr drop-in against gmpy2, 12 tests failing.
+
+`cpptest` is deliberately not on that list, and that is not a gap: it
+issues each entry point through `cft.hpp` and through `cft.h` on the
+same library, so a library defect moves both sides. It is a marshalling
+check by construction, and the phase-1 control noted the same shape.
+Phase 1's control found that `api-test` could not catch a flipped side
+because it had no case in that family; phase 2 has six neighbour
+families and one case from each went in, which is why `api-test` is on
+the list this time.
+
+Standardized run, `bash verify/run.sh --only vectors,libcft,mpfr,transcend`
+at 0a9a06c, run id 20260903-031637-0a9a06c:
+
+    vectors      ok      13s
+    libcft       ok      88s
+    transcend    ok     100s
+    mpfr         ok      62s
+
+    VERDICT: PASS, nothing skipped
+
+The seconds are honest and the stage logs carry the counts: vectors 40
+sets at the runner's own generation parameters, libcft's 521,845 cases
+replayed twice each, transcend's 154,269 then 143,069 comparisons with
+the model's escalation numbers printed underneath, and mpfr's 414,008
+cases with the library's evaluator counters after them.
+
+Repeated on the finished tree, so the record is of the commit that
+ships rather than of one before it: run id 20260903-032203-a8ba574,
+vectors 12s, libcft 87s, transcend 100s, mpfr 62s - **PASS, nothing
+skipped**, and mpfr's log ends
+`TOTAL 414008 cases, 0 value mismatches, 0 flag mismatches`.
+
+What did NOT run, and why: the RTL, formal and container simulation
+stages (nothing in this change touches them - these eleven issue no
+device pass at all); the native-oracle soak, because there is no CPU
+oracle for these functions; and the Node and wasm stages, because
+`bindings/node` and `bindings/wasm` were deliberately left alone -
+another change is working on the JavaScript surface for ABI 0.3's nine,
+and the eleven have no JavaScript surface at all. docs/COMPATIBILITY.md
+records that per row rather than in general. Fortran, Julia, Go and R
+were not re-run: this host carries none of those four toolchains, so
+those rows stand on their dated runs and on nothing newer.

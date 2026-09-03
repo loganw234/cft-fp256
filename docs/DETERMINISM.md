@@ -53,7 +53,9 @@ clause 5 - roundToIntegral, the conversions, scaleB/logB, nextUp/
 nextDown, classification, totalOrder, the signaling comparisons,
 remainder - are contract operations too, specified in their own
 section below, and so are the nine phase-1 transcendentals of clause 9
-(exp, expm1, exp2, log, log1p, log2, log10, pow, hypot), correctly
+(exp, expm1, exp2, log, log1p, log2, log10, pow, hypot) and the eleven
+phase-2 trigonometrics (sinPi, cosPi, tanPi, asin, acos, atan, atan2,
+asinPi, acosPi, atanPi, atan2Pi), correctly
 rounded. Everything is scored the same way regardless of route:
 `python/cft_golden/softfloat.py` defines the bits.
 
@@ -326,6 +328,64 @@ argument is context and the results are bit-identical across backends
 by construction. A tile-assisted fast path for the narrow formats would
 have to reproduce these bits exactly.
 
+## The phase-2 trigonometrics (clause 9.2)
+
+sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+and atan2Pi are contract operations with library entry points, added
+2026-09-03 as ABI 0.4, on exactly the terms the nine above are:
+**correctly rounded, in all five attributes, at all four formats, with
+exact flags.**
+
+They are the half of clause 9's trigonometry whose argument reduction
+is EXACT, and that is why they arrived a phase before the rest. sinPi
+reduces by `x mod 2` and every operand is a dyadic rational, so the
+reduction is a mask on the encoding at every magnitude; the inverse
+functions have nothing to reduce and meet pi only as a factor of the
+answer. `sin`, `cos` and `tan` of a radian argument - the reduction
+against pi itself - are not in this contract yet.
+
+What belongs here is what an independent implementation is scored on:
+
+- **The exact cases raise nothing, and they are an enumeration with a
+  theorem behind it.** Niven's theorem makes sinPi and cosPi exact
+  exactly at the half-integers and tanPi exactly at the
+  quarter-integers; Hermite-Lindemann makes asin, atan and atan2 exact
+  only where the answer is a zero, and acos only at `acos(1)`. The
+  Pi-forms of the inverses get a larger table for Niven's reason:
+  `asinPi(+-1) = +-1/2`, `acosPi(+-0) = 1/2`, `acosPi(-1) = 1`,
+  `atanPi(+-1) = +-1/4`, `atanPi(+-inf) = +-1/2`, and atan2Pi exact on
+  every axis and every diagonal - 0, +-1/4, +-1/2, +-3/4, +-1.
+  `asinPi(1/2)` is exactly 1/6: rational, NOT dyadic, therefore inexact
+  and therefore decidable.
+- **sinPi of an integer is a zero with the sign of the ARGUMENT**, not
+  of `(-1)^n`. `cosPi(n + 1/2)` is `+0` for every n and both signs,
+  because cosPi is even. **tanPi is sinPi/cosPi in every respect**, so
+  `tanPi(1)` is `-0`.
+- **tanPi at a half-integer is `+-infinity` with divideByZero.** A pole
+  is an exact infinity from finite operands, which is 7.3's condition.
+  The sign is sinPi's, since cosPi there is `+0`.
+- **Overflow cannot occur anywhere in this set.** tanPi is the only
+  candidate and cannot reach it: a representable argument is at least
+  `2^-p` from a pole, so `|tanPi| < 2^p`, far inside emax at every
+  rung. Underflow can occur and follows clause 7 through the same
+  round_pack.
+- **sinPi, cosPi and tanPi of an infinity are invalid** - no limit
+  exists. asin, acos and their Pi forms are invalid for `|x| > 1`,
+  infinities included.
+- **`atan2(+-0, -0) = +-pi` and `atan2Pi(+-0, -0) = +-1`.** A minus
+  zero denominator names the negative real axis. `atan2(+-0, +0)` is
+  `+-0`; `atan2(y, +-0)` is `+-pi/2`; `atan2(+-inf, +inf)` is `+-pi/4`
+  and `(+-inf, -inf)` is `+-3pi/4`.
+- **A quiet NaN does not outrank atan2's table** the way it outranks
+  pow's. atan2 of a NaN is a NaN. A signaling NaN raises invalid and
+  delivers the canonical quiet NaN, as everywhere else.
+- **An input that cannot be shown correctly rounded is REFUSED**, on
+  the same terms as phase 1.
+
+Like the nine, these issue no device pass: the device argument is
+context and the results are bit-identical across backends by
+construction.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -447,7 +507,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` | the C library's ports of every contract operation | golden model, per-element flags |
-| `host/tests/transcend_check.py` | the nine transcendentals, and again through the escalation path | golden model, per-element flags |
+| `host/tests/transcend_check.py` | the twenty transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 

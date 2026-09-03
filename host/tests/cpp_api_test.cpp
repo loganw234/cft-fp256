@@ -509,6 +509,39 @@ void check_format(cft::device &dev, cft_device *ref)
             CHECK(st == CFT_OK, "cft_hypot: %s", cft_strerror(st));
             expect<F>("hypot", rnd, dw, fw, dc, fc);
 
+            /* The phase-2 trigonometrics (ABI 0.4). Same reasoning:
+             * the wrapper computes nothing, so what is being checked
+             * is that it hands the same bytes to the same call - and
+             * for atan2 in particular that it does not swap y and x,
+             * which is the one marshalling error that would still
+             * look plausible. */
+#define TRIG1(name)                                                        \
+            fw = ctx.name(a, dw);                                          \
+            st = cft_##name(ref, F, rnd, a.data(), dc.data(), n, &fc);     \
+            CHECK(st == CFT_OK, "cft_" #name ": %s", cft_strerror(st));    \
+            expect<F>(#name, rnd, dw, fw, dc, fc)
+            TRIG1(sinpi);
+            TRIG1(cospi);
+            TRIG1(tanpi);
+            TRIG1(asin);
+            TRIG1(acos);
+            TRIG1(atan);
+            TRIG1(asinpi);
+            TRIG1(acospi);
+            TRIG1(atanpi);
+#undef TRIG1
+
+            fw = ctx.atan2(a, b, dw);
+            st = cft_atan2(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_atan2: %s", cft_strerror(st));
+            expect<F>("atan2", rnd, dw, fw, dc, fc);
+
+            fw = ctx.atan2pi(a, b, dw);
+            st = cft_atan2pi(ref, F, rnd, a.data(), b.data(), dc.data(), n,
+                             &fc);
+            CHECK(st == CFT_OK, "cft_atan2pi: %s", cft_strerror(st));
+            expect<F>("atan2pi", rnd, dw, fw, dc, fc);
+
             ctx.total_order(a, b, dw);
             st = cft_total_order(ref, F, a.data(), b.data(), dc.data(), n);
             CHECK(st == CFT_OK, "cft_total_order: %s", cft_strerror(st));
@@ -773,6 +806,31 @@ void check_format(cft::device &dev, cft_device *ref)
         cft_hypot(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,
                   &fc);
         CHECK(got.bytes() == one_c, "%s scalar hypot", cft_format_name(F));
+
+#define STRIG1(name)                                                       \
+        got = ctx.name(x);                                                 \
+        cft_##name(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc);   \
+        CHECK(got.bytes() == one_c, "%s scalar " #name, cft_format_name(F))
+        STRIG1(sinpi);
+        STRIG1(cospi);
+        STRIG1(tanpi);
+        STRIG1(asin);
+        STRIG1(acos);
+        STRIG1(atan);
+        STRIG1(asinpi);
+        STRIG1(acospi);
+        STRIG1(atanpi);
+#undef STRIG1
+
+        got = ctx.atan2(x, y);
+        cft_atan2(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,
+                  &fc);
+        CHECK(got.bytes() == one_c, "%s scalar atan2", cft_format_name(F));
+
+        got = ctx.atan2pi(x, y);
+        cft_atan2pi(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(),
+                    1, &fc);
+        CHECK(got.bytes() == one_c, "%s scalar atan2pi", cft_format_name(F));
 
         got = ctx.sqrt(x);
         cft_sqrt(ref, F, CFT_RUP, a.data() + 9, one_c.data(), 1, &fc, nullptr);

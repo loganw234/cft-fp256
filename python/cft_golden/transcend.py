@@ -89,12 +89,18 @@ FN_LOG10 = "log10"
 FN_POW = "pow"
 FN_HYPOT = "hypot"
 
-#: Canonical order - the ABI's, the vector sets', the docs'.
+#: Canonical order - the ABI's, the vector sets', the docs'. Phase 1's
+#: nine first, then phase 2's eleven, and the order never changes: a
+#: vector set names its function, but transcend.h's enum, cft_tr_name
+#: and this tuple are one list in three languages.
 TRANSCEND_FNS = (FN_EXP, FN_EXPM1, FN_EXP2, FN_LOG, FN_LOG1P, FN_LOG2,
-                 FN_LOG10, FN_POW, FN_HYPOT)
+                 FN_LOG10, FN_POW, FN_HYPOT,
+                 "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
+                 "atan2", "asinpi", "acospi", "atanpi", "atan2pi")
 
 #: How many operands each reads.
-TRANSCEND_ARITY = {fn: (2 if fn in (FN_POW, FN_HYPOT) else 1)
+TRANSCEND_ARITY = {fn: (2 if fn in (FN_POW, FN_HYPOT, "atan2", "atan2pi")
+                        else 1)
                    for fn in TRANSCEND_FNS}
 
 
@@ -933,6 +939,574 @@ def _integrality(u):
     return e >= 0, e == 0
 
 
+# =====================================================================
+# Phase 2: the trigonometric functions that need NO reduction against pi
+#
+# sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+# and atan2Pi. What they have in common is the thing phase 1's closing
+# note said was missing: none of them needs pi to hundreds of thousands
+# of bits.
+#
+#   * For the Pi-variants of the forward functions the reduction is
+#     x mod 2, and x is a DYADIC RATIONAL, so the reduction is a mask
+#     on the encoding and is exact at every magnitude. sinPi(2^262000)
+#     is +0 by integer arithmetic, where sin(2^262000) would need the
+#     reduction constant to a quarter of a million bits.
+#   * The inverse functions take their argument in [-1, 1] (or a ratio),
+#     so there is nothing to reduce at all; pi enters only as a factor
+#     of the ANSWER, at one multiplication's worth of precision.
+#
+# Everything else is phase 1's: the same three-way split (exact cases,
+# neighbour rules, enclosure), the same working-precision schedule, the
+# same cap, the same loud refusal. docs/TRANSCENDENTALS.md carries the
+# proofs; what is stated here is what each line rests on.
+# =====================================================================
+
+FN_SINPI = "sinpi"
+FN_COSPI = "cospi"
+FN_TANPI = "tanpi"
+FN_ASIN = "asin"
+FN_ACOS = "acos"
+FN_ATAN = "atan"
+FN_ATAN2 = "atan2"
+FN_ASINPI = "asinpi"
+FN_ACOSPI = "acospi"
+FN_ATANPI = "atanpi"
+FN_ATAN2PI = "atan2pi"
+
+TRIG_FNS = (FN_SINPI, FN_COSPI, FN_TANPI, FN_ASIN, FN_ACOS, FN_ATAN,
+            FN_ATAN2, FN_ASINPI, FN_ACOSPI, FN_ATANPI, FN_ATAN2PI)
+
+
+# ---- the generalised neighbour witness -------------------------------
+
+def _round_dyadic_side(fmt, sign, m, e, away, rnd):
+    """Round a value known to lie strictly between the exact dyadic
+    V = m * 2^e and V +- 2^(g-2), where 2^g is the format's grid step
+    just above V - a quarter step, and half a step where V is a power
+    of two and the true value is below it.
+
+    _round_neighbour above needs V to be a REPRESENTABLE number, because
+    it starts from an encoding. That is not enough for atan2: the value
+    it must sit beside is the quotient y/x, which is exactly a dyadic
+    rational whenever x's odd significand divides y's - and which can
+    land on a subnormal MIDPOINT rather than on the grid (atan2(minSub,
+    2) does exactly that). A midpoint is a rounding boundary like any
+    other, and no working precision separates atan of it from it.
+
+    The witness goes an eighth of a grid step from V on the named side.
+    Every value strictly inside that quarter-step rounds identically
+    under all five attributes - to V's own rounding when V is a grid
+    point, and to the grid point on the witness's side when V is a
+    midpoint - so the witness answers for the true value, and round_pack
+    derives the flags.
+
+    `away` = 1 when the true value is farther from zero than V.
+    """
+    assert m > 0
+    STATS["neighbour"] += 1
+    vexp = e + m.bit_length() - 1
+    g = max(vexp - fmt.prec + 1, fmt.emin - fmt.man_w)   # log2 of the step
+    assert e >= g - 3, (m, e, g)         # V is on the eighth-step grid
+    n = m << (e - g + 3)
+    return round_pack(fmt, sign, n + 1 if away else n - 1, g - 3, rnd)
+
+
+def _dyadic_iv(m, e):
+    """A callable giving the exact dyadic m * 2^e as a degenerate
+    interval. Exactness matters for the same reason it does for an
+    operand: a reduced argument rounded on the way in makes every
+    result a correctly rounded answer to the wrong question."""
+    def build(iv):
+        v = iv.mpf(m)
+        return v * iv.mpf(1 << e) if e >= 0 else v / iv.mpf(1 << -e)
+    return build
+
+
+def _exact_quotient(ua, ub):
+    """|a| / |b| as an exact (m, e) with m ODD, or None when the
+    quotient is not a dyadic rational.
+
+    a and b are finite and nonzero. |a|/|b| = (Ma/Mb) * 2^(Ea-Eb) with
+    Ma and Mb odd, so it is dyadic exactly when Mb divides Ma - and the
+    quotient's odd part is then Ma/Mb, which is no wider than Ma. That
+    is why atan2's neighbour case never has to consider an odd part
+    wider than p bits."""
+    ma, ea = _dyadic(ua)
+    mb, eb = _dyadic(ub)
+    if ma % mb:
+        return None
+    return ma // mb, ea - eb
+
+
+# ---- the Pi-variant argument reduction, exact ------------------------
+
+def _pi_reduce(u):
+    """|x| mod 2 written as k/2 + S*2^e, with k in 0..4 and |S*2^e| <=
+    1/4. Exact, and a mask rather than a multiplication.
+
+    S == 0 exactly when |x| is a half-integer, which is where every
+    exact case of this family lives.
+    """
+    if u.e >= 1:                            # every bit is above 2^1
+        return 0, 0, 0                      # an even integer
+    k2 = -u.e
+    tm = u.m & ((1 << (k2 + 1)) - 1)        # |x| mod 2 == tm * 2^-k2
+    if k2 == 0:                             # an integer
+        return 2 * tm, 0, 0
+    d = k2 - 1
+    if d == 0:                              # a half-integer
+        return tm, 0, 0
+    k = (tm + (1 << (d - 1))) >> d          # nearest, ties downward
+    return k, tm - (k << d), u.e
+
+
+def _pi_trig_signs(k, s_int):
+    """(sin is negative, cos is negative) for sin(pi t) and cos(pi t)
+    at t = k/2 + s. Read off the quadrant, exactly; no evaluation can
+    decide the sign of a value it is about to round."""
+    km = k & 3
+    if km == 0:
+        return s_int < 0, False
+    if km == 1:
+        return False, s_int > 0
+    if km == 2:
+        return s_int > 0, True
+    return True, s_int < 0
+
+
+def _sinpi_cospi_tanpi(fmt, xa, rnd, which):
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        # sin/cos/tan of an infinity has no limit: 9.2.1 makes all three
+        # invalid, and MPFR 4.2 agrees.
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        if which == "cos":
+            return one_bits(fmt, 0), 0                  # cosPi(+-0) = 1
+        return zero_bits(fmt, u.sign), 0                # sinPi/tanPi
+
+    m_odd, e_odd = _dyadic(u)
+
+    # ---- the exact cases, and Niven's theorem says they are all of
+    # them. For a rational r, sin(pi r) is rational only when it is 0,
+    # +-1/2 or +-1, and tan(pi r) only when it is 0 or +-1. A dyadic r
+    # can never give +-1/2 (that needs r = 1/6 + n/1 and friends), so:
+    #
+    #   sinPi, cosPi   exact exactly at the HALF-integers
+    #   tanPi          exact exactly at the QUARTER-integers
+    #                  (with the half-integers a pole, not a value)
+    #
+    # and everything else is irrational, hence not a rounding boundary,
+    # hence decided by the enclosure in finite time.
+    if e_odd >= 0:                                      # an integer n
+        STATS["exact"] += 1
+        odd_n = (e_odd == 0)
+        if which == "sin":
+            return zero_bits(fmt, u.sign), 0            # sign of n
+        if which == "cos":
+            return one_bits(fmt, 1 if odd_n else 0), 0  # (-1)^n
+        return zero_bits(fmt, u.sign ^ (1 if odd_n else 0)), 0
+    if e_odd == -1:                                     # n + 1/2
+        neg = u.sign ^ ((m_odd >> 1) & 1)
+        if which == "sin":
+            STATS["exact"] += 1
+            return one_bits(fmt, neg), 0                # +-1
+        if which == "cos":
+            STATS["exact"] += 1
+            return zero_bits(fmt, 0), 0                 # +0, both signs
+        # tanPi at a pole. 754-2019 7.3 raises divideByZero where an
+        # exact infinity comes from finite operands, and the sign is
+        # sinPi's, because cosPi there is +0. MPFR 4.2.2 delivers the
+        # same rows: tanpi(1/2) = +inf, tanpi(3/2) = -inf, with
+        # divide-by-zero raised.
+        return inf_bits(fmt, neg), FLAG_DIVZERO
+    if e_odd == -2 and which == "tan":                  # n/4, n odd
+        STATS["exact"] += 1
+        return one_bits(fmt, u.sign ^ ((m_odd >> 1) & 1)), 0
+
+    k, s_int, s_exp = _pi_reduce(u)
+    assert s_int != 0, "a half-integer reached the enclosure"
+    sin_neg, cos_neg = _pi_trig_signs(k, s_int)
+    if which == "sin":
+        sign = u.sign ^ (1 if sin_neg else 0)           # odd function
+    elif which == "cos":
+        sign = 1 if cos_neg else 0                      # even function
+    else:
+        sign = u.sign ^ (1 if sin_neg else 0) ^ (1 if cos_neg else 0)
+
+    # |sin(pi t)| is sin(pi|s|) when k is even and cos(pi|s|) when it is
+    # odd; |cos(pi t)| is the other way round.
+    k_even = (k % 2) == 0
+    magnitude_is_cos = (k_even and which == "cos") or \
+                       (not k_even and which == "sin")
+
+    s_abs = abs(s_int)
+    s_vexp = s_exp + s_abs.bit_length() - 1
+
+    # The one neighbour rule this family needs. cos(u) < 1 for u != 0
+    # and 1 - cos(u) <= u^2/2, so with u = pi|s| the result sits below 1
+    # by less than 4.94 s^2. Half the gap below 1 is 2^-(p+1), and
+    # 4.94 * 2^(2v+2) < 2^-(p+1) reduces to 2v + p + 6 <= 0. No working
+    # precision separates those from 1; the SIDE does, and it is always
+    # downward.
+    if magnitude_is_cos and 2 * s_vexp + p + 6 <= 0:
+        return _round_neighbour(fmt, one_bits(fmt, sign), away=0, rnd=rnd)
+
+    val = _dyadic_iv(s_abs, s_exp)
+
+    def evaluate(iv):
+        v = iv.pi * val(iv)
+        if which == "tan":
+            t = iv.tan(v)
+            return t if k_even else iv.mpf(1) / t
+        return iv.cos(v) if magnitude_is_cos else iv.sin(v)
+
+    return _ziv(fmt, sign, evaluate, rnd)
+
+
+def sinpi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """sin(pi x). Exact at the half-integers and nowhere else: sinPi(n)
+    is a zero with the sign of n, sinPi(n + 1/2) is +-1. sinPi(+-inf) is
+    invalid."""
+    return _sinpi_cospi_tanpi(fmt, xa, rnd, "sin")
+
+
+def cospi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """cos(pi x). cosPi(+-0) is 1, cosPi(n) is (-1)^n, and
+    cosPi(n + 1/2) is +0 for every n and both signs of the argument -
+    the function is even, so the zero cannot carry a sign."""
+    return _sinpi_cospi_tanpi(fmt, xa, rnd, "cos")
+
+
+def tanpi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """tan(pi x), which is sinPi/cosPi in every respect including the
+    signs: tanPi(1) is -0, because sinPi(1) is +0 and cosPi(1) is -1.
+    The half-integers are poles - +-infinity with divideByZero - and
+    the quarter-integers are exactly +-1.
+
+    tanPi cannot overflow at any format on this ladder. A representable
+    x nearest a pole is at least 2^-p from it (x in [1/2, 1) has that
+    ulp, and no binade does better), so |tanPi| <= 1/(pi 2^-p) < 2^p,
+    which is far inside emax at all four rungs."""
+    return _sinpi_cospi_tanpi(fmt, xa, rnd, "tan")
+
+
+# ---- the inverse functions -------------------------------------------
+#
+# EXACTNESS, and why the enumerations below are complete.
+#
+# For the non-Pi inverses the answer is Hermite-Lindemann. If theta is a
+# nonzero algebraic number then e^(i theta) is transcendental; but
+# sin theta = x algebraic makes z = e^(i theta) a root of
+# z^2 - 2ix z - 1, hence algebraic. So asin of a dyadic rational is
+# either 0 or transcendental, and the same argument runs for cos and
+# tan. asin, atan and atan2 are therefore exact only where the result
+# is a ZERO, and acos only at acos(1) = +0.
+#
+# For the Pi-variants it is Niven. asinPi(x) = r means x = sin(pi r);
+# r dyadic and x rational force sin(pi r) into {0, +-1/2, +-1}, and of
+# the r that produce those only 0 and +-1/2 are themselves dyadic. So
+# the whole table is
+#
+#   asinPi(+-0) = +-0        asinPi(+-1) = +-1/2
+#   acosPi(1)   = +0         acosPi(+-0) = 1/2      acosPi(-1) = 1
+#   atanPi(+-0) = +-0        atanPi(+-1) = +-1/4    atanPi(+-inf) = +-1/2
+#   atan2Pi on the axes and the diagonals: 0, +-1/4, +-1/2, +-3/4, +-1
+#
+# and asinPi(1/2) = 1/6, rational but NOT dyadic, is not an exact case
+# and not a rounding boundary either - which is why the loop terminates
+# on it rather than hanging.
+
+
+def _asin_acos_common(fmt, u):
+    """(|x| as an exact iv builder, sqrt((1-|x|)(1+|x|)) builder).
+
+    The product form is the whole trick: for |x| near 1 the factor
+    1 - |x| is EXACT (Sterbenz), so the cancellation amplifies an error
+    of zero, where 1 - x^2 formed directly would lose every bit the
+    answer has. Phase 1's log(m') uses the same shape for the same
+    reason."""
+    ax = _dyadic_iv(u.m, u.e)
+
+    def root(iv):
+        x = ax(iv)
+        one = iv.mpf(1)
+        return iv.sqrt((one - x) * (one + x))
+
+    return ax, root
+
+
+def _asin_family(fmt, xa, rnd, over_pi):
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return zero_bits(fmt, u.sign), 0            # asin(+-0) = +-0
+    if _mag_gt_one(u):
+        return qnan_bits(fmt), FLAG_INVALID         # |x| > 1
+    if _is_one_mag(u):
+        STATS["exact"] += 1
+        if over_pi:
+            return _round_exact(fmt, u.sign, 1, -1, rnd)   # +-1/2, exact
+        return _ziv(fmt, u.sign, lambda iv: iv.pi / 2, rnd)  # +-pi/2
+
+    ex = _vexp(u)
+    if not over_pi and 2 * ex + p + 2 <= 0:
+        # asin(x) - x = x^3/6 + 3x^5/40 + ... > 0 for x in (0, 1), so
+        # the true value is always on the far side of x from zero, and
+        # |asin(x) - x| <= 0.2|x|^3 < 2^(3e+0.68) is inside half the gap
+        # there once 2e + p + 2 <= 0. asinPi rides no such rule: its
+        # answer is about x/pi, which is not next to anything.
+        return _round_dyadic_side(fmt, u.sign, u.m, u.e, away=1, rnd=rnd)
+
+    ax, root = _asin_acos_common(fmt, u)
+
+    def evaluate(iv):
+        a = iv.atan2(ax(iv), root(iv))
+        return a / iv.pi if over_pi else a
+
+    return _ziv(fmt, u.sign, evaluate, rnd)
+
+
+def asin(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """asin(x) in radians. Exact only at +-0; |x| > 1 is invalid."""
+    return _asin_family(fmt, xa, rnd, over_pi=False)
+
+
+def asinpi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """asin(x)/pi. Exact at +-0 and at +-1, where it is +-1/2."""
+    return _asin_family(fmt, xa, rnd, over_pi=True)
+
+
+def _acos_family(fmt, xa, rnd, over_pi):
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return qnan_bits(fmt), FLAG_INVALID
+    if _mag_gt_one(u):
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == ZERO:
+        if over_pi:
+            STATS["exact"] += 1
+            return _round_exact(fmt, 0, 1, -1, rnd)        # 1/2, exact
+        return _ziv(fmt, 0, lambda iv: iv.pi / 2, rnd)     # pi/2
+    if _is_one_mag(u):
+        STATS["exact"] += 1
+        if not u.sign:
+            return zero_bits(fmt, 0), 0                    # acos(1) = +0
+        if over_pi:
+            return one_bits(fmt, 0), 0                     # acosPi(-1) = 1
+        return _ziv(fmt, 0, lambda iv: iv.pi, rnd)         # acos(-1) = pi
+
+    ex = _vexp(u)
+    if over_pi and ex <= -(p + 2):
+        # acosPi(x) = 1/2 - asin(x)/pi, and |asin(x)/pi| <= 0.33|x| is
+        # inside half the gap next to 1/2 once |x| <= 2^-(p+2). The side
+        # is the operand's: a positive x pulls the answer below 1/2.
+        return _round_dyadic_side(fmt, 0, 1, -1,
+                                  away=(1 if u.sign else 0), rnd=rnd)
+
+    ax, root = _asin_acos_common(fmt, u)
+
+    def evaluate(iv):
+        # atan2(sqrt(1-x^2), x) rather than pi/2 - asin(x): for x just
+        # below 1 the difference form cancels away the whole answer,
+        # and this one is a small angle computed as a small angle.
+        a = iv.atan2(root(iv), _dyadic_iv(u.m if not u.sign else -u.m,
+                                          u.e)(iv))
+        return a / iv.pi if over_pi else a
+
+    return _ziv(fmt, 0, evaluate, rnd)
+
+
+def acos(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """acos(x) in radians, in [0, pi]. Exact only at acos(1) = +0."""
+    return _acos_family(fmt, xa, rnd, over_pi=False)
+
+
+def acospi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """acos(x)/pi, in [0, 1]. Exact at 1 (+0), at +-0 (1/2) and at
+    -1 (1)."""
+    return _acos_family(fmt, xa, rnd, over_pi=True)
+
+
+def _atan_family(fmt, xa, rnd, over_pi):
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return zero_bits(fmt, u.sign), 0
+    if u.kind == INF:
+        if over_pi:
+            STATS["exact"] += 1
+            return _round_exact(fmt, u.sign, 1, -1, rnd)      # +-1/2
+        return _ziv(fmt, u.sign, lambda iv: iv.pi / 2, rnd)   # +-pi/2
+    if over_pi and _is_one_mag(u):
+        STATS["exact"] += 1
+        return _round_exact(fmt, u.sign, 1, -2, rnd)          # +-1/4
+
+    ex = _vexp(u)
+    if not over_pi and 2 * ex + p + 3 <= 0:
+        # atan(x) - x = -x^3/3 + x^5/5 - ... is negative for x in (0,1)
+        # and no bigger than x^3/3, so the true value lies on the ZERO
+        # side of x - the opposite side from asin's, which is what makes
+        # a pair of directed roundings tell the two apart at all.
+        return _round_dyadic_side(fmt, u.sign, u.m, u.e, away=0, rnd=rnd)
+    if over_pi and ex >= p + 1:
+        # atanPi(x) = 1/2 - atan(1/x)/pi and atan(1/x) <= 1/|x|, so once
+        # |x| >= 2^(p+1) the answer is inside half the gap below 1/2.
+        return _round_dyadic_side(fmt, u.sign, 1, -1, away=0, rnd=rnd)
+
+    ax = _dyadic_iv(u.m, u.e)
+
+    def evaluate(iv):
+        a = iv.atan2(ax(iv), iv.mpf(1))
+        return a / iv.pi if over_pi else a
+
+    return _ziv(fmt, u.sign, evaluate, rnd)
+
+
+def atan(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """atan(x) in radians. Exact only at +-0; atan(+-inf) is +-pi/2."""
+    return _atan_family(fmt, xa, rnd, over_pi=False)
+
+
+def atanpi(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """atan(x)/pi. Exact at +-0, at +-1 (+-1/4) and at +-inf (+-1/2)."""
+    return _atan_family(fmt, xa, rnd, over_pi=True)
+
+
+# ---- atan2, and the whole of its 9.2.1 table -------------------------
+#
+# The rows below are the standard's, and they are the ones an
+# implementation is most often wrong about. atan2(+-0, -0) is +-pi -
+# NOT +-0 - because the minus zero denominator names the negative real
+# axis; atan2Pi(+-0, -0) is +-1 and is EXACT, where its radian twin is
+# an inexact rounding of pi. Both were confirmed against MPFR 4.2.2
+# before they were written down.
+
+
+def _atan2_axis(fmt, quarters, sign, rnd, over_pi):
+    """Deliver a result that is an exact multiple of pi/4.
+
+    In the Pi-variant every one of them - 0, 1/4, 1/2, 3/4, 1 - is a
+    dyadic rational the format holds exactly, so the answer is exact and
+    raises nothing. In radians every one but zero is a rounding of an
+    irrational number, so the answer is inexact. That asymmetry is not
+    an implementation detail; it is the reason atan2Pi exists."""
+    if quarters == 0:
+        STATS["exact"] += 1
+        return zero_bits(fmt, sign), 0
+    if over_pi:
+        STATS["exact"] += 1
+        m, e = _odd_part(quarters)
+        return _round_exact(fmt, sign, m, e - 2, rnd)
+    return _ziv(fmt, sign, lambda iv: iv.pi * quarters / 4, rnd)
+
+
+def _atan2_family(fmt, ya, xa, rnd, over_pi):
+    uy, ux = unpack(fmt, ya), unpack(fmt, xa)
+    p = fmt.prec
+
+    if _has_snan(uy, ux):
+        return qnan_bits(fmt), FLAG_INVALID
+    if uy.kind == NAN or ux.kind == NAN:
+        return qnan_bits(fmt), 0
+
+    sign = uy.sign
+    if uy.kind == INF:
+        if ux.kind == INF:
+            return _atan2_axis(fmt, 1 if not ux.sign else 3, sign, rnd,
+                               over_pi)
+        return _atan2_axis(fmt, 2, sign, rnd, over_pi)      # +-pi/2
+    if ux.kind == INF:
+        # a finite y against an infinite x: +-0 or +-pi
+        return _atan2_axis(fmt, 4 if ux.sign else 0, sign, rnd, over_pi)
+    if uy.kind == ZERO:
+        # atan2(+-0, x>0) and atan2(+-0, +0) are +-0; atan2(+-0, x<0)
+        # and atan2(+-0, -0) are +-pi. The SIGN of a zero x decides,
+        # which is the row the whole table is remembered for.
+        return _atan2_axis(fmt, 4 if ux.sign else 0, sign, rnd, over_pi)
+    if ux.kind == ZERO:
+        return _atan2_axis(fmt, 2, sign, rnd, over_pi)      # +-pi/2
+
+    # Both finite and nonzero. The diagonals |y| == |x| are the last
+    # exact rows: atan2Pi is +-1/4 there for a positive x and +-3/4 for
+    # a negative one, and Niven says there are no others - a dyadic
+    # multiple of pi has a rational tangent only at 0, +-1 and the pole.
+    ey, ex = _vexp(uy), _vexp(ux)
+    if (uy.m << max(0, uy.e - ux.e)) == (ux.m << max(0, ux.e - uy.e)):
+        return _atan2_axis(fmt, 1 if not ux.sign else 3, sign, rnd, over_pi)
+
+    if not ux.sign and not over_pi:
+        # atan2(y, x>0) is atan(y/x), so when that quotient is itself a
+        # dyadic rational sitting on the format's fine grid - which it
+        # is whenever x's odd significand divides y's - the answer is a
+        # hair below it and no precision can say how far. atan2(minSub,
+        # 2) lands on a subnormal MIDPOINT this way.
+        q = _exact_quotient(uy, ux)
+        if q is not None:
+            qm, qe = q
+            qv = qe + qm.bit_length() - 1
+            g = max(qv - p + 1, fmt.emin - fmt.man_w)
+            if 2 * qv + p + 3 <= 0 and qe >= g - 1:
+                return _round_dyadic_side(fmt, sign, qm, qe, away=0, rnd=rnd)
+
+    if over_pi:
+        # Near +-1 (a tiny quotient against a negative x) and near +-1/2
+        # (a dominant y), the answer is inside half a gap of a value the
+        # format holds. In radians the same corners sit next to pi and
+        # pi/2, which the format does NOT hold, so no rule is needed
+        # there - the ordinary enclosure resolves them.
+        if ux.sign and ey - ex <= -(p + 1):
+            return _round_dyadic_side(fmt, sign, 1, 0, away=0, rnd=rnd)
+        if ex - ey <= -(p + 2):
+            return _round_dyadic_side(fmt, sign, 1, -1,
+                                      away=(1 if ux.sign else 0), rnd=rnd)
+
+    # |y| > 0 makes atan2(|y|, x) land in (0, pi) whatever x's sign is,
+    # so the interval library returns the MAGNITUDE directly and the
+    # sign stays where it belongs: decided exactly, above.
+    ay = _dyadic_iv(uy.m, uy.e)
+    sx = _dyadic_iv(-ux.m if ux.sign else ux.m, ux.e)
+
+    def evaluate(iv):
+        t = iv.atan2(ay(iv), sx(iv))
+        return t / iv.pi if over_pi else t
+
+    return _ziv(fmt, sign, evaluate, rnd)
+
+
+def atan2(fmt: FpFormat, ya: int, xa: int, rnd: int = RND_RNE):
+    """atan2(y, x) in radians, y first as C has it. The full 9.2.1
+    table, including atan2(+-0, -0) = +-pi."""
+    return _atan2_family(fmt, ya, xa, rnd, over_pi=False)
+
+
+def atan2pi(fmt: FpFormat, ya: int, xa: int, rnd: int = RND_RNE):
+    """atan2(y, x)/pi. Exact on the axes and the diagonals - 0, +-1/4,
+    +-1/2, +-3/4, +-1 - and nowhere else, which is a far larger exact
+    table than the radian form has."""
+    return _atan2_family(fmt, ya, xa, rnd, over_pi=True)
+
+
 # ---- dispatch --------------------------------------------------------
 
 TRANSCEND_IMPL = {
@@ -945,6 +1519,17 @@ TRANSCEND_IMPL = {
     FN_LOG10: log10,
     FN_POW: pow,
     FN_HYPOT: hypot,
+    FN_SINPI: sinpi,
+    FN_COSPI: cospi,
+    FN_TANPI: tanpi,
+    FN_ASIN: asin,
+    FN_ACOS: acos,
+    FN_ATAN: atan,
+    FN_ATAN2: atan2,
+    FN_ASINPI: asinpi,
+    FN_ACOSPI: acospi,
+    FN_ATANPI: atanpi,
+    FN_ATAN2PI: atan2pi,
 }
 
 
