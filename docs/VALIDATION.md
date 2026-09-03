@@ -1615,3 +1615,133 @@ and the eleven have no JavaScript surface at all. docs/COMPATIBILITY.md
 records that per row rather than in general. Fortran, Julia, Go and R
 were not re-run: this host carries none of those four toolchains, so
 those rows stand on their dated runs and on nothing newer.
+
+## 2026-09-03 - the JavaScript surface reaches ABI 0.4
+
+The eleven phase-2 trigonometrics landed in libcft an hour before this
+change, and the committed wasm artifacts were still built from the 0.3
+sources: the module reported 0.3, exported none of the eleven, and the
+`cft_conformance` inside it refused the regenerated vector sets on the
+function name. The docs said so - docs/COMPATIBILITY.md's 0.4 ledger
+carried two rows reading "no ABI 0.4 surface" - which was honest and
+was also the third time that gap had opened. It closed here, in the
+same commit as the rebuild, which is the part worth recording: a
+rebuild alone would have answered `cftw_abi_version()` with 4 while
+exporting nothing 0.4 names, and that is precisely what 0.2 and 0.3
+each spent a day doing.
+
+**What was added.** Eleven `cftw_*` wrappers in
+`bindings/wasm/wasm_api.c`, one per declaration in `host/include/cft.h`
+and in cft.h's order - `cftw_sinpi`, `cftw_cospi`, `cftw_tanpi`,
+`cftw_asin`, `cftw_acos`, `cftw_atan`, `cftw_asinpi`, `cftw_acospi`,
+`cftw_atanpi`, then `cftw_atan2` and `cftw_atan2pi`, which read y
+first. None carries a `bus_out`: these are host operations, they issue
+no device pass, and the contract gives them no such parameter. Eleven
+rows in the page's compute panel and eleven entries in its cwrap table;
+the drop zone needed nothing, having accepted the twenty transcendental
+set names since that morning. `bindings/node` carries all eleven on all
+three layers - the raw table, `Context`/`Float` scalars, and `map()`
+over an array, which dispatches by arity and so needed only the name
+lists - at package version 0.4.0.
+
+**The artifacts.** Rebuilt with `bash bindings/wasm/build.sh` against
+the pinned emsdk 6.0.9 image (tag and digest both), node 22.19.0 on
+Windows 11:
+
+| | |
+|---|---|
+| module | **98,392 bytes**, sha256 `ee66812e4bd17de7dcf6b5a63f652b803f196e1f1afd0bf8e572de6c86f2a68f` |
+| page | `conformance.html` 1,144,530 bytes, sha256 `b9ddcecc2dddf342faf77a1014b525f2283c07d3439ff1d39e072c5b17fc5254` |
+| exports | **58 `cftw_*`**, up from 47 |
+| `cftw_abi_version()` | 4 = ABI 0.4, matching `cft.h` |
+| node loader | byte-identical to the page's module, checked rather than assumed |
+
+Three container builds of the tree: two back to back, byte-identical,
+and a third after the negative control below was reverted, which is the
+stronger statement because it says the tree round-tripped.
+
+**Measured, with `make vectors` from the repo root (40 sets, 236,000
+opcode cases + 129,845 transcendental):**
+
+| check | result |
+|---|---|
+| `node bindings/wasm/verify.mjs` | ABI 0.4 and 58 exports from the committed page; **365,845 cases over 40 sets** through `cft_conformance`; **129,845 more through the twenty wrappers themselves**, per case then per family as arrays; zero mismatches either way |
+| `node bindings/node/test.mjs` | **74 passed, 0 failed** (57 before) |
+| `node bindings/node/conformance.mjs` | 236,000 opcode cases in 1.7 s, then **129,845 transcendental cases in 108.2 s** through this package's own `Context` methods; **365,845 over 40 sets in all** |
+
+The seventeen new Node tests are what a vector set cannot express:
+`sinPi`'s zeros carrying the ARGUMENT's sign (`sinPi(1) = +0`,
+`sinPi(-1) = -0`), `cosPi`'s unsigned half-integer zero, `tanPi(1) =
+-0` and the half-integer pole signalling divideByZero rather than
+overflow, the Pi-forms' larger exact table including `atanPi(±inf) =
+±1/2` raising nothing at all, the inverses exact only at their zeros,
+`atan2(±0, -0) = ±pi` inexact against `atan2Pi(±0, -0) = ±1` exact,
+the operand order, a quiet NaN losing to `atan2`'s table where it beats
+`pow`'s, invalid for `|x| > 1` and for an infinity in the forward set,
+the signaling NaN across all eleven, `sinPi(2^80)` and
+`sinPi(maxFinite)` exact by a reduction that is a mask on the encoding,
+all eleven at all four formats, the `Float` methods, and
+batch-equals-scalar over 129 elements for each.
+
+One of those deserves its own line, because it is the case that looks
+exact and is not. `asinPi(1/2)` is exactly 1/6 - rational, by Niven,
+but NOT a dyadic rational, so it rounds. The test checks that it is
+1/6 by DERIVING 1/6 from `cft_div(1, 6)` in the same attribute rather
+than transcribing a constant, and it does so in all five attributes:
+two correctly rounded results of one real number are one encoding, so
+agreement in all five is a much stronger statement than agreement in
+roundTiesToEven. `acosPi(1/2) = 1/3` is checked the same way.
+
+**Negative control**, run and reverted. The control moved with the
+surface: at ABI 0.3 it was `cftw_pow`, because pow is not symmetric;
+here it is **`cftw_atan2`**, which is sharper for the same reason and
+one more - atan2 takes y first, so swapping its two operand pointers
+returns a plausible number for *every* input rather than failing loudly
+anywhere. Swapped, rebuilt, and caught by name in three places:
+
+- `verify.mjs` step 5 fails **all twenty** transcendental sets, first
+  at `fp32-transcend.jsonl:4072` - `atan2(+0, -0)` comes back
+  `0x80000000` where the vectors say `0x40490fdb` with inexact, which
+  is exactly the clause 9.2.1 row cft.h says implementations most often
+  miss;
+- `bindings/node/test.mjs` fails 2 of 74 by name (`atan2(+0, -0) is pi
+  and inexact`, `atan2(-0, +1) is -0`);
+- `bindings/node/conformance.mjs` fails all twenty transcendental sets.
+
+And, the part that is the whole reason those checks exist:
+`verify.mjs` **step 4 stayed green at 365,845 cases** throughout, and
+so did `conformance.mjs`'s opcode pass. `cft_conformance` dispatches
+all twenty transcendentals internally, in C, and never touches a
+wrapper - so the internal replay cannot see a broken JavaScript
+surface, which is the half-step's failure mode reproduced on purpose.
+Reverted, rebuilt, and the artifacts hash to what they hashed before.
+
+Standardized run, `bash verify/run.sh --only vectors,node,wasm` on a
+clean tree at 32ece03, run id 20260903-043340-32ece03:
+
+    vectors      ok      14s
+    node        ok     367s
+    wasm        ok     213s
+
+    VERDICT: PASS, nothing skipped
+
+The runner generates its own vectors at its own parameters, which are
+larger than the Makefile's, so its counts are its own and not the ones
+above: 392,000 opcode cases over twenty sets plus the same 129,845
+transcendental cases, **521,845 over 40 sets**, replayed clean by both
+stages, with `test.mjs`'s 74 tests inside the node stage.
+
+**What did NOT run, and why.** The page was not opened in a browser,
+though its markup changed - eleven rows in the compute panel's table,
+eleven entries in the cwrap table. The 2026-09-03 morning rebuild was
+watched in Chromium precisely because it could no longer lean on an
+unchanged template; this one has no such watching behind it, and the
+claim it makes instead is narrower and stated as such in
+bindings/wasm/README.md: `verify.mjs` step 5 calls the same eleven
+wrappers the panel calls, on the same operands, comparing the same
+encodings and flags. What is unwitnessed is the markup between a click
+and those calls. Also not run: the RTL, formal and container simulation
+stages, the libcft/transcend/mpfr stages and the language legs - this
+change touches no C source, no header, no generator and no golden
+model, and `git diff` against the phase-2 merge is confined to
+`bindings/` and the docs.
