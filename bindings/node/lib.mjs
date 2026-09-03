@@ -81,6 +81,16 @@ export const CLASS_NAMES = [
   "+zero", "+subnormal", "+normal", "+inf", "snan", "qnan",
 ];
 
+/** The phase-1 transcendentals (ABI 0.3), by arity. These are not
+ *  opcodes - cft.h gives each its own entry point, because correct
+ *  rounding here is a library algorithm rather than a tile pass - so
+ *  they are addressed by name at every layer: the cftw_* export, the
+ *  "fn" field in the transcendental vector sets, the golden model's
+ *  dispatch and this table all use the same spelling. */
+export const TRANSCEND_UNARY = ["exp", "expm1", "exp2", "log", "log1p",
+                                "log2", "log10"];
+export const TRANSCEND_BINARY = ["pow", "hypot"];
+
 // ---------------------------------------------------------------------
 // The module
 // ---------------------------------------------------------------------
@@ -159,6 +169,20 @@ async function instantiate() {
 
     conformance:  M.cwrap("cftw_conformance", n, [n,s,n,n,n,n]),
   };
+
+  // ABI 0.3, the phase-1 transcendentals. Named rather than numbered:
+  // these are library entry points, not opcodes, so there is no field
+  // to mistranscribe and audit() has nothing to ask the module about
+  // them - a missing export shows up as a missing cwrap right here,
+  // which is why the loop is over the contract's own name lists.
+  //
+  // The argument list ends at the flag word for all nine. That is the
+  // contract's shape, not an oversight: these issue no device pass, so
+  // there is no bus word (cft.h). Seven are unary, two take b.
+  for (const fn of TRANSCEND_UNARY)
+    C[fn] = M.cwrap(`cftw_${fn}`, n, [n,n,n,n,n,n,n]);
+  for (const fn of TRANSCEND_BINARY)
+    C[fn] = M.cwrap(`cftw_${fn}`, n, [n,n,n,n,n,n,n,n]);
 
   audit(M, C);
   return { M, C };

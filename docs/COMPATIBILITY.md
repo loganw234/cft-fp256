@@ -48,8 +48,8 @@ output lives in its own header and is compared by eye.
 | Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18); 2026-09-02 as runner stage `lang-go` on the desktop's WSL, CI, and Windows (go 1.26.4 from pacman, GOROOT carried by the runner) | static-links libcft.a as a direct linker input |
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8); 2026-09-02 as runner stage `lang-csharp` on Windows, the desktop's WSL (dotnet 8.0.130) and CI | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL, and on Windows (R 4.6.1 with Rtools45, whose gcc 14.3 builds the shim) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
-| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm 66 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt; 38 `cftw_*` exports - the whole ABI 0.2 surface; the module is built from the 0.3 sources and reports 0.3, but the nine transcendentals have no `cftw_*` wrapper yet | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged; 2026-09-02 as runner stage `wasm` on Windows and CI, 392,000 cases | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
-| Node / JavaScript | `bindings/node/` | full package: the 38 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, the clause-5 surface, exact-decimal I/O | Windows 2026-09-02, node 22.19.0: 43 tests; 236,000-case vectors replay clean through the page's own module; decimal parsing checked against V8's strtod; 2026-09-02 as runner stage `node` on Windows and CI - the 392,000-case replay takes 4 s, the 43 unit tests 272 s on the Windows host and 126 s on ubuntu, a gap measured and not yet explained | loads the SAME wasm module as the browser page (sha256 checked, not assumed). Encodings are `Uint8Array`/`BigInt`, never a JS `number` - see Drop-ins below for why it is a drop-in for nothing |
+| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1.1 MB, wasm 89 KB) with drag-drop full-set replay - the twenty opcode sets and, since 2026-09-03, the twenty transcendental ones - and a compute panel covering `cft_run`'s opcodes, composed div/sqrt and the nine transcendentals; 47 `cftw_*` exports - the whole ABI 0.3 surface, wrappers included | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged; 2026-09-02 as runner stage `wasm` on Windows and CI, 392,000 cases. Rebuilt again 2026-09-03 with the nine wrappers (module 88,875 bytes, sha256 `6ff4129e03d43682…`, three clean container builds byte-identical): `verify.mjs` gets ABI 0.3 and 47 exports from the committed page, replays **300,325 cases over 40 sets** through `cft_conformance` and drives **64,325 more through the nine wrappers themselves** - the check that fails when a wrapper is missing or wrong, shown failing with `cftw_pow`'s operands swapped while the internal replay stayed green. **Re-opened in a browser this time** (Chromium 148, served over loopback since `file://` was unreachable), because the template did change: identity line ABI 0.3, embedded sample 4,015 cases green, a drop of four transcendental sets + one opcode set clean at 32,465 cases with a misnamed file still refused, and the panel's new controls computing `exp(1)`, `log(+0)` = -inf/divideByZero, `pow(2,3)`=8 vs `pow(3,2)`=9 and `log2(2^10)`=10 exactly at binary256; the negative-control page failed red in the same browser | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
+| Node / JavaScript | `bindings/node/` (package 0.3.1) | full package: the 47 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, the clause-5 surface, the nine transcendentals on all three layers, exact-decimal I/O | Windows 2026-09-02, node 22.19.0: 43 tests; 236,000-case vectors replay clean through the page's own module; decimal parsing checked against V8's strtod; 2026-09-02 as runner stage `node` on Windows and CI - the 392,000-case replay takes 4 s, the 43 unit tests 272 s on the Windows host and 126 s on ubuntu, a gap measured and not yet explained. 2026-09-03 with the nine: **57 tests**, and `conformance.mjs` now **300,325 cases over 40 sets** - 236,000 through `cft_conformance` in 1.6 s, then 64,325 transcendental cases in 60.9 s driven through this package's own `Context` methods, per case and then as arrays. Negative control run and reverted: `cftw_pow`'s operands swapped fails 6 tests by name and all twenty transcendental sets, while the `cft_conformance` pass stays green | loads the SAME wasm module as the browser page (sha256 checked, not assumed). Encodings are `Uint8Array`/`BigInt`, never a JS `number` - see Drop-ins below for why it is a drop-in for nothing |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
@@ -198,19 +198,34 @@ because the honest answer differs:
 | C++ (`cft.hpp`) | complete, all three layers, and `cpp_api_test` issues every one twice - through the wrapper and through `cft.h` - comparing encodings and flags: 3,267 checks at C++17 and C++20 |
 | Python (`cftmpfr`) | complete on `Context` and in `batch`, with 268 tests including bit-for-bit agreement with gmpy2's IEEE emulation at every precision and every attribute MPFR has |
 | conformance vectors | complete: 20 new sets, `<fmt>-transcend[-<rnd>].jsonl`, 64,325 cases, replayed by `cft_conformance` |
-| Node (`bindings/node`) | module rebuilt from the 0.3 sources, so `cft_conformance` inside it replays transcendental sets; `wasm_api.c` has no `cftw_*` wrapper for any of the nine, so no JavaScript caller can invoke one |
-| Browser / WASM page | rebuilt the same way and with the same caveat: the replay understands the new sets, the compute panel has no control for them, and the embedded sample stays the twenty opcode sets its sampling rule covers |
+| Node (`bindings/node`) | complete on all three layers (package 0.3.1): the nine `cftw_*` exports, `Context`/`Float` scalars, `map()` over an array. 57 tests, and `conformance.mjs` drives all 64,325 transcendental cases through the package's own methods on top of the 236,000 through `cft_conformance` - 300,325 over 40 sets |
+| Browser / WASM page | complete: `wasm_api.c` carries the nine (47 `cftw_*` exports), the compute panel has a control for each, and the drop zone accepts the twenty transcendental sets. `verify.mjs` replays 300,325 cases over 40 sets and drives 64,325 through the wrappers themselves. The embedded sample stays the twenty opcode sets its sampling rule covers - the containerized build has no mpmath and cannot generate the others |
 
-The last two rows are the honest half-step. `bash
-bindings/wasm/build.sh` rebuilt both artifacts on 2026-09-03 against
+The last two rows were the honest half-step for part of 2026-09-03,
+and this is what that meant and how it closed. `bash
+bindings/wasm/build.sh` rebuilt both artifacts that morning against
 the pinned emsdk, and because that build asks `host/Makefile` what it
 compiles rather than carrying a list, `mpfloat.c` and `transcend.c`
-came along on their own: the module reports ABI 0.3 and the
-`cft_conformance` inside it understands the new vector sets. What did
-NOT happen is a `cftw_*` wrapper or a page control for any of the nine,
-so no JavaScript caller can invoke one and no test on either surface
-drives one. A row that said "ABI 0.3" and stopped there would be true
-and misleading.
+came along on their own: the module reported ABI 0.3 and the
+`cft_conformance` inside it understood the new vector sets. What had
+NOT happened was a `cftw_*` wrapper or a page control for any of the
+nine, so no JavaScript caller could invoke one and no test on either
+surface drove one. A row that said "ABI 0.3" and stopped there would
+have been true and misleading.
+
+Closed the same day, and the closing is what the two rows above now
+record: nine wrappers in `wasm_api.c`, one per declaration in cft.h
+and none of them carrying a `bus_out` the contract does not give them;
+nine rows in the page's compute panel; the nine on all three Node
+layers; and, the part that makes the rest checkable, a test on each
+JavaScript surface that *drives the wrappers* rather than the internal
+replay. That distinction is the whole lesson of the half-step:
+`cft_conformance` dispatches the nine in C, so it was green on a
+module with no JavaScript surface for them at all, and it stays green
+today with `cftw_pow`'s operands deliberately swapped - a negative
+control that was run, caught by both new checks, and reverted. Three
+clean container builds of the final tree produced byte-identical
+artifacts.
 
 ## Drop-ins
 

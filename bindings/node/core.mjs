@@ -34,8 +34,14 @@ import {
   CLASS_NAMES, FP32, FP64, FP128, FP256, OP_ABS, OP_ADD, OP_CMPEQ,
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
-  RDN, RMM, RNE, RTZ, RUP, checkStatus, flagNames, loadModule, withScratch,
+  RDN, RMM, RNE, RTZ, RUP, TRANSCEND_BINARY, TRANSCEND_UNARY,
+  checkStatus, flagNames, loadModule, withScratch,
 } from "./lib.mjs";
+
+const TRANSCEND_ARITY = new Map([
+  ...TRANSCEND_UNARY.map((f) => [f, 1]),
+  ...TRANSCEND_BINARY.map((f) => [f, 2]),
+]);
 
 // ---------------------------------------------------------------------
 // Formats. Geometry only; the codes and names are cft.h's, and
@@ -340,6 +346,18 @@ export class Float {
   neg() { return this._ctx.neg(this); }
   abs() { return this._ctx.abs(this); }
   fma(y, z) { return this._ctx.fma(this, y, z); }
+
+  /** The phase-1 transcendentals (ABI 0.3), correctly rounded in this
+   *  value's own context and attribute. */
+  exp() { return this._ctx.exp(this); }
+  expm1() { return this._ctx.expm1(this); }
+  exp2() { return this._ctx.exp2(this); }
+  log() { return this._ctx.log(this); }
+  log1p() { return this._ctx.log1p(this); }
+  log2() { return this._ctx.log2(this); }
+  log10() { return this._ctx.log10(this); }
+  pow(y) { return this._ctx.pow(this, y); }
+  hypot(y) { return this._ctx.hypot(this, y); }
 
   lt(y) { return this._ctx.lt(this, y); }
   le(y) { return this._ctx.le(this, y); }
@@ -763,6 +781,89 @@ export class Context {
     });
   }
 
+  // -- the phase-1 transcendentals (ABI 0.3) -----------------------
+  //
+  // CORRECTLY ROUNDED at this context's precision under this context's
+  // attribute, with 754-2019 clause 9.2.1's special values and exact
+  // flags. That is the whole reason they belong in a determinism
+  // contract: the result is defined by the mathematics, so every
+  // correct implementation agrees bit for bit and this one is scorable
+  // against any of them. An "accurate" transcendental - the ordinary
+  // kind, faithful to an ulp or so - is precisely the thing this
+  // project exists to replace, because two of them never agree.
+  //
+  // Nothing is computed here, as everywhere else in this file: each
+  // call is one cftw_* call on bytes. The exactness rules are the
+  // library's too - exp only at zero, log only at one, exp2 at an
+  // integer the format's range holds, log2 at a power of two, log10 at
+  // a representable power of ten, pow at a dyadic result, hypot at a
+  // perfect square - decided there by exact arithmetic rather than
+  // here by a tolerance.
+
+  _transcend1(fn, x) {
+    const M = this._M, fi = this._fi;
+    const a = this.from(x);
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes), pd = s.alloc(fi.size), fl = s.alloc(4);
+      // no bus_out: a host operation issues no device pass (cft.h)
+      const st = this._C[fn](this._dev, fi.code, this._rnd, pa, pd, 1, fl);
+      checkStatus(this._C, st, `cft_${fn}`);
+      return this._finish(s.get(pd, fi.size), s.u32(fl));
+    });
+  }
+
+  _transcend2(fn, x, y) {
+    const M = this._M, fi = this._fi;
+    const a = this.from(x), b = this.from(y);
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes), pb = s.put(b.bytes);
+      const pd = s.alloc(fi.size), fl = s.alloc(4);
+      const st = this._C[fn](this._dev, fi.code, this._rnd, pa, pb, pd, 1, fl);
+      checkStatus(this._C, st, `cft_${fn}`);
+      return this._finish(s.get(pd, fi.size), s.u32(fl));
+    });
+  }
+
+  /** e ** x. Exact only at x = 0, where exp(0) = 1 raises nothing;
+   *  exp(-inf) is +0. */
+  exp(x) { return this._transcend1("exp", x); }
+
+  /** exp(x) - 1. expm1(+-0) is +-0 - the operand's sign, which is half
+   *  of why this function exists - and expm1(-inf) is -1. */
+  expm1(x) { return this._transcend1("expm1", x); }
+
+  /** 2 ** x, exact when x is an integer whose power the format holds;
+   *  exp2(-inf) is +0. */
+  exp2(x) { return this._transcend1("exp2", x); }
+
+  /** The natural logarithm. log(+-0) is -inf and signals divideByZero;
+   *  a finite negative operand is invalid and delivers a quiet NaN. */
+  log(x) { return this._transcend1("log", x); }
+
+  /** log(1 + x). log1p(+-0) is +-0; log1p(-1) is -inf with
+   *  divideByZero; x < -1 is invalid. */
+  log1p(x) { return this._transcend1("log1p", x); }
+
+  /** Base-two logarithm, exact at the powers of two. */
+  log2(x) { return this._transcend1("log2", x); }
+
+  /** Base-ten logarithm, exact at the powers of ten the format
+   *  represents. */
+  log10(x) { return this._transcend1("log10", x); }
+
+  /** x ** y, 754-2019's `pow`: pow(x, +-0) is 1 for ANY x including a
+   *  quiet NaN or an infinity, pow(1, y) is 1 for ANY y, and
+   *  pow(-1, +-inf) is 1. A finite negative x with a non-integer y is
+   *  invalid. A SIGNALING NaN is not covered by those rows and raises
+   *  invalid like everywhere else in this contract - deliberately
+   *  unlike C's pow(sNaN, 0), and cft.h says so. */
+  pow(x, y) { return this._transcend2("pow", x, y); }
+
+  /** sqrt(x^2 + y^2) as if computed with unbounded range and rounded
+   *  once, so it neither overflows nor underflows on the way.
+   *  hypot(+-inf, y) is +inf for any y, INCLUDING a quiet NaN. */
+  hypot(x, y) { return this._transcend2("hypot", x, y); }
+
   // -- clause 5 ----------------------------------------------------
 
   /** roundToIntegral. exact: true is roundToIntegralExact, the one
@@ -892,10 +993,18 @@ export class Context {
 
   // -- arrays ------------------------------------------------------
 
-  /** One cft_run over a whole array: the call shape a device wants,
-   *  and the reason a batch API exists at all. `op` is a name from
-   *  cft.h ("add", "mul", "fma", ...); operands are arrays of Float
-   *  or anything from() accepts, or null for an unused slot. */
+  /** One library call over a whole array: the call shape a device
+   *  wants, and the reason a batch API exists at all. `op` is a name
+   *  from cft.h - an opcode ("add", "mul", "fma", ...) or one of the
+   *  nine transcendentals ("exp", "pow", ...); operands are arrays of
+   *  Float or anything from() accepts, or null for an unused slot.
+   *
+   *  The transcendentals take a different C entry point, not an opcode
+   *  in cft_run, so they are dispatched by name below. They are
+   *  correctly rounded, which means the array answer IS the scalar
+   *  answer element by element: there is no vectorised approximation
+   *  here to drift from a scalar path, and test.mjs checks that rather
+   *  than assuming it. */
   map(op, a, b = null, c = null) {
     const fi = this._fi;
     const lens = [a, b, c].filter(Boolean).map((v) => v.length);
@@ -909,16 +1018,43 @@ export class Context {
       arr.forEach((v, i) => buf.set(this.from(v).bytes, i * fi.size));
       return buf;
     };
+    const split = (bytes) => {
+      const out = [];
+      for (let i = 0; i < n; i++)
+        out.push(new Float(this, bytes.slice(i * fi.size, (i + 1) * fi.size)));
+      return out;
+    };
+
+    const arity = typeof op === "string" ? TRANSCEND_ARITY.get(op) : undefined;
+    if (arity !== undefined) {
+      if (c) throw new TypeError(`${op} takes no c operand`);
+      if (arity === 2 && !b)
+        throw new TypeError(`${op} needs a second operand array`);
+      if (arity === 1 && b)
+        throw new TypeError(`${op} takes one operand array, not two`);
+      const ab = pack(a), bb = pack(b);
+      return withScratch(this._M, (s) => {
+        const pa = s.put(ab);
+        const pb = bb ? s.put(bb) : 0;
+        const pd = s.alloc(fi.size * n), fl = s.alloc(4);
+        const st = arity === 2
+          ? this._C[op](this._dev, fi.code, this._rnd, pa, pb, pd, n, fl)
+          : this._C[op](this._dev, fi.code, this._rnd, pa, pd, n, fl);
+        checkStatus(this._C, st, `cft_${op}`);
+        const flags = s.u32(fl);
+        this.lastFlags = flags;
+        this.flags |= flags;
+        return split(s.get(pd, fi.size * n));
+      });
+    }
+
     const code = typeof op === "string" ? OPS[op] : op;
     if (code === undefined)
       throw new TypeError(`unknown op ${JSON.stringify(op)}`);
     const r = this._run(code, pack(a), pack(b), pack(c), n);
     this.lastFlags = r.flags;
     this.flags |= r.flags;
-    const out = [];
-    for (let i = 0; i < n; i++)
-      out.push(new Float(this, r.bytes.slice(i * fi.size, (i + 1) * fi.size)));
-    return out;
+    return split(r.bytes);
   }
 
   /** The contract's tree reduction: sum, or dot with a second array.

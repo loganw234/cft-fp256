@@ -464,6 +464,252 @@ test("a Float from another format is refused, not silently widened", () => {
 });
 
 // ---------------------------------------------------------------------
+// the phase-1 transcendentals (ABI 0.3)
+//
+// The vectors score these too - conformance.mjs replays 64,325 cases
+// through the same JavaScript surface - so what belongs here is what a
+// vector set cannot say: the exact cases that must raise NOTHING, the
+// clause 9.2.1 rows implementations most often differ on, and the
+// promise that the batch call and the scalar call are the same answer.
+//
+// Every expectation below is either a value cft.h states in words or
+// one that is exactly representable and checkable by eye. Nothing is
+// compared against libm: a C library's exp is neither correctly
+// rounded nor reproducible, which is the whole reason these functions
+// are in this contract.
+// ---------------------------------------------------------------------
+
+test("the exact cases are exact, and raise nothing at all", () => {
+  // cft.h: exp and expm1 are exact only at zero, log and log1p only at
+  // 1 and 0, exp2 at an integer, log2 at a power of two, log10 at a
+  // representable power of ten, pow at a dyadic result, hypot at a
+  // perfect square. Each of these raises no flag, inexact included.
+  const exact = [
+    ["exp(0)", () => c64.exp(0), 1],
+    ["exp2(10)", () => c64.exp2(10), 1024],
+    ["log(1)", () => c64.log(1), 0],
+    ["log1p(0)", () => c64.log1p(0), 0],
+    ["log2(1024)", () => c64.log2(1024), 10],
+    ["log10(1000)", () => c64.log10(1000), 3],
+    ["pow(2,10)", () => c64.pow(2, 10), 1024],
+    ["hypot(3,4)", () => c64.hypot(3, 4), 5],
+  ];
+  for (const [what, call, want] of exact) {
+    c64.clearFlags();
+    const got = call();
+    eq(got.toNumber(), want, `${what}: `);
+    eq(c64.lastFlags, 0, `${what} is exact, so `);
+  }
+  eq(c64.expm1(0).bits, 0n, "expm1(+0) is +0: ");
+  eq(c64.lastFlags, 0, "and exact, so ");
+});
+
+test("an ordinary value rounds, and says inexact", () => {
+  const e = c64.exp(1);
+  ok(c64.lastFlags & FLAG_INEXACT, "exp(1) is irrational, so it rounds");
+  // and the attribute decides which way: the directed pair must
+  // bracket the value by exactly one ulp
+  const lo = c64.withRounding("rdn").exp(1);
+  const hi = c64.withRounding("rup").exp(1);
+  eq(hi.bits, lo.bits + 1n, "rdn and rup bracket exp(1) by one ulp: ");
+  ok(e.sameBits(lo) || e.sameBits(hi), "and RNE picks one of the two");
+});
+
+test("the signed zeros that expm1 and log1p exist for survive", () => {
+  // cft.h calls this half the reason the two functions exist: the sign
+  // of a zero operand is the sign of the zero result.
+  eq(c64.expm1(c64.zero(0)).sign, 0, "expm1(+0) is +0: ");
+  eq(c64.expm1(c64.zero(1)).sign, 1, "expm1(-0) is -0: ");
+  eq(c64.log1p(c64.zero(0)).sign, 0, "log1p(+0) is +0: ");
+  eq(c64.log1p(c64.zero(1)).sign, 1, "log1p(-0) is -0: ");
+  for (const f of [c64.expm1(c64.zero(1)), c64.log1p(c64.zero(1))])
+    ok(f.isZero, "and both are zeros");
+});
+
+test("the infinite arguments follow clause 9.2.1", () => {
+  const ninf = c64.inf(1), pinf = c64.inf(0);
+  ok(c64.exp(ninf).isZero && c64.exp(ninf).sign === 0, "exp(-inf) is +0");
+  ok(c64.exp(pinf).isInf, "exp(+inf) is +inf");
+  eq(c64.expm1(ninf).toNumber(), -1, "expm1(-inf): ");
+  ok(c64.exp2(ninf).isZero, "exp2(-inf) is +0");
+  const l = c64.log(pinf);
+  ok(l.isInf && l.sign === 0, "log(+inf) is +inf");
+});
+
+test("log at zero is a pole: -inf, and divideByZero says which kind", () => {
+  for (const z of [c64.zero(0), c64.zero(1)]) {
+    c64.clearFlags();
+    const r = c64.log(z);
+    ok(r.isInf && r.sign === 1, "log(0) is -inf");
+    ok(c64.lastFlags & FLAG_DIVBYZERO, "and raises divideByZero");
+    eq(c64.lastFlags & FLAG_INVALID, 0, "and NOT invalid: ");
+  }
+  const r = c64.log1p(-1);
+  ok(r.isInf && r.sign === 1, "log1p(-1) is -inf too");
+  ok(c64.lastFlags & FLAG_DIVBYZERO, "with divideByZero");
+});
+
+test("a domain error is invalid, and delivers the canonical quiet NaN", () => {
+  // The contract's canonical qNaN: sign 0, quiet bit, payload 0. Not
+  // "some NaN" - a payload this library invented would be a bit that
+  // differs between implementations, which is the whole disease.
+  const canon = c64.nan();
+  const cases = [
+    ["log(-1)", () => c64.log(-1)],
+    ["log2(-1)", () => c64.log2(-1)],
+    ["log10(-1)", () => c64.log10(-1)],
+    ["log1p(-2)", () => c64.log1p(-2)],
+    ["pow(-2, 0.5)", () => c64.pow(-2, c64.from("0.5"))],
+  ];
+  for (const [what, call] of cases) {
+    c64.clearFlags();
+    const r = call();
+    ok(r.isNaN, `${what} is a NaN`);
+    ok(r.sameBits(canon), `${what} is THE canonical quiet NaN`);
+    ok(c64.lastFlags & FLAG_INVALID, `${what} raises invalid`);
+  }
+});
+
+test("pow's identities beat its NaNs, exactly as 754 says", () => {
+  // The rows implementations most often disagree on, and the reason
+  // cft.h lists them: an identity that holds for every x holds for a
+  // NaN x too.
+  c64.clearFlags();
+  eq(c64.pow(c64.nan(), 0).toNumber(), 1, "pow(qNaN, +0) is 1: ");
+  eq(c64.lastFlags, 0, "and raises nothing: ");
+  eq(c64.pow(c64.nan(), c64.zero(1)).toNumber(), 1, "pow(qNaN, -0) too: ");
+  eq(c64.pow(c64.inf(0), 0).toNumber(), 1, "pow(+inf, +0) is 1: ");
+  eq(c64.pow(1, c64.nan()).toNumber(), 1, "pow(1, qNaN) is 1: ");
+  eq(c64.lastFlags, 0, "also silently: ");
+  eq(c64.pow(-1, c64.inf(0)).toNumber(), 1, "pow(-1, +inf) is 1: ");
+  eq(c64.pow(-1, c64.inf(1)).toNumber(), 1, "pow(-1, -inf) is 1: ");
+});
+
+test("pow's pole is at a finite exponent, not at the limit", () => {
+  // cft.h spells this out because the two look alike and are not:
+  // pow(+-0, y) for FINITE y < 0 is the pole and signals divideByZero;
+  // pow(+-0, -inf) is the |x| < 1 row, +inf, and signals NOTHING.
+  c64.clearFlags();
+  const pole = c64.pow(c64.zero(0), -1);
+  ok(pole.isInf, "pow(+0, -1) is an infinity");
+  ok(c64.lastFlags & FLAG_DIVBYZERO, "and signals divideByZero");
+  c64.clearFlags();
+  const limit = c64.pow(c64.zero(0), c64.inf(1));
+  ok(limit.isInf && limit.sign === 0, "pow(+0, -inf) is +inf");
+  eq(c64.lastFlags, 0, "and signals nothing at all: ");
+});
+
+test("hypot takes an infinity over a NaN, and never overflows on the way", () => {
+  c64.clearFlags();
+  const r = c64.hypot(c64.inf(1), c64.nan());
+  ok(r.isInf && r.sign === 0, "hypot(-inf, qNaN) is +inf");
+  eq(c64.lastFlags, 0, "and raises nothing: ");
+  // 3*max and 4*max would each square to infinity; the true hypot is
+  // 5*max, which is finite. One rounding over unbounded range.
+  const max = c64.fromBits(0x7fefffffffffffffn);
+  const big = c64.hypot(c64.mul(max, c64.from("0.6")),
+                        c64.mul(max, c64.from("0.8")));
+  ok(!big.isInf, "hypot(0.6*max, 0.8*max) stays finite");
+});
+
+test("a signaling NaN is invalid everywhere, cft.h's deliberate C break", () => {
+  // 9.2.1's "even a quiet NaN" wording does not reach a signaling one,
+  // so pow(sNaN, 0) is invalid here where C's pow returns 1.
+  const snan = c64.fromBits(0x7ff0000000000001n);
+  eq(c64.classify(snan), "snan", "the operand really is signaling: ");
+  for (const [what, call] of [["exp", () => c64.exp(snan)],
+                              ["log", () => c64.log(snan)],
+                              ["pow(sNaN, 0)", () => c64.pow(snan, 0)],
+                              ["pow(1, sNaN)", () => c64.pow(1, snan)],
+                              ["hypot", () => c64.hypot(c64.inf(0), snan)]]) {
+    c64.clearFlags();
+    const r = call();
+    ok(r.sameBits(c64.nan()), `${what} delivers the canonical quiet NaN`);
+    ok(c64.lastFlags & FLAG_INVALID, `${what} raises invalid`);
+  }
+});
+
+test("the operands are the ones cft.h names, in that order", () => {
+  // pow is not symmetric, and a wrapper with its two operand pointers
+  // swapped computes b**a while returning a plausible number. This is
+  // the check that notices.
+  eq(c64.pow(2, 3).toNumber(), 8, "pow(2,3): ");
+  eq(c64.pow(3, 2).toNumber(), 9, "pow(3,2) is a different answer: ");
+  eq(c64.hypot(3, 4).toNumber(), 5, "hypot(3,4): ");
+  eq(c64.hypot(4, 3).toNumber(), 5, "hypot is symmetric, so: ");
+  eq(c64.log(c64.exp(1)).toNumber(), 1, "log undoes exp at e: ");
+});
+
+test("all nine reach every format, and the wide ones are wider", () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    ctx.clearFlags();
+    eq(ctx.exp(0).toNumber(), 1, `binary${w} exp(0): `);
+    eq(ctx.lastFlags, 0, `binary${w} exp(0) exact: `);
+    eq(ctx.log(1).toNumber(), 0, `binary${w} log(1): `);
+    eq(ctx.hypot(3, 4).toNumber(), 5, `binary${w} hypot(3,4): `);
+    eq(ctx.pow(2, 10).toNumber(), 1024, `binary${w} pow(2,10): `);
+  }
+  // binary256 carries a value binary64 cannot: exp(1) to 237 bits,
+  // whose leading 53 bits are binary64's exp(1) but which does not
+  // narrow back to it exactly.
+  const wide = ctxs[256].exp(1);
+  const narrowed = c64.convert(wide);
+  ok(c64.lastFlags & FLAG_INEXACT, "narrowing binary256's exp(1) rounds");
+  ok(narrowed.sameBits(c64.exp(1)),
+     "and lands on binary64's own correctly rounded exp(1)");
+});
+
+test("Float carries the nine as methods, on its own context", () => {
+  const x = c64.from(1);
+  ok(x.exp().sameBits(c64.exp(1)), "x.exp()");
+  ok(x.log().sameBits(c64.log(1)), "x.log()");
+  ok(c64.from(3).hypot(4).sameBits(c64.hypot(3, 4)), "x.hypot(y)");
+  ok(c64.from(2).pow(10).sameBits(c64.pow(2, 10)), "x.pow(y)");
+  const r = ctxs[128].withRounding("rup");
+  ok(r.from(1).exp().sameBits(r.exp(1)), "and through a derived context");
+});
+
+test("the batch call is the scalar call, for all nine", () => {
+  // Correct rounding is what makes this true by definition rather than
+  // by luck: there is no vectorised approximation to differ from the
+  // scalar path. Worth measuring anyway - it is the property a fast
+  // path would silently break.
+  const rand = mulberry32(0x7a4c3);
+  const xs = [], ys = [];
+  for (let i = 0; i < 129; i++) {          // not a power of two
+    xs.push(c64.fromNumber(rand() * 20 - 10));
+    ys.push(c64.fromNumber(rand() * 6));
+  }
+  const unary = ["exp", "expm1", "exp2", "log", "log1p", "log2", "log10"];
+  for (const fn of unary) {
+    const batch = c64.map(fn, xs);
+    const batchFlags = c64.lastFlags;
+    let flags = 0;
+    for (let i = 0; i < xs.length; i++) {
+      const one = c64[fn](xs[i]);
+      flags |= c64.lastFlags;
+      ok(batch[i].sameBits(one), `${fn} element ${i}`);
+    }
+    eq(batchFlags, flags, `${fn}: batch flags are the OR over elements: `);
+  }
+  for (const fn of ["pow", "hypot"]) {
+    const batch = c64.map(fn, xs, ys);
+    const batchFlags = c64.lastFlags;
+    let flags = 0;
+    for (let i = 0; i < xs.length; i++) {
+      const one = c64[fn](xs[i], ys[i]);
+      flags |= c64.lastFlags;
+      ok(batch[i].sameBits(one), `${fn} element ${i}`);
+    }
+    eq(batchFlags, flags, `${fn}: batch flags are the OR over elements: `);
+  }
+  throws(() => c64.map("exp", xs, ys), "exp takes one operand array");
+  throws(() => c64.map("pow", xs), "pow needs its second array");
+  throws(() => c64.map("hypot", xs, ys, xs), "no c slot on a transcendental");
+});
+
+// ---------------------------------------------------------------------
 // arrays: one call, same answers, and the contract's tree
 // ---------------------------------------------------------------------
 

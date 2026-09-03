@@ -14,6 +14,15 @@
 // arrays, compares, and its report IS the failure detail; this script
 // writes files and prints what came back.
 //
+// The twenty transcendental sets get a SECOND pass, driven from
+// JavaScript through Context's exp/log/pow/hypot rather than handed to
+// cft_conformance. That is not redundancy: cft_conformance dispatches
+// the nine internally in C and would be green with no JavaScript
+// surface for them at all - it was, for a day (docs/COMPATIBILITY.md's
+// half-step). The library remains the only thing computing; what this
+// pass adds is that the package's own methods reach it, in the right
+// order, with the flags intact.
+//
 // A run that checked nothing must not read as a pass. Zero cases, a
 // missing set, or a directory with no sets in it are failures here,
 // exactly as they are inside cft_conformance.
@@ -22,7 +31,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadModule } from "./lib.mjs";
+import { Context } from "./core.mjs";
+import { TRANSCEND_BINARY, TRANSCEND_UNARY, loadModule } from "./lib.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -33,6 +43,22 @@ const CANONICAL = [];
 for (const f of FORMATS)
   for (const r of ROUNDINGS)
     CANONICAL.push(r === "rne" ? `${f}.jsonl` : `${f}-${r}.jsonl`);
+
+// The transcendental sets: their own files, their own schema ("fn"
+// rather than "op", no c operand), because the nine are library entry
+// points rather than opcodes - vectors/gen_vectors.py says why.
+const TRANSCEND_SETS = [];
+for (const f of FORMATS)
+  for (const r of ROUNDINGS)
+    TRANSCEND_SETS.push({
+      name: r === "rne" ? `${f}-transcend.jsonl`
+                        : `${f}-transcend-${r}.jsonl`,
+      format: f, rounding: r,
+    });
+const TRANSCEND_ARITY = new Map([
+  ...TRANSCEND_UNARY.map((f) => [f, 1]),
+  ...TRANSCEND_BINARY.map((f) => [f, 2]),
+]);
 
 const candidates = [process.argv[2], join(ROOT, "vectors", "out"),
                     join(ROOT, "bindings", "wasm", "build", "vectors")]
@@ -60,8 +86,9 @@ const abi = C.abiVersion() >>> 0;
 console.log(`libcft ABI ${abi >>> 16}.${abi & 0xffff}, backend ` +
             `${C.capsBackend(dev)}, wasm32`);
 console.log(`vectors    ${vdir}`);
+const KNOWN = new Set([...CANONICAL, ...TRANSCEND_SETS.map((s) => s.name)]);
 const stray = readdirSync(vdir).filter((n) => n.endsWith(".jsonl") &&
-  !CANONICAL.includes(n));
+  !KNOWN.has(n));
 if (stray.length) console.log(`           (ignoring ${stray.join(", ")})`);
 console.log("");
 
@@ -107,11 +134,149 @@ for (const name of CANONICAL) {
 
 const secs = ((Date.now() - t0) / 1000).toFixed(1);
 console.log("");
-if (bad === 0 && clean === CANONICAL.length && total > 0) {
+if (bad === 0 && clean === CANONICAL.length && total > 0)
   console.log(`${total.toLocaleString("en-US")} cases over ${clean} sets, ` +
               `library matches the vectors exactly (${secs}s)`);
+else
+  console.log(`${clean} of ${CANONICAL.length} sets clean, ` +
+              `${total.toLocaleString("en-US")} cases - NOT A PASS (${secs}s)`);
+
+// ---------------------------------------------------------------------
+// The nine, through this package's own methods
+//
+// One Context per (format, attribute) - the sets are organised the same
+// way - and one call per case, so the flag word the file carries is
+// compared against the flag word that one call raised. Then one map()
+// per family, because a batch call that disagreed with the scalar one
+// would be a bug the per-case pass cannot see.
+//
+// Everything is compared as ENCODINGS: Float.bits, never a decimal and
+// never a JS number. A NaN payload and a signed zero both survive that
+// and neither survives a `number`.
+// ---------------------------------------------------------------------
+
+function hexOf(f, fi) {
+  return "0x" + f.bits.toString(16).padStart(fi.size * 2, "0");
+}
+
+async function driveTranscendSet(set, text) {
+  const ctx = await Context.open(set.format);
+  try {
+    const c = ctx.withRounding(set.rounding);
+    const fi = c.format;
+    const byFn = new Map();
+    let lineno = 0;
+    for (const line of text.split("\n")) {
+      lineno++;
+      if (!line.trim()) continue;
+      const rec = JSON.parse(line);
+      const arity = TRANSCEND_ARITY.get(rec.fn);
+      if (arity === undefined)
+        throw new Error(`${set.name}:${lineno}: unknown function ` +
+                        `"${rec.fn}" - this package's table and cft.h ` +
+                        `have diverged`);
+      if (rec.rnd !== set.rounding)
+        throw new Error(`${set.name}:${lineno}: attribute "${rec.rnd}" in ` +
+                        `a ${set.rounding} set`);
+      if ((arity === 2) !== (rec.b !== undefined))
+        throw new Error(`${set.name}:${lineno}: ${rec.fn} is ` +
+                        `${arity === 2 ? "binary" : "unary"} but the case ` +
+                        `${rec.b !== undefined ? "carries" : "omits"} b`);
+      if (!byFn.has(rec.fn)) byFn.set(rec.fn, []);
+      byFn.get(rec.fn).push({
+        lineno,
+        a: c.fromBits(BigInt(rec.a)),
+        b: arity === 2 ? c.fromBits(BigInt(rec.b)) : null,
+        d: c.fromBits(BigInt(rec.d)),
+        flags: rec.flags >>> 0,
+      });
+    }
+    if (!byFn.size) throw new Error(`${set.name}: no cases`);
+
+    let checked = 0;
+    for (const [fn, cases] of byFn) {
+      let union = 0;
+      for (const k of cases) {
+        c.clearFlags();
+        const got = k.b ? c[fn](k.a, k.b) : c[fn](k.a);
+        if (!got.sameBits(k.d) || c.lastFlags !== k.flags)
+          throw new Error(
+            `${set.name}:${k.lineno}: ${fn} ${set.rounding}\n` +
+            `        a        ${hexOf(k.a, fi)}\n` +
+            (k.b ? `        b        ${hexOf(k.b, fi)}\n` : "") +
+            `        expected ${hexOf(k.d, fi)} flags 0x` +
+            `${k.flags.toString(16).padStart(2, "0")}\n` +
+            `        got      ${hexOf(got, fi)} flags 0x` +
+            `${c.lastFlags.toString(16).padStart(2, "0")}`);
+        union |= c.lastFlags;
+        checked++;
+      }
+      c.clearFlags();
+      const batch = TRANSCEND_ARITY.get(fn) === 2
+        ? c.map(fn, cases.map((k) => k.a), cases.map((k) => k.b))
+        : c.map(fn, cases.map((k) => k.a));
+      cases.forEach((k, i) => {
+        if (!batch[i].sameBits(k.d))
+          throw new Error(`${set.name}:${k.lineno}: ${fn} over ` +
+                          `${cases.length} elements gives ` +
+                          `${hexOf(batch[i], fi)} where one element at a ` +
+                          `time gives ${hexOf(k.d, fi)}`);
+      });
+      if (c.lastFlags !== union)
+        throw new Error(`${set.name}: ${fn} over ${cases.length} elements ` +
+                        `raised 0x${c.lastFlags.toString(16)}, the union ` +
+                        `over the scalar calls is 0x${union.toString(16)}`);
+    }
+    return checked;
+  } finally {
+    ctx.close();
+  }
+}
+
+const haveTranscend = TRANSCEND_SETS.every((s) =>
+  existsSync(join(vdir, s.name)));
+if (!haveTranscend) {
+  console.log(`\nno transcendental sets in ${vdir} - the nine were NOT ` +
+              `driven. Run \`make vectors\` from the repo root; the ` +
+              `containerized wasm build cannot write them (no mpmath in ` +
+              `the pinned image).`);
+  console.log("NOT A PASS: the ABI 0.3 surface was not exercised.");
+  process.exit(1);
+}
+
+console.log("\nthe nine, through Context (per case, then as arrays)\n");
+let tTotal = 0, tClean = 0, tBad = 0;
+const t1 = Date.now();
+for (const set of TRANSCEND_SETS) {
+  let n = 0, err = null;
+  try { n = await driveTranscendSet(set, readFileSync(join(vdir, set.name),
+                                                     "utf8")); }
+  catch (e) { err = e; }
+  tTotal += n;
+  const shown = n.toLocaleString("en-US").padStart(7);
+  if (!err) {
+    tClean++;
+    console.log(`  ${set.name.padEnd(26)} ${shown}  all matching`);
+  } else {
+    tBad++;
+    console.log(`  ${set.name.padEnd(26)} ${shown}  FAILED`);
+    console.log(`      ${err.message}`);
+  }
+}
+const tSecs = ((Date.now() - t1) / 1000).toFixed(1);
+
+console.log("");
+const allClean = bad === 0 && clean === CANONICAL.length && total > 0 &&
+                 tBad === 0 && tClean === TRANSCEND_SETS.length && tTotal > 0;
+if (allClean) {
+  console.log(`${tTotal.toLocaleString("en-US")} transcendental cases over ` +
+              `${tClean} sets, through this package's own methods, ` +
+              `encodings and flags exact (${tSecs}s)`);
+  console.log(`\n${(total + tTotal).toLocaleString("en-US")} cases over ` +
+              `${clean + tClean} sets in all - a pass.`);
   process.exit(0);
 }
-console.log(`${clean} of ${CANONICAL.length} sets clean, ` +
-            `${total.toLocaleString("en-US")} cases - NOT A PASS (${secs}s)`);
+console.log(`${tClean} of ${TRANSCEND_SETS.length} transcendental sets ` +
+            `clean, ${tTotal.toLocaleString("en-US")} cases - NOT A PASS ` +
+            `(${tSecs}s)`);
 process.exit(1);

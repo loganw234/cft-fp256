@@ -144,7 +144,8 @@ footer pre { font-size: 0.75rem; }
   <h2>3 &middot; full replay: drop the published sets</h2>
   <p>The embedded sample is a sample. For the full claim, generate the
   complete sets in a checkout of this repo -
-  <code>make vectors</code>, which writes 236,000 cases to
+  <code>make vectors</code>, which writes 236,000 cases over twenty
+  opcode sets plus 64,325 more over twenty transcendental sets to
   <code>vectors/out/</code> - and drop any or all of the
   <code>.jsonl</code> files here. Same code path as section 2, whole
   files this time.</p>
@@ -156,19 +157,25 @@ footer pre { font-size: 0.75rem; }
     <tbody></tbody>
   </table>
   <p class="small dim">Only the generator's fixed names are accepted
-  (<span class="mono">fp32.jsonl &hellip; fp256-rmm.jsonl</span>) -
-  cft_conformance enumerates sets by name rather than by scanning, and
-  a file this page cannot map to a set is refused loudly rather than
-  skipped quietly.</p>
+  (<span class="mono">fp32.jsonl &hellip; fp256-rmm.jsonl</span> and
+  <span class="mono">fp32-transcend.jsonl &hellip;
+  fp256-transcend-rmm.jsonl</span>) - cft_conformance enumerates sets by
+  name rather than by scanning, and a file this page cannot map to a set
+  is refused loudly rather than skipped quietly.</p>
 </section>
 
 <section id="compute-section">
   <h2>4 &middot; compute</h2>
   <p>The same library, called forward: one element through
-  <code>cft_run()</code> (or the composed <code>cft_div()</code> /
-  <code>cft_sqrt()</code> sequence), operands and result as raw
-  encodings. This is a working binary32/64/128/256 calculator, and every
-  answer it gives is pinned by the replay above.</p>
+  <code>cft_run()</code>, or the composed <code>cft_div()</code> /
+  <code>cft_sqrt()</code> sequence, or one of the nine phase-1
+  transcendentals (<code>cft_exp</code> &hellip; <code>cft_hypot</code>,
+  ABI 0.3) - operands and result as raw encodings. This is a working
+  binary32/64/128/256 calculator, and every answer it gives is pinned by
+  the replay above. The transcendentals are <em>correctly rounded</em>,
+  which is why they can be in a determinism contract at all: the answer
+  is defined by the mathematics, not by an algorithm, so every correct
+  implementation agrees with this one bit for bit.</p>
   <fieldset>
     <div>
       <label class="f"><span>operation</span><select id="op-sel"></select></label>
@@ -216,10 +223,21 @@ const $ = (id) => document.getElementById(id);
 
 const FORMATS   = ["fp32", "fp64", "fp128", "fp256"];
 const ROUNDINGS = ["rne", "rtz", "rdn", "rup", "rmm"];
+/* The generator's fixed names, both families: the twenty opcode sets
+ * the embedded sample is drawn from, and - since ABI 0.3 - the twenty
+ * transcendental sets, which carry a different schema ("fn" rather
+ * than "op") and are therefore their own files. The library reads
+ * both, so the drop zone accepts both; before the nine had wrappers
+ * this list stopped at twenty and a `make vectors` drop refused half
+ * of what the page had just told the reader to generate. */
 const CANONICAL = [];
 for (const f of FORMATS)
   for (const r of ROUNDINGS)
     CANONICAL.push(r === "rne" ? f + ".jsonl" : f + "-" + r + ".jsonl");
+for (const f of FORMATS)
+  for (const r of ROUNDINGS)
+    CANONICAL.push(r === "rne" ? f + "-transcend.jsonl"
+                               : f + "-transcend-" + r + ".jsonl");
 
 const FLAG_NAMES = [
   [1, "invalid"], [2, "divbyzero"], [4, "overflow"],
@@ -264,6 +282,18 @@ function init() {
     div:          M.cwrap("cftw_div", n, [n,n,n,n,n,n,n,n,n]),
     sqrt:         M.cwrap("cftw_sqrt", n, [n,n,n,n,n,n,n,n]),
     conformance:  M.cwrap("cftw_conformance", n, [n,s,n,n,n,n]),
+    /* The phase-1 transcendentals (ABI 0.3). Host operations, so the
+     * argument list ends at the flag word: no bus_out, because no
+     * device pass happens - cft.h, and wasm_api.c's block on it. */
+    exp:          M.cwrap("cftw_exp", n, [n,n,n,n,n,n,n]),
+    expm1:        M.cwrap("cftw_expm1", n, [n,n,n,n,n,n,n]),
+    exp2:         M.cwrap("cftw_exp2", n, [n,n,n,n,n,n,n]),
+    log:          M.cwrap("cftw_log", n, [n,n,n,n,n,n,n]),
+    log1p:        M.cwrap("cftw_log1p", n, [n,n,n,n,n,n,n]),
+    log2:         M.cwrap("cftw_log2", n, [n,n,n,n,n,n,n]),
+    log10:        M.cwrap("cftw_log10", n, [n,n,n,n,n,n,n]),
+    pow:          M.cwrap("cftw_pow", n, [n,n,n,n,n,n,n,n]),
+    hypot:        M.cwrap("cftw_hypot", n, [n,n,n,n,n,n,n,n]),
   };
 
   const pp = M._malloc(4);
@@ -550,7 +580,15 @@ function wireDrop() {
  * cft_sf_op_operands() in host/src/softfloat.c; the numeric opcodes
  * and their names come from the library itself at runtime. "div" and
  * "sqrt" are cft_div()/cft_sqrt(), the composed seed/Newton sequence,
- * not single opcodes - cft.h explains why that is a design fact. */
+ * not single opcodes - cft.h explains why that is a design fact.
+ *
+ * The nine named after them are the phase-1 transcendentals: separate
+ * library entry points, not opcodes and not compositions, because an
+ * exponential has no exactly measurable residual for a tile pass to
+ * correct (docs/TRANSCENDENTALS.md). Each is CORRECTLY ROUNDED in the
+ * selected attribute with exact flags, so the answer below is the
+ * mathematical one, and the "k" field says which kind of call each
+ * non-opcode entry is rather than letting the reader guess. */
 const PANEL_OPS = [
   { v: 0,  use: "abc", f: "d = a*b + c — one rounding, exact product" },
   { v: 1,  use: "ac",  f: "d = a + c (b ignored)" },
@@ -577,9 +615,38 @@ const PANEL_OPS = [
   { v: 23, use: "ab",  f: "unsigned compare → 1.0 or +0.0" },
   { v: 26, use: "a",   f: "seed table ~1/a; quiet; subnormals flush to ±inf at input (cft.h says why)" },
   { v: 27, use: "a",   f: "seed table ~1/√a; quiet; same flush rule" },
-  { v: "div",  use: "ab", f: "d = a / b — correctly rounded via the seed/Newton/exact-residual sequence (cft_div)" },
-  { v: "sqrt", use: "a",  f: "d = √a — same construction (cft_sqrt)" },
+  { v: "div",  use: "ab", k: "composed sequence",
+    f: "d = a / b — correctly rounded via the seed/Newton/exact-residual sequence (cft_div)" },
+  { v: "sqrt", use: "a",  k: "composed sequence",
+    f: "d = √a — same construction (cft_sqrt)" },
+  { v: "exp",   use: "a",  k: "ABI 0.3, cft_exp",
+    f: "d = e^a — correctly rounded; exact only at a = 0, where exp(0) = 1 raises nothing; exp(-inf) = +0" },
+  { v: "expm1", use: "a",  k: "ABI 0.3, cft_expm1",
+    f: "d = e^a - 1 — expm1(±0) is ±0 (the operand's sign, which is half of why this function exists); expm1(-inf) = -1" },
+  { v: "exp2",  use: "a",  k: "ABI 0.3, cft_exp2",
+    f: "d = 2^a — exact when a is an integer whose power the format holds; exp2(-inf) = +0" },
+  { v: "log",   use: "a",  k: "ABI 0.3, cft_log",
+    f: "d = ln a — exact only at a = 1; log(±0) = -inf with divideByZero; a < 0 is invalid (qNaN)" },
+  { v: "log1p", use: "a",  k: "ABI 0.3, cft_log1p",
+    f: "d = ln(1 + a) — log1p(±0) is ±0; log1p(-1) = -inf with divideByZero; a < -1 is invalid" },
+  { v: "log2",  use: "a",  k: "ABI 0.3, cft_log2",
+    f: "d = log₂ a — exact at the powers of two; same zero and negative rules as log" },
+  { v: "log10", use: "a",  k: "ABI 0.3, cft_log10",
+    f: "d = log₁₀ a — exact at the powers of ten the format represents; same zero and negative rules as log" },
+  { v: "pow",   use: "ab", k: "ABI 0.3, cft_pow",
+    f: "d = a^b — 754-2019 pow: pow(a, ±0) = 1 for ANY a including a qNaN, pow(1, b) = 1 for ANY b, pow(-1, ±inf) = 1; a finite negative with a non-integer b is invalid" },
+  { v: "hypot", use: "ab", k: "ABI 0.3, cft_hypot",
+    f: "d = √(a² + b²) — one rounding, no intermediate overflow; hypot(±inf, b) = +inf for any b, INCLUDING a qNaN" },
 ];
+
+/* The two transcendental arities, spelled once. The names match both
+ * the cftw_* export and the "fn" field the transcendental vector sets
+ * use, which is not a coincidence: cft.h names these operations, and
+ * every layer that carries them - the generator, the golden model, the
+ * bindings - spells them the same way rather than inventing a table. */
+const TRANSCEND_UNARY = ["exp", "expm1", "exp2", "log", "log1p",
+                         "log2", "log10"];
+const TRANSCEND_BINARY = ["pow", "hypot"];
 
 /* IEEE 754-2019 interchange field widths, display-only (the classifier
  * under the result line); cross-checked against
@@ -593,7 +660,7 @@ function initComputePanel() {
     const opt = document.createElement("option");
     opt.value = String(o.v);
     opt.textContent = typeof o.v === "number"
-      ? C.opName(o.v) + " (op " + o.v + ")" : o.v + " (composed sequence)";
+      ? C.opName(o.v) + " (op " + o.v + ")" : o.v + " (" + o.k + ")";
     opSel.append(opt);
   }
   for (let i = 0; i < 4; i++) {
@@ -707,6 +774,11 @@ function computeOnce() {
       st = C.div(dev, fmt, rnd, pa, pb, pd, 1, pfl, 0);
     else if (o.v === "sqrt")
       st = C.sqrt(dev, fmt, rnd, pa, pd, 1, pfl, 0);
+    else if (TRANSCEND_UNARY.includes(o.v))
+      /* no bus_out: a host operation issues no device pass (cft.h) */
+      st = C[o.v](dev, fmt, rnd, pa, pd, 1, pfl);
+    else if (TRANSCEND_BINARY.includes(o.v))
+      st = C[o.v](dev, fmt, rnd, pa, pb, pd, 1, pfl);
     else
       st = C.run(dev, o.v, fmt, rnd, pa, pb, pc, pd, 1, pfl, 0);
 
