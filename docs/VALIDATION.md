@@ -1341,3 +1341,31 @@ issue no device pass at all); and the native-oracle soak, because there
 is no CPU oracle for these functions - libm is neither correctly
 rounded nor reproducible, which is the whole reason MPFR is the only
 external arbiter here.
+
+---
+
+## 2026-09-03 - standardized verification run (DESKTOP-T33SK86)
+
+verify/run.sh at fd717b0: 24 stage(s) executed, 0 cached from earlier
+in the run, 0 failed, 3 skipped. Run id 20260903-003242-fd717b0;
+per-stage logs under verify/state/.
+
+The first full run with the transcendentals in it - every gate on this
+host, including the RTL suite and the formal proofs, which this change
+does not touch and which are here to show it did not touch them:
+
+    golden 164s   vectors 10s   sim 1415s    lint 42s      formal 26s
+    libcft 56s    selfcheck 1s  divsqrt 1s   clause5 2s    transcend 59s
+    diff 3s       seq 2s        reduce 16s   bindings 4s   cpp 153s
+    lang-cpp 1s   lang-rust 0s  lang-go 0s   lang-csharp 4s
+    lang-fortran 1s   node 257s   wasm 2s    mpfr 13s      soak-quick 75s
+    lang-julia   SKIP (no julia on PATH)
+    lang-r       SKIP (no Rscript on PATH)
+    images       SKIP (xclbinutil not present - XRT hosts only)
+
+    VERDICT: PASS with 3 skips - 24 executed, 0 failed
+
+`sim` at 1,415 s rather than the 502 s of 2026-09-02 is SIM_JOBS=1
+against that run's 8, not a change in the suite. The three skips are
+absent toolchains named by the runner, the same three this host has
+always lacked.
