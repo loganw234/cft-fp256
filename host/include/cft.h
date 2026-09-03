@@ -96,7 +96,14 @@ extern "C" {
 #define CFT_ABI_VERSION_MAJOR 0
 #define CFT_ABI_VERSION_MINOR 3   /* 0.3: the phase-1 transcendentals */
 
-/* Returns (major << 16) | minor of the library actually loaded. */
+/* Returns (major << 16) | minor of the library actually loaded.
+ *
+ * The minor version is a floor on what is present, and each step of it
+ * is additive: 0.1 was the elementwise opcodes, the reductions and the
+ * composed div/sqrt; 0.2 added the clause-5 completion set; 0.3 added
+ * the nine correctly-rounded transcendentals below. A caller that
+ * needs one of those checks the number rather than the header it
+ * compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
 /* ---------------------------------------------------------------
