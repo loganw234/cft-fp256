@@ -40,14 +40,14 @@ output lives in its own header and is compared by eye.
 |---|---|---|---|---|
 | C | `host/examples/vector_fma.c` | the reference example; the header IS the binding | Windows 2026-09-02 + Linux 2026-09-01; 2026-09-02 as runner stage `libcft` on Windows, the desktop's WSL, the box and CI | `cft.h` is the whole contract surface |
 | C++ | `host/include/cft.hpp`, `host/examples/vector_fma.cpp`, `host/tests/cpp_api_test.cpp` | header-only wrapper: RAII for the three handles, a fixed-width byte type per format, span batches, and a Context/Float layer of the same shape as cftmpfr's and bindings/node's; plus the example and a test that issues every entry point twice | Windows 2026-09-02 (mingw64 g++ 16.1.0), at **both** `-std=c++17` and `-std=c++20`: the example's four checksums diff clean against the C example (`make -C host examples-lang`), and `make -C host cpptest` passes 2,871 checks each way including a 236,000-case `cft_conformance` replay through the wrapper; 2026-09-02 as runner stages `cpp` and `lang-cpp` on Windows, the desktop's WSL (g++ 11.4), the box (g++ 13.3) and CI (ubuntu-24.04), the replay 392,000 cases each way | computes nothing: every result is a libcft call, and the test is the proof - each entry point is issued through `cft.hpp` and through `cft.h` on the same bytes, compared for identical encodings AND identical flags. Operators are bound to an explicit Context (format + attribute) because a free `operator+` on a bare value type would need a hidden global attribute; the header says so at length |
-| Fortran | `host/examples/vector_fma.f90` | example via iso_c_binding | Linux, gfortran 13.3 (`make -C host fortran`); 2026-09-02 as runner stage `lang-fortran` on the desktop's WSL (gfortran 11.4) and CI (ubuntu-24.04); the example's header carries no date | the constituency the C ABI was chosen for |
+| Fortran | `host/examples/vector_fma.f90` | example via iso_c_binding | Linux, gfortran 13.3 (`make -C host fortran`); 2026-09-02 as runner stage `lang-fortran` on the desktop's WSL (gfortran 11.4), CI (ubuntu-24.04) and Windows (mingw64 gfortran 16.1.0 from pacman); the example's header carries no date | the constituency the C ABI was chosen for |
 | Python (ctypes) | `host/examples/vector_fma.py`, `vector_fma_ctypes.py` | example + the diff/seq/reduce/divsqrt check harnesses | Windows 2026-09-02 + Linux 2026-09-01, every `make -C host test`; 2026-09-02 as runner stage `libcft` on all four hosts | no build step, no generated bindings |
 | Python (package) | `bindings/python/cftmpfr/` | full package: Context/Float scalar ops, batch ops, gmpy2 interop | Windows 2026-09-02 (80 tests; 300k/300k bit-identical to gmpy2); 2026-09-02 as runner stage `bindings` on Windows, the desktop's WSL (gmpy2 2.1.2), the box (gmpy2 2.3.1) and CI, 80 tests each | see Drop-ins below |
 | Rust | `host/examples/vector_fma.rs` | single-file example, plain rustc, static-links libcft.a (MSVC rustc included) | Windows 2026-09-02 (rustc 1.94.1, x86_64-pc-windows-msvc); 2026-09-02 as runner stage `lang-rust` on Windows and CI (ubuntu-24.04) | why the static link survives MSVC is in its header |
-| Julia | `host/examples/vector_fma.jl` | single-file example, stdlib ccall | Linux 2026-09-01 (julia 1.12.7); checksums also match the Windows set; SKIPped by name on every 2026-09-02 runner host and not on the CI image | born UNVERIFIED, asterisk lasted one day |
-| Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18); 2026-09-02 as runner stage `lang-go` on the desktop's WSL and CI | static-links libcft.a as a direct linker input |
+| Julia | `host/examples/vector_fma.jl` | single-file example, stdlib ccall | Linux 2026-09-01 (julia 1.12.7); checksums also match the Windows set; Windows 2026-09-02 (julia 1.12.7 from the pinned zip, runner stage `lang-julia`) and the desktop's WSL the same evening (same version, same zip's Linux tarball); not on the CI image | born UNVERIFIED, asterisk lasted one day |
+| Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18); 2026-09-02 as runner stage `lang-go` on the desktop's WSL, CI, and Windows (go 1.26.4 from pacman, GOROOT carried by the runner) | static-links libcft.a as a direct linker input |
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8); 2026-09-02 as runner stage `lang-csharp` on Windows, the desktop's WSL (dotnet 8.0.130) and CI | resolver maps to exactly one candidate; error paths byte-identical |
-| R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
+| R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL, and on Windows (R 4.6.1 with Rtools45, whose gcc 14.3 builds the shim) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
 | Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm 66 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt; 38 `cftw_*` exports, the whole ABI 0.2 surface | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged; 2026-09-02 as runner stage `wasm` on Windows and CI, 392,000 cases | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
 | Node / JavaScript | `bindings/node/` | full package: the 38 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, the clause-5 surface, exact-decimal I/O | Windows 2026-09-02, node 22.19.0: 43 tests; 236,000-case vectors replay clean through the page's own module; decimal parsing checked against V8's strtod; 2026-09-02 as runner stage `node` on Windows and CI - the 392,000-case replay takes 4 s, the 43 unit tests 272 s on the Windows host and 126 s on ubuntu, a gap measured and not yet explained | loads the SAME wasm module as the browser page (sha256 checked, not assumed). Encodings are `Uint8Array`/`BigInt`, never a JS `number` - see Drop-ins below for why it is a drop-in for nothing |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
@@ -119,6 +119,31 @@ not be edited while a run is in progress: bash reads it as it goes,
 and a four-line insert during the Windows run's node stage put a
 syntax error at the next stage line; that run was repeated on the
 committed tree.
+
+**A Windows host with every toolchain, 2026-09-02.** The desktop was
+set up to run the whole standard set, and the recipe is short enough
+to keep. Nothing needs an administrator: gfortran and go are pacman
+packages in the MSYS2 that already builds libcft
+(`mingw-w64-x86_64-gcc-fortran`, `mingw-w64-x86_64-go`); Julia is the
+pinned 1.12.7 zip from julialang-s3, SHA-256 checked against the
+published checksums file, unpacked under `%LOCALAPPDATA%\Programs`;
+R 4.6.1 is CRAN's Inno installer with `/VERYSILENT /CURRENTUSER`,
+md5 checked against the master server's `md5sum.R-4.6.1.txt`, and
+Rtools45 the same way into `C:\rtools45`, where R's own Makeconf
+looks for it (an R without Rtools reaches for whatever `gcc` is on
+PATH and fails on the `.def` file it writes for the shim). Julia's
+and R's `bin` directories go on the user PATH; pacman's tools do
+not need to, because the runner looks in mingw64's bin directory
+and HOSTMAKE prepends it. Three things the runner and the Makefile
+carry so nobody has to: pacman's go is a trimmed binary that needs
+GOROOT, MSYS make hands recipes a stripped environment, and MSYS2's
+`env` drops an inherited GOROOT on the way to a native child while
+keeping one assigned on its own command line - so GOROOT travels as
+a make variable into the Makefile's WINENV block, beside the profile
+variables dotnet, julia and R also need there. With that, every
+language leg runs on the Windows host; `images` is the one stage
+Windows can never run, because XRT's xclbinutil is Linux-only, and
+the desktop's WSL distro runs that one with the rest.
 
 One wrinkle for whoever runs `make -C host examples-lang` on Windows
 next. Under MSYS2 make the recipe environment arrives stripped of
