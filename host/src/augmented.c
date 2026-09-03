@@ -373,9 +373,13 @@ static cft_status aug_validate(cft_device *dev, cft_format fmt,
         return CFT_OK;
     if (!a || !b || !r || !e)
         return CFT_ERR_INVALID_ARGUMENT;
-    /* r and e are two outputs of one operation: overlapping them would
-     * make the second write destroy the first, and no ordering of the
-     * writes makes that well defined. Either MAY alias an input. */
+    /* r and e are two outputs of one operation: writing both into one
+     * buffer has no well-defined ordering, so the identical-pointer
+     * case - the one a caller actually reaches by accident - is
+     * refused here rather than computed. A partial overlap is
+     * undefined and not policed, exactly as cft_convert's
+     * "d MUST NOT overlap a" is not policed. Either output MAY alias
+     * an input: each element is read before either is written. */
     if (r == e)
         return CFT_ERR_INVALID_ARGUMENT;
     return CFT_OK;

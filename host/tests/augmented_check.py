@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import (  # noqa: E402
-    FORMATS, PREC_CODE, vectors, is_nan,
+    FORMATS, PREC_CODE, vectors,
     FLAG_INEXACT, FLAG_OVERFLOW,
     one_bits, zero_bits, min_subnormal_bits, max_normal_bits,
 )

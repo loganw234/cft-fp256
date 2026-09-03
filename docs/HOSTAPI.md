@@ -787,6 +787,20 @@ fp32:
 | MPFR parity, the nine functions | 95,680 | zero value AND zero flag mismatches |
 | `cft.hpp` vs `cft.h`, every entry point twice | 3,267 at C++17 and again at C++20 | identical encodings and flags |
 
+And the clause-9.5 augmented operations (2026-09-03), where the oracle
+question has its own answer - MPFR has no roundTiesTowardZero, so the
+harness takes the exact value from MPFR and applies the tie rule
+itself:
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay (44 sets: 20 opcode, 20 transcendental, 4 augmented) | 724,531, of which 89,616 augmented | every case, BOTH outputs and flags, replayed twice |
+| `augmented_check.py`, the three vs the model | 149,112 comparisons at `--trials 400` | zero disagreements, per-element flags |
+| the pair identity `r + e == x op y`, exact integers, on the library's output | 80,209 pairs | exact, plus 8,316 residuals delivered rounded per 9.5's one non-representable case |
+| the FAR/NEAR alignment split, walked across its decision | 70,200 comparisons | C == model on every one |
+| MPFR parity, the three operations | 21,492 (5,373 per format) | zero value AND zero flag mismatches |
+| `cft.hpp` vs `cft.h`, every entry point twice | 4,311 at C++17 and again at C++20 | identical encodings and flags |
+
 The second table is the one that matters for tiles. It is the software
 statement of the property the hardware has to keep: cutting a
 reduction into k canonical ranges and folding the partials gives the

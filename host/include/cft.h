@@ -1023,11 +1023,14 @@ CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
  * HOST operations, like the clause-5 set and the transcendentals: no
  * cft_run pass is issued, no bus word is produced, `dev` is context,
  * `n` is arbitrary and the flag word is the OR across the batch. r and
- * e must not overlap each other; either may alias a or b, since each
- * element is read before either output is written. A tile-composed
- * route (a TwoSum, or an FMA residual for the product) is a plausible
- * later fast path and would have to reproduce these bits exactly; it is
- * not what runs today.
+ * e must not overlap each other - passing the same pointer for both is
+ * CFT_ERR_INVALID_ARGUMENT, and any other overlap is undefined - while
+ * either MAY alias a or b, since each element is read before either
+ * output is written. A tile-composed route (a TwoSum, or an FMA
+ * residual for the product) is a plausible later fast path and would
+ * have to reproduce these bits exactly; it is not what runs today, and
+ * the rounding is a reason as well as the arithmetic, since the tile's
+ * five attributes do not include this one.
  *
  * THE SPECIAL CASES, from 9.5 rather than from habit:
  *

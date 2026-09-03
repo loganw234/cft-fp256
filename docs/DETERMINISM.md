@@ -483,9 +483,21 @@ one exists inside `round_pack` (`RND_RTTZ` in the model,
 `CFT_SF_RTTZ` in the library, both numbered 16 - outside the three-bit
 attribute field on purpose) and is reachable only from these three
 operations, which have no argument to carry it. The gate that admits
-the five rejects it. An independent implementation is scored on that:
-the five attributes' bits are unchanged, which the whole conformance
-replay proves, and no attribute can produce this rounding.
+the five rejects it, and no attribute can produce this rounding.
+
+**The five attributes' bits are unchanged, and the conformance replay
+is not what proves it.** `make vectors` regenerates the sets from the
+current model, so a change that moved the model and the library
+together would replay clean; that argument would be circular. What
+proves it is the layer that shares no code with either:
+`python/tests/test_rounding.py` re-derives every attribute from exact
+rationals, `test_augmented.py` holds addition under all five against
+the same independent reference, and the MPFR campaign arbitrates the
+library against an outside implementation. As a one-off at the time of
+the change, the current model was also compared directly against the
+model as it stood at the preceding commit over add/sub/mul/fma/div/sqrt
+- 216,480 cases across five attributes and four formats, bit-identical
+including flags (docs/VALIDATION.md, 2026-09-03).
 
 The tie rule differs from roundTiesToEven **only at an exact midpoint
 whose lower neighbour has an odd last bit**, so an implementation that
