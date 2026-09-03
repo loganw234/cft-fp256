@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 5   /* 0.5: the phase-3 radian trig and hyperbolics */
+#define CFT_ABI_VERSION_MINOR 6   /* 0.6: table 9.1 complete, 5.12, 9.4, 9.5, 9.7 */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -104,8 +104,13 @@ extern "C" {
  * the nine correctly-rounded transcendentals below; 0.4 added the
  * eleven trigonometric functions whose argument reduction is exact -
  * sinPi, cosPi, tanPi, asin, acos, atan, atan2 and the four Pi-forms
- * of the inverses. A caller that needs one of those checks the number
- * rather than the header it compiled against. */
+ * of the inverses; 0.5 added sin, cos and tan of a radian argument and
+ * the six hyperbolics; 0.6 added the rest of table 9.1 (exp2m1, exp10,
+ * exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn), the
+ * character conversions of 5.12 with 9.7's payload operations, the
+ * augmented arithmetic of 9.5 and the remaining reductions of 9.4. A
+ * caller that needs one of those checks the number rather than the
+ * header it compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
 /* ---------------------------------------------------------------
