@@ -1,5 +1,10 @@
 # The transcendentals, correctly rounded
 
+**Phase 1** (ABI 0.3, 2026-09-02) is exp, expm1, exp2, log, log1p,
+log2, log10, pow and hypot; **phase 2** (ABI 0.4, 2026-09-03) is
+sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+and atan2Pi, and has its own section at the end of this file.
+
 exp, expm1, exp2, log, log1p, log2, log10, pow and hypot - phase 1 of
 the transcendental set, landed 2026-09-02 as ABI 0.3. This is the
 design, the proofs it rests on, and the measurements that were actually
@@ -497,6 +502,436 @@ reference that did not escalate.
   error model, the enclosure decision, the escalation and the exactness
   discipline all carry over unchanged - but the reduction is its own
   design.
+
+  *Written 2026-09-02, and half-answered the next day.* Phase 2 below
+  is the part of that set which needs NO reduction against pi - the
+  Pi-variants, whose reduction is x mod 2 on a dyadic operand, and the
+  inverse functions, which have nothing to reduce. It landed
+  2026-09-03 as ABI 0.4 and reused every piece of the machinery named
+  above. What is still not here is `sin`, `cos` and `tan` of a radian
+  argument, which is the reduction problem itself.
 - **A performance claim.** None is made. These calls are hundreds of
   multiprecision operations each; `docs/BENCHMARKS.md` has no row for
   them because none has been measured.
+
+---
+
+# Phase 2: the trigonometry that needs no reduction against pi
+
+sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+and atan2Pi - landed 2026-09-03 as ABI 0.4. Same promise, same
+evaluator, same three-way split, same loud refusal.
+
+The section above ends by saying that the rest of clause 9 needs one
+thing phase 1 did not: an argument reduction against pi, carried to
+hundreds of thousands of bits at fp256. **These eleven are exactly the
+functions that do not need it**, and that is the whole reason they are
+a phase of their own rather than part of the next one.
+
+- For the Pi-variants of the forward functions the reduction is
+  `x mod 2`, and every operand is a DYADIC RATIONAL, so the reduction
+  is a mask on the encoding and is exact at every magnitude.
+  `sinPi(2^262000)` is `+0` decided by integer arithmetic; `sin` of the
+  same argument would need pi to a quarter of a million bits before the
+  first series term could be written down.
+- The inverse functions take an argument in [-1, 1], or a ratio, so
+  there is nothing to reduce at all. pi enters only as a factor of the
+  ANSWER, at one multiplication's worth of precision.
+
+`sin`, `cos` and `tan` of a radian argument are still not here. That is
+phase 3, and it is the reduction problem rather than this one.
+
+## The exact cases, proved complete
+
+Phase 1's enumerations rest on Lindemann-Weierstrass and on unique
+factorisation. Phase 2's rest on two more theorems, and between them
+they make every table below finite and closed.
+
+**Niven's theorem** bounds the forward set. If r is rational and
+sin(pi r) is rational, then sin(pi r) is 0, +-1/2 or +-1; the tangent
+form says tan(pi r) is rational only when it is 0 or +-1. Every operand
+here is a dyadic rational, so r is rational and the theorem applies -
+and the +-1/2 case needs r = 1/6 + n and its friends, which is never
+dyadic. So:
+
+| function | exact exactly at | value |
+|---|---|---|
+| sinPi | the half-integers | `sinPi(n)` is a zero with the SIGN OF THE ARGUMENT; `sinPi(M/2)` for odd M is +1 when M = 1 (mod 4) and -1 when M = 3 (mod 4), times the argument's sign |
+| cosPi | the half-integers | `cosPi(n)` is `(-1)^n`; `cosPi(n + 1/2)` is `+0`, for every n and both signs of the argument |
+| tanPi | the quarter-integers | `tanPi(n)` is a zero whose sign is the argument's XOR the parity of n; `tanPi(M/4)` for odd M is +-1 by the same M mod 4 rule. The half-integers are a POLE, not a value |
+
+Everything else on the line is irrational, hence not a dyadic rational,
+hence not a rounding boundary, hence decided by the enclosure in finite
+time. That is a proof and not an observation.
+
+**Hermite-Lindemann** bounds the inverse set, and bounds it hard. If
+theta is a nonzero algebraic number then `e^(i theta)` is
+transcendental; but `sin theta = x` with x algebraic makes
+`z = e^(i theta)` a root of `z^2 - 2ix z - 1`, hence algebraic. So asin
+of a nonzero dyadic rational is 0 or transcendental, and the same
+argument runs for cos and tan. Therefore:
+
+| function | exact exactly at | value |
+|---|---|---|
+| asin | +-0 | +-0 |
+| atan | +-0 | +-0 |
+| acos | 1 | +0 |
+| atan2 | y = +-0 with x > 0 | +-0 |
+
+and nowhere else. `asin(1)` is pi/2 and INEXACT; `acos(-1)` is pi and
+inexact; `atan2(+-0, -0)` is +-pi and inexact. Every other row of
+9.2.1's atan2 table is an irrational multiple of pi.
+
+**Niven again, for the Pi-variants of the inverses**, and here the
+table is much larger, because dividing by pi turns those multiples into
+dyadic rationals. `asinPi(x) = r` means `x = sin(pi r)`; r dyadic and x
+rational force `sin(pi r)` into {0, +-1/2, +-1}, and of the r that
+produce those only 0 and +-1/2 are themselves dyadic:
+
+| function | exact at | value |
+|---|---|---|
+| asinPi | +-0, +-1 | +-0, +-1/2 |
+| acosPi | 1, +-0, -1 | +0, 1/2, 1 |
+| atanPi | +-0, +-1, +-inf | +-0, +-1/4, +-1/2 |
+| atan2Pi | every axis and every diagonal | 0, +-1/4, +-1/2, +-3/4, +-1 |
+
+`atan2Pi`'s diagonals are the rows `|y| == |x|`, which is an exact
+comparison on the encoding: +-1/4 for a positive x and +-3/4 for a
+negative one. Its axes are the zero and infinity rows. And the
+completeness argument is the tangent form of Niven: a dyadic multiple
+of pi has a rational tangent only at 0, +-1 and the pole, so `y/x` must
+be 0, +-1 or undefined, which is exactly the axes and the diagonals.
+
+**One case worth stating because it is not exact**: `asinPi(1/2)` is
+exactly 1/6. That is RATIONAL - Niven's theorem produces it - and it is
+NOT a dyadic rational, so it is not a rounding boundary, so it is
+inexact and the enclosure decides it in finite time like any other
+irrational. The distinction between "rational" and "dyadic rational" is
+the whole of why the enumeration stops where it does, and `acosPi(1/2)
+= 1/3` is the same story.
+
+## The neighbour rules, and where each threshold comes from
+
+Six families, each derived the way phase 1 derives its four: bound the
+distance from the representable value, compare against a quarter of the
+grid step there, and reduce to an integer condition on the argument's
+exponent e.
+
+| family | the true value | threshold |
+|---|---|---|
+| `asin(x)` | strictly ABOVE x: `asin(x) - x = x^3/6 + 3x^5/40 + ... > 0`, and at most `0.2\|x\|^3` for \|x\| <= 1/4 | `2e + p + 2 <= 0` |
+| `atan(x)` | strictly BELOW x: `atan(x) - x = -x^3/3 + x^5/5 - ...`, alternating and decreasing, so at most `\|x\|^3/3` | `2e + p + 3 <= 0` |
+| `cosPi`, and `sinPi` next to a half-integer | strictly below 1: `1 - cos(u) <= u^2/2` with `u = pi\|s\|`, so below `4.94 s^2` | `2v + p + 6 <= 0`, v the reduced argument's exponent |
+| `acosPi(x)` | beside 1/2, below for a positive x and above for a negative one: `\|acosPi(x) - 1/2\| = \|asin(x)\|/pi <= 0.33\|x\|` | `e <= -(p+2)` |
+| `atanPi(x)` for a huge x | below 1/2 by `atan(1/\|x\|)/pi <= 1/(pi\|x\|)` | `e >= p + 1` |
+| `atan2Pi` beside 1 and 1/2 | below 1 for a tiny quotient against a negative x; beside 1/2 for a dominant y | `ey - ex <= -(p+1)`, `ex - ey <= -(p+2)` |
+| `atan2(y, x>0)` beside an exact quotient | below `y/x`, by the atan rule applied to the quotient | `2 q + p + 3 <= 0` on the quotient's exponent |
+
+Each derivation is the same shape. For asin: `0.2 < 2^-2.32` and
+`|x|^3 < 2^(3e+3)`, so the excess is below `2^(3e+0.68)`; the grid step
+at that magnitude is at least `2^(e-p+1)` and a quarter of it is
+`2^(e-p-1)`; `3e + 0.68 < e - p - 1` reduces to `2e < -p - 1.68`, and
+`2e + p + 2 <= 0` is the integer condition that implies it. For atan the
+constant is `1/3 < 2^-1.58` and the same algebra gives `2e + p + 3 <= 0`.
+For cosPi, `4.94 < 2^2.31` and `s^2 < 2^(2v+2)` give `2v + 4.31 < -p-1`,
+hence `2v + p + 6 <= 0`.
+
+**Which functions have no rule, and why that is the interesting half.**
+`asinPi` and `atanPi` of a tiny argument are about `x/pi`, which is not
+next to anything the format holds - the ordinary enclosure resolves
+them, and the answer is NOT x. `acos` near 1 behaves like
+`sqrt(2(1-x))`, which is nowhere near a representable neighbour of
+anything. `asin` and `atan2` near their pi/2 and pi corners sit beside
+numbers the format does not hold, so nothing has to be decided by a
+side there. A neighbour rule applied where it is not needed would be a
+wrong answer waiting to happen; the six above are the six that are.
+
+**The witness needed generalising.** Phase 1's `round_neighbour` starts
+from a representable ENCODING. That is not enough for atan2, whose
+anchor is the quotient `y/x` - which is exactly a dyadic rational
+whenever x's odd significand divides y's, and which can land on a
+subnormal MIDPOINT rather than on the grid. `atan2(minSubnormal, 2)` is
+that case: the quotient is `minSub/2`, not a representable number at
+all, and a value just below a midpoint rounds differently from the
+midpoint itself. `round_side` (C) and `_round_dyadic_side` (the model)
+therefore take an exact dyadic `m * 2^e`, derive the grid step 2^g at
+that magnitude, and place the witness at `m * 2^e -+ 2^(g-3)` - an
+eighth of a step. Every value strictly inside the quarter-step rounds
+identically under all five attributes, to V's own rounding when V is a
+grid point and to the grid point on the witness's side when V is a
+midpoint, so the witness answers for the true value and `round_pack`
+derives the flags.
+
+Why the quotient's odd part never needs more than p bits: `|y|/|x| =
+(My/Mx) * 2^(Ey-Ex)` with both odd parts, so it is dyadic exactly when
+Mx divides My, and the quotient's odd part is then `My/Mx`, no wider
+than My. One exact integer division decides it.
+
+## pi, generated and derived twice
+
+`pi` and `1/pi` join ln2, log2e, ln10 and log10e in
+`host/src/mp_consts.h`, at 1088 bits, emitted by
+`host/tools/gen_mp_consts.py` from mpmath. Nothing is transcribed.
+
+The reciprocal self-check the C already ran per call now covers the new
+pair - but `pi * (1/pi) == 1` is a weaker statement than it looks: a
+generator that emitted pi/2 and 2/pi would pass it. It says the two
+halves agree with each other, not that either is pi. So pi gets an
+INDEPENDENT derivation on both sides:
+
+- **In C**, `cft_mp_consts_selfcheck()` re-sums Machin's
+  `pi/4 = 4 atan(1/5) - atan(1/239)` at 256 bits, out of small-integer
+  arithmetic that touches no stored constant, and requires the stored
+  value to match within `2^-(256-32)`. That derivation is cached - it
+  is a property of compile-time data, and re-deriving it on every call
+  would cost more than the transcendental it guards - while the three
+  cheap reciprocal products still run every time, as they always did. A
+  failure is sticky: a bad header must not become good on the second
+  call.
+- **In Python**, `python/tests/test_mp_consts.py` does the same sum in
+  exact `Fraction` arithmetic at the header's full 1088 bits, with no
+  mpmath in it at all, and requires the committed limbs to be the true
+  value truncated toward zero.
+
+Two constants, not four: `pi/2` and `pi/4` are exact shifts of pi, and
+`2/pi` an exact shift of `1/pi`.
+
+**No argument-reduction headroom is consumed.** In phase 1, `k` in
+`t = k ln2 + s` is bounded by `emax + man_w`, and ln2 has to be that
+many bits sharper. Phase 2's reduction produces `|s| <= 1/4` by masking,
+and pi multiplies it once; there is no large multiplier anywhere, which
+is the same fact as "no reduction against pi", stated in bits.
+
+## The algorithms, with their error bounds
+
+**sinPi, cosPi, tanPi.** Reduce `|x| mod 2` to `k/2 + s` with `k` in
+0..4 and `|s| <= 1/4`, exactly, by masking the encoding. `S == 0`
+exactly when |x| is a half-integer, which is where every exact case of
+the family lives, so the enclosure path never sees one. Then
+
+    |sin(pi t)| = sin(pi|s|) when k is even, cos(pi|s|) when it is odd
+    |cos(pi t)| = the other way round
+    |tan(pi t)| = the quotient
+
+and the SIGNS come off the quadrant exactly - `k mod 4` and the sign of
+S - because no evaluation decides the sign of a value it is about to
+round. `mp_sincos` sums both series at once: `term_n = v^n/n!` with
+`n mod 4` selecting one of four accumulators, so the sine and the
+cosine are each a difference of two like-signs sums.
+
+**asin, acos, atan, atan2** all reduce to one routine, `mp_atan_pos`.
+It reciprocates above 2 - `atan(t) = pi/2 - atan(1/t)`, where
+`1/t <= 1/2` puts `atan(1/t)` below 0.464 and the difference above 1.1,
+so the subtraction loses no bits - and otherwise applies three exact
+halvings, `atan(u) = 2 atan(u/(1 + sqrt(1+u^2)))`, which take the
+largest argument it ever sees down to 0.1421, and then the series.
+Three halvings cost three square roots and three divisions and no
+cancellation at all: `1 + u^2` and `1 + sqrt` are both like-signs adds.
+
+    asin(x)  = atan(|x| / r)          r = sqrt((1-|x|)(1+|x|))
+    acos(x)  = atan(r / |x|)          for a positive x
+             = pi - atan(r / |x|)     for a negative one
+    atan(x)  = atan(|x|)
+    atan2    = atan(|y|/|x|), or pi - that when x < 0
+
+The product form `(1-|x|)(1+|x|)` rather than `1 - x^2` is the same
+trick phase 1's `log(m')` uses: for |x| just below 1 the factor
+`1 - |x|` is EXACT at the working precision, so the cancellation
+amplifies an error of zero and costs nothing, where `1 - x^2` formed
+directly would lose every bit the answer has. `acos` uses
+`atan(r/|x|)` rather than `pi/2 - asin(x)` for the same reason in the
+other direction: for x just below 1 the difference form cancels the
+whole answer away, and this one computes a small angle as a small
+angle. Where a subtraction remains - `pi - a` for a negative operand,
+`pi/2 - a` in the reciprocal branch - the subtrahend is bounded below
+pi/2 and below 0.464 respectively, so at most one bit is charged.
+
+**Both series split their terms.** The positive and the negative terms
+go into separate accumulators and are subtracted once at the end,
+instead of being added alternately into one running sum. That is not
+tidiness. `cft_mp_add`'s unlike-signs rule charges a factor of two per
+step even when nothing cancels, because the result can be half the
+larger operand; over the hundred and thirty terms `mp_atan_series`
+needs at the deepest working precision that is 2^65 and the bound
+saturates. Split in two it is ONE doubling in total, and the
+accumulators themselves only ever add like signs. The final
+subtraction is safe by construction: for sin the positive part is
+`v + v^5/120 + ...` and the negative `v^3/6 + ...`, so with
+`|v| <= pi/4` the difference keeps more than four fifths of the larger;
+for cos it keeps two thirds; for atan, more than nine tenths.
+
+**The Pi-variants of the inverses** multiply by the generated `1/pi`. A
+division by pi would do as well and cost sixty times more; the constant
+carries its own two units of error and the multiply adds three.
+
+## Special values and flags, all of 9.2.1
+
+Every row below was transcribed from the standard and then CONFIRMED
+against MPFR 4.2.2 - the mingw64 build on this host, and the first
+release line to carry `mpfr_sinpi`, `mpfr_cospi`, `mpfr_tanpi` and the
+Pi-variants of the inverses (they arrived in 4.2.0) - before it was
+written down. Where the two could have differed, the probe is quoted.
+
+- `sinPi(+-0) = +-0`. `sinPi` of an INTEGER n is a zero with the sign
+  of the ARGUMENT, not with the parity of n: measured,
+  `sinpi(1) = +0`, `sinpi(3) = +0`, `sinpi(-1) = -0`. That keeps sinPi
+  odd, which is the property the standard does fix; periodicity cannot
+  also be honoured in the sign, and is not.
+- `sinPi(M/2)` for odd M is `+-1`: `+1` when `M = 1 (mod 4)`, `-1` when
+  `M = 3 (mod 4)`, times the argument's sign.
+- `cosPi(+-0) = 1`, `cosPi(n) = (-1)^n`, and `cosPi(n + 1/2) = +0` for
+  every n and BOTH signs of the argument. cosPi is even, so that zero
+  has no sign to carry, and MPFR delivers `+0` throughout.
+- **`tanPi` is `sinPi/cosPi` in every respect, signs included.**
+  `tanpi(1) = -0` - because `sinPi(1)` is `+0` and `cosPi(1)` is `-1` -
+  and `tanpi(2) = +0`, `tanpi(-1) = +0`, `tanpi(-2) = -0`. That is the
+  row an implementation reaching for "tanPi is odd, so tanPi(n) has the
+  sign of n" gets wrong; both rules hold, and the quotient rule is the
+  one that also fixes the parity.
+- **tanPi at a half-integer is `+-infinity` with divideByZero raised.**
+  Measured: `tanpi(1/2) = +Inf`, `tanpi(3/2) = -Inf`, `tanpi(5/2) =
+  +Inf`, `tanpi(-1/2) = -Inf`, all with MPFR's divide-by-zero flag set.
+  The sign is sinPi's, since cosPi there is `+0`. 754-2019 7.3 raises
+  divideByZero exactly when an operation on finite operands has an
+  exact infinite result, which is what a pole is, so the standard's
+  general rule and MPFR's behaviour agree and the contract follows
+  both.
+- `tanPi(M/4)` for odd M is `+-1` by the same `M mod 4` rule.
+- **tanPi cannot overflow at any format on this ladder.** A
+  representable argument cannot get closer than `2^-p` to a pole - the
+  binade [1/2, 1) has that ulp and no binade does better, and every
+  value at or above `2^(p-1)` is an integer or a half-integer exactly -
+  so `|tanPi| <= 1/(pi 2^-p) < 2^p`, which is far inside emax at all
+  four rungs (24 against 127, 53 against 1023, 113 against 16383, 237
+  against 262143). Overflow cannot occur anywhere in this set.
+- `sinPi`, `cosPi` and `tanPi` of an infinity are **invalid**: there is
+  no limit there. MPFR returns NaN and sets its NaN flag.
+- `asin`, `acos`, `asinPi` and `acosPi` of an operand with `|x| > 1`
+  are invalid, infinities included.
+- `atan(+-inf) = +-pi/2`; `atanPi(+-inf) = +-1/2`, and that one is
+  EXACT.
+- **`atan2(+-0, -0) = +-pi`, and `atan2Pi(+-0, -0) = +-1`.** A minus
+  zero denominator names the negative real axis, so the answer is pi
+  and not zero. It is the row implementations most often miss, and its
+  Pi form is exact where the radian form is an inexact rounding of pi -
+  which is, in one line, the reason atan2Pi is a separate function.
+  `atan2(+-0, +0) = +-0`; `atan2(y, +-0) = +-pi/2`;
+  `atan2(+-inf, +inf) = +-pi/4` and `(+-inf, -inf) = +-3pi/4`.
+- A quiet NaN operand does NOT outrank atan2's table the way it
+  outranks pow's: `atan2` of a NaN is a NaN.
+- A SIGNALING NaN raises invalid and delivers the canonical quiet NaN,
+  as everywhere else in this contract.
+- **Underflow can occur and comes through `round_pack` like everything
+  else.** `sinPi` of a tiny x is about `pi x` and `atanPi` of one is
+  about `x/pi`; at the smallest subnormal the first rounds to three
+  subnormals and the second to zero (or to one subnormal upward), both
+  tiny and inexact. `atan2(minSubnormal, maxFinite)` is about
+  `2^-524522` at fp256 and underflows to zero with the same flags.
+
+## What phase 2 changed in phase 1's machinery
+
+Two defects, both pre-existing, both found by building this phase's
+gates rather than by reasoning about them.
+
+**`mpfr_check.c`'s transcendental pool had an inverted success test.**
+`enc_from_val` returns 1 on success; `build_tpool` tested it against 0.
+Every directed operand it meant to add - the exp2 integers, the log2
+powers of two, the log10 powers of ten, the neighbours of 1, the
+arguments below `2^-(p+3)` - was therefore discarded and a zeroed
+encoding kept in its place, and the phase-1 MPFR campaign ran on
+`build_pool`'s specials plus randoms. Found because the new
+trigonometric pool came out at 42 entries where 192 were asked for.
+
+**The exact-cancellation repair in `cft_mp_add` was unsound.** Phase 1
+found that two inexact approximations cancelling to zero destroy the
+error bound rather than widening it, and repaired it by returning the
+larger operand with a SATURATED bound, on the reasoning that the
+enclosure would then reach zero. It does not: `err` saturates at 2^40
+while the significand is `2^(W-1)`, so at any working precision above
+41 bits the enclosure is narrow, decidable and wrong. With the pool
+fixed, that showed up as `pow(2 + ulp, ~10^4)` at fp128 overflowing
+where the true value is about `2^9888`. The true difference is bounded
+only in ABSOLUTE terms, which a relative bound around any value cannot
+express, so it is now a FAILURE - and `tr_ziv` escalates on a failure
+below the cap rather than refusing, because a failure there means the
+precision was too coarse and not that no precision can decide. Only a
+failure AT the cap is a refusal. The same change fixes a second
+symptom: at 64 bits `log(1 + 2^-112)` comes out as `2 atanh(1/2)`, the
+exponential's reduction multiple lands past its own cap, and
+`mp_exp_full` used to refuse outright.
+
+Both were invisible to every gate the project had until the pool was
+repaired, and both are in code the contract's own working precisions
+never reach. That is what the forced-low-precision run is for.
+
+## What was actually run
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2 (mingw64) with gmpy2 2.2.1's
+own MPFR 4.2.1 for the Python side, CPython 3.12, 2026-09-03.
+
+| check | count | result |
+|---|---|---|
+| `python/tests/test_transcend.py` | 567 tests | pass |
+| `python/tests/test_mp_consts.py` | 4 tests | pass |
+| the whole `python/tests` suite | 941 tests, 1 skipped | pass |
+| `host/tests/transcend_check.py`, C vs the model, twenty functions | 154,269 comparisons | C == model on every one, bits and flags |
+| the same, forced to start below the precision it needs | 143,069 comparisons | identical through the escalation path |
+| MPFR parity, all twenty, four formats, five attributes | 414,008 cases total, of which 175,680 transcendental (95,680 phase 1, 80,000 phase 2) | **zero value mismatches, zero flag mismatches** |
+| the same campaign with `CFT_TRANSCEND_MINPREC=64` | 414,008 cases, 38,338 escalations | zero mismatches |
+| `cft_conformance` replay | 40 sets, 365,845 cases, of which 129,845 transcendental in 20 sets | every case, twice - per element and as arrays |
+| `cft.hpp` vs `cft.h` | 3,751 checks at C++17 and again at C++20 | identical encodings and flags |
+| the cftmpfr drop-in | 384 tests | pass, including the four inverse functions bit-for-bit against gmpy2 |
+| `api-test` contract checks | all | pass |
+
+**Escalation, measured.** Over the MPFR campaign's 175,680
+transcendental elements, 74,755 reached the Ziv loop and it escalated
+**zero** times: every one was decided at the first attempt, and the
+deepest working precision used was 514 bits - fp256's `2p + 40`. 18,520
+elements were decided exactly and 43,155 by a neighbour's side rather
+than by any precision at all. **No input reached the cap.** Over
+`transcend_check.py`'s pools the model escalated 36 times, all of them
+still the phase-1 `pow(1+u, -(1+u))` family, and the deepest precision
+any input needed was 832 bits - the fp256 cap itself - for that family.
+No phase-2 input escalated at all at the contract's own precisions.
+
+Forced low: `CFT_TRANSCEND_MINPREC=64` drives **38,338 escalations**
+through the MPFR campaign and finds the same answers, and
+`transcend_check.py --min-prec 64` drives the C's escalation path
+against an UNESCALATED model over 143,069 comparisons with identical
+results. That is the run that found both defects above.
+
+**Negative control**, run and restored the same day. Inverting one
+character - the `away` argument of atan's neighbour witness in
+`do_atan_family`, so the true value is claimed to lie above its
+argument rather than below - is caught by `api-test` (1 FAILED, at the
+new `atan(min subnormal)` toward-zero case), by `transcend_check.py`
+(fp32 rtz, the smallest subnormal: `0x1` where the model says `0x0`),
+by the conformance replay (which stops at 68,542 cases), by MPFR parity
+(from the first fp32 atan rtz row), and by the cftmpfr drop-in against
+gmpy2 (12 tests). `cpptest` is deliberately not on that list: it issues
+each entry point through `cft.hpp` and through `cft.h` on the same
+library, so a library defect moves both sides and it is a marshalling
+check by construction.
+
+## What phase 3 inherits
+
+Everything except the reduction. `mp_sincos` computes sin and cos of a
+reduced argument in [0, pi/4] and is exactly what `sin(x)` needs once
+`x mod (pi/2)` exists; `mp_atan_pos`, `round_side`, the split-series
+discipline, the error model, the enclosure decision, the schedule, the
+cap and the exactness machinery all carry over unchanged. What phase 3
+has to build is the one thing this phase was defined to exclude:
+`x mod (pi/2)` for an argument up to `2^262143`, which needs `2/pi` to
+about 524,000 bits and a Payne-Hanek-style reduction, plus its own
+exactness argument (`sin(x)` for a nonzero dyadic x is transcendental,
+so the exact cases are only the zeros - but the WORST CASE of the
+reduction is the famously deep part, and it is a measurement rather
+than a theorem).
+
+The hyperbolics need neither reduction nor a new constant: `sinh`,
+`cosh`, `tanh` and their inverses are `exp` and `log` in different
+clothes, with the same cancellation questions phase 1 already answers
+(`sinh(x) = expm1(x)(expm1(x)+2)/(2(expm1(x)+1))` for a small x, and
+`asinh(x) = log1p(x + x^2/(1 + sqrt(1+x^2)))`), and their exact cases
+are the zeros by Lindemann-Weierstrass. They are a smaller job than
+either phase so far.

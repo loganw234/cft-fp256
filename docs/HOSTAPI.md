@@ -388,6 +388,85 @@ entry points rather than opcodes - a case names a FUNCTION, and there
 is no opcode field to put that in - which also means a consumer that
 predates ABI 0.3 reads exactly the files it always read.
 
+## The phase-2 trigonometrics (ABI 0.4)
+
+`cft_sinpi`, `cft_cospi`, `cft_tanpi`, `cft_asin`, `cft_acos`,
+`cft_atan`, `cft_atan2`, `cft_asinpi`, `cft_acospi`, `cft_atanpi` and
+`cft_atan2pi`, added 2026-09-03 in one additive bump. **Correctly
+rounded** at every format under every attribute, with clause 9.2.1's
+special values and exact flags, on exactly the terms the nine above
+are.
+
+**What these eleven have in common is what they do NOT need.** The
+phase-1 note said the rest of clause 9 wanted an argument reduction
+against pi carried to hundreds of thousands of bits at fp256. These are
+the functions that want no such thing:
+
+- `sinPi`'s reduction is `x mod 2`, and every operand is a dyadic
+  rational, so that reduction is a MASK on the encoding and is exact at
+  every magnitude. `sinPi` of the largest finite binary256 is a zero
+  decided by integer arithmetic.
+- The inverse functions take an argument in [-1, 1] or a ratio, so
+  there is nothing to reduce; pi enters only as a factor of the answer.
+
+`sin`, `cos` and `tan` of a RADIAN argument are a different problem and
+are not here.
+
+The signatures follow the nine exactly, and `atan2` takes y first as C
+does:
+
+```c
+cft_sinpi  (dev, fmt, rnd, a,    d, n, &flags);
+cft_atan2  (dev, fmt, rnd, y, x, d, n, &flags);
+cft_atan2pi(dev, fmt, rnd, y, x, d, n, &flags);
+```
+
+**The exact cases are a much larger table than phase 1's, and every one
+of them raises nothing.** Niven's theorem bounds the forward set:
+`sin(pi r)` is rational for a rational r only at 0, +-1/2 and +-1, and
+a dyadic r cannot reach +-1/2, so `sinPi` and `cosPi` are exact exactly
+at the half-integers and `tanPi` exactly at the quarter-integers (with
+the half-integers a pole). Hermite-Lindemann bounds the inverse set:
+`asin`, `atan` and `atan2` of a nonzero dyadic rational are
+transcendental, so they are exact only where the answer is a zero, and
+`acos` only at `acos(1)`. The Pi-forms get Niven's larger table -
+`asinPi(+-1) = +-1/2`, `acosPi(+-0) = 1/2`, `acosPi(-1) = 1`,
+`atanPi(+-1) = +-1/4`, `atanPi(+-inf) = +-1/2`, and `atan2Pi` exact on
+every axis and every diagonal. `asinPi(1/2)` is exactly 1/6, which is
+rational but NOT dyadic, so it is inexact and still decidable - the
+distinction is the whole reason the enumeration is finite.
+
+Rows a porter should not have to infer, each confirmed against MPFR
+4.2.2 before it was written down:
+
+- `sinPi` of an integer is a zero with the sign of the ARGUMENT, not of
+  `(-1)^n`: `sinPi(1) = +0`, `sinPi(-1) = -0`.
+- `cosPi(n + 1/2) = +0` for every n and both signs, because cosPi is
+  even and that zero has no sign to carry.
+- `tanPi` is `sinPi/cosPi` in every respect, signs included, so
+  `tanPi(1) = -0`. At a half-integer it is `+-infinity` with
+  **divideByZero** - 7.3's rule for an exact infinity from finite
+  operands.
+- **`tanPi` cannot overflow at any format here.** A representable
+  argument is at least `2^-p` from a pole, so `|tanPi| < 2^p`, far
+  inside emax at all four rungs. Overflow cannot occur anywhere in this
+  set; underflow can, and comes through the same `round_pack` as
+  everything else.
+- `sinPi`, `cosPi` and `tanPi` of an infinity are invalid - there is no
+  limit there - and `asin`/`acos` and their Pi forms are invalid for
+  `|x| > 1`.
+- **`atan2(+-0, -0) = +-pi` and `atan2Pi(+-0, -0) = +-1`**: a minus
+  zero denominator names the negative real axis. It is the row
+  implementations most often miss, and the Pi form is EXACT where the
+  radian form is an inexact rounding of pi - which is, in one line, why
+  atan2Pi exists as a separate function.
+- A quiet NaN does NOT outrank atan2's table the way it outranks pow's.
+
+The vectors carry them in the same `<fmt>-transcend[-<rnd>].jsonl`
+files, which now name twenty functions rather than nine. A consumer
+built against ABI 0.3 and handed a 0.4 set fails on the NAME of a
+function it does not know, which is the refusal it should give.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future
