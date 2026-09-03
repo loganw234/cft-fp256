@@ -519,12 +519,14 @@ def test_rndna_inexact_conversions_refused():
     assert ctx.from_int(3).to_int() == 3            # exact: fine
     with pytest.raises(ValueError, match="ties"):
         ctx.from_int((1 << 30) + 1)
-    if gmpy2 is not None:
-        # an EXACT decimal is fine under any attribute...
-        assert ctx.from_str("0.5").to_float() == 0.5
-        # ...only one that actually needs rounding refuses
-        with pytest.raises(ValueError, match="ties"):
-            ctx.from_str("0.1")
+    # from_str no longer refuses under RNDNA: since the 0.6 step it
+    # rounds through the LIBRARY's decimal parse, which implements the
+    # attribute MPFR does not have. The refusal above is the from_int
+    # route, which still goes through gmpy2.
+    assert ctx.from_str("0.5").to_float() == 0.5
+    away = ctx.from_str("16777217")          # exactly halfway at binary32
+    assert away.to_bits() == 0x4b800001, hex(away.to_bits())
+    assert Context(24).from_str("16777217").to_bits() == 0x4b800000
 
 
 def test_gmpy2_absent_paths(monkeypatch):
@@ -533,8 +535,11 @@ def test_gmpy2_absent_paths(monkeypatch):
     monkeypatch.setattr(core, "gmpy2", None)
     assert ctx.from_int(10).to_int() == 10
     assert exact.to_float() == 1.5
-    with pytest.raises(RuntimeError, match="gmpy2"):
-        ctx.from_str("0.1")
+    # from_str needs no gmpy2 since the 0.6 step - it is the library's
+    # own decimal parse now, and this is the check that says so.
+    assert ctx.from_str("0.1").to_decimal(17) == "1.0000000000000000e-1"
+    assert ctx.from_decimal("0.1").same_bits(ctx.from_str("0.1"))
+    assert ctx.from_hex("0x1.8p+1").to_decimal() == "3e+0"
     with pytest.raises(RuntimeError, match="gmpy2"):
         exact.to_mpfr()
     third = ctx.div(ctx.from_int(1), ctx.from_int(3))
@@ -1170,3 +1175,201 @@ def test_p3_tiny_arguments_take_a_side(prec):
         got = getattr(ctx, fn)(ctx.from_bits(1))
         assert got.same_bits(want), (fn, mode, got.to_str())
         assert tuple(ctx.flag_names(ctx.last_flags)) == ("inexact",), (fn, mode)
+
+
+# ---------------------------------------------------------------------
+# Character sequences (754-2019 5.12) and NaN payloads (9.7)
+#
+# Part of the 0.6 step, and the first conversions in this package that
+# need no optional dependency at all: the rounding is the library's,
+# not gmpy2's. So the tests here run on a bare box, and the ones that
+# compare against gmpy2 are extra rather than load-bearing.
+#
+# What a binding can break in this area is the shape rather than the
+# arithmetic - the sizing protocol, the batch marshalling, which flag
+# word gets recorded, and whether a refusal reaches the caller as a
+# refusal. That is what these attack.
+# ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_decimal_digits_is_pmin(prec):
+    """5.12.2's Pmin, from the LIBRARY rather than from a table here:
+    9, 17, 36 and 73 for the four rungs."""
+    assert Context(prec).decimal_digits == {24: 9, 53: 17, 113: 36,
+                                            237: 73}[prec]
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU", "RNDNA"))
+def test_decimal_round_trip_at_pmin(prec, mode):
+    """to_decimal(Pmin) then from_decimal reproduces the encoding under
+    a nearest attribute - 5.12's opening requirement. The directed
+    attributes are checked for the weaker property that actually holds
+    there: the sequence still names a value on the right side."""
+    ctx = Context(prec, rounding=mode)
+    h = ctx.decimal_digits
+    for bits in pool(prec, count=24, seed=31):
+        f = ctx.from_bits(bits)
+        if f.is_nan:
+            continue
+        back = ctx.from_decimal(f.to_decimal(h))
+        if mode in ("RNDN", "RNDNA"):
+            assert back.same_bits(f), (mode, hex(bits), f.to_decimal(h))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_exact_decimal_round_trips_in_every_attribute(prec):
+    """The EXACT conversion writes the value and nothing else, so
+    reading it back cannot round and cannot raise - in any attribute.
+    That is a stronger claim than the Pmin round trip and the one the
+    exact mode exists to make."""
+    for mode in ("RNDN", "RNDZ", "RNDD", "RNDU", "RNDNA"):
+        ctx = Context(prec, rounding=mode)
+        for bits in pool(prec, count=10, seed=32):
+            f = ctx.from_bits(bits)
+            if f.is_nan or f.is_inf:
+                continue
+            text = f.to_decimal()
+            back = ctx.from_decimal(text)
+            assert back.same_bits(f), (mode, hex(bits), text[:60])
+            assert ctx.last_flags == 0, (mode, hex(bits))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_hex_round_trips_and_is_exact(prec):
+    ctx = Context(prec)
+    for bits in pool(prec, count=16, seed=33):
+        f = ctx.from_bits(bits)
+        if f.is_nan:
+            continue
+        back = ctx.from_hex(f.to_hex())
+        assert back.same_bits(f), (hex(bits), f.to_hex())
+        assert ctx.last_flags == 0
+    assert ctx.from_hex("0x1.8p+1").to_decimal() == "3e+0"
+    # 5.12.3's grammar requires the binary exponent
+    with pytest.raises(cftmpfr.CftError):
+        ctx.from_hex("0x1.8")
+    # and the hex parser is not the decimal one
+    with pytest.raises(cftmpfr.CftError):
+        ctx.from_hex("1.5")
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_specials_and_payloads_survive_the_round_trip(prec):
+    """5.12.1's words, including the payload suffix 6.2.3 asks language
+    standards to provide. A signaling NaN comes back SIGNALING and
+    raises nothing on the way, which is the spelling this contract
+    chose out of the two 5.12.1 offers."""
+    ctx = Context(prec)
+    fi = ctx._fi
+    top = 1 << (fi.man_w - 1)
+    allones = ((1 << fi.exp_w) - 1) << fi.man_w
+    for bits in (allones | top,                          # canonical qNaN
+                 allones | top | 5,                      # qNaN, payload 5
+                 allones | 1,                            # sNaN, payload 1
+                 allones | (top - 1),                    # sNaN, max payload
+                 (1 << (fi.width - 1)) | allones | top | 3):
+        f = ctx.from_bits(bits)
+        ctx.clear_flags()
+        text = f.to_decimal()
+        assert ctx.from_decimal(text).same_bits(f), (hex(bits), text)
+        assert ctx.from_hex(text).same_bits(f), (hex(bits), text)
+        assert ctx.flags == 0, (hex(bits), text)
+    for text, sign in (("inf", 0), ("-inf", 1), ("INFINITY", 0)):
+        f = ctx.from_decimal(text)
+        assert f.is_inf and f.sign == sign
+    assert ctx.from_decimal("-0").sign == 1
+    assert ctx.from_decimal("0").to_decimal(9) == "0"
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_from_decimal_refuses_rather_than_guesses(prec):
+    ctx = Context(prec)
+    for s in ("", "+", ".", "1e", "1 ", " 1", "1.5.5", "1,5", "0x1p+0",
+              "nan()", "nan(0x)", "1_000"):
+        with pytest.raises(cftmpfr.CftError):
+            ctx.from_decimal(s)
+    # a payload the format cannot hold is in the syntax and refused
+    with pytest.raises(cftmpfr.CftError):
+        ctx.from_decimal("nan(0x%x)" % (1 << (ctx._fi.man_w - 1)))
+    with pytest.raises(TypeError):
+        ctx.from_decimal(1.5)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_batch_from_decimal_equals_the_scalar_path(prec):
+    """The batch path against the scalar path, which is this file's
+    standing question for every operation - here with the flag word as
+    the OR across the batch."""
+    ctx = Context(prec)
+    seqs = []
+    for bits in pool(prec, count=20, seed=34):
+        f = ctx.from_bits(bits)
+        if f.is_nan or f.is_inf:
+            continue
+        seqs.append(f.to_decimal(ctx.decimal_digits))
+    seqs += ["0.1", "1e400", "1e-400", "inf", "-0", "nan(0x1)"]
+    ctx.clear_flags()
+    got, fl = batch.from_decimal(ctx, seqs)
+    want, acc = [], 0
+    single = Context(prec)
+    for s in seqs:
+        want.append(single.from_decimal(s))
+        acc |= single.last_flags
+    assert len(got) == len(want)
+    for a, b, s in zip(got, want, seqs):
+        assert a.same_bits(b), (s[:60], a, b)
+    assert fl == acc
+    with pytest.raises(TypeError):
+        batch.from_decimal(ctx, "1.5")
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_payload_operations(prec):
+    """9.7, which signals nothing - so the flag state must be untouched
+    by every one of the three."""
+    ctx = Context(prec)
+    top = 1 << (ctx._fi.man_w - 1)
+    ctx.clear_flags()
+    for payload in (1, 5, top - 1):
+        made = ctx.set_payload(ctx.from_int(payload))
+        assert made.is_nan and made.get_payload().to_int() == payload
+        sig = ctx.set_payload_signaling(ctx.from_int(payload))
+        assert sig.is_nan and sig.get_payload().to_int() == payload
+        assert sig.to_decimal().startswith("snan")
+    # outside the admissible set the answer is +0, per 9.7
+    for bad in (ctx.from_int(top), ctx.from_int(-1), ctx.inf(0), ctx.nan()):
+        assert ctx.set_payload(bad).is_zero
+        assert ctx.set_payload_signaling(bad).is_zero
+    # payload 0 is admissible quiet and NOT signaling
+    assert ctx.set_payload(ctx.zero(0)).is_nan
+    assert ctx.set_payload_signaling(ctx.zero(0)).is_zero
+    # getPayload of anything that is not a NaN is -1
+    assert ctx.get_payload(ctx.from_int(3)).to_int() == -1
+    assert ctx.flags == 0, "9.7 says these signal no exceptions"
+    # the batch form agrees with the scalar one
+    xs = [ctx.from_int(1), ctx.nan(), ctx.zero(0), ctx.inf(1)]
+    for name in ("get_payload", "set_payload", "set_payload_signaling"):
+        got = getattr(batch, name)(ctx, xs)
+        for g, x in zip(got, xs):
+            assert g.same_bits(getattr(ctx, name)(x)), (name, x)
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+def test_from_decimal_agrees_with_gmpy2(prec, mode):
+    """The library's decimal parse against MPFR's, which is what
+    from_str used before the 0.6 step. Encodings only: MPFR's underflow
+    flag has its own definition and raises on a decimal that lands
+    EXACTLY on a subnormal, where 754 7.5 says an exact result raises
+    nothing - which is the one row the two disagree on and the reason
+    from_str moved."""
+    ctx = Context(prec, rounding=mode)
+    ref = Context(prec, rounding=mode)
+    for s in ("0.1", "0.5", "2.5", "1e300", "1e-300", "1e400", "-1e400",
+              "3.14159265358979323846264338327950288", "9" * 30,
+              "16777217", "1e-45", "123456789012345678901234567890e-15"):
+        got = ctx.from_decimal(s)
+        want = ref._rounded_via_gmpy2(lambda: gmpy2.mpfr(s), s)
+        assert got.same_bits(want), (prec, mode, s, got, want)

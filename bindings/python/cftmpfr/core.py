@@ -305,6 +305,53 @@ class Float:
         finally:
             gmpy2.set_context(save)
 
+
+    # ---- character sequences (5.12) ------------------------------
+    #
+    # Part of the 0.6 step. to_str above is the SHORTEST sequence that
+    # reads back to these bits; the two below are the standard's own
+    # conversions and are a different question with a different answer.
+    # Both come from the library rather than from gmpy2, so neither
+    # needs an optional dependency and both work under RNDNA.
+
+    def to_decimal(self, digits=0):
+        """A decimal character sequence, 5.12.2.
+
+        digits == 0 is the EXACT conversion: every digit of the exact
+        value, however many that is. Every binary float IS a finite
+        decimal (2^-k = 5^k * 10^-k), so this always terminates - and
+        for the extremes it is long: about 183,000 significant digits
+        for the smallest binary256 subnormal.
+
+        digits >= 1 asks for that many significant digits, correctly
+        rounded in this Float's context attribute, trailing zeros kept.
+        Context.decimal_digits is the count at which reading the result
+        back reproduces these bits."""
+        if digits < 0:
+            raise ValueError("digits must be 0 (exact) or a positive count")
+        ctx = self._ctx
+        s, fl = _lib.to_char(ctx._dev, ctx._fi.code, ctx._rnd,
+                             self.to_bytes(), digits)
+        ctx.last_flags = fl
+        ctx.flags |= fl
+        return s
+
+    def to_hex(self):
+        """A hexadecimal-significand sequence, 5.12.3: the SHORTEST one
+        that represents this value exactly, "0x1.8p+1". Not to be
+        confused with the encoding's own hex - to_bits() is the bit
+        pattern, this is the number - and always exact, so it consults
+        no attribute and raises nothing."""
+        ctx = self._ctx
+        s, _ = _lib.to_char(ctx._dev, ctx._fi.code, ctx._rnd,
+                            self.to_bytes(), 0, hex_form=True)
+        return s
+
+    def get_payload(self):
+        """9.7 getPayload, as a Float in this format: the payload of a
+        NaN, or -1 for anything else. Signals nothing."""
+        return self._ctx.get_payload(self)
+
     # -- printing ----------------------------------------------------
     def __repr__(self):
         fi = self._ctx._fi
@@ -554,56 +601,40 @@ class Context:
 
     def from_str(self, s):
         """A decimal string, correctly rounded to this format in this
-        context's attribute - by gmpy2/MPFR in the matching IEEE
-        emulation context, never by a Python reimplementation. The
-        flags of the PARSE (inexact, and over/underflow if the decimal
-        lands outside the format) are surfaced in last_flags with
-        MPFR's own flag definitions, which for a decimal parse are not
-        in dispute the way tininess is."""
+        context's attribute BY THE LIBRARY - cft_from_decimal_char,
+        which is 754-2019 5.12.2 - with the library's own flags.
+
+        This routed through gmpy2/MPFR until the 0.6 step, for the
+        reason the file header gives: a second implementation of the
+        rounding is how bit-identity dies, and libcft had no decimal
+        parser to round with. It has one now, and routing through it
+        closes three gaps at once. The parse needs no optional
+        dependency. It works under RNDNA, which MPFR cannot do at all,
+        so the one attribute this package exists to add no longer has a
+        hole in its conversions. And its UNDERFLOW flag is the
+        CONTRACT's - tiny AND inexact, 754 7.5 - rather than MPFR's,
+        which raises on a decimal that lands exactly on a subnormal
+        where the standard says "If the rounded result is exact, no
+        flag is raised".
+
+        Measured before the switch, and the numbers are the reason it
+        was made: 2,480 parses across the four precisions and the four
+        attributes MPFR has, comparing this route against the gmpy2
+        one - ZERO encoding differences, and 32 flag differences, every
+        one of them that exact-subnormal row.
+
+        Two smaller changes ride along, both of them the standard's
+        side of a question the old route could not express. "-nan"
+        keeps its sign now (5.12.1 writes the sign as optional and
+        does not interpret it, and keeping it is what makes the round
+        trip exact), and "snan" reads as a SIGNALING NaN rather than as
+        an error. Whitespace either side is still stripped here rather
+        than by the library: 5.12's syntax admits none, and this method
+        has tolerated it since it was written.
+        """
         if not isinstance(s, str):
             raise TypeError(f"from_str wants a str, got {type(s).__name__}")
-        # Specials are lexed here, not by gmpy2. to_str emits "nan",
-        # "inf", "-inf" and the two zeros without a library, so the
-        # parse has to read them back without one - and gmpy2 2.1.2
-        # refuses every spelling of inf and nan ("invalid digits")
-        # where 2.2 accepts them. Recognising a token is not rounding;
-        # what follows the token still goes through MPFR. Whitespace
-        # is stripped for the same reason: 2.1.2 rejects it trailing,
-        # 2.2 accepts it either side, and a parse should not depend on
-        # which one is installed.
-        t = s.strip()
-        neg = t.startswith("-")
-        body = t[1:] if t[:1] in "+-" else t
-        low = body.lower()
-        if low == "nan":
-            self.last_flags = 0
-            return self.nan()
-        if low in ("inf", "infinity"):
-            self.last_flags = 0
-            return self.inf(1 if neg else 0)
-        # A leading plus carries no information and gmpy2 2.1.2 refuses
-        # "+0" with "invalid digits", so it is dropped here. A leading
-        # MINUS is not: under a directed attribute the rounding of -x is
-        # not the negation of the rounding of x, so the sign must reach
-        # MPFR with the digits.
-        if t.startswith("+"):
-            t = t[1:]
-        result = self._rounded_via_gmpy2(
-            lambda: gmpy2.mpfr(t), f"decimal string {s!r}")
-        # The sign of a zero comes from the DECIMAL, not from gmpy2.
-        # gmpy2 2.1.2 (MPFR 4.1.0) parses "-0" inside the ieee() context
-        # this method rounds in to a zero with no sign at all, and
-        # from_mpfr takes the sign from is_signed, so every zero parsed
-        # from a negative decimal lost its sign on that version (2.2.1
-        # is correct). 754 settles what the answer is: rounding never
-        # changes a sign, so a negative decimal that is zero, or that
-        # underflows to zero in this format, is -0 in every attribute.
-        # The parse flags stand; only the sign bit is restored.
-        if result.is_zero and neg:
-            flags = self.last_flags
-            result = self.zero(1)
-            self.last_flags = flags
-        return result
+        return self.from_decimal(s.strip())
 
     def from_mpfr(self, x):
         """A gmpy2.mpfr, adopted EXACTLY - integer significand and
@@ -987,3 +1018,80 @@ class Context:
         out, fl = _lib.run(self._dev, _lib.OP_ABS, self._fi.code, self._rnd,
                            x.to_bytes(), None, None, 1, self._fi.esz)
         return self._finish(out, fl)
+
+    # ---- character sequences (5.12) and NaN payloads (9.7) --------
+    #
+    # Part of the 0.6 step, and the first conversions in this package
+    # that need NO second implementation and NO optional dependency.
+    # from_str above rounds a decimal through gmpy2/MPFR because until
+    # now libcft had no decimal parser to round it with; these call the
+    # library's, so they work with gmpy2 absent, they work under RNDNA
+    # (which MPFR cannot do at all), and the rounding is the same
+    # round_pack every arithmetic result in this package comes out of.
+    #
+    # The two directions have different shapes and that is cft.h's
+    # decision, not this package's: reading sequences IN is a batch,
+    # writing one OUT is per element, because an output sequence's
+    # length is not known until the conversion has run and runs from
+    # three characters to 183,000. See cftmpfr.batch.from_decimal for
+    # the array form of the first.
+
+    @property
+    def decimal_digits(self):
+        """Pmin for this precision (5.12.2): the significant-digit
+        count at which Float.to_decimal(H) and Context.from_decimal
+        round trip under a nearest attribute - 9, 17, 36 and 73. The
+        LIBRARY's answer; nothing here tabulates it."""
+        return _lib.decimal_digits(self._fi.code)
+
+    def from_decimal(self, s):
+        """A decimal character sequence, correctly rounded to this
+        format in this context's attribute BY THE LIBRARY, with the
+        library's own flags. The syntax is 5.12's, exactly: an optional
+        sign, digits with an optional point, an optional exponent, or
+        inf/infinity/nan/snan with an optional payload suffix - no
+        whitespace, no separators, no locale, no hexadecimal. Anything
+        else raises CftError rather than being guessed at."""
+        if not isinstance(s, str):
+            raise TypeError(f"from_decimal wants a str, got "
+                            f"{type(s).__name__}")
+        out, fl = _lib.from_char(self._dev, self._fi.code, self._rnd, [s],
+                                 self._fi.esz)
+        return self._finish(out, fl)
+
+    def from_hex(self, s):
+        """A hexadecimal-significand sequence (5.12.3): "0x1.8p+3" and
+        the standard's grammar, whose binary exponent is REQUIRED. Exact
+        when the sequence fits this format, correctly rounded when it
+        carries more bits than the format holds."""
+        if not isinstance(s, str):
+            raise TypeError(f"from_hex wants a str, got {type(s).__name__}")
+        out, fl = _lib.from_char(self._dev, self._fi.code, self._rnd, [s],
+                                 self._fi.esz, hex_form=True)
+        return self._finish(out, fl)
+
+    def get_payload(self, x):
+        """9.7 getPayload: a NaN's payload as a floating-point integer,
+        or -1 for anything that is not a NaN. Signals nothing."""
+        x = self._coerce(x)
+        return Float(self, _lib.payload_op(self._dev, "get_payload",
+                                           self._fi.code, x.to_bytes(), 1,
+                                           self._fi.esz))
+
+    def set_payload(self, x):
+        """9.7 setPayload: a quiet NaN carrying x when x is a
+        non-negative floating-point integer below 2^(man_w - 1), and +0
+        otherwise. Signals nothing."""
+        x = self._coerce(x)
+        return Float(self, _lib.payload_op(self._dev, "set_payload",
+                                           self._fi.code, x.to_bytes(), 1,
+                                           self._fi.esz))
+
+    def set_payload_signaling(self, x):
+        """9.7 setPayloadSignaling. Payload 0 is not admissible here -
+        that encoding is an infinity - so this answers +0 for +-0."""
+        x = self._coerce(x)
+        return Float(self, _lib.payload_op(self._dev,
+                                           "set_payload_signaling",
+                                           self._fi.code, x.to_bytes(), 1,
+                                           self._fi.esz))

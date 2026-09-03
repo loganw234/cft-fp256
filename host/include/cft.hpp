@@ -174,6 +174,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "cft.h"
 
@@ -1227,6 +1228,100 @@ public:
     }
 
 
+    /* ---------------------------------------------------------------
+     * Character sequences (754-2019 clause 5.12) and NaN payloads (9.7)
+     * Part of the 0.6 step.
+     *
+     * The one thing this layer does beyond marshalling: it absorbs the
+     * two-call sizing protocol. C needs it because C has no growable
+     * string; C++ has one, so the wrapper asks for the length, sizes a
+     * buffer and hands back a std::string. A caller who wants the raw
+     * protocol still has cft.h.
+     *
+     * The from_ direction keeps the C shape exactly - an array of
+     * NUL-terminated sequences in, a dense array of encodings out -
+     * because that shape is already right.
+     * --------------------------------------------------------------- */
+    static std::size_t decimal_digits(cft_format fmt) noexcept
+    {
+        return cft_format_decimal_digits(fmt);
+    }
+
+    call_result from_decimal_char(cft_format fmt, cft_round rnd,
+                                  const char *const *in, void *d,
+                                  std::size_t n,
+                                  std::size_t *bad = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_from_decimal_char(dev_, fmt, rnd, in, d, n, bad,
+                                         &r.flags);
+        return r;
+    }
+    call_result from_hex_char(cft_format fmt, cft_round rnd,
+                              const char *const *in, void *d, std::size_t n,
+                              std::size_t *bad = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_from_hex_char(dev_, fmt, rnd, in, d, n, bad, &r.flags);
+        return r;
+    }
+
+    /* digits == 0 is the exact conversion; digits >= 1 is that many
+     * significant digits, correctly rounded under `rnd`. */
+    call_result to_decimal_char(cft_format fmt, cft_round rnd, const void *a,
+                                std::size_t digits, std::string &out)
+    {
+        call_result r;
+        std::size_t need = 0;
+        out.clear();
+        r.status = cft_to_decimal_char(dev_, fmt, rnd, a, digits, nullptr, 0,
+                                       &need, &r.flags);
+        if (need == 0)
+            return r;                 /* a real argument error, not a size */
+        {
+            std::string buf(need, '\0');
+            r.status = cft_to_decimal_char(dev_, fmt, rnd, a, digits,
+                                           &buf[0], need, &need, &r.flags);
+            if (r.status == CFT_OK)
+                out.assign(buf.c_str());
+        }
+        return r;
+    }
+    cft_status to_hex_char(cft_format fmt, const void *a, std::string &out)
+    {
+        std::size_t need = 0;
+        cft_status st;
+        out.clear();
+        st = cft_to_hex_char(dev_, fmt, a, nullptr, 0, &need);
+        if (need == 0)
+            return st;
+        {
+            std::string buf(need, '\0');
+            st = cft_to_hex_char(dev_, fmt, a, &buf[0], need, &need);
+            if (st == CFT_OK)
+                out.assign(buf.c_str());
+        }
+        return st;
+    }
+
+    /* 9.7 signals no exceptions, so these return a status and no flag
+     * word - the same shape classify() takes for the same reason. */
+    cft_status get_payload(cft_format fmt, const void *a, void *d,
+                           std::size_t n) noexcept
+    {
+        return cft_get_payload(dev_, fmt, a, d, n);
+    }
+    cft_status set_payload(cft_format fmt, const void *a, void *d,
+                           std::size_t n) noexcept
+    {
+        return cft_set_payload(dev_, fmt, a, d, n);
+    }
+    cft_status set_payload_signaling(cft_format fmt, const void *a, void *d,
+                                     std::size_t n) noexcept
+    {
+        return cft_set_payload_signaling(dev_, fmt, a, d, n);
+    }
+
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
     {
@@ -1882,6 +1977,138 @@ public:
 
 
     /* ===========================================================
+     * Character sequences (5.12) and NaN payloads (9.7)
+     * Part of the 0.6 step.
+     *
+     * The typed shape of an asymmetric API, and the asymmetry is the C
+     * header's decision rather than this layer's: reading sequences IN
+     * is a batch (an array of strings, a dense array of encodings), and
+     * writing one OUT is per element, because an output sequence's
+     * length is not known until the conversion has run and runs from
+     * three bytes to 183,000. What this layer adds is that the length
+     * comes back as a std::string rather than as a protocol.
+     *
+     * to_decimal(x) with no digit count is 5.12.2's EXACT conversion -
+     * every digit of the value, which at the ends of fp256's range is
+     * tens of thousands of them. to_decimal(x, H) is H significant
+     * digits correctly rounded in this context's attribute, and
+     * decimal_digits() is the H at which the round trip is guaranteed.
+     *
+     * These keep the C names - to_hex_char, not to_hex - and the
+     * distinction is load-bearing rather than pedantic: to_hex_char(x)
+     * is 5.12.3's hexadecimal FLOAT, "0x1.8p+1", while x.hex() and
+     * cft::to_hex<F>() are the ENCODING's bit pattern, "0x40400000".
+     * Two different answers to two different questions, and giving
+     * them one name would be a trap.
+     * =========================================================== */
+    static std::size_t decimal_digits() noexcept
+    {
+        return cft_format_decimal_digits(F);
+    }
+
+    std::uint32_t from_decimal_char(const std::string *in, std::size_t n,
+                               span<encoding_type> d)
+    {
+        return from_char_batch(in, n, d, false);
+    }
+    std::uint32_t from_hex_char(const std::string *in, std::size_t n,
+                           span<encoding_type> d)
+    {
+        return from_char_batch(in, n, d, true);
+    }
+
+    /* The scalar forms - each the batch of one, like every other scalar
+     * convenience here. A sequence outside 5.12's syntax throws
+     * cft::error carrying CFT_ERR_INVALID_ARGUMENT and naming the
+     * sequence, because a parse that cannot be trusted must not come
+     * back looking like a number. */
+    value_type from_decimal_char(const std::string &s) &
+    {
+        encoding_type d{};
+        from_char_batch(&s, 1, span<encoding_type>(&d, 1), false);
+        return make(d);
+    }
+    value_type from_hex_char(const std::string &s) &
+    {
+        encoding_type d{};
+        from_char_batch(&s, 1, span<encoding_type>(&d, 1), true);
+        return make(d);
+    }
+
+    std::string to_decimal_char(const encoding_type &a,
+                                std::size_t digits = 0)
+    {
+        std::string out;
+        record(dev_->to_decimal_char(F, rnd_, a.data(), digits, out),
+               "cft_to_decimal_char");
+        return out;
+    }
+    std::string to_decimal_char(const value_type &x,
+                                std::size_t digits = 0)
+    {
+        return to_decimal_char(x.bytes(), digits);
+    }
+    std::string to_hex_char(const encoding_type &a)
+    {
+        std::string out;
+        const cft_status st = dev_->to_hex_char(F, a.data(), out);
+        if (st != CFT_OK)
+            throw error(st, "cft_to_hex_char");
+        return out;
+    }
+    std::string to_hex_char(const value_type &x)
+    {
+        return to_hex_char(x.bytes());
+    }
+
+    /* 9.7: quiet-computational and signalling nothing, so no flag word
+     * is recorded and none is returned - the shape classify() takes,
+     * for the same reason. */
+    void get_payload(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        const cft_status st = dev_->get_payload(F, ptr(a), ptr(d), d.size());
+        if (st != CFT_OK)
+            throw error(st, "cft_get_payload");
+    }
+    void set_payload(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        const cft_status st = dev_->set_payload(F, ptr(a), ptr(d), d.size());
+        if (st != CFT_OK)
+            throw error(st, "cft_set_payload");
+    }
+    void set_payload_signaling(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        const cft_status st =
+            dev_->set_payload_signaling(F, ptr(a), ptr(d), d.size());
+        if (st != CFT_OK)
+            throw error(st, "cft_set_payload_signaling");
+    }
+    value_type get_payload(const value_type &x) &
+    {
+        encoding_type d{};
+        get_payload(cspan<encoding_type>(&x.bytes(), 1),
+                    span<encoding_type>(&d, 1));
+        return make(d);
+    }
+    value_type set_payload(const value_type &x) &
+    {
+        encoding_type d{};
+        set_payload(cspan<encoding_type>(&x.bytes(), 1),
+                    span<encoding_type>(&d, 1));
+        return make(d);
+    }
+    value_type set_payload_signaling(const value_type &x) &
+    {
+        encoding_type d{};
+        set_payload_signaling(cspan<encoding_type>(&x.bytes(), 1),
+                              span<encoding_type>(&d, 1));
+        return make(d);
+    }
+
+    /* ===========================================================
      * Scalar convenience - every one of these is the batch of one
      *
      * Offered for clarity, not for throughput: N of these is N round
@@ -2179,6 +2406,46 @@ public:
     }
 
 private:
+    /* The from_ conversions' one shared body. The C call wants an
+     * array of NUL-terminated pointers, the C++ caller has std::string,
+     * and a refusal has to name WHICH sequence was refused - a caller
+     * reading a file of numbers needs the line and not just the
+     * verdict. */
+    std::uint32_t from_char_batch(const std::string *in, std::size_t n,
+                                  span<encoding_type> d, bool hex)
+    {
+        const char *what = hex ? "cft_from_hex_char"
+                               : "cft_from_decimal_char";
+        if (n != d.size())
+            throw std::invalid_argument(
+                std::string("cft: ") + std::to_string(n) +
+                " sequences for " + std::to_string(d.size()) + " outputs");
+        if (n == 0)
+            return record(call_result(), what);
+        {
+            std::vector<const char *> raw(n);
+            std::size_t bad = 0;
+            call_result r;
+            for (std::size_t i = 0; i < n; i++)
+                raw[i] = in[i].c_str();
+            r = hex ? dev_->from_hex_char(F, rnd_, raw.data(), ptr(d), n,
+                                          &bad)
+                    : dev_->from_decimal_char(F, rnd_, raw.data(), ptr(d), n,
+                                              &bad);
+            if (r.status != CFT_OK) {
+                std::string where(what);
+                if (bad < n) {
+                    const std::string &s = in[bad];
+                    where += " on sequence " + std::to_string(bad) + " \"" +
+                             (s.size() > 60 ? s.substr(0, 60) + "..." : s) +
+                             "\"";
+                }
+                throw error(r.status, where.c_str());
+            }
+            return record(r, what);
+        }
+    }
+
     static const void *ptr(cspan<encoding_type> s) noexcept
     {
         return s.empty() ? nullptr : static_cast<const void *>(s.data());

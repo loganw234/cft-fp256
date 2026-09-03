@@ -571,6 +571,148 @@ void check_format(cft::device &dev, cft_device *ref)
                   "%s: classify disagrees with cft_class", cft_format_name(F));
         }
 
+        /* -- character sequences (5.12) and payloads (9.7) --------- *
+         *
+         * Part of the 0.6 step, and the same charter as everything
+         * above: the wrapper's answer must be the C call's answer,
+         * bit for bit and flag for flag. The shapes differ here, so
+         * the comparison does too - the from_ direction is a batch and
+         * is compared as one, and the to_ direction is per element, so
+         * the whole pool is walked and every sequence compared as a
+         * string. What the wrapper adds beyond marshalling is the
+         * sizing protocol, and the strings would differ the moment it
+         * got that wrong.
+         */
+        {
+            std::uint32_t fw = 0, fc = 0;
+            cft_status st;
+            const std::size_t h = ctx.decimal_digits();
+
+            CHECK(h == cft_format_decimal_digits(F),
+                  "%s: decimal_digits disagrees with the C entry point",
+                  cft_format_name(F));
+
+            for (int rj = 0; rj < 5; rj++) {
+                const cft_round rj_rnd = rounds[rj];
+                auto rctx = ctx.with_rounding(rj_rnd);
+                std::vector<std::string> seq(n);
+                std::vector<const char *> raw(n);
+                std::size_t i;
+
+                /* Write the pool out through the wrapper and through
+                 * the C entry point, in both radices and both digit
+                 * modes, and compare the characters. */
+                for (i = 0; i < n; i++) {
+                    std::string wdec = rctx.to_decimal_char(a[i]);
+                    std::string wrnd = rctx.to_decimal_char(a[i], h);
+                    std::string whex = rctx.to_hex_char(a[i]);
+                    std::vector<char> cbuf;
+                    std::size_t need = 0;
+                    std::uint32_t f1 = 0;
+
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), 0,
+                                             nullptr, 0, &need, &f1);
+                    CHECK(st == CFT_ERR_INVALID_ARGUMENT && need > 1,
+                          "the sizing call must报 refuse and report a size");
+                    cbuf.assign(need, '\0');
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), 0,
+                                             cbuf.data(), need, &need, &f1);
+                    CHECK(st == CFT_OK && wdec == cbuf.data() && f1 == 0,
+                          "%s: to_decimal_char(exact) wrapper %s vs C %s",
+                          cft_format_name(F), wdec.c_str(), cbuf.data());
+
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), h,
+                                             nullptr, 0, &need, &f1);
+                    cbuf.assign(need, '\0');
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), h,
+                                             cbuf.data(), need, &need, &f1);
+                    CHECK(st == CFT_OK && wrnd == cbuf.data(),
+                          "%s: to_decimal_char(%u) wrapper %s vs C %s",
+                          cft_format_name(F), static_cast<unsigned>(h),
+                          wrnd.c_str(), cbuf.data());
+                    CHECK(rctx.last_flags() == f1,
+                          "%s: to_decimal_char flags disagree",
+                          cft_format_name(F));
+
+                    st = cft_to_hex_char(ref, F, a[i].data(), nullptr, 0,
+                                         &need);
+                    cbuf.assign(need, '\0');
+                    st = cft_to_hex_char(ref, F, a[i].data(), cbuf.data(),
+                                         need, &need);
+                    CHECK(st == CFT_OK && whex == cbuf.data(),
+                          "%s: to_hex_char wrapper %s vs C %s",
+                          cft_format_name(F), whex.c_str(), cbuf.data());
+
+                    seq[i] = wdec;
+                    checks += 3;
+                }
+
+                /* ... and read the whole batch back, both ways. */
+                for (i = 0; i < n; i++)
+                    raw[i] = seq[i].c_str();
+                fw = rctx.from_decimal_char(seq.data(), n, dw);
+                st = cft_from_decimal_char(ref, F, rj_rnd, raw.data(),
+                                           dc.data(), n, nullptr, &fc);
+                CHECK(st == CFT_OK, "cft_from_decimal_char: %s",
+                      cft_strerror(st));
+                expect<F>("from_decimal_char", rj_rnd, dw, fw, dc, fc);
+
+                for (i = 0; i < n; i++)
+                    seq[i] = rctx.to_hex_char(a[i]);
+                for (i = 0; i < n; i++)
+                    raw[i] = seq[i].c_str();
+                fw = rctx.from_hex_char(seq.data(), n, dw);
+                st = cft_from_hex_char(ref, F, rj_rnd, raw.data(), dc.data(),
+                                       n, nullptr, &fc);
+                CHECK(st == CFT_OK, "cft_from_hex_char: %s",
+                      cft_strerror(st));
+                expect<F>("from_hex_char", rj_rnd, dw, fw, dc, fc);
+                /* The hex form is exact, so reading it back reproduces
+                 * the pool - through the wrapper, and with no flag. */
+                CHECK(same_bytes<F>(dw, a, nullptr) && fw == 0,
+                      "%s %s: the exact hex form did not round trip",
+                      cft_format_name(F), cft::round_name(rj_rnd));
+                checks++;
+            }
+
+            /* The 9.7 three, wrapper against C. */
+            ctx.get_payload(a, dw);
+            st = cft_get_payload(ref, F, a.data(), dc.data(), n);
+            CHECK(st == CFT_OK, "cft_get_payload: %s", cft_strerror(st));
+            expect<F>("get_payload", CFT_RNE, dw, 0, dc, 0);
+
+            ctx.set_payload(a, dw);
+            st = cft_set_payload(ref, F, a.data(), dc.data(), n);
+            CHECK(st == CFT_OK, "cft_set_payload: %s", cft_strerror(st));
+            expect<F>("set_payload", CFT_RNE, dw, 0, dc, 0);
+
+            ctx.set_payload_signaling(a, dw);
+            st = cft_set_payload_signaling(ref, F, a.data(), dc.data(), n);
+            CHECK(st == CFT_OK, "cft_set_payload_signaling: %s",
+                  cft_strerror(st));
+            expect<F>("set_payload_signaling", CFT_RNE, dw, 0, dc, 0);
+
+            /* A sequence outside the syntax reaches the caller as
+             * cft::error carrying the C status, not as a number. */
+            CHECK(status_of([&] { ctx.from_decimal_char("1.5.5"); })
+                  == CFT_ERR_INVALID_ARGUMENT,
+                  "%s: a malformed sequence must throw cft::error",
+                  cft_format_name(F));
+            CHECK(status_of([&] { ctx.from_hex_char("0x1.8"); })
+                  == CFT_ERR_INVALID_ARGUMENT,
+                  "%s: 5.12.3 requires the binary exponent",
+                  cft_format_name(F));
+            /* And a length mismatch is the wrapper's own misuse
+             * exception, as everywhere else here. */
+            {
+                std::vector<std::string> two(2, std::string("1"));
+                CHECK(refused_as_misuse(
+                          [&] { ctx.from_decimal_char(two.data(), 2, dw); }),
+                      "%s: a short sequence array must be std::invalid_argument",
+                      cft_format_name(F));
+            }
+        }
+
         /* -- conversions ------------------------------------------ */
         {
             std::uint32_t fw = 0, fc = 0;
