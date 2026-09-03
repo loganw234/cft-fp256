@@ -438,7 +438,7 @@ do_transcend() {
   PY "$ROOT/host/tests/transcend_check.py" --min-prec 64 --trials 16
 }
 need host-cc python
-stage transcend "the twenty-nine transcendentals vs the model, and again through the escalation path" -- \
+stage transcend "the thirty-nine transcendentals vs the model, and again through the escalation path" -- \
   do_transcend
 
 # The augmented arithmetic operations of 754-2019 9.5. Their own stage
@@ -562,7 +562,7 @@ do_soakquick() {
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
 need host-cc mpfr
-stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the twenty transcendentals" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals" -- do_mpfr
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick

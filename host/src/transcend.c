@@ -413,6 +413,254 @@ static int odd_root_2k(cft_bn *root, const cft_bn *M, int k)
     return 0;
 }
 
+/* ---- table 9.1's remainder: exact helpers -------------------------- *
+ *
+ * exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound
+ * and rootn add no evaluator and no constant. What they add is
+ * EXACTNESS: each has a larger exact-case table than the function it is
+ * built from, and each table has to be closed before the Ziv loop under
+ * it is allowed to run. The helpers below are those tables' arithmetic.
+ */
+
+/* An exact cft_mp from an int64_t. Exact at every working precision the
+ * schedule reaches, all of which are far above 64 bits - which is what
+ * lets pown, compound and rootn multiply or divide by an exponent that
+ * a uint32 could not hold. */
+static int mp_set_i64(cft_mp *r, int W, int64_t v)
+{
+    cft_bn m, hi;
+    uint64_t u;
+
+    if (v == 0) {
+        cft_mp_set_zero(r);
+        return 0;
+    }
+    u = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+    cft_bn_zero(&m);
+    cft_bn_set_u32(&m, (uint32_t)(u & 0xffffffffu));
+    if ((uint32_t)(u >> 32)) {
+        cft_bn_zero(&hi);
+        cft_bn_set_u32(&hi, (uint32_t)(u >> 32));
+        if (cft_bn_shl(&hi, &hi, 32))
+            return 1;
+        if (cft_bn_add(&m, &m, &hi))
+            return 1;
+    }
+    return cft_mp_set_bn(r, W, v < 0, &m, 0);
+}
+
+static uint64_t i64_abs(int64_t n)
+{
+    return n < 0 ? (uint64_t)0 - (uint64_t)n : (uint64_t)n;
+}
+
+/* sat_mul with an int64 multiplier. The saturation is safe for the same
+ * reason sat_mul's is: every caller tests the delivered exponent against
+ * the format BEFORE packing, so a clamp at 2^24 - which is above emax at
+ * all four rungs - reaches the overflow or underflow response and never
+ * a wrong finite value. */
+static long sat_mul_i64(long a, int64_t b)
+{
+    int64_t r;
+    if (a == 0 || b == 0)
+        return 0;
+    if (b > TR_EXP_CAP || b < -TR_EXP_CAP)
+        return ((a > 0) == (b > 0)) ? TR_EXP_CAP : -TR_EXP_CAP;
+    r = (int64_t)a * b;
+    if (r > TR_EXP_CAP)
+        return TR_EXP_CAP;
+    if (r < -TR_EXP_CAP)
+        return -TR_EXP_CAP;
+    return (long)r;
+}
+
+/* 1 + x as an EXACT dyadic m * 2^e, m >= 0, for a finite lane with
+ * x >= -1. Never a rounded sum: the two exponents are aligned on the
+ * lower of them and the integers are added, the discipline phase 3's
+ * acosh and atanh keep for x - 1 and 1 - x.
+ *
+ * Returns 1 when the exact form would need more than `maxbits`, and for
+ * every caller here that is a PROOF that no exact case exists rather
+ * than a shrug. An exact case needs the odd part of 1 + x inside p+1
+ * bits, or 1 + x itself a power of two; write x = +-M 2^E with M odd.
+ * For E < 0 the odd part of 1 + x is 2^-E -+ M, which is odd and about
+ * -E bits wide, so p+1 bits force -E <= p+1. For E >= 1 it is
+ * M 2^E + 1, odd and E + bits(M) wide, so the same bound applies. And
+ * 1 + x = 2^k with x representable forces |k| <= p, whose aligned form
+ * is p+1 bits. maxbits = p+4 therefore discards nothing.
+ */
+static int lane_one_plus(const lane *L, cft_bn *m, long *e, int maxbits)
+{
+    cft_bn one, t, M;
+    long E, e0, sh_one, sh_x;
+    int nb;
+
+    /* The ODD form, not the encoding's: |x| = M * 2^E with M odd is the
+     * canonical shape every width bound below is stated in, and 2^-12 at
+     * binary32 is the encoding 2^23 * 2^-35 - which would put the
+     * alignment 23 bits deeper than the value needs. */
+    lane_odd(L, &M, &E);
+    e0 = E < 0 ? E : 0;
+    sh_one = -e0;
+    sh_x = E - e0;
+    nb = cft_bn_bitlen(&M);
+    if (sh_one > (long)maxbits || sh_x + nb > (long)maxbits)
+        return 1;
+    cft_bn_zero(&one);
+    cft_bn_setbit(&one, (int)sh_one);
+    if (cft_bn_shl(&t, &M, (int)sh_x))
+        return 1;
+    if (L->sign) {
+        if (cft_bn_cmp(&one, &t) < 0)
+            return 1;                    /* x < -1: the callers screen it */
+        cft_bn_sub(m, &one, &t);
+    } else {
+        if (cft_bn_add(m, &one, &t))
+            return 1;
+    }
+    *e = e0;
+    return 0;
+}
+
+/* The exact k-th root of the odd M > 1, k >= 2, built one bit at a time
+ * from the top and VERIFIED by raising it back - the same rule
+ * odd_root_2k keeps with its integer square roots, and the same reason:
+ * a root decided by a tolerance is not a root. Returns 0 and sets *root
+ * when M is a perfect k-th power. */
+static int odd_root_n(cft_bn *root, const cft_bn *M, long k)
+{
+    cft_bn r, t, cand;
+    int nb = cft_bn_bitlen(M);
+    int top, i, c;
+
+    if (k >= (long)nb)
+        return 1;                /* a root of 2 or more would need 2^k <= M */
+    top = (int)(((long)nb + k - 1) / k);
+    cft_bn_zero(&r);
+    for (i = top; i >= 0; i--) {
+        cft_bn_copy(&cand, &r);
+        cft_bn_setbit(&cand, i);
+        if (odd_pow(&t, &cand, k, nb))
+            continue;                    /* already wider than M */
+        c = cft_bn_cmp(&t, M);
+        if (c <= 0)
+            cft_bn_copy(&r, &cand);
+        if (c == 0)
+            break;
+    }
+    if (cft_bn_is_zero(&r))
+        return 1;
+    if (odd_pow(&t, &r, k, nb))
+        return 1;
+    if (cft_bn_cmp(&t, M) != 0)
+        return 1;
+    cft_bn_copy(root, &r);
+    return 0;
+}
+
+/* (m * 2^e)^n as an exact dyadic, or 1 when no such value can be a
+ * rounding boundary. m > 0, n != 0.
+ *
+ * This is pow_dyadic's integer-exponent branch restated on a DYADIC
+ * rather than on an encoding, so that compound can apply it to the exact
+ * 1 + x. The proof is phase 1's: the odd part of (M 2^E)^n is M^n, so
+ * either M = 1 and the value is a pure exponent shift, or n <= p+1 and
+ * the power is computed exactly with an early exit the moment it passes
+ * p+1 bits, or the value's odd part is too wide to be a grid point or a
+ * midpoint. A negative n with M > 1 gives a rational that is not dyadic,
+ * which is not a boundary either. */
+static int dyadic_pow_int(const cft_fmt_desc *f, const cft_bn *m, long e,
+                          int64_t n, cft_bn *rm, long *re)
+{
+    cft_bn M, t;
+    long E, tz = 0;
+    int nb = cft_bn_bitlen(m), p = f->prec;
+
+    while (tz < (long)nb && !cft_bn_bit(m, (int)tz))
+        tz++;
+    cft_bn_shr(&M, m, (int)tz);
+    E = e + tz;
+    if (cft_bn_bitlen(&M) == 1) {              /* |value| is 2^E */
+        cft_bn_zero(rm);
+        cft_bn_set_u32(rm, 1);
+        *re = sat_mul_i64(E, n);
+        return 0;
+    }
+    if (n < 0)
+        return 1;                              /* 1/(odd > 1) is not dyadic */
+    if (n > (int64_t)p + 1)
+        return 1;
+    if (odd_pow(&t, &M, (long)n, p + 1))
+        return 1;
+    cft_bn_copy(rm, &t);
+    *re = sat_mul_i64(E, n);
+    return 0;
+}
+
+/* |x|^(1/n) as an exact dyadic, or 1 when it is not one.
+ *
+ * (M 2^E)^(1/n) is rational exactly when M is a perfect |n|-th power and
+ * |n| divides E - one verified integer root and one exact division - and
+ * for a negative n the reciprocal of that is dyadic only when the root
+ * is 1, because 1/(odd > 1) is not a dyadic rational. */
+static int rootn_dyadic(const cft_fmt_desc *f, const lane *x, int64_t n,
+                        cft_bn *rm, long *re)
+{
+    cft_bn M, root;
+    long E, F;
+    uint64_t k = i64_abs(n);
+
+    (void)f;
+    lane_odd(x, &M, &E);
+    if (E != 0) {
+        uint64_t ae = (uint64_t)(E < 0 ? -E : E);
+        if (k > ae)
+            return 1;                          /* |n| > |E| > 0: no divisor */
+        if (E % (long)k)
+            return 1;
+        F = E / (long)k;
+    } else {
+        F = 0;
+    }
+    if (cft_bn_bitlen(&M) == 1) {              /* M == 1 */
+        cft_bn_zero(rm);
+        cft_bn_set_u32(rm, 1);
+        *re = n < 0 ? -F : F;
+        return 0;
+    }
+    if (n < 0)
+        return 1;
+    if (k > (uint64_t)cft_bn_bitlen(&M))
+        return 1;
+    if (odd_root_n(&root, &M, (long)k))
+        return 1;
+    cft_bn_copy(rm, &root);
+    *re = F;
+    return 0;
+}
+
+/* 5^n, with an early exit the moment it passes `maxbits`. The only
+ * exact-case test exp10 and log10p1 need, and the same shape log10's
+ * has carried since phase 1. */
+static int pow5(cft_bn *r, long n, int maxbits)
+{
+    cft_bn acc, five, t;
+    long i;
+    cft_bn_zero(&acc);
+    cft_bn_set_u32(&acc, 1);
+    cft_bn_zero(&five);
+    cft_bn_set_u32(&five, 5);
+    for (i = 0; i < n; i++) {
+        if (cft_bn_mul(&t, &acc, &five))
+            return 1;
+        if (cft_bn_bitlen(&t) > maxbits)
+            return 1;
+        cft_bn_copy(&acc, &t);
+    }
+    cft_bn_copy(r, &acc);
+    return 0;
+}
+
 /* ---- the multiprecision series ------------------------------------- */
 
 static void mp_bump(cft_mp *v, uint64_t k)
@@ -658,6 +906,40 @@ static int mp_log1p_small(cft_mp *r, const cft_mp *u, int W)
     if (cft_mp_div(&z, u, &den, W))
         return 1;
     return mp_atanh2(r, &z, W);
+}
+
+/* log(1 + u) for an exactly-known lane u > -1, SIGNED, in the three
+ * regimes above. Factored out because log2p1, log10p1 and compound all
+ * need exactly it - and all need it never to form 1 + u when u is tiny,
+ * which is the property this function exists to keep. */
+static int mp_log1p_lane(cft_mp *r, const cft_fmt_desc *f, const lane *a,
+                         int Wi)
+{
+    cft_mp x, t, l, one, inv, part;
+    long v = lane_vexp(a);
+
+    if (cft_mp_set_bn(&x, Wi, a->sign, &a->m, a->e))
+        return 1;
+    if (v <= -2)
+        return mp_log1p_small(r, &x, Wi);
+    if (v <= (long)f->prec + 30) {
+        if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+            return 1;
+        if (cft_mp_add(&t, &one, &x, Wi))
+            return 1;
+        if (t.zero || t.sign)
+            return 1;                    /* u <= -1 was handled upstream */
+        return mp_log_exact(r, &t.m, t.exp, Wi);
+    }
+    if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+        return 1;
+    if (cft_mp_div(&inv, &one, &x, Wi))
+        return 1;
+    if (mp_log1p_small(&part, &inv, Wi))
+        return 1;
+    if (mp_log_exact(&l, &a->m, a->e, Wi))
+        return 1;
+    return cft_mp_add(r, &l, &part, Wi);
 }
 
 
@@ -1293,6 +1575,9 @@ typedef struct {
      * attempts, because the result's SIGN comes off it. Only the
      * multiplication by pi/2 is redone per precision. */
     tr_pi_red red;
+    /* table 9.1's remainder: the INTEGER operand of pown, compound and
+     * rootn, carried per element beside the encoding. */
+    int64_t nn;
 } tr_args;
 
 /* |f(a[,b])| at working precision W. The SIGN of the result is decided
@@ -1388,42 +1673,13 @@ static int tr_eval(const tr_args *A, int W, cft_mp *r)
         cft_mp_copy(r, &l);
         return 0;
 
-    case CFT_TR_LOG1P: {
-        long v = lane_vexp(&A->a);
-        if (cft_mp_set_bn(&x, Wi, A->a.sign, &A->a.m, A->a.e))
+    case CFT_TR_LOG1P:
+        if (mp_log1p_lane(&l, f, &A->a, Wi))
             return 1;
-        if (v <= -2) {
-            if (mp_log1p_small(&l, &x, Wi))
-                return 1;
-        } else if (v <= (long)f->prec + 30) {
-            cft_mp one;
-            if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
-                return 1;
-            if (cft_mp_add(&t, &one, &x, Wi))
-                return 1;
-            if (t.zero || t.sign)
-                return 1;                /* u <= -1 was handled upstream */
-            if (mp_log_exact(&l, &t.m, t.exp, Wi))
-                return 1;
-        } else {
-            cft_mp inv, one, part;
-            if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
-                return 1;
-            if (cft_mp_div(&inv, &one, &x, Wi))
-                return 1;
-            if (mp_log1p_small(&part, &inv, Wi))
-                return 1;
-            if (mp_log_exact(&l, &A->a.m, A->a.e, Wi))
-                return 1;
-            if (cft_mp_add(&t, &l, &part, Wi))
-                return 1;
-            cft_mp_copy(&l, &t);
-        }
         if (l.sign)
             cft_mp_neg(&l);
         cft_mp_copy(r, &l);
         return 0;
-    }
 
     case CFT_TR_POW:
         if (mp_log_exact(&l, &A->a.m, A->a.e, Wi))
@@ -1774,6 +2030,174 @@ static int tr_eval(const tr_args *A, int W, cft_mp *r)
         return 0;
     }
 
+    /* ---- the rest of table 9.1 --------------------------------- */
+
+    case CFT_TR_EXP2M1: {
+        cft_mp l2;
+        long v = lane_vexp(&A->a);
+        /* 2^x - 1 = expm1(x ln2), never exp(x ln2) - 1: for a small x
+         * the second form loses every bit the answer has. |x| < 1/4
+         * puts |x ln2| below 0.174, inside mp_expm1_core's domain. */
+        if (cft_mp_set_bn(&x, Wi, A->a.sign, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_const(&l2, CFT_MP_C_LN2, Wi))
+            return 1;
+        if (cft_mp_mul(&t, &x, &l2, Wi))
+            return 1;
+        if (v <= -2) {
+            if (mp_expm1_core(&l, &t, Wi))
+                return 1;
+        } else {
+            if (mp_exp_full(&l, &t, Wi))
+                return 1;
+            if (cft_mp_set_ui(&tmp, Wi, 0, 1, 0))
+                return 1;
+            if (cft_mp_sub(&l, &l, &tmp, Wi))
+                return 1;
+        }
+        if (l.sign)
+            cft_mp_neg(&l);
+        cft_mp_copy(r, &l);
+        return 0;
+    }
+
+    case CFT_TR_EXP10:
+    case CFT_TR_EXP10M1: {
+        cft_mp l10;
+        long v = lane_vexp(&A->a);
+        if (cft_mp_set_bn(&x, Wi, A->a.sign, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_const(&l10, CFT_MP_C_LN10, Wi))
+            return 1;
+        if (cft_mp_mul(&t, &x, &l10, Wi))
+            return 1;
+        if (A->fn == CFT_TR_EXP10)
+            return mp_exp_full(r, &t, Wi);
+        /* |x| < 1/8 puts |x ln10| below 0.288, which mp_expm1_core
+         * carries; anything larger takes the general path, where
+         * exp(t) - 1 keeps at least a quarter of the larger operand and
+         * costs two bits. */
+        if (v <= -4) {
+            if (mp_expm1_core(&l, &t, Wi))
+                return 1;
+        } else {
+            if (mp_exp_full(&l, &t, Wi))
+                return 1;
+            if (cft_mp_set_ui(&tmp, Wi, 0, 1, 0))
+                return 1;
+            if (cft_mp_sub(&l, &l, &tmp, Wi))
+                return 1;
+        }
+        if (l.sign)
+            cft_mp_neg(&l);
+        cft_mp_copy(r, &l);
+        return 0;
+    }
+
+    case CFT_TR_LOG2P1:
+    case CFT_TR_LOG10P1: {
+        cft_mp c;
+        if (mp_log1p_lane(&l, f, &A->a, Wi))
+            return 1;
+        if (cft_mp_const(&c, A->fn == CFT_TR_LOG2P1 ? CFT_MP_C_LOG2E
+                                                    : CFT_MP_C_LOG10E, Wi))
+            return 1;
+        if (cft_mp_mul(&tmp, &l, &c, Wi))
+            return 1;
+        if (tmp.sign)
+            cft_mp_neg(&tmp);
+        cft_mp_copy(r, &tmp);
+        return 0;
+    }
+
+    case CFT_TR_RSQRT: {
+        cft_mp s, one;
+        /* The evaluator's own square root and one division. The tile's
+         * RSQRT_SEED opcode is a LATER fast path for the narrow formats
+         * and would have to reproduce these bits exactly; it is not
+         * part of this contract, and nothing here reads it. */
+        if (cft_mp_set_bn(&x, Wi, 0, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_sqrt(&s, &x, Wi))
+            return 1;
+        if (cft_mp_set_ui(&one, Wi, 0, 1, 0))
+            return 1;
+        return cft_mp_div(r, &one, &s, Wi);
+    }
+
+    case CFT_TR_POWN: {
+        cft_mp nn;
+        if (mp_log_exact(&l, &A->a.m, A->a.e, Wi))
+            return 1;
+        if (mp_set_i64(&nn, Wi, A->nn))
+            return 1;
+        if (cft_mp_mul(&t, &nn, &l, Wi))
+            return 1;
+        return mp_exp_full(r, &t, Wi);
+    }
+
+    case CFT_TR_POWR:
+        /* exp(y log x) with x > 0 by construction - pow's evaluation
+         * with the sign question deleted. */
+        if (mp_log_exact(&l, &A->a.m, A->a.e, Wi))
+            return 1;
+        if (cft_mp_set_bn(&y, Wi, A->b.sign, &A->b.m, A->b.e))
+            return 1;
+        if (cft_mp_mul(&t, &y, &l, Wi))
+            return 1;
+        return mp_exp_full(r, &t, Wi);
+
+    case CFT_TR_COMPOUND: {
+        cft_mp nn;
+        /* exp(n log1p(x)), and log1p rather than log(1 + x) for the
+         * reason phase 1 gives: 1 + x formed at the working precision
+         * rounds to 1 for a tiny x and takes the answer with it. */
+        if (mp_log1p_lane(&l, f, &A->a, Wi))
+            return 1;
+        if (mp_set_i64(&nn, Wi, A->nn))
+            return 1;
+        if (cft_mp_mul(&t, &nn, &l, Wi))
+            return 1;
+        return mp_exp_full(r, &t, Wi);
+    }
+
+    case CFT_TR_ROOTN: {
+        cft_mp nn, q, s;
+        int64_t n = A->nn;
+        /* The square roots go through the evaluator's own, which is
+         * exact to within one unit in the last place by construction;
+         * everything else is exp(log(x)/n), whose absolute error in the
+         * exponent's argument becomes the result's relative error - the
+         * same accounting pow already carries. */
+        if (n == 2 || n == -2) {
+            if (cft_mp_set_bn(&x, Wi, 0, &A->a.m, A->a.e))
+                return 1;
+            if (cft_mp_sqrt(&s, &x, Wi))
+                return 1;
+            if (n == 2) {
+                cft_mp_copy(r, &s);
+                return 0;
+            }
+            if (cft_mp_set_ui(&tmp, Wi, 0, 1, 0))
+                return 1;
+            return cft_mp_div(r, &tmp, &s, Wi);
+        }
+        if (n == -1) {
+            if (cft_mp_set_bn(&x, Wi, 0, &A->a.m, A->a.e))
+                return 1;
+            if (cft_mp_set_ui(&tmp, Wi, 0, 1, 0))
+                return 1;
+            return cft_mp_div(r, &tmp, &x, Wi);
+        }
+        if (mp_log_exact(&l, &A->a.m, A->a.e, Wi))
+            return 1;
+        if (mp_set_i64(&nn, Wi, n))
+            return 1;
+        if (cft_mp_div(&q, &l, &nn, Wi))
+            return 1;
+        return mp_exp_full(r, &q, Wi);
+    }
+
     default:
         return 1;
     }
@@ -1890,6 +2314,7 @@ static int tr_log2_estimate(const tr_args *A, cft_mp *q)
     case CFT_TR_EXP2:
         return cft_mp_set_bn(q, W, A->a.sign, &A->a.m, A->a.e);
     case CFT_TR_POW:
+    case CFT_TR_POWR:
         if (mp_log_exact(&l, &A->a.m, A->a.e, W))
             return 1;
         if (cft_mp_set_bn(&x, W, A->b.sign, &A->b.m, A->b.e))
@@ -1897,6 +2322,59 @@ static int tr_log2_estimate(const tr_args *A, cft_mp *q)
         if (cft_mp_mul(&t, &x, &l, W))
             return 1;
         return cft_mp_mul(q, &t, &e2, W);
+    case CFT_TR_EXP2M1:
+        return cft_mp_set_bn(q, W, A->a.sign, &A->a.m, A->a.e);
+    case CFT_TR_EXP10:
+    case CFT_TR_EXP10M1: {
+        cft_mp l10;
+        if (cft_mp_set_bn(&x, W, A->a.sign, &A->a.m, A->a.e))
+            return 1;
+        if (cft_mp_const(&l10, CFT_MP_C_LN10, W))
+            return 1;
+        if (cft_mp_mul(&t, &x, &l10, W))
+            return 1;
+        return cft_mp_mul(q, &t, &e2, W);
+    }
+    case CFT_TR_POWN: {
+        cft_mp nn;
+        if (mp_log_exact(&l, &A->a.m, A->a.e, W))
+            return 1;
+        if (mp_set_i64(&nn, W, A->nn))
+            return 1;
+        if (cft_mp_mul(&t, &nn, &l, W))
+            return 1;
+        return cft_mp_mul(q, &t, &e2, W);
+    }
+    case CFT_TR_ROOTN: {
+        cft_mp nn, dq;
+        if (mp_log_exact(&l, &A->a.m, A->a.e, W))
+            return 1;
+        if (mp_set_i64(&nn, W, A->nn))
+            return 1;
+        if (cft_mp_div(&dq, &l, &nn, W))
+            return 1;
+        return cft_mp_mul(q, &dq, &e2, W);
+    }
+    case CFT_TR_COMPOUND: {
+        cft_mp nn;
+        /* A WIDER screening precision than the rest, and for a stated
+         * reason: mp_log1p_lane's middle regime forms 1 + x and treats
+         * it as exact, which it is only at 2p+31 bits or more. p+32
+         * would enclose the logarithm of a ROUNDED operand - a correct
+         * answer to the wrong question. Firing a screen on that could
+         * deliver an overflow for an input that does not overflow. */
+        int Wc = 2 * f->prec + 72;
+        cft_mp e2c;
+        if (cft_mp_const(&e2c, CFT_MP_C_LOG2E, Wc))
+            return 1;
+        if (mp_log1p_lane(&l, f, &A->a, Wc))
+            return 1;
+        if (mp_set_i64(&nn, Wc, A->nn))
+            return 1;
+        if (cft_mp_mul(&t, &nn, &l, Wc))
+            return 1;
+        return cft_mp_mul(q, &t, &e2c, Wc);
+    }
     default:
         return 1;
     }
@@ -3367,6 +3845,913 @@ static cft_status do_atanh(const cft_fmt_desc *f, const lane *a, int rnd,
     return tr_ziv(&A, a->sign, rnd, out, flags);
 }
 
+/* ---- table 9.1's remainder: the drivers ---------------------------- */
+
+/* The lane for an exactly representable power of two, so a neighbour
+ * witness can be anchored on it. n must be inside the normal range. */
+static void lane_pow2(const cft_fmt_desc *f, long n, lane *u)
+{
+    memset(u, 0, sizeof *u);
+    u->kind = K_NORM;
+    u->sign = 0;
+    cft_bn_zero(&u->m);
+    cft_bn_set_u32(&u->m, 1);
+    (void)cft_bn_shl(&u->m, &u->m, f->man_w);
+    u->e = n - (long)f->man_w;
+}
+
+/* The lane for +-1. */
+static void lane_one(const cft_fmt_desc *f, int sign, lane *u)
+{
+    lane_pow2(f, 0, u);
+    u->sign = sign;
+}
+
+/* 2^x - 1.
+ *
+ * EXACT at every integer argument, which is the widest exact table in
+ * this set: 2^n - 1 is a dyadic rational for every n, positive or
+ * negative, and it is a rounding boundary of a p-bit format exactly
+ * while |n| <= p+1. Past that the value is still exactly known but is
+ * delivered by a SIDE rather than by a rounding of it, because the exact
+ * integer 2^n - 1 is up to 262,143 bits wide at fp256 and this
+ * container is 2048:
+ *
+ *   n >= p+2   2^n - 1 sits in the top HALF of the gap below 2^n,
+ *              above its midpoint (the gap there is 2^(n-p) and
+ *              1 < 2^(n-p-1));
+ *   n <= -(p+2) -(1 - 2^n) sits in the half gap above -1, whose nearest
+ *              boundary is -(1 - 2^-(p+1)).
+ *
+ * There is NO tiny-argument rule: 2^x - 1 is about x ln2, which is not
+ * beside x. Only a base of e puts it there, which is why expm1 has one
+ * and this does not.
+ */
+static cft_status do_exp2m1(const cft_fmt_desc *f, const lane *a, int rnd,
+                            cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn M, t;
+    long E, n;
+
+    *flags = 0;
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        if (a->signaling)
+            *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {
+        if (a->sign)
+            put_one(f, 1, out);                 /* exp2m1(-inf) = -1 */
+        else
+            cft_sf_inf(f, 0, out);
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);           /* exp2m1(+-0) = +-0 */
+        return CFT_OK;
+    }
+
+    lane_odd(a, &M, &E);
+    if (E >= 0) {                               /* an integer argument */
+        n = odd_to_long(&M, E, a->sign);
+        if (n >= -(long)(f->prec + 1) && n <= (long)(f->prec + 1)) {
+            cft_tr_exact++;
+            cft_bn_zero(&t);
+            cft_bn_setbit(&t, (int)(n < 0 ? -n : n));
+            cft_bn_dec(&t);                     /* 2^|n| - 1 */
+            return round_exact(f, n < 0, &t, n < 0 ? n : 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        }
+        if (n > 0) {
+            lane u;
+            if (n > f->emax)
+                return round_overflowing(f, 0, rnd, out, flags)
+                    ? CFT_ERR_INTERNAL : CFT_OK;
+            lane_pow2(f, n, &u);
+            return round_neighbour(f, &u, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        }
+        {
+            lane negone;
+            lane_one(f, 1, &negone);
+            return round_neighbour(f, &negone, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        }
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_EXP2M1;
+    A.a = *a;
+    {
+        cft_mp q;
+        if (tr_log2_estimate(&A, &q))            /* log2(2^x) is x */
+            return CFT_ERR_INTERNAL;
+        if (cft_mp_cmp_int(&q, (int64_t)f->emax + 2) > 0)
+            return round_overflowing(f, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        if (cft_mp_cmp_int(&q, -(int64_t)(f->prec + 3)) < 0) {
+            lane negone;
+            lane_one(f, 1, &negone);
+            return round_neighbour(f, &negone, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        }
+    }
+    return tr_ziv(&A, a->sign ? 1 : 0, rnd, out, flags);
+}
+
+/* 10^x and 10^x - 1.
+ *
+ * EXACT exactly at the non-negative integers whose 10^n (odd part 5^n)
+ * or 10^n - 1 (odd, so its own odd part) fits in p+1 bits. A negative
+ * power of ten is not a dyadic rational at all, and a non-integer dyadic
+ * exponent gives an algebraic irrational, so neither can be a boundary.
+ *
+ * exp10 gets the beside-1 rule for a tiny argument - |10^x - 1| <= 2.64|x|
+ * is inside the half gap next to 1 once |x| < 2^-(p+3) - and exp10m1
+ * does NOT, for exp2m1's reason: 10^x - 1 is about x ln10, which is not
+ * beside x. What exp10m1 gets instead is the rule beside -1, where 10^x
+ * has fallen below half a gap.
+ */
+static cft_status do_exp10_family(const cft_fmt_desc *f, int fn,
+                                  const lane *a, int rnd, cft_bn *out,
+                                  uint32_t *flags)
+{
+    tr_args A;
+    cft_bn M;
+    long E;
+    int minus_one = (fn == CFT_TR_EXP10M1);
+
+    *flags = 0;
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        if (a->signaling)
+            *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {
+        if (a->sign) {
+            if (minus_one)
+                put_one(f, 1, out);             /* exp10m1(-inf) = -1 */
+            else
+                cft_sf_zero(f, 0, out);         /* exp10(-inf) = +0 */
+        } else {
+            cft_sf_inf(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        if (minus_one)
+            cft_sf_zero(f, a->sign, out);       /* exp10m1(+-0) = +-0 */
+        else
+            put_one(f, 0, out);                 /* exp10(+-0) = 1 */
+        return CFT_OK;
+    }
+
+    lane_odd(a, &M, &E);
+    if (E >= 0 && !a->sign) {                   /* a positive integer */
+        long n = odd_to_long(&M, E, 0);
+        if (n <= (long)f->prec + 1) {
+            cft_bn five;
+            if (pow5(&five, n, f->prec + 1) == 0) {
+                cft_bn ten;
+                if (!minus_one) {
+                    cft_tr_exact++;
+                    return round_exact(f, 0, &five, n, rnd, out, flags)
+                        ? CFT_ERR_INTERNAL : CFT_OK;
+                }
+                if (cft_bn_shl(&ten, &five, (int)n) == 0) {
+                    cft_bn_dec(&ten);           /* 10^n - 1, odd */
+                    if (cft_bn_bitlen(&ten) <= f->prec + 1) {
+                        cft_tr_exact++;
+                        return round_exact(f, 0, &ten, 0, rnd, out, flags)
+                            ? CFT_ERR_INTERNAL : CFT_OK;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!minus_one && lane_vexp(a) <= -(long)(f->prec + 4)) {
+        lane one;
+        lane_one(f, 0, &one);
+        return round_neighbour(f, &one, a->sign == 0, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    {
+        cft_mp q;
+        if (tr_log2_estimate(&A, &q))
+            return CFT_ERR_INTERNAL;
+        if (minus_one) {
+            if (cft_mp_cmp_int(&q, (int64_t)f->emax + 2) > 0)
+                return round_overflowing(f, 0, rnd, out, flags)
+                    ? CFT_ERR_INTERNAL : CFT_OK;
+            if (cft_mp_cmp_int(&q, -(int64_t)(f->prec + 3)) < 0) {
+                lane negone;
+                lane_one(f, 1, &negone);
+                return round_neighbour(f, &negone, 0, rnd, out, flags)
+                    ? CFT_ERR_INTERNAL : CFT_OK;
+            }
+        } else {
+            int s = tr_screen(&A, &q, 0, rnd, out, flags);
+            if (s < 0)
+                return CFT_ERR_INTERNAL;
+            if (s > 0)
+                return CFT_OK;
+        }
+    }
+    return tr_ziv(&A, minus_one && a->sign ? 1 : 0, rnd, out, flags);
+}
+
+/* log2(1 + x) and log10(1 + x).
+ *
+ * EXACT exactly where 1 + x is a power of two, or of ten - unique
+ * factorisation, the same argument log2 and log10 have carried since
+ * phase 1 - and 1 + x is formed EXACTLY on the encoding rather than in
+ * the format, which is the whole reason these functions exist.
+ *
+ * NO neighbour rule, and that is a derivation rather than an omission:
+ * for a tiny x the value is x/ln2 or x/ln10, which is not beside x. Only
+ * a base of e puts it there, which is why log1p has a rule and these do
+ * not; the enclosure resolves them to full relative precision and
+ * round_pack carries the underflow.
+ */
+static cft_status do_logp1_family(const cft_fmt_desc *f, int fn,
+                                  const lane *a, int rnd, cft_bn *out,
+                                  uint32_t *flags)
+{
+    tr_args A;
+    cft_bn M, sm, O, n;
+    long E, se, F;
+
+    *flags = 0;
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        if (a->signaling)
+            *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {
+        if (a->sign) {
+            cft_sf_qnan(f, out);                /* 1 + (-inf) < 0 */
+            *flags = CFT_SF_INVALID;
+        } else {
+            cft_sf_inf(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_tr_exact++;
+        cft_sf_zero(f, a->sign, out);           /* f(+-0) = +-0 */
+        return CFT_OK;
+    }
+    lane_odd(a, &M, &E);
+    if (a->sign && E == 0 && cft_bn_bitlen(&M) == 1) {   /* x == -1 */
+        cft_sf_inf(f, 1, out);
+        *flags = CFT_SF_DIVZERO;
+        return CFT_OK;
+    }
+    if (a->sign && lane_vexp(a) >= 0) {                  /* x < -1 */
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+
+    if (lane_one_plus(a, &sm, &se, f->prec + 4) == 0) {
+        int tz = 0, nb = cft_bn_bitlen(&sm);
+        while (tz < nb && !cft_bn_bit(&sm, tz))
+            tz++;
+        cft_bn_shr(&O, &sm, tz);
+        F = se + tz;
+        if (fn == CFT_TR_LOG2P1 && cft_bn_bitlen(&O) == 1) {
+            cft_tr_exact++;                      /* 1 + x == 2^F */
+            if (F == 0) {
+                cft_sf_zero(f, 0, out);
+                return CFT_OK;
+            }
+            cft_bn_zero(&n);
+            cft_bn_set_u32(&n, (uint32_t)(F < 0 ? -F : F));
+            return round_exact(f, F < 0, &n, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        }
+        if (fn == CFT_TR_LOG10P1 && F >= 0 && F <= f->prec) {
+            cft_bn five;
+            if (pow5(&five, F, f->prec + 2) == 0 &&
+                cft_bn_cmp(&five, &O) == 0) {
+                cft_tr_exact++;                  /* 1 + x == 10^F */
+                if (F == 0) {
+                    cft_sf_zero(f, 0, out);
+                    return CFT_OK;
+                }
+                cft_bn_zero(&n);
+                cft_bn_set_u32(&n, (uint32_t)F);
+                return round_exact(f, 0, &n, 0, rnd, out, flags)
+                    ? CFT_ERR_INTERNAL : CFT_OK;
+            }
+        }
+    }
+
+    /* The one family no working precision can decide, and the reason
+     * these two functions have a neighbour rule after all - just not the
+     * tiny-argument one their siblings have.
+     *
+     * For x = 2^k the value is k + log2(1 + 2^-k): an exponentially
+     * small step ABOVE the integer k, and k is a grid point of every
+     * format on this ladder. An enclosure would have to separate the two
+     * and cannot; the SIDE is the whole answer, and it is a theorem
+     * (log2(1+u) > 0 for u > 0) rather than a measurement.
+     *
+     * The threshold is derived. The excess is at most 2^(-k+0.529), and
+     * the nearest boundary above k is half an ulp away at 2^(g-p) with
+     * g = floor(log2 k), so the excess is inside it once
+     * k > p - g + 0.529 - that is, once k >= p - g + 1. At k = p - g the
+     * excess is at least 1.26 half-gaps, so the enclosure decides that
+     * one with two bits to spare: there is no band between the two.
+     *
+     * For x = 10^k the same shape in another base: the excess is at most
+     * 10^-k/ln10, and the comparison against the half gap is made in
+     * EXACT integers against 23025/10000, a rational below ln 10. The
+     * closest that comparison comes to an equality over every k any
+     * format on this ladder holds is a factor of 2^0.495 (fp128,
+     * k = 32), so five decimals of ln 10 decide it with room.
+     *
+     * Nothing else in these two functions needs a rule. x = 2^k + one
+     * ulp puts the value about 2^(1-p) above k in RELATIVE terms, which
+     * the enclosure resolves in p + log2(k) bits; only the exact power,
+     * where the whole perturbation is the "+1", is out of its reach. */
+    if (!a->sign && E >= 1) {
+        long k = E, g = 0, kk = E;
+        while (kk > 1) {
+            kk >>= 1;
+            g++;
+        }
+        if (fn == CFT_TR_LOG2P1 && cft_bn_bitlen(&M) == 1 &&
+            k >= (long)f->prec - g + 1) {
+            cft_bn km;
+            cft_bn_zero(&km);
+            cft_bn_set_u32(&km, (uint32_t)k);
+            return round_side(f, 0, &km, 0, 1, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        }
+        if (fn == CFT_TR_LOG10P1 && k <= (long)f->prec) {
+            cft_bn five, ten, half, lhs, rhs, c;
+            if (pow5(&five, k, f->prec + 2) == 0 &&
+                cft_bn_cmp(&five, &M) == 0) {         /* x == 10^k */
+                cft_bn_zero(&half);
+                cft_bn_setbit(&half, (int)((long)f->prec - g));
+                cft_bn_zero(&c);
+                cft_bn_set_u32(&c, 10000);
+                if (cft_bn_mul(&lhs, &half, &c))
+                    return CFT_ERR_INTERNAL;
+                if (cft_bn_shl(&ten, &five, (int)k))
+                    return CFT_ERR_INTERNAL;
+                cft_bn_zero(&c);
+                cft_bn_set_u32(&c, 23025);
+                if (cft_bn_mul(&rhs, &ten, &c))
+                    return CFT_ERR_INTERNAL;
+                if (cft_bn_cmp(&lhs, &rhs) < 0) {
+                    cft_bn km;
+                    cft_bn_zero(&km);
+                    cft_bn_set_u32(&km, (uint32_t)k);
+                    return round_side(f, 0, &km, 0, 1, rnd, out, flags)
+                        ? CFT_ERR_INTERNAL : CFT_OK;
+                }
+            }
+        }
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = fn;
+    A.a = *a;
+    return tr_ziv(&A, a->sign, rnd, out, flags);
+}
+
+/* 1/sqrt(x) on [0, +inf].
+ *
+ * rSqrt(+-0) is +-INFINITY with divideByZero - the sign SURVIVES, which
+ * is 754-2019 9.2.1's row and is not what GNU MPFR's mpfr_rec_sqrt
+ * delivers (it returns +inf for both zeros; measured on 4.2.2,
+ * 2026-09-03, and recorded in docs/TRANSCENDENTALS.md).
+ *
+ * EXACT exactly at the even powers of two: 1/sqrt(M 2^E) is rational
+ * only if sqrt(M) is, and dyadic only if sqrt(M) is a power of two,
+ * which for an odd M forces M = 1 - and then E must be even.
+ *
+ * It can neither overflow nor underflow at any rung: the largest result
+ * is 1/sqrt(minSubnormal) = 2^((emax+p-1)/2), and half of emax+p-1 is
+ * below emax whenever emax > p-1, which holds at all four. So there is
+ * no screen here, and none is missing.
+ */
+static cft_status do_rsqrt(const cft_fmt_desc *f, const lane *a, int rnd,
+                           cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn M, one;
+    long E;
+
+    *flags = 0;
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        if (a->signaling)
+            *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        cft_sf_inf(f, a->sign, out);
+        *flags = CFT_SF_DIVZERO;
+        return CFT_OK;
+    }
+    if (a->sign) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {
+        cft_sf_zero(f, 0, out);
+        return CFT_OK;
+    }
+
+    lane_odd(a, &M, &E);
+    if (cft_bn_bitlen(&M) == 1 && (E % 2) == 0) {
+        cft_tr_exact++;
+        cft_bn_zero(&one);
+        cft_bn_set_u32(&one, 1);
+        return round_exact(f, 0, &one, -(E / 2), rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_RSQRT;
+    A.a = *a;
+    return tr_ziv(&A, 0, rnd, out, flags);
+}
+
+/* The screen and the beside-1 rule shared by pown, powr, compound and
+ * rootn: every one of them is exp(something * a logarithm), so a result
+ * provably past the format is delivered without evaluating anything, and
+ * one provably inside the half gap next to 1 is delivered by its side.
+ * `up` is the side the exact operand signs give.
+ *
+ * Returns 1 when it fired, 0 to fall through, -1 on an internal
+ * failure. */
+static int tr_pow_like_screen(const tr_args *A, int sign, int up, int rnd,
+                              cft_bn *out, uint32_t *flags)
+{
+    const cft_fmt_desc *f = A->f;
+    cft_mp q;
+    int s;
+
+    if (tr_log2_estimate(A, &q))
+        return -1;
+    s = tr_screen(A, &q, sign, rnd, out, flags);
+    if (s != 0)
+        return s;
+    if (!q.zero && cft_mp_exp2_of(&q) + 4 < -(long)(f->prec + 3)) {
+        lane one;
+        lane_one(f, sign, &one);
+        return round_neighbour(f, &one, up, rnd, out, flags) ? -1 : 1;
+    }
+    return 0;
+}
+
+/* x^n for an integer n. 9.2.1's own rows, which are pow's with the
+ * non-integer exponent deleted - and with pow(1, y) = 1 deleted too,
+ * because an integer n makes that an ordinary exact case rather than a
+ * table entry. pown(x, 0) is 1 for any x that is not a signaling NaN, a
+ * quiet NaN and an infinity included. */
+static cft_status do_pown(const cft_fmt_desc *f, const lane *a, int64_t n,
+                          int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn m;
+    long e;
+    int odd = (int)(n & 1), sign, up;
+
+    *flags = 0;
+    if (a->kind == K_NAN && a->signaling) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (n == 0) {
+        put_one(f, 0, out);                     /* even a quiet NaN */
+        return CFT_OK;
+    }
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        int neg = a->sign && odd;
+        if (n < 0) {
+            cft_sf_inf(f, neg, out);
+            *flags = CFT_SF_DIVZERO;
+        } else {
+            cft_sf_zero(f, neg, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {
+        int neg = a->sign && odd;
+        if (n < 0)
+            cft_sf_zero(f, neg, out);
+        else
+            cft_sf_inf(f, neg, out);
+        return CFT_OK;
+    }
+
+    sign = (a->sign && odd) ? 1 : 0;
+    if (dyadic_pow_int(f, &a->m, a->e, n, &m, &e) == 0) {
+        long vexp = e + cft_bn_bitlen(&m) - 1;
+        cft_tr_exact++;
+        if (vexp > f->emax)
+            return round_overflowing(f, sign, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        if (vexp < f->emin - f->man_w - 1)
+            return round_underflowing(f, sign, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        return round_exact(f, sign, &m, e, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_POWN;
+    A.a = *a;
+    A.a.sign = 0;
+    A.nn = n;
+    up = (lane_vexp(a) >= 0) != (n < 0);
+    {
+        int s = tr_pow_like_screen(&A, sign, up, rnd, out, flags);
+        if (s < 0)
+            return CFT_ERR_INTERNAL;
+        if (s > 0)
+            return CFT_OK;
+    }
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
+/* x^y defined as exp(y log x), so the domain excludes a negative base
+ * and the table is NOT pow's. The rows that differ, and every one of
+ * them is a deliberate difference rather than an oversight:
+ *
+ *   powr(x, y) for x < 0            invalid, for EVERY y, a NaN included
+ *   powr(+-0, +-0)                  invalid
+ *   powr(+inf, +-0)                 invalid
+ *   powr(+1, +-inf)                 invalid
+ *   powr(qNaN, y), powr(x, qNaN)    qNaN and silent - so powr(qNaN, 0)
+ *                                   is a NaN where pow(qNaN, 0) is 1,
+ *                                   which is the point of having both
+ *
+ * MPFR 4.2.2 returns 1 for mpfr_powr(1, qNaN); the standard's row is
+ * "powr(+1, y) is 1 for FINITE y" and it lists powr(x, qNaN) for x >= 0
+ * separately, so this contract delivers the quiet NaN. Measured and
+ * recorded in docs/TRANSCENDENTALS.md.
+ */
+static cft_status do_powr(const cft_fmt_desc *f, const lane *x, const lane *y,
+                          int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn m;
+    long e;
+    int up;
+
+    *flags = 0;
+    if ((x->kind == K_NAN && x->signaling) ||
+        (y->kind == K_NAN && y->signaling)) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    /* x < 0 outranks even a quiet NaN exponent: it is a domain error,
+     * and 9.2.1's NaN row is written "for x >= 0". */
+    if (x->kind != K_NAN && x->sign && x->kind != K_ZERO) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (x->kind == K_NAN || y->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        return CFT_OK;
+    }
+    if (x->kind == K_ZERO) {
+        if (y->kind == K_ZERO) {
+            cft_sf_qnan(f, out);                /* powr(+-0, +-0) */
+            *flags = CFT_SF_INVALID;
+        } else if (y->sign) {
+            cft_sf_inf(f, 0, out);
+            if (y->kind != K_INF)
+                *flags = CFT_SF_DIVZERO;        /* the pole, not the limit */
+        } else {
+            cft_sf_zero(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (x->kind == K_INF) {                     /* +inf only */
+        if (y->kind == K_ZERO) {
+            cft_sf_qnan(f, out);                /* powr(+inf, +-0) */
+            *flags = CFT_SF_INVALID;
+        } else if (y->sign) {
+            cft_sf_zero(f, 0, out);
+        } else {
+            cft_sf_inf(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (lane_is_one(x)) {
+        if (y->kind == K_INF) {
+            cft_sf_qnan(f, out);                /* powr(+1, +-inf) */
+            *flags = CFT_SF_INVALID;
+        } else {
+            put_one(f, 0, out);                 /* every finite y */
+        }
+        return CFT_OK;
+    }
+    if (y->kind == K_ZERO) {
+        put_one(f, 0, out);                     /* finite x > 0 */
+        return CFT_OK;
+    }
+    if (y->kind == K_INF) {
+        if ((lane_vexp(x) >= 0) == !y->sign)
+            cft_sf_inf(f, 0, out);
+        else
+            cft_sf_zero(f, 0, out);
+        return CFT_OK;
+    }
+
+    if (pow_dyadic(f, x, y, &m, &e) == 0) {
+        long vexp = e + cft_bn_bitlen(&m) - 1;
+        cft_tr_exact++;
+        if (vexp > f->emax)
+            return round_overflowing(f, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        if (vexp < f->emin - f->man_w - 1)
+            return round_underflowing(f, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        return round_exact(f, 0, &m, e, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_POWR;
+    A.a = *x;
+    A.b = *y;
+    up = (lane_vexp(x) >= 0) != (y->sign != 0);
+    {
+        int s = tr_pow_like_screen(&A, 0, up, rnd, out, flags);
+        if (s < 0)
+            return CFT_ERR_INTERNAL;
+        if (s > 0)
+            return CFT_OK;
+    }
+    return tr_ziv(&A, 0, rnd, out, flags);
+}
+
+/* (1 + x)^n for an integer n, on [-1, +inf].
+ *
+ * 9.2.1's rows, and the one an implementation is most likely to get
+ * wrong is the first: compound(x, 0) is 1 "for x >= -1 or quiet NaN",
+ * which makes compound(x, 0) for x < -1 INVALID rather than 1. MPFR
+ * 4.2.2 agrees (measured: mpfr_compound_si(-2, 0) is NaN).
+ *
+ * 1 + x is formed EXACTLY and then raised by pown's own procedure, so
+ * compound(2^-1074, 1) at binary64 is the correctly rounded 1 + 2^-1074
+ * - which is 1 with inexact, and is NOT what evaluating (1 + x)^1 in
+ * the format would give.
+ */
+static cft_status do_compound(const cft_fmt_desc *f, const lane *a,
+                              int64_t n, int rnd, cft_bn *out,
+                              uint32_t *flags)
+{
+    tr_args A;
+    cft_bn sm, m;
+    long se, e;
+    int below, up;
+
+    *flags = 0;
+    if (a->kind == K_NAN && a->signaling) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    below = a->kind != K_NAN && a->sign &&
+            (a->kind == K_INF || (a->kind != K_ZERO && !lane_is_one(a) &&
+                                  lane_vexp(a) >= 0));
+    if (n == 0) {
+        if (a->kind == K_NAN) {
+            put_one(f, 0, out);                 /* even a quiet NaN */
+        } else if (below) {
+            cft_sf_qnan(f, out);
+            *flags = CFT_SF_INVALID;
+        } else {
+            put_one(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        return CFT_OK;
+    }
+    if (below) {
+        cft_sf_qnan(f, out);                    /* x < -1, -inf included */
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->sign && a->kind != K_ZERO && lane_is_one(a)) {   /* x == -1 */
+        if (n < 0) {
+            cft_sf_inf(f, 0, out);
+            *flags = CFT_SF_DIVZERO;
+        } else {
+            cft_sf_zero(f, 0, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        put_one(f, 0, out);                     /* compound(+-0, n) = 1 */
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {                     /* +inf */
+        if (n > 0)
+            cft_sf_inf(f, 0, out);
+        else
+            cft_sf_zero(f, 0, out);
+        return CFT_OK;
+    }
+
+    if (lane_one_plus(a, &sm, &se, f->prec + 4) == 0 &&
+        dyadic_pow_int(f, &sm, se, n, &m, &e) == 0) {
+        long vexp = e + cft_bn_bitlen(&m) - 1;
+        cft_tr_exact++;
+        if (vexp > f->emax)
+            return round_overflowing(f, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        if (vexp < f->emin - f->man_w - 1)
+            return round_underflowing(f, 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        return round_exact(f, 0, &m, e, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_COMPOUND;
+    A.a = *a;
+    A.nn = n;
+    up = (a->sign == 0) != (n < 0);             /* 1 + x is above 1 iff x is */
+    {
+        int s = tr_pow_like_screen(&A, 0, up, rnd, out, flags);
+        if (s < 0)
+            return CFT_ERR_INTERNAL;
+        if (s > 0)
+            return CFT_OK;
+    }
+
+    /* A DOMINANT operand, and the second family in this set that no
+     * working precision reaches. For a large x the value is x^n times
+     * (1 + 1/x)^n, and when x^n is itself an exact dyadic the correction
+     * is below a quarter of the grid step there - so the side settles
+     * it, exactly as hypot's dominant operand is settled.
+     *
+     * Without this, compound(2^1022, 1) at binary64 is 2^1022 + 1: one
+     * unit above a grid point whose ulp is 2^970, and no precision under
+     * the cap separates them.
+     *
+     * The threshold is derived. vexp(x) >= p + 2 + bits(|n|) makes
+     * |n/x| < 2^-(p+2); the binomial tail |(1+1/x)^n - 1 - n/x| is below
+     * 2(n/x)^2 and so below it again; and a quarter of the relative grid
+     * step is 2^-(p+1). The correction's SIGN is n's, because 1 + 1/x is
+     * above 1 for a positive x. */
+    {
+        uint64_t an = i64_abs(n);
+        int nbits = 0;
+        while (an) {
+            nbits++;
+            an >>= 1;
+        }
+        if (!a->sign &&
+            lane_vexp(a) >= (long)f->prec + 2 + nbits &&
+            dyadic_pow_int(f, &a->m, a->e, n, &m, &e) == 0)
+            return round_side(f, 0, &m, e, n > 0, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+    return tr_ziv(&A, 0, rnd, out, flags);
+}
+
+/* x^(1/n) for a nonzero integer n.
+ *
+ * rootn(x, 1) is x, exactly and silently. rootn(x, 2) is squareRoot(x)
+ * on every input EXCEPT x = -0, where the standard's own NOTE says they
+ * differ: rootn(-0, 2) is +0 by the even-n row where squareRoot(-0) is
+ * -0. host/tests/transcend_check.py tests both halves of that.
+ *
+ * EXACT exactly when the odd significand is a perfect |n|-th power and
+ * |n| divides the exponent, which one verified integer root decides;
+ * a negative n turns it into a reciprocal, dyadic only when that root
+ * is 1. For a large |n| the answer is inside the half gap next to 1 and
+ * the beside-1 rule delivers it, which is the same rule pow uses and the
+ * reason exp(log(x)/n) never has to be evaluated for an |n| that would
+ * make it meaningless.
+ */
+static cft_status do_rootn(const cft_fmt_desc *f, const lane *a, int64_t n,
+                           int rnd, cft_bn *out, uint32_t *flags)
+{
+    tr_args A;
+    cft_bn m;
+    long e;
+    int odd = (int)(n & 1), sign, up;
+
+    *flags = 0;
+    if (a->kind == K_NAN && a->signaling) {
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (n == 0) {
+        /* Table 9.1: "n = 0: invalid operation". Zero is outside the
+         * domain for EVERY x, a quiet NaN included, and 9.2's rule for
+         * an operand outside the domain is a quiet NaN with invalid. */
+        cft_sf_qnan(f, out);
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (a->kind == K_NAN) {
+        cft_sf_qnan(f, out);
+        return CFT_OK;
+    }
+    if (a->kind == K_ZERO) {
+        if (n < 0) {
+            cft_sf_inf(f, (odd && a->sign) ? 1 : 0, out);
+            *flags = CFT_SF_DIVZERO;
+        } else {
+            cft_sf_zero(f, (odd && a->sign) ? 1 : 0, out);
+        }
+        return CFT_OK;
+    }
+    if (a->kind == K_INF) {
+        if (a->sign && !odd) {
+            cft_sf_qnan(f, out);
+            *flags = CFT_SF_INVALID;
+        } else if (n > 0) {
+            cft_sf_inf(f, a->sign, out);
+        } else {
+            cft_sf_zero(f, a->sign, out);
+        }
+        return CFT_OK;
+    }
+    if (a->sign && !odd) {
+        cft_sf_qnan(f, out);                    /* x < 0 with an even n */
+        *flags = CFT_SF_INVALID;
+        return CFT_OK;
+    }
+    if (n == 1) {
+        cft_tr_exact++;                         /* rootn(x, 1) = x */
+        return round_exact(f, a->sign, &a->m, a->e, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    sign = a->sign;
+    if (rootn_dyadic(f, a, n, &m, &e) == 0) {
+        long vexp = e + cft_bn_bitlen(&m) - 1;
+        cft_tr_exact++;
+        if (vexp > f->emax)
+            return round_overflowing(f, sign, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        if (vexp < f->emin - f->man_w - 1)
+            return round_underflowing(f, sign, rnd, out, flags)
+                ? CFT_ERR_INTERNAL : CFT_OK;
+        return round_exact(f, sign, &m, e, rnd, out, flags)
+            ? CFT_ERR_INTERNAL : CFT_OK;
+    }
+
+    memset(&A, 0, sizeof A);
+    A.f = f;
+    A.fn = CFT_TR_ROOTN;
+    A.a = *a;
+    A.a.sign = 0;
+    A.nn = n;
+    up = (lane_vexp(a) >= 0) != (n < 0);
+    {
+        int s = tr_pow_like_screen(&A, sign, up, rnd, out, flags);
+        if (s < 0)
+            return CFT_ERR_INTERNAL;
+        if (s > 0)
+            return CFT_OK;
+    }
+    return tr_ziv(&A, sign, rnd, out, flags);
+}
+
 /* ---- the public entry points ---------------------------------------- */
 
 static int rnd_ok(cft_round rnd)
@@ -3390,7 +4775,8 @@ static cft_status tr_validate(cft_device *dev, cft_format fmt,
 
 static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
                            cft_round rnd, const void *a, const void *b,
-                           void *d, size_t n, uint32_t *flags_out)
+                           const int64_t *nn, void *d, size_t n,
+                           uint32_t *flags_out)
 {
     const cft_fmt_desc *f;
     uint32_t acc = 0;
@@ -3411,6 +4797,8 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
         if (!b)
             return CFT_ERR_INVALID_ARGUMENT;
     }
+    if (cft_tr_has_int(fn) && !nn)
+        return CFT_ERR_INVALID_ARGUMENT;
     f = &cft_sf_formats[(int)fmt];
     if (n > ((size_t)-1) / (size_t)(f->width / 8))
         return CFT_ERR_INVALID_ARGUMENT;
@@ -3490,6 +4878,32 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
         case CFT_TR_ATANH:
             st = do_atanh(f, &la, (int)rnd, &out, &fl);
             break;
+        case CFT_TR_EXP2M1:
+            st = do_exp2m1(f, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_EXP10:
+        case CFT_TR_EXP10M1:
+            st = do_exp10_family(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_LOG2P1:
+        case CFT_TR_LOG10P1:
+            st = do_logp1_family(f, fn, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_RSQRT:
+            st = do_rsqrt(f, &la, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_POWN:
+            st = do_pown(f, &la, nn[i], (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_POWR:
+            st = do_powr(f, &la, &lb, (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_COMPOUND:
+            st = do_compound(f, &la, nn[i], (int)rnd, &out, &fl);
+            break;
+        case CFT_TR_ROOTN:
+            st = do_rootn(f, &la, nn[i], (int)rnd, &out, &fl);
+            break;
         default:
             return CFT_ERR_INVALID_ARGUMENT;
         }
@@ -3508,7 +4922,7 @@ CFT_API cft_status name(cft_device *dev, cft_format fmt, cft_round rnd,   \
                         const void *a, void *d, size_t n,                 \
                         uint32_t *flags_out)                              \
 {                                                                         \
-    return tr_batch(dev, code, fmt, rnd, a, NULL, d, n, flags_out);       \
+    return tr_batch(dev, code, fmt, rnd, a, NULL, NULL, d, n, flags_out); \
 }
 
 TR_UNARY(cft_exp,   CFT_TR_EXP)
@@ -3523,14 +4937,16 @@ CFT_API cft_status cft_pow(cft_device *dev, cft_format fmt, cft_round rnd,
                            const void *a, const void *b, void *d, size_t n,
                            uint32_t *flags_out)
 {
-    return tr_batch(dev, CFT_TR_POW, fmt, rnd, a, b, d, n, flags_out);
+    return tr_batch(dev, CFT_TR_POW, fmt, rnd, a, b, NULL, d, n,
+                    flags_out);
 }
 
 CFT_API cft_status cft_hypot(cft_device *dev, cft_format fmt, cft_round rnd,
                              const void *a, const void *b, void *d, size_t n,
                              uint32_t *flags_out)
 {
-    return tr_batch(dev, CFT_TR_HYPOT, fmt, rnd, a, b, d, n, flags_out);
+    return tr_batch(dev, CFT_TR_HYPOT, fmt, rnd, a, b, NULL, d, n,
+                    flags_out);
 }
 
 TR_UNARY(cft_sinpi,  CFT_TR_SINPI)
@@ -3550,14 +4966,16 @@ CFT_API cft_status cft_atan2(cft_device *dev, cft_format fmt, cft_round rnd,
                              const void *a, const void *b, void *d, size_t n,
                              uint32_t *flags_out)
 {
-    return tr_batch(dev, CFT_TR_ATAN2, fmt, rnd, a, b, d, n, flags_out);
+    return tr_batch(dev, CFT_TR_ATAN2, fmt, rnd, a, b, NULL, d, n,
+                    flags_out);
 }
 
 CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
                                cft_round rnd, const void *a, const void *b,
                                void *d, size_t n, uint32_t *flags_out)
 {
-    return tr_batch(dev, CFT_TR_ATAN2PI, fmt, rnd, a, b, d, n, flags_out);
+    return tr_batch(dev, CFT_TR_ATAN2PI, fmt, rnd, a, b, NULL, d, n,
+                    flags_out);
 }
 
 TR_UNARY(cft_sin,   CFT_TR_SIN)
@@ -3569,6 +4987,37 @@ TR_UNARY(cft_tanh,  CFT_TR_TANH)
 TR_UNARY(cft_asinh, CFT_TR_ASINH)
 TR_UNARY(cft_acosh, CFT_TR_ACOSH)
 TR_UNARY(cft_atanh, CFT_TR_ATANH)
+
+/* The rest of table 9.1. The five unary ones take the shape everything
+ * above takes; the four powers do not, and the reason is 9.2.1's:
+ * pown, compound and rootn read an INTEGER second operand, so they take
+ * an int64_t array beside the encoding array and the element count moves
+ * to `count`. powr reads two encodings like pow. */
+TR_UNARY(cft_exp2m1,  CFT_TR_EXP2M1)
+TR_UNARY(cft_exp10,   CFT_TR_EXP10)
+TR_UNARY(cft_exp10m1, CFT_TR_EXP10M1)
+TR_UNARY(cft_log2p1,  CFT_TR_LOG2P1)
+TR_UNARY(cft_log10p1, CFT_TR_LOG10P1)
+TR_UNARY(cft_rsqrt,   CFT_TR_RSQRT)
+
+CFT_API cft_status cft_powr(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const void *b, void *d, size_t n,
+                            uint32_t *flags_out)
+{
+    return tr_batch(dev, CFT_TR_POWR, fmt, rnd, a, b, NULL, d, n, flags_out);
+}
+
+#define TR_INT1(name, code)                                               \
+CFT_API cft_status name(cft_device *dev, cft_format fmt, cft_round rnd,   \
+                        const void *a, const int64_t *n, void *d,         \
+                        size_t count, uint32_t *flags_out)                \
+{                                                                         \
+    return tr_batch(dev, code, fmt, rnd, a, NULL, n, d, count, flags_out); \
+}
+
+TR_INT1(cft_pown,     CFT_TR_POWN)
+TR_INT1(cft_compound, CFT_TR_COMPOUND)
+TR_INT1(cft_rootn,    CFT_TR_ROOTN)
 
 const char *cft_tr_name(int fn)
 {
@@ -3602,6 +5051,16 @@ const char *cft_tr_name(int fn)
     case CFT_TR_ASINH:   return "asinh";
     case CFT_TR_ACOSH:   return "acosh";
     case CFT_TR_ATANH:   return "atanh";
+    case CFT_TR_EXP2M1:   return "exp2m1";
+    case CFT_TR_EXP10:    return "exp10";
+    case CFT_TR_EXP10M1:  return "exp10m1";
+    case CFT_TR_LOG2P1:   return "log2p1";
+    case CFT_TR_LOG10P1:  return "log10p1";
+    case CFT_TR_RSQRT:    return "rsqrt";
+    case CFT_TR_POWN:     return "pown";
+    case CFT_TR_POWR:     return "powr";
+    case CFT_TR_COMPOUND: return "compound";
+    case CFT_TR_ROOTN:    return "rootn";
     default:             return "unknown";
     }
 }
@@ -3609,7 +5068,14 @@ const char *cft_tr_name(int fn)
 int cft_tr_arity(int fn)
 {
     return (fn == CFT_TR_POW || fn == CFT_TR_HYPOT ||
-            fn == CFT_TR_ATAN2 || fn == CFT_TR_ATAN2PI) ? 2 : 1;
+            fn == CFT_TR_ATAN2 || fn == CFT_TR_ATAN2PI ||
+            fn == CFT_TR_POWR) ? 2 : 1;
+}
+
+int cft_tr_has_int(int fn)
+{
+    return fn == CFT_TR_POWN || fn == CFT_TR_COMPOUND ||
+           fn == CFT_TR_ROOTN;
 }
 
 int cft_tr_from_name(const char *s)
@@ -3623,7 +5089,8 @@ int cft_tr_from_name(const char *s)
 
 cft_status cft_tr_apply(cft_device *dev, int fn, cft_format fmt,
                         cft_round rnd, const void *a, const void *b,
-                        void *d, size_t n, uint32_t *flags_out)
+                        const int64_t *nn, void *d, size_t n,
+                        uint32_t *flags_out)
 {
-    return tr_batch(dev, fn, fmt, rnd, a, b, d, n, flags_out);
+    return tr_batch(dev, fn, fmt, rnd, a, b, nn, d, n, flags_out);
 }

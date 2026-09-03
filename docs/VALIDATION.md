@@ -1866,6 +1866,91 @@ run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
 libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
 wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.
 
+## 2026-09-03 - the rest of table 9.1: exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn (part of the 0.6 step)
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, with three
+other agents building on the same box - so no wall-clock figure here is
+comparable with an earlier entry and none is quoted as a performance
+number. With these ten the library implements every operation IEEE
+754-2019 table 9.1 lists for the binary formats.
+
+    python/tests          1,241 passed, 1 skipped (944 before)
+    transcend_check       607,217 comparisons over 39 functions, C == model on every
+                          one; 580,977 more with the C forced to start at 64 bits
+    rootn(x,2) == sqrt(x) 17,665 comparisons over 5 attributes - identical except at
+                          x = -0, where 9.2.1's own NOTE says they differ, and the
+                          difference is asserted rather than skipped
+    make vectors          40 sets, 769,265 cases (533,265 transcendental), up from
+                          478,915 (242,915)
+    make -C host test     api-test all contract checks passed, the table-9.1 block
+                          included; 769,265 cases replayed twice
+    mpfr-check            544,788 cases, 92,800 of them for the ten: 0 value, 0 flag
+                          mismatches; again with CFT_TRANSCEND_MINPREC=64: 0
+                          mismatches, 72,381 escalations
+    evaluator             306,460 transcendental elements, 138,825 reached the Ziv
+                          loop, 9 escalations (all phase 3's tanh - none of the ten),
+                          32,585 decided exactly, 56,835 by a neighbour's side
+    cpptest               4,549 checks at C++17 and at C++20 (4,111 before)
+    test_cftmpfr          668 tests (576 before)
+    examples-lang         c++, rust, go, csharp: same library, same bits; julia and
+                          R absent from this host
+    runner                INCOMPLETE. Run 20260903-104410-a285ad8 got two stages in -
+                          vectors ok 369 s, libcft ok 386 s - and was STOPPED during
+                          the transcend stage under time pressure, with three other
+                          agents on the box. mpfr, cpp and bindings were not reached
+                          by the runner; all three were run standalone above, on the
+                          same tree and with the same arguments the runner uses, and
+                          the two stages the runner did finish agree with the
+                          standalone runs. The runner has NOT been seen green
+                          end-to-end on this tree and nothing here says otherwise.
+
+Three rows follow 754-2019 where GNU MPFR 4.2.2 does not, each measured
+on this host before it was written down: `rSqrt(-0)` is -infinity where
+`mpfr_rec_sqrt` gives +infinity; `powr(1, qNaN)` is a quiet NaN where
+`mpfr_powr` gives 1; and `compound(x, 0)` for x below -1 is invalid,
+which MPFR agrees with and which the standard's row makes rather than
+states.
+
+**A defect in the oracle.** `mpfr_compound_si` is off by one unit in
+the last place for a NEGATIVE n whenever 1 + x is not representable at
+the working precision - a double rounding of the intermediate sum.
+Measured at 24 bits: `compound(1 + 2^-23, -1)` toward zero returns
+`0x7.fffffp-4` where the same value computed at 400 bits and rounded
+once is `0x7.fffff8p-4`; `compound(3 - 2^-22, -1)` to nearest returns
+`0x4p-4` where the reference gives `0x4.000008p-4`. n = -2 and n = -4
+do it too; a non-negative n does not, and `mpfr_pow_si` and
+`mpfr_rootn_si` are sound at every n in [-12, 12] against the same
+reference. The library's answers were confirmed three independent ways
+first - the golden model's mpmath enclosure, the C's own tracked error
+bound, and `python/tests/test_transcend.py`'s brute-force enclosure at
+four times the escalation cap - so `host/tools/mpfr_check.c` keeps
+MPFR's own compound for n >= 0 and builds the expectation from the
+exactly formed 1 + x and `mpfr_pow_si` for n < 0, with the reasoning in
+a comment at the call site.
+
+**Two neighbour rules the sweep found rather than the design
+predicted**, both now in the model and the C with the same derived
+thresholds: `log2p1(2^k)` and `log10p1(10^k)` sit an exponentially
+small step above the integer k, which is a grid point no precision
+separates them from; and `compound(x, n)` for a dominant x sits inside
+a quarter step of x^n - without which `compound(2^1022, 1)` at binary64
+is 2^1022 + 1, one unit above a grid point whose ulp is 2^970.
+
+Negative control, run and restored: the `away` argument of log2p1's
+neighbour witness inverted in `do_logp1_family`, so `log2p1(2^k)` is
+claimed to lie below the integer k. Caught by api-test ("and upward it
+is nextUp(30)"), by transcend_check.py at fp32 under roundTowardZero
+(`log2p1(2^24)` came out `0x41bfffff` where the model says
+`0x41c00000`), by the conformance replay (which stops at 92,033 cases)
+and by MPFR parity.
+
+Not covered here: `bindings/node` and `bindings/wasm` still carry the
+twenty-nine. They replay the transcendental sets, which now name
+thirty-nine functions and carry an `"n"` field, so they need the
+rebuild the JavaScript step performs; nothing in this entry claims
+otherwise.
+
+
 ## 2026-09-03 - the rest of clause 9.4: the five remaining reductions
 
 sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff, on the

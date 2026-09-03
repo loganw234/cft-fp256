@@ -1210,7 +1210,39 @@ public:
     CFT_HPP_TRIG1(asinh)
     CFT_HPP_TRIG1(acosh)
     CFT_HPP_TRIG1(atanh)
+    /* The rest of table 9.1 (part of the 0.6 step). Six take the same
+     * shape as everything above; powr takes two encodings like pow; and
+     * pown, compound and rootn read an INTEGER exponent array beside
+     * the operand array, which is what 754-2019 9.2.1 asks for. cft.h
+     * carries every special row, including the three where this
+     * contract follows the standard and MPFR does not. */
+    CFT_HPP_TRIG1(exp2m1)
+    CFT_HPP_TRIG1(exp10)
+    CFT_HPP_TRIG1(exp10m1)
+    CFT_HPP_TRIG1(log2p1)
+    CFT_HPP_TRIG1(log10p1)
+    CFT_HPP_TRIG1(rsqrt)
 #undef CFT_HPP_TRIG1
+#define CFT_HPP_INT1(name)                                              \
+    call_result name(cft_format fmt, cft_round rnd, const void *a,      \
+                     const std::int64_t *n, void *d,                    \
+                     std::size_t count) noexcept                        \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_##name(dev_, fmt, rnd, a, n, d, count, &r.flags); \
+        return r;                                                       \
+    }
+    CFT_HPP_INT1(pown)
+    CFT_HPP_INT1(compound)
+    CFT_HPP_INT1(rootn)
+#undef CFT_HPP_INT1
+    call_result powr(cft_format fmt, cft_round rnd, const void *a,
+                     const void *b, void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_powr(dev_, fmt, rnd, a, b, d, n, &r.flags);
+        return r;
+    }
     call_result atan2(cft_format fmt, cft_round rnd, const void *a,
                       const void *b, void *d, std::size_t n) noexcept
     {
@@ -1983,7 +2015,42 @@ public:
     CFT_HPP_CTX_TRIG1(asinh)
     CFT_HPP_CTX_TRIG1(acosh)
     CFT_HPP_CTX_TRIG1(atanh)
+    /* table 9.1's remainder (part of the 0.6 step) */
+    CFT_HPP_CTX_TRIG1(exp2m1)
+    CFT_HPP_CTX_TRIG1(exp10)
+    CFT_HPP_CTX_TRIG1(exp10m1)
+    CFT_HPP_CTX_TRIG1(log2p1)
+    CFT_HPP_CTX_TRIG1(log10p1)
+    CFT_HPP_CTX_TRIG1(rsqrt)
 #undef CFT_HPP_CTX_TRIG1
+    /* pown, compound and rootn: an INTEGER exponent per element, so the
+     * span of exponents must be as long as the output and is checked to
+     * be, exactly as an encoding operand is. */
+#define CFT_HPP_CTX_INT1(name)                                          \
+    std::uint32_t name(cspan<encoding_type> a, cspan<std::int64_t> n,   \
+                       span<encoding_type> d)                           \
+    {                                                                   \
+        check_operand(a, d, "a");                                       \
+        if (n.size() != d.size())                                       \
+            throw std::invalid_argument(                                \
+                std::string("cft: exponent array for " #name " has ") + \
+                std::to_string(n.size()) + " elements, output has " +   \
+                std::to_string(d.size()));                              \
+        return record(dev_->name(F, rnd_, ptr(a), n.data(), ptr(d),     \
+                                 d.size()), "cft_" #name);              \
+    }
+    CFT_HPP_CTX_INT1(pown)
+    CFT_HPP_CTX_INT1(compound)
+    CFT_HPP_CTX_INT1(rootn)
+#undef CFT_HPP_CTX_INT1
+    std::uint32_t powr(cspan<encoding_type> a, cspan<encoding_type> b,
+                       span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->powr(F, rnd_, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_powr");
+    }
     /* y first, then x - C's order, and the one every caller expects. */
     std::uint32_t atan2(cspan<encoding_type> a, cspan<encoding_type> b,
                         span<encoding_type> d)
@@ -2214,7 +2281,34 @@ public:
     CFT_HPP_SCALAR_TRIG1(asinh)
     CFT_HPP_SCALAR_TRIG1(acosh)
     CFT_HPP_SCALAR_TRIG1(atanh)
+    CFT_HPP_SCALAR_TRIG1(exp2m1)
+    CFT_HPP_SCALAR_TRIG1(exp10)
+    CFT_HPP_SCALAR_TRIG1(exp10m1)
+    CFT_HPP_SCALAR_TRIG1(log2p1)
+    CFT_HPP_SCALAR_TRIG1(log10p1)
+    CFT_HPP_SCALAR_TRIG1(rsqrt)
 #undef CFT_HPP_SCALAR_TRIG1
+#define CFT_HPP_SCALAR_INT1(name)                                       \
+    value_type name(const value_type &x, std::int64_t n) &              \
+    {                                                                   \
+        encoding_type d{};                                              \
+        const std::int64_t nn = n;                                      \
+        record(dev_->name(F, rnd_, x.bytes().data(), &nn, d.data(), 1), \
+               "cft_" #name);                                           \
+        return make(d);                                                 \
+    }
+    CFT_HPP_SCALAR_INT1(pown)
+    CFT_HPP_SCALAR_INT1(compound)
+    CFT_HPP_SCALAR_INT1(rootn)
+#undef CFT_HPP_SCALAR_INT1
+    value_type powr(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->powr(F, rnd_, x.bytes().data(), y.bytes().data(),
+                          d.data(), 1),
+               "cft_powr");
+        return make(d);
+    }
     value_type atan2(const value_type &y, const value_type &x) &
     {
         encoding_type d{};

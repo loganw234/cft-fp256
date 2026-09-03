@@ -122,7 +122,9 @@
  * quietly check something weaker. */
 #if MPFR_VERSION < MPFR_VERSION_NUM(4, 2, 0)
 #  error "mpfr-check needs MPFR 4.2.0 or newer for sinpi/cospi/tanpi \
-and the Pi-variants of the inverse trigonometrics (ABI 0.4)."
+and the Pi-variants of the inverse trigonometrics (ABI 0.4), and for \
+exp2m1/exp10m1/log2p1/log10p1/powr/compound_si/rootn_si (table 9.1's \
+remainder). Every one of those is called DIRECTLY."
 #endif
 
 #include "../include/cft.h"
@@ -185,6 +187,8 @@ enum {
     T_ASINPI, T_ACOSPI, T_ATANPI, T_ATAN2PI,
     T_SIN, T_COS, T_TAN, T_SINH, T_COSH, T_TANH, T_ASINH, T_ACOSH,
     T_ATANH,
+    T_EXP2M1, T_EXP10, T_EXP10M1, T_LOG2P1, T_LOG10P1, T_RSQRT,
+    T_POWN, T_POWR, T_COMPOUND, T_ROOTN,
     /* the augmented arithmetic operations of 754-2019 9.5 */
     T_AUG_ADD, T_AUG_SUB, T_AUG_MUL,
     /* the seven reductions of clause 9.4. A "case" here is a whole
@@ -208,6 +212,8 @@ static const char *const TALLY_NAME[NTALLY] = {
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
     "atanh",
+    "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt",
+    "pown", "powr", "compound", "rootn",
     "aug_add", "aug_sub", "aug_mul",
     "sum", "dot", "sumsq", "sumabs",
     "sprod", "sprod_sum", "sprod_diff"
@@ -2191,7 +2197,9 @@ typedef enum {
     TF_SINPI, TF_COSPI, TF_TANPI, TF_ASIN, TF_ACOS, TF_ATAN, TF_ATAN2,
     TF_ASINPI, TF_ACOSPI, TF_ATANPI, TF_ATAN2PI,
     TF_SIN, TF_COS, TF_TAN, TF_SINH, TF_COSH, TF_TANH, TF_ASINH,
-    TF_ACOSH, TF_ATANH, TF_COUNT
+    TF_ACOSH, TF_ATANH,
+    TF_EXP2M1, TF_EXP10, TF_EXP10M1, TF_LOG2P1, TF_LOG10P1, TF_RSQRT,
+    TF_POWN, TF_POWR, TF_COMPOUND, TF_ROOTN, TF_COUNT
 } tfn;
 
 static const char *const TFN_NAME[TF_COUNT] = {
@@ -2199,16 +2207,29 @@ static const char *const TFN_NAME[TF_COUNT] = {
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
-    "atanh"
+    "atanh",
+    "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt",
+    "pown", "powr", "compound", "rootn"
 };
 static const int TFN_NARGS[TF_COUNT] = {
     1, 1, 1, 1, 1, 1, 1, 2, 2,
     1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2,
-    1, 1, 1, 1, 1, 1, 1, 1, 1
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 2, 1, 1
+};
+/* Which of them read an INTEGER operand beside the floating one. MPFR
+ * spells that operand `long`, which is 32 bits on this host, so the
+ * campaign's exponents stop at the long range; the whole int64 range is
+ * covered against the model by host/tests/transcend_check.py. */
+static const int TFN_HASINT[TF_COUNT] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 1, 0, 1, 1
 };
 
 static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
-                   mpfr_rnd_t rnd)
+                   long nn, mpfr_rnd_t rnd)
 {
     switch (fn) {
     case TF_EXP:   return mpfr_exp(r, a, rnd);
@@ -2245,7 +2266,66 @@ static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
     case TF_TANH:    return mpfr_tanh(r, a, rnd);
     case TF_ASINH:   return mpfr_asinh(r, a, rnd);
     case TF_ACOSH:   return mpfr_acosh(r, a, rnd);
-    default:         return mpfr_atanh(r, a, rnd);
+    case TF_ATANH:   return mpfr_atanh(r, a, rnd);
+    /* Table 9.1's remainder. exp2m1, exp10m1, log2p1, log10p1, powr,
+     * compound_si and rootn_si are MPFR 4.2.0 functions and this host
+     * carries 4.2.2; the version is asserted at the top of this file so
+     * that an older one fails to BUILD rather than quietly comparing
+     * against something composed. Composing exp10m1 out of
+     * exp10(x) - 1, or rootn out of exp(log(x)/n), would be a
+     * comparison against a rounded intermediate and would decide
+     * nothing about the last bit. */
+    case TF_EXP2M1:   return mpfr_exp2m1(r, a, rnd);
+    case TF_EXP10:    return mpfr_exp10(r, a, rnd);
+    case TF_EXP10M1:  return mpfr_exp10m1(r, a, rnd);
+    case TF_LOG2P1:   return mpfr_log2p1(r, a, rnd);
+    case TF_LOG10P1:  return mpfr_log10p1(r, a, rnd);
+    case TF_RSQRT:    return mpfr_rec_sqrt(r, a, rnd);
+    case TF_POWN:     return mpfr_pow_si(r, a, nn, rnd);
+    case TF_POWR:     return mpfr_powr(r, a, b, rnd);
+    case TF_COMPOUND:
+        /* THE ONE PLACE THIS CAMPAIGN DOES NOT TRUST MPFR.
+         *
+         * mpfr_compound_si is off by one unit in the last place for a
+         * NEGATIVE n whenever 1 + x is not representable at the working
+         * precision - a double rounding of the intermediate sum.
+         * Measured on 4.2.2, this host, 2026-09-03, at 24 bits:
+         *
+         *   compound(1 + 2^-23, -1) toward zero returns 0x7.fffffp-4
+         *   where (2 + 2^-23)^-1 computed at 400 bits and rounded once
+         *   is 0x7.fffff8p-4;
+         *   compound(3 - 2^-22, -1) to nearest returns 0x4p-4 where the
+         *   same reference gives 0x4.000008p-4.
+         *
+         * n = -2 and n = -4 do it too; a NON-NEGATIVE n does not, and
+         * mpfr_pow_si and mpfr_rootn_si are sound at every n this
+         * campaign uses (all three checked by the same 400-bit
+         * reference). So n >= 0 goes through MPFR's own compound, which
+         * is the comparison worth having, and n < 0 is built from the
+         * EXACTLY formed 1 + x and mpfr_pow_si - still MPFR arithmetic,
+         * still one rounding, and not the entry point with the defect.
+         *
+         * The library's answers were confirmed independently three
+         * ways before this workaround was written: the golden model's
+         * rigorous mpmath enclosure, the C's own tracked error bound,
+         * and python/tests/test_transcend.py's brute-force enclosure at
+         * four times the escalation cap all agree with the 400-bit
+         * reference and not with mpfr_compound_si. */
+        if (nn >= 0 || !mpfr_regular_p(a) || mpfr_cmp_si(a, -1) <= 0)
+            return mpfr_compound_si(r, a, nn, rnd);   /* the domain rows */
+        {
+            mpfr_t s;
+            mpfr_exp_t e = mpfr_get_exp(a);
+            mpfr_prec_t need = (mpfr_prec_t)((e < 0 ? -e : e) +
+                                             (long)mpfr_get_prec(a) + 8);
+            int t;
+            mpfr_init2(s, need);
+            mpfr_add_ui(s, a, 1, MPFR_RNDN);     /* exact at `need` bits */
+            t = mpfr_pow_si(r, s, nn, rnd);
+            mpfr_clear(s);
+            return t;
+        }
+    default:          return mpfr_rootn_si(r, a, nn, rnd);
     }
 }
 
@@ -2282,7 +2362,7 @@ static void enc_integrality(const fdesc *f, const uint8_t *b, int *is_int,
 
 /* The contract's invalid/divideByZero for one case, from classes. */
 static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
-                                const uint8_t *bb)
+                                const uint8_t *bb, long nn)
 {
     cls ca, cb;
     uint32_t fl = 0;
@@ -2298,7 +2378,7 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
         else if (!ca.is_nan && ca.sign)
             fl |= CFT_FLAG_INVALID;
         break;
-    case TF_LOG1P:
+    case TF_LOG1P: case TF_LOG2P1: case TF_LOG10P1:
         if (!ca.is_nan && ca.sign) {
             mpfr_t v;
             mpfr_init2(v, f->p);
@@ -2308,6 +2388,80 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
             else if (mpfr_cmp_si(v, -1) < 0)
                 fl |= CFT_FLAG_INVALID;
             mpfr_clear(v);
+        }
+        break;
+    case TF_RSQRT:
+        /* the domain is [0, +inf]: a zero is the POLE (divideByZero,
+         * 7.3's rule for an exact infinity from a finite operand) and
+         * anything below it is out of domain */
+        if (ca.is_nan)
+            break;
+        if (ca.is_zero)
+            fl |= CFT_FLAG_DIVBYZERO;
+        else if (ca.sign)
+            fl |= CFT_FLAG_INVALID;
+        break;
+    case TF_POWN:
+        if (nn == 0 || ca.is_nan)
+            break;                       /* pown(x, 0) is 1; NaNs pass */
+        if (ca.is_zero && nn < 0)
+            fl |= CFT_FLAG_DIVBYZERO;
+        break;
+    case TF_POWR:
+        if (ca.is_nan || cb.is_nan)
+            break;                       /* decided in t_oracle */
+        if (ca.sign && !ca.is_zero) {
+            fl |= CFT_FLAG_INVALID;      /* x < 0, for every y */
+        } else if (cb.is_zero && (ca.is_zero || ca.is_inf)) {
+            fl |= CFT_FLAG_INVALID;      /* powr(+-0,+-0), powr(inf,+-0) */
+        } else if (ca.is_zero && cb.sign && !cb.is_inf) {
+            fl |= CFT_FLAG_DIVBYZERO;    /* the pole, not the limit */
+        } else if (cb.is_inf && !ca.is_zero && !ca.is_inf) {
+            mpfr_t v;
+            mpfr_init2(v, f->p);
+            enc_to_mpfr(f, ba, v);
+            if (mpfr_cmp_ui(v, 1) == 0)
+                fl |= CFT_FLAG_INVALID;  /* powr(+1, +-inf) */
+            mpfr_clear(v);
+        }
+        break;
+    case TF_COMPOUND: {
+        /* the domain is [-1, +inf]: below -1 is invalid EVEN at n = 0,
+         * which is what "compound(x, 0) is 1 for x >= -1 or quiet NaN"
+         * makes of the row rather than states */
+        mpfr_t v;
+        int c;
+        if (ca.is_nan)
+            break;
+        if (ca.is_inf) {
+            if (ca.sign)
+                fl |= CFT_FLAG_INVALID;
+            break;
+        }
+        mpfr_init2(v, f->p);
+        enc_to_mpfr(f, ba, v);
+        c = mpfr_cmp_si(v, -1);
+        if (c < 0)
+            fl |= CFT_FLAG_INVALID;
+        else if (c == 0 && nn < 0)
+            fl |= CFT_FLAG_DIVBYZERO;
+        mpfr_clear(v);
+        break;
+    }
+    case TF_ROOTN:
+        /* n = 0 is outside the domain for EVERY x, a quiet NaN
+         * included; a negative operand with an even n likewise */
+        if (nn == 0) {
+            fl |= CFT_FLAG_INVALID;
+            break;
+        }
+        if (ca.is_nan)
+            break;
+        if (ca.is_zero) {
+            if (nn < 0)
+                fl |= CFT_FLAG_DIVBYZERO;
+        } else if (ca.sign && (nn % 2 == 0)) {
+            fl |= CFT_FLAG_INVALID;
         }
         break;
     case TF_SINPI: case TF_COSPI:
@@ -2417,14 +2571,15 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
 
 /* One transcendental case through MPFR, delivered into the format. */
 static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
-                     const uint8_t *bb, mpfr_t out, uint32_t *flags)
+                     const uint8_t *bb, long nn, mpfr_t out,
+                     uint32_t *flags)
 {
     mpfr_t a, b, runb, r, y;
     cls ca, cb;
     int tunb = 0, inexact, is_rmm = (MODES[mi].cr == CFT_RMM);
     int ovf = 0, unf = 0;
     mpfr_rnd_t rnd = MODES[mi].mr;
-    uint32_t fl = tfn_class_flags(f, fn, ba, bb);
+    uint32_t fl = tfn_class_flags(f, fn, ba, bb, nn);
     mpfr_exp_t save_emin = mpfr_get_emin(), save_emax = mpfr_get_emax();
 
     classify(f, ba, &ca);
@@ -2445,6 +2600,34 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
         goto done;
     }
 
+    /* Two rows where MPFR 4.2.2 and 754-2019 differ, given here the same
+     * one-sided help this harness already gives MPFR for signaling NaNs.
+     * Both were MEASURED on this host before they were written down.
+     *
+     *   rSqrt(-0). 9.2.1 says "rSqrt(+-0) is +-infinity"; mpfr_rec_sqrt
+     *   returns +infinity for both zeros.
+     *
+     *   powr's NaN corner. 9.2.1 says "powr(+1, y) is 1 for FINITE y"
+     *   and lists "powr(x, qNaN) is qNaN for x >= 0" separately, so
+     *   powr(1, qNaN) is a quiet NaN; mpfr_powr returns 1. The whole
+     *   corner is decided here so the reading is in one place: a NaN in
+     *   either operand gives a quiet NaN, and a negative base gives one
+     *   with invalid, whichever the other operand is. */
+    if (fn == TF_RSQRT && ca.is_zero && ca.sign) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set_inf(out, -1);
+        *flags = CFT_FLAG_DIVBYZERO;
+        goto done;
+    }
+    if (fn == TF_POWR && (ca.is_nan || cb.is_nan ||
+                          (ca.sign && !ca.is_zero))) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set_nan(out);
+        *flags = (!ca.is_nan && ca.sign && !ca.is_zero)
+                 ? CFT_FLAG_INVALID : 0;
+        goto done;
+    }
+
     /* The unbounded-range evaluation: MPFR's widest exponents, so that
      * an overflow HERE means the true value is past anything the
      * format could hold. */
@@ -2452,7 +2635,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
     mpfr_set_emax(mpfr_get_emax_max());
     mpfr_clear_flags();
     if (is_rmm) {
-        int t1 = raw_tfn(y, fn, a, b, MPFR_RNDZ);
+        int t1 = raw_tfn(y, fn, a, b, nn, MPFR_RNDZ);
         ovf = mpfr_overflow_p();
         unf = mpfr_underflow_p();
         if (!mpfr_number_p(y) || mpfr_zero_p(y)) {
@@ -2463,7 +2646,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             tunb = !mpfr_equal_p(runb, y) || t1;
         }
     } else {
-        tunb = raw_tfn(runb, fn, a, b, rnd);
+        tunb = raw_tfn(runb, fn, a, b, nn, rnd);
         ovf = mpfr_overflow_p();
         unf = mpfr_underflow_p();
     }
@@ -2547,7 +2730,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             int t2;
             mpfr_set_emin(f->emin - f->p + 2);
             mpfr_set_emax(f->emax + 1);
-            t2 = raw_tfn(r, fn, a, b, rnd);
+            t2 = raw_tfn(r, fn, a, b, nn, rnd);
             t2 = mpfr_check_range(r, t2, rnd);
             t2 = mpfr_subnormalize(r, t2, rnd);
             mpfr_set_emin(save_emin);
@@ -2562,7 +2745,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             long grid = f->emin - f->man_w;
             mpz_t n;
             mpfr_t scaled, frac, half;
-            t1 = raw_tfn(y, fn, a, b, MPFR_RNDZ);
+            t1 = raw_tfn(y, fn, a, b, nn, MPFR_RNDZ);
             sign = mpfr_sgn(y) < 0;
             mpz_init(n);
             mpfr_init2(scaled, f->p + 4);
@@ -2596,10 +2779,11 @@ done:
 }
 
 static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
-                        const uint8_t *a, const uint8_t *b, uint8_t *d,
-                        cft_status *st)
+                        const uint8_t *a, const uint8_t *b, long nn,
+                        uint8_t *d, cft_status *st)
 {
     uint32_t fl = 0;
+    int64_t n64 = (int64_t)nn;
     switch (fn) {
     case TF_EXP:   *st = cft_exp(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_EXPM1: *st = cft_expm1(dev, f->fmt, rnd, a, d, 1, &fl); break;
@@ -2631,7 +2815,29 @@ static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
     case TF_TANH:   *st = cft_tanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_ASINH:  *st = cft_asinh(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_ACOSH:  *st = cft_acosh(dev, f->fmt, rnd, a, d, 1, &fl); break;
-    default:        *st = cft_atanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_ATANH:  *st = cft_atanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP2M1: *st = cft_exp2m1(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP10:  *st = cft_exp10(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP10M1:
+        *st = cft_exp10m1(dev, f->fmt, rnd, a, d, 1, &fl);
+        break;
+    case TF_LOG2P1: *st = cft_log2p1(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_LOG10P1:
+        *st = cft_log10p1(dev, f->fmt, rnd, a, d, 1, &fl);
+        break;
+    case TF_RSQRT:  *st = cft_rsqrt(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_POWN:
+        *st = cft_pown(dev, f->fmt, rnd, a, &n64, d, 1, &fl);
+        break;
+    case TF_POWR:
+        *st = cft_powr(dev, f->fmt, rnd, a, b, d, 1, &fl);
+        break;
+    case TF_COMPOUND:
+        *st = cft_compound(dev, f->fmt, rnd, a, &n64, d, 1, &fl);
+        break;
+    default:
+        *st = cft_rootn(dev, f->fmt, rnd, a, &n64, d, 1, &fl);
+        break;
     }
     return fl;
 }
@@ -2979,6 +3185,19 @@ static int build_p3pool(const fdesc *f, uint8_t pool[][32],
     return n;
 }
 
+/* The integer exponents pown, compound and rootn are tried against.
+ * Both signs, both parities, a value past p+1 (where the exact-case
+ * test gives up), and the ends of the LONG range - which is 32 bits on
+ * this host, and is MPFR's own type for these operands. The whole int64
+ * range is covered against the model in host/tests/transcend_check.py;
+ * what is checked here is agreement with MPFR over what MPFR can be
+ * asked. */
+static const long TFN_NS[] = {
+    0, 1, -1, 2, -2, 3, -3, 5, -5, 17, -17, 120, -120,
+    2147483647L, -2147483647L
+};
+#define TFN_NS_COUNT ((int)(sizeof TFN_NS / sizeof TFN_NS[0]))
+
 static void check_transcend(int fj, uint8_t pool[][32], int pn,
                             uint8_t tpool[][32], int tn,
                             uint8_t hpool[][32], int hn, int first,
@@ -2995,29 +3214,48 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
          * cross product of two hundred operands times five attributes
          * times two functions is not a sharper test, only a longer
          * one. */
-        uint8_t (*P)[32] = fn >= TF_SIN ? hpool
+        uint8_t (*P)[32] = fn >= TF_EXP2M1 ? tpool
+                         : fn >= TF_SIN ? hpool
                          : fn >= TF_SINPI ? tpool : pool;
-        int np = fn >= TF_SIN ? hn : fn >= TF_SINPI ? tn : pn;
+        int np = fn >= TF_EXP2M1 ? tn
+               : fn >= TF_SIN ? hn : fn >= TF_SINPI ? tn : pn;
+        int hasn = TFN_HASINT[fn];
         int jstep = nargs == 2 ? (np / 8 > 0 ? np / 8 : 1) : 1;
+        int nstep = hasn ? 3 : 1;
         for (mi = 0; mi < 5; mi++) {
             for (i = 0; i < np; i++) {
                 int jmax = nargs == 2 ? np : 1;
-                for (j = (nargs == 2 ? i % jstep : 0); j < jmax; j += jstep) {
-                    const uint8_t *a = P[i];
-                    const uint8_t *b = P[j];
-                    uint8_t d[32];
-                    uint32_t gf, wf = 0;
-                    cft_status st = CFT_OK;
-                    mpfr_t want;
+                int k;
+                /* The integer operand is strided the same way a second
+                 * encoding is: every n against every operand times five
+                 * attributes would be a longer campaign rather than a
+                 * sharper one, and the rows that turn on n's sign and
+                 * parity are all inside the first few. */
+                for (k = hasn ? i % nstep : 0;
+                     k < (hasn ? TFN_NS_COUNT : 1); k += nstep) {
+                    long nn = hasn ? TFN_NS[k] : 0;
+                    for (j = (nargs == 2 ? i % jstep : 0); j < jmax;
+                         j += jstep) {
+                        const uint8_t *a = P[i];
+                        const uint8_t *b = P[j];
+                        uint8_t d[32];
+                        uint32_t gf, wf = 0;
+                        cft_status st = CFT_OK;
+                        char extra[48];
+                        mpfr_t want;
 
-                    mpfr_init2(want, f->p);
-                    t_oracle(f, fn, mi, a, b, want, &wf);
-                    memset(d, 0, sizeof d);
-                    gf = tfn_lib(f, fn, MODES[mi].cr, a, b, d, &st);
-                    c5_judge(T_EXP + fn, fj, TFN_NAME[fn], MODES[mi].name,
-                             f, a, nargs == 2 ? b : NULL, f, d, want, gf, wf,
-                             st, NULL);
-                    mpfr_clear(want);
+                        mpfr_init2(want, f->p);
+                        t_oracle(f, fn, mi, a, b, nn, want, &wf);
+                        memset(d, 0, sizeof d);
+                        gf = tfn_lib(f, fn, MODES[mi].cr, a, b, nn, d, &st);
+                        if (hasn)
+                            snprintf(extra, sizeof extra, "n=%ld", nn);
+                        c5_judge(T_EXP + fn, fj, TFN_NAME[fn],
+                                 MODES[mi].name, f, a,
+                                 nargs == 2 ? b : NULL, f, d, want, gf, wf,
+                                 st, hasn ? extra : NULL);
+                        mpfr_clear(want);
+                    }
                 }
             }
         }
@@ -3632,9 +3870,18 @@ int main(int argc, char **argv)
         fflush(stdout);
         before = cases;
         check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SIN,
-                        TF_COUNT);
+                        TF_EXP2M1);
         printf("%s radian+hyperbolic: %llu cases done (running "
                "mismatches: %llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+        before = cases;
+        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_EXP2M1,
+                        TF_COUNT);
+        printf("%s table91: %llu cases done (running mismatches: "
+               "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,
                (unsigned long long)flag_mismatches);

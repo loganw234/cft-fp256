@@ -731,6 +731,81 @@ two independent implementations of it compared against each other, that
 the streaming accumulator agrees with the recursive definition, and
 that the published vector sets carry the answers.
 
+## The rest of table 9.1 (clause 9.2)
+
+exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound
+and rootn are contract operations with library entry points, added
+2026-09-03 as part of the step to ABI 0.6, on exactly the terms the
+twenty-nine above are: **correctly rounded, in all five attributes, at
+all four formats, with exact flags.** With these ten the contract
+covers every operation IEEE 754-2019 table 9.1 defines for the binary
+formats.
+
+They need no reduction and no new constant. What they add is
+exactness: each has a larger exact-case table than the function it is
+built from, and every table is proved closed in
+docs/TRANSCENDENTALS.md - which is what makes the inexact flag
+trustworthy here and what keeps the Ziv loop terminating.
+
+What belongs here is what an independent implementation is scored on:
+
+- **The exact cases, each an enumeration with a proof.** exp2m1 at
+  EVERY integer argument; exp10 and exp10m1 at the non-negative
+  integers whose 10^n (odd part 5^n) or 10^n - 1 fits in p+1 bits;
+  log2p1 and log10p1 wherever 1 + x is a power of two or of ten;
+  rSqrt at the EVEN powers of two and nowhere else; pown, powr and
+  compound by phase 1's p+1-bit odd-part bound on pow; rootn wherever
+  the odd significand is a perfect |n|-th power and |n| divides the
+  exponent. Everything else is inexact, and that is a theorem rather
+  than a tolerance.
+- **1 + x is formed EXACTLY.** log2p1, log10p1 and compound align the
+  two exponents and add the integers; they never evaluate 1 + x in the
+  format. `compound(2^-1074, 1)` at binary64 is the correctly rounded
+  1 + 2^-1074 - which is 1 with inexact - and not what the format's own
+  addition would give.
+- **The three integer-exponent operations read an INTEGER.** 9.2.1
+  asks for "a finite integral value in integralFormat", so pown,
+  compound and rootn take an int64 per element rather than a floating
+  operand that would have to be asked whether it is integral. A vector
+  set carries it as a signed decimal in an `"n"` field.
+- **rootn(x, 1) is x** and **rootn(x, 2) is squareRoot(x)** on every
+  input but one: `rootn(-0, 2)` is +0 where `squareRoot(-0)` is -0,
+  which is 754-2019's own NOTE and is tested both ways.
+- **Three rows follow the standard where GNU MPFR does not**, and an
+  implementation scored against MPFR rather than against the standard
+  will differ on exactly these: `rSqrt(-0)` is **-infinity** with
+  divideByZero (MPFR gives +infinity); `powr(+1, qNaN)` is a **quiet
+  NaN** (MPFR gives 1); and `compound(x, 0)` for x below -1 is
+  **invalid** rather than 1. Each was measured on MPFR 4.2.2 before it
+  was written down.
+- **powr is not pow.** A negative base is invalid for every exponent,
+  a NaN included; `powr(+-0, +-0)`, `powr(+inf, +-0)` and
+  `powr(+1, +-inf)` are invalid; and a quiet NaN operand outranks
+  nothing, so `powr(qNaN, 0)` is a NaN where `pow(qNaN, 0)` is 1.
+- **rootn(x, 0) is invalid for every x**, a quiet NaN included, because
+  zero is outside the domain; a negative operand with an even n
+  likewise.
+- **Poles signal divideByZero:** `rSqrt(+-0)`, `log2p1(-1)`,
+  `log10p1(-1)`, `compound(-1, n)` for n < 0, and the zero rows of
+  pown and rootn for a negative n - 7.3's rule for an exact infinity
+  from finite operands.
+- **A tiny argument is NOT decided by a side here**, and that is a
+  derivation rather than an omission: 2^x - 1 is about 0.693x,
+  10^x - 1 about 2.303x, log2(1+x) about 1.443x and log10(1+x) about
+  0.434x, none of which is beside x. The enclosure resolves all four to
+  full relative precision and round_pack carries the underflow. What
+  IS decided by a side: exp10 beside 1 for a tiny argument, exp2m1 and
+  exp10m1 beside -1 for a very negative one, exp2m1 beside 2^n at an
+  integer past p+1, the four powers beside 1, log2p1 and log10p1
+  beside the integer k at x = 2^k or 10^k, and compound beside x^n for
+  a dominant x.
+- **An input that cannot be shown correctly rounded is REFUSED**, on
+  the same terms as the three phases before.
+
+Like the twenty-nine, these issue no device pass: the device argument
+is context and the results are bit-identical across backends by
+construction.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode

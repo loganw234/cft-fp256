@@ -21,12 +21,21 @@ rather than by opcode number and reads a different schema:
     {"fn": "pow", "rnd": "rne", "a": "0x...", "b": "0x...",
      "d": "0x...", "flags": 16}
 
-"b" appears only for the four binary functions (pow, hypot, atan2 and
-atan2Pi). Keeping them in separate files means a consumer that predates
-ABI 0.3 reads exactly what it always read, and one that does not carry
-the transcendentals skips a file rather than failing a line. A
-consumer built against 0.3 and handed a 0.4 set fails on the NAME of a
-function it does not know, which is the refusal it should give.
+"b" appears only for the five binary functions (pow, hypot, atan2,
+atan2Pi and powr), and "n" - a SIGNED DECIMAL, not an encoding - only
+for the three that take an integer exponent (pown, compound and
+rootn), because 754-2019 9.2.1 gives them one:
+
+    {"fn": "rootn", "rnd": "rne", "a": "0x...", "n": -3,
+     "d": "0x...", "flags": 16}
+
+Keeping them in separate files means a consumer that predates ABI 0.3
+reads exactly what it always read, and one that does not carry the
+transcendentals skips a file rather than failing a line. A consumer
+built against 0.3 and handed a 0.4 set fails on the NAME of a function
+it does not know, which is the refusal it should give; one that knows
+the names but not the "n" field fails on a missing key, which is the
+same refusal.
 
 The augmented arithmetic operations of 754-2019 clause 9.5 get a third
 schema and a third family of files - `fp32-augmented.jsonl` and one per
@@ -79,7 +88,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from cft_golden import (  # noqa: E402
-    FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, augmented, compute,
+    FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, TRANSCEND_INTARG, augmented, compute,
     transcend, vectors,
 )
 from cft_golden.reduce import (  # noqa: E402
@@ -162,8 +171,8 @@ def main():
             suffix = "" if rname == "rne" else f"-{rname}"
             path = outdir / f"{name}-transcend{suffix}.jsonl"
             with open(path, "w") as f:
-                for fn, xa, xb in tcases:
-                    d, flags = transcend.compute(fmt, fn, xa, xb, rnd)
+                for fn, xa, xb, nn in tcases:
+                    d, flags = transcend.compute(fmt, fn, xa, xb, rnd, nn)
                     rec = {
                         "fn": fn,
                         "rnd": rname,
@@ -171,6 +180,8 @@ def main():
                     }
                     if TRANSCEND_ARITY[fn] == 2:
                         rec["b"] = f"0x{xb:0{hexw}x}"
+                    if TRANSCEND_INTARG[fn]:
+                        rec["n"] = nn
                     rec["d"] = f"0x{d:0{hexw}x}"
                     rec["flags"] = flags
                     f.write(json.dumps(rec) + "\n")

@@ -223,15 +223,28 @@ def _bind(lib):
                   "cft_acos", "cft_atan", "cft_asinpi", "cft_acospi",
                   "cft_atanpi",
                   "cft_sin", "cft_cos", "cft_tan", "cft_sinh", "cft_cosh",
-                  "cft_tanh", "cft_asinh", "cft_acosh", "cft_atanh"):
+                  "cft_tanh", "cft_asinh", "cft_acosh", "cft_atanh",
+                  "cft_exp2m1", "cft_exp10", "cft_exp10m1", "cft_log2p1",
+                  "cft_log10p1", "cft_rsqrt"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
-    for _name in ("cft_pow", "cft_hypot", "cft_atan2", "cft_atan2pi"):
+    for _name in ("cft_pow", "cft_hypot", "cft_atan2", "cft_atan2pi",
+                  "cft_powr"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
+    # pown, compound and rootn read an INTEGER exponent array beside the
+    # encodings, which is what 754-2019 9.2.1 asks for - so their
+    # prototype is a different one, and getting it wrong here would be a
+    # pointer-sized lie ctypes would happily tell.
+    for _name in ("cft_pown", "cft_compound", "cft_rootn"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_void_p,
+                        ctypes.POINTER(ctypes.c_int64), c_void_p,
+                        c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
     # The augmented arithmetic operations (754-2019 9.5). Two outputs
     # and NO rounding argument - the shortest possible summary of why
@@ -457,20 +470,31 @@ TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
                    "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
                    "asinpi", "acospi", "atanpi",
                    "sin", "cos", "tan", "sinh", "cosh", "tanh",
-                   "asinh", "acosh", "atanh")
-TRANSCEND_BINARY = ("pow", "hypot", "atan2", "atan2pi")
-TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY
+                   "asinh", "acosh", "atanh",
+                   "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1",
+                   "rsqrt")
+TRANSCEND_BINARY = ("pow", "hypot", "atan2", "atan2pi", "powr")
+#: The three that read an INTEGER exponent per element rather than a
+#: second encoding - 9.2.1's "finite integral value in integralFormat".
+TRANSCEND_INT = ("pown", "compound", "rootn")
+TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY + TRANSCEND_INT
 
 
-def transcend(handle, name, fmt, rnd, a, b, n, esz):
-    """One of the twenty-nine, over n elements. b is None for the unary
-    twenty-five. Returns (result bytes, flag word)."""
+def transcend(handle, name, fmt, rnd, a, b, n, esz, ns=None):
+    """One of the thirty-nine, over n elements. b is None for the unary
+    ones; ns is the integer exponent sequence for pown, compound and
+    rootn and is None for every other. Returns (bytes, flag word)."""
     if name not in TRANSCEND:
         raise ValueError(f"unknown transcendental {name!r}")
     d = ctypes.create_string_buffer(n * esz)
     flags = ctypes.c_uint32(0)
     fn = getattr(lib(), "cft_" + name)
-    if name in TRANSCEND_BINARY:
+    if name in TRANSCEND_INT:
+        if ns is None:
+            raise ValueError(f"{name} needs an integer exponent per element")
+        arr = (ctypes.c_int64 * n)(*ns)
+        st = fn(handle, fmt, rnd, a, arr, d, n, ctypes.byref(flags))
+    elif name in TRANSCEND_BINARY:
         st = fn(handle, fmt, rnd, a, b, d, n, ctypes.byref(flags))
     else:
         st = fn(handle, fmt, rnd, a, d, n, ctypes.byref(flags))

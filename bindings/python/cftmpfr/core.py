@@ -817,6 +817,16 @@ class Context:
                                  self._fi.esz)
         return self._finish(out, fl)
 
+    def _transcend_int(self, name, x, n):
+        """One of the three whose second operand is an INTEGER. n is
+        taken as a Python int and passed as int64, so the whole range
+        is available and nothing is asked whether it is integral."""
+        x = self._coerce(x)
+        out, fl = _lib.transcend(self._dev, name, self._fi.code, self._rnd,
+                                 x.to_bytes(), None, 1, self._fi.esz,
+                                 ns=(int(n),))
+        return self._finish(out, fl)
+
     def exp(self, x):
         """e ** x, correctly rounded."""
         return self._transcend1("exp", x)
@@ -968,6 +978,71 @@ class Context:
         """acosh(x) on [1, +inf). acosh(1) = +0 exactly; every x below 1
         is invalid, zeros, negatives and -inf included."""
         return self._transcend1("acosh", x)
+
+
+    # ---- the rest of table 9.1 (part of the 0.6 step) ------------
+    #
+    # With these ten the drop-in reaches every operation 754-2019 table
+    # 9.1 lists for the binary formats, and every one of them is
+    # correctly rounded. Three rows follow the STANDARD where MPFR does
+    # not, so a caller who swapped this context for gmpy2's would see
+    # them move: rSqrt(-0) is -infinity here and +infinity there;
+    # powr(1, qNaN) is a quiet NaN here and 1 there; and compound(x, 0)
+    # for x below -1 is invalid rather than 1. cft.h and
+    # docs/TRANSCENDENTALS.md carry the readings.
+
+    def exp2m1(self, x):
+        """2**x - 1. Exact at EVERY integer argument, which is the widest
+        exact table in the set; expm1's cancellation-free form in
+        another base, so it is not exp2(x) - 1."""
+        return self._transcend1("exp2m1", x)
+
+    def exp10(self, x):
+        """10**x. Exact at the non-negative integers whose 5^n fits the
+        format; a negative power of ten is not a dyadic rational."""
+        return self._transcend1("exp10", x)
+
+    def exp10m1(self, x):
+        """10**x - 1, exact where 10^n - 1 fits; exp10m1(-0) is -0."""
+        return self._transcend1("exp10m1", x)
+
+    def log2p1(self, x):
+        """log2(1 + x). Exact where 1 + x is a power of two, and 1 + x
+        is formed exactly on the encoding rather than in the format -
+        which is the whole reason this is not log2(1 + x)."""
+        return self._transcend1("log2p1", x)
+
+    def log10p1(self, x):
+        """log10(1 + x), exact where 1 + x is a power of ten."""
+        return self._transcend1("log10p1", x)
+
+    def rsqrt(self, x):
+        """1/sqrt(x). Exact at the even powers of two; rSqrt(+-0) is
+        +-infinity with divideByZero - the sign SURVIVES, which is
+        9.2.1's row and not MPFR's."""
+        return self._transcend1("rsqrt", x)
+
+    def powr(self, x, y):
+        """x**y as exp(y log x), so a negative base is invalid for every
+        exponent and powr(qNaN, 0) is a NaN where pow(qNaN, 0) is 1."""
+        return self._transcend2("powr", x, y)
+
+    def pown(self, x, n):
+        """x**n for an INTEGER n. pown(x, 0) is 1 for any x that is not
+        a signaling NaN, and the zero and infinity rows split on the
+        parity of n."""
+        return self._transcend_int("pown", x, n)
+
+    def compound(self, x, n):
+        """(1 + x)**n for an integer n, on [-1, +inf]. compound(x, 0) is
+        1 for x >= -1 or a quiet NaN - and INVALID below -1."""
+        return self._transcend_int("compound", x, n)
+
+    def rootn(self, x, n):
+        """x**(1/n) for a nonzero integer n. rootn(x, 1) is x exactly and
+        rootn(x, 2) is sqrt(x) on every input but -0, where 9.2.1's own
+        NOTE says they differ: rootn(-0, 2) is +0."""
+        return self._transcend_int("rootn", x, n)
 
     def atanh(self, x):
         """atanh(x) on (-1, 1). Exact only at +-0; atanh(+-1) is +-inf
