@@ -98,7 +98,9 @@ typedef enum {
     CFT_MP_C_LN2 = 0,
     CFT_MP_C_LOG2E,
     CFT_MP_C_LN10,
-    CFT_MP_C_LOG10E
+    CFT_MP_C_LOG10E,
+    CFT_MP_C_PI,        /* phase 2: sinPi/cosPi/tanPi multiply by it */
+    CFT_MP_C_INVPI      /* phase 2: asinPi/acosPi/atanPi divide by it */
 } cft_mp_constant;
 
 /* Every function below returns 0 on success and 1 if a bigint width
@@ -157,11 +159,20 @@ int cft_mp_cmp_int(const cft_mp *a, int64_t t);
 int cft_mp_round(const cft_mp *a, int sign, const cft_fmt_desc *f, int rnd,
                  cft_bn *out, uint32_t *flags, int *decided);
 
-/* Multiply ln2 by log2e and ln10 by log10e and require both products
- * to be 1 to within a few units in the last place. Returns 0 when the
- * generated header is intact. A constant that was truncated, byte
- * swapped or edited fails here rather than in the low bit of somebody's
- * exponential. */
+/* Multiply ln2 by log2e, ln10 by log10e and pi by 1/pi, and require
+ * all three products to be 1 to within a few units in the last place.
+ * Returns 0 when the generated header is intact. A constant that was
+ * truncated, byte swapped or edited fails here rather than in the low
+ * bit of somebody's exponential.
+ *
+ * A reciprocal relation only says the two halves of a pair agree with
+ * each other, so pi additionally gets an INDEPENDENT derivation: the
+ * first call re-sums Machin's pi/4 = 4 atan(1/5) - atan(1/239) at 256
+ * bits out of small-integer arithmetic and compares. That derivation
+ * is cached - it is a property of compile-time data, and re-deriving
+ * it on every call would cost more than the transcendental it guards -
+ * while the three cheap products are re-checked every time, as they
+ * always were. */
 int cft_mp_consts_selfcheck(void);
 
 #endif /* CFT_MPFLOAT_H */

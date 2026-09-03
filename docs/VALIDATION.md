@@ -1475,3 +1475,341 @@ rounded evaluations, a quarter of them at binary256, one `_malloc` per
 scalar call across a wasm boundary. The cost buys the only check that
 can see a broken wrapper, which this morning's module proved was
 worth having.
+## 2026-09-03 - the phase-2 trigonometrics, ABI 0.4
+
+sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+and atan2Pi, correctly rounded at all four formats under all five
+rounding attributes, with 754-2019 clause 9.2.1's special values and
+the contract's exact flags - the half of clause 9's trigonometry whose
+argument reduction is EXACT (`x mod 2` on a dyadic operand for the
+forward Pi-variants; nothing at all for the inverses).
+docs/TRANSCENDENTALS.md's phase-2 section is the design and its proofs.
+
+Windows 11 (DESKTOP-T33SK86), mingw64 gcc 16.1.0, MPFR 4.2.2 as the C
+oracle, CPython 3.12 with gmpy2 2.2.1 (which links its own MPFR 4.2.1),
+2026-09-03.
+
+| check | count | result |
+|---|---|---|
+| `python/tests/test_transcend.py` | 567 tests (was 389) | pass |
+| `python/tests/test_mp_consts.py` | 4 tests (was 3) | pass |
+| the whole `python/tests` suite | 941 tests, 1 skipped | pass |
+| `host/tests/transcend_check.py` - the C against the model, per element for exact flags plus batch calls, over TWENTY functions | 154,269 comparisons | C == model on every one, bits and flags |
+| the same, with the library forced to START below the precision it needs, against an unescalated model | 143,069 comparisons | identical results through the escalation path |
+| `cft_conformance` replay of the transcendental sets | 129,845 cases in 20 sets (part of 521,845 in 40 at the runner's generation, 365,845 at the Makefile's) | every case, bits and flags, replayed twice |
+| MPFR parity, all twenty functions, four formats, five attributes | 175,680 transcendental cases (95,680 phase 1 + 80,000 phase 2), part of 414,008 | **zero value mismatches, zero flag mismatches** |
+| the same campaign with `CFT_TRANSCEND_MINPREC=64` | 414,008 cases, 38,338 escalations | **zero mismatches** |
+| `cft.hpp` against `cft.h`, every entry point twice | 3,751 checks at C++17 and again at C++20 (was 3,267) | identical encodings and flags |
+| the cftmpfr drop-in | 384 tests (was 268) | pass, asin/acos/atan/atan2 bit-for-bit against gmpy2 |
+| `api-test` contract checks | all | pass |
+| `make -C host examples-lang`, the legs this host can run | c++, rust, csharp | the canonical four checksums, diff clean |
+
+MPFR is again not the third oracle but the ONLY one, and for the seven
+Pi-variants it is called directly: `mpfr_sinpi`, `mpfr_cospi`,
+`mpfr_tanpi`, `mpfr_asinpi`, `mpfr_acospi`, `mpfr_atanpi` and
+`mpfr_atan2pi` are MPFR 4.2.0 functions, asserted by a `#error` at the
+top of `host/tools/mpfr_check.c`. Composing sinPi out of
+`mpfr_sin(pi * x)` would compare against a ROUNDED product and would
+decide nothing about the last bit. `mpfr_asin`, `mpfr_acos`,
+`mpfr_atan` and `mpfr_atan2` exist in every MPFR.
+
+**Escalation, measured.** Over the MPFR campaign's 175,680
+transcendental elements, 74,755 reached the Ziv loop and it escalated
+**zero** times; the deepest working precision used was **514 bits** -
+fp256's own first attempt, `2p + 40`. **No input reached the cap.**
+18,520 elements were decided exactly and 43,155 by a neighbour's side
+rather than by any precision at all. Over `transcend_check.py`'s pools
+the model escalated 36 times, all of them still the phase-1
+`pow(1+u, -(1+u))` family, and the deepest precision any input needed
+was 832 bits, the fp256 cap itself, for that family. **No phase-2 input
+escalated at all** at the contract's own precisions.
+
+Forced low, the second run of the `transcend` stage: 143,069
+comparisons of an escalated C against an unescalated model with
+identical results, and 38,338 escalations driven through the MPFR
+campaign with zero mismatches.
+
+**Three defects, two of them pre-existing and invisible until this
+phase's gates were built.**
+
+- `host/tools/mpfr_check.c`'s `build_tpool` had tested `enc_from_val`
+  against 0 since it was written, where 1 is success. Every directed
+  transcendental operand it meant to add - the exp2 integers, the log2
+  powers of two, the log10 powers of ten, the neighbours of 1, the
+  arguments below `2^-(p+3)` - was discarded and a zeroed encoding kept
+  in its place, so the phase-1 MPFR campaign ran on `build_pool`'s
+  specials plus randoms. Found because the new trigonometric pool came
+  out at 42 entries where 192 were asked for. The 2026-09-02 entry's
+  escalation figures are annotated accordingly; its case COUNTS are
+  unaffected, because the pool was topped up with randoms to the same
+  size.
+- With the pool repaired, the forced-escalation run failed 75 cases,
+  all `pow` at fp128 with a base one ulp from 1. `tr_ziv` refused
+  outright when `tr_eval` failed, where a failure BELOW the cap means
+  the precision was too coarse rather than that no precision can
+  decide; it now escalates, and only a failure AT the cap is a
+  refusal.
+- Five cases survived that, and they were phase 1's exact-cancellation
+  repair being unsound. It returned the larger operand with a SATURATED
+  bound, on the reasoning that the enclosure would then reach zero. It
+  does not: `err` saturates at 2^40 while the significand is
+  `2^(W-1)`, so at any working precision above 41 bits the enclosure is
+  narrow, decidable and wrong - `pow(2 + ulp, ~10^4)` at fp128
+  overflowed where the true value is about `2^9888`. The true
+  difference is bounded only in ABSOLUTE terms, which a relative bound
+  around any value cannot express, so it is now a failure and the loop
+  escalates on it.
+
+**Negative control**, run and restored the same day. Inverting one
+character - the `away` argument of atan's neighbour witness in
+`do_atan_family`, so the true value is claimed to lie above its
+argument rather than below - is caught by:
+
+- `api-test`, at the new `atan(min subnormal)` toward-zero case:
+  `api-test: 1 FAILED`;
+- `transcend_check.py`, on its first atan case (`fp32 atan rtz`, the
+  smallest subnormal: `0x1` where the model says `0x0`);
+- the conformance replay, which stops at 68,542 cases with
+  `expected 0x00000000 flags 0x18 / got 0x00000001 flags 0x18`;
+- MPFR parity, with mismatches from the first `fp32 atan rtz` row;
+- the cftmpfr drop-in against gmpy2, 12 tests failing.
+
+`cpptest` is deliberately not on that list, and that is not a gap: it
+issues each entry point through `cft.hpp` and through `cft.h` on the
+same library, so a library defect moves both sides. It is a marshalling
+check by construction, and the phase-1 control noted the same shape.
+Phase 1's control found that `api-test` could not catch a flipped side
+because it had no case in that family; phase 2 has six neighbour
+families and one case from each went in, which is why `api-test` is on
+the list this time.
+
+Standardized run, `bash verify/run.sh --only vectors,libcft,mpfr,transcend`
+at 0a9a06c, run id 20260903-031637-0a9a06c:
+
+    vectors      ok      13s
+    libcft       ok      88s
+    transcend    ok     100s
+    mpfr         ok      62s
+
+    VERDICT: PASS, nothing skipped
+
+The seconds are honest and the stage logs carry the counts: vectors 40
+sets at the runner's own generation parameters, libcft's 521,845 cases
+replayed twice each, transcend's 154,269 then 143,069 comparisons with
+the model's escalation numbers printed underneath, and mpfr's 414,008
+cases with the library's evaluator counters after them.
+
+Repeated on the finished tree, so the record is of the commit that
+ships rather than of one before it: run id 20260903-032203-a8ba574,
+vectors 12s, libcft 87s, transcend 100s, mpfr 62s - **PASS, nothing
+skipped**, and mpfr's log ends
+`TOTAL 414008 cases, 0 value mismatches, 0 flag mismatches`.
+
+What did NOT run, and why: the RTL, formal and container simulation
+stages (nothing in this change touches them - these eleven issue no
+device pass at all); the native-oracle soak, because there is no CPU
+oracle for these functions; and the Node and wasm stages, because
+`bindings/node` and `bindings/wasm` were deliberately left alone -
+another change is working on the JavaScript surface for ABI 0.3's nine,
+and the eleven have no JavaScript surface at all. docs/COMPATIBILITY.md
+records that per row rather than in general. Fortran, Julia, Go and R
+were not re-run: this host carries none of those four toolchains, so
+those rows stand on their dated runs and on nothing newer.
+
+## 2026-09-03 - the JavaScript surface reaches ABI 0.4
+
+The eleven phase-2 trigonometrics landed in libcft an hour before this
+change, and the committed wasm artifacts were still built from the 0.3
+sources: the module reported 0.3, exported none of the eleven, and the
+`cft_conformance` inside it refused the regenerated vector sets on the
+function name. The docs said so - docs/COMPATIBILITY.md's 0.4 ledger
+carried two rows reading "no ABI 0.4 surface" - which was honest and
+was also the third time that gap had opened. It closed here, in the
+same commit as the rebuild, which is the part worth recording: a
+rebuild alone would have answered `cftw_abi_version()` with 4 while
+exporting nothing 0.4 names, and that is precisely what 0.2 and 0.3
+each spent a day doing.
+
+**What was added.** Eleven `cftw_*` wrappers in
+`bindings/wasm/wasm_api.c`, one per declaration in `host/include/cft.h`
+and in cft.h's order - `cftw_sinpi`, `cftw_cospi`, `cftw_tanpi`,
+`cftw_asin`, `cftw_acos`, `cftw_atan`, `cftw_asinpi`, `cftw_acospi`,
+`cftw_atanpi`, then `cftw_atan2` and `cftw_atan2pi`, which read y
+first. None carries a `bus_out`: these are host operations, they issue
+no device pass, and the contract gives them no such parameter. Eleven
+rows in the page's compute panel and eleven entries in its cwrap table;
+the drop zone needed nothing, having accepted the twenty transcendental
+set names since that morning. `bindings/node` carries all eleven on all
+three layers - the raw table, `Context`/`Float` scalars, and `map()`
+over an array, which dispatches by arity and so needed only the name
+lists - at package version 0.4.0.
+
+**The artifacts.** Rebuilt with `bash bindings/wasm/build.sh` against
+the pinned emsdk 6.0.9 image (tag and digest both), node 22.19.0 on
+Windows 11:
+
+| | |
+|---|---|
+| module | **98,392 bytes**, sha256 `ee66812e4bd17de7dcf6b5a63f652b803f196e1f1afd0bf8e572de6c86f2a68f` |
+| page | `conformance.html` 1,144,530 bytes, sha256 `b9ddcecc2dddf342faf77a1014b525f2283c07d3439ff1d39e072c5b17fc5254` |
+| exports | **58 `cftw_*`**, up from 47 |
+| `cftw_abi_version()` | 4 = ABI 0.4, matching `cft.h` |
+| node loader | byte-identical to the page's module, checked rather than assumed |
+
+Three container builds of the tree: two back to back, byte-identical,
+and a third after the negative control below was reverted, which is the
+stronger statement because it says the tree round-tripped.
+
+**Measured, with `make vectors` from the repo root (40 sets, 236,000
+opcode cases + 129,845 transcendental):**
+
+| check | result |
+|---|---|
+| `node bindings/wasm/verify.mjs` | ABI 0.4 and 58 exports from the committed page; **365,845 cases over 40 sets** through `cft_conformance`; **129,845 more through the twenty wrappers themselves**, per case then per family as arrays; zero mismatches either way |
+| `node bindings/node/test.mjs` | **74 passed, 0 failed** (57 before) |
+| `node bindings/node/conformance.mjs` | 236,000 opcode cases in 1.7 s, then **129,845 transcendental cases in 108.2 s** through this package's own `Context` methods; **365,845 over 40 sets in all** |
+
+The seventeen new Node tests are what a vector set cannot express:
+`sinPi`'s zeros carrying the ARGUMENT's sign (`sinPi(1) = +0`,
+`sinPi(-1) = -0`), `cosPi`'s unsigned half-integer zero, `tanPi(1) =
+-0` and the half-integer pole signalling divideByZero rather than
+overflow, the Pi-forms' larger exact table including `atanPi(±inf) =
+±1/2` raising nothing at all, the inverses exact only at their zeros,
+`atan2(±0, -0) = ±pi` inexact against `atan2Pi(±0, -0) = ±1` exact,
+the operand order, a quiet NaN losing to `atan2`'s table where it beats
+`pow`'s, invalid for `|x| > 1` and for an infinity in the forward set,
+the signaling NaN across all eleven, `sinPi(2^80)` and
+`sinPi(maxFinite)` exact by a reduction that is a mask on the encoding,
+all eleven at all four formats, the `Float` methods, and
+batch-equals-scalar over 129 elements for each.
+
+One of those deserves its own line, because it is the case that looks
+exact and is not. `asinPi(1/2)` is exactly 1/6 - rational, by Niven,
+but NOT a dyadic rational, so it rounds. The test checks that it is
+1/6 by DERIVING 1/6 from `cft_div(1, 6)` in the same attribute rather
+than transcribing a constant, and it does so in all five attributes:
+two correctly rounded results of one real number are one encoding, so
+agreement in all five is a much stronger statement than agreement in
+roundTiesToEven. `acosPi(1/2) = 1/3` is checked the same way.
+
+**Negative control**, run and reverted. The control moved with the
+surface: at ABI 0.3 it was `cftw_pow`, because pow is not symmetric;
+here it is **`cftw_atan2`**, which is sharper for the same reason and
+one more - atan2 takes y first, so swapping its two operand pointers
+returns a plausible number for *every* input rather than failing loudly
+anywhere. Swapped, rebuilt, and caught by name in three places:
+
+- `verify.mjs` step 5 fails **all twenty** transcendental sets, first
+  at `fp32-transcend.jsonl:4072` - `atan2(+0, -0)` comes back
+  `0x80000000` where the vectors say `0x40490fdb` with inexact, which
+  is exactly the clause 9.2.1 row cft.h says implementations most often
+  miss;
+- `bindings/node/test.mjs` fails 2 of 74 by name (`atan2(+0, -0) is pi
+  and inexact`, `atan2(-0, +1) is -0`);
+- `bindings/node/conformance.mjs` fails all twenty transcendental sets.
+
+And, the part that is the whole reason those checks exist:
+`verify.mjs` **step 4 stayed green at 365,845 cases** throughout, and
+so did `conformance.mjs`'s opcode pass. `cft_conformance` dispatches
+all twenty transcendentals internally, in C, and never touches a
+wrapper - so the internal replay cannot see a broken JavaScript
+surface, which is the half-step's failure mode reproduced on purpose.
+Reverted, rebuilt, and the artifacts hash to what they hashed before.
+
+Standardized run, `bash verify/run.sh --only vectors,node,wasm` on a
+clean tree at 32ece03, run id 20260903-043340-32ece03:
+
+    vectors      ok      14s
+    node        ok     367s
+    wasm        ok     213s
+
+    VERDICT: PASS, nothing skipped
+
+The runner generates its own vectors at its own parameters, which are
+larger than the Makefile's, so its counts are its own and not the ones
+above: 392,000 opcode cases over twenty sets plus the same 129,845
+transcendental cases, **521,845 over 40 sets**, replayed clean by both
+stages, with `test.mjs`'s 74 tests inside the node stage.
+
+**Watched in a browser**, because the markup changed again - eleven
+rows in the compute panel's table, eleven entries in the cwrap table -
+and `verify.mjs` step 5 checks the wrappers, not the markup between a
+click and them. Chromium 148 on Windows 11, the committed
+`conformance.html` served over a loopback `http.server`, `file://`
+still being unreachable from this session:
+
+- section 1 read **libcft ABI 0.4**;
+- section 2's embedded sample replayed **4,015 cases over 20 sets,
+  green**;
+- section 3 took a drop of four transcendental sets and one opcode set
+  - **45,569 cases, all matching** - with a deliberately misnamed
+  sixth file refused by name and the verdict correctly downgraded to
+  "not a full pass". The four transcendental sets carry the eleven's
+  cases, so the drop path saw them too;
+- section 4 offered all eleven new operations, each labelled with its
+  ABI step and entry point and each enabling exactly the operand
+  fields its arity uses. Computed through the button: `sinPi(1)` = +0
+  against `sinPi(-1)` = -0 with no flags either way; `tanPi(1)` = -0;
+  `tanPi(1/2)` = +inf **with divideByZero, not overflow**;
+  `cosPi(3/2)` = +0; `atanPi(+inf)` = `0x3fe0000000000000`, exactly
+  1/2, silent; `atan2(+0, -0)` = `0x400921fb54442d18` = pi and
+  *inexact* against `atan2Pi(+0, -0)` = 1 exactly; `atan2Pi(1, 0)` =
+  1/2 against `atan2Pi(0, 1)` = +0, which is the operand order made
+  visible in the UI; and at binary256 `asinPi(1)` = 1/2 and
+  `acosPi(-1)` = 1 both exact and silent, `acosPi(1/2)` =
+  `0x3fffd5555…5555` = 1/3 with inexact, `asin(2)` the canonical quiet
+  NaN with invalid. The panel refused a 65-hex-digit operand by count
+  rather than truncating it;
+- `build/negative_control.html` was opened in the same browser and
+  failed red at `fp64.jsonl:2` (`expected 0x7ff8000000000001 / got
+  0x7ff8000000000000`), so the checker was watched failing on this
+  build and not only on the previous one.
+
+**What did NOT run, and why.** The RTL, formal and container
+simulation stages, the libcft/transcend/mpfr stages and the language
+legs: this change touches no C source, no header, no generator and no
+golden model, and `git diff` against the phase-2 merge is confined to
+`bindings/` and the docs. No other JS runtime and no device backend -
+wasm32 has no PCIe, so `Context.open` here is always the software
+backend.
+
+## 2026-09-03 - the reviewer's gates on the phase-2 merge (ABI 0.4)
+
+Three runs on DESKTOP-T33SK86 (Windows), each on a clean tree, before
+phase 2 and the JavaScript surface it needed were merged.
+
+**The phase-2 tree itself, c9a180e, the whole standard set:** 26
+stages executed, 25 ok, images skipped by name (no xclbinutil on
+Windows), and ONE failure that was the expected one - `wasm` in 3 s,
+the page's ABI check refusing a module at 0.3 against a header at 0.4.
+Everything the C side touches passed: golden 173 s (941 tests), vectors
+14 s, sim 408 s at SIM_JOBS=8, lint 46 s, formal 28 s, libcft 93 s
+(365,845-case replay), transcend 107 s (154,269 comparisons, then
+143,069 through the escalation path), mpfr 47 s (414,008 cases, zero
+mismatches), cpp 326 s (3,751 checks at each standard), bindings 6 s
+(384 tests), the seven language legs, node 269 s, soak-quick 85 s. Run
+id 20260903-033117-c9a180e.
+
+**The merged tree, 047430a (phase 2 over the 0.3 JavaScript surface),
+the eight stages the merge could move:** vectors, libcft, transcend,
+bindings, cpp and mpfr ok; node and wasm FAIL - `unknown function
+"sinpi" - this package's table and cft.h have diverged` and `the page
+reports ABI 0.3 where the tree is at 0.4`. Both refusals by name, which
+is what the JavaScript gates were built to do when the library moves
+under them. Run id 20260903-033321-047430a.
+
+**The tree that ships, with the 0.4 modules:** vectors, bindings, node
+and wasm ok - node 376 s, wasm 218 s - the 58-export module
+replaying every set the drop zone accepts. Run id 20260903-051451-f3d36ed.
+
+Two defects phase 2 found in phase 1's work are worth restating here
+because the 2026-09-02 entries above were written before them: the
+MPFR harness's transcendental pool had discarded every directed
+operand since it was written (an inverted success test), so the
+phase-1 parity campaign ran on specials and randoms; and the
+exact-cancellation repair in the evaluator's add was unsound below the
+contract's working precisions (a saturated RELATIVE bound cannot hold
+an ABSOLUTE window around zero). Neither produced a wrong answer at
+any precision the contract uses - the forced-low run is what reached
+them - and both are fixed on the tree above, with the MPFR campaign
+re-run on the repaired pool.

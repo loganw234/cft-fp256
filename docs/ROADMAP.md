@@ -1499,6 +1499,68 @@ What that closed, and what it did not:
   model, the enclosure decision, the escalation policy and the
   exactness discipline all carry over unchanged), but the reduction is
   its own design and its own entry.
+
+  *Half-answered the next day; see the phase-2 entry below.*
+
+## The transcendentals, phase 2 (status, 2026-09-03)
+
+sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi
+and atan2Pi ship as ABI 0.4, correctly rounded at all four formats
+under all five attributes with clause 9.2.1's special values and exact
+flags. Zero RTL again, and the same evaluator.
+
+The organising idea is the one the phase-1 entry above ends on. These
+eleven are exactly the clause-9 functions whose argument reduction is
+EXACT: sinPi reduces by `x mod 2` and every operand is a dyadic
+rational, so the reduction is a mask on the encoding at every magnitude
+(sinPi of the largest finite binary256 is a zero decided by integer
+arithmetic); the inverse functions have nothing to reduce at all. Split
+that way, the hard part of clause 9 is isolated in what remains rather
+than spread across it.
+
+What that closed, and what it did not:
+
+- **Closed.** The exact-case tables, which are larger here than
+  anywhere else in the contract and are proved complete rather than
+  sampled: Niven's theorem for the forward set (sinPi and cosPi exact
+  at the half-integers, tanPi at the quarter-integers) and
+  Hermite-Lindemann for the inverses (exact only where the answer is a
+  zero, plus acos(1)) - with the Pi-forms getting Niven's larger table,
+  including all of atan2Pi's axes and diagonals. `asinPi(1/2) = 1/6` is
+  the case that shows the enumeration is a proof and not a list: it is
+  rational, it is not DYADIC, and so it is inexact and decidable.
+- **Closed, twice over: two defects in phase 1's own machinery.**
+  `mpfr_check.c`'s transcendental pool had tested `enc_from_val`
+  against 0 since it was written, where 1 is success - so every
+  directed operand it meant to add had been discarded and the phase-1
+  MPFR campaign had run on specials plus randoms. With that repaired,
+  the forced-low-precision run failed 75 cases and exposed the second:
+  phase 1's exact-cancellation repair returned a saturated RELATIVE
+  bound, which cannot express a difference bounded only in absolute
+  terms and is narrow, decidable and wrong at any working precision
+  above 41 bits. Both are now fixed and both are described in
+  docs/TRANSCENDENTALS.md.
+- **Not closed: the reduction against pi.** `sin`, `cos` and `tan` of a
+  radian argument still need `x mod (pi/2)` for an argument up to
+  `2^262143`, which means `2/pi` to about 524,000 bits and a
+  Payne-Hanek-style reduction with its own worst-case measurement.
+  Everything else phase 3 needs is built: `mp_sincos` already computes
+  sin and cos of a reduced argument in [0, pi/4].
+- **Not closed: the hyperbolics.** sinh, cosh, tanh and their inverses
+  need neither a reduction nor a new constant - they are exp and log in
+  different clothes, with cancellation questions phase 1 already
+  answers - and are a smaller job than either phase so far. Nothing has
+  been written, so nothing is claimed.
+- **Not closed: a JavaScript surface.** The Node binding and the wasm
+  page were not rebuilt for 0.4, so neither knows the eleven; a 0.4
+  vector set handed to either fails on a function name, which is the
+  refusal it should give. docs/COMPATIBILITY.md says so per row.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 entry:
+365,845 conformance cases replayed, 154,269 model comparisons over
+twenty functions, 414,008 MPFR cases with zero value and zero flag
+mismatches, 38,338 escalations driven through the forced-low run, and a
+negative control that five gates caught.
 - **Not closed: a tile-assisted fast path.** Every one of the nine is
   host work today, at hundreds of multiprecision operations per
   element. A polynomial on the tile's FMA for fp32 and fp64, with the

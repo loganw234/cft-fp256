@@ -7,9 +7,9 @@ binary128 and binary256, all five rounding attributes, exact flags,
 and results that are libcft's bits and nothing else.
 
 ```bash
-node bindings/node/test.mjs         # 57 tests, no dependencies
+node bindings/node/test.mjs         # 74 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 300,325 published cases
+node bindings/node/conformance.mjs  # 365,845 published cases
 ```
 
 ```js
@@ -28,9 +28,11 @@ const total = ctx.reduce("sum", roots);       // the contract's fixed tree
 ## Correctly rounded transcendentals, at 237 bits
 
 Since ABI 0.3 the package carries the phase-1 set - `exp`, `expm1`,
-`exp2`, `log`, `log1p`, `log2`, `log10`, `pow`, `hypot` - on all three
-layers: the raw `cftw_*` exports, `Context`/`Float` scalars, and
-`map()` over an array.
+`exp2`, `log`, `log1p`, `log2`, `log10`, `pow`, `hypot` - and since
+ABI 0.4 the phase-2 trigonometrics as well - `sinpi`, `cospi`,
+`tanpi`, `asin`, `acos`, `atan`, `asinpi`, `acospi`, `atanpi`,
+`atan2`, `atan2pi` - all twenty on all three layers: the raw `cftw_*`
+exports, `Context`/`Float` scalars, and `map()` over an array.
 
 ```js
 const ctx = await Context.open(128);
@@ -38,7 +40,26 @@ ctx.exp(1).toString();          // e correctly rounded to 113 bits, as
                                 // that binary value's exact decimal
 ctx.withRounding("rup").log(2); // the same question, rounded the other way
 ctx.map("hypot", xs, ys);       // one call for the whole array
+
+ctx.sinpi(1).sign;              // 0 - sinPi(1) is +0, sinPi(-1) is -0
+ctx.atanpi(ctx.inf(0));         // exactly 1/2, and it raises nothing
+ctx.atan2(y, x);                // y FIRST, the C order and cft.h's
+ctx.atan2pi(ctx.zero(0), ctx.zero(1));   // exactly 1: (+0, -0) is the
+                                         // negative real axis, not zero
 ```
+
+**`atan2` and `atan2pi` take y first**, everywhere in this package:
+`ctx.atan2(y, x)`, `y.atan2(x)` on a `Float`, and `ctx.map("atan2",
+ys, xs)` in a batch. That is cft.h's order and C's, and it is checked
+by running it rather than by reading it - swapping the two pointers
+in the wrapper fails two named tests and every transcendental vector
+set (see the measurements below).
+
+What the eleven have in common is what they do *not* need: an argument
+reduction against pi. `sinPi`'s reduction is x mod 2, a mask on the
+encoding, so it is exact at every magnitude - `ctx.sinpi(maxFinite)` is
+a zero decided by integer arithmetic. `sin`, `cos` and `tan` of a
+*radian* argument are a different problem and are not here.
 
 **Correctly rounded** is the whole point, and it is not the usual
 promise. Not "accurate to an ulp", not "faithful", not
@@ -52,10 +73,23 @@ flag, `log2(1024)` is 10, `hypot(3, 4)` is 5 - and 754-2019 clause
 9.2.1's special values hold in full, including the rows
 implementations most often differ on: `pow(x, ±0)` is 1 for any `x`
 including a quiet NaN, `pow(1, y)` is 1 for any `y`, `hypot(±inf, y)`
-is +inf even against a NaN, and `log(±0)` is -inf with divideByZero
-rather than invalid. A *signaling* NaN is not covered by those rows
+is +inf even against a NaN, `log(±0)` is -inf with divideByZero
+rather than invalid, `sinPi(1)` is +0 and `sinPi(-1)` is -0 - the
+sign of the *argument* - `tanPi(1)` is -0, `tanPi(1/2)` is an infinity
+with divideByZero rather than overflow, and `atan2(±0, -0)` is ±pi
+rather than a zero, because a minus-zero denominator names the
+negative real axis. A *signaling* NaN is not covered by those rows
 and raises invalid like everywhere else in this contract - deliberately
-unlike C's `pow(sNaN, 0)`, and cft.h says so.
+unlike C's `pow(sNaN, 0)`, and cft.h says so. The one asymmetry worth
+knowing: a *quiet* NaN beats `pow`'s table and loses to `atan2`'s.
+
+The exact sets are enumerations with proofs behind them rather than
+tolerances. Niven's theorem bounds the forward ones - `sinPi` and
+`cosPi` exact exactly at the half-integers, `tanPi` at the quarter-
+integers - and Hermite-Lindemann bounds the inverses to their zeros,
+which is why `asinPi(±1)` is exactly ±1/2 while `asinPi(1/2)` is
+exactly 1/6 and *inexact*: rational, but not a dyadic rational.
+docs/TRANSCENDENTALS.md carries both arguments.
 
 These are host operations: no device pass, no bus word, and nothing
 here computes them - each call is one `cftw_*` call on bytes, exactly
@@ -244,9 +278,46 @@ nine, which is docs/COMPATIBILITY.md's half-step):
   it never calls the wrapper. That is the half-step reproduced on
   purpose, and the reason the second pass exists.
 
+**2026-09-03, later the same day, same host and node, wasm module
+sha256 `ee66812e4bd17de7…`** - the rebuild that gave the eleven
+phase-2 trigonometrics their `cftw_*` wrappers, in the same commit as
+the rebuild itself so this package never shipped against a module
+reporting 0.4 with none of them in it (package 0.4.0; the ABI test
+reads 0.4):
+
+* `node conformance.mjs` - **365,845 cases over 40 sets, zero
+  mismatches**: the 236,000 opcode cases through `cft_conformance()` in
+  1.7 s, then **129,845 transcendental cases in 108.2 s driven through
+  this package's own `Context` methods** - the same twenty files,
+  carrying all twenty functions now - per case and then once per
+  family through `map()`.
+* `node test.mjs` - **74 tests, 0 failures**: the 57 above plus 17 for
+  the eleven - `sinPi`'s zeros carrying the argument's sign, `cosPi`'s
+  unsigned half-integer zero, `tanPi(1) = -0` and the pole at a
+  half-integer signalling divideByZero rather than overflow, the
+  Pi-forms' larger exact table including `atanPi(±inf) = ±1/2` raising
+  nothing, `asinPi(1/2) = 1/6` shown inexact **and shown to be 1/6 in
+  all five attributes** by deriving it from `cft_div` rather than
+  transcribing a constant, the inverses exact only at their zeros,
+  `atan2(±0, -0) = ±pi` inexact against `atan2Pi(±0, -0) = ±1` exact,
+  the operand order, a quiet NaN losing to `atan2`'s table, the domain
+  errors for `|x| > 1`, infinities invalid in `sinPi`/`cosPi`/`tanPi`,
+  the signaling NaN across all eleven, `sinPi(2^80)` and
+  `sinPi(maxFinite)` exact, all eleven at all four formats, the `Float`
+  methods, and batch-equals-scalar over 129 elements for each.
+* Negative control for the new surface, run and reverted: `cftw_atan2`'s
+  two operand pointers swapped in `wasm_api.c` and the module rebuilt.
+  2 of the 74 tests fail by name (`atan2(+0, -0) is pi and inexact`,
+  `atan2(-0, +1) is -0`), `conformance.mjs` fails all twenty
+  transcendental sets - `atan2(+0, -0)` returning -0 where the vectors
+  say pi - and the `cft_conformance` replay stays green throughout, for
+  the same reason as before. `atan2` is the sharper control than `pow`
+  was: it takes y first, so a swap answers a plausible number for every
+  input rather than failing loudly anywhere.
+
 Not verified: no other JS runtime, no device backend (wasm32 has no
 PCIe; `Context.open` is always the software backend here), and no
-performance claim. The 60.9 s for 64,325 transcendental cases is a
+performance claim. The 108.2 s for 129,845 transcendental cases is a
 measurement, not a promise: it is one `_malloc` per scalar call across
 a wasm boundary, at binary256 for a quarter of them.
 

@@ -359,6 +359,21 @@ export class Float {
   pow(y) { return this._ctx.pow(this, y); }
   hypot(y) { return this._ctx.hypot(this, y); }
 
+  /** The phase-2 trigonometrics (ABI 0.4), same terms. `this` is the
+   *  y operand of atan2 and atan2pi, so `y.atan2(x)` reads in the
+   *  order cft.h names and C's atan2 uses. */
+  sinpi() { return this._ctx.sinpi(this); }
+  cospi() { return this._ctx.cospi(this); }
+  tanpi() { return this._ctx.tanpi(this); }
+  asin() { return this._ctx.asin(this); }
+  acos() { return this._ctx.acos(this); }
+  atan() { return this._ctx.atan(this); }
+  asinpi() { return this._ctx.asinpi(this); }
+  acospi() { return this._ctx.acospi(this); }
+  atanpi() { return this._ctx.atanpi(this); }
+  atan2(x) { return this._ctx.atan2(this, x); }
+  atan2pi(x) { return this._ctx.atan2pi(this, x); }
+
   lt(y) { return this._ctx.lt(this, y); }
   le(y) { return this._ctx.le(this, y); }
   eq(y) { return this._ctx.eq(this, y); }
@@ -864,6 +879,83 @@ export class Context {
    *  hypot(+-inf, y) is +inf for any y, INCLUDING a quiet NaN. */
   hypot(x, y) { return this._transcend2("hypot", x, y); }
 
+  // -- the phase-2 trigonometrics (ABI 0.4) ------------------------
+  //
+  // The same promise on the same machinery, and what these eleven have
+  // in common is what they do NOT need: an argument reduction against
+  // pi. sinPi's reduction is x mod 2 and every operand is a dyadic
+  // rational, so it is a mask on the encoding and exact at every
+  // magnitude; the inverses take an argument in [-1, 1] or a ratio and
+  // meet pi only as a factor of the answer. sin, cos and tan of a
+  // RADIAN argument are a different problem and are not here (cft.h).
+  //
+  // The exact cases are an enumeration with a proof behind it rather
+  // than a tolerance: Niven's theorem bounds the forward set to the
+  // half- and quarter-integers, Hermite-Lindemann bounds the inverses
+  // to their zeros, and the Pi-forms get a larger table because
+  // dividing by pi turns those multiples into dyadic rationals.
+  // docs/TRANSCENDENTALS.md carries both arguments in full.
+
+  /** sin(pi*x). The reduction is exact at every magnitude. sinPi(+-0)
+   *  is +-0, and sinPi of an integer n is a zero with the sign of the
+   *  ARGUMENT - sinPi(1) is +0 and sinPi(-1) is -0. An infinity is
+   *  invalid: there is no limit. */
+  sinpi(x) { return this._transcend1("sinpi", x); }
+
+  /** cos(pi*x). cosPi(n) is (-1)^n and cosPi(n + 1/2) is +0 for every
+   *  n and both signs - cosPi is even, so that zero has no sign to
+   *  carry. An infinity is invalid. */
+  cospi(x) { return this._transcend1("cospi", x); }
+
+  /** tan(pi*x), which is sinPi/cosPi in every respect: tanPi(1) is -0,
+   *  and a half-integer is a pole - +-infinity with divideByZero, 7.3's
+   *  rule for an exact infinity from finite operands. It cannot
+   *  overflow at any format here. */
+  tanpi(x) { return this._transcend1("tanpi", x); }
+
+  /** The inverse sine, exact only at +-0. asin(1) is pi/2 and inexact;
+   *  |x| > 1 is invalid, infinities included. */
+  asin(x) { return this._transcend1("asin", x); }
+
+  /** The inverse cosine, exact only at acos(1) = +0; acos(-1) is pi
+   *  and inexact. |x| > 1 is invalid. */
+  acos(x) { return this._transcend1("acos", x); }
+
+  /** The inverse tangent, exact only at +-0. atan(+-inf) is +-pi/2 and
+   *  inexact. Every real is in range, so there is no domain error. */
+  atan(x) { return this._transcend1("atan", x); }
+
+  /** asin(x)/pi. Exact at asinPi(+-0) = +-0 and asinPi(+-1) = +-1/2.
+   *  asinPi(1/2) is exactly 1/6, which is rational but NOT a dyadic
+   *  rational - so it is inexact, and still decidable. */
+  asinpi(x) { return this._transcend1("asinpi", x); }
+
+  /** acos(x)/pi. Exact at acosPi(1) = +0, acosPi(+-0) = 1/2 and
+   *  acosPi(-1) = 1; acosPi(1/2) is 1/3 and inexact for asinPi's
+   *  reason. |x| > 1 is invalid. */
+  acospi(x) { return this._transcend1("acospi", x); }
+
+  /** atan(x)/pi. Exact at atanPi(+-0) = +-0, atanPi(+-1) = +-1/4 and
+   *  atanPi(+-inf) = +-1/2 - that last one exactly, and raising
+   *  nothing, where atan(+-inf) is an inexact +-pi/2. */
+  atanpi(x) { return this._transcend1("atanpi", x); }
+
+  /** atan2(y, x) - y FIRST, the C order and cft.h's, because that is
+   *  what every caller of atan2 expects. atan2(+-0, -0) is +-pi and
+   *  inexact: a minus-zero denominator names the negative real axis,
+   *  which is the row implementations most often miss. atan2(+-0, +0)
+   *  is +-0; atan2(y, +-0) is +-pi/2; atan2(+-inf, +inf) is +-pi/4 and
+   *  (+-inf, -inf) is +-3pi/4. Unlike pow, a quiet NaN operand does not
+   *  lose to this table: atan2 of a NaN is a NaN. */
+  atan2(y, x) { return this._transcend2("atan2", y, x); }
+
+  /** atan2(y, x)/pi, y first. Exact on every axis and every diagonal -
+   *  |y| == |x| is an exact comparison on the encoding - giving 0,
+   *  +-1/4, +-1/2, +-3/4 and +-1. atan2Pi(+-0, -0) is +-1 exactly where
+   *  atan2 of the same operands is an inexact +-pi, which is in one
+   *  line why this is a separate function. */
+  atan2pi(y, x) { return this._transcend2("atan2pi", y, x); }
+
   // -- clause 5 ----------------------------------------------------
 
   /** roundToIntegral. exact: true is roundToIntegralExact, the one
@@ -996,8 +1088,10 @@ export class Context {
   /** One library call over a whole array: the call shape a device
    *  wants, and the reason a batch API exists at all. `op` is a name
    *  from cft.h - an opcode ("add", "mul", "fma", ...) or one of the
-   *  nine transcendentals ("exp", "pow", ...); operands are arrays of
-   *  Float or anything from() accepts, or null for an unused slot.
+   *  twenty transcendentals ("exp", "pow", "sinpi", "atan2", ...);
+   *  operands are arrays of Float or anything from() accepts, or null
+   *  for an unused slot. For atan2 and atan2pi the first array is y
+   *  and the second is x, as everywhere else in this package.
    *
    *  The transcendentals take a different C entry point, not an opcode
    *  in cft_run, so they are dispatched by name below. They are

@@ -660,6 +660,15 @@ if __name__ == "__main__":
 
 TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10")
 TRANSCEND_BINARY = ("pow", "hypot")
+#: ABI 0.4. gmpy2 2.2.1 binds asin, acos, atan and atan2 but none of
+#: MPFR 4.2.0's Pi-variants, so the interop comparison covers the four
+#: it has and the rest are covered by the batch-vs-scalar and
+#: special-row tests below, plus host/tools/mpfr_check.c, which calls
+#: mpfr_sinpi and friends directly.
+TRIG_GMPY = ("asin", "acos", "atan")
+TRIG_UNARY = ("sinpi", "cospi", "tanpi", "asin", "acos", "atan",
+              "asinpi", "acospi", "atanpi")
+TRIG_BINARY = ("atan2", "atan2pi")
 
 
 def gmpy_transcend(prec, mode, fn, args):
@@ -810,3 +819,172 @@ def test_transcend_special_rows(prec):
     # the signed zero survives expm1 and log1p, which is why they exist
     assert ctx.expm1(ctx.zero(1)).sign == 1
     assert ctx.log1p(ctx.zero(1)).sign == 1
+
+
+# ---------------------------------------------------------------------
+# The phase-2 trigonometrics (ABI 0.4)
+# ---------------------------------------------------------------------
+
+def trig_pool(prec, seed):
+    """Operands where these functions are worth testing: the
+    half-integers and quarter-integers where sinPi and tanPi are exact,
+    the two sides of 1 where asin's domain ends, and randoms."""
+    ctx = Context(prec)
+    out = [ctx.from_float(v) for v in
+           (0.0, -0.0, 0.5, -0.5, 1.0, -1.0, 1.5, 2.0, 2.5, 3.0, -3.0,
+            0.25, 0.75, -0.25, 1.25, 0.125, 0.375, 4.0, 17.0, 0.9375,
+            1e-8, -1e-8, 0.7, -0.3)]
+    out += [ctx.from_bits(b) for b in pool(prec, count=10, seed=seed)]
+    return out
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+@pytest.mark.parametrize("fn", TRIG_GMPY + ("atan2",))
+def test_trig_matches_gmpy2(prec, mode, fn):
+    """Bit for bit against MPFR at a matching IEEE context, for the four
+    inverse functions gmpy2 binds. The Pi-variants are MPFR 4.2.0
+    functions gmpy2 2.2.1 does not expose; host/tools/mpfr_check.c calls
+    them directly instead, and saying so is better than composing
+    sin(pi*x) here and calling the result a comparison."""
+    ctx = Context(prec, rounding=mode)
+    ops = trig_pool(prec, seed=29)
+    checked = 0
+    for i, x in enumerate(ops):
+        args = [x] if fn != "atan2" else [x, ops[(i * 5 + 2) % len(ops)]]
+        if any(is_snan(ctx, a) for a in args):
+            continue
+        got = getattr(ctx, fn)(*args)
+        save = gmpy2.get_context()
+        gctx = gmpy2.ieee(WIDTH[prec])
+        gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+        gmpy2.set_context(gctx)
+        try:
+            ms = [a.to_mpfr() for a in args]
+            want = gmpy2.atan2(*ms) if fn == "atan2" \
+                else getattr(gmpy2, fn)(ms[0])
+        finally:
+            gmpy2.set_context(save)
+        if got.is_nan:
+            assert gmpy2.is_nan(want), (fn, i)
+        else:
+            assert got.same_bits(ctx.from_mpfr(want)), \
+                f"{fn} {prec} {mode} arg {i}: {got.to_str()} vs {want}"
+        checked += 1
+    assert checked >= 20
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", TRIG_UNARY + TRIG_BINARY)
+def test_trig_batch_matches_scalar(prec, fn):
+    """One C call for the array must equal N calls for the elements."""
+    ctx = Context(prec)
+    ops = trig_pool(prec, seed=31)
+    ys = [ops[(i * 3 + 1) % len(ops)] for i in range(len(ops))]
+    want, want_or = [], 0
+    if fn in TRIG_UNARY:
+        got, fl = getattr(batch, fn)(ctx, ops)
+        for x in ops:
+            want.append(getattr(ctx, fn)(x))
+            want_or |= ctx.last_flags
+    else:
+        got, fl = getattr(batch, fn)(ctx, ops, ys)
+        for x, y in zip(ops, ys):
+            want.append(getattr(ctx, fn)(x, y))
+            want_or |= ctx.last_flags
+    assert len(got) == len(want)
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or, f"{fn} {prec}: batch flags are the OR"
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_trig_exact_cases_raise_nothing(prec):
+    """The exact table of ABI 0.4, which is far larger than 0.3's -
+    Niven's theorem, not a tolerance. Every one of these must leave the
+    flag word EMPTY."""
+    ctx = Context(prec)
+    cases = [
+        ("sinpi", (0.5,), 1.0),
+        ("sinpi", (1.5,), -1.0),
+        ("sinpi", (3.0,), 0.0),
+        ("cospi", (1.0,), -1.0),
+        ("cospi", (2.0,), 1.0),
+        ("cospi", (0.5,), 0.0),
+        ("tanpi", (0.25,), 1.0),
+        ("tanpi", (0.75,), -1.0),
+        ("tanpi", (2.0,), 0.0),
+        ("acos", (1.0,), 0.0),
+        ("asin", (0.0,), 0.0),
+        ("atan", (0.0,), 0.0),
+        ("asinpi", (1.0,), 0.5),
+        ("asinpi", (-1.0,), -0.5),
+        ("acospi", (0.0,), 0.5),
+        ("acospi", (-1.0,), 1.0),
+        ("acospi", (1.0,), 0.0),
+        ("atanpi", (1.0,), 0.25),
+        ("atanpi", (-1.0,), -0.25),
+        ("atan2pi", (1.0, 1.0), 0.25),
+        ("atan2pi", (1.0, -1.0), 0.75),
+        ("atan2pi", (-2.0, 2.0), -0.25),
+    ]
+    for fn, args, want in cases:
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(*args)
+        assert got.to_float() == want, (fn, args, got.to_str())
+        assert ctx.last_flags == 0, (fn, args, ctx.flag_names())
+    # and the neighbours of those are inexact, so the table is a proof
+    # and not a coincidence
+    for fn, args in (("sinpi", (0.375,)), ("cospi", (0.125,)),
+                     ("tanpi", (0.125,)), ("asin", (0.5,)),
+                     ("asinpi", (0.5,)), ("atan", (1.0,)),
+                     ("atan2", (1.0, 1.0))):
+        ctx.clear_flags()
+        getattr(ctx, fn)(*args)
+        assert "inexact" in ctx.flag_names(), (fn, args)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_trig_special_rows(prec):
+    """The clause 9.2.1 rows a drop-in has to keep, and the ones two
+    implementations most often differ on."""
+    ctx = Context(prec)
+    # sinPi of an integer takes the sign of the ARGUMENT
+    assert ctx.sinpi(1.0).is_zero and ctx.sinpi(1.0).sign == 0
+    assert ctx.sinpi(-1.0).is_zero and ctx.sinpi(-1.0).sign == 1
+    # cosPi is even, so its zero has no sign to carry
+    assert ctx.cospi(0.5).sign == 0
+    assert ctx.cospi(-0.5).sign == 0
+    # tanPi is sinPi/cosPi, signs included: tanPi(1) is -0
+    assert ctx.tanpi(1.0).is_zero and ctx.tanpi(1.0).sign == 1
+    assert ctx.tanpi(2.0).sign == 0
+    # a pole is +-infinity with divideByZero
+    ctx.clear_flags()
+    p = ctx.tanpi(0.5)
+    assert p.is_inf and p.sign == 0
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    n = ctx.tanpi(1.5)
+    assert n.is_inf and n.sign == 1
+    # sin, cos and tan of an infinity have no limit
+    for fn in ("sinpi", "cospi", "tanpi"):
+        ctx.clear_flags()
+        assert getattr(ctx, fn)(ctx.inf()).is_nan
+        assert "invalid" in ctx.flag_names(ctx.last_flags)
+    # out of domain
+    for fn in ("asin", "acos", "asinpi", "acospi"):
+        ctx.clear_flags()
+        assert getattr(ctx, fn)(2.0).is_nan
+        assert "invalid" in ctx.flag_names(ctx.last_flags)
+    assert ctx.atanpi(ctx.inf()).to_float() == 0.5
+    assert ctx.atanpi(ctx.inf(1)).to_float() == -0.5
+    # atan2(+-0, -0) is +-pi, and its Pi form is +-1 and EXACT
+    ctx.clear_flags()
+    assert ctx.atan2pi(ctx.zero(), ctx.zero(1)).to_float() == 1.0
+    assert ctx.last_flags == 0
+    assert ctx.atan2pi(ctx.zero(1), ctx.zero(1)).to_float() == -1.0
+    assert ctx.atan2pi(ctx.zero(), ctx.zero()).is_zero
+    assert ctx.atan2pi(ctx.zero(1), ctx.zero()).sign == 1
+    # a quiet NaN does NOT outrank atan2's table the way it does pow's
+    assert ctx.atan2(ctx.nan(), ctx.zero()).is_nan
+    assert ctx.atan2pi(ctx.from_float(1.0), ctx.nan()).is_nan
