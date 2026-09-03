@@ -241,7 +241,29 @@ int cft_mp_add(cft_mp *r, const cft_mp *a, const cft_mp *b, int W)
     } else {
         cmp = cft_bn_cmp(&ma, &mb);
         if (cmp == 0) {
-            cft_mp_set_zero(r);
+            if (erra == 0 && errb == 0) {
+                cft_mp_set_zero(r);      /* exactly zero, and provably */
+                return 0;
+            }
+            /* The two APPROXIMATIONS cancelled exactly, but neither
+             * was exact, so the true difference is not provably zero -
+             * and an exact zero here is the one value that destroys
+             * the error bound rather than widening it, because zero
+             * has no relative error to carry. Hand back a magnitude
+             * with a saturated bound instead: the enclosure then
+             * reaches zero, the rounding is undecidable, and the Ziv
+             * loop raises the precision, which is exactly what a
+             * cancellation this complete calls for.
+             *
+             * Found by running the evaluator below its design
+             * precision (CFT_TRANSCEND_MINPREC): log(1 + 2^-112) at
+             * fp128 cancels to zero at 64 bits, and pow then returned
+             * exactly 1 with a degenerate enclosure the loop believed.
+             * At the contract's own working precisions the operands of
+             * that subtraction are exact and this cannot fire, which
+             * is why nothing else had reached it. */
+            cft_mp_copy(r, a);
+            r->err = CFT_MP_ERR_MAX;
             return 0;
         }
         if (cmp > 0) {

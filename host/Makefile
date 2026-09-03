@@ -158,6 +158,7 @@ TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
+        transcendtest \
         examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
         lang-r lang-fortran clean
 
@@ -399,6 +400,13 @@ divsqrttest: all
 # chunk-crossing batches. Same shape and reasoning as divsqrttest.
 clause5test: all
 	$(PYTHON) tests/clause5_check.py
+
+# The phase-1 transcendentals against the model: every entry point, per
+# element for exact flags plus the batch calls, over the operand
+# families where a correctly rounded implementation and an accurate one
+# part company. Same shape and reasoning as clause5test.
+transcendtest: all
+	$(PYTHON) tests/transcend_check.py
 
 # The native-oracle soak: cft_div/cft_sqrt against the host CPU's own
 # IEEE division and square root, which nobody in this repository

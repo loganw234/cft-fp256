@@ -77,6 +77,10 @@
 #include <mpfr.h>
 
 #include "../include/cft.h"
+/* Not API: the transcendental instrumentation, which this tool
+ * links statically and which is where docs/TRANSCENDENTALS.md's
+ * escalation numbers are measured rather than asserted. */
+#include "../src/transcend.h"
 
 typedef struct {
     const char *name;
@@ -866,6 +870,39 @@ static int rint_by_mode(mpfr_t r, const mpfr_t v, int mi)
     }
 }
 
+/* An expected value, printed WITHOUT mpfr_out_str.
+ *
+ * mpfr_out_str with n = 0 segfaults on a zero in MPFR 4.2.1 as built
+ * here, and dies on an extreme exponent as well - measured 2026-09-02,
+ * both from this file. Either one turns the first reported mismatch
+ * into a dead process and takes the report with it, which is the worst
+ * possible failure mode for an oracle: it can only crash when it has
+ * something to say. So the mantissa and the exponent are printed
+ * directly, which is bounded work for any value MPFR can hold. */
+static void print_mpfr(mpfr_srcptr v)
+{
+    mpz_t m;
+    mpfr_exp_t e;
+    /* A caller-supplied buffer, not mpz_get_str(NULL, ...): GMP
+     * allocates with its own allocator and free() is not necessarily
+     * its deallocator, which corrupts the heap on this toolchain. The
+     * mantissa is at most p bits, so 128 bytes is generous. */
+    char buf[128];
+    if (mpfr_nan_p(v)) { printf("nan"); return; }
+    if (mpfr_inf_p(v)) { printf("%sinf", mpfr_signbit(v) ? "-" : ""); return; }
+    if (mpfr_zero_p(v)) { printf("%s0", mpfr_signbit(v) ? "-" : ""); return; }
+    mpz_init(m);
+    e = mpfr_get_z_2exp(m, v);
+    if (mpz_sizeinbase(m, 16) + 3 <= sizeof buf) {
+        mpz_get_str(buf, 16, m);
+        printf("0x%s p2^%ld", buf, (long)e);
+    } else {
+        printf("<%lu hex digits> p2^%ld",
+               (unsigned long)mpz_sizeinbase(m, 16), (long)e);
+    }
+    mpz_clear(m);
+}
+
 static void report_c5(const char *opn, const char *mode, const fdesc *fa,
                       const uint8_t *a, const uint8_t *b, const fdesc *fg,
                       const uint8_t *got, mpfr_srcptr want, uint32_t gf,
@@ -882,19 +919,7 @@ static void report_c5(const char *opn, const char *mode, const fdesc *fa,
            value_bad ? "MISMATCH" : "FLAGS", fa->name, opn, mode, ha, hb,
            extra ? extra : "");
     printf("    lib=0x%s flags=0x%02x  mpfr=", hg, (unsigned)gf);
-    /* Not mpfr_out_str unconditionally: with n = 0 it segfaults on a
-     * ZERO in MPFR 4.2.1 as built here, which would turn the first
-     * reported mismatch into a dead process and lose the report that
-     * was the point. Measured 2026-09-02, on the underflowed pow that
-     * found the sign bug above. */
-    if (mpfr_nan_p(want))
-        printf("nan");
-    else if (mpfr_inf_p(want))
-        printf("%sinf", mpfr_signbit(want) ? "-" : "");
-    else if (mpfr_zero_p(want))
-        printf("%s0", mpfr_signbit(want) ? "-" : "");
-    else
-        mpfr_out_str(stdout, 16, 0, want, MPFR_RNDN);
+    print_mpfr(want);
     printf(" flags=0x%02x\n", (unsigned)wf);
 }
 
@@ -2122,6 +2147,14 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn)
                     cft_status st = CFT_OK;
                     mpfr_t want;
 
+                    if (getenv("TRACE")) {
+                        char ta[65], tb[65];
+                        hexdump(a, f->esz, ta); hexdump(b, f->esz, tb);
+                        fprintf(stderr, "%s %s %s a=%s b=%s\n",
+                                f->name, TFN_NAME[fn], MODES[mi].name,
+                                ta, tb);
+                        fflush(stderr);
+                    }
                     mpfr_init2(want, f->p);
                     t_oracle(f, fn, mi, a, b, want, &wf);
                     memset(d, 0, sizeof d);
@@ -2280,6 +2313,17 @@ int main(int argc, char **argv)
             printf("\n");
         }
     }
+
+    printf("\ntranscendental evaluator: %llu elements, %llu reached the "
+           "Ziv loop,\n  %llu escalations, deepest working precision %llu "
+           "bits, %llu decided exactly,\n  %llu decided by a neighbour's "
+           "side\n",
+           (unsigned long long)cft_tr_calls,
+           (unsigned long long)cft_tr_ziv_calls,
+           (unsigned long long)cft_tr_escalations,
+           (unsigned long long)cft_tr_max_prec,
+           (unsigned long long)cft_tr_exact,
+           (unsigned long long)cft_tr_neighbour);
 
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
            "mismatches\n", (unsigned long long)cases,

@@ -135,7 +135,21 @@ def reset_stats():
 PREC_CAP_CEILING = 832
 
 
+#: Lower the FIRST attempt's precision, for tests only. The escalation
+#: path decides nothing on its own - a rounding accepted at 2p+40 bits
+#: is accepted at any higher precision too, because the enclosure only
+#: narrows - so forcing the loop to start below what it needs must not
+#: move a single result bit. It is set by python/tests/test_transcend.py
+#: (and, on the C side, by CFT_TRANSCEND_MINPREC) because a path never
+#: taken is a path never tested, and in ordinary use this loop never
+#: escalates at all.
+START_PREC_OVERRIDE = 0
+
+
 def start_prec(fmt: FpFormat) -> int:
+    if START_PREC_OVERRIDE:
+        return max(64, fmt.prec // 2,
+                   min(START_PREC_OVERRIDE, prec_cap(fmt)))
     return 2 * fmt.prec + 40
 
 

@@ -711,3 +711,38 @@ def test_unknown_names_and_modes_are_refused():
         tr.compute(FP32, "atan", one_bits(FP32))
     with pytest.raises(ValueError):
         tr.compute(FP32, "exp", one_bits(FP32), 0, 7)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_escalation_lands_on_the_same_answer(fmt):
+    """Force the loop to start below the precision it needs and the
+    answers must not move.
+
+    This is the only test that exercises the escalation at all: over
+    every campaign this module has run, the first attempt has decided
+    every single input, so the path that raises the precision has never
+    been taken in anger. A path never taken is a path never tested, and
+    this one is load-bearing - it is what the cap and the loud failure
+    are about."""
+    pool = _brute_pool(fmt)
+    tr.reset_stats()
+    baseline = {}
+    for fn in tr.TRANSCEND_FNS:
+        arity = tr.TRANSCEND_ARITY[fn]
+        pairs = ([(a, 0) for a in pool] if arity == 1
+                 else [(a, b) for a in pool[:8] for b in pool[:8]])
+        for rnd in RND_MODES:
+            for xa, xb in pairs:
+                baseline[(fn, rnd, xa, xb)] = tr.compute(fmt, fn, xa, xb, rnd)
+    ordinary = tr.STATS["escalations"]
+
+    tr.reset_stats()
+    tr.START_PREC_OVERRIDE = fmt.prec + 8
+    try:
+        for (fn, rnd, xa, xb), want in baseline.items():
+            assert tr.compute(fmt, fn, xa, xb, rnd) == want, \
+                (fmt.name, fn, RND_NAMES[rnd], hex(xa), hex(xb))
+    finally:
+        tr.START_PREC_OVERRIDE = 0
+    assert tr.STATS["escalations"] > 100 > ordinary, tr.STATS
+    assert tr.STATS["max_prec"] <= tr.prec_cap(fmt)

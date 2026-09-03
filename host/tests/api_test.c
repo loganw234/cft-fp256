@@ -728,6 +728,35 @@ int main(void)
         st = cft_exp2(dev, CFT_FP32, CFT_RNE, d, d, 1, &f3);   /* aliased */
         CHECK(st == CFT_OK && get32(d) == 0x41000000u && f3 == 0,
               "exp2(3) = 8 EXACTLY, and d may alias a");
+
+        /* The neighbour rule, which the sabotage run of 2026-09-02
+         * showed this file could not catch: exp of an argument below
+         * 2^-(p+3) is one half-gap above 1, so it rounds to 1 in four
+         * attributes and to nextUp(1) in the fifth, and no working
+         * precision decides that - only the SIDE does. expm1 and log1p
+         * of the same argument go opposite ways for the same reason,
+         * and both land subnormal, so both are tiny AND inexact. */
+        put32(a, 0x00000001u);                        /* min subnormal */
+        st = cft_exp(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u &&
+              f3 == CFT_FLAG_INEXACT,
+              "exp(min subnormal) = 1, inexact");
+        st = cft_exp(dev, CFT_FP32, CFT_RUP, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800001u &&
+              f3 == CFT_FLAG_INEXACT,
+              "exp(min subnormal) upward = nextUp(1)");
+        st = cft_expm1(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "expm1(min subnormal) toward zero stays there, tiny+inexact");
+        st = cft_log1p(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "log1p(min subnormal) downward is +0, tiny+inexact");
+        st = cft_log1p(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "log1p(min subnormal) to nearest stays put, tiny+inexact");
     }
 
     /* --- the clause-5 completion set ------------------------------

@@ -240,6 +240,19 @@ def pow_pairs(fmt, trials, seed):
             for base in (one + dy, one - dy):
                 pairs.append((base, b))
                 pairs.append((base, b | fmt.sign_mask))
+    # The one family measured to make the Ziv loop escalate at all:
+    # pow(1+u, -(1+u)) is 1 - u + u^3/2, so it sits three precisions
+    # from the representable 1-u and the first attempt cannot see the
+    # gap. The u^2 term cancels only for this exponent, and no
+    # representable y can cancel the u^3 one as well, which is the
+    # argument that bounds the whole family at 3p bits.
+    for du in (1, 2, 3, 5):
+        for dv in (0, 1, 2, 3, 5):
+            base = one + du
+            expo = (one + dv) | fmt.sign_mask
+            pairs.append((base, expo))
+            pairs.append((one - du, expo))
+            pairs.append((base, one + dv))
     for _ in range(trials):
         pairs.append((rng.getrandbits(fmt.width), rng.getrandbits(fmt.width)))
     return pairs
@@ -398,7 +411,18 @@ def main():
     ap.add_argument("--formats", default="fp32,fp64,fp128,fp256")
     ap.add_argument("--trials", type=int, default=64)
     ap.add_argument("--seed", type=int, default=5)
+    ap.add_argument("--min-prec", type=int, default=0,
+                    help="force the C library to START below the "
+                         "precision it needs, so its escalation path is "
+                         "exercised against an unescalated model")
     args = ap.parse_args()
+    if args.min_prec:
+        # The C only. The model keeps its ordinary schedule, so this
+        # run compares an ESCALATED C against a non-escalated
+        # reference - which is the property worth proving: raising the
+        # working precision must land on the same bits, or the loop is
+        # deciding something the mathematics does not.
+        os.environ["CFT_TRANSCEND_MINPREC"] = str(args.min_prec)
     formats = [s.strip() for s in args.formats.split(",") if s.strip()]
 
     lib = load_library()
@@ -421,8 +445,14 @@ def main():
                   f"the model ({CHECKED} comparisons so far)")
     finally:
         lib.cft_close(dev)
+    st = tr.STATS
     print(f"transcend_check: {CHECKED} comparisons, "
           "C == model on every one")
+    print(f"  the model's evaluator: {st['ziv_calls']} enclosures, "
+          f"{st['escalations']} escalations, deepest working precision "
+          f"{st['max_prec']} bits,\n"
+          f"  {st['exact']} decided exactly, {st['neighbour']} decided by "
+          "a neighbour's side")
 
 
 if __name__ == "__main__":

@@ -326,6 +326,19 @@ def transcend_pow_pairs(fmt: FpFormat, extra: int, seed: int = 10):
             for base in (one + dy, one - dy):
                 pairs.append((base, b))
                 pairs.append((base, b | fmt.sign_mask))
+    # The one family measured to make the Ziv loop escalate at all:
+    # pow(1+u, -(1+u)) is 1 - u + u^3/2, so it sits three precisions
+    # from the representable 1-u and the first attempt cannot see the
+    # gap. The u^2 term cancels only for this exponent, and no
+    # representable y can cancel the u^3 one as well, which is the
+    # argument that bounds the whole family at 3p bits.
+    for du in (1, 2, 3, 5):
+        for dv in (0, 1, 2, 3, 5):
+            base = one + du
+            expo = (one + dv) | fmt.sign_mask
+            pairs.append((base, expo))
+            pairs.append((one - du, expo))
+            pairs.append((base, one + dv))
     for _ in range(extra):
         pairs.append((_rand_bits(rng, fmt), _rand_bits(rng, fmt)))
     return [(a, b) for a, b in pairs if a is not None and b is not None]

@@ -85,8 +85,34 @@ void cft_tr_reset_stats(void)
 
 /* ---- the working-precision schedule (mirrors the model) ----------- */
 
+/* The first attempt's precision, and an override for tests only.
+ *
+ * CFT_TRANSCEND_MINPREC lowers it so that the escalation path runs at
+ * all: in ordinary use this loop has never escalated once - 95,680
+ * elements through the MPFR campaign and 76,115 through the model
+ * check, zero escalations between them - and a path never taken is a
+ * path never tested. It cannot change a result: a rounding the
+ * enclosure decides at some precision is decided the same way at every
+ * higher one, because raising the precision only narrows the
+ * enclosure. host/tests/transcend_check.py --min-prec proves that by
+ * replaying the whole sweep with it set. */
 static int tr_start_prec(const cft_fmt_desc *f)
 {
+    static int probed, forced;
+    if (!probed) {
+        const char *e = getenv("CFT_TRANSCEND_MINPREC");
+        probed = 1;
+        forced = e ? atoi(e) : 0;
+    }
+    if (forced > 0) {
+        int cap = 8 * f->prec + 128;
+        int lo = f->prec / 2 > 64 ? f->prec / 2 : 64;
+        if (cap > CFT_TR_PREC_CAP_CEILING)
+            cap = CFT_TR_PREC_CAP_CEILING;
+        if (forced > cap)
+            return cap;
+        return forced < lo ? lo : forced;
+    }
     return 2 * f->prec + 40;
 }
 
@@ -804,7 +830,14 @@ static cft_status tr_ziv(const tr_args *A, int sign, int rnd, cft_bn *out,
             cft_tr_max_prec = (uint64_t)W;
         if (tr_eval(A, W, &r))
             return CFT_ERR_INTERNAL;
-        if (cft_mp_round(&r, sign, f, rnd, out, flags, &decided))
+        /* A result that came out EXACTLY zero at this precision means
+         * the working precision was too coarse to see the value at all
+         * - log(1 + 2^-112) at fp128 does it once the precision drops
+         * below p - and the answer is to raise it, not to refuse. The
+         * exact zeros of these functions are all decided long before
+         * the loop. */
+        if (!r.zero &&
+            cft_mp_round(&r, sign, f, rnd, out, flags, &decided))
             return CFT_ERR_INTERNAL;
         if (decided)
             return CFT_OK;
