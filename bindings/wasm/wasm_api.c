@@ -684,3 +684,324 @@ WASM_EXPORT int cftw_atanh(cft_device *dev, int fmt, int rnd,
     return (int)cft_atanh(dev, (cft_format)fmt, (cft_round)rnd, a, d,
                           (size_t)n, flags_out);
 }
+
+/* ---- the four packages of ABI 0.6 --------------------------------- *
+ *
+ * Added 2026-09-03 with the library's own step to 0.6, so this module
+ * never carried the four packages without exporting them - the
+ * half-step the 0.3 and 0.4 rebuilds each took once and 0.5 stopped
+ * taking. One wrapper per declaration in cft.h, in cft.h's order:
+ * clause 5.12's character conversions with 9.7's payload operations,
+ * then the rest of table 9.1, then the scaled product reductions, then
+ * clause 9.5's augmented arithmetic. CFT_SUMSQ and CFT_SUMABS need no
+ * wrapper of their own: they are opcodes 28 and 29 through the
+ * cftw_reduce that has been here since 0.1, which is the whole point
+ * of an opcode.
+ *
+ * FOUR ADAPTATIONS ARE NEW HERE, and each one is the contract's shape
+ * carried across wasm32 rather than a JavaScript convenience:
+ *
+ *   STRINGS IN. cft_from_decimal_char and cft_from_hex_char take
+ *   `const char *const *` - an array of pointers to NUL-terminated
+ *   sequences. On wasm32 that is an array of 4-byte heap offsets, so a
+ *   JS caller writes each sequence into the heap, writes the offsets
+ *   into a second buffer, and hands over that buffer's pointer. The
+ *   wrapper passes it straight through; there is no marshalling here,
+ *   because a wrapper that copied strings would be a second definition
+ *   of what a sequence is.
+ *
+ *   STRINGS OUT keep the C's two-call sizing protocol EXACTLY, and
+ *   this is the one place the temptation to invent a JavaScript
+ *   contract was real. cft.h: *len is always set, on success and on
+ *   refusal alike, to the bytes required INCLUDING the NUL; cap = 0
+ *   with out = NULL asks; a buffer too small is
+ *   CFT_ERR_INVALID_ARGUMENT with *len set and NOTHING written. A
+ *   wrapper that allocated the answer itself and returned a pointer
+ *   would have to own the free, would hide the refusal, and would mean
+ *   the browser and the C disagree about what a short buffer does -
+ *   so it does none of that. `out` of 0 IS the NULL the protocol asks
+ *   for: wasm address 0 is not a valid allocation.
+ *
+ *   THE INT64 ARRAY. pown, compound and rootn read one int64_t per
+ *   element beside the encoding array. It crosses as a plain heap
+ *   pointer, the way cft_cvt_from_i64's does - JS fills it with a
+ *   BigInt64Array view - rather than as a parameter, because without
+ *   -sWASM_BIGINT a wasm i64 cannot cross the JS boundary at all.
+ *   cft.h's name for the element count there is `count`, not `n`, and
+ *   this file keeps that spelling so the two arguments cannot be
+ *   confused when they are read side by side.
+ *
+ *   THE PAIRS. The three scaled products deliver a significand and an
+ *   int64 scale, and the three augmented operations deliver r and e.
+ *   Both pairs travel as out-pointers into the heap - scale_out an
+ *   int64 the caller reads with a BigInt64Array, r and e two element
+ *   buffers - which is what the C does, and is why neither needed a
+ *   return-value convention invented for it here.
+ *
+ * The augmented three take NO ROUNDING ARGUMENT, and the omission is
+ * normative rather than an oversight in this file: 9.5 fixes the
+ * direction to roundTiesTowardZero, which is not one of clause 4.3's
+ * five, so there is nothing to pass. A wrapper that accepted a
+ * cft_round to look like its neighbours would be describing a choice
+ * the caller does not have.
+ *
+ * Host operations throughout: no cft_run pass is issued, so there is
+ * no bus word and no bus_out parameter, and `dev` is context. Correct
+ * rounding, 9.2.1's special values, 5.12's syntax and its refusals,
+ * 9.4's infinity-before-NaN row and 9.5's roundTiesTowardZero all live
+ * in the library; nothing here decides or second-guesses any of them.
+ */
+
+/* ---- clause 5.12's character conversions, 9.7's payloads ---------- */
+
+/* Pmin(fmt): 9, 17, 36, 73. size_t in the contract, uint32 here like
+ * every other size_t on wasm32. */
+WASM_EXPORT uint32_t cftw_format_decimal_digits(int fmt)
+{
+    return (uint32_t)cft_format_decimal_digits((cft_format)fmt);
+}
+
+/* `in` is an array of n heap offsets, each a NUL-terminated sequence.
+ * bad_index reports which element of the batch was refused, and is
+ * written only when the library writes it - a caller that passes 0
+ * gets the contract's NULL and no report, exactly as in C. */
+WASM_EXPORT int cftw_from_decimal_char(cft_device *dev, int fmt, int rnd,
+                                       const char *const *in, void *d,
+                                       uint32_t n, uint32_t *bad_index,
+                                       uint32_t *flags_out)
+{
+    size_t bad = 0;
+    int st = (int)cft_from_decimal_char(dev, (cft_format)fmt, (cft_round)rnd,
+                                        in, d, (size_t)n,
+                                        bad_index ? &bad : NULL, flags_out);
+    if (bad_index)
+        *bad_index = (uint32_t)bad;
+    return st;
+}
+
+/* The sizing protocol, unchanged: out = 0 with cap = 0 asks for the
+ * length, *len is set either way, and a short buffer refuses rather
+ * than truncating. digits = 0 is the exact conversion. */
+WASM_EXPORT int cftw_to_decimal_char(cft_device *dev, int fmt, int rnd,
+                                     const void *a, uint32_t digits,
+                                     char *out, uint32_t cap, uint32_t *len,
+                                     uint32_t *flags_out)
+{
+    size_t need = 0;
+    int st = (int)cft_to_decimal_char(dev, (cft_format)fmt, (cft_round)rnd, a,
+                                      (size_t)digits, out, (size_t)cap,
+                                      len ? &need : NULL, flags_out);
+    if (len)
+        *len = (uint32_t)need;
+    return st;
+}
+
+WASM_EXPORT int cftw_from_hex_char(cft_device *dev, int fmt, int rnd,
+                                   const char *const *in, void *d,
+                                   uint32_t n, uint32_t *bad_index,
+                                   uint32_t *flags_out)
+{
+    size_t bad = 0;
+    int st = (int)cft_from_hex_char(dev, (cft_format)fmt, (cft_round)rnd,
+                                    in, d, (size_t)n,
+                                    bad_index ? &bad : NULL, flags_out);
+    if (bad_index)
+        *bad_index = (uint32_t)bad;
+    return st;
+}
+
+/* Exact always, so there is no rounding attribute and no flag word -
+ * cft.h gives this one neither, and neither is invented here. */
+WASM_EXPORT int cftw_to_hex_char(cft_device *dev, int fmt, const void *a,
+                                 char *out, uint32_t cap, uint32_t *len)
+{
+    size_t need = 0;
+    int st = (int)cft_to_hex_char(dev, (cft_format)fmt, a, out, (size_t)cap,
+                                  len ? &need : NULL);
+    if (len)
+        *len = (uint32_t)need;
+    return st;
+}
+
+/* The 9.7 payload operations. "These signal no exceptions", so none
+ * has a flags argument - the same reason cftw_class has none. */
+WASM_EXPORT int cftw_get_payload(cft_device *dev, int fmt, const void *a,
+                                 void *d, uint32_t n)
+{
+    return (int)cft_get_payload(dev, (cft_format)fmt, a, d, (size_t)n);
+}
+
+WASM_EXPORT int cftw_set_payload(cft_device *dev, int fmt, const void *a,
+                                 void *d, uint32_t n)
+{
+    return (int)cft_set_payload(dev, (cft_format)fmt, a, d, (size_t)n);
+}
+
+WASM_EXPORT int cftw_set_payload_signaling(cft_device *dev, int fmt,
+                                           const void *a, void *d,
+                                           uint32_t n)
+{
+    return (int)cft_set_payload_signaling(dev, (cft_format)fmt, a, d,
+                                          (size_t)n);
+}
+
+/* ---- the rest of IEEE 754-2019 table 9.1 -------------------------- */
+
+WASM_EXPORT int cftw_exp2m1(cft_device *dev, int fmt, int rnd,
+                            const void *a, void *d, uint32_t n,
+                            uint32_t *flags_out)
+{
+    return (int)cft_exp2m1(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                           (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_exp10(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_exp10(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_exp10m1(cft_device *dev, int fmt, int rnd,
+                             const void *a, void *d, uint32_t n,
+                             uint32_t *flags_out)
+{
+    return (int)cft_exp10m1(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                            (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_log2p1(cft_device *dev, int fmt, int rnd,
+                            const void *a, void *d, uint32_t n,
+                            uint32_t *flags_out)
+{
+    return (int)cft_log2p1(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                           (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_log10p1(cft_device *dev, int fmt, int rnd,
+                             const void *a, void *d, uint32_t n,
+                             uint32_t *flags_out)
+{
+    return (int)cft_log10p1(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                            (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_rsqrt(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_rsqrt(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+/* powr is NOT pow, and the difference is in the library rather than
+ * here: x < 0 is invalid for EVERY y including a NaN, powr(+-0, +-0)
+ * and powr(+1, +-inf) are invalid, and powr(qNaN, y) is a quiet NaN
+ * where pow(qNaN, 0) is 1. a is the base and b the exponent, in that
+ * order - the asymmetry verify.mjs step 5 exists to notice. */
+WASM_EXPORT int cftw_powr(cft_device *dev, int fmt, int rnd,
+                          const void *a, const void *b, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_powr(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
+                         (size_t)n, flags_out);
+}
+
+/* The three with an INTEGER exponent (9.2.1: "n is a finite integral
+ * value in integralFormat"). `nn` is a heap pointer to `count`
+ * int64_t values - one per element, never NULL - and `count` is the
+ * element count, which is cft.h's own naming for the one place those
+ * two arguments are not the same number. */
+WASM_EXPORT int cftw_pown(cft_device *dev, int fmt, int rnd, const void *a,
+                          const int64_t *nn, void *d, uint32_t count,
+                          uint32_t *flags_out)
+{
+    return (int)cft_pown(dev, (cft_format)fmt, (cft_round)rnd, a, nn, d,
+                         (size_t)count, flags_out);
+}
+
+WASM_EXPORT int cftw_compound(cft_device *dev, int fmt, int rnd,
+                              const void *a, const int64_t *nn, void *d,
+                              uint32_t count, uint32_t *flags_out)
+{
+    return (int)cft_compound(dev, (cft_format)fmt, (cft_round)rnd, a, nn, d,
+                             (size_t)count, flags_out);
+}
+
+WASM_EXPORT int cftw_rootn(cft_device *dev, int fmt, int rnd, const void *a,
+                           const int64_t *nn, void *d, uint32_t count,
+                           uint32_t *flags_out)
+{
+    return (int)cft_rootn(dev, (cft_format)fmt, (cft_round)rnd, a, nn, d,
+                          (size_t)count, flags_out);
+}
+
+/* ---- the scaled product reductions (clause 9.4) ------------------- *
+ *
+ * A pair out: `pr` receives ONE element and `scale_out` one int64,
+ * both heap pointers, neither NULL. n == 0 is the multiplicative
+ * identity - pr = 1, sf = 0, no exception - so a zero-length call is
+ * an answer rather than an error, and this wrapper passes the count
+ * through without a length check of its own.
+ */
+
+WASM_EXPORT int cftw_scaled_prod(cft_device *dev, int fmt, int rnd,
+                                 const void *a, void *pr, int64_t *scale_out,
+                                 uint32_t n, uint32_t *flags_out)
+{
+    return (int)cft_scaled_prod(dev, (cft_format)fmt, (cft_round)rnd, a, pr,
+                                scale_out, (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_scaled_prod_sum(cft_device *dev, int fmt, int rnd,
+                                     const void *a, const void *b, void *pr,
+                                     int64_t *scale_out, uint32_t n,
+                                     uint32_t *flags_out)
+{
+    return (int)cft_scaled_prod_sum(dev, (cft_format)fmt, (cft_round)rnd, a,
+                                    b, pr, scale_out, (size_t)n, flags_out);
+}
+
+/* The leaf is a[i] - b[i], in that order. An asymmetric operand pair
+ * again, and the one this build's negative control swaps. */
+WASM_EXPORT int cftw_scaled_prod_diff(cft_device *dev, int fmt, int rnd,
+                                      const void *a, const void *b, void *pr,
+                                      int64_t *scale_out, uint32_t n,
+                                      uint32_t *flags_out)
+{
+    return (int)cft_scaled_prod_diff(dev, (cft_format)fmt, (cft_round)rnd, a,
+                                     b, pr, scale_out, (size_t)n, flags_out);
+}
+
+/* ---- the augmented arithmetic (clause 9.5) ------------------------ *
+ *
+ * Two outputs per element and no rounding argument. r and e must not
+ * overlap each other - the same pointer for both is
+ * CFT_ERR_INVALID_ARGUMENT in the library, which is where that check
+ * belongs - while either may alias a or b.
+ */
+
+WASM_EXPORT int cftw_augmented_add(cft_device *dev, int fmt, const void *a,
+                                   const void *b, void *r, void *e,
+                                   uint32_t n, uint32_t *flags_out)
+{
+    return (int)cft_augmented_add(dev, (cft_format)fmt, a, b, r, e,
+                                  (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_augmented_sub(cft_device *dev, int fmt, const void *a,
+                                   const void *b, void *r, void *e,
+                                   uint32_t n, uint32_t *flags_out)
+{
+    return (int)cft_augmented_sub(dev, (cft_format)fmt, a, b, r, e,
+                                  (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_augmented_mul(cft_device *dev, int fmt, const void *a,
+                                   const void *b, void *r, void *e,
+                                   uint32_t n, uint32_t *flags_out)
+{
+    return (int)cft_augmented_mul(dev, (cft_format)fmt, a, b, r, e,
+                                  (size_t)n, flags_out);
+}
