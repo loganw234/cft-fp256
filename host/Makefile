@@ -9,9 +9,13 @@
 #   make test            build, then run the contract tests and replay
 #                        the published vectors through the library
 #   make examples-lang   the C/Python identity check again, for the
-#                        optional toolchains: julia and rustc are each
-#                        run and diffed if present, SKIPped by name if
-#                        not
+#                        optional toolchains: C++, Julia, Rust, Go, C#
+#                        and R are each run and diffed if present,
+#                        SKIPped by name if not
+#   make lang-rust       one leg of that on its own (lang-cpp,
+#                        lang-julia, lang-rust, lang-go, lang-csharp,
+#                        lang-r, lang-fortran) - how verify/run.sh
+#                        reports the languages one by one
 #   make cpptest         cft.hpp against cft.h, at C++17 and C++20.
 #                        Its own target rather than part of `test`
 #                        because a C library whose point is that it
@@ -141,7 +145,8 @@ TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
-        examples-lang clean
+        examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
+        lang-r lang-fortran clean
 
 all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
 
@@ -257,13 +262,20 @@ fortran: libcft.a
 	./vector-fma-f$(EXE)
 
 # The C/Python identity check from `test`, re-run for the language
-# toolchains this Makefile does not get to assume. Julia and Rust are
-# optional here: a machine that lacks one says SKIP with the language's
-# name and checks what it has, because a log that quietly checked
-# nothing must not read as a pass - the rule cft_conformance applies
-# to its own summary, applied to make. A toolchain that IS present and
-# prints different bits fails the build outright; that is a broken
-# ABI story, not a warning.
+# toolchains this Makefile does not get to assume. Every leg is
+# optional here: a machine that lacks a toolchain says SKIP with the
+# language's name and checks what it has, because a log that quietly
+# checked nothing must not read as a pass - the rule cft_conformance
+# applies to its own summary, applied to make. A toolchain that IS
+# present and prints different bits fails the build outright; that is
+# a broken ABI story, not a warning.
+#
+# Each leg is its own target - lang-cpp, lang-julia, lang-rust,
+# lang-go, lang-csharp, lang-r, and lang-fortran for the `fortran`
+# target under the same naming - so that verify/run.sh can run and
+# report them one at a time, by language. `examples-lang` is all of
+# them and then the cleanup. The legs share .out-c.txt, the C
+# example's output, made once by its own rule.
 #
 # The C++ leg is the same example again through host/include/cft.hpp,
 # so it checks the wrapper's marshalling with the checksum the other
@@ -279,8 +291,10 @@ fortran: libcft.a
 # what is under test - so the diff strips it rather than teaching two
 # more languages to imitate msvcrt. (On Linux both sides are already
 # \n and the flag changes nothing.)
-examples-lang: all
+.out-c.txt: vector-fma$(EXE)
 	./vector-fma$(EXE) > .out-c.txt
+
+lang-cpp: all .out-c.txt
 	@if command -v $(CXX) >/dev/null 2>&1; then \
 		if ! $(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) \
 			examples/vector_fma.cpp libcft.a -o vector-fma-cpp$(EXE) \
@@ -294,6 +308,8 @@ examples-lang: all
 	else \
 		echo "SKIP c++: no $(CXX) on PATH"; \
 	fi
+
+lang-julia: all .out-c.txt
 	@if command -v julia >/dev/null 2>&1; then \
 		julia examples/vector_fma.jl > .out-jl.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-jl.txt && \
@@ -301,6 +317,8 @@ examples-lang: all
 	else \
 		echo "SKIP julia: no julia on PATH"; \
 	fi
+
+lang-rust: all .out-c.txt
 	@if command -v rustc >/dev/null 2>&1; then \
 		rustc --edition 2021 -L native=. examples/vector_fma.rs \
 			-o vector-fma-rs$(EXE) && \
@@ -310,6 +328,8 @@ examples-lang: all
 	else \
 		echo "SKIP rust: no rustc on PATH"; \
 	fi
+
+lang-go: all .out-c.txt
 	@if command -v go >/dev/null 2>&1; then \
 		go run examples/vector_fma.go > .out-go.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-go.txt && \
@@ -317,6 +337,8 @@ examples-lang: all
 	else \
 		echo "SKIP go: no go on PATH"; \
 	fi
+
+lang-csharp: all .out-c.txt
 	@if command -v dotnet >/dev/null 2>&1; then \
 		if ! $(DOTNET_ENV) dotnet run --project examples/vector_fma_cs.csproj \
 			> .out-cs.txt 2> .out-cs.err; then \
@@ -328,6 +350,8 @@ examples-lang: all
 	else \
 		echo "SKIP csharp: no dotnet on PATH"; \
 	fi
+
+lang-r: all .out-c.txt
 	@if command -v Rscript >/dev/null 2>&1; then \
 		Rscript examples/vector_fma.R > .out-r.txt && \
 		diff --strip-trailing-cr .out-c.txt .out-r.txt && \
@@ -335,6 +359,10 @@ examples-lang: all
 	else \
 		echo "SKIP r: no Rscript on PATH"; \
 	fi
+
+lang-fortran: fortran
+
+examples-lang: all lang-cpp lang-julia lang-rust lang-go lang-csharp lang-r
 	@rm -f .out-c.txt .out-cpp.txt .out-cpp.err .out-jl.txt .out-rs.txt \
 		.out-go.txt .out-cs.txt .out-cs.err .out-r.txt
 

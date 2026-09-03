@@ -14,6 +14,7 @@
 #   bash verify/run.sh --fresh         # force a new run id
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
 #   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
+#   bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
 #
 # Why this exists: the gates grew one at a time - pytest, the cocotb
 # suite, yosys, the formal proofs, the library's contract tests, the
@@ -121,31 +122,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# KEEP IN STEP with the `stage` calls below. This block is written by
-# hand, which makes it a second source of truth for a list that already
-# drifted once: clause5 and mpfr were added to the run without being
-# added here, and the sim line claimed 15 cocotb targets after the
-# aggregate grew to 17. If you add a stage, add a line here in the same
-# order, or --list quietly lies about what `make verify` does.
+# The stage names and their descriptions are read from the `stage`
+# calls below: this file is the only copy of the list. It used to be
+# kept by hand in three places - a --list heredoc, a validation list
+# and the calls - and the copies drifted twice: clause5 and mpfr
+# reached the run without reaching --list, and the sim line claimed 15
+# cocotb targets after the aggregate grew to 17. A list that can lie
+# about what `make verify` does is worse than no list, and the last
+# comment here said deriving it was worth more than another comment
+# the next time the list grew. It grew: the language stages.
+SELF="${BASH_SOURCE[0]}"
+STAGELIST=$(grep -E '^stage [a-z0-9-]+ "' "$SELF" | awk '{print $2}' | tr '\n' ' ')
+STAGELIST="${STAGELIST% }"
 if [ "$LIST" = 1 ]; then
-  cat <<'EOF'
-golden       golden-model pytest suite (the definition of correct)
-vectors      regenerate the conformance sets from the model
-sim          cocotb RTL suite, all 18 targets, SIM_JOBS at a time (docker cft-sim)
-lint         yosys elaboration gate, every RTL file (docker cft-sim)
-formal       property proofs + negative control (docker cft-formal)
-libcft       host library: build + contract tests + conformance replay
-selfcheck    device-test harness, software-vs-software full matrix
-divsqrt      cft_div/cft_sqrt + seeds vs the model, per-element flags
-clause5      the clause-5 completion set vs the model, all entry points
-diff         library vs model over the alignment boundary
-seq          the sequencer: C vs model over fuzzed programs
-reduce       reduction ranges: C vs model
-bindings     the cftmpfr drop-in vs gmpy2's IEEE emulation
-mpfr         MPFR parity - the only external oracle reaching fp128/fp256
-soak-quick   native-oracle soak, QUICK depth + sabotage control
-images       hw/verify-image.sh over $IMAGES (XRT hosts, if staged)
-EOF
+  grep -E '^stage [a-z0-9-]+ "' "$SELF" \
+    | sed -E 's/^stage ([a-z0-9-]+) +"([^"]*)".*/\1\t\2/' \
+    | awk -F'\t' '{printf "%-13s%s\n", $1, $2}'
   exit 0
 fi
 
@@ -153,13 +145,6 @@ fi
 # A typo'd --only used to select NOTHING, print "PASS, nothing
 # skipped", and crash the census mid-print with an unbound variable -
 # exit 0. A compliance runner must refuse names it does not know.
-# THIRD copy of the stage names, after the --list heredoc above and the
-# `stage` calls below. All three are hand-maintained and all three must
-# be edited together; clause5 and mpfr had already reached two of the
-# three, and `bindings` needed all three. If this list grows again,
-# deriving it is worth more than another comment.
-STAGELIST="golden vectors sim lint formal libcft selfcheck divsqrt \
-clause5 diff seq reduce bindings mpfr soak-quick images"
 check_names() {  # <flagname> <comma-list>
   local n
   for n in $(echo "$2" | tr ',' ' '); do
@@ -320,8 +305,26 @@ need() {  # docker|host-cc|xclbinutil ...
             [ -f /usr/include/mpfr.h ] || \
             [ -f /usr/include/x86_64-linux-gnu/mpfr.h ] \
         || STAGE_SKIP_REASON="libmpfr headers not found (verify/build-mpfr-oracle.sh builds them from pinned sources, no root needed)";;
+      # The language toolchains. On Windows the C++ and Fortran
+      # compilers are the mingw64 ones HOSTMAKE puts on PATH, so they
+      # are looked for there and not only on the caller's PATH.
+      cxx) if [ "$WIN" = 1 ]; then
+             [ -x /c/msys64/mingw64/bin/g++.exe ] \
+               || STAGE_SKIP_REASON="mingw64 g++ not found";
+           else command -v g++ >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 \
+               || STAGE_SKIP_REASON="no C++ compiler"; fi;;
+      gfortran) if [ "$WIN" = 1 ]; then
+             [ -x /c/msys64/mingw64/bin/gfortran.exe ] \
+               || command -v gfortran >/dev/null 2>&1 \
+               || STAGE_SKIP_REASON="no gfortran (mingw64 or PATH)";
+           else command -v gfortran >/dev/null 2>&1 \
+               || STAGE_SKIP_REASON="no gfortran on PATH"; fi;;
       images-env) [ -n "${IMAGES:-}" ] \
         || STAGE_SKIP_REASON="no IMAGES=... exported (nothing staged to verify)";;
+      # Any other name is a command that must be on PATH: rustc,
+      # julia, go, dotnet, Rscript, node.
+      *) command -v "$t" >/dev/null 2>&1 \
+        || STAGE_SKIP_REASON="no $t on PATH";;
     esac
     [ -n "$STAGE_SKIP_REASON" ] && return 0
   done
@@ -334,11 +337,11 @@ need() {  # docker|host-cc|xclbinutil ...
 
 
 need python
-stage golden "golden-model pytest" -- \
+stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q
 
 need python
-stage vectors "regenerate conformance sets (all five attributes)" -- \
+stage vectors "regenerate the conformance sets from the model, all five attributes" -- \
   PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" \
      --rounding rne rtz rdn rup rmm
 
@@ -352,10 +355,10 @@ do_lint() { ensure_sim_image && \
             DOCKER run --rm -v "$MOUNT:/work" -w /work cft-sim make yosys-lint; }
 
 need docker
-stage sim "cocotb RTL suite in cft-sim" -- do_sim
+stage sim "cocotb RTL suite, all 18 targets, SIM_JOBS at a time (docker cft-sim)" -- do_sim
 
 need docker
-stage lint "yosys elaboration gate" -- do_lint
+stage lint "yosys elaboration gate, every RTL file (docker cft-sim)" -- do_lint
 
 do_formal() {
   docker image inspect cft-formal >/dev/null 2>&1 || \
@@ -363,7 +366,7 @@ do_formal() {
   DOCKER run --rm -v "$MOUNT:/work" -w /work cft-formal ./formal/run.sh
 }
 need docker
-stage formal "formal proofs + negative control" -- do_formal
+stage formal "property proofs + negative control (docker cft-formal)" -- do_formal
 
 # One interpreter for every python-touching stage, chosen by PY()'s
 # rule - the libcft stage used to hand make `command -v python3`,
@@ -386,35 +389,35 @@ do_libcft() {
   HOSTMAKE test PYTHON="$PYBIN"
 }
 need host-cc python
-stage libcft "host library contract tests + conformance replay" -- do_libcft
+stage libcft "host library: build + contract tests + conformance replay" -- do_libcft
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1
   (cd "$ROOT/host" && "./device-test$EXE" sw -n 96)
 }
 need host-cc
-stage selfcheck "device-test software self-matrix (seeds + div/sqrt included)" \
+stage selfcheck "device-test harness, software-vs-software full matrix (seeds + div/sqrt included)" \
   -- do_selfcheck
 
 need host-cc python
-stage divsqrt "cft_div/cft_sqrt/seeds vs model" -- \
+stage divsqrt "cft_div/cft_sqrt + seeds vs the model, per-element flags" -- \
   PY "$ROOT/host/tests/divsqrt_check.py"
 
 need host-cc python
-stage clause5 "clause-5 completion set vs model" -- \
+stage clause5 "the clause-5 completion set vs the model, all entry points" -- \
   PY "$ROOT/host/tests/clause5_check.py"
 
 need host-cc python
-stage diff "library vs model, alignment boundary" -- \
+stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000
 
 need host-cc python
-stage seq "sequencer C-vs-model over fuzzed programs" -- \
+stage seq "the sequencer: C vs model over fuzzed programs" -- \
   PY "$ROOT/host/tests/seq_check.py" --trials 250 \
      --formats fp32 fp64 fp128 fp256
 
 need host-cc python
-stage reduce "reduction ranges C-vs-model" -- \
+stage reduce "reduction ranges: C vs model" -- \
   PY "$ROOT/host/tests/reduce_check.py" --trials 1500
 
 # The MPFR-compatible Python binding, which is a different claim from
@@ -434,8 +437,65 @@ do_bindings() {
     "$ROOT/bindings/python/test_cftmpfr.py"
 }
 need host-cc python
-stage bindings "cftmpfr drop-in: encodings, flags and refusals vs gmpy2" \
+stage bindings "the cftmpfr drop-in vs gmpy2's IEEE emulation: encodings, flags, refusals" \
   -- do_bindings
+
+# ---- the other languages -------------------------------------------
+# One stage per language, so the report names each one and a push that
+# breaks a binding fails by name: the C++ layer's own test, then every
+# example in the checksum diff against the C example (host/examples,
+# docs/COMPATIBILITY.md), then the two JavaScript surfaces. A toolchain
+# that is absent SKIPs by name; one that is present and prints
+# different bits FAILs, which is the point of the diff.
+#
+# The vectors: cpptest, the Node binding and the wasm page all replay
+# vectors/out, which the `vectors` stage regenerates earlier in a full
+# run and an --only run may not have. Absent sets are generated, not
+# skipped past - a replay of nothing is not a replay.
+ensure_vectors() {
+  [ -n "$(ls "$ROOT/vectors/out" 2>/dev/null)" ] && return 0
+  PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" \
+     --rounding rne rtz rdn rup rmm
+}
+
+do_cpp() { ensure_vectors && HOSTMAKE cpptest; }
+need host-cc cxx
+stage cpp "cft.hpp vs cft.h at C++17 and C++20: every entry point, same bits and flags" -- do_cpp
+
+need host-cc cxx
+stage lang-cpp "C++ example vs the C example: same bits" -- HOSTMAKE lang-cpp
+
+need host-cc rustc
+stage lang-rust "Rust example vs the C example: same bits" -- HOSTMAKE lang-rust
+
+need host-cc julia
+stage lang-julia "Julia example vs the C example: same bits" -- HOSTMAKE lang-julia
+
+need host-cc go
+stage lang-go "Go example vs the C example: same bits" -- HOSTMAKE lang-go
+
+need host-cc dotnet
+stage lang-csharp "C# example vs the C example: same bits" -- HOSTMAKE lang-csharp
+
+need host-cc Rscript
+stage lang-r "R example vs the C example: same bits" -- HOSTMAKE lang-r
+
+need host-cc gfortran
+stage lang-fortran "Fortran example builds and runs through iso_c_binding (prints no checksum line)" -- HOSTMAKE fortran
+
+do_node() {
+  ensure_vectors || return 1
+  (cd "$ROOT/bindings/node" && node test.mjs && node conformance.mjs "$ROOT/vectors/out")
+}
+need node
+stage node "Node binding: unit tests, then the vectors through cft_node.wasm" -- do_node
+
+do_wasm() {
+  ensure_vectors || return 1
+  node "$ROOT/bindings/wasm/verify.mjs" "$ROOT/vectors/out"
+}
+need node
+stage wasm "the committed conformance page, verified without a browser" -- do_wasm
 
 do_mpfr() {
   # A repo-local prefix (verify/build-mpfr-oracle.sh) outranks system
@@ -459,10 +519,10 @@ do_soakquick() {
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
 need host-cc mpfr
-stage mpfr "MPFR parity: all rungs, all modes, flags (third oracle)" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256" -- do_mpfr
 
 need host-cc
-stage soak-quick "native-oracle soak (QUICK) + sabotage control" -- do_soakquick
+stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick
 
 do_images() {
   local rc=0 img
@@ -473,7 +533,7 @@ do_images() {
   return $rc
 }
 need xclbinutil images-env
-stage images "verify staged artifacts against their manifests" -- do_images
+stage images "hw/verify-image.sh over IMAGES against their manifests (XRT hosts, if staged)" -- do_images
 
 # ---- report --------------------------------------------------------
 {

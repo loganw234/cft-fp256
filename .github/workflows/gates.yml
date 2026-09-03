@@ -4,7 +4,10 @@
 # The gates. Job one proves the golden model against arbiters that
 # share no code with it (native binary64, math.fma, mpmath, and the
 # hand-written IEEE 754 anchors). Job two proves the RTL against the
-# golden model, streamed, plus the full kernel through AXI.
+# golden model, streamed, plus the full kernel through AXI. Job four
+# builds the host library and runs every language that calls it,
+# through verify/run.sh, each binding and example a named stage that
+# is required to run rather than allowed to skip.
 #
 # What a green tick does NOT cover: synthesis, timing, package_xo,
 # v++ linking, and behaviour on a physical card. Those gates live in
@@ -46,3 +49,25 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends yosys
       - run: make yosys-lint
+
+  # The host library and every language that calls it, through the same
+  # runner a person uses, so a push that breaks a binding or a language
+  # example fails here by name. --require-all: a stage that skipped
+  # because the image lost a toolchain FAILS rather than passing by
+  # omission. Julia and R are not on the image and stay on the dated
+  # rows in docs/COMPATIBILITY.md; Rust, Go and .NET are on it, gfortran
+  # is one apt line, and the language stages regenerate the vectors they
+  # replay when the vectors stage did not run first.
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gfortran
+      - run: pip install pytest mpmath gmpy2 numpy
+      - run: bash verify/run.sh --require-all --only vectors,libcft,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm
