@@ -375,3 +375,104 @@ WASM_EXPORT int cftw_rem(cft_device *dev, int fmt, const void *a,
 {
     return (int)cft_rem(dev, (cft_format)fmt, a, b, d, (size_t)n, flags_out);
 }
+
+/* ---- the phase-1 transcendentals (ABI 0.3) ----------------------- *
+ *
+ * Added 2026-09-03, the rebuild after the one that made mpfloat.c and
+ * transcend.c part of this build. That rebuild left the module
+ * answering cftw_abi_version() with 3 while exporting none of the nine
+ * operations 0.3 IS - the same shape of untruth the clause-5 block
+ * above exists to have ended, one minor version later, and the reason
+ * docs/COMPATIBILITY.md called it a half-step rather than a release.
+ * These close it: one wrapper per declaration in cft.h, same order,
+ * same arguments.
+ *
+ * The signature difference from cft_run and from cft_div/cft_sqrt is
+ * the contract's, not an omission here. These are HOST operations:
+ * they issue no device pass, so there is no bus word and cft.h gives
+ * them no bus_out parameter. A wrapper that added one to look like its
+ * neighbours would be describing a device round trip that does not
+ * happen. The device argument stays because cft.h takes one - it is
+ * context, not a destination.
+ *
+ * Everything else is the usual adaptation and nothing more: cft_format
+ * and cft_round as ints, size_t as uint32 (wasm32's), the flag word as
+ * a pointer into the heap. Correct rounding, the clause 9.2.1 special
+ * values and the exactness rules all live in the library, and nothing
+ * here decides or second-guesses any of them.
+ */
+
+WASM_EXPORT int cftw_exp(cft_device *dev, int fmt, int rnd,
+                         const void *a, void *d, uint32_t n,
+                         uint32_t *flags_out)
+{
+    return (int)cft_exp(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                        (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_expm1(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_expm1(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_exp2(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_exp2(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_log(cft_device *dev, int fmt, int rnd,
+                         const void *a, void *d, uint32_t n,
+                         uint32_t *flags_out)
+{
+    return (int)cft_log(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                        (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_log1p(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_log1p(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_log2(cft_device *dev, int fmt, int rnd,
+                          const void *a, void *d, uint32_t n,
+                          uint32_t *flags_out)
+{
+    return (int)cft_log2(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                         (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_log10(cft_device *dev, int fmt, int rnd,
+                           const void *a, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_log10(dev, (cft_format)fmt, (cft_round)rnd, a, d,
+                          (size_t)n, flags_out);
+}
+
+/* b is the exponent for pow and the second leg for hypot. cft.h says
+ * neither may be NULL; this wrapper passes what it is given rather
+ * than substituting a default for a caller who forgot one. */
+WASM_EXPORT int cftw_pow(cft_device *dev, int fmt, int rnd,
+                         const void *a, const void *b, void *d, uint32_t n,
+                         uint32_t *flags_out)
+{
+    return (int)cft_pow(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
+                        (size_t)n, flags_out);
+}
+
+WASM_EXPORT int cftw_hypot(cft_device *dev, int fmt, int rnd,
+                           const void *a, const void *b, void *d, uint32_t n,
+                           uint32_t *flags_out)
+{
+    return (int)cft_hypot(dev, (cft_format)fmt, (cft_round)rnd, a, b, d,
+                          (size_t)n, flags_out);
+}
