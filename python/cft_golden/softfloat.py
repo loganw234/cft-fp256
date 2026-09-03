@@ -16,6 +16,10 @@ Semantics implemented - the determinism contract of docs/DETERMINISM.md:
   (4.3.1, 4.3.2), selected per operation and defaulting to
   roundTiesToEven. Every mode is a separate deterministic contract:
   the same inputs and the same mode always give the same bits.
+  round_pack also implements a SIXTH rounding direction,
+  roundTiesTowardZero, which 754-2019 9.5 defines for the augmented
+  operations (augmented.py) and for nothing else. It is not an
+  attribute, no operation here accepts it, and _check_mode rejects it.
 * subnormals: full support, never flushed, in or out
 * NaN: any NaN in -> the one canonical qNaN out (sign 0, quiet bit set,
   payload 0); a signaling NaN in raises invalid
@@ -65,6 +69,26 @@ RND_RMM = 4  # roundTiesToAway
 RND_NAMES = {RND_RNE: "rne", RND_RTZ: "rtz", RND_RDN: "rdn",
              RND_RUP: "rup", RND_RMM: "rmm"}
 RND_MODES = tuple(RND_NAMES)
+
+# The SIXTH rounding: roundTiesTowardZero, IEEE 754-2019 9.5.
+#
+# "This standard specifies a single rounding direction to be used in
+# the operations in this subclause, defined as roundTiesTowardZero:
+# the floating-point number nearest to the infinitely precise result
+# shall be delivered; if the two nearest floating-point numbers
+# bracketing an unrepresentable infinitely precise result are equally
+# near, the one with smaller magnitude shall be delivered." (9.5)
+#
+# It is NOT a rounding-direction attribute. 4.3 lists five and this is
+# not among them; 9.5 fixes it for the augmented operations alone and
+# gives them no attribute argument to carry it. So it lives here as an
+# INTERNAL rounding direction that round_pack understands and that
+# _check_mode - the gate every public operation passes through -
+# rejects. Its value is deliberately outside the 3-bit MODE[14:12]
+# field the five attributes encode into, so it can never be mistaken
+# for one of them on a wire, in a CSR, or in a vector set.
+RND_RTTZ = 16
+RND_RTTZ_NAME = "ties-toward-zero (754-2019 9.5, internal)"
 
 
 class Unpacked:
@@ -145,8 +169,20 @@ def is_nan(fmt, bits):
 # ---- rounding --------------------------------------------------------
 
 def _check_mode(rnd: int):
+    """The gate on the five rounding-direction ATTRIBUTES (4.3). Every
+    public operation calls this, so no caller can reach round_pack's
+    internal sixth direction through an operation that takes an
+    attribute."""
     if rnd not in RND_NAMES:
         raise ValueError(f"bad rounding mode {rnd}; contract defines 0-4")
+
+
+def _check_round_dir(rnd: int):
+    """The gate on the rounding DIRECTIONS round_pack implements: the
+    five attributes plus 9.5's roundTiesTowardZero, which is not one."""
+    if rnd not in RND_NAMES and rnd != RND_RTTZ:
+        raise ValueError(f"bad rounding direction {rnd}; the contract "
+                         f"defines 0-4 and the internal {RND_RTTZ}")
 
 
 def _round_up(rnd: int, sign: int, guard: int, sticky: int, lsb: int) -> bool:
@@ -159,6 +195,12 @@ def _round_up(rnd: int, sign: int, guard: int, sticky: int, lsb: int) -> bool:
         return bool(guard)
     if rnd == RND_RTZ:
         return False
+    if rnd == RND_RTTZ:
+        # 9.5's roundTiesTowardZero: nearest, and an exact tie keeps
+        # "the one with smaller magnitude" - so increment only STRICTLY
+        # above the midpoint. The lsb never enters, which is the whole
+        # difference from roundTiesToEven.
+        return bool(guard and sticky)
     if rnd == RND_RDN:
         return bool(sign and (guard or sticky))
     return bool((not sign) and (guard or sticky))  # RND_RUP
@@ -166,8 +208,15 @@ def _round_up(rnd: int, sign: int, guard: int, sticky: int, lsb: int) -> bool:
 
 def _overflow_gives_inf(rnd: int, sign: int) -> bool:
     """IEEE 754-2019 7.4: which overflows deliver an infinity, and
-    which deliver the largest finite magnitude instead."""
-    if rnd in (RND_RNE, RND_RMM):
+    which deliver the largest finite magnitude instead.
+
+    roundTiesTowardZero joins the two round-to-nearest attributes here,
+    and 9.5 says so in as many words: "roundTiesTowardZero carries all
+    overflows (see 7.4) to infinity with the sign of the intermediate
+    result". Ties toward zero is a rule about midpoints, not a
+    truncation - the value one ulp above the last representable
+    midpoint is nearest to 2^(emax+1), which the format does not have."""
+    if rnd in (RND_RNE, RND_RMM, RND_RTTZ):
         return True
     if rnd == RND_RTZ:
         return False
@@ -217,9 +266,14 @@ def _round_at(m: int, e: int, q: int, sign: int = 0, rnd: int = RND_RNE):
 
 def round_pack(fmt: FpFormat, sign: int, m: int, e: int, rnd: int = RND_RNE):
     """Round the exact non-zero value (-1)^sign * m * 2^e into the
-    format under `rnd`. Returns (bits, flags)."""
+    format under `rnd`. Returns (bits, flags).
+
+    `rnd` is a rounding DIRECTION, which is the five attributes plus
+    9.5's internal roundTiesTowardZero; the operations above gate the
+    attribute themselves with _check_mode, so nothing a caller can
+    reach admits the sixth."""
     assert m > 0
-    _check_mode(rnd)
+    _check_round_dir(rnd)
     p = fmt.prec
     e_norm = e + m.bit_length() - 1  # unbiased exponent of the value
 

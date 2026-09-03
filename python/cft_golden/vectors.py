@@ -610,6 +610,157 @@ def hyperbolic_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
     return sorted({b & ((1 << fmt.width) - 1) for b in out})
 
 
+# ---- the augmented arithmetic set (754-2019 9.5) ---------------------
+
+def augmented_pairs(fmt: FpFormat, extra: int, seed: int = 16):
+    """Operand pairs where an augmented operation can be got wrong.
+
+    A fourth pool again, because what catches an FMA does not catch
+    these. The three operations differ from ordinary add/sub/mul in
+    exactly four places, and every family below aims at one of them:
+
+    * THE TIE RULE. roundTiesTowardZero and roundTiesToEven part company
+      only at an exact midpoint whose lower neighbour has an ODD last
+      bit, so the pool builds midpoints at binade edges from odd
+      significands on purpose - a random pair reaches one with
+      probability about 2^-p. Every binade the format has is swept at
+      fp32 and sampled at the wider rungs, because the tie rule and the
+      subnormal grid interact only near emin and the overflow threshold
+      only near emax.
+    * THE ERROR TERM'S SIGN AT ZERO. Exact cancellation with every sign
+      combination, so that "e takes the sign of r" is scored rather than
+      assumed.
+    * THE UNDERFLOW RULE. Sums whose residual lands subnormal (underflow
+      with NO inexact - the combination that appears nowhere else in
+      this contract) and products whose residual falls off the bottom of
+      the grid entirely (underflow AND inexact, with the residual itself
+      rounded).
+    * THE OVERFLOW THRESHOLD. 9.5 rounds a magnitude EQUAL to
+      2^emax x (2 - 2^-p) down to the largest finite and anything above
+      it to an infinity, so both sides of that midpoint are here with
+      the neighbours either side.
+    """
+    p = fmt.prec
+    rng = random.Random(seed ^ (fmt.width * 601))
+    pool = interesting_operands(fmt)
+    pairs = [(a, b) for a in pool for b in pool]
+
+    # Binade sweep. Exhaustive at fp32; the wider rungs take a stride
+    # plus the edges, since a vector set is replayed on every run.
+    step = 1 if fmt.width <= 32 else max(1, (fmt.emax - fmt.emin) // 24)
+    exps = sorted({k for k in range(fmt.emin, fmt.emax + 1, step)} |
+                  {fmt.emin, fmt.emin + 1, fmt.emin + p, -1, 0, 1, p, 2 * p,
+                   fmt.emax - 1, fmt.emax} |
+                  {fmt.emin - fmt.man_w, fmt.emin - fmt.man_w + 1,
+                   fmt.emin - 1, fmt.emin - p // 2})
+    mants = ((1 << (p - 1)), (1 << (p - 1)) | 1, (1 << p) - 1, (1 << p) - 2)
+    for k in exps:
+        for m in mants:
+            x = _val(fmt, 0, m, k - (p - 1))
+            if x is None:
+                continue
+            for sy in (0, 1):
+                # half an ulp is the exact tie; a quarter and three
+                # quarters straddle it; one ulp is the ordinary case
+                for ym, ye in ((1, k - p), (1, k - p - 1), (3, k - p - 2),
+                               (1, k - p + 1)):
+                    y = _val(fmt, sy, ym, ye)
+                    if y is not None:
+                        pairs.append((x, y))
+                        pairs.append((x | fmt.sign_mask, y))
+
+    # Exact cancellation, every sign combination - the sign of e is the
+    # sign of r there, and r's own is 6.3's.
+    for m, e in ((1, 0), (3, -1), ((1 << p) - 1, -(p - 1)), (1, fmt.emax),
+                 (1, fmt.emin), (1, fmt.emin - fmt.man_w)):
+        x = _val(fmt, 0, m, e)
+        if x is None:
+            continue
+        for sx in (0, 1):
+            for sy in (0, 1):
+                a = x | (fmt.sign_mask if sx else 0)
+                b = x | (fmt.sign_mask if sy else 0)
+                pairs += [(a, b), (a, b ^ fmt.sign_mask)]
+
+    # Sums whose residual is subnormal: a normal x against a y so far
+    # below it that the residual is y itself, walked across the
+    # subnormal range. Underflow with no inexact.
+    for k in (0, 1, p, 2 * p, fmt.emin + p, fmt.emax // 2, fmt.emax):
+        x = _val(fmt, 0, 1, k)
+        if x is None:
+            continue
+        for ye in (fmt.emin - fmt.man_w, fmt.emin - fmt.man_w + 1,
+                   fmt.emin - 1, fmt.emin, fmt.emin + 1):
+            for ym in (1, 3, (1 << p) - 1):
+                y = _val(fmt, 0, ym, ye)
+                if y is None:
+                    continue
+                pairs += [(x, y), (x, y | fmt.sign_mask),
+                          (x | fmt.sign_mask, y)]
+
+    # Products whose residual underflows: both operands near the bottom,
+    # so the exact 2p-bit product has digits below the subnormal grid.
+    for xe in (fmt.emin, fmt.emin + 1, fmt.emin + p // 2, fmt.emin - 1,
+               fmt.emin - fmt.man_w // 2, fmt.emin - fmt.man_w):
+        for xm in (1, 3, (1 << p) - 1, (1 << (p - 1)) | 1):
+            x = _val(fmt, 0, xm, xe - (xm.bit_length() - 1))
+            if x is None:
+                continue
+            for ye in (0, -1, -p // 2, -p, 1):
+                for ym in (1, 3, (1 << p) - 1):
+                    y = _val(fmt, 0, ym, ye - (ym.bit_length() - 1))
+                    if y is not None:
+                        pairs += [(x, y), (x | fmt.sign_mask, y)]
+
+    # The overflow threshold: maxfinite plus half an ulp is EXACTLY the
+    # midpoint 9.5 sends to maxfinite, and everything above it goes to
+    # infinity. Both sides, both signs, plus the products that land
+    # there.
+    mx = sf.max_normal_bits(fmt)
+    for ym, ye in ((1, fmt.emax - p), (1, fmt.emax - p + 1),
+                   ((1 << p) - 1, fmt.emax - p - (p - 1)),
+                   (1, fmt.emax - p - 1), (1, fmt.emax)):
+        y = _val(fmt, 0, ym, ye)
+        if y is None:
+            continue
+        pairs += [(mx, y), (mx, y | fmt.sign_mask),
+                  (mx | fmt.sign_mask, y | fmt.sign_mask),
+                  (mx ^ 1, y), (mx, mx), (mx, mx | fmt.sign_mask)]
+    for m, e in ((1, 1), (3, -1), ((1 << p) - 1, -(p - 1)), (1, 0)):
+        y = _val(fmt, 0, m, e)
+        if y is not None:
+            pairs += [(mx, y), (mx | fmt.sign_mask, y)]
+
+    pairs += [(_rand_bits(rng, fmt), _rand_bits(rng, fmt))
+              for _ in range(extra)]
+    # A near-cancellation family: y within a few ulps of -x, where the
+    # sum is tiny and the residual is exactly zero more often than
+    # chance would have it.
+    for _ in range(extra):
+        x = _rand_finite(rng, fmt, 1, fmt.exp_mask - 2)
+        pairs.append((x, (x ^ fmt.sign_mask) + rng.randint(-3, 3)))
+    out, seen = [], set()
+    for a, b in pairs:
+        if a is None or b is None:
+            continue
+        key = (a & ((1 << fmt.width) - 1), b & ((1 << fmt.width) - 1))
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def augmented_cases(fmt: FpFormat, extra: int, seed: int = 16):
+    """(fn, a, b) triples for the three augmented operations, in the
+    order gen_vectors.py writes them. One pool serves all three: the
+    families that stress an augmented sum stress an augmented product
+    at the other end of the same exponent range, and a pair that is
+    dull for one is cheap to replay."""
+    from .augmented import AUG_FNS
+    pairs = augmented_pairs(fmt, extra, seed)
+    return [(fn, a, b) for fn in AUG_FNS for a, b in pairs]
+
+
 def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
     """(fn, a, b) triples for all twenty-nine transcendentals, in the
     order gen_vectors.py writes them. b is 0 for the unary twenty-five,
