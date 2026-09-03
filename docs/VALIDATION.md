@@ -1131,3 +1131,30 @@ xclbin UUID and the v++ install path in the build metadata (the box's is
 determinism measured across two hosts rather than assumed: either image
 is the card-day quad, and ~/cardday-tip/REPRODUCED.txt on the box holds
 both hashes and the section hash.
+
+## 2026-09-02 - the language stages: first runs on three hosts and CI
+
+verify/run.sh gained one stage per language (cpp, lang-cpp, lang-rust,
+lang-julia, lang-go, lang-csharp, lang-r, lang-fortran, node, wasm),
+its stage list is read from its own `stage` calls, and gates.yml
+gained a `host` job that runs the language stages under
+--require-all. docs/COMPATIBILITY.md has the per-stage grid; the
+runs:
+
+    desktop WSL   20260902-202118-8c626a5   9 executed, 0 failed, 4 skipped by name            PASS
+    box           20260902-202115-8c626a5   5 executed, 1 FAILED (bindings: no pytest, 0 s), 8 skipped
+    box           20260902-202359-efff78e   5 executed, 0 failed, 8 skipped by name            PASS
+    Windows       20260902-202124-8c626a5   9 stages ok through node (279 s), then run.sh was edited
+                                            under the run and it broke at the next stage line
+    Windows       20260902-202756-efff78e   9 executed, 0 failed, 4 skipped by name (node 272 s, wasm 3 s)   PASS
+    CI host job   8c626a5 green in 3m19s; efff78e green in 3m30s (node 126 s, wasm 3 s, every selected stage ok)
+
+Numbers worth keeping. The cpp stage replays 392,000 cases through
+the wrapper at both standards - the vectors stage regenerates all
+five attributes first, and the 236,000 quoted for cpptest earlier
+was the older vectors/out. The Node replay of the same 392,000 cases
+takes 4 s; the binding's 43 unit tests take 272 s on the
+Windows host and 126 s on ubuntu, a gap measured here and not
+yet explained. The box's bindings stage passed 80 tests against gmpy2
+2.3.1, a release newer than the 2.1.2 and 2.2.1 the binding was
+written against.

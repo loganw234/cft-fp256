@@ -13,6 +13,7 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --fresh        # force a new run id
     bash verify/run.sh --require-all  # skips become failures
     SIM_JOBS=12 bash verify/run.sh    # the sim stage's targets, twelve at a time
+    bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
 
 ## The stages
 
@@ -31,9 +32,23 @@ the repo root, or `bash verify/run.sh` with the flags below.
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |
 | bindings | the cftmpfr drop-in vs gmpy2's IEEE emulation | cc, python |
+| cpp | `cft.hpp` vs `cft.h` at C++17 and C++20: every entry point, same bits and flags, plus the conformance replay through the wrapper | cc, g++ |
+| lang-cpp, lang-rust, lang-julia, lang-go, lang-csharp, lang-r | that language's example vs the C example, same bits (`make -C host examples-lang`, one leg at a time) | cc + that toolchain |
+| lang-fortran | the Fortran example builds and runs through iso_c_binding; it prints no checksum line | cc, gfortran |
+| node | the Node binding: its unit tests, then the vectors through `cft_node.wasm` | node |
+| wasm | the committed conformance page, verified without a browser | node |
 | mpfr | GNU MPFR parity, every rung and mode (third oracle) | cc, python |
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
+
+The `cpp`, `lang-*`, `node` and `wasm` stages are the regression
+harness for the languages: one named stage per binding or example,
+SKIPped by name where the toolchain is absent and FAILed where the
+bits differ, so a change to the library or to a binding says which
+language it broke. `.github/workflows/gates.yml`'s `host` job runs
+them on every push (ubuntu, `--require-all`, everything but Julia
+and R); a full census runs them wherever the toolchains are, and
+docs/COMPATIBILITY.md keeps the dated per-language rows.
 
 Wall time for the standard set is dominated by `sim` when it runs
 serially: ~40 min in the container, ~25 min under Verilator on a

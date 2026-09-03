@@ -51,6 +51,7 @@ host/vector-fma-f
 host/vector-fma-rs
 host/*.pdb
 host/.out-*.txt
+host/.out-*.err
 
 # downloaded reference material, kept locally and never redistributed.
 # This repo is Apache-2.0 and public; third-party pages carry their own
