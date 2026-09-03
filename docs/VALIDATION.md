@@ -1378,3 +1378,100 @@ in 60 s, the conformance replay now 456,325 cases, mpfr 13 s over the
 nine as well. The one review fix before the merge was a README bullet
 that called the wasm page ABI 0.3 'surface included'; it reports 0.3
 and carries no wrapper for the nine, and the bullet now says so.
+
+---
+
+## 2026-09-03 - the JavaScript surfaces reach the nine, and the half-step closes
+
+This morning's rebuild left the wasm module reporting ABI 0.3 with no
+`cftw_*` wrapper for any of the nine transcendentals: the arithmetic
+was in (the build derives its source list from `host/Makefile`, so
+`mpfloat.c` and `transcend.c` came along on their own) and no
+JavaScript caller could reach it. docs/COMPATIBILITY.md called that
+the half-step and said so in those words. This entry is what closed
+it, and what was measured closing it. **No host source moved** -
+`host/src`, `cft.h`, the vectors generator and the golden model are
+untouched, which is why no arithmetic gate is re-run below.
+
+What the surfaces gained:
+
+| surface | before | after |
+|---|---|---|
+| `bindings/wasm/wasm_api.c` | 38 `cftw_*` wrappers | **47** - the nine added, one per declaration in cft.h, none with a `bus_out` the contract does not give them |
+| the page's compute panel | opcodes + composed div/sqrt | + the nine, nine rows in the panel's own table |
+| the page's drop zone | 20 opcode set names | + the 20 `<fmt>-transcend[-<rnd>].jsonl` names it had been refusing |
+| `bindings/wasm/verify.mjs` | 4 checks | **5** - the fifth drives the wrappers themselves |
+| `bindings/node` | clause-5 surface, 43 tests | + the nine on raw/Context-Float/`map`, **57 tests**, package 0.3.1 |
+
+Measured on DESKTOP-T33SK86 (Windows 11, node 22.19.0, Docker Desktop
+29.2.1, emsdk 6.0.9 pinned by tag and digest):
+
+| check | count | result |
+|---|---|---|
+| build reproducibility, three clean container builds | `conformance.html` sha256 `30292f731a4b553d…`, wasm `6ff4129e03d43682…` | byte-identical all three times - two back to back, the third after the negative control was reverted |
+| module size / exports | 88,875 bytes, 47 `cftw_*` | where the wrapperless 0.3 build was 88,541: the nine doors cost 334 bytes |
+| `node bindings/wasm/verify.mjs`, `make vectors` sets | 300,325 cases over 40 sets via `cft_conformance`, then 64,325 through the nine wrappers | zero mismatches either way, 2 min |
+| `node bindings/node/test.mjs` | 57 tests (43 + 14 new) | 0 failures |
+| `node bindings/node/conformance.mjs`, `make vectors` sets | 236,000 in 1.6 s + 64,325 through `Context`'s own methods in 60.9 s = 300,325 over 40 sets | zero mismatches |
+| `bash verify/run.sh --only vectors,node,wasm` at 9a5cfca, clean tree | vectors 10 s, node 317 s, wasm 128 s; 456,325 cases over 40 sets in each script's replay (the runner regenerates at the generator's defaults - 19,600 per opcode set, so 392,000 + 64,325) | **PASS, nothing skipped**. Run id 20260903-023112-9a5cfca, per-stage logs under `verify/state/` |
+
+The commits after 9a5cfca in this change are prose and comments only -
+a README wording fix, `verify.mjs`'s header count, one line of a Files
+block - and change no line any stage executes; `git diff 9a5cfca` says
+so.
+
+**The negative control, and why it is the important line here.**
+`cft_conformance` dispatches the nine internally, in C. It replayed
+the transcendental sets happily on a module with no JavaScript surface
+for them at all - that is precisely how the half-step passed every
+gate this morning. So the new check had to be shown failing on the
+thing the old one cannot see. `cftw_pow`'s two operand pointers were
+swapped in `wasm_api.c` and the module rebuilt:
+
+* `verify.mjs` step 5 fails all twenty transcendental sets at
+  `fp32-transcend.jsonl:1543` - `pow(+0, +inf)` returns 1 where the
+  vectors say +0 - and exits 1;
+* its step 4, the `cft_conformance` replay, stays **green** through
+  the same run: 300,325 cases, all matching;
+* `test.mjs` fails 6 of 57 by name, the plainest being
+  `pow(2,3): expected 8, got 9`;
+* `conformance.mjs` fails all twenty transcendental sets.
+
+Reverted, rebuilt, hashes reproduced.
+
+**The page was opened in a browser**, which the two previous rebuilds
+did not need to be: they could lean on `page_template.html` being
+byte-identical to the version Chrome ran on 2026-09-01, and this
+change edits the template. Chromium 148 on this host, the committed
+`conformance.html` served over a loopback `http.server` (this
+session's browser will not open a `file://` path). Section 1 read
+*libcft ABI 0.3*; section 2 replayed the embedded sample green -
+4,015 cases over 20 sets; section 3 accepted a drop of four
+transcendental sets and one opcode set, **32,465 cases all matching**,
+with a deliberately misnamed sixth file refused by name and the
+verdict correctly downgraded to "not a full pass"; section 4's new
+controls computed `exp(+0) = 1` with no flags, `exp(1) =
+0x4005bf0a8b145769` inexact, `log(+0) = -inf` with divideByZero,
+`pow(2,3) = 8` against `pow(3,2) = 9`, `hypot(3,4) = 5`, and
+`log2(2^10) = 10` exactly at binary256 under roundTowardPositive.
+`build/negative_control.html` was opened in the same browser and
+failed red at `fp64.jsonl:2` with the library's own disagreement, so
+the checker was watched failing here too.
+
+What did NOT run, and why: every arithmetic gate below the bindings -
+`golden`, `libcft`, `transcend`, `mpfr`, `diff`, the RTL suite, the
+formal proofs, the soak - because this change adds no arithmetic and
+touches no file any of them reads. The nine were already commissioned
+on 2026-09-02 against MPFR (95,680 cases, zero value and zero flag
+mismatches) and against the model (77,315 comparisons); nothing here
+re-decides a bit. Also not run: any JavaScript runtime other than node
+22.19.0 / V8 and Chromium 148, and any device backend - wasm32 has no
+PCIe, and these are host operations besides.
+
+A note for whoever reads the stage times next: `wasm` was 2 s before
+this change and is 128 s now, and `node` moved from 257 s to 317 s.
+Both differences are the transcendental passes - 64,325 correctly
+rounded evaluations, a quarter of them at binary256, one `_malloc` per
+scalar call across a wasm boundary. The cost buys the only check that
+can see a broken wrapper, which this morning's module proved was
+worth having.

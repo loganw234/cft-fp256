@@ -338,7 +338,9 @@ wasm_api.c           the exported C surface (cftw_* ≙ cft.h, 1:1)
 page_template.html   the page, with three @CFT_*@ splice tokens open
 make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
-verify.mjs           the browserless check of that build product
+verify.mjs           the browserless check of that build product:
+                     identity, module hash, the vector replay, and the
+                     nine driven through their own wrappers
 build/               untracked: vectors, module, node loader,
                      negative control
 ```

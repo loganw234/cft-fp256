@@ -12,7 +12,7 @@
 // on 2026-09-01 answered ABI 0.1 for a day, see the README). This
 // script is the re-runnable half.
 //
-// It checks four things, in the order that makes the last one mean
+// It checks five things, in the order that makes the last two mean
 // something:
 //
 //   1  THE PAGE'S OWN MODULE, extracted from the HTML. Emscripten's

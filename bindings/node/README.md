@@ -34,9 +34,10 @@ layers: the raw `cftw_*` exports, `Context`/`Float` scalars, and
 
 ```js
 const ctx = await Context.open(128);
-ctx.exp(1).toString();                        // e to 113 bits, exactly
-ctx.withRounding("rup").log(2);               // the other direction
-ctx.map("hypot", xs, ys);                     // one call for the array
+ctx.exp(1).toString();          // e correctly rounded to 113 bits, as
+                                // that binary value's exact decimal
+ctx.withRounding("rup").log(2); // the same question, rounded the other way
+ctx.map("hypot", xs, ys);       // one call for the whole array
 ```
 
 **Correctly rounded** is the whole point, and it is not the usual
