@@ -1065,6 +1065,33 @@ Closed later the same evening - the arm's slice is clipped to the
 beat at elaboration - so a rerun of this benchmark would build all
 eighteen and return rc=0.
 
+It did. The cold run, taken at 19:47 once the box's quad had finished,
+at 7619f70 (the same RTL plus the quarter closure), from an empty
+tb/sim_build each time:
+
+    cold   (-j12)    wall  185 s    18 targets, 51 tests, 51 passed, rc=0
+    warm   (-j12)    wall   56 s    18 targets, 51 tests, 51 passed, rc=0
+    cold   (-j18)    wall  166 s    18 targets, 51 tests, 51 passed, rc=0
+
+Three minutes for the whole suite from nothing against twenty-five for
+the serial pass: the compiles parallelise as well as the simulations
+did, and the eighteenth target - quarter, at BEAT_BITS=64 - builds
+under Verilator now and adds its test to the count. The eighteenth
+job buys 19 s over twelve, which says where the floor is: at one job
+per target the wall is one full-kernel compile plus its bench, so
+de-duplicating the eight identical kernel compiles now saves CPU time
+on this box rather than wall time, and stays the lever wherever the
+suite runs serially - the CI runner included. 44 GB free at the start
+of each cold pass, 42 before the warm one; nothing was guarded or
+killed.
+
+The runner's own path, checked the same evening on the box:
+`SIM_JOBS=12 bash verify/run.sh --only sim` at 617c35a, PASS in 327 s
+under the container's Icarus - the suite's default simulator, ~40 min
+serial - run id 20260902-195817-617c35a. That clone carried an
+untracked build directory, so the runner marked its report dirty as it
+should; the run certifies the knob, not the tree.
+
 The same day, `make -C host examples-lang` under MSYS2 make on the
 Windows host: rust and csharp same bits as the C example; julia, go
 and R skipped by name for want of toolchains. The C# leg had been

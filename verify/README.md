@@ -12,6 +12,7 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --resume       # continue the most recent run
     bash verify/run.sh --fresh        # force a new run id
     bash verify/run.sh --require-all  # skips become failures
+    SIM_JOBS=12 bash verify/run.sh    # the sim stage's targets, twelve at a time
 
 ## The stages
 
@@ -34,11 +35,15 @@ the repo root, or `bash verify/run.sh` with the flags below.
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
 
-Wall time for the standard set is dominated by `sim` (~40 min in the
-container, ~25 min under Verilator on a 36-core box - almost all of
-it compilation; the simulations themselves run in under a minute at
--j12 once the models exist, docs/VALIDATION.md 2026-09-02);
-everything else together is ~20-30 min.
+Wall time for the standard set is dominated by `sim` when it runs
+serially: ~40 min in the container, ~25 min under Verilator on a
+36-core box, almost all of it compilation. The targets are
+parallel-safe by construction - each writes its own sim_build/<name>
+and results file - so `SIM_JOBS=n` hands make `-j n` (and `-k`, so
+one failing target does not hide the others): the whole suite cold
+at -j12 on that box is 3 min, warm under a minute (docs/VALIDATION.md
+2026-09-02). Budget 1-2 GB a job under Verilator. Everything else
+together is ~20-30 min.
 
 Two things the runner learned on 2026-09-02, both now built in: the
 libcft stage cleans `host/` before building it, because a checkout
