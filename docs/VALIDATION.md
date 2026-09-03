@@ -1085,6 +1085,13 @@ suite runs serially - the CI runner included. 44 GB free at the start
 of each cold pass, 42 before the warm one; nothing was guarded or
 killed.
 
+The runner's own path, checked the same evening on the box:
+`SIM_JOBS=12 bash verify/run.sh --only sim` at 617c35a, PASS in 327 s
+under the container's Icarus - the suite's default simulator, ~40 min
+serial - run id 20260902-195817-617c35a. That clone carried an
+untracked build directory, so the runner marked its report dirty as it
+should; the run certifies the knob, not the tree.
+
 The same day, `make -C host examples-lang` under MSYS2 make on the
 Windows host: rust and csharp same bits as the C example; julia, go
 and R skipped by name for want of toolchains. The C# leg had been
