@@ -1887,7 +1887,7 @@ comparable with the earlier entries. The counts are.
 | the whole `python/tests` suite | 964 passed, 1 skipped (was 944/1), 258 s | pass |
 | `make vectors` | 44 sets, 568,531 cases - 4 new augmented sets, 89,616 cases | written |
 | `cft_conformance` replay at the runner's generation | 44 sets, 724,531 cases, 89,616 of them augmented | every case, BOTH outputs and flags, replayed twice |
-| `host/tests/augmented_check.py` - the C against the model per element, plus batches, aliasing and refusals | 140,088 comparisons at the default pool; 149,112 at `--trials 400` | C == model on every one |
+| `host/tests/augmented_check.py` - the C against the model per element, plus batches, aliasing and refusals | 140,088 comparisons at the default pool; 149,112 at `--trials 400`; 158,712 more at `--trials 800` over the four formats in two halves | C == model on every one |
 | the pair identity `r + e == x op y`, exact integers, on the LIBRARY's output | 80,209 pairs | exact - plus 8,316 residuals delivered rounded, 9.5's one non-representable case |
 | the FAR/NEAR alignment split, walked across its decision at every magnitude and both signs | 70,200 comparisons | C == model on every one |
 | MPFR parity, the three operations, four formats | 21,492 augmented cases (5,373 per format), part of 473,480 | **zero value mismatches, zero flag mismatches** |
@@ -1943,11 +1943,25 @@ not see this rounding; and the MPFR campaign, which reported the
 mismatches from `aug_add` at fp32. Restored, rebuilt, `api-test` green
 again.
 
+**The pre-existing vector sets are byte-identical.** The new pool is a
+new function; it must not have perturbed the RNG streams the opcode and
+transcendental families draw from. Checked rather than reasoned: the
+generator as it stood at ef2348e was run out of a scratch checkout and
+its `fp32.jsonl`, `fp32-rtz.jsonl`, `fp32-transcend-rtz.jsonl`,
+`fp64.jsonl`, `fp64-transcend.jsonl` compared byte for byte against the
+current generator's. Identical.
+
 **Runner.** `bash verify/run.sh --only vectors,libcft,augmented,mpfr,cpp,bindings`
 at 04fcb56, run id 20260903-094456-04fcb56: vectors 61 s, libcft 162 s,
 augmented 4 s, bindings 15 s, cpp 541 s, mpfr 91 s - **PASS, nothing
 skipped.** Repeated on the tree that ships, after the docs above were
-committed: run id and timings below.
+committed and with a clean tree: run id 20260903-100057-a019cd5 -
+vectors 54 s, libcft 160 s, augmented 5 s, bindings 14 s, cpp 555 s,
+mpfr 109 s - **PASS, nothing skipped.** Both runs replayed 44 sets and
+724,531 cases and reported 473,480 MPFR cases with zero value and zero
+flag mismatches. The wall times are roughly double the earlier entries'
+for the same stages, which is the four-agent load on the box and not
+the work.
 
 Not run, and why: the RTL stages (`sim`, `lint`, `formal`) and the
 `node`/`wasm` stages were outside this work's brief - no opcode was
