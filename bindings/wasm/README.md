@@ -383,9 +383,11 @@ operations it could not call: module **196,379 bytes**, sha256
 `e8611510973d1081…`, identical to the node loader's
 `bindings/node/cft_node.wasm` (and to `build/cft_node.wasm`);
 `cftw_abi_version()` = 6 = ABI 0.6, matching `cft.h`; **91 `cftw_*`
-exports**, against 67 at 0.5. Two clean container builds produced the
-same `conformance.html` (sha256 `ffb23acb113184ae…`) and the same
-module.
+exports**, against 67 at 0.5. Five clean container builds produced the
+same module, and the last two the same `conformance.html` (sha256
+`6fc065e25241bde6…`) - the page's own bytes changed once between them,
+when a stale case count in its verdict text was corrected, and the
+module did not, which is the split the build is supposed to have.
 
 * **881,657 cases over 84 sets** through `cft_conformance` - the
   twenty opcode sets (236,000), the twenty transcendental ones
@@ -445,10 +447,9 @@ module):
   through `Context`'s own methods while its own `cft_conformance` pass
   reports 110,776 cases matching, again green throughout.
 
-Reverted, rebuilt: module sha256 back to `e8611510973d1081…` and
-`conformance.html` to `ffb23acb113184ae…`, so the tree round-tripped
-and the reproducibility claim above stands on three clean builds
-rather than two.
+Reverted, rebuilt: module sha256 back to `e8611510973d1081…`, so the
+tree round-tripped and the reproducibility claim above stands on a
+build after a deliberate break rather than only on two in a row.
 
 Those three runs used a **truncated copy** of the sets - the 20
 reduction sets whole, since they carry the broken operation, and every
@@ -456,15 +457,47 @@ other family headed to 2,000 lines - because the point was to watch
 the checker fail rather than to re-prove 1.5 M cases with a
 deliberately wrong module. The clean numbers above are the full sets.
 
-**The page was not opened in a browser for this step.** The markup
-changed more than it did at 0.4 or 0.5 - three new input controls, a
-two-line result for each pair, a rounding select that greys itself out
-for the augmented three, and five new dispatch branches - so this is a
-larger unchecked surface than the previous two steps left, and it is
-worth naming as such rather than implying otherwise. What stands is
-that `verify.mjs` step 5 drives every wrapper the panel calls, through
-the same argument shapes, including the sizing protocol; what does not
-stand is that anyone has watched a click reach them.
+**And the page was opened in a browser**, which mattered more here
+than at 0.4 or 0.5: the markup changed further than either of those -
+three new input controls, a two-line result for each pair, a rounding
+select that greys itself out, and five new dispatch branches - and
+`verify.mjs` step 5 checks the wrappers, not the markup between a
+click and them. Chromium on Windows 11, the committed
+`conformance.html` served over a loopback `http.server`.
+
+* Section 1 read *libcft ABI 0.6*; section 2's embedded sample
+  replayed **4,015 cases over 20 sets, green**, with no console errors.
+* Section 3 took a drop of `fp32-augmented.jsonl`,
+  `fp32-reduce.jsonl`, `fp32-character.jsonl` and
+  `fp64-reduce-rtz.jsonl` - all three new families - and replayed
+  **55,798 cases, all matching**, with a deliberately misnamed fifth
+  file refused by name and the verdict correctly downgraded to *not a
+  full pass*. Before this step those four names were not in the drop
+  zone's list at all.
+* Section 4's panel offered **81 operations**, and each new control
+  appeared for exactly the operations that use it. Computed through
+  the button: `to_decimal(1.5)` at digits 0 gave `1.5e+0` and at
+  digits 5 gave `1.5000e+0`, each reporting the length its own sizing
+  call returned (7 and 10 bytes, NUL included); `to_hex(1.5)` gave
+  `0x1.8p+0` labelled *exact, no attribute*; `from_decimal("1.5")`
+  gave `0x3ff8000000000000`, while `"1..2"` and `from_hex("0x1.8")` -
+  the latter missing 5.12.3's required binary exponent - were both
+  **refused with the reason**, not guessed at. `rootn(8, 3)` = 2 and
+  `rootn(-0, 2)` = **+0**, the even-n row where `squareRoot(-0)` is
+  -0; `pown(2, 10)` = 1024; `rsqrt(-0)` = **-inf** with divideByZero,
+  the sign the standard keeps and MPFR does not.
+  `augmentedAddition(nextUp(1), 2^-53)` came back as the pair
+  `(nextUp(1), 2^-53)` with the rounding select **disabled and
+  labelled roundTiesTowardZero** - the tie roundTiesToEven takes the
+  other way. `scaled_prod_diff(1, 2)` gave `pr` = -1 against
+  `scaled_prod_diff(2, 1)` = +1, which is the operand order visible in
+  the UI and the thing this step's negative control breaks;
+  `sumsq([3])` = 9; `get_payload` of a quiet NaN with payload 5 gave
+  5.0 with **no flag line at all**, because 9.7 says it signals
+  nothing.
+
+Every one of those matches `python/cft_golden`, which is where they
+were taken from before they were typed here.
 
 ## Scope, honestly
 

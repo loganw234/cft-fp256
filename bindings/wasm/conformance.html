@@ -670,8 +670,9 @@ async function replayBuiltin() {
     const files = Object.keys(CFT_SAMPLE).map(
       (name) => ({ name, text: CFT_SAMPLE[name] }));
     await replaySets(files, sectionUI("builtin"),
-      "this is the embedded sample, not the full published set - " +
-      "section 3 replays all 236,000 cases");
+      "this is the embedded sample of the twenty OPCODE sets, not the " +
+      "full published set - section 3 replays all 881,657 cases over " +
+      "all 84");
   } finally {
     builtinRunning = false;
     $("rerun").disabled = false;
