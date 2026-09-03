@@ -987,6 +987,132 @@ CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
                              uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
+ * The rest of IEEE 754-2019 table 9.1 (part of the 0.6 step)
+ *
+ *   d[i] = 2^a[i] - 1        d[i] = log2(1 + a[i])    d[i] = 1/sqrt(a[i])
+ *   d[i] = 10^a[i]           d[i] = log10(1 + a[i])
+ *   d[i] = 10^a[i] - 1
+ *
+ *   d[i] = a[i]^n[i]         (pown)      d[i] = a[i]^b[i]   (powr)
+ *   d[i] = (1 + a[i])^n[i]   (compound)  d[i] = a[i]^(1/n[i]) (rootn)
+ *
+ * With these ten the library implements every operation table 9.1
+ * lists for the binary formats. CORRECTLY ROUNDED at every format
+ * under every attribute, with clause 9.2.1's special values and exact
+ * flags, on exactly the terms the twenty-nine above are. HOST
+ * operations, like all of them: no cft_run pass, no bus word, `dev` is
+ * context, `d` may alias `a`, and the flag word is the OR across the
+ * batch.
+ *
+ * WHAT IS NEW IS EXACTNESS, NOT MACHINERY. There is no new reduction
+ * and no constant beyond the ln 10 and log10 e phase 1 already
+ * generates. What each of these has is a LARGER exact-case table than
+ * the function it is built from, and each table is proved closed in
+ * docs/TRANSCENDENTALS.md before the Ziv loop under it is allowed to
+ * run - a true value sitting on a rounding boundary is exactly where
+ * that loop does not terminate:
+ *
+ *   exp2m1    EXACT at every integer argument: 2^n - 1 is a dyadic
+ *             rational for every n, and a rounding boundary while
+ *             |n| <= p+1. Past that the value is still known exactly
+ *             and is delivered by a SIDE - 2^n - 1 sits in the top
+ *             quarter of the gap below 2^n, and -(1 - 2^n) in the half
+ *             gap above -1.
+ *   exp10     EXACT at the non-negative integers whose 5^n fits in p+1
+ *             bits. A negative power of ten is not dyadic at all.
+ *   exp10m1   EXACT at the non-negative integers whose 10^n - 1 (odd,
+ *             so its own odd part) fits in p+1 bits.
+ *   log2p1    EXACT where 1 + x is a power of two; log10p1 where it is
+ *             a power of ten. 1 + x is formed EXACTLY on the encoding
+ *             and never as a rounded sum, which is the whole reason
+ *             these functions exist.
+ *   rSqrt     EXACT exactly at the even powers of two, and it can
+ *             neither overflow nor underflow at any rung.
+ *   pown      pow's dyadic analysis with an integer exponent.
+ *   powr      the same with a non-negative base, so no sign question.
+ *   compound  1 + x exactly, then pown's procedure on it.
+ *   rootn     EXACT when the odd significand is a perfect |n|-th power
+ *             and |n| divides the exponent - one verified integer root.
+ *
+ * THE INTEGER OPERAND. 9.2.1 says "n is a finite integral value in
+ * integralFormat", so pown, compound and rootn take an `int64_t`
+ * array beside the encoding array rather than a second encoding that
+ * would have to be asked whether it is integral. That moves the
+ * element count to `count`; `n` is the exponent array, one per
+ * element, and must not be NULL.
+ *
+ * Rows a porter should not have to infer, every one of them confirmed
+ * against MPFR 4.2.2 before it was written down:
+ *
+ *   - rSqrt(+-0) is +-INFINITY with divideByZero. The sign SURVIVES:
+ *     rSqrt(-0) is -infinity. GNU MPFR's mpfr_rec_sqrt returns +inf
+ *     for both zeros; the standard's row is +-inf and this contract
+ *     follows the standard.
+ *   - powr is NOT pow. powr(x, y) for x < 0 is invalid for EVERY y, a
+ *     NaN included; powr(+-0, +-0), powr(+inf, +-0) and powr(+1, +-inf)
+ *     are invalid; and powr(qNaN, y) is a quiet NaN where pow(qNaN, 0)
+ *     is 1. powr(+1, qNaN) is a quiet NaN here - the standard's row is
+ *     "powr(+1, y) is 1 for FINITE y" and it lists powr(x, qNaN) for
+ *     x >= 0 separately - where mpfr_powr returns 1.
+ *   - pown(x, 0) is 1 for any x that is not a signaling NaN, an
+ *     infinity and a quiet NaN included.
+ *   - compound(x, 0) is 1 "for x >= -1 or quiet NaN", so compound of an
+ *     x BELOW -1 with n = 0 is invalid rather than 1. compound(-1, n)
+ *     is +infinity with divideByZero for n < 0 and +0 for n > 0;
+ *     compound(+-0, n) is 1.
+ *   - rootn(x, 0) is invalid: zero is outside the domain for every x.
+ *     rootn(x, 1) is x, exactly and silently. rootn(x, 2) is
+ *     squareRoot(x) on every input EXCEPT x = -0, where the standard's
+ *     own NOTE says they differ: rootn(-0, 2) is +0 by the even-n row
+ *     where squareRoot(-0) is -0.
+ *   - log2p1(-1) and log10p1(-1) are -infinity with divideByZero, and
+ *     an operand below -1 is invalid.
+ *   - A signaling NaN raises invalid and delivers the canonical quiet
+ *     NaN, as everywhere else in this contract.
+ *
+ * docs/TRANSCENDENTALS.md's "Table 9.1, completed" section is the
+ * design, the exact-case proofs and the neighbour-rule derivations -
+ * including which functions get NO neighbour rule and why.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_exp2m1(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_exp10(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_exp10m1(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_log2p1(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_log10p1(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_rsqrt(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* x**y on [0, +inf] x [-inf, +inf], two encodings like pow. */
+CFT_API cft_status cft_powr(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const void *b, void *d, size_t n,
+                            uint32_t *flags_out);
+
+/* The three with an INTEGER exponent. `n` is the per-element exponent
+ * array and `count` the number of elements - the one place in this
+ * header where those two names are not the same argument. */
+CFT_API cft_status cft_pown(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const int64_t *n, void *d,
+                            size_t count, uint32_t *flags_out);
+CFT_API cft_status cft_compound(cft_device *dev, cft_format fmt,
+                                cft_round rnd, const void *a,
+                                const int64_t *n, void *d, size_t count,
+                                uint32_t *flags_out);
+CFT_API cft_status cft_rootn(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const int64_t *n, void *d,
+                             size_t count, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)
  *
  * cft_run copies host memory in and out. That is the right default -

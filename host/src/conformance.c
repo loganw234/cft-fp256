@@ -117,6 +117,36 @@ static int field_u32(const char *line, const char *key, uint32_t *out)
     return 0;
 }
 
+/* A signed decimal field, for the "n" of pown, compound and rootn -
+ * the one field in these sets that is an INTEGER rather than an
+ * encoding, and the reason it has a key of its own rather than being
+ * squeezed into "b". The whole int64 range has to parse: pown of a base
+ * one ulp from 1 against an exponent of 2^62 is an ordinary number, not
+ * an edge case. */
+static int field_i64(const char *line, const char *key, int64_t *out)
+{
+    const char *p = find_field(line, key);
+    uint64_t v = 0;
+    int digits = 0, neg = 0;
+    if (!p)
+        return -1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (*p == '-') {
+        neg = 1;
+        p++;
+    }
+    while (*p >= '0' && *p <= '9') {
+        v = v * 10u + (uint64_t)(*p - '0');
+        p++;
+        digits++;
+    }
+    if (!digits || digits > 19)
+        return -1;
+    *out = neg ? -(int64_t)v : (int64_t)v;
+    return 0;
+}
+
 static int hexval(int ch)
 {
     if (ch >= '0' && ch <= '9') return ch - '0';
@@ -347,6 +377,7 @@ static cft_status array_pass(cft_device *dev, int fi, int rnd, int esz,
 
 typedef struct {
     int      fn;
+    int64_t  nn;             /* the "n" of pown, compound and rootn */
     uint8_t  a[MAX_ELEM], b[MAX_ELEM], d[MAX_ELEM];
     uint32_t flags;
 } cft_tr_case;
@@ -358,6 +389,7 @@ static cft_status transcend_array_pass(cft_device *dev, int fi, int rnd,
 {
     const cft_fmt_desc *f = &cft_sf_formats[fi];
     uint8_t *a = NULL, *b = NULL, *got = NULL;
+    int64_t *nn = NULL;
     cft_status ret = CFT_OK;
     int fn;
 
@@ -366,8 +398,9 @@ static cft_status transcend_array_pass(cft_device *dev, int fi, int rnd,
     a   = (uint8_t *)malloc(ncases * (size_t)esz);
     b   = (uint8_t *)malloc(ncases * (size_t)esz);
     got = (uint8_t *)malloc(ncases * (size_t)esz);
-    if (!a || !b || !got) {
-        free(a); free(b); free(got);
+    nn  = (int64_t *)malloc(ncases * sizeof *nn);
+    if (!a || !b || !got || !nn) {
+        free(a); free(b); free(got); free(nn);
         return CFT_ERR_OUT_OF_MEMORY;
     }
 
@@ -381,6 +414,7 @@ static cft_status transcend_array_pass(cft_device *dev, int fi, int rnd,
                 continue;
             memcpy(a + k * (size_t)esz, cases[i].a, (size_t)esz);
             memcpy(b + k * (size_t)esz, cases[i].b, (size_t)esz);
+            nn[k] = cases[i].nn;
             want_flags |= cases[i].flags;
             k++;
         }
@@ -390,7 +424,8 @@ static cft_status transcend_array_pass(cft_device *dev, int fi, int rnd,
 
         memset(got, 0, k * (size_t)esz);
         st = cft_tr_apply(dev, fn, (cft_format)fi, (cft_round)rnd, a,
-                          cft_tr_arity(fn) == 2 ? b : NULL, got, k,
+                          cft_tr_arity(fn) == 2 ? b : NULL,
+                          cft_tr_has_int(fn) ? nn : NULL, got, k,
                           &got_flags);
         if (st != CFT_OK) {
             rep_add(r, "%s: array pass, %s x%lu: failed: %s\n",
@@ -434,7 +469,7 @@ static cft_status transcend_array_pass(cft_device *dev, int fi, int rnd,
         }
     }
 
-    free(a); free(b); free(got);
+    free(a); free(b); free(got); free(nn);
     return ret;
 }
 
@@ -458,7 +493,8 @@ static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
         uint8_t ea[MAX_ELEM], eb[MAX_ELEM];
         uint8_t want_d[MAX_ELEM], got_d[MAX_ELEM];
         uint32_t want_flags = 0, got_flags = 0;
-        int fn = -1, rnd = -1, binary;
+        int64_t enn = 0;
+        int fn = -1, rnd = -1, binary, has_n;
         cft_status st;
 
         lineno++;
@@ -484,6 +520,7 @@ static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
             }
         }
         binary = cft_tr_arity(fn) == 2;
+        has_n = cft_tr_has_int(fn);
         memset(eb, 0, sizeof eb);
 
 #define TGET(key, dst)                                                   \
@@ -499,10 +536,18 @@ static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
             TGET("b", eb)
         TGET("d", want_d)
 #undef TGET
+        if (has_n && field_i64(line, "n", &enn)) {
+            fclose(fp);
+            free(cases);
+            rep_add(r, "%s:%lu: no \"n\" field - %s takes an integer "
+                       "exponent\n", path, lineno, cft_tr_name(fn));
+            return CFT_ERR_ARTIFACT;
+        }
 
         memset(got_d, 0, (size_t)esz);
         st = cft_tr_apply(dev, fn, (cft_format)fi, (cft_round)rnd, ea,
-                          binary ? eb : NULL, got_d, 1, &got_flags);
+                          binary ? eb : NULL, has_n ? &enn : NULL,
+                          got_d, 1, &got_flags);
         if (st != CFT_OK) {
             fclose(fp);
             free(cases);
@@ -528,10 +573,12 @@ static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
             rep_add(r, "%s:%lu: %s %s %s\n"
                         "  a        %s\n"
                         "  b        %s\n"
+                        "  n        %lld\n"
                         "  expected %s flags 0x%02x\n"
                         "  got      %s flags 0x%02x\n",
                     path, lineno, f->name, cft_tr_name(fn), rnames[rnd],
-                    ha, binary ? hb : "-", hw, (unsigned)want_flags,
+                    ha, binary ? hb : "-", (long long)(has_n ? enn : 0),
+                    hw, (unsigned)want_flags,
                     hg, (unsigned)got_flags);
             return CFT_ERR_INTERNAL;
         }
@@ -550,6 +597,7 @@ static cft_status transcend_set(cft_device *dev, int fi, int ri, int esz,
             ccap = want;
         }
         cases[ncases].fn = fn;
+        cases[ncases].nn = enn;
         cases[ncases].flags = want_flags;
         memcpy(cases[ncases].a, ea, (size_t)esz);
         memcpy(cases[ncases].b, eb, (size_t)esz);

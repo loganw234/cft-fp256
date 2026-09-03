@@ -75,6 +75,14 @@ TRIG_UNARY = ("sinpi", "cospi", "tanpi", "asin", "acos", "atan",
 TRIG_BINARY = ("atan2", "atan2pi")
 RADIAN = ("sin", "cos", "tan")
 HYPER = ("sinh", "cosh", "tanh", "asinh", "acosh", "atanh")
+#: The rest of table 9.1. The six unary ones bind like every other
+#: unary entry point; powr takes two encodings like pow; and pown,
+#: compound and rootn take an INTEGER array beside the encoding array,
+#: which is what 9.2.1 asks for and what makes them a different
+#: prototype rather than a different convention.
+T91_UNARY = ("exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt")
+T91_BINARY = ("powr",)
+T91_INT = ("pown", "compound", "rootn")
 
 #: How coarsely host/tools/pi_worstcase.py sweeps the binades when it
 #: builds this harness's adversarial pool, and how many of the deepest
@@ -110,14 +118,21 @@ def bind(lib):
     lib.cft_open.restype = i
     lib.cft_close.argtypes = [vp]
     lib.cft_close.restype = None
-    for nm in UNARY + TRIG_UNARY + RADIAN + HYPER:
+    for nm in UNARY + TRIG_UNARY + RADIAN + HYPER + T91_UNARY:
         fn = getattr(lib, "cft_" + nm)
         fn.argtypes = [vp, i, i, vp, vp, sz, u32p]
         fn.restype = i
-    for nm in BINARY + TRIG_BINARY:
+    for nm in BINARY + TRIG_BINARY + T91_BINARY:
         fn = getattr(lib, "cft_" + nm)
         fn.argtypes = [vp, i, i, vp, vp, vp, sz, u32p]
         fn.restype = i
+    for nm in T91_INT:
+        fn = getattr(lib, "cft_" + nm)
+        fn.argtypes = [vp, i, i, vp, ctypes.POINTER(ctypes.c_int64), vp,
+                       sz, u32p]
+        fn.restype = i
+    lib.cft_sqrt.argtypes = [vp, i, i, vp, vp, sz, u32p, u32p]
+    lib.cft_sqrt.restype = i
     lib.cft_abi_version.argtypes = []
     lib.cft_abi_version.restype = ctypes.c_uint32
 
@@ -141,19 +156,36 @@ def dec(fmt, raw, n):
             for i in range(n)]
 
 
-def call(lib, dev, fmt, fn, rnd, xs, ys=None):
-    """One batch through the C, returning (bits list, flag word, status)."""
+def call(lib, dev, fmt, fn, rnd, xs, ys=None, ns=None):
+    """One batch through the C, returning (bits list, flag word, status).
+
+    `ns` is the integer exponent array of pown, compound and rootn."""
     esz = fmt.width // 8
     n = len(xs)
     a = ctypes.create_string_buffer(enc(fmt, xs), n * esz)
     d = ctypes.create_string_buffer(n * esz)
     fl = ctypes.c_uint32(0xDEAD)
     f = getattr(lib, "cft_" + fn)
-    if fn in BINARY or fn in TRIG_BINARY:
+    if fn in T91_INT:
+        arr = (ctypes.c_int64 * n)(*ns)
+        st = f(dev, PREC_CODE[fmt.name], rnd, a, arr, d, n, ctypes.byref(fl))
+    elif fn in BINARY or fn in TRIG_BINARY or fn in T91_BINARY:
         b = ctypes.create_string_buffer(enc(fmt, ys), n * esz)
         st = f(dev, PREC_CODE[fmt.name], rnd, a, b, d, n, ctypes.byref(fl))
     else:
         st = f(dev, PREC_CODE[fmt.name], rnd, a, d, n, ctypes.byref(fl))
+    return dec(fmt, d.raw, n), fl.value, st
+
+
+def call_sqrt(lib, dev, fmt, rnd, xs):
+    """cft_sqrt over the same operands, for the rootn(x, 2) identity."""
+    esz = fmt.width // 8
+    n = len(xs)
+    a = ctypes.create_string_buffer(enc(fmt, xs), n * esz)
+    d = ctypes.create_string_buffer(n * esz)
+    fl = ctypes.c_uint32(0xDEAD)
+    st = lib.cft_sqrt(dev, PREC_CODE[fmt.name], rnd, a, d, n,
+                      ctypes.byref(fl), None)
     return dec(fmt, d.raw, n), fl.value, st
 
 
@@ -713,6 +745,298 @@ def check_batches(lib, dev, fmt, pool, pairs):
         note(len(xs))
 
 
+def t91_pool(fmt, trials, seed):
+    """Operands where the six unary members of table 9.1's remainder can
+    actually be got wrong, which is a fifth list again.
+
+      * every INTEGER from 0 to p+3 and their negatives, because exp2m1
+        is exact on all of them up to p+1 and decided by a SIDE from
+        p+2 - the one threshold in this set where an off-by-one changes
+        the answer rather than the path;
+      * the powers of ten, where exp10 and exp10m1 are exact, and
+        10^k - 1, where log10p1 is;
+      * 2^k - 1 for every k the format holds, where log2p1 is exact,
+        with a neighbour either side;
+      * the even and the odd powers of two, which is exactly rSqrt's
+        exact/inexact split;
+      * -1 and its neighbours, which is log2p1's and log10p1's pole;
+      * the tiny thresholds 2^-(p+3) and 2^-(p+4), straddled, where
+        exp10's beside-1 rule starts and where exp2m1's and exp10m1's
+        deliberately do NOT.
+    """
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 503))
+    out = [
+        sf.zero_bits(fmt), sf.zero_bits(fmt, 1),
+        one, sf.one_bits(fmt, 1), one + 1, one - 1,
+        sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1,
+        sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+        sf.max_subnormal_bits(fmt), sf.max_subnormal_bits(fmt, 1),
+        sf.min_normal_bits(fmt), sf.min_normal_bits(fmt, 1),
+        sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+        sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+        sf.qnan_bits(fmt), sf.snan_bits(fmt), sf.qnan_bits(fmt) | 0x5,
+    ]
+    # every integer through exp2m1's exact/side boundary, and the ends
+    for k in list(range(1, 12)) + [p - 1, p, p + 1, p + 2, p + 3, 2 * p,
+                                   fmt.emax - 1, fmt.emax, fmt.emax + 1,
+                                   fmt.emin, fmt.emin - fmt.man_w]:
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, abs(k), 0)
+            if b is not None:
+                out += [b, b + 1, b - 1]
+    # the powers of ten and 10^k - 1, where exp10, exp10m1 and log10p1
+    # are exact, each with a neighbour above
+    k = 0
+    while 5 ** k < (1 << p):
+        b = Vopt(fmt, 0, 5 ** k, k)
+        if b is None:
+            break
+        out += [b, b + 1, b - 1]
+        c = Vopt(fmt, 0, 10 ** k - 1, 0) if k else None
+        if c is not None:
+            out += [c, c + 1]
+        k += 1
+    # 2^k - 1 for every k: log2p1's exact table, both signs of k
+    for k in range(1, min(p, 40) + 1):
+        for m, e in (((1 << k) - 1, 0), ((1 << k) - 1, -k)):
+            for sgn in (0, 1):
+                b = Vopt(fmt, sgn, m, e)
+                if b is not None:
+                    out += [b, b + 1, b - 1]
+    # the powers of two, even and odd, which is rSqrt's whole split
+    for k in list(range(-6, 7)) + [p, -p, fmt.emax, fmt.emax - 1,
+                                   fmt.emin, fmt.emin + 1,
+                                   fmt.emin - fmt.man_w,
+                                   fmt.emin - fmt.man_w + 1]:
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, k)
+            if b is not None:
+                out += [b, b + 1, b - 1]
+    # the tiny thresholds, straddled
+    for k in (p + 2, p + 3, p + 4, p + 5, 2 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                b = Vopt(fmt, sgn, m, e)
+                if b is not None:
+                    out.append(b)
+    out += [rng.getrandbits(fmt.width) for _ in range(trials)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def powr_pairs(fmt, trials, seed):
+    """pow's pairs plus the rows where powr is NOT pow: a negative base
+    against every kind of exponent, both zeros against both zeros, an
+    infinite base against a zero exponent, 1 against an infinity, and a
+    quiet NaN in either operand - which powr answers with a NaN where
+    pow answers with 1."""
+    pairs = list(pow_pairs(fmt, trials, seed))
+    one = sf.one_bits(fmt)
+    specials = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+                sf.inf_bits(fmt, 1), sf.qnan_bits(fmt), sf.snan_bits(fmt),
+                one, sf.one_bits(fmt, 1), V(fmt, 0, 1, 1), V(fmt, 1, 1, 1),
+                V(fmt, 0, 3, -1), V(fmt, 1, 3, -1),
+                sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+                sf.min_subnormal_bits(fmt)]
+    pairs += [(a, b) for a in specials for b in specials]
+    return pairs
+
+
+def int_exponents(fmt):
+    """The integer exponents pown, compound and rootn are tried against.
+
+    The whole int64 range, because the C takes an int64_t and a harness
+    that stopped at p+2 would never reach the saturating exponent
+    arithmetic - and both ends of it, because INT64_MIN has no positive
+    negation and is exactly the value a naive |n| gets wrong."""
+    p = fmt.prec
+    ns = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 8, -8, 17, -17,
+          p - 1, p, p + 1, p + 2, -(p + 1), -(p + 2),
+          1000, -1000, 1 << 20, -(1 << 20), (1 << 31) - 1, -(1 << 31),
+          1 << 62, -(1 << 62), (1 << 63) - 1, -(1 << 63)]
+    return sorted(set(ns), key=lambda v: (abs(v), v))
+
+
+def int_pow_cases(fmt, trials, seed):
+    """(operand, n) pairs for pown, compound and rootn.
+
+    The operands are the ones whose exactness the three decide
+    differently: perfect powers (rootn is exact there), a base whose odd
+    part is 1 (pown is exact at every n), -1 and its neighbours
+    (compound's pole), the two zeros and both infinities (every sign row
+    in 9.2.1), and a base one ulp from 1 (the beside-1 rule).
+
+    The cross product is strided, because five attributes times three
+    functions times the full product is a longer test rather than a
+    sharper one."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 607))
+    ops = [
+        sf.zero_bits(fmt), sf.zero_bits(fmt, 1),
+        sf.inf_bits(fmt), sf.inf_bits(fmt, 1),
+        sf.qnan_bits(fmt), sf.snan_bits(fmt),
+        one, sf.one_bits(fmt, 1), one + 1, one - 1,
+        sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1,
+        sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+        sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+        sf.min_normal_bits(fmt),
+    ]
+    # perfect powers and their near-misses: rootn is exact on the first
+    # and provably not on the second
+    for m in (2, 3, 4, 8, 9, 16, 25, 27, 32, 64, 81, 125, 243, 256, 1024,
+              15625):
+        if m.bit_length() > p:
+            continue
+        for sgn in (0, 1):
+            for e in (0, 2, 6, -4, -6):
+                b = Vopt(fmt, sgn, m, e)
+                if b is not None:
+                    ops.append(b)
+        b = Vopt(fmt, 0, m, 0)
+        if b is not None:
+            ops += [b + 1, b - 1]
+    # powers of two, where pown and rootn are exact at every n that
+    # divides the exponent
+    for e in (-3, -2, -1, 1, 2, 3, 6, p, -p, fmt.emax, fmt.emin,
+              fmt.emin - fmt.man_w):
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, e)
+            if b is not None:
+                ops.append(b)
+    # compound's neighbourhood of -1 and of 0
+    for k in (1, 2, p // 2, p, p + 2, 2 * p):
+        for sgn in (0, 1):
+            b = Vopt(fmt, sgn, 1, -k)
+            if b is not None:
+                ops.append(b)
+    ops += [rng.getrandbits(fmt.width) for _ in range(max(4, trials // 4))]
+    ops = sorted({b & ((1 << fmt.width) - 1) for b in ops})
+
+    ns = int_exponents(fmt)
+    step = 3
+    cases = []
+    for i, a in enumerate(ops):
+        for j in range(i % step, len(ns), step):
+            cases.append((a, ns[j]))
+    # and every operand against the exponents whose rows are unique
+    for a in ops:
+        for k in (0, 1, 2, -1, -2):
+            cases.append((a, k))
+    return cases
+
+
+def check_t91_unary(lib, dev, fmt, pool):
+    for fn in T91_UNARY:
+        for rnd in RND_MODES:
+            for xa in pool:
+                got, fl, st = call(lib, dev, fmt, fn, rnd, [xa])
+                assert st == 0, (fn, fmt.name, RND_NAMES[rnd], hex(xa), st)
+                want = tr.compute(fmt, fn, xa, 0, rnd)
+                assert (got[0], fl) == want, \
+                    (fn, fmt.name, RND_NAMES[rnd], hex(xa),
+                     (hex(got[0]), fl), (hex(want[0]), want[1]))
+                note()
+
+
+def check_t91_int(lib, dev, fmt, cases):
+    for fn in T91_INT:
+        for rnd in RND_MODES:
+            for xa, n in cases:
+                got, fl, st = call(lib, dev, fmt, fn, rnd, [xa], ns=[n])
+                assert st == 0, (fn, fmt.name, RND_NAMES[rnd], hex(xa), n,
+                                 st)
+                want = tr.compute(fmt, fn, xa, 0, rnd, n)
+                assert (got[0], fl) == want, \
+                    (fn, fmt.name, RND_NAMES[rnd], hex(xa), n,
+                     (hex(got[0]), fl), (hex(want[0]), want[1]))
+                note()
+
+
+def check_rootn_is_sqrt(lib, dev, fmt, pool):
+    """rootn(x, 2) is squareRoot(x) - bits AND flags - on every operand
+    and every attribute, with exactly one documented exception.
+
+    754-2019 9.2.1's own NOTE says it: rootn(-0, 2) is +0 by the
+    "rootn(+-0, n) is +0 for even n > 0" row, where squareRoot(-0) is
+    -0. So the identity is asserted everywhere and the difference is
+    asserted THERE, which is a stronger test than skipping the case."""
+    negzero = sf.zero_bits(fmt, 1)
+    for rnd in RND_MODES:
+        xs = list(pool)
+        ns = [2] * len(xs)
+        got, _fl, st = call(lib, dev, fmt, "rootn", rnd, xs, ns=ns)
+        assert st == 0, ("rootn", fmt.name, st)
+        sq, _sf2, st2 = call_sqrt(lib, dev, fmt, rnd, xs)
+        assert st2 == 0, ("sqrt", fmt.name, st2)
+        for x, g, s in zip(xs, got, sq):
+            # per element, so the flags compare one at a time
+            g1, gf, _ = call(lib, dev, fmt, "rootn", rnd, [x], ns=[2])
+            s1, sfl, _ = call_sqrt(lib, dev, fmt, rnd, [x])
+            assert g1[0] == g and s1[0] == s
+            if x == negzero:
+                assert g1[0] == sf.zero_bits(fmt, 0) and s1[0] == negzero, \
+                    ("rootn(-0,2) must be +0 and sqrt(-0) must be -0",
+                     fmt.name, hex(g1[0]), hex(s1[0]))
+                assert gf == sfl == 0
+            else:
+                assert (g1[0], gf) == (s1[0], sfl), \
+                    ("rootn(x,2) != sqrt(x)", fmt.name, RND_NAMES[rnd],
+                     hex(x), (hex(g1[0]), gf), (hex(s1[0]), sfl))
+            note()
+
+
+def check_t91_batches(lib, dev, fmt, pool, cases):
+    """The array path for the ten, with a signaling NaN in the last lane
+    so late-lane classification is what sets the flag word - and, for the
+    three integer-exponent ones, a DIFFERENT n per lane, which is the
+    property an implementation that hoisted n out of the loop would
+    fail."""
+    rng = random.Random(733 ^ fmt.width)
+    n = 200
+    for fn, rnd in (("exp2m1", sf.RND_RDN), ("exp10", sf.RND_RUP),
+                    ("exp10m1", sf.RND_RTZ), ("log2p1", sf.RND_RNE),
+                    ("log10p1", sf.RND_RMM), ("rsqrt", sf.RND_RUP)):
+        xs = [rng.choice(pool) for _ in range(n - 1)] + [sf.snan_bits(fmt)]
+        got, fl, st = call(lib, dev, fmt, fn, rnd, xs)
+        assert st == 0, (fn, st)
+        want_or = 0
+        for x, g in zip(xs, got):
+            wb, wf = tr.compute(fmt, fn, x, 0, rnd)
+            assert g == wb, ("batch", fn, fmt.name, hex(x), hex(g), hex(wb))
+            want_or |= wf
+        assert fl == want_or and (want_or & 1), (fn, fl, want_or)
+        note(n)
+    picked = [cases[(i * 7) % len(cases)] for i in range(n - 1)]
+    picked.append((sf.snan_bits(fmt), 3))
+    xs = [a for a, _ in picked]
+    ns = [k for _, k in picked]
+    for fn in T91_INT:
+        got, fl, st = call(lib, dev, fmt, fn, sf.RND_RDN, xs, ns=ns)
+        assert st == 0, (fn, st)
+        want_or = 0
+        for (x, k), g in zip(picked, got):
+            wb, wf = tr.compute(fmt, fn, x, 0, sf.RND_RDN, k)
+            assert g == wb, ("batch", fn, fmt.name, hex(x), k, hex(g),
+                             hex(wb))
+            want_or |= wf
+        assert fl == want_or and (want_or & 1), (fn, fl, want_or)
+        note(n)
+    xs = [a for a, _ in powr_pairs(fmt, 4, 5)[:200]]
+    ys = [b for _, b in powr_pairs(fmt, 4, 5)[:200]]
+    got, fl, st = call(lib, dev, fmt, "powr", sf.RND_RTZ, xs, ys)
+    assert st == 0, ("powr", st)
+    want_or = 0
+    for x, y, g in zip(xs, ys, got):
+        wb, wf = tr.compute(fmt, "powr", x, y, sf.RND_RTZ)
+        assert g == wb, ("batch", "powr", fmt.name, hex(x), hex(y),
+                         hex(g), hex(wb))
+        want_or |= wf
+    assert fl == want_or
+    note(len(xs))
+
+
 def check_refusals(lib, dev):
     """The arguments that must be refused rather than computed."""
     fmt = FORMATS["fp32"]
@@ -743,6 +1067,46 @@ def check_refusals(lib, dev):
         assert lib.cft_tanh(dev, bad_fmt, 0, a, d, 1,
                             ctypes.byref(fl)) == INVAL, bad_fmt
         note(3)
+    for bad in (-1, 5, 7, 255):
+        assert lib.cft_exp10(dev, fi, bad, a, d, 1,
+                             ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_rsqrt(dev, fi, bad, a, d, 1,
+                             ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_powr(dev, fi, bad, a, a, d, 1,
+                            ctypes.byref(fl)) == INVAL, bad
+        note(3)
+    nn = (ctypes.c_int64 * 1)(2)
+    for bad in (-1, 5, 255):
+        assert lib.cft_pown(dev, fi, bad, a, nn, d, 1,
+                            ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_rootn(dev, fi, bad, a, nn, d, 1,
+                             ctypes.byref(fl)) == INVAL, bad
+        assert lib.cft_compound(dev, fi, bad, a, nn, d, 1,
+                                ctypes.byref(fl)) == INVAL, bad
+        note(3)
+    for bad_fmt in (-1, 4, 99):
+        assert lib.cft_log2p1(dev, bad_fmt, 0, a, d, 1,
+                              ctypes.byref(fl)) == INVAL, bad_fmt
+        assert lib.cft_pown(dev, bad_fmt, 0, a, nn, d, 1,
+                            ctypes.byref(fl)) == INVAL, bad_fmt
+        note(2)
+    # the INTEGER operand is not optional either, and that is a
+    # different NULL from the second encoding's
+    assert lib.cft_pown(dev, fi, 0, a, None, d, 1,
+                        ctypes.byref(fl)) == INVAL
+    assert lib.cft_compound(dev, fi, 0, a, None, d, 1,
+                            ctypes.byref(fl)) == INVAL
+    assert lib.cft_rootn(dev, fi, 0, a, None, d, 1,
+                         ctypes.byref(fl)) == INVAL
+    assert lib.cft_powr(dev, fi, 0, a, None, d, 1,
+                        ctypes.byref(fl)) == INVAL
+    note(4)
+    # n == 0 elements touches nothing, integer operand or not
+    fl.value = 0xDEAD
+    assert lib.cft_rootn(dev, fi, 0, None, None, None, 0,
+                         ctypes.byref(fl)) == 0
+    assert fl.value == 0
+    note()
     # the second operand is not optional for any binary entry point
     assert lib.cft_pow(dev, fi, 0, a, None, d, 1,
                        ctypes.byref(fl)) == INVAL
@@ -815,6 +1179,9 @@ def main():
             apairs = atan2_pairs(fmt, t, args.seed)
             rpool = radian_pool(fmt, t, args.seed)
             hpool = hyper_pool(fmt, t, args.seed)
+            t9pool = t91_pool(fmt, t, args.seed)
+            t9pairs = powr_pairs(fmt, t, args.seed)
+            t9int = int_pow_cases(fmt, t, args.seed)
             check_unary(lib, dev, fmt, pool)
             check_binary(lib, dev, fmt, "pow", ppairs)
             check_binary(lib, dev, fmt, "hypot", hpairs)
@@ -826,6 +1193,11 @@ def main():
             check_named_unary(lib, dev, fmt, RADIAN, rpool)
             check_named_unary(lib, dev, fmt, HYPER, hpool)
             check_phase3_batches(lib, dev, fmt, rpool, hpool)
+            check_t91_unary(lib, dev, fmt, t9pool)
+            check_binary(lib, dev, fmt, "powr", t9pairs)
+            check_t91_int(lib, dev, fmt, t9int)
+            check_rootn_is_sqrt(lib, dev, fmt, t9pool)
+            check_t91_batches(lib, dev, fmt, t9pool, t9int)
             check_aliasing(lib, dev, fmt, pool)
             print(f"  {name}: the transcendental entry points agree with "
                   f"the model ({CHECKED} comparisons so far)")
@@ -833,7 +1205,8 @@ def main():
         lib.cft_close(dev)
     st = tr.STATS
     nfn = (len(UNARY) + len(BINARY) + len(TRIG_UNARY) + len(TRIG_BINARY)
-           + len(RADIAN) + len(HYPER))
+           + len(RADIAN) + len(HYPER) + len(T91_UNARY) + len(T91_BINARY)
+           + len(T91_INT))
     print(f"transcend_check: {CHECKED} comparisons over {nfn} "
           "functions, C == model on every one")
     print(f"  the model's evaluator: {st['ziv_calls']} enclosures, "

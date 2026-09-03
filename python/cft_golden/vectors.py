@@ -610,47 +610,191 @@ def hyperbolic_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
     return sorted({b & ((1 << fmt.width) - 1) for b in out})
 
 
-def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
-    """(fn, a, b) triples for all twenty-nine transcendentals, in the
-    order gen_vectors.py writes them. b is 0 for the unary twenty-five,
-    which do not emit it at all.
+def table91_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
+    """Operands for exp2m1, exp10, exp10m1, log2p1, log10p1 and rSqrt.
 
-    Four operand pools, because the families are different: the
+    A fifth pool, because the families that catch these are not the ones
+    that catch exp: the INTEGERS (exp2m1 is exact on them up to p+1 and
+    decided by a side from p+2), the powers of ten and 10^k - 1, the
+    values 2^k - 1 where log2p1 is exact, the powers of two where x = 2^k
+    puts log2p1 an exponentially small step above the integer k, and the
+    even/odd split of the powers of two that is rSqrt's whole exactness
+    question."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 503))
+    out = list(interesting_operands(fmt))
+    _extend(out, one + 1, one - 1, sf.one_bits(fmt, 1) + 1,
+            sf.one_bits(fmt, 1) - 1)
+
+    for k in list(range(1, 12)) + [p - 1, p, p + 1, p + 2, p + 3, 2 * p,
+                                   fmt.emax - 1, fmt.emax, fmt.emax + 1,
+                                   fmt.emin, fmt.emin - fmt.man_w]:
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, abs(k), 0)
+            if b is not None:
+                _extend(out, b, b + 1, b - 1)
+    k = 0
+    while 5 ** k < (1 << p):
+        b = _val(fmt, 0, 5 ** k, k)
+        if b is None:
+            break
+        _extend(out, b, b + 1, b - 1)
+        if k:
+            _extend(out, _val(fmt, 0, 10 ** k - 1, 0))
+        k += 1
+    for k in range(1, min(p, 40) + 1):
+        for m, e in (((1 << k) - 1, 0), ((1 << k) - 1, -k)):
+            for sgn in (0, 1):
+                b = _val(fmt, sgn, m, e)
+                if b is not None:
+                    _extend(out, b, b + 1, b - 1)
+    for k in list(range(-6, 7)) + [p, -p, fmt.emax, fmt.emax - 1, fmt.emin,
+                                   fmt.emin - fmt.man_w,
+                                   fmt.emin - fmt.man_w + 1]:
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, 1, k)
+            if b is not None:
+                _extend(out, b, b + 1, b - 1)
+    for k in (p + 2, p + 3, p + 4, p + 5, 2 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                _extend(out, _val(fmt, sgn, m, e))
+    out += [_rand_bits(rng, fmt) for _ in range(extra)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def transcend_powr_pairs(fmt: FpFormat, extra: int, seed: int = 16):
+    """pow's pairs plus the rows where powr is NOT pow: a negative base
+    against every kind of exponent, both zeros against both zeros, an
+    infinite base against a zero exponent, 1 against an infinity, and a
+    quiet NaN in either operand."""
+    pairs = list(transcend_pow_pairs(fmt, extra, seed))
+    one = sf.one_bits(fmt)
+    specials = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+                sf.inf_bits(fmt, 1), sf.qnan_bits(fmt), sf.snan_bits(fmt),
+                one, sf.one_bits(fmt, 1), _val(fmt, 0, 1, 1),
+                _val(fmt, 1, 1, 1), _val(fmt, 0, 3, -1),
+                sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+                sf.min_subnormal_bits(fmt)]
+    pairs += [(a, b) for a in specials for b in specials
+              if a is not None and b is not None]
+    return pairs
+
+
+def transcend_int_pow_cases(fmt: FpFormat, extra: int, seed: int = 17):
+    """(operand, n) pairs for pown, compound and rootn.
+
+    The operands are the ones whose exactness the three decide
+    differently - perfect powers, a significand whose odd part is 1,
+    -1 and its neighbours, the zeros and the infinities, a base one ulp
+    from 1 - and the exponents run the whole int64 range including both
+    ends, because INT64_MIN is exactly the value a naive |n| gets
+    wrong. The cross product is strided: five attributes times three
+    functions times the full product would be a longer test rather than
+    a sharper one."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 607))
+    ops = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+           sf.inf_bits(fmt, 1), sf.qnan_bits(fmt), sf.snan_bits(fmt),
+           one, sf.one_bits(fmt, 1), one + 1, one - 1,
+           sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1,
+           sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+           sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+           sf.min_normal_bits(fmt)]
+    for m in (2, 3, 4, 8, 9, 16, 25, 27, 32, 64, 81, 125, 243, 256, 1024,
+              15625):
+        if m.bit_length() > p:
+            continue
+        for sgn in (0, 1):
+            for e in (0, 2, 6, -4, -6):
+                _extend(ops, _val(fmt, sgn, m, e))
+        b = _val(fmt, 0, m, 0)
+        if b is not None:
+            _extend(ops, b + 1, b - 1)
+    for e in (-3, -2, -1, 1, 2, 3, 6, p, -p, fmt.emax, fmt.emin,
+              fmt.emin - fmt.man_w):
+        for sgn in (0, 1):
+            _extend(ops, _val(fmt, sgn, 1, e))
+    for k in (1, 2, p // 2, p, p + 2, 2 * p):
+        for sgn in (0, 1):
+            _extend(ops, _val(fmt, sgn, 1, -k))
+    ops += [_rand_bits(rng, fmt) for _ in range(max(4, extra // 4))]
+    ops = sorted({b & ((1 << fmt.width) - 1) for b in ops})
+
+    ns = sorted({0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 8, -8, 17, -17,
+                 p - 1, p, p + 1, p + 2, -(p + 1), -(p + 2),
+                 1000, -1000, 1 << 20, -(1 << 20), (1 << 31) - 1,
+                 -(1 << 31), 1 << 62, -(1 << 62), (1 << 63) - 1,
+                 -(1 << 63)},
+                key=lambda v: (abs(v), v))
+    step = 3
+    cases = []
+    for i, a in enumerate(ops):
+        for j in range(i % step, len(ns), step):
+            cases.append((a, ns[j]))
+    for a in ops:
+        for k in (0, 1, 2, -1, -2):
+            cases.append((a, k))
+    return cases
+
+
+def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
+    """(fn, a, b, n) tuples for all thirty-nine transcendentals, in the
+    order gen_vectors.py writes them. b is 0 for the unary ones, which do
+    not emit it at all, and n is 0 for everything but pown, compound and
+    rootn, which are the three that read an INTEGER operand.
+
+    Five operand pools, because the families are different: the
     exponential set turns on exact powers and overflow thresholds, the
     Pi-trigonometric set on half-integers and the edge of the asin
-    domain, the radian set on the argument reduction's worst cases, and
-    the hyperbolic set on its own domain edges. Each slice of
-    TRANSCEND_FNS is named by INDEX below, so appending a phase does not
-    silently re-point an earlier one at the wrong pool."""
-    from .transcend import TRANSCEND_ARITY, TRANSCEND_FNS
+    domain, the radian set on the argument reduction's worst cases, the
+    hyperbolic set on its own domain edges, and table 9.1's remainder on
+    the integers, the powers of ten and the even/odd powers of two. Each
+    slice of TRANSCEND_FNS is named by INDEX below, so appending a phase
+    does not silently re-point an earlier one at the wrong pool."""
+    from .transcend import (TRANSCEND_ARITY, TRANSCEND_FNS,
+                            TRANSCEND_INTARG)
 
     pool = transcend_unary_pool(fmt, extra, seed)
     tpool = trig_unary_pool(fmt, extra, seed + 3)
     rpool = radian_unary_pool(fmt, extra, seed + 5)
     hpool = hyperbolic_unary_pool(fmt, extra, seed + 6)
+    t9pool = table91_unary_pool(fmt, extra, seed + 7)
     trig = set(TRANSCEND_FNS[9:20])
     radian = set(TRANSCEND_FNS[20:23])
-    hyper = set(TRANSCEND_FNS[23:])
+    hyper = set(TRANSCEND_FNS[23:29])
+    table91 = set(TRANSCEND_FNS[29:])
     assert radian == {"sin", "cos", "tan"}, TRANSCEND_FNS[20:23]
+    assert "rootn" in table91 and len(table91) == 10, TRANSCEND_FNS[29:]
+    intcases = transcend_int_pow_cases(fmt, extra, seed + 8)
     cases = []
     for fn in TRANSCEND_FNS:
-        if TRANSCEND_ARITY[fn] == 1:
+        if TRANSCEND_INTARG[fn]:
+            cases += [(fn, a, 0, k) for a, k in intcases]
+        elif TRANSCEND_ARITY[fn] == 1:
             if fn in radian:
                 src = rpool
             elif fn in hyper:
                 src = hpool
             elif fn in trig:
                 src = tpool
+            elif fn in table91:
+                src = t9pool
             else:
                 src = pool
-            cases += [(fn, a, 0) for a in src]
+            cases += [(fn, a, 0, 0) for a in src]
         elif fn == "pow":
-            cases += [(fn, a, b)
+            cases += [(fn, a, b, 0)
                       for a, b in transcend_pow_pairs(fmt, extra, seed + 1)]
         elif fn == "hypot":
-            cases += [(fn, a, b)
+            cases += [(fn, a, b, 0)
                       for a, b in transcend_hypot_pairs(fmt, extra, seed + 2)]
+        elif fn == "powr":
+            cases += [(fn, a, b, 0)
+                      for a, b in transcend_powr_pairs(fmt, extra, seed + 9)]
         else:
-            cases += [(fn, a, b)
+            cases += [(fn, a, b, 0)
                       for a, b in trig_atan2_pairs(fmt, extra, seed + 4)]
     return cases
