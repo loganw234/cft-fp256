@@ -1772,3 +1772,44 @@ golden model, and `git diff` against the phase-2 merge is confined to
 `bindings/` and the docs. No other JS runtime and no device backend -
 wasm32 has no PCIe, so `Context.open` here is always the software
 backend.
+
+## 2026-09-03 - the reviewer's gates on the phase-2 merge (ABI 0.4)
+
+Three runs on DESKTOP-T33SK86 (Windows), each on a clean tree, before
+phase 2 and the JavaScript surface it needed were merged.
+
+**The phase-2 tree itself, c9a180e, the whole standard set:** 26
+stages executed, 25 ok, images skipped by name (no xclbinutil on
+Windows), and ONE failure that was the expected one - `wasm` in 3 s,
+the page's ABI check refusing a module at 0.3 against a header at 0.4.
+Everything the C side touches passed: golden 173 s (941 tests), vectors
+14 s, sim 408 s at SIM_JOBS=8, lint 46 s, formal 28 s, libcft 93 s
+(365,845-case replay), transcend 107 s (154,269 comparisons, then
+143,069 through the escalation path), mpfr 47 s (414,008 cases, zero
+mismatches), cpp 326 s (3,751 checks at each standard), bindings 6 s
+(384 tests), the seven language legs, node 269 s, soak-quick 85 s. Run
+id 20260903-033117-c9a180e.
+
+**The merged tree, 047430a (phase 2 over the 0.3 JavaScript surface),
+the eight stages the merge could move:** vectors, libcft, transcend,
+bindings, cpp and mpfr ok; node and wasm FAIL - `unknown function
+"sinpi" - this package's table and cft.h have diverged` and `the page
+reports ABI 0.3 where the tree is at 0.4`. Both refusals by name, which
+is what the JavaScript gates were built to do when the library moves
+under them. Run id 20260903-033321-047430a.
+
+**The tree that ships, with the 0.4 modules:** vectors, bindings, node
+and wasm ok - node 376 s, wasm 218 s - the 58-export module
+replaying every set the drop zone accepts. Run id 20260903-051451-f3d36ed.
+
+Two defects phase 2 found in phase 1's work are worth restating here
+because the 2026-09-02 entries above were written before them: the
+MPFR harness's transcendental pool had discarded every directed
+operand since it was written (an inverted success test), so the
+phase-1 parity campaign ran on specials and randoms; and the
+exact-cancellation repair in the evaluator's add was unsound below the
+contract's working precisions (a saturated RELATIVE bound cannot hold
+an ABSOLUTE window around zero). Neither produced a wrong answer at
+any precision the contract uses - the forced-low run is what reached
+them - and both are fixed on the tree above, with the MPFR campaign
+re-run on the repaired pool.
