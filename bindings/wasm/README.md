@@ -138,9 +138,12 @@ without.
 
 ```bash
 make vectors                       # from the repo root, once
-bash bindings/wasm/build.sh        # produces the node loader too
-node bindings/wasm/verify.mjs      # ~4 minutes
+node bindings/wasm/verify.mjs      # 2 s, node 22
 ```
+
+No build is needed: the loader it drives is `bindings/node`'s
+committed one. `bash bindings/wasm/build.sh` puts a fresh copy in
+`build/` as well, and `verify.mjs` takes whichever it finds.
 
 A person watching a browser is how this page was signed off, and it
 is not a thing you can re-run after a rebuild - which is exactly how
@@ -165,7 +168,8 @@ the build directory:
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
 rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
-identical to `build/cft_node.wasm`; `cftw_abi_version()` = 2 = ABI
+identical to the node loader's `bindings/node/cft_node.wasm` (and to
+`build/cft_node.wasm`); `cftw_abi_version()` = 2 = ABI
 0.2, matching `cft.h`; 38 `cftw_*` exports; **236,000 cases over 20
 sets, zero mismatches**. Two clean container builds produced the same
 `conformance.html` (sha256 `333dabd8c067a04a…`), so the

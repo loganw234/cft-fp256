@@ -48,6 +48,7 @@ output lives in its own header and is compared by eye.
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8) | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
 | Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm 66 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt; 38 `cftw_*` exports, the whole ABI 0.2 surface | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
+| Node / JavaScript | `bindings/node/` | full package: the 38 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, the clause-5 surface, exact-decimal I/O | Windows 2026-09-02, node 22.19.0: 43 tests; 236,000-case vectors replay clean through the page's own module; decimal parsing checked against V8's strtod | loads the SAME wasm module as the browser page (sha256 checked, not assumed). Encodings are `Uint8Array`/`BigInt`, never a JS `number` - see Drop-ins below for why it is a drop-in for nothing |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
@@ -87,14 +88,15 @@ vector_fma surface, and none has been extended to the new calls yet.
 host/tests/clause5_check.py is the reference consumer (ctypes,
 every entry point) a new binding can crib declarations from.
 
-One row now *carries* the new surface without exercising it, and the
-distinction is worth keeping: as of 2026-09-02 the wasm module
-exports all twenty clause-5 entry points (it had been built from six
-sources, missing `src/clause5.c` entirely), but nothing in the page
-or its replay calls them - the published vectors cover `cft_run`'s
-opcode space, not clause 5. Present and callable, unexercised here,
-and the only thing that has actually been run against them is
-`clause5_check.py` on the native library.
+Two rows have moved since. As of 2026-09-02 the wasm module exports
+all twenty clause-5 entry points (it had been built from six sources,
+missing `src/clause5.c` entirely); the *page* still calls none of them,
+because the published vectors cover `cft_run`'s opcode space and not
+clause 5. `bindings/node` is the first binding outside
+`host/tests/clause5_check.py` that actually drives them - rint,
+scaleb, logb, nextUp/nextDown, class, totalOrder, the signaling
+compares, convert, the integer conversions and remainder each have a
+test - on the wasm build rather than the native library.
 
 ## Drop-ins
 
@@ -110,3 +112,28 @@ dtype/ufunc layer over the batch API; an mpmath context; a
 gmpy2-compatible C extension for zero-source-change swaps. Each is a
 shape question, not a semantics question - the semantics are the
 contract, and the contract does not move.
+
+**JavaScript has nothing to be a drop-in for (surveyed 2026-09-02).**
+`bindings/node` was built as a binding, not a drop-in, and the reason
+is worth recording so the question does not get re-opened from
+memory. Against the versions npm serves today: `decimal.js` 10.6.0,
+`bignumber.js` 11.1.5 and `big.js` 7.0.1 are arbitrary-precision
+**decimal** - their `precision` counts decimal digits and their
+rounding modes round decimals, which is a different radix and a
+different question, so imitating one would mean claiming semantics
+this library does not implement. `gmp-wasm` 1.3.2 is the only binary
+candidate - GMP and MPFR compiled to wasm - and is still not it: its
+high-level `getFloatContext` takes `precisionBits` and a rounding mode
+and nothing else, with no exponent bounds and no subnormalization
+(`mpfr_set_emin`/`_emax`/`mpfr_subnormalize` live only on its raw
+binding surface), so it is unbounded-exponent MPFR rather than an
+interchange-format emulator; and its fifth rounding mode is MPFR's
+`RNDA`, away-from-zero for every inexact value, not roundTiesToAway.
+The language itself offers `number` (binary64) and the two typed
+arrays, and nothing that carries flags. So the honest shape is the C
+ABI one to one plus a Context/Float layer - the same layer cftmpfr
+has, because that is the shape numerical code is written in, not
+because it imitates a package. If a JavaScript MPFR context ever
+grows the `ieee(n)` recipe, the interop path is the one cftmpfr
+already uses: integer significand and exponent, never a decimal
+detour.

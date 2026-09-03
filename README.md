@@ -124,8 +124,9 @@ host/examples/       the same program in C, Python (ctypes), Julia, Rust,
                      outside that diff; the full language/drop-in matrix
                      with per-row verification status is
                      docs/COMPATIBILITY.md
-bindings/            cftmpfr (the Python MPFR drop-in) and the WASM build
-                     behind the browser conformance page
+bindings/            cftmpfr (the Python MPFR drop-in), the WASM build
+                     behind the browser conformance page, and the Node
+                     package that loads that same module outside a browser
 formal/              the property proofs (make formal): FIFO, seeds,
                      simpleops equivalence, plus the negative control
 verify/              the standardized verification runner (make verify):
