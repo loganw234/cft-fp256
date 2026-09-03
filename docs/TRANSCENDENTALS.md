@@ -456,7 +456,7 @@ Windows 11, mingw64 gcc 16.1, MPFR 4.2.1, CPython 3.12, 2026-09-02.
 | `python/tests/test_transcend.py` | 389 tests | pass |
 | `python/tests/test_mp_consts.py` | 3 tests | pass |
 | `host/tests/transcend_check.py`, C vs the model | 77,315 comparisons | C == model on every one, bits and flags |
-| the same, with the library forced to start below the precision it needs | 77,315 comparisons | identical results through the escalation path |
+| the same, with the library forced to start below the precision it needs | 72,275 comparisons | identical results through the escalation path |
 | MPFR parity, the nine functions | 95,680 cases (4 formats x 5 attributes) | zero value mismatches, zero flag mismatches |
 | `cft_conformance` replay, transcendental sets | 64,325 cases in 20 sets | every case, bits and flags |
 | `cft.hpp` vs `cft.h` | 3,267 checks at C++17 and C++20 | identical bits and flags |
@@ -480,7 +480,8 @@ MPFR campaign, and it is what found the exact-cancellation hole in the
 error bound described above. The knob cannot change a result: a
 rounding the enclosure decides at some precision is decided the same
 way at every higher one, because raising the precision only narrows the
-enclosure - and the run proves it, over 77,315 comparisons.
+enclosure - and the run proves it, over 72,275 comparisons against a
+reference that did not escalate.
 
 ## What is not here
 
