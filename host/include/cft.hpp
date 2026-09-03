@@ -1264,13 +1264,30 @@ public:
     std::string flag_names() const { return cft::flag_names(sticky_); }
 
     /* -- making values -------------------------------------------- */
-    value_type make(const encoding_type &e) noexcept { return value_type(this, e); }
-    value_type zero(int sign = 0) noexcept { return make(zero_enc<F>(sign)); }
-    value_type inf(int sign = 0) noexcept { return make(inf_enc<F>(sign)); }
-    value_type quiet_nan() noexcept { return make(quiet_nan_enc<F>()); }
-    value_type signaling_nan() noexcept { return make(signaling_nan_enc<F>()); }
-    value_type one() noexcept { return make(one_enc<F>()); }
-    value_type from_hex(const std::string &s) { return make(cft::from_hex<F>(s)); }
+    /* Every member below that hands back a value_type is lvalue-ref-
+     * qualified - the trailing `&` on its signature. A value carries a
+     * pointer to the context that made it, and with_rounding() returns
+     * a context BY VALUE, so
+     *
+     *     auto y = ctx.with_rounding(CFT_RUP).one();   // does not compile
+     *
+     * would otherwise hand back a value whose context is gone at the
+     * semicolon and whose first operator use is undefined behaviour.
+     * Name the context first and it is fine:
+     *
+     *     auto up = ctx.with_rounding(CFT_RUP);
+     *     auto y  = up.one();
+     *
+     * The batch members return a flag word and bind nothing, so they
+     * are not qualified: ctx.with_rounding(CFT_RUP).fma(a, b, c, d) is
+     * a legitimate one-liner. */
+    value_type make(const encoding_type &e) & noexcept { return value_type(this, e); }
+    value_type zero(int sign = 0) & noexcept { return make(zero_enc<F>(sign)); }
+    value_type inf(int sign = 0) & noexcept { return make(inf_enc<F>(sign)); }
+    value_type quiet_nan() & noexcept { return make(quiet_nan_enc<F>()); }
+    value_type signaling_nan() & noexcept { return make(signaling_nan_enc<F>()); }
+    value_type one() & noexcept { return make(one_enc<F>()); }
+    value_type from_hex(const std::string &s) & { return make(cft::from_hex<F>(s)); }
 
     /* -- supports ------------------------------------------------- */
     bool supports(cft_op op) const noexcept { return dev_->supports(op, F); }
@@ -1435,7 +1452,7 @@ public:
      * at every node. n == 0 is +0 and raises nothing; n == 1 is a[0]
      * verbatim, not even quieting a signaling NaN. */
     value_type reduce(cft_op op, cspan<encoding_type> a,
-                      cspan<encoding_type> b)
+                      cspan<encoding_type> b) &
     {
         if (op == CFT_DOT && b.size() != a.size())
             throw std::invalid_argument(
@@ -1447,11 +1464,11 @@ public:
                "cft_reduce");
         return make(d);
     }
-    value_type sum(cspan<encoding_type> a)
+    value_type sum(cspan<encoding_type> a) &
     {
         return reduce(CFT_SUM, a, cspan<encoding_type>());
     }
-    value_type dot(cspan<encoding_type> a, cspan<encoding_type> b)
+    value_type dot(cspan<encoding_type> a, cspan<encoding_type> b) &
     {
         return reduce(CFT_DOT, a, b);
     }
@@ -1621,37 +1638,37 @@ public:
      * a streaming engine does not want.
      * =========================================================== */
     value_type fma(const value_type &x, const value_type &y,
-                   const value_type &z)
+                   const value_type &z) &
     {
         return one_of(CFT_FMA, x.bytes(), y.bytes(), z.bytes());
     }
-    value_type add(const value_type &x, const value_type &y)
+    value_type add(const value_type &x, const value_type &y) &
     { return one_of(CFT_ADD, x.bytes(), null_enc(), y.bytes()); }
-    value_type sub(const value_type &x, const value_type &y)
+    value_type sub(const value_type &x, const value_type &y) &
     { return one_of(CFT_SUB, x.bytes(), null_enc(), y.bytes()); }
-    value_type mul(const value_type &x, const value_type &y)
+    value_type mul(const value_type &x, const value_type &y) &
     { return one_of(CFT_MUL, x.bytes(), y.bytes(), null_enc()); }
-    value_type abs(const value_type &x)
+    value_type abs(const value_type &x) &
     { return one_of(CFT_ABS, x.bytes(), null_enc(), null_enc()); }
-    value_type neg(const value_type &x)
+    value_type neg(const value_type &x) &
     { return one_of(CFT_NEG, x.bytes(), null_enc(), null_enc()); }
-    value_type copysign(const value_type &x, const value_type &y)
+    value_type copysign(const value_type &x, const value_type &y) &
     { return one_of(CFT_COPYSIGN, x.bytes(), y.bytes(), null_enc()); }
-    value_type min(const value_type &x, const value_type &y)
+    value_type min(const value_type &x, const value_type &y) &
     { return one_of(CFT_MIN, x.bytes(), y.bytes(), null_enc()); }
-    value_type max(const value_type &x, const value_type &y)
+    value_type max(const value_type &x, const value_type &y) &
     { return one_of(CFT_MAX, x.bytes(), y.bytes(), null_enc()); }
-    value_type minnum(const value_type &x, const value_type &y)
+    value_type minnum(const value_type &x, const value_type &y) &
     { return one_of(CFT_MINNUM, x.bytes(), y.bytes(), null_enc()); }
-    value_type maxnum(const value_type &x, const value_type &y)
+    value_type maxnum(const value_type &x, const value_type &y) &
     { return one_of(CFT_MAXNUM, x.bytes(), y.bytes(), null_enc()); }
     value_type select(const value_type &a, const value_type &b,
-                      const value_type &c)
+                      const value_type &c) &
     { return one_of(CFT_SELECT, a.bytes(), b.bytes(), c.bytes()); }
-    value_type predicate(cft_op cmp, const value_type &x, const value_type &y)
+    value_type predicate(cft_op cmp, const value_type &x, const value_type &y) &
     { return one_of(cmp, x.bytes(), y.bytes(), null_enc()); }
 
-    value_type div(const value_type &x, const value_type &y)
+    value_type div(const value_type &x, const value_type &y) &
     {
         encoding_type d{};
         record(dev_->div(F, rnd_, x.bytes().data(), y.bytes().data(),
@@ -1659,46 +1676,46 @@ public:
                "cft_div");
         return make(d);
     }
-    value_type sqrt(const value_type &x)
+    value_type sqrt(const value_type &x) &
     {
         encoding_type d{};
         record(dev_->sqrt(F, rnd_, x.bytes().data(), d.data(), 1), "cft_sqrt");
         return make(d);
     }
-    value_type rint(const value_type &x, bool exact = false)
+    value_type rint(const value_type &x, bool exact = false) &
     {
         encoding_type d{};
         record(dev_->rint(F, rnd_, exact, x.bytes().data(), d.data(), 1),
                "cft_rint");
         return make(d);
     }
-    value_type scaleb(const value_type &x, std::int64_t nexp)
+    value_type scaleb(const value_type &x, std::int64_t nexp) &
     {
         encoding_type d{};
         record(dev_->scaleb(F, rnd_, x.bytes().data(), nexp, d.data(), 1),
                "cft_scaleb");
         return make(d);
     }
-    value_type logb(const value_type &x)
+    value_type logb(const value_type &x) &
     {
         encoding_type d{};
         record(dev_->logb(F, x.bytes().data(), d.data(), 1), "cft_logb");
         return make(d);
     }
-    value_type next_up(const value_type &x)
+    value_type next_up(const value_type &x) &
     {
         encoding_type d{};
         record(dev_->next_up(F, x.bytes().data(), d.data(), 1), "cft_next_up");
         return make(d);
     }
-    value_type next_down(const value_type &x)
+    value_type next_down(const value_type &x) &
     {
         encoding_type d{};
         record(dev_->next_down(F, x.bytes().data(), d.data(), 1),
                "cft_next_down");
         return make(d);
     }
-    value_type rem(const value_type &x, const value_type &y)
+    value_type rem(const value_type &x, const value_type &y) &
     {
         encoding_type d{};
         record(dev_->rem(F, x.bytes().data(), y.bytes().data(), d.data(), 1),
@@ -1738,7 +1755,7 @@ public:
 
     /* An integer, converted by the library (5.4.1). */
     template <class Int>
-    value_type from_int(Int v)
+    value_type from_int(Int v) &
     {
         encoding_type d{};
         record(dev_->cvt_from(F, rnd_, &v, d.data(), 1), "cft_cvt_from");
@@ -1760,7 +1777,7 @@ public:
      * which is exact for fp64/fp128/fp256 and a real rounding for
      * fp32. Nothing wider than binary64 is ever routed through a
      * double: a value that does not fit one never becomes one here. */
-    value_type from_double(double x)
+    value_type from_double(double x) &
     {
         fp64_enc src{};
         std::memcpy(src.data(), &x, sizeof x);
@@ -1839,7 +1856,7 @@ private:
     }
 
     value_type one_of(cft_op op, const encoding_type &a, const encoding_type &b,
-                      const encoding_type &c)
+                      const encoding_type &c) &
     {
         encoding_type d{};
         record(dev_->run(op, F, rnd_, a.data(), b.data(), c.data(), d.data(), 1),
@@ -1851,7 +1868,7 @@ private:
      * kept honest so the wrapper's scalar path issues exactly the C
      * call the batch path issues. */
     value_type one_of(cft_op op, const encoding_type &a,
-                      cspan<encoding_type> b, const encoding_type &c)
+                      cspan<encoding_type> b, const encoding_type &c) &
     {
         encoding_type d{};
         record(dev_->run(op, F, rnd_, a.data(), ptr(b), c.data(), d.data(), 1),
@@ -1859,7 +1876,7 @@ private:
         return make(d);
     }
     value_type one_of(cft_op op, const encoding_type &a,
-                      const encoding_type &b, cspan<encoding_type> c)
+                      const encoding_type &b, cspan<encoding_type> c) &
     {
         encoding_type d{};
         record(dev_->run(op, F, rnd_, a.data(), b.data(), ptr(c), d.data(), 1),
@@ -1867,7 +1884,7 @@ private:
         return make(d);
     }
     value_type one_of(cft_op op, const encoding_type &a,
-                      cspan<encoding_type> b, cspan<encoding_type> c)
+                      cspan<encoding_type> b, cspan<encoding_type> c) &
     {
         encoding_type d{};
         record(dev_->run(op, F, rnd_, a.data(), ptr(b), ptr(c), d.data(), 1),
