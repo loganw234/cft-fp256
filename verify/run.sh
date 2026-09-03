@@ -298,6 +298,10 @@ need() {  # docker|host-cc|xclbinutil ...
                    || STAGE_SKIP_REASON="no C compiler"; fi;;
       python) command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="no python";;
+      # A module, not a command: the interpreter PY() picks must import
+      # it, or the pytest stages say so instead of failing in 0 s.
+      pytest) PY -c 'import pytest' >/dev/null 2>&1 \
+        || STAGE_SKIP_REASON="python has no pytest module (pip install pytest)";;
       xclbinutil) command -v xclbinutil >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="xclbinutil not present (XRT hosts only)";;
       mpfr) [ -f "$ROOT/verify/_mpfr-prefix/include/mpfr.h" ] || \
@@ -336,7 +340,7 @@ need() {  # docker|host-cc|xclbinutil ...
 # it, vectors before their replay, the library before its sweeps.
 
 
-need python
+need python pytest
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q
 
@@ -436,7 +440,7 @@ do_bindings() {
   CFT_LIB="$ROOT/host/$SHLIB_NAME" PY -m pytest -q \
     "$ROOT/bindings/python/test_cftmpfr.py"
 }
-need host-cc python
+need host-cc python pytest
 stage bindings "the cftmpfr drop-in vs gmpy2's IEEE emulation: encodings, flags, refusals" \
   -- do_bindings
 
