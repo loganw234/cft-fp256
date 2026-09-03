@@ -48,7 +48,7 @@ output lives in its own header and is compared by eye.
 | Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18); 2026-09-02 as runner stage `lang-go` on the desktop's WSL, CI, and Windows (go 1.26.4 from pacman, GOROOT carried by the runner) | static-links libcft.a as a direct linker input |
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8); 2026-09-02 as runner stage `lang-csharp` on Windows, the desktop's WSL (dotnet 8.0.130) and CI | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL, and on Windows (R 4.6.1 with Rtools45, whose gcc 14.3 builds the shim) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
-| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm 66 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt; 38 `cftw_*` exports, the whole ABI 0.2 surface | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged; 2026-09-02 as runner stage `wasm` on Windows and CI, 392,000 cases | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
+| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, ~1 MB, wasm 66 KB) with drag-drop full-set replay and a compute panel incl. composed div/sqrt; 38 `cftw_*` exports - the whole ABI 0.2 surface; the module is built from the 0.3 sources and reports 0.3, but the nine transcendentals have no `cftw_*` wrapper yet | Chrome 2026-09-01: embedded 4,015-case sample clean AND full 236,000-case replay clean; negative control screenshotted; two container builds byte-identical. Rebuilt 2026-09-02 (same pinned emsdk 6.0.9, source list now derived from `host/Makefile`): `node bindings/wasm/verify.mjs` extracts the committed page's module, gets ABI 0.2 from it, and replays 236,000 cases clean through it - not re-opened in a browser that day, template unchanged; 2026-09-02 as runner stage `wasm` on Windows and CI, 392,000 cases | bit-exact BY CONSTRUCTION - the softfloat is integer-only and wasm integer semantics are fully specified. Replays the published vectors with only a compliant browser. Browser-GPU compute is deliberately out of scope: that floating point is the nondeterminism this project exists against |
 | Node / JavaScript | `bindings/node/` | full package: the 38 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, the clause-5 surface, exact-decimal I/O | Windows 2026-09-02, node 22.19.0: 43 tests; 236,000-case vectors replay clean through the page's own module; decimal parsing checked against V8's strtod; 2026-09-02 as runner stage `node` on Windows and CI - the 392,000-case replay takes 4 s, the 43 unit tests 272 s on the Windows host and 126 s on ubuntu, a gap measured and not yet explained | loads the SAME wasm module as the browser page (sha256 checked, not assumed). Encodings are `Uint8Array`/`BigInt`, never a JS `number` - see Drop-ins below for why it is a drop-in for nothing |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
@@ -198,15 +198,19 @@ because the honest answer differs:
 | C++ (`cft.hpp`) | complete, all three layers, and `cpp_api_test` issues every one twice - through the wrapper and through `cft.h` - comparing encodings and flags: 3,267 checks at C++17 and C++20 |
 | Python (`cftmpfr`) | complete on `Context` and in `batch`, with 268 tests including bit-for-bit agreement with gmpy2's IEEE emulation at every precision and every attribute MPFR has |
 | conformance vectors | complete: 20 new sets, `<fmt>-transcend[-<rnd>].jsonl`, 64,325 cases, replayed by `cft_conformance` |
-| Node (`bindings/node`) | **PENDING at ABI 0.2.** The wasm module it loads is a committed artifact and was not rebuilt for 0.3, so it exports the 0.2 surface and its tests drive nothing new |
-| Browser / WASM page | **PENDING at ABI 0.2**, for the same reason - the committed page is a build artifact, and rebuilding it is an emsdk run that did not fit in this change |
+| Node (`bindings/node`) | module rebuilt from the 0.3 sources, so `cft_conformance` inside it replays transcendental sets; `wasm_api.c` has no `cftw_*` wrapper for any of the nine, so no JavaScript caller can invoke one |
+| Browser / WASM page | rebuilt the same way and with the same caveat: the replay understands the new sets, the compute panel has no control for them, and the embedded sample stays the twenty opcode sets its sampling rule covers |
 
-Those last two rows are pending, not done, and they are written that
-way here rather than left to be inferred from a table that stopped
-being true. Rebuilding them is `bash bindings/wasm/build.sh` with the
-pinned emsdk and a re-verify of the page; the source list is already
-derived from `host/Makefile`, so the new files come along on their
-own.
+The last two rows are the honest half-step. `bash
+bindings/wasm/build.sh` rebuilt both artifacts on 2026-09-03 against
+the pinned emsdk, and because that build asks `host/Makefile` what it
+compiles rather than carrying a list, `mpfloat.c` and `transcend.c`
+came along on their own: the module reports ABI 0.3 and the
+`cft_conformance` inside it understands the new vector sets. What did
+NOT happen is a `cftw_*` wrapper or a page control for any of the nine,
+so no JavaScript caller can invoke one and no test on either surface
+drives one. A row that said "ABI 0.3" and stopped there would be true
+and misleading.
 
 ## Drop-ins
 

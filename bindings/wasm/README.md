@@ -91,19 +91,19 @@ the override it warns and proceeds. Stages:
    reported wasm size is a measured fact) and `-sSINGLE_FILE` for
    embedding;
 3. `make_page.py` samples the sets and splices runtime, sample and
-   provenance into `page_template.html` → `conformance.html`;
-4. the same assembly with `--corrupt` →
+   provenance into `page_template.html` â†’ `conformance.html`;
+4. the same assembly with `--corrupt` â†’
    `build/negative_control.html` (untracked): one expected value
    deliberately flipped, so anyone can watch the page fail. The
    corrupted expectation, the red verdict and the library's verbatim
    disagreement report are the proof that this checker *can* fail;
    a checker never seen failing proves nothing;
-5. the same module once more with `-sENVIRONMENT=node` →
+5. the same module once more with `-sENVIRONMENT=node` â†’
    `build/cft_node.js` + `.wasm`, and into `bindings/node/` when that
    package is present. `-sENVIRONMENT` changes the loader and not the
    wasm, so this is the page's module with a different front door -
    measured, not assumed: both builds hash to
-   `7504440ef7ca5c9d…` on 2026-09-02. It is what lets `verify.mjs`
+   `7504440ef7ca5c9dâ€¦` on 2026-09-02. It is what lets `verify.mjs`
    replay the full sets without a browser.
 
 **The source list is derived, because the typed one drifted.**
@@ -118,8 +118,8 @@ longer holds a list: it asks `host/Makefile` (via `make --eval`) what
 build instead of vanishing from it.
 
 **The sampling rule** (also in `build.sh`, `make_page.py`, and on the
-page): from each of the 20 sets (4 formats × 5 rounding attributes,
-11,800 lines each) take every 59th line - 0-based lines 0, 59, 118, …
+page): from each of the 20 sets (4 formats Ã— 5 rounding attributes,
+11,800 lines each) take every 59th line - 0-based lines 0, 59, 118, â€¦
 = exactly 200 per set - then add the set's first line of any opcode
 name the stride missed, so every opcode class is embedded per set by
 construction rather than by luck. `conformance.html` is a committed
@@ -134,7 +134,7 @@ contract. Since 2026-09-02 that includes the clause-5 completion set
 - `cftw_rint`, `cftw_convert`, the eight integer conversions,
 `cftw_scaleb`/`cftw_logb`, `cftw_next_up`/`_down`, `cftw_class`,
 `cftw_total_order`(`_mag`), `cftw_cmp_sig`, `cftw_rem` - which the
-page does not call and a module claiming ABI 0.2 should not be
+page does not call and a module claiming its ABI version should not be
 without.
 
 ## Verifying it, without a browser
@@ -170,12 +170,12 @@ the build directory:
    library's own file-reading path, one call per set.
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
-rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
+rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9dâ€¦`,
 identical to the node loader's `bindings/node/cft_node.wasm` (and to
 `build/cft_node.wasm`); `cftw_abi_version()` = 2 = ABI
 0.2, matching `cft.h`; 38 `cftw_*` exports; **236,000 cases over 20
 sets, zero mismatches**. Two clean container builds produced the same
-`conformance.html` (sha256 `333dabd8c067a04a…`), so the
+`conformance.html` (sha256 `333dabd8c067a04aâ€¦`), so the
 reproducibility claim below still holds with the derived source list.
 And the harness was seen failing before it was believed: one expected
 value in `fp128-rup.jsonl` flipped by a hex digit stops the run at
@@ -205,7 +205,7 @@ on 2026-09-01.
 * **The sequencer is compiled in but not exported.** No panel drives
   `cft_program_*` yet, and this page only claims surfaces it
   exercises.
-* **The page is at ABI 0.2 as of 2026-09-02, surface included.** The
+* **The page is at ABI 0.3 as of 2026-09-03, surface included.** The
   page committed on 2026-09-01 (5ec0883) was built eighty minutes
   before the clause-5 completion set landed, so its module answered
   `cftw_abi_version()` with 1 and its identity line read *libcft ABI
@@ -218,7 +218,7 @@ on 2026-09-01.
   change: `page_template.html` is untouched, and the diff is the two
   spliced lines (runtime, build info).
 * Reproducibility claim, precisely: same pinned image + same repo
-  state → same page. The vectors are seeded and the sampling is a
+  state â†’ same page. The vectors are seeded and the sampling is a
   pure function of them; `emcc` is deterministic within the pinned
   image. Across *different* emsdk releases the wasm bytes will
   differ; the arithmetic they compute must not - and the page is
@@ -228,7 +228,7 @@ on 2026-09-01.
 
 ```
 build.sh             the containerized build, image pinned by tag+digest
-wasm_api.c           the exported C surface (cftw_* ≙ cft.h, 1:1)
+wasm_api.c           the exported C surface (cftw_* â‰™ cft.h, 1:1)
 page_template.html   the page, with three @CFT_*@ splice tokens open
 make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
