@@ -45,6 +45,22 @@ static void put32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)(v >> 24);
 }
 
+static void put64(uint8_t *p, uint64_t v)
+{
+    int i;
+    for (i = 0; i < 8; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static uint64_t get64(const uint8_t *p)
+{
+    uint64_t v = 0;
+    int i;
+    for (i = 0; i < 8; i++)
+        v |= (uint64_t)p[i] << (8 * i);
+    return v;
+}
+
 static uint32_t get32(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -896,6 +912,182 @@ int main(void)
         CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
               f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
               "atan2(minSub, 2) to nearest is +0: just below a midpoint");
+    }
+
+    /* --- the phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
+     *
+     * The same charter: the refusals, the exact cases whose bits come
+     * from a theorem rather than from the library, the special rows,
+     * one case from every neighbour family - and the reduction's two
+     * published worst cases, whose expected bits come from the rule
+     * beside 1 and from mpmath at 700 bits, an oracle that shares
+     * nothing with the library.
+     */
+    {
+        uint8_t a[8], d[8];
+        uint32_t f3 = 0xdead;
+
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        CHECK(cft_sin(dev, CFT_FP32, (cft_round)-1, a, d, 1, &f3)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_sin refuses an out-of-range rounding attribute");
+        CHECK(cft_cosh(dev, (cft_format)9, CFT_RNE, a, d, 1, &f3)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_cosh refuses an unknown format");
+        f3 = 0xdead;
+        CHECK(cft_atanh(dev, CFT_FP32, CFT_RNE, NULL, NULL, 0, &f3)
+                  == CFT_OK && f3 == 0,
+              "cft_atanh with n == 0 touches nothing and clears the flags");
+
+        /* The exact cases are the zeros - Hermite-Lindemann makes the
+         * list a theorem - and every one raises NOTHING. */
+        put32(a, 0x80000000u);                       /* -0.0f */
+        st = cft_sin(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "sin(-0) = -0 EXACTLY");
+        st = cft_cos(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "cos(-0) = 1 EXACTLY");
+        st = cft_tan(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "tan(-0) = -0 EXACTLY");
+        st = cft_sinh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "sinh(-0) = -0 EXACTLY");
+        st = cft_cosh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "cosh(-0) = 1 EXACTLY");
+        st = cft_tanh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "tanh(-0) = -0 EXACTLY");
+        st = cft_asinh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "asinh(-0) = -0 EXACTLY");
+        st = cft_atanh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f3 == 0,
+              "atanh(-0) = -0 EXACTLY");
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        st = cft_acosh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f3 == 0,
+              "acosh(1) = +0 EXACTLY");
+        st = cft_atanh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f3 == CFT_FLAG_DIVBYZERO,
+              "atanh(1) = +inf with divideByZero: the pole");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        st = cft_atanh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f3 == CFT_FLAG_DIVBYZERO,
+              "atanh(-1) = -inf with divideByZero");
+        st = cft_acosh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f3 == CFT_FLAG_INVALID,
+              "acosh(-1) is invalid: the domain starts at 1");
+        put32(a, 0x7f800000u);                       /* +inf */
+        st = cft_tanh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f3 == 0,
+              "tanh(+inf) = 1 EXACTLY: a limit that is representable");
+        st = cft_sin(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f3 == CFT_FLAG_INVALID,
+              "sin(+inf) is invalid: there is no limit there");
+        st = cft_acosh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f3 == 0,
+              "acosh(+inf) = +inf, silent");
+        st = cft_atanh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f3 == CFT_FLAG_INVALID,
+              "atanh(+inf) is invalid");
+        put32(a, 0xff800000u);                       /* -inf */
+        st = cft_cosh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f3 == 0,
+              "cosh(-inf) = +inf: even");
+        st = cft_sinh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u && f3 == 0,
+              "sinh(-inf) = -inf: odd");
+        st = cft_acosh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f3 == CFT_FLAG_INVALID,
+              "acosh(-inf) is invalid");
+
+        /* One case from every neighbour family, each a SIDE and not a
+         * value. sin, tanh and asinh lie on the zero side of a tiny
+         * argument; tan, sinh and atanh on the far side; cos is below 1
+         * and cosh above it. */
+        put32(a, 0x00000001u);                       /* min subnormal */
+        st = cft_sin(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "sin(min subnormal) downward is +0: sin is BELOW its argument");
+        st = cft_sin(dev, CFT_FP32, CFT_RUP, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "sin(min subnormal) upward stays put");
+        st = cft_tan(dev, CFT_FP32, CFT_RUP, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "tan(min subnormal) upward steps off it: tan is ABOVE");
+        st = cft_sinh(dev, CFT_FP32, CFT_RUP, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "sinh(min subnormal) upward steps off it");
+        st = cft_tanh(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "tanh(min subnormal) toward zero is +0");
+        st = cft_asinh(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "asinh(min subnormal) to nearest stays put");
+        st = cft_atanh(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f3 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "atanh(min subnormal) downward stays put: atanh is ABOVE");
+        st = cft_cos(dev, CFT_FP32, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f7fffffu &&
+              f3 == CFT_FLAG_INEXACT,
+              "cos(min subnormal) downward is nextDown(1)");
+        st = cft_cosh(dev, CFT_FP32, CFT_RUP, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800001u &&
+              f3 == CFT_FLAG_INEXACT,
+              "cosh(min subnormal) upward is nextUp(1)");
+
+        /* The reduction's published worst cases. 16367173 * 2^72 is the
+         * binary32 argument nearest a multiple of pi/2 and
+         * 0x1.6ac5b262ca1ffp+849 the binary64 one; the search in
+         * host/tools/pi_worstcase.py rediscovers both. Both sit beside
+         * an ODD multiple, so the sines are 1 minus about 2^-59 and
+         * 2^-123 - inside the half gap below 1, where the neighbour
+         * rule beside 1 decides: 1 to nearest, nextDown(1) toward
+         * zero. The cosines are the reduced arguments themselves (up
+         * to sign), and those bits come from mpmath at 700 bits,
+         * rounded to the format by hand. */
+        put32(a, 0x6f79be45u);
+        st = cft_sin(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u &&
+              f3 == CFT_FLAG_INEXACT,
+              "sin(binary32 worst case) to nearest is 1");
+        st = cft_sin(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0x3f7fffffu &&
+              f3 == CFT_FLAG_INEXACT,
+              "sin(binary32 worst case) toward zero is nextDown(1)");
+        st = cft_cos(dev, CFT_FP32, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get32(d) == 0xb0ddeea9u &&
+              f3 == CFT_FLAG_INEXACT,
+              "cos(binary32 worst case) is the reduced argument, -1.6148e-9");
+        put64(a, UINT64_C(0x7506ac5b262ca1ff));
+        st = cft_sin(dev, CFT_FP64, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get64(d) == UINT64_C(0x3ff0000000000000) &&
+              f3 == CFT_FLAG_INEXACT,
+              "sin(binary64 worst case) to nearest is 1");
+        st = cft_sin(dev, CFT_FP64, CFT_RDN, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get64(d) == UINT64_C(0x3fefffffffffffff) &&
+              f3 == CFT_FLAG_INEXACT,
+              "sin(binary64 worst case) downward is nextDown(1)");
+        st = cft_cos(dev, CFT_FP64, CFT_RNE, a, d, 1, &f3);
+        CHECK(st == CFT_OK && get64(d) == UINT64_C(0xbc214ae72e6ba22f) &&
+              f3 == CFT_FLAG_INEXACT,
+              "cos(binary64 worst case) is the reduced argument, -4.687e-19");
     }
 
     /* --- the clause-5 completion set ------------------------------

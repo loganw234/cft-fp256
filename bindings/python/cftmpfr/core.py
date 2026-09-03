@@ -920,6 +920,60 @@ class Context:
         rounding of a multiple of pi."""
         return self._transcend2("atan2pi", y, x)
 
+    # ---- the phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
+    #
+    # sin, cos and tan take a RADIAN argument and are reduced against pi
+    # inside the library, at any magnitude the format holds; the six
+    # hyperbolics need no reduction. Every one is correctly rounded like
+    # the rest, and their exact cases are the zeros: sin, tan, sinh, tanh,
+    # asinh and atanh at +-0, cos and cosh at 0 (giving 1), acosh at 1
+    # (giving +0). That is a theorem (Hermite-Lindemann), so every other
+    # result raises inexact.
+
+    def sin(self, x):
+        """sin(x), x in radians. Exact only at +-0; sin(+-inf) is
+        invalid."""
+        return self._transcend1("sin", x)
+
+    def cos(self, x):
+        """cos(x) in radians. cos(+-0) = 1 is the only exact case;
+        cos(+-inf) is invalid."""
+        return self._transcend1("cos", x)
+
+    def tan(self, x):
+        """tan(x) in radians. Exact only at +-0. No representable
+        argument is a pole (an odd multiple of pi/2 is irrational), so it
+        never signals divideByZero - but it can overflow."""
+        return self._transcend1("tan", x)
+
+    def sinh(self, x):
+        """sinh(x). Odd, exact only at +-0, sinh(+-inf) = +-inf, and it
+        overflows for a large argument like any exponential."""
+        return self._transcend1("sinh", x)
+
+    def cosh(self, x):
+        """cosh(x). Even, never below 1, exact only at cosh(+-0) = 1."""
+        return self._transcend1("cosh", x)
+
+    def tanh(self, x):
+        """tanh(x). Odd, exact at +-0, and tanh(+-inf) = +-1 EXACTLY - a
+        limit that happens to be representable, raising nothing."""
+        return self._transcend1("tanh", x)
+
+    def asinh(self, x):
+        """asinh(x). Odd, exact only at +-0; asinh(+-inf) = +-inf."""
+        return self._transcend1("asinh", x)
+
+    def acosh(self, x):
+        """acosh(x) on [1, +inf). acosh(1) = +0 exactly; every x below 1
+        is invalid, zeros, negatives and -inf included."""
+        return self._transcend1("acosh", x)
+
+    def atanh(self, x):
+        """atanh(x) on (-1, 1). Exact only at +-0; atanh(+-1) is +-inf
+        with divideByZero; |x| > 1 is invalid, infinities included."""
+        return self._transcend1("atanh", x)
+
     def neg(self, x):
         """Sign flip, 754 5.5.1: quiet even on signaling NaNs, payload
         preserved - deliberately NOT 0 - x."""
