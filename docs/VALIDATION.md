@@ -1220,3 +1220,106 @@ Two hosts, two operating systems, one tree, the same 25 verdicts; the
 26th runs where the tool exists. The Node unit tests remain the one
 stage that is slower on Windows (264 s against 105 s), still measured
 and still unexplained.
+
+---
+
+## 2026-09-02 - the phase-1 transcendentals (ABI 0.3), commissioned
+
+Nine new library entry points - `cft_exp`, `cft_expm1`, `cft_exp2`,
+`cft_log`, `cft_log1p`, `cft_log2`, `cft_log10`, `cft_pow`,
+`cft_hypot` - correctly rounded at all four formats under all five
+rounding attributes, with IEEE 754-2019 clause 9.2.1's special values
+and the contract's exact flags. Zero RTL. docs/TRANSCENDENTALS.md is
+the design, its proofs and its honest gaps.
+
+What was run, on DESKTOP-T33SK86 (Windows 11, mingw64 gcc 16.1, MPFR
+4.2.1, CPython 3.12):
+
+| check | count | result |
+|---|---|---|
+| `python/tests/test_transcend.py` - the model's own suite | 389 tests | pass |
+| `python/tests/test_mp_consts.py` - the generated constants | 3 tests | pass |
+| `host/tests/transcend_check.py` - the C against the model, per element for exact flags plus batch calls | 77,315 comparisons | C == model on every one, bits and flags |
+| the same, with the library forced to START below the precision it needs, against an unescalated model | 72,275 comparisons | identical results through the escalation path |
+| `cft_conformance` replay of the new sets | 64,325 cases in 20 sets (part of 456,325 in 40) | every case, bits and flags |
+| MPFR parity, the nine functions, four formats, five attributes | 95,680 cases (part of 334,008) | **zero value mismatches, zero flag mismatches** |
+| `cft.hpp` against `cft.h`, every entry point twice | 3,267 checks at C++17 and again at C++20 | identical encodings and flags |
+| the cftmpfr drop-in against gmpy2's IEEE emulation | 268 tests | bit-for-bit at every precision and attribute MPFR has |
+| `api-test` contract checks | all | pass |
+
+MPFR is not the third oracle here but the ONLY one. libm is neither
+correctly rounded nor reproducible, so unlike div and sqrt there is no
+CPU campaign at fp32/fp64 to calibrate the harness against; agreement
+with MPFR is the entire external case. The signaling-NaN rows are the
+documented one-sided help - MPFR has none - and divideByZero comes from
+operand classes, as everywhere else in that harness.
+
+**Escalation, measured.** Over the MPFR campaign's 95,680 elements,
+15,350 reached the Ziv loop and it escalated **zero** times: every one
+was decided at the first attempt, 2p+40 bits. Over
+`transcend_check.py`'s pools the model escalated 36 times, all of them
+the `pow(1+u, -(1+u))` family, and the deepest working precision any
+input needed was **832 bits - the fp256 cap itself**, for that family.
+2,605 elements were decided exactly and 39,620 by a neighbour's side
+rather than by any precision at all.
+
+Because a path never taken is a path never tested, the `transcend`
+stage runs the sweep twice, the second time with the C forced to start
+at 64 bits. That run drives **6,542 escalations** and finds the same
+answers as an unescalated model over 72,275 comparisons.
+
+**Two defects the escalation run found**, both in code that the
+contract's own working precisions never reach:
+
+- the evaluator's error bound was destroyed rather than widened by an
+  EXACT cancellation of two inexact approximations, because zero has no
+  relative error to carry; `pow(1 + 2^-112, 1 + 2^-112)` at fp128 then
+  returned exactly 1 from a degenerate enclosure the loop believed.
+  `cft_mp_add` now hands back a saturated bound instead;
+- a result that came out exactly zero because the precision was too
+  coarse returned `CFT_ERR_INTERNAL` where it should have escalated.
+
+**One defect in the reference's arbiter.** mpmath's interval context is
+documented as rigorous and is not, quite: at 514 bits
+`iv.power(1 + 2^-236, -(1 + 2^-236))` returns a DEGENERATE interval
+that excludes the true value by 2^-709, costing the last bit of that
+`pow` under roundTowardPositive. The model now moves every endpoint
+outward by 256 units of the working precision before believing it. The
+C - whose error bound is derived and checked rather than inherited -
+had the right answer throughout, which is the argument for having two
+implementations rather than one.
+
+**Negative control**, run and restored the same day. Inverting one
+character - the SIDE of the neighbour rule's witness in
+`round_neighbour` - is caught by:
+
+- `transcend_check.py`, on its first neighbour case (`fp64 exp rtz`,
+  the smallest subnormal: `0x3fefffffffffffff` where the model says
+  `0x3ff0000000000000`);
+- the conformance replay, at `fp32-transcend-rtz.jsonl:2`;
+- MPFR parity, with mismatches from the first `exp` row.
+
+`api-test` did NOT catch it, because it had no case in that family at
+all. Five went in - exp of the smallest subnormal to nearest and
+upward, expm1 and log1p of it in the two directions that differ - and
+with those it reports `api-test: 3 FAILED` against the same sabotage.
+A gate that cannot fail is not a gate, and that is what the control is
+for.
+
+Standardized run, `bash verify/run.sh --only vectors,libcft,mpfr,transcend`
+at b9d390d:
+
+    vectors      ok      10s
+    libcft       ok      57s
+    transcend    ok      59s
+    mpfr         ok      13s
+
+    VERDICT: PASS, nothing skipped
+
+What did NOT run, and why: the RTL, formal and container stages
+(nothing in this change touches them, and the transcendentals issue no
+device pass at all); the native-oracle soak (there is no CPU oracle for
+these functions); and the Node and WASM surfaces, which stay at ABI 0.2
+because rebuilding their committed artifacts is an emsdk run that did
+not fit here - recorded as PENDING in docs/COMPATIBILITY.md rather than
+left to be inferred.

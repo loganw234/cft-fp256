@@ -181,6 +181,33 @@ encodings and flags. That is a marshalling check, not a second opinion
 on the semantics - the semantics have one implementation, which is the
 point.
 
+**ABI 0.3 (2026-09-02)** added the phase-1 transcendentals - cft_exp,
+cft_expm1, cft_exp2, cft_log, cft_log1p, cft_log2, cft_log10, cft_pow
+and cft_hypot - correctly rounded at all four formats under all five
+attributes, with clause 9.2.1's special values and exact flags. Same
+shape as the clause-5 host operations: plain positional C functions,
+no bus word, reachable through exactly the FFI each row above already
+uses. docs/TRANSCENDENTALS.md is the design.
+
+Where each surface stands, stated per row rather than in general,
+because the honest answer differs:
+
+| surface | status at ABI 0.3 |
+|---|---|
+| C (`cft.h`) | complete. `host/tests/api_test.c` covers the refusals, the aliasing rule and the clause 9.2.1 edges; `host/tests/transcend_check.py` is the reference ctypes consumer, 77,315 comparisons against the model |
+| C++ (`cft.hpp`) | complete, all three layers, and `cpp_api_test` issues every one twice - through the wrapper and through `cft.h` - comparing encodings and flags: 3,267 checks at C++17 and C++20 |
+| Python (`cftmpfr`) | complete on `Context` and in `batch`, with 268 tests including bit-for-bit agreement with gmpy2's IEEE emulation at every precision and every attribute MPFR has |
+| conformance vectors | complete: 20 new sets, `<fmt>-transcend[-<rnd>].jsonl`, 64,325 cases, replayed by `cft_conformance` |
+| Node (`bindings/node`) | **PENDING at ABI 0.2.** The wasm module it loads is a committed artifact and was not rebuilt for 0.3, so it exports the 0.2 surface and its tests drive nothing new |
+| Browser / WASM page | **PENDING at ABI 0.2**, for the same reason - the committed page is a build artifact, and rebuilding it is an emsdk run that did not fit in this change |
+
+Those last two rows are pending, not done, and they are written that
+way here rather than left to be inferred from a table that stopped
+being true. Rebuilding them is `bash bindings/wasm/build.sh` with the
+pinned emsdk and a re-verify of the page; the source list is already
+derived from `host/Makefile`, so the new files come along on their
+own.
+
 ## Drop-ins
 
 Higher-level packages that slot into an existing ecosystem's shape,

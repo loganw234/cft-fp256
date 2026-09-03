@@ -52,7 +52,9 @@ operations composed from the tile's seed opcodes and FMA; the rest of
 clause 5 - roundToIntegral, the conversions, scaleB/logB, nextUp/
 nextDown, classification, totalOrder, the signaling comparisons,
 remainder - are contract operations too, specified in their own
-section below. Everything is scored the same way regardless of route:
+section below, and so are the nine phase-1 transcendentals of clause 9
+(exp, expm1, exp2, log, log1p, log2, log10, pow, hypot), correctly
+rounded. Everything is scored the same way regardless of route:
 `python/cft_golden/softfloat.py` defines the bits.
 
 ADD/SUB/MUL are defined as operand-steered FMA (see
@@ -255,6 +257,75 @@ returns the same bits on every backend. The load-bearing choices:
   occur. A zero result takes x's sign. remainder(inf, y) and
   remainder(x, 0) are invalid; remainder(x, inf) is x exactly.
 
+## The phase-1 transcendentals (clause 9.2)
+
+exp, expm1, exp2, log, log1p, log2, log10, pow and hypot are contract
+operations with library entry points (`cft_exp`, `cft_pow`, ...), added
+2026-09-02. They are the first operations in this contract that 754
+calls RECOMMENDED rather than required, and the reason they are in a
+determinism document at all is the load-bearing choice:
+
+**They are correctly rounded, in all five attributes, at all four
+formats, with exact flags.** 754-2019 9.2 asks only that these
+functions be "correctly rounded" if an implementation claims to provide
+them under clause 9's rules, and most libraries do not claim it. This
+one does, and it is not a quality boast: a correctly rounded result is
+defined by the mathematics, so two conforming implementations agree bit
+for bit and a vector set can score them. An "accurate" transcendental
+cannot be scored at all - two of them disagree in the last bit on a
+percentage of inputs and neither is wrong - which would put a hole in
+the promise at the top of this document the size of every application
+that calls `exp`.
+
+`python/cft_golden/transcend.py` defines every bit;
+docs/TRANSCENDENTALS.md carries the algorithms, the error bounds, the
+exactness proofs and the honest statement of the Table Maker's Dilemma.
+What belongs HERE is what an independent implementation is scored on:
+
+- **The exact cases raise nothing**, and they are decided by exact
+  arithmetic rather than by a tolerance: exp and expm1 only at zero,
+  log and log1p only at 1 and 0, exp2 exactly when the argument is an
+  integer whose power is representable, log2 exactly at the powers of
+  two, log10 exactly at the powers of ten the format represents, pow
+  exactly when the true value is a representable dyadic rational, hypot
+  exactly when x^2 + y^2 is a perfect square. `hypot(3, 4)` is 5 with
+  no inexact flag. Everything else is inexact.
+- **Overflow and underflow follow clause 7** through the same
+  round_pack every arithmetic result uses, delivered value included -
+  the largest finite magnitude rather than an infinity under
+  roundTowardZero and on the wrong side of the two directed attributes.
+- **The clause 9.2.1 special-value table applies in full.** The rows
+  implementations most often differ on: `exp(-inf)` is +0 and silent;
+  `expm1(-inf)` is -1 exactly; `expm1(+-0)` and `log1p(+-0)` keep the
+  operand's SIGN; `log(+-0)` and `log1p(-1)` are -inf with
+  divideByZero; a negative operand to log, or one below -1 to log1p, is
+  invalid; `pow(x, +-0)` is 1 for any x including a quiet NaN or an
+  infinity; `pow(+1, y)` is 1 for any y; `pow(-1, +-inf)` is 1; a
+  negative finite base with a non-integer exponent is invalid;
+  `hypot(+-inf, y)` is +inf for any y including a quiet NaN.
+- **`pow(+-0, y)` signals divideByZero for a FINITE negative y only.**
+  `pow(+-0, -inf)` is +inf and signals nothing: it is the |x| < 1 row,
+  and the divideByZero is the pole at a finite exponent rather than the
+  limit. That is the single row of that table most often got wrong.
+- **A signaling NaN operand is outside those rows.** 9.2.1's wording is
+  "even a QUIET NaN", so an sNaN raises invalid and delivers the
+  canonical quiet NaN like every other operation here. This differs
+  from C's `pow(sNaN, 0)`, which returns 1, and the difference is a
+  stated choice rather than an accident.
+- **An input that cannot be shown correctly rounded is REFUSED.** The
+  library evaluates at a working precision and raises it until an
+  enclosure of the true value rounds one way at both ends; if it
+  reaches its cap it returns a status and writes nothing. It never
+  returns a plausible number. No input the formats can express should
+  reach that cap - docs/TRANSCENDENTALS.md does the arithmetic - and if
+  one ever does, a status is how you find out.
+
+Like the clause-5 host operations, these issue no device pass: they are
+exact integer work over a multiprecision evaluator, so the device
+argument is context and the results are bit-identical across backends
+by construction. A tile-assisted fast path for the narrow formats would
+have to reproduce these bits exactly.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -376,6 +447,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` | the C library's ports of every contract operation | golden model, per-element flags |
+| `host/tests/transcend_check.py` | the nine transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 
@@ -391,4 +463,6 @@ and the integer conversions 5.4.1; convertFormat 5.4.2; signaling
 comparisons 5.6.1; classification predicates 5.7.2; totalOrder 5.10;
 quiet comparisons 5.11; NaN semantics 6.2 (payload recommendation
 6.2.3); sign bit rules 6.3; invalid 7.2; divideByZero 7.3; overflow
-7.4; underflow and tininess 7.5.
+7.4; underflow and tininess 7.5; the recommended correctly-rounded
+functions and their special-value tables 9.2 (the table itself 9.2.1);
+minimum/maximum 9.6.
