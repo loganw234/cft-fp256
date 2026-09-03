@@ -14,14 +14,16 @@
 // arrays, compares, and its report IS the failure detail; this script
 // writes files and prints what came back.
 //
-// The twenty transcendental sets get a SECOND pass, driven from
-// JavaScript through Context's exp/log/pow/hypot rather than handed to
-// cft_conformance. That is not redundancy: cft_conformance dispatches
-// the nine internally in C and would be green with no JavaScript
-// surface for them at all - it was, for a day (docs/COMPATIBILITY.md's
-// half-step). The library remains the only thing computing; what this
-// pass adds is that the package's own methods reach it, in the right
-// order, with the flags intact.
+// The twenty transcendental sets - which carry all twenty FUNCTIONS
+// since ABI 0.4, phase 1's nine and phase 2's eleven - get a SECOND
+// pass, driven from JavaScript through Context's exp/log/pow/hypot and
+// sinpi/asin/atan2 rather than handed to cft_conformance. That is not
+// redundancy: cft_conformance dispatches all twenty internally in C
+// and would be green with no JavaScript surface for any of them at
+// all - it was, for a day (docs/COMPATIBILITY.md's half-step). The
+// library remains the only thing computing; what this pass adds is
+// that the package's own methods reach it, in the right order - which
+// for atan2 and atan2pi means y first - with the flags intact.
 //
 // A run that checked nothing must not read as a pass. Zero cases, a
 // missing set, or a directory with no sets in it are failures here,
@@ -45,8 +47,8 @@ for (const f of FORMATS)
     CANONICAL.push(r === "rne" ? `${f}.jsonl` : `${f}-${r}.jsonl`);
 
 // The transcendental sets: their own files, their own schema ("fn"
-// rather than "op", no c operand), because the nine are library entry
-// points rather than opcodes - vectors/gen_vectors.py says why.
+// rather than "op", no c operand), because the twenty are library
+// entry points rather than opcodes - vectors/gen_vectors.py says why.
 const TRANSCEND_SETS = [];
 for (const f of FORMATS)
   for (const r of ROUNDINGS)
@@ -236,15 +238,15 @@ async function driveTranscendSet(set, text) {
 const haveTranscend = TRANSCEND_SETS.every((s) =>
   existsSync(join(vdir, s.name)));
 if (!haveTranscend) {
-  console.log(`\nno transcendental sets in ${vdir} - the nine were NOT ` +
+  console.log(`\nno transcendental sets in ${vdir} - the twenty were NOT ` +
               `driven. Run \`make vectors\` from the repo root; the ` +
               `containerized wasm build cannot write them (no mpmath in ` +
               `the pinned image).`);
-  console.log("NOT A PASS: the ABI 0.3 surface was not exercised.");
+  console.log("NOT A PASS: the ABI 0.4 surface was not exercised.");
   process.exit(1);
 }
 
-console.log("\nthe nine, through Context (per case, then as arrays)\n");
+console.log("\nthe twenty, through Context (per case, then as arrays)\n");
 let tTotal = 0, tClean = 0, tBad = 0;
 const t1 = Date.now();
 for (const set of TRANSCEND_SETS) {
