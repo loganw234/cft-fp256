@@ -541,7 +541,43 @@ void check_format(cft::device &dev, cft_device *ref)
             TRIG1(asinh);
             TRIG1(acosh);
             TRIG1(atanh);
+            /* Table 9.1's remainder (part of the 0.6 step). The six
+             * unary ones marshal like everything above. */
+            TRIG1(exp2m1);
+            TRIG1(exp10);
+            TRIG1(exp10m1);
+            TRIG1(log2p1);
+            TRIG1(log10p1);
+            TRIG1(rsqrt);
 #undef TRIG1
+
+            /* pown, compound and rootn carry a second array of a
+             * DIFFERENT type, which is the marshalling this file exists
+             * to check: a wrapper that passed the element count where
+             * the exponent array belongs would compile and would be
+             * wrong in every lane. The exponents vary per element for
+             * the same reason. */
+            {
+                std::vector<std::int64_t> nv(n);
+                for (std::size_t k = 0; k < n; k++)
+                    nv[k] = (std::int64_t)(k % 7) - 3;
+#define INT1(name)                                                         \
+                fw = ctx.name(a, nv, dw);                                  \
+                st = cft_##name(ref, F, rnd, a.data(), nv.data(),          \
+                                dc.data(), n, &fc);                        \
+                CHECK(st == CFT_OK, "cft_" #name ": %s",                   \
+                      cft_strerror(st));                                   \
+                expect<F>(#name, rnd, dw, fw, dc, fc)
+                INT1(pown);
+                INT1(compound);
+                INT1(rootn);
+#undef INT1
+            }
+
+            fw = ctx.powr(a, b, dw);
+            st = cft_powr(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_powr: %s", cft_strerror(st));
+            expect<F>("powr", rnd, dw, fw, dc, fc);
 
             fw = ctx.atan2(a, b, dw);
             st = cft_atan2(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
@@ -832,7 +868,32 @@ void check_format(cft::device &dev, cft_device *ref)
         STRIG1(asinpi);
         STRIG1(acospi);
         STRIG1(atanpi);
+        STRIG1(exp2m1);
+        STRIG1(exp10);
+        STRIG1(exp10m1);
+        STRIG1(log2p1);
+        STRIG1(log10p1);
+        STRIG1(rsqrt);
 #undef STRIG1
+
+#define SINT1(name)                                                        \
+        {                                                                  \
+            const std::int64_t nn = 3;                                     \
+            got = ctx.name(x, nn);                                         \
+            cft_##name(ref, F, CFT_RUP, a.data() + 9, &nn, one_c.data(),   \
+                       1, &fc);                                            \
+            CHECK(got.bytes() == one_c, "%s scalar " #name,                \
+                  cft_format_name(F));                                     \
+        }
+        SINT1(pown);
+        SINT1(compound);
+        SINT1(rootn);
+#undef SINT1
+
+        got = ctx.powr(x, y);
+        cft_powr(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,
+                 &fc);
+        CHECK(got.bytes() == one_c, "%s scalar powr", cft_format_name(F));
 
         got = ctx.atan2(x, y);
         cft_atan2(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,

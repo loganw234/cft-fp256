@@ -1090,6 +1090,336 @@ int main(void)
               "cos(binary64 worst case) is the reduced argument, -4.687e-19");
     }
 
+
+    /* --- the rest of table 9.1 (part of the 0.6 step)
+     *
+     * The same charter as the three phases above: the refusals, the
+     * exact cases whose bits come from a theorem rather than from the
+     * library, the special rows - including the three where this
+     * contract follows 754-2019 and GNU MPFR does not - one case from
+     * every neighbour family, and the identity between rootn(x, 2) and
+     * squareRoot with the single input where the standard's own NOTE
+     * says they differ.
+     */
+    {
+        uint8_t a[8], b[8], d[8];
+        uint8_t av[3 * 4], dv[3 * 4];
+        int64_t nn[3];
+        uint32_t f4 = 0xdead;
+
+        put32(a, 0x40000000u);                       /* 2.0f */
+        CHECK(cft_exp2m1(dev, CFT_FP32, (cft_round)-1, a, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_exp2m1 refuses an out-of-range rounding attribute");
+        CHECK(cft_rsqrt(dev, (cft_format)9, CFT_RNE, a, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_rsqrt refuses an unknown format");
+        nn[0] = 2;
+        CHECK(cft_pown(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_pown refuses a NULL integer-exponent array");
+        CHECK(cft_compound(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_compound refuses a NULL integer-exponent array");
+        CHECK(cft_rootn(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_rootn refuses a NULL integer-exponent array");
+        CHECK(cft_powr(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_powr refuses a NULL second operand");
+        f4 = 0xdead;
+        CHECK(cft_rootn(dev, CFT_FP32, CFT_RNE, NULL, NULL, NULL, 0, &f4)
+                  == CFT_OK && f4 == 0,
+              "cft_rootn with n == 0 elements touches nothing");
+
+        /* Exactness, and every one of these is an integer identity
+         * rather than a rounding: 2^3 - 1 = 7, 2^-3 - 1 = -7/8,
+         * 10^2 = 100, 10^2 - 1 = 99, log2(1 + 3) = 2, log10(1 + 99) = 2,
+         * 1/sqrt(4) = 1/2. */
+        put32(a, 0x40400000u);                       /* 3.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x40e00000u && f4 == 0,
+              "exp2m1(3) = 7 EXACTLY");
+        put32(a, 0xc0400000u);                       /* -3.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf600000u && f4 == 0,
+              "exp2m1(-3) = -7/8 EXACTLY");
+        put32(a, 0x80000000u);                       /* -0.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "exp2m1(-0) = -0, silent");
+        st = cft_exp10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "exp10(-0) = 1, silent");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        st = cft_exp10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x42c80000u && f4 == 0,
+              "exp10(2) = 100 EXACTLY");
+        st = cft_exp10m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x42c60000u && f4 == 0,
+              "exp10m1(2) = 99 EXACTLY");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        st = cft_exp10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && f4 == CFT_FLAG_INEXACT,
+              "exp10(-1) is INEXACT: 10^-1 is not a dyadic rational");
+        put32(a, 0x40400000u);                       /* 3.0f */
+        st = cft_log2p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x40000000u && f4 == 0,
+              "log2p1(3) = 2 EXACTLY: 1 + x is a power of two");
+        put32(a, 0xbf000000u);                       /* -0.5f */
+        st = cft_log2p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf800000u && f4 == 0,
+              "log2p1(-1/2) = -1 EXACTLY: 1 + x is formed on the encoding");
+        put32(a, 0x42c60000u);                       /* 99.0f */
+        st = cft_log10p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x40000000u && f4 == 0,
+              "log10p1(99) = 2 EXACTLY");
+        put32(a, 0x40800000u);                       /* 4.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f000000u && f4 == 0,
+              "rSqrt(4) = 1/2 EXACTLY: an EVEN power of two");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && f4 == CFT_FLAG_INEXACT,
+              "rSqrt(2) is INEXACT: an odd power of two is not");
+
+        /* exp2m1's exact table runs to |n| = p+1, and p+1 lands on a
+         * MIDPOINT - which is exactly why it must be decided by exact
+         * arithmetic: no enclosure ever separates a midpoint from
+         * either side. Past it the value is still known exactly and is
+         * delivered by a SIDE. */
+        put32(a, 0x41c00000u);                       /* 24.0f = p */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4b7fffffu && f4 == 0,
+              "exp2m1(24) = 2^24 - 1 EXACTLY at binary32");
+        put32(a, 0x41c80000u);                       /* 25.0f = p+1 */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4c000000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(25) is the midpoint 2^25 - 1, ties to even");
+        put32(a, 0x41d00000u);                       /* 26.0f = p+2 */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4c800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(26) to nearest is 2^26: the side above the midpoint");
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4c7fffffu &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(26) toward zero is nextDown(2^26)");
+        put32(a, 0xc1d00000u);                       /* -26.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(-26) to nearest is -1: inside the half gap above it");
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf7fffffu &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(-26) toward zero steps off -1");
+
+        /* The three rows where this contract follows the standard and
+         * MPFR 4.2.2 does not. Each was measured on this host before it
+         * was written down; docs/TRANSCENDENTALS.md quotes the probe. */
+        put32(a, 0x00000000u);                       /* +0.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "rSqrt(+0) = +inf with divideByZero");
+        put32(a, 0x80000000u);                       /* -0.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "rSqrt(-0) = MINUS inf: 9.2.1 keeps the sign, mpfr_rec_sqrt "
+              "does not");
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        put32(b, 0x7fc00000u);                       /* qNaN */
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == 0,
+              "powr(1, qNaN) is a quiet NaN: the standard's row is "
+              "\"for FINITE y\"");
+        st = cft_pow(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "pow(1, qNaN) is 1 - which is why powr is a second function");
+        put32(a, 0xc0000000u);                       /* -2.0f */
+        nn[0] = 0;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "compound(-2, 0) is INVALID: the row is \"1 for x >= -1\"");
+        put32(a, 0x7fc00000u);                       /* qNaN */
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "compound(qNaN, 0) is 1: the same row says \"or quiet NaN\"");
+
+        /* The rest of 9.2.1's rows for the four powers. */
+        put32(a, 0x7fc00000u);                       /* qNaN */
+        nn[0] = 0;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "pown(qNaN, 0) = 1");
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "rootn(qNaN, 0) is INVALID: zero is outside the domain for "
+              "every x");
+        put32(a, 0x80000000u);                       /* -0.0f */
+        nn[0] = -3;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "pown(-0, -3) = -inf with divideByZero: n is ODD");
+        nn[0] = -2;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "pown(-0, -2) = PLUS inf: n is even");
+        put32(a, 0xc0000000u);                       /* -2.0f */
+        nn[0] = 3;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xc1000000u && f4 == 0,
+              "pown(-2, 3) = -8 EXACTLY");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        nn[0] = -3;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "compound(-1, -3) = +inf with divideByZero");
+        nn[0] = 3;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f4 == 0,
+              "compound(-1, 3) = +0, silent");
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41000000u && f4 == 0,
+              "compound(1, 3) = 8 EXACTLY");
+        put32(a, 0x00000000u);                       /* +0.0f */
+        put32(b, 0x00000000u);
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "powr(+0, +0) is INVALID where pow(+0, +0) is 1");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        put32(b, 0x40000000u);                       /* 2.0f */
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "powr(-1, 2) is INVALID: powr's domain excludes a negative "
+              "base");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        put32(b, 0x40400000u);                       /* 3.0f */
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41000000u && f4 == 0,
+              "powr(2, 3) = 8 EXACTLY");
+
+        /* rootn(x, 2) is squareRoot on every input but one, and the
+         * exception is the standard's own NOTE. Both are asked here,
+         * side by side, so the difference is asserted rather than
+         * skipped. */
+        put32(a, 0x80000000u);                       /* -0.0f */
+        nn[0] = 2;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f4 == 0,
+              "rootn(-0, 2) = PLUS zero (the even-n row)");
+        st = cft_sqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "squareRoot(-0) = MINUS zero - the one input where the two "
+              "differ, and 9.2.1 says so");
+        nn[0] = 3;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "rootn(-0, 3) = -0: n is odd");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        nn[0] = 2;
+        st = cft_rootn(dev, CFT_FP32, CFT_RTZ, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3fb504f3u &&
+              f4 == CFT_FLAG_INEXACT,
+              "rootn(2, 2) toward zero is sqrt(2) correctly rounded");
+        st = cft_sqrt(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f4, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x3fb504f3u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and cft_sqrt agrees, bits and flags");
+        put32(a, 0xc1000000u);                       /* -8.0f */
+        nn[0] = 3;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xc0000000u && f4 == 0,
+              "rootn(-8, 3) = -2 EXACTLY: a perfect cube, and n is odd");
+        put32(a, 0x00000001u);                       /* min subnormal */
+        nn[0] = 1;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u && f4 == 0,
+              "rootn(x, 1) = x EXACTLY, subnormal and silent");
+
+        /* One case from every neighbour family in this set - and, just
+         * as loudly, from the families that have NONE. exp2m1, exp10m1,
+         * log2p1 and log10p1 of the smallest subnormal are 0.693x,
+         * 2.303x, 1.443x and 0.434x: four different answers, none of
+         * them x, which is what "no tiny-argument rule here" means. */
+        put32(a, 0x00000001u);                       /* min subnormal */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "exp2m1(min subnormal) is 0.693x: one subnormal to nearest");
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RDN, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "and downward it is +0 - so it is NOT beside its argument");
+        st = cft_exp10m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "exp10m1(min subnormal) is 2.303x: TWO subnormals");
+        st = cft_log2p1(dev, CFT_FP32, CFT_RUP, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "log2p1(min subnormal) is 1.443x: two subnormals upward");
+        st = cft_log10p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "log10p1(min subnormal) is 0.434x: +0, below half a subnormal");
+        put32(a, 0x30800000u);                       /* 2^-30 */
+        st = cft_exp10(dev, CFT_FP32, CFT_RDN, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp10(2^-30) downward is 1 - the rule beside 1 that DOES "
+              "apply");
+        st = cft_exp10(dev, CFT_FP32, CFT_RUP, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800001u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and upward it is nextUp(1)");
+        put32(a, 0x4e800000u);                       /* 2^30 */
+        st = cft_log2p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41f00000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "log2p1(2^30) to nearest is 30: an exponentially small step "
+              "above a grid point");
+        st = cft_log2p1(dev, CFT_FP32, CFT_RUP, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41f00001u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and upward it is nextUp(30) - the side is the whole answer");
+        nn[0] = 1;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4e800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "compound(2^30, 1) to nearest is 2^30: 1 is far inside its "
+              "gap");
+        st = cft_compound(dev, CFT_FP32, CFT_RUP, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4e800001u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and upward it steps off it");
+
+        /* The integer operand is read PER ELEMENT. An implementation
+         * that hoisted it out of the batch loop passes every test above
+         * and fails this one. */
+        put32(av + 0, 0x40000000u);                  /* 2.0f */
+        put32(av + 4, 0x40000000u);
+        put32(av + 8, 0x40000000u);
+        nn[0] = 1; nn[1] = 2; nn[2] = 3;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, av, nn, dv, 3, &f4);
+        CHECK(st == CFT_OK && get32(dv + 0) == 0x40000000u &&
+              get32(dv + 4) == 0x40800000u &&
+              get32(dv + 8) == 0x41000000u && f4 == 0,
+              "pown over a batch reads n per element: 2, 4, 8");
+    }
+
     /* --- the clause-5 completion set ------------------------------
      *
      * The check harness proves these against the model at scale; what

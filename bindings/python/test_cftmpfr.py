@@ -1170,3 +1170,251 @@ def test_p3_tiny_arguments_take_a_side(prec):
         got = getattr(ctx, fn)(ctx.from_bits(1))
         assert got.same_bits(want), (fn, mode, got.to_str())
         assert tuple(ctx.flag_names(ctx.last_flags)) == ("inexact",), (fn, mode)
+
+
+# ---- the rest of table 9.1 (part of the 0.6 step) -----------------------
+
+T91_UNARY = ("exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt")
+T91_INT = ("pown", "compound", "rootn")
+
+#: Of the ten, gmpy2 2.2.1 binds three: exp10, rec_sqrt (as rsqrt) and
+#: rootn - and rootn only for a NON-NEGATIVE n, since it goes to
+#: mpfr_rootn_ui. exp2m1, exp10m1, log2p1, log10p1, powr, pown and
+#: compound exist in MPFR 4.2.2 but not in this gmpy2, so they are
+#: checked against MPFR by host/tools/mpfr_check.c calling the C entry
+#: points directly, and here against the library's own contract. Naming
+#: the gap is better than claiming a comparison this file cannot make.
+GMPY_T91 = {"exp10": "exp10", "rsqrt": "rec_sqrt"}
+
+
+def t91_pool(prec, seed):
+    """Operands where the ten can be got wrong: the integers (exp2m1 is
+    exact on them), the powers of ten (exp10 and exp10m1 are), 2^k - 1
+    and 10^k - 1 (log2p1 and log10p1 are), the even and odd powers of
+    two (rSqrt's whole split), the neighbourhood of -1, and the tiny."""
+    ctx = Context(prec)
+    out = [ctx.from_float(v) for v in
+           (0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, 7.0, 8.0,
+            9.0, 10.0, 16.0, 24.0, 25.0, 26.0, 0.5, -0.5, 0.25, -0.25,
+            99.0, 100.0, 1000.0, 0.125, 1e-8, -1e-8, 1e-40, 1.5, -0.75,
+            1023.0, 1e20)]
+    out += [ctx.from_bits(b) for b in pool(prec, count=10, seed=seed)]
+    return out
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+@pytest.mark.parametrize("fn", sorted(GMPY_T91))
+def test_t91_matches_gmpy2(prec, mode, fn):
+    """The three of the ten gmpy2 reaches, bit for bit at a matching
+    IEEE context - with rSqrt(-0) held back, because MPFR returns
+    +infinity there and 754-2019 9.2.1 asks for -infinity. That row is
+    pinned against the STANDARD below instead."""
+    ctx = Context(prec, rounding=mode)
+    ops = t91_pool(prec, seed=61)
+    checked = 0
+    for i, x in enumerate(ops):
+        if is_snan(ctx, x):
+            continue
+        if fn == "rsqrt" and x.is_zero and x.sign == 1:
+            continue
+        got = getattr(ctx, fn)(x)
+        save = gmpy2.get_context()
+        gctx = gmpy2.ieee(WIDTH[prec])
+        gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+        gmpy2.set_context(gctx)
+        try:
+            want = getattr(gmpy2, GMPY_T91[fn])(x.to_mpfr())
+        finally:
+            gmpy2.set_context(save)
+        if got.is_nan:
+            assert gmpy2.is_nan(want), (fn, i)
+        else:
+            assert got.same_bits(ctx.from_mpfr(want)), \
+                f"{fn} {prec} {mode} arg {i}: {got.to_str()} vs {want}"
+        checked += 1
+    assert checked >= 30
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+def test_rootn_matches_gmpy2(prec, mode):
+    """rootn against mpfr_rootn_ui, which gmpy2 exposes for a positive n
+    and a non-negative operand - a different MPFR entry point from
+    anything else this file calls."""
+    ctx = Context(prec, rounding=mode)
+    ops = [x for x in t91_pool(prec, seed=62)
+           if not is_snan(ctx, x) and not x.is_nan and x.sign == 0]
+    checked = 0
+    for n in (1, 2, 3, 5, 8):
+        for x in ops:
+            got = ctx.rootn(x, n)
+            save = gmpy2.get_context()
+            gctx = gmpy2.ieee(WIDTH[prec])
+            gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+            gmpy2.set_context(gctx)
+            try:
+                want = gmpy2.rootn(x.to_mpfr(), n)
+            finally:
+                gmpy2.set_context(save)
+            if got.is_nan:
+                assert gmpy2.is_nan(want), (n, x.to_str())
+            else:
+                assert got.same_bits(ctx.from_mpfr(want)), \
+                    f"rootn {prec} {mode} n={n}: {got.to_str()} vs {want}"
+            checked += 1
+    assert checked >= 60
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", T91_UNARY)
+def test_t91_batch_matches_scalar(prec, fn):
+    """One C call for the array must equal N calls for the elements."""
+    ctx = Context(prec)
+    ops = t91_pool(prec, seed=63)
+    got, fl = getattr(batch, fn)(ctx, ops)
+    want, want_or = [], 0
+    for x in ops:
+        want.append(getattr(ctx, fn)(x))
+        want_or |= ctx.last_flags
+    assert len(got) == len(want)
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or, f"{fn} {prec}: batch flags are the OR"
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", T91_INT)
+def test_t91_int_batch_reads_n_per_element(prec, fn):
+    """The batch form of pown, compound and rootn takes a sequence of
+    exponents, one per element - which an implementation that hoisted n
+    out of the loop would pass every scalar test and fail here."""
+    ctx = Context(prec)
+    ops = t91_pool(prec, seed=64)
+    ns = [((i % 7) - 3) or 1 for i in range(len(ops))]
+    got, fl = getattr(batch, fn)(ctx, ops, ns)
+    want, want_or = [], 0
+    for x, n in zip(ops, ns):
+        want.append(getattr(ctx, fn)(x, n))
+        want_or |= ctx.last_flags
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or
+    # and a scalar n applies to every element
+    got2, _ = getattr(batch, fn)(ctx, ops, 3)
+    for g, x in zip(got2, ops):
+        assert g.same_bits(getattr(ctx, fn)(x, 3))
+    with pytest.raises(ValueError):
+        getattr(batch, fn)(ctx, ops, [1, 2])
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_t91_exact_cases_and_rows(prec):
+    """The exact cases decided by exact arithmetic, and the 9.2.1 rows
+    for the ten - including the three where this contract follows the
+    standard and MPFR does not."""
+    ctx = Context(prec)
+    F = ctx.from_float
+    exact = [
+        ("exp2m1", 3.0, 7.0), ("exp2m1", -3.0, -0.875),
+        ("exp2m1", -0.0, -0.0), ("exp10", 2.0, 100.0),
+        ("exp10", -0.0, 1.0), ("exp10m1", 2.0, 99.0),
+        ("log2p1", 3.0, 2.0), ("log2p1", -0.5, -1.0),
+        ("log10p1", 99.0, 2.0), ("log10p1", 9.0, 1.0),
+        ("rsqrt", 4.0, 0.5), ("rsqrt", 0.25, 2.0),
+    ]
+    for fn, arg, want in exact:
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(F(arg))
+        assert got.to_float() == want, (fn, arg, got.to_str())
+        assert ctx.last_flags == 0, (fn, arg, ctx.flag_names())
+    # log2p1(1) is log2(2) = 1 and IS exact, which is why the inexact
+    # list uses 2 - the exact table here is larger than it looks
+    for fn, arg in (("exp10", -1.0), ("rsqrt", 2.0), ("exp2m1", 0.5),
+                    ("log2p1", 2.0), ("log10p1", 1.0)):
+        ctx.clear_flags()
+        getattr(ctx, fn)(F(arg))
+        assert "inexact" in ctx.flag_names(), (fn, arg)
+    # rSqrt keeps the sign of a zero; MPFR does not
+    ctx.clear_flags()
+    p = ctx.rsqrt(ctx.zero())
+    assert p.is_inf and p.sign == 0
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    m = ctx.rsqrt(ctx.zero(1))
+    assert m.is_inf and m.sign == 1, "rSqrt(-0) is MINUS infinity"
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.rsqrt(F(-1.0)).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.rsqrt(ctx.inf()).is_zero and ctx.last_flags == 0
+    # log2p1 and log10p1: the pole at -1 and the domain below it
+    for fn in ("log2p1", "log10p1"):
+        ctx.clear_flags()
+        r = getattr(ctx, fn)(F(-1.0))
+        assert r.is_inf and r.sign == 1
+        assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+        ctx.clear_flags()
+        assert getattr(ctx, fn)(F(-2.0)).is_nan
+        assert "invalid" in ctx.flag_names(ctx.last_flags)
+    # powr is not pow
+    ctx.clear_flags()
+    assert ctx.powr(F(1.0), ctx.nan()).is_nan, "powr(1, qNaN) is a NaN"
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    assert ctx.pow(F(1.0), ctx.nan()).to_float() == 1.0, "pow(1, qNaN) is 1"
+    ctx.clear_flags()
+    assert ctx.powr(F(-1.0), F(2.0)).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.powr(ctx.zero(), ctx.zero()).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.powr(F(2.0), F(3.0)).to_float() == 8.0
+    assert ctx.last_flags == 0
+    # pown, compound, rootn
+    ctx.clear_flags()
+    assert ctx.pown(ctx.nan(), 0).to_float() == 1.0
+    assert ctx.pown(F(-2.0), 3).to_float() == -8.0
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    z = ctx.pown(ctx.zero(1), -3)
+    assert z.is_inf and z.sign == 1
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.compound(ctx.nan(), 0).to_float() == 1.0
+    assert ctx.compound(F(1.0), 3).to_float() == 8.0
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    assert ctx.compound(F(-2.0), 0).is_nan, "compound(x < -1, 0) is invalid"
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.rootn(F(-8.0), 3).to_float() == -2.0
+    assert ctx.rootn(F(4.0), -1).to_float() == 0.25
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    assert ctx.rootn(ctx.nan(), 0).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_rootn_two_is_sqrt_except_at_minus_zero(prec):
+    """rootn(x, 2) is sqrt(x) on every operand but -0, where 754-2019's
+    own NOTE says they differ: rootn(-0, 2) is +0 and squareRoot(-0) is
+    -0. The difference is asserted, not skipped."""
+    ctx = Context(prec)
+    for x in t91_pool(prec, seed=65):
+        if is_snan(ctx, x):
+            continue
+        r = ctx.rootn(x, 2)
+        s = ctx.sqrt(x)
+        if x.is_zero and x.sign == 1:
+            assert r.is_zero and r.sign == 0
+            assert s.is_zero and s.sign == 1
+        elif r.is_nan:
+            assert s.is_nan
+        else:
+            assert r.same_bits(s), (x.to_str(), r.to_str(), s.to_str())

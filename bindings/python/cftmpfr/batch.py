@@ -369,6 +369,73 @@ def atanh(ctx, x):
     return _t1(ctx, "atanh", x)
 
 
+# The rest of table 9.1 (part of the 0.6 step), on the same footing -
+# except for the three whose second operand is an INTEGER per element,
+# which take a sequence rather than an array of encodings.
+
+def exp2m1(ctx, x):
+    """out[i] = 2**x[i] - 1."""
+    return _t1(ctx, "exp2m1", x)
+
+
+def exp10(ctx, x):
+    """out[i] = 10**x[i]."""
+    return _t1(ctx, "exp10", x)
+
+
+def exp10m1(ctx, x):
+    """out[i] = 10**x[i] - 1."""
+    return _t1(ctx, "exp10m1", x)
+
+
+def log2p1(ctx, x):
+    """out[i] = log2(1 + x[i])."""
+    return _t1(ctx, "log2p1", x)
+
+
+def log10p1(ctx, x):
+    """out[i] = log10(1 + x[i])."""
+    return _t1(ctx, "log10p1", x)
+
+
+def rsqrt(ctx, x):
+    """out[i] = 1/sqrt(x[i])."""
+    return _t1(ctx, "rsqrt", x)
+
+
+def powr(ctx, x, y):
+    """out[i] = x[i]**y[i] as exp(y log x): a negative base is invalid."""
+    return _t2(ctx, "powr", x, y)
+
+
+def _tint(ctx, name, x, ns):
+    (bx,), n, mirror = _normalise(ctx, (x,))
+    ns = [int(v) for v in ns]
+    if len(ns) == 1 and n != 1:
+        ns = ns * n
+    if len(ns) != n:
+        raise ValueError(f"{name}: {len(ns)} exponents for {n} elements")
+    out, fl = _lib.transcend(ctx._dev, name, ctx._fi.code, ctx._rnd, bx,
+                             None, n, ctx._fi.esz, ns=ns)
+    return _finish(ctx, out, fl, mirror)
+
+
+def pown(ctx, x, n):
+    """out[i] = x[i]**n[i], n integral. A scalar n applies to every
+    element; a sequence must be as long as the operand."""
+    return _tint(ctx, "pown", x, n if hasattr(n, "__len__") else (n,))
+
+
+def compound(ctx, x, n):
+    """out[i] = (1 + x[i])**n[i], n integral."""
+    return _tint(ctx, "compound", x, n if hasattr(n, "__len__") else (n,))
+
+
+def rootn(ctx, x, n):
+    """out[i] = x[i]**(1/n[i]), n a nonzero integer."""
+    return _tint(ctx, "rootn", x, n if hasattr(n, "__len__") else (n,))
+
+
 # ---------------------------------------------------------------------
 # Reductions: n in, ONE out, over the contract's fixed tree.
 # ---------------------------------------------------------------------
