@@ -240,6 +240,11 @@ orbits: cft-orbits$(EXE)
 # interrupt/resume equivalence, and bit identity between the
 # sequencer-program engine and the host cft_run loop. Needs Python and
 # mpmath, so it is its own target rather than part of `test`.
+#
+# mpmath is the ONE dependency, and on Windows a bare `python` inside
+# a make recipe is often not the interpreter on your shell's PATH, so
+# pass one in the way verify/run.sh does:
+#     make -C host orbitstest PYTHON=/c/path/to/python.exe
 orbitstest: cft-orbits$(EXE)
 	$(PYTHON) tests/orbits_check.py
 

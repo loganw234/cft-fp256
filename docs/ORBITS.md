@@ -7,6 +7,16 @@ ensemble of copies of the same system perturbed by an exact number of
 ulps. `host/tests/orbits_check.py` scores it against a 300-digit
 mpmath oracle; `make -C host orbitstest` runs that.
 
+The tool itself needs nothing but libcft. The check needs **mpmath**,
+its one dependency - and on Windows a bare `python` inside a make
+recipe is often not the interpreter on your shell's PATH, so pass one
+in the way `verify/run.sh` does:
+
+```
+make -C host orbits
+make -C host orbitstest PYTHON=/c/path/to/python.exe
+```
+
 It exists because this workload has two error sources that behave
 completely differently, and separating them is the only way either
 becomes a number.

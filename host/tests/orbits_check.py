@@ -68,7 +68,14 @@ try:
     from mpmath import mp, mpf, sqrt as mp_sqrt, sin as mp_sin, cos as mp_cos, \
         pi as mp_pi, floor as mp_floor, log as mp_log
 except ImportError:                                   # pragma: no cover
-    raise SystemExit("orbits_check needs mpmath: pip install mpmath")
+    raise SystemExit(
+        "orbits_check needs mpmath, and it is the ONLY dependency it has.\n"
+        "  pip install mpmath\n"
+        "or point the target at an interpreter that already carries it:\n"
+        "  make -C host orbitstest PYTHON=/path/to/python\n"
+        "On Windows a bare `python` inside a make recipe is often not the\n"
+        "one on your shell's PATH - verify/run.sh resolves it once and\n"
+        "passes it in for exactly this reason.")
 
 mp.dps = 300
 
