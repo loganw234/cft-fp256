@@ -832,10 +832,10 @@ typedef struct {
     const char *ckpt;
     double      ckpt_interval;
     int         resume;
-    long        stop_after_samples;
+    long        stop_after_samples, stop_after_steps;
     const char *records_path;
     const char *artifact;
-    int         csv, quiet;
+    int         csv, quiet, dump_setup;
 } options;
 
 typedef struct {
@@ -1881,6 +1881,78 @@ static void separations(runstate *R, const uint8_t *qq, const uint8_t *vv,
     }
 }
 
+/* Every derived constant the integration will use, as an EXACT
+ * decimal - the step size, the composition weights folded into the
+ * drift and kick scales, G, the masses, the pairwise products.
+ *
+ * This is not a debugging aid. The 300-digit oracle has to run the
+ * SAME discrete scheme the tool ran, and "the same" includes the
+ * constants: h is fl(2*pi/S), the drift scale is fl(fl(w*h)*0.5), and
+ * an oracle that used the exact real numbers instead would be
+ * measuring the constants' rounding as though it were the
+ * integration's. So the tool states what it is about to compute with,
+ * the same way a program image can be read back to attest what
+ * executed. */
+static void dump_setup(runstate *R)
+{
+    const fmt_info *fi = R->fi;
+    options *O = R->O;
+    char dec[DECMAX];
+    int s, b, j;
+
+    printf("setup format %s\n", cft_format_name(fi->fmt));
+    printf("setup precision %d\n", fi->prec);
+    printf("setup newton %d\n", fi->newton);
+    printf("setup problem %s\n", problem_name(O->problem));
+    printf("setup scheme %s\n", scheme_name(O->scheme));
+    printf("setup rsqrt %s\n", rsqrt_name(O->rsqrt));
+    printf("setup bodies %d\n", R->nb);
+    printf("setup dims %d\n", R->nd);
+    printf("setup nsub %d\n", R->nsub);
+    printf("setup members %" PRIu64 "\n", (uint64_t)O->members);
+    printf("setup steps %" PRIu64 "\n", R->nsteps);
+    printf("setup stride %" PRIu64 "\n", R->stride);
+    printf("setup samples %" PRIu64 "\n", R->nsamples);
+    val_to_dec(fi, R->s_h, dec, sizeof dec);
+    printf("setup h %s\n", dec);
+    for (s = 0; s < R->nsub; s++) {
+        val_to_dec(fi, R->c_hd[s], dec, sizeof dec);
+        printf("setup hd %d %s\n", s, dec);
+        if (O->problem == PROB_KEPLER) {
+            val_to_dec(fi, R->c_mg[s], dec, sizeof dec);
+            printf("setup mg %d %s\n", s, dec);
+        } else {
+            for (b = 0; b < R->nb; b++) {
+                val_to_dec(fi, R->c_hm[s][b], dec, sizeof dec);
+                printf("setup hm %d %d %s\n", s, b, dec);
+                val_to_dec(fi, R->c_mhm[s][b], dec, sizeof dec);
+                printf("setup mhm %d %d %s\n", s, b, dec);
+            }
+        }
+    }
+    if (O->problem == PROB_KEPLER) {
+        val_to_dec(fi, R->c_mu, dec, sizeof dec);
+        printf("setup mu %s\n", dec);
+    } else {
+        val_to_dec(fi, R->c_G, dec, sizeof dec);
+        printf("setup G %s\n", dec);
+        for (b = 0; b < R->nb; b++) {
+            val_to_dec(fi, R->c_m[b], dec, sizeof dec);
+            printf("setup mass %d %s\n", b, dec);
+            val_to_dec(fi, R->c_halfm[b], dec, sizeof dec);
+            printf("setup halfm %d %s\n", b, dec);
+        }
+        for (b = 0; b < R->nb; b++)
+            for (j = b + 1; j < R->nb; j++) {
+                val_to_dec(fi, R->c_gmm[b][j], dec, sizeof dec);
+                printf("setup gmm %d %d %s\n", b, j, dec);
+            }
+    }
+    val_to_dec(fi, R->c_half, dec, sizeof dec);
+    printf("setup half %s\n", dec);
+    printf("setup end\n");
+}
+
 static void report(runstate *R, double elapsed, const char *backend)
 {
     const fmt_info *fi = R->fi;
@@ -2070,6 +2142,8 @@ int main(int argc, char **argv)
     cft_status st;
     double t0, tckpt, elapsed;
     long emitted = 0;
+    uint64_t steps_this_run = 0;
+    int stopping = 0;
     int i, c, k;
     size_t esz;
 
@@ -2088,6 +2162,7 @@ int main(int argc, char **argv)
     O.years = 100;
     O.ckpt_interval = 10.0;
     O.stop_after_samples = -1;
+    O.stop_after_steps = -1;
 
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -2144,9 +2219,12 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--resume")) O.resume = 1;
         else if (!strcmp(a, "--stop-after-samples"))
             O.stop_after_samples = strtol(need(argc, argv, &i), NULL, 10);
+        else if (!strcmp(a, "--stop-after-steps"))
+            O.stop_after_steps = strtol(need(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--records"))
             O.records_path = need(argc, argv, &i);
         else if (!strcmp(a, "--artifact")) O.artifact = need(argc, argv, &i);
+        else if (!strcmp(a, "--dump-setup")) O.dump_setup = 1;
         else if (!strcmp(a, "--csv")) O.csv = 1;
         else if (!strcmp(a, "--quiet")) O.quiet = 1;
         else {
@@ -2253,6 +2331,12 @@ int main(int argc, char **argv)
     cft_lower_flags(DEV, CFT_FLAGS_ALL);
     FLAGS_SEEN = 0;
 
+    if (O.dump_setup) {
+        dump_setup(&R);
+        cft_close(DEV);
+        return 0;
+    }
+
     if (O.resume) {
         if (!O.ckpt)
             die("--resume needs --checkpoint");
@@ -2334,14 +2418,32 @@ int main(int argc, char **argv)
          * emit it again. */
         if (!O.resume)
             emit_sample(&R, 0, 0, R.q, R.v);
-        while (R.sample < R.nsamples) {
-            uint64_t j;
-            if (O.stop_after_samples >= 0 && emitted >= O.stop_after_samples)
-                break;
-            for (j = 0; j < R.stride; j++) {
+        while (R.sample < R.nsamples && !stopping) {
+            /* The checkpoint is STEP-granular, not sample-granular:
+             * the ensemble state is complete after every step, so a
+             * checkpoint may be taken between any two of them and a
+             * resume picks up part way through a sample interval.
+             * That is what makes an interruption cost at most one
+             * --checkpoint-interval of work however coarse the
+             * sampling is, and it is what the resume test in
+             * host/tests/orbits_check.py exercises. */
+            uint64_t upto = (R.sample + 1) * R.stride;
+            while (R.step < upto) {
                 one_step(&R);
                 R.step++;
+                steps_this_run++;
+                if (O.ckpt && now_s() - tckpt >= O.ckpt_interval) {
+                    ckpt_write(&R);
+                    tckpt = now_s();
+                }
+                if (O.stop_after_steps >= 0 &&
+                    steps_this_run >= (uint64_t)O.stop_after_steps) {
+                    stopping = 1;
+                    break;
+                }
             }
+            if (stopping)
+                break;
             R.sample++;
             emit_sample(&R, R.sample, R.step, R.q, R.v);
             emitted++;
@@ -2349,6 +2451,8 @@ int main(int argc, char **argv)
                 ckpt_write(&R);
                 tckpt = now_s();
             }
+            if (O.stop_after_samples >= 0 && emitted >= O.stop_after_samples)
+                break;
         }
     }
     elapsed = now_s() - t0;
