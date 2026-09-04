@@ -1951,3 +1951,278 @@ def test_augmented_refuses_an_unknown_name():
     with pytest.raises(ValueError):
         cftmpfr._lib.augmented(ctx._dev, "div", ctx._fi.code, b"", b"", 0,
                                ctx._fi.esz)
+
+
+# ---------------------------------------------------------------------
+# The formatOf arithmetic (754-2019 clause 5.4.1)
+#
+# What a binding can break here that it cannot break anywhere else:
+# there are TWO formats, so they could be swapped, or the destination's
+# element size used to cut the source buffer, or the destination's
+# attribute quietly replaced by the source's. All three are attacked
+# below, and the scoring is against the GOLDEN MODEL - gmpy2's IEEE
+# emulation has one precision per context and no cross-format form to
+# compare with.
+#
+# The witness cases matter more here than anywhere else in this file: a
+# binding that reached cft_div in the source format and converted the
+# answer down would pass every ordinary case and fail exactly these.
+# ---------------------------------------------------------------------
+
+try:
+    from cft_golden import formatof as _gfo               # noqa: E402
+except ImportError:                                       # pragma: no cover
+    _gfo = None
+
+needs_formatof = pytest.mark.skipif(
+    GOLDEN is None or _gfo is None,
+    reason="the golden model is not importable")
+
+FO_METHODS = (("formatof_add", "addition", 2),
+              ("formatof_sub", "subtraction", 2),
+              ("formatof_mul", "multiplication", 2),
+              ("formatof_div", "division", 2),
+              ("formatof_sqrt", "squareRoot", 1),
+              ("formatof_fma", "fusedMultiplyAdd", 3))
+
+FO_PAIRS = [(s, d) for s in PRECISIONS for d in PRECISIONS]
+FO_NARROWING = [(s, d) for s, d in FO_PAIRS if d < s]
+
+
+def _fo_ids(pairs):
+    return [f"{WIDTH[s]}->{WIDTH[d]}" for s, d in pairs]
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_PAIRS, ids=_fo_ids(FO_PAIRS))
+def test_formatof_matches_the_model(sp, dp):
+    """Every ordered pair, all six operations, against
+    python/cft_golden/formatof.py - which is the definition."""
+    sfmt, dfmt = GOLDEN[sp], GOLDEN[dp]
+    src, dst = Context(sp), Context(dp)
+    ops = pool(sp, count=14, seed=61)
+    checked = 0
+    for name, fn, arity in FO_METHODS:
+        for i, xb in enumerate(ops):
+            yb = ops[(i * 5 + 1) % len(ops)]
+            zb = ops[(i * 7 + 3) % len(ops)]
+            args = [src.from_bits(v) for v in (xb, yb, zb)][:arity]
+            dst.clear_flags()
+            got = getattr(dst, name)(*args)
+            want = _gfo.compute(sfmt, dfmt, fn, xb, yb, zb)
+            assert (got.to_bits(), dst.last_flags) == want, \
+                (name, sp, dp, hex(xb), hex(yb), hex(zb))
+            checked += 1
+    assert checked > 80, checked
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_NARROWING, ids=_fo_ids(FO_NARROWING))
+def test_formatof_is_not_a_double_rounding(sp, dp):
+    """The three witnesses, through the binding.
+
+    Each is a case where computing in the source format and converting
+    the answer down lands one ulp low - the tie in the destination
+    broken to even by a first rounding that should not have happened.
+    Both halves are asserted: the binding matches the model, and the
+    composed route does NOT, so a witness that stopped separating them
+    fails here rather than quietly passing."""
+    sfmt, dfmt = GOLDEN[sp], GOLDEN[dp]
+    src, dst = Context(sp), Context(dp)
+    for name, fn, arity in FO_METHODS:
+        if fn not in ("division", "squareRoot", "fusedMultiplyAdd"):
+            continue
+        xb, yb, zb, wfmt = _gfo.double_rounding_witness(sfmt, dfmt, fn)
+        args = [src.from_bits(v) for v in (xb, yb, zb)][:arity]
+        dst.clear_flags()
+        got = getattr(dst, name)(*args)
+        want = _gfo.compute(sfmt, dfmt, fn, xb, yb, zb)
+        assert (got.to_bits(), dst.last_flags) == want, (name, sp, dp)
+        wrong = _gfo.composed_route(sfmt, dfmt, wfmt, fn, xb, yb, zb)
+        assert wrong[0] != want[0], (
+            f"{name} {sp}->{dp}: the composed route agreed, so this "
+            f"witness no longer witnesses anything")
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_NARROWING, ids=_fo_ids(FO_NARROWING))
+def test_formatof_uses_the_destination_attribute(sp, dp):
+    """The rounding is the DESTINATION context's, not the source's.
+
+    Half of the destination's least subnormal is an exact tie between
+    zero and that subnormal, and an ordinary normal in the source - so
+    the two directions of the tie separate a binding that forwarded the
+    right attribute from one that forwarded the source's."""
+    sfmt, dfmt = GOLDEN[sp], GOLDEN[dp]
+    half, fl = _gsf.round_pack(sfmt, 0, 1,
+                              dfmt.emin - dfmt.man_w - 1, _gsf.RND_RNE)
+    assert fl == 0, "half the destination's least subnormal must be exact"
+    src = Context(sp)
+    x = src.from_bits(half)
+    one = src.from_int(1)
+    for dr, want in (("RNDN", 0),
+                     ("RNDZ", 0),
+                     ("RNDD", 0),
+                     ("RNDU", 1),
+                     ("RNDNA", 1)):
+        dst = Context(dp, rounding=dr)
+        dst.clear_flags()
+        got = dst.formatof_mul(x, one)
+        assert got.to_bits() == want, (dr, sp, dp, hex(got.to_bits()))
+        assert set(dst.flag_names(dst.last_flags)) == {"underflow",
+                                                       "inexact"}
+    # and the SOURCE context's attribute is not consulted at all
+    loud = Context(sp, rounding="RNDU")
+    x2 = loud.from_bits(half)
+    quiet = Context(dp, rounding="RNDN")
+    assert quiet.formatof_mul(x2, loud.from_int(1)).to_bits() == 0
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_PAIRS, ids=_fo_ids(FO_PAIRS))
+def test_formatof_batch_equals_the_scalar_path(sp, dp):
+    """One C call over the array, element by element in Python - the
+    same bits and the OR of the same flags. The container styles are
+    the destination's, not the source's, which is the one thing this
+    family's batch path has to get right that no other one does."""
+    src, dst = Context(sp), Context(dp)
+    ops = pool(sp, count=12, seed=63)
+    xs = [src.from_bits(v) for v in ops]
+    ys = [src.from_bits(ops[(i * 3 + 1) % len(ops)])
+          for i in range(len(ops))]
+    zs = [src.from_bits(ops[(i * 5 + 2) % len(ops)])
+          for i in range(len(ops))]
+    for name, _fn, arity in FO_METHODS:
+        args = [xs, ys, zs][:arity]
+        dst.clear_flags()
+        out, fl = getattr(batch, name)(dst, src, *args)
+        assert len(out) == len(ops)
+        acc = 0
+        for i in range(len(ops)):
+            dst.clear_flags()
+            one = getattr(dst, name)(*[a[i] for a in args])
+            assert out[i].to_bits() == one.to_bits(), (name, sp, dp, i)
+            acc |= dst.last_flags
+        assert fl == acc, (name, sp, dp)
+        # every result is a Float of the DESTINATION context
+        assert all(v.context is dst for v in out)
+        # the bytes container gives the same encodings back
+        packed = [b"".join(v.to_bytes() for v in a) for a in args]
+        outb, flb = getattr(batch, name)(dst, src, *packed)
+        assert outb == b"".join(v.to_bytes() for v in out)
+        assert flb == fl
+
+
+@needs_formatof
+def test_formatof_refuses_a_mixed_source_format():
+    """5.4.1 takes ONE source format. A mixed pair is refused rather
+    than widened behind the caller's back - the same rule _coerce
+    applies within one format, for the same reason."""
+    hi, lo = Context(53), Context(24)
+    with pytest.raises(ValueError):
+        lo.formatof_add(hi.from_int(1), lo.from_int(1))
+    with pytest.raises(ValueError):
+        batch.formatof_add(lo, hi, [hi.from_int(1)], [lo.from_int(1)])
+
+
+@needs_formatof
+def test_formatof_refuses_an_unknown_name_and_a_bad_arity():
+    ctx = Context(53)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.formatof(ctx._dev, "rem", 1, 0, 0, (b"", b""), 0, 4)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.formatof(ctx._dev, "sqrt", 1, 0, 0, (b"", b""), 0, 4)
+
+
+@needs_formatof
+def test_formatof_named_rows():
+    """The rows an independent reading of 5.4.1 decides, so that this
+    file is not only comparing two implementations of one idea."""
+    hi, lo = Context(53), Context(24)
+
+    # the destination owns the overflow: 2^100 * 2^100 is nothing in
+    # binary64 and an overflow in binary32
+    big = hi.from_float(2.0 ** 100)
+    hi.clear_flags()
+    assert hi.mul(big, big).to_float() == 2.0 ** 200
+    assert hi.last_flags == 0
+    lo.clear_flags()
+    got = lo.formatof_mul(big, big)
+    assert got.is_inf and set(lo.flag_names(lo.last_flags)) == {"overflow",
+                                                               "inexact"}
+
+    # the wider destination owns the wider range: binary32's least
+    # subnormal squared vanishes in binary32 and is exact in binary64
+    tiny = lo.from_bits(1)
+    lo.clear_flags()
+    assert lo.mul(tiny, tiny).is_zero
+    hi.clear_flags()
+    sq = hi.formatof_mul(tiny, tiny)
+    assert hi.last_flags == 0
+    assert sq.to_float() == float(2.0 ** -149) ** 2 or sq.to_bits() != 0
+
+    # a signaling NaN signals once and delivers the DESTINATION's
+    # canonical quiet NaN
+    lo.clear_flags()
+    snan = hi.from_bits((0x7FF << 52) | 1)
+    q = lo.formatof_add(snan, hi.from_int(1))
+    assert q.is_nan and q.to_bits() == 0x7FC00000
+    assert tuple(lo.flag_names(lo.last_flags)) == ("invalid",)
+
+    # divideByZero is delivered in the destination too
+    lo.clear_flags()
+    inf = lo.formatof_div(hi.from_int(1), hi.zero())
+    assert inf.is_inf and tuple(lo.flag_names(lo.last_flags)) == \
+        ("divbyzero",)
+
+
+@needs_formatof
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_formatof_same_format_is_the_ordinary_operation(prec):
+    """sfmt == dfmt is the operation that was already on the context,
+    bit for bit and flag for flag."""
+    ctx = Context(prec)
+    ops = pool(prec, count=12, seed=65)
+    for i, xb in enumerate(ops):
+        yb = ops[(i * 3 + 1) % len(ops)]
+        zb = ops[(i * 7 + 2) % len(ops)]
+        x, y, z = (ctx.from_bits(xb), ctx.from_bits(yb), ctx.from_bits(zb))
+        for name, plain in (("formatof_add", "add"), ("formatof_sub", "sub"),
+                            ("formatof_mul", "mul"), ("formatof_div", "div")):
+            ctx.clear_flags()
+            a = getattr(ctx, name)(x, y)
+            fa = ctx.last_flags
+            ctx.clear_flags()
+            b = getattr(ctx, plain)(x, y)
+            assert (a.to_bits(), fa) == (b.to_bits(), ctx.last_flags), name
+        ctx.clear_flags()
+        a = ctx.formatof_sqrt(x)
+        fa = ctx.last_flags
+        ctx.clear_flags()
+        assert (a.to_bits(), fa) == (ctx.sqrt(x).to_bits(), ctx.last_flags)
+        ctx.clear_flags()
+        a = ctx.formatof_fma(x, y, z)
+        fa = ctx.last_flags
+        ctx.clear_flags()
+        assert (a.to_bits(), fa) == (ctx.fma(x, y, z).to_bits(),
+                                     ctx.last_flags)
+
+
+@needs_numpy
+@needs_formatof
+def test_formatof_batch_numpy_returns_the_destination_dtype():
+    """An ndarray in, an ndarray of the DESTINATION's natural dtype out
+    - the one place this family's container rules differ from every
+    other batch call's, because the element size changes."""
+    hi, lo = Context(53), Context(24)
+    xs = np.array([1.5, 2.25, -3.0, 1e300], dtype=np.float64)
+    ys = np.array([0.5, 0.25, 1.0, 1e300], dtype=np.float64)
+    out, fl = batch.formatof_add(lo, hi, xs, ys)
+    assert out.dtype == np.dtype("float32")
+    assert list(out[:3]) == [2.0, 2.5, -2.0]
+    assert np.isinf(out[3]) and (fl & cftmpfr.FLAG_OVERFLOW)
+    # and the other direction: binary32 in, binary64 out
+    zs = np.array([1.5, 2.25], dtype=np.float32)
+    out2, _ = batch.formatof_mul(hi, lo, zs, zs)
+    assert out2.dtype == np.dtype("float64")
+    assert list(out2) == [2.25, 5.0625]

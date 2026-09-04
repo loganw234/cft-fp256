@@ -1422,6 +1422,61 @@ public:
         return cft_set_payload_signaling(dev_, fmt, a, d, n);
     }
 
+
+    /* ---------------------------------------------------------------
+     * The formatOf arithmetic operations (754-2019 clause 5.4.1)
+     *
+     * The only entry points here that take TWO formats: `sfmt` for a, b
+     * and c, `dfmt` for d, one rounding into the destination. Sixteen
+     * ordered pairs, six operations, five attributes; the same-format
+     * pairs are the operations already on this class, bit for bit.
+     *
+     * Named one per operation, exactly as cft.h names them and for the
+     * reason cft.h gives - division and square root have no opcode, so
+     * a dispatcher keyed on cft_op could not express half the clause.
+     *
+     * `d` must not overlap a, b or c: the elements change size, so an
+     * in-place call would overwrite operand i+1 while writing result i.
+     * That is cft_convert's rule and it is not policed here either.
+     * --------------------------------------------------------------- */
+#define CFT_HPP_FO2(name)                                               \
+    call_result formatof_##name(cft_format sfmt, cft_format dfmt,       \
+                                cft_round rnd, const void *a,           \
+                                const void *b, void *d, std::size_t n,  \
+                                std::uint32_t *bus = nullptr) noexcept  \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_formatof_##name(dev_, sfmt, dfmt, rnd, a, b, d,  \
+                                       n, &r.flags, bus);               \
+        return r;                                                       \
+    }
+    CFT_HPP_FO2(add)
+    CFT_HPP_FO2(sub)
+    CFT_HPP_FO2(mul)
+    CFT_HPP_FO2(div)
+#undef CFT_HPP_FO2
+
+    call_result formatof_sqrt(cft_format sfmt, cft_format dfmt,
+                              cft_round rnd, const void *a, void *d,
+                              std::size_t n,
+                              std::uint32_t *bus = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_formatof_sqrt(dev_, sfmt, dfmt, rnd, a, d, n,
+                                     &r.flags, bus);
+        return r;
+    }
+    call_result formatof_fma(cft_format sfmt, cft_format dfmt,
+                             cft_round rnd, const void *a, const void *b,
+                             const void *c, void *d, std::size_t n,
+                             std::uint32_t *bus = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_formatof_fma(dev_, sfmt, dfmt, rnd, a, b, c, d, n,
+                                    &r.flags, bus);
+        return r;
+    }
+
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
     {
@@ -2876,6 +2931,106 @@ bool value<F>::operator>(const value &o) const
 template <cft_format F>
 bool value<F>::operator>=(const value &o) const
 { return detail::predicate_true(require_same(o, "operator>="), CFT_CMPLE, o, *this); }
+
+
+/* ---------------------------------------------------------------
+ * The formatOf arithmetic, typed (754-2019 clause 5.4.1)
+ *
+ * FREE FUNCTIONS, not members of basic_context<F>, and that is forced
+ * rather than chosen: a context is bound to ONE format and these
+ * operations have two. Putting them on the destination's context would
+ * type the result and leave the operands as raw bytes, which is exactly
+ * the mistake this layer exists to prevent - handing binary64 encodings
+ * to a call that reads them as binary32 is a compile error here and a
+ * silent wrong answer in C.
+ *
+ * So the source and destination formats are both template parameters,
+ * the spans carry encoding<SF> and encoding<DF>, and a mismatched pair
+ * does not compile. The rounding attribute is explicit for the same
+ * reason it cannot come from a context: there are two contexts in play
+ * and no rule says which one's attribute wins.
+ *
+ * Each returns the flag word and throws cft::error on a failed status,
+ * which is the convention basic_context::record() follows. `d` must not
+ * overlap the operands - cft.h's rule, unpoliced here as there.
+ *
+ * 5.11's cross-format COMPARISON is deliberately absent. The clause
+ * asks that comparisons of data in different binary formats be "exact,
+ * as if the data were converted to a common format with unbounded
+ * exponent range and precision"; on this ladder that common format is
+ * the wider of the two, converting into it is exact, and so the
+ * composition - convert<SF, DF>() then the context's own comparison -
+ * IS the operation. Wrapping two calls that already exist would add a
+ * name, not a capability. docs/DETERMINISM.md records it as a
+ * composition.
+ * --------------------------------------------------------------- */
+namespace detail {
+
+template <cft_format SF, cft_format DF>
+inline void formatof_sizes(std::size_t na, std::size_t nb, std::size_t nc,
+                           std::size_t nd, int arity, const char *what)
+{
+    if (na < nd || (arity >= 2 && nb < nd) || (arity >= 3 && nc < nd))
+        throw std::invalid_argument(
+            std::string(what) + ": every operand span must hold at least "
+            "as many elements as the destination span");
+}
+
+inline std::uint32_t formatof_finish(const call_result &r, const char *what)
+{
+    if (r.status != CFT_OK)
+        throw error(r.status, what);
+    return r.flags;
+}
+
+}  // namespace detail
+
+#define CFT_HPP_FO_FREE2(name)                                            \
+template <cft_format SF, cft_format DF>                                   \
+inline std::uint32_t formatof_##name(device &dev, cft_round rnd,          \
+                                     cspan<encoding<SF>> a,               \
+                                     cspan<encoding<SF>> b,               \
+                                     span<encoding<DF>> d)                \
+{                                                                         \
+    detail::formatof_sizes<SF, DF>(a.size(), b.size(), 0, d.size(), 2,    \
+                                   "cft::formatof_" #name);               \
+    return detail::formatof_finish(                                       \
+        dev.formatof_##name(SF, DF, rnd, a.data(), b.data(), d.data(),    \
+                            d.size()),                                    \
+        "cft_formatof_" #name);                                           \
+}
+CFT_HPP_FO_FREE2(add)
+CFT_HPP_FO_FREE2(sub)
+CFT_HPP_FO_FREE2(mul)
+CFT_HPP_FO_FREE2(div)
+#undef CFT_HPP_FO_FREE2
+
+template <cft_format SF, cft_format DF>
+inline std::uint32_t formatof_sqrt(device &dev, cft_round rnd,
+                                   cspan<encoding<SF>> a,
+                                   span<encoding<DF>> d)
+{
+    detail::formatof_sizes<SF, DF>(a.size(), 0, 0, d.size(), 1,
+                                   "cft::formatof_sqrt");
+    return detail::formatof_finish(
+        dev.formatof_sqrt(SF, DF, rnd, a.data(), d.data(), d.size()),
+        "cft_formatof_sqrt");
+}
+
+template <cft_format SF, cft_format DF>
+inline std::uint32_t formatof_fma(device &dev, cft_round rnd,
+                                  cspan<encoding<SF>> a,
+                                  cspan<encoding<SF>> b,
+                                  cspan<encoding<SF>> c,
+                                  span<encoding<DF>> d)
+{
+    detail::formatof_sizes<SF, DF>(a.size(), b.size(), c.size(), d.size(),
+                                   3, "cft::formatof_fma");
+    return detail::formatof_finish(
+        dev.formatof_fma(SF, DF, rnd, a.data(), b.data(), c.data(),
+                         d.data(), d.size()),
+        "cft_formatof_fma");
+}
 
 }  // namespace cft
 

@@ -275,6 +275,30 @@ def _bind(lib):
                         ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
 
+    # The formatOf arithmetic of 754-2019 5.4.1: TWO formats per call,
+    # the operands read in the first and the result rounded once into
+    # the second. Written out rather than looped over the same-format
+    # list, because the extra c_int is exactly the kind of difference a
+    # shared loop hides.
+    for _name in ("cft_formatof_add", "cft_formatof_sub",
+                  "cft_formatof_mul", "cft_formatof_div"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_int, c_void_p, c_void_p,
+                        c_void_p, c_size_t, ctypes.POINTER(c_uint32),
+                        ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
+    lib.cft_formatof_sqrt.argtypes = [c_void_p, c_int, c_int, c_int,
+                                      c_void_p, c_void_p, c_size_t,
+                                      ctypes.POINTER(c_uint32),
+                                      ctypes.POINTER(c_uint32)]
+    lib.cft_formatof_sqrt.restype = c_int
+    lib.cft_formatof_fma.argtypes = [c_void_p, c_int, c_int, c_int,
+                                     c_void_p, c_void_p, c_void_p,
+                                     c_void_p, c_size_t,
+                                     ctypes.POINTER(c_uint32),
+                                     ctypes.POINTER(c_uint32)]
+    lib.cft_formatof_fma.restype = c_int
+
     # The clause-5.12 character conversions and the clause-9.7 payload
     # operations (part of the 0.6 step). Host operations, so no bus
     # word; the payload three signal nothing, so no flag word either.
@@ -627,3 +651,50 @@ def augmented(handle, name, fmt, a, b, n, esz):
     check(fn(handle, fmt, a, b, r, e, n, ctypes.byref(flags)),
           "cft_augmented_" + name)
     return r.raw, e.raw, flags.value
+
+
+# ---------------------------------------------------------------------
+# The formatOf arithmetic operations, 754-2019 clause 5.4.1.
+#
+# The only entry points here that take TWO formats: the operands are
+# read in `sfmt` and the result is rounded once into `dfmt`. Note the
+# two c_int format arguments in the prototypes above, where every other
+# arithmetic call has one - a binding that bound only the first would be
+# a pointer-sized lie ctypes would tell without complaint, which is why
+# the argtypes for these are written out rather than looped over the
+# same list the same-format calls use.
+#
+# The output buffer is sized from the DESTINATION's element size and the
+# operand buffers from the SOURCE's; on this ladder they differ by up to
+# a factor of eight, so a caller who got that backwards would read past
+# the end of its own array rather than get a wrong answer.
+# ---------------------------------------------------------------------
+
+FORMATOF = ("add", "sub", "mul", "div", "sqrt", "fma")
+
+#: How many operands each reads - 5.4.1's own arities.
+FORMATOF_ARITY = {"add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
+                  "fma": 3}
+
+
+def formatof(handle, name, sfmt, dfmt, rnd, ops, n, desz):
+    """One formatOf operation over n elements.
+
+    `ops` is a tuple of packed source-format buffers, one per operand
+    the entry point reads; the result comes back as `n * desz` bytes of
+    destination-format encodings with the call's flag word.
+    """
+    try:
+        arity = FORMATOF_ARITY[name]
+    except KeyError:
+        raise ValueError(f"unknown formatOf operation {name!r}") from None
+    if len(ops) != arity:
+        raise ValueError(
+            f"formatOf-{name} reads {arity} operand(s), got {len(ops)}")
+    d = ctypes.create_string_buffer(n * desz)
+    flags = ctypes.c_uint32(0)
+    fn = getattr(lib(), "cft_formatof_" + name)
+    check(fn(handle, sfmt, dfmt, rnd, *ops, d, n, ctypes.byref(flags),
+             None),
+          "cft_formatof_" + name)
+    return d.raw, flags.value

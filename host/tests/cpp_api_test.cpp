@@ -1655,6 +1655,154 @@ void check_device(cft::device &dev, cft_device *ref)
     }
 }
 
+
+/* ---- the formatOf arithmetic (754-2019 5.4.1) --------------------- *
+ *
+ * Two formats, so this cannot live inside check_format<F>: the source
+ * and the destination are separate template parameters and every
+ * ordered pair gets its own instantiation, which is the point - handing
+ * binary64 encodings to a call that reads them as binary32 is a compile
+ * error in this layer and a silent wrong answer in C.
+ *
+ * Three paths compared, not two: the typed free function, the raw
+ * method on cft::device, and cft.h itself. The middle one exists
+ * because it is what a caller with its own buffers uses, and a wrapper
+ * whose typed path was right and whose raw path had the operands
+ * swapped would pass a two-path test.
+ */
+template <cft_format SF, cft_format DF>
+void check_formatof(cft::device &dev, cft_device *ref)
+{
+    using senc = cft::encoding<SF>;
+    using denc = cft::encoding<DF>;
+    const std::size_t n = 129;          /* crosses the widening chunking */
+    static const cft_round rounds[5] = { CFT_RNE, CFT_RTZ, CFT_RDN,
+                                         CFT_RUP, CFT_RMM };
+
+    const std::vector<senc> a = operands<SF>(n, 0);
+    const std::vector<senc> b = operands<SF>(n, 3);
+    const std::vector<senc> c = operands<SF>(n, 5);
+
+    for (std::size_t ri = 0; ri < 5; ri++) {
+        const cft_round rnd = rounds[ri];
+        std::vector<denc> dw(n), dc(n), dr(n);
+        std::uint32_t fw = 0, fc = 0, fr = 0;
+        cft_status st;
+
+#define FO2(name)                                                         \
+        fw = cft::formatof_##name<SF, DF>(dev, rnd, a, b, dw);            \
+        st = cft_formatof_##name(ref, SF, DF, rnd, a.data(), b.data(),    \
+                                 dc.data(), n, &fc, nullptr);             \
+        CHECK(st == CFT_OK, "cft_formatof_" #name ": %s",                 \
+              cft_strerror(st));                                          \
+        expect<DF>("formatof_" #name, rnd, dw, fw, dc, fc);               \
+        {                                                                 \
+            const cft::call_result r =                                    \
+                dev.formatof_##name(SF, DF, rnd, a.data(), b.data(),      \
+                                    dr.data(), n);                        \
+            fr = r.flags;                                                 \
+            CHECK(r.status == CFT_OK, "device::formatof_" #name);         \
+            expect<DF>("formatof_" #name " (raw)", rnd, dr, fr, dc, fc);  \
+        }
+        FO2(add)
+        FO2(sub)
+        FO2(mul)
+        FO2(div)
+#undef FO2
+
+        fw = cft::formatof_sqrt<SF, DF>(dev, rnd, a, dw);
+        st = cft_formatof_sqrt(ref, SF, DF, rnd, a.data(), dc.data(), n,
+                               &fc, nullptr);
+        CHECK(st == CFT_OK, "cft_formatof_sqrt: %s", cft_strerror(st));
+        expect<DF>("formatof_sqrt", rnd, dw, fw, dc, fc);
+
+        fw = cft::formatof_fma<SF, DF>(dev, rnd, a, b, c, dw);
+        st = cft_formatof_fma(ref, SF, DF, rnd, a.data(), b.data(),
+                              c.data(), dc.data(), n, &fc, nullptr);
+        CHECK(st == CFT_OK, "cft_formatof_fma: %s", cft_strerror(st));
+        expect<DF>("formatof_fma", rnd, dw, fw, dc, fc);
+    }
+
+    /* A short destination span is refused before any call is issued -
+     * the one thing this layer can check that C cannot, since C has
+     * only pointers and a count. */
+    {
+        std::vector<denc> shortd(2);
+        bool threw = false;
+        try {
+            std::vector<senc> two(2);
+            cft::formatof_add<SF, DF>(dev, CFT_RNE,
+                                      cft::cspan<senc>(two.data(), 1),
+                                      cft::cspan<senc>(two.data(), 2),
+                                      cft::span<denc>(shortd.data(), 2));
+        } catch (const std::invalid_argument &) {
+            threw = true;
+        }
+        CHECK(threw, "%s->%s: an operand span shorter than the destination "
+                     "is refused", cft_format_name(SF), cft_format_name(DF));
+    }
+
+    /* The same-format instantiation is the operation that was already
+     * there. Checked HERE rather than only in C, because the wrapper is
+     * where a format could get swapped for its neighbour. */
+    if (SF == DF) {
+        std::vector<denc> dw(n), dc(n);
+        const std::uint32_t fw2 =
+            cft::formatof_add<SF, DF>(dev, CFT_RNE, a, b, dw);
+        std::uint32_t fc2 = 0;
+        const cft_status st2 =
+            cft_run(ref, CFT_ADD, SF, CFT_RNE, a.data(), nullptr, b.data(),
+                    dc.data(), n, &fc2, nullptr);
+        CHECK(st2 == CFT_OK, "cft_run: %s", cft_strerror(st2));
+        expect<DF>("formatof_add == run(ADD)", CFT_RNE, dw, fw2, dc, fc2);
+    }
+
+    /* 5.11's cross-format comparison, as the COMPOSITION cft.h says it
+     * is: widen both sides into the wider of the two formats and use the
+     * comparison that already exists. Exercised rather than asserted,
+     * and the assertion that matters is that the widening rounds
+     * NOTHING - the clause asks for a comparison "as if the data were
+     * converted to a common format with unbounded exponent range and
+     * precision", and this composition only computes that because the
+     * ladder nests. */
+    {
+        const cft_format wide =
+            (cft::format_traits<SF>::significand_bits >=
+             cft::format_traits<DF>::significand_bits) ? SF : DF;
+        const std::size_t wsz = cft_format_size(wide);
+        std::vector<denc> dvals(n);
+        std::vector<std::uint8_t> wa(n * wsz), wb(n * wsz), pred(n * wsz);
+        std::uint32_t f0 = 0, f1 = 0, f2 = 0, f3 = 0;
+
+        /* the second side is a real destination-format value, so the
+         * comparison has two formats to reconcile rather than one */
+        const cft_status s0 = cft_formatof_add(ref, SF, DF, CFT_RNE,
+                                               a.data(), b.data(),
+                                               dvals.data(), n, &f0,
+                                               nullptr);
+        const cft_status s1 = cft_convert(ref, SF, wide, CFT_RNE, a.data(),
+                                          wa.data(), n, &f1);
+        const cft_status s2 = cft_convert(ref, DF, wide, CFT_RNE,
+                                          dvals.data(), wb.data(), n, &f2);
+        const cft_status s3 = cft_run(ref, CFT_CMPLT, wide, CFT_RNE,
+                                      wa.data(), wb.data(), nullptr,
+                                      pred.data(), n, &f3, nullptr);
+        CHECK(s0 == CFT_OK && s1 == CFT_OK && s2 == CFT_OK && s3 == CFT_OK,
+              "%s vs %s: the 5.11 composition runs",
+              cft_format_name(SF), cft_format_name(DF));
+        CHECK((f1 & ~static_cast<std::uint32_t>(CFT_FLAG_INVALID)) == 0 &&
+              (f2 & ~static_cast<std::uint32_t>(CFT_FLAG_INVALID)) == 0,
+              "%s/%s: 5.11's widening into the common format must be exact, "
+              "got 0x%02x and 0x%02x", cft_format_name(SF),
+              cft_format_name(DF), static_cast<unsigned>(f1),
+              static_cast<unsigned>(f2));
+        /* and the quiet comparison signals nothing at all, even where
+         * the widening met a signaling NaN on the way in */
+        CHECK(f3 == 0, "%s/%s: the quiet comparison signals nothing",
+              cft_format_name(SF), cft_format_name(DF));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -1687,6 +1835,21 @@ int main(int argc, char **argv)
     check_format<CFT_FP128>(dev, ref);
     check_format<CFT_FP256>(dev, ref);
     check_program(dev, ref);
+
+    /* Every ordered pair of formats through the formatOf layer. The
+     * loop is written out because SF and DF are template parameters -
+     * which is the whole point of the typed layer, and the reason a
+     * mismatched pair is a compile error rather than a wrong answer. */
+#define FOPAIR(S, D) check_formatof<S, D>(dev, ref)
+    FOPAIR(CFT_FP32, CFT_FP32);  FOPAIR(CFT_FP32, CFT_FP64);
+    FOPAIR(CFT_FP32, CFT_FP128); FOPAIR(CFT_FP32, CFT_FP256);
+    FOPAIR(CFT_FP64, CFT_FP32);  FOPAIR(CFT_FP64, CFT_FP64);
+    FOPAIR(CFT_FP64, CFT_FP128); FOPAIR(CFT_FP64, CFT_FP256);
+    FOPAIR(CFT_FP128, CFT_FP32); FOPAIR(CFT_FP128, CFT_FP64);
+    FOPAIR(CFT_FP128, CFT_FP128);FOPAIR(CFT_FP128, CFT_FP256);
+    FOPAIR(CFT_FP256, CFT_FP32); FOPAIR(CFT_FP256, CFT_FP64);
+    FOPAIR(CFT_FP256, CFT_FP128);FOPAIR(CFT_FP256, CFT_FP256);
+#undef FOPAIR
 
     /* Conformance through the wrapper: the published vector sets,
      * replayed by cft_conformance itself rather than by a restatement

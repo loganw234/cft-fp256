@@ -1125,6 +1125,115 @@ class Context:
         which arrives rounded with underflow AND inexact raised."""
         return self._augmented("mul", x, y)
 
+
+    # ---- the formatOf arithmetic (754-2019 5.4.1) ----------------
+    #
+    # The six arithmetic operations with the operands in ONE binary
+    # format and the result in ANOTHER, rounded once. 5.4.1 requires
+    # them for every ordered pair of supported formats.
+    #
+    # THE METHOD LIVES ON THE DESTINATION CONTEXT, and that is MPFR's
+    # own shape rather than an invention: mpfr_add(rop, op1, op2, rnd)
+    # already rounds into rop's precision whatever the operands' is, so
+    # a drop-in that made the cross-format form a separate object would
+    # be less like MPFR, not more. Read
+    #
+    #     lo.formatof_add(x, y)
+    #
+    # as "x + y, rounded once into lo's format, in lo's attribute" -
+    # which is the whole operation, with the exception flags being lo's
+    # as well. A product of two unremarkable binary64 values overflows
+    # a binary32 destination and says so here.
+    #
+    # The SOURCE format comes from the operands: they must all be Floats
+    # of one format, and a mix is refused rather than silently widened,
+    # for the same reason _coerce refuses a mixed-precision operand.
+    # 5.4.1 itself is written for operands "of all supported arithmetic
+    # formats" - one source format per call - and mixed operands reduce
+    # to that by an exact widening the caller can write.
+    #
+    # Plain ints and floats are coerced through the SOURCE context's
+    # exact-or-refuse constructors, so a value that does not fit the
+    # source format is refused there rather than quietly landing in the
+    # destination's grid.
+    #
+    # There is no cross-format COMPARISON here and 5.11 does not need
+    # one: it asks that comparisons across binary formats be exact "as
+    # if the data were converted to a common format with unbounded
+    # exponent range and precision", and on this ladder widening into
+    # the wider of the two IS exact - so `wide.from_float(...)` or an
+    # explicit convert, then the comparison that already exists, is the
+    # operation rather than an approximation of it.
+
+    _FORMATOF_ARITY = {"add": 2, "sub": 2, "mul": 2, "div": 2,
+                       "sqrt": 1, "fma": 3}
+
+    def _formatof_source(self, args):
+        """The context the operands live in: the one they share, or
+        this one when none of them is a Float."""
+        src = None
+        for v in args:
+            if isinstance(v, Float):
+                if src is None:
+                    src = v._ctx
+                elif v._ctx._fi.prec != src._fi.prec:
+                    raise ValueError(
+                        f"mixed source formats: {src._fi.ieee_name} and "
+                        f"{v._ctx._fi.ieee_name} operands in one "
+                        f"formatOf call. 5.4.1 takes ONE source format; "
+                        f"convert explicitly - a widening is exact and "
+                        f"you should be able to see it.")
+        return src if src is not None else self
+
+    def _formatof(self, name, *args):
+        src = self._formatof_source(args)
+        ops = tuple(src._coerce(v).to_bytes() for v in args)
+        out, fl = _lib.formatof(self._dev, name, src._fi.code,
+                                self._fi.code, self._rnd, ops, 1,
+                                self._fi.esz)
+        return self._finish(out, fl)
+
+    def formatof_add(self, x, y):
+        """x + y, rounded ONCE into this context's format.
+
+        The operands keep their own format; every exception - inexact,
+        overflow, underflow - belongs to this one."""
+        return self._formatof("add", x, y)
+
+    def formatof_sub(self, x, y):
+        """x - y, rounded once into this context's format."""
+        return self._formatof("sub", x, y)
+
+    def formatof_mul(self, x, y):
+        """x * y, rounded once into this context's format."""
+        return self._formatof("mul", x, y)
+
+    def formatof_div(self, x, y):
+        """x / y, correctly rounded once into this context's format.
+
+        NOT the source-format quotient converted down. That composition
+        gives a different answer - a quotient of two wide values can sit
+        arbitrarily close to a narrow midpoint, so the first rounding
+        can land exactly on it and the second break the tie the wrong
+        way. python/cft_golden/formatof.py constructs the witness."""
+        return self._formatof("div", x, y)
+
+    def formatof_sqrt(self, x):
+        """squareRoot(x), correctly rounded once into this context's
+        format - and, unlike the same-format square root, able to
+        overflow and to underflow, because the root of a huge or tiny
+        wide value need not be in the narrow range."""
+        return self._formatof("sqrt", x)
+
+    def formatof_fma(self, x, y, z):
+        """x*y + z with ONE rounding, into this context's format.
+
+        The operation no double-rounding scheme can imitate at any
+        intermediate width: the product can land exactly on a midpoint
+        of this format's grid while the addend, a free choice of source
+        value, sits below any intermediate's half-ulp."""
+        return self._formatof("fma", x, y, z)
+
     def neg(self, x):
         """Sign flip, 754 5.5.1: quiet even on signaling NaNs, payload
         preserved - deliberately NOT 0 - x."""
