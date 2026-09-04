@@ -47,13 +47,15 @@ command in the `cft2204` distro.
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO/seedop/simpleops theorems + negative control | docker |
-| libcft | C library contract + 493k-case conformance replay (20 opcode sets + 20 transcendental sets + 20 character sets); cleans host/ first | cc, python |
+| libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
 | character | the clause-5.12 character conversions and the 9.7 payload operations vs model, both directions, five attributes, plus the round trip at Pmin and its collision at Pmin - 1 | cc, python |
 | transcend | the thirty-nine transcendentals vs model, then again with the library forced to start below the precision it needs, so the escalation path runs against an unescalated reference | cc, python |
 | augmented | the three clause-9.5 augmented operations vs model - both outputs and the flag word per element, the batch loop and its flag OR, the aliasing rules, and the pair identity `r + e == x op y` checked in exact integers on the library's own output | cc, python |
+| status96 | the 7.1/5.7.4 status word, the 5.7.1 predicates and 9.6's four magnitude forms vs the model | cc, python |
+| formatof | the clause-5.4.1 formatOf arithmetic vs the model: every ordered format pair, six operations, five attributes, the destination's exceptions | cc, python |
 | diff | the alignment-boundary sweep vs the model | cc, python |
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |

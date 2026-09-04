@@ -501,7 +501,12 @@ way at every higher one, because raising the precision only narrows the
 enclosure - and the run proves it, over 72,275 comparisons against a
 reference that did not escalate.
 
-## What is not here
+## What was not here on 2026-09-02
+
+*Status 2026-09-04: everything below except tile assistance has since
+landed - phases 2 and 3 and the rest of table 9.1 follow in this file,
+and docs/COMPLIANCE.md is the statement. The section stays as written
+because the prediction it makes was tested by what came after.*
 
 - **Tile assistance.** Every one of these is host work today. A
   narrow-format fast path on the tile's FMA is a phase-2 optimisation

@@ -63,7 +63,8 @@ kernel flow, XRT host runtime.
   lives in three places that must move together: this module,
   `softfloat.steer`, and this document.
 - **cft_simpleops** - the operations that are not arithmetic: `abs`,
-  `negate`, `copySign` (754 5.5.1), the four min/max forms (9.6), the
+  `negate`, `copySign` (754 5.5.1), the four opcode forms of min/max
+  (9.6; the magnitude four are host operations, docs/HOSTAPI.md), the
   quiet predicates + `select`, and the integer/bitwise group. A sign
   bit, one magnitude comparison and one shifter, computed
   combinationally - and proven bit-identical to its pre-rewrite self

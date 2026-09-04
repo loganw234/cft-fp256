@@ -27,8 +27,7 @@ runner. **yes (contexts)**: the C library holds no state by design, so
 the facility lives in the Python `Context` and the C++ context objects,
 one attribute each. **composition**: not an entry point, but exactly
 reachable from the entry points that exist, and said how. **exceeds**:
-more than the clause asks. **gap**: named by the standard, absent
-here. **excluded**: left out by design and stated in
+more than the clause asks. **excluded**: left out by design and stated in
 docs/DETERMINISM.md. **language**: the clause addresses a language
 standard, not a library.
 

@@ -46,8 +46,8 @@ hw_manager access that stock U50s route through the PCIe shell only.
 
 | box | hardware | role |
 |---|---|---|
-| amd-arc-box (192.168.0.201) | Xeon E5-2697 v4 36t, 32 GB, 238 GB NVMe (167 free), RX 7600 + Arc B580 + Arc A750, Ubuntu 24.04 | **build box** (Vitis + v++); card host IF its X99-UD4 BIOS exposes Above 4G Decoding (common on X99 - check; /proc/iomem shows none mapped today) |
-| nvidia-box (192.168.0.234) | i5-6600K 4t, 8 GB, 117 GB SSD, GTX 1080, mini-ITX, Ubuntu 24.04 | too small for v++ links (8 GB); last-resort card host - single slot means pulling the 1080, which breaks an atlas census column |
+| amd-arc-box | Xeon E5-2697 v4 36t, 32 GB, 238 GB NVMe (167 free), RX 7600 + Arc B580 + Arc A750, Ubuntu 24.04 | **build box** (Vitis + v++); card host IF its X99-UD4 BIOS exposes Above 4G Decoding (common on X99 - check; /proc/iomem shows none mapped today) |
+| nvidia-box | i5-6600K 4t, 8 GB, 117 GB SSD, GTX 1080, mini-ITX, Ubuntu 24.04 | too small for v++ links (8 GB); last-resort card host - single slot means pulling the 1080, which breaks an atlas census column |
 | Windows box (MSI PRO B760-P) | Vivado 2026.1 installed with U50 part support; Above-4G decoding confirmed ACTIVE | .xo packaging + synthesis experiments today; strong card-host fallback via dual-boot Ubuntu on a spare drive |
 
 Both Linux boxes run Ubuntu 24.04, so the native Linux Vitis must be a

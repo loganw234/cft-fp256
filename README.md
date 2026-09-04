@@ -158,16 +158,17 @@ thirty-nine functions of Table 9.1, **correctly rounded** at every
 format under every attribute with exact flags (docs/TRANSCENDENTALS.md
 - a stronger claim than any libm makes and the only one that can be
 scored), the seven reductions of 9.4 over a contractual tree, the three
-augmented operations of 9.5 with their ties-toward-zero rounding, four
-of the eight minimum/maximum operations of 9.6 and the three payload
-operations of 9.7. Since ABI 0.7 (2026-09-04) the library **conforms to
+augmented operations of 9.5 with their ties-toward-zero rounding, all
+eight minimum/maximum operations of 9.6 (four as tile opcodes, the
+magnitude four as host operations) and the three payload operations
+of 9.7. Since ABI 0.7 (2026-09-04) the library **conforms to
 IEEE 754-2019 in radix 2**, in the standard's own words (3.1.2):
 binary32, binary64 and binary128 as supported arithmetic and
 interchange formats and binary256 as a further one; every clause-5
 operation for each of them, the cross-format forms of the six
 arithmetic operations included; a status word lowered only by the
 caller; the conformance predicates; and every recommended operation
-of clause 9 for binary formats, all eight forms of 9.6 among them.
+of clause 9 for binary formats, the magnitude four of 9.6 among them.
 docs/COMPLIANCE.md walks the standard clause by clause and is the
 conformance statement. What stays outside is named rather than
 implied: the

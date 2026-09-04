@@ -70,7 +70,7 @@ Run the demo and the tests:
 
 ```bash
 python demo_mpfr_dropin.py        # 100k-element binary256 workload
-python -m pytest test_cftmpfr.py  # 80 tests; skips gmpy2/numpy parts if absent
+python -m pytest test_cftmpfr.py  # 834 tests at ABI 0.7; skips gmpy2/numpy parts if absent
 ```
 
 ## What the demo measures, honestly
@@ -215,3 +215,22 @@ as TwoSum and Dekker splitting and correct only under assumptions a
 compiler is free to break. `r + e` is exact in every case but one: a
 product whose residual falls below the subnormal grid, which 9.5
 delivers rounded with underflow and inexact raised.
+
+## The package at ABI 0.7
+
+The two sections above are the first two steps; the package kept pace
+with every step after them, and this is the map. Every method is on
+`Context` and, where the C has a batch shape, in `batch` too; the
+semantics are the library's, documented in docs/HOSTAPI.md, and
+`test_cftmpfr.py` holds each one to the library bit for bit.
+
+| family | methods |
+|---|---|
+| the transcendentals, all thirty-nine of table 9.1 | `exp`, `expm1`, `exp2`, `exp2m1`, `exp10`, `exp10m1`, `log`, `log1p`, `log2`, `log2p1`, `log10`, `log10p1`, `pow`, `pown`, `powr`, `compound`, `rootn`, `rsqrt`, `hypot`, `sin`, `cos`, `tan`, `sinpi`, `cospi`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `asinpi`, `acospi`, `atanpi`, `atan2pi`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` - the integer-operand three take a Python int |
+| the reductions (9.4) | `tree_sum`, `tree_dot`, `tree_sumsq`, `tree_sumabs`, `scaled_prod`, `scaled_prod_sum`, `scaled_prod_diff` in `batch` |
+| augmented arithmetic (9.5) | `augmented_add`, `augmented_sub`, `augmented_mul` - a pair out, no rounding argument |
+| character sequences (5.12) and payloads (9.7) | `from_str`, `to_str`, `from_hex`, `to_hex` through the library's own conversions; `get_payload`, `set_payload`, `set_payload_signaling` |
+| formatOf arithmetic (5.4.1, ABI 0.7) | `formatof_add`, `formatof_sub`, `formatof_mul`, `formatof_div`, `formatof_sqrt`, `formatof_fma` - the destination context is an argument, the result a `Float` of that context |
+| min/max, all eight (9.6) | the four opcodes as before, and `min_mag`, `max_mag`, `minnum_mag`, `maxnum_mag` |
+| the status word (7.1, 5.7.4, ABI 0.7) | `Context.flags` is a property over the library's own word; `clear_flags()` lowers it; `lower_flags`, `raise_flags`, `test_flags`, `save_all_flags`, `restore_flags`, `test_saved_flags` are 754's names for the same word |
+| conformance predicates (5.7.1) | `cftmpfr.is754version1985()`, `is754version2008()`, `is754version2019()` - false, false, true, for the reasons in docs/COMPLIANCE.md |

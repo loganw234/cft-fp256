@@ -131,7 +131,8 @@ from existing opcodes where floating-point work exists, host bit
 surgery where none does - with **zero new RTL**, which was the point
 of the composition methodology. `python/cft_golden/softfloat.py`
 defines each one; `host/tests/clause5_check.py` holds libcft identical
-to it (112,372 comparisons, every format and attribute).
+to it (145,032 comparisons at the 0.7 census, every format and
+attribute).
 
 | group | operations | status |
 |---|---|---|
@@ -150,6 +151,10 @@ to it (112,372 comparisons, every format and attribute).
 | next (5.3.1) | `nextUp`, `nextDown` (`cft_next_up/_down`) | **library** - one step on the encoding, the standard's -0 edge included |
 | classification (5.7.2) | `class` + every is* predicate as a subset test (`cft_class`) | **library** - ten values pinned to RISC-V fclass bit indices |
 | total order (5.10) | `totalOrder`, `totalOrderMag` (`cft_total_order*`) | **library** - the order-embedding key; defined on the whole encoding space, signals nothing |
+| formatOf arithmetic (5.4.1) | the six arithmetic operations with the destination in another format (`cft_formatof_add/sub/mul/div/sqrt/fma`) | **composed** when the destination is not narrower - exact widening, then the opcode, so the tile runs it; **library** when it is - the exact result rounded once, since none of the six can be double rounded with the operands at the source's precision (ABI 0.7) |
+| min/max magnitude (9.6) | `minimumMagnitude`, `minimumMagnitudeNumber`, `maximumMagnitude`, `maximumMagnitudeNumber` (`cft_min_mag`, `cft_minnum_mag`, `cft_max_mag`, `cft_maxnum_mag`) | **library** - selections on the encoding from the clause's own definitions (ABI 0.7) |
+| status flags (7.1, 5.7.4) | the status word and its six operations (`cft_lower_flags` ... `cft_save_all_flags`) | **library** - a word on the device handle that every entry point raises and only the caller lowers (ABI 0.7) |
+| conformance predicates (5.7.1) | `is754version1985/2008/2019` | **library** - false, false, true (ABI 0.7) |
 | NaN payloads (6.2.3) | payload propagation | **out** |
 
 What **library** rows would take to become **yes** is the same short

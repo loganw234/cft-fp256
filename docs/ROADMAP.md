@@ -1865,6 +1865,42 @@ attributes, 20,172 conversion cases against MPFR with zero value and
 zero flag mismatches, and the round trip shown to hold at Pmin and to
 collide at Pmin - 1.
 
+## ABI 0.7: conformance in radix 2 (status, 2026-09-04)
+
+The step after table 9.1 was not more functions; it was the three
+things clause 5 asks beyond names, found by reading the standard's
+conformance clause against the library rather than counting
+operations, plus the one recommended gap left in clause 9. Two Opus
+agents built them in parallel worktrees and one more brought the
+JavaScript surface up; the integrator merged, bumped once, and ran
+the census (docs/VALIDATION.md, 2026-09-04).
+
+- **formatOf arithmetic (5.4.1)**: `cft_formatof_add/sub/mul/div/
+  sqrt/fma`, operands in one format and the result in another, rounded
+  once. Widening is exact and issues the existing opcode, so a device
+  still runs that direction; narrowing forms the exact result on the
+  host. The package proved that none of the six can be double rounded
+  when the operands carry the source's precision - the 2p+2 rule's
+  hypothesis is operands at the destination's precision - and its own
+  MPFR oracle had to be corrected for the same mistake on the
+  destination's subnormal grid before the gate passed.
+- **The status word (7.1, 5.7.4)** on the device handle, ORed into by
+  every entry point through one hook with a mute for composed
+  operations' internal passes, lowered only by the caller; the six
+  operations of 5.7.4 in C, C++, Python and JavaScript, each surface
+  reading the library's word rather than keeping its own.
+- **The conformance predicates (5.7.1)**: false, false, true.
+- **9.6's magnitude four**, host entry points from the clause's own
+  definitions.
+
+With these the library conforms to IEEE 754-2019 in radix 2 on the
+terms docs/COMPLIANCE.md states. What is deliberately outside stays
+outside: the decimal formats, clause 8, payload propagation through
+arithmetic. What is open on the hardware side is unchanged by this
+step - a tile-assisted fast path for the narrowing formatOf direction
+and for the transcendentals is an optimisation, not a contract change,
+and nothing in 0.7 added RTL.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,
