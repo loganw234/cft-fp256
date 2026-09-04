@@ -146,14 +146,16 @@ required items and one recommended one.
    descriptor instead of the operands'. FMA cannot be done any other
    way: a product that lands exactly on a midpoint of the narrow grid
    plus an addend smaller than the wide format's half-ulp is a
-   counter-example to every double-rounding scheme, however wide. For
-   division and square root the wide correctly-rounded result may be
-   converted down instead, because double rounding of those is
-   innocuous when the wide format carries at least 2p + 2 bits, and
-   every adjacent pair here does: 53 against 2·24 + 2 = 50, 113
-   against 2·53 + 2 = 108, 237 against 2·113 + 2 = 228; the wide
-   step's inexact flag is kept, the destination's overflow and
-   underflow are decided by the second rounding. Mixed operand formats
+   counter-example to every double-rounding scheme, however wide.
+   Division and square root need the same exactness, and an earlier
+   draft of this file was wrong to say otherwise: the familiar result
+   that double rounding is innocuous once the wide format carries
+   2p + 2 bits assumes operands of the DESTINATION's precision computed
+   in a wider format, and here the operands carry the source's, so the
+   exact quotient or root of two wide operands can sit as close to a
+   narrow midpoint as it likes. The 0.7 work constructs that
+   counter-example for every narrowing pair and both operations, and
+   computes both exactly on the host. Mixed operand formats
    reduce to this by exact widening. Cross-format comparison (5.11)
    is the same composition and needs no entry point. Size: a package
    of the augmented kind - golden model, entry points, vector sets
