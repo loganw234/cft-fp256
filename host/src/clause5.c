@@ -1397,13 +1397,13 @@ static void minmax_mag_lane(const cft_fmt_desc *f, const cft_bn *xa,
      *   compares less than +0. Otherwise (i.e., when x = y and signs
      *   are the same) it is either x or y."
      *
-     * Equal magnitude with equal sign means x = y and the standard
-     * leaves the choice open; this contract takes x, which is what
-     * the model does and what makes the answer a function of the
-     * operand bits rather than of an implementation's mood. Equal
-     * magnitude with DIFFERENT signs is the interesting row: the
-     * negative one is the smaller, the positive one the larger, and
-     * that covers +-0 as a special case of itself. */
+     * Equal magnitude with equal sign is that open case, and it
+     * cannot be observed: for a non-NaN operand the encoding IS the
+     * sign followed by the magnitude bits, so x and y are the same
+     * bits and either choice returns them. Taking x is the shortest
+     * way to say so. Equal magnitude with DIFFERENT signs is the
+     * interesting row: the negative one is the smaller, the positive
+     * one the larger, and that covers +-0 as a case of itself. */
     if (ka.sign == kb.sign) {
         cft_bn_copy(v, xa);
         return;
