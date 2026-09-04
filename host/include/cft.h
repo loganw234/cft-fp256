@@ -1714,6 +1714,152 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                                    char *report, size_t report_size,
                                    uint64_t *cases_checked);
 
+/* ---------------------------------------------------------------
+ * The formatOf arithmetic operations (754-2019 clause 5.4.1)
+ *
+ *   formatOf-addition(a, b)              cft_formatof_add
+ *   formatOf-subtraction(a, b)           cft_formatof_sub
+ *   formatOf-multiplication(a, b)        cft_formatof_mul
+ *   formatOf-division(a, b)              cft_formatof_div
+ *   formatOf-squareRoot(a)               cft_formatof_sqrt
+ *   formatOf-fusedMultiplyAdd(a, b, c)   cft_formatof_fma
+ *
+ * The six arithmetic operations with the OPERANDS in one binary format
+ * and the RESULT in another, rounded once. 5.4.1 requires them for
+ * every ordered pair of supported arithmetic formats, in these words:
+ *
+ *   "Implementations shall provide the following formatOf general-
+ *    computational operations, for destinations of all supported
+ *    arithmetic formats, and, for each destination format, for
+ *    operands of all supported arithmetic formats with the same radix
+ *    as the destination format:
+ *        formatOf-addition(source1, source2)
+ *        formatOf-subtraction(source1, source2)
+ *        formatOf-multiplication(source1, source2)
+ *        formatOf-division(source1, source2)
+ *        formatOf-squareRoot(source)
+ *        formatOf-fusedMultiplyAdd(source1, source2, source3)"
+ *
+ * Everything above this block takes one cft_format and uses it for the
+ * operands and the result both. These take two: `sfmt` for a, b and c,
+ * `dfmt` for d. Sixteen ordered pairs x six operations x five
+ * attributes, and the same-format pairs are the operations that were
+ * already here, bit for bit.
+ *
+ * SIX ENTRY POINTS RATHER THAN ONE DISPATCHER, and the reason is not
+ * taste. A dispatcher would need a first argument naming the operation,
+ * and the only such namespace this library has is cft_op - an OPCODE
+ * space that is on the wire, in the device's opcode field and in every
+ * published vector set. Two of these six have no opcode and never will:
+ * division and square root are COMPOSITIONS here (cft.h says so above),
+ * not tile instructions, so a dispatcher keyed on cft_op could not
+ * express half of the clause without inventing opcode numbers for
+ * things the hardware does not do. The arities differ too - one, two
+ * and three operands - so a single signature would carry three pointers
+ * whose meaning changed per operation, which is exactly the shape
+ * cft_run has and pays for with the steering table. That table exists
+ * because ADD, SUB, MUL and FMA really are one hardware opcode. These
+ * six are not.
+ *
+ * WHICH DIRECTION DOES WHAT, AND WHY YOU SHOULD CARE
+ *
+ * dfmt AT LEAST AS WIDE AS sfmt: the operands are widened exactly with
+ * cft_convert and the existing same-format operation is issued. The
+ * interchange ladder nests - every binary32 value is a binary64 value,
+ * in significand bits and in exponent range both - so the widening
+ * rounds nothing and the operation's rounding is still the only one.
+ * The point of taking this route rather than a host-side one is that
+ * the arithmetic still runs where it would have run: on a device
+ * backend the cft_run / cft_div / cft_sqrt underneath is a tile pass,
+ * and bus_out carries its fault word.
+ *
+ * dfmt NARROWER THAN sfmt: the exact result is formed on the host and
+ * rounded ONCE against the destination's descriptor, through the same
+ * cft_sf_round_pack seam every other operation in this library rounds
+ * through. There is no tile pass and bus_out reads back 0.
+ *
+ * WHY NOT ROUND IN sfmt AND CONVERT DOWN. Because it gives the wrong
+ * answer, and not only in principle. The rule that says otherwise -
+ * double rounding through an intermediate of at least 2p + 2 bits is
+ * innocuous for the basic operations - has a hypothesis this
+ * configuration does not meet: it is about operands of the
+ * DESTINATION's precision. Here they carry the SOURCE's, and a quotient
+ * or a root of two wide values can sit as close as it likes to a narrow
+ * midpoint. python/cft_golden/formatof.py's double_rounding_witness()
+ * constructs the counterexample from the format descriptors alone, for
+ * division, square root and fused multiply-add, on every ordered pair
+ * of this ladder; python/tests/test_formatof.py runs all eighteen and
+ * host/src/formatof.c's banner carries the arithmetic. The composed
+ * route lands one ulp low every time, the tie in the destination broken
+ * to even by a first rounding that should not have happened. So all
+ * six narrow the exact way, and the FMA - which no intermediate width
+ * can rescue, because its addend is a free choice of source value - is
+ * only the most obvious member of the family rather than the only one.
+ *
+ * THE REST IS THE ORDINARY CONTRACT. d receives n elements of
+ * cft_format_size(dfmt) bytes; a, b and c hold n elements of
+ * cft_format_size(sfmt). Unused operands may be NULL (b for add and
+ * sub, b and c for sqrt, c for mul and div). The rounding attribute is
+ * consulted for the single rounding. Flags are the OR across the batch;
+ * every exception is the DESTINATION's - a product of two unremarkable
+ * binary64 values overflows a binary32 destination and says so, and a
+ * difference of two lands on binary32's subnormal grid and raises
+ * underflow with inexact. A signaling NaN operand raises invalid and
+ * the result is dfmt's canonical quiet NaN (6.2.1, and this contract's
+ * standing payload deviation).
+ *
+ * ALIASING: d MUST NOT overlap a, b or c. Unlike the same-format entry
+ * points, the elements change size here, so an in-place call would
+ * overwrite operand i+1 while writing result i - the same rule, and the
+ * same reason, cft_convert states. It is not policed.
+ *
+ * 5.11 - COMPARISON ACROSS TWO BINARY FORMATS - NEEDS NO ENTRY POINT.
+ * The clause asks that comparisons of data in different binary formats
+ * be "exact, as if the data were converted to a common format with
+ * unbounded exponent range and precision". On this ladder the common
+ * format is the wider of the two and cft_convert into it is exact, so
+ * the composition IS the comparison: convert the narrower operand, then
+ * use CFT_CMPLT / CFT_CMPLE / CFT_CMPEQ or cft_cmp_sig. A signaling NaN
+ * raises invalid on the way through the conversion exactly as it would
+ * have in the comparison, so the signal is neither lost nor doubled.
+ * python/cft_golden/formatof.py's compare() states the composition and
+ * python/tests/test_formatof.py checks it against exact rationals;
+ * docs/DETERMINISM.md records it as a composition rather than a gap.
+ *
+ * python/cft_golden/formatof.py defines every bit and flag below.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_formatof_add(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_sub(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_mul(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_div(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_sqrt(cft_device *dev, cft_format sfmt,
+                                     cft_format dfmt, cft_round rnd,
+                                     const void *a, void *d,
+                                     size_t n, uint32_t *flags_out,
+                                     uint32_t *bus_out);
+CFT_API cft_status cft_formatof_fma(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b,
+                                    const void *c, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
