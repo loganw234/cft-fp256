@@ -89,6 +89,29 @@ contract as any value, and the one part a set of encodings cannot
 express. Every "s" here is asserted to be free of characters JSON
 would have to escape, so a replayer's scanner needs no unescaper.
 
+The formatOf arithmetic of 754-2019 5.4.1 gets a family of its own -
+`fp64-to-fp32-formatof.jsonl`, `fp256-to-fp128-formatof-rtz.jsonl` and so
+on, one file per ORDERED PAIR of formats per attribute - because it is
+the only family whose case has two formats:
+
+    {"fn": "fma", "sfmt": "fp64", "dfmt": "fp32", "rnd": "rne",
+     "a": "0x...", "b": "0x...", "c": "0x...",
+     "d": "0x3f800001", "flags": 16}
+
+"a" is a source-format encoding and "d" a destination-format one, so
+the two are different widths on the same line; "b" appears for every
+operation but sqrt and "c" only for fma. All sixteen ordered pairs are
+emitted, the same-format four included, because 5.4.1 asks for
+"destinations of all supported arithmetic formats and, for each
+destination format, ... operands of all supported arithmetic formats".
+
+This is the one family that repeats its formats INSIDE the record as
+well as in the filename, and the repetition is deliberate: with two
+formats there is a pairing to get wrong, and a set whose name and
+contents disagree is a failure mode no other family has. cft_conformance
+checks the two against each other and refuses a file that lies about
+itself.
+
 Every opcode the tile implements appears here, arithmetic and
 non-arithmetic alike, plus the unassigned codes whose defined
 answer (canonical qNaN, invalid raised) is also part of the
@@ -113,6 +136,16 @@ from cft_golden import (  # noqa: E402
     FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, chars, TRANSCEND_INTARG, augmented, compute,
     transcend, vectors,
 )
+from cft_golden import formatof  # noqa: E402
+from cft_golden.formatof import (  # noqa: E402
+    FORMATOF_ARITY, FORMATOF_SHORT,
+)
+
+#: The set files and the C entry points name these operations "add",
+#: "div" and so on; the standard names them "formatOf-addition" and
+#: "formatOf-division". FORMATOF_SHORT maps one way and this maps back,
+#: so neither name is written out twice.
+FORMATOF_LONG = {v: k for k, v in FORMATOF_SHORT.items()}
 from cft_golden.reduce import (  # noqa: E402
     SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, fdot, fsum, fsumabs, fsumsq,
     scaled_prod,
@@ -212,6 +245,9 @@ def main():
     ap.add_argument("--character", type=int, default=12,
                     help="random sequences added to the clause-5.12 "
                          "directed pool (0 to skip the sets)")
+    ap.add_argument("--formatof", type=int, default=8,
+                    help="random operands added to each clause-5.4.1 "
+                         "formatOf pool (0 to skip the sets)")
     ap.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
 
@@ -335,6 +371,45 @@ def main():
                     f.write(json.dumps(rec) + "\n")
                     written += 1
             print(f"{path}: {written} cases (seed {args.seed}, {rname})")
+
+    # The formatOf arithmetic of 754-2019 5.4.1: one file per ordered
+    # (source, destination) pair per attribute, OUTSIDE the per-format
+    # loop above because a case here has two formats and belongs to
+    # neither of them alone.
+    if args.formatof > 0:
+        for sname in args.formats:
+            for dname in args.formats:
+                sfmt, dfmt = FORMATS[sname], FORMATS[dname]
+                shexw, dhexw = sfmt.width // 4, dfmt.width // 4
+                fcases = vectors.formatof_cases(sfmt, dfmt, args.formatof,
+                                                args.seed + 21)
+                for rname in args.rounding:
+                    rnd = RND_BY_NAME[rname]
+                    suffix = "" if rname == "rne" else f"-{rname}"
+                    path = (outdir /
+                            f"{sname}-to-{dname}-formatof{suffix}.jsonl")
+                    with open(path, "w") as f:
+                        for fn, xa, xb, xc in fcases:
+                            long_fn = FORMATOF_LONG[fn]
+                            d, flags = formatof.compute(sfmt, dfmt, long_fn,
+                                                        xa, xb, xc, rnd)
+                            rec = {
+                                "fn": fn,
+                                "sfmt": sname,
+                                "dfmt": dname,
+                                "rnd": rname,
+                                "a": f"0x{xa:0{shexw}x}",
+                            }
+                            arity = FORMATOF_ARITY[long_fn]
+                            if arity >= 2:
+                                rec["b"] = f"0x{xb:0{shexw}x}"
+                            if arity >= 3:
+                                rec["c"] = f"0x{xc:0{shexw}x}"
+                            rec["d"] = f"0x{d:0{dhexw}x}"
+                            rec["flags"] = flags
+                            f.write(json.dumps(rec) + "\n")
+                    print(f"{path}: {len(fcases)} cases (seed {args.seed}, "
+                          f"{rname})")
 
 
 if __name__ == "__main__":

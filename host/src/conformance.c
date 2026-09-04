@@ -1666,6 +1666,306 @@ static cft_status character_set(cft_device *dev, int fi, int ri, int esz,
 
 /* ---- the replay --------------------------------------------------- */
 
+/* ---- the formatOf arithmetic sets (754-2019 5.4.1) ---------------- *
+ *
+ * A fifth schema, and the first whose case has TWO formats: the
+ * operands are source-format encodings and the answer is a
+ * destination-format one, so the widths on a single line differ. One
+ * file per ORDERED PAIR per attribute, all sixteen pairs, the
+ * same-format four included - 5.4.1 asks for "destinations of all
+ * supported arithmetic formats and, for each destination format, ...
+ * operands of all supported arithmetic formats".
+ *
+ * A line repeats its two formats, which no other family does, and the
+ * repetition earns its bytes: with two formats there is a PAIRING to
+ * get wrong, and a set whose name and contents disagree is a failure
+ * mode nothing else here has. So the fields are checked against the
+ * filename the driver constructed, and a file that lies about itself is
+ * refused as an artifact rather than replayed against the wrong
+ * descriptor - which would fail with a wrong-answer report and send a
+ * reader hunting through the arithmetic.
+ *
+ * Replayed the same two ways as everything else: one element at a time,
+ * where a sticky flag word means exactly one case, and then as whole
+ * arrays, which is the only thing that exercises the batch loop, the
+ * flag OR and - on a device backend - the partitioning of the widening
+ * route's tile pass.
+ */
+
+#define FO_COUNT 6
+static const char *const FO_NAMES[FO_COUNT] = {
+    "add", "sub", "mul", "div", "sqrt", "fma"
+};
+/* How many operands each reads. sqrt takes one, fma three. */
+static const int FO_ARITY[FO_COUNT] = { 2, 2, 2, 2, 1, 3 };
+
+typedef struct {
+    int      fn;
+    uint8_t  a[MAX_ELEM], b[MAX_ELEM], c[MAX_ELEM], d[MAX_ELEM];
+    uint32_t flags;
+} cft_fo_case;
+
+static int fo_from_name(const char *s)
+{
+    int i;
+    for (i = 0; i < FO_COUNT; i++)
+        if (strcmp(FO_NAMES[i], s) == 0)
+            return i;
+    return -1;
+}
+
+static cft_status fo_apply(cft_device *dev, int fn, cft_format sfmt,
+                           cft_format dfmt, cft_round rnd, const void *a,
+                           const void *b, const void *c, void *d, size_t n,
+                           uint32_t *flags, uint32_t *bus)
+{
+    switch (fn) {
+    case 0: return cft_formatof_add(dev, sfmt, dfmt, rnd, a, b, d, n,
+                                    flags, bus);
+    case 1: return cft_formatof_sub(dev, sfmt, dfmt, rnd, a, b, d, n,
+                                    flags, bus);
+    case 2: return cft_formatof_mul(dev, sfmt, dfmt, rnd, a, b, d, n,
+                                    flags, bus);
+    case 3: return cft_formatof_div(dev, sfmt, dfmt, rnd, a, b, d, n,
+                                    flags, bus);
+    case 4: return cft_formatof_sqrt(dev, sfmt, dfmt, rnd, a, d, n,
+                                     flags, bus);
+    default: return cft_formatof_fma(dev, sfmt, dfmt, rnd, a, b, c, d, n,
+                                     flags, bus);
+    }
+}
+
+static cft_status formatof_array_pass(cft_device *dev, int sfi, int dfi,
+                                      int ri, const cft_fo_case *cases,
+                                      size_t ncases, const char *path,
+                                      rep *rp)
+{
+    const cft_fmt_desc *fs = &cft_sf_formats[sfi];
+    const cft_fmt_desc *fd = &cft_sf_formats[dfi];
+    size_t sesz = (size_t)(fs->width / 8), desz = (size_t)(fd->width / 8);
+    uint8_t *a = NULL, *b = NULL, *c = NULL, *g = NULL;
+    cft_status ret = CFT_OK;
+    int fn;
+
+    if (ncases == 0)
+        return CFT_OK;
+    a = (uint8_t *)malloc(ncases * sesz);
+    b = (uint8_t *)malloc(ncases * sesz);
+    c = (uint8_t *)malloc(ncases * sesz);
+    g = (uint8_t *)malloc(ncases * desz);
+    if (!a || !b || !c || !g) {
+        free(a); free(b); free(c); free(g);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+
+    for (fn = 0; fn < FO_COUNT && ret == CFT_OK; fn++) {
+        size_t k = 0, i, batch;
+        uint32_t want_flags = 0, got_flags = 0;
+        cft_status st;
+
+        for (i = 0; i < ncases; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            memcpy(a + k * sesz, cases[i].a, sesz);
+            memcpy(b + k * sesz, cases[i].b, sesz);
+            memcpy(c + k * sesz, cases[i].c, sesz);
+            want_flags |= cases[i].flags;
+            k++;
+        }
+        if (k == 0)
+            continue;
+        batch = k;
+
+        memset(g, 0, k * desz);
+        st = fo_apply(dev, fn, (cft_format)sfi, (cft_format)dfi,
+                      (cft_round)ri, a, b, c, g, k, &got_flags, NULL);
+        if (st != CFT_OK) {
+            rep_add(rp, "%s: array pass, %s x%lu: failed: %s\n",
+                    path, FO_NAMES[fn], (unsigned long)k, cft_strerror(st));
+            ret = st;
+            break;
+        }
+
+        k = 0;
+        for (i = 0; i < ncases && ret == CFT_OK; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            if (memcmp(g + k * desz, cases[i].d, desz) != 0) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                format_hex_elem(cases[i].d, (int)desz, hw);
+                format_hex_elem(g + k * desz, (int)desz, hg);
+                rp->used = 0;
+                if (rp->buf && rp->size)
+                    rp->buf[0] = '\0';
+                rep_add(rp, "%s: ARRAY PASS element %lu of %lu (%s->%s %s)\n"
+                            "  expected %s\n  got      %s\n"
+                            "  the same case passes one element at a time, "
+                            "so this is the batch loop\n",
+                        path, (unsigned long)k, (unsigned long)batch,
+                        fs->name, fd->name, FO_NAMES[fn], hw, hg);
+                ret = CFT_ERR_INTERNAL;
+            }
+            k++;
+        }
+        if (ret == CFT_OK && got_flags != want_flags) {
+            rp->used = 0;
+            if (rp->buf && rp->size)
+                rp->buf[0] = '\0';
+            rep_add(rp, "%s: ARRAY PASS flags for %s over %lu elements: "
+                        "got 0x%02x, expected the OR of the cases 0x%02x\n",
+                    path, FO_NAMES[fn], (unsigned long)batch,
+                    (unsigned)got_flags, (unsigned)want_flags);
+            ret = CFT_ERR_INTERNAL;
+        }
+    }
+
+    free(a); free(b); free(c); free(g);
+    return ret;
+}
+
+static cft_status formatof_set(cft_device *dev, int sfi, int dfi, int ri,
+                               const char *path, rep *rp,
+                               const char *const *rnames, uint64_t *total)
+{
+    const cft_fmt_desc *fs = &cft_sf_formats[sfi];
+    const cft_fmt_desc *fd = &cft_sf_formats[dfi];
+    int sesz = fs->width / 8, desz = fd->width / 8;
+    char line[LINE_MAX];
+    unsigned long lineno = 0;
+    cft_fo_case *cases = NULL;
+    size_t ncases = 0, ccap = 0;
+    cft_status arr;
+    FILE *fp = fopen(path, "r");
+
+    if (!fp)
+        return CFT_OK;                    /* absent is not a failure */
+
+    while (fgets(line, (int)sizeof line, fp)) {
+        char tok[TOKEN_MAX];
+        uint8_t ea[MAX_ELEM], eb[MAX_ELEM], ec[MAX_ELEM];
+        uint8_t want_d[MAX_ELEM], got_d[MAX_ELEM];
+        uint32_t want_flags = 0, got_flags = 0, bus = 0;
+        int fn = -1, arity;
+        cft_status st;
+
+        lineno++;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+            continue;
+        {
+            const char *why = NULL;
+            if (field_string(line, "fn", tok, sizeof tok))
+                why = "no \"fn\" field - this is not a formatOf set";
+            else if ((fn = fo_from_name(tok)) < 0)
+                why = "unknown formatOf operation name";
+            else if (field_string(line, "sfmt", tok, sizeof tok) ||
+                     strcmp(tok, fs->name) != 0)
+                why = "\"sfmt\" missing or not the source format this "
+                      "file is named for";
+            else if (field_string(line, "dfmt", tok, sizeof tok) ||
+                     strcmp(tok, fd->name) != 0)
+                why = "\"dfmt\" missing or not the destination format "
+                      "this file is named for";
+            else if (field_string(line, "rnd", tok, sizeof tok) ||
+                     rnd_from_name(tok) != ri)
+                why = "\"rnd\" missing or not this file's attribute";
+            else if (field_u32(line, "flags", &want_flags))
+                why = "no \"flags\" field";
+            if (why) {
+                fclose(fp);
+                free(cases);
+                rep_add(rp, "%s:%lu: %s\n", path, lineno, why);
+                return CFT_ERR_ARTIFACT;
+            }
+        }
+        arity = FO_ARITY[fn];
+
+        memset(ea, 0, sizeof ea);
+        memset(eb, 0, sizeof eb);
+        memset(ec, 0, sizeof ec);
+#define FOGET(key, dst, sz)                                              \
+        if (field_string(line, key, tok, sizeof tok) ||                  \
+            parse_hex_elem(tok, dst, sz)) {                              \
+            fclose(fp);                                                  \
+            free(cases);                                                 \
+            rep_add(rp, "%s:%lu: bad \"%s\" field\n", path, lineno, key); \
+            return CFT_ERR_ARTIFACT;                                     \
+        }
+        FOGET("a", ea, sesz)
+        if (arity >= 2)
+            FOGET("b", eb, sesz)
+        if (arity >= 3)
+            FOGET("c", ec, sesz)
+        FOGET("d", want_d, desz)
+#undef FOGET
+
+        memset(got_d, 0, (size_t)desz);
+        st = fo_apply(dev, fn, (cft_format)sfi, (cft_format)dfi,
+                      (cft_round)ri, ea, eb, ec, got_d, 1, &got_flags,
+                      &bus);
+        if (st != CFT_OK) {
+            fclose(fp);
+            free(cases);
+            rep_add(rp, "%s:%lu: %s failed: %s\n", path, lineno,
+                    FO_NAMES[fn], cft_strerror(st));
+            return st;
+        }
+        (*total)++;
+
+        if (memcmp(got_d, want_d, (size_t)desz) != 0 ||
+            got_flags != want_flags) {
+            char ha[2 * MAX_ELEM + 3], hb[2 * MAX_ELEM + 3];
+            char hc[2 * MAX_ELEM + 3];
+            char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+            fclose(fp);
+            free(cases);
+            format_hex_elem(ea, sesz, ha);
+            format_hex_elem(eb, sesz, hb);
+            format_hex_elem(ec, sesz, hc);
+            format_hex_elem(want_d, desz, hw);
+            format_hex_elem(got_d, desz, hg);
+            rp->used = 0;
+            if (rp->buf && rp->size)
+                rp->buf[0] = '\0';
+            rep_add(rp, "%s:%lu: %s->%s %s %s\n"
+                        "  a        %s\n"
+                        "  b        %s\n"
+                        "  c        %s\n"
+                        "  expected %s flags 0x%02x\n"
+                        "  got      %s flags 0x%02x\n",
+                    path, lineno, fs->name, fd->name, rnames[ri],
+                    FO_NAMES[fn], ha, hb, hc,
+                    hw, (unsigned)want_flags, hg, (unsigned)got_flags);
+            return CFT_ERR_INTERNAL;
+        }
+
+        if (ncases == ccap) {
+            size_t want = ccap ? ccap * 2 : 4096;
+            cft_fo_case *bigger = (cft_fo_case *)realloc(
+                cases, want * sizeof *cases);
+            if (!bigger) {
+                fclose(fp);
+                free(cases);
+                rep_add(rp, "out of memory holding %s\n", path);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+            cases = bigger;
+            ccap = want;
+        }
+        cases[ncases].fn = fn;
+        cases[ncases].flags = want_flags;
+        memcpy(cases[ncases].a, ea, (size_t)sesz);
+        memcpy(cases[ncases].b, eb, (size_t)sesz);
+        memcpy(cases[ncases].c, ec, (size_t)sesz);
+        memcpy(cases[ncases].d, want_d, (size_t)desz);
+        ncases++;
+    }
+    fclose(fp);
+
+    arr = formatof_array_pass(dev, sfi, dfi, ri, cases, ncases, path, rp);
+    free(cases);
+    return arr;
+}
+
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                                    char *report, size_t report_size,
                                    uint64_t *cases_checked)
@@ -1984,6 +2284,51 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 if (cases_checked)
                     *cases_checked = total;
                 return st;
+            }
+        }
+    }
+
+
+    /* The formatOf arithmetic sets (754-2019 5.4.1), one file per
+     * ORDERED PAIR of formats per attribute. Outside the per-format
+     * loop above, because a case here belongs to two formats and to
+     * neither of them alone - and a device that lacks EITHER format
+     * cannot run the set, so both are asked about by name. */
+    for (fi = 0; fi < 4; fi++) {
+        const cft_fmt_desc *fs = &cft_sf_formats[fi];
+        int dfi;
+        for (dfi = 0; dfi < 4; dfi++) {
+            const cft_fmt_desc *fd = &cft_sf_formats[dfi];
+            for (ri = 0; ri < 5; ri++) {
+                char path[512];
+                cft_status st;
+                FILE *probe;
+
+                if (ri == 0)
+                    snprintf(path, sizeof path, "%s/%s-to-%s-formatof.jsonl",
+                             dir, fs->name, fd->name);
+                else
+                    snprintf(path, sizeof path,
+                             "%s/%s-to-%s-formatof-%s.jsonl", dir,
+                             fs->name, fd->name, rnames[ri]);
+                probe = fopen(path, "r");
+                if (!probe)
+                    continue;
+                fclose(probe);
+                if (!cft_supports(dev, CFT_FMA, (cft_format)fi) ||
+                    !cft_supports(dev, CFT_FMA, (cft_format)dfi)) {
+                    rep_add(&r, "%s: skipped, %s or %s not on this "
+                                "device\n", path, fs->name, fd->name);
+                    continue;
+                }
+                sets++;
+                st = formatof_set(dev, fi, dfi, ri, path, &r, rnames,
+                                  &total);
+                if (st != CFT_OK) {
+                    if (cases_checked)
+                        *cases_checked = total;
+                    return st;
+                }
             }
         }
     }

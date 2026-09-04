@@ -2162,6 +2162,287 @@ int main(void)
         }
     }
 
+
+    /* --- the formatOf arithmetic operations (754-2019 5.4.1) ------
+     *
+     * host/tests/formatof_check.py proves these against the model over
+     * every ordered pair at scale and the published sets replay them;
+     * what belongs HERE is this file's charter - refusals, aliasing,
+     * and the rows whose expected bits come from reading 5.4.1 rather
+     * than from either implementation.
+     *
+     * Every anchor below is derivable with the clause open, and every
+     * constant is built from the format's own field layout rather than
+     * typed:
+     *
+     *  - THE DOUBLE ROUNDING. binary64 operands, binary32 destination.
+     *    a = 1 + 2^-24 is exactly the midpoint between binary32's 1 and
+     *    1 + 2^-23, and it is a binary64 value; b = 1, so the product is
+     *    that midpoint EXACTLY; c is binary64's smallest subnormal,
+     *    2^-1074, which is positive. The infinitely precise a*b + c is
+     *    therefore strictly above the midpoint, so 5.4.1's single
+     *    rounding to binary32 gives 1 + 2^-23. Round to binary64 first
+     *    and the addend disappears under a half-ulp of 2^-53: the
+     *    intermediate is the midpoint, the second rounding ties to even,
+     *    and the answer comes back 1.0 - one ulp low. Both routes are
+     *    issued below, so the difference is exhibited rather than
+     *    described.
+     *  - THE DESTINATION OWNS THE EXCEPTIONS. 2^100 * 2^100 is an
+     *    ordinary binary64 multiply and an overflow in binary32; 2^-150
+     *    is an ordinary binary64 normal and half of binary32's least
+     *    subnormal, so it is an exact tie between zero and that
+     *    subnormal, and 7.5's underflow rises with inexact. The
+     *    direction decides which side of both, which is why each is
+     *    issued in two attributes.
+     *  - THE WIDER DESTINATION HAS THE WIDER RANGE. The square of
+     *    binary32's least subnormal underflows to zero IN binary32 and
+     *    is an ordinary binary64 normal, 2^-298, exactly. The same two
+     *    calls, one opcode apart, are in the test.
+     *  - SQUARE ROOT CROSSES RANGES TOO. sqrt of binary128's 2^-2000 is
+     *    binary64's 2^-1000, exact; into binary32 the root of 2^-400
+     *    lands below the subnormal floor and underflows to zero.
+     *  - THE SAME-FORMAT CASE IS THE OPERATION THAT WAS ALREADY HERE,
+     *    bit for bit and flag for flag, which is the base case a reader
+     *    will assume.
+     */
+    {
+        uint8_t a8[8 * 8], b8[8 * 8], c8[8 * 8], d4[8 * 4], d8[8 * 8];
+        uint8_t a16[16];
+        uint32_t fl = 0xdead, bus = 0xdead, fl2 = 0;
+        const uint32_t FL_OVF = CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        const uint32_t FL_UNF = CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT;
+        int k;
+
+        /* --- the double rounding, exhibited --- */
+        /* a = 1 + 2^-24 in binary64: exponent field = bias, and the
+         * fraction bit whose weight is 2^-24 sits at 52 - 24. */
+        put64(a8, ((uint64_t)1023 << 52) | ((uint64_t)1 << (52 - 24)));
+        put64(b8, (uint64_t)1023 << 52);                    /* 1.0 */
+        put64(c8, (uint64_t)1);                             /* 2^-1074 */
+        st = cft_formatof_fma(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, c8, d4, 1, &fl, &bus);
+        CHECK(st == CFT_OK &&
+              get32(d4) == (((uint32_t)127 << 23) | 1u) &&
+              fl == CFT_FLAG_INEXACT,
+              "formatOf-fusedMultiplyAdd rounds ONCE into binary32: "
+              "got 0x%08x/0x%02x want 0x%08x/0x%02x",
+              (unsigned)get32(d4), (unsigned)fl,
+              (unsigned)(((uint32_t)127 << 23) | 1u),
+              (unsigned)CFT_FLAG_INEXACT);
+        CHECK(bus == 0,
+              "the narrowing route issues no device pass, so bus_out is 0");
+        /* the control: the same operands rounded in binary64 first and
+         * then converted - the route 5.4.1 does NOT describe */
+        st = cft_run(dev, CFT_FMA, CFT_FP64, CFT_RNE, a8, b8, c8, d8, 1,
+                     &fl, NULL);
+        CHECK(st == CFT_OK, "fma in binary64: %s", cft_strerror(st));
+        st = cft_convert(dev, CFT_FP64, CFT_FP32, CFT_RNE, d8, d4, 1, &fl2);
+        CHECK(st == CFT_OK && get32(d4) == ((uint32_t)127 << 23),
+              "rounding in the source format first ties to even and "
+              "loses an ulp - got 0x%08x, which is why formatOf is not "
+              "a composition in this direction", (unsigned)get32(d4));
+
+        /* --- the destination owns the overflow --- */
+        put64(a8, (uint64_t)(1023 + 100) << 52);            /* 2^100 */
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, a8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7f800000u && fl == FL_OVF,
+              "2^200 overflows the binary32 destination: 0x%08x/0x%02x",
+              (unsigned)get32(d4), (unsigned)fl);
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RTZ,
+                              a8, a8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7f7fffffu && fl == FL_OVF,
+              "7.4: roundTowardZero delivers the largest finite instead "
+              "of an infinity - 0x%08x/0x%02x",
+              (unsigned)get32(d4), (unsigned)fl);
+        /* the same multiply IN binary64 raises nothing at all */
+        st = cft_run(dev, CFT_MUL, CFT_FP64, CFT_RNE, a8, a8, NULL, d8, 1,
+                     &fl, NULL);
+        CHECK(st == CFT_OK && fl == 0,
+              "2^100 * 2^100 is unremarkable in binary64, which is what "
+              "makes the row above a statement about the destination");
+
+        /* --- the destination owns the tininess --- */
+        put64(a8, (uint64_t)(1023 - 150) << 52);            /* 2^-150 */
+        put64(b8, (uint64_t)1023 << 52);                    /* 1.0 */
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0 && fl == FL_UNF,
+              "half of binary32's least subnormal is an exact tie and "
+              "roundTiesToEven takes the even neighbour, zero: "
+              "0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl);
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RUP,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 1u && fl == FL_UNF,
+              "roundTowardPositive takes the other side of that tie: "
+              "0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl);
+
+        /* --- the wider destination has the wider range --- */
+        put32(a8, 1u);                                /* 2^-149, binary32 */
+        st = cft_formatof_mul(dev, CFT_FP32, CFT_FP64, CFT_RNE,
+                              a8, a8, d8, 1, &fl, &bus);
+        CHECK(st == CFT_OK &&
+              get64(d8) == ((uint64_t)(1023 - 298) << 52) && fl == 0,
+              "the square of binary32's least subnormal is an EXACT "
+              "binary64 normal, 2^-298: 0x%016llx/0x%02x",
+              (unsigned long long)get64(d8), (unsigned)fl);
+        CHECK(bus == 0, "a widening pass reports a clean bus word");
+        st = cft_run(dev, CFT_MUL, CFT_FP32, CFT_RNE, a8, a8, NULL, d4, 1,
+                     &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0 && fl == FL_UNF,
+              "and the same multiply in binary32 vanishes, which is the "
+              "whole reason 5.4.1 asks for the cross-format form");
+
+        /* --- square root across ranges --- */
+        memset(a16, 0, sizeof a16);
+        for (k = 0; k < 15; k++)                  /* 2^-2000 in binary128 */
+            if ((((long)16383 - 2000) >> k) & 1)
+                a16[(112 + k) / 8] |= (uint8_t)(1u << ((112 + k) % 8));
+        st = cft_formatof_sqrt(dev, CFT_FP128, CFT_FP64, CFT_RNE,
+                               a16, d8, 1, &fl, NULL);
+        CHECK(st == CFT_OK &&
+              get64(d8) == ((uint64_t)(1023 - 1000) << 52) && fl == 0,
+              "sqrt of binary128's 2^-2000 is binary64's 2^-1000, "
+              "exactly: 0x%016llx/0x%02x",
+              (unsigned long long)get64(d8), (unsigned)fl);
+        memset(a16, 0, sizeof a16);
+        for (k = 0; k < 15; k++)                   /* 2^-400 in binary128 */
+            if ((((long)16383 - 400) >> k) & 1)
+                a16[(112 + k) / 8] |= (uint8_t)(1u << ((112 + k) % 8));
+        st = cft_formatof_sqrt(dev, CFT_FP128, CFT_FP32, CFT_RNE,
+                               a16, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0 && fl == FL_UNF,
+              "its root 2^-200 is below binary32's subnormal floor, so "
+              "the cross-format square root CAN underflow where the "
+              "same-format one cannot: 0x%08x/0x%02x",
+              (unsigned)get32(d4), (unsigned)fl);
+
+        /* --- division, and the exceptions of 7.2/7.3 in the
+         *     destination's encoding --- */
+        put64(a8, (uint64_t)1023 << 52);                       /* 1.0 */
+        put64(b8, ((uint64_t)(1023 + 1) << 52) | ((uint64_t)1 << 51));
+        st = cft_formatof_div(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x3eaaaaabu &&
+              fl == CFT_FLAG_INEXACT,
+              "1/3 correctly rounded straight into binary32 is "
+              "0x3eaaaaab: got 0x%08x/0x%02x",
+              (unsigned)get32(d4), (unsigned)fl);
+        put64(c8, 0);                                          /* +0 */
+        st = cft_formatof_div(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, c8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7f800000u &&
+              fl == CFT_FLAG_DIVBYZERO,
+              "7.3 divideByZero, delivered in the DESTINATION: "
+              "0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl);
+        st = cft_formatof_div(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              c8, c8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7fc00000u &&
+              fl == CFT_FLAG_INVALID,
+              "0/0 is the destination's canonical quiet NaN with "
+              "invalid: 0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl);
+
+        /* --- 6.2.1: a signaling NaN operand signals in every one of
+         *     the six, and the quiet NaN it delivers is the
+         *     DESTINATION's --- */
+        put64(a8, ((uint64_t)2047 << 52) | (uint64_t)1);       /* sNaN */
+        put64(b8, (uint64_t)1023 << 52);
+        st = cft_formatof_add(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7fc00000u &&
+              fl == CFT_FLAG_INVALID, "sNaN through formatOf-addition");
+        st = cft_formatof_sqrt(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                               a8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7fc00000u &&
+              fl == CFT_FLAG_INVALID, "sNaN through formatOf-squareRoot");
+        st = cft_formatof_fma(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              b8, b8, a8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x7fc00000u &&
+              fl == CFT_FLAG_INVALID,
+              "sNaN in the addend of formatOf-fusedMultiplyAdd");
+        /* and a widening source: the conversion raises it on the way */
+        put32(a8, 0x7f800001u);                          /* binary32 sNaN */
+        put32(b8, 0x3f800000u);
+        st = cft_formatof_add(dev, CFT_FP32, CFT_FP256, CFT_RNE,
+                              a8, b8, d8, 1, &fl, NULL);
+        CHECK(st == CFT_OK && fl == CFT_FLAG_INVALID,
+              "a signaling NaN signals once, not twice, on the widening "
+              "route: 0x%02x", (unsigned)fl);
+
+        /* --- the same-format case IS the existing operation --- */
+        put32(a8, 0x3f800001u);
+        put32(b8, 0x33800000u);
+        st = cft_formatof_add(dev, CFT_FP32, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK, "same-format add: %s", cft_strerror(st));
+        st = cft_run(dev, CFT_ADD, CFT_FP32, CFT_RNE, a8, NULL, b8,
+                     d4 + 4, 1, &fl2, NULL);
+        CHECK(st == CFT_OK && get32(d4) == get32(d4 + 4) && fl == fl2,
+              "sfmt == dfmt is cft_run's own answer: 0x%08x/0x%02x vs "
+              "0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl,
+              (unsigned)get32(d4 + 4), (unsigned)fl2);
+        st = cft_formatof_sqrt(dev, CFT_FP32, CFT_FP32, CFT_RDN,
+                               a8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK, "same-format sqrt: %s", cft_strerror(st));
+        st = cft_sqrt(dev, CFT_FP32, CFT_RDN, a8, d4 + 4, 1, &fl2, NULL);
+        CHECK(st == CFT_OK && get32(d4) == get32(d4 + 4) && fl == fl2,
+              "and cft_sqrt's, for the operation that has no opcode");
+
+        /* --- batches: the element loop and the flag OR --- */
+        for (k = 0; k < 8; k++)
+            put64(a8 + 8 * k, (uint64_t)(1023 + 100 * k) << 52);
+        for (k = 0; k < 8; k++)
+            put64(b8 + 8 * k, (uint64_t)1023 << 52);
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 8, &fl, NULL);
+        CHECK(st == CFT_OK && (fl & CFT_FLAG_OVERFLOW),
+              "a batch's flag word is the OR across it");
+        CHECK(get32(d4) == ((uint32_t)127 << 23),
+              "element 0 of that batch is 2^0, untouched by element 7's "
+              "overflow: 0x%08x", (unsigned)get32(d4));
+        CHECK(get32(d4 + 4 * 7) == 0x7f800000u,
+              "and element 7 is the infinity");
+
+        /* --- refusals --- */
+        CHECK(cft_formatof_add(dev, (cft_format)9, CFT_FP32, CFT_RNE,
+                               a8, b8, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "bad source format refused");
+        CHECK(cft_formatof_add(dev, CFT_FP32, (cft_format)-1, CFT_RNE,
+                               a8, b8, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "bad destination format refused");
+        CHECK(cft_formatof_add(dev, CFT_FP32, CFT_FP32, (cft_round)5,
+                               a8, b8, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "a rounding direction outside 4.3's five refused - which is "
+              "how 9.5's roundTiesTowardZero stays unreachable from here");
+        CHECK(cft_formatof_add(dev, CFT_FP32, CFT_FP32, CFT_RNE,
+                               NULL, b8, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "NULL a refused");
+        CHECK(cft_formatof_add(dev, CFT_FP32, CFT_FP32, CFT_RNE,
+                               a8, NULL, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "NULL b refused");
+        CHECK(cft_formatof_fma(dev, CFT_FP32, CFT_FP32, CFT_RNE,
+                               a8, b8, NULL, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "NULL c refused by fma");
+        CHECK(cft_formatof_add(dev, CFT_FP32, CFT_FP32, CFT_RNE,
+                               a8, b8, NULL, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "NULL d refused");
+        CHECK(cft_formatof_sqrt(NULL, CFT_FP32, CFT_FP32, CFT_RNE,
+                                a8, d4, 1, &fl, NULL)
+              == CFT_ERR_INVALID_ARGUMENT, "NULL device refused");
+        fl = 0xdead;
+        bus = 0xdead;
+        CHECK(cft_formatof_add(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                               NULL, NULL, NULL, 0, &fl, &bus) == CFT_OK &&
+              fl == 0 && bus == 0,
+              "n == 0 is not an error and clears both output words");
+        /* sqrt reads one operand, so a NULL second argument is not its
+         * business to refuse - the entry point does not have one */
+        CHECK(cft_formatof_sqrt(dev, CFT_FP256, CFT_FP32, CFT_RNE,
+                                a8, d4, 1, NULL, NULL) == CFT_OK,
+              "flags_out and bus_out may both be NULL");
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));

@@ -1244,3 +1244,139 @@ def character_cases(fmt: FpFormat, extra: int, seed: int = 20):
     for op in ("get_payload", "set_payload", "set_payload_signaling"):
         cases += [("payload", op, bits) for bits in pay]
     return cases
+
+
+# ---- the formatOf arithmetic sets (754-2019 5.4.1) -------------------
+#
+# A SIXTH pool, and it needed one for a reason none of the others share:
+# every case here has TWO formats, and every exception belongs to the
+# second of them. An operand pool built for one format decides nothing
+# about a destination it was not aimed at - the whole population of
+# interesting values moves when dfmt changes, because "interesting"
+# means "near a decision of the destination's grid".
+#
+# So the families below are the destination's landmarks expressed in the
+# source: its subnormal floor and half of it, its least normal, its
+# largest finite and the overflow midpoint above it, and its rounding
+# midpoints with the source-grid neighbours that straddle them. Each is
+# an unremarkable value in the source format and a decision in the
+# destination, which is precisely the class of case a same-format
+# implementation would never see.
+
+def formatof_pool(sfmt: FpFormat, dfmt: FpFormat, extra: int, seed: int = 30):
+    """Source-format operands aimed at the destination's decisions."""
+    rng = random.Random(seed ^ (sfmt.width * 1301) ^ (dfmt.width * 37))
+    ps, pd = sfmt.prec, dfmt.prec
+    out = list(interesting_operands(sfmt))
+
+    # The destination's landmarks, carried up into the source (exact
+    # whenever the source is at least as wide), with their SOURCE-grid
+    # neighbours either side - the only place a rounding written against
+    # the wrong descriptor can be caught.
+    for mb in (sf.min_subnormal_bits(dfmt), sf.max_subnormal_bits(dfmt),
+               sf.min_normal_bits(dfmt), sf.max_normal_bits(dfmt),
+               sf.one_bits(dfmt)):
+        v, fl = sf.convert(dfmt, sfmt, mb, sf.RND_RNE)
+        if fl:
+            continue
+        for sgn in (0, 1):
+            b = v | (sfmt.sign_mask if sgn else 0)
+            _extend(out, b, b - 1, b + 1)
+
+    if ps > pd:
+        # Destination midpoints, and the quarter / half / three-quarter
+        # steps around them. Half a destination ulp is the exact tie;
+        # the others straddle it; one source ulp is the ordinary case.
+        exps = sorted({0, 1, -1, pd, -pd, dfmt.emax, dfmt.emax - 1,
+                       dfmt.emin, dfmt.emin + 1, dfmt.emin - 1,
+                       dfmt.emin - dfmt.man_w,
+                       dfmt.emin - dfmt.man_w + 1})
+        for E in exps:
+            base = _val(sfmt, 0, 1 << (pd - 1), E - (pd - 1))
+            if base is None:
+                continue
+            for dm, de in ((1, E - pd), (1, E - pd - 1), (3, E - pd - 2),
+                           (1, E - pd + 1), (1, E - ps + 1)):
+                step = _val(sfmt, 0, dm, de)
+                if step is None:
+                    continue
+                hi, f1 = sf.add(sfmt, base, step, sf.RND_RNE)
+                lo, f2 = sf.sub(sfmt, base, step, sf.RND_RNE)
+                for sgn in (0, 1):
+                    m = sfmt.sign_mask if sgn else 0
+                    if not f1:
+                        _extend(out, hi | m)
+                    if not f2:
+                        _extend(out, lo | m)
+            for sgn in (0, 1):
+                _extend(out, base | (sfmt.sign_mask if sgn else 0))
+        # The overflow midpoint of the destination and its neighbours,
+        # and half its least subnormal - the two boundaries 7.4 and 7.5
+        # decide, both invisible from the source.
+        thr = _val(sfmt, 0, (1 << pd) - 1, dfmt.emax - pd + 1)
+        halftiny = _val(sfmt, 0, 1, dfmt.emin - dfmt.man_w - 1)
+        for b in (thr, halftiny):
+            if b is None:
+                continue
+            for sgn in (0, 1):
+                m = b | (sfmt.sign_mask if sgn else 0)
+                _extend(out, m, m - 1, m + 1)
+
+    # Powers of two across the source's own range, so a product or a
+    # quotient lands exactly on a binade edge of the destination.
+    span = max(1, (sfmt.emax - sfmt.emin) // 10)
+    for E in range(sfmt.emin, sfmt.emax + 1, span):
+        for sgn in (0, 1):
+            _extend(out, _val(sfmt, sgn, 1, E))
+    for E in (0, 1, -1, ps, -ps):
+        for sgn in (0, 1):
+            _extend(out, _val(sfmt, sgn, 1, E), _val(sfmt, sgn, 3, E - 1),
+                    _val(sfmt, sgn, (1 << ps) - 1, E - ps + 1))
+
+    for _ in range(extra):
+        ef = rng.randrange(0, sfmt.exp_mask + 1)
+        out.append((rng.getrandbits(1) << (sfmt.width - 1)) |
+                   (ef << sfmt.man_w) | rng.getrandbits(sfmt.man_w))
+
+    seen, uniq = set(), []
+    for b in out:
+        if b is None:
+            continue
+        b &= (1 << sfmt.width) - 1
+        if b not in seen:
+            seen.add(b)
+            uniq.append(b)
+    return uniq
+
+
+def formatof_cases(sfmt: FpFormat, dfmt: FpFormat, extra: int,
+                   seed: int = 30):
+    """(fn, a, b, c) tuples for the six operations of 5.4.1, in the
+    order gen_vectors.py writes them.
+
+    One pool serves all six, as it does for the augmented set: the
+    families that stress a narrowing sum stress a narrowing quotient at
+    the other end of the same exponent range, and a case that is dull
+    for one is cheap to replay.
+
+    The three double-rounding witnesses are appended when the pair has
+    them - they are the cases that separate a conforming implementation
+    from one that rounds in the source format first, and a set without
+    them would score that implementation as conforming.
+    """
+    from .formatof import (FORMATOF_FNS, FORMATOF_SHORT,
+                           double_rounding_witness, FN_FO_DIV, FN_FO_SQRT,
+                           FN_FO_FMA)
+    pool = formatof_pool(sfmt, dfmt, extra, seed)
+    n = len(pool)
+    trip = []
+    for i, a in enumerate(pool):
+        trip.append((a, pool[(i * 7 + 1) % n], pool[(i * 13 + 5) % n]))
+        trip.append((a, a, pool[(i * 3 + 2) % n]))
+    cases = [(FORMATOF_SHORT[fn], a, b, c)
+             for fn in FORMATOF_FNS for a, b, c in trip]
+    if dfmt.prec < sfmt.prec:
+        for fn in (FN_FO_FMA, FN_FO_DIV, FN_FO_SQRT):
+            wa, wb, wc, _w = double_rounding_witness(sfmt, dfmt, fn)
+            cases.append((FORMATOF_SHORT[fn], wa, wb, wc))
+    return cases
