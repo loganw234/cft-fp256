@@ -2974,3 +2974,254 @@ comparisons.
   left alone.
 - `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
   ABI version were left to the integrator, as at 0.7.
+
+## 2026-09-04 - the enclosure tool: the directed roundings put to work, and what fp64 has left
+
+`host/tools/enclose.c` and `host/tests/enclose_check.py` are new;
+`docs/ENCLOSE.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload is verified computing. Compute a quantity once under
+`roundTowardNegative` and once under `roundTowardPositive` and the true
+value is provably between the two, because each result is correctly
+rounded and each rounding is monotone. That needs all five attributes,
+per call and - in the sequencer - per instruction, which is a half of
+this contract nothing else here exercises. And because the arithmetic is
+deterministic, two machines produce the SAME interval rather than two
+overlapping ones: **an enclosure produced by this tool is the same bits
+on every conforming host, so a verified result can be reproduced rather
+than merely re-derived.**
+
+Three kernels. A series for `exp(x)` over dyadic x in [0,1] with the
+tail bounded by `t_N/N` and charged to the upper end only, its term
+count derived from the format's measured p (10 at binary32, 18 at
+binary64, 31 at binary128, 54 at binary256). Dot and matrix-vector
+products through `cft_reduce` under both attributes, over vectors of
+dyadic rationals mirrored so the exact answer is 1 however violent the
+cancellation. And an interval Horner with interval coefficients, which
+is the one that runs as an orbit-sequencer program.
+
+### What the gate is, and what it scores
+
+`make -C host enclosetest` scores every interval against a value Python
+computes without rounding: exact `fractions` for the dot products and
+the polynomial (both are rationals, because every input is dyadic),
+mpmath at 300 digits for `exp` - about 228 decimal digits more than a
+binary256 enclosure carries, so the comparison is never close. The
+library stays the authority on arithmetic; Python is the authority on
+the domain.
+
+    2658 comparisons, 0 failures
+    ENCLOSE CHECK OK - every enclosure contains the value the oracle
+    computed, and the same bits come out at every batch size, from
+    either engine, interrupted or not
+
+| what it checks | result |
+|---|---|
+| containment, fp256 / fp64, all three kernels, 145 items each | every interval contains the exact value |
+| containment, fp256 Horner through the loop engine | same |
+| containment, fp32 series and Horner, 130 items | same |
+| containment, fp32 series at 2048 points, where the terms go subnormal | 2,049 intervals, all containing exp(x), flag word 0x18 |
+| the interval coefficients contain 1/k! | 24 of 24, at every format |
+| tightness | every width inside its rounding budget - a few thousand ulps for the point kernels, a few ulps per addition of the largest partial magnitude for the dot kernel |
+| the exact-by-construction dot product | width zero, both bounds ARE the rational, flag word clean |
+| the two Horner engines, fp256 and fp64 | byte-identical records at different batch sizes |
+| batch 7 / 64 / 1024 | byte-identical checkpoints AND byte-identical record streams |
+| interrupt and resume, 41 stops at a different batch size | byte-identical to the uninterrupted run |
+| the hash chain over 145 records | recomputed with `hashlib`, identical |
+| four refusals | a degree the constant bank cannot hold, a non-power-of-two point count, a format whose exponent range cannot carry the ladder, an unknown kernel |
+
+The interrupt leg runs at `--stop-after-passes 4` against a 54-term
+series on purpose, so that 40 of its 41 stops caught an item part way
+through its recurrence, with partly summed terms in flight, rather than
+on a batch boundary.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04. `--points 2048 --batch 256`, so every row is
+4,113 enclosures except binary32's 4,098 - it runs `--kernels
+series,horner`, because it cannot express the dot ladder.
+
+| format | enclosures/s | element-ops/s | library calls | seconds |
+|---|---|---|---|---|
+| fp256 | 1,821 | 389,150 | 2,991 | 2.259 |
+| fp128 | 5,097 | 738,901 | 1,749 | 0.807 |
+| fp64 | 11,660 | 1,237,434 | 1,047 | 0.353 |
+| fp32 | 25,441 | 2,086,129 | 585 | 0.161 |
+
+An enclosure is one item with BOTH bounds computed. Throughput is flat
+in the batch size - 64, 256, 1,024 and 4,096 all land between 1,669 and
+1,897 enclosures/s at fp256, with no trend - and all four return the
+same chain, `2a4f7fa58560dac13b59879406d914768db27531c9829a23cd50dffcf6cf5ade`.
+
+The Horner kernel alone, 8,193 enclosures at `--batch 512`: the
+sequencer program is **1.19x to 1.41x faster than the host `cft_run`
+loop on the software backend**, where there is no bus to save - 48,502
+against 34,505 enclosures/s at fp256, 79,992 against 67,055 at fp64,
+and **51 library calls against 1,649**. The margin is smaller than the
+Collatz explorer's 1.5x-2.1x for a plain reason: a Horner step is four
+opcodes against that workload's twenty-three, so there is less per-call
+overhead per unit of work to remove. Both engines return the same chain.
+
+The sweep that was run, 20.081 s:
+
+    ./cft-enclose --format fp256 --points 16384 --batch 512 \
+                  --checkpoint run.ckpt --checkpoint-interval 30 \
+                  --csv run.csv
+
+    32,785 enclosures, 9 of them exact, flags seen 0x10 (inexact only)
+    widest series width  9.59902e-70
+    widest horner width  3.62228e-71
+    widest dot width     3.13215e-53
+    dot enclosures straddling zero: 0
+    throughput  1,633 enclosures/s, 349,323 element-ops/s
+    chain       573609c0a0befe28f576dbd2cef79cf0bb16c6477ed8b39aae1fae5870e83c7e
+
+The same command at fp64 takes 3.264 s and returns chain
+`cdead7ef4138b108ca7c7f175577ea3bcae46b229e191b5eb66d678e39cd06a8`,
+with **14 of its 15 dot enclosures straddling zero**.
+
+### fp64 against fp256, in numbers
+
+e, enclosed by the series with its rigorous tail:
+
+| format | terms | width of the enclosure of e |
+|---|---|---|
+| fp32 | 10 | 2.1e-6 |
+| fp64 | 18 | 7.5e-15 |
+| fp128 | 31 | 1.2e-32 |
+| fp256 | 54 | **9.6e-70** |
+
+The widest width per kernel over the same 2,048 points: series 7.99e-15
+at fp64 against 9.60e-70 at fp256 (a factor of 2^182), Horner 8.88e-16
+against 3.62e-71 (2^184), dot 2.18e+3 against 3.13e-53 (2^186).
+
+The ill-conditioned dot products are the row that matters. Every one of
+them has the exact value **1** and a condition number near 2^60-2^66:
+
+| case | fp64 | fp128 | fp256 |
+|---|---|---|---|
+| `cancel-spread0` | [-0, 256] | [1, 1] | [1, 1] |
+| `cancel-spread90` | [-768, 512] | [1, 1] | [1, 1] |
+| `cancel-spread225` | [-742.82, 793.19] | width 1.0e-15 | width 2.1e-53 |
+| `matvec-row2` | [-1152, 1024] | width 1.1e-15 | width 1.0e-53 |
+
+binary64's answer is not wrong; it is honest and useless. The interval
+does contain 1 - it also contains 0 and -700, so it does not determine
+the sign of the answer. Fourteen of the fifteen are like that, and a
+non-interval binary64 dot product would print a single number somewhere
+in that range with no indication that anything was wrong. binary256
+returns the exact rational with the flag word clean on six of the
+fourteen, and about 1e-53 on the rest.
+
+It is worth recording the other half honestly: **on the two point
+kernels fp64's enclosures are perfectly usable.** 7.5e-15 for e is
+fifteen good digits, and a reader who needs fifteen digits should use
+binary64 and enjoy the 6.4x throughput. What binary256 buys is the
+regime where the CONDITIONING rather than the answer sets the precision
+needed.
+
+### What the writing of it found
+
+**Three observations about the program model, and one of them is a
+limit.** A sequencer instruction names its operands in four-bit fields,
+and `ka`/`kb`/`kc` redirect those same fields at the constant bank - so
+a program addresses exactly **sixteen constants**, whatever `n_consts`
+in its header says. An interval coefficient costs two, so one program
+holds eight coefficients, which is why the Horner kernel is compiled
+into chunk programs of eight steps and why `--degree` refuses anything
+that does not make `degree + 1` a multiple of eight. That is a real
+ceiling on any table-driven kernel; `imm` is already 32 bits wide and
+unused by ALU instructions, so a `ka`-with-`imm`-index form would cost
+no encoding space. The other two are the ones `docs/COLLATZ.md` already
+recorded: three input streams and no fourth (exactly enough here -
+point, lower bound, upper bound - by luck rather than design), and no
+way for one program to call another, which is what keeps the series
+kernel's `cft_div` out of the ISA.
+
+**Underflow is expected, not forbidden.** The first flag policy stopped
+the run on it. That was wrong: the series' terms are `x^k/k!`, so a
+small x in a narrow format reaches the subnormal range - at binary32 an
+x of 2^-11 gets there by the tenth term - and tininess costs the
+enclosure nothing, because a directed rounding of a subnormal is still
+correctly rounded. The lower chain stays below the true term (it may
+reach +0, which is still below) and the upper chain stays above it,
+since `roundTowardPositive` cannot carry a positive value to +0, so the
+tail bound survives. The check script now runs binary32 at 2,048 points
+on purpose to exercise the case.
+
+**A batch-wide call needs a batch-wide operand.** The loop engine handed
+`cft_run` the scalar zero as the first operand of a `CFT_CMPLE` over n
+elements, and `cft_run` reads n elements from every operand it is
+given. Small batches survived it; batch 37 walked off a 32-byte
+allocation and the process died. Neither the oracle nor any internal
+gate caught that one - the operating system did - but it was the check
+script that ran the loop engine at a batch size the smoke tests had not.
+
+**The mirroring needs a permutation.** The first ill-conditioned
+construction put the mirrored block at a fixed offset, and the
+contractual tree then cancelled the two halves against each other at a
+single node: exact, tidy, and testing nothing. Twelve of fifteen dot
+products came back with width zero at binary64. One shared permutation
+of x and y leaves the exact answer alone and destroys the structure the
+tree was exploiting.
+
+### The negative control
+
+Two faults, each rebuilt and run through the same gate.
+
+| control | what was changed | caught by | first thing it said |
+|---|---|---|---|
+| A | `CFT_RUP` to `CFT_RDN` on the Horner kernel's upper-bound FMA, in BOTH engines | the oracle alone, on 245 containment rows | `horner item 0 does not contain the true value (lo 0.36787944117144233, hi 0.36787944117144233)` |
+| B | `cft_reduce`'s RDN and RUP swapped in the dot kernel | the tool's own `lo <= hi` gate, before a record was written | `an enclosure came back with its ends the wrong way round - a rounding attribute is wrong` |
+
+Control A is the instructive one. Every internal gate passes, and each
+for a good reason: `lo <= hi` holds because both chains now round the
+same way; the two engines agree because both were sabotaged; the
+batch-size property, the resume property, the chain and the refusals
+are untouched; and the flag/width certificate is *satisfied*, because
+the widths really are zero. The tool then reports
+
+    horner        9 enclosures, 9 exact (both bounds ARE the value)
+                  widest 0 at item 0
+
+- a confident, self-consistent claim that every value it computed is
+exactly representable and that both of its bounds are it. Only the
+oracle knows otherwise. The honest statement is:
+
+> Every internal check in this tool is a CONSISTENCY check, and control
+> A does not make the tool inconsistent - it makes it consistently
+> compute the wrong thing. Only an independent computation of the true
+> value can tell you that an interval does not contain it, which is why
+> the oracle computes in exact rationals rather than by rerunning the
+> library.
+
+Control B never reaches an oracle: the internal gate fires on the first
+ill-conditioned item and the harness reports it as a result rather than
+a crash, five rows at once. Restoring the file, rebuilding, and the gate
+is green again at 2,658 comparisons, 0 failures.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact` and
+  issues the same program either way, but nothing here has been through
+  XRT; `docs/BRINGUP.md` owns those gates. No device number is quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The Horner program uses `CFT_CMPLE`, `CFT_SELECT`
+  and `CFT_FMA`, and the control codes `DEPOSIT` and `HALT`, all of
+  which `tb/` and the vector sets already cover. The per-instruction
+  rounding attribute this workload leans on is already benched:
+  `tb/test_seq_core.py`'s `constants_and_rounding` runs adjacent RDN
+  and RUP FMAs against the model precisely because "the interval
+  pattern is the reason the attribute is per instruction rather than
+  per run". This tool is the first APPLICATION of that pattern; the
+  RTL case for it was written before the application existed.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so the
+  library gates certify the same library. No runner stage was added;
+  `verify/run.sh` was deliberately left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md`,
+  `docs/BENCHMARKS.md` and the ABI version were left to the integrator,
+  as at 0.7.
