@@ -3955,8 +3955,8 @@ enclosures, fp128 and fp256 on none, and fp256's fifteen are exact.
 `bash bindings/wasm/build_demos.sh`, inside the image `build.sh` pins -
 and the pin is read out of `build.sh` rather than typed again. **Two
 clean container builds with `bindings/wasm/build/` removed between
-them, byte-identical: 485,693 bytes, sha256
-`9ab4c956ed048f18ed45ccb0de60b82eb90bf82b8c690aa12c96d8cfd2f7cc85`.**
+them, byte-identical: 486,822 bytes, sha256
+`e3711319627e68281dc97636a65da169b9c3b8d467ed45b2e1da9bceb6538a67`.**
 
 The build refuses to ship a page whose module is not the committed one,
 and checks that fact three times: the split `.wasm` from the same emcc

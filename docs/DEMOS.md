@@ -19,8 +19,8 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 485,693 bytes |
-| sha256 | `9ab4c956ed048f18ed45ccb0de60b82eb90bf82b8c690aa12c96d8cfd2f7cc85` |
+| page | `bindings/wasm/demos.html`, 486,822 bytes |
+| sha256 | `e3711319627e68281dc97636a65da169b9c3b8d467ed45b2e1da9bceb6538a67` |
 | module | `bindings/node/cft_node.wasm`, 211,869 bytes, sha256 `a1f0a4715516d3f64838fbfcbeafe6bbae1670dc74a86bd021ff8c428a761e55` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 11, over 13 chains |
@@ -341,6 +341,13 @@ measurements of a slow software tier, not a performance claim** - the
 sentence `docs/BENCHMARKS.md` makes about every number in it, and the
 page prints it under every panel.
 
+The machine was not quiet: other work was running on it throughout, and
+repeating the browser column moved individual cells by up to 40% on the
+short runs (`enclose`, whose whole run is 20-50 ms, and the Collatz
+sweep) while the long ones - zoom, Mersenne - held to a few percent.
+Read the ratios and the orders, not the third digit, exactly as
+`docs/BENCHMARKS.md` asks of its own tables.
+
 | panel / run | work | native, `--engine loop` | node (wasm) | Chromium (wasm, Web Worker) |
 |---|---|---|---|---|
 | collatz / trajectory | 2,437 Collatz steps | 239,666 /s | 42,754 /s | 58,865 /s |
@@ -407,8 +414,8 @@ split `.wasm` from the same emcc run, against the committed module, and
 by walking the bytes back out of the assembled HTML. Three checks of
 one fact is not paranoia when the fact is the whole argument.
 
-**Two clean container builds, byte-identical:** 485,693 bytes, sha256
-`9ab4c956ed048f18ed45ccb0de60b82eb90bf82b8c690aa12c96d8cfd2f7cc85`,
+**Two clean container builds, byte-identical:** 486,822 bytes, sha256
+`e3711319627e68281dc97636a65da169b9c3b8d467ed45b2e1da9bceb6538a67`,
 with `bindings/wasm/build/` removed between them.
 
 ### Where the compute runs
@@ -421,7 +428,13 @@ between batches, and a 19-second zoom draws itself as it goes.
 A page opened from `file://` in a browser that refuses `blob:` workers
 falls back to running **the same source on the main thread**,
 cooperatively yielded, and the identity block says which of the two it
-used. A demo that silently did nothing would be worse than a slow one.
+used and why. There are three ways to arrive at the fallback and only
+one of them is the synchronous throw Chrome gives from a `file://`
+document: the page also falls back when the Worker reports an error
+before it is ready, and when it never becomes ready within five
+seconds. A demo that silently did nothing would be worse than a slow
+one, and a Worker that neither throws nor loads is exactly how a page
+looks alive and computes nothing.
 The fallback was exercised directly - `CftDemosDriver.handle()` driven
 from the page's own scope, enclose/fp256, chain
 `93cdda3270eaa7ba434ddbbabcc54d77a5afa28779e05bccef4f7b81cc43400c`,

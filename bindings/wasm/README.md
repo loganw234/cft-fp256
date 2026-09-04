@@ -847,8 +847,8 @@ verify_demos.mjs     the browserless check: module, core, and every
                      chain three ways (tool, core, recording)
 ```
 
-**The page.** 485,693 bytes, sha256
-`9ab4c956ed048f18ed45ccb0de60b82eb90bf82b8c690aa12c96d8cfd2f7cc85`.
+**The page.** 486,822 bytes, sha256
+`e3711319627e68281dc97636a65da169b9c3b8d467ed45b2e1da9bceb6538a67`.
 Two clean container builds with `bindings/wasm/build/` removed between
 them: byte-identical. emcc 6.0.9 (4e4223852a...), the image `build.sh`
 pins.

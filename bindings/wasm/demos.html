@@ -3008,29 +3008,58 @@ const RECORDED = {"recorded": "2026-09-04", "host": "DESKTOP-T33SK86", "module_s
 const SRC = ["cft-runtime-src", "cft-core-src", "cft-driver-src"]
   .map((id) => document.getElementById(id).textContent).join("\n;\n");
 
-let engine = null, engineKind = "";
+let engine = null, engineKind = "", engineReady = false;
 const handlers = [];
 function onEngine(fn) { handlers.push(fn); }
-function dispatch(m) { for (const fn of handlers) fn(m); }
+function dispatch(m) {
+  if (m.type === "ready") engineReady = true;
+  for (const fn of handlers) fn(m);
+}
 
-function startEngine() {
-  try {
-    const url = URL.createObjectURL(new Blob([SRC], { type: "text/javascript" }));
-    const w = new Worker(url);
-    w.onerror = (e) => dispatch({ type: "error", message:
-      "worker: " + (e.message || "failed to start") });
-    w.onmessage = (ev) => dispatch(ev.data);
-    engine = { post: (m) => w.postMessage(m) };
-    engineKind = "Web Worker";
-    return;
-  } catch (err) {
-    // fall through
-  }
+/** The main-thread fallback. Idempotent, because there are three ways
+ *  to arrive here and only one of them is the synchronous throw:
+ *  Chrome refuses `new Worker(blob:null/...)` from a file:// document
+ *  outright, but a browser that instead fails the worker
+ *  ASYNCHRONOUSLY - or one that neither throws nor loads - would
+ *  otherwise leave a page that looks alive and computes nothing. A
+ *  demo that silently did nothing would be worse than a slow one. */
+let fellBack = false;
+function fallBackToMainThread(why, worker) {
+  if (fellBack) return;
+  fellBack = true;
+  if (worker) { try { worker.terminate(); } catch (e) { /* gone */ } }
   (0, eval)(SRC);
   const drv = window.CftDemosDriver;
   engine = { post: (m) => drv.handle(m, dispatch) };
-  engineKind = "main thread (this browser refused a blob: Worker)";
+  engineKind = "main thread (" + why + ")";
   setTimeout(() => dispatch({ type: "ready" }), 0);
+}
+
+function startEngine() {
+  let w = null;
+  try {
+    const url = URL.createObjectURL(new Blob([SRC], { type: "text/javascript" }));
+    w = new Worker(url);
+  } catch (err) {
+    fallBackToMainThread("this browser refused a blob: Worker", null);
+    return;
+  }
+  w.onerror = (e) => {
+    if (!engineReady)
+      fallBackToMainThread("the blob: Worker did not start here", w);
+    else
+      dispatch({ type: "error",
+                 message: "worker: " + (e.message || "failed") });
+  };
+  w.onmessage = (ev) => dispatch(ev.data);
+  engine = { post: (m) => w.postMessage(m) };
+  engineKind = "Web Worker";
+  // A worker that neither throws nor reports: the loader posts "ready"
+  // as its last statement, so five seconds is many times over.
+  setTimeout(() => {
+    if (!engineReady)
+      fallBackToMainThread("the blob: Worker never became ready", w);
+  }, 5000);
 }
 
 // ---------------------------------------------------------------------
