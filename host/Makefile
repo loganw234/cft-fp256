@@ -213,6 +213,40 @@ cft-collatz$(EXE): tools/collatz.c libcft.a
 
 collatz: cft-collatz$(EXE)
 
+# ===================================================================
+# cft-orbits - symplectic few-body integration, docs/ORBITS.md
+#
+# A separately delimited block so that four workloads written in
+# parallel worktrees merge without touching each other's lines. TOOLS
+# and the `all` and `clean` prerequisites are ADDED to rather than
+# edited, because `all:`'s prerequisite list was already expanded by
+# the time make reads this - the extra `all:` line is how a target
+# joins the default build from below it.
+# ===================================================================
+TOOLS += cft-orbits$(EXE)
+all: cft-orbits$(EXE)
+clean: clean-orbits
+.PHONY: orbits orbitstest clean-orbits
+
+cft-orbits$(EXE): tools/orbits.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+orbits: cft-orbits$(EXE)
+
+# The integrator against a 300-digit mpmath oracle - the closed form
+# through Kepler's equation for the two-body problem, the same
+# discrete scheme for the outer solar system - plus the three
+# determinism properties the tool claims: batch-size independence,
+# interrupt/resume equivalence, and bit identity between the
+# sequencer-program engine and the host cft_run loop. Needs Python and
+# mpmath, so it is its own target rather than part of `test`.
+orbitstest: cft-orbits$(EXE)
+	$(PYTHON) tests/orbits_check.py
+
+clean-orbits:
+	rm -f cft-orbits cft-orbits.exe
+# ==================== end of the cft-orbits block ==================
+
 api-test$(EXE): tests/api_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
