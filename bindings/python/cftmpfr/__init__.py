@@ -84,7 +84,11 @@ from ._lib import (
     FLAG_INVALID,
     FLAG_OVERFLOW,
     FLAG_UNDERFLOW,
+    FLAGS_ALL,
     flag_names,
+    is754version1985,
+    is754version2008,
+    is754version2019,
 )
 from .core import (
     RNDD,
@@ -105,6 +109,11 @@ __all__ = [
     "SUPPORTED_PRECISIONS",
     "RNDN", "RNDZ", "RNDD", "RNDU", "RNDNA",
     "FLAG_INVALID", "FLAG_DIVBYZERO", "FLAG_OVERFLOW",
-    "FLAG_UNDERFLOW", "FLAG_INEXACT",
+    "FLAG_UNDERFLOW", "FLAG_INEXACT", "FLAGS_ALL",
+    # 754-2019 5.7.1's conformance predicates (ABI 0.7). Module-level
+    # because they describe the programming environment and take no
+    # context: cftmpfr.is754version2019() is True, the other two False,
+    # and cft.h says what each answer rests on.
+    "is754version1985", "is754version2008", "is754version2019",
     "__version__",
 ]

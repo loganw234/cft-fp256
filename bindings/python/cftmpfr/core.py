@@ -464,8 +464,42 @@ class Context:
         self._fi = _format_for(precision)
         self._rnd = _round_for(rounding)
         self._dev = _lib.open_device(artifact, index)
-        self.flags = 0
+        self.flags = 0                 # the property below: lowers them
         self.last_flags = 0
+
+    # -- 754-2019 7.1's status word ----------------------------------
+    #
+    # ``flags`` reads and writes the LIBRARY's word rather than a copy
+    # kept here. From ABI 0.7 libcft carries one status word per device
+    # and every entry point ORs into it, which is what 7.1 asks for
+    # ("Status flags shall be lowered only at the user's request"); a
+    # second sticky attribute on this object would be a second thing
+    # that could disagree with it.
+    #
+    # What a caller sees is unchanged: ``ctx.flags`` is still the OR of
+    # every call this context has made, ``ctx.flags = 0`` and
+    # ``clear_flags()`` still reset it, and ``|=`` still works because
+    # the getter and setter compose. The one difference is the one 7.1
+    # describes: two Contexts over the same device would share the
+    # word - and they cannot be, because each Context opens its own
+    # device.
+    #
+    # A closed Context has no word: reading gives 0 and writing is a
+    # no-op, so __del__ during interpreter teardown cannot raise.
+
+    @property
+    def flags(self):
+        """The sticky status word (754-2019 7.1), from the library."""
+        if self._dev is None:
+            return 0
+        return _lib.save_all_flags(self._dev)
+
+    @flags.setter
+    def flags(self, value):
+        if self._dev is None:
+            return
+        _lib.restore_flags(self._dev, int(value) & _lib.FLAGS_ALL,
+                           _lib.FLAGS_ALL)
 
     # -- lifecycle ---------------------------------------------------
     def close(self):
@@ -746,6 +780,75 @@ class Context:
         """Names for a flag word; defaults to the sticky word."""
         return _lib.flag_names(self.flags if flags is None else flags)
 
+    # 5.7.4's six operations on subsets of flags, by their 754 names.
+    # `mask` is 5.7.4's exceptionGroup - "any subset of the
+    # exceptions" - as an OR of the FLAG_* constants; it defaults to
+    # all of them where the collective form is the useful one.
+    def lower_flags(self, mask=_lib.FLAGS_ALL):
+        """lowerFlags: clear the flags named by mask."""
+        _lib.lower_flags(self._dev, mask)
+
+    def raise_flags(self, mask):
+        """raiseFlags: set them, with no exception having been
+        signalled - 7.1 allows exactly this "at the user's request"."""
+        _lib.raise_flags(self._dev, mask)
+
+    def test_flags(self, mask=_lib.FLAGS_ALL):
+        """testFlags: True if ANY flag named by mask is raised."""
+        return _lib.test_flags(self._dev, mask)
+
+    def save_all_flags(self):
+        """saveAllFlags: the whole word, for restore_flags or
+        test_saved_flags."""
+        return _lib.save_all_flags(self._dev)
+
+    def restore_flags(self, saved, mask=_lib.FLAGS_ALL):
+        """restoreFlags: put the flags named by mask back to their
+        state in `saved`. Restores rather than ORs, so a flag that is
+        low in `saved` comes back low."""
+        _lib.restore_flags(self._dev, saved, mask)
+
+    @staticmethod
+    def test_saved_flags(saved, mask):
+        """testSavedFlags: the same question asked of a word the
+        caller holds. Static, because no device is involved."""
+        return _lib.test_saved_flags(saved, mask)
+
+    # -- 754-2019 9.6's magnitude forms ------------------------------
+    #
+    # "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+    #  otherwise minimum(x, y)" - and the same shape for the other
+    # three. No rounding attribute is consulted, because there is no
+    # rounding: the result is one of the two operands. A NaN has no
+    # magnitude, so every NaN case is the "otherwise" and inherits the
+    # base operation's NaN rule; so does an equal-magnitude pair, which
+    # is why min_mag(+3, -3) is -3 and max_mag(+3, -3) is +3.
+
+    def _minmax_mag(self, name, x, y):
+        x, y = self._coerce(x), self._coerce(y)
+        out, fl = _lib.minmax_mag(self._dev, name, self._fi.code,
+                                  x.to_bytes(), y.to_bytes(), 1,
+                                  self._fi.esz)
+        return self._finish(out, fl)
+
+    def min_mag(self, x, y):
+        """minimumMagnitude (9.6)."""
+        return self._minmax_mag("min_mag", x, y)
+
+    def max_mag(self, x, y):
+        """maximumMagnitude (9.6)."""
+        return self._minmax_mag("max_mag", x, y)
+
+    def minnum_mag(self, x, y):
+        """minimumMagnitudeNumber (9.6): the number survives a NaN,
+        and a signaling NaN signals invalid without becoming the
+        result."""
+        return self._minmax_mag("minnum_mag", x, y)
+
+    def maxnum_mag(self, x, y):
+        """maximumMagnitudeNumber (9.6)."""
+        return self._minmax_mag("maxnum_mag", x, y)
+
     # -- scalar arithmetic (each method is one libcft call) ----------
     def _coerce(self, v):
         if isinstance(v, Float):
@@ -768,7 +871,10 @@ class Context:
 
     def _finish(self, out, fl):
         self.last_flags = fl
-        self.flags |= fl
+        # The library has already ORed fl into its own status word (the
+        # `flags` property above reads it), so there is nothing to
+        # accumulate here. Kept as one line rather than none because
+        # this is where a reader looks for it.
         return Float(self, out)
 
     def _run2(self, op, a_enc, b_enc):
