@@ -565,10 +565,14 @@ and for the outer solar system, 8 members, 20 years at a 10-day step
 Four things in those tables are worth more than the numbers.
 
 - **binary256 costs 2.4x binary64 on this workload**, not the 30x a
-  significand-width argument would predict. The software backend's
-  cost is dominated by softfloat's per-operation bookkeeping, which is
-  the same shape docs/BENCHMARKS.md reports for the elementwise
-  operations. binary32 is only 3x faster than binary256.
+  significand-width argument would predict, and binary32 is only 3x
+  faster than binary256. docs/BENCHMARKS.md measures 1.6x from fp32 to
+  fp256 on a bare FMA and explains why - the software backend's
+  per-element price is the structural path rather than limb
+  arithmetic. The gap is wider here than there because the step is not
+  a bare FMA: `cft_sqrt` and `cft_div` are Newton iterations whose
+  pass count *does* grow with p, so a workload built on them widens
+  the ladder from 1.6x to 3x. That is the honest shape of it.
 - **Correct rounding costs 2.2x.** `cft_sqrt` plus `cft_div` against
   the seed-plus-Newton route, at binary256, for the same kernel.
 - **The program engine's contribution is the call count, not the
