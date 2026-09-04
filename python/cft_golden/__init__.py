@@ -49,6 +49,14 @@ from .augmented import (
     AUG_FNS, AUG_IMPL, FN_AUG_ADD, FN_AUG_SUB, FN_AUG_MUL,
     augmented_add, augmented_sub, augmented_mul,
 )
+# The formatOf arithmetic of clause 5.4.1 - operands in one binary
+# format, destination in another, one rounding. Appended, like every
+# step before it, so an existing import is untouched.
+from .formatof import (
+    FORMATOF_FNS, FORMATOF_ARITY, FORMATOF_SHORT, FORMATOF_IMPL,
+    FN_FO_ADD, FN_FO_SUB, FN_FO_MUL, FN_FO_DIV, FN_FO_SQRT, FN_FO_FMA,
+    fo_add, fo_sub, fo_mul, fo_div, fo_sqrt, fo_fma,
+)
 from .reduce import (
     OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, REDUCE_OPS, REDUCE_OP_NAMES,
     SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, SCALED_KINDS, SCALED_KIND_NAMES,
@@ -61,7 +69,7 @@ from .chars import (
     from_decimal, to_decimal, from_hex, to_hex,
     get_payload, set_payload, set_payload_signaling,
 )
-from . import augmented, chars, transcend, vectors
+from . import augmented, chars, formatof, transcend, vectors
 
 __all__ = [
     "FP32", "FP64", "FP128", "FP256", "FORMATS", "PREC_CODE", "FpFormat",
@@ -103,6 +111,10 @@ __all__ = [
     "SCALE_MAX", "ScaleOverflow", "split", "tree_adds", "canonical_ranges",
     "reduce_bits", "fsum", "fdot", "combine", "stream_reduce", "fsumsq",
     "fsumabs", "norm_split", "scaled_prod",
+    "FORMATOF_FNS", "FORMATOF_ARITY", "FORMATOF_SHORT",
+    "FORMATOF_IMPL", "FN_FO_ADD", "FN_FO_SUB", "FN_FO_MUL",
+    "FN_FO_DIV", "FN_FO_SQRT", "FN_FO_FMA", "fo_add", "fo_sub",
+    "fo_mul", "fo_div", "fo_sqrt", "fo_fma", "formatof",
 ]
 
 __version__ = "0.1.0"
