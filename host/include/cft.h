@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 6   /* 0.6: table 9.1 complete, 5.12, 9.4, 9.5, 9.7 */
+#define CFT_ABI_VERSION_MINOR 7   /* 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
