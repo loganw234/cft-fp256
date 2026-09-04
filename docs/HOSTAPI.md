@@ -414,8 +414,8 @@ the functions that want no such thing:
 - The inverse functions take an argument in [-1, 1] or a ratio, so
   there is nothing to reduce; pi enters only as a factor of the answer.
 
-`sin`, `cos` and `tan` of a RADIAN argument are a different problem and
-are not here.
+`sin`, `cos` and `tan` of a RADIAN argument were a different problem
+and arrived in phase 3, below.
 
 The signatures follow the nine exactly, and `atan2` takes y first as C
 does:
@@ -1148,7 +1148,8 @@ cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE, a, b, d, n,
 
 5.4.1 requires this for every ordered pair of supported arithmetic
 formats, which is sixteen pairs on this ladder, so it is a conformance
-item rather than a convenience. docs/COMPLIANCE.md's first gap.
+item rather than a convenience - the first of the items
+docs/COMPLIANCE.md listed at 0.6, closed here.
 
 ### Six entry points, not one dispatcher
 

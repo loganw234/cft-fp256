@@ -1,9 +1,11 @@
 # cft-golden
 
 The exact reference model for the cft-fp256 tile: integer-only IEEE
-754-2019 binary arithmetic for fp32/fp64/fp128/fp256, the operand
-steering contract shared with the RTL, and deterministic
-conformance-vector generation.
+754-2019 binary arithmetic for fp32/fp64/fp128/fp256 - every operation
+of clause 5 and every recommended operation of clause 9 for binary
+formats, the definition libcft is held to - the operand steering
+contract shared with the RTL, and deterministic conformance-vector
+generation.
 
 Install for development (optional - the testbenches use PYTHONPATH):
 
