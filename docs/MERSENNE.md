@@ -191,7 +191,7 @@ must raise **nothing at all**:
 | `cft_run(CFT_ADD)` | the `-2`, the carry add, the fold | the value bound is wrong |
 | `cft_run(CFT_MUL)` | the fold's scale by 2^d | a power-of-two multiply rounded, which cannot happen |
 | the split, program or loop | `MUL`, four integer opcodes, `CMPLT`, `SELECT`, `FMA`, and the witness | the derivation above is wrong |
-| the integrality gate, once per squaring | `(y + 2^(p-1)) - 2^(p-1)` | `inexact`: a limb is not an integer. Here the flag is not a by-product, it **is** the detector - see below |
+| the integrality gate, once per squaring | `(y + 2^(p-1)) - 2^(p-1)` | `inexact`: a limb is not an integer. Here the flag is not a by-product, it **is** the detector - see the section above |
 
 Because the two expected sites are in setup and in a separate mode, no
 expected flag can mask a certificate. The report prints the device
@@ -686,14 +686,25 @@ never carry anything.
 
 ### B: the split's shift constant off by one
 
-`(p-1) + bias` became `p + bias`, so `s` is one too large and the
-truncation clears one bit too few. `hi` comes back as a **half-integer**
-and everything stays exact: the witness passes, because
-`v == hi*B + lo` and `0 <= lo < B` are all true of `(1.5, 0)` as well
-as of `(1, B/2)`.
+`(p-1) + bias` became `p + bias`, so `s` is one too large. What that
+does is worth spelling out, because it is not what it looks like:
 
-Caught by the **limb integrality gate**, which exists because writing
-this control found the hole:
+- for `E >= 1` the shift stays inside the significand and clears one
+  extra **fraction** bit, so `hi` is `trunc(t)` rounded down to an even
+  integer and `lo` can reach `2B`. The witness's `lo < B` catches that
+  one.
+- for `E = 0` the shift is `p`, which is one bit **past** the
+  significand and into the low bit of the biased exponent field.
+  Clearing that bit **halves** the value, so `hi` comes back as a
+  half-integer - and `v == hi*B + lo` with `0 <= lo < B` is then
+  perfectly true of `(0.5, v - B/2)` as well as of `(1, v - B)`. The
+  witness has nothing to object to.
+
+The first squaring hits the second case first (`c_0 = 2^b + 13` has
+`E = 0` at every exponent), so a half-integer carry rides into the next
+limb and the residue stops being an integer. Caught by the **limb
+integrality gate**, which exists because writing this control found the
+hole:
 
 ```
 FAIL: fp256, sequencer program: the tool refused to finish -
@@ -749,8 +760,9 @@ So, plainly:
 > the wrong recurrence. That is what the big-integer oracle is for, and
 > why the cross-check compares residues rather than verdicts.
 
-Restoring the file, rebuilding and re-running is green again:
-**382 comparisons, 0 failures** at `--quick`, 388 at the default size.
+Restoring the file, rebuilding and re-running is green again: **382
+comparisons at `--quick`, 388 at the default size, 397 at `--full`, 0
+failures.**
 
 ---
 

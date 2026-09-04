@@ -526,6 +526,13 @@ collatztest: cft-collatz$(EXE)
 # integers, which cannot be wrong about a Lucas-Lehmer residue.
 # ===================================================================
 TOOLS += cft-mersenne$(EXE)
+# ...and `all` again, explicitly. GNU Make expands a rule's prerequisite
+# list when the rule is READ, so `all: $(TOOLS)` above already holds the
+# value TOOLS had at that line and a later `+=` cannot reach it. Naming
+# the binary here is what actually puts it in the default build, and it
+# is one added prerequisite on a recipe-less target, so four worktrees
+# can each add their own line without colliding.
+all: cft-mersenne$(EXE)
 .PHONY: mersenne mersennetest
 
 cft-mersenne$(EXE): tools/mersenne.c libcft.a

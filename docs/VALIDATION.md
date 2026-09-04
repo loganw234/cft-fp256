@@ -3103,7 +3103,7 @@ caught by a **different** layer.
 | control | what was changed | caught by | first thing it said |
 |---|---|---|---|
 | A | the `t < 1` guard deleted from the carry split, in both engines | the **flag word**, on the first squaring, at all four formats | `the carry add raised 0x10 (inexact) ... the residue is REFUSED, not reported` |
-| B | the split's shift constant `(p-1) + bias` becomes `p + bias`, so `hi` is a half-integer | the **limb integrality gate** - not the witness, which passes | `the limb integrality gate raised 0x10 (inexact)` |
+| B | the split's shift constant `(p-1) + bias` becomes `p + bias`, so the shift reaches one bit past the significand into the low bit of the biased exponent and `hi` comes back HALVED | the **limb integrality gate** - not the witness, which is perfectly satisfied by `(0.5, v - B/2)` | `the limb integrality gate raised 0x10 (inexact)` |
 | C | the recurrence's `2^P - 3` becomes `2^P - 2`, so it subtracts 1 instead of 2 | **only the oracle** | `residue after squaring 1 differs - tool res64 ...0010, oracle res64 ...000e` |
 
 Control A is the honest ordering, and worth recording: for that bug the
@@ -3128,8 +3128,8 @@ Stated plainly:
 > is exactly, reproducibly, deterministically computing the wrong
 > recurrence.
 
-Restoring, rebuilding and re-running is green again at 382 comparisons
-(`--quick`) and 388 at the default size.
+Restoring, rebuilding and re-running is green again: **382 comparisons
+at `--quick`, 388 at the default size, 397 at `--full`, 0 failures**.
 
 ### GIMPS, stated honestly
 
