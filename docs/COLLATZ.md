@@ -243,10 +243,13 @@ sequencer contributes is not just fewer round trips:
 - **Convergence masking is free.** `SETACT` narrows the active set; an
   inactive lane writes nothing, deposits nothing and - the part that
   matters here - **raises no flag**. The host loop has to buy that
-  behaviour with two extra opcodes per step (`MIN` the parity with the
-  live mask, then `SELECT` the FMA's operand), because a finished
-  element that kept feeding its own value to the tripling would push
-  `inexact` into the run for ever.
+  behaviour: the program's two `SETACT`s become six masking opcodes in
+  the host loop - `MIN` the live mask into the parity so a finished
+  element cannot reach the tripling with its own value, then `SELECT`
+  the commit of n, the step count and the escape flag through it. That
+  is the 19-versus-23 difference between the two engines, and it is
+  there because a finished element that kept feeding the tripling
+  would push `inexact` into the run for ever.
 - **The early exit is exactly this workload's shape.** Stopping times
   vary from 0 to several hundred inside one batch, and P3 says the
   early exit changes how long the run takes and nothing else.
@@ -255,7 +258,7 @@ sequencer contributes is not just fewer round trips:
   what lets the host resume a batch: the deposits of one call are the
   `a`, `b`, `c` streams of the next.
 
-`--engine loop` issues the same step as twenty-two `cft_run` passes
+`--engine loop` issues the same step as twenty-three `cft_run` passes
 per iteration and exists to be compared against. The two must agree
 bit for bit, and the cross-check holds them to that over every
 starting value it tries, in both directions of the exactness
@@ -411,7 +414,7 @@ Three things in that table are worth more than the numbers:
 - **The sequencer route is 1.5x to 2.1x faster than the host loop on
   the software backend**, where there is no bus and no round trip to
   save. What it saves is the per-call dispatch, the format steering
-  and the buffer walk that `cft_run` performs 22 times per step; the
+  and the buffer walk that `cft_run` performs 23 times per step; the
   program does the same arithmetic inside one call. On a device the
   gap is the memory system's, and much larger.
 - **fp256 is only 1.5x slower than fp64 here.** The per-element cost

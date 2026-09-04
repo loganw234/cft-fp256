@@ -122,7 +122,7 @@
  * time, peak, escape flag - come back through the deposit buffer,
  * which is what DEPOSIT is for.
  *
- * --engine loop issues the same step as twenty-two cft_run passes per
+ * --engine loop issues the same step as twenty-three cft_run passes per
  * iteration from the host. It exists to be compared against: the two
  * must agree bit for bit on every element, and it is what a device
  * without the sequencer would run. The three extra passes are the
@@ -972,7 +972,7 @@ static size_t engine_pass(engine *E, size_t n)
         runN(CFT_ADD, fi, E->cnt, NULL, E->bc[K_ONE], E->tmp, n, &f);
         runN(CFT_SELECT, fi, E->tmp, E->cnt, E->live, E->cnt, n, &f);
         runN(CFT_MAX, fi, E->peak, E->n, NULL, E->peak, n, &f);
-        E->ops += 22 * (uint64_t)n;
+        E->ops += 23 * (uint64_t)n;
         for (i = 0; i < n; i++)
             if (pred_true(fi, E->esc + i * esz))
                 newly_escaped++;

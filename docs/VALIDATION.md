@@ -2876,7 +2876,7 @@ p = 24.
 
 Two numbers worth keeping. The sequencer route is **1.5x to 2.1x
 faster than the host `cft_run` loop on the SOFTWARE backend**, where
-there is no bus to save - what it saves is 22 dispatches, format
+there is no bus to save - what it saves is 23 dispatches, format
 steerings and buffer walks per Collatz step. And throughput is flat in
 the batch size (256..16,384) and the trip count (128..8,192), all
 within 565,000..600,000 steps/s at fp256: the per-call overhead has
