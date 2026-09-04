@@ -930,6 +930,7 @@ typedef struct {
     uint8_t *invT, *negT;        /* base 2^(b-d), the reduction below 2^P */
     uint8_t *invW, *negW;        /* base 2^64, reading the low word out */
     uint8_t *bpow2d;             /* 2^d, broadcast, for the fold */
+    uint8_t *bmagic;             /* 2^(p-1), broadcast, the integrality gate */
     uint8_t *kminus2;            /* the limbs of 2^P - 3 */
     uint8_t *kmodulus;           /* the limbs of 2^P - 1 */
     uint8_t  one[MAX_ESZ], zero[MAX_ESZ], pow2d[MAX_ESZ];
@@ -1143,6 +1144,45 @@ static void normalize(runstate *R, uint8_t *y, size_t n, int wrap)
             die("carry propagation did not converge");
 }
 
+/* Every limb must be an INTEGER, and neither the flag word nor the
+ * split's witness can say so.
+ *
+ * The witness proves v == hi*B + lo with 0 <= lo < B. That does not pin
+ * hi down: v = 3B/2 satisfies it with (hi, lo) = (1, B/2) and equally
+ * with (1.5, 0), and a shift amount that was off by one produces the
+ * second - exactly, raising nothing, with the witness satisfied. The
+ * error then rides in the limbs, and the dot only notices when the
+ * extra fractional bits push a coefficient past 2^p, which at a small
+ * exponent they never do. This gate was added because writing the
+ * negative controls found that hole.
+ *
+ * So once per squaring, on the L limbs that are the only state crossing
+ * from one squaring to the next: (y + M) - M == y with M = 2^(p-1) is
+ * "y is an integer", the magic-constant round the carry split could not
+ * use. Here it is exactly the right instrument, because a limb below
+ * 2^b is far below M and the addition is exact if and only if the limb
+ * is an integer - so the INEXACT it raises is not noise to be masked,
+ * it IS the answer, and a correct run raises nothing here either.
+ */
+static void integrality_gate(runstate *R, uint8_t *y, size_t n)
+{
+    size_t i;
+    runN(R, CFT_ADD, y, NULL, R->bmagic, R->scr, n,
+         "the limb integrality gate");
+    runN(R, CFT_SUB, R->scr, NULL, R->bmagic, R->scr, n,
+         "the limb integrality gate");
+    runN(R, CFT_CMPEQ, R->scr, y, NULL, R->scr, n,
+         "the limb integrality gate");
+    for (i = 0; i < n; i++)
+        if (memcmp(R->scr + i * R->fi->esz, R->one, R->fi->esz) != 0) {
+            fprintf(stderr,
+                    "cft-mersenne: limb %" PRIu64 " of the residue is not an "
+                    "integer - the carry split's shift is wrong in a way "
+                    "its own witness cannot see\n", (uint64_t)i);
+            exit(3);
+        }
+}
+
 /* Reduce to the unique representative in [0, 2^P - 2]. The residue is
  * carried in L limbs of b bits, so it can sit anywhere below 2^(L*b);
  * only the low (b - d) bits of the top limb belong below 2^P, and what
@@ -1216,6 +1256,7 @@ static void ll_step(runstate *R)
 
     normalize(R, R->y, (size_t)L, 1);
     canonicalize(R, R->y);
+    integrality_gate(R, R->y, (size_t)L);
 }
 
 /* The low 64 bits of a canonical residue - GIMPS's res64, and the one
@@ -1305,6 +1346,7 @@ static void engine_setup(runstate *R)
     R->invW = (uint8_t *)xcalloc(cap, esz);
     R->negW = (uint8_t *)xcalloc(cap, esz);
     R->bpow2d   = (uint8_t *)xcalloc(cap, esz);
+    R->bmagic   = (uint8_t *)xcalloc(cap, esz);
     R->kminus2  = (uint8_t *)xcalloc(cap, esz);
     R->kmodulus = (uint8_t *)xcalloc(cap, esz);
 
@@ -1313,6 +1355,8 @@ static void engine_setup(runstate *R)
     val_from_i64(fi, 3, three);
     val_pow2(fi, d, R->pow2d);
     bcast(fi, R->bpow2d, R->pow2d, cap);
+    val_pow2(fi, fi->prec - 1, t1);
+    bcast(fi, R->bmagic, t1, cap);
 
     /* the three bases this tool splits at */
     val_pow2(fi, -b, t1);        bcast(fi, R->invB, t1, cap);
@@ -1379,12 +1423,13 @@ static void engine_teardown(runstate *R)
         }
     }
     free(R->invB); free(R->negB); free(R->invT); free(R->negT);
-    free(R->invW); free(R->negW); free(R->bpow2d);
+    free(R->invW); free(R->negW); free(R->bpow2d); free(R->bmagic);
     free(R->kminus2); free(R->kmodulus);
     free(R->dep); free(R->counts);
     R->y = R->yrev = R->c = R->lo = R->hi = R->cs = R->wit = R->scr = NULL;
     R->invB = R->negB = R->invT = R->negT = R->invW = R->negW = NULL;
     R->bpow2d = NULL;
+    R->bmagic = NULL;
     R->kminus2 = R->kmodulus = NULL;
     R->dep = NULL;
     R->counts = NULL;

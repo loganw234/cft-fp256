@@ -160,6 +160,8 @@ class Tool:
 
     def csv(self, *args):
         out = self.run(*args, "--csv").stdout.strip().splitlines()
+        if len(out) < 2:
+            raise RuntimeError("the tool printed no csv row")
         head = out[0].split(",")
         row = dict(zip(head, out[1].split(",")))
         rows = []
@@ -211,9 +213,15 @@ def check_residues(tool, tmp, P, fmt, engine, every, upto, label):
     """Every intermediate residue, whole, against Python's."""
     global CHECKS
     path = Path(tmp) / ("dump-%d-%s-%s.txt" % (P, fmt, engine))
-    tool.run("--exponents", P, "--format", fmt, "--engine", engine,
-             "--dump-residues", path, "--dump-every", every,
-             "--max-squarings", upto, "--quiet")
+    try:
+        tool.run("--exponents", P, "--format", fmt, "--engine", engine,
+                 "--dump-residues", path, "--dump-every", every,
+                 "--max-squarings", upto, "--quiet")
+    except RuntimeError as exc:
+        CHECKS += 1
+        fail("%s: the tool refused to finish - %s"
+             % (label, str(exc).strip().splitlines()[-1]))
+        return
     got = {}
     geom = None
     for line in path.read_text().splitlines():
@@ -326,7 +334,7 @@ def main():
             try:
                 r256, _ = tool.csv("--exponents", P, "--format", "fp256")
                 rX, _ = tool.csv("--exponents", P, "--format", fmt)
-            except RuntimeError as exc:
+            except (RuntimeError, IndexError) as exc:
                 fail("%s at P = %d refused to run - %s"
                      % (fmt, P, str(exc).strip().splitlines()[-1]))
                 continue
@@ -371,12 +379,17 @@ def main():
         for batch, engine in ((3, "program"), (4096, "program"),
                               (11, "loop")):
             path = Path(tmp) / ("bs-%d-%s.ckpt" % (batch, engine))
-            tool.run(*argset, "--batch", batch, "--engine", engine,
-                     "--checkpoint", path, "--quiet")
+            try:
+                tool.run(*argset, "--batch", batch, "--engine", engine,
+                         "--checkpoint", path, "--quiet")
+            except RuntimeError as exc:
+                fail("batch %d, engine %s refused to run - %s"
+                     % (batch, engine, str(exc).strip().splitlines()[-1]))
+                continue
             paths.append(path)
         CHECKS += 1
         blobs = [p.read_bytes() for p in paths]
-        if blobs[0] == blobs[1] == blobs[2]:
+        if len(blobs) == 3 and blobs[0] == blobs[1] == blobs[2]:
             ok("batch 3, batch 4096 and the host loop at batch 11 end on "
                "byte-identical checkpoints (%s)"
                % read_field(paths[0], "chain")[:16])
@@ -395,30 +408,43 @@ def main():
         step = 137 if not args.quick else 211
         common = argset + ["--batch", 9, "--stop-after-squarings", step,
                            "--checkpoint", piece, "--quiet"]
-        tool.run(*common)
+        started = True
+        try:
+            tool.run(*common)
+        except RuntimeError as exc:
+            CHECKS += 1
+            fail("the interrupt leg could not start - %s"
+                 % str(exc).strip().splitlines()[-1])
+            started = False
         rounds = 0
         mid = 0
-        while True:
+        while started:
             rounds += 1
             if rounds > 10000:
                 fail("the resumed run did not finish")
                 break
             if read_field(piece, "current") != "- -":
                 mid += 1
-            tool.run("--resume", *(argset + ["--batch", 23,
-                                             "--stop-after-squarings", step,
-                                             "--checkpoint", piece,
-                                             "--quiet"]))
+            try:
+                tool.run("--resume",
+                         *(argset + ["--batch", 23,
+                                     "--stop-after-squarings", step,
+                                     "--checkpoint", piece, "--quiet"]))
+            except RuntimeError as exc:
+                fail("a resume refused to run - %s"
+                     % str(exc).strip().splitlines()[-1])
+                started = False
+                break
             if read_field(piece, "done") == str(len(small)):
                 break
         CHECKS += 2
-        if mid:
+        if started and mid:
             ok("%d of the %d interruptions caught a partial residue "
                "mid-exponent" % (mid, rounds))
         else:
             fail("no interruption landed inside an exponent, so the "
                  "in-flight residue was never exercised")
-        if piece.read_bytes() == blobs[0]:
+        if started and blobs and piece.read_bytes() == blobs[0]:
             ok("a run stopped and resumed %d times, at a different batch "
                "size, ends on the same checkpoint - byte for byte - as one "
                "that was never stopped" % rounds)
