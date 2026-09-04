@@ -440,8 +440,8 @@ of it.
 | 1,024 | 1,669 | 1,017 |
 | 4,096 | 1,897 | 359 |
 
-- a 13% spread with no trend, which is measurement noise on this host -
-and all four return the same chain,
+That is a 13% spread with no trend, which is measurement noise on this
+host, and all four runs return the same chain,
 `2a4f7fa58560dac13b59879406d914768db27531c9829a23cd50dffcf6cf5ade`.
 
 **The Horner kernel alone, program against loop**, 8,193 enclosures at

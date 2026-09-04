@@ -3188,9 +3188,9 @@ the widths really are zero. The tool then reports
     horner        9 enclosures, 9 exact (both bounds ARE the value)
                   widest 0 at item 0
 
-- a confident, self-consistent claim that every value it computed is
-exactly representable and that both of its bounds are it. Only the
-oracle knows otherwise. The honest statement is:
+which is a confident, self-consistent claim that every value it
+computed is exactly representable and that both of its bounds are it.
+Only the oracle knows otherwise. The honest statement is:
 
 > Every internal check in this tool is a CONSISTENCY check, and control
 > A does not make the tool inconsistent - it makes it consistently
