@@ -2036,11 +2036,23 @@ int main(int argc, char **argv)
                                           &R.g)
                          : geometry_derive(&fi, P, &R.g);
         if (!okg) {
-            fprintf(stderr,
-                    "cft-mersenne: P = %d has no limb width this format "
-                    "holds exactly (p = %d): a limb needs 2b <= p and a "
-                    "coefficient L*2^(2b) <= 2^p, and no b satisfies both "
-                    "with L = ceil(P/b)\n", P, fi.prec);
+            if (O.limb_req)
+                fprintf(stderr,
+                        "cft-mersenne: the limb width you asked for, %d "
+                        "bits, is not one this format holds exactly at "
+                        "P = %d (p = %d): a limb product needs 2b <= p, and "
+                        "a coefficient of L = ceil(P/b) = %d such products "
+                        "needs L*2^(2b) <= 2^p. Refused rather than "
+                        "rounded; --unsafe-limb forces it, and then the "
+                        "library's inexact is what stops the run\n",
+                        O.limb_req, P, fi.prec,
+                        (P + O.limb_req - 1) / O.limb_req);
+            else
+                fprintf(stderr,
+                        "cft-mersenne: P = %d has no limb width this format "
+                        "holds exactly (p = %d): a limb needs 2b <= p and a "
+                        "coefficient L*2^(2b) <= 2^p, and no b satisfies "
+                        "both with L = ceil(P/b)\n", P, fi.prec);
             return 2;
         }
         R.g.exp = P;
