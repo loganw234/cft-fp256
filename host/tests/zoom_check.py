@@ -437,17 +437,44 @@ def main():
         else:
             fail("the two engines produce different orbits")
 
+        # The derived centre is REAL, which makes the whole imaginary
+        # half of the step arithmetically trivial: zi stays exactly +0,
+        # so zr^2 - zi^2 and zr^2 + zi^2 are the same value and a swap
+        # between them would be invisible. A complex centre closes that
+        # blind spot, and the negative control in docs/ZOOM.md is
+        # exactly this bug.
+        cx = "-0.125,0.75"
+        cxn = 3000 if not args.quick else 1500
+        cpath = Path(tmp) / "orb-complex.txt"
+        tool.run("--centre", cx, "--ref-iters", cxn, "--no-pixels",
+                 "--orbit", cpath, "--quiet")
+        cxr = ch.from_decimal(FP256, "-0.125")[0]
+        cxi = ch.from_decimal(FP256, "0.75")[0]
+        gotc = parse_orbit(cpath, FP256)
+        wantc = golden_orbit(FP256, cxr, cxi, cxn)
+        CHECKS += len(wantc)
+        if len(gotc) != len(wantc) or any(
+                (i + 1, wr, wi) != g for i, (g, (wr, wi))
+                in enumerate(zip(gotc, wantc))):
+            fail("the complex-centre orbit differs from the golden model")
+        else:
+            ok("a COMPLEX centre (%s) runs %d iterations bit-identical to "
+               "the model, so the imaginary half of the step is covered "
+               "too" % (cx, len(gotc)))
+
         # -------------------------------------------------------------
         print("\n[3] the checkpoint does not depend on the machine")
         ck = []
-        for engine, reps in (("program", 1024), ("program", 63),
-                             ("loop", 7)):
-            path = Path(tmp) / ("ck-%s-%d.ckpt" % (engine, reps))
+        for engine, reps, batch in (("program", 1024, 4096),
+                                    ("program", 63, 4096),
+                                    ("loop", 7, 4096),
+                                    ("program", 1024, 3)):
+            path = Path(tmp) / ("ck-%s-%d-%d.ckpt" % (engine, reps, batch))
             tool.run("--ref-iters", 2000, "--no-pixels", "--engine", engine,
-                     "--steps-per-call", reps, "--checkpoint", path,
-                     "--quiet")
+                     "--steps-per-call", reps, "--batch", batch,
+                     "--checkpoint", path, "--quiet")
             ck.append(path)
-        CHECKS += 2
+        CHECKS += 3
         if ck[0].read_bytes() == ck[1].read_bytes():
             ok("trip counts 1024 and 63 end on byte-identical checkpoints "
                "(%s)" % read_ckpt_field(ck[0], "chain")[:16])
@@ -458,6 +485,14 @@ def main():
                "sequencer program")
         else:
             fail("the two engines end on different checkpoints")
+        # --batch sizes the CENTRE SEARCH's calls (the orbit itself is
+        # one lane), and the centre is in the checkpoint, so this is the
+        # batch-size property for the reference half.
+        if ck[0].read_bytes() == ck[3].read_bytes():
+            ok("batch 3 and batch 4096 derive the same centre and end on "
+               "the same checkpoint")
+        else:
+            fail("the derived centre depends on the batch size")
 
         # -------------------------------------------------------------
         print("\n[4] interrupting and resuming the reference orbit")
@@ -500,52 +535,83 @@ def main():
 
         # -------------------------------------------------------------
         print("\n[6] the perturbed pixels, bit for bit against the model")
-        # A shallower view than the default, so that pixels escape inside
-        # a cap the golden model can afford to reproduce element by
-        # element. The grid is deliberately tiny and the EDGES are in it:
+        gb = FP64.prec // 4
+
+        def pixel_case(label, extra, zexp, wid, pmax, refn, off=0):
+            """Run a small frame and reproduce every pixel of it with the
+            golden model's own binary64 semantics, in the tool's order."""
+            global CHECKS
+            tag = label.replace(" ", "-")
+            ppath = Path(tmp) / ("px-%s.txt" % tag)
+            opath = Path(tmp) / ("orb-%s.txt" % tag)
+            argv = list(extra) + ["--zoom-exp", zexp, "--width", wid,
+                                  "--ref-iters", refn, "--pixel-iters",
+                                  pmax, "--batch", 5, "--ref-offset", off]
+            tool.run(*argv, "--pixels", ppath, "--quiet")
+            tool.run(*(list(extra) + ["--zoom-exp", zexp, "--width", wid,
+                                      "--ref-iters", refn, "--ref-offset",
+                                      off, "--no-pixels", "--orbit", opath,
+                                      "--quiet"]))
+            orb = parse_orbit(opath, FP256)
+            ref_r = [sf.zero_bits(FP64)]
+            ref_i = [sf.zero_bits(FP64)]
+            for _, rr, ri in orb:
+                ref_r.append(sf.convert(FP256, FP64, rr)[0])
+                ref_i.append(sf.convert(FP256, FP64, ri)[0])
+            half = g_pow2(FP64, -zexp - (wid.bit_length() - 1))
+            offs = []
+            for g in range(wid * wid):
+                ix, iy = g % wid, g // wid
+                offs.append(
+                    (g_mul(FP64, g_int(FP64, 2 * ix + 1 - wid - 2 * off),
+                           half),
+                     g_mul(FP64, g_int(FP64, 2 * iy + 1 - wid), half)))
+            # The tool caps the pixel iteration at the reference it
+            # actually has (`if (maxk + 1 > R->k) maxk = R->k - 1`), so
+            # the oracle caps identically - a reference that escaped
+            # early must not turn into an index error here.
+            use = min(pmax, len(ref_r) - 2)
+            if use < pmax:
+                print("       (%s: the reference is only %d long, so the "
+                      "cap is %d)" % (label, len(ref_r) - 1, use))
+            want_p = golden_pixels(ref_r, ref_i, offs, use, gb)
+            got_p = []
+            for ln in ppath.read_text().splitlines():
+                if ln.strip():
+                    _, it, kind = ln.split(" ")
+                    got_p.append((int(it), kind))
+            CHECKS += len(want_p)
+            bad_p = [(i, x, y) for i, (x, y) in enumerate(zip(got_p, want_p))
+                     if x != y]
+            if bad_p or len(got_p) != len(want_p):
+                if bad_p:
+                    fail("%s, pixel %d: tool says %r, the golden model "
+                         "says %r" % (label, bad_p[0][0], bad_p[0][1],
+                                      bad_p[0][2]))
+                else:
+                    fail("%s: %d pixel records, model has %d"
+                         % (label, len(got_p), len(want_p)))
+                return want_p
+            counts = {}
+            for v in want_p:
+                counts[v[1]] = counts.get(v[1], 0) + 1
+            ok("%s: %d pixels match the golden model's binary64 semantics "
+               "exactly (%s)"
+               % (label, len(want_p),
+                  ", ".join("%d %s" % (v, k) for k, v in
+                            sorted(counts.items()))))
+            return want_p
+
+        # The deep frame: a shallower view than the default, so that
+        # pixels escape inside a cap the golden model can afford to
+        # reproduce element by element. The EDGES are in the grid:
         # index 0 is the corner, where |Dc| is largest.
         zexp, wid, pmax, refn = 185, 8, 320, 400
+        want_pix = pixel_case("the deep real nucleus", [], zexp, wid, pmax,
+                              refn)
         prow = tool.csv("--zoom-exp", zexp, "--width", wid,
                         "--ref-iters", refn, "--pixel-iters", pmax,
-                        "--batch", 5,
-                        "--pixels", Path(tmp) / "px-small.txt")
-        gb = FP64.prec // 4
-        opath = Path(tmp) / "orb-small.txt"
-        tool.run("--zoom-exp", zexp, "--width", wid, "--ref-iters", refn,
-                 "--no-pixels", "--orbit", opath, "--quiet")
-        orb = parse_orbit(opath, FP256)
-        ref_r = [sf.zero_bits(FP64)]
-        ref_i = [sf.zero_bits(FP64)]
-        for _, rr, ri in orb:
-            ref_r.append(sf.convert(FP256, FP64, rr)[0])
-            ref_i.append(sf.convert(FP256, FP64, ri)[0])
-        half = g_pow2(FP64, -zexp - (wid.bit_length() - 1))
-        offs = []
-        for g in range(wid * wid):
-            ix, iy = g % wid, g // wid
-            offs.append((g_mul(FP64, g_int(FP64, 2 * ix + 1 - wid), half),
-                         g_mul(FP64, g_int(FP64, 2 * iy + 1 - wid), half)))
-        want_pix = golden_pixels(ref_r, ref_i, offs, pmax, gb)
-        got_pix = []
-        for line in (Path(tmp) / "px-small.txt").read_text().splitlines():
-            if line.strip():
-                idx, it, kind = line.split(" ")
-                got_pix.append((int(it), kind))
-        CHECKS += len(want_pix)
-        bad = [(i, a2, b2) for i, (a2, b2) in
-               enumerate(zip(got_pix, want_pix)) if a2 != b2]
-        if bad or len(got_pix) != len(want_pix):
-            if bad:
-                fail("pixel %d: tool says %r, the golden model says %r"
-                     % (bad[0][0], bad[0][1], bad[0][2]))
-            else:
-                fail("%d pixel records, model has %d"
-                     % (len(got_pix), len(want_pix)))
-        else:
-            nesc = sum(1 for v in want_pix if v[1] == "esc")
-            ok("%d perturbed pixels at fp64 match the golden model's own "
-               "binary64 semantics exactly, %d of them escaping"
-               % (len(want_pix), nesc))
+                        "--batch", 5)
         CHECKS += 1
         if prow["escaped"] == str(sum(1 for v in want_pix
                                       if v[1] == "esc")):
@@ -553,52 +619,28 @@ def main():
         else:
             fail("escape counts disagree: %s" % prow["escaped"])
 
+        # And a COMPLEX centre, where the reference's imaginary part is
+        # not zero, so the perturbation's imaginary arithmetic is under
+        # test rather than multiplying zero.
+        pixel_case("a complex centre", ["--centre", cx], 3, 8, 300, 400)
+
         # The glitch branch, which the nucleus reference never takes.
         # Move the reference off the nucleus by whole pixels and the
         # Pauldelbrot test starts firing - the model has to agree about
         # WHICH pixels and at WHICH iteration, or the criterion is
         # decoration.
-        gpath = Path(tmp) / "px-glitch.txt"
-        gopath = Path(tmp) / "orb-glitch.txt"
         goff = 12
-        tool.run("--zoom-exp", zexp, "--width", wid, "--ref-iters", refn,
-                 "--pixel-iters", pmax, "--batch", 5, "--ref-offset", goff,
-                 "--pixels", gpath, "--quiet")
-        tool.run("--zoom-exp", zexp, "--width", wid, "--ref-iters", refn,
-                 "--ref-offset", goff, "--no-pixels", "--orbit", gopath,
-                 "--quiet")
-        gorb = parse_orbit(gopath, FP256)
-        gref_r = [sf.zero_bits(FP64)]
-        gref_i = [sf.zero_bits(FP64)]
-        for _, rr, ri in gorb:
-            gref_r.append(sf.convert(FP256, FP64, rr)[0])
-            gref_i.append(sf.convert(FP256, FP64, ri)[0])
-        goffs = []
-        for g in range(wid * wid):
-            ix, iy = g % wid, g // wid
-            goffs.append(
-                (g_mul(FP64, g_int(FP64, 2 * ix + 1 - wid - 2 * goff), half),
-                 g_mul(FP64, g_int(FP64, 2 * iy + 1 - wid), half)))
-        gwant = golden_pixels(gref_r, gref_i, goffs, pmax, gb)
-        ggot = []
-        for line in gpath.read_text().splitlines():
-            if line.strip():
-                _, it, kind = line.split(" ")
-                ggot.append((int(it), kind))
-        CHECKS += len(gwant)
+        gwant = pixel_case("the reference %d pixels off the nucleus" % goff,
+                           [], zexp, wid, pmax, refn, off=goff)
         nglitch = sum(1 for v in gwant if v[1] == "glitch")
-        if ggot != gwant:
-            bad2 = [(i, x, y) for i, (x, y) in enumerate(zip(ggot, gwant))
-                    if x != y]
-            fail("glitch run, pixel %d: tool %r, model %r"
-                 % (bad2[0][0], bad2[0][1], bad2[0][2]))
-        elif nglitch == 0:
+        CHECKS += 1
+        if nglitch:
+            ok("...and the glitch criterion fires on %d of those %d "
+               "pixels, so it is live code rather than decoration"
+               % (nglitch, len(gwant)))
+        else:
             fail("moving the reference %d pixels off the nucleus produced "
                  "no glitches, so the criterion was never exercised" % goff)
-        else:
-            ok("with the reference %d pixels off the nucleus the glitch "
-               "criterion fires on %d of %d pixels, and the model agrees "
-               "pixel for pixel" % (goff, nglitch, len(gwant)))
 
         # -------------------------------------------------------------
         print("\n[7] batch-size independence of the pixel batch")

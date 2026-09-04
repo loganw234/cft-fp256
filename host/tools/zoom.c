@@ -802,7 +802,11 @@ static uint32_t orbit_pass(orbit_engine *E, uint8_t *zr, uint8_t *zi,
         if (E->counts[0] & 1u)
             die("the orbit program deposited an odd number of values");
         did = E->counts[0] / 2;
-        OPS_ISSUED += (uint64_t)did * 7u;
+        /* eight ALU instructions an iteration - two multiplies, three
+         * adds, a subtract, a fused multiply-add and the comparison;
+         * REPEAT, SETACT and the two DEPOSITs are control, not
+         * arithmetic, and the host loop issues exactly the same eight */
+        OPS_ISSUED += (uint64_t)did * 8u;
         for (j = 0; j < did; j++) {
             memcpy(out_r + (size_t)j * esz, E->dep + (size_t)(2 * j) * esz,
                    esz);
@@ -1012,6 +1016,7 @@ typedef struct {
     uint64_t  n_escaped, n_glitched, n_interior;
     uint64_t  pixel_work;
     uint32_t  esc_min, esc_max;
+    uint64_t  ops_ref, ops_pix;   /* elementwise operations issued */
 } runstate;
 
 /* ---- the hash chains --------------------------------------------- */
@@ -1065,9 +1070,14 @@ static void derive_centre(runstate *R)
     int found = 0, sgn_lo;
     size_t per_call = O->batch ? O->batch : 1;
 
-    if (2 * (int)O->period + 12 > fi->prec)
-        die("this format cannot hold the search grid for that period; "
-            "use a smaller --period or a wider --format");
+    /* A grid point is -2 + (i/8) * 4^-p with i a small integer, so its
+     * highest bit is 2^1 and its lowest is 2^(-3-2p): it needs exactly
+     * 2p + 5 significand bits to be exact, and an inexact candidate
+     * would make the sign of z_p a question about the grid rather than
+     * about the set. Derived from the format, not tabulated. */
+    if (2 * (int)O->period + 5 > fi->prec)
+        die("this format cannot hold the search grid for that period "
+            "exactly; use a smaller --period or a wider format");
 
     val_from_i64(fi, -2, minus2);
     val_pow2(fi, -2 * (int)O->period, w);      /* 4^-p */
@@ -1206,12 +1216,8 @@ static void ckpt_write(runstate *R)
     fprintf(f, "refiters %" PRIu64 "\n", O->ref_iters);
     fprintf(f, "k %" PRIu64 "\n", R->k);
     fprintf(f, "escapedat %" PRIu64 "\n", R->escaped_at);
-    if (R->have_min) {
-        val_to_dec(fi, R->minmag, a, sizeof a);
-        fprintf(f, "minmag %s %" PRIu64 "\n", a, R->minmag_at);
-    } else {
-        fprintf(f, "minmag - 0\n");
-    }
+    /* No minmag here: it is a function of the orbit below, and the
+     * checkpoint carries results, not restatements of them. */
     fprintf(f, "chain %s\n", chain);
     fprintf(f, "orbit %" PRIu64 "\n", R->k);
     for (i = 1; i <= R->k; i++) {
@@ -1277,16 +1283,6 @@ static void ckpt_read(runstate *R)
             R->k = strtoull(rest, NULL, 10);
         } else if (!strcmp(key, "escapedat")) {
             R->escaped_at = strtoull(rest, NULL, 10);
-        } else if (!strcmp(key, "minmag")) {
-            char mv[DECMAX];
-            uint64_t at = 0;
-            if (sscanf(rest, "%2047s %" SCNu64, mv, &at) == 2 &&
-                strcmp(mv, "-") != 0) {
-                if (!val_from_dec(fi, mv, R->minmag))
-                    die("bad checkpoint minmag");
-                R->minmag_at = at;
-                R->have_min = 1;
-            }
         } else if (!strcmp(key, "chain")) {
             if (!unhex32(rest, R->chain))
                 die("bad checkpoint chain");
@@ -1336,20 +1332,68 @@ static void orbit_absorb(runstate *R, uint64_t idx)
         fprintf(R->orbf, "%s\n", line);
 }
 
-static void orbit_track_min(runstate *R, uint64_t idx)
+/* The smallest |z_k|^2 the reference reaches, and where.
+ *
+ * This is a property of the finished orbit rather than of the
+ * iteration, so it is computed ONCE, afterwards, in whole-array calls -
+ * three elementwise passes and a MIN tournament, about 2*log2(n) + 4
+ * library calls for any n. Doing it per iteration instead cost four
+ * single-element calls per point, which is half as much work again as
+ * the orbit itself and four hundred thousand library calls where the
+ * sequencer had got the count down to ninety-eight. It is worth
+ * recording why that mattered: a per-iteration host-side statistic
+ * quietly undoes exactly what the sequencer is for.
+ *
+ * The number matters because it is where perturbation is fragile: the
+ * closer a reference passes to the origin, the fewer pixels can glitch
+ * against it. */
+static void compute_minmag(runstate *R)
 {
     const fmt_info *fi = R->fi;
-    uint8_t a[MAX_ESZ], b[MAX_ESZ], m[MAX_ESZ];
-    run1(CFT_MUL, fi->fmt, R->orb_r + idx * fi->esz,
-         R->orb_r + idx * fi->esz, NULL, a);
-    run1(CFT_MUL, fi->fmt, R->orb_i + idx * fi->esz,
-         R->orb_i + idx * fi->esz, NULL, b);
-    run1(CFT_ADD, fi->fmt, a, NULL, b, m);
-    if (!R->have_min || val_lt(fi, m, R->minmag)) {
-        R->have_min = 1;
-        memcpy(R->minmag, m, fi->esz);
-        R->minmag_at = idx;
+    size_t esz = fi->esz, n = (size_t)R->k, len, i;
+    uint8_t *a, *b, *m, *t, *bc, *p;
+
+    if (!n)
+        return;
+    a = (uint8_t *)xcalloc(n, esz);
+    b = (uint8_t *)xcalloc(n, esz);
+    m = (uint8_t *)xcalloc(n, esz);
+    t = (uint8_t *)xcalloc(n, esz);
+    bc = (uint8_t *)xcalloc(n, esz);
+    p = (uint8_t *)xcalloc(n, esz);
+
+    runN(CFT_MUL, fi->fmt, R->orb_r + esz, R->orb_r + esz, NULL, a, n,
+         "the minimum-magnitude pass");
+    runN(CFT_MUL, fi->fmt, R->orb_i + esz, R->orb_i + esz, NULL, b, n,
+         "the minimum-magnitude pass");
+    runN(CFT_ADD, fi->fmt, a, NULL, b, m, n,
+         "the minimum-magnitude pass");
+
+    memcpy(t, m, n * esz);
+    len = n;
+    while (len > 1) {
+        size_t half = len >> 1;
+        runN(CFT_MIN, fi->fmt, t, t + half * esz, NULL, t, half,
+             "the minimum-magnitude pass");
+        if (len & 1) {
+            memcpy(t + half * esz, t + (len - 1) * esz, esz);
+            len = half + 1;
+        } else {
+            len = half;
+        }
     }
+    bcast(fi, bc, t, n);
+    run_cmp(CFT_CMPEQ, fi->fmt, m, bc, p, n);
+    for (i = 0; i < n; i++) {
+        if (pred_true(fi, p + i * esz)) {
+            R->minmag_at = i + 1;
+            break;
+        }
+    }
+    memcpy(R->minmag, t, esz);
+    R->have_min = 1;
+
+    free(a); free(b); free(m); free(t); free(bc); free(p);
 }
 
 /* Run the orbit to --ref-iters, or until it escapes, or until a stop
@@ -1374,7 +1418,6 @@ static int run_reference(runstate *R, double t0, double *tckpt)
             memcpy(R->orb_r + idx * esz, br + j * esz, esz);
             memcpy(R->orb_i + idx * esz, bi + j * esz, esz);
             orbit_absorb(R, idx);
-            orbit_track_min(R, idx);
         }
         R->k += take;
         if (take)
@@ -1862,12 +1905,12 @@ static void report(runstate *R, double t_ref, double t_pix,
                "esc_max,pixel_iterations,ref_seconds,pixel_seconds,"
                "ref_iters_per_s,pixel_iters_per_s,pixels_per_s,flags,"
                "chain,pixchain,compare_differ,compare_total,"
-               "centre_re,centre_im\n");
+               "centre_re,centre_im,ref_ops,pixel_ops\n");
         printf("%s,%s,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%u,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%s,%" PRIu64 ",%s,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRIu64
                ",%.6f,%.6f,%.1f,%.1f,%.1f,0x%02x,%s,%s,%" PRIu64
-               ",%" PRIu64 ",%s,%s\n",
+               ",%" PRIu64 ",%s,%s,%" PRIu64 ",%" PRIu64 "\n",
                backend, cft_format_name(fi->fmt),
                O->use_program ? "program" : "loop",
                (uint64_t)O->batch, (uint64_t)O->reps, O->period,
@@ -1876,7 +1919,8 @@ static void report(runstate *R, double t_ref, double t_pix,
                R->n_interior,
                R->n_escaped ? R->esc_min : 0, R->esc_max, R->pixel_work,
                t_ref, t_pix, rps, pps, eps, (unsigned)status,
-               chain, pchain, cmp_diff, cmp_tot, cr, ci);
+               chain, pchain, cmp_diff, cmp_tot, cr, ci,
+               R->ops_ref, R->ops_pix);
         return;
     }
 
@@ -1929,11 +1973,13 @@ static void report(runstate *R, double t_ref, double t_pix,
                : "  DISAGREES WITH THE UNION ABOVE");
     printf("  time          %.3f s reference, %.3f s pixels\n",
            t_ref, t_pix);
-    printf("  throughput    %.0f reference iterations/s at %s\n", rps,
-           cft_format_name(fi->fmt));
+    printf("  throughput    %.0f reference iterations/s at %s "
+           "(%.0f elementwise ops/s)\n", rps, cft_format_name(fi->fmt),
+           t_ref > 0 ? (double)R->ops_ref / t_ref : 0.0);
     if (!O->no_pixels)
-        printf("                %.0f pixel-iterations/s at fp64, "
-               "%.1f pixels/s\n", pps, eps);
+        printf("                %.0f pixel-iterations/s at fp64 "
+               "(%.0f elementwise ops/s), %.1f pixels/s\n", pps,
+               t_pix > 0 ? (double)R->ops_pix / t_pix : 0.0, eps);
     printf("  orbit chain   %s\n", chain);
     if (!O->no_pixels)
         printf("  pixel chain   %s\n", pchain);
@@ -2202,12 +2248,17 @@ int main(int argc, char **argv)
     tckpt = t0;
     stopped = run_reference(&R, t0, &tckpt);
     t_ref = now_s() - t0;
+    R.ops_ref = OPS_ISSUED;
     if (R.orbf)
         fclose(R.orbf);
+    /* After the timed phase, and outside it: a statistic over the
+     * finished orbit is not part of computing the orbit. */
+    compute_minmag(&R);
 
     if (!stopped && !O.no_pixels && R.k >= 2) {
         double p0 = now_s();
         run_pixels(&R);
+        R.ops_pix = OPS_ISSUED - R.ops_ref;
         pixel_chain_and_dump(&R);
         write_pgm(&R);
         t_pix = now_s() - p0;
