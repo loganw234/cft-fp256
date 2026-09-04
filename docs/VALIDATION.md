@@ -2738,3 +2738,68 @@ arithmetic, and `api-test` covers the new path directly.
   it had reached `golden` ok 385 s, `vectors` ok 287 s and was inside
   `libcft`'s replay. 20260903-230223-0c8884d is the run whose `mpfr`
   FAIL is dissected above.
+
+## 2026-09-04 - the ABI 0.7 census: the conformance step, every stage the desktop can run
+
+Two runs, and the reason there are two is worth a paragraph.
+`bash verify/run.sh --fresh` at d4fe397 - the bump commit, with both 0.7
+packages and the JavaScript surface merged, julia and R on PATH this
+time - on DESKTOP-T33SK86 (Windows, MINGW64, Docker Desktop for the
+three container stages), run id 20260904-035237-d4fe397, on a clean tree,
+110 minutes wall with the box quiet:
+
+    golden 397s  vectors 308s  sim 605s  lint 47s  formal 29s
+    libcft 450s  selfcheck 1s  divsqrt 1s  clause5 2s  character 156s
+    transcend 755s  augmented 3s  status96 0s  formatof 6s  diff 3s
+    seq 1s  reduce 12s  bindings 141s  cpp 1497s  lang-cpp 1s
+    lang-rust 1s  lang-julia 2s  lang-go 1s  lang-csharp 6s  lang-r 9s
+    lang-fortran 1s  node FAIL  wasm FAIL  mpfr 489s  soak-quick 96s
+    images SKIP
+
+    VERDICT: 28 executed ok, 2 failed, 1 skipped by name
+    (images - xclbinutil is Linux-only)
+
+The two failures were one line each: `node` ("abi (cft.h says):
+expected 0.7, got 0.6") and `wasm` ("cftw_abi_version() = 6 (0.6);
+cft.h says 7 (0.7)"). The JavaScript step had measured its module on
+the tree BEFORE the integrator's bump, so the compiled module carried
+6 while the header said 7 - the ordering mistake the 0.6 step avoided
+by bumping first, and precisely the mismatch the two replayers exist
+to refuse. The module and page were rebuilt on the bumped tree, twice,
+in the pinned container - byte-identical: page sha256
+`e1b42b3873416e39…` (1,336,073 bytes), module `a1f0a4715516d3f6…`
+(211,869 bytes), the same bytes in `bindings/node/cft_node.wasm` - and
+committed as 2216e62, where `bash verify/run.sh --fresh --only
+vectors,node,wasm` ran as 20260904-054715-2216e62, 55 minutes:
+
+    vectors 333s  node 1656s  wasm 1316s
+
+    VERDICT: PASS, nothing skipped - node 125 passed, 0 failed; 2,055,270 cases over 316 set replays;
+    wasm VERIFY OK
+
+Nothing under host/, python/ or vectors/ changed between the two
+commits - the rebuild touched two binary files and the runner gained
+its `--budget` option - so the 28 library verdicts of the first run
+stand for the tree of the second. Together they are the census behind
+the conformance statement in docs/COMPLIANCE.md.
+
+The counts the stages printed, each the run's own:
+
+| stage | printed |
+|---|---|
+| golden | 2011 passed, 5 skipped |
+| libcft | 1223635 cases replayed through `cft_conformance`, 168 sets |
+| divsqrt | 29124 cases, library matches the model exactly |
+| clause5 | 145032 comparisons, C == model on every one |
+| character | 20819 comparisons, C == model on every one |
+| status96 | 53517 comparisons over 9.6's four magnitude forms, C == model on every one, with the status-word checks |
+| formatof | 509118 comparisons over all sixteen ordered format pairs, six operations, five attributes, C == model on every one |
+| transcend | 607217 comparisons over 39 functions, then 580977 again through the escalation path, C == model on every one |
+| augmented | 140088 comparisons, C == model on every one |
+| reduce | the tree, the scaling, the bits and the flags agree |
+| bindings | cftmpfr: 834 passed |
+| cpp | 213691 checks, C++17 and C++20 |
+| node | 125 passed, 0 failed; 2,055,270 cases over 316 set replays - a pass (second run) |
+| wasm | VERIFY OK (second run) |
+| mpfr | 739234 cases, 0 value mismatches, 0 flag mismatches |
+| soak-quick | 107886080 cases, 0 value mismatches, 0 flag mismatches |

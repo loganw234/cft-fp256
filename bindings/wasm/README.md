@@ -797,3 +797,19 @@ verify.mjs           the browserless check of that build product:
 build/               untracked: vectors, module, node loader,
                      negative control
 ```
+
+### Rebuilt after the bump, 2026-09-04
+
+The block above was measured on a tree whose `cft.h` still read 0.6:
+the integrator's bump to 0.7 came after the JavaScript step this time,
+the opposite order from 0.6, and the full run on the bumped tree
+refused the page on one line - `cftw_abi_version() = 6 (0.6); cft.h
+says 7 (0.7)` - which is the check doing its job. The page and the
+module were rebuilt on the bumped tree with `build.sh`, twice, in the
+pinned container, byte-identical: `conformance.html` **1,336,073
+bytes**, sha256 `e1b42b3873416e39…`; module **211,869 bytes**, sha256
+`a1f0a4715516d3f6…` (the same bytes as `bindings/node/cft_node.wasm`);
+`cft_node.js` unchanged. Sizes identical to the block above, hashes
+different by the one constant. `verify.mjs` then ran under
+`bash verify/run.sh --fresh --only vectors,node,wasm`, run id
+`20260904-054715-2216e62`, and passed with the same counts as the block above.

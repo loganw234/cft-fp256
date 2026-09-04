@@ -602,3 +602,13 @@ conformance.mjs  the vectors replay - the package's conformance test;
 same flags as the page's module, inside the same pinned emsdk image,
 and copied here. Rebuild them there, not here; there is no build step
 in this directory and no dependency to install.
+
+**2026-09-04, rebuilt on the bumped tree, wasm module sha256
+`a1f0a4715516d3f6…`** - the block above was measured before `cft.h` moved
+to 0.7, and the ABI test refused the old module on the bumped tree
+("expected 0.7, got 0.6"), as it should. The module was rebuilt twice
+in the container on the 0.7 tree, byte-identical, and `test.mjs` and
+`conformance.mjs` re-ran under `bash verify/run.sh --fresh --only
+vectors,node,wasm`, run id `20260904-054715-2216e62`: the same test and case counts as
+above, the ABI test now reading 0.7 from the header and the module
+alike.
