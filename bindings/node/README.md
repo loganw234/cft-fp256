@@ -490,9 +490,9 @@ tree* and goes green on the integrator's bump with nothing here to
 change. On this run both read **0.6**, because the bump is the
 integrator's single commit for the whole step.
 
-Both figures below come from one standardized run,
-`bash verify/run.sh --fresh --only vectors,node,wasm`, run id
-**20260904-021432-cfab84c** (`vectors` 278 s, `node` 1435 s, `wasm`
+Both figures below come from one standardized run on a
+clean tree, `bash verify/run.sh --fresh --only vectors,node,wasm`, run
+id **20260904-030316-6b9a845** (`vectors` 275 s, `node` 1438 s, `wasm`
 1100 s, **PASS, nothing skipped**).
 
 * `node conformance.mjs` - **2,055,270 cases over 316 set replays,

@@ -537,11 +537,13 @@ and a third after the negative control below was reverted.
 
 The numbers below are one standardized run,
 `bash verify/run.sh --fresh --only vectors,node,wasm`, run id
-**20260904-021432-cfab84c**: `vectors` 278 s, `node` 1435 s, `wasm`
-1100 s, **VERDICT: PASS, nothing skipped**. Its header says *TREE
-DIRTY*, and the dirt was these two README files being written while it
-ran - every source, build product and vector set it exercised was at
-cfab84c, and nothing it compiles or replays was uncommitted.
+**20260904-030316-6b9a845** on a clean tree: `vectors` 275 s, `node`
+1438 s, `wasm` 1100 s, **VERDICT: PASS, nothing skipped**. It is the
+second of two: the first (20260904-021432-cfab84c) ran while these two
+README files were being written, so its header says *TREE DIRTY* and
+it certifies nothing by this repository's own rule - it is recorded
+only because it reported the same counts, stage for stage, which is
+what a rerun on the same sources should do.
 
 * **1,223,635 cases over 168 sets** through `cft_conformance` - the
   twenty opcode sets, the twenty transcendental ones (533,265), the
