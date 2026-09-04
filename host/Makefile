@@ -515,6 +515,28 @@ coverage: all
 collatztest: cft-collatz$(EXE)
 	$(PYTHON) tests/collatz_check.py
 
+# ===================================================================
+# cft-mersenne - the Lucas-Lehmer test with fp256 as an EXACT wide
+# integer multiplier. A squaring is a convolution of limbs, the
+# convolution is cft_reduce(CFT_DOT) over a tree the contract fixes,
+# and `flags == 0` is the certificate that every coefficient is the
+# exact integer sum - which is the property GIMPS has to rebuild with
+# Gerbicz checks because its floating-point FFT is fast but not exact.
+# docs/MERSENNE.md is the argument; the oracle is Python's big
+# integers, which cannot be wrong about a Lucas-Lehmer residue.
+# ===================================================================
+TOOLS += cft-mersenne$(EXE)
+.PHONY: mersenne mersennetest
+
+cft-mersenne$(EXE): tools/mersenne.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+mersenne: cft-mersenne$(EXE)
+
+mersennetest: cft-mersenne$(EXE)
+	$(PYTHON) tests/mersenne_check.py
+# ===================================================================
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves
