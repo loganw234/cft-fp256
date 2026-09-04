@@ -25,17 +25,27 @@ a sample nobody can regenerate is a sample nobody can audit:
     reserved15/30/255 whose defined qNaN+invalid answer is contract
     surface too. Lines keep file order.
 
-ONLY THE OPCODE SETS ARE SAMPLED, and that is unchanged at ABI 0.6.
-The generator now writes five families - opcode, transcendental,
-augmented, reduction and character - but the embedded sample exists to
+ONLY THE OPCODE SETS ARE SAMPLED, and that is unchanged at ABI 0.7.
+The generator now writes SEVEN families - opcode, transcendental,
+augmented, reduction, character, and since 0.7 the magnitude forms of
+9.6 and the formatOf arithmetic of 5.4.1 - but the embedded sample
+exists to
 give a page that has just loaded something to replay before anyone
 drops a file, and the opcode sets are the ones whose schema this rule
 can sample line by line and whose 28 opcode classes it can prove
-covered. The other four families are droppable in section 3, where
+covered. The other six families are droppable in section 3, where
 they are replayed whole; embedding a sample of them would grow the
 committed page for a weaker version of the check the drop zone already
-makes. cft_conformance reads all five either way, so nothing here
+makes. cft_conformance reads all seven either way, so nothing here
 decides what the library will replay.
+
+The formatOf family is the sharpest case for not sampling: with
+sixteen ordered format pairs it is eighty of the 168 published sets,
+and a case there carries a source-format operand beside a
+destination-format result, so the line-stride rule above - which reads
+one "op" field per line and counts opcode classes - has nothing to say
+about it. Sampling it would mean a second rule, and a second rule is a
+second thing to keep honest.
 
 The numbers 11,800 / 59 / 200 assume the generator arguments the repo
 publishes (`make vectors`); the asserts below pin that, so changing

@@ -151,12 +151,15 @@ footer pre { font-size: 0.75rem; }
   <h2>3 &middot; full replay: drop the published sets</h2>
   <p>The embedded sample is a sample. For the full claim, generate the
   complete sets in a checkout of this repo -
-  <code>make vectors</code>, which writes <strong>881,657 cases over 84
-  sets</strong> to <code>vectors/out/</code>: 236,000 over twenty opcode
-  sets, 533,265 over twenty transcendental sets (all thirty-nine
+  <code>make vectors</code>, which writes <strong>1,067,635 cases over
+  168 sets</strong> to <code>vectors/out/</code>: 236,000 over twenty
+  opcode sets, 533,265 over twenty transcendental sets (all thirty-nine
   functions since ABI 0.6, table 9.1 complete), 89,616 over the four
-  augmented sets of clause 9.5, 8,960 over twenty reduction sets and
-  13,816 over twenty character sets - and drop any or all of the
+  augmented sets of clause 9.5, 8,960 over twenty reduction sets,
+  13,816 over twenty character sets, and since ABI 0.7 9,728 over the
+  four magnitude sets of clause 9.6 and 176,250 over the eighty
+  formatOf sets of clause 5.4.1 - one per ordered pair of formats per
+  attribute - and drop any or all of the
   <code>.jsonl</code> files here. Same code path as section 2, whole
   files this time.</p>
   <div id="dropzone">drop <code>vectors/out/*.jsonl</code> here &mdash; or click to pick files</div>
@@ -167,7 +170,7 @@ footer pre { font-size: 0.75rem; }
     <tbody></tbody>
   </table>
   <p class="small dim">Only the generator's fixed names are accepted -
-  all 84 of them:
+  all 168 of them:
   <span class="mono">fp32.jsonl &hellip; fp256-rmm.jsonl</span>,
   <span class="mono">fp32-transcend.jsonl &hellip;
   fp256-transcend-rmm.jsonl</span>,
@@ -175,9 +178,20 @@ footer pre { font-size: 0.75rem; }
   fp256-augmented.jsonl</span> (one per format, because 754-2019 9.5
   fixes the rounding and there is no attribute to sweep),
   <span class="mono">fp32-reduce.jsonl &hellip;
-  fp256-reduce-rmm.jsonl</span> and
+  fp256-reduce-rmm.jsonl</span>,
   <span class="mono">fp32-character.jsonl &hellip;
-  fp256-character-rmm.jsonl</span> - cft_conformance enumerates sets by
+  fp256-character-rmm.jsonl</span>,
+  <span class="mono">fp32-minmaxmag.jsonl &hellip;
+  fp256-minmaxmag.jsonl</span> (one per format again, and for a sharper
+  reason: 9.6's magnitude forms compare two magnitudes and then
+  <em>select</em> an operand, so there is no rounding for an attribute
+  to direct) and
+  <span class="mono">fp32-to-fp32-formatof.jsonl &hellip;
+  fp256-to-fp256-formatof-rmm.jsonl</span> (sixteen ordered pairs
+  &times; five attributes; a case there carries a source-format operand
+  and a destination-format result on the same line, and names both
+  formats so the file cannot lie about which pairing it is) -
+  cft_conformance enumerates sets by
   name rather than by scanning, and a file this page cannot map to a set
   is refused loudly rather than skipped quietly.</p>
 </section>
@@ -224,10 +238,42 @@ footer pre { font-size: 0.75rem; }
   panel is a one-element calculator, so it runs them over the single
   operand, which is an answer the contract names rather than a special
   case invented for the page.</p>
+  <p>ABI 0.7 adds two more. Clause <strong>9.6</strong>'s four
+  <em>magnitude</em> forms of minimum and maximum are here beside the
+  four opcodes they defer to, and like the augmented three they grey
+  the rounding select out - not because an attribute is fixed but
+  because there is no rounding at all: each compares two sign-cleared
+  encodings and then <em>selects</em> one operand, so the answer is an
+  operand's own bits except where the base operation delivers a NaN.
+  The row worth trying is equal magnitudes of opposite sign:
+  <code>maximumMagnitude(+3, -3)</code> is the &ldquo;otherwise&rdquo;
+  case and defers to <code>maximum</code>, so it is +3, and an
+  implementation that quietly preferred the second operand would be
+  wrong here and nowhere else. Clause <strong>5.4.1</strong>'s six
+  <em>formatOf</em> operations take <strong>two formats</strong>, so
+  the panel grows a second select: the operands are read in the source
+  format, the result is delivered in the destination one, and there is
+  exactly <em>one</em> rounding between them. Narrowing is not
+  &ldquo;compute there, convert here&rdquo; - that rounds twice, and on
+  operands this ladder can construct the composed answer is one ulp
+  low with the same flags.</p>
+  <p>The <strong>status word</strong> under the result is 754-2019
+  <strong>7.1</strong>'s: one sticky word on the device handle into
+  which every call ORs what it signalled, which <em>nothing in the
+  library ever lowers</em>. The <code>flags</code> line above it is the
+  last call's; this one is every call since the page loaded or since
+  you last cleared it, which is the distinction 7.1 exists to draw.
+  Sections 2 and 3 are calls too, so the word is already carrying the
+  replay's exceptions before you compute anything &mdash; press
+  <em>lower all flags</em> first if you want to watch one operation on
+  its own. It
+  never influences a result - libcft never reads it back to decide
+  anything - so clearing it or not changes no answer anywhere.</p>
   <fieldset>
     <div>
       <label class="f"><span>operation</span><select id="op-sel"></select></label>
       <label class="f"><span>format</span><select id="fmt-sel"></select></label>
+      <label class="f" id="dfmt-wrap" hidden><span>destination format (5.4.1)</span><select id="dfmt-sel"></select></label>
       <label class="f"><span>rounding</span><select id="rnd-sel"></select></label>
     </div>
     <p class="small dim" id="op-formula"></p>
@@ -239,6 +285,12 @@ footer pre { font-size: 0.75rem; }
     <div class="operand" id="row-s" hidden><label class="f" style="width:100%"><span>the character SEQUENCE to convert</span><input type="text" id="in-s" spellcheck="false" value="1.5"></label></div>
     <p><button id="compute-btn" disabled>compute</button></p>
     <pre id="compute-out" hidden></pre>
+    <p class="small dim">754-2019 7.1 status word, sticky on this
+    device since the page loaded &mdash; the union of every call above,
+    lowered only at your request:</p>
+    <pre id="status-word">(nothing raised)</pre>
+    <p><button id="lower-flags">lower all flags (5.7.4
+    lowerFlags)</button></p>
   </fieldset>
 </section>
 
@@ -274,17 +326,22 @@ const $ = (id) => document.getElementById(id);
 
 const FORMATS   = ["fp32", "fp64", "fp128", "fp256"];
 const ROUNDINGS = ["rne", "rtz", "rdn", "rup", "rmm"];
-/* The generator's fixed names, all five families: the twenty opcode
+/* The generator's fixed names, all seven families: the twenty opcode
  * sets the embedded sample is drawn from; the twenty transcendental
  * sets, which carry a different schema ("fn" rather than "op") and are
- * therefore their own files; and - since ABI 0.6 - the four augmented
+ * therefore their own files; from ABI 0.6 the four augmented
  * sets (one per format, because 9.5 fixes the rounding and there is no
  * attribute to sweep), the twenty reduction sets (whose operand is a
  * whole vector) and the twenty character sets (whose operand is a
- * SEQUENCE). cft_conformance reads all five, so the drop zone accepts
- * all five; before the nine had wrappers this list stopped at twenty
+ * SEQUENCE); and from ABI 0.7 the four magnitude sets of clause 9.6
+ * (one per format again, because those operations SELECT an operand
+ * and no attribute could change an answer) and the eighty formatOf
+ * sets of clause 5.4.1 - one per ORDERED PAIR of formats per
+ * attribute, the only family whose case carries two formats.
+ * cft_conformance reads all seven, so the drop zone accepts
+ * all seven; before the nine had wrappers this list stopped at twenty
  * and a `make vectors` drop refused half of what the page had just
- * told the reader to generate. 84 names. */
+ * told the reader to generate. 168 names. */
 const CANONICAL = [];
 for (const f of FORMATS)
   for (const r of ROUNDINGS)
@@ -303,6 +360,14 @@ for (const f of FORMATS)
   for (const r of ROUNDINGS)
     CANONICAL.push(r === "rne" ? f + "-character.jsonl"
                                : f + "-character-" + r + ".jsonl");
+for (const f of FORMATS)
+  CANONICAL.push(f + "-minmaxmag.jsonl");
+for (const s of FORMATS)
+  for (const d of FORMATS)
+    for (const r of ROUNDINGS)
+      CANONICAL.push(r === "rne"
+        ? s + "-to-" + d + "-formatof.jsonl"
+        : s + "-to-" + d + "-formatof-" + r + ".jsonl");
 
 const FLAG_NAMES = [
   [1, "invalid"], [2, "divbyzero"], [4, "overflow"],
@@ -436,6 +501,48 @@ function init() {
                   M.cwrap("cftw_augmented_sub", n, [n,n,n,n,n,n,n,n]),
     augmentedMultiplication:
                   M.cwrap("cftw_augmented_mul", n, [n,n,n,n,n,n,n,n]),
+    /* ABI 0.7, package B: 7.1's status word and 5.7.4's six
+     * operations over it. The word lives on the DEVICE handle, and
+     * nothing in the library ever lowers it - the button under the
+     * compute panel is the only thing on this page that can.
+     * cftw_flags_all() projects cft.h's CFT_FLAGS_ALL, which is a
+     * MACRO: derived there from the cft_exception bits, and therefore
+     * the one part of the header a caller holding only the module
+     * cannot reach. The page asks for it rather than transcribing it,
+     * so a sixth flag would be covered by "all" here without this
+     * file being edited. */
+    flagsAll:     M.cwrap("cftw_flags_all", n, []),
+    lowerFlags:   M.cwrap("cftw_lower_flags", null, [n, n]),
+    raiseFlags:   M.cwrap("cftw_raise_flags", null, [n, n]),
+    testFlags:    M.cwrap("cftw_test_flags", n, [n, n]),
+    saveAllFlags: M.cwrap("cftw_save_all_flags", n, [n]),
+    restoreFlags: M.cwrap("cftw_restore_flags", null, [n, n, n]),
+    testSavedFlags: M.cwrap("cftw_test_saved_flags", n, [n, n]),
+    /* 5.7.1's three conformance predicates. No device and no format -
+     * they describe the programming environment, not a number - so
+     * they are rendered in section 1 beside the ABI version. */
+    is754version1985: M.cwrap("cftw_is754version1985", n, []),
+    is754version2008: M.cwrap("cftw_is754version2008", n, []),
+    is754version2019: M.cwrap("cftw_is754version2019", n, []),
+    /* 9.6's four magnitude forms. NO rounding argument, and the
+     * omission is normative: each compares two sign-cleared encodings
+     * and then selects an operand, so there is nothing for an
+     * attribute to direct. No bus word either - no device pass is
+     * issued. */
+    min_mag:      M.cwrap("cftw_min_mag", n, [n,n,n,n,n,n,n]),
+    max_mag:      M.cwrap("cftw_max_mag", n, [n,n,n,n,n,n,n]),
+    minnum_mag:   M.cwrap("cftw_minnum_mag", n, [n,n,n,n,n,n,n]),
+    maxnum_mag:   M.cwrap("cftw_maxnum_mag", n, [n,n,n,n,n,n,n]),
+    /* ABI 0.7, package A: clause 5.4.1's formatOf arithmetic. TWO
+     * formats in one call - sfmt for a, b and c, dfmt for d - so the
+     * operand and result buffers are different widths, which nothing
+     * else on this page does except cftw_convert. */
+    formatof_add: M.cwrap("cftw_formatof_add", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatof_sub: M.cwrap("cftw_formatof_sub", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatof_mul: M.cwrap("cftw_formatof_mul", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatof_div: M.cwrap("cftw_formatof_div", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatof_sqrt: M.cwrap("cftw_formatof_sqrt", n, [n,n,n,n,n,n,n,n,n]),
+    formatof_fma: M.cwrap("cftw_formatof_fma", n, [n,n,n,n,n,n,n,n,n,n,n]),
   };
 
   const pp = M._malloc(4);
@@ -451,6 +558,7 @@ function init() {
   renderProvenance();
   initComputePanel();
   wireDrop();
+  renderStatusWord();
   $("rerun").disabled = false;
   $("rerun").addEventListener("click", replayBuiltin);
   replayBuiltin();
@@ -465,13 +573,49 @@ function renderIdentity() {
   for (let i = 0; i < 4; i++)
     if (mask & (1 << i))
       fmts += C.fmtName(i) + " (" + C.fmtSize(i) + " bytes)  ";
+  /* 5.7.1's three predicates, asked of the library rather than
+   * restated here. 2008 is FALSE and not because anything is missing:
+   * it REQUIRED minNum/maxNum/minNumMag/maxNumMag, 754-2019 replaced
+   * them with 9.6's recommended operations and changed the
+   * signaling-NaN rule, and this library implements the 2019
+   * semantics. 1985 is FALSE because no part of this project's
+   * verification is written against that text - a predicate that said
+   * "true" on the strength of nobody having checked is what 5.7.1
+   * exists to prevent. */
+  const yn = (v) => (v ? "yes" : "no");
   $("identity").textContent =
     "libcft ABI      " + (abi >>> 16) + "." + (abi & 0xffff) + "\n" +
     "backend         " + C.capsBackend(dev) + " (wasm32 build of the same C sources)\n" +
     "tiles           " + C.capsTiles(dev) + "\n" +
     "flags readable  " + (C.capsFlagsOk(dev) ? "yes" :
                           "NO - flags cannot be trusted on this backend") + "\n" +
-    "formats         " + fmts.trim();
+    "formats         " + fmts.trim() + "\n" +
+    "754 conformance is754version1985 " + yn(C.is754version1985()) +
+    "   is754version2008 " + yn(C.is754version2008()) +
+    "   is754version2019 " + yn(C.is754version2019()) + "\n" +
+    "                (5.7.1, radix 2; docs/COMPLIANCE.md is the " +
+    "clause-by-clause statement behind the 2019 answer)";
+}
+
+/* ---- the status word (754-2019 7.1) ------------------------------ *
+ *
+ * One sticky uint32 on the device handle, into which every entry point
+ * ORs the union of its per-element flags and which NOTHING in the
+ * library ever lowers - 7.1's "Status flags shall be lowered only at
+ * the user's request". The word never influences a result: libcft
+ * never reads it back to decide anything, so clearing it or not
+ * changes no answer anywhere.
+ */
+
+function renderStatusWord() {
+  const w = C.saveAllFlags(dev) >>> 0;
+  const names = flagsText(w);
+  $("status-word").textContent =
+    "saveAllFlags(dev) = 0x" + w.toString(16).padStart(2, "0") +
+    "  " + names +
+    (w ? "\n(sticky: the union of every call since the page loaded or " +
+         "since you last lowered them)"
+       : "\n(a fresh device opens with every flag lowered - 7.1)");
 }
 
 function renderProvenance() {
@@ -624,6 +768,10 @@ async function replaySets(files, ui, sourceNote) {
     setsRun++;
     await tick();
   }
+  /* A replay is calls, so it raises flags into the device's sticky
+   * word like anything else - showing the word only after the compute
+   * panel ran would be quietly excusing this section from 7.1. */
+  renderStatusWord();
 
   const summary = setsRun + " set" + (setsRun === 1 ? "" : "s") +
     " run / " + cases.toLocaleString("en-US") + " cases checked" +
@@ -669,8 +817,8 @@ async function replayBuiltin() {
       (name) => ({ name, text: CFT_SAMPLE[name] }));
     await replaySets(files, sectionUI("builtin"),
       "this is the embedded sample of the twenty OPCODE sets, not the " +
-      "full published set - section 3 replays all 881,657 cases over " +
-      "all 84");
+      "full published set - section 3 replays all 1,067,635 cases over " +
+      "all 168");
   } finally {
     builtinRunning = false;
     $("rerun").disabled = false;
@@ -888,6 +1036,36 @@ const PANEL_OPS = [
     f: "the same pair for a - b: a + (-b) with every rule of the addition, the signed zeros included" },
   { v: "augmentedMultiplication", use: "ab", k: "ABI 0.6, cft_augmented_mul",
     f: "the same pair for a × b. This is the one of the three whose e can fail to be representable — 9.5's residual with non-zero digits strictly between ±b^(emin-p+1) — and it delivers that residual ROUNDED, raising underflow and inexact. It is the only case in which r + e is not exactly a op b" },
+  /* Clause 9.6's four MAGNITUDE forms (ABI 0.7), beside the four
+   * opcodes above that they defer to. No rounding attribute, and the
+   * omission is normative rather than an oversight: each compares two
+   * sign-cleared encodings and then SELECTS an operand, so the answer
+   * is one operand's own bits and no attribute could change it. */
+  { v: "min_mag", use: "ab", k: "ABI 0.7, cft_min_mag",
+    f: "minimumMagnitude(a, b) = a if |a| < |b|, b if |b| < |a|, otherwise minimum(a, b) — and reading that deferral literally settles every edge. A NaN has no magnitude, so every NaN case is the \"otherwise\": a quiet NaN out if either operand is a NaN. EQUAL MAGNITUDES OF OPPOSITE SIGN are the otherwise too, so min_mag(+3, -3) is minimum(+3, -3) = -3; ±0 likewise, giving -0. A signaling NaN raises invalid and nothing else can be raised at all" },
+  { v: "max_mag", use: "ab", k: "ABI 0.7, cft_max_mag",
+    f: "maximumMagnitude(a, b), deferring to maximum: max_mag(+3, -3) is +3 and max_mag(-0, +0) is +0. This is the row an implementation that quietly returns \"the second operand\" on a tie gets wrong, and the only row on which it is visible" },
+  { v: "minnum_mag", use: "ab", k: "ABI 0.7, cft_minnum_mag",
+    f: "minimumMagnitudeNumber(a, b), deferring to minimumNumber: a NaN operand loses to the NUMBER, and only two NaNs give a quiet NaN. A signaling NaN still raises invalid and still returns the number — that is where 754-2019 differs from 2008's minNumMag, and why is754version2008 answers no" },
+  { v: "maxnum_mag", use: "ab", k: "ABI 0.7, cft_maxnum_mag",
+    f: "maximumMagnitudeNumber(a, b), the same with maximumNumber" },
+  /* Clause 5.4.1's formatOf arithmetic (ABI 0.7). The only operations
+   * on this page with TWO formats: the operands are read in the
+   * format select, the result is delivered in the destination select,
+   * and there is exactly ONE rounding between them. The "F" in `use`
+   * shows the destination select. */
+  { v: "formatof_add", use: "abF", k: "ABI 0.7, cft_formatof_add",
+    f: "d = a + b, operands in the source format and the result in the DESTINATION format, rounded once. Widening is exact and then the ordinary operation runs; narrowing forms the exact result and rounds it once against the destination's descriptor. Every exception is the destination's: a sum of two unremarkable binary64 values can overflow a binary32 destination, or land on its subnormal grid and raise underflow with inexact" },
+  { v: "formatof_sub", use: "abF", k: "ABI 0.7, cft_formatof_sub",
+    f: "d = a - b, a first, same terms. Try binary64 → binary32 with a = 0x8037478c91215dae and b = 0xb690000000000000 on the ADD instead: their exact sum is a hair above half of binary32's least subnormal, so it rounds to 0x80000001 with underflow and inexact — the boundary a double-rounded oracle got wrong before this package shipped" },
+  { v: "formatof_mul", use: "abF", k: "ABI 0.7, cft_formatof_mul",
+    f: "d = a × b in the destination format, one rounding" },
+  { v: "formatof_div", use: "abF", k: "ABI 0.7, cft_formatof_div",
+    f: "d = a / b in the destination format, ONE rounding — not a division in the source format converted down, which would round twice. The theorem that says double rounding through 2p+2 bits is innocuous is about operands of the DESTINATION's precision; here they carry the SOURCE's, and a quotient of two wide values can sit as close as it likes to a narrow midpoint. python/cft_golden/formatof.py's double_rounding_witness() builds the counterexample from the format descriptors alone" },
+  { v: "formatof_sqrt", use: "aF", k: "ABI 0.7, cft_formatof_sqrt",
+    f: "d = √a in the destination format, one rounding, and the same argument: a root of a wide value lands one ulp low if it is rounded twice" },
+  { v: "formatof_fma", use: "abcF", k: "ABI 0.7, cft_formatof_fma",
+    f: "d = a×b + c in the destination format, exact product, ONE rounding — and the member of the six that no intermediate width can rescue, because its addend is a free choice of any source value and can always be made smaller than the intermediate's half-ulp. Verified defeated at 30, 53, 64, 113, 237, 400 and 1000 bits" },
 ];
 
 /* The three transcendental arities, spelled once. The names match both
@@ -923,6 +1101,16 @@ const SCALED_PRODUCTS = ["scaled_prod", "scaled_prod_sum",
                          "scaled_prod_diff"];
 const AUGMENTED = ["augmentedAddition", "augmentedSubtraction",
                    "augmentedMultiplication"];
+/* ABI 0.7. The magnitude four take no attribute - they select rather
+ * than round - so the rounding select greys out for them as it does
+ * for the augmented three, and for a stricter reason: 9.5 fixes a
+ * direction, 9.6 has no rounding at all. The formatOf six read a
+ * SECOND format, so the destination select appears for exactly those
+ * six and their arity says which operand rows to enable. */
+const MINMAX_MAG_FNS = ["min_mag", "max_mag", "minnum_mag", "maxnum_mag"];
+const FORMATOF_ARITY = { formatof_add: 2, formatof_sub: 2,
+                         formatof_mul: 2, formatof_div: 2,
+                         formatof_sqrt: 1, formatof_fma: 3 };
 
 /* IEEE 754-2019 interchange field widths, display-only (the classifier
  * under the result line); cross-checked against
@@ -939,11 +1127,14 @@ function initComputePanel() {
       ? C.opName(o.v) + " (op " + o.v + ")" : o.v + " (" + o.k + ")";
     opSel.append(opt);
   }
+  const dfmtSel = $("dfmt-sel");
   for (let i = 0; i < 4; i++) {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = C.fmtName(i);
-    fmtSel.append(opt);
+    for (const sel of [fmtSel, dfmtSel]) {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = C.fmtName(i);
+      sel.append(opt);
+    }
   }
   const rndLong = ["roundTiesToEven", "roundTowardZero", "roundTowardNegative",
                    "roundTowardPositive", "roundTiesToAway"];
@@ -965,15 +1156,27 @@ function initComputePanel() {
      * row for every other one would be noise on the page. */
     for (const x of ["n", "h", "s"])
       $("row-" + x).hidden = !o.use.includes(x);
-    /* 9.5 fixes the augmented three's rounding to roundTiesTowardZero,
-     * which is not one of the five, so the select does not apply and
-     * says so rather than looking as if it did. */
+    /* The DESTINATION format is a real argument of the formatOf six
+     * and of nothing else on this page, so its select appears for
+     * exactly those six rather than sitting greyed out everywhere. */
+    $("dfmt-wrap").hidden = !o.use.includes("F");
+    /* Two reasons the rounding select can fail to apply, and they are
+     * not the same reason. 9.5 FIXES the augmented three's direction
+     * to roundTiesTowardZero, which is not one of clause 4.3's five;
+     * 9.6's magnitude four have no rounding at all, because they
+     * select an operand rather than computing a value. Both grey the
+     * select out and each says which it is. */
     const fixedRnd = AUGMENTED.includes(o.v);
-    rndSel.disabled = fixedRnd;
+    const noRnd = MINMAX_MAG_FNS.includes(o.v);
+    rndSel.disabled = fixedRnd || noRnd;
     rndSel.title = fixedRnd
       ? "754-2019 9.5 fixes this operation's rounding to " +
         "roundTiesTowardZero, which is not one of clause 4.3's five"
-      : "";
+      : (noRnd
+         ? "754-2019 9.6's magnitude forms compare two magnitudes and " +
+           "then SELECT an operand - there is no rounding here for an " +
+           "attribute to direct"
+         : "");
   };
   opSel.addEventListener("change", sync);
 
@@ -987,6 +1190,16 @@ function initComputePanel() {
 
   $("compute-btn").disabled = false;
   $("compute-btn").addEventListener("click", computeOnce);
+  /* 5.7.4's lowerFlags(CFT_FLAGS_ALL), and the ONLY thing on this page
+   * that can lower a flag - nothing in the library ever does. The mask
+   * comes from cftw_flags_all() rather than from a constant typed
+   * here, because CFT_FLAGS_ALL is derived in cft.h from the
+   * cft_exception bits and a page-local copy would be a transcription
+   * of that derivation. */
+  $("lower-flags").addEventListener("click", () => {
+    C.lowerFlags(dev, C.flagsAll());
+    renderStatusWord();
+  });
 }
 
 function parseHexOperand(label, s, esz) {
@@ -1239,6 +1452,63 @@ function computeOnce() {
       return;
     }
 
+    /* ---- 9.6's magnitude forms: no attribute, no bus word ---- */
+    if (MINMAX_MAG_FNS.includes(o.v)) {
+      const pd = keep(M._malloc(esz)), pfl = keep(M._malloc(4));
+      M.HEAPU8.fill(0, pd, pd + esz);
+      M.HEAPU32[pfl >> 2] = 0;
+      const st = C[o.v](dev, fmt, pa, pb, pd, 1, pfl);
+      if (st !== 0) {
+        out.textContent = "cft call FAILED: " + C.strerror(st);
+        return;
+      }
+      const dhex = hexOfBytes(M.HEAPU8.slice(pd, pd + esz));
+      lines.push("op    " + o.v + "  " + fmtName +
+                 "  (9.6 selects an operand: no attribute)");
+      lines.push("d  =  " + dhex + "  (" + classify(dhex, fmtName) + ")");
+      lines.push("flags " + flagsText(M.HEAPU32[pfl >> 2]));
+      out.textContent = lines.join("\n");
+      return;
+    }
+
+    /* ---- 5.4.1's formatOf six: TWO formats, ONE rounding ---- *
+     *
+     * The operands were read at the SOURCE format's element size
+     * above; d is the destination's, and the two are different widths
+     * in the same call. That is the whole shape of the clause, and the
+     * reason this branch exists rather than a flag on the one below.
+     */
+    if (FORMATOF_ARITY[o.v] !== undefined) {
+      const dfmt = Number($("dfmt-sel").value);
+      const dName = C.fmtName(dfmt);
+      const desz = C.fmtSize(dfmt);
+      const arity = FORMATOF_ARITY[o.v];
+      const pd = keep(M._malloc(desz)), pfl = keep(M._malloc(4));
+      const pbus = keep(M._malloc(4));
+      M.HEAPU8.fill(0, pd, pd + desz);
+      M.HEAPU32[pfl >> 2] = 0;
+      M.HEAPU32[pbus >> 2] = 0;
+      const st = arity === 1
+        ? C[o.v](dev, fmt, dfmt, rnd, pa, pd, 1, pfl, pbus)
+        : (arity === 2
+           ? C[o.v](dev, fmt, dfmt, rnd, pa, pb, pd, 1, pfl, pbus)
+           : C[o.v](dev, fmt, dfmt, rnd, pa, pb, pc, pd, 1, pfl, pbus));
+      if (st !== 0) {
+        out.textContent = "cft call FAILED: " + C.strerror(st) + "\n" +
+          "(on any error the contents of d are unspecified - not shown)";
+        return;
+      }
+      const dhex = hexOfBytes(M.HEAPU8.slice(pd, pd + desz));
+      lines.push("op    " + o.v + "  " + fmtName + " → " + dName +
+                 "  " + ROUNDINGS[rnd] + "  (one rounding)");
+      lines.push("d  =  " + dhex + "  (" + classify(dhex, dName) +
+                 ", in " + dName + ")");
+      lines.push("flags " + flagsText(M.HEAPU32[pfl >> 2]) +
+                 "   — the DESTINATION's exceptions");
+      out.textContent = lines.join("\n");
+      return;
+    }
+
     /* ---- everything with ONE encoding out ---- */
     const pd = keep(M._malloc(esz)), pfl = keep(M._malloc(4));
     M.HEAPU8.fill(0, pd, pd + esz);
@@ -1284,6 +1554,10 @@ function computeOnce() {
     out.textContent = "refused: " + err;
   } finally {
     for (const p of ptrs) if (p) M._free(p);
+    /* Whatever happened above, the device's sticky word is what it is
+     * now - and a refusal that reached no library call leaves it
+     * exactly where it was, which is itself worth being able to see. */
+    renderStatusWord();
   }
 }
 </script>

@@ -37,10 +37,11 @@
 #      lines 0, 59, 118, ... = exactly 200 per set - then add the
 #      set's first line of any opcode name the stride missed, so every
 #      opcode class is embedded per set by construction, seeds 26/27
-#      and the unassigned reserved15/30/255 included. The other four
+#      and the unassigned reserved15/30/255 included. The other six
 #      families the generator writes - transcendental, augmented,
-#      reduction, character - are droppable in section 3 and are not
-#      embedded; make_page.py says why.
+#      reduction, character, and since ABI 0.7 the magnitude forms of
+#      9.6 and the eighty formatOf sets of 5.4.1 - are droppable in
+#      section 3 and are not embedded; make_page.py says why.
 #   4  the same assembly again with --corrupt, into
 #      build/negative_control.html (untracked): one expected value
 #      deliberately flipped, so anyone can watch the page fail. A
