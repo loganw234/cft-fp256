@@ -2,8 +2,10 @@
 
 What this hardware promises about every bit it produces, stated so it
 can be checked by someone who trusts none of this code. Clause
-references are to IEEE Std 754-2019, quote-verified 2026-08-28 against
-the licensed PDF, with the standard's own words where the choice is
+references are to IEEE Std 754-2019, quote-verified against the
+licensed PDF on the day each section was written (2026-08-28 for the
+original, 2026-09-03 and 2026-09-04 for the clause-9 and 0.7
+sections), with the standard's own words where the choice is
 load-bearing.
 
 ## The promise
@@ -920,9 +922,11 @@ something else beside it:
 
 > "For each kind of exception the implementation shall provide a
 > corresponding status flag ... Status flags shall be lowered only at
-> the user's request. The user shall be able to test and to alter the
-> status flags individually or collectively, and shall further be able
-> to save and restore all at one time (see 5.7.4)."
+> the user's request."
+
+and goes on to require that the user can test and alter them
+individually or collectively and save and restore them all at once,
+which is 5.7.4's list.
 
 From ABI 0.7 the library carries that word. It is one `uint32_t` on
 the device handle, in the same five `cft_exception` bits every call
@@ -997,14 +1001,12 @@ the other four of 9.6 as host entry points - `cft_min_mag`,
 `cft_minnum_mag`, `cft_max_mag`, `cft_maxnum_mag` - and the standard
 defines each in one line, by deferral:
 
-> "minimumMagnitude(x, y) is x if | x| < | y|, y if | y| < | x|,
-> otherwise minimum(x, y).
-> minimumMagnitudeNumber(x, y) is x if | x| < | y|, y if | y| < | x|,
-> otherwise minimumNumber(x, y).
-> maximumMagnitude(x, y) is x if | x| > | y|, y if | y| > | x|,
-> otherwise maximum(x, y).
-> maximumMagnitudeNumber(x, y) is x if | x| > | y|, y if | y| > | x|,
-> otherwise maximumNumber(x, y)." (9.6)
+> "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+> otherwise minimum(x, y)." (9.6)
+
+and the same shape for the other three, with minimumNumber, maximum
+and maximumNumber in the last position and the comparison reversed
+for the two maxima.
 
 They select an operand; they never compute one. There is no rounding,
 no attribute, no opcode and no RTL - the whole operation is a compare
@@ -1046,6 +1048,7 @@ Equal magnitudes with the SAME sign is the one case 754 leaves open
 ("Otherwise ... it is either x or y"). It cannot be observed: equal
 magnitude and equal sign means identical encodings for every non-NaN
 operand, so x and y are the same bits.
+
 ## The formatOf arithmetic across the binary formats (clause 5.4.1)
 
 The six arithmetic operations with the **operands in one binary format
@@ -1054,17 +1057,12 @@ the 0.7 step: `cft_formatof_add`, `_sub`, `_mul`, `_div`, `_sqrt` and
 `_fma`, sixteen ordered pairs of formats apiece. 5.4.1 requires them,
 not as a convenience:
 
-> Implementations shall provide the following formatOf general-
-> computational operations, for destinations of all supported
-> arithmetic formats, and, for each destination format, for operands of
-> all supported arithmetic formats with the same radix as the
-> destination format:
->     formatOf-addition(source1, source2)
->     formatOf-subtraction(source1, source2)
->     formatOf-multiplication(source1, source2)
->     formatOf-division(source1, source2)
->     formatOf-squareRoot(source)
->     formatOf-fusedMultiplyAdd(source1, source2, source3)
+> "... for destinations of all supported arithmetic formats, and, for
+> each destination format, for operands of all supported arithmetic
+> formats with the same radix as the destination format"
+
+- the six being addition, subtraction, multiplication, division,
+squareRoot and fusedMultiplyAdd, each in its formatOf form.
 
 Every arithmetic entry point before these took one `cft_format` and
 used it for the operands and the result both. These take two.
@@ -1352,7 +1350,6 @@ pair rather than a value - see the section above. Nothing in the four
 bullets changes for them: the pairing is fixed, the schedule and the
 operand side are free, and a scaled product splits across tiles on the
 same canonical nodes.
-| `host/tests/character_check.py` | the clause-5.12 conversions and the 9.7 payload operations, both directions | golden model, per-element flags, and the Pmin round trip with its collision at Pmin - 1 |
 
 ## The verification lattice
 
@@ -1367,6 +1364,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` / `augmented_check.py` | the C library's ports of every contract operation | golden model, per-element flags (and, for 9.5, the pair identity in exact integers) |
+| `host/tests/character_check.py` | the clause-5.12 conversions and the 9.7 payload operations, both directions | golden model, per-element flags, and the Pmin round trip with its collision at Pmin - 1 |
 | `python/tests/test_formatof.py` | the clause-5.4.1 formatOf semantics and 5.11's cross-format comparison | exact rationals rounded by a reference written from 4.3, square root by squaring rather than by rooting, the widening composition identity, bit-identity with the single-format functions, and eighteen constructed double-rounding witnesses |
 | `host/tests/formatof_check.py` | the C library's port of all six formatOf operations over all sixteen ordered pairs | golden model, per-element flags, plus the witnesses and the same-format alias against cft_run/cft_div/cft_sqrt |
 | `host/tests/transcend_check.py` | the thirty-nine transcendentals, and again through the escalation path | golden model, per-element flags |

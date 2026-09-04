@@ -468,8 +468,8 @@ def check_c_partitioner():
     ranges - so at n=280, parts=64 it returns 32 eight-wide nodes
     followed by 24 singletons, a mixed depth that is not equal to
     canonical_ranges(280, p) for ANY p. It is still a perfectly valid
-    partition, and demanding equality would fail 57 cases that are all
-    correct.
+    partition, and demanding equality would fail 199 of the sweep's
+    2,100 cases that are all correct.
 
     The contract the fold actually needs is three things, so those are
     what get asserted: the ranges tile [0, n) in order with no gap or

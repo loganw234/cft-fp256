@@ -172,28 +172,27 @@ docs/DETERMINISM.md.
 
 ## Recommended operations (clause 9.2)
 
-**Nine of them are yes as of 2026-09-02** (ABI 0.3): `exp`, `expm1`,
-`exp2`, `log`, `log1p`, `log2`, `log10`, `pow` and `hypot`, correctly
-rounded at all four formats under all five rounding attributes with
-9.2.1's special values and exact flags. Not "accurate" - correctly
-rounded, which is the only version of these functions a determinism
-contract can score, because two accurate implementations disagree in
-the last bit and neither is wrong. In the library, not in the tile:
-they are host operations over a multiprecision evaluator built on the
-same bigint core, and unlike divide they could not have been anything
-else - division composes from FMA because it has an exactly measurable
-residual and an exponential has none. docs/TRANSCENDENTALS.md is the
-design; the numbers are in docs/VALIDATION.md's 2026-09-02 entry
-(95,680 cases against GNU MPFR, zero value and zero flag mismatches).
-
-`exp10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`,
-`cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `rSqrt`, `compound`,
-`rootn`, `pown`, `powr` - **still no**. The trigonometric family needs
-one thing the nine did not: an argument reduction against pi, which is
-a harder problem in its own right (the reduction constant has to be
-carried to hundreds of thousands of bits at fp256). The evaluator built
-for phase 1 is the right foundation for them and the work is scoped in
-docs/ROADMAP.md, but nothing is claimed until it runs.
+**All thirty-nine functions of table 9.1 are yes**, and have been
+since 2026-09-03 (ABI 0.6): the exp/log/pow family and hypot on
+2026-09-02 (ABI 0.3), the Pi-variants and the inverse trigonometry
+the next morning (0.4), sin, cos and tan of a radian argument with the
+six hyperbolics that afternoon (0.5), and exp2m1, exp10, exp10m1,
+log2p1, log10p1, rSqrt, pown, powr, compound and rootn that evening
+(0.6). Correctly rounded at all four formats under all five rounding
+attributes with 9.2.1's special values and exact flags. Not
+"accurate" - correctly rounded, which is the only version of these
+functions a determinism contract can score, because two accurate
+implementations disagree in the last bit and neither is wrong. In the
+library, not in the tile: they are host operations over a
+multiprecision evaluator built on the same bigint core, and unlike
+divide they could not have been anything else - division composes
+from FMA because it has an exactly measurable residual and an
+exponential has none. The radian three reduce their argument against a
+270,336-bit 2/pi generated at build time; the exact cases of every
+function are proved closed rather than sampled. docs/TRANSCENDENTALS.md
+is the design and the proofs; the numbers are in docs/VALIDATION.md,
+phase by phase, and in its 0.7 census (607,217 comparisons against the
+model over the thirty-nine, MPFR parity over every one).
 
 **Still none of this is a hardware transcendental**, and that remains
 deliberate. The atlas det library computes these *in software from
@@ -247,7 +246,7 @@ on-chip program is the ~25x traffic win).
 | multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. The quad image is built and verified - on the pre-sequencer design; the sequencer-era quad is still building |
 | reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | strided or gathered access | **no** | three dense linear streams |
-| on-chip program / loop | **benched** | `cft_seq` behind MODE[15] (VERSION 0x600, CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level. No program has been through hw_emu, and no bitstream carries one |
+| on-chip program / loop | **benched** | `cft_seq` behind MODE[15] (VERSION 0x600, CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level. Every program shape passed hw_emu at fp32 through the real XRT stack on 2026-09-02; fp64 and wider are not yet through, and no bitstream carries a program yet |
 | in-place operation (D aliasing A/B/C) | **yes** | documented in cft.h: each element is read before written |
 
 ### Host access

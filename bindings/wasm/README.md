@@ -538,7 +538,10 @@ and a third after the negative control below was reverted.
 The numbers below are one standardized run,
 `bash verify/run.sh --fresh --only vectors,node,wasm`, run id
 **20260904-030316-6b9a845** on a clean tree: `vectors` 275 s, `node`
-1438 s, `wasm` 1100 s, **VERDICT: PASS, nothing skipped**. It is the
+1438 s, `wasm` 1100 s, **VERDICT: PASS, nothing skipped** (its state
+directory lived in the JavaScript step's worktree and was not kept;
+the re-run on the rebuilt module, 20260904-054715-2216e62, is in the
+tree and reproduced the counts). It is the
 second of two: the first (20260904-021432-cfab84c) ran while these two
 README files were being written, so its header says *TREE DIRTY* and
 it certifies nothing by this repository's own rule - it is recorded

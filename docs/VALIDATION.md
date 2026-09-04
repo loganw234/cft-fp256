@@ -1040,7 +1040,8 @@ single for card day pending hw/verify-image.sh and a matching quad.
 ## 2026-09-02 - the cocotb suite in parallel on the 36-core box
 
 `make -k SIM=verilator sim` at 9f73107 on amd-arc-box, the whole suite
-under Verilator, run twice back to back by tb/box_parallel_sim.sh:
+under Verilator, run twice back to back by an ad-hoc script on the
+build box that was not committed:
 
     serial   (-j1)    wall 1522 s    17 targets, 50 tests, 50 passed
     parallel (-j12)   wall   57 s    17 targets, 50 tests, 50 passed

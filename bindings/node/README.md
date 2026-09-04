@@ -493,7 +493,10 @@ integrator's single commit for the whole step.
 Both figures below come from one standardized run on a
 clean tree, `bash verify/run.sh --fresh --only vectors,node,wasm`, run
 id **20260904-030316-6b9a845** (`vectors` 275 s, `node` 1438 s, `wasm`
-1100 s, **PASS, nothing skipped**).
+1100 s, **PASS, nothing skipped**). That run's state directory lived
+in the JavaScript step's worktree and was not kept; the re-run on the
+rebuilt module, 20260904-054715-2216e62, is in the tree and
+reproduced the counts.
 
 * `node conformance.mjs` - **2,055,270 cases over 316 set replays,
   zero mismatches**. **1,223,635 cases over all 168 sets**

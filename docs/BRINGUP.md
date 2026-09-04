@@ -261,7 +261,8 @@ tier does not cover xcu50 (Virtex UltraScale+ needs CORE+, Alveo has
 its own tier). What works: the **Alveo-tier license** that comes with
 an Alveo card purchase, generated on the AMD portal, node-locked to
 the build box's NIC MAC. On amd-arc-box: `~/.Xilinx/Xilinx.lic`,
-HOSTID = eno1 (fc:aa:14:2e:43:5a), features Vivado_Alveo_Package +
+HOSTID = eno1's MAC (on file with the license, not published here),
+features Vivado_Alveo_Package +
 Synthesis + Implementation + Simulation, **valid through 2027-08-29**
 - calendar the renewal; synthesis stops when it lapses. The account
 allows one node-lock per entitlement: it lives where v++ runs. The
@@ -432,7 +433,7 @@ XRT stack - the first time the kernel.xml argument map, the CSR
 protocol, and the host code meet Xilinx's implementation rather than
 cocotb's. Small N; hw_emu is slow.
 
-## 3. Gate: link for hardware - **MET 2026-08-29 on the pre-sequencer design; the sequencer tile's single closes at 135 MHz (2026-09-02), its quad has not**
+## 3. Gate: link for hardware - **MET 2026-08-29 on the pre-sequencer design; MET again on the sequencer tile 2026-09-02, single (+0.618) and quad (+0.143) both closing at 135 MHz from 9f73107**
 
 **2026-09-02.** The shared-array sequencer tile links as a single at
 135 MHz with +0.045 of slack (with retiming and without; +0.050 at
@@ -441,6 +442,12 @@ no image either time. The quad's worst paths are three named
 families (docs/ROADMAP.md); the tree that removes the largest and
 shortens the next is building as a quad at 135 on two hosts with 130
 queued behind. The bitstreams below are unchanged by any of this.
+
+*Later the same day both halves closed from 9f73107: the quad at 135
+MHz with kernel WNS +0.143 and 0 failing endpoints, the single at
++0.618. docs/CARDDAY.md's primary pair is that tree, and
+docs/VALIDATION.md's entry "the tip quad closes at 135 MHz" is the
+record.*
 
 ```bash
 TARGETS=hw KERNEL_FREQ=100000000 bash hw/rebuild-2022.sh

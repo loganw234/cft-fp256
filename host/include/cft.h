@@ -375,7 +375,7 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
  * which matters for the long chains of elementwise steps that
  * branchless code turns into.
  *
- * An opcode the contract leaves unassigned (15, and 28 upward) is not
+ * An opcode the contract leaves unassigned (15, and 30 upward) is not
  * an error: it returns CFT_OK having written the canonical quiet NaN
  * and raised invalid, because that is exactly what the device does,
  * and "the same call returns the same bits" has to hold for the
@@ -527,7 +527,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
  * specifically.
  *
  * d may alias a or b. b unused by cft_sqrt. A device whose bitstream
- * lacks the seed opcodes (CAPS group bit 6), the arithmetic group or
+ * lacks the seed opcodes (opcode group 6, CAPS bit 14), the arithmetic group or
  * the sign group cannot run the sequence and answers
  * CFT_ERR_UNSUPPORTED; ask cft_supports(dev, CFT_RECIP_SEED, fmt)
  * to know in advance.
@@ -1701,9 +1701,11 @@ CFT_API cft_status cft_program_run(cft_program *prog,
  *
  *   "For each kind of exception the implementation shall provide a
  *    corresponding status flag ... Status flags shall be lowered only
- *    at the user's request. The user shall be able to test and to
- *    alter the status flags individually or collectively, and shall
- *    further be able to save and restore all at one time (see 5.7.4)."
+ *    at the user's request."
+ *
+ * and goes on to require that the user can test and alter them
+ * individually or collectively and save and restore them all at once
+ * - 5.7.4's six operations.
  *
  * So a device handle carries a STATUS WORD: one uint32_t in the same
  * cft_exception bits, into which every entry point ORs the union of
@@ -1840,13 +1842,11 @@ CFT_API int cft_is754version2019(void);
  * one line, by deferral:
  *
  *   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
- *    otherwise minimum(x, y).
- *    minimumMagnitudeNumber(x, y) is x if |x| < |y|, y if |y| < |x|,
- *    otherwise minimumNumber(x, y).
- *    maximumMagnitude(x, y) is x if |x| > |y|, y if |y| > |x|,
- *    otherwise maximum(x, y).
- *    maximumMagnitudeNumber(x, y) is x if |x| > |y|, y if |y| > |x|,
- *    otherwise maximumNumber(x, y)." (9.6)
+ *    otherwise minimum(x, y)." (9.6)
+ *
+ * and the same shape for the other three, with minimumNumber,
+ * maximum and maximumNumber in the last position and the comparison
+ * reversed for the two maxima.
  *
  * HOST operations of the nextUp kind: a comparison of the two
  * sign-cleared encodings and then a selection, with no rounding, no
@@ -1932,17 +1932,13 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
  * and the RESULT in another, rounded once. 5.4.1 requires them for
  * every ordered pair of supported arithmetic formats, in these words:
  *
- *   "Implementations shall provide the following formatOf general-
- *    computational operations, for destinations of all supported
- *    arithmetic formats, and, for each destination format, for
- *    operands of all supported arithmetic formats with the same radix
- *    as the destination format:
- *        formatOf-addition(source1, source2)
- *        formatOf-subtraction(source1, source2)
- *        formatOf-multiplication(source1, source2)
- *        formatOf-division(source1, source2)
- *        formatOf-squareRoot(source)
- *        formatOf-fusedMultiplyAdd(source1, source2, source3)"
+ *   "... for destinations of all supported arithmetic formats, and,
+ *    for each destination format, for operands of all supported
+ *    arithmetic formats with the same radix as the destination
+ *    format"
+ *
+ * - the six being addition, subtraction, multiplication, division,
+ * squareRoot and fusedMultiplyAdd, each in its formatOf form.
  *
  * Everything above this block takes one cft_format and uses it for the
  * operands and the result both. These take two: `sfmt` for a, b and c,

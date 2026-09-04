@@ -222,11 +222,13 @@ the reduction datapath itself rather than the split.
 
     ./host/cft-selftest vectors/out cardday/single/cft_hw.xclbin
 
-392,000 published cases replayed through the hardware, each one twice:
+Every published case replayed through the hardware (1,223,635 over 168
+sets at the 0.7 census; the count grows with the contract), each one
+twice:
 element at a time for exact flags, then as arrays (the sets were
 regenerated when the seed opcodes joined the contract - regenerate
 locally with `make vectors` before the day so the card replays the
-current 20 sets). This is the claim the project is for, so it is the
+current sets). This is the claim the project is for, so it is the
 run whose output gets kept. Follow it with the composed divide and
 square root - `bash hw/run-device-test.sh <image> -q` includes them -
 because on silicon the ~30-invocation sequence costs microseconds,

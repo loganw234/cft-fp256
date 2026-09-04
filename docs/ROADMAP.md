@@ -922,6 +922,8 @@ kernel until the sequencer-era tile was synthesised whole:
 | of which the second array | 124,057 |
 
 The quad link of that tile asked for **1,316,831 LUT of an 871,680-LUT
+(the datasheet figure; the routed report's Available column reads
+870,720, which hw/gen_layouts.py uses)
 part** and died in placement (`VPL UTLZ-1`, LUT-as-logic
 over-utilised). The array is now one instance, `rtl/cft_lanes.sv`, that
 `cft_krnl` owns and BOTH engines drive through a per-issue request
