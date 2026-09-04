@@ -3019,7 +3019,7 @@ escape iteration under the model's own binary64 semantics. mpmath at
 300 digits is the authority on the domain, where the tool must be
 CLOSE, and how close is the measurement.
 
-    11212 comparisons, 0 failures
+    11222 comparisons, 0 failures
     ZOOM CHECK OK - the tool, the golden model and mpmath agree
 
 about 14 seconds.
@@ -3036,7 +3036,8 @@ about 14 seconds.
 | the perturbed pixels, 3 frames | 64 pixels each, bit-identical to the model's binary64 semantics: 64 escaping, 23/41 escaping/interior at a complex centre, 60/4 escaping/glitched off the nucleus |
 | batch 7 / 64 / 4096 | byte-identical pixel records |
 | the chain | recomputed with `hashlib`, identical |
-| refusals | a width that is not a power of two, a centre the format cannot hold, an unknown option |
+| the 754 status word | equals the union of every call's `flags_out`, on an orbit-only run and on a full frame |
+| refusals | a width that is not a power of two, a centre the format cannot hold, an unknown option, a resume that moves the centre, a zoom below binary64's normal range, a glitch tolerance outside the format's precision, sizes larger than memory |
 
 mpmath is optional; when it is absent the script prints a SKIP naming
 the four rows that are then missing, and its summary line becomes
@@ -3163,11 +3164,11 @@ nothing else in the check noticed.
 Three faults, each rebuilt and run through the same gate, then
 restored.
 
-| control | what was changed | caught by | rows still green |
+| control | what was changed | caught by | result |
 |---|---|---|---|
-| A | `zr^2 - zi^2` became `zr^2 + zi^2`, in BOTH engines | the complex-centre orbit row, alone | 25 of 26 |
-| B | the reference rounded into binary64 with RTZ instead of RNE | the per-pixel oracle, alone: `pixel 2: tool says (176, 'esc'), the golden model says (175, 'esc')` | 25 of 26 |
-| C | the program's final add reads `zr` instead of `zr^2 - zi^2` - ONE engine | the engine cross-check, the checkpoints, the resume, the model and mpmath | 19 of 26, 8 failures |
+| A | `zr^2 - zi^2` became `zr^2 + zi^2`, in BOTH engines | the complex-centre rows, alone - the orbit and the pixel cap | 35 green, 2 failing |
+| B | the reference rounded into binary64 with RTZ instead of RNE | the per-pixel oracle, alone: `pixel 2: tool says (176, 'esc'), the golden model says (175, 'esc')` | 35 green, 1 failing |
+| C | the program's final add reads `zr` instead of `zr^2 - zi^2` - ONE engine | the engine cross-check, the checkpoints, the resume, the model and mpmath | 29 green, 11 failing |
 
 A and B are the interesting pair. Under both, the engines agree with
 each other, the checkpoints match across trip counts and batch sizes,
@@ -3178,8 +3179,36 @@ cannot prove the thing is right, and two engines built from one
 understanding are wrong together. C is here to show the internal gates
 are live, which is what makes A and B's silence meaningful.
 
-Restoring the file, rebuilding, and the gate is green again at 11,212
+Restoring the file, rebuilding, and the gate is green again at 11,222
 comparisons.
+
+### What a review of the finished tool found
+
+Seven silent-failure paths, all closed, and the worst of them is worth
+recording because the cross-check could not have found it. **A resume
+that moved the centre continued the checkpoint's orbit prefix with this
+invocation's parameter**: the centre is baked into the sequencer
+program's constant bank when the engine is built, and `ckpt_read` ran
+afterwards and overwrote it, so `--resume --ref-offset 40` produced a
+chain matching neither the offset-0 run nor the offset-40 one while
+still printing the offset-0 centre. The check resumed only ever with
+identical arguments, so it saw nothing. The checkpoint is now read
+before the engine is built, a differing centre is refused, and both the
+refusal and the ordinary resume are rows of the gate.
+
+The others were guards rather than bugs, each against something that
+raised no flag and printed nothing: `--zoom-exp` past binary64's
+smallest normal collapsed the frame into `width^2` copies of the
+reference with every pixel offset rounded to `+0`; the reference's
+narrowing conversion into binary64 bypassed the forbidden-flag gate, so
+an orbit point becoming a subnormal would not have stopped the run; the
+"status word agrees with the union" line was printed and never read, and
+the report's own roundings were happening after the word was sampled;
+and `--glitch-bits`, `--ref-iters` and `--ref-offset` were unbounded in
+ways that disabled the glitch test, wrapped an allocation, and
+overflowed a 32-bit `long` respectively. In the oracle: the orbit rows
+asserted no minimum length, so an orbit that escaped at iteration one
+would have passed as "1 point identical".
 
 ### What was NOT run, and why
 

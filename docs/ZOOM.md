@@ -717,18 +717,21 @@ Three deliberate faults, each rebuilt and run through
 so `zr^2 - zi^2` is computed as `zr^2 + zi^2`. Both engines are wrong
 identically.
 
-**Twenty-five of the check's twenty-six rows stay green.** The engines
-agree with each other. The checkpoints match across trip counts,
-batch sizes and engines. The resume test passes. The chain matches
-hashlib. Every pixel of the deep frame matches the golden model. The
-binary64 comparison still reports 4096 of 4096. mpmath still agrees
-that the centre is a nucleus and that the binary256 reference never
-drifts past a pixel's own deviation.
+**Thirty-five rows stay green and two fail.** The engines agree with
+each other. The checkpoints match across trip counts, batch sizes and
+engines. The resume test passes and so does the resume refusal. The
+chain matches hashlib and the status word matches the union. Every
+pixel of the deep frame matches the golden model. The binary64
+comparison still reports 4096 of 4096. mpmath still agrees that the
+centre is a nucleus and that the binary256 reference never drifts past
+a pixel's own deviation.
 
-One row fails:
+The two that fail are both the complex centre:
 
 ```
   FAIL: the complex-centre orbit differs from the golden model
+  FAIL: a complex centre: the reference is only 4 long, so the pixel cap
+        fell from 300 to 3 - the orbit escaped early
 ```
 
 The reason is the point of the control: **the derived centre is real**,
@@ -747,9 +750,9 @@ was added because of it.
 `cft_convert(..., CFT_RNE, ...)` became `CFT_RTZ` for both components
 of the reference. The reference orbit itself is untouched.
 
-Twenty-five rows green again - the orbit, both engines, all four
-checkpoint properties, the chain, the refusals, the binary64
-comparison, both mpmath rows. One row fails:
+Thirty-five rows green again - the orbit, both engines, all four
+checkpoint properties, the chain, the status word, every refusal, the
+binary64 comparison, both mpmath rows. One row fails:
 
 ```
   FAIL: the reference 12 pixels off the nucleus, pixel 2:
@@ -770,17 +773,18 @@ the other, and both are needed.
 sequencer program iterates `z <- z + c` while the host loop still
 iterates `z <- z^2 + c`.
 
-Eight rows fail, immediately and loudly:
+Eleven rows fail, immediately and loudly:
 
 ```
-  FAIL: fp256 orbit, program engine: 2 points, model has 2000
+  FAIL: fp256 orbit, program engine: 2 points, but 2000 were asked for -
+        the orbit escaped early
   FAIL: the two engines produce different orbits
   FAIL: the complex-centre orbit differs from the golden model
   FAIL: the two engines end on different checkpoints
   FAIL: the resumed run did not finish
-  FAIL: moving the reference 12 pixels off the nucleus produced no glitches
-  FAIL: only 0 of 1024 pixels differ
-  FAIL: the binary256 reference drifted at k = 2
+  FAIL: the deep real nucleus: the reference is only 2 long, so the pixel
+        cap fell from 320 to 1 - the orbit escaped early
+  ... and four more
 ```
 
 This is the control the INTERNAL gates catch: the engine cross-check
