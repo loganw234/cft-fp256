@@ -227,6 +227,11 @@ collatz: cft-collatz$(EXE)
 # untouched so that four parallel workloads do not all edit one recipe.
 # ---------------------------------------------------------------------
 TOOLS += cft-zoom$(EXE)
+# `all` above names $(TOOLS) as a prerequisite, and prerequisites of an
+# explicit rule are expanded when the rule is READ - so the += alone
+# would not reach it. An extra prerequisite line with no recipe does,
+# and it is additive, which is the point of keeping this in one block.
+all: cft-zoom$(EXE)
 
 .PHONY: zoom zoomtest zoomclean
 

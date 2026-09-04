@@ -2974,3 +2974,227 @@ comparisons.
   left alone.
 - `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
   ABI version were left to the integrator, as at 0.7.
+
+## 2026-09-04 - the deep-zoom explorer: a reference orbit at binary256, a frame at binary64
+
+`host/tools/zoom.c` and `host/tests/zoom_check.py` are new;
+`docs/ZOOM.md` is the argument behind them. Nothing under `host/src/`,
+`host/include/`, `python/cft_golden/` or `verify/` was touched, and the
+ABI version is unchanged - this is a tool over the existing contract,
+not a change to it.
+
+The workload is the project's own mission field. One point - the
+reference - iterates `z <- z^2 + c` at binary256 as an orbit-sequencer
+program; a batch of pixels around it iterates `d <- 2 z d + d^2 + Dc`
+at binary64 through `cft_run`. Both halves go through libcft, so the
+frame is the contract's arithmetic end to end, and the question it
+answers with numbers is what the wide format buys.
+
+### The centre is derived, not transcribed
+
+Near the tip `c = -2` the set is self-similar with ratio 4; every real
+`c` in [-2, 1/4] has a bounded critical orbit; and a grid point
+`-2 + (i/8)*4^-p` needs exactly `2p + 5` significand bits, which the
+tool computes from the format's measured `p` and refuses if the format
+is too narrow. So a sign change of `z_p` on that segment brackets a
+period-`p` nucleus, and 320 candidates in one call plus about 135
+bisection steps land on it - 85 ms, no Newton, no seed, no published
+coordinate copied in. At `p = 51` that is `-2 + 2.9196544e-30`, a
+240-digit binary256 number whose orbit is superattracting and therefore
+bounded past 100,000 iterations.
+
+The cross-check re-derives the same bits with `python/cft_golden` and
+then asks mpmath at 300 digits whether it is really a nucleus:
+`|z_51(c)| = 1.61181e-42`, against `4.59177e-41` for one ulp of `c`
+amplified through 51 steps of a map whose derivative is about 4 per
+step. It is the nearest binary256 value to a nucleus, which is all any
+binary256 number can be.
+
+### What the gate is, and what it scores
+
+`make -C host zoomtest`. The library stays the authority on arithmetic
+and `python/cft_golden` is where that is written down, so the tool must
+be BIT-IDENTICAL to it - the centre, every orbit point, every pixel's
+escape iteration under the model's own binary64 semantics. mpmath at
+300 digits is the authority on the domain, where the tool must be
+CLOSE, and how close is the measurement.
+
+    11212 comparisons, 0 failures
+    ZOOM CHECK OK - the tool, the golden model and mpmath agree
+
+about 14 seconds.
+
+| what it checks | result |
+|---|---|
+| the derived centre | identical to the golden model's, all 237 bits; a nucleus at 300 digits; bounded for 100,000 iterations |
+| the reference orbit, both engines | 4,000 points each, bit-identical to the model |
+| a COMPLEX centre (-0.125, 0.75) | 3,000 points bit-identical - the derived centre is real, so this is the only row that exercises the imaginary half |
+| program versus loop | byte-identical orbits and byte-identical checkpoints |
+| trip counts 1024 / 63 | byte-identical checkpoints |
+| batch 3 / 4096 | the same derived centre and the same checkpoint |
+| interrupt and resume, 11 stops at a different trip count | byte-identical to the uninterrupted run |
+| the perturbed pixels, 3 frames | 64 pixels each, bit-identical to the model's binary64 semantics: 64 escaping, 23/41 escaping/interior at a complex centre, 60/4 escaping/glitched off the nucleus |
+| batch 7 / 64 / 4096 | byte-identical pixel records |
+| the chain | recomputed with `hashlib`, identical |
+| refusals | a width that is not a power of two, a centre the format cannot hold, an unknown option |
+
+mpmath is optional; when it is absent the script prints a loud SKIP
+naming the four rows that are then missing, rather than passing
+quietly. That line exists because writing the negative controls found
+the control script putting a different interpreter first on PATH, and
+four rows vanished without a word.
+
+### The binary64-versus-binary256 result
+
+Derived from the format parameters: a centre near `|c| = 2` is held to
+`2^(1-p)`, so binary64 reaches a pixel scale of about 1e-15 and
+binary256 about 1e-71. **Fifty-six decades.** Measured at this frame's
+3.11e-61 pixel, the tool prints `|c_fmt - c_fp256| / pixel` exactly:
+
+| reference format | centre error, in pixels | escape iterations | pixels differing from the fp256 frame |
+|---|---|---|---|
+| binary256 | **0** | 307..3227 | - |
+| binary128 | 1.78e+26 | 148..156 | 4096 of 4096 |
+| binary64 | 9.38e+30 | 74..107 | 4096 of 4096 |
+| binary32 | 9.38e+30 | 74..107 | 4096 of 4096 |
+
+Not a worse image; a different one. binary32 and binary64 agree because
+both round this centre to exactly -2, and they return the same orbit
+chain for that reason.
+
+Reference validity length, against the 300-digit orbit. The absolute
+criterion - the first `k` at which the formats' orbits differ by more
+than one pixel - gives 21 for binary256 and 1 for binary64 at 1e-60.
+But that criterion measures the map's Lyapunov exponent rather than the
+reference's usability, because the reference error and a pixel's own
+offset obey the same linearised recurrence and amplify together. The
+criterion that decides the image is the ratio, and by it the binary256
+reference never drifts past a pixel's own deviation in 600 iterations
+while binary64's is past it at iteration **1**, before a single pixel
+has moved.
+
+### The flag that says nothing, in one measurement
+
+    ./cft-zoom --format fp64 --ref-iters 100000 --no-pixels
+    orbit flags   0x00  (inexact is expected; anything else stops the run)
+
+The binary64 reference orbit raises **nothing at all**. Its centre
+rounded to exactly -2, so the orbit is 0, -2, 2, 2, 2, ... and every
+operation in it is exact for a hundred thousand iterations - a
+perfectly exact computation of the wrong problem. That is the sharpest
+statement this repository has of what an exception flag cannot tell
+you, and it is the opposite of the Collatz explorer, where `inexact` is
+a per-element detector. Here `inexact` is EXPECTED on every call; the
+certificates are the absence of the other four (checked after every
+call), the escape comparison raising exactly zero (checked per call in
+the loop engine, because a comparison rounds nothing), bit identity
+with the golden model, and bit identity between the engines.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04, box busy with other work - about +-15%
+run-to-run, so medians of five. `--ref-iters 100000 --no-pixels`:
+
+| format | engine | reference iterations/s | elementwise ops/s |
+|---|---|---|---|
+| fp256 | program | 131,448 | 1,051,584 |
+| fp256 | loop | 116,401 | 931,208 |
+| fp128 | program | 208,907 | 1,671,256 |
+| fp64 | program | 393,947 | 3,151,576 |
+| fp32 | program | 445,421 | 3,563,368 |
+
+The pixel batch is 380,131 pixel-iterations/s at binary64 - 8.3 million
+elementwise operations a second at 23 per pixel-iteration - flat in the
+batch size within the box's spread, with an identical pixel chain from
+batch 64 to batch 16,384.
+
+The headline frame: 100,000 reference iterations at fp256 in 0.72 s
+through **98 library calls** (the host loop issues 800,000), then 4,096
+pixels in 5.1 s: 4,010 escaped, 0 glitched, 86 interior, escape
+iterations 307..3227, orbit chain
+`8cf49c0b2cdcf6bf899ba7fbc763aa5ee82449807578052f20934cc365afc3e4`.
+
+**The sequencer's margin here is only 1.1x to 1.4x**, against 1.5x to
+2.1x for the Collatz explorer, and the reason is structural rather than
+disappointing: a reference orbit is ONE lane, so the program saves
+per-call dispatch on a call that was doing one element's work anyway.
+What it does buy is the call count, and on a device the memory round
+trip per step. The domain's own answer is many references at once,
+which is what multi-reference rendering does and what would turn this
+into the sequencer's best case.
+
+### What the writing of it found
+
+**A per-iteration host-side statistic quietly undoes what the sequencer
+is for.** The running minimum of `|z_k|^2` began as four
+single-element library calls per orbit point: half as much work again
+as the eight the step needs, and 400,000 calls where the sequencer had
+got the count down to 98. It is now three whole-array passes and a MIN
+tournament after the run - about `2*log2(n) + 4` calls for any `n` -
+and it left the checkpoint, because it is a function of the orbit that
+is already there.
+
+**The perturbation cannot be a sequencer program, and the obstacle is
+exact.** It needs six live values a step: four per-lane and persistent,
+which the register file holds, and two that change every iteration and
+are shared by every lane. The model has three input streams that
+initialise once, and a constant bank fixed at load time and addressed
+by the 4-bit register field - **at most 16 constants**, so not enough to
+unroll. There is no operand source that advances with the loop counter.
+The missing feature is a per-iteration broadcast: a fourth stream read
+by iteration index rather than by lane, or a constant bank the loop
+counter can address. Recorded for the sequencer's designers, because
+perturbation rendering is the reason a deep-zoom engine wants a
+sequencer at all.
+
+**A real centre hides half the arithmetic.** The derived nucleus is on
+the real axis, so `zi` is exactly +0 for the whole orbit and
+`zr^2 - zi^2` and `zr^2 + zi^2` are the same value. The complex-centre
+row exists because negative control A swapped exactly those two and
+nothing else in the check noticed.
+
+### The negative controls
+
+Three faults, each rebuilt and run through the same gate, then
+restored.
+
+| control | what was changed | caught by | rows still green |
+|---|---|---|---|
+| A | `zr^2 - zi^2` became `zr^2 + zi^2`, in BOTH engines | the complex-centre orbit row, alone | 25 of 26 |
+| B | the reference rounded into binary64 with RTZ instead of RNE | the per-pixel oracle, alone: `pixel 2: tool says (176, 'esc'), the golden model says (175, 'esc')` | 25 of 26 |
+| C | the program's final add reads `zr` instead of `zr^2 - zi^2` - ONE engine | the engine cross-check, the checkpoints, the resume, the model and mpmath | 19 of 26, 8 failures |
+
+A and B are the interesting pair. Under both, the engines agree with
+each other, the checkpoints match across trip counts and batch sizes,
+the resumed run lands byte-identically, the chain matches hashlib, and
+the binary64 comparison still reports 4096 of 4096. Internal
+consistency proves the tool computes the same thing every time; it
+cannot prove the thing is right, and two engines built from one
+understanding are wrong together. C is here to show the internal gates
+are live, which is what makes A and B's silence meaningful.
+
+Restoring the file, rebuilding, and the gate is green again at 11,212
+comparisons.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact` and
+  issues the same program either way, but nothing here has been through
+  XRT; `docs/BRINGUP.md` owns those gates. No device number is quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The orbit program uses `CFT_MUL`, `CFT_ADD`,
+  `CFT_SUB`, `CFT_FMA` and `CFT_CMPLE`; the pixel batch adds
+  `CFT_NEG`, `CFT_MIN`, `CFT_MAX` and `CFT_SELECT`; the search adds
+  nothing. All are covered by `tb/` and the vector sets, and the four
+  control codes used are ones `tb/test_seq_core.py` already scores.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library they certified this
+  morning. No runner stage was added; `verify/run.sh` was deliberately
+  left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md`,
+  `docs/BENCHMARKS.md` and the ABI version were left to the integrator,
+  as at 0.7. `host/Makefile`'s `clean` was left alone too: the new
+  targets sit in their own delimited block with their own `TOOLS +=`
+  line and a `zoomclean`, so that four parallel workloads merge beside
+  one another rather than through one recipe.

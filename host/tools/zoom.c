@@ -994,8 +994,7 @@ typedef struct {
 
     uint8_t   cr[MAX_ESZ], ci[MAX_ESZ];     /* the centre, in fi */
     uint8_t   c256r[MAX_ESZ], c256i[MAX_ESZ];  /* the derived nucleus */
-    uint8_t   pixscale[MAX_ESZ];            /* one pixel, in fi */
-    uint8_t   radius[MAX_ESZ];
+    uint8_t   pixscale[MAX_ESZ];       /* one pixel, always at fp256 */
 
     uint64_t  k;                 /* orbit iterations resolved */
     uint64_t  escaped_at;        /* 0 if it never escaped */
@@ -1063,7 +1062,7 @@ static void derive_centre(runstate *R)
     uint8_t *zval = (uint8_t *)xcalloc(SCAN_STEPS, esz);
     uint8_t minus2[MAX_ESZ], w[MAX_ESZ], eighth[MAX_ESZ], step[MAX_ESZ];
     uint8_t zero[MAX_ESZ], lo[MAX_ESZ], hi[MAX_ESZ], mid[MAX_ESZ];
-    uint8_t zlo[MAX_ESZ], zhi[MAX_ESZ], zmid[MAX_ESZ], mag[MAX_ESZ];
+    uint8_t zlo[MAX_ESZ], zhi[MAX_ESZ], zmid[MAX_ESZ];
     uint8_t maglo[MAX_ESZ], maghi[MAX_ESZ];
     scan_engine S;
     size_t i, brk = 0;
@@ -1148,15 +1147,8 @@ static void derive_centre(runstate *R)
      * format can express. */
     run1(CFT_MUL, fi->fmt, zlo, zlo, NULL, maglo);
     run1(CFT_MUL, fi->fmt, zhi, zhi, NULL, maghi);
-    if (val_lt(fi, maghi, maglo)) {
-        memcpy(R->c256r, hi, esz);
-        memcpy(mag, maghi, esz);
-    } else {
-        memcpy(R->c256r, lo, esz);
-        memcpy(mag, maglo, esz);
-    }
+    memcpy(R->c256r, val_lt(fi, maghi, maglo) ? hi : lo, esz);
     memset(R->c256i, 0, esz);
-    (void)mag;
 
     scan_engine_free(&S);
     free(cand);
@@ -1797,7 +1789,6 @@ static void compare_pixels(runstate *R, uint64_t *differ, uint64_t *total)
     options *O = R->opt;
     FILE *f = fopen(O->compare_path, "rb");
     char line[256];
-    uint64_t i = 0;
     *differ = 0;
     *total = 0;
     if (!f)
@@ -1814,9 +1805,7 @@ static void compare_pixels(runstate *R, uint64_t *differ, uint64_t *total)
         if (R->pix[idx].iter != it ||
             strcmp(pix_kind_name(R->pix[idx].kind), kind) != 0)
             (*differ)++;
-        i++;
     }
-    (void)i;
     fclose(f);
 }
 
@@ -2157,7 +2146,6 @@ int main(int argc, char **argv)
         g.fmt = CFT_FP256;
         g.esz = cft_format_size(CFT_FP256);
         while (w > 1) { w >>= 1; sh++; }
-        val_pow2(&g, -O.zoom_exp, R.radius);
         val_pow2(&g, 1 - O.zoom_exp - (int)sh, R.pixscale);
     }
 
@@ -2203,7 +2191,6 @@ int main(int argc, char **argv)
             val_from_i64(&f256, v, shift);
             run1(CFT_MUL, CFT_FP256, shift, R.pixscale, NULL, nref);
             run1(CFT_ADD, CFT_FP256, R.c256r, NULL, nref, R.c256r);
-            (void)shift;
         }
         if (O.fmt == CFT_FP256) {
             memcpy(R.cr, R.c256r, fi.esz);

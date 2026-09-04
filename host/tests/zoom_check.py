@@ -342,6 +342,16 @@ def main():
     orbit_n = 2000 if args.quick else 4000
     try:
         print("cft-zoom cross-check, tool: %s" % exe)
+        if not HAVE_MPMATH:
+            # A log that quietly checked nothing must not read as a
+            # pass. mpmath is the authority on the DOMAIN here - that c
+            # is a nucleus, that its orbit is bounded, and how long each
+            # format's reference stays valid - and without it those
+            # questions are not asked at all.
+            print("\n  SKIP  mpmath is not installed, so every check "
+                  "against the 300-digit orbit is MISSING: the nucleus,\n"
+                  "        the boundedness of the reference, and the "
+                  "reference validity lengths. `pip install mpmath`.")
 
         # -------------------------------------------------------------
         print("\n[1] the derived centre, against the golden model")
