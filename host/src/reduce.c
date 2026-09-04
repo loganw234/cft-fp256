@@ -230,8 +230,7 @@ static cft_status scaled_prod_impl(cft_device *dev, cft_format fmt,
         (void)cft_bn_shl(&one, &one, f->man_w);
         cft_bn_store(&one, (uint8_t *)pr, (int)esz);
         *scale_out = 0;
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
 
@@ -325,8 +324,7 @@ static cft_status scaled_prod_impl(cft_device *dev, cft_format fmt,
 
     cft_bn_store(&out, (uint8_t *)pr, (int)esz);
     *scale_out = scale;
-    if (flags_out)
-        *flags_out = flags;
+    cft_flags_emit(dev, flags, flags_out);
     return CFT_OK;
 }
 

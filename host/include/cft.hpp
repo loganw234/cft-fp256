@@ -1422,6 +1422,61 @@ public:
         return cft_set_payload_signaling(dev_, fmt, a, d, n);
     }
 
+
+    /* ---------------------------------------------------------------
+     * The formatOf arithmetic operations (754-2019 clause 5.4.1)
+     *
+     * The only entry points here that take TWO formats: `sfmt` for a, b
+     * and c, `dfmt` for d, one rounding into the destination. Sixteen
+     * ordered pairs, six operations, five attributes; the same-format
+     * pairs are the operations already on this class, bit for bit.
+     *
+     * Named one per operation, exactly as cft.h names them and for the
+     * reason cft.h gives - division and square root have no opcode, so
+     * a dispatcher keyed on cft_op could not express half the clause.
+     *
+     * `d` must not overlap a, b or c: the elements change size, so an
+     * in-place call would overwrite operand i+1 while writing result i.
+     * That is cft_convert's rule and it is not policed here either.
+     * --------------------------------------------------------------- */
+#define CFT_HPP_FO2(name)                                               \
+    call_result formatof_##name(cft_format sfmt, cft_format dfmt,       \
+                                cft_round rnd, const void *a,           \
+                                const void *b, void *d, std::size_t n,  \
+                                std::uint32_t *bus = nullptr) noexcept  \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_formatof_##name(dev_, sfmt, dfmt, rnd, a, b, d,  \
+                                       n, &r.flags, bus);               \
+        return r;                                                       \
+    }
+    CFT_HPP_FO2(add)
+    CFT_HPP_FO2(sub)
+    CFT_HPP_FO2(mul)
+    CFT_HPP_FO2(div)
+#undef CFT_HPP_FO2
+
+    call_result formatof_sqrt(cft_format sfmt, cft_format dfmt,
+                              cft_round rnd, const void *a, void *d,
+                              std::size_t n,
+                              std::uint32_t *bus = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_formatof_sqrt(dev_, sfmt, dfmt, rnd, a, d, n,
+                                     &r.flags, bus);
+        return r;
+    }
+    call_result formatof_fma(cft_format sfmt, cft_format dfmt,
+                             cft_round rnd, const void *a, const void *b,
+                             const void *c, void *d, std::size_t n,
+                             std::uint32_t *bus = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_formatof_fma(dev_, sfmt, dfmt, rnd, a, b, c, d, n,
+                                    &r.flags, bus);
+        return r;
+    }
+
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
     {
@@ -1470,9 +1525,84 @@ public:
         return out;
     }
 
+    /* -- the status word (754-2019 7.1, 5.7.4)         (ABI 0.7) ---
+     *
+     * The word lives on the C device handle, which is why it lives
+     * here and not on a context: 7.1 describes one set of status flags
+     * per environment, and a wrapper that kept a second copy would be
+     * a second thing that could be wrong. basic_context's flags() and
+     * clear_flags() are views onto exactly this word, so two contexts
+     * over one device see one set of flags - which is the point.
+     *
+     * 5.7.4's names, in this header's spelling. mask is any subset of
+     * the exceptions, CFT_FLAGS_ALL the whole set. */
+    void lower_flags(std::uint32_t mask = CFT_FLAGS_ALL) noexcept
+    { cft_lower_flags(dev_, mask); }
+    void raise_flags(std::uint32_t mask) noexcept
+    { cft_raise_flags(dev_, mask); }
+    bool test_flags(std::uint32_t mask = CFT_FLAGS_ALL) const noexcept
+    { return cft_test_flags(dev_, mask) != 0; }
+    std::uint32_t save_all_flags() const noexcept
+    { return cft_save_all_flags(dev_); }
+    void restore_flags(std::uint32_t saved,
+                       std::uint32_t mask = CFT_FLAGS_ALL) noexcept
+    { cft_restore_flags(dev_, saved, mask); }
+    /* No device is involved - 5.7.4 puts the saved word in the first
+     * operand - so this is static, and callable without one. */
+    static bool test_saved_flags(std::uint32_t saved,
+                                 std::uint32_t mask) noexcept
+    { return cft_test_saved_flags(saved, mask) != 0; }
+
+    /* -- 9.6's magnitude forms                         (ABI 0.7) ---
+     * Host operations with no rounding attribute, so no cft_round
+     * argument: cft.h has the definitions and the edge families. */
+    call_result min_mag(cft_format fmt, const void *a, const void *b,
+                        void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_min_mag(dev_, fmt, a, b, d, n, &r.flags);
+        return r;
+    }
+    call_result max_mag(cft_format fmt, const void *a, const void *b,
+                        void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_max_mag(dev_, fmt, a, b, d, n, &r.flags);
+        return r;
+    }
+    call_result minnum_mag(cft_format fmt, const void *a, const void *b,
+                           void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_minnum_mag(dev_, fmt, a, b, d, n, &r.flags);
+        return r;
+    }
+    call_result maxnum_mag(cft_format fmt, const void *a, const void *b,
+                           void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_maxnum_mag(dev_, fmt, a, b, d, n, &r.flags);
+        return r;
+    }
+
 private:
     cft_device *dev_ = nullptr;
 };
+
+/* ---------------------------------------------------------------
+ * 5.7.1's conformance predicates                        (ABI 0.7)
+ *
+ * Free functions in namespace cft, because they describe the
+ * programming environment and take neither a device nor a format -
+ * and are callable before anything is opened. cft.h says what each
+ * answer rests on; the short version is 0, 0, 1.
+ * --------------------------------------------------------------- */
+inline bool is754version1985() noexcept
+{ return cft_is754version1985() != 0; }
+inline bool is754version2008() noexcept
+{ return cft_is754version2008() != 0; }
+inline bool is754version2019() noexcept
+{ return cft_is754version2019() != 0; }
 
 /* ---------------------------------------------------------------
  * value<F> - one encoding, bound to the context that can compute on it
@@ -1550,8 +1680,11 @@ using fp256_value = value<CFT_FP256>;
  * Flags accumulate the way MPFR's do and the way bindings/python and
  * bindings/node already do: last_flags() is the most recent call's
  * word, flags() is the OR of every call this context has made, and
- * clear_flags() resets the sticky one. Both are this context's own -
- * copying a context gives the copy its own flag state.
+ * clear_flags() resets the sticky one. From ABI 0.7 the sticky one is
+ * the LIBRARY's - 754-2019 7.1's status word, kept on the device - so
+ * two contexts over one device share it, which is what 7.1 describes;
+ * 5.7.4's six operations over it are members here too. last_flags()
+ * is still this context's own.
  *
  * NOT thread-safe, because the device underneath is not.
  * --------------------------------------------------------------- */
@@ -1581,10 +1714,42 @@ public:
     }
 
     /* -- flags ---------------------------------------------------- */
-    std::uint32_t flags() const noexcept { return sticky_; }
+    /* flags() and clear_flags() are 754-2019 7.1's status word, read
+     * and lowered through the library rather than through a copy kept
+     * here: the ABI 0.7 library keeps one word per device, every entry
+     * point ORs into it, and a second sticky word in this header would
+     * be a second thing that could disagree with it. The behaviour a
+     * caller sees is what it always was - flags() is the OR of every
+     * call made through this context, clear_flags() resets it - with
+     * one difference that is the whole point: a device shared by two
+     * contexts now has ONE set of flags, as 7.1 describes, where
+     * before each context accumulated its own. last_flags() is
+     * unchanged and stays this context's own, because "the most recent
+     * call through THIS object" is not a 754 concept and no library
+     * word could answer it. */
+    std::uint32_t flags() const noexcept { return dev_->save_all_flags(); }
     std::uint32_t last_flags() const noexcept { return last_; }
-    void clear_flags() noexcept { sticky_ = 0; }
-    std::string flag_names() const { return cft::flag_names(sticky_); }
+    void clear_flags() noexcept { dev_->lower_flags(CFT_FLAGS_ALL); }
+    std::string flag_names() const { return cft::flag_names(flags()); }
+
+    /* 5.7.4's six, by their 754 names, over the same word. Delegated
+     * to the device rather than reimplemented; they are here because a
+     * caller working through a context should not have to reach past
+     * it to lower a flag. */
+    void lower_flags(std::uint32_t mask = CFT_FLAGS_ALL) noexcept
+    { dev_->lower_flags(mask); }
+    void raise_flags(std::uint32_t mask) noexcept
+    { dev_->raise_flags(mask); }
+    bool test_flags(std::uint32_t mask = CFT_FLAGS_ALL) const noexcept
+    { return dev_->test_flags(mask); }
+    std::uint32_t save_all_flags() const noexcept
+    { return dev_->save_all_flags(); }
+    void restore_flags(std::uint32_t saved,
+                       std::uint32_t mask = CFT_FLAGS_ALL) noexcept
+    { dev_->restore_flags(saved, mask); }
+    static bool test_saved_flags(std::uint32_t saved,
+                                 std::uint32_t mask) noexcept
+    { return device::test_saved_flags(saved, mask); }
 
     /* -- making values -------------------------------------------- */
     /* Every member below that hands back a value_type is lvalue-ref-
@@ -2008,6 +2173,49 @@ public:
                       "cft_rem");
     }
 
+    /* 9.6's magnitude forms                            (ABI 0.7)
+     *
+     * "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+     *  otherwise minimum(x, y)" - and the same shape for the other
+     * three, with minimumNumber, maximum and maximumNumber in the last
+     * position. No rounding attribute: these select an operand, they
+     * do not compute one, so this context's attribute is not consulted
+     * and could not be. cft.h holds the three edge families (a NaN,
+     * equal magnitudes of opposite sign, the two zeros) and what each
+     * defers to. */
+    std::uint32_t min_mag(cspan<encoding_type> a, cspan<encoding_type> b,
+                          span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->min_mag(F, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_min_mag");
+    }
+    std::uint32_t max_mag(cspan<encoding_type> a, cspan<encoding_type> b,
+                          span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->max_mag(F, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_max_mag");
+    }
+    std::uint32_t minnum_mag(cspan<encoding_type> a, cspan<encoding_type> b,
+                             span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->minnum_mag(F, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_minnum_mag");
+    }
+    std::uint32_t maxnum_mag(cspan<encoding_type> a, cspan<encoding_type> b,
+                             span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->maxnum_mag(F, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_maxnum_mag");
+    }
+
     /* ===========================================================
      * The phase-1 transcendentals (ABI 0.3)
      *
@@ -2420,6 +2628,35 @@ public:
                "cft_rem");
         return make(d);
     }
+    /* 9.6's magnitude forms, one element at a time. */
+    value_type min_mag(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->min_mag(F, x.bytes().data(), y.bytes().data(),
+                             d.data(), 1), "cft_min_mag");
+        return make(d);
+    }
+    value_type max_mag(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->max_mag(F, x.bytes().data(), y.bytes().data(),
+                             d.data(), 1), "cft_max_mag");
+        return make(d);
+    }
+    value_type minnum_mag(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->minnum_mag(F, x.bytes().data(), y.bytes().data(),
+                                d.data(), 1), "cft_minnum_mag");
+        return make(d);
+    }
+    value_type maxnum_mag(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->maxnum_mag(F, x.bytes().data(), y.bytes().data(),
+                                d.data(), 1), "cft_maxnum_mag");
+        return make(d);
+    }
     value_type exp(const value_type &x) &
     {
         encoding_type d{};
@@ -2648,7 +2885,10 @@ public:
     {
         const std::uint32_t f = r.check(where);
         last_ = f;
-        sticky_ |= f;
+        /* No sticky word is accumulated here any more: from ABI 0.7
+         * the library keeps 7.1's status word on the device and the
+         * call that produced `f` has already ORed it in. A second
+         * accumulation would be a second thing to keep in step. */
         return f;
     }
 
@@ -2789,7 +3029,10 @@ private:
 
     device      *dev_ = nullptr;
     cft_round    rnd_ = CFT_RNE;
-    std::uint32_t sticky_ = 0;
+    /* The sticky word that used to live here is gone: flags() reads
+     * the library's, which is the one 7.1 describes. last_ stays,
+     * because "the most recent call through this object" is this
+     * header's own idea and nothing in the library answers it. */
     std::uint32_t last_ = 0;
 };
 
@@ -2876,6 +3119,106 @@ bool value<F>::operator>(const value &o) const
 template <cft_format F>
 bool value<F>::operator>=(const value &o) const
 { return detail::predicate_true(require_same(o, "operator>="), CFT_CMPLE, o, *this); }
+
+
+/* ---------------------------------------------------------------
+ * The formatOf arithmetic, typed (754-2019 clause 5.4.1)
+ *
+ * FREE FUNCTIONS, not members of basic_context<F>, and that is forced
+ * rather than chosen: a context is bound to ONE format and these
+ * operations have two. Putting them on the destination's context would
+ * type the result and leave the operands as raw bytes, which is exactly
+ * the mistake this layer exists to prevent - handing binary64 encodings
+ * to a call that reads them as binary32 is a compile error here and a
+ * silent wrong answer in C.
+ *
+ * So the source and destination formats are both template parameters,
+ * the spans carry encoding<SF> and encoding<DF>, and a mismatched pair
+ * does not compile. The rounding attribute is explicit for the same
+ * reason it cannot come from a context: there are two contexts in play
+ * and no rule says which one's attribute wins.
+ *
+ * Each returns the flag word and throws cft::error on a failed status,
+ * which is the convention basic_context::record() follows. `d` must not
+ * overlap the operands - cft.h's rule, unpoliced here as there.
+ *
+ * 5.11's cross-format COMPARISON is deliberately absent. The clause
+ * asks that comparisons of data in different binary formats be "exact,
+ * as if the data were converted to a common format with unbounded
+ * exponent range and precision"; on this ladder that common format is
+ * the wider of the two, converting into it is exact, and so the
+ * composition - convert<SF, DF>() then the context's own comparison -
+ * IS the operation. Wrapping two calls that already exist would add a
+ * name, not a capability. docs/DETERMINISM.md records it as a
+ * composition.
+ * --------------------------------------------------------------- */
+namespace detail {
+
+template <cft_format SF, cft_format DF>
+inline void formatof_sizes(std::size_t na, std::size_t nb, std::size_t nc,
+                           std::size_t nd, int arity, const char *what)
+{
+    if (na < nd || (arity >= 2 && nb < nd) || (arity >= 3 && nc < nd))
+        throw std::invalid_argument(
+            std::string(what) + ": every operand span must hold at least "
+            "as many elements as the destination span");
+}
+
+inline std::uint32_t formatof_finish(const call_result &r, const char *what)
+{
+    if (r.status != CFT_OK)
+        throw error(r.status, what);
+    return r.flags;
+}
+
+}  // namespace detail
+
+#define CFT_HPP_FO_FREE2(name)                                            \
+template <cft_format SF, cft_format DF>                                   \
+inline std::uint32_t formatof_##name(device &dev, cft_round rnd,          \
+                                     cspan<encoding<SF>> a,               \
+                                     cspan<encoding<SF>> b,               \
+                                     span<encoding<DF>> d)                \
+{                                                                         \
+    detail::formatof_sizes<SF, DF>(a.size(), b.size(), 0, d.size(), 2,    \
+                                   "cft::formatof_" #name);               \
+    return detail::formatof_finish(                                       \
+        dev.formatof_##name(SF, DF, rnd, a.data(), b.data(), d.data(),    \
+                            d.size()),                                    \
+        "cft_formatof_" #name);                                           \
+}
+CFT_HPP_FO_FREE2(add)
+CFT_HPP_FO_FREE2(sub)
+CFT_HPP_FO_FREE2(mul)
+CFT_HPP_FO_FREE2(div)
+#undef CFT_HPP_FO_FREE2
+
+template <cft_format SF, cft_format DF>
+inline std::uint32_t formatof_sqrt(device &dev, cft_round rnd,
+                                   cspan<encoding<SF>> a,
+                                   span<encoding<DF>> d)
+{
+    detail::formatof_sizes<SF, DF>(a.size(), 0, 0, d.size(), 1,
+                                   "cft::formatof_sqrt");
+    return detail::formatof_finish(
+        dev.formatof_sqrt(SF, DF, rnd, a.data(), d.data(), d.size()),
+        "cft_formatof_sqrt");
+}
+
+template <cft_format SF, cft_format DF>
+inline std::uint32_t formatof_fma(device &dev, cft_round rnd,
+                                  cspan<encoding<SF>> a,
+                                  cspan<encoding<SF>> b,
+                                  cspan<encoding<SF>> c,
+                                  span<encoding<DF>> d)
+{
+    detail::formatof_sizes<SF, DF>(a.size(), b.size(), c.size(), d.size(),
+                                   3, "cft::formatof_fma");
+    return detail::formatof_finish(
+        dev.formatof_fma(SF, DF, rnd, a.data(), b.data(), c.data(),
+                         d.data(), d.size()),
+        "cft_formatof_fma");
+}
 
 }  // namespace cft
 

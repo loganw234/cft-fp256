@@ -48,8 +48,8 @@ output lives in its own header and is compared by eye.
 | Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18); 2026-09-02 as runner stage `lang-go` on the desktop's WSL, CI, and Windows (go 1.26.4 from pacman, GOROOT carried by the runner) | static-links libcft.a as a direct linker input |
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8); 2026-09-02 as runner stage `lang-csharp` on Windows, the desktop's WSL (dotnet 8.0.130) and CI | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL, and on Windows (R 4.6.1 with Rtools45, whose gcc 14.3 builds the shim) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
-| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, wasm 196,379 bytes) with drag-drop full-set replay over every published set family - opcodes, transcendentals, augmented, reductions, character sequences - and a compute panel covering `cft_run`'s opcodes, composed div/sqrt, all thirty-nine transcendentals, the augmented pairs, the scaled products and the character conversions | Windows 2026-09-03, node 22.19.0: `verify.mjs` replays 1,037,657 cases over 84 sets through `cft_conformance` and 645,657 over 64 - every transcendental, augmented, reduction and character case - through the wrappers themselves; two clean container builds byte-identical (page sha256 `6fc065e25241bde6…`) | ABI 0.6 on the identity line; 91 `cftw_*` exports |
-| Node / JavaScript | `bindings/node/` (package 0.6.0) | full package: the 91 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, the clause-5 surface including the character conversions, all thirty-nine transcendentals, the augmented pairs and every reduction on all three layers, exact-decimal I/O | Windows 2026-09-03, node 22.19.0: 104 tests; 1,683,314 cases over every set family replayed through the page's own module, the non-opcode families through the package's own methods | the same module as the page, byte for byte |
+| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, wasm 211,869 bytes) with drag-drop full-set replay over every published set family - opcodes, transcendentals, augmented, reductions, character sequences, formatOf, the magnitude forms - and a compute panel covering every operation of the library, the status word included | Windows 2026-09-04, node 22.19.0: `verify.mjs` replays 1,223,635 cases through `cft_conformance` and 831,635 through the wrappers themselves; two clean container builds byte-identical (page sha256 `e1b42b3873416e39…`) | ABI 0.7 on the identity line; 111 `cftw_*` exports |
+| Node / JavaScript | `bindings/node/` (package 0.7.0) | full package: the 111 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, every operation of clause 5 including the cross-format six and the character conversions, all thirty-nine transcendentals, the augmented pairs, every reduction, all eight forms of 9.6, the status word by its 754 names, exact-decimal I/O | Windows 2026-09-04, node 22.19.0: 125 tests; 2,055,270 cases over every set family replayed through the page's own module, the non-opcode families through the package's own methods | the same module as the page, byte for byte |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
@@ -348,6 +348,35 @@ but four packages ahead of one surface. It lasted the afternoon.
 | MPFR parity | **599,380 cases, 0 value and 0 flag mismatches** across every entry point MPFR can arbitrate, with the reductions replayed node by node and the augmented tie rule derived from MPFR's exact sums; one MPFR 4.2.2 defect found and worked around (`mpfr_compound_si` at negative n) |
 | Node (`bindings/node`) | complete on all three layers (package 0.6.0): every new `cftw_*` export, `Context`/`Float` methods for the ten, the character conversions, the payload operations, the augmented pairs and the reductions, `map()` where the C has a batch shape. **104 tests**; `conformance.mjs` replays 1,683,314 cases over 148 set replays, every family |
 | Browser / WASM page | complete: `wasm_api.c` carries every new declaration (**91 `cftw_*` exports**, module 196,379 bytes), the compute panel has a control for each, and the drop zone accepts every family. `verify.mjs` replays 1,037,657 cases through `cft_conformance` and 645,657 more through the wrappers themselves. Two clean container builds byte-identical: page sha256 `6fc065e25241bde6…`, module `e8611510973d1081…` |
+
+**ABI 0.7 (2026-09-04)** is the conformance step. Two packages built in
+parallel and merged in sequence: the cross-format (formatOf) forms of
+the six arithmetic operations of 5.4.1 (`cft_formatof_add/sub/mul/div/
+sqrt/fma`: operands in one format, the result in another, rounded
+once - exactly, because none of the six can be double rounded when the
+operands carry the source's precision); and 7.1's status word on the
+device handle with the six operations of 5.7.4 (`cft_lower_flags`,
+`cft_raise_flags`, `cft_test_flags`, `cft_save_all_flags`,
+`cft_restore_flags`, `cft_test_saved_flags`), 5.7.1's three predicates
+(`cft_is754version1985/2008/2019`, answering false, false, true) and
+9.6's magnitude four (`cft_min_mag`, `cft_max_mag`, `cft_minnum_mag`,
+`cft_maxnum_mag`). Same shape as every step before it: plain positional
+C, additive, reachable through exactly the FFI each row above already
+uses - with one change of state: the device handle now carries a
+status word, which no result depends on. With this step the library
+conforms to IEEE 754-2019 in radix 2; docs/COMPLIANCE.md is the
+statement. The JavaScript rows moved in their own step again, so the
+half-step of the 0.6 kind repeated, and lasted the night.
+
+| surface | status at ABI 0.7 |
+|---|---|
+| C (`cft.h`) | complete. `host/tests/formatof_check.py` (509,118 comparisons over all sixteen ordered format pairs, six operations, five attributes) and `minmax_mag_check.py` (53,517 comparisons plus the status-word checks) are the reference ctypes consumers; `api_test.c` covers refusals, the FMA double-rounding witness family, accumulation of the status word across calls and its save/restore round trips |
+| C++ (`cft.hpp`) | complete, all three layers, the context reading the library's status word rather than its own: **213,691 checks** at C++17 and again at C++20 |
+| Python (`cftmpfr`) | complete on `Context` and in `batch`, `Context.flags` now a property over the library's word, the six flag operations and the predicates by their 754 names: **834 tests** |
+| conformance vectors | complete: seven set families - the formatOf family adds 80 sets (176,250 cases), one per (source, destination, attribute), and the magnitude family four - **168 sets, 1,223,635 cases** at the runner's generator counts, replayed by `cft_conformance` |
+| MPFR parity | **739,234 cases, 0 value and 0 flag mismatches**; for formatOf, MPFR rounding an exact result once to the destination precision is the standard's definition, so it arbitrates without a footnote |
+| Node (`bindings/node`) | complete (package 0.7.0): **125 tests**; `conformance.mjs` replays 2,055,270 cases over every family |
+| Browser / WASM page | complete: **111 `cftw_*` exports**, module 211,869 bytes, a control per operation, the status word visible; `verify.mjs` replays 1,223,635 cases through `cft_conformance` and 831,635 through the wrappers. Two clean container builds byte-identical: page sha256 `e1b42b3873416e39…`, module `a1f0a4715516d3f6…` |
 
 ## Drop-ins
 

@@ -1000,6 +1000,269 @@ reads it the same way. Anything outside the set gives `+0`, which is
 | `cft.hpp` vs `cft.h`, every entry point twice | 210,511 at C++17 and again at C++20 | identical encodings, flags and characters |
 | `test_cftmpfr.py` | 640 | pass |
 
+## The status word, the predicates, and 9.6's magnitude four (ABI 0.7)
+
+Three things clause 5 asked of the library and one clause 9 recommends.
+They arrived together because they share a seam.
+
+### The status word (7.1, 5.7.4)
+
+```c
+#define CFT_FLAGS_ALL /* the five cft_exception bits, as one mask */
+
+void     cft_lower_flags(cft_device *dev, uint32_t mask);
+void     cft_raise_flags(cft_device *dev, uint32_t mask);
+int      cft_test_flags(cft_device *dev, uint32_t mask);
+uint32_t cft_save_all_flags(cft_device *dev);
+void     cft_restore_flags(cft_device *dev, uint32_t saved, uint32_t mask);
+int      cft_test_saved_flags(uint32_t saved, uint32_t mask);
+```
+
+`flags_out` is unchanged and still answers "what did THIS call raise".
+The word answers the other question 7.1 asks - "what has been raised
+since the caller last lowered anything" - and it is the caller who
+lowers it, nobody else. A fresh device opens with every flag down.
+
+Reading the six against 5.7.4, in case a porter is holding the
+standard: `mask` is 5.7.4's exceptionGroup, "any subset of the
+exceptions", so every one of the six takes one; `cft_test_flags` is
+"whether ANY of the flags ... are raised" and so returns 1 or 0 rather
+than the intersection, which a caller could mistake for a flag word;
+`cft_restore_flags` RESTORES rather than ORs, so a flag inside the mask
+that is low in `saved` comes back low - that is the only reading under
+which `cft_restore_flags(dev, cft_save_all_flags(dev), CFT_FLAGS_ALL)`
+is the identity 5.7.4 wants it to be, and it is the one an OR-only
+implementation gets wrong while still passing a round-trip test;
+`cft_test_saved_flags` takes no device, because 5.7.4 puts the saved
+word in the first operand and there is nothing else involved.
+
+A NULL device is accepted by all of them and behaves as a handle whose
+word is permanently zero: the mutators do nothing and the tests answer
+0. That matches `cft_close()` and `cft_buffer_free()`, which have
+always tolerated NULL.
+
+**Rows a porter should not have to infer.** All of these are tested,
+and each of them is a way a plausible implementation goes wrong:
+
+| situation | the word after |
+|---|---|
+| a call that raises nothing | exactly what it was - ORing zero is the identity |
+| `cft_class`, `cft_total_order*`, the 9.7 payload three | unchanged; they are non-computational and have no flag word at all |
+| `cft_div(1, 0)` | divideByZero alone. The Newton scaffolding is inexact on almost every step and contributes nothing |
+| a batch call | one OR of every element's flags, in one step, the same word `flags_out` receives |
+| `cft_reduce(CFT_SUMABS)` over a vector holding an infinity and a signalling NaN | 9.4's override REPLACES the tree's flags, and the word gets the override's, not both |
+| two contexts (C++ or Python) over one device | one word between them, which is what 7.1 describes |
+
+Internally every producing entry point ends with one call,
+`cft_flags_emit(dev, acc, flags_out)`, and that is the only thing in
+the library that can raise the word. A new entry point therefore costs
+one line, and a composed one brackets its internal passes with
+`cft_flags_mute` so that scaffolding never reaches the word. Both are
+internal (`host/src/softfloat.h`); they are described here because the
+next entry point somebody adds needs to know about exactly two of
+them.
+
+**The word never influences a result.** Nothing reads it back - not a
+rounding, not a special case, not a branch - so determinism is exactly
+what it was. See docs/DETERMINISM.md.
+
+### The conformance predicates (5.7.1)
+
+```c
+int cft_is754version1985(void);   /* 0 */
+int cft_is754version2008(void);   /* 0 */
+int cft_is754version2019(void);   /* 1 */
+```
+
+Constants, no device, no format, safe before `cft_open`. What each
+rests on is in `cft.h` and in docs/COMPLIANCE.md; the one that is
+easily misread is 2008, which is false not because something is
+missing but because 754-2008 required `minNum`/`maxNum`/`minNumMag`/
+`maxNumMag` in its 5.3.1 and 2019 replaced them with 9.6's, whose
+signaling-NaN rule differs. This library implements the 2019
+semantics.
+
+### 9.6's magnitude forms
+
+```c
+cft_status cft_min_mag   (cft_device *dev, cft_format fmt,
+                          const void *a, const void *b, void *d,
+                          size_t n, uint32_t *flags_out);
+cft_status cft_max_mag   (...);   /* same signature */
+cft_status cft_minnum_mag(...);
+cft_status cft_maxnum_mag(...);
+```
+
+HOST entry points of the `nextUp` kind: no rounding argument, because
+there is no rounding - 9.6 selects one of the operands rather than
+computing a value. No opcode either, so they do not gate on the
+device's opcode groups and are available on a bitstream that does not
+carry the min/max group at all. `d` may alias `a` or `b`.
+
+The definitions, the NaN rule each inherits, and the equal-magnitude
+tie are in docs/DETERMINISM.md and quoted in `cft.h`. The two things a
+caller most often wants stated plainly:
+
+- `cft_min_mag(-3, +2)` is `+2`, where `CFT_MIN(-3, +2)` is `-3`. The
+  magnitude decides and the sign has no vote.
+- `cft_max_mag(+3, -3)` is `+3` and `cft_min_mag(+3, -3)` is `-3`,
+  both orders of the operands, because equal magnitudes fall through
+  to `maximum`/`minimum`. The same rule gives `-0` for the minima and
+  `+0` for the maxima of the two zeros.
+
+### How they are scored
+
+| check | cases | result |
+|---|---|---|
+| `minmax_mag_check.py`: the four vs the golden model at all four formats - scalar, batch, every equal-magnitude pair, aliasing and refusals; plus the status word against 7.1's own sentences and the three predicates | 53,517 | zero disagreements |
+| `python/tests/test_minmax_mag.py`: the model against an independent reading of the encoding, and against CPython's binary64 at fp64 | 94 | pass |
+| `cft_conformance` replay of the four new `-minmaxmag` sets, one element at a time and then as arrays | 2,432 per format | every case, bits and flags |
+| MPFR parity: `mpfr_cmpabs` for the magnitude ordering and `mpfr_min`/`mpfr_max` for the equal-magnitude tie, with 9.6's NaN rules restated | see docs/VALIDATION.md | zero value AND zero flag mismatches |
+| `api_test.c`, `cpp_api_test.cpp`, `test_cftmpfr.py` | the C, C++ and Python surfaces | pass |
+
+One line about the MPFR row, because it is the only place in this
+package where an oracle and a restatement sit in the same function.
+The ORACLE half is MPFR's and it is the whole numeric content:
+`mpfr_cmpabs` decides `|x|` against `|y|` in MPFR's own arithmetic, and
+`mpfr_min`/`mpfr_max` decide the equal-magnitude case - the MPFR manual
+defines them exactly as 754 defines minimum and maximum on numbers,
+signed zeros included. The RESTATEMENT half is the NaN handling, and it
+has to be: MPFR has no signaling NaN, and `mpfr_min` implements only
+the `...Number` NaN rule, so the plain forms' rule has no counterpart
+to compare against. Those rows are two readings of 9.6 scored against
+each other, not two oracles, and `host/tools/mpfr_check.c` says so at
+the top of the block.
+## The formatOf arithmetic across the formats (754-2019 5.4.1, the 0.7 step)
+
+`cft_formatof_add`, `_sub`, `_mul`, `_div`, `_sqrt` and `_fma`: the six
+arithmetic operations with the **operands in one binary format and the
+result in another**, rounded once. Every arithmetic entry point above
+this section takes one `cft_format` and uses it for the operands and
+the result both; these take two.
+
+```c
+/* a and b are binary64 encodings; d receives binary32 ones. */
+cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE, a, b, d, n,
+                 &flags, &bus);
+```
+
+5.4.1 requires this for every ordered pair of supported arithmetic
+formats, which is sixteen pairs on this ladder, so it is a conformance
+item rather than a convenience. docs/COMPLIANCE.md's first gap.
+
+### Six entry points, not one dispatcher
+
+The choice a reader will ask about. A dispatcher would need a first
+argument naming the operation, and the only such namespace this library
+has is `cft_op` - an OPCODE space that is on the wire, in the device's
+opcode field, and in every published vector set. **Two of these six
+have no opcode and never will**: division and square root are
+compositions here, not tile instructions, so a dispatcher keyed on
+`cft_op` could not express half the clause without inventing opcode
+numbers for things the hardware does not do. The arities differ too -
+one, two and three operands - so one signature would carry three
+pointers whose meaning changed per operation. That is `cft_run`'s
+shape, and it pays for it with the steering table, which exists only
+because ADD, SUB, MUL and FMA really are one hardware opcode. These six
+are not.
+
+### Which direction does what, and why a caller should care
+
+**Destination at least as wide as the source.** The operands are
+widened exactly with `cft_convert` and the existing same-format
+operation is issued. The ladder nests, so the widening rounds nothing
+and the operation's own rounding is still the only one. The point of
+going this way rather than computing on the host is that the arithmetic
+still runs where it would have run: on a device backend the `cft_run` /
+`cft_div` / `cft_sqrt` underneath is a tile pass, and `bus_out` carries
+its fault word.
+
+**Destination narrower.** The exact result is formed on the host and
+rounded ONCE against the destination's descriptor, through the same
+`cft_sf_round_pack` seam every other operation in this library rounds
+through. No tile pass; `bus_out` reads 0.
+
+### The rows a porter should not have to infer
+
+- **Every exception belongs to the destination.** `2^100 * 2^100` is an
+  unremarkable binary64 multiply and an overflow into binary32 -
+  infinity under roundTiesToEven, the largest finite under
+  roundTowardZero, `overflow | inexact` either way. `2^-150` is an
+  ordinary binary64 normal and exactly half of binary32's least
+  subnormal, so it is a tie between zero and that subnormal, and 7.5's
+  underflow rises with inexact whichever side the attribute takes.
+- **The wider destination has the wider range.** The square of
+  binary32's least subnormal vanishes in binary32 and is an exact
+  binary64 normal, `2^-298`.
+- **Square root crosses ranges in both directions**, which the
+  same-format square root cannot: the root of binary256's largest
+  finite is about `2^131071`, far above binary32's emax, and the root of
+  its least subnormal is about `2^-131189`, far below binary32's floor.
+- **`x + 0` still rounds.** It is x exactly, but x is a source value and
+  the destination may not hold it, so the single rounding still happens
+  and still reports its flags. Returning the operand's encoding is right
+  in the same-format case and wrong here.
+- **Specials are built in the destination.** A signaling NaN operand
+  raises invalid (6.2.1) and delivers the destination's canonical quiet
+  NaN; `divideByZero`, `inf - inf` and `0/0` likewise deliver the
+  destination's encodings.
+- **`d` must not overlap `a`, `b` or `c`.** The elements change size, so
+  an in-place call would overwrite operand i+1 while writing result i.
+  That is `cft_convert`'s rule, for `cft_convert`'s reason, and it is
+  not policed.
+- **The same-format pairs are the operations that were already here**,
+  bit for bit and flag for flag.
+
+### Why division and square root are not double rounded
+
+Because the shortcut gives the wrong answer, and this is worth stating
+plainly since docs/COMPLIANCE.md proposed it at 0.6. Rounding in the
+source format and converting down is innocuous for the basic operations
+when the intermediate carries at least 2p + 2 bits - and 53 >= 2x24 + 2,
+113 >= 2x53 + 2, 237 >= 2x113 + 2 all hold on this ladder. **The rule
+does not apply**: its hypothesis is that the OPERANDS carry the
+destination's precision, and here they carry the source's. A quotient
+or a root of two wide values can sit as close as it likes to a narrow
+midpoint, so the first rounding lands exactly on it, the second ties to
+even, and the answer is one ulp low with the same flag word.
+
+`python/cft_golden/formatof.py`'s `double_rounding_witness()` builds the
+counterexample from the format descriptors for division, square root and
+fused multiply-add on every one of the six narrowing pairs;
+docs/DETERMINISM.md carries the constructions. A porter's first
+temptation here is the composition, so the published sets carry all
+eighteen witnesses and a port that took it fails on them by name.
+
+### Comparison across formats (5.11) needs no entry point
+
+Widen the narrower operand with `cft_convert` - exact - and use the
+comparison you already have. A signaling NaN raises invalid on the way
+through, exactly as it would have in the comparison, so the signal is
+neither lost nor doubled. `python/cft_golden/formatof.py`'s `compare()`
+states the composition and the C++ test exercises it.
+
+### The other surfaces
+
+`cft.hpp` puts the six on `cft::device` and adds free function
+templates `cft::formatof_add<SF, DF>` and friends - free rather than
+members of `basic_context<F>`, because a context is bound to one format
+and these have two; the typed form makes a mismatched operand a compile
+error. `cftmpfr` puts them on the DESTINATION `Context`
+(`lo.formatof_add(x, y)`), which is MPFR's own shape - `mpfr_add(rop,
+op1, op2, rnd)` already rounds into rop's precision whatever the
+operands' is - with `batch.formatof_*` taking the source context
+explicitly, since a bytes buffer carries no format of its own.
+
+### How they are scored
+
+| layer | what it settles |
+|---|---|
+| `python/tests/test_formatof.py` | the model against exact rationals rounded by a reference written from 4.3, square root by squaring rather than by rooting, the widening identity, bit-identity with the single-format functions, the destination's boundaries, and the eighteen witnesses (plus the FMA family against intermediates from 30 to 1000 bits) |
+| `host/tests/formatof_check.py` | the C against the model over all sixteen ordered pairs, six operations, five attributes, per element and as arrays, plus the witnesses, the same-format alias against `cft_run`/`cft_div`/`cft_sqrt`, and the refusals |
+| `host/tools/mpfr_check.c` | both against GNU MPFR, which is a FULL oracle here: 5.4.1's definition is a literal description of `mpfr_add` and friends with the operand variables at the source precision and the result variable at the destination's |
+| `vectors/out/<sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl` | anyone else's implementation, 80 sets |
+| `host/tests/api_test.c`, `cpp_api_test.cpp`, `test_cftmpfr.py` | the refusals, the aliasing, and the rows an independent reading of 5.4.1 decides |
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future

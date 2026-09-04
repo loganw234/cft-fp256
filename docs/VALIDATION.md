@@ -2407,3 +2407,399 @@ makes; the four-package gate earlier in the day (run
 seeded by format width and trial count, not by time. The 0.6 top-level
 claims in README.md and docs/COMPATIBILITY.md were taken from that
 earlier gate and this run reproduces every one of them.
+
+## 2026-09-03 - ABI 0.7 package B: the status word, the conformance predicates, and 9.6's magnitude four
+
+The package: 754-2019 7.1's sticky status word with 5.7.4's six
+operations over it, the three conformance predicates of 5.7.1, and the
+four magnitude forms of minimum and maximum from 9.6. The first two are
+required for a conformance claim (docs/COMPLIANCE.md's items 2 and 3);
+the third is recommended, and with it every operation clause 9 lists for
+binary formats is present.
+
+`bash verify/run.sh --fresh --only golden,vectors,libcft,clause5,status96,cpp,bindings,mpfr`
+at 219e722 on DESKTOP-T33SK86 (Windows, MINGW64, Miniconda's python
+first on PATH so the model's stages get mpmath). Run id
+20260903-213827-219e722, on a clean tree, 58 minutes wall beside other
+agents' work on the same box:
+
+    golden 289s  vectors 299s  libcft 475s  clause5 2s  status96 1s
+    bindings 141s  cpp 1447s  mpfr 490s
+
+    VERDICT: PASS, nothing skipped - 8 executed, 0 failed, 0 skipped
+
+The counts each stage printed, and what is new in them:
+
+| stage | printed | of which this package |
+|---|---|---|
+| golden | 1566 passed, 5 skipped | +94 over 0.6's 1472, all of them `python/tests/test_minmax_mag.py` |
+| vectors | 88 sets written | 4 new - `<fmt>-minmaxmag.jsonl`, 2432 cases each |
+| libcft | `api-test: all contract checks passed`; 88 sets, 1,047,385 cases replayed through `cft_conformance` | the replay grew from 84 sets / 1,037,657 cases; the four new sets are replayed one element at a time and then as arrays. api-test gained a block of ~90 checks on the word and on 9.6's named rows |
+| clause5 | 145,032 comparisons, C == model | unchanged in content, and that is the point: it is the regression check on the routing, since every clause-5 entry point's `flags_out` now comes out of `cft_flags_emit` |
+| status96 | 53,517 comparisons, C == model on every one; 45 checks on the word; the predicates 0/0/1 | all of it |
+| cpp | 212,019 checks at C++17 and again at C++20, each replaying 1,047,385 cases | up from 211,931: the four through `basic_context` batch and scalar, the tie and NaN rows, one word seen through two contexts, `cft::is754version*` |
+| bindings | cftmpfr: 782 passed | +27 over 0.6's 755 |
+| mpfr | 714,964 cases, 0 value mismatches, 0 flag mismatches (MPFR 4.2.1) | +115,584 over 0.6's 599,380: 7,224 cases for each of the four operations at each of the four formats |
+
+Model comparisons: `test_minmax_mag.py` is 94 tests over the four
+formats, arbitrating the two halves of 9.6's sentence separately. The
+magnitude half gets an independent reading of the encoding written from
+the format descriptor alone, plus CPython's native binary64 at fp64. The
+deferral half is hand-derived from the standard's text, because there is
+no external implementation of 2019's minimumNumber to ask - C's
+`fmin`/`fmax` are 2008's `minNum`, whose signaling-NaN rule 2019 changed
+(the NOTE at the end of 5.3.1).
+
+The MPFR row is the only place in the package where an oracle and a
+restatement sit in one function, and `host/tools/mpfr_check.c` says
+which is which at the top of the block. The oracle half is MPFR's and
+it is the whole numeric content: `mpfr_cmpabs` decides `|x|` against
+`|y|`, and `mpfr_min`/`mpfr_max` decide the equal-magnitude case (the
+MPFR manual defines those exactly as 754 defines minimum and maximum on
+numbers, signed zeros included). The restatement half is the NaN
+handling, and it has to be - MPFR has no signaling NaN, and `mpfr_min`
+implements only the `...Number` NaN rule, so the plain forms' rule has
+no counterpart to compare against.
+
+### The negative controls
+
+Both were run against the built tree and both were restored; `git
+status` was clean afterwards, and the gate above ran on the restored
+tree.
+
+**1. The OR-in, broken for one entry point.** `cft_next_up` was put back
+to the pre-0.7 shape - `if (flags_out) *flags_out = acc;`, reaching no
+status word - which is the mistake a future entry point makes by copying
+an old one. Nothing else was touched. Two gates caught it and named it:
+
+    api-test.c:2233   FAIL  four flags standing after three calls
+    status96          FAIL  minmax_mag_check.py:394, AssertionError on
+                            cft_save_all_flags(dev) == DIVBYZERO|INVALID
+                            after cft_next_up(sNaN)
+
+Both are the same assertion in two harnesses: three calls raise
+overflow+inexact, divideByZero and invalid, and the word must hold all
+four. Restored; both green again.
+
+**2. maximumMagnitude preferring y on equal magnitudes of opposite
+sign.** The plausible wrong reading of 9.6 - "otherwise, return the
+second operand" instead of "otherwise, maximum(x, y)" - applied to
+`cft_max_mag` only, leaving `cft_min_mag` and the two `...Number` forms
+correct, so the control is as narrow as a real mistake would be. It is
+invisible everywhere except on that tie, and five gates caught it:
+
+    api-test.c:2407   FAIL  maximumMagnitude(+3, -3) defers to maximum: +3
+    api-test.c:2417   FAIL  max of the two zeros is +0
+    libcft (replay)   FAIL  vectors/out/fp32-minmaxmag.jsonl
+                            a 0x00000000 b 0x80000000
+                            expected 0x00000000, got 0x80000000
+    status96          FAIL  max_mag fp32 a=0x0 b=0x80000000:
+                            C 0x80000000, model 0x0
+    bindings          FAIL  8 tests - test_minmax_mag_matches_the_model
+                            and test_minmax_mag_named_rows, all four
+                            precisions each
+    mpfr              FAIL  44 value mismatches per format in the
+                            clause5+9.5+9.6 phase: "MISMATCH fp32 max_mag
+                            a=0x00000000 b=0x80000000 lib=0x80000000
+                            mpfr=0", and the same for +-inf
+
+The MPFR row is the one worth noting: `mpfr_max` says the answer is `+0`
+and `+inf`, so the equal-magnitude rule is scored by MPFR rather than by
+a restatement of it.
+
+### What was NOT run, and why
+
+- The RTL stages (`sim`, `lint`, `formal`) and the `selfcheck`,
+  `divsqrt`, `character`, `transcend`, `augmented`, `diff`, `seq`,
+  `reduce` and `soak-quick` stages were outside this package's gate
+  command. No opcode was consumed, no RTL file was touched, and no
+  arithmetic changed: the four new operations are host-side selections
+  with no opcode, and the status word is inert state that nothing reads
+  back. `clause5` WAS run, because it is the regression check that
+  matters here - every clause-5 entry point's flag write now goes
+  through the new seam.
+- The JavaScript surfaces (`node`, `wasm`) were left to the later agent
+  that does the JavaScript side, and `bindings/wasm` and `bindings/node`
+  were not touched. Both replayers list an unknown `.jsonl` as
+  "(ignoring ...)" rather than failing on it, so the four
+  `-minmaxmag` sets are ignored there until that step lands.
+- The language legs (`lang-*`) were not run: no example changed, and the
+  C ABI gained only additive entry points.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the ABI
+  version in `cft.h` were deliberately not touched - the integrator does
+  those once, for the whole 0.7 step. The header and the docs say "ABI
+  0.7" where they describe the new surface; `CFT_ABI_VERSION_MINOR`
+  still reads 6.
+- No device backend was exercised. The status word is a host-memory
+  field on the device handle, written by the host on every path
+  including the XRT one, so a card would not change it; the four
+  magnitude forms are host operations with no opcode and no pass to
+  issue.
+- One earlier attempt at this same gate (run id 20260903-213234-f52ebe0)
+  was abandoned and its state directory removed. It was killed
+  deliberately, four minutes in, because a comment-only commit landed
+  while it was running and a census that names one commit while
+  compiling another certifies nothing. Its `golden` FAIL marker was that
+  kill, not the suite.
+
+Three wording fixes in `cft.h`, `docs/DETERMINISM.md` and
+`docs/HOSTAPI.md` were held back until after this run for the same
+reason and are the only commit between it and the tip.
+
+## 2026-09-04 - ABI 0.7 package A: 5.4.1's formatOf arithmetic, and the double rounding nobody may use
+
+`bash verify/run.sh --fresh --only golden,vectors,libcft,formatof,status96,cpp,bindings,mpfr`
+at 9855955 on DESKTOP-T33SK86 (Windows, MINGW64), run id
+20260904-001646-9855955, on a clean tree, beside other work on the same
+box:
+
+    golden 373s  vectors 274s  libcft 431s  status96 1s  formatof 5s
+    bindings 137s  cpp 1370s  mpfr 480s
+
+    VERDICT: PASS, nothing skipped
+
+The tree is package A merged onto package B (`git merge shared-lanes` at
+07c95a3), so this run gates both together; `status96` is here for that
+reason and passed unchanged.
+
+### The finding, because it changed a published claim
+
+`docs/COMPLIANCE.md` said at 0.6 that the wide-to-narrow **division and
+square root** could be computed in the source format and converted down
+- that double rounding through an intermediate of at least 2p + 2 bits
+is innocuous for the basic operations, and this ladder satisfies
+53 >= 2x24 + 2, 113 >= 2x53 + 2 and 237 >= 2x113 + 2. **The rule does
+not apply in this configuration, and the difference is a hypothesis
+rather than a margin**: the theorem is about operands carrying the
+DESTINATION's precision, and here they carry the SOURCE's. A quotient
+or a root of two wide values can sit as close as it likes to a narrow
+midpoint, so the first rounding lands exactly on it, the second ties to
+even, and the answer is one ulp low with the same flag word. (The
+matrix was corrected at b80da94, before this merge.)
+
+`python/cft_golden/formatof.py`'s `double_rounding_witness()` constructs
+the counterexample from the format descriptors alone - for division,
+square root AND fused multiply-add - on every one of the six ordered
+narrowing pairs. All eighteen were built and run, and every one shows
+the composed route one ulp below the correct answer. The fused
+multiply-add family was run again against intermediate precisions of
+30, 53, 64, 113, 237, 400 and 1000 bits, all defeated, which is what
+"cannot be double rounded at any width" means when it is measured
+rather than asserted. So all six operations narrow the exact way, and
+`host/src/formatof.c` carries a restoring division and a
+digit-by-digit integer root for the two that needed them - neither of
+which the same-format library ever had to form, because `cft_div` and
+`cft_sqrt` reach their answers by Newton refinement instead.
+
+Every harness that carries the witnesses asserts BOTH halves of each:
+the implementation agrees with the model, and the composed route
+disagrees with both. A witness that stopped separating the two would
+leave those harnesses checking that two identical things are identical,
+so that is a failure rather than a pass.
+
+### The counts each stage printed
+
+| stage | printed |
+|---|---|
+| golden | 2011 passed, 5 skipped |
+| vectors | 168 sets |
+| libcft | 168 sets, 1,223,635 cases replayed through `cft_conformance`; api-test green |
+| status96 | 53,517 comparisons, C == model on every one |
+| formatof | 509,118 comparisons over 16 format pairs, 18 double-rounding witnesses, 8 refusal checks |
+| bindings | cftmpfr: 834 passed |
+| cpp | 213,691 checks at C++17 and again at C++20, each replaying 1,223,635 cases |
+| mpfr | 739,234 cases, 0 value mismatches, 0 flag mismatches |
+
+The formatOf work inside them:
+
+| layer | formatOf |
+|---|---|
+| `golden` | 445 tests in `python/tests/test_formatof.py` |
+| `vectors` | 80 new sets, `<sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl`, 35,250 cases per attribute and 176,250 over the five |
+| `libcft` | the replay grew from 84 sets / 1,037,657 cases at 0.6 to 168 / 1,223,635, of which 80 sets and 176,250 cases are this package's and 4 sets / 9,728 cases are package B's |
+| `formatof` | 509,118 comparisons: 22,470-22,770 for each same-format pair (which includes the alias check against `cft_run`/`cft_div`/`cft_sqrt`), 18,240-18,480 for each of the six widening pairs, and 51,363 for each of the six narrowing ones, where the pools carry the destination's midpoints and both its boundaries |
+| `mpfr` | 24,270 formatOf cases across the sixteen ordered pairs, zero value and zero flag mismatches |
+
+### The status word (package B's 7.1) through these six
+
+All six entry points end at one `cft_flags_emit(dev, acc, flags_out)`;
+no raw `*flags_out =` remains in `host/src/formatof.c`. The widening
+route runs MUTED, and that is load-bearing rather than tidy: every
+`cft_convert`, `cft_run`, `cft_div` and `cft_sqrt` it issues is
+internal to one formatOf operation, so without the mute
+`cft_formatof_div(1, 0)` would leave its scaffolding's inexact standing
+beside the divideByZero, and a widening conversion of a signaling NaN
+would put invalid in the word on its own account rather than as part of
+the operation. `api_test.c` asserts both, plus that the word
+accumulates across formatOf calls, and that a call signalling nothing
+neither adds to it nor lowers it.
+
+### The MPFR harness was wrong, and wrong the same way
+
+Worth its own heading, because the first run of this gate
+(20260903-230223-0c8884d) came back 7 of 8 with `mpfr` reporting 8
+value mismatches and 0 flag mismatches - and the library was right.
+
+Every one had the shape "library says the least subnormal, MPFR says
+zero, both say underflow|inexact". At binary64 -> binary32 under
+roundTiesToEven, a = `0x8037478c91215dae` (about -2^-968) and
+c = `0xb690000000000000` (exactly -2^-150): half of binary32's least
+subnormal IS 2^-150, so the exact sum is a hair above it in magnitude
+and round-to-nearest delivers -2^-149. Checked against exact rationals,
+the model and the library agree; MPFR did not.
+
+`fo_oracle` had reached the destination's subnormal grid through the
+MPFR manual's IEEE recipe - set emin to emin - p + 2, redo the
+operation at the destination's precision, `mpfr_check_range`,
+`mpfr_subnormalize`. That recipe needs the operation's own result to
+land at or above the least subnormal's exponent, so that the ternary it
+hands `subnormalize` still describes the rounding. A SAME-format sum
+always does: both operands are multiples of the format's own smallest
+quantum, so a non-zero exact sum is at least that quantum, which is
+twice the half-way point - which is why `oracle()` has never hit this
+in twenty-four million same-format cases. Across formats it does not.
+`mpfr_add` underflowed against the very emin set for it, flushed, and
+the ternary stopped carrying the hair. **The oracle was double
+rounding**, which is the exact mistake this package exists to refuse.
+
+It now rounds onto the destination's fixed grid explicitly, for all
+five attributes, by the construction the same file already used for
+9.5's roundTiesTowardZero: truncate toward zero at p + 2 bits with the
+exponent range left alone, scale onto the grid, split into an integer
+and a fraction with exact arithmetic, compare with one half. The
+truncation cannot move the decision, and the argument is in the source.
+The boundary is now pinned in two places that are NOT the oracle -
+`python/tests/test_formatof.py` builds "a hair above half the
+destination's least subnormal" from the two descriptors for every
+narrowing pair and every attribute with the exact tie beside it, and
+`api_test.c` carries the binary64 -> binary32 row and its negation.
+
+Two smaller things the failure exposed: the harness printed the wrong
+operand (the steering makes add and sub read a and c, and the report
+always printed b), so the first diagnosis was of a value the case never
+touched; and `docs/DETERMINISM.md`'s "MPFR is a full oracle here" now
+carries the one footnote it has earned.
+
+### The negative control
+
+`host/src/formatof.c`'s wide-to-narrow fused multiply-add was changed
+to round into the SOURCE format first and convert down - the double
+rounding this package refuses - and every gate rebuilt explicitly,
+since `make all` rebuilds neither `api-test` nor `mpfr-check`:
+
+| gate | caught | the first case it named |
+|---|---|---|
+| `api-test` | yes | formatOf-fusedMultiplyAdd binary64 -> binary32 gave `0x3f800000`, wanted `0x3f800001` |
+| `formatof` | yes | `fp64->fp32 fusedMultiplyAdd rne`: the same BITS, flags `0x10` where the model says `0x18` - the destination's underflow lost, because the source-format rounding was exact |
+| `libcft` and `cpp` (the `cft_conformance` replay) | yes | `fp64-to-fp32-formatof.jsonl:3591`, `0x3f800000` for `0x3f800001` |
+| `mpfr` | yes | 12 value and 48 flag mismatches at randoms=2, first `fp64 fma rne ->fp32` |
+| `bindings` | yes | all six `test_formatof_is_not_a_double_rounding` cases |
+| `cpp`'s wrapper checks | no, by design | 213,601 of 213,601 still passed. That test compares the typed path, the raw device method and `cft.h` against EACH OTHER, and the control changes all three identically; its conformance leg is what caught it. |
+| `golden`, `vectors` | no, by design | both are model-only, and the control was in the C |
+
+The row worth keeping is `formatof`'s: the first thing it found was not
+a wrong value but a LOST FLAG - the destination's underflow, which a
+rounding done in the source format never had a reason to raise. A
+harness that compared only encodings would have walked past that case
+and failed somewhere less informative.
+
+`git checkout host/src/formatof.c`, rebuild, and every one of them is
+green again. The control was run before the package-B merge; the merge
+changed the flag PATH (through `cft_flags_emit`) and not the
+arithmetic, and `api-test` covers the new path directly.
+
+### What was NOT run, and why
+
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was consumed and
+  no RTL file was touched. 5.4.1's cross-format forms are library entry
+  points over the existing opcodes, and the narrowing direction issues
+  no device pass at all.
+- `node` and `wasm`: the JavaScript surface is a separate step, as it
+  was at 0.6 and as it is for package B's four sets. Both replayers
+  list an unknown `.jsonl` as ignored rather than failing on it, so the
+  80 `-formatof` sets are ignored there until that step lands.
+- `selfcheck`, `divsqrt`, `clause5`, `character`, `transcend`,
+  `augmented`, `diff`, `seq`, `reduce`, `soak-quick`, the `lang-*` legs
+  and `images`: outside this gate's command. Nothing here changes the
+  arithmetic they cover; the six new entry points are additive, and the
+  files package A shares with the rest of the library were appended to,
+  never edited. `libcft` and `cpp` build and exercise all of it.
+- No device backend. The narrowing route is host arithmetic by
+  construction; the widening route issues ordinary `cft_run` /
+  `cft_div` / `cft_sqrt` passes, which a card would run and which
+  nothing here changes.
+- `README.md`, `docs/COMPATIBILITY.md` and the ABI version in `cft.h`
+  were deliberately left to the integrator, as for package B.
+  `CFT_ABI_VERSION_MINOR` still reads 6.
+- Two earlier attempts at this gate were abandoned and their state
+  directories removed. 20260903-222925-32ebeb0 ran on the pre-merge
+  tree and was stopped by PID because package B landed while it was
+  running - a census that straddles a source change certifies nothing;
+  it had reached `golden` ok 385 s, `vectors` ok 287 s and was inside
+  `libcft`'s replay. 20260903-230223-0c8884d is the run whose `mpfr`
+  FAIL is dissected above.
+
+## 2026-09-04 - the ABI 0.7 census: the conformance step, every stage the desktop can run
+
+Two runs, and the reason there are two is worth a paragraph.
+`bash verify/run.sh --fresh` at d4fe397 - the bump commit, with both 0.7
+packages and the JavaScript surface merged, julia and R on PATH this
+time - on DESKTOP-T33SK86 (Windows, MINGW64, Docker Desktop for the
+three container stages), run id 20260904-035237-d4fe397, on a clean tree,
+110 minutes wall with the box quiet:
+
+    golden 397s  vectors 308s  sim 605s  lint 47s  formal 29s
+    libcft 450s  selfcheck 1s  divsqrt 1s  clause5 2s  character 156s
+    transcend 755s  augmented 3s  status96 0s  formatof 6s  diff 3s
+    seq 1s  reduce 12s  bindings 141s  cpp 1497s  lang-cpp 1s
+    lang-rust 1s  lang-julia 2s  lang-go 1s  lang-csharp 6s  lang-r 9s
+    lang-fortran 1s  node FAIL  wasm FAIL  mpfr 489s  soak-quick 96s
+    images SKIP
+
+    VERDICT: 28 executed ok, 2 failed, 1 skipped by name
+    (images - xclbinutil is Linux-only)
+
+The two failures were one line each: `node` ("abi (cft.h says):
+expected 0.7, got 0.6") and `wasm` ("cftw_abi_version() = 6 (0.6);
+cft.h says 7 (0.7)"). The JavaScript step had measured its module on
+the tree BEFORE the integrator's bump, so the compiled module carried
+6 while the header said 7 - the ordering mistake the 0.6 step avoided
+by bumping first, and precisely the mismatch the two replayers exist
+to refuse. The module and page were rebuilt on the bumped tree, twice,
+in the pinned container - byte-identical: page sha256
+`e1b42b3873416e39…` (1,336,073 bytes), module `a1f0a4715516d3f6…`
+(211,869 bytes), the same bytes in `bindings/node/cft_node.wasm` - and
+committed as 2216e62, where `bash verify/run.sh --fresh --only
+vectors,node,wasm` ran as 20260904-054715-2216e62, 55 minutes:
+
+    vectors 333s  node 1656s  wasm 1316s
+
+    VERDICT: PASS, nothing skipped - node 125 passed, 0 failed; 2,055,270 cases over 316 set replays;
+    wasm VERIFY OK
+
+Nothing under host/, python/ or vectors/ changed between the two
+commits - the rebuild touched two binary files and the runner gained
+its `--budget` option - so the 28 library verdicts of the first run
+stand for the tree of the second. Together they are the census behind
+the conformance statement in docs/COMPLIANCE.md.
+
+The counts the stages printed, each the run's own:
+
+| stage | printed |
+|---|---|
+| golden | 2011 passed, 5 skipped |
+| libcft | 1223635 cases replayed through `cft_conformance`, 168 sets |
+| divsqrt | 29124 cases, library matches the model exactly |
+| clause5 | 145032 comparisons, C == model on every one |
+| character | 20819 comparisons, C == model on every one |
+| status96 | 53517 comparisons over 9.6's four magnitude forms, C == model on every one, with the status-word checks |
+| formatof | 509118 comparisons over all sixteen ordered format pairs, six operations, five attributes, C == model on every one |
+| transcend | 607217 comparisons over 39 functions, then 580977 again through the escalation path, C == model on every one |
+| augmented | 140088 comparisons, C == model on every one |
+| reduce | the tree, the scaling, the bits and the flags agree |
+| bindings | cftmpfr: 834 passed |
+| cpp | 213691 checks, C++17 and C++20 |
+| node | 125 passed, 0 failed; 2,055,270 cases over 316 set replays - a pass (second run) |
+| wasm | VERIFY OK (second run) |
+| mpfr | 739234 cases, 0 value mismatches, 0 flag mismatches |
+| soak-quick | 107886080 cases, 0 value mismatches, 0 flag mismatches |

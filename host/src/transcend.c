@@ -4789,8 +4789,7 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     if (cft_tr_arity(fn) == 2) {
@@ -4912,8 +4911,7 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
         acc |= fl;
         lane_store(f, (uint8_t *)d, i, &out);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 

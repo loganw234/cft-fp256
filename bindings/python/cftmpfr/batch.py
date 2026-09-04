@@ -132,7 +132,8 @@ def _normalise(ctx, operands):
 
 def _finish(ctx, out, fl, mirror):
     ctx.last_flags = fl
-    ctx.flags |= fl
+    # No sticky accumulation here from ABI 0.7: the call itself ORed fl
+    # into the library's status word, which is what ctx.flags reads.
     return mirror(out), fl
 
 
@@ -661,3 +662,163 @@ def scaled_prod_diff(ctx, x, y):
     scaled_prod_sum with a subtraction at the leaf, in every respect.
     Returns (Float, int, flag word)."""
     return _scaled(ctx, 2, x, y)
+
+
+# ---------------------------------------------------------------------
+# 754-2019 9.6's magnitude forms, one C call for the whole array.
+#
+# "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|, otherwise
+# minimum(x, y)", and the same shape for the other three. They take no
+# rounding attribute - the result is one of the operands, so there is
+# nothing to round - which is why the context's attribute does not
+# appear below and could not change an answer.
+#
+# The four min/max OPCODES (min, max, minnum, maxnum) are reached
+# through batch.map-style calls on the elementwise path; these four are
+# host entry points and have no opcode, which is why they are here by
+# name.
+# ---------------------------------------------------------------------
+
+def _minmax_mag(ctx, name, x, y):
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.minmax_mag(ctx._dev, name, ctx._fi.code, bx, by, n,
+                              ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def min_mag(ctx, x, y):
+    """out[i] = minimumMagnitude(x[i], y[i])."""
+    return _minmax_mag(ctx, "min_mag", x, y)
+
+
+def max_mag(ctx, x, y):
+    """out[i] = maximumMagnitude(x[i], y[i])."""
+    return _minmax_mag(ctx, "max_mag", x, y)
+
+
+def minnum_mag(ctx, x, y):
+    """out[i] = minimumMagnitudeNumber(x[i], y[i])."""
+    return _minmax_mag(ctx, "minnum_mag", x, y)
+
+
+def maxnum_mag(ctx, x, y):
+    """out[i] = maximumMagnitudeNumber(x[i], y[i])."""
+    return _minmax_mag(ctx, "maxnum_mag", x, y)
+
+
+# ---------------------------------------------------------------------
+# The formatOf arithmetic, 754-2019 clause 5.4.1
+#
+# The one family here whose operands and results are DIFFERENT SIZES,
+# which is why it does not reuse _normalise's mirror: that mirror was
+# built from the operand's context and would rebuild the container at
+# the source's element size. So the operands are normalised against the
+# SOURCE context and the container is rebuilt against the DESTINATION's,
+# by the same three rules - list in, list of destination Floats out;
+# bytes in, packed destination encodings out; ndarray in, an array of
+# the destination's natural dtype out.
+#
+# `src` is the operands' context and `dst` the result's. Both are real
+# Contexts because both formats' machinery is needed: the source's to
+# coerce an int or a float exactly, the destination's to carry the
+# attribute, the flag word and the result Floats.
+# ---------------------------------------------------------------------
+
+def _dest_dtype(dst):
+    """The numpy dtype an array of `dst` encodings comes back as:
+    float32 and float64 where numpy has the format, and a void dtype of
+    the right width where it does not."""
+    esz = dst._fi.esz
+    if esz == 4:
+        return _np.dtype("float32")
+    if esz == 8:
+        return _np.dtype("float64")
+    return _np.dtype("V%d" % esz)
+
+
+def _dest_mirror(dst, operands):
+    """A callable rebuilding the destination container from result
+    bytes, chosen from the first SEQUENCE operand's style."""
+    esz = dst._fi.esz
+    for x in operands:
+        if isinstance(x, Float):
+            continue
+        if isinstance(x, (bytes, bytearray, memoryview)):
+            return lambda out: out
+        if isinstance(x, (list, tuple)):
+            return lambda out: [Float(dst, out[i * esz:(i + 1) * esz])
+                                for i in range(len(out) // esz)]
+        if _np is not None and isinstance(x, _np.ndarray):
+            return (lambda out, dt=_dest_dtype(dst):
+                    _np.frombuffer(out, dtype=dt).copy())
+    return None
+
+
+def _formatof(dst, src, name, operands):
+    """The shared tail: normalise against the source, call, rebuild
+    against the destination."""
+    for x in operands:
+        if isinstance(x, Float) and x._ctx._fi.prec != src._fi.prec:
+            raise ValueError(
+                f"{x._ctx._fi.ieee_name} Float among {src._fi.ieee_name} "
+                f"operands: `src` names the ONE source format 5.4.1 "
+                f"takes, and a mixed operand is refused rather than "
+                f"silently widened.")
+    payloads, n, _ = _normalise(src, operands)
+    mirror = _dest_mirror(dst, operands)
+    if mirror is None:
+        raise TypeError(
+            "every operand is a broadcast scalar; batch needs at least "
+            "one sequence to set the element count (for scalars, the "
+            "Context methods are the right call)")
+    out, fl = _lib.formatof(dst._dev, name, src._fi.code, dst._fi.code,
+                            dst._rnd, tuple(payloads), n, dst._fi.esz)
+    return _finish(dst, out, fl, mirror)
+
+
+def formatof_add(dst, src, x, y):
+    """out[i] = x[i] + y[i] in `src`'s format, rounded ONCE into
+    `dst`'s.
+
+    `src` is passed rather than inferred, and that is not ceremony: a
+    bytes operand or a numpy array carries no format of its own, so the
+    element size a buffer is cut into has to be stated. Getting it wrong
+    would read the wrong number of bytes per element rather than give a
+    wrong answer, which is a failure worth making impossible to reach by
+    accident.
+
+    Every exception belongs to the destination. Returns (results, flag
+    word), with the results in the container style the first sequence
+    operand used."""
+    return _formatof(dst, src, "add", (x, y))
+
+
+def formatof_sub(dst, src, x, y):
+    """out[i] = x[i] - y[i] in `src`'s format, rounded once into
+    `dst`'s."""
+    return _formatof(dst, src, "sub", (x, y))
+
+
+def formatof_mul(dst, src, x, y):
+    """out[i] = x[i] * y[i] in `src`'s format, rounded once into
+    `dst`'s."""
+    return _formatof(dst, src, "mul", (x, y))
+
+
+def formatof_div(dst, src, x, y):
+    """out[i] = x[i] / y[i], correctly rounded once into `dst`'s
+    format - not the source-format quotient converted down, which is a
+    different answer near the destination's midpoints."""
+    return _formatof(dst, src, "div", (x, y))
+
+
+def formatof_sqrt(dst, src, x):
+    """out[i] = squareRoot(x[i]), correctly rounded once into `dst`'s
+    format, with the destination's overflow and underflow."""
+    return _formatof(dst, src, "sqrt", (x,))
+
+
+def formatof_fma(dst, src, x, y, z):
+    """out[i] = x[i]*y[i] + z[i] with ONE rounding into `dst`'s format -
+    the operation no double-rounding scheme imitates at any width."""
+    return _formatof(dst, src, "fma", (x, y, z))

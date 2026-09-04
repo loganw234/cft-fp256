@@ -15,6 +15,11 @@
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
 #   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
 #   bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
+#   bash verify/run.sh --budget quick   # ~10 min: every model-vs-C check, bindings,
+#                                      # the language legs, soak - after a host build
+#   bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded: quick + golden,
+#                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
+#   bash verify/run.sh --budget full    # everything: the census (adds sim, node, wasm, images)
 #
 # Why this exists: the gates grew one at a time - pytest, the cocotb
 # suite, yosys, the formal proofs, the library's contract tests, the
@@ -113,6 +118,21 @@ PY() {
 # ---- arguments -----------------------------------------------------
 SKIP="${SKIP:-}"
 ONLY="${ONLY:-}"
+BUDGET=""
+# The two named budgets. `quick` is every stage that finishes in
+# seconds or a couple of minutes on a loaded desktop - the ctypes
+# checks of the C against the model, the Python binding, the language
+# legs, the soak - and it pre-builds the host library because those
+# stages load it rather than build it. `gate` is what a package's
+# reviewer ran before merging in September 2026: quick plus the
+# model's own suite, the vectors, the million-case replay, the
+# transcendentals, MPFR, the C++ header and the two RTL gates that
+# need only a container. `full` is the census. Measured on the
+# Windows desktop (verify/README.md has the table): quick ~10 min,
+# gate ~1 h with the box quiet and 2-3 h loaded, full ~2 h quiet and
+# ~4 h loaded; on the WSL distro the replay stages take seconds.
+BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,soak-quick
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -123,6 +143,13 @@ while [ $# -gt 0 ]; do
               SKIP="$SKIP,$2"; shift 2;;
     --only)   [ $# -ge 2 ] || { echo "--only needs a value" >&2; exit 2; }
               ONLY="$ONLY,$2"; shift 2;;
+    --budget) [ $# -ge 2 ] || { echo "--budget needs quick, gate or full" >&2; exit 2; }
+              case "$2" in
+                quick) BUDGET=quick; ONLY="$ONLY,$BUDGET_QUICK";;
+                gate)  BUDGET=gate;  ONLY="$ONLY,$BUDGET_GATE";;
+                full)  BUDGET=full;;
+                *) echo "--budget: unknown budget '$2' (quick, gate, full)" >&2; exit 2;;
+              esac; shift 2;;
     --resume) if [ $# -gt 1 ] && [[ ${2:-} != --* ]]; then RESUME=$2; shift 2
               else RESUME=last; shift; fi;;
     --fresh)  FRESH=1; shift;;
@@ -353,6 +380,15 @@ need() {  # docker|host-cc|xclbinutil ...
 # it, vectors before their replay, the library before its sweeps.
 
 
+# A quick budget skips the libcft stage, which is where the host
+# library gets built in a gate or full run; the ctypes checks that
+# follow load the library rather than build it, so build it here.
+# Not silent: a build that fails prints, and the first stage that
+# needs the library then fails by name instead of mysteriously.
+if [ "$BUDGET" = quick ]; then
+  HOSTMAKE all >/dev/null 2>&1 || HOSTMAKE all || echo "quick budget: host build failed" >&2
+fi
+
 need python pytest
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q
@@ -459,6 +495,34 @@ stage transcend "the thirty-nine transcendentals vs the model, and again through
 need host-cc python
 stage augmented "the clause-9.5 augmented operations vs the model: both outputs, flags, and the exact pair identity" -- \
   PY "$ROOT/host/tests/augmented_check.py"
+
+# ABI 0.7 package B: the sticky status word (7.1, 5.7.4), the three
+# conformance predicates (5.7.1), and clause 9.6's four magnitude forms
+# of minimum and maximum. Its own stage rather than a line inside
+# clause5, because half of what it checks is not arithmetic at all: the
+# status word is STATE, the golden model has nothing corresponding to
+# it, and every assertion about it is against a sentence of 7.1 or
+# 5.7.4 rather than against a computed value. The 9.6 half is scored
+# the way clause5 is - the model defines every bit, the C is replayed
+# against it - over seeded pools at all four formats, including every
+# equal-magnitude pair, which is the family 9.6 defers to the base
+# operation on and the one an implementation gets wrong.
+need host-cc python
+stage status96 "the 7.1/5.7.4 status word, the 5.7.1 predicates, and clause 9.6's four magnitude forms vs the model" -- \
+  PY "$ROOT/host/tests/minmax_mag_check.py"
+
+# The formatOf arithmetic of 754-2019 5.4.1. Its own stage rather than a
+# line inside clause5, because what it checks is different in kind: TWO
+# formats per call, sixteen ordered pairs, and the one family whose
+# every exception belongs to a format the operands are not in. It also
+# carries the eighteen double-rounding witnesses - the cases that
+# separate this implementation from the plausible one that rounds in the
+# source format and converts down - and asserts BOTH halves of each, so
+# a witness that stopped separating the two fails the stage rather than
+# quietly passing it.
+need host-cc python
+stage formatof "the clause-5.4.1 formatOf arithmetic vs the model: every ordered pair, the destination's exceptions, and the double-rounding witnesses" -- \
+  PY "$ROOT/host/tests/formatof_check.py"
 
 need host-cc python
 stage diff "library vs model over the alignment boundary" -- \

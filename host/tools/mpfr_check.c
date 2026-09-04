@@ -201,7 +201,13 @@ enum {
      * undersell the campaign while reporting only the larger would
      * oversell its independence. */
     T_RSUM, T_RDOT, T_RSUMSQ, T_RSUMABS,
-    T_SPROD, T_SPROD_SUM, T_SPROD_DIFF, NTALLY
+    T_SPROD, T_SPROD_SUM, T_SPROD_DIFF,
+    /* 754-2019 9.6's four magnitude forms (ABI 0.7) */
+    T_MINMAG, T_MINNUM_MAG, T_MAXMAG, T_MAXNUM_MAG,
+    /* the formatOf arithmetic of 5.4.1, tallied by SOURCE format like
+     * convert - the destination is named in the run's per-pair line */
+    T_FO_ADD, T_FO_SUB, T_FO_MUL, T_FO_DIV, T_FO_SQRT, T_FO_FMA,
+    NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -220,7 +226,9 @@ static const char *const TALLY_NAME[NTALLY] = {
     "from_dec", "to_dec", "from_hex", "to_hex",
     "aug_add", "aug_sub", "aug_mul",
     "sum", "dot", "sumsq", "sumabs",
-    "sprod", "sprod_sum", "sprod_diff"
+    "sprod", "sprod_sum", "sprod_diff",
+    "min_mag", "minnum_mag", "max_mag", "maxnum_mag",
+    "fo_add", "fo_sub", "fo_mul", "fo_div", "fo_sqrt", "fo_fma"
 };
 static uint64_t tally[NTALLY][4];
 
@@ -2732,6 +2740,232 @@ static void check_chars(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 }
 
+/* ---- 9.6's magnitude forms of minimum and maximum ------------------ *
+ *
+ * WHICH HALF IS AN ORACLE AND WHICH IS A RESTATEMENT. This matters
+ * more here than anywhere else in this file, because the operation is
+ * a selection and a careless oracle would be this library's own logic
+ * written twice.
+ *
+ * The ORACLE half is MPFR's, and it is the whole numeric content of
+ * 9.6's first two clauses:
+ *
+ *   * mpfr_cmpabs(av, bv) decides |x| against |y|. MPFR converts the
+ *     encodings exactly (enc_to_mpfr) and compares magnitudes in its
+ *     own arbitrary-precision arithmetic; nothing in libcft or in the
+ *     golden model contributes to that answer, and at fp128/fp256 it
+ *     is the only implementation on this machine that can give one.
+ *   * mpfr_min / mpfr_max decide the "otherwise" when the magnitudes
+ *     are equal. The MPFR manual defines those exactly as 754 defines
+ *     minimum and maximum on numbers, signed zeros included: "If op1
+ *     and op2 are zeros of different signs, then rop is set to -0
+ *     (resp. +0)". So the -0/+0 rule, and the choice between +3 and
+ *     -3, come from MPFR rather than from a rule restated here.
+ *
+ * The RESTATEMENT half is the NaN handling, and it has to be, because
+ * MPFR cannot supply it:
+ *
+ *   * MPFR has no signaling NaN, so "an invalid operation exception is
+ *     signaled" (9.6) has no counterpart to compare against.
+ *   * mpfr_min implements only the ...Number NaN rule ("if op1 or op2
+ *     is NaN, then rop is set to the other value"), which is
+ *     minimumNumber's. The plain minimum's rule - "a quiet NaN if
+ *     either operand is a NaN" - is the opposite, and MPFR has no
+ *     function that does it.
+ *   * A NaN has no magnitude, so mpfr_cmpabs on one is meaningless
+ *     (MPFR sets erange and returns 0); the NaN cases must be taken
+ *     out before the oracle is consulted, which is a decision about
+ *     the standard's text and not a measurement.
+ *
+ * So: every NaN row below is this file reading 9.6 and 6.2, scored
+ * against libcft reading the same clauses - two readings, not two
+ * oracles - and every numeric row is MPFR's answer. The golden model
+ * is the third opinion on both halves and host/tests/
+ * minmax_mag_check.py is where that comparison lives.
+ *
+ * The comparison is a memcmp of ENCODINGS rather than agree()'s value
+ * comparison, because 9.6 selects an operand: an implementation that
+ * returned a numerically equal but differently encoded result - the
+ * wrong one of two NaNs, or +0 where -0 was asked for - would pass a
+ * value test and be wrong.
+ */
+
+/* Which operand 9.6 selects, and with which flags, for one pair.
+ * Writes the expected encoding into `want`. */
+static void mm_oracle(const fdesc *f, int fn, const uint8_t *a,
+                      const uint8_t *b, uint8_t *want, uint32_t *wf)
+{
+    const int is_max = (fn == 2 || fn == 3);
+    const int is_num = (fn == 1 || fn == 3);
+    cls ca, cb;
+    mpfr_t av, bv, pick;
+    int c;
+
+    classify(f, a, &ca);
+    classify(f, b, &cb);
+    *wf = (ca.is_snan || cb.is_snan) ? CFT_FLAG_INVALID : 0u;
+
+    /* --- the restatement: 9.6's "otherwise" for a NaN operand --- */
+    if (ca.is_nan || cb.is_nan) {
+        if (!is_num || (ca.is_nan && cb.is_nan)) {
+            /* The canonical quiet NaN this contract delivers: sign
+             * clear, every exponent bit set, the quiet bit set, the
+             * payload zero. Built from the format's own widths rather
+             * than transcribed per format. */
+            int k;
+            memset(want, 0, f->esz);
+            for (k = f->man_w; k < f->man_w + f->exp_w; k++)
+                want[k >> 3] |= (uint8_t)(1u << (k & 7));
+            want[(f->man_w - 1) >> 3] |=
+                (uint8_t)(1u << ((f->man_w - 1) & 7));
+        } else {
+            memcpy(want, ca.is_nan ? b : a, f->esz);
+        }
+        return;
+    }
+
+    /* --- the oracle: MPFR decides both magnitude and tie --- */
+    mpfr_init2(av, f->p);
+    mpfr_init2(bv, f->p);
+    enc_to_mpfr(f, a, av);
+    enc_to_mpfr(f, b, bv);
+    c = mpfr_cmpabs(av, bv);
+    if (c != 0) {
+        memcpy(want, (is_max ? (c > 0) : (c < 0)) ? a : b, f->esz);
+    } else {
+        /* Equal magnitudes. mpfr_min/mpfr_max ARE 754's minimum and
+         * maximum on numbers, so let them choose the value and map it
+         * back to the operand that carries it. With equal magnitudes
+         * the two operands differ at most in their sign bit, so the
+         * sign of MPFR's answer names one of them. */
+        mpfr_init2(pick, f->p);
+        if (is_max)
+            mpfr_max(pick, av, bv, MPFR_RNDN);
+        else
+            mpfr_min(pick, av, bv, MPFR_RNDN);
+        {
+            const int neg = mpfr_signbit(pick) != 0;
+            if (ca.sign == cb.sign)
+                memcpy(want, a, f->esz);   /* identical encodings */
+            else
+                memcpy(want, (ca.sign == neg) ? a : b, f->esz);
+        }
+        mpfr_clear(pick);
+    }
+    mpfr_clear(av);
+    mpfr_clear(bv);
+}
+
+static cft_status mm_lib(const fdesc *f, int fn, const uint8_t *a,
+                         const uint8_t *b, uint8_t *d, uint32_t *fl)
+{
+    switch (fn) {
+    case 0:  return cft_min_mag(dev, f->fmt, a, b, d, 1, fl);
+    case 1:  return cft_minnum_mag(dev, f->fmt, a, b, d, 1, fl);
+    case 2:  return cft_max_mag(dev, f->fmt, a, b, d, 1, fl);
+    default: return cft_maxnum_mag(dev, f->fmt, a, b, d, 1, fl);
+    }
+}
+
+static const char *const MMN[4] = { "min_mag", "minnum_mag",
+                                    "max_mag", "maxnum_mag" };
+static const int MM_TALLY[4] = { T_MINMAG, T_MINNUM_MAG,
+                                 T_MAXMAG, T_MAXNUM_MAG };
+
+/* One case's verdict. Like c5_judge, but the value test is a memcmp of
+ * encodings: 9.6 names an operand, so "numerically equal" is not the
+ * question. The mpfr value is built only for the report. */
+static void mm_judge(int fj, int fn, const fdesc *f, const uint8_t *a,
+                     const uint8_t *b, const uint8_t *got,
+                     const uint8_t *want, uint32_t gf, uint32_t wf,
+                     cft_status st)
+{
+    const int vbad = (st != CFT_OK) || memcmp(got, want, f->esz) != 0;
+    const int fbad = (gf != wf);
+    if (vbad)
+        mismatches++;
+    if (fbad)
+        flag_mismatches++;
+    if (vbad || fbad) {
+        mpfr_t w;
+        mpfr_init2(w, f->p);
+        enc_to_mpfr(f, want, w);
+        report_c5(MMN[fn], "-", f, a, b, f, got, w, gf, wf, vbad,
+                  st != CFT_OK ? "(status!=OK)" : NULL);
+        mpfr_clear(w);
+    }
+    cases++;
+    tally[MM_TALLY[fn]][fj]++;
+}
+
+static void check_minmax_mag(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t want[32], got[32], aflip[32], bflip[32];
+    int fn, i, j, sa, sb;
+
+    for (fn = 0; fn < 4; fn++)
+        for (i = 0; i < pn; i++)
+            for (j = 0; j < pn; j++)
+                /* Both sign combinations of every pair, because the
+                 * sign has no vote in 9.6's magnitude clauses and
+                 * exactly the deciding vote in its "otherwise" - an
+                 * implementation that lets it in early fails only on
+                 * the mixed pairs, and only those. */
+                for (sa = 0; sa <= 1; sa++)
+                    for (sb = 0; sb <= 1; sb++) {
+                        const uint8_t *a, *b;
+                        uint32_t gf = 0, wf = 0;
+                        cft_status st;
+
+                        if (sa) {
+                            memcpy(aflip, pool[i], 32);
+                            enc_neg(f, aflip);
+                            a = aflip;
+                        } else {
+                            a = pool[i];
+                        }
+                        if (sb) {
+                            memcpy(bflip, pool[j], 32);
+                            enc_neg(f, bflip);
+                            b = bflip;
+                        } else {
+                            b = pool[j];
+                        }
+                        mm_oracle(f, fn, a, b, want, &wf);
+                        memset(got, 0, sizeof got);
+                        st = mm_lib(f, fn, a, b, got, &gf);
+                        mm_judge(fj, fn, f, a, b, got, want, gf, wf, st);
+                    }
+}
+
+/* Equal magnitudes are where the four differ from a plain magnitude
+ * compare, and a random pool reaches them almost never. This aims at
+ * them directly: every pool entry against ITSELF and against its own
+ * negation, which is every equal-magnitude pair there is. */
+static void check_minmax_mag_ties(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t want[32], got[32], neg[32];
+    int fn, i, k;
+
+    for (fn = 0; fn < 4; fn++)
+        for (i = 0; i < pn; i++) {
+            memcpy(neg, pool[i], 32);
+            enc_neg(f, neg);
+            for (k = 0; k < 4; k++) {
+                const uint8_t *a = (k & 1) ? neg : pool[i];
+                const uint8_t *b = (k & 2) ? neg : pool[i];
+                uint32_t gf = 0, wf = 0;
+                cft_status st;
+                mm_oracle(f, fn, a, b, want, &wf);
+                memset(got, 0, sizeof got);
+                st = mm_lib(f, fn, a, b, got, &gf);
+                mm_judge(fj, fn, f, a, b, got, want, gf, wf, st);
+            }
+        }
+}
+
 /* ---- the transcendentals ------------------------------------------- *
  *
  * The nine functions of ABI 0.3 and the eleven of ABI 0.4 against
@@ -4329,6 +4563,517 @@ static void check_reduce(int fj, uint8_t pool[][32], int pn, int nvec)
     }
 }
 
+/* ---- the formatOf arithmetic of clause 5.4.1 ----------------------- *
+ *
+ * MPFR IS A FULL ORACLE HERE, with no footnote, and it is worth saying
+ * why: 5.4.1's cross-format operations are DEFINED as "the operands
+ * read at their own precision, the infinitely precise result rounded
+ * once to the destination", and that sentence is a literal description
+ * of mpfr_add / mpfr_mul / mpfr_fma / mpfr_div / mpfr_sqrt with the
+ * operand variables at the source precision and the result variable at
+ * the destination's. Nothing here restates a rule the way the augmented
+ * harness has to restate 9.5's tie, and nothing here reproduces a shape
+ * the way the reduction harness reproduces the tree. The library and
+ * MPFR are told the same thing and their answers are compared.
+ *
+ * The exponent range is the DESTINATION's, and it is handled exactly as
+ * oracle() handles the same-format case: the unbounded-range result at
+ * the destination's precision decides overflow and tininess (the same
+ * after-rounding test round_pack applies), and a subnormal landing is
+ * re-rounded through the MPFR manual's recipe - emin/emax set to the
+ * destination's, mpfr_check_range, mpfr_subnormalize with the ternary.
+ * RMM is the p+1 construction the rest of this file uses, at the
+ * destination's p.
+ *
+ * The three DOUBLE-ROUNDING WITNESSES are built here too, from the two
+ * descriptors with GMP integers - the cases where computing in the
+ * source format and converting down gives a different answer from the
+ * single rounding 5.4.1 asks for. They are the only cases in this file
+ * whose expected answer would be reached by a plausible wrong
+ * implementation, so they are constructed rather than hoped for.
+ */
+
+/* Add one to a little-endian encoding: nextUp for a positive finite
+ * value that is not the largest, nextDown for a negative one. */
+static void enc_inc(uint8_t *b, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (++b[i] != 0)
+            return;
+    }
+}
+
+static void enc_dec(uint8_t *b, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (b[i]-- != 0)
+            return;
+    }
+}
+
+/* One case through MPFR, with the operands at fs's precision and the
+ * result at fd's - oracle()'s body with the one format split in two.
+ * The duplication is deliberate: oracle() is the same-format campaign's
+ * and is left exactly as it was, so a change here cannot silently
+ * re-verdict 24 million same-format cases. */
+static void fo_oracle(const fdesc *fs, const fdesc *fd, mop op, int mi,
+                      const uint8_t *ba, const uint8_t *bb,
+                      const uint8_t *bc, mpfr_t out, uint32_t *flags)
+{
+    mpfr_t a, b, c, runb, r, y;
+    cls ca, cb, cc;
+    int tunb = 0, inexact, nan_in = 0,
+        is_rmm = (MODES[mi].cr == CFT_RMM);
+    mpfr_rnd_t rnd = MODES[mi].mr;
+    uint32_t fl = 0;
+
+    classify(fs, ba, &ca);
+    classify(fs, bb, &cb);
+    classify(fs, bc, &cc);
+
+    mpfr_init2(a, fs->p); mpfr_init2(b, fs->p); mpfr_init2(c, fs->p);
+    mpfr_init2(runb, fd->p); mpfr_init2(r, fd->p);
+    mpfr_init2(y, fd->p + 1);
+    enc_to_mpfr(fs, ba, a);
+    enc_to_mpfr(fs, bb, b);
+    enc_to_mpfr(fs, bc, c);
+
+    {
+        int use_b = (op == OP_MUL || op == OP_FMA || op == OP_DIV);
+        int use_c = (op == OP_ADD || op == OP_SUB || op == OP_FMA);
+        if (ca.is_snan || (use_b && cb.is_snan) || (use_c && cc.is_snan))
+            fl |= CFT_FLAG_INVALID;
+        nan_in = ca.is_nan || (use_b && cb.is_nan) || (use_c && cc.is_nan);
+    }
+    if (op == OP_DIV && cb.is_zero && !ca.is_zero && !ca.is_nan &&
+        !ca.is_inf)
+        fl |= CFT_FLAG_DIVBYZERO;
+
+    if (is_rmm) {
+        int t1;
+        raw_op(y, op, a, b, c, MPFR_RNDZ, &t1);
+        if (!mpfr_number_p(y) || mpfr_zero_p(y)) {
+            mpfr_set(runb, y, MPFR_RNDN);
+            tunb = 0;
+        } else {
+            rmm_round(runb, y, t1 != 0, fd->p);
+            tunb = !mpfr_equal_p(runb, y) || t1;
+        }
+    } else {
+        raw_op(runb, op, a, b, c, rnd, &tunb);
+    }
+
+    if (mpfr_nan_p(runb) && !nan_in)
+        fl |= CFT_FLAG_INVALID;
+
+    inexact = (tunb != 0);
+
+    if (mpfr_nan_p(runb) || mpfr_inf_p(runb) || mpfr_zero_p(runb)) {
+        mpfr_set(out, runb, MPFR_RNDN);
+        if (inexact) fl |= CFT_FLAG_INEXACT;
+        *flags = fl;
+        goto fo_done;
+    }
+
+    {
+        mpfr_exp_t e_unb = mpfr_get_exp(runb);
+        long e_res = (long)e_unb - 1;
+
+        if (e_res > fd->emax) {
+            int away = (rnd == MPFR_RNDU && mpfr_sgn(runb) > 0) ||
+                       (rnd == MPFR_RNDD && mpfr_sgn(runb) < 0) ||
+                       rnd == MPFR_RNDN || is_rmm;
+            if (rnd == MPFR_RNDZ) away = 0;
+            if (away)
+                mpfr_set_inf(out, mpfr_sgn(runb));
+            else {
+                mpfr_set_ui_2exp(out, 1, fd->emax + 1, MPFR_RNDN);
+                mpfr_nextbelow(out);
+                if (mpfr_sgn(runb) < 0) mpfr_neg(out, out, MPFR_RNDN);
+            }
+            *flags = fl | CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+            goto fo_done;
+        }
+
+        if (e_res >= fd->emin) {
+            mpfr_set(out, runb, MPFR_RNDN);
+            if (inexact) fl |= CFT_FLAG_INEXACT;
+            *flags = fl;
+            goto fo_done;
+        }
+
+        /* SUBNORMAL LANDING, and this is the one place fo_oracle does
+         * NOT follow oracle()'s body - it cannot, and finding out why
+         * cost a gate.
+         *
+         * oracle() uses the MPFR manual's IEEE recipe here: set emin to
+         * emin - p + 2, redo the operation at the format's precision,
+         * then mpfr_check_range + mpfr_subnormalize with the ternary.
+         * That recipe assumes the operation's own result lands at or
+         * above the least subnormal's exponent, so that the ternary it
+         * hands subnormalize still describes the rounding. In a
+         * SAME-format addition it always does: both operands are
+         * multiples of the format's smallest quantum, so a non-zero
+         * exact sum is at least that quantum, which is twice the
+         * half-way point below the least subnormal. Across formats it
+         * does not. binary64's 2^-968 added to -2^-150 is a hair over
+         * half of binary32's least subnormal; the recipe's mpfr_add
+         * underflows against the very emin that was set for it, flushes,
+         * and the ternary stops carrying the hair. The result comes back
+         * -0 where round-to-nearest says -2^-149, on eight cases in this
+         * campaign, and the harness blamed the library.
+         *
+         * So the destination's subnormal grid is rounded onto EXPLICITLY,
+         * for all five attributes, by the construction the RMM branch of
+         * this file already used and c5_round_into documents: truncate
+         * the exact result to p + 2 bits toward zero with the exponent
+         * range left alone (the ternary is then a faithful sticky),
+         * scale onto the grid, split into an integer and a fraction with
+         * exact arithmetic, and compare that fraction with one half.
+         *
+         * The truncation cannot move the decision: the fraction is a
+         * multiple of a granule no larger than 2^-2 of a grid unit and
+         * the truncation error is below one granule, so a fraction under
+         * one half stays under it, and a fraction exactly at one half
+         * with a non-zero sticky is strictly above it. Every step is
+         * MPFR's or GMP's; the only thing this file contributes is
+         * clause 4.3's decision table, which is what an oracle for a
+         * rounding has to contribute.
+         *
+         * Tininess is already settled: this branch was reached because
+         * the UNBOUNDED p-bit rounding fell below emin, which is 7.5's
+         * after-rounding test, so underflow rides with inexact even when
+         * the grid rounding carries up to the least normal. */
+        {
+            int t1, up, sign, at_half, above_half, lost;
+            long grid = fd->emin - fd->man_w;
+            mpz_t n;
+            mpfr_t scaled, frac, half;
+
+            raw_op(y, op, a, b, c, MPFR_RNDZ, &t1);
+            sign = mpfr_signbit(y) ? 1 : 0;
+            mpz_init(n);
+            mpfr_init2(scaled, fd->p + 8);
+            mpfr_init2(frac, fd->p + 8);
+            mpfr_init2(half, 8);
+            mpfr_abs(scaled, y, MPFR_RNDN);
+            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);   /* exact */
+            mpfr_get_z(n, scaled, MPFR_RNDZ);                 /* floor */
+            mpfr_sub_z(frac, scaled, n, MPFR_RNDN);           /* exact */
+            mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+            at_half = (mpfr_cmp(frac, half) == 0);
+            above_half = (mpfr_cmp(frac, half) > 0);
+            lost = (!mpfr_zero_p(frac) || t1 != 0);
+
+            switch (MODES[mi].cr) {
+            case CFT_RTZ:
+                up = 0;
+                break;
+            case CFT_RDN:
+                up = sign && lost;
+                break;
+            case CFT_RUP:
+                up = !sign && lost;
+                break;
+            case CFT_RMM:
+                up = above_half || at_half;
+                break;
+            default:            /* CFT_RNE */
+                up = above_half ||
+                     (at_half && (t1 != 0 || mpz_odd_p(n)));
+                break;
+            }
+            if (up)
+                mpz_add_ui(n, n, 1);
+            mpfr_set_prec(out, fd->p);
+            mpfr_set_z_2exp(out, n, grid, MPFR_RNDN);         /* exact */
+            if (sign)
+                mpfr_neg(out, out, MPFR_RNDN);
+            if (lost || inexact)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            mpz_clear(n);
+            mpfr_clear(scaled); mpfr_clear(frac); mpfr_clear(half);
+            *flags = fl;
+        }
+        goto fo_done;
+    }
+
+fo_done:
+    mpfr_clear(a); mpfr_clear(b); mpfr_clear(c);
+    mpfr_clear(runb); mpfr_clear(r); mpfr_clear(y);
+}
+
+/* The library side. `op` is the same mop the oracle took. */
+static cft_status fo_lib(const fdesc *fs, const fdesc *fd, mop op,
+                         cft_round rnd, const uint8_t *a, const uint8_t *b,
+                         const uint8_t *c, uint8_t *d, uint32_t *fl)
+{
+    switch (op) {
+    case OP_ADD:  return cft_formatof_add(dev, fs->fmt, fd->fmt, rnd,
+                                          a, c, d, 1, fl, NULL);
+    case OP_SUB:  return cft_formatof_sub(dev, fs->fmt, fd->fmt, rnd,
+                                          a, c, d, 1, fl, NULL);
+    case OP_MUL:  return cft_formatof_mul(dev, fs->fmt, fd->fmt, rnd,
+                                          a, b, d, 1, fl, NULL);
+    case OP_FMA:  return cft_formatof_fma(dev, fs->fmt, fd->fmt, rnd,
+                                          a, b, c, d, 1, fl, NULL);
+    case OP_DIV:  return cft_formatof_div(dev, fs->fmt, fd->fmt, rnd,
+                                          a, b, d, 1, fl, NULL);
+    default:      return cft_formatof_sqrt(dev, fs->fmt, fd->fmt, rnd,
+                                           a, d, 1, fl, NULL);
+    }
+}
+
+/* An exact value into a source encoding, or 0 if the source cannot hold
+ * it. mpfr_to_enc wants a value already at the format's precision, so
+ * the caller's variable is set at that precision and the ternary says
+ * whether anything was lost. */
+static int fo_exact_enc(const fdesc *fs, mpfr_srcptr v, uint8_t *b)
+{
+    mpfr_t t;
+    int tern, ok;
+    mpfr_init2(t, fs->p);
+    tern = mpfr_set(t, v, MPFR_RNDN);
+    ok = (tern == 0) && mpfr_to_enc(fs, t, b);
+    mpfr_clear(t);
+    return ok;
+}
+
+/* The three double-rounding witnesses for (fs -> fd), built from the
+ * descriptors. `which`: 0 fma, 1 div, 2 sqrt. Returns 1 when the pair
+ * has one - which is exactly when fd is strictly narrower.
+ *
+ * Each puts the exact result a hair ABOVE a midpoint of the DESTINATION
+ * grid and closer to it than half an ulp of the SOURCE, so a first
+ * rounding into the source lands on the midpoint and the second ties to
+ * even, downward, while the single correct rounding goes up. */
+static int fo_witness(const fdesc *fs, const fdesc *fd, int which,
+                      uint8_t *ba, uint8_t *bb, uint8_t *bc)
+{
+    long ps = fs->p, pd = fd->p;
+    mpz_t M, Y, T;
+    mpfr_t v;
+    int ok = 0;
+
+    if (pd >= ps)
+        return 0;
+    memset(ba, 0, 32); memset(bb, 0, 32); memset(bc, 0, 32);
+    mpz_init(M); mpz_init(Y); mpz_init(T);
+    mpfr_init2(v, (mpfr_prec_t)(2 * ps + 8));
+
+    mpz_ui_pow_ui(M, 2, (unsigned long)pd);
+    mpz_add_ui(M, M, 1);                       /* M = 2^pd + 1, odd */
+
+    if (which == 0) {
+        /* a = M * 2^-pd is the destination midpoint just above 1 and a
+         * source value; b = 1; c = the source's least subnormal, which
+         * is positive and far below the source's own half-ulp at 1. */
+        mpfr_set_z_2exp(v, M, -pd, MPFR_RNDN);
+        if (!fo_exact_enc(fs, v, ba))
+            goto done;
+        mpfr_set_ui(v, 1, MPFR_RNDN);
+        if (!fo_exact_enc(fs, v, bb))
+            goto done;
+        bc[0] = 1;                             /* 2^(emin - man_w) */
+        ok = 1;
+        goto done;
+    }
+
+    if (which == 1) {
+        /* Y = 2^(ps-1) + 2^(ps-pd) - 1 satisfies Y == -1 (mod 2^pd), so
+         * M*Y is one unit short of a multiple of the source grid at
+         * weight 2^(1-pd-ps); the dividend is that product plus one
+         * unit, and x/y is the midpoint plus one unit over y. */
+        mpz_ui_pow_ui(Y, 2, (unsigned long)(ps - 1));
+        mpz_ui_pow_ui(T, 2, (unsigned long)(ps - pd));
+        mpz_add(Y, Y, T);
+        mpz_sub_ui(Y, Y, 1);
+        mpfr_set_z_2exp(v, Y, 1 - ps, MPFR_RNDN);
+        if (!fo_exact_enc(fs, v, bb))
+            goto done;
+        mpz_mul(T, M, Y);
+        mpz_add_ui(T, T, 1);
+        mpfr_set_z_2exp(v, T, 1 - pd - ps, MPFR_RNDN);
+        if (!fo_exact_enc(fs, v, ba))
+            goto done;
+        ok = 1;
+        goto done;
+    }
+
+    /* which == 2: the square of the midpoint needs 2*pd + 1 bits, which
+     * every ordered pair of this ladder holds; the source value one ulp
+     * above it has a root a quarter of a source ulp above the midpoint. */
+    if (2 * pd + 1 > ps)
+        goto done;
+    mpz_mul(T, M, M);
+    mpfr_set_z_2exp(v, T, -2 * pd, MPFR_RNDN);
+    if (!fo_exact_enc(fs, v, ba))
+        goto done;
+    enc_inc(ba, fs->esz);
+    ok = 1;
+
+done:
+    mpz_clear(M); mpz_clear(Y); mpz_clear(T);
+    mpfr_clear(v);
+    return ok;
+}
+
+/* The second operand an operation actually reads, for the report. The
+ * steering behind cft.h's opcodes makes add and sub read a and c while
+ * mul and div read a and b, so a report that always printed b would
+ * name a value the failing case never looked at. */
+static const uint8_t *fo_second(mop op, const uint8_t *b, const uint8_t *c)
+{
+    if (op == OP_SQRT)
+        return 0;
+    if (op == OP_ADD || op == OP_SUB)
+        return c;
+    return b;
+}
+
+static const mop FO_OPS[6] = { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_SQRT,
+                               OP_FMA };
+static const int FO_TALLY[6] = { T_FO_ADD, T_FO_SUB, T_FO_MUL, T_FO_DIV,
+                                 T_FO_SQRT, T_FO_FMA };
+
+static void check_formatof(int sfi, int dfi, uint8_t pool[][32], int pn)
+{
+    const fdesc *fs = &FMTS[sfi], *fd = &FMTS[dfi];
+    uint8_t extra[64][32];
+    uint8_t d[32];
+    int ne = 0, i, oi, mi;
+    char note[24];
+    mpfr_t v;
+
+    snprintf(note, sizeof note, "->%s", fd->name);
+    mpfr_init2(v, (mpfr_prec_t)(fd->p + 4));
+
+    /* The DESTINATION's landmarks, expressed in the source. Every one
+     * of them is an unremarkable source value and a decision in the
+     * destination, which is the class of case a same-format pool
+     * cannot contain. */
+    {
+        long marks[4];
+        int k, nm = 0;
+        marks[nm++] = fd->emin - fd->man_w;         /* least subnormal */
+        marks[nm++] = fd->emin - fd->man_w - 1;     /* half of it: a tie */
+        marks[nm++] = fd->emin;                     /* least normal */
+        marks[nm++] = fd->emin - fd->man_w / 2;     /* mid-subnormal */
+        for (k = 0; k < nm && ne < 60; k++) {
+            mpfr_set_ui_2exp(v, 1, marks[k], MPFR_RNDN);
+            if (!fo_exact_enc(fs, v, extra[ne]))
+                continue;
+            memcpy(extra[ne + 1], extra[ne], 32);
+            enc_neg(fs, extra[ne + 1]);
+            ne += 2;
+        }
+    }
+    if (ne < 58) {
+        /* the largest finite of the destination, and the overflow
+         * midpoint above it - 7.4's threshold, invisible from here */
+        mpfr_set_ui_2exp(v, 1, fd->emax + 1, MPFR_RNDN);
+        mpfr_nextbelow(v);                          /* maxfinite(fd) */
+        if (fo_exact_enc(fs, v, extra[ne])) {
+            memcpy(extra[ne + 1], extra[ne], 32);
+            enc_neg(fs, extra[ne + 1]);
+            ne += 2;
+        }
+        {
+            mpfr_t w;
+            mpfr_init2(w, (mpfr_prec_t)(fd->p + 1));
+            mpfr_set_ui_2exp(w, 1, fd->emax + 1, MPFR_RNDN);
+            mpfr_nextbelow(w);                      /* the midpoint */
+            if (ne < 58 && fo_exact_enc(fs, w, extra[ne])) {
+                memcpy(extra[ne + 1], extra[ne], 32);
+                enc_neg(fs, extra[ne + 1]);
+                ne += 2;
+            }
+            mpfr_clear(w);
+        }
+    }
+    if (fs->p > fd->p) {
+        /* destination midpoints, with a source-grid neighbour either
+         * side - the only place a rounding written against the wrong
+         * descriptor can be caught */
+        long Es[3];
+        int k, nE = 0;
+        Es[nE++] = 0;
+        Es[nE++] = fd->emax;
+        Es[nE++] = fd->emin;
+        for (k = 0; k < nE && ne < 58; k++) {
+            mpfr_t w;
+            mpfr_init2(w, (mpfr_prec_t)(fd->p + 1));
+            mpfr_set_ui_2exp(w, 1, Es[k] + 1, MPFR_RNDN);
+            mpfr_nextbelow(w);          /* 2^(E+1) - ulp_d/2: a midpoint */
+            if (fo_exact_enc(fs, w, extra[ne])) {
+                memcpy(extra[ne + 1], extra[ne], 32);
+                enc_inc(extra[ne + 1], fs->esz);
+                memcpy(extra[ne + 2], extra[ne], 32);
+                enc_dec(extra[ne + 2], fs->esz);
+                ne += 3;
+            }
+            mpfr_clear(w);
+        }
+    }
+    mpfr_clear(v);
+
+    for (oi = 0; oi < 6; oi++) {
+        mop op = FO_OPS[oi];
+        for (mi = 0; mi < 5; mi++)
+            for (i = 0; i < pn + ne; i++) {
+                const uint8_t *a = i < pn ? pool[i] : extra[i - pn];
+                int jb = (i * 7 + 1) % (pn + ne);
+                int jc = (i * 13 + 5) % (pn + ne);
+                const uint8_t *b = jb < pn ? pool[jb] : extra[jb - pn];
+                const uint8_t *c = jc < pn ? pool[jc] : extra[jc - pn];
+                uint32_t gf = 0, wf = 0;
+                mpfr_t want;
+                cft_status st;
+
+                mpfr_init2(want, fd->p);
+                fo_oracle(fs, fd, op, mi, a, b, c, want, &wf);
+                memset(d, 0, sizeof d);
+                st = fo_lib(fs, fd, op, MODES[mi].cr, a, b, c, d, &gf);
+                /* Report the operands the OPERATION READ, not the pool
+                 * slots: the steering makes add and sub read a and c,
+                 * so printing b there names a value the case never
+                 * touched - which cost an hour once. */
+                c5_judge(FO_TALLY[oi], sfi, OPN[op], MODES[mi].name,
+                         fs, a, fo_second(op, b, c), fd, d, want,
+                         gf, wf, st, note);
+                mpfr_clear(want);
+            }
+    }
+
+    /* The witnesses, in every attribute: the cases a source-format
+     * rounding would get wrong. */
+    if (fd->p < fs->p) {
+        int w;
+        for (w = 0; w < 3; w++) {
+            uint8_t wa[32], wb[32], wc[32];
+            mop op = (w == 0) ? OP_FMA : (w == 1) ? OP_DIV : OP_SQRT;
+            int ti = (w == 0) ? T_FO_FMA : (w == 1) ? T_FO_DIV : T_FO_SQRT;
+            if (!fo_witness(fs, fd, w, wa, wb, wc))
+                continue;
+            for (mi = 0; mi < 5; mi++) {
+                uint32_t gf = 0, wf = 0;
+                mpfr_t want;
+                cft_status st;
+                mpfr_init2(want, fd->p);
+                fo_oracle(fs, fd, op, mi, wa, wb, wc, want, &wf);
+                memset(d, 0, sizeof d);
+                st = fo_lib(fs, fd, op, MODES[mi].cr, wa, wb, wc, d, &gf);
+                c5_judge(ti, sfi, OPN[op], MODES[mi].name, fs, wa,
+                         fo_second(op, wb, wc), fd, d, want, gf, wf,
+                         st, "double-rounding witness");
+                mpfr_clear(want);
+            }
+        }
+    }
+}
+
 /* ---- driver -------------------------------------------------------- */
 
 static void report(const fdesc *f, mop op, int mi, const uint8_t *a,
@@ -4428,7 +5173,9 @@ int main(int argc, char **argv)
         check_rem(fi, pool, pn, 48 * mult);
         check_chars(fi, pool, pn, 48 * mult);
         check_augmented(fi, pool, pn);
-        printf("%s clause5+9.5: %llu cases done (running mismatches: "
+        check_minmax_mag(fi, pool, pn);
+        check_minmax_mag_ties(fi, pool, pn);
+        printf("%s clause5+9.5+9.6: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,
@@ -4514,9 +5261,33 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
+    /* The formatOf arithmetic of 5.4.1: every ordered pair of formats,
+     * all six operations, all five attributes. MPFR is a FULL oracle
+     * here - the clause's definition IS "the operands at the source
+     * precision, the infinitely precise result rounded once to the
+     * destination", which is exactly what mpfr_add and friends do when
+     * the variables are declared that way - so nothing in this phase is
+     * a restatement of a rule or a reproduction of a shape. */
+    for (fi = 0; fi < 4; fi++) {
+        int pn = build_pool(&FMTS[fi], pool, randoms);
+        int dfi;
+        for (dfi = 0; dfi < 4; dfi++) {
+            uint64_t before = cases;
+            check_formatof(fi, dfi, pool, pn);
+            printf("%s->%s formatOf: %llu cases done (running "
+                   "mismatches: %llu value, %llu flag)\n",
+                   FMTS[fi].name, FMTS[dfi].name,
+                   (unsigned long long)(cases - before),
+                   (unsigned long long)mismatches,
+                   (unsigned long long)flag_mismatches);
+            fflush(stdout);
+        }
+    }
+
     {
         int t, k;
-        printf("\nper-op case counts (convert by source format):\n");
+        printf("\nper-op case counts (convert and formatOf by source "
+               "format):\n");
         printf("  %-10s %12s %12s %12s %12s\n", "op", "fp32", "fp64",
                "fp128", "fp256");
         for (t = 0; t < NTALLY; t++) {

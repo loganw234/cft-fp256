@@ -31,7 +31,8 @@
 // implements it.
 
 import {
-  CLASS_NAMES, FP32, FP64, FP128, FP256, OP_ABS, OP_ADD, OP_CMPEQ,
+  CLASS_NAMES, FLAGS_ALL, FORMATOF_ARITY, FORMATOF_METHOD, FP32, FP64,
+  FP128, FP256, MINMAG_METHOD, OP_ABS, OP_ADD, OP_CMPEQ,
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
   OP_SUMABS, OP_SUMSQ,
@@ -73,6 +74,25 @@ function asI64(v, what) {
   if (n < -(2n ** 63n) || n >= 2n ** 63n)
     throw new RangeError(`${what} is int64_t; ${n} does not fit`);
   return n;
+}
+
+/** An exceptionGroup (754-2019 5.7.4) as the C wants it: a mask of
+ *  FLAG_* bits. A number, because a subset of five named exceptions IS
+ *  a bit mask in this contract - but a CHECKED one, so that a mask
+ *  carrying a bit the library does not define is refused here rather
+ *  than passed through to mean nothing. A safe integer is required:
+ *  the C's parameter is a uint32_t. */
+function maskOf(v, what) {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0)
+    throw new TypeError(
+      `${what} wants an exceptionGroup - a mask of FLAG_INVALID, ` +
+      `FLAG_DIVBYZERO, FLAG_OVERFLOW, FLAG_UNDERFLOW and FLAG_INEXACT, ` +
+      `or FLAGS_ALL for the collective form - got ${JSON.stringify(v)}`);
+  if (v & ~FLAGS_ALL)
+    throw new RangeError(
+      `${what}: 0x${(v & ~FLAGS_ALL).toString(16)} is not an exception ` +
+      `this library defines. FLAGS_ALL is 0x${FLAGS_ALL.toString(16)}.`);
+  return v >>> 0;
 }
 
 // ---------------------------------------------------------------------
@@ -455,6 +475,24 @@ export class Float {
   augmentedSub(y) { return this._ctx.augmentedSub(this, y); }
   augmentedMul(y) { return this._ctx.augmentedMul(this, y); }
 
+  /** The formatOf arithmetic of clause 5.4.1 (ABI 0.7): this value's
+   *  format is the SOURCE, `dfmt` is the destination, and the result
+   *  is rounded once into it. The destination is the first argument
+   *  and not a mode - `x.formatOfDiv("fp32", y)` says which format the
+   *  quotient is in at the place the quotient is asked for.
+   *
+   *  Narrowing is not the same as dividing here and converting there:
+   *  that rounds twice, and the composed answer is one ulp low on
+   *  operands this ladder can construct. The returned Float carries
+   *  `dfmt`'s context, so its bits, decimal and comparisons are the
+   *  destination format's. */
+  formatOfAdd(dfmt, ...r) { return this._ctx.formatOfAdd(dfmt, this, ...r); }
+  formatOfSub(dfmt, ...r) { return this._ctx.formatOfSub(dfmt, this, ...r); }
+  formatOfMul(dfmt, ...r) { return this._ctx.formatOfMul(dfmt, this, ...r); }
+  formatOfDiv(dfmt, ...r) { return this._ctx.formatOfDiv(dfmt, this, ...r); }
+  formatOfSqrt(dfmt, ...r) { return this._ctx.formatOfSqrt(dfmt, this, ...r); }
+  formatOfFma(dfmt, ...r) { return this._ctx.formatOfFma(dfmt, this, ...r); }
+
   lt(y) { return this._ctx.lt(this, y); }
   le(y) { return this._ctx.le(this, y); }
   eq(y) { return this._ctx.eq(this, y); }
@@ -512,9 +550,33 @@ export class Context {
     this._rnd = rnd;
     /** The flags of the most recent call. */
     this.lastFlags = 0;
-    /** Sticky across calls until clearFlags(), like MPFR's own model. */
-    this.flags = 0;
   }
+
+  /** The STICKY word - and since ABI 0.7 it is the LIBRARY's word,
+   *  not a second one kept beside it.
+   *
+   *  754-2019 7.1 asks an implementation for a status flag per
+   *  exception that "shall be lowered only at the user's request", and
+   *  libcft's device handle now carries exactly that: every entry
+   *  point ORs its flags into a uint32_t on the device, and nothing in
+   *  the library ever lowers it. Until 0.7 this package accumulated
+   *  its own copy in JavaScript, which was the same value by
+   *  construction and only by construction - one entry point that
+   *  forgot to update it, or one call made through the raw layer in
+   *  lib.mjs rather than through a Context, and the two would part
+   *  company with no way to tell which was right. So there is one
+   *  word, it is the library's, and this is a view of it.
+   *
+   *  It is per DEVICE, which means a context and everything derived
+   *  from it - withRounding(), the temporary fp64 context toNumber()
+   *  opens, a second Context over the same handle - all see one word.
+   *  That is 7.1's own granularity, not a shortcut: the flags belong
+   *  to the computation, not to the attribute it ran under.
+   *
+   *  A closed context reads 0: cft.h defines a NULL device as a handle
+   *  whose word is permanently zero, which is the honest answer to
+   *  "what was raised" when there is nothing left to ask. */
+  get flags() { return this._C.saveAllFlags(this._dev) >>> 0; }
 
   get format() { return this._fi; }
   get precision() { return this._fi.prec; }
@@ -530,8 +592,115 @@ export class Context {
     if (this._dev) { this._C.close(this._dev); this._dev = 0; }
   }
 
-  clearFlags() { this.flags = 0; }
+  /** lowerFlags(all): the older spelling, kept because it is what
+   *  every caller of this package already writes. It is exactly
+   *  `lowerFlags(FLAGS_ALL)` and it reaches the library, so it clears
+   *  the word every other language surface sees too. */
+  clearFlags() { this.lowerFlags(FLAGS_ALL); }
   flagNames(flags) { return flagNames(flags ?? this.flags); }
+
+  // -- 5.7.4's six operations on the status word (ABI 0.7) ---------
+  //
+  // 754-2019 7.1: "The user shall be able to test and to alter the
+  // status flags individually or collectively, and shall further be
+  // able to save and restore all at one time (see 5.7.4)." These are
+  // that sentence, under 5.7.4's own names, and each takes an
+  // exceptionGroup - "any subset of the exceptions" - as a mask of
+  // FLAG_* bits, with FLAGS_ALL for the collective forms.
+  //
+  // The mask is a NUMBER here and a name everywhere else in this
+  // package, deliberately: an exceptionGroup is a SET, the C's
+  // representation of it is a bit mask, and a package that took
+  // ["invalid", "inexact"] instead would be inventing a second
+  // representation of the thing 5.7.4 already names. flagNames() reads
+  // one back when a human has to.
+
+  /** lowerFlags(exceptionGroup): clear the flags named by `mask`.
+   *  This and restoreFlags are the only two things in the system that
+   *  can lower a flag - nothing in the library ever does. */
+  lowerFlags(mask = FLAGS_ALL) {
+    this._C.lowerFlags(this._dev, maskOf(mask, "lowerFlags"));
+  }
+
+  /** raiseFlags(exceptionGroup): set the flags named by `mask` without
+   *  an exception having been signalled - 7.1's "status flags are
+   *  raised without an exception being signaled only at the user's
+   *  request". */
+  raiseFlags(mask = FLAGS_ALL) {
+    this._C.raiseFlags(this._dev, maskOf(mask, "raiseFlags"));
+  }
+
+  /** testFlags(exceptionGroup): true if ANY flag in `mask` is raised.
+   *  A predicate, not an intersection - the C answers 1 or 0 so that
+   *  it cannot be mistaken for a flag word, and this answers a
+   *  boolean for the same reason. */
+  testFlags(mask = FLAGS_ALL) {
+    return this._C.testFlags(this._dev, maskOf(mask, "testFlags")) !== 0;
+  }
+
+  /** saveAllFlags(): "a representation of the state of all status
+   *  flags", which here is the word itself in the same bits as any
+   *  call's flags_out - so it is directly comparable with lastFlags,
+   *  and that is the point of the representation being this one. */
+  saveAllFlags() { return this.flags; }
+
+  /** restoreFlags(flags, exceptionGroup): put the flags in `mask` back
+   *  to their state in `saved`. RESTORES rather than ORs - a flag
+   *  inside the mask that is low in `saved` comes back low - so that
+   *  save, compute, restore is the round trip 5.7.4 exists to provide.
+   *  Flags outside the mask are untouched. */
+  restoreFlags(saved, mask = FLAGS_ALL) {
+    this._C.restoreFlags(this._dev, maskOf(saved, "restoreFlags's saved word"),
+                         maskOf(mask, "restoreFlags"));
+  }
+
+  /** testSavedFlags(flags, exceptionGroup): the same question as
+   *  testFlags, asked of a word the caller already holds. No device is
+   *  involved - 5.7.4 puts the saved flags in the first operand
+   *  precisely so that this is pure - so it is also available as a
+   *  static, for a caller holding a word and no context. */
+  testSavedFlags(saved, mask = FLAGS_ALL) {
+    return Context.testSavedFlags(saved, mask, this._C);
+  }
+
+  static testSavedFlags(saved, mask = FLAGS_ALL, C = null) {
+    const s = maskOf(saved, "testSavedFlags's saved word");
+    const m = maskOf(mask, "testSavedFlags");
+    // The library's answer when there is a module to ask; the same
+    // predicate written out when there is not, which is the one place
+    // this package restates a line of C - a pure "any bit of s in m"
+    // over a five-bit mask, checked against the module by test.mjs.
+    return C ? C.testSavedFlags(s, m) !== 0 : (s & m) !== 0;
+  }
+
+  // -- 5.7.1's three conformance predicates (ABI 0.7) --------------
+  //
+  // Constants of the library, asked of the library. They take no
+  // device and no format in C, and lib.mjs exports them as free
+  // functions for that reason; they are here as well because a caller
+  // holding a Context should not have to import a second thing to ask
+  // what standard it conforms to.
+
+  /** is754version1985: FALSE - not because it is believed untrue, but
+   *  because no part of this project's verification is written against
+   *  the 1985 text, and a predicate that says "true" on the strength
+   *  of nobody having checked is what 5.7.1 exists to prevent. */
+  is754version1985() { return this._C.is754version1985() !== 0; }
+
+  /** is754version2008: FALSE, and not because anything is missing.
+   *  754-2008 required minNum/maxNum/minNumMag/maxNumMag; 754-2019
+   *  replaced them with 9.6's recommended operations and changed the
+   *  signaling-NaN rule. This library implements the 2019 semantics
+   *  (see minMag and friends below), so it does not provide 2008's
+   *  required operations and cannot claim 2008. */
+  is754version2008() { return this._C.is754version2008() !== 0; }
+
+  /** is754version2019: TRUE from ABI 0.7. What it rests on is clause 5
+   *  being complete for the binary formats, with clause 4's attributes
+   *  and clauses 6 and 7 as written; docs/COMPLIANCE.md is that
+   *  statement clause by clause and is where to check it rather than
+   *  take this line's word. Radix 2 only. */
+  is754version2019() { return this._C.is754version2019() !== 0; }
 
   /** A context of the same shape with a different attribute. */
   withRounding(rounding) {
@@ -717,7 +886,6 @@ export class Context {
     const dst = new Context(this._M, this._C, this._dev, F64, this._rnd);
     const y = dst.convert(x);
     this.lastFlags = dst.lastFlags;
-    this.flags |= dst.lastFlags;
     return new DataView(y.bytes.buffer).getFloat64(0, true);
   }
 
@@ -781,7 +949,6 @@ export class Context {
         ? new BigUint64Array(M.HEAPU8.buffer, dst, 1)[0]
         : new BigInt64Array(M.HEAPU8.buffer, dst, 1)[0];
       this.lastFlags = s.u32(fl);
-      this.flags |= this.lastFlags;
       return v;
     });
   }
@@ -790,7 +957,6 @@ export class Context {
 
   _finish(bytes, fl) {
     this.lastFlags = fl;
-    this.flags |= fl;
     return new Float(this, bytes);
   }
 
@@ -839,6 +1005,69 @@ export class Context {
   maxnum(x, y) {
     return this._run1(OP_MAXNUM, this.from(x), this.from(y), null);
   }
+
+  // -- 9.6's magnitude forms (ABI 0.7) -----------------------------
+  //
+  // The other four of clause 9.6, beside the four opcodes above. The
+  // standard defines each in one line, by DEFERRAL:
+  //
+  //   minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+  //   otherwise minimum(x, y) - and the same shape for the other
+  //   three, each deferring to the operation named in its last
+  //   position.
+  //
+  // These are NOT opcodes, and that is not an accident of numbering: a
+  // comparison of two sign-cleared encodings and then a selection has
+  // no rounding, no attribute and no arithmetic, so there is nothing
+  // for a device to accelerate and this context's attribute is not
+  // consulted. The result is one of the two operand encodings BIT FOR
+  // BIT, except where the base operation delivers a NaN and it is the
+  // canonical quiet one.
+  //
+  // Reading the deferral literally settles every edge, and this
+  // library does read it literally:
+  //
+  //   * A NaN has no magnitude, so every NaN case is the "otherwise"
+  //     and each form inherits the NaN rule of the operation it names.
+  //     The two plain forms give a quiet NaN if either operand is a
+  //     NaN; the two ...Number forms give the number unless both are.
+  //     A signaling NaN raises invalid either way, and nothing else
+  //     can be raised at all.
+  //   * EQUAL MAGNITUDES OF OPPOSITE SIGN are the "otherwise" too, and
+  //     this is the row worth a test of its own: minMag(+3, -3) is
+  //     minimum(+3, -3) = -3 and maxMag(+3, -3) is +3. An
+  //     implementation that quietly prefers x or y there is not
+  //     conforming and is invisible everywhere else.
+  //   * +-0 have equal magnitude, so the zeros come from the base
+  //     operation: -0 for the minima, +0 for the maxima.
+
+  /** minimumMagnitude(x, y). */
+  minMag(x, y) { return this._minmaxMag("minMag", x, y); }
+
+  /** maximumMagnitude(x, y). */
+  maxMag(x, y) { return this._minmaxMag("maxMag", x, y); }
+
+  /** minimumMagnitudeNumber(x, y) - a NaN operand loses to the
+   *  number, as minimumNumber's does. */
+  minnumMag(x, y) { return this._minmaxMag("minnumMag", x, y); }
+
+  /** maximumMagnitudeNumber(x, y). */
+  maxnumMag(x, y) { return this._minmaxMag("maxnumMag", x, y); }
+
+  _minmaxMag(which, x, y) {
+    const M = this._M, fi = this._fi;
+    const a = this.from(x), b = this.from(y);
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes), pb = s.put(b.bytes);
+      const pd = s.alloc(fi.size), fl = s.alloc(4);
+      // no rnd and no bus word: 9.6 selects, and no device pass is
+      // issued (cft.h)
+      const st = this._C[which](this._dev, fi.code, pa, pb, pd, 1, fl);
+      checkStatus(this._C, st, `cft_${which}`);
+      return this._finish(s.get(pd, fi.size), s.u32(fl));
+    });
+  }
+
   select(x, y, cond) {
     return this._run1(OP_SELECT, this.from(x), this.from(y), this.from(cond));
   }
@@ -1254,7 +1483,6 @@ export class Context {
                                 Number(d), out, cap, len, fl),
         s, "cft_to_decimal_char", true);
       this.lastFlags = flags;
-      this.flags |= flags;
       return text;
     });
   }
@@ -1320,7 +1548,6 @@ export class Context {
                                        pa, Number(d), out, cap, len, fl);
       const flags = s.u32(fl);
       this.lastFlags = flags;
-      this.flags |= flags;
       return { status: st, len: s.u32(len), flags,
                text: st === 0 ? s.str(out) : null };
     });
@@ -1403,7 +1630,6 @@ export class Context {
       checkStatus(this._C, st, `cft_${which}`);
       const flags = s.u32(fl);
       this.lastFlags = flags;
-      this.flags |= flags;
       return { r: new Float(this, s.get(pr, fi.size)),
                e: new Float(this, s.get(pe, fi.size)) };
     });
@@ -1463,8 +1689,197 @@ export class Context {
       checkStatus(this._C, st, `cft_${which}`);
       const flags = s.u32(fl);
       this.lastFlags = flags;
-      this.flags |= flags;
       return { pr: new Float(this, s.get(pr, fi.size)), sf: s.i64(psf) };
+    });
+  }
+
+  // -- clause 5.4.1's formatOf arithmetic (ABI 0.7) ----------------
+  //
+  // The six arithmetic operations with the OPERANDS in one binary
+  // format and the RESULT in another, rounded ONCE. 5.4.1 requires
+  // them for every ordered pair of supported arithmetic formats, and
+  // this ladder has sixteen.
+  //
+  // THE DESTINATION IS AN ARGUMENT, NOT A MODE, and that is the whole
+  // shape of this API. Every other method here uses the context's
+  // format for the operands and the result both; a formatOf call has
+  // two formats, and the second one belongs to the CALL. A context
+  // that carried a "destination" would make `ctx.add(x, y)` mean
+  // different things depending on state set somewhere else, which is
+  // the failure mode a determinism contract cannot afford. So: the
+  // context is the SOURCE, the first argument is the destination, and
+  // the returned Float carries a context of that destination format.
+  // The rounding attribute is this context's, and it directs the one
+  // rounding.
+  //
+  // WHY THIS IS NOT `convert` AND THEN THE OPERATION, in the direction
+  // that matters. Widening IS that, and legitimately: the interchange
+  // ladder nests, so a widening conversion rounds nothing and the
+  // operation's rounding is still the only one. NARROWING IS NOT.
+  // Rounding in the source format and converting down is a DOUBLE
+  // rounding, and the rule that says double rounding through 2p + 2
+  // bits is innocuous does not apply here: that theorem is about
+  // operands of the DESTINATION's precision, and these carry the
+  // SOURCE's. A quotient or a root of two wide values can sit as close
+  // as it likes to a narrow midpoint, so the first rounding lands on
+  // it, the second ties to even, and the answer is one ulp low with
+  // the same flag word. python/cft_golden/formatof.py's
+  // double_rounding_witness() builds the counterexample from the
+  // format descriptors alone for division, square root AND fused
+  // multiply-add, on all six narrowing pairs; test.mjs rebuilds it
+  // here and checks both halves - that this package agrees with the
+  // single rounding, and that the composed route disagrees with it.
+  //
+  // Every exception is the DESTINATION's: a product of two
+  // unremarkable binary64 values overflows a binary32 destination and
+  // says so, and a difference lands on binary32's subnormal grid and
+  // raises underflow with inexact. A signaling NaN operand raises
+  // invalid and delivers dfmt's canonical quiet NaN.
+
+  // Each of the six forwards every argument it was given rather than
+  // the ones it wants, so an operand too many is REFUSED by the arity
+  // check in _formatOf instead of silently ignored. The six differ in
+  // arity and share a destination argument, which is exactly the shape
+  // in which a caller writes sqrt with two operands by accident.
+
+  /** formatOf-addition: (a + b) in `dfmt`, one rounding. */
+  formatOfAdd(dfmt, ...ops) { return this._formatOf("add", dfmt, ...ops); }
+
+  /** formatOf-subtraction: (a - b) in `dfmt`, a first. */
+  formatOfSub(dfmt, ...ops) { return this._formatOf("sub", dfmt, ...ops); }
+
+  /** formatOf-multiplication. */
+  formatOfMul(dfmt, ...ops) { return this._formatOf("mul", dfmt, ...ops); }
+
+  /** formatOf-division: a / b, in that order. */
+  formatOfDiv(dfmt, ...ops) { return this._formatOf("div", dfmt, ...ops); }
+
+  /** formatOf-squareRoot: one operand. */
+  formatOfSqrt(dfmt, ...ops) { return this._formatOf("sqrt", dfmt, ...ops); }
+
+  /** formatOf-fusedMultiplyAdd: a*b + c, exact product, one rounding
+   *  into `dfmt`. The member of the six that no intermediate width can
+   *  rescue, because its addend is a free choice of source value. */
+  formatOfFma(dfmt, ...ops) { return this._formatOf("fma", dfmt, ...ops); }
+
+  /** A context of `spec`'s format over THIS device and attribute, so
+   *  the destination Float a formatOf call returns is a first-class
+   *  value of the destination format rather than bytes with a label.
+   *  Cached per format code: two contexts of the same format over one
+   *  device are the same thing and there is no reason to keep making
+   *  them. */
+  _dstContext(spec) {
+    const fi = formatFor(spec);
+    if (fi === this._fi) return this;
+    (this._dstCache ??= new Map());
+    let c = this._dstCache.get(fi.code);
+    if (!c) {
+      c = new Context(this._M, this._C, this._dev, fi, this._rnd);
+      this._dstCache.set(fi.code, c);
+    }
+    return c;
+  }
+
+  _formatOf(fn, dfmt, x, y, z) {
+    const M = this._M, sfi = this._fi;
+    const dctx = this._dstContext(dfmt);
+    const dfi = dctx._fi;
+    const arity = FORMATOF_ARITY[fn];
+    const a = this.from(x);
+    const b = arity >= 2 ? this.from(y) : null;
+    const c = arity >= 3 ? this.from(z) : null;
+    if (arity < 2 && y !== undefined)
+      throw new TypeError(`formatOf-${fn} reads one operand`);
+    if (arity < 3 && z !== undefined)
+      throw new TypeError(`formatOf-${fn} reads ${arity} operands`);
+    const call = this._C[FORMATOF_METHOD[fn]];
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes);
+      const pb = b ? s.put(b.bytes) : 0;
+      const pc = c ? s.put(c.bytes) : 0;
+      // d must not overlap a, b or c - the elements change size, so an
+      // in-place call would overwrite operand i+1 while writing result
+      // i (cft.h). Its own allocation, always.
+      const pd = s.alloc(dfi.size), fl = s.alloc(4);
+      const st = arity === 1
+        ? call(this._dev, sfi.code, dfi.code, this._rnd, pa, pd, 1, fl, 0)
+        : (arity === 2
+           ? call(this._dev, sfi.code, dfi.code, this._rnd, pa, pb, pd, 1,
+                  fl, 0)
+           : call(this._dev, sfi.code, dfi.code, this._rnd, pa, pb, pc, pd,
+                  1, fl, 0));
+      checkStatus(this._C, st, `cft_formatof_${fn}`);
+      const flags = s.u32(fl);
+      this.lastFlags = flags;
+      dctx.lastFlags = flags;
+      return new Float(dctx, s.get(pd, dfi.size));
+    });
+  }
+
+  /** The formatOf six over whole arrays - the batch shape the C has,
+   *  and its own entry point rather than a case in map().
+   *
+   *  map()'s signature cannot carry this and should not be bent to:
+   *  its arrays are all of the context's one format and its result is
+   *  too, while a formatOf call has a source format for the operands,
+   *  a destination format for the result, and an operation named
+   *  separately from either. mapFromDecimal() is a separate batch
+   *  entry point for the same kind of reason - a family whose operand
+   *  is not an encoding of this context's format.
+   *
+   *  `fn` is one of "add", "sub", "mul", "div", "sqrt", "fma" - the
+   *  short names the set files and the C entry points use. */
+  mapFormatOf(fn, dfmt, a, b = null, c = null) {
+    const arity = FORMATOF_ARITY[fn];
+    if (arity === undefined)
+      throw new TypeError(
+        `mapFormatOf wants one of ${Object.keys(FORMATOF_ARITY).join(", ")}` +
+        `, got ${JSON.stringify(fn)}`);
+    if (!Array.isArray(a))
+      throw new TypeError(`mapFormatOf(${fn}) reduces arrays of operands`);
+    const need = [a, arity >= 2 ? b : null, arity >= 3 ? c : null];
+    if (arity >= 2 && !Array.isArray(b))
+      throw new TypeError(`formatOf-${fn} needs a second operand array`);
+    if (arity >= 3 && !Array.isArray(c))
+      throw new TypeError(`formatOf-${fn} needs a third operand array`);
+    if (arity < 2 && b) throw new TypeError(`formatOf-${fn} takes no b`);
+    if (arity < 3 && c) throw new TypeError(`formatOf-${fn} takes no c`);
+    const lens = need.filter(Boolean).map((v) => v.length);
+    if (lens.some((l) => l !== lens[0]))
+      throw new RangeError(`operand arrays differ in length: ${lens}`);
+    const n = lens[0];
+
+    const M = this._M, sfi = this._fi;
+    const dctx = this._dstContext(dfmt);
+    const dfi = dctx._fi;
+    const pack = (arr) => {
+      if (!arr) return null;
+      const buf = new Uint8Array(sfi.size * n);
+      arr.forEach((v, i) => buf.set(this.from(v).bytes, i * sfi.size));
+      return buf;
+    };
+    const packed = need.map(pack);
+    const call = this._C[FORMATOF_METHOD[fn]];
+    return withScratch(M, (s) => {
+      const [pa, pb, pc] = packed.map((v) => (v && n ? s.put(v) : 0));
+      const pd = s.alloc(dfi.size * Math.max(n, 1)), fl = s.alloc(4);
+      const st = arity === 1
+        ? call(this._dev, sfi.code, dfi.code, this._rnd, pa, pd, n, fl, 0)
+        : (arity === 2
+           ? call(this._dev, sfi.code, dfi.code, this._rnd, pa, pb, pd, n,
+                  fl, 0)
+           : call(this._dev, sfi.code, dfi.code, this._rnd, pa, pb, pc, pd,
+                  n, fl, 0));
+      checkStatus(this._C, st, `cft_formatof_${fn}`);
+      const flags = s.u32(fl);
+      this.lastFlags = flags;
+      dctx.lastFlags = flags;
+      const bytes = s.get(pd, dfi.size * Math.max(n, 1));
+      const out = [];
+      for (let i = 0; i < n; i++)
+        out.push(new Float(dctx,
+                           bytes.slice(i * dfi.size, (i + 1) * dfi.size)));
+      return out;
     });
   }
 
@@ -1601,8 +2016,10 @@ export class Context {
    *  wants, and the reason a batch API exists at all. `op` is a name
    *  from cft.h - an opcode ("add", "mul", "fma", ...), one of the
    *  thirty-nine transcendentals ("exp", "pow", "sinpi", "atan2",
-   *  "rootn", ...), one of the three augmented operations, or one of
-   *  the payload operations; operands are arrays of Float or anything
+   *  "rootn", ...), one of the three augmented operations, one of the
+   *  payload operations, or since ABI 0.7 one of 9.6's four magnitude
+   *  forms ("minimumMagnitude" … "maximumMagnitudeNumber", or
+   *  "minMag" … "maxnumMag"); operands are arrays of Float or anything
    *  from() accepts, or null for an unused slot. For atan2 and atan2pi
    *  the first array is y and the second is x, as everywhere else in
    *  this package. For pown, compound and rootn the SECOND array is
@@ -1656,7 +2073,6 @@ export class Context {
         checkStatus(this._C, st, `cft_${op}`);
         const flags = s.u32(fl);
         this.lastFlags = flags;
-        this.flags |= flags;
         return split(s.get(pd, fi.size * n));
       });
     }
@@ -1680,9 +2096,30 @@ export class Context {
         checkStatus(this._C, st, `cft_${augFn}`);
         const flags = s.u32(fl);
         this.lastFlags = flags;
-        this.flags |= flags;
         return { r: split(s.get(pr, fi.size * n)),
                  e: split(s.get(pe, fi.size * n)) };
+      });
+    }
+
+    // 9.6's magnitude four (ABI 0.7): two operand arrays, one result
+    // array, and NO rounding argument - they select rather than
+    // compute. Reachable by 754's own spelling, which is what the
+    // <fmt>-minmaxmag sets carry, or by this package's method name.
+    const magFn = typeof op === "string"
+      ? (MINMAG_METHOD[op] ??
+         (Object.values(MINMAG_METHOD).includes(op) ? op : undefined))
+      : undefined;
+    if (magFn !== undefined) {
+      if (c) throw new TypeError(`${op} takes no c operand`);
+      if (!b) throw new TypeError(`${op} needs a second operand array`);
+      const ab = pack(a), bb = pack(b);
+      return withScratch(this._M, (s) => {
+        const pa = s.put(ab), pb = s.put(bb);
+        const pd = s.alloc(fi.size * n), fl = s.alloc(4);
+        const st = this._C[magFn](this._dev, fi.code, pa, pb, pd, n, fl);
+        checkStatus(this._C, st, `cft_${magFn}`);
+        this.lastFlags = s.u32(fl);
+        return split(s.get(pd, fi.size * n));
       });
     }
 
@@ -1721,17 +2158,28 @@ export class Context {
         checkStatus(this._C, st, `cft_${op}`);
         const flags = s.u32(fl);
         this.lastFlags = flags;
-        this.flags |= flags;
         return split(s.get(pd, fi.size * n));
       });
     }
 
     const code = typeof op === "string" ? OPS[op] : op;
-    if (code === undefined)
+    if (code === undefined) {
+      // "div" and "sqrt" reach here and are worth a better answer than
+      // "unknown": they are formatOf operation names, and the four
+      // that collide with an opcode - add, sub, mul, fma - were
+      // already dispatched as opcodes above, which is the right
+      // reading of a bare name in a one-format call. A formatOf call
+      // has a destination map() cannot carry.
+      if (typeof op === "string" && FORMATOF_ARITY[op] !== undefined)
+        throw new TypeError(
+          `${JSON.stringify(op)} is one of clause 5.4.1's formatOf ` +
+          `operations, whose result is in a DESTINATION format rather ` +
+          `than this context's - map() has no argument for one. Use ` +
+          `mapFormatOf(${JSON.stringify(op)}, dfmt, a, ...).`);
       throw new TypeError(`unknown op ${JSON.stringify(op)}`);
+    }
     const r = this._run(code, pack(a), pack(b), pack(c), n);
     this.lastFlags = r.flags;
-    this.flags |= r.flags;
     return split(r.bytes);
   }
 
@@ -1766,7 +2214,6 @@ export class Context {
       }
       const flags = s.u32(fl);
       this.lastFlags = flags;
-      this.flags |= flags;
       const bytes = s.get(pd, fi.size * Math.max(n, 1));
       const out = [];
       for (let i = 0; i < n; i++)

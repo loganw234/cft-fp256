@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 6   /* 0.6: table 9.1 complete, 5.12, 9.4, 9.5, 9.7 */
+#define CFT_ABI_VERSION_MINOR 7   /* 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -1693,6 +1693,210 @@ CFT_API cft_status cft_program_run(cft_program *prog,
                                    uint32_t *flags, uint32_t *bus);
 
 /* ---------------------------------------------------------------
+ * The status word (754-2019 7.1), the six operations on subsets of
+ * flags (5.7.4), and the conformance predicates (5.7.1)   (ABI 0.7)
+ *
+ * Every call above returns the exceptions IT raised in flags_out.
+ * That is a per-call answer, and 7.1 asks for something else as well:
+ *
+ *   "For each kind of exception the implementation shall provide a
+ *    corresponding status flag ... Status flags shall be lowered only
+ *    at the user's request. The user shall be able to test and to
+ *    alter the status flags individually or collectively, and shall
+ *    further be able to save and restore all at one time (see 5.7.4)."
+ *
+ * So a device handle carries a STATUS WORD: one uint32_t in the same
+ * cft_exception bits, into which every entry point ORs the union of
+ * its per-element flags, and which nothing in this library ever
+ * lowers. A caller lowers it; nobody else. flags_out keeps working
+ * exactly as before and is unaffected by any of this - the two are
+ * written from the same value at the same moment, so they can never
+ * disagree about what a call signalled.
+ *
+ * THE WORD NEVER INFLUENCES A RESULT. Nothing in libcft reads it back
+ * to decide anything: not a rounding, not a special case, not a
+ * branch. It is write-only to the arithmetic and readable only
+ * through the six calls below, so the determinism contract
+ * (docs/DETERMINISM.md) is exactly what it was - the same inputs give
+ * the same bits whatever the word holds, and clearing it or not
+ * changes no answer anywhere.
+ *
+ * A fresh device opens with every flag lowered, which is 7.1's "A
+ * program that does not inherit status flags from another source
+ * begins execution with all status flags lowered." The word is per
+ * DEVICE, and a cft_device is not thread-safe (as this header has
+ * always said), so the flags of two threads do not collide because
+ * two threads do not share a device.
+ *
+ * Each operation takes a mask - 5.7.4's exceptionGroup, "any subset
+ * of the exceptions" - built from cft_exception bits. CFT_FLAGS_ALL
+ * is the whole set, for the collective forms.
+ *
+ * A NULL device is accepted everywhere here and behaves as a handle
+ * whose word is permanently zero: the three mutators (lower, raise,
+ * restore) do nothing, cft_test_flags answers 0, and
+ * cft_save_all_flags returns 0. That matches
+ * cft_close() and cft_buffer_free(), which have always tolerated
+ * NULL, and it means a caller need not branch on a device it failed
+ * to open before asking a question the answer to which is "nothing
+ * was raised".
+ * --------------------------------------------------------------- */
+
+/* Every exception this library defines, as one mask. Derived from the
+ * cft_exception bits rather than written out, so a sixth flag would
+ * not need this line edited. */
+#define CFT_FLAGS_ALL ((uint32_t)(CFT_FLAG_INVALID | CFT_FLAG_DIVBYZERO | \
+                                  CFT_FLAG_OVERFLOW | CFT_FLAG_UNDERFLOW | \
+                                  CFT_FLAG_INEXACT))
+
+/* lowerFlags(exceptionGroup): clear the flags named by mask. One of
+ * the only two things in the system that can lower a flag;
+ * cft_restore_flags, below, is the other. */
+CFT_API void cft_lower_flags(cft_device *dev, uint32_t mask);
+
+/* raiseFlags(exceptionGroup): set the flags named by mask, without an
+ * exception having been signalled - 7.1's "status flags are raised
+ * without an exception being signaled only at the user's request". */
+CFT_API void cft_raise_flags(cft_device *dev, uint32_t mask);
+
+/* testFlags(exceptionGroup): nonzero if ANY flag named by mask is
+ * raised, 0 otherwise. A predicate, not an intersection: the value is
+ * 1 or 0 so that it cannot be mistaken for a flag word. */
+CFT_API int cft_test_flags(cft_device *dev, uint32_t mask);
+
+/* saveAllFlags(): "Returns a representation of the state of all
+ * status flags." That representation is the word itself, in
+ * cft_exception bits, which is what makes it directly comparable with
+ * any call's flags_out. */
+CFT_API uint32_t cft_save_all_flags(cft_device *dev);
+
+/* restoreFlags(flags, exceptionGroup): put the flags named by mask
+ * back to their state in `saved`. RESTORES rather than ORs - a flag
+ * inside the mask that is low in `saved` comes back low - so that
+ *
+ *     uint32_t s = cft_save_all_flags(dev);
+ *     ... anything ...
+ *     cft_restore_flags(dev, s, CFT_FLAGS_ALL);
+ *
+ * is the round trip 5.7.4 exists to provide. Flags outside the mask
+ * are untouched. */
+CFT_API void cft_restore_flags(cft_device *dev, uint32_t saved,
+                               uint32_t mask);
+
+/* testSavedFlags(flags, exceptionGroup): the same question as
+ * cft_test_flags, asked of a word the caller already holds. No device
+ * argument, because no device is involved - 5.7.4 puts the saved
+ * flags in the first operand precisely so that this is a pure
+ * predicate. */
+CFT_API int cft_test_saved_flags(uint32_t saved, uint32_t mask);
+
+/* 5.7.1's three conformance predicates, "true if and only if this
+ * programming environment conforms to" the named version. They are
+ * constants, and each rests on something stated elsewhere rather than
+ * on this header's opinion:
+ *
+ *   is754version2019 - TRUE from ABI 0.7 on. What it rests on is
+ *     clause 5 being complete for the binary formats this library
+ *     supports, together with clause 4's attributes and clauses 6
+ *     and 7 as written; docs/COMPLIANCE.md is that statement, clause
+ *     by clause, and is where a reader should go to check it rather
+ *     than take this line's word. The claim is radix 2 only: decimal
+ *     formats are excluded by design (3.5 permits a per-radix claim),
+ *     and clause 8's alternate exception handling is a recommendation
+ *     this library does not implement.
+ *
+ *   is754version2008 - FALSE, and not because anything is missing.
+ *     754-2008 REQUIRED minNum, maxNum, minNumMag and maxNumMag in
+ *     its clause 5.3.1. 754-2019 removed them and put the magnitude
+ *     forms among the recommended operations of 9.6 instead - the
+ *     NOTE at the end of 2019's 5.3.1 says exactly that: "The minNum
+ *     and maxNum operations of the 2008 version of the standard have
+ *     been replaced by the recommended operations of 9.6." The two
+ *     differ on a signaling NaN: 2019's minimumNumber signals invalid
+ *     and still returns the number, where 2008's minNum returned the
+ *     other operand quietly for a quiet NaN and had no such rule.
+ *     This library implements the 2019 semantics (see cft_min_mag and
+ *     friends below, and CFT_MINNUM), so it does not provide 2008's
+ *     required operations and cannot claim 2008.
+ *
+ *   is754version1985 - FALSE. Not because it is believed untrue, but
+ *     because it has never been evaluated against the 1985 text: no
+ *     part of this project's verification is written against that
+ *     document, and a predicate that says "true" on the strength of
+ *     nobody having checked is exactly the kind of claim 5.7.1 exists
+ *     to make answerable.
+ *
+ * These describe a programming environment, so they take no device
+ * and no format, and they are safe to call before cft_open(). */
+CFT_API int cft_is754version1985(void);
+CFT_API int cft_is754version2008(void);
+CFT_API int cft_is754version2019(void);
+
+/* ---------------------------------------------------------------
+ * The magnitude forms of minimum and maximum (754-2019 9.6)
+ *
+ * The other four of clause 9.6, beside the four opcodes CFT_MIN,
+ * CFT_MAX, CFT_MINNUM and CFT_MAXNUM. The standard defines each in
+ * one line, by deferral:
+ *
+ *   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+ *    otherwise minimum(x, y).
+ *    minimumMagnitudeNumber(x, y) is x if |x| < |y|, y if |y| < |x|,
+ *    otherwise minimumNumber(x, y).
+ *    maximumMagnitude(x, y) is x if |x| > |y|, y if |y| > |x|,
+ *    otherwise maximum(x, y).
+ *    maximumMagnitudeNumber(x, y) is x if |x| > |y|, y if |y| > |x|,
+ *    otherwise maximumNumber(x, y)." (9.6)
+ *
+ * HOST operations of the nextUp kind: a comparison of the two
+ * sign-cleared encodings and then a selection, with no rounding, no
+ * attribute, no arithmetic and no opcode - so there is nothing for a
+ * device to accelerate, no `rnd` argument, and results are
+ * bit-identical on every backend by construction. Like the other host
+ * entry points they do not gate on the device's format mask.
+ *
+ * Reading the definition literally settles all three edge families,
+ * and this library does read it literally:
+ *
+ *   * A NaN has no magnitude, so neither |x| < |y| nor |y| < |x| can
+ *     hold and every NaN case is the "otherwise" - which means each
+ *     of these four inherits the NaN rule of the operation named in
+ *     its last position. The two plain forms return the canonical
+ *     quiet NaN if either operand is a NaN; the two ...Number forms
+ *     return the number when the other operand is a NaN, and a quiet
+ *     NaN only when both are. Either way a signaling NaN operand
+ *     raises invalid and nothing else can be raised at all.
+ *   * Equal magnitudes of opposite sign are the "otherwise" too:
+ *     cft_min_mag(+3, -3) is minimum(+3, -3) = -3 and
+ *     cft_max_mag(+3, -3) is maximum(+3, -3) = +3. An implementation
+ *     that quietly prefers x or y on that tie is not conforming, and
+ *     it is the one case worth a test of its own.
+ *   * +-0 have equal magnitude, so the zeros also come from the base
+ *     operation: -0 for the two minima, +0 for the two maxima.
+ *
+ * The result is always one of the two operand encodings, bit for bit,
+ * except where the base operation delivers a NaN - and then it is
+ * this contract's canonical quiet NaN, the same canonicalisation
+ * every other operation here performs (docs/DETERMINISM.md).
+ *
+ * python/cft_golden/softfloat.py's fminmag/fmaxmag/fminnummag/
+ * fmaxnummag define every bit and flag below. d may alias a or b:
+ * each element is read before it is written, as everywhere else.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_min_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_max_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_minnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
  * Conformance
  *
  * Replay the published vector sets through this device and report the
@@ -1713,6 +1917,152 @@ CFT_API cft_status cft_program_run(cft_program *prog,
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                                    char *report, size_t report_size,
                                    uint64_t *cases_checked);
+
+/* ---------------------------------------------------------------
+ * The formatOf arithmetic operations (754-2019 clause 5.4.1)
+ *
+ *   formatOf-addition(a, b)              cft_formatof_add
+ *   formatOf-subtraction(a, b)           cft_formatof_sub
+ *   formatOf-multiplication(a, b)        cft_formatof_mul
+ *   formatOf-division(a, b)              cft_formatof_div
+ *   formatOf-squareRoot(a)               cft_formatof_sqrt
+ *   formatOf-fusedMultiplyAdd(a, b, c)   cft_formatof_fma
+ *
+ * The six arithmetic operations with the OPERANDS in one binary format
+ * and the RESULT in another, rounded once. 5.4.1 requires them for
+ * every ordered pair of supported arithmetic formats, in these words:
+ *
+ *   "Implementations shall provide the following formatOf general-
+ *    computational operations, for destinations of all supported
+ *    arithmetic formats, and, for each destination format, for
+ *    operands of all supported arithmetic formats with the same radix
+ *    as the destination format:
+ *        formatOf-addition(source1, source2)
+ *        formatOf-subtraction(source1, source2)
+ *        formatOf-multiplication(source1, source2)
+ *        formatOf-division(source1, source2)
+ *        formatOf-squareRoot(source)
+ *        formatOf-fusedMultiplyAdd(source1, source2, source3)"
+ *
+ * Everything above this block takes one cft_format and uses it for the
+ * operands and the result both. These take two: `sfmt` for a, b and c,
+ * `dfmt` for d. Sixteen ordered pairs x six operations x five
+ * attributes, and the same-format pairs are the operations that were
+ * already here, bit for bit.
+ *
+ * SIX ENTRY POINTS RATHER THAN ONE DISPATCHER, and the reason is not
+ * taste. A dispatcher would need a first argument naming the operation,
+ * and the only such namespace this library has is cft_op - an OPCODE
+ * space that is on the wire, in the device's opcode field and in every
+ * published vector set. Two of these six have no opcode and never will:
+ * division and square root are COMPOSITIONS here (cft.h says so above),
+ * not tile instructions, so a dispatcher keyed on cft_op could not
+ * express half of the clause without inventing opcode numbers for
+ * things the hardware does not do. The arities differ too - one, two
+ * and three operands - so a single signature would carry three pointers
+ * whose meaning changed per operation, which is exactly the shape
+ * cft_run has and pays for with the steering table. That table exists
+ * because ADD, SUB, MUL and FMA really are one hardware opcode. These
+ * six are not.
+ *
+ * WHICH DIRECTION DOES WHAT, AND WHY YOU SHOULD CARE
+ *
+ * dfmt AT LEAST AS WIDE AS sfmt: the operands are widened exactly with
+ * cft_convert and the existing same-format operation is issued. The
+ * interchange ladder nests - every binary32 value is a binary64 value,
+ * in significand bits and in exponent range both - so the widening
+ * rounds nothing and the operation's rounding is still the only one.
+ * The point of taking this route rather than a host-side one is that
+ * the arithmetic still runs where it would have run: on a device
+ * backend the cft_run / cft_div / cft_sqrt underneath is a tile pass,
+ * and bus_out carries its fault word.
+ *
+ * dfmt NARROWER THAN sfmt: the exact result is formed on the host and
+ * rounded ONCE against the destination's descriptor, through the same
+ * cft_sf_round_pack seam every other operation in this library rounds
+ * through. There is no tile pass and bus_out reads back 0.
+ *
+ * WHY NOT ROUND IN sfmt AND CONVERT DOWN. Because it gives the wrong
+ * answer, and not only in principle. The rule that says otherwise -
+ * double rounding through an intermediate of at least 2p + 2 bits is
+ * innocuous for the basic operations - has a hypothesis this
+ * configuration does not meet: it is about operands of the
+ * DESTINATION's precision. Here they carry the SOURCE's, and a quotient
+ * or a root of two wide values can sit as close as it likes to a narrow
+ * midpoint. python/cft_golden/formatof.py's double_rounding_witness()
+ * constructs the counterexample from the format descriptors alone, for
+ * division, square root and fused multiply-add, on every ordered pair
+ * of this ladder; python/tests/test_formatof.py runs all eighteen and
+ * host/src/formatof.c's banner carries the arithmetic. The composed
+ * route lands one ulp low every time, the tie in the destination broken
+ * to even by a first rounding that should not have happened. So all
+ * six narrow the exact way, and the FMA - which no intermediate width
+ * can rescue, because its addend is a free choice of source value - is
+ * only the most obvious member of the family rather than the only one.
+ *
+ * THE REST IS THE ORDINARY CONTRACT. d receives n elements of
+ * cft_format_size(dfmt) bytes; a, b and c hold n elements of
+ * cft_format_size(sfmt). Unused operands may be NULL (b for add and
+ * sub, b and c for sqrt, c for mul and div). The rounding attribute is
+ * consulted for the single rounding. Flags are the OR across the batch;
+ * every exception is the DESTINATION's - a product of two unremarkable
+ * binary64 values overflows a binary32 destination and says so, and a
+ * difference of two lands on binary32's subnormal grid and raises
+ * underflow with inexact. A signaling NaN operand raises invalid and
+ * the result is dfmt's canonical quiet NaN (6.2.1, and this contract's
+ * standing payload deviation).
+ *
+ * ALIASING: d MUST NOT overlap a, b or c. Unlike the same-format entry
+ * points, the elements change size here, so an in-place call would
+ * overwrite operand i+1 while writing result i - the same rule, and the
+ * same reason, cft_convert states. It is not policed.
+ *
+ * 5.11 - COMPARISON ACROSS TWO BINARY FORMATS - NEEDS NO ENTRY POINT.
+ * The clause asks that comparisons of data in different binary formats
+ * be "exact, as if the data were converted to a common format with
+ * unbounded exponent range and precision". On this ladder the common
+ * format is the wider of the two and cft_convert into it is exact, so
+ * the composition IS the comparison: convert the narrower operand, then
+ * use CFT_CMPLT / CFT_CMPLE / CFT_CMPEQ or cft_cmp_sig. A signaling NaN
+ * raises invalid on the way through the conversion exactly as it would
+ * have in the comparison, so the signal is neither lost nor doubled.
+ * python/cft_golden/formatof.py's compare() states the composition and
+ * python/tests/test_formatof.py checks it against exact rationals;
+ * docs/DETERMINISM.md records it as a composition rather than a gap.
+ *
+ * python/cft_golden/formatof.py defines every bit and flag below.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_formatof_add(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_sub(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_mul(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_div(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_sqrt(cft_device *dev, cft_format sfmt,
+                                     cft_format dfmt, cft_round rnd,
+                                     const void *a, void *d,
+                                     size_t n, uint32_t *flags_out,
+                                     uint32_t *bus_out);
+CFT_API cft_status cft_formatof_fma(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b,
+                                    const void *c, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
 
 #ifdef __cplusplus
 }  /* extern "C" */

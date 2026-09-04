@@ -16,18 +16,22 @@
 //
 // EVERY SET FAMILY THAT IS NOT AN OPCODE then gets a SECOND pass,
 // driven from JavaScript through this package's own Context methods
-// rather than handed to cft_conformance. Since ABI 0.6 that is four
+// rather than handed to cft_conformance. Since ABI 0.7 that is six
 // families: the transcendental sets (all thirty-nine functions, table
 // 9.1 complete), the augmented sets of clause 9.5, the reduction sets
-// of 9.4 - sum, dot, sumsq, sumabs and the three scaled products - and
-// the character sets of 5.12 with 9.7's payload operations. That is
+// of 9.4 - sum, dot, sumsq, sumabs and the three scaled products - the
+// character sets of 5.12 with 9.7's payload operations, the four
+// magnitude sets of 9.6, and the eighty formatOf sets of 5.4.1, one
+// per ordered pair of formats per attribute. That is
 // not redundancy: cft_conformance dispatches all of it internally in C
 // and would be green with no JavaScript surface for any of it at all -
 // it was, for a day (docs/COMPATIBILITY.md's half-step). The library
 // remains the only thing computing; what this pass adds is that the
 // package's own methods reach it, in the right order - which for atan2
-// and atan2pi means y first, and for scaledProdDiff means a minus b -
-// with the flags, the sequences and the scales intact.
+// and atan2pi means y first, for scaledProdDiff means a minus b, and
+// for the formatOf six means the destination format the call was asked
+// for and not the context's - with the flags, the sequences and the
+// scales intact.
 //
 // A run that checked nothing must not read as a pass. Zero cases, a
 // missing set, or a directory with no sets in it are failures here,
@@ -38,7 +42,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Context } from "./core.mjs";
-import { AUGMENTED, TRANSCEND_BINARY, TRANSCEND_INTARG, TRANSCEND_UNARY,
+import { AUGMENTED, FORMATOF_ARITY, FORMATOF_METHOD, MINMAG_METHOD,
+         TRANSCEND_BINARY, TRANSCEND_INTARG, TRANSCEND_UNARY,
          loadModule } from "./lib.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +108,37 @@ const CHAR_TO = { to_decimal: "toDecimal", to_hex: "toHex" };
 const CHAR_PAYLOAD = { get_payload: "getPayload", set_payload: "setPayload",
                        set_payload_signaling: "setPayloadSignaling" };
 
+// The magnitude sets (9.6): ONE file per format, and the absence of a
+// "rnd" field in them is normative for a sharper reason than the
+// augmented family's - these operations SELECT one of their operands
+// rather than computing a value, so there is no rounding for an
+// attribute to direct. "fn" carries 754's own spelling.
+const MINMAXMAG_SETS = FORMATS.map((f) => ({
+  name: `${f}-minmaxmag.jsonl`, format: f,
+}));
+
+// The formatOf sets (5.4.1): one file per ORDERED PAIR of formats per
+// attribute - all sixteen pairs, the same-format four included,
+// because 5.4.1 asks for "destinations of all supported arithmetic
+// formats and, for each destination format, ... operands of all
+// supported arithmetic formats". 80 files.
+//
+// This is the only family whose case has TWO formats, and the only one
+// that repeats them inside the record as well as in the file name. The
+// repetition is checked rather than ignored: with two formats there is
+// a pairing to get wrong, and a set whose name and contents disagree
+// is a failure mode no other family has. cft_conformance refuses such
+// a file; so does the pass below.
+const FORMATOF_SETS = [];
+for (const s of FORMATS)
+  for (const d of FORMATS)
+    for (const r of ROUNDINGS)
+      FORMATOF_SETS.push({
+        name: r === "rne" ? `${s}-to-${d}-formatof.jsonl`
+                          : `${s}-to-${d}-formatof-${r}.jsonl`,
+        sfmt: s, dfmt: d, rounding: r,
+      });
+
 const candidates = [process.argv[2], join(ROOT, "vectors", "out"),
                     join(ROOT, "bindings", "wasm", "build", "vectors")]
   .filter(Boolean);
@@ -138,6 +174,10 @@ const DRIVEN = [
     unit: "reduction", sets: REDUCE_SETS, drive: driveReduceSet },
   { label: "the character conversions (5.12) and payloads (9.7)",
     unit: "character", sets: CHARACTER_SETS, drive: driveCharacterSet },
+  { label: "the magnitude forms of minimum and maximum (9.6)",
+    unit: "minmaxmag", sets: MINMAXMAG_SETS, drive: driveMinMaxMagSet },
+  { label: "the formatOf arithmetic (5.4.1), all sixteen ordered pairs",
+    unit: "formatof", sets: FORMATOF_SETS, drive: driveFormatOfSet },
 ];
 const KNOWN = new Set([...CANONICAL,
                        ...DRIVEN.flatMap((f) => f.sets.map((s) => s.name))]);
@@ -604,6 +644,179 @@ async function driveCharacterSet(set, text) {
   }
 }
 
+async function driveMinMaxMagSet(set, text) {
+  const ctx = await Context.open(set.format);
+  try {
+    const fi = ctx.format;
+    const byFn = new Map();
+    let lineno = 0;
+    for (const line of text.split("\n")) {
+      lineno++;
+      if (!line.trim()) continue;
+      const rec = JSON.parse(line);
+      if (!MINMAG_METHOD[rec.fn])
+        throw new Error(`${set.name}:${lineno}: unknown magnitude ` +
+                        `operation "${rec.fn}" - 9.6 names four`);
+      // The absence of "rnd" is normative: 9.6 selects an operand, so
+      // there is no rounding for an attribute to direct and a set that
+      // carried one would be recording a choice that does not exist.
+      if (rec.rnd !== undefined)
+        throw new Error(`${set.name}:${lineno}: a 9.6 magnitude case ` +
+                        `carries "rnd": ${JSON.stringify(rec.rnd)}; these ` +
+                        `operations compare magnitudes and then SELECT an ` +
+                        `operand, so no attribute can change an answer`);
+      if (!byFn.has(rec.fn)) byFn.set(rec.fn, []);
+      byFn.get(rec.fn).push({
+        lineno,
+        a: ctx.fromBits(BigInt(rec.a)), b: ctx.fromBits(BigInt(rec.b)),
+        d: ctx.fromBits(BigInt(rec.d)), flags: rec.flags >>> 0,
+      });
+    }
+    if (!byFn.size) throw new Error(`${set.name}: no cases`);
+
+    let checked = 0;
+    for (const [fn, cases] of byFn) {
+      const method = MINMAG_METHOD[fn];
+      let union = 0;
+      for (const k of cases) {
+        ctx.clearFlags();
+        const got = ctx[method](k.a, k.b);
+        if (!got.sameBits(k.d) || ctx.lastFlags !== k.flags)
+          throw new Error(
+            `${set.name}:${k.lineno}: ${fn}\n` +
+            `        a        ${hexOf(k.a, fi)}\n` +
+            `        b        ${hexOf(k.b, fi)}\n` +
+            `        expected ${hexOf(k.d, fi)} flags 0x` +
+            `${k.flags.toString(16).padStart(2, "0")}\n` +
+            `        got      ${hexOf(got, fi)} flags 0x` +
+            `${ctx.lastFlags.toString(16).padStart(2, "0")}`);
+        union |= ctx.lastFlags;
+        checked++;
+      }
+      ctx.clearFlags();
+      const batch = ctx.map(fn, cases.map((k) => k.a), cases.map((k) => k.b));
+      cases.forEach((k, i) => {
+        if (!batch[i].sameBits(k.d))
+          throw new Error(`${set.name}:${k.lineno}: ${fn} over ` +
+                          `${cases.length} elements gives ` +
+                          `${hexOf(batch[i], fi)} where one element at a ` +
+                          `time gives ${hexOf(k.d, fi)}`);
+      });
+      if (ctx.lastFlags !== union)
+        throw new Error(`${set.name}: ${fn} over ${cases.length} elements ` +
+                        `raised 0x${ctx.lastFlags.toString(16)}, the union ` +
+                        `over the scalar calls is 0x${union.toString(16)}`);
+    }
+    return checked;
+  } finally {
+    ctx.close();
+  }
+}
+
+async function driveFormatOfSet(set, text) {
+  const ctx = await Context.open(set.sfmt);
+  try {
+    const c = ctx.withRounding(set.rounding);
+    const sfi = c.format;
+    // The destination is an ARGUMENT to each call, not a second
+    // context, so the only thing needed here is its width - the
+    // expected "d" is a destination-format encoding on the same line
+    // as source-format operands, which is what makes this family the
+    // one where a hex string has to be read against the right size.
+    const dsize = { fp32: 4, fp64: 8, fp128: 16, fp256: 32 }[set.dfmt];
+    const dhex = (bits) => "0x" + bits.toString(16).padStart(dsize * 2, "0");
+    const byFn = new Map();
+    let lineno = 0;
+    for (const line of text.split("\n")) {
+      lineno++;
+      if (!line.trim()) continue;
+      const rec = JSON.parse(line);
+      const arity = FORMATOF_ARITY[rec.fn];
+      if (arity === undefined)
+        throw new Error(`${set.name}:${lineno}: unknown formatOf ` +
+                        `operation "${rec.fn}" - 5.4.1 names six`);
+      // The record repeats its two formats, and the repetition is the
+      // point: a set whose name and contents disagree about the
+      // pairing is a failure mode no other family has, so it is
+      // refused rather than replayed under the name's assumption.
+      if (rec.sfmt !== set.sfmt || rec.dfmt !== set.dfmt)
+        throw new Error(`${set.name}:${lineno}: the case says ` +
+                        `${rec.sfmt} -> ${rec.dfmt} in a file named for ` +
+                        `${set.sfmt} -> ${set.dfmt}`);
+      if (rec.rnd !== set.rounding)
+        throw new Error(`${set.name}:${lineno}: attribute "${rec.rnd}" in ` +
+                        `a ${set.rounding} set`);
+      if ((arity >= 2) !== (rec.b !== undefined) ||
+          (arity >= 3) !== (rec.c !== undefined))
+        throw new Error(`${set.name}:${lineno}: formatOf-${rec.fn} reads ` +
+                        `${arity} operand(s) but the case carries ` +
+                        `${1 + (rec.b !== undefined) + (rec.c !== undefined)}`);
+      if (!byFn.has(rec.fn)) byFn.set(rec.fn, []);
+      byFn.get(rec.fn).push({
+        lineno,
+        a: c.fromBits(BigInt(rec.a)),
+        b: arity >= 2 ? c.fromBits(BigInt(rec.b)) : null,
+        c: arity >= 3 ? c.fromBits(BigInt(rec.c)) : null,
+        d: dhex(BigInt(rec.d)),
+        flags: rec.flags >>> 0,
+      });
+    }
+    if (!byFn.size) throw new Error(`${set.name}: no cases`);
+
+    let checked = 0;
+    for (const [fn, cases] of byFn) {
+      const method = FORMATOF_METHOD[fn];
+      const arity = FORMATOF_ARITY[fn];
+      let union = 0;
+      for (const k of cases) {
+        c.clearFlags();
+        const got = arity === 1 ? c[method](set.dfmt, k.a)
+          : (arity === 2 ? c[method](set.dfmt, k.a, k.b)
+                         : c[method](set.dfmt, k.a, k.b, k.c));
+        if (got.context.format.name !== set.dfmt)
+          throw new Error(`${set.name}:${k.lineno}: ${method} returned a ` +
+                          `${got.context.format.name} value where the ` +
+                          `destination is ${set.dfmt}`);
+        if (dhex(got.bits) !== k.d || c.lastFlags !== k.flags)
+          throw new Error(
+            `${set.name}:${k.lineno}: formatOf-${fn} ${set.sfmt} -> ` +
+            `${set.dfmt} ${set.rounding}\n` +
+            `        a        ${hexOf(k.a, sfi)}\n` +
+            (k.b ? `        b        ${hexOf(k.b, sfi)}\n` : "") +
+            (k.c ? `        c        ${hexOf(k.c, sfi)}\n` : "") +
+            `        expected ${k.d} flags 0x` +
+            `${k.flags.toString(16).padStart(2, "0")}\n` +
+            `        got      ${dhex(got.bits)} flags 0x` +
+            `${c.lastFlags.toString(16).padStart(2, "0")}`);
+        union |= c.lastFlags;
+        checked++;
+      }
+      // and once as one array of the whole family, through the batch
+      // entry point the two formats need
+      c.clearFlags();
+      const batch = c.mapFormatOf(
+        fn, set.dfmt, cases.map((k) => k.a),
+        arity >= 2 ? cases.map((k) => k.b) : null,
+        arity >= 3 ? cases.map((k) => k.c) : null);
+      cases.forEach((k, i) => {
+        if (dhex(batch[i].bits) !== k.d)
+          throw new Error(`${set.name}:${k.lineno}: formatOf-${fn} over ` +
+                          `${cases.length} elements gives ` +
+                          `${dhex(batch[i].bits)} where one element at a ` +
+                          `time gives ${k.d}`);
+      });
+      if (c.lastFlags !== union)
+        throw new Error(`${set.name}: formatOf-${fn} over ${cases.length} ` +
+                        `elements raised 0x${c.lastFlags.toString(16)}, the ` +
+                        `union over the scalar calls is ` +
+                        `0x${union.toString(16)}`);
+    }
+    return checked;
+  } finally {
+    ctx.close();
+  }
+}
+
 const missing = DRIVEN.filter((f) =>
   !f.sets.every((s) => existsSync(join(vdir, s.name))));
 if (missing.length) {
@@ -612,7 +825,7 @@ if (missing.length) {
               `NOT driven. Run \`make vectors\` from the repo root; the ` +
               `containerized wasm build cannot write them (no mpmath in ` +
               `the pinned image).`);
-  console.log("NOT A PASS: the ABI 0.6 surface was not exercised.");
+  console.log("NOT A PASS: the ABI 0.7 surface was not exercised.");
   process.exit(1);
 }
 

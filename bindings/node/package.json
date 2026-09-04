@@ -1,6 +1,6 @@
 {
   "name": "cft-node",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "libcft (IEEE binary32/64/128/256, bit-exact) in Node, through the same wasm module the browser conformance page runs",
   "license": "Apache-2.0",

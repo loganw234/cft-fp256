@@ -1951,3 +1951,595 @@ def test_augmented_refuses_an_unknown_name():
     with pytest.raises(ValueError):
         cftmpfr._lib.augmented(ctx._dev, "div", ctx._fi.code, b"", b"", 0,
                                ctx._fi.esz)
+
+
+# ---------------------------------------------------------------------
+# ABI 0.7: the status word (7.1, 5.7.4), the conformance predicates
+# (5.7.1), and 9.6's four magnitude forms
+#
+# What a binding can break here that it cannot break anywhere else:
+#
+# * ``Context.flags`` used to be an ordinary attribute this package
+#   maintained. It is now a view onto the LIBRARY's status word, so
+#   the ways it can go wrong are new ones - a getter that reads a
+#   stale copy, a setter that ORs where 754 says restore, a mask
+#   argument dropped on the way through ctypes.
+# * The four magnitude forms take NO rounding attribute, so the
+#   context's could leak into the call the way it could for the
+#   augmented three; and their result must be one of the OPERANDS, so
+#   a binding that returned a fresh encoding "equal" to one of them
+#   would pass a value comparison and fail a bit comparison.
+# ---------------------------------------------------------------------
+
+MINMAX_MAG = ("min_mag", "max_mag", "minnum_mag", "maxnum_mag")
+
+
+def _snan_bits(prec):
+    """A signaling NaN encoding: the NaN exponent, the quiet bit CLEAR
+    and a non-zero payload. Derived from the format's widths rather
+    than transcribed."""
+    exp_w, man_w = {24: (8, 23), 53: (11, 52), 113: (15, 112),
+                    237: (19, 236)}[prec]
+    return (((1 << exp_w) - 1) << man_w) | 1
+
+
+def _mm_model(name):
+    return {"min_mag": _gsf.fminmag, "max_mag": _gsf.fmaxmag,
+            "minnum_mag": _gsf.fminnummag,
+            "maxnum_mag": _gsf.fmaxnummag}[name]
+
+
+def test_conformance_predicates():
+    """5.7.1's three, as module-level functions - they describe the
+    programming environment, not a context. cft.h says what each
+    answer rests on; here we only check the binding reaches them and
+    reports 0, 0, 1 rather than the truthiness of a function object."""
+    assert cftmpfr.is754version1985() is False
+    assert cftmpfr.is754version2008() is False
+    assert cftmpfr.is754version2019() is True
+
+
+def test_flags_attribute_is_the_librarys_word():
+    """7.1's status word, read through Context.flags. A call raises it,
+    nothing lowers it but the caller, and the property is the library's
+    word rather than a copy: lowering through the C entry point must be
+    visible in the attribute."""
+    ctx = Context(24)
+    assert ctx.flags == 0, "a fresh Context opens with its flags lowered"
+
+    big = ctx.from_bits(0x7f7fffff)          # max normal
+    ctx.add(big, big)                        # overflow + inexact
+    assert ctx.flags == ctx.last_flags != 0
+    first = ctx.flags
+
+    ctx.mul(ctx(1.0), ctx(1.0))              # exact: raises nothing
+    assert ctx.last_flags == 0
+    assert ctx.flags == first, "a call that raises nothing changes nothing"
+
+    ctx.div(ctx(1.0), ctx.zero())            # divideByZero
+    assert ctx.last_flags == cftmpfr.FLAG_DIVBYZERO, \
+        "the composed divide signals divideByZero and nothing else"
+    assert ctx.flags == first | cftmpfr.FLAG_DIVBYZERO
+
+    # the attribute really is the library's word, not a shadow of it
+    cftmpfr._lib.lower_flags(ctx._dev, cftmpfr.FLAGS_ALL)
+    assert ctx.flags == 0
+    cftmpfr._lib.raise_flags(ctx._dev, cftmpfr.FLAG_INEXACT)
+    assert ctx.flags == cftmpfr.FLAG_INEXACT
+
+
+def test_flags_attribute_stays_assignable():
+    """The pre-0.7 spellings still work: ``ctx.flags = 0``,
+    ``ctx.flags |= bits``, and clear_flags()."""
+    ctx = Context(53)
+    ctx.flags = cftmpfr.FLAG_INVALID | cftmpfr.FLAG_OVERFLOW
+    assert ctx.flags == cftmpfr.FLAG_INVALID | cftmpfr.FLAG_OVERFLOW
+    ctx.flags |= cftmpfr.FLAG_INEXACT
+    assert ctx.flags == (cftmpfr.FLAG_INVALID | cftmpfr.FLAG_OVERFLOW |
+                         cftmpfr.FLAG_INEXACT)
+    ctx.flags = 0
+    assert ctx.flags == 0 and ctx.test_flags() is False
+    ctx.raise_flags(cftmpfr.FLAG_UNDERFLOW)
+    ctx.clear_flags()
+    assert ctx.flags == 0
+
+
+def test_flag_names_reads_the_word():
+    ctx = Context(24)
+    ctx.clear_flags()
+    ctx.raise_flags(cftmpfr.FLAG_INVALID | cftmpfr.FLAG_INEXACT)
+    assert set(ctx.flag_names()) == {"invalid", "inexact"}
+    assert ctx.flag_names(cftmpfr.FLAG_OVERFLOW) == ("overflow",)
+
+
+def test_the_six_operations_of_5_7_4():
+    """lowerFlags, raiseFlags, testFlags, saveAllFlags, restoreFlags
+    and testSavedFlags, by their 754 names."""
+    ctx = Context(113)
+    ctx.lower_flags()
+    assert ctx.save_all_flags() == 0
+
+    ctx.raise_flags(cftmpfr.FLAGS_ALL)
+    assert ctx.save_all_flags() == cftmpfr.FLAGS_ALL
+
+    # lower BY MASK: only the named flags go down
+    ctx.lower_flags(cftmpfr.FLAG_INEXACT | cftmpfr.FLAG_UNDERFLOW)
+    assert ctx.save_all_flags() == (cftmpfr.FLAGS_ALL &
+                                    ~(cftmpfr.FLAG_INEXACT |
+                                      cftmpfr.FLAG_UNDERFLOW))
+    # testFlags is 5.7.4's "whether ANY of the flags ... are raised"
+    assert ctx.test_flags(cftmpfr.FLAG_INEXACT) is False
+    assert ctx.test_flags(cftmpfr.FLAG_INVALID) is True
+    assert ctx.test_flags(cftmpfr.FLAG_INEXACT |
+                          cftmpfr.FLAG_INVALID) is True
+    assert ctx.test_flags(0) is False
+
+    # the save/restore round trip 5.7.4 exists to provide
+    saved = ctx.save_all_flags()
+    ctx.lower_flags()
+    ctx.raise_flags(cftmpfr.FLAG_INEXACT)
+    ctx.restore_flags(saved)
+    assert ctx.save_all_flags() == saved
+
+    # restore LOWERS inside the mask as well as raising - an OR-only
+    # implementation passes the round trip above and fails this
+    ctx.lower_flags()
+    ctx.raise_flags(cftmpfr.FLAGS_ALL)
+    ctx.restore_flags(0, cftmpfr.FLAG_INEXACT)
+    assert ctx.save_all_flags() == cftmpfr.FLAGS_ALL & ~cftmpfr.FLAG_INEXACT
+    ctx.restore_flags(cftmpfr.FLAGS_ALL, cftmpfr.FLAG_INEXACT)
+    assert ctx.save_all_flags() == cftmpfr.FLAGS_ALL
+    # ... and leaves everything outside the mask alone
+    ctx.lower_flags()
+    ctx.restore_flags(cftmpfr.FLAGS_ALL, cftmpfr.FLAG_DIVBYZERO)
+    assert ctx.save_all_flags() == cftmpfr.FLAG_DIVBYZERO
+
+    # testSavedFlags: the same question of a word the caller holds
+    assert Context.test_saved_flags(cftmpfr.FLAG_INVALID |
+                                    cftmpfr.FLAG_INEXACT,
+                                    cftmpfr.FLAG_INEXACT) is True
+    assert Context.test_saved_flags(cftmpfr.FLAG_INVALID,
+                                    cftmpfr.FLAG_INEXACT) is False
+    assert Context.test_saved_flags(0, cftmpfr.FLAGS_ALL) is False
+    ctx.lower_flags()
+
+
+def test_the_batch_path_feeds_the_same_word():
+    """A batch call's flag word is the OR over its elements, and that
+    same OR reaches the status word in one step."""
+    ctx = Context(24)
+    ctx.clear_flags()
+    big = ctx.from_bits(0x7f7fffff)
+    tiny = ctx.from_bits(0x00000001)
+    third = ctx.from_bits(0x3eaaaaab)
+    snan = ctx.from_bits(0x7fa00000)
+    xs = [big, tiny, ctx(1.0), snan]
+    ys = [big, third, ctx(1.0), ctx(1.0)]
+    _, fl = batch.mul(ctx, xs, ys)
+    for bit in (cftmpfr.FLAG_OVERFLOW, cftmpfr.FLAG_UNDERFLOW,
+                cftmpfr.FLAG_INEXACT, cftmpfr.FLAG_INVALID):
+        assert fl & bit, cftmpfr.flag_names(fl)
+    assert ctx.flags == fl
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_matches_the_model(prec):
+    """The four, per element, against python/cft_golden - which is the
+    definition. gmpy2 is no oracle here: MPFR's mpfr_min/mpfr_max are
+    2008's minNum, whose signaling-NaN rule 2019 changed, and it has
+    no magnitude forms at all."""
+    fmt = GOLDEN[prec]
+    ctx = Context(prec)
+    ops = pool(prec, count=26, seed=57)
+    checked = 0
+    for name in MINMAX_MAG:
+        model = _mm_model(name)
+        for xb in ops:
+            for yb in ops:
+                ctx.clear_flags()
+                r = getattr(ctx, name)(ctx.from_bits(xb), ctx.from_bits(yb))
+                assert (r.to_bits(), ctx.last_flags) == model(fmt, xb, yb), \
+                    (name, prec, hex(xb), hex(yb))
+                checked += 1
+    assert checked > 4000, checked
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_result_is_always_an_operand(prec):
+    """9.6 SELECTS; it never computes. So every result is one of the
+    two operand encodings bit for bit - unless the base operation
+    delivers a NaN, and then it is the canonical quiet NaN."""
+    ctx = Context(prec)
+    qnan = ctx.nan().to_bits()
+    ops = pool(prec, count=20, seed=59)
+    for name in MINMAX_MAG:
+        for xb in ops:
+            for yb in ops:
+                got = getattr(ctx, name)(ctx.from_bits(xb),
+                                         ctx.from_bits(yb)).to_bits()
+                if got == qnan:
+                    continue
+                assert got in (xb, yb), (name, prec, hex(xb), hex(yb),
+                                         hex(got))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_ignores_the_context_attribute(prec):
+    """There is no rounding in a selection, so the same pair must come
+    back under every attribute - RNDNA included. A binding that
+    forwarded the context's attribute into the call would pass every
+    other test in this file."""
+    ops = pool(prec, count=10, seed=61)
+    base = Context(prec, rounding="RNDN")
+    want = {}
+    for name in MINMAX_MAG:
+        for xb in ops:
+            for yb in ops:
+                r = getattr(base, name)(base.from_bits(xb),
+                                        base.from_bits(yb))
+                want[(name, xb, yb)] = (r.to_bits(), base.last_flags)
+    for mode in ("RNDZ", "RNDD", "RNDU", "RNDNA"):
+        ctx = Context(prec, rounding=mode)
+        for (name, xb, yb), expected in want.items():
+            r = getattr(ctx, name)(ctx.from_bits(xb), ctx.from_bits(yb))
+            assert (r.to_bits(), ctx.last_flags) == expected, \
+                (name, mode, prec, hex(xb), hex(yb))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_batch_equals_the_scalar_path(prec):
+    """One C call over an array must give, element for element, what n
+    scalar calls give - and a flag word that is their OR."""
+    ctx = Context(prec)
+    ops = pool(prec, count=24, seed=63)
+    xs = [ctx.from_bits(b) for b in ops]
+    ys = [ctx.from_bits(b) for b in reversed(ops)]
+    for name in MINMAX_MAG:
+        want, want_fl = [], 0
+        for x, y in zip(xs, ys):
+            ctx.clear_flags()
+            want.append(getattr(ctx, name)(x, y).to_bits())
+            want_fl |= ctx.last_flags
+        ctx.clear_flags()
+        out, fl = getattr(batch, name)(ctx, xs, ys)
+        assert [v.to_bits() for v in out] == want, (name, prec)
+        assert fl == want_fl and ctx.flags == fl, (name, prec)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_named_rows(prec):
+    """The rows derived from 9.6's own sentence rather than from either
+    implementation: the magnitude decides regardless of sign, equal
+    magnitudes defer to the base operation, and a NaN is unordered so
+    it defers too."""
+    ctx = Context(prec)
+    one, minus_one = ctx(1.0), ctx(-1.0)
+    two, minus_three = ctx(2.0), ctx(-3.0)
+
+    assert ctx.min_mag(minus_one, two).same_bits(minus_one)
+    assert ctx.max_mag(minus_one, two).same_bits(two)
+    assert ctx.min_mag(minus_three, two).same_bits(two), \
+        "minimumMagnitude(-3, 2) is +2 where minimum(-3, 2) is -3"
+    assert ctx.max_mag(minus_three, two).same_bits(minus_three)
+
+    # equal magnitudes of opposite sign: 9.6's "otherwise"
+    assert ctx.min_mag(one, minus_one).same_bits(minus_one)
+    assert ctx.min_mag(minus_one, one).same_bits(minus_one)
+    assert ctx.max_mag(one, minus_one).same_bits(one)
+    assert ctx.max_mag(minus_one, one).same_bits(one)
+
+    pz, nz = ctx.zero(0), ctx.zero(1)
+    assert ctx.min_mag(pz, nz).same_bits(nz)
+    assert ctx.max_mag(pz, nz).same_bits(pz)
+    assert ctx.minnum_mag(nz, pz).same_bits(nz)
+    assert ctx.maxnum_mag(nz, pz).same_bits(pz)
+
+    # infinities are on the same ladder
+    pinf, ninf = ctx.inf(0), ctx.inf(1)
+    assert ctx.min_mag(ninf, one).same_bits(one)
+    assert ctx.max_mag(ninf, one).same_bits(ninf)
+    assert ctx.min_mag(pinf, ninf).same_bits(ninf)
+    assert ctx.max_mag(pinf, ninf).same_bits(pinf)
+
+    # the NaN rules, each inherited from the operation 9.6 names last
+    qn = ctx.nan()
+    sn = ctx.from_bits(_snan_bits(prec))
+    ctx.clear_flags()
+    assert ctx.min_mag(qn, one).same_bits(qn) and ctx.last_flags == 0
+    assert ctx.max_mag(one, qn).same_bits(qn) and ctx.last_flags == 0
+    assert ctx.minnum_mag(qn, one).same_bits(one) and ctx.last_flags == 0
+    assert ctx.maxnum_mag(one, qn).same_bits(one) and ctx.last_flags == 0
+    assert (ctx.minnum_mag(sn, one).same_bits(one) and
+            ctx.last_flags == cftmpfr.FLAG_INVALID), \
+        "a signaling NaN signals invalid and is otherwise ignored (9.6)"
+    assert (ctx.max_mag(sn, one).same_bits(qn) and
+            ctx.last_flags == cftmpfr.FLAG_INVALID), \
+        "where the plain form quiets it"
+    assert (ctx.maxnum_mag(sn, qn).same_bits(qn) and
+            ctx.last_flags == cftmpfr.FLAG_INVALID), \
+        "two NaNs give a quiet NaN even in the Number forms"
+    ctx.clear_flags()
+
+
+def test_minmax_mag_refuses_an_unknown_name():
+    ctx = Context(53)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.minmax_mag(ctx._dev, "midmag", ctx._fi.code, b"", b"",
+                                0, ctx._fi.esz)
+
+
+# ---------------------------------------------------------------------
+# The formatOf arithmetic (754-2019 clause 5.4.1)
+#
+# What a binding can break here that it cannot break anywhere else:
+# there are TWO formats, so they could be swapped, or the destination's
+# element size used to cut the source buffer, or the destination's
+# attribute quietly replaced by the source's. All three are attacked
+# below, and the scoring is against the GOLDEN MODEL - gmpy2's IEEE
+# emulation has one precision per context and no cross-format form to
+# compare with.
+#
+# The witness cases matter more here than anywhere else in this file: a
+# binding that reached cft_div in the source format and converted the
+# answer down would pass every ordinary case and fail exactly these.
+# ---------------------------------------------------------------------
+
+try:
+    from cft_golden import formatof as _gfo               # noqa: E402
+except ImportError:                                       # pragma: no cover
+    _gfo = None
+
+needs_formatof = pytest.mark.skipif(
+    GOLDEN is None or _gfo is None,
+    reason="the golden model is not importable")
+
+FO_METHODS = (("formatof_add", "addition", 2),
+              ("formatof_sub", "subtraction", 2),
+              ("formatof_mul", "multiplication", 2),
+              ("formatof_div", "division", 2),
+              ("formatof_sqrt", "squareRoot", 1),
+              ("formatof_fma", "fusedMultiplyAdd", 3))
+
+FO_PAIRS = [(s, d) for s in PRECISIONS for d in PRECISIONS]
+FO_NARROWING = [(s, d) for s, d in FO_PAIRS if d < s]
+
+
+def _fo_ids(pairs):
+    return [f"{WIDTH[s]}->{WIDTH[d]}" for s, d in pairs]
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_PAIRS, ids=_fo_ids(FO_PAIRS))
+def test_formatof_matches_the_model(sp, dp):
+    """Every ordered pair, all six operations, against
+    python/cft_golden/formatof.py - which is the definition."""
+    sfmt, dfmt = GOLDEN[sp], GOLDEN[dp]
+    src, dst = Context(sp), Context(dp)
+    ops = pool(sp, count=14, seed=61)
+    checked = 0
+    for name, fn, arity in FO_METHODS:
+        for i, xb in enumerate(ops):
+            yb = ops[(i * 5 + 1) % len(ops)]
+            zb = ops[(i * 7 + 3) % len(ops)]
+            args = [src.from_bits(v) for v in (xb, yb, zb)][:arity]
+            dst.clear_flags()
+            got = getattr(dst, name)(*args)
+            want = _gfo.compute(sfmt, dfmt, fn, xb, yb, zb)
+            assert (got.to_bits(), dst.last_flags) == want, \
+                (name, sp, dp, hex(xb), hex(yb), hex(zb))
+            checked += 1
+    assert checked > 80, checked
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_NARROWING, ids=_fo_ids(FO_NARROWING))
+def test_formatof_is_not_a_double_rounding(sp, dp):
+    """The three witnesses, through the binding.
+
+    Each is a case where computing in the source format and converting
+    the answer down lands one ulp low - the tie in the destination
+    broken to even by a first rounding that should not have happened.
+    Both halves are asserted: the binding matches the model, and the
+    composed route does NOT, so a witness that stopped separating them
+    fails here rather than quietly passing."""
+    sfmt, dfmt = GOLDEN[sp], GOLDEN[dp]
+    src, dst = Context(sp), Context(dp)
+    for name, fn, arity in FO_METHODS:
+        if fn not in ("division", "squareRoot", "fusedMultiplyAdd"):
+            continue
+        xb, yb, zb, wfmt = _gfo.double_rounding_witness(sfmt, dfmt, fn)
+        args = [src.from_bits(v) for v in (xb, yb, zb)][:arity]
+        dst.clear_flags()
+        got = getattr(dst, name)(*args)
+        want = _gfo.compute(sfmt, dfmt, fn, xb, yb, zb)
+        assert (got.to_bits(), dst.last_flags) == want, (name, sp, dp)
+        wrong = _gfo.composed_route(sfmt, dfmt, wfmt, fn, xb, yb, zb)
+        assert wrong[0] != want[0], (
+            f"{name} {sp}->{dp}: the composed route agreed, so this "
+            f"witness no longer witnesses anything")
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_NARROWING, ids=_fo_ids(FO_NARROWING))
+def test_formatof_uses_the_destination_attribute(sp, dp):
+    """The rounding is the DESTINATION context's, not the source's.
+
+    Half of the destination's least subnormal is an exact tie between
+    zero and that subnormal, and an ordinary normal in the source - so
+    the two directions of the tie separate a binding that forwarded the
+    right attribute from one that forwarded the source's."""
+    sfmt, dfmt = GOLDEN[sp], GOLDEN[dp]
+    half, fl = _gsf.round_pack(sfmt, 0, 1,
+                              dfmt.emin - dfmt.man_w - 1, _gsf.RND_RNE)
+    assert fl == 0, "half the destination's least subnormal must be exact"
+    src = Context(sp)
+    x = src.from_bits(half)
+    one = src.from_int(1)
+    for dr, want in (("RNDN", 0),
+                     ("RNDZ", 0),
+                     ("RNDD", 0),
+                     ("RNDU", 1),
+                     ("RNDNA", 1)):
+        dst = Context(dp, rounding=dr)
+        dst.clear_flags()
+        got = dst.formatof_mul(x, one)
+        assert got.to_bits() == want, (dr, sp, dp, hex(got.to_bits()))
+        assert set(dst.flag_names(dst.last_flags)) == {"underflow",
+                                                       "inexact"}
+    # and the SOURCE context's attribute is not consulted at all
+    loud = Context(sp, rounding="RNDU")
+    x2 = loud.from_bits(half)
+    quiet = Context(dp, rounding="RNDN")
+    assert quiet.formatof_mul(x2, loud.from_int(1)).to_bits() == 0
+
+
+@needs_formatof
+@pytest.mark.parametrize("sp,dp", FO_PAIRS, ids=_fo_ids(FO_PAIRS))
+def test_formatof_batch_equals_the_scalar_path(sp, dp):
+    """One C call over the array, element by element in Python - the
+    same bits and the OR of the same flags. The container styles are
+    the destination's, not the source's, which is the one thing this
+    family's batch path has to get right that no other one does."""
+    src, dst = Context(sp), Context(dp)
+    ops = pool(sp, count=12, seed=63)
+    xs = [src.from_bits(v) for v in ops]
+    ys = [src.from_bits(ops[(i * 3 + 1) % len(ops)])
+          for i in range(len(ops))]
+    zs = [src.from_bits(ops[(i * 5 + 2) % len(ops)])
+          for i in range(len(ops))]
+    for name, _fn, arity in FO_METHODS:
+        args = [xs, ys, zs][:arity]
+        dst.clear_flags()
+        out, fl = getattr(batch, name)(dst, src, *args)
+        assert len(out) == len(ops)
+        acc = 0
+        for i in range(len(ops)):
+            dst.clear_flags()
+            one = getattr(dst, name)(*[a[i] for a in args])
+            assert out[i].to_bits() == one.to_bits(), (name, sp, dp, i)
+            acc |= dst.last_flags
+        assert fl == acc, (name, sp, dp)
+        # every result is a Float of the DESTINATION context
+        assert all(v.context is dst for v in out)
+        # the bytes container gives the same encodings back
+        packed = [b"".join(v.to_bytes() for v in a) for a in args]
+        outb, flb = getattr(batch, name)(dst, src, *packed)
+        assert outb == b"".join(v.to_bytes() for v in out)
+        assert flb == fl
+
+
+@needs_formatof
+def test_formatof_refuses_a_mixed_source_format():
+    """5.4.1 takes ONE source format. A mixed pair is refused rather
+    than widened behind the caller's back - the same rule _coerce
+    applies within one format, for the same reason."""
+    hi, lo = Context(53), Context(24)
+    with pytest.raises(ValueError):
+        lo.formatof_add(hi.from_int(1), lo.from_int(1))
+    with pytest.raises(ValueError):
+        batch.formatof_add(lo, hi, [hi.from_int(1)], [lo.from_int(1)])
+
+
+@needs_formatof
+def test_formatof_refuses_an_unknown_name_and_a_bad_arity():
+    ctx = Context(53)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.formatof(ctx._dev, "rem", 1, 0, 0, (b"", b""), 0, 4)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.formatof(ctx._dev, "sqrt", 1, 0, 0, (b"", b""), 0, 4)
+
+
+@needs_formatof
+def test_formatof_named_rows():
+    """The rows an independent reading of 5.4.1 decides, so that this
+    file is not only comparing two implementations of one idea."""
+    hi, lo = Context(53), Context(24)
+
+    # the destination owns the overflow: 2^100 * 2^100 is nothing in
+    # binary64 and an overflow in binary32
+    big = hi.from_float(2.0 ** 100)
+    hi.clear_flags()
+    assert hi.mul(big, big).to_float() == 2.0 ** 200
+    assert hi.last_flags == 0
+    lo.clear_flags()
+    got = lo.formatof_mul(big, big)
+    assert got.is_inf and set(lo.flag_names(lo.last_flags)) == {"overflow",
+                                                               "inexact"}
+
+    # the wider destination owns the wider range: binary32's least
+    # subnormal squared vanishes in binary32 and is exact in binary64
+    tiny = lo.from_bits(1)
+    lo.clear_flags()
+    assert lo.mul(tiny, tiny).is_zero
+    hi.clear_flags()
+    sq = hi.formatof_mul(tiny, tiny)
+    assert hi.last_flags == 0
+    assert sq.to_float() == float(2.0 ** -149) ** 2 or sq.to_bits() != 0
+
+    # a signaling NaN signals once and delivers the DESTINATION's
+    # canonical quiet NaN
+    lo.clear_flags()
+    snan = hi.from_bits((0x7FF << 52) | 1)
+    q = lo.formatof_add(snan, hi.from_int(1))
+    assert q.is_nan and q.to_bits() == 0x7FC00000
+    assert tuple(lo.flag_names(lo.last_flags)) == ("invalid",)
+
+    # divideByZero is delivered in the destination too
+    lo.clear_flags()
+    inf = lo.formatof_div(hi.from_int(1), hi.zero())
+    assert inf.is_inf and tuple(lo.flag_names(lo.last_flags)) == \
+        ("divbyzero",)
+
+
+@needs_formatof
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_formatof_same_format_is_the_ordinary_operation(prec):
+    """sfmt == dfmt is the operation that was already on the context,
+    bit for bit and flag for flag."""
+    ctx = Context(prec)
+    ops = pool(prec, count=12, seed=65)
+    for i, xb in enumerate(ops):
+        yb = ops[(i * 3 + 1) % len(ops)]
+        zb = ops[(i * 7 + 2) % len(ops)]
+        x, y, z = (ctx.from_bits(xb), ctx.from_bits(yb), ctx.from_bits(zb))
+        for name, plain in (("formatof_add", "add"), ("formatof_sub", "sub"),
+                            ("formatof_mul", "mul"), ("formatof_div", "div")):
+            ctx.clear_flags()
+            a = getattr(ctx, name)(x, y)
+            fa = ctx.last_flags
+            ctx.clear_flags()
+            b = getattr(ctx, plain)(x, y)
+            assert (a.to_bits(), fa) == (b.to_bits(), ctx.last_flags), name
+        ctx.clear_flags()
+        a = ctx.formatof_sqrt(x)
+        fa = ctx.last_flags
+        ctx.clear_flags()
+        assert (a.to_bits(), fa) == (ctx.sqrt(x).to_bits(), ctx.last_flags)
+        ctx.clear_flags()
+        a = ctx.formatof_fma(x, y, z)
+        fa = ctx.last_flags
+        ctx.clear_flags()
+        assert (a.to_bits(), fa) == (ctx.fma(x, y, z).to_bits(),
+                                     ctx.last_flags)
+
+
+@needs_numpy
+@needs_formatof
+def test_formatof_batch_numpy_returns_the_destination_dtype():
+    """An ndarray in, an ndarray of the DESTINATION's natural dtype out
+    - the one place this family's container rules differ from every
+    other batch call's, because the element size changes."""
+    hi, lo = Context(53), Context(24)
+    xs = np.array([1.5, 2.25, -3.0, 1e300], dtype=np.float64)
+    ys = np.array([0.5, 0.25, 1.0, 1e300], dtype=np.float64)
+    out, fl = batch.formatof_add(lo, hi, xs, ys)
+    assert out.dtype == np.dtype("float32")
+    assert list(out[:3]) == [2.0, 2.5, -2.0]
+    assert np.isinf(out[3]) and (fl & cftmpfr.FLAG_OVERFLOW)
+    # and the other direction: binary32 in, binary64 out
+    zs = np.array([1.5, 2.25], dtype=np.float32)
+    out2, _ = batch.formatof_mul(hi, lo, zs, zs)
+    assert out2.dtype == np.dtype("float64")
+    assert list(out2) == [2.25, 5.0625]

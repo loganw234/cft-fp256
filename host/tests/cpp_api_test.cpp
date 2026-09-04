@@ -1310,11 +1310,21 @@ void check_format(cft::device &dev, cft_device *ref)
         }
 
         /* Flag bookkeeping: sticky is the OR of the calls, last is the
-         * most recent, and clearing clears only the sticky word. */
+         * most recent, and clearing clears only the sticky word.
+         *
+         * From ABI 0.7 the sticky word is the LIBRARY's - 754-2019
+         * 7.1's status flags, kept on the device - so a new context
+         * over a device that has been computing inherits what stands
+         * there, exactly as a new scope in a program inherits its
+         * caller's flags. Lowering them is the caller's job and 7.1
+         * says only the caller may do it, so the test does it
+         * explicitly rather than assuming a constructor did. */
         {
             cft::basic_context<F> fctx(dev, CFT_RNE);
-            CHECK(fctx.flags() == 0 && fctx.last_flags() == 0,
-                  "%s: a fresh context has no flags", cft_format_name(F));
+            fctx.clear_flags();
+            CHECK(fctx.flags() == 0,
+                  "%s: a context whose flags were lowered has none",
+                  cft_format_name(F));
             std::vector<enc> out(n);
             const std::uint32_t f1 = fctx.mul(a, b, out);
             const std::uint32_t f2 = fctx.abs(a, out);
@@ -1348,6 +1358,140 @@ void check_format(cft::device &dev, cft_device *ref)
             CHECK(refused_as_misuse([&] { const cft::value<F> r = x + foreign;
                                           (void)r; }),
                   "%s: values from two contexts do not mix",
+                  cft_format_name(F));
+        }
+
+        /* ---- ABI 0.7: 9.6's magnitude forms, 7.1's status word, and
+         *      5.7.1's predicates through the wrapper ------------- */
+        {
+            std::vector<enc> wd(n), cd(n);
+            std::uint32_t mfc = 0, fw;
+
+            /* The four, batch, against cft.h reached directly - the
+             * same comparison every other entry point here gets. */
+            fw = ctx.min_mag(a, b, wd);
+            cft_min_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc,
+                  "%s min_mag: wrapper 0x%02x vs library 0x%02x",
+                  cft_format_name(F), static_cast<unsigned>(fw),
+                  static_cast<unsigned>(mfc));
+            fw = ctx.max_mag(a, b, wd);
+            cft_max_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc, "%s max_mag", cft_format_name(F));
+            fw = ctx.minnum_mag(a, b, wd);
+            cft_minnum_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc, "%s minnum_mag", cft_format_name(F));
+            fw = ctx.maxnum_mag(a, b, wd);
+            cft_maxnum_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc, "%s maxnum_mag", cft_format_name(F));
+
+            /* ... and scalar, which must be the batch of one. */
+            {
+                const cft::value<F> va = ctx.make(a[0]);
+                const cft::value<F> vb = ctx.make(b[0]);
+                ctx.min_mag(a, b, wd);
+                CHECK(ctx.min_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar min_mag is element 0 of the batch",
+                      cft_format_name(F));
+                ctx.max_mag(a, b, wd);
+                CHECK(ctx.max_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar max_mag", cft_format_name(F));
+                ctx.minnum_mag(a, b, wd);
+                CHECK(ctx.minnum_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar minnum_mag", cft_format_name(F));
+                ctx.maxnum_mag(a, b, wd);
+                CHECK(ctx.maxnum_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar maxnum_mag", cft_format_name(F));
+            }
+
+            /* Equal magnitudes of opposite sign defer to the base
+             * operation - the one row an implementation that prefers x
+             * or y gets wrong, checked here through the wrapper. */
+            {
+                const cft::value<F> one = ctx.one();
+                const cft::value<F> minus_one = -one;
+                CHECK(ctx.min_mag(one, minus_one).same_bits(minus_one) &&
+                      ctx.min_mag(minus_one, one).same_bits(minus_one),
+                      "%s: min_mag(1, -1) is -1 either way round",
+                      cft_format_name(F));
+                CHECK(ctx.max_mag(one, minus_one).same_bits(one) &&
+                      ctx.max_mag(minus_one, one).same_bits(one),
+                      "%s: max_mag(1, -1) is +1 either way round",
+                      cft_format_name(F));
+                const cft::value<F> zp = ctx.zero(0);
+                const cft::value<F> zn = ctx.zero(1);
+                CHECK(ctx.min_mag(zp, zn).same_bits(zn) &&
+                      ctx.max_mag(zp, zn).same_bits(zp),
+                      "%s: the two zeros come from the base operation",
+                      cft_format_name(F));
+                /* and the NaN rules, which are the base operation's too */
+                const cft::value<F> qn = ctx.quiet_nan();
+                const cft::value<F> sn = ctx.signaling_nan();
+                ctx.clear_flags();
+                CHECK(ctx.min_mag(qn, one).same_bits(qn) &&
+                      ctx.last_flags() == 0,
+                      "%s: min_mag propagates a quiet NaN quietly",
+                      cft_format_name(F));
+                CHECK(ctx.minnum_mag(qn, one).same_bits(one) &&
+                      ctx.last_flags() == 0,
+                      "%s: minnum_mag returns the number",
+                      cft_format_name(F));
+                CHECK(ctx.maxnum_mag(sn, one).same_bits(one) &&
+                      ctx.last_flags() == CFT_FLAG_INVALID,
+                      "%s: a signaling NaN signals invalid and is ignored",
+                      cft_format_name(F));
+            }
+
+            /* 7.1's word, through the context and through the device -
+             * one word, two views. */
+            {
+                ctx.clear_flags();
+                CHECK(ctx.flags() == 0 && dev.save_all_flags() == 0,
+                      "%s: context and device see the same lowered word",
+                      cft_format_name(F));
+                const std::uint32_t f1 = ctx.minnum_mag(a, b, wd);
+                CHECK(ctx.flags() == f1 && dev.save_all_flags() == f1,
+                      "%s: and the same raised one", cft_format_name(F));
+
+                /* 5.7.4's six, by their names. */
+                ctx.lower_flags(CFT_FLAGS_ALL);
+                ctx.raise_flags(CFT_FLAG_OVERFLOW | CFT_FLAG_INVALID);
+                CHECK(ctx.test_flags(CFT_FLAG_OVERFLOW) &&
+                      !ctx.test_flags(CFT_FLAG_INEXACT),
+                      "%s: testFlags is ANY of the mask",
+                      cft_format_name(F));
+                const std::uint32_t saved = ctx.save_all_flags();
+                ctx.lower_flags(CFT_FLAG_OVERFLOW);
+                CHECK(ctx.flags() == CFT_FLAG_INVALID,
+                      "%s: lowering by mask leaves the rest",
+                      cft_format_name(F));
+                ctx.restore_flags(saved, CFT_FLAGS_ALL);
+                CHECK(ctx.flags() == saved,
+                      "%s: restoreFlags round-trips saveAllFlags",
+                      cft_format_name(F));
+                CHECK(cft::basic_context<F>::test_saved_flags(
+                          saved, CFT_FLAG_INVALID) &&
+                      !cft::basic_context<F>::test_saved_flags(
+                          saved, CFT_FLAG_INEXACT),
+                      "%s: testSavedFlags asks the same of a held word",
+                      cft_format_name(F));
+                /* Two contexts over one device share ONE word, which
+                 * is what 7.1 describes and the whole reason the
+                 * header stopped keeping its own. */
+                {
+                    cft::basic_context<F> second(dev, CFT_RDN);
+                    second.lower_flags(CFT_FLAGS_ALL);
+                    CHECK(ctx.flags() == 0,
+                          "%s: lowering through one context lowers the "
+                          "device's word", cft_format_name(F));
+                }
+                ctx.clear_flags();
+            }
+
+            /* 5.7.1, through the wrapper's free functions. */
+            CHECK(!cft::is754version1985() && !cft::is754version2008() &&
+                  cft::is754version2019(),
+                  "%s: the conformance predicates are 0, 0, 1",
                   cft_format_name(F));
         }
     }
@@ -1655,6 +1799,154 @@ void check_device(cft::device &dev, cft_device *ref)
     }
 }
 
+
+/* ---- the formatOf arithmetic (754-2019 5.4.1) --------------------- *
+ *
+ * Two formats, so this cannot live inside check_format<F>: the source
+ * and the destination are separate template parameters and every
+ * ordered pair gets its own instantiation, which is the point - handing
+ * binary64 encodings to a call that reads them as binary32 is a compile
+ * error in this layer and a silent wrong answer in C.
+ *
+ * Three paths compared, not two: the typed free function, the raw
+ * method on cft::device, and cft.h itself. The middle one exists
+ * because it is what a caller with its own buffers uses, and a wrapper
+ * whose typed path was right and whose raw path had the operands
+ * swapped would pass a two-path test.
+ */
+template <cft_format SF, cft_format DF>
+void check_formatof(cft::device &dev, cft_device *ref)
+{
+    using senc = cft::encoding<SF>;
+    using denc = cft::encoding<DF>;
+    const std::size_t n = 129;          /* crosses the widening chunking */
+    static const cft_round rounds[5] = { CFT_RNE, CFT_RTZ, CFT_RDN,
+                                         CFT_RUP, CFT_RMM };
+
+    const std::vector<senc> a = operands<SF>(n, 0);
+    const std::vector<senc> b = operands<SF>(n, 3);
+    const std::vector<senc> c = operands<SF>(n, 5);
+
+    for (std::size_t ri = 0; ri < 5; ri++) {
+        const cft_round rnd = rounds[ri];
+        std::vector<denc> dw(n), dc(n), dr(n);
+        std::uint32_t fw = 0, fc = 0, fr = 0;
+        cft_status st;
+
+#define FO2(name)                                                         \
+        fw = cft::formatof_##name<SF, DF>(dev, rnd, a, b, dw);            \
+        st = cft_formatof_##name(ref, SF, DF, rnd, a.data(), b.data(),    \
+                                 dc.data(), n, &fc, nullptr);             \
+        CHECK(st == CFT_OK, "cft_formatof_" #name ": %s",                 \
+              cft_strerror(st));                                          \
+        expect<DF>("formatof_" #name, rnd, dw, fw, dc, fc);               \
+        {                                                                 \
+            const cft::call_result r =                                    \
+                dev.formatof_##name(SF, DF, rnd, a.data(), b.data(),      \
+                                    dr.data(), n);                        \
+            fr = r.flags;                                                 \
+            CHECK(r.status == CFT_OK, "device::formatof_" #name);         \
+            expect<DF>("formatof_" #name " (raw)", rnd, dr, fr, dc, fc);  \
+        }
+        FO2(add)
+        FO2(sub)
+        FO2(mul)
+        FO2(div)
+#undef FO2
+
+        fw = cft::formatof_sqrt<SF, DF>(dev, rnd, a, dw);
+        st = cft_formatof_sqrt(ref, SF, DF, rnd, a.data(), dc.data(), n,
+                               &fc, nullptr);
+        CHECK(st == CFT_OK, "cft_formatof_sqrt: %s", cft_strerror(st));
+        expect<DF>("formatof_sqrt", rnd, dw, fw, dc, fc);
+
+        fw = cft::formatof_fma<SF, DF>(dev, rnd, a, b, c, dw);
+        st = cft_formatof_fma(ref, SF, DF, rnd, a.data(), b.data(),
+                              c.data(), dc.data(), n, &fc, nullptr);
+        CHECK(st == CFT_OK, "cft_formatof_fma: %s", cft_strerror(st));
+        expect<DF>("formatof_fma", rnd, dw, fw, dc, fc);
+    }
+
+    /* A short destination span is refused before any call is issued -
+     * the one thing this layer can check that C cannot, since C has
+     * only pointers and a count. */
+    {
+        std::vector<denc> shortd(2);
+        bool threw = false;
+        try {
+            std::vector<senc> two(2);
+            cft::formatof_add<SF, DF>(dev, CFT_RNE,
+                                      cft::cspan<senc>(two.data(), 1),
+                                      cft::cspan<senc>(two.data(), 2),
+                                      cft::span<denc>(shortd.data(), 2));
+        } catch (const std::invalid_argument &) {
+            threw = true;
+        }
+        CHECK(threw, "%s->%s: an operand span shorter than the destination "
+                     "is refused", cft_format_name(SF), cft_format_name(DF));
+    }
+
+    /* The same-format instantiation is the operation that was already
+     * there. Checked HERE rather than only in C, because the wrapper is
+     * where a format could get swapped for its neighbour. */
+    if (SF == DF) {
+        std::vector<denc> dw(n), dc(n);
+        const std::uint32_t fw2 =
+            cft::formatof_add<SF, DF>(dev, CFT_RNE, a, b, dw);
+        std::uint32_t fc2 = 0;
+        const cft_status st2 =
+            cft_run(ref, CFT_ADD, SF, CFT_RNE, a.data(), nullptr, b.data(),
+                    dc.data(), n, &fc2, nullptr);
+        CHECK(st2 == CFT_OK, "cft_run: %s", cft_strerror(st2));
+        expect<DF>("formatof_add == run(ADD)", CFT_RNE, dw, fw2, dc, fc2);
+    }
+
+    /* 5.11's cross-format comparison, as the COMPOSITION cft.h says it
+     * is: widen both sides into the wider of the two formats and use the
+     * comparison that already exists. Exercised rather than asserted,
+     * and the assertion that matters is that the widening rounds
+     * NOTHING - the clause asks for a comparison "as if the data were
+     * converted to a common format with unbounded exponent range and
+     * precision", and this composition only computes that because the
+     * ladder nests. */
+    {
+        const cft_format wide =
+            (cft::format_traits<SF>::significand_bits >=
+             cft::format_traits<DF>::significand_bits) ? SF : DF;
+        const std::size_t wsz = cft_format_size(wide);
+        std::vector<denc> dvals(n);
+        std::vector<std::uint8_t> wa(n * wsz), wb(n * wsz), pred(n * wsz);
+        std::uint32_t f0 = 0, f1 = 0, f2 = 0, f3 = 0;
+
+        /* the second side is a real destination-format value, so the
+         * comparison has two formats to reconcile rather than one */
+        const cft_status s0 = cft_formatof_add(ref, SF, DF, CFT_RNE,
+                                               a.data(), b.data(),
+                                               dvals.data(), n, &f0,
+                                               nullptr);
+        const cft_status s1 = cft_convert(ref, SF, wide, CFT_RNE, a.data(),
+                                          wa.data(), n, &f1);
+        const cft_status s2 = cft_convert(ref, DF, wide, CFT_RNE,
+                                          dvals.data(), wb.data(), n, &f2);
+        const cft_status s3 = cft_run(ref, CFT_CMPLT, wide, CFT_RNE,
+                                      wa.data(), wb.data(), nullptr,
+                                      pred.data(), n, &f3, nullptr);
+        CHECK(s0 == CFT_OK && s1 == CFT_OK && s2 == CFT_OK && s3 == CFT_OK,
+              "%s vs %s: the 5.11 composition runs",
+              cft_format_name(SF), cft_format_name(DF));
+        CHECK((f1 & ~static_cast<std::uint32_t>(CFT_FLAG_INVALID)) == 0 &&
+              (f2 & ~static_cast<std::uint32_t>(CFT_FLAG_INVALID)) == 0,
+              "%s/%s: 5.11's widening into the common format must be exact, "
+              "got 0x%02x and 0x%02x", cft_format_name(SF),
+              cft_format_name(DF), static_cast<unsigned>(f1),
+              static_cast<unsigned>(f2));
+        /* and the quiet comparison signals nothing at all, even where
+         * the widening met a signaling NaN on the way in */
+        CHECK(f3 == 0, "%s/%s: the quiet comparison signals nothing",
+              cft_format_name(SF), cft_format_name(DF));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -1687,6 +1979,21 @@ int main(int argc, char **argv)
     check_format<CFT_FP128>(dev, ref);
     check_format<CFT_FP256>(dev, ref);
     check_program(dev, ref);
+
+    /* Every ordered pair of formats through the formatOf layer. The
+     * loop is written out because SF and DF are template parameters -
+     * which is the whole point of the typed layer, and the reason a
+     * mismatched pair is a compile error rather than a wrong answer. */
+#define FOPAIR(S, D) check_formatof<S, D>(dev, ref)
+    FOPAIR(CFT_FP32, CFT_FP32);  FOPAIR(CFT_FP32, CFT_FP64);
+    FOPAIR(CFT_FP32, CFT_FP128); FOPAIR(CFT_FP32, CFT_FP256);
+    FOPAIR(CFT_FP64, CFT_FP32);  FOPAIR(CFT_FP64, CFT_FP64);
+    FOPAIR(CFT_FP64, CFT_FP128); FOPAIR(CFT_FP64, CFT_FP256);
+    FOPAIR(CFT_FP128, CFT_FP32); FOPAIR(CFT_FP128, CFT_FP64);
+    FOPAIR(CFT_FP128, CFT_FP128);FOPAIR(CFT_FP128, CFT_FP256);
+    FOPAIR(CFT_FP256, CFT_FP32); FOPAIR(CFT_FP256, CFT_FP64);
+    FOPAIR(CFT_FP256, CFT_FP128);FOPAIR(CFT_FP256, CFT_FP256);
+#undef FOPAIR
 
     /* Conformance through the wrapper: the published vector sets,
      * replayed by cft_conformance itself rather than by a restatement

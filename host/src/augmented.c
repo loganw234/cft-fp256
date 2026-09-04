@@ -397,8 +397,7 @@ static cft_status aug_batch(cft_device *dev, cft_format fmt, int is_mul,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -420,8 +419,7 @@ static cft_status aug_batch(cft_device *dev, cft_format fmt, int is_mul,
         lane_store(f, (uint8_t *)r, i, &vr);
         lane_store(f, (uint8_t *)e, i, &ve);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -450,8 +448,7 @@ CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -472,8 +469,7 @@ CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
         lane_store(f, (uint8_t *)r, i, &vr);
         lane_store(f, (uint8_t *)e, i, &ve);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 

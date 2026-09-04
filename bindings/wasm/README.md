@@ -46,7 +46,7 @@ The embedded sample (4,015 cases; deterministic rule below) spans all
 four formats, all five rounding attributes and every opcode class,
 the divide/sqrt seeds 26/27 and the unassigned `reserved15/30/255`
 included - that list lost 28 when ABI 0.6 assigned it to `sumsq`. For
-the full 881,657-case claim, generate the sets in a
+the full 1,067,635-case claim, generate the sets in a
 checkout (`make vectors`) and drag the `vectors/out/*.jsonl` files
 onto the page - same code path, whole files. Verified at build time:
 the full 20-set drop replays with zero mismatches, from both
@@ -69,7 +69,14 @@ not change, so the drop zone needed nothing for those. It did need
 three more families at 0.6, and got them: `<fmt>-augmented.jsonl`
 (one per format - 9.5 fixes the rounding, so there is no attribute to
 sweep), `<fmt>-reduce[-<rnd>].jsonl` and
-`<fmt>-character[-<rnd>].jsonl`. **84 names in all.**
+`<fmt>-character[-<rnd>].jsonl`. ABI 0.7 added two more:
+`<fmt>-minmaxmag.jsonl` (one per format again, and for a stricter
+reason - 9.6's magnitude forms *select* an operand, so there is no
+rounding at all for an attribute to direct) and
+`<sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl`, **eighty** of them, one per
+ordered pair of formats per attribute, because 5.4.1 asks for every
+destination and, for each destination, every source. **168 names in
+all.**
 
 The page is also a working binary32/64/128/256 calculator: one
 element through `cft_run()`, the composed `cft_div`/`cft_sqrt`
@@ -77,10 +84,14 @@ sequence, or any of the thirty-nine transcendentals - phase 1's nine,
 phase 2's eleven, phase 3's nine and the ten that complete table 9.1 -
 and since ABI 0.6 the character conversions of clause 5.12, the
 payload operations of 9.7, the augmented arithmetic of 9.5 and clause
-9.4's remaining reductions. Operands and results as raw encodings, a
+9.4's remaining reductions. ABI 0.7 adds 9.6's four magnitude forms
+and 5.4.1's six formatOf operations, the latter with a second format
+select, because a formatOf call's destination is an argument rather
+than a mode. Operands and results as raw encodings, a
 text field where the operation reads a sequence, two result lines
-where it returns a pair, flags decoded, every answer pinned by the
-replay above it.
+where it returns a pair, flags decoded, the 7.1 status word under the
+result and a button that is the only thing on the page able to lower
+it, and every answer pinned by the replay above it.
 
 ## Building
 
@@ -110,10 +121,12 @@ the override it warns and proceeds. Stages:
    build trusts its own regeneration, not whatever `vectors/out`
    holds);
 2. `emcc` the library sources - **asked of `host/Makefile`, not
-   listed here** (see below), currently nine: bigint, softfloat,
-   device, divsqrt, clause5, mpfloat, transcend, program, conformance
-   - `mpfloat.c` and `transcend.c` arrived with ABI 0.3 and were
-   compiled in without anyone editing this directory, which is the
+   listed here** (see below), currently thirteen: bigint, softfloat,
+   device, divsqrt, clause5, chars, augmented, mpfloat, transcend,
+   program, reduce, formatof, conformance
+   - `mpfloat.c` and `transcend.c` arrived with ABI 0.3 and
+   `formatof.c` with 0.7, each compiled in without anyone editing this
+   directory, which is the
    derivation doing its job; the XRT backend is not compiled, wasm32
    having no PCIe to speak - plus `wasm_api.c`,
    twice with identical flags: split (`.js` + `.wasm`, so the
@@ -210,10 +223,12 @@ the build directory:
    `cft_conformance()` over MEMFS - the page's own bytes, the
    library's own file-reading path, one call per set. One set per
    directory, which is what the page does with a dropped file, over
-   every name the drop zone accepts: since ABI 0.6 that is all **84** -
+   every name the drop zone accepts: since ABI 0.7 that is all **168** -
    the twenty opcode sets, the twenty transcendental ones and, when
    `make vectors` has written them, the four augmented, twenty
-   reduction and twenty character sets;
+   reduction and twenty character sets, the four magnitude sets of 9.6
+   and the eighty formatOf sets of 5.4.1 (one per ordered pair of
+   formats per attribute);
 5. drives **every operation that is not an opcode through its own
    wrapper**, reading the same files itself: the thirty-nine
    transcendentals (`cftw_exp` … `cftw_hypot`, `cftw_sinpi` …
@@ -221,10 +236,14 @@ the build directory:
    `cftw_exp2m1` … `cftw_rootn`), clause 9.5's `cftw_augmented_add` …
    `cftw_augmented_mul` with their two outputs, clause 9.4's four sum
    reductions through `cftw_reduce` at opcodes 24/25/28/29 and the
-   three `cftw_scaled_prod*` with their int64 scale, and clause 5.12's
+   three `cftw_scaled_prod*` with their int64 scale, clause 5.12's
    `cftw_from_decimal_char` … `cftw_set_payload_signaling` - the last
    through the sizing protocol exactly as cft.h states it, short buffer
-   included. One element at a time for exact per-case flags, then as
+   included - and since ABI 0.7 clause 9.6's `cftw_min_mag` …
+   `cftw_maxnum_mag` and clause 5.4.1's `cftw_formatof_add` …
+   `cftw_formatof_fma`, the one family whose operand and result
+   buffers are different widths in the same call. One element at a
+   time for exact per-case flags, then as
    arrays wherever the C has a batch shape, comparing encodings,
    sequences, scales and flags against the file. Step 4 cannot
    substitute for this and it is worth being blunt about why:
@@ -234,7 +253,8 @@ the build directory:
    that fails when the JavaScript surface is missing, or present and
    wrong - including `atan2` with its two operands the wrong way
    round, which is the negative control the 0.4 block below records,
-   and `scaled_prod_diff` the same way at 0.6.
+   `scaled_prod_diff` the same way at 0.6, and at 0.7 a formatOf call
+   whose two formats are the wrong way round.
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
 rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
@@ -499,6 +519,180 @@ click and them. Chromium on Windows 11, the committed
 Every one of those matches `python/cft_golden`, which is where they
 were taken from before they were typed here.
 
+**Measured 2026-09-04**, node 22.19.0 on Windows 11 (DESKTOP-T33SK86),
+against the page rebuilt with the ABI 0.7 wrappers in it - the two
+packages in one step, so this module never reported a version whose
+operations it could not call: module **211,869 bytes**, sha256
+`04c3aad8748c9555…`, identical to the node loader's
+`bindings/node/cft_node.wasm` (and to `build/cft_node.wasm`); **111
+`cftw_*` exports**, against 91 at 0.6, with **80 named entry points**
+checked present by name. `cftw_abi_version()` reads **6 = ABI 0.6, and
+so does `cft.h`** - the integrator bumps `CFT_ABI_VERSION_MINOR` once,
+for the whole 0.7 step, and `verify.mjs` compares the module against
+the header rather than against a number typed into it, so this line
+goes to 0.7 on that commit with nothing here to change. Two clean
+container builds produced the same module and the same
+`conformance.html` (**1,336,073 bytes**, sha256 `cf43d9b11ae34d28…`),
+and a third after the negative control below was reverted.
+
+The numbers below are one standardized run,
+`bash verify/run.sh --fresh --only vectors,node,wasm`, run id
+**20260904-030316-6b9a845** on a clean tree: `vectors` 275 s, `node`
+1438 s, `wasm` 1100 s, **VERDICT: PASS, nothing skipped**. It is the
+second of two: the first (20260904-021432-cfab84c) ran while these two
+README files were being written, so its header says *TREE DIRTY* and
+it certifies nothing by this repository's own rule - it is recorded
+only because it reported the same counts, stage for stage, which is
+what a rerun on the same sources should do.
+
+* **1,223,635 cases over 168 sets** through `cft_conformance` - the
+  twenty opcode sets, the twenty transcendental ones (533,265), the
+  four augmented (89,616), twenty reduction (8,960) and
+  twenty character (13,816) sets of 0.6, and the two new families:
+  four magnitude sets of 9.6 (**9,728**) and eighty formatOf sets of
+  5.4.1 (**176,250**), one per ordered pair of formats per attribute.
+  `make vectors` writes all 168; the drop zone accepts all 168. (That
+  count is larger than the **1,067,635** the page quotes for
+  `make vectors`, and the difference is entirely the opcode sets:
+  `verify/run.sh`'s own `vectors` stage takes the generator's default
+  directed/random/simple pools rather than `make vectors`'s
+  `--directed 3000 --random 4000 --simple 200`, so its opcode sets
+  carry 19,600 lines each where the published ones carry 11,800. The
+  other six families are pool-size-independent and identical either
+  way, which is why the step-5 numbers below are the same in both.)
+* **831,635 of those driven through the wrappers themselves**, over
+  the 148 sets that are not opcode sets - the four families of 0.6
+  plus 9,728 magnitude cases over 4 sets and 176,250 formatOf cases
+  over 80. Per case for exact flags, then as arrays wherever the C has
+  a batch shape. Zero mismatches either way, `VERIFY OK`.
+* The formatOf family is the first whose **operand and result
+  encodings are different widths on the same line**, so its driver
+  sizes every buffer from the format it belongs to and checks the
+  record's own `sfmt`/`dfmt` against the file's name - with two
+  formats there is a pairing to get wrong, and a set whose name and
+  contents disagree is a failure mode no other family has.
+
+**The negative control moved with the surface again.** At 0.3 it was
+`cftw_pow`, at 0.4 and 0.5 `cftw_atan2`, at 0.6 `cftw_scaled_prod_diff`;
+here it is **`cftw_formatof_sub`, whose two operand pointers were
+swapped** so that the wrapper computes b - a. It is the same shape of
+mistake for the same reason those were chosen: nothing errors, the
+magnitude is right, and exactly one sign bit is wrong, so a checker
+that looked only for a crash or a NaN would walk past it. Swapped and
+rebuilt (module sha256 `2796f430c7d2c265…`, a different module):
+
+* `verify.mjs` **fails all 80 formatOf sets in step 5** - the first
+  disagreement at `fp32-to-fp32-formatof.jsonl:41`,
+  `formatOf-sub fp32 -> fp32 rne`, `a 0x00000000 b 0x00000001`,
+  `expected 0x80000001, got 0x00000001`: the same value with one sign
+  bit, on a SAME-FORMAT pair, because an operand swap needs no change
+  of format to show. The other five families stay clean (4,825
+  transcendental, 967 augmented, 8,960 reduction, 6,372 character, 976
+  magnitude) and **step 4 stays green over all 168 sets**, the 80
+  formatOf sets included. That is the half-step's failure mode exactly:
+  the internal replay never calls the wrapper, so it cannot see it
+  broken.
+* `bindings/node/conformance.mjs` fails **the same 80 sets** through
+  `Context`'s own methods - 68 of 148 clean, and its `cft_conformance`
+  pass reports 47,620 cases over 168 sets matching, green throughout.
+* `bindings/node/test.mjs` fails **1 of 125** by name: *a same-format
+  formatOf call IS the operation that was already here*, at binary32
+  under roundTiesToEven. **Which one test that is, is the row worth
+  keeping.** The batch test - `mapFormatOf` against the scalar methods
+  - stays GREEN, because the control changes both identically and that
+  test compares the package with itself; so does every test that
+  drives `add`, `mul`, `div`, `sqrt` or `fma`. The one that catches it
+  is the one that compares formatOf against `cft_run`/`cft_div`/
+  `cft_sqrt` - a different thing, asserted for exactly this reason.
+
+Reverted, rebuilt: module sha256 back to `04c3aad8748c9555…` and
+`conformance.html` back to `cf43d9b11ae34d28…`, so the tree
+round-tripped and the reproducibility claim above stands on a build
+after a deliberate break rather than only on two in a row.
+
+Those three runs used a **thinned copy** of the sets - all 168 names,
+each strided down to about 240 lines - because the point was to watch
+the checkers fail rather than to re-prove a million cases with a
+deliberately wrong module. A `head` would not have done: the formatOf
+and magnitude sets are grouped by operation, so the first 240 lines of
+a formatOf set are all `add` and the broken `sub` would never have
+been reached. The clean numbers above are the full sets.
+
+**And the page was opened in a browser**, which mattered again: the
+markup changed further than `verify.mjs` can see - a second format
+select that appears for six operations and no others, a rounding
+select that greys itself out for a second and different reason, a
+status word rendered under the result, and a button that is the only
+thing on the page able to lower a flag. Chromium 148 on Windows 11,
+the committed `conformance.html` served over a loopback `http.server`
+because this session's browser will not open a `file://` path.
+
+* Section 1 read *libcft ABI 0.6* (the header's own answer, see above)
+  and, new at 0.7, **`is754version1985 no   is754version2008 no
+  is754version2019 yes`** - asked of the library, not restated by the
+  page. Section 2's embedded sample replayed **4,015 cases over 20
+  sets, green**, with no console errors.
+* Section 3 took a drop of `fp32-minmaxmag.jsonl`,
+  `fp256-minmaxmag.jsonl`, `fp64-to-fp32-formatof.jsonl` and
+  `fp128-to-fp32-formatof-rtz.jsonl` - both new families - and
+  replayed **13,414 cases, all matching**, with a deliberately
+  misnamed fifth file (`fp64-to-fp32-formatOf.jsonl`, one capital)
+  refused by name and the verdict correctly downgraded to *not a full
+  pass*. Before this step those four names were not in the drop zone's
+  list at all.
+* Section 4's panel offered **91 operations**. `max_mag(+3, -3)` gave
+  **+3** and `min_mag(+3, -3)` gave **-3** - 9.6's "otherwise",
+  deferring to maximum and minimum, which is the one row a wrong
+  reading is visible on - with the rounding select **disabled and
+  labelled** *there is no rounding here for an attribute to direct*,
+  which is a different sentence from the augmented three's *9.5 fixes
+  this operation's rounding*. The destination select appeared for the
+  formatOf six and for nothing else.
+* The formatOf rows, computed through the button at binary64 →
+  binary32 under roundTiesToEven: `formatof_add` of
+  `0x8037478c91215dae` and `0xb690000000000000` - about -2^-968 plus
+  exactly -2^-150, a hair past half of binary32's least subnormal -
+  gave **`0x80000001` with underflow and inexact**, the destination's
+  exceptions on the destination's grid and the row that caught the
+  MPFR harness double rounding (docs/VALIDATION.md). `formatof_mul` of
+  2^100 by 2^100 gave **+inf with overflow and inexact**, an exception
+  the same multiply raises nowhere in binary64 (`test.mjs` asserts that
+  half). And the
+  double-rounding witness: `formatof_fma` of `0x3ff0000010000000` ×
+  1 + binary64's smallest subnormal - a product that IS binary32's
+  midpoint between 1 and nextUp(1), plus a hair - gave
+  **`0x3f800001`**, while the same product *without* the addend gave
+  **`0x3f800000`**, the tie broken to even downward. Those two values
+  one ulp apart, in the same panel, are what "narrowing may not be
+  double rounded" means.
+* The status word read `0x00` on load, `0x1d` (invalid, overflow,
+  underflow, inexact) after section 2's replay - a replay is calls,
+  and the page says so rather than exempting itself - `0x00` again
+  after the button, and then accumulated `0x18` and `0x1c` across the
+  formatOf calls above while each call's own `flags` line stayed its
+  own. `build/negative_control.html` was opened in the same browser
+  and failed red at `fp64.jsonl:2` with the library's own
+  disagreement, so the checker was watched failing here too.
+
+Every one of those matches `python/cft_golden`, which is where they
+were derived from before they were typed here.
+
+**What was NOT run, and why.** The gate for this step was
+`bash verify/run.sh --only vectors,node,wasm`, so the library's own
+stages - `libcft`, `cpp`, `mpfr`, `formatof`, `status96`, `bindings` -
+and the RTL ones did not run here. They belong to the two package
+commits that landed the C, which docs/VALIDATION.md records; nothing
+under `host/`, `python/` or `vectors/` was touched by this step, and
+the module this page carries is compiled from those sources unchanged.
+No device backend was exercised: wasm32 has no XRT and no PCIe, and
+the software backend is the only device a browser can be. No other JS
+engine was measured - the argument for cross-engine agreement is the
+wasm integer spec, and the measurement is V8 (node 22.19.0 and
+Chromium 148), which is one engine family. And
+`CFT_ABI_VERSION_MINOR` still reads 6: the integrator bumps it once
+for the whole 0.7 step, and every check here compares the module
+against the header rather than against a version typed into a test.
+
 ## Scope, honestly
 
 * **This is the software backend in a browser.** Full contract
@@ -597,9 +791,25 @@ page_template.html   the page, with three @CFT_*@ splice tokens open
 make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
 verify.mjs           the browserless check of that build product:
-                     identity, module hash, the 84-set vector replay,
+                     identity, module hash, the 168-set vector replay,
                      and every non-opcode operation driven through its
                      own wrapper
 build/               untracked: vectors, module, node loader,
                      negative control
 ```
+
+### Rebuilt after the bump, 2026-09-04
+
+The block above was measured on a tree whose `cft.h` still read 0.6:
+the integrator's bump to 0.7 came after the JavaScript step this time,
+the opposite order from 0.6, and the full run on the bumped tree
+refused the page on one line - `cftw_abi_version() = 6 (0.6); cft.h
+says 7 (0.7)` - which is the check doing its job. The page and the
+module were rebuilt on the bumped tree with `build.sh`, twice, in the
+pinned container, byte-identical: `conformance.html` **1,336,073
+bytes**, sha256 `e1b42b3873416e39…`; module **211,869 bytes**, sha256
+`a1f0a4715516d3f6…` (the same bytes as `bindings/node/cft_node.wasm`);
+`cft_node.js` unchanged. Sizes identical to the block above, hashes
+different by the one constant. `verify.mjs` then ran under
+`bash verify/run.sh --fresh --only vectors,node,wasm`, run id
+`20260904-054715-2216e62`, and passed with the same counts as the block above.

@@ -1005,3 +1005,241 @@ WASM_EXPORT int cftw_augmented_mul(cft_device *dev, int fmt, const void *a,
     return (int)cft_augmented_mul(dev, (cft_format)fmt, a, b, r, e,
                                   (size_t)n, flags_out);
 }
+
+/* ---- the two packages of ABI 0.7 ---------------------------------- *
+ *
+ * Added 2026-09-04 with the library's own step to 0.7, so this module
+ * never carried the two packages without exporting them - the
+ * half-step the 0.3 and 0.4 rebuilds each took once and every step
+ * since has refused to take. One wrapper per declaration in cft.h, in
+ * cft.h's order: the status word of 7.1 with 5.7.4's six operations
+ * over it, the three conformance predicates of 5.7.1, the four
+ * magnitude forms of 9.6, and then clause 5.4.1's formatOf
+ * arithmetic.
+ *
+ * THREE THINGS HERE ARE NOT PLAIN PASSTHROUGHS, and each is the
+ * contract's shape carried across wasm32 rather than a JavaScript
+ * convenience:
+ *
+ *   THE MASK IS A MACRO, and a macro is the one part of a header a
+ *   caller on the other side of a wasm boundary cannot reach at all.
+ *   CFT_FLAGS_ALL is DERIVED in cft.h from the cft_exception bits
+ *   rather than written out, so a JavaScript copy of it would be a
+ *   transcription of a derivation - which is how a sixth flag would
+ *   silently stop being covered by "all". cftw_flags_all() projects
+ *   the macro instead, and bindings/node's audit asks the module for
+ *   it rather than trusting its own OR.
+ *
+ *   A NULL DEVICE IS PASSED THROUGH, not defended against. cft.h says
+ *   the six flag calls accept one and behave as a handle whose word is
+ *   permanently zero; a wrapper that refused it here would be a
+ *   different contract in the browser than in C, and 0 is exactly the
+ *   pointer a JS caller holds before cftw_open_software() has
+ *   succeeded.
+ *
+ *   TWO FORMATS, IN THE C's ORDER. The formatOf six take sfmt for a,
+ *   b and c and dfmt for d, so d holds n elements of
+ *   cftw_format_size(dfmt) bytes while the operands hold n of
+ *   cftw_format_size(sfmt) - the two are different widths in the same
+ *   call, which no other entry point in this file does except
+ *   cftw_convert. d MUST NOT overlap a, b or c (cft.h); this wrapper
+ *   does not restate the rule and does not break it.
+ *
+ * The four magnitude forms take NO ROUNDING ARGUMENT and the omission
+ * is normative rather than an oversight: 9.6 defines each by a
+ * comparison of magnitudes and then a SELECTION of one operand, so
+ * there is no rounding for an attribute to direct. They issue no
+ * device pass either, so there is no bus word - like nextUp, and for
+ * the same reason. The three predicates take neither a device nor a
+ * format: 5.7.1 asks about the programming environment, not about a
+ * number, and they are safe to call before cftw_open_software().
+ *
+ * Everything the operations mean - which direction narrows exactly,
+ * why the composed route may not be used, whose exceptions the
+ * formatOf six raise, what "otherwise" means for a NaN in 9.6 - lives
+ * in cft.h and in python/cft_golden/formatof.py. Nothing here decides
+ * or second-guesses any of it.
+ */
+
+/* ---- the status word (7.1) and 5.7.4's six operations ------------- */
+
+/* CFT_FLAGS_ALL, which is a macro and therefore invisible to a caller
+ * that only has the module. Derived in cft.h from the cft_exception
+ * bits; projected here so that nothing on the JavaScript side has to
+ * hold a second copy of the derivation. */
+WASM_EXPORT uint32_t cftw_flags_all(void)
+{
+    return (uint32_t)CFT_FLAGS_ALL;
+}
+
+WASM_EXPORT void cftw_lower_flags(cft_device *dev, uint32_t mask)
+{
+    cft_lower_flags(dev, mask);
+}
+
+WASM_EXPORT void cftw_raise_flags(cft_device *dev, uint32_t mask)
+{
+    cft_raise_flags(dev, mask);
+}
+
+/* 1 or 0, never a flag word - cft.h makes that a property of the
+ * value so it cannot be mistaken for an intersection. */
+WASM_EXPORT int cftw_test_flags(cft_device *dev, uint32_t mask)
+{
+    return cft_test_flags(dev, mask);
+}
+
+WASM_EXPORT uint32_t cftw_save_all_flags(cft_device *dev)
+{
+    return cft_save_all_flags(dev);
+}
+
+/* RESTORES rather than ORs: a flag inside the mask that is low in
+ * `saved` comes back low. That is what makes save/restore a round
+ * trip rather than an accumulation. */
+WASM_EXPORT void cftw_restore_flags(cft_device *dev, uint32_t saved,
+                                    uint32_t mask)
+{
+    cft_restore_flags(dev, saved, mask);
+}
+
+/* No device argument, because no device is involved: 5.7.4 puts the
+ * saved flags in the first operand precisely so this is pure. */
+WASM_EXPORT int cftw_test_saved_flags(uint32_t saved, uint32_t mask)
+{
+    return cft_test_saved_flags(saved, mask);
+}
+
+/* ---- 5.7.1's three conformance predicates ------------------------- */
+
+WASM_EXPORT int cftw_is754version1985(void)
+{
+    return cft_is754version1985();
+}
+
+WASM_EXPORT int cftw_is754version2008(void)
+{
+    return cft_is754version2008();
+}
+
+WASM_EXPORT int cftw_is754version2019(void)
+{
+    return cft_is754version2019();
+}
+
+/* ---- 9.6's magnitude forms of minimum and maximum ----------------- *
+ *
+ * Host operations of the nextUp kind: a comparison of two sign-cleared
+ * encodings and a selection, no rounding and no opcode - so no `rnd`
+ * argument and no bus word, and the result is one of the two operand
+ * encodings bit for bit except where the base operation delivers a
+ * NaN. d may alias a or b. */
+
+WASM_EXPORT int cftw_min_mag(cft_device *dev, int fmt, const void *a,
+                             const void *b, void *d, uint32_t n,
+                             uint32_t *flags_out)
+{
+    return (int)cft_min_mag(dev, (cft_format)fmt, a, b, d, (size_t)n,
+                            flags_out);
+}
+
+WASM_EXPORT int cftw_max_mag(cft_device *dev, int fmt, const void *a,
+                             const void *b, void *d, uint32_t n,
+                             uint32_t *flags_out)
+{
+    return (int)cft_max_mag(dev, (cft_format)fmt, a, b, d, (size_t)n,
+                            flags_out);
+}
+
+WASM_EXPORT int cftw_minnum_mag(cft_device *dev, int fmt, const void *a,
+                                const void *b, void *d, uint32_t n,
+                                uint32_t *flags_out)
+{
+    return (int)cft_minnum_mag(dev, (cft_format)fmt, a, b, d, (size_t)n,
+                               flags_out);
+}
+
+WASM_EXPORT int cftw_maxnum_mag(cft_device *dev, int fmt, const void *a,
+                                const void *b, void *d, uint32_t n,
+                                uint32_t *flags_out)
+{
+    return (int)cft_maxnum_mag(dev, (cft_format)fmt, a, b, d, (size_t)n,
+                               flags_out);
+}
+
+/* ---- clause 5.4.1's formatOf arithmetic --------------------------- *
+ *
+ * SIX ENTRY POINTS RATHER THAN ONE DISPATCHER, and the reason is the
+ * C's rather than this file's: division and square root have no opcode
+ * and never will (they are compositions here), so a dispatcher keyed
+ * on cft_op could not express half of the clause. The arities differ
+ * too. cft.h argues it at length.
+ *
+ * `sfmt` is the format of a, b and c; `dfmt` is d's. The rounding
+ * attribute directs the ONE rounding, and every exception is the
+ * DESTINATION's. The signatures below carry exactly the operands
+ * cft.h gives each operation, so there is no unused slot here to pass
+ * the wrong thing into. bus_out is real for the widening direction (a
+ * device pass is issued underneath) and reads back 0 for the narrowing
+ * one, which is the contract's own statement and not a wrapper's
+ * simplification. */
+
+WASM_EXPORT int cftw_formatof_add(cft_device *dev, int sfmt, int dfmt,
+                                  int rnd, const void *a, const void *b,
+                                  void *d, uint32_t n, uint32_t *flags_out,
+                                  uint32_t *bus_out)
+{
+    return (int)cft_formatof_add(dev, (cft_format)sfmt, (cft_format)dfmt,
+                                 (cft_round)rnd, a, b, d, (size_t)n,
+                                 flags_out, bus_out);
+}
+
+WASM_EXPORT int cftw_formatof_sub(cft_device *dev, int sfmt, int dfmt,
+                                  int rnd, const void *a, const void *b,
+                                  void *d, uint32_t n, uint32_t *flags_out,
+                                  uint32_t *bus_out)
+{
+    return (int)cft_formatof_sub(dev, (cft_format)sfmt, (cft_format)dfmt,
+                                 (cft_round)rnd, a, b, d, (size_t)n,
+                                 flags_out, bus_out);
+}
+
+WASM_EXPORT int cftw_formatof_mul(cft_device *dev, int sfmt, int dfmt,
+                                  int rnd, const void *a, const void *b,
+                                  void *d, uint32_t n, uint32_t *flags_out,
+                                  uint32_t *bus_out)
+{
+    return (int)cft_formatof_mul(dev, (cft_format)sfmt, (cft_format)dfmt,
+                                 (cft_round)rnd, a, b, d, (size_t)n,
+                                 flags_out, bus_out);
+}
+
+WASM_EXPORT int cftw_formatof_div(cft_device *dev, int sfmt, int dfmt,
+                                  int rnd, const void *a, const void *b,
+                                  void *d, uint32_t n, uint32_t *flags_out,
+                                  uint32_t *bus_out)
+{
+    return (int)cft_formatof_div(dev, (cft_format)sfmt, (cft_format)dfmt,
+                                 (cft_round)rnd, a, b, d, (size_t)n,
+                                 flags_out, bus_out);
+}
+
+WASM_EXPORT int cftw_formatof_sqrt(cft_device *dev, int sfmt, int dfmt,
+                                   int rnd, const void *a, void *d,
+                                   uint32_t n, uint32_t *flags_out,
+                                   uint32_t *bus_out)
+{
+    return (int)cft_formatof_sqrt(dev, (cft_format)sfmt, (cft_format)dfmt,
+                                  (cft_round)rnd, a, d, (size_t)n,
+                                  flags_out, bus_out);
+}
+
+WASM_EXPORT int cftw_formatof_fma(cft_device *dev, int sfmt, int dfmt,
+                                  int rnd, const void *a, const void *b,
+                                  const void *c, void *d, uint32_t n,
+                                  uint32_t *flags_out, uint32_t *bus_out)
+{
+    return (int)cft_formatof_fma(dev, (cft_format)sfmt, (cft_format)dfmt,
+                                 (cft_round)rnd, a, b, c, d, (size_t)n,
+                                 flags_out, bus_out);
+}

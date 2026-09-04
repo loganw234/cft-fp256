@@ -7,9 +7,9 @@ binary128 and binary256, all five rounding attributes, exact flags,
 and results that are libcft's bits and nothing else.
 
 ```bash
-node bindings/node/test.mjs         # 104 tests, no dependencies
+node bindings/node/test.mjs         # 125 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 881,657 published cases
+node bindings/node/conformance.mjs  # 1,067,635 published cases
 ```
 
 ```js
@@ -65,6 +65,39 @@ ctx.scaleb(pr, sf);              // and an int64 scale (a BigInt here)
 
 ctx.reduce("sumsq", xs);         // opcodes 28 and 29, the same fixed
 ctx.reduce("sumabs", xs);        // tree over a different leaf
+```
+
+**ABI 0.7** brings two more. 754-2019 **7.1**'s status word is now the
+one this package has: `ctx.flags` is a view of the library's sticky
+word rather than a second copy accumulated in JavaScript, with
+5.7.4's six operations over it under their own names, and 5.7.1's
+three conformance predicates beside them. **9.6**'s four magnitude
+forms of minimum and maximum join the four opcodes they defer to. And
+clause **5.4.1**'s six formatOf operations arrive with a
+**destination format as a real argument** - not a mode on the context,
+because a context that carried one would make `ctx.add(x, y)` mean
+different things depending on state set somewhere else.
+
+```js
+const c = await Context.open(64);
+c.lowerFlags(FLAGS_ALL);         // 5.7.4, and the only thing that can
+c.add(1e308, 1e308);             // lower a flag - the library never does
+c.testFlags(FLAG_OVERFLOW);      // true; c.flags is the library's word
+const saved = c.saveAllFlags();
+c.restoreFlags(saved, FLAGS_ALL);     // RESTORES, so a flag low in
+                                 // `saved` comes back low
+c.is754version2019();            // true; 2008 is false, and cft.h and
+                                 // docs/COMPLIANCE.md say exactly why
+
+c.maxMag(3, -3);                 // +3: equal magnitudes are 9.6's
+                                 // "otherwise", so it defers to maximum
+
+c.formatOfDiv("fp32", a, b);     // operands binary64, result binary32,
+                                 // ONE rounding - not a binary64 divide
+                                 // converted down, which rounds twice
+                                 // and lands one ulp low on operands
+                                 // the format descriptors can construct
+c.mapFormatOf("fma", "fp32", as, bs, cs);   // the same over arrays
 ```
 
 **Two shapes are worth naming**, because both are the C's rather than
@@ -244,7 +277,13 @@ totally. Two compliant engines cannot disagree, so the same call
 returns the same encoding on every platform, browser or node, today and
 after an engine upgrade. Reductions have a fixed tree shape that is
 part of the contract, so a sum is not "whatever the accumulation order
-was". Flags are the contract's definitions, per call and sticky.
+was". Flags are the contract's definitions, per call and sticky - and
+since ABI 0.7 the sticky half is **the library's own word** (754-2019
+7.1), read through `ctx.flags` rather than accumulated separately
+here. It is per DEVICE, so `withRounding()` and every other context
+over the same handle see one word, which is 7.1's own granularity: the
+flags belong to the computation, not to the attribute it ran under.
+`lastFlags` stays per call and per object.
 
 **Cannot.** Anything that passes through a JS `number`: it is a
 binary64, so it cannot carry binary128/256 at all and cannot carry a
@@ -440,6 +479,99 @@ their `cftw_*` wrappers, in the library's own step to 0.5 (package
   purpose, and the reason the second pass exists. Reverted and
   rebuilt, the module hash reproduces.
 
+**2026-09-04, same host and node (22.19.0, Windows 11,
+DESKTOP-T33SK86), wasm module sha256 `04c3aad8748c9555…`** - the
+rebuild that gave the two packages of ABI 0.7 their `cftw_*` wrappers,
+in the library's own step to 0.7 (package **0.7.0**). 20 new wrappers,
+91 exports to **111**. The ABI test no longer names a version: it
+reads `CFT_ABI_VERSION_MAJOR/MINOR` out of `host/include/cft.h` and
+asserts the module agrees, so it says *this module was built from this
+tree* and goes green on the integrator's bump with nothing here to
+change. On this run both read **0.6**, because the bump is the
+integrator's single commit for the whole step.
+
+Both figures below come from one standardized run on a
+clean tree, `bash verify/run.sh --fresh --only vectors,node,wasm`, run
+id **20260904-030316-6b9a845** (`vectors` 275 s, `node` 1438 s, `wasm`
+1100 s, **PASS, nothing skipped**).
+
+* `node conformance.mjs` - **2,055,270 cases over 316 set replays,
+  zero mismatches**. **1,223,635 cases over all 168 sets**
+  through `cft_conformance()` in 523.1 s - the opcode sets, 533,265
+  transcendental, 89,616 augmented, 8,960 reduction, 13,816 character,
+  and the two new families, 9,728 magnitude (9.6) and 176,250 formatOf
+  (5.4.1) - and then **831,635 of them again in 637.2 s through this
+  package's own `Context` methods**, over the 148 sets that are not
+  opcode sets. Per case, so the flag word compared is that case's,
+  then as arrays wherever the C has a batch shape - `map()` for the
+  elementwise families including 9.6's four, `mapFormatOf()` for
+  5.4.1's six, which `map()` cannot carry because their result is not
+  the context's format. That second pass is not redundancy:
+  `cft_conformance` dispatches every one of those internally in C and
+  is green with or without a JavaScript surface for them.
+* `node test.mjs` - **125 tests, 0 failures**: the 104 above plus 21
+  for the two packages. The status word is checked to BE the library's
+  word by the only means that distinguishes one word from two -
+  `raiseFlags` touches nothing but the C, so a JavaScript copy would
+  still read 0 after it - then the device granularity (`withRounding`,
+  and the temporary context `toNumber` opens, all see one word), three
+  calls leaving four flags standing with nothing in the library
+  lowering them, the exceptionGroup forms, the save/restore round trip
+  proving `restoreFlags` **restores rather than ORs**, `testSavedFlags`
+  as a pure predicate, a mask outside `FLAGS_ALL` refused, and a fresh
+  device opening lowered. The predicates answer no/no/yes, and 2008's
+  no is given its reason: `minimumMagnitudeNumber(sNaN, 3)` returns 3
+  **and** signals invalid, which is the 2019 row that replaced 2008's
+  `minNumMag`. 9.6's four are read as the deferral they are -
+  `minMag(+3, -3)` is -3 and `maxMag(+3, -3)` is +3 either way round,
+  the zeros come from the base operation, a quiet NaN loses to the
+  number in the `...Number` forms only, a signaling NaN raises invalid
+  and nothing else can be raised at all, and the answer is one
+  operand's own encoding bit for bit.
+* And 5.4.1, where the tests are the argument: the same-format pairs
+  are asserted to **be** `cft_run`/`cft_div`/`cft_sqrt` bit for bit at
+  every format and attribute; widening is asserted to be
+  convert-then-operate with the same flags; and the
+  **double-rounding witnesses are rebuilt from the format descriptors
+  alone** - the construction `python/cft_golden/formatof.py`'s
+  `double_rounding_witness()` derives, ported rather than tabulated -
+  for division, square root and fused multiply-add on all six
+  narrowing pairs, **18 in all**. Each asserts BOTH halves: the single
+  rounding is `nextUp(1)` in the destination, the composed route
+  (round in the source, convert down, both through this same library)
+  is `1.0`, and the two differ by one ulp with the composed one low. A
+  witness that stopped separating them would be checking that two
+  identical things are identical. Then the destination's exceptions on
+  the destination's grid: the binary64 → binary32 row a hair above
+  half the least subnormal and its negation, where underflow and
+  inexact appear that the source had no reason to raise; an overflow
+  binary64 does not have; and a signaling NaN giving the
+  **destination's** canonical quiet NaN.
+* Negative control for the new surface, run and reverted:
+  `cftw_formatof_sub`'s two operand pointers swapped in `wasm_api.c`
+  and the module rebuilt (sha256 `2796f430c7d2c265…`, a different
+  module). **1 of the 125 tests fails by name** - *a same-format
+  formatOf call IS the operation that was already here* -
+  `conformance.mjs` fails **all 80 formatOf sets** through `Context`'s
+  own methods (`fp32-to-fp32-formatof.jsonl:41`, `expected
+  0x80000001, got 0x00000001`, the same value with one sign bit) while
+  its `cft_conformance` pass **stays green throughout**, and
+  `bindings/wasm/verify.mjs` says the same in its two passes. The row
+  worth keeping is which test caught it: the `mapFormatOf`
+  batch-versus-scalar test stayed GREEN, because the control changes
+  both sides identically and that test compares the package with
+  itself. The one that fails is the one comparing formatOf against
+  `cft_run`/`cft_div`/`cft_sqrt`. Reverted and rebuilt, the module
+  hash reproduces.
+
+The gate for this step was
+`bash verify/run.sh --only vectors,node,wasm`, so the library's own
+stages did not run here: they belong to the two package commits that
+landed the C, and nothing under `host/`, `python/` or `vectors/` was
+touched by this step. `CFT_ABI_VERSION_MINOR` still reads 6, which is
+exactly why the ABI test above reads the header rather than naming a
+number - the integrator bumps it once for the whole 0.7 step.
+
 Not verified: no other JS runtime, no device backend (wasm32 has no
 PCIe; `Context.open` is always the software backend here), and no
 performance claim. The timings above are measurements, not promises:
@@ -459,10 +591,10 @@ cft_node.js      committed build product: emcc -sENVIRONMENT=node
 cft_node.wasm    committed build product: THE PAGE'S MODULE, byte for byte
 test.mjs         everything the vectors cannot express
 conformance.mjs  the vectors replay - the package's conformance test;
-                 cft_conformance for all 84 sets, then this package's
-                 own methods for the four families that are not
+                 cft_conformance for all 168 sets, then this package's
+                 own methods for the six families that are not
                  opcodes: transcendental, augmented, reduction,
-                 character
+                 character, minmaxmag, formatof
 ```
 
 `cft_node.js` and `cft_node.wasm` are built by
@@ -470,3 +602,13 @@ conformance.mjs  the vectors replay - the package's conformance test;
 same flags as the page's module, inside the same pinned emsdk image,
 and copied here. Rebuild them there, not here; there is no build step
 in this directory and no dependency to install.
+
+**2026-09-04, rebuilt on the bumped tree, wasm module sha256
+`a1f0a4715516d3f6…`** - the block above was measured before `cft.h` moved
+to 0.7, and the ABI test refused the old module on the bumped tree
+("expected 0.7, got 0.6"), as it should. The module was rebuilt twice
+in the container on the 0.7 tree, byte-identical, and `test.mjs` and
+`conformance.mjs` re-ran under `bash verify/run.sh --fresh --only
+vectors,node,wasm`, run id `20260904-054715-2216e62`: the same test and case counts as
+above, the ABI test now reading 0.7 from the header and the module
+alike.
