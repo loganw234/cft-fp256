@@ -139,7 +139,11 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      Table Maker's Dilemma stated honestly),
                      SEQUENCER, SCALING, ROADMAP, BRINGUP, CARDDAY,
                      BENCHMARKS (the software tier measured against
-                     MPFR, __float128 and the CPU itself),
+                     MPFR, __float128 and the CPU itself, and the
+                     five workloads written for the contract),
+                     COLLATZ, ENCLOSE, MERSENNE, ORBITS, ZOOM (those
+                     workloads: exact integers, rigorous enclosures,
+                     Lucas-Lehmer, symplectic orbits, deep zoom),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```

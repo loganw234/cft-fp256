@@ -2974,3 +2974,926 @@ comparisons.
   left alone.
 - `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
   ABI version were left to the integrator, as at 0.7.
+
+## 2026-09-04 - the enclosure tool: the directed roundings put to work, and what fp64 has left
+
+`host/tools/enclose.c` and `host/tests/enclose_check.py` are new;
+`docs/ENCLOSE.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload is verified computing. Compute a quantity once under
+`roundTowardNegative` and once under `roundTowardPositive` and the true
+value is provably between the two, because each result is correctly
+rounded and each rounding is monotone. That needs all five attributes,
+per call and - in the sequencer - per instruction, which is a half of
+this contract nothing else here exercises. And because the arithmetic is
+deterministic, two machines produce the SAME interval rather than two
+overlapping ones: **an enclosure produced by this tool is the same bits
+on every conforming host, so a verified result can be reproduced rather
+than merely re-derived.**
+
+Three kernels. A series for `exp(x)` over dyadic x in [0,1] with the
+tail bounded by `t_N/N` and charged to the upper end only, its term
+count derived from the format's measured p (10 at binary32, 18 at
+binary64, 31 at binary128, 54 at binary256). Dot and matrix-vector
+products through `cft_reduce` under both attributes, over vectors of
+dyadic rationals mirrored so the exact answer is 1 however violent the
+cancellation. And an interval Horner with interval coefficients, which
+is the one that runs as an orbit-sequencer program.
+
+### What the gate is, and what it scores
+
+`make -C host enclosetest` scores every interval against a value Python
+computes without rounding: exact `fractions` for the dot products and
+the polynomial (both are rationals, because every input is dyadic),
+mpmath at 300 digits for `exp` - about 228 decimal digits more than a
+binary256 enclosure carries, so the comparison is never close. The
+library stays the authority on arithmetic; Python is the authority on
+the domain.
+
+    2658 comparisons, 0 failures
+    ENCLOSE CHECK OK - every enclosure contains the value the oracle
+    computed, and the same bits come out at every batch size, from
+    either engine, interrupted or not
+
+| what it checks | result |
+|---|---|
+| containment, fp256 / fp64, all three kernels, 145 items each | every interval contains the exact value |
+| containment, fp256 Horner through the loop engine | same |
+| containment, fp32 series and Horner, 130 items | same |
+| containment, fp32 series at 2048 points, where the terms go subnormal | 2,049 intervals, all containing exp(x), flag word 0x18 |
+| the interval coefficients contain 1/k! | 24 of 24, at every format |
+| tightness | every width inside its rounding budget - a few thousand ulps for the point kernels, a few ulps per addition of the largest partial magnitude for the dot kernel |
+| the exact-by-construction dot product | width zero, both bounds ARE the rational, flag word clean |
+| the two Horner engines, fp256 and fp64 | byte-identical records at different batch sizes |
+| batch 7 / 64 / 1024 | byte-identical checkpoints AND byte-identical record streams |
+| interrupt and resume, 41 stops at a different batch size | byte-identical to the uninterrupted run |
+| the hash chain over 145 records | recomputed with `hashlib`, identical |
+| four refusals | a degree the constant bank cannot hold, a non-power-of-two point count, a format whose exponent range cannot carry the ladder, an unknown kernel |
+
+The interrupt leg runs at `--stop-after-passes 4` against a 54-term
+series on purpose, so that 40 of its 41 stops caught an item part way
+through its recurrence, with partly summed terms in flight, rather than
+on a batch boundary.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04. `--points 2048 --batch 256`, so every row is
+4,113 enclosures except binary32's 4,098 - it runs `--kernels
+series,horner`, because it cannot express the dot ladder.
+
+| format | enclosures/s | element-ops/s | library calls | seconds |
+|---|---|---|---|---|
+| fp256 | 1,821 | 389,150 | 2,991 | 2.259 |
+| fp128 | 5,097 | 738,901 | 1,749 | 0.807 |
+| fp64 | 11,660 | 1,237,434 | 1,047 | 0.353 |
+| fp32 | 25,441 | 2,086,129 | 585 | 0.161 |
+
+An enclosure is one item with BOTH bounds computed. Throughput is flat
+in the batch size - 64, 256, 1,024 and 4,096 all land between 1,669 and
+1,897 enclosures/s at fp256, with no trend - and all four return the
+same chain, `2a4f7fa58560dac13b59879406d914768db27531c9829a23cd50dffcf6cf5ade`.
+
+The Horner kernel alone, 8,193 enclosures at `--batch 512`: the
+sequencer program is **1.19x to 1.41x faster than the host `cft_run`
+loop on the software backend**, where there is no bus to save - 48,502
+against 34,505 enclosures/s at fp256, 79,992 against 67,055 at fp64,
+and **51 library calls against 1,649**. The margin is smaller than the
+Collatz explorer's 1.5x-2.1x for a plain reason: a Horner step is four
+opcodes against that workload's twenty-three, so there is less per-call
+overhead per unit of work to remove. Both engines return the same chain.
+
+The sweep that was run, 20.081 s:
+
+    ./cft-enclose --format fp256 --points 16384 --batch 512 \
+                  --checkpoint run.ckpt --checkpoint-interval 30 \
+                  --csv run.csv
+
+    32,785 enclosures, 9 of them exact, flags seen 0x10 (inexact only)
+    widest series width  9.59902e-70
+    widest horner width  3.62228e-71
+    widest dot width     3.13215e-53
+    dot enclosures straddling zero: 0
+    throughput  1,633 enclosures/s, 349,323 element-ops/s
+    chain       573609c0a0befe28f576dbd2cef79cf0bb16c6477ed8b39aae1fae5870e83c7e
+
+The same command at fp64 takes 3.264 s and returns chain
+`cdead7ef4138b108ca7c7f175577ea3bcae46b229e191b5eb66d678e39cd06a8`,
+with **14 of its 15 dot enclosures straddling zero**.
+
+### fp64 against fp256, in numbers
+
+e, enclosed by the series with its rigorous tail:
+
+| format | terms | width of the enclosure of e |
+|---|---|---|
+| fp32 | 10 | 2.1e-6 |
+| fp64 | 18 | 7.5e-15 |
+| fp128 | 31 | 1.2e-32 |
+| fp256 | 54 | **9.6e-70** |
+
+The widest width per kernel over the same 2,048 points: series 7.99e-15
+at fp64 against 9.60e-70 at fp256 (a factor of 2^182), Horner 8.88e-16
+against 3.62e-71 (2^184), dot 2.18e+3 against 3.13e-53 (2^186).
+
+The ill-conditioned dot products are the row that matters. Every one of
+them has the exact value **1** and a condition number near 2^60-2^66:
+
+| case | fp64 | fp128 | fp256 |
+|---|---|---|---|
+| `cancel-spread0` | [-0, 256] | [1, 1] | [1, 1] |
+| `cancel-spread90` | [-768, 512] | [1, 1] | [1, 1] |
+| `cancel-spread225` | [-742.82, 793.19] | width 1.0e-15 | width 2.1e-53 |
+| `matvec-row2` | [-1152, 1024] | width 1.1e-15 | width 1.0e-53 |
+
+binary64's answer is not wrong; it is honest and useless. The interval
+does contain 1 - it also contains 0 and -700, so it does not determine
+the sign of the answer. Fourteen of the fifteen are like that, and a
+non-interval binary64 dot product would print a single number somewhere
+in that range with no indication that anything was wrong. binary256
+returns the exact rational with the flag word clean on six of the
+fourteen, and about 1e-53 on the rest.
+
+It is worth recording the other half honestly: **on the two point
+kernels fp64's enclosures are perfectly usable.** 7.5e-15 for e is
+fifteen good digits, and a reader who needs fifteen digits should use
+binary64 and enjoy the 6.4x throughput. What binary256 buys is the
+regime where the CONDITIONING rather than the answer sets the precision
+needed.
+
+### What the writing of it found
+
+**Three observations about the program model, and one of them is a
+limit.** A sequencer instruction names its operands in four-bit fields,
+and `ka`/`kb`/`kc` redirect those same fields at the constant bank - so
+a program addresses exactly **sixteen constants**, whatever `n_consts`
+in its header says. An interval coefficient costs two, so one program
+holds eight coefficients, which is why the Horner kernel is compiled
+into chunk programs of eight steps and why `--degree` refuses anything
+that does not make `degree + 1` a multiple of eight. That is a real
+ceiling on any table-driven kernel; `imm` is already 32 bits wide and
+unused by ALU instructions, so a `ka`-with-`imm`-index form would cost
+no encoding space. The other two are the ones `docs/COLLATZ.md` already
+recorded: three input streams and no fourth (exactly enough here -
+point, lower bound, upper bound - by luck rather than design), and no
+way for one program to call another, which is what keeps the series
+kernel's `cft_div` out of the ISA.
+
+**Underflow is expected, not forbidden.** The first flag policy stopped
+the run on it. That was wrong: the series' terms are `x^k/k!`, so a
+small x in a narrow format reaches the subnormal range - at binary32 an
+x of 2^-11 gets there by the tenth term - and tininess costs the
+enclosure nothing, because a directed rounding of a subnormal is still
+correctly rounded. The lower chain stays below the true term (it may
+reach +0, which is still below) and the upper chain stays above it,
+since `roundTowardPositive` cannot carry a positive value to +0, so the
+tail bound survives. The check script now runs binary32 at 2,048 points
+on purpose to exercise the case.
+
+**A batch-wide call needs a batch-wide operand.** The loop engine handed
+`cft_run` the scalar zero as the first operand of a `CFT_CMPLE` over n
+elements, and `cft_run` reads n elements from every operand it is
+given. Small batches survived it; batch 37 walked off a 32-byte
+allocation and the process died. Neither the oracle nor any internal
+gate caught that one - the operating system did - but it was the check
+script that ran the loop engine at a batch size the smoke tests had not.
+
+**The mirroring needs a permutation.** The first ill-conditioned
+construction put the mirrored block at a fixed offset, and the
+contractual tree then cancelled the two halves against each other at a
+single node: exact, tidy, and testing nothing. Twelve of fifteen dot
+products came back with width zero at binary64. One shared permutation
+of x and y leaves the exact answer alone and destroys the structure the
+tree was exploiting.
+
+### The negative control
+
+Two faults, each rebuilt and run through the same gate.
+
+| control | what was changed | caught by | first thing it said |
+|---|---|---|---|
+| A | `CFT_RUP` to `CFT_RDN` on the Horner kernel's upper-bound FMA, in BOTH engines | the oracle alone, on 245 containment rows | `horner item 0 does not contain the true value (lo 0.36787944117144233, hi 0.36787944117144233)` |
+| B | `cft_reduce`'s RDN and RUP swapped in the dot kernel | the tool's own `lo <= hi` gate, before a record was written | `an enclosure came back with its ends the wrong way round - a rounding attribute is wrong` |
+
+Control A is the instructive one. Every internal gate passes, and each
+for a good reason: `lo <= hi` holds because both chains now round the
+same way; the two engines agree because both were sabotaged; the
+batch-size property, the resume property, the chain and the refusals
+are untouched; and the flag/width certificate is *satisfied*, because
+the widths really are zero. The tool then reports
+
+    horner        9 enclosures, 9 exact (both bounds ARE the value)
+                  widest 0 at item 0
+
+which is a confident, self-consistent claim that every value it
+computed is exactly representable and that both of its bounds are it.
+Only the oracle knows otherwise. The honest statement is:
+
+> Every internal check in this tool is a CONSISTENCY check, and control
+> A does not make the tool inconsistent - it makes it consistently
+> compute the wrong thing. Only an independent computation of the true
+> value can tell you that an interval does not contain it, which is why
+> the oracle computes in exact rationals rather than by rerunning the
+> library.
+
+Control B never reaches an oracle: the internal gate fires on the first
+ill-conditioned item and the harness reports it as a result rather than
+a crash, five rows at once. Restoring the file, rebuilding, and the gate
+is green again at 2,658 comparisons, 0 failures.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact` and
+  issues the same program either way, but nothing here has been through
+  XRT; `docs/BRINGUP.md` owns those gates. No device number is quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The Horner program uses `CFT_CMPLE`, `CFT_SELECT`
+  and `CFT_FMA`, and the control codes `DEPOSIT` and `HALT`, all of
+  which `tb/` and the vector sets already cover. The per-instruction
+  rounding attribute this workload leans on is already benched:
+  `tb/test_seq_core.py`'s `constants_and_rounding` runs adjacent RDN
+  and RUP FMAs against the model precisely because "the interval
+  pattern is the reason the attribute is per instruction rather than
+  per run". This tool is the first APPLICATION of that pattern; the
+  RTL case for it was written before the application existed.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so the
+  library gates certify the same library. No runner stage was added;
+  `verify/run.sh` was deliberately left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md`,
+  `docs/BENCHMARKS.md` and the ABI version were left to the integrator,
+  as at 0.7.
+
+## 2026-09-04 - the Mersenne verifier: exactness as a flag, and the width paying for itself
+
+`host/tools/mersenne.c` and `host/tests/mersenne_check.py` are new;
+`docs/MERSENNE.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload is Lucas-Lehmer, `s_{k+1} = s_k^2 - 2 mod (2^P - 1)`. A
+squaring is a convolution of limbs, and `cft_reduce(CFT_DOT)` **is**
+that convolution: while every partial sum of its contractual tree stays
+below 2^p no node rounds, so `flags == 0` over a coefficient is a
+certificate - issued by the library - that the coefficient is the exact
+integer sum. That is the property GIMPS has to rebuild with Gerbicz
+error checking and an independent double-check, because a
+floating-point FFT is fast but not exact.
+
+The limb geometry is derived from p and the exponent in one function
+and nowhere else: `2b <= p` for a product, `L * 2^(2b) <= 2^p` for a
+coefficient, `d + 2 <= b` so the fold's scale by `2^d` cannot overflow,
+with `L = ceil(P/b)` and `d = L*b - P`. At binary256 that lands on
+102-116 bit limbs, which is about four times less work than the
+symmetric 59-bit split would be.
+
+### What the gate is, and what it scores
+
+`make -C host mersennetest` runs a Python big-integer oracle against
+the tool. It is a stricter join than the Collatz check's, because a
+Lucas-Lehmer verdict is one bit and one bit is easy to get right by
+accident: the oracle recomputes `s_k` for **every** k the tool dumps
+and compares the **whole residue** - res64 plus a SHA-256 over every
+canonical limb - so a wrong carry shows at the first squaring that
+breaks it rather than 1,275 squarings later.
+
+    388 comparisons, 0 failures
+    MERSENNE CHECK OK - the tool, the library and the big-integer oracle agree
+
+| what it checks | result |
+|---|---|
+| verdicts, squaring counts and res64 at fp256 (both engines) and fp64 | 5 exponents each, oracle-exact, **3 prime and 2 composite** |
+| every intermediate residue, whole | 251 at fp256/program, 36 at fp256/loop, 61 at fp64, 11 at fp32 |
+| the two engines | identical chain, identical checkpoint |
+| fp32 / fp64 / fp128 / fp256 | the same chain - the record carries no format |
+| the hash chain | recomputed with `hashlib`, identical |
+| batch 3 / batch 4096 / host loop at batch 11 | byte-identical checkpoints |
+| interrupt and resume, 17 stops, all mid-exponent | byte-identical to the uninterrupted run |
+| the exactness bound | 15 selftest probes; a forbidden `--limb` refused before any arithmetic; `--unsafe-limb` stopped by the library's `inexact` |
+
+The composite controls are the half that is easy to leave out: **1277
+and 1619 are prime exponents whose Mersenne numbers are not prime**, so
+a tool that always answered "prime" would pass a test set of Mersenne
+primes alone and fail here. Their res64 values, `5613a480590e78ba` and
+`3f964611757ce4e0`, are what an unrelated implementation prints.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04, other work sharing the box (repeat runs within
+~5%).
+
+The whole known set - eleven Mersenne prime exponents up to 11213 and
+the two composite controls - in **212.285 s**:
+
+    ./cft-mersenne --set known --format fp256 --engine program --batch 4096 \
+                   --checkpoint run.ckpt --checkpoint-interval 30
+
+    52,497 squarings, 270,377,166 limb products, 7,484,340 library calls
+    flags seen   0x00
+    status word  0x00 (agrees with the union above)
+    throughput   1,273,651 limb products/s, 247.3 squarings/s
+    chain        851b85d1e262b0f1e887f641f25bd684df1384d9c128e991646c3f9a18eed9cf
+
+**270 million exact 115-bit limb products and not one raised a flag.**
+
+fp256 against fp64, same tool, same chain, at P = 1279 / 2203 / 4423:
+
+| P | fp64 / fp256 limb products | fp64 / fp256 wall time |
+|---|---|---|
+| 1279 | 21.8x | 7.4x |
+| 2203 | 25.5x | 10.7x |
+| 4423 | 29.3x | 12.7x |
+
+fp64 is *faster per limb product* (2.08M/s against fp256's 0.71M/s at
+P = 1279) and much slower overall, because its 53-bit significand
+forces 23-bit limbs where fp256 carries 107. **A wider format is the
+cheaper way to buy exactness on this workload**, which is the opposite
+of the usual intuition. fp32 at P = 1279 needs 160 limbs of 8 bits:
+177.8x the limb products and 50x the wall time. Every rung is exact and
+every rung returns the same chain; what the narrow ones lose is
+throughput, not correctness.
+
+The sequencer route is **1.02x to 1.27x** faster than the host loop
+here, where docs/COLLATZ.md measured 1.5x to 2.1x on the same backend.
+That is structural: in Collatz the program is the whole step, and here
+it is only the carry split. The convolution cannot be a program at all
+- a coefficient is a cross-element reduction and the carry chain reads
+a neighbour, and a lane has no path to another lane - so most of the
+time is in `cft_reduce`, which is identical in both engines.
+docs/MERSENNE.md records what would change that: a lane shift, or a
+cross-lane reduction inside a program.
+
+### What the writing of it found
+
+**The split's witness leaves a hole, and it took a negative control to
+see it.** The witness proves `v == hi*B + lo` with `0 <= lo < B`, which
+does *not* pin `hi` down: `v = 3B/2` satisfies it at `(1, B/2)` and
+equally at `(1.5, 0)`. A shift amount off by one produces the second -
+exactly, raising nothing, witness green - and the error then rides in
+the limbs. The dot only notices when the extra fractional bits push a
+coefficient past 2^p, which at `b = 105, L = 5` they never do.
+
+So there is now a third gate: once per squaring, over the L limbs that
+are the only state crossing between squarings,
+`(y + 2^(p-1)) - 2^(p-1) == y`. The magic-constant round the carry
+split could not use is exactly the right instrument there, because a
+limb below 2^b is far below 2^(p-1) and the addition is exact if and
+only if the limb is an integer - the `inexact` it would raise IS the
+answer rather than noise to be masked. It costs 3.7% of the elementwise
+issues at P = 3217, inside the timing noise, and the chain is unchanged.
+
+### The negative controls
+
+Three faults, each rebuilt and run through the same gate, and each
+caught by a **different** layer.
+
+| control | what was changed | caught by | first thing it said |
+|---|---|---|---|
+| A | the `t < 1` guard deleted from the carry split, in both engines | the **flag word**, on the first squaring, at all four formats | `the carry add raised 0x10 (inexact) ... the residue is REFUSED, not reported` |
+| B | the split's shift constant `(p-1) + bias` becomes `p + bias`, so the shift reaches one bit past the significand into the low bit of the biased exponent and `hi` comes back HALVED | the **limb integrality gate** - not the witness, which is perfectly satisfied by `(0.5, v - B/2)` | `the limb integrality gate raised 0x10 (inexact)` |
+| C | the recurrence's `2^P - 3` becomes `2^P - 2`, so it subtracts 1 instead of 2 | **only the oracle** | `residue after squaring 1 differs - tool res64 ...0010, oracle res64 ...000e` |
+
+Control A is the honest ordering, and worth recording: for that bug the
+flag is the *faster* detector, because a fractional `hi` makes
+`lo = fma(hi, -B, v)` inexact and the check fires inside the split
+before the witness is looked at. Twenty-one of the check's twenty-two
+rows fail; only the four bound probes pass, since they carry nothing.
+
+Control C is the one that makes the case for an oracle. **Every
+internal gate stays green**: flags `0x00`, status word `0x00`, the
+witness satisfied on every element of every pass, the integrality gate
+satisfied on every limb, both engines in exact agreement, all four
+formats in exact agreement, batch-size independence holding, and
+interrupt/resume landing on a byte-identical checkpoint. The tool then
+reports `2^521 - 1 COMPOSITE, res64 0000000000000002`, which is wrong.
+Stated plainly:
+
+> The flag word certifies that no operation rounded. The witness
+> certifies that the split reconstructs. The integrality gate certifies
+> that a limb is an integer. None of the three certifies that the tool
+> is computing the Lucas-Lehmer sequence, and control C is a tool that
+> is exactly, reproducibly, deterministically computing the wrong
+> recurrence.
+
+Restoring, rebuilding and re-running is green again: **382 comparisons
+at `--quick`, 388 at the default size, 397 at `--full`, 0 failures**.
+
+### GIMPS, stated honestly
+
+The doc carries the arithmetic rather than a slogan. At this tool's own
+measured rate, the current record exponent (P = 136,279,841) would need
+`L = 1,185,043` limbs, `1.91 x 10^20` limb products and **4.2 million
+years** on one thread - about nine orders of magnitude against a GIMPS
+client's day on one GPU, ten against the parallelism one really uses.
+It splits into `10^4.8` of algorithm (a direct convolution is `L^2`, an
+FFT about `L log2 L`) and `10^5`-`10^6` of hardware. The algorithmic
+half is the **price of the certificate**: an FFT's twiddle factors are
+irrational, which is exactly why GIMPS needs Gerbicz checking and a
+double-check. The exact sub-quadratic route is Karatsuba - 330x fewer
+limb products at that size, certificate intact - and it is not built.
+
+What the exactness buys instead is that the rounding class of error is
+*gone* rather than bounded, and that a re-run is a reproduction rather
+than a second opinion. It buys nothing against a bit flip, and the doc
+says so.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact` and
+  issues the same program either way, but nothing here has been through
+  XRT; `docs/BRINGUP.md` owns those gates. No device number is quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The split program uses `CFT_MUL`, `CFT_ISHR`,
+  `CFT_ISUB`, `CFT_ISHL`, `CFT_CMPLT`, `CFT_SELECT`, `CFT_FMA`,
+  `CFT_NEG`, `CFT_CMPEQ`, `CFT_MIN` and `CFT_CMPLE`, all of which `tb/`
+  and the vector sets already cover, and the control codes `DEPOSIT`
+  and `HALT` that `tb/test_seq_core.py` already scores.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library. No runner stage was
+  added; `verify/run.sh` was deliberately left alone.
+- Of the device-era exponents (19937, 21701, 23209, 44497), only
+  **19937** was run - and it was run to a verdict: **2^19937 - 1 is
+  PRIME**, the twenty-fourth Mersenne prime, 6,002 decimal digits,
+  19,935 squarings and 610 million exact limb products across THREE
+  separate invocations (300 s, then 60 s, then 53 s) with the
+  checkpoint carrying the residue between them and flags 0x00
+  throughout. Python's big integers agree, verdict and res64. 21701,
+  23209 and 44497 were not run; 44497 is about eleven times 19937's
+  work, which is 80 minutes here.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
+  ABI version were left to the integrator, as at 0.7.
+
+## 2026-09-04 - the orbit integrator: the roundoff floor and the method's error, measured apart
+
+`host/tools/orbits.c` and `host/tests/orbits_check.py` are new;
+`docs/ORBITS.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload integrates the Kepler two-body problem and the outer
+solar system with Stormer-Verlet and with Yoshida's fourth-order
+composition of it, every arithmetic step through libcft, at any of the
+four formats, over an ensemble of copies perturbed by an exact integer
+number of ulps.
+
+It is here because it has two error sources that behave completely
+differently, and it separates them into two numbers rather than
+reporting their sum:
+
+- the **energy** drift is the METHOD's, and comes out identical at
+  binary64 and binary256 to every digit printed;
+- the **angular-momentum** drift is the ARITHMETIC's alone, because
+  both schemes conserve total angular momentum exactly in exact
+  arithmetic - a drift adds `m c (v x v) = 0`, and the kick's pair
+  term cancels because `m_i g_ij = h G m_i m_j / r^3` is symmetric,
+  which is Newton's third law written in the arithmetic.
+
+### What the gate is, and what it scores
+
+`make -C host orbitstest` runs a 300-digit mpmath oracle against the
+tool, in two roles that are deliberately kept apart. The **same
+discrete scheme** at 300 digits, from the tool's own starting
+encodings and the tool's own derived constants, whose difference from
+the run is the format's ROUNDOFF and nothing else. And the **closed
+form** through Kepler's equation, whose difference from the discrete
+solution is the method's TRUNCATION error.
+
+Keeping "the same constants" honest is what `--dump-setup` is for: `h`
+is `fl(2*pi/S)` and the drift scale is `fl(fl(w*h)*0.5)`, so an oracle
+using the exact real numbers would be charging the constants' rounding
+to the integration. The tool prints every derived constant as an exact
+decimal and the oracle integrates with those.
+
+    26 checks, 0 failures
+    ORBITS CHECK OK - the tool, the library and the 300-digit oracle agree
+
+| what it checks | result |
+|---|---|
+| roundoff, fp256 and fp64 against their own 300-digit twins | `5.500e-68` and `1.050e-12` over 2,048 steps; ratio `1.91e55` against `2^184 = 2.45e55` |
+| truncation, and both schemes' orders | halving `h` cuts the error from the closed form by **3.99** (leapfrog, order 2) and **15.96** (yoshida4, order 4) |
+| the roundoff floor against the truncation error | fp256's is `5.52e64` times below leapfrog's, `8.68e61` below yoshida4's |
+| `H0` and `L0` at sample 0 | 0.6 and 0.0 ulps of binary256 from the 300-digit values |
+| the initial condition | `a - 1 = 4.2e-71`, `e - 3/4 = 1.1e-71` |
+| the angular-momentum certificate | bounded by `steps^2 2^-p 10^6` for both problems and both schemes |
+| the outer solar system against its 300-digit twin | `3.118e-70` at fp256, `3.707e-15` at fp64 - a factor of `1.19e55` |
+| the transcribed table, against the sky | osculating periods within 0.01% (Jupiter) to 0.75% (Neptune) of the published sidereal periods |
+| the hash chain | recomputed with `hashlib`, identical |
+| batch 8 / 3 / 1 | byte-identical checkpoints |
+| the sequencer program against the host loop | byte-identical records AND checkpoints |
+| interrupt and resume, 6 stops, 5 of them mid sample interval | byte-identical checkpoint and records to the uninterrupted run |
+| the three things `--engine program` must refuse | refused, each with its reason |
+
+The interrupt leg stops every 37 steps on purpose, which does not
+divide the 96-step sample interval, so most stops catch the ensemble
+part way through one; the checkpoint is step-granular for that reason.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04, box busy with other work.
+
+**The result the workload exists for.** 2000 Kepler periods at 512
+steps a period - 1,024,000 steps - over four ensemble members:
+
+| scheme | format | energy drift | angular-momentum drift | seconds |
+|---|---|---|---|---|
+| leapfrog | fp256 | `7.94534e-4` | `9.00177e-69` | 133.6 |
+| leapfrog | fp64 | `7.94534e-4` | `1.44687e-13` | 64.0 |
+| yoshida4 | fp256 | `2.04280e-5` | `6.91390e-69` | 399.9 |
+| yoshida4 | fp64 | `2.04280e-5` | `2.20051e-13` | 204.8 |
+
+The energy column is identical across formats and 38.9x apart across
+schemes. The angular-momentum column is `1.61e55` and `3.18e55` apart
+across formats - `2^184` is `2.45e55` - and within 30% across schemes.
+**The same roundoff floor under two different truncation errors**,
+which is what carrying two schemes was for.
+
+The outer solar system over 300 years at a 10-day step, eight members,
+says the same thing: `dH = 4.02616e-6` (leapfrog) and `2.52287e-9`
+(yoshida4) at BOTH formats, against `dL` of `4.44569e-70` /
+`1.70779e-14` and `1.12624e-69` / `2.45873e-14`.
+
+**The floor across the whole ladder**, 64 periods, leapfrog:
+
+| format | p | energy drift | angular-momentum drift |
+|---|---|---|---|
+| fp32 | 24 | `7.89642e-4` | `1.34269e-5` |
+| fp64 | 53 | `7.92692e-4` | `4.49838e-14` |
+| fp128 | 113 | `7.92692e-4` | `2.02365e-32` |
+| fp256 | 237 | `7.92692e-4` | `7.87227e-70` |
+
+`dL` tracks `2^-p` across four rungs to within a factor of two, and
+**binary32 is the rung where the columns stop being independent** -
+its energy drift disagrees with every wider format's in the fifth
+digit, because at `p = 24` the roundoff has grown into the truncation
+measurement. Locating that crossover is what the workload is for; at
+binary256 it is `2^213` further away.
+
+**Throughput**, 16 members, 8,192 Kepler steps:
+
+| scheme | 1/r^3 | format | engine | seconds | element-steps/s | library calls |
+|---|---|---|---|---|---|---|
+| leapfrog | exact | fp256 | loop | 3.720 | 35,233 | 90,395 |
+| leapfrog | exact | fp64 | loop | 1.570 | 83,487 | 90,395 |
+| leapfrog | newton | fp256 | loop | 1.656 | 79,150 | 295,195 |
+| leapfrog | newton | fp256 | **program** | 1.376 | 95,263 | **284** |
+| yoshida4 | exact | fp256 | loop | 10.853 | 12,077 | 270,619 |
+
+binary256 costs **2.4x** binary64 here, not the 30x a significand
+argument predicts; correct rounding (`cft_sqrt` + `cft_div`) costs
+**2.2x** the seed-and-Newton route and is still the default; and the
+sequencer's contribution is **284 library calls instead of 295,195**
+for the same arithmetic - 1.20x on the software backend, where there
+is no bus to save.
+
+### What the writing of it found
+
+**The sequencer cannot hold this workload, and there are two
+independent reasons, either fatal alone.** Both are properties of the
+program model rather than of the tool, and both are new information
+for docs/SEQUENCER.md.
+
+1. **Three input streams against `2d` state values.**
+   `cft_program_run` initialises `r0`, `r1`, `r2`; `r3..r15` start at
+   `+0`. A Hamiltonian system with `d` degrees of freedom has `2d`
+   values per lane - 4 for the planar Kepler problem, 30 for the outer
+   solar system - so a program can be ENTERED only at a state with at
+   most three non-zero components. The Kepler initial condition has
+   exactly two, and the registers that must hold the zeros are the
+   ones that start at `+0`, so step 0 is reachable and no later step
+   is. That is why the Kepler program engine runs the whole
+   integration in one call, cannot resume into the middle of one, and
+   does not exist for the outer solar system. docs/COLLATZ.md recorded
+   the same limit gently ("it only fits because the fourth is an
+   output that always starts at +0"); this workload shows it binding.
+   **A fourth input stream, or a "load `r3..` from the deposit buffer"
+   mode, would make every 2-degree-of-freedom system resumable and
+   every 3-degree-of-freedom one expressible.** Sixteen registers are
+   already enough for a 6-value state; only the loading is missing.
+
+2. **Correctly rounded divide and square root are not programs.**
+   `python/cft_golden/seqprogs.py` partitions its own route as HOST
+   prep, PROGRAM core, HOST finish - `round_pack` is the contract's
+   single rounding authority and it is host work by design - and the
+   core alone occupies `r0..r12` of sixteen registers. So the composed
+   route cannot be inlined into a larger program's loop body. That is
+   why `--rsqrt exact` is a loop-engine route and why `--rsqrt newton`
+   exists at all: so that the two engines have a step they can BOTH
+   run, which they then have to run bit for bit.
+
+**Nothing in this workload is exact, and saying so is the design.**
+Every drift and every kick rounds, so `INEXACT` is expected on every
+call and carries no information; the other four flags are
+certificates, are checked on every call, and stop the run. A sweep of
+18 deliberately under-resolved configurations - three formats, six
+step sizes from 3 to 12 steps per orbit, 3,000 periods each - raised
+nothing but `INEXACT`. The certificate never fires on a healthy
+integration or even a badly wrong one; it fires on arithmetic that has
+left the domain, which is what a certificate should do.
+
+### The negative control
+
+Three faults, each rebuilt and run through the same gate, chosen to be
+caught by three different gates.
+
+| control | what was changed | caught by | what stayed green |
+|---|---|---|---|
+| A | `c_mhm[sub][i]` -> `[j]` in the outer kick: Newton's third law | the angular-momentum certificate (`2.05411e-3` against a `2.35e-60` bound) and the 300-digit oracle (`2.756e-01` against `9.389e-62`) | every Kepler row, the flags (`0x10`, perfectly clean), the chain, batch, engines, resume, the refusals |
+| B | `note_flags` no longer fatal on the certificate flags, plus `CFT_FMA` -> `CFT_SUB` in `kepler_r2` | with the gate IN: exit 3 at the first step, `cft_sqrt raised 0x01`, at every format. With the gate OUT: the run completes, `dH = nan`, **`dL = 0`**, a chain, and 8 of 26 checks fail | **the angular-momentum certificate passes, reporting `0`** - a NaN state conserves everything |
+| C | the ORDER of the two roundings in `kepler_r2` reversed - mathematically identical | **exactly one check**: the sequencer program against the host loop | everything else, the 300-digit oracle included (`1.946e-68` against the unsabotaged `2.372e-68`) |
+
+Control C is the one worth keeping. **The oracle cannot see a change
+in the order of the roundings and never could** - two different
+roundings of the same real number are both correct answers to the
+domain's question. Had the fault been applied to both engines, nothing
+in the check would have caught it, and the chains published in
+docs/ORBITS.md would be the only witness. That is the plainest
+statement of what an oracle is for and what it is not: it bounds the
+answer, and only a bit-exact reference bounds the bits.
+
+Control B is the complement. The certificate flags are the only gate
+that fires BEFORE a wrong answer exists - every other gate scores a
+number the tool has already produced - and the only gate a NaN cannot
+satisfy.
+
+Restoring the file, rebuilding, and the gate is green again at 26
+checks.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact`
+  and issues the same calls either way, but nothing here has been
+  through XRT; docs/BRINGUP.md owns those gates. No device number is
+  quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The program uses `CFT_FMA`, `CFT_MUL` and
+  `CFT_RSQRT_SEED` with the control codes `REPEAT`, `ENDREP`,
+  `DEPOSIT` and `HALT`, all of which `tb/` and the vector sets already
+  cover.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library. No runner stage was
+  added; `verify/run.sh` was deliberately left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
+  ABI version were left to the integrator, as at 0.7.
+
+## 2026-09-04 - the deep-zoom explorer: a reference orbit at binary256, a frame at binary64
+
+`host/tools/zoom.c` and `host/tests/zoom_check.py` are new;
+`docs/ZOOM.md` is the argument behind them. Nothing under `host/src/`,
+`host/include/`, `python/cft_golden/` or `verify/` was touched, and the
+ABI version is unchanged - this is a tool over the existing contract,
+not a change to it.
+
+The workload is the project's own mission field. One point - the
+reference - iterates `z <- z^2 + c` at binary256 as an orbit-sequencer
+program; a batch of pixels around it iterates `d <- 2 z d + d^2 + Dc`
+at binary64 through `cft_run`. Both halves go through libcft, so the
+frame is the contract's arithmetic end to end, and the question it
+answers with numbers is what the wide format buys.
+
+### The centre is derived, not transcribed
+
+Near the tip `c = -2` the set is self-similar with ratio 4; every real
+`c` in [-2, 1/4] has a bounded critical orbit; and a grid point
+`-2 + (i/8)*4^-p` needs exactly `2p + 5` significand bits, which the
+tool computes from the format's measured `p` and refuses if the format
+is too narrow. So a sign change of `z_p` on that segment brackets a
+period-`p` nucleus, and 320 candidates in one call plus 130 bisection
+steps land on it - 85 ms, no Newton, no seed, no published coordinate
+copied in. At `p = 51` that is `-2 + 2.9196544e-30`, a
+240-digit binary256 number whose orbit is superattracting and therefore
+bounded past 100,000 iterations.
+
+The cross-check re-derives the same bits with `python/cft_golden` and
+then asks mpmath at 300 digits whether it is really a nucleus:
+`|z_51(c)| = 1.61181e-42`, against `4.59177e-41` for one ulp of `c`
+amplified through 51 steps of a map whose derivative is about 4 per
+step. It is the nearest binary256 value to a nucleus, which is all any
+binary256 number can be.
+
+### What the gate is, and what it scores
+
+`make -C host zoomtest`. The library stays the authority on arithmetic
+and `python/cft_golden` is where that is written down, so the tool must
+be BIT-IDENTICAL to it - the centre, every orbit point, every pixel's
+escape iteration under the model's own binary64 semantics. mpmath at
+300 digits is the authority on the domain, where the tool must be
+CLOSE, and how close is the measurement.
+
+    11222 comparisons, 0 failures
+    ZOOM CHECK OK - the tool, the golden model and mpmath agree
+
+about 14 seconds.
+
+| what it checks | result |
+|---|---|
+| the derived centre | identical to the golden model's, all 237 bits; a nucleus at 300 digits; bounded for 100,000 iterations |
+| the reference orbit, both engines | 4,000 points each, bit-identical to the model |
+| a COMPLEX centre (-0.125, 0.75) | 3,000 points bit-identical - the derived centre is real, so this is the only row that exercises the imaginary half |
+| program versus loop | byte-identical orbits and byte-identical checkpoints |
+| trip counts 1024 / 63 | byte-identical checkpoints |
+| batch 3 / 4096 | the same derived centre and the same checkpoint |
+| interrupt and resume, 11 stops at a different trip count | byte-identical to the uninterrupted run |
+| the perturbed pixels, 3 frames | 64 pixels each, bit-identical to the model's binary64 semantics: 64 escaping, 23/41 escaping/interior at a complex centre, 60/4 escaping/glitched off the nucleus |
+| batch 7 / 64 / 4096 | byte-identical pixel records |
+| the chain | recomputed with `hashlib`, identical |
+| the 754 status word | equals the union of every call's `flags_out`, on an orbit-only run and on a full frame |
+| refusals | a width that is not a power of two, a centre the format cannot hold, an unknown option, a resume that moves the centre, a zoom below binary64's normal range, a glitch tolerance outside the format's precision, sizes larger than memory |
+
+mpmath is optional; when it is absent the script prints a SKIP naming
+the four rows that are then missing, and its summary line becomes
+"ZOOM CHECK OK against the golden model - but mpmath was MISSING, so
+nothing here checked the domain" rather than the usual one. That exists
+because writing the negative controls found the control script putting
+a different interpreter first on PATH, and four rows vanished without a
+word.
+
+### The binary64-versus-binary256 result
+
+Derived from the format parameters: a centre near `|c| = 2` is held to
+`2^(1-p)`, so binary64 reaches a pixel scale of about 1e-15 and
+binary256 about 1e-71. **Fifty-six decades.** Measured at this frame's
+3.11e-61 pixel, the tool prints `|c_fmt - c_fp256| / pixel` exactly:
+
+| reference format | centre error, in pixels | escape iterations | pixels differing from the fp256 frame |
+|---|---|---|---|
+| binary256 | **0** | 307..3227 | - |
+| binary128 | 1.78e+26 | 148..156 | 4096 of 4096 |
+| binary64 | 9.38e+30 | 74..107 | 4096 of 4096 |
+| binary32 | 9.38e+30 | 74..107 | 4096 of 4096 |
+
+Not a worse image; a different one. binary32 and binary64 agree because
+both round this centre to exactly -2, and they return the same orbit
+chain for that reason.
+
+Reference validity length, against the 300-digit orbit. The absolute
+criterion - the first `k` at which the formats' orbits differ by more
+than one pixel - gives 21 for binary256 and 1 for binary64 at 1e-60.
+But that criterion measures the map's Lyapunov exponent rather than the
+reference's usability, because the reference error and a pixel's own
+offset obey the same linearised recurrence and amplify together. The
+criterion that decides the image is the ratio, and by it the binary256
+reference never drifts past a pixel's own deviation in 600 iterations
+while binary64's is past it at iteration **1**, before a single pixel
+has moved.
+
+### The flag that says nothing, in one measurement
+
+    ./cft-zoom --format fp64 --ref-iters 100000 --no-pixels
+    orbit flags   0x00  (inexact is expected; anything else stops the run)
+
+The binary64 reference orbit raises **nothing at all**. Its centre
+rounded to exactly -2, so the orbit is 0, -2, 2, 2, 2, ... and every
+operation in it is exact for a hundred thousand iterations - a
+perfectly exact computation of the wrong problem. That is the sharpest
+statement this repository has of what an exception flag cannot tell
+you, and it is the opposite of the Collatz explorer, where `inexact` is
+a per-element detector. Here `inexact` is EXPECTED on every call; the
+certificates are the absence of the other four (checked after every
+call), the escape comparison raising exactly zero (checked per call in
+the loop engine, because a comparison rounds nothing), bit identity
+with the golden model, and bit identity between the engines.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04. A shared box: the same measurement taken while
+other work ran came back about 25% lower across the board, so every row
+is a median of five and the ratios are the result rather than the
+absolutes. `--ref-iters 100000 --no-pixels`:
+
+| format | engine | reference iterations/s | elementwise ops/s |
+|---|---|---|---|
+| fp256 | program | 174,462 | 1,395,696 |
+| fp256 | loop | 162,374 | 1,298,992 |
+| fp128 | program | 275,562 | 2,204,496 |
+| fp64 | program | 450,980 | 3,607,840 |
+| fp32 | program | 493,293 | 3,946,344 |
+
+The pixel batch is 399,782 pixel-iterations/s at binary64 - about 9.2
+million elementwise operations a second at 23 per pixel-iteration -
+375,000 to 411,000 from batch 64 to batch 16,384, with an identical
+pixel chain at every one.
+
+The headline frame: 100,000 reference iterations at fp256 in 0.54 s
+through **98 library calls** (the host loop issues 800,000), then 4,096
+pixels in 4.6 s: 4,010 escaped, 0 glitched, 86 interior, escape
+iterations 307..3227, orbit chain
+`8cf49c0b2cdcf6bf899ba7fbc763aa5ee82449807578052f20934cc365afc3e4`.
+
+**The sequencer's margin here is only 1.06x to 1.16x**, against 1.5x to
+2.1x for the Collatz explorer, and the reason is structural rather than
+disappointing: a reference orbit is ONE lane, so the program saves
+per-call dispatch on a call that was doing one element's work anyway.
+What it does buy is the call count, and on a device the memory round
+trip per step. The domain's own answer is many references at once,
+which is what multi-reference rendering does and what would turn this
+into the sequencer's best case.
+
+### What the writing of it found
+
+**A per-iteration host-side statistic quietly undoes what the sequencer
+is for.** The running minimum of `|z_k|^2` began as four
+single-element library calls per orbit point: half as much work again
+as the eight the step needs, and 400,000 calls where the sequencer had
+got the count down to 98. It is now three whole-array passes and a MIN
+tournament after the run - about `2*log2(n) + 4` calls for any `n` -
+and it left the checkpoint, because it is a function of the orbit that
+is already there.
+
+**The perturbation cannot be a sequencer program, and the obstacle is
+exact.** It needs six live values a step: four per-lane and persistent,
+which the register file holds, and two that change every iteration and
+are shared by every lane. The model has three input streams that
+initialise once, and a constant bank fixed at load time and addressed
+by the 4-bit register field - **at most 16 constants**, so not enough to
+unroll. There is no operand source that advances with the loop counter.
+The missing feature is a per-iteration broadcast: a fourth stream read
+by iteration index rather than by lane, or a constant bank the loop
+counter can address. Recorded for the sequencer's designers, because
+perturbation rendering is the reason a deep-zoom engine wants a
+sequencer at all.
+
+**A real centre hides half the arithmetic.** The derived nucleus is on
+the real axis, so `zi` is exactly +0 for the whole orbit and
+`zr^2 - zi^2` and `zr^2 + zi^2` are the same value. The complex-centre
+row exists because negative control A swapped exactly those two and
+nothing else in the check noticed.
+
+### The negative controls
+
+Three faults, each rebuilt and run through the same gate, then
+restored.
+
+| control | what was changed | caught by | result |
+|---|---|---|---|
+| A | `zr^2 - zi^2` became `zr^2 + zi^2`, in BOTH engines | the complex-centre rows, alone - the orbit and the pixel cap | 35 green, 2 failing |
+| B | the reference rounded into binary64 with RTZ instead of RNE | the per-pixel oracle, alone: `pixel 2: tool says (176, 'esc'), the golden model says (175, 'esc')` | 35 green, 1 failing |
+| C | the program's final add reads `zr` instead of `zr^2 - zi^2` - ONE engine | the engine cross-check, the checkpoints, the resume, the model and mpmath | 29 green, 11 failing |
+
+A and B are the interesting pair. Under both, the engines agree with
+each other, the checkpoints match across trip counts and batch sizes,
+the resumed run lands byte-identically, the chain matches hashlib, and
+the binary64 comparison still reports 4096 of 4096. Internal
+consistency proves the tool computes the same thing every time; it
+cannot prove the thing is right, and two engines built from one
+understanding are wrong together. C is here to show the internal gates
+are live, which is what makes A and B's silence meaningful.
+
+Restoring the file, rebuilding, and the gate is green again at 11,222
+comparisons.
+
+### What a review of the finished tool found
+
+Seven silent-failure paths, all closed, and the worst of them is worth
+recording because the cross-check could not have found it. **A resume
+that moved the centre continued the checkpoint's orbit prefix with this
+invocation's parameter**: the centre is baked into the sequencer
+program's constant bank when the engine is built, and `ckpt_read` ran
+afterwards and overwrote it, so `--resume --ref-offset 40` produced a
+chain matching neither the offset-0 run nor the offset-40 one while
+still printing the offset-0 centre. The check resumed only ever with
+identical arguments, so it saw nothing. The checkpoint is now read
+before the engine is built, a differing centre is refused, and both the
+refusal and the ordinary resume are rows of the gate.
+
+The others were guards rather than bugs, each against something that
+raised no flag and printed nothing: `--zoom-exp` past binary64's
+smallest normal collapsed the frame into `width^2` copies of the
+reference with every pixel offset rounded to `+0`; the reference's
+narrowing conversion into binary64 bypassed the forbidden-flag gate, so
+an orbit point becoming a subnormal would not have stopped the run; the
+"status word agrees with the union" line was printed and never read, and
+the report's own roundings were happening after the word was sampled;
+and `--glitch-bits`, `--ref-iters` and `--ref-offset` were unbounded in
+ways that disabled the glitch test, wrapped an allocation, and
+overflowed a 32-bit `long` respectively. In the oracle: the orbit rows
+asserted no minimum length, so an orbit that escaped at iteration one
+would have passed as "1 point identical".
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact` and
+  issues the same program either way, but nothing here has been through
+  XRT; `docs/BRINGUP.md` owns those gates. No device number is quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The orbit program uses `CFT_MUL`, `CFT_ADD`,
+  `CFT_SUB`, `CFT_FMA` and `CFT_CMPLE`; the pixel batch adds
+  `CFT_NEG`, `CFT_MIN`, `CFT_MAX` and `CFT_SELECT`; the search adds
+  nothing. All are covered by `tb/` and the vector sets, and the four
+  control codes used are ones `tb/test_seq_core.py` already scores.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library they certified this
+  morning. No runner stage was added; `verify/run.sh` was deliberately
+  left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md`,
+  `docs/BENCHMARKS.md` and the ABI version were left to the integrator,
+  as at 0.7. `host/Makefile`'s `clean` was left alone too: the new
+  targets sit in their own delimited block with their own `TOOLS +=`
+  line and a `zoomclean`, so that four parallel workloads merge beside
+  one another rather than through one recipe.

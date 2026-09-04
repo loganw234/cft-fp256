@@ -143,6 +143,41 @@ in shape, not rigor; mpmath has no fma):
 | div | 1592 | 1696 | 1843 | 2162 |
 | sqrt | 2545 | 2853 | 3189 | 4160 |
 
+## Workloads designed for the contract
+
+The tables above adapt other libraries' benchmarks to this one. The
+five tools below were written the other way round, on 2026-09-04, each
+for a property the contract has and a conventional float library does
+not: exact integers to 2^237 with the inexact flag as the proof, five
+rounding attributes per instruction, correctly rounded results that
+are the same bits on every host, and a sequencer that runs the inner
+loop as a program. Each is a resumable C tool in `host/tools/` with a
+Python oracle in `host/tests/`, a design note in `docs/`, and an entry
+in docs/VALIDATION.md; each runs at fp64 beside fp256 and says what
+fp64 loses, or that it loses nothing; each measures the software
+backend today and takes `--artifact` for a device later. The numbers
+are one thread on the Windows desktop, software backend, and they are
+measurements of a slow backend, not a promise.
+
+| tool | the workload | what the contract supplies | software backend, fp256 | fp64 beside it |
+|---|---|---|---|---|
+| `cft-collatz` (docs/COLLATZ.md) | Collatz trajectories, sweep and deep | exact integers below 2^237, the inexact flag as the certificate, the sequencer's escape loop | 587,571 steps/s as a program, 277,210 as a host loop; 10^6 starting values verified in 231 s with 123 library calls | the same chain at fp64 and fp128; fp32 loses 87 of 100,000 to exactness. 2^237 - 1315 verified in 2,437 exact steps |
+| `cft-enclose` (docs/ENCLOSE.md) | rigorous enclosures: a series, dot products, interval Horner | roundDown and roundUp per instruction, the reductions' fixed tree, bit-identical bounds | 1,821 enclosures/s; interval Horner 48,502/s as a program against 34,505 as a loop | 14 of 15 ill-conditioned fp64 enclosures straddle zero, 0 of 15 at fp256; on well-conditioned kernels fp64 is fine at 6.4x the rate |
+| `cft-mersenne` (docs/MERSENNE.md) | Lucas-Lehmer over the known Mersenne primes | fp256 as an exact 59-bit-limb multiplier, dot reductions as exact convolutions, flags as the certificate | 270,377,166 limb products for the thirteen exponents through 11213 in 212 s, flags clean; 2^19937 - 1 verified across three resumed runs | fp64 needs 22-29x the limb products and 7-13x the wall time for the same exponent; every rung returns the same residue chain |
+| `cft-orbits` (docs/ORBITS.md) | symplectic few-body integration, Kepler and the outer solar system | correctly rounded arithmetic, bit-identical ensembles | 95,263 element-steps/s for the Kepler leapfrog as a program (284 library calls where the loop needs 295,195); 12,077 for the Yoshida scheme with correctly rounded 1/r^3; the outer solar system 3,136 | energy drift identical at every format - the method: 7.9e-4 leapfrog, 2.0e-5 Yoshida over 2,000 periods - while angular-momentum drift, the arithmetic, is 9.0e-69 at fp256 against 1.4e-13 at fp64, 2^184 apart |
+| `cft-zoom` (docs/ZOOM.md) | a deep-zoom Mandelbrot reference orbit with fp64 perturbation | a bit-identical fp256 reference orbit as a sequencer escape loop | 174,462 reference iterations/s as a program (98 calls per 100,000 iterations), 162,374 as a loop; 399,782 fp64 pixel-iterations/s with an identical pixel chain at every batch size | at a 3.1e-61 pixel the fp64 reference is 9.4e30 pixels off and wrong from iteration 1 while raising no flag; all 4,096 pixels differ; fp256 addresses pixels to 1e-71 against fp64's 1e-15 |
+
+Three of the five asked the sequencer for something it does not have,
+and the asks are recorded in their design notes rather than worked
+around silently: a fourth input stream and an optional per-element
+flag output (Collatz); more than sixteen addressable constants, since
+operand fields are four bits (enclose); a lane shift and an in-program
+cross-lane reduction, which would put a whole carry chain and a
+convolution on-chip (Mersenne). Composed operations and reductions
+cannot be called from inside a program, which is why the enclosure
+tool's series and dot kernels, and the Mersenne convolution, run as
+host-issued calls around program passes.
+
 ## Reading the numbers
 
 **MPFR is 7-25x faster than libcft's software backend on the

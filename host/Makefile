@@ -157,6 +157,11 @@ TOOLS := cft-selftest$(EXE) cft-bench$(EXE) cft-collatz$(EXE)
 TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
+# One `TOOLS +=` line per added tool, ABOVE the `all` rule because make
+# expands a prerequisite list when it reads the rule. The recipes are
+# in their own delimited block at the end of the tools section.
+TOOLS += cft-enclose$(EXE)
+
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
         transcendtest augmentedtest formatoftest collatz collatztest \
         examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
@@ -212,6 +217,45 @@ cft-collatz$(EXE): tools/collatz.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
 collatz: cft-collatz$(EXE)
+
+# ====================================================================
+# cft-enclose - rigorous enclosures from the directed roundings.
+#
+# The verified-computing workload: every quantity computed once under
+# roundTowardNegative and once under roundTowardPositive, so the true
+# value is provably between the two, and - because the contract is
+# deterministic - the SAME two numbers on every conforming host. Three
+# kernels (a series with a tail bound, dot and matrix-vector products,
+# an interval Horner that runs as an orbit-sequencer program with the
+# rounding attribute set per instruction). docs/ENCLOSE.md is the
+# rounding argument; enclosetest scores the tool against a Python
+# oracle that is exact rationals where the value is a rational and
+# mpmath at 300 digits where it is not.
+#
+# Its own block at the end of the tools section, and `clean` gains a
+# prerequisite rather than a longer command line, so that four tools
+# added in parallel do not all edit the same two lines.
+# ====================================================================
+.PHONY: enclose enclosetest enclose-clean
+
+cft-enclose$(EXE): tools/enclose.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+enclose: cft-enclose$(EXE)
+
+# The enclosure tool against the oracle, plus the three determinism
+# properties it claims: batch-size independence, interrupt/resume
+# equivalence, and program-versus-loop bit identity. Python's Fractions
+# are exact, so they are the authority on a dot product of dyadic
+# rationals and on a polynomial with rational coefficients; mpmath at
+# 300 digits is the authority on exp. The library stays the authority
+# on arithmetic.
+enclosetest: cft-enclose$(EXE)
+	$(PYTHON) tests/enclose_check.py
+
+clean: enclose-clean
+enclose-clean:
+	rm -f cft-enclose cft-enclose.exe
 
 api-test$(EXE): tests/api_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
@@ -514,6 +558,124 @@ coverage: all
 # library stays the authority on arithmetic.
 collatztest: cft-collatz$(EXE)
 	$(PYTHON) tests/collatz_check.py
+
+# ===================================================================
+# cft-orbits - symplectic few-body integration, docs/ORBITS.md
+#
+# A separately delimited block so that four workloads written in
+# parallel worktrees merge without touching each other's lines. TOOLS
+# and the `all` and `clean` prerequisites are ADDED to rather than
+# edited, because `all:`'s prerequisite list was already expanded by
+# the time make reads this - the extra `all:` line is how a target
+# joins the default build from below it.
+# ===================================================================
+TOOLS += cft-orbits$(EXE)
+all: cft-orbits$(EXE)
+clean: clean-orbits
+.PHONY: orbits orbitstest clean-orbits
+
+cft-orbits$(EXE): tools/orbits.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+orbits: cft-orbits$(EXE)
+
+# The integrator against a 300-digit mpmath oracle - the closed form
+# through Kepler's equation for the two-body problem, the same
+# discrete scheme for the outer solar system - plus the three
+# determinism properties the tool claims: batch-size independence,
+# interrupt/resume equivalence, and bit identity between the
+# sequencer-program engine and the host cft_run loop. Needs Python and
+# mpmath, so it is its own target rather than part of `test`.
+#
+# mpmath is the ONE dependency, and on Windows a bare `python` inside
+# a make recipe is often not the interpreter on your shell's PATH, so
+# pass one in the way verify/run.sh does:
+#     make -C host orbitstest PYTHON=/c/path/to/python.exe
+orbitstest: cft-orbits$(EXE)
+	$(PYTHON) tests/orbits_check.py
+
+clean-orbits:
+	rm -f cft-orbits cft-orbits.exe
+# ==================== end of the cft-orbits block ==================
+
+
+# ---------------------------------------------------------------------
+# cft-zoom - the deep-zoom Mandelbrot reference orbit (docs/ZOOM.md)
+#
+# Its own block, with its own TOOLS += line rather than an edit to the
+# TOOLS := above, so that this workload merges beside the others rather
+# than through them. The reference orbit runs at fp256 (or whatever
+# --format says) as an orbit-sequencer program; the perturbed pixels run
+# at fp64 through cft_run. Same binary against the software backend and
+# against an artifact.
+#
+# `make zoomclean` removes its products; `clean` above is deliberately
+# untouched so that four parallel workloads do not all edit one recipe.
+# ---------------------------------------------------------------------
+TOOLS += cft-zoom$(EXE)
+# `all` above names $(TOOLS) as a prerequisite, and prerequisites of an
+# explicit rule are expanded when the rule is READ - so the += alone
+# would not reach it. An extra prerequisite line with no recipe does,
+# and it is additive, which is the point of keeping this in one block.
+all: cft-zoom$(EXE)
+
+.PHONY: zoom zoomtest zoomclean
+
+cft-zoom$(EXE): tools/zoom.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+zoom: cft-zoom$(EXE)
+
+# The reference orbit against the golden model's own fp256 semantics and
+# against mpmath at 300 digits, plus the determinism properties the tool
+# claims: program versus loop, trip-count and batch-size independence,
+# and interrupt/resume. The library stays the authority on arithmetic;
+# mpmath is the authority on the Mandelbrot orbit.
+zoomtest: cft-zoom$(EXE)
+	$(PYTHON) tests/zoom_check.py
+
+zoomclean:
+	rm -f cft-zoom cft-zoom.exe
+# ---------------------------------------------------------------------
+
+
+# ===================================================================
+# cft-mersenne - the Lucas-Lehmer test with fp256 as an EXACT wide
+# integer multiplier. A squaring is a convolution of limbs, the
+# convolution is cft_reduce(CFT_DOT) over a tree the contract fixes,
+# and `flags == 0` is the certificate that every coefficient is the
+# exact integer sum - which is the property GIMPS has to rebuild with
+# Gerbicz checks because its floating-point FFT is fast but not exact.
+# docs/MERSENNE.md is the argument; the oracle is Python's big
+# integers, which cannot be wrong about a Lucas-Lehmer residue.
+# ===================================================================
+TOOLS += cft-mersenne$(EXE)
+# ...and `all` again, explicitly. GNU Make expands a rule's prerequisite
+# list when the rule is READ, so `all: $(TOOLS)` above already holds the
+# value TOOLS had at that line and a later `+=` cannot reach it. Naming
+# the binary here is what actually puts it in the default build, and it
+# is one added prerequisite on a recipe-less target, so four worktrees
+# can each add their own line without colliding.
+all: cft-mersenne$(EXE)
+.PHONY: mersenne mersennetest
+
+cft-mersenne$(EXE): tools/mersenne.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+mersenne: cft-mersenne$(EXE)
+
+mersennetest: cft-mersenne$(EXE)
+	$(PYTHON) tests/mersenne_check.py
+
+# `clean` already has its recipe below; a prerequisite added here runs
+# before it, which removes this tool's products without any worktree
+# having to edit that shared rm list. Both spellings, for the same
+# reason the real rule removes both.
+clean: clean-mersenne
+clean-mersenne:
+	rm -f cft-mersenne cft-mersenne.exe
+.PHONY: clean-mersenne
+# ===================================================================
 
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
