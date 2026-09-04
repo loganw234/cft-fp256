@@ -1033,7 +1033,9 @@ typedef struct {
     uint64_t  k;                 /* orbit iterations resolved */
     uint64_t  escaped_at;        /* 0 if it never escaped */
     uint8_t   zr[MAX_ESZ], zi[MAX_ESZ];
-    uint8_t  *orb_r, *orb_i;     /* ref_iters + 1 points, index 0 = z_0 */
+    /* ref_iters + 2 elements: index 0 is z_0, 1..ref_iters are the
+     * orbit, and the pixel phase reads one past its cap. */
+    uint8_t  *orb_r, *orb_i;
     uint8_t   chain[32];
     uint8_t   pixchain[32];
 
@@ -1051,6 +1053,12 @@ typedef struct {
     uint32_t  esc_min, esc_max;
     uint64_t  ops_ref, ops_pix;   /* elementwise operations issued */
     uint32_t  flags_ref;          /* the union over the orbit alone */
+    /* Every rounded decimal the report prints, computed while the run
+     * is still running: they raise inexact, and a status word sampled
+     * before them would not match the union that includes them. */
+    char      centre_err[64];
+    char      minmag_s[64];
+    char      pixscale_s[64];
 } runstate;
 
 /* ---- the hash chains --------------------------------------------- */
@@ -1083,7 +1091,7 @@ static void orbit_record(runstate *R, uint64_t idx, char *out, size_t cap)
  * Near the tip the set is self-similar with ratio 4, so a period-p
  * nucleus sits a small multiple of 4^-p from -2. Every candidate on
  * the grid is EXACT in the format: -2 plus (i * 2^-3) * 4^-p, with i a
- * small integer, needs about (2p + 12) significand bits, which every
+ * small integer, needs exactly 2p + 5 significand bits, which every
  * format wide enough to run this workload has.
  * =================================================================== */
 #define SCAN_STEPS 320          /* i = 1..320, so eps/4^-p in (0, 40] */
@@ -1201,7 +1209,8 @@ static void derive_centre(runstate *R)
  * different engines end on byte-identical files.
  *
  * It is O(the orbit), which is honest rather than convenient: at
- * 100,000 iterations the file is about 48 MB. Checkpointing is opt-in
+ * 100,000 iterations the file is about 24.5 MB, and writing it costs
+ * more than computing the orbit does. Checkpointing is opt-in
  * for that reason. The PIXEL phase does not checkpoint - it is one
  * batch of independent elements, like the Collatz explorer's deep
  * mode, and its determinism property is batch-size independence rather
@@ -1707,13 +1716,19 @@ static void run_pixels(runstate *R)
                          ref_r, (size_t)maxk + 2, &f);
         if (st != CFT_OK)
             die_st("cft_convert (reference to binary64)", st);
-        FLAGS_SEEN |= f;
+        /* Through the same gate as everything else: narrowing rounds,
+         * so inexact is expected, but an UNDERFLOW here would mean an
+         * orbit point became a binary64 subnormal and the perturbation
+         * is about to run against a denormalised reference. That is a
+         * result worth stopping for, not one worth folding into a
+         * union. */
+        note_flags(f, "the reference conversion to binary64");
         f = 0;
         st = cft_convert(DEV, fi->fmt, CFT_FP64, CFT_RNE, R->orb_i,
                          ref_i, (size_t)maxk + 2, &f);
         if (st != CFT_OK)
             die_st("cft_convert (reference to binary64)", st);
-        FLAGS_SEEN |= f;
+        note_flags(f, "the reference conversion to binary64");
     }
 
     /* one half-pixel, as a binary64 number: the view radius is
@@ -1853,14 +1868,20 @@ static void compare_pixels(runstate *R, uint64_t *differ, uint64_t *total)
 /* ===================================================================
  * Reporting
  * =================================================================== */
+/* A rounded decimal, for the human-readable report. Unlike val_to_dec's
+ * exact conversion this one ROUNDS, so it raises inexact - which is
+ * routed into the union like everything else, because a status word
+ * that the union does not match is a cross-check that cries wolf. */
 static void dec_digits(const fmt_info *fi, const void *v, size_t digits,
                        char *out, size_t cap)
 {
     size_t len = 0;
+    uint32_t fl = 0;
     cft_status st = cft_to_decimal_char(DEV, fi->fmt, CFT_RNE, v, digits,
-                                        out, cap, &len, NULL);
+                                        out, cap, &len, &fl);
     if (st != CFT_OK)
         die_st("cft_to_decimal_char", st);
+    note_flags(fl, "a decimal conversion for the report");
 }
 
 /* |c_fmt - c_fp256| measured in pixels: the reference's own
@@ -1895,6 +1916,7 @@ static void centre_error_pixels(runstate *R, char *out, size_t cap)
     st = cft_div(DEV, CFT_FP256, CFT_RNE, adiff, px, q, 1, &fl, NULL);
     if (st != CFT_OK)
         die_st("cft_div", st);
+    note_flags(fl, "the centre-error division");
     dec_digits(&big, q, 6, out, cap);
 }
 
@@ -1903,8 +1925,10 @@ static void report(runstate *R, double t_ref, double t_pix,
 {
     const fmt_info *fi = R->fi;
     options *O = R->opt;
-    char chain[65], pchain[65], cr[DECMAX], ci[DECMAX], mm[64], err[64];
-    char pix[64];
+    char chain[65], pchain[65], cr[DECMAX], ci[DECMAX];
+    const char *err = R->centre_err;
+    const char *mm = R->minmag_s;
+    const char *pix = R->pixscale_s;
     double rps = t_ref > 0 ? (double)R->k / t_ref : 0.0;
     double pps = t_pix > 0 ? (double)R->pixel_work / t_pix : 0.0;
     double eps = t_pix > 0 ? (double)O->width * O->width / t_pix : 0.0;
@@ -1914,17 +1938,6 @@ static void report(runstate *R, double t_ref, double t_pix,
     hex32(R->pixchain, pchain);
     val_to_dec(fi, R->cr, cr, sizeof cr);
     val_to_dec(fi, R->ci, ci, sizeof ci);
-    if (R->have_min)
-        dec_digits(fi, R->minmag, 6, mm, sizeof mm);
-    else
-        snprintf(mm, sizeof mm, "-");
-    centre_error_pixels(R, err, sizeof err);
-    {
-        fmt_info big;
-        big.fmt = CFT_FP256;
-        big.esz = cft_format_size(CFT_FP256);
-        dec_digits(&big, R->pixscale, 6, pix, sizeof pix);
-    }
     if (O->compare_path)
         compare_pixels(R, &cmp_diff, &cmp_tot);
 
@@ -1935,12 +1948,14 @@ static void report(runstate *R, double t_ref, double t_pix,
                "esc_max,pixel_iterations,ref_seconds,pixel_seconds,"
                "ref_iters_per_s,pixel_iters_per_s,pixels_per_s,flags,"
                "chain,pixchain,compare_differ,compare_total,"
-               "centre_re,centre_im,ref_ops,pixel_ops,orbit_flags\n");
+               "centre_re,centre_im,ref_ops,pixel_ops,orbit_flags,"
+               "flags_union\n");
         printf("%s,%s,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%u,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%s,%" PRIu64 ",%s,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRIu64
                ",%.6f,%.6f,%.1f,%.1f,%.1f,0x%02x,%s,%s,%" PRIu64
-               ",%" PRIu64 ",%s,%s,%" PRIu64 ",%" PRIu64 ",0x%02x\n",
+               ",%" PRIu64 ",%s,%s,%" PRIu64 ",%" PRIu64 ",0x%02x"
+               ",0x%02x\n",
                backend, cft_format_name(fi->fmt),
                O->use_program ? "program" : "loop",
                (uint64_t)O->batch, (uint64_t)O->reps, O->period,
@@ -1950,7 +1965,8 @@ static void report(runstate *R, double t_ref, double t_pix,
                R->n_escaped ? R->esc_min : 0, R->esc_max, R->pixel_work,
                t_ref, t_pix, rps, pps, eps, (unsigned)status,
                chain, pchain, cmp_diff, cmp_tot, cr, ci,
-               R->ops_ref, R->ops_pix, (unsigned)R->flags_ref);
+               R->ops_ref, R->ops_pix, (unsigned)R->flags_ref,
+               (unsigned)FLAGS_SEEN);
         return;
     }
 
@@ -2179,6 +2195,45 @@ int main(int argc, char **argv)
     if (O.glitch_bits < 0)
         O.glitch_bits = pf.prec / 4;
 
+    /* Everything the geometry needs, checked against the PIXEL format's
+     * own measured parameters rather than assumed. A pixel offset is an
+     * odd integer below 2^12 times one half-pixel, 2^(-zoom_exp-log2 W),
+     * so it is exact if and only if that power of two is a NORMAL
+     * binary64 number: a subnormal half-pixel would quietly drop the
+     * low bits of the offset, and far enough down every offset becomes
+     * +0 and the frame collapses into width^2 copies of the reference
+     * with no flag raised anywhere. That is the one failure this tool
+     * must not have, since the depth axis is the thing it argues
+     * about. */
+    {
+        uint32_t w = O.width, sh = 0;
+        int emin = 1 - (int)pf.bias, emax = (int)pf.bias, e;
+        while (w > 1) { w >>= 1; sh++; }
+        if (O.zoom_exp > emax || O.zoom_exp < -emax)
+            die("--zoom-exp is outside anything binary64 can hold");
+        e = -O.zoom_exp - (int)sh;
+        if (e < emin)
+            die("that --zoom-exp and --width put one pixel below "
+                "binary64's smallest normal number, where the pixel "
+                "offsets would stop being exact; zoom out or narrow the "
+                "grid");
+        if (e > emax)
+            die("that --zoom-exp and --width put one pixel above "
+                "binary64's largest finite number");
+        if (O.glitch_bits < 1 || O.glitch_bits > pf.prec)
+            die("--glitch-bits must be between 1 and the pixel format's "
+                "precision; outside that the criterion is either always "
+                "or never true");
+        if (O.ref_offset > (long)(1 << 20) ||
+            O.ref_offset < -(long)(1 << 20))
+            die("--ref-offset is larger than any frame this tool draws");
+        if (O.ref_iters > ((uint64_t)-1) / MAX_ESZ - 2 ||
+            O.ref_iters > (uint64_t)1 << 40)
+            die("--ref-iters is larger than this tool will allocate for");
+        if (O.width > (1u << 15))
+            die("--width is larger than this tool will allocate for");
+    }
+
     memset(&R, 0, sizeof R);
     R.fi = &fi;
     R.pf = &pf;
@@ -2266,12 +2321,26 @@ int main(int argc, char **argv)
     FLAGS_SEEN = 0;
     OPS_ISSUED = 0;
 
-    orbit_engine_init(&R.eng, &fi, R.cr, R.ci, O.use_program, O.reps);
+    /* The checkpoint is read BEFORE the engine is built, because the
+     * centre is baked into the program's constant bank: an engine built
+     * from this invocation's centre and then fed a checkpoint written
+     * for another one would continue somebody else's orbit in silence.
+     * The equality check below is the belt to that braces - a resume
+     * with a different --period, --centre or --ref-offset is a
+     * different run, and is refused rather than blended. */
     if (O.resume) {
+        uint8_t want_r[MAX_ESZ], want_i[MAX_ESZ];
         if (!O.ckpt)
             die("--resume needs --checkpoint");
+        memcpy(want_r, R.cr, fi.esz);
+        memcpy(want_i, R.ci, fi.esz);
         ckpt_read(&R);
+        if (memcmp(want_r, R.cr, fi.esz) != 0 ||
+            memcmp(want_i, R.ci, fi.esz) != 0)
+            die("that checkpoint was written for a different centre; "
+                "--resume continues one run, it does not move one");
     }
+    orbit_engine_init(&R.eng, &fi, R.cr, R.ci, O.use_program, O.reps);
     if (O.orbit_path) {
         R.orbf = fopen(O.orbit_path, "wb");
         if (!R.orbf)
@@ -2302,8 +2371,25 @@ int main(int argc, char **argv)
         t_pix = now_s() - p0;
     }
 
-    /* Sampled here, before the report's own decimal conversions and
-     * division round anything into it. */
+    /* The report's rounded decimals are a division and several
+     * conversions, all of which raise inexact, so they are computed
+     * HERE while they still count as part of the run rather than inside
+     * the report after the status word has been sampled - otherwise
+     * their own inexact would make the word disagree with the union and
+     * the cross-check would cry wolf. */
+    centre_error_pixels(&R, R.centre_err, sizeof R.centre_err);
+    if (R.have_min)
+        dec_digits(&fi, R.minmag, 6, R.minmag_s, sizeof R.minmag_s);
+    else
+        snprintf(R.minmag_s, sizeof R.minmag_s, "-");
+    {
+        fmt_info g;
+        g.fmt = CFT_FP256;
+        g.esz = cft_format_size(CFT_FP256);
+        dec_digits(&g, R.pixscale, 6, R.pixscale_s, sizeof R.pixscale_s);
+    }
+    /* Sampled here, after everything the run does and before the
+     * report's own decimal conversions round anything into it. */
     report(&R, t_ref, t_pix, caps.backend, cft_save_all_flags(DEV));
 
     orbit_engine_free(&R.eng);

@@ -272,6 +272,19 @@ setup is done - measuring `p` and deriving the centre both raise
 inexact deliberately - and never touched again, so it must agree with
 the union.
 
+Making that agreement true rather than approximately true took two
+things. Every rounding the tool performs goes through the same gate,
+including the ones the REPORT performs - the centre-error division and
+the six-digit decimals - which are therefore computed while the run is
+still running rather than after the word has been sampled. And the
+narrowing conversion of the reference into binary64 goes through the
+gate too: it rounds, so inexact is expected, but an `underflow` there
+would mean an orbit point had become a binary64 subnormal and the
+perturbation was about to run against a denormalised reference, which
+is worth stopping for. The check script compares the word against the
+union on two runs, because a cross-check nothing reads is not a
+cross-check.
+
 ### What the flag cannot tell you, in one measurement
 
     ./cft-zoom --format fp64 --ref-iters 100000 --no-pixels
@@ -307,6 +320,15 @@ of two (the tool refuses anything else), so
 has at most 12 significant bits and is exact in binary64 and in
 binary256 alike. The grid contributes no rounding of its own, which is
 what lets the fp64 and fp256 frames be compared pixel for pixel.
+
+That exactness has a floor, and the tool checks it against the pixel
+format's own measured parameters rather than assuming it: the
+half-pixel `2^(-E-log2 W)` has to be a NORMAL binary64 number, because
+a subnormal one would quietly drop the low bits of the offset, and far
+enough down every offset becomes `+0` and the frame collapses into
+`W^2` copies of the reference **with no flag raised anywhere**. `--zoom-exp`
+past that floor is refused with the reason. It is the one silent
+failure a tool arguing about depth must not have.
 
 The reference is rounded once into binary64 with `cft_convert` - which
 is what the technique asks for, since the product `2 z_k d` needs the
@@ -454,16 +476,25 @@ The claim in the tool's header is:
 | interruption | a run stopped every five passes and resumed, at a different trip count, must end on the same checkpoint - byte for byte - as one that was never stopped |
 | the pixels | every escape iteration and verdict against the golden model's own binary64 semantics, at three centres including the glitching one |
 | the chains | recomputed with `hashlib` |
-| refusals | a width that is not a power of two, a centre the format cannot hold exactly, an unknown option |
+| the status word | 754-2019 7.1's word, lowered once when setup ended, must equal the union of every call's `flags_out` - checked on an orbit-only run and on a full frame |
+| refusals | a width that is not a power of two, a centre the format cannot hold exactly, an unknown option, a resume that moves the centre, a zoom below binary64's normal range, a glitch tolerance outside the format's precision, sizes larger than memory |
 
 The interrupt leg stops every five engine calls at `--steps-per-call
 37`, so a stop lands in the middle of the orbit rather than on a
 convenient boundary, and it resumes at a different trip count from the
 run it is compared against.
 
+**A resume may not move the centre.** The centre is baked into the
+program's constant bank, so a run resumed with a different `--period`,
+`--centre` or `--ref-offset` would continue one orbit's prefix with
+another orbit's parameter, in silence. The tool reads the checkpoint
+BEFORE it builds the engine and refuses when the two centres differ;
+the check exercises both halves, the refusal and the ordinary resume
+that must still work.
+
 The gate on this tree:
 
-    11212 comparisons, 0 failures
+    11222 comparisons, 0 failures
     ZOOM CHECK OK - the tool, the golden model and mpmath agree
 
 about 14 seconds. mpmath is optional - the golden-model half of the
@@ -539,6 +570,10 @@ one's absolute size. Measured against a real pixel's true deviation at
 |---|---|
 | binary256 | **never**, in 600 iterations |
 | binary64 | **1** - before a single pixel has moved |
+
+("A pixel's own deviation" is measured, not modelled: the check runs
+the true orbit of the point one pixel away at 300 digits and grades the
+reference error against `|w_k - z_k|` at each `k`.)
 
 So the honest statement of the absolute table is that it measures the
 Lyapunov exponent of the map (about 4 per iteration near the tip)
@@ -767,7 +802,7 @@ Stated plainly, because it is the lesson of A and B:
 > B needed a per-pixel oracle.
 
 `git checkout host/tools/zoom.c`, `make -C host zoom`, and
-`make -C host zoomtest` is green again: **11,212 comparisons, 0
+`make -C host zoomtest` is green again: **11,222 comparisons, 0
 failures.**
 
 ---

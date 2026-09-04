@@ -424,7 +424,14 @@ def main():
             want_orb = golden_orbit(FP256, tool_cr, tool_ci, orbit_n)
             CHECKS += len(want_orb)
             bad = None
-            if len(got) != len(want_orb):
+            # The length is asserted first and against the REQUEST, not
+            # against the model: `golden_orbit` stops wherever the tool
+            # stops, so a change that made the orbit escape at iteration
+            # one would otherwise report "1 point identical" and pass.
+            if len(got) != orbit_n:
+                bad = ("%d points, but %d were asked for - the orbit "
+                       "escaped early" % (len(got), orbit_n))
+            elif len(got) != len(want_orb):
                 bad = "%d points, model has %d" % (len(got), len(want_orb))
             else:
                 for i, ((idx, gr, gi), (wr, wi)) in enumerate(
@@ -527,8 +534,30 @@ def main():
             fail("the resumed run's checkpoint differs from the "
                  "uninterrupted one")
 
+        # A resume that MOVES the centre is a different run, and the
+        # tool has to say so: the centre is baked into the program's
+        # constant bank, so continuing one run's orbit prefix with
+        # another run's parameter would be silent nonsense.
+        moved = Path(tmp) / "moved.ckpt"
+        base = ["--ref-iters", 200, "--no-pixels", "--steps-per-call", 50,
+                "--checkpoint", moved, "--quiet"]
+        tool.run(*base, "--stop-after-passes", 1)
+        CHECKS += 2
+        bad_r = tool.run("--resume", "--ref-offset", 40, *base,
+                         expect_ok=False)
+        if bad_r.returncode != 0:
+            ok("a resume that moves the centre is refused, not blended")
+        else:
+            fail("--resume accepted a checkpoint written for another "
+                 "centre")
+        good_r = tool.run("--resume", *base)
+        if good_r.returncode == 0:
+            ok("...and a resume with the same options still continues")
+        else:
+            fail("the same-options resume was refused too")
+
         # -------------------------------------------------------------
-        print("\n[5] the hash chain, recomputed with hashlib")
+        print("\n[5] the hash chain, and the 754 status word")
         lines = [ln for ln in
                  (Path(tmp) / "orb-program.txt").read_text().splitlines()
                  if ln.strip()]
@@ -542,6 +571,25 @@ def main():
         else:
             fail("chain mismatch: tool %s, hashlib %s"
                  % (rowo["chain"], chain_of(lines)))
+
+        # The tool prints "status word ... agrees with the union above"
+        # and nothing was checking it. The device's 754 status word
+        # (7.1) is lowered once, when setup is done, and nothing in the
+        # tool lowers it again - so it must equal the union of every
+        # flags_out the run collected, or something raised a flag
+        # outside the tool's own accounting.
+        CHECKS += 2
+        for row_s, what in ((rowo, "an orbit-only run"),
+                            (tool.csv("--zoom-exp", 190, "--width", 16,
+                                      "--ref-iters", 900,
+                                      "--pixel-iters", 700),
+                             "a full frame")):
+            if row_s["flags"] == row_s["flags_union"]:
+                ok("%s: the 754 status word (%s) equals the union of the "
+                   "calls' flags_out" % (what, row_s["flags"]))
+            else:
+                fail("%s: status word %s but the union is %s"
+                     % (what, row_s["flags"], row_s["flags_union"]))
 
         # -------------------------------------------------------------
         print("\n[6] the perturbed pixels, bit for bit against the model")
@@ -582,8 +630,13 @@ def main():
             # early must not turn into an index error here.
             use = min(pmax, len(ref_r) - 2)
             if use < pmax:
-                print("       (%s: the reference is only %d long, so the "
-                      "cap is %d)" % (label, len(ref_r) - 1, use))
+                # Not a silent degradation: a short reference means the
+                # orbit escaped, which is a finding rather than a
+                # smaller test.
+                CHECKS += 1
+                fail("%s: the reference is only %d long, so the pixel cap "
+                     "fell from %d to %d - the orbit escaped early"
+                     % (label, len(ref_r) - 1, pmax, use))
             want_p = golden_pixels(ref_r, ref_i, offs, use, gb)
             got_p = []
             for ln in ppath.read_text().splitlines():
@@ -707,14 +760,18 @@ def main():
             for _ in range(n_valid):
                 z = z * z + c_mp
                 exact.append(z)
-            # the pixel a whole view-radius away, whose true orbit is what
-            # a pixel offset actually becomes by iteration k
-            pixel = mpf(2) ** (1 - 196 - 5)      # --zoom-exp 196, width 32
-            edge = []
+            # ONE PIXEL of the tool's default frame - the runs below use
+            # the default --zoom-exp 196 and --width 64, so the pixel is
+            # 2 * 2^-196 / 64 - and the true orbit of the point one
+            # pixel away, which is what a pixel's offset has actually
+            # become by iteration k. That deviation, not the pixel
+            # itself, is the yardstick the relative criterion needs.
+            pixel = mpf(2) ** (1 - 196 - 6)
+            neighbour = []
             z = mpf(0)
             for _ in range(n_valid):
-                z = z * z + (c_mp + mpf(2) ** -196)
-                edge.append(z)
+                z = z * z + (c_mp + pixel)
+                neighbour.append(z)
 
             fmts = []
             opath256 = Path(tmp) / "vorb256.txt"
@@ -726,7 +783,7 @@ def main():
                      "--no-pixels", "--orbit", opath64, "--quiet")
             fmts.append(("fp64", parse_orbit(opath64, FP64), FP64))
 
-            print("       one pixel at 2^-196 over 32 pixels = %s"
+            print("       one pixel at 2^-196 over 64 pixels = %s"
                   % mp.nstr(pixel, 6))
             for name, orbf, fmt in fmts:
                 err = [abs(bits_to_mpf(fmt, rr) - exact[i])
@@ -734,7 +791,7 @@ def main():
                 absk = next((i + 1 for i, e in enumerate(err)
                              if e > pixel), None)
                 relk = next((i + 1 for i, e in enumerate(err)
-                             if e > abs(edge[i] - exact[i])), None)
+                             if e > abs(neighbour[i] - exact[i])), None)
                 print("       %-6s first error above one pixel at k = %s; "
                       "above a pixel's own deviation at k = %s"
                       % (name, absk, relk))
@@ -805,6 +862,33 @@ def main():
             ok("an unknown option is refused rather than ignored")
         else:
             fail("an unknown option was accepted")
+
+        # The guards that stop a silent collapse rather than a loud
+        # one. Below binary64's smallest normal every pixel offset would
+        # round to +0 and the frame would become width^2 copies of the
+        # reference, with no flag raised anywhere; and a glitch
+        # tolerance outside the format's precision makes the criterion
+        # either always or never true.
+        for argv, why in (
+                (["--zoom-exp", 1100, "--width", 8],
+                 "a zoom deeper than binary64's normal range"),
+                (["--zoom-exp", 1020, "--width", 8],
+                 "a zoom whose pixel would be subnormal"),
+                (["--glitch-bits", 2000], "a glitch tolerance of 2^-2000"),
+                (["--glitch-bits", 0], "a glitch tolerance of 1"),
+                (["--ref-iters", 18446744073709551615],
+                 "a reference longer than memory"),
+                (["--ref-offset", 2000000000],
+                 "a reference offset larger than any frame")):
+            CHECKS += 1
+            got_r = tool.run(*(argv + ["--ref-iters", 10]
+                               if "--ref-iters" not in
+                               [str(a) for a in argv] else argv),
+                             expect_ok=False)
+            if got_r.returncode != 0:
+                ok("%s is refused" % why)
+            else:
+                fail("%s was accepted" % why)
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
