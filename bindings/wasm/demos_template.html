@@ -1,0 +1,1168 @@
+<!doctype html>
+<!-- Copyright 2026 Logan W.
+     SPDX-License-Identifier: Apache-2.0
+
+     Template for bindings/wasm/demos.html. Do not open this file
+     directly: the @CFT_*@ tokens below are filled in by make_demos.py
+     during build_demos.sh, and until they are there is no library,
+     no compute core and no recorded chain here. The built page is
+     self-contained on purpose - one file, no server, no CDN, no
+     external request - and it embeds the SAME wasm module the
+     conformance page embeds, byte for byte.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>libcft: five workloads, in your browser</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --dim: #666666; --line: #d8d8d8;
+  --accent: #0a5cad; --pass-bg: #e8f5e9; --pass-fg: #1b5e20;
+  --fail-bg: #fdecea; --fail-fg: #b71c1c; --warn-bg: #fff8e1;
+  --warn-fg: #8d6e00; --code-bg: #f5f5f5; --panel: #fbfbfb;
+  --s256: #0a5cad; --s64: #c1440e; --s128: #6a1b9a; --s32: #00695c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --fg: #e4e4e4; --dim: #9a9a9a; --line: #33373d;
+    --accent: #5ea2e0; --pass-bg: #12310f; --pass-fg: #a3e0a0;
+    --fail-bg: #3d1210; --fail-fg: #ffb3ab; --warn-bg: #3a2f0a;
+    --warn-fg: #ffd970; --code-bg: #1d2025; --panel: #181b20;
+    --s256: #5ea2e0; --s64: #ff8a5c; --s128: #c08ae0; --s32: #4db6a5;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto; padding: 1.2rem 1rem 4rem; max-width: 68rem;
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 1.5rem; margin: 0.2rem 0 0.4rem; }
+h2 { font-size: 1.15rem; margin: 0 0 0.4rem; }
+h3 { font-size: 0.95rem; margin: 1rem 0 0.3rem; color: var(--dim);
+     text-transform: uppercase; letter-spacing: 0.04em; }
+p  { margin: 0.4rem 0; }
+a  { color: var(--accent); }
+.dim { color: var(--dim); }
+small, .small { font-size: 0.85rem; }
+code, pre, .mono, table, input, select, button.mono {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", Menlo, monospace;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line);
+  padding: 0.6rem 0.8rem; overflow-x: auto; margin: 0.5rem 0;
+  font-size: 0.82rem; white-space: pre;
+}
+section.panel {
+  border: 1px solid var(--line); border-radius: 6px; margin: 1.4rem 0;
+  padding: 1rem 1.1rem; background: var(--panel);
+}
+.why { font-size: 0.92rem; margin: 0.3rem 0 0.7rem; }
+.controls { display: flex; flex-wrap: wrap; gap: 0.7rem 1.1rem;
+            align-items: flex-end; margin: 0.6rem 0; }
+.controls label { font-size: 0.78rem; color: var(--dim);
+                  display: flex; flex-direction: column; gap: 0.15rem; }
+input, select {
+  font: inherit; font-size: 0.85rem; padding: 0.22rem 0.4rem;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: var(--bg); color: var(--fg);
+}
+input.wide { width: min(46rem, 88vw); }
+button {
+  font: inherit; padding: 0.3rem 0.9rem; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--code-bg); color: var(--fg);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.bar { height: 8px; background: var(--code-bg); border: 1px solid var(--line);
+       border-radius: 4px; overflow: hidden; margin: 0.5rem 0 0.2rem; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent);
+           transition: width 0.15s linear; }
+.status { font-size: 0.82rem; color: var(--dim); min-height: 1.2em;
+          font-family: ui-monospace, Consolas, Menlo, monospace; }
+table { border-collapse: collapse; width: 100%; font-size: 0.8rem;
+        margin: 0.4rem 0; }
+th, td { text-align: left; padding: 0.18rem 0.7rem 0.18rem 0;
+         border-bottom: 1px solid var(--line); vertical-align: top;
+         white-space: nowrap; }
+th { color: var(--dim); font-weight: 600; }
+td.num { text-align: right; padding-right: 1.2rem; }
+td.hash { font-size: 0.72rem; word-break: break-all; white-space: normal; }
+.tag { display: inline-block; padding: 0 0.4rem; border-radius: 3px;
+       font-size: 0.75rem; font-weight: 700; border: 1px solid transparent; }
+.tag.pass { background: var(--pass-bg); color: var(--pass-fg); border-color: var(--pass-fg); }
+.tag.fail { background: var(--fail-bg); color: var(--fail-fg); border-color: var(--fail-fg); }
+.tag.wait { background: var(--code-bg); color: var(--dim); border-color: var(--line); }
+.verdict { margin: 0.7rem 0; padding: 0.6rem 0.9rem; border-radius: 4px;
+           border: 1px solid var(--line); font-size: 0.95rem; }
+.verdict.pass { background: var(--pass-bg); color: var(--pass-fg); border-color: var(--pass-fg); font-weight: 600; }
+.verdict.fail { background: var(--fail-bg); color: var(--fail-fg); border-color: var(--fail-fg); font-weight: 700; }
+.verdict.wait { background: var(--code-bg); color: var(--dim); }
+.figs { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.6rem 0; }
+.fig { flex: 1 1 18rem; min-width: 15rem; }
+.fig h4 { margin: 0 0 0.25rem; font-size: 0.82rem; font-weight: 600; }
+.fig .cap { font-size: 0.75rem; color: var(--dim); margin-top: 0.2rem; }
+canvas { width: 100%; height: auto; display: block; border: 1px solid var(--line);
+         border-radius: 3px; background: var(--bg); image-rendering: pixelated; }
+canvas.plot { image-rendering: auto; }
+.legend { font-size: 0.75rem; color: var(--dim); margin-top: 0.25rem; }
+.legend i { display: inline-block; width: 0.8rem; height: 0.55rem;
+            margin-right: 0.25rem; border-radius: 2px; vertical-align: baseline; }
+.negctl-banner {
+  background: var(--fail-bg); color: var(--fail-fg); border: 2px solid var(--fail-fg);
+  padding: 0.6rem 1rem; font-weight: 700; margin: 0.8rem 0; border-radius: 4px;
+}
+.slowtier { border-left: 3px solid var(--warn-fg); background: var(--warn-bg);
+            color: var(--warn-fg); padding: 0.45rem 0.8rem; font-size: 0.85rem;
+            border-radius: 3px; margin: 0.5rem 0; }
+footer { margin-top: 3rem; border-top: 1px solid var(--line);
+         padding-top: 0.8rem; font-size: 0.85rem; color: var(--dim); }
+footer pre { font-size: 0.74rem; }
+.scroll { max-height: 15rem; overflow: auto; border: 1px solid var(--line);
+          border-radius: 3px; }
+.scroll table { margin: 0; }
+.scroll th { position: sticky; top: 0; background: var(--panel); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Five workloads written for the contract, computed in this tab</h1>
+  <p class="dim">Each panel below is a faithful port of one C tool in
+  <code>host/tools/</code> - its <code>--engine loop</code> path, the
+  same operation sequence, the same rounding attributes, the same flag
+  handling - running on the <em>same wasm module</em> the
+  <a href="conformance.html">conformance page</a> embeds. Every tool
+  records a SHA-256 chain over its results. Each panel computes the
+  same records and the same chain, and prints it beside the chain the
+  native tool produced, so the claim this page makes is checkable in
+  one glance: <strong>the browser computes the same bits as the C
+  tool.</strong></p>
+  <p class="slowtier">These are measurements of a slow software tier,
+  not a performance claim - the same sentence <code>docs/BENCHMARKS.md</code>
+  makes about every number in it.</p>
+</header>
+
+<!--@CFT_NEGCTL@-->
+
+<section class="panel" id="identity">
+  <h2>The module that loaded</h2>
+  <pre id="identity-box">loading the wasm module&hellip;</pre>
+  <div class="controls">
+    <button id="run-all" class="primary">Run every panel</button>
+    <button id="cancel-all" disabled>Cancel</button>
+    <button id="verify-all">Verify every chain</button>
+    <span class="status" id="global-status"></span>
+  </div>
+  <div class="verdict wait" id="global-verdict">No panel has run yet.</div>
+</section>
+
+<section class="panel" id="panel-zoom">
+  <h2>1 &middot; zoom &mdash; a deep-zoom reference orbit</h2>
+  <p class="why">A perturbation renderer needs one reference orbit
+  computed to the depth of the view. At a pixel of about
+  <span id="zoom-pixscale">10<sup>-61</sup></span> a binary64 reference
+  is not merely inaccurate, it is somewhere else entirely - and it
+  raises no flag saying so. The fp256 reference is bit-identical on
+  every host, so the frame is too. <span class="dim">Port of
+  <code>cft-zoom --engine loop</code>; the reference orbit's eight
+  opcodes an iteration at fp256, the perturbed pixels' twenty-three at
+  fp64.</span></p>
+  <div class="controls">
+    <label>width<select id="zoom-width"><option>64</option><option selected>128</option><option>256</option></select></label>
+    <label>iteration cap<input id="zoom-iters" type="number" min="16" max="20000" step="1" value="1000" style="width:6rem"></label>
+    <label>pixels per call<input id="zoom-batch" type="number" min="64" max="65536" step="64" value="1024" style="width:6rem"></label>
+    <button data-run="zoom" class="primary">Run both frames</button>
+    <button data-cancel="zoom" disabled>Cancel</button>
+    <span class="status" id="zoom-status"></span>
+  </div>
+  <div class="bar"><i id="zoom-bar"></i></div>
+  <div class="figs">
+    <div class="fig">
+      <h4>fp256 reference, fp64 perturbed pixels</h4>
+      <canvas id="zoom-canvas-fp256-reference" width="128" height="128"></canvas>
+      <div class="cap" id="zoom-cap-fp256-reference">&nbsp;</div>
+    </div>
+    <div class="fig">
+      <h4>the frame an fp64 reference produces</h4>
+      <canvas id="zoom-canvas-fp64-reference" width="128" height="128"></canvas>
+      <div class="cap" id="zoom-cap-fp64-reference">&nbsp;</div>
+    </div>
+  </div>
+  <div id="zoom-report"></div>
+</section>
+
+<section class="panel" id="panel-orbits">
+  <h2>2 &middot; orbits &mdash; a Kepler ensemble and its invariants</h2>
+  <p class="why">A symplectic integrator's energy drift is a property
+  of the <em>method</em> and is the same at every format. Its
+  angular-momentum drift is a property of the <em>arithmetic</em>, and
+  is where the formats separate: the same ensemble, the same step, the
+  same code - and roundoff two hundred binary orders apart.
+  <span class="dim">Port of <code>cft-orbits --engine loop</code>,
+  Kepler at eccentricity 3/4, Stormer-Verlet, 1/r&sup3; from
+  <code>cft_sqrt</code> and <code>cft_div</code>.</span></p>
+  <div class="controls">
+    <label>members<input id="orbits-members" type="number" min="1" max="64" value="8" style="width:5rem"></label>
+    <label>periods<input id="orbits-periods" type="number" min="1" max="64" value="4" style="width:5rem"></label>
+    <label>steps/period<input id="orbits-spp" type="number" min="16" max="8192" value="512" style="width:6rem"></label>
+    <label>sample every<input id="orbits-sample" type="number" min="1" max="1024" value="32" style="width:6rem"></label>
+    <button data-run="orbits" class="primary">Run fp256 and fp64</button>
+    <button data-cancel="orbits" disabled>Cancel</button>
+    <span class="status" id="orbits-status"></span>
+  </div>
+  <div class="bar"><i id="orbits-bar"></i></div>
+  <div class="figs">
+    <div class="fig">
+      <h4>the ellipse, both ensembles</h4>
+      <canvas id="orbits-track" class="plot" width="520" height="380"></canvas>
+      <div class="legend"><i style="background:var(--s256)"></i>fp256 members
+        &nbsp; <i style="background:var(--s64)"></i>fp64 members</div>
+    </div>
+    <div class="fig">
+      <h4>drift, |H&minus;H&#8320;| and |L&minus;L&#8320;| (log)</h4>
+      <canvas id="orbits-drift" class="plot" width="520" height="380"></canvas>
+      <div class="legend"><i style="background:var(--s256)"></i>fp256
+        &nbsp; <i style="background:var(--s64)"></i>fp64
+        &nbsp; solid = energy (the method) &nbsp; dashed = angular momentum (the arithmetic)</div>
+    </div>
+  </div>
+  <div id="orbits-report"></div>
+</section>
+
+<section class="panel" id="panel-collatz">
+  <h2>3 &middot; Collatz &mdash; exact integers, and the edge of exactness</h2>
+  <p class="why">Every integer below 2<sup>p</sup> is exact in a binary
+  format, and the inexact flag is the certificate: the tool commits a
+  step only when <code>3n+1</code> was computed exactly, and the
+  library's flag and the tool's per-element witness must agree on every
+  call or the run stops. At fp256 that ceiling is
+  2<sup id="collatz-p">237</sup>, so a seventy-two-digit starting value
+  is ordinary arithmetic. <span class="dim">Port of
+  <code>cft-collatz --engine loop</code>, twenty-three elementwise
+  opcodes per step.</span></p>
+  <div class="controls">
+    <label style="flex:1 1 100%">starting value
+      <input id="collatz-value" class="wide" type="text" value=""></label>
+    <label>format<select id="collatz-format">
+      <option>fp32</option><option>fp64</option><option>fp128</option>
+      <option selected>fp256</option></select></label>
+    <label>sweep to<input id="collatz-to" type="number" min="2" max="200000" value="1001" style="width:7rem"></label>
+    <button data-run="collatz" class="primary">Run trajectory and sweep</button>
+    <button data-cancel="collatz" disabled>Cancel</button>
+    <span class="status" id="collatz-status"></span>
+  </div>
+  <div class="bar"><i id="collatz-bar"></i></div>
+  <div class="figs">
+    <div class="fig">
+      <h4>the trajectory (log&#8322; of the value)</h4>
+      <canvas id="collatz-trail" class="plot" width="520" height="330"></canvas>
+      <div class="legend"><i style="background:var(--s256)"></i>trajectory
+        &nbsp; <i style="background:var(--s64)"></i>the 2<sup>p</sup> exactness edge
+        &nbsp; <i style="background:var(--s128)"></i>where exactness ended</div>
+    </div>
+    <div class="fig">
+      <h4>stopping times over the sweep</h4>
+      <canvas id="collatz-scatter" class="plot" width="520" height="330"></canvas>
+      <div class="legend">one dot per starting value: total stopping time against n</div>
+    </div>
+  </div>
+  <div id="collatz-report"></div>
+</section>
+
+<section class="panel" id="panel-enclose">
+  <h2>4 &middot; enclose &mdash; the interval ladder, at every format</h2>
+  <p class="why">Two directed roundings per instruction turn a
+  computation into a proof: evaluate the lower end under roundTowardNegative
+  and the upper under roundTowardPositive and the true value is inside,
+  whatever the conditioning. The dot ladder below is a sum whose exact
+  value is <em>one</em> and whose terms cancel over an exponent spread
+  that grows down the rungs. Watch the fp64 bars cross zero while the
+  fp256 enclosure stays a point. <span class="dim">Port of
+  <code>cft-enclose --engine loop</code>, all three kernels, one run per
+  format.</span></p>
+  <div class="controls">
+    <label>points per kernel<select id="enclose-points">
+      <option>8</option><option selected>16</option><option>32</option><option>64</option></select></label>
+    <button data-run="enclose" class="primary">Run all four formats</button>
+    <button data-cancel="enclose" disabled>Cancel</button>
+    <span class="status" id="enclose-status"></span>
+  </div>
+  <div class="bar"><i id="enclose-bar"></i></div>
+  <div class="figs">
+    <div class="fig" style="flex:1 1 26rem">
+      <h4>enclosure width of the dot ladder (log scale)</h4>
+      <canvas id="enclose-bars" class="plot" width="560" height="330"></canvas>
+      <div class="legend">
+        <i style="background:var(--s32)"></i>fp32 &nbsp;
+        <i style="background:var(--s64)"></i>fp64 &nbsp;
+        <i style="background:var(--s128)"></i>fp128 &nbsp;
+        <i style="background:var(--s256)"></i>fp256 &nbsp;
+        &times; marks an enclosure that straddles zero
+      </div>
+    </div>
+    <div class="fig" style="flex:1 1 18rem">
+      <h4>the ill-conditioned dot product</h4>
+      <div id="enclose-straddle"></div>
+    </div>
+  </div>
+  <div id="enclose-report"></div>
+</section>
+
+<section class="panel" id="panel-mersenne">
+  <h2>5 &middot; Mersenne &mdash; Lucas-Lehmer on an exact multiplier</h2>
+  <p class="why">fp256 holds every integer below 2<sup>237</sup>
+  exactly, so a wide integer becomes an array of limbs and its square
+  becomes a convolution of dot reductions - and the reductions' clean
+  flag word is the certificate that not one product rounded. The limb
+  width is derived from the format's own p, never tabulated.
+  <span class="dim">Port of <code>cft-mersenne --engine loop</code>,
+  the carry split as fifteen <code>cft_run</code> passes.</span></p>
+  <div class="controls">
+    <label>exponents<select id="mersenne-set">
+      <option value="default" selected>521 .. 2281 (seconds)</option>
+      <option value="known">3217 .. 11213 (minutes)</option>
+      <option value="device">19937 .. 44497 (hours)</option>
+    </select></label>
+    <button data-run="mersenne" class="primary">Run the verifier</button>
+    <button data-cancel="mersenne" disabled>Cancel</button>
+    <span class="status" id="mersenne-status"></span>
+  </div>
+  <div class="verdict wait" id="mersenne-warning" style="display:none"></div>
+  <div class="bar"><i id="mersenne-bar"></i></div>
+  <div id="mersenne-residues"></div>
+  <div id="mersenne-report"></div>
+</section>
+
+<footer>
+  <p>Built by <code>bash bindings/wasm/build_demos.sh</code> inside the
+  pinned emscripten image. <code>docs/DEMOS.md</code> says what each
+  panel shows, how each chain pair was produced, and how the page is
+  verified without a browser
+  (<code>node bindings/wasm/verify_demos.mjs</code>).</p>
+  <pre id="build-box"></pre>
+</footer>
+
+<script type="text/plain" id="cft-runtime-src">/*@CFT_RUNTIME_JS@*/</script>
+<script type="text/plain" id="cft-core-src">/*@CFT_CORE_JS@*/</script>
+<script type="text/plain" id="cft-driver-src">/*@CFT_WORKER_JS@*/</script>
+
+<script>
+"use strict";
+const BUILD = /*@CFT_BUILD_JSON@*/ null;
+const RECORDED = /*@CFT_CHAINS_JSON@*/ null;
+
+// ---------------------------------------------------------------------
+// The engine: one Web Worker built from a Blob of (emscripten loader +
+// compute core + driver). A page opened from file:// in a browser that
+// refuses blob: workers falls back to running the SAME source on the
+// main thread, cooperatively yielded, and says so - a demo that
+// silently did nothing would be worse than a slow one.
+// ---------------------------------------------------------------------
+const SRC = ["cft-runtime-src", "cft-core-src", "cft-driver-src"]
+  .map((id) => document.getElementById(id).textContent).join("\n;\n");
+
+let engine = null, engineKind = "";
+const handlers = [];
+function onEngine(fn) { handlers.push(fn); }
+function dispatch(m) { for (const fn of handlers) fn(m); }
+
+function startEngine() {
+  try {
+    const url = URL.createObjectURL(new Blob([SRC], { type: "text/javascript" }));
+    const w = new Worker(url);
+    w.onerror = (e) => dispatch({ type: "error", message:
+      "worker: " + (e.message || "failed to start") });
+    w.onmessage = (ev) => dispatch(ev.data);
+    engine = { post: (m) => w.postMessage(m) };
+    engineKind = "Web Worker";
+    return;
+  } catch (err) {
+    // fall through
+  }
+  (0, eval)(SRC);
+  const drv = window.CftDemosDriver;
+  engine = { post: (m) => drv.handle(m, dispatch) };
+  engineKind = "main thread (this browser refused a blob: Worker)";
+  setTimeout(() => dispatch({ type: "ready" }), 0);
+}
+
+// ---------------------------------------------------------------------
+// Chain bookkeeping: the recorded native chain, the chain this browser
+// just computed, and the verdict that compares them.
+// ---------------------------------------------------------------------
+const browserChains = {};                 // "panel/run/chain" -> hex
+function chainKey(p, r, c) { return `${p}/${r}/${c}`; }
+function nativeChain(p, r, c) {
+  const row = RECORDED.runs.find((x) => x.panel === p && x.run === r);
+  return row ? row.chains[c] : null;
+}
+function nativeRow(p, r) {
+  return RECORDED.runs.find((x) => x.panel === p && x.run === r) || null;
+}
+
+function chainTable(panelId) {
+  const rows = RECORDED.runs.filter((r) => r.panel === panelId);
+  let html = '<h3>the chain, both ways</h3><table><tr><th>run</th>' +
+             '<th>chain</th><th>native tool (recorded)</th>' +
+             '<th>this browser</th><th></th></tr>';
+  for (const row of rows)
+    for (const cname of Object.keys(row.chains)) {
+      const got = browserChains[chainKey(panelId, row.run, cname)];
+      const want = row.chains[cname];
+      const cls = got ? (got === want ? "pass" : "fail") : "wait";
+      const txt = got ? (got === want ? "match" : "DIFFER") : "not run";
+      html += `<tr><td>${row.run}</td><td>${cname}</td>` +
+              `<td class="hash">${want}</td>` +
+              `<td class="hash">${got || "&mdash;"}</td>` +
+              `<td><span class="tag ${cls}">${txt}</span></td></tr>`;
+    }
+  html += "</table>";
+  for (const row of rows)
+    html += `<pre>${row.command}</pre>`;
+  return html;
+}
+
+function verdictFor(panelId) {
+  const rows = RECORDED.runs.filter((r) => r.panel === panelId);
+  let total = 0, have = 0, bad = 0;
+  for (const row of rows)
+    for (const cname of Object.keys(row.chains)) {
+      total++;
+      const got = browserChains[chainKey(panelId, row.run, cname)];
+      if (!got) continue;
+      have++;
+      if (got !== row.chains[cname]) bad++;
+    }
+  return { total, have, bad };
+}
+
+function renderVerdict(panelId) {
+  const v = verdictFor(panelId);
+  const el = document.getElementById(panelId + "-verdict");
+  if (!el) return;
+  if (!v.have) {
+    el.className = "verdict wait";
+    el.textContent = `not run yet - ${v.total} chain(s) to check`;
+  } else if (v.bad) {
+    el.className = "verdict fail";
+    el.textContent = `${v.bad} of ${v.have} chain(s) DIFFER from the ` +
+      `native tool. The page is wrong until shown otherwise.`;
+  } else {
+    el.className = "verdict pass";
+    el.textContent = `${v.have} of ${v.total} chain(s) computed, all ` +
+      `identical to the native tool's.`;
+  }
+}
+
+function renderGlobalVerdict() {
+  let total = 0, have = 0, bad = 0;
+  for (const p of Object.keys(PANEL_UI)) {
+    const v = verdictFor(p);
+    total += v.total; have += v.have; bad += v.bad;
+  }
+  const el = document.getElementById("global-verdict");
+  if (!have) {
+    el.className = "verdict wait";
+    el.textContent = `No panel has run yet. ${total} recorded chains are ` +
+      `waiting to be reproduced.`;
+  } else if (bad) {
+    el.className = "verdict fail";
+    el.textContent = `${bad} of ${have} computed chains DIFFER from the ` +
+      `native tools. The page is wrong until shown otherwise.`;
+  } else {
+    el.className = "verdict pass";
+    el.textContent = `${have} of ${total} chains computed in this browser, ` +
+      `every one identical to the C tool's.`;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Small drawing helpers - no library, no CDN.
+// ---------------------------------------------------------------------
+function css(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function prep(cv) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || cv.width, h = Math.round(w * cv.height / cv.width);
+  if (cv.width !== Math.round(w * dpr)) {
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  return { g, w, h };
+}
+function axes(g, w, h, pad, xlab, ylab) {
+  g.strokeStyle = css("--line"); g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(pad.l, pad.t); g.lineTo(pad.l, h - pad.b); g.lineTo(w - pad.r, h - pad.b);
+  g.stroke();
+  g.fillStyle = css("--dim");
+  g.font = "10px ui-monospace, monospace";
+  if (xlab) g.fillText(xlab, w - pad.r - g.measureText(xlab).width, h - 3);
+  if (ylab) g.fillText(ylab, 2, pad.t - 4);
+}
+
+// ---------------------------------------------------------------------
+// Panels
+// ---------------------------------------------------------------------
+const PANEL_UI = {};
+
+// ---- zoom -----------------------------------------------------------
+const zoomState = {};
+PANEL_UI.zoom = {
+  runs: ["fp256-reference", "fp64-reference"],
+  overrides() {
+    return {
+      width: parseInt(document.getElementById("zoom-width").value, 10),
+      pixelIters: parseInt(document.getElementById("zoom-iters").value, 10),
+      refIters: parseInt(document.getElementById("zoom-iters").value, 10) + 1,
+      batch: parseInt(document.getElementById("zoom-batch").value, 10),
+    };
+  },
+  started(m) {
+    const cv = document.getElementById("zoom-canvas-" + m.run);
+    cv.width = m.cfg.width; cv.height = m.cfg.width;
+    const g = cv.getContext("2d");
+    g.fillStyle = css("--code-bg");
+    g.fillRect(0, 0, cv.width, cv.height);
+    zoomState[m.run] = { cfg: m.cfg, img: g.createImageData(m.cfg.width, 1),
+                         lo: Infinity, hi: 0, iter: new Int32Array(m.cfg.width * m.cfg.width),
+                         kind: new Int8Array(m.cfg.width * m.cfg.width).fill(-1) };
+    document.getElementById("zoom-cap-" + m.run).textContent =
+      `${m.cfg.format} reference, ${m.cfg.width}x${m.cfg.width}, cap ${m.cfg.pixelIters}`;
+  },
+  progress(m) {
+    const st = zoomState[m.run];
+    if (!st || !m.data || m.data.iter === undefined) return;
+    const { from, to, iter, kind } = m.data;
+    for (let i = 0; i < iter.length; i++) {
+      st.iter[from + i] = iter[i];
+      st.kind[from + i] = kind[i];
+      if (kind[i] === 0) {
+        if (iter[i] < st.lo) st.lo = iter[i];
+        if (iter[i] > st.hi) st.hi = iter[i];
+      }
+    }
+    paintZoom(m.run);
+  },
+  done(m) {
+    const st = zoomState[m.run];
+    const p = m.result.pixels;
+    if (st && p) { st.iter = p.iter; st.kind = p.kind; }
+    paintZoom(m.run);
+    const s = m.result.stats;
+    document.getElementById("zoom-cap-" + m.run).textContent =
+      `${s.format} reference (p=${s.prec}), centre error ` +
+      `${s.centreErrorPixels} pixels; ${s.escaped} escaped, ` +
+      `${s.glitched} glitched, ${s.interior} interior; escape iterations ` +
+      `${s.escMin}..${s.escMax}`;
+    document.getElementById("zoom-pixscale").textContent = s.pixscale;
+    report("zoom", m);
+  },
+};
+function paintZoom(runName) {
+  const st = zoomState[runName];
+  if (!st) return;
+  const cv = document.getElementById("zoom-canvas-" + runName);
+  const w = st.cfg.width;
+  const g = cv.getContext("2d");
+  const img = g.createImageData(w, w);
+  const span = st.hi > st.lo ? st.hi - st.lo : 1;
+  for (let i = 0; i < w * w; i++) {
+    const o = i * 4;
+    let r, gg, b;
+    const k = st.kind[i];
+    if (k < 0) { r = gg = b = 32; }
+    else if (k === 2) { r = gg = b = 0; }
+    else if (k === 1) { r = 200; gg = 40; b = 40; }
+    else {
+      const t = Math.min(1, Math.max(0, (st.iter[i] - st.lo) / span));
+      r = Math.round(255 * Math.min(1, 1.6 * t));
+      gg = Math.round(255 * Math.min(1, Math.max(0, 1.6 * t - 0.35)));
+      b = Math.round(255 * Math.min(1, Math.max(0, 2.0 * t - 1.0)));
+    }
+    img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = b;
+    img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+
+// ---- orbits ---------------------------------------------------------
+const orbitsState = {};
+PANEL_UI.orbits = {
+  runs: ["fp256", "fp64"],
+  overrides() {
+    return {
+      members: parseInt(document.getElementById("orbits-members").value, 10),
+      periods: parseInt(document.getElementById("orbits-periods").value, 10),
+      stepsPerPeriod: parseInt(document.getElementById("orbits-spp").value, 10),
+      sampleEvery: parseInt(document.getElementById("orbits-sample").value, 10),
+    };
+  },
+  started(m) { orbitsState[m.run] = { samples: [], cfg: m.cfg }; },
+  progress(m) {
+    const st = orbitsState[m.run];
+    if (!st || !m.data.samples) return;
+    for (const s of m.data.samples) st.samples.push(s);
+    paintOrbits();
+  },
+  done(m) {
+    const st = orbitsState[m.run];
+    if (st) st.result = m.result;
+    paintOrbits();
+    report("orbits", m);
+  },
+};
+function paintOrbits() {
+  {
+    const { g, w, h } = prep(document.getElementById("orbits-track"));
+    const pad = { l: 26, r: 8, t: 12, b: 20 };
+    let R = 0.3;
+    for (const key of ["fp256", "fp64"]) {
+      const st = orbitsState[key];
+      if (!st) continue;
+      for (const s of st.samples)
+        for (const p of s.pos) R = Math.max(R, Math.abs(p[0]), Math.abs(p[1]));
+    }
+    const sc = Math.min((w - pad.l - pad.r), (h - pad.t - pad.b)) / (2.15 * R);
+    const cx = pad.l + (w - pad.l - pad.r) / 2, cy = pad.t + (h - pad.t - pad.b) / 2;
+    axes(g, w, h, pad, "q₀", "q₁");
+    g.strokeStyle = css("--line");
+    g.beginPath(); g.arc(cx, cy, 2.5, 0, 7); g.stroke();
+    for (const [key, colour] of [["fp256", css("--s256")], ["fp64", css("--s64")]]) {
+      const st = orbitsState[key];
+      if (!st) continue;
+      const M = st.cfg.members;
+      for (let m = 0; m < M; m++) {
+        g.strokeStyle = colour;
+        g.globalAlpha = key === "fp64" ? 0.85 : 0.55;
+        g.lineWidth = key === "fp64" ? 0.7 : 1.3;
+        g.beginPath();
+        let first = true;
+        for (const s of st.samples) {
+          const p = s.pos[m];
+          if (!p) continue;
+          const X = cx + p[0] * sc, Y = cy - p[1] * sc;
+          if (first) { g.moveTo(X, Y); first = false; } else g.lineTo(X, Y);
+        }
+        g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+  }
+  {
+    const { g, w, h } = prep(document.getElementById("orbits-drift"));
+    const pad = { l: 42, r: 8, t: 14, b: 22 };
+    let lo = 1e-80, hi = 1e-3, any = false;
+    const series = [];
+    for (const [key, colour] of [["fp256", css("--s256")], ["fp64", css("--s64")]]) {
+      const st = orbitsState[key];
+      if (!st || !st.samples.length) continue;
+      any = true;
+      for (const which of ["dH", "dL"]) {
+        const pts = st.samples.map((s, i) => {
+          let v = 0;
+          for (const d of s[which]) v = Math.max(v, Math.abs(d));
+          return [i / Math.max(1, st.samples.length - 1), v];
+        }).filter((p) => p[1] > 0);
+        for (const p of pts) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
+        series.push({ pts, colour, dash: which === "dL" });
+      }
+    }
+    axes(g, w, h, pad, "sample", "|drift|");
+    if (!any) return;
+    const L = Math.log10(lo), H = Math.log10(hi);
+    const Y = (v) => (h - pad.b) - (Math.log10(v) - L) / (H - L) * (h - pad.t - pad.b);
+    g.fillStyle = css("--dim"); g.font = "9px ui-monospace, monospace";
+    for (let e = Math.ceil(L); e <= Math.floor(H); e++) {
+      if ((Math.floor(H) - Math.ceil(L)) > 12 && (e % 10)) continue;
+      const y = Y(Math.pow(10, e));
+      g.strokeStyle = css("--line"); g.globalAlpha = 0.5;
+      g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+      g.globalAlpha = 1;
+      g.fillText("1e" + e, 2, y + 3);
+    }
+    for (const s of series) {
+      g.strokeStyle = s.colour; g.lineWidth = 1.4;
+      g.setLineDash(s.dash ? [4, 3] : []);
+      g.beginPath();
+      s.pts.forEach((p, i) => {
+        const X = pad.l + p[0] * (w - pad.l - pad.r);
+        const y = Y(p[1]);
+        if (i === 0) g.moveTo(X, y); else g.lineTo(X, y);
+      });
+      g.stroke();
+    }
+    g.setLineDash([]);
+  }
+}
+
+// ---- collatz --------------------------------------------------------
+const collatzState = {};
+PANEL_UI.collatz = {
+  runs: ["trajectory", "sweep"],
+  overrides(runName) {
+    const fmt = document.getElementById("collatz-format").value;
+    if (runName === "trajectory")
+      return { format: fmt,
+               values: [document.getElementById("collatz-value").value.trim()] };
+    return { format: fmt,
+             to: parseInt(document.getElementById("collatz-to").value, 10) };
+  },
+  started(m) { collatzState[m.run] = { cfg: m.cfg, rows: [], trail: 0 }; },
+  progress(m) {
+    const st = collatzState[m.run];
+    if (!st) return;
+    if (m.data.rows) for (const r of m.data.rows) st.rows.push(r);
+    if (m.data.trail) st.trail = m.data.trail;
+    if (m.run === "trajectory")
+      setStatus("collatz", `${st.trail} exact steps so far`);
+  },
+  done(m) {
+    collatzState[m.run] = Object.assign(collatzState[m.run] || {}, m.result);
+    if (m.run === "trajectory") paintTrail(m.result);
+    else paintScatter(m.result);
+    report("collatz", m);
+  },
+};
+function paintTrail(res) {
+  const { g, w, h } = prep(document.getElementById("collatz-trail"));
+  const pad = { l: 34, r: 8, t: 12, b: 20 };
+  axes(g, w, h, pad, "step", "log2 n");
+  const t = res.trail || [];
+  if (!t.length) return;
+  const edge = res.exactEdge;
+  let hi = edge * 1.06;
+  for (const v of t) if (v > 0) hi = Math.max(hi, Math.log2(v));
+  const Y = (b) => (h - pad.b) - (b / hi) * (h - pad.t - pad.b);
+  const X = (i) => pad.l + i / Math.max(1, t.length - 1) * (w - pad.l - pad.r);
+  g.strokeStyle = css("--s64"); g.setLineDash([5, 4]); g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(pad.l, Y(edge)); g.lineTo(w - pad.r, Y(edge)); g.stroke();
+  g.setLineDash([]);
+  g.fillStyle = css("--s64"); g.font = "10px ui-monospace, monospace";
+  g.fillText("2^" + edge, pad.l + 3, Y(edge) - 3);
+  g.strokeStyle = css("--s256"); g.lineWidth = 1.1;
+  g.beginPath();
+  t.forEach((v, i) => {
+    const y = Y(v > 0 ? Math.log2(v) : 0);
+    if (i === 0) g.moveTo(X(i), y); else g.lineTo(X(i), y);
+  });
+  g.stroke();
+  if (res.escapeAt !== null && res.escapeAt !== undefined) {
+    const i = res.escapeAt;
+    g.strokeStyle = css("--s128"); g.lineWidth = 1.6;
+    g.beginPath(); g.moveTo(X(i), pad.t); g.lineTo(X(i), h - pad.b); g.stroke();
+    g.fillStyle = css("--s128");
+    g.fillText("left exact arithmetic", Math.min(X(i) + 4, w - 130), pad.t + 10);
+  }
+  g.fillStyle = css("--dim");
+  g.fillText(`${t.length - 1} steps`, w - pad.r - 60, pad.t + 10);
+}
+function paintScatter(res) {
+  const { g, w, h } = prep(document.getElementById("collatz-scatter"));
+  const pad = { l: 34, r: 8, t: 12, b: 20 };
+  axes(g, w, h, pad, "n", "steps");
+  const pts = res.scatter || [];
+  if (!pts.length) return;
+  let maxN = 1, maxS = 1;
+  for (const p of pts) { maxN = Math.max(maxN, Number(p.n0)); maxS = Math.max(maxS, p.steps); }
+  for (const p of pts) {
+    const X = pad.l + Number(p.n0) / maxN * (w - pad.l - pad.r);
+    const Y = (h - pad.b) - p.steps / maxS * (h - pad.t - pad.b);
+    g.fillStyle = p.escaped ? css("--s128") : css("--s256");
+    g.globalAlpha = p.escaped ? 1 : 0.55;
+    g.fillRect(X - 1, Y - 1, 2, 2);
+  }
+  g.globalAlpha = 1;
+  g.fillStyle = css("--dim"); g.font = "10px ui-monospace, monospace";
+  g.fillText(`${pts.length} starting values, longest ${maxS} steps`,
+             pad.l + 4, pad.t + 10);
+}
+
+// ---- enclose --------------------------------------------------------
+const encloseState = {};
+PANEL_UI.enclose = {
+  runs: ["fp32", "fp64", "fp128", "fp256"],
+  overrides() {
+    return { points: parseInt(document.getElementById("enclose-points").value, 10) };
+  },
+  started(m) { encloseState[m.run] = { cfg: m.cfg, records: [] }; },
+  progress(m) {
+    const st = encloseState[m.run];
+    if (!st || !m.data.records) return;
+    for (const r of m.data.records) st.records.push(r);
+  },
+  done(m) {
+    encloseState[m.run] = Object.assign(encloseState[m.run] || {}, m.result);
+    paintEnclose();
+    report("enclose", m);
+  },
+};
+function paintEnclose() {
+  const FORMATS = ["fp32", "fp64", "fp128", "fp256"];
+  const COLOUR = { fp32: css("--s32"), fp64: css("--s64"),
+                   fp128: css("--s128"), fp256: css("--s256") };
+  const { g, w, h } = prep(document.getElementById("enclose-bars"));
+  const pad = { l: 46, r: 8, t: 14, b: 34 };
+  axes(g, w, h, pad, "ladder rung (exponent spread)", "width");
+  // the dot kernel's items: 0 = the exact control, 1..condLevels the ladder
+  let items = 0;
+  const data = {};
+  for (const f of FORMATS) {
+    const st = encloseState[f];
+    if (!st || !st.records) continue;
+    const dot = st.records.filter((r) => r.kernel === 1);
+    if (!dot.length) continue;
+    data[f] = dot;
+    items = Math.max(items, dot.length);
+  }
+  if (!items) return;
+  const shown = Math.min(items, (encloseState.fp256 && encloseState.fp256.stats
+                                 ? encloseState.fp256.stats.condLevels + 1 : 7));
+  let lo = Infinity, hi = 0;
+  for (const f of FORMATS) {
+    if (!data[f]) continue;
+    for (let i = 0; i < shown; i++) {
+      const v = data[f][i].width;
+      if (v > 0) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    }
+  }
+  if (!isFinite(lo)) { lo = 1e-70; }
+  lo = Math.min(lo, 1e-72); hi = Math.max(hi, 1);
+  const L = Math.log10(lo), H = Math.log10(hi);
+  const Y = (v) => (h - pad.b) - (Math.log10(v) - L) / (H - L) * (h - pad.t - pad.b);
+  g.font = "9px ui-monospace, monospace";
+  for (let e = Math.ceil(L); e <= Math.floor(H); e += 10) {
+    const y = Y(Math.pow(10, e));
+    g.strokeStyle = css("--line"); g.globalAlpha = 0.5;
+    g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+    g.globalAlpha = 1;
+    g.fillStyle = css("--dim"); g.fillText("1e" + e, 2, y + 3);
+  }
+  const groupW = (w - pad.l - pad.r) / shown;
+  const barW = Math.max(2, groupW / 5.2);
+  for (let i = 0; i < shown; i++) {
+    const x0 = pad.l + i * groupW;
+    let label = i === 0 ? "exact" : "";
+    FORMATS.forEach((f, fi) => {
+      if (!data[f] || !data[f][i]) return;
+      const rec = data[f][i];
+      if (rec.spread !== undefined && rec.spread >= 0) label = String(rec.spread);
+      const x = x0 + groupW * 0.08 + fi * barW;
+      const v = rec.width;
+      g.fillStyle = COLOUR[f];
+      if (v > 0) {
+        const y = Y(v);
+        g.fillRect(x, y, barW - 1, (h - pad.b) - y);
+      } else {
+        g.fillRect(x, h - pad.b - 2, barW - 1, 2);   // an exact enclosure
+      }
+      if (rec.straddles) {
+        g.strokeStyle = css("--fail-fg"); g.lineWidth = 1.4;
+        const cx = x + barW / 2 - 0.5, cy = Y(Math.max(v, lo)) - 6;
+        g.beginPath();
+        g.moveTo(cx - 3, cy - 3); g.lineTo(cx + 3, cy + 3);
+        g.moveTo(cx + 3, cy - 3); g.lineTo(cx - 3, cy + 3);
+        g.stroke();
+      }
+    });
+    g.fillStyle = css("--dim");
+    const tw = g.measureText(label).width;
+    g.fillText(label, x0 + groupW / 2 - tw / 2, h - pad.b + 12);
+  }
+  g.fillStyle = css("--dim");
+  g.fillText("a bar flat on the axis is an EXACT enclosure (width 0)",
+             pad.l + 2, h - 4);
+
+  // the straddle table
+  const rung = (encloseState.fp256 && encloseState.fp256.stats)
+    ? encloseState.fp256.stats.condLevels : 6;
+  let html = "<table><tr><th>format</th><th>lower bound</th>" +
+             "<th>upper bound</th><th></th></tr>";
+  for (const f of FORMATS) {
+    if (!data[f] || !data[f][rung]) continue;
+    const r = data[f][rung];
+    html += `<tr><td>${f}</td><td class="num">${fmtNum(r.loD)}</td>` +
+            `<td class="num">${fmtNum(r.hiD)}</td><td>` +
+            `<span class="tag ${r.straddles ? "fail" : "pass"}">` +
+            `${r.straddles ? "straddles 0" : (r.exact ? "exact" : "encloses")}` +
+            `</span></td></tr>`;
+  }
+  html += "</table><p class=\"small dim\">The exact value of this dot " +
+          "product is <b>1</b>. Every bound above is rigorous - the " +
+          "question is only whether it is <i>useful</i>.</p>";
+  document.getElementById("enclose-straddle").innerHTML = html;
+}
+function fmtNum(v) {
+  if (v === 0) return "0";
+  if (!isFinite(v)) return String(v);
+  return v.toExponential(4);
+}
+
+// ---- mersenne -------------------------------------------------------
+const mersenneState = { records: [] };
+PANEL_UI.mersenne = {
+  runs: ["to-2281"],
+  overrides() {
+    const which = document.getElementById("mersenne-set").value;
+    if (which === "default") return {};
+    return { exponents: MORE[which] };
+  },
+  started(m) { mersenneState.records = []; mersenneState.cfg = m.cfg; },
+  progress(m) {
+    const at = m.data.at;
+    if (at)
+      setStatus("mersenne", `P = ${at.exponent}: squaring ${at.step} of ` +
+        `${at.need}   b=${at.b} L=${at.L} d=${at.d}`);
+    if (m.data.records) for (const r of m.data.records) mersenneState.records.push(r);
+    paintMersenne();
+  },
+  done(m) {
+    mersenneState.records = m.result.records;
+    paintMersenne();
+    report("mersenne", m);
+  },
+};
+const MORE = { known: [3217, 4253, 4423, 9689, 9941, 11213],
+               device: [19937, 21701, 23209, 44497] };
+function paintMersenne() {
+  let html = '<h3>the residue chain</h3><div class="scroll"><table>' +
+    "<tr><th>exponent</th><th>verdict</th><th>squarings</th><th>limbs</th>" +
+    "<th>res64</th><th>SHA-256 of the residue limbs</th></tr>";
+  for (const r of mersenneState.records)
+    html += `<tr><td>2^${r.exponent}&minus;1</td>` +
+      `<td><span class="tag ${r.prime ? "pass" : "wait"}">` +
+      `${r.prime ? "PRIME" : "composite"}</span></td>` +
+      `<td class="num">${r.squarings}</td>` +
+      `<td class="num">${r.L} x ${r.b} bits</td>` +
+      `<td>${r.res64}</td><td class="hash">${r.digest}</td></tr>`;
+  html += "</table></div>";
+  document.getElementById("mersenne-residues").innerHTML = html;
+}
+
+// ---------------------------------------------------------------------
+// The shared report block: rate, backend, format, batch, flags, chains.
+// ---------------------------------------------------------------------
+const lastResults = {};
+function report(panelId, m) {
+  const key = panelId + "/" + m.run;
+  lastResults[key] = m.result;
+  const el = document.getElementById(panelId + "-report");
+  let html = '<h3>what this run measured</h3><table>' +
+    "<tr><th>run</th><th>backend</th><th>format</th><th>batch</th>" +
+    "<th>seconds</th><th>rate</th><th>flags</th></tr>";
+  for (const r of PANEL_UI[panelId].runs) {
+    const res = lastResults[panelId + "/" + r];
+    if (!res) continue;
+    html += `<tr><td>${r}</td><td>${res.backend} (wasm)</td>` +
+      `<td>${res.stats.format}, p=${res.stats.prec}</td>` +
+      `<td class="num">${batchOf(panelId, res)}</td>` +
+      `<td class="num">${res.seconds.toFixed(3)}</td>` +
+      `<td class="num">${Math.round(res.rate).toLocaleString("en-US")} ` +
+      `${res.workUnit}/s</td>` +
+      `<td>0x${res.stats.flags.toString(16).padStart(2, "0")} ` +
+      `${res.stats.flagText}</td></tr>`;
+  }
+  html += "</table>";
+  html += '<p class="slowtier">These are measurements of a slow software ' +
+    "tier, not a performance claim.</p>";
+  html += chainTable(panelId);
+  html += `<div class="verdict wait" id="${panelId}-verdict"></div>`;
+  el.innerHTML = html;
+  renderVerdict(panelId);
+  renderGlobalVerdict();
+}
+function batchOf(panelId, res) {
+  const c = res.cfg;
+  if (panelId === "zoom") return c.batch + " px";
+  if (panelId === "orbits") return c.members + " members";
+  if (panelId === "collatz") return c.batch + " lanes";
+  if (panelId === "enclose") return c.batch + " items";
+  if (panelId === "mersenne") return (res.records[0] ? res.records[0].L : "-") + " limbs";
+  return "-";
+}
+
+// ---------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------
+let token = 0, running = null;
+function setStatus(panelId, text) {
+  const el = document.getElementById(panelId + "-status");
+  if (el) el.textContent = text;
+}
+function setBar(panelId, frac) {
+  const el = document.getElementById(panelId + "-bar");
+  if (el) el.style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + "%";
+}
+function setBusy(panelId, busy) {
+  document.querySelectorAll("[data-run]").forEach((b) => { b.disabled = busy; });
+  document.querySelectorAll("[data-cancel]").forEach((b) => {
+    b.disabled = !busy || b.dataset.cancel !== panelId;
+  });
+  document.getElementById("run-all").disabled = busy;
+  document.getElementById("cancel-all").disabled = !busy;
+}
+
+function startPanel(panelId, queue) {
+  const ui = PANEL_UI[panelId];
+  token++;
+  running = { panelId, queue: queue || null, token };
+  setBusy(panelId, true);
+  setStatus(panelId, "starting…");
+  setBar(panelId, 0);
+  // Overrides are per run for collatz (the two runs take different
+  // controls) and shared for the rest.
+  const perRun = ui.overrides.length > 0;
+  if (perRun) {
+    running.runs = ui.runs.slice();
+    running.perRun = true;
+    engine.post({ type: "start", panel: panelId, runs: [running.runs[0]],
+                  overrides: ui.overrides(running.runs[0]), token });
+    running.at = 0;
+  } else {
+    engine.post({ type: "start", panel: panelId, runs: ui.runs,
+                  overrides: ui.overrides(), token });
+  }
+}
+
+function advance() {
+  if (!running) return;
+  if (running.perRun && running.at + 1 < running.runs.length) {
+    running.at++;
+    const ui = PANEL_UI[running.panelId];
+    engine.post({ type: "start", panel: running.panelId,
+                  runs: [running.runs[running.at]],
+                  overrides: ui.overrides(running.runs[running.at]),
+                  token: running.token });
+    return;
+  }
+  const q = running.queue;
+  const panelId = running.panelId;
+  setBusy(panelId, false);
+  running = null;
+  if (q && q.length) startPanel(q.shift(), q);
+  else document.getElementById("global-status").textContent = "";
+}
+
+onEngine((m) => {
+  if (m.type === "ready") {
+    document.getElementById("identity-box").textContent = identityText();
+    document.getElementById("build-box").textContent = buildText();
+    renderGlobalVerdict();
+    return;
+  }
+  if (m.type === "error") {
+    setStatus(running ? running.panelId : "collatz", "ERROR: " + m.message);
+    document.getElementById("global-status").textContent = "ERROR: " + m.message;
+    if (running) { setBusy(running.panelId, false); running = null; }
+    return;
+  }
+  if (!running) return;
+  const ui = PANEL_UI[m.panel];
+  if (m.type === "started") {
+    if (ui.started) ui.started(m);
+    setStatus(m.panel, `${m.run}: ${m.command}`);
+    return;
+  }
+  if (m.type === "progress") {
+    if (ui.progress) ui.progress(m);
+    setBar(m.panel, m.progress);
+    if (m.panel !== "mersenne" && m.panel !== "collatz")
+      setStatus(m.panel, `${m.run}: ${(m.progress * 100).toFixed(1)}% ` +
+        `(${m.seconds.toFixed(1)} s)${m.phase ? " " + m.phase : ""}`);
+    return;
+  }
+  if (m.type === "cancelled") {
+    setStatus(m.panel, `${m.run}: cancelled after ${m.seconds.toFixed(1)} s`);
+    setBusy(m.panel, false);
+    running = null;
+    return;
+  }
+  if (m.type === "done") {
+    const row = nativeRow(m.panel, m.run);
+    for (const [cname, hex] of Object.entries(m.result.chains))
+      browserChains[chainKey(m.panel, m.run, cname)] = hex;
+    if (ui.done) ui.done(m);
+    setBar(m.panel, 1);
+    setStatus(m.panel, `${m.run}: done in ${m.result.seconds.toFixed(2)} s`);
+    return;
+  }
+  if (m.type === "idle") advance();
+});
+
+document.querySelectorAll("[data-run]").forEach((b) => {
+  b.addEventListener("click", () => startPanel(b.dataset.run, null));
+});
+document.querySelectorAll("[data-cancel]").forEach((b) => {
+  b.addEventListener("click", () => engine.post({ type: "cancel" }));
+});
+document.getElementById("cancel-all").addEventListener("click", () => {
+  if (running) running.queue = null;
+  engine.post({ type: "cancel" });
+});
+document.getElementById("run-all").addEventListener("click", () => {
+  const q = Object.keys(PANEL_UI);
+  document.getElementById("global-status").textContent =
+    "running every panel; this takes minutes on the software tier";
+  startPanel(q.shift(), q);
+});
+document.getElementById("verify-all").addEventListener("click", () => {
+  for (const p of Object.keys(PANEL_UI)) renderVerdict(p);
+  renderGlobalVerdict();
+  const el = document.getElementById("global-verdict");
+  el.scrollIntoView({ block: "nearest" });
+});
+document.getElementById("mersenne-set").addEventListener("change", (e) => {
+  const w = document.getElementById("mersenne-warning");
+  if (e.target.value === "default") { w.style.display = "none"; return; }
+  w.style.display = "";
+  w.className = "verdict fail";
+  w.textContent = e.target.value === "known"
+    ? "These six exponents are 3217 through 11213: about 33 million limb " +
+      "products, minutes to tens of minutes in a browser on the software " +
+      "tier. The tab stays responsive and Cancel works, but nothing will " +
+      "match a recorded chain, because the recorded chain is for 521..2281."
+    : "These four exponents are 19937 through 44497 - cft-mersenne's " +
+      "`device` set, which the C tool wires in and does NOT run here. " +
+      "Hours in a browser. Start it only if you mean it.";
+});
+
+function identityText() {
+  const lines = [];
+  lines.push(`module        ${BUILD.module_bytes} bytes, sha256 ${BUILD.module_sha256}`);
+  lines.push(`               - byte-identical to bindings/node/cft_node.wasm and to`);
+  lines.push(`                 the module conformance.html embeds`);
+  lines.push(`toolchain     emcc ${BUILD.emcc_version}`);
+  lines.push(`image         ${BUILD.image}`);
+  lines.push(`compute core  demos_core.js, sha256 ${BUILD.core_sha256}`);
+  lines.push(`engine        ${engineKind}`);
+  lines.push(`chains        ${RECORDED.runs.length} recorded native runs, ` +
+             `${RECORDED.runs.reduce((a, r) => a + Object.keys(r.chains).length, 0)} chains`);
+  lines.push(`recorded      ${RECORDED.recorded} on ${RECORDED.host}`);
+  return lines.join("\n");
+}
+function buildText() {
+  return [
+    `page          ${BUILD.page_note}`,
+    `built         ${BUILD.image}`,
+    `native tools  ${RECORDED.build_command}`,
+    `verify        node bindings/wasm/verify_demos.mjs`,
+  ].join("\n");
+}
+
+// The 72-digit default: 2^237 - 1315, computed here rather than typed,
+// so the page cannot disagree with docs/COLLATZ.md about what it is.
+document.getElementById("collatz-value").value = ((1n << 237n) - 1315n).toString();
+document.getElementById("collatz-p").textContent = "237";
+
+startEngine();
+</script>
+</body>
+</html>
