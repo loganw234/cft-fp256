@@ -3225,3 +3225,204 @@ is green again at 2,658 comparisons, 0 failures.
 - `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md`,
   `docs/BENCHMARKS.md` and the ABI version were left to the integrator,
   as at 0.7.
+
+## 2026-09-04 - the Mersenne verifier: exactness as a flag, and the width paying for itself
+
+`host/tools/mersenne.c` and `host/tests/mersenne_check.py` are new;
+`docs/MERSENNE.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload is Lucas-Lehmer, `s_{k+1} = s_k^2 - 2 mod (2^P - 1)`. A
+squaring is a convolution of limbs, and `cft_reduce(CFT_DOT)` **is**
+that convolution: while every partial sum of its contractual tree stays
+below 2^p no node rounds, so `flags == 0` over a coefficient is a
+certificate - issued by the library - that the coefficient is the exact
+integer sum. That is the property GIMPS has to rebuild with Gerbicz
+error checking and an independent double-check, because a
+floating-point FFT is fast but not exact.
+
+The limb geometry is derived from p and the exponent in one function
+and nowhere else: `2b <= p` for a product, `L * 2^(2b) <= 2^p` for a
+coefficient, `d + 2 <= b` so the fold's scale by `2^d` cannot overflow,
+with `L = ceil(P/b)` and `d = L*b - P`. At binary256 that lands on
+102-116 bit limbs, which is about four times less work than the
+symmetric 59-bit split would be.
+
+### What the gate is, and what it scores
+
+`make -C host mersennetest` runs a Python big-integer oracle against
+the tool. It is a stricter join than the Collatz check's, because a
+Lucas-Lehmer verdict is one bit and one bit is easy to get right by
+accident: the oracle recomputes `s_k` for **every** k the tool dumps
+and compares the **whole residue** - res64 plus a SHA-256 over every
+canonical limb - so a wrong carry shows at the first squaring that
+breaks it rather than 1,275 squarings later.
+
+    388 comparisons, 0 failures
+    MERSENNE CHECK OK - the tool, the library and the big-integer oracle agree
+
+| what it checks | result |
+|---|---|
+| verdicts, squaring counts and res64 at fp256 (both engines) and fp64 | 5 exponents each, oracle-exact, **3 prime and 2 composite** |
+| every intermediate residue, whole | 251 at fp256/program, 36 at fp256/loop, 61 at fp64, 11 at fp32 |
+| the two engines | identical chain, identical checkpoint |
+| fp32 / fp64 / fp128 / fp256 | the same chain - the record carries no format |
+| the hash chain | recomputed with `hashlib`, identical |
+| batch 3 / batch 4096 / host loop at batch 11 | byte-identical checkpoints |
+| interrupt and resume, 17 stops, all mid-exponent | byte-identical to the uninterrupted run |
+| the exactness bound | 15 selftest probes; a forbidden `--limb` refused before any arithmetic; `--unsafe-limb` stopped by the library's `inexact` |
+
+The composite controls are the half that is easy to leave out: **1277
+and 1619 are prime exponents whose Mersenne numbers are not prime**, so
+a tool that always answered "prime" would pass a test set of Mersenne
+primes alone and fail here. Their res64 values, `5613a480590e78ba` and
+`3f964611757ce4e0`, are what an unrelated implementation prints.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04, other work sharing the box (repeat runs within
+~5%).
+
+The whole known set - eleven Mersenne prime exponents up to 11213 and
+the two composite controls - in **212.285 s**:
+
+    ./cft-mersenne --set known --format fp256 --engine program --batch 4096 \
+                   --checkpoint run.ckpt --checkpoint-interval 30
+
+    52,497 squarings, 270,377,166 limb products, 7,484,340 library calls
+    flags seen   0x00
+    status word  0x00 (agrees with the union above)
+    throughput   1,273,651 limb products/s, 247.3 squarings/s
+    chain        851b85d1e262b0f1e887f641f25bd684df1384d9c128e991646c3f9a18eed9cf
+
+**270 million exact 115-bit limb products and not one raised a flag.**
+
+fp256 against fp64, same tool, same chain, at P = 1279 / 2203 / 4423:
+
+| P | fp64 / fp256 limb products | fp64 / fp256 wall time |
+|---|---|---|
+| 1279 | 21.8x | 7.4x |
+| 2203 | 25.5x | 10.7x |
+| 4423 | 29.3x | 12.7x |
+
+fp64 is *faster per limb product* (2.08M/s against fp256's 0.71M/s at
+P = 1279) and much slower overall, because its 53-bit significand
+forces 23-bit limbs where fp256 carries 107. **A wider format is the
+cheaper way to buy exactness on this workload**, which is the opposite
+of the usual intuition. fp32 at P = 1279 needs 160 limbs of 8 bits:
+177.8x the limb products and 50x the wall time. Every rung is exact and
+every rung returns the same chain; what the narrow ones lose is
+throughput, not correctness.
+
+The sequencer route is **1.02x to 1.27x** faster than the host loop
+here, where docs/COLLATZ.md measured 1.5x to 2.1x on the same backend.
+That is structural: in Collatz the program is the whole step, and here
+it is only the carry split. The convolution cannot be a program at all
+- a coefficient is a cross-element reduction and the carry chain reads
+a neighbour, and a lane has no path to another lane - so most of the
+time is in `cft_reduce`, which is identical in both engines.
+docs/MERSENNE.md records what would change that: a lane shift, or a
+cross-lane reduction inside a program.
+
+### What the writing of it found
+
+**The split's witness leaves a hole, and it took a negative control to
+see it.** The witness proves `v == hi*B + lo` with `0 <= lo < B`, which
+does *not* pin `hi` down: `v = 3B/2` satisfies it at `(1, B/2)` and
+equally at `(1.5, 0)`. A shift amount off by one produces the second -
+exactly, raising nothing, witness green - and the error then rides in
+the limbs. The dot only notices when the extra fractional bits push a
+coefficient past 2^p, which at `b = 105, L = 5` they never do.
+
+So there is now a third gate: once per squaring, over the L limbs that
+are the only state crossing between squarings,
+`(y + 2^(p-1)) - 2^(p-1) == y`. The magic-constant round the carry
+split could not use is exactly the right instrument there, because a
+limb below 2^b is far below 2^(p-1) and the addition is exact if and
+only if the limb is an integer - the `inexact` it would raise IS the
+answer rather than noise to be masked. It costs 3.7% of the elementwise
+issues at P = 3217, inside the timing noise, and the chain is unchanged.
+
+### The negative controls
+
+Three faults, each rebuilt and run through the same gate, and each
+caught by a **different** layer.
+
+| control | what was changed | caught by | first thing it said |
+|---|---|---|---|
+| A | the `t < 1` guard deleted from the carry split, in both engines | the **flag word**, on the first squaring, at all four formats | `the carry add raised 0x10 (inexact) ... the residue is REFUSED, not reported` |
+| B | the split's shift constant `(p-1) + bias` becomes `p + bias`, so the shift reaches one bit past the significand into the low bit of the biased exponent and `hi` comes back HALVED | the **limb integrality gate** - not the witness, which is perfectly satisfied by `(0.5, v - B/2)` | `the limb integrality gate raised 0x10 (inexact)` |
+| C | the recurrence's `2^P - 3` becomes `2^P - 2`, so it subtracts 1 instead of 2 | **only the oracle** | `residue after squaring 1 differs - tool res64 ...0010, oracle res64 ...000e` |
+
+Control A is the honest ordering, and worth recording: for that bug the
+flag is the *faster* detector, because a fractional `hi` makes
+`lo = fma(hi, -B, v)` inexact and the check fires inside the split
+before the witness is looked at. Twenty-one of the check's twenty-two
+rows fail; only the four bound probes pass, since they carry nothing.
+
+Control C is the one that makes the case for an oracle. **Every
+internal gate stays green**: flags `0x00`, status word `0x00`, the
+witness satisfied on every element of every pass, the integrality gate
+satisfied on every limb, both engines in exact agreement, all four
+formats in exact agreement, batch-size independence holding, and
+interrupt/resume landing on a byte-identical checkpoint. The tool then
+reports `2^521 - 1 COMPOSITE, res64 0000000000000002`, which is wrong.
+Stated plainly:
+
+> The flag word certifies that no operation rounded. The witness
+> certifies that the split reconstructs. The integrality gate certifies
+> that a limb is an integer. None of the three certifies that the tool
+> is computing the Lucas-Lehmer sequence, and control C is a tool that
+> is exactly, reproducibly, deterministically computing the wrong
+> recurrence.
+
+Restoring, rebuilding and re-running is green again: **382 comparisons
+at `--quick`, 388 at the default size, 397 at `--full`, 0 failures**.
+
+### GIMPS, stated honestly
+
+The doc carries the arithmetic rather than a slogan. At this tool's own
+measured rate, the current record exponent (P = 136,279,841) would need
+`L = 1,185,043` limbs, `1.91 x 10^20` limb products and **4.2 million
+years** on one thread - about nine orders of magnitude against a GIMPS
+client's day on one GPU, ten against the parallelism one really uses.
+It splits into `10^4.8` of algorithm (a direct convolution is `L^2`, an
+FFT about `L log2 L`) and `10^5`-`10^6` of hardware. The algorithmic
+half is the **price of the certificate**: an FFT's twiddle factors are
+irrational, which is exactly why GIMPS needs Gerbicz checking and a
+double-check. The exact sub-quadratic route is Karatsuba - 330x fewer
+limb products at that size, certificate intact - and it is not built.
+
+What the exactness buys instead is that the rounding class of error is
+*gone* rather than bounded, and that a re-run is a reproduction rather
+than a second opinion. It buys nothing against a bit flip, and the doc
+says so.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact` and
+  issues the same program either way, but nothing here has been through
+  XRT; `docs/BRINGUP.md` owns those gates. No device number is quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The split program uses `CFT_MUL`, `CFT_ISHR`,
+  `CFT_ISUB`, `CFT_ISHL`, `CFT_CMPLT`, `CFT_SELECT`, `CFT_FMA`,
+  `CFT_NEG`, `CFT_CMPEQ`, `CFT_MIN` and `CFT_CMPLE`, all of which `tb/`
+  and the vector sets already cover, and the control codes `DEPOSIT`
+  and `HALT` that `tb/test_seq_core.py` already scores.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library. No runner stage was
+  added; `verify/run.sh` was deliberately left alone.
+- Of the device-era exponents (19937, 21701, 23209, 44497), only
+  **19937** was run - and it was run to a verdict: **2^19937 - 1 is
+  PRIME**, the twenty-fourth Mersenne prime, 6,002 decimal digits,
+  19,935 squarings and 610 million exact limb products across THREE
+  separate invocations (300 s, then 60 s, then 53 s) with the
+  checkpoint carrying the residue between them and flags 0x00
+  throughout. Python's big integers agree, verdict and res64. 21701,
+  23209 and 44497 were not run; 44497 is about eleven times 19937's
+  work, which is 80 minutes here.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
+  ABI version were left to the integrator, as at 0.7.

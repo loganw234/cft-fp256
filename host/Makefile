@@ -559,6 +559,44 @@ coverage: all
 collatztest: cft-collatz$(EXE)
 	$(PYTHON) tests/collatz_check.py
 
+# ===================================================================
+# cft-mersenne - the Lucas-Lehmer test with fp256 as an EXACT wide
+# integer multiplier. A squaring is a convolution of limbs, the
+# convolution is cft_reduce(CFT_DOT) over a tree the contract fixes,
+# and `flags == 0` is the certificate that every coefficient is the
+# exact integer sum - which is the property GIMPS has to rebuild with
+# Gerbicz checks because its floating-point FFT is fast but not exact.
+# docs/MERSENNE.md is the argument; the oracle is Python's big
+# integers, which cannot be wrong about a Lucas-Lehmer residue.
+# ===================================================================
+TOOLS += cft-mersenne$(EXE)
+# ...and `all` again, explicitly. GNU Make expands a rule's prerequisite
+# list when the rule is READ, so `all: $(TOOLS)` above already holds the
+# value TOOLS had at that line and a later `+=` cannot reach it. Naming
+# the binary here is what actually puts it in the default build, and it
+# is one added prerequisite on a recipe-less target, so four worktrees
+# can each add their own line without colliding.
+all: cft-mersenne$(EXE)
+.PHONY: mersenne mersennetest
+
+cft-mersenne$(EXE): tools/mersenne.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+mersenne: cft-mersenne$(EXE)
+
+mersennetest: cft-mersenne$(EXE)
+	$(PYTHON) tests/mersenne_check.py
+
+# `clean` already has its recipe below; a prerequisite added here runs
+# before it, which removes this tool's products without any worktree
+# having to edit that shared rm list. Both spellings, for the same
+# reason the real rule removes both.
+clean: clean-mersenne
+clean-mersenne:
+	rm -f cft-mersenne cft-mersenne.exe
+.PHONY: clean-mersenne
+# ===================================================================
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves
