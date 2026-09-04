@@ -157,6 +157,11 @@ TOOLS := cft-selftest$(EXE) cft-bench$(EXE) cft-collatz$(EXE)
 TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
+# One `TOOLS +=` line per added tool, ABOVE the `all` rule because make
+# expands a prerequisite list when it reads the rule. The recipes are
+# in their own delimited block at the end of the tools section.
+TOOLS += cft-enclose$(EXE)
+
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
         transcendtest augmentedtest formatoftest collatz collatztest \
         examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
@@ -212,6 +217,45 @@ cft-collatz$(EXE): tools/collatz.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
 collatz: cft-collatz$(EXE)
+
+# ====================================================================
+# cft-enclose - rigorous enclosures from the directed roundings.
+#
+# The verified-computing workload: every quantity computed once under
+# roundTowardNegative and once under roundTowardPositive, so the true
+# value is provably between the two, and - because the contract is
+# deterministic - the SAME two numbers on every conforming host. Three
+# kernels (a series with a tail bound, dot and matrix-vector products,
+# an interval Horner that runs as an orbit-sequencer program with the
+# rounding attribute set per instruction). docs/ENCLOSE.md is the
+# rounding argument; enclosetest scores the tool against a Python
+# oracle that is exact rationals where the value is a rational and
+# mpmath at 300 digits where it is not.
+#
+# Its own block at the end of the tools section, and `clean` gains a
+# prerequisite rather than a longer command line, so that four tools
+# added in parallel do not all edit the same two lines.
+# ====================================================================
+.PHONY: enclose enclosetest enclose-clean
+
+cft-enclose$(EXE): tools/enclose.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+enclose: cft-enclose$(EXE)
+
+# The enclosure tool against the oracle, plus the three determinism
+# properties it claims: batch-size independence, interrupt/resume
+# equivalence, and program-versus-loop bit identity. Python's Fractions
+# are exact, so they are the authority on a dot product of dyadic
+# rationals and on a polynomial with rational coefficients; mpmath at
+# 300 digits is the authority on exp. The library stays the authority
+# on arithmetic.
+enclosetest: cft-enclose$(EXE)
+	$(PYTHON) tests/enclose_check.py
+
+clean: enclose-clean
+enclose-clean:
+	rm -f cft-enclose cft-enclose.exe
 
 api-test$(EXE): tests/api_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
