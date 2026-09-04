@@ -1267,3 +1267,110 @@ def remainder(fmt: FpFormat, xa: int, xb: int):
     # overflow or underflow.
     assert packfl == 0
     return bits, 0
+
+
+# ---- 754-2019 9.6: the magnitude forms of minimum and maximum --------
+#
+# The other four of clause 9.6, defined by the standard in one line
+# each and quoted here rather than paraphrased:
+#
+#   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+#    otherwise minimum(x, y).
+#    minimumMagnitudeNumber(x, y) is x if |x| < |y|, y if |y| < |x|,
+#    otherwise minimumNumber(x, y).
+#    maximumMagnitude(x, y) is x if |x| > |y|, y if |y| > |x|,
+#    otherwise maximum(x, y).
+#    maximumMagnitudeNumber(x, y) is x if |x| > |y|, y if |y| > |x|,
+#    otherwise maximumNumber(x, y)." (9.6)
+#
+# Three things follow from reading that literally, and all three are
+# what makes these four one-liners on top of _minmax rather than four
+# new operations:
+#
+#  * A NaN has no magnitude to compare, so neither |x| < |y| nor
+#    |y| < |x| can hold when either operand is a NaN - both are
+#    unordered, and unordered is false. Every NaN case therefore falls
+#    through to the base operation in the last position and inherits
+#    ITS NaN rule: minimum propagates a quiet NaN, minimumNumber
+#    returns the number, both signal invalid on a signaling NaN, and
+#    two NaNs give a quiet NaN either way.
+#  * Equal magnitudes of opposite sign - the only other tie - also fall
+#    through, so minimumMagnitude(+3, -3) is minimum(+3, -3) = -3 and
+#    maximumMagnitude(+3, -3) is maximum(+3, -3) = +3. That is where an
+#    implementation that "prefers y" or "prefers x" on a tie diverges,
+#    and it is the one case worth testing hardest.
+#  * +-0 have equal magnitude, so min/maxMagnitude of the two zeros is
+#    exactly 9.6's signed-zero rule through the base operation: -0 for
+#    the minima, +0 for the maxima.
+#
+# No rounding, no attribute, no arithmetic: the answer is one of the
+# two operand ENCODINGS whenever it is not a NaN, so the magnitude
+# comparison is a comparison of the sign-cleared bit patterns, which
+# for non-NaN operands is monotone in the magnitude (the same property
+# _numeric_lt uses).
+
+
+def _magnitude_bits(fmt: FpFormat, x: int) -> int:
+    """The encoding with the sign bit cleared. For a non-NaN operand
+    this orders exactly as |x| does."""
+    return x & ~fmt.sign_mask
+
+
+def _minmax_mag(fmt: FpFormat, xa: int, xb: int, want_max: bool,
+                number: bool):
+    """754-2019 9.6's magnitude forms. `want_max` and `number` select
+    which of the four, and name the base operation this defers to."""
+    ua, ub = unpack(fmt, xa), unpack(fmt, xb)
+    if ua.kind == NAN or ub.kind == NAN:
+        # |NaN| is unordered against everything, so both magnitude
+        # tests are false and the definition's last clause applies.
+        return _minmax(fmt, xa, xb, want_max, number)
+    ma, mb = _magnitude_bits(fmt, xa), _magnitude_bits(fmt, xb)
+    if ma == mb:
+        return _minmax(fmt, xa, xb, want_max, number)
+    a_smaller = ma < mb
+    if want_max:
+        return (xb if a_smaller else xa), 0
+    return (xa if a_smaller else xb), 0
+
+
+def fminmag(fmt, xa, xb, *_):
+    """minimumMagnitude (9.6)."""
+    return _minmax_mag(fmt, xa, xb, want_max=False, number=False)
+
+
+def fmaxmag(fmt, xa, xb, *_):
+    """maximumMagnitude (9.6)."""
+    return _minmax_mag(fmt, xa, xb, want_max=True, number=False)
+
+
+def fminnummag(fmt, xa, xb, *_):
+    """minimumMagnitudeNumber (9.6)."""
+    return _minmax_mag(fmt, xa, xb, want_max=False, number=True)
+
+
+def fmaxnummag(fmt, xa, xb, *_):
+    """maximumMagnitudeNumber (9.6)."""
+    return _minmax_mag(fmt, xa, xb, want_max=True, number=True)
+
+
+#: The four, by the name their vector set and the C entry point use.
+#: One table, so that a caller enumerating them cannot miss one.
+MINMAX_MAG_FNS = ("min_mag", "minnum_mag", "max_mag", "maxnum_mag")
+
+#: 754-2019's own spelling of each, which is what the conformance sets
+#: record - a set naming "min_mag" would be naming this repository
+#: rather than the standard.
+MINMAX_MAG_754 = {
+    "min_mag":    "minimumMagnitude",
+    "minnum_mag": "minimumMagnitudeNumber",
+    "max_mag":    "maximumMagnitude",
+    "maxnum_mag": "maximumMagnitudeNumber",
+}
+
+MINMAX_MAG_IMPL = {
+    "min_mag":    fminmag,
+    "minnum_mag": fminnummag,
+    "max_mag":    fmaxmag,
+    "maxnum_mag": fmaxnummag,
+}
