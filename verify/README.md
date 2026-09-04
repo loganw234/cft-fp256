@@ -131,6 +131,15 @@ device-test runs. They are machine- and schedule-bound, keep their
 own drivers, and earn their own entries in docs/VALIDATION.md. This
 runner is the recurring floor, not the ceiling.
 
+Also outside it today, as make targets: the five workload
+cross-checks - `make -C host collatztest enclosetest mersennetest
+orbitstest zoomtest PYTHON=<an interpreter with mpmath>` - about a
+minute together, each holding its tool to its oracle and to its own
+determinism properties; and `node bindings/wasm/verify_demos.mjs`,
+which reproduces the browser demos' chains against the built tools.
+They are the natural next `quick` stage; until then they run by hand
+and on the merged tree before each merge to main.
+
 ## Bootstrapping the MPFR oracle
 
 The `mpfr` stage needs libmpfr/libgmp. Package managers are the easy

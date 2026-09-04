@@ -321,6 +321,14 @@ in docs/COMPATIBILITY.md) gets the full story.
   reduction path. Neither moved a result - the numbers are the same
   numbers - but calling the remaining work plumbing was wrong, and
   docs/BRINGUP.md is where it is now tracked honestly.
+- As a **library people can already run something on**: five
+  workloads written for the contract rather than adapted to it - exact
+  Collatz trajectories, rigorous enclosures, Lucas-Lehmer on fp256
+  limbs, symplectic orbits, a deep-zoom reference orbit - each with a
+  C tool, an oracle, a design note and a browser demo whose chain
+  matches the tool's (docs/BENCHMARKS.md, docs/DEMOS.md). They are the
+  benchmark a device will be measured with, and they say what fp64
+  loses on each, or that it loses nothing.
 - For the **atlas det library**: every primitive it refines from
   exists on the tile, including its seeds and now floor/round; the
   on-chip sequence to chain them exists in RTL and is benched. The

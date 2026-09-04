@@ -178,6 +178,19 @@ cannot be called from inside a program, which is why the enclosure
 tool's series and dot kernels, and the Mersenne convolution, run as
 host-issued calls around program passes.
 
+All five also run in the browser (docs/DEMOS.md): a second committed
+page on the module the conformance page embeds, each panel a port of
+the tool's loop engine with elements batched, and each panel's chain
+matched to the C tool's for the same configuration - 13 chains over 11
+configurations on 2026-09-04. Browser rates came out at 0.8 to 1.4
+times the native loop engines wherever a call carries a batch (zoom
+pixels 343,381 against 346,414 pixel-iterations/s, Mersenne 473,911
+against 646,661 limb products/s, orbits 22,645 against 24,922
+element-steps/s); a single-lane Collatz trajectory is the outlier at
+a quarter of native, which is the wasm boundary and nothing else.
+Those are measurements of the same slow tier, made in a browser, and
+the page says so.
+
 ## Reading the numbers
 
 **MPFR is 7-25x faster than libcft's software backend on the
