@@ -1512,19 +1512,36 @@
         chain.absorb(parts.join(" "));
         rows.push(m);
       }
-      // presentation: positions and the two drifts, as doubles
-      const pos = [], dH = [], dL = [];
-      for (let m = 0; m < M; m++) {
-        pos.push([C.showDouble(fi.fmt, q + (0 * M + m) * esz),
-                  C.showDouble(fi.fmt, q + (1 * M + m) * esz)]);
-        const saved = C.saveAllFlags(C.dev) >>> 0;
-        C.runN(OP.sub, fi.fmt, RND.rne, Hd + m * esz, 0, H0 + m * esz, t1, 1);
-        dH.push(C.showDouble(fi.fmt, t1));
-        C.runN(OP.sub, fi.fmt, RND.rne, Ld + m * esz, 0, L0 + m * esz, t1, 1);
-        dL.push(C.showDouble(fi.fmt, t1));
-        C.restoreFlags(C.dev, saved, C.flagsAllMask);
-      }
-      const rec = { sample: s, step: stepIdx, pos, dH, dL };
+      // Presentation: positions, the two drifts, and each member's
+      // separation from member 0. All of it under C.present(), so the
+      // flag union and the call counters describe the integration and
+      // nothing else.
+      //
+      // The separation has to be computed IN THE FORMAT, not from the
+      // plotted doubles: at fp256 two members differ by about 1e-70,
+      // and subtracting their binary64 shadows - which agree to every
+      // bit binary64 has - gives exactly zero. The library's own
+      // subtraction is what makes the ensemble's spread visible at
+      // all, which is rather the point of the panel.
+      const pos = [], dH = [], dL = [], sep = [];
+      C.present(() => {
+        for (let m = 0; m < M; m++) {
+          pos.push([C.showDouble(fi.fmt, q + (0 * M + m) * esz),
+                    C.showDouble(fi.fmt, q + (1 * M + m) * esz)]);
+          C.runN(OP.sub, fi.fmt, RND.rne, Hd + m * esz, 0, H0 + m * esz, t1, 1);
+          dH.push(C.showDouble(fi.fmt, t1));
+          C.runN(OP.sub, fi.fmt, RND.rne, Ld + m * esz, 0, L0 + m * esz, t1, 1);
+          dL.push(C.showDouble(fi.fmt, t1));
+          C.runN(OP.sub, fi.fmt, RND.rne, q + (0 * M + m) * esz, 0, q, t1, 1);
+          C.runN(OP.mul, fi.fmt, RND.rne, t1, t1, 0, t2, 1);
+          C.runN(OP.sub, fi.fmt, RND.rne, q + (1 * M + m) * esz, 0,
+                 q + M * esz, t1, 1);
+          C.runN(OP.fma, fi.fmt, RND.rne, t1, t1, t2, t2, 1);
+          C.sqrtN(fi.fmt, RND.rne, t2, t1, 1);
+          sep.push(C.showDouble(fi.fmt, t1));
+        }
+      });
+      const rec = { sample: s, step: stepIdx, pos, dH, dL, sep };
       samples.push(rec);
       return rec;
     }

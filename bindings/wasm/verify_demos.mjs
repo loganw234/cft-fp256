@@ -325,7 +325,7 @@ for (const r of runs) {
        `flags 0x${res.stats.flags.toString(16).padStart(2, "0")}`);
 
   const row = {
-    panel: r.panel, run: r.run, command: r.command,
+    panel: r.panel, run: r.run, command: r.command, cfg: r.cfg,
     chains: nativeChains || (recorded ? (recorded.runs.find(
       (x) => x.panel === r.panel && x.run === r.run) || {}).chains : null),
     native: { seconds: nativeSeconds, report: nativeReport },

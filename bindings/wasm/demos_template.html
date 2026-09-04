@@ -229,6 +229,16 @@ footer pre { font-size: 0.74rem; }
         &nbsp; <i style="background:var(--s64)"></i>fp64
         &nbsp; solid = energy (the method) &nbsp; dashed = angular momentum (the arithmetic)</div>
     </div>
+    <div class="fig" style="flex:1 1 100%">
+      <h4>the ensemble separating: |q&#8342; &minus; q&#8320;| per member (log)</h4>
+      <canvas id="orbits-spread" class="plot" width="1040" height="300"></canvas>
+      <div class="legend"><i style="background:var(--s256)"></i>fp256 members
+        &nbsp; <i style="background:var(--s64)"></i>their fp64 twins &mdash; the
+        same one-ulp ladder, the same steps, and roughly 2<sup>184</sup> between
+        the two clouds. Computed IN THE FORMAT: at fp256 the members differ by
+        about 10<sup>-70</sup>, which subtracting their binary64 shadows would
+        report as zero.</div>
+    </div>
   </div>
   <div id="orbits-report"></div>
 </section>
@@ -395,7 +405,26 @@ function startEngine() {
 // just computed, and the verdict that compares them.
 // ---------------------------------------------------------------------
 const browserChains = {};                 // "panel/run/chain" -> hex
+const browserCfg = {};                    // "panel/run"       -> the cfg run
 function chainKey(p, r, c) { return `${p}/${r}/${c}`; }
+
+/** Two configurations are the same run when every field matches. A
+ *  panel the reader has retuned - a wider frame, a different starting
+ *  value, the larger Mersenne set - computes something the recorded
+ *  chain is not about, and saying "DIFFER" there would be a lie about
+ *  which of the two is wrong. It says "other config" instead, and
+ *  counts for nothing. */
+function sameCfg(a, b) {
+  if (!a || !b) return false;
+  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+  if (ka.join(",") !== kb.join(",")) return false;
+  return ka.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
+}
+function comparable(p, r) {
+  const row = nativeRow(p, r);
+  const got = browserCfg[`${p}/${r}`];
+  return !got || sameCfg(row && row.cfg, got);
+}
 function nativeChain(p, r, c) {
   const row = RECORDED.runs.find((x) => x.panel === p && x.run === r);
   return row ? row.chains[c] : null;
@@ -413,8 +442,10 @@ function chainTable(panelId) {
     for (const cname of Object.keys(row.chains)) {
       const got = browserChains[chainKey(panelId, row.run, cname)];
       const want = row.chains[cname];
-      const cls = got ? (got === want ? "pass" : "fail") : "wait";
-      const txt = got ? (got === want ? "match" : "DIFFER") : "not run";
+      const ok = comparable(panelId, row.run);
+      const cls = !got ? "wait" : (!ok ? "wait" : (got === want ? "pass" : "fail"));
+      const txt = !got ? "not run"
+                : (!ok ? "other config" : (got === want ? "match" : "DIFFER"));
       html += `<tr><td>${row.run}</td><td>${cname}</td>` +
               `<td class="hash">${want}</td>` +
               `<td class="hash">${got || "&mdash;"}</td>` +
@@ -429,15 +460,17 @@ function chainTable(panelId) {
 function verdictFor(panelId) {
   const rows = RECORDED.runs.filter((r) => r.panel === panelId);
   let total = 0, have = 0, bad = 0;
+  let other = 0;
   for (const row of rows)
     for (const cname of Object.keys(row.chains)) {
       total++;
       const got = browserChains[chainKey(panelId, row.run, cname)];
       if (!got) continue;
+      if (!comparable(panelId, row.run)) { other++; continue; }
       have++;
       if (got !== row.chains[cname]) bad++;
     }
-  return { total, have, bad };
+  return { total, have, bad, other };
 }
 
 function renderVerdict(panelId) {
@@ -446,7 +479,10 @@ function renderVerdict(panelId) {
   if (!el) return;
   if (!v.have) {
     el.className = "verdict wait";
-    el.textContent = `not run yet - ${v.total} chain(s) to check`;
+    el.textContent = v.other
+      ? `${v.other} chain(s) computed for a configuration the recorded ` +
+        `chains are not about - nothing to compare`
+      : `not run yet - ${v.total} chain(s) to check`;
   } else if (v.bad) {
     el.className = "verdict fail";
     el.textContent = `${v.bad} of ${v.have} chain(s) DIFFER from the ` +
@@ -460,9 +496,10 @@ function renderVerdict(panelId) {
 
 function renderGlobalVerdict() {
   let total = 0, have = 0, bad = 0;
+  let other = 0;
   for (const p of Object.keys(PANEL_UI)) {
     const v = verdictFor(p);
-    total += v.total; have += v.have; bad += v.bad;
+    total += v.total; have += v.have; bad += v.bad; other += v.other;
   }
   const el = document.getElementById("global-verdict");
   if (!have) {
@@ -476,7 +513,9 @@ function renderGlobalVerdict() {
   } else {
     el.className = "verdict pass";
     el.textContent = `${have} of ${total} chains computed in this browser, ` +
-      `every one identical to the C tool's.`;
+      `every one identical to the C tool's.` +
+      (other ? `  (${other} more computed for a retuned configuration the ` +
+               `recorded chains are not about.)` : "");
   }
 }
 
@@ -701,6 +740,51 @@ function paintOrbits() {
       g.stroke();
     }
     g.setLineDash([]);
+  }
+  {
+    const { g, w, h } = prep(document.getElementById("orbits-spread"));
+    const pad = { l: 46, r: 8, t: 14, b: 22 };
+    let lo = Infinity, hi = 0, any = false;
+    for (const key of ["fp256", "fp64"]) {
+      const st = orbitsState[key];
+      if (!st) continue;
+      for (const s of st.samples)
+        for (let m = 1; m < (s.sep || []).length; m++) {
+          const v = s.sep[m];
+          if (v > 0) { any = true; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        }
+    }
+    axes(g, w, h, pad, "sample", "|qₘ - q₀|");
+    if (!any) return;
+    const L = Math.floor(Math.log10(lo)) - 1, H = Math.ceil(Math.log10(hi)) + 1;
+    const Y = (v) => (h - pad.b) - (Math.log10(v) - L) / (H - L) * (h - pad.t - pad.b);
+    g.font = "9px ui-monospace, monospace";
+    for (let e = L; e <= H; e++) {
+      if ((H - L) > 14 && (e % 10)) continue;
+      const y = Y(Math.pow(10, e));
+      g.strokeStyle = css("--line"); g.globalAlpha = 0.5;
+      g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+      g.globalAlpha = 1;
+      g.fillStyle = css("--dim"); g.fillText("1e" + e, 2, y + 3);
+    }
+    for (const [key, colour] of [["fp256", css("--s256")], ["fp64", css("--s64")]]) {
+      const st = orbitsState[key];
+      if (!st || !st.samples.length) continue;
+      const M = st.cfg.members;
+      for (let m = 1; m < M; m++) {
+        g.strokeStyle = colour; g.lineWidth = 1.1; g.globalAlpha = 0.9;
+        g.beginPath();
+        let first = true;
+        st.samples.forEach((s, i) => {
+          const v = s.sep && s.sep[m];
+          if (!v || v <= 0) return;
+          const X = pad.l + i / Math.max(1, st.samples.length - 1) * (w - pad.l - pad.r);
+          if (first) { g.moveTo(X, Y(v)); first = false; } else g.lineTo(X, Y(v));
+        });
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+    }
   }
 }
 
@@ -983,9 +1067,12 @@ function batchOf(panelId, res) {
   const c = res.cfg;
   if (panelId === "zoom") return c.batch + " px";
   if (panelId === "orbits") return c.members + " members";
-  if (panelId === "collatz") return c.batch + " lanes";
+  if (panelId === "collatz") return c.batch + (c.batch === 1 ? " lane" : " lanes");
   if (panelId === "enclose") return c.batch + " items";
-  if (panelId === "mersenne") return (res.records[0] ? res.records[0].L : "-") + " limbs";
+  if (panelId === "mersenne") {
+    const Ls = res.records.map((r) => r.L);
+    return Ls.length ? (Math.min(...Ls) + ".." + Math.max(...Ls) + " limbs") : "-";
+  }
   return "-";
 }
 
@@ -1086,7 +1173,7 @@ onEngine((m) => {
     return;
   }
   if (m.type === "done") {
-    const row = nativeRow(m.panel, m.run);
+    browserCfg[`${m.panel}/${m.run}`] = m.result.cfg;
     for (const [cname, hex] of Object.entries(m.result.chains))
       browserChains[chainKey(m.panel, m.run, cname)] = hex;
     if (ui.done) ui.done(m);

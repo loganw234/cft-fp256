@@ -2,28 +2,36 @@
   "recorded": "2026-09-04",
   "host": "DESKTOP-T33SK86",
   "module_sha256": "a1f0a4715516d3f64838fbfcbeafe6bbae1670dc74a86bd021ff8c428a761e55",
-  "core_sha256": "b9749cfb086374f205b177a6e9faa4b9026cce99e1f23d95e91a4f590dc0b7fa",
+  "core_sha256": "339bc0a4c59b31f09f51e8993109c2a55983a33593ad38a58a93ffbe1662b9c4",
   "build_command": "make -C host CC=gcc OS=Windows_NT TMP=/tmp TEMP=/tmp cft-collatz.exe cft-zoom.exe cft-orbits.exe cft-enclose.exe cft-mersenne.exe",
   "runs": [
     {
       "panel": "collatz",
       "run": "trajectory",
       "command": "./host/cft-collatz --engine loop --format fp256 --mode deep --values 220855883097298041197912187592864814478435487109452369765200775161576157 --batch 1",
+      "cfg": {
+        "format": "fp256",
+        "mode": "deep",
+        "values": [
+          "220855883097298041197912187592864814478435487109452369765200775161576157"
+        ],
+        "batch": 1
+      },
       "chains": {
         "chain": "b13572843b19a7efba863c3c32390e6730108fe40bd8213acee7400bad676a2f"
       },
       "native": {
-        "seconds": 0.037,
+        "seconds": 0.033,
         "report": [
           "library calls 2437",
           "opcode issues 56051 elementwise passes over one element each",
-          "time          0.013 s",
-          "throughput    184267 Collatz steps/s, 75.6 elements/s"
+          "time          0.010 s",
+          "throughput    239666 Collatz steps/s, 98.3 elements/s"
         ]
       },
       "core": {
-        "seconds": 0.045,
-        "rate": 54155.555555555555,
+        "seconds": 0.057,
+        "rate": 42754.38596491228,
         "unit": "Collatz steps",
         "calls": 58489
       }
@@ -32,21 +40,28 @@
       "panel": "collatz",
       "run": "sweep",
       "command": "./host/cft-collatz --engine loop --format fp256 --mode sweep --from 1 --to 1001 --batch 1000",
+      "cfg": {
+        "format": "fp256",
+        "mode": "sweep",
+        "from": 1,
+        "to": 1001,
+        "batch": 1000
+      },
       "chains": {
         "chain": "c2ccab682e3747261561871ee0f99d3b3d43f88fa7fa4de18eff7e46a0555c51"
       },
       "native": {
-        "seconds": 0.253,
+        "seconds": 0.295,
         "report": [
           "library calls 178",
           "opcode issues 1369489 elementwise passes over one element each",
-          "time          0.236 s",
-          "throughput    252187 Collatz steps/s, 4235.5 elements/s"
+          "time          0.269 s",
+          "throughput    221294 Collatz steps/s, 3716.6 elements/s"
         ]
       },
       "core": {
-        "seconds": 0.457,
-        "rate": 130288.84026258205,
+        "seconds": 0.399,
+        "rate": 149228.0701754386,
         "unit": "Collatz steps",
         "calls": 66638
       }
@@ -55,22 +70,35 @@
       "panel": "zoom",
       "run": "fp256-reference",
       "command": "./host/cft-zoom --engine loop --format fp256 --width 128 --ref-iters 1001 --pixel-iters 1000 --batch 1024",
+      "cfg": {
+        "format": "fp256",
+        "width": 128,
+        "zoomExp": 196,
+        "period": 51,
+        "refIters": 1001,
+        "pixelIters": 1000,
+        "batch": 1024,
+        "refOffset": 0,
+        "glitchBits": 0,
+        "centre": null
+      },
       "chains": {
         "orbit": "ebec460efc657fa70293a5ade8f8919cd3f06afbd4b5603be6a3f3a66ecf9b3d",
         "pixels": "5fb8f0de8bb1be57ef39f7a0f69520d0ed8f0cdd0cad600a6e7e4ada757d11f3"
       },
       "native": {
-        "seconds": 17.568,
+        "seconds": 18.372,
         "report": [
           "library calls 1 for the orbit",
           "pixel work    6342288 pixel-iterations at fp64",
-          "time          0.008 s reference, 17.505 s pixels",
-          "throughput    126147 reference iterations/s at fp256 (1009174 elementwise ops/s)"
+          "time          0.008 s reference, 18.308 s pixels",
+          "throughput    133413 reference iterations/s at fp256 (1067306 elementwise ops/s)",
+          "346414 pixel-iterations/s at fp64 (7971324 elementwise ops/s), 894.9 pixels/s"
         ]
       },
       "core": {
-        "seconds": 23.859,
-        "rate": 265823.7143216396,
+        "seconds": 23.544,
+        "rate": 269380.2242609582,
         "unit": "fp64 pixel-iterations",
         "calls": 220724
       }
@@ -79,22 +107,35 @@
       "panel": "zoom",
       "run": "fp64-reference",
       "command": "./host/cft-zoom --engine loop --format fp64 --width 128 --ref-iters 1001 --pixel-iters 1000 --batch 1024",
+      "cfg": {
+        "format": "fp64",
+        "width": 128,
+        "zoomExp": 196,
+        "period": 51,
+        "refIters": 1001,
+        "pixelIters": 1000,
+        "batch": 1024,
+        "refOffset": 0,
+        "glitchBits": 0,
+        "centre": null
+      },
       "chains": {
         "orbit": "9c83048409fa65ad1cd0524f0463f0d8bf747e5d4d8ed6c3e3a7844758674258",
         "pixels": "878ae482df8da39326d658c0ec9047d1a29c2b1eb15902a24175d4e899c81dda"
       },
       "native": {
-        "seconds": 4.894,
+        "seconds": 4.824,
         "report": [
           "library calls 1 for the orbit",
           "pixel work    1835008 pixel-iterations at fp64",
-          "time          0.004 s reference, 4.848 s pixels",
-          "throughput    281520 reference iterations/s at fp64 (2252159 elementwise ops/s)"
+          "time          0.002 s reference, 4.782 s pixels",
+          "throughput    415301 reference iterations/s at fp64 (3322408 elementwise ops/s)",
+          "383738 pixel-iterations/s at fp64 (8830028 elementwise ops/s), 3426.2 pixels/s"
         ]
       },
       "core": {
-        "seconds": 6.839,
-        "rate": 268315.2507676561,
+        "seconds": 7.298,
+        "rate": 251439.8465332968,
         "unit": "fp64 pixel-iterations",
         "calls": 55124
       }
@@ -103,62 +144,89 @@
       "panel": "orbits",
       "run": "fp256",
       "command": "./host/cft-orbits --engine loop --format fp256 --members 8 --periods 4 --steps-per-period 512 --sample-every 32",
+      "cfg": {
+        "format": "fp256",
+        "members": 8,
+        "periods": 4,
+        "stepsPerPeriod": 512,
+        "sampleEvery": 32,
+        "spread": 1
+      },
       "chains": {
         "chain": "12012be36beb6d5fc15f9b4b17e84af30923399503a744bdef7a6e4042d93cc9"
       },
       "native": {
-        "seconds": 0.565,
+        "seconds": 0.691,
         "report": [
           "library calls 23627",
           "elementwise   155208 opcode issues, plus 33808 composed div/sqrt",
-          "time          0.542 s",
-          "throughput    3781 steps/s, 30251 element-steps/s, 348991 library element-ops/s"
+          "time          0.657 s",
+          "throughput    3115 steps/s, 24922 element-steps/s, 287512 library element-ops/s"
         ]
       },
       "core": {
-        "seconds": 0.715,
-        "rate": 22914.685314685317,
+        "seconds": 0.952,
+        "rate": 17210.084033613446,
         "unit": "element-steps",
-        "calls": 24667
+        "calls": 23627
       }
     },
     {
       "panel": "orbits",
       "run": "fp64",
       "command": "./host/cft-orbits --engine loop --format fp64 --members 8 --periods 4 --steps-per-period 512 --sample-every 32",
+      "cfg": {
+        "format": "fp64",
+        "members": 8,
+        "periods": 4,
+        "stepsPerPeriod": 512,
+        "sampleEvery": 32,
+        "spread": 1
+      },
       "chains": {
         "chain": "3ebf95ae53d96a38c5b541ec08cb9c6d60e59cb7727cdc6ea5ae5aba6d4aa96a"
       },
       "native": {
-        "seconds": 0.283,
+        "seconds": 0.341,
         "report": [
           "library calls 23627",
           "elementwise   155208 opcode issues, plus 33808 composed div/sqrt",
-          "time          0.262 s",
-          "throughput    7821 steps/s, 62566 element-steps/s, 721795 library element-ops/s"
+          "time          0.295 s",
+          "throughput    6949 steps/s, 55589 element-steps/s, 641304 library element-ops/s"
         ]
       },
       "core": {
-        "seconds": 0.327,
-        "rate": 50103.975535168196,
+        "seconds": 0.347,
+        "rate": 47216.138328530265,
         "unit": "element-steps",
-        "calls": 24667
+        "calls": 23627
       }
     },
     {
       "panel": "enclose",
       "run": "fp32",
       "command": "./host/cft-enclose --engine loop --format fp32 --kernels series,dot,horner --points 16 --cond-max 164",
+      "cfg": {
+        "format": "fp32",
+        "points": 16,
+        "degree": 23,
+        "dotM": 32,
+        "dotTop": 60,
+        "condMax": 164,
+        "condLevels": 6,
+        "rows": 8,
+        "batch": 256
+      },
       "chains": {
         "chain": "d9f761c22220f1aa185c2ccbfbf4b2d83e4f8d84dced8e61cdb8882d7528b208"
       },
       "native": {
-        "seconds": 0.026,
+        "seconds": 0.03,
         "report": [
           "library calls 189",
           "element ops   4845",
-          "time          0.006 s",
-          "throughput    8745.5 enclosures/s, 864731 element ops/s"
+          "time          0.007 s",
+          "throughput    6941.8 enclosures/s, 686387 element ops/s"
         ]
       },
       "core": {
@@ -172,21 +240,32 @@
       "panel": "enclose",
       "run": "fp64",
       "command": "./host/cft-enclose --engine loop --format fp64 --kernels series,dot,horner --points 16 --cond-max 164",
+      "cfg": {
+        "format": "fp64",
+        "points": 16,
+        "degree": 23,
+        "dotM": 32,
+        "dotTop": 60,
+        "condMax": 164,
+        "condLevels": 6,
+        "rows": 8,
+        "batch": 256
+      },
       "chains": {
         "chain": "835ca8ab9aa3358d6ad0dcfdf167e813a65ed3bfb5dffcf31b32927f28c7e3d1"
       },
       "native": {
-        "seconds": 0.029,
+        "seconds": 0.028,
         "report": [
           "library calls 237",
           "element ops   5661",
-          "time          0.008 s",
-          "throughput    5904.7 enclosures/s, 682171 element ops/s"
+          "time          0.007 s",
+          "throughput    6773.2 enclosures/s, 782511 element ops/s"
         ]
       },
       "core": {
-        "seconds": 0.014,
-        "rate": 3500,
+        "seconds": 0.012,
+        "rate": 4083.333333333333,
         "unit": "enclosures",
         "calls": 2588
       }
@@ -195,21 +274,32 @@
       "panel": "enclose",
       "run": "fp128",
       "command": "./host/cft-enclose --engine loop --format fp128 --kernels series,dot,horner --points 16 --cond-max 164",
+      "cfg": {
+        "format": "fp128",
+        "points": 16,
+        "degree": 23,
+        "dotM": 32,
+        "dotTop": 60,
+        "condMax": 164,
+        "condLevels": 6,
+        "rows": 8,
+        "batch": 256
+      },
       "chains": {
         "chain": "4ff5b22ba2333153491c101eb8aab83e4128a051a50d73e0e654a07438cc4f0c"
       },
       "native": {
-        "seconds": 0.061,
+        "seconds": 0.036,
         "report": [
           "library calls 315",
           "element ops   6987",
-          "time          0.018 s",
-          "throughput    2764.1 enclosures/s, 394142 element ops/s"
+          "time          0.013 s",
+          "throughput    3880.5 enclosures/s, 553321 element ops/s"
         ]
       },
       "core": {
-        "seconds": 0.024,
-        "rate": 2041.6666666666665,
+        "seconds": 0.017,
+        "rate": 2882.3529411764703,
         "unit": "enclosures",
         "calls": 2665
       }
@@ -218,21 +308,32 @@
       "panel": "enclose",
       "run": "fp256",
       "command": "./host/cft-enclose --engine loop --format fp256 --kernels series,dot,horner --points 16 --cond-max 164",
+      "cfg": {
+        "format": "fp256",
+        "points": 16,
+        "degree": 23,
+        "dotM": 32,
+        "dotTop": 60,
+        "condMax": 164,
+        "condLevels": 6,
+        "rows": 8,
+        "batch": 256
+      },
       "chains": {
         "chain": "93cdda3270eaa7ba434ddbbabcc54d77a5afa28779e05bccef4f7b81cc43400c"
       },
       "native": {
-        "seconds": 0.07,
+        "seconds": 0.062,
         "report": [
           "library calls 453",
           "element ops   9333",
-          "time          0.034 s",
-          "throughput    1431.9 enclosures/s, 272733 element ops/s"
+          "time          0.032 s",
+          "throughput    1526.4 enclosures/s, 290733 element ops/s"
         ]
       },
       "core": {
-        "seconds": 0.037,
-        "rate": 1324.3243243243244,
+        "seconds": 0.05,
+        "rate": 980,
         "unit": "enclosures",
         "calls": 2826
       }
@@ -241,21 +342,34 @@
       "panel": "mersenne",
       "run": "to-2281",
       "command": "./host/cft-mersenne --engine loop --format fp256 --exponents 521,607,1277,1279,1619,2203,2281",
+      "cfg": {
+        "format": "fp256",
+        "exponents": [
+          521,
+          607,
+          1277,
+          1279,
+          1619,
+          2203,
+          2281
+        ]
+      },
       "chains": {
         "chain": "7555f58433fa902b06a0c2b7057d8d1b86b55e2aeff7636abb55ef53c0d80aca"
       },
       "native": {
-        "seconds": 3.791,
+        "seconds": 3.81,
         "report": [
           "limb products  2425336",
+          "carry passes   56694",
           "library calls  1232076",
-          "time           3.770 s",
-          "throughput     643399 limb products/s, 2592.606 squarings/s, 3298444 elementwise op issues/s"
+          "time           3.751 s",
+          "throughput     646661 limb products/s, 2605.749 squarings/s, 3315165 elementwise op issues/s"
         ]
       },
       "core": {
-        "seconds": 5.311,
-        "rate": 456662.77537186973,
+        "seconds": 6.004,
+        "rate": 403953.36442371755,
         "unit": "limb products",
         "calls": 1232293
       }
