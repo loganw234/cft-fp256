@@ -2206,6 +2206,13 @@ int main(int argc, char **argv)
                 R.inflight = n;
                 R.inflight_kernel = kern;
             }
+        } else if (R.inflight_kernel != kern) {
+            /* only the series kernel checkpoints mid-item, so a resume
+             * that arrives with work in flight and a cursor pointing
+             * anywhere else is a corrupt checkpoint rather than a
+             * state this tool can be in */
+            die("the checkpoint has work in flight for one kernel and a "
+                "cursor in another");
         }
         n = R.inflight;
 
