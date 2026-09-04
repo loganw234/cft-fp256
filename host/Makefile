@@ -153,12 +153,12 @@ else
   EXE     :=
 endif
 
-TOOLS := cft-selftest$(EXE) cft-bench$(EXE)
+TOOLS := cft-selftest$(EXE) cft-bench$(EXE) cft-collatz$(EXE)
 TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
-        transcendtest augmentedtest formatoftest \
+        transcendtest augmentedtest formatoftest collatz collatztest \
         examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
         lang-r lang-fortran clean
 
@@ -201,6 +201,17 @@ cft-selftest$(EXE): tools/cft_selftest.c libcft.a
 # with one measurement rather than two.
 cft-bench$(EXE): tools/cft_bench.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+# Collatz trajectories computed exactly - a benchmark designed FOR the
+# contract rather than adapted to it, and a working demonstration of
+# the orbit sequencer with a workload that is not div/sqrt. Same
+# binary against the software backend and against an artifact, because
+# the point of the measurement is that the two are comparable.
+# docs/COLLATZ.md is the exactness argument.
+cft-collatz$(EXE): tools/collatz.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+collatz: cft-collatz$(EXE)
 
 api-test$(EXE): tests/api_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
@@ -495,6 +506,15 @@ reducetest: all
 coverage: all
 	$(PYTHON) tests/diff_check.py --coverage --trials 3000
 
+# The Collatz explorer against a Python big-integer oracle, plus the
+# two determinism properties the tool claims: that the results do not
+# depend on the batch size, and that interrupting and resuming a run
+# lands on the same checkpoint as an uninterrupted one. Python's
+# integers are exact, so they are the authority on Collatz; the
+# library stays the authority on arithmetic.
+collatztest: cft-collatz$(EXE)
+	$(PYTHON) tests/collatz_check.py
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves
@@ -505,6 +525,7 @@ clean:
 	      cft.dll libcft.so libcft.dylib \
 	      cft-selftest cft-selftest.exe api-test api-test.exe \
 	      cft-bench cft-bench.exe \
+	      cft-collatz cft-collatz.exe \
 	      cft-bench-peers cft-bench-peers.exe \
 	      divsqrt-soak divsqrt-soak.exe clause5-soak clause5-soak.exe \
 	      mpfr-check mpfr-check.exe \
