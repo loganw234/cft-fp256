@@ -1480,8 +1480,7 @@ static cft_status from_char_batch(cft_device *dev, cft_format fmt,
     if ((int)fmt < 0 || (int)fmt > 3 || !rnd_ok(rnd))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     if (!in || !d)
@@ -1503,8 +1502,7 @@ static cft_status from_char_batch(cft_device *dev, cft_format fmt,
         acc |= fl;
         lane_store(f, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -1538,8 +1536,7 @@ CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
 
     if (len)
         *len = 0;
-    if (flags_out)
-        *flags_out = 0;
+    cft_flags_emit(dev, 0, flags_out);
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)fmt < 0 || (int)fmt > 3)
@@ -1559,8 +1556,8 @@ CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
     st = to_decimal_one(f, &x, digits, (int)rnd, &b, &fl);
     if (st == CFT_OK) {
         st = deliver(&b, out, cap, len);
-        if (st == CFT_OK && flags_out)
-            *flags_out = fl;
+        if (st == CFT_OK)
+            cft_flags_emit(dev, fl, flags_out);
     }
     sb_free(&b);
     return st;

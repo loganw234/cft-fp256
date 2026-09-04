@@ -83,6 +83,26 @@ encoding:
     {"fn": "get_payload", "rnd": "rne", "a": "0x7fc00005",
      "d": "0x40a00000", "flags": 0}
 
+The four MAGNITUDE forms of minimum and maximum (754-2019 9.6) get
+their own family too - `fp32-minmaxmag.jsonl` and one per format - for
+the reasons the augmented set has one: they are library entry points
+rather than opcodes, so a replayer dispatches them by NAME, and they
+consume no rounding attribute, so there is ONE file per format rather
+than one per attribute.
+
+    {"fn": "minimumMagnitude", "a": "0x...", "b": "0x...",
+     "d": "0x...", "flags": 0}
+
+"fn" is 754's own spelling - minimumMagnitude, minimumMagnitudeNumber,
+maximumMagnitude, maximumMagnitudeNumber - not this repository's C
+names, because the set is a statement about the standard. There is no
+"rnd" field and, as in the augmented family, its absence is normative:
+these operations SELECT one of their operands rather than computing a
+value, so there is no rounding to record and an attribute could not
+change an answer. The four opcodes of 9.6 that DO exist - min, max,
+minnum, maxnum - stay where they are, in the elementwise sets, because
+they are opcodes.
+
 "refuse" marks a sequence that is NOT in 5.12's syntax and that a
 conforming implementation must REFUSE - which is as much a part of the
 contract as any value, and the one part a set of encodings cannot
@@ -112,6 +132,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from cft_golden import (  # noqa: E402
     FORMATS, OP_NAMES, RND_NAMES, TRANSCEND_ARITY, chars, TRANSCEND_INTARG, augmented, compute,
     transcend, vectors,
+    MINMAX_MAG_FNS, MINMAX_MAG_754, MINMAX_MAG_IMPL,
 )
 from cft_golden.reduce import (  # noqa: E402
     SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, fdot, fsum, fsumabs, fsumsq,
@@ -133,6 +154,12 @@ REDUCE_IMPL = {
 }
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
+
+#: 754's spelling of each 9.6 magnitude form -> the model function that
+#: defines it. Built from the model's own two tables rather than
+#: written out, so the set can only ever record a name the model knows.
+MINMAX_MAG_BY_754 = {MINMAX_MAG_754[k]: MINMAX_MAG_IMPL[k]
+                     for k in MINMAX_MAG_FNS}
 
 PAYLOAD_IMPL = {
     "get_payload": chars.get_payload,
@@ -212,6 +239,9 @@ def main():
     ap.add_argument("--character", type=int, default=12,
                     help="random sequences added to the clause-5.12 "
                          "directed pool (0 to skip the sets)")
+    ap.add_argument("--minmaxmag", type=int, default=16,
+                    help="random pairs added to the clause-9.6 magnitude "
+                         "pool (0 to skip the sets)")
     ap.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
 
@@ -264,6 +294,30 @@ def main():
                     rec["flags"] = flags
                     f.write(json.dumps(rec) + "\n")
             print(f"{path}: {len(tcases)} cases (seed {args.seed}, {rname})")
+
+        # The four magnitude forms of 754-2019 9.6. ONE file per
+        # format, whatever --rounding asked for, and for a sharper
+        # reason than the augmented set's: these operations SELECT an
+        # operand rather than computing a value, so there is no
+        # rounding for an attribute to direct. Written before the
+        # blocks below because those skip with `continue`, and a
+        # --character 0 run must still emit these.
+        if args.minmaxmag > 0:
+            mcases = vectors.minmax_mag_cases(fmt, args.minmaxmag,
+                                              args.seed + 21)
+            path = outdir / f"{name}-minmaxmag.jsonl"
+            with open(path, "w") as f:
+                for fn, xa, xb in mcases:
+                    d, flags = MINMAX_MAG_BY_754[fn](fmt, xa, xb)
+                    f.write(json.dumps({
+                        "fn": fn,
+                        "a": f"0x{xa:0{hexw}x}",
+                        "b": f"0x{xb:0{hexw}x}",
+                        "d": f"0x{d:0{hexw}x}",
+                        "flags": flags,
+                    }) + "\n")
+            print(f"{path}: {len(mcases)} cases (seed {args.seed}, "
+                  f"no attribute - 9.6 selects, it does not round)")
 
         # The augmented arithmetic operations (754-2019 9.5). ONE file
         # per format, whatever --rounding asked for: the rounding is

@@ -1244,3 +1244,79 @@ def character_cases(fmt: FpFormat, extra: int, seed: int = 20):
     for op in ("get_payload", "set_payload", "set_payload_signaling"):
         cases += [("payload", op, bits) for bits in pay]
     return cases
+
+
+# ---- the magnitude min/max set (754-2019 9.6) ------------------------
+#
+# A sixth family, and it needed one for the same reason the augmented
+# set did: these four operations are library entry points rather than
+# opcodes, so a replayer dispatches them by NAME, and they consume no
+# rounding attribute, so there is one file per format rather than one
+# per attribute. The elementwise sets already carry min/max/minnum/
+# maxnum as opcodes 7 to 10; nothing there can carry these.
+#
+# What the pool is aimed at, in the order the standard's sentence puts
+# them:
+#
+#   * |x| < |y| and |y| < |x|, over the whole magnitude ladder from +0
+#     through the subnormals to infinity - in EVERY sign combination,
+#     because the sign has no vote at all in that clause and an
+#     implementation that lets it in fails only on the mixed pairs.
+#   * The "otherwise": every equal-magnitude pair, which is each
+#     magnitude against itself with both signs. This is the family
+#     9.6 defers to minimum/minimumNumber on, it is the only place the
+#     four differ from a plain magnitude compare, and it is where an
+#     implementation that quietly prefers x or y goes wrong.
+#   * The NaNs, which are unordered and therefore also the
+#     "otherwise": quiet, signaling, payload-carrying and negative,
+#     against numbers and against each other, one and both.
+
+
+def minmax_mag_pairs(fmt: FpFormat, extra: int, seed: int = 21):
+    """Operand pairs for 9.6's four magnitude forms."""
+    rng = random.Random(seed ^ (fmt.width * 809))
+    mags = [
+        sf.zero_bits(fmt, 0),
+        sf.min_subnormal_bits(fmt, 0),
+        sf.max_subnormal_bits(fmt, 0),
+        sf.min_normal_bits(fmt, 0),
+        sf.one_bits(fmt, 0),
+        sf.one_bits(fmt, 0) | 1,
+        sf.one_bits(fmt, 0) + (1 << fmt.man_w),          # 2.0
+        sf.max_normal_bits(fmt, 0),
+        sf.inf_bits(fmt, 0),
+    ]
+    signed = [m | s for m in mags for s in (0, fmt.sign_mask)]
+    nans = [sf.qnan_bits(fmt), sf.qnan_bits(fmt) | 5,
+            sf.qnan_bits(fmt) | fmt.sign_mask,
+            sf.snan_bits(fmt), sf.snan_bits(fmt) | 3,
+            sf.snan_bits(fmt) | fmt.sign_mask]
+
+    pairs = [(a, b) for a in signed for b in signed]      # the ladder
+    pairs += [(a, b) for a in nans for b in signed]       # one NaN
+    pairs += [(a, b) for a in signed for b in nans]
+    pairs += [(a, b) for a in nans for b in nans]         # two NaNs
+
+    # Randoms, and a few "same magnitude, random value" pairs so that
+    # the equal-magnitude family is not only the directed ladder.
+    for _ in range(extra):
+        a = rng.getrandbits(fmt.width)
+        pairs.append((a, rng.getrandbits(fmt.width)))
+        pairs.append((a, a ^ fmt.sign_mask))
+
+    seen, out = set(), []
+    for pr in pairs:
+        if pr not in seen:
+            seen.add(pr)
+            out.append(pr)
+    return out
+
+
+def minmax_mag_cases(fmt: FpFormat, extra: int, seed: int = 21):
+    """(fn, a, b) triples for the four, in the order gen_vectors.py
+    writes them. `fn` is 754's own spelling - minimumMagnitude and
+    friends - because a set naming this repository's C entry points
+    would be naming the wrong thing."""
+    pairs = minmax_mag_pairs(fmt, extra, seed)
+    return [(sf.MINMAX_MAG_754[fn], a, b)
+            for fn in sf.MINMAX_MAG_FNS for a, b in pairs]

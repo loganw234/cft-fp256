@@ -460,6 +460,21 @@ need host-cc python
 stage augmented "the clause-9.5 augmented operations vs the model: both outputs, flags, and the exact pair identity" -- \
   PY "$ROOT/host/tests/augmented_check.py"
 
+# ABI 0.7 package B: the sticky status word (7.1, 5.7.4), the three
+# conformance predicates (5.7.1), and clause 9.6's four magnitude forms
+# of minimum and maximum. Its own stage rather than a line inside
+# clause5, because half of what it checks is not arithmetic at all: the
+# status word is STATE, the golden model has nothing corresponding to
+# it, and every assertion about it is against a sentence of 7.1 or
+# 5.7.4 rather than against a computed value. The 9.6 half is scored
+# the way clause5 is - the model defines every bit, the C is replayed
+# against it - over seeded pools at all four formats, including every
+# equal-magnitude pair, which is the family 9.6 defers to the base
+# operation on and the one an implementation gets wrong.
+need host-cc python
+stage status96 "the 7.1/5.7.4 status word, the 5.7.1 predicates, and clause 9.6's four magnitude forms vs the model" -- \
+  PY "$ROOT/host/tests/minmax_mag_check.py"
+
 need host-cc python
 stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000

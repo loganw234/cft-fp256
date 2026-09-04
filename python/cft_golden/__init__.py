@@ -20,6 +20,8 @@ from .softfloat import (
     OP_RECIP_SEED, OP_RSQRT_SEED, SEED_OPS, recip_seed, rsqrt_seed,
     ARITH_OPS, SIMPLE_OPS, SIMPLE_IMPL,
     fabs, neg, copysign, fmin, fmax, fminnum, fmaxnum,
+    fminmag, fmaxmag, fminnummag, fmaxnummag,
+    MINMAX_MAG_FNS, MINMAX_MAG_754, MINMAX_MAG_IMPL,
     RND_RNE, RND_RTZ, RND_RDN, RND_RUP, RND_RMM, RND_NAMES, RND_MODES,
     RND_RTTZ, RND_RTTZ_NAME,
     add, sub, mul, fma, div, sqrt, compute, steer, unpack,
@@ -103,6 +105,9 @@ __all__ = [
     "SCALE_MAX", "ScaleOverflow", "split", "tree_adds", "canonical_ranges",
     "reduce_bits", "fsum", "fdot", "combine", "stream_reduce", "fsumsq",
     "fsumabs", "norm_split", "scaled_prod",
+    # 754-2019 9.6's magnitude forms (ABI 0.7)
+    "fminmag", "fmaxmag", "fminnummag", "fmaxnummag",
+    "MINMAX_MAG_FNS", "MINMAX_MAG_754", "MINMAX_MAG_IMPL",
 ]
 
 __version__ = "0.1.0"

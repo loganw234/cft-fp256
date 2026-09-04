@@ -136,13 +136,18 @@ static void bn_sig_exp(const cft_fmt_desc *f, const cft_bn *x,
     }
 }
 
-/* A scaffolding run: value kept, flags discarded, bus faults fatal. */
+/* A scaffolding run: value kept, flags discarded, bus faults fatal.
+ * Discarded from the status word too, which is what the mute is for -
+ * see softfloat.h. */
 static cft_status step(cft_device *dev, cft_op op, cft_format fmt, int rnd,
                        const void *a, const void *b, const void *c, void *d,
                        size_t n, uint32_t *bus_out)
 {
-    return cft_run(dev, op, fmt, (cft_round)rnd, a, b, c, d, n,
-                   NULL, bus_out);
+    const int muted = cft_flags_mute(dev, 1);
+    cft_status st = cft_run(dev, op, fmt, (cft_round)rnd, a, b, c, d, n,
+                            NULL, bus_out);
+    (void)cft_flags_mute(dev, muted);
+    return st;
 }
 
 /* The shared argument checks. The rounding attribute is deliberately
@@ -216,8 +221,7 @@ CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
         !cft_supports(dev, CFT_COPYSIGN, fmt))
         return CFT_ERR_UNSUPPORTED;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
 
@@ -306,8 +310,7 @@ CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
         off += c;
     }
     st = CFT_OK;
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
 out:
     free(aw); free(mb); free(t); free(core);
     return st;
@@ -353,8 +356,7 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
     if (!cft_supports(dev, CFT_MUL, fmt))
         return CFT_ERR_UNSUPPORTED;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
 
@@ -394,10 +396,19 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
             for (i = 0; i < (n < CHUNK ? n : CHUNK); i++)
                 lane_store(f, fact, i, &v);
             for (offel = 0; offel < n; offel += take) {
+                int muted;
                 take = n - offel > CHUNK ? CHUNK : n - offel;
+                /* The mul's flags ARE scaleB's contract flags (the
+                 * factor is exact), but they are collected here and
+                 * emitted once at the end - so the pass itself stays
+                 * muted like every other internal pass, and the word
+                 * receives the whole operation's union rather than one
+                 * chunk of one exponent step's. */
+                muted = cft_flags_mute(dev, 1);
                 st = cft_run(dev, CFT_MUL, fmt, rnd,
                              (const uint8_t *)src + offel * esz, fact, NULL,
                              (uint8_t *)d + offel * esz, take, &fl, bus_out);
+                (void)cft_flags_mute(dev, muted);
                 if (st != CFT_OK) {
                     free(fact);
                     return st;
@@ -410,8 +421,7 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
             src = d;
         }
         free(fact);
-        if (flags_out)
-            *flags_out = acc;
+        cft_flags_emit(dev, acc, flags_out);
         return CFT_OK;
     }
 
@@ -448,8 +458,7 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
             }
             lane_store(f, (uint8_t *)d, i, &v);
         }
-        if (flags_out)
-            *flags_out = acc;
+        cft_flags_emit(dev, acc, flags_out);
         return CFT_OK;
     }
 }
@@ -476,8 +485,7 @@ CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
     if (!cft_supports(dev, cmp, fmt))
         return CFT_ERR_UNSUPPORTED;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     if (!b)
@@ -506,8 +514,7 @@ CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
     st = step(dev, cmp, fmt, CFT_SF_RNE, a, b, NULL, d, n, bus_out);
     if (st != CFT_OK)
         return st;
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -531,8 +538,7 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
 
@@ -567,8 +573,7 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
         }
         lane_store(fd, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -607,8 +612,7 @@ static cft_status cvt_from_core(cft_device *dev, cft_format fmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -651,8 +655,7 @@ static cft_status cvt_from_core(cft_device *dev, cft_format fmt,
         }
         lane_store(f, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -797,8 +800,7 @@ static cft_status cvt_to_core(cft_device *dev, cft_format fmt, cft_round rnd,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -821,8 +823,7 @@ static cft_status cvt_to_core(cft_device *dev, cft_format fmt, cft_round rnd,
         else
             ((uint64_t *)dst)[i] = out64;
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -872,8 +873,7 @@ CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -911,8 +911,7 @@ CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
         }
         lane_store(f, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -970,8 +969,7 @@ CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -983,8 +981,7 @@ CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
         next_up_lane(f, &xa, &v, &acc);
         lane_store(f, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -1001,8 +998,7 @@ CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     f = &cft_sf_formats[(int)fmt];
@@ -1034,8 +1030,7 @@ CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
         }
         lane_store(f, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -1283,8 +1278,7 @@ CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     if (!b)
@@ -1300,7 +1294,186 @@ CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
             return CFT_ERR_INTERNAL;
         lane_store(f, (uint8_t *)d, i, &v);
     }
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
+}
+
+/* ---------------------------------------------------------------
+ * The magnitude forms of minimum and maximum (754-2019 9.6, ABI 0.7)
+ *
+ * The other four of clause 9.6, quoted in cft.h and defined by the
+ * standard purely by deferral:
+ *
+ *   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+ *    otherwise minimum(x, y)." (9.6)
+ *
+ * They live in this file rather than a new one because they are the
+ * same KIND of operation as everything above - host-side bit surgery
+ * on the encoding, no floating-point arithmetic, no pass to issue -
+ * and because they are written out of exactly the lane helpers this
+ * file already has (c5_validate, lane_load/lane_store, cls_of). A
+ * second file would have had to copy all four.
+ *
+ * The base operations in the last position are the tile's opcodes 7
+ * to 10, but issuing cft_run for them would be wrong here rather than
+ * merely slow: cft_run gates on the device's min/max opcode group and
+ * would refuse on a trimmed bitstream, where these four - being host
+ * operations with no opcode of their own - are always available. So
+ * the base rule is restated below, from the same 9.6 text
+ * python/cft_golden/softfloat.py's _minmax implements, and
+ * host/tests/minmax_mag_check.py holds the two identical over seeded
+ * pools at all four formats.
+ *
+ * The whole operation, once the NaNs are out of the way, is a compare
+ * of the two sign-cleared encodings: for non-NaN operands that bit
+ * pattern is monotone in the magnitude, which is the same property
+ * the ordering above relies on.
+ * --------------------------------------------------------------- */
+
+/* One lane of any of the four. want_max picks maximum over minimum;
+ * number picks the ...Number form. Writes the result and ORs this
+ * lane's exceptions into *acc. */
+static void minmax_mag_lane(const cft_fmt_desc *f, const cft_bn *xa,
+                            const cft_bn *xb, int want_max, int number,
+                            cft_bn *v, uint32_t *acc)
+{
+    lane_cls ka, kb;
+    cft_bn ma, mb;
+    int cmp;
+
+    cls_of(f, xa, &ka);
+    cls_of(f, xb, &kb);
+
+    /* 9.6 through 6.2: a signaling NaN operand signals invalid in
+     * every one of the four, and it is the only exception any of them
+     * can raise - there is no arithmetic here to be inexact. */
+    if ((ka.kind == K_NAN && ka.signaling) ||
+        (kb.kind == K_NAN && kb.signaling))
+        *acc |= CFT_SF_INVALID;
+
+    if (ka.kind == K_NAN || kb.kind == K_NAN) {
+        /* |NaN| is unordered against everything, so both magnitude
+         * tests are false and this is 9.6's "otherwise" - the base
+         * operation's NaN rule, which is the whole difference between
+         * the plain and the ...Number forms:
+         *
+         *   minimum/maximum: "a quiet NaN if either operand is a NaN,
+         *   according to 6.2".
+         *   minimumNumber/maximumNumber: "the number if one operand is
+         *   a number and the other is a NaN ... If both operands are
+         *   NaNs, a quiet NaN is returned ... unless both operands are
+         *   NaNs, the signaling NaN is otherwise ignored and not
+         *   converted to a quiet NaN".
+         */
+        if (!number || (ka.kind == K_NAN && kb.kind == K_NAN))
+            cft_sf_qnan(f, v);
+        else if (ka.kind == K_NAN)
+            cft_bn_copy(v, xb);
+        else
+            cft_bn_copy(v, xa);
+        return;
+    }
+
+    /* |a| against |b|, on the sign-cleared encodings. */
+    cft_bn_copy(&ma, xa);
+    cft_bn_copy(&mb, xb);
+    cft_bn_clearbit(&ma, f->width - 1);
+    cft_bn_clearbit(&mb, f->width - 1);
+    cmp = cft_bn_cmp(&ma, &mb);
+
+    if (cmp != 0) {
+        /* The magnitude decides, and the sign has no say at all:
+         * minimumMagnitude(-5, +1) is +1. */
+        int take_a = want_max ? (cmp > 0) : (cmp < 0);
+        cft_bn_copy(v, take_a ? xa : xb);
+        return;
+    }
+
+    /* Equal magnitudes: 9.6's "otherwise" again, so the base
+     * operation decides on the SIGN. Both forms agree here, since
+     * neither operand is a NaN:
+     *
+     *   minimum: "x if x < y, y if y < x ... For this operation, -0
+     *   compares less than +0. Otherwise (i.e., when x = y and signs
+     *   are the same) it is either x or y."
+     *
+     * Equal magnitude with equal sign is that open case, and it
+     * cannot be observed: for a non-NaN operand the encoding IS the
+     * sign followed by the magnitude bits, so x and y are the same
+     * bits and either choice returns them. Taking x is the shortest
+     * way to say so. Equal magnitude with DIFFERENT signs is the
+     * interesting row: the negative one is the smaller, the positive
+     * one the larger, and that covers +-0 as a case of itself. */
+    if (ka.sign == kb.sign) {
+        cft_bn_copy(v, xa);
+        return;
+    }
+    /* ka.sign != kb.sign: a is the negative one iff ka.sign. */
+    if (want_max)
+        cft_bn_copy(v, ka.sign ? xb : xa);
+    else
+        cft_bn_copy(v, ka.sign ? xa : xb);
+}
+
+static cft_status minmax_mag_batch(cft_device *dev, cft_format fmt,
+                                   const void *a, const void *b, void *d,
+                                   size_t n, uint32_t *flags_out,
+                                   int want_max, int number)
+{
+    const cft_fmt_desc *f;
+    uint32_t acc = 0;
+    size_t i;
+    cft_status st;
+
+    st = c5_validate(dev, fmt, a, d, n);
+    if (st != CFT_OK)
+        return st;
+    if (n == 0) {
+        cft_flags_emit(dev, 0, flags_out);
+        return CFT_OK;
+    }
+    if (!b)
+        return CFT_ERR_INVALID_ARGUMENT;
+    f = &cft_sf_formats[(int)fmt];
+    if (size_overflows(f, n))
+        return CFT_ERR_INVALID_ARGUMENT;
+
+    for (i = 0; i < n; i++) {
+        cft_bn xa, xb, v;
+        /* Both operands read before the store, so d may alias either. */
+        lane_load(f, (const uint8_t *)a, i, &xa);
+        lane_load(f, (const uint8_t *)b, i, &xb);
+        minmax_mag_lane(f, &xa, &xb, want_max, number, &v, &acc);
+        lane_store(f, (uint8_t *)d, i, &v);
+    }
+    cft_flags_emit(dev, acc, flags_out);
+    return CFT_OK;
+}
+
+CFT_API cft_status cft_min_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out)
+{
+    return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 0, 0);
+}
+
+CFT_API cft_status cft_max_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out)
+{
+    return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 1, 0);
+}
+
+CFT_API cft_status cft_minnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out)
+{
+    return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 0, 1);
+}
+
+CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out)
+{
+    return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 1, 1);
 }

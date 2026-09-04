@@ -912,6 +912,141 @@ device pass: the work is exact integer division and digit generation,
 so the device argument is context and the results are bit-identical
 across backends by construction.
 
+## The status word (clause 7.1 and 5.7.4), and what it cannot do
+
+Every entry point has always returned the exceptions it raised in its
+`flags_out`. That is a per-call answer, and clause 7.1 asks for
+something else beside it:
+
+> "For each kind of exception the implementation shall provide a
+> corresponding status flag ... Status flags shall be lowered only at
+> the user's request. The user shall be able to test and to alter the
+> status flags individually or collectively, and shall further be able
+> to save and restore all at one time (see 5.7.4)."
+
+From ABI 0.7 the library carries that word. It is one `uint32_t` on
+the device handle, in the same five `cft_exception` bits every call
+already returns; a fresh device opens with every flag lowered, which
+is 7.1's "A program that does not inherit status flags from another
+source begins execution with all status flags lowered"; and 5.7.4's
+six operations - `cft_lower_flags`, `cft_raise_flags`,
+`cft_test_flags`, `cft_save_all_flags`, `cft_restore_flags`,
+`cft_test_saved_flags` - are the caller's whole interface to it. Two
+of them can lower a flag and nothing else in the system can:
+`cft_lower_flags`, and `cft_restore_flags` where the saved word has
+one low inside the mask.
+
+**The word is not part of the determinism contract, and that is the
+point.** Nothing in libcft reads it back. Not a rounding decision, not
+a special case, not a branch: the arithmetic writes to it and never
+from it. So the same inputs give the same bits whatever the word
+holds, a run that clears it and a run that does not compute the same
+answers, and a device backend that could not report it at all would
+still be bit-identical. It records what happened; it never influences
+what happens.
+
+Three properties of the word are contract, because a caller can
+observe them:
+
+- **It is the union of every call's own flags, and nothing else.** A
+  call's `flags_out` and its contribution to the word are written from
+  the same value at the same moment (one internal seam, `cft_flags_emit`,
+  which every producing entry point ends with), so the two can never
+  disagree about what an operation signalled.
+- **A composed operation contributes what it signals, not what its
+  scaffolding signals.** `cft_div`, `cft_sqrt`, `cft_rint`,
+  `cft_scaleb`, `cft_cmp_sig` and the two composed reductions reach
+  their answers through internal `cft_run`/`cft_reduce`/
+  `cft_program_run` passes whose flags they discard - the Newton
+  iteration behind a division is inexact on almost every step. Those
+  passes run muted: `cft_div(1, 0)` leaves divideByZero standing in the
+  word and nothing else, exactly as its `flags_out` says. The same
+  discipline covers 9.4's infinity override for sumSquare and sumAbs,
+  which REPLACES the tree's flags rather than adding to them.
+- **A call that raises nothing leaves the word exactly as it stood.**
+  Not "mostly": ORing zero is the identity. The non-computational
+  operations (`cft_class`, `cft_total_order`, the 9.7 payload three)
+  have no flag word at all and touch nothing.
+
+The word is per DEVICE, and a `cft_device` is not thread-safe, so two
+threads never share one - each opens its own. The language surfaces
+have exactly one word, not two: `cft.hpp`'s context and `cftmpfr`'s
+`Context` used to keep sticky words of their own and now read and
+lower the library's, with 5.7.4's six operations on each by their 754
+names. `last_flags()` stays each surface's own, because "the most
+recent call through this object" is not a 754 concept and no library
+word could answer it.
+
+`cft_is754version1985`, `cft_is754version2008` and
+`cft_is754version2019` (5.7.1) are constants - 0, 0, 1 - and
+docs/COMPLIANCE.md is what the third one rests on. The second is
+false for a reason worth stating here rather than only in the header:
+754-2008 REQUIRED `minNum`, `maxNum`, `minNumMag` and `maxNumMag` in
+its clause 5.3.1, and 754-2019 removed them. Its own NOTE at the end
+of 5.3.1 says so - "The minNum and maxNum operations of the 2008
+version of the standard have been replaced by the recommended
+operations of 9.6" - and the replacements differ on a signaling NaN.
+This contract implements the 2019 semantics, so it does not provide
+2008's required operations and cannot claim 2008.
+
+## The magnitude forms of minimum and maximum (clause 9.6)
+
+The tile has carried `minimum`, `minimumNumber`, `maximum` and
+`maximumNumber` as opcodes 7 to 10 since the beginning. ABI 0.7 adds
+the other four of 9.6 as host entry points - `cft_min_mag`,
+`cft_minnum_mag`, `cft_max_mag`, `cft_maxnum_mag` - and the standard
+defines each in one line, by deferral:
+
+> "minimumMagnitude(x, y) is x if | x| < | y|, y if | y| < | x|,
+> otherwise minimum(x, y).
+> minimumMagnitudeNumber(x, y) is x if | x| < | y|, y if | y| < | x|,
+> otherwise minimumNumber(x, y).
+> maximumMagnitude(x, y) is x if | x| > | y|, y if | y| > | x|,
+> otherwise maximum(x, y).
+> maximumMagnitudeNumber(x, y) is x if | x| > | y|, y if | y| > | x|,
+> otherwise maximumNumber(x, y)." (9.6)
+
+They select an operand; they never compute one. There is no rounding,
+no attribute, no opcode and no RTL - the whole operation is a compare
+of the two sign-cleared encodings (which for a non-NaN operand is
+monotone in the magnitude) followed by a copy. So the answer is
+bit-identical on every backend by construction, the way `nextUp` is,
+and the result is always one of the two operand ENCODINGS unless the
+base operation delivers a NaN - and then it is this contract's
+canonical quiet NaN, like every other NaN result here.
+
+Reading the definition literally settles the three edge families, and
+this contract does read it literally:
+
+- **A NaN has no magnitude.** Neither `|x| < |y|` nor `|y| < |x|` can
+  hold when either operand is a NaN, because both comparisons are
+  unordered and unordered is false. Every NaN case is therefore the
+  "otherwise", and each of the four inherits the NaN rule of the
+  operation named in its last position: the two plain forms return the
+  canonical quiet NaN if either operand is a NaN; the two `...Number`
+  forms return the number when only one operand is a NaN and a quiet
+  NaN when both are. A signaling NaN operand raises invalid in all
+  four and is, in the `...Number` forms, "otherwise ignored and not
+  converted to a quiet NaN" (9.6). Invalid is the only exception any
+  of the four can raise: there is no arithmetic here to be inexact.
+- **Equal magnitudes of opposite sign are the "otherwise" too.**
+  `minimumMagnitude(+3, -3)` is `minimum(+3, -3)` = -3, and
+  `maximumMagnitude(+3, -3)` is `maximum(+3, -3)` = +3, both orders of
+  the operands. An implementation that quietly prefers x or y on that
+  tie is not conforming, and it is the one case worth testing hardest
+  - so the model tests, the C harness, the vector set and the MPFR
+  campaign all sweep every equal-magnitude pair in both sign
+  combinations, and the package's negative control is exactly that
+  substitution.
+- **The two zeros have equal magnitude,** so they come out of the base
+  operation's signed-zero rule rather than a rule of their own: -0 for
+  the two minima, +0 for the two maxima.
+
+Equal magnitudes with the SAME sign is the one case 754 leaves open
+("Otherwise ... it is either x or y"). It cannot be observed: equal
+magnitude and equal sign means identical encodings for every non-NaN
+operand, so x and y are the same bits.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -1052,6 +1187,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `host/tests/transcend_check.py` | the thirty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tests/reduce_check.py` | all seven of clause 9.4 - the tree at every n, both composition identities, the scaled products' invariant | golden model, plus the library against itself for the identities |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
+| `host/tests/minmax_mag_check.py` | the sticky status word (7.1, 5.7.4), the 5.7.1 predicates, and 9.6's four magnitude forms | the golden model per element for 9.6; the standard's own sentences for the word, which is state and has no model counterpart |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 
 What is deliberately NOT claimed yet: behaviour on a physical card
@@ -1073,6 +1209,10 @@ encodings and the payload field 6.2.1, payload recommendation
 functions and their special-value tables 9.2 (the table itself 9.2.1);
 the augmented arithmetic operations and roundTiesTowardZero 9.5;
 the reduction operations - sum, dot, sumSquare, sumAbs and the three
-scaled products - 9.4; minimum/maximum 9.6; the reproducible-operation list 11.
+scaled products - 9.4; minimum, minimumNumber, maximum and
+maximumNumber 9.6, and the four MAGNITUDE forms of them in the same
+subclause; the status flags and their default handling 7.1, the six
+operations on subsets of them 5.7.4, the conformance predicates
+5.7.1; the reproducible-operation list 11.
 docs/COMPLIANCE.md is the clause-by-clause matrix: every operation the
 standard names for binary formats, with its status here.

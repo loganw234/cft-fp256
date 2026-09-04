@@ -1000,6 +1000,139 @@ reads it the same way. Anything outside the set gives `+0`, which is
 | `cft.hpp` vs `cft.h`, every entry point twice | 210,511 at C++17 and again at C++20 | identical encodings, flags and characters |
 | `test_cftmpfr.py` | 640 | pass |
 
+## The status word, the predicates, and 9.6's magnitude four (ABI 0.7)
+
+Three things clause 5 asked of the library and one clause 9 recommends.
+They arrived together because they share a seam.
+
+### The status word (7.1, 5.7.4)
+
+```c
+#define CFT_FLAGS_ALL /* the five cft_exception bits, as one mask */
+
+void     cft_lower_flags(cft_device *dev, uint32_t mask);
+void     cft_raise_flags(cft_device *dev, uint32_t mask);
+int      cft_test_flags(cft_device *dev, uint32_t mask);
+uint32_t cft_save_all_flags(cft_device *dev);
+void     cft_restore_flags(cft_device *dev, uint32_t saved, uint32_t mask);
+int      cft_test_saved_flags(uint32_t saved, uint32_t mask);
+```
+
+`flags_out` is unchanged and still answers "what did THIS call raise".
+The word answers the other question 7.1 asks - "what has been raised
+since the caller last lowered anything" - and it is the caller who
+lowers it, nobody else. A fresh device opens with every flag down.
+
+Reading the six against 5.7.4, in case a porter is holding the
+standard: `mask` is 5.7.4's exceptionGroup, "any subset of the
+exceptions", so every one of the six takes one; `cft_test_flags` is
+"whether ANY of the flags ... are raised" and so returns 1 or 0 rather
+than the intersection, which a caller could mistake for a flag word;
+`cft_restore_flags` RESTORES rather than ORs, so a flag inside the mask
+that is low in `saved` comes back low - that is the only reading under
+which `cft_restore_flags(dev, cft_save_all_flags(dev), CFT_FLAGS_ALL)`
+is the identity 5.7.4 wants it to be, and it is the one an OR-only
+implementation gets wrong while still passing a round-trip test;
+`cft_test_saved_flags` takes no device, because 5.7.4 puts the saved
+word in the first operand and there is nothing else involved.
+
+A NULL device is accepted by all of them and behaves as a handle whose
+word is permanently zero: the mutators do nothing and the tests answer
+0. That matches `cft_close()` and `cft_buffer_free()`, which have
+always tolerated NULL.
+
+**Rows a porter should not have to infer.** All of these are tested,
+and each of them is a way a plausible implementation goes wrong:
+
+| situation | the word after |
+|---|---|
+| a call that raises nothing | exactly what it was - ORing zero is the identity |
+| `cft_class`, `cft_total_order*`, the 9.7 payload three | unchanged; they are non-computational and have no flag word at all |
+| `cft_div(1, 0)` | divideByZero alone. The Newton scaffolding is inexact on almost every step and contributes nothing |
+| a batch call | one OR of every element's flags, in one step, the same word `flags_out` receives |
+| `cft_reduce(CFT_SUMABS)` over a vector holding an infinity and a signalling NaN | 9.4's override REPLACES the tree's flags, and the word gets the override's, not both |
+| two contexts (C++ or Python) over one device | one word between them, which is what 7.1 describes |
+
+Internally every producing entry point ends with one call,
+`cft_flags_emit(dev, acc, flags_out)`, and that is the only thing in
+the library that can raise the word. A new entry point therefore costs
+one line, and a composed one brackets its internal passes with
+`cft_flags_mute` so that scaffolding never reaches the word. Both are
+internal (`host/src/softfloat.h`); they are described here because the
+next entry point somebody adds needs to know about exactly two of
+them.
+
+**The word never influences a result.** Nothing reads it back - not a
+rounding, not a special case, not a branch - so determinism is exactly
+what it was. See docs/DETERMINISM.md.
+
+### The conformance predicates (5.7.1)
+
+```c
+int cft_is754version1985(void);   /* 0 */
+int cft_is754version2008(void);   /* 0 */
+int cft_is754version2019(void);   /* 1 */
+```
+
+Constants, no device, no format, safe before `cft_open`. What each
+rests on is in `cft.h` and in docs/COMPLIANCE.md; the one that is
+easily misread is 2008, which is false not because something is
+missing but because 754-2008 required `minNum`/`maxNum`/`minNumMag`/
+`maxNumMag` in its 5.3.1 and 2019 replaced them with 9.6's, whose
+signaling-NaN rule differs. This library implements the 2019
+semantics.
+
+### 9.6's magnitude forms
+
+```c
+cft_status cft_min_mag   (cft_device *dev, cft_format fmt,
+                          const void *a, const void *b, void *d,
+                          size_t n, uint32_t *flags_out);
+cft_status cft_max_mag   (...);   /* same signature */
+cft_status cft_minnum_mag(...);
+cft_status cft_maxnum_mag(...);
+```
+
+HOST entry points of the `nextUp` kind: no rounding argument, because
+there is no rounding - 9.6 selects one of the operands rather than
+computing a value. No opcode either, so they do not gate on the
+device's opcode groups and are available on a bitstream that does not
+carry the min/max group at all. `d` may alias `a` or `b`.
+
+The definitions, the NaN rule each inherits, and the equal-magnitude
+tie are in docs/DETERMINISM.md and quoted in `cft.h`. The two things a
+caller most often wants stated plainly:
+
+- `cft_min_mag(-3, +2)` is `+2`, where `CFT_MIN(-3, +2)` is `-3`. The
+  magnitude decides and the sign has no vote.
+- `cft_max_mag(+3, -3)` is `+3` and `cft_min_mag(+3, -3)` is `-3`,
+  both orders of the operands, because equal magnitudes fall through
+  to `maximum`/`minimum`. The same rule gives `-0` for the minima and
+  `+0` for the maxima of the two zeros.
+
+### How they are scored
+
+| check | cases | result |
+|---|---|---|
+| `minmax_mag_check.py`: the four vs the golden model at all four formats - scalar, batch, every equal-magnitude pair, aliasing and refusals; plus the status word against 7.1's own sentences and the three predicates | 53,517 | zero disagreements |
+| `python/tests/test_minmax_mag.py`: the model against an independent reading of the encoding, and against CPython's binary64 at fp64 | 94 | pass |
+| `cft_conformance` replay of the four new `-minmaxmag` sets, one element at a time and then as arrays | 2,432 per format | every case, bits and flags |
+| MPFR parity: `mpfr_cmpabs` for the magnitude ordering and `mpfr_min`/`mpfr_max` for the equal-magnitude tie, with 9.6's NaN rules restated | see docs/VALIDATION.md | zero value AND zero flag mismatches |
+| `api_test.c`, `cpp_api_test.cpp`, `test_cftmpfr.py` | the C, C++ and Python surfaces | pass |
+
+One line about the MPFR row, because it is the only place in this
+package where an oracle and a restatement sit in the same function.
+The ORACLE half is MPFR's and it is the whole numeric content:
+`mpfr_cmpabs` decides `|x|` against `|y|` in MPFR's own arithmetic, and
+`mpfr_min`/`mpfr_max` decide the equal-magnitude case - the MPFR manual
+defines them exactly as 754 defines minimum and maximum on numbers,
+signed zeros included. The RESTATEMENT half is the NaN handling, and it
+has to be: MPFR has no signaling NaN, and `mpfr_min` implements only
+the `...Number` NaN rule, so the plain forms' rule has no counterpart
+to compare against. Those rows are two readings of 9.6 scored against
+each other, not two oracles, and `host/tools/mpfr_check.c` says so at
+the top of the block.
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future

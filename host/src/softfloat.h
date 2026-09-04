@@ -213,4 +213,63 @@ void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out);
 void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out);
 void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out);
 
+/* ---------------------------------------------------------------
+ * The status word's one seam (ABI 0.7)
+ *
+ * IEEE 754-2019 7.1: "For each kind of exception the implementation
+ * shall provide a corresponding status flag ... Status flags shall be
+ * lowered only at the user's request." The word itself lives on the
+ * device handle, whose shape is device.c's business; this is the only
+ * way the rest of the library reaches it.
+ *
+ * EVERY entry point that produces flags ends with exactly this call
+ * and nothing else - the `if (flags_out) *flags_out = acc;` it
+ * replaced - so that the per-call word and the sticky word can never
+ * disagree about what an operation signalled, and so that a new entry
+ * point costs one line rather than two places to remember.
+ *
+ * acc is the union of the call's per-element flags. It is ORed into
+ * the device's word (nothing here ever lowers it: 7.1 reserves that
+ * for the caller) and written to flags_out when that is non-NULL.
+ * Passing acc == 0 is therefore a no-op on the word, which is what
+ * makes a call that signals nothing leave the caller's flags alone.
+ * A NULL dev writes flags_out and keeps nothing, so the entry points
+ * that tolerate one stay unchanged.
+ *
+ * The word is write-only from the arithmetic's point of view: nothing
+ * in libcft ever reads it back to decide a result, so it cannot
+ * influence one bit of any answer. Determinism is untouched.
+ * --------------------------------------------------------------- */
+struct cft_device;              /* cft.h's opaque handle; device.c owns it */
+
+void cft_flags_emit(struct cft_device *dev, uint32_t acc,
+                    uint32_t *flags_out);
+
+/* The composition discipline's half of the same seam.
+ *
+ * A composed operation - cft_div, cft_sqrt, cft_rint, cft_scaleb,
+ * cft_cmp_sig, the two composed reductions - reaches its answer by
+ * issuing cft_run/cft_reduce/cft_program_run passes, and those passes
+ * raise flags of their OWN that the operation does not signal:
+ * divsqrt.c's Newton iteration is inexact on almost every step, and
+ * 1/0 must still signal divideByZero and nothing else. flags_out has
+ * always discarded them (see the flag paragraph in divsqrt.c and
+ * clause5.c); the status word has to discard exactly the same ones,
+ * or cft_div(1, 0) would leave inexact standing in it and 7.1's word
+ * would be a record of the scaffolding rather than of the operation.
+ *
+ * So an internal pass runs muted: cft_flags_emit still writes the
+ * pass's own flags_out, which is how the composition collects them,
+ * but ORs nothing into the device. Only the outermost entry point's
+ * emit - the one carrying the contract flags - reaches the word.
+ *
+ * Save-and-restore rather than a boolean, so it nests:
+ *
+ *     const int prev = cft_flags_mute(dev, 1);
+ *     ... issue passes ...
+ *     (void)cft_flags_mute(dev, prev);
+ *
+ * Returns the previous state. NULL dev is 0 and does nothing. */
+int cft_flags_mute(struct cft_device *dev, int on);
+
 #endif /* CFT_SOFTFLOAT_H */

@@ -473,8 +473,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     if (!prog)
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0) {
-        if (flags)
-            *flags = 0;
+        cft_flags_emit(prog->dev, 0, flags);
         return CFT_OK;
     }
     if (!a || (!deposits && prog->max_deposits))
@@ -518,8 +517,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
                 hw, prog->fmt_code, prog->image, prog->image_bytes,
                 prog->max_deposits, a, b, c, deposits, counts, n, &fl, &bs);
             if (st == CFT_OK) {
-                if (flags)
-                    *flags = fl;
+                cft_flags_emit(prog->dev, fl, flags);
                 if (bus)
                     *bus = bs;
             }
@@ -569,8 +567,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     }
 
     free(B);
-    if (flags)
-        *flags = acc_flags;
+    cft_flags_emit(prog->dev, acc_flags, flags);
     /* A deposit overflow is reported, not an error. The deposits that
      * fit are correct and the run is reproducible; what the caller
      * lost is the tail, and it needs to know that without being told

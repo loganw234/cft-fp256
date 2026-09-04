@@ -1951,3 +1951,320 @@ def test_augmented_refuses_an_unknown_name():
     with pytest.raises(ValueError):
         cftmpfr._lib.augmented(ctx._dev, "div", ctx._fi.code, b"", b"", 0,
                                ctx._fi.esz)
+
+
+# ---------------------------------------------------------------------
+# ABI 0.7: the status word (7.1, 5.7.4), the conformance predicates
+# (5.7.1), and 9.6's four magnitude forms
+#
+# What a binding can break here that it cannot break anywhere else:
+#
+# * ``Context.flags`` used to be an ordinary attribute this package
+#   maintained. It is now a view onto the LIBRARY's status word, so
+#   the ways it can go wrong are new ones - a getter that reads a
+#   stale copy, a setter that ORs where 754 says restore, a mask
+#   argument dropped on the way through ctypes.
+# * The four magnitude forms take NO rounding attribute, so the
+#   context's could leak into the call the way it could for the
+#   augmented three; and their result must be one of the OPERANDS, so
+#   a binding that returned a fresh encoding "equal" to one of them
+#   would pass a value comparison and fail a bit comparison.
+# ---------------------------------------------------------------------
+
+MINMAX_MAG = ("min_mag", "max_mag", "minnum_mag", "maxnum_mag")
+
+
+def _snan_bits(prec):
+    """A signaling NaN encoding: the NaN exponent, the quiet bit CLEAR
+    and a non-zero payload. Derived from the format's widths rather
+    than transcribed."""
+    exp_w, man_w = {24: (8, 23), 53: (11, 52), 113: (15, 112),
+                    237: (19, 236)}[prec]
+    return (((1 << exp_w) - 1) << man_w) | 1
+
+
+def _mm_model(name):
+    return {"min_mag": _gsf.fminmag, "max_mag": _gsf.fmaxmag,
+            "minnum_mag": _gsf.fminnummag,
+            "maxnum_mag": _gsf.fmaxnummag}[name]
+
+
+def test_conformance_predicates():
+    """5.7.1's three, as module-level functions - they describe the
+    programming environment, not a context. cft.h says what each
+    answer rests on; here we only check the binding reaches them and
+    reports 0, 0, 1 rather than the truthiness of a function object."""
+    assert cftmpfr.is754version1985() is False
+    assert cftmpfr.is754version2008() is False
+    assert cftmpfr.is754version2019() is True
+
+
+def test_flags_attribute_is_the_librarys_word():
+    """7.1's status word, read through Context.flags. A call raises it,
+    nothing lowers it but the caller, and the property is the library's
+    word rather than a copy: lowering through the C entry point must be
+    visible in the attribute."""
+    ctx = Context(24)
+    assert ctx.flags == 0, "a fresh Context opens with its flags lowered"
+
+    big = ctx.from_bits(0x7f7fffff)          # max normal
+    ctx.add(big, big)                        # overflow + inexact
+    assert ctx.flags == ctx.last_flags != 0
+    first = ctx.flags
+
+    ctx.mul(ctx(1.0), ctx(1.0))              # exact: raises nothing
+    assert ctx.last_flags == 0
+    assert ctx.flags == first, "a call that raises nothing changes nothing"
+
+    ctx.div(ctx(1.0), ctx.zero())            # divideByZero
+    assert ctx.last_flags == cftmpfr.FLAG_DIVBYZERO, \
+        "the composed divide signals divideByZero and nothing else"
+    assert ctx.flags == first | cftmpfr.FLAG_DIVBYZERO
+
+    # the attribute really is the library's word, not a shadow of it
+    cftmpfr._lib.lower_flags(ctx._dev, cftmpfr.FLAGS_ALL)
+    assert ctx.flags == 0
+    cftmpfr._lib.raise_flags(ctx._dev, cftmpfr.FLAG_INEXACT)
+    assert ctx.flags == cftmpfr.FLAG_INEXACT
+
+
+def test_flags_attribute_stays_assignable():
+    """The pre-0.7 spellings still work: ``ctx.flags = 0``,
+    ``ctx.flags |= bits``, and clear_flags()."""
+    ctx = Context(53)
+    ctx.flags = cftmpfr.FLAG_INVALID | cftmpfr.FLAG_OVERFLOW
+    assert ctx.flags == cftmpfr.FLAG_INVALID | cftmpfr.FLAG_OVERFLOW
+    ctx.flags |= cftmpfr.FLAG_INEXACT
+    assert ctx.flags == (cftmpfr.FLAG_INVALID | cftmpfr.FLAG_OVERFLOW |
+                         cftmpfr.FLAG_INEXACT)
+    ctx.flags = 0
+    assert ctx.flags == 0 and ctx.test_flags() is False
+    ctx.raise_flags(cftmpfr.FLAG_UNDERFLOW)
+    ctx.clear_flags()
+    assert ctx.flags == 0
+
+
+def test_flag_names_reads_the_word():
+    ctx = Context(24)
+    ctx.clear_flags()
+    ctx.raise_flags(cftmpfr.FLAG_INVALID | cftmpfr.FLAG_INEXACT)
+    assert set(ctx.flag_names()) == {"invalid", "inexact"}
+    assert ctx.flag_names(cftmpfr.FLAG_OVERFLOW) == ("overflow",)
+
+
+def test_the_six_operations_of_5_7_4():
+    """lowerFlags, raiseFlags, testFlags, saveAllFlags, restoreFlags
+    and testSavedFlags, by their 754 names."""
+    ctx = Context(113)
+    ctx.lower_flags()
+    assert ctx.save_all_flags() == 0
+
+    ctx.raise_flags(cftmpfr.FLAGS_ALL)
+    assert ctx.save_all_flags() == cftmpfr.FLAGS_ALL
+
+    # lower BY MASK: only the named flags go down
+    ctx.lower_flags(cftmpfr.FLAG_INEXACT | cftmpfr.FLAG_UNDERFLOW)
+    assert ctx.save_all_flags() == (cftmpfr.FLAGS_ALL &
+                                    ~(cftmpfr.FLAG_INEXACT |
+                                      cftmpfr.FLAG_UNDERFLOW))
+    # testFlags is 5.7.4's "whether ANY of the flags ... are raised"
+    assert ctx.test_flags(cftmpfr.FLAG_INEXACT) is False
+    assert ctx.test_flags(cftmpfr.FLAG_INVALID) is True
+    assert ctx.test_flags(cftmpfr.FLAG_INEXACT |
+                          cftmpfr.FLAG_INVALID) is True
+    assert ctx.test_flags(0) is False
+
+    # the save/restore round trip 5.7.4 exists to provide
+    saved = ctx.save_all_flags()
+    ctx.lower_flags()
+    ctx.raise_flags(cftmpfr.FLAG_INEXACT)
+    ctx.restore_flags(saved)
+    assert ctx.save_all_flags() == saved
+
+    # restore LOWERS inside the mask as well as raising - an OR-only
+    # implementation passes the round trip above and fails this
+    ctx.lower_flags()
+    ctx.raise_flags(cftmpfr.FLAGS_ALL)
+    ctx.restore_flags(0, cftmpfr.FLAG_INEXACT)
+    assert ctx.save_all_flags() == cftmpfr.FLAGS_ALL & ~cftmpfr.FLAG_INEXACT
+    ctx.restore_flags(cftmpfr.FLAGS_ALL, cftmpfr.FLAG_INEXACT)
+    assert ctx.save_all_flags() == cftmpfr.FLAGS_ALL
+    # ... and leaves everything outside the mask alone
+    ctx.lower_flags()
+    ctx.restore_flags(cftmpfr.FLAGS_ALL, cftmpfr.FLAG_DIVBYZERO)
+    assert ctx.save_all_flags() == cftmpfr.FLAG_DIVBYZERO
+
+    # testSavedFlags: the same question of a word the caller holds
+    assert Context.test_saved_flags(cftmpfr.FLAG_INVALID |
+                                    cftmpfr.FLAG_INEXACT,
+                                    cftmpfr.FLAG_INEXACT) is True
+    assert Context.test_saved_flags(cftmpfr.FLAG_INVALID,
+                                    cftmpfr.FLAG_INEXACT) is False
+    assert Context.test_saved_flags(0, cftmpfr.FLAGS_ALL) is False
+    ctx.lower_flags()
+
+
+def test_the_batch_path_feeds_the_same_word():
+    """A batch call's flag word is the OR over its elements, and that
+    same OR reaches the status word in one step."""
+    ctx = Context(24)
+    ctx.clear_flags()
+    big = ctx.from_bits(0x7f7fffff)
+    tiny = ctx.from_bits(0x00000001)
+    third = ctx.from_bits(0x3eaaaaab)
+    snan = ctx.from_bits(0x7fa00000)
+    xs = [big, tiny, ctx(1.0), snan]
+    ys = [big, third, ctx(1.0), ctx(1.0)]
+    _, fl = batch.mul(ctx, xs, ys)
+    for bit in (cftmpfr.FLAG_OVERFLOW, cftmpfr.FLAG_UNDERFLOW,
+                cftmpfr.FLAG_INEXACT, cftmpfr.FLAG_INVALID):
+        assert fl & bit, cftmpfr.flag_names(fl)
+    assert ctx.flags == fl
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_matches_the_model(prec):
+    """The four, per element, against python/cft_golden - which is the
+    definition. gmpy2 is no oracle here: MPFR's mpfr_min/mpfr_max are
+    2008's minNum, whose signaling-NaN rule 2019 changed, and it has
+    no magnitude forms at all."""
+    fmt = GOLDEN[prec]
+    ctx = Context(prec)
+    ops = pool(prec, count=26, seed=57)
+    checked = 0
+    for name in MINMAX_MAG:
+        model = _mm_model(name)
+        for xb in ops:
+            for yb in ops:
+                ctx.clear_flags()
+                r = getattr(ctx, name)(ctx.from_bits(xb), ctx.from_bits(yb))
+                assert (r.to_bits(), ctx.last_flags) == model(fmt, xb, yb), \
+                    (name, prec, hex(xb), hex(yb))
+                checked += 1
+    assert checked > 4000, checked
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_result_is_always_an_operand(prec):
+    """9.6 SELECTS; it never computes. So every result is one of the
+    two operand encodings bit for bit - unless the base operation
+    delivers a NaN, and then it is the canonical quiet NaN."""
+    ctx = Context(prec)
+    qnan = ctx.nan().to_bits()
+    ops = pool(prec, count=20, seed=59)
+    for name in MINMAX_MAG:
+        for xb in ops:
+            for yb in ops:
+                got = getattr(ctx, name)(ctx.from_bits(xb),
+                                         ctx.from_bits(yb)).to_bits()
+                if got == qnan:
+                    continue
+                assert got in (xb, yb), (name, prec, hex(xb), hex(yb),
+                                         hex(got))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_ignores_the_context_attribute(prec):
+    """There is no rounding in a selection, so the same pair must come
+    back under every attribute - RNDNA included. A binding that
+    forwarded the context's attribute into the call would pass every
+    other test in this file."""
+    ops = pool(prec, count=10, seed=61)
+    base = Context(prec, rounding="RNDN")
+    want = {}
+    for name in MINMAX_MAG:
+        for xb in ops:
+            for yb in ops:
+                r = getattr(base, name)(base.from_bits(xb),
+                                        base.from_bits(yb))
+                want[(name, xb, yb)] = (r.to_bits(), base.last_flags)
+    for mode in ("RNDZ", "RNDD", "RNDU", "RNDNA"):
+        ctx = Context(prec, rounding=mode)
+        for (name, xb, yb), expected in want.items():
+            r = getattr(ctx, name)(ctx.from_bits(xb), ctx.from_bits(yb))
+            assert (r.to_bits(), ctx.last_flags) == expected, \
+                (name, mode, prec, hex(xb), hex(yb))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_batch_equals_the_scalar_path(prec):
+    """One C call over an array must give, element for element, what n
+    scalar calls give - and a flag word that is their OR."""
+    ctx = Context(prec)
+    ops = pool(prec, count=24, seed=63)
+    xs = [ctx.from_bits(b) for b in ops]
+    ys = [ctx.from_bits(b) for b in reversed(ops)]
+    for name in MINMAX_MAG:
+        want, want_fl = [], 0
+        for x, y in zip(xs, ys):
+            ctx.clear_flags()
+            want.append(getattr(ctx, name)(x, y).to_bits())
+            want_fl |= ctx.last_flags
+        ctx.clear_flags()
+        out, fl = getattr(batch, name)(ctx, xs, ys)
+        assert [v.to_bits() for v in out] == want, (name, prec)
+        assert fl == want_fl and ctx.flags == fl, (name, prec)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_minmax_mag_named_rows(prec):
+    """The rows derived from 9.6's own sentence rather than from either
+    implementation: the magnitude decides regardless of sign, equal
+    magnitudes defer to the base operation, and a NaN is unordered so
+    it defers too."""
+    ctx = Context(prec)
+    one, minus_one = ctx(1.0), ctx(-1.0)
+    two, minus_three = ctx(2.0), ctx(-3.0)
+
+    assert ctx.min_mag(minus_one, two).same_bits(minus_one)
+    assert ctx.max_mag(minus_one, two).same_bits(two)
+    assert ctx.min_mag(minus_three, two).same_bits(two), \
+        "minimumMagnitude(-3, 2) is +2 where minimum(-3, 2) is -3"
+    assert ctx.max_mag(minus_three, two).same_bits(minus_three)
+
+    # equal magnitudes of opposite sign: 9.6's "otherwise"
+    assert ctx.min_mag(one, minus_one).same_bits(minus_one)
+    assert ctx.min_mag(minus_one, one).same_bits(minus_one)
+    assert ctx.max_mag(one, minus_one).same_bits(one)
+    assert ctx.max_mag(minus_one, one).same_bits(one)
+
+    pz, nz = ctx.zero(0), ctx.zero(1)
+    assert ctx.min_mag(pz, nz).same_bits(nz)
+    assert ctx.max_mag(pz, nz).same_bits(pz)
+    assert ctx.minnum_mag(nz, pz).same_bits(nz)
+    assert ctx.maxnum_mag(nz, pz).same_bits(pz)
+
+    # infinities are on the same ladder
+    pinf, ninf = ctx.inf(0), ctx.inf(1)
+    assert ctx.min_mag(ninf, one).same_bits(one)
+    assert ctx.max_mag(ninf, one).same_bits(ninf)
+    assert ctx.min_mag(pinf, ninf).same_bits(ninf)
+    assert ctx.max_mag(pinf, ninf).same_bits(pinf)
+
+    # the NaN rules, each inherited from the operation 9.6 names last
+    qn = ctx.nan()
+    sn = ctx.from_bits(_snan_bits(prec))
+    ctx.clear_flags()
+    assert ctx.min_mag(qn, one).same_bits(qn) and ctx.last_flags == 0
+    assert ctx.max_mag(one, qn).same_bits(qn) and ctx.last_flags == 0
+    assert ctx.minnum_mag(qn, one).same_bits(one) and ctx.last_flags == 0
+    assert ctx.maxnum_mag(one, qn).same_bits(one) and ctx.last_flags == 0
+    assert (ctx.minnum_mag(sn, one).same_bits(one) and
+            ctx.last_flags == cftmpfr.FLAG_INVALID), \
+        "a signaling NaN signals invalid and is otherwise ignored (9.6)"
+    assert (ctx.max_mag(sn, one).same_bits(qn) and
+            ctx.last_flags == cftmpfr.FLAG_INVALID), \
+        "where the plain form quiets it"
+    assert (ctx.maxnum_mag(sn, qn).same_bits(qn) and
+            ctx.last_flags == cftmpfr.FLAG_INVALID), \
+        "two NaNs give a quiet NaN even in the Number forms"
+    ctx.clear_flags()
+
+
+def test_minmax_mag_refuses_an_unknown_name():
+    ctx = Context(53)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.minmax_mag(ctx._dev, "midmag", ctx._fi.code, b"", b"",
+                                0, ctx._fi.esz)

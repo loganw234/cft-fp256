@@ -201,7 +201,9 @@ enum {
      * undersell the campaign while reporting only the larger would
      * oversell its independence. */
     T_RSUM, T_RDOT, T_RSUMSQ, T_RSUMABS,
-    T_SPROD, T_SPROD_SUM, T_SPROD_DIFF, NTALLY
+    T_SPROD, T_SPROD_SUM, T_SPROD_DIFF,
+    /* 754-2019 9.6's four magnitude forms (ABI 0.7) */
+    T_MINMAG, T_MINNUM_MAG, T_MAXMAG, T_MAXNUM_MAG, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -220,7 +222,8 @@ static const char *const TALLY_NAME[NTALLY] = {
     "from_dec", "to_dec", "from_hex", "to_hex",
     "aug_add", "aug_sub", "aug_mul",
     "sum", "dot", "sumsq", "sumabs",
-    "sprod", "sprod_sum", "sprod_diff"
+    "sprod", "sprod_sum", "sprod_diff",
+    "min_mag", "minnum_mag", "max_mag", "maxnum_mag"
 };
 static uint64_t tally[NTALLY][4];
 
@@ -2732,6 +2735,232 @@ static void check_chars(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 }
 
+/* ---- 9.6's magnitude forms of minimum and maximum ------------------ *
+ *
+ * WHICH HALF IS AN ORACLE AND WHICH IS A RESTATEMENT. This matters
+ * more here than anywhere else in this file, because the operation is
+ * a selection and a careless oracle would be this library's own logic
+ * written twice.
+ *
+ * The ORACLE half is MPFR's, and it is the whole numeric content of
+ * 9.6's first two clauses:
+ *
+ *   * mpfr_cmpabs(av, bv) decides |x| against |y|. MPFR converts the
+ *     encodings exactly (enc_to_mpfr) and compares magnitudes in its
+ *     own arbitrary-precision arithmetic; nothing in libcft or in the
+ *     golden model contributes to that answer, and at fp128/fp256 it
+ *     is the only implementation on this machine that can give one.
+ *   * mpfr_min / mpfr_max decide the "otherwise" when the magnitudes
+ *     are equal. The MPFR manual defines those exactly as 754 defines
+ *     minimum and maximum on numbers, signed zeros included: "If op1
+ *     and op2 are zeros of different signs, then rop is set to -0
+ *     (resp. +0)". So the -0/+0 rule, and the choice between +3 and
+ *     -3, come from MPFR rather than from a rule restated here.
+ *
+ * The RESTATEMENT half is the NaN handling, and it has to be, because
+ * MPFR cannot supply it:
+ *
+ *   * MPFR has no signaling NaN, so "an invalid operation exception is
+ *     signaled" (9.6) has no counterpart to compare against.
+ *   * mpfr_min implements only the ...Number NaN rule ("if op1 or op2
+ *     is NaN, then rop is set to the other value"), which is
+ *     minimumNumber's. The plain minimum's rule - "a quiet NaN if
+ *     either operand is a NaN" - is the opposite, and MPFR has no
+ *     function that does it.
+ *   * A NaN has no magnitude, so mpfr_cmpabs on one is meaningless
+ *     (MPFR sets erange and returns 0); the NaN cases must be taken
+ *     out before the oracle is consulted, which is a decision about
+ *     the standard's text and not a measurement.
+ *
+ * So: every NaN row below is this file reading 9.6 and 6.2, scored
+ * against libcft reading the same clauses - two readings, not two
+ * oracles - and every numeric row is MPFR's answer. The golden model
+ * is the third opinion on both halves and host/tests/
+ * minmax_mag_check.py is where that comparison lives.
+ *
+ * The comparison is a memcmp of ENCODINGS rather than agree()'s value
+ * comparison, because 9.6 selects an operand: an implementation that
+ * returned a numerically equal but differently encoded result - the
+ * wrong one of two NaNs, or +0 where -0 was asked for - would pass a
+ * value test and be wrong.
+ */
+
+/* Which operand 9.6 selects, and with which flags, for one pair.
+ * Writes the expected encoding into `want`. */
+static void mm_oracle(const fdesc *f, int fn, const uint8_t *a,
+                      const uint8_t *b, uint8_t *want, uint32_t *wf)
+{
+    const int is_max = (fn == 2 || fn == 3);
+    const int is_num = (fn == 1 || fn == 3);
+    cls ca, cb;
+    mpfr_t av, bv, pick;
+    int c;
+
+    classify(f, a, &ca);
+    classify(f, b, &cb);
+    *wf = (ca.is_snan || cb.is_snan) ? CFT_FLAG_INVALID : 0u;
+
+    /* --- the restatement: 9.6's "otherwise" for a NaN operand --- */
+    if (ca.is_nan || cb.is_nan) {
+        if (!is_num || (ca.is_nan && cb.is_nan)) {
+            /* The canonical quiet NaN this contract delivers: sign
+             * clear, every exponent bit set, the quiet bit set, the
+             * payload zero. Built from the format's own widths rather
+             * than transcribed per format. */
+            int k;
+            memset(want, 0, f->esz);
+            for (k = f->man_w; k < f->man_w + f->exp_w; k++)
+                want[k >> 3] |= (uint8_t)(1u << (k & 7));
+            want[(f->man_w - 1) >> 3] |=
+                (uint8_t)(1u << ((f->man_w - 1) & 7));
+        } else {
+            memcpy(want, ca.is_nan ? b : a, f->esz);
+        }
+        return;
+    }
+
+    /* --- the oracle: MPFR decides both magnitude and tie --- */
+    mpfr_init2(av, f->p);
+    mpfr_init2(bv, f->p);
+    enc_to_mpfr(f, a, av);
+    enc_to_mpfr(f, b, bv);
+    c = mpfr_cmpabs(av, bv);
+    if (c != 0) {
+        memcpy(want, (is_max ? (c > 0) : (c < 0)) ? a : b, f->esz);
+    } else {
+        /* Equal magnitudes. mpfr_min/mpfr_max ARE 754's minimum and
+         * maximum on numbers, so let them choose the value and map it
+         * back to the operand that carries it. With equal magnitudes
+         * the two operands differ at most in their sign bit, so the
+         * sign of MPFR's answer names one of them. */
+        mpfr_init2(pick, f->p);
+        if (is_max)
+            mpfr_max(pick, av, bv, MPFR_RNDN);
+        else
+            mpfr_min(pick, av, bv, MPFR_RNDN);
+        {
+            const int neg = mpfr_signbit(pick) != 0;
+            if (ca.sign == cb.sign)
+                memcpy(want, a, f->esz);   /* identical encodings */
+            else
+                memcpy(want, (ca.sign == neg) ? a : b, f->esz);
+        }
+        mpfr_clear(pick);
+    }
+    mpfr_clear(av);
+    mpfr_clear(bv);
+}
+
+static cft_status mm_lib(const fdesc *f, int fn, const uint8_t *a,
+                         const uint8_t *b, uint8_t *d, uint32_t *fl)
+{
+    switch (fn) {
+    case 0:  return cft_min_mag(dev, f->fmt, a, b, d, 1, fl);
+    case 1:  return cft_minnum_mag(dev, f->fmt, a, b, d, 1, fl);
+    case 2:  return cft_max_mag(dev, f->fmt, a, b, d, 1, fl);
+    default: return cft_maxnum_mag(dev, f->fmt, a, b, d, 1, fl);
+    }
+}
+
+static const char *const MMN[4] = { "min_mag", "minnum_mag",
+                                    "max_mag", "maxnum_mag" };
+static const int MM_TALLY[4] = { T_MINMAG, T_MINNUM_MAG,
+                                 T_MAXMAG, T_MAXNUM_MAG };
+
+/* One case's verdict. Like c5_judge, but the value test is a memcmp of
+ * encodings: 9.6 names an operand, so "numerically equal" is not the
+ * question. The mpfr value is built only for the report. */
+static void mm_judge(int fj, int fn, const fdesc *f, const uint8_t *a,
+                     const uint8_t *b, const uint8_t *got,
+                     const uint8_t *want, uint32_t gf, uint32_t wf,
+                     cft_status st)
+{
+    const int vbad = (st != CFT_OK) || memcmp(got, want, f->esz) != 0;
+    const int fbad = (gf != wf);
+    if (vbad)
+        mismatches++;
+    if (fbad)
+        flag_mismatches++;
+    if (vbad || fbad) {
+        mpfr_t w;
+        mpfr_init2(w, f->p);
+        enc_to_mpfr(f, want, w);
+        report_c5(MMN[fn], "-", f, a, b, f, got, w, gf, wf, vbad,
+                  st != CFT_OK ? "(status!=OK)" : NULL);
+        mpfr_clear(w);
+    }
+    cases++;
+    tally[MM_TALLY[fn]][fj]++;
+}
+
+static void check_minmax_mag(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t want[32], got[32], aflip[32], bflip[32];
+    int fn, i, j, sa, sb;
+
+    for (fn = 0; fn < 4; fn++)
+        for (i = 0; i < pn; i++)
+            for (j = 0; j < pn; j++)
+                /* Both sign combinations of every pair, because the
+                 * sign has no vote in 9.6's magnitude clauses and
+                 * exactly the deciding vote in its "otherwise" - an
+                 * implementation that lets it in early fails only on
+                 * the mixed pairs, and only those. */
+                for (sa = 0; sa <= 1; sa++)
+                    for (sb = 0; sb <= 1; sb++) {
+                        const uint8_t *a, *b;
+                        uint32_t gf = 0, wf = 0;
+                        cft_status st;
+
+                        if (sa) {
+                            memcpy(aflip, pool[i], 32);
+                            enc_neg(f, aflip);
+                            a = aflip;
+                        } else {
+                            a = pool[i];
+                        }
+                        if (sb) {
+                            memcpy(bflip, pool[j], 32);
+                            enc_neg(f, bflip);
+                            b = bflip;
+                        } else {
+                            b = pool[j];
+                        }
+                        mm_oracle(f, fn, a, b, want, &wf);
+                        memset(got, 0, sizeof got);
+                        st = mm_lib(f, fn, a, b, got, &gf);
+                        mm_judge(fj, fn, f, a, b, got, want, gf, wf, st);
+                    }
+}
+
+/* Equal magnitudes are where the four differ from a plain magnitude
+ * compare, and a random pool reaches them almost never. This aims at
+ * them directly: every pool entry against ITSELF and against its own
+ * negation, which is every equal-magnitude pair there is. */
+static void check_minmax_mag_ties(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    uint8_t want[32], got[32], neg[32];
+    int fn, i, k;
+
+    for (fn = 0; fn < 4; fn++)
+        for (i = 0; i < pn; i++) {
+            memcpy(neg, pool[i], 32);
+            enc_neg(f, neg);
+            for (k = 0; k < 4; k++) {
+                const uint8_t *a = (k & 1) ? neg : pool[i];
+                const uint8_t *b = (k & 2) ? neg : pool[i];
+                uint32_t gf = 0, wf = 0;
+                cft_status st;
+                mm_oracle(f, fn, a, b, want, &wf);
+                memset(got, 0, sizeof got);
+                st = mm_lib(f, fn, a, b, got, &gf);
+                mm_judge(fj, fn, f, a, b, got, want, gf, wf, st);
+            }
+        }
+}
+
 /* ---- the transcendentals ------------------------------------------- *
  *
  * The nine functions of ABI 0.3 and the eleven of ABI 0.4 against
@@ -4428,7 +4657,9 @@ int main(int argc, char **argv)
         check_rem(fi, pool, pn, 48 * mult);
         check_chars(fi, pool, pn, 48 * mult);
         check_augmented(fi, pool, pn);
-        printf("%s clause5+9.5: %llu cases done (running mismatches: "
+        check_minmax_mag(fi, pool, pn);
+        check_minmax_mag_ties(fi, pool, pn);
+        printf("%s clause5+9.5+9.6: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,

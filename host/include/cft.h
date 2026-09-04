@@ -1693,6 +1693,210 @@ CFT_API cft_status cft_program_run(cft_program *prog,
                                    uint32_t *flags, uint32_t *bus);
 
 /* ---------------------------------------------------------------
+ * The status word (754-2019 7.1), the six operations on subsets of
+ * flags (5.7.4), and the conformance predicates (5.7.1)   (ABI 0.7)
+ *
+ * Every call above returns the exceptions IT raised in flags_out.
+ * That is a per-call answer, and 7.1 asks for something else as well:
+ *
+ *   "For each kind of exception the implementation shall provide a
+ *    corresponding status flag ... Status flags shall be lowered only
+ *    at the user's request. The user shall be able to test and to
+ *    alter the status flags individually or collectively, and shall
+ *    further be able to save and restore all at one time (see 5.7.4)."
+ *
+ * So a device handle carries a STATUS WORD: one uint32_t in the same
+ * cft_exception bits, into which every entry point ORs the union of
+ * its per-element flags, and which nothing in this library ever
+ * lowers. A caller lowers it; nobody else. flags_out keeps working
+ * exactly as before and is unaffected by any of this - the two are
+ * written from the same value at the same moment, so they can never
+ * disagree about what a call signalled.
+ *
+ * THE WORD NEVER INFLUENCES A RESULT. Nothing in libcft reads it back
+ * to decide anything: not a rounding, not a special case, not a
+ * branch. It is write-only to the arithmetic and readable only
+ * through the six calls below, so the determinism contract
+ * (docs/DETERMINISM.md) is exactly what it was - the same inputs give
+ * the same bits whatever the word holds, and clearing it or not
+ * changes no answer anywhere.
+ *
+ * A fresh device opens with every flag lowered, which is 7.1's "A
+ * program that does not inherit status flags from another source
+ * begins execution with all status flags lowered." The word is per
+ * DEVICE, and a cft_device is not thread-safe (as this header has
+ * always said), so the flags of two threads do not collide because
+ * two threads do not share a device.
+ *
+ * Each operation takes a mask - 5.7.4's exceptionGroup, "any subset
+ * of the exceptions" - built from cft_exception bits. CFT_FLAGS_ALL
+ * is the whole set, for the collective forms.
+ *
+ * A NULL device is accepted everywhere here and behaves as a handle
+ * whose word is permanently zero: the three mutators (lower, raise,
+ * restore) do nothing, cft_test_flags answers 0, and
+ * cft_save_all_flags returns 0. That matches
+ * cft_close() and cft_buffer_free(), which have always tolerated
+ * NULL, and it means a caller need not branch on a device it failed
+ * to open before asking a question the answer to which is "nothing
+ * was raised".
+ * --------------------------------------------------------------- */
+
+/* Every exception this library defines, as one mask. Derived from the
+ * cft_exception bits rather than written out, so a sixth flag would
+ * not need this line edited. */
+#define CFT_FLAGS_ALL ((uint32_t)(CFT_FLAG_INVALID | CFT_FLAG_DIVBYZERO | \
+                                  CFT_FLAG_OVERFLOW | CFT_FLAG_UNDERFLOW | \
+                                  CFT_FLAG_INEXACT))
+
+/* lowerFlags(exceptionGroup): clear the flags named by mask. One of
+ * the only two things in the system that can lower a flag;
+ * cft_restore_flags, below, is the other. */
+CFT_API void cft_lower_flags(cft_device *dev, uint32_t mask);
+
+/* raiseFlags(exceptionGroup): set the flags named by mask, without an
+ * exception having been signalled - 7.1's "status flags are raised
+ * without an exception being signaled only at the user's request". */
+CFT_API void cft_raise_flags(cft_device *dev, uint32_t mask);
+
+/* testFlags(exceptionGroup): nonzero if ANY flag named by mask is
+ * raised, 0 otherwise. A predicate, not an intersection: the value is
+ * 1 or 0 so that it cannot be mistaken for a flag word. */
+CFT_API int cft_test_flags(cft_device *dev, uint32_t mask);
+
+/* saveAllFlags(): "Returns a representation of the state of all
+ * status flags." That representation is the word itself, in
+ * cft_exception bits, which is what makes it directly comparable with
+ * any call's flags_out. */
+CFT_API uint32_t cft_save_all_flags(cft_device *dev);
+
+/* restoreFlags(flags, exceptionGroup): put the flags named by mask
+ * back to their state in `saved`. RESTORES rather than ORs - a flag
+ * inside the mask that is low in `saved` comes back low - so that
+ *
+ *     uint32_t s = cft_save_all_flags(dev);
+ *     ... anything ...
+ *     cft_restore_flags(dev, s, CFT_FLAGS_ALL);
+ *
+ * is the round trip 5.7.4 exists to provide. Flags outside the mask
+ * are untouched. */
+CFT_API void cft_restore_flags(cft_device *dev, uint32_t saved,
+                               uint32_t mask);
+
+/* testSavedFlags(flags, exceptionGroup): the same question as
+ * cft_test_flags, asked of a word the caller already holds. No device
+ * argument, because no device is involved - 5.7.4 puts the saved
+ * flags in the first operand precisely so that this is a pure
+ * predicate. */
+CFT_API int cft_test_saved_flags(uint32_t saved, uint32_t mask);
+
+/* 5.7.1's three conformance predicates, "true if and only if this
+ * programming environment conforms to" the named version. They are
+ * constants, and each rests on something stated elsewhere rather than
+ * on this header's opinion:
+ *
+ *   is754version2019 - TRUE from ABI 0.7 on. What it rests on is
+ *     clause 5 being complete for the binary formats this library
+ *     supports, together with clause 4's attributes and clauses 6
+ *     and 7 as written; docs/COMPLIANCE.md is that statement, clause
+ *     by clause, and is where a reader should go to check it rather
+ *     than take this line's word. The claim is radix 2 only: decimal
+ *     formats are excluded by design (3.5 permits a per-radix claim),
+ *     and clause 8's alternate exception handling is a recommendation
+ *     this library does not implement.
+ *
+ *   is754version2008 - FALSE, and not because anything is missing.
+ *     754-2008 REQUIRED minNum, maxNum, minNumMag and maxNumMag in
+ *     its clause 5.3.1. 754-2019 removed them and put the magnitude
+ *     forms among the recommended operations of 9.6 instead - the
+ *     NOTE at the end of 2019's 5.3.1 says exactly that: "The minNum
+ *     and maxNum operations of the 2008 version of the standard have
+ *     been replaced by the recommended operations of 9.6." The two
+ *     differ on a signaling NaN: 2019's minimumNumber signals invalid
+ *     and still returns the number, where 2008's minNum returned the
+ *     other operand quietly for a quiet NaN and had no such rule.
+ *     This library implements the 2019 semantics (see cft_min_mag and
+ *     friends below, and CFT_MINNUM), so it does not provide 2008's
+ *     required operations and cannot claim 2008.
+ *
+ *   is754version1985 - FALSE. Not because it is believed untrue, but
+ *     because it has never been evaluated against the 1985 text: no
+ *     part of this project's verification is written against that
+ *     document, and a predicate that says "true" on the strength of
+ *     nobody having checked is exactly the kind of claim 5.7.1 exists
+ *     to make answerable.
+ *
+ * These describe a programming environment, so they take no device
+ * and no format, and they are safe to call before cft_open(). */
+CFT_API int cft_is754version1985(void);
+CFT_API int cft_is754version2008(void);
+CFT_API int cft_is754version2019(void);
+
+/* ---------------------------------------------------------------
+ * The magnitude forms of minimum and maximum (754-2019 9.6)
+ *
+ * The other four of clause 9.6, beside the four opcodes CFT_MIN,
+ * CFT_MAX, CFT_MINNUM and CFT_MAXNUM. The standard defines each in
+ * one line, by deferral:
+ *
+ *   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+ *    otherwise minimum(x, y).
+ *    minimumMagnitudeNumber(x, y) is x if |x| < |y|, y if |y| < |x|,
+ *    otherwise minimumNumber(x, y).
+ *    maximumMagnitude(x, y) is x if |x| > |y|, y if |y| > |x|,
+ *    otherwise maximum(x, y).
+ *    maximumMagnitudeNumber(x, y) is x if |x| > |y|, y if |y| > |x|,
+ *    otherwise maximumNumber(x, y)." (9.6)
+ *
+ * HOST operations of the nextUp kind: a comparison of the two
+ * sign-cleared encodings and then a selection, with no rounding, no
+ * attribute, no arithmetic and no opcode - so there is nothing for a
+ * device to accelerate, no `rnd` argument, and results are
+ * bit-identical on every backend by construction. Like the other host
+ * entry points they do not gate on the device's format mask.
+ *
+ * Reading the definition literally settles all three edge families,
+ * and this library does read it literally:
+ *
+ *   * A NaN has no magnitude, so neither |x| < |y| nor |y| < |x| can
+ *     hold and every NaN case is the "otherwise" - which means each
+ *     of these four inherits the NaN rule of the operation named in
+ *     its last position. The two plain forms return the canonical
+ *     quiet NaN if either operand is a NaN; the two ...Number forms
+ *     return the number when the other operand is a NaN, and a quiet
+ *     NaN only when both are. Either way a signaling NaN operand
+ *     raises invalid and nothing else can be raised at all.
+ *   * Equal magnitudes of opposite sign are the "otherwise" too:
+ *     cft_min_mag(+3, -3) is minimum(+3, -3) = -3 and
+ *     cft_max_mag(+3, -3) is maximum(+3, -3) = +3. An implementation
+ *     that quietly prefers x or y on that tie is not conforming, and
+ *     it is the one case worth a test of its own.
+ *   * +-0 have equal magnitude, so the zeros also come from the base
+ *     operation: -0 for the two minima, +0 for the two maxima.
+ *
+ * The result is always one of the two operand encodings, bit for bit,
+ * except where the base operation delivers a NaN - and then it is
+ * this contract's canonical quiet NaN, the same canonicalisation
+ * every other operation here performs (docs/DETERMINISM.md).
+ *
+ * python/cft_golden/softfloat.py's fminmag/fmaxmag/fminnummag/
+ * fmaxnummag define every bit and flag below. d may alias a or b:
+ * each element is read before it is written, as everywhere else.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_min_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_max_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_minnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
  * Conformance
  *
  * Replay the published vector sets through this device and report the
