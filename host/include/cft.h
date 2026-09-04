@@ -1733,8 +1733,9 @@ CFT_API cft_status cft_program_run(cft_program *prog,
  * is the whole set, for the collective forms.
  *
  * A NULL device is accepted everywhere here and behaves as a handle
- * whose word is permanently zero: the two mutators do nothing, the
- * two tests answer 0, and cft_save_all_flags returns 0. That matches
+ * whose word is permanently zero: the three mutators (lower, raise,
+ * restore) do nothing, cft_test_flags answers 0, and
+ * cft_save_all_flags returns 0. That matches
  * cft_close() and cft_buffer_free(), which have always tolerated
  * NULL, and it means a caller need not branch on a device it failed
  * to open before asking a question the answer to which is "nothing
@@ -1748,8 +1749,9 @@ CFT_API cft_status cft_program_run(cft_program *prog,
                                   CFT_FLAG_OVERFLOW | CFT_FLAG_UNDERFLOW | \
                                   CFT_FLAG_INEXACT))
 
-/* lowerFlags(exceptionGroup): clear the flags named by mask. The only
- * thing in the system that lowers a flag. */
+/* lowerFlags(exceptionGroup): clear the flags named by mask. One of
+ * the only two things in the system that can lower a flag;
+ * cft_restore_flags, below, is the other. */
 CFT_API void cft_lower_flags(cft_device *dev, uint32_t mask);
 
 /* raiseFlags(exceptionGroup): set the flags named by mask, without an

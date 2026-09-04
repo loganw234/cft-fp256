@@ -931,7 +931,10 @@ is 7.1's "A program that does not inherit status flags from another
 source begins execution with all status flags lowered"; and 5.7.4's
 six operations - `cft_lower_flags`, `cft_raise_flags`,
 `cft_test_flags`, `cft_save_all_flags`, `cft_restore_flags`,
-`cft_test_saved_flags` - are the only things that can lower it.
+`cft_test_saved_flags` - are the caller's whole interface to it. Two
+of them can lower a flag and nothing else in the system can:
+`cft_lower_flags`, and `cft_restore_flags` where the saved word has
+one low inside the mask.
 
 **The word is not part of the determinism contract, and that is the
 point.** Nothing in libcft reads it back. Not a rounding decision, not

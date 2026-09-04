@@ -1118,7 +1118,7 @@ caller most often wants stated plainly:
 | `python/tests/test_minmax_mag.py`: the model against an independent reading of the encoding, and against CPython's binary64 at fp64 | 94 | pass |
 | `cft_conformance` replay of the four new `-minmaxmag` sets, one element at a time and then as arrays | 2,432 per format | every case, bits and flags |
 | MPFR parity: `mpfr_cmpabs` for the magnitude ordering and `mpfr_min`/`mpfr_max` for the equal-magnitude tie, with 9.6's NaN rules restated | see docs/VALIDATION.md | zero value AND zero flag mismatches |
-| `api_test.c`, `cpp_api_test.cpp`, `test_cftmpfr.py` | the four language surfaces | pass |
+| `api_test.c`, `cpp_api_test.cpp`, `test_cftmpfr.py` | the C, C++ and Python surfaces | pass |
 
 One line about the MPFR row, because it is the only place in this
 package where an oracle and a restatement sit in the same function.
