@@ -58,8 +58,8 @@
  *   e = 3/4 - a dyadic rational, so 1-e and 1+e are exact in every
  *   format and only the initial speed needs rounding. The initial
  *   condition is Hairer, Lubich and Wanner's (Geometric Numerical
- *   Integration, 2nd ed., section I.2.2), at apoapsis... at
- *   PERIapsis in their orientation:
+ *   Integration, 2nd ed., section I.2.2), which starts the particle
+ *   at PERIapsis with the velocity perpendicular to the radius:
  *
  *       q = (1-e, 0)        v = (0, sqrt((1+e)/(1-e)))
  *
@@ -138,9 +138,12 @@
  *     error recurrence e -> 1.5 e^2 until it passes 2^-(p+2); it is
  *     never tabulated.
  *
- * Measured on the software backend, --rsqrt exact costs about 1.4x
- * what --rsqrt newton costs at binary256 (docs/ORBITS.md). Correct
- * rounding is nearly free here, which is why it is the default.
+ * Measured on the software backend, --rsqrt exact costs about 2.2x
+ * what --rsqrt newton costs at binary256 (docs/ORBITS.md), and it is
+ * still the default: correct rounding is the contract's product, the
+ * factor is a factor and not an order, and the exact route is the one
+ * whose error the reader can bound from the standard rather than from
+ * this file.
  *
  * ---------------------------------------------------------------
  * Where the step runs, and the two things that stop it
@@ -2046,8 +2049,10 @@ static void report(runstate *R, double elapsed, const char *backend)
     printf("  steps done    %" PRIu64 " of %" PRIu64 ", %" PRIu64
            " samples of %" PRIu64 "\n",
            R->step, R->nsteps, R->sample, R->nsamples);
-    printf("  energy drift  %s (max |H-H0|/|H0| over the ensemble)\n", sdh);
-    printf("  angmom drift  %s (max |L-L0|/|L0| over the ensemble)\n", sdl);
+    printf("  energy drift  %s   max over samples and members of "
+           "|H-H0|, over member 0's |H0|\n", sdh);
+    printf("  angmom drift  %s   the same for L, whose drift is "
+           "ROUNDOFF ALONE\n", sdl);
     printf("  separations   member: initial -> final, growth\n");
     for (m = 1; m < M && m < 5; m++) {
         uint8_t growth[MAX_ESZ];

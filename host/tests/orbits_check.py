@@ -595,6 +595,35 @@ def main():
               "published one: suspect a digit in the table")
 
         # -------------------------------------------------------------
+        # Angular momentum is conserved EXACTLY by both schemes for
+        # both problems: the drift moves q along v, which adds
+        # m (v x v) = 0, and the kick's pair term m_i g_ij (q_i x q_j)
+        # cancels against m_j g_ji (q_j x q_i) because m_i g_ij is
+        # symmetric - which is Newton's third law. So the drift the
+        # tool reports has NO truncation component at all and is a
+        # bound on the ARITHMETIC alone. That makes it a certificate
+        # rather than a diagnostic, and this is its gate.
+        print("\n[4b] the angular-momentum certificate")
+        for problem, extra, label in (
+                ("kepler", ["--periods", 4, "--steps-per-period", 256],
+                 "kepler, 1024 steps"),
+                ("outer", ["--years", 20, "--days", 10],
+                 "outer solar system, 730 steps")):
+            for scheme in ("leapfrog", "yoshida4"):
+                r = tool.csv("--problem", problem, "--scheme", scheme,
+                             "--format", "fp256", "--members", 2, *extra)
+                nst = int(r["steps"])
+                bound = mpf(nst) ** 2 * mpf(2) ** -237 * 10 ** 6
+                got = mpf(r["angmom_drift"])
+                check(got < bound,
+                      "%s, %s: |L-L0|/|L0| is %s, under the %.2e bound - "
+                      "both schemes conserve L exactly, so this is the "
+                      "arithmetic and nothing else"
+                      % (label, scheme, r["angmom_drift"], float(bound)),
+                      "%s, %s: the angular-momentum drift is %s, above the "
+                      "%.2e bound - something other than rounding is moving "
+                      "L" % (label, scheme, r["angmom_drift"], float(bound)))
+
         print("\n[5] the hash chain")
         a = ["--problem", "kepler", "--format", "fp256", "--members", 4,
              "--periods", 2, "--steps-per-period", 64]
