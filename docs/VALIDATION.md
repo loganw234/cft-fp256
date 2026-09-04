@@ -3897,3 +3897,202 @@ would have passed as "1 point identical".
   targets sit in their own delimited block with their own `TOOLS +=`
   line and a `zoomclean`, so that four parallel workloads merge beside
   one another rather than through one recipe.
+
+## 2026-09-04 - the five workloads in a browser tab, chained against the C tools
+
+`bindings/wasm/demos.html` is new, and so are the six files that build
+and check it (`demos_template.html`, `demos_core.js`,
+`demos_worker.js`, `demos_chains.json`, `make_demos.py`,
+`build_demos.sh`, `verify_demos.mjs`); `docs/DEMOS.md` is the argument
+behind them. Nothing under `host/src/`, `host/include/`,
+`host/tools/`, `python/` or `verify/` was touched, the ABI version is
+unchanged, **no wasm module was rebuilt**, and `conformance.html` was
+not modified - this is a second page over the existing build product,
+not a change to it.
+
+The page runs the five workloads of docs/BENCHMARKS.md - zoom, orbits,
+Collatz, enclose, Mersenne - as five panels, each a port of one tool's
+`--engine loop` path, on the module `conformance.html` embeds. Each
+panel prints the SHA-256 chain the native C tool produced for exactly
+its configuration beside the chain it just computed, and a control
+compares them. That comparison is the whole deliverable: **the browser
+computes the same bits as the C tool**, or the panel goes red.
+
+### What was verified, and how
+
+`node bindings/wasm/verify_demos.mjs` is the browserless gate. Three
+checks, in order, and the first two exist so the third is about the
+right program:
+
+| what it checks | result |
+|---|---|
+| the module the page embeds, walked out of emcc's SINGLE_FILE literal | 211,869 bytes, sha256 `a1f0a4715516d3f6…` - identical to `bindings/node/cft_node.wasm`, the module `conformance.html` embeds |
+| the compute core the page embeds | byte-identical to `demos_core.js`, so the report is about the page and not a lookalike |
+| 13 chains over 11 configurations, three ways: the native tool run just now, the compute core over the committed module, and the recording in `demos_chains.json` | 13 of 13 agree, all three ways |
+
+And then in a real browser: served over loopback and driven in
+Chromium, every panel run, **13 of 13 chains computed in this browser,
+every one identical to the C tool's** - in a Web Worker, with the tab
+responsive, progress posted in batches and Cancel honoured between
+them. One PNG per panel in `docs/img/demos/`.
+
+The eleven configurations are all expressible in the tools' existing
+flags; no tool was edited to make one reachable. Two of them deserve a
+line. The zoom panel runs `--ref-iters 1001 --pixel-iters 1000` rather
+than the tool's 100,000/4,096 because a browser wants a frame more than
+an orbit, and 1,001 is exactly one more reference point than the pixel
+phase reads. The enclose panel runs `--cond-max 164` rather than the
+tool's 225 because 225 is *refused* at binary32 - the ladder's smallest
+element would be `2^-187`, below binary32's smallest normal - and 164
+is the largest spread every format holds exactly,
+`dot_top - 2*mw - emin(binary32)`, derived on the page from
+`measureFormat("fp32")` rather than carried as a number. At 164 the
+result is unchanged: fp32 and fp64 straddle zero on 14 of 15
+enclosures, fp128 and fp256 on none, and fp256's fifteen are exact.
+
+### The build
+
+`bash bindings/wasm/build_demos.sh`, inside the image `build.sh` pins -
+and the pin is read out of `build.sh` rather than typed again. **Two
+clean container builds with `bindings/wasm/build/` removed between
+them, byte-identical: 485,693 bytes, sha256
+`9ab4c956ed048f18ed45ccb0de60b82eb90bf82b8c690aa12c96d8cfd2f7cc85`.**
+
+The build refuses to ship a page whose module is not the committed one,
+and checks that fact three times: the split `.wasm` from the same emcc
+run against `bindings/node/cft_node.wasm` (stage 2), `make_demos.py`
+again, and then by walking the bytes back out of the assembled HTML.
+`demos_chains.json` also records the module and core hashes it was
+recorded against, and the build refuses a mismatch - a chain recorded
+against a different program is a chain about a different program.
+
+One emcc flag differs from `build.sh`: `-sENVIRONMENT=web,worker`
+instead of `-sENVIRONMENT=web`, because the page computes in a Worker.
+`ENVIRONMENT` selects branches of the JavaScript loader and nothing
+else, and stage 2 does not assume that - the module it produced hashes
+identically to the committed one.
+
+### The negative controls
+
+Two of them, one sabotage: the Collatz panel's running peak computed
+with `CFT_MIN` instead of `CFT_MAX`. That site was chosen because
+nothing else notices it - the flag/witness agreement still holds, the
+step count is right, the final value is right, the run reports success
+- and only the chain is wrong. It is exactly the failure a chain
+comparison is for.
+
+- **The page.** `build/demos_negative_control.html` (untracked, built
+  by stage 4) carries a red banner naming the sabotage; running its
+  Collatz panel gives *"2 of 2 computed chains DIFFER from the native
+  tools. The page is wrong until shown otherwise."* Screenshot in
+  `docs/img/demos/negative-control.png`.
+- **The checker.** The same edit to `demos_core.js` makes
+  `verify_demos.mjs --panel collatz` fail four times - each chain
+  against the tool it just ran *and* against the recording - which is
+  the point of keeping both references. `git checkout --` restores it
+  and both go green.
+
+### Rates, measured on both sides
+
+Software backend, one thread, DESKTOP-T33SK86, wall clock over work
+done. **Measurements of a slow software tier, not a performance
+claim**, and the page prints that sentence under every panel.
+
+| panel / run | native `--engine loop` | node (wasm) | Chromium (wasm) |
+|---|---|---|---|
+| zoom / fp256-reference | 346,414 pixel-iter/s | 269,380 | 343,381 |
+| zoom / fp64-reference | 383,738 pixel-iter/s | 251,440 | 297,215 |
+| orbits / fp256 | 24,922 element-steps/s | 17,210 | 22,645 |
+| orbits / fp64 | 55,589 element-steps/s | 47,216 | 50,945 |
+| collatz / sweep | 221,294 steps/s | 149,228 | 173,491 |
+| collatz / trajectory | 239,666 steps/s | 42,754 | 58,865 |
+| enclose / fp256 | 1,526 enclosures/s | 980 | 1,247 |
+| mersenne / to-2281 | 646,661 limb products/s | 403,953 | 473,911 |
+
+wasm runs between 0.8x and 1.4x of native wherever a call carries a
+batch, and the browser is consistently a little faster than node on the
+same module. The collatz trajectory row is the outlier and it is call
+shape, not arithmetic: one lane, 23 wasm crossings per Collatz step.
+
+### What the port had to do differently, and why neither changes a bit
+
+**Elements are batched.** Where a tool issues one library call per
+element, the port issues one per batch. `cft_run` is elementwise by
+contract - which is why every one of these tools' gates already runs a
+configuration at two batch sizes and compares bytes - and one `_malloc`
+per scalar call is the wasm boundary's known trap, so every buffer is
+allocated once per job.
+
+**zoom's seven per-iteration reference scalars are hoisted** out of the
+pixel loop into seven batched passes over the whole reference. They
+depend on the reference alone; element `k` of the batched pass is the
+C's `k`-th scalar call on the same operands. It removes 112,000 wasm
+crossings and leaves the pixel chain identical, which is the check that
+matters.
+
+**Presentation is fenced off.** Anything computed for the screen goes
+through a save/restore of the 7.1 status word (5.7.4) *and* of the call
+counters, so a printed decimal cannot pollute a flag union or inflate a
+rate. That is `enclose.c`'s own `val_to_dec` pattern with the counters
+added; with it, the orbits panel reports the tool's own 23,627 library
+calls exactly.
+
+**Constants are derived.** SHA-256's `K` and `H0` are computed from the
+first 64 primes over BigInt exactly as the C computes them over a
+128-bit integer; every format's `p` is measured by asking the library
+where `2^k + 1` first goes inexact; `--cond-max` is derived above; the
+Collatz default `2^237 - 1315` is computed in the page. The opcode,
+format, rounding and flag numbers are audited against the module at
+open time via `cftw_op_name`, `cftw_format_name` and `cftw_flags_all`,
+because a mistranscribed opcode field computes a different operation
+and reports nothing.
+
+### What the sequencer's program API would have bought, measured
+
+The wasm surface exports no `cft_program_*`, so every panel runs a host
+loop. Both engines return the same chain, so the gap is a rate and
+nothing else, and it was measured at the page's own configurations
+rather than quoted:
+
+| the page's configuration | program | host loop | ratio |
+|---|---|---|---|
+| collatz, sweep 1..1000 | 413,018 steps/s | 222,660 | 1.85x |
+| collatz, deep `2^237-1315` | 506,053 steps/s | ~240,000 | ~2.1x |
+| zoom, the 1,001-iteration reference orbit | 109,871 iter/s | 78,713 | 1.40x |
+| orbits, Kepler leapfrog, `--rsqrt newton` | 82,492 el-steps/s | 65,717 | 1.26x |
+| enclose, interval Horner, 17 items | 19,970 /s | 15,351 | 1.30x |
+
+Which makes the ask small and worth stating with its limits: exporting
+the three program entry points would buy four panels 1.3x-2.1x, and the
+fifth - zoom, whose pixel phase is nineteen of the page's twenty
+seconds - nothing at all, because those pixels go through `cft_run` in
+the C tool too. The orbits row is not even available as configured: the
+page runs `--rsqrt exact`, which `cft-orbits` refuses to run as a
+program. The gain in wasm should exceed the gain in C, since what a
+program removes is call boundaries and a wasm boundary costs more - but
+that could not be measured, because the API is not exported, so it is
+recorded as an expectation and not a number.
+
+### What was NOT run, and why
+
+- **No module rebuild.** `bindings/node/cft_node.wasm` is untouched and
+  its sha256 is unchanged; the conformance page and three documents
+  quote it, and the integrator schedules module rebuilds. Every check
+  above is against the committed bytes.
+- **No device.** The panels drive the software backend, the only
+  backend a browser can be. No hardware number appears here.
+- **The RTL stages and the rest of `verify/run.sh`.** No opcode was
+  added, no RTL file touched, nothing under `host/src/` changed, and
+  `verify/run.sh` was deliberately left alone. The library gates
+  certify the same library they certified this morning.
+- **`README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md`,
+  `docs/BENCHMARKS.md` and the ABI version** were left to the
+  integrator, as at 0.7. `.github/workflows/pages.yml` was edited,
+  because the new page has to be deployed: it now stages
+  `conformance.html` twice (as `index.html` and under its own name, so
+  the demos page's relative link resolves on the site) and
+  `demos.html` beside them, and `bindings/wasm/demos.html` is in the
+  trigger paths.
+- **The larger Mersenne exponents.** 3217..11213 and 19937..44497 are
+  offered on the page behind a time warning and were not run; neither
+  has a recorded chain, and the page says so when either is selected.

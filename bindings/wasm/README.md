@@ -816,3 +816,95 @@ bytes**, sha256 `e1b42b3873416e39…`; module **211,869 bytes**, sha256
 different by the one constant. `verify.mjs` then ran under
 `bash verify/run.sh --fresh --only vectors,node,wasm`, run id
 `20260904-054715-2216e62`, and passed with the same counts as the block above.
+
+---
+
+## A second page: the five workloads, measured (2026-09-04)
+
+`demos.html` is the other deliverable of this directory. Same
+directory, same container, same pinned image, and **the same module** -
+but where `conformance.html` replays vector sets, this one runs the
+five contract workloads of `docs/BENCHMARKS.md` and prints, beside
+each result, the SHA-256 chain the native C tool produced for exactly
+that configuration. `docs/DEMOS.md` is the argument; this block is what
+was measured.
+
+```
+demos_template.html  the page, with six @CFT_*@ splice tokens open
+demos_core.js        the compute core: five panels, each a port of one
+                     tool's --engine loop path. A PLAIN SCRIPT, so the
+                     page's Worker and node run the same bytes.
+demos_worker.js      the driver - Worker, or main thread where a
+                     browser refuses a blob: Worker from file://
+demos_chains.json    what the NATIVE tools printed: 11 configurations,
+                     13 chains, each with its command line
+make_demos.py        page assembly (+ --corrupt), and the three module
+                     identity checks
+build_demos.sh       the containerized build; the image pin is READ
+                     OUT OF build.sh rather than typed again
+demos.html           THE DELIVERABLE - committed build product
+verify_demos.mjs     the browserless check: module, core, and every
+                     chain three ways (tool, core, recording)
+```
+
+**The page.** 485,693 bytes, sha256
+`9ab4c956ed048f18ed45ccb0de60b82eb90bf82b8c690aa12c96d8cfd2f7cc85`.
+Two clean container builds with `bindings/wasm/build/` removed between
+them: byte-identical. emcc 6.0.9 (4e4223852a...), the image `build.sh`
+pins.
+
+**The module, three checks of one fact.** The demos page's chains are a
+claim about a specific program, so the build refuses to ship a page
+whose module is not the committed one: the split `.wasm` from the same
+emcc run is hashed against `bindings/node/cft_node.wasm` (stage 2),
+`make_demos.py` re-checks it and then walks the bytes back out of the
+assembled HTML (stage 3), and `verify_demos.mjs` walks them out again
+from the committed file. All four agree on **211,869 bytes, sha256
+`a1f0a4715516d3f6...`** - the same module `conformance.html` embeds.
+The one emcc flag that differs from `build.sh` is
+`-sENVIRONMENT=web,worker`, which selects branches of the JavaScript
+loader and nothing else; stage 2 does not assume that, it checks it.
+
+**The chains.** 13, over 11 configurations, all reproduced three ways:
+
+| | node, over the committed module | Chromium, in a Web Worker |
+|---|---|---|
+| chains reproduced | 13 of 13 | 13 of 13 |
+| against | the tool run just now, and the recording | the recording |
+
+The page's verdict line after a full run reads *"13 of 13 chains
+computed in this browser, every one identical to the C tool's."*
+`docs/DEMOS.md` lists every chain with the command that produced it.
+
+**Rates, wall clock over work done.** Both sides are the software
+backend on the same desktop, single-threaded. These are measurements of
+a slow software tier, not a performance claim.
+
+| panel / run | native `--engine loop` | node (wasm) | Chromium (wasm) |
+|---|---|---|---|
+| zoom / fp256-reference | 346,414 pixel-iter/s | 269,380 | 343,381 |
+| zoom / fp64-reference | 383,738 pixel-iter/s | 251,440 | 297,215 |
+| orbits / fp256 | 24,922 element-steps/s | 17,210 | 22,645 |
+| orbits / fp64 | 55,589 element-steps/s | 47,216 | 50,945 |
+| collatz / sweep | 221,294 steps/s | 149,228 | 173,491 |
+| collatz / trajectory | 239,666 steps/s | 42,754 | 58,865 |
+| enclose / fp256 | 1,526 enclosures/s | 980 | 1,247 |
+| mersenne / to-2281 | 646,661 limb products/s | 403,953 | 473,911 |
+
+0.8x to 1.4x of native wherever a call carries a batch; the collatz
+trajectory row is one lane at 23 wasm crossings per step, which is the
+boundary and not the arithmetic.
+
+**The negative control.** `build_demos.sh` also writes
+`build/demos_negative_control.html` (untracked), identical except that
+the Collatz panel's running peak is computed with `CFT_MIN` instead of
+`CFT_MAX` - a change that leaves the flag/witness agreement, the step
+count and the final value all correct, and only the chain wrong. Its
+Collatz panel reports **2 of 2 chains DIFFER**; the same edit made to
+`demos_core.js` makes `verify_demos.mjs` fail four times (each chain
+against both the tool and the recording); restoring the file makes both
+green again. A checker that has never been seen to fail proves nothing.
+
+**No network at runtime.** Loading the page costs one GET for the file
+and one for the Worker's `blob:` URL. Nothing else appears in the
+network log, from `file://` or over a server.
