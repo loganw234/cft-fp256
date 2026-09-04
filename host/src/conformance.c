@@ -1966,6 +1966,256 @@ static cft_status formatof_set(cft_device *dev, int sfi, int dfi, int ri,
     return arr;
 }
 
+/* ---- the magnitude min/max sets (754-2019 9.6) --------------------- *
+ *
+ * A sixth schema, and the simplest of them: two operands, one output,
+ * one flag word, and NO "rnd" field. Its absence is normative, as it
+ * is for the augmented sets and for a sharper reason - these four
+ * operations select one of their operands rather than computing a
+ * value, so there is no rounding for an attribute to direct and one
+ * file per format is the whole set.
+ *
+ * "fn" carries 754's own spelling (minimumMagnitude and friends)
+ * rather than this library's C names, so the file says what standard
+ * it is a set for.
+ *
+ * Replayed the same two ways as everything else: one element at a
+ * time, where the flag word means exactly one case, and then as whole
+ * arrays, which is what exercises the batch loop and the flag OR.
+ */
+
+typedef struct {
+    int      fn;                /* index into MM_NAMES */
+    uint8_t  a[MAX_ELEM], b[MAX_ELEM], d[MAX_ELEM];
+    uint32_t flags;
+} cft_mm_case;
+
+#define MM_COUNT 4
+static const char *const MM_NAMES[MM_COUNT] = {
+    "minimumMagnitude", "minimumMagnitudeNumber",
+    "maximumMagnitude", "maximumMagnitudeNumber"
+};
+
+static int mm_from_name(const char *s)
+{
+    int i;
+    for (i = 0; i < MM_COUNT; i++)
+        if (strcmp(MM_NAMES[i], s) == 0)
+            return i;
+    return -1;
+}
+
+static cft_status mm_apply(cft_device *dev, int fn, cft_format fmt,
+                           const void *a, const void *b, void *d,
+                           size_t n, uint32_t *flags)
+{
+    switch (fn) {
+    case 0:  return cft_min_mag(dev, fmt, a, b, d, n, flags);
+    case 1:  return cft_minnum_mag(dev, fmt, a, b, d, n, flags);
+    case 2:  return cft_max_mag(dev, fmt, a, b, d, n, flags);
+    default: return cft_maxnum_mag(dev, fmt, a, b, d, n, flags);
+    }
+}
+
+static cft_status minmaxmag_array_pass(cft_device *dev, int fi, int esz,
+                                       const cft_mm_case *cases,
+                                       size_t ncases, const char *path,
+                                       rep *rp)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    uint8_t *a = NULL, *b = NULL, *gd = NULL;
+    cft_status ret = CFT_OK;
+    int fn;
+
+    if (ncases == 0)
+        return CFT_OK;
+    a  = (uint8_t *)malloc(ncases * (size_t)esz);
+    b  = (uint8_t *)malloc(ncases * (size_t)esz);
+    gd = (uint8_t *)malloc(ncases * (size_t)esz);
+    if (!a || !b || !gd) {
+        free(a); free(b); free(gd);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+
+    for (fn = 0; fn < MM_COUNT && ret == CFT_OK; fn++) {
+        size_t k = 0, i, batch;
+        uint32_t want_flags = 0, got_flags = 0;
+        cft_status st;
+
+        for (i = 0; i < ncases; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            memcpy(a + k * (size_t)esz, cases[i].a, (size_t)esz);
+            memcpy(b + k * (size_t)esz, cases[i].b, (size_t)esz);
+            want_flags |= cases[i].flags;
+            k++;
+        }
+        if (k == 0)
+            continue;
+        batch = k;
+
+        memset(gd, 0, k * (size_t)esz);
+        st = mm_apply(dev, fn, (cft_format)fi, a, b, gd, k, &got_flags);
+        if (st != CFT_OK) {
+            rep_add(rp, "%s: array pass, %s x%lu: failed: %s\n",
+                    path, MM_NAMES[fn], (unsigned long)k, cft_strerror(st));
+            ret = st;
+            break;
+        }
+
+        k = 0;
+        for (i = 0; i < ncases && ret == CFT_OK; i++) {
+            if (cases[i].fn != fn)
+                continue;
+            if (memcmp(gd + k * (size_t)esz, cases[i].d, (size_t)esz) != 0) {
+                char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+                format_hex_elem(cases[i].d, esz, hw);
+                format_hex_elem(gd + k * (size_t)esz, esz, hg);
+                rp->used = 0;
+                if (rp->buf && rp->size)
+                    rp->buf[0] = '\0';
+                rep_add(rp, "%s: ARRAY PASS element %lu of %lu (%s %s)\n"
+                            "  expected %s\n"
+                            "  got      %s\n"
+                            "  the same case passes one element at a time, "
+                            "so this is the batch loop\n",
+                        path, (unsigned long)k, (unsigned long)batch,
+                        f->name, MM_NAMES[fn], hw, hg);
+                ret = CFT_ERR_INTERNAL;
+            }
+            k++;
+        }
+        if (ret == CFT_OK && got_flags != want_flags) {
+            rp->used = 0;
+            if (rp->buf && rp->size)
+                rp->buf[0] = '\0';
+            rep_add(rp, "%s: ARRAY PASS flags for %s over %lu elements: "
+                        "got 0x%02x, expected the OR of the cases 0x%02x\n",
+                    path, MM_NAMES[fn], (unsigned long)batch,
+                    (unsigned)got_flags, (unsigned)want_flags);
+            ret = CFT_ERR_INTERNAL;
+        }
+    }
+
+    free(a); free(b); free(gd);
+    return ret;
+}
+
+static cft_status minmaxmag_set(cft_device *dev, int fi, int esz,
+                                const char *path, rep *rp, uint64_t *total)
+{
+    const cft_fmt_desc *f = &cft_sf_formats[fi];
+    char line[LINE_MAX];
+    unsigned long lineno = 0;
+    cft_mm_case *cases = NULL;
+    size_t ncases = 0, ccap = 0;
+    cft_status arr;
+    FILE *fp = fopen(path, "r");
+
+    if (!fp)
+        return CFT_OK;                    /* absent is not a failure */
+
+    while (fgets(line, (int)sizeof line, fp)) {
+        char tok[TOKEN_MAX];
+        uint8_t ea[MAX_ELEM], eb[MAX_ELEM];
+        uint8_t want_d[MAX_ELEM], got_d[MAX_ELEM];
+        uint32_t want_flags = 0, got_flags = 0;
+        int fn = -1;
+        cft_status st;
+
+        lineno++;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+            continue;
+        {
+            const char *why = NULL;
+            if (field_string(line, "fn", tok, sizeof tok))
+                why = "no \"fn\" field - this is not a magnitude min/max set";
+            else if ((fn = mm_from_name(tok)) < 0)
+                why = "unknown 9.6 magnitude operation name";
+            else if (field_u32(line, "flags", &want_flags))
+                why = "no \"flags\" field";
+            if (why) {
+                fclose(fp);
+                free(cases);
+                rep_add(rp, "%s:%lu: %s\n", path, lineno, why);
+                return CFT_ERR_ARTIFACT;
+            }
+        }
+
+#define MGET(key, dst)                                                   \
+        if (field_string(line, key, tok, sizeof tok) ||                  \
+            parse_hex_elem(tok, dst, esz)) {                             \
+            fclose(fp);                                                  \
+            free(cases);                                                 \
+            rep_add(rp, "%s:%lu: bad \"%s\" field\n", path, lineno, key); \
+            return CFT_ERR_ARTIFACT;                                     \
+        }
+        MGET("a", ea)
+        MGET("b", eb)
+        MGET("d", want_d)
+#undef MGET
+
+        memset(got_d, 0, (size_t)esz);
+        st = mm_apply(dev, fn, (cft_format)fi, ea, eb, got_d, 1, &got_flags);
+        if (st != CFT_OK) {
+            fclose(fp);
+            free(cases);
+            rep_add(rp, "%s:%lu: %s failed: %s\n", path, lineno,
+                    MM_NAMES[fn], cft_strerror(st));
+            return st;
+        }
+        (*total)++;
+
+        if (memcmp(got_d, want_d, (size_t)esz) != 0 ||
+            got_flags != want_flags) {
+            char ha[2 * MAX_ELEM + 3], hb[2 * MAX_ELEM + 3];
+            char hw[2 * MAX_ELEM + 3], hg[2 * MAX_ELEM + 3];
+            fclose(fp);
+            free(cases);
+            format_hex_elem(ea, esz, ha);
+            format_hex_elem(eb, esz, hb);
+            format_hex_elem(want_d, esz, hw);
+            format_hex_elem(got_d, esz, hg);
+            rp->used = 0;
+            if (rp->buf && rp->size)
+                rp->buf[0] = '\0';
+            rep_add(rp, "%s:%lu: %s %s\n"
+                        "  a        %s\n"
+                        "  b        %s\n"
+                        "  expected %s flags 0x%02x\n"
+                        "  got      %s flags 0x%02x\n",
+                    path, lineno, f->name, MM_NAMES[fn], ha, hb,
+                    hw, (unsigned)want_flags, hg, (unsigned)got_flags);
+            return CFT_ERR_INTERNAL;
+        }
+
+        if (ncases == ccap) {
+            size_t want = ccap ? ccap * 2 : 4096;
+            cft_mm_case *bigger = (cft_mm_case *)realloc(
+                cases, want * sizeof *cases);
+            if (!bigger) {
+                fclose(fp);
+                free(cases);
+                rep_add(rp, "out of memory holding %s\n", path);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+            cases = bigger;
+            ccap = want;
+        }
+        cases[ncases].fn = fn;
+        cases[ncases].flags = want_flags;
+        memcpy(cases[ncases].a, ea, (size_t)esz);
+        memcpy(cases[ncases].b, eb, (size_t)esz);
+        memcpy(cases[ncases].d, want_d, (size_t)esz);
+        ncases++;
+    }
+    fclose(fp);
+
+    arr = minmaxmag_array_pass(dev, fi, esz, cases, ncases, path, rp);
+    free(cases);
+    return arr;
+}
+
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                                    char *report, size_t report_size,
                                    uint64_t *cases_checked)
@@ -2284,6 +2534,36 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 if (cases_checked)
                     *cases_checked = total;
                 return st;
+            }
+        }
+
+        /* The four magnitude forms of 754-2019 9.6: ONE file per
+         * format, because these operations select an operand rather
+         * than computing one and so consume no rounding attribute.
+         * Host operations, so the only capability to ask about is the
+         * format itself. */
+        {
+            char path[512];
+            cft_status st;
+            FILE *probe;
+
+            snprintf(path, sizeof path, "%s/%s-minmaxmag.jsonl", dir,
+                     f->name);
+            probe = fopen(path, "r");
+            if (probe) {
+                fclose(probe);
+                if (!supported) {
+                    rep_add(&r, "%s: skipped, %s not on this device\n",
+                            path, f->name);
+                } else {
+                    sets++;
+                    st = minmaxmag_set(dev, fi, esz, path, &r, &total);
+                    if (st != CFT_OK) {
+                        if (cases_checked)
+                            *cases_checked = total;
+                        return st;
+                    }
+                }
             }
         }
     }

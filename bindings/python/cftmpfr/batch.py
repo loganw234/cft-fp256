@@ -132,7 +132,8 @@ def _normalise(ctx, operands):
 
 def _finish(ctx, out, fl, mirror):
     ctx.last_flags = fl
-    ctx.flags |= fl
+    # No sticky accumulation here from ABI 0.7: the call itself ORed fl
+    # into the library's status word, which is what ctx.flags reads.
     return mirror(out), fl
 
 
@@ -661,6 +662,48 @@ def scaled_prod_diff(ctx, x, y):
     scaled_prod_sum with a subtraction at the leaf, in every respect.
     Returns (Float, int, flag word)."""
     return _scaled(ctx, 2, x, y)
+
+
+# ---------------------------------------------------------------------
+# 754-2019 9.6's magnitude forms, one C call for the whole array.
+#
+# "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|, otherwise
+# minimum(x, y)", and the same shape for the other three. They take no
+# rounding attribute - the result is one of the operands, so there is
+# nothing to round - which is why the context's attribute does not
+# appear below and could not change an answer.
+#
+# The four min/max OPCODES (min, max, minnum, maxnum) are reached
+# through batch.map-style calls on the elementwise path; these four are
+# host entry points and have no opcode, which is why they are here by
+# name.
+# ---------------------------------------------------------------------
+
+def _minmax_mag(ctx, name, x, y):
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    out, fl = _lib.minmax_mag(ctx._dev, name, ctx._fi.code, bx, by, n,
+                              ctx._fi.esz)
+    return _finish(ctx, out, fl, mirror)
+
+
+def min_mag(ctx, x, y):
+    """out[i] = minimumMagnitude(x[i], y[i])."""
+    return _minmax_mag(ctx, "min_mag", x, y)
+
+
+def max_mag(ctx, x, y):
+    """out[i] = maximumMagnitude(x[i], y[i])."""
+    return _minmax_mag(ctx, "max_mag", x, y)
+
+
+def minnum_mag(ctx, x, y):
+    """out[i] = minimumMagnitudeNumber(x[i], y[i])."""
+    return _minmax_mag(ctx, "minnum_mag", x, y)
+
+
+def maxnum_mag(ctx, x, y):
+    """out[i] = maximumMagnitudeNumber(x[i], y[i])."""
+    return _minmax_mag(ctx, "maxnum_mag", x, y)
 
 
 # ---------------------------------------------------------------------

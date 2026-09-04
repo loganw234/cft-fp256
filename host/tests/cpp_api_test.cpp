@@ -1310,11 +1310,21 @@ void check_format(cft::device &dev, cft_device *ref)
         }
 
         /* Flag bookkeeping: sticky is the OR of the calls, last is the
-         * most recent, and clearing clears only the sticky word. */
+         * most recent, and clearing clears only the sticky word.
+         *
+         * From ABI 0.7 the sticky word is the LIBRARY's - 754-2019
+         * 7.1's status flags, kept on the device - so a new context
+         * over a device that has been computing inherits what stands
+         * there, exactly as a new scope in a program inherits its
+         * caller's flags. Lowering them is the caller's job and 7.1
+         * says only the caller may do it, so the test does it
+         * explicitly rather than assuming a constructor did. */
         {
             cft::basic_context<F> fctx(dev, CFT_RNE);
-            CHECK(fctx.flags() == 0 && fctx.last_flags() == 0,
-                  "%s: a fresh context has no flags", cft_format_name(F));
+            fctx.clear_flags();
+            CHECK(fctx.flags() == 0,
+                  "%s: a context whose flags were lowered has none",
+                  cft_format_name(F));
             std::vector<enc> out(n);
             const std::uint32_t f1 = fctx.mul(a, b, out);
             const std::uint32_t f2 = fctx.abs(a, out);
@@ -1348,6 +1358,140 @@ void check_format(cft::device &dev, cft_device *ref)
             CHECK(refused_as_misuse([&] { const cft::value<F> r = x + foreign;
                                           (void)r; }),
                   "%s: values from two contexts do not mix",
+                  cft_format_name(F));
+        }
+
+        /* ---- ABI 0.7: 9.6's magnitude forms, 7.1's status word, and
+         *      5.7.1's predicates through the wrapper ------------- */
+        {
+            std::vector<enc> wd(n), cd(n);
+            std::uint32_t mfc = 0, fw;
+
+            /* The four, batch, against cft.h reached directly - the
+             * same comparison every other entry point here gets. */
+            fw = ctx.min_mag(a, b, wd);
+            cft_min_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc,
+                  "%s min_mag: wrapper 0x%02x vs library 0x%02x",
+                  cft_format_name(F), static_cast<unsigned>(fw),
+                  static_cast<unsigned>(mfc));
+            fw = ctx.max_mag(a, b, wd);
+            cft_max_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc, "%s max_mag", cft_format_name(F));
+            fw = ctx.minnum_mag(a, b, wd);
+            cft_minnum_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc, "%s minnum_mag", cft_format_name(F));
+            fw = ctx.maxnum_mag(a, b, wd);
+            cft_maxnum_mag(ref, F, a.data(), b.data(), cd.data(), n, &mfc);
+            CHECK(wd == cd && fw == mfc, "%s maxnum_mag", cft_format_name(F));
+
+            /* ... and scalar, which must be the batch of one. */
+            {
+                const cft::value<F> va = ctx.make(a[0]);
+                const cft::value<F> vb = ctx.make(b[0]);
+                ctx.min_mag(a, b, wd);
+                CHECK(ctx.min_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar min_mag is element 0 of the batch",
+                      cft_format_name(F));
+                ctx.max_mag(a, b, wd);
+                CHECK(ctx.max_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar max_mag", cft_format_name(F));
+                ctx.minnum_mag(a, b, wd);
+                CHECK(ctx.minnum_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar minnum_mag", cft_format_name(F));
+                ctx.maxnum_mag(a, b, wd);
+                CHECK(ctx.maxnum_mag(va, vb).bytes() == wd[0],
+                      "%s: scalar maxnum_mag", cft_format_name(F));
+            }
+
+            /* Equal magnitudes of opposite sign defer to the base
+             * operation - the one row an implementation that prefers x
+             * or y gets wrong, checked here through the wrapper. */
+            {
+                const cft::value<F> one = ctx.one();
+                const cft::value<F> minus_one = -one;
+                CHECK(ctx.min_mag(one, minus_one).same_bits(minus_one) &&
+                      ctx.min_mag(minus_one, one).same_bits(minus_one),
+                      "%s: min_mag(1, -1) is -1 either way round",
+                      cft_format_name(F));
+                CHECK(ctx.max_mag(one, minus_one).same_bits(one) &&
+                      ctx.max_mag(minus_one, one).same_bits(one),
+                      "%s: max_mag(1, -1) is +1 either way round",
+                      cft_format_name(F));
+                const cft::value<F> zp = ctx.zero(0);
+                const cft::value<F> zn = ctx.zero(1);
+                CHECK(ctx.min_mag(zp, zn).same_bits(zn) &&
+                      ctx.max_mag(zp, zn).same_bits(zp),
+                      "%s: the two zeros come from the base operation",
+                      cft_format_name(F));
+                /* and the NaN rules, which are the base operation's too */
+                const cft::value<F> qn = ctx.quiet_nan();
+                const cft::value<F> sn = ctx.signaling_nan();
+                ctx.clear_flags();
+                CHECK(ctx.min_mag(qn, one).same_bits(qn) &&
+                      ctx.last_flags() == 0,
+                      "%s: min_mag propagates a quiet NaN quietly",
+                      cft_format_name(F));
+                CHECK(ctx.minnum_mag(qn, one).same_bits(one) &&
+                      ctx.last_flags() == 0,
+                      "%s: minnum_mag returns the number",
+                      cft_format_name(F));
+                CHECK(ctx.maxnum_mag(sn, one).same_bits(one) &&
+                      ctx.last_flags() == CFT_FLAG_INVALID,
+                      "%s: a signaling NaN signals invalid and is ignored",
+                      cft_format_name(F));
+            }
+
+            /* 7.1's word, through the context and through the device -
+             * one word, two views. */
+            {
+                ctx.clear_flags();
+                CHECK(ctx.flags() == 0 && dev.save_all_flags() == 0,
+                      "%s: context and device see the same lowered word",
+                      cft_format_name(F));
+                const std::uint32_t f1 = ctx.minnum_mag(a, b, wd);
+                CHECK(ctx.flags() == f1 && dev.save_all_flags() == f1,
+                      "%s: and the same raised one", cft_format_name(F));
+
+                /* 5.7.4's six, by their names. */
+                ctx.lower_flags(CFT_FLAGS_ALL);
+                ctx.raise_flags(CFT_FLAG_OVERFLOW | CFT_FLAG_INVALID);
+                CHECK(ctx.test_flags(CFT_FLAG_OVERFLOW) &&
+                      !ctx.test_flags(CFT_FLAG_INEXACT),
+                      "%s: testFlags is ANY of the mask",
+                      cft_format_name(F));
+                const std::uint32_t saved = ctx.save_all_flags();
+                ctx.lower_flags(CFT_FLAG_OVERFLOW);
+                CHECK(ctx.flags() == CFT_FLAG_INVALID,
+                      "%s: lowering by mask leaves the rest",
+                      cft_format_name(F));
+                ctx.restore_flags(saved, CFT_FLAGS_ALL);
+                CHECK(ctx.flags() == saved,
+                      "%s: restoreFlags round-trips saveAllFlags",
+                      cft_format_name(F));
+                CHECK(cft::basic_context<F>::test_saved_flags(
+                          saved, CFT_FLAG_INVALID) &&
+                      !cft::basic_context<F>::test_saved_flags(
+                          saved, CFT_FLAG_INEXACT),
+                      "%s: testSavedFlags asks the same of a held word",
+                      cft_format_name(F));
+                /* Two contexts over one device share ONE word, which
+                 * is what 7.1 describes and the whole reason the
+                 * header stopped keeping its own. */
+                {
+                    cft::basic_context<F> second(dev, CFT_RDN);
+                    second.lower_flags(CFT_FLAGS_ALL);
+                    CHECK(ctx.flags() == 0,
+                          "%s: lowering through one context lowers the "
+                          "device's word", cft_format_name(F));
+                }
+                ctx.clear_flags();
+            }
+
+            /* 5.7.1, through the wrapper's free functions. */
+            CHECK(!cft::is754version1985() && !cft::is754version2008() &&
+                  cft::is754version2019(),
+                  "%s: the conformance predicates are 0, 0, 1",
                   cft_format_name(F));
         }
     }

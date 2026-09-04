@@ -208,13 +208,19 @@ static void lane_step(const cft_fmt_desc *f, uint8_t *buf, size_t i, int up)
 
 /* ---- one sequence step -------------------------------------------- */
 
-/* A scaffolding run: value kept, flags discarded, bus faults fatal. */
+/* A scaffolding run: value kept, flags discarded, bus faults fatal.
+ * Discarded from the status word too - the Newton iteration is
+ * inexact on almost every step and cft_div(1, 0) must still leave
+ * divideByZero alone in the word. See softfloat.h for the mute. */
 static cft_status step(cft_device *dev, cft_op op, cft_format fmt, int rnd,
                        const void *a, const void *b, const void *c, void *d,
                        size_t n, uint32_t *bus_out)
 {
-    return cft_run(dev, op, fmt, (cft_round)rnd, a, b, c, d, n,
-                   NULL, bus_out);
+    const int muted = cft_flags_mute(dev, 1);
+    cft_status st = cft_run(dev, op, fmt, (cft_round)rnd, a, b, c, d, n,
+                            NULL, bus_out);
+    (void)cft_flags_mute(dev, muted);
+    return st;
 }
 
 /* ---- shared scratch ----------------------------------------------- */
@@ -1350,6 +1356,7 @@ static cft_status divsqrt_via_program(cft_device *dev,
     pscratch s;
     cft_status st;
     int wrote_any = 0;
+    int muted;
 
     bytes = sq_emit(f, fmt, is_sqrt, image);
     st = cft_program_load(dev, image, bytes, &prog);
@@ -1359,6 +1366,12 @@ static cft_status divsqrt_via_program(cft_device *dev,
         cft_program_free(prog);
         return CFT_ERR_OUT_OF_MEMORY;
     }
+    /* Every pass below is internal: the program the tile runs IS the
+     * Newton sequence step() issues on the chunk route, so its flags
+     * are the scaffolding's and must not reach the status word. The
+     * contract flags this route produces are in *acc, and cft_div /
+     * cft_sqrt emit those. */
+    muted = cft_flags_mute(dev, 1);
     while (off < n) {
         size_t c = n - off > CHUNK ? CHUNK : n - off;
         st = is_sqrt
@@ -1377,6 +1390,7 @@ static cft_status divsqrt_via_program(cft_device *dev,
                 st = CFT_ERR_INTERNAL;
             pscratch_free(&s);
             cft_program_free(prog);
+            (void)cft_flags_mute(dev, muted);
             return st;
         }
         wrote_any = 1;
@@ -1384,6 +1398,7 @@ static cft_status divsqrt_via_program(cft_device *dev,
     }
     pscratch_free(&s);
     cft_program_free(prog);
+    (void)cft_flags_mute(dev, muted);
     return CFT_OK;
 }
 
@@ -1429,8 +1444,8 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
         *bus_out = 0;
     st = divsqrt_validate(dev, fmt, rnd, a, d, n, CFT_RECIP_SEED);
     if (st != CFT_OK || n == 0) {
-        if (st == CFT_OK && flags_out)
-            *flags_out = 0;
+        if (st == CFT_OK)
+            cft_flags_emit(dev, 0, flags_out);
         return st;
     }
     if (!b)
@@ -1446,8 +1461,8 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
                                  (const uint8_t *)a, (const uint8_t *)b,
                                  (uint8_t *)d, n, &acc, bus_out);
         if (st != CFT_ERR_UNSUPPORTED) {
-            if (st == CFT_OK && flags_out)
-                *flags_out = acc;
+            if (st == CFT_OK)
+                cft_flags_emit(dev, acc, flags_out);
             return st;
         }
         acc = 0;         /* bitstream cannot run programs; d untouched */
@@ -1469,8 +1484,7 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
         off += c;
     }
     scratch_free(&s);
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -1488,8 +1502,8 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
         *bus_out = 0;
     st = divsqrt_validate(dev, fmt, rnd, a, d, n, CFT_RSQRT_SEED);
     if (st != CFT_OK || n == 0) {
-        if (st == CFT_OK && flags_out)
-            *flags_out = 0;
+        if (st == CFT_OK)
+            cft_flags_emit(dev, 0, flags_out);
         return st;
     }
 
@@ -1503,8 +1517,8 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
                                  (const uint8_t *)a, NULL,
                                  (uint8_t *)d, n, &acc, bus_out);
         if (st != CFT_ERR_UNSUPPORTED) {
-            if (st == CFT_OK && flags_out)
-                *flags_out = acc;
+            if (st == CFT_OK)
+                cft_flags_emit(dev, acc, flags_out);
             return st;
         }
         acc = 0;         /* bitstream cannot run programs; d untouched */
@@ -1525,7 +1539,6 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
         off += c;
     }
     scratch_free(&s);
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }

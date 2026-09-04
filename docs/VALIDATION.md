@@ -2407,3 +2407,141 @@ makes; the four-package gate earlier in the day (run
 seeded by format width and trial count, not by time. The 0.6 top-level
 claims in README.md and docs/COMPATIBILITY.md were taken from that
 earlier gate and this run reproduces every one of them.
+
+## 2026-09-03 - ABI 0.7 package B: the status word, the conformance predicates, and 9.6's magnitude four
+
+The package: 754-2019 7.1's sticky status word with 5.7.4's six
+operations over it, the three conformance predicates of 5.7.1, and the
+four magnitude forms of minimum and maximum from 9.6. The first two are
+required for a conformance claim (docs/COMPLIANCE.md's items 2 and 3);
+the third is recommended, and with it every operation clause 9 lists for
+binary formats is present.
+
+`bash verify/run.sh --fresh --only golden,vectors,libcft,clause5,status96,cpp,bindings,mpfr`
+at 219e722 on DESKTOP-T33SK86 (Windows, MINGW64, Miniconda's python
+first on PATH so the model's stages get mpmath). Run id
+20260903-213827-219e722, on a clean tree, 58 minutes wall beside other
+agents' work on the same box:
+
+    golden 289s  vectors 299s  libcft 475s  clause5 2s  status96 1s
+    bindings 141s  cpp 1447s  mpfr 490s
+
+    VERDICT: PASS, nothing skipped - 8 executed, 0 failed, 0 skipped
+
+The counts each stage printed, and what is new in them:
+
+| stage | printed | of which this package |
+|---|---|---|
+| golden | 1566 passed, 5 skipped | +94 over 0.6's 1472, all of them `python/tests/test_minmax_mag.py` |
+| vectors | 88 sets written | 4 new - `<fmt>-minmaxmag.jsonl`, 2432 cases each |
+| libcft | `api-test: all contract checks passed`; 88 sets, 1,047,385 cases replayed through `cft_conformance` | the replay grew from 84 sets / 1,037,657 cases; the four new sets are replayed one element at a time and then as arrays. api-test gained a block of ~90 checks on the word and on 9.6's named rows |
+| clause5 | 145,032 comparisons, C == model | unchanged in content, and that is the point: it is the regression check on the routing, since every clause-5 entry point's `flags_out` now comes out of `cft_flags_emit` |
+| status96 | 53,517 comparisons, C == model on every one; 45 checks on the word; the predicates 0/0/1 | all of it |
+| cpp | 212,019 checks at C++17 and again at C++20, each replaying 1,047,385 cases | up from 211,931: the four through `basic_context` batch and scalar, the tie and NaN rows, one word seen through two contexts, `cft::is754version*` |
+| bindings | cftmpfr: 782 passed | +27 over 0.6's 755 |
+| mpfr | 714,964 cases, 0 value mismatches, 0 flag mismatches (MPFR 4.2.1) | +115,584 over 0.6's 599,380: 7,224 cases for each of the four operations at each of the four formats |
+
+Model comparisons: `test_minmax_mag.py` is 94 tests over the four
+formats, arbitrating the two halves of 9.6's sentence separately. The
+magnitude half gets an independent reading of the encoding written from
+the format descriptor alone, plus CPython's native binary64 at fp64. The
+deferral half is hand-derived from the standard's text, because there is
+no external implementation of 2019's minimumNumber to ask - C's
+`fmin`/`fmax` are 2008's `minNum`, whose signaling-NaN rule 2019 changed
+(the NOTE at the end of 5.3.1).
+
+The MPFR row is the only place in the package where an oracle and a
+restatement sit in one function, and `host/tools/mpfr_check.c` says
+which is which at the top of the block. The oracle half is MPFR's and
+it is the whole numeric content: `mpfr_cmpabs` decides `|x|` against
+`|y|`, and `mpfr_min`/`mpfr_max` decide the equal-magnitude case (the
+MPFR manual defines those exactly as 754 defines minimum and maximum on
+numbers, signed zeros included). The restatement half is the NaN
+handling, and it has to be - MPFR has no signaling NaN, and `mpfr_min`
+implements only the `...Number` NaN rule, so the plain forms' rule has
+no counterpart to compare against.
+
+### The negative controls
+
+Both were run against the built tree and both were restored; `git
+status` was clean afterwards, and the gate above ran on the restored
+tree.
+
+**1. The OR-in, broken for one entry point.** `cft_next_up` was put back
+to the pre-0.7 shape - `if (flags_out) *flags_out = acc;`, reaching no
+status word - which is the mistake a future entry point makes by copying
+an old one. Nothing else was touched. Two gates caught it and named it:
+
+    api-test.c:2233   FAIL  four flags standing after three calls
+    status96          FAIL  minmax_mag_check.py:394, AssertionError on
+                            cft_save_all_flags(dev) == DIVBYZERO|INVALID
+                            after cft_next_up(sNaN)
+
+Both are the same assertion in two harnesses: three calls raise
+overflow+inexact, divideByZero and invalid, and the word must hold all
+four. Restored; both green again.
+
+**2. maximumMagnitude preferring y on equal magnitudes of opposite
+sign.** The plausible wrong reading of 9.6 - "otherwise, return the
+second operand" instead of "otherwise, maximum(x, y)" - applied to
+`cft_max_mag` only, leaving `cft_min_mag` and the two `...Number` forms
+correct, so the control is as narrow as a real mistake would be. It is
+invisible everywhere except on that tie, and five gates caught it:
+
+    api-test.c:2407   FAIL  maximumMagnitude(+3, -3) defers to maximum: +3
+    api-test.c:2417   FAIL  max of the two zeros is +0
+    libcft (replay)   FAIL  vectors/out/fp32-minmaxmag.jsonl
+                            a 0x00000000 b 0x80000000
+                            expected 0x00000000, got 0x80000000
+    status96          FAIL  max_mag fp32 a=0x0 b=0x80000000:
+                            C 0x80000000, model 0x0
+    bindings          FAIL  8 tests - test_minmax_mag_matches_the_model
+                            and test_minmax_mag_named_rows, all four
+                            precisions each
+    mpfr              FAIL  44 value mismatches per format in the
+                            clause5+9.5+9.6 phase: "MISMATCH fp32 max_mag
+                            a=0x00000000 b=0x80000000 lib=0x80000000
+                            mpfr=0", and the same for +-inf
+
+The MPFR row is the one worth noting: `mpfr_max` says the answer is `+0`
+and `+inf`, so the equal-magnitude rule is scored by MPFR rather than by
+a restatement of it.
+
+### What was NOT run, and why
+
+- The RTL stages (`sim`, `lint`, `formal`) and the `selfcheck`,
+  `divsqrt`, `character`, `transcend`, `augmented`, `diff`, `seq`,
+  `reduce` and `soak-quick` stages were outside this package's gate
+  command. No opcode was consumed, no RTL file was touched, and no
+  arithmetic changed: the four new operations are host-side selections
+  with no opcode, and the status word is inert state that nothing reads
+  back. `clause5` WAS run, because it is the regression check that
+  matters here - every clause-5 entry point's flag write now goes
+  through the new seam.
+- The JavaScript surfaces (`node`, `wasm`) were left to the later agent
+  that does the JavaScript side, and `bindings/wasm` and `bindings/node`
+  were not touched. Both replayers list an unknown `.jsonl` as
+  "(ignoring ...)" rather than failing on it, so the four
+  `-minmaxmag` sets are ignored there until that step lands.
+- The language legs (`lang-*`) were not run: no example changed, and the
+  C ABI gained only additive entry points.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the ABI
+  version in `cft.h` were deliberately not touched - the integrator does
+  those once, for the whole 0.7 step. The header and the docs say "ABI
+  0.7" where they describe the new surface; `CFT_ABI_VERSION_MINOR`
+  still reads 6.
+- No device backend was exercised. The status word is a host-memory
+  field on the device handle, written by the host on every path
+  including the XRT one, so a card would not change it; the four
+  magnitude forms are host operations with no opcode and no pass to
+  issue.
+- One earlier attempt at this same gate (run id 20260903-213234-f52ebe0)
+  was abandoned and its state directory removed. It was killed
+  deliberately, four minutes in, because a comment-only commit landed
+  while it was running and a census that names one commit while
+  compiling another certifies nothing. Its `golden` FAIL marker was that
+  kill, not the suite.
+
+Three wording fixes in `cft.h`, `docs/DETERMINISM.md` and
+`docs/HOSTAPI.md` were held back until after this run for the same
+reason and are the only commit between it and the tip.

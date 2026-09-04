@@ -36,6 +36,17 @@ struct cft_device {
     int         flags_readable;
     const char *backend_name;
     void       *hw;             /* backend handle, NULL for software */
+    /* The 754-2019 7.1 status word (ABI 0.7). Every entry point ORs
+     * its per-call flags in through cft_flags_emit(); only the six
+     * operations of 5.7.4 at the end of this file ever lower it.
+     * calloc'd to zero at cft_open, which is 7.1's "A program that
+     * does not inherit status flags from another source begins
+     * execution with all status flags lowered." */
+    uint32_t    sticky_flags;
+    /* Nonzero while a composed operation's internal passes are
+     * running, so that the scaffolding's flags reach the pass's own
+     * flags_out and not the word above. See cft_flags_mute. */
+    int         flags_muted;
 };
 
 /* Which CAPS opcode-group bit covers an opcode. The groups exist
@@ -374,8 +385,7 @@ CFT_API cft_status cft_run(cft_device *dev,
     }
 
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
     if (!d)
@@ -396,8 +406,8 @@ CFT_API cft_status cft_run(cft_device *dev,
         cft_status st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
                                              (int)rnd, a, b, c, d, n,
                                              &fl, bus_out);
-        if (st == CFT_OK && flags_out)
-            *flags_out = fl;
+        if (st == CFT_OK)
+            cft_flags_emit(dev, fl, flags_out);
         return st;
     }
 #endif
@@ -423,8 +433,7 @@ CFT_API cft_status cft_run(cft_device *dev,
         cft_bn_store(&bo, pd + i * esz, (int)esz);
     }
 
-    if (flags_out)
-        *flags_out = acc;
+    cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
 
@@ -554,8 +563,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
         cft_bn z;
         cft_bn_zero(&z);
         cft_bn_store(&z, (uint8_t *)d, (int)esz);
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
     }
 
@@ -585,6 +593,13 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (op == CFT_SUMSQ || op == CFT_SUMABS) {
         uint32_t cf = 0;
         cft_status st;
+        /* The composition's own calls are internal passes, so they do
+         * not reach the status word: the emit at the end of this block
+         * does, and it is the one that carries 9.4's infinity override
+         * when that fires. Muting is what keeps a sumAbs over a vector
+         * holding both an infinity and a signalling NaN from leaving
+         * the tree's flags standing beside the override's. */
+        const int muted = cft_flags_mute(dev, 1);
 
         if (op == CFT_SUMSQ) {
             st = cft_reduce(dev, CFT_DOT, fmt, rnd, a, a, d, n, &cf,
@@ -602,6 +617,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
             free(tmp);
             cf |= af;          /* abs signals nothing (5.5.1); OR anyway */
         }
+        (void)cft_flags_mute(dev, muted);
         if (st != CFT_OK)
             return st;
 
@@ -613,8 +629,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
                 cf = of;
             }
         }
-        if (flags_out)
-            *flags_out = cf;
+        cft_flags_emit(dev, cf, flags_out);
         return CFT_OK;
     }
 
@@ -629,16 +644,19 @@ CFT_API cft_status cft_reduce(cft_device *dev,
             void *tmp = malloc(n * esz);
             uint32_t mf = 0, sf = 0;
             cft_status st;
+            int muted;
             if (!tmp)
                 return CFT_ERR_OUT_OF_MEMORY;
+            muted = cft_flags_mute(dev, 1);   /* internal passes */
             st = cft_run(dev, CFT_MUL, fmt, rnd, a, b, NULL, tmp, n,
                          &mf, bus_out);
             if (st == CFT_OK)
                 st = cft_reduce(dev, CFT_SUM, fmt, rnd, tmp, NULL, d, n,
                                 &sf, bus_out);
             free(tmp);
-            if (st == CFT_OK && flags_out)
-                *flags_out = mf | sf;
+            (void)cft_flags_mute(dev, muted);
+            if (st == CFT_OK)
+                cft_flags_emit(dev, mf | sf, flags_out);
             return st;
         }
 
@@ -691,8 +709,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
                 fl |= cf;
             }
             cft_bn_store(&bo, (uint8_t *)d, (int)esz);
-            if (flags_out)
-                *flags_out = fl;
+            cft_flags_emit(dev, fl, flags_out);
             return CFT_OK;
         }
     }
@@ -701,8 +718,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (cft_sf_reduce(f, (int)op, (int)rnd, a, b, esz, 0, n, &bo, &fl))
         return CFT_ERR_INTERNAL;
     cft_bn_store(&bo, (uint8_t *)d, (int)esz);
-    if (flags_out)
-        *flags_out = fl;
+    cft_flags_emit(dev, fl, flags_out);
     return CFT_OK;
 }
 
@@ -760,3 +776,131 @@ CFT_API void cft_buffer_free(cft_buffer *buf)
     free(buf->data);
     free(buf);
 }
+
+/* ---------------------------------------------------------------
+ * The status word (754-2019 7.1) and the six operations of 5.7.4,
+ * plus the three conformance predicates of 5.7.1.       (ABI 0.7)
+ *
+ * 7.1: "For each kind of exception the implementation shall provide a
+ * corresponding status flag ... Status flags shall be lowered only at
+ * the user's request. The user shall be able to test and to alter the
+ * status flags individually or collectively, and shall further be
+ * able to save and restore all at one time (see 5.7.4)."
+ *
+ * The word is one uint32_t on the device handle, in the same
+ * cft_exception bits every entry point already returns. It is the
+ * ONLY mutable state libcft keeps, and it is inert: nothing here or
+ * anywhere else in the library reads it back to decide a result, so
+ * two runs of the same calls on the same inputs produce the same bits
+ * whatever the word happens to hold. The determinism contract is
+ * untouched by its existence.
+ *
+ * Every producer reaches it through cft_flags_emit() below and only
+ * through that, which is why a new entry point costs one line.
+ * --------------------------------------------------------------- */
+
+/* The one seam. See softfloat.h for the contract; the whole of it is
+ * "OR in, then write out". */
+void cft_flags_emit(struct cft_device *dev, uint32_t acc,
+                    uint32_t *flags_out)
+{
+    if (dev && !dev->flags_muted)
+        dev->sticky_flags |= acc;
+    if (flags_out)
+        *flags_out = acc;
+}
+
+/* The composition discipline's half. See softfloat.h for why an
+ * internal pass must not reach the word. */
+int cft_flags_mute(struct cft_device *dev, int on)
+{
+    int prev;
+    if (!dev)
+        return 0;
+    prev = dev->flags_muted;
+    dev->flags_muted = on;
+    return prev;
+}
+
+/* 5.7.4 lowerFlags(exceptionGroup). A NULL device has no word to
+ * lower, so this does nothing rather than crashing - the same
+ * tolerance cft_close() and cft_buffer_free() already promise. */
+CFT_API void cft_lower_flags(cft_device *dev, uint32_t mask)
+{
+    if (dev)
+        dev->sticky_flags &= ~mask;
+}
+
+/* 5.7.4 raiseFlags(exceptionGroup). The one operation besides an
+ * arithmetic call that can raise a flag, and 7.1 says so: "status
+ * flags are raised without an exception being signaled only at the
+ * user's request". */
+CFT_API void cft_raise_flags(cft_device *dev, uint32_t mask)
+{
+    if (dev)
+        dev->sticky_flags |= mask;
+}
+
+/* 5.7.4 testFlags(exceptionGroup): "Queries whether ANY of the flags
+ * ... are raised" - so this is a disjunction over the mask and not an
+ * equality, and it returns 1 or 0 rather than the intersection, which
+ * a caller could mistake for a flag word. A NULL device tests an
+ * empty word: 0. */
+CFT_API int cft_test_flags(cft_device *dev, uint32_t mask)
+{
+    return dev && (dev->sticky_flags & mask) ? 1 : 0;
+}
+
+/* 5.7.4 saveAllFlags(void): "Returns a representation of the state of
+ * all status flags." The representation here is the flag word itself,
+ * in cft_exception bits - which is what makes it comparable with the
+ * flags_out of any call. 0 for a NULL device. */
+CFT_API uint32_t cft_save_all_flags(cft_device *dev)
+{
+    return dev ? dev->sticky_flags : 0u;
+}
+
+/* 5.7.4 restoreFlags(flags, exceptionGroup): "Restores the flags
+ * corresponding to the exceptions specified in the exceptionGroup
+ * operand ... to their state represented in the flags operand."
+ *
+ * Restores, not ORs: a flag inside the mask that is LOW in `saved`
+ * comes back low, which is the only reading under which
+ * restoreFlags(saveAllFlags(), all) is the identity it is meant to
+ * be. Flags outside the mask are left exactly as they stand. */
+CFT_API void cft_restore_flags(cft_device *dev, uint32_t saved,
+                               uint32_t mask)
+{
+    if (dev)
+        dev->sticky_flags = (dev->sticky_flags & ~mask) | (saved & mask);
+}
+
+/* 5.7.4 testSavedFlags(flags, exceptionGroup). No device: the whole
+ * operation is a question about a value the caller already holds, and
+ * giving it a device argument would suggest otherwise. */
+CFT_API int cft_test_saved_flags(uint32_t saved, uint32_t mask)
+{
+    return (saved & mask) ? 1 : 0;
+}
+
+/* ---- 5.7.1, the conformance predicates ---------------------------- *
+ *
+ * "Implementations shall provide the following non-computational
+ * operations, true if and only if the indicated conditions are true:
+ * boolean is754version1985(void) ... boolean is754version2008(void)
+ * ... boolean is754version2019(void)" (5.7.1)
+ *
+ * The answers are constants, and each rests on something stated
+ * elsewhere rather than on this file's opinion. See cft.h for the
+ * three arguments in full; in one line each:
+ *
+ *   1985 - false: never evaluated against the 1985 text.
+ *   2008 - false: 754-2008 required minNum/maxNum/minNumMag/maxNumMag
+ *          in its 5.3.1, and this library implements 2019's 9.6
+ *          semantics instead, which are not the same operations.
+ *   2019 - true from ABI 0.7, when clause 5 is complete;
+ *          docs/COMPLIANCE.md is the clause-by-clause statement.
+ */
+CFT_API int cft_is754version1985(void) { return 0; }
+CFT_API int cft_is754version2008(void) { return 0; }
+CFT_API int cft_is754version2019(void) { return 1; }

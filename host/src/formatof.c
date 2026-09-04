@@ -729,9 +729,20 @@ static cft_status fo_validate(cft_device *dev, int op, cft_format sfmt,
 /* The one place every formatOf call's flag word becomes final.
  *
  * All six entry points are one line each into this function, and the
- * `*flags_out = acc` below is the single point at which the batch's
- * exception group is complete - the obvious hook for the sticky status
- * word 7.1 asks for, when that lands. */
+ * single cft_flags_emit() below is the point at which the batch's
+ * exception group is complete: it writes flags_out and ORs the same
+ * word into the device's sticky status word (754-2019 7.1), which is
+ * why no raw `*flags_out =` survives anywhere in this file.
+ *
+ * The widening route's passes run MUTED. Every cft_convert, cft_run,
+ * cft_div and cft_sqrt it issues is internal to one formatOf
+ * operation - the same relationship divsqrt.c's Newton steps have to
+ * cft_div - so their flags reach this function through their own
+ * flags_out, are accumulated here, and reach the status word exactly
+ * once, through the emit below. Without the mute a single
+ * formatOf-division would OR its scaffolding into the word twice and,
+ * worse, the widening cft_convert of a signaling NaN would put invalid
+ * there on its own account rather than as part of the operation. */
 static cft_status fo_batch(cft_device *dev, int op, cft_format sfmt,
                            cft_format dfmt, cft_round rnd, const void *a,
                            const void *b, const void *c, void *d, size_t n,
@@ -744,8 +755,7 @@ static cft_status fo_batch(cft_device *dev, int op, cft_format sfmt,
     if (st != CFT_OK)
         return st;
     if (n == 0) {
-        if (flags_out)
-            *flags_out = 0;
+        cft_flags_emit(dev, 0, flags_out);
         if (bus_out)
             *bus_out = 0;
         return CFT_OK;
@@ -759,9 +769,13 @@ static cft_status fo_batch(cft_device *dev, int op, cft_format sfmt,
 
     if (g->prec >= f->prec) {
         /* Not narrower: widen exactly and issue the existing operation,
-         * so a device backend still runs it on the tile. */
+         * so a device backend still runs it on the tile. Muted, because
+         * every pass it issues is internal to THIS operation - see the
+         * banner above and the composition discipline in softfloat.h. */
+        const int muted = cft_flags_mute(dev, 1);
         st = fo_widen_batch(dev, op, sfmt, dfmt, rnd, a, b, c, d, n,
                             &acc, &bus);
+        (void)cft_flags_mute(dev, muted);
         if (st != CFT_OK) {
             if (bus_out)
                 *bus_out = bus;
@@ -788,8 +802,8 @@ static cft_status fo_batch(cft_device *dev, int op, cft_format sfmt,
         }
     }
 
-    if (flags_out)
-        *flags_out = acc;          /* <- the call's flag word is final */
+    /* <- the call's flag word is final: flags_out and 7.1's word, once */
+    cft_flags_emit(dev, acc, flags_out);
     if (bus_out)
         *bus_out = bus;
     return CFT_OK;

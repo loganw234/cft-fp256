@@ -2162,6 +2162,366 @@ int main(void)
         }
     }
 
+    /* --- the status word (7.1, 5.7.4), the conformance predicates
+     *     (5.7.1), and 9.6's magnitude forms          (ABI 0.7)
+     *
+     * The word is state, so nothing in the vectors can express it and
+     * nothing in the golden model corresponds to it. Every check below
+     * is against a sentence of the standard, quoted where it bites.
+     * ------------------------------------------------------------- */
+    {
+        uint8_t a[4], b[4], d[4];
+        uint32_t f = 0, saved;
+
+        /* 5.7.1. Constants, and what each rests on is in cft.h. */
+        CHECK(cft_is754version1985() == 0, "1985 is not asserted");
+        CHECK(cft_is754version2008() == 0,
+              "2008 is not asserted: its 5.3.1 required minNum/maxNum, "
+              "which 2019 replaced with 9.6's");
+        CHECK(cft_is754version2019() == 1, "2019 IS asserted from 0.7");
+
+        /* The whole-set mask is the five flags and nothing else. */
+        CHECK(CFT_FLAGS_ALL == (uint32_t)(CFT_FLAG_INVALID |
+                                          CFT_FLAG_DIVBYZERO |
+                                          CFT_FLAG_OVERFLOW |
+                                          CFT_FLAG_UNDERFLOW |
+                                          CFT_FLAG_INEXACT),
+              "CFT_FLAGS_ALL is every exception this library defines");
+
+        /* 7.1: "A program that does not inherit status flags from
+         * another source begins execution with all status flags
+         * lowered." This device has done a great deal by now, so
+         * lower them first and treat that as the starting point. */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        CHECK(cft_save_all_flags(dev) == 0, "lowered means zero");
+        CHECK(cft_test_flags(dev, CFT_FLAGS_ALL) == 0,
+              "and testFlags agrees");
+
+        /* ACCUMULATION ACROSS CALLS. Each of these raises something
+         * different; nothing between them lowers anything; so the word
+         * is the union at every step. The values are 754's, not either
+         * implementation's: max + max overflows (and 7.4 makes that
+         * inexact too), 1/0 is divideByZero (7.3), and an sNaN into
+         * nextUp is invalid (5.3.1: "nextUp(x) is quiet except for
+         * signaling NaNs"). */
+        put32(a, 0x7f7fffffu);                  /* max normal fp32 */
+        put32(b, 0x7f7fffffu);
+        CHECK(cft_run(dev, CFT_ADD, CFT_FP32, CFT_RNE, a, NULL, b, d, 1,
+                      &f, NULL) == CFT_OK, "add");
+        CHECK(f == (uint32_t)(CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "max + max overflows inexactly, got 0x%02x", (unsigned)f);
+        CHECK(cft_save_all_flags(dev) == f,
+              "the first call's flags are the whole word");
+
+        put32(a, 0x3f800000u);                  /* 1.0 */
+        put32(b, 0x00000000u);                  /* +0  */
+        CHECK(cft_div(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f, NULL)
+              == CFT_OK, "div");
+        CHECK(f == (uint32_t)CFT_FLAG_DIVBYZERO,
+              "1/0 signals divideByZero and NOTHING else - the Newton "
+              "scaffolding's inexact must not leak, got 0x%02x",
+              (unsigned)f);
+        CHECK(cft_save_all_flags(dev) ==
+              (uint32_t)(CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT |
+                         CFT_FLAG_DIVBYZERO),
+              "and the word is the union of the two calls: 0x%02x",
+              (unsigned)cft_save_all_flags(dev));
+
+        put32(a, 0x7fa00000u);                  /* a signaling NaN */
+        CHECK(cft_next_up(dev, CFT_FP32, a, d, 1, &f) == CFT_OK, "nextUp");
+        CHECK(f == (uint32_t)CFT_FLAG_INVALID, "nextUp(sNaN) is invalid");
+        CHECK(cft_save_all_flags(dev) ==
+              (uint32_t)(CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT |
+                         CFT_FLAG_DIVBYZERO | CFT_FLAG_INVALID),
+              "four flags standing after three calls");
+
+        /* A CALL THAT RAISES NOTHING LEAVES THE WORD ALONE. Not
+         * "leaves it mostly alone": exactly as it stood. 1 + 1 is
+         * exact, and cft_class is non-computational (5.7.2) and
+         * signals nothing at all, not even on the sNaN below. */
+        saved = cft_save_all_flags(dev);
+        put32(a, 0x3f800000u);
+        put32(b, 0x3f800000u);
+        CHECK(cft_run(dev, CFT_ADD, CFT_FP32, CFT_RNE, a, NULL, b, d, 1,
+                      &f, NULL) == CFT_OK, "add");
+        CHECK(f == 0 && get32(d) == 0x40000000u, "1 + 1 = 2, exactly");
+        CHECK(cft_save_all_flags(dev) == saved,
+              "an exact call changes no flag");
+        {
+            uint8_t cls = 0xff;
+            put32(a, 0x7fa00000u);
+            CHECK(cft_class(dev, CFT_FP32, a, &cls, 1) == CFT_OK, "class");
+            CHECK(cls == CFT_CLASS_SNAN, "and it IS a signaling NaN");
+            CHECK(cft_save_all_flags(dev) == saved,
+                  "which class reports without signalling (5.7.2)");
+        }
+
+        /* THE PER-ELEMENT UNION. One batch call whose four elements
+         * each raise something different puts all four in the word at
+         * once - the same OR the call returns. */
+        {
+            uint8_t va[16], vb[16], vd[16];
+            uint32_t want = (uint32_t)(CFT_FLAG_OVERFLOW |
+                                       CFT_FLAG_UNDERFLOW |
+                                       CFT_FLAG_INEXACT |
+                                       CFT_FLAG_INVALID);
+            put32(va + 0,  0x7f7fffffu); put32(vb + 0,  0x7f7fffffu);
+            put32(va + 4,  0x00000001u); put32(vb + 4,  0x3eaaaaabu);
+            put32(va + 8,  0x3f800000u); put32(vb + 8,  0x3f800000u);
+            put32(va + 12, 0x7fa00000u); put32(vb + 12, 0x3f800000u);
+            cft_lower_flags(dev, CFT_FLAGS_ALL);
+            CHECK(cft_run(dev, CFT_MUL, CFT_FP32, CFT_RNE, va, vb, NULL,
+                          vd, 4, &f, NULL) == CFT_OK, "mul x4");
+            CHECK(f == want, "the batch's flags are the union of its "
+                  "elements': 0x%02x want 0x%02x", (unsigned)f,
+                  (unsigned)want);
+            CHECK(cft_save_all_flags(dev) == want,
+                  "and the word gets that same union in one call");
+        }
+
+        /* LOWER BY MASK: only the named flags go down, and testFlags is
+         * 5.7.4's "whether ANY of the flags ... are raised". */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        cft_raise_flags(dev, CFT_FLAGS_ALL);
+        CHECK(cft_save_all_flags(dev) == CFT_FLAGS_ALL, "raise all");
+        cft_lower_flags(dev, CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW);
+        CHECK(cft_save_all_flags(dev) ==
+              (CFT_FLAGS_ALL & ~(uint32_t)(CFT_FLAG_INEXACT |
+                                           CFT_FLAG_UNDERFLOW)),
+              "lowering two leaves the other three standing");
+        CHECK(cft_test_flags(dev, CFT_FLAG_INEXACT) == 0, "inexact is down");
+        CHECK(cft_test_flags(dev, CFT_FLAG_INVALID) == 1, "invalid is up");
+        CHECK(cft_test_flags(dev, CFT_FLAG_INEXACT | CFT_FLAG_INVALID) == 1,
+              "ANY, not all");
+        CHECK(cft_test_flags(dev, 0) == 0, "the empty group tests false");
+
+        /* RAISE BY MASK, one bit at a time. */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        for (i = 0; i < 5; i++) {
+            const uint32_t bit = 1u << i;
+            cft_raise_flags(dev, bit);
+            CHECK(cft_test_flags(dev, bit) == 1, "raised bit %d", i);
+        }
+        CHECK(cft_save_all_flags(dev) == CFT_FLAGS_ALL,
+              "five raises make the whole set");
+
+        /* SAVE / RESTORE ROUND TRIP, which is what 5.7.4 says the
+         * saveAllFlags result is for: "for use as the first operand to
+         * a restoreFlags or testSavedFlags operation". */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        cft_raise_flags(dev, CFT_FLAG_INVALID | CFT_FLAG_OVERFLOW);
+        saved = cft_save_all_flags(dev);
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        cft_raise_flags(dev, CFT_FLAG_INEXACT);
+        cft_restore_flags(dev, saved, CFT_FLAGS_ALL);
+        CHECK(cft_save_all_flags(dev) == saved,
+              "restore over the whole set is a round trip: 0x%02x vs "
+              "0x%02x", (unsigned)cft_save_all_flags(dev),
+              (unsigned)saved);
+
+        /* restoreFlags LOWERS inside the mask as well as raising - a
+         * flag that is low in `saved` comes back low - and touches
+         * nothing outside it. An OR-only implementation passes the
+         * round trip above and fails this. */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        cft_raise_flags(dev, CFT_FLAGS_ALL);
+        cft_restore_flags(dev, 0, CFT_FLAG_INEXACT);
+        CHECK(cft_save_all_flags(dev) ==
+              (CFT_FLAGS_ALL & ~(uint32_t)CFT_FLAG_INEXACT),
+              "restoring a low flag lowers it");
+        cft_restore_flags(dev, CFT_FLAG_INEXACT | CFT_FLAG_INVALID,
+                          CFT_FLAG_INEXACT);
+        CHECK(cft_save_all_flags(dev) == CFT_FLAGS_ALL,
+              "and restoring a high one raises it");
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        cft_restore_flags(dev, CFT_FLAGS_ALL, CFT_FLAG_DIVBYZERO);
+        CHECK(cft_save_all_flags(dev) == (uint32_t)CFT_FLAG_DIVBYZERO,
+              "outside the mask nothing moves");
+
+        /* testSavedFlags: the same question, asked of a value the
+         * caller holds. No device, so no state can affect it. */
+        CHECK(cft_test_saved_flags(CFT_FLAG_INVALID | CFT_FLAG_INEXACT,
+                                   CFT_FLAG_INEXACT) == 1, "saved: any");
+        CHECK(cft_test_saved_flags(CFT_FLAG_INVALID,
+                                   CFT_FLAG_INEXACT) == 0, "saved: none");
+        CHECK(cft_test_saved_flags(0, CFT_FLAGS_ALL) == 0, "saved: empty");
+        CHECK(cft_test_saved_flags(CFT_FLAGS_ALL, CFT_FLAGS_ALL) == 1,
+              "saved: full");
+
+        /* A NULL device is a word that is permanently zero, and none
+         * of the six may dereference it. */
+        CHECK(cft_save_all_flags(NULL) == 0, "NULL device saves 0");
+        CHECK(cft_test_flags(NULL, CFT_FLAGS_ALL) == 0, "NULL tests 0");
+        cft_raise_flags(NULL, CFT_FLAGS_ALL);
+        cft_lower_flags(NULL, CFT_FLAGS_ALL);
+        cft_restore_flags(NULL, CFT_FLAGS_ALL, CFT_FLAGS_ALL);
+        CHECK(cft_save_all_flags(NULL) == 0, "and still 0 afterwards");
+
+        /* ---- 9.6's magnitude forms ------------------------------ *
+         *
+         * Values derived from the standard's own sentence rather than
+         * from either implementation:
+         *
+         *   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+         *    otherwise minimum(x, y)."
+         */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+
+        /* The magnitude decides and the sign has no vote:
+         * |-1| < |+2|, so minimumMagnitude(-1, +2) is -1 even though
+         * -1 is also the smaller number, and maximumMagnitude is +2. */
+        put32(a, 0xbf800000u);                  /* -1.0 */
+        put32(b, 0x40000000u);                  /* +2.0 */
+        f = 0xdead;
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0xbf800000u && f == 0, "minimumMagnitude(-1, 2)");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0x40000000u && f == 0, "maximumMagnitude(-1, 2)");
+
+        /* ... and the other way round, where it disagrees with plain
+         * minimum: |+2| > |-1| makes -1 the minimum-magnitude, while
+         * minimum(-1, +2) would also be -1; so use -3 and +2, where
+         * minimum is -3 and minimumMagnitude is +2. */
+        put32(a, 0xc0400000u);                  /* -3.0 */
+        put32(b, 0x40000000u);                  /* +2.0 */
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0x40000000u,
+              "minimumMagnitude(-3, 2) is +2 where minimum(-3, 2) is -3");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0xc0400000u,
+              "maximumMagnitude(-3, 2) is -3 where maximum(-3, 2) is +2");
+
+        /* EQUAL MAGNITUDES OF OPPOSITE SIGN: 9.6's "otherwise", so the
+         * base operation decides, and 9.6 says "-0 compares less than
+         * +0" for minimum and "+0 compares greater than -0" for
+         * maximum. Both orders of the operands, because preferring x
+         * or preferring y is exactly the wrong answer here. */
+        put32(a, 0x40400000u);                  /* +3.0 */
+        put32(b, 0xc0400000u);                  /* -3.0 */
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0xc0400000u,
+              "minimumMagnitude(+3, -3) defers to minimum: -3");
+        CHECK(cft_min_mag(dev, CFT_FP32, b, a, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0xc0400000u, "and -3 whichever way round");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0x40400000u,
+              "maximumMagnitude(+3, -3) defers to maximum: +3");
+        CHECK(cft_max_mag(dev, CFT_FP32, b, a, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0x40400000u, "and +3 whichever way round");
+
+        put32(a, 0x00000000u);                  /* +0 */
+        put32(b, 0x80000000u);                  /* -0 */
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0x80000000u, "min of the two zeros is -0");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0x00000000u, "max of the two zeros is +0");
+        CHECK(cft_minnum_mag(dev, CFT_FP32, b, a, d, 1, &f) == CFT_OK,
+              "minnummag");
+        CHECK(get32(d) == 0x80000000u, "and the Number forms agree");
+        CHECK(cft_maxnum_mag(dev, CFT_FP32, b, a, d, 1, &f) == CFT_OK,
+              "maxnummag");
+        CHECK(get32(d) == 0x00000000u, "and the Number forms agree");
+
+        /* NaNs: |NaN| is unordered, so every NaN case is 9.6's
+         * "otherwise" and each form inherits the NaN rule of the
+         * operation it names. */
+        put32(a, 0x7fc00000u);                  /* quiet NaN */
+        put32(b, 0x3f800000u);                  /* 1.0 */
+        f = 0xdead;
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0x7fc00000u && f == 0,
+              "minimumMagnitude propagates a quiet NaN, quietly");
+        CHECK(cft_minnum_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK,
+              "minnummag");
+        CHECK(get32(d) == 0x3f800000u && f == 0,
+              "minimumMagnitudeNumber returns the number");
+        put32(a, 0x7fa00000u);                  /* signaling NaN */
+        CHECK(cft_maxnum_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK,
+              "maxnummag");
+        CHECK(get32(d) == 0x3f800000u && f == (uint32_t)CFT_FLAG_INVALID,
+              "a signaling NaN signals invalid and is 'otherwise "
+              "ignored and not converted to a quiet NaN' (9.6)");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0x7fc00000u && f == (uint32_t)CFT_FLAG_INVALID,
+              "where maximumMagnitude quiets it");
+        put32(b, 0x7fc00000u);                  /* sNaN and qNaN */
+        CHECK(cft_minnum_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK,
+              "minnummag");
+        CHECK(get32(d) == 0x7fc00000u && f == (uint32_t)CFT_FLAG_INVALID,
+              "two NaNs give a quiet NaN even in the Number forms");
+
+        /* Infinities and subnormals sit on the same magnitude ladder
+         * as everything else. */
+        put32(a, 0xff800000u);                  /* -inf */
+        put32(b, 0x00000001u);                  /* smallest subnormal */
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(get32(d) == 0x00000001u && f == 0,
+              "the subnormal has the smaller magnitude");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "maxmag");
+        CHECK(get32(d) == 0xff800000u && f == 0, "and -inf the larger");
+
+        /* The flags of the four reach the status word like every other
+         * entry point's - the check the hook's negative control
+         * breaks. */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        put32(a, 0x7fa00000u);
+        put32(b, 0x3f800000u);
+        CHECK(cft_min_mag(dev, CFT_FP32, a, b, d, 1, &f) == CFT_OK, "minmag");
+        CHECK(cft_save_all_flags(dev) == (uint32_t)CFT_FLAG_INVALID,
+              "cft_min_mag ORs its flags into the status word");
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+
+        /* d may alias a or b: each element is read before it is
+         * written, as everywhere else in this library. */
+        {
+            uint8_t va[8], vb[8];
+            put32(va + 0, 0xc0400000u); put32(vb + 0, 0x40000000u);
+            put32(va + 4, 0x00000001u); put32(vb + 4, 0x80000000u);
+            CHECK(cft_max_mag(dev, CFT_FP32, va, vb, va, 2, &f) == CFT_OK,
+                  "maxmag aliasing a");
+            CHECK(get32(va + 0) == 0xc0400000u &&
+                  get32(va + 4) == 0x00000001u, "d aliases a");
+            put32(va + 0, 0xc0400000u); put32(vb + 0, 0x40000000u);
+            put32(va + 4, 0x00000001u); put32(vb + 4, 0x80000000u);
+            CHECK(cft_max_mag(dev, CFT_FP32, va, vb, vb, 2, &f) == CFT_OK,
+                  "maxmag aliasing b");
+            CHECK(get32(vb + 0) == 0xc0400000u &&
+                  get32(vb + 4) == 0x00000001u, "d aliases b");
+        }
+
+        /* n == 0 is a no-op that raises nothing; a missing operand, a
+         * bad format and a NULL device are refused. */
+        f = 0xdead;
+        CHECK(cft_min_mag(dev, CFT_FP32, NULL, NULL, NULL, 0, &f) == CFT_OK,
+              "n == 0 is OK");
+        CHECK(f == 0, "and raises nothing");
+        CHECK(cft_max_mag(dev, CFT_FP32, a, NULL, d, 1, &f) ==
+              CFT_ERR_INVALID_ARGUMENT, "b is required");
+        CHECK(cft_minnum_mag(dev, (cft_format)9, a, b, d, 1, &f) ==
+              CFT_ERR_INVALID_ARGUMENT, "bad format is refused");
+        CHECK(cft_maxnum_mag(NULL, CFT_FP32, a, b, d, 1, &f) ==
+              CFT_ERR_INVALID_ARGUMENT, "NULL device is refused");
+
+        /* Host operations, so they do not gate on the device's opcode
+         * groups the way CFT_MIN does - which is exactly why the base
+         * operation is restated inside them rather than issued as
+         * opcode 7. Nothing to assert about a software device here
+         * beyond that they work, but the fp256 leg proves the width
+         * is not special-cased at 32 bits. */
+        {
+            uint8_t wa[32], wb[32], wd[32];
+            memset(wa, 0, sizeof wa);
+            memset(wb, 0, sizeof wb);
+            wa[31] = 0x80;                      /* -0 at fp256 */
+            CHECK(cft_min_mag(dev, CFT_FP256, wa, wb, wd, 1, &f) == CFT_OK,
+                  "fp256 minmag");
+            CHECK(memcmp(wd, wa, 32) == 0, "min of the fp256 zeros is -0");
+            CHECK(cft_max_mag(dev, CFT_FP256, wa, wb, wd, 1, &f) == CFT_OK,
+                  "fp256 maxmag");
+            CHECK(memcmp(wd, wb, 32) == 0, "max of the fp256 zeros is +0");
+        }
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+    }
 
     /* --- the formatOf arithmetic operations (754-2019 5.4.1) ------
      *
@@ -2402,6 +2762,114 @@ int main(void)
               "overflow: 0x%08x", (unsigned)get32(d4));
         CHECK(get32(d4 + 4 * 7) == 0x7f800000u,
               "and element 7 is the infinity");
+
+        /* --- subtraction, where the cancellation is exact and the
+         *     destination still decides the sign of the zero ---
+         *
+         * (1 + 2^-52) - 1 is 2^-52 EXACTLY - a catastrophic
+         * cancellation in binary64 whose whole result is one bit, and
+         * 2^-52 is an ordinary binary32 normal (binary32's emin is
+         * -126), so nothing is lost on the way down and nothing is
+         * signalled. And 6.3's rule is the destination's: an exact
+         * cancellation is +0 in every attribute except
+         * roundTowardNegative. */
+        put64(a8, ((uint64_t)1023 << 52) | (uint64_t)1);   /* 1 + 2^-52 */
+        put64(b8, (uint64_t)1023 << 52);                   /* 1.0 */
+        st = cft_formatof_sub(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK &&
+              get32(d4) == ((uint32_t)(127 - 52) << 23) && fl == 0,
+              "formatOf-subtraction of a cancellation: got 0x%08x/0x%02x "
+              "want 0x%08x/0x00", (unsigned)get32(d4), (unsigned)fl,
+              (unsigned)((uint32_t)(127 - 52) << 23));
+        st = cft_formatof_sub(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              b8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0 && fl == 0,
+              "an exact cancellation is +0 under roundTiesToEven");
+        st = cft_formatof_sub(dev, CFT_FP64, CFT_FP32, CFT_RDN,
+                              b8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x80000000u && fl == 0,
+              "6.3: and -0 under roundTowardNegative, in the "
+              "DESTINATION's encoding: 0x%08x", (unsigned)get32(d4));
+        /* the same subtraction into a WIDER destination is the same
+         * value, which is what makes the row above about the operation
+         * rather than about binary32 */
+        st = cft_formatof_sub(dev, CFT_FP64, CFT_FP256, CFT_RNE,
+                              a8, b8, d8, 1, &fl, NULL);
+        CHECK(st == CFT_OK && fl == 0,
+              "and into binary256 it is exact too: 0x%02x", (unsigned)fl);
+
+
+        /* --- and the 7.1 status word, from formatOf calls ------------
+         *
+         * Package B's word is only worth having if every entry point
+         * feeds it, so these four rows ask it of THIS package's six.
+         * The interesting one is the last: a call that signals nothing
+         * must leave the word exactly as it found it, which is the
+         * difference between OR-ing a group in and assigning one. */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        CHECK(cft_test_flags(dev, CFT_FLAGS_ALL) == 0,
+              "the word starts down");
+
+        /* a narrowing multiply that is inexact and nothing else */
+        put64(a8, ((uint64_t)1023 << 52) | (uint64_t)1);   /* 1 + 2^-52 */
+        put64(b8, (uint64_t)1023 << 52);                   /* 1.0 */
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, NULL, NULL);
+        CHECK(st == CFT_OK &&
+              cft_test_flags(dev, CFT_FLAG_INEXACT) == 1 &&
+              cft_test_flags(dev, (uint32_t)(CFT_FLAGS_ALL &
+                                             ~CFT_FLAG_INEXACT)) == 0,
+              "a narrowing multiply raises inexact IN THE WORD, and only "
+              "that - flags_out was not even asked for");
+
+        /* a call that signals nothing leaves the word alone: the same
+         * narrowing multiply by an exact power of two */
+        put64(a8, (uint64_t)1023 << 52);                   /* 1.0 */
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && fl == 0 &&
+              cft_test_flags(dev, CFT_FLAG_INEXACT) == 1,
+              "a formatOf call that signals nothing neither adds to the "
+              "word nor lowers it");
+
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        put64(c8, 0);                                      /* +0 */
+        st = cft_formatof_div(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, c8, d4, 1, NULL, NULL);
+        CHECK(st == CFT_OK &&
+              cft_test_flags(dev, CFT_FLAG_DIVBYZERO) == 1 &&
+              cft_test_flags(dev, CFT_FLAG_INEXACT) == 0,
+              "formatOf-division by zero leaves divideByZero standing and "
+              "NOT the inexact of its own scaffolding - the widening "
+              "route's passes are muted, which is what that is for");
+
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        put64(a8, ((uint64_t)2047 << 52) | (uint64_t)1);   /* sNaN */
+        st = cft_formatof_add(dev, CFT_FP64, CFT_FP256, CFT_RNE,
+                              a8, b8, d8, 1, NULL, NULL);
+        CHECK(st == CFT_OK &&
+              cft_test_flags(dev, CFT_FLAG_INVALID) == 1,
+              "a signaling NaN through the WIDENING route reaches the "
+              "word once, through the operation rather than through its "
+              "internal conversion");
+
+        /* the accumulation itself: two calls, two different exceptions,
+         * and 7.1's "lowered only at the user's request" */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        put64(a8, ((uint64_t)1023 << 52) | (uint64_t)1);
+        st = cft_formatof_mul(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, NULL, NULL);
+        CHECK(st == CFT_OK, "inexact call");
+        put64(a8, (uint64_t)1023 << 52);
+        st = cft_formatof_div(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, c8, d4, 1, NULL, NULL);
+        CHECK(st == CFT_OK &&
+              cft_test_flags(dev, (uint32_t)(CFT_FLAG_INEXACT |
+                                             CFT_FLAG_DIVBYZERO)) == 1,
+              "the word accumulates across formatOf calls and is lowered "
+              "only when asked");
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
 
         /* --- refusals --- */
         CHECK(cft_formatof_add(dev, (cft_format)9, CFT_FP32, CFT_RNE,
