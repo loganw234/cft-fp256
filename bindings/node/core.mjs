@@ -486,14 +486,12 @@ export class Float {
    *  operands this ladder can construct. The returned Float carries
    *  `dfmt`'s context, so its bits, decimal and comparisons are the
    *  destination format's. */
-  formatOfAdd(dfmt, y) { return this._ctx.formatOfAdd(dfmt, this, y); }
-  formatOfSub(dfmt, y) { return this._ctx.formatOfSub(dfmt, this, y); }
-  formatOfMul(dfmt, y) { return this._ctx.formatOfMul(dfmt, this, y); }
-  formatOfDiv(dfmt, y) { return this._ctx.formatOfDiv(dfmt, this, y); }
-  formatOfSqrt(dfmt) { return this._ctx.formatOfSqrt(dfmt, this); }
-  formatOfFma(dfmt, y, z) {
-    return this._ctx.formatOfFma(dfmt, this, y, z);
-  }
+  formatOfAdd(dfmt, ...r) { return this._ctx.formatOfAdd(dfmt, this, ...r); }
+  formatOfSub(dfmt, ...r) { return this._ctx.formatOfSub(dfmt, this, ...r); }
+  formatOfMul(dfmt, ...r) { return this._ctx.formatOfMul(dfmt, this, ...r); }
+  formatOfDiv(dfmt, ...r) { return this._ctx.formatOfDiv(dfmt, this, ...r); }
+  formatOfSqrt(dfmt, ...r) { return this._ctx.formatOfSqrt(dfmt, this, ...r); }
+  formatOfFma(dfmt, ...r) { return this._ctx.formatOfFma(dfmt, this, ...r); }
 
   lt(y) { return this._ctx.lt(this, y); }
   le(y) { return this._ctx.le(this, y); }
@@ -1738,27 +1736,31 @@ export class Context {
   // raises underflow with inexact. A signaling NaN operand raises
   // invalid and delivers dfmt's canonical quiet NaN.
 
+  // Each of the six forwards every argument it was given rather than
+  // the ones it wants, so an operand too many is REFUSED by the arity
+  // check in _formatOf instead of silently ignored. The six differ in
+  // arity and share a destination argument, which is exactly the shape
+  // in which a caller writes sqrt with two operands by accident.
+
   /** formatOf-addition: (a + b) in `dfmt`, one rounding. */
-  formatOfAdd(dfmt, x, y) { return this._formatOf("add", dfmt, x, y); }
+  formatOfAdd(dfmt, ...ops) { return this._formatOf("add", dfmt, ...ops); }
 
   /** formatOf-subtraction: (a - b) in `dfmt`, a first. */
-  formatOfSub(dfmt, x, y) { return this._formatOf("sub", dfmt, x, y); }
+  formatOfSub(dfmt, ...ops) { return this._formatOf("sub", dfmt, ...ops); }
 
   /** formatOf-multiplication. */
-  formatOfMul(dfmt, x, y) { return this._formatOf("mul", dfmt, x, y); }
+  formatOfMul(dfmt, ...ops) { return this._formatOf("mul", dfmt, ...ops); }
 
   /** formatOf-division: a / b, in that order. */
-  formatOfDiv(dfmt, x, y) { return this._formatOf("div", dfmt, x, y); }
+  formatOfDiv(dfmt, ...ops) { return this._formatOf("div", dfmt, ...ops); }
 
   /** formatOf-squareRoot: one operand. */
-  formatOfSqrt(dfmt, x) { return this._formatOf("sqrt", dfmt, x); }
+  formatOfSqrt(dfmt, ...ops) { return this._formatOf("sqrt", dfmt, ...ops); }
 
   /** formatOf-fusedMultiplyAdd: a*b + c, exact product, one rounding
    *  into `dfmt`. The member of the six that no intermediate width can
    *  rescue, because its addend is a free choice of source value. */
-  formatOfFma(dfmt, x, y, z) {
-    return this._formatOf("fma", dfmt, x, y, z);
-  }
+  formatOfFma(dfmt, ...ops) { return this._formatOf("fma", dfmt, ...ops); }
 
   /** A context of `spec`'s format over THIS device and attribute, so
    *  the destination Float a formatOf call returns is a first-class

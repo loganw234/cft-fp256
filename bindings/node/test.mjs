@@ -2701,6 +2701,9 @@ test("the destination is an argument, and the result knows it", () => {
          "a format this library does not implement");
   throws(() => f256.formatOfSqrt("fp32", f256.from(4), f256.from(1)),
          "squareRoot reads one operand");
+  throws(() => f256.formatOfAdd("fp32", f256.from(1), f256.from(2),
+                                f256.from(3)),
+         "addition reads two, and a third is a mistake rather than a c");
   throws(() => f256.formatOfAdd("fp32", ctxs[64].from(1), f256.from(1)),
          "a binary64 operand in a binary256 source context");
   f256.clearFlags();
