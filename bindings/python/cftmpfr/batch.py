@@ -369,6 +369,188 @@ def atanh(ctx, x):
     return _t1(ctx, "atanh", x)
 
 
+# The rest of table 9.1 (part of the 0.6 step), on the same footing -
+# except for the three whose second operand is an INTEGER per element,
+# which take a sequence rather than an array of encodings.
+
+def exp2m1(ctx, x):
+    """out[i] = 2**x[i] - 1."""
+    return _t1(ctx, "exp2m1", x)
+
+
+def exp10(ctx, x):
+    """out[i] = 10**x[i]."""
+    return _t1(ctx, "exp10", x)
+
+
+def exp10m1(ctx, x):
+    """out[i] = 10**x[i] - 1."""
+    return _t1(ctx, "exp10m1", x)
+
+
+def log2p1(ctx, x):
+    """out[i] = log2(1 + x[i])."""
+    return _t1(ctx, "log2p1", x)
+
+
+def log10p1(ctx, x):
+    """out[i] = log10(1 + x[i])."""
+    return _t1(ctx, "log10p1", x)
+
+
+
+# ---------------------------------------------------------------------
+# Character sequences (5.12) and NaN payloads (9.7). Part of the 0.6
+# step.
+#
+# Only one direction of 5.12 belongs here, and that is cft.h's shape
+# rather than this module's preference: reading sequences IN is a
+# genuine batch - an array of strings, one C call, a dense array of
+# encodings out - while writing one OUT is per element, because an
+# output sequence's length is not known until the conversion has run
+# and runs from three characters to 183,000. Float.to_decimal() is
+# where that direction lives, and a caller writing a whole array ORs
+# the flag words itself, which is all this module does with them.
+# ---------------------------------------------------------------------
+
+def _from_char(ctx, seqs, hex_form):
+    if isinstance(seqs, str):
+        raise TypeError(
+            "batch wants a sequence of strings; one string is "
+            "Context.from_decimal / Context.from_hex")
+    seqs = list(seqs)
+    for s in seqs:
+        if not isinstance(s, str):
+            raise TypeError(f"every element must be a str, got "
+                            f"{type(s).__name__}")
+    esz = ctx._fi.esz
+    out, fl = _lib.from_char(ctx._dev, ctx._fi.code, ctx._rnd, seqs, esz,
+                             hex_form=hex_form)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return ([Float(ctx, out[i * esz:(i + 1) * esz])
+             for i in range(len(seqs))], fl)
+
+
+def from_decimal(ctx, seqs):
+    """A list of decimal character sequences to Floats, one libcft call
+    for the array, each correctly rounded in ctx's attribute. Returns
+    (list of Float, flag word) - the flag word being the OR across the
+    batch, as everywhere else here. A sequence outside 5.12's syntax
+    refuses the whole call and names which one."""
+    return _from_char(ctx, seqs, False)
+
+
+def from_hex(ctx, seqs):
+    """The same for hexadecimal-significand sequences (5.12.3)."""
+    return _from_char(ctx, seqs, True)
+
+
+def _payload(ctx, name, x):
+    payloads, n, mirror = _normalise(ctx, (x,))
+    out = _lib.payload_op(ctx._dev, name, ctx._fi.code, payloads[0], n,
+                          ctx._fi.esz)
+    # 9.7: "These operations signal no exceptions." No flag word is
+    # recorded and none is returned, so ctx.last_flags is left alone.
+    return mirror(out)
+
+
+def get_payload(ctx, x):
+    """9.7 getPayload elementwise: each NaN's payload as a
+    floating-point integer, -1 for anything that is not a NaN."""
+    return _payload(ctx, "get_payload", x)
+
+
+def set_payload(ctx, x):
+    """9.7 setPayload elementwise: a quiet NaN carrying x[i] when that
+    value is an admissible payload, and +0 otherwise."""
+    return _payload(ctx, "set_payload", x)
+
+
+def set_payload_signaling(ctx, x):
+    """9.7 setPayloadSignaling elementwise. Payload 0 is not admissible,
+    so +-0 answers +0."""
+    return _payload(ctx, "set_payload_signaling", x)
+
+def rsqrt(ctx, x):
+    """out[i] = 1/sqrt(x[i])."""
+    return _t1(ctx, "rsqrt", x)
+
+
+def powr(ctx, x, y):
+    """out[i] = x[i]**y[i] as exp(y log x): a negative base is invalid."""
+    return _t2(ctx, "powr", x, y)
+
+
+def _tint(ctx, name, x, ns):
+    (bx,), n, mirror = _normalise(ctx, (x,))
+    ns = [int(v) for v in ns]
+    if len(ns) == 1 and n != 1:
+        ns = ns * n
+    if len(ns) != n:
+        raise ValueError(f"{name}: {len(ns)} exponents for {n} elements")
+    out, fl = _lib.transcend(ctx._dev, name, ctx._fi.code, ctx._rnd, bx,
+                             None, n, ctx._fi.esz, ns=ns)
+    return _finish(ctx, out, fl, mirror)
+
+
+def pown(ctx, x, n):
+    """out[i] = x[i]**n[i], n integral. A scalar n applies to every
+    element; a sequence must be as long as the operand."""
+    return _tint(ctx, "pown", x, n if hasattr(n, "__len__") else (n,))
+
+
+def compound(ctx, x, n):
+    """out[i] = (1 + x[i])**n[i], n integral."""
+    return _tint(ctx, "compound", x, n if hasattr(n, "__len__") else (n,))
+
+
+def rootn(ctx, x, n):
+    """out[i] = x[i]**(1/n[i]), n a nonzero integer."""
+    return _tint(ctx, "rootn", x, n if hasattr(n, "__len__") else (n,))
+
+
+# ---------------------------------------------------------------------
+# The augmented arithmetic operations (754-2019 clause 9.5).
+#
+# The only calls here that return TWO arrays - the operation rounded,
+# and the error rounding made - and the only ones that ignore the
+# context's rounding attribute, because 9.5 fixes the rounding to
+# roundTiesTowardZero. Both arrays mirror the container of the first
+# sequence operand, exactly as one-output calls do:
+#
+#     r, e, flags = batch.augmented_add(ctx, xs, ys)
+#
+# and r[i] + e[i] is the exact sum, elementwise, which is the whole
+# reason to want them over an array rather than one at a time.
+# ---------------------------------------------------------------------
+
+def _aug(ctx, name, x, y):
+    (bx, by), n, mirror = _normalise(ctx, (x, y))
+    br, be, fl = _lib.augmented(ctx._dev, name, ctx._fi.code, bx, by, n,
+                                ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return mirror(br), mirror(be), fl
+
+
+def augmented_add(ctx, x, y):
+    """(r, e, flags) with r[i] + e[i] the exact x[i] + y[i]."""
+    return _aug(ctx, "add", x, y)
+
+
+def augmented_sub(ctx, x, y):
+    """(r, e, flags) with r[i] + e[i] the exact x[i] - y[i]."""
+    return _aug(ctx, "sub", x, y)
+
+
+def augmented_mul(ctx, x, y):
+    """(r, e, flags) with r[i] + e[i] the exact x[i] * y[i], except
+    where the residual falls below the subnormal grid - 9.5's one
+    non-representable case, which arrives rounded and flagged."""
+    return _aug(ctx, "mul", x, y)
+
+
 # ---------------------------------------------------------------------
 # Reductions: n in, ONE out, over the contract's fixed tree.
 # ---------------------------------------------------------------------
@@ -397,3 +579,85 @@ def tree_dot(ctx, x, y):
     ctx.last_flags = fl
     ctx.flags |= fl
     return Float(ctx, out), fl
+
+
+# ---------------------------------------------------------------------
+# The rest of clause 9.4 (the 0.6 step)
+#
+# The other five reductions 754-2019 9.4 asks a language to define.
+# Named tree_* like the two above, and for the same reason: nothing
+# here is mpfr_sum, mpfr_dot or any other single correctly-rounded
+# reduction, and a name that invited that reading would cost somebody a
+# week. What these are is the contract's fixed index-shaped tree,
+# rounded at every node in the context's attribute.
+# ---------------------------------------------------------------------
+
+def tree_sumsq(ctx, x):
+    """sum over the fixed tree of round(x[i]*x[i]) - 9.4's sumSquare.
+
+    Bit-identical to tree_dot(ctx, x, x), because the library issues
+    exactly that; the one exception is 9.4's own, where a vector
+    holding an infinity AND a NaN gives +inf rather than the quiet NaN
+    the tree would give. Returns (Float, flag word)."""
+    (bx,), n, _ = _normalise(ctx, (x,))
+    out, fl = _lib.reduce(ctx._dev, _lib.OP_SUMSQ, ctx._fi.code, ctx._rnd,
+                          bx, None, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), fl
+
+
+def tree_sumabs(ctx, x):
+    """sum over the fixed tree of |x[i]| - 9.4's sumAbs.
+
+    Bit-identical to an abs pass followed by tree_sum, with the same
+    single exception tree_sumsq carries. Returns (Float, flag word)."""
+    (bx,), n, _ = _normalise(ctx, (x,))
+    out, fl = _lib.reduce(ctx._dev, _lib.OP_SUMABS, ctx._fi.code, ctx._rnd,
+                          bx, None, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), fl
+
+
+def _scaled(ctx, kind, x, y=None):
+    if y is None:
+        (bx,), n, _ = _normalise(ctx, (x,))
+        by = None
+    else:
+        (bx, by), n, _ = _normalise(ctx, (x, y))
+    out, scale, fl = _lib.scaled_prod(ctx._dev, kind, ctx._fi.code,
+                                      ctx._rnd, bx, by, n, ctx._fi.esz)
+    ctx.last_flags = fl
+    ctx.flags |= fl
+    return Float(ctx, out), scale, fl
+
+
+def scaled_prod(ctx, x):
+    """9.4's scaledProd: the product of the elements as a PAIR.
+
+    Returns (Float pr, int scale, flag word), where ldexp(pr, scale) is
+    the product and pr is always in +-[1, 2). The operation cannot
+    overflow or underflow whatever the true product is - both operands
+    of every node's multiply are in +-[1, 2) by construction - which is
+    the reason 754 defines it at all. n = 0 gives (1, 0) silently, the
+    multiplicative identity."""
+    return _scaled(ctx, 0, x)
+
+
+def scaled_prod_sum(ctx, x, y):
+    """9.4's scaledProdSum: the product of (x[i] + y[i]) as a pair.
+
+    ONE contract rounding per leaf sum, then the same scaled tree. That
+    leaf addition is the only place this can signal overflow or
+    underflow; the product tree never does. Returns (Float, int, flag
+    word)."""
+    return _scaled(ctx, 1, x, y)
+
+
+def scaled_prod_diff(ctx, x, y):
+    """9.4's scaledProdDiff: the product of (x[i] - y[i]) as a pair.
+
+    scaled_prod_sum with a subtraction at the leaf, in every respect.
+    Returns (Float, int, flag word)."""
+    return _scaled(ctx, 2, x, y)

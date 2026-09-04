@@ -219,6 +219,11 @@ arbitration between muls and adds - the most schedule-sensitive logic
 in the engine, for one saved round trip. The composition property went
 into the contract partly so this choice would exist.
 
+That choice paid twice: `CFT_SUMSQ` and `CFT_SUMABS` are the same
+composition over a different leaf, and the other three of clause 9.4 -
+the scaled products, which return a pair - are named host entry points.
+See "The rest of clause 9.4's reductions" below.
+
 ## Division and square root: composed, not opcodes
 
 `cft_div` and `cft_sqrt` landed with CAPS opcode-group bit 14. They
@@ -538,6 +543,463 @@ arguments. A consumer built against ABI 0.4 and handed a 0.5 set fails
 on the NAME of a function it does not know, which is the refusal it
 should give.
 
+## The augmented arithmetic operations (754-2019 clause 9.5)
+
+`cft_augmented_add`, `cft_augmented_sub` and `cft_augmented_mul`,
+added 2026-09-03 as part of the 0.6 step. They are unlike everything
+above them in two visible ways, and both are the standard's doing
+rather than this library's.
+
+**They return a PAIR.** Each writes two arrays: `r`, the operation
+rounded, and `e`, the error that rounding made. Together they carry
+the exact result the format cannot hold.
+
+```c
+cft_augmented_add(dev, fmt, a, b, r, e, n, &flags);
+cft_augmented_mul(dev, fmt, a, b, r, e, n, &flags);
+```
+
+That is the primitive under compensated summation, exactly rounded dot
+products, and double-double arithmetic. Every one of those is written
+today out of TwoSum and Dekker splitting - sequences of ordinary
+operations that reconstruct the residual by hand, correctly only under
+assumptions about association, contraction and intermediate precision
+that a compiler is free to break and routinely does. Here it is a
+library call with a standard behind it and a vector set scoring it.
+
+**They take NO rounding attribute.** 9.5 fixes the rounding itself:
+
+> This standard specifies a single rounding direction to be used in the
+> operations in this subclause, defined as roundTiesTowardZero: the
+> floating-point number nearest to the infinitely precise result shall
+> be delivered; if the two nearest floating-point numbers bracketing an
+> unrepresentable infinitely precise result are equally near, the one
+> with smaller magnitude shall be delivered.
+
+That direction is not one of clause 4.3's five attributes, and this
+library does not add a sixth attribute for it. There is no `cft_round`
+parameter in the signature because there is nothing to pass. Inside,
+`round_pack` learns it as an internal rounding DIRECTION
+(`CFT_SF_RTTZ`, value 16 - outside the three-bit MODE field the five
+attributes encode into), reachable from `host/src/augmented.c` and from
+nowhere a caller can steer; the API layer's own attribute range check
+is 0..4 and always was.
+
+The tie rule differs from roundTiesToEven **only at an exact midpoint,
+and only where the lower neighbour's last bit is odd**. An
+implementation that quietly used roundTiesToEven would pass every test
+that did not aim at exactly that case, so the vector pools aim at it at
+every binade edge the format has.
+
+**HOST operations**, like the clause-5 set and the transcendentals: no
+`cft_run` pass is issued, no bus word is produced, `dev` is context. A
+tile-composed route - a TwoSum, or an FMA residual for the product -
+is a plausible later fast path and would have to reproduce these bits
+exactly; it is not what runs today, and the rounding is a reason as
+well as the arithmetic, since the tile's five attributes do not include
+this one.
+
+`r` and `e` must be different buffers - two writes to one buffer have
+no well-defined ordering, so that call is `CFT_ERR_INVALID_ARGUMENT`
+rather than a plausible answer. Either may alias `a` or `b`: each
+element is read before either output is written.
+
+### The rows a porter should not have to infer
+
+- **Any NaN operand gives the canonical quiet NaN as BOTH results**
+  ("propagates a NaN as both results"), invalid raised only for a
+  signaling one. An invalid operation - `inf + (-inf)` for the sum,
+  `inf * 0` for the product - "produces the same quiet NaN for both
+  outputs" with invalid raised.
+- **An infinite r gives that infinity as both results.** From an
+  infinite OPERAND it signals nothing; from overflow it signals
+  overflow and inexact.
+- **The overflow threshold is a midpoint, and landing ON it is
+  silent.** 9.5: a magnitude "greater than b^emax x (b - 1/2 b^(1-p))
+  shall round to infinity with no change in sign", and one "equal to
+  b^emax x (b - 1/2 b^(1-p)) shall round to b^emax x (b - b^(1-p))".
+  At binary32 that midpoint is `maxfinite + 2^103`: it delivers
+  maxfinite and raises **nothing**, because inexact is signalled "only
+  when roundTiesTowardZero(x + y) overflows". One ulp higher overflows
+  to an infinity in both outputs. Note that overflow here always
+  delivers an infinity, in both directions - "roundTiesTowardZero
+  carries all overflows to infinity with the sign of the intermediate
+  result" - unlike roundTowardZero, which never does.
+- **UNDERFLOW is a statement about the ERROR TERM.** It is raised when
+  e is "non-zero and lies strictly between +-b^emin". Since e is exact,
+  that is **underflow without inexact** - the one place in this
+  contract where those two part company, and the one flag combination
+  no other operation here can produce. A subnormal `r` with an exactly
+  representable residual raises nothing at all: "the operation's
+  subnormal and zero results are exact".
+- **The sign of a zero e is r's sign**, when the residual is exactly
+  zero: `augmentedAddition(-3, 0)` is `(-3, -0)`. r's own zero sign is
+  6.3's - `+0` for an exact cancellation (roundTiesTowardZero is not
+  roundTowardNegative), the operands' sign for like-signed zeros, the
+  XOR of the signs for a product. A residual that is non-zero and
+  merely ROUNDS to zero keeps the sign of the exact residual instead,
+  by 6.3's rule for a result "that is zero because of rounding".
+- **e is always representable for the sum and the difference.** Both
+  operands are integer multiples of the format's smallest quantum, so
+  the exact sum is one too; the residual is at most half an ulp of r,
+  which needs at most p significant bits on a grid the format has. 9.5
+  gives augmentedAddition no non-representable case at all, and the
+  model and the library both ASSERT it rather than trusting it - the
+  model raises, the library returns `CFT_ERR_INTERNAL`.
+- **`cft_augmented_mul` has the one exception 9.5 names**: a product
+  residual with "non-zero digits ... strictly between
+  +-b^(emin-p+1)". It delivers that residual ROUNDED the same way, with
+  underflow and inexact raised. That is the only case in which
+  `r + e` is not exactly `x op y`, and the only case in which either
+  operation raises inexact without overflowing.
+
+### How they are scored
+
+`python/cft_golden/augmented.py` defines every bit and flag. The
+vectors get a third schema and a third family of files -
+`<fmt>-augmented.jsonl`, one per format, with `"r"` and `"e"` per case
+and **no `"rnd"` field**, whose absence is normative: there is no
+attribute to record. `cft_conformance` replays them the same two ways
+as everything else, one element at a time for exact flags and then as
+arrays for the batch loop.
+
+`host/tests/augmented_check.py` is the C-against-model sweep, and it
+checks one thing the vectors cannot: the pair identity `r + e == x op
+y`, in exact Python integers, **on the library's own output**, over the
+whole pool with the two documented exclusions named rather than
+tolerated. `host/tools/mpfr_check.c` arbitrates the values against
+MPFR - which has no roundTiesTowardZero, so the harness takes the exact
+value from MPFR at a precision that provably holds it, proves it did
+by requiring a zero ternary, and applies 9.5's tie rule itself; the
+banner above `check_augmented` says exactly which half of that is an
+independent oracle and which is a restatement.
+
+## The rest of clause 9.4's reductions (part of the 0.6 step)
+
+`cft_reduce` shipped with two of the seven reductions 754-2019 9.4 asks
+a language to define. The other five landed 2026-09-03:
+**sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff.**
+docs/DETERMINISM.md holds the contract - the tree, the scaling rule,
+the exception rules; what belongs HERE is the API shape and why it is
+that shape, because the five did not all arrive through the same door.
+
+**Two are new `cft_reduce` opcodes, and they are COMPOSITIONS.**
+`CFT_SUMSQ` (28) and `CFT_SUMABS` (29) append to the enum after the
+divide/sqrt seeds. Neither is separate hardware and neither needs to
+be, for exactly the reason `CFT_DOT` is not: they are the same tree
+over a different leaf, so the library issues
+
+    CFT_SUMSQ  ->  cft_reduce(CFT_DOT, a, a)
+    CFT_SUMABS ->  cft_run(CFT_ABS, a), then cft_reduce(CFT_SUM)
+
+and the device and software backends agree by construction rather than
+by testing. The cost is one scratch buffer for sumAbs - the same trade
+`CFT_DOT` already makes for its multiply pass - and one dot for
+sumSquare, which costs nothing extra at all.
+
+9.4's one divergent row is applied above both backends, and lazily.
+The standard puts an infinity ahead of a NaN for these two, where sum
+and dot put NaN first, so a vector holding both returns `+inf`. That
+cannot come out of a tree, so the library overrides it - but only after
+checking, because no term of either operation is negative, that the
+tree's answer is a NaN at all. The scan for an infinity therefore runs
+only on a vector that produced one, instead of on every call, which on
+a device backend is the host reading the whole input array.
+
+`cft_supports()` accounts for the composition: `CFT_SUMSQ` also needs
+the arithmetic group and `CFT_SUMABS` the sign group, so asking about
+the opcode itself is the right question and a device missing one says
+`CFT_ERR_UNSUPPORTED` before the sequence starts.
+
+**Three are named host entry points**, because they return a PAIR:
+
+```c
+cft_scaled_prod     (dev, fmt, rnd, a,    pr, &scale, n, &flags);
+cft_scaled_prod_sum (dev, fmt, rnd, a, b, pr, &scale, n, &flags);
+cft_scaled_prod_diff(dev, fmt, rnd, a, b, pr, &scale, n, &flags);
+```
+
+A pair does not fit through `cft_reduce`, which delivers one element.
+Three names rather than one call with a `kind` argument, and the reason
+is the same one docs/DETERMINISM.md's reassignment hazard records:
+these issue no device pass, so a `kind` enum would be a second opcode
+space living beside `cft_op` with none of an opcode's meaning and all
+of its stale-number risk. The arities differ too - one vector, then
+two - so three functions check at compile time what one would check at
+run time. Every other pair-free host operation in the header is named
+this way (`cft_div`, `cft_pow`, `cft_atan2`), and these follow it.
+
+`scale` is an `int64_t` out-parameter; neither it nor `pr` may be NULL.
+`pr` receives ONE element. **These are HOST operations** - no `cft_run`
+pass, no bus word, `dev` is context - for the plainest possible reason:
+there is no tile accumulator for a scaled product. The accumulator
+streams ADDs. So there is nothing here for a device to carry, and the
+results are bit-identical across backends by construction, the same
+shape the transcendentals take.
+
+The cost note is short. `cft_scaled_prod` allocates nothing at all -
+its factors are the caller's own array - and the other two allocate one
+scratch buffer of `n` elements for the rounded leaf sums. Every node is
+one multiply and an exact binade extraction, so a scaled product is
+about the price of a dot.
+
+**The vectors carry all seven**, in a THIRD set type:
+`<fmt>-reduce[-<rnd>].jsonl`, 448 cases and 9,513 elements per file,
+20 files. It had to be a new type - a reduction's operand is a whole
+vector whose length is part of the case, and both existing schemas are
+one line per case with a fixed number of single-element operands. The
+scaled products' cases carry `pr` and `sf` where the others carry `d`,
+because a set that recorded only the significand would score half the
+operation. Before this the published sets carried no reductions at all,
+not even `sum`.
+
+## The rest of table 9.1 (part of the 0.6 step)
+
+`cft_exp2m1`, `cft_exp10`, `cft_exp10m1`, `cft_log2p1`, `cft_log10p1`,
+`cft_rsqrt`, `cft_powr`, `cft_pown`, `cft_compound` and `cft_rootn`,
+added 2026-09-03. **Correctly rounded** at every format under every
+attribute, with clause 9.2.1's special values and exact flags, on
+exactly the terms the twenty-nine above are. With these ten the library
+implements every operation IEEE 754-2019 table 9.1 lists for the binary
+formats.
+
+**What these needed that the twenty-nine did not: nothing but
+exactness.** No reduction, no constant beyond the ln 10 and log10 e
+phase 1 generates, no new series. Each of the ten has a LARGER
+exact-case table than the function it is built from, and each table is
+proved closed in docs/TRANSCENDENTALS.md before the Ziv loop under it
+is allowed to run - a true value on a rounding boundary being precisely
+where that loop does not terminate. exp2m1 is exact at every integer
+argument; exp10 and exp10m1 at the non-negative integers their format
+can hold; log2p1 and log10p1 wherever 1 + x is a power of two or of
+ten, with 1 + x formed EXACTLY on the encoding and never as a rounded
+sum; rSqrt at the even powers of two; rootn wherever the odd
+significand is a perfect |n|-th power and |n| divides the exponent.
+
+Seven of the ten follow the shapes above:
+
+```c
+cft_exp2m1(dev, fmt, rnd, a, d, n, &flags);       /* unary */
+cft_powr  (dev, fmt, rnd, a, b, d, n, &flags);    /* two encodings */
+```
+
+**The other three do not, and 9.2.1 is why.** `pown`, `compound` and
+`rootn` read an INTEGER second operand - "n is a finite integral value
+in integralFormat" - so they take an `int64_t` array beside the
+encoding array rather than a second encoding that would have to be
+interrogated about whether it is integral. That is the question `pow`
+has to ask and the reason `pow` and `pown` are different functions at
+all. The element count moves to `count`, which is the one place in this
+header where those two names are not the same argument:
+
+```c
+const int64_t ns[3] = { 2, -3, 5 };
+cft_pown(dev, CFT_FP64, CFT_RNE, a, ns, d, 3, &flags);
+```
+
+`n` is read PER ELEMENT and must not be NULL; a NULL is
+`CFT_ERR_INVALID_ARGUMENT`, like the missing second operand of a binary
+entry point.
+
+Rows a porter should not have to infer, each confirmed against MPFR
+4.2.2 before it was written down - and **three of them are rows where
+this contract follows the standard and MPFR does not**:
+
+- **`rSqrt(+-0)` is `+-infinity`** with divideByZero: the sign
+  SURVIVES. `mpfr_rec_sqrt` returns +infinity for both zeros, which
+  predates 754-2019's rSqrt row. `rSqrt(+inf)` is +0; `x < 0` is
+  invalid. rSqrt can neither overflow nor underflow at any rung.
+- **`powr` is not `pow`.** `powr(x, y)` for x < 0 is invalid for EVERY
+  y, a NaN included; `powr(+-0, +-0)`, `powr(+inf, +-0)` and
+  `powr(+1, +-inf)` are invalid; and `powr(qNaN, y)` is a quiet NaN
+  where `pow(qNaN, 0)` is 1. **`powr(+1, qNaN)` is a quiet NaN** - the
+  standard's row is "powr(+1, y) is 1 for FINITE y" and it lists
+  `powr(x, qNaN)` for x >= 0 separately - where `mpfr_powr` returns 1.
+  `powr(+-0, y)` is +infinity with divideByZero for a finite y < 0 and
+  +infinity SILENTLY for y = -infinity, the same pole-versus-limit
+  distinction pow's table makes.
+- **`compound(x, 0)` for an x below -1 is invalid**, not 1: the row
+  reads "compound(x, 0) is 1 for x >= -1 or quiet NaN", which makes
+  that case rather than states it. `compound(qNaN, 0)` IS 1.
+  `compound(-1, n)` is +infinity with divideByZero for n < 0 and +0 for
+  n > 0; `compound(+-0, n)` is 1.
+- `pown(x, 0)` is 1 for any x that is not a signaling NaN, an infinity
+  and a quiet NaN included. `pown(+-0, n)` is `+-infinity` with
+  divideByZero for an odd n < 0 and `+infinity` for an even one.
+- **`rootn(x, 0)` is invalid for every x**, a quiet NaN included: zero
+  is outside the domain. `rootn(x, 1)` is x, exactly and silently. A
+  negative operand with an EVEN n is invalid. `rootn(x, 2)` is
+  `cft_sqrt(x)` on every input except `x = -0`, where the standard's
+  own NOTE says they differ: `rootn(-0, 2)` is +0 by the even-n row and
+  `squareRoot(-0)` is -0.
+- `log2p1(-1)` and `log10p1(-1)` are -infinity with **divideByZero**;
+  an operand below -1 is invalid, -infinity included.
+- A signaling NaN raises invalid and delivers the canonical quiet NaN,
+  as everywhere else in this contract.
+
+The vectors carry them in the same `<fmt>-transcend[-<rnd>].jsonl`
+files, which now name thirty-nine functions and carry one new field:
+`"n"`, a SIGNED DECIMAL rather than an encoding, present only for the
+three that read an integer exponent. A consumer that knows the names
+but not that field fails on a missing key, which is the refusal it
+should give.
+
+`rSqrt` is host work like the other thirty-eight - the evaluator's own
+square root and one division. The tile's RSQRT_SEED opcode is a
+plausible later fast path for the narrow formats, exactly as one is for
+exp; it would have to reproduce these bits exactly, which makes it an
+optimisation rather than a different answer, and nothing here reads it.
+
+## Character sequences and NaN payloads (part of the 0.6 step)
+
+`cft_from_decimal_char`, `cft_to_decimal_char`, `cft_from_hex_char`,
+`cft_to_hex_char`, `cft_format_decimal_digits`, `cft_get_payload`,
+`cft_set_payload` and `cft_set_payload_signaling`, added 2026-09-03.
+The last REQUIRED part of clause 5 this library lacked, and clause
+9.7's three payload operations alongside it.
+
+754-2019 5.12 opens with a **shall**: an implementation "shall provide
+conversions between each supported binary format and external decimal
+character sequences such that, under roundTiesToEven, conversion from
+the supported format to external decimal character sequence and back
+recovers the original floating-point representation". Until now this
+library provided none of them, which meant every caller who reached it
+from a text format - a config file, a CSV, a REPL - was reaching some
+other library's rounding on the way in, and some other library's
+opinion of "enough digits" on the way out. That is precisely the hole
+this project exists to close, and it was open at the edge of the API.
+
+**Correctly rounded in both directions, in the caller's attribute,
+with exact flags - and the standard's H is UNBOUNDED here.** 5.12.2
+lets an implementation cap the digit count it will round correctly at
+some H >= M + 3, and NOTE 1 spells out what a capped implementation
+then costs its users: "conversions of greater than H significant
+digits might incur additional rounding of the order of 10^(M-H)".
+This library incurs none of it, at any length, because the arithmetic
+is exact: a decimal sequence's value is a RATIONAL, an encoding's
+value is a dyadic rational, and both are held exactly in integers.
+
+### The exactness argument, in one paragraph
+
+A decimal sequence denotes `(-1)^s * D * 10^K` exactly - write it as
+`num/den`, with `den` either 1 or `10^-K`. The binary window is ONE
+integer division: with `q = bitlen(num) - bitlen(den) - (p + 3)`,
+`m = floor(num / (den * 2^q))` lands with `p+3` or `p+4` bits and the
+remainder says whether anything is left below it. The value is then
+exactly `(m + eps) * 2^q` with `eps` in [0, 1), non-zero exactly when
+the remainder is - which is `round_pack`'s own precondition. So the
+rounding and every flag come from the library's single rounding
+authority, on an exactly derived operand, at any length. The other
+direction needs no rounding authority at all in the exact mode:
+`m * 2^e` is `m * 5^-e * 10^e` for `e < 0` and `m << e` otherwise, both
+integers, and their decimal digits ARE the answer.
+
+`host/src/chars.c` carries its own growable natural number to do it,
+and that is not a preference. `bigint.h` is FIXED at 2048 bits, which
+is exactly right for what it was written for - softfloat.c bounds its
+alignment and needs about 1200. Decimal conversion cannot be bounded
+that way: the exact decimal of the smallest binary256 subnormal is
+`5^262378 * 10^-262378`, about 183,000 significant digits and 609,000
+bits, and reading that same sequence back needs `10^262378`, another
+872,000. Those lengths come from the FORMAT, not from a design choice.
+
+### The two shapes, and why they differ
+
+The `from_` calls are BATCHES - an array of C strings in, a dense
+array of encodings out, `n` arbitrary, the flag word the OR across it,
+the same shape as every other entry point in the header. The `to_`
+calls are PER ELEMENT, and have to be: an output sequence's length is
+not known until the conversion has run, and it is wildly non-uniform -
+three bytes for `inf`, about 183,000 for the exact decimal of the
+smallest binary256 subnormal. No dense output array can hold that, and
+a batch would need three parallel arrays (buffers, capacities,
+lengths) that a caller could not size in advance anyway, so it would
+degenerate into the per-element two-call protocol with extra ceremony.
+
+Sizing is that protocol and `*len` is ALWAYS set - on success and on
+refusal alike - to the bytes required including the NUL. Pass `cap = 0`
+with `out = NULL` to ask, then call again. A buffer too small is
+`CFT_ERR_INVALID_ARGUMENT` with `*len` set and NOTHING written: a
+truncated number is a wrong answer that looks like a right one.
+
+```c
+size_t need = 0;
+cft_to_decimal_char(dev, CFT_FP256, CFT_RNE, x, 0, NULL, 0, &need, &f);
+char *s = malloc(need);
+cft_to_decimal_char(dev, CFT_FP256, CFT_RNE, x, 0, s, need, &need, &f);
+```
+
+`digits == 0` is 5.12.2's EXACT conversion; `digits >= 1` is that many
+significant digits correctly rounded, trailing zeros kept so a caller
+who asked for H can count H. `cft_format_decimal_digits` returns
+Pmin - 9, 17, 36 and 73 - derived from `1 + ceiling(p * log10 2)`
+rather than tabulated, and that is the count at which the round trip is
+guaranteed.
+
+**The one cost note this set carries**, in the tradition of `cft_rem`'s:
+the H-digit mode derives the FULL exact expansion and then rounds the
+digit string, so writing a value near either end of fp128's or fp256's
+exponent range costs the same whether a caller asks for 5 digits or for
+all 183,000 - about 0.7 s for the widest fp256 case on the host these
+numbers come from, against about 5 microseconds for pi at binary64
+whether exact or at seventeen digits. Ordinary magnitudes are
+microseconds; the extremes are the price of the format. That
+keeps one code path and one correctness argument for both modes, which
+is the trade this library makes everywhere; a second, shorter route for
+small H would have to reproduce these digits exactly.
+
+### The syntax accepted, and the refusal
+
+```
+decimal   sign? ( digit* "." digit* | digit+ )  ( [eE] sign? digit+ )?
+hex       sign? "0" [xX] ( hexDigit* "." hexDigit* | hexDigit+ )
+                         [pP] sign? digit+
+either    sign? ( "inf" | "infinity" | "nan" | "snan" ) payload?
+payload   "(" ( digit+ | "0" [xX] hexDigit+ ) ")"
+```
+
+At least one digit in the significand, the words case-insensitive, and
+the hexadecimal form's binary exponent REQUIRED - 5.12.3's grammar
+writes `{decExponent}`, not `{decExponent}?`. No leading or trailing
+whitespace, no digit separators, no locale, no hexadecimal in the
+decimal parser or decimal in the hexadecimal one. Anything else is
+`CFT_ERR_INVALID_ARGUMENT` with nothing written, and `bad_index`
+reports WHICH element of the batch was at fault - a caller reading a
+file of numbers needs the line and not just the verdict. What this
+library writes, this library reads back.
+
+### Two contract choices a porter must not miss
+
+**A signaling NaN is written `snan`, not `nan`, and no conversion here
+raises invalid.** 6.2 exempts "the conversions described in 5.12" from
+the rule that a signaling NaN signals invalid, and 5.12.1 offers two
+spellings: write `snan`, or write `nan` and signal invalid. This
+contract takes the first, because the second loses the distinction the
+round trip is required to keep. NaNs carry their payload and their sign
+through both directions - these are ENCODING operations, like
+abs/negate/copySign/select, and docs/DETERMINISM.md's canonical-NaN
+rule governs arithmetic.
+
+**9.7's admissible payload set is the format's payload field**, bits
+d2..d(p-1) of the trailing significand (6.2.1): `0 .. 2^(man_w-1) - 1`,
+and `1` upward for the signaling form, because payload 0 with the quiet
+bit clear is an INFINITY encoding rather than a NaN. The test is on the
+VALUE, so `-0` passes it as the integer zero - 754 settles that `-0`
+equals `0`, and every other value-based operation in this contract
+reads it the same way. Anything outside the set gives `+0`, which is
+9.7's own answer, and `getPayload` of a non-NaN is `-1`, which is also
+9.7's. All three signal nothing, so none of them has a flags argument.
+
+### What has been run
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay (60 sets: 20 opcode, 20 transcendental, 20 character) | 648,731 at the generator's defaults, 492,731 at `make vectors`' | every case, bits, flags and refusals |
+| `character_check.py`, both directions vs the model | 20,819 | zero disagreements, per-element flags |
+| MPFR parity, the four conversions, five attributes, four rungs | 20,172 of 298,904 | zero value AND zero flag mismatches |
+| `cft.hpp` vs `cft.h`, every entry point twice | 210,511 at C++17 and again at C++20 | identical encodings, flags and characters |
+| `test_cftmpfr.py` | 640 | pass |
+
 ## What is deliberately not in the first version
 
 - **Asynchronous submission.** Everything blocks today. A future
@@ -655,6 +1117,20 @@ fp32:
 | the same, with the library forced to start below the precision it needs | 72,275 | identical through the escalation path |
 | MPFR parity, the nine functions | 95,680 | zero value AND zero flag mismatches |
 | `cft.hpp` vs `cft.h`, every entry point twice | 3,267 at C++17 and again at C++20 | identical encodings and flags |
+
+And the clause-9.5 augmented operations (2026-09-03), where the oracle
+question has its own answer - MPFR has no roundTiesTowardZero, so the
+harness takes the exact value from MPFR and applies the tie rule
+itself:
+
+| check | cases | result |
+|---|---|---|
+| `cft_conformance` replay (44 sets: 20 opcode, 20 transcendental, 4 augmented) | 724,531, of which 89,616 augmented | every case, BOTH outputs and flags, replayed twice |
+| `augmented_check.py`, the three vs the model | 149,112 comparisons at `--trials 400` | zero disagreements, per-element flags |
+| the pair identity `r + e == x op y`, exact integers, on the library's output | 80,209 pairs | exact, plus 8,316 residuals delivered rounded per 9.5's one non-representable case |
+| the FAR/NEAR alignment split, walked across its decision | 70,200 comparisons | C == model on every one |
+| MPFR parity, the three operations | 21,492 (5,373 per format) | zero value AND zero flag mismatches |
+| `cft.hpp` vs `cft.h`, every entry point twice | 4,311 at C++17 and again at C++20 | identical encodings and flags |
 
 The second table is the one that matters for tiles. It is the software
 statement of the property the hardware has to keep: cutting a

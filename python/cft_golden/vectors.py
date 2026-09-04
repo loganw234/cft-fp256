@@ -173,19 +173,20 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
     shifty = [0, 1, 2, fmt.man_w, fmt.width - 1, fmt.width, fmt.width + 1,
               2 * fmt.width - 1]
     cases = []
-    # 15, 28 and 255 are unassigned: one inside the float block, one
-    # just past the seeds, one at the top of the byte. This list has
-    # now shed a member TWICE - 24 became CFT_SUM, then 26 became
-    # RECIP_SEED - which is the exact hazard docs/DETERMINISM.md warns
-    # about for anyone who issued an unassigned opcode early: the
-    # conformance replayer refuses a set whose "reserved" case has
-    # since been assigned, and that refusal is what caught 26 here.
+    # 15, 30 and 255 are unassigned: one inside the float block, one
+    # just past the composed reductions, one at the top of the byte.
+    # This list has now shed a member THREE times - 24 became CFT_SUM,
+    # 26 became RECIP_SEED, and on 2026-09-03 28 became CFT_SUMSQ -
+    # which is the exact hazard docs/DETERMINISM.md warns about for
+    # anyone who issued an unassigned opcode early: the conformance
+    # replayer refuses a set whose "reserved" case has since been
+    # assigned, and that refusal is what caught 26 here, and 28 again.
     #
     # The seed opcodes themselves get the same per-op budget as the
     # rest: they are unary and quiet, but their special classes (the
     # limit values, and the flush-at-input rule for subnormals) are
     # contract surface an independent implementation can get wrong.
-    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 28, 255):
+    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 30, 255):
         is_shift = op in (sf.OP_ISHL, sf.OP_ISHR)
         for i in range(per_op):
             if i % 3 == 0:
@@ -610,47 +611,636 @@ def hyperbolic_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
     return sorted({b & ((1 << fmt.width) - 1) for b in out})
 
 
-def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
-    """(fn, a, b) triples for all twenty-nine transcendentals, in the
-    order gen_vectors.py writes them. b is 0 for the unary twenty-five,
-    which do not emit it at all.
+# ---- the augmented arithmetic set (754-2019 9.5) ---------------------
 
-    Four operand pools, because the families are different: the
+def augmented_pairs(fmt: FpFormat, extra: int, seed: int = 16):
+    """Operand pairs where an augmented operation can be got wrong.
+
+    A fourth pool again, because what catches an FMA does not catch
+    these. The three operations differ from ordinary add/sub/mul in
+    exactly four places, and every family below aims at one of them:
+
+    * THE TIE RULE. roundTiesTowardZero and roundTiesToEven part company
+      only at an exact midpoint whose lower neighbour has an ODD last
+      bit, so the pool builds midpoints at binade edges from odd
+      significands on purpose - a random pair reaches one with
+      probability about 2^-p. Every binade the format has is swept at
+      fp32 and sampled at the wider rungs, because the tie rule and the
+      subnormal grid interact only near emin and the overflow threshold
+      only near emax.
+    * THE ERROR TERM'S SIGN AT ZERO. Exact cancellation with every sign
+      combination, so that "e takes the sign of r" is scored rather than
+      assumed.
+    * THE UNDERFLOW RULE. Sums whose residual lands subnormal (underflow
+      with NO inexact - the combination that appears nowhere else in
+      this contract) and products whose residual falls off the bottom of
+      the grid entirely (underflow AND inexact, with the residual itself
+      rounded).
+    * THE OVERFLOW THRESHOLD. 9.5 rounds a magnitude EQUAL to
+      2^emax x (2 - 2^-p) down to the largest finite and anything above
+      it to an infinity, so both sides of that midpoint are here with
+      the neighbours either side.
+    """
+    p = fmt.prec
+    rng = random.Random(seed ^ (fmt.width * 601))
+    pool = interesting_operands(fmt)
+    pairs = [(a, b) for a in pool for b in pool]
+
+    # Binade sweep. Exhaustive at fp32; the wider rungs take a stride
+    # plus the edges, since a vector set is replayed on every run.
+    step = 1 if fmt.width <= 32 else max(1, (fmt.emax - fmt.emin) // 24)
+    exps = sorted({k for k in range(fmt.emin, fmt.emax + 1, step)} |
+                  {fmt.emin, fmt.emin + 1, fmt.emin + p, -1, 0, 1, p, 2 * p,
+                   fmt.emax - 1, fmt.emax} |
+                  {fmt.emin - fmt.man_w, fmt.emin - fmt.man_w + 1,
+                   fmt.emin - 1, fmt.emin - p // 2})
+    mants = ((1 << (p - 1)), (1 << (p - 1)) | 1, (1 << p) - 1, (1 << p) - 2)
+    for k in exps:
+        for m in mants:
+            x = _val(fmt, 0, m, k - (p - 1))
+            if x is None:
+                continue
+            for sy in (0, 1):
+                # half an ulp is the exact tie; a quarter and three
+                # quarters straddle it; one ulp is the ordinary case
+                for ym, ye in ((1, k - p), (1, k - p - 1), (3, k - p - 2),
+                               (1, k - p + 1)):
+                    y = _val(fmt, sy, ym, ye)
+                    if y is not None:
+                        pairs.append((x, y))
+                        pairs.append((x | fmt.sign_mask, y))
+
+    # Exact cancellation, every sign combination - the sign of e is the
+    # sign of r there, and r's own is 6.3's.
+    for m, e in ((1, 0), (3, -1), ((1 << p) - 1, -(p - 1)), (1, fmt.emax),
+                 (1, fmt.emin), (1, fmt.emin - fmt.man_w)):
+        x = _val(fmt, 0, m, e)
+        if x is None:
+            continue
+        for sx in (0, 1):
+            for sy in (0, 1):
+                a = x | (fmt.sign_mask if sx else 0)
+                b = x | (fmt.sign_mask if sy else 0)
+                pairs += [(a, b), (a, b ^ fmt.sign_mask)]
+
+    # Sums whose residual is subnormal: a normal x against a y so far
+    # below it that the residual is y itself, walked across the
+    # subnormal range. Underflow with no inexact.
+    for k in (0, 1, p, 2 * p, fmt.emin + p, fmt.emax // 2, fmt.emax):
+        x = _val(fmt, 0, 1, k)
+        if x is None:
+            continue
+        for ye in (fmt.emin - fmt.man_w, fmt.emin - fmt.man_w + 1,
+                   fmt.emin - 1, fmt.emin, fmt.emin + 1):
+            for ym in (1, 3, (1 << p) - 1):
+                y = _val(fmt, 0, ym, ye)
+                if y is None:
+                    continue
+                pairs += [(x, y), (x, y | fmt.sign_mask),
+                          (x | fmt.sign_mask, y)]
+
+    # Products whose residual underflows: both operands near the bottom,
+    # so the exact 2p-bit product has digits below the subnormal grid.
+    for xe in (fmt.emin, fmt.emin + 1, fmt.emin + p // 2, fmt.emin - 1,
+               fmt.emin - fmt.man_w // 2, fmt.emin - fmt.man_w):
+        for xm in (1, 3, (1 << p) - 1, (1 << (p - 1)) | 1):
+            x = _val(fmt, 0, xm, xe - (xm.bit_length() - 1))
+            if x is None:
+                continue
+            for ye in (0, -1, -p // 2, -p, 1):
+                for ym in (1, 3, (1 << p) - 1):
+                    y = _val(fmt, 0, ym, ye - (ym.bit_length() - 1))
+                    if y is not None:
+                        pairs += [(x, y), (x | fmt.sign_mask, y)]
+
+    # The overflow threshold: maxfinite plus half an ulp is EXACTLY the
+    # midpoint 9.5 sends to maxfinite, and everything above it goes to
+    # infinity. Both sides, both signs, plus the products that land
+    # there.
+    mx = sf.max_normal_bits(fmt)
+    for ym, ye in ((1, fmt.emax - p), (1, fmt.emax - p + 1),
+                   ((1 << p) - 1, fmt.emax - p - (p - 1)),
+                   (1, fmt.emax - p - 1), (1, fmt.emax)):
+        y = _val(fmt, 0, ym, ye)
+        if y is None:
+            continue
+        pairs += [(mx, y), (mx, y | fmt.sign_mask),
+                  (mx | fmt.sign_mask, y | fmt.sign_mask),
+                  (mx ^ 1, y), (mx, mx), (mx, mx | fmt.sign_mask)]
+    for m, e in ((1, 1), (3, -1), ((1 << p) - 1, -(p - 1)), (1, 0)):
+        y = _val(fmt, 0, m, e)
+        if y is not None:
+            pairs += [(mx, y), (mx | fmt.sign_mask, y)]
+
+    pairs += [(_rand_bits(rng, fmt), _rand_bits(rng, fmt))
+              for _ in range(extra)]
+    # A near-cancellation family: y within a few ulps of -x, where the
+    # sum is tiny and the residual is exactly zero more often than
+    # chance would have it.
+    for _ in range(extra):
+        x = _rand_finite(rng, fmt, 1, fmt.exp_mask - 2)
+        pairs.append((x, (x ^ fmt.sign_mask) + rng.randint(-3, 3)))
+    out, seen = [], set()
+    for a, b in pairs:
+        if a is None or b is None:
+            continue
+        key = (a & ((1 << fmt.width) - 1), b & ((1 << fmt.width) - 1))
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def augmented_cases(fmt: FpFormat, extra: int, seed: int = 16):
+    """(fn, a, b) triples for the three augmented operations, in the
+    order gen_vectors.py writes them. One pool serves all three: the
+    families that stress an augmented sum stress an augmented product
+    at the other end of the same exponent range, and a pair that is
+    dull for one is cheap to replay."""
+    from .augmented import AUG_FNS
+    pairs = augmented_pairs(fmt, extra, seed)
+    return [(fn, a, b) for fn in AUG_FNS for a, b in pairs]
+
+
+def table91_unary_pool(fmt: FpFormat, extra: int, seed: int = 15):
+    """Operands for exp2m1, exp10, exp10m1, log2p1, log10p1 and rSqrt.
+
+    A fifth pool, because the families that catch these are not the ones
+    that catch exp: the INTEGERS (exp2m1 is exact on them up to p+1 and
+    decided by a side from p+2), the powers of ten and 10^k - 1, the
+    values 2^k - 1 where log2p1 is exact, the powers of two where x = 2^k
+    puts log2p1 an exponentially small step above the integer k, and the
+    even/odd split of the powers of two that is rSqrt's whole exactness
+    question."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 503))
+    out = list(interesting_operands(fmt))
+    _extend(out, one + 1, one - 1, sf.one_bits(fmt, 1) + 1,
+            sf.one_bits(fmt, 1) - 1)
+
+    for k in list(range(1, 12)) + [p - 1, p, p + 1, p + 2, p + 3, 2 * p,
+                                   fmt.emax - 1, fmt.emax, fmt.emax + 1,
+                                   fmt.emin, fmt.emin - fmt.man_w]:
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, abs(k), 0)
+            if b is not None:
+                _extend(out, b, b + 1, b - 1)
+    k = 0
+    while 5 ** k < (1 << p):
+        b = _val(fmt, 0, 5 ** k, k)
+        if b is None:
+            break
+        _extend(out, b, b + 1, b - 1)
+        if k:
+            _extend(out, _val(fmt, 0, 10 ** k - 1, 0))
+        k += 1
+    for k in range(1, min(p, 40) + 1):
+        for m, e in (((1 << k) - 1, 0), ((1 << k) - 1, -k)):
+            for sgn in (0, 1):
+                b = _val(fmt, sgn, m, e)
+                if b is not None:
+                    _extend(out, b, b + 1, b - 1)
+    for k in list(range(-6, 7)) + [p, -p, fmt.emax, fmt.emax - 1, fmt.emin,
+                                   fmt.emin - fmt.man_w,
+                                   fmt.emin - fmt.man_w + 1]:
+        for sgn in (0, 1):
+            b = _val(fmt, sgn, 1, k)
+            if b is not None:
+                _extend(out, b, b + 1, b - 1)
+    for k in (p + 2, p + 3, p + 4, p + 5, 2 * p):
+        for m, e in ((1, -k), (3, -k - 1)):
+            for sgn in (0, 1):
+                _extend(out, _val(fmt, sgn, m, e))
+    out += [_rand_bits(rng, fmt) for _ in range(extra)]
+    return sorted({b & ((1 << fmt.width) - 1) for b in out})
+
+
+def transcend_powr_pairs(fmt: FpFormat, extra: int, seed: int = 16):
+    """pow's pairs plus the rows where powr is NOT pow: a negative base
+    against every kind of exponent, both zeros against both zeros, an
+    infinite base against a zero exponent, 1 against an infinity, and a
+    quiet NaN in either operand."""
+    pairs = list(transcend_pow_pairs(fmt, extra, seed))
+    one = sf.one_bits(fmt)
+    specials = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+                sf.inf_bits(fmt, 1), sf.qnan_bits(fmt), sf.snan_bits(fmt),
+                one, sf.one_bits(fmt, 1), _val(fmt, 0, 1, 1),
+                _val(fmt, 1, 1, 1), _val(fmt, 0, 3, -1),
+                sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+                sf.min_subnormal_bits(fmt)]
+    pairs += [(a, b) for a in specials for b in specials
+              if a is not None and b is not None]
+    return pairs
+
+
+def transcend_int_pow_cases(fmt: FpFormat, extra: int, seed: int = 17):
+    """(operand, n) pairs for pown, compound and rootn.
+
+    The operands are the ones whose exactness the three decide
+    differently - perfect powers, a significand whose odd part is 1,
+    -1 and its neighbours, the zeros and the infinities, a base one ulp
+    from 1 - and the exponents run the whole int64 range including both
+    ends, because INT64_MIN is exactly the value a naive |n| gets
+    wrong. The cross product is strided: five attributes times three
+    functions times the full product would be a longer test rather than
+    a sharper one."""
+    p = fmt.prec
+    one = sf.one_bits(fmt)
+    rng = random.Random(seed ^ (fmt.width * 607))
+    ops = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.inf_bits(fmt),
+           sf.inf_bits(fmt, 1), sf.qnan_bits(fmt), sf.snan_bits(fmt),
+           one, sf.one_bits(fmt, 1), one + 1, one - 1,
+           sf.one_bits(fmt, 1) + 1, sf.one_bits(fmt, 1) - 1,
+           sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt, 1),
+           sf.max_normal_bits(fmt), sf.max_normal_bits(fmt, 1),
+           sf.min_normal_bits(fmt)]
+    for m in (2, 3, 4, 8, 9, 16, 25, 27, 32, 64, 81, 125, 243, 256, 1024,
+              15625):
+        if m.bit_length() > p:
+            continue
+        for sgn in (0, 1):
+            for e in (0, 2, 6, -4, -6):
+                _extend(ops, _val(fmt, sgn, m, e))
+        b = _val(fmt, 0, m, 0)
+        if b is not None:
+            _extend(ops, b + 1, b - 1)
+    for e in (-3, -2, -1, 1, 2, 3, 6, p, -p, fmt.emax, fmt.emin,
+              fmt.emin - fmt.man_w):
+        for sgn in (0, 1):
+            _extend(ops, _val(fmt, sgn, 1, e))
+    for k in (1, 2, p // 2, p, p + 2, 2 * p):
+        for sgn in (0, 1):
+            _extend(ops, _val(fmt, sgn, 1, -k))
+    ops += [_rand_bits(rng, fmt) for _ in range(max(4, extra // 4))]
+    ops = sorted({b & ((1 << fmt.width) - 1) for b in ops})
+
+    ns = sorted({0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 8, -8, 17, -17,
+                 p - 1, p, p + 1, p + 2, -(p + 1), -(p + 2),
+                 1000, -1000, 1 << 20, -(1 << 20), (1 << 31) - 1,
+                 -(1 << 31), 1 << 62, -(1 << 62), (1 << 63) - 1,
+                 -(1 << 63)},
+                key=lambda v: (abs(v), v))
+    step = 3
+    cases = []
+    for i, a in enumerate(ops):
+        for j in range(i % step, len(ns), step):
+            cases.append((a, ns[j]))
+    for a in ops:
+        for k in (0, 1, 2, -1, -2):
+            cases.append((a, k))
+    return cases
+
+
+def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
+    """(fn, a, b, n) tuples for all thirty-nine transcendentals, in the
+    order gen_vectors.py writes them. b is 0 for the unary ones, which do
+    not emit it at all, and n is 0 for everything but pown, compound and
+    rootn, which are the three that read an INTEGER operand.
+
+    Five operand pools, because the families are different: the
     exponential set turns on exact powers and overflow thresholds, the
     Pi-trigonometric set on half-integers and the edge of the asin
-    domain, the radian set on the argument reduction's worst cases, and
-    the hyperbolic set on its own domain edges. Each slice of
-    TRANSCEND_FNS is named by INDEX below, so appending a phase does not
-    silently re-point an earlier one at the wrong pool."""
-    from .transcend import TRANSCEND_ARITY, TRANSCEND_FNS
+    domain, the radian set on the argument reduction's worst cases, the
+    hyperbolic set on its own domain edges, and table 9.1's remainder on
+    the integers, the powers of ten and the even/odd powers of two. Each
+    slice of TRANSCEND_FNS is named by INDEX below, so appending a phase
+    does not silently re-point an earlier one at the wrong pool."""
+    from .transcend import (TRANSCEND_ARITY, TRANSCEND_FNS,
+                            TRANSCEND_INTARG)
 
     pool = transcend_unary_pool(fmt, extra, seed)
     tpool = trig_unary_pool(fmt, extra, seed + 3)
     rpool = radian_unary_pool(fmt, extra, seed + 5)
     hpool = hyperbolic_unary_pool(fmt, extra, seed + 6)
+    t9pool = table91_unary_pool(fmt, extra, seed + 7)
     trig = set(TRANSCEND_FNS[9:20])
     radian = set(TRANSCEND_FNS[20:23])
-    hyper = set(TRANSCEND_FNS[23:])
+    hyper = set(TRANSCEND_FNS[23:29])
+    table91 = set(TRANSCEND_FNS[29:])
     assert radian == {"sin", "cos", "tan"}, TRANSCEND_FNS[20:23]
+    assert "rootn" in table91 and len(table91) == 10, TRANSCEND_FNS[29:]
+    intcases = transcend_int_pow_cases(fmt, extra, seed + 8)
     cases = []
     for fn in TRANSCEND_FNS:
-        if TRANSCEND_ARITY[fn] == 1:
+        if TRANSCEND_INTARG[fn]:
+            cases += [(fn, a, 0, k) for a, k in intcases]
+        elif TRANSCEND_ARITY[fn] == 1:
             if fn in radian:
                 src = rpool
             elif fn in hyper:
                 src = hpool
             elif fn in trig:
                 src = tpool
+            elif fn in table91:
+                src = t9pool
             else:
                 src = pool
-            cases += [(fn, a, 0) for a in src]
+            cases += [(fn, a, 0, 0) for a in src]
         elif fn == "pow":
-            cases += [(fn, a, b)
+            cases += [(fn, a, b, 0)
                       for a, b in transcend_pow_pairs(fmt, extra, seed + 1)]
         elif fn == "hypot":
-            cases += [(fn, a, b)
+            cases += [(fn, a, b, 0)
                       for a, b in transcend_hypot_pairs(fmt, extra, seed + 2)]
+        elif fn == "powr":
+            cases += [(fn, a, b, 0)
+                      for a, b in transcend_powr_pairs(fmt, extra, seed + 9)]
         else:
-            cases += [(fn, a, b)
+            cases += [(fn, a, b, 0)
                       for a, b in trig_atan2_pairs(fmt, extra, seed + 4)]
+    return cases
+
+
+# ---- the reduction sets ----------------------------------------------
+#
+# A THIRD set type, and it needed one: the published sets before this
+# carried no reductions at all. Both of the existing schemas are one
+# case per LINE with a fixed number of single-element operands, and a
+# reduction's operand is a whole vector whose length is part of the
+# case - so a reduction could not be expressed in either without
+# redefining what a line means for everything else.
+#
+# The scaled products need more than that again: they return a PAIR, so
+# their cases carry two answers.
+
+REDUCE_FNS = ("sum", "dot", "sumsq", "sumabs",
+              "scaled_prod", "scaled_prod_sum", "scaled_prod_diff")
+
+REDUCE_ARITY = {"sum": 1, "dot": 2, "sumsq": 1, "sumabs": 1,
+                "scaled_prod": 1, "scaled_prod_sum": 2,
+                "scaled_prod_diff": 2}
+
+# Which functions deliver (pr, sf) rather than one element.
+REDUCE_SCALED = ("scaled_prod", "scaled_prod_sum", "scaled_prod_diff")
+
+# Lengths. The tree's shape is a function of n and of nothing else, so
+# the sizes are the coverage: every small n, then each power of two
+# with its neighbours either side, where a perfect subtree gives way to
+# a lopsided one. A set that tried only round numbers would score a
+# midpoint-splitting implementation as conforming.
+REDUCE_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 16, 17,
+                  31, 32, 33, 63, 64, 65, 127, 128, 129)
+
+# Where the pools are sampled across every function as well - kept
+# short because a case's cost is its length.
+REDUCE_POOL_LENGTHS = (2, 5, 17, 33)
+
+
+def reduce_pools(fmt: FpFormat, extra: int, seed: int = 20):
+    """Named operand pools, each at least max(REDUCE_LENGTHS) long.
+
+    Adversarial in the ways a reduction is: products that leave the
+    format many times over in both directions, alternating magnitudes,
+    signed zeros, an infinity beside a zero (the invalid row of a
+    scaled product), NaNs beside infinities (the row 9.4 orders
+    differently for sumSquare and sumAbs), and subnormals - whose
+    normalised significands are what makes a scaled product's leaf
+    extraction non-trivial.
+    """
+    need = max(REDUCE_LENGTHS)
+    rng = random.Random(seed ^ fmt.width)
+    big = sf.max_normal_bits(fmt)
+    tiny = sf.min_subnormal_bits(fmt)
+    pools = {}
+
+    def cycle(values):
+        return [values[i % len(values)] for i in range(need)]
+
+    # ordinary work: exponents close enough together that the additions
+    # actually interact rather than reducing to "the largest one wins"
+    pools["ordinary"] = [_rand_finite(rng, fmt, fmt.bias - 6, fmt.bias + 6)
+                         for _ in range(need)]
+
+    # products that overflow and underflow the format many times over
+    pools["huge"] = cycle([big, sf.max_normal_bits(fmt, 1),
+                           big ^ 1, sf.max_normal_bits(fmt, 1) ^ 1])
+    pools["tiny"] = cycle([tiny, sf.min_subnormal_bits(fmt, 1),
+                           sf.max_subnormal_bits(fmt),
+                           sf.min_normal_bits(fmt)])
+    pools["alternating"] = cycle([big, tiny, sf.max_normal_bits(fmt, 1),
+                                  sf.min_subnormal_bits(fmt, 1)])
+
+    # signed zeros beside ordinary values: the sign of a scaled
+    # product's zero is the XOR over every factor, and an exact
+    # cancellation's zero follows the rounding attribute
+    pools["zeros"] = cycle([sf.zero_bits(fmt, 0), sf.one_bits(fmt),
+                            sf.zero_bits(fmt, 1), sf.one_bits(fmt, 1),
+                            sf.zero_bits(fmt, 1), sf.zero_bits(fmt, 0)])
+
+    # an infinity beside a zero: invalid for a scaled product, and
+    # nothing at all for sumSquare
+    pools["inf_zero"] = cycle([sf.inf_bits(fmt), sf.zero_bits(fmt),
+                               sf.one_bits(fmt), sf.inf_bits(fmt, 1),
+                               sf.zero_bits(fmt, 1), sf.one_bits(fmt, 1)])
+
+    # NaNs beside infinities: the one row where sumSquare and sumAbs
+    # are not the plain composition
+    pools["nan_inf"] = cycle([sf.qnan_bits(fmt), sf.inf_bits(fmt),
+                              sf.one_bits(fmt), sf.snan_bits(fmt),
+                              sf.inf_bits(fmt, 1), sf.qnan_bits(fmt) | 5])
+
+    # the whole exponent range in one vector
+    pools["wide"] = [_rand_finite(rng, fmt, 1, fmt.exp_mask - 1)
+                     for _ in range(need)]
+
+    for i in range(max(0, extra)):
+        pools["random%d" % i] = [_rand_bits(rng, fmt) for _ in range(need)]
+    return pools
+
+
+def reduce_cases(fmt: FpFormat, extra: int, seed: int = 20):
+    """(fn, xs, ys) triples for all seven of clause 9.4's reductions.
+
+    ys is None for the unary five. Coverage is deliberately shaped
+    around cost: every LENGTH is used for every function (rotating
+    through the pools), and every POOL is used for every function at a
+    few short lengths - because a case's size is its length, and a
+    cross of all lengths against all pools would make an fp256 set tens
+    of megabytes for coverage that repeats itself.
+    """
+    pools = reduce_pools(fmt, extra, seed)
+    names = sorted(pools)
+    cases = []
+    k = 0
+    for fn in REDUCE_FNS:
+        binary = REDUCE_ARITY[fn] == 2
+        for n in REDUCE_LENGTHS:
+            src = pools[names[k % len(names)]]
+            other = pools[names[(k + 3) % len(names)]]
+            k += 1
+            cases.append((fn, src[:n], other[:n] if binary else None))
+        for name in names:
+            for n in REDUCE_POOL_LENGTHS:
+                src = pools[name]
+                other = pools[names[(names.index(name) + 1) % len(names)]]
+                cases.append((fn, src[:n], other[:n] if binary else None))
+    return cases
+
+
+# ---- the character-conversion sets -----------------------------------
+
+# Sequences that are NOT in 5.12's syntax and must be refused rather
+# than guessed at. Kept free of quotes and backslashes so the emitted
+# JSON needs no escapes and cft_conformance's scanner needs no
+# unescaper - gen_vectors.py asserts that rather than trusting it.
+DECIMAL_REFUSALS = (
+    "", "+", "-", ".", "-.", "e5", "1e", "1e+", "1e-", "1 ", " 1", "1.5.5",
+    "1,5", "0x1p+0", "1p5", "--1", "1-", "nan(", "nan()", "nan(x)",
+    "nan(0x)", "nan(-1)", "infi", "nanx", "snan()", "1.5e5x", "1_000",
+)
+
+HEX_REFUSALS = (
+    "", "0x", "0x1", "0x.p+0", "0xp+1", "0x1p", "0x1p+", "0x1.8",
+    "1.8p+3", "0x1.8e+3", "0x1.8p+3x", "0xg.1p+0", "0x1..8p+0",
+    " 0x1p+0", "1e5", "0x1p+0.5",
+)
+
+# Every spelling of every special 5.12.1 names, read by both parsers.
+SPECIAL_SEQUENCES = (
+    "inf", "-inf", "+inf", "INF", "Inf", "infinity", "-INFINITY",
+    "nan", "-nan", "NaN", "NAN", "snan", "-snan", "SNaN",
+    "nan(1)", "nan(0x1)", "-nan(0x2)", "NAN(0X3)", "snan(0x1)",
+    "-snan(5)", "0", "-0", "+0", "0.0", "-0.0e10",
+)
+
+
+def character_cases(fmt: FpFormat, extra: int, seed: int = 20):
+    """The clause-5.12 and 9.7 cases, as tagged tuples gen_vectors.py
+    turns into records:
+
+        ("from_decimal", s)          a sequence to convert in
+        ("from_decimal_refuse", s)   a sequence that must be refused
+        ("to_decimal", bits, h)      an encoding to write out, h digits
+                                     (0 = the exact conversion)
+        ("from_hex", s) / ("from_hex_refuse", s) / ("to_hex", bits)
+        ("payload", op, bits)        one of the three 9.7 operations
+
+    The families are the ones a conversion is actually got wrong on:
+    exact halfway sequences that only the last digit decides, digit
+    strings far longer than the format's precision, exponents inside
+    and past the bands where the library answers without computing,
+    subnormal landings, the round-trip digit counts at exactly Pmin and
+    at Pmin - 1, and every spelling of every special. Random digit
+    strings are in there too, but they are the part that scores least:
+    a uniformly random decimal essentially never lands on a rounding
+    boundary."""
+    from . import chars
+
+    rng = random.Random(seed)
+    h = chars.pmin(fmt)
+    cases = []
+
+    # -- encodings to write out ------------------------------------
+    outs = list(interesting_operands(fmt))
+    outs += [sf.qnan_bits(fmt) | 1, sf.snan_bits(fmt, 1),
+             sf.qnan_bits(fmt) | (chars.max_payload(fmt) - 1),
+             fmt.sign_mask | sf.snan_bits(fmt, 3)]
+    for k in (1, 3, 5, 9, 11):
+        for s in (0, 1):
+            _extend(outs, _val(fmt, s, k, -3), _val(fmt, s, k * 5, -1))
+    span = 30 if fmt.width > 64 else fmt.emax
+    for _ in range(extra):
+        m = rng.getrandbits(fmt.prec) | (1 << (fmt.prec - 1))
+        outs.append(sf.round_pack(fmt, rng.getrandbits(1), m,
+                                  rng.randint(-span, span) - fmt.man_w,
+                                  sf.RND_RNE)[0])
+    for bits in outs:
+        # The wide formats' exponent extremes are left out of the dense
+        # sweep and covered deliberately just below. Their exact
+        # decimals run to tens of thousands of digits, which the
+        # library derives in full at every digit count (cft.h carries
+        # the cost note), so sweeping them here would put minutes of
+        # replay into every consumer's run and add no case the edge
+        # pass does not already carry.
+        kind, _, em, ee, _, _ = chars._decode(fmt, bits)
+        dense = (fmt.width <= 64 or kind != "finite" or
+                 abs(ee + em.bit_length() - 1) <= 400)
+        for digits in (0, 1, 2, h - 1, h, h + 3):
+            if dense:
+                cases.append(("to_decimal", bits, digits))
+        cases.append(("to_hex", bits))
+
+    # The ends of the exponent range, where the exact decimal runs to
+    # tens of thousands of digits and the powering path is the whole
+    # cost of the conversion. A deliberate handful, not a sample: at
+    # fp256 one of these is a 183,000-character sequence.
+    edges = [sf.min_subnormal_bits(fmt, 0), sf.min_subnormal_bits(fmt, 1),
+             sf.max_subnormal_bits(fmt, 0), sf.min_normal_bits(fmt, 0),
+             sf.max_normal_bits(fmt, 0)]
+    for bits in edges:
+        for digits in (0, 1, h - 1, h):
+            cases.append(("to_decimal", bits, digits))
+        cases.append(("to_hex", bits))
+
+    # -- sequences to read in --------------------------------------
+    seqs = list(SPECIAL_SEQUENCES)
+    seqs += ["1", "-1", "1.", ".5", "1.5", "1e0", "1E0", "1e+0", "10e-1",
+             "0.1", "2.5", "1.25", "9" * 30, "0." + "0" * 25 + "1",
+             "1e999999999999", "-1e-999999999999", "1e99999", "1e-99999"]
+    for bits in edges + [sf.one_bits(fmt, 0)]:
+        text, _ = chars.to_decimal(fmt, bits, 0)
+        seqs.append(text)
+        seqs.append(chars.to_decimal(fmt, bits, h)[0])
+        seqs.append(chars.to_decimal(fmt, bits, h - 1)[0])
+
+    # Exact halfway sequences between neighbouring encodings, and the
+    # same sequence nudged either side of the tie: the cases where the
+    # attribute, and nothing else, decides the answer.
+    for bits in (sf.one_bits(fmt, 0), sf.min_normal_bits(fmt, 0),
+                 sf.min_subnormal_bits(fmt, 0), _val(fmt, 0, 3, -1)):
+        if bits is None:
+            continue
+        k1, sign, m1, e1, _, _ = chars._decode(fmt, bits)
+        k2, _, m2, e2, _, _ = chars._decode(fmt, bits + 1)
+        if k1 != "finite" or k2 != "finite":
+            continue
+        e = min(e1, e2) - 1
+        mid = ((m1 << (e1 - e)) + (m2 << (e2 - e))) // 2
+        ds, exp10 = chars.exact_digits(mid, e)
+        seqs.append(chars._format_finite(sign, ds, exp10))
+        seqs.append(chars._format_finite(1, ds, exp10))
+        seqs.append(chars._format_finite(sign, ds + "1", exp10))
+        if ds[-1] != "0":
+            seqs.append(chars._format_finite(
+                sign, ds[:-1] + str(int(ds[-1]) - 1) + "9", exp10))
+
+    for _ in range(extra * 2):
+        nd = rng.randint(1, 40)
+        d = "".join(rng.choice("0123456789") for _ in range(nd))
+        k = rng.randint(-(fmt.emax // 3 + 20), fmt.emax // 3 + 20)
+        seqs.append(("-" if rng.getrandbits(1) else "") + d + "e" + str(k))
+
+    cases += [("from_decimal", s) for s in seqs]
+    cases += [("from_decimal_refuse", s) for s in DECIMAL_REFUSALS]
+    cases.append(("from_decimal_refuse", "nan(0x%x)" % chars.max_payload(fmt)))
+
+    hexes = list(SPECIAL_SEQUENCES[:20])
+    hexes += ["0x0p+0", "-0x0p+0", "0x1p+0", "-0x1p+0", "0X1P+0",
+              "0x1.8p+1", "0x.8p+1", "0x8.p-3", "0x1p+999999999999",
+              "0x1p-999999999999", "0xfffffffffffffffffffffffffffffffffp-4"]
+    for bits in edges + [sf.one_bits(fmt, 0)]:
+        hexes.append(chars.to_hex(fmt, bits))
+    for _ in range(extra):
+        nd = rng.randint(1, fmt.prec // 4 + 4)
+        d = "".join(rng.choice("0123456789abcdefABCDEF") for _ in range(nd))
+        e = rng.randint(-(fmt.emax + 30), fmt.emax + 30)
+        hexes.append(("-" if rng.getrandbits(1) else "") + "0x" + d + "p" +
+                     ("+" if e >= 0 else "") + str(e))
+    cases += [("from_hex", s) for s in hexes]
+    cases += [("from_hex_refuse", s) for s in HEX_REFUSALS]
+
+    # -- the 9.7 payload operations --------------------------------
+    pay = list(outs[:40])
+    pay += [sf.qnan_bits(fmt), sf.snan_bits(fmt, 1),
+            sf.qnan_bits(fmt) | (chars.max_payload(fmt) - 1),
+            sf.zero_bits(fmt, 0), sf.zero_bits(fmt, 1),
+            sf.one_bits(fmt, 0), sf.one_bits(fmt, 1)]
+    # the admissibility edge: the largest admissible payload, the first
+    # inadmissible one, and a non-integer just below both
+    for v in (chars.max_payload(fmt) - 1, chars.max_payload(fmt)):
+        _extend(pay, _val(fmt, 0, v, 0), _val(fmt, 1, v, 0),
+                _val(fmt, 0, 2 * v - 1, -1))
+    for op in ("get_payload", "set_payload", "set_payload_signaling"):
+        cases += [("payload", op, bits) for bits in pay]
     return cases

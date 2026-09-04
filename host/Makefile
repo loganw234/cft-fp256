@@ -55,8 +55,8 @@ WARN    := -Wall -Wextra -Wpedantic -Wshadow
 INC     := -Iinclude
 
 SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
-           src/clause5.c src/mpfloat.c src/transcend.c src/program.c \
-           src/conformance.c
+           src/clause5.c src/chars.c src/augmented.c src/mpfloat.c src/transcend.c \
+           src/program.c src/reduce.c src/conformance.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
@@ -158,7 +158,7 @@ TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
-        transcendtest \
+        transcendtest augmentedtest \
         examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
         lang-r lang-fortran clean
 
@@ -407,6 +407,14 @@ clause5test: all
 # part company. Same shape and reasoning as clause5test.
 transcendtest: all
 	$(PYTHON) tests/transcend_check.py
+
+# The augmented arithmetic operations (754-2019 9.5) against the model:
+# BOTH outputs and the flag word per element, the batch loop and its
+# flag OR, the aliasing rules, and the pair identity r + e == x op y
+# checked in exact integers on the library's own output. Same shape and
+# reasoning as clause5test.
+augmentedtest: all
+	$(PYTHON) tests/augmented_check.py
 
 # The native-oracle soak: cft_div/cft_sqrt against the host CPU's own
 # IEEE division and square root, which nobody in this repository

@@ -1614,7 +1614,9 @@ What that closed, and what it did not:
   log2p1, log10p1, pown, powr, compound and rootn remain. None needs a
   reduction, a constant beyond ln 10, or a new idea; they are a
   smaller job than any phase so far. Nothing has been written, so
-  nothing is claimed.
+  nothing is claimed. *(Closed the same day - see the table-9.1 entry
+  below. The prediction held for the machinery and understated the
+  exactness work.)*
 - **Not closed: a tile-assisted fast path**, as before.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 phase-3 entry:
@@ -1622,6 +1624,246 @@ The measurements are in docs/VALIDATION.md's 2026-09-03 phase-3 entry:
 model comparisons over twenty-nine functions, 451,988 MPFR
 cases with zero value and zero flag mismatches, and a negative control
 that four gates caught.
+
+## The augmented arithmetic operations (status, 2026-09-03)
+
+augmentedAddition, augmentedSubtraction and augmentedMultiplication -
+IEEE 754-2019 clause 9.5 - ship as part of the 0.6 step:
+`cft_augmented_add`, `cft_augmented_sub`, `cft_augmented_mul`, all four
+formats, both outputs, exact flags. Zero RTL again, and no new
+constant; what they needed was a rounding the contract did not have.
+
+What that closed, and what it did not:
+
+- **Closed: the sixth rounding, without a sixth attribute.** 9.5's
+  roundTiesTowardZero is a rounding DIRECTION, not one of clause 4.3's
+  five, and the operations that use it take no attribute argument. So
+  it went into `round_pack` in both languages numbered outside the
+  three-bit MODE field, reachable only from the augmented operations,
+  and the gate that admits the five attributes rejects it. The five
+  came through bit-identical, which the full conformance replay is what
+  proves.
+- **Closed: the pair as a first-class result.** Three entry points that
+  write two arrays, a vector-set schema with `"r"` and `"e"` and
+  deliberately no `"rnd"`, a conformance replayer that scores both, and
+  a harness that checks `r + e == x op y` in exact integers on the
+  library's output rather than on the model's. That identity is what
+  the operations are FOR, so it is scored rather than assumed.
+- **Closed: the flag combination nothing else here produces.**
+  Underflow without inexact, because 9.5 raises underflow on a
+  subnormal ERROR TERM and that term is exact. It took a documented
+  exception in docs/DETERMINISM.md's tininess section, which was the
+  right place for it: the rule there was stated absolutely and is now
+  stated with its one exception.
+- **Closed: an oracle for a rounding MPFR does not have.** mpfr_check
+  computes the exact value at a precision that provably holds it -
+  proved by requiring a zero ternary, since the exact sum of two p-bit
+  values spans the whole exponent range and 2p bits would not do it -
+  then applies the tie rule itself. The harness says which half of that
+  is an independent oracle and which is a restatement.
+- **Not closed: a tile-composed fast path.** A TwoSum for the sum and
+  an FMA residual for the product would compute these on the tile, and
+  the note is in cft.h. It has a second obstacle the transcendentals
+  did not: the tile's five attributes cannot produce r, so a composed
+  route needs the residual AND a way to reach the tie rule. Nothing has
+  been written, so nothing is claimed.
+- **Closed the same day: clause 9.4's reduction operations** (scaledProd
+  and friends), a different shape again - a vector in, a scaled pair
+  out - shipped in the 0.6 step; the section below records them.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.5
+entry.
+
+## The rest of clause 9.4's reductions (status, 2026-09-03)
+
+sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff ship as
+part of the 0.6 step, completing the seven reductions 754-2019 9.4 asks
+a language to define - `sum` and `dot` having been the first two since
+2026-08-30. Zero RTL, two new opcodes, three new host entry points.
+
+What that closed, and what it did not:
+
+- **Closed: the two sum reductions, as COMPOSITIONS.** `CFT_SUMSQ` is
+  `cft_reduce(CFT_DOT, a, a)` and `CFT_SUMABS` is an abs pass then
+  `CFT_SUM`, node for node, so no second tree walker exists for the
+  two backends to disagree about. The composition property `dot` was
+  given in 2026-08-30 is what made that available; this is the second
+  time it has paid.
+- **Closed: the scaling rule, which 9.4 explicitly leaves open.** The
+  same index-shaped tree, one rounding per node, and a running
+  significand held in +-[1, 2) with the binade extracted into an int64
+  scale after every multiply. The invariant is what delivers the
+  standard's own requirement that pr "shall not be affected by
+  overflow or underflow" - both operands of every multiply are in
+  +-[1, 2), so no product can leave any rung - by construction rather
+  than by testing.
+- **Closed: the exception rules**, including the row that is not the
+  plain composition. 9.4 orders an infinity ahead of a NaN for
+  sumSquare and sumAbs and the other way round for sum and dot, so a
+  vector holding both returns +inf; that override is applied above both
+  backends and is checked lazily, only on a vector whose tree produced
+  a NaN.
+- **Closed: the reductions in the published vectors**, which carried
+  none of them before - not even `sum`. A third set type,
+  `<fmt>-reduce[-<rnd>].jsonl`, because a reduction's operand is a
+  whole vector whose length is part of the case.
+- **Closed: a third firing of the reassignment hazard.** Taking 28 and
+  29 made the generator's "unassigned representative" stale, and
+  `cft_conformance` refused the regenerated set by name rather than
+  scoring sumSquare against an answer recorded for an unassigned
+  opcode. Twice was a warning; three times is a working mechanism.
+- **Not closed: an accumulator that streams a scaled product.** There
+  is none, and none is planned: the tile's accumulator streams ADDs,
+  and a scaled product's node is a multiply plus a binade extraction.
+  The three are host operations for that reason, not as a staging post.
+- **Not closed: MPFR arbitrating the TREE.** It cannot - 9.4 lets an
+  implementation associate in any order - so the MPFR campaign settles
+  every node and reproduces the shape rather than judging it. What
+  guards the shape is two independent implementations of it, the
+  streaming accumulator, and the vector sets. The tool's banner says
+  so in those words.
+- **Not closed: clause 9.5's augmented arithmetic**, which sits beside
+  9.4 in the standard and is a genuinely different operation - one
+  rounding for a whole accumulation, in a rounding direction
+  (roundTiesTowardZero) this contract does not otherwise carry.
+  Nothing has been written, so nothing is claimed.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.4
+entry.
+
+## Table 9.1, completed (status, 2026-09-03)
+
+exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound
+and rootn ship as part of the step to ABI 0.6, correctly rounded at all
+four formats under all five attributes with clause 9.2.1's special
+values and exact flags. Zero RTL, the same evaluator, no new constant.
+**With these ten the library implements every operation IEEE 754-2019
+table 9.1 lists for the binary formats.**
+
+What that closed, and what it did not:
+
+- **Closed: the exactness.** Ten enumerations, each proved rather than
+  observed - exp2m1 exact at EVERY integer, exp10 and exp10m1 at the
+  non-negative integers their format holds, log2p1 and log10p1 wherever
+  1 + x is a power of two or of ten, rSqrt at the even powers of two,
+  rootn wherever the odd significand is a perfect |n|-th power and |n|
+  divides the exponent, and pown, powr and compound by phase 1's
+  p+1-bit odd-part bound. 1 + x is formed exactly on the encoding and
+  never in the format, which is the whole reason log2p1 and compound
+  exist as separate operations.
+- **Closed: two neighbour rules the design did not predict.** The
+  sweeps found them: log2p1(2^k) is an exponentially small step above
+  the integer k, which is a grid point and which no precision
+  separates; and compound of a dominant operand sits inside a quarter
+  step of x^n. Both have derived thresholds, both are in the model and
+  the C with the same numbers, and both are written up rather than
+  quietly added. The interesting half is which functions get NO
+  tiny-argument rule - 2^x - 1 is 0.693x and log2(1+x) is 1.443x,
+  neither beside x, so the four m1/p1 forms of a base other than e get
+  none.
+- **Closed: the integer operand.** pown, compound and rootn take an
+  int64 per element, which is what 9.2.1 asks for, and it reaches the
+  vector schema (a new `"n"` field), the replay, the C++ span layer and
+  the Python binding.
+- **Closed: three rows where the standard and MPFR differ**, each
+  measured before it was written down and each decided for the
+  standard: rSqrt(-0) is -infinity, powr(+1, qNaN) is a quiet NaN, and
+  compound(x, 0) below -1 is invalid.
+- **Found: a defect in the oracle.** mpfr_compound_si is off by one
+  ulp for a NEGATIVE n when 1 + x is not representable at the working
+  precision - a double rounding, measured on 4.2.2 and characterised
+  over n in [-12, 12]. mpfr_pow_si and mpfr_rootn_si are sound. The
+  campaign keeps MPFR's own compound for n >= 0 and builds the
+  expectation from the exactly formed 1 + x and mpfr_pow_si for n < 0,
+  with the library's answers confirmed three independent ways first.
+  That is the second external arbiter to be wrong in this project and
+  the second time two implementations caught it.
+- **Not closed: a tile-assisted fast path.** rSqrt is host work like
+  the other thirty-eight, and the tile's RSQRT_SEED opcode remains an
+  optimisation nobody has built - it would have to reproduce these bits
+  exactly, which is what makes it an optimisation rather than a
+  different answer.
+- **Not closed: the decimal half of table 9.1**, which this library has
+  never claimed: the formats here are the binary interchange ladder.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 table-9.1
+entry.
+
+## Clause 5.12 and 9.7: character sequences and payloads (status, 2026-09-03)
+
+The conversions between the four binary formats and external character
+sequences - decimal and hexadecimal, both directions - and clause
+9.7's getPayload, setPayload and setPayloadSignaling ship as part of
+the 0.6 step. Zero RTL, zero new numerics beyond exact integer
+arithmetic, and no device pass: the work is integer division and digit
+generation.
+
+This one is different in kind from the phases before it. The
+transcendentals are clause 9, which 754 calls RECOMMENDED, and this
+project implemented them because a determinism contract with an
+approximate `exp` in it has a hole the size of every caller of `exp`.
+5.12 is clause 5, and it says **shall**. It was the last required part
+of clause 5 the library did not meet, and it was open at exactly the
+edge where callers arrive: a config file, a CSV, a REPL, a test
+fixture. Every one of those reached this library through some other
+implementation's decimal rounding.
+
+What that closed, and what it did not:
+
+- **Closed: correct rounding at every length, in both directions.**
+  5.12.2 lets an implementation cap the digit count it rounds
+  correctly at some H >= M + 3 and then incur "additional rounding of
+  the order of 10^(M-H)" past it. There is no cap here. A decimal
+  sequence's value is a rational and an encoding's is a dyadic
+  rational, both held exactly, so the whole conversion is one integer
+  division against `round_pack`'s own (m, e, sticky) precondition. A
+  capped conversion would not be reproducible against an
+  implementation with a different cap, which is why the uncapped
+  version is a determinism property and not a quality boast.
+- **Closed: the round trip, and its edge.** Pmin comes out 9, 17, 36
+  and 73 from `1 + ceiling(p * log10 2)`, derived rather than
+  tabulated, and the round trip is held at it - AND shown to fail one
+  digit short, with a named colliding pair per format rather than an
+  assertion that none exists.
+- **Closed: a growable bignum, in one file, for one reason.**
+  `bigint.h` is fixed at 2048 bits because softfloat.c bounds its
+  alignment; decimal conversion cannot be bounded that way, because
+  the exact decimal of the smallest binary256 subnormal is 183,395
+  digits and reading it back needs `10^262378`. Those lengths come
+  from the format. `host/src/chars.c` carries the limb vector that
+  handles them and nothing more.
+- **Closed: a hole in cftmpfr.** `from_str` routed through gmpy2/MPFR
+  because libcft had no decimal parser; it now routes through the
+  library, which removes the optional dependency from that path, gives
+  it roundTiesToAway (which MPFR does not have at all), and replaces
+  MPFR's underflow definition with the contract's. Measured before the
+  switch: 2,480 parses, zero encoding differences, and 32 flag
+  differences all on the one row where MPFR raises underflow for a
+  decimal that lands exactly on a subnormal and 754 7.5 says an exact
+  result raises nothing.
+- **Not closed: a shorter route for a small digit count.** The
+  H-digit mode derives the full exact expansion and rounds the digit
+  string, so writing five digits of a value at the end of fp256's
+  exponent range costs what writing all 183,000 costs - about 0.7 s.
+  One code path and one correctness argument was the trade; a second
+  route would have to reproduce these digits exactly, which makes it
+  an optimisation rather than a different answer. cft.h carries the
+  cost note, in the tradition of `cft_rem`'s.
+- **Not closed: decimal interchange formats.** 5.12.2's
+  quantum-preserving conversions and Pmin for decimal32/64/128 belong
+  to formats this contract does not carry and is not going to; the
+  ladder is the binary one, and identity needs one definition per
+  width.
+- **Not closed: the JavaScript surface.** The wasm and Node layers do
+  not reach these yet; that is a separate step and nothing is claimed
+  for it here.
+
+The measurements are in docs/VALIDATION.md's 2026-09-03 clause-5.12
+entry: 648,731 conformance cases replayed across sixty sets, 20,819
+model comparisons in both directions at four formats and five
+attributes, 20,172 conversion cases against MPFR with zero value and
+zero flag mismatches, and the round trip shown to hold at Pmin and to
+collide at Pmin - 1.
 
 ## The open core
 

@@ -447,9 +447,9 @@ out:
  * point, and the reason this cannot reuse compare() above.
  *
  * `finite` picks the operand distribution - see fill_finite. b is
- * passed as NULL for CFT_SUM, because the header says it may be and a
- * device path that dereferences it anyway should fail here rather than
- * on the card. */
+ * passed as NULL for everything but CFT_DOT, because the header says
+ * it may be and a device path that dereferences it anyway should fail
+ * here rather than on the card. */
 static void compare_reduce(cft_device *sw, cft_device *hw, cft_format fmt,
                            cft_op op, cft_round rnd, size_t n,
                            uint32_t seed, int finite)
@@ -479,9 +479,9 @@ static void compare_reduce(cft_device *sw, cft_device *hw, cft_format fmt,
     memset(dsw, 0, sizeof dsw);
     memset(dhw, 0, sizeof dhw);
 
-    ssw = cft_reduce(sw, op, fmt, rnd, a, op == CFT_SUM ? NULL : b,
+    ssw = cft_reduce(sw, op, fmt, rnd, a, op == CFT_DOT ? b : NULL,
                      dsw, n, &fsw, NULL);
-    shw = cft_reduce(hw, op, fmt, rnd, a, op == CFT_SUM ? NULL : b,
+    shw = cft_reduce(hw, op, fmt, rnd, a, op == CFT_DOT ? b : NULL,
                      dhw, n, &fhw, &bus);
 
     CHECK(ssw == CFT_OK, "software %s %s n=%lu: %s", cft_format_name(fmt),
@@ -1010,6 +1010,37 @@ int main(int argc, char **argv)
                     compare_reduce(sw, hw, fmt, CFT_DOT, CFT_RNE, rn[i],
                                    0xd0700000u + (uint32_t)(f * 50 + i), 1);
                 printf("    dot: %d checks, %d failed\n", checks, failures);
+                fflush(stdout);
+            }
+
+            /* sumSquare and sumAbs are compositions for the same
+             * reason dot is - the dot itself, and an abs pass followed
+             * by a sum - so what this checks is again the composition
+             * across the backend boundary. Run with any-bits operands
+             * as well as finite ones, because 9.4's infinity-ahead-of-
+             * NaN override lives in the host layer above both
+             * backends, and a device path that reached the tree by a
+             * different route would show up here. */
+            if (cft_supports(hw, CFT_SUMSQ, fmt)) {
+                for (i = 0; i < (quick ? 3u : 6u) && i < nrn; i++) {
+                    compare_reduce(sw, hw, fmt, CFT_SUMSQ, CFT_RNE, rn[i],
+                                   0x59000000u + (uint32_t)(f * 50 + i), 1);
+                    compare_reduce(sw, hw, fmt, CFT_SUMSQ, CFT_RNE, rn[i],
+                                   0x59a00000u + (uint32_t)(f * 50 + i), 0);
+                }
+                printf("    sumsq: %d checks, %d failed\n",
+                       checks, failures);
+                fflush(stdout);
+            }
+            if (cft_supports(hw, CFT_SUMABS, fmt)) {
+                for (i = 0; i < (quick ? 3u : 6u) && i < nrn; i++) {
+                    compare_reduce(sw, hw, fmt, CFT_SUMABS, CFT_RNE, rn[i],
+                                   0x5ab00000u + (uint32_t)(f * 50 + i), 1);
+                    compare_reduce(sw, hw, fmt, CFT_SUMABS, CFT_RNE, rn[i],
+                                   0x5ab50000u + (uint32_t)(f * 50 + i), 0);
+                }
+                printf("    sumabs: %d checks, %d failed\n",
+                       checks, failures);
                 fflush(stdout);
             }
         } else {

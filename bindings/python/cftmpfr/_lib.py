@@ -77,6 +77,7 @@ OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
 OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 OP_SUM, OP_DOT = 24, 25
 OP_RECIP_SEED, OP_RSQRT_SEED = 26, 27
+OP_SUMSQ, OP_SUMABS = 28, 29        # the other two of clause 9.4
 
 RNE, RTZ, RDN, RUP, RMM = 0, 1, 2, 3, 4
 
@@ -222,16 +223,83 @@ def _bind(lib):
                   "cft_acos", "cft_atan", "cft_asinpi", "cft_acospi",
                   "cft_atanpi",
                   "cft_sin", "cft_cos", "cft_tan", "cft_sinh", "cft_cosh",
-                  "cft_tanh", "cft_asinh", "cft_acosh", "cft_atanh"):
+                  "cft_tanh", "cft_asinh", "cft_acosh", "cft_atanh",
+                  "cft_exp2m1", "cft_exp10", "cft_exp10m1", "cft_log2p1",
+                  "cft_log10p1", "cft_rsqrt"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
-    for _name in ("cft_pow", "cft_hypot", "cft_atan2", "cft_atan2pi"):
+    for _name in ("cft_pow", "cft_hypot", "cft_atan2", "cft_atan2pi",
+                  "cft_powr"):
         _fn = getattr(lib, _name)
         _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
                         c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
         _fn.restype = c_int
+    # pown, compound and rootn read an INTEGER exponent array beside the
+    # encodings, which is what 754-2019 9.2.1 asks for - so their
+    # prototype is a different one, and getting it wrong here would be a
+    # pointer-sized lie ctypes would happily tell.
+    for _name in ("cft_pown", "cft_compound", "cft_rootn"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_void_p,
+                        ctypes.POINTER(ctypes.c_int64), c_void_p,
+                        c_size_t, ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
+    # The augmented arithmetic operations (754-2019 9.5). Two outputs
+    # and NO rounding argument - the shortest possible summary of why
+    # they get their own loop: the standard fixes the rounding, so
+    # there is no c_int for an attribute between the format and the
+    # operands.
+    for _name in ("cft_augmented_add", "cft_augmented_sub",
+                  "cft_augmented_mul"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_void_p,
+                        c_void_p, c_size_t, ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
+
+    # The scaled product reductions (clause 9.4). Host operations like
+    # the transcendentals - no bus word - but they return a PAIR, so
+    # the argument list carries an int64 out-parameter for the scale
+    # before the length. Three named entry points rather than one with
+    # a kind argument, for the reason cft.h gives.
+    _i64p = ctypes.POINTER(ctypes.c_int64)
+    lib.cft_scaled_prod.argtypes = [c_void_p, c_int, c_int, c_void_p,
+                                    c_void_p, _i64p, c_size_t,
+                                    ctypes.POINTER(c_uint32)]
+    lib.cft_scaled_prod.restype = c_int
+    for _name in ("cft_scaled_prod_sum", "cft_scaled_prod_diff"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_int, c_void_p, c_void_p,
+                        c_void_p, _i64p, c_size_t,
+                        ctypes.POINTER(c_uint32)]
+        _fn.restype = c_int
+
+    # The clause-5.12 character conversions and the clause-9.7 payload
+    # operations (part of the 0.6 step). Host operations, so no bus
+    # word; the payload three signal nothing, so no flag word either.
+    szp = ctypes.POINTER(c_size_t)
+    cpp = ctypes.POINTER(c_char_p)
+    lib.cft_format_decimal_digits.argtypes = [c_int]
+    lib.cft_format_decimal_digits.restype = c_size_t
+    lib.cft_from_decimal_char.argtypes = [c_void_p, c_int, c_int, cpp,
+                                          c_void_p, c_size_t, szp, u32p]
+    lib.cft_from_hex_char.argtypes = [c_void_p, c_int, c_int, cpp, c_void_p,
+                                      c_size_t, szp, u32p]
+    lib.cft_to_decimal_char.argtypes = [c_void_p, c_int, c_int, c_void_p,
+                                        c_size_t, c_char_p, c_size_t, szp,
+                                        u32p]
+    lib.cft_to_hex_char.argtypes = [c_void_p, c_int, c_void_p, c_char_p,
+                                    c_size_t, szp]
+    for _name in ("cft_get_payload", "cft_set_payload",
+                  "cft_set_payload_signaling"):
+        _fn = getattr(lib, _name)
+        _fn.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_size_t]
+        _fn.restype = c_int
+    for _name in ("cft_from_decimal_char", "cft_from_hex_char",
+                  "cft_to_decimal_char", "cft_to_hex_char"):
+        getattr(lib, _name).restype = c_int
+
     _audit(lib)
     return lib
 
@@ -369,6 +437,31 @@ def reduce(handle, op, fmt, rnd, a, b, n, esz):
     return d.raw, flags.value
 
 
+def scaled_prod(handle, kind, fmt, rnd, a, b, n, esz):
+    """cft_scaled_prod / _sum / _diff: n elements in, a PAIR out.
+
+    kind is 0, 1 or 2 for the product of the elements, of their
+    pairwise sums, and of their pairwise differences. Returns
+    (one-element bytes, int scale, flag word); scaleB(pr, scale) is the
+    product, and pr is always in +-[1, 2) so the operation cannot
+    overflow or underflow.
+    """
+    d = ctypes.create_string_buffer(esz)
+    scale = ctypes.c_int64(0)
+    flags = ctypes.c_uint32(0)
+    name = ("cft_scaled_prod", "cft_scaled_prod_sum",
+            "cft_scaled_prod_diff")[kind]
+    fn = getattr(lib(), name)
+    if kind == 0:
+        st = fn(handle, fmt, rnd, a, d, ctypes.byref(scale), n,
+                ctypes.byref(flags))
+    else:
+        st = fn(handle, fmt, rnd, a, b, d, ctypes.byref(scale), n,
+                ctypes.byref(flags))
+    check(st, name)
+    return d.raw, scale.value, flags.value
+
+
 def div(handle, fmt, rnd, a, b, n, esz):
     d = ctypes.create_string_buffer(n * esz)
     flags = ctypes.c_uint32(0)
@@ -397,28 +490,140 @@ def sqrt(handle, fmt, rnd, a, n, esz):
 # ABI 0.5's nine complete the elementary set: sin, cos and tan of a
 # RADIAN argument, reduced against pi inside the library at any
 # magnitude, and the six hyperbolics.
+
+
+# ---- character sequences (5.12) and NaN payloads (9.7) ---------------
+#
+# Part of the 0.6 step. The from_ conversions are batches like every
+# other call here; the to_ conversions are per element and use the
+# library's two-call sizing protocol, which these helpers absorb -
+# Python has a growable string, so a caller should never see it.
+
+def from_char(handle, fmt, rnd, seqs, esz, hex_form=False):
+    """cft_from_decimal_char / cft_from_hex_char over a list of str.
+    Returns (encoding bytes, flag word). A sequence outside 5.12's
+    syntax raises CftError naming which one it was, because a caller
+    reading a file of numbers needs the line and not just the
+    verdict."""
+    n = len(seqs)
+    arr = (ctypes.c_char_p * max(n, 1))(*[s.encode("ascii") for s in seqs])
+    d = ctypes.create_string_buffer(max(n, 1) * esz)
+    flags = ctypes.c_uint32(0)
+    bad = ctypes.c_size_t(0)
+    fn = (lib().cft_from_hex_char if hex_form
+          else lib().cft_from_decimal_char)
+    st = fn(handle, fmt, rnd, arr, d, n, ctypes.byref(bad),
+            ctypes.byref(flags))
+    if st != 0:
+        where = ("cft_from_hex_char" if hex_form
+                 else "cft_from_decimal_char")
+        if bad.value < n:
+            s = seqs[bad.value]
+            where += (" on sequence %d %r"
+                      % (bad.value, s if len(s) <= 60 else s[:60] + "..."))
+        check(st, where)
+    return d.raw[:n * esz], flags.value
+
+
+def to_char(handle, fmt, rnd, enc, digits=0, hex_form=False):
+    """cft_to_decimal_char / cft_to_hex_char for ONE encoding, sized by
+    the library. Returns (str, flag word)."""
+    need = ctypes.c_size_t(0)
+    flags = ctypes.c_uint32(0)
+    L = lib()
+    if hex_form:
+        st = L.cft_to_hex_char(handle, fmt, enc, None, 0,
+                               ctypes.byref(need))
+    else:
+        st = L.cft_to_decimal_char(handle, fmt, rnd, enc, digits, None, 0,
+                                   ctypes.byref(need), ctypes.byref(flags))
+    if need.value == 0:                  # a real argument error, not a size
+        check(st, "cft_to_hex_char" if hex_form else "cft_to_decimal_char")
+    buf = ctypes.create_string_buffer(need.value)
+    if hex_form:
+        st = L.cft_to_hex_char(handle, fmt, enc, buf, need.value,
+                               ctypes.byref(need))
+    else:
+        st = L.cft_to_decimal_char(handle, fmt, rnd, enc, digits, buf,
+                                   need.value, ctypes.byref(need),
+                                   ctypes.byref(flags))
+    check(st, "cft_to_hex_char" if hex_form else "cft_to_decimal_char")
+    return buf.value.decode("ascii"), flags.value
+
+
+def payload_op(handle, name, fmt, enc, n, esz):
+    """One of the three 9.7 operations. They signal no exceptions, so
+    there is no flag word to return and none is invented."""
+    d = ctypes.create_string_buffer(n * esz)
+    check(getattr(lib(), "cft_" + name)(handle, fmt, enc, d, n),
+          "cft_" + name)
+    return d.raw[:n * esz]
+
+
+def decimal_digits(fmt):
+    """Pmin(fmt) from 5.12.2 - the digit count at which the decimal
+    round trip is guaranteed. The LIBRARY's answer, not a table here."""
+    return lib().cft_format_decimal_digits(fmt)
 # ---------------------------------------------------------------------
 
 TRANSCEND_UNARY = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
                    "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
                    "asinpi", "acospi", "atanpi",
                    "sin", "cos", "tan", "sinh", "cosh", "tanh",
-                   "asinh", "acosh", "atanh")
-TRANSCEND_BINARY = ("pow", "hypot", "atan2", "atan2pi")
-TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY
+                   "asinh", "acosh", "atanh",
+                   "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1",
+                   "rsqrt")
+TRANSCEND_BINARY = ("pow", "hypot", "atan2", "atan2pi", "powr")
+#: The three that read an INTEGER exponent per element rather than a
+#: second encoding - 9.2.1's "finite integral value in integralFormat".
+TRANSCEND_INT = ("pown", "compound", "rootn")
+TRANSCEND = TRANSCEND_UNARY + TRANSCEND_BINARY + TRANSCEND_INT
 
 
-def transcend(handle, name, fmt, rnd, a, b, n, esz):
-    """One of the twenty-nine, over n elements. b is None for the unary
-    twenty-five. Returns (result bytes, flag word)."""
+def transcend(handle, name, fmt, rnd, a, b, n, esz, ns=None):
+    """One of the thirty-nine, over n elements. b is None for the unary
+    ones; ns is the integer exponent sequence for pown, compound and
+    rootn and is None for every other. Returns (bytes, flag word)."""
     if name not in TRANSCEND:
         raise ValueError(f"unknown transcendental {name!r}")
     d = ctypes.create_string_buffer(n * esz)
     flags = ctypes.c_uint32(0)
     fn = getattr(lib(), "cft_" + name)
-    if name in TRANSCEND_BINARY:
+    if name in TRANSCEND_INT:
+        if ns is None:
+            raise ValueError(f"{name} needs an integer exponent per element")
+        arr = (ctypes.c_int64 * n)(*ns)
+        st = fn(handle, fmt, rnd, a, arr, d, n, ctypes.byref(flags))
+    elif name in TRANSCEND_BINARY:
         st = fn(handle, fmt, rnd, a, b, d, n, ctypes.byref(flags))
     else:
         st = fn(handle, fmt, rnd, a, d, n, ctypes.byref(flags))
     check(st, "cft_" + name)
     return d.raw, flags.value
+
+
+# ---------------------------------------------------------------------
+# The augmented arithmetic operations, 754-2019 clause 9.5.
+#
+# Two results per element - the operation rounded, and the error that
+# rounding made - and no rounding attribute, because 9.5 fixes the
+# rounding to roundTiesTowardZero and gives the operations no argument
+# to carry one. Note the missing `rnd` parameter below: it is not an
+# oversight and it is not a default, it is the standard.
+# ---------------------------------------------------------------------
+
+AUGMENTED = ("add", "sub", "mul")
+
+
+def augmented(handle, name, fmt, a, b, n, esz):
+    """One augmented operation over n elements. Returns
+    (r bytes, e bytes, flag word)."""
+    if name not in AUGMENTED:
+        raise ValueError(f"unknown augmented operation {name!r}")
+    r = ctypes.create_string_buffer(n * esz)
+    e = ctypes.create_string_buffer(n * esz)
+    flags = ctypes.c_uint32(0)
+    fn = getattr(lib(), "cft_augmented_" + name)
+    check(fn(handle, fmt, a, b, r, e, n, ctypes.byref(flags)),
+          "cft_augmented_" + name)
+    return r.raw, e.raw, flags.value

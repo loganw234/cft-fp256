@@ -382,8 +382,8 @@ def test_hypot_scaled_triples_stay_exact(fmt):
 # 3. The brute-force enclosure - no schedule, no screens, no shortcuts
 # =====================================================================
 
-def _brute_enclosure(fmt, fn, xa, xb, prec):
-    """f(x[,y]) as an interval at `prec` bits, built from scratch."""
+def _brute_enclosure(fmt, fn, xa, xb, prec, nn=0):
+    """f(x[,y][,n]) as an interval at `prec` bits, built from scratch."""
     from mpmath import iv
     saved = iv.prec
     try:
@@ -444,8 +444,35 @@ def _brute_enclosure(fmt, fn, xa, xb, prec):
             return iv.log(x + iv.sqrt(x * x - one))
         if fn == "atanh":
             return iv.log((one + x) / (one - x)) / 2
+        # Table 9.1's remainder, in the naive forms again - 1 + x
+        # formed outright, 10^x - 1 as a difference, x^(1/n) as
+        # exp(log x / n) - which share nothing with either
+        # implementation and which four times the cap can afford.
+        if fn == "exp2m1":
+            return iv.power(2, x) - one
+        if fn == "exp10":
+            return iv.power(10, x)
+        if fn == "exp10m1":
+            return iv.power(10, x) - one
+        if fn == "log2p1":
+            return iv.log(one + x) / iv.log(2)
+        if fn == "log10p1":
+            return iv.log(one + x) / iv.log(10)
+        if fn == "rsqrt":
+            return one / iv.sqrt(x)
+        if fn in ("pown", "rootn", "compound"):
+            u = unpack(fmt, xa)
+            neg = bool(u.sign) and (nn % 2 != 0)
+            if fn == "compound":
+                return iv.power(one + x, nn)
+            ax = -x if u.sign else x
+            if fn == "pown":
+                r = iv.power(ax, nn)
+            else:
+                r = ax if nn == 1 else iv.exp(iv.log(ax) / nn)
+            return -r if neg else r
         y = val(xb)
-        if fn == "pow":
+        if fn in ("pow", "powr"):
             return iv.power(x, y)
         if fn in ("atan2", "atan2pi"):
             a = iv.atan2(x, y)
@@ -453,6 +480,24 @@ def _brute_enclosure(fmt, fn, xa, xb, prec):
         return iv.sqrt(x * x + y * y)
     finally:
         iv.prec = saved
+
+
+#: The integer exponents the structural sweeps below try. Small
+#: enough to keep the sweeps sweeps, and chosen so that each of pown,
+#: compound and rootn meets both an exact case and an inexact one.
+_SWEEP_NS = (1, 2, 3, -1, -2, 5)
+
+
+def _sweep_cases(fn, pool, k):
+    """(xa, xb, n) for one function over a pool, k operands wide for the
+    binary ones. The integer-exponent three read their second operand
+    from _SWEEP_NS rather than from the pool, which is the whole
+    difference 9.2.1's "integral value in integralFormat" makes."""
+    if tr.TRANSCEND_INTARG[fn]:
+        return [(a, 0, n) for a in pool for n in _SWEEP_NS]
+    if tr.TRANSCEND_ARITY[fn] == 1:
+        return [(a, 0, 0) for a in pool]
+    return [(a, b, 0) for a in pool[:k] for b in pool[:k]]
 
 
 def _decide(fmt, enc, rnd):
@@ -493,12 +538,9 @@ def test_brute_force_enclosure_agrees(fmt, rnd):
     decided = undecided = 0
     deep = 2 * tr.prec_cap(fmt)
     for fn in tr.TRANSCEND_FNS:
-        arity = tr.TRANSCEND_ARITY[fn]
-        pairs = ([(a, 0) for a in pool] if arity == 1
-                 else [(a, b) for a in pool[:9] for b in pool[:9]])
-        for xa, xb in pairs:
+        for xa, xb, nn in _sweep_cases(fn, pool, 9):
             before = tr.STATS["neighbour"]
-            got = tr.compute(fmt, fn, xa, xb, rnd)
+            got = tr.compute(fmt, fn, xa, xb, rnd, nn)
             # Only the ordinary middle. A result the screens delivered
             # is one whose true value is astronomically outside the
             # format, and asking an interval library for
@@ -518,7 +560,7 @@ def test_brute_force_enclosure_agrees(fmt, rnd):
             u = unpack(fmt, got[0])
             if u.kind in (sf.INF, sf.NAN, sf.ZERO):
                 continue
-            enc = _brute_enclosure(fmt, fn, xa, xb, deep)
+            enc = _brute_enclosure(fmt, fn, xa, xb, deep, nn)
             want = _decide(fmt, enc, rnd)
             if want is None:
                 undecided += 1
@@ -561,6 +603,7 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
 
         a = conv(xa)
         table = {"exp": gmpy2.exp, "expm1": gmpy2.expm1,
+                 "exp10": gmpy2.exp10, "rsqrt": gmpy2.rec_sqrt,
                  "exp2": gmpy2.exp2, "log": gmpy2.log,
                  "log1p": gmpy2.log1p, "log2": gmpy2.log2,
                  "log10": gmpy2.log10, "asin": gmpy2.asin,
@@ -571,6 +614,8 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
                  "acosh": gmpy2.acosh, "atanh": gmpy2.atanh}
         if fn in table:
             v = table[fn](a)
+        elif fn == "rootn":
+            v = gmpy2.rootn(a, xb)          # xb carries n here
         elif fn == "pow":
             v = a ** conv(xb)
         elif fn == "atan2":
@@ -598,10 +643,21 @@ def _mpfr_round(fmt, fn, rnd, xa, xb):
 #: entry points directly, and here only against the brute-force
 #: enclosure above. Claiming an MPFR comparison this file cannot make
 #: would be worse than naming the gap.
+#:
+#: Of table 9.1's remaining ten, gmpy2 2.2.1 binds three: exp10,
+#: rec_sqrt and rootn (the last only for a NON-NEGATIVE n, since it
+#: goes to mpfr_rootn_ui). exp2m1, exp10m1, log2p1, log10p1, powr,
+#: pown and compound exist in MPFR 4.2.2 and are checked there, by
+#: host/tools/mpfr_check.c calling the C entry points directly - naming
+#: the gap is better than claiming a comparison this file cannot make.
+#:
+#: rec_sqrt is on the list with ONE case held back: MPFR delivers +inf
+#: for rSqrt(-0) where 754-2019 9.2.1 asks for -inf, so that row is
+#: pinned against the standard in the special-value tests instead.
 MPFR_BOUND = ("exp", "expm1", "exp2", "log", "log1p", "log2", "log10",
               "pow", "hypot", "asin", "acos", "atan", "atan2",
               "sin", "cos", "tan", "sinh", "cosh", "tanh",
-              "asinh", "acosh", "atanh")
+              "asinh", "acosh", "atanh", "exp10", "rsqrt")
 
 
 @pytest.mark.parametrize("fmt", ALL)
@@ -614,16 +670,31 @@ def test_mpfr_parity(fmt, rnd):
     instead of claiming a native comparison.)"""
     pool = _brute_pool(fmt)
     checked = 0
+    negzero = zero_bits(fmt, 1)
     for fn in MPFR_BOUND:
         arity = tr.TRANSCEND_ARITY[fn]
         pairs = ([(a, 0) for a in pool] if arity == 1
                  else [(a, b) for a in pool[:8] for b in pool[:8]])
         for xa, xb in pairs:
+            if fn == "rsqrt" and xa == negzero:
+                continue                # MPFR says +inf, 9.2.1 says -inf
             got = tr.compute(fmt, fn, xa, xb, rnd)[0]
             want = _mpfr_round(fmt, fn, rnd, xa, xb)
             checked += 1
             assert got == want, (fmt.name, fn, RND_NAMES[rnd], hex(xa),
                                  hex(xb), hex(got), hex(want))
+    # rootn against mpfr_rootn_ui, which is a different MPFR entry point
+    # from anything above and the only external check this file can make
+    # on an integer exponent.
+    for n in (1, 2, 3, 5, 8):
+        for xa in pool:
+            if unpack(fmt, xa).sign:
+                continue                # rootn_ui refuses a negative base
+            got = tr.compute(fmt, "rootn", xa, 0, rnd, n)[0]
+            want = _mpfr_round(fmt, "rootn", rnd, xa, n)
+            checked += 1
+            assert got == want, (fmt.name, "rootn", n, RND_NAMES[rnd],
+                                 hex(xa), hex(got), hex(want))
     assert checked > 200
 
 
@@ -640,12 +711,9 @@ def test_directed_attributes_bracket_and_are_tight(fmt):
     pool = _brute_pool(fmt)
     seen = 0
     for fn in tr.TRANSCEND_FNS:
-        arity = tr.TRANSCEND_ARITY[fn]
-        pairs = ([(a, 0) for a in pool] if arity == 1
-                 else [(a, b) for a in pool[:7] for b in pool[:7]])
-        for xa, xb in pairs:
-            dn, fdn = tr.compute(fmt, fn, xa, xb, RND_RDN)
-            up, fup = tr.compute(fmt, fn, xa, xb, RND_RUP)
+        for xa, xb, nn in _sweep_cases(fn, pool, 7):
+            dn, fdn = tr.compute(fmt, fn, xa, xb, RND_RDN, nn)
+            up, fup = tr.compute(fmt, fn, xa, xb, RND_RUP, nn)
             if sf.is_nan(fmt, dn) or sf.is_nan(fmt, up):
                 continue
             if not (fdn & FLAG_INEXACT):
@@ -655,7 +723,7 @@ def test_directed_attributes_bracket_and_are_tight(fmt):
                     unpack(fmt, up).kind == sf.INF:
                 continue
             assert next_up(fmt, dn)[0] == up, \
-                (fn, hex(xa), hex(xb), hex(dn), hex(up))
+                (fn, hex(xa), hex(xb), nn, hex(dn), hex(up))
             seen += 1
     assert seen > 100, seen
 
@@ -666,14 +734,11 @@ def test_exactness_is_the_same_in_every_attribute(fmt):
     the rounding attribute. A tolerance-based test would fail this."""
     pool = _brute_pool(fmt)
     for fn in tr.TRANSCEND_FNS:
-        arity = tr.TRANSCEND_ARITY[fn]
-        pairs = ([(a, 0) for a in pool] if arity == 1
-                 else [(a, b) for a in pool[:8] for b in pool[:8]])
-        for xa, xb in pairs:
-            flags = [tr.compute(fmt, fn, xa, xb, r)[1] & FLAG_INEXACT
+        for xa, xb, nn in _sweep_cases(fn, pool, 8):
+            flags = [tr.compute(fmt, fn, xa, xb, r, nn)[1] & FLAG_INEXACT
                      for r in RND_MODES]
             assert len(set(flags)) == 1, (fmt.name, fn, hex(xa), hex(xb),
-                                          flags)
+                                          nn, flags)
 
 
 def test_escalation_is_instrumented_and_shallow():
@@ -1415,8 +1480,569 @@ def test_the_eleven_are_registered_and_named_once():
     """One canonical order in three languages. The vector sets, the C
     enum and this tuple index each other, so a name added in one place
     and not the others is a silent renumbering."""
-    assert len(tr.TRANSCEND_FNS) == 29
+    assert len(tr.TRANSCEND_FNS) == 39
     assert tr.TRANSCEND_FNS[9:20] == TRIG
     for fn in TRIG:
         assert fn in tr.TRANSCEND_IMPL
         assert tr.TRANSCEND_ARITY[fn] == (2 if fn.startswith("atan2") else 1)
+
+
+# =====================================================================
+# Table 9.1, completed: exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt,
+# pown, powr, compound and rootn
+#
+# The same four arbiters as everything above: 9.2.1's rows written out
+# as literal encodings, exactness proved both ways by exact integer
+# arithmetic, the brute-force enclosure (which the sweeps already reach
+# through _sweep_cases), and MPFR where gmpy2 binds it. What is new is
+# the number of rows: these ten carry more special values between them
+# than the twenty-nine before them, and three of them read an INTEGER
+# operand whose sign and parity decide the answer.
+# =====================================================================
+
+TABLE91 = ("exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt",
+           "pown", "powr", "compound", "rootn")
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_exp2m1_exp10_exp10m1_specials(fmt, rnd):
+    """9.2.1: for expm1, exp2m1 and exp10m1, f(+0) is +0 and f(-0) is
+    -0; f(+inf) is +inf and f(-inf) is -1. For exp, exp2 and exp10,
+    f(+-0) is +1, f(+inf) is +inf and f(-inf) is +0."""
+    for fn in ("exp2m1", "exp10m1"):
+        assert tr.compute(fmt, fn, zero_bits(fmt), 0, rnd) == \
+            (zero_bits(fmt), 0)
+        assert tr.compute(fmt, fn, zero_bits(fmt, 1), 0, rnd) == \
+            (zero_bits(fmt, 1), 0)
+        assert tr.compute(fmt, fn, inf_bits(fmt), 0, rnd) == \
+            (inf_bits(fmt), 0)
+        assert tr.compute(fmt, fn, inf_bits(fmt, 1), 0, rnd) == \
+            (one_bits(fmt, 1), 0)
+        assert tr.compute(fmt, fn, qnan_bits(fmt), 0, rnd) == \
+            (qnan_bits(fmt), 0)
+        assert tr.compute(fmt, fn, snan_bits(fmt), 0, rnd) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "exp10", zero_bits(fmt), 0, rnd) == \
+        (one_bits(fmt), 0)
+    assert tr.compute(fmt, "exp10", zero_bits(fmt, 1), 0, rnd) == \
+        (one_bits(fmt), 0)
+    assert tr.compute(fmt, "exp10", inf_bits(fmt), 0, rnd) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "exp10", inf_bits(fmt, 1), 0, rnd) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "exp10", snan_bits(fmt), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+@pytest.mark.parametrize("fn", ("log2p1", "log10p1"))
+def test_logp1_other_bases_specials(fmt, rnd, fn):
+    """9.2.1: f(+0) is +0, f(-0) is -0, f(-1) is -infinity with
+    divideByZero, f(+inf) is +inf - and an operand below -1, -infinity
+    included, is outside the domain."""
+    assert tr.compute(fmt, fn, zero_bits(fmt), 0, rnd) == (zero_bits(fmt), 0)
+    assert tr.compute(fmt, fn, zero_bits(fmt, 1), 0, rnd) == \
+        (zero_bits(fmt, 1), 0)
+    assert tr.compute(fmt, fn, one_bits(fmt, 1), 0, rnd) == \
+        (inf_bits(fmt, 1), FLAG_DIVZERO)
+    assert tr.compute(fmt, fn, inf_bits(fmt), 0, rnd) == (inf_bits(fmt), 0)
+    assert tr.compute(fmt, fn, inf_bits(fmt, 1), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, fn, V(fmt, 1, 3, -1), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, fn, max_normal_bits(fmt, 1), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, fn, qnan_bits(fmt), 0, rnd) == (qnan_bits(fmt), 0)
+    assert tr.compute(fmt, fn, snan_bits(fmt), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_rsqrt_specials(fmt, rnd):
+    """9.2.1: rSqrt(+inf) is +0 with no exception; rSqrt(+-0) is +-INF
+    and signals divideByZero. The sign of the zero SURVIVES, and that is
+    the row GNU MPFR does not keep - mpfr_rec_sqrt returns +inf for both
+    zeros (measured on 4.2.2). The standard says +-inf; this is the
+    standard."""
+    assert tr.compute(fmt, "rsqrt", zero_bits(fmt), 0, rnd) == \
+        (inf_bits(fmt), FLAG_DIVZERO)
+    assert tr.compute(fmt, "rsqrt", zero_bits(fmt, 1), 0, rnd) == \
+        (inf_bits(fmt, 1), FLAG_DIVZERO)
+    assert tr.compute(fmt, "rsqrt", inf_bits(fmt), 0, rnd) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "rsqrt", inf_bits(fmt, 1), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rsqrt", one_bits(fmt, 1), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rsqrt", min_subnormal_bits(fmt, 1), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rsqrt", qnan_bits(fmt), 0, rnd) == \
+        (qnan_bits(fmt), 0)
+    assert tr.compute(fmt, "rsqrt", snan_bits(fmt), 0, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_pown_specials(fmt, rnd):
+    """9.2.1's pown table, every row. pown(x, 0) is 1 for any x that is
+    not a signaling NaN - an infinity and a quiet NaN included - and the
+    zero and infinity rows split on the PARITY of n."""
+    for x in (zero_bits(fmt), zero_bits(fmt, 1), inf_bits(fmt),
+              inf_bits(fmt, 1), qnan_bits(fmt), one_bits(fmt, 1),
+              max_normal_bits(fmt, 1)):
+        assert tr.compute(fmt, "pown", x, 0, rnd, 0) == (one_bits(fmt), 0)
+    assert tr.compute(fmt, "pown", snan_bits(fmt), 0, rnd, 0) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "pown", qnan_bits(fmt), 0, rnd, 3) == \
+        (qnan_bits(fmt), 0)
+
+    for z, s in ((zero_bits(fmt), 0), (zero_bits(fmt, 1), 1)):
+        assert tr.compute(fmt, "pown", z, 0, rnd, -3) == \
+            (inf_bits(fmt, s), FLAG_DIVZERO)
+        assert tr.compute(fmt, "pown", z, 0, rnd, -2) == \
+            (inf_bits(fmt), FLAG_DIVZERO)
+        assert tr.compute(fmt, "pown", z, 0, rnd, 3) == (zero_bits(fmt, s), 0)
+        assert tr.compute(fmt, "pown", z, 0, rnd, 2) == (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "pown", inf_bits(fmt), 0, rnd, 3) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "pown", inf_bits(fmt, 1), 0, rnd, 3) == \
+        (inf_bits(fmt, 1), 0)
+    assert tr.compute(fmt, "pown", inf_bits(fmt, 1), 0, rnd, 2) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "pown", inf_bits(fmt), 0, rnd, -3) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "pown", inf_bits(fmt, 1), 0, rnd, -3) == \
+        (zero_bits(fmt, 1), 0)
+    assert tr.compute(fmt, "pown", inf_bits(fmt, 1), 0, rnd, -2) == \
+        (zero_bits(fmt), 0)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_powr_specials(fmt, rnd):
+    """9.2.1's powr table, and the rows where powr is NOT pow are the
+    point of the test: a negative base is invalid for every exponent, a
+    quiet NaN outranks nothing, and three combinations that pow answers
+    with 1 are invalid here."""
+    two = V(fmt, 0, 1, 1)
+    half = V(fmt, 0, 1, -1)
+    # x < 0 is a domain error for every y, a NaN included
+    for y in (two, zero_bits(fmt), inf_bits(fmt), qnan_bits(fmt),
+              one_bits(fmt)):
+        assert tr.compute(fmt, "powr", one_bits(fmt, 1), y, rnd) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+        assert tr.compute(fmt, "powr", inf_bits(fmt, 1), y, rnd) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+    # the three invalid corners
+    for z in (zero_bits(fmt), zero_bits(fmt, 1)):
+        for w in (zero_bits(fmt), zero_bits(fmt, 1)):
+            assert tr.compute(fmt, "powr", z, w, rnd) == \
+                (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "powr", inf_bits(fmt), zero_bits(fmt), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "powr", inf_bits(fmt), zero_bits(fmt, 1),
+                      rnd) == (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "powr", one_bits(fmt), inf_bits(fmt), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "powr", one_bits(fmt), inf_bits(fmt, 1), rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    # a quiet NaN in either operand is a quiet NaN - NOT 1, which is
+    # what pow answers for the same pair
+    assert tr.compute(fmt, "powr", qnan_bits(fmt), zero_bits(fmt), rnd) == \
+        (qnan_bits(fmt), 0)
+    assert tr.compute(fmt, "pow", qnan_bits(fmt), zero_bits(fmt), rnd) == \
+        (one_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", one_bits(fmt), qnan_bits(fmt), rnd) == \
+        (qnan_bits(fmt), 0)
+    assert tr.compute(fmt, "pow", one_bits(fmt), qnan_bits(fmt), rnd) == \
+        (one_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", snan_bits(fmt), two, rnd) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    # the zero rows: +inf with divideByZero for a FINITE negative y,
+    # +inf and silent for -infinity
+    for z in (zero_bits(fmt), zero_bits(fmt, 1)):
+        assert tr.compute(fmt, "powr", z, V(fmt, 1, 3, 0), rnd) == \
+            (inf_bits(fmt), FLAG_DIVZERO)
+        assert tr.compute(fmt, "powr", z, inf_bits(fmt, 1), rnd) == \
+            (inf_bits(fmt), 0)
+        assert tr.compute(fmt, "powr", z, two, rnd) == (zero_bits(fmt), 0)
+        assert tr.compute(fmt, "powr", z, inf_bits(fmt), rnd) == \
+            (zero_bits(fmt), 0)
+    # 1 and the infinite base and exponent rows
+    assert tr.compute(fmt, "powr", one_bits(fmt), two, rnd) == \
+        (one_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", two, zero_bits(fmt), rnd) == \
+        (one_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", inf_bits(fmt), two, rnd) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", inf_bits(fmt), V(fmt, 1, 1, 1), rnd) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", two, inf_bits(fmt), rnd) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", half, inf_bits(fmt), rnd) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", two, inf_bits(fmt, 1), rnd) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "powr", half, inf_bits(fmt, 1), rnd) == \
+        (inf_bits(fmt), 0)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_compound_specials(fmt, rnd):
+    """9.2.1's compound table. The row an implementation is most likely
+    to get wrong is the first: compound(x, 0) is 1 "for x >= -1 or quiet
+    NaN", which makes compound of an x BELOW -1 with n = 0 invalid
+    rather than 1 - and MPFR 4.2.2 agrees."""
+    for x in (V(fmt, 0, 3, 0), zero_bits(fmt), zero_bits(fmt, 1),
+              one_bits(fmt, 1), inf_bits(fmt), qnan_bits(fmt)):
+        assert tr.compute(fmt, "compound", x, 0, rnd, 0) == (one_bits(fmt), 0)
+    for x in (V(fmt, 1, 3, 0), inf_bits(fmt, 1), max_normal_bits(fmt, 1),
+              V(fmt, 1, 3, -1)):
+        assert tr.compute(fmt, "compound", x, 0, rnd, 0) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "compound", snan_bits(fmt), 0, rnd, 0) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "compound", qnan_bits(fmt), 0, rnd, 3) == \
+        (qnan_bits(fmt), 0)
+    for x in (V(fmt, 1, 3, 0), inf_bits(fmt, 1)):
+        assert tr.compute(fmt, "compound", x, 0, rnd, 3) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "compound", one_bits(fmt, 1), 0, rnd, -3) == \
+        (inf_bits(fmt), FLAG_DIVZERO)
+    assert tr.compute(fmt, "compound", one_bits(fmt, 1), 0, rnd, 3) == \
+        (zero_bits(fmt), 0)
+    for z in (zero_bits(fmt), zero_bits(fmt, 1)):
+        assert tr.compute(fmt, "compound", z, 0, rnd, 5) == (one_bits(fmt), 0)
+        assert tr.compute(fmt, "compound", z, 0, rnd, -5) == \
+            (one_bits(fmt), 0)
+    assert tr.compute(fmt, "compound", inf_bits(fmt), 0, rnd, 3) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "compound", inf_bits(fmt), 0, rnd, -3) == \
+        (zero_bits(fmt), 0)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_rootn_specials(fmt, rnd):
+    """9.2.1's rootn table. n = 0 is outside the domain for EVERY x, a
+    quiet NaN included; a negative base with an even n is invalid; and
+    the zero and infinity rows split on the parity of n."""
+    for x in (V(fmt, 0, 4, 0), zero_bits(fmt), inf_bits(fmt),
+              inf_bits(fmt, 1), qnan_bits(fmt), one_bits(fmt, 1)):
+        assert tr.compute(fmt, "rootn", x, 0, rnd, 0) == \
+            (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rootn", snan_bits(fmt), 0, rnd, 3) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rootn", qnan_bits(fmt), 0, rnd, 3) == \
+        (qnan_bits(fmt), 0)
+    for z, s in ((zero_bits(fmt), 0), (zero_bits(fmt, 1), 1)):
+        assert tr.compute(fmt, "rootn", z, 0, rnd, -3) == \
+            (inf_bits(fmt, s), FLAG_DIVZERO)
+        assert tr.compute(fmt, "rootn", z, 0, rnd, -2) == \
+            (inf_bits(fmt), FLAG_DIVZERO)
+        assert tr.compute(fmt, "rootn", z, 0, rnd, 2) == (zero_bits(fmt), 0)
+        assert tr.compute(fmt, "rootn", z, 0, rnd, 3) == (zero_bits(fmt, s), 0)
+    assert tr.compute(fmt, "rootn", inf_bits(fmt), 0, rnd, 3) == \
+        (inf_bits(fmt), 0)
+    assert tr.compute(fmt, "rootn", inf_bits(fmt, 1), 0, rnd, 3) == \
+        (inf_bits(fmt, 1), 0)
+    assert tr.compute(fmt, "rootn", inf_bits(fmt, 1), 0, rnd, 2) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rootn", inf_bits(fmt), 0, rnd, -3) == \
+        (zero_bits(fmt), 0)
+    assert tr.compute(fmt, "rootn", inf_bits(fmt, 1), 0, rnd, -3) == \
+        (zero_bits(fmt, 1), 0)
+    assert tr.compute(fmt, "rootn", inf_bits(fmt, 1), 0, rnd, -2) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    assert tr.compute(fmt, "rootn", V(fmt, 1, 3, 0), 0, rnd, 2) == \
+        (qnan_bits(fmt), FLAG_INVALID)
+    # rootn(x, 1) is x, exactly and silently, for every x
+    for x in (V(fmt, 0, 3, 0), V(fmt, 1, 3, 0), min_subnormal_bits(fmt),
+              max_normal_bits(fmt, 1)):
+        assert tr.compute(fmt, "rootn", x, 0, rnd, 1) == (x, 0)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_rootn_two_is_square_root_except_at_minus_zero(fmt, rnd):
+    """rootn(x, 2) is squareRoot(x) on every operand but one, and the
+    exception is the standard's own NOTE: rootn(-0, 2) is +0 by the
+    "rootn(+-0, n) is +0 for even n > 0" row, where squareRoot(-0) is
+    -0. Asserting the difference is a stronger test than skipping the
+    case."""
+    pool = _brute_pool(fmt) + [zero_bits(fmt), zero_bits(fmt, 1),
+                               inf_bits(fmt), inf_bits(fmt, 1),
+                               qnan_bits(fmt), V(fmt, 0, 4, 0),
+                               V(fmt, 0, 9, 0), V(fmt, 0, 2, 0)]
+    for x in pool:
+        got = tr.compute(fmt, "rootn", x, 0, rnd, 2)
+        want = sf.sqrt(fmt, x, rnd)
+        if x == zero_bits(fmt, 1):
+            assert got == (zero_bits(fmt), 0)
+            assert want == (zero_bits(fmt, 1), 0)
+        else:
+            assert got == want, (fmt.name, RND_NAMES[rnd], hex(x), got, want)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_exp2m1_exact_on_every_integer(fmt, rnd):
+    """2^n - 1 is a dyadic rational for EVERY integer n, and a rounding
+    boundary of a p-bit format exactly while |n| <= p+1. Inside that
+    range the answer is exact arithmetic; outside it the value is still
+    known exactly and is delivered by a SIDE."""
+    p = fmt.prec
+    for n in list(range(1, 13)) + [p - 2, p - 1, p]:
+        want = (1 << n) - 1
+        bits, fl = sf.round_pack(fmt, 0, want, 0, RND_RNE)
+        assert fl == 0
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, rnd) == \
+            (bits, 0)
+        # and the negative side: -(1 - 2^-n), exact while n <= p+1
+        bits, fl = sf.round_pack(fmt, 1, (1 << n) - 1, -n, RND_RNE)
+        assert fl == 0, n
+        assert tr.compute(fmt, "exp2m1", V(fmt, 1, n, 0), 0, rnd) == \
+            (bits, 0)
+    # n = p+1 is the LAST exact case, and it lands on a midpoint - which
+    # is exactly why it must be caught by exact arithmetic rather than
+    # by an enclosure that would never separate it from either side.
+    got, fl = tr.compute(fmt, "exp2m1", V(fmt, 0, p + 1, 0), 0, rnd)
+    want = sf.round_pack(fmt, 0, (1 << (p + 1)) - 1, 0, rnd)
+    assert (got, fl) == (want[0], want[1] | FLAG_INEXACT)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_exp2m1_beyond_the_exact_range_takes_a_side(fmt):
+    """For n >= p+2 the value 2^n - 1 sits in the top QUARTER of the gap
+    below 2^n: above the midpoint, so every attribute but the two that
+    point toward zero delivers 2^n itself."""
+    p = fmt.prec
+    for n in (p + 2, p + 5, 2 * p):
+        two_n = V(fmt, 0, 1, n)
+        below = next_down(fmt, two_n)[0]
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, RND_RNE) == \
+            (two_n, FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, RND_RUP) == \
+            (two_n, FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, RND_RMM) == \
+            (two_n, FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, RND_RTZ) == \
+            (below, FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", V(fmt, 0, n, 0), 0, RND_RDN) == \
+            (below, FLAG_INEXACT)
+        # and the mirror: -(1 - 2^-n) sits in the half gap above -1
+        toward = next_up(fmt, one_bits(fmt, 1))[0]
+        arg = V(fmt, 1, n, 0)
+        assert tr.compute(fmt, "exp2m1", arg, 0, RND_RNE) == \
+            (one_bits(fmt, 1), FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", arg, 0, RND_RTZ) == \
+            (toward, FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", arg, 0, RND_RUP) == \
+            (toward, FLAG_INEXACT)
+        assert tr.compute(fmt, "exp2m1", arg, 0, RND_RDN) == \
+            (one_bits(fmt, 1), FLAG_INEXACT)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_exp10_and_exp10m1_exact_on_the_powers_of_ten(fmt, rnd):
+    """10^n has odd part 5^n, so it is a rounding boundary exactly while
+    that fits in p+1 bits; 10^n - 1 is odd, so its own odd part is the
+    test. Both are decided by exact integer arithmetic, and both stop
+    being exact one step later."""
+    p = fmt.prec
+    n = 1
+    seen = 0
+    while (5 ** n).bit_length() <= p:
+        bits, fl = sf.round_pack(fmt, 0, 5 ** n, n, RND_RNE)
+        assert fl == 0
+        assert tr.compute(fmt, "exp10", V(fmt, 0, n, 0), 0, rnd) == (bits, 0)
+        if (10 ** n - 1).bit_length() <= p:
+            b2, f2 = sf.round_pack(fmt, 0, 10 ** n - 1, 0, RND_RNE)
+            assert f2 == 0
+            assert tr.compute(fmt, "exp10m1", V(fmt, 0, n, 0), 0, rnd) == \
+                (b2, 0)
+            seen += 1
+        n += 1
+    assert seen >= 4
+    # the first n whose 5^n needs more than p+1 bits is inexact, and a
+    # NEGATIVE integer never was: 10^-n is not a dyadic rational.
+    while (5 ** n).bit_length() <= p + 1:
+        n += 1
+    assert tr.compute(fmt, "exp10", V(fmt, 0, n, 0), 0, rnd)[1] & FLAG_INEXACT
+    assert tr.compute(fmt, "exp10", V(fmt, 1, 1, 0), 0, rnd)[1] & FLAG_INEXACT
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_log2p1_and_log10p1_exact_where_one_plus_x_is_a_power(fmt, rnd):
+    """log2(1+x) is rational only where 1 + x is a power of two and
+    log10(1+x) only where it is a power of ten - unique factorisation,
+    the same argument log2 and log10 carry. 1 + x is formed exactly on
+    the encoding, so x = -(1 - 2^-k) is caught as surely as x = 2^k - 1."""
+    p = fmt.prec
+    for k in list(range(1, 13)) + [p - 1, p]:
+        x = V(fmt, 0, (1 << k) - 1, 0)                   # 1 + x = 2^k
+        assert tr.compute(fmt, "log2p1", x, 0, rnd) == (V(fmt, 0, k, 0), 0)
+        x = V(fmt, 1, (1 << k) - 1, -k)                  # 1 + x = 2^-k
+        assert tr.compute(fmt, "log2p1", x, 0, rnd) == (V(fmt, 1, k, 0), 0)
+    n = 1
+    while (10 ** n - 1).bit_length() <= p:
+        x = V(fmt, 0, 10 ** n - 1, 0)                    # 1 + x = 10^n
+        assert tr.compute(fmt, "log10p1", x, 0, rnd) == (V(fmt, 0, n, 0), 0)
+        n += 1
+    assert n >= 5
+    # and one step off a power of two is not exact
+    x = V(fmt, 0, (1 << 8) - 1, 0)
+    assert tr.compute(fmt, "log2p1", x + 1, 0, rnd)[1] & FLAG_INEXACT
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_log2p1_of_a_power_of_two_takes_the_side(fmt):
+    """The one family in this set that no working precision can decide.
+    For x = 2^k the value is k + log2(1 + 2^-k) - an exponentially small
+    step above the integer k, which is a grid point - so the SIDE is the
+    whole answer, and it is a theorem rather than a measurement."""
+    p = fmt.prec
+    for k in (p + 4, 2 * p, min(4 * p, fmt.emax - 1)):
+        x = V(fmt, 0, 1, k)
+        kk = V(fmt, 0, k, 0)
+        up = next_up(fmt, kk)[0]
+        assert tr.compute(fmt, "log2p1", x, 0, RND_RNE) == (kk, FLAG_INEXACT)
+        assert tr.compute(fmt, "log2p1", x, 0, RND_RDN) == (kk, FLAG_INEXACT)
+        assert tr.compute(fmt, "log2p1", x, 0, RND_RTZ) == (kk, FLAG_INEXACT)
+        assert tr.compute(fmt, "log2p1", x, 0, RND_RMM) == (kk, FLAG_INEXACT)
+        assert tr.compute(fmt, "log2p1", x, 0, RND_RUP) == (up, FLAG_INEXACT)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_rsqrt_exact_exactly_on_the_even_powers_of_two(fmt, rnd):
+    """1/sqrt(M 2^E) is dyadic only when sqrt(M) is a power of two,
+    which for an odd M forces M = 1 - and then E must be even."""
+    for e in (-8, -4, -2, 0, 2, 4, 10):
+        assert tr.compute(fmt, "rsqrt", V(fmt, 0, 1, e), 0, rnd) == \
+            (V(fmt, 0, 1, -e // 2), 0)
+    for e in (-7, -3, -1, 1, 3, 9):
+        assert tr.compute(fmt, "rsqrt", V(fmt, 0, 1, e), 0, rnd)[1] \
+            & FLAG_INEXACT
+    for m in (3, 5, 9):
+        assert tr.compute(fmt, "rsqrt", V(fmt, 0, m, 0), 0, rnd)[1] \
+            & FLAG_INEXACT
+
+
+@pytest.mark.parametrize("fmt", ALL)
+@pytest.mark.parametrize("rnd", RND_MODES)
+def test_pown_compound_rootn_exact_cases(fmt, rnd):
+    """The three integer-exponent functions' exactness, decided by exact
+    integer arithmetic in both directions."""
+    p = fmt.prec
+    # pown: a power-of-two magnitude is a pure exponent shift at ANY n
+    assert tr.compute(fmt, "pown", V(fmt, 1, 1, 3), 0, rnd, 5) == \
+        (V(fmt, 1, 1, 15), 0)
+    assert tr.compute(fmt, "pown", V(fmt, 0, 1, 2), 0, rnd, -3) == \
+        (V(fmt, 0, 1, -6), 0)
+    # and any other odd part loses the race after p+1 multiplications
+    assert tr.compute(fmt, "pown", V(fmt, 0, 3, 0), 0, rnd, 4) == \
+        (V(fmt, 0, 81, 0), 0)
+    assert tr.compute(fmt, "pown", V(fmt, 1, 3, 0), 0, rnd, 3) == \
+        (V(fmt, 1, 27, 0), 0)
+    assert tr.compute(fmt, "pown", V(fmt, 0, 3, 0), 0, rnd, -3)[1] \
+        & FLAG_INEXACT
+    # compound: 1 + x exactly, then pown's procedure on it
+    assert tr.compute(fmt, "compound", V(fmt, 0, 3, 0), 0, rnd, 2) == \
+        (V(fmt, 0, 1, 4), 0)
+    assert tr.compute(fmt, "compound", V(fmt, 1, 1, -1), 0, rnd, 3) == \
+        (V(fmt, 0, 1, -3), 0)
+    assert tr.compute(fmt, "compound", V(fmt, 0, 1, -1), 0, rnd, 2) == \
+        (V(fmt, 0, 9, -2), 0)
+    # rootn: a perfect |n|-th power with |n| dividing the exponent
+    assert tr.compute(fmt, "rootn", V(fmt, 0, 1, 6), 0, rnd, 3) == \
+        (V(fmt, 0, 1, 2), 0)
+    assert tr.compute(fmt, "rootn", V(fmt, 1, 27, 0), 0, rnd, 3) == \
+        (V(fmt, 1, 3, 0), 0)
+    assert tr.compute(fmt, "rootn", V(fmt, 0, 81, 0), 0, rnd, 4) == \
+        (V(fmt, 0, 3, 0), 0)
+    assert tr.compute(fmt, "rootn", V(fmt, 0, 1, 6), 0, rnd, -3) == \
+        (V(fmt, 0, 1, -2), 0)
+    # 27 is a perfect cube but 5 does not divide the exponent 1, and
+    # 1/(odd > 1) is never a dyadic rational
+    assert tr.compute(fmt, "rootn", V(fmt, 0, 1, 5), 0, rnd, 3)[1] \
+        & FLAG_INEXACT
+    assert tr.compute(fmt, "rootn", V(fmt, 0, 27, 0), 0, rnd, -3)[1] \
+        & FLAG_INEXACT
+    assert p > 0
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_compound_of_a_dominant_operand_takes_the_side(fmt):
+    """compound(x, 1) for a large x is 1 + x, which sits one unit above
+    the grid point x whose ulp is astronomically larger - no working
+    precision separates them, so the side is the whole answer."""
+    p = fmt.prec
+    for k in (p + 6, 2 * p, fmt.emax - 2):
+        x = V(fmt, 0, 1, k)
+        up = next_up(fmt, x)[0]
+        assert tr.compute(fmt, "compound", x, 0, RND_RNE, 1) == \
+            (x, FLAG_INEXACT)
+        assert tr.compute(fmt, "compound", x, 0, RND_RTZ, 1) == \
+            (x, FLAG_INEXACT)
+        assert tr.compute(fmt, "compound", x, 0, RND_RUP, 1) == \
+            (up, FLAG_INEXACT)
+        # and a negative n puts it just BELOW the reciprocal grid point
+        y = V(fmt, 0, 1, -k)
+        dn = next_down(fmt, y)[0]
+        assert tr.compute(fmt, "compound", x, 0, RND_RNE, -1) == \
+            (y, FLAG_INEXACT)
+        assert tr.compute(fmt, "compound", x, 0, RND_RDN, -1) == \
+            (dn, FLAG_INEXACT)
+
+
+@pytest.mark.parametrize("fmt", ALL)
+def test_the_other_bases_get_no_tiny_neighbour_rule(fmt):
+    """The interesting half of the neighbour derivation. expm1 and
+    log1p of a tiny x are beside x; exp2m1, exp10m1, log2p1 and log10p1
+    are NOT, because their leading coefficient is not 1 - so the answer
+    is a different subnormal, or zero, and an implementation that reused
+    expm1's rule here would return x."""
+    sub = min_subnormal_bits(fmt)
+    two_sub = next_up(fmt, sub)[0]
+    UF = FLAG_INEXACT | FLAG_UNDERFLOW
+    # 2^x - 1 ~ 0.693 x: above half a subnormal, so it rounds UP to one
+    assert tr.compute(fmt, "exp2m1", sub, 0, RND_RNE) == (sub, UF)
+    assert tr.compute(fmt, "exp2m1", sub, 0, RND_RDN) == (zero_bits(fmt), UF)
+    # 10^x - 1 ~ 2.303 x: two subnormals, not one
+    assert tr.compute(fmt, "exp10m1", sub, 0, RND_RNE) == (two_sub, UF)
+    # log2(1+x) ~ 1.443 x: one subnormal to nearest, two upward
+    assert tr.compute(fmt, "log2p1", sub, 0, RND_RNE) == (sub, UF)
+    assert tr.compute(fmt, "log2p1", sub, 0, RND_RUP) == (two_sub, UF)
+    # log10(1+x) ~ 0.434 x: BELOW half a subnormal, so it rounds to zero
+    assert tr.compute(fmt, "log10p1", sub, 0, RND_RNE) == (zero_bits(fmt), UF)
+    assert tr.compute(fmt, "log10p1", sub, 0, RND_RUP) == (sub, UF)
+    # and exp10 of one IS beside 1, which is the rule that does apply
+    tiny = V(fmt, 0, 1, -(fmt.prec + 8))
+    assert tr.compute(fmt, "exp10", tiny, 0, RND_RDN) == \
+        (one_bits(fmt), FLAG_INEXACT)
+    assert tr.compute(fmt, "exp10", tiny, 0, RND_RUP) == \
+        (next_up(fmt, one_bits(fmt))[0], FLAG_INEXACT)
+
+
+def test_the_ten_are_registered_and_named_once():
+    """The canonical order again, extended. TRANSCEND_FNS, the C enum
+    and the vector sets index each other, so a name appended in one
+    place and not the others is a silent renumbering of every committed
+    set."""
+    assert len(tr.TRANSCEND_FNS) == 39
+    assert tr.TRANSCEND_FNS[29:] == TABLE91
+    for fn in TABLE91:
+        assert fn in tr.TRANSCEND_IMPL
+        assert tr.TRANSCEND_ARITY[fn] == (2 if fn == "powr" else 1)
+        assert tr.TRANSCEND_INTARG[fn] == \
+            (fn in ("pown", "compound", "rootn"))
+    for fn in tr.TRANSCEND_FNS[:29]:
+        assert not tr.TRANSCEND_INTARG[fn]

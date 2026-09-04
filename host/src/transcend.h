@@ -60,6 +60,22 @@ enum {
     CFT_TR_ASINH,
     CFT_TR_ACOSH,
     CFT_TR_ATANH,
+    /* the rest of 754-2019 table 9.1 (part of the 0.6 step): exp and
+     * log in two more bases, the reciprocal square root, and the four
+     * powers whose second operand is an INTEGER rather than a
+     * floating-point number. No new reduction and no new constant -
+     * what they add is a larger exact-case table each, and the proofs
+     * that close them are in docs/TRANSCENDENTALS.md. */
+    CFT_TR_EXP2M1,
+    CFT_TR_EXP10,
+    CFT_TR_EXP10M1,
+    CFT_TR_LOG2P1,
+    CFT_TR_LOG10P1,
+    CFT_TR_RSQRT,
+    CFT_TR_POWN,
+    CFT_TR_POWR,
+    CFT_TR_COMPOUND,
+    CFT_TR_ROOTN,
     CFT_TR_COUNT
 };
 
@@ -96,11 +112,22 @@ const char *cft_tr_name(int fn);
 int         cft_tr_from_name(const char *s);
 int         cft_tr_arity(int fn);
 
-/* The same twenty operations by index, so a replayer does not need a
- * twenty-way switch of its own. */
+/* Does this function read an INTEGER operand beside its floating one?
+ * pown, compound and rootn do, and 9.2.1 asks for exactly that - "n is
+ * a finite integral value in integralFormat" - so they take an int64_t
+ * array rather than a second encoding that would have to be asked
+ * whether it is integral. Arity above counts the FLOATING operands
+ * only, so it is 1 for all three. */
+int         cft_tr_has_int(int fn);
+
+/* The same operations by index, so a replayer does not need a
+ * switch of its own. `nn` is the integer operand array for the three
+ * functions cft_tr_has_int names and is ignored (and may be NULL) for
+ * every other. */
 cft_status cft_tr_apply(cft_device *dev, int fn, cft_format fmt,
                         cft_round rnd, const void *a, const void *b,
-                        void *d, size_t n, uint32_t *flags_out);
+                        const int64_t *nn, void *d, size_t n,
+                        uint32_t *flags_out);
 
 extern uint64_t cft_tr_calls;        /* elements evaluated */
 extern uint64_t cft_tr_ziv_calls;    /* elements that reached the loop */

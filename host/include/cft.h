@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 5   /* 0.5: the phase-3 radian trig and hyperbolics */
+#define CFT_ABI_VERSION_MINOR 6   /* 0.6: table 9.1 complete, 5.12, 9.4, 9.5, 9.7 */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -104,8 +104,13 @@ extern "C" {
  * the nine correctly-rounded transcendentals below; 0.4 added the
  * eleven trigonometric functions whose argument reduction is exact -
  * sinPi, cosPi, tanPi, asin, acos, atan, atan2 and the four Pi-forms
- * of the inverses. A caller that needs one of those checks the number
- * rather than the header it compiled against. */
+ * of the inverses; 0.5 added sin, cos and tan of a radian argument and
+ * the six hyperbolics; 0.6 added the rest of table 9.1 (exp2m1, exp10,
+ * exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn), the
+ * character conversions of 5.12 with 9.7's payload operations, the
+ * augmented arithmetic of 9.5 and the remaining reductions of 9.4. A
+ * caller that needs one of those checks the number rather than the
+ * header it compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
 /* ---------------------------------------------------------------
@@ -238,7 +243,26 @@ typedef enum cft_op {
      * hardware that nothing uses, because cft_div and cft_sqrt
      * pre-normalise before seeding. */
     CFT_RECIP_SEED = 26,   /* ~ 1/a   */
-    CFT_RSQRT_SEED = 27    /* ~ 1/sqrt(a) */
+    CFT_RSQRT_SEED = 27,   /* ~ 1/sqrt(a) */
+
+    /* The other two of clause 9.4's sum reductions, appended (never
+     * inserted, never renumbered - an opcode number is on the wire and
+     * in every published vector set). Issued through cft_reduce() like
+     * CFT_SUM and CFT_DOT.
+     *
+     * Neither is separate hardware, and neither needs to be: they are
+     * the SAME tree over a different leaf, so the library issues the
+     * composition and both backends get the same bits by
+     * construction -
+     *
+     *     CFT_SUMSQ  == CFT_DOT over (a, a)
+     *     CFT_SUMABS == CFT_ABS pass, then CFT_SUM
+     *
+     * with one documented exception in each, where 754-2019 9.4 orders
+     * an infinity ahead of a NaN for these two and ahead of nothing
+     * for sum and dot. See the cft_reduce block below. */
+    CFT_SUMSQ    = 28,  /* d = sum round(a[i] * a[i]) */
+    CFT_SUMABS   = 29   /* d = sum |a[i]|             */
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance
@@ -382,6 +406,8 @@ CFT_API cft_status cft_run(cft_device *dev,
  *
  *     d[0] = sum over i in [0, n) of a[i]              CFT_SUM
  *     d[0] = sum over i in [0, n) of round(a[i]*b[i])  CFT_DOT
+ *     d[0] = sum over i in [0, n) of round(a[i]*a[i])  CFT_SUMSQ
+ *     d[0] = sum over i in [0, n) of |a[i]|            CFT_SUMABS
  *
  * d receives exactly ONE element - cft_format_size(fmt) bytes - not n.
  * That is the whole reason this is a separate entry point: cft_run's
@@ -390,7 +416,7 @@ CFT_API cft_status cft_run(cft_device *dev,
  * through cft_run() is CFT_ERR_INVALID_ARGUMENT rather than a
  * plausible-looking array.
  *
- * b is unused by CFT_SUM and may be NULL.
+ * b is unused by CFT_SUM, CFT_SUMSQ and CFT_SUMABS and may be NULL.
  *
  * THE TREE SHAPE IS PART OF THE CONTRACT. Results are the fixed
  * binary tree over the index range, evaluated with the given rounding
@@ -415,9 +441,39 @@ CFT_API cft_status cft_run(cft_device *dev,
  *   n == 0 gives +0.0 and raises nothing.
  *   n == 1 gives a[0] verbatim and raises nothing - one leaf means
  *          zero additions, so not even a signalling NaN is quieted.
+ *          (For CFT_SUMSQ the leaf IS a multiply, so it quiets and
+ *          signals; for CFT_SUMABS the leaf is an abs, which by 5.5.1
+ *          signals nothing at all, so a lone sNaN comes back with its
+ *          sign cleared and no flag.)
+ *
+ * CFT_SUMSQ AND CFT_SUMABS ARE COMPOSITIONS, AND THAT IS THE CONTRACT.
+ * They are the same tree over a different leaf, so the library issues
+ * exactly `cft_reduce(CFT_DOT, a, a)` and `cft_run(CFT_ABS)` followed
+ * by `cft_reduce(CFT_SUM)`. There is no second tree walker to keep in
+ * step, so the device and software backends agree by construction
+ * rather than by testing - and a caller who wants the pieces can have
+ * them without changing the answer. Both identities hold bit for bit,
+ * flags included, on every input and every attribute EXCEPT one:
+ *
+ *   754-2019 9.4 says "For sumSquare and sumAbs, if any operand
+ *   element is an infinity, +inf is returned. Otherwise, if any
+ *   operand element is a NaN a quiet NaN is returned" - infinity
+ *   ahead of NaN, where sum and dot put NaN first.
+ *
+ * So a vector holding BOTH an infinity and a NaN returns +inf here,
+ * where the plain dot or sum would return a quiet NaN; invalid is
+ * raised only if one of those NaNs is signalling (9.4's blanket rule),
+ * and no other flag is. That single row is the whole difference, and
+ * it is the only place either operation is not the plain composition.
+ * With an infinity and no NaN the tree already returns +inf on its
+ * own, since no term of either operation is negative.
  *
  * A device that does not implement the reduction opcode group returns
- * CFT_ERR_UNSUPPORTED; ask cft_supports() to know in advance.
+ * CFT_ERR_UNSUPPORTED; ask cft_supports() to know in advance. The two
+ * composed reductions also need the group their composition runs
+ * through - arithmetic for CFT_SUMSQ, sign for CFT_SUMABS - and
+ * cft_supports() accounts for that, so asking about the opcode itself
+ * is the right question.
  * --------------------------------------------------------------- */
 CFT_API cft_status cft_reduce(cft_device *dev,
                               cft_op      op,
@@ -888,6 +944,340 @@ CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
                                void *d, size_t n, uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
+ * Character sequences (754-2019 clause 5.12) and NaN payloads (9.7)
+ * Part of the 0.6 step.
+ *
+ *   a decimal sequence  -> fmt   cft_from_decimal_char   (5.12.2)
+ *   fmt -> a decimal sequence    cft_to_decimal_char     (5.12.2)
+ *   a hex sequence      -> fmt   cft_from_hex_char       (5.12.3)
+ *   fmt -> a hex sequence        cft_to_hex_char         (5.12.3)
+ *   getPayload / setPayload / setPayloadSignaling        (9.7)
+ *
+ * These are the last REQUIRED part of clause 5 this library lacked.
+ * 5.12 opens with "Implementations shall provide conversions between
+ * each supported binary format and external decimal character
+ * sequences such that, under roundTiesToEven, conversion from the
+ * supported format to external decimal character sequence and back
+ * recovers the original floating-point representation" - a shall, not
+ * a should, and one this library now keeps at all four rungs.
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, with exact flags, and
+ * the standard's H is UNBOUNDED here. 5.12.2 allows an implementation
+ * to cap the digit count it will round correctly at some H >= M + 3;
+ * this one does not need a cap, because a decimal sequence's value is
+ * a rational and an encoding's value is a dyadic rational, and both
+ * are held exactly in integer arithmetic. Every digit count from 1
+ * upward is correctly rounded on the way out, and a sequence of any
+ * length at all is correctly rounded on the way in - no pre-rounding
+ * to H digits, no "additional rounding of the order of 10^(M-H)"
+ * which 5.12.2's NOTE 1 permits and which this library never incurs.
+ * python/cft_golden/chars.py is the definition of every result below.
+ *
+ * HOST operations, like most of the clause-5 set and all of clause 9:
+ * they issue no device pass, so there is no bus word and the device
+ * argument is context. There is nothing here for a tile to
+ * accelerate - the work is exact integer division and digit
+ * generation - so they are bit-identical on every backend by
+ * construction.
+ *
+ * WHY THE TWO DIRECTIONS HAVE DIFFERENT SHAPES, which is a decision
+ * rather than an oversight. The from_ calls are BATCHES: an array of
+ * C strings in, a dense array of encodings out, n arbitrary, the flag
+ * word the OR across the batch - the same shape as every other entry
+ * point in this header. The to_ calls are PER ELEMENT, one value and
+ * one buffer, and they have to be: an output sequence's length is not
+ * known until the conversion has run, it is wildly non-uniform (three
+ * bytes for "inf", about 183,000 for the exact decimal of the
+ * smallest binary256 subnormal), and no dense output array can hold
+ * that. A batch would mean three parallel arrays - buffers,
+ * capacities, lengths - that a caller could not size in advance
+ * anyway, so it would degenerate into the per-element two-call
+ * protocol with extra ceremony. One call per value is the honest
+ * shape; a caller batching them ORs the flag words itself, which is
+ * all cft_run does with them.
+ *
+ * SIZING AN OUTPUT BUFFER is the usual two-call protocol, and *len is
+ * ALWAYS set - on success and on refusal alike - to the number of
+ * bytes required INCLUDING the terminating NUL. Pass cap = 0 with out
+ * = NULL to ask, then call again with a buffer that size. A buffer
+ * too small for the answer is CFT_ERR_INVALID_ARGUMENT with *len set
+ * and NOTHING written: this library does not truncate a number.
+ *
+ * A SEQUENCE OUTSIDE THE SYNTAX IS REFUSED, not guessed at.
+ * cft_from_decimal_char and cft_from_hex_char return
+ * CFT_ERR_INVALID_ARGUMENT, write nothing to d, and - if bad_index is
+ * non-NULL - report which element of the batch was at fault, because
+ * a caller reading a file of numbers needs the line and not just the
+ * verdict. The syntax accepted is exactly:
+ *
+ *   decimal   sign? ( digit* "." digit* | digit+ )  ( [eE] sign? digit+ )?
+ *   hex       sign? "0" [xX] ( hexDigit* "." hexDigit* | hexDigit+ )
+ *                            [pP] sign? digit+
+ *   either    sign? ( "inf" | "infinity" | "nan" | "snan" ) payload?
+ *   payload   "(" ( digit+ | "0" [xX] hexDigit+ ) ")"
+ *
+ * with at least one digit in the significand, the words case
+ * insensitive, and the hex form's binary exponent REQUIRED - 5.12.3's
+ * grammar writes {decExponent}, not {decExponent}?. No leading or
+ * trailing whitespace, no digit separators, no locale, no hexadecimal
+ * in the decimal parser or decimal in the hex one. What this library
+ * writes, this library reads back.
+ *
+ * NaNs KEEP THEIR PAYLOAD AND THEIR SIGNALING BIT in both directions,
+ * and that is deliberate. docs/DETERMINISM.md's canonical-NaN rule
+ * governs arithmetic, where the divergence between implementations is
+ * over which operand's payload survives; these are ENCODING
+ * operations, like abs/negate/copySign/select, and 5.12's own
+ * requirement is that the round trip recover the original
+ * representation. A signaling NaN is written "snan" rather than
+ * "nan", which 5.12.1 allows and which is the spelling that raises
+ * NOTHING - the alternative it offers, writing "nan" and signaling
+ * invalid, would lose the distinction the round trip has to keep. So
+ * no conversion here ever raises invalid.
+ * --------------------------------------------------------------- */
+
+/* Pmin(fmt) from 5.12.2: the significant-digit count at which a
+ * to-decimal / from-decimal round trip under a round-to-nearest
+ * attribute is GUARANTEED to reproduce the original encoding - 9, 17,
+ * 36 and 73 for the four rungs. Derived from 1 + ceiling(p*log10 2),
+ * not tabulated. Returns 0 for a format this library does not carry.
+ *
+ * Fewer digits than this is not a rounding error, it is a different
+ * number: at Pmin - 1 there are encodings whose decimals collide, and
+ * host/tests/character_check.py exhibits one per format rather than
+ * asserting that none exists. */
+CFT_API size_t cft_format_decimal_digits(cft_format fmt);
+
+/* convertFromDecimalCharacter (5.4.2, 5.12.2), n sequences at a time.
+ *
+ * in[i] is a NUL-terminated sequence; d receives n encodings. Every
+ * sequence is converted exactly or correctly rounded under `rnd`, with
+ * inexact / overflow / underflow exactly as round_pack delivers them
+ * for an arithmetic result of the same value. A sequence outside the
+ * syntax refuses the WHOLE call (see the block comment); on any
+ * refusal the contents of d are unspecified. */
+CFT_API cft_status cft_from_decimal_char(cft_device *dev, cft_format fmt,
+                                         cft_round rnd,
+                                         const char *const *in, void *d,
+                                         size_t n, size_t *bad_index,
+                                         uint32_t *flags_out);
+
+/* convertToDecimalCharacter (5.4.2, 5.12.2), ONE value.
+ *
+ * digits == 0 is the EXACT conversion 5.12.2 asks for: every digit of
+ * the exact value, however many that is, trailing zeros removed. Every
+ * binary float is a finite decimal (2^-k = 5^k * 10^-k) so this always
+ * terminates - and for the extremes it is long: about 183,000
+ * significant digits for the smallest binary256 subnormal, 78,914 for
+ * the largest binary256 normal. `rnd` is not consulted and no flag is
+ * raised.
+ *
+ * digits >= 1 asks for exactly that many significant digits,
+ * correctly rounded under `rnd`, trailing zeros KEPT so a caller who
+ * asked for H digits can count H of them. inexact is raised when any
+ * digit was dropped and is the only flag possible: the exponent is
+ * written out in full, so 5.12.2's "exponent not of sufficient width"
+ * overflow and underflow cannot arise.
+ *
+ * The form is sign, one digit, a point, the rest, "e", an explicitly
+ * signed decimal exponent - "-1.5e+3", "1e+0", "5e-324". Zeros are
+ * "0" and "-0" at every digit count (a zero has no significant digit
+ * to round or to pad); the specials are the words above. */
+CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
+                                       cft_round rnd, const void *a,
+                                       size_t digits, char *out, size_t cap,
+                                       size_t *len, uint32_t *flags_out);
+
+/* convertFromHexCharacter (5.4.3, 5.12.3), n sequences at a time.
+ * Exact when the sequence fits the format, correctly rounded under
+ * `rnd` when it carries more bits than the format holds - a hex
+ * sequence's value is dyadic, so "exact" is the common case and the
+ * rounding is the same one round_pack performs anywhere else. */
+CFT_API cft_status cft_from_hex_char(cft_device *dev, cft_format fmt,
+                                     cft_round rnd, const char *const *in,
+                                     void *d, size_t n, size_t *bad_index,
+                                     uint32_t *flags_out);
+
+/* convertToHexCharacter (5.4.3, 5.12.3), ONE value: the shortest
+ * sequence that represents it EXACTLY, which is what 5.12.3 requires
+ * "in the absence of an explicit precision specification". Canonical:
+ * one leading 1, no trailing zeros in the fraction, an explicitly
+ * signed binary exponent - so a subnormal prints with its true
+ * exponent (0x1p-149 for the smallest binary32) and the spelling
+ * depends on the value rather than on which side of the format's
+ * subnormal boundary it sits. Zero is "0x0p+0".
+ *
+ * Exact always, so there is no rounding attribute to consult and no
+ * flag word to mislead - the same reason cft_class has neither. */
+CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
+                                   const void *a, char *out, size_t cap,
+                                   size_t *len);
+
+/* The 9.7 NaN payload operations, elementwise over arrays. 9.7 says
+ * these "signal no exceptions", so none of them has a flags argument.
+ * They are ENCODING operations and say so here for the same reason
+ * the conversions above do: the canonical-NaN rule is about
+ * arithmetic, and reading or writing a payload is not arithmetic.
+ *
+ * The payload is bits d2..d(p-1) of the trailing significand (6.2.1) -
+ * everything below the quiet bit - so the admissible set is
+ * 0 .. 2^(man_w - 1) - 1, and 1 upward for the signaling form, since
+ * payload 0 with the quiet bit clear is an INFINITY encoding rather
+ * than a NaN.
+ *
+ *   cft_get_payload   NaN -> the payload as a floating-point integer;
+ *                     anything else -> -1, which is 9.7's own answer.
+ *   cft_set_payload   a non-negative floating-point integer in the
+ *                     admissible set -> a quiet NaN carrying it;
+ *                     ANYTHING else -> +0, per 9.7.
+ *   cft_set_payload_signaling
+ *                     the same with a signaling NaN, and payload 0 is
+ *                     not admissible, so setPayloadSignaling(+-0) is
+ *                     +0.
+ *
+ * The admissibility test is on the VALUE, so -0 passes it as the
+ * integer zero - 754 settles that -0 equals 0, and every other
+ * value-based operation in this contract reads it the same way. The
+ * NaN a set produces has sign 0, matching the non-negative operand it
+ * came from; 9.7 fixes the sign of the +0 fallback and leaves the
+ * NaN's to the implementation.
+ *
+ * d may alias a: each element is read before it is written. */
+CFT_API cft_status cft_get_payload(cft_device *dev, cft_format fmt,
+                                   const void *a, void *d, size_t n);
+CFT_API cft_status cft_set_payload(cft_device *dev, cft_format fmt,
+                                   const void *a, void *d, size_t n);
+CFT_API cft_status cft_set_payload_signaling(cft_device *dev,
+                                             cft_format fmt, const void *a,
+                                             void *d, size_t n);
+
+/* ---------------------------------------------------------------
+ * The rest of IEEE 754-2019 table 9.1 (part of the 0.6 step)
+ *
+ *   d[i] = 2^a[i] - 1        d[i] = log2(1 + a[i])    d[i] = 1/sqrt(a[i])
+ *   d[i] = 10^a[i]           d[i] = log10(1 + a[i])
+ *   d[i] = 10^a[i] - 1
+ *
+ *   d[i] = a[i]^n[i]         (pown)      d[i] = a[i]^b[i]   (powr)
+ *   d[i] = (1 + a[i])^n[i]   (compound)  d[i] = a[i]^(1/n[i]) (rootn)
+ *
+ * With these ten the library implements every operation table 9.1
+ * lists for the binary formats. CORRECTLY ROUNDED at every format
+ * under every attribute, with clause 9.2.1's special values and exact
+ * flags, on exactly the terms the twenty-nine above are. HOST
+ * operations, like all of them: no cft_run pass, no bus word, `dev` is
+ * context, `d` may alias `a`, and the flag word is the OR across the
+ * batch.
+ *
+ * WHAT IS NEW IS EXACTNESS, NOT MACHINERY. There is no new reduction
+ * and no constant beyond the ln 10 and log10 e phase 1 already
+ * generates. What each of these has is a LARGER exact-case table than
+ * the function it is built from, and each table is proved closed in
+ * docs/TRANSCENDENTALS.md before the Ziv loop under it is allowed to
+ * run - a true value sitting on a rounding boundary is exactly where
+ * that loop does not terminate:
+ *
+ *   exp2m1    EXACT at every integer argument: 2^n - 1 is a dyadic
+ *             rational for every n, and a rounding boundary while
+ *             |n| <= p+1. Past that the value is still known exactly
+ *             and is delivered by a SIDE - 2^n - 1 sits in the top
+ *             quarter of the gap below 2^n, and -(1 - 2^n) in the half
+ *             gap above -1.
+ *   exp10     EXACT at the non-negative integers whose 5^n fits in p+1
+ *             bits. A negative power of ten is not dyadic at all.
+ *   exp10m1   EXACT at the non-negative integers whose 10^n - 1 (odd,
+ *             so its own odd part) fits in p+1 bits.
+ *   log2p1    EXACT where 1 + x is a power of two; log10p1 where it is
+ *             a power of ten. 1 + x is formed EXACTLY on the encoding
+ *             and never as a rounded sum, which is the whole reason
+ *             these functions exist.
+ *   rSqrt     EXACT exactly at the even powers of two, and it can
+ *             neither overflow nor underflow at any rung.
+ *   pown      pow's dyadic analysis with an integer exponent.
+ *   powr      the same with a non-negative base, so no sign question.
+ *   compound  1 + x exactly, then pown's procedure on it.
+ *   rootn     EXACT when the odd significand is a perfect |n|-th power
+ *             and |n| divides the exponent - one verified integer root.
+ *
+ * THE INTEGER OPERAND. 9.2.1 says "n is a finite integral value in
+ * integralFormat", so pown, compound and rootn take an `int64_t`
+ * array beside the encoding array rather than a second encoding that
+ * would have to be asked whether it is integral. That moves the
+ * element count to `count`; `n` is the exponent array, one per
+ * element, and must not be NULL.
+ *
+ * Rows a porter should not have to infer, every one of them confirmed
+ * against MPFR 4.2.2 before it was written down:
+ *
+ *   - rSqrt(+-0) is +-INFINITY with divideByZero. The sign SURVIVES:
+ *     rSqrt(-0) is -infinity. GNU MPFR's mpfr_rec_sqrt returns +inf
+ *     for both zeros; the standard's row is +-inf and this contract
+ *     follows the standard.
+ *   - powr is NOT pow. powr(x, y) for x < 0 is invalid for EVERY y, a
+ *     NaN included; powr(+-0, +-0), powr(+inf, +-0) and powr(+1, +-inf)
+ *     are invalid; and powr(qNaN, y) is a quiet NaN where pow(qNaN, 0)
+ *     is 1. powr(+1, qNaN) is a quiet NaN here - the standard's row is
+ *     "powr(+1, y) is 1 for FINITE y" and it lists powr(x, qNaN) for
+ *     x >= 0 separately - where mpfr_powr returns 1.
+ *   - pown(x, 0) is 1 for any x that is not a signaling NaN, an
+ *     infinity and a quiet NaN included.
+ *   - compound(x, 0) is 1 "for x >= -1 or quiet NaN", so compound of an
+ *     x BELOW -1 with n = 0 is invalid rather than 1. compound(-1, n)
+ *     is +infinity with divideByZero for n < 0 and +0 for n > 0;
+ *     compound(+-0, n) is 1.
+ *   - rootn(x, 0) is invalid: zero is outside the domain for every x.
+ *     rootn(x, 1) is x, exactly and silently. rootn(x, 2) is
+ *     squareRoot(x) on every input EXCEPT x = -0, where the standard's
+ *     own NOTE says they differ: rootn(-0, 2) is +0 by the even-n row
+ *     where squareRoot(-0) is -0.
+ *   - log2p1(-1) and log10p1(-1) are -infinity with divideByZero, and
+ *     an operand below -1 is invalid.
+ *   - A signaling NaN raises invalid and delivers the canonical quiet
+ *     NaN, as everywhere else in this contract.
+ *
+ * docs/TRANSCENDENTALS.md's "Table 9.1, completed" section is the
+ * design, the exact-case proofs and the neighbour-rule derivations -
+ * including which functions get NO neighbour rule and why.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_exp2m1(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_exp10(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_exp10m1(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_log2p1(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_log10p1(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_rsqrt(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* x**y on [0, +inf] x [-inf, +inf], two encodings like pow. */
+CFT_API cft_status cft_powr(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const void *b, void *d, size_t n,
+                            uint32_t *flags_out);
+
+/* The three with an INTEGER exponent. `n` is the per-element exponent
+ * array and `count` the number of elements - the one place in this
+ * header where those two names are not the same argument. */
+CFT_API cft_status cft_pown(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const int64_t *n, void *d,
+                            size_t count, uint32_t *flags_out);
+CFT_API cft_status cft_compound(cft_device *dev, cft_format fmt,
+                                cft_round rnd, const void *a,
+                                const int64_t *n, void *d, size_t count,
+                                uint32_t *flags_out);
+CFT_API cft_status cft_rootn(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const int64_t *n, void *d,
+                             size_t count, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
  * The phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
  *
  *   d[i] = sin  a[i]      d[i] = sinh  a[i]      d[i] = asinh a[i]
@@ -985,6 +1375,228 @@ CFT_API cft_status cft_acosh(cft_device *dev, cft_format fmt, cft_round rnd,
 CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
                              const void *a, void *d, size_t n,
                              uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The scaled product reductions (clause 9.4)
+ *
+ *   scaleB(pr, sf) ~ product over i in [0, n) of a[i]         cft_scaled_prod
+ *   scaleB(pr, sf) ~ product of (a[i] + b[i])             cft_scaled_prod_sum
+ *   scaleB(pr, sf) ~ product of (a[i] - b[i])            cft_scaled_prod_diff
+ *
+ * The last three operations of 754-2019 9.4, added 2026-09-03 as part
+ * of the 0.6 step. They return a PAIR - a significand and an integer
+ * scale - which is why they are not cft_reduce opcodes: that entry
+ * point delivers one element, and a pair does not fit through it.
+ *
+ * THREE NAMED ENTRY POINTS RATHER THAN ONE WITH A `kind` ARGUMENT.
+ * cft_run and cft_reduce take an opcode because an opcode is a field
+ * in a device word; these issue no device pass, so a `kind` enum would
+ * be a second opcode space living beside cft_op with none of its
+ * meaning - and docs/DETERMINISM.md records what a stale opcode number
+ * costs. The arities differ too (one vector, then two), so a single
+ * entry point would need a b-is-NULL-unless rule checked at run time
+ * where three functions check it at compile time. Every other
+ * pair-free host operation in this header - cft_div, cft_pow,
+ * cft_atan2 - is named, and these follow it.
+ *
+ *   pr        receives ONE element, cft_format_size(fmt) bytes.
+ *   scale_out receives the int64 scale. Neither may be NULL.
+ *   b         is required by _sum and _diff, and is not read by
+ *             cft_scaled_prod, which does not take it.
+ *
+ * WHY A SCALED PRODUCT EXISTS: a product of many elements leaves any
+ * format's range long before it stops being meaningful. This one
+ * cannot overflow or underflow at all, and that is a property of the
+ * construction rather than a claim about typical inputs:
+ *
+ *   THE TREE IS THE SAME TREE cft_reduce uses - the fixed
+ *   index-shaped one - and every node carries (significand, scale)
+ *   with the significand in +-[1, 2). A node multiplies its two
+ *   children's significands under the caller's attribute, which is the
+ *   node's ONE rounding, then extracts the binade back out: the
+ *   product is in +-[1, 4), so that extraction is a shift of 0, 1 or 2
+ *   binades and is exact. Both multiply operands are therefore always
+ *   in +-[1, 2), and no such product can leave any rung of the ladder.
+ *
+ * 754-2019 9.4 requires exactly that - "the scaled result, pr, shall
+ * not be affected by overflow or underflow" - and leaves the scaling
+ * itself implementation-defined, which a determinism contract may not:
+ * pinning the tree and the [1, 2) normalisation is what makes two
+ * conforming implementations return the same pair.
+ *
+ * pr is in +-[1, 2) for every n, INCLUDING n == 0, where 9.4 fixes the
+ * answer: "pr is 1 and sf is +0 without exception" - the
+ * multiplicative identity, where an empty sum gives the additive one.
+ *
+ * THE LEAF OF _sum AND _diff IS ONE CONTRACT ROUNDING of a[i] + b[i]
+ * (or a[i] - b[i]) in the caller's attribute, and its result is the
+ * factor everything below sees. Those two are therefore the ONLY ones
+ * that can signal overflow or underflow, and only from that addition -
+ * never from the product tree. Both are compositions, and hold as
+ * such bit for bit:
+ *
+ *     cft_scaled_prod_sum(a, b)  == cft_scaled_prod(cft_run(ADD, a, b))
+ *     cft_scaled_prod_diff(a, b) == cft_scaled_prod(cft_run(SUB, a, b))
+ *
+ * with the add's flags OR'd in.
+ *
+ * SPECIAL VALUES are 9.4's, in 9.4's order, applied to the FACTORS -
+ * which for _sum and _diff are the rounded sums, not the raw operands:
+ *
+ *   - any factor a NaN            -> quiet NaN, sf = 0. invalid only
+ *                                    if some operand was signalling.
+ *   - an infinity AND a zero      -> invalid, quiet NaN, sf = 0.
+ *                                    ("A product of inf x 0 signals
+ *                                     the invalid operation
+ *                                     exception.")
+ *   - an infinity, no zero        -> that infinity, sf = 0, NO
+ *                                    exception.
+ *   - a zero, no infinity         -> a zero, sf = 0, no exception.
+ *
+ * The sign of that infinity or zero is the sign of the true product,
+ * the XOR of every factor's sign bit. 9.4 leaves it open; a
+ * determinism contract cannot. A sum of unlike infinities needs no row
+ * of its own: that addition raises invalid and produces a quiet NaN by
+ * itself, and the NaN row then delivers it.
+ *
+ * divideByZero is NEVER signalled - 9.4 asks for that explicitly
+ * ("even if implemented with logB"), and this is not implemented with
+ * logB: the binade comes out of the encoding, and a zero never reaches
+ * the tree.
+ *
+ * THE SCALE is an int64 and is accumulated with checked additions. If
+ * one would leave the int64 range the call signals invalid and
+ * delivers the canonical quiet NaN for pr with sf = 0, which is what
+ * 9.4 requires of a scale factor too large for integralFormat. It is
+ * unreachable in practice - a leaf contributes at most emax + p - 1 =
+ * 262,379 at fp256 and a node at most 2, so a vector would need about
+ * 3.5e13 elements, 1.1 PB of fp256 - and it is implemented anyway,
+ * because "cannot happen" is not a result.
+ *
+ * HOST operations: no cft_run pass is issued, no bus word is produced
+ * and `dev` is context, exactly like the transcendentals. There is no
+ * tile accumulator for a scaled product - the accumulator streams
+ * ADDs - so there is nothing here for a device to carry, and the
+ * results are bit-identical across backends by construction.
+ *
+ * python/cft_golden/reduce.py's scaled_prod() is the definition of
+ * every bit; docs/DETERMINISM.md holds the contract's statement of it.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_scaled_prod(cft_device *dev, cft_format fmt,
+                                   cft_round rnd, const void *a,
+                                   void *pr, int64_t *scale_out,
+                                   size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_scaled_prod_sum(cft_device *dev, cft_format fmt,
+                                       cft_round rnd, const void *a,
+                                       const void *b, void *pr,
+                                       int64_t *scale_out, size_t n,
+                                       uint32_t *flags_out);
+CFT_API cft_status cft_scaled_prod_diff(cft_device *dev, cft_format fmt,
+                                        cft_round rnd, const void *a,
+                                        const void *b, void *pr,
+                                        int64_t *scale_out, size_t n,
+                                        uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The augmented arithmetic operations (754-2019 clause 9.5)
+ *
+ *   augmentedAddition(x, y)        cft_augmented_add
+ *   augmentedSubtraction(x, y)     cft_augmented_sub
+ *   augmentedMultiplication(x, y)  cft_augmented_mul
+ *
+ * Each returns a PAIR: r[i], the operation rounded, and e[i], the error
+ * that rounding made. Together they carry the exact result the format
+ * alone cannot hold, which is what a compensated summation, a
+ * double-double product or an exactly-rounded dot product is built out
+ * of - and what those algorithms currently reconstruct by hand from
+ * TwoSum and Dekker splitting, correctly only under assumptions the
+ * compiler is free to break.
+ *
+ * THESE TAKE NO ROUNDING ATTRIBUTE, and that is the standard's choice
+ * rather than a simplification. 9.5 fixes the rounding itself:
+ *
+ *   "This standard specifies a single rounding direction to be used in
+ *    the operations in this subclause, defined as roundTiesTowardZero:
+ *    the floating-point number nearest to the infinitely precise result
+ *    shall be delivered; if the two nearest floating-point numbers
+ *    bracketing an unrepresentable infinitely precise result are
+ *    equally near, the one with smaller magnitude shall be delivered."
+ *
+ * That direction is not one of the five attributes of clause 4.3 and
+ * this library does not add a sixth attribute for it: passing a
+ * cft_round is impossible here because there is nothing to pass. The
+ * tie rule differs from roundTiesToEven only at an exact midpoint, and
+ * only where the lower neighbour's last bit is odd - so an
+ * implementation that quietly used roundTiesToEven would pass every
+ * test that did not aim at that case, which is why the vector sets aim
+ * at it at every binade edge.
+ *
+ * HOST operations, like the clause-5 set and the transcendentals: no
+ * cft_run pass is issued, no bus word is produced, `dev` is context,
+ * `n` is arbitrary and the flag word is the OR across the batch. r and
+ * e must not overlap each other - passing the same pointer for both is
+ * CFT_ERR_INVALID_ARGUMENT, and any other overlap is undefined - while
+ * either MAY alias a or b, since each element is read before either
+ * output is written. A tile-composed route (a TwoSum, or an FMA
+ * residual for the product) is a plausible later fast path and would
+ * have to reproduce these bits exactly; it is not what runs today, and
+ * the rounding is a reason as well as the arithmetic, since the tile's
+ * five attributes do not include this one.
+ *
+ * THE SPECIAL CASES, from 9.5 rather than from habit:
+ *
+ *   - Any NaN operand gives the canonical quiet NaN as BOTH results
+ *     ("propagates a NaN as both results"), invalid raised only for a
+ *     signaling one. An invalid operation - inf + (-inf) for the sum,
+ *     inf * 0 for the product - "produces the same quiet NaN for both
+ *     outputs" with invalid raised.
+ *   - An infinite r gives that infinity as BOTH results. When it came
+ *     from an infinite OPERAND it signals nothing; when it came from
+ *     overflow it signals overflow and inexact.
+ *   - OVERFLOW happens strictly above 2^emax x (2 - 2^-p), and a result
+ *     landing exactly ON that midpoint rounds to the largest finite
+ *     "with no change in sign" - and raises NOTHING, because 9.5
+ *     signals inexact "only when roundTiesTowardZero(x + y) overflows".
+ *     Overflow always delivers an infinity here, in both directions:
+ *     "roundTiesTowardZero carries all overflows to infinity with the
+ *     sign of the intermediate result".
+ *   - UNDERFLOW is a statement about the ERROR TERM, not about r: it is
+ *     raised when e is "non-zero and lies strictly between +-b^emin".
+ *     Since e is exact, that is underflow WITHOUT inexact - the one
+ *     place in this contract where those two part company. A subnormal
+ *     r with an exactly representable residual raises nothing at all:
+ *     "the operation's subnormal and zero results are exact".
+ *   - THE SIGN OF A ZERO e is the sign of r when the residual is
+ *     exactly zero, so augmentedAddition(-3, 0) delivers (-3, -0) and
+ *     augmentedAddition(3, -3) delivers (+0, +0). r's own zero sign is
+ *     6.3's: +0 for an exact cancellation, the operands' sign for
+ *     like-signed zeros, the XOR of the signs for a product.
+ *   - e IS ALWAYS REPRESENTABLE for the sum and the difference: both
+ *     operands are multiples of the format's smallest quantum, so their
+ *     exact sum is, and the residual is at most half an ulp of r.
+ *     cft_augmented_mul has the one exception 9.5 names - a product
+ *     residual with "non-zero digits ... strictly between
+ *     +-b^(emin-p+1)" - and delivers that residual ROUNDED the same
+ *     way, raising underflow and inexact. That is the only case in
+ *     which r + e is not exactly x op y, and it is the only case in
+ *     which either operation raises inexact without overflowing.
+ *
+ * python/cft_golden/augmented.py defines every bit and flag;
+ * docs/DETERMINISM.md carries the contract statement and
+ * docs/HOSTAPI.md the design. Part of the 0.6 step.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_augmented_add(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
  * Device-resident buffers (optional, for throughput)

@@ -125,13 +125,20 @@ footer pre { font-size: 0.75rem; }
   other backend is judged by.</p>
   <p class="small dim">Sampling rule (deterministic, restated in
   build.sh): regenerate the published sets with
-  <code id="gen-cmd"></code>; from each of the 20 sets
+  <code id="gen-cmd"></code>; from each of the 20 <em>opcode</em> sets
   (4&nbsp;formats &times; 5&nbsp;rounding attributes, 11,800 cases
   each) take every 59th line - 0-based lines 0, 59, 118, &hellip; - then
   add the set's first line for any opcode name the stride missed, so
   every opcode class is present per set by construction, the seed
   opcodes <code>recip_seed</code>/<code>rsqrt_seed</code> and the
-  unassigned <code>reserved15/28/255</code> included.</p>
+  unassigned <code>reserved15/30/255</code> included. (That list has
+  shed a member three times - 24 became <code>sum</code>, 26
+  <code>recip_seed</code>, and 28 <code>sumsq</code> at ABI 0.6 - which
+  is the hazard a published <em>reserved</em> case carries and the
+  reason the replayer refuses a set whose reserved opcode has since
+  been assigned.) The other four families - transcendental, augmented,
+  reduction, character - are not embedded; drop them in section 3,
+  where they are replayed whole.</p>
   <div id="builtin-verdict" class="verdict pending">waiting for the wasm module&hellip;</div>
   <table class="sets" id="builtin-table" hidden>
     <thead><tr><th>set</th><th class="num">cases</th><th>result</th></tr></thead>
@@ -144,10 +151,12 @@ footer pre { font-size: 0.75rem; }
   <h2>3 &middot; full replay: drop the published sets</h2>
   <p>The embedded sample is a sample. For the full claim, generate the
   complete sets in a checkout of this repo -
-  <code>make vectors</code>, which writes 236,000 cases over twenty
-  opcode sets plus 242,915 more over twenty transcendental sets - all
-  twenty-nine functions since ABI 0.5 - to
-  <code>vectors/out/</code> - and drop any or all of the
+  <code>make vectors</code>, which writes <strong>881,657 cases over 84
+  sets</strong> to <code>vectors/out/</code>: 236,000 over twenty opcode
+  sets, 533,265 over twenty transcendental sets (all thirty-nine
+  functions since ABI 0.6, table 9.1 complete), 89,616 over the four
+  augmented sets of clause 9.5, 8,960 over twenty reduction sets and
+  13,816 over twenty character sets - and drop any or all of the
   <code>.jsonl</code> files here. Same code path as section 2, whole
   files this time.</p>
   <div id="dropzone">drop <code>vectors/out/*.jsonl</code> here &mdash; or click to pick files</div>
@@ -157,10 +166,18 @@ footer pre { font-size: 0.75rem; }
     <thead><tr><th>set</th><th class="num">cases</th><th>result</th></tr></thead>
     <tbody></tbody>
   </table>
-  <p class="small dim">Only the generator's fixed names are accepted
-  (<span class="mono">fp32.jsonl &hellip; fp256-rmm.jsonl</span> and
+  <p class="small dim">Only the generator's fixed names are accepted -
+  all 84 of them:
+  <span class="mono">fp32.jsonl &hellip; fp256-rmm.jsonl</span>,
   <span class="mono">fp32-transcend.jsonl &hellip;
-  fp256-transcend-rmm.jsonl</span>) - cft_conformance enumerates sets by
+  fp256-transcend-rmm.jsonl</span>,
+  <span class="mono">fp32-augmented.jsonl &hellip;
+  fp256-augmented.jsonl</span> (one per format, because 754-2019 9.5
+  fixes the rounding and there is no attribute to sweep),
+  <span class="mono">fp32-reduce.jsonl &hellip;
+  fp256-reduce-rmm.jsonl</span> and
+  <span class="mono">fp32-character.jsonl &hellip;
+  fp256-character-rmm.jsonl</span> - cft_conformance enumerates sets by
   name rather than by scanning, and a file this page cannot map to a set
   is refused loudly rather than skipped quietly.</p>
 </section>
@@ -169,13 +186,15 @@ footer pre { font-size: 0.75rem; }
   <h2>4 &middot; compute</h2>
   <p>The same library, called forward: one element through
   <code>cft_run()</code>, or the composed <code>cft_div()</code> /
-  <code>cft_sqrt()</code> sequence, or any of the twenty-nine
+  <code>cft_sqrt()</code> sequence, or any of the thirty-nine
   transcendentals - phase 1's nine (<code>cft_exp</code> &hellip;
   <code>cft_hypot</code>, ABI 0.3), phase 2's eleven
-  (<code>cft_sinpi</code> &hellip; <code>cft_atan2pi</code>, ABI 0.4)
-  and phase 3's nine (<code>cft_sin</code> &hellip; <code>cft_atanh</code>,
-  ABI 0.5, sin/cos/tan in radians) -
-  operands and result as raw encodings. This is a working
+  (<code>cft_sinpi</code> &hellip; <code>cft_atan2pi</code>, ABI 0.4),
+  phase 3's nine (<code>cft_sin</code> &hellip; <code>cft_atanh</code>,
+  ABI 0.5, sin/cos/tan in radians) and the ten that complete
+  754-2019 <strong>table 9.1</strong> (<code>cft_exp2m1</code> &hellip;
+  <code>cft_rootn</code>, ABI 0.6) - operands and result as raw
+  encodings. This is a working
   binary32/64/128/256 calculator, and every answer it gives is pinned by
   the replay above. The transcendentals are <em>correctly rounded</em>,
   which is why they can be in a determinism contract at all: the answer
@@ -183,9 +202,28 @@ footer pre { font-size: 0.75rem; }
   implementation agrees with this one bit for bit. The eleven are the
   ones whose argument reduction is exact - <code>sinPi</code>'s is
   <em>x</em> mod 2, a mask on the encoding, and the inverses meet
-  &pi; only as a factor of the answer - so <code>sin</code>,
+  &pi; only as a factor of the answer - while <code>sin</code>,
   <code>cos</code> and <code>tan</code> of a <em>radian</em> argument
-  are a different problem and are deliberately not here.</p>
+  reduce against the library's own 270,336-bit 2/&pi; instead.</p>
+  <p>ABI 0.6 also puts the other three packages here. Clause
+  <strong>5.12</strong>'s character conversions read and write a
+  <em>sequence</em> rather than an encoding - the panel grows a text
+  field for one and a digit count for the other, and the two-call
+  sizing protocol it runs to get an answer out is the C's own, not a
+  shorter one invented for JavaScript. Clause <strong>9.7</strong>'s
+  three payload operations signal nothing at all, so there is no flag
+  line under them. Clause <strong>9.5</strong>'s augmented arithmetic
+  and clause <strong>9.4</strong>'s scaled products each return a
+  <em>pair</em>, shown on two lines: <code>r</code> and <code>e</code>,
+  whose sum is exactly the operation; or <code>pr</code> and an int64
+  <code>sf</code>, whose <code>scaleB</code> is the product. The
+  augmented three ignore the rounding select and grey it out, because
+  9.5 fixes their direction to roundTiesTowardZero, which is not one of
+  clause 4.3's five attributes. <code>sumsq</code>, <code>sumabs</code>
+  and the scaled products are reductions over a whole vector; this
+  panel is a one-element calculator, so it runs them over the single
+  operand, which is an answer the contract names rather than a special
+  case invented for the page.</p>
   <fieldset>
     <div>
       <label class="f"><span>operation</span><select id="op-sel"></select></label>
@@ -196,6 +234,9 @@ footer pre { font-size: 0.75rem; }
     <div class="operand"><label class="f" style="width:100%"><span>a (hex encoding, left-padded to the format width)</span><input type="text" id="in-a" spellcheck="false"></label></div>
     <div class="operand"><label class="f" style="width:100%"><span>b</span><input type="text" id="in-b" spellcheck="false"></label></div>
     <div class="operand"><label class="f" style="width:100%"><span>c</span><input type="text" id="in-c" spellcheck="false"></label></div>
+    <div class="operand" id="row-n" hidden><label class="f" style="width:100%"><span>n (the INTEGER exponent, int64 &mdash; a decimal, signed, not an encoding)</span><input type="text" id="in-n" spellcheck="false" value="3"></label></div>
+    <div class="operand" id="row-h" hidden><label class="f" style="width:100%"><span>digits (0 = the exact conversion; h &ge; 1 = exactly h significant digits)</span><input type="text" id="in-h" spellcheck="false" value="0"></label></div>
+    <div class="operand" id="row-s" hidden><label class="f" style="width:100%"><span>the character SEQUENCE to convert</span><input type="text" id="in-s" spellcheck="false" value="1.5"></label></div>
     <p><button id="compute-btn" disabled>compute</button></p>
     <pre id="compute-out" hidden></pre>
   </fieldset>
@@ -233,13 +274,17 @@ const $ = (id) => document.getElementById(id);
 
 const FORMATS   = ["fp32", "fp64", "fp128", "fp256"];
 const ROUNDINGS = ["rne", "rtz", "rdn", "rup", "rmm"];
-/* The generator's fixed names, both families: the twenty opcode sets
- * the embedded sample is drawn from, and - since ABI 0.3 - the twenty
- * transcendental sets, which carry a different schema ("fn" rather
- * than "op") and are therefore their own files. The library reads
- * both, so the drop zone accepts both; before the nine had wrappers
- * this list stopped at twenty and a `make vectors` drop refused half
- * of what the page had just told the reader to generate. */
+/* The generator's fixed names, all five families: the twenty opcode
+ * sets the embedded sample is drawn from; the twenty transcendental
+ * sets, which carry a different schema ("fn" rather than "op") and are
+ * therefore their own files; and - since ABI 0.6 - the four augmented
+ * sets (one per format, because 9.5 fixes the rounding and there is no
+ * attribute to sweep), the twenty reduction sets (whose operand is a
+ * whole vector) and the twenty character sets (whose operand is a
+ * SEQUENCE). cft_conformance reads all five, so the drop zone accepts
+ * all five; before the nine had wrappers this list stopped at twenty
+ * and a `make vectors` drop refused half of what the page had just
+ * told the reader to generate. 84 names. */
 const CANONICAL = [];
 for (const f of FORMATS)
   for (const r of ROUNDINGS)
@@ -248,6 +293,16 @@ for (const f of FORMATS)
   for (const r of ROUNDINGS)
     CANONICAL.push(r === "rne" ? f + "-transcend.jsonl"
                                : f + "-transcend-" + r + ".jsonl");
+for (const f of FORMATS)
+  CANONICAL.push(f + "-augmented.jsonl");
+for (const f of FORMATS)
+  for (const r of ROUNDINGS)
+    CANONICAL.push(r === "rne" ? f + "-reduce.jsonl"
+                               : f + "-reduce-" + r + ".jsonl");
+for (const f of FORMATS)
+  for (const r of ROUNDINGS)
+    CANONICAL.push(r === "rne" ? f + "-character.jsonl"
+                               : f + "-character-" + r + ".jsonl");
 
 const FLAG_NAMES = [
   [1, "invalid"], [2, "divbyzero"], [4, "overflow"],
@@ -329,6 +384,58 @@ function init() {
     asinh:        M.cwrap("cftw_asinh", n, [n,n,n,n,n,n,n]),
     acosh:        M.cwrap("cftw_acosh", n, [n,n,n,n,n,n,n]),
     atanh:        M.cwrap("cftw_atanh", n, [n,n,n,n,n,n,n]),
+    /* The rest of table 9.1 (ABI 0.6). Six unary, powr binary, and
+     * three that read an int64 ARRAY where b's encodings would be:
+     * 9.2.1 asks for "a finite integral value in integralFormat", so
+     * pown, compound and rootn take an integer rather than a second
+     * encoding that would have to be asked whether it is integral. */
+    exp2m1:       M.cwrap("cftw_exp2m1", n, [n,n,n,n,n,n,n]),
+    exp10:        M.cwrap("cftw_exp10", n, [n,n,n,n,n,n,n]),
+    exp10m1:      M.cwrap("cftw_exp10m1", n, [n,n,n,n,n,n,n]),
+    log2p1:       M.cwrap("cftw_log2p1", n, [n,n,n,n,n,n,n]),
+    log10p1:      M.cwrap("cftw_log10p1", n, [n,n,n,n,n,n,n]),
+    rsqrt:        M.cwrap("cftw_rsqrt", n, [n,n,n,n,n,n,n]),
+    powr:         M.cwrap("cftw_powr", n, [n,n,n,n,n,n,n,n]),
+    pown:         M.cwrap("cftw_pown", n, [n,n,n,n,n,n,n,n]),
+    compound:     M.cwrap("cftw_compound", n, [n,n,n,n,n,n,n,n]),
+    rootn:        M.cwrap("cftw_rootn", n, [n,n,n,n,n,n,n,n]),
+    /* Clause 5.12's character conversions and 9.7's payloads (ABI
+     * 0.6). Every string crosses as a heap pointer, never as cwrap's
+     * "string" type: the from_ calls take an ARRAY of pointers, and
+     * the to_ calls answer through the two-call sizing protocol, which
+     * a marshalled return value could not express - cft.h, and
+     * wasm_api.c's block on it. */
+    decimalDigits: M.cwrap("cftw_format_decimal_digits", n, [n]),
+    from_decimal: M.cwrap("cftw_from_decimal_char", n, [n,n,n,n,n,n,n,n]),
+    to_decimal:   M.cwrap("cftw_to_decimal_char", n, [n,n,n,n,n,n,n,n,n]),
+    from_hex:     M.cwrap("cftw_from_hex_char", n, [n,n,n,n,n,n,n,n]),
+    to_hex:       M.cwrap("cftw_to_hex_char", n, [n,n,n,n,n,n]),
+    get_payload:  M.cwrap("cftw_get_payload", n, [n,n,n,n,n]),
+    set_payload:  M.cwrap("cftw_set_payload", n, [n,n,n,n,n]),
+    set_payload_signaling:
+                  M.cwrap("cftw_set_payload_signaling", n, [n,n,n,n,n]),
+    /* Clause 9.4's remaining reductions (ABI 0.6). sumsq and sumabs
+     * are opcodes 28 and 29 through the cftw_reduce that has been in
+     * this module since 0.1 - an opcode needs no wrapper of its own -
+     * while the three scaled products have their own entry points,
+     * because they return a PAIR and cft_reduce delivers one element. */
+    reduce:       M.cwrap("cftw_reduce", n, [n,n,n,n,n,n,n,n,n,n]),
+    scaled_prod:  M.cwrap("cftw_scaled_prod", n, [n,n,n,n,n,n,n,n]),
+    scaled_prod_sum:
+                  M.cwrap("cftw_scaled_prod_sum", n, [n,n,n,n,n,n,n,n,n]),
+    scaled_prod_diff:
+                  M.cwrap("cftw_scaled_prod_diff", n, [n,n,n,n,n,n,n,n,n]),
+    /* Clause 9.5's augmented arithmetic (ABI 0.6): two outputs, and NO
+     * rounding argument - 9.5 fixes the direction to
+     * roundTiesTowardZero, which is not one of the five attributes, so
+     * there is nothing to pass and the panel's rounding select does
+     * not apply to these three. */
+    augmentedAddition:
+                  M.cwrap("cftw_augmented_add", n, [n,n,n,n,n,n,n,n]),
+    augmentedSubtraction:
+                  M.cwrap("cftw_augmented_sub", n, [n,n,n,n,n,n,n,n]),
+    augmentedMultiplication:
+                  M.cwrap("cftw_augmented_mul", n, [n,n,n,n,n,n,n,n]),
   };
 
   const pp = M._malloc(4);
@@ -561,8 +668,9 @@ async function replayBuiltin() {
     const files = Object.keys(CFT_SAMPLE).map(
       (name) => ({ name, text: CFT_SAMPLE[name] }));
     await replaySets(files, sectionUI("builtin"),
-      "this is the embedded sample, not the full published set - " +
-      "section 3 replays all 236,000 cases");
+      "this is the embedded sample of the twenty OPCODE sets, not the " +
+      "full published set - section 3 replays all 881,657 cases over " +
+      "all 84");
   } finally {
     builtinRunning = false;
     $("rerun").disabled = false;
@@ -714,21 +822,107 @@ const PANEL_OPS = [
     f: "d = acosh a on [1, +inf) — acosh(1) = +0 exactly; every a below 1 is invalid, zeros and -inf included" },
   { v: "atanh",  use: "a",  k: "ABI 0.5, cft_atanh",
     f: "d = atanh a on (-1, 1) — exact only at ±0; atanh(±1) = ±inf with divideByZero (the pole); |a| > 1 is invalid, infinities included" },
+  /* The rest of table 9.1 (ABI 0.6). What is new in these ten is
+   * EXACTNESS, not machinery: each has a larger exact-case table than
+   * the function it is built from, proved closed in
+   * docs/TRANSCENDENTALS.md before the Ziv loop under it may run. */
+  { v: "exp2m1",  use: "a",  k: "ABI 0.6, cft_exp2m1",
+    f: "d = 2^a - 1 — EXACT at every integer a: 2^n - 1 is a dyadic rational for every n, and a rounding boundary while |n| ≤ p+1, so past that the value is delivered by a SIDE rather than by a boundary" },
+  { v: "exp10",   use: "a",  k: "ABI 0.6, cft_exp10",
+    f: "d = 10^a — exact at the non-negative integers whose 5ⁿ fits in p+1 bits; a negative power of ten is not dyadic at all, so none of those is exact" },
+  { v: "exp10m1", use: "a",  k: "ABI 0.6, cft_exp10m1",
+    f: "d = 10^a - 1 — exact at the non-negative integers whose 10ⁿ - 1 (odd, so its own odd part) fits in p+1 bits" },
+  { v: "log2p1",  use: "a",  k: "ABI 0.6, cft_log2p1",
+    f: "d = log₂(1 + a), with 1 + a formed EXACTLY on the encoding and never as a rounded sum — which is the whole reason this function exists. Exact where 1 + a is a power of two; log2p1(-1) = -inf with divideByZero; a < -1 is invalid" },
+  { v: "log10p1", use: "a",  k: "ABI 0.6, cft_log10p1",
+    f: "d = log₁₀(1 + a), same exact construction, exact where 1 + a is a power of ten; the same pole and the same domain error" },
+  { v: "rsqrt",   use: "a",  k: "ABI 0.6, cft_rsqrt",
+    f: "d = 1/√a — exact exactly at the even powers of two, and it can neither overflow nor underflow at any rung. rSqrt(±0) is ±INFINITY with divideByZero and THE SIGN SURVIVES: rSqrt(-0) is -inf, which is the standard's row where MPFR's mpfr_rec_sqrt returns +inf for both zeros" },
+  { v: "powr",    use: "ab", k: "ABI 0.6, cft_powr",
+    f: "d = a^b on [0, +inf] × [-inf, +inf] — powr is NOT pow: a < 0 is invalid for EVERY b, a NaN included; powr(±0, ±0), powr(+inf, ±0) and powr(+1, ±inf) are invalid; and powr(qNaN, b) is a quiet NaN where pow(qNaN, 0) is 1" },
+  { v: "pown",    use: "an", k: "ABI 0.6, cft_pown",
+    f: "d = a^n for an INTEGER n (754-2019 9.2.1: \"n is a finite integral value in integralFormat\", so it is an int64 beside the encoding, not a second float). pown(a, 0) is 1 for any a that is not a signaling NaN — an infinity and a quiet NaN included" },
+  { v: "compound", use: "an", k: "ABI 0.6, cft_compound",
+    f: "d = (1 + a)^n, integer n, with 1 + a formed exactly. compound(a, 0) is 1 \"for a ≥ -1 or quiet NaN\", so an a BELOW -1 with n = 0 is invalid rather than 1; compound(-1, n) is +inf with divideByZero for n < 0 and +0 for n > 0; compound(±0, n) is 1" },
+  { v: "rootn",   use: "an", k: "ABI 0.6, cft_rootn",
+    f: "d = a^(1/n), integer n. rootn(a, 0) is invalid — zero is outside the domain for every a. rootn(a, 1) is a, exactly and silently. rootn(a, 2) is squareRoot(a) on every input EXCEPT a = -0, where the standard's own NOTE says they differ: rootn(-0, 2) is +0 by the even-n row where squareRoot(-0) is -0" },
+  /* Clause 5.12's character conversions and 9.7's payloads (ABI 0.6).
+   * The two directions have different shapes and cft.h says why: the
+   * from_ calls are batches, the to_ calls are per element, because an
+   * output sequence's length is not known until the conversion has run
+   * and is wildly non-uniform. The panel drives one value either way. */
+  { v: "from_decimal", use: "s", k: "ABI 0.6, cft_from_decimal_char",
+    f: "d = the encoding of the decimal SEQUENCE below, correctly rounded in the selected attribute with the standard's H UNBOUNDED — no pre-rounding to a digit cap. A sequence outside 5.12's syntax is REFUSED rather than guessed at: sign? (digits \".\" digits | digits) ([eE] sign? digits)?, or inf / infinity / nan / snan with an optional (payload)" },
+  { v: "from_hex",     use: "s", k: "ABI 0.6, cft_from_hex_char",
+    f: "d = the encoding of the hexadecimal SEQUENCE below. A hex sequence's value is dyadic, so exact is the common case and more bits than the format holds round once. The binary exponent is REQUIRED — 5.12.3's grammar writes {decExponent}, not {decExponent}? — so \"0x1.8\" is refused and \"0x1.8p+0\" is not" },
+  { v: "to_decimal",   use: "ah", k: "ABI 0.6, cft_to_decimal_char",
+    f: "the decimal sequence for a. digits = 0 is the EXACT conversion 5.12.2 asks for — every digit of the exact value, trailing zeros removed, no attribute consulted and no flag raised; it always terminates and for the extremes it is long (about 183,000 significant digits for the smallest binary256 subnormal). digits ≥ 1 asks for exactly that many, correctly rounded, trailing zeros KEPT, inexact when a digit was dropped" },
+  { v: "to_hex",       use: "a", k: "ABI 0.6, cft_to_hex_char",
+    f: "the shortest hexadecimal sequence that represents a EXACTLY (5.12.3, in the absence of an explicit precision). Canonical: one leading 1, no trailing zeros, an explicitly signed binary exponent — so a subnormal prints with its TRUE exponent, 0x1p-149 for the smallest binary32. Exact always, so there is no attribute and no flag word" },
+  { v: "get_payload",  use: "a", k: "ABI 0.6, cft_get_payload",
+    f: "d = a NaN's payload as a floating-point integer; anything that is not a NaN gives -1, which is 9.7's own answer. Non-computational: signals nothing, so there is no flag word" },
+  { v: "set_payload",  use: "a", k: "ABI 0.6, cft_set_payload",
+    f: "d = a quiet NaN carrying a, when a is a non-negative floating-point integer in the admissible set 0 … 2^(manW-1) - 1; ANYTHING else gives +0, per 9.7. The test is on the VALUE, so -0 passes it as the integer zero" },
+  { v: "set_payload_signaling", use: "a", k: "ABI 0.6, cft_set_payload_signaling",
+    f: "the same with a SIGNALING NaN, where payload 0 is not admissible — payload 0 with the quiet bit clear is an infinity encoding — so setPayloadSignaling(±0) is +0" },
+  /* Clause 9.4's remaining reductions (ABI 0.6). The panel is a
+   * one-element calculator, so these run over the single vector [a]:
+   * a real answer at n = 1 and the contract's own (cft.h names what
+   * n == 1 does for each), not a special case invented for the UI. */
+  { v: "sumsq",   use: "a",  k: "ABI 0.6, cft_reduce op 28, over [a]",
+    f: "d = Σ round(a[i]²) over the contract's fixed tree. Over the single element below that is round(a·a) — at n = 1 the leaf IS a multiply, so it quiets a signaling NaN and signals, which cft.h states because sum's n = 1 does not. Composed as dot(a, a), with one row of its own: 9.4 puts an INFINITY ahead of a NaN here, where sum and dot put the NaN first" },
+  { v: "sumabs",  use: "a",  k: "ABI 0.6, cft_reduce op 29, over [a]",
+    f: "d = Σ |a[i]| over the same tree. At n = 1 the leaf is an abs, which by 5.5.1 signals nothing at all, so a lone signaling NaN comes back with its sign cleared and NO flag. Composed as an ABS pass then SUM, with the same infinity-before-NaN row" },
+  { v: "scaled_prod", use: "a", k: "ABI 0.6, cft_scaled_prod, over [a]",
+    f: "a PAIR: scaleB(pr, sf) ≈ Π a[i], with pr in ±[1, 2) and sf an int64. It cannot overflow or underflow at all — every node multiplies two significands in ±[1, 2) and extracts the binade back out exactly. Over the single element below, pr is a's own significand and sf its binade. n = 0 gives pr = 1, sf = 0 without exception, which 9.4 fixes" },
+  { v: "scaled_prod_sum", use: "ab", k: "ABI 0.6, cft_scaled_prod_sum, over [a],[b]",
+    f: "the same pair over Π (a[i] + b[i]). The leaf is ONE contract rounding of that sum in the selected attribute, and it is the only thing here that can signal overflow or underflow — never the product tree. divideByZero is NEVER signalled, which 9.4 asks for explicitly" },
+  { v: "scaled_prod_diff", use: "ab", k: "ABI 0.6, cft_scaled_prod_diff, over [a],[b]",
+    f: "the same over Π (a[i] - b[i]), a first. The operand order is visible here: scaled_prod_diff(1, 2) and scaled_prod_diff(2, 1) differ in the sign of pr" },
+  /* Clause 9.5's augmented arithmetic (ABI 0.6): two outputs, and the
+   * rounding select above does NOT apply - 9.5 fixes the direction to
+   * roundTiesTowardZero, which is not one of clause 4.3's five. */
+  { v: "augmentedAddition", use: "ab", k: "ABI 0.6, cft_augmented_add",
+    f: "a PAIR: r = a + b rounded, e = the error that rounding made, so r + e is EXACTLY a + b. roundTiesTowardZero, fixed by 9.5 — the rounding select above does not apply. The sign of a zero e is the sign of r when the residual is exactly zero: augmentedAddition(-3, 0) is (-3, -0) and augmentedAddition(3, -3) is (+0, +0). UNDERFLOW is a statement about e, not r, and comes WITHOUT inexact — the one place in this contract those two part company" },
+  { v: "augmentedSubtraction", use: "ab", k: "ABI 0.6, cft_augmented_sub",
+    f: "the same pair for a - b: a + (-b) with every rule of the addition, the signed zeros included" },
+  { v: "augmentedMultiplication", use: "ab", k: "ABI 0.6, cft_augmented_mul",
+    f: "the same pair for a × b. This is the one of the three whose e can fail to be representable — 9.5's residual with non-zero digits strictly between ±b^(emin-p+1) — and it delivers that residual ROUNDED, raising underflow and inexact. It is the only case in which r + e is not exactly a op b" },
 ];
 
-/* The two transcendental arities, spelled once. The names match both
+/* The three transcendental arities, spelled once. The names match both
  * the cftw_* export and the "fn" field the transcendental vector sets
  * use, which is not a coincidence: cft.h names these operations, and
  * every layer that carries them - the generator, the golden model, the
  * bindings - spells them the same way rather than inventing a table.
- * Phase 1's nine first, then phase 2's eleven, then phase 3's nine. */
+ * Phase 1's nine first, then phase 2's eleven, then phase 3's nine,
+ * then the ten that complete table 9.1.
+ *
+ * TRANSCEND_INTARG is a third arity rather than a flag on the second,
+ * because its second operand is not a float: it is an int64 array, one
+ * per element. */
 const TRANSCEND_UNARY = ["exp", "expm1", "exp2", "log", "log1p",
                          "log2", "log10",
                          "sinpi", "cospi", "tanpi", "asin", "acos",
                          "atan", "asinpi", "acospi", "atanpi",
                          "sin", "cos", "tan", "sinh", "cosh", "tanh",
-                         "asinh", "acosh", "atanh"];
-const TRANSCEND_BINARY = ["pow", "hypot", "atan2", "atan2pi"];
+                         "asinh", "acosh", "atanh",
+                         "exp2m1", "exp10", "exp10m1", "log2p1",
+                         "log10p1", "rsqrt"];
+const TRANSCEND_BINARY = ["pow", "hypot", "atan2", "atan2pi", "powr"];
+const TRANSCEND_INTARG = ["pown", "compound", "rootn"];
+
+/* The 0.6 families the panel dispatches by name, each with the shape
+ * of its answer: a sequence out, an encoding out, a (value, int64)
+ * pair, or a (r, e) pair. */
+const CHAR_FROM = ["from_decimal", "from_hex"];
+const CHAR_TO = ["to_decimal", "to_hex"];
+const PAYLOAD_FNS = ["get_payload", "set_payload", "set_payload_signaling"];
+const REDUCE_PANEL = { sumsq: 28, sumabs: 29 };
+const SCALED_PRODUCTS = ["scaled_prod", "scaled_prod_sum",
+                         "scaled_prod_diff"];
+const AUGMENTED = ["augmentedAddition", "augmentedSubtraction",
+                   "augmentedMultiplication"];
 
 /* IEEE 754-2019 interchange field widths, display-only (the classifier
  * under the result line); cross-checked against
@@ -765,6 +959,21 @@ function initComputePanel() {
     $("op-formula").textContent = o.f;
     for (const x of ["a", "b", "c"])
       $("in-" + x).disabled = !o.use.includes(x);
+    /* The three controls the 0.6 families need are hidden rather than
+     * disabled: an integer exponent, a digit count and a text operand
+     * apply to a handful of operations each, and a permanently greyed
+     * row for every other one would be noise on the page. */
+    for (const x of ["n", "h", "s"])
+      $("row-" + x).hidden = !o.use.includes(x);
+    /* 9.5 fixes the augmented three's rounding to roundTiesTowardZero,
+     * which is not one of the five, so the select does not apply and
+     * says so rather than looking as if it did. */
+    const fixedRnd = AUGMENTED.includes(o.v);
+    rndSel.disabled = fixedRnd;
+    rndSel.title = fixedRnd
+      ? "754-2019 9.5 fixes this operation's rounding to " +
+        "roundTiesTowardZero, which is not one of clause 4.3's five"
+      : "";
   };
   opSel.addEventListener("change", sync);
 
@@ -825,6 +1034,58 @@ function flagsText(fl) {
   return names.length ? names.join(" ") : "(none)";
 }
 
+/* An int64 typed as a decimal. BigInt, because that is what an int64
+ * is: a JS number stops being an integer above 2^53, so a plain
+ * Number() here would silently accept a value the field cannot carry
+ * and pass a different one to the library. */
+function parseInt64(label, s) {
+  const t = s.trim();
+  if (!/^[+-]?[0-9]+$/.test(t))
+    throw label + " is a signed decimal integer, not \"" + t + "\"";
+  const v = BigInt(t);
+  if (v < -(2n ** 63n) || v >= 2n ** 63n)
+    throw label + " is an int64; " + v + " does not fit";
+  return v;
+}
+
+/* The two-call sizing protocol of cft.h's to_ conversions, run as the
+ * contract states it: ask with a NULL buffer and capacity 0, which
+ * reports the required length INCLUDING the NUL and refuses; allocate
+ * exactly that; call again. The page does not invent a shorter
+ * protocol for JavaScript, and a caller watching this panel is
+ * watching the same two calls host/src/conformance.c makes. */
+function charWrite(kind, fmt, rnd, pa, digits) {
+  const plen = M._malloc(4), pfl = M._malloc(4);
+  let out = 0;
+  try {
+    M.HEAPU32[plen >> 2] = 0;
+    M.HEAPU32[pfl >> 2] = 0;
+    const ask = kind === "to_decimal"
+      ? C.to_decimal(dev, fmt, rnd, pa, digits, 0, 0, plen, pfl)
+      : C.to_hex(dev, fmt, pa, 0, 0, plen);
+    const need = M.HEAPU32[plen >> 2] >>> 0;
+    if (ask === 0)
+      throw "the sizing call returned success where cft.h says it reports " +
+            "the required length and refuses";
+    if (need < 2) throw "the sizing call reported " + need + " bytes";
+    out = M._malloc(need);
+    M.HEAPU32[plen >> 2] = 0;
+    M.HEAPU32[pfl >> 2] = 0;
+    const st = kind === "to_decimal"
+      ? C.to_decimal(dev, fmt, rnd, pa, digits, out, need, plen, pfl)
+      : C.to_hex(dev, fmt, pa, out, need, plen);
+    if (st !== 0)
+      throw "cft call FAILED with the " + need + "-byte buffer it asked " +
+            "for: " + C.strerror(st);
+    return { text: M.UTF8ToString(out), len: need,
+             flags: M.HEAPU32[pfl >> 2] >>> 0 };
+  } finally {
+    if (out) M._free(out);
+    M._free(plen);
+    M._free(pfl);
+  }
+}
+
 function computeOnce() {
   const out = $("compute-out");
   out.hidden = false;
@@ -833,23 +1094,155 @@ function computeOnce() {
   const rnd = Number($("rnd-sel").value);
   const fmtName = C.fmtName(fmt);
   const esz = C.fmtSize(fmt);
-  let pa = 0, pb = 0, pc = 0, pd = 0, pfl = 0;
+  const ptrs = [];
+  const keep = (p) => { ptrs.push(p); return p; };
   try {
     const bufs = {};
     for (const x of ["a", "b", "c"])
       if (o.use.includes(x))
         bufs[x] = parseHexOperand(x, $("in-" + x).value, esz);
-    pd = M._malloc(esz);
-    pfl = M._malloc(4);
-    M.HEAPU32[pfl >> 2] = 0;
     const put = (arr) => {
-      const p = M._malloc(esz);
+      const p = keep(M._malloc(esz));
       M.HEAPU8.set(arr, p);
       return p;
     };
-    if (bufs.a) pa = put(bufs.a);
-    if (bufs.b) pb = put(bufs.b);
-    if (bufs.c) pc = put(bufs.c);
+    const pa = bufs.a ? put(bufs.a) : 0;
+    const pb = bufs.b ? put(bufs.b) : 0;
+    const pc = bufs.c ? put(bufs.c) : 0;
+    const lines = [];
+    for (const x of ["a", "b", "c"])
+      if (bufs[x])
+        lines.push(x.padEnd(6) + hexOfBytes(bufs[x]) +
+                   "  (" + classify(hexOfBytes(bufs[x]), fmtName) + ")");
+
+    /* ---- a SEQUENCE in: the from_ conversions ---- */
+    if (CHAR_FROM.includes(o.v)) {
+      const seq = $("in-s").value;
+      const bytes = M.lengthBytesUTF8(seq) + 1;
+      const ps = keep(M._malloc(bytes));
+      M.stringToUTF8(seq, ps, bytes);
+      const pin = keep(M._malloc(4));
+      M.HEAPU32[pin >> 2] = ps;
+      const pd = keep(M._malloc(esz)), pbad = keep(M._malloc(4));
+      const pfl = keep(M._malloc(4));
+      M.HEAPU8.fill(0, pd, pd + esz);
+      M.HEAPU32[pbad >> 2] = 0;
+      M.HEAPU32[pfl >> 2] = 0;
+      const st = C[o.v](dev, fmt, rnd, pin, pd, 1, pbad, pfl);
+      if (st !== 0) {
+        out.textContent =
+          "s     " + JSON.stringify(seq) + "\n" +
+          "REFUSED at element " + M.HEAPU32[pbad >> 2] + ": " +
+          C.strerror(st) + "\n" +
+          "A sequence outside 754-2019 clause 5.12's syntax is rejected " +
+          "rather than guessed at, and that refusal is as much a part of " +
+          "the contract as any value.";
+        return;
+      }
+      const dhex = hexOfBytes(M.HEAPU8.slice(pd, pd + esz));
+      out.textContent = [
+        "s     " + JSON.stringify(seq),
+        "op    " + o.v + "  " + fmtName + "  " + ROUNDINGS[rnd],
+        "d  =  " + dhex + "  (" + classify(dhex, fmtName) + ")",
+        "flags " + flagsText(M.HEAPU32[pfl >> 2]),
+      ].join("\n");
+      return;
+    }
+
+    /* ---- a SEQUENCE out: the to_ conversions ---- */
+    if (CHAR_TO.includes(o.v)) {
+      const digits = o.v === "to_decimal"
+        ? Number(parseInt64("digits", $("in-h").value)) : 0;
+      if (digits < 0) throw "digits is a count";
+      const got = charWrite(o.v, fmt, rnd, pa, digits);
+      lines.push("op    " + o.v + "  " + fmtName +
+                 (o.v === "to_decimal" ? "  " + ROUNDINGS[rnd] +
+                  "  digits " + digits : "  (exact, no attribute)"));
+      lines.push("s  =  " + (got.text.length > 400
+        ? got.text.slice(0, 400) + "…" : got.text));
+      lines.push("len   " + got.len +
+                 " bytes including the NUL, from the sizing call");
+      if (got.text.length > 400)
+        lines.push("      (" + got.text.length + " characters; the first " +
+                   "400 are shown, and the exact decimal of an extreme " +
+                   "runs to about 183,000)");
+      lines.push("flags " + flagsText(got.flags));
+      out.textContent = lines.join("\n");
+      return;
+    }
+
+    /* ---- the 9.7 payload operations: no attribute, no flags ---- */
+    if (PAYLOAD_FNS.includes(o.v)) {
+      const pd = keep(M._malloc(esz));
+      M.HEAPU8.fill(0, pd, pd + esz);
+      const st = C[o.v](dev, fmt, pa, pd, 1);
+      if (st !== 0) {
+        out.textContent = "cft call FAILED: " + C.strerror(st);
+        return;
+      }
+      const dhex = hexOfBytes(M.HEAPU8.slice(pd, pd + esz));
+      lines.push("op    " + o.v + "  " + fmtName +
+                 "  (non-computational: signals nothing)");
+      lines.push("d  =  " + dhex + "  (" + classify(dhex, fmtName) + ")");
+      out.textContent = lines.join("\n");
+      return;
+    }
+
+    /* ---- the augmented pair: r and e, no rounding attribute ---- */
+    if (AUGMENTED.includes(o.v)) {
+      const pr = keep(M._malloc(esz)), pe = keep(M._malloc(esz));
+      const pfl = keep(M._malloc(4));
+      M.HEAPU8.fill(0, pr, pr + esz);
+      M.HEAPU8.fill(0, pe, pe + esz);
+      M.HEAPU32[pfl >> 2] = 0;
+      const st = C[o.v](dev, fmt, pa, pb, pr, pe, 1, pfl);
+      if (st !== 0) {
+        out.textContent = "cft call FAILED: " + C.strerror(st);
+        return;
+      }
+      const rh = hexOfBytes(M.HEAPU8.slice(pr, pr + esz));
+      const eh = hexOfBytes(M.HEAPU8.slice(pe, pe + esz));
+      lines.push("op    " + o.v + "  " + fmtName +
+                 "  roundTiesTowardZero (fixed by 9.5)");
+      lines.push("r  =  " + rh + "  (" + classify(rh, fmtName) + ")");
+      lines.push("e  =  " + eh + "  (" + classify(eh, fmtName) + ")");
+      lines.push("flags " + flagsText(M.HEAPU32[pfl >> 2]));
+      out.textContent = lines.join("\n");
+      return;
+    }
+
+    /* ---- the scaled products: a value and an int64 scale ---- */
+    if (SCALED_PRODUCTS.includes(o.v)) {
+      const binary = o.v !== "scaled_prod";
+      const pr = keep(M._malloc(esz)), psf = keep(M._malloc(8));
+      const pfl = keep(M._malloc(4));
+      M.HEAPU8.fill(0, pr, pr + esz);
+      new BigInt64Array(M.HEAPU8.buffer, psf, 1)[0] = 0n;
+      M.HEAPU32[pfl >> 2] = 0;
+      const st = binary
+        ? C[o.v](dev, fmt, rnd, pa, pb, pr, psf, 1, pfl)
+        : C[o.v](dev, fmt, rnd, pa, pr, psf, 1, pfl);
+      if (st !== 0) {
+        out.textContent = "cft call FAILED: " + C.strerror(st);
+        return;
+      }
+      const prh = hexOfBytes(M.HEAPU8.slice(pr, pr + esz));
+      const sf = new BigInt64Array(M.HEAPU8.buffer, psf, 1)[0];
+      lines.push("op    " + o.v + "  " + fmtName + "  " + ROUNDINGS[rnd] +
+                 "  over 1 element");
+      lines.push("pr =  " + prh + "  (" + classify(prh, fmtName) +
+                 ", in ±[1, 2) for every n)");
+      lines.push("sf =  " + sf + "   (int64; the answer is " +
+                 "scaleB(pr, sf))");
+      lines.push("flags " + flagsText(M.HEAPU32[pfl >> 2]));
+      out.textContent = lines.join("\n");
+      return;
+    }
+
+    /* ---- everything with ONE encoding out ---- */
+    const pd = keep(M._malloc(esz)), pfl = keep(M._malloc(4));
+    M.HEAPU8.fill(0, pd, pd + esz);
+    M.HEAPU32[pfl >> 2] = 0;
 
     let st;
     if (o.v === "div")
@@ -861,6 +1254,16 @@ function computeOnce() {
       st = C[o.v](dev, fmt, rnd, pa, pd, 1, pfl);
     else if (TRANSCEND_BINARY.includes(o.v))
       st = C[o.v](dev, fmt, rnd, pa, pb, pd, 1, pfl);
+    else if (TRANSCEND_INTARG.includes(o.v)) {
+      /* the int64 lives in memory, never in a parameter: without
+       * -sWASM_BIGINT a wasm i64 cannot cross into JS at all */
+      const nn = parseInt64("n", $("in-n").value);
+      const pn = keep(M._malloc(8));
+      new BigInt64Array(M.HEAPU8.buffer, pn, 1)[0] = nn;
+      lines.push("n     " + nn + "  (int64, the integer exponent)");
+      st = C[o.v](dev, fmt, rnd, pa, pn, pd, 1, pfl);
+    } else if (REDUCE_PANEL[o.v] !== undefined)
+      st = C.reduce(dev, REDUCE_PANEL[o.v], fmt, rnd, pa, 0, pd, 1, pfl, 0);
     else
       st = C.run(dev, o.v, fmt, rnd, pa, pb, pc, pd, 1, pfl, 0);
 
@@ -869,24 +1272,18 @@ function computeOnce() {
         "(on any error the contents of d are unspecified - not shown)";
       return;
     }
-    const dbytes = M.HEAPU8.slice(pd, pd + esz);
-    const dhex = hexOfBytes(dbytes);
+    const dhex = hexOfBytes(M.HEAPU8.slice(pd, pd + esz));
     const fl = M.HEAPU32[pfl >> 2];
-    const lines = [];
-    for (const x of ["a", "b", "c"])
-      if (bufs[x])
-        lines.push(x.padEnd(6) + hexOfBytes(bufs[x]) +
-                   "  (" + classify(hexOfBytes(bufs[x]), fmtName) + ")");
     lines.push("op    " + (typeof o.v === "number" ? C.opName(o.v) : o.v) +
-               "  " + fmtName + "  " + ROUNDINGS[rnd]);
+               "  " + fmtName + "  " + ROUNDINGS[rnd] +
+               (REDUCE_PANEL[o.v] !== undefined ? "  over 1 element" : ""));
     lines.push("d  =  " + dhex + "  (" + classify(dhex, fmtName) + ")");
     lines.push("flags " + flagsText(fl));
     out.textContent = lines.join("\n");
   } catch (err) {
     out.textContent = "refused: " + err;
   } finally {
-    for (const p of [pa, pb, pc, pd, pfl])
-      if (p) M._free(p);
+    for (const p of ptrs) if (p) M._free(p);
   }
 }
 </script>

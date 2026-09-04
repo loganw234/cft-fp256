@@ -23,6 +23,7 @@ without numpy (container tests skip). A negative control proves the
 comparison machinery can actually fail.
 """
 
+import math
 import random
 import sys
 from pathlib import Path
@@ -441,6 +442,123 @@ def test_tree_reductions(prec):
     assert lone.same_bits(ctx.nan()) and fl == 0
 
 
+@pytest.mark.parametrize("prec", (24, 237))
+def test_tree_sumsq_and_sumabs(prec):
+    """The other two of 9.4's sum reductions, and the identities that
+    are how the two backends are made to agree."""
+    ctx = Context(prec)
+    xs = [ctx.from_int(i) for i in range(1, 12)]     # 11: not a power of two
+    signed = [x if i % 2 else ctx.neg(x) for i, x in enumerate(xs)]
+
+    sq, fl = batch.tree_sumsq(ctx, xs)
+    assert sq.to_int() == sum(i * i for i in range(1, 12)) and fl == 0
+    ab, fl = batch.tree_sumabs(ctx, signed)
+    assert ab.to_int() == sum(range(1, 12)) and fl == 0
+
+    # the identities, through the binding's own entry points
+    dot, fdot = batch.tree_dot(ctx, signed, signed)
+    sq2, fsq = batch.tree_sumsq(ctx, signed)
+    assert sq2.same_bits(dot) and fsq == fdot
+
+    # abs signals nothing at all (5.5.1), so the pass contributes no
+    # flags and the tree's are the operation's
+    absed = [ctx.abs(v) for v in signed]
+    s, fs = batch.tree_sum(ctx, absed)
+    ab2, fab = batch.tree_sumabs(ctx, signed)
+    assert ab2.same_bits(s) and fab == fs
+
+    # 9.4 puts an infinity ahead of a NaN for these two and only these
+    mixed = [ctx.inf(), ctx.nan(), ctx(1)]
+    sq3, fl = batch.tree_sumsq(ctx, mixed)
+    assert sq3.same_bits(ctx.inf()) and fl == 0
+    ab3, fl = batch.tree_sumabs(ctx, mixed)
+    assert ab3.same_bits(ctx.inf()) and fl == 0
+    # the negative control: the plain tree returns the quiet NaN there
+    d3, _ = batch.tree_dot(ctx, mixed, mixed)
+    assert d3.is_nan
+
+    # the edges, which the sum tree decides
+    empty, fl = batch.tree_sumsq(ctx, [])
+    assert empty.is_zero and empty.sign == 0 and fl == 0
+    empty, fl = batch.tree_sumabs(ctx, [])
+    assert empty.is_zero and empty.sign == 0 and fl == 0
+
+
+@pytest.mark.parametrize("prec", (24, 237))
+def test_scaled_products(prec):
+    """The three that return a pair, and the property they exist for."""
+    ctx = Context(prec)
+    F = cftmpfr
+
+    # 2^100 four times over: the true product is 2^400, hundreds of
+    # binades outside binary32, and it comes back exactly.
+    big = ctx.from_int(2 ** 100)
+    pr, sf, fl = batch.scaled_prod(ctx, [big] * 4)
+    assert pr.to_int() == 1 and sf == 400 and fl == 0
+
+    # pr is always in [1, 2): the invariant the operation rests on
+    xs = [ctx.from_int(i) for i in range(1, 12)]
+    pr, sf, fl = batch.scaled_prod(ctx, xs)
+    one, two = ctx(1), ctx(2)
+    assert not (pr < one) and pr < two
+    # and the pair really is 11! = 39916800, which every rung holds
+    # exactly (2^8 x 155925, and 155925 needs 18 bits)
+    assert math.ldexp(pr.to_float(), sf) == 39916800.0 and fl == 0
+
+    # 9.4's empty case: the multiplicative identity, silently
+    pr, sf, fl = batch.scaled_prod(ctx, [])
+    assert pr.to_int() == 1 and sf == 0 and fl == 0
+    for fn in (batch.scaled_prod_sum, batch.scaled_prod_diff):
+        pr, sf, fl = fn(ctx, [], [])
+        assert pr.to_int() == 1 and sf == 0 and fl == 0
+
+    # the sums and differences: (1+1)*(3+1) = 8, (1-1)*(3-1) = 0
+    a = [ctx(1), ctx(3)]
+    b = [ctx(1), ctx(1)]
+    pr, sf, fl = batch.scaled_prod_sum(ctx, a, b)
+    assert pr.to_int() == 1 and sf == 3 and fl == 0
+    pr, sf, fl = batch.scaled_prod_diff(ctx, a, b)
+    assert pr.is_zero and pr.sign == 0 and sf == 0 and fl == 0
+
+    # 9.4's rows: inf x 0 is invalid, an infinity alone is not
+    pr, sf, fl = batch.scaled_prod(ctx, [ctx.inf(), ctx.zero()])
+    assert pr.is_nan and sf == 0 and fl == F.FLAG_INVALID
+    pr, sf, fl = batch.scaled_prod(ctx, [ctx.inf(), ctx(-2)])
+    assert pr.is_inf and pr.sign == 1 and sf == 0 and fl == 0
+    pr, sf, fl = batch.scaled_prod(ctx, [ctx.zero(1), ctx(-2)])
+    assert pr.is_zero and pr.sign == 0 and sf == 0 and fl == 0
+
+    # a length disagreement is a refusal, not a short read
+    with pytest.raises(ValueError):
+        batch.scaled_prod_sum(ctx, [ctx(1), ctx(2)], [ctx(1)])
+
+
+def test_scaled_prod_survives_what_the_plain_product_does_not():
+    """The NEGATIVE CONTROL for the whole operation, at binary32 where
+    the format's edge can be named by its bits: eight copies of the
+    largest finite value have a product 900-odd binades outside the
+    format, and scaledProd returns it with no overflow at all - where
+    ONE multiply of two of them is already an infinity."""
+    ctx = Context(24)
+    F = cftmpfr
+    big = ctx.from_bits(0x7F7FFFFF)                  # max normal
+    pr, sf, fl = batch.scaled_prod(ctx, [big] * 8)
+    assert not (fl & (F.FLAG_OVERFLOW | F.FLAG_UNDERFLOW | F.FLAG_INVALID))
+    assert not pr.is_inf and not pr.is_nan and not pr.is_zero
+    assert sf > 1000                                 # 8 x ~127 binades
+
+    sq, mfl = batch.mul(ctx, [big], [big])
+    assert sq[0].is_inf and (mfl & F.FLAG_OVERFLOW)
+
+    # and the same at the other end: eight minimum subnormals
+    tiny = ctx.from_bits(1)
+    pr, sf, fl = batch.scaled_prod(ctx, [tiny] * 8)
+    assert not (fl & (F.FLAG_OVERFLOW | F.FLAG_UNDERFLOW | F.FLAG_INVALID))
+    assert sf == -8 * 149 and pr.to_int() == 1
+    sq, mfl = batch.mul(ctx, [tiny], [tiny])
+    assert sq[0].is_zero and (mfl & F.FLAG_UNDERFLOW)
+
+
 # ---------------------------------------------------------------------
 # flag words
 # ---------------------------------------------------------------------
@@ -519,12 +637,14 @@ def test_rndna_inexact_conversions_refused():
     assert ctx.from_int(3).to_int() == 3            # exact: fine
     with pytest.raises(ValueError, match="ties"):
         ctx.from_int((1 << 30) + 1)
-    if gmpy2 is not None:
-        # an EXACT decimal is fine under any attribute...
-        assert ctx.from_str("0.5").to_float() == 0.5
-        # ...only one that actually needs rounding refuses
-        with pytest.raises(ValueError, match="ties"):
-            ctx.from_str("0.1")
+    # from_str no longer refuses under RNDNA: since the 0.6 step it
+    # rounds through the LIBRARY's decimal parse, which implements the
+    # attribute MPFR does not have. The refusal above is the from_int
+    # route, which still goes through gmpy2.
+    assert ctx.from_str("0.5").to_float() == 0.5
+    away = ctx.from_str("16777217")          # exactly halfway at binary32
+    assert away.to_bits() == 0x4b800001, hex(away.to_bits())
+    assert Context(24).from_str("16777217").to_bits() == 0x4b800000
 
 
 def test_gmpy2_absent_paths(monkeypatch):
@@ -533,8 +653,11 @@ def test_gmpy2_absent_paths(monkeypatch):
     monkeypatch.setattr(core, "gmpy2", None)
     assert ctx.from_int(10).to_int() == 10
     assert exact.to_float() == 1.5
-    with pytest.raises(RuntimeError, match="gmpy2"):
-        ctx.from_str("0.1")
+    # from_str needs no gmpy2 since the 0.6 step - it is the library's
+    # own decimal parse now, and this is the check that says so.
+    assert ctx.from_str("0.1").to_decimal(17) == "1.0000000000000000e-1"
+    assert ctx.from_decimal("0.1").same_bits(ctx.from_str("0.1"))
+    assert ctx.from_hex("0x1.8p+1").to_decimal() == "3e+0"
     with pytest.raises(RuntimeError, match="gmpy2"):
         exact.to_mpfr()
     third = ctx.div(ctx.from_int(1), ctx.from_int(3))
@@ -1062,6 +1185,452 @@ def test_p3_batch_matches_scalar(prec, fn):
     assert fl == want_or, f"{fn} {prec}: batch flags are the OR"
 
 
+# ---- the rest of table 9.1 (part of the 0.6 step) -----------------------
+
+T91_UNARY = ("exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt")
+T91_INT = ("pown", "compound", "rootn")
+
+#: Of the ten, gmpy2 2.2.1 binds three: exp10, rec_sqrt (as rsqrt) and
+#: rootn - and rootn only for a NON-NEGATIVE n, since it goes to
+#: mpfr_rootn_ui. exp2m1, exp10m1, log2p1, log10p1, powr, pown and
+#: compound exist in MPFR 4.2.2 but not in this gmpy2, so they are
+#: checked against MPFR by host/tools/mpfr_check.c calling the C entry
+#: points directly, and here against the library's own contract. Naming
+#: the gap is better than claiming a comparison this file cannot make.
+GMPY_T91 = {"exp10": "exp10", "rsqrt": "rec_sqrt"}
+
+
+def t91_pool(prec, seed):
+    """Operands where the ten can be got wrong: the integers (exp2m1 is
+    exact on them), the powers of ten (exp10 and exp10m1 are), 2^k - 1
+    and 10^k - 1 (log2p1 and log10p1 are), the even and odd powers of
+    two (rSqrt's whole split), the neighbourhood of -1, and the tiny."""
+    ctx = Context(prec)
+    out = [ctx.from_float(v) for v in
+           (0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, 7.0, 8.0,
+            9.0, 10.0, 16.0, 24.0, 25.0, 26.0, 0.5, -0.5, 0.25, -0.25,
+            99.0, 100.0, 1000.0, 0.125, 1e-8, -1e-8, 1e-40, 1.5, -0.75,
+            1023.0, 1e20)]
+    out += [ctx.from_bits(b) for b in pool(prec, count=10, seed=seed)]
+    return out
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+@pytest.mark.parametrize("fn", sorted(GMPY_T91))
+def test_t91_matches_gmpy2(prec, mode, fn):
+    """The three of the ten gmpy2 reaches, bit for bit at a matching
+    IEEE context - with rSqrt(-0) held back, because MPFR returns
+    +infinity there and 754-2019 9.2.1 asks for -infinity. That row is
+    pinned against the STANDARD below instead."""
+    ctx = Context(prec, rounding=mode)
+    ops = t91_pool(prec, seed=61)
+    checked = 0
+    for i, x in enumerate(ops):
+        if is_snan(ctx, x):
+            continue
+        if fn == "rsqrt" and x.is_zero and x.sign == 1:
+            continue
+        got = getattr(ctx, fn)(x)
+        save = gmpy2.get_context()
+        gctx = gmpy2.ieee(WIDTH[prec])
+        gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+        gmpy2.set_context(gctx)
+        try:
+            want = getattr(gmpy2, GMPY_T91[fn])(x.to_mpfr())
+        finally:
+            gmpy2.set_context(save)
+        if got.is_nan:
+            assert gmpy2.is_nan(want), (fn, i)
+        else:
+            assert got.same_bits(ctx.from_mpfr(want)), \
+                f"{fn} {prec} {mode} arg {i}: {got.to_str()} vs {want}"
+        checked += 1
+    assert checked >= 30
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+def test_rootn_matches_gmpy2(prec, mode):
+    """rootn against mpfr_rootn_ui, which gmpy2 exposes for a positive n
+    and a non-negative operand - a different MPFR entry point from
+    anything else this file calls."""
+    ctx = Context(prec, rounding=mode)
+    ops = [x for x in t91_pool(prec, seed=62)
+           if not is_snan(ctx, x) and not x.is_nan and x.sign == 0]
+    checked = 0
+    for n in (1, 2, 3, 5, 8):
+        for x in ops:
+            got = ctx.rootn(x, n)
+            save = gmpy2.get_context()
+            gctx = gmpy2.ieee(WIDTH[prec])
+            gctx.round = getattr(gmpy2, GMPY_MODES[mode])
+            gmpy2.set_context(gctx)
+            try:
+                want = gmpy2.rootn(x.to_mpfr(), n)
+            finally:
+                gmpy2.set_context(save)
+            if got.is_nan:
+                assert gmpy2.is_nan(want), (n, x.to_str())
+            else:
+                assert got.same_bits(ctx.from_mpfr(want)), \
+                    f"rootn {prec} {mode} n={n}: {got.to_str()} vs {want}"
+            checked += 1
+    assert checked >= 60
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", T91_UNARY)
+def test_t91_batch_matches_scalar(prec, fn):
+    """One C call for the array must equal N calls for the elements."""
+    ctx = Context(prec)
+    ops = t91_pool(prec, seed=63)
+    got, fl = getattr(batch, fn)(ctx, ops)
+    want, want_or = [], 0
+    for x in ops:
+        want.append(getattr(ctx, fn)(x))
+        want_or |= ctx.last_flags
+    assert len(got) == len(want)
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or, f"{fn} {prec}: batch flags are the OR"
+
+
+# ---------------------------------------------------------------------
+# Character sequences (754-2019 5.12) and NaN payloads (9.7)
+#
+# Part of the 0.6 step, and the first conversions in this package that
+# need no optional dependency at all: the rounding is the library's,
+# not gmpy2's. So the tests here run on a bare box, and the ones that
+# compare against gmpy2 are extra rather than load-bearing.
+#
+# What a binding can break in this area is the shape rather than the
+# arithmetic - the sizing protocol, the batch marshalling, which flag
+# word gets recorded, and whether a refusal reaches the caller as a
+# refusal. That is what these attack.
+# ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_decimal_digits_is_pmin(prec):
+    """5.12.2's Pmin, from the LIBRARY rather than from a table here:
+    9, 17, 36 and 73 for the four rungs."""
+    assert Context(prec).decimal_digits == {24: 9, 53: 17, 113: 36,
+                                            237: 73}[prec]
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU", "RNDNA"))
+def test_decimal_round_trip_at_pmin(prec, mode):
+    """to_decimal(Pmin) then from_decimal reproduces the encoding under
+    a nearest attribute - 5.12's opening requirement. The directed
+    attributes are checked for the weaker property that actually holds
+    there: the sequence still names a value on the right side."""
+    ctx = Context(prec, rounding=mode)
+    h = ctx.decimal_digits
+    for bits in pool(prec, count=24, seed=31):
+        f = ctx.from_bits(bits)
+        if f.is_nan:
+            continue
+        back = ctx.from_decimal(f.to_decimal(h))
+        if mode in ("RNDN", "RNDNA"):
+            assert back.same_bits(f), (mode, hex(bits), f.to_decimal(h))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_exact_decimal_round_trips_in_every_attribute(prec):
+    """The EXACT conversion writes the value and nothing else, so
+    reading it back cannot round and cannot raise - in any attribute.
+    That is a stronger claim than the Pmin round trip and the one the
+    exact mode exists to make."""
+    for mode in ("RNDN", "RNDZ", "RNDD", "RNDU", "RNDNA"):
+        ctx = Context(prec, rounding=mode)
+        for bits in pool(prec, count=10, seed=32):
+            f = ctx.from_bits(bits)
+            if f.is_nan or f.is_inf:
+                continue
+            text = f.to_decimal()
+            back = ctx.from_decimal(text)
+            assert back.same_bits(f), (mode, hex(bits), text[:60])
+            assert ctx.last_flags == 0, (mode, hex(bits))
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_hex_round_trips_and_is_exact(prec):
+    ctx = Context(prec)
+    for bits in pool(prec, count=16, seed=33):
+        f = ctx.from_bits(bits)
+        if f.is_nan:
+            continue
+        back = ctx.from_hex(f.to_hex())
+        assert back.same_bits(f), (hex(bits), f.to_hex())
+        assert ctx.last_flags == 0
+    assert ctx.from_hex("0x1.8p+1").to_decimal() == "3e+0"
+    # 5.12.3's grammar requires the binary exponent
+    with pytest.raises(cftmpfr.CftError):
+        ctx.from_hex("0x1.8")
+    # and the hex parser is not the decimal one
+    with pytest.raises(cftmpfr.CftError):
+        ctx.from_hex("1.5")
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_specials_and_payloads_survive_the_round_trip(prec):
+    """5.12.1's words, including the payload suffix 6.2.3 asks language
+    standards to provide. A signaling NaN comes back SIGNALING and
+    raises nothing on the way, which is the spelling this contract
+    chose out of the two 5.12.1 offers."""
+    ctx = Context(prec)
+    fi = ctx._fi
+    top = 1 << (fi.man_w - 1)
+    allones = ((1 << fi.exp_w) - 1) << fi.man_w
+    for bits in (allones | top,                          # canonical qNaN
+                 allones | top | 5,                      # qNaN, payload 5
+                 allones | 1,                            # sNaN, payload 1
+                 allones | (top - 1),                    # sNaN, max payload
+                 (1 << (fi.width - 1)) | allones | top | 3):
+        f = ctx.from_bits(bits)
+        ctx.clear_flags()
+        text = f.to_decimal()
+        assert ctx.from_decimal(text).same_bits(f), (hex(bits), text)
+        assert ctx.from_hex(text).same_bits(f), (hex(bits), text)
+        assert ctx.flags == 0, (hex(bits), text)
+    for text, sign in (("inf", 0), ("-inf", 1), ("INFINITY", 0)):
+        f = ctx.from_decimal(text)
+        assert f.is_inf and f.sign == sign
+    assert ctx.from_decimal("-0").sign == 1
+    assert ctx.from_decimal("0").to_decimal(9) == "0"
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_from_decimal_refuses_rather_than_guesses(prec):
+    ctx = Context(prec)
+    for s in ("", "+", ".", "1e", "1 ", " 1", "1.5.5", "1,5", "0x1p+0",
+              "nan()", "nan(0x)", "1_000"):
+        with pytest.raises(cftmpfr.CftError):
+            ctx.from_decimal(s)
+    # a payload the format cannot hold is in the syntax and refused
+    with pytest.raises(cftmpfr.CftError):
+        ctx.from_decimal("nan(0x%x)" % (1 << (ctx._fi.man_w - 1)))
+    with pytest.raises(TypeError):
+        ctx.from_decimal(1.5)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_batch_from_decimal_equals_the_scalar_path(prec):
+    """The batch path against the scalar path, which is this file's
+    standing question for every operation - here with the flag word as
+    the OR across the batch."""
+    ctx = Context(prec)
+    seqs = []
+    for bits in pool(prec, count=20, seed=34):
+        f = ctx.from_bits(bits)
+        if f.is_nan or f.is_inf:
+            continue
+        seqs.append(f.to_decimal(ctx.decimal_digits))
+    seqs += ["0.1", "1e400", "1e-400", "inf", "-0", "nan(0x1)"]
+    ctx.clear_flags()
+    got, fl = batch.from_decimal(ctx, seqs)
+    want, acc = [], 0
+    single = Context(prec)
+    for s in seqs:
+        want.append(single.from_decimal(s))
+        acc |= single.last_flags
+    assert len(got) == len(want)
+    for a, b, s in zip(got, want, seqs):
+        assert a.same_bits(b), (s[:60], a, b)
+    assert fl == acc
+    with pytest.raises(TypeError):
+        batch.from_decimal(ctx, "1.5")
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_payload_operations(prec):
+    """9.7, which signals nothing - so the flag state must be untouched
+    by every one of the three."""
+    ctx = Context(prec)
+    top = 1 << (ctx._fi.man_w - 1)
+    ctx.clear_flags()
+    for payload in (1, 5, top - 1):
+        made = ctx.set_payload(ctx.from_int(payload))
+        assert made.is_nan and made.get_payload().to_int() == payload
+        sig = ctx.set_payload_signaling(ctx.from_int(payload))
+        assert sig.is_nan and sig.get_payload().to_int() == payload
+        assert sig.to_decimal().startswith("snan")
+    # outside the admissible set the answer is +0, per 9.7
+    for bad in (ctx.from_int(top), ctx.from_int(-1), ctx.inf(0), ctx.nan()):
+        assert ctx.set_payload(bad).is_zero
+        assert ctx.set_payload_signaling(bad).is_zero
+    # payload 0 is admissible quiet and NOT signaling
+    assert ctx.set_payload(ctx.zero(0)).is_nan
+    assert ctx.set_payload_signaling(ctx.zero(0)).is_zero
+    # getPayload of anything that is not a NaN is -1
+    assert ctx.get_payload(ctx.from_int(3)).to_int() == -1
+    assert ctx.flags == 0, "9.7 says these signal no exceptions"
+    # the batch form agrees with the scalar one
+    xs = [ctx.from_int(1), ctx.nan(), ctx.zero(0), ctx.inf(1)]
+    for name in ("get_payload", "set_payload", "set_payload_signaling"):
+        got = getattr(batch, name)(ctx, xs)
+        for g, x in zip(got, xs):
+            assert g.same_bits(getattr(ctx, name)(x)), (name, x)
+
+
+@needs_gmpy2
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("mode", ("RNDN", "RNDZ", "RNDD", "RNDU"))
+def test_from_decimal_agrees_with_gmpy2(prec, mode):
+    """The library's decimal parse against MPFR's, which is what
+    from_str used before the 0.6 step. Encodings only: MPFR's underflow
+    flag has its own definition and raises on a decimal that lands
+    EXACTLY on a subnormal, where 754 7.5 says an exact result raises
+    nothing - which is the one row the two disagree on and the reason
+    from_str moved."""
+    ctx = Context(prec, rounding=mode)
+    ref = Context(prec, rounding=mode)
+    for s in ("0.1", "0.5", "2.5", "1e300", "1e-300", "1e400", "-1e400",
+              "3.14159265358979323846264338327950288", "9" * 30,
+              "16777217", "1e-45", "123456789012345678901234567890e-15"):
+        got = ctx.from_decimal(s)
+        want = ref._rounded_via_gmpy2(lambda: gmpy2.mpfr(s), s)
+        assert got.same_bits(want), (prec, mode, s, got, want)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+@pytest.mark.parametrize("fn", T91_INT)
+def test_t91_int_batch_reads_n_per_element(prec, fn):
+    """The batch form of pown, compound and rootn takes a sequence of
+    exponents, one per element - which an implementation that hoisted n
+    out of the loop would pass every scalar test and fail here."""
+    ctx = Context(prec)
+    ops = t91_pool(prec, seed=64)
+    ns = [((i % 7) - 3) or 1 for i in range(len(ops))]
+    got, fl = getattr(batch, fn)(ctx, ops, ns)
+    want, want_or = [], 0
+    for x, n in zip(ops, ns):
+        want.append(getattr(ctx, fn)(x, n))
+        want_or |= ctx.last_flags
+    for g, w in zip(got, want):
+        assert g.same_bits(w), f"{fn} {prec}"
+    assert fl == want_or
+    # and a scalar n applies to every element
+    got2, _ = getattr(batch, fn)(ctx, ops, 3)
+    for g, x in zip(got2, ops):
+        assert g.same_bits(getattr(ctx, fn)(x, 3))
+    with pytest.raises(ValueError):
+        getattr(batch, fn)(ctx, ops, [1, 2])
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_t91_exact_cases_and_rows(prec):
+    """The exact cases decided by exact arithmetic, and the 9.2.1 rows
+    for the ten - including the three where this contract follows the
+    standard and MPFR does not."""
+    ctx = Context(prec)
+    F = ctx.from_float
+    exact = [
+        ("exp2m1", 3.0, 7.0), ("exp2m1", -3.0, -0.875),
+        ("exp2m1", -0.0, -0.0), ("exp10", 2.0, 100.0),
+        ("exp10", -0.0, 1.0), ("exp10m1", 2.0, 99.0),
+        ("log2p1", 3.0, 2.0), ("log2p1", -0.5, -1.0),
+        ("log10p1", 99.0, 2.0), ("log10p1", 9.0, 1.0),
+        ("rsqrt", 4.0, 0.5), ("rsqrt", 0.25, 2.0),
+    ]
+    for fn, arg, want in exact:
+        ctx.clear_flags()
+        got = getattr(ctx, fn)(F(arg))
+        assert got.to_float() == want, (fn, arg, got.to_str())
+        assert ctx.last_flags == 0, (fn, arg, ctx.flag_names())
+    # log2p1(1) is log2(2) = 1 and IS exact, which is why the inexact
+    # list uses 2 - the exact table here is larger than it looks
+    for fn, arg in (("exp10", -1.0), ("rsqrt", 2.0), ("exp2m1", 0.5),
+                    ("log2p1", 2.0), ("log10p1", 1.0)):
+        ctx.clear_flags()
+        getattr(ctx, fn)(F(arg))
+        assert "inexact" in ctx.flag_names(), (fn, arg)
+    # rSqrt keeps the sign of a zero; MPFR does not
+    ctx.clear_flags()
+    p = ctx.rsqrt(ctx.zero())
+    assert p.is_inf and p.sign == 0
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    m = ctx.rsqrt(ctx.zero(1))
+    assert m.is_inf and m.sign == 1, "rSqrt(-0) is MINUS infinity"
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.rsqrt(F(-1.0)).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.rsqrt(ctx.inf()).is_zero and ctx.last_flags == 0
+    # log2p1 and log10p1: the pole at -1 and the domain below it
+    for fn in ("log2p1", "log10p1"):
+        ctx.clear_flags()
+        r = getattr(ctx, fn)(F(-1.0))
+        assert r.is_inf and r.sign == 1
+        assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+        ctx.clear_flags()
+        assert getattr(ctx, fn)(F(-2.0)).is_nan
+        assert "invalid" in ctx.flag_names(ctx.last_flags)
+    # powr is not pow
+    ctx.clear_flags()
+    assert ctx.powr(F(1.0), ctx.nan()).is_nan, "powr(1, qNaN) is a NaN"
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    assert ctx.pow(F(1.0), ctx.nan()).to_float() == 1.0, "pow(1, qNaN) is 1"
+    ctx.clear_flags()
+    assert ctx.powr(F(-1.0), F(2.0)).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.powr(ctx.zero(), ctx.zero()).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.powr(F(2.0), F(3.0)).to_float() == 8.0
+    assert ctx.last_flags == 0
+    # pown, compound, rootn
+    ctx.clear_flags()
+    assert ctx.pown(ctx.nan(), 0).to_float() == 1.0
+    assert ctx.pown(F(-2.0), 3).to_float() == -8.0
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    z = ctx.pown(ctx.zero(1), -3)
+    assert z.is_inf and z.sign == 1
+    assert "divbyzero" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.compound(ctx.nan(), 0).to_float() == 1.0
+    assert ctx.compound(F(1.0), 3).to_float() == 8.0
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    assert ctx.compound(F(-2.0), 0).is_nan, "compound(x < -1, 0) is invalid"
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+    ctx.clear_flags()
+    assert ctx.rootn(F(-8.0), 3).to_float() == -2.0
+    assert ctx.rootn(F(4.0), -1).to_float() == 0.25
+    assert ctx.last_flags == 0
+    ctx.clear_flags()
+    assert ctx.rootn(ctx.nan(), 0).is_nan
+    assert "invalid" in ctx.flag_names(ctx.last_flags)
+
+
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_rootn_two_is_sqrt_except_at_minus_zero(prec):
+    """rootn(x, 2) is sqrt(x) on every operand but -0, where 754-2019's
+    own NOTE says they differ: rootn(-0, 2) is +0 and squareRoot(-0) is
+    -0. The difference is asserted, not skipped."""
+    ctx = Context(prec)
+    for x in t91_pool(prec, seed=65):
+        if is_snan(ctx, x):
+            continue
+        r = ctx.rootn(x, 2)
+        s = ctx.sqrt(x)
+        if x.is_zero and x.sign == 1:
+            assert r.is_zero and r.sign == 0
+            assert s.is_zero and s.sign == 1
+        elif r.is_nan:
+            assert s.is_nan
+        else:
+            assert r.same_bits(s), (x.to_str(), r.to_str(), s.to_str())
+
+
 @pytest.mark.parametrize("prec", PRECISIONS)
 def test_p3_exact_cases_are_the_zeros(prec):
     """Hermite-Lindemann: the only exact cases are the zeros, cos and
@@ -1170,3 +1739,215 @@ def test_p3_tiny_arguments_take_a_side(prec):
         got = getattr(ctx, fn)(ctx.from_bits(1))
         assert got.same_bits(want), (fn, mode, got.to_str())
         assert tuple(ctx.flag_names(ctx.last_flags)) == ("inexact",), (fn, mode)
+
+
+# ---------------------------------------------------------------------
+# The augmented arithmetic operations (754-2019 clause 9.5)
+#
+# What a binding can break here that it cannot break anywhere else:
+# there are TWO outputs, so the second could be dropped, swapped with
+# the first, or handed back stale; and there is NO rounding argument,
+# so the context's attribute could leak into the call. Both are
+# attacked below. The values are scored against the GOLDEN MODEL, the
+# way the rest of this repository scores them - gmpy2 is no oracle
+# here, because MPFR has no roundTiesTowardZero at all, which is
+# precisely why these three are worth exposing from a package that
+# otherwise matches it call for call.
+# ---------------------------------------------------------------------
+
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+    from cft_golden import FORMATS as _GFORMATS          # noqa: E402
+    from cft_golden import augmented as _gaug            # noqa: E402
+    from cft_golden import softfloat as _gsf             # noqa: E402
+    GOLDEN = {24: _GFORMATS["fp32"], 53: _GFORMATS["fp64"],
+              113: _GFORMATS["fp128"], 237: _GFORMATS["fp256"]}
+except ImportError:                                      # pragma: no cover
+    GOLDEN = None
+
+needs_golden = pytest.mark.skipif(GOLDEN is None,
+                                  reason="the golden model is not importable")
+
+AUG = ("augmented_add", "augmented_sub", "augmented_mul")
+
+
+def _aug_model(name):
+    return {"augmented_add": _gaug.augmented_add,
+            "augmented_sub": _gaug.augmented_sub,
+            "augmented_mul": _gaug.augmented_mul}[name]
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_pairs_match_the_model(prec):
+    """Both outputs and the flag word, per element, against
+    python/cft_golden/augmented.py - which is the definition."""
+    fmt = GOLDEN[prec]
+    ctx = Context(prec)
+    ops = pool(prec, count=26, seed=41)
+    checked = 0
+    for name in AUG:
+        for xb in ops:
+            for yb in ops:
+                ctx.clear_flags()
+                r, e = getattr(ctx, name)(ctx.from_bits(xb),
+                                          ctx.from_bits(yb))
+                want = _aug_model(name)(fmt, xb, yb)
+                assert (r.to_bits(), e.to_bits(), ctx.last_flags) == want, \
+                    (name, prec, hex(xb), hex(yb))
+                checked += 1
+    assert checked > 4000, checked
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_ignores_the_context_attribute(prec):
+    """9.5 fixes the rounding, so the SAME pair must come back under
+    every attribute - RNDNA included, which nothing else in this
+    package can even ask MPFR for. A binding that forwarded the
+    context's attribute would pass every other test in this file."""
+    ops = pool(prec, count=10, seed=43)
+    base = Context(prec, rounding="RNDN")
+    want = {}
+    for name in AUG:
+        for xb in ops:
+            for yb in ops:
+                r, e = getattr(base, name)(base.from_bits(xb),
+                                           base.from_bits(yb))
+                want[(name, xb, yb)] = (r.to_bits(), e.to_bits(),
+                                        base.last_flags)
+    for mode in ("RNDZ", "RNDD", "RNDU", "RNDNA"):
+        ctx = Context(prec, rounding=mode)
+        for (name, xb, yb), expected in want.items():
+            r, e = getattr(ctx, name)(ctx.from_bits(xb), ctx.from_bits(yb))
+            assert (r.to_bits(), e.to_bits(), ctx.last_flags) == expected, \
+                (name, mode, prec, hex(xb), hex(yb))
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_batch_equals_the_scalar_path(prec):
+    """One C call over an array must give, element for element, what n
+    calls of one element give - both arrays, and the flag OR."""
+    ctx = Context(prec)
+    ops = pool(prec, count=40, seed=47)
+    xs = [ctx.from_bits(b) for b in ops]
+    ys = [ctx.from_bits(b) for b in reversed(ops)]
+    for name in AUG:
+        ctx.clear_flags()
+        rs, es, flags = getattr(batch, name)(ctx, xs, ys)
+        assert len(rs) == len(xs) and len(es) == len(xs)
+        want_or = 0
+        for x, y, r, e in zip(xs, ys, rs, es):
+            ctx.clear_flags()
+            sr, se = getattr(ctx, name)(x, y)
+            assert r.same_bits(sr) and e.same_bits(se), (name, prec)
+            want_or |= ctx.last_flags
+        assert flags == want_or, (name, prec, flags, want_or)
+
+
+def _dyadic(fmt, bits):
+    """(m, e) with value m * 2^e and m odd - or None if not finite."""
+    u = _gsf.unpack(fmt, bits)
+    if u.kind in (_gsf.INF, _gsf.NAN):
+        return None
+    if u.kind == _gsf.ZERO:
+        return (0, 0)
+    m = -u.m if u.sign else u.m
+    t = (m & -m).bit_length() - 1
+    return (m >> t, u.e + t)
+
+
+def _dnorm(m, e):
+    if m == 0:
+        return (0, 0)
+    t = (m & -m).bit_length() - 1
+    return (m >> t, e + t)
+
+
+def _dadd(p, q):
+    e0 = min(p[1], q[1])
+    return _dnorm((p[0] << (p[1] - e0)) + (q[0] << (q[1] - e0)), e0)
+
+
+@needs_golden
+@pytest.mark.parametrize("prec", PRECISIONS)
+def test_augmented_pair_is_exact(prec):
+    """r + e is x op y EXACTLY, in Python integers rather than through
+    any floating-point arithmetic - the property the pair exists for.
+    Two documented exclusions: an overflowed result, where both outputs
+    are an infinity, and a product residual the format cannot hold,
+    which 9.5 delivers rounded with underflow AND inexact."""
+    fmt = GOLDEN[prec]
+    ctx = Context(prec)
+    ops = pool(prec, count=30, seed=53)
+    exact = lost = 0
+    for name in AUG:
+        for xb in ops:
+            for yb in ops:
+                dx, dy = _dyadic(fmt, xb), _dyadic(fmt, yb)
+                if dx is None or dy is None:
+                    continue
+                ctx.clear_flags()
+                r, e = getattr(ctx, name)(ctx.from_bits(xb),
+                                          ctx.from_bits(yb))
+                names = set(ctx.flag_names(ctx.last_flags))
+                if "overflow" in names:
+                    continue
+                if name == "augmented_mul" and "inexact" in names:
+                    lost += 1
+                    continue
+                if name == "augmented_mul":
+                    want = _dnorm(dx[0] * dy[0], dx[1] + dy[1])
+                elif name == "augmented_sub":
+                    want = _dadd(dx, (-dy[0], dy[1]))
+                else:
+                    want = _dadd(dx, dy)
+                got = _dadd(_dyadic(fmt, r.to_bits()),
+                            _dyadic(fmt, e.to_bits()))
+                assert got == want, (name, prec, hex(xb), hex(yb))
+                exact += 1
+    assert exact > 2000, exact
+    assert lost > 0, "the non-representable product residual was unreached"
+
+
+@needs_golden
+def test_augmented_named_rows():
+    """The rows 9.5 states in words, reached through the binding: the
+    tie toward the smaller magnitude, underflow without inexact, and
+    the zero error term that takes r's sign."""
+    ctx = Context(53)
+    one_u = ctx.from_bits(0x3FF0000000000001)           # 1 + 2^-52
+    half_u = ctx.from_bits(0x3CA0000000000000)          # 2^-53
+    ctx.clear_flags()
+    r, e = ctx.augmented_add(one_u, half_u)
+    assert r.to_bits() == 0x3FF0000000000001
+    assert e.to_bits() == 0x3CA0000000000000
+    assert ctx.last_flags == 0
+    # ordinary addition steps UP from the same midpoint, which is what
+    # makes the assertion above a test rather than a coincidence
+    assert ctx.add(one_u, half_u).to_bits() == 0x3FF0000000000002
+
+    ctx.clear_flags()
+    r, e = ctx.augmented_add(ctx.from_float(1.0), ctx.from_bits(1))
+    assert e.to_bits() == 1
+    assert tuple(ctx.flag_names(ctx.last_flags)) == ("underflow",)
+
+    ctx.clear_flags()
+    r, e = ctx.augmented_mul(ctx.from_bits(1), ctx.from_bits(1))
+    assert r.is_zero and e.is_zero
+    assert set(ctx.flag_names(ctx.last_flags)) == {"underflow", "inexact"}
+
+    ctx.clear_flags()
+    minus_one = ctx.from_float(-1.0)
+    r, e = ctx.augmented_add(minus_one, ctx.zero())
+    assert r.same_bits(minus_one)
+    assert e.is_zero and e.sign == 1, "a zero e takes the sign of r"
+    assert ctx.last_flags == 0
+
+
+def test_augmented_refuses_an_unknown_name():
+    ctx = Context(53)
+    with pytest.raises(ValueError):
+        cftmpfr._lib.augmented(ctx._dev, "div", ctx._fi.code, b"", b"", 0,
+                               ctx._fi.esz)

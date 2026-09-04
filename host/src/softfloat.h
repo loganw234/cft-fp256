@@ -54,7 +54,21 @@ extern const cft_fmt_desc cft_sf_formats[4];
 #define CFT_SF_RUP 3
 #define CFT_SF_RMM 4
 
-/* Opcodes. 15 and 28..255 are unassigned and answer with the canonical
+/* The SIXTH rounding DIRECTION, which is not an attribute:
+ * roundTiesTowardZero, defined by IEEE 754-2019 9.5 for the augmented
+ * arithmetic operations and for nothing else. Nearest, and an exact tie
+ * takes "the one with smaller magnitude"; overflow still goes to an
+ * infinity, which 9.5 states explicitly.
+ *
+ * cft_sf_round_pack accepts it; nothing that takes a cft_round does.
+ * The value is deliberately outside the 3-bit MODE[14:12] field the
+ * five attributes encode into, so it cannot be mistaken for one on a
+ * wire, in a CSR, or in a vector set - and the API layer's own
+ * range check (0..4) rejects it before it can be passed as one.
+ * augmented.c is the only caller. */
+#define CFT_SF_RTTZ 16
+
+/* Opcodes. 15 and 30..255 are unassigned and answer with the canonical
  * quiet NaN and invalid - a defined result, because a host issuing an
  * opcode its device predates should see that in the flags rather than
  * receive a plausible number. */
@@ -94,6 +108,15 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * subnormal operands. divsqrt.c refines them to full precision. */
 #define CFT_SF_RECIP_SEED 26
 #define CFT_SF_RSQRT_SEED 27
+
+/* The other two of clause 9.4's sum reductions, appended (never
+ * inserted) after the seeds. No accumulator streams them and none
+ * needs to: sumSquare IS the dot tree over (a, a) and sumAbs IS the
+ * sum tree over |a|, so cft_reduce() issues exactly those and the
+ * device and software backends agree by construction. They take
+ * opcode numbers because cft_reduce()'s first argument is one. */
+#define CFT_SF_SUMSQ    28
+#define CFT_SF_SUMABS   29
 
 /* Is `op` one of the assigned opcodes? Unassigned ones still compute -
  * see above - but cft_supports() answers with this. */

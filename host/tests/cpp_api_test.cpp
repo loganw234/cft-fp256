@@ -410,6 +410,158 @@ void check_format(cft::device &dev, cft_device *ref)
                   cft_format_name(F), z.hex().c_str());
         }
 
+        /* -- the rest of clause 9.4 (the 0.6 step) ---------------- *
+         *
+         * The same three lengths, plus the two claims that are about
+         * this WRAPPER rather than about the library: that sumsq and
+         * sumabs reach the right opcodes, and that a scaled product's
+         * SCALE survives the round trip - a pair whose second member
+         * the wrapper dropped would still pass a pr-only comparison.
+         */
+        {
+            static const std::size_t lens[] = { 0, 1, 5, 64, 257 };
+            for (std::size_t li = 0; li < sizeof lens / sizeof lens[0]; li++) {
+                const std::size_t m = lens[li];
+                cft::cspan<enc> av(m ? a.data() : nullptr, m);
+                cft::cspan<enc> bv(m ? b.data() : nullptr, m);
+                enc c1{};
+                std::uint32_t fc = 0;
+                cft_status st;
+
+                const cft::value<F> sq = ctx.sumsq(av);
+                st = cft_reduce(ref, CFT_SUMSQ, F, rnd, m ? a.data() : nullptr,
+                                nullptr, c1.data(), m, &fc, nullptr);
+                CHECK(st == CFT_OK && sq.bytes() == c1 &&
+                          ctx.last_flags() == fc,
+                      "%s %s sumsq n=%u: wrapper %s/0x%02x, C %s/0x%02x",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), sq.hex().c_str(),
+                      static_cast<unsigned>(ctx.last_flags()),
+                      cft::to_hex<F>(c1).c_str(), static_cast<unsigned>(fc));
+
+                const cft::value<F> ab = ctx.sumabs(av);
+                st = cft_reduce(ref, CFT_SUMABS, F, rnd, m ? a.data() : nullptr,
+                                nullptr, c1.data(), m, &fc, nullptr);
+                CHECK(st == CFT_OK && ab.bytes() == c1 &&
+                          ctx.last_flags() == fc,
+                      "%s %s sumabs n=%u: wrapper %s/0x%02x, C %s/0x%02x",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), ab.hex().c_str(),
+                      static_cast<unsigned>(ctx.last_flags()),
+                      cft::to_hex<F>(c1).c_str(), static_cast<unsigned>(fc));
+
+                /* The identity, through the wrapper's own two entry
+                 * points - and its documented exception, which this
+                 * operand array reaches: it carries infinities and
+                 * NaNs, so 9.4's infinity-over-NaN row applies at every
+                 * length but n <= 1 and the answer is +inf where the
+                 * plain dot gives the quiet NaN. Both branches are
+                 * asserted, because "they differ" is only evidence if
+                 * the difference is the one the standard names. */
+                if (m) {
+                    std::vector<std::uint8_t> kls(m);
+                    bool has_inf = false, has_nan = false;
+                    CHECK(cft_class(ref, F, a.data(), kls.data(), m) == CFT_OK,
+                          "cft_class over the reduction operands");
+                    for (std::size_t k = 0; k < m; k++) {
+                        has_inf |= kls[k] == CFT_CLASS_POS_INF ||
+                                   kls[k] == CFT_CLASS_NEG_INF;
+                        has_nan |= kls[k] == CFT_CLASS_QNAN ||
+                                   kls[k] == CFT_CLASS_SNAN;
+                    }
+                    const cft::value<F> dsq = ctx.dot(av, av);
+                    if (has_inf && has_nan) {
+                        CHECK(sq.bytes() == cft::inf_enc<F>(0),
+                              "%s %s n=%u: an infinity beside a NaN must "
+                              "make sumsq +inf, got %s",
+                              cft_format_name(F), cft::round_name(rnd),
+                              static_cast<unsigned>(m), sq.hex().c_str());
+                        CHECK(!(dsq.bytes() == sq.bytes()),
+                              "%s %s n=%u: the plain dot agreed there, so "
+                              "the override cannot be shown to do anything",
+                              cft_format_name(F), cft::round_name(rnd),
+                              static_cast<unsigned>(m));
+                    } else {
+                        CHECK(sq.bytes() == dsq.bytes(),
+                              "%s %s n=%u: sumsq %s != dot(a,a) %s through "
+                              "the wrapper", cft_format_name(F),
+                              cft::round_name(rnd), static_cast<unsigned>(m),
+                              sq.hex().c_str(), dsq.hex().c_str());
+                    }
+                }
+
+                std::int64_t sc64 = 0;
+                const auto sp = ctx.scaled_prod(av);
+                st = cft_scaled_prod(ref, F, rnd, m ? a.data() : nullptr,
+                                     c1.data(), &sc64, m, &fc);
+                CHECK(st == CFT_OK && sp.pr.bytes() == c1 &&
+                          sp.scale == sc64 && ctx.last_flags() == fc,
+                      "%s %s scaled_prod n=%u: wrapper %s/%lld/0x%02x, "
+                      "C %s/%lld/0x%02x",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), sp.pr.hex().c_str(),
+                      static_cast<long long>(sp.scale),
+                      static_cast<unsigned>(ctx.last_flags()),
+                      cft::to_hex<F>(c1).c_str(),
+                      static_cast<long long>(sc64),
+                      static_cast<unsigned>(fc));
+
+                const auto sps = ctx.scaled_prod_sum(av, bv);
+                st = cft_scaled_prod_sum(ref, F, rnd, m ? a.data() : nullptr,
+                                         m ? b.data() : nullptr, c1.data(),
+                                         &sc64, m, &fc);
+                CHECK(st == CFT_OK && sps.pr.bytes() == c1 &&
+                          sps.scale == sc64 && ctx.last_flags() == fc,
+                      "%s %s scaled_prod_sum n=%u: wrapper %s/%lld, "
+                      "C %s/%lld",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), sps.pr.hex().c_str(),
+                      static_cast<long long>(sps.scale),
+                      cft::to_hex<F>(c1).c_str(),
+                      static_cast<long long>(sc64));
+
+                const auto spd = ctx.scaled_prod_diff(av, bv);
+                st = cft_scaled_prod_diff(ref, F, rnd, m ? a.data() : nullptr,
+                                          m ? b.data() : nullptr, c1.data(),
+                                          &sc64, m, &fc);
+                CHECK(st == CFT_OK && spd.pr.bytes() == c1 &&
+                          spd.scale == sc64 && ctx.last_flags() == fc,
+                      "%s %s scaled_prod_diff n=%u: wrapper %s/%lld, "
+                      "C %s/%lld",
+                      cft_format_name(F), cft::round_name(rnd),
+                      static_cast<unsigned>(m), spd.pr.hex().c_str(),
+                      static_cast<long long>(spd.scale),
+                      cft::to_hex<F>(c1).c_str(),
+                      static_cast<long long>(sc64));
+            }
+
+            /* An empty scaled product is 9.4's multiplicative identity,
+             * and it is the one answer here that is not a function of
+             * any input - worth a literal rather than a comparison. */
+            const auto e = ctx.scaled_prod(cft::cspan<enc>());
+            CHECK(e.pr.bytes() == cft::one_enc<F>() && e.scale == 0 &&
+                      ctx.last_flags() == 0,
+                  "%s: an empty scaled product is (1, 0), silently (%s/%lld)",
+                  cft_format_name(F), e.pr.hex().c_str(),
+                  static_cast<long long>(e.scale));
+
+            /* Length disagreement is the wrapper's own refusal, and it
+             * must be an exception rather than a read past the end of
+             * the caller's array. */
+            CHECK(refused_as_misuse([&] {
+                      ctx.scaled_prod_sum(cft::cspan<enc>(a.data(), 4),
+                                          cft::cspan<enc>(b.data(), 3));
+                  }),
+                  "%s: scaled_prod_sum refuses mismatched lengths",
+                  cft_format_name(F));
+            CHECK(refused_as_misuse([&] {
+                      ctx.scaled_prod_diff(cft::cspan<enc>(a.data(), 4),
+                                           cft::cspan<enc>(b.data(), 3));
+                  }),
+                  "%s: scaled_prod_diff refuses mismatched lengths",
+                  cft_format_name(F));
+        }
+
         /* -- clause 5 --------------------------------------------- */
         {
             std::uint32_t fw = 0, fc = 0;
@@ -541,7 +693,43 @@ void check_format(cft::device &dev, cft_device *ref)
             TRIG1(asinh);
             TRIG1(acosh);
             TRIG1(atanh);
+            /* Table 9.1's remainder (part of the 0.6 step). The six
+             * unary ones marshal like everything above. */
+            TRIG1(exp2m1);
+            TRIG1(exp10);
+            TRIG1(exp10m1);
+            TRIG1(log2p1);
+            TRIG1(log10p1);
+            TRIG1(rsqrt);
 #undef TRIG1
+
+            /* pown, compound and rootn carry a second array of a
+             * DIFFERENT type, which is the marshalling this file exists
+             * to check: a wrapper that passed the element count where
+             * the exponent array belongs would compile and would be
+             * wrong in every lane. The exponents vary per element for
+             * the same reason. */
+            {
+                std::vector<std::int64_t> nv(n);
+                for (std::size_t k = 0; k < n; k++)
+                    nv[k] = (std::int64_t)(k % 7) - 3;
+#define INT1(name)                                                         \
+                fw = ctx.name(a, nv, dw);                                  \
+                st = cft_##name(ref, F, rnd, a.data(), nv.data(),          \
+                                dc.data(), n, &fc);                        \
+                CHECK(st == CFT_OK, "cft_" #name ": %s",                   \
+                      cft_strerror(st));                                   \
+                expect<F>(#name, rnd, dw, fw, dc, fc)
+                INT1(pown);
+                INT1(compound);
+                INT1(rootn);
+#undef INT1
+            }
+
+            fw = ctx.powr(a, b, dw);
+            st = cft_powr(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
+            CHECK(st == CFT_OK, "cft_powr: %s", cft_strerror(st));
+            expect<F>("powr", rnd, dw, fw, dc, fc);
 
             fw = ctx.atan2(a, b, dw);
             st = cft_atan2(ref, F, rnd, a.data(), b.data(), dc.data(), n, &fc);
@@ -553,6 +741,37 @@ void check_format(cft::device &dev, cft_device *ref)
                              &fc);
             CHECK(st == CFT_OK, "cft_atan2pi: %s", cft_strerror(st));
             expect<F>("atan2pi", rnd, dw, fw, dc, fc);
+
+            /* The augmented arithmetic operations (754-2019 9.5): two
+             * outputs each, and no attribute - the context's rounding
+             * is deliberately NOT consulted, so the same pair must come
+             * back under every `rnd` this loop is running. */
+            {
+                std::vector<enc> ew(n), ec(n);
+#define AUG(name)                                                         \
+                fw = ctx.augmented_##name(a, b, dw, ew);                  \
+                st = cft_augmented_##name(ref, F, a.data(), b.data(),     \
+                                          dc.data(), ec.data(), n, &fc);  \
+                CHECK(st == CFT_OK, "cft_augmented_" #name ": %s",        \
+                      cft_strerror(st));                                  \
+                expect<F>("augmented_" #name " (r)", rnd, dw, fw, dc, fc); \
+                expect<F>("augmented_" #name " (e)", rnd, ew, fw, ec, fc)
+                AUG(add);
+                AUG(sub);
+                AUG(mul);
+#undef AUG
+                /* r and e as one span is refused by the library and the
+                 * wrapper turns that into an exception, like every
+                 * other refusal on this class. */
+                bool threw = false;
+                try {
+                    ctx.augmented_add(a, b, dw, dw);
+                } catch (const cft::error &) {
+                    threw = true;
+                }
+                CHECK(threw, "%s: augmented_add(r, r) must be refused",
+                      cft_format_name(F));
+            }
 
             ctx.total_order(a, b, dw);
             st = cft_total_order(ref, F, a.data(), b.data(), dc.data(), n);
@@ -569,6 +788,148 @@ void check_format(cft::device &dev, cft_device *ref)
             st = cft_class(ref, F, a.data(), clsc.data(), n);
             CHECK(st == CFT_OK && clsw == clsc,
                   "%s: classify disagrees with cft_class", cft_format_name(F));
+        }
+
+        /* -- character sequences (5.12) and payloads (9.7) --------- *
+         *
+         * Part of the 0.6 step, and the same charter as everything
+         * above: the wrapper's answer must be the C call's answer,
+         * bit for bit and flag for flag. The shapes differ here, so
+         * the comparison does too - the from_ direction is a batch and
+         * is compared as one, and the to_ direction is per element, so
+         * the whole pool is walked and every sequence compared as a
+         * string. What the wrapper adds beyond marshalling is the
+         * sizing protocol, and the strings would differ the moment it
+         * got that wrong.
+         */
+        {
+            std::uint32_t fw = 0, fc = 0;
+            cft_status st;
+            const std::size_t h = ctx.decimal_digits();
+
+            CHECK(h == cft_format_decimal_digits(F),
+                  "%s: decimal_digits disagrees with the C entry point",
+                  cft_format_name(F));
+
+            for (int rj = 0; rj < 5; rj++) {
+                const cft_round rj_rnd = rounds[rj];
+                auto rctx = ctx.with_rounding(rj_rnd);
+                std::vector<std::string> seq(n);
+                std::vector<const char *> raw(n);
+                std::size_t i;
+
+                /* Write the pool out through the wrapper and through
+                 * the C entry point, in both radices and both digit
+                 * modes, and compare the characters. */
+                for (i = 0; i < n; i++) {
+                    std::string wdec = rctx.to_decimal_char(a[i]);
+                    std::string wrnd = rctx.to_decimal_char(a[i], h);
+                    std::string whex = rctx.to_hex_char(a[i]);
+                    std::vector<char> cbuf;
+                    std::size_t need = 0;
+                    std::uint32_t f1 = 0;
+
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), 0,
+                                             nullptr, 0, &need, &f1);
+                    CHECK(st == CFT_ERR_INVALID_ARGUMENT && need > 1,
+                          "the sizing call must报 refuse and report a size");
+                    cbuf.assign(need, '\0');
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), 0,
+                                             cbuf.data(), need, &need, &f1);
+                    CHECK(st == CFT_OK && wdec == cbuf.data() && f1 == 0,
+                          "%s: to_decimal_char(exact) wrapper %s vs C %s",
+                          cft_format_name(F), wdec.c_str(), cbuf.data());
+
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), h,
+                                             nullptr, 0, &need, &f1);
+                    cbuf.assign(need, '\0');
+                    st = cft_to_decimal_char(ref, F, rj_rnd, a[i].data(), h,
+                                             cbuf.data(), need, &need, &f1);
+                    CHECK(st == CFT_OK && wrnd == cbuf.data(),
+                          "%s: to_decimal_char(%u) wrapper %s vs C %s",
+                          cft_format_name(F), static_cast<unsigned>(h),
+                          wrnd.c_str(), cbuf.data());
+                    CHECK(rctx.last_flags() == f1,
+                          "%s: to_decimal_char flags disagree",
+                          cft_format_name(F));
+
+                    st = cft_to_hex_char(ref, F, a[i].data(), nullptr, 0,
+                                         &need);
+                    cbuf.assign(need, '\0');
+                    st = cft_to_hex_char(ref, F, a[i].data(), cbuf.data(),
+                                         need, &need);
+                    CHECK(st == CFT_OK && whex == cbuf.data(),
+                          "%s: to_hex_char wrapper %s vs C %s",
+                          cft_format_name(F), whex.c_str(), cbuf.data());
+
+                    seq[i] = wdec;
+                    checks += 3;
+                }
+
+                /* ... and read the whole batch back, both ways. */
+                for (i = 0; i < n; i++)
+                    raw[i] = seq[i].c_str();
+                fw = rctx.from_decimal_char(seq.data(), n, dw);
+                st = cft_from_decimal_char(ref, F, rj_rnd, raw.data(),
+                                           dc.data(), n, nullptr, &fc);
+                CHECK(st == CFT_OK, "cft_from_decimal_char: %s",
+                      cft_strerror(st));
+                expect<F>("from_decimal_char", rj_rnd, dw, fw, dc, fc);
+
+                for (i = 0; i < n; i++)
+                    seq[i] = rctx.to_hex_char(a[i]);
+                for (i = 0; i < n; i++)
+                    raw[i] = seq[i].c_str();
+                fw = rctx.from_hex_char(seq.data(), n, dw);
+                st = cft_from_hex_char(ref, F, rj_rnd, raw.data(), dc.data(),
+                                       n, nullptr, &fc);
+                CHECK(st == CFT_OK, "cft_from_hex_char: %s",
+                      cft_strerror(st));
+                expect<F>("from_hex_char", rj_rnd, dw, fw, dc, fc);
+                /* The hex form is exact, so reading it back reproduces
+                 * the pool - through the wrapper, and with no flag. */
+                CHECK(same_bytes<F>(dw, a, nullptr) && fw == 0,
+                      "%s %s: the exact hex form did not round trip",
+                      cft_format_name(F), cft::round_name(rj_rnd));
+                checks++;
+            }
+
+            /* The 9.7 three, wrapper against C. */
+            ctx.get_payload(a, dw);
+            st = cft_get_payload(ref, F, a.data(), dc.data(), n);
+            CHECK(st == CFT_OK, "cft_get_payload: %s", cft_strerror(st));
+            expect<F>("get_payload", CFT_RNE, dw, 0, dc, 0);
+
+            ctx.set_payload(a, dw);
+            st = cft_set_payload(ref, F, a.data(), dc.data(), n);
+            CHECK(st == CFT_OK, "cft_set_payload: %s", cft_strerror(st));
+            expect<F>("set_payload", CFT_RNE, dw, 0, dc, 0);
+
+            ctx.set_payload_signaling(a, dw);
+            st = cft_set_payload_signaling(ref, F, a.data(), dc.data(), n);
+            CHECK(st == CFT_OK, "cft_set_payload_signaling: %s",
+                  cft_strerror(st));
+            expect<F>("set_payload_signaling", CFT_RNE, dw, 0, dc, 0);
+
+            /* A sequence outside the syntax reaches the caller as
+             * cft::error carrying the C status, not as a number. */
+            CHECK(status_of([&] { ctx.from_decimal_char("1.5.5"); })
+                  == CFT_ERR_INVALID_ARGUMENT,
+                  "%s: a malformed sequence must throw cft::error",
+                  cft_format_name(F));
+            CHECK(status_of([&] { ctx.from_hex_char("0x1.8"); })
+                  == CFT_ERR_INVALID_ARGUMENT,
+                  "%s: 5.12.3 requires the binary exponent",
+                  cft_format_name(F));
+            /* And a length mismatch is the wrapper's own misuse
+             * exception, as everywhere else here. */
+            {
+                std::vector<std::string> two(2, std::string("1"));
+                CHECK(refused_as_misuse(
+                          [&] { ctx.from_decimal_char(two.data(), 2, dw); }),
+                      "%s: a short sequence array must be std::invalid_argument",
+                      cft_format_name(F));
+            }
         }
 
         /* -- conversions ------------------------------------------ */
@@ -832,7 +1193,32 @@ void check_format(cft::device &dev, cft_device *ref)
         STRIG1(asinpi);
         STRIG1(acospi);
         STRIG1(atanpi);
+        STRIG1(exp2m1);
+        STRIG1(exp10);
+        STRIG1(exp10m1);
+        STRIG1(log2p1);
+        STRIG1(log10p1);
+        STRIG1(rsqrt);
 #undef STRIG1
+
+#define SINT1(name)                                                        \
+        {                                                                  \
+            const std::int64_t nn = 3;                                     \
+            got = ctx.name(x, nn);                                         \
+            cft_##name(ref, F, CFT_RUP, a.data() + 9, &nn, one_c.data(),   \
+                       1, &fc);                                            \
+            CHECK(got.bytes() == one_c, "%s scalar " #name,                \
+                  cft_format_name(F));                                     \
+        }
+        SINT1(pown);
+        SINT1(compound);
+        SINT1(rootn);
+#undef SINT1
+
+        got = ctx.powr(x, y);
+        cft_powr(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,
+                 &fc);
+        CHECK(got.bytes() == one_c, "%s scalar powr", cft_format_name(F));
 
         got = ctx.atan2(x, y);
         cft_atan2(ref, F, CFT_RUP, a.data() + 9, b.data() + 9, one_c.data(), 1,

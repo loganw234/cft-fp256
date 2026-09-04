@@ -98,12 +98,23 @@ TRANSCEND_FNS = (FN_EXP, FN_EXPM1, FN_EXP2, FN_LOG, FN_LOG1P, FN_LOG2,
                  "sinpi", "cospi", "tanpi", "asin", "acos", "atan",
                  "atan2", "asinpi", "acospi", "atanpi", "atan2pi",
                  "sin", "cos", "tan",
-                 "sinh", "cosh", "tanh", "asinh", "acosh", "atanh")
+                 "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+                 "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1",
+                 "rsqrt", "pown", "powr", "compound", "rootn")
 
-#: How many operands each reads.
-TRANSCEND_ARITY = {fn: (2 if fn in (FN_POW, FN_HYPOT, "atan2", "atan2pi")
+#: How many FLOATING-POINT operands each reads.
+TRANSCEND_ARITY = {fn: (2 if fn in (FN_POW, FN_HYPOT, "atan2", "atan2pi",
+                                    "powr")
                         else 1)
                    for fn in TRANSCEND_FNS}
+
+#: Which of them read an INTEGER second operand beside the float one.
+#: 754-2019 9.2.1 asks for exactly that - "n is a finite integral value
+#: in integralFormat" - so these three take a Python int here and an
+#: int64_t array in the C, rather than a floating operand that would
+#: have to be asked whether it is integral.
+TRANSCEND_INTARG = {fn: fn in ("pown", "compound", "rootn")
+                    for fn in TRANSCEND_FNS}
 
 
 class ZivEscalation(Exception):
@@ -2018,6 +2029,818 @@ def atanh(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
     return _ziv(fmt, u.sign, evaluate, rnd)
 
 
+# =====================================================================
+# The rest of table 9.1: exp2m1, exp10, exp10m1, log2p1, log10p1,
+# rSqrt, pown, powr, compound and rootn
+#
+# What is new here is NOT a reduction, a constant or an evaluator - it
+# is exactness. Every one of these ten has a LARGER exact-case table
+# than the function it is built from, and each table has to be proved
+# closed before the Ziv loop below it is allowed to run, because a true
+# value that sits on a rounding boundary is exactly where the loop does
+# not terminate.
+#
+#   exp2m1   2^n - 1 is a dyadic rational for EVERY integer n, positive
+#            or negative. exp2's own exact case is the whole line of
+#            integers, and subtracting 1 keeps it there.
+#   exp10    10^n = 2^n 5^n is dyadic for n >= 0 and is a rounding
+#            boundary exactly while 5^n fits in p+1 bits; a negative
+#            power of ten is not dyadic at all.
+#   exp10m1  10^n - 1 is an ODD integer, so its odd part is itself and
+#            the boundary condition is that it fit in p+1 bits.
+#   log2p1   log2(1+x) is rational only where 1+x is a power of two -
+#            unique factorisation, the same argument log2 uses - and 1+x
+#            is formed EXACTLY on the encoding, never as a rounded sum.
+#   log10p1  likewise for the powers of ten, which for a dyadic 1+x
+#            means the non-negative ones.
+#   rSqrt    1/sqrt(M 2^E) is dyadic only when M = 1 and E is even: any
+#            other odd M would need sqrt(M) to be a power of two.
+#   pown     phase 1's pow with an integer exponent, which is the branch
+#            its dyadic analysis already decides exactly.
+#   powr     phase 1's pow restricted to a non-negative base, so the
+#            same analysis with the sign question deleted.
+#   compound (1+x)^n: 1+x exactly, then pown's procedure on it.
+#   rootn    x^(1/n) is rational only when the odd significand is a
+#            perfect |n|-th power AND |n| divides the exponent, which
+#            one verified integer root decides.
+#
+# The neighbour rules are the other half, and the interesting half is
+# which functions get NONE. A tiny x gives 2^x - 1 ~ x ln2,
+# 10^x - 1 ~ x ln10, log2(1+x) ~ x/ln2 and log10(1+x) ~ x/ln10 - none
+# of which is beside x, because none of those constants is 1. So the
+# four "m1/p1" functions of a base other than e get no tiny-argument
+# rule at all, where expm1 and log1p have one; what they get instead is
+# a rule beside -1 for a large negative argument, where 2^x and 10^x
+# have vanished below half a gap. docs/TRANSCENDENTALS.md derives every
+# threshold.
+# =====================================================================
+
+FN_EXP2M1 = "exp2m1"
+FN_EXP10 = "exp10"
+FN_EXP10M1 = "exp10m1"
+FN_LOG2P1 = "log2p1"
+FN_LOG10P1 = "log10p1"
+FN_RSQRT = "rsqrt"
+FN_POWN = "pown"
+FN_POWR = "powr"
+FN_COMPOUND = "compound"
+FN_ROOTN = "rootn"
+
+TABLE91_FNS = (FN_EXP2M1, FN_EXP10, FN_EXP10M1, FN_LOG2P1, FN_LOG10P1,
+               FN_RSQRT, FN_POWN, FN_POWR, FN_COMPOUND, FN_ROOTN)
+
+
+# ---- exact helpers for this set --------------------------------------
+
+def _exact_one_plus(u):
+    """1 + x as an exact dyadic (m, e) with m >= 0, for a finite x.
+
+    Never a rounded sum: the two exponents are aligned on the lower of
+    them and the integers are added, which is the same discipline phase
+    3's acosh and atanh use for x - 1 and 1 - x. For x = -2^-1074 at
+    binary64 the result is the 1075-bit integer 2^1074 - 1 times
+    2^-1074, exactly, where `1 + x` evaluated in the format would be 1
+    and would take the answer with it."""
+    e0 = min(0, u.e)
+    base = 1 << (-e0)
+    term = u.m << (u.e - e0)
+    return (base - term if u.sign else base + term), e0
+
+
+def _int_kth_root(M, k):
+    """The exact k-th root of the positive integer M, or None. Binary
+    search verified by raising the candidate back - no floating point
+    and no tolerance, which is the same rule _exact_2k_root keeps."""
+    if M == 1:
+        return 1
+    if k >= M.bit_length():
+        return None                     # any root >= 2 would need 2^k <= M
+    hi = 1 << ((M.bit_length() + k - 1) // k)
+    lo = 1
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if mid ** k <= M:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo if lo ** k == M else None
+
+
+def _pown_dyadic(fmt, m, e, n):
+    """(M 2^E)^n as an exact (m, e), or None when no such dyadic
+    rational exists with an odd part small enough to be a rounding
+    boundary. m > 0; n != 0.
+
+    None is a proof, not a shrug, and it is phase 1's: the value is
+    then a rational that is not dyadic (a negative power of an odd
+    significand) or a dyadic whose odd part needs more than p+1 bits,
+    and neither can be a grid point or a midpoint of a p-bit format."""
+    p = fmt.prec
+    M, E = _odd_part(m)
+    E += e
+    if M == 1:
+        return 1, E * n
+    if n < 0:
+        return None                     # 1/(odd > 1) is not dyadic
+    if n > p + 1:
+        return None                     # the odd part outruns p+1 bits
+    v = M ** n
+    if v.bit_length() > p + 1:
+        return None
+    return v, E * n
+
+
+def _rootn_dyadic(fmt, u, n):
+    """|x|^(1/n) as an exact (m, e), or None.
+
+    (M 2^E)^(1/n) is rational exactly when M is a perfect |n|-th power
+    and |n| divides E; for a negative n the reciprocal of that is dyadic
+    only when the root is 1, because 1/(odd > 1) is not a dyadic
+    rational. Both halves are decided by exact integer arithmetic."""
+    M, E = _dyadic(u)
+    k = -n if n < 0 else n
+    if E % k:
+        return None
+    if M == 1:
+        root = 1
+    else:
+        if n < 0:
+            return None
+        root = _int_kth_root(M, k)
+        if root is None:
+            return None
+    F = E // k
+    if n < 0:
+        return 1, -F                    # root == 1 here, so 1/2^F
+    return root, F
+
+
+def _int_bits(fmt, n, e):
+    """The encoding of n * 2^e when the format holds it exactly, else
+    None - so a neighbour witness can be anchored on a power of two
+    without assuming the format reaches it."""
+    bits, flags = round_pack(fmt, 0, n, e, RND_RNE)
+    return None if flags else bits
+
+
+# =====================================================================
+# exp2m1, exp10, exp10m1
+# =====================================================================
+
+def exp2m1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """2**x - 1, correctly rounded. 754-2019 9.2.1: f(+-0) is +-0,
+    f(+inf) is +inf, f(-inf) is -1, all with no exception.
+
+    EXACT at every integer argument, which is a wider table than exp2's
+    is narrow: 2^n - 1 is a dyadic rational for every n, and it is a
+    rounding boundary of a p-bit format exactly while |n| <= p+1. Past
+    that the value is still exactly known but is decided by a SIDE
+    rather than by a rounding of it - 2^n - 1 sits in the top quarter of
+    the gap below 2^n for n >= p+2, and -(1 - 2^n) in the half gap above
+    -1 for n <= -(p+2) - because the exact integer 2^n - 1 is up to
+    262,143 bits wide at fp256 and the C's container is 2048."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        if u.sign:
+            return one_bits(fmt, 1), 0                  # exp2m1(-inf) = -1
+        return inf_bits(fmt, 0), 0
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # exp2m1(+-0) = +-0
+
+    M, E = _dyadic(u)
+    if E >= 0:                                          # an integer argument
+        n = M << E
+        if u.sign:
+            n = -n
+        if -(p + 1) <= n <= p + 1:
+            STATS["exact"] += 1
+            if n >= 0:
+                return _round_exact(fmt, 0, (1 << n) - 1, 0, rnd)
+            return _round_exact(fmt, 1, (1 << -n) - 1, n, rnd)
+        if n > 0:
+            if n > fmt.emax:
+                return _round_overflowing(fmt, 0, rnd)
+            # 2^n - 1 is inside the top quarter of the gap below 2^n:
+            # the gap there is 2^(n-p) and 1 < 2^(n-p-1) for n >= p+2.
+            return _round_neighbour(fmt, _int_bits(fmt, 1, n), away=0,
+                                    rnd=rnd)
+        # n <= -(p+2): 2^n - 1 is inside the half gap above -1, whose
+        # nearest boundary is at -(1 - 2^-(p+1)).
+        return _round_neighbour(fmt, one_bits(fmt, 1), away=0, rnd=rnd)
+
+    # A non-integer argument. No tiny-argument rule: 2^x - 1 is about
+    # x ln2, which is not beside x.
+    val = _exact_value_iv(fmt, xa)
+    sign = 1 if u.sign else 0
+
+    lo, hi = _bounds(fmt, val)                          # log2(2^x) is x
+    if lo > fmt.emax + 2:
+        return _round_overflowing(fmt, 0, rnd)
+    if hi < -(p + 3):
+        # 2^x is below 2^-(p+2), so the value sits that far above -1.
+        return _round_neighbour(fmt, one_bits(fmt, 1), away=0, rnd=rnd)
+
+    def evaluate(iv):
+        y = iv.expm1(val(iv) * iv.log(2))
+        return -y if sign else y
+
+    return _ziv(fmt, sign, evaluate, rnd)
+
+
+def exp10(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """10**x, correctly rounded. 9.2.1: f(+-0) is 1, f(+inf) is +inf,
+    f(-inf) is +0.
+
+    EXACT exactly at the non-negative integers whose 5^n fits in p+1
+    bits. 10^n = 2^n 5^n has odd part 5^n, so it is a rounding boundary
+    only while that fits; a negative power of ten is not a dyadic
+    rational at all, and a non-integer dyadic exponent gives an
+    algebraic irrational."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        return (zero_bits(fmt, 0), 0) if u.sign else (inf_bits(fmt, 0), 0)
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return one_bits(fmt, 0), 0
+
+    M, E = _dyadic(u)
+    if E >= 0 and not u.sign:
+        n = M << E
+        if n <= p + 1:                  # 5^n needs at least n bits
+            v = 5 ** n
+            if v.bit_length() <= p + 1:
+                STATS["exact"] += 1
+                return _round_exact(fmt, 0, v, n, rnd)
+
+    ex = _vexp(u)
+    if ex <= -(p + 4):
+        # |10^x - 1| <= 2.64|x| < 2^-(p+1) there, which is the nearer
+        # boundary next to 1, and the side is the sign of x.
+        return _round_neighbour(fmt, one_bits(fmt, 0), away=(u.sign == 0),
+                                rnd=rnd)
+
+    val = _exact_value_iv(fmt, xa)
+
+    def log2_of_result(iv):
+        return val(iv) * iv.log(10) / iv.log(2)
+
+    screened = _screen_exponent(fmt, log2_of_result, 0, rnd)
+    if screened is not None:
+        return screened
+
+    return _ziv(fmt, 0, lambda iv: iv.exp(val(iv) * iv.log(10)), rnd)
+
+
+def exp10m1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """10**x - 1, correctly rounded. 9.2.1: f(+-0) is +-0, f(+inf) is
+    +inf, f(-inf) is -1.
+
+    EXACT exactly at the non-negative integers whose 10^n - 1 fits in
+    p+1 bits. 10^n - 1 is an odd integer, so its odd part is itself; for
+    a larger n the value is not a boundary and the enclosure decides it,
+    and for (p+1)/log2(10) < n <= p/log2(5) it decides it at a
+    measurable depth - 10^n - 1 is then exactly ONE below a multiple of
+    the half-ulp, so the enclosure needs about log2(10)*n bits, which is
+    at most 1.44(p+1) and is inside the FIRST attempt at every format.
+    docs/TRANSCENDENTALS.md does that arithmetic."""
+    u = unpack(fmt, xa)
+    p = fmt.prec
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        if u.sign:
+            return one_bits(fmt, 1), 0                  # exp10m1(-inf) = -1
+        return inf_bits(fmt, 0), 0
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # exp10m1(+-0) = +-0
+
+    M, E = _dyadic(u)
+    if E >= 0 and not u.sign:
+        n = M << E
+        if n <= p + 1:
+            v = 10 ** n - 1
+            if v.bit_length() <= p + 1:
+                STATS["exact"] += 1
+                return _round_exact(fmt, 0, v, 0, rnd)
+
+    val = _exact_value_iv(fmt, xa)
+    sign = 1 if u.sign else 0
+
+    def log2_of_exp(iv):
+        return val(iv) * iv.log(10) / iv.log(2)
+
+    lo, hi = _bounds(fmt, log2_of_exp)
+    if lo > fmt.emax + 2:
+        return _round_overflowing(fmt, 0, rnd)
+    if hi < -(p + 3):
+        # 10^x is below 2^-(p+2): the value sits that far above -1.
+        return _round_neighbour(fmt, one_bits(fmt, 1), away=0, rnd=rnd)
+
+    def evaluate(iv):
+        y = iv.expm1(val(iv) * iv.log(10))
+        return -y if sign else y
+
+    return _ziv(fmt, sign, evaluate, rnd)
+
+
+# =====================================================================
+# log2p1, log10p1
+# =====================================================================
+
+def log2p1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """log2(1 + x). 9.2.1: f(+-0) is +-0, f(-1) is -inf with
+    divideByZero, x < -1 is invalid, f(+inf) is +inf.
+
+    EXACT exactly where 1 + x is a power of two, and 1 + x is formed
+    EXACTLY on the encoding rather than in the format."""
+    return _logp1_family(fmt, xa, rnd, base=2)
+
+
+def log10p1(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """log10(1 + x). The same rows, and EXACT exactly where 1 + x is a
+    power of ten the format can hold - which means a NON-NEGATIVE power,
+    since 10^-k is not a dyadic rational and 1 + x always is."""
+    return _logp1_family(fmt, xa, rnd, base=10)
+
+
+def _logp1_family(fmt, xa, rnd, base):
+    u = unpack(fmt, xa)
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == INF:
+        if u.sign:
+            return qnan_bits(fmt), FLAG_INVALID         # 1 + (-inf) < 0
+        return inf_bits(fmt, 0), 0
+    if u.kind == ZERO:
+        STATS["exact"] += 1
+        return xa, 0                                    # f(+-0) = +-0
+
+    M, E = _dyadic(u)
+    if u.sign and M == 1 and E == 0:                    # x == -1
+        return inf_bits(fmt, 1), FLAG_DIVZERO
+    if u.sign and _vexp(u) >= 0:                        # x < -1
+        return qnan_bits(fmt), FLAG_INVALID
+
+    sm, se = _exact_one_plus(u)
+    om, oe = _odd_part(sm)
+    oe += se
+    if base == 2 and om == 1:                           # 1 + x = 2^oe
+        STATS["exact"] += 1
+        if oe == 0:
+            return zero_bits(fmt, 0), 0
+        return _round_exact(fmt, 1 if oe < 0 else 0, abs(oe), 0, rnd)
+    if base == 10 and 0 <= oe <= fmt.prec and om == 5 ** oe:
+        STATS["exact"] += 1                             # 1 + x = 10^oe
+        if oe == 0:
+            return zero_bits(fmt, 0), 0
+        return _round_exact(fmt, 0, oe, 0, rnd)
+
+    # The one family no working precision can decide, and the only
+    # neighbour rule these two get.
+    #
+    # For x = 2^k the value is k + log2(1 + 2^-k): an exponentially small
+    # step ABOVE the integer k, and k is a grid point of every format on
+    # this ladder. The enclosure would have to separate the two and
+    # cannot; the SIDE is the whole answer, and it is a theorem
+    # (log2(1+u) > 0 for u > 0) rather than a measurement.
+    #
+    # The threshold is derived. The excess is at most 2^(-k+0.529) and
+    # the nearest boundary above k is at 2^(g-p) with g = floor(log2 k),
+    # so it is inside once k >= p - g + 1; at k = p - g the excess is at
+    # least 1.26 half-gaps and the enclosure decides that one with two
+    # bits to spare, so there is no band between them. For x = 10^k the
+    # same shape in another base, compared in exact integers against
+    # 23025/10000 - a rational below ln 10, and the closest that
+    # comparison comes to an equality over every k any format holds is a
+    # factor of 2^0.495 (fp128, k = 32).
+    if not u.sign and E >= 1:
+        g = E.bit_length() - 1
+        if base == 2 and M == 1 and E >= fmt.prec - g + 1:
+            return _round_dyadic_side(fmt, 0, E, 0, away=1, rnd=rnd)
+        if (base == 10 and E <= fmt.prec and M == 5 ** E and
+                10000 * (1 << (fmt.prec - g)) < 23025 * 10 ** E):
+            return _round_dyadic_side(fmt, 0, E, 0, away=1, rnd=rnd)
+
+    # Nothing else needs one, and that is the derivation rather than an
+    # omission: for a tiny x the value is x/ln2 or x/ln10, which is not
+    # beside x - only a base of e puts it there. The enclosure resolves
+    # those to full relative precision, and round_pack carries the
+    # underflow.
+    sign = u.sign
+    val = _exact_value_iv(fmt, xa)
+
+    def evaluate(iv):
+        y = iv.log1p(val(iv)) / (iv.log(2) if base == 2 else iv.log(10))
+        return -y if sign else y
+
+    return _ziv(fmt, sign, evaluate, rnd)
+
+
+# =====================================================================
+# rSqrt
+# =====================================================================
+
+def rsqrt(fmt: FpFormat, xa: int, rnd: int = RND_RNE):
+    """1/sqrt(x) on [0, +inf]. 9.2.1: rSqrt(+-0) is +-INFINITY with
+    divideByZero - the sign survives, which GNU MPFR's mpfr_rec_sqrt
+    does not do (it delivers +inf for both, measured 2026-09-03) -
+    rSqrt(+inf) is +0, and x < 0 is invalid.
+
+    EXACT exactly at the even powers of two. 1/sqrt(M 2^E) is rational
+    only if sqrt(M) is, and dyadic only if sqrt(M) is a power of two;
+    M is odd, so that forces M = 1, and then E must be even for
+    2^(-E/2) to be a dyadic rational at all.
+
+    It can neither overflow nor underflow on this ladder: the largest
+    result is 1/sqrt(minSubnormal) = 2^((p-1+emax)/2), and (emax+p-1)/2
+    is below emax at every rung."""
+    u = unpack(fmt, xa)
+
+    if u.kind == NAN:
+        return _nan_out(fmt, u)
+    if u.kind == ZERO:
+        return inf_bits(fmt, u.sign), FLAG_DIVZERO
+    if u.sign:
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == INF:
+        return zero_bits(fmt, 0), 0
+
+    M, E = _dyadic(u)
+    if M == 1 and E % 2 == 0:
+        STATS["exact"] += 1
+        return _round_exact(fmt, 0, 1, -(E // 2), rnd)
+
+    val = _exact_value_iv(fmt, xa)
+    return _ziv(fmt, 0, lambda iv: iv.mpf(1) / iv.sqrt(val(iv)), rnd)
+
+
+# =====================================================================
+# pown, powr, compound, rootn - the integer-exponent family
+#
+# n is an INTEGER, not a floating-point operand, exactly as 9.2.1 asks:
+# "n is a finite integral value in integralFormat". This module takes a
+# Python int and the C takes an int64_t array beside the operand array;
+# neither ever has to ask what a non-integral second operand would mean.
+# =====================================================================
+
+def pown(fmt: FpFormat, xa: int, n: int, rnd: int = RND_RNE):
+    """x**n for an integer n. 9.2.1's own rows, which are pow's with
+    the non-integer exponent deleted: pown(x, 0) is 1 for any x that is
+    not a signaling NaN - a quiet NaN and an infinity included -
+    pown(+-0, n) is +-inf with divideByZero for an odd n < 0 and +inf
+    for an even one, and the sign of the result is the operand's when n
+    is odd and positive otherwise.
+
+    The exact cases are the ones pow's dyadic analysis already decides:
+    a power-of-two magnitude is an exponent shift at any n, and any
+    other odd significand loses the race after p+1 multiplications."""
+    u = unpack(fmt, xa)
+
+    if _has_snan(u):
+        return qnan_bits(fmt), FLAG_INVALID
+    if n == 0:
+        return one_bits(fmt, 0), 0
+    if u.kind == NAN:
+        return qnan_bits(fmt), 0
+
+    odd = bool(n & 1)
+    if u.kind == ZERO:
+        neg = u.sign and odd
+        if n < 0:
+            return inf_bits(fmt, 1 if neg else 0), FLAG_DIVZERO
+        return zero_bits(fmt, 1 if neg else 0), 0
+    if u.kind == INF:
+        neg = u.sign and odd
+        if n < 0:
+            return zero_bits(fmt, 1 if neg else 0), 0
+        return inf_bits(fmt, 1 if neg else 0), 0
+
+    sign = 1 if (u.sign and odd) else 0
+    exact = _pown_dyadic(fmt, u.m, u.e, n)
+    if exact is not None:
+        m, e = exact
+        STATS["exact"] += 1
+        vexp = e + m.bit_length() - 1
+        if vexp > fmt.emax:
+            return _round_overflowing(fmt, sign, rnd)
+        if vexp < fmt.emin - fmt.man_w - 1:
+            return _round_underflowing(fmt, sign, rnd)
+        return _round_exact(fmt, sign, m, e, rnd)
+
+    val = _exact_value_iv(fmt, xa)
+
+    def log_of_result(iv):
+        return n * iv.log(abs(val(iv)))
+
+    screened = _screen_exponent(fmt, lambda iv: log_of_result(iv) / iv.log(2),
+                                sign, rnd)
+    if screened is not None:
+        return screened
+
+    lo, hi = _bounds(fmt, lambda iv: abs(log_of_result(iv)))
+    if hi < 2.0 ** -(fmt.prec + 3):
+        up = (_mag_gt_one(u) != (n < 0))
+        return _round_neighbour(fmt, one_bits(fmt, sign), away=up, rnd=rnd)
+
+    return _ziv(fmt, sign, lambda iv: iv.power(abs(val(iv)), n), rnd)
+
+
+def powr(fmt: FpFormat, xa: int, xb: int, rnd: int = RND_RNE):
+    """x**y defined as exp(y log x), so the domain excludes a negative
+    base and the table is NOT pow's:
+
+        powr(x, y) for x < 0            invalid  (every y, NaN included)
+        powr(+-0, +-0)                  invalid
+        powr(+inf, +-0)                 invalid
+        powr(+1, +-inf)                 invalid
+        powr(+-0, y) for finite y < 0   +inf with divideByZero
+        powr(+-0, -inf)                 +inf, silent
+        powr(+-0, y) for y > 0          +0
+        powr(x, +-0) for finite x > 0   1
+        powr(+1, y) for finite y        1
+        powr(qNaN, y), powr(x, qNaN)    qNaN, silent
+
+    Two of those differ from what MPFR 4.2.2 delivers, and both are the
+    standard's: powr(1, qNaN) is a quiet NaN here where mpfr_powr
+    returns 1 - the standard's row is "powr(+1, y) is 1 for FINITE y",
+    and it lists powr(x, qNaN) for x >= 0 separately - and powr(qNaN, 0)
+    is a quiet NaN where pow(qNaN, 0) is 1. The second is the whole
+    point of having both functions.
+
+    The result is never negative, so the exact cases are pow's dyadic
+    analysis with the sign question deleted."""
+    ux, uy = unpack(fmt, xa), unpack(fmt, xb)
+
+    if _has_snan(ux, uy):
+        return qnan_bits(fmt), FLAG_INVALID
+    # x < 0 outranks even a quiet NaN exponent: it is a domain error,
+    # and 9.2.1's NaN row is written "for x >= 0".
+    if ux.kind != NAN and ux.sign and ux.kind != ZERO:
+        return qnan_bits(fmt), FLAG_INVALID
+    if ux.kind == NAN or uy.kind == NAN:
+        return qnan_bits(fmt), 0
+
+    if ux.kind == ZERO:
+        if uy.kind == ZERO:
+            return qnan_bits(fmt), FLAG_INVALID         # powr(+-0, +-0)
+        if uy.sign:
+            if uy.kind == INF:
+                return inf_bits(fmt, 0), 0              # powr(+-0, -inf)
+            return inf_bits(fmt, 0), FLAG_DIVZERO
+        return zero_bits(fmt, 0), 0
+    if ux.kind == INF:                                  # +inf only
+        if uy.kind == ZERO:
+            return qnan_bits(fmt), FLAG_INVALID         # powr(+inf, +-0)
+        return (zero_bits(fmt, 0), 0) if uy.sign else (inf_bits(fmt, 0), 0)
+    if _is_one(ux):
+        if uy.kind == INF:
+            return qnan_bits(fmt), FLAG_INVALID         # powr(+1, +-inf)
+        return one_bits(fmt, 0), 0                      # every finite y
+    if uy.kind == ZERO:
+        return one_bits(fmt, 0), 0                      # finite x > 0
+    if uy.kind == INF:
+        if _mag_gt_one(ux) == (not uy.sign):
+            return inf_bits(fmt, 0), 0
+        return zero_bits(fmt, 0), 0
+
+    exact = _pow_dyadic(fmt, ux, uy)
+    if exact is not None:
+        m, e = exact
+        STATS["exact"] += 1
+        vexp = e + m.bit_length() - 1
+        if vexp > fmt.emax:
+            return _round_overflowing(fmt, 0, rnd)
+        if vexp < fmt.emin - fmt.man_w - 1:
+            return _round_underflowing(fmt, 0, rnd)
+        return _round_exact(fmt, 0, m, e, rnd)
+
+    valx = _exact_value_iv(fmt, xa)
+    valy = _exact_value_iv(fmt, xb)
+
+    def log_of_result(iv):
+        return valy(iv) * iv.log(valx(iv))
+
+    screened = _screen_exponent(fmt, lambda iv: log_of_result(iv) / iv.log(2),
+                                0, rnd)
+    if screened is not None:
+        return screened
+
+    lo, hi = _bounds(fmt, lambda iv: abs(log_of_result(iv)))
+    if hi < 2.0 ** -(fmt.prec + 3):
+        up = (_mag_gt_one(ux) != bool(uy.sign))
+        return _round_neighbour(fmt, one_bits(fmt, 0), away=up, rnd=rnd)
+
+    return _ziv(fmt, 0, lambda iv: iv.power(valx(iv), valy(iv)), rnd)
+
+
+def compound(fmt: FpFormat, xa: int, n: int, rnd: int = RND_RNE):
+    """(1 + x)**n for an integer n, on [-1, +inf]. 9.2.1:
+
+        compound(x, 0)      1 for x >= -1 or a quiet NaN - and INVALID
+                            for x < -1, which is the row the phrase "for
+                            x >= -1 or quiet NaN" makes rather than
+                            states, and which MPFR 4.2.2 confirms
+        compound(-1, n)     +inf with divideByZero for n < 0, +0 for n > 0
+        compound(+-0, n)    1
+        compound(+inf, n)   +inf for n > 0, +0 for n < 0
+        compound(x, n)      invalid for x < -1, -inf included
+        compound(qNaN, n)   qNaN for n != 0
+
+    1 + x is formed EXACTLY and then raised by pown's own procedure, so
+    compound(x, 1) is the exact 1 + x correctly rounded - which for
+    x = 2^-1074 at binary64 is 1 with inexact, and is NOT what
+    evaluating (1 + x)^1 in the format would give."""
+    u = unpack(fmt, xa)
+
+    if _has_snan(u):
+        return qnan_bits(fmt), FLAG_INVALID
+    below = (u.kind != NAN and u.sign and _mag_gt_one(u))       # x < -1
+    if n == 0:
+        if u.kind == NAN:
+            return one_bits(fmt, 0), 0                  # even a quiet NaN
+        if below:
+            return qnan_bits(fmt), FLAG_INVALID
+        return one_bits(fmt, 0), 0
+    if u.kind == NAN:
+        return qnan_bits(fmt), 0
+    if below:
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.sign and _is_one_mag(u):                       # x == -1
+        if n < 0:
+            return inf_bits(fmt, 0), FLAG_DIVZERO
+        return zero_bits(fmt, 0), 0
+    if u.kind == ZERO:
+        return one_bits(fmt, 0), 0
+    if u.kind == INF:                                   # +inf
+        return (inf_bits(fmt, 0), 0) if n > 0 else (zero_bits(fmt, 0), 0)
+
+    sm, se = _exact_one_plus(u)
+    exact = _pown_dyadic(fmt, sm, se, n)
+    if exact is not None:
+        m, e = exact
+        STATS["exact"] += 1
+        vexp = e + m.bit_length() - 1
+        if vexp > fmt.emax:
+            return _round_overflowing(fmt, 0, rnd)
+        if vexp < fmt.emin - fmt.man_w - 1:
+            return _round_underflowing(fmt, 0, rnd)
+        return _round_exact(fmt, 0, m, e, rnd)
+
+    val = _exact_value_iv(fmt, xa)
+    onep = _dyadic_iv(sm, se)
+
+    def log_of_result(iv):
+        # log1p on the operand for a small x, so 1 + x is never formed
+        # in the interval context and cannot round to 1; the exact
+        # dyadic otherwise, which costs nothing and is tighter.
+        if _vexp(u) < -2:
+            return n * iv.log1p(val(iv))
+        return n * iv.log(onep(iv))
+
+    screened = _screen_exponent(fmt, lambda iv: log_of_result(iv) / iv.log(2),
+                                0, rnd)
+    if screened is not None:
+        return screened
+
+    lo, hi = _bounds(fmt, lambda iv: abs(log_of_result(iv)))
+    if hi < 2.0 ** -(fmt.prec + 3):
+        up = (not u.sign) != (n < 0)     # 1 + x is above 1 iff x is
+        return _round_neighbour(fmt, one_bits(fmt, 0), away=up, rnd=rnd)
+
+    # A DOMINANT operand, and the second family here that no working
+    # precision reaches. For a large x the value is x^n times
+    # (1 + 1/x)^n, and when x^n is itself an exact dyadic the correction
+    # is below a quarter of the grid step there, so the side settles it -
+    # exactly as hypot's dominant operand is settled. Without it,
+    # compound(2^1022, 1) at binary64 is 2^1022 + 1: one unit above a
+    # grid point whose ulp is 2^970.
+    #
+    # vexp(x) >= p + 2 + bits(|n|) makes |n/x| < 2^-(p+2), the binomial
+    # tail is below 2(n/x)^2 and so below it again, and a quarter of the
+    # relative grid step is 2^-(p+1). The correction's sign is n's,
+    # because 1 + 1/x is above 1 for a positive x.
+    if not u.sign and _vexp(u) >= fmt.prec + 2 + abs(n).bit_length():
+        dom = _pown_dyadic(fmt, u.m, u.e, n)
+        if dom is not None:
+            dm, de = dom
+            return _round_dyadic_side(fmt, 0, dm, de, away=(n > 0), rnd=rnd)
+
+    def evaluate(iv):
+        if _vexp(u) < -2:
+            return iv.exp(n * iv.log1p(val(iv)))
+        return iv.power(onep(iv), n)
+
+    return _ziv(fmt, 0, evaluate, rnd)
+
+
+def rootn(fmt: FpFormat, xa: int, n: int, rnd: int = RND_RNE):
+    """x**(1/n) for a nonzero integer n. 9.2.1:
+
+        rootn(x, 0)              invalid - 0 is outside the domain
+        rootn(+-0, n) n < 0 odd  +-inf with divideByZero
+        rootn(+-0, n) n < 0 even +inf with divideByZero
+        rootn(+-0, n) n > 0 odd  +-0
+        rootn(+-0, n) n > 0 even +0
+        rootn(+-inf, n)          +-inf / +-0 for odd n, invalid for an
+                                 even n and a negative operand
+        x < 0 with an even n     invalid
+
+    rootn(x, 1) is x, exactly and with no exception. rootn(x, 2) is
+    squareRoot(x) on every input EXCEPT x = -0, where the standard's own
+    NOTE says they differ: rootn(-0, 2) is +0 by the even-n row, where
+    squareRoot(-0) is -0. host/tests/transcend_check.py tests both
+    halves of that.
+
+    EXACT exactly when the odd significand is a perfect |n|-th power and
+    |n| divides the exponent - one verified integer root - with a
+    negative n turning it into a reciprocal, which is dyadic only when
+    that root is 1."""
+    u = unpack(fmt, xa)
+
+    if _has_snan(u):
+        return qnan_bits(fmt), FLAG_INVALID
+    if n == 0:
+        # Table 9.1: "n = 0: invalid operation". 0 is outside the
+        # domain for EVERY x, a quiet NaN included, and 9.2's general
+        # rule for an operand outside the domain is invalid.
+        return qnan_bits(fmt), FLAG_INVALID
+    if u.kind == NAN:
+        return qnan_bits(fmt), 0
+
+    odd = bool(n & 1)
+    if u.kind == ZERO:
+        if n < 0:
+            return inf_bits(fmt, 1 if (odd and u.sign) else 0), FLAG_DIVZERO
+        return zero_bits(fmt, 1 if (odd and u.sign) else 0), 0
+    if u.kind == INF:
+        if u.sign and not odd:
+            return qnan_bits(fmt), FLAG_INVALID
+        if n > 0:
+            return inf_bits(fmt, 1 if u.sign else 0), 0
+        return zero_bits(fmt, 1 if u.sign else 0), 0
+    if u.sign and not odd:
+        return qnan_bits(fmt), FLAG_INVALID             # x < 0, n even
+
+    if n == 1:
+        STATS["exact"] += 1
+        return xa, 0                                    # rootn(x, 1) = x
+
+    sign = 1 if u.sign else 0
+    exact = _rootn_dyadic(fmt, u, n)
+    if exact is not None:
+        m, e = exact
+        STATS["exact"] += 1
+        vexp = e + m.bit_length() - 1
+        if vexp > fmt.emax:
+            return _round_overflowing(fmt, sign, rnd)
+        if vexp < fmt.emin - fmt.man_w - 1:
+            return _round_underflowing(fmt, sign, rnd)
+        return _round_exact(fmt, sign, m, e, rnd)
+
+    val = _exact_value_iv(fmt, xa)
+
+    def mag(iv):
+        return abs(val(iv))
+
+    def log_of_result(iv):
+        return iv.log(mag(iv)) / n
+
+    screened = _screen_exponent(fmt, lambda iv: log_of_result(iv) / iv.log(2),
+                                sign, rnd)
+    if screened is not None:
+        return screened
+
+    lo, hi = _bounds(fmt, lambda iv: abs(log_of_result(iv)))
+    if hi < 2.0 ** -(fmt.prec + 3):
+        # A large |n| drives every operand to 1; the side is the side of
+        # 1 the operand is on, flipped by the sign of n.
+        up = (_mag_gt_one(u) != (n < 0))
+        return _round_neighbour(fmt, one_bits(fmt, sign), away=up, rnd=rnd)
+
+    def evaluate(iv):
+        if n == 2:
+            return iv.sqrt(mag(iv))
+        if n == -2:
+            return iv.mpf(1) / iv.sqrt(mag(iv))
+        if n == -1:
+            return iv.mpf(1) / mag(iv)
+        return iv.exp(iv.log(mag(iv)) / n)
+
+    return _ziv(fmt, sign, evaluate, rnd)
+
+
 # ---- dispatch --------------------------------------------------------
 
 TRANSCEND_IMPL = {
@@ -2050,18 +2873,36 @@ TRANSCEND_IMPL = {
     FN_ASINH: asinh,
     FN_ACOSH: acosh,
     FN_ATANH: atanh,
+    FN_EXP2M1: exp2m1,
+    FN_EXP10: exp10,
+    FN_EXP10M1: exp10m1,
+    FN_LOG2P1: log2p1,
+    FN_LOG10P1: log10p1,
+    FN_RSQRT: rsqrt,
+    FN_POWN: pown,
+    FN_POWR: powr,
+    FN_COMPOUND: compound,
+    FN_ROOTN: rootn,
 }
 
 
 def compute(fmt: FpFormat, fn: str, xa: int, xb: int = 0,
-            rnd: int = RND_RNE):
+            rnd: int = RND_RNE, n: int = 0):
     """One case by function name - the shape the vector generator and
-    the conformance replay both speak."""
+    the conformance replay both speak.
+
+    `n` is the INTEGER operand of pown, compound and rootn, and is
+    ignored by every other function. It is a separate parameter rather
+    than a reuse of xb because it is a different kind of thing: xb is an
+    encoding, n is an integer, and a vector set writes them under
+    different keys for the same reason."""
     if fn not in TRANSCEND_IMPL:
         raise ValueError(f"unknown transcendental {fn!r}")
     if rnd not in RND_MODES:
         raise ValueError(f"bad rounding mode {rnd}; contract defines 0-4")
     impl = TRANSCEND_IMPL[fn]
+    if TRANSCEND_INTARG[fn]:
+        return impl(fmt, xa, int(n), rnd)
     if TRANSCEND_ARITY[fn] == 2:
         return impl(fmt, xa, xb, rnd)
     return impl(fmt, xa, rnd)

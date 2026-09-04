@@ -32,12 +32,15 @@
 #      into the page.
 #   3  make_page.py samples the sets and assembles the page. THE
 #      SAMPLING RULE (also stated in make_page.py and on the page):
-#      from each of the 20 sets (4 formats x 5 rounding attributes,
-#      11,800 lines each) take every 59th line - 0-based lines 0, 59,
-#      118, ... = exactly 200 per set - then add the set's first line
-#      of any opcode name the stride missed, so every opcode class is
-#      embedded per set by construction, seeds 26/27 and the
-#      unassigned reserved15/28/255 included.
+#      from each of the 20 OPCODE sets (4 formats x 5 rounding
+#      attributes, 11,800 lines each) take every 59th line - 0-based
+#      lines 0, 59, 118, ... = exactly 200 per set - then add the
+#      set's first line of any opcode name the stride missed, so every
+#      opcode class is embedded per set by construction, seeds 26/27
+#      and the unassigned reserved15/30/255 included. The other four
+#      families the generator writes - transcendental, augmented,
+#      reduction, character - are droppable in section 3 and are not
+#      embedded; make_page.py says why.
 #   4  the same assembly again with --corrupt, into
 #      build/negative_control.html (untracked): one expected value
 #      deliberately flipped, so anyone can watch the page fail. A

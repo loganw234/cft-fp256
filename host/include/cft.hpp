@@ -174,6 +174,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "cft.h"
 
@@ -1210,7 +1211,39 @@ public:
     CFT_HPP_TRIG1(asinh)
     CFT_HPP_TRIG1(acosh)
     CFT_HPP_TRIG1(atanh)
+    /* The rest of table 9.1 (part of the 0.6 step). Six take the same
+     * shape as everything above; powr takes two encodings like pow; and
+     * pown, compound and rootn read an INTEGER exponent array beside
+     * the operand array, which is what 754-2019 9.2.1 asks for. cft.h
+     * carries every special row, including the three where this
+     * contract follows the standard and MPFR does not. */
+    CFT_HPP_TRIG1(exp2m1)
+    CFT_HPP_TRIG1(exp10)
+    CFT_HPP_TRIG1(exp10m1)
+    CFT_HPP_TRIG1(log2p1)
+    CFT_HPP_TRIG1(log10p1)
+    CFT_HPP_TRIG1(rsqrt)
 #undef CFT_HPP_TRIG1
+#define CFT_HPP_INT1(name)                                              \
+    call_result name(cft_format fmt, cft_round rnd, const void *a,      \
+                     const std::int64_t *n, void *d,                    \
+                     std::size_t count) noexcept                        \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_##name(dev_, fmt, rnd, a, n, d, count, &r.flags); \
+        return r;                                                       \
+    }
+    CFT_HPP_INT1(pown)
+    CFT_HPP_INT1(compound)
+    CFT_HPP_INT1(rootn)
+#undef CFT_HPP_INT1
+    call_result powr(cft_format fmt, cft_round rnd, const void *a,
+                     const void *b, void *d, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_powr(dev_, fmt, rnd, a, b, d, n, &r.flags);
+        return r;
+    }
     call_result atan2(cft_format fmt, cft_round rnd, const void *a,
                       const void *b, void *d, std::size_t n) noexcept
     {
@@ -1226,6 +1259,168 @@ public:
         return r;
     }
 
+    /* ---------------------------------------------------------------
+     * The augmented arithmetic operations (754-2019 clause 9.5)
+     *
+     * The only entry points here that return TWO results - the
+     * operation rounded, and the error rounding made - and the only
+     * ones that take no cft_round, because 9.5 fixes the rounding to
+     * roundTiesTowardZero and gives the operations no attribute
+     * argument to carry it. There is nothing to pass and so no
+     * parameter to pass it in; cft.h has the tie rule, the zero-sign
+     * rules and the flag policy.
+     *
+     * `out_r` and `out_e` must be different buffers. Either may alias
+     * `a` or `b`.
+     * --------------------------------------------------------------- */
+#define CFT_HPP_AUG(name)                                               \
+    call_result augmented_##name(cft_format fmt, const void *a,         \
+                                 const void *b, void *out_r,            \
+                                 void *out_e, std::size_t n) noexcept   \
+    {                                                                   \
+        call_result r;                                                  \
+        r.status = cft_augmented_##name(dev_, fmt, a, b, out_r, out_e,  \
+                                        n, &r.flags);                   \
+        return r;                                                       \
+    }
+    CFT_HPP_AUG(add)
+    CFT_HPP_AUG(sub)
+    CFT_HPP_AUG(mul)
+#undef CFT_HPP_AUG
+
+    /* -- the scaled product reductions (clause 9.4, the 0.6 step) --
+     *
+     * The three of 9.4 that return a PAIR: a significand always in
+     * +-[1, 2) and an integer scale, with scaleB(pr, scale) the
+     * product. Named rather than selected by an enum for the reason
+     * cft.h gives - these issue no device pass, so a `kind` argument
+     * would be a second opcode space with none of an opcode's meaning.
+     *
+     * The scale lands where the caller points; everything else is the
+     * shape every other call here has. */
+    call_result scaled_prod(cft_format fmt, cft_round rnd, const void *a,
+                            void *pr, std::int64_t *scale,
+                            std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_scaled_prod(dev_, fmt, rnd, a, pr, scale, n,
+                                   &r.flags);
+        return r;
+    }
+    call_result scaled_prod_sum(cft_format fmt, cft_round rnd,
+                                const void *a, const void *b, void *pr,
+                                std::int64_t *scale, std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_scaled_prod_sum(dev_, fmt, rnd, a, b, pr, scale, n,
+                                       &r.flags);
+        return r;
+    }
+    call_result scaled_prod_diff(cft_format fmt, cft_round rnd,
+                                 const void *a, const void *b, void *pr,
+                                 std::int64_t *scale,
+                                 std::size_t n) noexcept
+    {
+        call_result r;
+        r.status = cft_scaled_prod_diff(dev_, fmt, rnd, a, b, pr, scale, n,
+                                        &r.flags);
+        return r;
+    }
+
+
+    /* ---------------------------------------------------------------
+     * Character sequences (754-2019 clause 5.12) and NaN payloads (9.7)
+     * Part of the 0.6 step.
+     *
+     * The one thing this layer does beyond marshalling: it absorbs the
+     * two-call sizing protocol. C needs it because C has no growable
+     * string; C++ has one, so the wrapper asks for the length, sizes a
+     * buffer and hands back a std::string. A caller who wants the raw
+     * protocol still has cft.h.
+     *
+     * The from_ direction keeps the C shape exactly - an array of
+     * NUL-terminated sequences in, a dense array of encodings out -
+     * because that shape is already right.
+     * --------------------------------------------------------------- */
+    static std::size_t decimal_digits(cft_format fmt) noexcept
+    {
+        return cft_format_decimal_digits(fmt);
+    }
+
+    call_result from_decimal_char(cft_format fmt, cft_round rnd,
+                                  const char *const *in, void *d,
+                                  std::size_t n,
+                                  std::size_t *bad = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_from_decimal_char(dev_, fmt, rnd, in, d, n, bad,
+                                         &r.flags);
+        return r;
+    }
+    call_result from_hex_char(cft_format fmt, cft_round rnd,
+                              const char *const *in, void *d, std::size_t n,
+                              std::size_t *bad = nullptr) noexcept
+    {
+        call_result r;
+        r.status = cft_from_hex_char(dev_, fmt, rnd, in, d, n, bad, &r.flags);
+        return r;
+    }
+
+    /* digits == 0 is the exact conversion; digits >= 1 is that many
+     * significant digits, correctly rounded under `rnd`. */
+    call_result to_decimal_char(cft_format fmt, cft_round rnd, const void *a,
+                                std::size_t digits, std::string &out)
+    {
+        call_result r;
+        std::size_t need = 0;
+        out.clear();
+        r.status = cft_to_decimal_char(dev_, fmt, rnd, a, digits, nullptr, 0,
+                                       &need, &r.flags);
+        if (need == 0)
+            return r;                 /* a real argument error, not a size */
+        {
+            std::string buf(need, '\0');
+            r.status = cft_to_decimal_char(dev_, fmt, rnd, a, digits,
+                                           &buf[0], need, &need, &r.flags);
+            if (r.status == CFT_OK)
+                out.assign(buf.c_str());
+        }
+        return r;
+    }
+    cft_status to_hex_char(cft_format fmt, const void *a, std::string &out)
+    {
+        std::size_t need = 0;
+        cft_status st;
+        out.clear();
+        st = cft_to_hex_char(dev_, fmt, a, nullptr, 0, &need);
+        if (need == 0)
+            return st;
+        {
+            std::string buf(need, '\0');
+            st = cft_to_hex_char(dev_, fmt, a, &buf[0], need, &need);
+            if (st == CFT_OK)
+                out.assign(buf.c_str());
+        }
+        return st;
+    }
+
+    /* 9.7 signals no exceptions, so these return a status and no flag
+     * word - the same shape classify() takes for the same reason. */
+    cft_status get_payload(cft_format fmt, const void *a, void *d,
+                           std::size_t n) noexcept
+    {
+        return cft_get_payload(dev_, fmt, a, d, n);
+    }
+    cft_status set_payload(cft_format fmt, const void *a, void *d,
+                           std::size_t n) noexcept
+    {
+        return cft_set_payload(dev_, fmt, a, d, n);
+    }
+    cft_status set_payload_signaling(cft_format fmt, const void *a, void *d,
+                                     std::size_t n) noexcept
+    {
+        return cft_set_payload_signaling(dev_, fmt, a, d, n);
+    }
 
     /* -- device-resident buffers ---------------------------------- */
     buffer alloc(std::size_t bytes)
@@ -1601,6 +1796,61 @@ public:
         return reduce(CFT_DOT, a, b);
     }
 
+    /* -- the rest of clause 9.4's sum reductions (the 0.6 step) ----
+     *
+     * The same tree over a different leaf, and the library issues
+     * exactly that: sumsq IS dot(a, a) and sumabs IS an abs pass then
+     * sum, bit for bit and flag for flag - with the single row 9.4
+     * orders differently, where an infinity beside a NaN gives +inf
+     * rather than the quiet NaN the tree would give. cft.h's
+     * cft_reduce block is the full statement. */
+    value_type sumsq(cspan<encoding_type> a) &
+    {
+        return reduce(CFT_SUMSQ, a, cspan<encoding_type>());
+    }
+    value_type sumabs(cspan<encoding_type> a) &
+    {
+        return reduce(CFT_SUMABS, a, cspan<encoding_type>());
+    }
+
+    /* -- the scaled product reductions (clause 9.4, the 0.6 step) --
+     *
+     * These return a pair, so they return a struct: pr is always in
+     * +-[1, 2) and scaleB(pr, scale) is the product. The operation
+     * cannot overflow or underflow - both operands of every node's
+     * multiply are in +-[1, 2) by construction - so a product hundreds
+     * of binades outside the format comes back exactly as one inside
+     * it does. cft.h's block has the special-value rows and the
+     * scaling rule.
+     *
+     * scaledProdSum and scaledProdDiff take the product of the
+     * pairwise sums or differences, with ONE rounding per leaf; those
+     * two, and only those two, can signal overflow or underflow, and
+     * only from that addition. */
+    struct scaled_result {
+        value_type   pr;
+        std::int64_t scale;
+    };
+
+    scaled_result scaled_prod(cspan<encoding_type> a) &
+    {
+        encoding_type d{};
+        std::int64_t s = 0;
+        record(dev_->scaled_prod(F, rnd_, ptr(a), d.data(), &s, a.size()),
+               "cft_scaled_prod");
+        return scaled_result{ make(d), s };
+    }
+    scaled_result scaled_prod_sum(cspan<encoding_type> a,
+                                  cspan<encoding_type> b) &
+    {
+        return scaled_pair(a, b, false);
+    }
+    scaled_result scaled_prod_diff(cspan<encoding_type> a,
+                                   cspan<encoding_type> b) &
+    {
+        return scaled_pair(a, b, true);
+    }
+
     /* ===========================================================
      * Batch: the clause-5 completion set
      * =========================================================== */
@@ -1860,7 +2110,42 @@ public:
     CFT_HPP_CTX_TRIG1(asinh)
     CFT_HPP_CTX_TRIG1(acosh)
     CFT_HPP_CTX_TRIG1(atanh)
+    /* table 9.1's remainder (part of the 0.6 step) */
+    CFT_HPP_CTX_TRIG1(exp2m1)
+    CFT_HPP_CTX_TRIG1(exp10)
+    CFT_HPP_CTX_TRIG1(exp10m1)
+    CFT_HPP_CTX_TRIG1(log2p1)
+    CFT_HPP_CTX_TRIG1(log10p1)
+    CFT_HPP_CTX_TRIG1(rsqrt)
 #undef CFT_HPP_CTX_TRIG1
+    /* pown, compound and rootn: an INTEGER exponent per element, so the
+     * span of exponents must be as long as the output and is checked to
+     * be, exactly as an encoding operand is. */
+#define CFT_HPP_CTX_INT1(name)                                          \
+    std::uint32_t name(cspan<encoding_type> a, cspan<std::int64_t> n,   \
+                       span<encoding_type> d)                           \
+    {                                                                   \
+        check_operand(a, d, "a");                                       \
+        if (n.size() != d.size())                                       \
+            throw std::invalid_argument(                                \
+                std::string("cft: exponent array for " #name " has ") + \
+                std::to_string(n.size()) + " elements, output has " +   \
+                std::to_string(d.size()));                              \
+        return record(dev_->name(F, rnd_, ptr(a), n.data(), ptr(d),     \
+                                 d.size()), "cft_" #name);              \
+    }
+    CFT_HPP_CTX_INT1(pown)
+    CFT_HPP_CTX_INT1(compound)
+    CFT_HPP_CTX_INT1(rootn)
+#undef CFT_HPP_CTX_INT1
+    std::uint32_t powr(cspan<encoding_type> a, cspan<encoding_type> b,
+                       span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        check_operand(b, d, "b");
+        return record(dev_->powr(F, rnd_, ptr(a), ptr(b), ptr(d), d.size()),
+                      "cft_powr");
+    }
     /* y first, then x - C's order, and the one every caller expects. */
     std::uint32_t atan2(cspan<encoding_type> a, cspan<encoding_type> b,
                         span<encoding_type> d)
@@ -1880,6 +2165,168 @@ public:
                       "cft_atan2pi");
     }
 
+    /* ===========================================================
+     * The augmented arithmetic operations (754-2019 clause 9.5)
+     *
+     * Two outputs, and no attribute: 9.5 fixes the rounding to
+     * roundTiesTowardZero, so THIS CONTEXT'S ATTRIBUTE IS NOT
+     * CONSULTED - which is worth saying here, where every other
+     * member on this class does consult it. `out_r` and `out_e` must
+     * be different spans; either may alias an operand. cft.h has the
+     * tie rule, the zero-sign rules and the flag policy.
+     * =========================================================== */
+#define CFT_HPP_CTX_AUG(name)                                           \
+    std::uint32_t augmented_##name(cspan<encoding_type> a,              \
+                                   cspan<encoding_type> b,              \
+                                   span<encoding_type> out_r,           \
+                                   span<encoding_type> out_e)           \
+    {                                                                   \
+        check_operand(a, out_r, "a");                                   \
+        check_operand(b, out_r, "b");                                   \
+        check_operand(out_e, out_r, "e");                               \
+        return record(dev_->augmented_##name(F, ptr(a), ptr(b),         \
+                                             ptr(out_r), ptr(out_e),    \
+                                             out_r.size()),             \
+                      "cft_augmented_" #name);                          \
+    }
+    CFT_HPP_CTX_AUG(add)
+    CFT_HPP_CTX_AUG(sub)
+    CFT_HPP_CTX_AUG(mul)
+#undef CFT_HPP_CTX_AUG
+
+
+    /* ===========================================================
+     * Character sequences (5.12) and NaN payloads (9.7)
+     * Part of the 0.6 step.
+     *
+     * The typed shape of an asymmetric API, and the asymmetry is the C
+     * header's decision rather than this layer's: reading sequences IN
+     * is a batch (an array of strings, a dense array of encodings), and
+     * writing one OUT is per element, because an output sequence's
+     * length is not known until the conversion has run and runs from
+     * three bytes to 183,000. What this layer adds is that the length
+     * comes back as a std::string rather than as a protocol.
+     *
+     * to_decimal_char(x) with no digit count is 5.12.2's EXACT
+     * conversion - every digit of the value, which at the ends of
+     * fp256's range is tens of thousands of them.
+     * to_decimal_char(x, H) is H significant digits correctly rounded
+     * in this context's attribute, and decimal_digits() is the H at
+     * which the round trip is guaranteed.
+     *
+     * These keep the C names - to_hex_char, not to_hex - and the
+     * distinction is load-bearing rather than pedantic: to_hex_char(x)
+     * is 5.12.3's hexadecimal FLOAT, "0x1.8p+1", while x.hex() and
+     * cft::to_hex<F>() are the ENCODING's bit pattern, "0x40400000".
+     * Two different answers to two different questions, and giving
+     * them one name would be a trap.
+     * =========================================================== */
+    static std::size_t decimal_digits() noexcept
+    {
+        return cft_format_decimal_digits(F);
+    }
+
+    std::uint32_t from_decimal_char(const std::string *in, std::size_t n,
+                               span<encoding_type> d)
+    {
+        return from_char_batch(in, n, d, false);
+    }
+    std::uint32_t from_hex_char(const std::string *in, std::size_t n,
+                           span<encoding_type> d)
+    {
+        return from_char_batch(in, n, d, true);
+    }
+
+    /* The scalar forms - each the batch of one, like every other scalar
+     * convenience here. A sequence outside 5.12's syntax throws
+     * cft::error carrying CFT_ERR_INVALID_ARGUMENT and naming the
+     * sequence, because a parse that cannot be trusted must not come
+     * back looking like a number. */
+    value_type from_decimal_char(const std::string &s) &
+    {
+        encoding_type d{};
+        from_char_batch(&s, 1, span<encoding_type>(&d, 1), false);
+        return make(d);
+    }
+    value_type from_hex_char(const std::string &s) &
+    {
+        encoding_type d{};
+        from_char_batch(&s, 1, span<encoding_type>(&d, 1), true);
+        return make(d);
+    }
+
+    std::string to_decimal_char(const encoding_type &a,
+                                std::size_t digits = 0)
+    {
+        std::string out;
+        record(dev_->to_decimal_char(F, rnd_, a.data(), digits, out),
+               "cft_to_decimal_char");
+        return out;
+    }
+    std::string to_decimal_char(const value_type &x,
+                                std::size_t digits = 0)
+    {
+        return to_decimal_char(x.bytes(), digits);
+    }
+    std::string to_hex_char(const encoding_type &a)
+    {
+        std::string out;
+        const cft_status st = dev_->to_hex_char(F, a.data(), out);
+        if (st != CFT_OK)
+            throw error(st, "cft_to_hex_char");
+        return out;
+    }
+    std::string to_hex_char(const value_type &x)
+    {
+        return to_hex_char(x.bytes());
+    }
+
+    /* 9.7: quiet-computational and signalling nothing, so no flag word
+     * is recorded and none is returned - the shape classify() takes,
+     * for the same reason. */
+    void get_payload(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        const cft_status st = dev_->get_payload(F, ptr(a), ptr(d), d.size());
+        if (st != CFT_OK)
+            throw error(st, "cft_get_payload");
+    }
+    void set_payload(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        const cft_status st = dev_->set_payload(F, ptr(a), ptr(d), d.size());
+        if (st != CFT_OK)
+            throw error(st, "cft_set_payload");
+    }
+    void set_payload_signaling(cspan<encoding_type> a, span<encoding_type> d)
+    {
+        check_operand(a, d, "a");
+        const cft_status st =
+            dev_->set_payload_signaling(F, ptr(a), ptr(d), d.size());
+        if (st != CFT_OK)
+            throw error(st, "cft_set_payload_signaling");
+    }
+    value_type get_payload(const value_type &x) &
+    {
+        encoding_type d{};
+        get_payload(cspan<encoding_type>(&x.bytes(), 1),
+                    span<encoding_type>(&d, 1));
+        return make(d);
+    }
+    value_type set_payload(const value_type &x) &
+    {
+        encoding_type d{};
+        set_payload(cspan<encoding_type>(&x.bytes(), 1),
+                    span<encoding_type>(&d, 1));
+        return make(d);
+    }
+    value_type set_payload_signaling(const value_type &x) &
+    {
+        encoding_type d{};
+        set_payload_signaling(cspan<encoding_type>(&x.bytes(), 1),
+                              span<encoding_type>(&d, 1));
+        return make(d);
+    }
 
     /* ===========================================================
      * Scalar convenience - every one of these is the batch of one
@@ -2062,7 +2509,34 @@ public:
     CFT_HPP_SCALAR_TRIG1(asinh)
     CFT_HPP_SCALAR_TRIG1(acosh)
     CFT_HPP_SCALAR_TRIG1(atanh)
+    CFT_HPP_SCALAR_TRIG1(exp2m1)
+    CFT_HPP_SCALAR_TRIG1(exp10)
+    CFT_HPP_SCALAR_TRIG1(exp10m1)
+    CFT_HPP_SCALAR_TRIG1(log2p1)
+    CFT_HPP_SCALAR_TRIG1(log10p1)
+    CFT_HPP_SCALAR_TRIG1(rsqrt)
 #undef CFT_HPP_SCALAR_TRIG1
+#define CFT_HPP_SCALAR_INT1(name)                                       \
+    value_type name(const value_type &x, std::int64_t n) &              \
+    {                                                                   \
+        encoding_type d{};                                              \
+        const std::int64_t nn = n;                                      \
+        record(dev_->name(F, rnd_, x.bytes().data(), &nn, d.data(), 1), \
+               "cft_" #name);                                           \
+        return make(d);                                                 \
+    }
+    CFT_HPP_SCALAR_INT1(pown)
+    CFT_HPP_SCALAR_INT1(compound)
+    CFT_HPP_SCALAR_INT1(rootn)
+#undef CFT_HPP_SCALAR_INT1
+    value_type powr(const value_type &x, const value_type &y) &
+    {
+        encoding_type d{};
+        record(dev_->powr(F, rnd_, x.bytes().data(), y.bytes().data(),
+                          d.data(), 1),
+               "cft_powr");
+        return make(d);
+    }
     value_type atan2(const value_type &y, const value_type &x) &
     {
         encoding_type d{};
@@ -2179,6 +2653,46 @@ public:
     }
 
 private:
+    /* The from_ conversions' one shared body. The C call wants an
+     * array of NUL-terminated pointers, the C++ caller has std::string,
+     * and a refusal has to name WHICH sequence was refused - a caller
+     * reading a file of numbers needs the line and not just the
+     * verdict. */
+    std::uint32_t from_char_batch(const std::string *in, std::size_t n,
+                                  span<encoding_type> d, bool hex)
+    {
+        const char *what = hex ? "cft_from_hex_char"
+                               : "cft_from_decimal_char";
+        if (n != d.size())
+            throw std::invalid_argument(
+                std::string("cft: ") + std::to_string(n) +
+                " sequences for " + std::to_string(d.size()) + " outputs");
+        if (n == 0)
+            return record(call_result(), what);
+        {
+            std::vector<const char *> raw(n);
+            std::size_t bad = 0;
+            call_result r;
+            for (std::size_t i = 0; i < n; i++)
+                raw[i] = in[i].c_str();
+            r = hex ? dev_->from_hex_char(F, rnd_, raw.data(), ptr(d), n,
+                                          &bad)
+                    : dev_->from_decimal_char(F, rnd_, raw.data(), ptr(d), n,
+                                              &bad);
+            if (r.status != CFT_OK) {
+                std::string where(what);
+                if (bad < n) {
+                    const std::string &s = in[bad];
+                    where += " on sequence " + std::to_string(bad) + " \"" +
+                             (s.size() > 60 ? s.substr(0, 60) + "..." : s) +
+                             "\"";
+                }
+                throw error(r.status, where.c_str());
+            }
+            return record(r, what);
+        }
+    }
+
     static const void *ptr(cspan<encoding_type> s) noexcept
     {
         return s.empty() ? nullptr : static_cast<const void *>(s.data());
@@ -2210,6 +2724,30 @@ private:
                 std::string("cft: operand ") + name + " has " +
                 std::to_string(s.size()) + " elements, output has " +
                 std::to_string(d.size()));
+    }
+
+    /* scaledProdSum and scaledProdDiff differ in one C entry point and
+     * nothing else, so the length check and the pair-building live
+     * here once. */
+    scaled_result scaled_pair(cspan<encoding_type> a, cspan<encoding_type> b,
+                              bool difference) &
+    {
+        if (b.size() != a.size())
+            throw std::invalid_argument(
+                std::string("cft::scaled_prod_") +
+                (difference ? "diff" : "sum") +
+                ": b must be as long as a (" + std::to_string(b.size()) +
+                " vs " + std::to_string(a.size()) + ")");
+        encoding_type d{};
+        std::int64_t s = 0;
+        const call_result r =
+            difference ? dev_->scaled_prod_diff(F, rnd_, ptr(a), ptr(b),
+                                                d.data(), &s, a.size())
+                       : dev_->scaled_prod_sum(F, rnd_, ptr(a), ptr(b),
+                                               d.data(), &s, a.size());
+        record(r, difference ? "cft_scaled_prod_diff"
+                             : "cft_scaled_prod_sum");
+        return scaled_result{ make(d), s };
     }
 
     value_type one_of(cft_op op, const encoding_type &a, const encoding_type &b,

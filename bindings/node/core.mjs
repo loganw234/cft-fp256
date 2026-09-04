@@ -34,14 +34,46 @@ import {
   CLASS_NAMES, FP32, FP64, FP128, FP256, OP_ABS, OP_ADD, OP_CMPEQ,
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
-  RDN, RMM, RNE, RTZ, RUP, TRANSCEND_BINARY, TRANSCEND_UNARY,
+  OP_SUMABS, OP_SUMSQ,
+  RDN, RMM, RNE, RTZ, RUP, TRANSCEND_BINARY, TRANSCEND_INTARG,
+  TRANSCEND_UNARY,
   checkStatus, flagNames, loadModule, withScratch,
 } from "./lib.mjs";
 
+// Three arities, not two: TRANSCEND_INTARG's second operand is an
+// int64 array rather than an encoding, so it cannot share the binary
+// path even though the argument count matches. lib.mjs says why.
 const TRANSCEND_ARITY = new Map([
   ...TRANSCEND_UNARY.map((f) => [f, 1]),
   ...TRANSCEND_BINARY.map((f) => [f, 2]),
 ]);
+const TRANSCEND_INT = new Set(TRANSCEND_INTARG);
+
+/** The int64 range check every integer operand in this package goes
+ *  through. int64 is exactly why these are BigInt at the boundary: a
+ *  JS number is a binary64, so it silently stops being an integer
+ *  above 2^53, and rootn's or pown's exponent is int64 in the
+ *  contract. A safe integer is accepted and widened here - writing
+ *  `pown(x, 3)` should not need a suffix - and anything past 2^53 has
+ *  to arrive as a BigInt, because a number that large has already lost
+ *  the value before this function could see it. */
+function asI64(v, what) {
+  let n;
+  if (typeof v === "bigint") n = v;
+  else if (typeof v === "number") {
+    if (!Number.isSafeInteger(v))
+      throw new TypeError(
+        `${what} is an int64 in the contract; ${v} is not a safe integer, ` +
+        `so a JS number cannot carry it - pass a BigInt`);
+    n = BigInt(v);
+  } else {
+    throw new TypeError(`${what} wants a BigInt or a safe integer, got ` +
+                        `${typeof v}`);
+  }
+  if (n < -(2n ** 63n) || n >= 2n ** 63n)
+    throw new RangeError(`${what} is int64_t; ${n} does not fit`);
+  return n;
+}
 
 // ---------------------------------------------------------------------
 // Formats. Geometry only; the codes and names are cft.h's, and
@@ -385,6 +417,43 @@ export class Float {
   asinh() { return this._ctx.asinh(this); }
   acosh() { return this._ctx.acosh(this); }
   atanh() { return this._ctx.atanh(this); }
+
+  /** The rest of 754-2019 table 9.1 (ABI 0.6), same terms. `pown`,
+   *  `compound` and `rootn` take an INTEGER exponent - a BigInt, or a
+   *  safe integer this package widens - because 9.2.1 asks for one:
+   *  "n is a finite integral value in integralFormat". `powr` is not
+   *  `pow`: a negative base is invalid for every exponent. */
+  exp2m1() { return this._ctx.exp2m1(this); }
+  exp10() { return this._ctx.exp10(this); }
+  exp10m1() { return this._ctx.exp10m1(this); }
+  log2p1() { return this._ctx.log2p1(this); }
+  log10p1() { return this._ctx.log10p1(this); }
+  rsqrt() { return this._ctx.rsqrt(this); }
+  powr(y) { return this._ctx.powr(this, y); }
+  pown(n) { return this._ctx.pown(this, n); }
+  compound(n) { return this._ctx.compound(this, n); }
+  rootn(n) { return this._ctx.rootn(this, n); }
+
+  /** The clause-5.12 character conversions out of this value, and the
+   *  clause-9.7 payload reads (ABI 0.6). `toDecimal()` with no digit
+   *  count is the EXACT conversion, which is what toString() already
+   *  writes; a count asks for exactly that many significant digits,
+   *  correctly rounded in this context's attribute. `toHex()` is the
+   *  shortest sequence that represents the value exactly and never
+   *  rounds. */
+  toDecimal(opts) { return this._ctx.toDecimal(this, opts); }
+  toHex() { return this._ctx.toHex(this); }
+  getPayload() { return this._ctx.getPayload(this); }
+  setPayload() { return this._ctx.setPayload(this); }
+  setPayloadSignaling() { return this._ctx.setPayloadSignaling(this); }
+
+  /** The augmented arithmetic of clause 9.5 (ABI 0.6). Each returns
+   *  `{ r, e }` - the operation rounded, and the error that rounding
+   *  made - under roundTiesTowardZero, which is 9.5's own direction and
+   *  not one this context can change. */
+  augmentedAdd(y) { return this._ctx.augmentedAdd(this, y); }
+  augmentedSub(y) { return this._ctx.augmentedSub(this, y); }
+  augmentedMul(y) { return this._ctx.augmentedMul(this, y); }
 
   lt(y) { return this._ctx.lt(this, y); }
   le(y) { return this._ctx.le(this, y); }
@@ -1019,6 +1088,386 @@ export class Context {
    *  pole); |x| > 1 is invalid, infinities included. */
   atanh(x) { return this._transcend1("atanh", x); }
 
+  // -- the rest of table 9.1 (ABI 0.6) -----------------------------
+  //
+  // With these ten the library implements every operation 754-2019
+  // table 9.1 lists for the binary formats. Same promise on the same
+  // machinery: correctly rounded at this context's precision under its
+  // attribute, 9.2.1's special values, exact flags, nothing computed
+  // here. What is new is EXACTNESS, not machinery - each has a larger
+  // exact-case table than the function it is built from, proved closed
+  // in docs/TRANSCENDENTALS.md before the Ziv loop under it is allowed
+  // to run, because a true value sitting on a rounding boundary is
+  // exactly where that loop does not terminate.
+
+  /** 2^x - 1. EXACT at every integer argument: 2^n - 1 is a dyadic
+   *  rational for every n. Past |n| > p+1 the value is still known
+   *  exactly and is delivered by a side rather than by a boundary. */
+  exp2m1(x) { return this._transcend1("exp2m1", x); }
+
+  /** 10^x, exact at the non-negative integers whose 5^n fits in p+1
+   *  bits. A negative power of ten is not dyadic at all, so none of
+   *  those is exact. */
+  exp10(x) { return this._transcend1("exp10", x); }
+
+  /** 10^x - 1, exact at the non-negative integers whose 10^n - 1 fits
+   *  in p+1 bits. */
+  exp10m1(x) { return this._transcend1("exp10m1", x); }
+
+  /** log2(1 + x), with 1 + x formed EXACTLY on the encoding and never
+   *  as a rounded sum - which is the whole reason this function
+   *  exists. Exact where 1 + x is a power of two; log2p1(-1) is -inf
+   *  with divideByZero, and an operand below -1 is invalid. */
+  log2p1(x) { return this._transcend1("log2p1", x); }
+
+  /** log10(1 + x), the same construction and the same edges, exact
+   *  where 1 + x is a power of ten. */
+  log10p1(x) { return this._transcend1("log10p1", x); }
+
+  /** 1/sqrt(x). Exact exactly at the even powers of two, and it can
+   *  neither overflow nor underflow at any format. rSqrt(+-0) is
+   *  +-INFINITY with divideByZero and THE SIGN SURVIVES: rSqrt(-0) is
+   *  -infinity, which is the standard's row and not MPFR's. */
+  rsqrt(x) { return this._transcend1("rsqrt", x); }
+
+  /** x^y on [0, +inf) x [-inf, +inf]. powr is NOT pow, and the
+   *  differences are the reason it is a separate operation: powr(x, y)
+   *  for x < 0 is invalid for EVERY y, a NaN included; powr(+-0, +-0),
+   *  powr(+inf, +-0) and powr(+1, +-inf) are invalid; and
+   *  powr(qNaN, y) is a quiet NaN where pow(qNaN, 0) is 1. */
+  powr(x, y) { return this._transcend2("powr", x, y); }
+
+  /** x^n for an INTEGER n - a BigInt, or a safe integer widened here.
+   *  pown(x, 0) is 1 for any x that is not a signaling NaN, an
+   *  infinity and a quiet NaN included. */
+  pown(x, n) { return this._transcendInt("pown", x, n); }
+
+  /** (1 + x)^n, integer n, with 1 + x formed exactly. compound(x, 0)
+   *  is 1 "for x >= -1 or quiet NaN", so an x BELOW -1 with n = 0 is
+   *  invalid rather than 1; compound(-1, n) is +inf with divideByZero
+   *  for n < 0 and +0 for n > 0; compound(+-0, n) is 1. */
+  compound(x, n) { return this._transcendInt("compound", x, n); }
+
+  /** x^(1/n), integer n. rootn(x, 0) is invalid - zero is outside the
+   *  domain for every x. rootn(x, 1) is x exactly and silently.
+   *  rootn(x, 2) is squareRoot(x) on every input EXCEPT x = -0, where
+   *  the standard's own NOTE says they differ: rootn(-0, 2) is +0 by
+   *  the even-n row where squareRoot(-0) is -0. */
+  rootn(x, n) { return this._transcendInt("rootn", x, n); }
+
+  /** One of the three with an integer exponent, at n == 1. The int64
+   *  travels in a one-element heap array, which is the shape cft.h
+   *  gives it - `const int64_t *n` beside the encoding array, never a
+   *  scalar parameter, so it needs no BigInt across the wasm
+   *  boundary. */
+  _transcendInt(fn, x, n) {
+    const M = this._M, fi = this._fi;
+    const a = this.from(x);
+    const nn = asI64(n, `${fn}'s exponent`);
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes), pn = s.putI64([nn]);
+      const pd = s.alloc(fi.size), fl = s.alloc(4);
+      const st = this._C[fn](this._dev, fi.code, this._rnd, pa, pn, pd, 1, fl);
+      checkStatus(this._C, st, `cft_${fn}`);
+      return this._finish(s.get(pd, fi.size), s.u32(fl));
+    });
+  }
+
+  // -- clause 5.12's characters and clause 9.7's payloads (ABI 0.6) --
+  //
+  // Strings are JavaScript strings at this boundary and heap bytes
+  // below it, and the conversion in both directions is the library's:
+  // this package writes the sequence into wasm memory and hands the
+  // pointer over, or asks the library how long its answer is and reads
+  // it back. It does NOT parse a decimal itself here - Context.parse()
+  // above is the older, narrower path that packs an exact value or
+  // rounds it with one arithmetic call, and it REFUSES what it cannot
+  // do that way; fromDecimal() is the library's own 5.12 parser, with
+  // no window and no refusal except the syntax's own.
+  //
+  // THE SIZING PROTOCOL IS THE C's, EXACTLY. cft.h: a NULL buffer with
+  // cap 0 asks for the required length including the NUL, a buffer too
+  // small is CFT_ERR_INVALID_ARGUMENT with the length set and NOTHING
+  // written, and *len is set either way. This package performs both
+  // calls and hands back a string, which is what a JS caller wants -
+  // but it does not invent a different contract underneath, and
+  // toDecimalInto() below exposes the raw protocol so a caller can see
+  // the refusal happen. test.mjs drives both.
+
+  /** Pmin (5.12.2) for this context's format: 9, 17, 36, 73. The digit
+   *  count at which a to-decimal / from-decimal round trip under a
+   *  round-to-nearest attribute is GUARANTEED to reproduce the
+   *  encoding. Fewer digits than this is not a rounding error, it is a
+   *  different number. From the library, not tabulated here. */
+  get decimalDigits() { return this._C.decimalDigits(this._fi.code); }
+
+  /** One decimal sequence -> an encoding, correctly rounded in this
+   *  context's attribute by the library's own 5.12 parser. A sequence
+   *  outside the syntax is refused with the library's status, not
+   *  guessed at. */
+  fromDecimal(s) { return this._fromChar("fromDecimalChar", s); }
+
+  /** One hexadecimal sequence -> an encoding. A hex sequence's value is
+   *  dyadic, so exact is the common case; more bits than the format
+   *  holds round once. The binary exponent is REQUIRED by 5.12.3's
+   *  grammar, and a sequence without one is refused. */
+  fromHex(s) { return this._fromChar("fromHexChar", s); }
+
+  _fromChar(which, s) {
+    if (typeof s !== "string")
+      throw new TypeError(`${which} wants a string, got ${typeof s}`);
+    const M = this._M, fi = this._fi;
+    return withScratch(M, (st_) => {
+      const pin = st_.putStringArray([s]);
+      const pd = st_.alloc(fi.size), bad = st_.alloc(4), fl = st_.alloc(4);
+      const st = this._C[which](this._dev, fi.code, this._rnd, pin, pd, 1,
+                                bad, fl);
+      if (st !== 0)
+        throw new SyntaxError(
+          `${JSON.stringify(s)} is not a sequence 754-2019 clause 5.12 ` +
+          `accepts (the library refused element ${st_.u32(bad)}): ` +
+          `${this._C.strerror(st)}. The syntax is an optional sign, digits ` +
+          `with an optional point and an optional exponent - a hex ` +
+          `sequence needs 0x and a REQUIRED binary exponent - or the words ` +
+          `inf / infinity / nan / snan with an optional (payload).`);
+      return this._finish(st_.get(pd, fi.size), st_.u32(fl));
+    });
+  }
+
+  /** An encoding -> a decimal sequence. `digits: 0` (the default) is
+   *  the EXACT conversion 5.12.2 asks for: every digit of the exact
+   *  value, trailing zeros removed, no attribute consulted and no flag
+   *  raised. It always terminates and it can be long - about 183,000
+   *  significant digits for the smallest binary256 subnormal.
+   *  `digits: h` for h >= 1 asks for exactly h significant digits,
+   *  correctly rounded under this context's attribute with trailing
+   *  zeros KEPT, and raises inexact when a digit was dropped. */
+  toDecimal(x, { digits = 0 } = {}) {
+    const a = this.from(x);
+    const d = asI64(digits, "toDecimal's digit count");
+    if (d < 0n) throw new RangeError("toDecimal's digit count is a count");
+    return withScratch(this._M, (s) => {
+      const pa = s.put(a.bytes);
+      const { text, flags } = this._sized(
+        (out, cap, len, fl) =>
+          this._C.toDecimalChar(this._dev, this._fi.code, this._rnd, pa,
+                                Number(d), out, cap, len, fl),
+        s, "cft_to_decimal_char", true);
+      this.lastFlags = flags;
+      this.flags |= flags;
+      return text;
+    });
+  }
+
+  /** An encoding -> the shortest hexadecimal sequence that represents
+   *  it EXACTLY (5.12.3, "in the absence of an explicit precision
+   *  specification"). Canonical: one leading 1, no trailing zeros, an
+   *  explicitly signed binary exponent - so a subnormal prints with
+   *  its true exponent, 0x1p-149 for the smallest binary32. Exact
+   *  always, so no attribute is consulted and no flag can be raised;
+   *  the library gives this one no flag word and none is invented. */
+  toHex(x) {
+    const a = this.from(x);
+    return withScratch(this._M, (s) => {
+      const pa = s.put(a.bytes);
+      return this._sized(
+        (out, cap, len) =>
+          this._C.toHexChar(this._dev, this._fi.code, pa, out, cap, len),
+        s, "cft_to_hex_char", false).text;
+    });
+  }
+
+  /** The two-call sizing protocol, run: ask with a NULL buffer and a
+   *  zero capacity, allocate exactly what the library asked for, call
+   *  again. The refusal path is not smoothed over - a status that is
+   *  neither the sizing refusal nor OK is raised - because the whole
+   *  point of exposing the protocol is that a caller can tell the two
+   *  apart. */
+  _sized(call, s, what, hasFlags) {
+    const len = s.alloc(4);
+    const fl = hasFlags ? s.alloc(4) : 0;
+    const ask = call(0, 0, len, fl);
+    const need = s.u32(len);
+    if (ask === 0)
+      throw new Error(
+        `${what}: a NULL buffer with capacity 0 returned success, where ` +
+        `cft.h's sizing protocol says it reports the required length and ` +
+        `refuses. The module and this package disagree about the protocol.`);
+    if (need < 2)
+      throw new Error(`${what}: required length ${need} - a sequence is at ` +
+                      `least one character and a NUL`);
+    const out = s.alloc(need);
+    const st = call(out, need, len, fl);
+    checkStatus(this._C, st, what);
+    return { text: s.str(out), len: need, flags: hasFlags ? s.u32(fl) : 0 };
+  }
+
+  /** The sizing protocol with the buffer the CALLER chose, so the
+   *  refusal is visible rather than handled. Returns
+   *  `{ status, len, text }`: `status` 0 with the text on success, and
+   *  the library's CFT_ERR_INVALID_ARGUMENT with `len` set and no text
+   *  when `cap` is too small - which is the contract's answer, because
+   *  this library does not truncate a number. `cap: 0` is the sizing
+   *  question itself. */
+  toDecimalInto(x, cap, { digits = 0 } = {}) {
+    const a = this.from(x);
+    const d = asI64(digits, "toDecimalInto's digit count");
+    return withScratch(this._M, (s) => {
+      const pa = s.put(a.bytes);
+      const len = s.alloc(4), fl = s.alloc(4);
+      const out = cap > 0 ? s.alloc(cap) : 0;
+      const st = this._C.toDecimalChar(this._dev, this._fi.code, this._rnd,
+                                       pa, Number(d), out, cap, len, fl);
+      const flags = s.u32(fl);
+      this.lastFlags = flags;
+      this.flags |= flags;
+      return { status: st, len: s.u32(len), flags,
+               text: st === 0 ? s.str(out) : null };
+    });
+  }
+
+  /** getPayload (9.7): a NaN's payload as a floating-point integer;
+   *  anything that is not a NaN gives -1, which is 9.7's own answer.
+   *  Non-computational - it signals nothing, so there is no flags
+   *  argument and none is invented. */
+  getPayload(x) { return this._payload("getPayload", x); }
+
+  /** setPayload (9.7): a non-negative floating-point integer in the
+   *  admissible set 0 .. 2^(manW - 1) - 1 becomes a quiet NaN carrying
+   *  it; ANYTHING else becomes +0. The test is on the VALUE, so -0
+   *  passes it as the integer zero. */
+  setPayload(x) { return this._payload("setPayload", x); }
+
+  /** setPayloadSignaling (9.7): the same with a signaling NaN, where
+   *  payload 0 is NOT admissible - payload 0 with the quiet bit clear
+   *  is an infinity encoding - so setPayloadSignaling(+-0) is +0. */
+  setPayloadSignaling(x) { return this._payload("setPayloadSignaling", x); }
+
+  _payload(which, x) {
+    const M = this._M, fi = this._fi;
+    const a = this.from(x);
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes), pd = s.alloc(fi.size);
+      const st = this._C[which](this._dev, fi.code, pa, pd, 1);
+      checkStatus(this._C, st, `cft_${which}`);
+      return new Float(this, s.get(pd, fi.size));
+    });
+  }
+
+  // -- the augmented arithmetic (clause 9.5, ABI 0.6) --------------
+  //
+  // A PAIR out: r is the operation rounded and e is the error that
+  // rounding made, and together they carry the exact result the format
+  // alone cannot hold. That is what a compensated summation or an
+  // exactly-rounded dot product is built out of, and what those
+  // algorithms currently reconstruct by hand from TwoSum and Dekker
+  // splitting - correctly only under assumptions a compiler is free to
+  // break.
+  //
+  // NO ROUNDING ATTRIBUTE IS ACCEPTED, and this context's attribute is
+  // not consulted either. 9.5 fixes the direction itself:
+  // roundTiesTowardZero, which is not one of clause 4.3's five, so
+  // there is nothing to pass. The tie rule differs from
+  // roundTiesToEven only at an exact midpoint whose lower neighbour is
+  // odd - so an implementation that quietly used RNE would pass every
+  // test that did not aim there, which is why the vector sets aim
+  // there at every binade edge.
+
+  /** `{ r, e }` of augmentedAddition(x, y). The sign of a zero e is
+   *  the sign of r when the residual is exactly zero, so
+   *  augmentedAdd(-3, 0) is (-3, -0) and augmentedAdd(3, -3) is
+   *  (+0, +0). */
+  augmentedAdd(x, y) { return this._augmented("augmentedAdd", x, y); }
+
+  /** `{ r, e }` of augmentedSubtraction(x, y): x + (-y) with every
+   *  rule of the addition, the signed zeros included. */
+  augmentedSub(x, y) { return this._augmented("augmentedSub", x, y); }
+
+  /** `{ r, e }` of augmentedMultiplication(x, y). This is the one
+   *  operation of the three whose e can fail to be representable -
+   *  9.5's residual with non-zero digits strictly between
+   *  +-b^(emin-p+1) - and it delivers that residual ROUNDED, raising
+   *  underflow and inexact. It is the only case in which r + e is not
+   *  exactly x * y. */
+  augmentedMul(x, y) { return this._augmented("augmentedMul", x, y); }
+
+  _augmented(which, x, y) {
+    const M = this._M, fi = this._fi;
+    const a = this.from(x), b = this.from(y);
+    return withScratch(M, (s) => {
+      const pa = s.put(a.bytes), pb = s.put(b.bytes);
+      // r and e must not overlap each other - cft.h refuses the same
+      // pointer for both - so they are two allocations, never one.
+      const pr = s.alloc(fi.size), pe = s.alloc(fi.size), fl = s.alloc(4);
+      const st = this._C[which](this._dev, fi.code, pa, pb, pr, pe, 1, fl);
+      checkStatus(this._C, st, `cft_${which}`);
+      const flags = s.u32(fl);
+      this.lastFlags = flags;
+      this.flags |= flags;
+      return { r: new Float(this, s.get(pr, fi.size)),
+               e: new Float(this, s.get(pe, fi.size)) };
+    });
+  }
+
+  // -- the scaled product reductions (clause 9.4, ABI 0.6) ---------
+  //
+  // A pair again, and a different one: a significand in +-[1, 2) and
+  // an INT64 SCALE. The scale comes back as a BigInt, for the reason
+  // every integer in this package does - it is int64_t in the
+  // contract, a JS number stops being an integer above 2^53, and a
+  // scale that silently lost its low bits would be a wrong answer
+  // wearing a plausible one's clothes. It is small in practice (a leaf
+  // contributes at most emax + p - 1 = 262,379 at fp256), which is an
+  // argument for a Number and not a good enough one: the contract's
+  // type is the one that survives the case nobody tested.
+
+  /** `{ pr, sf }` with scaleB(pr, sf) ~ the product of the array.
+   *  Cannot overflow or underflow, by construction rather than by
+   *  luck: every node's operands are in +-[1, 2), so no product can
+   *  leave any rung of the ladder. n == 0 gives pr = 1 and sf = 0
+   *  without exception - 9.4 fixes that, the multiplicative identity
+   *  where an empty sum gives the additive one. */
+  scaledProd(a) { return this._scaledProd("scaledProd", a, null); }
+
+  /** `{ pr, sf }` over the products of (a[i] + b[i]). The leaf is ONE
+   *  contract rounding of that sum in this context's attribute, and it
+   *  is the only place this operation can signal overflow or
+   *  underflow - never the product tree. */
+  scaledProdSum(a, b) { return this._scaledProd("scaledProdSum", a, b); }
+
+  /** `{ pr, sf }` over the products of (a[i] - b[i]), a first. */
+  scaledProdDiff(a, b) { return this._scaledProd("scaledProdDiff", a, b); }
+
+  _scaledProd(which, a, b) {
+    const M = this._M, fi = this._fi;
+    if (!Array.isArray(a))
+      throw new TypeError(`${which} reduces an array of operands`);
+    if (b && b.length !== a.length)
+      throw new RangeError(`operand arrays differ in length: ` +
+                           `${a.length} and ${b.length}`);
+    const n = a.length;
+    const pack = (arr) => {
+      if (!arr) return null;
+      const buf = new Uint8Array(fi.size * n);
+      arr.forEach((v, i) => buf.set(this.from(v).bytes, i * fi.size));
+      return buf;
+    };
+    const ab = pack(a), bb = pack(b);
+    return withScratch(M, (s) => {
+      const pa = n ? s.put(ab) : 0;
+      const pb = bb && n ? s.put(bb) : 0;
+      const pr = s.alloc(fi.size), psf = s.alloc(8), fl = s.alloc(4);
+      const st = b
+        ? this._C[which](this._dev, fi.code, this._rnd, pa, pb, pr, psf, n, fl)
+        : this._C[which](this._dev, fi.code, this._rnd, pa, pr, psf, n, fl);
+      checkStatus(this._C, st, `cft_${which}`);
+      const flags = s.u32(fl);
+      this.lastFlags = flags;
+      this.flags |= flags;
+      return { pr: new Float(this, s.get(pr, fi.size)), sf: s.i64(psf) };
+    });
+  }
+
   // -- clause 5 ----------------------------------------------------
 
   /** roundToIntegral. exact: true is roundToIntegralExact, the one
@@ -1150,18 +1599,27 @@ export class Context {
 
   /** One library call over a whole array: the call shape a device
    *  wants, and the reason a batch API exists at all. `op` is a name
-   *  from cft.h - an opcode ("add", "mul", "fma", ...) or one of the
-   *  twenty transcendentals ("exp", "pow", "sinpi", "atan2", ...);
-   *  operands are arrays of Float or anything from() accepts, or null
-   *  for an unused slot. For atan2 and atan2pi the first array is y
-   *  and the second is x, as everywhere else in this package.
+   *  from cft.h - an opcode ("add", "mul", "fma", ...), one of the
+   *  thirty-nine transcendentals ("exp", "pow", "sinpi", "atan2",
+   *  "rootn", ...), one of the three augmented operations, or one of
+   *  the payload operations; operands are arrays of Float or anything
+   *  from() accepts, or null for an unused slot. For atan2 and atan2pi
+   *  the first array is y and the second is x, as everywhere else in
+   *  this package. For pown, compound and rootn the SECOND array is
+   *  the integer exponents - BigInts, or safe integers - because the
+   *  contract's second operand there is an int64 and not an encoding.
    *
    *  The transcendentals take a different C entry point, not an opcode
    *  in cft_run, so they are dispatched by name below. They are
    *  correctly rounded, which means the array answer IS the scalar
    *  answer element by element: there is no vectorised approximation
    *  here to drift from a scalar path, and test.mjs checks that rather
-   *  than assuming it. */
+   *  than assuming it.
+   *
+   *  The three augmented operations return `{ r, e }` of two arrays
+   *  rather than one array, because they have two outputs; the payload
+   *  three return one array and no flags, because 9.7 says they signal
+   *  nothing. Both are the C's shapes carried up, not new ones. */
   map(op, a, b = null, c = null) {
     const fi = this._fi;
     const lens = [a, b, c].filter(Boolean).map((v) => v.length);
@@ -1181,6 +1639,69 @@ export class Context {
         out.push(new Float(this, bytes.slice(i * fi.size, (i + 1) * fi.size)));
       return out;
     };
+
+    // The three with an int64 exponent array. Same argument count as a
+    // binary call and a different second operand, so it is its own
+    // branch rather than a flag on that one.
+    if (typeof op === "string" && TRANSCEND_INT.has(op)) {
+      if (c) throw new TypeError(`${op} takes no c operand`);
+      if (!b) throw new TypeError(`${op} needs an array of integer exponents`);
+      const ns = b.map((v, i) => asI64(v, `${op}'s exponent [${i}]`));
+      const ab = pack(a);
+      return withScratch(this._M, (s) => {
+        const pa = s.put(ab), pn = s.putI64(ns);
+        const pd = s.alloc(fi.size * n), fl = s.alloc(4);
+        const st = this._C[op](this._dev, fi.code, this._rnd, pa, pn, pd, n,
+                               fl);
+        checkStatus(this._C, st, `cft_${op}`);
+        const flags = s.u32(fl);
+        this.lastFlags = flags;
+        this.flags |= flags;
+        return split(s.get(pd, fi.size * n));
+      });
+    }
+
+    // The augmented three: two outputs, no rounding argument.
+    const AUG = { augmentedAddition: "augmentedAdd",
+                  augmentedSubtraction: "augmentedSub",
+                  augmentedMultiplication: "augmentedMul" };
+    const augFn = typeof op === "string"
+      ? (AUG[op] ?? (Object.values(AUG).includes(op) ? op : undefined))
+      : undefined;
+    if (augFn !== undefined) {
+      if (c) throw new TypeError(`${op} takes no c operand`);
+      if (!b) throw new TypeError(`${op} needs a second operand array`);
+      const ab = pack(a), bb = pack(b);
+      return withScratch(this._M, (s) => {
+        const pa = s.put(ab), pb = s.put(bb);
+        const pr = s.alloc(fi.size * n), pe = s.alloc(fi.size * n);
+        const fl = s.alloc(4);
+        const st = this._C[augFn](this._dev, fi.code, pa, pb, pr, pe, n, fl);
+        checkStatus(this._C, st, `cft_${augFn}`);
+        const flags = s.u32(fl);
+        this.lastFlags = flags;
+        this.flags |= flags;
+        return { r: split(s.get(pr, fi.size * n)),
+                 e: split(s.get(pe, fi.size * n)) };
+      });
+    }
+
+    // The 9.7 payload three: elementwise, and no flag word at all.
+    const PAY = { get_payload: "getPayload", set_payload: "setPayload",
+                  set_payload_signaling: "setPayloadSignaling" };
+    const payFn = typeof op === "string"
+      ? (PAY[op] ?? (Object.values(PAY).includes(op) ? op : undefined))
+      : undefined;
+    if (payFn !== undefined) {
+      if (b || c) throw new TypeError(`${op} reads one operand array`);
+      const ab = pack(a);
+      return withScratch(this._M, (s) => {
+        const pa = s.put(ab), pd = s.alloc(fi.size * n);
+        const st = this._C[payFn](this._dev, fi.code, pa, pd, n);
+        checkStatus(this._C, st, `cft_${payFn}`);
+        return split(s.get(pd, fi.size * n));
+      });
+    }
 
     const arity = typeof op === "string" ? TRANSCEND_ARITY.get(op) : undefined;
     if (arity !== undefined) {
@@ -1214,15 +1735,68 @@ export class Context {
     return split(r.bytes);
   }
 
-  /** The contract's tree reduction: sum, or dot with a second array.
+  /** Many sequences -> many encodings in ONE library call: the from_
+   *  conversions are the batch-shaped half of clause 5.12, and this is
+   *  that shape. The flag word is the OR across the batch; a sequence
+   *  outside the syntax refuses the WHOLE call and the error names
+   *  which element was at fault, because a caller reading a file of
+   *  numbers needs the line and not just the verdict. */
+  mapFromDecimal(list) { return this._mapFromChar("fromDecimalChar", list); }
+  mapFromHex(list) { return this._mapFromChar("fromHexChar", list); }
+
+  _mapFromChar(which, list) {
+    if (!Array.isArray(list) || list.some((s) => typeof s !== "string"))
+      throw new TypeError(`${which} wants an array of strings`);
+    const M = this._M, fi = this._fi;
+    const n = list.length;
+    return withScratch(M, (s) => {
+      const pin = s.putStringArray(list);
+      const pd = s.alloc(fi.size * Math.max(n, 1));
+      const bad = s.alloc(4), fl = s.alloc(4);
+      const st = this._C[which](this._dev, fi.code, this._rnd, pin, pd, n,
+                                bad, fl);
+      if (st !== 0) {
+        const i = s.u32(bad);
+        throw new SyntaxError(
+          `${which} refused the batch at element ${i} ` +
+          `(${JSON.stringify(list[i] ?? "?")}): ` +
+          `${this._C.strerror(st)}. On a refusal the whole call is refused ` +
+          `and the output is unspecified - cft.h, and this package does not ` +
+          `hand back a half-converted array.`);
+      }
+      const flags = s.u32(fl);
+      this.lastFlags = flags;
+      this.flags |= flags;
+      const bytes = s.get(pd, fi.size * Math.max(n, 1));
+      const out = [];
+      for (let i = 0; i < n; i++)
+        out.push(new Float(this, bytes.slice(i * fi.size, (i + 1) * fi.size)));
+      return out;
+    });
+  }
+
+  /** The contract's tree reduction: "sum", "dot" with a second array,
+   *  and since ABI 0.6 "sumsq" and "sumabs" - opcodes 28 and 29, the
+   *  other two of clause 9.4's sum reductions.
    *  The tree shape is part of the contract, not an implementation
    *  detail (cft.h, docs/DETERMINISM.md), which is why this is
-   *  cft_reduce and not a JS loop over add(). */
+   *  cft_reduce and not a JS loop over add().
+   *
+   *  sumsq and sumabs are the SAME tree over a different leaf, so the
+   *  library issues `dot(a, a)` and an `abs` pass then `sum` - with one
+   *  documented row of their own, where 754-2019 9.4 puts an infinity
+   *  AHEAD of a NaN for these two and behind it for sum and dot. A
+   *  vector holding both comes back +inf here where dot or sum would
+   *  give a quiet NaN. */
   reduce(op, a, b = null) {
     const M = this._M, fi = this._fi;
-    const code = op === "sum" ? OP_SUM : op === "dot" ? OP_DOT : undefined;
+    const REDUCE_OPS = { sum: OP_SUM, dot: OP_DOT,
+                         sumsq: OP_SUMSQ, sumabs: OP_SUMABS };
+    const code = REDUCE_OPS[op];
     if (code === undefined)
-      throw new TypeError(`reduce wants "sum" or "dot"`);
+      throw new TypeError(`reduce wants "sum", "dot", "sumsq" or "sumabs"`);
+    if (b && code !== OP_DOT)
+      throw new TypeError(`${op} reads one operand array; only dot takes b`);
     const n = a.length;
     const pack = (arr) => {
       if (!arr) return null;

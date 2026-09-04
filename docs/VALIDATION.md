@@ -1865,3 +1865,545 @@ Repeated on the tree that ships, after the docs above were committed:
 run 20260903-080110-bc1ec32, the same eight stages - vectors 43 s,
 libcft 129 s, transcend 254 s, bindings 10 s, cpp 438 s, node 425 s,
 wasm 320 s, mpfr 50 s - PASS, nothing skipped, clean tree.
+
+## 2026-09-03 - clause 5.12's character sequences and clause 9.7's payloads
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, on a twelve-core
+box running three other agents' builds throughout - so every wall clock
+below is longer than this tree deserves and none of them is a
+performance number. The last runner invocation was STOPPED before it
+finished; what did and did not run is spelled out below rather than
+estimated.
+
+This is the last REQUIRED part of clause 5 the library did not meet.
+5.12 opens with a **shall**, not a should: an implementation must
+convert between each supported binary format and external decimal
+character sequences such that the round trip under roundTiesToEven
+recovers the original representation. Every other numeric claim in this
+repository is about arithmetic; this one is about the edge where
+callers arrive, and until now every caller reaching libcft from a text
+format was reaching some other implementation's decimal rounding.
+
+### What ran, and what it said
+
+    python/tests            1083 passed, 5 skipped (321 s). 139 of them
+                            are new: chars.py against ref754's rational
+                            restatement of 754 in all five attributes,
+                            against CPython's own binary64 parse and
+                            "%.16e" write, and against the exact value
+                            of every sequence read back as a Fraction
+                            by the TEST rather than by the model
+    make vectors            60 sets, 492,731 cases; 13,816 of them the
+                            twenty new character sets
+    make -C host test       api-test all contract checks passed (the new
+                            block and its negative control included);
+                            reduce-parts 6,294 partitions; 492,731 cases
+                            replayed; C and Python examples identical
+    runner, stage vectors   ok 79 s - 60 sets at the generator's
+                            defaults, 13,816 character cases
+    runner, stage libcft    ok 333 s - clean rebuild, api-test,
+                            reduce-parts, 648,731 cases replayed over
+                            60 sets
+    runner, stage character ok 166 s - 20,819 comparisons over four
+                            formats and five attributes, C == model on
+                            every one, with the Pmin-1 collision
+                            exhibited per format
+    runner, stage bindings  ok 146 s - 640 tests (was 636)
+    runner, stage cpp       C++17 leg complete: 648,731 conformance
+                            cases through the wrapper and all 210,511
+                            checks passed. The C++20 leg was RUNNING
+                            when the run was stopped - see below
+    mpfr-check 24 7         458,300 cases, 0 value and 0 flag
+                            mismatches, 6,312 of them the four
+                            conversions
+    mpfr-check 2 7          298,904 cases, 0 value and 0 flag
+                            mismatches, 20,172 of them the four
+                            conversions, on the ENLARGED pools this
+                            tree ships
+    cpptest, standalone     210,511 checks at C++17 and again at C++20,
+                            492,731 conformance cases through the
+                            wrapper each time - run before the MPFR
+                            harness and the conformance summary line
+                            were last touched, neither of which the
+                            wrapper compiles against
+
+### What did NOT run, and why
+
+The runner invocation `--only vectors,libcft,character,mpfr,cpp,bindings`
+(run id 20260903-111141-60d046d) was **stopped under time pressure on a
+contended host**, with four of its six stages green and no failure
+anywhere. Specifically:
+
+  * `cpp` - the C++17 half passed with its counts above; the C++20 half
+    was mid-replay and has no verdict from THIS run. The same binary at
+    the same standard passed standalone earlier on the same wrapper
+    source (210,511 checks), so the gap is a missing re-run rather than
+    an unknown.
+  * `mpfr` - never started in that run. The campaign it would have run
+    (`mpfr-check 24 7`) completed twice earlier with zero mismatches,
+    but never once with BOTH the census random count and the enlarged
+    character pools this tree ships: the 24-argument run predates the
+    pool increase and the 2-argument run postdates it. That combination
+    is the one number this entry does not have.
+
+Nothing was skipped by the runner's own logic and nothing failed. There
+is no VERDICT line for that run, so it certifies nothing on its own;
+the four green stages are recorded as the individual stage results they
+are.
+
+### The round trip, held and cornered
+
+Pmin comes out 9, 17, 36 and 73 from `1 + ceiling(p * log10 2)`,
+derived rather than transcribed, and the standard lists the first three
+so the formula is checked before it is trusted at binary256. The round
+trip holds at Pmin in both directions under both nearest attributes.
+One digit short it does not, and that is shown rather than assumed:
+`0x417ffff5` and `0x417ffff6` are neighbouring binary32 encodings just
+below 16 that both write `1.5999990e+1` at eight digits, so reading
+that sequence back can recover at most one of them. The colliding pair
+is found by walking down from the top of each binade - where the
+decimal grid is coarsest relative to the binary one - and one is
+exhibited per format. binary64's is `0x3ffffffffffffffe` against
+`0x3fffffffffffffff`, and there BOTH are lost, because their shared
+sixteen-digit decimal `2.000000000000000e+0` rounds to a third
+encoding between them.
+
+**The negative control is the round trip itself.** An implementation
+that ignored the digit count and always wrote the exact value would
+satisfy every round-trip check ever written, so the last block of
+api_test.c asserts that the round trip FAILS at Pmin - 1, which it can
+only do if the digit count is being honoured.
+
+### What MPFR arbitrates here, and what it cannot
+
+mpfr_strtofr and mpfr_get_str are correctly rounded in every mode at
+any precision, so both directions are scored against them - values and
+flags, five attributes, four rungs. Three things are deliberately
+outside that, and are written where the harness runs: the absurd
+exponents (`1e999999999999`) are outside MPFR's own exponent range, so
+feeding them to the oracle would score MPFR's overflow rather than the
+format's; NaN PAYLOADS cannot be arbitrated by a library that keeps
+none; and the EXACT conversion cannot be asked of mpfr_get_str at all,
+which produces shortest-or-N digits. The exact conversion is scored a
+different way that is just as strong - the sequence the library wrote
+is handed back to mpfr_strtofr at the format's precision, and MPFR must
+report a ternary of ZERO and the same value. The halfway sequences the
+attribute alone decides are built on the oracle side with GMP, from the
+midpoint between an encoding and its successor, so they owe the library
+nothing.
+
+### cftmpfr's from_str moved off gmpy2, and the switch was measured first
+
+2,480 parses across four precisions and the four attributes MPFR has,
+the library's route against the gmpy2 one: ZERO encoding differences,
+and 32 flag differences, every one of them the same row - a decimal
+that lands exactly on a subnormal, where MPFR raises underflow and 754
+7.5 says "If the rounded result is exact, no flag is raised". The
+library is right and the package now says so. Two smaller changes rode
+along: `-nan` keeps its sign, and `snan` reads as a signaling NaN
+rather than as an error. `to_str` was NOT switched - it is the shortest
+sequence that reads back and the library's is the exact one, and no
+measurement can make those the same string.
+
+### A defect this work found in its own harness
+
+The MPFR side builds the exact decimal of a midpoint with GMP, and
+`mpfr_get_z_2exp` hands back a NEGATIVE significand for a negative
+value while the harness was also prepending its own sign - so every
+negative midpoint was written `--.1000...e+1` and the library correctly
+REFUSED all thirty of them. The refusal reached the report as a bare
+"status != OK" naming no sequence, so a `REFUSED` line that names it
+went in before the bug was found. Two oracles disagreeing is the normal
+case; an oracle that cannot say what it disagreed about is the problem.
+
+
+## 2026-09-03 - the rest of table 9.1: exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn (part of the 0.6 step)
+
+Windows 11, mingw64 gcc 16.1, MPFR 4.2.2, CPython 3.12, with three
+other agents building on the same box - so no wall-clock figure here is
+comparable with an earlier entry and none is quoted as a performance
+number. With these ten the library implements every operation IEEE
+754-2019 table 9.1 lists for the binary formats.
+
+    python/tests          1,241 passed, 1 skipped (944 before)
+    transcend_check       607,217 comparisons over 39 functions, C == model on every
+                          one; 580,977 more with the C forced to start at 64 bits
+    rootn(x,2) == sqrt(x) 17,665 comparisons over 5 attributes - identical except at
+                          x = -0, where 9.2.1's own NOTE says they differ, and the
+                          difference is asserted rather than skipped
+    make vectors          40 sets, 769,265 cases (533,265 transcendental), up from
+                          478,915 (242,915)
+    make -C host test     api-test all contract checks passed, the table-9.1 block
+                          included; 769,265 cases replayed twice
+    mpfr-check            544,788 cases, 92,800 of them for the ten: 0 value, 0 flag
+                          mismatches; again with CFT_TRANSCEND_MINPREC=64: 0
+                          mismatches, 72,381 escalations
+    evaluator             306,460 transcendental elements, 138,825 reached the Ziv
+                          loop, 9 escalations (all phase 3's tanh - none of the ten),
+                          32,585 decided exactly, 56,835 by a neighbour's side
+    cpptest               4,549 checks at C++17 and at C++20 (4,111 before)
+    test_cftmpfr          668 tests (576 before)
+    examples-lang         c++, rust, go, csharp: same library, same bits; julia and
+                          R absent from this host
+    runner                INCOMPLETE. Run 20260903-104410-a285ad8 got two stages in -
+                          vectors ok 369 s, libcft ok 386 s - and was STOPPED during
+                          the transcend stage under time pressure, with three other
+                          agents on the box. mpfr, cpp and bindings were not reached
+                          by the runner; all three were run standalone above, on the
+                          same tree and with the same arguments the runner uses, and
+                          the two stages the runner did finish agree with the
+                          standalone runs. The runner has NOT been seen green
+                          end-to-end on this tree and nothing here says otherwise.
+
+Three rows follow 754-2019 where GNU MPFR 4.2.2 does not, each measured
+on this host before it was written down: `rSqrt(-0)` is -infinity where
+`mpfr_rec_sqrt` gives +infinity; `powr(1, qNaN)` is a quiet NaN where
+`mpfr_powr` gives 1; and `compound(x, 0)` for x below -1 is invalid,
+which MPFR agrees with and which the standard's row makes rather than
+states.
+
+**A defect in the oracle.** `mpfr_compound_si` is off by one unit in
+the last place for a NEGATIVE n whenever 1 + x is not representable at
+the working precision - a double rounding of the intermediate sum.
+Measured at 24 bits: `compound(1 + 2^-23, -1)` toward zero returns
+`0x7.fffffp-4` where the same value computed at 400 bits and rounded
+once is `0x7.fffff8p-4`; `compound(3 - 2^-22, -1)` to nearest returns
+`0x4p-4` where the reference gives `0x4.000008p-4`. n = -2 and n = -4
+do it too; a non-negative n does not, and `mpfr_pow_si` and
+`mpfr_rootn_si` are sound at every n in [-12, 12] against the same
+reference. The library's answers were confirmed three independent ways
+first - the golden model's mpmath enclosure, the C's own tracked error
+bound, and `python/tests/test_transcend.py`'s brute-force enclosure at
+four times the escalation cap - so `host/tools/mpfr_check.c` keeps
+MPFR's own compound for n >= 0 and builds the expectation from the
+exactly formed 1 + x and `mpfr_pow_si` for n < 0, with the reasoning in
+a comment at the call site.
+
+**Two neighbour rules the sweep found rather than the design
+predicted**, both now in the model and the C with the same derived
+thresholds: `log2p1(2^k)` and `log10p1(10^k)` sit an exponentially
+small step above the integer k, which is a grid point no precision
+separates them from; and `compound(x, n)` for a dominant x sits inside
+a quarter step of x^n - without which `compound(2^1022, 1)` at binary64
+is 2^1022 + 1, one unit above a grid point whose ulp is 2^970.
+
+Negative control, run and restored: the `away` argument of log2p1's
+neighbour witness inverted in `do_logp1_family`, so `log2p1(2^k)` is
+claimed to lie below the integer k. Caught by api-test ("and upward it
+is nextUp(30)"), by transcend_check.py at fp32 under roundTowardZero
+(`log2p1(2^24)` came out `0x41bfffff` where the model says
+`0x41c00000`), by the conformance replay (which stops at 92,033 cases)
+and by MPFR parity.
+
+Not covered here: `bindings/node` and `bindings/wasm` still carry the
+twenty-nine. They replay the transcendental sets, which now name
+thirty-nine functions and carry an `"n"` field, so they need the
+rebuild the JavaScript step performs; nothing in this entry claims
+otherwise.
+
+
+## 2026-09-03 - the rest of clause 9.4: the five remaining reductions
+
+sumSquare, sumAbs, scaledProd, scaledProdSum and scaledProdDiff, on the
+terms `sum` and `dot` have held since 2026-08-30: one tree fixed by
+element index, one rounding per node, in the caller's attribute. Part
+of the 0.6 step; `CFT_ABI_VERSION_MINOR` untouched, left for the
+integrator.
+
+What was measured, and by what:
+
+| gate | scope | result |
+|---|---|---|
+| `python/tests` (whole suite) | the golden model, which defines every bit | **1016 passed, 1 skipped** |
+| `python/tests/test_reduce.py` | the five, specifically | **213 passed**, from 24 test functions to 43 |
+| `make vectors` | the sets, Makefile arguments | 60 sets, of which **20 are new reduction sets** at 448 cases / 9,513 elements each |
+| `make -C host test` | api-test, reduce-parts, the conformance replay | **60 sets, 487,875 cases, all matching** over the sets `make vectors` emits (the runner's are larger - see below); api-test all contract checks passed; reduce-parts 6,294 partitions, all canonical |
+| `host/tests/reduce_check.py --trials 1500` | libcft against the model, four formats | **12,696 reductions, 0 failures** |
+| `host/tools/mpfr-check 24 7` | GNU MPFR as the arbiter of every node | **461,508 cases, 0 value and 0 flag mismatches**; of those, 9,520 reduction vectors and **231,975 tree nodes arbitrated** |
+| `make cpptest` | cft.hpp against cft.h, both standards | **4,891 checks each at C++17 and C++20**, 0 failed, from 4,771 |
+| `test_cftmpfr.py` | the drop-in | **581 passed**, from 43 test functions to 46 |
+| `device-test sw -n 96` | the composition across the backend boundary | **2,248 checks, 0 failed**, now including 48 sumsq and 48 sumabs |
+
+Two numbers in that table are worth reading twice. The reduction sets
+are the FIRST reductions the published vectors have ever carried - not
+even `sum` was in them before - and they needed a third schema, because
+a reduction's operand is a whole vector whose length is part of the
+case and the two existing schemas are one line per case with a fixed
+number of single-element operands. And the 231,975 MPFR-arbitrated
+nodes are nodes, not vectors: a case here is a whole reduction.
+
+**The identities, and the row that is not one.** reduce_check.py checks
+`sumSquare == dot(a, a)` and `sumAbs == abs pass then sum` THROUGH THE
+LIBRARY, because issuing exactly those calls is how the device and
+software backends are made to agree, and a run that assumed them would
+be taking the mechanism on trust. Over the standard sweep: **476
+vectors where both identities hold verbatim, 272 where 9.4's
+infinity-over-NaN row applies instead** - counted rather than skipped,
+checked against the override, with the plain dot's quiet NaN as the
+control. The check fails if the override is never exercised at all.
+
+**What the MPFR campaign does NOT settle, stated in the tool's own
+banner.** MPFR arbitrates every node - one add or one multiply of two
+format values, correctly rounded - and has no opinion on the TREE,
+because 9.4 says an implementation may "associate in any order or
+evaluate in any wider format". The harness therefore reproduces the
+split rather than judging it, and a reduction whose shape were wrong in
+both libcft and this file would pass. What guards the shape is two
+independent implementations of it compared against each other, the
+streaming accumulator's agreement with the recursive definition, and
+the published sets.
+
+**One bug, in the harness, with two faces - found the moment the oracle
+first ran.** The first campaign reported 36 value and 476 flag
+mismatches, and every one came from a single wrong choice: the harness
+classified the LEAVES rather than the operand elements when applying
+9.4's infinity-over-NaN row. That is wrong in both directions at once.
+An element whose SQUARE overflowed to an infinity fired an override the
+standard's text does not - 9.4 says "operand element", and a finite
+element is not an infinity however large its square. And a signalling
+NaN stopped raising invalid, because squaring quiets it before the
+classification ever saw it. The library was right both times, which is
+what a new oracle is for. Fixed; 0 mismatches after.
+
+**One overclaiming comment, found by re-reading rather than by a
+gate.** The campaign's fourth draw of every length said it alternated
+"the pool's extremes - maxfinite and the minimum subnormal". It did
+not: `build_pool`'s `pool[0]` is +0 and its tail is random. The two
+ends are now built from the format descriptor, the comment is true, and
+the node count rose from 226,295 to 231,975 with the coverage the
+comment had been claiming.
+
+**A third firing of the reassignment hazard.** Assigning 28 and 29 made
+`vectors.py`'s "unassigned, just past the seeds" representative stale,
+and `cft_conformance` refused the regenerated set by name -
+"this set records an opcode as reserved that the contract has since
+assigned" - rather than scoring sumSquare against an answer recorded
+for the unassigned-opcode result. 24 was the first (2026-08-30), 26 the
+second (2026-08-31). The representative is now 30, and
+docs/DETERMINISM.md's "everything from 28 up" now reads 30.
+
+### Negative control, run and restored
+
+The claim most worth attacking is the SCALING rule, because it is the
+one thing 9.4 leaves implementation-defined and therefore the one thing
+an oracle over values cannot check. So the control preserves the value
+exactly and breaks only the pinned form: `sp_split` in
+`host/src/reduce.c` was made to normalise into `±[2, 4)` instead of
+`±[1, 2)`, with the scale one lower. **`scaleB(pr, sf)` is bit-for-bit
+the same real number, every rounding in the tree is unchanged, and no
+flag moves** - only the pair the contract pins.
+
+Five gates caught it, and the sixth is worth recording because it
+could not:
+
+| gate | verdict on the broken tree |
+|---|---|
+| `api-test` | **2 FAILED** - `scaledProd(2^100 x 4)` returned `(2.0, 399)` for `(1.0, 400)`, and scaledProdSum `(2.0, 2)` for `(1.0, 3)` |
+| `reduce_check.py --trials 200 --formats fp32` | **86 failures** of 1,565, including the pr-in-[1,2) invariant |
+| `cft-selftest` conformance replay | **FAILED** at `fp32-reduce.jsonl:258` - expected `0x3f800000` scale -149, got `0x40000000` scale -150 |
+| `mpfr-check 2 7` | **1,092 value mismatches**, 273 per format - and **0 flag mismatches**, exactly as designed: the arithmetic never moved |
+| `test_cftmpfr.py` | **3 failed** of 581 |
+| `cpp-api-test` (C++17) | **1 of 4,891** - and that one is the conformance replay, not the wrapper comparison. All 4,890 wrapper-against-C checks PASSED, because both sides call the same library: a C++ layer that only compares itself to the C is structurally incapable of catching a change of this class, and it is worth knowing which of your gates are which. |
+
+Restored, rebuilt clean, api-test green again.
+
+### The standardized run
+
+`bash verify/run.sh --only vectors,libcft,reduce,mpfr,cpp,bindings` on
+DESKTOP-T33SK86 (Windows, MINGW64), run **20260903-103848-642b5e4, on a
+CLEAN tree**: vectors 56 s, libcft 164 s, reduce 16 s, bindings 15 s,
+cpp 591 s, mpfr 89 s - **VERDICT: PASS, nothing skipped**.
+
+The runner regenerates the sets with `gen_vectors.py`'s own defaults
+rather than the Makefile's, so its libcft stage replayed **643,875
+cases** where `make -C host test` replays 487,875 - the same 60 sets at
+different budgets. Its cpp stage replayed those 643,875 through the
+wrapper too, at both standards, 4,891 checks each. Its mpfr stage is
+the 461,508-case, 231,975-node campaign in the table above.
+
+An earlier run of the same six, 20260903-101107-aea195e, produced the
+same verdict with a DIRTY tree (the docs were uncommitted), and so
+certifies nothing on its own; it is mentioned only because it is where
+the numbers were first taken and because it is in verify/state/. Every
+number above was reproduced by the clean run - the reduction gates are
+deterministic by construction, so "reproduced" here means identical,
+not merely consistent: 12,696 reductions, the same 476/272 split, the
+same 231,975 nodes.
+
+The run was SCOPED to those six stages, so what it does not cover is
+worth naming rather than leaving to be inferred:
+
+- `golden` was not run under the runner; `python/tests` was run
+  directly instead, which is the same suite - 1016 passed, 1 skipped.
+- `sim` and `lint` need docker and cover the RTL. **This work adds no
+  RTL and changes none**: neither of the two new opcodes is streamed by
+  the accumulator, and a scaled product has no accumulator at all.
+- `node` and `wasm` are out of scope by instruction - a separate agent
+  adds the JavaScript surface. Both runners enumerate vector sets by
+  NAME and ignore anything else, so they see the twenty new sets as
+  "(ignoring fp32-reduce.jsonl, ...)": neither breaks on them, and
+  neither scores them yet.
+- `transcend`, `clause5`, `divsqrt`, `diff`, `seq`, `selfcheck` and the
+  language stages were not re-run. Nothing in this work touches their
+  code paths, and saying so is not the same as having measured it.
+
+`device-test sw -n 96` was run directly rather than through the
+`selfcheck` stage, which is what that stage runs.
+
+## 2026-09-03 - the augmented arithmetic operations, IEEE 754-2019 clause 9.5
+
+augmentedAddition, augmentedSubtraction and augmentedMultiplication -
+`cft_augmented_add`, `cft_augmented_sub`, `cft_augmented_mul` - at all
+four formats, both outputs and exact flags, under the one rounding
+754-2019 defines for them and for nothing else: roundTiesTowardZero.
+Part of the 0.6 step; the ABI minor is the integrator's to bump when
+the whole step lands, and this work leaves it at 5.
+
+Windows 11 (DESKTOP-T33SK86), mingw64 gcc 16.1.0, MPFR 4.2.1 as the C
+oracle (what the run printed), CPython 3.12.9 with gmpy2 2.2.1,
+2026-09-03. **Three other agents were building and running campaigns on
+the same machine throughout**, so the wall times below are not
+comparable with the earlier entries. The counts are.
+
+| check | count | result |
+|---|---|---|
+| `python/tests/test_augmented.py` | 20 tests | pass |
+| the whole `python/tests` suite | 964 passed, 1 skipped (was 944/1), 258 s | pass |
+| `make vectors` | 44 sets, 568,531 cases - 4 new augmented sets, 89,616 cases | written |
+| `cft_conformance` replay at the runner's generation | 44 sets, 724,531 cases, 89,616 of them augmented | every case, BOTH outputs and flags, replayed twice |
+| `host/tests/augmented_check.py` - the C against the model per element, plus batches, aliasing and refusals | 140,088 comparisons at the default pool; 149,112 at `--trials 400`; 158,712 more at `--trials 800` over the four formats in two halves | C == model on every one |
+| the pair identity `r + e == x op y`, exact integers, on the LIBRARY's output | 80,209 pairs | exact - plus 8,316 residuals delivered rounded, 9.5's one non-representable case |
+| the FAR/NEAR alignment split, walked across its decision at every magnitude and both signs | 70,200 comparisons | C == model on every one |
+| MPFR parity, the three operations, four formats | 21,492 augmented cases (5,373 per format), part of 473,480 | **zero value mismatches, zero flag mismatches** |
+| `cft.hpp` against `cft.h`, every entry point twice | 4,311 checks at C++17 and again at C++20 (was 4,111) | identical encodings and flags |
+| the cftmpfr drop-in | 594 tests (was 576) | pass |
+| `api-test` contract checks | all | pass |
+| neighbours, in case the shared `round_pack` moved: `divsqrt_check.py` / `clause5_check.py` | 29,124 / 145,032 | zero disagreements |
+
+**The five attributes are unchanged, and the conformance replay is not
+what proves it.** `make vectors` regenerates the sets from the current
+model, so a change that moved model and library together would replay
+clean - that argument is circular and saying so is the point of this
+paragraph. The evidence that is not: `python/tests/test_rounding.py`
+re-derives each attribute from exact rationals sharing no code with the
+model (it is in the 964), `test_augmented.py` holds addition under all
+five against the same independent reference, MPFR arbitrates the
+library from outside, and as a one-off the current model was compared
+directly against the model as it stood at the preceding commit
+(ef2348e) over add/sub/mul/fma/div/sqrt: **216,480 cases across five
+attributes and four formats, bit-identical including flags.**
+
+**The oracle, stated honestly.** MPFR has no roundTiesTowardZero, and
+`MPFR_RNDZ` is not it - RNDZ truncates every inexact value, not only
+the ties. So `check_augmented` cannot ask MPFR for the answer. It asks
+for the EXACT value at a precision that provably holds it - not 2p,
+because the exact sum of two p-bit values spans the whole exponent
+range (524,522 bits at binary256), and proved rather than assumed by
+requiring MPFR's ternary to be zero - then applies 9.5's tie rule
+itself and derives the error term by exact subtraction, deciding
+representability by rounding it and asking whether that changed it.
+Independent for the VALUES, a restatement for the FLAGS, and the banner
+above the function says which is which.
+
+**The flag words, enumerated.** Over the whole pool at every format the
+three operations produce exactly five flag words and no others: nothing,
+invalid, underflow alone, underflow with inexact, and overflow with
+inexact. Inexact never appears alone and divideByZero cannot appear at
+all. **Underflow alone is the one this contract admits nowhere else** -
+9.5 raises underflow on a subnormal error term that is EXACT - and it
+is asserted as a set equality, so a missing combination fails the test
+rather than passing quietly.
+
+**Negative control, run and restored.** `host/src/softfloat.c`'s
+`CFT_SF_RTTZ` arm changed from `guard && sticky` to
+`guard && (sticky || lsb)` - roundTiesToEven, which is the plausible
+mistake and the one an implementation makes by not reading 9.5. Caught
+by four independent gates: `api-test` at three named checks (the tie at
+binary32, the same tie at binary64, and the overflow threshold);
+`augmented_check.py` at its first fp32 pair; the conformance replay at
+`fp32-augmented.jsonl` **after 28,932 non-augmented cases had already
+passed**, which is the same evidence again that the five attributes do
+not see this rounding; and the MPFR campaign, which reported the
+mismatches from `aug_add` at fp32. Restored, rebuilt, `api-test` green
+again.
+
+**The pre-existing vector sets are byte-identical.** The new pool is a
+new function; it must not have perturbed the RNG streams the opcode and
+transcendental families draw from. Checked rather than reasoned: the
+generator as it stood at ef2348e was run out of a scratch checkout and
+its `fp32.jsonl`, `fp32-rtz.jsonl`, `fp32-transcend-rtz.jsonl`,
+`fp64.jsonl`, `fp64-transcend.jsonl` compared byte for byte against the
+current generator's. Identical.
+
+**Runner.** `bash verify/run.sh --only vectors,libcft,augmented,mpfr,cpp,bindings`
+at 04fcb56, run id 20260903-094456-04fcb56: vectors 61 s, libcft 162 s,
+augmented 4 s, bindings 15 s, cpp 541 s, mpfr 91 s - **PASS, nothing
+skipped.** Repeated on the tree that ships, after the docs above were
+committed and with a clean tree: run id 20260903-100057-a019cd5 -
+vectors 54 s, libcft 160 s, augmented 5 s, bindings 14 s, cpp 555 s,
+mpfr 109 s - **PASS, nothing skipped.** Both runs replayed 44 sets and
+724,531 cases and reported 473,480 MPFR cases with zero value and zero
+flag mismatches. The wall times are roughly double the earlier entries'
+for the same stages, which is the four-agent load on the box and not
+the work.
+
+Not run, and why: the RTL stages (`sim`, `lint`, `formal`) and the
+`node`/`wasm` stages were outside this work's brief - no opcode was
+consumed, no RTL file was touched, and the JavaScript surface is a
+separate step that will add the augmented sets to its own replayer. The
+`node` and `wasm` replayers already IGNORE an unknown `.jsonl` by name
+rather than failing on it, so the four new sets are listed as ignored
+there until that step lands.
+
+## 2026-09-03 - the ABI 0.6 census: 28 of 29 on the Windows desktop, with the JavaScript surface in
+
+`bash verify/run.sh --fresh` at e3e6267 on DESKTOP-T33SK86 (Windows,
+MINGW64, Docker Desktop for the three container stages), the first
+full run with all four 0.6 packages AND the JavaScript surface merged.
+Run id 20260903-164537-e3e6267, on a clean tree, 227 minutes wall
+beside a CUDA experiment, a UI server and a pool of multiprocessing
+workers that were not this run's:
+
+    golden 928s  vectors 1170s  sim 3369s  lint 254s  formal 208s
+    libcft 1794s  selfcheck 1s  divsqrt 1s  clause5 2s  character 162s
+    transcend 785s  augmented 3s  diff 4s  seq 2s  reduce 13s
+    bindings 149s  cpp 1471s  lang-cpp 2s  lang-rust 1s  lang-julia SKIP
+    lang-go 13s  lang-csharp 5s  lang-r SKIP  lang-fortran 1s  node 1553s
+    wasm 1194s  mpfr 483s  soak-quick 74s  images SKIP
+
+    VERDICT: PASS - 26 executed, 0 failed, 3 skipped by name
+    (lang-julia, lang-r, images)
+
+Two of the three skips were the shell's PATH, not the host: julia
+1.12.7 and R 4.6.1 are installed, and `bash verify/run.sh --only
+lang-julia,lang-r` with both on PATH executed them under run id
+20260903-203425-5430990 (the tree two docs-only commits later) -
+lang-julia 4 s, lang-r 10 s, both ok, so every language leg
+holds bit-identity with the C example. The third skip is `images`,
+which needs xclbinutil and is Linux-only.
+
+The counts the stages printed, each the run's own:
+
+| stage | printed |
+|---|---|
+| golden | 1472 passed, 5 skipped |
+| libcft | 1037657 cases replayed through `cft_conformance`, 84 sets |
+| divsqrt | 29124 cases, library matches the model exactly |
+| clause5 | 145032 comparisons, C == model on every one |
+| character | 20819 comparisons, C == model on every one |
+| transcend | 607217 comparisons over 39 functions, then 580977 again through the escalation path (`--min-prec 64 --trials 16`), C == model on every one |
+| augmented | 140088 comparisons, C == model on every one |
+| reduce | the tree, the scaling, the bits and the flags agree |
+| bindings | cftmpfr: 755 passed |
+| cpp | 211931 checks, C++17 and C++20 |
+| node | 1,683,314 cases over 148 set replays - a pass |
+| wasm | VERIFY OK, 1,037,657 cases through `cft_conformance` and 645,657 through the wrappers |
+| mpfr | 599380 cases, 0 value mismatches, 0 flag mismatches |
+| soak-quick | 107886080 cases, 0 value mismatches, 0 flag mismatches |
+
+The transcend stage's two numbers are the two invocations the stage
+makes; the four-package gate earlier in the day (run
+20260903-121735-8d091ff) printed the same two, because the pools are
+seeded by format width and trial count, not by time. The 0.6 top-level
+claims in README.md and docs/COMPATIBILITY.md were taken from that
+earlier gate and this run reproduces every one of them.

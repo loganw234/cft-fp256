@@ -377,7 +377,8 @@ int main(void)
                  * Skipping them here rather than deleting the opcode
                  * from the sweep, because the refusal itself is worth
                  * asserting - checked immediately below. */
-                if (op_i == CFT_SUM || op_i == CFT_DOT) {
+                if (op_i == CFT_SUM || op_i == CFT_DOT ||
+                    op_i == CFT_SUMSQ || op_i == CFT_SUMABS) {
                     st = cft_run(dev, (cft_op)op_i, (cft_format)f_i,
                                  CFT_RNE, zero, zero, zero, out, 1,
                                  NULL, NULL);
@@ -1090,6 +1091,336 @@ int main(void)
               "cos(binary64 worst case) is the reduced argument, -4.687e-19");
     }
 
+
+    /* --- the rest of table 9.1 (part of the 0.6 step)
+     *
+     * The same charter as the three phases above: the refusals, the
+     * exact cases whose bits come from a theorem rather than from the
+     * library, the special rows - including the three where this
+     * contract follows 754-2019 and GNU MPFR does not - one case from
+     * every neighbour family, and the identity between rootn(x, 2) and
+     * squareRoot with the single input where the standard's own NOTE
+     * says they differ.
+     */
+    {
+        uint8_t a[8], b[8], d[8];
+        uint8_t av[3 * 4], dv[3 * 4];
+        int64_t nn[3];
+        uint32_t f4 = 0xdead;
+
+        put32(a, 0x40000000u);                       /* 2.0f */
+        CHECK(cft_exp2m1(dev, CFT_FP32, (cft_round)-1, a, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_exp2m1 refuses an out-of-range rounding attribute");
+        CHECK(cft_rsqrt(dev, (cft_format)9, CFT_RNE, a, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_rsqrt refuses an unknown format");
+        nn[0] = 2;
+        CHECK(cft_pown(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_pown refuses a NULL integer-exponent array");
+        CHECK(cft_compound(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_compound refuses a NULL integer-exponent array");
+        CHECK(cft_rootn(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_rootn refuses a NULL integer-exponent array");
+        CHECK(cft_powr(dev, CFT_FP32, CFT_RNE, a, NULL, d, 1, &f4)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "cft_powr refuses a NULL second operand");
+        f4 = 0xdead;
+        CHECK(cft_rootn(dev, CFT_FP32, CFT_RNE, NULL, NULL, NULL, 0, &f4)
+                  == CFT_OK && f4 == 0,
+              "cft_rootn with n == 0 elements touches nothing");
+
+        /* Exactness, and every one of these is an integer identity
+         * rather than a rounding: 2^3 - 1 = 7, 2^-3 - 1 = -7/8,
+         * 10^2 = 100, 10^2 - 1 = 99, log2(1 + 3) = 2, log10(1 + 99) = 2,
+         * 1/sqrt(4) = 1/2. */
+        put32(a, 0x40400000u);                       /* 3.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x40e00000u && f4 == 0,
+              "exp2m1(3) = 7 EXACTLY");
+        put32(a, 0xc0400000u);                       /* -3.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf600000u && f4 == 0,
+              "exp2m1(-3) = -7/8 EXACTLY");
+        put32(a, 0x80000000u);                       /* -0.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "exp2m1(-0) = -0, silent");
+        st = cft_exp10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "exp10(-0) = 1, silent");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        st = cft_exp10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x42c80000u && f4 == 0,
+              "exp10(2) = 100 EXACTLY");
+        st = cft_exp10m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x42c60000u && f4 == 0,
+              "exp10m1(2) = 99 EXACTLY");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        st = cft_exp10(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && f4 == CFT_FLAG_INEXACT,
+              "exp10(-1) is INEXACT: 10^-1 is not a dyadic rational");
+        put32(a, 0x40400000u);                       /* 3.0f */
+        st = cft_log2p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x40000000u && f4 == 0,
+              "log2p1(3) = 2 EXACTLY: 1 + x is a power of two");
+        put32(a, 0xbf000000u);                       /* -0.5f */
+        st = cft_log2p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf800000u && f4 == 0,
+              "log2p1(-1/2) = -1 EXACTLY: 1 + x is formed on the encoding");
+        put32(a, 0x42c60000u);                       /* 99.0f */
+        st = cft_log10p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x40000000u && f4 == 0,
+              "log10p1(99) = 2 EXACTLY");
+        put32(a, 0x40800000u);                       /* 4.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f000000u && f4 == 0,
+              "rSqrt(4) = 1/2 EXACTLY: an EVEN power of two");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && f4 == CFT_FLAG_INEXACT,
+              "rSqrt(2) is INEXACT: an odd power of two is not");
+
+        /* exp2m1's exact table runs to |n| = p+1, and p+1 lands on a
+         * MIDPOINT - which is exactly why it must be decided by exact
+         * arithmetic: no enclosure ever separates a midpoint from
+         * either side. Past it the value is still known exactly and is
+         * delivered by a SIDE. */
+        put32(a, 0x41c00000u);                       /* 24.0f = p */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4b7fffffu && f4 == 0,
+              "exp2m1(24) = 2^24 - 1 EXACTLY at binary32");
+        put32(a, 0x41c80000u);                       /* 25.0f = p+1 */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4c000000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(25) is the midpoint 2^25 - 1, ties to even");
+        put32(a, 0x41d00000u);                       /* 26.0f = p+2 */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4c800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(26) to nearest is 2^26: the side above the midpoint");
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4c7fffffu &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(26) toward zero is nextDown(2^26)");
+        put32(a, 0xc1d00000u);                       /* -26.0f */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(-26) to nearest is -1: inside the half gap above it");
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xbf7fffffu &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp2m1(-26) toward zero steps off -1");
+
+        /* The three rows where this contract follows the standard and
+         * MPFR 4.2.2 does not. Each was measured on this host before it
+         * was written down; docs/TRANSCENDENTALS.md quotes the probe. */
+        put32(a, 0x00000000u);                       /* +0.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "rSqrt(+0) = +inf with divideByZero");
+        put32(a, 0x80000000u);                       /* -0.0f */
+        st = cft_rsqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "rSqrt(-0) = MINUS inf: 9.2.1 keeps the sign, mpfr_rec_sqrt "
+              "does not");
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        put32(b, 0x7fc00000u);                       /* qNaN */
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == 0,
+              "powr(1, qNaN) is a quiet NaN: the standard's row is "
+              "\"for FINITE y\"");
+        st = cft_pow(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "pow(1, qNaN) is 1 - which is why powr is a second function");
+        put32(a, 0xc0000000u);                       /* -2.0f */
+        nn[0] = 0;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "compound(-2, 0) is INVALID: the row is \"1 for x >= -1\"");
+        put32(a, 0x7fc00000u);                       /* qNaN */
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "compound(qNaN, 0) is 1: the same row says \"or quiet NaN\"");
+
+        /* The rest of 9.2.1's rows for the four powers. */
+        put32(a, 0x7fc00000u);                       /* qNaN */
+        nn[0] = 0;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && f4 == 0,
+              "pown(qNaN, 0) = 1");
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "rootn(qNaN, 0) is INVALID: zero is outside the domain for "
+              "every x");
+        put32(a, 0x80000000u);                       /* -0.0f */
+        nn[0] = -3;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "pown(-0, -3) = -inf with divideByZero: n is ODD");
+        nn[0] = -2;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "pown(-0, -2) = PLUS inf: n is even");
+        put32(a, 0xc0000000u);                       /* -2.0f */
+        nn[0] = 3;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xc1000000u && f4 == 0,
+              "pown(-2, 3) = -8 EXACTLY");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        nn[0] = -3;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == CFT_FLAG_DIVBYZERO,
+              "compound(-1, -3) = +inf with divideByZero");
+        nn[0] = 3;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f4 == 0,
+              "compound(-1, 3) = +0, silent");
+        put32(a, 0x3f800000u);                       /* 1.0f */
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41000000u && f4 == 0,
+              "compound(1, 3) = 8 EXACTLY");
+        put32(a, 0x00000000u);                       /* +0.0f */
+        put32(b, 0x00000000u);
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "powr(+0, +0) is INVALID where pow(+0, +0) is 1");
+        put32(a, 0xbf800000u);                       /* -1.0f */
+        put32(b, 0x40000000u);                       /* 2.0f */
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && (get32(d) & 0x7fc00000u) == 0x7fc00000u &&
+              f4 == CFT_FLAG_INVALID,
+              "powr(-1, 2) is INVALID: powr's domain excludes a negative "
+              "base");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        put32(b, 0x40400000u);                       /* 3.0f */
+        st = cft_powr(dev, CFT_FP32, CFT_RNE, a, b, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41000000u && f4 == 0,
+              "powr(2, 3) = 8 EXACTLY");
+
+        /* rootn(x, 2) is squareRoot on every input but one, and the
+         * exception is the standard's own NOTE. Both are asked here,
+         * side by side, so the difference is asserted rather than
+         * skipped. */
+        put32(a, 0x80000000u);                       /* -0.0f */
+        nn[0] = 2;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f4 == 0,
+              "rootn(-0, 2) = PLUS zero (the even-n row)");
+        st = cft_sqrt(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "squareRoot(-0) = MINUS zero - the one input where the two "
+              "differ, and 9.2.1 says so");
+        nn[0] = 3;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "rootn(-0, 3) = -0: n is odd");
+        put32(a, 0x40000000u);                       /* 2.0f */
+        nn[0] = 2;
+        st = cft_rootn(dev, CFT_FP32, CFT_RTZ, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3fb504f3u &&
+              f4 == CFT_FLAG_INEXACT,
+              "rootn(2, 2) toward zero is sqrt(2) correctly rounded");
+        st = cft_sqrt(dev, CFT_FP32, CFT_RTZ, a, d, 1, &f4, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x3fb504f3u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and cft_sqrt agrees, bits and flags");
+        put32(a, 0xc1000000u);                       /* -8.0f */
+        nn[0] = 3;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0xc0000000u && f4 == 0,
+              "rootn(-8, 3) = -2 EXACTLY: a perfect cube, and n is odd");
+        put32(a, 0x00000001u);                       /* min subnormal */
+        nn[0] = 1;
+        st = cft_rootn(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u && f4 == 0,
+              "rootn(x, 1) = x EXACTLY, subnormal and silent");
+
+        /* One case from every neighbour family in this set - and, just
+         * as loudly, from the families that have NONE. exp2m1, exp10m1,
+         * log2p1 and log10p1 of the smallest subnormal are 0.693x,
+         * 2.303x, 1.443x and 0.434x: four different answers, none of
+         * them x, which is what "no tiny-argument rule here" means. */
+        put32(a, 0x00000001u);                       /* min subnormal */
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000001u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "exp2m1(min subnormal) is 0.693x: one subnormal to nearest");
+        st = cft_exp2m1(dev, CFT_FP32, CFT_RDN, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "and downward it is +0 - so it is NOT beside its argument");
+        st = cft_exp10m1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "exp10m1(min subnormal) is 2.303x: TWO subnormals");
+        st = cft_log2p1(dev, CFT_FP32, CFT_RUP, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000002u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "log2p1(min subnormal) is 1.443x: two subnormals upward");
+        st = cft_log10p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u &&
+              f4 == (CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW),
+              "log10p1(min subnormal) is 0.434x: +0, below half a subnormal");
+        put32(a, 0x30800000u);                       /* 2^-30 */
+        st = cft_exp10(dev, CFT_FP32, CFT_RDN, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "exp10(2^-30) downward is 1 - the rule beside 1 that DOES "
+              "apply");
+        st = cft_exp10(dev, CFT_FP32, CFT_RUP, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800001u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and upward it is nextUp(1)");
+        put32(a, 0x4e800000u);                       /* 2^30 */
+        st = cft_log2p1(dev, CFT_FP32, CFT_RNE, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41f00000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "log2p1(2^30) to nearest is 30: an exponentially small step "
+              "above a grid point");
+        st = cft_log2p1(dev, CFT_FP32, CFT_RUP, a, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x41f00001u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and upward it is nextUp(30) - the side is the whole answer");
+        nn[0] = 1;
+        st = cft_compound(dev, CFT_FP32, CFT_RNE, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4e800000u &&
+              f4 == CFT_FLAG_INEXACT,
+              "compound(2^30, 1) to nearest is 2^30: 1 is far inside its "
+              "gap");
+        st = cft_compound(dev, CFT_FP32, CFT_RUP, a, nn, d, 1, &f4);
+        CHECK(st == CFT_OK && get32(d) == 0x4e800001u &&
+              f4 == CFT_FLAG_INEXACT,
+              "and upward it steps off it");
+
+        /* The integer operand is read PER ELEMENT. An implementation
+         * that hoisted it out of the batch loop passes every test above
+         * and fails this one. */
+        put32(av + 0, 0x40000000u);                  /* 2.0f */
+        put32(av + 4, 0x40000000u);
+        put32(av + 8, 0x40000000u);
+        nn[0] = 1; nn[1] = 2; nn[2] = 3;
+        st = cft_pown(dev, CFT_FP32, CFT_RNE, av, nn, dv, 3, &f4);
+        CHECK(st == CFT_OK && get32(dv + 0) == 0x40000000u &&
+              get32(dv + 4) == 0x40800000u &&
+              get32(dv + 8) == 0x41000000u && f4 == 0,
+              "pown over a batch reads n per element: 2, 4, 8");
+    }
+
     /* --- the clause-5 completion set ------------------------------
      *
      * The check harness proves these against the model at scale; what
@@ -1163,6 +1494,672 @@ int main(void)
         st = cft_scaleb(dev, CFT_FP32, CFT_RNE, a, 130, a, 8, &f2, NULL);
         CHECK(st == CFT_OK && memcmp(a, d, 32) == 0,
               "scaleb in place matches (staged path)");
+    }
+
+    /* --- the augmented arithmetic operations (754-2019 9.5) -------
+     *
+     * host/tests/augmented_check.py proves these against the model at
+     * scale and the published sets replay them; what belongs HERE is
+     * this file's charter - refusals, aliasing, and the rows whose
+     * expected bits come from reading 9.5 rather than from either
+     * implementation.
+     *
+     * Every anchor below is derivable with the subclause open:
+     *
+     *  - THE TIE. (1 + 2^-23) + 2^-24 is 1 + 3*2^-24, exactly halfway
+     *    between 1 + 2^-23 and 1 + 2^-22. 9.5 delivers "the one with
+     *    smaller magnitude", so r is 1 + 2^-23 = 0x3f800001 and the
+     *    residual is 2^-24 = 0x33800000. roundTiesToEven would step UP
+     *    to 0x3f800002, because the lower neighbour's last bit is odd -
+     *    which is why this exact case is the one that separates a
+     *    conforming implementation from a plausible one, and why it is
+     *    asserted here at binary32 and binary64 both.
+     *  - THE OVERFLOW THRESHOLD. 9.5: an infinitely precise result
+     *    "with magnitude equal to b^emax x (b - 1/2 b^(1-p)) shall
+     *    round to b^emax x (b - b^(1-p))". At binary32 that midpoint is
+     *    maxfinite + 2^103, and it lands on maxfinite raising NOTHING,
+     *    since inexact is signalled "only when roundTiesTowardZero
+     *    overflows". One ulp higher (2^104) is past it, and both
+     *    outputs become +infinity with overflow and inexact.
+     *  - UNDERFLOW WITHOUT INEXACT. 1 + 2^-149 has an exact residual of
+     *    2^-149, which is non-zero and strictly inside +-2^emin, so the
+     *    underflow flag rises alone - a combination no other operation
+     *    in this library can produce.
+     *  - THE ZERO SIGNS. e "is returned with the sign of
+     *    roundTiesTowardZero(x + y)" when the residual is zero, so
+     *    (-1) + 0 gives (-1, -0); r's own sign is 6.3's, so 1 + (-1)
+     *    gives (+0, +0) and -0 - (+0) gives (-0, -0).
+     */
+    {
+        uint8_t a[8 * 8], b[8 * 8], r[8 * 8], e[8 * 8], r2[8 * 8];
+        uint32_t fl = 0xdead;
+        int k;
+
+        put32(a, 0x3f800001u);               /* 1 + 2^-23 */
+        put32(b, 0x33800000u);               /* 2^-24: an exact tie */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x3f800001u &&
+              get32(e) == 0x33800000u && fl == 0,
+              "augmentedAddition breaks the tie toward the SMALLER "
+              "magnitude (got r=0x%08x e=0x%08x fl=0x%02x)",
+              (unsigned)get32(r), (unsigned)get32(e), (unsigned)fl);
+        /* the same operands through ordinary addition step up, which is
+         * what makes the line above a test rather than a coincidence */
+        st = cft_run(dev, CFT_ADD, CFT_FP32, CFT_RNE, a, NULL, b, r2, 1,
+                     NULL, NULL);
+        CHECK(st == CFT_OK && get32(r2) == 0x3f800002u,
+              "roundTiesToEven steps up from that midpoint");
+
+        put64(a, UINT64_C(0x3ff0000000000001));   /* 1 + 2^-52 */
+        put64(b, UINT64_C(0x3ca0000000000000));   /* 2^-53 */
+        st = cft_augmented_add(dev, CFT_FP64, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get64(r) == UINT64_C(0x3ff0000000000001) &&
+              get64(e) == UINT64_C(0x3ca0000000000000) && fl == 0,
+              "the same tie at binary64");
+
+        put32(a, 0x7f7fffffu);               /* the largest finite */
+        put32(b, 0x73000000u);               /* 2^103: half an ulp */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7f7fffffu &&
+              get32(e) == 0x73000000u && fl == 0,
+              "exactly ON the overflow threshold: maxfinite, silently");
+        put32(b, 0x73800000u);               /* 2^104: one ulp */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7f800000u &&
+              get32(e) == 0x7f800000u &&
+              fl == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "past it: +infinity in BOTH outputs, overflow and inexact");
+
+        put32(a, 0x3f800000u);               /* 1.0 */
+        put32(b, 0x00000001u);               /* 2^-149 */
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x3f800000u &&
+              get32(e) == 0x00000001u && fl == CFT_FLAG_UNDERFLOW,
+              "a subnormal residual raises underflow and NOT inexact");
+        st = cft_augmented_mul(dev, CFT_FP32, b, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0 && get32(e) == 0 &&
+              fl == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "a product residual the format cannot hold: both raised");
+
+        put32(a, 0xbf800000u);               /* -1.0 */
+        put32(b, 0x00000000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0xbf800000u &&
+              get32(e) == 0x80000000u && fl == 0,
+              "a zero error term takes the sign of r, not of the sum");
+        put32(b, 0x3f800000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0 && get32(e) == 0 && fl == 0,
+              "exact cancellation is +0 in both outputs (6.3)");
+        put32(a, 0x80000000u);
+        put32(b, 0x00000000u);
+        st = cft_augmented_sub(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x80000000u &&
+              get32(e) == 0x80000000u && fl == 0,
+              "-0 - (+0) is (-0, -0)");
+
+        put32(a, 0x7f800000u);
+        put32(b, 0xff800000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7fc00000u &&
+              get32(e) == 0x7fc00000u && fl == CFT_FLAG_INVALID,
+              "inf + (-inf): the same quiet NaN for both outputs");
+        put32(a, 0x7f800001u);               /* a signaling NaN */
+        put32(b, 0x3f800000u);
+        st = cft_augmented_mul(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7fc00000u &&
+              get32(e) == 0x7fc00000u && fl == CFT_FLAG_INVALID,
+              "a signaling NaN propagates as both results, invalid raised");
+        put32(a, 0x7f800000u);
+        put32(b, 0x00000000u);
+        st = cft_augmented_mul(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7fc00000u &&
+              get32(e) == 0x7fc00000u && fl == CFT_FLAG_INVALID,
+              "inf * 0 likewise");
+        put32(a, 0x7f800000u);
+        put32(b, 0x3f800000u);
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 1, &fl);
+        CHECK(st == CFT_OK && get32(r) == 0x7f800000u &&
+              get32(e) == 0x7f800000u && fl == 0,
+              "an infinite OPERAND signals nothing - only overflow does");
+
+        /* refusals and aliasing, this file's charter */
+        put32(a, 0x3f800000u);
+        put32(b, 0x40000000u);
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, r, r, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "r and e must not be the same buffer");
+        CHECK(cft_augmented_mul(dev, CFT_FP32, NULL, b, r, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "a is not optional");
+        CHECK(cft_augmented_sub(dev, CFT_FP32, a, NULL, r, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "b is not optional");
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, NULL, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "r is not optional");
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, r, NULL, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "e is not optional");
+        CHECK(cft_augmented_add(dev, (cft_format)9, a, b, r, e, 1, &fl)
+              == CFT_ERR_INVALID_ARGUMENT, "a bad format is refused");
+        fl = 0xdead;
+        CHECK(cft_augmented_add(dev, CFT_FP32, a, b, r, e, 0, &fl)
+              == CFT_OK && fl == 0, "n = 0 succeeds with clean flags");
+
+        for (k = 0; k < 8; k++) {
+            put32(a + 4 * k, 0x3f800000u + (uint32_t)k);
+            put32(b + 4 * k, 0x33800000u + (uint32_t)k);
+        }
+        st = cft_augmented_add(dev, CFT_FP32, a, b, r, e, 8, &fl);
+        CHECK(st == CFT_OK, "augmented batch, separate buffers");
+        memcpy(r2, a, 32);
+        st = cft_augmented_add(dev, CFT_FP32, r2, b, r2, e, 8, &fl);
+        CHECK(st == CFT_OK && memcmp(r2, r, 32) == 0,
+              "r may alias a: each element is read before it is written");
+    }
+
+    /* --- the rest of clause 9.4 ----------------------------------
+     *
+     * sumSquare, sumAbs and the three scaled products. Each claim the
+     * header makes gets a check, and the two that are worth doubting -
+     * "the same tree, so the composition is the answer" and "this
+     * cannot overflow" - get a NEGATIVE CONTROL beside them, because a
+     * property that holds for boring reasons is not evidence.
+     */
+    {
+        uint8_t v[4 * 4], w[4 * 4], d[4], d2[4];
+        uint32_t f2 = 0, f3 = 0;
+        int64_t scale = -12345;
+
+        CHECK(strcmp(cft_op_name(CFT_SUMSQ), "sumsq") == 0 &&
+              strcmp(cft_op_name(CFT_SUMABS), "sumabs") == 0,
+              "the two new reduction opcodes are named");
+        CHECK(strcmp(cft_op_name((cft_op)30), "reserved") == 0,
+              "30 is the first unassigned opcode now");
+        CHECK(cft_supports(dev, CFT_SUMSQ, CFT_FP256) == 1 &&
+              cft_supports(dev, CFT_SUMABS, CFT_FP32) == 1,
+              "software backend carries the composed reductions");
+        CHECK(cft_supports(dev, (cft_op)30, CFT_FP32) == 0,
+              "op 30 unassigned");
+
+        /* sumSquare([3, 4]) = 9 + 16 = 25, exactly. */
+        put32(v, 0x40400000u);          /* 3.0 */
+        put32(v + 4, 0x40800000u);      /* 4.0 */
+        st = cft_reduce(dev, CFT_SUMSQ, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x41c80000u && f2 == 0,
+              "sumsq([3,4]) = 25 exactly: %s 0x%08x/0x%02x",
+              cft_strerror(st), get32(d), (unsigned)f2);
+        /* the identity, on the same bytes: it IS the dot over (a, a) */
+        st = cft_reduce(dev, CFT_DOT, CFT_FP32, CFT_RNE, v, v, d2, 2,
+                        &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == get32(d) && f3 == f2,
+              "sumsq == dot(a, a)");
+
+        /* sumAbs([-3, 4]) = 7, and the same as an abs pass then a sum */
+        put32(v, 0xc0400000u);          /* -3.0 */
+        st = cft_reduce(dev, CFT_SUMABS, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x40e00000u && f2 == 0,
+              "sumabs([-3,4]) = 7: %s 0x%08x/0x%02x",
+              cft_strerror(st), get32(d), (unsigned)f2);
+        st = cft_run(dev, CFT_ABS, CFT_FP32, CFT_RNE, v, NULL, NULL, w, 2,
+                     &f3, NULL);
+        if (st == CFT_OK)
+            st = cft_reduce(dev, CFT_SUM, CFT_FP32, CFT_RNE, w, NULL, d2, 2,
+                            &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == get32(d) && f3 == f2,
+              "sumabs == abs pass then sum");
+
+        /* 9.4 puts an infinity AHEAD of a NaN for these two, which the
+         * tree cannot do - and the NEGATIVE CONTROL is the same vector
+         * through the plain dot, which returns the quiet NaN. */
+        put32(v, 0x7f800000u);          /* +inf */
+        put32(v + 4, 0x7fc00000u);      /* quiet NaN */
+        st = cft_reduce(dev, CFT_SUMSQ, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f2 == 0,
+              "sumsq(inf, NaN) is +inf with no flag: 0x%08x/0x%02x",
+              get32(d), (unsigned)f2);
+        st = cft_reduce(dev, CFT_SUMABS, CFT_FP32, CFT_RNE, v, NULL, d, 2,
+                        &f2, NULL);
+        CHECK(st == CFT_OK && get32(d) == 0x7f800000u && f2 == 0,
+              "sumabs(inf, NaN) is +inf");
+        st = cft_reduce(dev, CFT_DOT, CFT_FP32, CFT_RNE, v, v, d2, 2,
+                        &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == 0x7fc00000u,
+              "NEGATIVE CONTROL: the plain dot returns the quiet NaN "
+              "there, so the override is doing real work (0x%08x)",
+              get32(d2));
+
+        /* scaledProd of four copies of 2^100: the true product is
+         * 2^400, hundreds of binades outside fp32, and it comes back
+         * as (1.0, 400) with no flag at all. */
+        put32(v, 0x71800000u);
+        put32(v + 4, 0x71800000u);
+        put32(v + 8, 0x71800000u);
+        put32(v + 12, 0x71800000u);
+        f2 = 0xdead;
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 4, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && scale == 400 &&
+              f2 == 0,
+              "scaledProd(2^100 x 4) = (1.0, 400) silently: %s "
+              "0x%08x/%lld/0x%02x", cft_strerror(st), get32(d),
+              (long long)scale, (unsigned)f2);
+        /* the NEGATIVE CONTROL: the same operands through the multiply
+         * this composes from overflow to +inf on the FIRST pair. */
+        f3 = 0;
+        st = cft_run(dev, CFT_MUL, CFT_FP32, CFT_RNE, v, v, NULL, d2, 1,
+                     &f3, NULL);
+        CHECK(st == CFT_OK && get32(d2) == 0x7f800000u &&
+              (f3 & CFT_FLAG_OVERFLOW),
+              "NEGATIVE CONTROL: 2^100 * 2^100 overflows to +inf with "
+              "the overflow flag (0x%08x/0x%02x)", get32(d2),
+              (unsigned)f3);
+
+        /* the empty vector: 9.4 fixes it at pr = 1, sf = +0, silent */
+        scale = -1;
+        f2 = 0xdead;
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, NULL, d, &scale, 0,
+                             &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && scale == 0 &&
+              f2 == 0, "scaledProd of nothing is (1.0, 0), silently");
+
+        /* the special-value rows, in 9.4's order */
+        put32(v, 0x7f800000u);          /* +inf */
+        put32(v + 4, 0x00000000u);      /* +0   */
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 2, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x7fc00000u && scale == 0 &&
+              f2 == CFT_FLAG_INVALID,
+              "inf x 0 is invalid and the canonical quiet NaN");
+        put32(v + 4, 0xc0000000u);      /* -2.0 */
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 2, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0xff800000u && f2 == 0,
+              "an infinity with no zero takes the product's sign, "
+              "silently");
+        put32(v, 0x80000000u);          /* -0 */
+        st = cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, &scale, 2, &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && f2 == 0,
+              "-0 x -2 is +0, silently");
+
+        /* scaledProdSum / Diff: one rounding for the leaf, then the
+         * same tree. (1+1) * (3+1) = 8 -> (1.0, 3). */
+        put32(v, 0x3f800000u); put32(v + 4, 0x40400000u);
+        put32(w, 0x3f800000u); put32(w + 4, 0x3f800000u);
+        st = cft_scaled_prod_sum(dev, CFT_FP32, CFT_RNE, v, w, d, &scale, 2,
+                                 &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x3f800000u && scale == 3 &&
+              f2 == 0, "scaledProdSum = (1.0, 3): 0x%08x/%lld/0x%02x",
+              get32(d), (long long)scale, (unsigned)f2);
+        /* (1-1) * (3-1): a zero factor, so a zero result */
+        st = cft_scaled_prod_diff(dev, CFT_FP32, CFT_RNE, v, w, d, &scale, 2,
+                                  &f2);
+        CHECK(st == CFT_OK && get32(d) == 0x00000000u && scale == 0 &&
+              f2 == 0, "scaledProdDiff with a zero factor is +0");
+
+        /* the refusals: an output the caller cannot receive is an
+         * error, not a silent partial answer */
+        CHECK(cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, NULL, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "NULL pr refused");
+        CHECK(cft_scaled_prod(dev, CFT_FP32, CFT_RNE, v, d, NULL, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "NULL scale refused");
+        CHECK(cft_scaled_prod(NULL, CFT_FP32, CFT_RNE, v, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "NULL device refused");
+        CHECK(cft_scaled_prod(dev, (cft_format)4, CFT_RNE, v, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "bad format refused");
+        CHECK(cft_scaled_prod(dev, CFT_FP32, (cft_round)5, v, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "bad rounding attribute refused");
+        CHECK(cft_scaled_prod(dev, CFT_FP32, CFT_RNE, NULL, d, &scale, 2,
+                              NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "a non-empty call with no vector is refused");
+        CHECK(cft_scaled_prod_sum(dev, CFT_FP32, CFT_RNE, v, NULL, d,
+                                  &scale, 2, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "scaledProdSum needs b");
+    }
+
+    /* --- the character conversions and the payload operations ------
+     *
+     * Part of the 0.6 step. character_check.py proves these against the
+     * model at scale and the vectors replay them; what belongs HERE is
+     * this file's charter - the refusals, the sizing protocol, the
+     * aliasing rule, and a handful of results whose expected bits and
+     * characters come from reading 754-2019 clauses 5.12 and 9.7 by
+     * hand rather than from running either implementation.
+     *
+     * Ending with a NEGATIVE CONTROL, because the headline claim here
+     * is a round trip, and a round trip is the easiest property in this
+     * library to pass for the wrong reason: an implementation that
+     * quietly ignored the digit count and always wrote the exact value
+     * would satisfy every round-trip check ever written. So the last
+     * block asserts that the round trip FAILS one digit below Pmin -
+     * which it can only do if the digit count is being honoured.
+     */
+    {
+        uint8_t a[8], d[8];
+        char text[64];
+        const char *in[4];
+        size_t need = 0, bad = 0;
+        uint32_t f4 = 0xdead;
+        cft_status s2;
+
+        /* Pmin(bf) = 1 + ceiling(p * log10 2). 5.12.2 lists 9, 17 and
+         * 36 for the first three rungs; 73 is the same formula at
+         * p = 237. */
+        CHECK(cft_format_decimal_digits(CFT_FP32) == 9 &&
+              cft_format_decimal_digits(CFT_FP64) == 17 &&
+              cft_format_decimal_digits(CFT_FP128) == 36 &&
+              cft_format_decimal_digits(CFT_FP256) == 73,
+              "Pmin per 5.12.2");
+        CHECK(cft_format_decimal_digits((cft_format)9) == 0,
+              "Pmin of an unknown format is 0");
+
+        /* -- reading a sequence in -- */
+        in[0] = "1.5";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, &bad,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3fc00000u && f4 == 0,
+              "1.5 is exact in binary32 and raises nothing");
+        in[0] = "0.1";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3dcccccdu &&
+              f4 == CFT_FLAG_INEXACT, "0.1 to nearest is 0x3dcccccd");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RTZ, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3dccccccu &&
+              f4 == CFT_FLAG_INEXACT, "0.1 toward zero is one ulp below");
+        /* 2^24 + 1 is exactly halfway between 2^24 and 2^24 + 2, so
+         * the attribute alone decides it - ties-to-even takes the even
+         * significand, ties-to-away the other one. */
+        in[0] = "16777217";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x4b800000u &&
+              f4 == CFT_FLAG_INEXACT, "2^24+1 ties to even");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RMM, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x4b800001u &&
+              f4 == CFT_FLAG_INEXACT, "2^24+1 ties away");
+        /* Below half the smallest subnormal in magnitude, so the
+         * result is decided by the attribute's side and both the tiny
+         * and the inexact flags rise (7.5). */
+        in[0] = "1e-45";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x00000001u &&
+              f4 == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "1e-45 rounds up to the smallest subnormal, tiny+inexact");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RTZ, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0u &&
+              f4 == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "1e-45 toward zero is +0, still tiny+inexact");
+        /* Overflow delivers per 7.4's table, exactly as any arithmetic
+         * result does - an infinity to nearest, the largest finite
+         * magnitude toward zero. */
+        in[0] = "3.5e38";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7f800000u &&
+              f4 == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "3.5e38 overflows to +inf");
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RTZ, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7f7fffffu &&
+              f4 == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "3.5e38 toward zero delivers maxfinite");
+        /* An exponent no arithmetic could reach still has a defined
+         * answer: the library decides the band without computing
+         * 10^999999999999. */
+        in[0] = "-1e999999999999";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0xff800000u &&
+              f4 == (CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT),
+              "an absurd exponent overflows rather than hanging");
+        in[0] = "-1e-999999999999";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x80000000u &&
+              f4 == (CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT),
+              "and an absurd negative one underflows to -0");
+        /* A zero decimal is a zero and rounding never changes a sign
+         * (6.3), so the minus survives in every attribute. */
+        in[0] = "-0.000";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RUP, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x80000000u && f4 == 0,
+              "-0.000 is -0 even rounding upward");
+
+        /* -- the 5.12.1 words, both directions -- */
+        in[0] = "-INFINITY";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0xff800000u && f4 == 0,
+              "-INFINITY, case insensitive, raises nothing");
+        in[0] = "snan(0x1)";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7f800001u && f4 == 0,
+              "a signaling NaN reads back signaling, and raises NOTHING - "
+              "5.12 exempts these conversions from the sNaN rule");
+        in[0] = "NaN(0X5)";
+        s2 = cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL,
+                                   &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x7fc00005u && f4 == 0,
+              "a payload suffix is read in either case");
+
+        /* -- writing a sequence out -- */
+        put32(a, 0x3f800000u);                            /* 1.0f */
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "1e+0") == 0 && need == 5 &&
+              f4 == 0, "the exact decimal of 1 is 1e+0");
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "1.00000000e+0") == 0 && f4 == 0,
+              "nine digits of 1 keeps its trailing zeros and stays exact");
+        put32(a, 0x3dcccccdu);                            /* the 0.1f above */
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && f4 == 0 &&
+              strcmp(text, "1.00000001490116119384765625e-1") == 0,
+              "the EXACT decimal of the nearest float to 0.1, all of it");
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "1.00000001e-1") == 0 &&
+              f4 == CFT_FLAG_INEXACT,
+              "nine digits of it drops something, so inexact");
+        put32(a, 0x80000000u);
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 17, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "-0") == 0 && f4 == 0,
+              "a zero is -0 at every digit count - it has no digits to pad");
+        put32(a, 0x7f800001u);
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "snan(0x1)") == 0 && f4 == 0,
+              "a signaling NaN writes snan and signals nothing");
+        put32(a, 0x7fc00005u);
+        s2 = cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                 sizeof text, &need, &f4);
+        CHECK(s2 == CFT_OK && strcmp(text, "nan(0x5)") == 0,
+              "a quiet NaN carries its payload out");
+
+        /* -- hexadecimal (5.12.3) -- */
+        put32(a, 0x40400000u);                            /* 3.0f */
+        CHECK(cft_to_hex_char(dev, CFT_FP32, a, text, sizeof text, &need)
+              == CFT_OK && strcmp(text, "0x1.8p+1") == 0,
+              "the shortest exact hex of 3 is 0x1.8p+1");
+        put32(a, 0x00000001u);
+        CHECK(cft_to_hex_char(dev, CFT_FP32, a, text, sizeof text, &need)
+              == CFT_OK && strcmp(text, "0x1p-149") == 0,
+              "a subnormal prints with its TRUE exponent, not a leading 0");
+        put32(a, 0x80000000u);
+        CHECK(cft_to_hex_char(dev, CFT_FP32, a, text, sizeof text, &need)
+              == CFT_OK && strcmp(text, "-0x0p+0") == 0, "-0 in hex");
+        in[0] = "0x1.8p+0";
+        s2 = cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3fc00000u && f4 == 0,
+              "0x1.8p+0 is 1.5 exactly");
+        /* One hex digit more than binary32 holds: 0x1.000001p+0 is
+         * 1 + 2^-24, exactly halfway to the next float, so ties-to-even
+         * takes 1 and toward-positive takes its successor. */
+        in[0] = "0x1.000001p+0";
+        s2 = cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3f800000u &&
+              f4 == CFT_FLAG_INEXACT, "a hex tie rounds to even");
+        s2 = cft_from_hex_char(dev, CFT_FP32, CFT_RUP, in, d, 1, NULL, &f4);
+        CHECK(s2 == CFT_OK && get32(d) == 0x3f800001u &&
+              f4 == CFT_FLAG_INEXACT, "the same tie upward is nextUp(1)");
+
+        /* -- refusals: a status, never a guess -- */
+        {
+            static const char *const bad_seq[] = {
+                "", "+", ".", "1e", "1 ", " 1", "1.5.5", "1,5", "0x1p+0",
+                "nan()", "nan(0x)", "nan(0x400000)", "1_000", NULL
+            };
+            int k2;
+            for (k2 = 0; bad_seq[k2]; k2++) {
+                in[0] = bad_seq[k2];
+                CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                            NULL, &f4)
+                      == CFT_ERR_INVALID_ARGUMENT,
+                      "refused: %s", bad_seq[k2]);
+            }
+        }
+        in[0] = "1.5";                     /* decimal is not hexadecimal */
+        CHECK(cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "the hex parser refuses a decimal sequence");
+        in[0] = "0x1.8";                   /* 5.12.3 requires an exponent */
+        CHECK(cft_from_hex_char(dev, CFT_FP32, CFT_RNE, in, d, 1, NULL, &f4)
+              == CFT_ERR_INVALID_ARGUMENT,
+              "5.12.3's grammar requires the binary exponent");
+        /* Which element failed, because a caller reading a file of
+         * numbers needs the line and not just the verdict. */
+        in[0] = "1"; in[1] = "2"; in[2] = "oops"; in[3] = "4";
+        bad = 99;
+        CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 4, &bad,
+                                    &f4) == CFT_ERR_INVALID_ARGUMENT &&
+              bad == 2, "the refusal names the element");
+
+        /* -- the sizing protocol: a short buffer is a status, and the
+         * buffer is not touched. A truncated number is a wrong answer
+         * that looks like a right one. -- */
+        put32(a, 0x3dcccccdu);
+        need = 0;
+        CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, NULL, 0,
+                                  &need, &f4) == CFT_ERR_INVALID_ARGUMENT &&
+              need == 32,
+              "cap 0 asks for the size: 31 characters and a NUL");
+        memset(text, 'Z', sizeof text);
+        CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 0, text,
+                                  need - 1, &need, &f4)
+              == CFT_ERR_INVALID_ARGUMENT && text[0] == 'Z',
+              "one byte short refuses and writes NOTHING");
+
+        /* -- the 9.7 payload operations (they signal nothing) -- */
+        put32(a, 0x7fc00005u);
+        CHECK(cft_get_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x40a00000u,
+              "getPayload of a NaN carrying 5 is the float 5");
+        put32(a, 0x3f800000u);
+        CHECK(cft_get_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0xbf800000u,
+              "getPayload of a non-NaN is -1, which is 9.7's own answer");
+        put32(a, 0x40a00000u);                            /* 5.0f */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x7fc00005u, "setPayload(5) is a quiet NaN");
+        CHECK(cft_set_payload_signaling(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x7f800005u,
+              "setPayloadSignaling(5) is the signaling form");
+        put32(a, 0x4a800000u);                            /* 2^22 */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u,
+              "2^22 is one past what binary32's payload field holds: +0");
+        put32(a, 0x80000000u);                            /* -0 */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0x7fc00000u,
+              "-0 is the integer zero by value, so setPayload takes it");
+        CHECK(cft_set_payload_signaling(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u,
+              "but payload 0 cannot be signaling - that encoding is an "
+              "infinity - so setPayloadSignaling(-0) is +0");
+        put32(a, 0x3fc00000u);                            /* 1.5, not an int */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u, "a non-integer operand gives +0");
+        put32(a, 0xc0a00000u);                            /* -5.0f */
+        CHECK(cft_set_payload(dev, CFT_FP32, a, d, 1) == CFT_OK &&
+              get32(d) == 0u, "a negative operand gives +0");
+        /* d may alias a. */
+        put32(a, 0x7fc00003u);
+        CHECK(cft_get_payload(dev, CFT_FP32, a, a, 1) == CFT_OK &&
+              get32(a) == 0x40400000u, "getPayload in place");
+        CHECK(cft_set_payload(dev, CFT_FP32, a, a, 1) == CFT_OK &&
+              get32(a) == 0x7fc00003u, "setPayload in place, and back again");
+
+        /* -- THE NEGATIVE CONTROL --
+         *
+         * 0x417ffff5 and 0x417ffff6 are neighbouring binary32
+         * encodings just below 16. At Pmin = 9 digits they write
+         * different sequences and each reads back to itself, which is
+         * 5.12.2's guarantee. At 8 - one digit short - they write the
+         * SAME sequence, so reading it back cannot recover both, and
+         * this asserts that it does not. An implementation that
+         * ignored the digit count and always wrote the exact value
+         * would pass every round-trip check above and fail here, which
+         * is the only reason this block exists.
+         */
+        {
+            char nine_a[64], nine_b[64], eight_a[64], eight_b[64];
+            uint32_t bits_a = 0x417ffff5u, bits_b = 0x417ffff6u;
+            uint32_t back_a, back_b;
+
+            put32(a, bits_a);
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, nine_a,
+                                      sizeof nine_a, &need, &f4) == CFT_OK,
+                  "nine digits of 0x417ffff5");
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 8, eight_a,
+                                      sizeof eight_a, &need, &f4) == CFT_OK,
+                  "eight digits of 0x417ffff5");
+            put32(a, bits_b);
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 9, nine_b,
+                                      sizeof nine_b, &need, &f4) == CFT_OK,
+                  "nine digits of 0x417ffff6");
+            CHECK(cft_to_decimal_char(dev, CFT_FP32, CFT_RNE, a, 8, eight_b,
+                                      sizeof eight_b, &need, &f4) == CFT_OK,
+                  "eight digits of 0x417ffff6");
+
+            CHECK(strcmp(nine_a, nine_b) != 0,
+                  "at Pmin the two neighbours write different sequences");
+            in[0] = nine_a;
+            CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                        NULL, &f4) == CFT_OK, "read back");
+            back_a = get32(d);
+            in[0] = nine_b;
+            CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                        NULL, &f4) == CFT_OK, "read back");
+            back_b = get32(d);
+            CHECK(back_a == bits_a && back_b == bits_b,
+                  "5.12.2: Pmin digits under a nearest attribute round trip");
+
+            CHECK(strcmp(eight_a, eight_b) == 0,
+                  "at Pmin - 1 the two neighbours COLLIDE (%s vs %s)",
+                  eight_a, eight_b);
+            in[0] = eight_a;
+            CHECK(cft_from_decimal_char(dev, CFT_FP32, CFT_RNE, in, d, 1,
+                                        NULL, &f4) == CFT_OK, "read back");
+            CHECK(get32(d) != bits_a || get32(d) != bits_b,
+                  "one sequence cannot name two encodings");
+            CHECK((get32(d) == bits_a) != (get32(d) == bits_b),
+                  "so at Pmin - 1 the round trip loses one of them - which "
+                  "is the control: an implementation ignoring the digit "
+                  "count would recover both");
+        }
     }
 
     /* --- buffers ------------------------------------------------- */

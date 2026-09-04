@@ -64,6 +64,45 @@
  * (cvt_to's invalid-case delivery table), and why class, totalOrder
  * and the signaling comparisons are left to the other oracles.
  *
+ * The augmented arithmetic operations of clause 9.5 are checked here
+ * with one difference worth stating up front: MPFR has no
+ * roundTiesTowardZero, so this harness cannot ask it for the answer.
+ * It asks MPFR for the EXACT value at a precision that provably holds
+ * it - and proves it by requiring a zero ternary - then applies 9.5's
+ * tie rule itself and derives the error term by exact subtraction. See
+ * the banner above check_augmented for why that is still an oracle and
+ * exactly which part of it is not.
+ *
+ * The seven REDUCTIONS of clause 9.4 are checked here too, and what
+ * this oracle can and cannot say about them is worth stating exactly,
+ * because the honest answer is "half of it".
+ *
+ * MPFR CAN ARBITRATE EVERY NODE. Each node of a reduction is one add
+ * or one multiply of two format values, correctly rounded in the
+ * caller's attribute, and that is precisely what oracle() above
+ * already decides - so the campaign REPLAYS the tree here with MPFR
+ * doing every node's arithmetic and compares the root against the
+ * library's, bits and flags. A node that rounded the wrong way, or
+ * raised the wrong flag, or lost a subnormal, fails here.
+ *
+ * MPFR CANNOT ARBITRATE THE TREE. Which values are paired, and at
+ * which level, is this CONTRACT's choice - 754-2019 9.4 explicitly
+ * allows an implementation to "associate in any order or evaluate in
+ * any wider format", so there is no external authority to appeal to
+ * and MPFR has no opinion. The harness therefore reproduces the split
+ * rather than judging it, and a reduction whose shape was wrong in
+ * BOTH the library and this file would pass. What guards the shape is
+ * a different thing entirely: two independent implementations of it
+ * (python/cft_golden/reduce.py and libcft) compared against each other
+ * by host/tests/reduce_check.py, the streaming accumulator's agreement
+ * with the recursive definition, and the published vector sets.
+ *
+ * The same division applies to the three scaled products: MPFR decides
+ * every node's multiply, and the binade extraction that follows it is
+ * exact bit surgery on the encoding, with nothing to round and so
+ * nothing to arbitrate. 9.4's special-value precedence is likewise the
+ * contract's table, replayed rather than judged.
+ *
  * Usage:  mpfr-check [randoms-per-format] [seed]
  *         (directed specials always run; randoms are exponent-banded)
  */
@@ -83,7 +122,9 @@
  * quietly check something weaker. */
 #if MPFR_VERSION < MPFR_VERSION_NUM(4, 2, 0)
 #  error "mpfr-check needs MPFR 4.2.0 or newer for sinpi/cospi/tanpi \
-and the Pi-variants of the inverse trigonometrics (ABI 0.4)."
+and the Pi-variants of the inverse trigonometrics (ABI 0.4), and for \
+exp2m1/exp10m1/log2p1/log10p1/powr/compound_si/rootn_si (table 9.1's \
+remainder). Every one of those is called DIRECTLY."
 #endif
 
 #include "../include/cft.h"
@@ -145,7 +186,22 @@ enum {
     T_SINPI, T_COSPI, T_TANPI, T_ASIN, T_ACOS, T_ATAN, T_ATAN2,
     T_ASINPI, T_ACOSPI, T_ATANPI, T_ATAN2PI,
     T_SIN, T_COS, T_TAN, T_SINH, T_COSH, T_TANH, T_ASINH, T_ACOSH,
-    T_ATANH, NTALLY
+    T_ATANH,
+    T_EXP2M1, T_EXP10, T_EXP10M1, T_LOG2P1, T_LOG10P1, T_RSQRT,
+    T_POWN, T_POWR, T_COMPOUND, T_ROOTN,
+    /* clause 5.12, appended AFTER the transcendental block so
+     * check_transcend's T_EXP + fn indexing is untouched */
+    T_FROM_DEC, T_TO_DEC, T_FROM_HEX, T_TO_HEX,
+    /* the augmented arithmetic operations of 754-2019 9.5 */
+    T_AUG_ADD, T_AUG_SUB, T_AUG_MUL,
+    /* the seven reductions of clause 9.4. A "case" here is a whole
+     * VECTOR, not an element - the element count is reported
+     * separately, because 400 cases over 20-element vectors is 8,000
+     * arbitrated nodes and reporting only the smaller number would
+     * undersell the campaign while reporting only the larger would
+     * oversell its independence. */
+    T_RSUM, T_RDOT, T_RSUMSQ, T_RSUMABS,
+    T_SPROD, T_SPROD_SUM, T_SPROD_DIFF, NTALLY
 };
 static const char *const TALLY_NAME[NTALLY] = {
     "add", "sub", "mul", "fma", "div", "sqrt",
@@ -158,9 +214,18 @@ static const char *const TALLY_NAME[NTALLY] = {
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
-    "atanh"
+    "atanh",
+    "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt",
+    "pown", "powr", "compound", "rootn",
+    "from_dec", "to_dec", "from_hex", "to_hex",
+    "aug_add", "aug_sub", "aug_mul",
+    "sum", "dot", "sumsq", "sumabs",
+    "sprod", "sprod_sum", "sprod_diff"
 };
 static uint64_t tally[NTALLY][4];
+
+/* Arbitrated NODES, separately from the vector count above. */
+static uint64_t reduce_nodes;
 
 /* ---- bit-level classify (works on the little-endian encoding) ----- */
 
@@ -1735,6 +1800,938 @@ static void check_rem(int fj, uint8_t pool[][32], int pn, int nrand)
     }
 }
 
+/* ---- the augmented arithmetic operations (754-2019 9.5) ------------ *
+ *
+ * WHY THIS IS AN ORACLE, AND WHAT IT IS AN ORACLE FOR.
+ *
+ * MPFR has no roundTiesTowardZero. It has no mode that breaks a tie
+ * toward the smaller magnitude, and MPFR_RNDZ is not it - RNDZ
+ * truncates every inexact value, not only the ties. So this harness
+ * cannot ask MPFR for the answer; it asks MPFR for the EXACT VALUE and
+ * applies 9.5's rule itself:
+ *
+ *   1. compute x op y at a precision that holds the exact result with
+ *      no rounding at all, and PROVE it did by requiring MPFR's ternary
+ *      to be zero. That precision is not 2p: the exact sum of two
+ *      p-bit values whose exponents span the whole format is
+ *      emax - emin + p bits wide (524,522 at binary256), and the
+ *      product's residual against a subnormal result is nearly as wide.
+ *      AUG_PREC below covers both with margin, and the ternary check is
+ *      what makes "exact" a measurement rather than an assumption.
+ *   2. round that exact value to the format by 9.5's own definition -
+ *      scale to the format's grid, split into an integer and a
+ *      fraction with exact MPFR arithmetic, and compare the fraction
+ *      with one half: strictly above rounds away, equal keeps the
+ *      smaller magnitude ("the one with smaller magnitude shall be
+ *      delivered"), below truncates. Overflow is the rounded value's
+ *      exponent exceeding emax, and 9.5 sends it to an infinity.
+ *   3. subtract exactly for the error term, and decide representability
+ *      by rounding it the same way and asking whether the rounding
+ *      changed it - which is 9.5's "can be represented exactly as a
+ *      finite number in sourceFormat" tested rather than reasoned.
+ *
+ * Every arithmetic step above is MPFR's, every step is exact by
+ * construction and checked to be, and the only thing this file
+ * contributes is the tie rule and the flag policy - which are the two
+ * things 9.5 states in words and the library must be scored against.
+ * That makes this a genuine independent oracle for the VALUES and a
+ * restatement for the FLAGS, and saying which is which is the point of
+ * this paragraph.
+ *
+ * The flags are 9.5's, not clause 7's defaults: inexact "only when
+ * roundTiesTowardZero(x + y) overflows", underflow when the error term
+ * is "non-zero and lies strictly between +-b^emin" even though that
+ * error term is exact, and both together for the one case 9.5 gives
+ * augmentedMultiplication where the residual falls below the subnormal
+ * grid.
+ */
+
+#define AUG_COUNT 3
+static const char *const AUGN[AUG_COUNT] = { "aug_add", "aug_sub",
+                                             "aug_mul" };
+
+/* Wide enough to hold every exact intermediate: the widest is a SUM
+ * spanning the whole exponent range, emax - emin + p bits. */
+static long aug_prec(const fdesc *f)
+{
+    return (long)f->emax - f->emin + 2 * f->p + 16;
+}
+
+/* Round the exact non-zero finite value v into f's grid under 9.5's
+ * roundTiesTowardZero, into `out`. Returns 1 if it overflowed. */
+static int aug_rttz(const fdesc *f, mpfr_srcptr v, mpfr_ptr out)
+{
+    mpz_t n;
+    mpfr_t scaled, frac, half;
+    long E, q, er;
+    int sign = mpfr_signbit(v) ? 1 : 0, cmp, ovf = 0;
+
+    E = (long)mpfr_get_exp(v) - 1;               /* floor(log2 |v|) */
+    q = (E > f->emin ? E : f->emin) - (f->p - 1);
+    mpz_init(n);
+    mpfr_init2(scaled, aug_prec(f));
+    mpfr_init2(frac, aug_prec(f));
+    mpfr_init2(half, 8);
+    mpfr_abs(scaled, v, MPFR_RNDN);
+    mpfr_mul_2si(scaled, scaled, -q, MPFR_RNDN); /* exact: an exponent */
+    mpfr_get_z(n, scaled, MPFR_RNDZ);            /* floor */
+    mpfr_sub_z(frac, scaled, n, MPFR_RNDN);      /* exact */
+    mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+    cmp = mpfr_cmp(frac, half);
+    if (cmp > 0)
+        mpz_add_ui(n, n, 1);                     /* strictly above half */
+    /* cmp == 0 is the TIE, and 9.5 keeps the smaller magnitude: nothing
+     * happens here, and that one line is the whole difference from
+     * roundTiesToEven. */
+    if (mpz_sgn(n) == 0) {
+        mpfr_set_zero(out, sign ? -1 : 1);       /* 6.3: the exact sign */
+    } else {
+        er = q + (long)mpz_sizeinbase(n, 2) - 1;
+        if (er > f->emax) {
+            ovf = 1;
+            mpfr_set_inf(out, sign ? -1 : 1);
+        } else {
+            mpfr_set_z_2exp(out, n, q, MPFR_RNDN);       /* exact */
+            if (sign)
+                mpfr_neg(out, out, MPFR_RNDN);
+        }
+    }
+    mpz_clear(n);
+    mpfr_clear(scaled);
+    mpfr_clear(frac);
+    mpfr_clear(half);
+    return ovf;
+}
+
+/* The pair and the flags for one case. fn: 0 add, 1 sub, 2 mul. */
+static void aug_oracle(const fdesc *f, int fn, const uint8_t *ba,
+                       const uint8_t *bb, mpfr_ptr want_r, mpfr_ptr want_e,
+                       uint32_t *flags)
+{
+    mpfr_t a, b, exact, rv, err, emin_mag;
+    cls ca, cb;
+    uint32_t fl = 0;
+    int tern = 0, nan_in;
+    long P = aug_prec(f);
+
+    classify(f, ba, &ca);
+    classify(f, bb, &cb);
+    nan_in = ca.is_nan || cb.is_nan;
+    if (ca.is_snan || cb.is_snan)
+        fl |= CFT_FLAG_INVALID;
+
+    mpfr_init2(a, f->p);
+    mpfr_init2(b, f->p);
+    mpfr_init2(exact, P);
+    mpfr_init2(rv, P);
+    mpfr_init2(err, P);
+    mpfr_init2(emin_mag, 8);
+    enc_to_mpfr(f, ba, a);
+    enc_to_mpfr(f, bb, b);
+
+    if (fn == 2)
+        tern = mpfr_mul(exact, a, b, MPFR_RNDN);
+    else if (fn == 1)
+        tern = mpfr_sub(exact, a, b, MPFR_RNDN);
+    else
+        tern = mpfr_add(exact, a, b, MPFR_RNDN);
+    if (tern != 0) {
+        /* The working precision was supposed to make this impossible.
+         * A non-zero ternary means the harness, not the library, is
+         * wrong - surfaced rather than absorbed. */
+        mismatches++;
+        if (shown < 16) {
+            shown++;
+            printf("  AUG-TERNARY %s %s: the exact %s was rounded at %ld "
+                   "bits\n", f->name, AUGN[fn],
+                   fn == 2 ? "product" : "sum", P);
+        }
+    }
+
+    if (mpfr_nan_p(exact)) {
+        mpfr_set_nan(want_r);
+        mpfr_set_nan(want_e);
+        if (!nan_in)
+            fl |= CFT_FLAG_INVALID;      /* inf + (-inf), inf * 0 */
+        goto done;
+    }
+    if (!mpfr_number_p(exact) || mpfr_zero_p(exact)) {
+        /* An infinity at unbounded range can only come from an infinite
+         * OPERAND, so it signals nothing; a zero carries its own sign
+         * (6.3), and 9.5 gives both outputs the same value either way. */
+        mpfr_set(want_r, exact, MPFR_RNDN);
+        mpfr_set(want_e, exact, MPFR_RNDN);
+        goto done;
+    }
+
+    if (aug_rttz(f, exact, rv)) {
+        mpfr_set(want_r, rv, MPFR_RNDN);
+        mpfr_set(want_e, rv, MPFR_RNDN);
+        fl |= CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        goto done;
+    }
+    mpfr_set(want_r, rv, MPFR_RNDN);
+
+    tern = mpfr_sub(err, exact, rv, MPFR_RNDN);
+    if (tern != 0) {
+        mismatches++;
+        if (shown < 16) {
+            shown++;
+            printf("  AUG-TERNARY %s %s: the residual was rounded\n",
+                   f->name, AUGN[fn]);
+        }
+    }
+    if (mpfr_zero_p(err)) {
+        /* 9.5: an error term equal to zero "is returned with the sign of
+         * roundTiesTowardZero(x + y)". */
+        mpfr_set_zero(want_e, mpfr_signbit(rv) ? -1 : 1);
+        goto done;
+    }
+    {
+        mpfr_t rounded;
+        int tiny;
+        mpfr_set_ui_2exp(emin_mag, 1, f->emin, MPFR_RNDN);
+        tiny = mpfr_cmpabs(err, emin_mag) < 0;
+        mpfr_init2(rounded, P);
+        (void)aug_rttz(f, err, rounded);         /* cannot overflow */
+        if (mpfr_equal_p(rounded, err)) {
+            mpfr_set(want_e, err, MPFR_RNDN);    /* exactly representable */
+            if (tiny)
+                fl |= CFT_FLAG_UNDERFLOW;
+        } else {
+            /* 9.5's one non-representable delivery, augmentedMulti-
+             * plication only: the residual rounded the same way, with
+             * the underflow flag raised and inexact signalled. */
+            mpfr_set(want_e, rounded, MPFR_RNDN);
+            fl |= CFT_FLAG_UNDERFLOW | CFT_FLAG_INEXACT;
+        }
+        mpfr_clear(rounded);
+    }
+
+done:
+    *flags = fl;
+    mpfr_clear(a); mpfr_clear(b); mpfr_clear(exact);
+    mpfr_clear(rv); mpfr_clear(err); mpfr_clear(emin_mag);
+}
+
+/* Both values and the flag word, as ONE case in the ledger. */
+static void aug_judge(int ti, int fj, int fn, const fdesc *f,
+                      const uint8_t *a, const uint8_t *b,
+                      const uint8_t *gr, const uint8_t *ge,
+                      mpfr_srcptr wr, mpfr_srcptr we,
+                      uint32_t gf, uint32_t wf, cft_status st)
+{
+    int rbad = (st != CFT_OK) || !agree(f, gr, wr);
+    int ebad = (st != CFT_OK) || !agree(f, ge, we);
+    int fbad = (gf != wf);
+    if (rbad || ebad)
+        mismatches++;
+    if (fbad)
+        flag_mismatches++;
+    if (rbad || fbad)
+        report_c5(AUGN[fn], "9.5", f, a, b, f, gr, wr, gf, wf, rbad,
+                  st != CFT_OK ? "(status!=OK)" : "(r)");
+    if (ebad && !rbad)
+        report_c5(AUGN[fn], "9.5", f, a, b, f, ge, we, gf, wf, ebad,
+                  "(e, the error term)");
+    cases++;
+    tally[ti][fj]++;
+}
+
+static cft_status aug_lib(const fdesc *f, int fn, const uint8_t *a,
+                          const uint8_t *b, uint8_t *r, uint8_t *e,
+                          uint32_t *fl)
+{
+    switch (fn) {
+    case 0:  return cft_augmented_add(dev, f->fmt, a, b, r, e, 1, fl);
+    case 1:  return cft_augmented_sub(dev, f->fmt, a, b, r, e, 1, fl);
+    default: return cft_augmented_mul(dev, f->fmt, a, b, r, e, 1, fl);
+    }
+}
+
+/* 2^E as a normal encoding (E must be >= emin). */
+static void aug_pow2(const fdesc *f, long E, int sign, uint8_t *b)
+{
+    memset(b, 0, 32);
+    set_field(b, f->man_w, f->exp_w, (uint64_t)(E + f->emax));
+    if (sign)
+        set_field(b, 1 + f->exp_w + f->man_w - 1, 1, 1);
+}
+
+static void check_augmented(int fj, uint8_t pool[][32], int pn)
+{
+    const fdesc *f = &FMTS[fj];
+    static uint8_t xa[96][32], xb[96][32];
+    int np = 0, fn, i, j, s;
+    uint8_t gr[32], ge[32];
+
+    /* THE TIE, at binade edges: x is 2^k + 1 ulp (an ODD significand,
+     * which is the only place roundTiesTowardZero and roundTiesToEven
+     * can differ) and y is exactly half an ulp of that binade. */
+    {
+        long ks[6];
+        int nk = 0;
+        ks[nk++] = 0;
+        ks[nk++] = 1;
+        ks[nk++] = f->emin;
+        ks[nk++] = f->emin + f->p;
+        ks[nk++] = f->emax - 1;
+        ks[nk++] = f->emax / 2;
+        for (i = 0; i < nk; i++) {
+            long k = ks[i];
+            if (k - f->p < f->emin || np > 88)
+                continue;
+            for (s = 0; s <= 1; s++) {
+                aug_pow2(f, k, s, xa[np]);
+                set_field(xa[np], 0, 1, 1);            /* + 1 ulp: odd */
+                aug_pow2(f, k - f->p, 0, xb[np]);      /* half an ulp */
+                np++;
+                aug_pow2(f, k, s, xa[np]);
+                set_field(xa[np], 0, 1, 1);
+                aug_pow2(f, k - f->p, 1, xb[np]);      /* and below it */
+                np++;
+            }
+        }
+    }
+    /* THE OVERFLOW THRESHOLD: the largest finite plus exactly half an
+     * ulp is the midpoint 9.5 rounds DOWN, silently; one ulp is past
+     * it and goes to an infinity with overflow and inexact. */
+    for (s = 0; s <= 1 && np < 92; s++) {
+        int k;
+        for (k = 0; k < 2; k++) {
+            memset(xa[np], 0, 32);
+            set_field(xa[np], f->man_w, f->exp_w,
+                      (uint64_t)((1ull << f->exp_w) - 2));
+            for (i = 0; i < f->man_w; i++)
+                set_field(xa[np], i, 1, 1);            /* max normal */
+            if (s)
+                set_field(xa[np], 1 + f->exp_w + f->man_w - 1, 1, 1);
+            aug_pow2(f, f->emax - f->p + k, s, xb[np]);
+            np++;
+        }
+    }
+    /* A SUBNORMAL RESIDUAL: 1 against the bottom of the grid, which is
+     * underflow with no inexact - the combination 9.5 alone produces. */
+    for (i = 0; i < 3 && np < 95; i++) {
+        aug_pow2(f, i == 0 ? 0 : (i == 1 ? f->p : f->emax - 1), 0, xa[np]);
+        memset(xb[np], 0, 32);
+        set_field(xb[np], i, 1, 1);                    /* a tiny subnormal */
+        np++;
+    }
+
+    for (fn = 0; fn < AUG_COUNT; fn++) {
+        for (i = 0; i < pn + np; i++) {
+            int jmax = i < pn ? pn : 1;
+            for (j = 0; j < jmax; j++) {
+                const uint8_t *pa = i < pn ? pool[i] : xa[i - pn];
+                const uint8_t *pb = i < pn ? pool[j] : xb[i - pn];
+                uint32_t gf = 0, wf = 0;
+                mpfr_t wr, we;
+                cft_status st;
+
+                mpfr_init2(wr, f->p);
+                mpfr_init2(we, f->p);
+                aug_oracle(f, fn, pa, pb, wr, we, &wf);
+                memset(gr, 0, sizeof gr);
+                memset(ge, 0, sizeof ge);
+                st = aug_lib(f, fn, pa, pb, gr, ge, &gf);
+                aug_judge(T_AUG_ADD + fn, fj, fn, f, pa, pb, gr, ge, wr, we,
+                          gf, wf, st);
+                mpfr_clear(wr);
+                mpfr_clear(we);
+            }
+        }
+    }
+}
+
+/* ---- clause 5.12: conversions to and from character sequences ------ *
+ *
+ * MPFR is the right arbiter for these and is used as one in both
+ * directions: mpfr_strtofr and mpfr_get_str are correctly rounded in
+ * every rounding mode, at any precision, and neither has ever seen
+ * this project. So the parse is scored against MPFR's parse and the
+ * write against MPFR's digits, values AND flags, in all five
+ * attributes at all four rungs.
+ *
+ * Four things about this block are worth stating rather than leaving
+ * to be discovered.
+ *
+ * 1. There is no mpfr_t that holds the exact value of a decimal
+ *    sequence - "0.1" is not dyadic - so c5_round_into cannot be
+ *    reused here and chars_round_str below is its derivation with the
+ *    source changed from mpfr_set to mpfr_strtofr. Same unbounded
+ *    p-bit rounding as the overflow/underflow authority, same
+ *    subnormal re-rounding on the format's fixed grid, same p+1
+ *    guard/sticky build for RMM - only the thing being rounded
+ *    differs. base 0 reads both radices: "0x..." is hexadecimal with a
+ *    p exponent, anything else is decimal.
+ *
+ * 2. RMM is built rather than compared, in both directions, because
+ *    MPFR has no ties-to-away. Reading in, it is the same p+1
+ *    construction the rest of this file uses. Writing out it is
+ *    simpler than that and exactly right: ties-to-away on a DECIMAL
+ *    grid rounds up exactly when digit H+1 is 5 or more, and no sticky
+ *    is needed for that decision - so the oracle asks mpfr_get_str for
+ *    H+1 digits truncated and rounds the last one half-up.
+ *
+ * 3. The EXACT conversion cannot be asked of mpfr_get_str, which
+ *    produces shortest-or-N digits and not the full expansion. It is
+ *    scored a different way that is just as strong: the sequence the
+ *    library wrote is handed back to mpfr_strtofr at the format's own
+ *    precision, and MPFR must report a ternary of ZERO - the parse was
+ *    exact - and the same value. A sequence that denotes exactly x is
+ *    what "exact" means, and MPFR decides it. Same check for the
+ *    hexadecimal form.
+ *
+ * 4. What is deliberately NOT scored here. The absurd exponents
+ *    ("1e999999999999") are outside MPFR's own exponent range, so
+ *    feeding them to the oracle would score MPFR's overflow rather
+ *    than the format's - the pools stay inside MPFR's range and well
+ *    outside every format's, and the bands are scored by the golden
+ *    model and the vectors instead. NaN PAYLOADS are not scored here
+ *    either: MPFR keeps no payload, so it cannot arbitrate the one
+ *    thing 5.12.1's suffix exists for. The 9.7 payload operations are
+ *    pure bit surgery with no arithmetic in them at all and belong to
+ *    the model, which is where character_check.py scores them.
+ */
+
+/* c5_round_into's derivation, on a character sequence. */
+static void chars_round_str(const fdesc *f, const char *s, int mi,
+                            mpfr_t out, uint32_t *flags)
+{
+    mpfr_t runb, y;
+    int inexact, is_rmm = (MODES[mi].cr == CFT_RMM);
+    mpfr_rnd_t rnd = MODES[mi].mr;
+    uint32_t fl = 0;
+    char *end = NULL;
+    int t1;
+
+    mpfr_init2(runb, f->p);
+    mpfr_init2(y, f->p + 1);
+    if (is_rmm) {
+        t1 = mpfr_strtofr(y, s, &end, 0, MPFR_RNDZ);
+        rmm_round(runb, y, t1 != 0, f->p);
+        inexact = (t1 != 0) || !mpfr_equal_p(y, runb);
+    } else {
+        t1 = mpfr_strtofr(runb, s, &end, 0, rnd);
+        inexact = (t1 != 0);
+    }
+
+    if (mpfr_zero_p(runb) && !inexact) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set(out, runb, MPFR_RNDN);          /* signed zero rides along */
+        *flags = 0;
+        mpfr_clear(runb);
+        mpfr_clear(y);
+        return;
+    }
+
+    {
+        long e_res;
+        if (mpfr_zero_p(runb)) {
+            /* rounded away below the smallest representable: the
+             * subnormal branch decides it */
+            e_res = (long)f->emin - 1;
+        } else {
+            e_res = (long)mpfr_get_exp(runb) - 1;
+        }
+
+        if (e_res > f->emax) {
+            int away = (rnd == MPFR_RNDU && mpfr_sgn(runb) > 0) ||
+                       (rnd == MPFR_RNDD && mpfr_sgn(runb) < 0) ||
+                       rnd == MPFR_RNDN || is_rmm;
+            if (rnd == MPFR_RNDZ)
+                away = 0;
+            mpfr_set_prec(out, f->p);
+            if (away)
+                mpfr_set_inf(out, mpfr_sgn(runb));
+            else {
+                mpfr_set_ui_2exp(out, 1, f->emax + 1, MPFR_RNDN);
+                mpfr_nextbelow(out);
+                if (mpfr_sgn(runb) < 0)
+                    mpfr_neg(out, out, MPFR_RNDN);
+            }
+            *flags = fl | CFT_FLAG_OVERFLOW | CFT_FLAG_INEXACT;
+        } else if (e_res >= f->emin) {
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, runb, MPFR_RNDN);
+            *flags = inexact ? (fl | CFT_FLAG_INEXACT) : fl;
+        } else if (!is_rmm) {
+            mpfr_exp_t save_emin = mpfr_get_emin();
+            mpfr_exp_t save_emax = mpfr_get_emax();
+            mpfr_t r;
+            int t2;
+            mpfr_init2(r, f->p);
+            mpfr_set_emin(f->emin - f->p + 2);
+            mpfr_set_emax(f->emax + 1);
+            t2 = mpfr_strtofr(r, s, &end, 0, rnd);
+            t2 = mpfr_check_range(r, t2, rnd);
+            t2 = mpfr_subnormalize(r, t2, rnd);
+            mpfr_set_emin(save_emin);
+            mpfr_set_emax(save_emax);
+            mpfr_set_prec(out, f->p);
+            mpfr_set(out, r, MPFR_RNDN);
+            if (t2 != 0 || inexact)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            *flags = fl;
+            mpfr_clear(r);
+        } else {
+            /* RMM on the fixed subnormal grid, from the p+1 truncation
+             * - c5_round_into's block, and its granularity argument
+             * holds unchanged because y is a truncation here too. */
+            int t1b, up, sgn;
+            long grid = f->emin - f->man_w;
+            mpz_t nn;
+            mpfr_t scaled, frac, half;
+            t1b = mpfr_strtofr(y, s, &end, 0, MPFR_RNDZ);
+            sgn = mpfr_signbit(y) ? 1 : 0;
+            mpz_init(nn);
+            mpfr_init2(scaled, f->p + 4);
+            mpfr_init2(frac, f->p + 4);
+            mpfr_init2(half, 8);
+            mpfr_abs(scaled, y, MPFR_RNDN);
+            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);
+            mpfr_get_z(nn, scaled, MPFR_RNDZ);
+            mpfr_sub_z(frac, scaled, nn, MPFR_RNDN);
+            mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
+            up = (mpfr_cmp(frac, half) >= 0);
+            if (up)
+                mpz_add_ui(nn, nn, 1);
+            mpfr_set_prec(out, f->p);
+            mpfr_set_z_2exp(out, nn, grid, MPFR_RNDN);
+            if (sgn)
+                mpfr_neg(out, out, MPFR_RNDN);
+            if (!mpfr_zero_p(frac) || t1b)
+                fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
+            mpz_clear(nn);
+            mpfr_clear(scaled);
+            mpfr_clear(frac);
+            mpfr_clear(half);
+            *flags = fl;
+        }
+    }
+    mpfr_clear(runb);
+    mpfr_clear(y);
+}
+
+/* Read one sequence through the library, both ways compared. */
+static void chars_check_parse(int fj, const char *s, int hexform)
+{
+    const fdesc *f = &FMTS[fj];
+    int mi;
+    for (mi = 0; mi < 5; mi++) {
+        uint8_t d[32];
+        uint32_t gf = 0, wf = 0;
+        mpfr_t want;
+        cft_status st;
+        const char *one = s;
+        size_t bad = 0;
+
+        mpfr_init2(want, f->p);
+        chars_round_str(f, s, mi, want, &wf);
+        memset(d, 0, sizeof d);
+        st = hexform
+             ? cft_from_hex_char(dev, f->fmt, MODES[mi].cr, &one, d, 1, &bad,
+                                 &gf)
+             : cft_from_decimal_char(dev, f->fmt, MODES[mi].cr, &one, d, 1,
+                                     &bad, &gf);
+        /* A refusal is its own thing and gets its own line: "the
+         * library would not read a sequence MPFR read" and "it read a
+         * different number" want different responses from whoever is
+         * looking at the report. */
+        if (st != CFT_OK && shown < 16) {
+            shown++;
+            printf("  REFUSED %s %s %s: %.160s\n", f->name,
+                   hexform ? "from_hex" : "from_dec", MODES[mi].name, s);
+        }
+        c5_judge(hexform ? T_FROM_HEX : T_FROM_DEC, fj,
+                 hexform ? "from_hex" : "from_dec", MODES[mi].name, f, NULL,
+                 NULL, f, d, want, gf, wf, st, s);
+        mpfr_clear(want);
+    }
+}
+
+/* The library's answer, written into a fresh buffer. */
+static char *chars_write(int fj, int mi, const uint8_t *a, size_t digits,
+                         int hexform, uint32_t *flags, cft_status *st)
+{
+    const fdesc *f = &FMTS[fj];
+    size_t need = 0;
+    char *buf;
+
+    *flags = 0;
+    *st = hexform ? cft_to_hex_char(dev, f->fmt, a, NULL, 0, &need)
+                  : cft_to_decimal_char(dev, f->fmt, MODES[mi].cr, a, digits,
+                                        NULL, 0, &need, flags);
+    if (need < 2) {
+        *st = *st == CFT_OK ? CFT_ERR_INTERNAL : *st;
+        return NULL;
+    }
+    buf = (char *)malloc(need);
+    if (!buf) {
+        *st = CFT_ERR_OUT_OF_MEMORY;
+        return NULL;
+    }
+    *st = hexform ? cft_to_hex_char(dev, f->fmt, a, buf, need, &need)
+                  : cft_to_decimal_char(dev, f->fmt, MODES[mi].cr, a, digits,
+                                        buf, need, &need, flags);
+    if (*st != CFT_OK) {
+        free(buf);
+        return NULL;
+    }
+    return buf;
+}
+
+/* "the sequence denotes exactly this value" - MPFR's verdict, which is
+ * the whole content of an exact conversion. */
+static void chars_check_exact(int fj, const uint8_t *a, const char *s,
+                              const char *what, int ti)
+{
+    const fdesc *f = &FMTS[fj];
+    mpfr_t x, back;
+    char *end = NULL;
+    int t;
+
+    mpfr_init2(x, f->p);
+    mpfr_init2(back, f->p);
+    enc_to_mpfr(f, a, x);
+    t = mpfr_strtofr(back, s, &end, 0, MPFR_RNDN);
+    cases++;
+    tally[ti][fj]++;
+    if (t != 0 || !mpfr_equal_p(back, x) ||
+        (end && *end) || mpfr_signbit(back) != mpfr_signbit(x)) {
+        mismatches++;
+        if (shown < 16) {
+            char ha[65];
+            shown++;
+            hexdump(a, f->esz, ha);
+            printf("  MISMATCH %s %s a=0x%s\n", f->name, what, ha);
+            printf("    the library wrote %.*s%s\n", 120, s,
+                   strlen(s) > 120 ? "..." : "");
+            printf("    mpfr_strtofr reads it back ternary %d, equal %d, "
+                   "trailing %d\n", t, mpfr_equal_p(back, x),
+                   end && *end ? 1 : 0);
+        }
+    }
+    mpfr_clear(x);
+    mpfr_clear(back);
+}
+
+/* The library's H-digit sequence against mpfr_get_str's. */
+static void chars_check_digits(int fj, int mi, const uint8_t *a, size_t h)
+{
+    const fdesc *f = &FMTS[fj];
+    char *got;
+    uint32_t gf = 0;
+    cft_status st;
+    mpfr_t x;
+    mpfr_exp_t e10 = 0;
+    char *want;
+    char buf[512];
+    int is_rmm = (MODES[mi].cr == CFT_RMM);
+    size_t n = h + (is_rmm ? 1 : 0);
+    int bad = 0;
+
+    if (h < 2 || n + 4 > sizeof buf)
+        return;                            /* mpfr_get_str wants n >= 2 */
+
+    got = chars_write(fj, mi, a, h, 0, &gf, &st);
+    cases++;
+    tally[T_TO_DEC][fj]++;
+    if (!got) {
+        mismatches++;
+        if (shown < 16) {
+            shown++;
+            printf("  MISMATCH %s to_dec %s: status %s\n", f->name,
+                   MODES[mi].name, cft_strerror(st));
+        }
+        return;
+    }
+
+    mpfr_init2(x, f->p);
+    enc_to_mpfr(f, a, x);
+    want = mpfr_get_str(buf, &e10, 10, n,
+                        x, is_rmm ? MPFR_RNDZ : MODES[mi].mr);
+    if (!want) {
+        free(got);
+        mpfr_clear(x);
+        return;
+    }
+    {
+        /* mpfr_get_str writes 0.d1..dn * 10^e10 with the sign as a
+         * leading '-'; the library writes d1.d2..dn e (e10 - 1). */
+        char digits[520];
+        int neg = want[0] == '-';
+        long exp10;
+        size_t i, len;
+        char expect[560];
+
+        snprintf(digits, sizeof digits, "%s", want + (neg ? 1 : 0));
+        len = strlen(digits);
+        exp10 = (long)e10 - 1;
+        if (is_rmm && len == n) {
+            /* ties-to-away on a decimal grid: up exactly when the
+             * dropped digit is 5 or more, no sticky needed */
+            int up = digits[n - 1] >= '5';
+            digits[n - 1] = '\0';
+            len = n - 1;
+            if (up) {
+                size_t k = len;
+                while (k-- > 0) {
+                    if (digits[k] != '9') {
+                        digits[k]++;
+                        break;
+                    }
+                    digits[k] = '0';
+                    if (k == 0) {
+                        digits[0] = '1';
+                        exp10++;
+                    }
+                }
+            }
+        }
+        /* Assemble what the library should have written. */
+        {
+            char body[540];
+            size_t w = 0;
+            body[w++] = digits[0];
+            if (len > 1) {
+                body[w++] = '.';
+                for (i = 1; i < len && w + 2 < sizeof body; i++)
+                    body[w++] = digits[i];
+            }
+            body[w] = '\0';
+            snprintf(expect, sizeof expect, "%s%se%s%ld", neg ? "-" : "",
+                     body, exp10 >= 0 ? "+" : "-",
+                     exp10 >= 0 ? exp10 : -exp10);
+        }
+        if (strcmp(expect, got) != 0)
+            bad = 1;
+        if (bad) {
+            char ha[65];
+            mismatches++;
+            if (shown < 16) {
+                shown++;
+                hexdump(a, f->esz, ha);
+                printf("  MISMATCH %s to_dec %s a=0x%s h=%lu\n", f->name,
+                       MODES[mi].name, ha, (unsigned long)h);
+                printf("    lib  %s\n    mpfr %s\n", got, expect);
+            }
+        }
+    }
+    free(got);
+    mpfr_clear(x);
+}
+
+/* The exact decimal of the midpoint between an encoding and its
+ * successor, built with GMP - the tie only the attribute can decide,
+ * and generated by the ORACLE side so it owes the library nothing.
+ * Returns 0 when the expansion does not fit the caller's buffer, which
+ * is how the extremes of the wide formats are left out. */
+static int chars_midpoint(const fdesc *f, const uint8_t *a, char *buf,
+                          size_t cap)
+{
+    uint8_t up[32];
+    mpz_t m1, m2, mid, five;
+    mpfr_t v1, v2;
+    long e1, e2, e, p10;
+    int ok = 0;
+    cls ca;
+
+    classify(f, a, &ca);
+    if (ca.is_nan || ca.is_inf)
+        return 0;
+    memcpy(up, a, f->esz);
+    enc_step(f, up, 1);
+    classify(f, up, &ca);
+    if (ca.is_nan || ca.is_inf)
+        return 0;
+
+    mpfr_init2(v1, f->p);
+    mpfr_init2(v2, f->p);
+    enc_to_mpfr(f, a, v1);
+    enc_to_mpfr(f, up, v2);
+    if (mpfr_zero_p(v1) || mpfr_zero_p(v2) || mpfr_sgn(v1) != mpfr_sgn(v2)) {
+        mpfr_clear(v1);
+        mpfr_clear(v2);
+        return 0;
+    }
+    mpz_init(m1);
+    mpz_init(m2);
+    mpz_init(mid);
+    mpz_init(five);
+    e1 = (long)mpfr_get_z_2exp(m1, v1);
+    e2 = (long)mpfr_get_z_2exp(m2, v2);
+    e = (e1 < e2 ? e1 : e2) - 1;
+    mpz_mul_2exp(m1, m1, (unsigned long)(e1 - e));
+    mpz_mul_2exp(m2, m2, (unsigned long)(e2 - e));
+    mpz_add(mid, m1, m2);
+    mpz_tdiv_q_2exp(mid, mid, 1);              /* (m1 + m2) / 2, exact */
+    /* The sign is carried separately below - mpfr_get_z_2exp hands
+     * back a NEGATIVE significand for a negative value, and letting
+     * mpz_get_str write its own '-' as well produced "--..." */
+    mpz_abs(mid, mid);
+
+    /* mid * 2^e is mid * 5^-e * 10^e for e < 0, and mid << e for e >= 0 */
+    if (e >= 0) {
+        mpz_mul_2exp(mid, mid, (unsigned long)e);
+        p10 = 0;
+    } else {
+        mpz_ui_pow_ui(five, 5, (unsigned long)(-e));
+        mpz_mul(mid, mid, five);
+        p10 = e;
+    }
+    if (mpz_sizeinbase(mid, 10) + 24 < cap) {
+        char *digits = (char *)malloc(mpz_sizeinbase(mid, 10) + 4);
+        if (digits) {
+            size_t len, keep;
+            long exp10;
+            mpz_get_str(digits, 10, mid);
+            len = strlen(digits);
+            exp10 = (long)len - 1 + p10;
+            keep = len;
+            while (keep > 1 && digits[keep - 1] == '0')
+                keep--;
+            digits[keep] = '\0';
+            if (keep == 1)
+                snprintf(buf, cap, "%s%se%s%ld", mpfr_signbit(v1) ? "-" : "",
+                         digits, exp10 >= 0 ? "+" : "-",
+                         exp10 >= 0 ? exp10 : -exp10);
+            else
+                snprintf(buf, cap, "%s%c.%se%s%ld",
+                         mpfr_signbit(v1) ? "-" : "", digits[0], digits + 1,
+                         exp10 >= 0 ? "+" : "-", exp10 >= 0 ? exp10 : -exp10);
+            ok = 1;
+            free(digits);
+        }
+    }
+    mpz_clear(m1);
+    mpz_clear(m2);
+    mpz_clear(mid);
+    mpz_clear(five);
+    mpfr_clear(v1);
+    mpfr_clear(v2);
+    return ok;
+}
+
+static void check_chars(int fj, uint8_t pool[][32], int pn, int nrand)
+{
+    const fdesc *f = &FMTS[fj];
+    size_t h = cft_format_decimal_digits(f->fmt);
+    int i, mi, k;
+
+    /* -- writing out ------------------------------------------------ */
+    for (i = 0; i < pn; i++) {
+        cls ca;
+        classify(f, pool[i], &ca);
+        if (ca.is_nan || ca.is_inf || ca.is_zero)
+            continue;                     /* MPFR keeps no payload; the
+                                           * words are the model's */
+        for (mi = 0; mi < 5; mi++) {
+            chars_check_digits(fj, mi, pool[i], h);
+            chars_check_digits(fj, mi, pool[i], h - 1);
+            chars_check_digits(fj, mi, pool[i], h + 3);
+            chars_check_digits(fj, mi, pool[i], 5);
+            chars_check_digits(fj, mi, pool[i], 2);
+        }
+        /* The exact forms, in both radices, verified by reading them
+         * back through MPFR - which is what "exact" means. */
+        {
+            uint32_t gf = 0;
+            cft_status st;
+            char *s = chars_write(fj, 0, pool[i], 0, 0, &gf, &st);
+            if (s) {
+                if (gf == 0)
+                    chars_check_exact(fj, pool[i], s, "to_dec exact",
+                                      T_TO_DEC);
+                else {
+                    mismatches++;
+                    if (shown++ < 16)
+                        printf("  FLAGS %s to_dec exact raised 0x%02x\n",
+                               f->name, (unsigned)gf);
+                }
+                chars_check_parse(fj, s, 0);
+                free(s);
+            }
+            s = chars_write(fj, 0, pool[i], 0, 1, &gf, &st);
+            if (s) {
+                chars_check_exact(fj, pool[i], s, "to_hex", T_TO_HEX);
+                chars_check_parse(fj, s, 1);
+                free(s);
+            }
+        }
+    }
+
+    /* -- reading in: sequences this file builds itself --------------- */
+    {
+        static const char *const fixed[] = {
+            "0", "-0", "1", "-1", "0.1", "0.5", "2.5", "1.25",
+            "3.14159265358979323846264338327950288419716939937510",
+            "2.71828182845904523536028747135266249775724709369995",
+            "1e10", "1e-10", "1e100", "1e-100", "9.99999999999999999e2",
+            "123456789012345678901234567890e-15",
+            "0.000000000000000000000000000000000000001",
+            "99999999999999999999999999999999999999", NULL
+        };
+        for (k = 0; fixed[k]; k++)
+            chars_check_parse(fj, fixed[k], 0);
+    }
+    {
+        static const char *const fixedhex[] = {
+            "0x0p+0", "-0x0p+0", "0x1p+0", "-0x1p+0", "0X1P+0",
+            "0x1.8p+1", "0x.8p+1", "0x8.p-3", "0x1.fffffffffffffp+1023",
+            "0xfffffffffffffffffffffffffffffffffp-4",
+            "0x1.23456789abcdefp-100", "-0x1.fedcba9876543p+100", NULL
+        };
+        for (k = 0; fixedhex[k]; k++)
+            chars_check_parse(fj, fixedhex[k], 1);
+    }
+
+    /* Exponents inside MPFR's own range and well outside every
+     * format's, so overflow and underflow are scored by the oracle
+     * rather than assumed. */
+    for (k = 0; k < 8 * nrand; k++) {
+        char s[128];
+        int nd = 1 + (int)(rng() % 34), j, pos = 0;
+        long ex = (long)(rng() % 200001) - 100000;
+        if (rng() & 1)
+            s[pos++] = '-';
+        for (j = 0; j < nd; j++)
+            s[pos++] = (char)('0' + (int)(rng() % 10));
+        snprintf(s + pos, sizeof s - (size_t)pos, "e%ld", ex);
+        chars_check_parse(fj, s, 0);
+    }
+
+    /* Random hexadecimal significands, mostly WIDER than the format
+     * holds - which is the only way a hex sequence can need rounding
+     * at all, and so the only part of 5.12.3 an oracle can arbitrate
+     * beyond "did it read the bits back". */
+    for (k = 0; k < 4 * nrand; k++) {
+        char s[256];
+        int nd = 1 + (int)(rng() % (unsigned)(f->p / 4 + 6)), j, pos = 0;
+        long ex = (long)(rng() % (2u * (unsigned)f->emax + 61)) - f->emax - 30;
+        if (rng() & 1)
+            s[pos++] = '-';
+        s[pos++] = '0';
+        s[pos++] = 'x';
+        for (j = 0; j < nd; j++) {
+            s[pos++] = "0123456789abcdef"[rng() % 16];
+            if (j == 0 && (rng() & 1))
+                s[pos++] = '.';
+        }
+        snprintf(s + pos, sizeof s - (size_t)pos, "p%+ld", ex);
+        chars_check_parse(fj, s, 1);
+    }
+
+    /* The exact halfway sequences: the tie the attribute alone
+     * decides, built here from GMP and owing the library nothing. */
+    for (i = 0; i < pn; i++) {
+        char mid[4096];
+        if (chars_midpoint(f, pool[i], mid, sizeof mid))
+            chars_check_parse(fj, mid, 0);
+    }
+}
+
 /* ---- the transcendentals ------------------------------------------- *
  *
  * The nine functions of ABI 0.3 and the eleven of ABI 0.4 against
@@ -1792,7 +2789,9 @@ typedef enum {
     TF_SINPI, TF_COSPI, TF_TANPI, TF_ASIN, TF_ACOS, TF_ATAN, TF_ATAN2,
     TF_ASINPI, TF_ACOSPI, TF_ATANPI, TF_ATAN2PI,
     TF_SIN, TF_COS, TF_TAN, TF_SINH, TF_COSH, TF_TANH, TF_ASINH,
-    TF_ACOSH, TF_ATANH, TF_COUNT
+    TF_ACOSH, TF_ATANH,
+    TF_EXP2M1, TF_EXP10, TF_EXP10M1, TF_LOG2P1, TF_LOG10P1, TF_RSQRT,
+    TF_POWN, TF_POWR, TF_COMPOUND, TF_ROOTN, TF_COUNT
 } tfn;
 
 static const char *const TFN_NAME[TF_COUNT] = {
@@ -1800,16 +2799,29 @@ static const char *const TFN_NAME[TF_COUNT] = {
     "sinpi", "cospi", "tanpi", "asin", "acos", "atan", "atan2",
     "asinpi", "acospi", "atanpi", "atan2pi",
     "sin", "cos", "tan", "sinh", "cosh", "tanh", "asinh", "acosh",
-    "atanh"
+    "atanh",
+    "exp2m1", "exp10", "exp10m1", "log2p1", "log10p1", "rsqrt",
+    "pown", "powr", "compound", "rootn"
 };
 static const int TFN_NARGS[TF_COUNT] = {
     1, 1, 1, 1, 1, 1, 1, 2, 2,
     1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2,
-    1, 1, 1, 1, 1, 1, 1, 1, 1
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 2, 1, 1
+};
+/* Which of them read an INTEGER operand beside the floating one. MPFR
+ * spells that operand `long`, which is 32 bits on this host, so the
+ * campaign's exponents stop at the long range; the whole int64 range is
+ * covered against the model by host/tests/transcend_check.py. */
+static const int TFN_HASINT[TF_COUNT] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 1, 0, 1, 1
 };
 
 static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
-                   mpfr_rnd_t rnd)
+                   long nn, mpfr_rnd_t rnd)
 {
     switch (fn) {
     case TF_EXP:   return mpfr_exp(r, a, rnd);
@@ -1846,7 +2858,66 @@ static int raw_tfn(mpfr_t r, int fn, const mpfr_t a, const mpfr_t b,
     case TF_TANH:    return mpfr_tanh(r, a, rnd);
     case TF_ASINH:   return mpfr_asinh(r, a, rnd);
     case TF_ACOSH:   return mpfr_acosh(r, a, rnd);
-    default:         return mpfr_atanh(r, a, rnd);
+    case TF_ATANH:   return mpfr_atanh(r, a, rnd);
+    /* Table 9.1's remainder. exp2m1, exp10m1, log2p1, log10p1, powr,
+     * compound_si and rootn_si are MPFR 4.2.0 functions and this host
+     * carries 4.2.2; the version is asserted at the top of this file so
+     * that an older one fails to BUILD rather than quietly comparing
+     * against something composed. Composing exp10m1 out of
+     * exp10(x) - 1, or rootn out of exp(log(x)/n), would be a
+     * comparison against a rounded intermediate and would decide
+     * nothing about the last bit. */
+    case TF_EXP2M1:   return mpfr_exp2m1(r, a, rnd);
+    case TF_EXP10:    return mpfr_exp10(r, a, rnd);
+    case TF_EXP10M1:  return mpfr_exp10m1(r, a, rnd);
+    case TF_LOG2P1:   return mpfr_log2p1(r, a, rnd);
+    case TF_LOG10P1:  return mpfr_log10p1(r, a, rnd);
+    case TF_RSQRT:    return mpfr_rec_sqrt(r, a, rnd);
+    case TF_POWN:     return mpfr_pow_si(r, a, nn, rnd);
+    case TF_POWR:     return mpfr_powr(r, a, b, rnd);
+    case TF_COMPOUND:
+        /* THE ONE PLACE THIS CAMPAIGN DOES NOT TRUST MPFR.
+         *
+         * mpfr_compound_si is off by one unit in the last place for a
+         * NEGATIVE n whenever 1 + x is not representable at the working
+         * precision - a double rounding of the intermediate sum.
+         * Measured on 4.2.2, this host, 2026-09-03, at 24 bits:
+         *
+         *   compound(1 + 2^-23, -1) toward zero returns 0x7.fffffp-4
+         *   where (2 + 2^-23)^-1 computed at 400 bits and rounded once
+         *   is 0x7.fffff8p-4;
+         *   compound(3 - 2^-22, -1) to nearest returns 0x4p-4 where the
+         *   same reference gives 0x4.000008p-4.
+         *
+         * n = -2 and n = -4 do it too; a NON-NEGATIVE n does not, and
+         * mpfr_pow_si and mpfr_rootn_si are sound at every n this
+         * campaign uses (all three checked by the same 400-bit
+         * reference). So n >= 0 goes through MPFR's own compound, which
+         * is the comparison worth having, and n < 0 is built from the
+         * EXACTLY formed 1 + x and mpfr_pow_si - still MPFR arithmetic,
+         * still one rounding, and not the entry point with the defect.
+         *
+         * The library's answers were confirmed independently three
+         * ways before this workaround was written: the golden model's
+         * rigorous mpmath enclosure, the C's own tracked error bound,
+         * and python/tests/test_transcend.py's brute-force enclosure at
+         * four times the escalation cap all agree with the 400-bit
+         * reference and not with mpfr_compound_si. */
+        if (nn >= 0 || !mpfr_regular_p(a) || mpfr_cmp_si(a, -1) <= 0)
+            return mpfr_compound_si(r, a, nn, rnd);   /* the domain rows */
+        {
+            mpfr_t s;
+            mpfr_exp_t e = mpfr_get_exp(a);
+            mpfr_prec_t need = (mpfr_prec_t)((e < 0 ? -e : e) +
+                                             (long)mpfr_get_prec(a) + 8);
+            int t;
+            mpfr_init2(s, need);
+            mpfr_add_ui(s, a, 1, MPFR_RNDN);     /* exact at `need` bits */
+            t = mpfr_pow_si(r, s, nn, rnd);
+            mpfr_clear(s);
+            return t;
+        }
+    default:          return mpfr_rootn_si(r, a, nn, rnd);
     }
 }
 
@@ -1883,7 +2954,7 @@ static void enc_integrality(const fdesc *f, const uint8_t *b, int *is_int,
 
 /* The contract's invalid/divideByZero for one case, from classes. */
 static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
-                                const uint8_t *bb)
+                                const uint8_t *bb, long nn)
 {
     cls ca, cb;
     uint32_t fl = 0;
@@ -1899,7 +2970,7 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
         else if (!ca.is_nan && ca.sign)
             fl |= CFT_FLAG_INVALID;
         break;
-    case TF_LOG1P:
+    case TF_LOG1P: case TF_LOG2P1: case TF_LOG10P1:
         if (!ca.is_nan && ca.sign) {
             mpfr_t v;
             mpfr_init2(v, f->p);
@@ -1909,6 +2980,80 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
             else if (mpfr_cmp_si(v, -1) < 0)
                 fl |= CFT_FLAG_INVALID;
             mpfr_clear(v);
+        }
+        break;
+    case TF_RSQRT:
+        /* the domain is [0, +inf]: a zero is the POLE (divideByZero,
+         * 7.3's rule for an exact infinity from a finite operand) and
+         * anything below it is out of domain */
+        if (ca.is_nan)
+            break;
+        if (ca.is_zero)
+            fl |= CFT_FLAG_DIVBYZERO;
+        else if (ca.sign)
+            fl |= CFT_FLAG_INVALID;
+        break;
+    case TF_POWN:
+        if (nn == 0 || ca.is_nan)
+            break;                       /* pown(x, 0) is 1; NaNs pass */
+        if (ca.is_zero && nn < 0)
+            fl |= CFT_FLAG_DIVBYZERO;
+        break;
+    case TF_POWR:
+        if (ca.is_nan || cb.is_nan)
+            break;                       /* decided in t_oracle */
+        if (ca.sign && !ca.is_zero) {
+            fl |= CFT_FLAG_INVALID;      /* x < 0, for every y */
+        } else if (cb.is_zero && (ca.is_zero || ca.is_inf)) {
+            fl |= CFT_FLAG_INVALID;      /* powr(+-0,+-0), powr(inf,+-0) */
+        } else if (ca.is_zero && cb.sign && !cb.is_inf) {
+            fl |= CFT_FLAG_DIVBYZERO;    /* the pole, not the limit */
+        } else if (cb.is_inf && !ca.is_zero && !ca.is_inf) {
+            mpfr_t v;
+            mpfr_init2(v, f->p);
+            enc_to_mpfr(f, ba, v);
+            if (mpfr_cmp_ui(v, 1) == 0)
+                fl |= CFT_FLAG_INVALID;  /* powr(+1, +-inf) */
+            mpfr_clear(v);
+        }
+        break;
+    case TF_COMPOUND: {
+        /* the domain is [-1, +inf]: below -1 is invalid EVEN at n = 0,
+         * which is what "compound(x, 0) is 1 for x >= -1 or quiet NaN"
+         * makes of the row rather than states */
+        mpfr_t v;
+        int c;
+        if (ca.is_nan)
+            break;
+        if (ca.is_inf) {
+            if (ca.sign)
+                fl |= CFT_FLAG_INVALID;
+            break;
+        }
+        mpfr_init2(v, f->p);
+        enc_to_mpfr(f, ba, v);
+        c = mpfr_cmp_si(v, -1);
+        if (c < 0)
+            fl |= CFT_FLAG_INVALID;
+        else if (c == 0 && nn < 0)
+            fl |= CFT_FLAG_DIVBYZERO;
+        mpfr_clear(v);
+        break;
+    }
+    case TF_ROOTN:
+        /* n = 0 is outside the domain for EVERY x, a quiet NaN
+         * included; a negative operand with an even n likewise */
+        if (nn == 0) {
+            fl |= CFT_FLAG_INVALID;
+            break;
+        }
+        if (ca.is_nan)
+            break;
+        if (ca.is_zero) {
+            if (nn < 0)
+                fl |= CFT_FLAG_DIVBYZERO;
+        } else if (ca.sign && (nn % 2 == 0)) {
+            fl |= CFT_FLAG_INVALID;
         }
         break;
     case TF_SINPI: case TF_COSPI:
@@ -2018,14 +3163,15 @@ static uint32_t tfn_class_flags(const fdesc *f, int fn, const uint8_t *ba,
 
 /* One transcendental case through MPFR, delivered into the format. */
 static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
-                     const uint8_t *bb, mpfr_t out, uint32_t *flags)
+                     const uint8_t *bb, long nn, mpfr_t out,
+                     uint32_t *flags)
 {
     mpfr_t a, b, runb, r, y;
     cls ca, cb;
     int tunb = 0, inexact, is_rmm = (MODES[mi].cr == CFT_RMM);
     int ovf = 0, unf = 0;
     mpfr_rnd_t rnd = MODES[mi].mr;
-    uint32_t fl = tfn_class_flags(f, fn, ba, bb);
+    uint32_t fl = tfn_class_flags(f, fn, ba, bb, nn);
     mpfr_exp_t save_emin = mpfr_get_emin(), save_emax = mpfr_get_emax();
 
     classify(f, ba, &ca);
@@ -2046,6 +3192,34 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
         goto done;
     }
 
+    /* Two rows where MPFR 4.2.2 and 754-2019 differ, given here the same
+     * one-sided help this harness already gives MPFR for signaling NaNs.
+     * Both were MEASURED on this host before they were written down.
+     *
+     *   rSqrt(-0). 9.2.1 says "rSqrt(+-0) is +-infinity"; mpfr_rec_sqrt
+     *   returns +infinity for both zeros.
+     *
+     *   powr's NaN corner. 9.2.1 says "powr(+1, y) is 1 for FINITE y"
+     *   and lists "powr(x, qNaN) is qNaN for x >= 0" separately, so
+     *   powr(1, qNaN) is a quiet NaN; mpfr_powr returns 1. The whole
+     *   corner is decided here so the reading is in one place: a NaN in
+     *   either operand gives a quiet NaN, and a negative base gives one
+     *   with invalid, whichever the other operand is. */
+    if (fn == TF_RSQRT && ca.is_zero && ca.sign) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set_inf(out, -1);
+        *flags = CFT_FLAG_DIVBYZERO;
+        goto done;
+    }
+    if (fn == TF_POWR && (ca.is_nan || cb.is_nan ||
+                          (ca.sign && !ca.is_zero))) {
+        mpfr_set_prec(out, f->p);
+        mpfr_set_nan(out);
+        *flags = (!ca.is_nan && ca.sign && !ca.is_zero)
+                 ? CFT_FLAG_INVALID : 0;
+        goto done;
+    }
+
     /* The unbounded-range evaluation: MPFR's widest exponents, so that
      * an overflow HERE means the true value is past anything the
      * format could hold. */
@@ -2053,7 +3227,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
     mpfr_set_emax(mpfr_get_emax_max());
     mpfr_clear_flags();
     if (is_rmm) {
-        int t1 = raw_tfn(y, fn, a, b, MPFR_RNDZ);
+        int t1 = raw_tfn(y, fn, a, b, nn, MPFR_RNDZ);
         ovf = mpfr_overflow_p();
         unf = mpfr_underflow_p();
         if (!mpfr_number_p(y) || mpfr_zero_p(y)) {
@@ -2064,7 +3238,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             tunb = !mpfr_equal_p(runb, y) || t1;
         }
     } else {
-        tunb = raw_tfn(runb, fn, a, b, rnd);
+        tunb = raw_tfn(runb, fn, a, b, nn, rnd);
         ovf = mpfr_overflow_p();
         unf = mpfr_underflow_p();
     }
@@ -2148,7 +3322,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             int t2;
             mpfr_set_emin(f->emin - f->p + 2);
             mpfr_set_emax(f->emax + 1);
-            t2 = raw_tfn(r, fn, a, b, rnd);
+            t2 = raw_tfn(r, fn, a, b, nn, rnd);
             t2 = mpfr_check_range(r, t2, rnd);
             t2 = mpfr_subnormalize(r, t2, rnd);
             mpfr_set_emin(save_emin);
@@ -2163,7 +3337,7 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             long grid = f->emin - f->man_w;
             mpz_t n;
             mpfr_t scaled, frac, half;
-            t1 = raw_tfn(y, fn, a, b, MPFR_RNDZ);
+            t1 = raw_tfn(y, fn, a, b, nn, MPFR_RNDZ);
             sign = mpfr_sgn(y) < 0;
             mpz_init(n);
             mpfr_init2(scaled, f->p + 4);
@@ -2197,10 +3371,11 @@ done:
 }
 
 static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
-                        const uint8_t *a, const uint8_t *b, uint8_t *d,
-                        cft_status *st)
+                        const uint8_t *a, const uint8_t *b, long nn,
+                        uint8_t *d, cft_status *st)
 {
     uint32_t fl = 0;
+    int64_t n64 = (int64_t)nn;
     switch (fn) {
     case TF_EXP:   *st = cft_exp(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_EXPM1: *st = cft_expm1(dev, f->fmt, rnd, a, d, 1, &fl); break;
@@ -2232,7 +3407,29 @@ static uint32_t tfn_lib(const fdesc *f, int fn, cft_round rnd,
     case TF_TANH:   *st = cft_tanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_ASINH:  *st = cft_asinh(dev, f->fmt, rnd, a, d, 1, &fl); break;
     case TF_ACOSH:  *st = cft_acosh(dev, f->fmt, rnd, a, d, 1, &fl); break;
-    default:        *st = cft_atanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_ATANH:  *st = cft_atanh(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP2M1: *st = cft_exp2m1(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP10:  *st = cft_exp10(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_EXP10M1:
+        *st = cft_exp10m1(dev, f->fmt, rnd, a, d, 1, &fl);
+        break;
+    case TF_LOG2P1: *st = cft_log2p1(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_LOG10P1:
+        *st = cft_log10p1(dev, f->fmt, rnd, a, d, 1, &fl);
+        break;
+    case TF_RSQRT:  *st = cft_rsqrt(dev, f->fmt, rnd, a, d, 1, &fl); break;
+    case TF_POWN:
+        *st = cft_pown(dev, f->fmt, rnd, a, &n64, d, 1, &fl);
+        break;
+    case TF_POWR:
+        *st = cft_powr(dev, f->fmt, rnd, a, b, d, 1, &fl);
+        break;
+    case TF_COMPOUND:
+        *st = cft_compound(dev, f->fmt, rnd, a, &n64, d, 1, &fl);
+        break;
+    default:
+        *st = cft_rootn(dev, f->fmt, rnd, a, &n64, d, 1, &fl);
+        break;
     }
     return fl;
 }
@@ -2580,6 +3777,19 @@ static int build_p3pool(const fdesc *f, uint8_t pool[][32],
     return n;
 }
 
+/* The integer exponents pown, compound and rootn are tried against.
+ * Both signs, both parities, a value past p+1 (where the exact-case
+ * test gives up), and the ends of the LONG range - which is 32 bits on
+ * this host, and is MPFR's own type for these operands. The whole int64
+ * range is covered against the model in host/tests/transcend_check.py;
+ * what is checked here is agreement with MPFR over what MPFR can be
+ * asked. */
+static const long TFN_NS[] = {
+    0, 1, -1, 2, -2, 3, -3, 5, -5, 17, -17, 120, -120,
+    2147483647L, -2147483647L
+};
+#define TFN_NS_COUNT ((int)(sizeof TFN_NS / sizeof TFN_NS[0]))
+
 static void check_transcend(int fj, uint8_t pool[][32], int pn,
                             uint8_t tpool[][32], int tn,
                             uint8_t hpool[][32], int hn, int first,
@@ -2596,29 +3806,48 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
          * cross product of two hundred operands times five attributes
          * times two functions is not a sharper test, only a longer
          * one. */
-        uint8_t (*P)[32] = fn >= TF_SIN ? hpool
+        uint8_t (*P)[32] = fn >= TF_EXP2M1 ? tpool
+                         : fn >= TF_SIN ? hpool
                          : fn >= TF_SINPI ? tpool : pool;
-        int np = fn >= TF_SIN ? hn : fn >= TF_SINPI ? tn : pn;
+        int np = fn >= TF_EXP2M1 ? tn
+               : fn >= TF_SIN ? hn : fn >= TF_SINPI ? tn : pn;
+        int hasn = TFN_HASINT[fn];
         int jstep = nargs == 2 ? (np / 8 > 0 ? np / 8 : 1) : 1;
+        int nstep = hasn ? 3 : 1;
         for (mi = 0; mi < 5; mi++) {
             for (i = 0; i < np; i++) {
                 int jmax = nargs == 2 ? np : 1;
-                for (j = (nargs == 2 ? i % jstep : 0); j < jmax; j += jstep) {
-                    const uint8_t *a = P[i];
-                    const uint8_t *b = P[j];
-                    uint8_t d[32];
-                    uint32_t gf, wf = 0;
-                    cft_status st = CFT_OK;
-                    mpfr_t want;
+                int k;
+                /* The integer operand is strided the same way a second
+                 * encoding is: every n against every operand times five
+                 * attributes would be a longer campaign rather than a
+                 * sharper one, and the rows that turn on n's sign and
+                 * parity are all inside the first few. */
+                for (k = hasn ? i % nstep : 0;
+                     k < (hasn ? TFN_NS_COUNT : 1); k += nstep) {
+                    long nn = hasn ? TFN_NS[k] : 0;
+                    for (j = (nargs == 2 ? i % jstep : 0); j < jmax;
+                         j += jstep) {
+                        const uint8_t *a = P[i];
+                        const uint8_t *b = P[j];
+                        uint8_t d[32];
+                        uint32_t gf, wf = 0;
+                        cft_status st = CFT_OK;
+                        char extra[48];
+                        mpfr_t want;
 
-                    mpfr_init2(want, f->p);
-                    t_oracle(f, fn, mi, a, b, want, &wf);
-                    memset(d, 0, sizeof d);
-                    gf = tfn_lib(f, fn, MODES[mi].cr, a, b, d, &st);
-                    c5_judge(T_EXP + fn, fj, TFN_NAME[fn], MODES[mi].name,
-                             f, a, nargs == 2 ? b : NULL, f, d, want, gf, wf,
-                             st, NULL);
-                    mpfr_clear(want);
+                        mpfr_init2(want, f->p);
+                        t_oracle(f, fn, mi, a, b, nn, want, &wf);
+                        memset(d, 0, sizeof d);
+                        gf = tfn_lib(f, fn, MODES[mi].cr, a, b, nn, d, &st);
+                        if (hasn)
+                            snprintf(extra, sizeof extra, "n=%ld", nn);
+                        c5_judge(T_EXP + fn, fj, TFN_NAME[fn],
+                                 MODES[mi].name, f, a,
+                                 nargs == 2 ? b : NULL, f, d, want, gf, wf,
+                                 st, hasn ? extra : NULL);
+                        mpfr_clear(want);
+                    }
                 }
             }
         }
@@ -2629,6 +3858,474 @@ static void check_transcend(int fj, uint8_t pool[][32], int pn,
                    "precision so far %llu bits\n", f->name, TFN_NAME[fn],
                    (unsigned long long)(cft_tr_escalations - esc_before),
                    (unsigned long long)cft_tr_max_prec);
+    }
+}
+
+/* ---- the reductions of clause 9.4 ---------------------------------- *
+ *
+ * See the banner at the top of this file for what this can and cannot
+ * settle. In one line: MPFR decides every NODE, and the TREE is
+ * reproduced here rather than judged, because 9.4 leaves the
+ * association to the implementation and there is nothing to appeal to.
+ */
+
+/* An MPFR value already ON the format's grid -> its encoding. The
+ * nodes feed each other - oracle() consumes encodings and produces an
+ * mpfr value - so the replay needs the inverse of enc_to_mpfr.
+ *
+ * Not mpfr_to_enc() above, which takes normal values only and refuses
+ * everything else: a reduction's nodes produce infinities, signed
+ * zeros, subnormals and NaNs as a matter of course, and those classes
+ * are most of what its edges are about.
+ *
+ * It checks its own work, because a value this function could not
+ * represent exactly would silently corrupt every node above it and
+ * the campaign would report a library bug. */
+static void rd_to_enc(const fdesc *f, mpfr_srcptr x, uint8_t *out)
+{
+    memset(out, 0, f->esz);
+    if (mpfr_nan_p(x)) {
+        /* the canonical quiet NaN, which is the only NaN this contract
+         * emits and the only one MPFR can be said to have returned */
+        set_field(out, f->man_w, f->exp_w, (1ul << f->exp_w) - 1);
+        out[(f->man_w - 1) / 8] |= (uint8_t)(1u << ((f->man_w - 1) % 8));
+        return;
+    }
+    if (mpfr_signbit(x))
+        out[f->esz - 1] |= 0x80;
+    if (mpfr_inf_p(x)) {
+        set_field(out, f->man_w, f->exp_w, (1ul << f->exp_w) - 1);
+        return;
+    }
+    if (mpfr_zero_p(x))
+        return;                          /* the sign is already in */
+    {
+        mpz_t z;
+        mpfr_exp_t e;
+        long ee, ebiased;
+        size_t bits, i;
+        uint8_t tmp[32];
+
+        mpz_init(z);
+        e = mpfr_get_z_2exp(z, x);       /* x = z * 2^e, exactly */
+        mpz_abs(z, z);
+        bits = mpz_sizeinbase(z, 2);
+        ee = (long)e + (long)bits - 1;   /* IEEE-style exponent */
+        if (ee >= f->emin) {
+            long sh = (long)f->p - (long)bits;
+            if (sh > 0)
+                mpz_mul_2exp(z, z, (unsigned long)sh);
+            else if (sh < 0)
+                mpz_fdiv_q_2exp(z, z, (unsigned long)(-sh));
+            mpz_clrbit(z, f->man_w);     /* the hidden bit */
+            ebiased = ee + f->emax;
+        } else {
+            long sh = (long)e - (f->emin - f->man_w);
+            if (sh > 0)
+                mpz_mul_2exp(z, z, (unsigned long)sh);
+            else if (sh < 0)
+                mpz_fdiv_q_2exp(z, z, (unsigned long)(-sh));
+            ebiased = 0;
+        }
+        memset(tmp, 0, sizeof tmp);
+        mpz_export(tmp, NULL, -1, 1, 0, 0, z);
+        for (i = 0; i < f->esz; i++)
+            out[i] |= tmp[i];
+        if (ebiased)
+            set_field(out, f->man_w, f->exp_w, (unsigned long)ebiased);
+        mpz_clear(z);
+    }
+    if (!agree(f, out, x)) {
+        char h[70];
+        hexdump(out, f->esz, h);
+        printf("HARNESS BUG: rd_to_enc lost a value at %s -> 0x%s\n",
+               f->name, h);
+        mismatches++;
+    }
+}
+
+/* The contract's split: the largest power of two strictly inside the
+ * range, so the LEFT child is a perfect subtree. REPRODUCED, not
+ * arbitrated. */
+static size_t rd_split(size_t lo, size_t hi)
+{
+    size_t m = hi - lo, k = 1;
+    while (k < m)
+        k <<= 1;
+    return lo + (k >> 1);
+}
+
+/* enc (finite, non-zero) -> a significand in +-[1, 2) and the exact
+ * scale, the scaled products' leaf and node rule. Exact bit surgery:
+ * there is nothing here to round, so there is nothing here for MPFR
+ * to arbitrate, and saying so is the point. */
+static void rd_norm_split(const fdesc *f, const uint8_t *x, uint8_t *sig,
+                          long long *k)
+{
+    mpz_t enc, man;
+    unsigned long biased;
+    long e;
+    size_t bits, i;
+    uint8_t tmp[32];
+    int sign = (x[f->esz - 1] >> 7) & 1;
+
+    mpz_init(enc);
+    mpz_init(man);
+    mpz_import(enc, f->esz, -1, 1, 0, 0, x);
+    mpz_fdiv_r_2exp(man, enc, f->man_w);
+    mpz_fdiv_q_2exp(enc, enc, f->man_w);
+    biased = mpz_get_ui(enc) & ((1ul << f->exp_w) - 1);
+    if (biased) {
+        mpz_setbit(man, f->man_w);
+        e = (long)biased - f->emax - f->man_w;
+    } else {
+        e = f->emin - f->man_w;
+    }
+    bits = mpz_sizeinbase(man, 2);
+    *k = (long long)e + (long long)bits - 1;
+    mpz_mul_2exp(man, man, (unsigned long)(f->man_w - (bits - 1)));
+    mpz_clrbit(man, f->man_w);
+    memset(sig, 0, f->esz);
+    memset(tmp, 0, sizeof tmp);
+    mpz_export(tmp, NULL, -1, 1, 0, 0, man);
+    for (i = 0; i < f->esz; i++)
+        sig[i] |= tmp[i];
+    set_field(sig, f->man_w, f->exp_w, (unsigned long)f->emax);
+    if (sign)
+        sig[f->esz - 1] |= 0x80;
+    mpz_clear(enc);
+    mpz_clear(man);
+}
+
+/* The sum tree over already-transformed leaves, MPFR at every node. */
+static void rd_tree(const fdesc *f, int mi, const uint8_t (*leaf)[32],
+                    size_t lo, size_t hi, uint8_t *out, uint32_t *flags)
+{
+    uint8_t l[32], r[32], dummy[32];
+    uint32_t lf = 0, rf = 0, nf = 0;
+    mpfr_t v;
+    size_t mid;
+
+    *flags = 0;
+    if (hi - lo == 1) {
+        memcpy(out, leaf[lo], f->esz);
+        return;
+    }
+    mid = rd_split(lo, hi);
+    rd_tree(f, mi, leaf, lo, mid, l, &lf);
+    rd_tree(f, mi, leaf, mid, hi, r, &rf);
+    memset(dummy, 0, sizeof dummy);
+    mpfr_init2(v, f->p);
+    /* ADD reads a and c - b is steered to 1.0 - which oracle() and
+     * raw_op() already honour. */
+    oracle(f, OP_ADD, mi, l, dummy, r, v, &nf);
+    rd_to_enc(f, v, out);
+    mpfr_clear(v);
+    reduce_nodes++;
+    *flags = lf | rf | nf;
+}
+
+/* The scaled product tree: MPFR decides the multiply, the extraction
+ * is exact. */
+static void rd_sp_tree(const fdesc *f, int mi, const uint8_t (*fac)[32],
+                       size_t lo, size_t hi, uint8_t *sig,
+                       long long *scale, uint32_t *flags)
+{
+    uint8_t l[32], r[32], prod[32], dummy[32];
+    uint32_t lf = 0, rf = 0, nf = 0;
+    long long lk = 0, rk = 0, k = 0;
+    mpfr_t v;
+    size_t mid;
+
+    *flags = 0;
+    if (hi - lo == 1) {
+        rd_norm_split(f, fac[lo], sig, scale);
+        return;
+    }
+    mid = rd_split(lo, hi);
+    rd_sp_tree(f, mi, fac, lo, mid, l, &lk, &lf);
+    rd_sp_tree(f, mi, fac, mid, hi, r, &rk, &rf);
+    memset(dummy, 0, sizeof dummy);
+    mpfr_init2(v, f->p);
+    oracle(f, OP_MUL, mi, l, r, dummy, v, &nf);
+    rd_to_enc(f, v, prod);
+    mpfr_clear(v);
+    rd_norm_split(f, prod, sig, &k);
+    *scale = lk + rk + k;
+    reduce_nodes++;
+    *flags = lf | rf | nf;
+}
+
+/* The seven, by the order they are tallied in. */
+enum { RF_SUM, RF_DOT, RF_SUMSQ, RF_SUMABS,
+       RF_PROD, RF_PROD_SUM, RF_PROD_DIFF, RF_COUNT };
+static const char *const RFN_NAME[RF_COUNT] = {
+    "sum", "dot", "sumsq", "sumabs",
+    "scaled_prod", "scaled_prod_sum", "scaled_prod_diff"
+};
+static const int RFN_BINARY[RF_COUNT] = { 0, 1, 0, 0, 0, 1, 1 };
+
+/* 9.4's special-value tables, replayed. These are the CONTRACT's rows
+ * and MPFR has no opinion on them; what MPFR settles is the
+ * arithmetic underneath. */
+static void rd_classes(const fdesc *f, const uint8_t (*v)[32], size_t n,
+                       int *inf, int *zero, int *nan, int *snan, int *sign)
+{
+    size_t i;
+    *inf = *zero = *nan = *snan = *sign = 0;
+    for (i = 0; i < n; i++) {
+        cls c;
+        classify(f, v[i], &c);
+        *sign ^= c.sign;
+        if (c.is_nan) {
+            *nan = 1;
+            *snan |= c.is_snan;
+        } else if (c.is_inf) {
+            *inf = 1;
+        } else if (c.is_zero) {
+            *zero = 1;
+        }
+    }
+}
+
+#define RD_MAXN 65
+
+static void rd_oracle(const fdesc *f, int fn, int mi,
+                      const uint8_t (*a)[32], const uint8_t (*b)[32],
+                      size_t n, mpfr_t want, long long *want_sf,
+                      uint32_t *wf)
+{
+    uint8_t leaf[RD_MAXN][32], out[32], dummy[32];
+    uint32_t fl = 0, lf = 0;
+    int inf = 0, zero = 0, nan = 0, snan = 0, sign = 0;
+    size_t i;
+
+    *want_sf = 0;
+    memset(dummy, 0, sizeof dummy);
+
+    if (n == 0) {
+        if (fn >= RF_PROD) {
+            mpfr_set_ui(want, 1, MPFR_RNDN);      /* 9.4: pr = 1, sf = +0 */
+        } else {
+            mpfr_set_zero(want, 1);               /* 9.4: +0 */
+        }
+        *wf = 0;
+        return;
+    }
+
+    /* the leaves */
+    for (i = 0; i < n; i++) {
+        mpfr_t v;
+        switch (fn) {
+        case RF_SUM:
+            memcpy(leaf[i], a[i], f->esz);
+            break;
+        case RF_SUMABS:
+            /* abs: 5.5.1 says it touches the sign bit and signals
+             * nothing, so there is no arithmetic here to arbitrate */
+            memcpy(leaf[i], a[i], f->esz);
+            leaf[i][f->esz - 1] &= 0x7f;
+            break;
+        case RF_DOT:
+        case RF_SUMSQ:
+            mpfr_init2(v, f->p);
+            oracle(f, OP_MUL, mi, a[i], fn == RF_DOT ? b[i] : a[i], dummy,
+                   v, &lf);
+            rd_to_enc(f, v, leaf[i]);
+            mpfr_clear(v);
+            fl |= lf;
+            reduce_nodes++;
+            break;
+        case RF_PROD:
+            memcpy(leaf[i], a[i], f->esz);
+            break;
+        default:
+            mpfr_init2(v, f->p);
+            oracle(f, fn == RF_PROD_SUM ? OP_ADD : OP_SUB, mi, a[i], dummy,
+                   b[i], v, &lf);
+            rd_to_enc(f, v, leaf[i]);
+            mpfr_clear(v);
+            fl |= lf;
+            reduce_nodes++;
+            break;
+        }
+    }
+
+    if (fn < RF_PROD) {
+        uint32_t tf = 0;
+        /* 9.4 puts an infinity ahead of a NaN for sumSquare and sumAbs,
+         * and only for those two. The rows are stated over the OPERAND
+         * ELEMENTS, not over the leaves: an element whose square
+         * overflows to an infinity is not "an operand element that is
+         * an infinity", and squaring a signalling NaN produces a quiet
+         * one, so classifying the leaves gets this wrong in both
+         * directions. It did, until the campaign said so. */
+        rd_classes(f, a, n, &inf, &zero, &nan, &snan, &sign);
+        if ((fn == RF_SUMSQ || fn == RF_SUMABS) && inf && nan) {
+            mpfr_set_inf(want, 1);
+            *wf = snan ? CFT_FLAG_INVALID : 0u;
+            return;
+        }
+        rd_tree(f, mi, (const uint8_t (*)[32])leaf, 0, n, out, &tf);
+        enc_to_mpfr(f, out, want);
+        *wf = fl | tf;
+        return;
+    }
+
+    /* The scaled products' rows, in 9.4's order, over the FACTORS -
+     * which for scaledProdSum and scaledProdDiff are the rounded sums
+     * and differences, and for scaledProd are the elements. */
+    rd_classes(f, (const uint8_t (*)[32])leaf, n, &inf, &zero, &nan, &snan,
+               &sign);
+    if (nan) {
+        mpfr_set_nan(want);
+        *wf = fl | (snan ? CFT_FLAG_INVALID : 0u);
+        return;
+    }
+    if (inf && zero) {
+        mpfr_set_nan(want);
+        *wf = fl | CFT_FLAG_INVALID;
+        return;
+    }
+    if (inf) {
+        mpfr_set_inf(want, sign ? -1 : 1);
+        *wf = fl;
+        return;
+    }
+    if (zero) {
+        mpfr_set_zero(want, sign ? -1 : 1);
+        *wf = fl;
+        return;
+    }
+    {
+        uint32_t tf = 0;
+        rd_sp_tree(f, mi, (const uint8_t (*)[32])leaf, 0, n, out, want_sf,
+                   &tf);
+        enc_to_mpfr(f, out, want);
+        *wf = fl | tf;
+    }
+}
+
+static cft_status rd_lib(const fdesc *f, int fn, cft_round rnd,
+                         const uint8_t *a, const uint8_t *b, size_t n,
+                         uint8_t *d, long long *sf, uint32_t *flags)
+{
+    int64_t scale = 0;
+    cft_status st;
+    *flags = 0;
+    switch (fn) {
+    case RF_SUM:
+        st = cft_reduce(dev, CFT_SUM, f->fmt, rnd, a, NULL, d, n, flags,
+                        NULL);
+        break;
+    case RF_DOT:
+        st = cft_reduce(dev, CFT_DOT, f->fmt, rnd, a, b, d, n, flags, NULL);
+        break;
+    case RF_SUMSQ:
+        st = cft_reduce(dev, CFT_SUMSQ, f->fmt, rnd, a, NULL, d, n, flags,
+                        NULL);
+        break;
+    case RF_SUMABS:
+        st = cft_reduce(dev, CFT_SUMABS, f->fmt, rnd, a, NULL, d, n, flags,
+                        NULL);
+        break;
+    case RF_PROD:
+        st = cft_scaled_prod(dev, f->fmt, rnd, n ? a : NULL, d, &scale, n,
+                             flags);
+        break;
+    case RF_PROD_SUM:
+        st = cft_scaled_prod_sum(dev, f->fmt, rnd, n ? a : NULL,
+                                 n ? b : NULL, d, &scale, n, flags);
+        break;
+    default:
+        st = cft_scaled_prod_diff(dev, f->fmt, rnd, n ? a : NULL,
+                                  n ? b : NULL, d, &scale, n, flags);
+        break;
+    }
+    *sf = (long long)scale;
+    return st;
+}
+
+static void check_reduce(int fj, uint8_t pool[][32], int pn, int nvec)
+{
+    static const size_t LENS[] = { 0, 1, 2, 3, 5, 7, 8, 9, 15, 16, 17,
+                                   31, 32, 33, 63, 64, 65 };
+    const fdesc *f = &FMTS[fj];
+    uint8_t va[RD_MAXN][32], vb[RD_MAXN][32];
+    uint8_t flat_a[RD_MAXN * 32], flat_b[RD_MAXN * 32];
+    uint8_t d[32], big[32], tiny[32];
+    int fn, mi, li, v, i;
+    int nl = (int)(sizeof LENS / sizeof LENS[0]);
+
+    /* The two ends of the format, built here rather than taken from
+     * the pool by index. build_pool's ORDER is its own business -
+     * pool[0] is +0 and the tail is random - so a draw that claimed to
+     * alternate the extremes while taking pool[0] and pool[pn-1] would
+     * be describing something it does not do. It did, until this. */
+    memset(big, 0, sizeof big);
+    set_field(big, f->man_w, f->exp_w, (1ul << f->exp_w) - 2);
+    for (i = 0; i < f->man_w; i++)
+        set_field(big, i, 1, 1);                  /* max normal */
+    memset(tiny, 0, sizeof tiny);
+    set_field(tiny, 0, 1, 1);                     /* min subnormal */
+
+    for (fn = 0; fn < RF_COUNT; fn++) {
+        for (mi = 0; mi < 5; mi++) {
+            for (li = 0; li < nl; li++) {
+                size_t n = LENS[li];
+                for (v = 0; v < nvec; v++) {
+                    mpfr_t want;
+                    long long want_sf = 0, got_sf = 0;
+                    uint32_t gf = 0, wf = 0;
+                    cft_status st;
+                    char extra[96];
+
+                    /* Vectors are drawn from the pool by a stride that
+                     * changes with the draw, so a run covers the
+                     * specials-heavy pool in different combinations
+                     * rather than the same prefix every time. The
+                     * fourth draw of every length is the format's two
+                     * EXTREMES alternating - the largest finite value
+                     * and the smallest subnormal - which is the vector
+                     * a scaled product exists for: its true product
+                     * leaves the format by hundreds of binades in both
+                     * directions and the answer must not. */
+                    for (i = 0; i < (int)n; i++) {
+                        if (v % 4 == 3) {
+                            memcpy(va[i], (i & 1) ? tiny : big, f->esz);
+                            memcpy(vb[i], (i & 1) ? big : tiny, f->esz);
+                        } else {
+                            memcpy(va[i], pool[(i * (v + 1) + li) % pn],
+                                   f->esz);
+                            memcpy(vb[i], pool[(i * (v + 2) + fn + 1) % pn],
+                                   f->esz);
+                        }
+                        memcpy(flat_a + (size_t)i * f->esz, va[i], f->esz);
+                        memcpy(flat_b + (size_t)i * f->esz, vb[i], f->esz);
+                    }
+
+                    mpfr_init2(want, f->p);
+                    rd_oracle(f, fn, mi, (const uint8_t (*)[32])va,
+                              (const uint8_t (*)[32])vb, n, want, &want_sf,
+                              &wf);
+                    memset(d, 0, sizeof d);
+                    st = rd_lib(f, fn, MODES[mi].cr, flat_a,
+                                RFN_BINARY[fn] ? flat_b : NULL, n, d,
+                                &got_sf, &gf);
+                    snprintf(extra, sizeof extra,
+                             "n=%lu scale got %lld want %lld",
+                             (unsigned long)n, got_sf, want_sf);
+                    /* The scale is a second result, so a case that
+                     * agrees on pr and disagrees on sf must fail. */
+                    if (fn >= RF_PROD && got_sf != want_sf && st == CFT_OK)
+                        st = CFT_ERR_INTERNAL;
+                    c5_judge(T_RSUM + fn, fj, RFN_NAME[fn], MODES[mi].name,
+                             f, n ? va[0] : NULL, NULL, f, d, want, gf, wf,
+                             st, extra);
+                    mpfr_clear(want);
+                }
+            }
+        }
     }
 }
 
@@ -2729,7 +4426,9 @@ int main(int argc, char **argv)
         check_logb(fi, pool, pn, 24 * mult);
         check_next(fi, pool, pn);
         check_rem(fi, pool, pn, 48 * mult);
-        printf("%s clause5: %llu cases done (running mismatches: "
+        check_chars(fi, pool, pn, 48 * mult);
+        check_augmented(fi, pool, pn);
+        printf("%s clause5+9.5: %llu cases done (running mismatches: "
                "%llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
                (unsigned long long)mismatches,
@@ -2764,10 +4463,38 @@ int main(int argc, char **argv)
         fflush(stdout);
         before = cases;
         check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_SIN,
-                        TF_COUNT);
+                        TF_EXP2M1);
         printf("%s radian+hyperbolic: %llu cases done (running "
                "mismatches: %llu value, %llu flag)\n", f->name,
                (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+        before = cases;
+        check_transcend(fi, tpool, pn, gpool, gn, hpool, hn, TF_EXP2M1,
+                        TF_COUNT);
+        printf("%s table91: %llu cases done (running mismatches: "
+               "%llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)mismatches,
+               (unsigned long long)flag_mismatches);
+        fflush(stdout);
+    }
+
+    /* The seven reductions. Their pools are the arithmetic phase's -
+     * the specials are exactly what a reduction's edges turn on - and
+     * the campaign reports NODES as well as cases, because a case here
+     * is a whole vector and the node count is what MPFR actually
+     * arbitrated. */
+    for (fi = 0; fi < 4; fi++) {
+        const fdesc *f = &FMTS[fi];
+        int pn = build_pool(f, pool, randoms);
+        uint64_t before = cases, nodes_before = reduce_nodes;
+        check_reduce(fi, pool, pn, 4);
+        printf("%s reduce: %llu vectors done, %llu nodes arbitrated "
+               "(running mismatches: %llu value, %llu flag)\n", f->name,
+               (unsigned long long)(cases - before),
+               (unsigned long long)(reduce_nodes - nodes_before),
                (unsigned long long)mismatches,
                (unsigned long long)flag_mismatches);
         fflush(stdout);
@@ -2819,6 +4546,12 @@ int main(int argc, char **argv)
            (unsigned long long)cft_tr_max_window,
            (unsigned long long)cft_tr_max_cancel,
            CFT_TR_PH_WINDOW_MAX);
+
+    printf("reductions: %llu tree nodes arbitrated by MPFR (the SHAPE of "
+           "the tree\n  is this contract's choice and is reproduced by the "
+           "harness, not judged\n  by it - 9.4 lets an implementation "
+           "associate in any order)\n",
+           (unsigned long long)reduce_nodes);
 
     printf("TOTAL %llu cases, %llu value mismatches, %llu flag "
            "mismatches\n", (unsigned long long)cases,

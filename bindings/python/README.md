@@ -190,3 +190,28 @@ same answer rather than nearly the same one, and what makes gmpy2's
 `exp` at a matching IEEE context return the same bits. The exact cases
 raise nothing at all, which is the observable difference between a
 correctly rounded implementation and an accurate one.
+
+## The augmented arithmetic operations (754-2019 clause 9.5)
+
+`augmented_add`, `augmented_sub` and `augmented_mul` are on `Context`
+and in `batch`, and they are the only calls here that return a **pair**
+- the operation rounded, and the error rounding made:
+
+```python
+r, e = ctx.augmented_add(x, y)      # r + e is x + y, exactly
+rs, es, flags = batch.augmented_mul(ctx, xs, ys)
+```
+
+They take **no rounding attribute, and ignore the context's**: 754-2019
+9.5 fixes the rounding to `roundTiesTowardZero`, which is not one of
+the five attributes and which nothing else in this package can be asked
+for. gmpy2 has no equivalent, because MPFR has no such rounding mode -
+so this is one of the few places where the package adds an operation
+rather than matching one.
+
+The pair is the primitive under compensated summation, exact dot
+products and double-double arithmetic, written by hand everywhere else
+as TwoSum and Dekker splitting and correct only under assumptions a
+compiler is free to break. `r + e` is exact in every case but one: a
+product whose residual falls below the subnormal grid, which 9.5
+delivers rounded with underflow and inexact raised.
