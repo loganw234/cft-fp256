@@ -1480,3 +1480,29 @@ promised to a caller.
    canonical quiet NaN with **invalid** raised, in hardware and in the
    golden model alike, which is what `CFT_ERR_UNSUPPORTED` reports
    against.
+
+## What the workloads asked of the host API (2026-09-04)
+
+The five workload tools (docs/BENCHMARKS.md) and their browser demos
+(docs/DEMOS.md) surfaced three asks of this API, recorded rather than
+built; docs/SEQUENCER.md holds the program-model ones.
+
+1. **A per-element flag output on `cft_run` and `cft_program_run`**,
+   optional, beside the union `flags_out` returns. The Collatz tool
+   certifies exactness per element with a witness FMA because the
+   union cannot say which element raised inexact; the ask would remove
+   the witness and the cost of computing it.
+2. **A scalar (stride-0) operand for `cft_run`.** Every workload that
+   applies one value to a batch - the zoom's reference point against
+   every pixel, the Mersenne carry base, an interval coefficient - fills
+   an array with copies first; in the demos that is 6,144 JavaScript
+   stores per pixel iteration, and in C it is the same loop. A stride-0
+   operand is a contract shape, not a backend detail, so it would need
+   the model and the tile to agree on it first.
+3. **The program API in the wasm surface.** `cftw_*` carries every
+   library operation but not `cft_program_load/run`, so the demos run
+   the tools' loop engines; the program engines were measured native
+   at 1.3 to 2.1 times the loop on the panels that can be programs and
+   nothing on the zoom's pixel phase. Wrapping them is small, and it is
+   a module rebuild, so it waits for the next step that rebuilds the
+   module anyway.

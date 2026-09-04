@@ -1903,6 +1903,43 @@ step - a tile-assisted fast path for the narrowing formatOf direction
 and for the transcendentals is an optimisation, not a contract change,
 and nothing in 0.7 added RTL.
 
+## Workloads for the contract, and their demos (status, 2026-09-04)
+
+The day after the conformance step, five tools were written FOR the
+contract rather than adapted to it, one Opus agent each in parallel
+worktrees from one template (the Collatz explorer), and then ported to
+the browser by a sixth: docs/BENCHMARKS.md has the table, docs/DEMOS.md
+the page. Each is a resumable C tool with a Python oracle, a checkpoint
+that hashes identically across batch sizes and across an interrupt, a
+loop engine and, where the program model allows, a program engine
+that is bit for bit its equal, an fp64 run beside the fp256 one, and a
+negative control. Their results are the benchmark a device will be
+measured with, and what they found is the agenda:
+
+- **What fp256 buys, in numbers**: on ill-conditioned dot products 14
+  of 15 fp64 enclosures straddle zero and none at fp256; a Lucas-Lehmer
+  squaring costs fp64 22-29 times the limb products; the orbit
+  integrator's angular-momentum drift is 2^184 apart between the
+  formats while its energy drift, the method's, is identical; and at a
+  10^-61 zoom centre an fp64 reference orbit is wrong from its first
+  iteration while raising no flag at all - the one line worth
+  remembering, because it is the case a flag cannot catch and only a
+  wider format prevents.
+- **What the program model lacks**, recorded in docs/SEQUENCER.md's
+  last section: register loading beyond three input streams, a
+  per-element flag output, more than sixteen constants, a
+  per-iteration broadcast, a lane shift, an in-program reduction, a
+  callable composed operation. None is built; every tool runs without
+  them.
+- **What the host API lacks**, in docs/HOSTAPI.md's last section: the
+  per-element flags, a stride-0 operand, the program API in the wasm
+  surface.
+- **Next**: a `workloads` stage in the runner's quick budget (the five
+  cross-checks take about a minute together and are make targets
+  today); the program-API wrappers when the module is next rebuilt;
+  and, on card day, the same five commands with `--artifact`, which is
+  the first hardware number this repo will publish.
+
 ## The open core
 
 The core RTL is deliberately vendor-clean and, as of 2026-08-29,

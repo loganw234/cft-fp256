@@ -539,3 +539,65 @@ useful existence proof of the design's claim: a real correctly-rounded
 algorithm - conditionals, encoding surgery and all - fits the
 six-control-code ISA with no additions, in under fifty instructions
 and six constants.
+
+## What the workloads asked of the program model (2026-09-04)
+
+Five workloads were written against the contract after the first
+customer (docs/BENCHMARKS.md, "Workloads designed for the contract"),
+each told to run its inner step as a program where the model could
+hold it and to say precisely what stopped it where it could not. Four
+of the five stopped somewhere, and the asks below are theirs, recorded
+here because this is where the next revision of the model will be
+designed. None is built; all five tools keep a host loop that is bit
+for bit the program's equal, so nothing waits on them.
+
+- **More input streams, or a way to load registers from the deposit
+  buffer** (Collatz, orbits). `cft_program_run` initialises `r0..r2`
+  and the rest start at +0, so a program can be entered only at a state
+  with three non-zero components. The Collatz step fits because its
+  fourth value is an output that starts at +0; a planar Kepler orbit
+  fits at step 0 only, so the whole integration is one call that
+  cannot resume; the outer solar system's thirty values cannot enter a
+  program at all. Sixteen registers already hold the state - only the
+  loading is missing.
+- **An optional per-element flag output** (Collatz). `flags_out` is a
+  union over the call, so a program that spans many iterations and
+  elements cannot say which element left exactness; the Collatz tool
+  proves exactness per element with a witness FMA instead, and its
+  negative control B shows the union check is necessary and not
+  sufficient.
+- **More than sixteen addressable constants** (enclose). Operand
+  fields are four bits and `ka/kb/kc` redirect them at the constant
+  bank, so a program addresses sixteen constants whatever `n_consts`
+  says; the interval Horner is chunked eight coefficients at a time.
+  `imm` is 32 bits and unused by ALU instructions, so an
+  indexed-constant form would cost no encoding space.
+- **A per-iteration broadcast** (zoom). The perturbed pixel step needs
+  two values that change every iteration and are shared by every lane
+  - the reference orbit's point - and there is no operand source that
+  advances with the loop counter: a fourth stream read by iteration
+  index, or a constant bank the counter can address.
+- **A lane shift and an in-program cross-lane reduction** (Mersenne).
+  A carry chain reads a neighbour and a convolution sums across lanes;
+  a lane has sixteen private registers and no path to another. A read
+  of register r of lane i-1 would put the whole carry propagation
+  on-chip as one REPEAT with SETACT on "still carrying"; a reduction
+  would put the convolution there too. A partial workaround exists
+  without hardware: two input streams on the same array at different
+  offsets let a lane see its neighbour's input.
+- **A callable composed operation** (orbits, enclose). `cft_div` and
+  `cft_sqrt` are programs themselves, partitioned host-prep,
+  program-core, host-finish, and the core alone uses thirteen
+  registers, so they cannot be inlined into another program's loop
+  body; any kernel that needs correct rounding inside its loop leaves
+  the program for it. The same is true of `cft_reduce`, whose tree is
+  not in the ISA.
+
+Two facts to keep beside the list. The magic-constant floor - add 2^(p-1)
+and subtract it - is exact but raises inexact on every non-integer
+operand, which is why the Collatz tool reads parity off the encoding
+with the integer opcodes and why the Mersenne tool uses the constant
+only as a whole-number gate; and the program engine's margin over the
+host loop on the software backend is 1.06 to 2.1 times, set by how
+much of the step the program holds, which is a statement about a slow
+backend and not about the tile.
