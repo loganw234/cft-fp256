@@ -1667,9 +1667,9 @@ What that closed, and what it did not:
   did not: the tile's five attributes cannot produce r, so a composed
   route needs the residual AND a way to reach the tie rule. Nothing has
   been written, so nothing is claimed.
-- **Not closed: clause 9.4's reduction operations** (scaledProd and
-  friends), which are a different shape again - a vector in, a scaled
-  pair out - and are not started.
+- **Closed the same day: clause 9.4's reduction operations** (scaledProd
+  and friends), a different shape again - a vector in, a scaled pair
+  out - shipped in the 0.6 step; the section below records them.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.5
 entry.

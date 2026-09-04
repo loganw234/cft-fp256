@@ -321,10 +321,12 @@ reduce opcodes 28 and 29; cft_scaled_prod, cft_scaled_prod_sum and
 cft_scaled_prod_diff returning a value and an int64 scale). Same
 shape as every step before it: plain positional C functions, host
 operations, reachable through exactly the FFI each row above already
-uses. With this step every required operation of clause 5 and every
-recommended operation of clause 9 exists for the binary formats; the
-exceptions are the decimal formats, clause 8's alternate exception
-handling and payload propagation through arithmetic, all stated in
+uses. With this step every required operation of clause 5 exists for
+the binary formats, and every recommended operation of clause 9 but
+four: the magnitude forms of minimum and maximum in 9.6, which
+docs/COMPLIANCE.md records as the one remaining gap. The exceptions
+are the decimal formats, clause 8's alternate exception handling and
+payload propagation through arithmetic, all stated in
 docs/DETERMINISM.md.
 
 Where each surface stands at ABI 0.6. The JavaScript rows moved in

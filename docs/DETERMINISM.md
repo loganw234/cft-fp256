@@ -1049,7 +1049,7 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` / `augmented_check.py` | the C library's ports of every contract operation | golden model, per-element flags (and, for 9.5, the pair identity in exact integers) |
-| `host/tests/transcend_check.py` | the twenty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
+| `host/tests/transcend_check.py` | the thirty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tests/reduce_check.py` | all seven of clause 9.4 - the tree at every n, both composition identities, the scaled products' invariant | golden model, plus the library against itself for the identities |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
@@ -1074,3 +1074,5 @@ functions and their special-value tables 9.2 (the table itself 9.2.1);
 the augmented arithmetic operations and roundTiesTowardZero 9.5;
 the reduction operations - sum, dot, sumSquare, sumAbs and the three
 scaled products - 9.4; minimum/maximum 9.6; the reproducible-operation list 11.
+docs/COMPLIANCE.md is the clause-by-clause matrix: every operation the
+standard names for binary formats, with its status here.

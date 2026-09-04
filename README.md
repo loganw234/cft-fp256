@@ -158,9 +158,13 @@ thirty-nine functions of Table 9.1, **correctly rounded** at every
 format under every attribute with exact flags (docs/TRANSCENDENTALS.md
 - a stronger claim than any libm makes and the only one that can be
 scored), the seven reductions of 9.4 over a contractual tree, the three
-augmented operations of 9.5 with their ties-toward-zero rounding, the
-four minimum/maximum operations of 9.6 and the three payload
-operations of 9.7. What stays outside is named rather than implied: the
+augmented operations of 9.5 with their ties-toward-zero rounding, four
+of the eight minimum/maximum operations of 9.6 and the three payload
+operations of 9.7. docs/COMPLIANCE.md walks the standard clause by
+clause: of the 146 operations it names for binary formats, 139 are
+here, three are conformance predicates that belong to a language, and
+the four magnitude forms of minimum and maximum are the one gap. What
+stays outside is named rather than implied: the
 decimal formats (a different datapath, effectively their own tile),
 clause 8's alternate exception handling, and NaN payload propagation
 through arithmetic, which is a canonical quiet NaN by design. No
