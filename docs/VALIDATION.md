@@ -2354,3 +2354,56 @@ separate step that will add the augmented sets to its own replayer. The
 `node` and `wasm` replayers already IGNORE an unknown `.jsonl` by name
 rather than failing on it, so the four new sets are listed as ignored
 there until that step lands.
+
+## 2026-09-03 - the ABI 0.6 census: 28 of 29 on the Windows desktop, with the JavaScript surface in
+
+`bash verify/run.sh --fresh` at e3e6267 on DESKTOP-T33SK86 (Windows,
+MINGW64, Docker Desktop for the three container stages), the first
+full run with all four 0.6 packages AND the JavaScript surface merged.
+Run id 20260903-164537-e3e6267, on a clean tree, 227 minutes wall
+beside a CUDA experiment, a UI server and a pool of multiprocessing
+workers that were not this run's:
+
+    golden 928s  vectors 1170s  sim 3369s  lint 254s  formal 208s
+    libcft 1794s  selfcheck 1s  divsqrt 1s  clause5 2s  character 162s
+    transcend 785s  augmented 3s  diff 4s  seq 2s  reduce 13s
+    bindings 149s  cpp 1471s  lang-cpp 2s  lang-rust 1s  lang-julia SKIP
+    lang-go 13s  lang-csharp 5s  lang-r SKIP  lang-fortran 1s  node 1553s
+    wasm 1194s  mpfr 483s  soak-quick 74s  images SKIP
+
+    VERDICT: PASS - 26 executed, 0 failed, 3 skipped by name
+    (lang-julia, lang-r, images)
+
+Two of the three skips were the shell's PATH, not the host: julia
+1.12.7 and R 4.6.1 are installed, and `bash verify/run.sh --only
+lang-julia,lang-r` with both on PATH executed them under run id
+20260903-203425-5430990 (the tree two docs-only commits later) -
+lang-julia 4 s, lang-r 10 s, both ok, so every language leg
+holds bit-identity with the C example. The third skip is `images`,
+which needs xclbinutil and is Linux-only.
+
+The counts the stages printed, each the run's own:
+
+| stage | printed |
+|---|---|
+| golden | 1472 passed, 5 skipped |
+| libcft | 1037657 cases replayed through `cft_conformance`, 84 sets |
+| divsqrt | 29124 cases, library matches the model exactly |
+| clause5 | 145032 comparisons, C == model on every one |
+| character | 20819 comparisons, C == model on every one |
+| transcend | 607217 comparisons over 39 functions, then 580977 again through the escalation path (`--min-prec 64 --trials 16`), C == model on every one |
+| augmented | 140088 comparisons, C == model on every one |
+| reduce | the tree, the scaling, the bits and the flags agree |
+| bindings | cftmpfr: 755 passed |
+| cpp | 211931 checks, C++17 and C++20 |
+| node | 1,683,314 cases over 148 set replays - a pass |
+| wasm | VERIFY OK, 1,037,657 cases through `cft_conformance` and 645,657 through the wrappers |
+| mpfr | 599380 cases, 0 value mismatches, 0 flag mismatches |
+| soak-quick | 107886080 cases, 0 value mismatches, 0 flag mismatches |
+
+The transcend stage's two numbers are the two invocations the stage
+makes; the four-package gate earlier in the day (run
+20260903-121735-8d091ff) printed the same two, because the pools are
+seeded by format width and trial count, not by time. The 0.6 top-level
+claims in README.md and docs/COMPATIBILITY.md were taken from that
+earlier gate and this run reproduces every one of them.
