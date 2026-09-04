@@ -340,7 +340,15 @@ a record is
 Order is what makes it batch-size independent: elements finish in
 whatever order their trajectories allow, so a chain over completion
 order would be a chain over the schedule. `--records PATH` writes
-exactly those lines, so the chain can be recomputed by anything.
+exactly those lines, so the chain can be recomputed by anything. That
+file is truncated at the start of each run and is not resume-aware -
+the checkpoint's chain is the thing that spans an interruption.
+
+A checkpoint is complete state, so a run killed outright resumes from
+the last one and re-does at most one `--checkpoint-interval` of work,
+landing on the same final chain. What the cross-check exercises is a
+clean stop at an arbitrary pass, which leaves exactly the file an
+interval-triggered write would have left at that moment.
 
 SHA-256's eight initial words and sixty-four round constants are
 **derived** in the tool from the square and cube roots of the first 64
