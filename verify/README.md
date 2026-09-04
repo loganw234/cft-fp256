@@ -14,6 +14,29 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --require-all  # skips become failures
     SIM_JOBS=12 bash verify/run.sh    # the sim stage's targets, twelve at a time
     bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
+    bash verify/run.sh --budget quick   # ~10 min
+    bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded
+    bash verify/run.sh --budget full    # the census
+
+## Budgets
+
+No stage takes hours by itself; a full run is the sum of a dozen
+5-to-30-minute stages, and the sum moves with the load on the box.
+`--budget` names three cuts, kept in `run.sh` beside the stage list:
+
+| budget | stages | measured on the Windows desktop |
+|---|---|---|
+| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, soak-quick - after a host build the budget makes itself | about 10 minutes, loaded or not |
+| `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about an hour with the box quiet; 2-3 hours beside a CUDA job |
+| `full` | everything: gate + sim, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
+
+The slow stages are the replays and the RTL simulation, and they are
+slow on THIS host: libcft, cpp, vectors and wasm took 1794, 1471, 1170
+and 1194 s loaded here against 8, 15, 6 and 2 s on the desktop's WSL
+distro on 2026-09-02, where all 26 stages of that day finished in 22
+minutes. MSYS process spawning and file I/O are the cost, not the
+suite. The overnight budget therefore has a second form: the same
+command in the `cft2204` distro.
 
 ## The stages
 
