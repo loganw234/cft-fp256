@@ -104,7 +104,7 @@
  * Two more opcodes say so - the parity is ANDed with (n < 2^p) - and
  * that is not a formality: without it a value above 2^p reads as odd,
  * takes an odd step that cannot be exact, and the trajectory is
- * abandoned one halving too early. With it, a trajectory that climbs
+ * abandoned several steps too early. With it, a trajectory that climbs
  * past 2^p halves back down and carries on being a proof.
  *
  * ---------------------------------------------------------------

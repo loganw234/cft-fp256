@@ -2804,3 +2804,173 @@ The counts the stages printed, each the run's own:
 | wasm | VERIFY OK (second run) |
 | mpfr | 739234 cases, 0 value mismatches, 0 flag mismatches |
 | soak-quick | 107886080 cases, 0 value mismatches, 0 flag mismatches |
+
+## 2026-09-04 - the Collatz explorer: exactness as a result, and the sequencer's second customer
+
+`host/tools/collatz.c` and `host/tests/collatz_check.py` are new;
+`docs/COLLATZ.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload iterates n -> n/2 or 3n+1 in binary256, where every
+integer to 2^237 is exact and the whole step is `CFT_MUL` by 0.5, one
+`CFT_FMA`, and opcodes that round nothing. That makes a printed
+stopping time a theorem while the trajectory stays inside the format,
+and makes the library's own `inexact` flag the thing that says when it
+stops being one.
+
+### What the gate is, and what it scores
+
+`make -C host collatztest` runs a Python big-integer oracle against
+the tool. Python's integers are exact, so they are the authority on
+Collatz; the library stays the authority on arithmetic. The oracle
+models the tool's stopping rule exactly rather than approximately -
+including *which* step exactness ran out on - so a tool that gave up
+one step early or one step late fails it.
+
+    18103 comparisons, 0 failures
+    COLLATZ CHECK OK - the tool, the library and the big-integer oracle agree
+
+| what it checks | result |
+|---|---|
+| fp256 sweep 1..5000, both engines | 5,000 records each, oracle-exact |
+| fp64 sweep 1..5000 | oracle-exact, and byte-identical to fp256's records |
+| fp256 / fp64 / fp32 boundary sets, 23 values each | oracle-exact, 15 of the 23 leaving exact arithmetic exactly where the oracle says |
+| fp32 sweep 26000..28999 | oracle-exact, the 2 escapes in that window included |
+| the hash chain | recomputed with `hashlib`, identical |
+| batch 64 / 1000 / 4096 over 1..12000 | byte-identical checkpoints |
+| the two engines over the same range | byte-identical checkpoints |
+| interrupt and resume, 138 stops | byte-identical to the uninterrupted run |
+| a start value the format cannot hold | refused, not rounded |
+
+The interrupt leg runs at `--steps-per-call 7` on purpose, so that
+132 of its 138 stops caught elements part way through a trajectory
+rather than on a batch boundary; and it resumes at a different batch
+size and trip count from the run it is compared against, so it tests
+the batch-size property at the same time.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04, box otherwise quiet. `--from 1 --to 100001`,
+`--batch 4096`, so every row covers the same 10,753,840 Collatz steps
+except the two marked:
+
+| format | engine | steps/s | elements/s | seconds |
+|---|---|---|---|---|
+| fp256 | program | 587,571 | 5,464 | 18.30 |
+| fp256 | loop | 277,210 | 3,022 | 6.62 (20,000 starts) |
+| fp128 | program | 779,357 | 7,247 | 13.80 |
+| fp128 | loop | 418,520 | 4,562 | 4.38 (20,000 starts) |
+| fp64 | program | 886,386 | 8,243 | 12.13 |
+| fp64 | loop | 585,119 | 5,441 | 18.38 |
+| fp32 | program | 878,145 | 8,178 | 12.23 |
+
+fp256, fp128 and fp64 return the SAME chain over 1..100001,
+`cca55ca957433144ebed4047a2beba65d6d53d125c64b70813ba4b37e287f7ae`,
+with the published extremes - 350 steps at n = 77031, peak
+1,570,824,736 at n = 77671. binary32 returns a different one and says
+why: 87 of those 100,000 starting values leave exact arithmetic at
+p = 24.
+
+Two numbers worth keeping. The sequencer route is **1.5x to 2.1x
+faster than the host `cft_run` loop on the SOFTWARE backend**, where
+there is no bus to save - what it saves is 22 dispatches, format
+steerings and buffer walks per Collatz step. And throughput is flat in
+the batch size (256..16,384) and the trip count (128..8,192), all
+within 565,000..600,000 steps/s at fp256: the per-call overhead has
+already been engineered away.
+
+The sweep that was run, 230.703 s:
+
+    ./cft-collatz --format fp256 --engine program --batch 8192 \
+                  --from 1 --to 1000001 --checkpoint run.ckpt \
+                  --checkpoint-interval 30
+
+    1,000,000 starting values, 1,000,000 verified, 0 left exact arithmetic
+    longest      524 steps at n = 837799
+    largest peak 56,991,483,520 at n = 704511
+    steps        131,434,424
+    library calls 123
+    flags seen   0x00
+    throughput   569,713 steps/s, 4,334.6 elements/s
+    chain        966d0d7d23e92751490063609810b55577611e01e14da54822a3993e5db6e08f
+
+Both extremes are the published values for that range. **123 library
+calls for a million trajectories** is the sequencer's contribution as
+a number.
+
+### What the writing of it found
+
+Two things, and the first is the reason the boundary set exists.
+
+**"Above 2^p it has left exactness" is false**, and assuming it costs
+correct proofs. For odd n, 3n+1 is even, and an even integer one bit
+wider than the format still fits: a trajectory routinely climbs past
+2^p, halves back down, and every step of it is exact. Not one of the
+9,999 starting values below 10,000 escapes at binary32 even though many
+peak above 2^24; the first that does is 26623.
+
+**The first version of the tool read a value above 2^p as odd.** The
+parity test is `(bits >> ((p-1) + bias - biased_exp)) & 1`, and that
+shift goes negative - and wraps - once E exceeds p-1. Above 2^p there
+is no units bit in the significand and every representable value is
+even, so two more opcodes now say so. Before the fix, 2^237 - 3
+stopped after 1 exact step where it manages 8. The flag/witness
+assertion did **not** catch that, and correctly so: the fused
+multiply-add really was inexact and the tool really did detect it -
+what was wrong is that the element should never have taken that branch.
+Only the oracle knew.
+
+### The negative control
+
+Two faults, each rebuilt and run through the same gate.
+
+| control | what was changed | caught by | first thing it said |
+|---|---|---|---|
+| A | the two opcodes clamping parity to "even" above 2^p deleted from both engines | the oracle, on 4 of the check's 19 rows - all four boundary sets | `fp256 boundary set: got '...469 1 ...408 ...408 esc', oracle says '...469 8 ...408 ...991 esc'` |
+| B | the witness `CMPEQ(res, 1.0)` weakened to `CMPLE(0.0, res)` in both engines | the flag/witness assertion in the loop engine, the oracle in the program engine | `the INEXACT flag (1) and the per-element exactness witness (0 escapes) disagree` |
+
+Control A leaves every ordinary sweep, the chain, the batch-size
+property and the resume property green, and both engines still agree
+with each other - they are wrong identically. Only the boundary set
+fails. That is the case for an independent oracle rather than internal
+consistency alone, and it is not hypothetical: control A is the bug
+the tool actually had.
+
+Control B is the more interesting row. The **host loop** aborted with
+exit 3 on its first step, because it checks the biconditional once per
+Collatz step and the one rounding element was the only thing in the
+call. The **sequencer program** did not abort: it checks once per call
+of up to 1,024 iterations over 23 elements, and another element's
+correct detection satisfied the union - so 2^237 - 1 sailed on with a
+rounded value and reported a 245-step "verified" trajectory that does
+not exist, which the oracle then caught. The honest statement is that
+the flag/witness biconditional is **necessary and not sufficient**:
+the coarser the call, the more a partly-broken witness can hide behind
+another element's escape. It is a cheap continuous gate, not a
+substitute for the oracle, and the two caught this control in two
+different places.
+
+Restoring the file, rebuilding, and the gate is green again at 18,103
+comparisons.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact`
+  and issues the same program either way, but nothing here has been
+  through XRT; `docs/BRINGUP.md` owns those gates. No device number is
+  quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The program uses `CFT_MUL`, `CFT_FMA`, `CFT_ADD`,
+  `CFT_MIN`, `CFT_MAX`, `CFT_SELECT`, `CFT_CMPLT`, `CFT_CMPEQ`,
+  `CFT_ISHR`, `CFT_ISUB`, `CFT_IAND` and `CFT_ICMPLT`, all of which
+  `tb/` and the vector sets already cover, and the six control codes
+  `tb/test_seq_core.py` already scores.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library they certified this
+  morning. No runner stage was added; `verify/run.sh` was deliberately
+  left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
+  ABI version were left to the integrator, as at 0.7.

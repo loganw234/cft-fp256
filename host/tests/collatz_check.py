@@ -168,9 +168,15 @@ def read_ckpt_field(path, key):
 # ---------------------------------------------------------------------
 def check_sweep(tool, tmp, fmt, p, lo, hi, engine, batch, label):
     global CHECKS
-    got = tool.records(tmp, "--format", fmt, "--engine", engine,
-                       "--from", lo, "--to", hi, "--batch", batch,
-                       name="sweep-%s-%s-%s.txt" % (fmt, engine, batch))
+    try:
+        got = tool.records(tmp, "--format", fmt, "--engine", engine,
+                           "--from", lo, "--to", hi, "--batch", batch,
+                           name="sweep-%s-%s-%s.txt" % (fmt, engine, batch))
+    except RuntimeError as exc:
+        CHECKS += 1
+        fail("%s: the tool refused to finish - %s"
+             % (label, str(exc).strip().splitlines()[-1]))
+        return []
     want = [oracle_record(n, p) for n in range(lo, hi)]
     CHECKS += len(want)
     if got != want:
@@ -187,10 +193,16 @@ def check_sweep(tool, tmp, fmt, p, lo, hi, engine, batch, label):
 
 def check_values(tool, tmp, fmt, p, values, engine, label):
     global CHECKS
-    got = tool.records(tmp, "--mode", "deep", "--format", fmt,
-                       "--engine", engine, "--batch", max(8, len(values)),
-                       "--values", ",".join(str(v) for v in values),
-                       name="deep-%s-%s.txt" % (fmt, engine))
+    try:
+        got = tool.records(tmp, "--mode", "deep", "--format", fmt,
+                           "--engine", engine, "--batch", max(8, len(values)),
+                           "--values", ",".join(str(v) for v in values),
+                           name="deep-%s-%s.txt" % (fmt, engine))
+    except RuntimeError as exc:
+        CHECKS += 1
+        fail("%s: the tool refused to finish - %s"
+             % (label, str(exc).strip().splitlines()[-1]))
+        return []
     want = [oracle_record(v, p) for v in values]
     CHECKS += len(want)
     bad = [(a, b) for a, b in zip(got, want) if a != b]
