@@ -39,7 +39,7 @@ engine, sequencer, FIFOs, reduction accumulator and CSR are
 
 | kernel | rungs | generics off | clock (MHz) | provenance |
 |---|---|---|---|---|
-| `cft_krnl` | fp32 fp64 fp128 fp256 | - | 135 | measured: single closes +0.045 retimed; quad pending |
+| `cft_krnl` | fp32 fp64 fp128 fp256 | - | 135 | measured: single closes +0.618, quad +0.143 (9f73107, 2026-09-02, retimed + phys_opt) |
 | `cft_krnl_f128` | fp32 fp64 fp128 | `EN_FP256=0` | 150* | target, unmeasured |
 | `cft_krnl_f64` | fp32 fp64 | `EN_FP128=0 EN_FP256=0` | 170* | target, unmeasured |
 | `cft_krnl_f32` | fp32 | `EN_FP64=0 EN_FP128=0 EN_FP256=0` | 190* | target, unmeasured |
@@ -111,7 +111,7 @@ fifth fp128 beside the anchor at 92%.
 
 | quantity | value | provenance |
 |---|---|---|
-| device LUTs | 870,720 | the "Available" column of the routed quad's `full_util_placed.rpt` |
+| device LUTs | 870,720 | the "Available" column of the routed quad's `full_util_placed.rpt`; the datasheet's 871,680 is the figure ROADMAP, SCALING and VALIDATION quote |
 | shell, one CU | 123,897 | differenced routed builds, docs/SCALING.md |
 | each further CU | 12,626 | the quad's fixed cost was 161,775 - sixteen masters of crossbar - so (161,775 - 123,897) / 3 |
 | full tile | 131,386 | `hw/synth_attrib.tcl` (hierarchy preserved) on the RTL of eb8ef2a, the case-ROM commit, 2026-09-02; the same tree flattened for QoR reads 129,708 (the A/B in docs/ROADMAP.md), 1.3% less |

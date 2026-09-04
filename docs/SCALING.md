@@ -78,7 +78,9 @@ cost is a 256 MB cap per argument buffer per tile, which libcft does
 not capacity-split - an oversized run fails loudly at allocation.*
 
 **LUTs, and the orbit sequencer moved this wall a long way in.** Shell
-123,897 fixed, device 871,680, practical routing limit around 85%.
+123,897 fixed, device 871,680 by the datasheet (870,720 by the routed
+report's Available column, the figure hw/gen_layouts.py budgets
+against), practical routing limit around 85%.
 
 The history first, because the conclusion below used to be drawn from
 it. The tile was 119,543 in the shipped pre-sharing configuration, and
@@ -134,6 +136,10 @@ above with the quad's own fixed cost and a fifth tile is still over
 the line: 5 x 123,420 + 174,401 of shell for five CUs = 791,521,
 90.9%. Four remains the wall. docs/LAYOUTS.md now derives every mix
 the part could carry from measured bank costs, narrow tiles included.
+
+*And later that evening the quad closed too: 9f73107 at 135 MHz,
+kernel WNS +0.143 with 0 failing endpoints, the single at +0.618 -
+docs/CARDDAY.md's primary pair.*
 
 ### What one tile retires, in cycles (measured 2026-09-02)
 
@@ -247,8 +253,9 @@ by anything in the data path. Its job:
 **Most of this is already built.** The orbit sequencer
 (docs/SEQUENCER.md) is a micro-sequencer running programs on-chip with
 deposition addressed by index, and it is RTL now - `rtl/cft_seq.sv`,
-benched bit-exact against `python/cft_golden/seq.py`, hw_emu and
-silicon still ahead of it. Its three determinism properties are argued
+benched bit-exact against `python/cft_golden/seq.py` and through
+hw_emu at fp32 on the real XRT stack (2026-09-02), with fp64 and
+wider, a bitstream and silicon still ahead of it. Its three determinism properties are argued
 and tested, and P1 - "the sequencer introduces no arithmetic, only a
 schedule" - stopped being an argument on 2026-09-01, when the private
 second lane array went away: there is one `cft_lanes` per tile and the
@@ -321,7 +328,7 @@ Done:
   So the cross-check asserts the PROPERTY rather than equality: every
   range is a node of the tree over `[0, n)`, the ranges tile `[0, n)`
   in order, and the count fits the cap. Demanding equality would have
-  failed 57 correct cases and taught us to weaken the test.
+  failed 199 correct cases and taught us to weaken the test.
 
   Also worth knowing before sizing anything: **the range count is not
   bounded by the part count.** Cutting the top levels yields one extra

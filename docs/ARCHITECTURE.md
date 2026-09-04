@@ -165,6 +165,10 @@ element.
 | half tile | 128 | 4 / 2 / 1 / - | ~44k estimated, **pre-sequencer** | see ROADMAP's open-core sizing |
 | quarter tile | 64 | 2 / 1 / - / - | ~20k estimated, **pre-sequencer** | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
 
+The full-tile figure moved after this table was written: 129,708 with
+the seed ROM as case tables and **123,420** with the round stage
+precomputed (9f73107, retimed) - the Timing section below has the ladder.
+
 Both full-tile numbers are measured out of context, Vivado 2022.2,
 xcu50-fsvh2104-2-e, 135 MHz, on the tile as it now stands: one
 `cft_lanes` array, and the sequencer in it. Per module, with the
@@ -194,8 +198,9 @@ All three ladders self-gate on the full-tile geometry, so a quarter
 tile ignores them either way.
 
 **The width is a real constraint, not a preference, and the sequencer
-tightened it.** A full tile is now 139,404 LUT and 292 DSPs with the
-ladders off, 123,599 and 277 with them on. ROADMAP.md's part-by-part
+tightened it.** A full tile was 139,404 LUT and 292 DSPs with the
+ladders off when this was written, 123,599 and 277 with them on; the
+ladders-off tile has since come down to 123,420 (the Timing section). ROADMAP.md's part-by-part
 arithmetic has its anchor at a measured 138,083-LUT tile, which it
 records as 103% of an Artix-7 200T - so the 200T is about 134,000
 LUTs, the shipping ladders-off tile at 139,404 is over it, and the
@@ -267,8 +272,14 @@ sequencer's pointers are ids 6 and 7 at the first free offsets.
 | 21 | `ishl` | integer | count from `b` mod W |
 | 22 | `ishr` | integer | logical, never arithmetic |
 | 23 | `icmplt` | integer | unsigned; yields 1.0 or +0.0 |
+| 24 | `sum` | reduction | one element out, over the contractual tree (`cft_reduce`, VERSION 0x500) |
+| 25 | `dot` | reduction | not separate hardware: the host issues `mul` then `sum`, exact by the contract |
+| 26 | `recip_seed` | seed | ~1/a, the divide starting point; quiet, no flags |
+| 27 | `rsqrt_seed` | seed | ~1/sqrt(a), the square-root starting point; quiet, no flags |
+| 28 | `sumsq` | reduction | sum of round(a[i]*a[i]) over the tree (ABI 0.6) |
+| 29 | `sumabs` | reduction | sum of \|a[i]\| over the tree (ABI 0.6) |
 
-Opcode 15 and everything from 24 up are unassigned, and return
+Opcode 15 and everything from 30 up are unassigned, and return
 the canonical quiet NaN with invalid raised - in hardware and in the
 golden model alike. The field was four
 bits until the integer group needed a fifteenth opcode; it is a byte

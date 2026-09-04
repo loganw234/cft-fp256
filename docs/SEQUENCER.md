@@ -14,9 +14,10 @@ single-instruction programs through nested-loop escape maps, ragged
 block edges, a 62-program fuzz corpus, and the refusal matrix with
 zero write traffic on every refusal - plus `tb/test_krnl_seq.py`
 driving the whole kernel through the CSR exactly as XRT will.
-Remaining distance: hw_emu through the real XRT stack, a bitstream,
-silicon - all three still open on the evening of 2026-09-01, and the
-paragraphs below say how far each of them got. The RTL was pulled
+Remaining distance on the evening of 2026-09-01: hw_emu through the
+real XRT stack, a bitstream, silicon. hw_emu was met at fp32 the next
+day (the status note under the gates paragraph below); a bitstream
+carrying a program and silicon are still open. The RTL was pulled
 forward from v2 deliberately: an open core fed by DDR or
 PCIe-to-host-RAM cannot afford a memory pass per step, so the
 sequencer stops being a throughput refinement there and becomes the
@@ -107,6 +108,15 @@ are building at 135 MHz from this commit with the ladders off and the
 result is not known yet, so there is no closed bitstream for the
 sequencer tile either - and there is still no card in the machine.
 docs/BRINGUP.md is the gate record.
+
+*Status 2026-09-02, from docs/VALIDATION.md's entry "the sequencer
+passes on a device": the bank fix (40149b1) put every sequencer
+program through hw_emu on the real XRT stack at fp32 - 28 checks, 0
+failed, every program shape - before the 90-minute emulation cap
+stopped the run in fp64. The emulation gate is met for the sequencer
+at fp32; fp64 and above are unrun there, not failed; and there is
+still no card. The paragraph above is kept as the record of the
+morning that found the bug.*
 
 So a program can be written and run today, on any machine, with no
 card. What the hardware adds is speed and the on-chip iteration that
