@@ -931,7 +931,7 @@ typedef struct {
     cft_program **prog;
     uint8_t     *dep;
     uint32_t    *counts;
-    uint8_t     *hx, *hlo, *hhi, *hnn, *hma, *hmb, *hbclo, *hbchi;
+    uint8_t     *hx, *hlo, *hhi, *hnn, *hma, *hmb, *hbclo, *hbchi, *hzero;
 
     /* dot */
     uint8_t *dx, *dy;
@@ -1551,7 +1551,10 @@ static void horner_batch(runstate *R, size_t base, size_t n)
         }
     } else {
         int k;
-        runN(R, CFT_CMPLE, CFT_RNE, R->zero, R->hx, NULL, R->hnn, n, &f);
+        /* a batch-wide zero, not the scalar one: cft_run reads n
+         * elements from every operand it is given */
+        runN(R, CFT_CMPLE, CFT_RNE, R->hzero, R->hx, NULL, R->hnn, n,
+             &f);
         for (k = O->degree; k >= 0; k--) {
             bcast(fi, R->hbclo, R->clo + (size_t)k * esz, n);
             bcast(fi, R->hbchi, R->chi + (size_t)k * esz, n);
@@ -2100,6 +2103,8 @@ int main(int argc, char **argv)
     R.hmb = (uint8_t *)xcalloc(O.batch, esz);
     R.hbclo = (uint8_t *)xcalloc(O.batch, esz);
     R.hbchi = (uint8_t *)xcalloc(O.batch, esz);
+    R.hzero = (uint8_t *)xcalloc(O.batch, esz);
+    bcast(&fi, R.hzero, R.zero, O.batch);
     R.dep = (uint8_t *)xcalloc(O.batch * DEPOSITS, esz);
     R.counts = (uint32_t *)xcalloc(O.batch, sizeof(uint32_t));
     R.dot_cap = 4 * O.dot_m + 2;
@@ -2230,7 +2235,7 @@ int main(int argc, char **argv)
     free(R.zero); free(R.one); free(R.t1); free(R.t2); free(R.kv);
     free(R.sx); free(R.stlo); free(R.sthi); free(R.sslo); free(R.sshi);
     free(R.hx); free(R.hlo); free(R.hhi); free(R.hnn); free(R.hma);
-    free(R.hmb); free(R.hbclo); free(R.hbchi);
+    free(R.hmb); free(R.hbclo); free(R.hbchi); free(R.hzero);
     free(R.dep); free(R.counts); free(R.dx); free(R.dy);
     free(R.clo); free(R.chi);
     cft_close(DEV);
