@@ -91,12 +91,19 @@
  *     bound is STRICT on that side" - the normal, useful case. It is
  *     never treated as an error and never allowed to hide anything.
  *
- *   FORBIDDEN: invalid, divideByZero, overflow, underflow. Nothing in
- *     any kernel can produce them: no operand is a NaN, no divisor is
- *     zero, and every value stays inside the format's normal range by
- *     construction (the series' term count is tied to p, so the
- *     smallest term is about 2^-p and never subnormal). Any of them
- *     means the tool is wrong, so the tool stops.
+ *   EXPECTED: underflow, in the series kernel at a narrow format. The
+ *     terms are x^k/k!, so a small x reaches the subnormal range; at
+ *     binary32 an x of 2^-11 gets there by the tenth term. That is
+ *     tininess, not error, and it costs the enclosure nothing: a
+ *     directed rounding of a subnormal is still correctly rounded, so
+ *     the lower chain stays below the true term and the upper chain
+ *     above it. Reported, not tolerated silently.
+ *
+ *   FORBIDDEN: invalid, divideByZero, overflow. Nothing in any kernel
+ *     can produce them: no operand is a NaN, no divisor is zero, and
+ *     the dot kernel's largest product is checked against the format's
+ *     range before any work starts. Any of them means the tool is
+ *     wrong, so the tool stops.
  *
  *   CERTIFICATES, in increasing order of strength:
  *
@@ -729,15 +736,30 @@ static int val_le(const fmt_info *fi, const void *a, const void *b)
 /* ===================================================================
  * The flag policy
  * =================================================================== */
+/* invalid and divideByZero cannot arise: no operand is ever a NaN and
+ * no divisor is ever zero. overflow cannot arise either: the dot
+ * kernel's largest product is checked against the format's range
+ * before any work starts, and nothing else in the tool is large.
+ *
+ * UNDERFLOW is NOT forbidden, and the distinction is the interesting
+ * one. The series' terms are x^k/k!, so at a small x in a narrow
+ * format they reach the subnormal range - at binary32 an x of 2^-11
+ * gets there by the tenth term. That is tininess, not an error, and
+ * it does not weaken the enclosure by one bit: a directed rounding of
+ * a subnormal is still correctly rounded, so the lower chain stays
+ * below the true term (it may round to +0, which is still below) and
+ * the upper chain stays above it (it can never reach +0 from a
+ * positive value under roundTowardPositive, so the tail bound
+ * survives). It is reported rather than tolerated silently. */
 #define FORBIDDEN_FLAGS (CFT_FLAG_INVALID | CFT_FLAG_DIVBYZERO | \
-                         CFT_FLAG_OVERFLOW | CFT_FLAG_UNDERFLOW)
+                         CFT_FLAG_OVERFLOW)
 
 static void flags_expect(uint32_t f, const char *where)
 {
     if (f & FORBIDDEN_FLAGS) {
         fprintf(stderr,
-                "cft-enclose: %s raised 0x%02x, and inexact is the only "
-                "flag any kernel here can produce - stopping\n",
+                "cft-enclose: %s raised 0x%02x, and only inexact and "
+                "underflow can arise in any kernel here - stopping\n",
                 where, (unsigned)f);
         exit(3);
     }
@@ -1883,7 +1905,11 @@ static void report(runstate *R, double elapsed, const char *backend)
                (uint64_t)R->chunks, CHUNK);
     printf("  library calls %" PRIu64 "\n", R->calls);
     printf("  element ops   %" PRIu64 "\n", R->elem_ops);
-    printf("  flags seen    0x%02x%s\n", (unsigned)R->flags_seen,
+    printf("  flags seen    0x%02x%s%s%s\n", (unsigned)R->flags_seen,
+           (R->flags_seen & CFT_FLAG_INEXACT) ? "  inexact" : "",
+           (R->flags_seen & CFT_FLAG_UNDERFLOW)
+               ? " underflow (a subnormal series term; the bounds are "
+                 "still on the right side)" : "",
            R->flags_trusted ? "" : "  (this backend cannot read flags)");
     printf("  status word   0x%02x%s\n", (unsigned)cft_save_all_flags(DEV),
            cft_save_all_flags(DEV) == R->flags_seen

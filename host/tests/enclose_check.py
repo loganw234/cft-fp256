@@ -257,7 +257,13 @@ def check_containment(tool, tmp, fmt, kernels, points, degree, engine,
         args += ["--dump-vectors", vec_path]
     if "horner" in kernels:
         args += ["--dump-coeffs", coef_path]
-    tool.run(*args)
+    try:
+        tool.run(*args)
+    except RuntimeError as exc:
+        CHECKS += 1
+        fail("%s %s: the tool refused to finish - %s"
+             % (fmt, tag, str(exc).strip().splitlines()[-1]))
+        return []
     recs = read_records(recs_path)
     vecs = read_vectors(vec_path) if "dot" in kernels else {}
     coefs = read_coeffs(coef_path) if "horner" in kernels else {}
@@ -533,6 +539,20 @@ def check_refusals(tool):
             fail("%s was accepted" % what)
 
 
+def guard(fn, *a, **kw):
+    """A tool that refuses to finish is a RESULT, not a crash: a
+    negative control that trips an internal gate must be reported by
+    this harness rather than end it."""
+    global CHECKS
+    try:
+        return fn(*a, **kw)
+    except RuntimeError as exc:
+        CHECKS += 1
+        fail("%s: the tool refused to finish - %s"
+             % (fn.__name__, str(exc).strip().splitlines()[-1]))
+        return None
+
+
 def main():
     global CHECKS
     ap = argparse.ArgumentParser()
@@ -571,26 +591,34 @@ def main():
         # end of the ladder where precision runs out first.
         check_containment(tool, tmp, "fp32", ("series", "horner"), points,
                           degree, "program", 32, "narrow")
+        # ...and the edge where precision runs out entirely: at 2048
+        # points binary32's smallest x is 2^-11, so the series' terms
+        # reach the subnormal range and the run raises underflow. The
+        # enclosure must still contain exp(x), because a directed
+        # rounding of a subnormal is still correctly rounded.
+        check_containment(tool, tmp, "fp32", ("series",), 2048, degree,
+                          "program", 512, "subnormal")
 
         print("\n[2] the two Horner engines")
-        check_engines(tool, tmp, "fp256", points, degree)
-        check_engines(tool, tmp, "fp64", points, degree)
+        guard(check_engines, tool, tmp, "fp256", points, degree)
+        guard(check_engines, tool, tmp, "fp64", points, degree)
 
         print("\n[3] batch-size independence")
-        whole = check_batch_independence(tool, tmp, "fp256", points,
-                                         (7, 64, 1024))
+        whole = guard(check_batch_independence, tool, tmp, "fp256", points,
+                      (7, 64, 1024))
 
         print("\n[4] interrupting and resuming")
-        check_resume(tool, tmp, "fp256", points, whole)
+        if whole is not None:
+            guard(check_resume, tool, tmp, "fp256", points, whole)
 
         print("\n[5] the hash chain")
-        check_chain(tool, tmp, "fp64", points, None)
+        guard(check_chain, tool, tmp, "fp64", points, None)
 
         print("\n[6] what fp64 loses")
-        check_formats(tool, tmp, points, degree)
+        guard(check_formats, tool, tmp, points, degree)
 
         print("\n[7] refusals")
-        check_refusals(tool)
+        guard(check_refusals, tool)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
