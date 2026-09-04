@@ -82,6 +82,24 @@ subtree is another subtree, the contractual tree cancels the two
 against each other at one node, the cancellation is exact and the case
 tests nothing.
 
+**Does the contractual tree's fixed order matter for the bound?** For
+CONTAINMENT, no, and that is worth being clear about: any order of
+additions under RDN gives a result at or below the exact sum, because
+every node is, so the enclosure would be valid whatever shape the
+reduction took. Reassociating changes the WIDTH - a different shape
+loses a different number of ulps - but never the containment.
+
+For BIT IDENTITY it matters entirely, and that is the point of the
+whole exercise. `docs/DETERMINISM.md` fixes the pairing by element
+index - split at the largest power of two inside the range - and leaves
+the schedule and the operand side free. So the interval this tool
+prints for a given vector is the same interval on one tile or four, in
+simulation or on silicon, today or next year; a reduction whose order
+depended on arrival would still produce a valid enclosure and a
+different one, and "a verified result can be reproduced" would become
+"a verified result can be re-derived, approximately". A bound nobody
+else can reproduce exactly is a weaker object than a bound anybody can.
+
 Two knobs set how hard the case is, and they are not the same knob:
 
 - `--dot-top` (60) fixes the magnitude of the largest product, so the
