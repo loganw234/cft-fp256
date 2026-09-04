@@ -2121,17 +2121,6 @@ export class Context {
       });
     }
 
-    // The formatOf six do not belong here and are not quietly
-    // accepted: their result is not this context's format, so there is
-    // nowhere in map()'s answer to put it. mapFormatOf() takes the
-    // destination the operation needs.
-    if (typeof op === "string" && FORMATOF_ARITY[op] !== undefined)
-      throw new TypeError(
-        `${JSON.stringify(op)} is one of clause 5.4.1's formatOf ` +
-        `operations, whose result is in a DESTINATION format rather ` +
-        `than this context's - map() has no argument for one. Use ` +
-        `mapFormatOf(${JSON.stringify(op)}, dfmt, a, ...).`);
-
     // The 9.7 payload three: elementwise, and no flag word at all.
     const PAY = { get_payload: "getPayload", set_payload: "setPayload",
                   set_payload_signaling: "setPayloadSignaling" };
@@ -2172,8 +2161,21 @@ export class Context {
     }
 
     const code = typeof op === "string" ? OPS[op] : op;
-    if (code === undefined)
+    if (code === undefined) {
+      // "div" and "sqrt" reach here and are worth a better answer than
+      // "unknown": they are formatOf operation names, and the four
+      // that collide with an opcode - add, sub, mul, fma - were
+      // already dispatched as opcodes above, which is the right
+      // reading of a bare name in a one-format call. A formatOf call
+      // has a destination map() cannot carry.
+      if (typeof op === "string" && FORMATOF_ARITY[op] !== undefined)
+        throw new TypeError(
+          `${JSON.stringify(op)} is one of clause 5.4.1's formatOf ` +
+          `operations, whose result is in a DESTINATION format rather ` +
+          `than this context's - map() has no argument for one. Use ` +
+          `mapFormatOf(${JSON.stringify(op)}, dfmt, a, ...).`);
       throw new TypeError(`unknown op ${JSON.stringify(op)}`);
+    }
     const r = this._run(code, pack(a), pack(b), pack(c), n);
     this.lastFlags = r.flags;
     return split(r.bytes);

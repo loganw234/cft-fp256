@@ -27,10 +27,15 @@
 // And a negative control: the comparisons are shown failing on a
 // one-bit change before they are believed.
 
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Context, formatFor } from "./index.mjs";
-import { decode } from "./core.mjs";
-import { FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO, FLAG_OVERFLOW,
-         FLAG_UNDERFLOW }
+import { decode, encodeExact } from "./core.mjs";
+import { FLAGS_ALL, FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO,
+         FLAG_OVERFLOW, FLAG_UNDERFLOW, FORMATOF_METHOD, MINMAG_METHOD,
+         is754version1985, is754version2008, is754version2019 }
   from "./lib.mjs";
 
 let passed = 0, failed = 0;
@@ -71,8 +76,31 @@ const c64 = ctxs[64];
 // identity
 // ---------------------------------------------------------------------
 
-test("the module is ABI 0.6 on the software backend", () => {
-  eq(c64.abiVersion, "0.6", "abi: ");
+/** The ABI the TREE is at, read out of cft.h.
+ *
+ *  Not a number typed here, and the difference is the whole value of
+ *  the check. A hard-coded "0.6" agrees with a stale module exactly as
+ *  happily as with a fresh one - which is how bindings/wasm's module
+ *  spent a day reporting an ABI whose operations it did not export
+ *  (docs/COMPATIBILITY.md's half-step). Read from the header, the
+ *  assertion becomes "the module was built from THIS tree", which is
+ *  the thing worth knowing, and it goes green on the integrator's
+ *  version bump without this file being edited. bindings/wasm's
+ *  verify.mjs derives it the same way from the same two macros. */
+function abiFromHeader() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const h = readFileSync(join(resolve(here, "..", ".."), "host", "include",
+                              "cft.h"), "utf8");
+  const get = (name) => {
+    const m = h.match(new RegExp(`^#define\\s+${name}\\s+(\\d+)`, "m"));
+    if (!m) throw new Error(`cft.h has no ${name}`);
+    return Number(m[1]);
+  };
+  return `${get("CFT_ABI_VERSION_MAJOR")}.${get("CFT_ABI_VERSION_MINOR")}`;
+}
+
+test("the module is the tree's own ABI, on the software backend", () => {
+  eq(c64.abiVersion, abiFromHeader(), "abi (cft.h says): ");
   eq(c64.backend, "software", "backend: ");
 });
 
@@ -2137,6 +2165,608 @@ test("9.4's special rows for a scaled product, in 9.4's order", () => {
 });
 
 // ---------------------------------------------------------------------
+// ABI 0.7, package B: the status word (7.1, 5.7.4)
+//
+// The word lives on the DEVICE and nothing in the library ever lowers
+// it. What these check is mostly that this package did not build a
+// second one beside it - which it did until 0.7, and which was right
+// only by construction.
+// ---------------------------------------------------------------------
+
+test("the sticky word IS the library's word, not a copy beside it", () => {
+  // raiseFlags touches ONLY the C - it is 7.1's "raised without an
+  // exception being signaled at the user's request" and no arithmetic
+  // happens. If Context.flags were a JavaScript field it would still
+  // read 0 here, so this is the discriminator between one word and two.
+  c64.clearFlags();
+  eq(c64.flags, 0, "a lowered word reads: ");
+  c64.raiseFlags(FLAG_OVERFLOW);
+  eq(c64.flags, FLAG_OVERFLOW, "after raiseFlags(overflow), flags: ");
+  ok(c64.testFlags(FLAG_OVERFLOW), "and testFlags agrees");
+  ok(!c64.testFlags(FLAG_INVALID), "while an unraised flag does not");
+  // saveAllFlags is a third entry point onto the same word
+  eq(c64.saveAllFlags(), FLAG_OVERFLOW, "saveAllFlags: ");
+  c64.clearFlags();
+  eq(c64.flags, 0, "and clearFlags reaches the library: ");
+  ok(!c64.testFlags(FLAGS_ALL), "the library agrees it is empty");
+});
+
+test("one word per DEVICE, seen through every context over it", () => {
+  // withRounding() makes a second Context object over one device. The
+  // flags belong to the computation, not to the attribute it ran
+  // under, so both must see one word - which is exactly what a
+  // per-Context JavaScript copy could not do.
+  c64.clearFlags();
+  const up = c64.withRounding("rup");
+  const dn = c64.withRounding("rdn");
+  up.from("0.1");                       // inexact, raised through `up`
+  ok(dn.flags & FLAG_INEXACT, "a call through one context is visible in another");
+  ok(c64.flags & FLAG_INEXACT, "and in the context they came from");
+  eq(dn.lastFlags, 0, "lastFlags stays per-object: ");
+  dn.clearFlags();
+  eq(up.flags, 0, "and lowering through one lowers the word for all: ");
+  // toNumber opens a temporary fp64 context over the same device, so
+  // its rounding lands in the same word rather than in a private one
+  const c32 = ctxs[32];
+  c32.clearFlags();
+  c32.toNumber(c32.from("0.1"));
+  ok(c32.flags & FLAG_INEXACT, "the temporary context's flags reach the word");
+  c32.clearFlags();
+});
+
+test("nothing in the library lowers a flag - only the user", () => {
+  // VALIDATION's row: three calls raising overflow+inexact,
+  // divideByZero and invalid, and the word holds all four afterwards.
+  c64.clearFlags();
+  const big = c64.fromBits(0x7fefffffffffffffn);
+  c64.mul(big, big);                                   // overflow|inexact
+  c64.div(c64.from(1), c64.zero(0));                   // divideByZero
+  c64.nextUp(c64.fromBits(0x7ff0000000000001n));       // sNaN -> invalid
+  const want = FLAG_OVERFLOW | FLAG_INEXACT | FLAG_DIVBYZERO | FLAG_INVALID;
+  eq(c64.flags, want, "three calls, four flags standing: ");
+  // and a clean call adds nothing and removes nothing
+  const before = c64.saveAllFlags();
+  c64.add(1, 1);
+  eq(c64.lastFlags, 0, "an exact add raises nothing: ");
+  eq(c64.flags, before, "and leaves the word exactly where it was: ");
+  c64.clearFlags();
+});
+
+test("5.7.4's six work on an exceptionGroup, not on all-or-nothing", () => {
+  c64.clearFlags();
+  c64.raiseFlags(FLAG_INVALID | FLAG_INEXACT | FLAG_OVERFLOW);
+  c64.lowerFlags(FLAG_INEXACT);
+  eq(c64.flags, FLAG_INVALID | FLAG_OVERFLOW, "lowering one bit leaves the rest: ");
+  ok(c64.testFlags(FLAG_INVALID | FLAG_UNDERFLOW),
+     "testFlags is ANY of the group, not all of it");
+  ok(!c64.testFlags(FLAG_UNDERFLOW | FLAG_DIVBYZERO),
+     "and false when the group is disjoint from the word");
+  c64.clearFlags();
+});
+
+test("save and restore is a round trip, and RESTORES rather than ORs", () => {
+  c64.clearFlags();
+  c64.raiseFlags(FLAG_INVALID);
+  const saved = c64.saveAllFlags();
+  eq(saved, FLAG_INVALID, "saved: ");
+  c64.raiseFlags(FLAG_INEXACT | FLAG_OVERFLOW);
+  c64.restoreFlags(saved, FLAGS_ALL);
+  eq(c64.flags, FLAG_INVALID,
+     "restore puts the word back, so a flag low in `saved` comes back low: ");
+  // flags OUTSIDE the mask are untouched, which is what makes the mask
+  // worth having
+  c64.raiseFlags(FLAG_UNDERFLOW);
+  c64.restoreFlags(0, FLAG_INVALID);
+  eq(c64.flags, FLAG_UNDERFLOW,
+     "restoring only invalid left underflow alone: ");
+  // the pure predicate: same question, no device
+  ok(Context.testSavedFlags(saved, FLAG_INVALID), "testSavedFlags(saved, invalid)");
+  ok(!Context.testSavedFlags(saved, FLAG_INEXACT), "and not inexact");
+  eq(c64.testSavedFlags(saved, FLAG_INVALID),
+     Context.testSavedFlags(saved, FLAG_INVALID),
+     "the library's answer and the static one agree: ");
+  eq(c64.testSavedFlags(0, FLAGS_ALL), false, "an empty word tests false: ");
+  c64.clearFlags();
+});
+
+test("an exceptionGroup is checked, not just passed through", () => {
+  throws(() => c64.raiseFlags(1 << 20),
+         "a bit no exception of this library owns");
+  throws(() => c64.lowerFlags("inexact"),
+         "a name where 5.7.4's representation is a mask");
+  throws(() => c64.testFlags(-1), "a negative mask is not a subset");
+  eq(FLAGS_ALL, FLAG_INVALID | FLAG_DIVBYZERO | FLAG_OVERFLOW |
+                FLAG_UNDERFLOW | FLAG_INEXACT,
+     "FLAGS_ALL is the five, derived: ");
+});
+
+// Opened here rather than inside the test, because test() runs its
+// body synchronously: an `async` body would have its failures land in
+// a rejected promise nobody reads, and the test would pass no matter
+// what it found.
+const freshCtx = await Context.open(64);
+
+test("a fresh device opens with every flag lowered (7.1)", () => {
+  // "A program that does not inherit status flags from another source
+  // begins execution with all status flags lowered."
+  eq(freshCtx.flags, 0, "a device that has computed nothing: ");
+  ok(!freshCtx.testFlags(FLAGS_ALL), "and the library agrees");
+  // ... and it is ITS OWN word: raising here must not touch c64's
+  c64.clearFlags();
+  freshCtx.raiseFlags(FLAG_INVALID);
+  eq(c64.flags, 0, "another device's word is untouched: ");
+  eq(freshCtx.flags, FLAG_INVALID, "while its own moved: ");
+});
+
+// ---------------------------------------------------------------------
+// ABI 0.7, package B: 5.7.1's three conformance predicates
+// ---------------------------------------------------------------------
+
+// The device-free forms, awaited out here for the same reason.
+const FREE_VERSIONS = [await is754version1985(), await is754version2008(),
+                       await is754version2019()];
+
+test("5.7.1's predicates: 1985 no, 2008 no, 2019 yes", () => {
+  eq(c64.is754version1985(), false, "is754version1985: ");
+  eq(c64.is754version2008(), false, "is754version2008: ");
+  eq(c64.is754version2019(), true, "is754version2019: ");
+  // the same three without a device, because 5.7.1 asks about the
+  // programming environment rather than about a number
+  eq(FREE_VERSIONS[0], c64.is754version1985(), "free vs method 1985: ");
+  eq(FREE_VERSIONS[1], c64.is754version2008(), "free vs method 2008: ");
+  eq(FREE_VERSIONS[2], c64.is754version2019(), "free vs method 2019: ");
+});
+
+test("2008 is false BECAUSE of the row 9.6 changed", () => {
+  // 754-2008 required minNum/maxNum/minNumMag/maxNumMag; 754-2019
+  // replaced them with 9.6's recommended operations and changed the
+  // signaling-NaN rule - 2008's minNum said nothing about it, 2019's
+  // minimumNumber signals invalid and still returns the number. This
+  // library implements the 2019 row, which is what makes the predicate
+  // above answer no rather than yes.
+  const snan = c64.fromBits(0x7ff0000000000001n);
+  c64.clearFlags();
+  const got = c64.minnumMag(snan, c64.from(3));
+  eq(got.toNumber(), 3, "minimumMagnitudeNumber(sNaN, 3) returns the number: ");
+  ok(c64.lastFlags & FLAG_INVALID, "and signals invalid, which 2008 did not");
+  c64.clearFlags();
+});
+
+// ---------------------------------------------------------------------
+// ABI 0.7, package B: 9.6's four magnitude forms
+//
+// Each is "x if |x| < |y|, y if |y| < |x|, otherwise <the operation
+// named last>". Everything below is that sentence read literally.
+// ---------------------------------------------------------------------
+
+test("the magnitude forms pick by magnitude when the magnitudes differ", () => {
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    const a = c.from(-5), b = c.from(2);
+    ok(c.minMag(a, b).sameBits(b), `${w}: minMag(-5, 2) is 2`);
+    ok(c.maxMag(a, b).sameBits(a), `${w}: maxMag(-5, 2) is -5`);
+    ok(c.minnumMag(a, b).sameBits(b), `${w}: minnumMag(-5, 2) is 2`);
+    ok(c.maxnumMag(a, b).sameBits(a), `${w}: maxnumMag(-5, 2) is -5`);
+    c.clearFlags();
+    c.minMag(a, b);
+    eq(c.lastFlags, 0, `${w}: a selection of two numbers raises nothing: `);
+  }
+});
+
+test("EQUAL MAGNITUDES defer, and that is the row worth its own test", () => {
+  // "otherwise minimum(x, y)" - so +-3 is not "return x" and not
+  // "return y", it is minimum(+3, -3) = -3 and maximum(+3, -3) = +3.
+  // An implementation that quietly prefers an operand on this tie is
+  // wrong here and invisible everywhere else.
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    const p = c.from(3), m = c.from(-3);
+    eq(c.minMag(p, m).toString(), "-3e+0", `${w}: minMag(+3, -3): `);
+    eq(c.maxMag(p, m).toString(), "3e+0", `${w}: maxMag(+3, -3): `);
+    // ... and the same the other way round, because deferral does not
+    // care about operand order
+    eq(c.minMag(m, p).toString(), "-3e+0", `${w}: minMag(-3, +3): `);
+    eq(c.maxMag(m, p).toString(), "3e+0", `${w}: maxMag(-3, +3): `);
+    eq(c.minnumMag(p, m).toString(), "-3e+0", `${w}: minnumMag(+3, -3): `);
+    eq(c.maxnumMag(p, m).toString(), "3e+0", `${w}: maxnumMag(+3, -3): `);
+    // +-0 have equal magnitude too, so the zeros come from the base
+    // operation: -0 for the minima, +0 for the maxima
+    eq(c.minMag(c.zero(0), c.zero(1)).sign, 1, `${w}: minMag(+0, -0) is -0: `);
+    eq(c.maxMag(c.zero(0), c.zero(1)).sign, 0, `${w}: maxMag(+0, -0) is +0: `);
+    eq(c.minnumMag(c.zero(1), c.zero(0)).sign, 1, `${w}: minnumMag zeros: `);
+    eq(c.maxnumMag(c.zero(1), c.zero(0)).sign, 0, `${w}: maxnumMag zeros: `);
+  }
+});
+
+test("a NaN has no magnitude, so every NaN case is the deferral", () => {
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    const q = c.nan(), three = c.from(3);
+    c.clearFlags();
+    ok(c.minMag(q, three).isNaN, `${w}: minMag(qNaN, 3) is a NaN`);
+    ok(c.maxMag(three, q).isNaN, `${w}: maxMag(3, qNaN) is a NaN`);
+    eq(c.lastFlags, 0, `${w}: a QUIET NaN raises nothing: `);
+    ok(c.minnumMag(q, three).sameBits(three),
+       `${w}: minnumMag(qNaN, 3) is the number`);
+    ok(c.maxnumMag(q, three).sameBits(three),
+       `${w}: maxnumMag(qNaN, 3) is the number`);
+    ok(c.minnumMag(q, q).isNaN, `${w}: two NaNs give a NaN even here`);
+    // a signaling NaN raises invalid in all four, and nothing else can
+    // be raised at all
+    const fi = c.format;
+    const snan = c.fromBits((((1n << BigInt(fi.expW)) - 1n) <<
+                             BigInt(fi.manW)) | 1n);
+    for (const fn of ["minMag", "maxMag", "minnumMag", "maxnumMag"]) {
+      c.clearFlags();
+      const got = c[fn](snan, three);
+      eq(c.lastFlags, FLAG_INVALID, `${w}: ${fn}(sNaN, 3) flags: `);
+      if (fn.includes("num")) ok(got.sameBits(three), `${w}: ${fn} returns 3`);
+      else ok(got.isNaN, `${w}: ${fn} returns a quiet NaN`);
+    }
+    c.clearFlags();
+  }
+});
+
+test("the answer is an operand's own encoding, bit for bit", () => {
+  // The result is always one of the two operand encodings except where
+  // the base operation delivers a NaN - so a random sweep can check
+  // that identity without knowing which operand it should be.
+  const rand = mulberry32(0x9600);
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    const bits = interestingBits(c.format, rand);
+    for (let i = 0; i < bits.length; i++) {
+      const a = c.fromBits(bits[i]);
+      const b = c.fromBits(bits[(i * 7 + 3) % bits.length]);
+      for (const fn of ["minMag", "maxMag", "minnumMag", "maxnumMag"]) {
+        const got = c[fn](a, b);
+        ok(got.sameBits(a) || got.sameBits(b) || got.isNaN,
+           `${w} ${fn}: the result is an operand or a NaN`);
+      }
+    }
+  }
+});
+
+test("the magnitude four batch through map() exactly as they scalar", () => {
+  const rand = mulberry32(0x9601);
+  for (const w of WIDTHS) {
+    const c = ctxs[w];
+    const bits = interestingBits(c.format, rand);
+    const xs = bits.map((b) => c.fromBits(b));
+    const ys = bits.map((_, i) => c.fromBits(bits[(i * 5 + 1) % bits.length]));
+    for (const [name, method] of Object.entries(MINMAG_METHOD)) {
+      let union = 0;
+      const scalar = xs.map((x, i) => {
+        c.clearFlags();
+        const r = c[method](x, ys[i]);
+        union |= c.lastFlags;
+        return r;
+      });
+      // by 754's spelling, which is what the vector sets carry ...
+      c.clearFlags();
+      const batch = c.map(name, xs, ys);
+      batch.forEach((g, i) => ok(g.sameBits(scalar[i]),
+        `${w} ${name}[${i}]: the array answer is the scalar answer`));
+      eq(c.lastFlags, union, `${w} ${name}: the batch flag word is the union: `);
+      // ... and by this package's method name, the same answer
+      const alias = c.map(method, xs, ys);
+      alias.forEach((g, i) => ok(g.sameBits(scalar[i]),
+        `${w} ${method}[${i}]: reachable by either spelling`));
+    }
+    throws(() => c.map("minimumMagnitude", xs), "a second array is required");
+    c.clearFlags();
+  }
+});
+
+// ---------------------------------------------------------------------
+// ABI 0.7, package A: clause 5.4.1's formatOf arithmetic
+// ---------------------------------------------------------------------
+
+const FO_BINARY = ["formatOfAdd", "formatOfSub", "formatOfMul", "formatOfDiv"];
+
+test("a same-format formatOf call IS the operation that was already here", () => {
+  // 5.4.1 asks for every ORDERED pair, the four same-format ones
+  // included, and those must be the existing entry points bit for bit
+  // - not a reimplementation that happens to agree.
+  const rand = mulberry32(0x5410);
+  for (const w of WIDTHS) {
+    const base = ctxs[w];
+    const name = base.format.name;
+    for (const attr of ATTRS) {
+      const c = base.withRounding(attr);
+      const bits = interestingBits(c.format, rand);
+      for (let i = 0; i < bits.length; i++) {
+        const a = c.fromBits(bits[i]);
+        const b = c.fromBits(bits[(i * 3 + 5) % bits.length]);
+        const z = c.fromBits(bits[(i * 11 + 2) % bits.length]);
+        const pairs = [
+          [c.formatOfAdd(name, a, b), c.add(a, b)],
+          [c.formatOfSub(name, a, b), c.sub(a, b)],
+          [c.formatOfMul(name, a, b), c.mul(a, b)],
+          [c.formatOfDiv(name, a, b), c.div(a, b)],
+          [c.formatOfSqrt(name, a), c.sqrt(a)],
+          [c.formatOfFma(name, a, b, z), c.fma(a, b, z)],
+        ];
+        for (const [got, want] of pairs)
+          ok(got.sameBits(want),
+             `${w} ${attr} case ${i}: formatOf agrees with the same-format ` +
+             `operation (${got.bits.toString(16)} vs ${want.bits.toString(16)})`);
+      }
+    }
+  }
+});
+
+test("widening is exact, so it is convert-then-operate and says so", () => {
+  // The interchange ladder NESTS - every binary32 value is a binary64
+  // value in significand bits and in exponent range both - so widening
+  // rounds nothing and the operation's rounding is still the only one.
+  const rand = mulberry32(0x5411);
+  for (const sw of WIDTHS) {
+    for (const dw of WIDTHS) {
+      if (dw <= sw) continue;
+      const src = ctxs[sw], dst = ctxs[dw];
+      const dname = dst.format.name;
+      const bits = interestingBits(src.format, rand);
+      for (let i = 0; i < bits.length; i++) {
+        const a = src.fromBits(bits[i]);
+        const b = src.fromBits(bits[(i * 3 + 5) % bits.length]);
+        src.clearFlags();
+        const got = src.formatOfAdd(dname, a, b);
+        const foFlags = src.lastFlags;
+        dst.clearFlags();
+        const want = dst.add(dst.convert(a), dst.convert(b));
+        ok(got.sameBits(want),
+           `${sw}->${dw} case ${i}: formatOfAdd is convert-then-add`);
+        // the WORD rather than lastFlags, because the composition is
+        // three calls and only their union is comparable with the one
+        // call formatOf makes - a signaling NaN signals in the
+        // conversion there and inside the operation here
+        eq(foFlags, dst.flags,
+           `${sw}->${dw} case ${i}: and raises what the widened add raises: `);
+      }
+      src.clearFlags();
+      dst.clearFlags();
+    }
+  }
+});
+
+// The double-rounding witnesses, rebuilt here from the FORMAT
+// DESCRIPTORS ALONE - the construction python/cft_golden/formatof.py's
+// double_rounding_witness() derives, ported rather than tabulated, so
+// nothing here is a number somebody typed.
+//
+// One idea for all three: put the exact result a hair ABOVE a midpoint
+// of the DESTINATION grid, closer to it than half an ulp of the
+// intermediate. The first rounding lands exactly ON the midpoint, the
+// second sees a tie and breaks it to even DOWNWARD, and the single
+// correct rounding goes UP because the exact value was above. The
+// midpoint chosen is m = 1 + 2^-pd, whose destination neighbours are
+// 1 (last bit 0, so the tie goes there) and nextUp(1).
+function foWitness(sfi, dfi, fn) {
+  const ps = BigInt(sfi.prec), pd = BigInt(dfi.prec);
+  const M = (1n << pd) + 1n;                 // m's significand, pd+1 bits
+  if (fn === "fma") {
+    // a*b = m exactly with b = 1, and c the smallest positive source
+    // value - below every plausible intermediate's half-ulp at
+    // magnitude 1, which is why no width rescues this one.
+    return {
+      a: encodeExact(sfi, 0, M, -Number(pd)),
+      b: encodeExact(sfi, 0, 1n << (ps - 1n), 1 - Number(ps)),
+      c: 1n,
+    };
+  }
+  if (fn === "div") {
+    // Y with M*Y == -1 (mod 2^pd): the exact product m*y falls one
+    // unit of the product's last place short of a source value, so the
+    // source value just above it is the dividend and x/y sits that far
+    // above m.
+    const Y = (1n << (ps - 1n)) + ((1n << (ps - pd)) - 1n);
+    if (Y % (1n << pd) !== (1n << pd) - 1n)
+      throw new Error("the divisor construction lost its residue");
+    return {
+      a: encodeExact(sfi, 0, M * Y + 1n, 1 - Number(pd) - Number(ps)),
+      b: encodeExact(sfi, 0, Y, 1 - Number(ps)),
+      c: null,
+    };
+  }
+  // squareRoot: m^2 needs 2*pd + 1 bits and the ladder gives it, so it
+  // is a source value; the source value ONE ULP ABOVE it has a root a
+  // quarter of an intermediate ulp above m.
+  if (2n * pd + 1n > ps)
+    throw new Error("no square-root witness: m^2 does not fit the source");
+  return { a: encodeExact(sfi, 0, M * M, -2 * Number(pd)) + 1n,
+           b: null, c: null };
+}
+
+test("NARROWING IS NOT A DOUBLE ROUNDING, and the witnesses show it", () => {
+  // Both halves of every witness, which is the whole point: the
+  // implementation agrees with the single correct rounding, AND the
+  // composed route disagrees with it. A witness that stopped
+  // separating the two would be checking that two identical things are
+  // identical.
+  let witnesses = 0;
+  for (const sw of WIDTHS) {
+    for (const dw of WIDTHS) {
+      if (dw >= sw) continue;
+      const src = ctxs[sw], dst = ctxs[dw];
+      const sfi = src.format, dfi = dst.format;
+      const dname = dfi.name;
+      // The two destination values the witness sits between: 1.0,
+      // whose last significand bit is 0 and which therefore wins a
+      // ties-to-even tie, and nextUp(1), which is where the exact
+      // value rounds when it is a hair above the midpoint.
+      const one = BigInt(dfi.bias) << BigInt(dfi.manW);
+      for (const fn of ["fma", "div", "sqrt"]) {
+        const w = foWitness(sfi, dfi, fn);
+        const a = src.fromBits(w.a);
+        const b = w.b === null ? null : src.fromBits(w.b);
+        const cc = w.c === null ? null : src.fromBits(w.c);
+
+        src.clearFlags();
+        const single = fn === "fma" ? src.formatOfFma(dname, a, b, cc)
+          : (fn === "div" ? src.formatOfDiv(dname, a, b)
+                          : src.formatOfSqrt(dname, a));
+        const singleFlags = src.lastFlags;
+
+        // the route this library refuses: round in the SOURCE format,
+        // then convert down. Two roundings, both the library's own.
+        src.clearFlags();
+        const inSource = fn === "fma" ? src.fma(a, b, cc)
+          : (fn === "div" ? src.div(a, b) : src.sqrt(a));
+        dst.clearFlags();
+        const composed = dst.convert(inSource);
+
+        eq(single.bits, one + 1n,
+           `${sw}->${dw} ${fn}: the single rounding is nextUp(1) `);
+        eq(composed.bits, one,
+           `${sw}->${dw} ${fn}: the composed route is 1.0 `);
+        ok(!single.sameBits(composed),
+           `${sw}->${dw} ${fn}: and the two DIFFER - by one ulp of the ` +
+           `destination, the composed one low`);
+        ok(singleFlags & FLAG_INEXACT,
+           `${sw}->${dw} ${fn}: the single rounding is inexact`);
+        eq(single.context.format, dfi,
+           `${sw}->${dw} ${fn}: the result carries the destination's context: `);
+        witnesses++;
+      }
+      src.clearFlags();
+      dst.clearFlags();
+    }
+  }
+  eq(witnesses, 18, "six narrowing pairs x three operations: ");
+});
+
+test("the destination's exceptions, on the destination's grid", () => {
+  const f64 = ctxs[64], f32name = "fp32";
+  // A HAIR ABOVE HALF binary32's least subnormal. 2^-150 is exactly
+  // half of 2^-149, so a sum a hair above it in magnitude rounds AWAY
+  // from zero under roundTiesToEven and lands on the least subnormal -
+  // with the destination's underflow beside the inexact, neither of
+  // which the source format had any reason to raise. This is the row
+  // that caught the MPFR harness double rounding the destination's
+  // subnormal grid (docs/VALIDATION.md, 2026-09-04).
+  const a = f64.fromBits(0x8037478c91215daen);      // about -2^-968
+  const b = f64.fromBits(0xb690000000000000n);      // exactly -2^-150
+  f64.clearFlags();
+  const got = f64.formatOfAdd(f32name, a, b);
+  eq(got.bits, 0x80000001n, "fp64->fp32 add just past the midpoint: ");
+  eq(f64.lastFlags, FLAG_UNDERFLOW | FLAG_INEXACT, "with the destination's flags: ");
+  // and its negation, because a sign error here would be invisible
+  f64.clearFlags();
+  const gotP = f64.formatOfAdd(f32name, f64.fromBits(0x0037478c91215daen),
+                               f64.fromBits(0x3690000000000000n));
+  eq(gotP.bits, 0x00000001n, "the same row negated: ");
+  eq(f64.lastFlags, FLAG_UNDERFLOW | FLAG_INEXACT, "same flags: ");
+
+  // OVERFLOW is the destination's too: two unremarkable binary64
+  // values whose product a binary32 cannot hold. 2^100 x 2^100 is
+  // 2^200, far past binary32's 2^128.
+  const p100 = f64.fromBits(0x4630000000000000n);   // 2^100
+  f64.clearFlags();
+  const over = f64.formatOfMul(f32name, p100, p100);
+  ok(over.isInf && over.sign === 0, "2^100 x 2^100 overflows binary32");
+  eq(f64.lastFlags, FLAG_OVERFLOW | FLAG_INEXACT, "overflow and inexact: ");
+  // the same operands in binary64 raise nothing at all, which is the
+  // point: the exceptions belong to the destination
+  f64.clearFlags();
+  const fine = f64.mul(p100, p100);
+  eq(f64.lastFlags, 0, "while binary64 holds 2^200 exactly: ");
+  ok(!fine.isInf, "and finitely");
+
+  // A SIGNALING NaN raises invalid and delivers the DESTINATION's
+  // canonical quiet NaN (6.2.1, and this contract's payload rule).
+  const snan = f64.fromBits(0x7ff0000000000001n);
+  f64.clearFlags();
+  const q = f64.formatOfAdd(f32name, snan, f64.from(1));
+  ok(q.sameBits(ctxs[32].nan()), "sNaN gives the destination's canonical qNaN");
+  eq(f64.lastFlags, FLAG_INVALID, "with invalid: ");
+  f64.clearFlags();
+});
+
+test("the destination is an argument, and the result knows it", () => {
+  const f256 = ctxs[256];
+  const got = f256.formatOfDiv("fp32", f256.from(1), f256.from(3));
+  eq(got.context.format.ieeeName, "binary32", "the result's format: ");
+  eq(got.bytes.length, 4, "and its width: ");
+  // the same call written from the value rather than from the context
+  const alt = f256.from(1).formatOfDiv("fp32", f256.from(3));
+  ok(alt.sameBits(got), "Float.formatOfDiv is Context.formatOfDiv");
+  // a destination can be named by width, precision or name, like every
+  // other format in this package
+  ok(f256.formatOfDiv(32, f256.from(1), f256.from(3)).sameBits(got),
+     "the destination takes a width");
+  ok(f256.formatOfDiv("binary32", f256.from(1), f256.from(3)).sameBits(got),
+     "and 754's own name");
+  throws(() => f256.formatOfDiv("binary16", f256.from(1), f256.from(3)),
+         "a format this library does not implement");
+  throws(() => f256.formatOfSqrt("fp32", f256.from(4), f256.from(1)),
+         "squareRoot reads one operand");
+  throws(() => f256.formatOfAdd("fp32", ctxs[64].from(1), f256.from(1)),
+         "a binary64 operand in a binary256 source context");
+  f256.clearFlags();
+});
+
+test("the formatOf six batch through mapFormatOf as they scalar", () => {
+  const rand = mulberry32(0x5412);
+  for (const sw of [64, 256]) {
+    for (const dw of [32, 128]) {
+      const src = ctxs[sw];
+      const dname = formatFor(dw).name;
+      const bits = interestingBits(src.format, rand);
+      const xs = bits.map((b) => src.fromBits(b));
+      const ys = bits.map((_, i) => src.fromBits(bits[(i * 3 + 1) % bits.length]));
+      const zs = bits.map((_, i) => src.fromBits(bits[(i * 7 + 4) % bits.length]));
+      for (const fn of ["add", "sub", "mul", "div", "sqrt", "fma"]) {
+        const method = FORMATOF_METHOD[fn];
+        let union = 0;
+        const scalar = xs.map((x, i) => {
+          src.clearFlags();
+          const r = fn === "sqrt" ? src[method](dname, x)
+            : (fn === "fma" ? src[method](dname, x, ys[i], zs[i])
+                            : src[method](dname, x, ys[i]));
+          union |= src.lastFlags;
+          return r;
+        });
+        src.clearFlags();
+        const batch = src.mapFormatOf(fn, dname, xs,
+                                      fn === "sqrt" ? null : ys,
+                                      fn === "fma" ? zs : null);
+        batch.forEach((g, i) => ok(g.sameBits(scalar[i]),
+          `${sw}->${dw} ${fn}[${i}]: the array answer is the scalar answer`));
+        eq(src.lastFlags, union,
+           `${sw}->${dw} ${fn}: the batch flag word is the union: `);
+      }
+      throws(() => src.mapFormatOf("sqrt", dname, xs, ys),
+             "squareRoot takes no b array");
+      throws(() => src.mapFormatOf("add", dname, xs),
+             "addition needs a b array");
+      throws(() => src.mapFormatOf("nope", dname, xs, ys),
+             "an operation 5.4.1 does not name");
+      src.clearFlags();
+    }
+  }
+});
+
+test("map() sends a formatOf name somewhere useful", () => {
+  // "add", "sub", "mul" and "fma" are opcodes as well as formatOf
+  // names, and a bare name in a one-format call is the opcode - that
+  // reading has to keep working.
+  const xs = [c64.from(1), c64.from(2)];
+  const ys = [c64.from(3), c64.from(4)];
+  const added = c64.map("add", xs, null, ys);
+  eq(added[0].toNumber(), 4, "map(\"add\") is still the opcode: ");
+  // "div" and "sqrt" are not opcodes at all, so they land in the
+  // unknown-op path, and it names the entry point that can take them
+  try {
+    c64.map("div", xs, ys);
+    throw new Error("map(\"div\") should refuse");
+  } catch (err) {
+    ok(/mapFormatOf/.test(err.message),
+       `the refusal points at mapFormatOf (got: ${err.message})`);
+  }
+});
+
+// ---------------------------------------------------------------------
 // the negative control
 // ---------------------------------------------------------------------
 
@@ -2155,6 +2785,7 @@ test("NEGATIVE CONTROL: the comparisons can fail", () => {
 // ---------------------------------------------------------------------
 
 for (const w of WIDTHS) ctxs[w].close();
+freshCtx.close();
 
 console.log(`${passed} passed, ${failed} failed`);
 for (const f of failures) console.log(`  FAIL  ${f}`);
