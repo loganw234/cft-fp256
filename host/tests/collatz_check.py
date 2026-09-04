@@ -298,6 +298,25 @@ def main():
         b64 = boundary_values(53)
         check_values(tool, tmp, "fp64", 53, b64, "program",
                      "fp64 boundary set, sequencer program")
+        check_values(tool, tmp, "fp32", 24, boundary_values(24), "program",
+                     "fp32 boundary set, sequencer program")
+        # binary32 runs out of exactness inside an ORDINARY sweep, so
+        # the sweep path's escape handling is covered too and not only
+        # deep mode's. The window is chosen around the first starting
+        # value that escapes at p = 24 (26623), which is later than it
+        # looks: a trajectory routinely climbs past 2^24 and stays
+        # exact, because 3n+1 is even for odd n and an even value one
+        # bit above the format still fits.
+        f32 = check_sweep(tool, tmp, "fp32", 24, 26000, 29000, "program",
+                          512, "fp32 sweep 26000..28999, where binary32 "
+                               "runs out")
+        CHECKS += 1
+        n_esc = sum(1 for r in f32 if r.endswith("esc"))
+        if n_esc:
+            ok("%d of those 3000 starting values left exact arithmetic at "
+               "binary32, exactly where the oracle says they do" % n_esc)
+        else:
+            fail("no fp32 escapes: the sweep did not reach the boundary")
 
         # 4. the hash chain, recomputed with hashlib
         print("\n[4] the hash chain")
