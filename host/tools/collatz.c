@@ -815,7 +815,7 @@ typedef struct {
     uint32_t   flags_seen;
     int        flags_trusted;
     uint64_t   calls;
-    uint64_t   ops;          /* elementwise opcode issues, for context */
+    uint64_t   ops;          /* elementwise opcode issues, host loop only */
 } engine;
 
 static void bcast(const fmt_info *fi, uint8_t *dst, const uint8_t *v,
@@ -1539,8 +1539,24 @@ static void report(runstate *R, double elapsed, const char *backend)
         printf("                at n = %s\n", S->max_peak_n);
     printf("  steps         %" PRIu64 "\n", S->steps_total);
     printf("  library calls %" PRIu64 "\n", R->eng.calls);
+    if (O->use_program)
+        printf("  program       %u instructions, %d constants, "
+               "%d deposits per element\n",
+               R->eng.n_insns, (int)N_CONST, DEPOSITS);
+    else
+        printf("  opcode issues %" PRIu64 " elementwise passes over one "
+               "element each\n", R->eng.ops);
     printf("  flags seen    0x%02x%s\n", (unsigned)R->eng.flags_seen,
            R->eng.flags_trusted ? "" : "  (this backend cannot read flags)");
+    /* The device's 754 status word (7.1), lowered once after the
+     * constants were built and never touched since. It should hold
+     * exactly what the steps raised, because nothing else in this tool
+     * rounds anything - so printing both is a free cross-check on the
+     * claim that the step is the only source of flags. */
+    printf("  status word   0x%02x%s\n", (unsigned)cft_save_all_flags(DEV),
+           cft_save_all_flags(DEV) == R->eng.flags_seen
+               ? " (agrees with the union above)"
+               : "  DISAGREES WITH THE UNION ABOVE");
     printf("  time          %.3f s\n", elapsed);
     printf("  throughput    %.0f Collatz steps/s, %.1f elements/s\n",
            sps, eps);
@@ -1721,6 +1737,11 @@ int main(int argc, char **argv)
     val_pow2(&fi, 2 * fi.prec - 4, R.wcap);
     engine_init(&R.eng, &fi, O.batch, O.use_program, O.reps,
                 caps.flags_readable != 0);
+    /* Measuring p deliberately raises inexact, and 7.1 says a status
+     * flag is lowered only at the user's request. This is that
+     * request: from here the device's word holds what the RUN raised
+     * and nothing else, which the report cross-checks. */
+    cft_lower_flags(DEV, CFT_FLAGS_ALL);
 
     if (O.records_path) {
         R.recf = fopen(O.records_path, "wb");

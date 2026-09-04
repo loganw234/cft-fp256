@@ -236,6 +236,10 @@ def boundary_values(p):
     third = (top - 2) // 3
     for k in range(0, 6):
         vals.append(third - k)
+    # 2^p - 1315 is the one worth naming: at p = 237 its whole
+    # trajectory - 2,437 steps, over a peak above 2^238 - stays exact,
+    # so it is a verified Collatz stopping time for a 72-digit start.
+    vals.append(top - 1315)
     vals.append(top)
     vals.append(top // 2 + 1)
     vals.append((1 << (p // 2)) + 12345)

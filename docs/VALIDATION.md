@@ -2829,14 +2829,14 @@ models the tool's stopping rule exactly rather than approximately -
 including *which* step exactness ran out on - so a tool that gave up
 one step early or one step late fails it.
 
-    18103 comparisons, 0 failures
+    18107 comparisons, 0 failures
     COLLATZ CHECK OK - the tool, the library and the big-integer oracle agree
 
 | what it checks | result |
 |---|---|
 | fp256 sweep 1..5000, both engines | 5,000 records each, oracle-exact |
 | fp64 sweep 1..5000 | oracle-exact, and byte-identical to fp256's records |
-| fp256 / fp64 / fp32 boundary sets, 23 values each | oracle-exact, 15 of the 23 leaving exact arithmetic exactly where the oracle says |
+| fp256 / fp64 / fp32 boundary sets, 24 values each | oracle-exact, 15 of the 24 leaving exact arithmetic exactly where the oracle says |
 | fp32 sweep 26000..28999 | oracle-exact, the 2 escapes in that window included |
 | the hash chain | recomputed with `hashlib`, identical |
 | batch 64 / 1000 / 4096 over 1..12000 | byte-identical checkpoints |
@@ -2953,7 +2953,7 @@ another element's escape. It is a cheap continuous gate, not a
 substitute for the oracle, and the two caught this control in two
 different places.
 
-Restoring the file, rebuilding, and the gate is green again at 18,103
+Restoring the file, rebuilding, and the gate is green again at 18,107
 comparisons.
 
 ### What was NOT run, and why

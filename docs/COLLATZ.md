@@ -113,7 +113,21 @@ comparison per element per call and turns an argument into a gate.
 flag is raised and no witness failed, or a witness failed and the flag
 is clear, it prints what disagreed and exits 3. That assertion is the
 reason the flag is load-bearing here rather than decorative, and it is
-what the negative control below breaks.
+what the negative control below breaks. It is checked per call over
+the union, which makes it necessary and not sufficient - see control B.
+
+Beside it, the tool uses ABI 0.7's status word (754-2019 7.1) as a
+second, free cross-check. Measuring p deliberately raises `inexact`;
+the tool lowers the word once with `cft_lower_flags` when setup is
+done - 7.1's "lowered only at the user's request" - and never touches
+it again. The report prints the word beside the union of the calls'
+`flags_out`, and they must agree, because nothing else in the tool
+rounds anything:
+
+```
+  flags seen    0x10
+  status word   0x10 (agrees with the union above)
+```
 
 ### What the tool does with an element that leaves exactness
 
@@ -447,6 +461,41 @@ calls for a million trajectories** is the sequencer's contribution
 stated as a number: 131 million Collatz steps, and the host got
 involved 123 times.
 
+### Deep mode: as far as exactness allows
+
+`--mode deep` takes a named set of starting values (or a range) and
+follows each as far as every operation stays exact. Two values just
+below 2^237 make the point:
+
+```
+./cft-collatz --mode deep --batch 8 --values \
+  220855883097298041197912187592864814478435487109452369765200775161576157,\
+  220855883097298041197912187592864814478435487109452369765200775161577469
+```
+
+```
+220855883097298041197912187592864814478435487109452369765200775161576157
+    2437 steps  peak 662567649291894123593736562778594443435306461328357109295602325484728472
+220855883097298041197912187592864814478435487109452369765200775161577469
+       8 steps  peak 662567649291894123593736562778594443435306461328357109295602325484732408
+                                                LEFT EXACT ARITHMETIC
+```
+
+The first is **2^237 - 1315**, a 72-digit starting value whose entire
+trajectory - 2,437 steps, over a peak of 6.6e71, which is above
+2^238 - is computed without a single rounding. Its stopping time is a
+theorem, from a start 2^173 times beyond what an int64 can hold and
+2^184 beyond binary64's exact range. It is in the cross-check's
+boundary set for that reason.
+
+The second is 2^237 - 3, which manages eight exact steps and then
+meets a `3n+1` that binary256 cannot hold. The tool says so, stops the
+element, keeps the last value it provably held, and never counts it as
+verified. `flags seen 0x10` on that run is `CFT_FLAG_INEXACT`, and it
+is there because exactly one element needed it to be.
+
+Deep mode does not checkpoint; the resumable cursor is the sweep's.
+
 ### What a device run would change
 
 The same binary, given an `--artifact` path, opens the tile instead of
@@ -561,7 +610,7 @@ So the honest statement about the assertion is:
 > places.
 
 `git checkout host/tools/collatz.c`, `make -C host collatz`, and
-`make -C host collatztest` is green again: **18,103 comparisons, 0
+`make -C host collatztest` is green again: **18,107 comparisons, 0
 failures.**
 
 ---
