@@ -508,3 +508,61 @@ def test_cross_format_comparison_nans_and_infinities(a, b):
     if a.prec < b.prec:
         assert fo.compare(a, b, sf.max_normal_bits(a),
                           sf.max_normal_bits(b))[0] == (True, False, False)
+
+
+def _val_or_none(fmt, sign, m, e):
+    bits, flags = sf.round_pack(fmt, sign, m, e, sf.RND_RNE)
+    return None if flags else bits
+
+
+@pytest.mark.parametrize("s,d", NARROWING, ids=ids(NARROWING))
+@pytest.mark.parametrize("rnd", MODES, ids=[sf.RND_NAMES[m] for m in MODES])
+def test_a_hair_above_half_the_destination_subnormal(s, d, rnd):
+    """The exact result A HAIR ABOVE half the destination's least
+    subnormal must round to that subnormal, not to zero.
+
+    This family is here because it caught a bug - in the MPFR harness
+    rather than in the library, which is the more interesting way round.
+    host/tools/mpfr_check.c reached the destination's subnormal grid
+    through the MPFR manual's IEEE recipe: set emin, redo the operation
+    at the destination's precision, mpfr_check_range, mpfr_subnormalize.
+    That recipe needs the operation's own result to land at or above the
+    least subnormal's exponent, so that the ternary it hands
+    subnormalize still describes the rounding. A SAME-format sum always
+    does - both operands are multiples of the format's own smallest
+    quantum, so a non-zero exact sum is at least that quantum, which is
+    twice the half-way point below the least subnormal. ACROSS formats
+    it does not, and the recipe flushed to zero eight cases that round
+    to the least subnormal, blaming the library for them.
+
+    The construction: half the destination's least subnormal is a power
+    of two well inside the source's range, so it is a source value
+    exactly; the source's own least subnormal added to it puts the exact
+    sum a hair above the half-way point. Both exponents come from the
+    two descriptors and nothing is typed in.
+    """
+    half = _val_or_none(s, 0, 1, d.emin - d.man_w - 1)
+    assert half is not None, ("half the destination's least subnormal "
+                              "must be exact in the source")
+    hair = sf.min_subnormal_bits(s)
+    for sign in (0, 1):
+        a = half | (s.sign_mask if sign else 0)
+        b = hair | (s.sign_mask if sign else 0)
+        bits, flags = fo.fo_add(s, d, a, b, rnd)
+        # the exact sum is strictly between half the least subnormal and
+        # the least subnormal, so every attribute that moves away from
+        # zero at all lands on the subnormal
+        away = (rnd in (sf.RND_RNE, sf.RND_RMM) or
+                (rnd == sf.RND_RUP and not sign) or
+                (rnd == sf.RND_RDN and sign))
+        want = (sf.min_subnormal_bits(d, sign) if away
+                else sf.zero_bits(d, sign))
+        assert bits == want, (s.name, d.name, sf.RND_NAMES[rnd], sign,
+                              hex(bits))
+        assert flags == (sf.FLAG_INEXACT | sf.FLAG_UNDERFLOW)
+        # EXACTLY at the half-way point roundTiesToEven goes the other
+        # way, which is what makes the row above a test rather than a
+        # coincidence
+        if rnd == sf.RND_RNE:
+            bits2, _ = fo.fo_add(s, d, a, sf.zero_bits(s), rnd)
+            assert bits2 == sf.zero_bits(d, sign), (s.name, d.name)

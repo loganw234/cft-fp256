@@ -1208,6 +1208,28 @@ result variable at the destination's; and the published
 `<sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl` sets carry the whole thing to
 anyone else's implementation.
 
+One footnote to "full oracle", earned the hard way. MPFR decides the
+VALUE of every one of these operations with nothing restated - but the
+DESTINATION'S SUBNORMAL GRID it does not, and the manual's IEEE recipe
+(set emin, redo the operation at the destination's precision,
+`mpfr_check_range`, `mpfr_subnormalize`) is wrong here. That recipe
+needs the operation's own result to land at or above the least
+subnormal's exponent, so that the ternary it hands `subnormalize` still
+describes the rounding. A SAME-format sum always does: both operands
+are multiples of the format's own smallest quantum, so a non-zero exact
+sum is at least that quantum, which is twice the half-way point below
+the least subnormal. Across formats it does not - binary64's 2^-968
+added to -2^-150 is a hair over half of binary32's least subnormal -
+and the recipe underflows against the very emin set for it, flushes,
+and loses the hair. It reported eight such cases as library failures on
+2026-09-04 before the harness was corrected to round onto the
+destination's fixed grid explicitly, which is the construction 9.5's
+`roundTiesTowardZero` already needed in the same file. The library and
+the model were right; the layer that was supposed to arbitrate them was
+double rounding, which is the mistake this whole section is about.
+`python/tests/test_formatof.py` and `host/tests/api_test.c` now pin
+that boundary from both sides of it.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode

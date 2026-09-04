@@ -4704,45 +4704,94 @@ static void fo_oracle(const fdesc *fs, const fdesc *fd, mop op, int mi,
             goto fo_done;
         }
 
-        if (!is_rmm) {
-            mpfr_exp_t save_emin = mpfr_get_emin();
-            mpfr_exp_t save_emax = mpfr_get_emax();
-            int t2;
-            mpfr_set_emin(fd->emin - fd->p + 2);
-            mpfr_set_emax(fd->emax + 1);
-            raw_op(r, op, a, b, c, rnd, &t2);
-            t2 = mpfr_check_range(r, t2, rnd);
-            t2 = mpfr_subnormalize(r, t2, rnd);
-            mpfr_set_emin(save_emin);
-            mpfr_set_emax(save_emax);
-            mpfr_set(out, r, MPFR_RNDN);
-            if (t2 != 0 || inexact) fl |= CFT_FLAG_INEXACT;
-            if (t2 != 0 || inexact) fl |= CFT_FLAG_UNDERFLOW;
-            *flags = fl;
-        } else {
-            int t1, up, sign;
+        /* SUBNORMAL LANDING, and this is the one place fo_oracle does
+         * NOT follow oracle()'s body - it cannot, and finding out why
+         * cost a gate.
+         *
+         * oracle() uses the MPFR manual's IEEE recipe here: set emin to
+         * emin - p + 2, redo the operation at the format's precision,
+         * then mpfr_check_range + mpfr_subnormalize with the ternary.
+         * That recipe assumes the operation's own result lands at or
+         * above the least subnormal's exponent, so that the ternary it
+         * hands subnormalize still describes the rounding. In a
+         * SAME-format addition it always does: both operands are
+         * multiples of the format's smallest quantum, so a non-zero
+         * exact sum is at least that quantum, which is twice the
+         * half-way point below the least subnormal. Across formats it
+         * does not. binary64's 2^-968 added to -2^-150 is a hair over
+         * half of binary32's least subnormal; the recipe's mpfr_add
+         * underflows against the very emin that was set for it, flushes,
+         * and the ternary stops carrying the hair. The result comes back
+         * -0 where round-to-nearest says -2^-149, on eight cases in this
+         * campaign, and the harness blamed the library.
+         *
+         * So the destination's subnormal grid is rounded onto EXPLICITLY,
+         * for all five attributes, by the construction the RMM branch of
+         * this file already used and c5_round_into documents: truncate
+         * the exact result to p + 2 bits toward zero with the exponent
+         * range left alone (the ternary is then a faithful sticky),
+         * scale onto the grid, split into an integer and a fraction with
+         * exact arithmetic, and compare that fraction with one half.
+         *
+         * The truncation cannot move the decision: the fraction is a
+         * multiple of a granule no larger than 2^-2 of a grid unit and
+         * the truncation error is below one granule, so a fraction under
+         * one half stays under it, and a fraction exactly at one half
+         * with a non-zero sticky is strictly above it. Every step is
+         * MPFR's or GMP's; the only thing this file contributes is
+         * clause 4.3's decision table, which is what an oracle for a
+         * rounding has to contribute.
+         *
+         * Tininess is already settled: this branch was reached because
+         * the UNBOUNDED p-bit rounding fell below emin, which is 7.5's
+         * after-rounding test, so underflow rides with inexact even when
+         * the grid rounding carries up to the least normal. */
+        {
+            int t1, up, sign, at_half, above_half, lost;
             long grid = fd->emin - fd->man_w;
             mpz_t n;
             mpfr_t scaled, frac, half;
+
             raw_op(y, op, a, b, c, MPFR_RNDZ, &t1);
-            sign = mpfr_sgn(y) < 0;
+            sign = mpfr_signbit(y) ? 1 : 0;
             mpz_init(n);
-            mpfr_init2(scaled, fd->p + 4);
-            mpfr_init2(frac, fd->p + 4);
+            mpfr_init2(scaled, fd->p + 8);
+            mpfr_init2(frac, fd->p + 8);
             mpfr_init2(half, 8);
             mpfr_abs(scaled, y, MPFR_RNDN);
-            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);
-            mpfr_get_z(n, scaled, MPFR_RNDZ);
-            mpfr_sub_z(frac, scaled, n, MPFR_RNDN);
+            mpfr_mul_2si(scaled, scaled, -grid, MPFR_RNDN);   /* exact */
+            mpfr_get_z(n, scaled, MPFR_RNDZ);                 /* floor */
+            mpfr_sub_z(frac, scaled, n, MPFR_RNDN);           /* exact */
             mpfr_set_ui_2exp(half, 1, -1, MPFR_RNDN);
-            up = (mpfr_cmp(frac, half) >= 0);
+            at_half = (mpfr_cmp(frac, half) == 0);
+            above_half = (mpfr_cmp(frac, half) > 0);
+            lost = (!mpfr_zero_p(frac) || t1 != 0);
+
+            switch (MODES[mi].cr) {
+            case CFT_RTZ:
+                up = 0;
+                break;
+            case CFT_RDN:
+                up = sign && lost;
+                break;
+            case CFT_RUP:
+                up = !sign && lost;
+                break;
+            case CFT_RMM:
+                up = above_half || at_half;
+                break;
+            default:            /* CFT_RNE */
+                up = above_half ||
+                     (at_half && (t1 != 0 || mpz_odd_p(n)));
+                break;
+            }
             if (up)
                 mpz_add_ui(n, n, 1);
             mpfr_set_prec(out, fd->p);
-            mpfr_set_z_2exp(out, n, grid, MPFR_RNDN);
+            mpfr_set_z_2exp(out, n, grid, MPFR_RNDN);         /* exact */
             if (sign)
                 mpfr_neg(out, out, MPFR_RNDN);
-            if (!mpfr_zero_p(frac) || t1)
+            if (lost || inexact)
                 fl |= CFT_FLAG_INEXACT | CFT_FLAG_UNDERFLOW;
             mpz_clear(n);
             mpfr_clear(scaled); mpfr_clear(frac); mpfr_clear(half);
@@ -4871,6 +4920,19 @@ done:
     return ok;
 }
 
+/* The second operand an operation actually reads, for the report. The
+ * steering behind cft.h's opcodes makes add and sub read a and c while
+ * mul and div read a and b, so a report that always printed b would
+ * name a value the failing case never looked at. */
+static const uint8_t *fo_second(mop op, const uint8_t *b, const uint8_t *c)
+{
+    if (op == OP_SQRT)
+        return 0;
+    if (op == OP_ADD || op == OP_SUB)
+        return c;
+    return b;
+}
+
 static const mop FO_OPS[6] = { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_SQRT,
                                OP_FMA };
 static const int FO_TALLY[6] = { T_FO_ADD, T_FO_SUB, T_FO_MUL, T_FO_DIV,
@@ -4974,8 +5036,12 @@ static void check_formatof(int sfi, int dfi, uint8_t pool[][32], int pn)
                 fo_oracle(fs, fd, op, mi, a, b, c, want, &wf);
                 memset(d, 0, sizeof d);
                 st = fo_lib(fs, fd, op, MODES[mi].cr, a, b, c, d, &gf);
+                /* Report the operands the OPERATION READ, not the pool
+                 * slots: the steering makes add and sub read a and c,
+                 * so printing b there names a value the case never
+                 * touched - which cost an hour once. */
                 c5_judge(FO_TALLY[oi], sfi, OPN[op], MODES[mi].name,
-                         fs, a, op == OP_SQRT ? NULL : b, fd, d, want,
+                         fs, a, fo_second(op, b, c), fd, d, want,
                          gf, wf, st, note);
                 mpfr_clear(want);
             }
@@ -5000,7 +5066,7 @@ static void check_formatof(int sfi, int dfi, uint8_t pool[][32], int pn)
                 memset(d, 0, sizeof d);
                 st = fo_lib(fs, fd, op, MODES[mi].cr, wa, wb, wc, d, &gf);
                 c5_judge(ti, sfi, OPN[op], MODES[mi].name, fs, wa,
-                         op == OP_SQRT ? NULL : wb, fd, d, want, gf, wf,
+                         fo_second(op, wb, wc), fd, d, want, gf, wf,
                          st, "double-rounding witness");
                 mpfr_clear(want);
             }

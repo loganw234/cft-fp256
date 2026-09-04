@@ -2800,6 +2800,45 @@ int main(void)
               "and into binary256 it is exact too: 0x%02x", (unsigned)fl);
 
 
+        /* --- a hair above half the destination's least subnormal ----
+         *
+         * Half of binary32's least subnormal is 2^-150, an ordinary
+         * binary64 normal; binary64's own least subnormal added to it
+         * puts the exact sum strictly ABOVE that half-way point, so
+         * roundTiesToEven delivers binary32's least subnormal and not
+         * zero. Exactly ON the half-way point the tie goes to the even
+         * neighbour, which is zero - and having both rows is the
+         * difference between testing the boundary and testing near it.
+         *
+         * This is the family that caught the MPFR harness reaching the
+         * destination's subnormal grid through a recipe that flushes:
+         * the library was right and the oracle was not. It is pinned in
+         * C as well as in the model, because C is where it would be
+         * ported wrong. */
+        put64(a8, (uint64_t)(1023 - 150) << 52);           /* 2^-150 */
+        put64(b8, (uint64_t)1);                            /* 2^-1074 */
+        st = cft_formatof_add(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 1u && fl == FL_UNF,
+              "a hair above half the least subnormal rounds UP to it: "
+              "0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl);
+        put64(b8, 0);
+        st = cft_formatof_add(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0 && fl == FL_UNF,
+              "and exactly ON it the tie goes to the even neighbour, "
+              "zero: 0x%08x/0x%02x", (unsigned)get32(d4), (unsigned)fl);
+        /* negated: the least subnormal keeps its sign, and so would the
+         * zero, which is 6.3's rule for a value that is zero because of
+         * rounding */
+        put64(a8, ((uint64_t)(1023 - 150) << 52) | ((uint64_t)1 << 63));
+        put64(b8, ((uint64_t)1) | ((uint64_t)1 << 63));
+        st = cft_formatof_add(dev, CFT_FP64, CFT_FP32, CFT_RNE,
+                              a8, b8, d4, 1, &fl, NULL);
+        CHECK(st == CFT_OK && get32(d4) == 0x80000001u && fl == FL_UNF,
+              "and negated, the least subnormal with its sign: 0x%08x",
+              (unsigned)get32(d4));
+
         /* --- and the 7.1 status word, from formatOf calls ------------
          *
          * Package B's word is only worth having if every entry point
