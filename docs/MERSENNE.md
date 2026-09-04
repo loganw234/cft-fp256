@@ -645,8 +645,9 @@ the software backend and issues the identical program. What changes:
   - and the pipeline is 15 stages deep with no stall path, so a call
   below 15 elements runs at pipeline speed rather than throughput
   speed. That is a real constraint here: a linear convolution's dots
-  are 1, 2, 3, ... elements long at the ends, and at L = 12 most of
-  them are under 15.
+  are 1, 2, 3, ... elements long at the ends, and at L = 12 **every one
+  of the 23** is under 15. The small exponents would gain least from a
+  card, which is the opposite of the usual shape.
 - **What would not be measured honestly.** Numbers from `hw_emu` are
   RTL simulation seconds and mean nothing as hardware performance;
   `docs/BRINGUP.md` owns those gates. No device number is quoted here
