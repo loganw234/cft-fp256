@@ -3164,8 +3164,14 @@ says so.
 - The rest of `verify/run.sh`: nothing under `host/src/` changed, so
   the library gates certify the same library. No runner stage was
   added; `verify/run.sh` was deliberately left alone.
-- The device-era exponents (19937, 21701, 23209, 44497) are wired into
-  `--set device` with the checkpoint and only partially run; the doc
-  records how far one got and that it resumed.
+- Of the device-era exponents (19937, 21701, 23209, 44497), only
+  **19937** was run - and it was run to a verdict: **2^19937 - 1 is
+  PRIME**, the twenty-fourth Mersenne prime, 6,002 decimal digits,
+  19,935 squarings and 610 million exact limb products across THREE
+  separate invocations (300 s, then 60 s, then 53 s) with the
+  checkpoint carrying the residue between them and flags 0x00
+  throughout. Python's big integers agree, verdict and res64. 21701,
+  23209 and 44497 were not run; 44497 is about eleven times 19937's
+  work, which is 80 minutes here.
 - `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
   ABI version were left to the integrator, as at 0.7.

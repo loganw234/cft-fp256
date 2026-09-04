@@ -599,11 +599,23 @@ waited on.
 ```
 
 then `--resume` for sixty seconds more picks it up at 14,303 and
-reaches 17,362, at 1,560,916 limb products a second - so P = 19937 is a
-seven-minute run on this backend rather than an unreachable one, and
-the checkpoint is what makes it a background job:
+reaches 17,362 at 1,560,916 limb products a second, and a third
+`--resume` finishes it:
 
-<!--DEVICEERA-->
+```
+  P = 19937  b = 114  L = 175  d =  13  19935 squarings, 30625 limb products each
+       2^19937 - 1 is PRIME     res64 0000000000000000   53.200 s, 1481174 limb products/s
+  flags seen     0x00
+  status word    0x00 (agrees with the union above)
+```
+
+**2^19937 - 1 - the twenty-fourth Mersenne prime, 6,002 decimal
+digits - verified across three separate invocations**, 19,935 squarings
+and 610 million exact limb products in total, with the checkpoint
+carrying the residue between them and not one flag raised. Python's
+big integers agree, verdict and res64. The whole thing took about seven
+minutes of wall clock across the three, and needed no more than a
+minute of attention at a time; that is what the checkpoint is for.
 
 21701, 23209 and 44497 have not been run. Their cost is `L^2 (P-2)`
 with `L ~ P/114`, so 44497 is about (44497/19937)^3 = 11 times 19937's
@@ -817,11 +829,16 @@ Two orders, not six.
 
 The whole set of Mersenne prime exponents up to 11213 - eleven primes
 and the two composite controls, 3,376 decimal digits at the top -
-verifies in about three minutes on one thread, with every residue
-reproducible bit for bit and the exactness carried by a flag. The next
-four exponents up (19937, 21701, 23209, 44497) are wired into
-`--set device` with the checkpoint, so the tool can be left to run and
-resumed; they are the device-era targets and are not claimed here.
+verifies in **212 seconds** on one thread, with every residue
+reproducible bit for bit and the exactness carried by a flag. One rung
+further, **2^19937 - 1 (6,002 digits) verifies in about seven minutes**
+across three resumed invocations. 21701, 23209 and 44497 are wired in
+and not run.
+
+In exponent that is about four orders of magnitude below the record
+(19,937 against 136,279,841). What it is *not* is small: the residues
+are 6,002-digit integers, squared 19,935 times, and every one of those
+squarings is exact by certificate rather than by argument.
 
 ---
 
