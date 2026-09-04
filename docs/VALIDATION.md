@@ -2997,9 +2997,9 @@ Near the tip `c = -2` the set is self-similar with ratio 4; every real
 `-2 + (i/8)*4^-p` needs exactly `2p + 5` significand bits, which the
 tool computes from the format's measured `p` and refuses if the format
 is too narrow. So a sign change of `z_p` on that segment brackets a
-period-`p` nucleus, and 320 candidates in one call plus about 135
-bisection steps land on it - 85 ms, no Newton, no seed, no published
-coordinate copied in. At `p = 51` that is `-2 + 2.9196544e-30`, a
+period-`p` nucleus, and 320 candidates in one call plus 130 bisection
+steps land on it - 85 ms, no Newton, no seed, no published coordinate
+copied in. At `p = 51` that is `-2 + 2.9196544e-30`, a
 240-digit binary256 number whose orbit is superattracting and therefore
 bounded past 100,000 iterations.
 
@@ -3038,11 +3038,13 @@ about 14 seconds.
 | the chain | recomputed with `hashlib`, identical |
 | refusals | a width that is not a power of two, a centre the format cannot hold, an unknown option |
 
-mpmath is optional; when it is absent the script prints a loud SKIP
-naming the four rows that are then missing, rather than passing
-quietly. That line exists because writing the negative controls found
-the control script putting a different interpreter first on PATH, and
-four rows vanished without a word.
+mpmath is optional; when it is absent the script prints a SKIP naming
+the four rows that are then missing, and its summary line becomes
+"ZOOM CHECK OK against the golden model - but mpmath was MISSING, so
+nothing here checked the domain" rather than the usual one. That exists
+because writing the negative controls found the control script putting
+a different interpreter first on PATH, and four rows vanished without a
+word.
 
 ### The binary64-versus-binary256 result
 
@@ -3093,29 +3095,31 @@ with the golden model, and bit identity between the engines.
 ### The measurements
 
 Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
-`gcc -O2`), 2026-09-04, box busy with other work - about +-15%
-run-to-run, so medians of five. `--ref-iters 100000 --no-pixels`:
+`gcc -O2`), 2026-09-04. A shared box: the same measurement taken while
+other work ran came back about 25% lower across the board, so every row
+is a median of five and the ratios are the result rather than the
+absolutes. `--ref-iters 100000 --no-pixels`:
 
 | format | engine | reference iterations/s | elementwise ops/s |
 |---|---|---|---|
-| fp256 | program | 131,448 | 1,051,584 |
-| fp256 | loop | 116,401 | 931,208 |
-| fp128 | program | 208,907 | 1,671,256 |
-| fp64 | program | 393,947 | 3,151,576 |
-| fp32 | program | 445,421 | 3,563,368 |
+| fp256 | program | 174,462 | 1,395,696 |
+| fp256 | loop | 162,374 | 1,298,992 |
+| fp128 | program | 275,562 | 2,204,496 |
+| fp64 | program | 450,980 | 3,607,840 |
+| fp32 | program | 493,293 | 3,946,344 |
 
-The pixel batch is 380,131 pixel-iterations/s at binary64 - 8.3 million
-elementwise operations a second at 23 per pixel-iteration - flat in the
-batch size within the box's spread, with an identical pixel chain from
-batch 64 to batch 16,384.
+The pixel batch is 399,782 pixel-iterations/s at binary64 - about 9.2
+million elementwise operations a second at 23 per pixel-iteration -
+375,000 to 411,000 from batch 64 to batch 16,384, with an identical
+pixel chain at every one.
 
-The headline frame: 100,000 reference iterations at fp256 in 0.72 s
+The headline frame: 100,000 reference iterations at fp256 in 0.54 s
 through **98 library calls** (the host loop issues 800,000), then 4,096
-pixels in 5.1 s: 4,010 escaped, 0 glitched, 86 interior, escape
+pixels in 4.6 s: 4,010 escaped, 0 glitched, 86 interior, escape
 iterations 307..3227, orbit chain
 `8cf49c0b2cdcf6bf899ba7fbc763aa5ee82449807578052f20934cc365afc3e4`.
 
-**The sequencer's margin here is only 1.1x to 1.4x**, against 1.5x to
+**The sequencer's margin here is only 1.06x to 1.16x**, against 1.5x to
 2.1x for the Collatz explorer, and the reason is structural rather than
 disappointing: a reference orbit is ONE lane, so the program saves
 per-call dispatch on a call that was doing one element's work anyway.

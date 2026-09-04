@@ -71,7 +71,8 @@ So: evaluate `z_p` over 320 candidates - one lane per candidate, one
 library call - take the first sign change, and bisect until the
 interval is one ulp wide, keeping the endpoint whose `|z_p|` is
 smaller. At `p = 51` (the default) that is 320 lanes for the scan and
-about 135 bisection steps, roughly 85 ms in total, and it lands on
+130 bisection steps - the bracket starts `2^-105` wide and one ulp near
+`|c| = 2` is `2^-235` - roughly 85 ms in total, and it lands on
 
     -1.9999999999999999999999999999970803456017437624325096395786848\
      5567954185763041022613779833013185032264663712978841176727500959\
@@ -208,8 +209,8 @@ the loop iterates, shared by every lane. Two shapes would do it, and
 either is a small change:
 
 - a fourth stream read by index `iteration` rather than `lane` - call
-  it the *sequence* stream - so `2 z_k` and `2 zi_k` arrive the way `a`,
-  `b` and `c` already do; or
+  it the *sequence* stream - so `2 zr_k` and `2 zi_k` arrive the way
+  `a`, `b` and `c` already do; or
 - a constant bank addressable by the loop counter, which is the same
   thing with the vector in instruction memory.
 
@@ -311,10 +312,10 @@ The reference is rounded once into binary64 with `cft_convert` - which
 is what the technique asks for, since the product `2 z_k d` needs the
 reference only to binary64's own relative accuracy - and each iteration
 is 23 elementwise operations over the live pixels: nine for the step
-(four fused multiply-adds for the real part including one on a negated
-operand, two for the imaginary part, an exact doubling and a negate),
-four to form `|Z_{k+1} + d|^2`, and ten for the two tests and the
-masked commit. Survivors are compacted to the front every 32
+(four fused multiply-adds for the real part, three for the imaginary,
+one exact doubling and one negate - the negate is how `- di^2` becomes
+an FMA rather than a multiply and a subtract), four to form
+`|Z_{k+1} + d|^2`, and ten for the two tests and the masked commit. Survivors are compacted to the front every 32
 iterations; an element's trajectory depends on its own values and
 nothing else, so where it sits in the array cannot change what it
 computes - the same reason the sequencer may compact lanes.
@@ -414,8 +415,8 @@ proves the derivation right.
 
 Two honest notes about the shape. The file is **O(the orbit)**: 245
 bytes a point, so 24.5 MB at 100,000 iterations, and writing one costs
-about as long as computing the orbit. Checkpointing is opt-in for that
-reason. And the **pixel phase does not checkpoint** - it is one batch of
+more than computing the orbit does - 1.31 s against 0.54 s.
+Checkpointing is opt-in for that reason. And the **pixel phase does not checkpoint** - it is one batch of
 independent elements, like the Collatz explorer's deep mode; its
 determinism property is batch-size independence rather than resume, and
 it is tested as such.
@@ -466,11 +467,18 @@ The gate on this tree:
     ZOOM CHECK OK - the tool, the golden model and mpmath agree
 
 about 14 seconds. mpmath is optional - the golden-model half of the
-check needs nothing but Python - and when it is missing the script says
-so, loudly, in the words the repository's own rule asks for: a log that
-quietly checked nothing must not read as a pass. Writing the negative
-controls found exactly that, because the control script had put a
-different interpreter first on PATH and four rows were silently absent.
+check needs nothing but Python - and when it is missing the script
+prints a SKIP naming the four rows it is not running, and its summary
+line says
+
+    ZOOM CHECK OK against the golden model - but mpmath was MISSING,
+    so nothing here checked the domain
+
+rather than the usual one. That is the repository's own rule applied to
+this gate: a log that quietly checked nothing must not read as a pass.
+It is here because writing the negative controls found exactly that -
+the control script had put a different interpreter first on PATH, and
+four rows vanished without a word.
 
 ---
 
@@ -563,9 +571,12 @@ escape map as a 4,109-byte PGM if you want to look at them.
 ## Measured throughput
 
 Software backend, single thread, on DESKTOP-T33SK86 (Windows 11,
-MINGW64, `gcc -O2`), 2026-09-04, box otherwise busy with other work -
-run-to-run spread is about +-15%, so these are **medians of five**. The
-command for one row is
+MINGW64, `gcc -O2`), 2026-09-04. This is a shared box: the same
+measurement taken while other work was running came back about 25%
+lower across the board, so every row here is a **median of five**, and
+the spread within a set of five is about +-10%. Treat the ratios as the
+result and the absolute numbers as an order of magnitude. The command
+for one row is
 
 ```
 ./cft-zoom --format fp256 --engine program --ref-iters 100000 \
@@ -576,41 +587,43 @@ with `--format` and `--engine` varied.
 
 | format | engine | reference iterations/s | elementwise ops/s |
 |---|---|---|---|
-| fp256 | program | 131,448 | 1,051,584 |
-| fp256 | loop | 116,401 | 931,208 |
-| fp128 | program | 208,907 | 1,671,256 |
-| fp128 | loop | 189,771 | 1,518,168 |
-| fp64 | program | 393,947 | 3,151,576 |
-| fp64 | loop | 348,318 | 2,786,544 |
-| fp32 | program | 445,421 | 3,563,368 |
-| fp32 | loop | 312,545 | 2,500,360 |
+| fp256 | program | 174,462 | 1,395,696 |
+| fp256 | loop | 162,374 | 1,298,992 |
+| fp128 | program | 275,562 | 2,204,496 |
+| fp128 | loop | 237,276 | 1,898,208 |
+| fp64 | program | 450,980 | 3,607,840 |
+| fp64 | loop | 387,555 | 3,100,440 |
+| fp32 | program | 493,293 | 3,946,344 |
+| fp32 | loop | 465,075 | 3,720,600 |
 
 Eight arithmetic operations an iteration, so the ops column is the
-iterations column times eight. The pixel batch, 64 x 64 pixels at
-`--zoom-exp 196`, is **380,131 pixel-iterations/s** (median of five), or
-8.3 million binary64 elementwise operations a second at 23 operations
-a pixel-iteration. Batch 64 through 16,384 all land between 336,000 and
-390,000 - inside this box's run-to-run spread, so flat as far as the
-measurement can tell - and every one of them returns the identical
+iterations column times eight exactly - the tail-program rule above is
+what makes that exact rather than approximate. The pixel batch, 64 x 64
+pixels at `--zoom-exp 196`, is **399,782 pixel-iterations/s** (median of
+five), or about 9.2 million binary64 elementwise operations a second at
+23 operations a pixel-iteration. Batch 64 through 16,384 land between
+375,000 and 411,000, rising slightly with the batch as the per-call
+overhead is amortised, and every one of them returns the identical
 pixel chain `d4c3fce95f476184...`, which is the property that actually
 matters.
 
 Three things in those numbers are worth more than the numbers:
 
-- **The sequencer route is only 1.1x to 1.4x faster than the host loop
-  here**, where the Collatz explorer saw 1.5x to 2.1x. The reason is
-  structural and worth stating: a reference orbit is ONE lane, so the
-  program saves per-call dispatch on a call that was doing one
+- **The sequencer route is only 1.06x to 1.16x faster than the host
+  loop here**, where the Collatz explorer saw 1.5x to 2.1x. The reason
+  is structural and worth stating: a reference orbit is ONE lane, so
+  the program saves per-call dispatch on a call that was doing one
   element's work anyway. What the sequencer buys is dispatch amortised
   over lanes and, on a device, a memory round trip per step - neither
   of which a single-lane orbit on a software backend can show. The 98
   library calls against 800,000 is the honest way to state its
   contribution here.
-- **The pixel half is 20x faster per operation than the reference
-  half**, because it is 4,096 elements a call instead of one. That
-  asymmetry is the whole shape of perturbation rendering: one expensive
-  sequential orbit, then an embarrassingly parallel frame.
-- **fp256 is 3.0x slower than fp64 per iteration** - not 4x, not 10x -
+- **The pixel half is 6.6x faster per operation than the reference
+  half**, because it is 4,096 elements a call instead of one - and it
+  is a narrower format. That asymmetry is the whole shape of
+  perturbation rendering: one expensive sequential orbit, then an
+  embarrassingly parallel frame.
+- **fp256 is 2.6x slower than fp64 per iteration** - not 4x, not 10x -
   which is the same shape `docs/BENCHMARKS.md` reports for the
   elementwise operations.
 
@@ -622,10 +635,10 @@ The headline frame:
 
 | | |
 |---|---|
-| reference | 100,000 iterations at fp256, 0.72 s, **98 library calls** |
+| reference | 100,000 iterations at fp256, 0.54 s, **98 library calls** |
 | smallest \|z\|^2 | 8.45406e-87 at k = 51 |
 | pixels | 4,010 escaped, 0 glitched, 86 interior, escape iterations 307..3227 |
-| pixel work | 1,862,720 pixel-iterations at fp64, 5.1 s |
+| pixel work | 1,862,720 pixel-iterations at fp64, 4.6 s |
 | orbit flags | 0x10 (inexact only) |
 | orbit chain | `8cf49c0b2cdcf6bf899ba7fbc763aa5ee82449807578052f20934cc365afc3e4` |
 | pixel chain | `d4c3fce95f476184f5fe065f8266643821d7af473ddc87fee6bcc12bd3059e7a` |

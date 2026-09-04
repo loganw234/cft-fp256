@@ -779,6 +779,40 @@ static void orbit_engine_free(orbit_engine *E)
         cft_program_free(E->prog);
 }
 
+/* A program is compiled for its trip count, so the LAST chunk of a run
+ * gets its own image rather than running the full count and throwing
+ * the overrun away. That is not only tidiness: the flag word is a union
+ * over the call, so a call that computed iterations the host discards
+ * would report flags for work that is not in the result. This happens
+ * at most once per run. */
+static void orbit_engine_reps(orbit_engine *E, uint32_t reps)
+{
+    uint64_t ins[32];
+    uint8_t consts[N_ORBK * MAX_ESZ];
+    uint8_t *img;
+    size_t bytes = 0;
+    cft_status st;
+    int i;
+
+    if (reps == E->reps)
+        return;
+    E->reps = reps;
+    if (!E->use_program)
+        return;
+    cft_program_free(E->prog);
+    free(E->dep);
+    E->n_insns = orbit_insns(ins, reps);
+    for (i = 0; i < N_ORBK; i++)
+        memcpy(consts + (size_t)i * E->fi->esz, E->k[i], E->fi->esz);
+    img = pack_program(E->fi, ins, E->n_insns, consts, N_ORBK,
+                       2u * reps, &bytes);
+    st = cft_program_load(DEV, img, bytes, &E->prog);
+    free(img);
+    if (st != CFT_OK)
+        die_st("cft_program_load (orbit tail)", st);
+    E->dep = (uint8_t *)xcalloc((size_t)reps * 2, E->fi->esz);
+}
+
 /* Advance the orbit by up to `reps` iterations from (zr, zi), writing
  * the points into out_r/out_i. Returns how many iterations ran; a
  * count below `reps` means |z|^2 passed 4 on the next one. */
@@ -1016,6 +1050,7 @@ typedef struct {
     uint64_t  pixel_work;
     uint32_t  esc_min, esc_max;
     uint64_t  ops_ref, ops_pix;   /* elementwise operations issued */
+    uint32_t  flags_ref;          /* the union over the orbit alone */
 } runstate;
 
 /* ---- the hash chains --------------------------------------------- */
@@ -1400,11 +1435,17 @@ static int run_reference(runstate *R, double t0, double *tckpt)
     int stopped = 0;
 
     while (R->k < O->ref_iters && !R->escaped_at) {
-        uint32_t did = orbit_pass(&R->eng, R->zr, R->zi, br, bi);
-        uint64_t take = did;
-        uint64_t j;
-        if (take > O->ref_iters - R->k)
-            take = O->ref_iters - R->k;
+        uint64_t remain = O->ref_iters - R->k;
+        uint32_t did;
+        uint64_t take, j;
+        /* the final partial chunk gets a program of its own length, so
+         * that no iteration is computed and then discarded */
+        if (remain < (uint64_t)O->reps)
+            orbit_engine_reps(&R->eng, (uint32_t)remain);
+        did = orbit_pass(&R->eng, R->zr, R->zi, br, bi);
+        take = did;
+        if (take > remain)
+            take = remain;
         for (j = 0; j < take; j++) {
             uint64_t idx = R->k + j + 1;
             memcpy(R->orb_r + idx * esz, br + j * esz, esz);
@@ -1416,7 +1457,7 @@ static int run_reference(runstate *R, double t0, double *tckpt)
             memcpy(R->zr, R->orb_r + R->k * esz, esz);
         if (take)
             memcpy(R->zi, R->orb_i + R->k * esz, esz);
-        if (did < O->reps && take == did) {
+        if (did < R->eng.reps && take == did) {
             /* the lane went inactive: |z_k|^2 has passed 4 */
             R->escaped_at = R->k;
         }
@@ -1894,12 +1935,12 @@ static void report(runstate *R, double t_ref, double t_pix,
                "esc_max,pixel_iterations,ref_seconds,pixel_seconds,"
                "ref_iters_per_s,pixel_iters_per_s,pixels_per_s,flags,"
                "chain,pixchain,compare_differ,compare_total,"
-               "centre_re,centre_im,ref_ops,pixel_ops\n");
+               "centre_re,centre_im,ref_ops,pixel_ops,orbit_flags\n");
         printf("%s,%s,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%u,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%s,%" PRIu64 ",%s,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%u,%u,%" PRIu64
                ",%.6f,%.6f,%.1f,%.1f,%.1f,0x%02x,%s,%s,%" PRIu64
-               ",%" PRIu64 ",%s,%s,%" PRIu64 ",%" PRIu64 "\n",
+               ",%" PRIu64 ",%s,%s,%" PRIu64 ",%" PRIu64 ",0x%02x\n",
                backend, cft_format_name(fi->fmt),
                O->use_program ? "program" : "loop",
                (uint64_t)O->batch, (uint64_t)O->reps, O->period,
@@ -1909,7 +1950,7 @@ static void report(runstate *R, double t_ref, double t_pix,
                R->n_escaped ? R->esc_min : 0, R->esc_max, R->pixel_work,
                t_ref, t_pix, rps, pps, eps, (unsigned)status,
                chain, pchain, cmp_diff, cmp_tot, cr, ci,
-               R->ops_ref, R->ops_pix);
+               R->ops_ref, R->ops_pix, (unsigned)R->flags_ref);
         return;
     }
 
@@ -1935,8 +1976,9 @@ static void report(runstate *R, double t_ref, double t_pix,
     printf("  library calls %" PRIu64 " for the orbit\n", R->eng.calls);
     if (!O->no_pixels) {
         printf("  pixels        %" PRIu64 " escaped, %" PRIu64
-               " glitched, %" PRIu64 " interior\n",
-               R->n_escaped, R->n_glitched, R->n_interior);
+               " glitched, %" PRIu64 " interior, batch %" PRIu64 "\n",
+               R->n_escaped, R->n_glitched, R->n_interior,
+               (uint64_t)O->batch);
         if (R->n_escaped)
             printf("                escape iterations %u..%u\n",
                    R->esc_min, R->esc_max);
@@ -1949,6 +1991,14 @@ static void report(runstate *R, double t_ref, double t_pix,
         printf("  compared      %" PRIu64 " of %" PRIu64
                " pixels differ from %s\n", cmp_diff, cmp_tot,
                O->compare_path);
+    /* Two unions, because they say different things. The first is what
+     * the reference orbit itself raised; the second adds the minimum-
+     * magnitude pass, the pixels and the conversions. Inexact is
+     * EXPECTED in both and carries no information about correctness -
+     * see docs/ZOOM.md - so what is being asserted here is the absence
+     * of everything else, which the tool checks after every call. */
+    printf("  orbit flags   0x%02x  (inexact is expected; anything else "
+           "stops the run)\n", (unsigned)R->flags_ref);
     printf("  flags seen    0x%02x%s\n", (unsigned)FLAGS_SEEN,
            FLAGS_TRUSTED ? "" : "  (this backend cannot read flags)");
     /* The device's 754 status word (7.1), lowered once after the setup
@@ -2236,6 +2286,7 @@ int main(int argc, char **argv)
     stopped = run_reference(&R, t0, &tckpt);
     t_ref = now_s() - t0;
     R.ops_ref = OPS_ISSUED;
+    R.flags_ref = FLAGS_SEEN;
     if (R.orbf)
         fclose(R.orbf);
     /* After the timed phase, and outside it: a statistic over the

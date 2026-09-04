@@ -813,7 +813,13 @@ def main():
     if FAILURES:
         print("ZOOM CHECK FAILED")
         return 1
-    print("ZOOM CHECK OK - the tool, the golden model and mpmath agree")
+    if HAVE_MPMATH:
+        print("ZOOM CHECK OK - the tool, the golden model and mpmath agree")
+    else:
+        # The summary has to say what was NOT checked, or a run without
+        # mpmath reads exactly like a run with it.
+        print("ZOOM CHECK OK against the golden model - but mpmath was "
+              "MISSING, so nothing here checked the domain")
     return 0
 
 
