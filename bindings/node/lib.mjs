@@ -70,6 +70,15 @@ const FLAG_NAMES = [
   [FLAG_INEXACT, "inexact"],
 ];
 
+/** 5.7.4's exceptionGroup of every exception this library defines -
+ *  CFT_FLAGS_ALL, which is a MACRO in cft.h and so cannot be read out
+ *  of the module the way an entry point can. DERIVED here from the
+ *  five bits above, exactly as cft.h derives it from the
+ *  cft_exception enumeration, and then checked against the module's
+ *  own answer by audit(): a sixth flag would otherwise leave this
+ *  line quietly meaning "all but one". */
+export const FLAGS_ALL = FLAG_NAMES.reduce((a, [b]) => a | b, 0);
+
 /** The IEEE exception names set in a flag word. An unknown bit is
  *  reported as a number rather than dropped: a flag word this package
  *  cannot name is news, not noise. */
@@ -147,6 +156,45 @@ export const CHARACTER_FNS = ["from_decimal", "from_hex", "to_decimal",
                               "to_hex", "get_payload", "set_payload",
                               "set_payload_signaling"];
 
+/** The four magnitude forms of minimum and maximum (754-2019 9.6), in
+ *  the standard's own spelling - which is what the `<fmt>-minmaxmag`
+ *  sets carry, because the set is a statement about the standard
+ *  rather than about this repository's C names. MINMAG_METHOD maps
+ *  each to the Context method that drives it.
+ *
+ *  Not opcodes, and not because of an accident of numbering: each is a
+ *  comparison of two sign-cleared encodings and then a SELECTION of
+ *  one operand, with no rounding, no attribute and no arithmetic - so
+ *  there is nothing for a device to accelerate and one file per
+ *  format rather than one per attribute. The four of 9.6 that ARE
+ *  opcodes - min, max, minnum, maxnum - stay in the elementwise sets. */
+export const MINMAX_MAG = ["minimumMagnitude", "minimumMagnitudeNumber",
+                           "maximumMagnitude", "maximumMagnitudeNumber"];
+export const MINMAG_METHOD = {
+  minimumMagnitude: "minMag", minimumMagnitudeNumber: "minnumMag",
+  maximumMagnitude: "maxMag", maximumMagnitudeNumber: "maxnumMag",
+};
+
+/** The six formatOf operations of 754-2019 clause 5.4.1, by the short
+ *  name the set files and the C entry points carry, mapped to their
+ *  arity and to the Context method. The standard spells each
+ *  "formatOf-addition" and so on; the sets drop the prefix every one
+ *  of them shares, and this package's methods keep the standard's
+ *  "formatOf" because that is the operation's name.
+ *
+ *  These are the only operations here whose case has TWO formats, so
+ *  they get one file per ORDERED PAIR per attribute - 80 sets - and
+ *  their own batch entry point, mapFormatOf(). map() cannot carry
+ *  them: its arrays are all one format and its result is the
+ *  context's, and a formatOf call's destination is neither. */
+export const FORMATOF_FNS = ["add", "sub", "mul", "div", "sqrt", "fma"];
+export const FORMATOF_ARITY = { add: 2, sub: 2, mul: 2, div: 2,
+                                sqrt: 1, fma: 3 };
+export const FORMATOF_METHOD = {
+  add: "formatOfAdd", sub: "formatOfSub", mul: "formatOfMul",
+  div: "formatOfDiv", sqrt: "formatOfSqrt", fma: "formatOfFma",
+};
+
 // ---------------------------------------------------------------------
 // The module
 // ---------------------------------------------------------------------
@@ -161,6 +209,39 @@ let cached = null;
 export function loadModule() {
   if (!cached) cached = instantiate();
   return cached;
+}
+
+/** 754-2019 5.7.1's three conformance predicates, "true if and only if
+ *  this programming environment conforms to" the named version.
+ *
+ *  Free functions rather than Context methods (Context has them too)
+ *  because the C takes no device and no format: these describe the
+ *  environment, not a number, and are answerable before anything is
+ *  open. They are constants of the library, so they are asked of the
+ *  MODULE rather than restated here - a package that answered these
+ *  out of its own opinion would be making the claim itself, which is
+ *  the one thing 5.7.1 exists to stop. cft.h says what each rests on;
+ *  docs/COMPLIANCE.md is the clause-by-clause statement behind the
+ *  2019 answer.
+ *
+ *  2008 is FALSE and not because anything is missing: 754-2008
+ *  REQUIRED minNum/maxNum/minNumMag/maxNumMag, 754-2019 replaced them
+ *  with the recommended operations of 9.6, and the two differ on a
+ *  signaling NaN. This library implements the 2019 semantics, so it
+ *  does not provide 2008's required operations. */
+export async function is754version1985() {
+  const { C } = await loadModule();
+  return C.is754version1985() !== 0;
+}
+
+export async function is754version2008() {
+  const { C } = await loadModule();
+  return C.is754version2008() !== 0;
+}
+
+export async function is754version2019() {
+  const { C } = await loadModule();
+  return C.is754version2019() !== 0;
 }
 
 async function instantiate() {
@@ -253,6 +334,54 @@ async function instantiate() {
     augmentedAdd: M.cwrap("cftw_augmented_add", n, [n,n,n,n,n,n,n,n]),
     augmentedSub: M.cwrap("cftw_augmented_sub", n, [n,n,n,n,n,n,n,n]),
     augmentedMul: M.cwrap("cftw_augmented_mul", n, [n,n,n,n,n,n,n,n]),
+
+    // ABI 0.7, package B: the status word of 7.1 and 5.7.4's six
+    // operations over it. The word lives on the DEVICE handle, so
+    // every one of these takes the device and nothing else does the
+    // accumulating - core.mjs's Context.flags reads this word rather
+    // than keeping a second one beside it, because two words are two
+    // answers waiting to disagree.
+    //
+    // flagsAll projects cft.h's CFT_FLAGS_ALL, which is a macro and
+    // therefore unreachable from here any other way; audit() checks it
+    // against FLAGS_ALL above. testSavedFlags takes no device at all -
+    // 5.7.4 puts the saved flags in the first operand so that it can
+    // be a pure predicate.
+    flagsAll:     M.cwrap("cftw_flags_all", n, []),
+    lowerFlags:   M.cwrap("cftw_lower_flags", null, [n, n]),
+    raiseFlags:   M.cwrap("cftw_raise_flags", null, [n, n]),
+    testFlags:    M.cwrap("cftw_test_flags", n, [n, n]),
+    saveAllFlags: M.cwrap("cftw_save_all_flags", n, [n]),
+    restoreFlags: M.cwrap("cftw_restore_flags", null, [n, n, n]),
+    testSavedFlags: M.cwrap("cftw_test_saved_flags", n, [n, n]),
+
+    // ABI 0.7, package B: 5.7.1's three conformance predicates. No
+    // device and no format - they describe the programming
+    // environment, not a number, and are safe before cft_open().
+    is754version1985: M.cwrap("cftw_is754version1985", n, []),
+    is754version2008: M.cwrap("cftw_is754version2008", n, []),
+    is754version2019: M.cwrap("cftw_is754version2019", n, []),
+
+    // ABI 0.7, package B: 9.6's four magnitude forms. No rounding
+    // argument, because they select an operand rather than computing
+    // a value, and no bus word, because no device pass is issued.
+    minMag:       M.cwrap("cftw_min_mag", n, [n,n,n,n,n,n,n]),
+    maxMag:       M.cwrap("cftw_max_mag", n, [n,n,n,n,n,n,n]),
+    minnumMag:    M.cwrap("cftw_minnum_mag", n, [n,n,n,n,n,n,n]),
+    maxnumMag:    M.cwrap("cftw_maxnum_mag", n, [n,n,n,n,n,n,n]),
+
+    // ABI 0.7, package A: clause 5.4.1's formatOf arithmetic. TWO
+    // formats per call - sfmt for a, b and c, dfmt for d - so the
+    // operand and result buffers are different widths in the same
+    // call, which nothing else here does except convert. The bus word
+    // is back: the widening direction issues a real device pass
+    // underneath.
+    formatOfAdd:  M.cwrap("cftw_formatof_add", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatOfSub:  M.cwrap("cftw_formatof_sub", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatOfMul:  M.cwrap("cftw_formatof_mul", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatOfDiv:  M.cwrap("cftw_formatof_div", n, [n,n,n,n,n,n,n,n,n,n]),
+    formatOfSqrt: M.cwrap("cftw_formatof_sqrt", n, [n,n,n,n,n,n,n,n,n]),
+    formatOfFma:  M.cwrap("cftw_formatof_fma", n, [n,n,n,n,n,n,n,n,n,n,n]),
   };
 
   // ABI 0.3's nine, 0.4's eleven, 0.5's nine and 0.6's ten - the
@@ -307,6 +436,16 @@ function audit(M, C) {
   for (const [name, value] of [["fp32", FP32], ["fp64", FP64],
                                ["fp128", FP128], ["fp256", FP256]])
     check(name, value, C.formatName(value));
+  // CFT_FLAGS_ALL is a macro, so FLAGS_ALL above is this package's own
+  // derivation of it rather than a value read out of the library.
+  // Since ABI 0.7 the module can be asked, and is: the mask goes into
+  // every collective lowerFlags/restoreFlags call, so a disagreement
+  // would silently leave one exception uncleared.
+  const moduleAll = C.flagsAll() >>> 0;
+  if (moduleAll !== FLAGS_ALL)
+    wrong.push(`CFT_FLAGS_ALL is 0x${moduleAll.toString(16)} in the ` +
+               `module, 0x${FLAGS_ALL.toString(16)} here - the library ` +
+               `defines an exception this package does not name`);
   if (wrong.length)
     throw new Error(
       "this package's transcription of cft.h disagrees with the module " +
