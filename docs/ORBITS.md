@@ -335,10 +335,12 @@ therefore a loop-engine route, and `--rsqrt newton` exists so that the
 two engines have a step they can **both** run - which they then have
 to run bit for bit.
 
-The brief's other option - "1/r^3 stays a host-side composed call
-between program passes" - fails on obstacle (1) rather than on this
-one: a program pass that resumed at a force evaluation would need four
-inputs. The two obstacles are independent and either is fatal alone.
+The obvious way round (2) - leave `1/r^3` as a host-side composed call
+*between* program passes, so that each pass is drift-and-`r^2` or
+kick-and-drift - dies on (1) instead: a pass that resumed at the force
+evaluation would need four inputs, because every point inside a
+leapfrog step has all four state values live. The two obstacles are
+independent and either is fatal alone.
 
 **What the sequencer would need to run this workload as one program:**
 a way to load more than three registers, and either a callable
@@ -629,6 +631,16 @@ barely at all on the scheme.
 
 **The same floor sits under two different truncation errors**, which
 is the whole point of carrying two schemes.
+
+The sizes are deliberate. At `--rsqrt exact` the Kepler step costs 9
+elementwise issues and 2 composed operations per element-step per
+substep, so leapfrog over 1,024,000 steps and 4 members is
+`1.024e6 x 4 x 11 = 4.5e7` library element-operations and Yoshida
+three times that; the outer solar system over 300 years and 8 members
+is `1.75e7`. All four sit inside the `1e7`-to-`1e8` band that keeps a
+binary256 run on this backend to a few minutes, and the tool prints
+both counts (`elementwise` and `composed`) so the arithmetic can be
+checked against the clock.
 
 ### The floor across the whole ladder
 
