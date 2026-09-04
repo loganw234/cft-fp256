@@ -912,6 +912,168 @@ device pass: the work is exact integer division and digit generation,
 so the device argument is context and the results are bit-identical
 across backends by construction.
 
+## The formatOf arithmetic across the binary formats (clause 5.4.1)
+
+The six arithmetic operations with the **operands in one binary format
+and the result in another**, rounded once, added 2026-09-03 as part of
+the 0.7 step: `cft_formatof_add`, `_sub`, `_mul`, `_div`, `_sqrt` and
+`_fma`, sixteen ordered pairs of formats apiece. 5.4.1 requires them,
+not as a convenience:
+
+> Implementations shall provide the following formatOf general-
+> computational operations, for destinations of all supported
+> arithmetic formats, and, for each destination format, for operands of
+> all supported arithmetic formats with the same radix as the
+> destination format:
+>     formatOf-addition(source1, source2)
+>     formatOf-subtraction(source1, source2)
+>     formatOf-multiplication(source1, source2)
+>     formatOf-division(source1, source2)
+>     formatOf-squareRoot(source)
+>     formatOf-fusedMultiplyAdd(source1, source2, source3)
+
+Every arithmetic entry point before these took one `cft_format` and
+used it for the operands and the result both. These take two.
+
+**Every exception belongs to the destination.** `round_pack` decides
+inexact, tininess (after rounding, as everywhere else in this
+contract), underflow and overflow against the DESTINATION's p, emin and
+emax. So a product of two unremarkable binary64 values overflows a
+binary32 destination and says so; a difference of two lands on binary32's
+subnormal grid and raises underflow with inexact; and the square of
+binary32's least subnormal, which vanishes in binary32, is an exact
+binary64 normal. Specials are built in the destination too: a signaling
+NaN operand raises invalid (6.2.1) and delivers the destination's
+canonical quiet NaN.
+
+One consequence worth naming because it is where a transliteration goes
+wrong: `x + 0` is x exactly, but x is a value of the SOURCE format and
+the destination may not hold it. So it goes through the same single
+rounding as any other result rather than returning the operand's
+encoding, which is what the same-format addition does and is right
+there.
+
+### Narrow source, wide destination: a composition, and the tile still runs it
+
+When the destination is at least as wide as the source, every source
+value is exactly a destination value - the interchange ladder nests in
+significand bits and in exponent range both - so widening rounds
+nothing and
+
+    formatOf-op(sfmt -> dfmt) == op_dfmt(convert(a), convert(b), ...)
+
+with one rounding either way. libcft takes exactly that route in that
+direction, and the reason is not brevity: on a device backend the
+`cft_run` / `cft_div` / `cft_sqrt` underneath is a tile pass, so the
+arithmetic still runs where it would have run and `bus_out` carries its
+fault word. `python/tests/test_formatof.py` asserts the identity over
+every pair rather than trusting it.
+
+### Wide source, narrow destination: NOT a double rounding, for any of the six
+
+The other direction forms the exact result and rounds it ONCE against
+the destination's descriptor, through the same `cft_sf_round_pack` seam
+every other operation in this library rounds through. There is no tile
+pass in that direction and `bus_out` reads 0.
+
+**This corrects a claim docs/COMPLIANCE.md made at 0.6.** That document
+proposed computing division and square root in the source format and
+converting the answer down, on the strength of the standard result that
+double rounding through an intermediate of at least 2p + 2 bits is
+innocuous for the basic operations - and this ladder does satisfy 53 >=
+2x24 + 2, 113 >= 2x53 + 2 and 237 >= 2x113 + 2. **The rule does not
+apply here, and the difference is a hypothesis rather than a margin.**
+That theorem is about operands carrying the DESTINATION's precision p;
+its engine is the bound that a quotient of two p-bit values cannot come
+within 2^-(2p+2) of a p-bit midpoint without landing on it. Our
+operands carry the SOURCE's precision, and that bound says nothing
+about them.
+
+`python/cft_golden/formatof.py`'s `double_rounding_witness()`
+constructs the counterexample from the format descriptors alone, for
+division, square root and fused multiply-add, on every one of the six
+ordered narrowing pairs. Each puts the exact result a hair ABOVE a
+midpoint of the destination grid and closer to it than half an ulp of
+the intermediate, so the first rounding lands exactly ON the midpoint,
+the second ties to even, and the answer comes back one ulp low with the
+same flag word. At binary64 -> binary32:
+
+* **fusedMultiplyAdd** - `a = 1 + 2^-24` (the midpoint between
+  binary32's 1 and 1 + 2^-23, and a binary64 value), `b = 1`, `c =
+  2^-1074`. The product IS the midpoint; the addend is any positive
+  source value, so it can be put below the half-ulp of an intermediate
+  of ANY precision the source's exponent range can undercut. This is
+  the case no width rescues, and the one 9.5's cousin argument already
+  knew about.
+* **division** - `y = 1 + (2^29 - 1)x2^-52`, chosen so that the exact
+  product `m*y` misses the binary64 grid by exactly one unit in the last
+  place of that exact product, and `x` the binary64 value one such unit
+  above it. Then `x/y = m + 2^-76/y`, above the midpoint by about 2^-76
+  where binary64's half-ulp is 2^-53.
+* **squareRoot** - `m*m` needs 2 p_d + 1 bits, which every ordered pair
+  of this ladder holds, so it is a source value; the source value one
+  ulp above it has a root about a quarter of a source ulp above `m`.
+
+`python/tests/test_formatof.py` runs all eighteen, and the FMA family
+again against intermediates from 30 to 1000 bits, which is what
+"cannot be double rounded at any width" means when it is measured
+rather than asserted. `host/tests/formatof_check.py`, the published
+sets, `host/tools/mpfr_check.c` and `bindings/python/test_cftmpfr.py`
+all carry the same eighteen, and each asserts BOTH halves: the
+implementation agrees with the model, and the composed route disagrees
+with both. A witness that stopped separating the two would leave those
+harnesses checking that two identical things are identical, so that is
+a failure rather than a pass.
+
+Computing division and square root exactly is what needs a quotient and
+an integer root of a bignum, which the same-format library never had to
+form - `cft_div` and `cft_sqrt` reach their answers by Newton
+refinement on the tile instead. Both live in `host/src/formatof.c` as
+static helpers, the textbook shift-and-subtract, obviously exact and on
+no hot path.
+
+### Comparison across two binary formats (clause 5.11) is a composition
+
+5.11 asks for it and does not make it a formatOf operation, because a
+comparison has no destination format to round into:
+
+> Comparisons shall be exact and never overflow nor underflow.
+> ... Comparisons of two data of different binary formats shall be
+> exact, as if the data were converted to a common format with
+> unbounded exponent range and precision.
+
+On this ladder that common format is the wider of the two, and
+`cft_convert` into it is exact - so widening the narrower operand and
+then using `CFT_CMPLT` / `CFT_CMPLE` / `CFT_CMPEQ` or `cft_cmp_sig` IS
+the comparison the clause defines, not an approximation of it. A
+signaling NaN raises invalid on the way through the conversion exactly
+as it would have in the comparison, so the signal is neither lost nor
+doubled: the flag word is sticky and an OR of one raised bit with
+another raised bit is one raised bit.
+
+No entry point is added, and that is a statement rather than an
+omission. `python/cft_golden/formatof.py`'s `compare()` states the
+composition and `python/tests/test_formatof.py` checks it against exact
+rationals in both directions and at every ordered pair;
+`host/tests/cpp_api_test.cpp` checks it through the library and asserts
+the property that makes it 5.11 - that the widening raises nothing but
+the invalid a signaling NaN earns.
+
+### What each layer settles
+
+The layers share no code, as everywhere else in this contract:
+`python/tests/test_formatof.py` scores the model against exact
+rationals rounded by a reference written from clause 4.3 (and square
+root against the definition of correct rounding, by squaring rather
+than by taking a root); `host/tests/formatof_check.py` scores the C
+against the model over all sixteen pairs; `host/tools/mpfr_check.c`
+scores both against GNU MPFR, which is a FULL oracle here with no
+footnote - 5.4.1's definition is a literal description of `mpfr_add`
+and friends with the operand variables at the source precision and the
+result variable at the destination's; and the published
+`<sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl` sets carry the whole thing to
+anyone else's implementation.
+
 ## Subnormals
 
 Fully supported, in and out, never flushed - there is no FTZ/DAZ mode
@@ -1049,6 +1211,8 @@ Every claim above is a test somewhere, and the layers share no code:
 | `tb/test_fpfma_fp32.py` / `_fp256.py` | RTL datapath, streamed | golden model, bit-for-bit incl. flags |
 | `tb/test_krnl.py` | CSR + engine + AXI + steering + banks | golden model through the same interfaces XRT uses |
 | `host/tests/divsqrt_check.py` / `clause5_check.py` / `augmented_check.py` | the C library's ports of every contract operation | golden model, per-element flags (and, for 9.5, the pair identity in exact integers) |
+| `python/tests/test_formatof.py` | the clause-5.4.1 formatOf semantics and 5.11's cross-format comparison | exact rationals rounded by a reference written from 4.3, square root by squaring rather than by rooting, the widening composition identity, bit-identity with the single-format functions, and eighteen constructed double-rounding witnesses |
+| `host/tests/formatof_check.py` | the C library's port of all six formatOf operations over all sixteen ordered pairs | golden model, per-element flags, plus the witnesses and the same-format alias against cft_run/cft_div/cft_sqrt |
 | `host/tests/transcend_check.py` | the thirty-nine transcendentals, and again through the escalation path | golden model, per-element flags |
 | `host/tests/reduce_check.py` | all seven of clause 9.4 - the tree at every n, both composition identities, the scaled products' invariant | golden model, plus the library against itself for the identities |
 | `host/tools/divsqrt_soak.c` / `mpfr_check.c` | div/sqrt and the completion set at scale | the host CPU's own IEEE hardware; GNU MPFR (the only external oracle reaching fp128/fp256) |
@@ -1062,9 +1226,12 @@ What is deliberately NOT claimed yet: behaviour on a physical card
 For auditors with the standard open: format parameters 3.6 Table 3.5;
 roundToIntegral, nextUp/nextDown and remainder 5.3.1 (rint details
 5.9); scaleB and logB 5.3.3; fusedMultiplyAdd, division, squareRoot
-and the integer conversions 5.4.1; convertFormat 5.4.2; signaling
+and the integer conversions 5.4.1 (their formatOf forms, operands in one
+binary format and the destination in another, the same 5.4.1);
+convertFormat 5.4.2; signaling
 comparisons 5.6.1; classification predicates 5.7.2; totalOrder 5.10;
-quiet comparisons 5.11; the character-sequence conversions 5.12
+quiet comparisons 5.11 (and
+comparison across two binary formats, the same 5.11); the character-sequence conversions 5.12
 (the words 5.12.1, decimal 5.12.2, hexadecimal 5.12.3; their
 formatOf entries 5.4.2 and 5.4.3); NaN semantics 6.2 (binary NaN
 encodings and the payload field 6.2.1, payload recommendation

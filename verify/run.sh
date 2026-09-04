@@ -460,6 +460,19 @@ need host-cc python
 stage augmented "the clause-9.5 augmented operations vs the model: both outputs, flags, and the exact pair identity" -- \
   PY "$ROOT/host/tests/augmented_check.py"
 
+# The formatOf arithmetic of 754-2019 5.4.1. Its own stage rather than a
+# line inside clause5, because what it checks is different in kind: TWO
+# formats per call, sixteen ordered pairs, and the one family whose
+# every exception belongs to a format the operands are not in. It also
+# carries the eighteen double-rounding witnesses - the cases that
+# separate this implementation from the plausible one that rounds in the
+# source format and converts down - and asserts BOTH halves of each, so
+# a witness that stopped separating the two fails the stage rather than
+# quietly passing it.
+need host-cc python
+stage formatof "the clause-5.4.1 formatOf arithmetic vs the model: every ordered pair, the destination's exceptions, and the double-rounding witnesses" -- \
+  PY "$ROOT/host/tests/formatof_check.py"
+
 need host-cc python
 stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000

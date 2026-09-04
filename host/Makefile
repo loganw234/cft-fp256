@@ -158,7 +158,7 @@ TESTS := api-test$(EXE) reduce-parts$(EXE)
 EXAMPLES := vector-fma$(EXE)
 
 .PHONY: all test cpptest difftest seqtest reducetest coverage fortran \
-        transcendtest augmentedtest \
+        transcendtest augmentedtest formatoftest \
         examples-lang lang-cpp lang-julia lang-rust lang-go lang-csharp \
         lang-r lang-fortran clean
 
@@ -415,6 +415,14 @@ transcendtest: all
 # reasoning as clause5test.
 augmentedtest: all
 	$(PYTHON) tests/augmented_check.py
+
+# The formatOf arithmetic (754-2019 5.4.1) against the model: every
+# ordered pair of formats, every operation, every attribute, per element
+# and then as arrays, plus the double-rounding witnesses and the
+# same-format alias against cft_run/cft_div/cft_sqrt. Same shape and
+# reasoning as clause5test.
+formatoftest: all
+	$(PYTHON) tests/formatof_check.py
 
 # The native-oracle soak: cft_div/cft_sqrt against the host CPU's own
 # IEEE division and square root, which nobody in this repository
