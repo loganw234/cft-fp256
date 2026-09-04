@@ -26,7 +26,7 @@ No stage takes hours by itself; a full run is the sum of a dozen
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
-| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, soak-quick - after a host build the budget makes itself | about 10 minutes, loaded or not |
+| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, the five workloads and the browser demos, soak-quick - after a host build the budget makes itself | about 12 minutes, loaded or not |
 | `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about an hour with the box quiet; 2-3 hours beside a CUDA job |
 | `full` | everything: gate + sim, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
 
@@ -65,6 +65,8 @@ command in the `cft2204` distro.
 | lang-fortran | the Fortran example builds and runs through iso_c_binding; it prints no checksum line | cc, gfortran |
 | node | the Node binding: its unit tests, then the vectors through `cft_node.wasm` | node |
 | wasm | the committed conformance page, verified without a browser | node |
+| workloads | the five contract workloads vs their oracles and their own determinism properties - `collatztest`, `enclosetest`, `mersennetest`, `orbitstest`, `zoomtest` in host/ | cc, python with mpmath |
+| demos | the browser demos' compute core reproduces the C tools' chains, without a browser (`bindings/wasm/verify_demos.mjs`) | cc, node |
 | mpfr | GNU MPFR parity, every rung and mode (third oracle) | cc, python |
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
@@ -131,14 +133,10 @@ device-test runs. They are machine- and schedule-bound, keep their
 own drivers, and earn their own entries in docs/VALIDATION.md. This
 runner is the recurring floor, not the ceiling.
 
-Also outside it today, as make targets: the five workload
-cross-checks - `make -C host collatztest enclosetest mersennetest
-orbitstest zoomtest PYTHON=<an interpreter with mpmath>` - about a
-minute together, each holding its tool to its oracle and to its own
-determinism properties; and `node bindings/wasm/verify_demos.mjs`,
-which reproduces the browser demos' chains against the built tools.
-They are the natural next `quick` stage; until then they run by hand
-and on the merged tree before each merge to main.
+The five workload cross-checks and the browser demos' verifier were
+outside it for one afternoon, as make targets run by hand before each
+merge; since 2026-09-04 they are the `workloads` and `demos` stages,
+in the quick budget and in CI's host job.
 
 ## Bootstrapping the MPFR oracle
 

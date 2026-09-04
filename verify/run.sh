@@ -15,8 +15,9 @@
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
 #   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
 #   bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
-#   bash verify/run.sh --budget quick   # ~10 min: every model-vs-C check, bindings,
-#                                      # the language legs, soak - after a host build
+#   bash verify/run.sh --budget quick   # ~12 min: every model-vs-C check, bindings,
+#                                      # the language legs, soak, the five workloads
+#                                      # and the browser demos - after a host build
 #   bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, node, wasm, images)
@@ -131,7 +132,7 @@ BUDGET=""
 # Windows desktop (verify/README.md has the table): quick ~10 min,
 # gate ~1 h with the box quiet and 2-3 h loaded, full ~2 h quiet and
 # ~4 h loaded; on the WSL distro the replay stages take seconds.
-BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,soak-quick
+BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -339,6 +340,8 @@ need() {  # docker|host-cc|xclbinutil ...
       # it, or the pytest stages say so instead of failing in 0 s.
       pytest) PY -c 'import pytest' >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="python has no pytest module (pip install pytest)";;
+      mpmath) PY -c 'import mpmath' >/dev/null 2>&1 \
+        || STAGE_SKIP_REASON="python has no mpmath module (pip install mpmath)";;
       xclbinutil) command -v xclbinutil >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="xclbinutil not present (XRT hosts only)";;
       mpfr) [ -f "$ROOT/verify/_mpfr-prefix/include/mpfr.h" ] || \
@@ -613,6 +616,30 @@ do_wasm() {
 }
 need node
 stage wasm "the committed conformance page, verified without a browser" -- do_wasm
+
+# The five workloads written for the contract (docs/BENCHMARKS.md,
+# "Workloads designed for the contract"): each tool against its oracle
+# - Python big integers, exact rationals, or mpmath at 300 digits - and
+# against its own determinism claims: batch-size independence,
+# interrupt/resume equivalence, program-versus-loop bit identity. They
+# are make targets in host/, handed the interpreter PY() picked because
+# three of the five import mpmath; together they take about a minute.
+do_workloads() {
+  HOSTMAKE collatz enclose mersenne orbits zoom || return 1
+  HOSTMAKE collatztest enclosetest mersennetest orbitstest zoomtest PYTHON="$PYBIN"
+}
+need host-cc python mpmath
+stage workloads "the five contract workloads vs their oracles - Collatz, enclose, Mersenne, orbits, zoom - and their own determinism properties" -- do_workloads
+
+# The browser demos' compute core, driven under node at each panel's
+# default configuration, against the chains the C tools produce for the
+# same configurations (docs/DEMOS.md). Needs the tools built, and node.
+do_demos() {
+  HOSTMAKE collatz enclose mersenne orbits zoom || return 1
+  node "$ROOT/bindings/wasm/verify_demos.mjs"
+}
+need host-cc node
+stage demos "the browser demos' compute core reproduces the C tools' chains, without a browser" -- do_demos
 
 do_mpfr() {
   # A repo-local prefix (verify/build-mpfr-oracle.sh) outranks system
