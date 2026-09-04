@@ -599,6 +599,46 @@ clean-orbits:
 # ==================== end of the cft-orbits block ==================
 
 
+# ---------------------------------------------------------------------
+# cft-zoom - the deep-zoom Mandelbrot reference orbit (docs/ZOOM.md)
+#
+# Its own block, with its own TOOLS += line rather than an edit to the
+# TOOLS := above, so that this workload merges beside the others rather
+# than through them. The reference orbit runs at fp256 (or whatever
+# --format says) as an orbit-sequencer program; the perturbed pixels run
+# at fp64 through cft_run. Same binary against the software backend and
+# against an artifact.
+#
+# `make zoomclean` removes its products; `clean` above is deliberately
+# untouched so that four parallel workloads do not all edit one recipe.
+# ---------------------------------------------------------------------
+TOOLS += cft-zoom$(EXE)
+# `all` above names $(TOOLS) as a prerequisite, and prerequisites of an
+# explicit rule are expanded when the rule is READ - so the += alone
+# would not reach it. An extra prerequisite line with no recipe does,
+# and it is additive, which is the point of keeping this in one block.
+all: cft-zoom$(EXE)
+
+.PHONY: zoom zoomtest zoomclean
+
+cft-zoom$(EXE): tools/zoom.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+zoom: cft-zoom$(EXE)
+
+# The reference orbit against the golden model's own fp256 semantics and
+# against mpmath at 300 digits, plus the determinism properties the tool
+# claims: program versus loop, trip-count and batch-size independence,
+# and interrupt/resume. The library stays the authority on arithmetic;
+# mpmath is the authority on the Mandelbrot orbit.
+zoomtest: cft-zoom$(EXE)
+	$(PYTHON) tests/zoom_check.py
+
+zoomclean:
+	rm -f cft-zoom cft-zoom.exe
+# ---------------------------------------------------------------------
+
+
 # ===================================================================
 # cft-mersenne - the Lucas-Lehmer test with fp256 as an EXACT wide
 # integer multiplier. A squaring is a convolution of limbs, the
