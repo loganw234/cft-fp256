@@ -481,24 +481,35 @@ static uint64_t    N_CALLS;         /* library calls issued by the run */
 static uint64_t    N_ELEM_OPS;      /* elementwise opcode issues */
 static uint64_t    N_LIMB_PROD;     /* limb products the dots performed */
 
+static const char *flag_names(uint32_t f)
+{
+    static char buf[96];
+    buf[0] = 0;
+    if (f & CFT_FLAG_INVALID)   strcat(buf, "invalid ");
+    if (f & CFT_FLAG_DIVBYZERO) strcat(buf, "divideByZero ");
+    if (f & CFT_FLAG_OVERFLOW)  strcat(buf, "overflow ");
+    if (f & CFT_FLAG_UNDERFLOW) strcat(buf, "underflow ");
+    if (f & CFT_FLAG_INEXACT)   strcat(buf, "inexact ");
+    if (!buf[0])
+        strcat(buf, "nothing ");
+    buf[strlen(buf) - 1] = 0;
+    return buf;
+}
+
 /* Every call this tool issues during a step goes through one of these
  * three, and every one of them reads the flag word. Nothing may raise
- * anything: `what` names the phase so a certificate failure says which
- * one. */
+ * anything: `what` names the phase, and says what a flag there would
+ * mean, so a certificate failure is self-explanatory. */
 static void expect_clean(uint32_t f, const char *what)
 {
     FLAGS_SEEN |= f;
     if (!FLAGS_TRUSTED || !f)
         return;
     fprintf(stderr,
-            "cft-mersenne: %s raised 0x%02x, and every operation of a "
-            "Lucas-Lehmer step here is exact by construction%s - the "
-            "residue is REFUSED, not reported\n",
-            what, (unsigned)f,
-            (f & CFT_FLAG_INEXACT)
-                ? " (inexact: the accumulation left the format's exact "
-                  "range, so the limb width is too wide for this exponent)"
-                : "");
+            "cft-mersenne: %s raised 0x%02x (%s), and every operation of a "
+            "Lucas-Lehmer step here is exact by construction - the residue "
+            "is REFUSED, not reported\n",
+            what, (unsigned)f, flag_names(f));
     exit(3);
 }
 
@@ -985,7 +996,9 @@ static void dot(runstate *R, const void *a, const void *b, void *d,
                                n, &f, NULL);
     if (st != CFT_OK)
         die_st("cft_reduce", st);
-    expect_clean(f, "a convolution coefficient (CFT_DOT)");
+    expect_clean(f, "a convolution coefficient (CFT_DOT), where inexact "
+                    "means the accumulation left the format's exact range "
+                    "and the limb width is too wide for this exponent");
     N_CALLS++;
     N_LIMB_PROD += n;
 }
@@ -1168,7 +1181,8 @@ static void integrality_gate(runstate *R, uint8_t *y, size_t n)
 {
     size_t i;
     runN(R, CFT_ADD, y, NULL, R->bmagic, R->scr, n,
-         "the limb integrality gate");
+         "the limb integrality gate, where inexact means a limb is not an "
+         "integer - which is exactly what the gate is for");
     runN(R, CFT_SUB, R->scr, NULL, R->bmagic, R->scr, n,
          "the limb integrality gate");
     runN(R, CFT_CMPEQ, R->scr, y, NULL, R->scr, n,
