@@ -147,8 +147,8 @@ CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 **Start with [CAPABILITIES.md](CAPABILITIES.md)** if you want to know
 whether this is useful to you. It stays deliberately unflattering:
 IEEE 754-2019 is now covered on the binary side as far as the
-contract's stated exceptions allow. Every required operation of clause
-5 is there: the six arithmetic operations (division and square root
+contract's stated exceptions allow. Every operation of clause 5 is
+there by name: the six arithmetic operations (division and square root
 composed from the tile's own seed opcodes and FMA), the completion set
 from roundToIntegral to exact remainder, and - as of 2026-09-03 - the
 character-sequence conversions of 5.12, decimal and hexadecimal in both
@@ -162,9 +162,14 @@ augmented operations of 9.5 with their ties-toward-zero rounding, four
 of the eight minimum/maximum operations of 9.6 and the three payload
 operations of 9.7. docs/COMPLIANCE.md walks the standard clause by
 clause: of the 146 operations it names for binary formats, 139 are
-here, three are conformance predicates that belong to a language, and
-the four magnitude forms of minimum and maximum are the one gap. What
-stays outside is named rather than implied: the
+here. A conformance claim in radix 2 - the standard's own term - still
+needs three things of clause 5: the cross-format forms of the six
+arithmetic operations, where the operands' format differs from the
+destination's; a status word in the C library that stays raised until
+the caller lowers it; and the three conformance predicates. Beyond
+conformance, the recommended clause 9 is complete but for the four
+magnitude forms of minimum and maximum. What stays outside is named
+rather than implied: the
 decimal formats (a different datapath, effectively their own tile),
 clause 8's alternate exception handling, and NaN payload propagation
 through arithmetic, which is a canonical quiet NaN by design. No

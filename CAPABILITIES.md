@@ -298,12 +298,16 @@ in docs/COMPATIBILITY.md) gets the full story.
   9.7. The character-sequence conversions of 5.4.2/5.4.3/5.12 - decimal
   and hexadecimal, both directions, correctly rounded at every digit
   count with no cap on the standard's H - landed the same day, which
-  closes clause 5 entirely. What remains outside: NaN payload
-  propagation through ARITHMETIC (**out**, deliberately - the 9.7
-  operations read and write a payload, they do not carry one through
-  an add), the decimal formats and clause 8, and one gap that is not a
-  choice: the four magnitude forms of minimum and maximum in 9.6.
-  docs/COMPLIANCE.md has the clause-by-clause matrix.
+  closes clause 5's list of operations by name. What remains outside:
+  NaN payload propagation through ARITHMETIC (**out**, deliberately -
+  the 9.7 operations read and write a payload, they do not carry one
+  through an add), the decimal formats and clause 8 - and the gaps
+  that are not choices, which docs/COMPLIANCE.md sizes: clause 5's
+  cross-format arithmetic (operands wider than the destination,
+  rounded once), a status word in C that stays raised until lowered,
+  the three conformance predicates, and 9.6's four magnitude forms of
+  minimum and maximum. The first three stand between the library and
+  the standard's word "conforms"; the fourth is recommended only.
 - As a **general-purpose float processor**: the blocker was
   programmability alone, and programmability now exists in RTL and is
   benched against its model. What separates "benched" from "yes" is

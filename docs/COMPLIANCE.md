@@ -1,26 +1,34 @@
 # IEEE 754-2019, clause by clause
 
 What this library has of the standard, what it deliberately leaves
-out, and what is simply not there yet. Status at ABI 0.6 (2026-09-03),
-for the binary formats. The operation lists below were taken from the
-standard's own text, clause by clause, not from memory; the counts are
-derived from those lists.
+out, what is not there yet, and what the standard's own conformance
+clause would ask before the word "conforms" could be used. Status at
+ABI 0.6 (2026-09-03), for the binary formats. The operation lists
+below were taken from the standard's text, clause by clause, not from
+memory; the counts are derived from those lists.
 
-The one-line answer: **every operation the standard names for binary
-formats is here except four**, and those four - the magnitude forms of
-minimum and maximum in 9.6 - are host-side selections with no rounding
-in them. Of the 146 operations clauses 5 and 9 name for binary formats,
-139 exist in the library or its language contexts, 3 are conformance
-predicates that belong to a language rather than a library, and 4 are
-the gap.
+**The short answer.** By name, every operation the standard lists for
+binary formats is here except four - the magnitude forms of minimum
+and maximum in 9.6, which are recommended, not required. But
+conformance is not a count of names. Clause 3.1.2 says an
+implementation of an arithmetic format "shall provide all the
+operations of this standard defined in Clause 5, for that format", and
+three things clause 5 requires are not yet met on the C library's own
+terms: the cross-format forms of the six arithmetic operations (5.4.1's
+formatOf, where the operands' format differs from the destination's),
+a status word that stays raised until the caller lowers it (7.1,
+5.7.4 - present in the language contexts, absent in C), and the three
+conformance predicates (5.7.1). The section at the end sizes each.
 
 Legend. **yes**: present, defined by the golden model, gated by the
 runner. **yes (contexts)**: the C library holds no state by design, so
 the facility lives in the Python `Context` and the C++ context objects,
-one attribute each. **exceeds**: more than the clause asks. **gap**:
-named by the standard, absent here. **excluded**: left out by design and
-stated in docs/DETERMINISM.md. **language**: the clause addresses a
-language standard, not a library.
+one attribute each. **composition**: not an entry point, but exactly
+reachable from the entry points that exist, and said how. **exceeds**:
+more than the clause asks. **gap**: named by the standard, absent
+here. **excluded**: left out by design and stated in
+docs/DETERMINISM.md. **language**: the clause addresses a language
+standard, not a library.
 
 ## Clause 3 - formats
 
@@ -29,7 +37,8 @@ language standard, not a library.
 | 3.3, 3.4 | binary32, binary64, binary128 interchange formats and their encodings | yes |
 | 3.6 | binary256 as a binary*k* interchange format: p = 237, emax = 262143 from the clause's own formulas | yes |
 | 3.4 | NaN encodings: quiet bit, sign, payload | yes; results carry the canonical quiet NaN (6.2.3, below) |
-| 3.5 | decimal formats | excluded - a different datapath, effectively its own tile |
+| 3.1.2 | initialise a format; convert between every pair of supported formats; read and write the encoding | yes - the character and integer conversions, `cft_convert` over all sixteen pairs, the encodings as byte arrays |
+| 3.5 | decimal formats | excluded - a different datapath, effectively its own tile; conformance is claimed per radix, so this is permitted |
 | 3.7 | extended and extendable precisions | not provided; optional |
 
 ## Clause 4 - attributes and rounding
@@ -53,8 +62,9 @@ language standard, not a library.
 | 5.3.1 | quantize | excluded (decimal) |
 | 5.3.2 | decimal operations | excluded |
 | 5.3.3 | scaleB, logB | yes |
-| 5.4.1 | addition, subtraction, multiplication, fusedMultiplyAdd | yes - tile opcodes, the steered FMA |
-| 5.4.1 | division, squareRoot | yes - composed from the seed opcodes and FMA, correctly rounded |
+| 5.4.1 | addition, subtraction, multiplication, fusedMultiplyAdd, operands and destination in one format | yes - tile opcodes, the steered FMA |
+| 5.4.1 | division, squareRoot, one format | yes - composed from the seed opcodes and FMA, correctly rounded |
+| 5.4.1 | **the same six as formatOf operations: operands in one format, destination in another, one rounding** | **gap** - every arithmetic entry point takes a single format. Operands narrower than the destination are a composition today (widening is exact and keeps the signaling-NaN signal, so convert then operate is the operation). Operands wider than the destination are the gap: the result must be computed exactly and rounded once to the destination, which the C softfloat already does internally through one seam, `cft_sf_round_pack`, against the operands' own format descriptor |
 | 5.4.1 | convertFromInt | yes - int32, uint32, int64, uint64 |
 | 5.4.1 | convertToInteger, five directions, and convertToIntegerExact, five directions | yes - `cft_cvt_to_*` with the attribute and `exact`; the values 754 leaves open on invalid are fixed by the contract |
 | 5.4.2 | convertFormat | yes - `cft_convert`, any of the four to any other |
@@ -62,12 +72,13 @@ language standard, not a library.
 | 5.4.3 | convertFromHexCharacter, convertToHexCharacter | yes |
 | 5.5.1 | copy, negate, abs, copySign | yes - the encoding itself, `CFT_NEG`, `CFT_ABS`, `CFT_COPYSIGN`; signal nothing |
 | 5.5.2 | decimal re-encoding | excluded |
-| 5.6.1 | the 22 comparison predicates | yes - `CFT_CMPLT`, `CFT_CMPLE`, `CFT_CMPEQ` quiet, the same three signaling through `cft_cmp_sig`, and `cft_class` for unordered; the other sixteen are the standard's own negations and operand swaps of these, which is how 5.11 defines them |
-| 5.7.1 | is754version1985, is754version2008, is754version2019 | language - they describe a programming environment; this file is the library's conformance statement |
+| 5.6.1 | the 22 comparison predicates, one format | yes - `CFT_CMPLT`, `CFT_CMPLE`, `CFT_CMPEQ` quiet, the same three signaling through `cft_cmp_sig`, and `cft_class` for unordered; the other sixteen are the standard's own negations and operand swaps of these, which is how 5.11 defines them |
+| 5.11 | comparison across two binary formats | composition - widen the narrower operand with `cft_convert`, which is exact, then compare; a signaling NaN signals invalid on the way, as the comparison itself would |
+| 5.7.1 | is754version1985, is754version2008, is754version2019 | **gap**, trivial - three constants. They describe a programming environment, which is why they were not written; a conformance claim would have to answer them, and the honest answers are false, false, true |
 | 5.7.2 | class, isSignMinus, isNormal, isFinite, isZero, isSubnormal, isInfinite, isNaN, isSignaling, isCanonical, radix | yes - `cft_class`; every is* predicate is a subset test on its byte; isCanonical constantly true, radix constantly 2 |
 | 5.7.2 | totalOrder, totalOrderMag | yes |
 | 5.7.3 | sameQuantum | excluded (decimal) |
-| 5.7.4 | lowerFlags, raiseFlags, testFlags, testSavedFlags, restoreFlags, saveAllFlags | yes (contexts) - the sticky word on the Python `Context` and the C++ context; C returns each call's exception group and keeps no flag state, by design |
+| 5.7.4 | lowerFlags, raiseFlags, testFlags, testSavedFlags, restoreFlags, saveAllFlags | yes (contexts) - the sticky word on the Python `Context` and the C++ context, which is lowered only by the caller. **gap in C**: 7.1 requires a status flag per exception that "shall be lowered only at the user's request"; the C library returns each call's exception group and keeps none |
 | 5.8 - 5.11 | the details of conversion, comparison and totalOrder | yes - the golden model follows them; the one value the standard leaves to the implementation (5.8, invalid conversions) is fixed |
 | 5.12 | external character sequences, decimal and hexadecimal | yes - both directions, no cap on digits, the grammar as written in `python/cft_golden/chars.py` |
 
@@ -79,14 +90,15 @@ language standard, not a library.
 | 6.2.1 | signaling and quiet NaNs; invalid on a signaling operand in every general-computational operation, silence in the non-computational ones | yes |
 | 6.2.3 | NaN payload propagation through arithmetic - a "should" | excluded: every NaN result is the canonical quiet NaN. 9.7's operations read and write payloads; arithmetic does not carry them |
 | 6.3 | the sign bit, including exact zero results under each attribute | yes |
-| 7.1 | flags raised per operation, per element or accumulated | yes |
+| 7.1 | the five exceptions signalled, default results delivered, the flags raised | yes per call; the status word that stays raised is in the contexts, not in C (5.7.4 above) |
 | 7.2 - 7.4, 7.6 | invalid, divideByZero, overflow, inexact | yes |
 | 7.5 | underflow; tininess detected after rounding | yes - one of the two detections the clause allows, stated in docs/DETERMINISM.md |
 
 ## Clause 8 - alternate exception handling
 
-Excluded. Only default handling exists, which is also what clause 11
-requires of a reproducible program.
+Excluded. It is recommended, not required. Only default handling
+exists, which is also what clause 11 requires of a reproducible
+program.
 
 ## Clause 9 - recommended operations
 
@@ -104,38 +116,79 @@ requires of a reproducible program.
 ## Clauses 10 and 11 - expression evaluation, reproducibility
 
 Both address language standards. What they ask for is what this
-library is: each entry point is one formatOf operation with no
-implicit widening, contraction or reassociation (10.4's literal
-meaning), the reduction tree is fixed by the contract rather than left
-to the implementation, only default exception handling exists, and the
+library is: each entry point is one operation with no implicit
+widening, contraction or reassociation (10.4's literal meaning), the
+reduction tree is fixed by the contract rather than left to the
+implementation, only default exception handling exists, and the
 character conversions carry no precision limit - the three things
 clause 11 puts on a "reproducible results required" program. Clause 11
 counts only invalid, divideByZero and overflow as reproducible flags;
 here underflow and inexact reproduce too, because tininess detection
 and the rounding position are part of the contract.
 
-## The gap, and its size
+## What a conformance claim would need, and what each costs
 
-**9.6's magnitude four.** The standard defines them in one line each:
+The standard's own term is that a programming environment "conforms
+to this standard, in a particular radix" (3.1.2). In radix 2 that
+means: every clause-5 operation for each supported arithmetic format,
+the clause-4 attributes, and clauses 6 and 7 as written. Clause 9 is
+recommended throughout, so its gaps bear on completeness, not
+conformance. Against that bar, the library at 0.6 is short by three
+required items and one recommended one.
 
-> minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|, otherwise
-> minimum(x, y).
+1. **formatOf arithmetic across formats (5.4.1) - required.** The six
+   operations with the operands in one binary format and the
+   destination in another, rounded once. The narrow-to-wide direction
+   is already a composition, because widening is exact. The
+   wide-to-narrow direction is the work: for addition, subtraction,
+   multiplication and FMA, compute the exact intermediate the C
+   softfloat already forms and round it once against the destination's
+   descriptor instead of the operands'. FMA cannot be done any other
+   way: a product that lands exactly on a midpoint of the narrow grid
+   plus an addend smaller than the wide format's half-ulp is a
+   counter-example to every double-rounding scheme, however wide. For
+   division and square root the wide correctly-rounded result may be
+   converted down instead, because double rounding of those is
+   innocuous when the wide format carries at least 2p + 2 bits, and
+   every adjacent pair here does: 53 against 2·24 + 2 = 50, 113
+   against 2·53 + 2 = 108, 237 against 2·113 + 2 = 228; the wide
+   step's inexact flag is kept, the destination's overflow and
+   underflow are decided by the second rounding. Mixed operand formats
+   reduce to this by exact widening. Cross-format comparison (5.11)
+   is the same composition and needs no entry point. Size: a package
+   of the augmented kind - golden model, entry points, vector sets
+   with a source and a destination format, MPFR as the oracle (it
+   rounds an exact result once to any precision, which is precisely
+   the definition), and the four language surfaces.
+2. **A status word in C (7.1, 5.7.4) - required.** A word on the
+   device handle that every entry point ORs its exception group into,
+   lowered only by the caller, with the six operations of 5.7.4 over
+   it and a saved-flags value for testSavedFlags and restoreFlags.
+   Mechanical; every entry point already computes the group it would
+   contribute.
+3. **The three conformance predicates (5.7.1) - required.** Constants.
+4. **9.6's magnitude four - recommended.** The standard defines them
+   in one line each:
 
-and the same shape for the other three with maximum, minimumNumber and
-maximumNumber in the last position. They are selections on the
-encoding - a magnitude compare, then the existing operation - so they
-are host-side bit surgery of the nextUp kind: no rounding, no
-attribute, invalid on a signaling NaN exactly as the four existing
-forms raise it. The work is the smallest package this repo has shipped:
-four functions in the golden model, four host entry points or opcodes,
-their tests, vector sets, and the four language surfaces. Nothing in
-them needs the tile.
+   > minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|, otherwise
+   > minimum(x, y).
 
-**5.7.1's three predicates** are not counted as a gap. They ask whether
-a *programming environment* conforms, which a library cannot answer
-for the language above it. A binding that wants one returns a constant.
+   and the same shape for the other three with maximum, minimumNumber
+   and maximumNumber in the last position. They are selections on the
+   encoding - a magnitude compare, then the existing operation - so
+   they are host-side bit surgery of the nextUp kind: no rounding, no
+   attribute, invalid on a signaling NaN exactly as the four existing
+   forms raise it. The smallest package this repo would ship.
 
-Everything else the standard names for binary formats is present, on
-the terms above, with the stated exclusions - decimal formats, clause
-8, and payload propagation through arithmetic - which are choices,
-recorded as such, not gaps.
+With the first three done, the claim this library could make, in the
+standard's words, is: conforms to IEEE 754-2019 in radix 2, with
+binary32, binary64 and binary128 as supported arithmetic and
+interchange formats and binary256 as a further supported arithmetic
+and interchange format; roundTiesToAway provided; tininess detected
+after rounding; NaN payloads canonicalised (6.2.3 is a
+recommendation); no alternate exception handling (clause 8 is a
+recommendation); decimal formats not supported. With the fourth as
+well, every recommended operation of clause 9 for binary formats is
+provided. Everything else named above is present on the terms stated,
+and the exclusions - decimal formats, clause 8, payload propagation
+through arithmetic - are choices, recorded as such, not gaps.
