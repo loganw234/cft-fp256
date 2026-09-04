@@ -2545,3 +2545,196 @@ a restatement of it.
 Three wording fixes in `cft.h`, `docs/DETERMINISM.md` and
 `docs/HOSTAPI.md` were held back until after this run for the same
 reason and are the only commit between it and the tip.
+
+## 2026-09-04 - ABI 0.7 package A: 5.4.1's formatOf arithmetic, and the double rounding nobody may use
+
+`bash verify/run.sh --fresh --only golden,vectors,libcft,formatof,status96,cpp,bindings,mpfr`
+at 9855955 on DESKTOP-T33SK86 (Windows, MINGW64), run id
+20260904-001646-9855955, on a clean tree, beside other work on the same
+box:
+
+    golden 373s  vectors 274s  libcft 431s  status96 1s  formatof 5s
+    bindings 137s  cpp 1370s  mpfr 480s
+
+    VERDICT: PASS, nothing skipped
+
+The tree is package A merged onto package B (`git merge shared-lanes` at
+07c95a3), so this run gates both together; `status96` is here for that
+reason and passed unchanged.
+
+### The finding, because it changed a published claim
+
+`docs/COMPLIANCE.md` said at 0.6 that the wide-to-narrow **division and
+square root** could be computed in the source format and converted down
+- that double rounding through an intermediate of at least 2p + 2 bits
+is innocuous for the basic operations, and this ladder satisfies
+53 >= 2x24 + 2, 113 >= 2x53 + 2 and 237 >= 2x113 + 2. **The rule does
+not apply in this configuration, and the difference is a hypothesis
+rather than a margin**: the theorem is about operands carrying the
+DESTINATION's precision, and here they carry the SOURCE's. A quotient
+or a root of two wide values can sit as close as it likes to a narrow
+midpoint, so the first rounding lands exactly on it, the second ties to
+even, and the answer is one ulp low with the same flag word. (The
+matrix was corrected at b80da94, before this merge.)
+
+`python/cft_golden/formatof.py`'s `double_rounding_witness()` constructs
+the counterexample from the format descriptors alone - for division,
+square root AND fused multiply-add - on every one of the six ordered
+narrowing pairs. All eighteen were built and run, and every one shows
+the composed route one ulp below the correct answer. The fused
+multiply-add family was run again against intermediate precisions of
+30, 53, 64, 113, 237, 400 and 1000 bits, all defeated, which is what
+"cannot be double rounded at any width" means when it is measured
+rather than asserted. So all six operations narrow the exact way, and
+`host/src/formatof.c` carries a restoring division and a
+digit-by-digit integer root for the two that needed them - neither of
+which the same-format library ever had to form, because `cft_div` and
+`cft_sqrt` reach their answers by Newton refinement instead.
+
+Every harness that carries the witnesses asserts BOTH halves of each:
+the implementation agrees with the model, and the composed route
+disagrees with both. A witness that stopped separating the two would
+leave those harnesses checking that two identical things are identical,
+so that is a failure rather than a pass.
+
+### The counts each stage printed
+
+| stage | printed |
+|---|---|
+| golden | 2011 passed, 5 skipped |
+| vectors | 168 sets |
+| libcft | 168 sets, 1,223,635 cases replayed through `cft_conformance`; api-test green |
+| status96 | 53,517 comparisons, C == model on every one |
+| formatof | 509,118 comparisons over 16 format pairs, 18 double-rounding witnesses, 8 refusal checks |
+| bindings | cftmpfr: 834 passed |
+| cpp | 213,691 checks at C++17 and again at C++20, each replaying 1,223,635 cases |
+| mpfr | 739,234 cases, 0 value mismatches, 0 flag mismatches |
+
+The formatOf work inside them:
+
+| layer | formatOf |
+|---|---|
+| `golden` | 445 tests in `python/tests/test_formatof.py` |
+| `vectors` | 80 new sets, `<sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl`, 35,250 cases per attribute and 176,250 over the five |
+| `libcft` | the replay grew from 84 sets / 1,037,657 cases at 0.6 to 168 / 1,223,635, of which 80 sets and 176,250 cases are this package's and 4 sets / 9,728 cases are package B's |
+| `formatof` | 509,118 comparisons: 22,470-22,770 for each same-format pair (which includes the alias check against `cft_run`/`cft_div`/`cft_sqrt`), 18,240-18,480 for each of the six widening pairs, and 51,363 for each of the six narrowing ones, where the pools carry the destination's midpoints and both its boundaries |
+| `mpfr` | 24,270 formatOf cases across the sixteen ordered pairs, zero value and zero flag mismatches |
+
+### The status word (package B's 7.1) through these six
+
+All six entry points end at one `cft_flags_emit(dev, acc, flags_out)`;
+no raw `*flags_out =` remains in `host/src/formatof.c`. The widening
+route runs MUTED, and that is load-bearing rather than tidy: every
+`cft_convert`, `cft_run`, `cft_div` and `cft_sqrt` it issues is
+internal to one formatOf operation, so without the mute
+`cft_formatof_div(1, 0)` would leave its scaffolding's inexact standing
+beside the divideByZero, and a widening conversion of a signaling NaN
+would put invalid in the word on its own account rather than as part of
+the operation. `api_test.c` asserts both, plus that the word
+accumulates across formatOf calls, and that a call signalling nothing
+neither adds to it nor lowers it.
+
+### The MPFR harness was wrong, and wrong the same way
+
+Worth its own heading, because the first run of this gate
+(20260903-230223-0c8884d) came back 7 of 8 with `mpfr` reporting 8
+value mismatches and 0 flag mismatches - and the library was right.
+
+Every one had the shape "library says the least subnormal, MPFR says
+zero, both say underflow|inexact". At binary64 -> binary32 under
+roundTiesToEven, a = `0x8037478c91215dae` (about -2^-968) and
+c = `0xb690000000000000` (exactly -2^-150): half of binary32's least
+subnormal IS 2^-150, so the exact sum is a hair above it in magnitude
+and round-to-nearest delivers -2^-149. Checked against exact rationals,
+the model and the library agree; MPFR did not.
+
+`fo_oracle` had reached the destination's subnormal grid through the
+MPFR manual's IEEE recipe - set emin to emin - p + 2, redo the
+operation at the destination's precision, `mpfr_check_range`,
+`mpfr_subnormalize`. That recipe needs the operation's own result to
+land at or above the least subnormal's exponent, so that the ternary it
+hands `subnormalize` still describes the rounding. A SAME-format sum
+always does: both operands are multiples of the format's own smallest
+quantum, so a non-zero exact sum is at least that quantum, which is
+twice the half-way point - which is why `oracle()` has never hit this
+in twenty-four million same-format cases. Across formats it does not.
+`mpfr_add` underflowed against the very emin set for it, flushed, and
+the ternary stopped carrying the hair. **The oracle was double
+rounding**, which is the exact mistake this package exists to refuse.
+
+It now rounds onto the destination's fixed grid explicitly, for all
+five attributes, by the construction the same file already used for
+9.5's roundTiesTowardZero: truncate toward zero at p + 2 bits with the
+exponent range left alone, scale onto the grid, split into an integer
+and a fraction with exact arithmetic, compare with one half. The
+truncation cannot move the decision, and the argument is in the source.
+The boundary is now pinned in two places that are NOT the oracle -
+`python/tests/test_formatof.py` builds "a hair above half the
+destination's least subnormal" from the two descriptors for every
+narrowing pair and every attribute with the exact tie beside it, and
+`api_test.c` carries the binary64 -> binary32 row and its negation.
+
+Two smaller things the failure exposed: the harness printed the wrong
+operand (the steering makes add and sub read a and c, and the report
+always printed b), so the first diagnosis was of a value the case never
+touched; and `docs/DETERMINISM.md`'s "MPFR is a full oracle here" now
+carries the one footnote it has earned.
+
+### The negative control
+
+`host/src/formatof.c`'s wide-to-narrow fused multiply-add was changed
+to round into the SOURCE format first and convert down - the double
+rounding this package refuses - and every gate rebuilt explicitly,
+since `make all` rebuilds neither `api-test` nor `mpfr-check`:
+
+| gate | caught | the first case it named |
+|---|---|---|
+| `api-test` | yes | formatOf-fusedMultiplyAdd binary64 -> binary32 gave `0x3f800000`, wanted `0x3f800001` |
+| `formatof` | yes | `fp64->fp32 fusedMultiplyAdd rne`: the same BITS, flags `0x10` where the model says `0x18` - the destination's underflow lost, because the source-format rounding was exact |
+| `libcft` and `cpp` (the `cft_conformance` replay) | yes | `fp64-to-fp32-formatof.jsonl:3591`, `0x3f800000` for `0x3f800001` |
+| `mpfr` | yes | 12 value and 48 flag mismatches at randoms=2, first `fp64 fma rne ->fp32` |
+| `bindings` | yes | all six `test_formatof_is_not_a_double_rounding` cases |
+| `cpp`'s wrapper checks | no, by design | 213,601 of 213,601 still passed. That test compares the typed path, the raw device method and `cft.h` against EACH OTHER, and the control changes all three identically; its conformance leg is what caught it. |
+| `golden`, `vectors` | no, by design | both are model-only, and the control was in the C |
+
+The row worth keeping is `formatof`'s: the first thing it found was not
+a wrong value but a LOST FLAG - the destination's underflow, which a
+rounding done in the source format never had a reason to raise. A
+harness that compared only encodings would have walked past that case
+and failed somewhere less informative.
+
+`git checkout host/src/formatof.c`, rebuild, and every one of them is
+green again. The control was run before the package-B merge; the merge
+changed the flag PATH (through `cft_flags_emit`) and not the
+arithmetic, and `api-test` covers the new path directly.
+
+### What was NOT run, and why
+
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was consumed and
+  no RTL file was touched. 5.4.1's cross-format forms are library entry
+  points over the existing opcodes, and the narrowing direction issues
+  no device pass at all.
+- `node` and `wasm`: the JavaScript surface is a separate step, as it
+  was at 0.6 and as it is for package B's four sets. Both replayers
+  list an unknown `.jsonl` as ignored rather than failing on it, so the
+  80 `-formatof` sets are ignored there until that step lands.
+- `selfcheck`, `divsqrt`, `clause5`, `character`, `transcend`,
+  `augmented`, `diff`, `seq`, `reduce`, `soak-quick`, the `lang-*` legs
+  and `images`: outside this gate's command. Nothing here changes the
+  arithmetic they cover; the six new entry points are additive, and the
+  files package A shares with the rest of the library were appended to,
+  never edited. `libcft` and `cpp` build and exercise all of it.
+- No device backend. The narrowing route is host arithmetic by
+  construction; the widening route issues ordinary `cft_run` /
+  `cft_div` / `cft_sqrt` passes, which a card would run and which
+  nothing here changes.
+- `README.md`, `docs/COMPATIBILITY.md` and the ABI version in `cft.h`
+  were deliberately left to the integrator, as for package B.
+  `CFT_ABI_VERSION_MINOR` still reads 6.
+- Two earlier attempts at this gate were abandoned and their state
+  directories removed. 20260903-222925-32ebeb0 ran on the pre-merge
+  tree and was stopped by PID because package B landed while it was
+  running - a census that straddles a source change certifies nothing;
+  it had reached `golden` ok 385 s, `vectors` ok 287 s and was inside
+  `libcft`'s replay. 20260903-230223-0c8884d is the run whose `mpfr`
+  FAIL is dissected above.
