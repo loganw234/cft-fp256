@@ -542,6 +542,15 @@ mersenne: cft-mersenne$(EXE)
 
 mersennetest: cft-mersenne$(EXE)
 	$(PYTHON) tests/mersenne_check.py
+
+# `clean` already has its recipe below; a prerequisite added here runs
+# before it, which removes this tool's products without any worktree
+# having to edit that shared rm list. Both spellings, for the same
+# reason the real rule removes both.
+clean: clean-mersenne
+clean-mersenne:
+	rm -f cft-mersenne cft-mersenne.exe
+.PHONY: clean-mersenne
 # ===================================================================
 
 # Removes every platform's products, not just this one's. A tree on a
