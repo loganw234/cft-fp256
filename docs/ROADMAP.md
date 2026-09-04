@@ -1934,11 +1934,11 @@ measured with, and what they found is the agenda:
 - **What the host API lacks**, in docs/HOSTAPI.md's last section: the
   per-element flags, a stride-0 operand, the program API in the wasm
   surface.
-- **Next**: a `workloads` stage in the runner's quick budget (the five
-  cross-checks take about a minute together and are make targets
-  today); the program-API wrappers when the module is next rebuilt;
+- **Next**: the program-API wrappers when the module is next rebuilt;
   and, on card day, the same five commands with `--artifact`, which is
-  the first hardware number this repo will publish.
+  the first hardware number this repo will publish. (The `workloads`
+  and `demos` runner stages landed the same day, in the quick budget
+  and in CI.)
 
 ## The open core
 

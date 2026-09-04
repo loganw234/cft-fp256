@@ -70,4 +70,4 @@ jobs:
           node-version: "22"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gfortran
       - run: pip install pytest mpmath gmpy2 numpy
-      - run: bash verify/run.sh --require-all --only vectors,libcft,augmented,reduce,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm
+      - run: bash verify/run.sh --require-all --only vectors,libcft,augmented,reduce,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos
