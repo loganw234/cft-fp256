@@ -34,13 +34,19 @@
 //      published sets rather than the embedded sample. One set per
 //      directory, which is what the page's drop zone does, so this is
 //      that path and not a tidier one: since ABI 0.3 the drop zone
-//      accepts the twenty transcendental sets as well, and they are
-//      replayed here for the same reason.
+//      accepts the twenty transcendental sets as well, since 0.6 the
+//      augmented, reduction and character ones, and since 0.7 the four
+//      magnitude sets of 9.6 and the eighty formatOf sets of 5.4.1 -
+//      168 names - and they are replayed here for the same reason.
 //   5  EVERY OPERATION THAT IS NOT AN OPCODE, driven THROUGH ITS OWN
 //      WRAPPER from JavaScript: the thirty-nine transcendentals, the
 //      three augmented operations of clause 9.5, clause 9.4's four
-//      sum reductions and three scaled products, and clause 5.12's
-//      character conversions with 9.7's payload operations. Step 4
+//      sum reductions and three scaled products, clause 5.12's
+//      character conversions with 9.7's payload operations, and since
+//      ABI 0.7 clause 9.6's four magnitude forms and clause 5.4.1's
+//      six formatOf operations over all sixteen ordered pairs of
+//      formats - the one family whose operands and result are
+//      different widths in the same call. Step 4
 //      would pass without any of them: the cft_conformance inside the
 //      module has replayed those sets since the module was first
 //      built from sources that carried them, and it dispatches every
@@ -53,14 +59,16 @@
 //      cftw_atan2pi, cftw_sin … cftw_atanh, cftw_exp2m1 …
 //      cftw_rootn, cftw_augmented_add … cftw_augmented_mul,
 //      cftw_reduce at opcodes 24/25/28/29, cftw_scaled_prod …
-//      cftw_scaled_prod_diff and cftw_from_decimal_char …
-//      cftw_set_payload_signaling, one element at a time for exact
-//      per-case flags and then as arrays where the C has a batch
-//      shape, and compares encodings, sequences, scales and flags
-//      against the file. A wrapper with its operands swapped, or
+//      cftw_scaled_prod_diff, cftw_from_decimal_char …
+//      cftw_set_payload_signaling, cftw_min_mag … cftw_maxnum_mag and
+//      cftw_formatof_add … cftw_formatof_fma, one element at a time
+//      for exact per-case flags and then as arrays where the C has a
+//      batch shape, and compares encodings, sequences, scales and
+//      flags against the file. A wrapper with its operands swapped, or
 //      missing, fails here and nowhere else - which is why atan2's
 //      y-first order is checked by running it rather than by reading
-//      it.
+//      it, and why the formatOf six are driven with their two formats
+//      the way round the file names them.
 //
 // The loader comes from bindings/node/ if the package is there, else
 // from bindings/wasm/build/ after a build.sh run. Vectors come from
@@ -171,6 +179,50 @@ for (const f of FORMATS)
                         : `${f}-character-${r}.jsonl`,
       fmt: FORMATS.indexOf(f), rnd: ROUNDINGS.indexOf(r), rndName: r,
     });
+
+// The magnitude sets (754-2019 9.6): ONE file per format, and the
+// absence of a "rnd" field is normative for a sharper reason than the
+// augmented family's - these operations compare two sign-cleared
+// encodings and then SELECT an operand, so there is no rounding for an
+// attribute to direct and no attribute could change an answer. "fn"
+// carries 754's own spelling rather than this repository's C names,
+// because the set is a statement about the standard.
+const MM_NAMES = ["minimumMagnitude", "minimumMagnitudeNumber",
+                  "maximumMagnitude", "maximumMagnitudeNumber"];
+const MM_CALL = { minimumMagnitude: "min_mag",
+                  minimumMagnitudeNumber: "minnum_mag",
+                  maximumMagnitude: "max_mag",
+                  maximumMagnitudeNumber: "maxnum_mag" };
+const MINMAXMAG_SETS = FORMATS.map((f, i) => ({
+  name: `${f}-minmaxmag.jsonl`, fmt: i,
+}));
+
+// The formatOf sets (5.4.1): one file per ORDERED PAIR of formats per
+// attribute, all sixteen pairs including the same-format four, because
+// 5.4.1 asks for every destination and, per destination, every source.
+// 80 files.
+//
+// The only family whose case carries TWO formats, and the only one
+// whose operand and result encodings are DIFFERENT WIDTHS on the same
+// line - which is why the driver below reads "a" at the source's
+// element size and "d" at the destination's, and why it checks the
+// record's own sfmt/dfmt against the file's name rather than trusting
+// either alone.
+const FO_ARITY = { add: 2, sub: 2, mul: 2, div: 2, sqrt: 1, fma: 3 };
+const FO_CALL = { add: "formatof_add", sub: "formatof_sub",
+                  mul: "formatof_mul", div: "formatof_div",
+                  sqrt: "formatof_sqrt", fma: "formatof_fma" };
+const FORMATOF_SETS = [];
+for (const s of FORMATS)
+  for (const d of FORMATS)
+    for (const r of ROUNDINGS)
+      FORMATOF_SETS.push({
+        name: r === "rne" ? `${s}-to-${d}-formatof.jsonl`
+                          : `${s}-to-${d}-formatof-${r}.jsonl`,
+        sfmt: FORMATS.indexOf(s), dfmt: FORMATS.indexOf(d),
+        sName: s, dName: d,
+        rnd: ROUNDINGS.indexOf(r), rndName: r,
+      });
 
 let failed = false;
 const ok = (m) => console.log(`  ok    ${m}`);
@@ -302,11 +354,12 @@ console.log(`exports ${exported.length} cftw_* entry points`);
 // One name per ABI step, so a module built from a tree whose header
 // has moved on is caught by the missing operation and not only by the
 // version number: 0.1's cft_run, 0.2's clause-5 set, 0.3's nine, 0.4's
-// eleven, 0.5's nine, 0.6's four packages. Every one is listed in full
-// because a module can carry all but one and still report 0.6, which is
+// eleven, 0.5's nine, 0.6's four packages, 0.7's two. Every one is
+// listed in full because a module can carry all but one and still
+// report 0.7, which is
 // the failure mode this file is here for - it happened at 0.3 and at
 // 0.4, once per minor step, until 0.5 shipped its wrappers with the
-// library's own step and 0.6 did the same.
+// library's own step and 0.6 and 0.7 did the same.
 //
 // CFT_SUMSQ and CFT_SUMABS are deliberately not in this list and need
 // no wrapper: they are opcodes 28 and 29 through cftw_reduce, which
@@ -325,7 +378,24 @@ const NEEDED = ["cftw_run", "cftw_reduce", "cftw_conformance",
                 "cftw_scaled_prod", "cftw_scaled_prod_sum",
                 "cftw_scaled_prod_diff",
                 "cftw_augmented_add", "cftw_augmented_sub",
-                "cftw_augmented_mul"];
+                "cftw_augmented_mul",
+                // ABI 0.7, package B: the status word of 7.1 with
+                // 5.7.4's six operations, cft.h's CFT_FLAGS_ALL macro
+                // projected as a call (a macro is the one part of a
+                // header the far side of a wasm boundary cannot
+                // reach), and 5.7.1's three predicates.
+                "cftw_flags_all", "cftw_lower_flags", "cftw_raise_flags",
+                "cftw_test_flags", "cftw_save_all_flags",
+                "cftw_restore_flags", "cftw_test_saved_flags",
+                "cftw_is754version1985", "cftw_is754version2008",
+                "cftw_is754version2019",
+                // ABI 0.7, package B: 9.6's magnitude four.
+                "cftw_min_mag", "cftw_max_mag", "cftw_minnum_mag",
+                "cftw_maxnum_mag",
+                // ABI 0.7, package A: 5.4.1's formatOf six.
+                "cftw_formatof_add", "cftw_formatof_sub",
+                "cftw_formatof_mul", "cftw_formatof_div",
+                "cftw_formatof_sqrt", "cftw_formatof_fma"];
 for (const needed of NEEDED) {
   if (!exported.includes(needed)) bad(`the module does not export ${needed}`);
 }
@@ -373,15 +443,19 @@ if (!vdir) {
 }
 console.log(`vectors ${vdir}`);
 // Every family the generator writes and cft_conformance enumerates:
-// the twenty opcode sets, the twenty transcendental ones, and since
-// ABI 0.6 the four augmented, twenty reduction and twenty character
-// sets. 84 names in all; anything else in the directory is named and
-// skipped rather than replayed under a schema it does not have.
+// the twenty opcode sets, the twenty transcendental ones, the four
+// augmented, twenty reduction and twenty character sets of ABI 0.6,
+// and since ABI 0.7 the four magnitude sets of 9.6 and the eighty
+// formatOf sets of 5.4.1 - one per ordered pair of formats per
+// attribute. 168 names in all; anything else in the directory is named
+// and skipped rather than replayed under a schema it does not have.
 const ALL_SET_NAMES = [...CANONICAL,
                        ...TRANSCEND_SETS.map((s) => s.name),
                        ...AUGMENTED_SETS.map((s) => s.name),
                        ...REDUCE_SETS.map((s) => s.name),
-                       ...CHARACTER_SETS.map((s) => s.name)];
+                       ...CHARACTER_SETS.map((s) => s.name),
+                       ...MINMAXMAG_SETS.map((s) => s.name),
+                       ...FORMATOF_SETS.map((s) => s.name)];
 const KNOWN = new Set(ALL_SET_NAMES);
 const stray = readdirSync(vdir).filter((n) => n.endsWith(".jsonl") &&
   !KNOWN.has(n));
@@ -415,6 +489,31 @@ const C = {
   augmented_add: M.cwrap("cftw_augmented_add", num, N(8)),
   augmented_sub: M.cwrap("cftw_augmented_sub", num, N(8)),
   augmented_mul: M.cwrap("cftw_augmented_mul", num, N(8)),
+  // ABI 0.7, package B: the status word, the predicates, 9.6's four.
+  // No rounding argument on the magnitude four and no bus word: they
+  // select an operand and issue no device pass (cft.h).
+  flags_all: M.cwrap("cftw_flags_all", num, []),
+  lower_flags: M.cwrap("cftw_lower_flags", null, N(2)),
+  raise_flags: M.cwrap("cftw_raise_flags", null, N(2)),
+  test_flags: M.cwrap("cftw_test_flags", num, N(2)),
+  save_all_flags: M.cwrap("cftw_save_all_flags", num, N(1)),
+  restore_flags: M.cwrap("cftw_restore_flags", null, N(3)),
+  test_saved_flags: M.cwrap("cftw_test_saved_flags", num, N(2)),
+  is754version1985: M.cwrap("cftw_is754version1985", num, []),
+  is754version2008: M.cwrap("cftw_is754version2008", num, []),
+  is754version2019: M.cwrap("cftw_is754version2019", num, []),
+  min_mag: M.cwrap("cftw_min_mag", num, N(7)),
+  max_mag: M.cwrap("cftw_max_mag", num, N(7)),
+  minnum_mag: M.cwrap("cftw_minnum_mag", num, N(7)),
+  maxnum_mag: M.cwrap("cftw_maxnum_mag", num, N(7)),
+  // ABI 0.7, package A: 5.4.1's six. TWO formats per call, so the
+  // operand and result buffers are different widths in one call.
+  formatof_add: M.cwrap("cftw_formatof_add", num, N(10)),
+  formatof_sub: M.cwrap("cftw_formatof_sub", num, N(10)),
+  formatof_mul: M.cwrap("cftw_formatof_mul", num, N(10)),
+  formatof_div: M.cwrap("cftw_formatof_div", num, N(10)),
+  formatof_sqrt: M.cwrap("cftw_formatof_sqrt", num, N(9)),
+  formatof_fma: M.cwrap("cftw_formatof_fma", num, N(11)),
 };
 // The thirty-nine, by name. Thirty-one take (dev, fmt, rnd, a, d, n, flags),
 // five take (dev, fmt, rnd, a, b, d, n, flags) and three take an int64
@@ -461,8 +560,9 @@ function replayOneSet(name, text) {
 // directory - which is exactly what the page does with a dropped file,
 // so this measures that path and not a convenient variant of it. The
 // transcendental sets are in the list since ABI 0.3 gave the page a
-// reason to accept them, and since 0.6 the augmented, reduction and
-// character families are too; a directory that has only the twenty
+// reason to accept them, since 0.6 the augmented, reduction and
+// character families are too, and since 0.7 the magnitude and formatOf
+// ones; a directory that has only the twenty
 // opcode sets (the containerized build's own copy) replays those and
 // says the others were absent, rather than failing on a file nobody
 // wrote.
@@ -506,7 +606,7 @@ else
 // then as arrays wherever the C has a batch shape, because a wrapper
 // that only works at n == 1 would be a wrapper that does not work.
 //
-// Four families, four schemas, one rule: nothing here computes an
+// Six families, six schemas, one rule: nothing here computes an
 // expected value. Every expectation is a field in a file the golden
 // model wrote.
 // ---------------------------------------------------------------------
@@ -1104,9 +1204,235 @@ function mallocBytes(bytes) {
   return p;
 }
 
-// The four families of step 5, each with the sets it reads and the
-// driver that calls its wrappers. All four have to be present: a run
-// that drove three of them and said nothing about the fourth would be
+/** The magnitude sets (9.6): two operands in, one out, no attribute
+ *  and no bus word. Per case for exact flags, then each operation once
+ *  as one array. */
+function driveMinMaxMagSet(set, text) {
+  const esz = C.formatSize(set.fmt);
+  const byFn = new Map();
+  let lineno = 0;
+  for (const line of text.split("\n")) {
+    lineno++;
+    if (!line.trim()) continue;
+    const c = JSON.parse(line);
+    if (!MM_NAMES.includes(c.fn))
+      throw new Error(`${set.name}:${lineno}: unknown magnitude operation ` +
+                      `"${c.fn}" - 9.6 names four`);
+    // The absence of "rnd" is normative: these compare magnitudes and
+    // then SELECT an operand, so no attribute could change an answer
+    // and a set carrying one would be recording a choice that does not
+    // exist.
+    if (c.rnd !== undefined)
+      throw new Error(`${set.name}:${lineno}: a 9.6 magnitude case carries ` +
+                      `a "rnd" field (${c.rnd}); there is no rounding here ` +
+                      `for an attribute to direct`);
+    if (!byFn.has(c.fn)) byFn.set(c.fn, []);
+    byFn.get(c.fn).push({
+      lineno,
+      a: bytesOfHex(c.a, esz), b: bytesOfHex(c.b, esz),
+      d: bytesOfHex(c.d, esz), flags: c.flags >>> 0,
+    });
+  }
+  if (!byFn.size) throw new Error(`${set.name}: no cases`);
+
+  let checked = 0;
+  for (const [fn, cases] of byFn) {
+    const w = C[MM_CALL[fn]];
+    const pa = M._malloc(esz), pb = M._malloc(esz);
+    const pd = M._malloc(esz), pfl = M._malloc(4);
+    let unionFlags = 0;
+    try {
+      for (const c of cases) {
+        M.HEAPU8.set(c.a, pa);
+        M.HEAPU8.set(c.b, pb);
+        M.HEAPU8.fill(0, pd, pd + esz);
+        M.HEAPU32[pfl >> 2] = 0;
+        const st = w(dev, set.fmt, pa, pb, pd, 1, pfl);
+        if (st !== 0)
+          throw new Error(`${set.name}:${c.lineno}: cftw_${MM_CALL[fn]} ` +
+                          `returned ${C.strerror(st)}`);
+        const got = M.HEAPU8.slice(pd, pd + esz);
+        const gotFlags = M.HEAPU32[pfl >> 2] >>> 0;
+        if (hexOfBytes(got) !== hexOfBytes(c.d) || gotFlags !== c.flags)
+          throw new Error(
+            `${set.name}:${c.lineno}: ${fn}\n` +
+            `        a        ${hexOfBytes(c.a)}\n` +
+            `        b        ${hexOfBytes(c.b)}\n` +
+            `        expected ${hexOfBytes(c.d)} flags 0x` +
+            `${c.flags.toString(16).padStart(2, "0")}\n` +
+            `        got      ${hexOfBytes(got)} flags 0x` +
+            `${gotFlags.toString(16).padStart(2, "0")}`);
+        unionFlags |= gotFlags;
+        checked++;
+      }
+    } finally {
+      for (const p of [pa, pb, pd, pfl]) M._free(p);
+    }
+
+    const n = cases.length;
+    const aa = M._malloc(esz * n), ab = M._malloc(esz * n);
+    const ad = M._malloc(esz * n), afl = M._malloc(4);
+    try {
+      cases.forEach((c, i) => {
+        M.HEAPU8.set(c.a, aa + i * esz);
+        M.HEAPU8.set(c.b, ab + i * esz);
+      });
+      M.HEAPU8.fill(0, ad, ad + esz * n);
+      M.HEAPU32[afl >> 2] = 0;
+      const st = w(dev, set.fmt, aa, ab, ad, n, afl);
+      if (st !== 0)
+        throw new Error(`${set.name}: cftw_${MM_CALL[fn]} over ${n} ` +
+                        `elements returned ${C.strerror(st)}`);
+      cases.forEach((c, i) => {
+        const got = M.HEAPU8.slice(ad + i * esz, ad + (i + 1) * esz);
+        if (hexOfBytes(got) !== hexOfBytes(c.d))
+          throw new Error(`${set.name}:${c.lineno}: ${fn} disagrees with ` +
+                          `itself between n == 1 and n == ${n} - element ` +
+                          `${i} is ${hexOfBytes(got)}, the scalar call and ` +
+                          `the file both say ${hexOfBytes(c.d)}`);
+      });
+      const arrFlags = M.HEAPU32[afl >> 2] >>> 0;
+      if (arrFlags !== unionFlags)
+        throw new Error(`${set.name}: ${fn} over ${n} elements raised 0x` +
+                        `${arrFlags.toString(16)}, the union over the ` +
+                        `scalar calls is 0x${unionFlags.toString(16)}`);
+    } finally {
+      for (const p of [aa, ab, ad, afl]) M._free(p);
+    }
+  }
+  return checked;
+}
+
+/** The formatOf sets (5.4.1). The one family whose operands and result
+ *  are DIFFERENT WIDTHS in the same call, so every buffer below is
+ *  sized from the format it belongs to - and the record's own sfmt and
+ *  dfmt are checked against the file's name, because with two formats
+ *  there is a pairing to get wrong. */
+function driveFormatOfSet(set, text) {
+  const sesz = C.formatSize(set.sfmt), desz = C.formatSize(set.dfmt);
+  const byFn = new Map();
+  let lineno = 0;
+  for (const line of text.split("\n")) {
+    lineno++;
+    if (!line.trim()) continue;
+    const c = JSON.parse(line);
+    const arity = FO_ARITY[c.fn];
+    if (arity === undefined)
+      throw new Error(`${set.name}:${lineno}: unknown formatOf operation ` +
+                      `"${c.fn}" - 5.4.1 names six`);
+    if (c.sfmt !== set.sName || c.dfmt !== set.dName)
+      throw new Error(`${set.name}:${lineno}: the case says ${c.sfmt} -> ` +
+                      `${c.dfmt} in a file named for ${set.sName} -> ` +
+                      `${set.dName}`);
+    if (c.rnd !== set.rndName)
+      throw new Error(`${set.name}:${lineno}: attribute "${c.rnd}" in a ` +
+                      `${set.rndName} set`);
+    if ((arity >= 2) !== (c.b !== undefined) ||
+        (arity >= 3) !== (c.c !== undefined))
+      throw new Error(`${set.name}:${lineno}: formatOf-${c.fn} reads ` +
+                      `${arity} operand(s), the case carries ` +
+                      `${1 + (c.b !== undefined) + (c.c !== undefined)}`);
+    if (!byFn.has(c.fn)) byFn.set(c.fn, []);
+    byFn.get(c.fn).push({
+      lineno,
+      a: bytesOfHex(c.a, sesz),
+      b: arity >= 2 ? bytesOfHex(c.b, sesz) : null,
+      c: arity >= 3 ? bytesOfHex(c.c, sesz) : null,
+      d: bytesOfHex(c.d, desz),
+      flags: c.flags >>> 0,
+    });
+  }
+  if (!byFn.size) throw new Error(`${set.name}: no cases`);
+
+  let checked = 0;
+  for (const [fn, cases] of byFn) {
+    const w = C[FO_CALL[fn]];
+    const arity = FO_ARITY[fn];
+    // (dev, sfmt, dfmt, rnd, a[, b[, c]], d, n, flags, bus) - the bus
+    // word is real for the widening direction, which issues a device
+    // pass underneath, and reads back 0 for the narrowing one.
+    const call = (pa, pb, pc, pd, n, pfl, pbus) => arity === 1
+      ? w(dev, set.sfmt, set.dfmt, set.rnd, pa, pd, n, pfl, pbus)
+      : (arity === 2
+         ? w(dev, set.sfmt, set.dfmt, set.rnd, pa, pb, pd, n, pfl, pbus)
+         : w(dev, set.sfmt, set.dfmt, set.rnd, pa, pb, pc, pd, n, pfl, pbus));
+
+    const pa = M._malloc(sesz), pb = M._malloc(sesz), pc = M._malloc(sesz);
+    const pd = M._malloc(desz), pfl = M._malloc(4), pbus = M._malloc(4);
+    let unionFlags = 0;
+    try {
+      for (const k of cases) {
+        M.HEAPU8.set(k.a, pa);
+        if (k.b) M.HEAPU8.set(k.b, pb);
+        if (k.c) M.HEAPU8.set(k.c, pc);
+        M.HEAPU8.fill(0, pd, pd + desz);
+        M.HEAPU32[pfl >> 2] = 0;
+        M.HEAPU32[pbus >> 2] = 0;
+        const st = call(pa, pb, pc, pd, 1, pfl, pbus);
+        if (st !== 0)
+          throw new Error(`${set.name}:${k.lineno}: cftw_${FO_CALL[fn]} ` +
+                          `returned ${C.strerror(st)}`);
+        const got = M.HEAPU8.slice(pd, pd + desz);
+        const gotFlags = M.HEAPU32[pfl >> 2] >>> 0;
+        if (hexOfBytes(got) !== hexOfBytes(k.d) || gotFlags !== k.flags)
+          throw new Error(
+            `${set.name}:${k.lineno}: formatOf-${fn} ${set.sName} -> ` +
+            `${set.dName} ${set.rndName}\n` +
+            `        a        ${hexOfBytes(k.a)}\n` +
+            (k.b ? `        b        ${hexOfBytes(k.b)}\n` : "") +
+            (k.c ? `        c        ${hexOfBytes(k.c)}\n` : "") +
+            `        expected ${hexOfBytes(k.d)} flags 0x` +
+            `${k.flags.toString(16).padStart(2, "0")}\n` +
+            `        got      ${hexOfBytes(got)} flags 0x` +
+            `${gotFlags.toString(16).padStart(2, "0")}`);
+        unionFlags |= gotFlags;
+        checked++;
+      }
+    } finally {
+      for (const p of [pa, pb, pc, pd, pfl, pbus]) M._free(p);
+    }
+
+    const n = cases.length;
+    const aa = M._malloc(sesz * n), ab = M._malloc(sesz * n);
+    const ac = M._malloc(sesz * n), ad = M._malloc(desz * n);
+    const afl = M._malloc(4), abus = M._malloc(4);
+    try {
+      cases.forEach((k, i) => {
+        M.HEAPU8.set(k.a, aa + i * sesz);
+        if (k.b) M.HEAPU8.set(k.b, ab + i * sesz);
+        if (k.c) M.HEAPU8.set(k.c, ac + i * sesz);
+      });
+      M.HEAPU8.fill(0, ad, ad + desz * n);
+      M.HEAPU32[afl >> 2] = 0;
+      M.HEAPU32[abus >> 2] = 0;
+      const st = call(aa, ab, ac, ad, n, afl, abus);
+      if (st !== 0)
+        throw new Error(`${set.name}: cftw_${FO_CALL[fn]} over ${n} ` +
+                        `elements returned ${C.strerror(st)}`);
+      cases.forEach((k, i) => {
+        const got = M.HEAPU8.slice(ad + i * desz, ad + (i + 1) * desz);
+        if (hexOfBytes(got) !== hexOfBytes(k.d))
+          throw new Error(`${set.name}:${k.lineno}: formatOf-${fn} ` +
+                          `disagrees with itself between n == 1 and ` +
+                          `n == ${n} - element ${i} is ${hexOfBytes(got)}, ` +
+                          `the scalar call and the file both say ` +
+                          `${hexOfBytes(k.d)}`);
+      });
+      const arrFlags = M.HEAPU32[afl >> 2] >>> 0;
+      if (arrFlags !== unionFlags)
+        throw new Error(`${set.name}: formatOf-${fn} over ${n} elements ` +
+                        `raised 0x${arrFlags.toString(16)}, the union over ` +
+                        `the scalar calls is 0x${unionFlags.toString(16)}`);
+    } finally {
+      for (const p of [aa, ab, ac, ad, afl, abus]) M._free(p);
+    }
+  }
+  return checked;
+}
+
+// The six families of step 5, each with the sets it reads and the
+// driver that calls its wrappers. All six have to be present: a run
+// that drove five of them and said nothing about the sixth would be
 // the half-step in miniature.
 const STEP5 = [
   { label: "the thirty-nine transcendentals", unit: "transcendental",
@@ -1117,6 +1443,10 @@ const STEP5 = [
     sets: REDUCE_SETS, drive: driveReduceSet },
   { label: "the character conversions (5.12) and payloads (9.7)",
     unit: "character", sets: CHARACTER_SETS, drive: driveCharacterSet },
+  { label: "the magnitude forms of minimum and maximum (9.6)",
+    unit: "minmaxmag", sets: MINMAXMAG_SETS, drive: driveMinMaxMagSet },
+  { label: "the formatOf arithmetic (5.4.1), all sixteen ordered pairs",
+    unit: "formatof", sets: FORMATOF_SETS, drive: driveFormatOfSet },
 ];
 
 const missingFamily = STEP5.filter((f) =>
@@ -1128,7 +1458,7 @@ if (missingFamily.length) {
   console.log("Steps 1-4 stand. `make vectors` from the repo root writes " +
               "them; the containerized build cannot (no mpmath in the " +
               "pinned image), so build/vectors never has them.");
-  bad("the ABI 0.6 wrappers were not fully exercised - not a full pass");
+  bad("the ABI 0.7 wrappers were not fully exercised - not a full pass");
   console.log(failed ? "\nVERIFY FAILED" : "\nVERIFY OK");
   process.exit(1);
 }
