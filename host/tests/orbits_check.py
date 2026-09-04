@@ -339,6 +339,21 @@ def state_of(row):
     return [mpf(s) for s in row[3]], [mpf(s) for s in row[4]]
 
 
+def ratio(a, b):
+    """a/b, with a zero or NaN denominator answered rather than raised.
+
+    A broken tool can report an exactly zero drift - negative control
+    B does - and a check that died on that would be reporting a
+    traceback where it should be reporting a failure. A NaN stays a
+    NaN, so that every comparison against it is false and the check
+    FAILS rather than passing on an infinity."""
+    if a != a or b != b:
+        return mpf("nan")
+    if b == 0:
+        return mpf("inf")
+    return a / b
+
+
 def rel_diff(a, b):
     """||a - b|| / ||b||, over a concatenated state."""
     d = norm([x - y for x, y in zip(a, b)])
@@ -422,14 +437,14 @@ def main():
                   % (fmt, nsteps, float(dev), float(ceiling)),
                   "%s deviates by %.3e, above the %.3e ceiling: that is not "
                   "roundoff" % (fmt, float(dev), float(ceiling)))
-        ratio = floors["fp64"] / floors["fp256"]
+        rr = ratio(floors["fp64"], floors["fp256"])
         want_ratio = mpf(2) ** (237 - 53)
-        check(want_ratio / 4096 < ratio < want_ratio * 4096,
+        check(want_ratio / 4096 < rr < want_ratio * 4096,
               "fp64's roundoff is %.3e times fp256's; 2^(237-53) is %.3e, "
               "so the two floors are the formats' own ratio and nothing "
-              "else" % (float(ratio), float(want_ratio)),
+              "else" % (float(rr), float(want_ratio)),
               "fp64/fp256 roundoff ratio %.3e is nowhere near 2^184 = %.3e"
-              % (float(ratio), float(want_ratio)))
+              % (float(rr), float(want_ratio)))
 
         # -------------------------------------------------------------
         print("\n[2] the truncation error, and the two schemes' orders")
@@ -452,7 +467,7 @@ def main():
                 t = mpf(setup["h"]) * setup["steps"]
                 qe, ve = kepler_at(q0, v0, mpf(setup["mu"]), t)
                 errs.append(rel_diff(qT + vT, qe + ve))
-            r = errs[0] / errs[1]
+            r = ratio(errs[0], errs[1])
             check(lo < r < hi,
                   "%s: halving h cut the error from the closed form by "
                   "%.2f, and order %d wants %d - %.3e at %d steps a period, "
@@ -462,7 +477,7 @@ def main():
                   "%s: halving h changed the error by %.2f, which is not "
                   "order %d" % (scheme, float(r), order))
             # and the roundoff floor must be far below it
-            gap = errs[1] / floors["fp256"]
+            gap = ratio(errs[1], floors["fp256"])
             check(gap > 10 ** 6,
                   "%s: its truncation error is %.2e times fp256's roundoff, "
                   "so the method's error is the ONLY error - which is the "
@@ -517,7 +532,7 @@ def main():
               % row["energy_drift"],
               "the energy drift differs between the formats: %s vs %s"
               % (row["energy_drift"], row64["energy_drift"]))
-        lr = dl64 / dl256
+        lr = ratio(dl64, dl256)
         check(want_ratio / 4096 < lr < want_ratio * 4096,
               "the ANGULAR-MOMENTUM drift is %s at fp256 and %s at fp64, a "
               "factor of %.3e: it is roundoff alone, because both schemes "
@@ -558,7 +573,7 @@ def main():
               "fp64's deviation from ITS 300-digit twin is %.3e, %.2e times "
               "fp256's - the same integration, the same step, only the "
               "arithmetic differs"
-              % (float(dev64), float(dev64 / dev)),
+              % (float(dev64), float(ratio(dev64, dev))),
               "fp64's outer-system deviation %.3e is not far above fp256's "
               "%.3e" % (float(dev64), float(dev)))
 

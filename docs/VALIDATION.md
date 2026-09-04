@@ -2974,3 +2974,217 @@ comparisons.
   left alone.
 - `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
   ABI version were left to the integrator, as at 0.7.
+
+## 2026-09-04 - the orbit integrator: the roundoff floor and the method's error, measured apart
+
+`host/tools/orbits.c` and `host/tests/orbits_check.py` are new;
+`docs/ORBITS.md` is the argument behind them. Nothing under
+`host/src/`, `host/include/`, `python/cft_golden/` or `verify/` was
+touched, and the ABI version is unchanged - this is a tool over the
+existing contract, not a change to it.
+
+The workload integrates the Kepler two-body problem and the outer
+solar system with Stormer-Verlet and with Yoshida's fourth-order
+composition of it, every arithmetic step through libcft, at any of the
+four formats, over an ensemble of copies perturbed by an exact integer
+number of ulps.
+
+It is here because it has two error sources that behave completely
+differently, and it separates them into two numbers rather than
+reporting their sum:
+
+- the **energy** drift is the METHOD's, and comes out identical at
+  binary64 and binary256 to every digit printed;
+- the **angular-momentum** drift is the ARITHMETIC's alone, because
+  both schemes conserve total angular momentum exactly in exact
+  arithmetic - a drift adds `m c (v x v) = 0`, and the kick's pair
+  term cancels because `m_i g_ij = h G m_i m_j / r^3` is symmetric,
+  which is Newton's third law written in the arithmetic.
+
+### What the gate is, and what it scores
+
+`make -C host orbitstest` runs a 300-digit mpmath oracle against the
+tool, in two roles that are deliberately kept apart. The **same
+discrete scheme** at 300 digits, from the tool's own starting
+encodings and the tool's own derived constants, whose difference from
+the run is the format's ROUNDOFF and nothing else. And the **closed
+form** through Kepler's equation, whose difference from the discrete
+solution is the method's TRUNCATION error.
+
+Keeping "the same constants" honest is what `--dump-setup` is for: `h`
+is `fl(2*pi/S)` and the drift scale is `fl(fl(w*h)*0.5)`, so an oracle
+using the exact real numbers would be charging the constants' rounding
+to the integration. The tool prints every derived constant as an exact
+decimal and the oracle integrates with those.
+
+    26 checks, 0 failures
+    ORBITS CHECK OK - the tool, the library and the 300-digit oracle agree
+
+| what it checks | result |
+|---|---|
+| roundoff, fp256 and fp64 against their own 300-digit twins | `5.500e-68` and `1.050e-12` over 2,048 steps; ratio `1.91e55` against `2^184 = 2.45e55` |
+| truncation, and both schemes' orders | halving `h` cuts the error from the closed form by **3.99** (leapfrog, order 2) and **15.96** (yoshida4, order 4) |
+| the roundoff floor against the truncation error | fp256's is `5.52e64` times below leapfrog's, `8.68e61` below yoshida4's |
+| `H0` and `L0` at sample 0 | 0.6 and 0.0 ulps of binary256 from the 300-digit values |
+| the initial condition | `a - 1 = 4.2e-71`, `e - 3/4 = 1.1e-71` |
+| the angular-momentum certificate | bounded by `steps^2 2^-p 10^6` for both problems and both schemes |
+| the outer solar system against its 300-digit twin | `3.118e-70` at fp256, `3.707e-15` at fp64 - a factor of `1.19e55` |
+| the transcribed table, against the sky | osculating periods within 0.01% (Jupiter) to 0.75% (Neptune) of the published sidereal periods |
+| the hash chain | recomputed with `hashlib`, identical |
+| batch 8 / 3 / 1 | byte-identical checkpoints |
+| the sequencer program against the host loop | byte-identical records AND checkpoints |
+| interrupt and resume, 6 stops, 5 of them mid sample interval | byte-identical checkpoint and records to the uninterrupted run |
+| the three things `--engine program` must refuse | refused, each with its reason |
+
+The interrupt leg stops every 37 steps on purpose, which does not
+divide the 96-step sample interval, so most stops catch the ensemble
+part way through one; the checkpoint is step-granular for that reason.
+
+### The measurements
+
+Software backend, single thread, DESKTOP-T33SK86 (Windows 11, MINGW64,
+`gcc -O2`), 2026-09-04, box busy with other work.
+
+**The result the workload exists for.** 2000 Kepler periods at 512
+steps a period - 1,024,000 steps - over four ensemble members:
+
+| scheme | format | energy drift | angular-momentum drift | seconds |
+|---|---|---|---|---|
+| leapfrog | fp256 | `7.94534e-4` | `9.00177e-69` | 133.6 |
+| leapfrog | fp64 | `7.94534e-4` | `1.44687e-13` | 64.0 |
+| yoshida4 | fp256 | `2.04280e-5` | `6.91390e-69` | 399.9 |
+| yoshida4 | fp64 | `2.04280e-5` | `2.20051e-13` | 204.8 |
+
+The energy column is identical across formats and 38.9x apart across
+schemes. The angular-momentum column is `1.61e55` and `3.18e55` apart
+across formats - `2^184` is `2.45e55` - and within 30% across schemes.
+**The same roundoff floor under two different truncation errors**,
+which is what carrying two schemes was for.
+
+The outer solar system over 300 years at a 10-day step, eight members,
+says the same thing: `dH = 4.02616e-6` (leapfrog) and `2.52287e-9`
+(yoshida4) at BOTH formats, against `dL` of `4.44569e-70` /
+`1.70779e-14` and `1.12624e-69` / `2.45873e-14`.
+
+**The floor across the whole ladder**, 64 periods, leapfrog:
+
+| format | p | energy drift | angular-momentum drift |
+|---|---|---|---|
+| fp32 | 24 | `7.89642e-4` | `1.34269e-5` |
+| fp64 | 53 | `7.92692e-4` | `4.49838e-14` |
+| fp128 | 113 | `7.92692e-4` | `2.02365e-32` |
+| fp256 | 237 | `7.92692e-4` | `7.87227e-70` |
+
+`dL` tracks `2^-p` across four rungs to within a factor of two, and
+**binary32 is the rung where the columns stop being independent** -
+its energy drift disagrees with every wider format's in the fifth
+digit, because at `p = 24` the roundoff has grown into the truncation
+measurement. Locating that crossover is what the workload is for; at
+binary256 it is `2^213` further away.
+
+**Throughput**, 16 members, 8,192 Kepler steps:
+
+| scheme | 1/r^3 | format | engine | seconds | element-steps/s | library calls |
+|---|---|---|---|---|---|---|
+| leapfrog | exact | fp256 | loop | 3.720 | 35,233 | 90,395 |
+| leapfrog | exact | fp64 | loop | 1.570 | 83,487 | 90,395 |
+| leapfrog | newton | fp256 | loop | 1.656 | 79,150 | 295,195 |
+| leapfrog | newton | fp256 | **program** | 1.376 | 95,263 | **284** |
+| yoshida4 | exact | fp256 | loop | 10.853 | 12,077 | 270,619 |
+
+binary256 costs **2.4x** binary64 here, not the 30x a significand
+argument predicts; correct rounding (`cft_sqrt` + `cft_div`) costs
+**2.2x** the seed-and-Newton route and is still the default; and the
+sequencer's contribution is **284 library calls instead of 295,195**
+for the same arithmetic - 1.20x on the software backend, where there
+is no bus to save.
+
+### What the writing of it found
+
+**The sequencer cannot hold this workload, and there are two
+independent reasons, either fatal alone.** Both are properties of the
+program model rather than of the tool, and both are new information
+for docs/SEQUENCER.md.
+
+1. **Three input streams against `2d` state values.**
+   `cft_program_run` initialises `r0`, `r1`, `r2`; `r3..r15` start at
+   `+0`. A Hamiltonian system with `d` degrees of freedom has `2d`
+   values per lane - 4 for the planar Kepler problem, 30 for the outer
+   solar system - so a program can be ENTERED only at a state with at
+   most three non-zero components. The Kepler initial condition has
+   exactly two, and the registers that must hold the zeros are the
+   ones that start at `+0`, so step 0 is reachable and no later step
+   is. That is why the Kepler program engine runs the whole
+   integration in one call, cannot resume into the middle of one, and
+   does not exist for the outer solar system. docs/COLLATZ.md recorded
+   the same limit gently ("it only fits because the fourth is an
+   output that always starts at +0"); this workload shows it binding.
+   **A fourth input stream, or a "load `r3..` from the deposit buffer"
+   mode, would make every 2-degree-of-freedom system resumable and
+   every 3-degree-of-freedom one expressible.** Sixteen registers are
+   already enough for a 6-value state; only the loading is missing.
+
+2. **Correctly rounded divide and square root are not programs.**
+   `python/cft_golden/seqprogs.py` partitions its own route as HOST
+   prep, PROGRAM core, HOST finish - `round_pack` is the contract's
+   single rounding authority and it is host work by design - and the
+   core alone occupies `r0..r12` of sixteen registers. So the composed
+   route cannot be inlined into a larger program's loop body. That is
+   why `--rsqrt exact` is a loop-engine route and why `--rsqrt newton`
+   exists at all: so that the two engines have a step they can BOTH
+   run, which they then have to run bit for bit.
+
+**Nothing in this workload is exact, and saying so is the design.**
+Every drift and every kick rounds, so `INEXACT` is expected on every
+call and carries no information; the other four flags are
+certificates, are checked on every call, and stop the run. A sweep of
+18 deliberately under-resolved configurations - three formats, six
+step sizes from 3 to 12 steps per orbit, 3,000 periods each - raised
+nothing but `INEXACT`. The certificate never fires on a healthy
+integration or even a badly wrong one; it fires on arithmetic that has
+left the domain, which is what a certificate should do.
+
+### The negative control
+
+Three faults, each rebuilt and run through the same gate, chosen to be
+caught by three different gates.
+
+| control | what was changed | caught by | what stayed green |
+|---|---|---|---|
+| A | `c_mhm[sub][i]` -> `[j]` in the outer kick: Newton's third law | the angular-momentum certificate (`2.05411e-3` against a `2.35e-60` bound) and the 300-digit oracle (`2.756e-01` against `9.389e-62`) | every Kepler row, the flags (`0x10`, perfectly clean), the chain, batch, engines, resume, the refusals |
+| B | `note_flags` no longer fatal on the certificate flags, plus `CFT_FMA` -> `CFT_SUB` in `kepler_r2` | with the gate IN: exit 3 at the first step, `cft_sqrt raised 0x01`, at every format. With the gate OUT: the run completes, `dH = nan`, **`dL = 0`**, a chain, and 8 of 26 checks fail | **the angular-momentum certificate passes, reporting `0`** - a NaN state conserves everything |
+| C | the ORDER of the two roundings in `kepler_r2` reversed - mathematically identical | **exactly one check**: the sequencer program against the host loop | everything else, the 300-digit oracle included (`1.946e-68` against the unsabotaged `2.372e-68`) |
+
+Control C is the one worth keeping. **The oracle cannot see a change
+in the order of the roundings and never could** - two different
+roundings of the same real number are both correct answers to the
+domain's question. Had the fault been applied to both engines, nothing
+in the check would have caught it, and the chains published in
+docs/ORBITS.md would be the only witness. That is the plainest
+statement of what an oracle is for and what it is not: it bounds the
+answer, and only a bit-exact reference bounds the bits.
+
+Control B is the complement. The certificate flags are the only gate
+that fires BEFORE a wrong answer exists - every other gate scores a
+number the tool has already produced - and the only gate a NaN cannot
+satisfy.
+
+Restoring the file, rebuilding, and the gate is green again at 26
+checks.
+
+### What was NOT run, and why
+
+- No device, in emulation or otherwise. The tool takes `--artifact`
+  and issues the same calls either way, but nothing here has been
+  through XRT; docs/BRINGUP.md owns those gates. No device number is
+  quoted.
+- The RTL stages (`sim`, `lint`, `formal`): no opcode was added and no
+  RTL file touched. The program uses `CFT_FMA`, `CFT_MUL` and
+  `CFT_RSQRT_SEED` with the control codes `REPEAT`, `ENDREP`,
+  `DEPOSIT` and `HALT`, all of which `tb/` and the vector sets already
+  cover.
+- The rest of `verify/run.sh`: nothing under `host/src/` changed, so
+  the library gates certify the same library. No runner stage was
+  added; `verify/run.sh` was deliberately left alone.
+- `README.md`, `docs/COMPATIBILITY.md`, `docs/COMPLIANCE.md` and the
+  ABI version were left to the integrator, as at 0.7.
