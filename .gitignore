@@ -80,3 +80,9 @@ host/cpp-api-test20
 host/device-test
 host/divsqrt-soak
 host/clause5-soak
+host/mpfr-check
+host/cft-collatz
+host/cft-enclose
+host/cft-mersenne
+host/cft-orbits
+host/cft-zoom
