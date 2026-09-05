@@ -147,6 +147,8 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      Lucas-Lehmer, symplectic orbits, deep zoom),
                      DEMOS (the same five in the browser, chains
                      matched to the C tools),
+                     ATLAS (the atlas-engine integration: the emitter
+                     seam, the det library on the ISA, the four asks),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
