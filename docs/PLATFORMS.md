@@ -2243,3 +2243,604 @@ Mouser, Avnet, Digilent direct) refuse automated fetching entirely, so
 **used-market pricing is the weakest evidence in this document** and
 every figure drawn from a search index rather than a loaded page is
 marked as such. Treat those as leads to click, not as quotes.
+
+## Appendix: the Puzhi catalogue (2026-04-15)
+
+Added 2026-09-06, after the survey above was written. The operator
+pointed at a vendor the survey did not cover: **Puzhi (璞致电子,
+puzhi.com / en.puzhi.com), Puzhi Electronic Technology (Shanghai) Co.,
+Ltd.** - an SDR-leaning Chinese SOM-and-carrier house. The source is a
+77-page Chinese product catalogue,
+`Data/Puzhi.com/20260415_8013_FPGA_CAT.pdf`, dated 2026-04-15 by its
+filename. `Data/` is gitignored; the file is referenced by path and
+date and is not committed.
+
+All 77 pages were read: the text layer was extracted with PyMuPDF and
+every page also rendered and read as an image. The spec tables are
+real text, not scans, so the figures below are transcriptions rather
+than OCR guesses.
+
+**What the company says about itself** (p.3, read): founded 2017,
+headquartered in Pudong, Shanghai; ARM/FPGA core boards, development
+boards and custom design; ISO9001 and RoHS; claims sales into 60+
+countries and 20,000+ enterprise customers. Product lines cover
+Xilinx/AMD, **复旦微 (Shanghai Fudan Microelectronics)** and 紫光同创
+(Pango). Sales channels named on p.2 are Taobao, Tmall and two JD
+storefronts - all mainland-China marketplaces.
+
+### Method, and one warning that governs the whole appendix
+
+**The catalogue prints no prices.** Not one, on any page, in any
+currency. Searching the extracted text for 元, ￥, ¥, RMB, USD, `$`
+and 价格 returns nothing. Every price in this appendix therefore comes
+from a marketplace or reseller page, with the date it was seen, and
+none of them is the vendor's own.
+
+**The catalogue prints almost no DDR data rates.** Widths are given
+(this is unusually good for a Chinese datasheet), but the only pages
+that state a rate are the ZU7EG, ZU7EV and ZU11EG SOMs, which say
+"2400Mhz*64bit". Every other bandwidth figure below is computed at an
+assumed rate, and says so. That assumption is the weakest link in the
+per-product notes.
+
+**The catalogue's device numbers are AMD's own.** Every LUT, DSP and
+BRAM figure printed for an AMD part was checked against
+[DS890 v4.10, 2026-05-21](https://docs.amd.com/v/u/en-US/ds890-ultrascale-overview)
+(UltraScale/UltraScale+) or [DS180
+v2.6.1](https://docs.amd.com/v/u/en-US/ds180_7Series_Overview)
+(7-series, CLB LUTs = slices x 4). They match - AU15P 77,760 LUT /
+576 DSP, AU20P 109,000 / 900, KU040 242,400 / 1,920, KU060 331,680 /
+2,760, KU095 537,600 / **768**, KU3P 162,720 / 1,368, KU5P 216,960 /
+1,824, ZU4EV 87,840, ZU5EV 117,120, ZU7EV 230,400 - so the catalogue
+is not inflating anything. Where it errs it errs by transcription, and
+those errors are listed at the end.
+
+**The licence column was re-read from source, not taken from §2.**
+[UG973 2026.1, Device Availability by Subscription
+Tier](https://docs.amd.com/r/en-US/ug973-vivado-release-notes-install-license/Device-Availability-by-Subscription-Tier),
+fetched 2026-09-06, gives Basic as: **All** for every 7-series family
+and for Artix UltraScale+; **XCKU3P, XCKU5P** for Kintex UltraScale+;
+**XCKU025, XCKU035** for Kintex UltraScale; **None** for Virtex
+UltraScale+ and for Zynq UltraScale+ RFSoC; and for Zynq UltraScale+
+MPSoC an explicit list that ends **"... XCZU5EV, XCZU7EV, XCZU7EG,
+XCZU7CG"**. XCZU7EV being named by AMD rather than inferred is what
+makes the first shortlist entry below safe to recommend.
+
+Fit arithmetic is **budget (A)** from the Method section: a bare part,
+no vendor shell, `device_LUT x 0.85`, tile charged at 123,420 LUT
+flattened, and the platform wrapper not counted. Raw single-tile
+percentages are given in the survey's own convention (123,420 divided
+by raw device LUT) so the rows are comparable with §2. Per-tile memory
+demand is the survey's 13.82 GB/s.
+
+### The table, in the survey's columns
+
+SOMs first, because on this vendor the SOM is the compute object and
+the carrier is a breakout. "Tiles" is budget (A). Prices are the best
+found anywhere as of 2026-09-06 and are **not** from the catalogue;
+"-" means no listing was found.
+
+| candidate | device | LUT | DSP | BRAM | memory | host (via carrier) | tiles | free tools? | open flow? | price (date, source) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **PZ-ZU7EV-SOM** | XCZU7EV-2FFVC1156I | 230,400 | 1,728 | 11 Mb + 27 Mb URAM | **PL 4 GB DDR4 64-bit 2400** + PS 4 GB same | Gen3 x4, 2x SFP+, FMC-HPC, **PL GbE** | **1** at 53.6% | **yes, Basic** (named by AMD) | no | SOM **$2,914.64**, KFB kit **$2,722.28** (AliExpress); £987.99 / £1,310.99 sold out (CodeRobin) |
+| **PZ-ZU7EG-SOM** | XCZU7EG-2FFVC1156I | 230,400 | 1,728 | 11 Mb + 27 Mb URAM | same as ZU7EV | same | **1** at 53.6% | **yes, Basic** (named by AMD) | no | - |
+| **PZ-K7325T-SOM** | XC7K325T-2FFG900I | 203,800 | 840 | 16,020 Kb | **2 GB DDR3 64-bit** | **Gen2 x8**, 2x SFP, GbE (RGMII), SATA | **1** at 60.6% | **yes, Basic** | **yes** (`xc7k325tffg900-2`) | **$429.99 direct from Puzhi, in stock**; KFB kit **$1,036.14** (AliExpress) |
+| **PZ7100-SOM-900** | XC7Z100-2FFG900I | 277,400 | 2,020 | 26.5 Mb | PS 1 GB + **PL 1 GB DDR3, width not printed** | **Gen2 x8**, 4x SFP, SATA, dual GbE | **1** at 44.5% | **yes, Basic** | **yes** (`xc7z100ffg900-2`) | £567.99 sold out (CodeRobin) |
+| **PZ7045-SOM-900** | XC7Z045-2FFG900I | 218,600 | 900 | 19.2 Mb | PS 1 GB + **PL 1 GB DDR3, width not printed** | **Gen2 x8**, 4x SFP, SATA, dual GbE | **1** at 56.5% | **yes, Basic** | **yes** (`xc7z045ffg900-2`) | - |
+| **PZ-KU5P-SOM** | XCKU5P-2FFVB676I | 216,960 | 1,824 | 16.9 Mb + 18 Mb URAM | **2 GB DDR4 32-bit** | **Gen3 x8**, 100G QSFP28, FMC-HPC, GbE | **1** at 56.9% | **yes, Basic** | no | **$499.00 direct from Puzhi, in stock**; KFB kit **$1,408.61** (AliExpress) |
+| **PZ-KU3P-SOM** | XCKU3P-2FFVB676I | 162,720 | 1,368 | 12.7 Mb + 13.5 Mb URAM | 2 GB DDR4 32-bit | Gen3 x8, 100G QSFP28, FMC-HPC | **1** at 75.8% tight | **yes, Basic** | no | KFB kit **$1,240.18** (AliExpress); SOM alone not listed |
+| **PZ-K7410T-SOM** | XC7K410T-2FFG900I | 254,200 | 1,540 | 28,620 Kb | 2 GB DDR3 64-bit | Gen2 x8, 2x SFP, SATA | **1** at 48.6% | **yes, Basic** | **no - absent from the db** | SOM £453.99, FH kit £611.99, sold out (CodeRobin) |
+| **PZ-V7690T-SOM** | XC7V690T-2FFG1761I | 433,200 | 3,600 | 52,920 Kb | **2x (2 GB DDR3 64-bit)** | Gen3 x8, 3x SFP 10G, QSFP 40G, 3x FMC | **2** at 57.0% | **yes, Basic** | **no - only `xc7vx485t`** | SOM **$6,021.28**, board **$8,479.47** (AliExpress) |
+| **PZ-KU060-SOM** | XCKU060-2FFVA1156I | 331,680 | 2,760 | 38.0 Mb | **4 GB DDR4 64-bit** | Gen3 x4 or x8, 2x SFP, 2x FMC | **2** at 74.4% | **no - Core** (Basic: KU025/KU035 only) | no | - |
+| **PZ-KU040-SOM** | XCKU040-2FFVA1156I | 242,400 | 1,920 | 21.1 Mb | **4 GB DDR4 64-bit** | Gen3 x4 or x8, 2x SFP, 2x FMC | **1** at 50.9% | **no - Core** | no | - |
+| **PZ-KU095-SOM** | XCKU095-2FFVA1156I | 537,600 | **768** | 59.1 Mb | 4 GB DDR4 64-bit | **no carrier listed**; same 3x 168P footprint as KU040/060 | **2, DSP-bound** (3 by area) | **no - Core** | no | - |
+| **PZ-ZU11EG-SOM** | XCZU11EG-2FFVC1156I | 298,560 | 2,928 | 21.1 Mb + 22.5 Mb URAM | PL 4 GB DDR4 64-bit 2400 | Gen3 x4, 2x SFP, FMC-HPC | **2** at 82.7% tight | **no - Core** | no | - |
+| **PZ-ZU9EG-SOM** | XCZU9EG-2FFVB1156I | 274,080 | 2,520 | 32.1 Mb | PS 4 GB + PL 2 GB DDR4 | **its carrier has no PCIe**; 2x SFP, FMC-HPC | **1** at 45.0% | **no - Core** | no | SOM £1,075.99, KFB £1,164.99 sold out (2026-09-06, CodeRobin) |
+| **PZ-ZU15EG-SOM** | XCZU15EG-2FFVB1156I | 341,280 | 3,528 | 26.2 Mb + 31.5 Mb URAM | PS 4 GB + PL 2 GB DDR4 | **its carrier has no PCIe**; 2x SFP, FMC-HPC | **2** at 72.3% | **no - Core** | no | SOM £987.99, KFB £1,136.99 sold out (2026-09-06, CodeRobin) |
+| **PZ-ZU19EG-SOM** | XCZU19EG-2FFVC1760I | 522,720 | 1,968 | 34.6 Mb + 36.0 Mb URAM | PS 8 GB ECC + PL 8 GB DDR4 | **Gen3 x8**, 4x QSFP (40G per photo), FMC-HPC+LPC | **3** at 70.8% | **no - Core** | no | - |
+| **PZ-ZU47DR-SOM** | XCZU47DR-2FFVE1156I | 425,280 | 4,272 | 38 Mb + 22.5 Mb URAM | PS 8 GB + PL 4 GB DDR4 | Gen3 x4, 100G QSFP28, 10G SFP, OCXO | **2** at 58.0% | **no - RFSoC reads None** | no | - |
+| **PZ-VU9P-SOM** | XCVU9P-2FLGB2104I | 1,182,240 | 6,840 | 75.9 Mb | **dual DDR4 8 GB + 8 GB, width not printed** | **Gen3 x8**, 4x 100G QSFP28, 2x FMC-HPC + LPC | **8** at 83.5% | **no - Core** (Virtex US+ reads None) | no | ~**$19,220** (AliExpress; SOM-or-board **unverified**) |
+| **PZ-VU13P-SOM** | XCVU13P-2FHGB2104I | 1,728,000 | 12,288 | 94.5 Mb | dual DDR4 8 GB + 8 GB | same | **11** at 78.6% | **no - Core** | no | - |
+| **PZ-AU20P-SOM** | XCAU20P-2FFVB676I | 109,000 | 900 | 7.0 Mb | **1 GB DDR4 16-bit** | Gen3/4 x8 or x4, 2x SFP+, FMC-LPC | **0**; fp64-max 62.9% | **yes, Basic** | no | - |
+| **PZ-AU15P-SOM** | XCAU15P-2FFVB676I | 77,760 | 576 | 5.1 Mb | 1 GB DDR4 16-bit | Gen3/4 x8 or x4, 2x SFP+, FMC-LPC | **0**; fp32-max 55.6% | **yes, Basic** | no | **$389.99 direct from Puzhi, in stock**; board $879.56 (AliExpress); KFB also on [Amazon.com](https://www.amazon.com/PZ-AU15P-KFB-Development-UltraScale-XC7AU15P-XC7AU20P/dp/B0FH1M84XY) (price not loadable) |
+| **PZ-A7200T-SOM** | XC7A200T-2FBG484I | 134,600 | 740 | 13,140 Kb | 1 GB DDR3 32-bit | Gen2 x2, 2x SFP, 2x GbE | **0**; fp128-max 71.4% | **yes, Basic** | **yes** (`xc7a200tfbg484-2`) | **$329.99 direct from Puzhi, in stock**; $260.28 + $37.08 ship (AliExpress); **no KFB listing found** |
+| **PZ-A7100T-SOM** | XC7A100T-2FGG484I | 63,400 | 240 | 4,846 Kb | 1 GB DDR3 32-bit | Gen2 x2, 2x SFP, 2x GbE | **0**; fp32-max 68.2% | **yes, Basic** | **yes** (`xc7a100tfgg484-2`) | - |
+| **PZ-A775T-SOM** | XC7A75T-2FGG484I | 47,200 | 180 | 3,780 Kb | 1 GB DDR3 32-bit | Gen2 x2 | **0**; below fp32-max | **yes, Basic** | **no - xc7a75t absent from the db** | - |
+| **PZ-A735T-SOM** | XC7A35T-2FGG484I | 20,800 | 90 | 1,800 Kb | 1 GB DDR3 32-bit | Gen2 x2 | **0**; quarter tile only | **yes, Basic** | **yes** (`xc7a35tfgg484-2`) | - |
+| **PZ7035-SOM-900** | XC7Z035-2FFG900I | 171,900 | 900 | 17.6 Mb | PS 1 GB + PL 1 GB DDR3 | Gen2 x8, 4x SFP, SATA | **1** at 71.8% | **yes, Basic** | **yes** (`xc7z035ffg900-2`) | - |
+| **PZ7030-SOM-676** | XC7Z030-2FFG676I | 78,600 | 400 | 9.3 Mb | PS 1 GB + PL 1 GB DDR3 | **PCIe marked unusable on its carrier** | **0**; fp32-max 55.0% | **yes, Basic** | **yes** | - |
+| PZ7020 / PZ7010 / PZ7015 / PZ7020S / PZ7010S SOMs | XC7Z020/010/015 | 53,200 / 17,600 / 46,200 | 220 / 80 / 160 | 4.9 / 2.1 / - Mb | 0.5-1 GB DDR3 | Gen2 x2 (7015 only) | **0** | **yes, Basic** | **yes** | - |
+| PZ7020F / PZ7020SF / PZ7045F / PZ7100F / PZ-K7325TF / PZ-V7690TF SOMs | Fudan Micro JFMQL20S400, FMQL45T900, JFMQL100TAI900, JFM7K325T, JFM7VX690T36 | see notes | - | - | as their AMD analogues | as their AMD analogues | **n/a** | **no - not an AMD part** | **no** | - |
+
+XC7Z015 LUT is not printed in the catalogue (only "74K Logic Cells");
+46,200 is AMD's figure and is **UNVERIFIED** here because the part is
+far too small to matter either way.
+
+**The carriers**, which is where the host interfaces actually live:
+
+| carrier | SOM it takes | PCIe | Ethernet | optical | FMC | other | board size |
+|---|---|---|---|---|---|---|---|
+| **PZ-K7325T-KFB** / **-K7410T-KFB** | K7325T / K7410T | **Gen2 x8** | 1x GbE | 2x SFP | none | SATA, HDMI in/out, SD, 40P + 2x 120P | 156 x 121 mm (en.puzhi.com) |
+| **PZ-K7325T-FH-KFB** / **-K7410T-FH-KFB** | same | **Gen2 x2 only** | 1x GbE | 2x SFP | **HPC, fully wired** | HDMI 4K in/out, SD, 40P | - |
+| **PZ7045-KFB-900** / **PZ7100-KFB-900** / **PZ7035-KFB-900** | Z045 / Z100 / Z035 | **Gen2 x8** | 2x GbE (PS + PL) | **4x SFP** | none | SATA, HDMI in/out, 4x USB2, 3x 40P | 220 x 116 mm |
+| **PZ7045-FH-KFB** / **PZ7100-FH-KFB** / **PZ7035-FH-KFB** | same | Gen2 x4 | 1x GbE | 2x SFP | **HPC, fully wired** | SATA, 4x USB2 | 170 x 100 mm |
+| **PZ-ZU7EV-KFB** / **-ZU7EG-KFB** / **-ZU11EG-KFB** | ZU7EV/EG, ZU11EG | Gen3 x4 | **2x GbE (1 PS, 1 PL)** | 2x SFP+ (12.5 Gb/s) | **HPC** | 2x SATA, M.2 NVMe, 4x USB3, HDMI 4K in/out, MiniDP, 120P | - |
+| **PZ-ZU9EG-KFB** / **-ZU15EG-KFB** | ZU9EG / ZU15EG | **none - no PCIe edge on the board** | 2x GbE | 2x SFP | **HPC** | 2x SATA, M.2 NVMe, 4x USB3, HDMI 4K in/out, MiniDP | - |
+| **PZ-ZU19EG-KFB** | ZU19EG | **Gen3 x8** | 1x GbE | 4x QSFP (40G per photo) | **1x HPC + 1x LPC** | 4x SATA, M.2 NVMe, 4x USB3, MiniDP | - |
+| **PZ-KU5P-KFB** / **-KU3P-KFB** | KU5P / KU3P | **Gen3 x8** | 1x GbE | **1x 100G QSFP28** | **HPC (4 GT pairs, 72 IO)** | 2x MIPI CSI, SD, 40P | 148 x 100 mm (en.puzhi.com) |
+| **PZ-KU040-KFB** / **-KU060-KFB** | KU040 / KU060 | Gen3 x4 | 2x GbE | 2x SFP | **HPC, fully wired** | 2x SATA, HDMI 4K, 40P + 120P | 195 x 115 mm |
+| **PZ-KU040-FHT-KFB** / **-KU060-FHT-KFB** | same | **Gen3 x8** | 1x GbE | none | **1x HPC + 2x LPC** | nothing else - an FMC breakout | 195 x 105 mm |
+| **PZ-V7690T-KFB** | V7690T | **Gen3 x8** | 1x GbE | 3x SFP 10G + 1x QSFP28 40G | **1x LPC + 2x HPC** | 2x SATA, SD, 40P | 220 x 130 mm |
+| **PZ-VU9P-KFB** / **-VU13P-KFB** | VU9P / VU13P | **Gen3 x8** | 1x GbE | **4x QSFP28 100G** | 2x HPC (8 GT, 168 IO) + LPC (1 GT, 72 IO) | 6x SMA, 12V/20A | 256 x 140 mm |
+| **PZ-AU15P-KFB** / **-AU20P-KFB** | AU15P / AU20P | **Gen3/4, x8 conn / x4 lanes** | 2x GbE | 2x SFP+ | **LPC** | SATA, 2x MIPI CSI, SD, 40P | 148 x 107 mm |
+| **PZ-A7200T-KFB** and the rest of the A7 KFB line | A735T...A7200T | Gen2 x2 | 2x GbE | 2x SFP | none | HDMI in/out, SD, 2x 40P | 172 x 116 mm |
+| **PA*-FL-KFB** (A7 single-board) | integrated | none | 1x GbE | 2x SFP | **LPC (72 IO)** | SATA, MIPI, SD | 130 x 90 mm |
+| **PZ-ZU2CG/3EG-KFB**, **PZ7030-KFB-676** | - | **marked "PCIE不可用" - PCIe not usable** | 2x GbE | 2x SFP | - | - | - |
+
+Three of those rows are the appendix's most useful single facts, and
+each is a trap avoided: the **-FH-** carriers trade the x8 edge for an
+FMC-HPC and wire **two lanes**, which is what §8(a) already warned
+about and is now confirmed against both the catalogue (p.53, p.55) and
+the vendor's English page; the **-FHT-** Kintex UltraScale carriers do
+the opposite, keeping x8 and dropping every other interface; and three
+carriers ship with PCIe explicitly marked unusable in their own
+product titles. A fourth hazard sits one row lower: the **ZU9EG and
+ZU15EG carriers have no PCIe edge connector at all** - no PCIe row in
+their spec tables and no card edge in their board photographs - even
+though the ZU7EV and ZU11EG carriers beside them have Gen3 x4 and the
+ZU19EG has Gen3 x8.
+
+### Prices, and the one structural fact about them
+
+**All figures seen 2026-09-06.** None comes from the catalogue. USD and
+GBP are quoted as displayed and **not converted**. No RMB figure was
+obtainable: JD renders prices in JavaScript and gates its store hosts
+behind an anti-bot redirect, and Taobao/Tmall was unreachable - so
+every price here is a Western-marketplace price and the domestic price
+is unknown.
+
+**Puzhi sells direct to the United States on eBay**, as *Puzhi Official
+Store* (`puzhiofficialstore`), shipping from Pudong with free eBay
+SpeedPAK and **import fees included**. That store carries **SOMs only**
+and its ceiling is $499.90.
+
+| item | direct from Puzhi (eBay) | reseller | note |
+|---|---|---|---|
+| PZ-K7325T-SOM | **$429.99, 10+ in stock** ([ebay 800249283607](https://www.ebay.com/itm/800249283607)); qty 4+ $408.49 | $590.11 (ChipBoard, AliExpress); £331.99 sold out (CodeRobin) | eBay item specifics match the catalogue verbatim: `XC7K325T-2FFG900I`, `DDR3 2GB/64bit Width`, industrial |
+| PZ-K7325T-KFB | **none** | **$1,036.14** + $25.13 ([Shop1104510043, AliExpress](https://www.aliexpress.us/item/3256812586798779.html)) | two eBay listings for this carrier have **ended**: $620.00 (Jan) and $499.00 (Feb) |
+| PZ-K7325T-FH-KFB | none | $1,036.14 (AliExpress); **$449.00** out of stock ([HamGeek](https://www.hgeek.com/products/hamgeek-pz-k7325t-fh-kfb-kintex7-325t-fpga-development-board-xc7k325t-2ffg900i-onboard-jtag-downloader)); £436.99 sold out | |
+| PZ-KU5P-SOM | **$499.00, 10 in stock** ([ebay 800437714098](https://www.ebay.com/itm/800437714098)) | $989.85 (AliExpress) | |
+| PZ-KU5P-KFB | none | **$1,408.61** + $25.13 (AliExpress) | ended eBay listing at $749.00 (Feb) |
+| PZ-KU3P-KFB | none | $1,240.18 (AliExpress) | |
+| PZ-ZU7EV-SOM | none | **$2,914.64** (AliExpress); £987.99 sold out | |
+| PZ-ZU7EV-KFB | none | **$2,722.28** (AliExpress); £1,310.99 sold out | cheaper than the SOM listing - see below |
+| PZ-A7200T-SOM | **$329.99** ([ebay 800246211438](https://www.ebay.com/itm/800246211438)) | $260.28 + $37.08 (YoungG, AliExpress) | |
+| PZ-AU15P-SOM | **$389.99** ($370.49 with coupon) | $1,151.77 (AliExpress) | the spread here is 3x |
+| PZ-V7690T-SOM / board | none | $6,021.28 / $8,479.47 (AliExpress) | |
+| PZ-AU20P, PZ-KU3P-SOM, PZ-A7200T-KFB | none | **no listing found anywhere** | |
+
+**The structural fact: a "-KFB" is a complete kit that already contains
+its SOM.** CodeRobin's PZ-ZU7EV-KFB listing says so outright - "the SOM
+used on this development board is PZ-ZU7EV-SOM", boxed with heatsink,
+fan, 12 V adapter, two micro-USB cables and an SD card - which is also
+the only way to explain a ZU7EV-KFB selling *below* a ZU7EV-SOM at the
+same reseller. **So do not budget SOM + KFB; that pays for two SOMs.**
+Buy the SOM alone from Puzhi's eBay store if the carrier is going to be
+your own, or buy the KFB kit and get the SOM inside it. This is a
+reseller's description of the vendor's packaging, not the vendor's own,
+so confirm it in writing before ordering either way.
+
+Two further cautions. Every AliExpress figure above carried an
+"Ends: Sep 7, 20:59 (GMT-7)" promotional banner and **expires the day
+after these were seen**. And the deeply-discounted drop-shipper
+listings that surface alongside them (a "PZ-K7325T-FH-KFB" at $595.69
+struck through from $1,241.02; a KU5P at $995.74 from $2,489.35) show
+the inflated-MSRP pattern and should not be treated as quotes.
+
+### Per-product notes
+
+**Kintex-7: PZ-K7325T-SOM + PZ-K7325T-KFB.** The exact part is
+`XC7K325T-2FFG900I`, confirmed on the catalogue's p.22, on
+[en.puzhi.com's SOM page](https://www.en.puzhi.com/Product/AMD-FPGA-SoM/Kintex-7/PZ-K7325T-SOM)
+and on [its KFB
+page](https://www.en.puzhi.com/Product/AMD-FPGA-Development-Board/Kintex-7/PZ-K7325T-KFB)
+(all read 2026-09-06). `xc7k325tffg900` is in openXC7's database with
+speed grades 1/2/2L/3
+([kintex7/mapping/parts.yaml](https://github.com/openXC7/prjxray-db/blob/master/kintex7/mapping/parts.yaml),
+fetched 2026-09-06), and `xc7k325tffg900-2` is the `PART` line of the
+`blinky-genesys2` project in openXC7 CI - so **this is the only
+product in the entire Puzhi catalogue whose exact device-package-speed
+string is an openXC7 continuous-integration target.** One full tile at
+60.6% raw, 71.2% of the 85% budget; DSP 840 is 2.9 tiles at the
+survey's 292, and still 2.1 tiles at openXC7's inflated 390-400. The
+memory is the other half of the case: **2 GB DDR3 on a 64-bit bus**,
+stated in the catalogue, on en.puzhi.com, and independently by
+CodeRobin as "4x 512MB, 64bit Bus". At DDR3-1600 that is 12.80 GB/s
+against a tile's 13.82 - **93% of streaming demand**, the closest any
+board in this document gets on a 7-series part, and far better than
+the QMTech 16-bit (12%), the Genesys 2's 32-bit, or the A200T family's
+32-bit. **The data rate is not printed anywhere**, so the 93% is
+conditional on 1600 and would be 108% at 1866; assume 1600 until a
+schematic says otherwise. The carrier gives a real Gen2 **x8** edge,
+two SFP cages, SATA, and a gigabit PHY that en.puzhi.com specifies as
+**RGMII** - a PL-side MII, not a hard PS MAC, which is exactly the
+interface LiteEth wants.
+
+**Zynq UltraScale+: PZ-ZU7EV-SOM / PZ-ZU7EG-SOM + PZ-ZU7EV-KFB.** The
+one place in this catalogue where a full tile and its bandwidth are
+both satisfied. XCZU7EV/EG is 230,400 LUT - one tile at **53.6%**, two
+at 107% (no) - with 1,728 DSP and 27 Mb of UltraRAM. Both devices sit
+inside the free **Basic** tier (§2: Zynq UltraScale+ MPSoC covered "up
+to XCZU7EV / XCZU7EG / XCZU7CG"), and both are UltraScale+ CARRY8, so
+the project's measured 123,420 LUT and 135 MHz transfer without the
+7-series carry penalty the survey warns about. The decisive number is
+on p.16 of the catalogue: **"PL侧4GB 2400Mhz*64bit"** - four gigabytes
+of DDR4 on a 64-bit bus at 2400 Mbps wired to the *programmable logic*,
+independent of the identical PS-side bank. That is **19.20 GB/s, 139%
+of one tile's demand**, and it is the only figure in the catalogue
+where the rate is printed rather than assumed. CodeRobin's English
+listing confirms it verbatim: "4x 1GB DDR4, total 4GB, 64bit Bus, Data
+Rate 2400Mbps" on each side. The carrier adds **a second gigabit PHY
+on the PL side** alongside the PS one, two SFP+ cages, an FMC-HPC, two
+SATA and Gen3 x4. Read against the KCU116 row in §2 - same free tier,
+same architecture, 230,400 LUT against 216,960, and 19.2 GB/s against
+the KCU116's memory-starved 9.6 - this module is strictly the better
+object, at roughly a fifth of the KCU116's $6,495 list.
+
+**Zynq-7000: PZ7100-SOM-900 and PZ7045-SOM-900.** Overlooked in the
+survey and worth a second look, because openXC7's `zynq7` database
+carries **`xc7z045ffg900` (speeds 1-3) and `xc7z100ffg900` (speeds
+1-2)** ([zynq7/mapping/parts.yaml](https://github.com/openXC7/prjxray-db/blob/master/zynq7/mapping/parts.yaml),
+fetched 2026-09-06) - the exact packages Puzhi ships. XC7Z100 at
+277,400 LUT holds one tile at **44.5%**, the most fabric headroom of
+any openXC7-covered part in this catalogue and more than the K325T;
+XC7Z045 at 218,600 holds one at 56.5%. Both carriers give a Gen2 **x8**
+edge, **four** SFP cages, SATA and dual gigabit (one PS, one PL). Both
+devices are free-tier since the 2026.1 flip. The blocking unknown is
+memory: the catalogue says "PS侧1GB，PL侧1GB" and **prints no width
+for either**, so the PL-side bandwidth is somewhere between 3.2 GB/s
+(16-bit at 1600, 23% of demand) and 12.8 (64-bit, 93%) and nothing in
+the document narrows it. Note also that an open flow on a Zynq-7000
+means no PS at all - openXC7 has no processing-system support - so the
+ARM cores, the eMMC and the PS-side DDR are paid for and unused.
+
+**Kintex UltraScale+: PZ-KU5P-SOM / PZ-KU3P-SOM.** XCKU5P and XCKU3P
+are the two Kintex UltraScale+ parts inside the free Basic tier, and
+the KU5P holds a full tile at 56.9% - the same silicon as the KCU116
+the survey priced at $6,495. The carrier is better than the KCU116's:
+**PCIe Gen3 x8** and a **100G QSFP28**, against the KCU116's Gen3 x8
+and 4x SFP28. But the memory repeats the KCU116's exact defect: **2 GB
+DDR4 on a 32-bit bus**, which at DDR4-2400 is 9.60 GB/s, **69% of one
+tile's demand** - the same ~30% starvation §2 identifies on the
+KCU116, for the same reason. The catalogue contradicts itself here -
+the SOM pages (p.25) say "DDR4 2GB/32bit位宽" while the carrier pages
+(p.58) say "DDR3 2GB" - and
+[en.puzhi.com](https://www.en.puzhi.com/Product/AMD-FPGA-Development-Board/Kintex-UltraScale-plus/PZ-KU5P-KFB)
+resolves it as **DDR4, 2 GB, 32-bit**. KU3P at 75.8% is a one-tile
+part with no room to spare. Note also that en.puzhi.com describes the
+KU5P carrier's FMC as "HPC (4 pairs of GT, 72 IOs)" - an LPC-grade
+wiring in an HPC shell, unlike the fully-wired HPC on the Kintex-7
+-FH- and Kintex-UltraScale carriers.
+
+**Kintex UltraScale: PZ-KU040 / KU060 / KU095.** The best memory in
+the AMD-part range - **4 GB DDR4 on a 64-bit bus**, 19.2 GB/s at 2400,
+139% of one tile - and two tiles fit on the KU060 at 74.4%. They are
+ruled out by licence, not by silicon: §2's tier table gives Kintex
+UltraScale as "XCKU025, XCKU035 only" under Basic, so KU040, KU060 and
+KU095 need a paid **Core** subscription. This is the same trap §5
+names for the KCU1500 and the Innova-2. The KU095 carries a second,
+independent disqualifier worth recording because it is easy to miss
+from a LUT-per-dollar view: it has only **768 DSP slices** (DS890
+v4.10, confirmed today), so although three tiles fit by area, three
+tiles need 876 DSPs and **the KU095 is DSP-bound to two**.
+
+**Virtex-7: PZ-V7690T-SOM.** 433,200 LUT and **two independent 64-bit
+DDR3 channels of 2 GB each** - 25.6 GB/s aggregate at 1600, enough to
+feed two tiles at 93% each, which is exactly what fits: two tiles at
+57.0%, and a third would put the die at 85.5%, above the survey's
+practical routing ceiling. Free tier since 2026.1. But openXC7's
+`virtex7` database carries **only `xc7vx485t`**, so this is a
+Vivado-only part, and the module is a 100 x 80 mm, 8-12 V / 5 A,
+six-connector object that no cheap carrier exists for. It is the
+catalogue's answer to "a bigger VC707", not to anything in the
+third-tier plan.
+
+**Virtex UltraScale+: PZ-VU9P-SOM / PZ-VU13P-SOM.** Eight and eleven
+tiles by budget (A), on carriers with Gen3 x8, four 100G QSFP28 cages
+and three FMC connectors - the most capable objects in the catalogue
+by a wide margin. And squarely inside the trap §5 spends a paragraph
+on: Virtex UltraScale+ reads **None** under Basic, so `xcvu9p` and
+`xcvu13p` as raw parts need a paid Core subscription - which is
+precisely why the survey prefers a used Alveo over a cheaper bare
+VU13P even when the shell is being discarded. The DDR4 bus width is
+**not printed** ("双组DDR4（8GB+8GB）"), so the 8-tile figure is an
+area figure with no bandwidth behind it. 12 V at 20 A.
+
+**Artix UltraScale+: PZ-AU15P / PZ-AU20P.** Free tier, PCIe Gen3/Gen4,
+and the only Puzhi board found on a US retail channel (below). But
+XCAU20P at 109,000 LUT does not hold a full tile - 113.2% - and its
+fp128-max fallback lands at 88.1%, above the routing ceiling, so it is
+an **fp64-max part at 62.9%**; AU15P is an fp32-max part at 55.6%. The
+memory is the narrowest in the catalogue: **1 GB DDR4 on a 16-bit
+bus**, 4.8 GB/s at 2400, **35% of one tile's demand**. No openXC7
+coverage. A conformance node, not a compute one.
+
+**Artix-7 and the small Zynqs.** The A7 SOM line (A735T/A775T/A7100T/
+A7200T, all 60 x 45 mm, all 1 GB DDR3 **32-bit**) reproduces §3's
+finding exactly: the A200T is an fp128-max part (71.4%) and the A100T
+an fp32-max part (68.2%), on 6.4 GB/s of memory. Two details are new.
+First, `xc7a200tfbg484` and `xc7a100tfgg484` are both in openXC7's
+`artix7` database with speed grade 2, so the exact Puzhi parts are
+covered - though §3's note that **no A200T demo exists in openXC7 CI**
+still stands. Second, **`xc7a75t` does not appear in the artix7
+parts.yaml at all** (fetched 2026-09-06; the file carries 35t, 50t,
+100t and 200t), so PZ-A775T-SOM is Vivado-only. Among the small Zynqs
+only XC7Z035 (171,900 LUT, one tile at 71.8%) and the Z045/Z100 above
+reach a full tile.
+
+**The Fudan Micro line is out of scope for this project.** Six SOMs
+(PZ7020F, PZ7020SF, PZ7045F, PZ7100F, PZ-K7325TF, PZ-V7690TF) carry
+Shanghai Fudan Microelectronics parts - `JFM7K325T`,
+`JFM7VX690T36`, `JFMQL20S400`, `FMQL45T900`, `JFMQL100TAI900` - that
+mirror the Xilinx parts beside them pin for pin and figure for figure
+(the JFM7K325T page prints 326,080 logic cells, 50,950 slices, 840
+DSPs, identical to the XC7K325T). The JFM7K325T is
+[described as a clone of the Kintex-7 325T](https://www.cnx-software.com/2023/06/21/fudan-micro-jfm7k325t-is-a-clone-of-amd-embedded-kintex-7-325t-fpga/)
+and its design tool is Fudan's own **Procise**, not Vivado. Whether a
+Vivado or openXC7 bitstream loads on one is **UNVERIFIED and should be
+assumed false**: a deterministic-bits project cannot take a
+bit-compatibility claim on faith, and the whole value of the openXC7
+route is a documented bitstream format. Recorded here only so the
+question is not asked twice.
+
+**One daughter card matters.** `PZ-FL8211F` (p.73) is an **FMC-LPC
+card carrying four RTL8211FI gigabit PHYs on RGMII**, 75 x 75 mm, 12 V.
+On any Puzhi carrier with an FMC - the -FH- Kintex-7 pair, the ZU7EV,
+the KU040/KU060, the AU15P/AU20P - that is four PL-attached gigabit
+ports for a LiteEth MAC, on a part with no vendor runtime anywhere in
+its path. It is the cheapest route to the step-4 gate found in this
+survey, and it did not come from the boards section. (`PZ-FL8710`, its
+sibling, is four LAN8710 at 100 Mb on MII/RMII - the same idea one
+decade older.)
+
+### Shortlist
+
+**1. PZ-ZU7EV-SOM (or ZU7EG) + PZ-ZU7EV-KFB - the Ethernet-attached
+tile of step 4.** One full tile at 53.6% on UltraScale+ silicon whose
+carry structure matches the U50, so the project's own area and timing
+numbers mean what they mean. Free **Basic** tier. **19.2 GB/s of
+PL-side DDR4** - the only module in this catalogue that feeds a whole
+tile with 39% headroom, and the only one whose data rate the vendor
+actually prints. And a **PL-side gigabit PHY on the carrier**, beside
+the PS one, which is the physical prerequisite for the "no XDMA, no
+XRT, no driver" tile the ROADMAP's step 4 describes. Against it: no
+open flow (UltraScale+ is entirely outside openXC7); Puzhi does not
+sell it direct, so the only live path is one AliExpress reseller at
+**$2,722.28** for the KFB kit, with CodeRobin's £1,310.99 sold out;
+and that is real money for a board bought to ignore its ARM cores.
+Buy this one if step 4 is the goal and the open toolchain can wait for
+step 2 to prove itself on a cheaper part.
+
+**2. PZ-K7325T-SOM + PZ-K7325T-KFB (the x8 carrier, not the -FH-) -
+the openXC7 node of step 2.** `xc7k325tffg900-2` is not merely in the
+openXC7 database, it is a CI target that builds today; a whole tile
+fits at 60.6%; and the **64-bit DDR3** puts it at 93% of one tile's
+streaming demand instead of the 12% the Arty will manage. It is
+simultaneously the best 7-series memory, the only openXC7 CI part, and
+free in Vivado since 2026.1 - so the same board serves the vendor flow
+and the open one and lets them be differenced against each other,
+which is the comparison the DSP48E1 census in step 2 actually needs.
+Buy the **-KFB**, not the **-FH-KFB**: the FMC on the FH variant costs
+six PCIe lanes, and the RGMII gigabit PHY on the x8 carrier is the
+step-4 path anyway.
+
+The economics changed while this appendix was being written, and in a
+useful direction. §10 recorded the x8 KFB as quote-only; it now has a
+price, and so does the SOM. **The SOM is $429.99 direct from Puzhi's
+own eBay store, in stock, import fees included** - which makes it the
+cheapest object in this entire survey that holds a whole tile *and*
+feeds it at 93%, against the $6,495 KCU116 and the $1,154 Genesys 2
+that has no PCIe edge at all. The **carrier is the constraint**:
+$1,036.14 from a single AliExpress trader, roughly double the $499-620
+that two now-ended eBay listings asked earlier this year. So there are
+two honest plans - buy the SOM alone and accept that a carrier is your
+own problem, or pay the reseller for the kit - and the choice turns on
+whether a schematic and pinout can be obtained (see the verify list).
+
+**3. PZ7100-SOM-900 + PZ7100-KFB-900 - conditional, and only if the
+PL-side DDR3 is 32-bit or wider.** `xc7z100ffg900-2` is in openXC7's
+database, one tile sits at **44.5%** - more headroom than the K325T -
+and the carrier has a Gen2 x8 edge, four SFP cages and a PL-side
+gigabit PHY. If the PL DDR3 turns out to be 64-bit this is a better
+step-2 node than the K325T; if it is 16-bit it is worse than the Arty
+on bandwidth. The catalogue does not say, en.puzhi.com does not say,
+and no reseller listing says. **One email answers it.** Until it is
+answered this stays third.
+
+*Not shortlisted, and why:* everything Kintex UltraScale, Virtex
+UltraScale+ and Zynq UltraScale+ above ZU7 needs a paid Core
+subscription (§2, §5) and no amount of DDR4 changes that; the Artix
+UltraScale+ pair cannot hold a full tile on a 16-bit bus; the V7690T
+is a Vivado-only part with no cheap carrier; the KU5P repeats the
+KCU116's 32-bit memory defect; and the Fudan Micro line is an unproven
+toolchain for a project whose entire premise is a reproducible
+bitstream.
+
+### Verify before buying (Puzhi specifically)
+
+**0. Public documentation is zero, and that is the biggest risk here -
+bigger than any price in this appendix.** Checked directly on
+2026-09-06:
+
+* Every en.puzhi.com product page carries the same line - documents
+  "come with products, saved in the Google Drive/Yandex/Dropbox
+  Contact with Customer Service to Get it after Purchased". The
+  Chinese pages say the domestic equivalent: all materials come via
+  Baidu netdisk, on request, after purchase.
+* **Both download pages are decorative.** The CN
+  (`puzhi.com/cate/25.html`) and EN (`en.puzhi.com/cate/150.html`)
+  download pages list three marketing catalogues and nothing else, and
+  **every download link on them is `href="javascript:;"`** - the raw
+  HTML contains no `.pdf`, `.zip` or `.rar` URL at all. Access is
+  behind a lead-capture form wanting a mobile number, and even
+  completing it yields the catalogue, never a board manual.
+* **The catalogue withholds the FMC pinout by name.** An older Puzhi
+  catalogue mirrored by the Russian distributor Macro Group prints, in
+  a board's own interface table, `FMC-HPC Port - Signal Definition:
+  Contact Customer Service`. Those distributor mirrors are, ironically,
+  the only Puzhi documents reachable without a form.
+* **No public XDC exists for any Puzhi board.** `github.com/pzsdr`,
+  cited by Crowd Supply as the official PZSDR repository, has **zero
+  public repositories**; `github.com/puzhi` is an unrelated individual.
+  The only real third-party hit is `wangjiliang1983/zynq_arm_sdk`,
+  Vitis tutorial projects for Puzhi Zynq boards, last touched
+  2024-08-16, carrying **no schematics and no constraints**. Gitee's
+  search is not machine-fetchable, so "not found" there is not proof
+  of absence.
+* **A naming collision that will produce a wrong XDC if you are not
+  careful.** Avnet's PicoZed uses the same `PZ70xx` numbering, so a
+  search for `PZ7020` returns Avnet files such as
+  `Avnet/hdl/Boards/PZ7020_FMC2/PZ7020_FMC2_i2c.xdc` - electrically
+  unrelated to a Puzhi board and wrong on every pin.
+
+That pinout is not a nicety for this project: the K7325T SOM brings
+its 288 I/O out on **four 120-pin 0.6 mm connectors**, the ZU7EV on
+**three 168-pin 0.5 mm**, the KU5P on **two 240-pin 0.635 mm**, and a
+tile needs an XDC that names them. **Get a written commitment to
+supply the schematic and a pin-level constraints file before paying,
+and treat a refusal as disqualifying.**
+
+**1. Confirm the exact part and speed grade on the invoice**, not the
+listing. Every SOM in the catalogue is an **industrial** part -
+`-2...I` throughout - which is good for the openXC7 question (`-2`
+speed grade is in the database for every part shortlisted here) but
+means the temperature-grade suffix will differ from every AMD
+development board the project has touched.
+
+**2. Confirm the DDR width in writing, per bank.** The catalogue is
+better than most on this and still leaves three gaps that decide
+purchases: the **Zynq-7000 PL-side width is never printed**; the
+**VU9P/VU13P width is never printed**; and the **KU3P/KU5P pages
+contradict each other** (SOM says DDR4 32-bit, carrier says DDR3),
+with en.puzhi.com siding with DDR4 32-bit. Get the data rate too -
+only the ZU7EG/ZU7EV/ZU11EG pages state one.
+
+**3. Confirm what is on the SOM and what is on the carrier.** It
+differs by family and the tables above are the vendor's, not measured:
+the K7325T SOM carries its own gigabit PHY and the carrier adds PCIe,
+SFP and SATA; the ZU7EV SOM carries the PS-side PHY and the carrier
+adds the PL-side one plus PCIe and SFP+; the KU5P SOM lists no
+Ethernet at all and everything is on the carrier. Ask which connector
+pins carry the PCIe lanes, because a SOM-to-carrier PCIe path through
+a 0.5 mm board-to-board connector at Gen3 is a signal-integrity claim,
+not a datasheet entry.
+
+**4. Confirm the PCIe lane count against the carrier, not the family
+name.** Three separate hazards, all documented above: the **-FH-**
+carriers are **x2** where the plain **-KFB** is x8; the AU15P/AU20P
+carrier is an **x8 connector wired x4**; and the ZU2CG, ZU3EG and
+Z030-676 carriers ship with **"PCIE不可用" - PCIe not usable -
+printed in their own product titles**.
+
+**5. Buying from outside China - better than expected for SOMs, worse
+for carriers.** Puzhi's own storefronts on p.2 are Taobao, Tmall and
+two JD shops, all mainland-only, but the picture on 2026-09-06 is:
+
+* **Direct, in stock, duty-paid: eBay, `puzhiofficialstore` ("Puzhi
+  Official Store"),** shipping from Pudong with free SpeedPAK and
+  import fees included. This is the manufacturer, not a reseller, and
+  it is roughly **half** the AliExpress price for the same part. It
+  carries **SOMs only** - no K7325T, KU5P or ZU7EV carrier - and tops
+  out at $499.90. A second eBay store linked from en.puzhi.com,
+  `puzhifpgasdrstore`, returns zero results.
+* **Puzhi's own AliExpress storefront exists and is empty.** "PUZHI
+  FPGA SDR Store" (`aliexpress.com/store/1103106376`) has a full
+  category tree and **0 items** - not a usable path today.
+* **Carriers come from one reseller.** `Shop1104510043 Store` on
+  AliExpress is the only seller found carrying the KFB carriers for
+  K7325T, KU3P/KU5P and ZU7EV, at roughly twice the historic eBay
+  price. Others carrying PZ- numbers: `Shop1103878100`, `ChipBoard
+  Development Store`, `YoungG Store`.
+* **[CodeRobin](https://coderobin.com/collections/puzhi-fpga)** (UK,
+  GBP) lists 16 PZ- SKUs and **every one reads "Sold out"** with a
+  two-week lead. **[HamGeek](https://www.hgeek.com)** (Hong Kong)
+  lists the PZ-K7325T-FH-KFB at $449.00, out of stock. **Amazon.com**
+  carries the PZ-AU15P-KFB and PZ-K7325T-FH-KFB in bundle variants;
+  eBay.de carries PZ-A7200T-KFB and PZ-K7410T-KFB. Macro Group
+  (Russia) is a listed distributor.
+* **`puzhitech.com` is broken and still printed on the catalogue
+  cover.** It resolves to Puzhi's IP but serves a certificate for
+  `CN=puzhi.com` whose SAN list covers only `puzhi.com` and
+  `www.puzhi.com`, so every standard client refuses it - reproduced
+  independently while writing this appendix. Use `puzhi.com` or
+  `en.puzhi.com`.
+* **One negative data point on the direct store**, recorded because it
+  is the channel recommended above: alongside otherwise positive
+  feedback, a detailed eBay review alleges support was pushed
+  off-platform to WhatsApp and that a board arrived defective. The
+  sample is small either way.
+
+**6. Date every price, and note how fast these expire.** All prices
+here were seen **2026-09-06**. Every AliExpress figure carried an
+"Ends: Sep 7" promotional banner and is stale one day later. GBP
+figures are printed in GBP and **not** converted; convert against the
+rate on the day and add duty, VAT and shipping from the UK or Hong
+Kong. The eBay direct prices are the only ones quoted with import fees
+already included.
+
+### What could not be read, and what could not be verified
+
+Read in full and marked as read: all 77 pages, text and rendered
+image. Nothing in the document was illegible.
+
+* **No price appears anywhere in the catalogue**, in any currency, on
+  any page. This is not a legibility failure; the document does not
+  contain prices.
+* **No DDR data rate** is printed except on the ZU7EG, ZU7EV and
+  ZU11EG SOM pages. Every other bandwidth figure in this appendix
+  assumes DDR3-1600 or DDR4-2400 and says so at the point of use.
+* **No PL-side DDR3 width** for any Zynq-7000 SOM; **no DDR4 width**
+  for the VU9P and VU13P.
+* **No speed grade** is printed for any Fudan Micro part.
+* **No power figure** beyond a supply rail and a maximum current
+  (e.g. 12 V / 20 A for the VU9P), which is a connector rating, not a
+  measurement.
+* **PZ-ZU7EV-SOM's page omits its BRAM, UltraRAM and DSP rows**
+  entirely; the ZU7EG page beside it carries them, and since the two
+  share a fabric the ZU7EG figures are used above and marked as such.
+* **Three transcription errors in the catalogue itself**, found by
+  cross-checking DS890 v4.10 and worth knowing before quoting the
+  document to anyone: PZ-ZU19EG-SOM has its **LUT and Flip-Flop row
+  labels swapped** (1,045K is the flip-flop count and 523K the LUT
+  count, not the reverse); PZ-VU13P-KFB prints
+  `XCVU13P-2FLGB2104I` where the SOM page and AMD's package list say
+  `-2FHGB2104I` (FLGB2104 is the VU9P package); and PZ7100-SOM-900
+  merges "LUTS/Flip-Flops" into one row and prints only one number.
+* **Unverified: the domestic price of anything.** No RMB figure was
+  obtainable. JD renders prices in JavaScript and gates its store
+  hosts behind an anti-bot redirect; Taobao and Tmall were unreachable.
+  Every price in this appendix is a Western-marketplace price and the
+  spread between channels runs to 3x on the same part, so the
+  mainland price is unknown and probably lower than all of them.
+* **Unverified: that a "-KFB" ships with its SOM inside.** The claim
+  is CodeRobin's, is consistent with a KFB listing priced below its
+  own SOM, and decides whether a purchase is one board or two - but it
+  is a reseller's description of the vendor's packaging and Puzhi has
+  not been asked.
+* **Unverified: whether Puzhi will supply schematics or an XDC before
+  purchase.** The vendor's own pages say documentation follows the
+  product; an older catalogue defers the FMC signal definition to
+  customer service by name; and no public XDC for any Puzhi board was
+  found on GitHub. Gitee could not be searched by machine, so its
+  absence there is unproven rather than established.
+* **Unverified: whether the $19,220 VU9P listing is the SOM or the
+  board.** It is quoted only to show the order of magnitude.
+* **Superseded, not unverified:** §10's "the PZ x8 KFB carriers (quote
+  only)" now has a price - $1,036.14 for the K7325T x8 KFB, from one
+  AliExpress reseller, seen 2026-09-06.
+* **Unverified: any Fudan Micro part's toolchain compatibility** with
+  Vivado or openXC7. Procise is named as the vendor tool; nothing
+  further was established.
+* **Unverified: DDR3 data rate on the K7325T**, which is the single
+  number that decides whether that board is at 93% or 108% of a
+  tile's streaming demand.
