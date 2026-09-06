@@ -15,9 +15,10 @@
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
 #   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
 #   bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
-#   bash verify/run.sh --budget quick   # ~12 min: every model-vs-C check, bindings,
-#                                      # the language legs, soak, the five workloads
-#                                      # and the browser demos - after a host build
+#   bash verify/run.sh --budget quick   # ~20 min: every model-vs-C check, bindings,
+#                                      # the language legs, soak, the five workloads,
+#                                      # the browser demos and the remote backend -
+#                                      # after a host build
 #   bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, node, wasm, images)
@@ -129,7 +130,7 @@ BUDGET=""
 # model's own suite, the vectors, the million-case replay, the
 # transcendentals, MPFR, the C++ header and the two RTL gates that
 # need only a container. `full` is the census. Measured on the
-# Windows desktop (verify/README.md has the table): quick ~10 min,
+# Windows desktop (verify/README.md has the table): quick ~20 min,
 # gate ~1 h with the box quiet and 2-3 h loaded, full ~2 h quiet and
 # ~4 h loaded; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
