@@ -50,7 +50,7 @@ mulpass:
 # columns and a three-level in-pass tree.
 mulcycle:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulcycle \
-		MODULE=test_mulcycle SIM_BUILD=sim_build/mulcycle \
+		MODULE=test_mulcycle SIM_BUILD=sim_build/mulcycle$(MC) \
 		KRNL_PARAMS="-Ptb_mulcycle.MC=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/mulcycle$(MC)/results.xml
 
@@ -64,25 +64,25 @@ mulcycle2:
 # vectors, the same model, the pipe held between passes.
 fp32mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
-		MODULE=test_fpfma_fp32 SIM_BUILD=sim_build/fp32mc \
+		MODULE=test_fpfma_fp32 SIM_BUILD=sim_build/fp32mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp32.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/fp32mc$(MC)/results.xml
 
 fp64mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp64 \
-		MODULE=test_fpfma_fp64 SIM_BUILD=sim_build/fp64mc \
+		MODULE=test_fpfma_fp64 SIM_BUILD=sim_build/fp64mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp64.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/fp64mc$(MC)/results.xml
 
 fp128mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp128 \
-		MODULE=test_fpfma_fp128 SIM_BUILD=sim_build/fp128mc \
+		MODULE=test_fpfma_fp128 SIM_BUILD=sim_build/fp128mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp128.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/fp128mc$(MC)/results.xml
 
 fp256mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 \
-		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/fp256mc \
+		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/fp256mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/fp256mc$(MC)/results.xml
 
@@ -91,43 +91,43 @@ fp256mc:
 # held request and the fault paths, all through the paced array.
 reducemc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reducemc \
+		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reducemc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/reducemc$(MC)/results.xml
 
 krnlmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl SIM_BUILD=sim_build/krnlmc \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/krnlmc$(MC)/results.xml
 
 krnlseqmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseqmc \
+		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseqmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/krnlseqmc$(MC)/results.xml
 
 seqbanksmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanksmc \
+		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanksmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/seqbanksmc$(MC)/results.xml
 
 quartermc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
-		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quartermc \
+		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quartermc$(MC) \
 		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/quartermc$(MC)/results.xml
 
 faultsmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl_faults SIM_BUILD=sim_build/faultsmc \
+		MODULE=test_krnl_faults SIM_BUILD=sim_build/faultsmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/faultsmc$(MC)/results.xml
 
 seq_coremc:
 	CFT_MUL_PASSES=$(MC) timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
-		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coremc \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coremc$(MC) \
 		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/seq_coremc$(MC)/results.xml
 
@@ -135,7 +135,7 @@ seq_coremc:
 # multi-cycle tile trades, measured on the RTL rather than derived.
 cyclesmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cyclesmc \
+		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cyclesmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
 		COCOTB_RESULTS_FILE=sim_build/cyclesmc$(MC)/results.xml
 

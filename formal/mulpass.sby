@@ -1,21 +1,27 @@
 # Formal gate for rtl/cft_mulpass.sv - the iterated chunk-column
-# multiplier is exact for every operand pair, from an arbitrary initial
-# state, at the pipeline level the side-by-side tree delivered the
-# product. tb_mulpass_formal.sv states the property and the scope.
+# multiplier folds the pipe's own partial products to the same integer
+# the side-by-side tree does, for every operand pair, from an arbitrary
+# initial state, at the pipeline level the tree delivered the product.
+# tb_mulpass_formal.sv states the property and the scope.
 #
-# The chunk is narrowed to 4 bits for the solver (CFT_MUL_MCH_FORMAL,
-# see rtl/cft_mulgeom.svh for why that changes nothing about what is
-# proven and why no build flow defines it); at 24 bits the smallest
-# multi-pass instance is a 25 x 25 product and the solver did not
-# finish it in ten minutes. Every shape the module has is reached at
-# small P with the narrow chunk:
+# Two families of task. The `real` tasks are at the chunk width the
+# tile builds with - 24 bits, straight from the include - for the
+# smallest geometries that are multi-pass at it; they are what the
+# gate certifies about the RTL as synthesised. The `narrow` tasks
+# define CFT_MUL_MCH_FORMAL=4 (rtl/cft_mulgeom.svh says why that
+# changes nothing about the mechanism and why no build flow sets it)
+# to reach the shapes that only exist at a P the solver cannot
+# bit-blast with 24-bit columns: five passes with a four-deep output
+# chain (fp128 at MUL_PASSES=10), two and three in-pass tree levels,
+# and the five-column two-pass shape of fp256 at MUL_PASSES=2.
 #
-#   p6c1    P=6,  1 column   2 passes, one fold, chain of 3; also == a*b outright
-#   p10c1   P=10, 1 column   3 passes, two folds                     (fp64 at MUL_PASSES=10)
-#   p10c2   P=10, 2 columns  2 passes, one in-pass tree level
-#   p18c1   P=18, 1 column   5 passes, chain of 4                    (fp128 at MUL_PASSES=10)
-#   p18c3   P=18, 3 columns  2 passes, two tree levels, chain of 2
-#   p38c5   P=38, 5 columns  2 passes, three tree levels, chain of 1 (fp256 at MUL_PASSES=2)
+#   r25c1   P=25,  1 column  2 passes, one fold, chain of 3; ALSO == a*b outright (FULL)
+#   r49c1   P=49,  1 column  3 passes, two folds                (fp64 at MUL_PASSES=10)
+#   r49c2   P=49,  2 columns 2 passes, one in-pass tree level   (fp64 at MUL_PASSES=2)
+#   r73c1   P=73,  1 column  4 passes
+#   n18c1   P=18,  1 column  5 passes, chain of 4               (fp128 at MUL_PASSES=10)
+#   n18c3   P=18,  3 columns 2 passes, two tree levels, chain of 2
+#   n38c5   P=38,  5 columns 2 passes, three tree levels, chain of 1 (fp256 at MUL_PASSES=2)
 #   cover   the claim is reached with a non-zero product carrying into the top bit
 #
 # The DUT is sequential, so these are bounded: each depth covers the
@@ -24,34 +30,44 @@
 # operation whose predecessors were real operations rather than the
 # arbitrary initial state - depth = 1 + 8 * passes.
 #
-#   sby -f mulpass.sby p6c1        (and so on per task)
+# The reference is the column SUM rather than a second `*`: equality
+# between two multiplier circuits is the hard case for a SAT solver
+# (a plain a*b reference left a 10 x 10 on its first assertion step
+# after eight minutes), while the same partial products in another
+# order are matched term by term - the real-width tasks then close in
+# seconds. r25c1 keeps the plain product too, where it is cheap.
+#
+#   sby -f mulpass.sby r25c1        (and so on per task)
 #
 # cft_mulgeom.svh is listed in [files] so the bare `include in both
 # the DUT and the harness finds it in the workdir, as seedop.sby does
 # for its ROM. Run from formal/ (run.sh does).
 
 [tasks]
-p6c1
-p10c1
-p10c2
-p18c1
-p18c3
-p38c5
-cover
+r25c1 real
+r49c1 real
+r49c2 real
+r73c1 real
+n18c1 narrow
+n18c3 narrow
+n38c5 narrow
+cover real
 
 [options]
-p6c1: mode bmc
-p6c1: depth 17
-p10c1: mode bmc
-p10c1: depth 25
-p10c2: mode bmc
-p10c2: depth 17
-p18c1: mode bmc
-p18c1: depth 41
-p18c3: mode bmc
-p18c3: depth 17
-p38c5: mode bmc
-p38c5: depth 17
+r25c1: mode bmc
+r25c1: depth 17
+r49c1: mode bmc
+r49c1: depth 25
+r49c2: mode bmc
+r49c2: depth 17
+r73c1: mode bmc
+r73c1: depth 33
+n18c1: mode bmc
+n18c1: depth 41
+n18c3: mode bmc
+n18c3: depth 17
+n38c5: mode bmc
+n38c5: depth 17
 cover: mode cover
 cover: depth 17
 
@@ -59,15 +75,18 @@ cover: depth 17
 smtbmc bitwuzla
 
 [script]
-read_verilog -defer -formal -sv -DCFT_MUL_MCH_FORMAL=4 cft_mulpass.sv
-read_verilog -defer -formal -sv -DCFT_MUL_MCH_FORMAL=4 tb_mulpass_formal.sv
-p6c1:  chparam -set P 6  -set COLS 1 -set FULL 1 tb_mulpass_formal
-p10c1: chparam -set P 10 -set COLS 1 tb_mulpass_formal
-p10c2: chparam -set P 10 -set COLS 2 tb_mulpass_formal
-p18c1: chparam -set P 18 -set COLS 1 tb_mulpass_formal
-p18c3: chparam -set P 18 -set COLS 3 tb_mulpass_formal
-p38c5: chparam -set P 38 -set COLS 5 tb_mulpass_formal
-cover: chparam -set P 6  -set COLS 1 tb_mulpass_formal
+real: read_verilog -defer -formal -sv cft_mulpass.sv
+real: read_verilog -defer -formal -sv tb_mulpass_formal.sv
+narrow: read_verilog -defer -formal -sv -DCFT_MUL_MCH_FORMAL=4 cft_mulpass.sv
+narrow: read_verilog -defer -formal -sv -DCFT_MUL_MCH_FORMAL=4 tb_mulpass_formal.sv
+r25c1: chparam -set P 25 -set COLS 1 -set FULL 1 tb_mulpass_formal
+r49c1: chparam -set P 49 -set COLS 1 tb_mulpass_formal
+r49c2: chparam -set P 49 -set COLS 2 tb_mulpass_formal
+r73c1: chparam -set P 73 -set COLS 1 tb_mulpass_formal
+n18c1: chparam -set P 18 -set COLS 1 tb_mulpass_formal
+n18c3: chparam -set P 18 -set COLS 3 tb_mulpass_formal
+n38c5: chparam -set P 38 -set COLS 5 tb_mulpass_formal
+cover: chparam -set P 25 -set COLS 1 tb_mulpass_formal
 prep -top tb_mulpass_formal
 
 [files]
