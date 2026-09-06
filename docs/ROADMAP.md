@@ -2375,6 +2375,89 @@ Sizing basis: measured 6-LUT costs x ~1.8-2 for 4-LUT fabrics; the
 fp256 unit's ~196 18x18 multiplies exceed ECP5-85F's 156 DSPs, which
 is why the full tile needs the bigger parts.
 
+## After card day: the third tier (plan, 2026-09-05)
+
+docs/PLATFORMS.md surveyed every board and platform that could carry
+this tile and found the field narrow for an ecosystem reason rather
+than a silicon one: a tile as built needs five things at once - a die
+of about 123k LUT, memory bandwidth for a 256-bit beat every cycle, a
+PCIe path with a DMA engine and a driver, a toolchain that can build
+for that board, and a price - and outside the used Alveo market no
+candidate has all five, because the shelled, maintained, affordable
+accelerator card was a product of the 2017-2020 cloud-FPGA wave and
+the wave has receded. If card day goes well the design is validated,
+and the question that remains is reach. This plan buys reach by
+dropping an assumption under three of the five requirements rather
+than any requirement itself: that a tile has to be a full-width
+datapath on a bus. The contract is about bits; throughput is a product
+tier.
+
+**Drop the width, not the format.** The fp256 rung is about a third of
+the tile's LUTs and half its DSPs (the rung-subset ladder above:
+80,393 through fp128 against 115,903 for the full tile, before
+sharing), because a 237-bit significand means a 237x237 multiplier
+beside a wide aligner and normaliser. The multiplier is already built
+as 24-bit chunk columns; iterating those columns over N passes instead
+of laying them out side by side divides the multiplier by about N and
+costs fp256 throughput only. The results do not change, because
+latency and rate are nowhere in the contract, and the proof method
+exists: FUSE_NORM, FUSE_ALIGN and FUSE_MUL were each shown
+bit-identical to the unshared design by the same cocotb targets and
+the formal gate. Every tile stays fp256-capable, so the homogeneity
+rule holds, and a tile fits the parts the survey priced at a hundred
+dollars and the Artix-200T openXC7 already targets.
+
+**Drop the bus, not the host.** The PCIe requirement is what ties every
+candidate to a vendor's shell and runtime and keeps Windows out. A
+tile behind Ethernet - a deterministic frame protocol over an open MAC
+such as LiteEth, and a `backend_remote` in libcft beside `backend_xrt`
+- needs no XDMA, no XRT and no driver on any operating system, and the
+same backend serves the Alveo from a Linux box to every client on the
+LAN, the darkroom's render machines included.
+
+**Drop the bandwidth, because the sequencer already did.** Both of the
+above cost bandwidth, and that is acceptable for exactly the reason the
+sequencer was built: the workloads that matter are program-heavy. A
+positive is hundreds of instructions per sample against a few words
+of I/O (docs/ATLAS.md), and so were four of the five benchmark tools
+(docs/BENCHMARKS.md). Elementwise streaming is what needs HBM, and
+that remains the Alveo's job.
+
+**Kept**: the open toolchain as the goal, because the point is a tile
+no vendor can discontinue; and price, because a larger proprietary
+card buys reach from one vendor rather than independence.
+
+What this produces is a third tier between the software library and
+the Alveo: **open tiles that emit identical bits, slower, on
+anything**, scaled by the ring doctrine of this file rather than by die
+size. The steps, in order, each with the gate that says it is done:
+
+1. **`backend_remote` and the frame protocol.** Software only. Gate:
+   the conformance replay and the five workloads' checks pass through
+   the socket with the same chains they produce locally, from a
+   Windows client against a Linux host holding the U50C. This is also
+   the Windows answer of docs/PLATFORMS.md section 6, for free.
+2. **The hundred-dollar Kintex-7 and the openXC7 DSP experiment.** A
+   purchase and a census: the conformance vectors through an
+   openXC7-built fp32 lane, which is the one instrument that catches a
+   complemented DSP48E1 control pin (nextpnr-xilinx#159, open as of
+   2026-09-05). Nothing open proceeds on that flow until this is green.
+3. **The multi-cycle fp256 variant** behind a build parameter, proven
+   bit-identical in simulation and by the formal gate before it touches
+   a board, with its area and throughput measured out of context on the
+   same parts the survey sized. Weeks, inside the existing method.
+4. **An Ethernet-attached tile** on the Arty A7-100T or the K325T: the
+   first tile with no vendor runtime anywhere in its path. Gate: the
+   census, on an open flow, from a client that does not know which
+   backend it is talking to. This is where the difficulty is, because
+   an open flow has to place a real datapath and close timing with no
+   vendor tool to fall back on.
+5. **The ring**, once there are two of them, on the doctrine already
+   written here.
+
+Steps 1 and 3 are weeks of work; step 2 is a purchase; step 4 is the
+hard one and is the reason the other three come first.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
