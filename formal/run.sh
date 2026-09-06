@@ -14,6 +14,8 @@
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
 #   equiv.sby     check+cover   cft_simpleops == frozen pre-rewrite ref
+#   mulpass.sby   3 geometries  cft_mulpass' iterated product is exact,
+#                 + cover       from any initial state (bounded)
 #   negcontrol.sby              a deliberately broken property that MUST
 #                               be refuted - a gate that cannot fail
 #                               proves nothing, and this run discovered
@@ -113,6 +115,18 @@ run_proof seedop seedop.sby check "cft_seedop routing, all 2^40 inputs"
 run_proof seedop seedop.sby cover "cft_seedop operand classes reachable"
 run_proof equiv  equiv.sby  check "cft_simpleops == frozen ref (op != 26,27)"
 run_proof equiv  equiv.sby  cover "carve-out neighbours reachable"
+# NOT IN THE GATE: cft_mulpass' exactness proof (2026-09-06).
+# formal/mulpass.sby and formal/tb_mulpass_formal.sv are in the tree and
+# the property is the right one, but the proof does not close and the
+# harness does not yet pass this file's own vacuity preflight, so
+# running it would either hang or pass emptily. A bounded model check
+# over a multiplier is the shape a SAT solver does worst at: the
+# real-width task ran four hours without returning and was stopped. The
+# .sby now carries narrow tasks where the same property should close;
+# until one of them does, cft_mulpass' bit identity rests on the benches
+# - tb/test_mulcycle.py against the pipe's own side-by-side array, and
+# the whole suite at MC=10 - exactly as FUSE_NORM, FUSE_ALIGN and
+# FUSE_MUL's did. docs/VALIDATION.md's 2026-09-06 entry says so too.
 
 # --- the negative control ------------------------------------------------
 # expect fail in negcontrol.sby means: rc 0 == the broken property was
@@ -139,7 +153,7 @@ echo "== formal gate verdicts =="
 printf '%s' "$verdicts"
 echo
 if [ "$bad" -ne 0 ]; then
-    echo "FORMAL GATE: FAIL ($bad of 7)"
+    echo "FORMAL GATE: FAIL ($bad of 11)"
     exit 1
 fi
-echo "FORMAL GATE: PASS (7 of 7, negative control refuted)"
+echo "FORMAL GATE: PASS (11 of 11, negative control refuted)"

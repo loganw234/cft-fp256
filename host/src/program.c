@@ -36,7 +36,9 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
-#ifdef CFT_ENABLE_XRT
+/* Either device backend - XRT, or the remote one of docs/REMOTE.md,
+ * which is compiled in unless CFT_NO_REMOTE says otherwise. */
+#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 #include "backend.h"
 #endif
 
@@ -484,7 +486,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
         n > ((size_t)-1) / prog->max_deposits / esz)
         return CFT_ERR_INVALID_ARGUMENT;
 
-#ifdef CFT_ENABLE_XRT
+#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
     /* The device runs the program if the device is where it was
      * loaded. Everything above this line is argument checking that
      * both executors need; everything below is the software one.
@@ -513,8 +515,12 @@ CFT_API cft_status cft_program_run(cft_program *prog,
         void *hw = cft_device_backend(prog->dev);
         if (hw) {
             uint32_t fl = 0, bs = 0;
-            cft_status st = (cft_status)cftx_program_run(
-                hw, prog->fmt_code, prog->image, prog->image_bytes,
+            /* Which device backend is device.c's business: the
+             * dispatcher in backend.h hands the run to the XRT one or
+             * the remote one (docs/REMOTE.md) and this file names
+             * neither. */
+            cft_status st = (cft_status)cft_backend_program_run(
+                prog->dev, prog->fmt_code, prog->image, prog->image_bytes,
                 prog->max_deposits, a, b, c, deposits, counts, n, &fl, &bs);
             if (st == CFT_OK) {
                 cft_flags_emit(prog->dev, fl, flags);

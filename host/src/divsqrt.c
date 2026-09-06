@@ -1332,7 +1332,10 @@ static int divsqrt_route_program(cft_device *dev)
         return 0;
     if (e && e[0] == '1' && !e[1])
         return 1;
-#ifdef CFT_ENABLE_XRT
+    /* Any device backend takes the program route: the tile, or the
+     * remote device of docs/REMOTE.md, where one PROG_RUN frame per
+     * chunk replaces twenty-odd RUN round trips. */
+#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
     return cft_device_backend((const struct cft_device *)dev) != NULL;
 #else
     (void)dev;

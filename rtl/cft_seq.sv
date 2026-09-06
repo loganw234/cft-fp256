@@ -121,7 +121,11 @@ module cft_seq #(
     parameter bit EN_FP256   = 1'b1,
     // Own ALU array (1, the unit bench's configuration) or the
     // kernel's shared one through the lane_* ports (0).
-    parameter bit OWN_LANES  = 1'b1
+    parameter bit OWN_LANES  = 1'b1,
+    // The multi-cycle multiplier's pass budget, for the private array
+    // only (cft_lanes has the story); the kernel's array is paced by
+    // the kernel and reaches this module as lane_ready.
+    parameter int MUL_PASSES = 1
 )(
     input  logic              ap_clk,
     input  logic              ap_rst_n,
@@ -153,6 +157,11 @@ module cft_seq #(
     output logic [BEAT_BITS-1:0] lane_a,
     output logic [BEAT_BITS-1:0] lane_b,
     output logic [BEAT_BITS-1:0] lane_c,
+    // The array accepts a request only in a cycle with lane_ready
+    // high (cft_lanes' in_ready: every cycle in the shipping tile, one
+    // in NP at a multi-cycle rung). The registered request below is
+    // HELD until then, and the issue machine holds with it.
+    input  logic                 lane_ready,
     input  logic                 lane_ov,
     input  logic [BEAT_BITS-1:0] lane_d,
     input  logic [BEAT_BITS/32*5-1:0] lane_flags,
@@ -301,6 +310,9 @@ module cft_seq #(
   // recognises - a byte loop over a 256-bit word is the shape that
   // made yosys flatten the file into 130k registers.
   localparam int RF_D = 16 * NBEATS;
+  // Declared ahead of the register file that reads it; defined beside
+  // the array request it is about.
+  logic issue_hold;
   logic [7:0] rf_raddr_a, rf_raddr_b, rf_raddr_c;
   logic [BEAT_BITS-1:0] rf_rdata_a, rf_rdata_b, rf_rdata_c;
   logic        rf_we;
@@ -320,9 +332,16 @@ module cft_seq #(
       logic [31:0] bank1 [0:RF_D-1];
       logic [31:0] ra_q, rb_q, rc_q;
       always_ff @(posedge ap_clk) begin
-        ra_q <= bank0[rf_raddr_a];
-        rb_q <= bank0[rf_raddr_b];
-        rc_q <= bank1[rf_raddr_c];
+        // The read registers hold with the issue machine (issue_hold,
+        // below): S_ALU_ISSUE fires beat c-2 from the data that beat
+        // c's address request put on the bus two STEPS ago, and a
+        // step is a cycle the array accepts, not a clock. Every other
+        // reader of this bus runs when nothing is held.
+        if (!issue_hold) begin
+          ra_q <= bank0[rf_raddr_a];
+          rb_q <= bank0[rf_raddr_b];
+          rc_q <= bank1[rf_raddr_c];
+        end
         if (rf_we && rf_wwe[gw]) begin
           bank0[rf_waddr] <= rf_wdata[gw*32 +: 32];
           bank1[rf_waddr] <= rf_wdata[gw*32 +: 32];
@@ -400,9 +419,17 @@ module cft_seq #(
   logic [7:0]           al_op;
   logic [2:0]           al_rnd;
   logic [BEAT_BITS-1:0] al_a, al_b, al_c;
+  logic                 al_rdy;
   logic                 al_ov;
   logic [BEAT_BITS-1:0] al_d;
   logic [WORDS*5-1:0]   al_lf;
+
+  // A registered request the array has not yet taken. While it stands
+  // the issue machine and the register file's read registers hold, so
+  // the two-beats-ahead address pipeline of S_ALU_ISSUE stays two
+  // beats ahead in ACCEPTED beats. In the shipping tile al_rdy is a
+  // constant 1 and this is a constant 0.
+  assign issue_hold = al_valid && !al_rdy;
 
   assign lane_valid = al_valid;
   assign lane_op    = al_op;
@@ -416,16 +443,18 @@ module cft_seq #(
     if (OWN_LANES) begin : g_own_lanes
       cft_lanes #(
           .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
-          .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256)
+          .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+          .MUL_PASSES(MUL_PASSES)
       ) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
-          .a(al_a), .b(al_b), .c(al_c),
+          .a(al_a), .b(al_b), .c(al_c), .in_ready(al_rdy),
           .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
     end else begin : g_shared_lanes
-      assign al_ov = lane_ov;
-      assign al_d  = lane_d;
-      assign al_lf = lane_flags;
+      assign al_rdy = lane_ready;
+      assign al_ov  = lane_ov;
+      assign al_d   = lane_d;
+      assign al_lf  = lane_flags;
     end
   endgenerate
 
@@ -847,7 +876,9 @@ module cft_seq #(
 
     end else begin
       done <= 1'b0;
-      al_valid <= 1'b0;
+      // A request stands until the array takes it; the issue state
+      // re-asserts it for the next beat in the same cycle it is taken.
+      if (!issue_hold) al_valid <= 1'b0;
       rf_we <= 1'b0;
       db_we <= '0;
 
@@ -1201,22 +1232,33 @@ module cft_seq #(
           // fires beat c-2 from the data now on the bus. Getting this
           // off by one shifted every operand a beat and failed every
           // deposit slot at once - the bench's first catch.
-          if (bt < 6'({1'b0, nb_blk})) begin
-            rf_raddr_a <= {c_ra, bt[3:0]};
-            rf_raddr_b <= {c_rb, bt[3:0]};
-            rf_raddr_c <= {c_rc, bt[3:0]};
+          //
+          // "Cycle" here means a STEP: a cycle in which no request is
+          // standing untaken. On the multi-cycle tile the array takes
+          // one beat per pass period, and between acceptances the
+          // whole issue machine - addresses, the bank read registers,
+          // bt, and the request itself - holds, so the two-ahead
+          // relation is unchanged in accepted beats. Writeback below
+          // is outside the hold: a result is a pulse and is taken
+          // whenever it arrives.
+          if (!issue_hold) begin
+            if (bt < 6'({1'b0, nb_blk})) begin
+              rf_raddr_a <= {c_ra, bt[3:0]};
+              rf_raddr_b <= {c_rb, bt[3:0]};
+              rf_raddr_c <= {c_rc, bt[3:0]};
+            end
+            if (bt >= 6'd2) begin
+              al_valid <= 1'b1;
+              al_op <= c_op;
+              al_rnd <= c_rnd;
+              al_a <= c_ka ? kmem[c_ra] : rf_rdata_a;
+              al_b <= c_kb ? kmem[c_rb] : rf_rdata_b;
+              al_c <= c_kc ? kmem[c_rc] : rf_rdata_c;
+            end
+            bt <= bt + 1;
+            if (bt == 6'({1'b0, nb_blk} + 6'd1))
+              st <= S_ALU_WAIT;
           end
-          if (bt >= 6'd2) begin
-            al_valid <= 1'b1;
-            al_op <= c_op;
-            al_rnd <= c_rnd;
-            al_a <= c_ka ? kmem[c_ra] : rf_rdata_a;
-            al_b <= c_kb ? kmem[c_rb] : rf_rdata_b;
-            al_c <= c_kc ? kmem[c_rc] : rf_rdata_c;
-          end
-          bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} + 6'd1))
-            st <= S_ALU_WAIT;
           // With NBEATS > LATENCY the first result retires DURING the
           // last issue cycles - beat 0 lands exactly at issue cycle
           // LATENCY - so the writeback path runs here too. Missing

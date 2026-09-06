@@ -86,3 +86,6 @@ host/cft-enclose
 host/cft-mersenne
 host/cft-orbits
 host/cft-zoom
+# the remote backend's server and its protocol test (docs/REMOTE.md)
+host/cft-serve
+host/remote-test

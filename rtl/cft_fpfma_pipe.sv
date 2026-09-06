@@ -36,6 +36,15 @@
 //         attribute-directed increment, tininess-after-rounding
 //   S14   pack + specials mux -> output registers
 //
+// The pipe advances on `en`, a pipeline enable that is tied high in the
+// shipping configuration and folds away. MUL_PASSES > 1 replaces the
+// side-by-side multiplier (S2..S6) with cft_mulpass, which iterates a
+// subset of the chunk columns on the wall clock while `en` holds every
+// other stage; the product lands at the same level in enabled cycles,
+// so the stage map above is unchanged and so are the bits. The rung's
+// throughput drops to one beat per NP cycles, which is the trade the
+// multi-cycle tile makes deliberately (docs/ARCHITECTURE.md).
+//
 // Marker/sticky safety carries over from v0 strengthened: the
 // appended LSB participates in the S9/S10 subtract exactly (floor +
 // remainder), then becomes an explicit sticky bit for rounding, so
@@ -78,10 +87,34 @@ module cft_fpfma_pipe #(
     parameter bit EXT_ALIGN = 1'b0,
     // Width of the alignment window, for the aln_* ports only. DERIVED,
     // do not override: GW-1 = 3*MAN_W + 8, guarded below.
-    parameter int ALN_W = 3 * MAN_W + 8
+    parameter int ALN_W = 3 * MAN_W + 8,
+    // The multi-cycle multiplier's pass BUDGET (rtl/cft_mulgeom.svh).
+    // 1, the default, builds every chunk column side by side - the
+    // shipping pipe, unchanged. Above 1 the lane builds
+    // ceil(chunks / MUL_PASSES) columns and iterates them
+    // (cft_mulpass), which needs the whole pipe held on `en` for
+    // NP - 1 of every NP cycles, NP = ceil(chunks / columns). A lane
+    // whose chunk count fits the budget - fp32's one column always,
+    // fp64's three under a budget of 3 or more - stays single-pass.
+    parameter int MUL_PASSES = 1,
+    // The `en` period whoever paces this pipe believes this lane
+    // needs, cross-checked against the count derived here; 0 skips
+    // the check (a bench that ties en high). cft_lanes passes the
+    // period it will actually generate, so a geometry disagreement
+    // between the two files is an elaboration error and not a wrong
+    // product with clean flags.
+    parameter int MUL_PERIOD = 0
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
+    // Pipeline enable. Every stage register - S0 through S14, the
+    // rounding-attribute and valid delay lines, the sideband - advances
+    // only on a cycle with en high, so in enabled-edge terms the pipe
+    // is the same pipe at every MUL_PASSES. Tie high for the
+    // single-pass configuration; the multi-cycle one takes it from
+    // cft_lanes' phase counter. out_valid is gated by it too: one
+    // pulse per result, in the last cycle d holds it.
+    input  logic                 en,
     input  logic                 in_valid,
     input  logic [2:0]           rnd,      // rounding attribute, per op
     // Precomputed result. When byp is high the datapath's answer is
@@ -192,10 +225,15 @@ module cft_fpfma_pipe #(
   localparam int NW   = GW;
   localparam int NCH  = (NW + 63) / 64;
 
-  // multiplier decomposition
-  localparam int MCH  = 24;                    // chunk width
-  localparam int NMC  = (P + MCH - 1) / MCH;   // chunks (fp256: 10)
+  // multiplier decomposition - the geometry is rtl/cft_mulgeom.svh's,
+  // included rather than restated so the pipe, cft_mulpass and the
+  // array's pacing cannot disagree about a chunk count.
+  `include "cft_mulgeom.svh"
+  localparam int MCH  = CFT_MUL_MCH;           // chunk width, 24
+  localparam int NMC  = cft_mul_chunks(P);     // chunks (fp256: 10)
   localparam int PPW  = 2 * P + 2 * MCH;       // uniform tree width
+  localparam int MUL_C  = cft_mul_cols(P, MUL_PASSES);    // columns this lane builds
+  localparam int MUL_NP = cft_mul_passes(P, MUL_PASSES);  // passes it takes (1 = side by side)
 
   localparam int FL_INVALID   = 0;
   localparam int FL_OVERFLOW  = 2;
@@ -273,6 +311,18 @@ module cft_fpfma_pipe #(
     if (ALN_W != GW - 1) begin : g_bad_aln_w
       $error("cft_fpfma_pipe: ALN_W must equal GW-1 - do not override it");
     end
+    // The pacer and the pipe derive the pass count from the same
+    // include; if they still disagree, something overrode a parameter
+    // it should not have, and a lane held for the wrong number of
+    // cycles returns a partial product with clean flags.
+    if (MUL_PERIOD != 0 && MUL_PERIOD != MUL_NP) begin : g_bad_mul_period
+      $error("cft_fpfma_pipe: MUL_PERIOD disagrees with the pass count derived from MUL_PASSES");
+    end
+    // A shared array (EXT_MUL) is single-pass by construction; the two
+    // ways of not building a private multiplier do not compose.
+    if (EXT_MUL && MUL_NP > 1) begin : g_ext_and_multi
+      $error("cft_fpfma_pipe: EXT_MUL and a multi-pass MUL_PASSES cannot both be set");
+    end
   endgenerate
 
   initial begin
@@ -298,14 +348,27 @@ module cft_fpfma_pipe #(
       $display("FATAL: cft_fpfma_pipe ALN_W (%0d) != GW-1 (%0d)", ALN_W, GW - 1);
       $fatal(1);
     end
+    if (MUL_PERIOD != 0 && MUL_PERIOD != MUL_NP) begin
+      $display("FATAL: cft_fpfma_pipe MUL_PERIOD (%0d) != derived pass count (%0d) at P=%0d, MUL_PASSES=%0d",
+               MUL_PERIOD, MUL_NP, P, MUL_PASSES);
+      $fatal(1);
+    end
+    if (EXT_MUL && MUL_NP > 1) begin
+      $display("FATAL: cft_fpfma_pipe EXT_MUL=1 with MUL_PASSES=%0d (%0d passes)", MUL_PASSES, MUL_NP);
+      $fatal(1);
+    end
   end
 
+  // The valid line advances on `en` like every other stage, and
+  // out_valid is high for exactly the last cycle of the interval in
+  // which d holds a result - one pulse per operation, whatever the
+  // period. With en tied high that is the shipping contract verbatim.
   logic [DEPTH-1:0] v;
   always_ff @(posedge clk) begin
-    if (!rst_n) v <= '0;
-    else        v <= {v[DEPTH-2:0], in_valid};
+    if (!rst_n)  v <= '0;
+    else if (en) v <= {v[DEPTH-2:0], in_valid};
   end
-  assign out_valid = v[DEPTH-1];
+  assign out_valid = v[DEPTH-1] && en;
 
   // ------------------------------------------------------------------
   // S0: input registers
@@ -315,8 +378,10 @@ module cft_fpfma_pipe #(
   logic [W-1:0] s0_byp_d;
   logic [4:0]   s0_byp_f;
   always_ff @(posedge clk) begin
-    s0_a <= a; s0_b <= b; s0_c <= c;
-    s0_byp <= byp; s0_byp_d <= byp_d; s0_byp_f <= byp_f;
+    if (en) begin
+      s0_a <= a; s0_b <= b; s0_c <= c;
+      s0_byp <= byp; s0_byp_d <= byp_d; s0_byp_f <= byp_f;
+    end
   end
 
   // The rounding attribute travels with its operation rather than
@@ -345,8 +410,10 @@ module cft_fpfma_pipe #(
   // consumer reads; a further entry would be a register nothing uses.
   logic [2:0] rd_dly [0:DEPTH-2];
   always_ff @(posedge clk) begin
-    rd_dly[0] <= rnd;
-    for (int i = 1; i <= DEPTH-2; i = i + 1) rd_dly[i] <= rd_dly[i-1];
+    if (en) begin
+      rd_dly[0] <= rnd;
+      for (int i = 1; i <= DEPTH-2; i = i + 1) rd_dly[i] <= rd_dly[i-1];
+    end
   end
 
   // ------------------------------------------------------------------
@@ -372,70 +439,72 @@ module cft_fpfma_pipe #(
     int   efa_i, efb_i, efc_i;
     logic spx;
 
-    sa = s0_a[W-1]; sb = s0_b[W-1]; sc = s0_c[W-1];
-    efa = s0_a[W-2 -: EXP_W]; efb = s0_b[W-2 -: EXP_W]; efc = s0_c[W-2 -: EXP_W];
-    fra = s0_a[MAN_W-1:0];    frb = s0_b[MAN_W-1:0];    frc = s0_c[MAN_W-1:0];
-    a_nan  = (&efa) && (fra != 0);  b_nan  = (&efb) && (frb != 0);
-    c_nan  = (&efc) && (frc != 0);
-    a_snan = a_nan && !fra[MAN_W-1]; b_snan = b_nan && !frb[MAN_W-1];
-    c_snan = c_nan && !frc[MAN_W-1];
-    a_inf  = (&efa) && (fra == 0);  b_inf  = (&efb) && (frb == 0);
-    c_inf  = (&efc) && (frc == 0);
-    a_zero = (efa == 0) && (fra == 0); b_zero = (efb == 0) && (frb == 0);
-    c_zero = (efc == 0) && (frc == 0);
-    // The biased fields into int, explicitly: the sideband exponent
-    // algebra runs signed at 32 bits, with EXP_W <= 19 there is no
-    // value a field can hold that the cast moves.
-    efa_i = 32'(efa); efb_i = 32'(efb); efc_i = 32'(efc);
-    spx = sa ^ sb;
+    if (en) begin
+      sa = s0_a[W-1]; sb = s0_b[W-1]; sc = s0_c[W-1];
+      efa = s0_a[W-2 -: EXP_W]; efb = s0_b[W-2 -: EXP_W]; efc = s0_c[W-2 -: EXP_W];
+      fra = s0_a[MAN_W-1:0];    frb = s0_b[MAN_W-1:0];    frc = s0_c[MAN_W-1:0];
+      a_nan  = (&efa) && (fra != 0);  b_nan  = (&efb) && (frb != 0);
+      c_nan  = (&efc) && (frc != 0);
+      a_snan = a_nan && !fra[MAN_W-1]; b_snan = b_nan && !frb[MAN_W-1];
+      c_snan = c_nan && !frc[MAN_W-1];
+      a_inf  = (&efa) && (fra == 0);  b_inf  = (&efb) && (frb == 0);
+      c_inf  = (&efc) && (frc == 0);
+      a_zero = (efa == 0) && (fra == 0); b_zero = (efb == 0) && (frb == 0);
+      c_zero = (efc == 0) && (frc == 0);
+      // The biased fields into int, explicitly: the sideband exponent
+      // algebra runs signed at 32 bits, with EXP_W <= 19 there is no
+      // value a field can hold that the cast moves.
+      efa_i = 32'(efa); efb_i = 32'(efb); efc_i = 32'(efc);
+      spx = sa ^ sb;
 
-    s1_sp <= spx;
-    s1_sc <= sc;
-    s1_ma <= (efa == 0) ? {1'b0, fra} : {1'b1, fra};
-    s1_mb <= (efb == 0) ? {1'b0, frb} : {1'b1, frb};
-    s1_mc <= c_zero ? '0 : ((efc == 0) ? {1'b0, frc} : {1'b1, frc});
-    s1_ep <= (((efa == 0) ? 1 : efa_i) - BIAS - MAN_W)
-           + (((efb == 0) ? 1 : efb_i) - BIAS - MAN_W);
-    s1_ec <= ((efc == 0) ? 1 : efc_i) - BIAS - MAN_W;
-    s1_c_zero <= c_zero;
+      s1_sp <= spx;
+      s1_sc <= sc;
+      s1_ma <= (efa == 0) ? {1'b0, fra} : {1'b1, fra};
+      s1_mb <= (efb == 0) ? {1'b0, frb} : {1'b1, frb};
+      s1_mc <= c_zero ? '0 : ((efc == 0) ? {1'b0, frc} : {1'b1, frc});
+      s1_ep <= (((efa == 0) ? 1 : efa_i) - BIAS - MAN_W)
+             + (((efb == 0) ? 1 : efb_i) - BIAS - MAN_W);
+      s1_ec <= ((efc == 0) ? 1 : efc_i) - BIAS - MAN_W;
+      s1_c_zero <= c_zero;
 
-    s1_special <= 1'b0;
-    s1_spec_d  <= '0;
-    s1_spec_fl <= '0;
-    // A precomputed result wins over every classification below: the
-    // operation was not arithmetic, so nothing the operands look like
-    // can change its answer or raise a flag it did not raise.
-    if (s0_byp) begin
-      s1_special <= 1'b1;
-      s1_spec_d  <= s0_byp_d;
-      s1_spec_fl <= s0_byp_f;
-    end else if (a_nan || b_nan || c_nan) begin
-      s1_special <= 1'b1;
-      s1_spec_d  <= qnan;
-      s1_spec_fl <= (a_snan || b_snan || c_snan) ? (5'b1 << FL_INVALID) : 5'b0;
-    end else if ((a_inf && b_zero) || (b_inf && a_zero)) begin
-      s1_special <= 1'b1;
-      s1_spec_d  <= qnan;
-      s1_spec_fl <= 5'b1 << FL_INVALID;
-    end else if (a_inf || b_inf) begin
-      s1_special <= 1'b1;
-      if (c_inf && (sc != spx)) begin
+      s1_special <= 1'b0;
+      s1_spec_d  <= '0;
+      s1_spec_fl <= '0;
+      // A precomputed result wins over every classification below: the
+      // operation was not arithmetic, so nothing the operands look like
+      // can change its answer or raise a flag it did not raise.
+      if (s0_byp) begin
+        s1_special <= 1'b1;
+        s1_spec_d  <= s0_byp_d;
+        s1_spec_fl <= s0_byp_f;
+      end else if (a_nan || b_nan || c_nan) begin
+        s1_special <= 1'b1;
+        s1_spec_d  <= qnan;
+        s1_spec_fl <= (a_snan || b_snan || c_snan) ? (5'b1 << FL_INVALID) : 5'b0;
+      end else if ((a_inf && b_zero) || (b_inf && a_zero)) begin
+        s1_special <= 1'b1;
         s1_spec_d  <= qnan;
         s1_spec_fl <= 5'b1 << FL_INVALID;
-      end else begin
-        s1_spec_d <= {spx, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
+      end else if (a_inf || b_inf) begin
+        s1_special <= 1'b1;
+        if (c_inf && (sc != spx)) begin
+          s1_spec_d  <= qnan;
+          s1_spec_fl <= 5'b1 << FL_INVALID;
+        end else begin
+          s1_spec_d <= {spx, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
+        end
+      end else if (c_inf) begin
+        s1_special <= 1'b1;
+        s1_spec_d  <= {sc, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
+      end else if (a_zero || b_zero) begin
+        s1_special <= 1'b1;
+        // 754 6.3: a zero product plus a zero addend keeps a shared
+        // sign; when they disagree the sum is an exact zero, which is
+        // +0 in every attribute except roundTowardNegative.
+        if (c_zero) s1_spec_d <= {(sc == spx) ? sc : (rd_dly[0] == RND_RDN),
+                                  {(W-1){1'b0}}};
+        else        s1_spec_d <= s0_c;
       end
-    end else if (c_inf) begin
-      s1_special <= 1'b1;
-      s1_spec_d  <= {sc, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
-    end else if (a_zero || b_zero) begin
-      s1_special <= 1'b1;
-      // 754 6.3: a zero product plus a zero addend keeps a shared
-      // sign; when they disagree the sum is an exact zero, which is
-      // +0 in every attribute except roundTowardNegative.
-      if (c_zero) s1_spec_d <= {(sc == spx) ? sc : (rd_dly[0] == RND_RDN),
-                                {(W-1){1'b0}}};
-      else        s1_spec_d <= s0_c;
     end
   end
 
@@ -456,15 +525,17 @@ module cft_fpfma_pipe #(
   logic [4:0]   pb_spf  [2:6];
 
   always_ff @(posedge clk) begin : sideband
-    pb_sp[2] <= s1_sp;  pb_sc[2] <= s1_sc;  pb_mc[2] <= s1_mc;
-    pb_ep[2] <= s1_ep;  pb_ec[2] <= s1_ec;  pb_cz[2] <= s1_c_zero;
-    pb_spc[2] <= s1_special; pb_spd[2] <= s1_spec_d; pb_spf[2] <= s1_spec_fl;
-    for (int k = 3; k <= 6; k = k + 1) begin
-      pb_sp[k] <= pb_sp[k-1];   pb_sc[k] <= pb_sc[k-1];
-      pb_mc[k] <= pb_mc[k-1];   pb_ep[k] <= pb_ep[k-1];
-      pb_ec[k] <= pb_ec[k-1];   pb_cz[k] <= pb_cz[k-1];
-      pb_spc[k] <= pb_spc[k-1]; pb_spd[k] <= pb_spd[k-1];
-      pb_spf[k] <= pb_spf[k-1];
+    if (en) begin
+      pb_sp[2] <= s1_sp;  pb_sc[2] <= s1_sc;  pb_mc[2] <= s1_mc;
+      pb_ep[2] <= s1_ep;  pb_ec[2] <= s1_ec;  pb_cz[2] <= s1_c_zero;
+      pb_spc[2] <= s1_special; pb_spd[2] <= s1_spec_d; pb_spf[2] <= s1_spec_fl;
+      for (int k = 3; k <= 6; k = k + 1) begin
+        pb_sp[k] <= pb_sp[k-1];   pb_sc[k] <= pb_sc[k-1];
+        pb_mc[k] <= pb_mc[k-1];   pb_ep[k] <= pb_ep[k-1];
+        pb_ec[k] <= pb_ec[k-1];   pb_cz[k] <= pb_cz[k-1];
+        pb_spc[k] <= pb_spc[k-1]; pb_spd[k] <= pb_spd[k-1];
+        pb_spf[k] <= pb_spf[k-1];
+      end
     end
   end
 
@@ -486,6 +557,17 @@ module cft_fpfma_pipe #(
       // same depth this used to build, so s6_mp lands where it always
       // did and nothing downstream moves.
       assign s6_mp = mul_p;
+    end else if (MUL_NP > 1) begin : g_mul_multi
+      // The multi-cycle multiplier: MUL_C columns iterated over MUL_NP
+      // passes on the wall clock, its product handed back at level 5
+      // in ENABLED cycles - the same level the tree below delivers it,
+      // so alignment onward sees s6_mp arrive exactly when it always
+      // has. The pipe around it is being held on `en` for MUL_NP - 1
+      // of every MUL_NP cycles; that is the whole cost of the trade,
+      // and it is paid in throughput, never in bits (cft_mulpass'
+      // header carries the argument and the timeline).
+      cft_mulpass #(.P(P), .COLS(MUL_C), .LEVEL(5)) u_mulpass (
+          .clk(clk), .en(en), .a(s1_ma), .b(s1_mb), .p(s6_mp));
     end else begin : g_mul_local
       logic [PPW-1:0] s2_pp [0:15];
       logic [PPW-1:0] s3_q  [0:7];
@@ -497,29 +579,31 @@ module cft_fpfma_pipe #(
       assign mb_pad = {{(NMC*MCH-P){1'b0}}, s1_mb};
 
       always_ff @(posedge clk) begin : mult_stages
-        // S2: partial products (each a short DSP column)
-        for (int k = 0; k < 16; k = k + 1) begin
-          if (k < NMC) s2_pp[k] <= s1_ma * mb_pad[k*MCH +: MCH];
-          else         s2_pp[k] <= '0;
+        if (en) begin
+          // S2: partial products (each a short DSP column)
+          for (int k = 0; k < 16; k = k + 1) begin
+            if (k < NMC) s2_pp[k] <= s1_ma * mb_pad[k*MCH +: MCH];
+            else         s2_pp[k] <= '0;
+          end
+          // S3: L1 pairs, shift 24
+          for (int j = 0; j < 8; j = j + 1)
+            s3_q[j] <= s2_pp[2*j] + (s2_pp[2*j+1] << MCH);
+          // S4: L2 pairs, shift 48
+          for (int i = 0; i < 4; i = i + 1)
+            s4_t[i] <= s3_q[2*i] + (s3_q[2*i+1] << (2*MCH));
+          // S5: L3 pairs, shift 96
+          for (int i = 0; i < 2; i = i + 1)
+            s5_u[i] <= s4_t[2*i] + (s4_t[2*i+1] << (4*MCH));
+          // S6: L4 final, shift 192. The add runs at the tree's uniform
+          // PPW = 2P+48 bits and lands in 2P: the sum IS the exact
+          // product ma*mb < 2^2P, so the 48 bits dropped are zero by
+          // arithmetic, not by luck. Left as written - restaging the
+          // final add to please a width lint is exactly the edit this
+          // file's history warns against.
+          /* verilator lint_off WIDTHTRUNC */
+          s6_mp_r <= s5_u[0] + (s5_u[1] << (8*MCH));
+          /* verilator lint_on WIDTHTRUNC */
         end
-        // S3: L1 pairs, shift 24
-        for (int j = 0; j < 8; j = j + 1)
-          s3_q[j] <= s2_pp[2*j] + (s2_pp[2*j+1] << MCH);
-        // S4: L2 pairs, shift 48
-        for (int i = 0; i < 4; i = i + 1)
-          s4_t[i] <= s3_q[2*i] + (s3_q[2*i+1] << (2*MCH));
-        // S5: L3 pairs, shift 96
-        for (int i = 0; i < 2; i = i + 1)
-          s5_u[i] <= s4_t[2*i] + (s4_t[2*i+1] << (4*MCH));
-        // S6: L4 final, shift 192. The add runs at the tree's uniform
-        // PPW = 2P+48 bits and lands in 2P: the sum IS the exact
-        // product ma*mb < 2^2P, so the 48 bits dropped are zero by
-        // arithmetic, not by luck. Left as written - restaging the
-        // final add to please a width lint is exactly the edit this
-        // file's history warns against.
-        /* verilator lint_off WIDTHTRUNC */
-        s6_mp_r <= s5_u[0] + (s5_u[1] << (8*MCH));
-        /* verilator lint_on WIDTHTRUNC */
       end
 
       assign s6_mp = s6_mp_r;
@@ -540,34 +624,36 @@ module cft_fpfma_pipe #(
   always_ff @(posedge clk) begin : stage6_prep
     int dd, lshift;
     logic bp;
-    bp = (pb_ep[5] >= pb_ec[5]);
-    s6_big_is_p <= bp;
-    s6_sbig <= bp ? pb_sp[5] : pb_sc[5];
-    s6_ssml <= bp ? pb_sc[5] : pb_sp[5];
-    if (bp) begin dd = pb_ep[5] - pb_ec[5]; s6_g <= pb_ep[5] - SH; end
-    else     begin dd = pb_ec[5] - pb_ep[5]; s6_g <= pb_ec[5] - SH; end
-    lshift = SH - dd;
-    if (lshift >= 0) begin
-      s6_far <= 1'b0; s6_right <= 1'b0;
-      s6_csh <= (lshift >> 6); s6_fsh <= (lshift & 63);
-      s6_mkpre <= 1'b0;
-    end else if (-lshift < 2 * P + 2) begin
-      s6_far <= 1'b0; s6_right <= 1'b1;
-      s6_csh <= ((-lshift) >> 6); s6_fsh <= ((-lshift) & 63);
-      s6_mkpre <= 1'b0;
-    end else begin
-      s6_far <= 1'b1; s6_right <= 1'b0;
-      s6_csh <= 0; s6_fsh <= 0;
-      // sml is entirely below the grid: it is (a) the addend when the
-      // product anchors, or (b) the product when the addend anchors.
-      // For (b) the product is nonzero by construction here (a_zero/
-      // b_zero went down the specials path), so |sml| = 1.
-      s6_mkpre <= bp ? (pb_cz[5] ? 1'b0 : |pb_mc[5]) : 1'b1;
+    if (en) begin
+      bp = (pb_ep[5] >= pb_ec[5]);
+      s6_big_is_p <= bp;
+      s6_sbig <= bp ? pb_sp[5] : pb_sc[5];
+      s6_ssml <= bp ? pb_sc[5] : pb_sp[5];
+      if (bp) begin dd = pb_ep[5] - pb_ec[5]; s6_g <= pb_ep[5] - SH; end
+      else     begin dd = pb_ec[5] - pb_ep[5]; s6_g <= pb_ec[5] - SH; end
+      lshift = SH - dd;
+      if (lshift >= 0) begin
+        s6_far <= 1'b0; s6_right <= 1'b0;
+        s6_csh <= (lshift >> 6); s6_fsh <= (lshift & 63);
+        s6_mkpre <= 1'b0;
+      end else if (-lshift < 2 * P + 2) begin
+        s6_far <= 1'b0; s6_right <= 1'b1;
+        s6_csh <= ((-lshift) >> 6); s6_fsh <= ((-lshift) & 63);
+        s6_mkpre <= 1'b0;
+      end else begin
+        s6_far <= 1'b1; s6_right <= 1'b0;
+        s6_csh <= 0; s6_fsh <= 0;
+        // sml is entirely below the grid: it is (a) the addend when the
+        // product anchors, or (b) the product when the addend anchors.
+        // For (b) the product is nonzero by construction here (a_zero/
+        // b_zero went down the specials path), so |sml| = 1.
+        s6_mkpre <= bp ? (pb_cz[5] ? 1'b0 : |pb_mc[5]) : 1'b1;
+      end
+      s6_sp  <= pb_sp[5];
+      s6_cz  <= pb_cz[5];
+      s6_mc  <= pb_mc[5];
+      s6_spc <= pb_spc[5]; s6_spd <= pb_spd[5]; s6_spf <= pb_spf[5];
     end
-    s6_sp  <= pb_sp[5];
-    s6_cz  <= pb_cz[5];
-    s6_mc  <= pb_mc[5];
-    s6_spc <= pb_spc[5]; s6_spd <= pb_spd[5]; s6_spf <= pb_spf[5];
   end
 
   // ------------------------------------------------------------------
@@ -637,11 +723,13 @@ module cft_fpfma_pipe #(
   int            s7_g;
 
   always_ff @(posedge clk) begin : stage7
-    s7_big    <= n7_bigv;
-    s7_marker <= n7_marker;
-    s7_sbig <= s6_sbig; s7_ssml <= s6_ssml;
-    s7_g <= s6_g;
-    s7_spc <= s6_spc; s7_spd <= s6_spd; s7_spf <= s6_spf;
+    if (en) begin
+      s7_big    <= n7_bigv;
+      s7_marker <= n7_marker;
+      s7_sbig <= s6_sbig; s7_ssml <= s6_ssml;
+      s7_g <= s6_g;
+      s7_spc <= s6_spc; s7_spd <= s6_spd; s7_spf <= s6_spf;
+    end
   end
 
   logic [GW-1:0] s8_bigf, s8_smlf;
@@ -651,10 +739,12 @@ module cft_fpfma_pipe #(
   int            s8_g;
 
   always_ff @(posedge clk) begin : stage8
-    s8_bigf <= {s7_big, 1'b0};
-    s8_sbig <= s7_sbig; s8_ssml <= s7_ssml;
-    s8_g <= s7_g;
-    s8_spc <= s7_spc; s8_spd <= s7_spd; s8_spf <= s7_spf;
+    if (en) begin
+      s8_bigf <= {s7_big, 1'b0};
+      s8_sbig <= s7_sbig; s8_ssml <= s7_ssml;
+      s8_g <= s7_g;
+      s8_spc <= s7_spc; s8_spd <= s7_spd; s8_spf <= s7_spf;
+    end
   end
 
   // ---- the two alignment shifters, here or elsewhere ----------------
@@ -675,21 +765,25 @@ module cft_fpfma_pipe #(
       // of its operand - correct on isolated operations, wrong on the
       // streams the engine actually issues.
       logic s8_marker;
-      always_ff @(posedge clk) s8_marker <= s7_marker;
+      always_ff @(posedge clk) if (en) s8_marker <= s7_marker;
       assign s8_smlf = {aln_d[GW-2:0], s8_marker};
     end else begin : g_align_priv
       logic [GW-2:0] s7_sml;
       logic [5:0]    s7_fsh;
       logic          s7_right;
       always_ff @(posedge clk) begin
-        s7_sml   <= s6_right ? (n7_smlv >> (s6_csh * 64))
-                             : (n7_smlv << (s6_csh * 64));
-        s7_fsh   <= aln_fshw[5:0];
-        s7_right <= s6_right;
+        if (en) begin
+          s7_sml   <= s6_right ? (n7_smlv >> (s6_csh * 64))
+                               : (n7_smlv << (s6_csh * 64));
+          s7_fsh   <= aln_fshw[5:0];
+          s7_right <= s6_right;
+        end
       end
       always_ff @(posedge clk) begin
-        s8_smlf <= {s7_right ? (s7_sml >> s7_fsh) : (s7_sml << s7_fsh),
-                    s7_marker};
+        if (en) begin
+          s8_smlf <= {s7_right ? (s7_sml >> s7_fsh) : (s7_sml << s7_fsh),
+                      s7_marker};
+        end
       end
     end
   endgenerate
@@ -708,20 +802,22 @@ module cft_fpfma_pipe #(
   always_ff @(posedge clk) begin : stage9
     logic [CHW:0] sl, al, bl;
     logic [CHW-1:0] bigL, smlL;
-    bigL = s8_bigf[CHW-1:0];
-    smlL = s8_smlf[CHW-1:0];
-    sl = {1'b0, bigL} + {1'b0, smlL};
-    al = {1'b0, bigL} - {1'b0, smlL};
-    bl = {1'b0, smlL} - {1'b0, bigL};
-    s9_sumL <= sl[CHW-1:0];  s9_sumC <= sl[CHW];
-    s9_dAL  <= al[CHW-1:0];  s9_dAB  <= al[CHW];
-    s9_dBL  <= bl[CHW-1:0];  s9_dBB  <= bl[CHW];
-    s9_bigH <= {1'b0, s8_bigf[GW-1:CHW]};
-    s9_smlH <= {1'b0, s8_smlf[GW-1:CHW]};
-    s9_same <= (s8_sbig == s8_ssml);
-    s9_sbig <= s8_sbig; s9_ssml <= s8_ssml;
-    s9_g <= s8_g;
-    s9_spc <= s8_spc; s9_spd <= s8_spd; s9_spf <= s8_spf;
+    if (en) begin
+      bigL = s8_bigf[CHW-1:0];
+      smlL = s8_smlf[CHW-1:0];
+      sl = {1'b0, bigL} + {1'b0, smlL};
+      al = {1'b0, bigL} - {1'b0, smlL};
+      bl = {1'b0, smlL} - {1'b0, bigL};
+      s9_sumL <= sl[CHW-1:0];  s9_sumC <= sl[CHW];
+      s9_dAL  <= al[CHW-1:0];  s9_dAB  <= al[CHW];
+      s9_dBL  <= bl[CHW-1:0];  s9_dBB  <= bl[CHW];
+      s9_bigH <= {1'b0, s8_bigf[GW-1:CHW]};
+      s9_smlH <= {1'b0, s8_smlf[GW-1:CHW]};
+      s9_same <= (s8_sbig == s8_ssml);
+      s9_sbig <= s8_sbig; s9_ssml <= s8_ssml;
+      s9_g <= s8_g;
+      s9_spc <= s8_spc; s9_spd <= s8_spd; s9_spf <= s8_spf;
+    end
   end
 
   logic [GW:0]  s10_mag;
@@ -733,24 +829,26 @@ module cft_fpfma_pipe #(
   always_ff @(posedge clk) begin : stage10
     logic [HHW-1:0] sumH, dAH, dBH;
     logic negA;
-    sumH = s9_bigH + s9_smlH + {{(HHW-1){1'b0}}, s9_sumC};
-    dAH  = s9_bigH - s9_smlH - {{(HHW-1){1'b0}}, s9_dAB};
-    dBH  = s9_smlH - s9_bigH - {{(HHW-1){1'b0}}, s9_dBB};
-    if (s9_same) begin
-      s10_mag   <= {sumH, s9_sumL};
-      s10_rsign <= s9_sbig;
-    end else begin
-      negA = dAH[HHW-1];
-      if (!negA) begin
-        s10_mag   <= {dAH, s9_dAL};
+    if (en) begin
+      sumH = s9_bigH + s9_smlH + {{(HHW-1){1'b0}}, s9_sumC};
+      dAH  = s9_bigH - s9_smlH - {{(HHW-1){1'b0}}, s9_dAB};
+      dBH  = s9_smlH - s9_bigH - {{(HHW-1){1'b0}}, s9_dBB};
+      if (s9_same) begin
+        s10_mag   <= {sumH, s9_sumL};
         s10_rsign <= s9_sbig;
       end else begin
-        s10_mag   <= {dBH, s9_dBL};
-        s10_rsign <= s9_ssml;
+        negA = dAH[HHW-1];
+        if (!negA) begin
+          s10_mag   <= {dAH, s9_dAL};
+          s10_rsign <= s9_sbig;
+        end else begin
+          s10_mag   <= {dBH, s9_dBL};
+          s10_rsign <= s9_ssml;
+        end
       end
+      s10_g <= s9_g;
+      s10_spc <= s9_spc; s10_spd <= s9_spd; s10_spf <= s9_spf;
     end
-    s10_g <= s9_g;
-    s10_spc <= s9_spc; s10_spd <= s9_spd; s10_spf <= s9_spf;
   end
 
   // ------------------------------------------------------------------
@@ -856,11 +954,13 @@ module cft_fpfma_pipe #(
   // and S13's K is negative. Change SH or the far-alignment
   // threshold and this is the argument to re-derive.
   always_ff @(posedge clk) begin : stage11
-    s11_zero  <= n11_empty && !s10_mag[0];
-    s11_enorm <= n11_empty ? s10_g : (s10_g + n11_msb);
-    s11_stk   <= s10_mag[0];
-    s11_rsign <= s10_rsign;
-    s11_spc <= s10_spc; s11_spd <= s10_spd; s11_spf <= s10_spf;
+    if (en) begin
+      s11_zero  <= n11_empty && !s10_mag[0];
+      s11_enorm <= n11_empty ? s10_g : (s10_g + n11_msb);
+      s11_stk   <= s10_mag[0];
+      s11_rsign <= s10_rsign;
+      s11_spc <= s10_spc; s11_spd <= s10_spd; s11_spf <= s10_spf;
+    end
   end
 
   logic [NW-1:0] s12_norm;
@@ -888,22 +988,24 @@ module cft_fpfma_pipe #(
   always_ff @(posedge clk) begin : stage12
     int k12, d12;
     logic [P+1:0] ones_y;
-    ones_y = {(P+2){1'b1}};
-    k12 = (s11_enorm >= EMIN) ? P : (P - (EMIN - s11_enorm));
-    d12 = P - k12;
-    s12_stk   <= s11_stk;
-    s12_zero  <= s11_zero;
-    s12_enorm <= s11_enorm;
-    s12_rsign <= s11_rsign;
-    s12_spc <= s11_spc; s12_spd <= s11_spd; s12_spf <= s11_spf;
-    s12_k     <= k12;
-    s12_delta <= d12;
-    s12_q     <= ((s11_enorm >= EMIN) ? s11_enorm : EMIN) - (P - 1);
-    s12_tiny0 <= (s11_enorm < EMIN);
-    s12_tiny1 <= ((s11_enorm + 1) < EMIN);
-    // Only meaningful for K in 1..P (delta in 0..P-1); the K <= 0 branch
-    // never reads it, and a delta past the window just masks everything.
-    s12_ymask <= ~(ones_y << ((d12 < 0) ? 0 : ((d12 > P + 1) ? (P + 1) : d12)));
+    if (en) begin
+      ones_y = {(P+2){1'b1}};
+      k12 = (s11_enorm >= EMIN) ? P : (P - (EMIN - s11_enorm));
+      d12 = P - k12;
+      s12_stk   <= s11_stk;
+      s12_zero  <= s11_zero;
+      s12_enorm <= s11_enorm;
+      s12_rsign <= s11_rsign;
+      s12_spc <= s11_spc; s12_spd <= s11_spd; s12_spf <= s11_spf;
+      s12_k     <= k12;
+      s12_delta <= d12;
+      s12_q     <= ((s11_enorm >= EMIN) ? s11_enorm : EMIN) - (P - 1);
+      s12_tiny0 <= (s11_enorm < EMIN);
+      s12_tiny1 <= ((s11_enorm + 1) < EMIN);
+      // Only meaningful for K in 1..P (delta in 0..P-1); the K <= 0 branch
+      // never reads it, and a delta past the window just masks everything.
+      s12_ymask <= ~(ones_y << ((d12 < 0) ? 0 : ((d12 > P + 1) ? (P + 1) : d12)));
+    end
   end
 
   // ---- the two normalise shifters, here or elsewhere ----------------
@@ -924,11 +1026,15 @@ module cft_fpfma_pipe #(
       logic [NW-1:0] s11_valw;
       logic [5:0]    s11_fine;
       always_ff @(posedge clk) begin
-        s11_valw <= n11_valw << (n11_csh * 64);
-        s11_fine <= n11_fsh;
+        if (en) begin
+          s11_valw <= n11_valw << (n11_csh * 64);
+          s11_fine <= n11_fsh;
+        end
       end
       always_ff @(posedge clk) begin
-        s12_norm <= s11_valw << s11_fine;
+        if (en) begin
+          s12_norm <= s11_valw << s11_fine;
+        end
       end
     end
   endgenerate
@@ -950,74 +1056,76 @@ module cft_fpfma_pipe #(
     logic [P-1:0] kept_u;
     logic guard_u, sticky_u, up_u, carry_u;
 
-    K = s12_k;
-    s13_q     <= s12_q;
-    s13_zero  <= s12_zero;
-    s13_rsign <= s12_rsign;
-    s13_spc <= s12_spc; s13_spd <= s12_spd; s13_spf <= s12_spf;
+    if (en) begin
+      K = s12_k;
+      s13_q     <= s12_q;
+      s13_zero  <= s12_zero;
+      s13_rsign <= s12_rsign;
+      s13_spc <= s12_spc; s13_spd <= s12_spd; s13_spf <= s12_spf;
 
-    if (s12_zero) begin
-      s13_kept_r <= '0; s13_inexact <= 1'b0; s13_tiny <= 1'b0;
-    end else begin
-      kept_u   = s12_norm[NW-1 -: P];
-      guard_u  = s12_norm[NW-1-P];
-      sticky_u = (|s12_norm[NW-2-P:0]) | s12_stk;
-      up_u     = round_up(rd_dly[DEPTH-3], s12_rsign, guard_u, sticky_u,
-                          kept_u[0]);
-      carry_u  = (&kept_u) && up_u;
-      s13_tiny <= carry_u ? s12_tiny1 : s12_tiny0;
-
-      if (K <= 0) begin
-        // Entirely below the subnormal grid. K == 0 puts the value's
-        // MSB in the guard position; K < 0 puts everything into the
-        // sticky. Either way the result is inexact, and only the
-        // attribute decides whether it becomes zero or one ulp.
-        guard  = (K == 0);
-        sticky = (K == 0) ? ((|s12_norm[NW-2:0]) | s12_stk) : 1'b1;
-        kept   = '0;
+      if (s12_zero) begin
+        s13_kept_r <= '0; s13_inexact <= 1'b0; s13_tiny <= 1'b0;
       end else begin
-        // The clamped window, extracted from the P+1 bits that can
-        // reach it rather than by shifting all NW. With sh = NW - K
-        // the old form was kept = (s12_norm >> sh)[P:0] and
-        // guard = s12_norm[sh-1]; the bits those can name are
-        // s12_norm[NW-1 : NW-P-1] - the top P plus the guard position -
-        // and a zero above them. Shifting that window right by
-        // delta = P - K lands the same bits in the same places (bit i
-        // of kept is s12_norm[NW-K+i] either way, zero above K), so the
-        // shifter is 8 levels over P+2 bits instead of 10 over NW, and
-        // its amount is a register instead of a subtraction. Sticky is
-        // everything below the guard: the part that is below the
-        // window at every K, plus the delta window bits the shift
-        // dropped, which s12_ymask names.
-        ywin   = {1'b0, s12_norm[NW-1 : NW-P-1]};
-        zwin   = ywin >> s12_delta;
-        kept   = zwin[P+1:1];
-        guard  = zwin[0];
-        sticky = (|s12_norm[NW-P-2:0]) | (|(ywin & s12_ymask)) | s12_stk;
+        kept_u   = s12_norm[NW-1 -: P];
+        guard_u  = s12_norm[NW-1-P];
+        sticky_u = (|s12_norm[NW-2-P:0]) | s12_stk;
+        up_u     = round_up(rd_dly[DEPTH-3], s12_rsign, guard_u, sticky_u,
+                            kept_u[0]);
+        carry_u  = (&kept_u) && up_u;
+        s13_tiny <= carry_u ? s12_tiny1 : s12_tiny0;
+
+        if (K <= 0) begin
+          // Entirely below the subnormal grid. K == 0 puts the value's
+          // MSB in the guard position; K < 0 puts everything into the
+          // sticky. Either way the result is inexact, and only the
+          // attribute decides whether it becomes zero or one ulp.
+          guard  = (K == 0);
+          sticky = (K == 0) ? ((|s12_norm[NW-2:0]) | s12_stk) : 1'b1;
+          kept   = '0;
+        end else begin
+          // The clamped window, extracted from the P+1 bits that can
+          // reach it rather than by shifting all NW. With sh = NW - K
+          // the old form was kept = (s12_norm >> sh)[P:0] and
+          // guard = s12_norm[sh-1]; the bits those can name are
+          // s12_norm[NW-1 : NW-P-1] - the top P plus the guard position -
+          // and a zero above them. Shifting that window right by
+          // delta = P - K lands the same bits in the same places (bit i
+          // of kept is s12_norm[NW-K+i] either way, zero above K), so the
+          // shifter is 8 levels over P+2 bits instead of 10 over NW, and
+          // its amount is a register instead of a subtraction. Sticky is
+          // everything below the guard: the part that is below the
+          // window at every K, plus the delta window bits the shift
+          // dropped, which s12_ymask names.
+          ywin   = {1'b0, s12_norm[NW-1 : NW-P-1]};
+          zwin   = ywin >> s12_delta;
+          kept   = zwin[P+1:1];
+          guard  = zwin[0];
+          sticky = (|s12_norm[NW-P-2:0]) | (|(ywin & s12_ymask)) | s12_stk;
+        end
+        // Round by SELECTING between kept and kept+1, not by adding up.
+        //
+        // These are the same value. They are not the same circuit, and
+        // this stage is the measured critical path of the whole design
+        // (S12 -> S13, 39 logic levels, 21 of them CARRY8, ~61% route
+        // when this was written; 25 levels, 15 CARRY8 and 73% route on
+        // the routed quad of 2026-09-02, before the amount moved to S12).
+        //
+        // `up` depends on guard, sticky and kept[0], all of which come
+        // out of the variable shift above - so `kept + up` cannot begin
+        // until the guard/sticky reduction and round_up have finished,
+        // and a 238-bit ripple carry then sits at the END of an already
+        // long path. Computing kept+1 as soon as `kept` exists runs that
+        // carry in PARALLEL with the reduction that produces `up`, and
+        // leaves one multiplexer where the adder used to be.
+        //
+        // Nothing about the arithmetic changes, which is the point: this
+        // is the most safety-critical logic here, and the 441,000-case
+        // suite is what has to agree afterwards.
+        kept_p1 = kept + {{P{1'b0}}, 1'b1};
+        up = round_up(rd_dly[DEPTH-3], s12_rsign, guard, sticky, kept[0]);
+        s13_kept_r  <= up ? kept_p1 : kept;
+        s13_inexact <= guard || sticky;
       end
-      // Round by SELECTING between kept and kept+1, not by adding up.
-      //
-      // These are the same value. They are not the same circuit, and
-      // this stage is the measured critical path of the whole design
-      // (S12 -> S13, 39 logic levels, 21 of them CARRY8, ~61% route
-      // when this was written; 25 levels, 15 CARRY8 and 73% route on
-      // the routed quad of 2026-09-02, before the amount moved to S12).
-      //
-      // `up` depends on guard, sticky and kept[0], all of which come
-      // out of the variable shift above - so `kept + up` cannot begin
-      // until the guard/sticky reduction and round_up have finished,
-      // and a 238-bit ripple carry then sits at the END of an already
-      // long path. Computing kept+1 as soon as `kept` exists runs that
-      // carry in PARALLEL with the reduction that produces `up`, and
-      // leaves one multiplexer where the adder used to be.
-      //
-      // Nothing about the arithmetic changes, which is the point: this
-      // is the most safety-critical logic here, and the 441,000-case
-      // suite is what has to agree afterwards.
-      kept_p1 = kept + {{P{1'b0}}, 1'b1};
-      up = round_up(rd_dly[DEPTH-3], s12_rsign, guard, sticky, kept[0]);
-      s13_kept_r  <= up ? kept_p1 : kept;
-      s13_inexact <= guard || sticky;
     end
   end
 
@@ -1041,49 +1149,51 @@ module cft_fpfma_pipe #(
     logic [31:0] e_biased;
     int bl, e_res;
 
-    res = '0; fl = '0;
-    if (s13_spc) begin
-      res = s13_spd;
-      fl  = s13_spf;
-    end else if (s13_zero) begin
-      // exact cancellation (754 6.3): +0, except toward -infinity
-      res = {(rd_dly[DEPTH-2] == RND_RDN), {(W-1){1'b0}}};
-    end else begin
-      kr = s13_kept_r;
-      fl[FL_INEXACT] = s13_inexact;
-      if (kr == 0) begin
-        res = {s13_rsign, {(W-1){1'b0}}};
-        fl[FL_UNDERFLOW] = 1'b1;
+    if (en) begin
+      res = '0; fl = '0;
+      if (s13_spc) begin
+        res = s13_spd;
+        fl  = s13_spf;
+      end else if (s13_zero) begin
+        // exact cancellation (754 6.3): +0, except toward -infinity
+        res = {(rd_dly[DEPTH-2] == RND_RDN), {(W-1){1'b0}}};
       end else begin
-        bl = bitlen_p1(kr);
-        e_res = s13_q + bl - 1;
-        if (e_res > EMAX) begin
-          // 754 7.4: overflow is signalled in every attribute, but
-          // only some of them deliver an infinity; the rest deliver
-          // the largest finite magnitude.
-          if (overflow_to_inf(rd_dly[DEPTH-2], s13_rsign))
-            res = {s13_rsign, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
-          else
-            res = {s13_rsign, {(EXP_W-1){1'b1}}, 1'b0, {MAN_W{1'b1}}};
-          fl[FL_OVERFLOW] = 1'b1;
-          fl[FL_INEXACT]  = 1'b1;
+        kr = s13_kept_r;
+        fl[FL_INEXACT] = s13_inexact;
+        if (kr == 0) begin
+          res = {s13_rsign, {(W-1){1'b0}}};
+          fl[FL_UNDERFLOW] = 1'b1;
         end else begin
-          if (s13_tiny && s13_inexact) fl[FL_UNDERFLOW] = 1'b1;
-          if (e_res < EMIN) begin
-            res = {s13_rsign, {EXP_W{1'b0}}, kr[MAN_W-1:0]};
+          bl = bitlen_p1(kr);
+          e_res = s13_q + bl - 1;
+          if (e_res > EMAX) begin
+            // 754 7.4: overflow is signalled in every attribute, but
+            // only some of them deliver an infinity; the rest deliver
+            // the largest finite magnitude.
+            if (overflow_to_inf(rd_dly[DEPTH-2], s13_rsign))
+              res = {s13_rsign, {EXP_W{1'b1}}, {MAN_W{1'b0}}};
+            else
+              res = {s13_rsign, {(EXP_W-1){1'b1}}, 1'b0, {MAN_W{1'b1}}};
+            fl[FL_OVERFLOW] = 1'b1;
+            fl[FL_INEXACT]  = 1'b1;
           end else begin
-            if (bl == P + 1) kr = kr >> 1;
-            // In this branch EMIN <= e_res <= EMAX, so the biased sum
-            // sits in [1, 2^EXP_W - 2] and the field select is exact.
-            e_biased = e_res + BIAS;
-            biased_f = e_biased[EXP_W-1:0];
-            res = {s13_rsign, biased_f, kr[MAN_W-1:0]};
+            if (s13_tiny && s13_inexact) fl[FL_UNDERFLOW] = 1'b1;
+            if (e_res < EMIN) begin
+              res = {s13_rsign, {EXP_W{1'b0}}, kr[MAN_W-1:0]};
+            end else begin
+              if (bl == P + 1) kr = kr >> 1;
+              // In this branch EMIN <= e_res <= EMAX, so the biased sum
+              // sits in [1, 2^EXP_W - 2] and the field select is exact.
+              e_biased = e_res + BIAS;
+              biased_f = e_biased[EXP_W-1:0];
+              res = {s13_rsign, biased_f, kr[MAN_W-1:0]};
+            end
           end
         end
       end
+      d     <= res;
+      flags <= fl;
     end
-    d     <= res;
-    flags <= fl;
   end
 
 endmodule

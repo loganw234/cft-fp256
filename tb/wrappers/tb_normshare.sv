@@ -72,7 +72,7 @@ module tb_normshare #(
   logic [SLOTS*6-1:0] nrm_fsh;
 
   cft_normseg #(.PMAX(237), .SLOTS(SLOTS)) u_normseg (
-      .clk(clk), .mode(mode), .din(nrm_din),
+      .clk(clk), .en(1'b1), .mode(mode), .din(nrm_din),
       .csh(nrm_csh), .fsh(nrm_fsh), .dir('0), .dout(nrm_dout));
 
   // ---- the shared ALIGNER: the same ladder, bidirectional -----------
@@ -82,7 +82,7 @@ module tb_normshare #(
   logic [SLOTS-1:0]   aln_dir;
 
   cft_normseg #(.PMAX(237), .SLOTS(SLOTS), .BIDIR(1'b1)) u_alnseg (
-      .clk(clk), .mode(mode), .din(aln_din),
+      .clk(clk), .en(1'b1), .mode(mode), .din(aln_din),
       .csh(aln_csh), .fsh(aln_fsh), .dir(aln_dir), .dout(aln_dout));
 
   logic [AW32-1:0]  av32  [0:7];
@@ -176,7 +176,7 @@ module tb_normshare #(
     for (gi = 0; gi < 8; gi = gi + 1) begin : g32b
       logic [31:0] di, ds;
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_int (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*32 +: 32]), .b(b_beat[gi*32 +: 32]),
           .c(c_beat[gi*32 +: 32]),
@@ -186,7 +186,7 @@ module tb_normshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                        .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*32 +: 32]), .b(b_beat[gi*32 +: 32]),
           .c(c_beat[gi*32 +: 32]),
@@ -206,7 +206,7 @@ module tb_normshare #(
     for (gi = 0; gi < 4; gi = gi + 1) begin : g64b
       logic [63:0] di, ds;
       cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_int (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*64 +: 64]), .b(b_beat[gi*64 +: 64]),
           .c(c_beat[gi*64 +: 64]),
@@ -216,7 +216,7 @@ module tb_normshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                        .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*64 +: 64]), .b(b_beat[gi*64 +: 64]),
           .c(c_beat[gi*64 +: 64]),
@@ -236,7 +236,7 @@ module tb_normshare #(
     for (gi = 0; gi < 2; gi = gi + 1) begin : g128b
       logic [127:0] di, ds;
       cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_int (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*128 +: 128]), .b(b_beat[gi*128 +: 128]),
           .c(c_beat[gi*128 +: 128]),
@@ -246,7 +246,7 @@ module tb_normshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                        .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*128 +: 128]), .b(b_beat[gi*128 +: 128]),
           .c(c_beat[gi*128 +: 128]),
@@ -263,7 +263,7 @@ module tb_normshare #(
 
   // ---- fp256: 1 lane -------------------------------------------------
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_int256 (
-      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+      .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_i), .flags(f256_i),
@@ -272,7 +272,7 @@ module tb_normshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                    .EXT_NORM(1'b1), .EXT_ALIGN(1'b1)) u_shr256 (
-      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+      .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_s), .flags(f256_s),

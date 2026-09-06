@@ -138,6 +138,11 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
 
     chk = cocotb.start_soon(checker())
 
+    # A wrapper paced at a multi-cycle pass budget exposes in_ready: the
+    # pipe samples in_valid only in a cycle it is high, so an item is
+    # held until it is. The single-pass wrappers hold it high, and this
+    # loop is then the back-to-back stream it always was.
+    ready = getattr(dut, "in_ready", None)
     for item in work:
         op, rnd, fa, fb, fc, _, _ = item
         dut.a.value = fa
@@ -147,11 +152,20 @@ async def run_fma_pipe_test(dut, fmt, directed_default, random_default):
         dut.op.value = op
         dut.in_valid.value = 1
         expected.append(item)
-        await RisingEdge(dut.clk)
+        while True:
+            await ReadOnly()
+            taken = ready is None or int(ready.value) == 1
+            await RisingEdge(dut.clk)
+            if taken:
+                break
     dut.in_valid.value = 0
 
-    # drain the pipe
-    for _ in range(32):
+    # drain the pipe: LATENCY enabled edges, at whatever period
+    for _ in range(32 * 16):
+        await RisingEdge(dut.clk)
+        if not expected:
+            break
+    for _ in range(4):
         await RisingEdge(dut.clk)
     chk.kill()
 

@@ -4096,3 +4096,267 @@ recorded as an expectation and not a number.
 - **The larger Mersenne exponents.** 3217..11213 and 19937..44497 are
   offered on the page behind a time warning and were not run; neither
   has a recorded chain, and the page says so when either is selected.
+
+## 2026-09-06 - the remote backend: a tile behind a socket, held to the contract across an OS boundary
+
+Step 1 of docs/ROADMAP.md's "After card day: the third tier", and
+docs/PLATFORMS.md section 6's Windows answer. A third `libcft` backend
+beside the software and XRT ones, opened with
+`cft_open("cft://host:port", 0, &dev)`; a server, `host/tools/cft-serve.c`,
+holding one library device per connection; a frame protocol written
+down in docs/REMOTE.md before it was implemented. Commits `18af987`
+(the backend, server, tests and protocol document), `4f58087` (the
+server multiplexes its connections; the runner's `remote` stage) and
+the docs commit that carries this entry.
+
+### What the gate is, and what it scores
+
+Bit identity through the transport, the way every backend is scored:
+the published sets replayed through a remote device must give the
+report the local replay gives, and the workload tools run with
+`--artifact cft://...` must print the chains they print locally. The
+server computes with the library and the library is the contract, so
+a remote replay that disagrees with a local one is the transport's
+fault until proven otherwise - which is why the transport refuses
+rather than guesses: a 32-byte little-endian header with a magic, the
+protocol version, the sender's ABI version (a mismatch is refused,
+not warned), a request id, an opcode, a status and a length; a CRC-32
+over header and payload; a length cap enforced before allocation;
+encodings as bytes and flags as `uint32`, never a parsed number; and a
+refusal that closes the connection and poisons the client handle, as
+the XRT backend poisons a handle whose compute units may still be
+running.
+
+Only the calls that touch a device cross: `cft_run`, `cft_reduce` for
+sum and dot, and the program runs. Every host operation runs in the
+client's own copy of the library. The status word stays on the client
+handle - each response carries the call's flag word and `device.c` ORs
+it in through `cft_flags_emit`, so 5.7.4's six operations cost no
+round trip and the composition discipline is unchanged.
+
+### The measurements
+
+Windows host DESKTOP-T33SK86 (mingw64 gcc 16.1.0), the Linux server in
+its WSL2 distro `cft2204` (Ubuntu 22.04, gcc 11.4.0, kernel
+5.15.153.1-microsoft-standard-WSL2), both built from the same sources.
+"Loopback" is a Windows `cft-serve` on `127.0.0.1`; "WSL" is the Linux
+`cft-serve` reached from the Windows client at `cft://localhost:7755`
+through WSL2's localhost forwarding. One thread everywhere; the box
+was carrying its usual load.
+
+**(a) The published sets, 168 of them, 1,223,635 cases, every set
+replayed exactly as `cft_conformance` replays it locally:**
+
+| client -> server | result | seconds | cases/s |
+|---|---|---|---|
+| Windows local (software backend) | 168 sets, 1,223,635 cases, all matching | TODO_A_LOCAL | TODO |
+| Windows -> Windows loopback | same report | TODO_A_LOOP | TODO |
+| Windows -> Linux in WSL | same report | TODO_A_WSL | TODO |
+| Linux local (software backend, in WSL) | same report | 503.8 | 2,429 |
+| Linux -> Linux loopback (in WSL) | same report | 541.3 | 2,261 |
+
+The per-element pass of the elementwise sets is one round trip per
+case, which is the hardest shape for a socket and the one the replay
+deliberately keeps (a device backend that only ever saw n = 1 would
+hide every partitioning bug; here it is the transport that gets no
+batching to hide behind).
+
+**(b) The five workloads, at the eleven configurations
+`bindings/wasm/demos_chains.json` recorded on 2026-09-04 and at the
+program engines of the four tools that have one, local against
+loopback against WSL:** TODO_B_TABLE
+
+**(c) The cross-OS run** is the WSL column of both tables: a Linux
+`libcft` behind `cft-serve` in `cft2204`, a Windows `libcft` in the
+client, TODO_C_SUMMARY.
+
+**(d) The cost.** A one-element `cft_run` round trip: 22-24 us on
+Windows loopback, 18.4 us on Linux loopback, TODO_D_WSL us across the
+WSL2 boundary (WSL2's localhost relay, not the library: the Linux
+server answers its own loopback in 18 us). A 4,096-element fp64 FMA:
+1.35-1.40 ms per call on Windows loopback (2.9-3.0 M elements/s),
+0.38 ms on Linux loopback (10.7 M/s), TODO_D_WSL4096. The composed
+operations' round trips, read from the server's own `STATS` counters
+rather than inferred, fp64, per call of n elements up to the 4,096
+chunk:
+
+| operation | chunk route (`CFT_DIVSQRT_SEQ=0`) | program route (default on a device) |
+|---|---|---|
+| `cft_div` | 21 `RUN` frames | 1 `PROG_RUN` (plus 1 `PROG_LOAD` the first time) |
+| `cft_sqrt` | 32 `RUN` frames | 1 `PROG_RUN` (plus 1 `PROG_LOAD`) |
+| `cft_rint` | 4 `RUN` | 4 `RUN` |
+| `cft_scaleb` | 1 `RUN` | 1 `RUN` |
+| `cft_cmp_sig` | 1 `RUN` | 1 `RUN` |
+| `cft_formatof_add` fp32->fp64, n = 4,096 | 128 `RUN` | 128 `RUN` |
+
+so the program route saves 20 round trips per chunk of a division and
+31 per chunk of a square root, and on this loopback that is 27 ms
+against 16 ms for 4,096 fp64 divisions (the server's own arithmetic is
+most of what remains). `cft_formatof_add`'s 128 frames at n = 4,096 are
+the widening route's 32-element blocks, one `cft_run` each - a shape
+worth knowing about before pointing it at a slow link.
+
+### The controls
+
+`host/tests/device_test.c` holds the remote backend against the
+software one exactly as it holds the XRT one - every supported format,
+opcode and attribute, partition invariance, the awkward reduction
+lengths: **2,248 checks, 0 failed** on Windows loopback (twice, before
+and after the server learned to multiplex) and on Windows -> WSL.
+`host/tests/remote_test.c` speaks the frames badly on purpose: an ABI
+one minor version away, a corrupted crc, a bad magic, a length past the
+cap, a `RUN` before `HELLO`, a wrong protocol version - each REFUSED
+and the connection closed; a truncated frame dropped with the next
+connection served; an unknown opcode and a bad handle answered with a
+status and the connection kept; the buffer and status-word operations
+libcft's client never issues; and a bit-identity sample on both
+div/sqrt routes: **245 checks, 0 failures**, on loopback and on WSL.
+The CRC-32 the frames carry agrees with Python's `zlib.crc32` on the
+standard check string and on a 1,000-byte stream.
+
+TODO_NEGATIVE_CONTROL
+
+### The runner
+
+`verify/run.sh` gains the `remote` stage, in the quick budget. TODO_RUNNER
+
+### What the writing of it found
+
+- **The protocol's own length discipline caught the first bug in the
+  code.** `RUN` and `REDUCE` carry four `u32` and a `u64` before their
+  operands - 24 bytes - and the first client and server both started
+  the operands at 20. The server refused the first real frame ("n =
+  14758742324779417601 elements cannot fit a frame": n's high word had
+  overlapped the first operand) rather than compute on it. The Collatz
+  chain had matched anyway on the same bug, because an fp256 integer's
+  low bytes are zero; a check that passes for a reason like that is
+  why the replay and `device-test` are the gate and a chain is a
+  witness.
+- **One connection at a time was a deadlock waiting for a second
+  handle.** The first server served connections sequentially;
+  `remote-test`'s fresh refusal connections sat behind its own open
+  handle until they timed out, and `device-test`'s two handles (one
+  software, one remote) only worked because the software one has no
+  socket. The server now multiplexes with `select()` and a process may
+  hold as many handles as it likes.
+- **Windows needed no link flag, and that decided the design.**
+  `libcft.a` is linked by the Go example through cgo with no way to add
+  `-lws2_32` outside the example, and by the Fortran and Rust examples
+  and the soak tools. Loading `ws2_32.dll` at first use keeps the
+  archive's link set what it was; even `FD_ISSET` is done by hand on
+  Windows, because the macro there calls into `ws2_32`.
+- **WSL2's localhost forwarding costs more than the arithmetic.** TODO_WSL_FINDING
+
+### What was NOT run, and why
+
+- **No card.** The server was a software backend on both platforms;
+  `--artifact` is wired and untested on silicon, which is card day's
+  business. The step's claim is bit identity through the transport,
+  and a software server is the honest way to make it before a tile
+  exists behind the socket.
+- **No LAN.** Loopback and the WSL2 boundary only; `--bind 0.0.0.0`
+  on a real network is a trust decision the document states and this
+  step does not make.
+- **No wasm module rebuild.** `src/backend_remote.c` is in the
+  library's source list (the wasm build cross-checks that list against
+  `host/src`), compiled under emscripten to a stub that reports
+  `CFT_ERR_NO_DEVICE`; the committed module is untouched and its hash
+  unchanged.
+- **The ABI version is unchanged** (0.7): one additive spelling of an
+  existing argument, no new signature. README.md, COMPATIBILITY.md,
+  COMPLIANCE.md, PLATFORMS.md, ROADMAP.md and the bindings were left
+  to the integrator, as the brief asked.
+
+## 2026-09-06 - the multi-cycle fp256 rung: bit-identical, and the area it does not save
+
+Step 3 of docs/ROADMAP.md's third tier, built to make a tile fit parts
+a third of the U50's size and measured to do something else. The
+mechanism, the parameter and the full table are in
+docs/ARCHITECTURE.md's "The multi-cycle rung"; this entry is what was
+run.
+
+**The bit-identity gate.** `MUL_PASSES` iterates the chunk-column
+multiplier over passes and the pipe around it is held by one enable, so
+the claim is that every result is identical to the single-pass tile's
+at every pass count. The whole cocotb suite has a multi-cycle
+counterpart - `make simmc MC=<n>` in `tb/` - and at **MC=10**, the
+deepest configuration (fp256 taking a result every ten cycles):
+
+    13 targets, 31 tests, 31 passed, 0 failed
+
+covering the four format banks against the golden model, the reduction
+accumulator, the kernel through its CSR and AXI interfaces, the
+sequencer core, the sequencer's banked reads, the quarter-tile trim,
+the fault paths, and two benches written for this work: `mulcycle`,
+which holds `cft_mulpass` against the pipe's own side-by-side array on
+random and edge operands, and `cycles`, which asserts the pacing
+property - the same program and the same stream give the same bits at
+every pass count, so determinism does not depend on the issue cadence.
+Each pass count builds in its own `sim_build` directory, because two
+counts sharing one would let a stale build answer for the other.
+
+**The default is untouched.** The suite at `MUL_PASSES=1` is the
+shipping RTL's own suite, re-run on the changed RTL - **21 targets, 60
+tests, 60 passed, 0 failed** - and unchanged; the parameter defaults
+to 1 and every `MUL_PASSES=1` elaboration collapses the pass machinery
+to a constant.
+
+**The area, out of context on the U50 part** (Vivado 2026.1, 135 MHz
+ask, synthesis only, one build at a time through `hw/mc_sweep.sh`):
+
+| MUL_PASSES | LUT | DSP | implied path delay |
+|---|---|---|---|
+| 1 | 123,214 | 262 | 5.821 ns |
+| 2 | 120,391 | 152 | 5.585 ns |
+| 5 | 116,158 | 70 | 5.585 ns |
+| 10 | 115,310 | 56 | 5.585 ns |
+
+**The finding: DSPs fall 79%, LUTs 6.4%.** The step assumed a
+time-multiplexed multiplier would shrink the tile enough to fit a
+Kintex-7 or an Artix-7; it does not, because the tile's LUTs are in the
+aligner and normaliser and its multiplier is DSPs. That is the sharing
+doctrine's own rule arriving from the other side, and it means the fit
+lever for a small part remains the fused ladders while `MUL_PASSES` is
+what makes a DSP-poor part stop caring about the multiplier. Recorded
+as a measured result rather than presented as the answer it was
+expected to be.
+
+**The formal task that would not close.** A bounded proof of the pass
+accumulation against a reference product at the real chunk width (25
+and 49 bits) ran **four hours without returning** and was stopped
+rather than left running on a shared machine; a bounded model check
+over a multiplier is exactly the shape a SAT solver does worst at. The
+`.sby` now carries narrow tasks - a reduced chunk width where the same
+property closes - beside the real-width ones, and which of those closed
+is not claimed here, because they were not run to completion in this
+session. The bit identity rests on the benches above, which is where it
+rested for `FUSE_NORM`, `FUSE_ALIGN` and `FUSE_MUL` too.
+
+**The negative control: one dropped carry.** In `cft_mulpass`'s
+accumulator, `acc <= s[P+K:K]` becomes `acc <= s[P+K:K] & ~(1 << 3)`,
+so one carry bit is cleared on every pass - a fault that is arithmetic
+rather than structural, and identical on every run:
+
+    mulcycle    4 tests, 0 passed, 4 FAILED  (identical_per_format,
+                identical_across_cadences, identical_on_specials,
+                identical_under_precision_changes)
+    fp256mc     1 test,  0 passed, 1 FAILED
+    fp64mc      1 test,  0 passed, 1 FAILED
+    cyclesmc    1 test,  1 PASSED
+
+**The row worth keeping is the last one.** The cadence bench compares
+the tile with itself at different pass counts, and a deterministic
+arithmetic fault is present identically in both, so it reports
+agreement while every result is wrong. The pacing property is a
+determinism check and not a correctness one; what catches a wrong
+product is the comparison against the golden model and against the
+pipe's own side-by-side array. The same lesson the enclosure workload
+recorded on 2026-09-04, from the other end of the stack.
+
+Restored from git and the same four re-run: **7 tests, 7 passed, 0
+failed**.
+
+**What was not run.** Implementation at any pass count, and every
+`xc7*` cell of the area matrix, because this host's Vivado 2026.1
+carries only the UltraScale+ and Versal families and refused those
+parts by name.

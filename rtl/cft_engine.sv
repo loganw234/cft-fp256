@@ -247,7 +247,7 @@ module cft_engine #(
           .op(op_r), .a(sa), .b(sb), .c(sc),
           .valid(bv), .d(bd), .flags(bf));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
-          .clk(ap_clk), .rst_n(ap_rst_n),
+          .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
           .in_valid(ex_valid && (prec_r == PREC_FP32)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(fa), .b(fb), .c(fc),
@@ -290,7 +290,7 @@ module cft_engine #(
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
-            .clk(ap_clk), .rst_n(ap_rst_n),
+            .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
@@ -329,7 +329,7 @@ module cft_engine #(
             .op(op_r), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
-            .clk(ap_clk), .rst_n(ap_rst_n),
+            .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
@@ -363,7 +363,7 @@ module cft_engine #(
           .op(op_r), .a(abuf), .b(bbuf), .c(cbuf),
           .valid(bv), .d(bd), .flags(bf));
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
-          .clk(ap_clk), .rst_n(ap_rst_n),
+          .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
           .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(w_fa), .b(w_fb), .c(w_fc),

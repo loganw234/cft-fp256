@@ -1,12 +1,13 @@
 // Copyright 2026 Logan W.
 // SPDX-License-Identifier: Apache-2.0
-// cocotb top: fp64 instantiation of the FMA pipe. A fixed-parameter
-// wrapper per format keeps parameter overrides out of the simulator
-// command line, which is the part that differs between simulators.
+// cocotb top: fp64 instantiation of the FMA pipe. MUL_PASSES paces the
+// pipe the way cft_lanes would at that budget - see tb_fpfma_fp32.sv.
 
 `timescale 1ns/1ps
 
-module tb_fpfma_fp64 (
+module tb_fpfma_fp64 #(
+    parameter int MUL_PASSES = 1
+) (
     input  logic        clk,
     input  logic        rst_n,
     input  logic        in_valid,
@@ -15,20 +16,33 @@ module tb_fpfma_fp64 (
     input  logic [63:0] a,
     input  logic [63:0] b,
     input  logic [63:0] c,
+    output logic        in_ready,
     output logic        out_valid,
     output logic [63:0] d,
     output logic [4:0]  flags
 );
+  `include "cft_mulgeom.svh"
+  localparam int NP  = cft_mul_passes(52 + 1, MUL_PASSES);
+  localparam int PHW = (NP > 1) ? $clog2(NP) : 1;
+  logic [PHW-1:0] ph;
+  logic           en;
+  always_ff @(posedge clk) begin
+    if (!rst_n)                       ph <= '0;
+    else if (ph >= PHW'(NP - 1))      ph <= '0;
+    else                              ph <= ph + 1'b1;
+  end
+  assign en       = (ph >= PHW'(NP - 1));
+  assign in_ready = en;
+
   logic bv; logic [63:0] bd; logic [4:0] bf;
   cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
       .op(op), .a(a), .b(b), .c(c), .valid(bv), .d(bd), .flags(bf));
-  cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(15)) u_dut (
-      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd), .byp(bv), .byp_d(bd), .byp_f(bf),
+  cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(15),
+                   .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP)) u_dut (
+      .clk(clk), .rst_n(rst_n), .en(en), .in_valid(in_valid), .rnd(rnd),
+      .byp(bv), .byp_d(bd), .byp_f(bf),
       .a(a), .b(b), .c(c),
       .out_valid(out_valid), .d(d), .flags(flags),
-      // EXT_MUL defaults off, so these are inert - but a pin
-      // that is not named is fatal to Verilator, and that is
-      // what kept `make SIM=verilator` from ever running.
       .mul_a(), .mul_b(), .mul_p('0),
           .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));

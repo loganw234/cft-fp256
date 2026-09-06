@@ -82,6 +82,13 @@ module cft_reduce_acc #(
 ) (
     input  logic         clk,
     input  logic         rst_n,
+    // Advance enable, tied high by every caller but the multi-cycle
+    // tile's engine, which hands it the lane array's pipeline enable:
+    // the external adder then accepts a beat and returns a sum only on
+    // enabled edges, so this machine - which counts ADD_LATENCY in
+    // adder cycles - has to count the same edges. Reset and `clear`
+    // are not gated; they are not part of the schedule.
+    input  logic         clk_en,
     input  logic         clear,        // begin a new reduction
 
     input  logic         in_valid,
@@ -240,9 +247,9 @@ module cft_reduce_acc #(
   // term made explicit because that block's `else` no longer covers
   // them.
   logic res_place, in_place;
-  assign res_place = rst_n && !clear && res_v && (st != S_WAIT) &&
+  assign res_place = rst_n && !clear && clk_en && res_v && (st != S_WAIT) &&
                      !occ[res_lvl];
-  assign in_place  = rst_n && !clear && (st == S_ACC) &&
+  assign in_place  = rst_n && !clear && clk_en && (st == S_ACC) &&
                      in_valid && in_ready && !occ[0];
 
   always_ff @(posedge clk) begin
@@ -308,7 +315,7 @@ module cft_reduce_acc #(
         dly_v[i]   <= 1'b0;
         dly_lvl[i] <= '0;
       end
-    end else begin
+    end else if (clk_en) begin
       // ---- adder delay line ------------------------------------------
       dly_v[0]   <= add_valid;
       dly_lvl[0] <= issue_lvl;

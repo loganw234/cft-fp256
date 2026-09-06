@@ -11,13 +11,133 @@
 
 SIM ?= icarus
 
-.PHONY: sim fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
+# The multi-cycle multiplier's pass budget for the *mc targets and
+# `simmc` (rtl/cft_lanes.sv MUL_PASSES). 10 is the one-column-per-lane
+# corner - fp64/fp128/fp256 at 3/5/10 passes; 2 halves every wide rung.
+MC ?= 10
+
+.PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
-        seq_core seqprobe krnlfused krnlplain cycles seqbanks clean
+        seq_core seqprobe krnlfused krnlplain cycles seqbanks \
+        mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
+        krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
 sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
      seedop reduceacc reduce krnl quarter faults seq_core krnlseq \
-     seqbanks
+     seqbanks mulpass mulcycle mulcycle2
+
+# The suite at the multi-cycle pass budget MC: every bench that holds a
+# pipe, a lane array or the kernel, run against the same golden model
+# with the multiplier iterated and the array paced - plus the two
+# benches that exist only for this configuration. `sim` is the
+# shipping default; this is the third-tier tile's own census.
+simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
+       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc
+
+# The iterated chunk-column multiplier against exact integer
+# arithmetic, at every column count the three wide rungs can build -
+# the block itself, before any pipe wraps it.
+mulpass:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulpass \
+		MODULE=test_mulpass SIM_BUILD=sim_build/mulpass \
+		COCOTB_RESULTS_FILE=sim_build/mulpass/results.xml
+
+# Equivalence, tb_mulshare's shape: the lane array at MUL_PASSES=1
+# beside the same array at MUL_PASSES=MC, fed identical beats at a
+# random cadence, every result and flag word compared. The multi-cycle
+# tile ships only if this is bit-identical. mulcycle2 is the other
+# corner: every wide rung at two passes, the fp256 lane keeping five
+# columns and a three-level in-pass tree.
+mulcycle:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulcycle \
+		MODULE=test_mulcycle SIM_BUILD=sim_build/mulcycle$(MC) \
+		KRNL_PARAMS="-Ptb_mulcycle.MC=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/mulcycle$(MC)/results.xml
+
+mulcycle2:
+	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulcycle \
+		MODULE=test_mulcycle SIM_BUILD=sim_build/mulcycle2 \
+		KRNL_PARAMS="-Ptb_mulcycle.MC=2" \
+		COCOTB_RESULTS_FILE=sim_build/mulcycle2/results.xml
+
+# The pipe benches, paced by their wrappers at the budget: the same
+# vectors, the same model, the pipe held between passes.
+fp32mc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
+		MODULE=test_fpfma_fp32 SIM_BUILD=sim_build/fp32mc$(MC) \
+		KRNL_PARAMS="-Ptb_fpfma_fp32.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/fp32mc$(MC)/results.xml
+
+fp64mc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp64 \
+		MODULE=test_fpfma_fp64 SIM_BUILD=sim_build/fp64mc$(MC) \
+		KRNL_PARAMS="-Ptb_fpfma_fp64.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/fp64mc$(MC)/results.xml
+
+fp128mc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp128 \
+		MODULE=test_fpfma_fp128 SIM_BUILD=sim_build/fp128mc$(MC) \
+		KRNL_PARAMS="-Ptb_fpfma_fp128.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/fp128mc$(MC)/results.xml
+
+fp256mc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 \
+		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/fp256mc$(MC) \
+		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/fp256mc$(MC)/results.xml
+
+# The kernel-level benches at the budget: the engine's issue and
+# collection, the reduction accumulator's schedule, the sequencer's
+# held request and the fault paths, all through the paced array.
+reducemc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reducemc$(MC) \
+		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/reducemc$(MC)/results.xml
+
+krnlmc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlmc$(MC) \
+		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/krnlmc$(MC)/results.xml
+
+krnlseqmc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseqmc$(MC) \
+		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/krnlseqmc$(MC)/results.xml
+
+seqbanksmc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanksmc$(MC) \
+		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/seqbanksmc$(MC)/results.xml
+
+quartermc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
+		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quartermc$(MC) \
+		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/quartermc$(MC)/results.xml
+
+faultsmc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_faults SIM_BUILD=sim_build/faultsmc$(MC) \
+		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/faultsmc$(MC)/results.xml
+
+seq_coremc:
+	CFT_MUL_PASSES=$(MC) timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coremc$(MC) \
+		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/seq_coremc$(MC)/results.xml
+
+# Cycles per beat per rung at the budget - the throughput the
+# multi-cycle tile trades, measured on the RTL rather than derived.
+cyclesmc:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cyclesmc$(MC) \
+		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
+		COCOTB_RESULTS_FILE=sim_build/cyclesmc$(MC)/results.xml
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding

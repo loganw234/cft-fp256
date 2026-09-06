@@ -19,6 +19,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_csr.sv \
     $(RTLDIR)/cft_fifo.sv \
     $(RTLDIR)/cft_mulfrac.sv \
+    $(RTLDIR)/cft_mulpass.sv \
     $(RTLDIR)/cft_reduce_acc.sv \
     $(RTLDIR)/cft_normseg.sv \
     $(RTLDIR)/cft_seedop.sv \
@@ -33,6 +34,8 @@ VERILOG_SOURCES = \
     $(TBDIR)/wrappers/tb_fpfma_fp256.sv \
     $(TBDIR)/wrappers/tb_krnl_quarter.sv \
     $(TBDIR)/wrappers/tb_mulshare.sv \
+    $(TBDIR)/wrappers/tb_mulpass.sv \
+    $(TBDIR)/wrappers/tb_mulcycle.sv \
     $(TBDIR)/wrappers/cft_simpleops_ref.sv \
     $(TBDIR)/wrappers/tb_simpleops.sv \
     $(TBDIR)/wrappers/tb_normseg.sv \

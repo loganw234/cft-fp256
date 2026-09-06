@@ -73,7 +73,7 @@ module tb_mulshare #(
       logic [31:0] di, ds;
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                        .EXT_MUL(1'b0)) u_int (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*32 +: 32]), .b(b_beat[gi*32 +: 32]),
           .c(c_beat[gi*32 +: 32]),
@@ -83,7 +83,7 @@ module tb_mulshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                        .EXT_MUL(1'b1)) u_shr (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*32 +: 32]), .b(b_beat[gi*32 +: 32]),
           .c(c_beat[gi*32 +: 32]),
@@ -103,7 +103,7 @@ module tb_mulshare #(
       logic [63:0] di, ds;
       cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                        .EXT_MUL(1'b0)) u_int (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*64 +: 64]), .b(b_beat[gi*64 +: 64]),
           .c(c_beat[gi*64 +: 64]),
@@ -113,7 +113,7 @@ module tb_mulshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                        .EXT_MUL(1'b1)) u_shr (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*64 +: 64]), .b(b_beat[gi*64 +: 64]),
           .c(c_beat[gi*64 +: 64]),
@@ -133,7 +133,7 @@ module tb_mulshare #(
       logic [127:0] di, ds;
       cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                        .EXT_MUL(1'b0)) u_int (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*128 +: 128]), .b(b_beat[gi*128 +: 128]),
           .c(c_beat[gi*128 +: 128]),
@@ -143,7 +143,7 @@ module tb_mulshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
       cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                        .EXT_MUL(1'b1)) u_shr (
-          .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+          .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
           .byp(1'b0), .byp_d('0), .byp_f('0),
           .a(a_beat[gi*128 +: 128]), .b(b_beat[gi*128 +: 128]),
           .c(c_beat[gi*128 +: 128]),
@@ -160,7 +160,7 @@ module tb_mulshare #(
   // ---- fp256: 1 lane -------------------------------------------------
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                    .EXT_MUL(1'b0)) u_int256 (
-      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+      .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_i), .flags(f256_i),
@@ -169,7 +169,7 @@ module tb_mulshare #(
           .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
   cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                    .EXT_MUL(1'b1)) u_shr256 (
-      .clk(clk), .rst_n(rst_n), .in_valid(in_valid), .rnd(rnd),
+      .clk(clk), .rst_n(rst_n), .en(1'b1), .in_valid(in_valid), .rnd(rnd),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(a_beat), .b(b_beat), .c(c_beat),
       .out_valid(), .d(d256_s), .flags(f256_s),
