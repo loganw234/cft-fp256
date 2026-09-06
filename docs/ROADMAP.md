@@ -2467,11 +2467,14 @@ size. The steps, in order, each with the gate that says it is done:
    arriving from the other side. **The two levers had to be measured
    together to matter**, and on 7-series fabric they are: with the
    fused ladders on as well, a full fp256-capable tile synthesises at
-   99,287 LUT and 56 DSP, which is 49% of a Kintex-7 325T and 74% of an
-   Artix-7 200T where a single-pass tile's 262 DSPs alone would have
-   been 31% and 35% of those parts' DSPs and 119% of a Zynq-7020's. So
-   step 4's board is reachable, the pass count is what stops a DSP-poor
-   part refusing outright, and the ladders remain the LUT lever. The
+   99,287 LUT and 56 DSP on Artix-7 class fabric, which is 49% of a
+   Kintex-7 325T and 74% of an Artix-7 200T where a single-pass tile's
+   262 DSPs alone would have been 31% and 35% of those parts' DSP
+   columns and 119% of the Zynq-7020 those cells were run on. The
+   trade is in the clock: 17.1 ns of implied path there, about 58 MHz,
+   against 5.6 ns and 135 MHz on the U50. So step 4's board is
+   reachable, the pass count is what stops a DSP-poor part refusing
+   outright, and the ladders remain the LUT lever. The
    formal proof of the pass accumulation does **not** close - a bounded
    model check over a multiplier is the shape a SAT solver does worst
    at, and the real-width task ran four hours without returning - so it
