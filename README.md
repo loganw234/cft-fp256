@@ -150,6 +150,9 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      matched to the C tools),
                      ATLAS (the atlas-engine integration: the emitter
                      seam, the det library on the ISA, the four asks),
+                     PLATFORMS (the board and platform survey: what fits
+                     the tile, what the licence covers, what to verify
+                     before buying),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
