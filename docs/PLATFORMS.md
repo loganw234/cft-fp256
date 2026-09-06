@@ -1561,6 +1561,19 @@ row names no individual device.
 
 ## 6. The Windows story
 
+*Answered on 2026-09-06, and not by a driver.* `backend_remote`
+(docs/REMOTE.md) makes the OS question moot for every client: the
+server owns the card on a Linux host and a Windows, macOS or browser
+client computes against it over a socket, getting the same bits by
+contract. It was measured the way this section would want - a Windows
+client against a Linux server, the full 168 sets and 1,223,635 cases
+matching, every workload chain identical - and it costs about 25
+microseconds a round trip across a WSL2 boundary, which is nothing for
+a program-shaped workload and everything for a per-element one. The
+rows below still say what each board would need for a *native* Windows
+path, which matters for a bare XDMA design and for anyone who wants
+the card in the same machine as the client.
+
 Short version: **shell means Linux, bare means Windows is possible.**
 
 **XRT does not support Windows for PCIe accelerator cards.** AMD's own
