@@ -4096,3 +4096,73 @@ recorded as an expectation and not a number.
 - **The larger Mersenne exponents.** 3217..11213 and 19937..44497 are
   offered on the page behind a time warning and were not run; neither
   has a recorded chain, and the page says so when either is selected.
+
+## 2026-09-06 - the multi-cycle fp256 rung: bit-identical, and the area it does not save
+
+Step 3 of docs/ROADMAP.md's third tier, built to make a tile fit parts
+a third of the U50's size and measured to do something else. The
+mechanism, the parameter and the full table are in
+docs/ARCHITECTURE.md's "The multi-cycle rung"; this entry is what was
+run.
+
+**The bit-identity gate.** `MUL_PASSES` iterates the chunk-column
+multiplier over passes and the pipe around it is held by one enable, so
+the claim is that every result is identical to the single-pass tile's
+at every pass count. The whole cocotb suite has a multi-cycle
+counterpart - `make simmc MC=<n>` in `tb/` - and at **MC=10**, the
+deepest configuration (fp256 taking a result every ten cycles):
+
+    13 targets, 31 tests, 31 passed, 0 failed
+
+covering the four format banks against the golden model, the reduction
+accumulator, the kernel through its CSR and AXI interfaces, the
+sequencer core, the sequencer's banked reads, the quarter-tile trim,
+the fault paths, and two benches written for this work: `mulcycle`,
+which holds `cft_mulpass` against the pipe's own side-by-side array on
+random and edge operands, and `cycles`, which asserts the pacing
+property - the same program and the same stream give the same bits at
+every pass count, so determinism does not depend on the issue cadence.
+Each pass count builds in its own `sim_build` directory, because two
+counts sharing one would let a stale build answer for the other.
+
+**The default is untouched.** The suite at `MUL_PASSES=1` is the
+shipping RTL's own suite, re-run on the changed RTL - **21 targets, 60
+tests, 60 passed, 0 failed** - and unchanged; the parameter defaults
+to 1 and every `MUL_PASSES=1` elaboration collapses the pass machinery
+to a constant.
+
+**The area, out of context on the U50 part** (Vivado 2026.1, 135 MHz
+ask, synthesis only, one build at a time through `hw/mc_sweep.sh`):
+
+| MUL_PASSES | LUT | DSP | implied path delay |
+|---|---|---|---|
+| 1 | 123,214 | 262 | 5.821 ns |
+| 2 | 120,391 | 152 | 5.585 ns |
+| 5 | 116,158 | 70 | 5.585 ns |
+| 10 | 115,310 | 56 | 5.585 ns |
+
+**The finding: DSPs fall 79%, LUTs 6.4%.** The step assumed a
+time-multiplexed multiplier would shrink the tile enough to fit a
+Kintex-7 or an Artix-7; it does not, because the tile's LUTs are in the
+aligner and normaliser and its multiplier is DSPs. That is the sharing
+doctrine's own rule arriving from the other side, and it means the fit
+lever for a small part remains the fused ladders while `MUL_PASSES` is
+what makes a DSP-poor part stop caring about the multiplier. Recorded
+as a measured result rather than presented as the answer it was
+expected to be.
+
+**The formal task that would not close.** A bounded proof of the pass
+accumulation against a reference product at the real chunk width (25
+and 49 bits) ran **four hours without returning** and was stopped
+rather than left running on a shared machine; a bounded model check
+over a multiplier is exactly the shape a SAT solver does worst at. The
+`.sby` now carries narrow tasks - a reduced chunk width where the same
+property closes - beside the real-width ones, and which of those closed
+is not claimed here, because they were not run to completion in this
+session. The bit identity rests on the benches above, which is where it
+rested for `FUSE_NORM`, `FUSE_ALIGN` and `FUSE_MUL` too.
+
+**What was not run.** Implementation at any pass count; every `xc7*`
+cell of the area matrix, because this host's Vivado 2026.1 carries only
+the UltraScale+ and Versal families and refused those parts by name;
+and the negative control, which is the next thing this work owes.

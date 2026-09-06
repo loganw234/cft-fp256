@@ -572,6 +572,103 @@ clock-independent by construction. The v0 behavioural core (one
 combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
 reference.
 
+## The multi-cycle rung (built 2026-09-06: rtl/cft_mulpass.sv)
+
+`MUL_PASSES` on `cft_krnl` iterates the chunk-column multiplier instead
+of laying every column side by side, so a tile costs a fraction of the
+DSPs at a fraction of the wide rungs' throughput. It is step 3 of
+docs/ROADMAP.md's third tier, and its measured result is not the one
+that step assumed - see the reading at the end.
+
+**The mechanism.** `cft_fpfma_pipe` decomposes a P x P significand
+product into columns of P x 24, one per 24-bit chunk of the multiplier:
+one column at fp32, three at fp64, five at fp128, ten at fp256. The
+multi-cycle variant builds `ceil(chunks / MUL_PASSES)` of them and walks
+the chunks over `NP = ceil(chunks / COLS)` passes, one pass a clock,
+folding each pass's tree sum into an accumulator whose low bits shift
+out as they become final. **The exact product is integer arithmetic and
+no summation order of the same partial products changes an integer**,
+so the product handed downstream is bit-identical by construction and
+the aligner, normaliser and round stage never learn which array built
+it. The geometry lives once, in `rtl/cft_mulgeom.svh`, included by the
+four modules that must agree about it; a module that disagrees with the
+pipe about the pass count is refused at elaboration rather than
+mis-simulated.
+
+**The pacing** is one pipeline enable. In the multi-cycle
+configuration `cft_lanes` holds every stage register in the array for
+`NP - 1` of every `NP` cycles at the live rung's pass count, so in
+enabled-edge terms the pipe is exactly the single-pass pipe and the
+delay lines that carry each operation's rounding attribute stay
+aligned with it. Only `cft_mulpass` runs on the wall clock in between.
+Both issuers - the streaming engine and the sequencer - see the same
+enable, so determinism does not depend on the issue cadence: the same
+program and the same stream give the same bits at every value of the
+parameter, which is what the bench below asserts.
+
+**Throughput per mode**, results per lane per cycle, derived from the
+chunk counts above:
+
+| MUL_PASSES | fp32 | fp64 | fp128 | fp256 |
+|---|---|---|---|---|
+| 1 (shipping) | 1 | 1 | 1 | 1 |
+| 2 | 1 | 1/2 | 1/2 | 1/2 |
+| 5 | 1 | 1/3 | 1/5 | 1/5 |
+| 10 | 1 | 1/3 | 1/5 | 1/10 |
+
+**fp32 never slows down**, at any value: one chunk is one column is one
+pass. That is deliberate - the workload this tier serves is fp32
+(docs/ATLAS.md) - and it is why the parameter is a cap on columns
+rather than a fixed pass count.
+
+**Measured**, out-of-context synthesis of `cft_krnl` on
+`xcu50-fsvh2104-2-e` at a 135 MHz ask, Vivado 2026.1, one build at a
+time (`hw/mc_sweep.sh`, summaries in its `summary.txt`):
+
+| MUL_PASSES | LUT | FF | DSP | BRAM | implied path delay | levels |
+|---|---|---|---|---|---|---|
+| 1 | 123,214 | 57,638 | 262 | 36 | 5.821 ns | 25 |
+| 2 | 120,391 | 58,419 | 152 | 36 | 5.585 ns | 23 |
+| 5 | 116,158 | 53,598 | 70 | 36 | 5.585 ns | 23 |
+| 10 | 115,310 | 53,146 | 56 | 36 | 5.585 ns | 23 |
+
+These are synthesis estimates, comparable with each other and not with
+the routed 123,420 of the timing section above - though the
+`MUL_PASSES=1` row landing within 0.2% of it is a good sign that the
+default is untouched. The critical path is the same one it has always
+been, `s10_mag` into the fp256 normalise stage, and it gets slightly
+shorter, not longer: the multiplier was never on it.
+
+**The reading, and it is not what step 3 assumed.** Iterating the
+multiplier ten ways cuts DSPs by **79%** (262 to 56) and LUTs by
+**6.4%** (123,214 to 115,310). The tile's LUTs are in the aligner and
+the normaliser, which are linear in format width and were already
+shared; the multiplier is DSPs, which is exactly what the sharing
+doctrine in docs/ROADMAP.md says - "linear in format width shares at
+1x, quadratic does not" - and what `cft_mulfrac` measured from the
+other side in 2026-08-30, saving no DSPs and costing LUTs.
+
+So this parameter buys **DSP headroom, not LUT headroom**, and LUTs are
+the constraint. On the parts docs/PLATFORMS.md priced, a tile's 262
+DSPs would have been 31% of a Kintex-7 325T's 840 and 35% of an
+Artix-7 200T's 740 - real but not blocking - and 56 DSPs make that axis
+disappear entirely. The LUT axis does not move enough to change how
+many tiles fit anywhere: one tile is 60.5% of a K325T's 203,800 LUTs at
+`MUL_PASSES=1` and 56.6% at 10, and 91.5% against 85.7% of an
+Artix-200T's 134,600, which still wants the fused ladders rather than
+this. **The fit lever for a small part is `FUSE_NORM` and
+`FUSE_ALIGN`** (which took the full tile from 139,404 to 123,599 in the
+geometry table above); `MUL_PASSES` is what makes a DSP-poor part or a
+many-tile die stop caring about the multiplier. The two compose, and
+the sweep script takes both.
+
+**Not measured here.** The 7-series and Artix numbers this section
+quotes as percentages are arithmetic against AMD's device tables, not
+synthesis: the Vivado 2026.1 install on this host carries only the
+UltraScale+ and Versal families, so every `xc7*` cell of the matrix
+failed with "Specified part could not be found" and is unrun rather
+than unfavourable. Implementation was not run at any pass count.
+
 ## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 
 One physical partial-product array computing, per beat and by mode,
