@@ -33,12 +33,19 @@ all it needs, and Windows has had one of those since 1993.
   network by default; exposing it on a LAN is a deliberate act and a
   trust decision about that LAN. A first step should say what it is,
   and this one is a transport, not a security boundary.
-- **One connection at a time.** The server accepts a connection, opens
-  a library device for it, serves requests until the client closes,
-  closes the device, and accepts the next. A second client waits in the
-  listen backlog. Every request on a connection is answered before the
-  next is read, so the wire is a strict request/response sequence and
-  a request id is a check rather than a scheduler.
+- **One request at a time, many connections.** The server multiplexes
+  its connections with `select()` rather than threads: it opens a
+  library device for each connection when it is accepted, and then
+  serves requests from every open connection one at a time, in arrival
+  order, each to completion. Two clients, or one client holding two
+  handles, interleave at request granularity and neither waits for the
+  other to close - which is what makes `device-test`'s two handles, or
+  a process with a handle per thread, safe. Up to 32 connections at
+  once; the listen backlog holds the rest. On any one connection the
+  wire is a strict request/response sequence, so a request id is a
+  check rather than a scheduler. A connection that starts a frame and
+  then falls silent for a minute is dropped, so it cannot hold the
+  others up; a slow link that keeps delivering bytes is never cut.
 - **The socket API is the operating system's, not a dependency.**
   BSD sockets on POSIX, Winsock on Windows, both C99 plus the system
   headers; there is nothing to install. On Windows the library loads

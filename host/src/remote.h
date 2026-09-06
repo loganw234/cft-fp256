@@ -142,6 +142,14 @@ cftr_sock   cftr_sock_accept(cftr_sock listener);
 /* Receive timeout in milliseconds; 0 means none. */
 int         cftr_sock_timeout(cftr_sock s, long ms);
 
+/* Wait until at least one of `socks` is readable (a listener with a
+ * connection to accept counts), or until timeout_ms passes; -1 waits
+ * forever. Sets ready[i] to 1 for each readable socket and returns how
+ * many, 0 on a timeout, -1 on failure. How the server multiplexes its
+ * connections without a thread. */
+int         cftr_sock_select(const cftr_sock *socks, int n, int *ready,
+                             long timeout_ms);
+
 /* All-or-nothing. 0 on success, -1 on any failure (a short transfer
  * followed by EOF counts). cftr_sock_recv_all reports EOF-before-any-
  * byte as 1, so a server can tell a clean disconnect from a truncated

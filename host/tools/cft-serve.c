@@ -4,7 +4,8 @@
  * cft-serve - the tile behind a socket (docs/REMOTE.md).
  *
  *     cft-serve [--port N] [--bind ADDR] [--artifact PATH]
- *               [--max-conns N] [--pid-file PATH] [--verbose]
+ *               [--max-conns N] [--pid-file PATH] [--port-file PATH]
+ *               [--verbose]
  *
  * Holds one libcft device per connection - the software backend by
  * default, or the artifact named on the command line, so that the
@@ -16,12 +17,19 @@
  * here, because the client computes it on its own host with its own
  * copy of the library; only what touches a device crosses.
  *
- * Scope: no authentication, no encryption, one connection at a time,
- * 127.0.0.1 unless --bind says otherwise. A transport, not a security
- * boundary; docs/REMOTE.md says so at more length. C99 plus the
- * operating system's socket API, through the shim in libcft.a, so this
- * file has no platform branch of its own except the one that asks the
- * process id.
+ * Connections are multiplexed with select(), not threads: requests
+ * from every open connection are served one at a time, in arrival
+ * order, each to completion, so two clients - or one client holding
+ * two handles - interleave at request granularity and neither waits
+ * for the other to close. Up to MAX_CONNS at once; the listen backlog
+ * holds the rest. A connection that starts a frame and then stalls
+ * for a minute is dropped, so it cannot hold the others up.
+ *
+ * Scope: no authentication, no encryption, 127.0.0.1 unless --bind
+ * says otherwise. A transport, not a security boundary; docs/REMOTE.md
+ * says so at more length. C99 plus the operating system's socket API,
+ * through the shim in libcft.a, so this file has no platform branch of
+ * its own except the one that asks the process id.
  *
  * Stopping it: by its PID, which it prints on startup and writes to
  * --pid-file. Never by image name on a shared host.
@@ -44,9 +52,19 @@
 #include "cft.h"
 #include "remote.h"
 
+#define MAX_CONNS 32
+
+/* How long a connection may stall in the middle of a frame before it
+ * is dropped. Per recv, so a slow link that keeps delivering bytes is
+ * never cut; only silence is. */
+#define STALL_MS  60000L
+
 /* ---- per-connection state ------------------------------------------ */
 
 typedef struct {
+    int           open;
+    cftr_sock     s;
+    unsigned long id;
     cft_device   *dev;
     cft_status    open_status;      /* why dev is NULL, if it is */
     cft_program **progs;
@@ -59,7 +77,8 @@ typedef struct {
     int           hello_done;
 } conn;
 
-static int g_verbose;
+static conn g_conns[MAX_CONNS];
+static int  g_verbose;
 
 static void logline(const char *fmt, ...)
 {
@@ -648,9 +667,30 @@ static int h_stats(conn *C, answer *A)
     return 0;
 }
 
-/* ---- one connection --------------------------------------------------- */
+/* ---- connections ------------------------------------------------------ */
 
-static void conn_free(conn *C)
+static void conn_open(conn *C, cftr_sock s, unsigned long id,
+                      const char *artifact)
+{
+    cft_caps caps;
+    memset(C, 0, sizeof *C);
+    C->open = 1;
+    C->s = s;
+    C->id = id;
+    cftr_sock_timeout(s, STALL_MS);
+    C->open_status = cft_open(artifact, 0, &C->dev);
+    memset(&caps, 0, sizeof caps);
+    caps.struct_size = sizeof caps;
+    if (C->dev) {
+        cft_get_caps(C->dev, &caps);
+        logline("connection %lu: opened, device backend %s", id, caps.backend);
+    } else {
+        logline("connection %lu: opened, but its device did not: %s (%s)",
+                id, cft_strerror(C->open_status), cft_last_error());
+    }
+}
+
+static void conn_close(conn *C)
 {
     uint32_t i;
     for (i = 0; i < C->nprogs; i++)
@@ -661,12 +701,12 @@ static void conn_free(conn *C)
     free(C->bufs);
     free(C->buf_bytes);
     cft_close(C->dev);
+    cftr_sock_close(C->s);
     memset(C, 0, sizeof *C);
 }
 
-static int send_reply(cftr_sock s, conn *C, const cftr_hdr *req, int kind,
-                      int status, const void *payload, size_t len,
-                      uint32_t my_abi)
+static int send_reply(conn *C, const cftr_hdr *req, int kind, int status,
+                      const void *payload, size_t len, uint32_t my_abi)
 {
     cftr_hdr h;
     memset(&h, 0, sizeof h);
@@ -677,154 +717,132 @@ static int send_reply(cftr_sock s, conn *C, const cftr_hdr *req, int kind,
     h.op     = req->op;
     h.status = (uint16_t)status;
     C->bytes_out += CFTR_HDR_BYTES + len;
-    return cftr_send_frame(s, &h, payload, len);
+    return cftr_send_frame(C->s, &h, payload, len);
 }
 
-static void serve_connection(cftr_sock s, const char *artifact,
-                             unsigned long connid)
+/* Read and answer ONE request on a connection select() reported
+ * readable. Returns 0 to keep the connection, 1 to close it. */
+static int serve_one(conn *C, uint32_t my_abi)
 {
-    const uint32_t my_abi = cft_abi_version();
-    conn C;
-    cft_caps caps;
+    cftr_hdr h;
+    uint8_t *p = NULL;
+    char why[512];
+    answer A;
+    int rc;
 
-    memset(&C, 0, sizeof C);
-    C.open_status = cft_open(artifact, 0, &C.dev);
-    memset(&caps, 0, sizeof caps);
-    caps.struct_size = sizeof caps;
-    if (C.dev)
-        cft_get_caps(C.dev, &caps);
-    if (C.dev)
-        logline("connection %lu: opened, device backend %s", connid,
-                caps.backend);
-    else
-        logline("connection %lu: opened, but its device did not: %s (%s)",
-                connid, cft_strerror(C.open_status), cft_last_error());
+    memset(&h, 0, sizeof h);
+    rc = cftr_recv_frame(C->s, &h, &p, my_abi, why, sizeof why);
+    if (rc == 1) {
+        logline("connection %lu: closed by the client after %llu requests",
+                C->id, (unsigned long long)C->requests);
+        return 1;
+    }
+    if (rc) {
+        /* A refusal, then the connection ends: the stream is not to be
+         * trusted past a frame that failed its checks. A stall is the
+         * same outcome with a different reason in the log. */
+        logline("connection %lu: REFUSED a frame: %s", C->id, why);
+        send_reply(C, &h, CFTR_KIND_REFUSAL, rc, why, strlen(why) + 1, my_abi);
+        return 1;
+    }
+    C->requests++;
+    C->bytes_in += CFTR_HDR_BYTES + h.length;
+    if (h.op < 256)
+        C->op_count[h.op]++;
 
-    for (;;) {
-        cftr_hdr h;
-        uint8_t *p = NULL;
-        char why[512];
-        answer A;
-        int rc;
-
-        memset(&h, 0, sizeof h);
-        rc = cftr_recv_frame(s, &h, &p, my_abi, why, sizeof why);
-        if (rc == 1) {
-            logline("connection %lu: closed by the client after %llu "
-                    "requests", connid, (unsigned long long)C.requests);
-            break;
-        }
-        if (rc) {
-            /* A refusal, then the connection ends: the stream is not
-             * to be trusted past a frame that failed its checks. */
-            logline("connection %lu: REFUSED a frame: %s", connid, why);
-            send_reply(s, &C, &h, CFTR_KIND_REFUSAL, rc, why,
-                       strlen(why) + 1, my_abi);
-            break;
-        }
-        C.requests++;
-        C.bytes_in += CFTR_HDR_BYTES + h.length;
-        if (h.op < 256)
-            C.op_count[h.op]++;
-
-        memset(&A, 0, sizeof A);
-        A.status = CFT_ERR_INTERNAL;
-        if (h.kind != CFTR_KIND_REQUEST) {
-            snprintf(A.why, sizeof A.why, "a frame of kind %u where a "
-                     "request was due", (unsigned)h.kind);
-        } else if (!C.hello_done && h.op != CFTR_OP_HELLO) {
-            snprintf(A.why, sizeof A.why, "op 0x%04x before HELLO",
-                     (unsigned)h.op);
-        } else {
-            switch (h.op) {
-            case CFTR_OP_HELLO:
-            case CFTR_OP_CAPS:
-                if (h.length) {
-                    snprintf(A.why, sizeof A.why, "HELLO/CAPS carry no "
-                             "payload");
-                    break;
-                }
-                if (!C.dev) {
-                    fail(&A, C.open_status, "opening this connection's "
-                                            "device");
-                    break;
-                }
-                A.resp = (uint8_t *)malloc(CFTR_CAPS_BYTES);
-                if (!A.resp) {
-                    fail(&A, CFT_ERR_OUT_OF_MEMORY, "answering");
-                    break;
-                }
-                caps_block(&C, A.resp);
-                A.resp_len = CFTR_CAPS_BYTES;
-                A.status = CFT_OK;
-                C.hello_done = 1;
-                break;
-            case CFTR_OP_STATS:      h_stats(&C, &A); break;
-            case CFTR_OP_RUN:        h_run(&C, p, h.length, &A, 0); break;
-            case CFTR_OP_REDUCE:     h_run(&C, p, h.length, &A, 1); break;
-            case CFTR_OP_PROG_LOAD:  h_prog_load(&C, p, h.length, &A); break;
-            case CFTR_OP_PROG_RUN:   h_prog_run(&C, p, h.length, &A); break;
-            case CFTR_OP_PROG_FREE:  h_prog_free(&C, p, h.length, &A); break;
-            case CFTR_OP_BUF_ALLOC:  h_buf_alloc(&C, p, h.length, &A); break;
-            case CFTR_OP_BUF_FREE:   h_buf_free(&C, p, h.length, &A); break;
-            case CFTR_OP_BUF_WRITE:  h_buf_write(&C, p, h.length, &A); break;
-            case CFTR_OP_BUF_READ:   h_buf_read(&C, p, h.length, &A); break;
-            case CFTR_OP_FLAGS_LOWER:
-            case CFTR_OP_FLAGS_RAISE:
-            case CFTR_OP_FLAGS_TEST:
-            case CFTR_OP_FLAGS_SAVE:
-            case CFTR_OP_FLAGS_RESTORE:
-            case CFTR_OP_FLAGS_TEST_SAVED:
-                h_flags(&C, h.op, p, h.length, &A);
-                break;
-            case CFTR_OP_BYE:
-                A.status = CFT_OK;
-                break;
-            default:
-                /* An operation this server does not have is the
-                 * operation's own failure, not a broken stream. */
-                A.status = CFT_ERR_UNSUPPORTED;
-                snprintf(A.msg, sizeof A.msg, "opcode 0x%04x is not one "
-                         "this server serves", (unsigned)h.op);
+    memset(&A, 0, sizeof A);
+    A.status = CFT_ERR_INTERNAL;
+    if (h.kind != CFTR_KIND_REQUEST) {
+        snprintf(A.why, sizeof A.why, "a frame of kind %u where a request "
+                 "was due", (unsigned)h.kind);
+    } else if (!C->hello_done && h.op != CFTR_OP_HELLO) {
+        snprintf(A.why, sizeof A.why, "op 0x%04x before HELLO", (unsigned)h.op);
+    } else {
+        switch (h.op) {
+        case CFTR_OP_HELLO:
+        case CFTR_OP_CAPS:
+            if (h.length) {
+                snprintf(A.why, sizeof A.why, "HELLO/CAPS carry no payload");
                 break;
             }
-        }
-        free(p);
-
-        if (A.why[0]) {
-            logline("connection %lu: REFUSED request %lu (op 0x%04x): %s",
-                    connid, (unsigned long)h.id, (unsigned)h.op, A.why);
-            send_reply(s, &C, &h, CFTR_KIND_REFUSAL, CFT_ERR_INVALID_ARGUMENT,
-                       A.why, strlen(A.why) + 1, my_abi);
-            free(A.resp);
+            if (!C->dev) {
+                fail(&A, C->open_status, "opening this connection's device");
+                break;
+            }
+            A.resp = (uint8_t *)malloc(CFTR_CAPS_BYTES);
+            if (!A.resp) {
+                fail(&A, CFT_ERR_OUT_OF_MEMORY, "answering");
+                break;
+            }
+            caps_block(C, A.resp);
+            A.resp_len = CFTR_CAPS_BYTES;
+            A.status = CFT_OK;
+            C->hello_done = 1;
             break;
-        }
-        if (g_verbose)
-            logline("connection %lu: request %lu op 0x%04x in %lu bytes -> "
-                    "%s, %lu bytes", connid, (unsigned long)h.id,
-                    (unsigned)h.op, (unsigned long)h.length,
-                    cft_strerror((cft_status)A.status),
-                    (unsigned long)(A.status == CFT_OK ? A.resp_len
-                                                       : strlen(A.msg) + 1));
-        if (A.status == CFT_OK)
-            rc = send_reply(s, &C, &h, CFTR_KIND_RESPONSE, CFT_OK, A.resp,
-                            A.resp_len, my_abi);
-        else
-            rc = send_reply(s, &C, &h, CFTR_KIND_RESPONSE, A.status, A.msg,
-                            strlen(A.msg) + 1, my_abi);
-        free(A.resp);
-        if (rc) {
-            logline("connection %lu: sending a reply failed: %s", connid,
-                    cftr_sock_error());
+        case CFTR_OP_STATS:      h_stats(C, &A); break;
+        case CFTR_OP_RUN:        h_run(C, p, h.length, &A, 0); break;
+        case CFTR_OP_REDUCE:     h_run(C, p, h.length, &A, 1); break;
+        case CFTR_OP_PROG_LOAD:  h_prog_load(C, p, h.length, &A); break;
+        case CFTR_OP_PROG_RUN:   h_prog_run(C, p, h.length, &A); break;
+        case CFTR_OP_PROG_FREE:  h_prog_free(C, p, h.length, &A); break;
+        case CFTR_OP_BUF_ALLOC:  h_buf_alloc(C, p, h.length, &A); break;
+        case CFTR_OP_BUF_FREE:   h_buf_free(C, p, h.length, &A); break;
+        case CFTR_OP_BUF_WRITE:  h_buf_write(C, p, h.length, &A); break;
+        case CFTR_OP_BUF_READ:   h_buf_read(C, p, h.length, &A); break;
+        case CFTR_OP_FLAGS_LOWER:
+        case CFTR_OP_FLAGS_RAISE:
+        case CFTR_OP_FLAGS_TEST:
+        case CFTR_OP_FLAGS_SAVE:
+        case CFTR_OP_FLAGS_RESTORE:
+        case CFTR_OP_FLAGS_TEST_SAVED:
+            h_flags(C, h.op, p, h.length, &A);
             break;
-        }
-        if (h.op == CFTR_OP_BYE) {
-            logline("connection %lu: BYE after %llu requests", connid,
-                    (unsigned long long)C.requests);
+        case CFTR_OP_BYE:
+            A.status = CFT_OK;
+            break;
+        default:
+            /* An operation this server does not have is the operation's
+             * own failure, not a broken stream. */
+            A.status = CFT_ERR_UNSUPPORTED;
+            snprintf(A.msg, sizeof A.msg, "opcode 0x%04x is not one this "
+                     "server serves", (unsigned)h.op);
             break;
         }
     }
-    conn_free(&C);
+    free(p);
+
+    if (A.why[0]) {
+        logline("connection %lu: REFUSED request %lu (op 0x%04x): %s", C->id,
+                (unsigned long)h.id, (unsigned)h.op, A.why);
+        send_reply(C, &h, CFTR_KIND_REFUSAL, CFT_ERR_INVALID_ARGUMENT, A.why,
+                   strlen(A.why) + 1, my_abi);
+        free(A.resp);
+        return 1;
+    }
+    if (g_verbose)
+        logline("connection %lu: request %lu op 0x%04x in %lu bytes -> %s, "
+                "%lu bytes", C->id, (unsigned long)h.id, (unsigned)h.op,
+                (unsigned long)h.length, cft_strerror((cft_status)A.status),
+                (unsigned long)(A.status == CFT_OK ? A.resp_len
+                                                   : strlen(A.msg) + 1));
+    if (A.status == CFT_OK)
+        rc = send_reply(C, &h, CFTR_KIND_RESPONSE, CFT_OK, A.resp, A.resp_len,
+                        my_abi);
+    else
+        rc = send_reply(C, &h, CFTR_KIND_RESPONSE, A.status, A.msg,
+                        strlen(A.msg) + 1, my_abi);
+    free(A.resp);
+    if (rc) {
+        logline("connection %lu: sending a reply failed: %s", C->id,
+                cftr_sock_error());
+        return 1;
+    }
+    if (h.op == CFTR_OP_BYE) {
+        logline("connection %lu: BYE after %llu requests", C->id,
+                (unsigned long long)C->requests);
+        return 1;
+    }
+    return 0;
 }
 
 /* ---- main ------------------------------------------------------------- */
@@ -840,7 +858,7 @@ static void usage(void)
 "                    authentication, no encryption)\n"
 "  --artifact PATH   the device each connection gets (default: the\n"
 "                    software backend)\n"
-"  --max-conns N     exit after N connections\n"
+"  --max-conns N     exit once N connections have been served\n"
 "  --pid-file PATH   write the process id there\n"
 "  --port-file PATH  write the port actually bound there\n"
 "  --verbose         one line per request\n"
@@ -854,11 +872,12 @@ int main(int argc, char **argv)
     const char *bind_addr = "127.0.0.1", *artifact = NULL;
     const char *pid_file = NULL, *port_file = NULL;
     char port_s[16];
-    long port = CFTR_DEFAULT_PORT, max_conns = -1, served = 0;
+    long port = CFTR_DEFAULT_PORT, max_conns = -1, accepted = 0;
     int bound = 0, i;
     cftr_sock listener;
     cft_device *probe = NULL;
     cft_status st;
+    const uint32_t my_abi = cft_abi_version();
 
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -909,15 +928,14 @@ int main(int argc, char **argv)
         return 2;
     }
     snprintf(port_s, sizeof port_s, "%ld", port);
-    listener = cftr_sock_listen(bind_addr, port_s, 8, &bound);
+    listener = cftr_sock_listen(bind_addr, port_s, 16, &bound);
     if (listener == CFTR_BAD_SOCK) {
         fprintf(stderr, "cft-serve: listening on %s:%s: %s\n", bind_addr,
                 port_s, cftr_sock_error());
         return 2;
     }
     logline("cft-serve: libcft ABI %u.%u, device %s, listening on %s:%d, "
-            "pid %lu", (unsigned)(cft_abi_version() >> 16),
-            (unsigned)(cft_abi_version() & 0xFFFFu),
+            "pid %lu", (unsigned)(my_abi >> 16), (unsigned)(my_abi & 0xFFFFu),
             artifact ? artifact : "software", bind_addr, bound, SERVE_PID());
     if (pid_file) {
         FILE *f = fopen(pid_file, "w");
@@ -928,17 +946,62 @@ int main(int argc, char **argv)
         if (f) { fprintf(f, "%d\n", bound); fclose(f); }
     }
 
-    while (max_conns < 0 || served < max_conns) {
-        cftr_sock c = cftr_sock_accept(listener);
-        if (c == CFTR_BAD_SOCK) {
-            logline("cft-serve: accept failed: %s", cftr_sock_error());
-            continue;
+    /* The loop: wait on the listener and every open connection, accept
+     * what is waiting, serve one request on each connection that has
+     * one. --max-conns stops ACCEPTING at N and exits once the last
+     * of them has closed. */
+    for (;;) {
+        cftr_sock socks[MAX_CONNS + 1];
+        int ready[MAX_CONNS + 1], map[MAX_CONNS + 1];
+        int n = 0, open_count = 0, rc;
+
+        for (i = 0; i < MAX_CONNS; i++)
+            if (g_conns[i].open)
+                open_count++;
+        if ((max_conns < 0 || accepted < max_conns) && open_count < MAX_CONNS) {
+            socks[n] = listener;
+            map[n] = -1;
+            n++;
         }
-        served++;
-        serve_connection(c, artifact, (unsigned long)served);
-        cftr_sock_close(c);
+        for (i = 0; i < MAX_CONNS; i++)
+            if (g_conns[i].open) {
+                socks[n] = g_conns[i].s;
+                map[n] = i;
+                n++;
+            }
+        if (n == 0)
+            break;                /* --max-conns reached, all closed */
+
+        rc = cftr_sock_select(socks, n, ready, -1);
+        if (rc < 0) {
+            logline("cft-serve: select failed: %s", cftr_sock_error());
+            break;
+        }
+        for (i = 0; i < n; i++) {
+            if (!ready[i])
+                continue;
+            if (map[i] < 0) {
+                cftr_sock c = cftr_sock_accept(listener);
+                int slot;
+                if (c == CFTR_BAD_SOCK) {
+                    logline("cft-serve: accept failed: %s", cftr_sock_error());
+                    continue;
+                }
+                for (slot = 0; slot < MAX_CONNS; slot++)
+                    if (!g_conns[slot].open)
+                        break;
+                if (slot == MAX_CONNS) {      /* cannot happen: gated above */
+                    cftr_sock_close(c);
+                    continue;
+                }
+                accepted++;
+                conn_open(&g_conns[slot], c, (unsigned long)accepted, artifact);
+            } else if (serve_one(&g_conns[map[i]], my_abi)) {
+                conn_close(&g_conns[map[i]]);
+            }
+        }
     }
     cftr_sock_close(listener);
-    logline("cft-serve: served %ld connection(s), exiting", served);
+    logline("cft-serve: served %ld connection(s), exiting", accepted);
     return 0;
 }

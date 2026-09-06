@@ -357,8 +357,9 @@ CFT_API void       cft_close(cft_device *dev);
  * (default twenty minutes) is CFT_ERR_TIMEOUT.
  *
  * Scope, stated plainly: no authentication and no encryption. The
- * server binds to 127.0.0.1 unless told otherwise and serves one
- * connection at a time. It is a transport, not a security boundary.
+ * server binds to 127.0.0.1 unless told otherwise, and serves its
+ * connections' requests one at a time, in arrival order. It is a
+ * transport, not a security boundary.
  *
  * The socket API is the operating system's - Winsock on Windows, BSD
  * sockets elsewhere - and adds no dependency and no link flag: on

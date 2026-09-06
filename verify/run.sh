@@ -132,7 +132,7 @@ BUDGET=""
 # Windows desktop (verify/README.md has the table): quick ~10 min,
 # gate ~1 h with the box quiet and 2-3 h loaded, full ~2 h quiet and
 # ~4 h loaded; on the WSL distro the replay stages take seconds.
-BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick
+BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -678,6 +678,28 @@ do_images() {
 }
 need xclbinutil images-env
 stage images "hw/verify-image.sh over IMAGES against their manifests (XRT hosts, if staged)" -- do_images
+
+# ---- the remote backend (docs/REMOTE.md) ------------------------------
+# The tile behind a socket, held to the contract on loopback. The stage
+# builds the server and the client tools and hands the server's
+# LIFECYCLE to host/tests/remote_check.py, which starts cft-serve on a
+# free loopback port as its own child, records the PID here beside the
+# run's logs ($RUNDIR/remote-server.pid), drives every check through
+# it - the protocol refusals, device-test's full matrix against the
+# software backend, a bounded conformance replay local and remote, one
+# Collatz chain both ways, the round-trip counts on both div/sqrt
+# routes - and then terminates THAT PID. Never an image name: this is
+# a shared host, and a kill keyed on a name has destroyed other
+# people's work here before. mpmath because the bounded vector set is
+# generated from the model, transcendentals included.
+do_remote() {
+  HOSTMAKE "cft-serve$EXE" "remote-test$EXE" "device-test$EXE" \
+           "cft-selftest$EXE" "cft-collatz$EXE" || return 1
+  REMOTE_PIDFILE="$RUNDIR/remote-server.pid" \
+    PY "$ROOT/host/tests/remote_check.py"
+}
+need host-cc python mpmath
+stage remote "the remote backend on loopback: cft-serve started and stopped by PID, remote held against software - refusals, device-test, a bounded replay, one workload chain, the round-trip counts" -- do_remote
 
 # ---- report --------------------------------------------------------
 {

@@ -117,6 +117,7 @@ const char *cftr_last_error(void) { return ""; }
 #  include <netdb.h>
 #  include <netinet/in.h>
 #  include <netinet/tcp.h>
+#  include <sys/select.h>
 #  include <sys/socket.h>
 #  include <sys/time.h>
 #  include <sys/types.h>
@@ -301,6 +302,8 @@ static struct {
                                   struct addrinfo **);
     void   (WSAAPI *freeaddrinfo_)(struct addrinfo *);
     int    (WSAAPI *getsockname_)(SOCKET, struct sockaddr *, int *);
+    int    (WSAAPI *select_)(int, fd_set *, fd_set *, fd_set *,
+                             const struct timeval *);
     int    ready;
 } W;
 
@@ -355,6 +358,7 @@ int cftr_sock_init(void)
     W_SYM(getaddrinfo);
     W_SYM(freeaddrinfo);
     W_SYM(getsockname);
+    W_SYM(select);
 #undef W_SYM
     if (W.WSAStartup_(MAKEWORD(2, 2), &wsd) != 0) {
         w_fail("WSAStartup");
@@ -531,6 +535,42 @@ void cftr_sock_close(cftr_sock s)
         W.closesocket_((SOCKET)s);
 }
 
+/* Winsock's fd_set is a counted array of SOCKETs, and FD_ISSET on it
+ * is a call into ws2_32 (__WSAFDIsSet) - so the set is built and read
+ * by hand here, which keeps the archive free of that import too. */
+int cftr_sock_select(const cftr_sock *socks, int n, int *ready,
+                     long timeout_ms)
+{
+    fd_set rfds;
+    struct timeval tv, *ptv = NULL;
+    int i, rc, count = 0;
+
+    rfds.fd_count = 0;
+    for (i = 0; i < n && rfds.fd_count < FD_SETSIZE; i++)
+        rfds.fd_array[rfds.fd_count++] = (SOCKET)socks[i];
+    if (timeout_ms >= 0) {
+        tv.tv_sec  = (long)(timeout_ms / 1000);
+        tv.tv_usec = (long)((timeout_ms % 1000) * 1000);
+        ptv = &tv;
+    }
+    rc = W.select_(0, &rfds, NULL, NULL, ptv);
+    if (rc < 0) {
+        w_fail("select");
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        unsigned j;
+        ready[i] = 0;
+        for (j = 0; j < rfds.fd_count; j++)
+            if (rfds.fd_array[j] == (SOCKET)socks[i]) {
+                ready[i] = 1;
+                count++;
+                break;
+            }
+    }
+    return count;
+}
+
 #else  /* POSIX */
 
 static void p_fail(const char *what)
@@ -705,6 +745,44 @@ void cftr_sock_close(cftr_sock s)
 {
     if (s != CFTR_BAD_SOCK)
         close((int)s);
+}
+
+int cftr_sock_select(const cftr_sock *socks, int n, int *ready,
+                     long timeout_ms)
+{
+    fd_set rfds;
+    struct timeval tv, *ptv = NULL;
+    int i, rc, maxfd = -1, count = 0;
+
+    FD_ZERO(&rfds);
+    for (i = 0; i < n; i++) {
+        int fd = (int)socks[i];
+        if (fd < 0 || fd >= FD_SETSIZE) {
+            snprintf(g_sock_err, sizeof g_sock_err,
+                     "descriptor %d is beyond FD_SETSIZE", fd);
+            return -1;
+        }
+        FD_SET(fd, &rfds);
+        if (fd > maxfd)
+            maxfd = fd;
+    }
+    if (timeout_ms >= 0) {
+        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        ptv = &tv;
+    }
+    rc = select(maxfd + 1, &rfds, NULL, NULL, ptv);
+    if (rc < 0) {
+        if (errno == EINTR)
+            return 0;
+        p_fail("select");
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        ready[i] = FD_ISSET((int)socks[i], &rfds) ? 1 : 0;
+        count += ready[i];
+    }
+    return count;
 }
 
 #endif /* platform shim */
