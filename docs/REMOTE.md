@@ -173,10 +173,14 @@ magic, version, reserved and ABI, then reads exactly `length` bytes.
 A payload longer than the frame cap (1 GiB, `CFTR_MAX_PAYLOAD`) is
 refused before any of it is read or allocated, because a corrupted
 length field must not become an allocation. A connection that closes
-before `length` bytes arrive is a truncated frame and is refused. A
-payload whose length does not match what its opcode requires - a `RUN`
-whose operand bytes are not `n` elements of the format's width - is
-refused by the operation's decoder.
+before `length` bytes arrive is a truncated frame and is refused; so
+is one that stalls mid-frame for the server's stall timeout (a
+minute), which is how a header claiming one byte more than its sender
+holds ends - the server waits for the byte, gives up, refuses the
+frame as truncated with `CFT_ERR_TIMEOUT`, and closes. A payload whose
+length does not match what its opcode requires - a `RUN` whose operand
+bytes are not `n` elements of the format's width - is refused by the
+operation's decoder.
 
 **Refusal.** A frame that fails any check above is answered with kind
 2, `status` naming the reason (`CFT_ERR_INTERNAL` for a transport
@@ -354,10 +358,65 @@ fail and the refusal fires.
 ## The runner stage
 
 `verify/run.sh`'s `remote` stage, in the quick budget: build the
-server and the client tools, start a loopback server as a background
-process on a port derived from the stage's own process id, record its
-PID in the run directory, replay a bounded vector set through it and
-locally and compare the two reports, run one workload both ways and
-compare the chains, run `device-test` against it, and stop the server
-by the recorded PID - never by image name, on a host where other
-people's processes share the image names.
+server and the client tools, then hand the server's lifecycle to
+`host/tests/remote_check.py`, which starts a loopback server on a free
+port as its own child, records its PID in the run directory
+(`remote-server.pid`), replays a bounded vector set through it and
+locally and compares the two reports, runs `device-test` and
+`remote-test` against it, runs one workload both ways and compares
+the chains, reads the round-trip counts on both routes, and stops the
+server by the recorded PID - never by image name, on a host where
+other people's processes share the image names.
+
+## The negative control
+
+Two sabotages of the CLIENT, each applied to a scratch copy of
+`host/` so the worktree's own binaries stayed honest, each built and
+run against the Linux server in the `cft2204` distro (the same server
+every green result below used), and then the same copy unsabotaged.
+The scripts are the session's; the edits are one line each in
+`host/src/backend_remote.c`.
+
+**One bit of one returned encoding.** After `cftr_run` has copied a
+`RUN` response into the caller's buffer - after the crc has passed -
+flip the low bit of the first element's first byte:
+
+    pd[off * esz] ^= 0x01;   /* SABOTAGE */
+
+Result: `device-test cft://localhost:7755 -n 16` fails 305 of its
+2,248 checks, the first at `fp32 fma 0 element 0 of 16`;
+`cft-selftest` on a 14-set bounded replay fails on its FIRST case,
+`expected 0xff800000 got 0xff800001`, and the replay stops there;
+`cft-collatz --engine loop` refuses to finish its remote run (exit 2:
+its own exactness witness no longer agrees with the flags) where the
+local run prints chain `c2ccab68...`; `remote-test` fails 174 of 245
+checks, every one a `BYTES DIFFER`. Nothing about the transport
+noticed - the crc was correct, the frame was well formed - which is
+the point: the bit identity is checked by the replay, the harness and
+the chains, and a client that lies about a result is caught by
+exactly those.
+
+**A wrong frame length.** Have every `RUN` request's header claim one
+byte more than its payload holds:
+
+    hh.length = (uint32_t)len + (h->op == CFTR_OP_RUN ? 1u : 0u);
+
+Result: the server waits its stall timeout for the byte that never
+comes, refuses the frame as truncated, and closes; the client reports
+`the server refused the request: truncated frame ... this remote
+handle is finished; close it and open it again` with
+`CFT_ERR_TIMEOUT`, and every later call on that handle refuses.
+`device-test` fails 532 checks (the first `RUN` on each handle, then
+everything after it on the poisoned handle), `cft-selftest` checks 0
+cases and reports `CONFORMANCE FAILED: timed out`, the Collatz remote
+run dies in its first `cft_scaleb`, and `remote-test` fails 174 checks
+with `status 0/7` - CFT_OK locally, CFT_ERR_TIMEOUT remotely. No
+frame with a wrong length was ever computed on.
+
+**Restored.** The same scratch copy with the sabotage lines removed,
+against the same server: `device-test` 2,248 checks, 0 failed; the
+bounded replay 14 sets, 80,283 cases, all matching; the Collatz sweep
+chain `c2ccab682e3747261561871ee0f99d3b3d43f88fa7fa4de18eff7e46a0555c51`
+local and remote - which is also the chain
+`bindings/wasm/demos_chains.json` recorded for that configuration on
+2026-09-04; `remote-test` 245 checks, 0 failures.

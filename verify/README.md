@@ -26,7 +26,7 @@ No stage takes hours by itself; a full run is the sum of a dozen
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
-| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, the five workloads and the browser demos, soak-quick - after a host build the budget makes itself | about 12 minutes, loaded or not |
+| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, the five workloads and the browser demos, soak-quick, and the remote backend on loopback - after a host build the budget makes itself | about 12 minutes, loaded or not, plus about 6 for `remote` on this host (its bounded replay runs one round trip per case) |
 | `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about an hour with the box quiet; 2-3 hours beside a CUDA job |
 | `full` | everything: gate + sim, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
 
@@ -70,6 +70,7 @@ command in the `cft2204` distro.
 | mpfr | GNU MPFR parity, every rung and mode (third oracle) | cc, python |
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
+| remote | the remote backend (docs/REMOTE.md) held to the contract on loopback: `host/tests/remote_check.py` starts `cft-serve` as its own child, records the PID beside the run's logs, runs the protocol refusals, `device-test`'s full matrix, a bounded conformance replay local and remote, one Collatz chain both ways and the round-trip counts on both div/sqrt routes through it, and terminates that PID - never an image name | cc, python with mpmath |
 
 The `cpp`, `lang-*`, `node` and `wasm` stages are the regression
 harness for the languages: one named stage per binding or example,
