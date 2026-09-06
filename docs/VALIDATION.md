@@ -4162,7 +4162,31 @@ is not claimed here, because they were not run to completion in this
 session. The bit identity rests on the benches above, which is where it
 rested for `FUSE_NORM`, `FUSE_ALIGN` and `FUSE_MUL` too.
 
-**What was not run.** Implementation at any pass count; every `xc7*`
-cell of the area matrix, because this host's Vivado 2026.1 carries only
-the UltraScale+ and Versal families and refused those parts by name;
-and the negative control, which is the next thing this work owes.
+**The negative control: one dropped carry.** In `cft_mulpass`'s
+accumulator, `acc <= s[P+K:K]` becomes `acc <= s[P+K:K] & ~(1 << 3)`,
+so one carry bit is cleared on every pass - a fault that is arithmetic
+rather than structural, and identical on every run:
+
+    mulcycle    4 tests, 0 passed, 4 FAILED  (identical_per_format,
+                identical_across_cadences, identical_on_specials,
+                identical_under_precision_changes)
+    fp256mc     1 test,  0 passed, 1 FAILED
+    fp64mc      1 test,  0 passed, 1 FAILED
+    cyclesmc    1 test,  1 PASSED
+
+**The row worth keeping is the last one.** The cadence bench compares
+the tile with itself at different pass counts, and a deterministic
+arithmetic fault is present identically in both, so it reports
+agreement while every result is wrong. The pacing property is a
+determinism check and not a correctness one; what catches a wrong
+product is the comparison against the golden model and against the
+pipe's own side-by-side array. The same lesson the enclosure workload
+recorded on 2026-09-04, from the other end of the stack.
+
+Restored from git and the same four re-run: **7 tests, 7 passed, 0
+failed**.
+
+**What was not run.** Implementation at any pass count, and every
+`xc7*` cell of the area matrix, because this host's Vivado 2026.1
+carries only the UltraScale+ and Versal families and refused those
+parts by name.
