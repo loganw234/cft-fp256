@@ -121,6 +121,30 @@ void *cft_device_backend(const struct cft_device *dev);
  * the bench considerably worse. */
 const char *cftx_last_error(void);
 
+/* ====================================================================
+ * The remote backend (docs/REMOTE.md), beside the XRT one.
+ *
+ * Its cftr_ functions have the same shapes as the cftx_ ones above and
+ * are declared in remote.h, together with the wire protocol they
+ * speak. What this block adds is the two questions the rest of the
+ * library asks of "the backend" without caring which one it is:
+ * program.c needs to hand a program run to whichever device backend
+ * the handle has, and divsqrt.c needs to know whether there is one.
+ * cft_device_backend() above answers the second for both; this
+ * dispatcher answers the first, so that neither file names a backend.
+ *
+ * Returns the backend's status, or CFT_ERR_INTERNAL (as int) for a
+ * handle that has no device backend - which program.c never asks
+ * about, since it checks cft_device_backend() first.
+ * ==================================================================== */
+int cft_backend_program_run(struct cft_device *dev, int fmt,
+                            const void *image, size_t image_bytes,
+                            uint32_t max_deposits,
+                            const void *a, const void *b, const void *c,
+                            void *deposits, uint32_t *counts, size_t n,
+                            uint32_t *flags, uint32_t *bus);
+/* ============================ end of the remote block ============== */
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
