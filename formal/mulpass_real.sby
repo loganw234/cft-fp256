@@ -1,0 +1,36 @@
+# The same claim as mulpass.sby at the REAL chunk width - 24 bits, no
+# CFT_MUL_MCH_FORMAL - for the smallest multi-pass geometries that
+# exist at it. Not part of formal/run.sh: this is the experiment that
+# says how far the solver gets when the partial products are 25 x 24
+# and 49 x 24, recorded in docs/VALIDATION.md with its time, whichever
+# way it goes. mulpass.sby's narrow-chunk tasks are the gate.
+#
+#   sby -f mulpass_real.sby p25c1     2 passes x 1 column at P=25 (chunks 24 + 1)
+#   sby -f mulpass_real.sby p49c2     2 passes x 2 columns at P=49 (one tree level)
+#
+# Run from formal/ (the relative paths below resolve there).
+
+[tasks]
+p25c1
+p49c2
+
+[options]
+p25c1: mode bmc
+p25c1: depth 17
+p49c2: mode bmc
+p49c2: depth 17
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -defer -formal -sv cft_mulpass.sv
+read_verilog -defer -formal -sv tb_mulpass_formal.sv
+p25c1: chparam -set P 25 -set COLS 1 tb_mulpass_formal
+p49c2: chparam -set P 49 -set COLS 2 tb_mulpass_formal
+prep -top tb_mulpass_formal
+
+[files]
+../rtl/cft_mulpass.sv
+../rtl/cft_mulgeom.svh
+tb_mulpass_formal.sv

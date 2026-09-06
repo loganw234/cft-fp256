@@ -407,11 +407,21 @@ ensure_sim_image() {
 }
 do_sim()  { ensure_sim_image && \
             DOCKER run --rm -v "$MOUNT:/work" -w /work/tb cft-sim make -k -j"${SIM_JOBS:-1}" sim; }
+do_simmc() { ensure_sim_image && \
+            DOCKER run --rm -v "$MOUNT:/work" -w /work/tb cft-sim make -k -j"${SIM_JOBS:-1}" MC="${MC:-10}" simmc; }
 do_lint() { ensure_sim_image && \
             DOCKER run --rm -v "$MOUNT:/work" -w /work cft-sim make yosys-lint; }
 
 need docker
-stage sim "cocotb RTL suite, all 18 targets, SIM_JOBS at a time (docker cft-sim)" -- do_sim
+stage sim "cocotb RTL suite, all 21 targets, SIM_JOBS at a time (docker cft-sim)" -- do_sim
+
+# The same benches with the multiplier iterated and the array paced
+# (tb/Makefile simmc, MC=10 unless MC= says otherwise): the multi-cycle
+# tile's own census, beside the shipping default rather than instead
+# of it. Not in the quick or gate budgets - it is the third tier's
+# gate, and it takes as long as sim does.
+need docker
+stage simmc "cocotb suite at the multi-cycle pass budget MC (docker cft-sim)" -- do_simmc
 
 need docker
 stage lint "yosys elaboration gate, every RTL file (docker cft-sim)" -- do_lint

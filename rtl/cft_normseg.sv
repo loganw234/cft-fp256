@@ -125,6 +125,11 @@ module cft_normseg #(
     parameter bit BIDIR = 1'b0
 ) (
     input  logic               clk,
+    // Pipeline enable: the ladder's two registers sit at the pipe's
+    // S11 -> S12 -> S13 boundaries and must advance exactly when the
+    // pipe does, so a multi-cycle tile (cft_lanes, MUL_PASSES > 1)
+    // hands it the same `en` its pipes get. Tie high otherwise.
+    input  logic               en,
     input  logic [1:0]         mode,        // 0 fp32, 1 fp64, 2 fp128, 3 fp256
     input  logic [WT-1:0]      din,         // lanes packed at slot pitch
     // Per-lane amounts, packed at a fixed pitch - lane l at l*4, l*6
@@ -212,11 +217,13 @@ module cft_normseg #(
   logic [1:0]    mode_r;
   logic          dir_r [0:SLOTS-1];
   always_ff @(posedge clk) begin
-    for (int l = 0; l < SLOTS; l++) begin
-      amt_lo_r[l] <= amt[l][LO-1:0];
-      dir_r[l]    <= dir[l];
+    if (en) begin
+      for (int l = 0; l < SLOTS; l++) begin
+        amt_lo_r[l] <= amt[l][LO-1:0];
+        dir_r[l]    <= dir[l];
+      end
+      mode_r <= mode;
     end
-    mode_r <= mode;
   end
 
   // Per slot, the amount of the lane that owns it. Slot s belongs to
@@ -381,8 +388,10 @@ module cft_normseg #(
 
   // Two registers, at exactly the pipe's S11 -> S12 -> S13 boundaries.
   always_ff @(posedge clk) begin
-    cs_r <= cs[SPLIT];
-    dout <= fs[LO];
+    if (en) begin
+      cs_r <= cs[SPLIT];
+      dout <= fs[LO];
+    end
   end
 
 endmodule

@@ -36,7 +36,7 @@ module tb_reduce_acc #(
   logic [4:0]  add_flags;
 
   cft_reduce_acc #(.W(32), .LEVELS(LEVELS), .ADD_LATENCY(LATENCY)) u_acc (
-      .clk(clk), .rst_n(rst_n), .clear(clear),
+      .clk(clk), .rst_n(rst_n), .clk_en(1'b1), .clear(clear),
       .in_valid(in_valid), .in_data(in_data), .in_ready(in_ready),
       .flush(flush),
       .add_valid(add_valid), .add_a(add_a), .add_b(add_b),
@@ -45,7 +45,7 @@ module tb_reduce_acc #(
 
   cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                    .EXT_MUL(1'b0)) u_add (
-      .clk(clk), .rst_n(rst_n),
+      .clk(clk), .rst_n(rst_n), .en(1'b1),
       .in_valid(add_valid), .rnd(rnd),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(add_a), .b(FP32_ONE), .c(add_b),

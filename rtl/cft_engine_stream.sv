@@ -81,7 +81,11 @@ module cft_engine_stream #(
     // module on its own takes the default; cft_krnl passes 0 and hands
     // the same cft_lanes to the sequencer - see cft_lanes' header for
     // the area finding that made sharing mandatory.
-    parameter bit OWN_LANES  = 1'b1
+    parameter bit OWN_LANES  = 1'b1,
+    // The multi-cycle multiplier's pass budget, for the private array
+    // only (cft_lanes has the story); the kernel's array is paced by
+    // the kernel and reaches this module as lane_ready.
+    parameter int MUL_PASSES = 1
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -114,6 +118,12 @@ module cft_engine_stream #(
     output logic [BEAT_BITS-1:0] lane_a,
     output logic [BEAT_BITS-1:0] lane_b,
     output logic [BEAT_BITS-1:0] lane_c,
+    // The array accepts a request only in a cycle with lane_ready high
+    // (cft_lanes' in_ready): every cycle in the shipping tile, one in
+    // NP at a multi-cycle rung. Issue, the result-capture delay line
+    // and the accumulator's schedule are all gated on it below, so in
+    // ACCEPTED beats nothing here changes.
+    input  logic                 lane_ready,
     input  logic [BEAT_BITS-1:0] lane_d,
     input  logic [BEAT_BITS/32*5-1:0] lane_flags,
 
@@ -830,6 +840,11 @@ module cft_engine_stream #(
   logic red_in_valid, red_in_ready;
   logic [BEAT_BITS-1:0] red_in_elem;
 
+  // The array's acceptance strobe, whichever array this is driving.
+  // Declared here, ahead of the serializer that is its first reader;
+  // the generate that binds it sits with the array instance below.
+  logic arr_rdy;
+
   // The active element, right-aligned. Everything above the element's
   // width is zero and the accumulator never looks at it; the adder it
   // hands work to is the one for this precision.
@@ -896,7 +911,9 @@ module cft_engine_stream #(
         ser_cnt  <= (ser_rem < {58'd0, epb}) ? ser_rem[5:0] : epb;
         ser_beat_idx <= ser_beat_idx + 64'd1;
         ser_busy <= 1'b1;
-      end else if (ser_busy && red_in_valid && red_in_ready) begin
+      end else if (ser_busy && red_in_valid && red_in_ready && arr_rdy) begin
+        // The accumulator advances on the array's strobe, so its
+        // acceptance of an element counts once, on that strobe.
         if ((ser_idx + 6'd1) >= ser_cnt) ser_busy <= 1'b0;
         ser_idx <= ser_idx + 6'd1;
       end
@@ -934,9 +951,11 @@ module cft_engine_stream #(
   // pipe's own depth. The accumulator carries the destination level
   // in a delay line of exactly this length, so the two must agree or
   // carries land at the wrong level.
+  // clk_en is the array's strobe: the accumulator counts ADD_LATENCY in
+  // accepted edges, exactly as the pipe counts its depth.
   cft_reduce_acc #(.W(BEAT_BITS), .LEVELS(40), .ADD_LATENCY(LATENCY + 1))
   u_reduce (
-      .clk(ap_clk), .rst_n(ap_rst_n), .clear(start_accept),
+      .clk(ap_clk), .rst_n(ap_rst_n), .clk_en(arr_rdy), .clear(start_accept),
       .in_valid(red_in_valid && is_reduce), .in_data(red_in_elem),
       .in_ready(red_in_ready),
       .flush(red_flush),
@@ -965,7 +984,9 @@ module cft_engine_stream #(
   // The occupancy sum is done at 32 bits, zero-filled explicitly - at
   // its own width a full FIFO plus the pipe's in-flight beats could
   // wrap the compare and overfill the D FIFO.
-  assign ex_valid = running && !is_reduce &&
+  // Gated on arr_rdy: a beat is issued only in a cycle the array
+  // takes it, which is every cycle on the shipping tile.
+  assign ex_valid = running && !is_reduce && arr_rdy &&
                     (issued_beats < beats_total) &&
                     (a_cnt != 0) && (b_cnt != 0) && (c_cnt != 0) &&
                     (({{(31-FIFO_LOG2){1'b0}}, d_cnt} + {24'd0, inflight})
@@ -976,8 +997,12 @@ module cft_engine_stream #(
   // share one read enable and the host supplies all three pointers.
   assign abc_rd = is_reduce ? red_take_beat : ex_valid;
 
+  // The result-capture delay line counts ACCEPTED edges, like the
+  // pipe's own valid line, and the collect strobe fires once per
+  // result - in the last cycle the array holds it, which is the only
+  // cycle on the shipping tile.
   logic [LATENCY-1:0] vdl;
-  assign collect = vdl[LATENCY-1];
+  assign collect = vdl[LATENCY-1] && arr_rdy;
 
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
@@ -987,9 +1012,9 @@ module cft_engine_stream #(
     end else if (!running) begin
       issued_beats <= '0;
       inflight <= 8'd0;
-      vdl <= {vdl[LATENCY-2:0], 1'b0};
+      if (arr_rdy) vdl <= {vdl[LATENCY-2:0], 1'b0};
     end else begin
-      vdl <= {vdl[LATENCY-2:0], ex_valid};
+      if (arr_rdy) vdl <= {vdl[LATENCY-2:0], ex_valid};
       if (ex_valid) issued_beats <= issued_beats + 64'd1;
       inflight <= inflight + (ex_valid ? 8'd1 : 8'd0) - (collect ? 8'd1 : 8'd0);
     end
@@ -1082,6 +1107,10 @@ module cft_engine_stream #(
   // S0. The cost is one cycle of adder latency, which is not a numeric
   // change - the tree shape and the order of every add are fixed by
   // element index, not by timing - and cft_reduce_acc is told above.
+  // The register advances on the array's strobe too, so the request it
+  // holds stands for a whole pass period and is taken at the next
+  // strobe: still one accepted edge after the accumulator issued it,
+  // which is the +1 ADD_LATENCY carries.
   logic                 red_add_valid_q;
   logic [BEAT_BITS-1:0] red_add_a_q, red_add_b_q;
   always_ff @(posedge ap_clk) begin
@@ -1089,7 +1118,7 @@ module cft_engine_stream #(
       red_add_valid_q <= 1'b0;
       red_add_a_q     <= '0;
       red_add_b_q     <= '0;
-    end else begin
+    end else if (arr_rdy) begin
       red_add_valid_q <= red_add_valid;
       red_add_a_q     <= red_add_a;
       red_add_b_q     <= red_add_b;
@@ -1111,14 +1140,16 @@ module cft_engine_stream #(
       cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
                   .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
                   .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
-                  .FUSE_ALIGN(FUSE_ALIGN)) u_lanes (
+                  .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES)) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(lane_valid), .op(lane_op), .rnd(lane_rnd),
           .prec(lane_prec), .a(lane_a), .b(lane_b), .c(lane_c),
+          .in_ready(arr_rdy),
           .out_valid(), .d(arr_d), .lane_flags(arr_lf));
     end else begin : g_shared_lanes
-      assign arr_d  = lane_d;
-      assign arr_lf = lane_flags;
+      assign arr_rdy = lane_ready;
+      assign arr_d   = lane_d;
+      assign arr_lf  = lane_flags;
     end
   endgenerate
 
