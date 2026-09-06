@@ -66,7 +66,7 @@ module tb_normseg #(
   // bidirectional mode gets its own coverage in test_normseg's
   // direction tests via u_bid below.
   cft_normseg #(.PMAX(PMAX), .SLOTS(SLOTS), .SPLIT(SPLIT)) u_seg (
-      .clk(clk), .mode(mode), .din(din), .csh(csh_v), .fsh(fsh_v),
+      .clk(clk), .en(1'b1), .mode(mode), .din(din), .csh(csh_v), .fsh(fsh_v),
       .dir('0), .dout(dout));
 
   // The same ladder with directions live. Driven with dir_v = 0 it must
@@ -76,7 +76,7 @@ module tb_normseg #(
   // orientations, neighbours free to disagree.
   cft_normseg #(.PMAX(PMAX), .SLOTS(SLOTS), .SPLIT(SPLIT),
                 .BIDIR(1'b1)) u_bid (
-      .clk(clk), .mode(mode), .din(din), .csh(csh_v), .fsh(fsh_v),
+      .clk(clk), .en(1'b1), .mode(mode), .din(din), .csh(csh_v), .fsh(fsh_v),
       .dir(dir_v), .dout(dout_b));
 
   genvar gl;

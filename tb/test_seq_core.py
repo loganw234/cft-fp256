@@ -53,6 +53,7 @@ which runs the case deliberately and REPORTS which reading the RTL
 took without asserting either. See its docstring.
 """
 
+import os
 import random
 import sys
 from collections import Counter
@@ -76,6 +77,9 @@ BEAT_BITS = 256
 BEAT_BYTES = BEAT_BITS // 8
 LATENCY = 15
 NBEATS = 16
+# The pass budget the DUT was built with, for the cycle budgets only:
+# the multi-cycle targets export it, the default is the shipping tile.
+MUL_PASSES = int(os.getenv("CFT_MUL_PASSES", "1"))
 MAXD = 64
 IMEM_D = 1024
 KMEM_D = 256
@@ -543,8 +547,14 @@ class Bench:
     def _budget(self, fmt, prog, n, image_bytes):
         blocks = max(1, -(-n // lanes_per_block(fmt)))
         worst = worst_case_insns(prog.insns)
+        # On the multi-cycle tile (tb/Makefile seq_coremc, MUL_PASSES
+        # through CFT_MUL_PASSES) the array takes a beat and returns a
+        # result every pass period instead of every cycle, so the
+        # per-instruction cost of a block scales by the budget - the
+        # widest rung's period is the budget itself, and using it for
+        # every rung keeps this a bound rather than a fit.
         cycles = (3000 + (image_bytes // BEAT_BYTES + 8) * 8
-                  + blocks * (worst * (NBEATS + LATENCY + 8)
+                  + blocks * (worst * ((NBEATS + LATENCY) * MUL_PASSES + 8)
                               + 6 * NBEATS + 400))
         return min(cycles, 4_000_000)
 

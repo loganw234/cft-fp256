@@ -63,7 +63,19 @@ module cft_lanes #(
     // smaller part, where footprint is the objective.
     parameter bit FUSE_MUL   = 1'b0,
     parameter bit FUSE_NORM  = 1'b0,
-    parameter bit FUSE_ALIGN = 1'b0
+    parameter bit FUSE_ALIGN = 1'b0,
+    // The multi-cycle tile: a pass BUDGET for the wide rungs'
+    // significand multiplier (rtl/cft_mulgeom.svh derives what each
+    // rung makes of it). 1, the default, is the shipping array. Above
+    // 1, each wide lane builds ceil(chunks / MUL_PASSES) chunk columns
+    // and iterates them, and this module paces the WHOLE array with a
+    // pipeline enable at the live rung's pass count: fp32, whose lanes
+    // have one column, still takes a beat every cycle; fp64, fp128 and
+    // fp256 take one every 3, 5 and 10 at MUL_PASSES=10, one every
+    // 2 at MUL_PASSES=2. The results are bit-identical at every value
+    // - the trade is throughput for area, in the wide modes only, and
+    // tb_mulcycle holds the array to it against itself.
+    parameter int MUL_PASSES = 1
 )(
     input  logic                 clk,
     input  logic                 rst_n,
@@ -75,8 +87,17 @@ module cft_lanes #(
     input  logic [BEAT_BITS-1:0] a,
     input  logic [BEAT_BITS-1:0] b,
     input  logic [BEAT_BITS-1:0] c,
+    // The array samples in_valid and the operands ONLY in a cycle with
+    // in_ready high: once per pass period at the live rung, every
+    // cycle at MUL_PASSES=1 (where this is a constant 1 and the
+    // issuers' gating on it folds away). An issuer that presents a
+    // beat in a cycle with in_ready low has not issued it.
+    output logic                 in_ready,
 
-    output logic                 out_valid,   // in_valid, LATENCY later
+    // in_valid, LATENCY enabled edges later - a ONE-cycle pulse in the
+    // last cycle d and lane_flags hold the result, whatever the pass
+    // period, so a consumer counting pulses counts results.
+    output logic                 out_valid,
     output logic [BEAT_BITS-1:0] d,
     output logic [BEAT_BITS/32*5-1:0] lane_flags
 );
@@ -91,15 +112,85 @@ module cft_lanes #(
   localparam int LANES128 = (BEAT_BITS >= 128) ? BEAT_BITS / 128 : 0;
   localparam int LANES256 = (BEAT_BITS >= 256) ? BEAT_BITS / 256 : 0;
 
+  // ---- the pass period per rung, and the pipeline enable --------------
+  //
+  // Every lane is a cft_fpfma_pipe at one of four significand widths
+  // - 1 + MAN_W of the instantiations below - and the geometry include
+  // says how many passes each takes under the budget. The live rung's
+  // count is the period of `en`, the enable every stage register in
+  // every pipe (and the shared ladders) advances on; a rung the build
+  // drops is given a period of 1, which nothing selects because
+  // prec_ok refused it upstream.
+  //
+  // Each pipe is handed the period this module will generate for it
+  // (MUL_PERIOD) and refuses to elaborate if its own derivation
+  // disagrees - the two files share the include, so this is a check
+  // that nothing overrode a parameter, not a second source of truth.
+  `include "cft_mulgeom.svh"
+  localparam int P32  = 23 + 1;
+  localparam int P64  = 52 + 1;
+  localparam int P128 = 112 + 1;
+  localparam int P256 = 236 + 1;
+  localparam int NP32  = cft_mul_passes(P32, MUL_PASSES);
+  localparam int NP64  = EN_FP64  ? cft_mul_passes(P64, MUL_PASSES)  : 1;
+  localparam int NP128 = EN_FP128 ? cft_mul_passes(P128, MUL_PASSES) : 1;
+  localparam int NP256 = EN_FP256 ? cft_mul_passes(P256, MUL_PASSES) : 1;
+  localparam int NPMAX = (NP256 > NP128) ? ((NP256 > NP64) ? NP256 : NP64)
+                                         : ((NP128 > NP64) ? NP128 : NP64);
+  localparam int PHW   = (NPMAX > 1) ? $clog2(NPMAX) : 1;
+
+  // fp32 is single-pass at every budget: one column, one chunk. That
+  // is the property "fp32 keeps its rate" rests on, so it is checked
+  // rather than assumed.
+  generate
+    if (NP32 != 1) begin : g_fp32_not_single
+      $error("cft_lanes: the fp32 lanes must stay single-pass at every MUL_PASSES");
+    end
+    if (MUL_PASSES < 1) begin : g_bad_budget
+      $error("cft_lanes: MUL_PASSES must be at least 1");
+    end
+  endgenerate
+
+  initial begin
+    if (NP32 != 1 || MUL_PASSES < 1) begin
+      $display("FATAL: cft_lanes MUL_PASSES=%0d gives fp32 %0d passes", MUL_PASSES, NP32);
+      $finish;
+    end
+  end
+
+  // ph counts wall cycles within the live rung's period; the last one
+  // is the enabled cycle. `>=` rather than `==`, so a period that
+  // shrinks at a run boundary (prec is stable per run and only moves
+  // with the pipe drained) restarts the count instead of running off
+  // the end. At MUL_PASSES=1 every period is 1, ph is a constant 0 and
+  // en a constant 1 - the shipping netlist, once synthesis folds it.
+  logic [PHW-1:0] ph, ph_last;
+  logic           en;
+  always_comb begin
+    case (prec)
+      PREC_FP32:  ph_last = PHW'(NP32 - 1);
+      PREC_FP64:  ph_last = PHW'(NP64 - 1);
+      PREC_FP128: ph_last = PHW'(NP128 - 1);
+      default:    ph_last = PHW'(NP256 - 1);
+    endcase
+  end
+  always_ff @(posedge clk) begin
+    if (!rst_n)             ph <= '0;
+    else if (ph >= ph_last) ph <= '0;
+    else                    ph <= ph + 1'b1;
+  end
+  assign en       = (ph >= ph_last);
+  assign in_ready = en;
+
   // ---- validity delay line -------------------------------------------
   logic [LATENCY-1:0] v_sh;
   always_ff @(posedge clk) begin
     if (!rst_n)
       v_sh <= '0;
-    else
+    else if (en)
       v_sh <= {v_sh[LATENCY-2:0], in_valid};
   end
-  assign out_valid = v_sh[LATENCY-1];
+  assign out_valid = v_sh[LATENCY-1] && en;
 
   // ---- the shared multiplier (off by default) -------------------------
   //
@@ -109,6 +200,15 @@ module cft_lanes #(
   // measurements behind each default.
   localparam bit USE_FUSED_MUL = FUSE_MUL && (BEAT_BITS == 256) &&
                                  EN_FP64 && EN_FP128 && EN_FP256;
+
+  // The shared array is single-pass by construction and the multi-cycle
+  // multiplier is private by construction; the pipe refuses the pair
+  // per lane, and this names the combination at the array.
+  generate
+    if (USE_FUSED_MUL && MUL_PASSES > 1) begin : g_fused_and_multi
+      $error("cft_lanes: FUSE_MUL and MUL_PASSES > 1 do not compose");
+    end
+  endgenerate
 
   localparam int MF_PMAX = 237;
   localparam int MF_MCH  = 27;
@@ -194,7 +294,7 @@ module cft_lanes #(
   generate
     if (USE_FUSED_NORM) begin : g_normseg
       cft_normseg #(.PMAX(237), .SLOTS(8)) u_normseg (
-          .clk(clk), .mode(prec), .din(ns_din),
+          .clk(clk), .en(en), .mode(prec), .din(ns_din),
           .csh(ns_csh), .fsh(ns_fsh), .dir('0), .dout(ns_dout));
 
       always_comb begin
@@ -258,7 +358,7 @@ module cft_lanes #(
   generate
     if (USE_FUSED_ALIGN) begin : g_alignseg
       cft_normseg #(.PMAX(237), .SLOTS(8), .BIDIR(1'b1)) u_alignseg (
-          .clk(clk), .mode(prec), .din(as_din),
+          .clk(clk), .en(en), .mode(prec), .din(as_din),
           .csh(as_csh), .fsh(as_fsh), .dir(as_dir), .dout(as_dout));
 
       always_comb begin
@@ -332,8 +432,9 @@ module cft_lanes #(
       assign bf_m = sev ? 5'b0 : bf;
       cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                        .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-          .clk(clk), .rst_n(rst_n),
+                       .EXT_ALIGN(USE_FUSED_ALIGN),
+                       .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP32)) u_fma (
+          .clk(clk), .rst_n(rst_n), .en(en),
           .in_valid(in_valid && (prec == PREC_FP32)),
           .rnd(rnd),
           .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
@@ -375,8 +476,9 @@ module cft_lanes #(
         assign bf_m = sev ? 5'b0 : bf;
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                         .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-            .clk(clk), .rst_n(rst_n),
+                         .EXT_ALIGN(USE_FUSED_ALIGN),
+                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP64)) u_fma (
+            .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP64)),
             .rnd(rnd),
             .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
@@ -424,8 +526,9 @@ module cft_lanes #(
         assign bf_m = sev ? 5'b0 : bf;
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                         .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-            .clk(clk), .rst_n(rst_n),
+                         .EXT_ALIGN(USE_FUSED_ALIGN),
+                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP128)) u_fma (
+            .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP128)),
             .rnd(rnd),
             .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
@@ -469,8 +572,9 @@ module cft_lanes #(
       assign bf_m = sev ? 5'b0 : bf;
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                        .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN)) u_fma (
-          .clk(clk), .rst_n(rst_n),
+                       .EXT_ALIGN(USE_FUSED_ALIGN),
+                       .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP256)) u_fma (
+          .clk(clk), .rst_n(rst_n), .en(en),
           .in_valid(in_valid && (prec == PREC_FP256)),
           .rnd(rnd),
           .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),

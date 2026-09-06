@@ -17,7 +17,12 @@
 
 `timescale 1ns/1ps
 
-module tb_krnl_quarter (
+// MUL_PASSES passes through so the quarter tile can also run the
+// multi-cycle multiplier: at BEAT_BITS=64 the fp64 lane is the wide
+// rung, and a budget of 2 or more iterates its three chunk columns.
+module tb_krnl_quarter #(
+    parameter int MUL_PASSES = 1
+) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
 
@@ -119,6 +124,6 @@ module tb_krnl_quarter (
 );
 
   cft_krnl #(.EN_FP64(1'b1), .EN_FP128(1'b0), .EN_FP256(1'b0),
-             .BEAT_BITS(64)) u_krnl (.*);
+             .BEAT_BITS(64), .MUL_PASSES(MUL_PASSES)) u_krnl (.*);
 
 endmodule

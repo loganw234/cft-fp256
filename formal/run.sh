@@ -14,6 +14,8 @@
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
 #   equiv.sby     check+cover   cft_simpleops == frozen pre-rewrite ref
+#   mulpass.sby   3 geometries  cft_mulpass' iterated product is exact,
+#                 + cover       from any initial state (bounded)
 #   negcontrol.sby              a deliberately broken property that MUST
 #                               be refuted - a gate that cannot fail
 #                               proves nothing, and this run discovered
@@ -72,6 +74,7 @@ vacuity() { # label, top, min_asserts, files...
 vacuity fifo       tb_fifo_formal      3 ../rtl/cft_fifo.sv tb_fifo_formal.sv
 vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.sv
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
+vacuity mulpass    tb_mulpass_formal   1 -I../rtl ../rtl/cft_mulpass.sv tb_mulpass_formal.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
@@ -113,6 +116,10 @@ run_proof seedop seedop.sby check "cft_seedop routing, all 2^40 inputs"
 run_proof seedop seedop.sby cover "cft_seedop operand classes reachable"
 run_proof equiv  equiv.sby  check "cft_simpleops == frozen ref (op != 26,27)"
 run_proof equiv  equiv.sby  cover "carve-out neighbours reachable"
+run_proof mulpass mulpass.sby p25c1 "cft_mulpass exact: 2 passes x 1 column, any state"
+run_proof mulpass mulpass.sby p49c1 "cft_mulpass exact: 3 passes x 1 column"
+run_proof mulpass mulpass.sby p49c2 "cft_mulpass exact: 2 passes x 2 columns (tree)"
+run_proof mulpass mulpass.sby cover "cft_mulpass claim reached, top bit set"
 
 # --- the negative control ------------------------------------------------
 # expect fail in negcontrol.sby means: rc 0 == the broken property was
@@ -139,7 +146,7 @@ echo "== formal gate verdicts =="
 printf '%s' "$verdicts"
 echo
 if [ "$bad" -ne 0 ]; then
-    echo "FORMAL GATE: FAIL ($bad of 7)"
+    echo "FORMAL GATE: FAIL ($bad of 11)"
     exit 1
 fi
-echo "FORMAL GATE: PASS (7 of 7, negative control refuted)"
+echo "FORMAL GATE: PASS (11 of 11, negative control refuted)"
