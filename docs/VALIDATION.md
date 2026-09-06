@@ -4356,7 +4356,40 @@ recorded on 2026-09-04, from the other end of the stack.
 Restored from git and the same four re-run: **7 tests, 7 passed, 0
 failed**.
 
-**What was not run.** Implementation at any pass count, and every
-`xc7*` cell of the area matrix, because this host's Vivado 2026.1
-carries only the UltraScale+ and Versal families and refused those
-parts by name.
+**The 7-series cells, run the next hour on a part that was
+available.** The area matrix's `xc7k325t` and `xc7a200t` cells failed
+because this host's Vivado 2026.1 carries only the UltraScale+ and
+Versal families; the 2022.2 install in the `cft2204` distro carries
+Zynq-7000 but its licence is node-locked to Alveo devices, so
+`xc7z045` refused in eighteen seconds. `xc7z020` is in every free
+edition's device list and its fabric is Artix-7 class, so the four
+cells were run there - too small to hold a tile, which is not what they
+were for:
+
+| MUL_PASSES | ladders | LUT | DSP | implied delay |
+|---|---|---|---|---|
+| 1 | off | 135,865 | 220 (capped) | 16.157 ns |
+| 1 | on | 120,282 | 220 (capped) | 16.327 ns |
+| 10 | off | 116,498 | 56 | 16.428 ns |
+| 10 | on | **99,287** | **56** | 17.140 ns |
+
+The single-pass rows carry a caveat rather than a number: the part has
+220 DSPs, a single-pass tile wants 262, and Vivado capped inference at
+100% and spilled the rest into fabric, so those LUT figures are
+inflated by an unknown amount. The `MUL_PASSES=10` rows are clean, and
+between them the fused ladders are worth 14.8% of the tile's LUTs on
+this fabric.
+
+**The result the step was after, arrived at by both levers rather than
+one:** a full fp256-capable tile at **99,287 LUT and 56 DSP** on
+7-series fabric is 49% of a Kintex-7 325T and 74% of an Artix-7 200T,
+where a single-pass tile's 262 DSPs would have been 31% and 35% of
+those parts' DSP columns and 119% of this one's. The implied path is
+17.1 ns on a -1 part, about 58 MHz, which is the trade stated as a
+number.
+
+**Still not run.** Implementation at any pass count; the `xc7k325t`
+and `xc7a200t` cells themselves, which want those device families
+added to a Vivado install - an elevation and an AMD login, so an
+operator's step, and the free-tier licence is demonstrably not the
+blocker since `xc7z020` synthesised without one.
