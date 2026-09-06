@@ -355,6 +355,101 @@ control flips one byte of a returned encoding inside the client, and
 separately corrupts a frame's length, to show the replay and the chain
 fail and the refusal fires.
 
+## What the four measurements said
+
+Measured 2026-09-06 on DESKTOP-T33SK86 (Windows 11, MINGW64, gcc -O2),
+the client always the Windows build, against three servers: none (the
+local software backend), a Windows server on loopback, and a Linux
+server in the `cft2204` WSL distro reached through WSL2's localhost
+forwarding. The box was carrying other work; the seconds wobble, the
+bits do not.
+
+**(a) The full replay, three ways.** `cft-selftest` over `vectors/out`,
+the runner's generator counts:
+
+| route | sets | cases | result | seconds |
+|---|---|---|---|---|
+| local | 168 | 1,223,635 | all matching | 442.2 |
+| Windows loopback | 168 | 1,223,635 | all matching | 450.3 |
+| Linux server in WSL | 168 | 1,223,635 | all matching | 501.9 |
+
+Every case is a round trip on this path, so the replay is the worst
+case the transport has and it costs 2% on loopback and 13% across the
+OS boundary. Beside it, `device-test` against the remote handle -
+every format, opcode and attribute, the partition invariants, the
+awkward reduction lengths - **2,248 checks, 0 failed**, and
+`remote-test`'s own protocol suite **245 checks, 0 failures**.
+
+**(b) The workload chains, local against loopback.** Each tool prints a
+SHA-256 chain over its records; `matches` in the last column means the
+chain also equals the one `bindings/wasm/demos_chains.json` recorded on
+2026-09-04 for that configuration.
+
+| configuration | chains | local (s) | loopback (s) | recorded | library calls |
+|---|---|---|---|---|---|
+| collatz trajectory | same | 0.92 | 3.91 | matches | 2,437 |
+| collatz sweep | same | 0.75 | 5.76 | matches | 178 |
+| zoom fp256 | same | 56.49 | 69.08 | matches | 1 for the orbit |
+| zoom fp64 | same | 19.77 | 23.46 | matches | 1 for the orbit |
+| orbits fp256 | same | 1.82 | 2.78 | matches | 23,627 |
+| orbits fp64 | same | 1.23 | 2.03 | matches | 23,627 |
+| enclose fp32 / fp64 / fp128 / fp256 | same | 0.51 / 0.26 / 0.49 / 0.36 | 0.36 / 0.42 / 0.37 / 0.33 | matches | 189 / 237 / 315 / 453 |
+| mersenne to 2281 | same | 7.75 | 58.82 | matches | 1,232,076 |
+| collatz sweep, program engine | same | 0.47 | 0.59 | - | 1 |
+| zoom fp64, program engine | same | 11.93 | 19.18 | - | 1 for the orbit |
+| orbits fp256, program engine | same | 0.63 | 0.92 | - | 1,100 |
+| enclose fp256, program engine | same | 0.40 | 0.42 | - | 359 |
+| mersenne, program engine | same | 6.41 | 30.27 | - | 438,262 |
+
+The column that matters is the first: **every chain is the same over a
+socket**. The column that explains the rest is the last. A tool whose
+step is a program pays one frame per call and is barely slower over a
+socket; a tool that issues a million library calls pays a million round
+trips, and Mersenne's 7.6x is that, not the arithmetic.
+
+**(c) Across the OS boundary.** The same tools against the Linux server
+in WSL, which is the case this step exists for - a Windows client
+computing on a Linux-hosted device:
+
+| configuration | chains | local (s) | WSL (s) | recorded |
+|---|---|---|---|---|
+| orbits fp256 | same | 1.19 | 710.79 | matches |
+| enclose fp256 | same | 0.13 | 60.86 | matches |
+| mersenne to 2281 | same | 3.89 | 941.45 | matches |
+| zoom fp256 (32-wide), program engine | same | 1.44 | 400.19 | - |
+| collatz sweep, program engine | same | 0.19 | 3.03 | - |
+| enclose fp256, program engine | same | 0.11 | 2.52 | - |
+| mersenne, program engine | same | 3.16 | 1859.39 | - |
+
+Same chains, every one. The WSL2 boundary costs about 25 microseconds a
+round trip where loopback costs about 3, so a call-heavy tool is two to
+three orders slower there and a program-shaped one is not. This is the
+measurement that says what the remote backend is for: **programs, not
+per-element traffic** - which is what the sequencer was built for, and
+what docs/ROADMAP.md's third tier assumes.
+
+**(d) The round trips themselves.** From the server's own counters, one
+call at a time:
+
+| operation | elements | RUN | PROG_RUN | REDUCE | frames |
+|---|---|---|---|---|---|
+| run fma | any | 1 | 0 | 0 | 1 |
+| div, program route | 4,096 | 0 | 1 | 0 | 3 |
+| div, chunk route (`CFT_DIVSQRT_SEQ=0`) | 4,096 | 21 | 0 | 0 | 21 |
+| sqrt, program route | 4,096 | 0 | 1 | 0 | 3 |
+| sqrt, chunk route | 4,096 | 32 | 0 | 0 | 32 |
+| rint | 4,096 | 4 | 0 | 0 | 4 |
+| scaleb, cmp_sig | 4,096 | 1 | 0 | 0 | 1 |
+| formatof_add | 4,096 | 128 | 0 | 0 | 128 |
+
+So the program route is what makes a composed operation affordable
+remotely: **one frame where the chunk route needs twenty-one or
+thirty-two**, and it is the default here as it is on the XRT backend.
+The raw costs: one fp64 element per `cft_run`, 22.5 microseconds a call
+(44,444 calls/s); 4,096 elements per call, 1.40 ms (2,925,714
+elements/s). A batch amortises the socket the way it amortises
+everything else.
+
 ## The runner stage
 
 `verify/run.sh`'s `remote` stage, in the quick budget: build the
