@@ -26,6 +26,20 @@
 #define CFT_BACKEND_SW  0
 #define CFT_BACKEND_XRT 1
 
+/* ==== the remote backend (docs/REMOTE.md) ============================
+ * A device behind a socket, opened with "cft://host:port". Compiled in
+ * by default: it is C99 plus the operating system's socket API and
+ * adds no link-time dependency (backend_remote.c says how). Building
+ * with -DCFT_NO_REMOTE leaves it out, and cft_open() of a cft:// URL
+ * is then CFT_ERR_NO_DEVICE - the answer a build without XRT gives an
+ * xclbin path. */
+#ifndef CFT_NO_REMOTE
+#include "backend.h"
+#include "remote.h"
+#endif
+#define CFT_BACKEND_REMOTE 2
+/* ==== end of the remote block ======================================= */
+
 struct cft_device {
     int         backend;
     int         index;
@@ -168,6 +182,43 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     if (index < 0)
         return CFT_ERR_INVALID_ARGUMENT;
 
+    /* ==== the remote backend: "cft://host:port" (docs/REMOTE.md) ====
+     * One additive spelling of the artifact argument; every other
+     * string still means what it always did. The backend does the
+     * connecting and the handshake and reports the server's device as
+     * this one's capabilities; the handle it returns is dispatched to
+     * exactly as the XRT one is, below. */
+    if (artifact && strncmp(artifact, "cft://", 6) == 0) {
+#ifndef CFT_NO_REMOTE
+        uint32_t fmask = 0, groups = 0, tiles = 0, ver = 0;
+        int readable = 1;
+        void *hw = NULL;
+        int st = cftr_open(artifact, index, &hw, &fmask, &groups, &tiles,
+                           &ver, &readable);
+        if (st != CFT_OK)
+            return (cft_status)st;
+        dev = (cft_device *)calloc(1, sizeof *dev);
+        if (!dev) {
+            cftr_close(hw);
+            return CFT_ERR_OUT_OF_MEMORY;
+        }
+        dev->backend        = CFT_BACKEND_REMOTE;
+        dev->index          = index;
+        dev->format_mask    = fmask;
+        dev->op_groups      = groups;
+        dev->tiles          = tiles;
+        dev->device_version = ver;
+        dev->flags_readable = readable;
+        dev->backend_name   = "remote";
+        dev->hw             = hw;
+        *out = dev;
+        return CFT_OK;
+#else
+        return CFT_ERR_NO_DEVICE;
+#endif
+    }
+    /* ==== end of the remote block =================================== */
+
     if (artifact) {
 #ifdef CFT_ENABLE_XRT
         uint32_t fmask = 0, groups = 0, tiles = 0, ver = 0;
@@ -225,18 +276,50 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     return CFT_OK;
 }
 
-#ifdef CFT_ENABLE_XRT
+#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 /* program.c asks this to decide which executor a program run belongs
  * to. It is the only thing outside this file that needs to know a
  * device has a backend at all, and it deliberately returns the opaque
  * handle rather than the struct: the shape of cft_device stays this
- * file's business. */
+ * file's business. A remote device (docs/REMOTE.md) has a backend
+ * handle too, and gets the same answer. */
 void *cft_device_backend(const struct cft_device *dev)
 {
-    if (!dev || dev->backend != CFT_BACKEND_XRT)
+    if (!dev)
+        return NULL;
+    if (dev->backend != CFT_BACKEND_XRT && dev->backend != CFT_BACKEND_REMOTE)
         return NULL;
     return dev->hw;
 }
+
+/* ==== the remote block's dispatcher (backend.h) =======================
+ * Which device backend a program run belongs to is decided here, where
+ * the backend kind lives, so that program.c names neither of them. */
+int cft_backend_program_run(struct cft_device *dev, int fmt,
+                            const void *image, size_t image_bytes,
+                            uint32_t max_deposits,
+                            const void *a, const void *b, const void *c,
+                            void *deposits, uint32_t *counts, size_t n,
+                            uint32_t *flags, uint32_t *bus)
+{
+#ifdef CFT_ENABLE_XRT
+    if (dev && dev->backend == CFT_BACKEND_XRT)
+        return cftx_program_run(dev->hw, fmt, image, image_bytes,
+                                max_deposits, a, b, c, deposits, counts, n,
+                                flags, bus);
+#endif
+#ifndef CFT_NO_REMOTE
+    if (dev && dev->backend == CFT_BACKEND_REMOTE)
+        return cftr_program_run(dev->hw, fmt, image, image_bytes,
+                                max_deposits, a, b, c, deposits, counts, n,
+                                flags, bus);
+#endif
+    (void)fmt; (void)image; (void)image_bytes; (void)max_deposits;
+    (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
+    (void)flags; (void)bus;
+    return CFT_ERR_INTERNAL;
+}
+/* ==== end of the remote block ======================================= */
 #endif
 
 CFT_API void cft_close(cft_device *dev)
@@ -244,14 +327,26 @@ CFT_API void cft_close(cft_device *dev)
     if (!dev)
         return;
 #ifdef CFT_ENABLE_XRT
-    if (dev->hw)
+    if (dev->hw && dev->backend == CFT_BACKEND_XRT)
         cftx_close(dev->hw);
+#endif
+#ifndef CFT_NO_REMOTE
+    if (dev->hw && dev->backend == CFT_BACKEND_REMOTE)
+        cftr_close(dev->hw);
 #endif
     free(dev);
 }
 
 CFT_API const char *cft_last_error(void)
 {
+    /* Two device backends keep a message each. The remote one clears
+     * its own at the start of every call it makes, so its message is
+     * non-empty only while its most recent call is the one that
+     * failed - which is exactly when it is the message to show. */
+#ifndef CFT_NO_REMOTE
+    if (*cftr_last_error())
+        return cftr_last_error();
+#endif
 #ifdef CFT_ENABLE_XRT
     return cftx_last_error();
 #else
@@ -411,6 +506,22 @@ CFT_API cft_status cft_run(cft_device *dev,
         return st;
     }
 #endif
+    /* ==== the remote backend (docs/REMOTE.md) ========================
+     * The same shape as the XRT dispatch above: the backend moves the
+     * bytes and returns the run's flag word, and this file ORs it into
+     * the status word through the one seam every backend uses. */
+#ifndef CFT_NO_REMOTE
+    if (dev->backend == CFT_BACKEND_REMOTE) {
+        uint32_t fl = 0;
+        cft_status st = (cft_status)cftr_run(dev->hw, (int)op, (int)fmt,
+                                             (int)rnd, a, b, c, d, n,
+                                             &fl, bus_out);
+        if (st == CFT_OK)
+            cft_flags_emit(dev, fl, flags_out);
+        return st;
+    }
+#endif
+    /* ==== end of the remote block =================================== */
 
     pa = (const uint8_t *)a;
     pb = (const uint8_t *)b;
@@ -714,6 +825,24 @@ CFT_API cft_status cft_reduce(cft_device *dev,
         }
     }
 #endif
+    /* ==== the remote backend (docs/REMOTE.md) ========================
+     * The whole vector crosses in one frame and the server's own
+     * cft_reduce walks the tree - on its software backend directly, on
+     * a tile through its own partitioning - so CFT_DOT needs no MUL
+     * pass here: the server's library composes it, bit for bit the
+     * same. The composed CFT_SUMSQ and CFT_SUMABS were already taken
+     * apart above and arrive here as a DOT or an ABS pass and a SUM. */
+#ifndef CFT_NO_REMOTE
+    if (dev->backend == CFT_BACKEND_REMOTE) {
+        cft_status st = (cft_status)cftr_reduce(dev->hw, (int)op, (int)fmt,
+                                                (int)rnd, a, b, d, n,
+                                                &fl, bus_out);
+        if (st == CFT_OK)
+            cft_flags_emit(dev, fl, flags_out);
+        return st;
+    }
+#endif
+    /* ==== end of the remote block =================================== */
 
     if (cft_sf_reduce(f, (int)op, (int)rnd, a, b, esz, 0, n, &bo, &fl))
         return CFT_ERR_INTERNAL;

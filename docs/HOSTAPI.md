@@ -1506,3 +1506,79 @@ built; docs/SEQUENCER.md holds the program-model ones.
    nothing on the zoom's pixel phase. Wrapping them is small, and it is
    a module rebuild, so it waits for the next step that rebuilds the
    module anyway.
+
+## The remote backend: a device behind a socket (2026-09-06)
+
+Step 1 of docs/ROADMAP.md's third tier, and docs/PLATFORMS.md section
+6's Windows answer. docs/REMOTE.md is the protocol and the measured
+numbers; this section is the API's view of it.
+
+```c
+cft_open("cft://host:port", 0, &dev);     /* a remote device */
+```
+
+One additive spelling of `cft_open`'s artifact argument, and nothing
+else in the ABI moved. The handle is a `cft_device` like any other:
+`cft_get_caps` reports backend `remote` and the server's device for the
+format mask, opcode groups, tile count, contract version and
+`flags_readable`; `cft_supports` answers from those; every entry point
+takes the handle. What is different is where the arithmetic happens,
+and the rule for that is the one `host/src/device.c` already draws for
+the XRT backend: **only the calls that touch a device cross the wire**
+- `cft_run`, `cft_reduce` for `CFT_SUM` and `CFT_DOT`, and
+`cft_program_run` - and every host operation runs in the caller's own
+process on the caller's own copy of the library, which is bit-identical
+to the server's by contract. The clause-5 host operations, the
+transcendentals, the character conversions, the augmented operations,
+the scaled products, the magnitude forms and `cft_convert` never make
+a round trip; the composed operations (`cft_div`, `cft_sqrt`,
+`cft_rint`, `cft_scaleb`, `cft_cmp_sig`, the formatOf widening route)
+issue their passes through the backend and make one round trip per
+pass, or one per chunk on the program route, which a remote device
+takes by default as a tile does.
+
+**The status word stays on the handle.** A remote call returns its flag
+word in the response and `device.c` ORs it in through
+`cft_flags_emit`, the seam every backend uses, so the six operations of
+5.7.4 cost no round trip and a composed operation's internal passes are
+muted exactly as they are locally. The server's device has a word too,
+since it is a library device; nothing reads it and it dies with the
+connection. **Buffers stay on the client** for the same reason they are
+host memory on the software backend: `cft_run` copies from whatever
+pointers it is given on every backend today.
+
+The server, `host/tools/cft-serve.c`, opens one library device per
+connection - the software backend, or `--artifact` for a card on a
+Linux box - binds to `127.0.0.1` unless told otherwise, multiplexes its
+connections with `select()` and serves their requests one at a time,
+and is stopped by its PID. No authentication, no encryption: a
+transport, not a security boundary. The socket API is the operating
+system's and adds no link flag anywhere; on Windows `ws2_32.dll` is
+loaded at first use, so `libcft.a` links exactly as it did and the
+Fortran, Go and Rust examples build unchanged. An emscripten build
+compiles the backend to a stub that answers `CFT_ERR_NO_DEVICE`.
+
+Outcomes a caller can see: a malformed URL is
+`CFT_ERR_INVALID_ARGUMENT`; an unreachable server is
+`CFT_ERR_NO_DEVICE` with the socket's reason in `cft_last_error()`; a
+server built from a library with a different ABI version is
+`CFT_ERR_UNSUPPORTED` (a mismatch is refused, not warned about); and a
+corrupted, truncated or out-of-step frame poisons the handle so that
+every later call is `CFT_ERR_INTERNAL` with "close it and open it
+again" in `cft_last_error()` - the XRT backend's discipline for a
+handle whose compute units may still be running. A receive that
+outlasts `CFT_TIMEOUT_MS` (default twenty minutes) is
+`CFT_ERR_TIMEOUT`.
+
+How it is held to the contract: `host/tests/device_test.c` takes a
+`cft://` URL as its artifact and holds the remote backend against the
+software one over its full matrix, exactly as it holds the XRT one;
+`host/tests/remote_test.c` speaks the frames badly on purpose and
+checks each refusal, exercises the operations libcft's client never
+issues, and reads the composed operations' round-trip counts from the
+server's own counters; `host/tests/remote_check.py` owns a loopback
+server's lifecycle (started, PID recorded, terminated by that PID) and
+runs the replay and one workload chain both ways; and `verify/run.sh`'s
+`remote` stage runs that in the quick budget. The full-set replay, the
+five workloads' chains across a Windows-to-WSL boundary, and the rates
+are in docs/REMOTE.md.

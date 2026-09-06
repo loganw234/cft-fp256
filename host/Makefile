@@ -56,7 +56,8 @@ INC     := -Iinclude
 
 SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
            src/clause5.c src/chars.c src/augmented.c src/mpfloat.c src/transcend.c \
-           src/program.c src/reduce.c src/formatof.c src/conformance.c
+           src/program.c src/reduce.c src/formatof.c src/conformance.c \
+           src/backend_remote.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
@@ -676,6 +677,60 @@ clean-mersenne:
 	rm -f cft-mersenne cft-mersenne.exe
 .PHONY: clean-mersenne
 # ===================================================================
+
+# ===================================================================
+# cft-serve - the remote backend's server (docs/REMOTE.md)
+#
+# The tile behind a socket: a server that holds one library device per
+# connection (the software backend by default, or --artifact for a
+# card) and serves the device-touching calls over the frame protocol
+# of docs/REMOTE.md, and the client backend in src/backend_remote.c
+# that cft_open("cft://host:port") dispatches to. The socket API is the
+# operating system's and adds no link flag on any platform (the
+# backend's header says how), which is why nothing else in this file
+# changed to accommodate it.
+#
+# Its own delimited block, on the same terms as the workloads' blocks
+# above: TOOLS += plus an explicit `all:` prerequisite, and `clean`
+# gains a prerequisite rather than a longer command line.
+#
+#   make remotetest        start a loopback server, hold the remote
+#                          backend against the software one (protocol
+#                          refusals, device-test, a bounded replay, one
+#                          workload chain), stop it BY PID
+# ===================================================================
+TOOLS += cft-serve$(EXE)
+all: cft-serve$(EXE)
+clean: clean-remote
+.PHONY: serve remotetest clean-remote
+
+# -Isrc: the server speaks the frames from src/remote.h, which is
+# internal, and links the archive that carries them.
+cft-serve$(EXE): tools/cft-serve.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -Isrc $^ -o $@ $(XRTLIBS)
+
+serve: cft-serve$(EXE)
+
+# The protocol-level test: the refusals (a wrong ABI, a corrupted crc,
+# a bad magic, an oversize length, a request before HELLO), the buffer
+# and status-word operations libcft's own client never issues, the
+# server's counters, and a bit-identity smoke test against the
+# software backend. --bench reports the composed operations' round
+# trips from the server's counters.
+remote-test$(EXE): tests/remote_test.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -Isrc $^ -o $@ $(XRTLIBS)
+
+# tests/remote_check.py starts the server, records its PID, runs every
+# check through it, and terminates that PID - never an image name.
+# Needs the python the vectors are generated with, as the other checks
+# do: make -C host remotetest PYTHON=/c/path/to/python.exe
+remotetest: cft-serve$(EXE) remote-test$(EXE) device-test$(EXE) \
+            cft-selftest$(EXE) cft-collatz$(EXE)
+	$(PYTHON) tests/remote_check.py
+
+clean-remote:
+	rm -f cft-serve cft-serve.exe remote-test remote-test.exe
+# ==================== end of the cft-serve block ===================
 
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean

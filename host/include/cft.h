@@ -312,6 +312,62 @@ CFT_API cft_status cft_open(const char *artifact, int index,
                             cft_device **out);
 CFT_API void       cft_close(cft_device *dev);
 
+/* ==== a device behind a socket (docs/REMOTE.md) =====================
+ *
+ *   artifact == "cft://host:port"   a REMOTE device: a cft-serve
+ *                                   process at that address holding a
+ *                                   library device of its own - the
+ *                                   software backend, or an xclbin on
+ *                                   a machine that has the card.
+ *
+ * One additive spelling of the argument above; every other string
+ * still means what it always did. The handle behaves like any other:
+ * cft_run, cft_reduce and cft_program_run cross the wire and run on
+ * the server's device, and everything the library computes on the
+ * host - clause 5's host operations, the transcendentals, the
+ * character conversions, the reductions' host parts, the composed
+ * operations' bookkeeping - runs in this process on this copy of the
+ * library, which is bit-identical to the server's by contract. Only
+ * the calls that touch a device make a round trip, and the composed
+ * operations (cft_div, cft_sqrt, cft_rint, cft_scaleb, cft_cmp_sig,
+ * the formatOf widening route) make one per pass, or one per chunk on
+ * the program route; docs/REMOTE.md measures both.
+ *
+ * cft_get_caps reports backend "remote" and the SERVER's device for
+ * everything else: its format mask, opcode groups, tile count,
+ * hardware contract version and flags_readable. `index` must be 0 -
+ * the URL names the device - and anything else is CFT_ERR_NO_DEVICE.
+ *
+ * The status word (7.1) is THIS handle's, kept here and never sent:
+ * every remote call returns its flag word in the response and this
+ * library ORs it in through the same seam every backend uses, so the
+ * six operations of 5.7.4 cost no round trip and a composed
+ * operation's internal passes are muted exactly as they are locally.
+ *
+ * Outcomes: a malformed URL is CFT_ERR_INVALID_ARGUMENT; a server that
+ * cannot be reached is CFT_ERR_NO_DEVICE, with the socket's own reason
+ * in cft_last_error(); a server built from a library with a different
+ * ABI version is CFT_ERR_UNSUPPORTED - a mismatch is refused, not
+ * warned about, because the two libraries need not agree on which
+ * operations exist; and a corrupted, truncated or out-of-step frame
+ * poisons the handle, so that every later call is CFT_ERR_INTERNAL
+ * with "close it and open it again" in cft_last_error(), the same
+ * discipline the XRT backend applies to a handle whose compute units
+ * may still be running. A receive that outlasts CFT_TIMEOUT_MS
+ * (default twenty minutes) is CFT_ERR_TIMEOUT.
+ *
+ * Scope, stated plainly: no authentication and no encryption. The
+ * server binds to 127.0.0.1 unless told otherwise, and serves its
+ * connections' requests one at a time, in arrival order. It is a
+ * transport, not a security boundary.
+ *
+ * The socket API is the operating system's - Winsock on Windows, BSD
+ * sockets elsewhere - and adds no dependency and no link flag: on
+ * Windows the library loads ws2_32.dll at first use, so linking
+ * libcft.a is exactly what it was. host/tools/cft-serve.c is the
+ * server.
+ * ==================================================================== */
+
 /* What this device actually implements.
  *
  * A trimmed build may carry fewer formats than the full tile, and a
