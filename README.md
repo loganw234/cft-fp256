@@ -153,6 +153,8 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      PLATFORMS (the board and platform survey: what fits
                      the tile, what the licence covers, what to verify
                      before buying),
+                     REMOTE (the tile behind a socket: the protocol,
+                     what crosses the wire, and the OS answer),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```

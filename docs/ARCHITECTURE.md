@@ -662,12 +662,58 @@ geometry table above); `MUL_PASSES` is what makes a DSP-poor part or a
 many-tile die stop caring about the multiplier. The two compose, and
 the sweep script takes both.
 
-**Not measured here.** The 7-series and Artix numbers this section
-quotes as percentages are arithmetic against AMD's device tables, not
-synthesis: the Vivado 2026.1 install on this host carries only the
-UltraScale+ and Versal families, so every `xc7*` cell of the matrix
-failed with "Specified part could not be found" and is unrun rather
-than unfavourable. Implementation was not run at any pass count.
+**On 7-series fabric, where the two levers have to be measured
+together.** The Vivado 2026.1 install on this host carries only the
+UltraScale+ and Versal families, and the 2022.2 install in the
+`cft2204` distro carries Zynq-7000 but is licensed for Alveo devices
+only - so the matrix's `xc7k325t` and `xc7a200t` cells are unrun. What
+is free in every edition and present there is `xc7z020`, whose fabric
+is Artix-7 class: CARRY4 and 6-input LUTs rather than UltraScale+'s
+CARRY8, which is the difference that matters for a tile bound by its
+aligner. The part is far too small to hold a tile - that is not what it
+was run for - but the four cells on one fabric say what each lever
+buys:
+
+| MUL_PASSES | ladders | LUT | FF | DSP | implied delay |
+|---|---|---|---|---|---|
+| 1 | off | 135,865 | 59,147 | 220 (capped) | 16.157 ns |
+| 1 | on | 120,282 | 49,395 | 220 (capped) | 16.327 ns |
+| 10 | off | 116,498 | 53,193 | 56 | 16.428 ns |
+| 10 | on | **99,287** | 43,329 | **56** | 17.140 ns |
+
+**Read the two `MUL_PASSES=1` rows with their asterisk.** This part has
+220 DSPs and a single-pass tile wants 262, so Vivado capped inference
+at 100% and put the rest of the multiplier in fabric; those two LUT
+figures are inflated by an unknown amount and cannot be quoted as a
+tile's cost on a part with DSPs to spare. They are still the honest
+answer to a different question - what a single-pass tile does to a
+DSP-starved part - and the answer is that it stops being a multiplier
+design at all.
+
+The `MUL_PASSES=10` rows are clean at 56 of 220 DSPs, and between them
+the fused ladders take **116,498 to 99,287 LUT, 14.8%** on this fabric,
+against the 11.3% they took on the U50's (139,404 to 123,599 in the
+geometry table above). So the levers compose: the
+pass count empties the DSP columns, the ladders take the aligner and
+normaliser, and **a full fp256-capable tile is 99,287 LUT and 56 DSP on
+7-series fabric.** Against the parts docs/PLATFORMS.md priced, that is
+**49% of a Kintex-7 325T** (203,800 LUT, 840 DSP) and **74% of an
+Artix-7 200T** (134,600, 740) on the axis that constrains, with the DSP
+axis at 7% and 8%. A tile fits both, which is what step 4 of the third
+tier needed to know.
+
+The timing is the other half of the trade and this part is honest about
+it: 17.1 ns of implied path on a -1 Artix-class fabric is about 58 MHz,
+against 5.6 ns and a 135 MHz close on the U50's -2 UltraScale+. Slower,
+on anything, is a design position rather than a disappointment - but it
+is the number, and the K325T's -2 grade would be the one to measure
+before quoting a clock for a real board.
+
+**Still not measured.** Implementation at any pass count; the
+`xc7k325t` and `xc7a200t` cells themselves, which want those device
+families added to a Vivado install (a login and an elevation, so an
+operator's step); and any post-route figure on 7-series fabric, where
+routing rather than logic is usually what decides a tile-sized design.
 
 ## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 

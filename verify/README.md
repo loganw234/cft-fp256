@@ -14,7 +14,7 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --require-all  # skips become failures
     SIM_JOBS=12 bash verify/run.sh    # the sim stage's targets, twelve at a time
     bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
-    bash verify/run.sh --budget quick   # ~10 min
+    bash verify/run.sh --budget quick   # ~20 min
     bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded
     bash verify/run.sh --budget full    # the census
 
@@ -26,7 +26,7 @@ No stage takes hours by itself; a full run is the sum of a dozen
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
-| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, the five workloads and the browser demos, soak-quick, and the remote backend on loopback - after a host build the budget makes itself | about 12 minutes, loaded or not, plus about 6 for `remote` on this host (its bounded replay runs one round trip per case) |
+| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
 | `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about an hour with the box quiet; 2-3 hours beside a CUDA job |
 | `full` | everything: gate + sim, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
 

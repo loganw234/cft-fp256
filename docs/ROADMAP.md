@@ -678,7 +678,13 @@ built for 237x27 - **9% of the silicon it occupies.** Every lane is
 utilized and almost none of the hardware is. Cutting the width instead
 - the granule grid `docs/ARCHITECTURE.md` sketched, tiling 237x237 into
 24x24 granules with gated cross-terms so fp32 lights eight small
-granules - is the version that would pay, and remains unbuilt.
+granules - is the version that would pay, and remains unbuilt. **Measured from
+the other side on 2026-09-06**: `MUL_PASSES` iterates the columns
+instead of cutting their width, and takes the tile from 262 DSPs to 56
+while moving its LUTs by 6.4%. That is this paragraph's point arriving
+as a number - the multiplier is DSPs - and it means the granule grid's
+remaining prize is throughput per DSP at the narrow rungs, not tile
+area.
 
 This cuts in favour of the aligner work rather than against it: the
 aligner is LUTs, which are the constraint, so its 3.77x lands where the
@@ -2432,20 +2438,48 @@ the Alveo: **open tiles that emit identical bits, slower, on
 anything**, scaled by the ring doctrine of this file rather than by die
 size. The steps, in order, each with the gate that says it is done:
 
-1. **`backend_remote` and the frame protocol.** Software only. Gate:
-   the conformance replay and the five workloads' checks pass through
-   the socket with the same chains they produce locally, from a
-   Windows client against a Linux host holding the U50C. This is also
-   the Windows answer of docs/PLATFORMS.md section 6, for free.
+1. **`backend_remote` and the frame protocol.** Software only.
+   **Done 2026-09-06** (docs/REMOTE.md): `cft_open("cft://host:port")`,
+   `host/tools/cft-serve.c`, and only the device-touching calls on the
+   wire. The gate was met on three routes - 168 sets and 1,223,635
+   cases matching local, on loopback, and with a Windows client against
+   a Linux server in the `cft2204` distro - and every workload chain is
+   the same over a socket. The Windows answer of docs/PLATFORMS.md
+   section 6 came with it, and the cost table says what the backend is
+   for: a composed operation is one frame on the program route where
+   the chunk route is twenty-one, so this is a path for programs and
+   not for per-element traffic. A `remote` stage runs in the quick
+   budget.
 2. **The hundred-dollar Kintex-7 and the openXC7 DSP experiment.** A
    purchase and a census: the conformance vectors through an
    openXC7-built fp32 lane, which is the one instrument that catches a
    complemented DSP48E1 control pin (nextpnr-xilinx#159, open as of
    2026-09-05). Nothing open proceeds on that flow until this is green.
-3. **The multi-cycle fp256 variant** behind a build parameter, proven
-   bit-identical in simulation and by the formal gate before it touches
-   a board, with its area and throughput measured out of context on the
-   same parts the survey sized. Weeks, inside the existing method.
+3. **The multi-cycle fp256 variant** behind a build parameter.
+   **Done 2026-09-06** (`MUL_PASSES`, docs/ARCHITECTURE.md's "The
+   multi-cycle rung"), and it did not do what this step assumed it
+   would. Bit identity holds by construction and by gate - 13
+   multi-cycle targets and 31 tests at ten passes, the shipping suite
+   re-run at 21 and 60, a dropped-carry control that fails 6 of 7 - and
+   fp32 never slows down. But on the U50 part it cuts DSPs by 79% and
+   LUTs by 6.4%, because the tile's LUTs are the aligner and the
+   normaliser and its multiplier is DSPs: the sharing doctrine above,
+   arriving from the other side. **The two levers had to be measured
+   together to matter**, and on 7-series fabric they are: with the
+   fused ladders on as well, a full fp256-capable tile synthesises at
+   99,287 LUT and 56 DSP on Artix-7 class fabric, which is 49% of a
+   Kintex-7 325T and 74% of an Artix-7 200T where a single-pass tile's
+   262 DSPs alone would have been 31% and 35% of those parts' DSP
+   columns and 119% of the Zynq-7020 those cells were run on. The
+   trade is in the clock: 17.1 ns of implied path there, about 58 MHz,
+   against 5.6 ns and 135 MHz on the U50. So step 4's board is
+   reachable, the pass count is what stops a DSP-poor part refusing
+   outright, and the ladders remain the LUT lever. The
+   formal proof of the pass accumulation does **not** close - a bounded
+   model check over a multiplier is the shape a SAT solver does worst
+   at, and the real-width task ran four hours without returning - so it
+   is parked out of `formal/run.sh` with its reason in the file and the
+   bit identity rests on the benches, as the fused ladders' does.
 4. **An Ethernet-attached tile** on the Arty A7-100T or the K325T: the
    first tile with no vendor runtime anywhere in its path. Gate: the
    census, on an open flow, from a client that does not know which
@@ -2455,8 +2489,10 @@ size. The steps, in order, each with the gate that says it is done:
 5. **The ring**, once there are two of them, on the doctrine already
    written here.
 
-Steps 1 and 3 are weeks of work; step 2 is a purchase; step 4 is the
-hard one and is the reason the other three come first.
+Steps 1 and 3 landed on 2026-09-06, the same day the plan was written;
+step 2 is a purchase; step 4 is the hard one and is the reason the
+others came first. What step 4 now waits on is a board and an open
+flow, not a smaller tile.
 
 ## The adoption story these serve
 
