@@ -12,7 +12,8 @@ contract clause-by-clause against IEEE Std 754-2019; `vectors/` makes
 it scoreable.
 
 The adoption story is two tiers with one contract. A software library
-anyone can run on anything - the proven case is atlas-engine's pinned
+anyone can run on anything - the proven case is
+[atlas-engine](https://github.com/loganw234/atlas-engine)'s pinned
 GLSL det library, one hash across NVIDIA, AMD, and Intel GPUs - and
 this hardware for heavy compute: identical bits, more speed, and
 precision up to fp256 when the problem needs it (deep-zoom orbits,
@@ -149,6 +150,9 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      matched to the C tools),
                      ATLAS (the atlas-engine integration: the emitter
                      seam, the det library on the ISA, the four asks),
+                     PLATFORMS (the board and platform survey: what fits
+                     the tile, what the licence covers, what to verify
+                     before buying),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
@@ -222,6 +226,18 @@ card and reproduces the vectors; v1 builds the true fractured array
 directed rounding; v2 adds the orbit/walk micro-sequencer with
 hardware-guaranteed deposition order, the atlas parity column, and the
 high-precision oracle role.
+
+## Neighbours
+
+The workload this tile exists to serve is
+[atlas-engine](https://github.com/loganw234/atlas-engine), and the
+plates it evaluates are the
+[PrettyCloud](https://github.com/loganw234/PrettyCloud) atlas at
+prettycloud.io; docs/ATLAS.md is the assessment of what the backend swap
+needs. The camera whose census this README cites as its proven case is
+atlas-darkroom, which is private, and it labels the citation from its
+own side: one of the operator's projects vouching for another is worth
+exactly what the census behind it is worth, and nothing more.
 
 ## License
 

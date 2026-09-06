@@ -2261,7 +2261,8 @@ analysis (combinational-only modeling, merged 2026-08-01) - a threat
 to reported fmax, never to bits. So multipliers land in DSP48E1 on
 every 7-series row and the LUTs-for-multipliers disaster scenario is
 off the table, but bit-correct DSP results through the released
-toolchain are one in-flight fix away, and the bring-up check is the
+toolchain are one still-open fix away (openXC7/nextpnr-xilinx#159,
+unmerged as of 2026-09-05 - docs/PLATFORMS.md), and the bring-up check is the
 one this repo always runs anyway: the conformance vectors, which would
 catch a complemented INMODE in the first multiply.
 

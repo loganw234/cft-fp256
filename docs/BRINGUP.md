@@ -35,7 +35,10 @@ install, in this order:
 
 Also worth checking before first contact: ~100-250 GB free disk for
 Vitis (a lean device selection fits ~80 GB) plus workspace; BIOS
-"Above 4G Decoding" enabled or the card will not enumerate; and
+"Above 4G Decoding" enabled - community advice that costs nothing,
+not an AMD requirement: docs/PLATFORMS.md found it documented for
+the U25N and the Innova-2 and for no Alveo compute card, so a card
+that fails to enumerate is a shell or slot question first; and
 airflow appropriate to the card - stock U50s are passive and need
 ducted chassis air, while this project's U50C is a custom active-cooled
 unit (75 W, fan attached), which removes that worry. The U50C also
