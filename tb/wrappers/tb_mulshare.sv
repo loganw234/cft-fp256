@@ -20,7 +20,7 @@
 `timescale 1ns/1ps
 
 module tb_mulshare #(
-    parameter int LATENCY = 15
+    parameter int LATENCY = 16
 ) (
     input  logic         clk,
     input  logic         rst_n,

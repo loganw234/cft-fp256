@@ -20,6 +20,8 @@
 #   mulpass_real  4 geometries  the same claim as ONE property, where a
 #                               solver will take it that way - the
 #                               composition argument's independent check
+#   lzcone.sby    4 rungs       cft_lzcone == the priority-loop cone it
+#                               replaced, complete at each window width
 #   negcontrol.sby              a deliberately broken property that MUST
 #                               be refuted - a gate that cannot fail
 #                               proves nothing, and this run discovered
@@ -90,6 +92,7 @@ vacuity() { # label, top, min_asserts, files...
 vacuity fifo       tb_fifo_formal      3 ../rtl/cft_fifo.sv tb_fifo_formal.sv
 vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.sv
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
+vacuity lzcone     tb_lzcone_equiv     3 -I ../rtl ../rtl/cft_fpfma_pipe.sv cft_lzcone_ref.sv tb_lzcone_equiv.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
@@ -150,6 +153,14 @@ run_proof seedop.sby   check 11 "cft_seedop routing, all 2^40 inputs"
 run_proof seedop.sby   cover 12 "cft_seedop operand classes reachable"
 run_proof equiv.sby    check  3 "cft_simpleops == frozen ref (op != 26,27)"
 run_proof equiv.sby    cover  6 "carve-out neighbours reachable"
+
+# cft_lzcone against formal/cft_lzcone_ref.sv, the priority-loop cone
+# frozen at the moment of the split (2026-09-07). Both combinational,
+# so one BMC step is the whole input space at each window width.
+run_proof lzcone.sby   fp32   3 "cft_lzcone == frozen cone, 78-bit window"
+run_proof lzcone.sby   fp64   3 "cft_lzcone == frozen cone, 165-bit window"
+run_proof lzcone.sby   fp128  3 "cft_lzcone == frozen cone, 345-bit window"
+run_proof lzcone.sby   fp256  3 "cft_lzcone == frozen cone, 717-bit window"
 
 # cft_mulpass, at CFT_MUL_MCH = 24 - the chunk the tile synthesises -
 # for all seven (P, COLS) pairs cft_lanes can build. Lemma A (fold) is

@@ -42,7 +42,7 @@ from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE, RND_NAMES, vectors,
 )
 
-LATENCY = 15
+LATENCY = 16
 
 FORMATS = [
     (FP32,  0, 8),

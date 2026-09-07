@@ -11,7 +11,7 @@
 
 module tb_reduce_acc #(
     parameter int LEVELS  = 40,
-    parameter int LATENCY = 15
+    parameter int LATENCY = 16
 ) (
     input  logic        clk,
     input  logic        rst_n,

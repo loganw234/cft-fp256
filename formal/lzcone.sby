@@ -1,0 +1,49 @@
+# Equivalence miter: the leading-zero cone in rtl/cft_fpfma_pipe.sv
+# (module cft_lzcone) against cft_lzcone_ref.sv, the priority-loop form
+# it replaced, frozen. See tb_lzcone_equiv.sv for the story.
+#
+# Both modules are combinational, so bmc at depth 2 is a complete
+# equivalence proof over the whole window space at each rung - 2^78,
+# 2^165, 2^345 and 2^717 inputs - not a bounded sample of it.
+#
+#   sby -f lzcone.sby fp32     one rung
+#   sby -f lzcone.sby          all four (fp256 is the long one)
+#
+# Run from formal/ (run.sh does), so the relative paths below resolve.
+# cft_fpfma_pipe.sv is read whole because that is where the shipping
+# cone lives; `prep -top tb_lzcone_equiv` prunes the pipe itself, which
+# is why cft_mulgeom.svh is the only thing it needs beside it.
+
+[tasks]
+fp32
+fp64
+fp128
+fp256
+
+[options]
+mode bmc
+depth 2
+# 15 minutes of solver per rung, so the whole miter is bounded at an
+# hour however the four tasks are scheduled. A timeout is an ERROR to
+# sby, which is what a gate wants: a proof that stopped answering is not
+# a proof that passed.
+timeout 900
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -formal -sv -I. cft_fpfma_pipe.sv
+read_verilog -formal -sv cft_lzcone_ref.sv
+read_verilog -formal -sv tb_lzcone_equiv.sv
+fp32:  chparam -set NW 78  tb_lzcone_equiv
+fp64:  chparam -set NW 165 tb_lzcone_equiv
+fp128: chparam -set NW 345 tb_lzcone_equiv
+fp256: chparam -set NW 717 tb_lzcone_equiv
+prep -top tb_lzcone_equiv
+
+[files]
+../rtl/cft_fpfma_pipe.sv
+../rtl/cft_mulgeom.svh
+cft_lzcone_ref.sv
+tb_lzcone_equiv.sv

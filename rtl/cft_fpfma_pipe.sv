@@ -17,7 +17,7 @@
 // 24/48/96/192-bit shifts. Narrow formats degenerate gracefully
 // (fp32: one chunk, the tree levels are pass-through registers).
 //
-// Stage map (LATENCY = 15 edges, S0..S14):
+// Stage map (LATENCY = 16 edges, S0..S15):
 //   S0    input registers
 //   S1    unpack, classify, specials sideband
 //   S2    partial products  pp[k] = ma * mb[24k +: 24]
@@ -30,11 +30,28 @@
 //   S9    split add low halves: sum, big-small, small-big in parallel
 //   S10   split add high halves + magnitude/sign select; strip the
 //         appended marker into the explicit sticky rail
-//   S11   LZC (per-64 chunk tree) + coarse normalize shift
-//   S12   fine normalize shift
-//   S13   round-window extraction (clamped and as-if-unbounded),
+//   S11   LEADING-ZERO COUNT (cft_lzcone): the per-64-bit chunk
+//         zero-detect, two balanced (valid, count) trees and the chunk
+//         mux between them - the normalise distance, registered
+//   S12   coarse normalize shift (whole 64-bit granules) + the
+//         exponent/zero/sticky rails
+//   S13   fine normalize shift + the round stage's exponent arithmetic
+//   S14   round-window extraction (clamped and as-if-unbounded),
 //         attribute-directed increment, tininess-after-rounding
-//   S14   pack + specials mux -> output registers
+//   S15   pack + specials mux -> output registers
+//
+// S11 became a register boundary of its own on 2026-09-07
+// (docs/studies/OPT-C-timing.md idea 1). Before that the whole
+// leading-zero cone and the coarse shift shared one cycle, and the
+// routed reports had that cone as the worst path on every part: 8.77 ns
+// of an 11.55 ns fp256 path was "work out how far to shift". The
+// register-name prefixes s11_*, s12_*, s13_*, s14_* were fixed when
+// the LZC and the coarse shift shared a stage, and they were NOT
+// renamed when the stage split, so from S12 on a prefix lags its
+// pipeline level by one: s11_* is level 12, s14_* is level 15. Names
+// are names, levels are levels - which is exactly why the
+// rounding-attribute delay line's taps are written relative to DEPTH
+// and did not have to move. The registers at level 11 are r11_*.
 //
 // The pipe advances on `en`, a pipeline enable that is tied high in the
 // shipping configuration and folds away. MUL_PASSES > 1 replaces the
@@ -60,7 +77,7 @@
 module cft_fpfma_pipe #(
     parameter int EXP_W   = 8,
     parameter int MAN_W   = 23,
-    parameter int LATENCY = 15,
+    parameter int LATENCY = 16,
     // Take the significand product from mul_p instead of building a
     // multiplier here. See the mul_* ports for the contract. Default 0
     // keeps every existing instantiation bit-identical.
@@ -107,7 +124,7 @@ module cft_fpfma_pipe #(
 ) (
     input  logic                 clk,
     input  logic                 rst_n,
-    // Pipeline enable. Every stage register - S0 through S14, the
+    // Pipeline enable. Every stage register - S0 through S15, the
     // rounding-attribute and valid delay lines, the sideband - advances
     // only on a cycle with en high, so in enabled-edge terms the pipe
     // is the same pipe at every MUL_PASSES. Tie high for the
@@ -223,7 +240,6 @@ module cft_fpfma_pipe #(
   localparam int CHW  = AW / 2;
   localparam int HHW  = AW - CHW;
   localparam int NW   = GW;
-  localparam int NCH  = (NW + 63) / 64;
 
   // multiplier decomposition - the geometry is rtl/cft_mulgeom.svh's,
   // included rather than restated so the pipe, cft_mulpass and the
@@ -277,7 +293,7 @@ module cft_fpfma_pipe #(
     endcase
   endfunction
 
-  localparam int DEPTH = 15;
+  localparam int DEPTH = 16;
 
   // Elaboration-time guards. These have to be in generate scope, not in
   // an `initial` block: synthesis ignores `initial` entirely, so a
@@ -300,7 +316,7 @@ module cft_fpfma_pipe #(
   // in the simulation message below.)
   generate
     if (LATENCY != DEPTH) begin : g_bad_latency
-      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (15)");
+      $error("cft_fpfma_pipe: LATENCY must equal the structural depth (16)");
     end
     if (NMC > 16) begin : g_too_many_chunks
       $error("cft_fpfma_pipe: MAN_W too wide - the multiplier tree holds 16 chunks (max MAN_W 383)");
@@ -852,16 +868,87 @@ module cft_fpfma_pipe #(
   end
 
   // ------------------------------------------------------------------
-  // S11: LZC + coarse normalize; S12: fine normalize
+  // S11: leading-zero count (registered); S12: coarse normalize shift
+  // and the rails; S13: fine normalize shift
   // ------------------------------------------------------------------
-  function automatic int lzc64(input logic [63:0] x);
-    int r;
-    begin
-      r = 64;
-      for (int i = 0; i < 64; i = i + 1) if (x[i]) r = 63 - i;
-      lzc64 = r;
+  //
+  // The scan, the priority encode, the chunk mux, lzc64 and the
+  // NW-1-msb subtract were inline here until 2026-09-07. They are
+  // cft_lzcone, at the bottom of this file, for two reasons: the
+  // register below has to sit between the cone and its consumers, which
+  // is the whole point of the change, and a module is the thing a
+  // combinational equivalence miter can hold - formal/lzcone.sby proves
+  // the shipping cone equal over the whole NW-bit input space to the
+  // priority-loop form that was here.
+  //
+  // n11_valw is what gets normalised: the magnitude window less its
+  // appended marker LSB, which becomes the explicit sticky rail below.
+  logic [NW-1:0] n11_valw;
+  logic          n11_empty;
+  logic [9:0]    n11_lsh;
+  logic [9:0]    n11_msb;
+
+  assign n11_valw = s10_mag[GW:1];
+
+  cft_lzcone #(.NW(NW)) u_lzcone (
+      .v     (n11_valw),
+      .empty (n11_empty),
+      .msb   (n11_msb),
+      .lsh   (n11_lsh)
+  );
+
+  // ---- S11 registers: the distance, the window, and everything
+  // ---- travelling beside them ---------------------------------------
+  //
+  // The parallel paths are the point. This is a SYNCHRONISED multi-path
+  // pipeline, not a linear one, so the sign, the exponent anchor, the
+  // residue rail and the whole specials sideband cross the new boundary
+  // on the same edge the distance does. Delay one and not the others and
+  // every FMA pairs a shift amount with another operation's control
+  // word - docs/ROADMAP.md records what that looked like the last time
+  // a stage was added here: garbage, not drift.
+  //
+  // n11_lsh is the total left shift, NW-1-msb; the pipe's split of it
+  // into whole 64-bit granules plus a 0..63 remainder is what the
+  // nrm_csh/nrm_fsh ports carry. The halves are bit-selects of the
+  // REGISTERED total rather than arithmetic on it, so csh*64 + fsh ==
+  // lsh stays true by construction, exactly as when the split was
+  // combinational, and the two ports leave from flip-flops.
+  logic [NW-1:0] r11_valw;
+  logic          r11_empty;
+  logic [9:0]    r11_lsh;
+  int            r11_msb;
+  logic          r11_stk;      // the appended marker, s10_mag[0]
+  logic          r11_rsign, r11_spc;
+  logic [W-1:0]  r11_spd;
+  logic [4:0]    r11_spf;
+  int            r11_g;
+  logic [3:0]    r11_csh;
+  logic [5:0]    r11_fsh;
+
+  always_ff @(posedge clk) begin : reg11
+    if (en) begin
+      r11_valw  <= n11_valw;
+      r11_empty <= n11_empty;
+      r11_lsh   <= n11_lsh;
+      // 0 <= msb <= NW-1 <= 716, so this is a value-preserving widening
+      // of an unsigned count into the signed int the exponent add below
+      // wants - and it keeps that add signed, which it must be: g is
+      // negative for a subnormal anchor.
+      r11_msb   <= {22'b0, n11_msb};
+      r11_stk   <= s10_mag[0];
+      r11_rsign <= s10_rsign;
+      r11_g     <= s10_g;
+      r11_spc <= s10_spc; r11_spd <= s10_spd; r11_spf <= s10_spf;
     end
-  endfunction
+  end
+
+  assign r11_csh = r11_lsh[9:6];
+  assign r11_fsh = r11_lsh[5:0];
+
+  assign nrm_v   = r11_valw;
+  assign nrm_csh = r11_csh;
+  assign nrm_fsh = r11_fsh;
 
   // s11_valw and s11_fine are the private shifter's own intermediate
   // and live inside the generate below, so a shared lane does not carry
@@ -871,78 +958,14 @@ module cft_fpfma_pipe #(
   logic [4:0]    s11_spf;
   int            s11_enorm;
 
-  // ---- S11 combinational: the leading-zero scan and the distance ----
-  //
-  // Split out of the register process below so that a shared normaliser
-  // can be handed exactly the values the private one uses. Nothing here
-  // changed when it was split: the scan, the msb and the two halves of
-  // the distance are what stage11 always computed, they are just named
-  // now instead of being locals inside an always_ff.
-  //
-  // n11_lsh is the total left shift, NW-1-msb, and the pipe's own split
-  // of it into whole 64-bit granules plus a 0..63 remainder is what the
-  // nrm_csh/nrm_fsh ports carry. Taking the halves as bit-selects of
-  // n11_lsh rather than by arithmetic keeps csh*64 + fsh == lsh true by
-  // construction.
-  logic [NW-1:0] n11_valw;
-  logic          n11_empty;
-  logic [9:0]    n11_lsh;
-  logic [3:0]    n11_csh;
-  logic [5:0]    n11_fsh;
-  int            n11_msb;
-
-  always_comb begin
-    logic [NCH*64-1:0] padded;
-    logic [31:0] lsh_full;
-    int chunk, cl;
-    // Default-assigned before the branch. `cl` is only meaningful in
-    // the non-empty case, but a block-local written on one path of an
-    // always_comb is a latch, and Yosys refuses it - which is the whole
-    // reason the portability gate exists. This was a clocked process
-    // before the split, where the same code is unremarkable.
-    cl = 0;
-    lsh_full = '0;
-    n11_valw = s10_mag[GW:1];
-    padded = {{(NCH*64-NW){1'b0}}, n11_valw};
-    chunk = -1;
-    for (int ci = NCH - 1; ci >= 0; ci = ci - 1) begin
-      if (chunk == -1 && (padded[ci*64 +: 64] != 0)) chunk = ci;
-    end
-    if (chunk == -1) begin
-      // An empty window: n11_valw is zero by definition here, so any
-      // shift of it is zero and the distance is a don't-care. Driving
-      // zero rather than leaving it undefined matters for the shared
-      // path, where this lane's amount reaches a ladder other lanes
-      // are also using.
-      n11_empty = 1'b1;
-      n11_msb   = 0;
-      n11_lsh   = '0;
-    end else begin
-      cl        = lzc64(padded[chunk*64 +: 64]);
-      n11_msb   = chunk * 64 + (63 - cl);
-      n11_empty = 1'b0;
-      // NW-1-msb is at most 716 (fp256), so ten bits hold it. Taken as
-      // an explicit slice of a named 32-bit intermediate rather than by
-      // implicit truncation: the truncation is intended, and saying so
-      // in the source is what keeps it distinguishable from the ones
-      // that are not. (A width cast would read better still, but Icarus
-      // is uneven about casts - cft_mulfrac's own comment records it.)
-      lsh_full  = NW - 1 - n11_msb;
-      n11_lsh   = lsh_full[9:0];
-    end
-    n11_csh = n11_lsh[9:6];
-    n11_fsh = n11_lsh[5:0];
-  end
-
-  assign nrm_v   = n11_valw;
-  assign nrm_csh = n11_csh;
-  assign nrm_fsh = n11_fsh;
-
-  // S11 registers, less the shift itself. The empty-window case:
+  // S12's rails - the exponent, the zero and sticky flags, the
+  // sideband. They keep their s11_* names from when this process and
+  // the leading-zero count were one stage. The empty-window case:
   //
   // Exact zero only without sticky residue; else a bare epsilon,
-  // and s10_g already places it below the subnormal grid so S13
-  // rounds it per the attribute, carrying the true sign.
+  // and s10_g already places it below the subnormal grid so the
+  // round stage disposes of it per the attribute, carrying the true
+  // sign.
   //
   // Why that holds - it is NOT because the anchor is zero (a
   // nonzero subnormal addend reaches here too: fp32
@@ -951,15 +974,15 @@ module cft_fpfma_pipe #(
   // with a surviving residue requires the anchor's significand
   // below 2^(P-4), which forces it subnormal or zero - and any
   // subnormal pins its exponent at EMIN-MAN_W, so g = EMIN-MAN_W-SH
-  // and S13's K is negative. Change SH or the far-alignment
-  // threshold and this is the argument to re-derive.
+  // and the round stage's K is negative. Change SH or the
+  // far-alignment threshold and this is the argument to re-derive.
   always_ff @(posedge clk) begin : stage11
     if (en) begin
-      s11_zero  <= n11_empty && !s10_mag[0];
-      s11_enorm <= n11_empty ? s10_g : (s10_g + n11_msb);
-      s11_stk   <= s10_mag[0];
-      s11_rsign <= s10_rsign;
-      s11_spc <= s10_spc; s11_spd <= s10_spd; s11_spf <= s10_spf;
+      s11_zero  <= r11_empty && !r11_stk;
+      s11_enorm <= r11_empty ? r11_g : (r11_g + r11_msb);
+      s11_stk   <= r11_stk;
+      s11_rsign <= r11_rsign;
+      s11_spc <= r11_spc; s11_spd <= r11_spd; s11_spf <= r11_spf;
     end
   end
 
@@ -1010,11 +1033,11 @@ module cft_fpfma_pipe #(
 
   // ---- the two normalise shifters, here or elsewhere ----------------
   //
-  // Private: exactly what stage11 and stage12 did before the split -
-  // coarse by whole granules into s11_valw, then the remainder into
-  // s12_norm. The empty-window case needs no special handling because
-  // n11_valw IS zero then and n11_csh/n11_fsh are driven zero, so
-  // `n11_valw << 0` reproduces the old `s11_valw <= '0` exactly.
+  // Private: the same two shifts as ever, one level later - coarse by
+  // whole granules into s11_valw, then the remainder into s12_norm.
+  // The empty-window case needs no special handling because r11_valw IS
+  // zero then and r11_csh/r11_fsh are zero with it, so `r11_valw << 0`
+  // reproduces the old `s11_valw <= '0` exactly.
   //
   // Shared: s12_norm is a wire from the supplier, which must return the
   // value two cycles later. It still arrives as a register - the
@@ -1027,8 +1050,8 @@ module cft_fpfma_pipe #(
       logic [5:0]    s11_fine;
       always_ff @(posedge clk) begin
         if (en) begin
-          s11_valw <= n11_valw << (n11_csh * 64);
-          s11_fine <= n11_fsh;
+          s11_valw <= r11_valw << (r11_csh * 64);
+          s11_fine <= r11_fsh;
         end
       end
       always_ff @(posedge clk) begin
@@ -1195,5 +1218,225 @@ module cft_fpfma_pipe #(
       flags <= fl;
     end
   end
+
+endmodule
+
+// ---------------------------------------------------------------------
+// cft_lz4: leading zeros of a 4**L-bit vector, as a balanced tree.
+//
+// `cnt` is the number of zeros above the top set bit, and is meaningful
+// only when `vld`. The merge is the textbook log-depth (valid, count)
+// one, folded four wide:
+//
+//     valid = |{v3,v2,v1,v0}
+//     count = v3 ? {2'b00, c3} : v2 ? {2'b01, c2}
+//           : v1 ? {2'b10, c1} :      {2'b11, c0}
+//
+// with quarter 3 the most significant, so each level contributes one
+// base-4 digit and the root's count is the leading-zero count itself.
+//
+// Written as ONE always_comb over ONE loop, and that is measured rather
+// than preferred. The obvious form - a generate pyramid with a
+// continuous assignment per node - needs two multiply driven nets, and
+// Icarus schedules every one of those drivers as its own event: it took
+// `make fp32` from 21.6 s to 528.1 s on an otherwise identical tree
+// (2026-09-07). The whole cocotb matrix runs on Icarus.
+//
+// Two identities make the single flat loop possible. The first child of
+// node n is 4n - W at EVERY level - it falls out of B[k-1] = 4*B[k] - W
+// with B[k] = (W - W/4^k)/3, where level k starts - so no node needs to
+// know its own level to find its children; and c < n always, so a
+// node's children are resolved before it is reached. The second is that
+// the digits accumulate REVERSED, rc_parent = (rc_child << 2) | q,
+// which is also level-independent; one fixed permutation at the root
+// puts them back in order. (Yosys refuses a procedural for-loop whose
+// bound is not constant, so a level-by-level reduction in one process
+// is not available. This is.)
+// ---------------------------------------------------------------------
+module cft_lz4 #(
+    // Must be a power of four, and at least 4. Guarded below.
+    parameter int W = 64
+) (
+    input  logic [W-1:0] x,
+    output logic         vld,
+    output logic [9:0]   cnt
+);
+
+  localparam int LV  = ($clog2(W) + 1) / 2;   // levels
+  localparam int NU0 = W / 4;                 // leaves
+  localparam int NN  = (W - 1) / 3;           // nodes; the root is the last
+  localparam int CW  = 10;                    // count bits; 2*LV at most
+
+  generate
+    if (W < 4 || (1 << (2 * LV)) != W) begin : g_bad_w
+      $error("cft_lz4: W must be a power of four, at least 4");
+    end
+  endgenerate
+
+  initial begin
+    if (W < 4 || (1 << (2 * LV)) != W) begin
+      $display("FATAL: cft_lz4 W=%0d is not a power of four", W);
+      $fatal(1);
+    end
+  end
+
+  always_comb begin
+    logic [NN-1:0]    nv;     // per-node validity
+    logic [NN*CW-1:0] nc;     // per-node count, digits reversed
+    logic [CW-1:0]    rc, cv;
+    logic [1:0]       q;
+    logic             v3, v2, v1, v0;
+    int               c;
+
+    // Yosys refuses a block-local written on only one path of an
+    // always_comb, and it is right to: that is a latch.
+    nv = '0; nc = '0; rc = '0; cv = '0; q = 2'd0;
+    v3 = 1'b0; v2 = 1'b0; v1 = 1'b0; v0 = 1'b0; c = 0;
+
+    for (int n = 0; n < NN; n = n + 1) begin
+      if (n < NU0) begin
+        v3 = x[4*n+3]; v2 = x[4*n+2]; v1 = x[4*n+1]; v0 = x[4*n+0];
+        rc = '0;
+      end else begin
+        c  = 4*n - W;
+        v3 = nv[c+3]; v2 = nv[c+2]; v1 = nv[c+1]; v0 = nv[c+0];
+        rc = v3 ? nc[(c+3)*CW +: CW]
+           : v2 ? nc[(c+2)*CW +: CW]
+           : v1 ? nc[(c+1)*CW +: CW]
+           :      nc[(c+0)*CW +: CW];
+        rc = rc << 2;
+      end
+      q = v3 ? 2'd0 : v2 ? 2'd1 : v1 ? 2'd2 : 2'd3;
+      nv[n] = v3 | v2 | v1 | v0;
+      nc[n*CW +: CW] = rc | {{(CW-2){1'b0}}, q};
+    end
+
+    // Un-reverse the base-4 digits: the root's digit is the most
+    // significant of the true count, and it is the one sitting lowest.
+    rc = nc[(NN-1)*CW +: CW];
+    for (int i = 0; i < LV; i = i + 1)
+      cv[2*(LV-1-i) +: 2] = rc[2*i +: 2];
+
+    vld = nv[NN-1];
+    cnt = cv;
+  end
+
+endmodule
+
+// ---------------------------------------------------------------------
+// cft_lzcone: the leading-zero cone, for one normalise window.
+//
+// Given the NW-bit window `v`, report whether it is empty, the index of
+// its most significant 1, and the left shift NW-1-msb that puts that 1
+// at the top. On an empty window both counts are driven ZERO rather
+// than left undefined: this lane's amount reaches a ladder other lanes
+// are also using (rtl/cft_normseg.sv), and an X there is everyone's
+// problem.
+//
+// This was inline in cft_fpfma_pipe's S11 until 2026-09-07, as two
+// PRIORITY LOOPS: a per-64-bit chunk zero-detect, a top-down scan for
+// the highest nonzero chunk, a chunk mux and a 64-way priority count.
+// The 2026-09-06 routed fp256 trace put 8.77 ns of an 11.55 ns path in
+// here, over about thirteen levels
+// (docs/studies/OPT-C-timing.md 0.2). Two things changed. The pipe now
+// registers this module's answer, which is what wanted it to be one
+// nameable object; and both SCANS became balanced trees (cft_lz4).
+//
+// What did NOT change is the 64-bit chunk zero-detect, and that is
+// deliberate. It is the one part of the old cone Vivado already mapped
+// well - five CARRY4 for 0.484 ns and no routing, per the same trace -
+// and it is also what keeps this module cheap to SIMULATE: a 64-bit
+// reduction is one vector operation, where a tree over the same bits is
+// sixteen nodes. Measured on 2026-09-07: a pure radix-4 tree over the
+// whole 717-bit window is bit-identical and about four times slower
+// through Icarus on tb_fpfma_fp256, which the cocotb matrix pays on
+// every run. So the trees go where the PRIORITY LOOPS were - twelve
+// chunk flags, and sixty-four bits of the one chunk that matters - and
+// the wide cheap reduction stays.
+//
+// formal/lzcone.sby proves the whole module equal to the priority form
+// over the whole NW-bit input space at all four rungs. That proof is
+// the gate: this is a restructuring of a combinational function, so
+// "the vectors agreed" is the weaker claim and was never the one to
+// settle for here.
+// ---------------------------------------------------------------------
+module cft_lzcone #(
+    // Window width; the pipe builds 78, 165, 345 and 717.
+    parameter int NW = 717
+) (
+    input  logic [NW-1:0] v,
+    output logic          empty,   // v == 0
+    output logic [9:0]    msb,     // index of the top 1; 0 when empty
+    output logic [9:0]    lsh      // NW-1-msb; 0 when empty
+);
+
+  localparam int NCH = (NW + 63) / 64;              // 64-bit chunks needed
+  localparam int LVC = ($clog2(NCH) + 1) / 2;       // levels over chunks
+  localparam int NCP = 1 << (2 * LVC);              // chunks, padded to 4**LVC
+  localparam int CIW = 2 * LVC;                     // bits of chunk index
+  // Truncations here are intended and are written as slices of a named
+  // 32-bit intermediate rather than left implicit, which is what keeps
+  // them distinguishable from the ones that are not - and what lets the
+  // width warnings stay fatal, as tb/cocotb.mk's header insists. (Do
+  // not open a comment line with the simulator's name: it reads one as
+  // a metacomment and refuses the file.)
+  localparam logic [31:0] NWM1_FULL = NW - 1;
+  localparam logic [9:0]  NWM1      = NWM1_FULL[9:0];
+
+  // NW <= 1024 is the real ceiling: lsh is ten bits, and the chunk
+  // index and the 0..63 offset are concatenated into it below.
+  generate
+    if (NW < 4 || NW > 1024) begin : g_bad_nw
+      $error("cft_lzcone: NW must be between 4 and 1024");
+    end
+  endgenerate
+
+  initial begin
+    if (NW < 4 || NW > 1024) begin
+      $display("FATAL: cft_lzcone NW=%0d outside 4..1024", NW);
+      $fatal(1);
+    end
+  end
+
+  // The window sits at the TOP of the padded field, so its leading-zero
+  // count is unchanged by the padding and every chunk that is all
+  // padding folds to a constant zero flag.
+  logic [NCP*64-1:0] padded;
+  logic [NCP-1:0]    cvalid;
+
+  always_comb begin
+    padded = '0;
+    padded[NCP*64-1 -: NW] = v;
+    for (int i = 0; i < NCP; i = i + 1) cvalid[i] = |padded[64*i +: 64];
+  end
+
+  // Which chunk, counted in chunks from the top.
+  logic       any;
+  logic [9:0] ctop;
+  cft_lz4 #(.W(NCP)) u_chunk (.x(cvalid), .vld(any), .cnt(ctop));
+
+  // That chunk's 64 bits, and where its top 1 sits inside them. The
+  // chunk NUMBER is (NCP-1) - ctop, and since NCP-1 is all ones in CIW
+  // bits that subtraction is exactly a bit-complement - no borrow, no
+  // width to get wrong. Multiplying it by 64 is a concatenation for the
+  // same reason: `64 * x` would be evaluated at x's own width.
+  logic [CIW-1:0]   ctop_i, chunk_i;
+  logic [63:0]      sel;
+  logic [9:0]       wz;
+  logic             selv;
+  assign ctop_i  = ctop[CIW-1:0];
+  assign chunk_i = ~ctop_i;
+  always_comb sel = padded[{chunk_i, 6'b0} +: 64];
+  cft_lz4 #(.W(64)) u_bits (.x(sel), .vld(selv), .cnt(wz));
+
+  // ctop whole chunks of 64 plus wz inside the chunk. A concatenation
+  // rather than a multiply-add, because wz is 0..63 by construction and
+  // saying so in the source is what keeps the two halves from drifting.
+  logic [9:0] lsh_all;
+  assign lsh_all = {ctop[3:0], wz[5:0]};
+
+  assign empty = ~any;
+  assign lsh   = any ? lsh_all : 10'd0;
+  assign msb   = any ? (NWM1 - lsh_all) : 10'd0;
 
 endmodule
