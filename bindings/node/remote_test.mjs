@@ -576,7 +576,8 @@ async function main() {
     const wsDev = await CftRemote.connect(wsUrl, { abi });
     const tcpDev = await CftRemote.connect(url, { abi });
     const capsEqual = ["formatMask", "opGroups", "tiles", "deviceVersion",
-                       "flagsReadable", "abi", "backend"]
+                       "flagsReadable", "abi", "backend",
+                       "maxDeposits", "maxInsns", "maxConsts", "seqFeatures"]
       .every((k) => wsDev.caps[k] === tcpDev.caps[k]);
     check(capsEqual,
           `the caps block is the same over both: backend ` +

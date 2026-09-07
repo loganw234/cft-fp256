@@ -48,7 +48,8 @@ export const PROTO_VERSION = 1;
 export const HDR_BYTES = 32;
 export const MAX_PAYLOAD = 1 << 30;          // CFTR_MAX_PAYLOAD, 1 GiB
 export const CHUNK_BYTES = 16 << 20;         // CFTR_CHUNK_BYTES, 16 MiB
-export const CAPS_BYTES = 56;                // CFTR_CAPS_BYTES
+export const CAPS_BYTES = 56;                // CFTR_CAPS_BYTES_V1: the least a caps block can be
+export const CAPS_BYTES_V2 = 72;             // CFTR_CAPS_BYTES: + the four sequencer capacities (ABI 0.8)
 export const BACKEND_NAME = 32;              // CFTR_BACKEND_NAME
 export const DEFAULT_PORT = 7754;            // CFTR_DEFAULT_PORT
 
@@ -786,8 +787,11 @@ export class CftRemote {
 }
 
 /** The caps block a HELLO or CAPS response carries. Read by offset and
- *  not by total length: the block's first 56 bytes are what this
- *  document version defines, and a server that appends to it stays
+ *  not by total length: the first 56 bytes are the block as first
+ *  shipped, bytes 56..71 are the sequencer capacities cft_caps gained
+ *  at ABI 0.8 (max_deposits, max_insns, max_consts, seq_features -
+ *  host/src/remote.h), and they read as zero, meaning unknown, from a
+ *  server that predates them. A server that appends further stays
  *  readable here. */
 export function parseCaps(p) {
   if (p.length < CAPS_BYTES)
@@ -805,7 +809,11 @@ export function parseCaps(p) {
     flagsReadable: dv.getUint32(16, true),
     abi: dv.getUint32(20, true),
     backend: new TextDecoder().decode(name.subarray(0, end)),
-    extra: p.subarray(CAPS_BYTES),      // whatever a later server appends
+    maxDeposits: p.length >= CAPS_BYTES_V2 ? dv.getUint32(56, true) : 0,
+    maxInsns: p.length >= CAPS_BYTES_V2 ? dv.getUint32(60, true) : 0,
+    maxConsts: p.length >= CAPS_BYTES_V2 ? dv.getUint32(64, true) : 0,
+    seqFeatures: p.length >= CAPS_BYTES_V2 ? dv.getUint32(68, true) : 0,
+    extra: p.subarray(Math.min(p.length, CAPS_BYTES_V2)), // whatever a later server appends
   };
 }
 

@@ -378,6 +378,37 @@ half-step of the 0.6 kind repeated, and lasted the night.
 | Node (`bindings/node`) | complete (package 0.7.0): **125 tests**; `conformance.mjs` replays 2,055,270 cases over every family |
 | Browser / WASM page | complete: **111 `cftw_*` exports**, module 211,869 bytes, a control per operation, the status word visible; `verify.mjs` replays 1,223,635 cases through `cft_conformance` and 831,635 through the wrappers. Two clean container builds byte-identical: page sha256 `e1b42b3873416e39…`, module `a1f0a4715516d3f6…`. A second page, `demos.html` (486,822 bytes, sha256 `e3711319627e6828…`, two builds byte-identical), runs the five contract workloads on the same module with every panel's chain matched to the C tool's - docs/DEMOS.md |
 
+**ABI 0.8 (2026-09-07)** is the step that lets a host ask a tile what
+it can hold. `cft_caps` grows - behind `struct_size`, so a caller
+compiled against the old struct is unaffected - with `max_deposits`,
+`max_insns`, `max_consts` and `seq_features`: the sequencer's on-chip
+capacities, which the RTL now publishes in the previously reserved
+bits of `CAPS` (19:16 log2 of the deposit slots a lane, 23:20 log2 of
+the instruction capacity, 27:24 log2 of the addressable constants, 7:4
+a feature nibble that is all zero today). Every backend reports the
+caps it enforces and enforces the caps it reports: the software
+backend its own (2^20 deposits, 16 constants), the XRT backend the
+register's (zero meaning unknown on an image that predates the bits),
+the remote backend the server's through a HELLO block grown from 56 to
+72 bytes by appending, with the protocol version deliberately not
+moved so that an older server still answers. `cft_program_load`
+refuses a program above the device's published caps with the cap and
+both numbers in `cft_last_error()`, before the tile could refuse it
+with a status bit; `cft-zoom` sizes its trip count from the cap and
+`cft-orbits` refuses by name. Additive, positional C, one status code
+moved at the software backend's own limit (`INVALID_ARGUMENT` to
+`UNSUPPORTED`, so every backend refuses the same way), and one rule
+unchanged: 0.7 and 0.8 peers refuse each other over the socket, as
+every minor step has.
+
+| surface | status at ABI 0.8 |
+|---|---|
+| C (`cft.h`) | complete: `device_test.c` gains "the caps a backend reports match the caps it enforces" for the software and remote backends; `remote_test.c` covers the grown HELLO block (251 checks, from 245) |
+| C++ (`cft.hpp`) | unchanged; the wrapper passes `cft_caps` through by `struct_size` |
+| Python (`cftmpfr`) | correct as it stands: its `Caps` mirror passes its own `sizeof` and the handshake truncates there; the four fields are not yet surfaced |
+| Node / Browser | the WebSocket client reads the four fields from a 72-byte block and zero from a 56-byte one; the wasm and node modules were rebuilt on the bumped tree so the ABI test agrees with the header |
+| RTL | `CAPS` reads 0x04A6FF0F on the full tile where it read 0x0000FF0F; `cft_seq` untouched, the values named once in `cft_krnl.sv` |
+
 ## Drop-ins
 
 Higher-level packages that slot into an existing ecosystem's shape,
