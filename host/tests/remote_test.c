@@ -302,6 +302,68 @@ static void refusal_tests(const char *url)
           "after a truncated frame the server still answers: rc %d "
           "status %d", rc, status);
     printf("  truncated frame   -> dropped; the next connection is served\n");
+
+    /* 8. a RUN whose ANSWER cannot fit a frame.
+     *
+     * The operand mask names no operand, which is legal for an
+     * unassigned opcode (cft_sf_op_operands gives it none, and the
+     * contract gives it a defined canonical-qNaN result), so the
+     * payload's length says nothing about n and twenty-four bytes ask
+     * for 2^28 fp32 results. That is one gigabyte, and the answer
+     * carries eight bytes of flags and status in front of it, so it is
+     * eight bytes past what cftr_send_frame will send.
+     *
+     * Until 2026-09-07 the server did the whole run and the gigabyte
+     * allocation first and discovered that afterwards, when the send
+     * failed - work that could not have been delivered whatever
+     * happened. Found by host/fuzz. This has to come back promptly as
+     * a refusal; if it does not, the test hangs for as long as 2^28
+     * fp256-path elements take, which is itself the finding. */
+    {
+        cftr_sock s = cftr_sock_connect(host, port);
+        CHECK(s != CFTR_BAD_SOCK, "connecting for the oversize-answer test");
+        if (s != CFTR_BAD_SOCK) {
+            cftr_hdr h;
+            uint8_t *p = NULL;
+            char why[256];
+            cftr_sock_timeout(s, 20000);
+            hello_header(hdr, cft_abi_version(), CFTR_OP_HELLO, 0, NULL);
+            cftr_sock_send_all(s, hdr, 32);
+            rc = cftr_recv_frame(s, &h, &p, cft_abi_version(), why,
+                                 sizeof why);
+            free(p);
+            p = NULL;
+            CHECK(rc == 0 && h.status == CFT_OK,
+                  "HELLO before the oversize-answer test: rc %d", rc);
+            memset(payload, 0, 24);
+            cftr_put32(payload + 0, 165);      /* an unassigned opcode */
+            cftr_put32(payload + 4, 0);        /* fp32 */
+            cftr_put32(payload + 8, 0);        /* roundTiesToEven */
+            cftr_put32(payload + 12, 0);       /* no operands on the wire */
+            cftr_put64(payload + 16, (uint64_t)CFTR_MAX_PAYLOAD / 4u);
+            hello_header(hdr, cft_abi_version(), CFTR_OP_RUN, 24, payload);
+            cftr_put32(hdr + 12, 2);           /* id 2, the second request */
+            cftr_put32(hdr + 24, 0);
+            {
+                uint32_t crc = cftr_crc32(0, hdr, 32);
+                cftr_put32(hdr + 24, cftr_crc32(crc, payload, 24));
+            }
+            cftr_sock_send_all(s, hdr, 32);
+            cftr_sock_send_all(s, payload, 24);
+            rc = cftr_recv_frame(s, &h, &p, cft_abi_version(), why,
+                                 sizeof why);
+            msg[0] = '\0';
+            if (rc == 0 && p)
+                snprintf(msg, sizeof msg, "%.*s", (int)h.length,
+                         (const char *)p);
+            CHECK(rc == 0 && h.kind == CFTR_KIND_REFUSAL,
+                  "a RUN whose answer is past the frame cap: rc %d kind %u "
+                  "(%s)", rc, (unsigned)h.kind, msg);
+            free(p);
+            cftr_sock_close(s);
+        }
+    }
+    printf("  answer past cap   -> refused before the run, not after\n");
 }
 
 /* ---- the operations libcft's client never issues ---------------------- */

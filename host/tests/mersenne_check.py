@@ -60,6 +60,7 @@ constants right.
 
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -495,6 +496,44 @@ def main():
                "(--limb 200 at p = 237)")
         else:
             fail("--limb 200 was accepted at fp256")
+
+        # A checkpoint whose squaring count is outside the sequence.
+        # Found by host/fuzz on 2026-09-07, and the reason it is worth
+        # its own check: `current 521 100000` did not crash and did not
+        # complain - it printed "2^521 - 1 COMPOSITE, 519 squarings"
+        # and exited 0, which is a wrong answer about a known prime
+        # with nothing anywhere to say it was wrong. Past the end the
+        # squaring loop runs zero times and the parked residue is
+        # reported as a finished test; before the start it squares more
+        # times than Lucas-Lehmer defines.
+        ck = Path(tmp) / "mangled.ckpt"
+        tool.run("--exponents", 521, "--batch", 9,
+                 "--stop-after-squarings", 137, "--checkpoint", ck,
+                 "--quiet")
+        good = ck.read_text()
+        CHECKS += 1
+        if "\ncurrent 521 " not in good:
+            fail("the interrupted run left no partial residue, so the "
+                 "malformed-checkpoint cases could not be built")
+        else:
+            ok("an interrupted mersenne run left a partial residue to "
+               "malform")
+            for step, what in ((100000, "a squaring count past the end of "
+                                        "the sequence"),
+                               (-5, "a negative squaring count")):
+                ck.write_text(re.sub(r"^current 521 .*$",
+                                     "current 521 %d" % step, good,
+                                     flags=re.M))
+                proc = tool.run("--resume", "--checkpoint", ck,
+                                "--exponents", 521, "--batch", 9,
+                                "--quiet", expect_ok=False)
+                CHECKS += 1
+                if proc.returncode == 2 and "checkpoint" in proc.stderr:
+                    ok("a checkpoint with %s is refused by name" % what)
+                else:
+                    fail("a checkpoint with %s exited %d rather than being "
+                         "refused: %s" % (what, proc.returncode,
+                                          proc.stderr.strip()[:160]))
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

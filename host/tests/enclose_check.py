@@ -71,6 +71,7 @@ rather than about the mathematics:
 
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -539,6 +540,50 @@ def check_refusals(tool):
             fail("%s was accepted" % what)
 
 
+def check_checkpoint_refusals(tool, tmp):
+    """A checkpoint is a file, and a file on a shared machine is
+    something else can rewrite. Found by host/fuzz on 2026-09-07: a
+    resume from `inflight 23 1000` - a series term counter past the end
+    of the recurrence - finished the run and printed a full set of
+    enclosures, exit 0, that do not enclose, because the loop that sums
+    the remaining terms ran zero times and the tail bound was charged
+    to partial sums as though every term had been summed. A cursor past
+    the end of the plan is the same shape of lie. Both have to be
+    refused BY NAME."""
+    global CHECKS
+    common = ["--format", "fp64", "--points", 64, "--batch", 23,
+              "--stop-after-passes", 4, "--quiet"]
+    path = Path(tmp) / "mangled.ckpt"
+    tool.run(*common, "--checkpoint", path)
+    good = path.read_text()
+    CHECKS += 1
+    if "\ninflight " not in good:
+        fail("the interrupted run left nothing in flight, so the "
+             "malformed-checkpoint cases could not be built")
+        return
+    ok("an interrupted enclose run left work in flight to malform")
+
+    cases = [
+        (re.sub(r"^(inflight \d+) .*$", r"\1 1000", good, flags=re.M),
+         "a series term counter past the end of the recurrence"),
+        (re.sub(r"^(inflight \d+) .*$", r"\1 -5", good, flags=re.M),
+         "a negative series term counter"),
+        (re.sub(r"^cursor .*$", "cursor 999999", good, flags=re.M),
+         "a cursor past the end of the run"),
+    ]
+    for text, what in cases:
+        path.write_text(text)
+        CHECKS += 1
+        proc = tool.run("--resume", "--checkpoint", path, *common,
+                        expect_ok=False)
+        if proc.returncode == 2 and "checkpoint" in proc.stderr:
+            ok("a checkpoint with %s is refused by name" % what)
+        else:
+            fail("a checkpoint with %s exited %d rather than being "
+                 "refused: %s" % (what, proc.returncode,
+                                  proc.stderr.strip()[:160]))
+
+
 def guard(fn, *a, **kw):
     """A tool that refuses to finish is a RESULT, not a crash: a
     negative control that trips an internal gate must be reported by
@@ -619,6 +664,7 @@ def main():
 
         print("\n[7] refusals")
         guard(check_refusals, tool)
+        guard(check_checkpoint_refusals, tool, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

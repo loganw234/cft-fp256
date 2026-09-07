@@ -213,9 +213,18 @@ static cft_status seq_validate(const cft_program *p)
                 return CFT_ERR_INVALID_ARGUMENT;
             depth++;
             top++;
-            mult[top] = mult[top - 1] * d.imm;
-            if (mult[top] > SEQ_MAX_INSNS)
+            /* Checked BEFORE the product is taken, not after: mult and
+             * imm are both 64 bits, and a product past 2^64 wraps to a
+             * small number that passes an "> SEQ_MAX_INSNS" test. That
+             * let `repeat 2^16 / repeat 2^17 / repeat 2^31` - 2^64
+             * iterations - through this loader while seq.py, whose
+             * integers do not wrap, refused it (host/fuzz,
+             * 2026-09-07). mult[top - 1] is at least 1, so the
+             * division is safe, and imm > MAX / mult is exactly
+             * mult * imm > MAX. */
+            if (d.imm > SEQ_MAX_INSNS / mult[top - 1])
                 return CFT_ERR_INVALID_ARGUMENT;
+            mult[top] = mult[top - 1] * d.imm;
         } else if (d.op == SEQ_ENDREP) {
             if (depth == 0)
                 return CFT_ERR_INVALID_ARGUMENT;

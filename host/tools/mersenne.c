@@ -2065,6 +2065,18 @@ int main(int argc, char **argv)
                     "format and exponent derive");
             if (park_n != R.g.L)
                 die("the checkpoint's residue is the wrong length");
+            /* A resume has to start somewhere inside the sequence.
+             * PAST its end the loop below runs zero times and the
+             * parked residue is reported as a finished Lucas-Lehmer
+             * test: `current 521 100000` printed "2^521 - 1
+             * COMPOSITE, 519 squarings" and exited 0, which is a wrong
+             * answer about a known prime with nothing to say it was
+             * wrong. BEFORE its start it squares more times than the
+             * test defines. A file this tool wrote says neither
+             * (host/fuzz, 2026-09-07). */
+            if (cur_step < 0 || cur_step > need_steps)
+                die("the checkpoint's squaring count is outside this "
+                    "exponent's Lucas-Lehmer sequence");
             for (k = 0; k < R.g.L; k++)
                 if (!val_from_dec(&fi, park[k],
                                   R.y + (size_t)k * fi.esz))

@@ -89,3 +89,20 @@ host/cft-zoom
 # the remote backend's server and its protocol test (docs/REMOTE.md)
 host/cft-serve
 host/remote-test
+# host/fuzz: the harness binaries, the sanitised copies of the workload
+# tools, the scratch a resume run writes, and the corpus entries the
+# engine grew. The SEEDS in corpus/*/ are checked in (make_seeds.py
+# writes them and they are what a fresh run starts from); an entry the
+# engine kept for its coverage is a build product and there can be
+# thousands of them.
+host/fuzz/fuzz-program
+host/fuzz/fuzz-serve
+host/fuzz/fuzz-client
+host/fuzz/cft_fuzz.o
+host/fuzz/bin/
+host/fuzz/work/
+host/fuzz/corpus/*/q[0-9a-f]*
+# The checkpoint seeds are the tools own output and fuzz_ckpt.py
+# regenerates any that are missing on its first run; the fp256 ones
+# are tens of kilobytes of decimal and do not belong in the tree.
+host/fuzz/corpus/ckpt/

@@ -771,3 +771,87 @@ clean:
 	      .out-c.txt .out-py.txt .out-cpp.txt .out-cpp.err .out-jl.txt \
 	      .out-rs.txt .out-go.txt .out-cs.txt .out-cs.err .out-r.txt
 	rm -rf examples/bin examples/obj
+
+# ===================================================================
+# host/fuzz - the parsers that face untrusted bytes
+#
+# Opt-in and separately delimited, on the same terms as the workload
+# blocks above: nothing here is a prerequisite of `all`, nothing is
+# added to TOOLS, and `clean` gains a prerequisite rather than a
+# longer command line. A default build of libcft still needs one C99
+# compiler and nothing else.
+#
+#   make fuzz                    build the three in-process harnesses
+#   make fuzz-run                build, then run each for FUZZ_SECONDS
+#   make fuzz-ckpt               the workload tools' --resume readers
+#   make fuzz-repro              replay every checked-in reproducer;
+#                                this is the regression gate and it
+#                                must print no crash
+#
+# The harnesses want a compiler with -fsanitize=address,undefined and
+# -fsanitize-coverage=trace-pc. The MSYS2 mingw64 toolchain this
+# repository builds on under Windows has neither, so the fuzz lane
+# runs inside the cft-sim image (gcc 13, Linux) - which is also why
+# these targets are opt-in rather than part of `test`.
+# host/fuzz/README.md has the rest of that story.
+# ===================================================================
+FUZZ_CFLAGS  ?= -O1 -g -fno-omit-frame-pointer
+FUZZ_SAN     ?= -fsanitize=address,undefined -fno-sanitize-recover=all
+FUZZ_COV     ?= -fsanitize-coverage=trace-pc
+FUZZ_WARN    := -Wall -Wextra
+FUZZ_SECONDS ?= 60
+FUZZ_SRC_NOREMOTE := $(filter-out src/backend_remote.c,$(SRC))
+FUZZBIN := fuzz/fuzz-program$(EXE) fuzz/fuzz-serve$(EXE) \
+           fuzz/fuzz-client$(EXE)
+
+.PHONY: fuzz fuzz-run fuzz-ckpt fuzz-repro fuzz-clean
+clean: fuzz-clean
+
+fuzz: $(FUZZBIN)
+
+# The engine is the ONE translation unit built without the coverage
+# flag: __sanitizer_cov_trace_pc calling itself is a stack overflow
+# rather than a measurement.
+fuzz/cft_fuzz.o: fuzz/cft_fuzz.c fuzz/cft_fuzz.h
+	$(CC) $(CSTD) $(FUZZ_CFLAGS) $(FUZZ_SAN) $(FUZZ_WARN) -Ifuzz \
+	  -c fuzz/cft_fuzz.c -o $@
+
+fuzz/fuzz-program$(EXE): fuzz/fuzz_program.c fuzz/cft_fuzz.o $(SRC) $(HDRS)
+	$(CC) $(CSTD) $(FUZZ_CFLAGS) $(FUZZ_SAN) $(FUZZ_COV) $(FUZZ_WARN) \
+	  $(INC) -Isrc -Ifuzz fuzz/fuzz_program.c $(SRC) fuzz/cft_fuzz.o \
+	  -o $@ $(XRTLIBS)
+
+fuzz/fuzz-serve$(EXE): fuzz/fuzz_serve.c tools/cft-serve.c fuzz/cft_fuzz.o \
+                       $(SRC) $(HDRS)
+	$(CC) $(CSTD) $(FUZZ_CFLAGS) $(FUZZ_SAN) $(FUZZ_COV) $(FUZZ_WARN) \
+	  $(INC) -Isrc -Ifuzz fuzz/fuzz_serve.c $(SRC) fuzz/cft_fuzz.o \
+	  -o $@ $(XRTLIBS)
+
+# backend_remote.c is INCLUDED by this harness, so it must not also be
+# linked: rdev and do_request are static and the harness needs both.
+fuzz/fuzz-client$(EXE): fuzz/fuzz_client.c fuzz/cft_fuzz.o $(SRC) $(HDRS)
+	$(CC) $(CSTD) $(FUZZ_CFLAGS) $(FUZZ_SAN) $(FUZZ_COV) $(FUZZ_WARN) \
+	  $(INC) -Isrc -Ifuzz fuzz/fuzz_client.c $(FUZZ_SRC_NOREMOTE) \
+	  fuzz/cft_fuzz.o -o $@ $(XRTLIBS)
+
+fuzz-run: fuzz
+	cd fuzz && sh run.sh $(FUZZ_SECONDS)
+
+# The workload tools' checkpoint readers, driven as processes because
+# ckpt_read is static inside each tool's main file and a resume is a
+# whole-process act anyway. fuzz/run_ckpt.sh builds the five tools
+# with the same sanitisers into a scratch directory of its own.
+fuzz-ckpt:
+	cd fuzz && sh run_ckpt.sh $(FUZZ_SECONDS)
+
+# Every reproducer under host/fuzz/crashes, replayed. A finding that
+# was fixed stays fixed, and a harness that stopped reaching the bug
+# says so by name.
+fuzz-repro: fuzz
+	cd fuzz && sh repro.sh
+
+fuzz-clean:
+	rm -f fuzz/cft_fuzz.o fuzz/fuzz-program fuzz/fuzz-program.exe \
+	      fuzz/fuzz-serve fuzz/fuzz-serve.exe \
+	      fuzz/fuzz-client fuzz/fuzz-client.exe
+# ==================== end of the host/fuzz block ===================
