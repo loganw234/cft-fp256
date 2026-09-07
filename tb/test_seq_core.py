@@ -75,7 +75,7 @@ FP32, FP64, FP128, FP256 = (FORMATS[k] for k in
 # rtl/cft_seq.sv parameter defaults. Keep in step with the module.
 BEAT_BITS = 256
 BEAT_BYTES = BEAT_BITS // 8
-LATENCY = 15
+LATENCY = 16
 NBEATS = 16
 # The pass budget the DUT was built with, for the cycle budgets only:
 # the multi-cycle targets export it, the default is the shipping tile.

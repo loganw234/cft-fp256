@@ -4519,3 +4519,132 @@ needs to read.
 nested rungs, the retimed ladders, the pipelined leading-zero cone,
 the indexed constants and the published caps. Those are proposals
 with their own gates in the study documents.
+
+## 2026-09-07 - the leading-zero cone cut and rebuilt, LATENCY 15 to 16
+
+docs/studies/OPT-C-timing.md's first and seventh ideas, built and gated.
+Idea 1 puts a register boundary inside the S10->S11 leading-zero cone,
+which the 2026-09-06 routed reports made 8.77 ns of an 11.55 ns fp256
+path; idea 7 replaces the cone's two priority scans with balanced
+(valid, count) trees. `LATENCY` is 16 edges now, S0..S15.
+
+**What moved.** `rtl/cft_fpfma_pipe.sv`: the cone is `cft_lzcone`, a
+module at the foot of the file, and a new S11 register holds its answer
+- the window, the total shift, the msb, the empty flag - beside the
+sign, the exponent anchor, the residue rail and the whole specials
+sideband. Every parallel path crossing the boundary is registered in the
+same commit, because this pipe is synchronised rather than linear and
+the last stage added to it produced garbage, not drift. `DEPTH` 15 -> 16
+carried the rounding-attribute delay line with it untouched: its taps
+have always been written relative to `DEPTH`. The three `.LATENCY(15)`
+in `rtl/cft_krnl.sv` and the parameter defaults in `cft_lanes` and
+`cft_seq` follow; `cft_reduce_acc`'s `ADD_LATENCY` follows through
+`cft_engine_stream`'s `LATENCY + 1` with no edit, and `cft_normseg`
+needed none - its two-cycle contract is independent of the pipe's depth.
+Nine testbench sites named 15 and now name 16. One file was already
+ahead of the RTL: `hw/synth_ooc.tcl` says `set latency 16` with a
+comment that the default must track the depth, and at depth 15 that
+script could not have elaborated.
+
+**NBEATS did not have to move, and docs/ROADMAP.md said it would.** That
+file recorded "LATENCY 16 forces NBEATS to 32 and changes the block
+model seq.py is bit-exact to", from the parameter's own comment (`>=
+LATENCY + 1`). The relation is about keeping the pipe full, not about
+correctness - results retire in arrival order through `wb_bt`, and
+`S_ALU_ISSUE` and `S_ALU_WAIT` both run the writeback path - and
+`python/cft_golden/seq.py` does not model blocks at all. `NBEATS` stays
+16, `seq_core`'s nine tests pass at LATENCY 16, and the parameter now
+carries the elaboration guard docs/ROADMAP.md asked for, stating the
+constraint that is real: the register file addresses a beat in four
+bits.
+
+**The shape of the cone was decided by the simulator, not the fabric.**
+Idea 7 as the study writes it is one radix-4 tree over the whole window.
+That was built, proved bit-identical, and measured - and it costs the
+cocotb matrix a factor it cannot afford. `tb_fpfma_fp32` and
+`tb_fpfma_fp256` at `CFT_RANDOM=300`, cocotb's own elapsed time, every
+form at LATENCY 16 and every form bit-identical to the others:
+
+| cft_lzcone form | fp32 | fp256 |
+|---|---|---|
+| the priority scans it replaced | 21.6 s | 18.2 s |
+| one tree, generate pyramid, one assign per node | 528.1 s | - |
+| one tree, one process, per-level loops | 66.7 s | 71.4 s |
+| one tree, one process, flat node loop | 47.6 s | 77.0 s |
+| **chunk detect kept, trees where the scans were** | **20.2 s** | **25.8 s** |
+
+Two things in that table. A generate pyramid needs multiply driven nets
+and Icarus schedules every driver as its own event - 24x on fp32, for a
+netlist that is otherwise identical. And a tree over 717 bits is 341
+nodes where the old cone was twelve vector compares and one
+64-iteration scan, which is the remaining 4x. The shipping form keeps
+the 64-bit chunk zero-detect - the one part of the old cone Vivado
+already mapped well, five CARRY4 for 0.484 ns - and puts trees only
+where the two PRIORITY SCANS were: the twelve chunk flags, and the
+sixty-four bits of the one chunk that matters.
+
+**Gates that returned**, all on the committed tree, in the pinned
+images:
+
+- `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (11 of 11, negative
+  control refuted)`. Four of those eleven are new - `lzcone.sby` at
+  fp32/fp64/fp128/fp256, a combinational equivalence miter of
+  `cft_lzcone` against `formal/cft_lzcone_ref.sv`, the priority-loop
+  form frozen at the moment of the split. Both sides combinational, so
+  each BMC step is the whole input space at that rung: 2^78, 2^165,
+  2^345, 2^717. Solver time 3, 4, 3 and 5 seconds against a 900-second
+  per-rung bound. The vacuity preflight counts three assertion cells in
+  the miter, so it is not passing empty.
+- `make sim` in cft-sim: `SIM_RC=0`, twenty-one targets, zero failures.
+  The four FMA benches are 39,032 + 39,032 + 20,507 + 12,707 = **111,278
+  vectors bit-exact against cft_golden**, which is the suite this
+  project quotes by that number.
+
+**A defect this found.** `tb/Makefile`'s `simmc` target has carried a
+literal backslash-n where a line continuation belonged, since the day
+the board targets were appended to it. `make simmc` therefore ran
+everything up to `seqbanksmc` and then died on `No rule to make target
+'\n'` - so `board`, `boardkrnl`, `boardseq` and `boardfp256`, the three
+benches that exist to run the open-core board's configuration as one
+thing, had never run under that target at all. Fixed; `make -n simmc`
+now lists them.
+
+**Gates still running when this was written**, on a host carrying a
+dozen other agents' simulations: `make MC=10 simmc` (its first thirteen
+targets returned PASS with no failures, including the three `board*`
+ones above), `make MC=2 simmc`, `krnlfused`/`krnlplain`/`cycles`, and
+`make yosys-lint`. The same yosys-lint invocation passed on the
+idea-1-only tree earlier the same day (exit 0, no latches, no errors),
+and Verilator elaborates `cft_krnl` and `tb_normshare` clean - two
+width warnings in `cft_lzcone` were found by exactly that gate and
+fixed before this commit.
+
+**Measured, out of context, tip only so far.** `xcu50-fsvh2104-2-e` at a
+160 MHz ask, `MUL_PASSES=1` with the ladders off - the shipping
+configuration - at 046adae:
+
+| | tip |
+|---|---|
+| synthesis WNS / worst path | +0.410 / `s10_mag_reg[652]` -> `s11_valw_reg[448]`, 25 levels, **5.821 ns** |
+| routed WNS / worst path | +0.120 / `s13_kept_r_reg[11]` -> `d_reg[148]`, 20 levels, **6.111 ns** |
+| routed worst 25 by family | 13 round->pack, 8 `u_engine` `op_r`->`w_cnt`, 4 the cone (worst 6.068 ns) |
+| routed LUT / FF / DSP / BRAM | 120,839 / 57,644 / 262 / 36 |
+
+That confirms the study's central claim on a part it was not measured
+on: **before placement the single worst path in the kernel is the
+leading-zero cone.** It also shows what the routed picture is on this
+part, which the study did not have: after routing the cone and the round
+stage are within 0.04 ns, and the engine control path the study called
+the second wall is third in the list.
+
+**Not run here.** The branch's own implementations. The Kintex-7 325T
+synthesis pair at 120 MHz `MUL_PASSES=10` with the ladders on, the U50
+implementation pair, the idea-1-alone synthesis pair that would separate
+the register cut from the trees, and the two 325T implementations were
+queued one at a time behind the tip run above and had not returned; the
+host was running six Vivado processes belonging to other agents for part
+of the day. So this entry records a change that is PROVED bit-identical
+and gated in simulation, and MEASURED only on the tip side. No frequency
+claim is made for it, and none should be quoted until the pair exists -
+this is the design whose out-of-context proxy has mispredicted the shell
+by 0.88 ns once already.

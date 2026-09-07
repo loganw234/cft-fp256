@@ -47,7 +47,7 @@ module tb_fpfma_fp32 #(
   logic bv; logic [31:0] bd; logic [4:0] bf;
   cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
       .op(op), .a(a), .b(b), .c(c), .valid(bv), .d(bd), .flags(bf));
-  cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(15),
+  cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(16),
                    .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP)) u_dut (
       .clk(clk), .rst_n(rst_n), .en(en), .in_valid(in_valid), .rnd(rnd),
       .byp(bv), .byp_d(bd), .byp_f(bf),

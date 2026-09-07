@@ -516,7 +516,7 @@ module cft_krnl #(
   // The array's acceptance strobe reaches both issuers; each gates its
   // own issue on it, and each is a no-op at MUL_PASSES=1 where the
   // strobe is a constant 1.
-  cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(15),
+  cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(16),
               .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
               .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
               .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES)) u_lanes (
@@ -531,7 +531,7 @@ module cft_krnl #(
       .in_ready(arr_rdy),
       .out_valid(arr_ov), .d(arr_d), .lane_flags(arr_lf));
 
-  cft_engine_stream #(.LATENCY(15), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
+  cft_engine_stream #(.LATENCY(16), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
                       .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS),
                       .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
                       .FUSE_ALIGN(FUSE_ALIGN), .OWN_LANES(1'b0),
@@ -572,12 +572,14 @@ module cft_krnl #(
   );
 
   // The sequencer. LATENCY matches the engine's because they share the
-  // ALU recipe and a block shorter than the pipeline cannot fill it;
-  // NBEATS is the lane block, >= LATENCY + 1 for the same reason.
+  // ALU recipe. NBEATS is the lane block; cft_seq's own guard is the
+  // statement of what it has to be, and 16 satisfies it at LATENCY 16 -
+  // the block no longer has to outrun the pipe by a beat, because the
+  // issue state and the drain state both retire results.
   // MAXD, IMEM_D and KMEM_D are the on-chip caps the hardware checks a
   // program image against, and refuses past - a program the tile
   // cannot hold is not a program the tile may half-run.
-  cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(15), .NBEATS(16), .MAXD(64),
+  cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(16), .NBEATS(16), .MAXD(64),
             .IMEM_D(1024), .KMEM_D(256), .ADDR_W(64),
             .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
             .EN_FP256(EN_FP256), .OWN_LANES(1'b0),

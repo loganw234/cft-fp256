@@ -572,6 +572,100 @@ clock-independent by construction. The v0 behavioural core (one
 combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
 reference.
 
+### The leading-zero cone became its own stage (2026-09-07)
+
+`docs/studies/OPT-C-timing.md` took the 2026-09-06 routed fp256 path
+apart segment by segment and found that **76% of it was working out how
+far to shift**: of 11.550 ns on a Kintex-7 410T at an 80 MHz ask,
+8.77 ns was the chunk zero-scan, the priority encode, the chunk mux,
+`lzc64` and the `NW-1-msb` subtract; 1.58 ns was the gather into
+`cft_lanes`' mode mux; 1.20 ns was the ladder itself. All of it in one
+cycle, between `s10_mag` and the S11 registers. Two changes against
+that, in one commit, because neither is worth much alone.
+
+**A register boundary inside the cone.** `LATENCY` is **16** edges now,
+not 15, and the new S11 holds the cone's answer - the window, the total
+shift, the msb, the empty flag - together with every parallel path
+beside it: the sign, the exponent anchor, the residue rail and the whole
+specials sideband. That last clause is the entire risk of the change,
+and it is why the previous attempt to deepen this pipe produced
+*garbage, not drift* (docs/ROADMAP.md). `cft_fpfma_pipe` is a
+synchronised multi-path pipeline; a stage that delays one path and not
+its neighbours hands every operation another one's control word.
+Downstream the register names did not move - `s11_*` sits at level 12
+now, `s14_*` at level 15 - and the rounding-attribute delay line needed
+no edit at all, because its taps have always been written relative to
+`DEPTH` rather than as literals.
+
+**Balanced trees where the priority loops were.** The cone is
+`cft_lzcone` now, a module at the foot of `rtl/cft_fpfma_pipe.sv`, and
+both of its top-down scans - the twelve-chunk resolve and the 64-way
+`lzc64` - are log-depth (valid, count) merges folded four wide
+(`cft_lz4`). Two levels and three levels respectively, against the
+thirteen the routed trace walked. The count comes out of the root
+already, so the `NW-1-msb` subtract is gone rather than moved.
+
+What did **not** change is the 64-bit chunk zero-detect, and that is the
+interesting part. It was the one piece of the old cone Vivado already
+mapped well - five CARRY4 for 0.484 ns and no routing - and it is also
+what keeps the module cheap to SIMULATE, a 64-bit reduction being one
+vector operation where a tree over the same bits is sixteen nodes. The
+study's idea 7 proposes a single tree over the whole 717-bit window;
+that version was built, proved bit-identical, and measured **about four
+times slower through Icarus** on `tb_fpfma_fp256` (2026-09-07). A
+generate pyramid with one continuous assignment per node - the obvious
+way to write either - was **twenty-four times** slower on
+`tb_fpfma_fp32`, because Icarus schedules each driver of a multiply
+driven net as its own event. The whole cocotb matrix runs on Icarus, so
+those are not cosmetic numbers. The shipping form keeps the wide cheap
+reduction, puts the trees only where the scans were, and costs 1.4x on
+the fp256 bench and nothing on fp32.
+
+Bit identity here is proved, not argued. `formal/lzcone.sby` is a
+combinational equivalence miter of `cft_lzcone` against
+`formal/cft_lzcone_ref.sv` - the priority-loop form frozen at the moment
+of the split - at all four window widths; both sides being
+combinational, each BMC step is the whole input space at that rung
+(2^78, 2^165, 2^345, 2^717). It is part of `formal/run.sh`'s gate.
+
+`cft_seq`'s `NBEATS` did **not** have to move with the depth, and that
+is worth recording because docs/ROADMAP.md predicted it would ("LATENCY
+16 forces NBEATS to 32"). The parameter's old comment said `>= LATENCY +
+1`; the relation is about keeping the pipe full, not about correctness,
+because results retire in arrival order and both the issue state and the
+drain state run the writeback path. What is structural is the register
+file's address shape - the beat index is four bits - so `NBEATS` stays
+16 and now carries an elaboration guard saying which of the two
+constraints is real.
+
+**What the tip measured, before the change.** Out of context on
+`xcu50-fsvh2104-2-e` at a 160 MHz ask, `MUL_PASSES=1` with the ladders
+off - the shipping configuration - commit 046adae:
+
+| | tip, 2026-09-07 |
+|---|---|
+| synthesis WNS | +0.410 (period 6.250) |
+| synthesis worst path | **`s10_mag_reg[652]` -> `g_norm_priv.s11_valw_reg[448]`, 25 levels, 5.821 ns** |
+| routed WNS | +0.120 |
+| routed worst path | `s13_kept_r_reg[11]` -> `d_reg[148]`, 20 levels, **6.111 ns** |
+| routed worst 25, by family | 13 round->pack, 8 `u_engine` `op_r`->`w_cnt`, 4 the LZC cone (worst 6.068 ns) |
+| routed LUT / FF / DSP / BRAM | 120,839 / 57,644 / 262 / 36 |
+
+The synthesis line is the study's claim, confirmed on a part it was not
+measured on: **the single worst path in the whole kernel, before
+placement, is the leading-zero cone.** After routing the cone and the
+round stage are within 0.04 ns of each other, which is what "the cone
+stops being the critical path" has to be measured against - and the
+`u_engine` control family sitting third at 160 MHz is the second wall
+the study named, appearing in a U50 report for the first time.
+
+The matching branch runs were still on the host's Vivado queue when
+this was written; docs/VALIDATION.md's entry for the day says which
+returned. Read the path delay, not the slack: both runs above met their
+ask, and per docs/BRINGUP.md a passing run tells you the design met
+what it was asked for and nothing about headroom.
+
+
 ## The multi-cycle rung (built 2026-09-06: rtl/cft_mulpass.sv)
 
 `MUL_PASSES` on `cft_krnl` iterates the chunk-column multiplier instead

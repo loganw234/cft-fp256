@@ -14,6 +14,8 @@
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
 #   equiv.sby     check+cover   cft_simpleops == frozen pre-rewrite ref
+#   lzcone.sby    4 rungs       cft_lzcone == the priority-loop cone it
+#                               replaced, complete at each window width
 #   mulpass.sby   3 geometries  cft_mulpass' iterated product is exact,
 #                 + cover       from any initial state (bounded)
 #   negcontrol.sby              a deliberately broken property that MUST
@@ -74,6 +76,7 @@ vacuity() { # label, top, min_asserts, files...
 vacuity fifo       tb_fifo_formal      3 ../rtl/cft_fifo.sv tb_fifo_formal.sv
 vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.sv
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
+vacuity lzcone     tb_lzcone_equiv     3 -I ../rtl ../rtl/cft_fpfma_pipe.sv cft_lzcone_ref.sv tb_lzcone_equiv.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
@@ -85,6 +88,7 @@ echo
 
 # --- the proofs ----------------------------------------------------------
 declare -i bad=0
+declare -i total=0
 verdicts=""
 
 note() { verdicts="${verdicts}$1
@@ -94,6 +98,7 @@ run_proof() { # label, sbyfile, task (may be empty), detail
     local label=$1 sbyfile=$2 task=$3 detail=$4
     local -i t0 t1 rc
     t0=$(date +%s)
+    total+=1
     sby -f "$sbyfile" $task >/dev/null 2>&1
     rc=$?
     t1=$(date +%s)
@@ -115,6 +120,10 @@ run_proof seedop seedop.sby check "cft_seedop routing, all 2^40 inputs"
 run_proof seedop seedop.sby cover "cft_seedop operand classes reachable"
 run_proof equiv  equiv.sby  check "cft_simpleops == frozen ref (op != 26,27)"
 run_proof equiv  equiv.sby  cover "carve-out neighbours reachable"
+run_proof lzcone lzcone.sby fp32  "cft_lzcone == frozen cone, 78-bit window"
+run_proof lzcone lzcone.sby fp64  "cft_lzcone == frozen cone, 165-bit window"
+run_proof lzcone lzcone.sby fp128 "cft_lzcone == frozen cone, 345-bit window"
+run_proof lzcone lzcone.sby fp256 "cft_lzcone == frozen cone, 717-bit window"
 # NOT IN THE GATE: cft_mulpass' exactness proof (2026-09-06).
 # formal/mulpass.sby and formal/tb_mulpass_formal.sv are in the tree and
 # the property is the right one, but the proof does not close and the
@@ -134,6 +143,7 @@ run_proof equiv  equiv.sby  cover "carve-out neighbours reachable"
 # stopped being able to catch a real bug. The logfile is checked too,
 # so an sby that errored out cannot masquerade as a refutation.
 t0=$(date +%s)
+total+=1
 sby -f negcontrol.sby >/dev/null 2>&1
 rc=$?
 t1=$(date +%s)
@@ -153,7 +163,7 @@ echo "== formal gate verdicts =="
 printf '%s' "$verdicts"
 echo
 if [ "$bad" -ne 0 ]; then
-    echo "FORMAL GATE: FAIL ($bad of 11)"
+    echo "FORMAL GATE: FAIL ($bad of $total)"
     exit 1
 fi
-echo "FORMAL GATE: PASS (11 of 11, negative control refuted)"
+echo "FORMAL GATE: PASS ($total of $total, negative control refuted)"

@@ -110,8 +110,8 @@
 
 module cft_seq #(
     parameter int BEAT_BITS  = 256,
-    parameter int LATENCY    = 15,
-    parameter int NBEATS     = 16,     // lane block; >= LATENCY + 1
+    parameter int LATENCY    = 16,
+    parameter int NBEATS     = 16,     // lane block; see the guard below
     parameter int MAXD       = 64,     // deposit slots per lane, hw cap
     parameter int IMEM_D     = 1024,   // instruction capacity
     parameter int KMEM_D     = 256,    // constant capacity (image-side)
@@ -404,6 +404,35 @@ module cft_seq #(
   // always been addressed {reg, beat} with one enable per word.
   localparam int CW   = $clog2(MAXD + 1);
   localparam int NBSH = $clog2(NBEATS);      // beat index width
+
+  // The NBEATS guard docs/ROADMAP.md asked for before anyone changed
+  // the ALU depth, written now that someone has (LATENCY 15 -> 16,
+  // 2026-09-07). It is deliberately NOT `NBEATS >= LATENCY + 1`, which
+  // is what the parameter's comment used to say. That relation is about
+  // KEEPING THE PIPE FULL, not about correctness: results retire in
+  // arrival order through wb_bt, and S_ALU_ISSUE and S_ALU_WAIT both
+  // run the writeback path, so a block shorter than the pipe simply
+  // drains in the wait state instead of during issue. What IS
+  // structural is the register file's address shape - rf_raddr_* and
+  // rf_waddr carry the beat index in FOUR bits, {reg, beat[3:0]} - and
+  // that the block length fits the beat counters. Raise NBEATS past 16
+  // and those selects silently alias one beat onto another.
+  generate
+    if (NBEATS < 1 || NBEATS > 16) begin : g_nbeats
+      $error("cft_seq: NBEATS must be 1..16 - the register file addresses a beat in four bits");
+    end
+    if ((1 << NBSH) != NBEATS) begin : g_nbeats_pow2
+      $error("cft_seq: NBEATS must be a power of two - the beat index is NBSH bits wide");
+    end
+  endgenerate
+
+  initial begin
+    if (NBEATS < 1 || NBEATS > 16 || (1 << NBSH) != NBEATS) begin
+      $display("FATAL: cft_seq NBEATS=%0d must be a power of two in 1..16", NBEATS);
+      $fatal(1);
+    end
+  end
+
   logic [BLK_LANES-1:0]    active;
   logic [BLK_LANES*CW-1:0] dcnt;
   logic any_active;
