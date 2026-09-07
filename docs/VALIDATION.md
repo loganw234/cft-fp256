@@ -4643,6 +4643,36 @@ is NOT TESTED, and a constant index past 15 does not fit the
 instruction's four-bit field, so a device that addresses all sixteen
 has no representable violation to refuse.
 
+**The tools' device branches, exercised without a device.** Both
+tools' new paths are unreachable on the software backend, whose caps
+are larger than either default, so they were run against a SCRATCH
+COPY of `host/` whose software backend reports the tile's numbers
+instead - 64 deposit slots a lane, 1024 instructions, two lines in
+`host/src/program.c` - the same method docs/REMOTE.md's negative
+control uses, with the worktree's own binaries left alone. Against
+that copy:
+
+- `cft-zoom --engine program` at its default `--steps-per-call 1024`
+  printed `--steps-per-call 1024 needs 2048 deposit slots a lane and
+  the software backend holds 64; using 32 (cft_caps.max_deposits / 2)`
+  and ran;
+- the same run with `--steps-per-call 100` typed on the command line
+  was refused: `--steps-per-call 100 deposits 200 values a lane per
+  call and the software backend holds 64 (cft_caps.max_deposits): use
+  --steps-per-call 32 or lower`;
+- the resized run and an explicit `--steps-per-call 32` produced the
+  same chain,
+  `3bf0520b16eb4ef3a7e07c5454a6be6606051d590c39a788a14818029be6de9c`,
+  which is the property that makes resizing a default safe: the trip
+  count is a call boundary and not a result;
+- `cft-orbits --engine program` at 16 samples was refused - `16
+  samples deposit 68 values a lane and the software backend holds 64
+  (cft_caps.max_deposits): record at most 15 samples a run - raise
+  --sample-every or lower --periods`, exit 2 - and at 15 samples ran
+  and produced chain
+  `b09a54f42083c9f91c5a23742d077284b3dd7d667a82162546c84c7556327922`,
+  which is the same chain its loop engine produces for that run.
+
 **Not run.** No card, no hw_emu, no synthesis and no bitstream - the
 `CAPS` change is twelve wires and a concatenation, and neither Vivado
 nor XRT saw it here, so the XRT backend's decode of the new field has
