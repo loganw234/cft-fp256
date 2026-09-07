@@ -143,13 +143,15 @@
  * ---------------------------------------------------------------
  *
  * --engine program (the default) runs the Horner kernel as orbit
- * sequencer programs (docs/SEQUENCER.md): eight Horner steps per
- * program, the incoming interval arriving in r1/r2 from the b and c
- * streams and the outgoing one leaving through two DEPOSITs, so the
- * deposits of one call are the streams of the next. --engine loop
- * issues the identical steps as four cft_run passes per Horner step
- * from the host. The two must agree bit for bit, and the cross-check
- * holds them to it.
+ * sequencer programs (docs/SEQUENCER.md): as many Horner steps per
+ * program as the constant bank can be addressed with - up to 128 with
+ * indexed constants, eight without - the incoming interval arriving in
+ * r1/r2 from the b and c streams and the outgoing one leaving through
+ * two DEPOSITs, so where more than one program is needed the deposits
+ * of one call are the streams of the next. --engine loop issues the
+ * identical steps as four cft_run passes per Horner step from the
+ * host. All of these must agree bit for bit, and the cross-check holds
+ * them to it.
  *
  * The other two kernels have ONE engine each, and the reasons are
  * worth writing down because they are observations about the program
@@ -171,23 +173,37 @@
  *   is what makes its answer reproducible.
  *
  * ---------------------------------------------------------------
- * The wall the Horner kernel actually hit
+ * The wall the Horner kernel hit, and how it came down
  * ---------------------------------------------------------------
  *
  * A sequencer instruction names its operands in FOUR-BIT fields, and
  * the `ka`/`kb`/`kc` bits redirect those same fields at the constant
- * bank - so a program can address exactly SIXTEEN constants, whatever
- * `n_consts` in its header says. A polynomial with interval
+ * bank - so a program could address exactly SIXTEEN constants,
+ * whatever `n_consts` in its header said. A polynomial with interval
  * coefficients needs two constants per coefficient, so one program
- * holds eight coefficients and no more.
+ * held eight coefficients and no more, and the kernel was compiled
+ * into chunks of eight steps whose deposits fed the next call - the
+ * same pattern docs/COLLATZ.md uses to resume a trajectory. The
+ * ceiling was this workload's one observation for the sequencer's
+ * designers, and docs/ENCLOSE.md recorded it.
  *
- * That is why the Horner kernel is chunked into programs of eight
- * steps rather than compiled whole, and why --degree must satisfy
- * (degree + 1) % 8 == 0. The chunking is not a hardship - it is the
- * same "deposits feed the next call" pattern the Collatz explorer
- * uses to resume a trajectory - but the sixteen-constant ceiling is a
- * real limit on table-driven programs and is recorded in docs/ENCLOSE.md
- * for the sequencer's designers.
+ * On 2026-09-07 instruction bit 30 became `kx`: when it is set the
+ * three constant indices come from imm[7:0], imm[15:8] and imm[23:16]
+ * instead of from the operand fields, and the bank grows from sixteen
+ * addressable to 256. The kernel now asks the loader at startup
+ * whether it takes that encoding - by trying to load a one-instruction
+ * program that names constant 16, which nothing else can - and folds
+ * up to 128 coefficients into a single program where it does.
+ * --no-indexed-constants forces the chunked shape back.
+ *
+ * Nothing about the arithmetic changes: a chunk boundary is a deposit
+ * and a reload, both exact, so the chain a run prints is the same
+ * either way, at every format and every degree. That is the property
+ * host/tests/enclose_check.py holds the two shapes to, and it is the
+ * reason a changed chain here would be a bug rather than a design
+ * question. --degree still wants (degree + 1) to be a multiple of
+ * eight, because that is the granularity the coefficient block is cut
+ * at, not because sixteen constants is still the ceiling.
  *
  * ---------------------------------------------------------------
  * Determinism
@@ -243,7 +259,17 @@ static double now_s(void)
 #define MAX_ESZ  32     /* bytes in the widest element, binary256 */
 #define HEXMAX  160     /* an exact hexadecimal sequence, 5.12.3 */
 #define DECMAX  512     /* a rounded decimal sequence, for humans */
-#define CHUNK     8     /* Horner steps per program: 16 constants / 2 */
+/* Horner steps one program can hold: two constants per interval
+ * coefficient, so half the addressable bank. Sixteen constants when an
+ * operand's index is its own 4-bit field; 256 when instruction bit 30
+ * (`kx`) moves the three indices into `imm` - docs/SEQUENCER.md's
+ * instruction encoding. Which of the two applies is discovered at
+ * startup by asking the loader, not assumed. */
+#define CHUNK     8
+#define CHUNK_KX  128
+/* The instruction count of the largest program built here: one CMPLE,
+ * four instructions a step, two DEPOSITs and a HALT. */
+#define MAX_HORNER_INSNS (1 + 4 * CHUNK_KX + 3)
 
 static void die(const char *what)
 {
@@ -791,6 +817,25 @@ static uint64_t alu(int op, int rnd, int rd, int ra, int rb, int rc,
            ((uint64_t)(uint32_t)(kc ? 1 : 0) << 29);
 }
 
+/* The same instruction with its constant operands named through `imm`
+ * instead of through their 4-bit fields - instruction bit 30, `kx`.
+ * The caller passes the constant INDEX in the same argument either
+ * way; this packs it into imm[7:0] / imm[15:8] / imm[23:16] and zeroes
+ * the field it came from, which is what the loader's canonicity rule
+ * demands. imm[31:24] stays zero: it is reserved. */
+static uint64_t alu_kx(int op, int rnd, int rd, int ra, int rb, int rc,
+                       int ka, int kb, int kc)
+{
+    uint32_t imm = 0;
+    int fa = ra, fb = rb, fc = rc;
+
+    if (ka) { imm |= (uint32_t)(ra & 0xFF);            fa = 0; }
+    if (kb) { imm |= (uint32_t)(rb & 0xFF) << 8;       fb = 0; }
+    if (kc) { imm |= (uint32_t)(rc & 0xFF) << 16;      fc = 0; }
+    return alu(op, rnd, rd, fa, fb, fc, ka, kb, kc) |
+           ((uint64_t)1 << 30) | ((uint64_t)imm << 32);
+}
+
 static uint64_t ctl(int code, int ra, uint32_t imm)
 {
     return (uint64_t)(uint32_t)code |
@@ -826,31 +871,46 @@ enum { P_X = 0, P_LO = 1, P_HI = 2, P_ZERO = 5, P_NN = 6, P_MA = 7,
  *   lo <- fma(x, ma, clo)  [RDN]            <- the two attributes that
  *   hi <- fma(x, mb, chi)  [RUP]               make this one stream
  *
- * repeated CHUNK times over CHUNK consecutive coefficients, then two
- * DEPOSITs. For a point x and an interval [lo, hi], x*[lo,hi] is
- * [x*lo, x*hi] when x >= 0 and [x*hi, x*lo] when it is negative -
+ * repeated `nsteps` times over that many consecutive coefficients,
+ * then two DEPOSITs. For a point x and an interval [lo, hi], x*[lo,hi]
+ * is [x*lo, x*hi] when x >= 0 and [x*hi, x*lo] when it is negative -
  * which is the whole content of the two SELECTs.
+ *
+ * `kx` selects the indexed-constant form of the two FMAs, which is the
+ * only difference between a program of eight steps and one of a
+ * hundred and twenty-eight. Nothing else about the instruction stream
+ * changes, and the arithmetic does not change at all - which is why a
+ * run's chain is the same either way, and why a changed chain would
+ * mean a bug rather than a design question.
  */
 static uint8_t *build_chunk(const fmt_info *fi, const uint8_t *clo,
-                            const uint8_t *chi, size_t nsteps,
+                            const uint8_t *chi, size_t nsteps, int kx,
                             size_t *bytes_out, uint32_t *insn_out)
 {
-    uint64_t ins[64];
+    uint64_t ins[MAX_HORNER_INSNS];
     uint32_t n = 0;
     size_t esz = fi->esz, i, off, nconst = 2 * nsteps;
     uint8_t *img;
 
-    if (nsteps == 0 || nsteps > CHUNK)
-        die("a Horner chunk must hold between one and eight steps");
+    if (nsteps == 0 || nsteps > (size_t)(kx ? CHUNK_KX : CHUNK))
+        die("a Horner chunk holds one to eight steps, or one to "
+            "a hundred and twenty-eight with indexed constants");
 
     ins[n++] = alu(CFT_CMPLE, CFT_RNE, P_NN, P_ZERO, P_X, 0, 0, 0, 0);
     for (i = 0; i < nsteps; i++) {
         ins[n++] = alu(CFT_SELECT, CFT_RNE, P_MA, P_LO, P_HI, P_NN, 0, 0, 0);
         ins[n++] = alu(CFT_SELECT, CFT_RNE, P_MB, P_HI, P_LO, P_NN, 0, 0, 0);
-        ins[n++] = alu(CFT_FMA, CFT_RDN, P_LO, P_X, P_MA, (int)(2 * i),
-                       0, 0, 1);
-        ins[n++] = alu(CFT_FMA, CFT_RUP, P_HI, P_X, P_MB, (int)(2 * i + 1),
-                       0, 0, 1);
+        if (kx) {
+            ins[n++] = alu_kx(CFT_FMA, CFT_RDN, P_LO, P_X, P_MA,
+                              (int)(2 * i), 0, 0, 1);
+            ins[n++] = alu_kx(CFT_FMA, CFT_RUP, P_HI, P_X, P_MB,
+                              (int)(2 * i + 1), 0, 0, 1);
+        } else {
+            ins[n++] = alu(CFT_FMA, CFT_RDN, P_LO, P_X, P_MA, (int)(2 * i),
+                           0, 0, 1);
+            ins[n++] = alu(CFT_FMA, CFT_RUP, P_HI, P_X, P_MB,
+                           (int)(2 * i + 1), 0, 0, 1);
+        }
     }
     ins[n++] = ctl(C_DEPOSIT, P_LO, 0);
     ins[n++] = ctl(C_DEPOSIT, P_HI, 0);
@@ -885,6 +945,12 @@ static uint8_t *build_chunk(const fmt_info *fi, const uint8_t *clo,
 typedef struct {
     cft_format  fmt;
     int         use_program;
+    /* Use the indexed-constant instruction form wherever the loader
+     * takes it. On by default; --no-indexed-constants forces the
+     * chunked shape, which is what a device whose bitstream predates
+     * the feature needs, and what makes the two shapes comparable in
+     * one sitting. */
+    int         want_kx;
     int         want[N_KERNELS];
     size_t      points;        /* a power of two; each point kernel
                                 * evaluates points + 1 items */
@@ -950,6 +1016,8 @@ typedef struct {
     /* horner */
     uint8_t     *clo, *chi;      /* degree + 1 coefficient bounds */
     size_t       chunks;
+    size_t       steps;        /* Horner steps in one program */
+    int          kx;           /* the loader speaks indexed constants */
     cft_program **prog;
     uint8_t     *dep;
     uint32_t    *counts;
@@ -1507,13 +1575,81 @@ static void horner_coeffs(runstate *R)
     R->flags_seen |= f;
 }
 
+/* Does this loader speak indexed constants?
+ *
+ * Asked, not assumed, and asked of the loader rather than of a version
+ * number: build the smallest program that NEEDS the feature - one
+ * instruction naming constant 16, which no 4-bit operand field can
+ * reach - and see whether it loads. A loader that predates `kx` reads
+ * bit 30 as reserved-must-be-zero and refuses it, which is the version
+ * guard docs/SEQUENCER.md describes working exactly as designed.
+ *
+ * Note what this does NOT answer, because it matters on a card: it
+ * says the LOADER accepts the encoding, not that a bitstream executes
+ * it. When CAPS publishes a bit for the feature that is what this
+ * should read instead; until then the honest scope of the probe is
+ * the software backend, and a device run should be given --no-indexed
+ * -constants until the bitstream is known to carry it.
+ */
+static int kx_available(const fmt_info *fi)
+{
+    uint8_t img[32 + 17 * MAX_ESZ + 3 * 8];
+    size_t esz = fi->esz, off, i;
+    cft_program *p = NULL;
+    cft_status st;
+    uint64_t ins[3];
+
+    memset(img, 0, sizeof img);
+    ins[0] = alu_kx(CFT_SELECT, CFT_RNE, P_LO, P_X, 16, P_X, 0, 1, 0);
+    ins[1] = ctl(C_DEPOSIT, P_LO, 0);
+    ins[2] = ctl(C_HALT, 0, 0);
+
+    img[0] = 'C'; img[1] = 'F'; img[2] = 'T'; img[3] = 'P';
+    put_le32(img + 4, 1);                       /* version */
+    put_le32(img + 8, 3);                       /* n_insns */
+    put_le32(img + 12, 17);                     /* n_consts: 0..16 */
+    put_le32(img + 16, 1);                      /* max_deposits */
+    put_le32(img + 20, (uint32_t)fi->fmt);
+    off = 32 + 17 * esz;                        /* the bank stays +0 */
+    for (i = 0; i < 3; i++) {
+        put_le64(img + off, ins[i]);
+        off += 8;
+    }
+    st = cft_program_load(DEV, img, off, &p);
+    if (st != CFT_OK)
+        return 0;
+    cft_program_free(p);
+    return 1;
+}
+
+/* How many Horner steps one program should hold, given the cap the
+ * encoding allows and the coefficient count to cover.
+ *
+ * The whole block must divide evenly into programs - a ragged last
+ * chunk would work but would make the reported geometry two numbers
+ * instead of one - so this is the largest multiple of CHUNK not above
+ * the cap that divides degree + 1. The caller has already refused a
+ * degree for which CHUNK itself does not divide, so the loop always
+ * terminates at CHUNK.
+ */
+static size_t horner_steps(size_t ncoef, size_t cap)
+{
+    size_t s;
+    if (ncoef <= cap)
+        return ncoef;
+    for (s = cap - (cap % CHUNK); s > CHUNK; s -= CHUNK)
+        if (ncoef % s == 0)
+            return s;
+    return CHUNK;
+}
+
 static void horner_programs(runstate *R)
 {
     const fmt_info *fi = R->fi;
-    size_t esz = fi->esz, ch;
+    size_t esz = fi->esz, ch, steps = R->steps;
     int d = R->opt->degree;
-    uint8_t *clo = (uint8_t *)xcalloc(CHUNK, esz);
-    uint8_t *chi = (uint8_t *)xcalloc(CHUNK, esz);
+    uint8_t *clo = (uint8_t *)xcalloc(steps, esz);
+    uint8_t *chi = (uint8_t *)xcalloc(steps, esz);
 
     R->prog = (cft_program **)xcalloc(R->chunks, sizeof(cft_program *));
     for (ch = 0; ch < R->chunks; ch++) {
@@ -1521,12 +1657,17 @@ static void horner_programs(runstate *R)
         uint32_t insns = 0;
         uint8_t *img;
         cft_status st;
-        for (i = 0; i < CHUNK; i++) {
-            size_t k = (size_t)d - ch * CHUNK - i;
+        for (i = 0; i < steps; i++) {
+            size_t k = (size_t)d - ch * steps - i;
             memcpy(clo + i * esz, R->clo + k * esz, esz);
             memcpy(chi + i * esz, R->chi + k * esz, esz);
         }
-        img = build_chunk(fi, clo, chi, CHUNK, &bytes, &insns);
+        img = build_chunk(fi, clo, chi, steps, R->kx, &bytes, &insns);
+        /* The report states this rather than deriving it a second
+         * time; a geometry the tool printed but did not build would
+         * be exactly the kind of number this project does not quote. */
+        if (insns != 4 + 4 * (uint32_t)steps)
+            die("the Horner program is not the shape the report states");
         st = cft_program_load(DEV, img, bytes, &R->prog[ch]);
         free(img);
         if (st != CFT_OK)
@@ -1569,7 +1710,7 @@ static void horner_batch(runstate *R, size_t base, size_t n)
             }
             f |= fr;
             R->calls++;
-            R->elem_ops += n * (size_t)(1 + 4 * CHUNK);
+            R->elem_ops += n * (1 + 4 * R->steps);
         }
     } else {
         int k;
@@ -1900,9 +2041,24 @@ static void report(runstate *R, double elapsed, const char *backend)
     printf("  series terms  %d (tail below 2^-%d, derived from p)\n",
            R->terms, fi->prec + 1);
     if (S->n[KER_HORNER])
-        printf("  horner        degree %d, %" PRIu64 " chunk programs of %d "
-               "steps, 16 constants each\n", O->degree,
-               (uint64_t)R->chunks, CHUNK);
+        printf("  horner        degree %d, %" PRIu64 " program%s of %"
+               PRIu64 " steps, %" PRIu64 " constants and %" PRIu64
+               " instructions each, %s\n",
+               O->degree, (uint64_t)R->chunks,
+               R->chunks == 1 ? "" : "s", (uint64_t)R->steps,
+               (uint64_t)(2 * R->steps), (uint64_t)(4 + 4 * R->steps),
+               R->kx ? "indexed constants" : "four-bit constant fields");
+    /* Arithmetic intensity, which is what indexed constants bought:
+     * the ALU instructions one program issues per lane against the
+     * elements it moves - three stream loads in, DEPOSITS out.
+     * docs/SEQUENCER.md puts the memory-bound to compute-bound
+     * crossover at K ~ 30. The instruction count is the one the
+     * program this run BUILT carries, not an estimate of one. */
+    if (S->n[KER_HORNER] && O->use_program)
+        printf("  intensity     %.1f ALU instructions per element moved "
+               "(%" PRIu64 " over %d), crossover K ~ 30\n",
+               (double)(1 + 4 * R->steps) / (double)(3 + DEPOSITS),
+               (uint64_t)(1 + 4 * R->steps), 3 + DEPOSITS);
     printf("  library calls %" PRIu64 "\n", R->calls);
     printf("  element ops   %" PRIu64 "\n", R->elem_ops);
     printf("  flags seen    0x%02x%s%s%s\n", (unsigned)R->flags_seen,
@@ -1930,6 +2086,12 @@ static void usage(void)
 "\n"
 "  --format fp32|fp64|fp128|fp256   default fp256\n"
 "  --engine program|loop    the Horner kernel's engine (default program)\n"
+"  --no-indexed-constants   build the Horner kernel as chunks of eight\n"
+"                           coefficients, the shape a loader that reads\n"
+"                           instruction bit 30 as reserved requires. The\n"
+"                           default asks the loader and folds up to 128\n"
+"                           coefficients into ONE program where it can:\n"
+"                           same arithmetic, same chain, fewer calls.\n"
 "  --kernels a,b,c          any of series,dot,horner (default all)\n"
 "  --points N               points per point kernel, a power of two\n"
 "  --degree D               Horner degree; (D+1) must be a multiple of 8\n"
@@ -2002,6 +2164,7 @@ int main(int argc, char **argv)
     memset(&O, 0, sizeof O);
     O.fmt = CFT_FP256;
     O.use_program = 1;
+    O.want_kx = 1;
     O.want[0] = O.want[1] = O.want[2] = 1;
     O.points = 1024;
     O.degree = 23;
@@ -2031,6 +2194,7 @@ int main(int argc, char **argv)
             else if (!strcmp(v, "loop")) O.use_program = 0;
             else die("--engine takes program or loop");
         }
+        else if (!strcmp(a, "--no-indexed-constants")) O.want_kx = 0;
         else if (!strcmp(a, "--kernels")) parse_kernels(&O, need(argc, argv, &i));
         else if (!strcmp(a, "--points"))
             O.points = (size_t)strtoull(need(argc, argv, &i), NULL, 10);
@@ -2077,10 +2241,13 @@ int main(int argc, char **argv)
         die("--points must be a power of two, so that every evaluation "
             "point is a dyadic rational the format holds exactly");
     if (O.degree < 0 || ((O.degree + 1) % CHUNK) != 0)
-        die("--degree must make (degree + 1) a multiple of 8: a sequencer "
-            "instruction names a constant in a four-bit field, so a "
-            "program addresses sixteen constants and no more, which is "
-            "eight interval coefficients");
+        die("--degree must make (degree + 1) a multiple of 8: an interval "
+            "coefficient costs two constants, and the coefficient block "
+            "is cut into programs at that granularity. How many of those "
+            "eights fit in ONE program depends on how a constant is "
+            "addressed - sixteen constants through a four-bit operand "
+            "field, 256 through the indexed form - and the tool asks the "
+            "loader at startup rather than assuming");
     if (O.cond_levels < 1)
         die("--cond-levels must be at least 1");
     if (!O.dot_m)
@@ -2148,7 +2315,13 @@ int main(int argc, char **argv)
 
     R.terms = series_terms(&R);
     horner_coeffs(&R);
-    R.chunks = ((size_t)O.degree + 1) / CHUNK;
+    /* The program geometry, which is the one thing about this kernel
+     * that indexed constants change. It is computed for both engines
+     * because the report states it either way; only the program engine
+     * builds anything. */
+    R.kx = O.want_kx ? kx_available(&fi) : 0;
+    R.steps = horner_steps((size_t)O.degree + 1, R.kx ? CHUNK_KX : CHUNK);
+    R.chunks = ((size_t)O.degree + 1) / R.steps;
     if (O.want[KER_HORNER] && O.use_program)
         horner_programs(&R);
 

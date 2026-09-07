@@ -51,22 +51,28 @@ rather than about the mathematics:
 4. Engines.       The sequencer-program route and the host cft_run loop
                   must produce byte-identical records for the Horner
                   kernel.
-5. Batch size.    Three batch sizes over the same work must end on
+5. Shapes.        The same for the two PROGRAM shapes: one program
+                  holding every coefficient through indexed constants,
+                  and chunks of eight through four-bit operand fields.
+                  A chunk boundary is a deposit and a reload, both
+                  exact, so the records must not move.
+6. Batch size.    Three batch sizes over the same work must end on
                   byte-identical checkpoints AND byte-identical records.
-6. Interruption.  A run stopped every few passes and resumed, at a
+7. Interruption.  A run stopped every few passes and resumed, at a
                   different batch size, must end on the same checkpoint
                   as one that was never stopped - and the stops must
                   land mid-item, inside the series recurrence, or the
                   in-flight state was never exercised.
-7. The chain.     Recomputed with hashlib, which is what proves the
+8. The chain.     Recomputed with hashlib, which is what proves the
                   tool's from-first-principles derivation of SHA-256's
                   round constants right.
-8. Formats.       fp256 against fp64 on the same data: the numbers that
+9. Formats.       fp256 against fp64 on the same data: the numbers that
                   say what fp64 loses.
-9. Refusals.      A degree the sixteen-constant bank cannot hold, a
-                  point count that is not a power of two, and a format
-                  whose exponent range cannot carry the condition
-                  ladder are all refused rather than approximated.
+10. Refusals.     A degree that is not a whole number of
+                  eight-coefficient blocks, a point count that is not a
+                  power of two, and a format whose exponent range
+                  cannot carry the condition ladder are all refused
+                  rather than approximated.
 """
 
 import argparse
@@ -379,6 +385,36 @@ def check_engines(tool, tmp, fmt, points, degree):
         fail("%s: the two Horner engines disagree" % fmt)
 
 
+def check_program_shapes(tool, tmp, fmt, points, degree):
+    """The chunked Horner and the single-program one, byte for byte.
+
+    Indexed constants (`kx`, instruction bit 30, 2026-09-07) let one
+    program hold up to 128 interval coefficients where a four-bit
+    operand field held eight. Nothing about the arithmetic changes - a
+    chunk boundary is a deposit and a reload, both exact - so the two
+    shapes must produce identical records. A difference here is a bug
+    in the addressing mode, not a design question about it, which is
+    why this is a byte comparison and not a containment check.
+    """
+    global CHECKS
+    got = {}
+    for tag, extra in (("indexed", []),
+                       ("chunked", ["--no-indexed-constants"])):
+        path = Path(tmp) / ("shape-%s.rec" % tag)
+        tool.run("--format", fmt, "--kernels", "horner", "--points", points,
+                 "--degree", degree, "--engine", "program", "--batch", 64,
+                 "--records", path, "--quiet", *extra)
+        got[tag] = path.read_bytes()
+    CHECKS += 1
+    if got["indexed"] == got["chunked"]:
+        ok("%s degree %s: one program of %d coefficients and %d chunks of "
+           "eight produce byte-identical Horner records"
+           % (fmt, degree, int(degree) + 1, (int(degree) + 1) // 8))
+    else:
+        fail("%s: the chunked and single-program Horner shapes disagree - "
+             "indexed constants changed a result" % fmt)
+
+
 def check_batch_independence(tool, tmp, fmt, points, batches):
     global CHECKS
     blobs, recs = [], []
@@ -521,7 +557,7 @@ def check_refusals(tool):
     global CHECKS
     cases = [
         (["--degree", 12],
-         "a degree the sixteen-constant bank cannot hold"),
+         "a degree that is not a whole number of eight-coefficient blocks"),
         (["--points", 100],
          "a point count that is not a power of two"),
         (["--format", "fp32"],
@@ -603,21 +639,25 @@ def main():
         guard(check_engines, tool, tmp, "fp256", points, degree)
         guard(check_engines, tool, tmp, "fp64", points, degree)
 
-        print("\n[3] batch-size independence")
+        print("\n[3] the two Horner program shapes")
+        guard(check_program_shapes, tool, tmp, "fp256", points, degree)
+        guard(check_program_shapes, tool, tmp, "fp32", points, 127)
+
+        print("\n[4] batch-size independence")
         whole = guard(check_batch_independence, tool, tmp, "fp256", points,
                       (7, 64, 1024))
 
-        print("\n[4] interrupting and resuming")
+        print("\n[5] interrupting and resuming")
         if whole is not None:
             guard(check_resume, tool, tmp, "fp256", points, whole)
 
-        print("\n[5] the hash chain")
+        print("\n[6] the hash chain")
         guard(check_chain, tool, tmp, "fp64", points, None)
 
-        print("\n[6] what fp64 loses")
+        print("\n[7] what fp64 loses")
         guard(check_formats, tool, tmp, points, degree)
 
-        print("\n[7] refusals")
+        print("\n[8] refusals")
         guard(check_refusals, tool)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

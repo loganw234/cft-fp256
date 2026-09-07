@@ -9,11 +9,14 @@
 # (docker/Dockerfile.formal), so the host needs Docker and nothing
 # else. Same gate on a developer box and in CI, same claim.
 #
-# The gate is four proofs and a tripwire, in this order:
+# The gate is five proofs and a tripwire, in this order:
 #
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
 #   equiv.sby     check+cover   cft_simpleops == frozen pre-rewrite ref
+#   imul.sby      check+cover   IMUL's decode, its zero extension, and
+#                               the 32-bit rule as a self-miter over
+#                               the bits it must ignore
 #   mulpass.sby   3 geometries  cft_mulpass' iterated product is exact,
 #                 + cover       from any initial state (bounded)
 #   negcontrol.sby              a deliberately broken property that MUST
@@ -74,6 +77,7 @@ vacuity() { # label, top, min_asserts, files...
 vacuity fifo       tb_fifo_formal      3 ../rtl/cft_fifo.sv tb_fifo_formal.sv
 vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.sv
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
+vacuity imul       tb_imul_formal      6 ../rtl/cft_simpleops.sv tb_imul_formal.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
@@ -113,8 +117,23 @@ run_proof fifo   fifo.sby   prove "cft_fifo contract, unbounded (abc pdr)"
 run_proof fifo   fifo.sby   cover "cft_fifo control shapes reachable"
 run_proof seedop seedop.sby check "cft_seedop routing, all 2^40 inputs"
 run_proof seedop seedop.sby cover "cft_seedop operand classes reachable"
-run_proof equiv  equiv.sby  check "cft_simpleops == frozen ref (op != 26,27)"
+run_proof equiv  equiv.sby  check "cft_simpleops == frozen ref (op != 26,27,30)"
 run_proof equiv  equiv.sby  cover "carve-out neighbours reachable"
+run_proof imul   imul.sby   check "IMUL ignores every bit above 31"
+run_proof imul   imul.sby   cover "IMUL's decode corners reachable"
+# NOT IN THE GATE: imul.sby's `value` task (2026-09-07). The property
+# is the right one - IMUL's three 16x16 partial products against one
+# 32x32 multiply, truncated - and the harness carries it behind
+# IMUL_VALUE so it can be retried, but bitwuzla ran twenty-six minutes
+# on it without returning and was stopped. A miter of two differently
+# associated multipliers is what a bit-blasting engine does worst at,
+# which is the same wall mulpass.sby ran into below. Until it closes,
+# IMUL's VALUE rests on tb/test_simpleops.py's test_imul - 6,225
+# operand pairs at four rungs against the golden model - and on
+# host/tests/seq_check.py's differential; what the `check` task above
+# proves is everything about the operation that sampling cannot reach.
+#   sby -f imul.sby value    to try it again
+#
 # NOT IN THE GATE: cft_mulpass' exactness proof (2026-09-06).
 # formal/mulpass.sby and formal/tb_mulpass_formal.sv are in the tree and
 # the property is the right one, but the proof does not close and the
@@ -153,7 +172,7 @@ echo "== formal gate verdicts =="
 printf '%s' "$verdicts"
 echo
 if [ "$bad" -ne 0 ]; then
-    echo "FORMAL GATE: FAIL ($bad of 11)"
+    echo "FORMAL GATE: FAIL ($bad of 13)"
     exit 1
 fi
-echo "FORMAL GATE: PASS (11 of 11, negative control refuted)"
+echo "FORMAL GATE: PASS (13 of 13, negative control refuted)"

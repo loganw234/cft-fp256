@@ -22,6 +22,17 @@ Three things are compared, and the third is the one worth having:
    they agree IS the P2/P3 argument, executed rather than asserted -
    and it is the same argument that lets the library split a run across
    four compute units.
+
+Since 2026-09-07 every trial is drawn from one of TWO corpora, and the
+run says how many came from each. The first is the generator as it
+stood, unchanged down to the draw order so the programs this has always
+compared are the programs it still compares. The second sets
+`extended=True`, which adds `IMUL` to the opcode pool and `kx` -
+indexed constants - to the instructions that name one, over a bank
+deep enough that indices above fifteen are reached. Two corpora rather
+than one widened corpus because a differential that quietly stopped
+covering the old encoding while gaining the new one would be a
+regression nobody could see in a passing run.
 """
 
 import argparse
@@ -121,8 +132,11 @@ def corrupt(insns, rng):
     out = list(insns)
     loop_at = [i for i, w in enumerate(out)
                if seq.decode(w)["ctrl"] and seq.decode(w)["op"] == seq.REPEAT]
-    choices = ["repeat0", "stray_field", "alu_imm", "reserved", "unbalanced",
-               "huge_trip", "bad_const"]
+    choices = ["repeat0", "stray_field", "alu_imm", "kx_empty", "unbalanced",
+               "huge_trip", "bad_const",
+               # the refusals indexed constants added (2026-09-07)
+               "kx_wide_const", "kx_stray_reg", "kx_stray_imm",
+               "kx_reserved_byte", "kx_on_control"]
     if loop_at:
         choices += ["halt_in_loop", "actall_in_loop"]
     what = rng.choice(choices)
@@ -142,8 +156,28 @@ def corrupt(insns, rng):
         out.insert(0, seq.encode(seq.DEPOSIT, ra=0, ka=True, ctrl=True))
     elif what == "alu_imm":
         out.insert(0, seq.encode(seq.sf.OP_FMA, 0, imm=1))
-    elif what == "reserved":
-        out.insert(0, seq.encode(seq.sf.OP_FMA, 0) | (1 << 30))
+    elif what == "kx_empty":
+        # bit 30 is kx since 2026-09-07. Set with no operand naming a
+        # constant it selects nothing, so it is refused for exactly the
+        # reason it was refused as a reserved bit: a second encoding.
+        out.insert(0, seq.encode(seq.sf.OP_FMA, 0, kx=True))
+    elif what == "kx_wide_const":
+        # the index kx makes reachable, pointed past the bank
+        out.insert(0, seq.alu(seq.sf.OP_ADD, 0, rb=255, kb=True, kx=True))
+    elif what == "kx_stray_reg":
+        # the 4-bit field of an operand whose index came from imm
+        out.insert(0, seq.encode(seq.sf.OP_ADD, 0, rb=1, kb=True,
+                                 kx=True, imm=1 << 8))
+    elif what == "kx_stray_imm":
+        # an imm byte for an operand that names a register
+        out.insert(0, seq.encode(seq.sf.OP_ADD, 0, ra=1, rb=0, kb=True,
+                                 kx=True, imm=(1 << 0) | (1 << 8)))
+    elif what == "kx_reserved_byte":
+        out.insert(0, seq.encode(seq.sf.OP_ADD, 0, rb=0, kb=True,
+                                 kx=True, imm=(1 << 8) | (1 << 24)))
+    elif what == "kx_on_control":
+        # a field a control instruction does not read
+        out.insert(0, seq.encode(seq.DEPOSIT, ra=1, ctrl=True, kx=True))
     elif what == "huge_trip":
         # the termination bound: finite is not the same as bounded, and
         # the two implementations compute the worst case separately
@@ -173,13 +207,32 @@ def main():
 
     total = bad = refused_both = 0
     blocked = 0
+    extended = saw_kx = saw_imul = saw_wide = 0
     try:
         for name in args.formats:
             fmt = FORMATS[name]
             rng = random.Random(args.seed ^ (fmt.width * 7919))
             checked = 0
-            for _ in range(args.trials):
-                insns, consts = seq.random_program(fmt, rng)
+            for trial in range(args.trials):
+                # Alternate the two corpora rather than mixing them, so
+                # a run's counts say plainly how much of each was
+                # compared. The old arm draws exactly what it always
+                # drew for a given seed.
+                ext = (trial % 2) == 1
+                insns, consts = seq.random_program(fmt, rng, extended=ext)
+                if ext:
+                    extended += 1
+                    for w in insns:
+                        dd = seq.decode(w)
+                        if dd["ctrl"]:
+                            continue
+                        if dd["op"] == seq.sf.OP_IMUL:
+                            saw_imul += 1
+                        if dd["kx"]:
+                            saw_kx += 1
+                            for idx, is_k in seq.sources(dd):
+                                if is_k and idx >= seq.KADDR_PLAIN:
+                                    saw_wide += 1
                 maxdep = rng.choice([0, 1, 2, 4])
                 if rng.random() < 0.3:
                     insns, _kind = corrupt(insns, rng)
@@ -245,6 +298,10 @@ def main():
     print(f"\n{total} programs run through both implementations, "
           f"{refused_both} refused by both")
     print(f"{blocked} of them crossed libcft's 64-lane block boundary")
+    print(f"{extended} programs drawn from the extended corpus: "
+          f"{saw_imul} IMUL instructions, {saw_kx} indexed-constant "
+          f"instructions, {saw_wide} constant indices above "
+          f"{seq.KADDR_PLAIN - 1}")
     if not total:
         print("NO PROGRAM WAS COMPARED - the generator produced nothing "
               "valid, so this proved nothing")
@@ -252,6 +309,14 @@ def main():
     if not refused_both:
         print("NO PROGRAM WAS REFUSED - the two validators were never "
               "asked to disagree, so half of this check did not run")
+        return 1
+    if not (saw_imul and saw_kx and saw_wide):
+        # The same failure the counts above exist to make visible: a
+        # generator that stopped emitting the new forms would leave
+        # this differential passing while covering nothing new.
+        print("THE EXTENDED CORPUS REACHED NEITHER FEATURE - no IMUL, no "
+              "kx, or no constant index past the old sixteen, so the "
+              "2026-09-07 additions were not compared at all")
         return 1
     if bad:
         print(f"{bad} DISAGREEMENTS")

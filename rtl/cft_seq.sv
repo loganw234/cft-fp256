@@ -29,9 +29,13 @@
 //         n_insns <= IMEM_D, n_consts <= KMEM_D,
 //         max_deposits <= MAXD
 //     (max_deposits == 0 is LEGAL - the model allows it, every
-//     deposit then overflows - and only the addressable first 16
-//     constants are stored, because a 4-bit operand field cannot name
-//     the rest; the loader already refused any program that tries.)
+//     deposit then overflows.) Every constant the header declares is
+//     stored, up to KMEM_D: since 2026-09-07 an instruction with `kx`
+//     set - bit 30, formerly reserved-must-be-zero - takes its three
+//     constant indices from imm[7:0], imm[15:8] and imm[23:16] rather
+//     than from the 4-bit operand fields, so all 256 are addressable.
+//     Before that only the first 16 were stored, because no encoding
+//     could name the rest.
 //     A failure REFUSES the run: done pulses with `refuse` high,
 //     nothing was computed, and no memory was written (the header/
 //     image reads are the only traffic). Anything subtler - loop
@@ -89,9 +93,14 @@
 //                   per-byte enables so a lane's active bit masks its
 //                   slice. 16 regs x NBEATS beats x 32 B = 8 KiB, the
 //                   same silicon at every precision.
-//   imem / kmem     the instruction stream, and the 16 addressable
+//   imem / kmem     the instruction stream, and the KMEM_D addressable
 //                   constants, held already broadcast across the beat
-//                   because a run's format never changes.
+//                   because a run's format never changes. The bank is
+//                   read into three registers once per instruction,
+//                   not once per issue beat: a constant cannot change
+//                   during a run, and a 256-entry bank is a memory
+//                   rather than a LUT mux, so the read belongs in the
+//                   fetch shadow where the cycle is already spent.
 //   deposit buffer  eight 32-bit banks, one per 32-bit word position
 //                   within a beat - a wider lane occupies adjacent
 //                   banks at one address - so divergent per-lane
@@ -220,7 +229,14 @@ module cft_seq #(
   localparam int BEAT_BYTES = BEAT_BITS / 8;          // 32
   localparam int WORDS      = BEAT_BITS / 32;         // 8 banks
   localparam int BLK_LANES  = NBEATS * WORDS;         // 128 at fp32
-  localparam int KREG       = 16;                     // addressable consts
+  // Addressable constants. Sixteen was a property of the ENCODING, not
+  // of this module: an operand's index lived in a 4-bit field. `kx`
+  // (bit 30) moved the indices into imm's low three bytes, so the
+  // limit is now the header check's, which was already KMEM_D.
+  localparam int KREG       = KMEM_D;
+  // At least one bit, so a one-entry bank on some future trimmed
+  // build does not elaborate a [-1:0] index.
+  localparam int KAW        = (KREG > 1) ? $clog2(KREG) : 1;
   localparam int AR_MAXLEN  = 63;                     // 64-beat bursts
   localparam int LB         = $clog2(BLK_LANES);      // 7
   localparam int DB_D       = NBEATS * MAXD;
@@ -511,9 +527,35 @@ module cft_seq #(
   localparam int PWW = BEAT_BITS + 64;
   logic [PWW-1:0] pw;
   logic [6:0]  pw_have;
+
   logic [255:0] hdr_q;              // the header beat, verbatim
   logic [31:0] kons_left, insn_left;
   logic [31:0] kons_i, insn_i;
+
+  // How empty the parse window must become before the reader may take
+  // another beat, while constants are being peeled. TWO constraints,
+  // and both are required:
+  //
+  //   * the parser must not peel on the cycle `rready` is high, or the
+  //     handshake completes and the beat falls on the floor - so the
+  //     window must be too small for the NEXT field, which is another
+  //     constant while `kons_left > 1`;
+  //   * the beat below is absorbed at offset pw_have[2:0], so the
+  //     window must hold fewer than eight bytes when it arrives.
+  //
+  // At fp64 and wider the second implies the first, because esz >= 8.
+  // At fp32 it does not: a four-byte window is under eight and still
+  // peelable, so rready went high, the parser peeled again, and the
+  // beat the memory handed over on that handshake was lost - a program
+  // whose CONSTANT REGION spans more than one beat then starved
+  // forever. Found 2026-09-07 by tb/test_seq_core.py's first case to
+  // load a bank longer than a beat (40 fp32 constants); every case
+  // before it carried four constants or fewer, which is sixteen bytes
+  // and never crossed a beat. Nothing to do with indexed constants -
+  // it is simply the path they made worth reaching.
+  logic [6:0] kons_room;
+  assign kons_room = ((kons_left > 32'd1) && (esz < 6'd8)) ? {1'b0, esz}
+                                                          : 7'd8;
 
   // ---- AXI read side (single outstanding burst) -----------------------
   logic [ADDR_W-1:0] rd_addr;
@@ -565,7 +607,7 @@ module cft_seq #(
   logic [7:0]  c_op;
   logic [3:0]  c_rd, c_ra, c_rb, c_rc;
   logic [2:0]  c_rnd;
-  logic        c_ka, c_kb, c_kc, c_ctrl;
+  logic        c_ka, c_kb, c_kc, c_kx, c_ctrl;
   logic [31:0] c_imm;
   assign c_op   = cur[7:0];
   assign c_rd   = cur[11:8];
@@ -576,8 +618,48 @@ module cft_seq #(
   assign c_ka   = cur[27];
   assign c_kb   = cur[28];
   assign c_kc   = cur[29];
+  assign c_kx   = cur[30];
   assign c_ctrl = cur[31];
   assign c_imm  = cur[63:32];
+
+  // The constant index each operand names. Without `kx` it is the
+  // operand's own 4-bit field, zero-extended; with `kx` it is a byte
+  // of `imm`, which is what makes the whole bank reachable. The
+  // loader has already refused every other reading of these fields
+  // (a non-zero register field under `kx`, a non-zero imm byte
+  // without one, imm[31:24], `kx` with no operand naming a constant),
+  // so this mux is the only decision left.
+  logic [KAW-1:0] k_idx_a, k_idx_b, k_idx_c;
+  assign k_idx_a = c_kx ? KAW'(c_imm[7:0])   : KAW'(c_ra);
+  assign k_idx_b = c_kx ? KAW'(c_imm[15:8])  : KAW'(c_rb);
+  assign k_idx_c = c_kx ? KAW'(c_imm[23:16]) : KAW'(c_rc);
+
+  // The three constants THIS instruction reads, latched out of the
+  // bank one cycle behind `cur`. The bank was a 16-entry LUT mux read
+  // COMBINATIONALLY on the issue path; at 256 entries it is a memory,
+  // and a memory wants a registered read.
+  //
+  // There is no cycle cost. `cur` is written in S_FETCH and does not
+  // change again until the instruction retires, so these registers
+  // are valid from S_DECODE onward - S_FETCH2 already existed to
+  // cover imem's own read latency and this read fills the same
+  // shadow. It is also strictly LESS work than before: one read per
+  // instruction where the issue path did one per beat, for a value
+  // that cannot change during a run.
+  //
+  // In its own always_ff, not in the state machine's, and that is not
+  // tidiness: one write port and three unconditional synchronous read
+  // ports is the shape an inference engine recognises as a memory,
+  // and a 256 x BEAT_BITS array that failed to infer would be 65,536
+  // flip-flops behind three 256:1 muxes. No read enable, for the same
+  // reason - the addresses are stable whenever the answer is wanted,
+  // so gating the read would buy nothing and cost a condition.
+  logic [BEAT_BITS-1:0] kq_a, kq_b, kq_c;
+  always_ff @(posedge ap_clk) begin
+    kq_a <= kmem[k_idx_a];
+    kq_b <= kmem[k_idx_b];
+    kq_c <= kmem[k_idx_c];
+  end
 
   // ---- state ----------------------------------------------------------
   typedef enum logic [5:0] {
@@ -870,6 +952,11 @@ module cft_seq #(
       wr_aw_open <= 1'b0; wr_bresp_left <= '0;
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0;
+      // The constant bank is read unconditionally on every cycle, so
+      // the instruction word that supplies its three addresses must
+      // start defined; an X index into a memory is a simulator
+      // question nobody should have to answer.
+      cur <= '0;
       blk_base <= '0; active <= '0; dcnt <= '0;
       in_off <= '0; dep_off <= '0;
       rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
@@ -1015,13 +1102,13 @@ module cft_seq #(
           // starved forever.
           if (kons_left != 0 && pw_have >= {1'b0, esz}) begin
             if (kons_i < KREG)
-              kmem[kons_i[3:0]] <= kbroad(256'(pw) &
+              kmem[kons_i[KAW-1:0]] <= kbroad(256'(pw) &
                                    ~(~256'b0 << ({26'b0, esz} << 3)));
             pw <= pw >> ({26'b0, esz} << 3);
             pw_have <= pw_have - {1'b0, esz};
             kons_i <= kons_i + 1;
             kons_left <= kons_left - 1;
-            m_rd_rready <= ((pw_have - {1'b0, esz}) < 7'd8) &&
+            m_rd_rready <= ((pw_have - {1'b0, esz}) < kons_room) &&
                            !(kons_left == 1 && insn_left == 0);
           end else if (kons_left == 0 && insn_left != 0 &&
                        pw_have >= 7'd8) begin
@@ -1251,9 +1338,9 @@ module cft_seq #(
               al_valid <= 1'b1;
               al_op <= c_op;
               al_rnd <= c_rnd;
-              al_a <= c_ka ? kmem[c_ra] : rf_rdata_a;
-              al_b <= c_kb ? kmem[c_rb] : rf_rdata_b;
-              al_c <= c_kc ? kmem[c_rc] : rf_rdata_c;
+              al_a <= c_ka ? kq_a : rf_rdata_a;
+              al_b <= c_kb ? kq_b : rf_rdata_b;
+              al_c <= c_kc ? kq_c : rf_rdata_c;
             end
             bt <= bt + 1;
             if (bt == 6'({1'b0, nb_blk} + 6'd1))

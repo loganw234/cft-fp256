@@ -13,6 +13,15 @@ tb/*.vcd
 dump.fst
 dump.vcd
 
+# sby working directories (formal/run.sh makes one per task and
+# rewrites it on every run; `sby -f <file> <task>` regenerates)
+formal/*_check/
+formal/*_cover/
+formal/*_prove/
+formal/negcontrol/
+# and sby's per-.sby status database, which sits beside them
+formal/*/status.sqlite*
+
 # vitis / vivado
 build/
 build_ooc*/

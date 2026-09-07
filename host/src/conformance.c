@@ -295,7 +295,10 @@ static int op_from_name(const char *s)
             return -2;
         return v;
     }
-    for (i = 0; i < 30; i++)
+    /* Every opcode cft_op_name() names, 15 excepted - it is the one
+     * hole inside the block. The bound follows the table in device.c;
+     * it grew to 31 when IMUL took opcode 30 on 2026-09-07. */
+    for (i = 0; i < 31; i++)
         if (i != 15 && strcmp(cft_op_name((cft_op)i), s) == 0)
             return i;
     return -1;

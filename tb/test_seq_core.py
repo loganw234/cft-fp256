@@ -887,6 +887,49 @@ async def constants_and_rounding(dut):
         await bench.program(fmt, interval, a, b, c, n,
                             f"{name} interval pattern (rdn/rup/rtz/rmm)")
 
+    # A constant region LONGER THAN ONE BEAT, at every element size.
+    #
+    # This is the image-parse path rather than the operand mux, and
+    # until 2026-09-07 nothing reached it: every case above and the
+    # whole fuzz corpus carry four constants or fewer, which is 16
+    # bytes at fp32 and never crosses a 32-byte beat. The parser peels
+    # one field per cycle and raises `rready` only when the window is
+    # too empty to peel again, so the condition that decides "too
+    # empty" has to be the size of the NEXT field. It was 8 bytes for
+    # every element size, which is right at fp64 and wider and one
+    # beat too eager at fp32: the window still held four bytes, the
+    # parser peeled instead of absorbing, and the beat the memory had
+    # already handed over on that cycle's handshake fell on the floor.
+    # A program whose bank spans two beats then starved forever.
+    #
+    # The bank is deliberately larger than the sixteen an operand
+    # field can name, which is legal and always was - the extra
+    # constants are simply unaddressable without `kx`. That keeps this
+    # case about the PARSER and not about the addressing mode.
+    for name, n, count in (("fp32", 9, 40), ("fp64", 6, 20),
+                           ("fp128", 4, 12), ("fp256", 2, 6)):
+        fmt = FORMATS[name]
+        ebytes = fmt.width // 8
+        assert count * ebytes > BEAT_BYTES, (
+            f"{name}: {count} constants fit in one beat, so this case "
+            f"does not reach the path it exists for")
+        bank = [(i * 0x0303_0303 + 0x21) & ((1 << fmt.width) - 1)
+                for i in range(count)]
+        top = min(seq.KADDR_PLAIN, count) - 1
+        prog = seq.Program(
+            fmt,
+            [seq.alu(sf.OP_IOR, 4, ra=5, rb=top, kb=True),  # the last
+             seq.deposit(4),                                # addressable
+             seq.alu(sf.OP_IOR, 5, ra=5, rb=0, kb=True),    # ...and the
+             seq.deposit(5),                                # first
+             seq.halt()],
+            consts=bank, max_deposits=2)
+        await bench.program(fmt, prog, operands(fmt, n, 430),
+                            operands(fmt, n, 431), operands(fmt, n, 432),
+                            n, f"{name} {count} constants, "
+                               f"{count * ebytes} bytes over "
+                               f"{-(-count * ebytes // BEAT_BYTES)} beats")
+
     # a program with NO constant bank at all - the fetch must not read
     # one, and the bank being empty must not upset the operand mux
     for name, n in (("fp32", 9), ("fp256", 2)):
@@ -1383,7 +1426,165 @@ async def fuzz_programs(dut):
 
 
 # ======================================================================
-# 8. the one that has to go last
+# 8. indexed constants and IMUL (2026-09-07)
+# ======================================================================
+
+@cocotb.test()
+async def indexed_constants_and_imul(dut):
+    """The two additions of docs/ATLAS.md's "what the program model
+    lacks", through the whole module rather than through the lane.
+
+    `kx` (instruction bit 30, formerly reserved-must-be-zero) moves the
+    three constant indices into imm[7:0], imm[15:8] and imm[23:16], so
+    the addressable bank grows from sixteen to KMEM_D. Three things
+    have to be true of the RTL for that to be a widening rather than a
+    change, and each has its own case here:
+
+      * a constant ABOVE fifteen reaches the operand it names. This is
+        the whole feature, and it is the one thing no program could
+        express before, so nothing already in this file covers it;
+      * the same program written both ways computes the same thing.
+        Below sixteen the two encodings are two spellings of one
+        operation, and a module that muxed the index wrongly would
+        still pass every case above by reading `ra` when it should
+        read `imm`;
+      * a bank the run never wrote is never read. A program whose
+        n_consts is far below KMEM_D leaves most of the memory
+        undefined, and the operand mux must not depend on it.
+
+    IMUL rides along here rather than in its own suite because the
+    sequencer's obligation for a new opcode is exactly the one P1
+    states - steer the operands to the lane and put the answer back -
+    and `lowbias32`, the draw hash the opcode exists for, is a program
+    that exercises the steering under five instructions of dependency.
+
+    Everything is scored the standard way: seq.run() over the same
+    program and the same bits, whole machine compared.
+    """
+    bench = Bench(dut)
+    await bench.start()
+
+    # A bank as deep as the RTL will store, with every entry distinct
+    # and its own index in the low bits: a mis-indexed read then
+    # produces a value that names the slot it came from.
+    def deep_bank(fmt, count):
+        mask = (1 << fmt.width) - 1
+        return [((i * 0x0101_0101_0101_0101) ^ (i << 3) ^ 0x11) & mask
+                for i in range(count)]
+
+    # -- 1. an index above fifteen, on each of the three operand ports
+    for name, n in (("fp32", 12), ("fp64", 8), ("fp256", 3)):
+        fmt = FORMATS[name]
+        bank = deep_bank(fmt, KMEM_D)
+        assert len(set(bank)) == len(bank), "the bank must be distinguishable"
+        prog = seq.Program(
+            fmt,
+            [seq.alu(sf.OP_IOR, 4, ra=KMEM_D - 1, rb=5, rc=5,
+                     ka=True, kx=True),
+             seq.deposit(4),
+             seq.alu(sf.OP_IOR, 5, ra=5, rb=16, rc=5, kb=True, kx=True),
+             seq.deposit(5),
+             seq.alu(sf.OP_SELECT, 6, ra=0, rb=1, rc=200, kc=True, kx=True),
+             seq.deposit(6),
+             seq.alu(sf.OP_IXOR, 7, ra=17, rb=131, rc=0,
+                     ka=True, kb=True, kx=True),
+             seq.deposit(7),
+             seq.halt()],
+            consts=bank, max_deposits=4)
+        # the case is only meaningful if the indices are past the old
+        # ceiling, which no four-bit field could have named
+        for w in prog.insns:
+            d = seq.decode(w)
+            if d["ctrl"]:
+                continue
+            assert any(is_k and idx >= 16 for idx, is_k in seq.sources(d)), \
+                "an instruction here names no constant past fifteen"
+        await bench.program(fmt, prog, operands(fmt, n, 900),
+                            operands(fmt, n, 901), operands(fmt, n, 902),
+                            n, f"{name} kx: constants 16..{KMEM_D - 1}")
+
+    # -- 2. the two encodings agree where both can express the operand
+    for name, n in (("fp32", 9), ("fp128", 4)):
+        fmt = FORMATS[name]
+        bank = deep_bank(fmt, 16)
+        body = [(sf.OP_FMA, 4, 0, 3, 2), (sf.OP_MUL, 5, 0, 11, 2),
+                (sf.OP_IMUL, 6, 0, 7, 0), (sf.OP_SELECT, 7, 0, 1, 15)]
+        for use_kx in (False, True):
+            prog = seq.Program(
+                fmt,
+                [seq.alu(op, rd, ra, rb, rc, kb=True, kx=use_kx)
+                 for op, rd, ra, rb, rc in body]
+                + [seq.deposit(4), seq.deposit(5), seq.deposit(6),
+                   seq.deposit(7), seq.halt()],
+                consts=bank, max_deposits=4)
+            await bench.program(fmt, prog, dense(fmt, n, 910),
+                                dense(fmt, n, 911), dense(fmt, n, 912), n,
+                                f"{name} {'kx' if use_kx else 'plain'} "
+                                f"form over the low sixteen")
+
+    # -- 3. a shallow bank in a deep memory: the slots past n_consts are
+    #       never written by this run and must never be read either
+    for name, n in (("fp64", 8),):
+        fmt = FORMATS[name]
+        prog = seq.Program(
+            fmt,
+            [seq.alu(sf.OP_ADD, 4, ra=0, rb=0, rc=2, kc=True, kx=True),
+             seq.deposit(4), seq.halt()],
+            consts=deep_bank(fmt, 3), max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 920),
+                            operands(fmt, n, 921), operands(fmt, n, 922),
+                            n, f"{name} kx over a three-entry bank")
+
+    # -- 4. IMUL, and the hash it exists for
+    K1, K2 = 0x7FEB352D, 0x846CA68B          # atlas-engine's lowbias32
+    for name, n in (("fp32", 12), ("fp64", 8), ("fp128", 4), ("fp256", 2)):
+        fmt = FORMATS[name]
+        prog = seq.Program(
+            fmt, [seq.alu(sf.OP_IMUL, 4, 0, 1), seq.deposit(4), seq.halt()],
+            max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 930),
+                            operands(fmt, n, 931), operands(fmt, n, 932),
+                            n, f"{name} imul on stream operands")
+
+    fmt = FP32
+    prog = seq.Program(
+        fmt,
+        [seq.alu(sf.OP_ISHR, 1, 0, 0, kb=True),        # r1 = x >> 16
+         seq.alu(sf.OP_IXOR, 0, 0, 1),
+         seq.alu(sf.OP_IMUL, 0, 0, 2, kb=True),        # x *= 0x7feb352d
+         seq.alu(sf.OP_ISHR, 1, 0, 1, kb=True),        # r1 = x >> 15
+         seq.alu(sf.OP_IXOR, 0, 0, 1),
+         seq.alu(sf.OP_IMUL, 0, 0, 3, kb=True),        # x *= 0x846ca68b
+         seq.alu(sf.OP_ISHR, 1, 0, 0, kb=True),        # r1 = x >> 16
+         seq.alu(sf.OP_IXOR, 0, 0, 1),
+         seq.deposit(0), seq.halt()],
+        consts=[16, 15, K1, K2], max_deposits=1)
+    n = 16
+    seeds_ = [i * 0x9E3779B1 & 0xFFFFFFFF for i in range(n)]
+    want = seq.run(prog, seeds_, [0] * n, [0] * n)
+    assert want.flags == 0, "the draw stream must not signal"
+    assert len(set(want.deposits)) == n, (
+        "the hash collapsed these seeds, so this case would pass on a "
+        "module that computed nothing")
+    await bench.program(fmt, prog, seeds_, [0] * n, [0] * n, n,
+                        "fp32 lowbias32 as a program")
+
+    # -- 5. the version guard, from the hardware's side. The loader
+    #       refuses a kx program to an old library; an old TILE has no
+    #       such rule, so what protects it is the CAPS bit the library
+    #       will read - not anything this module does. Stated here as a
+    #       fact about the RTL rather than left implied: this module
+    #       executes bit 30 and does not refuse it.
+    fmt = FP32
+    word = seq.alu(sf.OP_ADD, 4, ra=0, rb=200, rc=0, kb=True, kx=True)
+    assert (word >> 30) & 1
+
+    dut._log.info("indexed constants and imul: %d runs",
+                  bench.cases["program"])
+
+
+# ======================================================================
+# 9. the one that has to go last
 # ======================================================================
 
 @cocotb.test()

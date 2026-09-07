@@ -16,17 +16,20 @@
 // complete equivalence proof at this rung, bounded in time, not in
 // coverage.
 //
-// The one carve-out, and its provenance: opcodes 26 and 27 left the
-// reserved set on 2026-08-31 for cft_seedop (tb/test_simpleops.py
-// REASSIGNED_OPS tells the story). The frozen ref predates that and
-// still traps them; the live module deliberately stays quiet so the
-// engine can OR the seed result over the shared sideband. They are
-// the ONE place ref and new are allowed to differ, so the assumption
-// below excludes exactly those two codes and nothing else - the
-// sweep's carve-out, restated to the solver. What the live module
-// does on 26/27 instead (valid low, flags clear) is cft_seedop's
-// gate's business, and the reserved codes bracketing them (25, 28)
-// stay INSIDE this proof, trapping in both instances.
+// The carve-outs, and their provenance. Opcodes 26 and 27 left the
+// reserved set on 2026-08-31 for cft_seedop, and opcode 30 left it on
+// 2026-09-07 for IMUL (tb/test_simpleops.py's REASSIGNED_OPS and
+// ADDED_OPS tell both stories). The frozen ref predates both and still
+// traps all three; the live module stays quiet on 26/27 so the engine
+// can OR cft_seedop's result over the shared sideband, and ANSWERS 30
+// out of its own integer datapath. Those three codes are the whole of
+// what ref and new are allowed to differ about, so the assumption
+// below excludes exactly them and nothing else - the sweep's
+// carve-out, restated to the solver. What the live module does
+// instead is proven elsewhere: 26/27 by cft_seedop's own gate, 30 by
+// imul.sby, which is a miter of the same shape as this one. The
+// reserved codes bracketing both carve-outs (25, 28, 29, 31) stay
+// INSIDE this proof, trapping in both instances.
 //
 // All three outputs are compared: d, valid, AND flags - the frozen
 // ref is the arbiter of flag behaviour too, including invalid on
@@ -46,10 +49,12 @@ module tb_simpleops_equiv #(
 
   localparam int W = 1 + EXP_W + MAN_W;
 
-  // The reassigned opcodes (golden model's map: OP_RECIP_SEED,
-  // OP_RSQRT_SEED = 26, 27) - the one sanctioned divergence.
+  // The carved-out opcodes (golden model's map: OP_RECIP_SEED,
+  // OP_RSQRT_SEED = 26, 27; OP_IMUL = 30) - the sanctioned
+  // divergences, and nothing else.
   localparam logic [7:0] OP_RECIP_SEED = 8'd26;
   localparam logic [7:0] OP_RSQRT_SEED = 8'd27;
+  localparam logic [7:0] OP_IMUL       = 8'd30;
 
   logic         v_new, v_ref;
   logic [W-1:0] d_new, d_ref;
@@ -72,7 +77,8 @@ module tb_simpleops_equiv #(
   );
 
   always_comb begin
-    assume (op != OP_RECIP_SEED && op != OP_RSQRT_SEED);
+    assume (op != OP_RECIP_SEED && op != OP_RSQRT_SEED &&
+            op != OP_IMUL);
 
     a_same_valid: assert (v_new == v_ref);
     a_same_d:     assert (d_new == d_ref);
@@ -84,6 +90,9 @@ module tb_simpleops_equiv #(
   always_comb begin
     c_op25_trap:  cover (op == 8'd25);
     c_op28_trap:  cover (op == 8'd28);
+    // IMUL's own neighbours, so its carve-out is one code wide too
+    c_op29_trap:  cover (op == 8'd29);
+    c_op31_trap:  cover (op == 8'd31);
     c_minmax:     cover (op == 8'd7 && v_new);
     c_cmp:        cover (op == 8'd12 && v_new);
     c_shift:      cover (op == 8'd22 && v_new);
