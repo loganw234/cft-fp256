@@ -821,11 +821,11 @@ fuzz/fuzz-program$(EXE): fuzz/fuzz_program.c fuzz/cft_fuzz.o $(SRC) $(HDRS)
 	  $(INC) -Isrc -Ifuzz fuzz/fuzz_program.c $(SRC) fuzz/cft_fuzz.o \
 	  -o $@ $(XRTLIBS)
 
-fuzz/fuzz-serve$(EXE): fuzz/fuzz_serve.c tools/cft-serve.c fuzz/cft_fuzz.o \
-                       $(SRC) $(HDRS)
+fuzz/fuzz-serve$(EXE): fuzz/fuzz_serve.c tools/cft-serve.c tools/ws.c \
+                       fuzz/cft_fuzz.o $(SRC) $(HDRS)
 	$(CC) $(CSTD) $(FUZZ_CFLAGS) $(FUZZ_SAN) $(FUZZ_COV) $(FUZZ_WARN) \
-	  $(INC) -Isrc -Ifuzz fuzz/fuzz_serve.c $(SRC) fuzz/cft_fuzz.o \
-	  -o $@ $(XRTLIBS)
+	  $(INC) -Isrc -Ifuzz fuzz/fuzz_serve.c tools/ws.c $(SRC) \
+	  fuzz/cft_fuzz.o -o $@ $(XRTLIBS)
 
 # backend_remote.c is INCLUDED by this harness, so it must not also be
 # linked: rdev and do_request are static and the harness needs both.
@@ -847,7 +847,7 @@ fuzz-ckpt:
 # Every reproducer under host/fuzz/crashes, replayed. A finding that
 # was fixed stays fixed, and a harness that stopped reaching the bug
 # says so by name.
-fuzz-repro: fuzz
+fuzz-repro: fuzz cft-collatz$(EXE) cft-enclose$(EXE) cft-mersenne$(EXE) cft-orbits$(EXE) cft-zoom$(EXE)
 	cd fuzz && sh repro.sh
 
 fuzz-clean:
