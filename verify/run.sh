@@ -707,10 +707,21 @@ do_remote() {
   HOSTMAKE "cft-serve$EXE" "remote-test$EXE" "device-test$EXE" \
            "cft-selftest$EXE" "cft-collatz$EXE" || return 1
   REMOTE_PIDFILE="$RUNDIR/remote-server.pid" \
-    PY "$ROOT/host/tests/remote_check.py"
+    PY "$ROOT/host/tests/remote_check.py" || return 1
+  # The WebSocket transport (2026-09-07), held to the same contract from
+  # JavaScript: bindings/node/remote_test.mjs starts its own server on a
+  # free loopback port, replays a vector subset over WebSocket and over
+  # TCP, compares both with the local wasm module and the published
+  # answers, and runs the negative controls. Node 22 carries a WebSocket
+  # client of its own; without node the leg is reported, not failed.
+  if command -v node >/dev/null 2>&1; then
+    HOSTMAKE wstest
+  else
+    echo "remote: no node on PATH - the WebSocket leg (make -C host wstest) was not run"
+  fi
 }
 need host-cc python mpmath
-stage remote "the remote backend on loopback: cft-serve started and stopped by PID, remote held against software - refusals, device-test, a bounded replay, one workload chain, the round-trip counts" -- do_remote
+stage remote "the remote backend on loopback: cft-serve started and stopped by PID, remote held against software - refusals, device-test, a bounded replay, one workload chain, the round-trip counts; then the same contract over WebSocket from node" -- do_remote
 
 # ---- report --------------------------------------------------------
 {
