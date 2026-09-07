@@ -64,7 +64,7 @@ from cft_golden import (  # noqa: E402
 )
 from cft_golden import seq  # noqa: E402
 
-from test_krnl import run_op  # noqa: E402
+from test_krnl import run_op, check_seq_caps  # noqa: E402
 
 # CSR map (rtl/cft_csr.sv == hw/kernel.xml == docs/ARCHITECTURE.md)
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
@@ -391,6 +391,7 @@ async def krnl_sequencer(dut):
     assert await axil.read_dword(VERSION) == 0x00000600, \
         "the map grew by four registers at v0.6.0"
     caps = await axil.read_dword(CAPS)
+    check_seq_caps(caps)
     assert caps & CAPS_SEQ, (
         "CAPS bit 15 must advertise the sequencer - it is what a host asks "
         "before it writes PROG_PTR, and the alternative is guessing from "

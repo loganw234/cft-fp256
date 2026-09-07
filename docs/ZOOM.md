@@ -165,8 +165,15 @@ describing. Three things follow:
   That is the software backend's figure: a tile holds 64 deposit slots
   a lane (docs/SEQUENCER.md), so on a device the trip count is at most
   32 and the same reference is 3,125 calls - still 256x fewer than the
-  host loop - and the tool refuses a higher `--steps-per-call` there
-  by name.
+  host loop. Since 2026-09-07 the tool does not carry that 64 as a
+  literal: it reads `cft_caps.max_deposits` and, when the device's
+  budget is smaller than the default, takes `cap / 2` and says on
+  stderr what it chose. The trip count changes only how many calls a
+  run takes and not what it computes - `tests/zoom_check.py` asserts
+  that as one of the determinism properties - so resizing a DEFAULT is
+  safe; a `--steps-per-call` the user typed is refused instead, naming
+  the cap, because running something other than the command line says
+  is how a measurement stops meaning what it claims.
 - **Convergence masking is free.** `SETACT` is the escape condition, and
   an inactive lane writes nothing, deposits nothing and raises no flag.
 - **The last chunk gets its own image.** A program is compiled for its

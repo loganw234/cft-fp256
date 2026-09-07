@@ -4707,3 +4707,171 @@ through the WebSocket path: the five tools are C and speak the TCP
 one. And `verify/run.sh` was not touched - wiring `make -C host
 wstest` into the `remote` stage is an integrator's call, not this
 step's.
+
+## 2026-09-07 - the tile's on-chip capacities, published and enforced the same way everywhere
+
+Item 3 of docs/studies/OPT-D-contract.md, built. The defect it retires
+is the one the previous entry recorded as live: `cft_seq` refuses a
+program header past `MAXD` (64 deposit slots a lane) with `STATUS[3]`
+and no explanation, `host/src/program.c` accepted 2^20, and no host
+could ask which of the two it was talking to. The two workload tools
+had a `#define TILE_MAX_DEPOSITS 64` copied out of the RTL, which is
+right until a tile ships with a different number and which nothing
+could check.
+
+**`CAPS` (0x4C) now carries the capacities.** `[19:16]` is log2 of the
+deposit slots a lane, `[23:20]` log2 of the instruction capacity,
+`[27:24]` log2 of the constants an instruction can ADDRESS, `[7:4]` a
+sequencer feature nibble and `[31:28]` reserved; the full tile reads
+6, 10, 4, 0 and 0, so `CAPS` is 0x04A6FF0F where it was 0x0000FF0F. An
+exponent rather than a count, which is what makes each fit four bits.
+`rtl/cft_krnl.sv` names the three numbers once, as the localparams it
+hands `cft_seq`, and passes their `$clog2` to `cft_csr`; the fourth is
+the width of the instruction's `ka`/`kb`/`kc` operand field, four
+bits, and must equal `cft_seq`'s `localparam int KREG = 16`.
+`tb/test_krnl.py` parses both files and checks the readback against
+them, so a capacity that moves without `CAPS` moving is a test
+failure rather than a card-day surprise. The feature nibble is zero in
+this build and its four assignments are reserved in `rtl/cft_csr.sv`
+(wide constant index, init block, per-lane flags, static deposit) so
+that two builds cannot spend one bit twice. `cft_seq.sv` is untouched:
+its header check was already correct.
+
+**VERSION does not move.** These are values inside a register that
+already exists, which is the rule `cft_csr.sv` states for itself: a
+host built for 0x600 reads them correctly, and a host reading an older
+tile gets zeros. Zero is UNKNOWN throughout - `cft_caps` says so, the
+XRT backend maps an all-zero `CAPS[27:16]` to it, and nothing is
+enforced against an unknown, which is what keeps the card-day 0x410
+images behaving exactly as they did.
+
+**`cft_caps` grew by four fields** - `max_deposits`, `max_insns`,
+`max_consts`, `seq_features` - which is what its `struct_size`
+handshake exists for; a caller compiled against the old struct passes
+the old size and is unaffected. Each backend reports what it enforces
+and enforces what it reports: XRT decodes the register, the remote
+backend takes them from `HELLO`, and the software backend reports its
+own (1,048,576 deposit slots a lane, the header field's own
+4,294,967,295 instructions, 16 addressable constants) from
+`host/src/program.c`, the file that enforces them. `cft_program_load`
+- not `cft_program_run`, because a program is built once and run many
+times - refuses an image past any of them with `CFT_ERR_UNSUPPORTED`
+and a `cft_last_error()` naming the cap and both numbers.
+
+**The software backend was NOT narrowed to the tile's 64.** It models
+the program model rather than one implementation of it, a smaller tile
+is meant to be a conforming tile, and every recorded workload chain
+was produced through its accepted set. So "it ran on software" still
+does not mean "it fits a tile"; what changed is that finding out costs
+one call. The accepted set is unchanged; one status code moved, from
+`CFT_ERR_INVALID_ARGUMENT` to `CFT_ERR_UNSUPPORTED`, for a header
+asking more than 2^20 deposit slots a lane, so that every backend
+gives the same explained refusal at its own cap.
+
+**The remote caps block grew from 56 to 72 bytes by appending**, and
+the client accepts any block of at least 56 and leaves what a shorter
+one does not carry at zero. `CFTR_PROTO_VERSION` deliberately does not
+move: the `proto` field is compared for equality at both ends, so a
+bump would turn "an older server answers with a shorter block" into
+"an older server refuses the connection". The pairing the tolerance
+describes cannot occur today anyway - the ABI equality check on every
+frame already refuses two libraries whose ABI differs, and appending
+to `cft_caps` is an ABI minor step - so the tolerance is insurance for
+the next growth. **No old-server pairing was built or simulated.**
+
+**The tools size themselves from the answer.** `cft-zoom` takes
+`--steps-per-call` from `cap / 2` when the device's budget is smaller
+than its default of 1,024, printing what it chose, because a trip
+count changes only how many calls a run takes and not what it
+computes; a value the user typed is refused instead, naming the cap.
+`cft-orbits` refuses either way, because its sample count is part of
+what is recorded. On the software backend the caps are larger than
+either default, so neither tool's behaviour changes there and the
+recorded chains do not move.
+
+Gates run on this tree, on the Windows host and in the pinned
+containers, each line as the run printed it:
+
+- `make yosys-lint` (cft-formal image): exit 0, 30 warnings, all of
+  them the pre-existing `Replacing memory ... with list of registers`
+  notes in `rtl/cft_lanes.sv`; no errors and no latches.
+- `make krnl`: `TESTS=2 PASS=2 FAIL=0 SKIP=0`
+- `make krnlseq`: `TESTS=1 PASS=1 FAIL=0 SKIP=0`
+- `make seqbanks`: `TESTS=1 PASS=1 FAIL=0 SKIP=0`
+- `make faults`: `TESTS=5 PASS=5 FAIL=0 SKIP=0`
+- `make quarter`: `TESTS=1 PASS=1 FAIL=0 SKIP=0`
+- `test_krnl_smoke` (no Makefile target; run through `cocotb.mk`):
+  `TESTS=2 PASS=2 FAIL=0 SKIP=0`
+- `api-test`: `api-test: all contract checks passed`
+- `reduce-parts`: `6294 partitions checked across 4 formats x 29 sizes
+  x 7 part counts x 5 attributes`
+- `cft-selftest ../vectors/out` over a bounded set generated for this
+  run: `28 sets, 184496 cases, all matching`
+- the C-versus-Python ABI comparison: `C and Python reached the same
+  library and got the same bits`
+- `seq_check.py --trials 250 --formats fp32 fp64 fp128 fp256`: `695
+  programs run through both implementations, 305 refused by both` -
+  `libcft and the golden model agree on every program: deposits,
+  counts, flags and status`
+- `make -C host remotetest` (the loopback server, its PID recorded and
+  stopped by that PID): `remote_check: every check passed`. Inside it,
+  `remote-test` **251 checks, 0 failures** on both div/sqrt routes,
+  up from 245 by the six the caps block added; `device-test` against
+  `cft://127.0.0.1` **2256 checks, 0 failed**; the conformance replay
+  `28 sets, 184496 cases` identical local and remote; and the collatz
+  sweep chain
+  `3d16b9d7ac66234495c47d202358df24aeeb0aaffc32e5babb0072f2d9e159b7`
+  the same both ways.
+- `make zoomtest`: `11222 comparisons, 0 failures`
+- `make orbitstest`: `26 checks, 0 failures`
+- the four `cft-zoom` and `cft-orbits` rows of
+  `bindings/wasm/demos_chains.json` replayed against this worktree's
+  binaries: all four chains identical to the ones recorded on
+  2026-09-04 (`ebec460e.../5fb8f0de...`, `9c830484.../878ae482...`,
+  `12012be3...`, `3ebf95ae...`). Both tools' new branches are
+  unreachable on the software backend, and the chains say so.
+
+What `device-test` states rather than skips: an image past the
+software backend's instruction cap would be 34,359,738,400 bytes and
+is NOT TESTED, and a constant index past 15 does not fit the
+instruction's four-bit field, so a device that addresses all sixteen
+has no representable violation to refuse.
+
+**The tools' device branches, exercised without a device.** Both
+tools' new paths are unreachable on the software backend, whose caps
+are larger than either default, so they were run against a SCRATCH
+COPY of `host/` whose software backend reports the tile's numbers
+instead - 64 deposit slots a lane, 1024 instructions, two lines in
+`host/src/program.c` - the same method docs/REMOTE.md's negative
+control uses, with the worktree's own binaries left alone. Against
+that copy:
+
+- `cft-zoom --engine program` at its default `--steps-per-call 1024`
+  printed `--steps-per-call 1024 needs 2048 deposit slots a lane and
+  the software backend holds 64; using 32 (cft_caps.max_deposits / 2)`
+  and ran;
+- the same run with `--steps-per-call 100` typed on the command line
+  was refused: `--steps-per-call 100 deposits 200 values a lane per
+  call and the software backend holds 64 (cft_caps.max_deposits): use
+  --steps-per-call 32 or lower`;
+- the resized run and an explicit `--steps-per-call 32` produced the
+  same chain,
+  `3bf0520b16eb4ef3a7e07c5454a6be6606051d590c39a788a14818029be6de9c`,
+  which is the property that makes resizing a default safe: the trip
+  count is a call boundary and not a result;
+- `cft-orbits --engine program` at 16 samples was refused - `16
+  samples deposit 68 values a lane and the software backend holds 64
+  (cft_caps.max_deposits): record at most 15 samples a run - raise
+  --sample-every or lower --periods`, exit 2 - and at 15 samples ran
+  and produced chain
+  `b09a54f42083c9f91c5a23742d077284b3dd7d667a82162546c84c7556327922`,
+  which is the same chain its loop engine produces for that run.
+
+**Not run.** No card, no hw_emu, no synthesis and no bitstream - the
+`CAPS` change is twelve wires and a concatenation, and neither Vivado
+nor XRT saw it here, so the XRT backend's decode of the new field has
+been read and not executed. `make sim` as a whole was not run, only the
+six benches above. `bindings/` was not touched and its suites were not
+run; `bindings/python/cftmpfr/_lib.py` mirrors the OLD `cft_caps` and
+is correct as it stands, because it passes its own `sizeof` and the
+handshake stops the copy there.

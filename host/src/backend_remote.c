@@ -66,10 +66,11 @@ int cftr_is_url(const char *artifact)
 }
 int cftr_open(const char *url, int index, void **out,
               uint32_t *format_mask, uint32_t *op_groups,
-              uint32_t *tiles, uint32_t *version, int *flags_readable)
+              uint32_t *tiles, uint32_t *version, int *flags_readable,
+              cft_seq_caps *seq)
 {
     (void)url; (void)index; (void)format_mask; (void)op_groups;
-    (void)tiles; (void)version; (void)flags_readable;
+    (void)tiles; (void)version; (void)flags_readable; (void)seq;
     if (out) *out = NULL;
     return CFT_ERR_NO_DEVICE;
 }
@@ -912,6 +913,11 @@ typedef struct rdev {
     /* the caps block from HELLO */
     uint32_t  format_mask, op_groups, tiles, device_version;
     uint32_t  flags_readable, server_abi;
+    /* The server device's sequencer capacities, all zero when its caps
+     * block predates them. Kept here beside the rest of the block, not
+     * merely forwarded, so a later CAPS request can be compared with
+     * what HELLO said. */
+    cft_seq_caps seq;
     char      server_backend[CFTR_BACKEND_NAME + 1];
     char      url[256];
     /* the one-entry program cache: the image bytes the server holds
@@ -1094,7 +1100,8 @@ static void rdev_free(rdev *R)
 
 int cftr_open(const char *url, int index, void **out,
               uint32_t *format_mask, uint32_t *op_groups,
-              uint32_t *tiles, uint32_t *version, int *flags_readable)
+              uint32_t *tiles, uint32_t *version, int *flags_readable,
+              cft_seq_caps *seq)
 {
     char host[200], port[8];
     rdev *R;
@@ -1154,10 +1161,15 @@ int cftr_open(const char *url, int index, void **out,
         rdev_free(R);
         return status;
     }
-    if (resp_len != CFTR_CAPS_BYTES) {
+    /* Short is a SERVER FROM BEFORE the block grew, and its missing
+     * fields read as zero - which cft_caps documents as unknown, and
+     * against which nothing is enforced. Shorter than V1 is not a
+     * version, it is a stream that is not a caps block. */
+    if (resp_len < CFTR_CAPS_BYTES_V1) {
         free(resp);
-        set_err("HELLO answered with %lu bytes, not the %u of a caps block",
-                (unsigned long)resp_len, (unsigned)CFTR_CAPS_BYTES);
+        set_err("HELLO answered with %lu bytes, fewer than the %u of the "
+                "smallest caps block this protocol has ever carried",
+                (unsigned long)resp_len, (unsigned)CFTR_CAPS_BYTES_V1);
         rdev_free(R);
         return CFT_ERR_INTERNAL;
     }
@@ -1169,6 +1181,13 @@ int cftr_open(const char *url, int index, void **out,
     R->server_abi     = cftr_get32(resp + 20);
     memcpy(R->server_backend, resp + 24, CFTR_BACKEND_NAME);
     R->server_backend[CFTR_BACKEND_NAME] = '\0';
+    memset(&R->seq, 0, sizeof R->seq);
+    if (resp_len >= CFTR_CAPS_BYTES) {
+        R->seq.max_deposits = cftr_get32(resp + 56);
+        R->seq.max_insns    = cftr_get32(resp + 60);
+        R->seq.max_consts   = cftr_get32(resp + 64);
+        R->seq.features     = cftr_get32(resp + 68);
+    }
     free(resp);
 
     *format_mask    = R->format_mask & 0xFu;
@@ -1176,6 +1195,8 @@ int cftr_open(const char *url, int index, void **out,
     *tiles          = R->tiles;
     *version        = R->device_version;
     *flags_readable = R->flags_readable ? 1 : 0;
+    if (seq)
+        *seq = R->seq;
     *out            = R;
     return CFT_OK;
 }

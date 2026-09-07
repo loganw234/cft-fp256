@@ -360,7 +360,7 @@ extern "C" const char *cftx_last_error(void)
 extern "C" int cftx_open(const char *artifact, int index, void **out,
                          uint32_t *format_mask, uint32_t *op_groups,
                          uint32_t *tiles, uint32_t *version,
-                         int *flags_readable)
+                         int *flags_readable, cft_seq_caps *seq)
 {
     if (!artifact || !out)
         return ST_INVALID_ARGUMENT;
@@ -482,6 +482,32 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
     *tiles          = static_cast<uint32_t>(D->tiles.size());
     *version        = ver;
     *flags_readable = 1;      /* proven above, or we did not get here */
+    if (seq) {
+        /* CAPS[27:16] carries the EXPONENT of each capacity - four bits
+         * each, which only fits because every one of them is a power of
+         * two by construction (two memory depths and a field width;
+         * rtl/cft_krnl.sv names them once and hands them to cft_seq as
+         * parameters). Shift, do not transcribe: a literal 64 here is
+         * how a host would go on believing a trimmed tile was a full
+         * one.
+         *
+         * A tile whose VERSION predates these fields reads zeros, and
+         * cft_caps documents zero as UNKNOWN - so the caps check in
+         * cft_program_load simply does not fire against it, which is
+         * the behaviour that tile had before the fields existed. The
+         * card-day images are 0x410 and are exactly that case. */
+        const uint32_t sizes = (caps >> 16) & 0xFFFu;
+        seq->features = (caps >> 4) & 0xFu;
+        if (sizes == 0) {
+            seq->max_deposits = 0;
+            seq->max_insns    = 0;
+            seq->max_consts   = 0;
+        } else {
+            seq->max_deposits = 1u << ((caps >> 16) & 0xFu);
+            seq->max_insns    = 1u << ((caps >> 20) & 0xFu);
+            seq->max_consts   = 1u << ((caps >> 24) & 0xFu);
+        }
+    }
     *out            = D;
     return ST_OK;
 }

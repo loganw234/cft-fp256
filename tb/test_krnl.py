@@ -70,6 +70,66 @@ OP_GROUPS = {
 OP_GROUPS_NOT_BUILT = {}
 
 
+# CAPS[27:16] carries the SEQUENCER's on-chip capacities, one log2 per
+# nibble, and CAPS[7:4] its feature nibble. The expected values are
+# PARSED OUT OF THE RTL rather than written here, because a copy of a
+# capacity in a test is exactly the thing that goes on agreeing with a
+# stale CAPS field forever - which is the defect this register field
+# exists to retire (docs/studies/OPT-D-contract.md 0.1). What the test
+# asserts is that the register agrees with the parameters the same
+# source file hands cft_seq.
+RTL = Path(__file__).resolve().parents[1] / "rtl"
+
+
+def _localparam(path, name):
+    """The integer value of `localparam int <name> = <n>;` in a file."""
+    import re
+    src = path.read_text(encoding="utf-8")
+    m = re.search(r"^\s*localparam\s+int\s+%s\s*=\s*(\d+)\s*;" % name,
+                  src, re.MULTILINE)
+    assert m, f"{path.name} has no `localparam int {name}`"
+    return int(m.group(1))
+
+
+def seq_caps_expected():
+    """(feat, log2 maxd, log2 imem, log2 kreg) as the RTL declares them."""
+    maxd = _localparam(RTL / "cft_krnl.sv", "SEQ_MAXD")
+    imem = _localparam(RTL / "cft_krnl.sv", "SEQ_IMEM_D")
+    kmem = _localparam(RTL / "cft_krnl.sv", "SEQ_KMEM_D")
+    kidx = _localparam(RTL / "cft_krnl.sv", "SEQ_KIDX_W")
+    # cft_seq owns the constant bank's depth as its own localparam, and
+    # cft_krnl publishes the log2 of it. Two files, one number: check
+    # they still agree, because CAPS would otherwise advertise a bank
+    # size the decoder does not have.
+    kreg = _localparam(RTL / "cft_seq.sv", "KREG")
+    assert (1 << kidx) == kreg, (
+        f"cft_krnl's SEQ_KIDX_W={kidx} means {1 << kidx} addressable "
+        f"constants and cft_seq's KREG is {kreg}")
+    # A four-bit field can only carry an exponent, so a capacity that is
+    # not a power of two would be published rounded DOWN - a cap a host
+    # would size a program against and be refused by.
+    for name, v in (("SEQ_MAXD", maxd), ("SEQ_IMEM_D", imem),
+                    ("SEQ_KMEM_D", kmem)):
+        assert v == 1 << (v.bit_length() - 1), (
+            f"{name}={v} is not a power of two; CAPS publishes log2")
+    return 0, maxd.bit_length() - 1, imem.bit_length() - 1, kidx
+
+
+def check_seq_caps(caps):
+    """CAPS[7:4] and CAPS[27:16] against rtl/cft_krnl.sv's parameters."""
+    feat, l_maxd, l_imem, l_kreg = seq_caps_expected()
+    got = ((caps >> 4) & 0xF, (caps >> 16) & 0xF,
+           (caps >> 20) & 0xF, (caps >> 24) & 0xF)
+    assert got == (feat, l_maxd, l_imem, l_kreg), (
+        "CAPS does not publish the sequencer capacities cft_krnl "
+        f"elaborates: feature nibble {got[0]:#x} (want {feat:#x}), "
+        f"log2 MAXD {got[1]} (want {l_maxd}), log2 IMEM_D {got[2]} "
+        f"(want {l_imem}), log2 addressable consts {got[3]} "
+        f"(want {l_kreg}) - CAPS is {caps:#010x}")
+    assert (caps >> 28) == 0, (
+        f"CAPS[31:28] is reserved and must read zero; CAPS is {caps:#010x}")
+
+
 def check_op_groups(caps):
     """Every implemented opcode group advertised, and nothing else."""
     groups = (caps >> 8) & 0xFF
@@ -206,6 +266,7 @@ async def krnl_end_to_end(dut):
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0xF, "full tile advertises all four rungs"
     check_op_groups(caps)
+    check_seq_caps(caps)
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
 

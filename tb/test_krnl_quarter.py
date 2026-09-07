@@ -41,7 +41,7 @@ from cft_golden import (  # noqa: E402
     RND_RDN, RND_RNE, RND_RUP,
 )
 
-from test_krnl import (run_op, check_op_groups,  # noqa: E402
+from test_krnl import (run_op, check_op_groups, check_seq_caps,  # noqa: E402
                        CAPS, MAGIC, VERSION, CTRL)
 from test_krnl_reduce import run_sum  # noqa: E402
 import busfx  # noqa: E402
@@ -85,6 +85,11 @@ async def quarter_tile_end_to_end(dut):
     # Trimming rungs must not trim opcode groups - every group still
     # works on the formats that remain, reductions included.
     check_op_groups(caps)
+    # Nor does trimming rungs trim the sequencer's memories: cft_seq is
+    # instantiated here too and its depths are the same parameters. A
+    # program is refused on this tile for the BEAT WIDTH (cft_krnl's
+    # SEQ_OK), which is not a capacity and has no CAPS field.
+    check_seq_caps(caps)
 
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"

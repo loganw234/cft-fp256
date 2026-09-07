@@ -691,6 +691,203 @@ out:
     free(dep_sw); free(dep_hw); free(cnt_sw); free(cnt_hw);
 }
 
+
+/* ==== the caps a backend reports are the caps it enforces ============
+ *
+ * The invariant docs/studies/OPT-D-contract.md item 3 exists for, and
+ * the one 0.1 found violated: the software backend accepted a program
+ * with 2^20 deposit slots a lane, the tile refused anything past 64
+ * with a status bit and no explanation, and no host could ask which it
+ * had. Now cft_get_caps answers, and this holds each backend to its own
+ * answer - at the cap, and one past it.
+ *
+ * "One past it" is only a test where it is REPRESENTABLE. The software
+ * backend's instruction cap is the header field's own ceiling
+ * (2^32-1), and an image at it would be 32 GiB; that case is reported
+ * as not tested rather than skipped silently, because a skip that
+ * looks like a pass is how the opcode-group bug survived.
+ *
+ * A cap of zero is UNKNOWN - only a remote server whose caps block
+ * predates the fields - and an unknown cap enforces nothing, which is
+ * also checked, since "unknown" quietly meaning "zero capacity" would
+ * refuse every program on an old server.
+ * ==================================================================== */
+
+/* One trivial program: `n_insns` HALTs, `n_consts` constants, the
+ * declared deposit budget. Nothing runs it; what is under test is
+ * whether cft_program_load accepts it. */
+static cft_status try_load(cft_device *dev, cft_format fmt,
+                           uint32_t n_insns, uint32_t n_consts,
+                           uint32_t maxdep, uint32_t const_idx,
+                           int use_const)
+{
+    size_t esz = cft_format_size(fmt);
+    size_t bytes = 32 + (size_t)n_consts * esz + (size_t)n_insns * 8;
+    uint8_t *img = (uint8_t *)calloc(1, bytes ? bytes : 1);
+    uint64_t *ins = (uint64_t *)calloc(n_insns ? n_insns : 1, 8);
+    uint8_t *kon = (uint8_t *)calloc(n_consts ? n_consts : 1, esz ? esz : 1);
+    cft_program *prog = NULL;
+    cft_status st;
+    uint32_t i;
+
+    if (!img || !ins || !kon) {
+        free(img); free(ins); free(kon);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+    for (i = 0; i < n_insns; i++)
+        ins[i] = seq_ctrl(0, 0, 0);              /* HALT */
+    if (use_const && n_insns) {
+        /* r4 = r0 * k[const_idx] + r2, with kb selecting the bank.
+         * seq_alu's `rb` is the index the kb bit redirects. */
+        ins[0] = seq_alu(0, 4, 0, const_idx, 2, 0, 1, 0);
+    }
+    (void)seq_image(img, fmt, ins, n_insns, kon, n_consts, maxdep);
+    st = cft_program_load(dev, img, bytes, &prog);
+    if (st == CFT_OK)
+        cft_program_free(prog);
+    free(img); free(ins); free(kon);
+    return st;
+}
+
+static void check_caps_enforced(cft_device *dev, const char *who)
+{
+    cft_caps c;
+    const cft_format fmt = CFT_FP32;
+    cft_status st;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    if (cft_get_caps(dev, &c) != CFT_OK) {
+        printf("  %s: cft_get_caps failed\n", who);
+        failures++;
+        return;
+    }
+    if (!cft_supports(dev, CFT_FMA, fmt)) {
+        printf("  %s: no fp32 here, capacity check not run\n", who);
+        return;
+    }
+    printf("  %s reports max_deposits %lu, max_insns %lu, max_consts %lu, "
+           "seq_features 0x%lx\n", who,
+           (unsigned long)c.max_deposits, (unsigned long)c.max_insns,
+           (unsigned long)c.max_consts, (unsigned long)c.seq_features);
+
+    /* Zero is unknown, and an unknown cap must constrain nothing. */
+    if (!c.max_deposits) {
+        st = try_load(dev, fmt, 1, 0, 4096, 0, 0);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL %s: max_deposits is 0 (unknown) and a program "
+                   "with 4096 was still refused: %s\n", who,
+                   cft_strerror(st));
+            failures++;
+        }
+    } else {
+        st = try_load(dev, fmt, 1, 0, c.max_deposits, 0, 0);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL %s: max_deposits %lu is reported and a program "
+                   "AT it was refused: %s (%s)\n", who,
+                   (unsigned long)c.max_deposits, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        }
+        if (c.max_deposits < 0xFFFFFFFFu) {
+            st = try_load(dev, fmt, 1, 0, c.max_deposits + 1u, 0, 0);
+            checks++;
+            if (st == CFT_OK) {
+                printf("  FAIL %s: max_deposits %lu is reported and a "
+                       "program with one MORE was accepted\n", who,
+                       (unsigned long)c.max_deposits);
+                failures++;
+            } else {
+                printf("    +1 deposit slot -> %s: %s\n", cft_strerror(st),
+                       cft_last_error());
+            }
+        }
+    }
+
+    /* The instruction cap, where an image past it can be built at all.
+     * 1 << 20 instructions is an 8 MiB image; anything larger is
+     * reported as untested rather than pretended. */
+    if (!c.max_insns) {
+        printf("    max_insns is 0 (unknown): nothing enforced, "
+               "nothing tested\n");
+    } else if (c.max_insns > (1u << 20)) {
+        printf("    max_insns %lu: an image past it is %llu bytes, "
+               "NOT TESTED\n", (unsigned long)c.max_insns,
+               (unsigned long long)(c.max_insns + 1ull) * 8ull + 32ull);
+    } else {
+        st = try_load(dev, fmt, c.max_insns, 0, 1, 0, 0);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL %s: max_insns %lu is reported and a program AT "
+                   "it was refused: %s (%s)\n", who,
+                   (unsigned long)c.max_insns, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        }
+        st = try_load(dev, fmt, c.max_insns + 1u, 0, 1, 0, 0);
+        checks++;
+        if (st == CFT_OK) {
+            printf("  FAIL %s: max_insns %lu is reported and a program with "
+                   "one MORE was accepted\n", who,
+                   (unsigned long)c.max_insns);
+            failures++;
+        } else {
+            printf("    +1 instruction -> %s: %s\n", cft_strerror(st),
+                   cft_last_error());
+        }
+    }
+
+    /* The addressable constants. An index is a four-bit field, so an
+     * index past 15 cannot be encoded at all: a device that addresses
+     * all sixteen has no representable violation, and that is stated
+     * rather than skipped. */
+    if (!c.max_consts) {
+        printf("    max_consts is 0 (unknown): nothing enforced, "
+               "nothing tested\n");
+    } else {
+        uint32_t hi = c.max_consts > 16u ? 16u : c.max_consts;
+        st = try_load(dev, fmt, 2, hi, 1, hi - 1u, 1);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL %s: max_consts %lu is reported and an "
+                   "instruction addressing k[%lu] was refused: %s (%s)\n",
+                   who, (unsigned long)c.max_consts, (unsigned long)(hi - 1u),
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        }
+        if (c.max_consts < 16u) {
+            st = try_load(dev, fmt, 2, 16, 1, c.max_consts, 1);
+            checks++;
+            if (st == CFT_OK) {
+                printf("  FAIL %s: max_consts %lu is reported and an "
+                       "instruction addressing k[%lu] was accepted\n", who,
+                       (unsigned long)c.max_consts,
+                       (unsigned long)c.max_consts);
+                failures++;
+            } else {
+                printf("    k[%lu] -> %s: %s\n",
+                       (unsigned long)c.max_consts, cft_strerror(st),
+                       cft_last_error());
+            }
+        } else {
+            printf("    max_consts %lu: an index past 15 does not fit the "
+                   "four-bit field, NOT TESTED\n",
+                   (unsigned long)c.max_consts);
+        }
+    }
+
+    /* The feature nibble is four bits of CAPS. Anything above them is
+     * a decode fault, not a feature. */
+    checks++;
+    if (c.seq_features & ~0xFu) {
+        printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4]\n",
+               who, (unsigned long)c.seq_features);
+        failures++;
+    }
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -862,6 +1059,14 @@ int main(int argc, char **argv)
            "backend\n", (unsigned long)n);
 
     check_layout(sw);
+
+    /* Both handles, because the claim is about a BACKEND and not about
+     * the device under test: run against `sw` this program is the
+     * software backend twice and still proves the software one. */
+    printf("the caps a backend reports are the caps it enforces\n");
+    check_caps_enforced(sw, "software");
+    check_caps_enforced(hw, "device");
+    fflush(stdout);
 
     for (f = 0; f < 4; f++) {
         cft_format fmt = (cft_format)f;

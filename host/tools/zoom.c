@@ -140,8 +140,12 @@ static double now_s(void)
 #endif
 
 #define MAX_ESZ 32          /* bytes in the widest element, binary256 */
-#define TILE_MAX_DEPOSITS 64 /* deposit slots a lane on a tile: MAXD, rtl/cft_krnl.sv */
 #define DECMAX  2048        /* an exact decimal this tool will print */
+/* The deposit ceiling is no longer a literal here. It was 64 - MAXD
+ * from rtl/cft_krnl.sv, copied into this file - which is a number
+ * that is right until a tile ships with a different one, and which no
+ * tool could check. cft_get_caps publishes it now
+ * (cft_caps.max_deposits), so this asks. */
 
 static void die(const char *what)
 {
@@ -2058,8 +2062,9 @@ static void usage(void)
 "  --ref-iters N            reference orbit length (default 100000)\n"
 "  --pixel-iters N          per-pixel iteration cap (default 4096)\n"
 "  --batch N                pixels in flight per call (default 4096)\n"
-"  --steps-per-call N       orbit program trip count (default 1024; a tile\n"
-"                           holds 64 deposits a lane, so at most 32 there)\n"
+"  --steps-per-call N       orbit program trip count (default 1024, or\n"
+"                           half the device's deposit budget if that is\n"
+"                           smaller - cft_get_caps says what it is)\n"
 "  --glitch-bits B          glitch when |Z+d| < 2^-B |Z| (default p/4)\n"
 "  --ref-offset N           move the reference N pixels off the nucleus\n"
 "  --checkpoint PATH        write a resumable checkpoint of the orbit\n"
@@ -2095,6 +2100,11 @@ int main(int argc, char **argv)
     cft_status st;
     double t0, tckpt, t_ref = 0.0, t_pix = 0.0;
     int i, stopped;
+    /* Whether --steps-per-call was CHOSEN. A default that does not fit
+     * the device is resized to fit; a value the user typed is not,
+     * because quietly running something else than what was asked for
+     * is how a measurement stops meaning what its command line says. */
+    int reps_given = 0;
 
     memset(&O, 0, sizeof O);
     O.fmt = CFT_FP256;
@@ -2144,6 +2154,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(a, "--steps-per-call")) {
             O.reps = (uint32_t)strtoul(need(argc, argv, &i), NULL, 10);
             if (!O.reps) die("--steps-per-call must be positive");
+            reps_given = 1;
         }
         else if (!strcmp(a, "--glitch-bits"))
             O.glitch_bits = (int)strtol(need(argc, argv, &i), NULL, 10);
@@ -2191,22 +2202,47 @@ int main(int argc, char **argv)
     if (!(caps.format_mask & (1u << (unsigned)CFT_FP64)))
         die("this backend does not carry binary64, which the pixels need");
 
-    /* The orbit program deposits two values a trip, and a tile holds
-     * TILE_MAX_DEPOSITS slots a lane (rtl/cft_krnl.sv, MAXD): a device
-     * refuses the image above --steps-per-call 32 where the software
-     * backend accepts a million. The same orbit comes back either way -
-     * the trip count only sets how many calls it takes - so refuse here
-     * with the flag named rather than let cft_program_load fail. */
-    if (O.use_program && strcmp(caps.backend, "software") != 0 &&
-        2u * O.reps > TILE_MAX_DEPOSITS) {
-        char msg[240];
-        snprintf(msg, sizeof msg,
-                 "--steps-per-call %u deposits %u values a lane per call and "
-                 "a tile holds %u (rtl/cft_krnl.sv MAXD): use --steps-per-call "
-                 "%u or lower on the %s backend",
-                 (unsigned)O.reps, (unsigned)(2u * O.reps), TILE_MAX_DEPOSITS,
-                 TILE_MAX_DEPOSITS / 2, caps.backend);
-        die(msg);
+    /* The orbit program deposits two values a trip, so a call of K
+     * trips needs 2K deposit slots a lane, and a device holds what
+     * cft_caps.max_deposits says - 64 on the tile of rtl/cft_krnl.sv,
+     * 2^20 in this library's software backend. The trip count changes
+     * NOTHING about the orbit, only how many calls it takes to walk
+     * it (that is one of the determinism properties tests/zoom_check.py
+     * asserts), so a K that does not fit is a sizing question and not
+     * an error - unless the user chose it, in which case silently
+     * doing something else would be the error.
+     *
+     * A cap of zero means the device did not say (an older remote
+     * server; docs/REMOTE.md), and an unknown cap constrains nothing.
+     * cft_program_load would then refuse an oversized image itself,
+     * which is the backstop this check exists to get ahead of. */
+    if (O.use_program && caps.max_deposits &&
+        2u * O.reps > caps.max_deposits) {
+        if (reps_given) {
+            char msg[280];
+            snprintf(msg, sizeof msg,
+                     "--steps-per-call %u deposits %u values a lane per call "
+                     "and the %s backend holds %u (cft_caps.max_deposits): "
+                     "use --steps-per-call %u or lower",
+                     (unsigned)O.reps, (unsigned)(2u * O.reps), caps.backend,
+                     (unsigned)caps.max_deposits,
+                     (unsigned)(caps.max_deposits / 2));
+            die(msg);
+        }
+        if (caps.max_deposits < 2)
+            die("this device holds fewer than two deposit slots a lane, "
+                "which is one orbit step; run --engine loop");
+        /* Half the budget, because a trip deposits two values. Printed,
+         * not assumed: --steps-per-call appears in the CSV header and
+         * in the summary, so a run that was resized says so in its own
+         * record rather than in this message alone. */
+        fprintf(stderr, "cft-zoom: --steps-per-call %u needs %u deposit "
+                        "slots a lane and the %s backend holds %u; using "
+                        "%u (cft_caps.max_deposits / 2)\n",
+                (unsigned)O.reps, (unsigned)(2u * O.reps), caps.backend,
+                (unsigned)caps.max_deposits,
+                (unsigned)(caps.max_deposits / 2));
+        O.reps = caps.max_deposits / 2;
     }
     FLAGS_TRUSTED = caps.flags_readable != 0;
 

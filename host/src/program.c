@@ -36,11 +36,14 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
-/* Either device backend - XRT, or the remote one of docs/REMOTE.md,
- * which is compiled in unless CFT_NO_REMOTE says otherwise. */
-#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
+/* Unconditionally, for cft_seq_caps and the two seams device.c owns:
+ * which caps a handle publishes, and which executor a program run
+ * belongs to. The second is only reachable when a device backend was
+ * compiled in - XRT, or the remote one of docs/REMOTE.md, which is
+ * there unless CFT_NO_REMOTE says otherwise - but a declaration costs
+ * nothing in a build that has neither, and a header included in two
+ * places under two conditions is how a signature drifts. */
 #include "backend.h"
-#endif
 
 #define SEQ_MAGIC        0x50544643u   /* "CFTP" */
 #define SEQ_VERSION      1u
@@ -48,8 +51,41 @@
 #define SEQ_INSN_BYTES   8
 #define SEQ_NREG         16
 #define SEQ_MAX_DEPTH    4
+/* The worst-case number of instruction ISSUES a program may perform,
+ * loops multiplied out - a run-length bound, not a capacity, and not
+ * published anywhere. */
 #define SEQ_MAX_INSNS    (1ull << 40)
+
+/* ---- what THIS backend accepts in a program header ------------------
+ *
+ * cft_get_caps publishes these three for a software device and
+ * cft_program_load holds it to exactly them, which is the invariant
+ * host/tests/device_test.c checks: the caps a backend reports are the
+ * caps it enforces. They are NOT the tile's - a tile holds 64 deposit
+ * slots a lane, 1024 instructions - and they are deliberately not
+ * narrowed to match one, because the software backend is the
+ * CONTRACT rather than an implementation of it, and every recorded
+ * workload chain (docs/REMOTE.md, bindings/wasm/demos_chains.json)
+ * was produced through this accepted set. What used to be missing was
+ * not a narrower software backend but a way to ASK, which is what
+ * cft_caps.max_deposits now is: cft-zoom and cft-orbits size
+ * themselves from the answer instead of from a literal 64.
+ *
+ * max_insns is the header field's own ceiling. This backend imposes
+ * nothing of its own on the instruction count - the image is checked
+ * for being exactly header + constants + instructions, so a program
+ * of n instructions is 8n bytes the caller had to have - and a cap of
+ * 2^32-1 is therefore the honest report: it is the largest n_insns a
+ * 32-bit header field can express.
+ *
+ * max_consts is the number of constants an instruction can ADDRESS,
+ * which is the four-bit ka/kb/kc operand field's reach and is the
+ * same 16 in the tile (rtl/cft_seq.sv's KREG). It is not the header's
+ * n_consts, which may legally be larger and simply leaves the excess
+ * unreachable. */
 #define SEQ_MAX_DEPOSITS (1u << 20)
+#define SEQ_IMAGE_INSNS  0xFFFFFFFFu
+#define SEQ_ADDR_CONSTS  16u
 
 #define BLOCK_LANES      64
 
@@ -196,6 +232,87 @@ static cft_status seq_validate(const cft_program *p)
     return depth == 0 ? CFT_OK : CFT_ERR_INVALID_ARGUMENT;
 }
 
+/* The software backend's own sequencer capacities, for device.c to
+ * publish. Defined here, where they are enforced, so that the number
+ * a host is told and the number a program is held to are one
+ * declaration. */
+void cft_sw_seq_caps(cft_seq_caps *out)
+{
+    if (!out)
+        return;
+    out->max_deposits = SEQ_MAX_DEPOSITS;
+    out->max_insns    = SEQ_IMAGE_INSNS;
+    out->max_consts   = SEQ_ADDR_CONSTS;
+    /* No sequencer feature beyond the base program model is
+     * implemented here. The bit assignments are in rtl/cft_csr.sv. */
+    out->features     = 0u;
+}
+
+/* A program image against the capacities the device it was loaded for
+ * publishes. Zero is UNKNOWN in every field - only a remote server
+ * whose caps block predates them produces one - and an unknown cap
+ * enforces nothing, because refusing against a number nobody stated
+ * would turn an old server into a broken one.
+ *
+ * The message names the cap, the program's value and the device's, in
+ * that order, because the thing a caller has to change is the first
+ * of the three. Before this existed the tile answered a program past
+ * its cap with STATUS[3] and no explanation, and the library
+ * answered with nothing at all: it accepted every one of them
+ * (docs/studies/OPT-D-contract.md 0.1). */
+static cft_status seq_check_caps(cft_device *dev, uint32_t n_insns,
+                                 uint32_t maxdep)
+{
+    cft_seq_caps c;
+    cft_device_seq_caps(dev, &c);
+    if (c.max_deposits && maxdep > c.max_deposits)
+        return (cft_status)cft_seq_cap_refusal(
+            "max_deposits", maxdep, c.max_deposits,
+            "deposit slots a lane", "max_deposits");
+    if (c.max_insns && n_insns > c.max_insns)
+        return (cft_status)cft_seq_cap_refusal(
+            "instruction count", n_insns, c.max_insns,
+            "instructions it can hold", "max_insns");
+    return CFT_OK;
+}
+
+/* The constant INDEX an instruction carries, against the number of
+ * constants the device can address. Separate from the header check
+ * above because it is a property of the instruction stream rather
+ * than of the header: a program may declare more constants than it
+ * can reach (they are simply unreachable), and what a device refuses
+ * to execute is a reference past its bank. Structurally impossible on
+ * a device that addresses all sixteen a four-bit field reaches, which
+ * is every device shipped so far; it becomes real for a trimmed tile
+ * that publishes fewer, and for the wide constant index that
+ * CAPS[4] is reserved for. */
+static cft_status seq_check_const_index(cft_device *dev,
+                                        const cft_program *p)
+{
+    cft_seq_caps c;
+    uint32_t pc;
+    cft_device_seq_caps(dev, &c);
+    if (!c.max_consts)
+        return CFT_OK;
+    for (pc = 0; pc < p->n_insns; pc++) {
+        seq_insn d;
+        int idx = -1;
+        seq_decode(p->insns[pc], &d);
+        if (d.ctrl)
+            continue;
+        if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
+        if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;
+        if (d.kc && (uint32_t)d.rc >= c.max_consts) idx = d.rc;
+        if (idx >= 0)
+            return (cft_status)cft_seq_cap_refusal(
+                "highest constant index", (unsigned long)idx,
+                (unsigned long)c.max_consts - 1u,
+                "constants an instruction can address, indexed from 0",
+                "max_consts");
+    }
+    return CFT_OK;
+}
+
 CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                                     size_t bytes, cft_program **out)
 {
@@ -224,14 +341,37 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
         return CFT_ERR_ARTIFACT;
     if (prec > 3)
         return CFT_ERR_ARTIFACT;
-    if (maxdep > SEQ_MAX_DEPOSITS)
-        return CFT_ERR_INVALID_ARGUMENT;
     /* A program is compiled for one format, because its constants are
      * format-width values. Refuse it here rather than at the first
      * instruction that would issue a precision this device does not
      * carry. */
     if (!cft_supports(dev, CFT_FMA, (cft_format)prec))
         return CFT_ERR_UNSUPPORTED;
+    /* And against the capacities THIS device publishes, in the same
+     * breath and for the same reason: the alternative is a program
+     * that loads, runs on a laptop, and is refused by the tile at its
+     * header check with a status bit and no explanation.
+     *
+     * At LOAD rather than at run, because a program is built once and
+     * run many times - a tool that will not fit wants to know before
+     * it has staged operands - and because a handle that loaded and
+     * cannot run is a worse contract than a load that failed.
+     *
+     * BEFORE the absolute ceiling below, not after, so that every
+     * device gets the same explained refusal at its own cap. For a
+     * software handle the two boundaries are the same number, and
+     * whichever came first would be the one a caller ever saw; the
+     * one that names the cap is the better answer. */
+    st = seq_check_caps(dev, n_insns, maxdep);
+    if (st != CFT_OK)
+        return st;
+    /* The library's own absolute ceiling on a deposit budget, which is
+     * about what this process can represent rather than about any
+     * device. Only reachable when the device published no cap of its
+     * own - cft_caps documents zero as unknown, and a remote server
+     * older than those fields is the one thing that produces it. */
+    if (maxdep > SEQ_MAX_DEPOSITS)
+        return CFT_ERR_INVALID_ARGUMENT;
 
     esz  = (size_t)cft_sf_formats[prec].width / 8;
     want = (size_t)SEQ_HEADER_BYTES + (size_t)n_consts * esz +
@@ -272,6 +412,13 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                                  i * SEQ_INSN_BYTES);
 
     st = seq_validate(prog);
+    if (st != CFT_OK) {
+        cft_program_free(prog);
+        return st;
+    }
+    /* After seq_validate, so that a malformed instruction is reported
+     * as malformed rather than as a capacity the device lacks. */
+    st = seq_check_const_index(dev, prog);
     if (st != CFT_OK) {
         cft_program_free(prog);
         return st;
