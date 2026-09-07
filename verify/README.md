@@ -111,6 +111,28 @@ Docker Desktop's integration has a shim on PATH that only prints how
 to enable it. A stage that cannot run is skipped by name, never
 failed by accident.
 
+## The generator's knobs, and why the census leaves one of them off
+
+`make vectors` takes `VECTOR_JOBS` (default 4) and writes the sets in
+that many worker processes; `make golden` takes `PYTEST_JOBS` (default
+4) and hands it to pytest-xdist when the interpreter has it. Neither
+can change a result: every operand pool is a pure function of
+(format, counts, seed), a worker rebuilds the pools its own files need
+and shares nothing, and xdist runs the same assertions in more
+processes. Measured 2026-09-07 on the desktop: the 168 sets in 3 min 5 s
+at four jobs against 8 min 30 s serial, the same roll-up hash both
+ways on the same model (`edf57497...` at ABI 0.8).
+
+`vectors/gen_vectors.py --cache DIR` goes further and does not
+regenerate a set at all when the model's source bytes, the generator's,
+the job's parameters, the interpreter's version and the bytes of the
+file already on disk are all what they were when it was last written.
+That is for the development loop. **The census does not use it, on
+purpose**: a census is the claim that the sets regenerate from the
+model, and a set served from a manifest is a set that was not
+regenerated, however sound the key. The runner's `vectors` stage calls
+the generator without `--cache`.
+
 ## Resume semantics
 
 Each run gets an id (timestamp to the second + commit, bumped on

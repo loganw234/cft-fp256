@@ -43,6 +43,12 @@ packaged_kernel/
 
 # generated vectors (regenerate with vectors/gen_vectors.py)
 vectors/out/
+# and the generator's content-hash manifest, which records what it
+# wrote so an unchanged model need not write it again. Outside
+# vectors/out on purpose: a vector set is a directory of vector sets
+# and nothing else, so a consumer that scans it - or a hash walk that
+# proves two runs produced the same bytes - sees what it always saw.
+vectors/.gen-cache/
 
 # libcft build products (make -C host)
 host/*.o

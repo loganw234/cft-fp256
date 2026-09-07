@@ -417,7 +417,7 @@ is now refused by name and regenerates with `imul` cases.
 | C (`cft.h`) | complete: `device_test.c` gains "the caps a backend reports match the caps it enforces" for the software and remote backends; `remote_test.c` covers the grown HELLO block (251 checks, from 245) |
 | C++ (`cft.hpp`) | unchanged; the wrapper passes `cft_caps` through by `struct_size` |
 | Python (`cftmpfr`) | correct as it stands: its `Caps` mirror passes its own `sizeof` and the handshake truncates there; the four fields are not yet surfaced |
-| Node / Browser | the WebSocket client reads the four fields from a 72-byte block and zero from a 56-byte one; the wasm and node modules were rebuilt on the bumped tree so the ABI test agrees with the header |
+| Node / Browser | the sequencer's program API reached JavaScript the same day (2026-09-07): **116 `cftw_*` exports** (five new, module 48a2f5c1...), a `Program` in the node package (`loadProgram`, `run`, `free`, the info read back through `cft_program_get_info`), a recorded corpus of 192 sequencer cases replayed through wasm (126 run, 66 refused, deposits and counts compared with the C executor), and the zoom and orbits demo panels on their tools' program engine - `test.mjs` 126 passed, `program_test.mjs` 17 passed, `conformance.mjs` 1,071,635 cases; the WebSocket client reads the four caps fields from a 72-byte block and zero from a 56-byte one; both modules rebuilt on the bumped tree so the ABI test agrees with the header |
 | RTL | `CAPS` reads 0x04A6FF0F on the full tile where it read 0x0000FF0F; `cft_seq` untouched, the values named once in `cft_krnl.sv` |
 
 ## Drop-ins

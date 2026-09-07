@@ -200,6 +200,31 @@ all; a known version with a CAPS bit clear means the image simply does
 not carry that feature, which is a normal thing for an older
 bitstream to say.
 
+Every staged image predates 2026-09-07, and three things landed in
+the library that day which such an image will show as absences,
+all of them normal (docs/HOSTAPI.md, docs/SEQUENCER.md):
+
+- **CAPS[27:16] reads zero**, so `cft_get_caps` reports the
+  sequencer's capacities as unknown and enforces nothing against
+  them. The tile still enforces its own 64 deposit slots a lane at
+  the header, with STATUS[3] and no message - so a program that
+  deposits once an iteration must be sized by hand on these images:
+  `cft-zoom --steps-per-call 32`, `cft-orbits --periods 15` (at most
+  15 samples a run). On an image that publishes its caps the tools
+  do this themselves.
+- **CAPS[4] and CAPS[28] read zero**: no indexed constants, no
+  `IMUL`. `cft_program_load` refuses an image that uses either,
+  naming the instruction, and `cft_supports` answers no for opcode
+  30. `cft-enclose` probes and falls back to its chunked shape.
+- **The published opcode sets carry 200 `imul` cases each** since
+  the opcode was assigned. The replay skips them by name on a device
+  that does not publish `IMUL` - one `imul skipped, not on this
+  device` line per set, and the case count it prints excludes them -
+  rather than failing the set. A run of `cft-selftest` on these
+  images should therefore print twenty such lines and a smaller
+  count than `make vectors` wrote; a `cft_run failed:
+  unsupported` line instead is a library defect, not the card's.
+
 **3. One tile is correct.**
 
     bash hw/run-device-test.sh ~/cardday-135/cft_hw_single.xclbin -n 4096
@@ -222,9 +247,11 @@ the reduction datapath itself rather than the split.
 
     ./host/cft-selftest vectors/out cardday/single/cft_hw.xclbin
 
-Every published case replayed through the hardware (1,223,635 over 168
-sets at the 0.7 census; the count grows with the contract), each one
-twice:
+Every published case replayed through the hardware (1,071,635 over
+168 sets from `make vectors` at ABI 0.8, of which the 4,000 `imul`
+cases are skipped by name on an image that predates the opcode; the
+runner's own census draws larger pools and counts 1.2 million), each
+one twice:
 element at a time for exact flags, then as arrays (the sets were
 regenerated when the seed opcodes joined the contract - regenerate
 locally with `make vectors` before the day so the card replays the
@@ -302,6 +329,10 @@ spirit - enough to replay, not enough to be a chore.
 - **All-zero output with clean flags** means a precision the bitstream
   does not carry. Check the format mask `device-test` printed in step
   2 against what is being issued.
+- **A program refused with STATUS[3] and no library message** is a
+  cap the image did not publish - 64 deposit slots a lane on every
+  staged image - so the library could not refuse it first. Size the
+  program down (the flags above) rather than suspect the arithmetic.
 - **A bus fault** (`CFT_ERR_BUS_FAULT`) means the memory system did not
   vouch for the data - a bad pointer or alignment, not arithmetic.
   `cft_last_error()` carries what XRT said, and STATUS says which of

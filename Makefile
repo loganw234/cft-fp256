@@ -9,6 +9,22 @@ PYTHON       ?= python3
 SIM          ?= icarus
 DOCKER_IMAGE ?= cft-sim
 
+# How many cores the two long software targets below may use. Four
+# rather than all of them because this is usually a shared machine and
+# a simulation or a Vitis build is beside them; verify/run.sh carries
+# the same ceiling and the same reasoning, and neither can change a
+# result - the generator's workers rebuild their own pools from the
+# seed and write disjoint files, and pytest-xdist runs the same
+# assertions in more processes.
+VECTOR_JOBS  ?= 4
+PYTEST_JOBS  ?= 4
+
+# pytest-xdist only if this interpreter has it: `-n` is an unknown
+# option to a bare pytest, and a gate that fails on the absence of an
+# accelerator is worse than a slow one. Recursive (=, not :=) so the
+# probe runs when `golden` runs and not on every `make help`.
+XDIST_N       = $(shell $(PYTHON) -c "import xdist" >/dev/null 2>&1 && echo $(PYTEST_JOBS))
+
 # hardware flow
 PLATFORM ?= xilinx_u50_gen3x16_xdma_5_202210_1
 PART     ?= xcu50-fsvh2104-2-e
@@ -51,7 +67,7 @@ $(BUILD)/emconfig.json:
 	emconfigutil --platform $(PLATFORM) --od $(BUILD)
 
 golden:
-	$(PYTHON) -m pytest python/tests -q
+	$(PYTHON) -m pytest python/tests -q $(if $(XDIST_N),-n $(XDIST_N),)
 
 # Every format and every rounding attribute. Each attribute is its own
 # deterministic contract, so a set covering only roundTiesToEven scores
@@ -60,7 +76,8 @@ vectors:
 	$(PYTHON) vectors/gen_vectors.py --out vectors/out \
 		--formats fp32 fp64 fp128 fp256 \
 		--rounding rne rtz rdn rup rmm \
-		--directed 3000 --random 4000 --simple 200
+		--directed 3000 --random 4000 --simple 200 \
+		--jobs $(VECTOR_JOBS)
 
 libcft:
 	$(MAKE) -C host
