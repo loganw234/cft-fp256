@@ -32,7 +32,11 @@ all it needs, and Windows has had one of those since 1993.
   `127.0.0.1` unless told otherwise (`--bind`), which keeps it off the
   network by default; exposing it on a LAN is a deliberate act and a
   trust decision about that LAN. A first step should say what it is,
-  and this one is a transport, not a security boundary.
+  and this one is a transport, not a security boundary. The two safe
+  ways to reach a server on another machine - an SSH tunnel, or a LAN
+  you already trust with the machine - and what a WebSocket port adds
+  to that, are in "What no authentication means, said again for a
+  browser" below.
 - **One request at a time, many connections.** The server multiplexes
   its connections with `select()` rather than threads: it opens a
   library device for each connection when it is accepted, and then
@@ -287,7 +291,8 @@ its time. A timeout poisons the handle and returns `CFT_ERR_TIMEOUT`.
 
 ## The server
 
-    cft-serve [--port N] [--bind ADDR] [--artifact PATH] [--max-conns N] [--verbose]
+    cft-serve [--port N] [--bind ADDR] [--artifact PATH] [--max-conns N]
+              [--ws PORT] [--ws-port-file PATH] [--verbose]
 
 Listens on `127.0.0.1:7754` by default (the port is a choice, not a
 derivation; anything above 1024 that nothing else on the box uses).
@@ -308,6 +313,322 @@ device's exception flags are read the way every backend reads them
 and returned in every `RUN`, `REDUCE` and `PROG_RUN` response, so a
 server fronting a tile whose `flags_readable` is 0 reports that in
 the caps block and the client's `cft_get_caps` says so.
+
+## The browser reaches the tile: the same frames over WebSocket
+
+`cft-serve --ws PORT` opens a second listener that speaks RFC 6455.
+**One WebSocket message carries exactly one frame of the section
+above, unchanged** - the same 32-byte header, the same little-endian
+fields, the same CRC-32 over the same bytes, the same opcodes and the
+same payload layouts. A WebSocket message is an envelope around the
+frame the TCP path sends bare, so the server's handlers, its `STATS`
+counters and its refusals are the ones the TCP path already had, and
+the protocol version does not move: a transport is not a protocol
+change.
+
+The envelope lives in `host/tools/ws.c` and `ws.h`, written against
+the same `cftr_sock_*` shim as the rest of the server, so it has no
+platform branch and adds no link flag on any platform. SHA-1 and
+base64 are implemented there because `Sec-WebSocket-Accept` is defined
+in terms of them and for no other reason; a handshake that pulled in a
+crypto library would be a dependency for forty lines of hashing.
+
+### A second port, not a second protocol on the first
+
+The alternative was one listener that reads the first bytes and treats
+`GET ` as a WebSocket. It was not taken, for three reasons:
+
+1. **The frame path is not touched.** A separate listener means
+   `serve_one()` reads a TCP frame with exactly the call it read it
+   with before, so the stall timeout, the truncation behaviour and the
+   refusals that "The negative control" below recorded are the ones
+   that were measured, not ones that were re-derived. Detection would
+   have meant reading the first four bytes and then handing them back
+   to a reader that takes a socket, which is a second frame reader on
+   the same connection.
+2. **Detection needs a peek the socket shim does not offer.**
+   `cftr_sock_recv_all` consumes what it reads; `MSG_PEEK` would be a
+   direct `recv` call, which on Windows means linking `ws2_32` into a
+   tool whose library deliberately loads it at run time
+   (`src/backend_remote.c` says why), and a platform branch in a file
+   that has none.
+3. **A browser will open a WebSocket to a loopback port from any page
+   the person is looking at.** A cross-origin `WebSocket` needs no
+   preflight and no permission from the server; the only thing that
+   decides is whether the server answers. The frame port is not
+   reachable that way at all - a browser cannot be made to send
+   `CFTR`, and a `GET ` on the frame port dies on the magic check. So
+   the WebSocket listener is the one transport a web page can use, and
+   it is **off unless `--ws` is given**. `--ws` and `--port` refuse to
+   be the same port.
+
+The handshake is read on the connection's first readable event and not
+at accept, because the loop is one thread: a client that connects to
+the WebSocket port and then says nothing would otherwise hold every
+other connection for the stall minute.
+
+### The envelope, in detail
+
+- The opening handshake is `GET`, `Upgrade: websocket`, `Connection:
+  upgrade`, `Sec-WebSocket-Version: 13` and a `Sec-WebSocket-Key`;
+  the answer is `101` with `Sec-WebSocket-Accept =
+  base64(SHA-1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))`.
+  Anything else gets a short HTTP status (`400`, `426`, `431`) and the
+  connection closes. The request head is capped at 8 KiB.
+- The SHA-1 and base64 are checked against their published vectors
+  before the server listens, exactly as the CRC-32 is: FIPS 180-4's
+  `SHA-1("abc")`, RFC 4648 section 10's seven base64 vectors, and RFC
+  6455 section 1.3's own worked example of the whole accept
+  computation. An implementation never held against its own published
+  vector is a guess.
+- Binary messages only. A text message is refused: this protocol is
+  bytes, and a text frame would have been through a UTF-8 round trip.
+- A client frame must be masked, as RFC 6455 5.1 requires; an unmasked
+  one is refused. Server frames are unmasked, as 5.1 also requires.
+- **Fragmentation is tolerated on receive**: a message split across a
+  binary frame and any number of continuations is reassembled and then
+  read as one frame. The server never fragments what it sends.
+- A ping is answered with a pong carrying the same bytes; a pong is
+  dropped; a close is answered with a close. **A control frame is not
+  a request**: nothing is counted, and the server goes back to waiting
+  rather than blocking for a data frame that may not be coming, so one
+  connection's keepalive cannot hold up the others.
+- Reserved bits, a 64-bit length with its top bit set, a fragmented or
+  oversize control frame, and a message longer than the frame cap are
+  each refused before anything is allocated.
+
+**One thing the message boundary changes, and only one.** A header
+that claims one byte more than its payload holds - the second sabotage
+of "The negative control" below - is caught immediately here, because
+the message ended, where the TCP path waits out its stall minute for a
+byte that never comes. Same verdict, sooner: the refusal says
+`truncated frame`, and it carries `CFT_ERR_INTERNAL` where the TCP
+path reports `CFT_ERR_TIMEOUT`. No frame with a wrong length is
+computed on either way.
+
+### What "no authentication" means, said again for a browser
+
+The scope statement at the top of this file holds without change: the
+server answers anyone who can reach its port, the bytes are plain, and
+it binds to `127.0.0.1` unless `--bind` says otherwise. The WebSocket
+port makes one thing sharper and it is worth saying plainly.
+
+**Anyone who can reach the port can compute on the device, read its
+`STATS`, load programs on it and allocate memory on it.** There is no
+credential to get wrong. So there are exactly two safe ways to run it:
+
+- **On loopback**, which is the default, reached by clients on the
+  same machine - or through an SSH tunnel from another one:
+  `ssh -N -L 7755:127.0.0.1:7755 user@host` puts the remote server on
+  the client's own `127.0.0.1`, authenticated and encrypted by SSH,
+  with nothing listening on the network at either end. That is the
+  supported way to reach a server on another machine.
+- **On a LAN you already trust with the machine**, by an explicit
+  `--bind`. That is a decision about the LAN, not about this program:
+  binding to `0.0.0.0` offers the device to every host that can route
+  to it.
+
+And for the WebSocket port specifically: **any page in a browser on a
+machine that can reach the port can open a WebSocket to it.**
+Cross-origin WebSocket connections need no preflight and no
+cooperation from the server, so a page the operator happens to visit
+can drive the tile. The server logs the `Origin` header of every
+handshake - it is recorded, not judged, because a server with no
+authentication should not pretend an `Origin` check is one - and
+`--ws` is off unless asked for. If the machine is running `cft-serve`
+for a C client, it is not offering a WebSocket unless someone typed
+`--ws`.
+
+### The clients
+
+- `bindings/wasm/remote.mjs` - the frames, in JavaScript. The same
+  bytes `src/backend_remote.c` builds: the same header, the same CRC
+  (whose table is derived from the polynomial here too), the same
+  chunking at `CFTR_CHUNK_BYTES`, the same refusal-poisons-the-handle
+  discipline. Two transports behind one codec: `ws://` (browser and
+  Node 22, which has a global `WebSocket`) and `tcp://` (Node, through
+  `node:net`, imported lazily so a browser bundle never sees it) -
+  `cft://host:port` is accepted as a spelling of the second. The two
+  differ in where a frame's boundary comes from and in nothing else,
+  which is what makes them comparable. There is no transcribed ABI
+  number: `abi` is a required option whose natural value is the wasm
+  module's own `cftw_abi_version()`, because every frame carries the
+  sender's and the server refuses a mismatch. The caps block is read
+  by offset and not by total length - the 56 bytes this document
+  defines, and whatever a later server appends kept as `extra` - so a
+  server that grows its `HELLO` stays readable by a client that has
+  not been rebuilt.
+- `bindings/wasm/remote.html` - a page that connects, prints the caps
+  block the server answered `HELLO` with, and then runs a check twice
+  for the same inputs: once on the server, once in the wasm module
+  loaded beside it, compared byte for byte. It also replays a dropped
+  `vectors/out` set through the server and compares each case with
+  both the local module and the golden model's published result. It
+  needs `build/cft_runtime.js` (`bash bindings/wasm/build.sh`) and to
+  be served over HTTP rather than opened from `file://`, because a
+  browser will not load an ES module from a `file:` URL.
+- `bindings/node/remote_test.mjs` - the same checks headless, plus a
+  raw RFC 6455 client written in the file itself for the branches a
+  client library will not exercise on request (fragmentation, ping).
+  It starts its own `cft-serve` on two free loopback ports, records
+  its PID and stops it by that PID. `make -C host wstest` runs it.
+
+### What this was held to
+
+Measured 2026-09-07 on DESKTOP-T33SK86 (Windows 11, MINGW64, gcc -O2,
+Node v22.19.0), server and clients all on `127.0.0.1`.
+
+**The TCP path first, unchanged.** `make -C host remotetest`, with the
+WebSocket code compiled in: `remote_check: every check passed` -
+`remote-test`'s protocol suite **245 checks, 0 failures** on both
+div/sqrt routes, `device-test` against a remote handle **2,248 checks,
+0 failed**, a bounded 28-set replay of **184,496 cases** giving the
+same report local and remote, and the Collatz sweep chain
+`3d16b9d7ac66234495c47d202358df24aeeb0aaffc32e5babb0072f2d9e159b7`
+both ways. That run is what the second-listener decision above was
+for: the frame path here is the one that was measured, not one
+re-derived around a detection.
+
+**Then the WebSocket path.** `node bindings/node/remote_test.mjs
+--sets 20 --cases 11800`: **46 checks, 0 failures**.
+
+| comparison | cases | differing |
+|---|---|---|
+| WebSocket against the local wasm module | 392,000 | 0 |
+| WebSocket against the model's published `d` | 392,000 | 0 |
+| WebSocket against the published flag word | 392,000 | 0 |
+| WebSocket against TCP | 392,000 | 0 |
+| `sum` and `dot`, as `REDUCE` frames | 2,560 | 0 |
+
+392,000 cases is all twenty opcode sets of `vectors/out`, every line,
+in 75.4 s. Each was run on the server over WebSocket, on the server
+over TCP and in the local wasm module, interleaved and compared as it
+went - so the server was multiplexing a WebSocket client and a TCP
+client throughout, and nothing was accumulated to compare later.
+
+`make -C host wstest` runs the same test against whatever
+`vectors/out` holds. In a tree where the vectors have not been
+generated the golden legs say NOT RUN and the replay falls back to
+LCG inputs, which still compare the server with the local module and
+the two transports with each other: **42 checks, 0 failures**.
+
+**The counters.** After that work the two connections' `STATS` say the
+same thing to the byte: **394,562 requests each, `RUN` x392,000 each,
+40,958,524 bytes in and 21,700,888 out each**. The counters count
+PROTOCOL bytes - `CFTR_HDR_BYTES + length`, on both paths - so the
+same sequence of calls leaves the same numbers whichever transport
+carried them. That is the measurement that says the envelope is only
+an envelope.
+
+**The envelope's own branches**, driven by a raw RFC 6455 client
+written inside the test, because a client library will not fragment a
+message or send a ping because a test asked it to: a `HELLO` split
+across three fragments is answered with its caps block; a ping comes
+back as a pong carrying the same fourteen bytes; the connection serves
+a request afterwards; a close is answered with a close.
+`Sec-WebSocket-Accept` was recomputed with `node:crypto`'s SHA-1 and
+matched, which is a second implementation of what `tools/ws.c` does.
+
+### The negative control, over WebSocket
+
+The two sabotages of "The negative control" below, applied to the
+JavaScript client instead of the C one (`--sabotage` in
+`bindings/wasm/remote.mjs`), against a loopback server:
+
+- **One bit of one returned encoding**, flipped after the CRC has
+  passed and the frame has been accepted: nothing about the transport
+  notices, because the CRC was correct and the frame was well formed,
+  and the comparison catches it at once - the local answer
+  `0000000000000000000000000080ff7f` against the sabotaged
+  `0100000000000000000000000080ff7f`. Which is the point: the bit
+  identity is checked by the replay, not by the wire.
+- **A `RUN` header claiming one byte more than its payload holds**:
+  `the server refused the request: truncated frame: the header claims 73
+  payload bytes and the WebSocket message carries 72`, and every later
+  call on the handle refuses with `this remote handle was poisoned by an
+  earlier transport fault; close it and open it again`. No frame with a
+  wrong length was computed on.
+
+And the refusals the protocol already had, over the new transport: a
+wrong magic, a corrupted CRC and a length past the cap refused with
+status `8` (CFT_ERR_INTERNAL), a wrong ABI with `2`
+(CFT_ERR_UNSUPPORTED), a request before `HELLO` with `1`
+(CFT_ERR_INVALID_ARGUMENT), and the connection closed after each. Plus
+the ones the envelope adds: a text message is refused as a frame, and
+a `GET` without `Upgrade` or a binary frame sent to the WebSocket port
+each get `HTTP/1.1 400 Bad Request` before any upgrade happens.
+
+### The round trip
+
+One element per call and 4,096 per call, sequential, from the same
+Node client over each transport on loopback, so the difference is the
+envelope and nothing else:
+
+| call | TCP | WebSocket | the envelope |
+|---|---|---|---|
+| 1 fp64 element | 57.5 / 69.8 / 58.7 us | 81.7 / 70.4 / 77.4 us | within the spread |
+| 4,096 fp64 elements | 2.656 / 2.793 / 2.693 ms | 3.62 / 3.44 / 3.75 ms | 0.65 to 1.06 ms |
+
+Three runs of 5,000 one-element calls and 500 batched ones, on a box
+carrying other work; the spread is the box's. On a one-element call the
+envelope is two to fourteen bytes and disappears into the run-to-run
+noise. On a 4,096-element call it is 0.65 to 1.06 ms over the 131,136
+bytes that cross - **about 5 to 8 nanoseconds a byte** - which is the
+client-to-server masking RFC 6455 5.1 requires, and the server's
+unmasking of it. The envelope's cost is per byte, not per call.
+
+These are a JavaScript client's numbers and they are not the C
+client's: this document's own measurement of `src/backend_remote.c` on
+this box, below, is 22.5 us for a one-element call and 1.40 ms for a
+4,096-element one, and the difference is a promise and an event-loop
+turn per call where the C has a blocking `recv`. The comparable number
+here is TCP against WebSocket from the SAME client, which is the table
+above.
+
+In a browser the number is the browser's: measured from
+`bindings/wasm/remote.html` in a Chrome tab on the same machine,
+**264 us** for a one-element fp64 `RUN` over 1,000 sequential calls with
+the tab visible, and 5.1 ms with it hidden - a background tab is
+throttled by two orders, which is the browser's scheduling and not the
+transport. The page's own dropped-set replay ran 300 cases of
+`fp64.jsonl` at 2,227 cases/s with 0 differing against the tab's module,
+0 against the published `d` and 0 against the published flags.
+
+### What was not run
+
+- **Nothing crossed a network.** Every run above was `127.0.0.1` on
+  one machine. The cross-OS run of "How it is held to the contract"
+  (c) below - a Linux server in the WSL distro, a Windows client -
+  was not repeated over WebSocket.
+- **`host/tools/ws.c` was not built or run on Linux.** It is C99
+  over the same `cftr_sock_*` shim as the rest of the server, with no
+  platform branch of its own, so there is nothing in it that is
+  Windows'; but that is an argument, not a measurement.
+- **No TLS.** The server does not terminate it. The client accepts a
+  `wss://` URL for a proxy that does, and that path was not
+  exercised; an SSH tunnel is the answer this document gives for
+  crossing a network.
+- **The seven-family conformance replay was not driven over
+  WebSocket.** The JavaScript client replays what a frame expresses:
+  the opcode sets as `RUN` and the reduction sets' `sum` and `dot` as
+  `REDUCE`. The transcendental, character, augmented, formatOf and
+  scaled-product families are host compositions that never cross the
+  wire (see "What crosses the wire, and what does not"), so
+  replaying them through a client that is not libcft would be
+  replaying the client. `cft_conformance` replays all seven through
+  the TCP path and did, above.
+- **No sequencer program was loaded from JavaScript.** `remote.mjs`
+  implements `PROG_LOAD`, `PROG_RUN` and `PROG_FREE`, and the
+  headless test drives `PROG_LOAD`'s frame path with bytes that are
+  not an image (the server's library refuses them, the connection
+  carries on) - but a valid image was never sent, so `PROG_RUN` over
+  WebSocket is written and not exercised. The buffer and status-word
+  operations ARE exercised, over WebSocket, in section I of that
+  test.
+- **No workload chain was computed through the WebSocket path.** The
+  five workload tools are C and speak the TCP one; a chain over
+  WebSocket would need the tools to take a `ws://` URL, which is a
+  change to `host/src` this step did not make.
 
 ## Round trips, and what the program route saves
 

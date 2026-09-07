@@ -705,9 +705,23 @@ clean: clean-remote
 .PHONY: serve remotetest clean-remote
 
 # -Isrc: the server speaks the frames from src/remote.h, which is
-# internal, and links the archive that carries them.
-cft-serve$(EXE): tools/cft-serve.c libcft.a
+# internal, and links the archive that carries them. tools/ws.c is the
+# RFC 6455 envelope for --ws: it is written against the same socket
+# shim, so it adds no link flag here either.
+cft-serve$(EXE): tools/cft-serve.c tools/ws.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -Isrc $^ -o $@ $(XRTLIBS)
+
+# The WebSocket transport held to the contract from JavaScript: the
+# node client in bindings/node/remote_test.mjs starts its own server
+# on a free loopback port, replays a vector subset over WebSocket and
+# over TCP, compares both with the local wasm module, checks the STATS
+# counters agree between the two transports, and runs the two negative
+# controls. Node 22 has a global WebSocket, so there is nothing to
+# install; NODE names another one if it is not on PATH.
+NODE ?= node
+wstest: cft-serve$(EXE)
+	$(NODE) ../bindings/node/remote_test.mjs --serve ./cft-serve$(EXE)
+.PHONY: wstest
 
 serve: cft-serve$(EXE)
 
