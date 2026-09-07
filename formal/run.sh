@@ -9,7 +9,7 @@
 # (docker/Dockerfile.formal), so the host needs Docker and nothing
 # else. Same gate on a developer box and in CI, same claim.
 #
-# The gate is seven proofs and a tripwire, in this order:
+# The gate is six proofs and a tripwire, in this order:
 #
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
@@ -22,9 +22,6 @@
 #                               composition argument's independent check
 #   lzcone.sby    4 rungs       cft_lzcone == the priority-loop cone it
 #                               replaced, complete at each window width
-#   imul.sby      check+cover   IMUL's decode, its zero extension, and
-#                               the 32-bit rule as a self-miter over
-#                               the bits it must ignore
 #   negcontrol.sby              a deliberately broken property that MUST
 #                               be refuted - a gate that cannot fail
 #                               proves nothing, and this run discovered
@@ -96,7 +93,6 @@ vacuity fifo       tb_fifo_formal      3 ../rtl/cft_fifo.sv tb_fifo_formal.sv
 vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.sv
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
 vacuity lzcone     tb_lzcone_equiv     3 -I ../rtl ../rtl/cft_fpfma_pipe.sv cft_lzcone_ref.sv tb_lzcone_equiv.sv
-vacuity imul       tb_imul_formal      6 ../rtl/cft_simpleops.sv tb_imul_formal.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
@@ -166,17 +162,18 @@ run_proof lzcone.sby   fp64   3 "cft_lzcone == frozen cone, 165-bit window"
 run_proof lzcone.sby   fp128  3 "cft_lzcone == frozen cone, 345-bit window"
 run_proof lzcone.sby   fp256  3 "cft_lzcone == frozen cone, 717-bit window"
 
-# IMUL (opcode 30, 2026-09-07): the decode, the zero extension and the
-# 32-bit rule as a self-miter over the bits it must ignore. The VALUE
+# NOT IN THE GATE: imul.sby (IMUL, opcode 30, 2026-09-07). Its `value`
 # task - the three 16x16 partial products against one 32x32 multiply,
-# truncated - is NOT in the gate: bitwuzla ran twenty-six minutes on it
-# without returning; a miter of two differently associated multipliers
-# is what a bit-blasting engine does worst at. Until it closes, IMUL's
-# value rests on tb/test_simpleops.py's test_imul (6,225 operand pairs
-# at four rungs against the golden model) and host/tests/seq_check.py's
-# differential. `sby -f imul.sby value` to try it again.
-run_proof imul.sby     check  6 "IMUL ignores every bit above 31"
-run_proof imul.sby     cover  1 "IMUL's decode corners reachable"
+# truncated - ran twenty-six minutes under bitwuzla without returning,
+# and its `check` task - the decode, the zero extension and the 32-bit
+# rule as a self-miter over the bits it must ignore - ran thirty
+# minutes for the integrator and two and a half hours inside this gate
+# on the merged tree without returning either. A miter over a
+# multiplier is what a bit-blasting engine does worst at. Until one
+# closes, IMUL's value rests on tb/test_simpleops.py's test_imul (6,225
+# operand pairs at four rungs against the golden model) and
+# host/tests/seq_check.py's differential; the harness and the .sby
+# stay in the tree. `sby -f imul.sby check` or `value` to try again.
 
 # cft_mulpass, at CFT_MUL_MCH = 24 - the chunk the tile synthesises -
 # for all seven (P, COLS) pairs cft_lanes can build. Lemma A (fold) is
