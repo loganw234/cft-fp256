@@ -43,7 +43,8 @@ downstream of the deposit changes its meaning.
 The det library is thirteen functions in 17 KB of GLSL: `det_sin`,
 `det_cos` (both through one `det_sincos`), `det_tan`, `det_atan`,
 `det_acos`, `det_exp2`, `det_log2`, `det_pow`, `det_sqrt`, `det_recip`,
-`det_div`, `det_mod`, `det_scale48`. Across them: 42 `fma`, a handful
+`det_div`, `det_mod`, `det_scale48`. Across them: 56 `fma` sites (this census first said 42; the
+generator rewrites all 56, counted 2026-09-07), a handful
 of `abs`/`min`/`max`/`clamp`, four ternaries, integer shifts, masks and
 xors on the bit patterns, one `floor`, one `isnan`, one `isinf`, and
 104 bit-pattern constants written as `uintBitsToFloat(0x...)`. No raw
@@ -55,9 +56,9 @@ loops four deep, 1,024 instructions per image.
 
 | the emitted GLSL uses | on the tile | notes |
 |---|---|---|
-| `precise` fma, `+`, `-`, `*` | `FMA`, `ADD`, `SUB`, `MUL` at fp32, RNE, denormals kept | bit-exact by construction; the tile is what the discipline assumes a GPU is |
+| `precise` fma, `+`, `-`, `*` | `MUL` then `ADD` for every `fma`; `ADD`, `SUB`, `MUL` at fp32, RNE, denormals kept | **the shipped library is unfused**: `gen-detlib` rewrites all 56 `fma` calls before the byte comparison that proves it identical to the darkroom's, so an `fma` is two roundings. Emitting `FMA` was tried on 2026-09-07 and gives 3,834 one-ULP differences across 14 of 19 functions (worst `det_mod`, 1,441 of 4,096 points): it saves 197 of 1,321 instructions and computes a different library |
 | the thirteen det functions | inlined sequences of the above plus the integer opcodes | the "det_* to program port": the same generator (`tools/gen-detlib.mjs`) grows a second output |
-| `abs`, `min`, `max`, `clamp` | `ABS`, `MIN`, `MAX`, `MIN`+`MAX` | GLSL leaves `min`/`max` with a NaN undefined; the det discipline keeps NaN out, the parity harness confirms it |
+| `abs`, `min`, `max`, `clamp` | `ABS`; `min`/`max` as `CMPLT`+`SELECT`, not the `MIN`/`MAX` opcodes | GLSL (8.1) defines `min`/`max` as comparisons, and 754's `minimum`/`maximum` differ from them on a NaN: the opcodes gave 36 mismatches in `det_atan` at `det_atan(+0, NaN)` on 2026-09-07, the compare-and-select form none, at 8 extra instructions across the library |
 | ternary, `if`/`else` on values | `CMPLT`/`CMPLE`/`CMPEQ` + `SELECT`, branchless | the emitter already refuses a draw inside a conditional, so both arms evaluating is invisible |
 | `floor` (once, in `det_mod`) | add and subtract 2^23 under a directed rounding, selected against \|x\| >= 2^23 where the value is already integral | exact everywhere; only the inexact flag differs, and flags are not part of the parity |
 | `isnan`, `isinf` | `CMPEQ(x, x)`; mask and compare on the encoding | one instruction each |
@@ -83,9 +84,11 @@ the arithmetic:
   opcode. This one IS expressible in-lane: split `x` into two 16-bit
   halves, make each an exact float by OR-ing it under `0x4b000000` and
   subtracting 2^23, then `fma(hi, 65536, lo)` rounds the true value
-  once, which is what a conforming `float(uint)` does. Six instructions
-  per draw, and the parity harness is what proves the GPUs' conversion
-  is the same rounding.
+  once, which is what a conforming `float(uint)` does. Nine
+  instructions per draw as emitted - eight for the unfused
+  `float(uint)`, seven if fused, plus the 2^-32 multiply - and the
+  parity harness is what proves the GPUs' conversion is the same
+  rounding.
 
 ## What the program model lacks for this workload
 
@@ -112,12 +115,18 @@ them and adds one:
    per-sample values - `q.x`, `q.y`, four in `rnd`, `seed` - before a
    single lever. The orbits workload asked for register loading from a
    per-lane block; here the block is seven wide and fixed by the
-   contract.
+   contract. Measured 2026-09-07: no det function takes three
+   inputs, so this is the positive's ask and not the library's.
 4. **Code size and subroutines.** No `CALL`, so every det function
    inlines at each use. `hopf` makes twelve sine or cosine calls;
-   inlined `det_sincos` is on the order of forty instructions, so
-   `hopf` is roughly 600 instructions, `buddha` with its two nested
-   loops more, against an image capacity of 1,024. The emitter's
+   inlined `det_sincos` is 53 image words as emitted on 2026-09-07
+   (`det_pow` 243; all nineteen functions together 1,362), so `hopf`
+   is 541 words and `jong` 466 - both fit - while 28 of the 69
+   positives are already over the 1,024-word image on their det_*
+   calls alone (median 707, the worst 10,100). One more limit the
+   census missed: `det_pow` needs 17 registers of the 16 a lane has,
+   after the best of four schedules; every other function fits, the
+   largest at 11. The emitter's
    existing `det_sincos` hoist (one call where the plate wrote several)
    is the first remedy and is already measured on the GPU; a `CALL`
    with a return address register is the durable one and is not in
@@ -175,6 +184,21 @@ deposition that column alone can claim.
    conversion and the two integer-multiply sites marked as needing
    `IMUL`. Verified function by function against the pinned GLSL on a
    sweep of arguments, through libcft's software backend.
+   **Done 2026-09-07**, on atlas-engine's branch `cft-detlib` (commit
+   af5feda, unmerged, for review): `gen-detlib --target cft` emits
+   all nineteen functions - the thirteen det_*, their four helpers,
+   `u2f`, `hashu` - with the register discipline written down in
+   that repository's docs/CFT-DETLIB.md, and
+   `tools/verify-cft-detlib.mjs` holds every one bit-identical to
+   the shipped library on 4,096-point sweeps through libcft's
+   software backend, `hashu` with its two `IMUL`s emulated since the
+   opcode does not exist yet. It corrected this document three times
+   on the way (the table above): the library is unfused, `min`/`max`
+   are comparisons, `u2f` is nine instructions. Eleven of the
+   nineteen need indexed constants (`det_div` lands on exactly 16,
+   `det_pow` wants 43; 77 distinct constants in all, inside
+   `KMEM_D`'s 256), `hashu` alone needs `IMUL`, and `det_pow` alone
+   needs a seventeenth register.
 2. **`IMUL` and immediate constants** (cft-fp256): model, softfloat,
    RTL, cocotb, CAPS and VERSION; the API gains nothing, since a
    program image is data. The immediate form is what lets step 3 emit

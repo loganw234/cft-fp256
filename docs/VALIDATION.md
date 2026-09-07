@@ -4519,3 +4519,44 @@ needs to read.
 nested rungs, the retimed ladders, the pipelined leading-zero cone,
 the indexed constants and the published caps. Those are proposals
 with their own gates in the study documents.
+
+## 2026-09-07 - the det library as sequencer programs: nineteen functions bit-identical, and the census corrected
+
+Step 1 of docs/ATLAS.md's order of work, done in atlas-engine (branch
+`cft-detlib`, commit af5feda, unmerged there) and recorded here because
+it measured this project's claims. `gen-detlib --target cft` turns the
+shipped det library - the thirteen det_* functions, their four helpers,
+`u2f` and `hashu` - into sequencer instruction sequences, and
+`tools/verify-cft-detlib.mjs` executes each sequence instruction by
+instruction through libcft's `cft_run` at binary32 against an
+interpreter over the shipped text, on 4,096-point sweeps per function:
+
+    every emitted function reproduces the library's bits
+
+Re-run by the integrator from the branch: the same line, 31 seconds.
+NaN-payload-only differences are excluded and attributed to the oracle
+(JavaScript has one NaN). `hashu`'s two integer multiplies are emulated
+because opcode 30 does not exist yet - libcft answers it with a
+canonical qNaN, measured.
+
+**Three corrections to docs/ATLAS.md, each measured rather than
+argued.** The library ships unfused: the generator rewrites all 56
+`fma` calls (the census said 42) before the byte comparison that proves
+it identical to the darkroom's, and emitting `FMA` gives 3,834 one-ULP
+differences across 14 of 19 functions - a different library, not a
+faster one. GLSL's `min`/`max` are comparisons, not 754's
+`minimum`/`maximum`: the opcodes cost 36 mismatches in `det_atan` at
+`det_atan(+0, NaN)`, compare-and-select costs 8 instructions
+library-wide and none. `u2f` is nine instructions, not six.
+
+**The asks, counted.** Eleven of nineteen functions need indexed
+constants (`det_div` lands on exactly 16; `det_pow` wants 43), `hashu`
+alone needs `IMUL`, `det_pow` alone needs a seventeenth register, and
+no det function takes three inputs - the wider input block is the
+positive's ask. All nineteen are 1,362 image words; `hopf` is 541 and
+`jong` 466, and 28 of the 69 positives are over the 1,024-word image
+on their det_* calls alone.
+
+**Not run.** atlas-engine's `ci-smoke.mjs` (69 child processes, still
+running when the agent wrapped up; it exercises files the work did not
+touch), the Chrome/GPU probes, and anything on a device.

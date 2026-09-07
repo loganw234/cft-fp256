@@ -209,7 +209,10 @@ getting one.
 exists to serve, and the most useful measure of readiness. It is 38
 functions built almost entirely from `fma` (51 uses against a handful
 of everything else), deliberately, so a GLSL driver's quirks cannot
-reach the results.
+reach the results. The shipped template is unfused - every `fma` is
+a multiply then an add, 56 sites counted on 2026-09-07 - so what the
+tile must reproduce is two roundings per `fma`, and `FMA` itself
+would compute a different library (docs/ATLAS.md).
 
 The distance to running it on-chip:
 
@@ -334,5 +337,11 @@ in docs/COMPATIBILITY.md) gets the full story.
 - For the **atlas det library**: every primitive it refines from
   exists on the tile, including its seeds and now floor/round; the
   on-chip sequence to chain them exists in RTL and is benched. The
-  remaining work on this axis is the det_* -> program port itself and
-  the parity harness against the GLSL bits - software, startable now.
+  det_* -> program port's first half landed on 2026-09-07
+  (atlas-engine branch `cft-detlib`): all nineteen functions of the
+  shipped library emit as sequencer instruction sequences and
+  reproduce its bits on 4,096-point sweeps through libcft's software
+  backend, with the ISA asks counted rather than guessed - eleven
+  functions need indexed constants, one needs `IMUL`, one needs a
+  seventeenth register (docs/ATLAS.md). The parity harness against
+  the GPU bits remains.
