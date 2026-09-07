@@ -5,7 +5,7 @@
  *
  *     cft-serve [--port N] [--bind ADDR] [--artifact PATH]
  *               [--max-conns N] [--pid-file PATH] [--port-file PATH]
- *               [--verbose]
+ *               [--ws N] [--ws-port-file PATH] [--verbose]
  *
  * Holds one libcft device per connection - the software backend by
  * default, or the artifact named on the command line, so that the
@@ -25,11 +25,24 @@
  * holds the rest. A connection that starts a frame and then stalls
  * for a minute is dropped, so it cannot hold the others up.
  *
+ * --ws N adds a SECOND listener that speaks the same frames inside
+ * RFC 6455 WebSocket messages - one message per frame, unchanged - so
+ * a browser reaches the tile. It is a second port and not a second
+ * protocol on the first, for three reasons, which docs/REMOTE.md
+ * states at length: the frame path here is not touched at all and
+ * keeps the behaviour its negative control recorded; detecting "GET "
+ * on the first bytes would need a peek the socket shim does not
+ * expose and a platform branch this file has not got; and a browser
+ * will open a WebSocket to a loopback port from any page the person
+ * is looking at, so a transport that is reachable from the web is one
+ * an operator should have to ask for. Off unless --ws is given.
+ *
  * Scope: no authentication, no encryption, 127.0.0.1 unless --bind
  * says otherwise. A transport, not a security boundary; docs/REMOTE.md
  * says so at more length. C99 plus the operating system's socket API,
  * through the shim in libcft.a, so this file has no platform branch of
- * its own except the one that asks the process id.
+ * its own except the one that asks the process id - and neither has
+ * tools/ws.c, which is written against the same shim.
  *
  * Stopping it: by its PID, which it prints on startup and writes to
  * --pid-file. Never by image name on a shared host.
@@ -51,6 +64,7 @@
 
 #include "cft.h"
 #include "remote.h"
+#include "ws.h"
 
 #define MAX_CONNS 32
 
@@ -65,6 +79,9 @@ typedef struct {
     int           open;
     cftr_sock     s;
     unsigned long id;
+    int           ws;               /* frames arrive in WebSocket messages */
+    int           ws_pending;       /* its opening handshake is still due */
+    ws_conn       w;
     cft_device   *dev;
     cft_status    open_status;      /* why dev is NULL, if it is */
     cft_program **progs;
@@ -669,14 +686,24 @@ static int h_stats(conn *C, answer *A)
 
 /* ---- connections ------------------------------------------------------ */
 
+/* Take a connection into a slot. A WebSocket connection's opening
+ * handshake is NOT read here - see below. */
 static void conn_open(conn *C, cftr_sock s, unsigned long id,
-                      const char *artifact)
+                      const char *artifact, int is_ws)
 {
     cft_caps caps;
     memset(C, 0, sizeof *C);
     C->open = 1;
     C->s = s;
     C->id = id;
+    C->ws = is_ws;
+    /* The handshake is NOT read here. Reading it would hold this
+     * accept until the request head arrives or the stall timeout
+     * expires - and every other connection with it, because the loop
+     * is one thread. So the connection joins the select set with its
+     * handshake still due, and is read when it has something to say,
+     * exactly as a frame is. */
+    C->ws_pending = is_ws;
     cftr_sock_timeout(s, STALL_MS);
     C->open_status = cft_open(artifact, 0, &C->dev);
     memset(&caps, 0, sizeof caps);
@@ -693,6 +720,10 @@ static void conn_open(conn *C, cftr_sock s, unsigned long id,
 static void conn_close(conn *C)
 {
     uint32_t i;
+    if (C->ws) {
+        ws_send_close(&C->w, 1000);
+        ws_conn_free(&C->w);
+    }
     for (i = 0; i < C->nprogs; i++)
         cft_program_free(C->progs[i]);
     for (i = 0; i < C->nbufs; i++)
@@ -716,8 +747,12 @@ static int send_reply(conn *C, const cftr_hdr *req, int kind, int status,
     h.id     = req->id;
     h.op     = req->op;
     h.status = (uint16_t)status;
+    /* The frame is the frame either way; the transport is only which
+     * of the two sends it. The byte count is the PROTOCOL's, so the
+     * counters STATS reports do not move between transports. */
     C->bytes_out += CFTR_HDR_BYTES + len;
-    return cftr_send_frame(C->s, &h, payload, len);
+    return C->ws ? ws_send_frame(&C->w, &h, payload, len)
+                 : cftr_send_frame(C->s, &h, payload, len);
 }
 
 /* Read and answer ONE request on a connection select() reported
@@ -730,8 +765,37 @@ static int serve_one(conn *C, uint32_t my_abi)
     answer A;
     int rc;
 
+    if (C->ws_pending) {
+        /* The first thing a WebSocket connection has to say is its
+         * opening handshake. A failure has already been answered with
+         * an HTTP status by ws_handshake, so there is no close frame
+         * to send after it. */
+        C->ws_pending = 0;
+        if (ws_handshake(&C->w, C->s, why, sizeof why)) {
+            C->w.peer_closed = 2;
+            logline("connection %lu: not a WebSocket handshake, refused: %s",
+                    C->id, why);
+            return 1;
+        }
+        /* The Origin is logged and not judged. This server has no
+         * authentication, and a browser will open a WebSocket to a
+         * loopback port from ANY page the person is looking at, so
+         * the log is where that becomes visible. docs/REMOTE.md says
+         * what running with --ws means. */
+        logline("connection %lu: WebSocket handshake accepted, origin %s",
+                C->id, C->w.origin[0] ? C->w.origin : "(none)");
+        return 0;
+    }
     memset(&h, 0, sizeof h);
-    rc = cftr_recv_frame(C->s, &h, &p, my_abi, why, sizeof why);
+    rc = C->ws ? ws_recv_frame(&C->w, &h, &p, my_abi, why, sizeof why)
+               : cftr_recv_frame(C->s, &h, &p, my_abi, why, sizeof why);
+    if (rc < 0) {
+        /* A WebSocket control frame: a ping answered, a pong dropped.
+         * No request arrived, so nothing is counted and the loop goes
+         * back to waiting rather than blocking here - one connection's
+         * keepalive must not hold up the others. */
+        return 0;
+    }
     if (rc == 1) {
         logline("connection %lu: closed by the client after %llu requests",
                 C->id, (unsigned long long)C->requests);
@@ -856,6 +920,13 @@ static void usage(void)
 "  --bind ADDR       listen on this address (default 127.0.0.1; 0.0.0.0\n"
 "                    exposes the server on every interface - no\n"
 "                    authentication, no encryption)\n"
+"  --ws N            ALSO listen on this port for WebSocket clients\n"
+"                    (RFC 6455; one message per frame, same protocol,\n"
+"                    same counters). Off unless asked, because a\n"
+"                    browser will open a WebSocket to a loopback port\n"
+"                    from any page the person is looking at, and this\n"
+"                    server has no authentication. 0 asks the OS\n"
+"  --ws-port-file P  write the WebSocket port actually bound there\n"
 "  --artifact PATH   the device each connection gets (default: the\n"
 "                    software backend)\n"
 "  --max-conns N     exit once N connections have been served\n"
@@ -870,11 +941,12 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     const char *bind_addr = "127.0.0.1", *artifact = NULL;
-    const char *pid_file = NULL, *port_file = NULL;
+    const char *pid_file = NULL, *port_file = NULL, *ws_port_file = NULL;
     char port_s[16];
     long port = CFTR_DEFAULT_PORT, max_conns = -1, accepted = 0;
-    int bound = 0, i;
-    cftr_sock listener;
+    long ws_port = -1;                  /* -1: no WebSocket listener */
+    int bound = 0, ws_bound = 0, i;
+    cftr_sock listener, ws_listener = CFTR_BAD_SOCK;
     cft_device *probe = NULL;
     cft_status st;
     const uint32_t my_abi = cft_abi_version();
@@ -885,6 +957,8 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--verbose")) g_verbose = 1;
         else if (i + 1 >= argc) { fprintf(stderr, "%s needs a value\n", a); return 2; }
         else if (!strcmp(a, "--port")) port = strtol(argv[++i], NULL, 10);
+        else if (!strcmp(a, "--ws")) ws_port = strtol(argv[++i], NULL, 10);
+        else if (!strcmp(a, "--ws-port-file")) ws_port_file = argv[++i];
         else if (!strcmp(a, "--bind")) bind_addr = argv[++i];
         else if (!strcmp(a, "--artifact")) artifact = argv[++i];
         else if (!strcmp(a, "--max-conns")) max_conns = strtol(argv[++i], NULL, 10);
@@ -894,6 +968,16 @@ int main(int argc, char **argv)
     }
     if (port < 0 || port > 65535) {
         fprintf(stderr, "cft-serve: --port %ld is not a port\n", port);
+        return 2;
+    }
+    if (ws_port >= 0 && ws_port > 65535) {
+        fprintf(stderr, "cft-serve: --ws %ld is not a port\n", ws_port);
+        return 2;
+    }
+    if (ws_port >= 0 && ws_port == port && port != 0) {
+        fprintf(stderr, "cft-serve: --ws %ld is the frame port; the two "
+                        "protocols get a port each (docs/REMOTE.md says "
+                        "why)\n", ws_port);
         return 2;
     }
     if (artifact && strncmp(artifact, "cft://", 6) == 0) {
@@ -907,6 +991,12 @@ int main(int argc, char **argv)
     if (cftr_crc32_selfcheck()) {
         fprintf(stderr, "cft-serve: the CRC-32 implementation failed its "
                         "check value; refusing to serve\n");
+        return 2;
+    }
+    if (ws_port >= 0 && ws_selfcheck()) {
+        fprintf(stderr, "cft-serve: the SHA-1 and base64 behind "
+                        "Sec-WebSocket-Accept failed their published check "
+                        "values; refusing to serve WebSocket\n");
         return 2;
     }
 
@@ -934,9 +1024,23 @@ int main(int argc, char **argv)
                 port_s, cftr_sock_error());
         return 2;
     }
+    if (ws_port >= 0) {
+        char ws_port_s[16];
+        snprintf(ws_port_s, sizeof ws_port_s, "%ld", ws_port);
+        ws_listener = cftr_sock_listen(bind_addr, ws_port_s, 16, &ws_bound);
+        if (ws_listener == CFTR_BAD_SOCK) {
+            fprintf(stderr, "cft-serve: listening on %s:%s for WebSocket: "
+                    "%s\n", bind_addr, ws_port_s, cftr_sock_error());
+            cftr_sock_close(listener);
+            return 2;
+        }
+    }
     logline("cft-serve: libcft ABI %u.%u, device %s, listening on %s:%d, "
             "pid %lu", (unsigned)(my_abi >> 16), (unsigned)(my_abi & 0xFFFFu),
             artifact ? artifact : "software", bind_addr, bound, SERVE_PID());
+    if (ws_listener != CFTR_BAD_SOCK)
+        logline("cft-serve: WebSocket (RFC 6455) on %s:%d - one message per "
+                "frame, no authentication", bind_addr, ws_bound);
     if (pid_file) {
         FILE *f = fopen(pid_file, "w");
         if (f) { fprintf(f, "%lu\n", SERVE_PID()); fclose(f); }
@@ -945,23 +1049,35 @@ int main(int argc, char **argv)
         FILE *f = fopen(port_file, "w");
         if (f) { fprintf(f, "%d\n", bound); fclose(f); }
     }
+    if (ws_port_file && ws_listener != CFTR_BAD_SOCK) {
+        FILE *f = fopen(ws_port_file, "w");
+        if (f) { fprintf(f, "%d\n", ws_bound); fclose(f); }
+    }
 
     /* The loop: wait on the listener and every open connection, accept
      * what is waiting, serve one request on each connection that has
      * one. --max-conns stops ACCEPTING at N and exits once the last
      * of them has closed. */
     for (;;) {
-        cftr_sock socks[MAX_CONNS + 1];
-        int ready[MAX_CONNS + 1], map[MAX_CONNS + 1];
+        cftr_sock socks[MAX_CONNS + 2];
+        int ready[MAX_CONNS + 2], map[MAX_CONNS + 2];
         int n = 0, open_count = 0, rc;
 
         for (i = 0; i < MAX_CONNS; i++)
             if (g_conns[i].open)
                 open_count++;
         if ((max_conns < 0 || accepted < max_conns) && open_count < MAX_CONNS) {
+            /* map < 0 is a listener: -1 the frame port, -2 the
+             * WebSocket one. A connection is the same connection
+             * either way once it is accepted. */
             socks[n] = listener;
             map[n] = -1;
             n++;
+            if (ws_listener != CFTR_BAD_SOCK) {
+                socks[n] = ws_listener;
+                map[n] = -2;
+                n++;
+            }
         }
         for (i = 0; i < MAX_CONNS; i++)
             if (g_conns[i].open) {
@@ -981,7 +1097,8 @@ int main(int argc, char **argv)
             if (!ready[i])
                 continue;
             if (map[i] < 0) {
-                cftr_sock c = cftr_sock_accept(listener);
+                const int is_ws = (map[i] == -2);
+                cftr_sock c = cftr_sock_accept(is_ws ? ws_listener : listener);
                 int slot;
                 if (c == CFTR_BAD_SOCK) {
                     logline("cft-serve: accept failed: %s", cftr_sock_error());
@@ -995,13 +1112,16 @@ int main(int argc, char **argv)
                     continue;
                 }
                 accepted++;
-                conn_open(&g_conns[slot], c, (unsigned long)accepted, artifact);
+                conn_open(&g_conns[slot], c, (unsigned long)accepted,
+                          artifact, is_ws);
             } else if (serve_one(&g_conns[map[i]], my_abi)) {
                 conn_close(&g_conns[map[i]]);
             }
         }
     }
     cftr_sock_close(listener);
+    if (ws_listener != CFTR_BAD_SOCK)
+        cftr_sock_close(ws_listener);
     logline("cft-serve: served %ld connection(s), exiting", accepted);
     return 0;
 }

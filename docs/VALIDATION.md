@@ -4519,3 +4519,147 @@ needs to read.
 nested rungs, the retimed ladders, the pipelined leading-zero cone,
 the indexed constants and the published caps. Those are proposals
 with their own gates in the study documents.
+
+## 2026-09-07 - the browser reaches the tile: the frame protocol over WebSocket
+
+A second transport for docs/REMOTE.md's frame protocol and a
+JavaScript client for it. `cft-serve --ws PORT` opens a second
+listener that speaks RFC 6455, and one WebSocket message carries
+exactly one frame of the protocol, unchanged - the same 32-byte
+header, the same little-endian fields, the same CRC-32 over the same
+bytes. The protocol version does not move, because a transport is not
+a protocol change. New: `host/tools/ws.c` and `ws.h` (the envelope,
+the handshake, SHA-1 and base64), `bindings/wasm/remote.mjs` (the
+frames in JavaScript, over WebSocket or TCP),
+`bindings/wasm/remote.html` (a page that runs a check on the server
+and in the wasm module beside it and compares them) and
+`bindings/node/remote_test.mjs` (the same headless, `make -C host
+wstest`).
+
+### What the gate is, and what it scores
+
+The same thing every backend is scored on: bit identity. A result the
+server computes and sends over a WebSocket must equal the one the
+local wasm module computes for the same bytes, and must equal the
+golden model's published one. Beside that, two things specific to a
+second transport:
+
+- **The counters must not move.** The server counts PROTOCOL bytes -
+  `CFTR_HDR_BYTES + length` - and frames by opcode, on both paths. The
+  same sequence of calls over each transport must leave `STATS`
+  saying the same thing, which is what "one message carries one frame"
+  means operationally.
+- **The refusals must still fire.** The protocol's own (a wrong magic,
+  a corrupted CRC, a wrong ABI, a request before `HELLO`, a length
+  past the cap) and docs/REMOTE.md's two negative controls.
+
+### The measurements
+
+DESKTOP-T33SK86 (Windows 11, MINGW64, gcc -O2, Node v22.19.0),
+server and clients all on `127.0.0.1`, the box carrying other work.
+
+**The TCP path, unchanged, with the WebSocket code compiled in.**
+`make -C host remotetest`: `remote_check: every check passed` -
+`remote-test` **245 checks, 0 failures** on both div/sqrt routes,
+`device-test` against a remote handle **2,248 checks, 0 failed**, a
+bounded 28-set replay **184,496 cases, all matching**, local and
+remote reporting the same thing, and the Collatz sweep chain
+`3d16b9d7ac66234495c47d202358df24aeeb0aaffc32e5babb0072f2d9e159b7`
+local and remote. The frame path was not edited, which is why it is
+a second listener and not a detection on the first; this run is what
+that decision was for.
+
+**The replay over WebSocket.** `node bindings/node/remote_test.mjs
+--sets 20 --cases 11800`: **46 checks, 0 failures**. All twenty
+opcode sets of `vectors/out`, every line - **392,000 cases** in 75.4
+s - each run on the server over WebSocket, on the server over TCP,
+and in the local wasm module, and the three compared as it went:
+
+| comparison | result |
+|---|---|
+| WebSocket against the local wasm module | 392,000 cases, 0 differing |
+| WebSocket against the golden model's published `d` | 392,000 cases, 0 differing |
+| WebSocket against the published flag word | 392,000 cases, 0 differing |
+| WebSocket against TCP | 392,000 cases, 0 differing |
+| the reduction sets' sum and dot, as `REDUCE` frames | 2,560 cases, 0 differing |
+
+**The counters.** After that work the two connections' `STATS` say
+the same thing to the byte: **394,562 requests each, `RUN` x392,000
+each, 40,958,524 bytes in and 21,700,888 out each**. The counters
+count protocol bytes - header plus payload - so the envelope does
+not move them, which is what "one message carries one frame" means
+operationally.
+
+**The envelope's own branches**, driven by a raw RFC 6455 client
+written inside the test because a client library will not fragment
+or ping on request: a `HELLO` split across three fragments is
+answered; a ping comes back as a pong with the same 14 bytes; the
+connection serves a request after the ping; a close is answered with
+a close. `Sec-WebSocket-Accept` was recomputed with `node:crypto`'s
+SHA-1 and matched, which is a second implementation of the thing
+`tools/ws.c` implements.
+
+**The refusals**, over WebSocket: a wrong magic, a corrupted CRC, an
+oversize length (status 8), a wrong ABI (status 2), a request before
+`HELLO` (status 1), a text message; and, before the upgrade, a `GET`
+without `Upgrade` and a binary frame on the WebSocket port, each
+`HTTP/1.1 400 Bad Request`.
+
+**The negative control**, docs/REMOTE.md's two sabotages applied to
+the JavaScript client. One bit of one returned encoding, flipped
+after the CRC passed: the transport notices nothing - the frame was
+well formed - and the comparison catches it, local
+`0000000000000000000000000080ff7f` against sabotaged
+`0100000000000000000000000080ff7f`. A `RUN` header claiming one byte
+more than its payload holds: `truncated frame: the header claims 73
+payload bytes and the WebSocket message carries 72`, and the handle
+is poisoned for good. The message boundary catches it at once where
+the TCP path waits out its stall minute - same verdict, sooner.
+
+**The cost.** Three runs of 5,000 one-element calls and 500
+batched ones, the same Node client over each transport:
+
+| call | TCP | WebSocket |
+|---|---|---|
+| 1 fp64 element | 57.5 / 69.8 / 58.7 us | 81.7 / 70.4 / 77.4 us |
+| 4,096 fp64 elements | 2.656 / 2.793 / 2.693 ms | 3.62 / 3.44 / 3.75 ms |
+
+At one element the envelope disappears into the run-to-run spread.
+At 4,096 it costs 0.65 to 1.06 ms over the 131,136 bytes that cross,
+about 5 to 8 nanoseconds a byte, which is the masking RFC 6455 5.1
+requires of a client and the server's unmasking of it: the
+envelope's cost is per byte, not per call. These are a JavaScript
+client's numbers and not the C client's - 22.5 us and 1.40 ms on
+this box, from the entry above - so the comparable figure is TCP
+against WebSocket from the same client, which is the table.
+
+**In a browser.** Chrome on the same machine, the page served over
+loopback HTTP: the caps block printed, a 512-element binary256 `fma`
+identical to the tab's own module for all 16,384 bytes, a 300-case
+`fp64.jsonl` replayed at 2,227 cases/s with 0 differing against the
+module, the published `d` and the published flags, and 264 us a call
+over 1,000 sequential one-element calls with the tab visible (5.1 ms
+with it hidden - a background tab is throttled by two orders, which
+is the browser's scheduling and not the transport).
+
+### What was not run
+
+Nothing crossed a network: every run was `127.0.0.1` on one machine,
+and the cross-OS run of the 2026-09-06 entry was not repeated over
+WebSocket. `host/tools/ws.c` was not built or run on Linux - it is
+C99 over the same socket shim with no platform branch, but that is
+an argument and not a measurement, and the desktop's WSL distro was
+left alone for card day. No TLS: the server does not terminate it,
+the client accepts a `wss://` URL for a proxy that does and that was
+not exercised. The transcendental, character, augmented, formatOf
+and scaled-product conformance families were not replayed over
+WebSocket, because they are host compositions that never cross the
+wire; `cft_conformance` replayed all seven through the TCP path. No
+sequencer program was loaded from JavaScript, so `PROG_RUN` over
+WebSocket is written and not exercised (`PROG_LOAD`'s frame path is,
+with bytes that are not an image; the buffer and status-word
+operations are, with real ones). No workload chain was computed
+through the WebSocket path: the five tools are C and speak the TCP
+one. And `verify/run.sh` was not touched - wiring `make -C host
+wstest` into the `remote` stage is an integrator's call, not this
+step's.
