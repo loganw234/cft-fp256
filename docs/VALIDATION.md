@@ -4388,8 +4388,35 @@ those parts' DSP columns and 119% of this one's. The implied path is
 17.1 ns on a -1 part, about 58 MHz, which is the trade stated as a
 number.
 
-**Still not run.** Implementation at any pass count; the `xc7k325t`
-and `xc7a200t` cells themselves, which want those device families
-added to a Vivado install - an elevation and an AMD login, so an
-operator's step, and the free-tier licence is demonstrably not the
-blocker since `xc7z020` synthesised without one.
+**The real parts, an hour later.** The device families were
+installed and the cells run for the two boards docs/PLATFORMS.md
+recommends, both with the ladders on:
+
+| part | passes | LUT | of device | DSP | implied delay |
+|---|---|---|---|---|---|
+| xc7k325tffg900-2 (-2) | 10 | 98,929 | 48.5% | 56 | 9.698 ns |
+| xc7k325tffg900-2 (-2) | 1 | 109,225 | 53.6% | 262 | 9.956 ns |
+| xc7a200tsbg484-1 (-1) | 10 | 98,929 | 73.5% | 56 | 17.422 ns |
+| xc7a200tsbg484-1 (-1) | 1 | 109,225 | 81.1% | 262 | 17.785 ns |
+
+Logic maps identically on the two parts, as it should; the speed grade
+is the difference. **The Kintex-7 325T carries a full fp256-capable
+tile at 48.5% with 9.698 ns of implied path against a 100 MHz ask**, a
+WNS of -0.066 - which is a far better clock than the Zynq-7020
+stand-in's -1 fabric predicted, and it is the board the survey already
+recommended. The Artix-7 200T holds the same tile at 73.5% and about
+57 MHz.
+
+**A licence trap worth a line in anyone's runbook.** These cells were
+"impossible" for an afternoon: Vivado 2026.1 picks ONE licence tier at
+startup and exposes only that tier's devices, so with an Alveo and a
+Basic entitlement in one `Xilinx.lic` it chose ALVEO, reported 12
+parts, and said `xc7k325tffg900-2` could not be found - with the
+7-series device files correctly installed and the Basic increment in
+the same file. Pointing `XILINXD_LICENSE_FILE` at a Basic-only copy
+turns 12 parts into 1,215. The device install was necessary; it was
+not sufficient, and neither was owning the licence.
+
+**Still not run.** Implementation at any pass count on any part, so no
+post-route number on 7-series fabric - which is where a 48.5% design
+with 66 picoseconds of synthesis slack would actually be decided.

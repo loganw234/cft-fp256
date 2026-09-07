@@ -709,11 +709,58 @@ on anything, is a design position rather than a disappointment - but it
 is the number, and the K325T's -2 grade would be the one to measure
 before quoting a clock for a real board.
 
-**Still not measured.** Implementation at any pass count; the
-`xc7k325t` and `xc7a200t` cells themselves, which want those device
-families added to a Vivado install (a login and an elevation, so an
-operator's step); and any post-route figure on 7-series fabric, where
-routing rather than logic is usually what decides a tile-sized design.
+**The parts themselves, measured the same day** once the families
+were installed and the licence-tier trap below was understood. Both at
+`MUL_PASSES=10` with the ladders on, and at `1` with them on for the
+comparison:
+
+| part | LUT | of device | DSP | of device | implied delay | levels |
+|---|---|---|---|---|---|---|
+| xc7k325tffg900-2, 10 passes | 98,929 | **48.5%** | 56 | 6.7% | 9.698 ns | 24 |
+| xc7k325tffg900-2, 1 pass | 109,225 | 53.6% | 262 | 31.2% | 9.956 ns | 25 |
+| xc7a200tsbg484-1, 10 passes | 98,929 | **73.5%** | 56 | 7.6% | 17.422 ns | 23 |
+| xc7a200tsbg484-1, 1 pass | 109,225 | 81.1% | 262 | 35.4% | 17.785 ns | 26 |
+
+The LUT, flip-flop and DSP columns are identical between the two parts
+at the same configuration, which is what one expects: same fabric
+family, same mapping, and only the speed grade differs. So the two
+rows that matter are the delays.
+
+**The Kintex-7 325T is the surprise, and it is a good one.** At its -2
+grade the tile's implied path is 9.698 ns against a 100 MHz ask, which
+is a WNS of -0.066 ns - about 103 MHz of path, essentially the ask,
+where the Zynq-7020 stand-in's -1 fabric had suggested 58. A full
+fp256-capable tile at **48.5% of a K325T running near 100 MHz** is a
+better answer than the third-tier plan assumed it would get, and it is
+the part the survey already recommended for other reasons. The
+Artix-7 200T is the slower half of the pair, 17.4 ns and about 57 MHz
+at its -1 grade, with the tile at 73.5%.
+
+**And on a part with DSPs to spare the pass count is a smaller lever
+than the ladders**, exactly as the U50 rows said: with the ladders on
+either way, ten passes take the K325T tile from 109,225 to 98,929 LUT,
+9.4%, while taking 262 DSPs to 56. Two tiles do not fit a K325T on
+LUTs (197,858 is 97% of the device before any interconnect), so the
+pass count's prize on these parts is the DSP column and the headroom
+around one tile, not a second tile.
+
+**The licence-tier trap, recorded because it cost an afternoon.**
+Vivado 2026.1 selects **one** licence tier at startup and then exposes
+only that tier's devices. With an Alveo entitlement and a Basic
+entitlement in the same `Xilinx.lic`, it announced "a valid Vivado
+Design Suite ALVEO license has been detected" and reported that
+`xc7k325tffg900-2` did not exist - `get_parts` returned 12 parts, all
+Alveo - with every 7-series device file correctly installed on disk
+and the Basic increment sitting in the same file. Splitting the
+licence into an Alveo-only and a Basic-only copy and pointing
+`XILINXD_LICENSE_FILE` at the Basic one turns 12 parts into 1,215,
+including 212 Kintex-7 and 210 Artix-7. **A part Vivado says does not
+exist may be a part your active tier does not cover.**
+
+**Still not measured.** Implementation at any pass count, on any part,
+and so no post-route figure on 7-series fabric - where routing rather
+than logic is usually what decides a design of this size, and where
+the K325T's -0.066 ns of synthesis slack is thin enough to matter.
 
 ## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 

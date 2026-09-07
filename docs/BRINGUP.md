@@ -33,6 +33,18 @@ install, in this order:
    page pairs with the deployment platform (the `-dev` platform
    package declares its minimum XRT).
 
+**Vivado 2026.1 picks ONE licence tier at startup** and exposes only
+that tier's devices. With an Alveo entitlement and a Basic entitlement
+in the same `Xilinx.lic` it takes ALVEO and then reports that every
+7-series part "could not be found", however completely those device
+families are installed - `get_parts` returned 12 parts on this desktop
+with 1,215 available. Keep the tiers in separate files and select one
+with `XILINXD_LICENSE_FILE`: the Alveo file for card work, a
+Basic-only copy for the open-core parts. A part the tool says does not
+exist may be a part the active tier does not cover, and the error says
+nothing about licences. Measured 2026-09-06; docs/ARCHITECTURE.md's
+multi-cycle section has the numbers it was blocking.
+
 Also worth checking before first contact: ~100-250 GB free disk for
 Vitis (a lean device selection fits ~80 GB) plus workspace; BIOS
 "Above 4G Decoding" enabled - community advice that costs nothing,

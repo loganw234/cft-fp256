@@ -2471,9 +2471,12 @@ size. The steps, in order, each with the gate that says it is done:
    Kintex-7 325T and 74% of an Artix-7 200T where a single-pass tile's
    262 DSPs alone would have been 31% and 35% of those parts' DSP
    columns and 119% of the Zynq-7020 those cells were run on. The
-   trade is in the clock: 17.1 ns of implied path there, about 58 MHz,
-   against 5.6 ns and 135 MHz on the U50. So step 4's board is
-   reachable, the pass count is what stops a DSP-poor part refusing
+   trade is in the clock, and the real parts are kinder than the
+   stand-in was: on a Kintex-7 325T at its -2 grade the tile is 48.5%
+   of the device with 9.698 ns of implied path against a 100 MHz ask,
+   about 103 MHz, where the Zynq-7020's -1 fabric had suggested 58;
+   an Artix-7 200T holds it at 73.5% and about 57 MHz. So step 4's
+   board is reachable at a real clock, the pass count is what stops a DSP-poor part refusing
    outright, and the ladders remain the LUT lever. The
    formal proof of the pass accumulation does **not** close - a bounded
    model check over a multiplier is the shape a SAT solver does worst
