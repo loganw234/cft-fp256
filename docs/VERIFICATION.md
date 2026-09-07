@@ -137,7 +137,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `sim` (21 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
 | `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | **more than 65 min at four jobs** | the fp256 benches at ten passes are the long tail |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
-| `formal` (31 tasks + the negative control) | **14 min** of solver time for the 27 multi-cycle-era tasks, plus about 20 s for the four cone proofs | **more than 80 min** | the fp256 fold lemma alone is 4 min quiet; the old four-proof gate was 29 s, which is the number older notes quote |
+| `formal` (31 tasks + the negative control) | **7 min** on the merged tree with the box otherwise idle (420 s of solver time; 14 min in an earlier run beside other work) | the same gate ran for **more than two and a half hours** earlier that day and had to be stopped - not load, but an IMUL equivalence task that had been left in the list and does not close; parked, the gate was back to 7 min | the fp256 fold lemma alone is 2 to 4 min; the old four-proof gate was 29 s, which is the number older notes quote |
 | `character` | 2.6 min | 5 min | |
 | `transcend` | 12.6 min | **52 min** | the thirty-nine functions twice, the second pass through the escalation path |
 | `bindings` (cftmpfr vs gmpy2) | 2.4 min | 8 min | |
