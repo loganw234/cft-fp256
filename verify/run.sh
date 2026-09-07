@@ -133,9 +133,11 @@ BUDGET=""
 # model's own suite, the vectors, the million-case replay, the
 # transcendentals, MPFR, the C++ header and the two RTL gates that
 # need only a container. `full` is the census. Measured on the
-# Windows desktop (verify/README.md has the table): quick ~20 min,
-# gate ~1 h with the box quiet and 2-3 h loaded, full ~2 h quiet and
-# ~4 h loaded; on the WSL distro the replay stages take seconds.
+# Windows desktop (docs/VERIFICATION.md has the table, quiet against
+# loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
+# now that the formal gate holds thirty-one proofs, full longer by the
+# simulation suite and the two browser replays; on the WSL distro the
+# replay stages take seconds.
 BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
