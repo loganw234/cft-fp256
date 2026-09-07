@@ -1,0 +1,557 @@
+<!doctype html>
+<!-- Copyright 2026 Logan W.
+     SPDX-License-Identifier: Apache-2.0
+
+     The tile behind a socket, from a browser (docs/REMOTE.md).
+
+     This page connects to cft-serve's WebSocket port, prints the caps
+     block the server answered HELLO with, and then runs a check TWICE
+     for the same inputs - once on the server, once in the wasm module
+     loaded beside it - and compares the two byte for byte. That is the
+     whole point of it: the library is the contract, so a remote result
+     that differs from a local one is a fault in the transport until
+     proven otherwise, and this page is where a person can see that for
+     themselves.
+
+     HOW TO RUN IT
+
+       1. Build the browser module once:  bash bindings/wasm/build.sh
+          (it writes build/cft_runtime.js, which this page loads).
+       2. Start a server with a WebSocket port:
+             host/cft-serve --ws 7755
+       3. Serve this directory over HTTP and open the page:
+             python -m http.server 8000
+             http://127.0.0.1:8000/remote.html
+          Over HTTP and not file://, because remote.mjs is an ES module
+          and a browser will not load one from a file: URL.
+
+     THE SERVER HAS NO AUTHENTICATION. Any page in this browser can
+     open a WebSocket to a loopback port; docs/REMOTE.md says what that
+     means and why --ws is off unless asked for. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cft-fp256 - the tile behind a WebSocket</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --fg: #1c1c1a; --dim: #6a6a64; --line: #d8d8d2;
+    --panel: #ffffff; --ok: #1c6b3a; --bad: #a02020; --accent: #2b4a80;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a; --fg: #e6e6e2; --dim: #9a9a94; --line: #33343a;
+      --panel: #1d1e22; --ok: #6fca8f; --bad: #ef8a8a; --accent: #8fb2ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.6rem 1.4rem 4rem; background: var(--bg);
+    color: var(--fg); font: 15px/1.55 ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .3rem; font-weight: 650; }
+  h2 { font-size: 1.02rem; margin: 2rem 0 .6rem; font-weight: 650;
+       border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+  p.lede { color: var(--dim); margin: 0 0 1.4rem; max-width: 46rem; }
+  section { background: var(--panel); border: 1px solid var(--line);
+            border-radius: 6px; padding: .9rem 1rem; margin-bottom: 1rem; }
+  label { display: inline-block; color: var(--dim); font-size: .87rem;
+          margin-right: .35rem; }
+  input, select, button {
+    font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; padding: .28rem .5rem;
+  }
+  input[type=text], input[type=number] { font-family: ui-monospace, monospace; }
+  button { cursor: pointer; background: var(--accent); color: #fff;
+           border-color: transparent; padding: .32rem .9rem; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; flex-wrap: wrap; gap: .8rem 1.1rem;
+         align-items: center; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  th, td { text-align: left; padding: .22rem .6rem .22rem 0;
+           border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; white-space: nowrap; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: .86em; }
+  pre { margin: .5rem 0 0; padding: .6rem .7rem; background: var(--bg);
+        border: 1px solid var(--line); border-radius: 4px; overflow-x: auto;
+        font-family: ui-monospace, monospace; font-size: .82rem;
+        white-space: pre-wrap; max-height: 26rem; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .dim { color: var(--dim); }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+<h1>cft-fp256 &mdash; the tile behind a WebSocket</h1>
+<p class="lede">
+  One WebSocket message carries exactly one frame of
+  <code>docs/REMOTE.md</code>, unchanged. This page speaks those frames
+  to <code>cft-serve --ws PORT</code>, and checks every answer against
+  the wasm module loaded beside it: the library is the contract, so a
+  remote result that differs from a local one is a fault in the
+  transport until proven otherwise.
+</p>
+
+<section>
+  <div class="row">
+    <span><label for="url">server</label>
+      <input id="url" type="text" size="26" value="ws://127.0.0.1:7755"></span>
+    <span id="abi-box" hidden><label for="abi">claimed ABI</label>
+      <input id="abi" type="text" size="6" placeholder="0.7"></span>
+    <button id="connect">connect</button>
+    <button id="disconnect" disabled>disconnect</button>
+    <span id="conn-state" class="dim">not connected</span>
+  </div>
+  <div id="module-note" class="dim" style="margin-top:.5rem"></div>
+</section>
+
+<h2>1. what the server said to HELLO</h2>
+<section>
+  <div class="scroll"><table id="caps">
+    <tr><td class="dim">not connected yet.</td></tr>
+  </table></div>
+</section>
+
+<h2>2. a check, run twice</h2>
+<section>
+  <div class="row">
+    <span><label for="check">check</label>
+      <select id="check">
+        <option value="fma">fma &mdash; a*b + c, one round</option>
+        <option value="add">add</option>
+        <option value="mul">mul</option>
+        <option value="min">min</option>
+        <option value="copysign">copysign</option>
+        <option value="cmplt">cmplt</option>
+        <option value="sum">sum &mdash; a reduction (REDUCE)</option>
+        <option value="dot">dot &mdash; a reduction (REDUCE)</option>
+      </select></span>
+    <span><label for="fmt">format</label>
+      <select id="fmt">
+        <option value="0">binary32</option>
+        <option value="1" selected>binary64</option>
+        <option value="2">binary128</option>
+        <option value="3">binary256</option>
+      </select></span>
+    <span><label for="rnd">rounding</label>
+      <select id="rnd">
+        <option value="0" selected>rne</option><option value="1">rtz</option>
+        <option value="2">rdn</option><option value="3">rup</option>
+        <option value="4">rmm</option>
+      </select></span>
+    <span><label for="n">elements</label>
+      <input id="n" type="number" value="1024" min="1" max="1000000"
+             size="7"></span>
+    <span><label for="seed">seed</label>
+      <input id="seed" type="number" value="1" min="0" size="5"></span>
+    <button id="run" disabled>run it both ways</button>
+  </div>
+  <pre id="out">Connect first.</pre>
+</section>
+
+<h2>3. a published vector set, replayed through the server</h2>
+<section>
+  <p class="dim" style="margin:0 0 .6rem">
+    Drop one of <code>vectors/out</code>'s opcode sets
+    (<code>fp64.jsonl</code>, <code>fp256-rdn.jsonl</code>, &hellip;) here.
+    Every case is replayed on the server and compared with BOTH the local
+    module's answer and the golden model's published one, which is the
+    same three-way comparison <code>bindings/node/remote_test.mjs</code>
+    makes headless.
+  </p>
+  <div class="row">
+    <input id="file" type="file" accept=".jsonl">
+    <span><label for="limit">first</label>
+      <input id="limit" type="number" value="500" min="1" max="20000"
+             size="6"> <span class="dim">lines</span></span>
+  </div>
+  <pre id="replay">No file dropped.</pre>
+</section>
+
+<h2>4. what the server counted</h2>
+<section>
+  <button id="stats" disabled>read STATS</button>
+  <pre id="statsout">The server counts every frame this connection sent it, by
+opcode. It is the same counter the TCP path increments, because
+one message carries one frame.</pre>
+</section>
+</main>
+
+<!-- The browser build of libcft: emcc -sSINGLE_FILE, so the wasm is
+     inside this one file and nothing else is fetched. build.sh writes
+     it; the page says so if it is not there. -->
+<script src="build/cft_runtime.js"></script>
+<script type="module">
+import {
+  CftRemote, FORMAT_SIZE, OP, ROUND_NAMES,
+} from "./remote.mjs";
+
+const $ = (id) => document.getElementById(id);
+const hex = (u8) => [...u8].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+// The opcode numbers this page uses, by the name cft_op_name() gives
+// them - checked against the module below, so a number here that the
+// library disagrees with is an error on load rather than a wrong
+// operation computed quietly.
+const OPS = { fma: 0, add: 1, sub: 2, mul: 3, abs: 4, neg: 5, copysign: 6,
+              min: 7, max: 8, minnum: 9, maxnum: 10, select: 11, cmplt: 12,
+              cmple: 13, cmpeq: 14, iand: 16, ior: 17, ixor: 18, iadd: 19,
+              isub: 20, ishl: 21, ishr: 22, icmplt: 23, sum: 24, dot: 25,
+              recip_seed: 26, rsqrt_seed: 27, sumsq: 28, sumabs: 29 };
+const REDUCTIONS = new Set(["sum", "dot"]);
+
+let M = null, C = null, localDev = null, dev = null;
+
+// ---- the local module ------------------------------------------------
+
+async function loadLocal() {
+  if (typeof createCftModule !== "function") {
+    $("module-note").innerHTML =
+      '<span class="bad">build/cft_runtime.js is not here</span>, so the ' +
+      'local half of every comparison is <b>NOT RUN</b>. Build it with ' +
+      '<code>bash bindings/wasm/build.sh</code>. You can still connect and ' +
+      'read the server\'s answers by stating the ABI you claim.';
+    $("abi-box").hidden = false;
+    return;
+  }
+  M = await createCftModule();
+  const n = "number", s = "string";
+  C = {
+    abiVersion: M.cwrap("cftw_abi_version", n, []),
+    strerror: M.cwrap("cftw_strerror", s, [n]),
+    lastError: M.cwrap("cftw_last_error", s, []),
+    formatName: M.cwrap("cftw_format_name", s, [n]),
+    opName: M.cwrap("cftw_op_name", s, [n]),
+    openSoftware: M.cwrap("cftw_open_software", n, [n]),
+    close: M.cwrap("cftw_close", null, [n]),
+    run: M.cwrap("cftw_run", n, [n, n, n, n, n, n, n, n, n, n, n]),
+    reduce: M.cwrap("cftw_reduce", n, [n, n, n, n, n, n, n, n, n, n]),
+  };
+  // The opcode numbers, held against the library's own names.
+  const wrong = Object.entries(OPS)
+    .filter(([name, v]) => C.opName(v) !== name)
+    .map(([name, v]) => `${name} = ${v}, but the library calls ${v} ` +
+                        `"${C.opName(v)}"`);
+  if (wrong.length) {
+    $("module-note").innerHTML = '<span class="bad">this page\'s opcode ' +
+      'numbers disagree with the module:</span> ' + wrong.join("; ");
+    C = null;
+    return;
+  }
+  const pp = M._malloc(4);
+  const st = C.openSoftware(pp);
+  localDev = M.HEAPU32[pp >> 2] >>> 0;
+  M._free(pp);
+  if (st !== 0) {
+    $("module-note").innerHTML =
+      `<span class="bad">the local module would not open a device: ` +
+      `${C.strerror(st)}</span>`;
+    C = null;
+    return;
+  }
+  const abi = C.abiVersion() >>> 0;
+  $("module-note").innerHTML =
+    `local module ready: libcft ABI <b>${abi >>> 16}.${abi & 0xffff}</b>, ` +
+    `software backend. Every remote answer below is compared with it.`;
+}
+
+function localRun(op, fmt, rnd, a, b, c, n, reduce) {
+  const esz = FORMAT_SIZE[fmt];
+  const outN = reduce ? 1 : n;
+  const ptrs = [];
+  const put = (bytes) => {
+    if (!bytes) return 0;
+    const p = M._malloc(bytes.length);
+    ptrs.push(p);
+    M.HEAPU8.set(bytes, p);
+    return p;
+  };
+  const alloc = (len) => {
+    const p = M._malloc(len);
+    ptrs.push(p);
+    M.HEAPU8.fill(0, p, p + len);
+    return p;
+  };
+  try {
+    const pa = put(a), pb = put(b), pc = put(c);
+    const pd = alloc(outN * esz), pf = alloc(4), pbus = alloc(4);
+    const st = reduce
+      ? C.reduce(localDev, op, fmt, rnd, pa, pb, pd, n, pf, pbus)
+      : C.run(localDev, op, fmt, rnd, pa, pb, pc, pd, n, pf, pbus);
+    return { status: st, d: M.HEAPU8.slice(pd, pd + outN * esz),
+             flags: M.HEAPU32[pf >> 2] >>> 0 };
+  } finally { for (const p of ptrs) M._free(p); }
+}
+
+// ---- operands ---------------------------------------------------------
+
+/** The same LCG the repo's other generators use, so a seed names a
+ *  stream rather than "some random bytes". */
+function lcg(seed, len) {
+  let s = (BigInt(seed) * 0x9E3779B97F4A7C15n) & ((1n << 64n) - 1n);
+  const out = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    s = (s * 6364136223846793005n + 1442695040888963407n) & ((1n << 64n) - 1n);
+    out[i] = Number((s ^ (s >> 29n)) >> 24n) & 0xff;
+  }
+  return out;
+}
+
+// ---- the connection ---------------------------------------------------
+
+function setState(text, cls) {
+  $("conn-state").className = cls || "dim";
+  $("conn-state").textContent = text;
+}
+
+$("connect").onclick = async () => {
+  let abi;
+  if (C) abi = C.abiVersion() >>> 0;
+  else {
+    const m = /^(\d+)\.(\d+)$/.exec($("abi").value.trim());
+    if (!m) { setState("state an ABI as major.minor, e.g. 0.7", "bad"); return; }
+    abi = (Number(m[1]) << 16) | Number(m[2]);
+  }
+  $("connect").disabled = true;
+  setState("connecting...", "dim");
+  try {
+    dev = await CftRemote.connect($("url").value.trim(), { abi });
+  } catch (e) {
+    setState(String(e.message || e), "bad");
+    $("connect").disabled = false;
+    return;
+  }
+  setState("connected", "ok");
+  $("disconnect").disabled = false;
+  $("run").disabled = !C;
+  $("stats").disabled = false;
+  const c = dev.caps;
+  const fmts = ["binary32", "binary64", "binary128", "binary256"]
+    .filter((_, i) => c.formatMask & (1 << i)).join(", ") || "(none)";
+  $("caps").innerHTML = [
+    ["backend", `<code>${c.backend}</code> &mdash; the name of the SERVER's
+      backend; a client of this protocol calls itself <code>remote</code>`],
+    ["formats", `<code>0x${c.formatMask.toString(16)}</code> &mdash; ${fmts}`],
+    ["opcode groups", `<code>0x${c.opGroups.toString(16)}</code>`],
+    ["tiles", String(c.tiles)],
+    ["device version", `0x${c.deviceVersion.toString(16)}`],
+    ["flags readable", c.flagsReadable ? "yes" : "no"],
+    ["libcft ABI", `${c.abi >>> 16}.${c.abi & 0xffff}` +
+      (C ? (c.abi === (C.abiVersion() >>> 0)
+        ? ' <span class="ok">= this module\'s</span>'
+        : ' <span class="bad">DIFFERENT from this module\'s</span>') : "")],
+    ...(c.extra.length ? [["extra caps bytes",
+        `<code>${hex(c.extra)}</code> &mdash; a newer server than this
+         page knows about`]] : []),
+  ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("");
+};
+
+$("disconnect").onclick = async () => {
+  if (dev) await dev.close();
+  dev = null;
+  setState("not connected", "dim");
+  $("connect").disabled = false;
+  $("disconnect").disabled = true;
+  $("run").disabled = true;
+  $("stats").disabled = true;
+};
+
+// ---- the check --------------------------------------------------------
+
+$("run").onclick = async () => {
+  const name = $("check").value;
+  const op = OPS[name], fmt = Number($("fmt").value);
+  const rnd = Number($("rnd").value), n = Number($("n").value);
+  const esz = FORMAT_SIZE[fmt];
+  const reduce = REDUCTIONS.has(name);
+  const seed = Number($("seed").value);
+  const a = lcg(seed * 3 + 1, n * esz);
+  const b = lcg(seed * 3 + 2, n * esz);
+  const c = reduce ? null : lcg(seed * 3 + 3, n * esz);
+  const lines = [];
+  $("run").disabled = true;
+  $("out").textContent = "running...";
+  // Yield once so the "running..." paint is behind us. Without it the
+  // first awaited message lands behind a rendering update and the
+  // number below is that wait, not the round trip: measured in this
+  // pane, 58 ms with the paint pending and 0.3 ms without it. The
+  // authoritative round-trip figures are the ones
+  // bindings/node/remote_test.mjs takes with no browser in the way.
+  await new Promise((res) => setTimeout(res, 0));
+  try {
+    const t0 = performance.now();
+    const remote = reduce
+      ? await dev.reduce(op, fmt, rnd, { a, b }, n)
+      : await dev.run(op, fmt, rnd, { a, b, c }, n);
+    const t1 = performance.now();
+    const local = localRun(op, fmt, rnd, a, b, c, n, reduce);
+    const t2 = performance.now();
+
+    lines.push(`${reduce ? "REDUCE" : "RUN"}  ${name}  ` +
+               `${["binary32", "binary64", "binary128", "binary256"][fmt]}  ` +
+               `${ROUND_NAMES[rnd]}  ${n} element(s)`);
+    lines.push("");
+    if (local.status !== 0) {
+      lines.push(`the local module refused the call: ` +
+                 `${C.strerror(local.status)} ${C.lastError()}`);
+    } else {
+      const outN = reduce ? 1 : n;
+      let firstBad = -1;
+      for (let i = 0; i < outN * esz; i++)
+        if (remote.d[i] !== local.d[i]) { firstBad = i; break; }
+      lines.push(`server   ${(t1 - t0).toFixed(2)} ms over the WebSocket ` +
+                 `(this tab's clock, browser scheduling included), ` +
+                 `flags 0x${remote.flags.toString(16)}`);
+      lines.push(`local    ${(t2 - t1).toFixed(2)} ms in this tab, ` +
+                 `flags 0x${local.flags.toString(16)}`);
+      lines.push("");
+      lines.push(firstBad < 0
+        ? `IDENTICAL: ${outN * esz} bytes, every one the same, and the ` +
+          `flag words ${remote.flags === local.flags ? "agree" :
+           "DIFFER - " + remote.flags + " vs " + local.flags}.`
+        : `DIFFERENT at byte ${firstBad} (element ` +
+          `${Math.floor(firstBad / esz)}): server ` +
+          `${remote.d[firstBad].toString(16)}, local ` +
+          `${local.d[firstBad].toString(16)}`);
+      lines.push("");
+      const show = Math.min(reduce ? 1 : 4, outN);
+      for (let i = 0; i < show; i++) {
+        const at = i * esz;
+        lines.push(`  [${i}] a ${hex(a.subarray(at, at + esz))}`);
+        lines.push(`      b ${hex(b.subarray(at, at + esz))}`);
+        if (c) lines.push(`      c ${hex(c.subarray(at, at + esz))}`);
+        lines.push(`      d ${hex(remote.d.subarray(at, at + esz))}` +
+                   `  (little-endian, as the wire carries it)`);
+      }
+    }
+  } catch (e) {
+    lines.push("the call failed: " + (e.message || e));
+    lines.push("");
+    lines.push("A refusal ends the connection and poisons the handle, which " +
+               "is what docs/REMOTE.md says it should do: past a frame that " +
+               "failed its checks the stream is not to be trusted. " +
+               "Reconnect to carry on.");
+  }
+  $("out").textContent = lines.join("\n");
+  $("run").disabled = false;
+};
+
+// ---- the dropped vector set -------------------------------------------
+
+$("file").onchange = async (ev) => {
+  const file = ev.target.files[0];
+  if (!file || !dev || !C) {
+    $("replay").textContent = dev
+      ? "The local module is not loaded, so there is nothing to compare with."
+      : "Connect first.";
+    return;
+  }
+  const fmtOf = { fp32: 0, fp64: 1, fp128: 2, fp256: 3 };
+  const fmt = fmtOf[file.name.split(/[-.]/)[0]];
+  if (fmt === undefined) {
+    $("replay").textContent =
+      `${file.name} is not one of the opcode sets (fp32.jsonl, ` +
+      `fp256-rdn.jsonl, ...).`;
+    return;
+  }
+  const esz = FORMAT_SIZE[fmt];
+  const limit = Number($("limit").value);
+  $("replay").textContent = "reading...";
+  const text = await file.text();
+  const lines = text.split("\n").filter((l) => l.trim()).slice(0, limit);
+  const beHex = (h) => {
+    const t = h.startsWith("0x") ? h.slice(2) : h;
+    const u = new Uint8Array(esz);
+    for (let i = 0; i < esz; i++)
+      u[esz - 1 - i] = parseInt(t.substr(i * 2, 2), 16);
+    return u;
+  };
+  let n = 0, badLocal = 0, badGolden = 0, badFlags = 0, skipped = 0;
+  const notes = [];
+  const t0 = performance.now();
+  for (const line of lines) {
+    const j = JSON.parse(line);
+    const m = /^reserved(\d+)$/.exec(j.op);
+    const op = j.op in OPS ? OPS[j.op] : (m ? Number(m[1]) : null);
+    if (op === null) { skipped++; continue; }
+    const a = beHex(j.a), b = beHex(j.b), c = beHex(j.c), want = beHex(j.d);
+    const rnd = ROUND_NAMES.indexOf(j.rnd);
+    let r;
+    try {
+      r = await dev.run(op, fmt, rnd, { a, b, c }, 1);
+    } catch (e) {
+      notes.push(`the call failed at line ${n + 1}: ${e.message || e}`);
+      break;
+    }
+    const loc = localRun(op, fmt, rnd, a, b, c, 1, false);
+    n++;
+    if (loc.status === 0 && hex(r.d) !== hex(loc.d)) {
+      badLocal++;
+      if (notes.length < 6)
+        notes.push(`line ${n} ${j.op} ${j.rnd}: local ${hex(loc.d)}, ` +
+                   `server ${hex(r.d)}`);
+    }
+    if (hex(r.d) !== hex(want)) {
+      badGolden++;
+      if (notes.length < 6)
+        notes.push(`line ${n} ${j.op} ${j.rnd}: expected ${j.d}, server ` +
+                   `${hex(r.d)}`);
+    }
+    if ((r.flags | 0) !== (j.flags | 0)) badFlags++;
+    if (n % 200 === 0) {
+      $("replay").textContent = `${n} of ${lines.length} cases...`;
+      await new Promise((res) => setTimeout(res, 0));
+    }
+  }
+  const ms = performance.now() - t0;
+  const verdict = (badLocal + badGolden + badFlags) === 0
+    ? "all matching" : "MISMATCHES";
+  $("replay").textContent = [
+    `${file.name}: ${n} cases replayed over the WebSocket in ` +
+    `${ms.toFixed(0)} ms (${(n * 1000 / ms).toFixed(0)} cases/s, one round ` +
+    `trip each)`,
+    ``,
+    `  against this tab's module   ${badLocal} differing`,
+    `  against the published d     ${badGolden} differing`,
+    `  against the published flags ${badFlags} differing`,
+    skipped ? `  ${skipped} lines skipped (an op this page has no number for)`
+            : ``,
+    ``,
+    verdict,
+    ...notes.map((t) => "  " + t),
+  ].filter((x) => x !== ``).join("\n");
+};
+
+// ---- the counters -----------------------------------------------------
+
+$("stats").onclick = async () => {
+  try {
+    const s = await dev.stats();
+    const names = Object.fromEntries(
+      Object.entries(OP).map(([k, v]) => [v, k]));
+    const rows = Object.entries(s.byOp)
+      .map(([o, ct]) => `  ${(names[o] || "0x" + Number(o).toString(16))
+        .padEnd(10)} ${String(ct).padStart(8)}`);
+    $("statsout").textContent = [
+      `requests   ${s.requests}`,
+      `bytes in   ${s.bytesIn}   (protocol bytes: header + payload, not the`,
+      `bytes out  ${s.bytesOut}    WebSocket envelope, so these are the same`,
+      `                   numbers the TCP path would report)`,
+      ``, `by opcode:`, ...rows,
+    ].join("\n");
+  } catch (e) {
+    $("statsout").textContent = "STATS failed: " + (e.message || e);
+  }
+};
+
+window.addEventListener("beforeunload", () => { if (dev) dev.close(); });
+loadLocal();
+</script>
+</body>
+</html>
