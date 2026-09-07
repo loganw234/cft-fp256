@@ -33,6 +33,7 @@ that never stopped, and two pixel batch sizes against each other.
 
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -555,6 +556,32 @@ def main():
             ok("...and a resume with the same options still continues")
         else:
             fail("the same-options resume was refused too")
+
+        # An escape is recorded as `escaped_at = k` at the iteration it
+        # happens on, and the orbit loop stops there, so a checkpoint
+        # this tool wrote says 0 or exactly k. Found by host/fuzz on
+        # 2026-09-07: any other number skipped the reference orbit
+        # entirely and reported an escape that never happened - k = 185
+        # of 2000, orbit flags 0x00, a different chain, exit 0, nothing
+        # anywhere saying the orbit had not been computed.
+        text = moved.read_text()
+        CHECKS += 1
+        if "\nescapedat " not in text or "\nk " not in text:
+            fail("the checkpoint has no k/escapedat pair to malform")
+        else:
+            mangled = Path(tmp) / "escaped.ckpt"
+            mangled.write_text(re.sub(r"^escapedat .*$", "escapedat 7",
+                                      text, flags=re.M))
+            bad_e = tool.run("--resume", "--ref-iters", 200, "--no-pixels",
+                             "--steps-per-call", 50, "--checkpoint",
+                             mangled, "--quiet", expect_ok=False)
+            if bad_e.returncode == 2 and "escape" in bad_e.stderr:
+                ok("a checkpoint recording an escape its orbit never "
+                   "reached is refused by name")
+            else:
+                fail("a checkpoint with escapedat 7 exited %d rather than "
+                     "being refused: %s" % (bad_e.returncode,
+                                            bad_e.stderr.strip()[:160]))
 
         # -------------------------------------------------------------
         print("\n[5] the hash chain, and the 754 status word")

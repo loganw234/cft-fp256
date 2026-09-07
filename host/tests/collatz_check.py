@@ -439,6 +439,55 @@ def main():
         else:
             fail("2^237 + 1 was accepted as a starting value")
 
+        # A checkpoint is a file, and on a shared machine a file is
+        # something another process can rewrite. Both shapes below were
+        # found by host/fuzz on 2026-09-07 and both were an
+        # out-of-bounds WRITE, not a wrong answer: fill_batch takes its
+        # count from `batchrecords` and its slots from `inflight`, so a
+        # file claiming more lanes than records runs the next batch off
+        # the end of the engine's arrays; and harvest indexes recs[] by
+        # the record number each in-flight lane names, so a lane naming
+        # a record the batch does not hold writes wherever that number
+        # points. A malformed checkpoint has to be refused BY NAME -
+        # exit 2 and a message - never a crash and never a resume from
+        # a state the file did not describe.
+        mal = Path(tmp) / "malformed.ckpt"
+        tool.run("--from", 1, "--to", 400, "--batch", 64,
+                 "--steps-per-call", 7, "--stop-after-passes", 3,
+                 "--checkpoint", mal, "--quiet")
+        lines = mal.read_text().splitlines()
+        run_line = next((ln for ln in lines if ln.startswith("run ")), None)
+        done_line = next((ln for ln in lines if ln.startswith("done ")), None)
+        head = [ln for ln in lines if ln.split(" ")[0] not in
+                ("batchrecords", "done", "pending", "inflight", "run", "end")]
+        CHECKS += 1
+        if not run_line or not done_line:
+            fail("the interrupted run left no in-flight lane, so the "
+                 "malformed-checkpoint cases could not be built")
+        else:
+            ok("an interrupted run left an in-flight lane to malform")
+            cases = (
+                ("more lanes in flight than records",
+                 head + ["batchrecords 0", "inflight 1", run_line, "end"]),
+                ("an in-flight lane naming a record the batch has not got",
+                 head + ["batchrecords 1", done_line, "inflight 1",
+                         " ".join(run_line.split(" ")[:-1] + ["999999"]),
+                         "end"]),
+            )
+            for what, body in cases:
+                mal.write_text("\n".join(body) + "\n")
+                proc = tool.run("--resume", "--checkpoint", mal,
+                                "--batch", 64, "--steps-per-call", 7,
+                                "--stop-after-passes", 3, "--quiet",
+                                expect_ok=False)
+                CHECKS += 1
+                if proc.returncode == 2 and "checkpoint" in proc.stderr:
+                    ok("a checkpoint with %s is refused by name" % what)
+                else:
+                    fail("a checkpoint with %s exited %d rather than being "
+                         "refused: %s" % (what, proc.returncode,
+                                          proc.stderr.strip()[:160]))
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

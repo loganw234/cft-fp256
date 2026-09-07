@@ -1,0 +1,18 @@
+cft-collatz-checkpoint 1
+format fp256
+mode sweep
+lo 1
+hi 400
+cursor 65
+resolved 0
+verified 0
+escaped 0
+steps 0
+maxsteps 0 -
+maxpeak - -
+firstescape - -
+chain 0000000000000000000000000000000000000000000000000000000000000000
+batchrecords 0
+inflight 1
+run 25 4 21 88 24
+end

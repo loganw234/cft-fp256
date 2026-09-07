@@ -1354,6 +1354,17 @@ static void ckpt_read(runstate *R)
     fclose(f);
     if (want != R->k)
         die("the checkpoint's orbit length and cursor disagree");
+    /* An escape is recorded as `escaped_at = k` at the iteration it
+     * happens on, and the loop then stops - so a file this tool wrote
+     * says either 0 or exactly k. Any other number stops the reference
+     * orbit before it starts and reports an escape that did not
+     * happen: `escapedat 7` on a 2000-iteration reference printed
+     * k = 185, escaped at 7, orbit flags 0x00 and a different chain,
+     * exit 0, with nothing to say the orbit had not been computed
+     * (host/fuzz, 2026-09-07). */
+    if (R->escaped_at && R->escaped_at != R->k)
+        die("the checkpoint records an escape at an iteration its orbit "
+            "never reached");
     if (R->k) {
         memcpy(R->zr, R->orb_r + R->k * fi->esz, fi->esz);
         memcpy(R->zi, R->orb_i + R->k * fi->esz, fi->esz);

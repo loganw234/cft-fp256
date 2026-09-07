@@ -705,6 +705,31 @@ control flips one byte of a returned encoding inside the client, and
 separately corrupts a frame's length, to show the replay and the chain
 fail and the refusal fires.
 
+Since 2026-09-07 both ends are also fuzzed: `host/fuzz` drives the
+server's request handlers and the client's response parsing in
+process, about 6,000 to 8,500 executions a second each under
+`-fsanitize=address,undefined`, and `make -C host fuzz-repro` replays
+every reproducer it kept. That found nothing unsafe in the frame layer
+- no crash, no undefined operation, no out-of-bounds read in 9.2
+million client executions or 4.4 million server ones - and one thing
+worth stating in the protocol rather than only in a fix. **A request
+carrying no operands does not bound its own element count.** `RUN`'s
+length check is `24 + popcount(mask) * n * elemsize`, so an operand
+mask of zero satisfies it for every `n`; and a mask of zero is legal,
+because an unassigned opcode reads no operand and still has a defined
+result (the canonical quiet NaN, invalid raised). Fifty-six bytes on
+the wire therefore ask for up to 2^25 fp256 results - half a gigabyte
+of allocation and minutes of arithmetic - and repeating that is a
+denial of service on a server with no authentication, which this one
+by design has not got. That is the transport's terms, not a defect:
+`cft-serve` binds to 127.0.0.1 unless told otherwise, and this section
+has always said it is not a security boundary. What WAS a defect, and
+is fixed, is that the largest `n` the cap admitted described an answer
+eight bytes past what `cftr_send_frame` will send: the server did the
+whole run and the gigabyte allocation and discovered that afterwards,
+when the send failed. It is refused before the work now, and
+`remote-test` checks that it comes back promptly as a refusal.
+
 ## What the four measurements said
 
 Measured 2026-09-06 on DESKTOP-T33SK86 (Windows 11, MINGW64, gcc -O2),

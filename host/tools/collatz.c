@@ -1418,6 +1418,17 @@ static void ckpt_read(runstate *R)
             size_t nfl = (size_t)strtoull(rest, NULL, 10);
             if (nfl > O->batch)
                 die("the checkpoint has more in flight than --batch");
+            /* Every lane in flight owns one of this batch's records:
+             * fill_batch takes its count from `nrec` and its slots
+             * from `live`, so a file claiming more lanes than records
+             * has the next batch written past the end of the engine's
+             * arrays, and a lane naming a record the batch does not
+             * hold has its result written past the end of recs[]. Two
+             * bounds a file this tool wrote always satisfies, and a
+             * file something else wrote need not. */
+            if (nfl > R->nrec)
+                die("the checkpoint has more lanes in flight than it has "
+                    "records for them");
             for (i = 0; i < nfl; i++) {
                 char a[DECMAX], b[DECMAX], c[DECMAX], d[DECMAX];
                 uint64_t slot = 0;
@@ -1427,6 +1438,9 @@ static void ckpt_read(runstate *R)
                 if (sscanf(line, "run %511s %511s %511s %511s %" SCNu64,
                            a, b, c, d, &slot) != 5)
                     die("bad checkpoint in-flight line");
+                if (slot >= (uint64_t)R->nrec)
+                    die("a checkpoint's in-flight lane names a record this "
+                        "batch does not hold");
                 if (!val_from_dec(fi, a, E->start + i * fi->esz) ||
                     !val_from_dec(fi, b, E->n + i * fi->esz) ||
                     !val_from_dec(fi, c, E->cnt + i * fi->esz) ||
