@@ -166,7 +166,7 @@ CFT_API const char *cft_format_name(cft_format f)
 
 CFT_API const char *cft_op_name(cft_op op)
 {
-    static const char *const names[30] = {
+    static const char *const names[31] = {
         "fma", "add", "sub", "mul",
         "abs", "neg", "copysign",
         "min", "max", "minnum", "maxnum",
@@ -176,7 +176,16 @@ CFT_API const char *cft_op_name(cft_op op)
         "isub", "ishl", "ishr", "icmplt",
         "sum", "dot",
         "recip_seed", "rsqrt_seed",
-        "sumsq", "sumabs"
+        "sumsq", "sumabs",
+        /* 30: the integer group's multiply (2026-09-07). Named here
+         * the moment the opcode was defined, and BEFORE any CAPS bit
+         * publishes it, because this table is what conformance.c's
+         * op_from_name() consults to decide whether a recorded set's
+         * "reserved30" case is stale. A set recorded while 30 answered
+         * with the canonical quiet NaN must be refused rather than
+         * replayed against a multiply, and it is this string that
+         * makes the refusal fire. */
+        "imul"
     };
     if ((int)op >= 0 && (int)op < (int)(sizeof names / sizeof names[0]) &&
         names[(int)op])

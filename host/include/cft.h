@@ -266,7 +266,28 @@ typedef enum cft_op {
      * an infinity ahead of a NaN for these two and ahead of nothing
      * for sum and dot. See the cft_reduce block below. */
     CFT_SUMSQ    = 28,  /* d = sum round(a[i] * a[i]) */
-    CFT_SUMABS   = 29   /* d = sum |a[i]|             */
+    CFT_SUMABS   = 29,  /* d = sum |a[i]|             */
+
+    /* The integer group's one arithmetic member, appended at the first
+     * free number above the composed reductions. d = the LOW 32 BITS
+     * of a's low 32 bits times b's low 32 bits, zero-extended to the
+     * format width. Quiet, attribute-independent, and defined
+     * identically at every format.
+     *
+     * Thirty-two bits and not the format width, which is the one place
+     * this opcode differs in shape from the rest of the group above.
+     * The operation exists for a 32-bit hash - the draw stream of
+     * docs/ATLAS.md, `lowbias32`, whose value must agree bit for bit
+     * with a GPU computing it on a `uint` - and a width-wide low
+     * product would be a 256x256 multiplier at binary256 serving
+     * nothing. Signedness does not enter: the low 32 bits of a
+     * two's-complement product are the same bits either way.
+     *
+     * It is a sequencer opcode first (docs/SEQUENCER.md): a program's
+     * ALU is this same opcode space. Whether a given DEVICE carries it
+     * elementwise is a CAPS question and cft_supports() is where to
+     * ask. */
+    CFT_IMUL     = 30
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance

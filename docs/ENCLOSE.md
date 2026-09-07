@@ -172,14 +172,21 @@ able to produce both interval bounds". This is that pass:
   HALT
 ```
 
-Thirty-six instructions, sixteen format-width constants,
-`max_deposits` = 2 - an 832-byte image at binary256. `r0` arrives from
-the `a` stream as the evaluation point; `r1` and `r2` arrive from `b`
-and `c` as the incoming interval, and are `+0` on the first chunk
-because a caller may pass NULL. The loader's rules are satisfied
-without effort: there is no loop, so `HALT` is at the top level by
-construction, every field an instruction does not read is zero, and the
-worst-case instruction count is thirty-six.
+Four instructions a step plus a `CMPLE`, two `DEPOSIT`s and a `HALT`.
+`r0` arrives from the `a` stream as the evaluation point; `r1` and `r2`
+arrive from `b` and `c` as the incoming interval, and are `+0` on the
+first program because a caller may pass NULL. The loader's rules are
+satisfied without effort: there is no loop, so `HALT` is at the top
+level by construction, every field an instruction does not read is
+zero, and the worst-case instruction count is the static one.
+
+How many steps fit in one program is the whole content of the section
+below. Through four-bit operand fields it is eight - thirty-six
+instructions, sixteen constants, an 832-byte image at binary256.
+Through **indexed constants** it is a hundred and twenty-eight: 516
+instructions, 256 constants, and at binary256 a 12,352-byte image -
+an 8,192-byte bank under a 4,128-byte instruction stream. The tool
+prints which shape it built.
 
 The RTL was benched for this before the application existed:
 `tb/test_seq_core.py`'s `constants_and_rounding` runs adjacent RDN and
@@ -195,25 +202,24 @@ nothing for the active mask to do. That is worth recording beside the
 Collatz explorer, which is all escape masking - the two workloads
 exercise opposite halves of the same ISA.
 
-### The wall this workload hit: sixteen constants
+### The wall this workload hit: sixteen constants, and how it came down
 
 A sequencer instruction names its operands in **four-bit fields**
 (`rd` at 11:8, `ra` at 15:12, `rb` at 19:16, `rc` at 23:20), and the
 `ka`/`kb`/`kc` bits redirect those same fields at the constant bank. So
-**a program can address exactly sixteen constants, whatever `n_consts`
-in its header says.** `host/src/program.c`'s validator agrees: it
-refuses a constant index at or above `n_consts`, and the index can
-never exceed 15.
+**a program could address exactly sixteen constants, whatever
+`n_consts` in its header said.** `host/src/program.c`'s validator
+agreed: it refuses a constant index at or above `n_consts`, and the
+index could never exceed 15.
 
-An interval coefficient costs two constants. One program therefore
-holds eight of them and no more, which is why the Horner kernel is
-compiled into `ceil((d+1)/8)` chunk programs rather than one, and why
-`--degree` refuses anything that does not make `degree + 1` a multiple
-of eight. The chunking is not a hardship - the deposits of one call are
-the `b` and `c` streams of the next, the same pattern
-`docs/COLLATZ.md` uses to resume a trajectory mid-orbit - but the
-ceiling is a real limit on any table-driven program, and it is the one
-observation this workload has for the sequencer's designers:
+An interval coefficient costs two constants. One program therefore held
+eight of them and no more, which is why the Horner kernel was compiled
+into `ceil((d+1)/8)` chunk programs rather than one. The chunking was
+not a hardship - the deposits of one call are the `b` and `c` streams
+of the next, the same pattern `docs/COLLATZ.md` uses to resume a
+trajectory mid-orbit - but the ceiling was a real limit on any
+table-driven program, and it was the one observation this workload had
+for the sequencer's designers:
 
 > **A wider constant index, or an indexed constant fetch, is what a
 > polynomial wants.** Sixteen constants is eight interval coefficients,
@@ -222,6 +228,87 @@ observation this workload has for the sequencer's designers:
 > that boundary and pays a memory round trip per chunk. The `imm` field
 > is already 32 bits wide and is unused by ALU instructions; a
 > `ka`-with-`imm`-index form would cost no encoding space at all.
+
+**That is what was built, on 2026-09-07.** Instruction bit 30 was
+reserved-must-be-zero; it is now `kx`, and when it is set the three
+constant indices come from `imm[7:0]`, `imm[15:8]` and `imm[23:16]`
+instead of from the operand fields. The bank reaches 256, so one
+program holds 128 interval coefficients. `docs/SEQUENCER.md` carries
+the encoding and the canonicity rules; what follows is what it did to
+this workload, measured.
+
+The tool asks the loader rather than assuming: at startup it tries to
+load a one-instruction program that names constant 16, which no
+four-bit field can, and uses the wide form only if that load succeeds.
+A loader that predates the feature refuses it by the reserved-bit rule
+it already has, which is the version guard working. `--degree` still
+wants `degree + 1` to be a multiple of eight, because that is the
+granularity the coefficient block is cut at, not because sixteen
+constants is still the ceiling; `--no-indexed-constants` forces the
+chunked shape back, which is how the two are compared in one sitting.
+
+#### What it changed, at every format (2026-09-07, this host)
+
+**Nothing about the answers.** `cft-enclose --engine program` prints
+the same SHA-256 chain at fp32, fp64, fp128 and fp256 that it printed
+before, and the same one `bindings/wasm/demos_chains.json` recorded on
+2026-09-04 - `d9f761c2...`, `835ca8ab...`, `4ff5b22b...`,
+`93cdda32...` for the four. Twenty chains were compared across the two
+engines, four formats and two degrees; none moved. That is the gate
+rather than the payoff: indexed constants reorder nothing and
+re-associate nothing, so a changed chain would have meant a bug.
+`host/tests/enclose_check.py` now holds the two program shapes to
+byte-identical records as its own section, beside the one that holds
+the program engine to the host loop.
+
+**The call count.** At `--degree 127` over 4,097 items in batches of
+512, the Horner kernel goes from **16 chunk programs and 144 library
+calls to one program and 9** - one call a batch, which is the floor.
+At the tool's default degree 23 the whole three-kernel run at 17 items
+goes from 95 to 93 calls at fp32 and 359 to 357 at fp256, the
+difference being small there because the series kernel's divisions
+dominate that configuration and no chunking is left to remove.
+
+**The frames over a socket.** Against `cft-serve` on loopback at
+fp64, degree 127, 32,769 points, batch 512, counted per opcode from
+the server's own request log: the Horner kernel's program traffic
+falls from **3,120 frames to 67**. The remote backend caches one
+program image at a time, so sixteen images cycling thrash the cache
+and every one of the 1,040 calls costs `PROG_FREE`, `PROG_LOAD`,
+`PROG_RUN`; one image costs a `PROG_FREE` and a `PROG_LOAD` once and
+then 65 bare `PROG_RUN`s, one a batch. Whole-connection frames go
+167,381 to 164,328, a difference of 3,053, which is 3,120 minus 67 and
+nothing else - because
+163,968 `RUN` frames of setup, measuring p and building 128
+coefficient enclosures, are identical either way and dwarf the kernel
+at this point count. Wall clock over loopback, 11.41 s to 10.02 s.
+Same chain both ways.
+
+**The arithmetic intensity**, which is the number the sequencer was
+built for. A program issues `1 + 4 * steps` ALU instructions per lane
+against five element transfers - three stream loads in, two deposits
+out - and the tool now prints both, from the program it actually
+built:
+
+| shape | steps | ALU instructions | per element moved |
+|---|---|---|---|
+| chunked | 8 | 33 | **6.6** |
+| one program, degree 23 | 24 | 97 | **19.4** |
+| one program, degree 127 | 128 | 513 | **102.6** |
+
+`docs/SEQUENCER.md`'s memory-bound to compute-bound crossover is
+K ~ 30. The chunked kernel was at a fifth of it; a degree-127
+polynomial as one program is **3.4x past it**, and is the first
+table-driven kernel here to cross it at all. Degree 23 - the tool's
+default, and a small polynomial - does not cross it even as one
+program, which is worth stating plainly: the feature raises the
+ceiling, it does not raise every kernel through it.
+
+The tile's own capacity is the next limit, and it is a comfortable
+one: 516 instructions of `IMEM_D`'s 1,024 and 256 constants of
+`KMEM_D`'s 256. A degree-255 polynomial would want 512 constants and
+1,028 instructions and is chunked at 128 coefficients for both
+reasons.
 
 Two smaller notes on the same subject, both consistent with what
 `docs/COLLATZ.md` recorded:
@@ -235,7 +322,13 @@ Two smaller notes on the same subject, both consistent with what
   program cannot issue one. (The library already issues that sequence
   *as* a program; what is missing is a way for one program to call
   another.) The workaround - a bank of precomputed `1/k` enclosures -
-  runs straight into the sixteen-constant ceiling above.
+  ran straight into the sixteen-constant ceiling above, and no longer
+  does: 256 constants is 128 interval `1/k` enclosures, which is more
+  terms than binary256 needs. It is still a workaround rather than a
+  divide, and it would trade the library's correctly-rounded quotient
+  for a precomputed enclosure of one, so the kernel has not been
+  changed. What moved is that the reason for not changing it is now a
+  numerical judgement instead of an encoding limit.
 - **A reduction crosses lanes**, so the dot kernel can never be a
   program, and should not be: `cft_reduce`'s index-fixed tree is what
   makes its answer reproducible, and P2 of `docs/SEQUENCER.md`
@@ -695,14 +788,18 @@ the software backend and issues the identical program.
   to agree with each other and with the software backend, and an
   enclosure computed on the card would be the same interval as one
   computed on a laptop - not an overlapping one.
-- **The arithmetic intensity, a little.** A Horner chunk is 33
-  arithmetic instructions per lane against five element transfers -
-  three stream loads and two deposits - so about 7 operations per
-  element moved. That is below `docs/SEQUENCER.md`'s K ~ 30 crossover,
-  so this kernel would still be partly memory-bound on a device. Raising `--degree` raises
-  the chunk count rather than the work per chunk, because of the
-  sixteen-constant ceiling; a wider constant index would raise K
-  directly.
+- **The arithmetic intensity, which indexed constants changed.** A
+  Horner chunk of eight steps is 33 arithmetic instructions per lane
+  against five element transfers - three stream loads and two deposits
+  - so 6.6 operations per element moved, a fifth of
+  `docs/SEQUENCER.md`'s K ~ 30 crossover, and a kernel that would still
+  be memory-bound on a device. Since 2026-09-07 raising `--degree`
+  raises the work per program instead of the program count, and a
+  degree-127 polynomial as one program is 513 instructions over the
+  same five transfers: **102.6, or 3.4x past the crossover**. The table
+  above has the arithmetic. What a device would add on top of that is
+  the bandwidth the intensity is measured against, and that number is
+  not one this tool can produce.
 - **Not the series kernel's shape.** Its divisions already run as
   sequencer programs *inside the library* on a program-capable device
   (`docs/SEQUENCER.md`, "the first customer"), so a device run would

@@ -543,7 +543,7 @@ stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000
 
 need host-cc python
-stage seq "the sequencer: C vs model over fuzzed programs" -- \
+stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexed constants and IMUL" -- \
   PY "$ROOT/host/tests/seq_check.py" --trials 250 \
      --formats fp32 fp64 fp128 fp256
 

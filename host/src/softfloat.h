@@ -68,7 +68,7 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * augmented.c is the only caller. */
 #define CFT_SF_RTTZ 16
 
-/* Opcodes. 15 and 30..255 are unassigned and answer with the canonical
+/* Opcodes. 15 and 31..255 are unassigned and answer with the canonical
  * quiet NaN and invalid - a defined result, because a host issuing an
  * opcode its device predates should see that in the flags rather than
  * receive a plausible number. */
@@ -117,6 +117,17 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * opcode numbers because cft_reduce()'s first argument is one. */
 #define CFT_SF_SUMSQ    28
 #define CFT_SF_SUMABS   29
+
+/* The integer group's one arithmetic member, appended at the first free
+ * opcode above the composed reductions: the LOW 32 BITS of the product
+ * of the two operands' low 32 bits, zero-extended to the format width.
+ *
+ * Thirty-two bits and not `f->width`, unlike every other member of the
+ * group, and that is the design rather than a shortcut: the caller is
+ * docs/ATLAS.md's draw hash, which is a 32-bit hash at every format
+ * because the GPU it must agree with computes it on a `uint`. See
+ * python/cft_golden/softfloat.py's imul(), which is the definition. */
+#define CFT_SF_IMUL     30
 
 /* Is `op` one of the assigned opcodes? Unassigned ones still compute -
  * see above - but cft_supports() answers with this. */

@@ -43,12 +43,12 @@ def test_encode_decode_roundtrip():
             ra=rng.randrange(16), rb=rng.randrange(16),
             rc=rng.randrange(16), rnd=rng.randrange(5),
             ka=bool(rng.getrandbits(1)), kb=bool(rng.getrandbits(1)),
-            kc=bool(rng.getrandbits(1)), ctrl=bool(rng.getrandbits(1)),
+            kc=bool(rng.getrandbits(1)), kx=bool(rng.getrandbits(1)),
+            ctrl=bool(rng.getrandbits(1)),
             imm=rng.randrange(1 << 32))
         d = seq.decode(seq.encode(**fields))
         for k, v in fields.items():
             assert d[k] == v, f"{k} did not survive the round trip"
-        assert d["rsv"] == 0
 
 
 def test_program_serialisation_roundtrip():
@@ -106,7 +106,11 @@ def test_validation_rejects_malformed_programs():
     with pytest.raises(seq.ProgramError):
         seq.encode(sf.OP_FMA, rnd=5)                            # reserved
     with pytest.raises(seq.ProgramError):
-        seq.Program(FP32, [seq.encode(sf.OP_FMA, 0) | (1 << 30)])  # rsv
+        # bit 30 is kx since 2026-09-07; set with no operand naming a
+        # constant it selects nothing, which is refused for the reason
+        # it was refused as a reserved bit - the instruction would have
+        # a second encoding.
+        seq.Program(FP32, [seq.encode(sf.OP_FMA, 0, kx=True)])
 
 
 # ---- a real program --------------------------------------------------
@@ -577,3 +581,233 @@ def test_run_is_repeatable():
     first = seq.run(prog, a, b)
     for _ in range(3):
         assert seq.run(prog, a, b).state() == first.state()
+
+
+# ---- indexed constants (kx) and IMUL, 2026-09-07 ---------------------
+#
+# Two additions the atlas port asked for (docs/ATLAS.md, "What the
+# program model lacks", items 1 and 2). They are tested here rather
+# than in test_softfloat.py because only one of them is arithmetic:
+# `kx` is an addressing mode and lives entirely in this file's decode
+# and validator.
+
+def _bank(fmt, n):
+    """A bank of n distinguishable constants. Distinguishable matters:
+    if two entries were equal an off-by-one index would read the right
+    answer from the wrong place and the test would pass."""
+    return [(i * 0x0101_0101 + 0x11) & ((1 << fmt.width) - 1)
+            for i in range(n)]
+
+
+def test_kx_reaches_the_whole_bank():
+    """The point of the feature: a constant index above fifteen, which
+    no encoding could name before."""
+    fmt = FP32
+    consts = _bank(fmt, 200)
+    for idx in (0, 15, 16, 17, 99, 199):
+        prog = seq.Program(
+            fmt,
+            [seq.alu(sf.OP_IOR, 3, ra=5, rb=idx, kb=True, kx=True),
+             seq.deposit(3), seq.halt()],
+            consts=consts, max_deposits=1)
+        res = seq.run(prog, [0], [0])
+        assert res.deposits[0] == consts[idx], (
+            f"constant {idx} did not reach the operand")
+
+
+def test_kx_and_plain_agree_where_both_can_encode():
+    """Below sixteen the two forms are two spellings of one operation,
+    so they must compute the same thing - which is what makes the new
+    bit a widening rather than a change."""
+    fmt = FP64
+    consts = _bank(fmt, 16)
+    rng = random.Random(1234)
+    for _ in range(200):
+        idx = rng.randrange(16)
+        op = rng.choice([sf.OP_FMA, sf.OP_ADD, sf.OP_MUL, sf.OP_SELECT,
+                         sf.OP_IXOR, sf.OP_IMUL])
+        body = dict(rd=4, ra=0, rb=idx, rc=1, kb=True)
+        a = seq.random_inputs(fmt, rng, 4)
+        b = seq.random_inputs(fmt, rng, 4)
+        plain = seq.Program(fmt, [seq.alu(op, **body), seq.deposit(4),
+                                  seq.halt()], consts, 1)
+        wide = seq.Program(fmt, [seq.alu(op, kx=True, **body),
+                                 seq.deposit(4), seq.halt()], consts, 1)
+        assert plain.insns != wide.insns, "the two forms encode the same"
+        assert seq.run(plain, a, b).state() == seq.run(wide, a, b).state()
+
+
+def test_kx_refusals():
+    fmt = FP32
+    consts = _bank(fmt, 40)
+
+    def prog(word):
+        return seq.Program(fmt, [word, seq.halt()], consts, 1)
+
+    # an index past the bank, reachable only through kx
+    with pytest.raises(seq.ProgramError, match="constant 40"):
+        prog(seq.alu(sf.OP_ADD, 0, rb=40, kb=True, kx=True))
+    # a non-zero operand field on an operand whose index came from imm
+    with pytest.raises(seq.ProgramError, match="must be zero"):
+        prog(seq.encode(sf.OP_ADD, 0, rb=3, kb=True, kx=True, imm=5 << 8))
+    # a non-zero imm byte for an operand that names a register
+    with pytest.raises(seq.ProgramError, match="not read and must be zero"):
+        prog(seq.encode(sf.OP_ADD, 0, ra=3, rb=0, kb=True, kx=True,
+                        imm=(2 << 0) | (5 << 8)))
+    # imm[31:24], which stays reserved so a later form can use it
+    with pytest.raises(seq.ProgramError, match=r"imm\[31:24\]"):
+        prog(seq.encode(sf.OP_ADD, 0, rb=0, kb=True, kx=True,
+                        imm=(5 << 8) | (1 << 24)))
+    # kx with nothing to select
+    with pytest.raises(seq.ProgramError, match="selects nothing"):
+        prog(seq.encode(sf.OP_ADD, 0, kx=True))
+    # kx on a control instruction: a field it does not read
+    with pytest.raises(seq.ProgramError, match="does not read kx"):
+        seq.Program(fmt, [seq.encode(seq.REPEAT, ctrl=True, imm=2,
+                                     kx=True), seq.endrep(), seq.halt()],
+                    consts, 1)
+    with pytest.raises(seq.ProgramError, match="does not read kx"):
+        seq.Program(fmt, [seq.encode(seq.DEPOSIT, ra=1, ctrl=True,
+                                     kx=True), seq.halt()], consts, 1)
+
+
+def test_kx_is_the_version_guard():
+    """An old loader refuses a kx program by the reserved-bit rule it
+    already has, which is why the feature needs no header version bump.
+    The old rule is reconstructed here rather than cited: bit 30
+    non-zero was the whole of it."""
+    fmt = FP32
+    word = seq.alu(sf.OP_ADD, 0, rb=200, kb=True, kx=True)
+    assert (word >> 30) & 1, "a kx instruction must set bit 30"
+
+    def old_loader_accepts(w):
+        return not ((w >> 30) & 1)
+
+    assert not old_loader_accepts(word)
+    assert old_loader_accepts(seq.alu(sf.OP_ADD, 0, rb=2, kb=True))
+
+
+def test_imul_matches_integer_arithmetic():
+    """IMUL against Python's own integers, over the directed corpus
+    docs/studies/OPT-D-contract.md names - zeros, ones, powers of two,
+    2^k-1, the two lowbias32 constants, the wraparound boundary - plus
+    randoms, at every format. The zero-extension rule is what the wide
+    formats are here for."""
+    rng = random.Random(20260907)
+    m32 = 0xFFFFFFFF
+    directed = [0, 1, 2, 3, 0xFFFF, 0x10000, 0x7FFFFFFF, 0x80000000,
+                0xFFFFFFFF, 0x7FEB352D, 0x846CA68B]
+    directed += [1 << k for k in range(32)]
+    directed += [(1 << k) - 1 for k in range(1, 33)]
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        top = (1 << fmt.width) - 1
+        pairs = [(x, y) for x in directed for y in directed]
+        pairs += [(rng.getrandbits(fmt.width), rng.getrandbits(fmt.width))
+                  for _ in range(2000)]
+        for xa, xb in pairs:
+            got, fl = sf.compute(fmt, sf.OP_IMUL, xa & top, xb & top, 0)
+            want = ((xa & m32) * (xb & m32)) & m32
+            assert got == want, f"{name} imul {xa:x} {xb:x}"
+            assert fl == 0, "IMUL is quiet, always"
+            assert got >> 32 == 0, "the result is zero-extended, not merged"
+
+
+def test_imul_ignores_the_bits_above_thirty_two():
+    """The 32-bit definition, stated as a property: no bit of either
+    operand above 31 can change the answer. This is the half of the
+    contract a W-bit implementation would silently break at fp64 and
+    above."""
+    rng = random.Random(7)
+    for name in ("fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        for _ in range(500):
+            lo_a, lo_b = rng.getrandbits(32), rng.getrandbits(32)
+            hi_a = rng.getrandbits(fmt.width - 32) << 32
+            hi_b = rng.getrandbits(fmt.width - 32) << 32
+            base, _ = sf.compute(fmt, sf.OP_IMUL, lo_a, lo_b, 0)
+            wide, _ = sf.compute(fmt, sf.OP_IMUL, lo_a | hi_a,
+                                 lo_b | hi_b, 0)
+            assert base == wide, f"{name}: a high bit reached the product"
+
+
+def test_imul_builds_lowbias32():
+    """The operation exists for one caller. This is that caller, run as
+    a program: atlas-engine's draw hash, whose two multiplies are what
+    docs/ATLAS.md's census could not map onto the ISA.
+
+        x ^= x >> 16;  x *= 0x7feb352d;
+        x ^= x >> 15;  x *= 0x846ca68b;
+        x ^= x >> 16
+
+    The constants are the hash's, so they are the one place here where
+    a literal is the specification rather than a transcription."""
+    fmt = FP32
+    K1, K2 = 0x7FEB352D, 0x846CA68B
+    consts = [16, 15, K1, K2]
+    prog = seq.Program(
+        fmt,
+        [
+            seq.alu(sf.OP_ISHR, 1, 0, 0, kb=True),         # r1 = x >> 16
+            seq.alu(sf.OP_IXOR, 0, 0, 1),
+            seq.alu(sf.OP_IMUL, 0, 0, 2, kb=True),         # x *= K1
+            seq.alu(sf.OP_ISHR, 1, 0, 1, kb=True),         # r1 = x >> 15
+            seq.alu(sf.OP_IXOR, 0, 0, 1),
+            seq.alu(sf.OP_IMUL, 0, 0, 3, kb=True),         # x *= K2
+            seq.alu(sf.OP_ISHR, 1, 0, 0, kb=True),         # r1 = x >> 16
+            seq.alu(sf.OP_IXOR, 0, 0, 1),
+            seq.deposit(0), seq.halt(),
+        ],
+        consts=consts, max_deposits=1)
+
+    def lowbias32(x):
+        x ^= x >> 16
+        x = (x * K1) & 0xFFFFFFFF
+        x ^= x >> 15
+        x = (x * K2) & 0xFFFFFFFF
+        x ^= x >> 16
+        return x
+
+    seeds = list(range(64)) + [0xFFFFFFFF, 0x80000000, 0xDEADBEEF]
+    res = seq.run(prog, seeds, [0] * len(seeds))
+    assert res.flags == 0, "the draw stream must not signal"
+    for i, s in enumerate(seeds):
+        assert res.deposits[i] == lowbias32(s), f"seed {s:#x}"
+
+
+def test_extended_fuzz_generates_both_features():
+    """The corpus arm the runner's seq stage uses. If it stopped
+    producing kx instructions or IMULs the differential would still
+    pass, and would be checking nothing new - so the generator is
+    checked for what it generates."""
+    rng = random.Random(11)
+    saw_kx = saw_imul = saw_wide_index = 0
+    for _ in range(200):
+        insns, consts = seq.random_program(FP32, rng, extended=True)
+        for w in insns:
+            d = seq.decode(w)
+            if d["ctrl"]:
+                continue
+            if d["op"] == sf.OP_IMUL:
+                saw_imul += 1
+            if d["kx"]:
+                saw_kx += 1
+                for idx, is_const in seq.sources(d):
+                    if is_const and idx >= seq.KADDR_PLAIN:
+                        saw_wide_index += 1
+        assert len(consts) > seq.KADDR_PLAIN
+    assert saw_imul > 0 and saw_kx > 0 and saw_wide_index > 0, (
+        f"imul={saw_imul} kx={saw_kx} wide={saw_wide_index}")
+
+
+def test_default_fuzz_is_unchanged_by_the_extension():
+    """The existing corpus is byte-identical. `tb/test_seq_core.py`
+    generates its fuzz suite from a fixed seed, and a generator that
+    reshuffled its draws would silently retire the 62 programs the RTL
+    has been held to. The default path must draw nothing new."""
+    known = seq.random_program(FP32, random.Random(5))
+    again = seq.random_program(FP32, random.Random(5))
+    assert known == again
+    # and the extended arm is a different corpus, not the same one
+    ext = seq.random_program(FP32, random.Random(5), extended=True)
+    assert ext != known

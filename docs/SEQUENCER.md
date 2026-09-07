@@ -37,13 +37,14 @@ ahead of the core, which is the point of writing the contract down
 first.
 
 The core is green - `tb/test_seq_core.py` scores its fetch, execute
-and drain body against `seq.py` directly, 9/9 suites - and both
-sequencer targets, `krnlseq` and `seq_core`, are in `make sim`, folded
-in on the day the core passed, which was the only day the claim would
-mean anything. On this tree the whole set holds: seq_core 9/9, krnlseq
-1/1, krnl 2/2, reduce 3/3, reduceacc 5/5, krnlfused 2/2, krnlplain 2/2,
-quarter 1/1, faults 4/4, the golden model's own 370 pytest cases, `make
-yosys-lint` clean, and the Verilator width gate clean. The last of
+and drain body against `seq.py` directly, 10/10 suites since indexed
+constants added one on 2026-09-07 - and both sequencer targets,
+`krnlseq` and `seq_core`, are in `make sim`, folded in on the day the
+core passed, which was the only day the claim would mean anything. On
+this tree the whole set holds: seq_core 10/10, krnlseq 1/1, krnl 2/2,
+reduce 3/3, reduceacc 5/5, krnlfused 2/2, krnlplain 2/2, quarter 1/1,
+faults 4/4, the golden model's own pytest cases, `make yosys-lint`
+clean, and the Verilator width gate clean. The last of
 those is not decoration: it is fatal-on-width here, and it caught seven
 implicit-width sites in `cft_seq.sv` that Icarus and yosys both
 passed.
@@ -164,6 +165,21 @@ Since the array was extracted this is structural rather than
 argumentative: there is one `cft_lanes` per tile and both engines drive
 it, so "the same pipeline" is a property of the netlist that a second
 copy cannot quietly drift away from.
+
+*A note on `IMUL`, added 2026-09-07.* Opcode 30 is a new operation, and
+P1 says the sequencer introduces none. It does not: `IMUL` is an
+opcode in the shared `cft_lanes` array, computed in `cft_simpleops`
+beside the rest of the integer group, and `cft_engine_stream` can issue
+it as readily as `cft_seq` can. That is the same category as the seed
+opcodes 26 and 27, and P1's subject is the *sequencer* introducing
+arithmetic of its own, which is still nothing. What it does cost is a
+verification surface the golden model owns first, exactly like every
+other opcode: `softfloat.py`'s `imul()`, the differential, the bench.
+Its definition - the low 32 bits of the product of the operands' low
+32 bits, zero-extended to the format width - is 32-bit and not W-bit
+because its caller is a 32-bit hash whose value must agree with a GPU
+computing it on a `uint`; `docs/ATLAS.md` is where that requirement
+comes from and `host/include/cft.h` states the operation.
 
 **P2. Deposition is addressed by index, never by arrival.** Lane *i*
 writes its *d*-th deposit to
@@ -343,9 +359,43 @@ One 64-bit little-endian word.
 | 27 | `ka` | source A names the constant bank, not a register |
 | 28 | `kb` | as `ka`, for source B |
 | 29 | `kc` | as `ka`, for source C |
-| 30 | — | reserved, must be zero |
+| 30 | `kx` | the constant indices come from `imm`, not from the operand fields |
 | 31 | `ctrl` | this is a control instruction |
-| 63:32 | `imm` | immediate, control instructions only |
+| 63:32 | `imm` | the trip count on `REPEAT`; the three constant indices under `kx`; zero otherwise |
+
+### Indexed constants (`kx`), 2026-09-07
+
+An operand's index is four bits wide, so `ka`/`kb`/`kc` on their own
+reach **sixteen** constants whatever `n_consts` says. That was the wall
+`docs/ENCLOSE.md` hit - an interval coefficient costs two constants, so
+a polynomial was chunked eight coefficients at a time - and the one
+`docs/ATLAS.md` counts eleven of the sixteen slots gone to `P[8]`,
+`uT`, `TAU` and `PI` before a single coefficient.
+
+Bit 30 was reserved and must-be-zero, and `imm` is thirty-two bits that
+an ALU instruction had no use for. **When `kx` is set the constant
+indices for the three operands come from `imm[7:0]`, `imm[15:8]` and
+`imm[23:16]`**, so the addressable bank is **256** - which is
+`KMEM_D`, the capacity `cft_seq`'s header check already permitted and
+only its storage and operand mux fell short of. `imm[31:24]` stays
+reserved-must-be-zero, which leaves room for a counter-indexed form
+later without disturbing this one.
+
+An operand whose `k` bit is CLEAR still names a register through its
+own four-bit field, exactly as before, so `kx` widens the constant
+addressing and touches nothing else. The arithmetic is untouched, the
+header is untouched, and no entry point changes signature: a program
+is data.
+
+**The version guard is the reserved-bit rule.** A loader that predates
+`kx` reads bit 30 as reserved-must-be-zero and refuses the program -
+which is exactly the behaviour a compatibility rule is for, and the
+reason this feature needs no program-header VERSION bump. What it DOES
+need is a sequencer VERSION step and a CAPS bit, because an old
+BITSTREAM has no such rule: its operand mux would ignore bit 30 and
+read the four-bit field. Until CAPS publishes the feature, a host that
+means to run a `kx` program on a device has no way to ask, and
+`host/tools/enclose.c` says so where it probes.
 
 The per-instruction rounding attribute is not an indulgence. The
 pipeline already carries the attribute alongside each operation rather
@@ -388,9 +438,13 @@ instructions stream in, in the same check that refuses a precision
 the tile was not configured for. A fourth number is not a memory
 depth at all but the reach of the instruction's own operand field:
 the `ka`/`kb`/`kc` bits redirect four-bit fields at the constant
-bank, so **a program addresses sixteen constants** whatever
-`n_consts` says, on the tile and in the library alike
-(host/tools/enclose.c chunks its Horner kernel around it).
+bank, so until 2026-09-07 **a program addressed sixteen constants**
+whatever `n_consts` said, on the tile and in the library alike, and
+host/tools/enclose.c chunked its Horner kernel around it. `kx`
+(below) closed that gap the same day: with it set the indices come
+from the immediate, the whole 256-entry bank is both stored and
+addressable, and `cft_caps.max_consts` says which of the two a
+device is.
 
 **A host asks rather than guesses.** Since 2026-09-07 the tile
 publishes all four in `CAPS` (0x4C) as log2 - bits 19:16, 23:20 and
@@ -444,6 +498,23 @@ the hardware does not have to be:
   natural RTL honest, since a shared operand-fetch mux would otherwise
   see a stray `ka` on a `DEPOSIT` and index a constant bank that may
   be empty.
+
+  `kx` is four more applications of that same rule, not a new one:
+  under `kx` an operand whose `k` bit is set takes its index from
+  `imm`, so its four-bit field is not read and must be zero; an
+  operand whose `k` bit is clear names a register, so its byte of
+  `imm` is not read and must be zero; `imm[31:24]` is read by nothing;
+  and `kx` itself selects nothing when no operand names a constant, so
+  that combination is refused too - it is a second spelling of an
+  ordinary three-register instruction. `kx` on a control instruction
+  is refused for the same reason `ka` on a `DEPOSIT` is.
+
+  One redundancy is deliberately NOT refused: a `kx` instruction whose
+  indices all happen to be below sixteen is a second spelling of a
+  plain `k` instruction, and it loads. The rule is about fields the
+  encoding does not read, not about which of two legal encodings a
+  compiler chose - the same latitude a unary `ABS` with a non-zero
+  `rb` has always had.
 
 ## Deposition, and the buffer that bounds it
 
@@ -606,12 +677,14 @@ for bit the program's equal, so nothing waits on them.
   proves exactness per element with a witness FMA instead, and its
   negative control B shows the union check is necessary and not
   sufficient.
-- **More than sixteen addressable constants** (enclose). Operand
-  fields are four bits and `ka/kb/kc` redirect them at the constant
-  bank, so a program addresses sixteen constants whatever `n_consts`
-  says; the interval Horner is chunked eight coefficients at a time.
-  `imm` is 32 bits and unused by ALU instructions, so an
-  indexed-constant form would cost no encoding space.
+- **More than sixteen addressable constants** (enclose). **BUILT,
+  2026-09-07**, as `kx` above: `imm`'s low three bytes carry the three
+  constant indices and the bank reaches 256. The interval Horner is one
+  program to degree 127 where it was sixteen chunks, its arithmetic
+  intensity goes from 6.6 to 102.6 operations per element moved, and
+  the chain it prints is unchanged at every format - which is the gate
+  the feature had to pass, since indexed constants reorder nothing and
+  re-associate nothing. docs/ENCLOSE.md carries the measurement.
 - **A per-iteration broadcast** (zoom). The perturbed pixel step needs
   two values that change every iteration and are shared by every lane
   - the reference orbit's point - and there is no operand source that

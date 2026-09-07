@@ -442,12 +442,25 @@ def check_refusals(lib, dev, fmt):
                   "INVALID_ARGUMENT")
             bad += 1
 
-    # 30 is the first unassigned opcode now that 28 and 29 are taken
-    if lib.cft_op_name(30) != b"reserved":
-        print("FAIL opcode 30 should still be unassigned")
+    # 31 is the first unassigned opcode now that 28 and 29 are the
+    # composed reductions and 30 is IMUL (2026-09-07). This line has
+    # moved every time an opcode was assigned, which is the point of
+    # having it: an opcode the contract has taken must stop reading as
+    # reserved, or a recorded conformance set naming it "reservedNN"
+    # would replay against a different operation than the one its
+    # answer was recorded for.
+    if lib.cft_op_name(31) != b"reserved":
+        print("FAIL opcode 31 should still be unassigned")
         bad += 1
-    if lib.cft_supports(dev, 30, PREC_CODE[fmt.name]):
+    if lib.cft_supports(dev, 31, PREC_CODE[fmt.name]):
         print("FAIL cft_supports says an unassigned opcode is supported")
+        bad += 1
+    # IMUL is named, and NOT yet published: the opcode exists and the
+    # sequencer executes it, but no CAPS bit says a device carries it,
+    # so cft_supports must still answer no. When the integer group's
+    # CAPS bit grows to cover 30 this line is what will say so.
+    if lib.cft_op_name(30) != b"imul":
+        print("FAIL opcode 30 is IMUL and must be named")
         bad += 1
     return bad
 
