@@ -25,14 +25,15 @@
 // radix. Being a "drop-in" for one of those would mean claiming
 // semantics this library does not implement.
 
-export { Context, Float, NotExact, formatFor } from "./core.mjs";
+export { Context, Float, NotExact, Program, formatFor } from "./core.mjs";
 export {
   ABI_MAJOR, AUGMENTED, CHARACTER_FNS, CLASS_NAMES, FLAGS_ALL,
   FLAG_DIVBYZERO,
   FLAG_INEXACT, FLAG_INVALID, FLAG_OVERFLOW, FLAG_UNDERFLOW,
   FORMATOF_ARITY, FORMATOF_FNS, FORMATOF_METHOD,
   MINMAG_METHOD, MINMAX_MAG, OPS_BY_NAME,
-  SCALED_PRODUCTS, TRANSCEND_BINARY, TRANSCEND_INTARG, TRANSCEND_UNARY,
+  SCALED_PRODUCTS, STATUS_DEPOSIT_OVERFLOW,
+  TRANSCEND_BINARY, TRANSCEND_INTARG, TRANSCEND_UNARY,
   flagNames, is754version1985, is754version2008, is754version2019,
   loadModule,
 } from "./lib.mjs";

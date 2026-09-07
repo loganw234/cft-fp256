@@ -5065,3 +5065,234 @@ two hours of CPU across five targets is a first pass, not a clean bill:
 thirteen million executions of the loader found nothing it gets wrong
 about a header it already checks, which is a weaker statement than it
 looks.
+
+## 2026-09-07 - the sequencer's program API in JavaScript, and two demo panels that run on it
+
+`cft_run` applies one operation to every element; a program applies a
+SEQUENCE to every element without the operands making a round trip to
+memory between steps. The library has had `cft_program_load`,
+`cft_program_get_info`, `cft_program_run` and `cft_program_free` since
+the sequencer was written, and until today no JavaScript caller could
+reach any of them: the wasm module exported 111 `cftw_*` entry points
+and not one of those four. docs/DEMOS.md recorded the consequence in
+its own words - "the wasm surface exposes every library operation but
+not the sequencer's program API" - and measured what it cost in a table
+taken from the C tools, because the browser gap could not be measured
+at all.
+
+That is closed. **116 `cftw_*` exports**, five of them new; the node
+package has a `Program`; and the zoom and orbits panels of
+`bindings/wasm/demos.html` carry their tool's program engine as a
+control.
+
+Nothing under `host/src/`, `host/include/`, `host/tools/`, `rtl/`,
+`python/` or `verify/` was touched and **no ABI number moved**: this is
+a binding catching up with a contract that has not changed.
+`host/tests/seq_check.py`, the library's own live gate for the
+sequencer, is unmodified and stays the definition of whether the
+executor is right.
+
+### The C ABI, projected
+
+One wrapper per declaration in cft.h's program section, in cft.h's
+order, plus one projection. Three are not plain passthroughs and each
+reason is the contract's:
+
+- **the handle is an out-parameter** for `cftw_program_load`, as it is
+  for `cftw_open_software`;
+- **`cftw_program_get_info` projects the sized struct into four
+  out-pointers** rather than copying it into the heap - a JS caller
+  reading struct offsets is the silent ABI coupling the `struct_size`
+  handshake exists to prevent. One call rather than four accessors,
+  because a program's shape is fixed at load and because format's `0`
+  is `fp32`, a legitimate answer, so an accessor returning 0 on failure
+  could not say which of the two had happened;
+- **`cftw_status_deposit_overflow()` projects a MACRO**, which is the
+  one part of a header the far side of a wasm boundary cannot reach -
+  the problem `CFT_FLAGS_ALL` has and the same answer. It matters here
+  more than usual: that bit has already moved once, from STATUS[3] to
+  STATUS[4] on 2026-09-01. Both JavaScript surfaces audit it against
+  their own copy at load time and refuse to run if they disagree.
+
+`bindings/node` gains `Program`: `ctx.loadProgram(image)`,
+`prog.format` / `maxDeposits` / `nInsns` / `nConsts` read back through
+`cft_program_get_info`, `prog.run(a, b, c)` returning
+`{ deposits, counts, flags, status, depositOverflow }`, and `free()`.
+There is deliberately **no assembler** in `core.mjs`: an image is
+bytes, `cft_program_load` is the validator, and a second validator on
+the JavaScript side would be a second opinion about what a device may
+execute.
+
+### What was verified
+
+**The recorded corpus: 192 cases, 126 run and 66 refused.**
+`host/tests/seq_check.py` is the live comparison and needs a built
+library and a Python that can import `cft_golden`; `bindings/node` has
+neither by design. So `bindings/node/make_seq_corpus.py` writes the C
+executor's answers down once - refusing to record any case the golden
+model disagrees with - and `program_test.mjs` and `test.mjs` replay
+them through `cft_program_load` / `cft_program_run` in wasm. The
+programs are `cft_golden.seq.random_program` from seed 2609, 48 per
+format; roughly a third are deliberately corrupted by `seq_check.py`'s own `corrupt()`,
+so a binding that loaded every program would pass every value
+comparison in the file and still be wrong about what a loader is for.
+`--check` regenerates the file and refuses if a byte moved; it does.
+
+    node bindings/node/program_test.mjs
+    corpus  126 programs run, 66 refused, 4492 deposits and 2680 counts
+            compared, 46 runs overflowed their deposit budget
+    17 passed, 0 failed
+
+Beside the corpus, programs written by hand - a countdown loop with
+`SETACT` and `DEPOSIT` whose expected deposits are derived from
+docs/SEQUENCER.md and readable beside it - carry the two behaviours a
+fuzz corpus records without explaining: **the early exit is invisible**
+(trip counts 4, 9 and 40 agree on every deposit, count, flag and status
+once every lane has dropped out, which is P3 in the one place a
+JavaScript caller can check it) and **overflow drops the tail and says
+so** (two slots, four deposits: what fit is right, the count is what
+fit, `status` is bit 4 and `flags` is zero, because "your buffer was
+too small" is not one of the five 754 names). Also: `n = 0` is an
+answer; a zero deposit budget is a program and every deposit overflows;
+`b` and `c` may be omitted and those registers start at `+0`; deposit
+addresses do not move when the array grows (P2); a program carries its
+own format; nine loader refusals arrive as errors carrying the
+library's own words; and a freed program refuses every later call.
+
+**Memory.** 2,000 load/run/free cycles, 2,000 load/free cycles, and
+2,000 REFUSED loads - the path nobody exercises, where
+`cft_program_load` frees its own partial allocation - each leave the
+wasm heap the size it was and a probe allocation at the same address.
+
+**A negative control**, because a checker that has never been seen to
+fail proves nothing: one flipped bit in one deposit, a wrong count, a
+wrong flag word, a wrong STATUS word, a wrong deposit budget, and a
+refused program relabelled as one that runs - all six are caught.
+
+### The two demo panels
+
+`demos_core.js` ports `pack_program` and the instruction encoders from
+`host/tools/zoom.c` and `host/tools/orbits.c`. It is the third copy of
+three - each tool carries its own - and a copy is only worth having if
+something checks it, so the check is the bytes:
+
+| image | bytes | sha256 |
+|---|---|---|
+| the nucleus scan, 51 iterations at fp256 | 136 | `8fad50d414aadc68…` |
+| the reference orbit, 1,001 iterations at fp256 | 248 | `9aaefec8adf583c6…` |
+| the reference orbit, 1,001 iterations at fp64 | 176 | `752e5489d358303d…` |
+| the Kepler integration at fp256, 49 instructions | 552 | `adcd627af5f1e71b…` |
+| the Kepler integration at fp64, 37 instructions | 360 | `d1ded7c1613b3509…` |
+
+Every one is the image the C tool loads, **byte for byte**. They were
+dumped from the tools themselves by compiling `host/tools/*.c` exactly
+as they stand and linking with `-Wl,--wrap=cft_program_load` and a shim
+that writes the image out before forwarding; nothing under `host/` was
+edited to get them. `verify_demos.mjs` step 4 now hashes each image the
+core loads against those five, and `demos_core.js` asks
+`cft_program_get_info` what the loader read back and refuses if it
+disagrees with what it packed.
+
+The orbits panel needed a second pair of runs to say anything at all.
+`cft-orbits` refuses `--engine program` with `--rsqrt exact`, for a
+reason that is a fact about the program model rather than the tool: the
+correctly rounded 1/r^3 route is `cft_sqrt` and `cft_div`, themselves
+programs partitioned host-prep / program-core / host-finish, and they
+cannot sit inside another program's loop body. So the recorded
+`fp256`/`fp64` pair stays the correctly rounded route and stays
+loop-only, and a `fp256-newton` / `fp64-newton` pair was recorded beside
+it - the same integration with the tile's own `rsqrt` seed and a
+DERIVED number of Newton refinements, which is the route a program can
+hold. Different arithmetic, its own chains, and not a second spelling
+of the first pair. The recording is now **13 configurations over 15
+chains**.
+
+`engine` is left out of the page's `sameCfg()`, which is the claim
+rather than a way of ducking a comparison: the two engines are one
+configuration, so a chain computed either way is comparable - and if
+they ever parted, the page says DIFFER rather than "other config".
+
+### The gates
+
+| gate | the line it printed |
+|---|---|
+| `node bindings/node/test.mjs` | `126 passed, 0 failed` - the 125 that were there plus the corpus replay, which reports `sequencer  126 programs run and 66 refused from seq_corpus.jsonl, 4492 deposits and 2680 counts compared with the C executor` |
+| `node bindings/node/program_test.mjs` | `17 passed, 0 failed`, over `corpus  126 programs run, 66 refused, 4492 deposits and 2680 counts compared, 46 runs overflowed their deposit budget` |
+| `node bindings/node/conformance.mjs` | `1,067,635 cases over 168 sets, library matches the vectors exactly (1036.5s)`, then `831,635 cases over 148 sets, through this package's own methods, encodings, sequences, scales and flags exact (1030.8s)`, then `1,899,270 cases over 316 set replays in all - a pass.` - the published result line, unchanged |
+| `node bindings/wasm/verify.mjs` | `exports 116 cftw_* entry points`, `needed  85 named entry points checked present`, `831,635 cases over 148 sets driven through the wrappers themselves`, `VERIFY OK` |
+| `node bindings/wasm/verify_demos.mjs` | 44 `ok` lines and no `FAIL`: `VERDICT: the browser's compute core produced the C tools' chains, over the module the conformance page embeds` |
+| Chromium, the committed page over a loopback `http.server` | every panel run with the program engine selected on zoom and orbits: `15 of 15 chains computed in this browser, every one identical to the C tool's`, and **no console message of any level** |
+| `python bindings/node/make_seq_corpus.py --check` | `192 cases, identical to a fresh generation` |
+| two clean container builds, `bindings/wasm/build/` removed between | the module, its node loader and `conformance.html` byte-identical; `demos.html` byte-identical |
+
+### What it bought, measured
+
+Median of fifteen runs each, alternating engine run by run, through
+the compute core on the committed module under node 22. **The machine
+was not quiet** - this desktop was running several other jobs
+throughout, and the per-run spread is wide because of it. Alternating
+the engines is what makes the ratio survive that: both halves of each
+pair met the same load. Read them against the C tools' own gap for the
+same work, measured on 2026-09-04 - 1.40x for the reference orbit and
+1.26x for the Kepler integration. Every row is above its C counterpart,
+which is the prediction docs/DEMOS.md made when it could not yet
+measure this: what a program removes is call boundaries, and a wasm
+boundary costs more than a C one.
+
+| the page's configuration | program | host loop | program removes | library calls |
+|---|---|---|---|---|
+| zoom, the 1,001-iteration reference orbit at fp256 | 0.026 s | 0.040 s | **1.56x** | 12 against 8,019 |
+| zoom, the reference orbit at fp64 | 0.011 s | 0.017 s | **1.51x** | 12 against 8,019 |
+| zoom, the nucleus scan and bisection (one lane a call) at fp256 | 0.050 s | 0.076 s | **1.53x** | not counted - the panel's counters are lowered after the centre is derived |
+| orbits, the whole Kepler integration at fp256, `--rsqrt newton` | 0.865 s | 1.140 s | **1.32x** | 1,100 against 74,827 |
+| orbits, the same at fp64 | 0.287 s | 0.394 s | **1.37x** | 1,100 against 50,251 |
+
+The zoom rows are the two phases the program engine touches, timed
+apart because their call shapes are opposite: the reference orbit is
+one call of 1,001 iterations on one lane, and the nucleus scan is 320
+candidates in one call followed by about two hundred bisection steps of
+one lane each. Together they are under a tenth of a second, so **the
+zoom panel as a whole is no faster** - its nineteen seconds are its
+pixel phase, which runs through `cft_run` in the C tool too, and the
+page's own report line says so. For the orbits panel's `--rsqrt exact` argument the program API
+still buys nothing, which is not a disappointment but the last of
+docs/SEQUENCER.md's recorded asks - a callable composed operation -
+with a number beside it.
+
+### What was rebuilt, and what was not
+
+The module changed, because it gained five exports, and everything
+downstream of it was rebuilt from the pinned container. **Each build
+product was produced twice from a clean `bindings/wasm/build/` and came
+out byte-identical both times**, which is what makes the hashes below
+worth quoting:
+
+| | |
+|---|---|
+| `bindings/node/cft_node.wasm` | 212,642 bytes, sha256 `f0975f3da635e92d8a5060f7843a0cf16af860b8b16f60d15f0edab631104768` |
+| `bindings/wasm/conformance.html` | 1,337,454 bytes, sha256 `89e0dc54fa720247571c7a4be996048b4146fa42b9f48ba56f5a783c77ffef7a` |
+| `bindings/wasm/demos.html` | 523,351 bytes, sha256 `2b75d080fafd8d2a887b0bdd18d5a5befb80e3467067d7b25ccc6487bfade5df` |
+| `bindings/wasm/demos_core.js` | sha256 `0fc4643a77d988253c81ad5c229cbd688d1588e46109d5d90f89880a99b57e5c` |
+
+`bindings/wasm/README.md` still says 111 exports and quotes the
+previous module and page hashes; it is not in this change's scope and
+is stale until an integrator updates it.
+
+### What was not run
+
+- **No device.** The panels and the tests are the software backend,
+  which is the only backend a browser can be. Nothing here is a
+  hardware number, and no sequencer program went through hw_emu or a
+  card in this work.
+- **`host/tests/seq_check.py` was not re-run as a gate** - it is
+  unchanged and its subject is unchanged. `make_seq_corpus.py` drives
+  the same model and the same library and refuses to record a
+  disagreement, so it ran the comparison 126 times while recording.
+- **The demos page's own negative control was rebuilt but not
+  re-driven.** `bindings/wasm/build/demos_negative_control.html` is
+  produced by stage 4 as before; the sabotage site in `demos_core.js`
+  is untouched and still appears exactly once, which `make_demos.py`
+  checks, but no one watched it go red today.
+- **The rates table in docs/DEMOS.md was not re-measured.** It is the
+  2026-09-04 recording and says so; the two newton rows are new and
+  have no browser column in it.

@@ -168,13 +168,18 @@ footer pre { font-size: 0.74rem; }
   is not merely inaccurate, it is somewhere else entirely - and it
   raises no flag saying so. The fp256 reference is bit-identical on
   every host, so the frame is too. <span class="dim">Port of
-  <code>cft-zoom --engine loop</code>; the reference orbit's eight
-  opcodes an iteration at fp256, the perturbed pixels' twenty-three at
-  fp64.</span></p>
+  <code>cft-zoom</code>, both engines: the reference orbit's eight
+  opcodes an iteration at fp256 - as a host <code>cft_run</code> loop or
+  as one sequencer program - and the perturbed pixels' twenty-three at
+  fp64, which are <code>cft_run</code> either way.</span></p>
   <div class="controls">
     <label>width<select id="zoom-width"><option>64</option><option selected>128</option><option>256</option></select></label>
     <label>iteration cap<input id="zoom-iters" type="number" min="16" max="20000" step="1" value="1000" style="width:6rem"></label>
     <label>pixels per call<input id="zoom-batch" type="number" min="64" max="65536" step="64" value="1024" style="width:6rem"></label>
+    <label>reference engine<select id="zoom-engine">
+      <option value="loop" selected>host cft_run loop</option>
+      <option value="program">sequencer program</option>
+    </select></label>
     <button data-run="zoom" class="primary">Run both frames</button>
     <button data-cancel="zoom" disabled>Cancel</button>
     <span class="status" id="zoom-status"></span>
@@ -202,15 +207,22 @@ footer pre { font-size: 0.74rem; }
   angular-momentum drift is a property of the <em>arithmetic</em>, and
   is where the formats separate: the same ensemble, the same step, the
   same code - and roundoff two hundred binary orders apart.
-  <span class="dim">Port of <code>cft-orbits --engine loop</code>,
-  Kepler at eccentricity 3/4, Stormer-Verlet, 1/r&sup3; from
-  <code>cft_sqrt</code> and <code>cft_div</code>.</span></p>
+  <span class="dim">Port of <code>cft-orbits</code>, Kepler at
+  eccentricity 3/4, Stormer-Verlet. The first pair takes 1/r&sup3; from
+  <code>cft_sqrt</code> and <code>cft_div</code>, correctly rounded; the
+  second takes it from the tile's own <code>rsqrt</code> seed and a
+  derived number of Newton passes, which is the route a sequencer
+  program can hold.</span></p>
   <div class="controls">
     <label>members<input id="orbits-members" type="number" min="1" max="64" value="8" style="width:5rem"></label>
     <label>periods<input id="orbits-periods" type="number" min="1" max="64" value="4" style="width:5rem"></label>
     <label>steps/period<input id="orbits-spp" type="number" min="16" max="8192" value="512" style="width:6rem"></label>
     <label>sample every<input id="orbits-sample" type="number" min="1" max="1024" value="32" style="width:6rem"></label>
-    <button data-run="orbits" class="primary">Run fp256 and fp64</button>
+    <label>newton engine<select id="orbits-engine">
+      <option value="loop" selected>host cft_run loop</option>
+      <option value="program">sequencer program</option>
+    </select></label>
+    <button data-run="orbits" class="primary">Run all four</button>
     <button data-cancel="orbits" disabled>Cancel</button>
     <span class="status" id="orbits-status"></span>
   </div>
@@ -443,11 +455,29 @@ function chainKey(p, r, c) { return `${p}/${r}/${c}`; }
  *  chain is not about, and saying "DIFFER" there would be a lie about
  *  which of the two is wrong. It says "other config" instead, and
  *  counts for nothing. */
+//
+// `engine` is the ONE field left out, and leaving it out is the claim
+// this page makes about the sequencer rather than a way of ducking a
+// comparison: the loop and program engines are held to byte-identical
+// records by each tool's own gate, so a chain computed either way is a
+// chain about the same configuration - and if the two ever disagreed,
+// dropping the field is exactly what makes the page say DIFFER instead
+// of "other config". It is the doctrine orbits.c's checkpoint states in
+// its own header: the file "carries every number that describes a
+// RESULT and nothing that describes the MACHINE - no batch size, no
+// engine, no timing".
+const MACHINE_FIELDS = ["engine"];
 function sameCfg(a, b) {
   if (!a || !b) return false;
-  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+  const strip = (o) => {
+    const c = Object.assign({}, o);
+    for (const f of MACHINE_FIELDS) delete c[f];
+    return c;
+  };
+  const x = strip(a), y = strip(b);
+  const ka = Object.keys(x).sort(), kb = Object.keys(y).sort();
   if (ka.join(",") !== kb.join(",")) return false;
-  return ka.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
+  return ka.every((k) => JSON.stringify(x[k]) === JSON.stringify(y[k]));
 }
 function comparable(p, r) {
   const row = nativeRow(p, r);
@@ -592,6 +622,11 @@ PANEL_UI.zoom = {
       pixelIters: parseInt(document.getElementById("zoom-iters").value, 10),
       refIters: parseInt(document.getElementById("zoom-iters").value, 10) + 1,
       batch: parseInt(document.getElementById("zoom-batch").value, 10),
+      // The reference orbit and the nucleus scan, as host cft_run
+      // loops or as sequencer programs. The pixel phase is cft_run
+      // either way - it is what takes the time, and the sequencer does
+      // not touch it.
+      engine: document.getElementById("zoom-engine").value,
     };
   },
   started(m) {
@@ -630,7 +665,11 @@ PANEL_UI.zoom = {
       `${s.format} reference (p=${s.prec}), centre error ` +
       `${s.centreErrorPixels} pixels; ${s.escaped} escaped, ` +
       `${s.glitched} glitched, ${s.interior} interior; escape iterations ` +
-      `${s.escMin}..${s.escMax}`;
+      `${s.escMin}..${s.escMax}; the reference orbit took ` +
+      `${s.refSeconds.toFixed(4)} s ` +
+      `(${Math.round(s.refRate).toLocaleString("en-US")} iterations/s, ` +
+      `${s.refCalls.toLocaleString("en-US")} library calls) on the ` +
+      `${s.engine === "program" ? "sequencer program" : "host loop"}`;
     document.getElementById("zoom-pixscale").textContent = s.pixscale;
     report("zoom", m);
   },
@@ -664,25 +703,43 @@ function paintZoom(runName) {
 
 // ---- orbits ---------------------------------------------------------
 const orbitsState = {};
+// Four runs, two pairs. The `exact` pair is the panel's argument -
+// correctly rounded 1/r^3 from cft_sqrt and cft_div - and is a
+// loop-engine route, because a program cannot call a composed
+// operation. The `newton` pair is the same integration with the tile's
+// own seed opcode and a derived number of refinements, which IS
+// expressible on-chip: different arithmetic, its own chain, and the
+// place where the two engines have something to be equal to.
+//
+// The plots key off the FORMAT rather than the run, so whichever pair
+// ran last is what is drawn and the fp256/fp64 story stays one pair of
+// lines.
+const orbitsFmtKey = (run) => (run.indexOf("fp256") === 0 ? "fp256" : "fp64");
 PANEL_UI.orbits = {
-  runs: ["fp256", "fp64"],
-  overrides() {
-    return {
+  runs: ["fp256", "fp64", "fp256-newton", "fp64-newton"],
+  overrides(runName) {
+    const shared = {
       members: parseInt(document.getElementById("orbits-members").value, 10),
       periods: parseInt(document.getElementById("orbits-periods").value, 10),
       stepsPerPeriod: parseInt(document.getElementById("orbits-spp").value, 10),
       sampleEvery: parseInt(document.getElementById("orbits-sample").value, 10),
     };
+    // The engine control reaches the newton runs only: --engine
+    // program needs --rsqrt newton, and cft-orbits refuses the pair
+    // the other way round rather than quietly running something else.
+    if (/-newton$/.test(runName || ""))
+      shared.engine = document.getElementById("orbits-engine").value;
+    return shared;
   },
-  started(m) { orbitsState[m.run] = { samples: [], cfg: m.cfg }; },
+  started(m) { orbitsState[orbitsFmtKey(m.run)] = { samples: [], cfg: m.cfg }; },
   progress(m) {
-    const st = orbitsState[m.run];
+    const st = orbitsState[orbitsFmtKey(m.run)];
     if (!st || !m.data.samples) return;
     for (const s of m.data.samples) st.samples.push(s);
     paintOrbits();
   },
   done(m) {
-    const st = orbitsState[m.run];
+    const st = orbitsState[orbitsFmtKey(m.run)];
     if (st) st.result = m.result;
     paintOrbits();
     report("orbits", m);
@@ -1069,14 +1126,22 @@ function report(panelId, m) {
   lastResults[key] = m.result;
   const el = document.getElementById(panelId + "-report");
   let html = '<h3>what this run measured</h3><table>' +
-    "<tr><th>run</th><th>backend</th><th>format</th><th>batch</th>" +
+    "<tr><th>run</th><th>backend</th><th>format</th><th>engine</th>" +
+    "<th>batch</th><th>calls</th>" +
     "<th>seconds</th><th>rate</th><th>flags</th></tr>";
   for (const r of PANEL_UI[panelId].runs) {
     const res = lastResults[panelId + "/" + r];
     if (!res) continue;
+    // Three of the five panels have only a host-loop port, because
+    // their step does not fit the program model - docs/SEQUENCER.md's
+    // "What the workloads asked" is the list of what stopped each.
+    const eng = res.stats.engine === "program" ? "sequencer program"
+                                               : "host loop";
     html += `<tr><td>${r}</td><td>${res.backend} (wasm)</td>` +
       `<td>${res.stats.format}, p=${res.stats.prec}</td>` +
+      `<td>${eng}</td>` +
       `<td class="num">${batchOf(panelId, res)}</td>` +
+      `<td class="num">${res.stats.calls.toLocaleString("en-US")}</td>` +
       `<td class="num">${res.seconds.toFixed(3)}</td>` +
       `<td class="num">${Math.round(res.rate).toLocaleString("en-US")} ` +
       `${res.workUnit}/s</td>` +
