@@ -44,9 +44,10 @@ it did not.**
 
 The embedded sample (4,015 cases; deterministic rule below) spans all
 four formats, all five rounding attributes and every opcode class,
-the divide/sqrt seeds 26/27 and the unassigned `reserved15/30/255`
-included - that list lost 28 when ABI 0.6 assigned it to `sumsq`. For
-the full 1,067,635-case claim, generate the sets in a
+the divide/sqrt seeds 26/27 and the unassigned `reserved15/31/255`
+included - that list lost 28 when ABI 0.6 assigned it to `sumsq` and
+30 when `imul` took it on 2026-09-07. For
+the full 1,071,635-case claim, generate the sets in a
 checkout (`make vectors`) and drag the `vectors/out/*.jsonl` files
 onto the page - same code path, whole files. Verified at build time:
 the full 20-set drop replays with zero mismatches, from both
@@ -161,7 +162,7 @@ build instead of vanishing from it.
 
 **The sampling rule** (also in `build.sh`, `make_page.py`, and on the
 page): from each of the 20 sets (4 formats × 5 rounding attributes,
-11,800 lines each) take every 59th line - 0-based lines 0, 59, 118, …
+12,000 lines each) take every 60th line - 0-based lines 0, 60, 120, …
 = exactly 200 per set - then add the set's first line of any opcode
 name the stride missed, so every opcode class is embedded per set by
 construction rather than by luck. `conformance.html` is a committed
@@ -555,12 +556,12 @@ what a rerun on the same sources should do.
   four magnitude sets of 9.6 (**9,728**) and eighty formatOf sets of
   5.4.1 (**176,250**), one per ordered pair of formats per attribute.
   `make vectors` writes all 168; the drop zone accepts all 168. (That
-  count is larger than the **1,067,635** the page quotes for
+  count is larger than the **1,071,635** the page quotes for
   `make vectors`, and the difference is entirely the opcode sets:
   `verify/run.sh`'s own `vectors` stage takes the generator's default
   directed/random/simple pools rather than `make vectors`'s
   `--directed 3000 --random 4000 --simple 200`, so its opcode sets
-  carry 19,600 lines each where the published ones carry 11,800. The
+  carry 19,800 lines each where the published ones carry 12,000. The
   other six families are pool-size-independent and identical either
   way, which is why the step-5 numbers below are the same in both.)
 * **831,635 of those driven through the wrappers themselves**, over

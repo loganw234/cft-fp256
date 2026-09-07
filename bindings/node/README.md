@@ -9,7 +9,7 @@ and results that are libcft's bits and nothing else.
 ```bash
 node bindings/node/test.mjs         # 125 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 1,067,635 published cases
+node bindings/node/conformance.mjs  # 1,071,635 published cases
 ```
 
 ```js

@@ -15,9 +15,9 @@ THE SAMPLING RULE - stated here, in build.sh and on the page, because
 a sample nobody can regenerate is a sample nobody can audit:
 
     From each of the 20 sets (4 formats x 5 rounding attributes,
-    11,800 lines each), take every 59th line - 0-based line numbers
-    0, 59, 118, ... - which is exactly 200 lines per set since
-    11,800 = 59 * 200. Then, for any opcode name present in the set
+    12,000 lines each), take every 60th line - 0-based line numbers
+    0, 60, 120, ... - which is exactly 200 lines per set since
+    12,000 = 60 * 200. Then, for any opcode name present in the set
     but missing from that stride, add the set's FIRST line carrying
     it, so every opcode class is embedded per set by construction
     rather than by luck: arithmetic, sign, min/max, predicates,
@@ -47,7 +47,7 @@ one "op" field per line and counts opcode classes - has nothing to say
 about it. Sampling it would mean a second rule, and a second rule is a
 second thing to keep honest.
 
-The numbers 11,800 / 59 / 200 assume the generator arguments the repo
+The numbers 12,000 / 60 / 200 assume the generator arguments the repo
 publishes (`make vectors`); the asserts below pin that, so changing
 the generator without changing this file and the page prose fails the
 build instead of quietly shipping stale text. The reserved list has
@@ -68,9 +68,9 @@ import json
 import sys
 from pathlib import Path
 
-STRIDE = 59
-LINES_PER_SET = 11800
-EXPECTED_OPS = 28          # 4 arithmetic + 19 simple + 2 seeds + 3 reserved
+STRIDE = 60
+LINES_PER_SET = 12000
+EXPECTED_OPS = 29          # 4 arithmetic + 19 simple + imul + 2 seeds + 3 reserved
 
 FORMATS = ("fp32", "fp64", "fp128", "fp256")
 ROUNDINGS = ("rne", "rtz", "rdn", "rup", "rmm")

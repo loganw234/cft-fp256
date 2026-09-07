@@ -126,8 +126,8 @@ footer pre { font-size: 0.75rem; }
   <p class="small dim">Sampling rule (deterministic, restated in
   build.sh): regenerate the published sets with
   <code id="gen-cmd"></code>; from each of the 20 <em>opcode</em> sets
-  (4&nbsp;formats &times; 5&nbsp;rounding attributes, 11,800 cases
-  each) take every 59th line - 0-based lines 0, 59, 118, &hellip; - then
+  (4&nbsp;formats &times; 5&nbsp;rounding attributes, 12,000 cases
+  each) take every 60th line - 0-based lines 0, 60, 120, &hellip; - then
   add the set's first line for any opcode name the stride missed, so
   every opcode class is present per set by construction, the seed
   opcodes <code>recip_seed</code>/<code>rsqrt_seed</code> and the
@@ -151,8 +151,8 @@ footer pre { font-size: 0.75rem; }
   <h2>3 &middot; full replay: drop the published sets</h2>
   <p>The embedded sample is a sample. For the full claim, generate the
   complete sets in a checkout of this repo -
-  <code>make vectors</code>, which writes <strong>1,067,635 cases over
-  168 sets</strong> to <code>vectors/out/</code>: 236,000 over twenty
+  <code>make vectors</code>, which writes <strong>1,071,635 cases over
+  168 sets</strong> to <code>vectors/out/</code>: 240,000 over twenty
   opcode sets, 533,265 over twenty transcendental sets (all thirty-nine
   functions since ABI 0.6, table 9.1 complete), 89,616 over the four
   augmented sets of clause 9.5, 8,960 over twenty reduction sets,
@@ -817,7 +817,7 @@ async function replayBuiltin() {
       (name) => ({ name, text: CFT_SAMPLE[name] }));
     await replaySets(files, sectionUI("builtin"),
       "this is the embedded sample of the twenty OPCODE sets, not the " +
-      "full published set - section 3 replays all 1,067,635 cases over " +
+      "full published set - section 3 replays all 1,071,635 cases over " +
       "all 168");
   } finally {
     builtinRunning = false;
