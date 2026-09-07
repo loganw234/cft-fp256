@@ -4420,3 +4420,49 @@ not sufficient, and neither was owning the licence.
 **Still not run.** Implementation at any pass count on any part, so no
 post-route number on 7-series fabric - which is where a 48.5% design
 with 66 picoseconds of synthesis slack would actually be decided.
+
+## 2026-09-07 - the open-core board: the configuration simulated as one thing, and what the speed grade costs
+
+The tile a Kintex-7 325T would carry is `MUL_PASSES=10` with both
+fused ladders on. Every one of those three parameters had been
+simulated and never all three at once - `krnlfused` runs the ladders at
+one pass, the `*mc` targets run the passes with the ladders off - and a
+configuration only ever covered a parameter at a time is a
+configuration nobody has run. `tb/Makefile` gains `board`, which is
+that configuration on the three benches that matter for a part with no
+host streaming a beat a cycle: the kernel through its CSR and AXI
+interfaces, the same kernel driven by the sequencer, and the fp256
+bank. **3 targets, 4 tests, 4 passed, 0 failed** at MC=10.
+
+**Routed, and the speed grade is the finding.** All out of context
+through `hw/mc_sweep.sh`, ladders on, ten passes:
+
+| part | grade | ask | routed WNS | verdict |
+|---|---|---|---|---|
+| xc7k325tffg900-2 | -2 | 100 MHz | **+0.096 ns** | closes; 95,695 LUT (47.0%), 43,365 FF, 36 BRAM, 56 DSP |
+| xc7k325tffg676-1 | -1 | 100 MHz | -2.782 ns | misses |
+| xc7k325tffg676-1 | -1 | 80 MHz | -0.384 ns | misses; implies about 77 MHz |
+| xc7k410tfbg676-2 | -2 | 100 MHz | -0.957 ns, 650 endpoints | misses |
+| xc7k410tffg900-2 | -2 | 100 MHz | -0.957 ns | identical - the package is not a variable in an out-of-context design with no bonded I/O |
+| xc7k410tfbg676-2 | -2 | 80 MHz | +0.607 ns | closes |
+
+Two things follow that a buyer needs. **The speed grade decides the
+board**: the same tile closes 100 MHz on a -2 and misses 80 on a -1, so
+the cheapest listed K325T core board (`xc7k325tffg676-1`, about $99)
+would run near 75 MHz where a -2 runs at 100. And **the bigger die is
+the slower one**: docs/studies/OPT-C-timing.md took the two 410T
+netlists apart and found them identical to a picosecond of logic delay,
+with the entire 1.053 ns difference in route - 1.33x the fabric area,
+whose square root predicts 15.3% more wire against 13.5% measured.
+
+**A defect these runs exposed.** `hw/mc_sweep.sh` keyed its output
+directory on part, passes, ladders and stage but not frequency, so two
+asks for one configuration overwrote each other's reports; the summary
+appends, so the QOR lines above survived and the 80 MHz run's detailed
+timing did not. The tag now carries the frequency.
+
+**Not run.** Any Alveo implementation with these parameters; any
+post-route number under a shell rather than out of context, where this
+project has one recorded 0.88 ns swing; and the frequency sweep that
+would establish either part's ceiling, which docs/studies/OPT-C-timing.md
+specifies and which the routed pairs here make possible.
