@@ -5866,3 +5866,139 @@ differential.
   freshly generated vector set with "unknown opcode name" until the
   module is rebuilt and its recorded SHA re-recorded. That is the same
   step 24, 26 and 28 each required when they were assigned.
+
+## 2026-09-07 - the improvement round, integrated by hand: what merged, what was held, and the gates on the merged tree
+
+Ten Opus agents were dispatched at once on disjoint targets. Four
+returned their reports and were gated and merged as they landed (the
+det library target, the WebSocket transport, the caps publication as
+ABI 0.8, the fuzz hardening - each has its own entry above). The other
+six sat waiting on hours-long runs and were stopped; their branches
+were reconstructed from the worktrees and the logs, committed as the
+agents left them, and integrated or held here.
+
+**Merged from the worktrees.**
+
+- *The program API in JavaScript* (its entry above): committed as
+  left, merged, the module rebuilt. `test.mjs` 126 passed,
+  `program_test.mjs` 17 passed, on the final module.
+- *The multi-cycle rung's exactness* (its entry above): merged; its
+  gate script became the base every other branch's proofs were ported
+  onto.
+- *The leading-zero cone cut, LATENCY 15 to 16* (its entry above):
+  merged with the formal gate and the kernel's parameter block resolved
+  by hand - the four `lzcone.sby` proofs in the merged gate's own
+  signature, three `.LATENCY(16)` sites. Its own timing was never
+  measured: the agent's queue waited on the tip runs and other agents'
+  Vivado processes all day, and the integrator's attempt found a
+  Vivado still running the tip's K325T implementation. The agent's leftover queue ran them after the stop, and the
+  integrator read the reports: on the U50 at 160 MHz the routed slack
+  went +0.120 to **+0.255** and the cone left the routed worst 25;
+  on the -2 K325T at 120 MHz in the board configuration the tip
+  misses by **-1.817** and the branch by **-0.078**, the wall now the
+  engine's `beats_total -> rd_resv` chain - study C's second wall -
+  so the board is a ~119 MHz part where it was a ~100 MHz one.
+  docs/ARCHITECTURE.md carries the table.
+- *IMUL and indexed constants* (its entry above, placeholders measured
+  by the integrator): merged with four hand-resolved conflicts - the
+  atlas document's step list, the sequencer document's capacities
+  paragraph, the formal gate's proof list, the seq differential's
+  corruption list (now the union: `wrap_trip` beside the five `kx`
+  refusals). Then the integrator's half: **CAPS[4] publishes `kx` and
+  CAPS[28] publishes `IMUL`**, decoded into `cft_caps.seq_features`
+  bits 0 and 4 (`CFT_SEQ_FEAT_WIDE_CONST`, `CFT_ALU_EXT_IMUL`), the
+  software backend reporting both and 256 addressable constants from
+  the file that enforces them, and a clear bit meaning ABSENT: the
+  loader refuses an image that uses either on a device that does not
+  publish it, naming the instruction, and `cft_supports` answers no for
+  opcode 30 there. No VERSION step - VERSION guards the register map and
+  features are announced in CAPS. `SEQ_KIDX_W` is 8; `tb/test_krnl.py`
+  parses the feature and extension literals and resolves `KREG`
+  through `KMEM_D`. The published vectors changed with the opcode: the
+  twenty opcode sets carry 12,000 lines (200 `imul` cases each) where
+  they carried 11,800, 1,071,635 cases over 168 sets where the page
+  said 1,067,635, 29 distinct opcodes where the sampler expected 28;
+  the sampler's stride is 60, and every document that pinned the old
+  numbers moved with them.
+
+**Held on their branches, committed, not merged.**
+
+- *Study A's idea 2, the round window folded into the normalise
+  ladder* (`worktree-agent-a19215c1f69c52ee1`, de7c742). Bit-identical
+  by the agent's model check (658,048 comparisons, 0 mismatches) and its
+  formal miter (pass, negative control refuted); its cocotb gate was
+  still running. Synthesis at 135 MHz on the U50 part, MUL_PASSES=1:
+
+  | ladders | LUT before | LUT after | path before | path after |
+  |---|---|---|---|---|
+  | off | 123,214 | 116,464 | 5.821 ns | 5.965 ns |
+  | on | 108,028 | 102,064 | 5.856 ns | 6.138 ns |
+
+  Six thousand LUTs, more than the study estimated, at 0.14 to 0.28 ns
+  more implied path on the same cone the LZC branch was built to
+  shorten. That is a trade between the two things this project
+  measures, and it is not the integrator's to make silently.
+- *The runner's parallel vector generator*
+  (`worktree-agent-a07f65f9943715fb5`, e18b290). Its own gate is
+  identity: the 168 published sets rolled up by path and sha256 must
+  not move. Against the reference `a0cd4bc4...` the rewritten generator
+  produces `6449e6dc...` at `--jobs 4` and the same `6449e6dc...` at
+  `--jobs 1` - consistent across job counts, but 20 files of the wide
+  formats differ from the original's bytes, so the rewrite and not the
+  scheduling changed them. Held until it reproduces the reference.
+  Its measured baseline (gate budget, per stage) is in the session's
+  scratchpad, and one of its findings - `simmc`'s literal backslash-n -
+  was fixed on the tree the same day.
+
+**Gates on the merged tree**, in the pinned images and on this host:
+
+- `make sim` in cft-sim: 21 targets, 0 failures.
+- `make MC=10 simmc` in cft-sim: sixteen of seventeen targets passed
+  (the thirteen multi-cycle benches and the sequencer-driven and fp256
+  board benches); the seventeenth, `boardkrnl` - the engine-driven
+  kernel at ten passes with both ladders on - **does not finish under
+  Icarus** on this tree: its simulated time advances at about 2 ns a
+  second while the simulator burns a core, 160x slower than the same
+  bench without the ladders, and it was stopped after two and a half
+  hours at 17 microseconds. Isolated the same afternoon: the LZC
+  agent's own tree crawls the same way (so its entry's claim that the
+  board targets passed under `simmc` is not one its logs support -
+  the target never reached a verdict there either), the tree before
+  the ISA merge crawls, Verilator's lint finds no combinational loop
+  on either tree, and **under Verilator the merged tree's board kernel
+  passes both tests in 7.5 s** of wall clock (31,556 ns simulated).
+  So the RTL is right in the board configuration and Icarus's
+  evaluation of the new cone beside the ladders at ten passes is the
+  pathology; `boardkrnl` now selects Verilator, and the cone's coding
+  for Icarus is recorded as the defect to fix, with the board
+  configuration under Icarus as its gate.
+- `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (31 of 31, negative
+  control refuted)`, 420 s of solver time - after a first run had to be
+  stopped at two and a half hours, stuck on `imul.sby`'s `check`
+  task, which the integrator had left in the gate while writing that
+  it was parked; it is parked now, both tasks.
+- `make yosys-lint`: exit 0, the pre-existing memory-replacement warnings only.
+- `make test`: `api-test: all contract checks passed`, `reduce-parts: every
+  canonical partition reproduces the whole`, `168 sets, 1071635
+  cases, all matching`, `C and Python reached the same library and
+  got the same bits` - on the regenerated set.
+- `make remotetest`: `remote_check: every check passed` - 2,256 device-test checks
+  over loopback with 0 failed (after the feature-word mask in
+  `device_test.c` was widened to the eight bits `seq_features` now
+  carries; the first run failed both sides with 0x11), the replay
+  identical local and remote over 184,592 cases, the collatz chain
+  the same both ways, the bench round trips on both div/sqrt routes.
+- `make wstest`: 46 checks, 0 failures, on the rebuilt module.
+- `node bindings/wasm/verify.mjs`: `1,071,635 cases over 168 sets, library matches the vectors
+  exactly` and `831,635 cases over 148 sets driven through the
+  wrappers themselves, encodings, sequences, scales and flags exact`.
+- `node bindings/wasm/verify_demos.mjs`: `the browser's compute core produced the C tools' chains, over the
+  module the conformance page embeds` - after the chains were
+  re-recorded against the rebuilt module, every one of the thirteen
+  runs byte-identical to the previous record.
+- the five workload checks: enclose 2,664 comparisons, collatz 18,110,
+  mersenne 391, zoom 11,223, orbits 26 checks, all with 0 failures; the
+  seq differential agrees on every program.
+
+**Not run.** Anything on a device; the held branches' own gates beyond
+what their logs already recorded.
