@@ -5296,3 +5296,209 @@ is stale until an integrator updates it.
 - **The rates table in docs/DEMOS.md was not re-measured.** It is the
   2026-09-04 recording and says so; the two newton rows are new and
   have no browser column in it.
+
+## 2026-09-07 - the multi-cycle rung's exactness, proven at the real chunk width
+
+The 2026-09-06 entry left one thing open. A bounded proof that
+`cft_mulpass`' pass-accumulated product equals the pipe's side-by-side
+array's ran four hours without returning and was stopped, so the rung's
+bit identity rested on the benches and `formal/mulpass.sby` sat outside
+the gate with a comment saying why. This entry closes the claim at
+`CFT_MUL_MCH = 24` - the chunk the tile synthesises - for **every pass
+geometry `cft_lanes` can build**, two independent ways, and records
+what each cost and what did not close. formal/ only: no RTL, bench,
+host or Python file is touched.
+
+**The seven geometries.** `rtl/cft_mulgeom.svh` maps (P, MUL_PASSES) to
+(COLS, passes). `cft_lanes` builds the fp64, fp128 and fp256 rungs at
+P = 53, 113 and 237 and `MUL_PASSES` 2, 5 and 10; fp32 is one chunk and
+never multi-pass. That is seven distinct (P, COLS) pairs, and all seven
+are proven. The pass count each task claims is handed to its harness as
+`EXP_NP` and re-derived there from cft_mulgeom.svh's own functions, so
+a task whose geometry table drifts from the header refuses to elaborate
+rather than proving something about a rung nobody builds.
+
+**What made it close: not asking a solver to compare two multipliers.**
+Split into three lemmas, none of them contains any multiplier
+reasoning.
+
+* **A, the fold** (`formal/tb_mulfold_formal.sv`). Every `dut.pcol[c]`
+  - the column registers - is made a yosys `cutpoint`, which replaces
+  the register and the multiplier behind it with an unconstrained
+  value, and the harness reads those free values back. The claim is
+  that the in-pass tree, the shift-accumulate with its shift-out
+  register, the completed-product latch and the `en`-clocked level
+  chain deliver at level 5 one operation's own column values summed at
+  their column weights. Linear in those values. The .sby then asserts
+  on the prepared model that no `$mul` cell survives, so the
+  abstraction cannot silently not have happened.
+* **B, the operands** (`formal/tb_mulsel_formal.sv`). `dut.a_r` and
+  `dut.bsel_r` are probed: on pass p they hold the captured `a` and
+  chunk group p of the captured `b`, at every offset in the interval
+  including the boundary cycle where the operand registers still carry
+  the previous operation's last pass.
+* **C, the columns** (same harness). The column register holds those
+  operands' product - written from the DUT's own operand wires so that
+  yosys' `opt_merge` folds the reference multiply onto the module's own
+  `$mul`, which the .sby checks by counting cells - a column the tree
+  reads but the geometry does not build holds zero, and a built one is
+  below 2^(P+24). The last two are exactly lemma A's side-conditions.
+
+Multiplication is a function, so equal operands give equal products;
+substituting B and C into A gives `sum_k (a * b[24k +: 24]) << 24k`
+truncated to 2P, which is `cft_fpfma_pipe.sv`'s `g_mul_local`
+expression term for term. formal/README.md writes the substitution out
+and names the one thing the composition asserts rather than proves.
+
+**No copy of the RTL exists anywhere in formal/.** `rtl/cft_mulpass.sv`
+is read unmodified; the cut and the probes are made by `cutpoint` and
+`connect -nounset -set` on the flattened netlist, because the Yosys
+frontend gives formal code no in-language way to name a submodule's
+internals - the same limitation that made the FIFO proof use `abc pdr`
+instead of a hand-written invariant.
+
+**What closed** (`formal/mulexact.sby`, bitwuzla 0.9.1 in the pinned
+cft-formal image, one task at a time on the shared desktop with other
+agents' simulations running, so these are upper bounds):
+
+| task | P | COLS | passes | rung | checks | result | s |
+|---|---|---|---|---|---|---|---|
+| `fold_53c2` | 53 | 2 | 2 | fp64 x2 | 1 assert | pass | 10 |
+| `sel_53c2` | 53 | 2 | 2 | fp64 x2 | 6 asserts | pass | 10 |
+| `fold_53c1` | 53 | 1 | 3 | fp64 x5, x10 | 1 assert | pass | 11 |
+| `sel_53c1` | 53 | 1 | 3 | fp64 x5, x10 | 3 asserts | pass | 11 |
+| `fold_113c3` | 113 | 3 | 2 | fp128 x2 | 1 assert | pass | 9 |
+| `sel_113c3` | 113 | 3 | 2 | fp128 x2 | 9 asserts | pass | 23 |
+| `fold_113c1` | 113 | 1 | 5 | fp128 x5, x10 | 1 assert | pass | 10 |
+| `sel_113c1` | 113 | 1 | 5 | fp128 x5, x10 | 3 asserts | pass | 5 |
+| `fold_237c5` | 237 | 5 | 2 | fp256 x2 | 1 assert | pass | 277 |
+| `sel_237c5` | 237 | 5 | 2 | fp256 x2 | 15 asserts | pass | 78 |
+| `fold_237c2` | 237 | 2 | 5 | fp256 x5 | 1 assert | pass | 19 |
+| `sel_237c2` | 237 | 2 | 5 | fp256 x5 | 6 asserts | pass | 36 |
+| `fold_237c1` | 237 | 1 | 10 | fp256 x10 | 1 assert | pass | 12 |
+| `sel_237c1` | 237 | 1 | 10 | fp256 x10 | 3 asserts | pass | 50 |
+| `cover_fold` | 237 | 1 | 10 | - | 2 covers | pass | 76 |
+| `cover_sel` | 237 | 1 | 10 | - | 4 covers | pass | 93 |
+
+The check counts are read off the model sby actually solved, not off
+the source; see the vacuity paragraph below.
+
+**And the single property closes too, at four of the seven.**
+`formal/mulpass_real.sby` asserts the whole thing in one place - the
+module's output against the pipe's own column-sum expression, both
+multipliers standing, no lemmas and no composition. That is the form
+the 2026-09-06 entry could not get to return. It returns now for every
+single-column geometry and for the smallest two-column one, **including
+fp256 at MUL_PASSES = 10, the deepest configuration the tile builds**,
+and those four tasks are now in the gate as an unfactored check under
+the composition argument:
+
+| task | P | COLS | passes | rung | boolector | bitwuzla |
+|---|---|---|---|---|---|---|
+| `p53c2` | 53 | 2 | 2 | fp64 x2 | **pass, 37 s** | pass, 47 s |
+| `p53c1` | 53 | 1 | 3 | fp64 x5, x10 | **pass, 29 s** | no return in 60 min, step 19 |
+| `p113c1` | 113 | 1 | 5 | fp128 x5, x10 | **pass, 39 s** | no return in 15 min, step 31 |
+| `p237c1` | 237 | 1 | 10 | fp256 x10 | **pass, 133 s** | not run |
+| `p113c3` | 113 | 3 | 2 | fp128 x2 | no return in 28 min, step 13 | no return in 15 min, step 13 |
+| `p237c2` | 237 | 2 | 5 | fp256 x5 | no return in 15 min, step 31 | not run |
+| `p237c5` | 237 | 5 | 2 | fp256 x2 | no return in 15 min, step 13 | not run |
+
+**The obstacle, stated exactly.** Every failing task stalls inside the
+first cycle at which its assertion is active - step 13 where the
+interval is two passes, step 31 where it is five - never on the
+unrolling, which finishes in seconds. That is the first query that
+actually contains both multiplier arrays. The solver cannot match the
+two sides' partial products structurally, because the module's operands
+reach its `$mul` through registers and a variable-index chunk mux while
+the reference's are combinational slices of the same operand at a
+different width, so it bit-blasts a P x 24 array equality. The three
+that stall are the three that build more than one column at P >= 113;
+adding columns multiplies the number of such arrays in each query. Logs
+are under the scratch path in this session's notes; each is an sby
+workdir with the engine's own step-by-step trace.
+
+**The engine mattered more than the property did.** Every other proof in
+formal/ runs on bitwuzla, which is boolector's successor and faster on
+all of them. On this property they are not comparable: bitwuzla did not
+return on `p53c1` in **sixty minutes** and boolector closed the same
+task in **twenty-nine seconds**. On the same task with a five-minute
+bound each, yices, z3 and cvc5 all returned nothing, and the two AIG
+engines never reached a solver at all - `abc bmc3` and `aiger aigbmc`
+both fail in the model build with "Design contains 'x' or 'z' bits",
+eight seconds in. So `formal/mulpass_real.sby` carries its own
+`[engines]` line rather than inheriting the directory's, with the
+measurement written beside it. Six engines were tried; one worked.
+
+**The narrow-chunk file, for the record.** `formal/mulpass.sby` is the
+same single property with `CFT_MUL_MCH_FORMAL=4`, kept out of the gate
+because a narrowed chunk is not the tile's arithmetic. Re-run on
+bitwuzla with the geometry cross-check added: `n18c1` passes in 22 s,
+`n18c3` in 46 s, its `cover` task in 33 s, and the real-chunk `r49c2`
+in 93 s - but `n38c5`, five columns even at a four-bit chunk, did not
+return in 15 minutes. The claim in the 2026-09-06 entry that the narrow
+tasks are where the property closes is therefore only true of the
+narrow tasks with few columns; it is the column count, not the chunk
+width, that this property founders on.
+
+**Commissioning: six mutations, six refutations.** A decomposition can
+be wrong in a way a single property cannot - each lemma passing while
+the seam between them leaks - so each mutation was applied to a scratch
+copy of rtl/ and formal/ and run against the task that ought to catch
+it:
+
+| mutation | caught by | refuted at |
+|---|---|---|
+| `acc <= s[P+K:K]` clears bit 3 - one carry dropped per pass | `fold_53c1`, `fold_53c2` | step 19, step 13 |
+| the shift-out register keeps one stale low bit | `fold_53c1` | step 19 |
+| the level chain is read one enabled edge short | `fold_53c1` | step 19 |
+| the chunk group is selected one pass early (`pidx + 1`) | `sel_53c1`, `sel_53c2` | step 7, step 5 |
+| a column multiplies the wrong chunk of its own group | `sel_53c2` | step 5, on two columns at once |
+| **the harness's** own pass window is one cycle late (`ed[2]`) | `fold_53c1` | step 19 |
+
+The last row mutates nothing in the RTL. It moves the harness's own
+idea of which cycles belong to which operation, and if lemma A were
+checking arithmetic and not timing it would still have passed. It did
+not, so the fold's alignment to the pipeline enable is inside the
+claim.
+
+**A vacuity check that earned itself the same afternoon.** `chparam`
+with a selection that matches nothing is silent. An early
+`formal/mulexact.sby` used `chparam ... tb_*`, which matched nothing,
+and every task ran at the harness's default geometry and passed. The
+harness-side fix is `EXP_NP`. The general fix is in `formal/run.sh`:
+every task, old and new, is now checked after it runs against
+`<workdir>/model/design_prep.il` - the netlist sby handed the engine -
+for a minimum number of surviving `$assert` and `$cover` cells, so a
+task whose checks were dropped fails the gate even though the engine
+said pass. The pre-run preflight is kept for the four single-file
+harnesses; it cannot cover a model that only exists after a flatten and
+a cutpoint, and mirroring those commands in a second script would be a
+copy to drift. The same afternoon also cost an hour to a second silent
+failure: `connect -set` unsets every existing driver of its left-hand
+side, and a bare `assign qv = {qw7, ..., qw0}` in a harness makes `qv`
+and `qw0` one net as far as yosys' signal map is concerned, so the
+default quietly took the harness's own concatenation apart. Every
+`connect` in mulexact.sby now carries `-nounset`, with a comment
+saying why.
+
+**The gate.** `formal/run.sh` was seven verdicts and 33 seconds. It is
+now **27 of 27 in 14 minutes** on this host - 835 seconds of proof time
+plus the preflight - and it still exits nonzero unless every proof
+passes AND `negcontrol.sby`'s deliberately false property is refuted,
+which it was, at step 3, as always. Twenty of the twenty-seven verdicts
+and about thirteen of the fourteen minutes are cft_mulpass; the single
+most expensive task is `mulexact.sby fold_237c5` at 237 seconds, which
+is the widest in-pass tree the tile builds. One small correction went
+in with it: the verdict count is now counted rather than written down,
+because the line had said "11 of 11" while printing seven.
+
+**Not run.** The proofs pace `cft_mulpass` at exactly the live rung's
+pass count, which is what `cft_lanes` gives it; the module's header
+also claims that a lane seeing a LONGER enabled period still produces
+the right product by folding zeros, and that is not proven here.
+`mulpass_real.sby`'s three failing tasks were given 15-minute
+observation bounds rather than the full hour, except `p113c3` which got
+28 minutes and `p53c1` under bitwuzla which got the full 60; no attempt
+was made to find a bound at which they do return. No simulation, no
+synthesis and no board work is in this entry, and none of the
+2026-09-06 entry's area or bench numbers is re-measured or changed.

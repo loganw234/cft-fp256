@@ -1,0 +1,216 @@
+# Formal gate for rtl/cft_mulpass.sv - the iterated chunk-column
+# multiplier folds the pipe's own partial products to the same integer
+# the side-by-side array does, AT THE REAL 24-BIT CHUNK, for every pass
+# geometry cft_lanes can build.
+#
+# The whole claim in one property is a bounded model check across two
+# multipliers, which is the shape a SAT solver does worst at: at the
+# real chunk width it ran four hours without returning (formal/
+# mulpass.sby, docs/VALIDATION.md 2026-09-06). It is proven here as
+# three lemmas that between them contain no multiplier reasoning at
+# all. formal/README.md writes the composition out; the harness headers
+# carry the timing.
+#
+#   fold_*   tb_mulfold_formal   LEMMA A. dut.pcol[c] - the column
+#                                registers - are CUT, so the multiplier
+#                                leaves the netlist entirely (checked: 0
+#                                $mul cells after prep), and the harness
+#                                reads the free values the cut put
+#                                there. The property is that the tree,
+#                                the shift-accumulate and the level
+#                                chain deliver one operation's free
+#                                values, summed at their column weights,
+#                                at LEVEL - linear in those values.
+#   sel_*    tb_mulsel_formal    LEMMAS B and C. dut.a_r, dut.bsel_r and
+#                                dut.pcol[c] are PROBED. B: on pass p the
+#                                operands are the captured `a` and chunk
+#                                group p of the captured `b`, at every
+#                                offset in the interval including the
+#                                boundary cycle. C: the column register
+#                                holds those operands' product, an
+#                                unbuilt column holds zero, and a built
+#                                one is below 2^(P+24) - the last two
+#                                being lemma A's side-conditions. C's
+#                                reference product is written from the
+#                                DUT's own operand wires, so opt_merge
+#                                folds it onto the DUT's own $mul
+#                                (checked: COLS + 1 $mul cells, not
+#                                2*COLS + 1) and no multiplier is
+#                                reasoned about.
+#
+# The cut is yosys' `cutpoint` and the probes are its
+# `connect -nounset -set`, on the flattened design, because the frontend
+# gives formal code no other way to name a submodule's internals
+# (formal/README.md, "Why the FIFO engine is pdr"). `connect` aborts on
+# a name it cannot resolve; a probe left undriven becomes an
+# unconstrained $anyseq in sby's own model build, so a detached probe
+# refutes its assertion rather than passing emptily. rtl/cft_mulpass.sv
+# is read unmodified and no copy of it is made.
+#
+# `-nounset` is load-bearing, not tidiness. `connect -set` defaults to
+# unsetting every existing driver of its left-hand side, and a bare
+# `assign qv = {qw7, ..., qw0}` in the harness makes qv and qw0 the same
+# net as far as yosys' signal map is concerned - so the default took the
+# harness's own concatenation apart, left qv undriven, and every proof
+# failed on a counterexample that was the plumbing's. The probe wires
+# have no driver to unset, so the option costs nothing and says so.
+#
+# THE GEOMETRIES ARE EVERY ONE THE TILE BUILDS. cft_mulgeom.svh turns
+# (P, MUL_PASSES) into (COLS, passes); cft_lanes instantiates the fp64,
+# fp128 and fp256 rungs at P = 53, 113, 237 and MUL_PASSES 2, 5, 10
+# (fp32 is one chunk and never multi-pass). That is seven distinct
+# (P, COLS) pairs, all seven below, at CFT_MUL_MCH = 24:
+#
+#   53c2    P=53  COLS=2  2 passes, 1 tree level     fp64  at MUL_PASSES=2
+#   53c1    P=53  COLS=1  3 passes, no tree          fp64  at MUL_PASSES=5,10
+#   113c3   P=113 COLS=3  2 passes, 2 tree levels    fp128 at MUL_PASSES=2
+#   113c1   P=113 COLS=1  5 passes, no tree          fp128 at MUL_PASSES=5,10
+#   237c5   P=237 COLS=5  2 passes, 3 tree levels    fp256 at MUL_PASSES=2
+#   237c2   P=237 COLS=2  5 passes, 1 tree level     fp256 at MUL_PASSES=5
+#   237c1   P=237 COLS=1  10 passes, no tree         fp256 at MUL_PASSES=10
+#
+# The DUT is sequential and nothing about its initial state is assumed
+# (cft_mulpass has no reset), so these are bounded. Each fold depth
+# covers reset, the pipeline's fill and the whole enabled interval in
+# which the operation under test is presented at LEVEL: 7*NP + 2 steps.
+# Each sel depth covers three whole intervals: 5*NP + 2.
+#
+#   sby -f mulexact.sby fold_237c1        (and so on per task)
+#
+# The fc<n>/sc<n> tags are cumulative - a task carries fc1..fc<NC>,
+# NC = 2^ceil(log2 COLS) being the columns the module's tree actually
+# reads - because sby matches one task tag per line, so "every task with
+# at least this many columns" has to be a tag rather than a list.
+#
+# cft_mulgeom.svh is listed in [files] so the bare `include in both the
+# DUT and the harnesses finds it in the workdir, as seedop.sby does for
+# its ROM. Run from formal/ (run.sh does).
+
+[tasks]
+fold_53c2   fold chk fc1 fc2
+fold_53c1   fold chk fc1
+fold_113c3  fold chk fc1 fc2 fc3 fc4
+fold_113c1  fold chk fc1
+fold_237c5  fold chk fc1 fc2 fc3 fc4 fc5 fc6 fc7 fc8
+fold_237c2  fold chk fc1 fc2
+fold_237c1  fold chk fc1
+sel_53c2    sel  chk sc1 sc2 sm2
+sel_53c1    sel  chk sc1 sm1
+sel_113c3   sel  chk sc1 sc2 sc3 sc4 sm3
+sel_113c1   sel  chk sc1 sm1
+sel_237c5   sel  chk sc1 sc2 sc3 sc4 sc5 sc6 sc7 sc8 sm5
+sel_237c2   sel  chk sc1 sc2 sm2
+sel_237c1   sel  chk sc1 sm1
+cover_fold  fold fc1
+cover_sel   sel  sc1 sm1
+
+[options]
+chk: mode bmc
+cover_fold: mode cover
+cover_sel:  mode cover
+fold_53c2:  depth 16
+fold_53c1:  depth 23
+fold_113c3: depth 16
+fold_113c1: depth 37
+fold_237c5: depth 16
+fold_237c2: depth 37
+fold_237c1: depth 72
+sel_53c2:   depth 12
+sel_53c1:   depth 17
+sel_113c3:  depth 12
+sel_113c1:  depth 27
+sel_237c5:  depth 12
+sel_237c2:  depth 27
+sel_237c1:  depth 52
+cover_fold: depth 72
+cover_sel:  depth 52
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -defer -formal -sv cft_mulpass.sv
+fold: read_verilog -defer -formal -sv tb_mulfold_formal.sv
+sel:  read_verilog -defer -formal -sv tb_mulsel_formal.sv
+
+# The geometry. P and COLS are the harness's own parameters and the
+# only numbers in this file that are not derived from them; EXP_NP is
+# the pass count this file's table claims, which each harness re-derives
+# from cft_mulgeom.svh and refuses to elaborate on a disagreement. That
+# is not decoration: `chparam` with a selection that matches nothing is
+# silent, and a whole run at the default geometry passed once before
+# this check existed.
+fold_53c2:  chparam -set P 53  -set COLS 2 -set EXP_NP 2  tb_mulfold_formal
+sel_53c2:   chparam -set P 53  -set COLS 2 -set EXP_NP 2  tb_mulsel_formal
+fold_53c1:  chparam -set P 53  -set COLS 1 -set EXP_NP 3  tb_mulfold_formal
+sel_53c1:   chparam -set P 53  -set COLS 1 -set EXP_NP 3  tb_mulsel_formal
+fold_113c3: chparam -set P 113 -set COLS 3 -set EXP_NP 2  tb_mulfold_formal
+sel_113c3:  chparam -set P 113 -set COLS 3 -set EXP_NP 2  tb_mulsel_formal
+fold_113c1: chparam -set P 113 -set COLS 1 -set EXP_NP 5  tb_mulfold_formal
+sel_113c1:  chparam -set P 113 -set COLS 1 -set EXP_NP 5  tb_mulsel_formal
+fold_237c5: chparam -set P 237 -set COLS 5 -set EXP_NP 2  tb_mulfold_formal
+sel_237c5:  chparam -set P 237 -set COLS 5 -set EXP_NP 2  tb_mulsel_formal
+fold_237c2: chparam -set P 237 -set COLS 2 -set EXP_NP 5  tb_mulfold_formal
+sel_237c2:  chparam -set P 237 -set COLS 2 -set EXP_NP 5  tb_mulsel_formal
+fold_237c1: chparam -set P 237 -set COLS 1 -set EXP_NP 10 tb_mulfold_formal
+sel_237c1:  chparam -set P 237 -set COLS 1 -set EXP_NP 10 tb_mulsel_formal
+cover_fold: chparam -set P 237 -set COLS 1 -set EXP_NP 10 tb_mulfold_formal
+cover_sel:  chparam -set P 237 -set COLS 1 -set EXP_NP 10 tb_mulsel_formal
+
+fold: hierarchy -top tb_mulfold_formal
+sel:  hierarchy -top tb_mulsel_formal
+proc
+flatten
+fold: cd tb_mulfold_formal
+sel:  cd tb_mulsel_formal
+
+# LEMMA A: cut the column registers, and let the harness read the free
+# values the cut put there. `cutpoint` replaces each register's driver
+# with an unconstrained $anyseq, which leaves the multiplier that fed it
+# dangling for opt_clean; `connect -nounset -set` then aliases the
+# harness's own qw<c> onto the cut net, so the reference is built from
+# exactly the values the DUT's tree sees. All sixteen entries are cut;
+# the ones past the tree's own reach are dead either way.
+fold: cutpoint w:dut.pcol*
+fc1: connect -nounset -set \qw0 \dut.pcol[0]
+fc2: connect -nounset -set \qw1 \dut.pcol[1]
+fc3: connect -nounset -set \qw2 \dut.pcol[2]
+fc4: connect -nounset -set \qw3 \dut.pcol[3]
+fc5: connect -nounset -set \qw4 \dut.pcol[4]
+fc6: connect -nounset -set \qw5 \dut.pcol[5]
+fc7: connect -nounset -set \qw6 \dut.pcol[6]
+fc8: connect -nounset -set \qw7 \dut.pcol[7]
+
+# LEMMAS B and C: probe the operand registers and the column registers.
+sel: connect -nounset -set \probe_ar   \dut.a_r
+sel: connect -nounset -set \probe_bsel \dut.bsel_r
+sc1: connect -nounset -set \probe_pcol0 \dut.pcol[0]
+sc2: connect -nounset -set \probe_pcol1 \dut.pcol[1]
+sc3: connect -nounset -set \probe_pcol2 \dut.pcol[2]
+sc4: connect -nounset -set \probe_pcol3 \dut.pcol[3]
+sc5: connect -nounset -set \probe_pcol4 \dut.pcol[4]
+sc6: connect -nounset -set \probe_pcol5 \dut.pcol[5]
+sc7: connect -nounset -set \probe_pcol6 \dut.pcol[6]
+sc8: connect -nounset -set \probe_pcol7 \dut.pcol[7]
+
+cd ..
+fold: prep -top tb_mulfold_formal
+sel:  prep -top tb_mulsel_formal
+
+# The abstraction, checked on the model that is actually solved. A cut
+# that did not apply leaves the column multiplier in the netlist; a
+# reference product that opt_merge did NOT fold onto the DUT's own $mul
+# leaves twice as many. The sel counts are COLS + 1: the module's other
+# $mul is the chunk-group base address, pidx * K, which the cut removes
+# along with everything else but which the probes leave standing.
+fold: select -assert-count 0 t:$mul
+sm1:  select -assert-count 2 t:$mul
+sm2:  select -assert-count 3 t:$mul
+sm3:  select -assert-count 4 t:$mul
+sm5:  select -assert-count 6 t:$mul
+
+[files]
+../rtl/cft_mulpass.sv
+../rtl/cft_mulgeom.svh
+tb_mulfold_formal.sv
+tb_mulsel_formal.sv
