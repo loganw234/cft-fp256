@@ -43,7 +43,12 @@ module tb_mulpass_formal #(
     // still on its first assertion step after eight minutes - so it is
     // asked only where it is cheap. The column-sum reference below is
     // always asserted and is the equivalence the gate exists for.
-    parameter bit FULL = 1'b0
+    parameter bit FULL = 1'b0,
+    // the pass count the .sby expects of this geometry; 0 is not a pass
+    // count, so a task that forgot to set it cannot elaborate, and a
+    // task whose (P, COLS) do not give the pass count its own table
+    // claims cannot elaborate either
+    parameter int EXP_NP = 0
 ) (
     input logic         clk,
     input logic         rst_n,
@@ -55,6 +60,12 @@ module tb_mulpass_formal #(
   localparam int NP    = (cft_mul_chunks(P) + COLS - 1) / COLS;
   localparam int PHW   = (NP > 1) ? $clog2(NP) : 1;
   localparam int LEVEL = 5;
+
+  generate
+    if (EXP_NP != NP) begin : g_bad_geom
+      $error("EXP_NP disagrees with the pass count derived from P and COLS");
+    end
+  endgenerate
 
   // ---- the reset shape: low at the first step, high after ------------
   logic past_valid = 1'b0;
