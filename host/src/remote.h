@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "backend.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -71,8 +73,28 @@ extern "C" {
 #define CFTR_OP_FLAGS_TEST_SAVED 0x0045u
 #define CFTR_OP_BYE              0x00FFu
 
-/* The caps block a HELLO or CAPS response carries. */
-#define CFTR_CAPS_BYTES     56u
+/* The caps block a HELLO or CAPS response carries.
+ *
+ * IT GROWS BY APPENDING, and a client reads what it recognises out of
+ * whatever length arrived: a block SHORTER than this one is a server
+ * that predates the missing fields, and they read as zero, which
+ * cft_caps documents as "unknown" and nothing enforces anything
+ * against. That is a property of the block, not of the frame, so
+ * CFTR_PROTO_VERSION does NOT move for it - the proto field is
+ * compared for equality at both ends, so bumping it would turn "an
+ * older server answers with a shorter block" into "an older server
+ * refuses the connection", which is the outcome the tolerance exists
+ * to avoid. What it cannot do is make an OLDER client read a longer
+ * block; that pairing is already refused one field earlier, by the
+ * ABI equality check in cftr_recv_frame, since appending to cft_caps
+ * is an ABI minor step.
+ *
+ * V1 (56 bytes, protocol 1 as first shipped): format_mask, op_groups,
+ * tiles, device_version, flags_readable, abi, backend[32].
+ * V2 (72): + max_deposits, max_insns, max_consts, seq_features - the
+ * sequencer capacities of cft_caps, in the same units. */
+#define CFTR_CAPS_BYTES_V1  56u
+#define CFTR_CAPS_BYTES     72u
 #define CFTR_BACKEND_NAME   32u
 
 /* The default port the server listens on. A choice, not a derivation:
@@ -186,12 +208,14 @@ int cftr_recv_frame(cftr_sock s, cftr_hdr *h, uint8_t **payload,
 /* ---- the client backend, as device.c sees it ------------------------ *
  *
  * The same shapes as the cftx_ functions in backend.h, so that
- * device.c's dispatch to the two device backends reads alike. `url`
- * is the whole "cft://host:port" string. */
+ * device.c's dispatch to the two device backends reads alike - which
+ * is why this header includes that one rather than restating
+ * cft_seq_caps. `url` is the whole "cft://host:port" string. */
 int  cftr_is_url(const char *artifact);
 int  cftr_open(const char *url, int index, void **out,
                uint32_t *format_mask, uint32_t *op_groups,
-               uint32_t *tiles, uint32_t *version, int *flags_readable);
+               uint32_t *tiles, uint32_t *version, int *flags_readable,
+               cft_seq_caps *seq);
 void cftr_close(void *hw);
 int  cftr_run(void *hw, int op, int fmt, int rnd,
               const void *a, const void *b, const void *c, void *d,

@@ -120,7 +120,11 @@ typedef enum cft_status {
     CFT_OK = 0,
     CFT_ERR_INVALID_ARGUMENT,
     CFT_ERR_UNSUPPORTED,   /* op or format not available on this device;
-                            * ask cft_supports() first */
+                            * ask cft_supports() first. Also a program
+                            * past a capacity this device publishes -
+                            * ask cft_get_caps() first, and see
+                            * cft_last_error() for which cap and by how
+                            * much */
     CFT_ERR_NO_DEVICE,
     CFT_ERR_ARTIFACT,      /* a file this library was told to load is
                             * missing, unreadable, or not what it claims:
@@ -396,6 +400,47 @@ typedef struct cft_caps {
                                 * argument of cft_run is left untouched
                                 * and you must not treat it as clean */
     char     backend[32];      /* "software", "xrt", ... */
+
+    /* ---- the sequencer's on-chip capacities (appended, ABI 0.8) ----
+     *
+     * What a program image may declare and still be accepted HERE.
+     * They are not part of the program model - docs/SEQUENCER.md's
+     * contract fixes what an instruction MEANS, not how many of them
+     * a particular tile holds - so they differ between backends, and
+     * a program that runs on one device is not thereby a program that
+     * fits another. Before these fields existed a tool had to guess:
+     * the software backend accepts a million deposit slots a lane, a
+     * tile holds sixty-four, and the first symptom of the difference
+     * was the tile refusing the image with STATUS[3] and no
+     * explanation (docs/studies/OPT-D-contract.md 0.1).
+     *
+     * ZERO MEANS UNKNOWN, not zero capacity, and nothing is enforced
+     * against an unknown. Only one thing can produce it today: a
+     * remote server whose caps block predates these fields.
+     *
+     * cft_program_load refuses an image past any of them with a
+     * message that names the cap and both values, so a tool learns
+     * which knob to turn instead of receiving a status bit.
+     *
+     * A caller compiled against the older struct passes the older
+     * struct_size and never sees these; that is what the size
+     * handshake is for. */
+    uint32_t max_deposits;     /* deposit slots a lane, the ceiling on
+                                * a program header's max_deposits */
+    uint32_t max_insns;        /* instructions in one program image */
+    uint32_t max_consts;       /* constants an instruction can ADDRESS.
+                                * The ka/kb/kc bits redirect the
+                                * four-bit operand fields at the
+                                * constant bank, so this is 16 both in
+                                * the tile and in this library, whatever
+                                * a header's n_consts says - the
+                                * ceiling host/tools/enclose.c chunks
+                                * its Horner kernel around */
+    uint32_t seq_features;     /* CAPS[7:4] of the device: sequencer
+                                * features beyond the base program
+                                * model. Zero in every build shipped so
+                                * far; ask before using one, exactly as
+                                * with cft_supports and an opcode */
 } cft_caps;
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);

@@ -1582,3 +1582,100 @@ runs the replay and one workload chain both ways; and `verify/run.sh`'s
 `remote` stage runs that in the quick budget. The full-set replay, the
 five workloads' chains across a Windows-to-WSL boundary, and the rates
 are in docs/REMOTE.md.
+
+## The device's on-chip capacities, published (2026-09-07)
+
+Item 3 of docs/studies/OPT-D-contract.md, and the defect its section
+0.1 found: **the tile refused a program it could not hold, with a
+status bit and no explanation, and no host could ask which tile it
+had.** `rtl/cft_krnl.sv` instantiates the sequencer with 64 deposit
+slots a lane and refuses a bigger header at its own header check;
+`host/src/program.c` accepted 2^20; and `cft-zoom`'s default of
+`--steps-per-call 1024` is 2,048 slots a lane - thirty-two times the
+tile's - so the tool was green on every machine that has no card and
+would have been refused by the first one that does.
+
+`cft_caps` grows by four fields, which is what its `struct_size`
+handshake exists for; a caller compiled against the older struct
+passes the older size and never sees them.
+
+    uint32_t max_deposits;   /* deposit slots a lane */
+    uint32_t max_insns;      /* instructions in one image */
+    uint32_t max_consts;     /* constants an instruction can ADDRESS */
+    uint32_t seq_features;   /* CAPS[7:4], zero in every build so far */
+
+**Zero means unknown, not zero capacity**, and nothing is enforced
+against an unknown. One thing produces it: a remote server whose
+`HELLO` caps block predates the fields (docs/REMOTE.md), and a device
+whose `VERSION` predates them, which is every card-day 0x410 image.
+
+`max_consts` is the number of constants an instruction can *address*,
+not the `n_consts` a header may declare. The `ka`/`kb`/`kc` bits
+redirect four-bit operand fields at the constant bank, so the answer
+is 16 on the tile (`rtl/cft_seq.sv`'s `KREG`) and 16 here, whatever
+the header says; `host/tools/enclose.c` already chunks its Horner
+kernel into eight interval coefficients because of it.
+
+**Each backend reports what it enforces and enforces what it
+reports.** The XRT backend decodes `CAPS[7:4]` and `CAPS[27:16]`,
+three four-bit exponents and a feature nibble, and does not
+transcribe a 64 into C. The remote backend takes them from the
+handshake. The software backend reports its own - 2^20 deposit slots
+a lane, the header field's own 2^32-1 instructions, 16 addressable
+constants - from `host/src/program.c`, which is the file that
+enforces them, so the number a host is told and the number a program
+is held to are one declaration.
+
+**The software backend was not narrowed to the tile's 64**, and that
+is a decision rather than an omission. It models the program model,
+not one implementation of it; a smaller tile is meant to be a
+conforming tile (docs/ROADMAP.md's third tier); and every recorded
+workload chain - docs/REMOTE.md's table, `bindings/wasm/demos_chains.json` -
+was produced through its accepted set, so narrowing it would change
+what those hashes cover in order to make a statement a host can now
+simply ask for. "It ran on software" therefore still does not mean
+"it fits a tile". What changed is that finding out costs one call
+instead of a card.
+
+**`cft_program_load` refuses, not `cft_program_run`.** It already
+takes the device, and already refuses a precision the device does not
+carry; a program is built once and run many times, so a tool that
+will not fit should learn before it stages operands; and a handle
+that loaded and cannot run is a worse contract than a load that
+failed. The status is `CFT_ERR_UNSUPPORTED` - the same answer as a
+format the device lacks, for the same reason - and `cft_last_error()`
+carries the cap, both numbers and the field that would have answered
+in advance:
+
+    this program's max_deposits is 2048; this device's is 64 (deposit
+    slots a lane). Ask cft_get_caps - cft_caps.max_deposits - before
+    building one: a device refuses an image past its capacities
+    itself, with a status bit and no explanation
+
+That message is the library's own, not a backend's: `cft_last_error()`
+now has a third source, cleared the moment anything reaches a device
+backend, so a refusal libcft made never goes on explaining someone
+else's failure.
+
+**The two workload tools size themselves from the answer.** `cft-zoom`
+took `--steps-per-call` from a `#define TILE_MAX_DEPOSITS 64` copied
+out of the RTL; it now reads `cft_caps.max_deposits`, and when the
+device's budget is smaller than its default it uses `cap / 2` (two
+deposits a trip) and says so on stderr, because the trip count changes
+only how many calls a run takes and not what it computes. A value the
+user typed is refused instead, naming the cap - running something
+other than the command line says is how a measurement stops meaning
+what it claims. `cft-orbits` refuses either way: its sample count is
+part of what is recorded, so there is nothing to resize.
+
+How it is held: `host/tests/device_test.c` gained "the caps a backend
+reports are the caps it enforces" - a program at each cap loads and
+one past it is refused - run against both handles, and through
+`cft-serve` on loopback for the remote one; `host/tests/remote_test.c`
+checks the caps block end to end and that the client enforces what the
+block told it; `tb/test_krnl.py` parses `rtl/cft_krnl.sv`'s
+localparams and checks the `CAPS` readback against them rather than
+against a copied literal. What is NOT tested, and says so in its own
+output rather than skipping quietly: an image past the software
+backend's instruction cap, which would be 32 GiB, and a constant index
+past 15, which does not fit the instruction's four-bit field.

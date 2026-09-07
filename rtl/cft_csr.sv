@@ -73,6 +73,26 @@
 //                 before issuing; the alternative is guessing from
 //                 VERSION, which stops working the moment one build
 //                 ships without a group.
+//                 [7:4]   sequencer feature nibble, all zero today;
+//                         the bit assignments are reserved at the
+//                         seq_feat port below
+//                 [19:16] log2 of the deposit slots a lane (MAXD)
+//                 [23:20] log2 of the instruction capacity (IMEM_D)
+//                 [27:24] log2 of the constants an instruction can
+//                         ADDRESS (the ka/kb/kc index field's width)
+//                 [31:28] reserved, zero
+//                 The three capacity fields carry an EXPONENT, not a
+//                 count, which is what makes them fit four bits each
+//                 and is honest because every one of them is a power
+//                 of two by construction (a memory depth and a field
+//                 width). They are what a host reads to size a
+//                 program BEFORE it builds one: the tile refuses an
+//                 image past any of them at its header check with
+//                 STATUS[3], and a refusal on card day is a worse
+//                 answer than a sizing calculation at startup.
+//                 They are values inside a register that already
+//                 exists, so they do NOT move VERSION - VERSION
+//                 guards the map.
 //   0x50  STATUS  RO: sticky faults from the last run, cleared by
 //                 hardware at an accepted ap_start. A run that ends
 //                 with STATUS non-zero either computed on data the
@@ -158,6 +178,27 @@ module cft_csr (
                                      // overflow, see STATUS
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     input  logic [7:0]  op_caps,     // constant; opcode groups present
+    // CAPS[7:4]: what the SEQUENCER can do beyond the base program
+    // model, as opposed to whether one exists at all (that is
+    // op_caps[7]). All zero in this build; the assignments are
+    // reserved here so that two builds cannot spend the same bit on
+    // two features:
+    //   [4] wide constant index - an instruction addresses more than
+    //       the 16 constants a 4-bit operand field reaches
+    //   [5] init block - a program carries initial register values
+    //       rather than taking three from the a/b/c streams
+    //   [6] per-lane flags - the run reports each lane's exceptions,
+    //       not only their union
+    //   [7] static deposit - a deposit's slot is named by the
+    //       instruction instead of by a running per-lane counter
+    // A host reads them the way it reads op_caps: ask, then issue.
+    input  logic [3:0]  seq_feat,    // constant; CAPS[7:4]
+    // The sequencer's on-chip capacities, as LOG2, from the very
+    // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
+    // the memories it describes without the elaboration changing too.
+    input  logic [3:0]  cap_maxd,    // CAPS[19:16] log2(MAXD)
+    input  logic [3:0]  cap_imem,    // CAPS[23:20] log2(IMEM_D)
+    input  logic [3:0]  cap_kreg,    // CAPS[27:24] log2(addressable consts)
     output logic [7:0]  cfg_op,
     output logic [3:0]  cfg_prec,
     output logic [2:0]  cfg_rnd,
@@ -350,7 +391,8 @@ module cft_csr (
           10'h010: s_axi_control_rdata <= {27'b0, eng_flags};
           10'h011: s_axi_control_rdata <= MAGIC;
           10'h012: s_axi_control_rdata <= VERSION;
-          10'h013: s_axi_control_rdata <= {16'b0, op_caps, 4'b0, prec_caps};
+          10'h013: s_axi_control_rdata <= {4'b0, cap_kreg, cap_imem, cap_maxd,
+                                           op_caps, seq_feat, prec_caps};
           10'h014: s_axi_control_rdata <= {27'b0, eng_err};
           10'h015: s_axi_control_rdata <= prog_q[31:0];
           10'h016: s_axi_control_rdata <= prog_q[63:32];

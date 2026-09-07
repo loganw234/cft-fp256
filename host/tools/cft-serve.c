@@ -189,6 +189,15 @@ static void caps_block(conn *C, uint8_t out[CFTR_CAPS_BYTES])
             n = CFTR_BACKEND_NAME - 1;
         memcpy(out + 24, caps.backend, n);
     }
+    /* Appended after the name, which is why the block grew rather than
+     * changed shape: a client that knows only the first 56 bytes reads
+     * the same six fields from the same offsets. Its own caps say what
+     * IT enforces, so a client holding a program to them is holding it
+     * to the device this server actually has. */
+    cftr_put32(out + 56, caps.max_deposits);
+    cftr_put32(out + 60, caps.max_insns);
+    cftr_put32(out + 64, caps.max_consts);
+    cftr_put32(out + 68, caps.seq_features);
 }
 
 /* ---- the handlers ------------------------------------------------------ *
