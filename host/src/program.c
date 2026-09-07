@@ -85,7 +85,9 @@
  * unreachable. */
 #define SEQ_MAX_DEPOSITS (1u << 20)
 #define SEQ_IMAGE_INSNS  0xFFFFFFFFu
-#define SEQ_ADDR_CONSTS  16u
+#define SEQ_ADDR_CONSTS  256u  /* with kx (2026-09-07) an instruction's
+                                * 8-bit indices reach the whole bank;
+                                * the 4-bit fields still reach 16 */
 
 #define BLOCK_LANES      64
 
@@ -336,9 +338,10 @@ void cft_sw_seq_caps(cft_seq_caps *out)
     out->max_deposits = SEQ_MAX_DEPOSITS;
     out->max_insns    = SEQ_IMAGE_INSNS;
     out->max_consts   = SEQ_ADDR_CONSTS;
-    /* No sequencer feature beyond the base program model is
-     * implemented here. The bit assignments are in rtl/cft_csr.sv. */
-    out->features     = 0u;
+    /* This executor decodes kx (bit 30: 8-bit constant indices in the
+     * immediate) and implements IMUL (opcode 30). The bit assignments
+     * are rtl/cft_csr.sv's, surfaced by cft.h. */
+    out->features     = CFT_SEQ_FEAT_WIDE_CONST | CFT_ALU_EXT_IMUL;
 }
 
 /* A program image against the capacities the device it was loaded for
@@ -385,13 +388,34 @@ static cft_status seq_check_const_index(cft_device *dev,
     cft_seq_caps c;
     uint32_t pc;
     cft_device_seq_caps(dev, &c);
-    if (!c.max_consts)
-        return CFT_OK;
     for (pc = 0; pc < p->n_insns; pc++) {
         seq_insn d;
         int idx = -1;
         seq_decode(p->insns[pc], &d);
         if (d.ctrl)
+            continue;
+        /* A feature the device does not publish is ABSENT, not
+         * unknown: an old bitstream's operand mux would read a kx
+         * instruction's four-bit fields and compute on the wrong
+         * constants without a fault, and an integer group without
+         * IMUL answers opcode 30 with the unassigned-opcode result.
+         * Neither is a refusal the tile can make, so it is made here. */
+        if (d.kx && !(c.features & CFT_SEQ_FEAT_WIDE_CONST)) {
+            cft_set_error("instruction %lu uses indexed constants (kx, bit "
+                          "30) and this device does not publish the "
+                          "feature (CAPS[4] clear, cft_caps.seq_features "
+                          "bit 0); build the program without kx",
+                          (unsigned long)pc);
+            return CFT_ERR_UNSUPPORTED;
+        }
+        if (d.op == 30 && !(c.features & CFT_ALU_EXT_IMUL)) {
+            cft_set_error("instruction %lu is IMUL (opcode 30) and this "
+                          "device does not implement it (CAPS[28] clear, "
+                          "cft_caps.seq_features bit 4)",
+                          (unsigned long)pc);
+            return CFT_ERR_UNSUPPORTED;
+        }
+        if (!c.max_consts)      /* unknown: nothing enforced */
             continue;
         if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
         if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;

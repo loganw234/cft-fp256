@@ -40,7 +40,7 @@ typedef struct cft_seq_caps {
     uint32_t max_deposits;
     uint32_t max_insns;
     uint32_t max_consts;   /* addressable, not the header's n_consts */
-    uint32_t features;     /* CAPS[7:4] */
+    uint32_t features;     /* CAPS[7:4] in bits 3:0, CAPS[31:28] in 7:4 */
 } cft_seq_caps;
 
 /* Open an artifact. On success fills every out-parameter:

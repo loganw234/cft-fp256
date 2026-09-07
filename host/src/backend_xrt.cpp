@@ -497,7 +497,9 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
          * the behaviour that tile had before the fields existed. The
          * card-day images are 0x410 and are exactly that case. */
         const uint32_t sizes = (caps >> 16) & 0xFFFu;
-        seq->features = (caps >> 4) & 0xFu;
+        /* The feature nibble, and above it the ALU extensions of
+         * CAPS[31:28] - IMUL is bit 28, cft.h's CFT_ALU_EXT_IMUL. */
+        seq->features = ((caps >> 4) & 0xFu) | (((caps >> 28) & 0xFu) << 4);
         if (sizes == 0) {
             seq->max_deposits = 0;
             seq->max_insns    = 0;

@@ -5631,3 +5631,238 @@ and gated in simulation, and MEASURED only on the tip side. No frequency
 claim is made for it, and none should be quoted until the pair exists -
 this is the design whose out-of-context proxy has mispredicted the shell
 by 0.88 ns once already.
+
+## 2026-09-07 - two instructions the atlas port asked for: IMUL, and constants addressed through the immediate
+
+docs/ATLAS.md's census of atlas-engine against this ISA found four
+gaps. Two are now built, golden model first: **`IMUL`**, opcode 30,
+the integer group's 32-bit low multiply, and **`kx`**, instruction bit
+30, which moves the three operands' constant indices into the
+immediate and takes the addressable constant bank from sixteen to 256.
+docs/studies/OPT-D-contract.md ranked them 2 and 1 and set the four
+measurements below; this entry is what they returned.
+
+**The encodings, exactly.** `IMUL` is opcode 30 in the same 8-bit
+space every other ALU opcode lives in: `d = ((a[31:0] * b[31:0]) mod
+2^32)`, zero-extended to the format width, at every format. Thirty-two
+bits and not `W`, which is the whole design decision - the caller is
+`lowbias32`, a 32-bit hash whose value has to agree with a GPU
+computing it on a `uint`, and a `W`-bit low product would be a 256x256
+multiplier at binary256 for nobody. Quiet always, attribute-
+independent, `c` unread; signedness does not enter, because the low 32
+bits of a two's-complement product are the same bits either way.
+
+`kx` is bit 30, which was reserved-must-be-zero. When it is set the
+constant indices for the three operands come from `imm[7:0]`,
+`imm[15:8]` and `imm[23:16]` instead of from the four-bit
+`ra`/`rb`/`rc` fields; an operand whose `k` bit is clear still names a
+register through its own field. The canonicity refusals are four more
+applications of the rule docs/SEQUENCER.md already states rather than
+a new one: under `kx`, the four-bit field of an operand that takes its
+index from `imm` must be zero, the `imm` byte of an operand that names
+a register must be zero, `imm[31:24]` must be zero, and `kx` set with
+no operand naming a constant is refused because the bit then selects
+nothing and the instruction has a second encoding. `kx` on a control
+instruction is refused the way `ka` on a `DEPOSIT` always was.
+
+**The version guard already existed, and only covers half.** A loader
+that predates `kx` reads bit 30 as reserved and refuses the program,
+so no program-header VERSION bump is needed and none was made. An old
+BITSTREAM has no such rule - its operand mux would ignore bit 30 and
+read the four-bit field - so what protects a device is a CAPS bit, and
+CAPS publishes neither feature yet. Nothing in the library issues
+`IMUL` or `kx` to a device on its own initiative; `cft_supports`
+answers no for opcode 30 on every device; and `cft-enclose` says so
+where it probes.
+
+**Where it landed.** `python/cft_golden/softfloat.py` gains `imul()`,
+and `seq.py` the `kx` decode, a `sources()` resolver, the refusals and
+an opt-in `extended=True` arm on the fuzz generator - opt-in because
+the default path must draw nothing new, or `tb/test_seq_core.py`'s
+fixed-seed corpus would quietly stop being the 62 programs the RTL has
+been held to. `host/src/softfloat.c` is one case in the integer
+dispatch. `host/src/program.c`'s decoder, validator and executor learn
+`kx` and resolve the three operand sources once per instruction rather
+than once per lane. `rtl/cft_simpleops.sv` computes the product from
+three 16x16 partial products - the fourth lands entirely at bit 32 and
+above and is not computed - on the precomputed-result sideband the
+rest of the integer group already uses, so the fp datapath is
+untouched. `rtl/cft_seq.sv` grows `KREG` from 16 to `KMEM_D`, muxes
+the index, and moves the bank read off the issue path.
+
+**That last move is a saving.** The bank was read combinationally into
+the issue registers once per BEAT, for a value that cannot change
+during a run; it is now read once per INSTRUCTION, in its own
+registered process, in the shadow of the fetch cycle that already
+existed. No cycle was added and none was removed - the benches score
+identical results. What a 256-entry bank does cost is memory: 256 x
+256 bits with three read ports, on the order of 6 RAMB36 where 512 B
+of LUTRAM stood. **No synthesis was run** - the brief forbade Vivado
+on this host - so that is arithmetic on the array's shape, not a
+measurement, and the timing effect is unmeasured. What was measured is
+that the change costs the FRONT END nothing: `cft_seq` alone through
+`read_verilog; hierarchy; proc; opt_clean; stat` takes 8.4 s and
+82 MB against the pre-change file's 6.7 s and 83 MB, and `kmem` stays
+a memory in both rather than being unrolled into registers.
+
+### A bug the feature found on the way, older than the feature
+
+`cft_seq`'s image parser peels one field per cycle and raises `rready`
+only when the parse window is too empty to peel again. The condition
+that decided "too empty" was eight bytes, at every element size. That
+is right at fp64 and wider, where a constant is at least eight bytes,
+and one beat too eager at fp32: the window still held four bytes, the
+parser peeled instead of absorbing, and the beat the memory had
+already handed over on that cycle's handshake fell on the floor. **Any
+fp32 program whose CONSTANT REGION spans more than one beat starved
+forever** - a hang, not a wrong answer, and the module's own header
+had warned about exactly this failure mode for the instruction stream.
+
+Nothing had ever reached it. Every directed case in
+`tb/test_seq_core.py` and every program in the fuzz corpus carries four
+constants or fewer, which is sixteen bytes at fp32 and never crosses a
+32-byte beat; the enclose workload's chunked Horner carries sixteen,
+which does cross a beat at binary256 - but there `esz` is 32 and the
+old condition was correct. The first bench case to load a bank longer
+than a beat at fp32 was written for indexed constants and hung on the
+spot, at 40 constants and 160 bytes. The condition is now the size of
+the NEXT field rather than a constant eight, and the regression that
+finds it lives in `constants_and_rounding` at all four element sizes,
+with banks of 40/20/12/6 - deliberately NOT a `kx` case, because the
+bug is the parser's and predates the feature.
+
+### The four measurements docs/studies/OPT-D-contract.md set
+
+All four on the software backend, this host, 2026-09-07.
+
+**1. The chain is unchanged - the gate.** `cft-enclose --engine
+program` prints the same SHA-256 chain at every format that it printed
+before, and the same one `bindings/wasm/demos_chains.json` recorded on
+2026-09-04. Twenty chains were compared over two engines, four formats
+and two degrees; none moved. `node bindings/wasm/verify_demos.mjs`
+reports 28 checks and no failures over all eleven demo configurations,
+each chain matching both the C tool and the recorded file. `make -C
+host enclosetest` is **2,660 comparisons, 0 failures**, now including a
+section that holds the single-program and chunked Horner shapes to
+byte-identical records at fp256 degree 23 and fp32 degree 127.
+Indexed constants reorder nothing and re-associate nothing, so a
+changed chain would have been a bug and not a design question.
+
+**2. The call count collapses.** `--degree 127`, 4,097 items, batch
+512: **16 chunk programs and 144 library calls become one program and
+9** - one call a batch, which is the floor. At the tool's default
+degree 23 the whole three-kernel run at 17 items goes 95 -> 93 calls at
+fp32 and 359 -> 357 at fp256; the series kernel's divisions dominate
+that configuration and there is little chunking left to remove.
+
+**3. The frames collapse, from the server's own log.** `cft-serve` on
+loopback, fp64, degree 127, 32,769 points, batch 512, counted per
+opcode from `--verbose`: the Horner kernel's program traffic falls
+from **3,120 frames to 67**. The remote backend caches one program
+image, so sixteen images cycling thrash that cache and each of the
+1,040 calls costs `PROG_FREE`, `PROG_LOAD`, `PROG_RUN`; one image pays
+that once and then 65 bare `PROG_RUN`s. Whole-connection frames go
+167,381 -> 164,328, a difference of 3,053, which is 3,120 minus 67 and
+nothing else: the 163,968 `RUN` frames of setup are identical either
+way and dwarf the kernel at this point count. Wall clock over loopback
+11.41 s -> 10.02 s, same chain.
+
+**4. The arithmetic intensity crosses the line.** A program issues
+`1 + 4 * steps` ALU instructions per lane against five element
+transfers - three stream loads in, two deposits out - and
+`cft-enclose` now prints both, from the program it actually built and
+cross-checked against the instruction count that program carries:
+
+| shape | steps | ALU instructions | per element moved |
+|---|---|---|---|
+| chunked | 8 | 33 | 6.6 |
+| one program, degree 23 | 24 | 97 | 19.4 |
+| one program, degree 127 | 128 | 513 | **102.6** |
+
+docs/SEQUENCER.md's crossover is K ~ 30. The chunked kernel sat at a
+fifth of it; a degree-127 polynomial as one program is **3.4x past
+it**, and is the first table-driven kernel here to cross it at all.
+Degree 23 does not cross it even as one program, which is worth saying
+plainly: the feature raises the ceiling, it does not raise every
+kernel through it. The tile's capacities are the next limit and they
+are comfortable - 516 instructions of `IMEM_D`'s 1,024, 256 constants
+of `KMEM_D`'s 256 - which is why the tool caps a program at 128
+coefficients and chunks above that.
+
+### The gates
+
+Golden model, `python/tests`: **2,020 passed, 5 skipped** (2,011 and 5
+before; the nine are the kx and IMUL properties, including one that
+asserts the default fuzz corpus is byte-identical to the old one and
+one that runs `lowbias32` as a program against Python's own integers).
+
+The runner's `seq` stage - `host/tests/seq_check.py --trials 250
+--formats fp32 fp64 fp128 fp256`, now alternating the old corpus with
+an extended one that emits `IMUL` and `kx`: **731 programs run through
+both implementations, 269 refused by both; 319 of them crossed
+libcft's 64-lane block boundary; 500 programs drawn from the extended
+corpus: 268 IMUL instructions, 780 indexed-constant instructions, 515
+constant indices above 15; libcft and the golden model agree on every
+program: deposits, counts, flags and status.** The stage now fails
+loudly if the extended corpus stops producing either feature, because
+a differential that covers nothing new still passes.
+
+cocotb, Icarus, in `cft-sim`: `simpleops` 6/6 (a new `test_imul`
+against the golden model at all four rungs over 6,225 operand pairs,
+24,900 comparisons, with random junk in the bits above 31 that the
+32-bit definition promises not to read); `seq_core` 10/10 (a new
+`indexed_constants_and_imul` suite: constants 16..255 on each of the
+three operand ports at fp32/fp64/fp256, the `kx` and plain forms
+compared where both can encode the operand, a three-entry bank in a
+256-entry memory, IMUL on stream operands at all four rungs, and
+`lowbias32` as a program); `krnlseq` 1/1, `seqbanks` 1/1, `krnl` 2/2.
+
+`make -C host test`: api-test all contract checks passed, with three
+lines moved because 31 is now the first unassigned opcode. `make -C
+host reducetest`: 12,696 reductions, 0 failures. The workloads:
+COLLATZ, ORBITS, ZOOM and MERSENNE CHECK OK, unchanged chains
+throughout.
+
+The conformance round trip, which is where an assigned opcode is
+easiest to get wrong: a freshly generated two-format set replays
+**2,800 cases, all matching**, with 40 `imul` cases and 40
+`reserved31` cases per format; and the same set with `imul` renamed
+back to `reserved30` is REFUSED by name - "this set records an opcode
+as reserved that the contract has since assigned". That refusal is why
+`cft_op_name` had to learn the name today rather than when CAPS
+publishes it.
+
+**Lint.** `make yosys-lint` in the cft-sim image on the branch, re-run
+by the integrator after the session was stopped: exit 0, the
+pre-existing memory-replacement warnings in `cft_lanes.sv` only.
+
+**Formal, not closed.** `formal/imul.sby`'s `value` task - three 16x16
+partial products against one 32x32 multiply, truncated - ran
+twenty-six minutes under bitwuzla without returning and was stopped;
+the `check` task, the decode, the zero extension and the 32-bit rule
+as a self-miter, was still waiting on the solver after sixteen
+minutes in the agent's last attempt and after thirty in the
+integrator's, on a box carrying other agents' simulations. Neither is
+in the gate: the harness and the .sby stay in the tree with `sby -f
+imul.sby check` and `value` to try again, and IMUL's value rests on
+`tb/test_simpleops.py`'s `test_imul` - 6,225 operand pairs at four
+rungs against the golden model - and on `host/tests/seq_check.py`'s
+differential.
+
+### What was not run, and why
+
+- **No synthesis and no timing.** No Vivado on this host by the
+  brief's rule, so the RAMB36 estimate for the widened bank is
+  arithmetic and the registered bank read's effect on the critical
+  path is unmeasured. The datapath and array studies own both.
+- **No hardware.** No hw_emu and no card; the RTL claims here are
+  simulation against the golden model, which is what every other RTL
+  claim in this file rests on until a bitstream exists.
+- **No CAPS bit, no VERSION step, and no rebuilt wasm module**, all
+  three deliberately and all three the integrator's. The last one has
+  a consequence worth naming: `bindings/node/cft_node.wasm` was built
+  on 2026-09-04 and its embedded conformance replayer does not know
+  the name `imul`, so the `node` and `wasm` verify stages refuse a
+  freshly generated vector set with "unknown opcode name" until the
+  module is rebuilt and its recorded SHA re-recorded. That is the same
+  step 24, 26 and 28 each required when they were assigned.

@@ -85,10 +85,26 @@ def _localparam(path, name):
     """The integer value of `localparam int <name> = <n>;` in a file."""
     import re
     src = path.read_text(encoding="utf-8")
-    m = re.search(r"^\s*localparam\s+int\s+%s\s*=\s*(\d+)\s*;" % name,
+    m = re.search(r"^\s*localparam\s+int\s+%s\s*=\s*(\d+|[A-Za-z_]\w*)\s*;" % name,
                   src, re.MULTILINE)
     assert m, f"{path.name} has no `localparam int {name}`"
-    return int(m.group(1))
+    v = m.group(1)
+    if v.isdigit():
+        return int(v)
+    # `localparam int KREG = KMEM_D;` - resolve one level through the
+    # module's own parameter list, which is where cft_seq keeps it.
+    m2 = re.search(r"\bparameter\s+int\s+%s\s*=\s*(\d+)" % v, src)
+    assert m2, f"{path.name}: {name} = {v}, and {v} is not a literal parameter"
+    return int(m2.group(1))
+
+
+def _port_literal(path, port):
+    """The value of a constant 4-bit port wired as `.<port>(4'bxxxx)`."""
+    import re
+    src = path.read_text(encoding="utf-8")
+    m = re.search(r"\.%s\(4'b([01]{4})\)" % port, src)
+    assert m, f"{path.name} does not wire .{port}(4'b....)"
+    return int(m.group(1), 2)
 
 
 def seq_caps_expected():
@@ -112,7 +128,8 @@ def seq_caps_expected():
                     ("SEQ_KMEM_D", kmem)):
         assert v == 1 << (v.bit_length() - 1), (
             f"{name}={v} is not a power of two; CAPS publishes log2")
-    return 0, maxd.bit_length() - 1, imem.bit_length() - 1, kidx
+    feat = _port_literal(RTL / "cft_krnl.sv", "seq_feat")
+    return feat, maxd.bit_length() - 1, imem.bit_length() - 1, kidx
 
 
 def check_seq_caps(caps):
@@ -126,8 +143,10 @@ def check_seq_caps(caps):
         f"log2 MAXD {got[1]} (want {l_maxd}), log2 IMEM_D {got[2]} "
         f"(want {l_imem}), log2 addressable consts {got[3]} "
         f"(want {l_kreg}) - CAPS is {caps:#010x}")
-    assert (caps >> 28) == 0, (
-        f"CAPS[31:28] is reserved and must read zero; CAPS is {caps:#010x}")
+    ext = _port_literal(RTL / "cft_krnl.sv", "alu_ext")
+    assert (caps >> 28) == ext, (
+        f"CAPS[31:28] must publish the ALU extensions cft_krnl wires "
+        f"({ext:#x}); CAPS is {caps:#010x}")
 
 
 def check_op_groups(caps):

@@ -73,14 +73,19 @@
 //                 before issuing; the alternative is guessing from
 //                 VERSION, which stops working the moment one build
 //                 ships without a group.
-//                 [7:4]   sequencer feature nibble, all zero today;
-//                         the bit assignments are reserved at the
-//                         seq_feat port below
+//                 [7:4]   sequencer feature nibble; [4] wide constant
+//                         index is set from 2026-09-07 (kx), the
+//                         other three assignments are reserved at
+//                         the seq_feat port below
 //                 [19:16] log2 of the deposit slots a lane (MAXD)
 //                 [23:20] log2 of the instruction capacity (IMEM_D)
 //                 [27:24] log2 of the constants an instruction can
 //                         ADDRESS (the ka/kb/kc index field's width)
-//                 [31:28] reserved, zero
+//                 [31:28] ALU extensions beyond the group bits:
+//                         [28] IMUL, opcode 30 (2026-09-07); an
+//                         opcode that joins a group after bitstreams
+//                         shipped with the group's bit set cannot be
+//                         announced by that bit. [31:29] reserved
 //                 The three capacity fields carry an EXPONENT, not a
 //                 count, which is what makes them fit four bits each
 //                 and is honest because every one of them is a power
@@ -180,7 +185,7 @@ module cft_csr (
     input  logic [7:0]  op_caps,     // constant; opcode groups present
     // CAPS[7:4]: what the SEQUENCER can do beyond the base program
     // model, as opposed to whether one exists at all (that is
-    // op_caps[7]). All zero in this build; the assignments are
+    // op_caps[7]). [4] is set from 2026-09-07; the assignments are
     // reserved here so that two builds cannot spend the same bit on
     // two features:
     //   [4] wide constant index - an instruction addresses more than
@@ -199,6 +204,11 @@ module cft_csr (
     input  logic [3:0]  cap_maxd,    // CAPS[19:16] log2(MAXD)
     input  logic [3:0]  cap_imem,    // CAPS[23:20] log2(IMEM_D)
     input  logic [3:0]  cap_kreg,    // CAPS[27:24] log2(addressable consts)
+    // CAPS[31:28]: ALU extensions beyond the opcode groups - an opcode
+    // that joins a group after bitstreams shipped with the group's bit
+    // set cannot be announced by that bit, so it takes one here.
+    //   [28] IMUL, opcode 30 (2026-09-07)
+    input  logic [3:0]  alu_ext,     // constant; CAPS[31:28]
     output logic [7:0]  cfg_op,
     output logic [3:0]  cfg_prec,
     output logic [2:0]  cfg_rnd,
@@ -391,7 +401,7 @@ module cft_csr (
           10'h010: s_axi_control_rdata <= {27'b0, eng_flags};
           10'h011: s_axi_control_rdata <= MAGIC;
           10'h012: s_axi_control_rdata <= VERSION;
-          10'h013: s_axi_control_rdata <= {4'b0, cap_kreg, cap_imem, cap_maxd,
+          10'h013: s_axi_control_rdata <= {alu_ext, cap_kreg, cap_imem, cap_maxd,
                                            op_caps, seq_feat, prec_caps};
           10'h014: s_axi_control_rdata <= {27'b0, eng_err};
           10'h015: s_axi_control_rdata <= prog_q[31:0];

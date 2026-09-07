@@ -391,11 +391,16 @@ is data.
 `kx` reads bit 30 as reserved-must-be-zero and refuses the program -
 which is exactly the behaviour a compatibility rule is for, and the
 reason this feature needs no program-header VERSION bump. What it DOES
-need is a sequencer VERSION step and a CAPS bit, because an old
-BITSTREAM has no such rule: its operand mux would ignore bit 30 and
-read the four-bit field. Until CAPS publishes the feature, a host that
-means to run a `kx` program on a device has no way to ask, and
-`host/tools/enclose.c` says so where it probes.
+need is a CAPS bit, because an old BITSTREAM has no such rule: its
+operand mux would ignore bit 30 and read the four-bit field. Since the
+same day CAPS[4] publishes it - the feature nibble's wide-constant-index
+bit, `cft_caps.seq_features` bit 0 - and CAPS[28] publishes `IMUL`
+(bit 4 of the same word); `cft_program_load` refuses an image that uses
+either on a device that does not publish it, naming the instruction,
+so a host never has to guess and `host/tools/enclose.c` falls back to
+its chunked shape where the loader says no. No VERSION step: VERSION
+guards the register map, and features are announced in CAPS
+(rtl/cft_csr.sv).
 
 The per-instruction rounding attribute is not an indulgence. The
 pipeline already carries the attribute alongside each operation rather

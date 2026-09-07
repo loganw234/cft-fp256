@@ -457,12 +457,25 @@ typedef struct cft_caps {
                                 * a header's n_consts says - the
                                 * ceiling host/tools/enclose.c chunks
                                 * its Horner kernel around */
-    uint32_t seq_features;     /* CAPS[7:4] of the device: sequencer
-                                * features beyond the base program
-                                * model. Zero in every build shipped so
-                                * far; ask before using one, exactly as
-                                * with cft_supports and an opcode */
+    uint32_t seq_features;     /* bits 3:0 = CAPS[7:4], the sequencer
+                                * feature nibble; bits 7:4 = CAPS[31:28],
+                                * the ALU extensions beyond the group
+                                * bits. CFT_SEQ_FEAT_WIDE_CONST and
+                                * CFT_ALU_EXT_IMUL below are the two
+                                * assigned so far (2026-09-07). A clear
+                                * bit is ABSENT, not unknown: the loader
+                                * refuses an image that uses the feature
+                                * and cft_supports answers no, so ask
+                                * before issuing, as with any opcode */
 } cft_caps;
+
+/* cft_caps.seq_features bits. */
+#define CFT_SEQ_FEAT_WIDE_CONST 0x01u  /* CAPS[4]: an instruction with kx
+                                        * (bit 30) set addresses the whole
+                                        * constant bank through 8-bit
+                                        * indices in its immediate */
+#define CFT_ALU_EXT_IMUL        0x10u  /* CAPS[28]: opcode 30, IMUL, is
+                                        * implemented */
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
 

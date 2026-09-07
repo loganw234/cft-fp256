@@ -1602,7 +1602,7 @@ passes the older size and never sees them.
     uint32_t max_deposits;   /* deposit slots a lane */
     uint32_t max_insns;      /* instructions in one image */
     uint32_t max_consts;     /* constants an instruction can ADDRESS */
-    uint32_t seq_features;   /* CAPS[7:4], zero in every build so far */
+    uint32_t seq_features;   /* CAPS[7:4] in bits 3:0, CAPS[31:28] in 7:4 */
 
 **Zero means unknown, not zero capacity**, and nothing is enforced
 against an unknown. One thing produces it: a remote server whose
@@ -1612,17 +1612,24 @@ whose `VERSION` predates them, which is every card-day 0x410 image.
 `max_consts` is the number of constants an instruction can *address*,
 not the `n_consts` a header may declare. The `ka`/`kb`/`kc` bits
 redirect four-bit operand fields at the constant bank, so the answer
-is 16 on the tile (`rtl/cft_seq.sv`'s `KREG`) and 16 here, whatever
-the header says; `host/tools/enclose.c` already chunks its Horner
-kernel into eight interval coefficients because of it.
+was 16 on the tile and 16 here until 2026-09-07, when `kx`
+(docs/SEQUENCER.md) gave an instruction 8-bit indices in its
+immediate: it is 256 on both now, and `seq_features` says which a
+device is. Bit 0 (`CFT_SEQ_FEAT_WIDE_CONST`, from CAPS[4]) is `kx`;
+bit 4 (`CFT_ALU_EXT_IMUL`, from CAPS[28]) is opcode 30, `IMUL`. **A
+feature bit that is clear is absent, not unknown**: `cft_program_load`
+refuses an image that uses `kx` or `IMUL` on a device that does not
+publish them, naming the instruction, and `cft_supports(dev,
+CFT_IMUL, fmt)` answers no - so a card-day image that predates both
+is never handed a program its operand mux would misread.
 
 **Each backend reports what it enforces and enforces what it
 reports.** The XRT backend decodes `CAPS[7:4]` and `CAPS[27:16]`,
 three four-bit exponents and a feature nibble, and does not
 transcribe a 64 into C. The remote backend takes them from the
 handshake. The software backend reports its own - 2^20 deposit slots
-a lane, the header field's own 2^32-1 instructions, 16 addressable
-constants - from `host/src/program.c`, which is the file that
+a lane, the header field's own 2^32-1 instructions, 256 addressable
+constants, both feature bits - from `host/src/program.c`, which is the file that
 enforces them, so the number a host is told and the number a program
 is held to are one declaration.
 

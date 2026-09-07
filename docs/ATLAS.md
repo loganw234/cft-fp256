@@ -148,13 +148,14 @@ them and adds one:
    with a return address register is the durable one and is not in
    the ISA today.
 
-None of these is deep. Together they are a VERSION step for the
-sequencer (a new opcode, a new instruction form, a wider input block,
-optionally a call), with the golden model first as always. The first
-two are built; the VERSION step and the CAPS bit that publish them are
-the integrator's, and until they land a device cannot be ASKED whether
-it carries either - which is why nothing in the library issues `IMUL`
-or `kx` to a device on its own initiative.
+None of these is deep. The first two are built (2026-09-07), golden
+model first as always, and published the same day as CAPS bits rather
+than a VERSION step - CAPS[28] for `IMUL`, CAPS[4] for `kx` - because
+VERSION guards the register map and features are announced in CAPS.
+`cft_program_load` refuses an image that uses either on a device that
+does not publish it and `cft_supports` answers for opcode 30, so a
+host asks rather than guesses. The wider input block and the optional
+call remain.
 
 ## Deposition, the half the tile does not do yet
 

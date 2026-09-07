@@ -91,6 +91,9 @@ static int op_group_bit(int op)
     if (op >= 7  && op <= 10) return 2;   /* min/max */
     if (op >= 11 && op <= 14) return 3;   /* predicate */
     if (op >= 16 && op <= 23) return 4;   /* integer */
+    if (op == 30)             return 4;   /* integer: IMUL (2026-09-07),
+                                           * and CAPS[28] must ALSO be set
+                                           * - checked beside the group */
     if (op >= 24 && op <= 25) return 5;   /* reduction */
     if (op >= 26 && op <= 27) return 6;   /* divide/sqrt (the seeds) */
     /* sumSquare and sumAbs are the reduction group too, although no
@@ -518,6 +521,11 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
         return 0;
     if (!(dev->op_groups & (1u << group)))
         return 0;
+    /* IMUL joined the integer group after bitstreams shipped with that
+     * group's bit set, so the group cannot vouch for it: CAPS[28] does
+     * (cft_caps.seq_features, CFT_ALU_EXT_IMUL). */
+    if ((int)op == (int)CFT_IMUL && !(dev->seq.features & CFT_ALU_EXT_IMUL))
+        return 0;
     /* A composed reduction is supported only if what it composes from
      * is: sumSquare needs the arithmetic group for its multiply and
      * sumAbs the sign group for its abs. Answering yes and then
@@ -589,6 +597,13 @@ CFT_API cft_status cft_run(cft_device *dev,
         int group = op_group_bit((int)op);
         if (group >= 0 && !(dev->op_groups & (1u << group)))
             return CFT_ERR_UNSUPPORTED;
+        if ((int)op == (int)CFT_IMUL &&
+            !(dev->seq.features & CFT_ALU_EXT_IMUL)) {
+            cft_set_error("opcode 30 (imul) is not implemented by this "
+                          "device: CAPS[28] is clear, the image predates "
+                          "2026-09-07 - cft_supports says so first");
+            return CFT_ERR_UNSUPPORTED;
+        }
     }
 
     if (n == 0) {
