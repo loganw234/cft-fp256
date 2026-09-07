@@ -32,7 +32,8 @@ sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
 # benches that exist only for this configuration. `sim` is the
 # shipping default; this is the third-tier tile's own census.
 simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
-       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \n       board boardkrnl boardseq boardfp256
+       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \
+       board boardkrnl boardseq boardfp256
 
 # The iterated chunk-column multiplier against exact integer
 # arithmetic, at every column count the three wide rungs can build -
