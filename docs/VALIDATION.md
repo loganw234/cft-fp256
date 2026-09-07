@@ -5972,6 +5972,18 @@ agents left them, and integrated or held here.
   pathology; `boardkrnl` now selects Verilator, and the cone's coding
   for Icarus is recorded as the defect to fix, with the board
   configuration under Icarus as its gate.
+  **Correction, the same afternoon.** The control run - the tree from
+  before the cone change, same bench, same simulator - crawls at the
+  same rate: 2,292 ns of simulated time in the first fourteen minutes
+  after compilation, four operations bit-exact, about 2.5 ns a second
+  against 2.2 on the merged tree. So the cone change did not cause
+  this; the engine-driven board kernel under Icarus is simply a
+  three-and-a-half-hour bench in this configuration, which is how the
+  morning's `board` run passed it, and the LZC agent's board targets
+  were most likely still running rather than wrong. There is no cone
+  defect to fix; the Verilator default stands as the simulator cost
+  it is, and the claim two paragraphs up that Icarus's evaluation of
+  the new cone is the pathology is withdrawn.
 - `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (31 of 31, negative
   control refuted)`, 420 s of solver time - after a first run had to be
   stopped at two and a half hours, stuck on `imul.sby`'s `check`

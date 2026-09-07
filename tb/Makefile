@@ -324,15 +324,15 @@ BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pc
 
 board: boardkrnl boardseq boardfp256
 
-# boardkrnl runs under Verilator by default. Since the leading-zero
-# cone became its own stage (2026-09-07) Icarus evaluates this one
+# boardkrnl runs under Verilator by default. Icarus evaluates this one
 # configuration - the engine-driven kernel at ten passes with both
-# ladders on - at about 2 ns of simulated time a second, 160x slower
-# than the same bench without the ladders, and never reaches its
-# verdict; Verilator passes both tests in seconds. The RTL is the same
-# either way (Verilator's lint finds no loop), so this is a simulator
-# pathology recorded as a defect against the cone's coding, not a
-# reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
+# ladders on - at about 2.5 ns of simulated time a second, 160x slower
+# than the same bench without the ladders and about 3.5 hours for the
+# bench (measured 2026-09-07 on the tree before and after the
+# leading-zero cone became its own stage: the same rate on both, so
+# the configuration is the cause, not a change); Verilator passes
+# both tests in seconds and its lint finds no loop. A simulator cost,
+# not a reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
 BOARDKRNL_SIM ?= verilator
 boardkrnl:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml

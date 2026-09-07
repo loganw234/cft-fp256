@@ -17,9 +17,11 @@ Vivado implementation sharing twelve cores. A gate that seems to have
 hung has usually just not finished - with two exceptions worth
 knowing: a formal task that does not close never finishes, and the
 gate's seven-minute norm is the number to hold a run against; and a
-bench whose simulated time stops advancing while the simulator burns
-a core is a simulator pathology, not a slow test - the board kernel
-under Icarus is the known case, and Verilator runs it in seconds.
+bench whose simulated time crawls while the simulator burns a core
+may be a simulator cost rather than a slow test - the board kernel
+under Icarus is the known case, about 3.5 hours where Verilator
+takes seconds - and the way to tell is to watch the simulated time,
+not the wall clock.
 Nothing here is a quick unit test.
 
 ## The layers, and what each one proves
@@ -141,7 +143,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `vectors` (`make vectors`, 168 sets) | 5 min | 7 to 8.5 min | |
 | `libcft` / `make -C host test` (build + the 1,071,635-case replay) | 7.5 min | 8.5 to 11 min | |
 | `sim` (21 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
-| `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, **does not finish under Icarus** since the leading-zero cone became its own stage (2026-09-07: about 2 ns of simulated time a second, 160x slower than the same bench without the ladders) and passes in 7.5 s under Verilator, which is what its target now selects |
+| `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, is **about 3.5 hours under Icarus** in this configuration - 2.5 ns of simulated time a second, 160x slower than the same bench without the ladders, on the tree before the cone change and after it alike - and 7 s under Verilator, which is what its target now selects |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
 | `formal` (31 tasks + the negative control) | **7 min** on the merged tree with the box otherwise idle (420 s of solver time; 14 min in an earlier run beside other work) | the same gate ran for **more than two and a half hours** earlier that day and had to be stopped - not load, but an IMUL equivalence task that had been left in the list and does not close; parked, the gate was back to 7 min | the fp256 fold lemma alone is 2 to 4 min; the old four-proof gate was 29 s, which is the number older notes quote |
 | `character` | 2.6 min | 5 min | |
