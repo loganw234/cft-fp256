@@ -4557,6 +4557,9 @@ positive's ask. All nineteen are 1,362 image words; `hopf` is 541 and
 `jong` 466, and 28 of the 69 positives are over the 1,024-word image
 on their det_* calls alone.
 
-**Not run.** atlas-engine's `ci-smoke.mjs` (69 child processes, still
-running when the agent wrapped up; it exercises files the work did not
-touch), the Chrome/GPU probes, and anything on a device.
+**Also run, after the report.** atlas-engine's `ci-smoke.mjs`: 69
+positives smoked, 66 passing, 3 failing (`buddha`, `qjulia`, `vlsi`) -
+the pre-existing failures its `known-smoke-failures.json` tolerates,
+and "smoke matches the record"; the work touched none of the files it
+exercises. **Not run.** The Chrome/GPU probes, and anything on a
+device.
