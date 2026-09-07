@@ -4636,6 +4636,12 @@ containers, each line as the run printed it:
   the same both ways.
 - `make zoomtest`: `11222 comparisons, 0 failures`
 - `make orbitstest`: `26 checks, 0 failures`
+- the four `cft-zoom` and `cft-orbits` rows of
+  `bindings/wasm/demos_chains.json` replayed against this worktree's
+  binaries: all four chains identical to the ones recorded on
+  2026-09-04 (`ebec460e.../5fb8f0de...`, `9c830484.../878ae482...`,
+  `12012be3...`, `3ebf95ae...`). Both tools' new branches are
+  unreachable on the software backend, and the chains say so.
 
 What `device-test` states rather than skips: an image past the
 software backend's instruction cap would be 34,359,738,400 bytes and
