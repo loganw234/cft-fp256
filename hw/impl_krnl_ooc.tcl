@@ -92,9 +92,10 @@ opt_design
 place_design
 report_utilization -file $build_dir/util_placed.rpt
 route_design
+write_checkpoint -force $build_dir/routed.dcp
 report_utilization -file $build_dir/util_routed.rpt
 report_utilization -hierarchical -hierarchical_depth 3 -file $build_dir/util_routed_hier.rpt
 report_timing_summary -file $build_dir/timing_routed.rpt -no_detailed_paths
-report_timing -max_paths 3 -file $build_dir/paths_routed.rpt
+report_timing -max_paths 25 -unique_pins -file $build_dir/paths_routed.rpt
 qor_lines ROUTED
 puts "QOR_STAGE: routed"

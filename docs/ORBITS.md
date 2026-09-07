@@ -376,6 +376,14 @@ to save, is **1.20x** and, more to the point, **284 library calls
 instead of 295,195** for the same 8,192 steps over 16 members. On a
 device that ratio is the whole argument of docs/SEQUENCER.md.
 
+One caveat travels with that row onto a device. The program deposits
+four values a sample, for the whole run in one call, and a tile holds
+64 deposit slots a lane (docs/SEQUENCER.md) - so a run there records
+at most 15 samples. `--periods 16` sampled once a period, which is
+both the default and the benchmark's setting, is 16 samples and is
+refused by name; `--sample-every 1024` or `--periods 15` fits, and
+the bits of every recorded sample are the same either way.
+
 ---
 
 ## Flags: which are expected, which are certificates
@@ -900,7 +908,10 @@ the software backend and issues the identical calls. What changes:
   still have to agree with each other and with the software backend.
 - **The arithmetic intensity, for the Kepler program only.** 284 calls
   for 8,192 steps over 16 members is one load and one deposit stream
-  for the whole integration; docs/SEQUENCER.md's K ~ 30 threshold is
+  for the whole integration - sampled coarsely enough to fit the
+  tile's 64 deposit slots a lane, which the benchmark's once-a-period
+  sampling of 16 periods does not (15 samples is the most one call
+  records there, and the tool refuses more by name); docs/SEQUENCER.md's K ~ 30 threshold is
   passed by three orders of magnitude. The loop engine, and therefore
   the entire outer-solar-system workload, stays at one round trip per
   operation and would be memory-bound exactly as that document

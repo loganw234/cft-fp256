@@ -221,7 +221,10 @@ docs/VALIDATION.md.
       slack**: Vivado optimises until the asked clock is met and then
       stops, so the 145 MHz run reports 6.842 ns while the 175 MHz
       run - where the tool tried its hardest - reports 6.276 ns. The
-      ceiling is that second number, **~159 MHz**.
+      ceiling is that second number, **~159 MHz** - or, after
+      docs/studies/OPT-C-timing.md refit the same runs against their
+      asks on 2026-09-07 (each 1 ns off the ask bought ~0.4 ns of
+      path), **147-157 MHz** with 159 as the upper end.
 
       The S11 split (commit 7753428) was then tested at 175 MHz and
       **made it worse: -0.673 ns, a ~157 MHz ceiling.** It has been
@@ -2173,7 +2176,7 @@ runs the same RTL at 64-bit beats against the same golden model.
 | Alchitry Au V2 (XC7A35T-2, $150) | openXC7 on prjxray's reference part - the most mature open target there is | the quarter tile as already built: 64-bit beats, 2x fp32 + 1x fp64, ~20k LUT estimated against 20,800 - tight, and the first thing to measure. fp256 remains physically impossible at any width | **the conformance node**: cheapest object that attests the contract; no transceivers (FTG256) but none needed - FT2232 USB at 8 MB/s replays vector sets in seconds, so an Au farm is a powered USB hub, no carrier required |
 | ECP5-85F (ULX3S etc.) | Yosys+nextpnr, most mature | fp32 bank + engine at reduced width | fallback nano-tile if boards resurface (scarce as of 2026-08) |
 | **Artix-7 200T** (Nexys Video, ALINX AX7A200) | openXC7 | a full tile at 89% LUT / 35% DSP - no LUT-fallback multipliers needed, contrary to the earlier note | the smallest part that takes a full-width tile |
-| **Kintex-7 325T - QMTech core board, ~$100** | openXC7 supports Kintex7 **325/420/480T**, with working `xc7k325t-picosoc-nextpnr` and `xc7k325t-blinky-nextpnr` examples on this exact part; LiteX ships `qmtech_kintex7_devboard.py` with a yosys+nextpnr toolchain option | **a full tile at 59% LUT / 31% DSP** - room left for the sequencer's register file and deposit buffer | **the open full-tile target.** Same price class as the Au, twice the Arty's density, and the flow is already demonstrated on the part |
+| **Kintex-7 325T - QMTech core board, ~$100** | openXC7 supports Kintex7 **325/420/480T**, with working `xc7k325t-picosoc-nextpnr` and `xc7k325t-blinky-nextpnr` examples on this exact part; LiteX ships `qmtech_kintex7_devboard.py` with a yosys+nextpnr toolchain option | **a full tile at 59% LUT / 31% DSP** - room left for the sequencer's register file and deposit buffer (routed 2026-09-07 in the `board` configuration: 47.0% LUT, 56 DSP - but the QMTech board is the -1 grade and runs this tile near 77 MHz where a -2 closes 100) | **the open full-tile target.** Same price class as the Au, twice the Arty's density, and the flow is already demonstrated on the part |
 | Kintex-7 480T (surplus) | openXC7 | **two full tiles**: 40% LUT, 14% DSP | the open multi-tile option - see the scale-out note below |
 | Zynq-7045 (ZC706) | openXC7 covers Zynq7; a fully open Zynq-7000 flow was presented at FOSDEM 2025 | a full tile at 55% LUT / 29% DSP | viable but the PS is complexity this design does not need |
 | ~~Tang Mega 138K (GW5A)~~ | ~~Apicula~~ | **ruled out 2026-08-30**: Apicula does not support the GW5A family (YosysHQ/apicula#204), so the part has no open flow regardless of its LUT count | revisit only if GW5A support lands |
@@ -2333,8 +2336,10 @@ DSP is not the constraint anywhere: two tiles is 524 of the 480T's
 1,920, 27%.
 
 So the open ladder is one comfortable tile on a ~$100 K325T (now 54%
-of it, down from 68% after the 2026-08-30/31 area work), two tiles on
-a **480T** and not on the 325T or 410T, and the ring above that.
+of it, down from 68% after the 2026-08-30/31 area work, and 47.0%
+routed in the `board` configuration on 2026-09-07 - at about 77 MHz on
+that board's -1 grade, 100 MHz on a -2), two tiles on a **480T** and
+not on the 325T or 410T, and the ring above that.
 Reaching two full tiles on a 325T would need ~92,000 LUT each after a
 platform budget; sharing both shift paths projects to ~96,000, and
 7-series carry structure makes these UltraScale+ figures optimistic
@@ -2455,6 +2460,10 @@ size. The steps, in order, each with the gate that says it is done:
    openXC7-built fp32 lane, which is the one instrument that catches a
    complemented DSP48E1 control pin (nextpnr-xilinx#159, open as of
    2026-09-05). Nothing open proceeds on that flow until this is green.
+   The routed runs of 2026-09-07 add a speed-grade clause to the
+   purchase: the -1 QMTech board runs this tile near 77 MHz and a -2
+   K325T closes 100 MHz (docs/VALIDATION.md), so the flow test can use
+   the cheap board and the tile that runs should not.
 3. **The multi-cycle fp256 variant** behind a build parameter.
    **Done 2026-09-06** (`MUL_PASSES`, docs/ARCHITECTURE.md's "The
    multi-cycle rung"), and it did not do what this step assumed it

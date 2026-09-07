@@ -140,6 +140,7 @@ static double now_s(void)
 #endif
 
 #define MAX_ESZ 32          /* bytes in the widest element, binary256 */
+#define TILE_MAX_DEPOSITS 64 /* deposit slots a lane on a tile: MAXD, rtl/cft_krnl.sv */
 #define DECMAX  2048        /* an exact decimal this tool will print */
 
 static void die(const char *what)
@@ -2057,7 +2058,8 @@ static void usage(void)
 "  --ref-iters N            reference orbit length (default 100000)\n"
 "  --pixel-iters N          per-pixel iteration cap (default 4096)\n"
 "  --batch N                pixels in flight per call (default 4096)\n"
-"  --steps-per-call N       orbit program trip count (default 1024)\n"
+"  --steps-per-call N       orbit program trip count (default 1024; a tile\n"
+"                           holds 64 deposits a lane, so at most 32 there)\n"
 "  --glitch-bits B          glitch when |Z+d| < 2^-B |Z| (default p/4)\n"
 "  --ref-offset N           move the reference N pixels off the nucleus\n"
 "  --checkpoint PATH        write a resumable checkpoint of the orbit\n"
@@ -2188,6 +2190,24 @@ int main(int argc, char **argv)
         die("this backend does not carry that format");
     if (!(caps.format_mask & (1u << (unsigned)CFT_FP64)))
         die("this backend does not carry binary64, which the pixels need");
+
+    /* The orbit program deposits two values a trip, and a tile holds
+     * TILE_MAX_DEPOSITS slots a lane (rtl/cft_krnl.sv, MAXD): a device
+     * refuses the image above --steps-per-call 32 where the software
+     * backend accepts a million. The same orbit comes back either way -
+     * the trip count only sets how many calls it takes - so refuse here
+     * with the flag named rather than let cft_program_load fail. */
+    if (O.use_program && strcmp(caps.backend, "software") != 0 &&
+        2u * O.reps > TILE_MAX_DEPOSITS) {
+        char msg[240];
+        snprintf(msg, sizeof msg,
+                 "--steps-per-call %u deposits %u values a lane per call and "
+                 "a tile holds %u (rtl/cft_krnl.sv MAXD): use --steps-per-call "
+                 "%u or lower on the %s backend",
+                 (unsigned)O.reps, (unsigned)(2u * O.reps), TILE_MAX_DEPOSITS,
+                 TILE_MAX_DEPOSITS / 2, caps.backend);
+        die(msg);
+    }
     FLAGS_TRUSTED = caps.flags_readable != 0;
 
     measure_format(&fi, O.fmt);

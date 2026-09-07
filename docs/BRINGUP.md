@@ -624,6 +624,13 @@ is the path delay**, and at maximum effort it asymptotes: 6.276 ns
 at 175 MHz implies a real ceiling near **159 MHz** for this design.
 Verified from both sides - 145 MHz closes, 175 MHz misses by 0.562 ns.
 
+One refinement, from docs/studies/OPT-C-timing.md (2026-09-07): the
+asymptote is not flat. Across this design's runs each 1 ns taken off
+the ask bought about 0.4 ns of path, so 6.276 ns at 175 MHz is a
+point on a slope rather than the floor, and the refit puts the
+ceiling at **147-157 MHz** with 159 as its upper end. Quote the
+range; the method - read the path, not the slack - stands.
+
 The out-of-context probe was right about both things that matter, and
 was only misleading in the one number this note originally quoted:
 
@@ -631,7 +638,7 @@ was only misleading in the one number this note originally quoted:
   fp256 unit, the leading-zero-count and coarse-normalize stage - and
   the 175 MHz failure is that same path, register for register;
 - its **path delay** of 6.666 ns implied ~150 MHz against a measured
-  ~159 MHz, accurate to about 6%;
+  ~159 MHz (147-157 after the refit above), accurate to about 6%;
 - its **slack** at a loose constraint (+3.3 ns at 100 MHz) meant
   nothing at all, for exactly the reason above.
 
