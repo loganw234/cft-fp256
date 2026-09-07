@@ -24,6 +24,25 @@
 extern "C" {
 #endif
 
+/* The sequencer capacities a backend publishes AND enforces.
+ *
+ * One struct rather than four more out-parameters, because both
+ * backends fill all four from one place (a CAPS register read, a HELLO
+ * caps block) and device.c copies them straight into cft_caps.
+ *
+ * The units are the program header's, so a comparison against a
+ * header field needs no conversion; CAPS carries log2 of the first
+ * three and the decode happens in the XRT backend, at the register.
+ *
+ * ZERO IS UNKNOWN in every field, and program.c enforces nothing
+ * against an unknown - see cft_caps in the public header. */
+typedef struct cft_seq_caps {
+    uint32_t max_deposits;
+    uint32_t max_insns;
+    uint32_t max_consts;   /* addressable, not the header's n_consts */
+    uint32_t features;     /* CAPS[7:4] */
+} cft_seq_caps;
+
 /* Open an artifact. On success fills every out-parameter:
  *
  *   format_mask     CAPS[3:0]  - precisions this bitstream carries
@@ -33,10 +52,14 @@ extern "C" {
  *   flags_readable  0 if the runtime cannot read the status registers,
  *                   in which case exception flags from this device are
  *                   not to be trusted and cft_get_caps says so
+ *   seq             CAPS[7:4] and CAPS[27:16] decoded - the sequencer
+ *                   capacities this device will accept a program
+ *                   against, which the loader then holds it to
  */
 int  cftx_open(const char *artifact, int index, void **out,
                uint32_t *format_mask, uint32_t *op_groups,
-               uint32_t *tiles, uint32_t *version, int *flags_readable);
+               uint32_t *tiles, uint32_t *version, int *flags_readable,
+               cft_seq_caps *seq);
 
 void cftx_close(void *hw);
 
@@ -113,6 +136,37 @@ int  cftx_program_run(void *hw, int fmt, const void *image,
  * drifts out of step with its definition. */
 struct cft_device;
 void *cft_device_backend(const struct cft_device *dev);
+
+/* The same seam again, for the capacities rather than the handle.
+ *
+ * device.c owns struct cft_device and fills these at open - from the
+ * CAPS register, from the HELLO caps block, or from cft_sw_seq_caps()
+ * below for a software handle. program.c reads them back to hold a
+ * program image to the device it was loaded for, so that the caps a
+ * backend REPORTS and the caps it ENFORCES are the same four numbers
+ * by construction and not by agreement.
+ *
+ * cft_sw_seq_caps lives in program.c, which is where the software
+ * backend's limits are enforced. */
+void cft_device_seq_caps(const struct cft_device *dev, cft_seq_caps *out);
+void cft_sw_seq_caps(cft_seq_caps *out);
+
+/* This library's own last-error slot, behind cft_last_error(). For
+ * refusals libcft makes WITHOUT reaching a device backend - the only
+ * one today is a program past a device's published capacity - so that
+ * a caller is told which cap and by how much rather than only that
+ * something was unsupported. Cleared the moment anything reaches a
+ * backend, so it never explains someone else's failure.
+ *
+ * cft_seq_cap_refusal formats one of those and returns the status to
+ * return (CFT_ERR_UNSUPPORTED as int, since this header stays
+ * independent of the public one): `field` is the program's, `units`
+ * says what the device's number counts, and `caps_field` is the
+ * cft_caps member that would have answered in advance. */
+void cft_set_error(const char *fmt, ...);
+int  cft_seq_cap_refusal(const char *field, unsigned long asked,
+                         unsigned long cap, const char *units,
+                         const char *caps_field);
 
 /* The message from the most recent failure, or "". Static storage,
  * overwritten by the next one. XRT's exceptions carry the only

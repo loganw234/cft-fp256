@@ -378,8 +378,9 @@ device that ratio is the whole argument of docs/SEQUENCER.md.
 
 One caveat travels with that row onto a device. The program deposits
 four values a sample, for the whole run in one call, and a tile holds
-64 deposit slots a lane (docs/SEQUENCER.md) - so a run there records
-at most 15 samples. `--periods 16` sampled once a period, which is
+64 deposit slots a lane, which the tool reads from
+`cft_caps.max_deposits` rather than from a literal since 2026-09-07
+(docs/SEQUENCER.md) - so a run there records at most 15 samples. `--periods 16` sampled once a period, which is
 both the default and the benchmark's setting, is 16 samples and is
 refused by name; `--sample-every 1024` or `--periods 15` fits, and
 the bits of every recorded sample are the same either way.

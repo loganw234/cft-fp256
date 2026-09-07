@@ -232,6 +232,39 @@ module cft_krnl #(
   logic run_ok;
   assign run_ok = prec_ok && (SEQ_OK || !cfg_seq);
 
+  // ---- the sequencer's on-chip capacities ----------------------------
+  //
+  // Named ONCE, here, and used twice: as the parameters cft_seq
+  // elaborates its memories from, and as the log2 fields CAPS
+  // publishes so a host can size a program before it builds one. Two
+  // copies of a number is how CAPS ends up describing a memory that is
+  // no longer that size, and it is the whole reason 0x4C's top half
+  // was left empty rather than filled in by hand.
+  //
+  // A program past any of them is refused by cft_seq at its header
+  // check, before a byte is computed (STATUS[3]) - so a host that
+  // reads these has done the arithmetic the tile would otherwise do
+  // for it on card day. docs/studies/OPT-D-contract.md 0.1 is the
+  // failure this retires.
+  localparam int SEQ_MAXD   = 64;     // deposit slots a lane
+  localparam int SEQ_IMEM_D = 1024;   // instruction capacity
+  localparam int SEQ_KMEM_D = 256;    // constant capacity, image side
+  // Addressable constants. The ka/kb/kc bits redirect the instruction's
+  // FOUR-BIT operand fields at the constant bank, so a program reaches
+  // 2**4 constants whatever its header declares (host/tools/enclose.c
+  // hit this ceiling and chunks its Horner kernel around it). Derived
+  // from the field width rather than typed as 16, and it must equal
+  // cft_seq's `localparam int KREG` - tb/test_krnl.py parses both out
+  // of the RTL and fails if they part company.
+  localparam int SEQ_KIDX_W = 4;
+  // CAPS carries the EXPONENT of each capacity in four bits, which is
+  // only honest while the capacity is a power of two: a capacity that
+  // was not one would be published rounded DOWN, and a host would
+  // trust it. Not asserted in RTL, because an elaboration-time $error
+  // inside a generate block is exactly the construct the open-toolchain
+  // gate (`make yosys-lint`) is here to keep out of this file;
+  // tb/test_krnl.py checks it against the parsed parameters instead.
+
   // Which engine owns the run in flight, and whether the sequencer
   // threw its program image back. The image refusal is not known at
   // start the way a precision refusal is - the header has to be read
@@ -371,6 +404,22 @@ module cft_krnl #(
                 1'b1,       // [2]   min/max
                 1'b1,       // [1]   sign
                 1'b1}),     // [0]   arithmetic
+      // CAPS[7:4]: no sequencer feature beyond the base program model
+      // is built here. The bit assignments are reserved in cft_csr.sv;
+      // a build that adds one sets its bit there and nowhere else.
+      .seq_feat(4'b0000),
+      // CAPS[27:16]: the sequencer's capacities as log2, from the same
+      // localparams the cft_seq instantiation below elaborates from.
+      // Published unconditionally, including on the narrow-beat tile
+      // where SEQ_OK is false: cft_seq is instantiated there too and
+      // its memories really are these depths - what that tile cannot
+      // do is parse a program header out of a quarter of a beat, which
+      // is a beat-width refusal and not a capacity. A field of zero
+      // would have to mean "capacity 1", not "unknown", so there is no
+      // room in a log2 field to say "no sequencer"; CAPS[15] says that.
+      .cap_maxd(4'($clog2(SEQ_MAXD))),
+      .cap_imem(4'($clog2(SEQ_IMEM_D))),
+      .cap_kreg(4'(SEQ_KIDX_W)),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd),
       .cfg_seq(cfg_seq), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
@@ -576,9 +625,12 @@ module cft_krnl #(
   // NBEATS is the lane block, >= LATENCY + 1 for the same reason.
   // MAXD, IMEM_D and KMEM_D are the on-chip caps the hardware checks a
   // program image against, and refuses past - a program the tile
-  // cannot hold is not a program the tile may half-run.
-  cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(15), .NBEATS(16), .MAXD(64),
-            .IMEM_D(1024), .KMEM_D(256), .ADDR_W(64),
+  // cannot hold is not a program the tile may half-run. They come from
+  // the localparams above rather than as literals here, because CAPS
+  // publishes their log2 and the two must be the same numbers.
+  cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(15), .NBEATS(16),
+            .MAXD(SEQ_MAXD), .IMEM_D(SEQ_IMEM_D), .KMEM_D(SEQ_KMEM_D),
+            .ADDR_W(64),
             .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
             .EN_FP256(EN_FP256), .OWN_LANES(1'b0),
             .MUL_PASSES(MUL_PASSES)) u_seq (

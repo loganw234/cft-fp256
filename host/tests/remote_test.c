@@ -306,6 +306,106 @@ static void refusal_tests(const char *url)
 
 /* ---- the operations libcft's client never issues ---------------------- */
 
+
+/* The caps block, and the four fields appended to it.
+ *
+ * HELLO's block is what the client's cft_get_caps answers from, so
+ * this asks the server for the block a second time (CAPS is the same
+ * block on demand) and checks the two agree - and that the sequencer
+ * capacities crossed the wire at all. They did not exist before
+ * 2026-09-07: a client and a server that disagree about the block's
+ * LENGTH is the one compatibility question this change raises, and
+ * the client's rule is "at least V1, read what fits", which means a
+ * shorter block leaves the new fields zero and cft_caps documents
+ * zero as unknown. The pairing that would exercise it - a new client
+ * against an old server - cannot be built here and is not simulated;
+ * what is checked is the current block, end to end. */
+static void caps_block_tests(cft_device *rm, cft_device *sw)
+{
+    void *hw = cft_device_backend(rm);
+    uint8_t *resp = NULL;
+    size_t len = 0;
+    int status;
+    cft_caps c, cs;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    CHECK(cft_get_caps(rm, &c) == CFT_OK, "cft_get_caps on the remote handle");
+
+    printf("the caps block:\n");
+    CHECK(!cftr_request(hw, CFTR_OP_CAPS, NULL, 0, &status, &resp, &len)
+          && status == CFT_OK && len == CFTR_CAPS_BYTES,
+          "CAPS answers %u bytes, got %lu", (unsigned)CFTR_CAPS_BYTES,
+          (unsigned long)len);
+    if (resp && len == CFTR_CAPS_BYTES) {
+        CHECK(cftr_get32(resp + 56) == c.max_deposits &&
+              cftr_get32(resp + 60) == c.max_insns &&
+              cftr_get32(resp + 64) == c.max_consts &&
+              cftr_get32(resp + 68) == c.seq_features,
+              "the block's sequencer capacities are what cft_get_caps "
+              "reports (%lu/%lu/%lu/0x%lx on the wire, %lu/%lu/%lu/0x%lx "
+              "from the handle)",
+              (unsigned long)cftr_get32(resp + 56),
+              (unsigned long)cftr_get32(resp + 60),
+              (unsigned long)cftr_get32(resp + 64),
+              (unsigned long)cftr_get32(resp + 68),
+              (unsigned long)c.max_deposits, (unsigned long)c.max_insns,
+              (unsigned long)c.max_consts, (unsigned long)c.seq_features);
+        printf("  max_deposits %lu, max_insns %lu, max_consts %lu, "
+               "seq_features 0x%lx\n",
+               (unsigned long)c.max_deposits, (unsigned long)c.max_insns,
+               (unsigned long)c.max_consts, (unsigned long)c.seq_features);
+    }
+    free(resp);
+
+    /* A server fronting the software backend must report exactly the
+     * caps this process's own software backend has, because it IS one:
+     * the two libraries have the same ABI or the handshake would have
+     * refused the connection. A server fronting a card reports the
+     * card's, which is the whole point and is not comparable here. */
+    memset(&cs, 0, sizeof cs);
+    cs.struct_size = sizeof cs;
+    if (cft_get_caps(sw, &cs) == CFT_OK &&
+        strcmp(cftr_server_backend(hw), "software") == 0) {
+        CHECK(c.max_deposits == cs.max_deposits &&
+              c.max_insns == cs.max_insns &&
+              c.max_consts == cs.max_consts &&
+              c.seq_features == cs.seq_features,
+              "a software server's capacities are this library's own");
+    } else {
+        printf("  server backend is '%s', not compared with the local "
+               "software backend\n", cftr_server_backend(hw));
+    }
+
+    /* And the client ENFORCES what it was told: a program past the
+     * server's deposit budget is refused here, before a frame is
+     * sent. */
+    if (c.max_deposits && c.max_deposits < 0xFFFFFFFFu) {
+        uint8_t img[40];
+        cft_program *prog = NULL;
+        cft_status st;
+        memset(img, 0, sizeof img);
+        cftr_put32(img + 0, 0x50544643u);      /* "CFTP" */
+        cftr_put32(img + 4, 1);                /* version */
+        cftr_put32(img + 8, 1);                /* n_insns */
+        cftr_put32(img + 12, 0);               /* n_consts */
+        cftr_put32(img + 16, c.max_deposits + 1u);
+        cftr_put32(img + 20, 0);               /* fp32 */
+        img[32] = 0;                           /* HALT, ctrl bit... */
+        img[35] = 0x80;                        /* ...at bit 31 */
+        st = cft_program_load(rm, img, sizeof img, &prog);
+        CHECK(st == CFT_ERR_UNSUPPORTED && !prog,
+              "max_deposits %lu + 1 is refused by the client: %s (%s)",
+              (unsigned long)c.max_deposits, cft_strerror(st),
+              cft_last_error());
+        cftr_put32(img + 16, c.max_deposits);
+        st = cft_program_load(rm, img, sizeof img, &prog);
+        CHECK(st == CFT_OK, "max_deposits %lu exactly is accepted: %s",
+              (unsigned long)c.max_deposits, cft_strerror(st));
+        cft_program_free(prog);
+    }
+}
+
 static void protocol_tests(cft_device *dev)
 {
     void *hw = cft_device_backend(dev);
@@ -724,6 +824,7 @@ int main(int argc, char **argv)
     }
 
     if (!do_bench) {
+        caps_block_tests(rm, sw);
         protocol_tests(rm);
         identity_tests(sw, rm, n);
     } else {

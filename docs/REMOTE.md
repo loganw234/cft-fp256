@@ -235,13 +235,37 @@ payload (the server passes NULL for it, as the caller did).
 | `0x0045` | `FLAGS_TEST_SAVED` | `u32 saved, u32 mask` | `u32 result` |
 | `0x00FF` | `BYE` | - | -, and both sides close |
 
-**The caps block** (56 bytes): `u32 format_mask, u32 op_groups,
+**The caps block** (72 bytes): `u32 format_mask, u32 op_groups,
 u32 tiles, u32 device_version, u32 flags_readable, u32 abi,
-char backend[32]` - the server's device as `cft_get_caps` reports it,
-with `op_groups` derived by asking `cft_supports` one representative
-opcode per group, and `backend` the NAME OF THE SERVER'S BACKEND
-(`software`, `xrt`), NUL-padded. The client reports its own backend as
-`remote` and keeps the server's name for the message a failure carries.
+char backend[32]`, then `u32 max_deposits, u32 max_insns,
+u32 max_consts, u32 seq_features` - the server's device as
+`cft_get_caps` reports it, with `op_groups` derived by asking
+`cft_supports` one representative opcode per group, and `backend` the
+NAME OF THE SERVER'S BACKEND (`software`, `xrt`), NUL-padded. The
+client reports its own backend as `remote` and keeps the server's name
+for the message a failure carries.
+
+**The block grows by appending, and a client reads what it
+recognises.** It was 56 bytes until 2026-09-07, when the sequencer's
+on-chip capacities were added (docs/HOSTAPI.md, docs/SEQUENCER.md);
+the client accepts any block of at least the original 56 and leaves
+the fields a shorter one does not carry at zero, which `cft_caps`
+documents as UNKNOWN and against which nothing is enforced. A block
+shorter than 56 is not an older version, it is a stream that is not a
+caps block, and the connection ends.
+
+**`CFTR_PROTO_VERSION` does not move for this**, and that is
+deliberate. The `proto` field is compared for EQUALITY at both ends,
+so bumping it would turn "an older server answers with a shorter
+block" into "an older server refuses the connection" - the opposite of
+the tolerance the length rule buys. What the length rule cannot do is
+make an older CLIENT read a longer block: it checks for exactly 56 and
+calls anything else a protocol fault. That pairing is already refused
+one field earlier, by the ABI equality check every frame carries -
+appending to `cft_caps` is an ABI minor step, and two libraries whose
+ABI differs have never been allowed to talk. So the tolerance is
+insurance for the next growth rather than a live compatibility path
+today, and no old-server pairing has been built or simulated here.
 
 `HELLO` must be the first request on a connection; anything else
 before it is refused. `CAPS` is the same block again on demand.
@@ -307,7 +331,12 @@ own and a client that exits mid-run leaves nothing behind. The
 device's exception flags are read the way every backend reads them
 and returned in every `RUN`, `REDUCE` and `PROG_RUN` response, so a
 server fronting a tile whose `flags_readable` is 0 reports that in
-the caps block and the client's `cft_get_caps` says so.
+the caps block and the client's `cft_get_caps` says so. The same is
+true of the sequencer capacities: a server fronting a tile reports the
+tile's 64 deposit slots a lane, a server fronting the software backend
+reports 2^20, and in both cases it is the CLIENT's
+`cft_program_load` that refuses an image past them - before a frame is
+sent, with the cap named.
 
 ## Round trips, and what the program route saves
 

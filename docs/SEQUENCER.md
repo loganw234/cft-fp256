@@ -385,16 +385,38 @@ deposit slots a lane**, `IMEM_D = 1024` instructions and `KMEM_D =
 256` constants. A header that asks for more than any of them is
 refused by the tile at the header, before the constants and
 instructions stream in, in the same check that refuses a precision
-the tile was not configured for. The software backend enforces none
-of the three - it accepts 2^20 deposits a lane - so a program that
-runs there has not been shown to fit a tile, and `cft_caps` does not
-yet publish the caps (docs/studies/OPT-D-contract.md proposes that
-it should). Programs that deposit once an iteration feel the first
-one: `cft-zoom` deposits two values a trip and is held to
-`--steps-per-call 32` on a device, `cft-orbits` deposits four a
-sample for a whole run in one call and is held to 15 samples, and
-both refuse with the flag named rather than let the tile refuse the
-image.
+the tile was not configured for. A fourth number is not a memory
+depth at all but the reach of the instruction's own operand field:
+the `ka`/`kb`/`kc` bits redirect four-bit fields at the constant
+bank, so **a program addresses sixteen constants** whatever
+`n_consts` says, on the tile and in the library alike
+(host/tools/enclose.c chunks its Horner kernel around it).
+
+**A host asks rather than guesses.** Since 2026-09-07 the tile
+publishes all four in `CAPS` (0x4C) as log2 - bits 19:16, 23:20 and
+27:24, with 7:4 a still-empty feature nibble - and `cft_get_caps`
+carries them into `cft_caps.max_deposits`, `max_insns`, `max_consts`
+and `seq_features`. **Every backend publishes what it enforces and
+enforces what it publishes**, and `cft_program_load` refuses an
+image past the device's own caps with a message naming the cap and
+both numbers, so a program that will not fit is refused where it was
+built rather than by the tile with a status bit. The numbers differ
+between backends and that is the point: the software backend accepts
+2^20 deposit slots a lane, because it models the program model and
+not one tile, so "it ran on software" still does not mean "it fits a
+tile" - what has changed is that a tool can now find out in one call.
+Zero in a field means the device did not say (only a remote server
+older than the fields), and an unknown cap is enforced against
+nothing.
+
+Programs that deposit once an iteration feel the deposit budget
+first: `cft-zoom` deposits two values a trip and takes
+`--steps-per-call` from `cap / 2` when the device's cap is smaller
+than its default of 1,024 - 32 on today's tile - and refuses a value
+the user typed that does not fit; `cft-orbits` deposits four a sample
+for a whole run in one call, so its sample count is bounded at 15 on
+a tile, and it refuses by name because unlike a trip count the sample
+count changes what is recorded.
 
 ### What the loader refuses
 

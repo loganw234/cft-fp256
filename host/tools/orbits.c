@@ -1276,7 +1276,11 @@ enum { R_Q0 = 0, R_V1 = 1, R_Q1 = 2, R_V0 = 3,
        R_X = 4, R_Y = 5, R_W = 6, R_E = 7, R_Z = 8, R_G = 9 };
 enum { C_HALT = 0, C_REPEAT, C_ENDREP, C_DEPOSIT, C_SETACT, C_ACTALL };
 #define DEPOSITS_PER_SAMPLE 4
-#define TILE_MAX_DEPOSITS   64  /* deposit slots a lane on a tile: MAXD, rtl/cft_krnl.sv */
+/* The deposit ceiling is not a literal here any more. It was 64 -
+ * MAXD, copied out of rtl/cft_krnl.sv - which is a number that stops
+ * being true the day a tile ships with a different one, and which no
+ * tool could check. cft_get_caps publishes it (cft_caps.max_deposits)
+ * and this asks. */
 
 static uint64_t alu(int op, int rd, int ra, int rb, int rc,
                     int ka, int kb, int kc)
@@ -2307,24 +2311,30 @@ int main(int argc, char **argv)
                 "three registers can be loaded");
         if (R.nsamples > 0xffffffffull || R.stride > 0xffffffffull)
             die("that run does not fit the sequencer's 32-bit trip counts");
-        /* A tile holds TILE_MAX_DEPOSITS deposit slots a lane
-         * (rtl/cft_krnl.sv, MAXD), and this program deposits four values
-         * a sample plus four at the start, for the whole run in one call
-         * - so on a device a run records at most 15 samples, which the
-         * default of 16 periods sampled once a period is not. The
-         * software backend accepts a million; refuse here with the flags
-         * named rather than let the tile refuse the image. */
-        if (strcmp(caps.backend, "software") != 0 &&
-            (R.nsamples + 1) * DEPOSITS_PER_SAMPLE > TILE_MAX_DEPOSITS) {
-            char msg[240];
+        /* This program deposits four values a sample plus four at the
+         * start, for a whole run in ONE call, so the sample count is
+         * bounded by the device's deposit budget: 64 slots a lane on
+         * the tile of rtl/cft_krnl.sv is fifteen samples, 2^20 in this
+         * library's software backend is a quarter of a million.
+         *
+         * Unlike the zoom's trip count, the sample count is part of
+         * WHAT IS COMPUTED - fewer samples is a different record - so
+         * there is nothing to resize and this refuses, naming the two
+         * flags that set it. A cap of zero means the device did not
+         * say (an older remote server; docs/REMOTE.md), and an unknown
+         * cap constrains nothing; cft_program_load is the backstop. */
+        if (caps.max_deposits &&
+            (R.nsamples + 1) * DEPOSITS_PER_SAMPLE > caps.max_deposits) {
+            char msg[280];
             snprintf(msg, sizeof msg,
-                     "%llu samples deposit %llu values a lane and a tile holds "
-                     "%u (rtl/cft_krnl.sv MAXD): record at most %u samples a run "
-                     "on the %s backend - raise --sample-every or lower --periods",
+                     "%llu samples deposit %llu values a lane and the %s "
+                     "backend holds %u (cft_caps.max_deposits): record at "
+                     "most %u samples a run - raise --sample-every or lower "
+                     "--periods",
                      (unsigned long long)R.nsamples,
                      (unsigned long long)((R.nsamples + 1) * DEPOSITS_PER_SAMPLE),
-                     TILE_MAX_DEPOSITS,
-                     TILE_MAX_DEPOSITS / DEPOSITS_PER_SAMPLE - 1, caps.backend);
+                     caps.backend, (unsigned)caps.max_deposits,
+                     (unsigned)(caps.max_deposits / DEPOSITS_PER_SAMPLE - 1));
             die(msg);
         }
     }

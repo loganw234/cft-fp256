@@ -8,13 +8,18 @@
  * another language cannot do for itself.
  */
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../include/cft.h"
 #include "softfloat.h"
-#ifdef CFT_ENABLE_XRT
+/* Unconditionally: cft_seq_caps and the seams this file owns on both
+ * sides of it (cft_device_seq_caps, cft_set_error) exist in every
+ * build, including one with no device backend at all. */
 #include "backend.h"
+#ifdef CFT_ENABLE_XRT
 
 /* Ranges a device reduction may be split into. One per tile, so this
  * is MAX_TILES in the XRT backend - kept as its own name because it
@@ -25,6 +30,12 @@
 
 #define CFT_BACKEND_SW  0
 #define CFT_BACKEND_XRT 1
+
+/* Clears this library's own last-error slot; called at every point
+ * where a call is about to reach a device backend, so that a message
+ * libcft wrote never goes on explaining a failure that is not its.
+ * Defined with the slot, below. */
+static void backend_call(void);
 
 /* ==== the remote backend (docs/REMOTE.md) ============================
  * A device behind a socket, opened with "cft://host:port". Compiled in
@@ -48,6 +59,11 @@ struct cft_device {
     uint32_t    tiles;
     uint32_t    device_version;
     int         flags_readable;
+    /* What this device will accept in a program header, published
+     * through cft_caps and enforced by cft_program_load. Zero in a
+     * field is UNKNOWN, and only a remote server whose caps block
+     * predates the fields produces one. */
+    cft_seq_caps seq;
     const char *backend_name;
     void       *hw;             /* backend handle, NULL for software */
     /* The 754-2019 7.1 status word (ABI 0.7). Every entry point ORs
@@ -191,10 +207,14 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     if (artifact && strncmp(artifact, "cft://", 6) == 0) {
 #ifndef CFT_NO_REMOTE
         uint32_t fmask = 0, groups = 0, tiles = 0, ver = 0;
+        cft_seq_caps seq;
         int readable = 1;
         void *hw = NULL;
-        int st = cftr_open(artifact, index, &hw, &fmask, &groups, &tiles,
-                           &ver, &readable);
+        int st;
+        memset(&seq, 0, sizeof seq);
+        backend_call();
+        st = cftr_open(artifact, index, &hw, &fmask, &groups, &tiles,
+                       &ver, &readable, &seq);
         if (st != CFT_OK)
             return (cft_status)st;
         dev = (cft_device *)calloc(1, sizeof *dev);
@@ -209,6 +229,7 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         dev->tiles          = tiles;
         dev->device_version = ver;
         dev->flags_readable = readable;
+        dev->seq            = seq;
         dev->backend_name   = "remote";
         dev->hw             = hw;
         *out = dev;
@@ -222,10 +243,14 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     if (artifact) {
 #ifdef CFT_ENABLE_XRT
         uint32_t fmask = 0, groups = 0, tiles = 0, ver = 0;
+        cft_seq_caps seq;
         int readable = 1;
         void *hw = NULL;
-        int st = cftx_open(artifact, index, &hw, &fmask, &groups, &tiles,
-                           &ver, &readable);
+        int st;
+        memset(&seq, 0, sizeof seq);
+        backend_call();
+        st = cftx_open(artifact, index, &hw, &fmask, &groups, &tiles,
+                       &ver, &readable, &seq);
         if (st != CFT_OK)
             return (cft_status)st;
         dev = (cft_device *)calloc(1, sizeof *dev);
@@ -240,6 +265,7 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         dev->tiles          = tiles;
         dev->device_version = ver;
         dev->flags_readable = readable;
+        dev->seq            = seq;
         dev->backend_name   = "xrt";
         dev->hw             = hw;
         *out = dev;
@@ -270,6 +296,11 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     dev->tiles          = 1;
     dev->device_version = 0;
     dev->flags_readable = 1;
+    /* Its own limits, from the file that enforces them, so that the
+     * caps this backend reports and the caps it holds a program to
+     * are one declaration (host/src/program.c). Deliberately NOT the
+     * tile's - see the note there. */
+    cft_sw_seq_caps(&dev->seq);
     dev->backend_name   = "software";
     dev->hw             = NULL;
     *out = dev;
@@ -303,16 +334,20 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                             uint32_t *flags, uint32_t *bus)
 {
 #ifdef CFT_ENABLE_XRT
-    if (dev && dev->backend == CFT_BACKEND_XRT)
+    if (dev && dev->backend == CFT_BACKEND_XRT) {
+        backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes,
                                 max_deposits, a, b, c, deposits, counts, n,
                                 flags, bus);
+    }
 #endif
 #ifndef CFT_NO_REMOTE
-    if (dev && dev->backend == CFT_BACKEND_REMOTE)
+    if (dev && dev->backend == CFT_BACKEND_REMOTE) {
+        backend_call();
         return cftr_program_run(dev->hw, fmt, image, image_bytes,
                                 max_deposits, a, b, c, deposits, counts, n,
                                 flags, bus);
+    }
 #endif
     (void)fmt; (void)image; (void)image_bytes; (void)max_deposits;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
@@ -337,8 +372,70 @@ CFT_API void cft_close(cft_device *dev)
     free(dev);
 }
 
+/* ---- the library's own last-error slot ------------------------------
+ *
+ * The two device backends keep a message each and clear it at the
+ * start of every call they make, so each is non-empty only while its
+ * own most recent call is the one that failed. This is the third
+ * source and it follows the same discipline from the other side:
+ * anything in libcft that refuses without reaching a backend writes
+ * here, and every call that DOES reach a backend clears it first -
+ * backend_call() below, immediately before each cftx_/cftr_ call, and
+ * this file holds all of them. Without that, a program refused at
+ * load would go on explaining a run that failed for another reason
+ * ten calls later.
+ *
+ * The one producer today is cft_program_load's capacity refusal. */
+static char g_msg[320];
+
+void cft_set_error(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g_msg, sizeof g_msg, fmt, ap);
+    va_end(ap);
+}
+
+/* Called immediately before handing anything to a device backend. */
+static void backend_call(void)
+{
+    g_msg[0] = '\0';
+}
+
+int cft_seq_cap_refusal(const char *field, unsigned long asked,
+                        unsigned long cap, const char *units,
+                        const char *caps_field)
+{
+    /* The program's number first, the device's second, and the name of
+     * the field that would have answered in advance third: what a
+     * caller has to change is the first of the three, and what it
+     * should have asked is the last. */
+    cft_set_error("this program's %s is %lu; this device's is %lu (%s). "
+                  "Ask cft_get_caps - cft_caps.%s - before building one: a "
+                  "device refuses an image past its capacities itself, with "
+                  "a status bit and no explanation",
+                  field, asked, cap, units, caps_field);
+    return CFT_ERR_UNSUPPORTED;
+}
+
+void cft_device_seq_caps(const struct cft_device *dev, cft_seq_caps *out)
+{
+    if (!out)
+        return;
+    if (!dev) {
+        memset(out, 0, sizeof *out);
+        return;
+    }
+    *out = dev->seq;
+}
+
 CFT_API const char *cft_last_error(void)
 {
+    /* This library's own message first: it is cleared the moment
+     * anything reaches a backend, so it is non-empty only while the
+     * most recent failure was one libcft made on its own. */
+    if (*g_msg)
+        return g_msg;
     /* Two device backends keep a message each. The remote one clears
      * its own at the start of every call it makes, so its message is
      * non-empty only while its most recent call is the one that
@@ -375,6 +472,12 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
     c.device_version = dev->device_version;
     c.flags_readable = dev->flags_readable;
     strncpy(c.backend, dev->backend_name, sizeof c.backend - 1);
+    /* Appended in ABI 0.8; a caller with the older struct passes the
+     * older struct_size and the memcpy below stops before them. */
+    c.max_deposits   = dev->seq.max_deposits;
+    c.max_insns      = dev->seq.max_insns;
+    c.max_consts     = dev->seq.max_consts;
+    c.seq_features   = dev->seq.features;
 
     if (want > sizeof c)
         want = sizeof c;
@@ -498,7 +601,9 @@ CFT_API cft_status cft_run(cft_device *dev,
 #ifdef CFT_ENABLE_XRT
     if (dev->backend == CFT_BACKEND_XRT) {
         uint32_t fl = 0;
-        cft_status st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
+        cft_status st;
+        backend_call();
+        st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
                                              (int)rnd, a, b, c, d, n,
                                              &fl, bus_out);
         if (st == CFT_OK)
@@ -513,7 +618,9 @@ CFT_API cft_status cft_run(cft_device *dev,
 #ifndef CFT_NO_REMOTE
     if (dev->backend == CFT_BACKEND_REMOTE) {
         uint32_t fl = 0;
-        cft_status st = (cft_status)cftr_run(dev->hw, (int)op, (int)fmt,
+        cft_status st;
+        backend_call();
+        st = (cft_status)cftr_run(dev->hw, (int)op, (int)fmt,
                                              (int)rnd, a, b, c, d, n,
                                              &fl, bus_out);
         if (st == CFT_OK)
@@ -798,6 +905,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
             if (!partials)
                 return CFT_ERR_OUT_OF_MEMORY;
 
+            backend_call();
             st = (cft_status)cftx_reduce(dev->hw, (int)op, (int)fmt,
                                          (int)rnd, a, lo, hi, nr,
                                          partials, &fl, bus_out);
@@ -834,7 +942,9 @@ CFT_API cft_status cft_reduce(cft_device *dev,
      * apart above and arrive here as a DOT or an ABS pass and a SUM. */
 #ifndef CFT_NO_REMOTE
     if (dev->backend == CFT_BACKEND_REMOTE) {
-        cft_status st = (cft_status)cftr_reduce(dev->hw, (int)op, (int)fmt,
+        cft_status st;
+        backend_call();
+        st = (cft_status)cftr_reduce(dev->hw, (int)op, (int)fmt,
                                                 (int)rnd, a, b, d, n,
                                                 &fl, bus_out);
         if (st == CFT_OK)
