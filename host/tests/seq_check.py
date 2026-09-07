@@ -122,7 +122,7 @@ def corrupt(insns, rng):
     loop_at = [i for i, w in enumerate(out)
                if seq.decode(w)["ctrl"] and seq.decode(w)["op"] == seq.REPEAT]
     choices = ["repeat0", "stray_field", "alu_imm", "reserved", "unbalanced",
-               "huge_trip", "bad_const"]
+               "huge_trip", "wrap_trip", "bad_const"]
     if loop_at:
         choices += ["halt_in_loop", "actall_in_loop"]
     what = rng.choice(choices)
@@ -150,6 +150,19 @@ def corrupt(insns, rng):
         out = ([seq.repeat(0xFFFFFFFF)] * 4 +
                [seq.alu(seq.sf.OP_ADD, 0, 0, 0, 0)] +
                [seq.endrep()] * 4 + out)
+    elif what == "wrap_trip":
+        # The same bound, reached by a trip-count product that
+        # OVERFLOWS sixty-four bits rather than one that is merely
+        # huge. 2^16 * 2^17 * 2^31 is exactly 2^64, which is zero in a
+        # uint64_t and passed libcft's "> MAX_INSTRUCTIONS" test until
+        # 2026-09-07; the model computes the same product in Python
+        # integers, so it has always refused this program. Found by
+        # host/fuzz; the image is host/fuzz/crashes/
+        # program-differential/repeat-trip-product-wraps.
+        out = ([seq.repeat(1 << 16), seq.repeat(1 << 17),
+                seq.repeat(1 << 31),
+                seq.alu(seq.sf.OP_ADD, 0, 0, 0, 0)] +
+               [seq.endrep()] * 3 + out)
     elif what == "bad_const":
         out.insert(0, seq.encode(seq.sf.OP_FMA, 0, rb=15, kb=True))
     else:                                   # unbalanced

@@ -260,6 +260,21 @@ static int h_run(conn *C, const uint8_t *p, size_t len, answer *A, int reduce)
     if (present & 4u) { c = q; }
 
     out_bytes = reduce ? esz : opnd;
+    /* The answer is eight bytes of flags and status before the
+     * results, and cftr_send_frame refuses a payload over the cap -
+     * so the largest n the check above admits describes a run whose
+     * answer could never be delivered, and the old order did the whole
+     * run and the gigabyte allocation first and discovered that after.
+     * Refused before the work, not after it (host/fuzz, 2026-09-07);
+     * every request whose answer was ever sendable is unaffected. */
+    if (8u + out_bytes > (size_t)CFTR_MAX_PAYLOAD) {
+        snprintf(A->why, sizeof A->why, "%s over %llu elements would answer "
+                 "with %lu bytes, past the %lu-byte frame cap",
+                 reduce ? "REDUCE" : "RUN", (unsigned long long)n,
+                 (unsigned long)(8u + out_bytes),
+                 (unsigned long)CFTR_MAX_PAYLOAD);
+        return -1;
+    }
     d = (uint8_t *)malloc(8u + (out_bytes ? out_bytes : 1u));
     if (!d) {
         fail(A, CFT_ERR_OUT_OF_MEMORY, "allocating the result");

@@ -4519,3 +4519,193 @@ needs to read.
 nested rungs, the retimed ladders, the pipelined leading-zero cone,
 the indexed constants and the published caps. Those are proposals
 with their own gates in the study documents.
+
+## 2026-09-07 - the four parsers that face untrusted bytes, fuzzed
+
+Four places in this repository read bytes somebody else wrote: the
+server's frames (`host/tools/cft-serve.c`), the client's replies
+(`host/src/backend_remote.c`), the program image
+(`host/src/program.c`), and the five workload tools' `--resume`
+readers. Everything else in libcft takes arguments, and a wrong
+argument is the caller's mistake. None of the four had been fuzzed.
+All four now are, opt-in, under `host/fuzz`.
+
+**The engine, and why it is not libFuzzer.** There is no clang on
+either machine this repository builds on - not on `PATH`, not in
+`/c/msys64/clang64` or `/c/msys64/mingw64`, not in the `cft-sim`
+image - and the image carries no AFL++ either. What both toolchains do
+carry is gcc with `-fsanitize=address,undefined`, and the Linux one
+also has `-fsanitize-coverage=trace-pc`, so `host/fuzz/cft_fuzz.c` is
+the part of libFuzzer that matters here: an AFL-style edge map,
+bucketed hit counts, a corpus that grows when an input reaches a
+bucket nothing else reached, havoc mutation, and a structure-aware
+repair pass per target - without which a mutated frame never gets past
+its crc and the whole budget goes into proving that a wrong crc is
+refused. The three in-process harnesses INCLUDE the files under test
+rather than refactoring them (`rdev`, `do_request` and every request
+handler are static), so the fuzz lane needed no diff to the server or
+the client. The five workload tools are driven as processes, because
+each `ckpt_read` is static inside its own main file and a resume is a
+whole-process act anyway; that arm has no coverage feedback, and says
+so.
+
+The Windows toolchain has neither sanitiser, so every number here was
+measured in the `cft-sim` image (gcc 13.3.0, Linux, `-O1 -g
+-fsanitize=address,undefined -fno-sanitize-recover=all`) on
+DESKTOP-T33SK86, one core per campaign, never more than four at once,
+about two hours ten minutes of CPU in total.
+
+| target | engine | executions | per second | crashes | fixed | differentials |
+|---|---|---|---|---|---|---|
+| `cft_program_load` | coverage-guided, in process | 13,390,661 in 1800 s | 7,439 | 0 | - | 1 |
+| `cft-serve`'s handlers | coverage-guided, in process | 9,157,596 in 1800 s | 5,088 | 0 | - | - |
+| `backend_remote`'s replies | coverage-guided, in process | 10,788,875 in 1800 s | 5,994 | 0 | - | - |
+| the loader against the model | mutation, ctypes, no coverage | 70,000 images | ~340 | - | - | 1 |
+| the five `--resume` readers | structure-aware mutation, as processes | 1,061 resumes | 0.1 to 2.7 | 2 | 2 | - |
+
+Coverage reached: 135 of 32,768 map buckets for the loader, 1,378 for
+the server, 303 for the client. The reproducer for every finding below
+is under `host/fuzz/crashes`, and `make -C host fuzz-repro` replays
+them: three files, each one refused by name where it used to be a
+crash or an acceptance. Replaying every corpus entry once with
+LeakSanitizer on - 78, 1,156 and 76 entries - reported no leak in any
+of the three.
+
+**Two out-of-bounds writes in cft-collatz's resume, both from a count
+the file was trusted for.** `fill_batch` takes how many slots to fill
+from `nrec`, the batch's record count, and where to put them from
+`live`, the lanes in flight; an uninterrupted run keeps `live <= nrec`
+because every lane it starts makes a record. The checkpoint reader
+bounded each against `--batch` and neither against the other, so
+`batchrecords 0` with `inflight 1` wrote the next batch past the end of
+six 2,048-byte engine arrays - ASan: `heap-buffer-overflow WRITE of
+size 32 ... fill_batch tools/collatz.c:1462`. And each in-flight lane
+names the record its result goes to; that number was not bounded at
+all, so `run ... 999999` sent `harvest`'s `val_to_dec` writing wherever
+`recs[999999]` landed - ASan: `SEGV on unknown address`. Twelve of the
+fuzzer's first 172 collatz resumes hit the first of the two. Both are
+bounds checks now, both refuse by name, and `collatz_check.py` builds
+both files from a real interrupted run and asserts exit 2 with a
+message.
+
+**A trip-count product that wraps, in the program loader.**
+`seq_validate` bounds a program's worst-case instruction count at 2^40
+by multiplying the enclosing loops' trip counts - `mult[top] =
+mult[top - 1] * d.imm`, both `uint64_t`, checked AFTER the multiply. A
+product past 2^64 wraps to a small number and passes. `repeat 2^16 /
+repeat 2^17 / repeat 2^31` is exactly 2^64: libcft accepted it, and
+`python/cft_golden/seq.py`, whose integers do not wrap, refused it with
+"worst-case instruction count exceeds 1099511627776". So the C loader
+took a program describing 2^64 iterations of its body while the model -
+which is the definition of what a program is - threw it back, and
+`cft-serve` would have run it, from a PROG_LOAD and a PROG_RUN
+totalling 118 bytes. Checked before the multiply now
+(`d.imm > SEQ_MAX_INSNS / mult[top - 1]`, which is exactly
+`mult * imm > MAX` and needs no wider type): one line and a comment,
+and no program either implementation accepted before is refused now.
+`seq_check.py` grew a ninth named corruption, `wrap_trip`, that builds
+this program every time it fires; the image is
+`host/fuzz/crashes/program-differential/repeat-trip-product-wraps`.
+
+Nothing else disagreed: 70,000 mutated images through both loaders,
+4,198 accepted by both and the rest refused by both, no other
+divergence.
+
+**A run whose answer could never be sent, done anyway.** `RUN`'s length
+check is `24 + popcount(mask) * n * elemsize`, so an operand mask of
+zero constrains `n` not at all - and a mask of zero is legal, because
+an unassigned opcode reads no operand and still has a defined result,
+the canonical quiet NaN with invalid raised. `cft-serve` capped `n` so
+the OPERANDS fit a frame and then answered with eight bytes of flags
+and status in front of the results, which for the largest `n` the cap
+admits is eight bytes past what `cftr_send_frame` will send: 2^28 fp32
+elements, a gigabyte allocated, a gigabyte of arithmetic, and then a
+failed send and a dropped connection. It is refused before the work
+now, and `remote-test` sends exactly that frame and checks that a
+refusal comes back promptly - 248 checks, 0 failures, where it was 245.
+What is NOT fixed, because it is the transport's terms rather than a
+defect, is that a well-formed operand-less request still asks for up to
+2^25 fp256 results from fifty-six bytes on the wire. docs/REMOTE.md now
+says so, in the section that has always said this is not a security
+boundary.
+
+**Three silent wrong resumes, in three tools.** Not crashes; the
+sanitisers cannot see these. They came from reading what the readers do
+not check and then running it.
+
+* `cft-mersenne` took its squaring counter from the file without
+  bounding it against the exponent's sequence. `current 521 100000`
+  printed **"2^521 - 1 COMPOSITE, 519 squarings"** and exited 0.
+  2^521 - 1 is a known Mersenne prime; past the end of the sequence the
+  squaring loop runs zero times and the parked residue is reported as a
+  finished Lucas-Lehmer test. `current 521 -5` squares five times too
+  many and reports a different wrong residue.
+* `cft-enclose` took its series term counter the same way. `inflight 23
+  1000`, where the recurrence for fp64 has 18 terms, finished the run
+  and printed a full set of enclosures - exit 0, a different chain -
+  that do not enclose, because the tail bound was charged to partial
+  sums as though every term had been summed. In a tool whose entire
+  claim is that the true value lies between its two numbers.
+* `cft-zoom` records an escape as `escaped_at = k` at the iteration it
+  happens on. `escapedat 7` on a 2,000-iteration reference skipped the
+  orbit entirely and reported `k = 185, escaped at 7, orbit flags 0x00`
+  and a different chain, exit 0.
+
+Each is one bounds check and a named refusal, and each tool's own check
+script now builds the file from a real interrupted run and asserts exit
+2. `cft-orbits` needed nothing: its `state` and `inv` lines already
+refuse a member index out of range, and its step and sample counters
+are counters rather than indices.
+
+**A second checkpoint campaign, against the patched tools.** 310
+resumes over the five tools: 104 accepted, 206 refused by name, no
+crash, no hang, no other exit status.
+
+**One false positive, recorded because the harness was wrong and the
+tool was not.** The first checkpoint campaign reported a hang in
+`cft-zoom`. It was not one: zoom derives its fp256 centre BEFORE it
+reads the checkpoint, so a resume it refuses outright still takes 11 to
+25 seconds under the sanitisers, and the 20-second budget was inside
+that window. The saved file is refused correctly - `bad checkpoint
+orbit line`, exit 2 - 24 seconds in. The budget is 90 seconds now. A
+fuzzer whose hang budget is shorter than its target's start-up reports
+start-up.
+
+**Gates, re-run on the patched tree.** In the `cft-sim` image (gcc
+13.3.0, Linux): `make test` "28 sets, 184496 cases, all matching" over
+a bounded generated set, plus api-test, reduce-parts and the C/Python
+identity; `seqtest` 674 programs, 326 refused by both, "libcft and the
+golden model agree on every program: deposits, counts, flags and
+status"; `remotetest` "remote_check: every check passed", inside it
+`device-test` 2,248 checks 0 failed and `remote-test` 248 checks 0
+failures on both div/sqrt routes; `collatztest` 18,110 comparisons 0
+failures; `enclosetest` 2,662 comparisons 0 failures; `mersennetest`
+391 comparisons 0 failures; `orbitstest` 26 checks 0 failures;
+`zoomtest` 11,223 comparisons 0 failures;
+`program_differential.py --trials 50000` "0 disagreements";
+`fuzz-repro` three reproducers, all handled. On Windows (MSYS2 mingw64
+gcc 16.1.0, no sanitisers): a clean `make all` with no new warning
+under `-Wall -Wextra -Wpedantic -Wshadow`, `seqtest` the same 674
+programs, `mersennetest` 391 comparisons 0 failures, and
+`remote_check.py` "remote_check: every check passed" against a
+loopback server it started and stopped by PID. The default build is
+unchanged: `make -C host` still needs one C99 compiler and no
+sanitiser, and nothing under `host/fuzz` is a prerequisite of `all`.
+
+**What was not run.** No RTL, no simulation, no hardware - nothing here
+touches `rtl/`, `tb/` or the card. The full published vector replay was
+not run: `vectors/out` is generated rather than committed and this
+worktree had none, so `make test` ran against the same bounded set
+`remote_check.py` generates - 184,496 cases - rather than the 1.2
+million the runner's `vectors` stage makes. On Windows only the build,
+`seqtest`, `mersennetest` and `remote_check.py` were re-run; the other
+four workload checks were run on Linux alone. The sanitisers are
+Linux-only here, so nothing was ever run under ASan or UBSan on
+Windows. libFuzzer and AFL++ were not used, for the reason at the top;
+neither was a coverage-guided arm for the checkpoint readers, which are
+subprocess-driven and blind, and which therefore got a thousand resumes
+where the in-process targets got tens of millions of executions. And
+two hours of CPU across five targets is a first pass, not a clean bill:
+thirteen million executions of the loader found nothing it gets wrong
+about a header it already checks, which is a weaker statement than it
+looks.

@@ -1763,6 +1763,8 @@ static void ckpt_read(runstate *R)
                 die("the checkpoint was written with a different --degree");
         } else if (!strcmp(key, "cursor")) {
             R->cursor = (size_t)strtoull(rest, NULL, 10);
+            if (R->cursor > R->total)
+                die("the checkpoint's cursor is past the end of the run");
         } else if (!strcmp(key, "kernel")) {
             char nm[32], hw[HEXMAX], wi[64];
             uint64_t nn = 0, ne = 0;
@@ -1804,6 +1806,19 @@ static void ckpt_read(runstate *R)
                 die("bad checkpoint inflight line");
             if (nfl > O->batch)
                 die("the checkpoint has more in flight than --batch");
+            /* The term counter has to name a place inside the
+             * recurrence. Past its end the loop that finishes the
+             * series runs zero times and the tail bound is charged to
+             * partial sums as though every term had been summed - a
+             * resume from `inflight 23 1000` produced a full set of
+             * enclosures, exit 0, that do not enclose. Before its
+             * start it sums terms the recurrence has not defined. A
+             * file this tool wrote says neither (host/fuzz,
+             * 2026-09-07); R->terms is derived from the format and is
+             * known before this is read. */
+            if (term < 0 || term > R->terms)
+                die("the checkpoint's series term counter is outside the "
+                    "recurrence this format defines");
             for (i = 0; i < (size_t)nfl; i++) {
                 char a[HEXMAX], b[HEXMAX], c[HEXMAX], d[HEXMAX];
                 if (!fgets(line, sizeof line, f))
