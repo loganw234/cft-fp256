@@ -19,9 +19,12 @@
 #                                      # the language legs, soak, the five workloads,
 #                                      # the browser demos and the remote backend -
 #                                      # after a host build
-#   bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded: quick + golden,
+#   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, node, wasm, images)
+#   Measured durations for every stage, quiet and loaded, are in
+#   docs/VERIFICATION.md - the simulation suites and the formal gate
+#   run for more than an hour each on a busy box.
 #
 # Why this exists: the gates grew one at a time - pytest, the cocotb
 # suite, yosys, the formal proofs, the library's contract tests, the
