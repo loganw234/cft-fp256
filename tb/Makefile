@@ -32,7 +32,7 @@ sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
 # benches that exist only for this configuration. `sim` is the
 # shipping default; this is the third-tier tile's own census.
 simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
-       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc
+       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \n       board boardkrnl boardseq boardfp256
 
 # The iterated chunk-column multiplier against exact integer
 # arithmetic, at every column count the three wide rungs can build -
@@ -303,6 +303,34 @@ krnlplain:
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlplain \
 		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=0 -Pcft_krnl.FUSE_ALIGN=0" \
 		COCOTB_RESULTS_FILE=sim_build/krnlplain/results.xml
+
+# THE OPEN-CORE BOARD CONFIGURATION, simulated as one thing.
+#
+# hw/mc_sweep.sh measured a tile for the Kintex-7 325T at MUL_PASSES=10
+# with both fused ladders on - 98,929 LUT, 48.5% of the part, 9.698 ns
+# of implied path against a 100 MHz ask (docs/ARCHITECTURE.md). Every
+# one of those three parameters has been simulated, and never all three
+# at once: `krnlfused` runs the ladders at one pass, the `*mc` targets
+# run the passes with the ladders off. A configuration that is only
+# ever covered a parameter at a time is a configuration nobody has run.
+#
+# These targets are that configuration, on the three benches that
+# matter for a board with no host streaming a beat a cycle: the kernel
+# through its CSR and AXI interfaces, the same kernel driven by the
+# sequencer (which is how an open tile actually computes), and the
+# fp256 bank itself. MC defaults to 10, so `make board` is the board.
+BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC)
+
+board: boardkrnl boardseq boardfp256
+
+boardkrnl:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml
+
+boardseq:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml
+
+boardfp256:
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/boardfp256$(MC) 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" 		COCOTB_RESULTS_FILE=sim_build/boardfp256$(MC)/results.xml
 
 # Cycle counts on the RTL, which is where they actually live: hw_emu's
 # wall clock measures the simulator, and its XRT timeline trace came
