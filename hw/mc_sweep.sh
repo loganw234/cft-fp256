@@ -8,7 +8,8 @@
 #
 #   bash hw/mc_sweep.sh <part> <freq_mhz> <MUL_PASSES> <ladders 0|1> <synth|impl> [out_root]
 #
-# Writes <out_root>/<part>_mp<N>_l<L>_<stage>/ with Vivado's log and the
+# Writes <out_root>/<part>_<freq>mhz_mp<N>_l<L>_<stage>/ with Vivado's log
+# and the
 # reports, and appends the QOR_* summary lines to <out_root>/summary.txt.
 # Picks up Vivado from VIVADO_BIN, else the 2026.1 install on this host.
 # Run one implementation at a time (a placement can take 25-30 GB).
@@ -20,7 +21,7 @@ out_root=${6:-build_mc}
 here=$(cd -- "$(dirname -- "$0")/.." && pwd)
 vivado=${VIVADO_BIN:-"C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat"}
 
-tag="${part}_mp${mp}_l${lad}_${stage}"
+tag="${part}_${freq}mhz_mp${mp}_l${lad}_${stage}"
 dir="$out_root/$tag"
 mkdir -p "$dir"
 generics="MUL_PASSES=$mp"
