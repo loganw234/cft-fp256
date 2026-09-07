@@ -666,11 +666,39 @@ stops being the critical path" has to be measured against - and the
 `u_engine` control family sitting third at 160 MHz is the second wall
 the study named, appearing in a U50 report for the first time.
 
-The matching branch runs were still on the host's Vivado queue when
-this was written; docs/VALIDATION.md's entry for the day says which
-returned. Read the path delay, not the slack: both runs above met their
-ask, and per docs/BRINGUP.md a passing run tells you the design met
-what it was asked for and nothing about headroom.
+**What the change measured, after the merge.** The same two asks, the
+branch beside the tip, out of context, one build at a time through
+`hw/mc_sweep.sh` (the branch runs were launched by the agent's own
+queue after its session was stopped, and read by the integrator):
+
+| | tip | with the cone cut |
+|---|---|---|
+| **U50, 160 MHz, MUL_PASSES=1, ladders off** | | |
+| synthesis WNS / worst path | +0.410 / the cone, 25 levels, 5.821 ns | +1.348 / `u_engine` reader, 26 levels, 4.883 ns |
+| routed WNS / worst path | +0.120 / round->pack, 6.111 ns | **+0.255** / round->pack, 19 levels, 5.977 ns |
+| routed worst 25, by family | 13 round->pack, 8 engine, 4 the cone | 11 round->pack, 14 engine (FIFO->S0, `beats_total`->`rd_resv`, `op_r`->`w_cnt`), **0 the cone** |
+| routed LUT / FF | 120,839 / 57,644 | 117,820 / 60,671 |
+| **K325T -2, 120 MHz, MUL_PASSES=10, ladders on** | | |
+| synthesis WNS / worst path | -1.733 / the cone into the ladder, 24 levels, 9.698 ns | -0.654 / `beats_total`->`rd_resv`, 43 levels, 9.001 ns |
+| routed WNS / worst path | **-1.817** / the cone into the ladder, 25 levels, 9.784 ns | **-0.078** / `beats_total`->`rd_resv`, 45 levels, 8.425 ns |
+| routed worst 25, by family | every one the cone into the ladder | every one `u_engine` (`beats_total`, `rd_issued`, `len_q`) |
+| routed LUT / FF | 95,695 / 43,365 | 94,204 / 46,288 |
+
+So the study's claim held on both parts: the cone is out of the
+critical-path conversation - absent from the routed worst 25 on the
+U50, and on the K325T the 1.36 ns of routed path it gave back moved
+the wall from a datapath the study could shorten to the engine's
+`beats_total -> rd_resv` control chain, which is its idea 4 and the
+"second wall" it named. The board's clock follows: 120 MHz misses by
+78 picoseconds where the tip missed by 1.8 ns, so a -2 K325T carrying
+the third tier's tile is a ~119 MHz part on the path-delay reading
+(8.425 ns plus the same overhead that turned 9.784 into -1.817 at
+8.333), against ~100 MHz before. The flip-flops cost 3,027 on the U50
+and 2,923 on the K325T, against the study's estimate of 2,856, and
+the LUTs fell 2.5% and 1.6%, which the balanced trees explain. Read
+the path delay, not the slack: the U50 runs both met their ask and
+say nothing about headroom, and neither part has had the frequency
+sweep that would put a number on its ceiling.
 
 
 ## The multi-cycle rung (built 2026-09-06: rtl/cft_mulpass.sv)
