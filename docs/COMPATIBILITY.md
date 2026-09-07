@@ -401,6 +401,17 @@ moved at the software backend's own limit (`INVALID_ARGUMENT` to
 unchanged: 0.7 and 0.8 peers refuse each other over the socket, as
 every minor step has.
 
+The same day, inside 0.8: opcode 30 is `IMUL` (`CFT_IMUL`, the low 32
+bits of a 32x32 product, zero-extended, at every format) and
+instruction bit 30 is `kx`, constants indexed through the immediate
+(docs/SEQUENCER.md). Both are published in CAPS - [28] and [4],
+surfaced as `cft_caps.seq_features` bits 4 and 0 - and refused by the
+loader and by `cft_supports` on a device that does not publish them.
+A program that uses neither is byte-identical in every executor; the
+seq corpus, every workload chain and the published vectors are
+unchanged, except that a vector set recording opcode 30 as reserved
+is now refused by name and regenerates with `imul` cases.
+
 | surface | status at ABI 0.8 |
 |---|---|
 | C (`cft.h`) | complete: `device_test.c` gains "the caps a backend reports match the caps it enforces" for the software and remote backends; `remote_test.c` covers the grown HELLO block (251 checks, from 245) |

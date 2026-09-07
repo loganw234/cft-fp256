@@ -132,7 +132,9 @@ bindings/            cftmpfr (the Python MPFR drop-in), the WASM build
 formal/              the property proofs (make formal): FIFO, seeds,
                      simpleops equivalence, plus the negative control
 verify/              the standardized verification runner (make verify):
-                     every gate, one resumable logged run, census output
+                     every gate, one resumable logged run, census output;
+                     docs/VERIFICATION.md is the map of every gate, what
+                     each proves and how long each really takes
 vectors/             conformance-set emitter (JSONL)
 docker/              the simulation container CI and dev boxes share
 docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
@@ -140,6 +142,8 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      algorithms, error bounds, exactness proofs and the
                      Table Maker's Dilemma stated honestly),
                      SEQUENCER, SCALING, ROADMAP, BRINGUP, CARDDAY,
+                     VERIFICATION (every gate, what it proves, and the
+                     measured wall time - none of it is quick),
                      BENCHMARKS (the software tier measured against
                      MPFR, __float128 and the CPU itself, and the
                      five workloads written for the contract),

@@ -630,6 +630,17 @@ static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
         else
             sf_zero(f, 0, out);
         return 0;
+    case CFT_SF_IMUL: {
+        /* The low 32 bits of the product of the low 32 bits, zero
+         * extended - the model's imul(), which explains why this one
+         * member of the group is not defined on f->width. Both
+         * operands are read before `out` is written, so `out` may
+         * alias either. */
+        uint32_t pa = cft_bn_extract(xa, 0, 32);
+        uint32_t pb = cft_bn_extract(xb, 0, 32);
+        cft_bn_set_u32(out, (uint32_t)((uint64_t)pa * (uint64_t)pb));
+        return 0;
+    }
     default:
         return 1;
     }
@@ -943,6 +954,7 @@ int cft_sf_compute(const cft_fmt_desc *f, int op, int rnd,
     case CFT_SF_ISHL:
     case CFT_SF_ISHR:
     case CFT_SF_ICMPLT:
+    case CFT_SF_IMUL:
         return sf_integer_op(f, op, a, b, out);
     case CFT_SF_RECIP_SEED:
         return sf_recip_seed(f, a, out);

@@ -18,10 +18,11 @@ reach at all. Three examples that matter here:
 
   * reserved opcodes. 15 and everything above 23 must answer with the
     canonical qNaN and raise invalid. The model has no opinion about
-    an opcode it does not define. (Since 2026-08 two of those codes,
-    26/27, belong to cft_seedop and the live module stays quiet on
-    them - see REASSIGNED_OPS below for how this bench handles the
-    one deliberate divergence from the frozen ref.)
+    an opcode it does not define. (Two of those codes, 26/27, went to
+    cft_seedop in 2026-08 and one, 30, became IMUL on 2026-09-07 - see
+    REASSIGNED_OPS and ADDED_OPS below for how this bench handles the
+    three deliberate divergences from the frozen ref, and what checks
+    each of them instead.)
   * the arithmetic group. Opcodes 0-3 leave `valid` low and `d`
     unread, but the rewrite still has to produce the same unread
     value, because "unread" is a property of the engine and not of
@@ -51,6 +52,7 @@ from cocotb.triggers import Timer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from cft_golden import FP32, FP64, FP128, FP256, vectors  # noqa: E402
+from cft_golden import softfloat as sf  # noqa: E402
 
 SETTLE_NS = 1
 
@@ -69,7 +71,7 @@ OP_NAMES = {
     7: "min", 8: "max", 9: "minnum", 10: "maxnum",
     11: "select", 12: "cmplt", 13: "cmple", 14: "cmpeq",
     16: "iand", 17: "ior", 18: "ixor", 19: "iadd", 20: "isub",
-    21: "ishl", 22: "ishr", 23: "icmplt",
+    21: "ishl", 22: "ishr", 23: "icmplt", 30: "imul",
 }
 
 # Everything this module answers, plus the arithmetic group whose
@@ -80,11 +82,26 @@ HANDLED_OPS = [o for o in range(24) if o != 15]
 # divide/sqrt seeds (2026-08, cft_seedop). The frozen ref predates the
 # reassignment and still traps them; the live module now stays quiet
 # so the engine can merge the seed module's result over the same
-# sideband. That makes these two codes the ONE place ref and new are
-# allowed to differ: the sweeps skip them, and test_reassigned_quiet
-# pins down what the live module does instead. Correctness of the seed
-# results themselves is tb_seedop's job.
+# sideband. The sweeps skip them, and test_reassigned_quiet pins down
+# what the live module does instead. Correctness of the seed results
+# themselves is tb_seedop's job.
 REASSIGNED_OPS = (26, 27)
+
+# Opcode 30 left the reserved space on 2026-09-07 for IMUL, the
+# integer group's 32-bit low multiply (docs/ATLAS.md). Unlike 26/27
+# this one the live module ANSWERS: it is an ordinary member of the
+# integer group and comes out of this block's own datapath. The frozen
+# ref still traps it, so the sweeps skip it and test_imul checks the
+# live module against the golden model directly - which is the right
+# arbiter here, the ref having no opinion about an operation it
+# predates.
+ADDED_OPS = (30,)
+
+# The whole of what the two modules are allowed to disagree about, and
+# nothing else. Every sweep below skips exactly this set, so an
+# off-by-one in the live module's `is_reserved` still shows up: 25, 28,
+# 29 and 31 all stay inside the comparison.
+CARVED_OPS = REASSIGNED_OPS + ADDED_OPS
 
 
 def _int(sig):
@@ -161,13 +178,14 @@ def _widen(value, fmt, rng):
 
 @cocotb.test()
 async def test_opcode_map(dut):
-    """Every opcode except the two reassigned ones - 254 of 256.
+    """Every opcode except the three carved out - 253 of 256.
 
     The reserved trap is the reason to sweep the whole space rather
     than the defined subset: an off-by-one in `is_reserved` is
     invisible to any bench that only drives opcodes it knows the names
-    of. The sweep brackets REASSIGNED_OPS on both sides (25 must trap,
-    28 must trap), so the carve-out is exactly two codes wide.
+    of. The sweep brackets both carve-outs on every side - 25 and 28
+    must trap around the seeds, 29 and 31 around IMUL - so neither is
+    a code wider than its opcode.
     """
     rng = random.Random(int(os.environ.get("CFT_SEED", "7")))
     chk = Checker(dut)
@@ -183,12 +201,13 @@ async def test_opcode_map(dut):
             ))
 
     for op in range(256):
-        if op in REASSIGNED_OPS:
+        if op in CARVED_OPS:
             continue
         for a, b, c in operands:
             await chk.drive(op, a, b, c, note="opcode sweep")
 
-    dut._log.info("opcode sweep: %d comparisons over 254 opcodes", chk.checks)
+    dut._log.info("opcode sweep: %d comparisons over %d opcodes",
+                  chk.checks, 256 - len(CARVED_OPS))
 
 
 @cocotb.test()
@@ -302,8 +321,75 @@ async def test_random(dut):
             return rng.getrandbits(256)
 
         op = rng.choice(HANDLED_OPS) if rng.random() < 0.9 else rng.getrandbits(8)
-        if op in REASSIGNED_OPS:
+        if op in CARVED_OPS:
             op = 25  # still reserved in both; keeps the trap exercised
         await chk.drive(op, operand(), operand(), operand(), note="random")
 
     dut._log.info("random: %d comparisons over %d drives", chk.checks, budget)
+
+
+@cocotb.test()
+async def test_imul(dut):
+    """The live module's side of the opcode-30 carve-out, against the
+    golden model rather than against the ref.
+
+    Two claims, and the second is the one a W-bit implementation would
+    fail quietly:
+
+      * the value is the low 32 bits of the product of the operands'
+        low 32 bits, zero-extended - `softfloat.imul()` is the
+        definition and is called here rather than reimplemented;
+      * no bit above 31 of either operand can reach the answer. Every
+        drive puts random junk in the high bits of the 256-bit operand
+        word, so at fp64, fp128 and fp256 the instance sees those bits
+        and must ignore them. The same drive at fp32 sees only the low
+        32, and all four rungs must agree on the same number.
+
+    The directed corpus is the one docs/studies/OPT-D-contract.md names
+    for this operation: zeros, ones, powers of two, 2^k - 1, the two
+    `lowbias32` constants, and the wraparound boundary.
+    """
+    rng = random.Random(int(os.environ.get("CFT_SEED", "7")) + 4)
+    m32 = 0xFFFFFFFF
+    directed = [0, 1, 2, 3, 0xFFFF, 0x10000, 0x7FFFFFFF, 0x80000000,
+                0xFFFFFFFF, 0x7FEB352D, 0x846CA68B]
+    directed += [1 << k for k in range(32)]
+    directed += [(1 << k) - 1 for k in range(1, 33)]
+
+    pairs = [(x, y) for x in directed for y in directed]
+    pairs += [(rng.getrandbits(32), rng.getrandbits(32)) for _ in range(600)]
+
+    checks = 0
+    for lo_a, lo_b in pairs:
+        # The high bits are junk on purpose: they are what the 32-bit
+        # definition promises not to read.
+        a = lo_a | (rng.getrandbits(224) << 32)
+        b = lo_b | (rng.getrandbits(224) << 32)
+        dut.op.value = 30
+        dut.a.value = a
+        dut.b.value = b
+        dut.c.value = rng.getrandbits(256)
+        await Timer(SETTLE_NS, units="ns")
+
+        want = (lo_a * lo_b) & m32
+        for name, fmt, width in RUNGS:
+            model, mflags = sf.compute(fmt, sf.OP_IMUL,
+                                       a & ((1 << width) - 1),
+                                       b & ((1 << width) - 1), 0)
+            assert model == want and mflags == 0, (
+                f"the model and this bench disagree at fp{name} - one of "
+                f"them is not computing imul")
+            d_n = _int(getattr(dut, f"d{name}_n"))
+            f_n = _int(getattr(dut, f"f{name}_n"))
+            v_n = _int(getattr(dut, f"v{name}_n"))
+            assert (d_n, f_n, v_n) == (model, 0, 1), (
+                f"fp{name} imul\n"
+                f"  a     = 0x{a & ((1 << width) - 1):0{width // 4}x}\n"
+                f"  b     = 0x{b & ((1 << width) - 1):0{width // 4}x}\n"
+                f"  model d=0x{model:0{width // 4}x} flags=0b00000 valid=1\n"
+                f"  new   d=0x{d_n:0{width // 4}x} flags=0b{f_n:05b} "
+                f"valid={v_n}")
+            checks += 1
+
+    dut._log.info("imul: %d comparisons over %d operand pairs",
+                  checks, len(pairs))

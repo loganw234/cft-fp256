@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from cft_golden import FP32, RND_NAMES, vectors  # noqa: E402
 from cft_golden.reduce import fsum, stream_reduce  # noqa: E402
 
-LATENCY = 15
+LATENCY = 16
 
 
 async def reset(dut):

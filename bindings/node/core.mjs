@@ -36,8 +36,8 @@ import {
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
   OP_SUMABS, OP_SUMSQ,
-  RDN, RMM, RNE, RTZ, RUP, TRANSCEND_BINARY, TRANSCEND_INTARG,
-  TRANSCEND_UNARY,
+  RDN, RMM, RNE, RTZ, RUP, STATUS_DEPOSIT_OVERFLOW, TRANSCEND_BINARY,
+  TRANSCEND_INTARG, TRANSCEND_UNARY,
   checkStatus, flagNames, loadModule, withScratch,
 } from "./lib.mjs";
 
@@ -2261,6 +2261,224 @@ export class Context {
       checkStatus(this._C, st, "cft_reduce");
       return this._finish(s.get(pd, fi.size), s.u32(fl));
     });
+  }
+
+  // -- the orbit sequencer (docs/SEQUENCER.md) ---------------------
+
+  /** Load a program IMAGE on this context's device.
+   *
+   *  `image` is the bytes docs/SEQUENCER.md specifies - header,
+   *  constant bank, instruction stream - as a Uint8Array (or anything
+   *  Uint8Array.from accepts). It is not parsed here: cft_program_load
+   *  is the validator, and a second one in JavaScript would be a
+   *  second opinion about what is legal, which is the failure the
+   *  loader exists to prevent. A program a device could execute
+   *  ambiguously is refused, loudly, with the library's own words.
+   *
+   *  The returned Program carries ITS OWN format, read back through
+   *  cft_program_get_info rather than assumed to be this context's: a
+   *  program is compiled for one format because its constants are
+   *  format-width values, and nothing stops an fp256 image being
+   *  loaded from an fp64 context on the same device. Its operands and
+   *  its deposits are in the program's format. The device, and
+   *  therefore the 7.1 status word, is shared with this context.
+   *
+   *  The handle is a wasm-heap allocation the library owns. Call
+   *  free() - or use it inside `using`/try-finally - because nothing
+   *  else will: there is no finalizer here, deliberately, since a
+   *  collector's schedule is not something a determinism contract
+   *  should be able to notice. */
+  loadProgram(image) {
+    const bytes = image instanceof Uint8Array ? image
+                                              : Uint8Array.from(image);
+    const M = this._M, C = this._C;
+    const handle = withScratch(M, (s) => {
+      const pimg = bytes.length ? s.put(bytes) : s.alloc(1);
+      const pout = s.alloc(4);
+      const st = C.programLoad(this._dev, pimg, bytes.length, pout);
+      checkStatus(C, st, "cft_program_load");
+      const h = s.u32(pout);
+      if (!h)
+        throw new Error("cft_program_load returned CFT_OK and no handle");
+      return h;
+    });
+    return new Program(this, handle);
+  }
+}
+
+const FORMAT_BY_CODE = new Map(ALL_FORMATS.map((f) => [f.code, f]));
+
+/** A loaded sequencer program, and the run that issues it.
+ *
+ *  cft_run applies one operation to every element; a program applies a
+ *  SEQUENCE to every element without the operands making a round trip
+ *  to memory between steps. This class is the four calls of cft.h's
+ *  program section and nothing more - load (Context.loadProgram), the
+ *  shape, the run, the free.
+ *
+ *  Construct it through Context.loadProgram(), never directly: the
+ *  handle is the library's and this object's whole job is to own
+ *  exactly one of them. */
+export class Program {
+  constructor(ctx, handle) {
+    this._ctx = ctx;
+    this._M = ctx._M;
+    this._C = ctx._C;
+    this._handle = handle;
+
+    const info = withScratch(this._M, (s) => {
+      const pf = s.alloc(4), pd = s.alloc(4);
+      const pi = s.alloc(4), pk = s.alloc(4);
+      const st = this._C.programGetInfo(handle, pf, pd, pi, pk);
+      checkStatus(this._C, st, "cft_program_get_info");
+      return { format: s.u32(pf) | 0, maxDeposits: s.u32(pd),
+               nInsns: s.u32(pi), nConsts: s.u32(pk) };
+    });
+    const fi = FORMAT_BY_CODE.get(info.format);
+    if (!fi)
+      throw new Error(
+        `cft_program_get_info reports format code ${info.format}, which ` +
+        `is not one of the four this package names. The precision ladder ` +
+        `has grown and the program is compiled for a rung that is not ` +
+        `here.`);
+    this._fi = fi;
+    this._maxDeposits = info.maxDeposits;
+    this._nInsns = info.nInsns;
+    this._nConsts = info.nConsts;
+    /** The IEEE flags of the most recent run. */
+    this.lastFlags = 0;
+    /** The STATUS word of the most recent run - bus faults and the
+     *  deposit-overflow bit, NOT the five IEEE flags. */
+    this.lastStatus = 0;
+  }
+
+  /** The format this program was compiled for. Its operands and its
+   *  deposits are elements of this format, whatever the context that
+   *  loaded it computes in. */
+  get format() { return this._fi; }
+  /** Deposit slots per element - and therefore the output's shape:
+   *  n * maxDeposits elements, deposit d of element i at index
+   *  i * maxDeposits + d. That address depends on the element's own
+   *  index and nothing else, which is what lets a run be split across
+   *  tiles and land the same bytes in the same places (SEQUENCER.md
+   *  P2). */
+  get maxDeposits() { return this._maxDeposits; }
+  get nInsns() { return this._nInsns; }
+  get nConsts() { return this._nConsts; }
+  /** True once free() has been called. A freed program refuses every
+   *  call rather than reaching into a heap block the library has
+   *  handed back. */
+  get freed() { return this._handle === 0; }
+
+  /** Run the program over n elements.
+   *
+   *  a, b and c initialise each lane's r0, r1 and r2 - the same three
+   *  streams cft_run reads - and r3..r15 start at +0. b and c may be
+   *  null, in which case those registers start at +0 too. Each is an
+   *  array of values this program's format accepts (anything the
+   *  format's own Context.from() takes), or a Uint8Array of
+   *  n * size bytes already encoded. n comes from a.
+   *
+   *  Returns { deposits, counts, flags, status, depositOverflow }:
+   *
+   *    deposits  n * maxDeposits Floats, flat, index
+   *              i * maxDeposits + d. EVERY slot is present: one a
+   *              lane never deposited into reads as +0, and that is
+   *              normative rather than convenient - a run whose
+   *              untouched slots kept whatever the buffer held would
+   *              not be reproducible.
+   *    counts    a Uint32Array of n deposit counts. It is not a
+   *              convenience: +0 is a perfectly good thing to deposit,
+   *              so the buffer alone cannot tell a deposited zero from
+   *              an untouched slot.
+   *    flags     the union of the IEEE exceptions the run raised.
+   *    status    the STATUS word (cft_program_run's `bus`
+   *              out-parameter, which cft.h says carries it): bits
+   *              0..2 are bus faults, bit 4 is deposit overflow.
+   *    depositOverflow
+   *              status & CFT_STATUS_DEPOSIT_OVERFLOW, as a boolean.
+   *              A lane that deposited more than maxDeposits dropped
+   *              the excess; what fit is still correct. */
+  run(a, b = null, c = null) {
+    this._live("run");
+    const M = this._M, C = this._C, fi = this._fi;
+    const ctx = this._formatCtx();
+    const pack = (arr, what) => {
+      if (arr === null || arr === undefined) return null;
+      if (arr instanceof Uint8Array) {
+        if (arr.length % fi.size)
+          throw new RangeError(
+            `${what} is ${arr.length} bytes, not a whole number of ` +
+            `${fi.ieeeName} elements (${fi.size} bytes each)`);
+        return arr;
+      }
+      if (!Array.isArray(arr))
+        throw new TypeError(`${what} wants an array or a Uint8Array`);
+      const buf = new Uint8Array(fi.size * arr.length);
+      arr.forEach((v, i) => buf.set(ctx.from(v).bytes, i * fi.size));
+      return buf;
+    };
+    const ab = pack(a, "a");
+    if (!ab) throw new TypeError("a is the r0 stream and is not optional");
+    const n = ab.length / fi.size;
+    const bb = pack(b, "b"), cb = pack(c, "c");
+    for (const [name, buf] of [["b", bb], ["c", cb]])
+      if (buf && buf.length !== ab.length)
+        throw new RangeError(
+          `${name} holds ${buf.length / fi.size} elements and a holds ${n}; ` +
+          `the three streams are read by the same lane index`);
+
+    const ndep = n * this._maxDeposits;
+    return withScratch(M, (s) => {
+      const pa = s.put(ab);
+      const pb = bb ? s.put(bb) : 0;
+      const pc = cb ? s.put(cb) : 0;
+      const pd = s.alloc(Math.max(ndep * fi.size, 1));
+      const pcnt = s.alloc(Math.max(n * 4, 1));
+      const pfl = s.alloc(4), pbus = s.alloc(4);
+      const st = C.programRun(this._handle, pa, pb, pc, pd, pcnt, n,
+                              pfl, pbus);
+      checkStatus(C, st, "cft_program_run");
+      const flags = s.u32(pfl), status = s.u32(pbus);
+      const raw = s.get(pd, Math.max(ndep * fi.size, 1));
+      const deposits = [];
+      for (let i = 0; i < ndep; i++)
+        deposits.push(new Float(ctx,
+                                raw.slice(i * fi.size, (i + 1) * fi.size)));
+      const counts = new Uint32Array(n);
+      for (let i = 0; i < n; i++) counts[i] = s.u32(pcnt + 4 * i);
+      this.lastFlags = flags;
+      this.lastStatus = status;
+      this._ctx.lastFlags = flags;
+      return { deposits, counts, flags, status,
+               depositOverflow: (status & STATUS_DEPOSIT_OVERFLOW) !== 0 };
+    });
+  }
+
+  /** Give the handle back. Idempotent; every other call on a freed
+   *  program throws. */
+  free() {
+    if (this._handle) {
+      this._C.programFree(this._handle);
+      this._handle = 0;
+    }
+  }
+
+  _live(what) {
+    if (!this._handle)
+      throw new Error(`${what}() on a program that has already been freed`);
+  }
+
+  /** A context in the PROGRAM's format over the same device, so that
+   *  operands and deposits are built and read at the right width. It
+   *  is the loading context itself whenever the two agree, which is
+   *  the ordinary case. */
+  _formatCtx() {
+    if (this._ctx._fi === this._fi) return this._ctx;
+    if (!this._fmtCtx)
+      this._fmtCtx = new Context(this._M, this._C, this._ctx._dev,
+                                 this._fi, this._ctx._rnd);
+    return this._fmtCtx;
   }
 }
 

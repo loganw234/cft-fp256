@@ -85,13 +85,23 @@
  * unreachable. */
 #define SEQ_MAX_DEPOSITS (1u << 20)
 #define SEQ_IMAGE_INSNS  0xFFFFFFFFu
-#define SEQ_ADDR_CONSTS  16u
+#define SEQ_ADDR_CONSTS  256u  /* with kx (2026-09-07) an instruction's
+                                * 8-bit indices reach the whole bank;
+                                * the 4-bit fields still reach 16 */
 
 #define BLOCK_LANES      64
 
 /* control codes */
 enum { SEQ_HALT = 0, SEQ_REPEAT, SEQ_ENDREP, SEQ_DEPOSIT, SEQ_SETACT,
        SEQ_ACTALL };
+
+/* Indexed constants (`kx`, instruction bit 30). Which byte of `imm`
+ * carries each operand's constant index, and the byte above them that
+ * stays reserved so a later form can have it. */
+#define SEQ_KX_SHIFT_A   0
+#define SEQ_KX_SHIFT_B   8
+#define SEQ_KX_SHIFT_C  16
+#define SEQ_KX_RESERVED  0xFF000000u
 
 struct cft_program {
     cft_device         *dev;
@@ -116,7 +126,7 @@ struct cft_program {
 
 typedef struct {
     int      op, rd, ra, rb, rc, rnd;
-    int      ka, kb, kc, rsv, ctrl;
+    int      ka, kb, kc, kx, ctrl;
     uint32_t imm;
 } seq_insn;
 
@@ -131,9 +141,33 @@ static void seq_decode(uint64_t w, seq_insn *d)
     d->ka   = (int)((w >> 27) & 1);
     d->kb   = (int)((w >> 28) & 1);
     d->kc   = (int)((w >> 29) & 1);
-    d->rsv  = (int)((w >> 30) & 1);
+    d->kx   = (int)((w >> 30) & 1);
     d->ctrl = (int)((w >> 31) & 1);
     d->imm  = (uint32_t)((w >> 32) & 0xFFFFFFFFu);
+}
+
+/* The index operand `which` (0 = a, 1 = b, 2 = c) names, and whether
+ * it is a constant. A port of seq.py's sources().
+ *
+ * Without `kx` an operand's 4-bit field is a register number, or a
+ * constant index when its `k` bit is set - sixteen addressable
+ * constants whatever the header says, which is the wall docs/ENCLOSE.md
+ * hit. With `kx` the constant indices come from imm[7:0], imm[15:8]
+ * and imm[23:16] instead and reach 255; an operand whose `k` bit is
+ * clear still names a register through its own field. */
+static int seq_source(const seq_insn *d, int which, int *is_const)
+{
+    static const int shift[3] = { SEQ_KX_SHIFT_A, SEQ_KX_SHIFT_B,
+                                  SEQ_KX_SHIFT_C };
+    const int reg[3] = { d->ra, d->rb, d->rc };
+    const int kf[3]  = { d->ka, d->kb, d->kc };
+
+    *is_const = kf[which];
+    if (!kf[which])
+        return reg[which];
+    if (d->kx)
+        return (int)((d->imm >> shift[which]) & 0xFFu);
+    return reg[which];
 }
 
 static uint32_t rd_le32(const uint8_t *p)
@@ -145,6 +179,60 @@ static uint32_t rd_le32(const uint8_t *p)
 static uint64_t rd_le64(const uint8_t *p)
 {
     return (uint64_t)rd_le32(p) | ((uint64_t)rd_le32(p + 4) << 32);
+}
+
+/* The operand half of an ALU instruction's refusals: every constant
+ * index is inside the bank, and the encoding of those indices is the
+ * only one that spells this operation. A port of seq.py's
+ * _check_operands(), which carries the argument at length.
+ *
+ * The canonicity rule is the one docs/SEQUENCER.md already states -
+ * any field an instruction does not read being non-zero is refused -
+ * applied to the fields `kx` brings into play. Without `kx` an ALU
+ * instruction has no immediate at all. With it: an operand whose `k`
+ * bit is set takes its index from `imm`, so its 4-bit field must be
+ * zero; an operand whose `k` bit is clear names a register, so its
+ * byte of `imm` must be zero; imm[31:24] is read by nothing; and `kx`
+ * itself selects nothing when no operand names a constant, which
+ * would leave the instruction with a second encoding. */
+static cft_status seq_check_operands(const cft_program *p,
+                                     const seq_insn *d)
+{
+    static const int shift[3] = { SEQ_KX_SHIFT_A, SEQ_KX_SHIFT_B,
+                                  SEQ_KX_SHIFT_C };
+    const int reg[3] = { d->ra, d->rb, d->rc };
+    const int kf[3]  = { d->ka, d->kb, d->kc };
+    int which;
+
+    if (d->kx) {
+        if (!(d->ka || d->kb || d->kc))
+            return CFT_ERR_INVALID_ARGUMENT;
+        if (d->imm & SEQ_KX_RESERVED)
+            return CFT_ERR_INVALID_ARGUMENT;
+    } else if (d->imm != 0) {
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+
+    for (which = 0; which < 3; which++) {
+        uint32_t byte = (d->imm >> shift[which]) & 0xFFu;
+        uint32_t idx;
+        if (d->kx && kf[which]) {
+            if (reg[which])
+                return CFT_ERR_INVALID_ARGUMENT;
+            idx = byte;
+        } else if (d->kx) {
+            if (byte)
+                return CFT_ERR_INVALID_ARGUMENT;
+            continue;
+        } else if (kf[which]) {
+            idx = (uint32_t)reg[which];
+        } else {
+            continue;
+        }
+        if (idx >= p->n_consts)
+            return CFT_ERR_INVALID_ARGUMENT;
+    }
+    return CFT_OK;
 }
 
 /* Everything docs/SEQUENCER.md says the loader refuses. A program that
@@ -164,20 +252,18 @@ static cft_status seq_validate(const cft_program *p)
     mult[0] = 1;
     for (pc = 0; pc < p->n_insns; pc++) {
         seq_insn d;
+        cft_status ost;
         seq_decode(p->insns[pc], &d);
-        if (d.rsv)
-            return CFT_ERR_INVALID_ARGUMENT;
 
         worst += mult[top];
         if (worst > SEQ_MAX_INSNS)
             return CFT_ERR_INVALID_ARGUMENT;
 
         if (!d.ctrl) {
-            if ((d.ka && (uint32_t)d.ra >= p->n_consts) ||
-                (d.kb && (uint32_t)d.rb >= p->n_consts) ||
-                (d.kc && (uint32_t)d.rc >= p->n_consts))
-                return CFT_ERR_INVALID_ARGUMENT;
-            if (d.rnd > 4 || d.imm != 0)
+            ost = seq_check_operands(p, &d);
+            if (ost != CFT_OK)
+                return ost;
+            if (d.rnd > 4)
                 return CFT_ERR_INVALID_ARGUMENT;
             continue;
         }
@@ -190,18 +276,18 @@ static cft_status seq_validate(const cft_program *p)
         case SEQ_ENDREP:
         case SEQ_ACTALL:
             if (d.rd || d.ra || d.rb || d.rc || d.rnd || d.ka || d.kb ||
-                d.kc || d.imm)
+                d.kc || d.kx || d.imm)
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
         case SEQ_REPEAT:
             if (d.rd || d.ra || d.rb || d.rc || d.rnd || d.ka || d.kb ||
-                d.kc)
+                d.kc || d.kx)
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
         case SEQ_DEPOSIT:
         case SEQ_SETACT:
             if (d.rd || d.rb || d.rc || d.rnd || d.ka || d.kb || d.kc ||
-                d.imm)
+                d.kx || d.imm)
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
         default:
@@ -252,9 +338,10 @@ void cft_sw_seq_caps(cft_seq_caps *out)
     out->max_deposits = SEQ_MAX_DEPOSITS;
     out->max_insns    = SEQ_IMAGE_INSNS;
     out->max_consts   = SEQ_ADDR_CONSTS;
-    /* No sequencer feature beyond the base program model is
-     * implemented here. The bit assignments are in rtl/cft_csr.sv. */
-    out->features     = 0u;
+    /* This executor decodes kx (bit 30: 8-bit constant indices in the
+     * immediate) and implements IMUL (opcode 30). The bit assignments
+     * are rtl/cft_csr.sv's, surfaced by cft.h. */
+    out->features     = CFT_SEQ_FEAT_WIDE_CONST | CFT_ALU_EXT_IMUL;
 }
 
 /* A program image against the capacities the device it was loaded for
@@ -301,13 +388,34 @@ static cft_status seq_check_const_index(cft_device *dev,
     cft_seq_caps c;
     uint32_t pc;
     cft_device_seq_caps(dev, &c);
-    if (!c.max_consts)
-        return CFT_OK;
     for (pc = 0; pc < p->n_insns; pc++) {
         seq_insn d;
         int idx = -1;
         seq_decode(p->insns[pc], &d);
         if (d.ctrl)
+            continue;
+        /* A feature the device does not publish is ABSENT, not
+         * unknown: an old bitstream's operand mux would read a kx
+         * instruction's four-bit fields and compute on the wrong
+         * constants without a fault, and an integer group without
+         * IMUL answers opcode 30 with the unassigned-opcode result.
+         * Neither is a refusal the tile can make, so it is made here. */
+        if (d.kx && !(c.features & CFT_SEQ_FEAT_WIDE_CONST)) {
+            cft_set_error("instruction %lu uses indexed constants (kx, bit "
+                          "30) and this device does not publish the "
+                          "feature (CAPS[4] clear, cft_caps.seq_features "
+                          "bit 0); build the program without kx",
+                          (unsigned long)pc);
+            return CFT_ERR_UNSUPPORTED;
+        }
+        if (d.op == 30 && !(c.features & CFT_ALU_EXT_IMUL)) {
+            cft_set_error("instruction %lu is IMUL (opcode 30) and this "
+                          "device does not implement it (CAPS[28] clear, "
+                          "cft_caps.seq_features bit 4)",
+                          (unsigned long)pc);
+            return CFT_ERR_UNSUPPORTED;
+        }
+        if (!c.max_consts)      /* unknown: nothing enforced */
             continue;
         if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
         if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;
@@ -519,15 +627,23 @@ static cft_status seq_run_block(const cft_program *p, seq_block *B,
         seq_decode(p->insns[pc], &d);
 
         if (!d.ctrl) {
+            /* The three operand sources are a property of the
+             * instruction, not of the lane, so they are resolved once
+             * per instruction - which is what the hardware does too,
+             * a constant being unable to change during a run. */
+            int ia, ib, ic, ka, kb, kc;
+            ia = seq_source(&d, 0, &ka);
+            ib = seq_source(&d, 1, &kb);
+            ic = seq_source(&d, 2, &kc);
             for (i = 0; i < nlane; i++) {
                 cft_bn outv;
                 uint32_t fl = 0;
                 if (!B->active[i])
                     continue;   /* no write, no deposit, and no flags */
                 if (cft_sf_compute(p->f, d.op, d.rnd,
-                                   seq_src(p, B, i, d.ra, d.ka),
-                                   seq_src(p, B, i, d.rb, d.kb),
-                                   seq_src(p, B, i, d.rc, d.kc),
+                                   seq_src(p, B, i, ia, ka),
+                                   seq_src(p, B, i, ib, kb),
+                                   seq_src(p, B, i, ic, kc),
                                    &outv, &fl))
                     return CFT_ERR_INTERNAL;
                 cft_bn_copy(&B->regs[i][d.rd], &outv);

@@ -62,7 +62,12 @@
 //             reserved-opcode trap. abs/negate/copySign join it too:
 //             their answer is `a` with a different sign bit, so they
 //             cost one LUT on the MSB rather than three W-bit sources.
-//   integer   bitwise, add/sub, shift - three sources, each built once.
+//   integer   bitwise, add/sub, shift, and (since 2026-09-07) the
+//             32-bit low multiply - four sources, each built once. The
+//             class field was already two bits wide with three
+//             encodings used, so IMUL cost the integer mux nothing;
+//             what it costs is its own three 16x16 partial products,
+//             which is where any area it takes will be.
 //
 // The three savings that are not just mux depth:
 //
@@ -121,6 +126,7 @@ module cft_simpleops #(
   localparam logic [7:0] OP_ISHL   = 8'd21;
   localparam logic [7:0] OP_ISHR   = 8'd22;
   localparam logic [7:0] OP_ICMPLT = 8'd23;
+  localparam logic [7:0] OP_IMUL   = 8'd30;
 
   localparam int BIAS = (1 << (EXP_W - 1)) - 1;
   localparam int SHB  = $clog2(W);   // every W here is a power of two
@@ -136,6 +142,10 @@ module cft_simpleops #(
   localparam logic [1:0] CL_BIT = 2'd0;   // and / or / xor
   localparam logic [1:0] CL_SUM = 2'd1;   // add / sub
   localparam logic [1:0] CL_SHF = 2'd2;   // shl / shr
+  localparam logic [1:0] CL_MUL = 2'd3;   // imul - the fourth encoding
+                                          // the 2-bit class field had
+                                          // spare, so the integer mux
+                                          // does not widen
 
   logic [W-1:0]     qnan, one, pzero;
   logic [EXP_W-1:0] bias_f;
@@ -226,7 +236,7 @@ module cft_simpleops #(
   assign shamt  = b[SHB-1:0];
   assign is_int = (op == OP_IAND) || (op == OP_IOR) || (op == OP_IXOR) ||
                   (op == OP_IADD) || (op == OP_ISUB) || (op == OP_ISHL) ||
-                  (op == OP_ISHR) || (op == OP_ICMPLT);
+                  (op == OP_ISHR) || (op == OP_ICMPLT) || (op == OP_IMUL);
 
   // Unassigned opcodes answer with the canonical quiet NaN and raise
   // invalid, rather than falling through to the FMA datapath and
@@ -243,9 +253,11 @@ module cft_simpleops #(
   // bypass sideband this module uses. 24 is the reduction (the engine
   // routes it around the banks entirely), 25 is CFT_DOT (host-composed,
   // never issued raw), and both still trap here if an element-wise run
-  // somehow presents them - deterministically, as before.
+  // somehow presents them - deterministically, as before. 30 left it on
+  // 2026-09-07 for IMUL, which this module answers itself; 28 and 29
+  // are the composed reductions and still trap.
   assign is_reserved = (op == 8'd15) || (op == 8'd24) || (op == 8'd25) ||
-                       (op > 8'd27);
+                       ((op > 8'd27) && (op != OP_IMUL));
 
   assign valid = (op == OP_ABS) || (op == OP_NEG) ||
                  (op == OP_COPYSIGN) || is_minmax ||
@@ -259,6 +271,14 @@ module cft_simpleops #(
   generate
     if (W != (1 << SHB)) begin : g_bad_width
       $error("cft_simpleops: format width must be a power of two");
+    end
+    // IMUL is defined on 32 bits and zero-extended to the format
+    // width, so a format narrower than 32 could not hold its own
+    // result. Every rung on the interchange ladder is 32 or wider, but
+    // nothing in the parameterization forces it, and the divergence
+    // from the golden model would otherwise be silent.
+    if (W < 32) begin : g_narrow_imul
+      $error("cft_simpleops: IMUL needs a format at least 32 bits wide");
     end
   endgenerate
 
@@ -293,6 +313,7 @@ module cft_simpleops #(
       OP_IAND, OP_IOR, OP_IXOR: begin use_int = 1'b1; int_cls = CL_BIT; end
       OP_IADD, OP_ISUB:         begin use_int = 1'b1; int_cls = CL_SUM; end
       OP_ISHL, OP_ISHR:         begin use_int = 1'b1; int_cls = CL_SHF; end
+      OP_IMUL:                  begin use_int = 1'b1; int_cls = CL_MUL; end
 
       OP_ICMPLT: begin pk = PK_PRED; pred = icmp_lt; end
 
@@ -388,11 +409,52 @@ module cft_simpleops #(
   end
   assign shift_val = sh_right ? sh_out_rev : sh_out;
 
+  // IMUL: the low 32 bits of the product of the operands' low 32 bits,
+  // zero-extended to W. This is the ONE member of the integer group
+  // that is not defined on the whole encoding, and the width is the
+  // design: the caller is a 32-bit hash (docs/ATLAS.md's draw stream)
+  // whose value has to agree with a GPU computing it on a `uint`, and
+  // a W-bit low product would be a 256x256 array at fp256 for nobody.
+  //
+  // Written as partial products rather than as a 32x32 multiply so
+  // that the pruning is in the source instead of trusted to the tool:
+  // split each operand into 16-bit halves and the product's low 32
+  // bits are
+  //
+  //     al*bl + ((al*bh + ah*bl) << 16)
+  //
+  // exactly. The FOURTH partial product, ah*bh, lands entirely at bit
+  // 32 and above and is not computed at all; only the low 16 bits of
+  // the middle sum survive the shift, so that adder is 16 bits wide
+  // and not 32. Three 16x16 multiplies per lane, which the tool maps
+  // to DSP48 slices or to fabric as it prefers - a mapping question,
+  // not a numeric one, since neither choice can change a bit. It sits
+  // where every other integer opcode sits, on the precomputed-result
+  // sideband, so it is off the FMA datapath entirely and the fp pipe
+  // is untouched.
+  logic [31:0] mul_a32, mul_b32;
+  logic [15:0] mul_al, mul_ah, mul_bl, mul_bh, mul_mid;
+  logic [31:0] mul_lo;
+  logic [W-1:0] mul_val;
+  // Size casts rather than part-selects, so this elaborates at any W
+  // the module is parameterised to; the generate guard below is what
+  // refuses the width where the OPERATION would not fit.
+  assign mul_a32 = 32'(a);
+  assign mul_b32 = 32'(b);
+  assign mul_al  = mul_a32[15:0];
+  assign mul_ah  = mul_a32[31:16];
+  assign mul_bl  = mul_b32[15:0];
+  assign mul_bh  = mul_b32[31:16];
+  assign mul_mid = 16'((mul_al * mul_bh) + (mul_ah * mul_bl));
+  assign mul_lo  = 32'(mul_al * mul_bl) + {mul_mid, 16'b0};
+  assign mul_val = W'(mul_lo);            // the zero extension
+
   logic [W-1:0] int_val;
   always_comb begin
     case (int_cls)
       CL_BIT:  int_val = bit_val;
       CL_SUM:  int_val = sum_val;
+      CL_MUL:  int_val = mul_val;
       default: int_val = shift_val;
     endcase
   end

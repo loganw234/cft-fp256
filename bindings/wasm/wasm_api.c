@@ -1243,3 +1243,110 @@ WASM_EXPORT int cftw_formatof_fma(cft_device *dev, int sfmt, int dfmt,
                                  (cft_round)rnd, a, b, c, d, (size_t)n,
                                  flags_out, bus_out);
 }
+
+/* ---- the orbit sequencer's programs -------------------------------- *
+ *
+ * Added 2026-09-07. Until now this module exposed every ELEMENTWISE
+ * operation cft.h declares and none of the four calls that make a
+ * SEQUENCE one on-chip pass, so a JavaScript caller could issue
+ * cft_run thirty times where C could load one program and issue it
+ * once. docs/DEMOS.md said so of the demos page ("the wasm surface
+ * exposes every library operation but not the sequencer's program
+ * API") and docs/studies/OPT-D-contract.md section 1.8 said why it
+ * mattered. These four close it.
+ *
+ * One wrapper per declaration in cft.h, in cft.h's order: load, free,
+ * get_info, run. The image is BYTES - the same bytes on disk, in this
+ * call and in a device's instruction memory (docs/SEQUENCER.md) - so
+ * it crosses as a plain heap pointer and a length, and nothing here
+ * parses, rewrites or validates it. cft_program_load is the validator;
+ * a second one in this file would be a second opinion about what is
+ * legal, which is the failure the loader exists to prevent.
+ *
+ * THREE THINGS ARE NOT PLAIN PASSTHROUGHS:
+ *
+ *   THE HANDLE IS AN OUT-PARAMETER, as it is for cftw_open_software:
+ *   cft_program_load writes a cft_program * into *out (4 bytes on
+ *   wasm32) and returns the cft_status. A JS caller allocates four
+ *   bytes, calls, and reads the handle back out of the heap. It is
+ *   opaque there exactly as it is in C.
+ *
+ *   THE INFO STRUCT IS PROJECTED INTO FOUR OUT-POINTERS rather than
+ *   copied into the caller's heap, for cftw_caps_*'s reason: a JS
+ *   caller reading struct offsets is the silent ABI coupling the
+ *   struct_size handshake exists to prevent, so the layout stays
+ *   private to C and the handshake happens here. It is ONE call rather
+ *   than four accessors because a program's shape is fixed at load and
+ *   four calls would re-do one handshake for a value that cannot
+ *   change - and because format's 0 is fp32, a legitimate answer, so
+ *   an accessor returning 0 on failure could not tell a caller which
+ *   of the two had happened. The status is the contract's status.
+ *
+ *   THE DEPOSIT-OVERFLOW BIT IS A MACRO, and a macro is the one part
+ *   of a header a caller on the far side of a wasm boundary cannot
+ *   reach - the same problem CFT_FLAGS_ALL has and the same answer.
+ *   cftw_status_deposit_overflow() projects it, so nothing in
+ *   JavaScript holds a second copy of a bit position that has already
+ *   moved once (STATUS[3] to STATUS[4] on 2026-09-01, before any
+ *   device had reported it).
+ *
+ * Everything else is the usual adaptation: size_t as wasm32's uint32
+ * for `bytes` and for `n`, the flag and bus words as pointers into the
+ * heap. b, c and counts may be NULL and are passed through as given;
+ * cft.h says what each NULL means and this file does not restate it.
+ * The deposit buffer's shape - n * max_deposits elements, index
+ * i * max_deposits + d, every slot written, an untouched slot +0 - is
+ * the contract's and is neither enforced nor assumed here.
+ */
+
+WASM_EXPORT int cftw_program_load(cft_device *dev, const void *image,
+                                  uint32_t bytes, cft_program **out)
+{
+    return (int)cft_program_load(dev, image, (size_t)bytes, out);
+}
+
+WASM_EXPORT void cftw_program_free(cft_program *prog)
+{
+    cft_program_free(prog);
+}
+
+WASM_EXPORT int cftw_program_get_info(cft_program *prog, int *format,
+                                      uint32_t *max_deposits,
+                                      uint32_t *n_insns, uint32_t *n_consts)
+{
+    cft_program_info info;
+    cft_status st;
+
+    memset(&info, 0, sizeof info);
+    info.struct_size = sizeof info;
+    st = cft_program_get_info(prog, &info);
+    if (st != CFT_OK)
+        return (int)st;
+    if (format)
+        *format = (int)info.format;
+    if (max_deposits)
+        *max_deposits = info.max_deposits;
+    if (n_insns)
+        *n_insns = info.n_insns;
+    if (n_consts)
+        *n_consts = info.n_consts;
+    return (int)CFT_OK;
+}
+
+WASM_EXPORT int cftw_program_run(cft_program *prog,
+                                 const void *a, const void *b, const void *c,
+                                 void *deposits, uint32_t *counts, uint32_t n,
+                                 uint32_t *flags_out, uint32_t *bus_out)
+{
+    return (int)cft_program_run(prog, a, b, c, deposits, counts, (size_t)n,
+                                flags_out, bus_out);
+}
+
+/* CFT_STATUS_DEPOSIT_OVERFLOW, projected for the reason cftw_flags_all
+ * projects CFT_FLAGS_ALL. It is a STATUS bit and not an IEEE flag: a
+ * lane that deposits past max_deposits drops the excess and sets it,
+ * and what fit is still correct and still reproducible (cft.h). */
+WASM_EXPORT uint32_t cftw_status_deposit_overflow(void)
+{
+    return (uint32_t)CFT_STATUS_DEPOSIT_OVERFLOW;
+}

@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 486,822 bytes |
-| sha256 | `e3711319627e68281dc97636a65da169b9c3b8d467ed45b2e1da9bceb6538a67` |
-| module | `bindings/node/cft_node.wasm`, 211,869 bytes, sha256 `a1f0a4715516d3f64838fbfcbeafe6bbae1670dc74a86bd021ff8c428a761e55` |
+| page | `bindings/wasm/demos.html`, 523,351 bytes |
+| sha256 | `2b75d080fafd8d2a887b0bdd18d5a5befb80e3467067d7b25ccc6487bfade5df` |
+| module | `bindings/node/cft_node.wasm`, 212,642 bytes, sha256 `f0975f3da635e92d8a5060f7843a0cf16af860b8b16f60d15f0edab631104768` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
-| configurations | 11, over 13 chains |
-| recorded | 2026-09-04, DESKTOP-T33SK86 |
+| configurations | 13, over 15 chains |
+| recorded | 2026-09-07, DESKTOP-T33SK86 |
 
 ---
 
@@ -85,6 +85,15 @@ property of the arithmetic** - the scheme conserves `L` exactly, so
 every bit of drift is roundoff, and it is `4.2e-70` at fp256 against
 `7.9e-15` at fp64. The two lines sit about `2^184` apart on a log
 axis, and that gap is the whole of what the width bought.
+
+The panel runs the ensemble twice more, at `--rsqrt newton`, and those
+two runs are there for a different reason: they are the route a
+sequencer program can hold, so they are where the page's program engine
+has something to be equal to. They are **different arithmetic** - a
+published Newton refinement from the tile's own seed opcode, not the
+correctly rounded `cft_sqrt`/`cft_div` route - with chains of their own,
+and they are not the panel's argument. The plots draw whichever pair
+ran last.
 
 The third plot needs a note. The members' separation `|q_m - q_0|` is
 computed **in the run's own format** and only then converted to a
@@ -223,20 +232,23 @@ two runs rather than one.
 | 4 | zoom / fp256-reference (pixels) | (the same run) | `5fb8f0de8bb1be57ef39f7a0f69520d0ed8f0cdd0cad600a6e7e4ada757d11f3` |
 | 5 | zoom / fp64-reference (orbit) | `./host/cft-zoom --engine loop --format fp64 --width 128 --ref-iters 1001 --pixel-iters 1000 --batch 1024` | `9c83048409fa65ad1cd0524f0463f0d8bf747e5d4d8ed6c3e3a7844758674258` |
 | 6 | zoom / fp64-reference (pixels) | (the same run) | `878ae482df8da39326d658c0ec9047d1a29c2b1eb15902a24175d4e899c81dda` |
-| 7 | orbits / fp256 | `./host/cft-orbits --engine loop --format fp256 --members 8 --periods 4 --steps-per-period 512 --sample-every 32` | `12012be36beb6d5fc15f9b4b17e84af30923399503a744bdef7a6e4042d93cc9` |
-| 8 | orbits / fp64 | `./host/cft-orbits --engine loop --format fp64 --members 8 --periods 4 --steps-per-period 512 --sample-every 32` | `3ebf95ae53d96a38c5b541ec08cb9c6d60e59cb7727cdc6ea5ae5aba6d4aa96a` |
-| 9 | enclose / fp32 | `./host/cft-enclose --engine loop --format fp32 --kernels series,dot,horner --points 16 --cond-max 164` | `d9f761c22220f1aa185c2ccbfbf4b2d83e4f8d84dced8e61cdb8882d7528b208` |
-| 10 | enclose / fp64 | `./host/cft-enclose --engine loop --format fp64 --kernels series,dot,horner --points 16 --cond-max 164` | `835ca8ab9aa3358d6ad0dcfdf167e813a65ed3bfb5dffcf31b32927f28c7e3d1` |
-| 11 | enclose / fp128 | `./host/cft-enclose --engine loop --format fp128 --kernels series,dot,horner --points 16 --cond-max 164` | `4ff5b22ba2333153491c101eb8aab83e4128a051a50d73e0e654a07438cc4f0c` |
-| 12 | enclose / fp256 | `./host/cft-enclose --engine loop --format fp256 --kernels series,dot,horner --points 16 --cond-max 164` | `93cdda3270eaa7ba434ddbbabcc54d77a5afa28779e05bccef4f7b81cc43400c` |
-| 13 | mersenne / to-2281 | `./host/cft-mersenne --engine loop --format fp256 --exponents 521,607,1277,1279,1619,2203,2281` | `7555f58433fa902b06a0c2b7057d8d1b86b55e2aeff7636abb55ef53c0d80aca` |
+| 7 | orbits / fp256 | `./host/cft-orbits --engine loop --rsqrt exact --format fp256 --members 8 --periods 4 --steps-per-period 512 --sample-every 32` | `12012be36beb6d5fc15f9b4b17e84af30923399503a744bdef7a6e4042d93cc9` |
+| 8 | orbits / fp64 | `./host/cft-orbits --engine loop --rsqrt exact --format fp64 --members 8 --periods 4 --steps-per-period 512 --sample-every 32` | `3ebf95ae53d96a38c5b541ec08cb9c6d60e59cb7727cdc6ea5ae5aba6d4aa96a` |
+| 9 | orbits / fp256-newton | `./host/cft-orbits --engine loop --rsqrt newton --format fp256 --members 8 --periods 4 --steps-per-period 512 --sample-every 32` | `d1e580c42eee48f2fad8d14fbf0c1b5529dc3b74287ea16e35ce3a8a27df78d8` |
+| 10 | orbits / fp64-newton | `./host/cft-orbits --engine loop --rsqrt newton --format fp64 --members 8 --periods 4 --steps-per-period 512 --sample-every 32` | `6b38342d22e85da1d432077fe1c1e90853337a7dff5620352596bd95b4001c2a` |
+| 11 | enclose / fp32 | `./host/cft-enclose --engine loop --format fp32 --kernels series,dot,horner --points 16 --cond-max 164` | `d9f761c22220f1aa185c2ccbfbf4b2d83e4f8d84dced8e61cdb8882d7528b208` |
+| 12 | enclose / fp64 | `./host/cft-enclose --engine loop --format fp64 --kernels series,dot,horner --points 16 --cond-max 164` | `835ca8ab9aa3358d6ad0dcfdf167e813a65ed3bfb5dffcf31b32927f28c7e3d1` |
+| 13 | enclose / fp128 | `./host/cft-enclose --engine loop --format fp128 --kernels series,dot,horner --points 16 --cond-max 164` | `4ff5b22ba2333153491c101eb8aab83e4128a051a50d73e0e654a07438cc4f0c` |
+| 14 | enclose / fp256 | `./host/cft-enclose --engine loop --format fp256 --kernels series,dot,horner --points 16 --cond-max 164` | `93cdda3270eaa7ba434ddbbabcc54d77a5afa28779e05bccef4f7b81cc43400c` |
+| 15 | mersenne / to-2281 | `./host/cft-mersenne --engine loop --format fp256 --exponents 521,607,1277,1279,1619,2203,2281` | `7555f58433fa902b06a0c2b7057d8d1b86b55e2aeff7636abb55ef53c0d80aca` |
+All fifteen were reproduced by the compute core under node, and all
+fifteen again in Chromium, in a Web Worker, over
+`bindings/node/cft_node.wasm` - with the zoom and orbits panels on the
+**sequencer program engine**, which is what makes rows 3-6, 9 and 10 a
+statement about two engines rather than one. The page's own verdict
+line after a full run reads:
 
-All thirteen were reproduced by the compute core under node, and all
-thirteen again in Chromium, in a Web Worker, over
-`bindings/node/cft_node.wasm`. The page's own verdict line after a full
-run reads:
-
-    13 of 13 chains computed in this browser, every one identical to
+    15 of 15 chains computed in this browser, every one identical to
     the C tool's.
 
 `bindings/wasm/demos_chains.json` is the recorded file: for each run it
@@ -250,12 +262,61 @@ different program is a chain about a different program.
 
 ## How the panels were ported
 
-Each panel is a port of one tool's `--engine loop` path, because the
-wasm surface exposes every library operation but not the sequencer's
-program API (`cft_program_load` / `cft_program_run` are not among the
-111 `cftw_*` exports). The loop engines are bit-identical to their
-program engines - each tool's own gate holds them to it - so the chain
-is the same either way; only the call count differs.
+Each panel is a port of one tool's engine. Three of the five have only
+the `--engine loop` path, because their step does not fit the program
+model and each says exactly what stopped it - docs/SEQUENCER.md's "What
+the workloads asked of the program model" is that list. **Two of them,
+zoom and orbits, carry both engines**, because since 2026-09-07 the
+wasm module exports the sequencer's program API: `cftw_program_load`,
+`cftw_program_get_info`, `cftw_program_run`, `cftw_program_free` and
+`cftw_status_deposit_overflow`, one per declaration in cft.h's program
+section plus the macro projected as a call.
+
+The engine is a control on those two panels and it changes no bit. Each
+tool's own gate already holds its two engines to byte-identical
+records; `verify_demos.mjs` step 4 holds this port's two to each other
+and to the image the C tool loads, and the page's `sameCfg()` therefore
+drops `engine` from the configuration comparison the way orbits.c's
+checkpoint drops it - that file "carries every number that describes a
+RESULT and nothing that describes the MACHINE - no batch size, no
+engine, no timing". If the two ever parted, the page would say DIFFER
+rather than "other config", which is the point of dropping it.
+
+**The images are the C tools', byte for byte.** `demos_core.js` ports
+`pack_program` and the instruction encoders from `host/tools/zoom.c`
+and `host/tools/orbits.c` - the third copy of three, since each tool
+carries its own - and a copy is only worth having if something checks
+it. The check is the bytes: each image the core loads is hashed and
+compared against the image the tool loads, dumped from the tool itself
+by compiling `host/tools/*.c` exactly as they stand and linking them
+with `-Wl,--wrap=cft_program_load` and a shim that writes the image out
+before forwarding. Nothing under `host/` was edited to get them.
+
+| image | bytes | sha256 |
+|---|---|---|
+| the nucleus scan, 51 iterations at fp256 (both zoom runs; the centre is derived at binary256 whatever the reference format is) | 136 | `8fad50d414aadc685faba7d64e701a0269a12ccd25d91d75bb656f454722272a` |
+| the reference orbit, 1,001 iterations at fp256 | 248 | `9aaefec8adf583c63dcc70d1e7b940f596649dfd743f8b6cd574b011cfbe8ff1` |
+| the reference orbit, 1,001 iterations at fp64 | 176 | `752e5489d358303d190bd3e51a491c69d016ddfe1c3547243ef6ea440ee4c8bc` |
+| the Kepler integration at fp256, 49 instructions, 6 Newton passes | 552 | `adcd627af5f1e71bab5647674176967e558f3663d191a08fbc354193b454b382` |
+| the Kepler integration at fp64, 37 instructions, 3 Newton passes | 360 | `d1ded7c1613b35099447d3a76a3a3b0e6fed139238d2fd324a2e18fa2511664f` |
+
+A program is an artefact: the host DMAs it to the tile and can read it
+back, so what executed can be attested rather than assumed. "The same
+answer" is therefore not the whole claim, and these five lines are the
+rest of it.
+
+**The orbits panel needed a second pair of runs to say anything at
+all.** `cft-orbits` refuses `--engine program` with `--rsqrt exact`,
+and refuses it for a reason that is a fact about the program model
+rather than about the tool: the correctly rounded 1/r^3 route is
+`cft_sqrt` and `cft_div`, which are themselves programs, partitioned
+host-prep / program-core / host-finish, and cannot sit inside another
+program's loop body. So the recorded `fp256`/`fp64` pair stays the
+correctly rounded route and stays loop-only, and a `fp256-newton` /
+`fp64-newton` pair was recorded beside it: the same integration with
+the tile's own `rsqrt` seed and a derived number of Newton refinements,
+which is the route a program can hold. It is **different arithmetic**
+and has its own chains; it is not a second spelling of the first pair.
 
 `bindings/wasm/demos_core.js` is a **plain script**: no import, no
 export, no module scope. The page splices it into a Blob its Worker
@@ -271,6 +332,36 @@ a browser.
 | orbits | `drift`, `kick_kepler`, `drift` - 2 FMA, MUL, FMA, `cft_sqrt`, MUL, `cft_div`, 2 FMA, 2 FMA per step; `invariants()`'s 11 per sample | one call per operation over all 8 members, exactly as `opN`/`sqrtN`/`divN` issue them |
 | enclose | `series_pass()`'s 6 (MUL/DIV under RDN, MUL/DIV under RUP, two ADDs); `dot_batch()`'s two `CFT_DOT` reductions per item under RDN and RUP; `horner_batch()`'s CMPLE plus 4 per degree (two SELECTs, an RDN FMA and an RUP FMA) | the whole kernel batch per call - 17, 15 and 17 items |
 | mersenne | `ll_step()`: `2L-1` `CFT_DOT` reductions, the `-2`, one carry pass, the `2^d` fold, carry to convergence, reduce below `2^P`, the integrality gate; the carry split is the loop route's 15 `cft_run` passes | `L` or `2L` limbs per call - 5 to 20 at these exponents |
+
+### The zoom and orbits panels' program engines
+
+Both are ports of their tool's `--engine program` path, and both build
+their image with `demos_core.js`'s own `packProgram` / `seqAlu` /
+`seqCtl` - a port of the three helpers `zoom.c` and `orbits.c` each
+carry. The images are compared byte for byte against the tools' own
+(the table above).
+
+| panel | the program | trip counts | deposits a lane |
+|---|---|---|---|
+| zoom, the nucleus scan | 9 instructions, 1 constant: `z <- z^2 + c`, with `SETACT` on `|z^2| <= 4` so a candidate that leaves the disc stops, then `ACTALL` and one `DEPOSIT` | the period, 51 | 1 |
+| zoom, the reference orbit | 15 instructions, 3 constants (4, `c_re`, `c_im`): the same eight ALU issues an iteration the host loop makes, the escape test **before** the step, and the two `DEPOSIT`s that ARE the orbit | `--steps-per-call`, 1,024, so 1,001 here in one call | `2 * trip` |
+| orbits, the whole integration | 49 instructions at fp256 and 37 at fp64, 4 constants: two nested `REPEAT`s - samples outside, `--sample-every` steps inside - with four `DEPOSIT`s at the top and four at the end of each sample | the whole run, `nsamples * stride` | `(nsamples + 1) * 4` = 260 |
+
+Three things follow from the model rather than from these ports, and
+each is a line in docs/SEQUENCER.md's "What the workloads asked":
+
+- **The orbits program is one call and cannot resume.** A program can
+  be entered only at a state with at most three non-zero components,
+  because `cft_program_run` initialises `r0`, `r1` and `r2` and the
+  rest start at `+0`. Step 0 of a planar Kepler orbit is such a state
+  and no later step is.
+- **260 deposit slots a lane is a software-backend number.** A tile
+  holds 64 (`MAXD`, `rtl/cft_krnl.sv`), which is 15 samples; the page
+  is the software backend, which holds 2^20, and the core refuses at
+  that cap with the tile's number named so it is not a surprise later.
+- **The pixel phase is untouched.** It runs through `cft_run` in the C
+  tool too. The sequencer does not reach it, which is why the zoom
+  panel's nineteen seconds are nineteen seconds either way.
 
 ### The two departures from the C's call shape, and why neither changes a bit
 
@@ -414,9 +505,11 @@ split `.wasm` from the same emcc run, against the committed module, and
 by walking the bytes back out of the assembled HTML. Three checks of
 one fact is not paranoia when the fact is the whole argument.
 
-**Two clean container builds, byte-identical:** 486,822 bytes, sha256
-`e3711319627e68281dc97636a65da169b9c3b8d467ed45b2e1da9bceb6538a67`,
-with `bindings/wasm/build/` removed between them.
+**Two clean container builds, byte-identical:** 523,351 bytes, sha256
+`2b75d080fafd8d2a887b0bdd18d5a5befb80e3467067d7b25ccc6487bfade5df`,
+with `bindings/wasm/build/` removed between them (2026-09-07; the
+2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
+the same way).
 
 ### Where the compute runs
 
@@ -450,7 +543,7 @@ appears in the network log.
 
     node bindings/wasm/verify_demos.mjs
 
-Three checks, in order:
+Four checks, in order:
 
 1. **The module.** The bytes embedded in `demos.html` are walked back
    out of emcc's SINGLE_FILE string literal - one byte per code unit,
@@ -459,10 +552,17 @@ Three checks, in order:
 2. **The compute core.** The core spliced into the page must be
    `demos_core.js` byte for byte, so that the report is about the page
    and not about a lookalike.
-3. **The chains, three ways.** For each of the eleven configurations:
-   run the native tool with the flags the page prints, run the compute
-   core over the committed module, and compare both against
-   `demos_chains.json`. All three must agree.
+3. **The chains, three ways.** For each of the thirteen
+   configurations: run the native tool with the flags the page prints,
+   run the compute core over the committed module, and compare both
+   against `demos_chains.json`. All three must agree.
+4. **The sequencer program engine.** For each configuration that can
+   run one - the two zoom frames and the two newton orbits runs - the
+   core is run again with `engine: "program"`, and two things must
+   hold: the chains must equal the loop engine's, and every program
+   image the core loads must equal the image the C tool loads, byte for
+   byte and by sha256. The first says the two engines are one
+   configuration; the second says they are one program.
 
 Flags: `--record` re-records the file (and needs the tools);
 `--no-native` drops the tool run and compares against the recording;
@@ -482,10 +582,15 @@ cft-mersenne`.
 
 ### In a real browser
 
-Served over loopback (`127.0.0.1:8731`) and driven in Chromium: every
-panel run, every chain reproduced, `13 of 13 chains computed in this
-browser, every one identical to the C tool's`. One PNG per panel is in
-`docs/img/demos/`, each the panel as the browser drew it after running:
+Served over loopback and driven in Chromium: every panel run, every
+chain reproduced, `15 of 15 chains computed in this browser, every one
+identical to the C tool's` - with the zoom and orbits panels on the
+**sequencer program engine** (2026-09-07; the 2026-09-04 run was 13 of
+13 on the host-loop engine, over the eleven configurations that
+existed then). No console message of any level was logged during
+either. The PNGs below are the 2026-09-04 run's, and the panels draw
+the same pictures either way, because the engines produce the same
+bits:
 
 | | |
 |---|---|
@@ -549,72 +654,79 @@ the files the repo already vouches for.
 
 ---
 
-## What the sequencer's program API would have bought, measured
+## What the sequencer's program API bought, measured
 
-The wasm surface has no `cft_program_load` / `cft_program_run` /
-`cft_program_free` among the 111 `cftw_*` exports, so every panel runs
-its tool's host-loop engine. The tools carry both engines and each
-tool's gate holds them to byte-identical records, so the gap is a
-measurement rather than a guess - and it was measured **at the page's
-own configurations**, on the same desktop, rather than quoted from a
-table about other ones. Both engines returned the same chain in every
-row, which is what makes the comparison a comparison.
+Until 2026-09-07 this section was called *what it would have bought*,
+and its table was the C tools' gap, because the wasm module exported
+none of the four program calls and the browser gap could not be
+measured at all. It can now, and the prediction it made - that the gain
+in wasm should be LARGER than the gain in C, because what a program
+removes is call boundaries and a wasm boundary costs more than a C one
+- is the thing the numbers below confirm.
 
-| the page's configuration | program | host loop | program removes | library calls |
+**Both engines return the same chain in every row**, which is what
+makes this a comparison rather than two different computations timed
+side by side.
+
+Median of fifteen runs each, alternating engine run by run, through the
+compute core on `bindings/node/cft_node.wasm` under node 22 on the same
+Windows desktop. **The machine was not quiet** - it was running several
+other jobs throughout, and the spread is wide because of it (the
+per-run times are in the log). Alternating the engines is what makes
+the ratio survive that: both halves of each pair met the same load.
+
+| what | program | host loop | program removes | library calls |
 |---|---|---|---|---|
-| collatz, sweep 1..1000 | 413,018 steps/s | 222,660 steps/s | **1.85x** | 1 against 178 |
-| collatz, deep `2^237-1315` | 506,053 steps/s | ~240,000 steps/s | **~2.1x** | 3 against 2,437 |
-| zoom, the 1,001-iteration reference orbit | 109,871 iterations/s | 78,713 iterations/s | **1.40x** | 1 against 1 pass |
-| orbits, Kepler leapfrog, `--rsqrt newton` | 82,492 element-steps/s | 65,717 element-steps/s | **1.26x** | 1,100 against 74,827 |
-| enclose, interval Horner, 17 items | 19,970 /s | 15,351 /s | **1.30x** | 3 against 97 |
+| zoom, the 1,001-iteration reference orbit at fp256 | 0.0259 s | 0.0405 s | **1.56x** | 12 against 8,019 |
+| zoom, the reference orbit at fp64 | 0.0111 s | 0.0167 s | **1.51x** | 12 against 8,019 |
+| zoom, the nucleus scan and bisection (one lane a call) at fp256 | 0.0497 s | 0.0760 s | **1.53x** | not counted - the panel lowers its counters once the centre is derived |
+| orbits, the whole Kepler integration at fp256, `--rsqrt newton` | 0.8655 s | 1.1402 s | **1.32x** | 1,100 against 74,827 |
+| orbits, the same at fp64 | 0.2870 s | 0.3936 s | **1.37x** | 1,100 against 50,251 |
 
-**The ask, then, and its size.** Exporting the three program entry
-points would buy this page somewhere between 1.3x and 2.1x on four of
-its five panels, and **nothing at all on the one that takes the time**.
-The zoom panel's nineteen seconds are almost entirely its pixel phase,
-which runs through `cft_run` in the C tool too - the sequencer does not
-touch it. So the honest summary is: it is a real improvement to four
-panels that already finish in under a second, and no improvement to the
-one that does not.
+Read against the C tools' own gap for the same work, measured on
+2026-09-04: 1.40x for the reference orbit and 1.26x for the Kepler
+integration. Every row here is above its C counterpart, which is the
+prediction holding.
 
-Three qualifications, all of which cut against the ask rather than for
-it:
+Three things the table does not say on its own:
 
-- **The orbits panel could not use it as configured.** The page runs
-  `--rsqrt exact`, the correctly rounded 1/r^3 route, and
-  `cft-orbits` refuses `--engine program` with it: the composed
-  `cft_sqrt`/`cft_div` route is host-prep, program core, host finish,
-  and cannot sit inside another program's loop body. The 1.26x above is
-  `--rsqrt newton`, which is different arithmetic and a different
-  chain. For the configuration the page actually runs, the program API
-  buys zero.
-- **The gain in wasm should be larger than the gain in C**, because
-  what a program removes is call boundaries and a wasm boundary costs
-  more than a C one. The collatz trajectory row is where that shows:
-  one lane, 23 wasm crossings per Collatz step, 58,865 steps/s in the
-  browser against 239,666 native. But I could not measure it, because
-  the API is not exported - so the table above is the native gap, and
-  the browser gap is stated as an expectation and nothing more.
-- **It would change no chain.** Each tool's own gate already holds its
-  two engines to byte-identical records; this page's argument is about
-  bits, and does not depend on which engine produced them.
+- **The zoom rows are the part the sequencer touches, not the panel.**
+  The reference orbit is 1,001 iterations of nine instructions on one
+  lane; the nucleus scan is 320 candidates in one call and then about
+  two hundred bisection steps of one lane each. Together they are under
+  a tenth of a second. The panel's other nineteen seconds are its pixel
+  phase, which runs through `cft_run` in the C tool too, so **the zoom
+  panel as a whole is no faster** and the page's report line says so.
+- **The call counts are the mechanism.** 8,019 `cft_run` crossings
+  become 12 for the reference orbit, and 74,827 become 1,100 for the
+  Kepler integration - the 1,100 being the per-sample invariants, which
+  are host work in the C tool too. What is left is not the arithmetic;
+  it is the boundary.
+- **The orbits row is `--rsqrt newton` on both sides.** The correctly
+  rounded route is not a program and cannot be one, so `--rsqrt exact`
+  has no program engine to compare against; for the configuration the
+  panel's *argument* runs, the program API still buys nothing. That is
+  not a disappointment, it is the last of docs/SEQUENCER.md's recorded
+  asks - a callable composed operation - with a number beside it.
 
-One smaller note, not a request. What would help the zoom panel is not
-on the sequencer's side at all: the pixel batch broadcasts six scalars
-across 1,024 elements every iteration with a JavaScript fill loop -
-6,144 stores per iteration, outside the library, measurably more than
-the wasm call they accompany. A `cft_run` that accepted a scalar
-(stride-0) operand would remove them. `dfill` in `pixel_chunk` is the
-same loop in C, so this is a shape the contract has, not a
-JavaScript problem.
+One smaller note, not a request, and unchanged: what would help the
+zoom panel is not on the sequencer's side at all. The pixel batch
+broadcasts six scalars across 1,024 elements every iteration with a
+JavaScript fill loop - 6,144 stores per iteration, outside the library,
+measurably more than the wasm call they accompany. A `cft_run` that
+accepted a scalar (stride-0) operand would remove them. `dfill` in
+`pixel_chunk` is the same loop in C, so this is a shape the contract
+has, not a JavaScript problem.
 
 ## What was not done
 
-- **No module was rebuilt.** `bindings/node/cft_node.wasm` is
-  unchanged, its sha256 is unchanged, and `conformance.html` was not
-  touched. Every check in this file is against the committed module.
 - **No tool was edited.** `host/tools/` is untouched; every browser
-  configuration is expressible in the flags the tools already have.
+  configuration is expressible in the flags the tools already have -
+  including the two the program engine needed, `--engine program` and
+  `--rsqrt newton`, which `cft-orbits` and `cft-zoom` have carried
+  since the day they were written. The images dumped for the
+  byte-for-byte comparison came from compiling those same sources
+  unchanged and interposing on `cft_program_load` at link time.
 - **No device.** The panels run the software backend, which is the
   only backend a browser can be (`wasm_api.c` says why). Nothing here
   is a hardware number.

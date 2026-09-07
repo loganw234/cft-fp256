@@ -1,33 +1,90 @@
-# The same claim as mulpass.sby at the REAL chunk width - 24 bits, no
-# CFT_MUL_MCH_FORMAL - for the smallest multi-pass geometries that
-# exist at it. Not part of formal/run.sh: this is the experiment that
-# says how far the solver gets when the partial products are 25 x 24
-# and 49 x 24, recorded in docs/VALIDATION.md with its time, whichever
-# way it goes. mulpass.sby's narrow-chunk tasks are the gate.
+# The MONOLITHIC form of cft_mulpass' exactness - the module's output
+# against a reference column sum in ONE assertion, with the multiplier
+# left standing on both sides - at the REAL chunk width, 24 bits, no
+# CFT_MUL_MCH_FORMAL.
 #
-#   sby -f mulpass_real.sby p25c1     2 passes x 1 column at P=25 (chunks 24 + 1)
-#   sby -f mulpass_real.sby p49c2     2 passes x 2 columns at P=49 (one tree level)
+# Four of these tasks ARE in formal/run.sh - p53c2, p53c1, p113c1 and
+# p237c1, the four that close - because a claim proven by decomposing
+# it (formal/mulexact.sby) is worth more when something under it does
+# not depend on the decomposition. The rest do not return inside a wall
+# bound and are kept as the measurement of where that stops;
+# docs/VALIDATION.md's 2026-09-07 entry has the times and the step each
+# one stalls on.
+#
+# THE ENGINE IS BOOLECTOR, and that is not a detail. Every other proof
+# in this directory runs on bitwuzla, which is boolector's successor and
+# is faster on all of them. On THIS property they are not comparable:
+# bitwuzla did not return on p53c1 in sixty minutes, and boolector
+# closed the same task in twenty-nine seconds. yices, z3 and cvc5 were
+# also tried on it and none returned in five minutes. Measured, not
+# assumed - and the reason this file does not simply inherit the
+# directory's engine.
+#
+#   p25c1   P=25  COLS=1  2 passes                 not a tile geometry
+#   p49c2   P=49  COLS=2  2 passes                 not a tile geometry
+#   p53c2   P=53  COLS=2  2 passes    fp64  at MUL_PASSES=2
+#   p53c1   P=53  COLS=1  3 passes    fp64  at MUL_PASSES=5,10
+#   p113c3  P=113 COLS=3  2 passes    fp128 at MUL_PASSES=2
+#   p113c1  P=113 COLS=1  5 passes    fp128 at MUL_PASSES=5,10
+#   p237c5  P=237 COLS=5  2 passes    fp256 at MUL_PASSES=2
+#   p237c2  P=237 COLS=2  5 passes    fp256 at MUL_PASSES=5
+#   p237c1  P=237 COLS=1  10 passes   fp256 at MUL_PASSES=10
+#
+# The last seven are every pair cft_lanes instantiates; the first two
+# are smaller still and exist only to bracket where the solver stops.
+# Depths are 7*NP + 2: reset, the pipeline's fill, and the whole enabled
+# interval in which the operation under test is presented at LEVEL.
+#
+#   sby -f mulpass_real.sby p237c1        (and so on per task)
 #
 # Run from formal/ (the relative paths below resolve there).
 
 [tasks]
 p25c1
 p49c2
+p53c2
+p53c1
+p113c3
+p113c1
+p237c5
+p237c2
+p237c1
 
 [options]
 p25c1: mode bmc
 p25c1: depth 17
 p49c2: mode bmc
 p49c2: depth 17
+p53c2: mode bmc
+p53c2: depth 16
+p53c1: mode bmc
+p53c1: depth 23
+p113c3: mode bmc
+p113c3: depth 16
+p113c1: mode bmc
+p113c1: depth 37
+p237c5: mode bmc
+p237c5: depth 16
+p237c2: mode bmc
+p237c2: depth 37
+p237c1: mode bmc
+p237c1: depth 72
 
 [engines]
-smtbmc bitwuzla
+smtbmc boolector
 
 [script]
 read_verilog -defer -formal -sv cft_mulpass.sv
 read_verilog -defer -formal -sv tb_mulpass_formal.sv
-p25c1: chparam -set P 25 -set COLS 1 tb_mulpass_formal
-p49c2: chparam -set P 49 -set COLS 2 tb_mulpass_formal
+p25c1:  chparam -set P 25  -set COLS 1 -set EXP_NP 2  tb_mulpass_formal
+p49c2:  chparam -set P 49  -set COLS 2 -set EXP_NP 2  tb_mulpass_formal
+p53c2:  chparam -set P 53  -set COLS 2 -set EXP_NP 2  tb_mulpass_formal
+p53c1:  chparam -set P 53  -set COLS 1 -set EXP_NP 3  tb_mulpass_formal
+p113c3: chparam -set P 113 -set COLS 3 -set EXP_NP 2  tb_mulpass_formal
+p113c1: chparam -set P 113 -set COLS 1 -set EXP_NP 5  tb_mulpass_formal
+p237c5: chparam -set P 237 -set COLS 5 -set EXP_NP 2  tb_mulpass_formal
+p237c2: chparam -set P 237 -set COLS 2 -set EXP_NP 5  tb_mulpass_formal
+p237c1: chparam -set P 237 -set COLS 1 -set EXP_NP 10 tb_mulpass_formal
 prep -top tb_mulpass_formal
 
 [files]

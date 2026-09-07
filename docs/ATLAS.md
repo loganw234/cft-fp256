@@ -49,10 +49,13 @@ of `abs`/`min`/`max`/`clamp`, four ternaries, integer shifts, masks and
 xors on the bit patterns, one `floor`, one `isnan`, one `isinf`, and
 104 bit-pattern constants written as `uintBitsToFloat(0x...)`. No raw
 `sqrt`, `log2` or `atan` survives outside a comment. The census below
-is against the sequencer's ISA (docs/SEQUENCER.md): 30 ALU opcodes,
-per-instruction rounding, 16 registers per lane, three input streams,
-16 addressable constants, `REPEAT`/`ENDREP`/`SETACT`/`DEPOSIT`/`HALT`,
-loops four deep, 1,024 instructions per image.
+is against the sequencer's ISA as it stood when the census was taken
+(docs/SEQUENCER.md): 30 ALU opcodes, per-instruction rounding, 16
+registers per lane, three input streams, 16 addressable constants,
+`REPEAT`/`ENDREP`/`SETACT`/`DEPOSIT`/`HALT`, loops four deep, 1,024
+instructions per image. Two of the four gaps it found were closed on
+2026-09-07 and are marked below; the census is left as it was written,
+because what it found is the reason they were closed.
 
 | the emitted GLSL uses | on the tile | notes |
 |---|---|---|
@@ -67,7 +70,7 @@ loops four deep, 1,024 instructions per image.
 | `s.orbit` with `until` | `REPEAT n` ... `SETACT(!until)` ... `ENDREP`, the count and the escape flag in registers | the model the sequencer was built for; the emitter's unroller becomes unnecessary |
 | `sum(n, term)` | a `REPEAT` accumulating into a register | per lane, no cross-lane reduction needed |
 | `s.deposit({xyz, col, glow})` | up to seven `DEPOSIT`s per sample, index-addressed | the fixed-order deposition GPUs cannot promise; binning into the plate is a separate step, below |
-| `P[8]`, `uT`, `TAU`, `PI` | the constant bank | 11 of the 16 addressable slots gone before any coefficient |
+| `P[8]`, `uT`, `TAU`, `PI` | the constant bank | 11 of the 16 addressable slots gone before any coefficient - 11 of 256 since indexed constants |
 
 Two operations do not map, and both sit in the stream rather than in
 the arithmetic:
@@ -75,10 +78,13 @@ the arithmetic:
 - **The draw hash is `lowbias32`**: `x ^= x >> 16; x *= 0x7feb352d;
   x ^= x >> 15; x *= 0x846ca68b; x ^= x >> 16`, plus one more multiply
   in the per-sample seeding. Two 32-bit integer multiplies per draw.
-  The ISA has no integer multiply. It cannot be built from the float
+  The ISA had no integer multiply. It cannot be built from the float
   opcodes either, because a 32x32-bit product exceeds the 24-bit
   significand and the conversions that a split-product route would
-  need are host operations.
+  need are host operations. **`IMUL`, opcode 30, closed this on
+  2026-09-07** - the hash is eight instructions and four constants as
+  a program, and the golden model, libcft and `cft_simpleops` all run
+  it, checked against Python's own integers at every format.
 - **The uniform is `float(x) * 2^-32`**: an integer-to-float
   conversion, which is `cft_cvt_from_u32` on the host and not an
   opcode. This one IS expressible in-lane: split `x` into two 16-bit
@@ -96,21 +102,31 @@ The five workloads of docs/BENCHMARKS.md found six asks of the program
 model (docs/SEQUENCER.md, last section). The atlas port needs three of
 them and adds one:
 
-1. **An integer multiply.** `IMUL`, 32-bit low product, the next free
-   opcode (30), in the integer group. Four 16-bit partial products on
-   the DSPs the tile is not short of; a golden-model definition of one
-   line; the softfloat, the RTL and a cocotb target. Without it every
-   draw goes to the host, and the number of draws per sample is
-   data-dependent inside an orbit, so "host-fed randomness" needs the
-   per-iteration stream read the zoom workload asked for. With it, the
-   whole stream is in-lane and the three input streams are enough.
-2. **Immediate constants.** Bit 30 of the instruction word is reserved
-   and `imm` is 32 bits wide and unused by ALU instructions - exactly
-   an fp32 constant. An "operand C is `imm`" form removes the
-   sixteen-constant wall the enclose workload hit: `hopf` alone wants
-   eleven constants before its first coefficient, and an inlined
-   `det_sincos` carries a dozen more. This is the single change that
-   turns chunked programs into one program per positive.
+1. **An integer multiply. BUILT 2026-09-07.** `IMUL`, 32-bit low
+   product, the next free opcode (30), in the integer group. Three
+   16x16 partial products in `cft_simpleops` - the fourth lands
+   entirely above bit 31 and is not computed - so it is off the fp
+   datapath and rides the precomputed-result sideband the rest of the
+   integer group already uses. `softfloat.py`'s `imul()` is the
+   one-line definition; `host/src/softfloat.c` is the port;
+   `tb/test_simpleops.py`'s `test_imul` and `tb/test_seq_core.py`'s
+   `indexed_constants_and_imul` are the benches, and `formal/imul.sby`
+   proves the three partial products equal a truncated 32x32 multiply
+   over every input at fp32's width. The whole draw stream is now
+   in-lane and the three input streams are enough.
+2. **Indexed constants. BUILT 2026-09-07.** Bit 30 of the instruction
+   word was reserved and `imm` is 32 bits wide and unused by ALU
+   instructions. The form built is an INDEX rather than a value - `kx`
+   sets the three operands' constant indices from `imm[7:0]`,
+   `imm[15:8]` and `imm[23:16]`, and the bank grows to 256 - which is
+   what serves both this port and the fp256 enclosure tool, where an
+   immediate would have had to be a format-width value and could not
+   have. `hopf`'s eleven constants and an inlined `det_sincos`'s dozen
+   are now eleven and twelve of 256 rather than of sixteen. Measured
+   on the enclose workload: 16 chunk programs to 1 at degree 127, 144
+   library calls to 9, arithmetic intensity 6.6 to 102.6 operations
+   per element moved against a K ~ 30 crossover, and the same SHA-256
+   chain at every format. docs/ENCLOSE.md carries the numbers.
 3. **More inputs than three.** The registry contract delivers seven
    per-sample values - `q.x`, `q.y`, four in `rnd`, `seed` - before a
    single lever. The orbits workload asked for register loading from a
@@ -132,9 +148,14 @@ them and adds one:
    with a return address register is the durable one and is not in
    the ISA today.
 
-None of these is deep. Together they are a VERSION step for the
-sequencer (a new opcode, a new instruction form, a wider input block,
-optionally a call), with the golden model first as always.
+None of these is deep. The first two are built (2026-09-07), golden
+model first as always, and published the same day as CAPS bits rather
+than a VERSION step - CAPS[28] for `IMUL`, CAPS[4] for `kx` - because
+VERSION guards the register map and features are announced in CAPS.
+`cft_program_load` refuses an image that uses either on a device that
+does not publish it and `cft_supports` answers for opcode 30, so a
+host asks rather than guesses. The wider input block and the optional
+call remain.
 
 ## Deposition, the half the tile does not do yet
 
@@ -199,10 +220,15 @@ deposition that column alone can claim.
    `det_pow` wants 43; 77 distinct constants in all, inside
    `KMEM_D`'s 256), `hashu` alone needs `IMUL`, and `det_pow` alone
    needs a seventeenth register.
-2. **`IMUL` and immediate constants** (cft-fp256): model, softfloat,
+2. **`IMUL` and indexed constants** (cft-fp256): model, softfloat,
    RTL, cocotb, CAPS and VERSION; the API gains nothing, since a
-   program image is data. The immediate form is what lets step 3 emit
-   one image per positive.
+   program image is data. **Done on 2026-09-07 except CAPS and
+   VERSION, which are the integrator's** - the model, libcft,
+   `cft_simpleops`, `cft_seq`, three benches, a formal proof and the
+   enclose measurement are in; `cft_caps` does not yet publish either
+   feature and the sequencer VERSION has not been stepped, so a host
+   still cannot ask a device whether its bitstream carries them. The
+   indexed form is what lets step 3 emit one image per positive.
 3. **The emitter target** (atlas-engine): `core/emit-cft.mjs` from the
    same parse, producing the image, the constant bank, the seven-wide
    input block and the deposit schema; a runner in cft-fp256

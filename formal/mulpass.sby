@@ -79,14 +79,14 @@ real: read_verilog -defer -formal -sv cft_mulpass.sv
 real: read_verilog -defer -formal -sv tb_mulpass_formal.sv
 narrow: read_verilog -defer -formal -sv -DCFT_MUL_MCH_FORMAL=4 cft_mulpass.sv
 narrow: read_verilog -defer -formal -sv -DCFT_MUL_MCH_FORMAL=4 tb_mulpass_formal.sv
-r25c1: chparam -set P 25 -set COLS 1 -set FULL 1 tb_mulpass_formal
-r49c1: chparam -set P 49 -set COLS 1 tb_mulpass_formal
-r49c2: chparam -set P 49 -set COLS 2 tb_mulpass_formal
-r73c1: chparam -set P 73 -set COLS 1 tb_mulpass_formal
-n18c1: chparam -set P 18 -set COLS 1 tb_mulpass_formal
-n18c3: chparam -set P 18 -set COLS 3 tb_mulpass_formal
-n38c5: chparam -set P 38 -set COLS 5 tb_mulpass_formal
-cover: chparam -set P 25 -set COLS 1 tb_mulpass_formal
+r25c1: chparam -set P 25 -set COLS 1 -set FULL 1 -set EXP_NP 2 tb_mulpass_formal
+r49c1: chparam -set P 49 -set COLS 1 -set EXP_NP 3 tb_mulpass_formal
+r49c2: chparam -set P 49 -set COLS 2 -set EXP_NP 2 tb_mulpass_formal
+r73c1: chparam -set P 73 -set COLS 1 -set EXP_NP 4 tb_mulpass_formal
+n18c1: chparam -set P 18 -set COLS 1 -set EXP_NP 5 tb_mulpass_formal
+n18c3: chparam -set P 18 -set COLS 3 -set EXP_NP 2 tb_mulpass_formal
+n38c5: chparam -set P 38 -set COLS 5 -set EXP_NP 2 tb_mulpass_formal
+cover: chparam -set P 25 -set COLS 1 -set EXP_NP 2 tb_mulpass_formal
 prep -top tb_mulpass_formal
 
 [files]

@@ -14,15 +14,19 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --require-all  # skips become failures
     SIM_JOBS=12 bash verify/run.sh    # the sim stage's targets, twelve at a time
     bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
-    bash verify/run.sh --budget quick   # ~20 min
-    bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded
-    bash verify/run.sh --budget full    # the census
+    bash verify/run.sh --budget quick   # ~20 min after a host build
+    bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded (2026-09-07)
+    bash verify/run.sh --budget full    # the census: gate + sim, node, wasm, images
 
 ## Budgets
 
-No stage takes hours by itself; a full run is the sum of a dozen
-5-to-30-minute stages, and the sum moves with the load on the box.
-`--budget` names three cuts, kept in `run.sh` beside the stage list:
+**None of this is a quick test suite.** Several stages run for twenty
+to fifty minutes on their own, the simulation suites and the formal
+gate for more than an hour each on a busy box, and the sum moves with
+the load: docs/VERIFICATION.md has the measured table, quiet against
+loaded, for every gate in and out of this runner, and the reader who
+thinks a stage has hung should look there first. `--budget` names
+three cuts, kept in `run.sh` beside the stage list:
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
@@ -46,7 +50,7 @@ command in the `cft2204` distro.
 | vectors | the conformance sets regenerate from the model | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
-| formal | the FIFO/seedop/simpleops theorems + negative control | docker |
+| formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 14 minutes of solver time quiet and well over an hour loaded (formal/README.md) | docker |
 | libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
@@ -82,15 +86,21 @@ and R); a full census runs them wherever the toolchains are, and
 docs/COMPATIBILITY.md keeps the dated per-language rows, and the
 recipe for giving a Windows host every toolchain the stages want.
 
-Wall time for the standard set is dominated by `sim` when it runs
-serially: ~40 min in the container, ~25 min under Verilator on a
-36-core box, almost all of it compilation. The targets are
-parallel-safe by construction - each writes its own sim_build/<name>
-and results file - so `SIM_JOBS=n` hands make `-j n` (and `-k`, so
-one failing target does not hide the others): the whole suite cold
-at -j12 on that box is 3 min, warm under a minute (docs/VALIDATION.md
-2026-09-02). Budget 1-2 GB a job under Verilator. Everything else
-together is ~20-30 min.
+Wall time for the standard set is dominated by `sim`, `formal`,
+`transcend` and `cpp`. `sim` is ~40 min serial in the container, ~25
+min under Verilator on a 36-core box, almost all of it compilation,
+and **55 minutes at four jobs on this desktop beside a Vivado run**
+(2026-09-07); `simmc MC=10`, which is not in any budget, is longer
+still. The targets are parallel-safe by construction - each writes
+its own sim_build/<name> and results file - so `SIM_JOBS=n` hands
+make `-j n` (and `-k`, so one failing target does not hide the
+others): the whole suite cold at -j12 on that box is 3 min, warm
+under a minute (docs/VALIDATION.md 2026-09-02). Budget 1-2 GB a job
+under Verilator. The formal gate was 29 s when it held four proofs
+and is about 14 minutes of solver time now that it holds thirty-one,
+over an hour when the box is shared; `transcend` is 13 minutes quiet
+and 52 loaded. docs/VERIFICATION.md carries every number with its
+provenance.
 
 Two things the runner learned on 2026-09-02, both now built in: the
 libcft stage cleans `host/` before building it, because a checkout

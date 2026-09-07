@@ -652,7 +652,7 @@ OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
 # reads three independent pointers, so a > b is compute(LT, b, a) with
 # the buffers swapped, at no cost. NE is SELECT over EQ, or an inverted
 # read. Only the orderings that cannot be reached by swapping operands
-# earn an opcode. MODE[7:0] is a byte; 15 and 24-255 are unassigned.
+# earn an opcode. MODE[7:0] is a byte; 15, 31 and above are unassigned.
 OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 # Integer and bitwise operations on the encoding, treated as a W-bit
 # unsigned word. Not floating point at all: they never round, never
@@ -668,6 +668,15 @@ OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT = 20, 21, 22, 23
 # Seed opcodes for the composed divide/sqrt (24 and 25 are the
 # reductions, in reduce.py). Quiet, unary, attribute-independent.
 OP_RECIP_SEED, OP_RSQRT_SEED = 26, 27
+# The integer group's one arithmetic member, appended at the first free
+# opcode above the seeds (28 and 29 are the composed reductions).
+#
+# It is defined on 32 BITS AND NOT ON W, which is the whole design
+# decision and the reason it is not simply "iadd with a multiply". The
+# operation exists for one caller - the draw hash of docs/ATLAS.md,
+# `lowbias32`, which is two 32-bit multiplies per random draw - and a
+# W-bit low product would be a 256x256 multiplier at fp256 for nobody.
+OP_IMUL = 30
 OP_NAMES = {
     OP_FMA: "fma", OP_ADD: "add", OP_SUB: "sub", OP_MUL: "mul",
     OP_ABS: "abs", OP_NEG: "neg", OP_COPYSIGN: "copysign",
@@ -679,15 +688,16 @@ OP_NAMES = {
     OP_ISUB: "isub", OP_ISHL: "ishl", OP_ISHR: "ishr",
     OP_ICMPLT: "icmplt",
     OP_RECIP_SEED: "recip_seed", OP_RSQRT_SEED: "rsqrt_seed",
+    OP_IMUL: "imul",
 }
 INT_OPS = (OP_IAND, OP_IOR, OP_IXOR, OP_IADD,
-           OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT)
+           OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT, OP_IMUL)
 ARITH_OPS = (OP_FMA, OP_ADD, OP_SUB, OP_MUL)
 SIMPLE_OPS = (OP_ABS, OP_NEG, OP_COPYSIGN,
               OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM,
               OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ,
               OP_IAND, OP_IOR, OP_IXOR, OP_IADD,
-              OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT)
+              OP_ISUB, OP_ISHL, OP_ISHR, OP_ICMPLT, OP_IMUL)
 SEED_OPS = (OP_RECIP_SEED, OP_RSQRT_SEED)
 
 
@@ -862,6 +872,37 @@ def icmplt(fmt, xa, xb, *_):
     return (one_bits(fmt) if xa < xb else zero_bits(fmt)), 0
 
 
+def imul(fmt, xa, xb, *_):
+    """The low 32 bits of the product of the two operands' low 32 bits,
+    zero-extended to the format width. Quiet, like the rest of the
+    group: it never rounds, never signals, and never canonicalises.
+
+    Two decisions are in that one line, and both are deliberate.
+
+    THIRTY-TWO BITS, NOT `fmt.width`. Every other member of the group
+    is defined on the whole W-bit encoding, and this one is not. The
+    caller is docs/ATLAS.md's draw stream - `lowbias32`, two 32-bit
+    multiplies per random draw - which is a 32-bit hash at every
+    format because the GPU it must agree with computes it on a
+    `uint`. A W-bit low product would be a 256x256 multiplier at fp256
+    serving nobody, so the operation reads a[31:0] and b[31:0] and
+    ignores every bit above them.
+
+    ZERO-EXTENDED, NOT MERGED. The bits of the destination above 31 are
+    written to zero rather than left holding whatever the register had:
+    a read-modify-write would make the result a function of the
+    destination as well as the sources, which no other opcode is, and
+    the hardware would have to route the old destination value into an
+    ALU that has no port for it.
+
+    Signedness does not enter. The low 32 bits of a two's-complement
+    product are the same bits whether the operands are read as signed
+    or unsigned, so there is one operation here and not two.
+    """
+    m32 = 0xFFFFFFFF
+    return ((xa & m32) * (xb & m32)) & m32, 0
+
+
 SIMPLE_IMPL = {
     OP_ABS: fabs, OP_NEG: neg, OP_COPYSIGN: copysign,
     OP_MIN: fmin, OP_MAX: fmax,
@@ -871,6 +912,7 @@ SIMPLE_IMPL = {
     OP_IAND: iand, OP_IOR: ior, OP_IXOR: ixor, OP_IADD: iadd,
     OP_ISUB: isub, OP_ISHL: ishl, OP_ISHR: ishr, OP_ICMPLT: icmplt,
     OP_RECIP_SEED: recip_seed, OP_RSQRT_SEED: rsqrt_seed,
+    OP_IMUL: imul,
 }
 
 

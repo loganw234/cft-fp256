@@ -232,7 +232,7 @@ does not work yet.
 | 0x40 | FLAGS | RO | sticky {inexact,underflow,overflow,divzero,invalid} of the last run; cleared at an ACCEPTED ap_start - a refused start (STATUS[3]) leaves them untouched, because a refusal is not a run |
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
 | 0x48 | VERSION | RO | 0x00000600. **Guards the REGISTER MAP, not the feature set** - a host accepts a SET of known versions and lets CAPS decide what an image can do. One accepted value would orphan a still-good bitstream every time a feature landed, which nearly happened when reductions bumped 0x410 to 0x500 and the card-day images were already built at 0x410. 0x600 is the first bump that GREW the map rather than only adding a capability: PROG_PTR and CNT_PTR exist at 0x54 and 0x5C, and two kernel arguments exist that did not. The older versions stay accepted because their registers are still read correctly; what they cannot do is run a program, and libcft refuses that outright rather than binding an eight-argument call to a six-argument xclbin |
-| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 sequencer (13 set from VERSION 0x500 onward, 14 with the seed opcodes, 15 from 0x600). **Bit 15 read "conversion - reserved" until 0x600.** The conversions landed as library entry points - `cft_convert`, the integer forms, the rest of clause 5 - composed from opcodes that already exist, so the group will never take a MODE opcode and the bit was never going to be spent on it. A group bit nothing can ever set is a reserved bit; the sequencer is a real thing a host must ask about before it writes PROG_PTR, so it takes the bit. **Bit 15 means MODE[15] reaches a `cft_seq`,** and nothing about which programs it will accept - the on-chip instruction, constant and deposit capacities are the tile's, and a program past them is refused at run time with STATUS[3]. **Bit 13 means opcode 24 only.** The group nominally covers 24 and 25, but `dot` (25) is a host-side composition of `mul` then `sum` - the kernel treats 25 as a reserved opcode and answers with canonical qNaN and invalid raised. A host that reads bit 13 and issues 25 to the tile directly gets that, not a dot product; libcft never does, because `cft_reduce` decomposes it. **Bit 14 means opcodes 26 and 27** - `recip_seed`/`rsqrt_seed`, the quiet table lookups the composed divide and square root start from. The full operations are not single opcodes at all: they are FMA sequences the host library issues (python/cft_golden/sequences.py is the specification), and bit 14 is what tells it the starting points exist in this bitstream. Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current. **[7:4] sequencer feature nibble**, all zero in every build so far; the assignments are reserved in `rtl/cft_csr.sv` (wide constant index, init block, per-lane flags, static deposit) so that two builds cannot spend one bit twice. **[19:16], [23:20], [27:24] are the sequencer's on-chip capacities as LOG2**: deposit slots a lane (`MAXD`, 6 -> 64), instruction capacity (`IMEM_D`, 10 -> 1024), and constants an instruction can ADDRESS (4 -> 16, the width of the `ka`/`kb`/`kc` operand field, which is not the image-side `KMEM_D` of 256 and is the ceiling `host/tools/enclose.c` chunks its Horner kernel around). An exponent rather than a count, which is what makes each fit four bits and is honest only because each capacity is a power of two by construction; `rtl/cft_krnl.sv` names them once, as the localparams it hands `cft_seq`, and `tb/test_krnl.py` parses that file and checks the register against it. A tile whose VERSION predates them reads zero in all three, which `cft_caps` documents as UNKNOWN and enforces nothing against - the card-day 0x410 images are exactly that. **[31:28] reserved, zero.** Publishing the capacities is what turns "the tile refused your image with STATUS[3]" into a sizing calculation a tool does at startup: `cft-zoom` reads the deposit budget and halves it for its trip count, `cft-orbits` refuses by name against it, and `cft_program_load` refuses an image past any of them with a message that says which cap and by how much (docs/HOSTAPI.md). Values inside a register that already exists, so **VERSION does not move for them** |
+| 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 sequencer (13 set from VERSION 0x500 onward, 14 with the seed opcodes, 15 from 0x600). **Bit 15 read "conversion - reserved" until 0x600.** The conversions landed as library entry points - `cft_convert`, the integer forms, the rest of clause 5 - composed from opcodes that already exist, so the group will never take a MODE opcode and the bit was never going to be spent on it. A group bit nothing can ever set is a reserved bit; the sequencer is a real thing a host must ask about before it writes PROG_PTR, so it takes the bit. **Bit 15 means MODE[15] reaches a `cft_seq`,** and nothing about which programs it will accept - the on-chip instruction, constant and deposit capacities are the tile's, and a program past them is refused at run time with STATUS[3]. **Bit 13 means opcode 24 only.** The group nominally covers 24 and 25, but `dot` (25) is a host-side composition of `mul` then `sum` - the kernel treats 25 as a reserved opcode and answers with canonical qNaN and invalid raised. A host that reads bit 13 and issues 25 to the tile directly gets that, not a dot product; libcft never does, because `cft_reduce` decomposes it. **Bit 14 means opcodes 26 and 27** - `recip_seed`/`rsqrt_seed`, the quiet table lookups the composed divide and square root start from. The full operations are not single opcodes at all: they are FMA sequences the host library issues (python/cft_golden/sequences.py is the specification), and bit 14 is what tells it the starting points exist in this bitstream. Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current. **[7:4] sequencer feature nibble**: [4] wide constant index is set from 2026-09-07 (`kx`, three 8-bit constant indices in the immediate); init block, per-lane flags and static deposit stay reserved in `rtl/cft_csr.sv` so that two builds cannot spend one bit twice. **[19:16], [23:20], [27:24] are the sequencer's on-chip capacities as LOG2**: deposit slots a lane (`MAXD`, 6 -> 64), instruction capacity (`IMEM_D`, 10 -> 1024), and constants an instruction can ADDRESS (4 -> 16, the width of the `ka`/`kb`/`kc` operand field, which is not the image-side `KMEM_D` of 256 and is the ceiling `host/tools/enclose.c` chunks its Horner kernel around). An exponent rather than a count, which is what makes each fit four bits and is honest only because each capacity is a power of two by construction; `rtl/cft_krnl.sv` names them once, as the localparams it hands `cft_seq`, and `tb/test_krnl.py` parses that file and checks the register against it. A tile whose VERSION predates them reads zero in all three, which `cft_caps` documents as UNKNOWN and enforces nothing against - the card-day 0x410 images are exactly that. **[31:28] ALU extensions beyond the group bits**: [28] `IMUL` (opcode 30, 2026-09-07), which joined the integer group after bitstreams had shipped with that group's bit set, so the group bit cannot announce it; [31:29] reserved, zero. Publishing the capacities is what turns "the tile refused your image with STATUS[3]" into a sizing calculation a tool does at startup: `cft-zoom` reads the deposit budget and halves it for its trip count, `cft-orbits` refuses by name against it, and `cft_program_load` refuses an image past any of them with a message that says which cap and by how much (docs/HOSTAPI.md). Values inside a register that already exists, so **VERSION does not move for them** |
 | 0x50 | STATUS | RO | sticky faults of the last run, cleared at an accepted ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count, [3] the run was REFUSED, [4] DEPOSIT OVERFLOW on a sequencer run. **[3] covers two refusals with one answer.** Either MODE selected a precision this build does not implement (or a code above 3), in which case neither engine started and no memory was touched at all; or a sequencer run's program image failed the tile's own header check - bad magic, a format that is not MODE's, more instructions, constants or deposit slots than the tile holds. The second kind may have READ the image before refusing it, but it wrote nothing and computed nothing, and a host's response to both is the same: the run did not happen and the output buffer holds what it held. `ap_done` still asserts either way, so a refusal costs a register read rather than a timeout, and FLAGS is left at the previous run's value because a refusal is not a run. CAPS[3:0] says in advance which precisions exist and CAPS[15] whether there is a sequencer; the refusal is what a host that did not ask gets instead of plausible garbage. **[4] is a report, not a fault** - a lane deposited past the program's `max_deposits`, the excess was dropped, and what fit is correct and reproducible. It is deliberately not an IEEE flag: the five in FLAGS mean what 754 says they mean and "your buffer was too small" is not one of them. It moved here from bit 3 on 2026-09-01, when the precision refusal took that position in silicon-bound RTL and the sequencer's bit had still never crossed a device boundary. **Bits [2:0] non-zero mean the D buffer must not be trusted.** [0] and [1] do not disturb the run - the beat still arrives, so it completes and STATUS is read after. [2] does: withheld beats starve compute, so the engine ABANDONS the run rather than waiting - no new bursts, any committed write burst finished (with stale data if the FIFO ran dry, since AXI4 A3.4.1 permits no way to withdraw it), outstanding reads allowed to land, then `ap_done`. A protocol violation ends as a prompt fault instead of a hang; a slave that stops answering altogether is indistinguishable from a slow one and still belongs to the host's timeout |
 | 0x54 | PROG_PTR | RW | 64-bit HBM byte address of the program image - header, constant bank, instruction stream, exactly as `cft_program_load` validated it (docs/SEQUENCER.md). 32-byte aligned. Read by the sequencer at start; ignored when MODE[15] is clear |
 | 0x5C | CNT_PTR | RW | 64-bit HBM byte address of the per-lane deposit counts, `n` uint32s, 4-byte aligned. An output rather than a convenience: `+0` is both a legal deposit and the defined value of a slot no lane wrote, so the count cannot be recovered from the deposit buffer |
@@ -578,6 +578,128 @@ A reduced clock changes nothing about results - determinism is
 clock-independent by construction. The v0 behavioural core (one
 combinational cloud, ~65/14 MHz) remains in rtl/ as the readable
 reference.
+
+### The leading-zero cone became its own stage (2026-09-07)
+
+`docs/studies/OPT-C-timing.md` took the 2026-09-06 routed fp256 path
+apart segment by segment and found that **76% of it was working out how
+far to shift**: of 11.550 ns on a Kintex-7 410T at an 80 MHz ask,
+8.77 ns was the chunk zero-scan, the priority encode, the chunk mux,
+`lzc64` and the `NW-1-msb` subtract; 1.58 ns was the gather into
+`cft_lanes`' mode mux; 1.20 ns was the ladder itself. All of it in one
+cycle, between `s10_mag` and the S11 registers. Two changes against
+that, in one commit, because neither is worth much alone.
+
+**A register boundary inside the cone.** `LATENCY` is **16** edges now,
+not 15, and the new S11 holds the cone's answer - the window, the total
+shift, the msb, the empty flag - together with every parallel path
+beside it: the sign, the exponent anchor, the residue rail and the whole
+specials sideband. That last clause is the entire risk of the change,
+and it is why the previous attempt to deepen this pipe produced
+*garbage, not drift* (docs/ROADMAP.md). `cft_fpfma_pipe` is a
+synchronised multi-path pipeline; a stage that delays one path and not
+its neighbours hands every operation another one's control word.
+Downstream the register names did not move - `s11_*` sits at level 12
+now, `s14_*` at level 15 - and the rounding-attribute delay line needed
+no edit at all, because its taps have always been written relative to
+`DEPTH` rather than as literals.
+
+**Balanced trees where the priority loops were.** The cone is
+`cft_lzcone` now, a module at the foot of `rtl/cft_fpfma_pipe.sv`, and
+both of its top-down scans - the twelve-chunk resolve and the 64-way
+`lzc64` - are log-depth (valid, count) merges folded four wide
+(`cft_lz4`). Two levels and three levels respectively, against the
+thirteen the routed trace walked. The count comes out of the root
+already, so the `NW-1-msb` subtract is gone rather than moved.
+
+What did **not** change is the 64-bit chunk zero-detect, and that is the
+interesting part. It was the one piece of the old cone Vivado already
+mapped well - five CARRY4 for 0.484 ns and no routing - and it is also
+what keeps the module cheap to SIMULATE, a 64-bit reduction being one
+vector operation where a tree over the same bits is sixteen nodes. The
+study's idea 7 proposes a single tree over the whole 717-bit window;
+that version was built, proved bit-identical, and measured **about four
+times slower through Icarus** on `tb_fpfma_fp256` (2026-09-07). A
+generate pyramid with one continuous assignment per node - the obvious
+way to write either - was **twenty-four times** slower on
+`tb_fpfma_fp32`, because Icarus schedules each driver of a multiply
+driven net as its own event. The whole cocotb matrix runs on Icarus, so
+those are not cosmetic numbers. The shipping form keeps the wide cheap
+reduction, puts the trees only where the scans were, and costs 1.4x on
+the fp256 bench and nothing on fp32.
+
+Bit identity here is proved, not argued. `formal/lzcone.sby` is a
+combinational equivalence miter of `cft_lzcone` against
+`formal/cft_lzcone_ref.sv` - the priority-loop form frozen at the moment
+of the split - at all four window widths; both sides being
+combinational, each BMC step is the whole input space at that rung
+(2^78, 2^165, 2^345, 2^717). It is part of `formal/run.sh`'s gate.
+
+`cft_seq`'s `NBEATS` did **not** have to move with the depth, and that
+is worth recording because docs/ROADMAP.md predicted it would ("LATENCY
+16 forces NBEATS to 32"). The parameter's old comment said `>= LATENCY +
+1`; the relation is about keeping the pipe full, not about correctness,
+because results retire in arrival order and both the issue state and the
+drain state run the writeback path. What is structural is the register
+file's address shape - the beat index is four bits - so `NBEATS` stays
+16 and now carries an elaboration guard saying which of the two
+constraints is real.
+
+**What the tip measured, before the change.** Out of context on
+`xcu50-fsvh2104-2-e` at a 160 MHz ask, `MUL_PASSES=1` with the ladders
+off - the shipping configuration - commit 046adae:
+
+| | tip, 2026-09-07 |
+|---|---|
+| synthesis WNS | +0.410 (period 6.250) |
+| synthesis worst path | **`s10_mag_reg[652]` -> `g_norm_priv.s11_valw_reg[448]`, 25 levels, 5.821 ns** |
+| routed WNS | +0.120 |
+| routed worst path | `s13_kept_r_reg[11]` -> `d_reg[148]`, 20 levels, **6.111 ns** |
+| routed worst 25, by family | 13 round->pack, 8 `u_engine` `op_r`->`w_cnt`, 4 the LZC cone (worst 6.068 ns) |
+| routed LUT / FF / DSP / BRAM | 120,839 / 57,644 / 262 / 36 |
+
+The synthesis line is the study's claim, confirmed on a part it was not
+measured on: **the single worst path in the whole kernel, before
+placement, is the leading-zero cone.** After routing the cone and the
+round stage are within 0.04 ns of each other, which is what "the cone
+stops being the critical path" has to be measured against - and the
+`u_engine` control family sitting third at 160 MHz is the second wall
+the study named, appearing in a U50 report for the first time.
+
+**What the change measured, after the merge.** The same two asks, the
+branch beside the tip, out of context, one build at a time through
+`hw/mc_sweep.sh` (the branch runs were launched by the agent's own
+queue after its session was stopped, and read by the integrator):
+
+| | tip | with the cone cut |
+|---|---|---|
+| **U50, 160 MHz, MUL_PASSES=1, ladders off** | | |
+| synthesis WNS / worst path | +0.410 / the cone, 25 levels, 5.821 ns | +1.348 / `u_engine` reader, 26 levels, 4.883 ns |
+| routed WNS / worst path | +0.120 / round->pack, 6.111 ns | **+0.255** / round->pack, 19 levels, 5.977 ns |
+| routed worst 25, by family | 13 round->pack, 8 engine, 4 the cone | 11 round->pack, 14 engine (FIFO->S0, `beats_total`->`rd_resv`, `op_r`->`w_cnt`), **0 the cone** |
+| routed LUT / FF | 120,839 / 57,644 | 117,820 / 60,671 |
+| **K325T -2, 120 MHz, MUL_PASSES=10, ladders on** | | |
+| synthesis WNS / worst path | -1.733 / the cone into the ladder, 24 levels, 9.698 ns | -0.654 / `beats_total`->`rd_resv`, 43 levels, 9.001 ns |
+| routed WNS / worst path | **-1.817** / the cone into the ladder, 25 levels, 9.784 ns | **-0.078** / `beats_total`->`rd_resv`, 45 levels, 8.425 ns |
+| routed worst 25, by family | every one the cone into the ladder | every one `u_engine` (`beats_total`, `rd_issued`, `len_q`) |
+| routed LUT / FF | 95,695 / 43,365 | 94,204 / 46,288 |
+
+So the study's claim held on both parts: the cone is out of the
+critical-path conversation - absent from the routed worst 25 on the
+U50, and on the K325T the 1.36 ns of routed path it gave back moved
+the wall from a datapath the study could shorten to the engine's
+`beats_total -> rd_resv` control chain, which is its idea 4 and the
+"second wall" it named. The board's clock follows: 120 MHz misses by
+78 picoseconds where the tip missed by 1.8 ns, so a -2 K325T carrying
+the third tier's tile is a ~119 MHz part on the path-delay reading
+(8.425 ns plus the same overhead that turned 9.784 into -1.817 at
+8.333), against ~100 MHz before. The flip-flops cost 3,027 on the U50
+and 2,923 on the K325T, against the study's estimate of 2,856, and
+the LUTs fell 2.5% and 1.6%, which the balanced trees explain. Read
+the path delay, not the slack: the U50 runs both met their ask and
+say nothing about headroom, and neither part has had the frequency
+sweep that would put a number on its ceiling.
+
 
 ## The multi-cycle rung (built 2026-09-06: rtl/cft_mulpass.sv)
 

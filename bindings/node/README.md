@@ -9,7 +9,7 @@ and results that are libcft's bits and nothing else.
 ```bash
 node bindings/node/test.mjs         # 125 tests, no dependencies
 make vectors                        # from the repo root, once
-node bindings/node/conformance.mjs  # 1,067,635 published cases
+node bindings/node/conformance.mjs  # 1,071,635 published cases
 ```
 
 ```js
@@ -172,6 +172,75 @@ docs/TRANSCENDENTALS.md carries both arguments.
 These are host operations: no device pass, no bus word, and nothing
 here computes them - each call is one `cftw_*` call on bytes, exactly
 like every other operation in this package.
+
+## Programs: the orbit sequencer
+
+`cft_run` applies one operation to every element. A **program** applies
+a SEQUENCE to every element, on-chip, without the operands making a
+round trip to memory between steps - which is the difference between
+0.125 flops per byte and something worth putting four compute units
+behind. docs/SEQUENCER.md is the design; `python/cft_golden/seq.py` is
+the definition of correct.
+
+Since 2026-09-07 the four calls of cft.h's program section are here,
+one to one:
+
+```js
+import { Context } from "./index.mjs";
+
+const ctx  = await Context.open(64);
+const prog = ctx.loadProgram(imageBytes);   // Uint8Array -> Program
+prog.format;                                // the program's OWN format
+prog.maxDeposits; prog.nInsns; prog.nConsts;
+
+const r = prog.run(a, b, c);                // arrays, or Uint8Array
+r.deposits;         // n * maxDeposits Floats, flat
+r.counts;           // Uint32Array of n
+r.flags;            // the IEEE exceptions the run raised
+r.status;           // the STATUS word - bus faults, deposit overflow
+r.depositOverflow;  // status & CFT_STATUS_DEPOSIT_OVERFLOW
+
+prog.free();                                // and nothing else will
+```
+
+Five things about it are the contract's rather than this package's, and
+each is worth knowing before the first program:
+
+* **An image is bytes, and this package does not write one.** The
+  header, constant bank and instruction stream of docs/SEQUENCER.md go
+  in as a `Uint8Array` - the same bytes on disk, in this call, and in a
+  device's instruction memory - and `cft_program_load` validates them.
+  There is deliberately no assembler here: a second validator on this
+  side would be a second opinion about what a device may execute.
+  `bindings/node/seq_corpus.mjs` has an encoder for tests that need to
+  write a program by hand.
+* **A program carries its own format.** It is compiled for one, because
+  its constants are format-width values, so `prog.format` is read back
+  from the loader and its operands and deposits are that width whatever
+  the context that loaded it computes in.
+* **Every deposit slot is present, and an untouched one is `+0`.** That
+  is normative and not a convenience: a run whose untouched slots kept
+  whatever the buffer held would not be reproducible. Deposit `d` of
+  element `i` is at `i * maxDeposits + d`, which depends on the
+  element's own index and nothing else - so a run split across four
+  tiles writes the same bytes to the same places as a run on one.
+* **`counts` is an output, not a courtesy.** `+0` is a perfectly good
+  thing to deposit, so the buffer alone cannot tell a deposited zero
+  from an untouched slot.
+* **Overflow drops the tail and says so.** A lane that deposits more
+  than `maxDeposits` keeps what fit - correct and reproducible - and
+  sets `CFT_STATUS_DEPOSIT_OVERFLOW` in `status`. It is bit 4 of the
+  STATUS word and **not** an IEEE flag: the five in `flags` mean what
+  754 says they mean, and "your buffer was too small" is not one of
+  them.
+
+`free()` is not optional and there is no finalizer, deliberately: a
+collector's schedule is not something a determinism contract should be
+able to notice. A freed program refuses every later call.
+
+`node program_test.mjs` is this surface's own test - the recorded
+corpus, then programs written by hand for SETACT's early exit and for
+deposit overflow, then the refusals, the memory and a negative control.
 
 ## What this is a drop-in for: nothing, on purpose
 
@@ -589,7 +658,8 @@ decimal is 183,600 bytes.
 ```
 index.mjs        the public surface
 lib.mjs          the module load, the cftw_* table, the ABI audit
-core.mjs         Context and Float, the codec, the decimal contract
+core.mjs         Context, Float and Program, the codec, the decimal
+                 contract
 cft_node.js      committed build product: emcc -sENVIRONMENT=node
 cft_node.wasm    committed build product: THE PAGE'S MODULE, byte for byte
 test.mjs         everything the vectors cannot express
@@ -598,6 +668,16 @@ conformance.mjs  the vectors replay - the package's conformance test;
                  own methods for the six families that are not
                  opcodes: transcendental, augmented, reduction,
                  character, minmaxmag, formatof
+program_test.mjs the orbit sequencer: the recorded corpus, programs
+                 written by hand, the refusals, the memory, a negative
+                 control
+seq_corpus.mjs   the corpus reader and replay, and an instruction
+                 encoder for tests that write a program by hand
+seq_corpus.jsonl what libcft's C executor answered for the shared fuzz
+                 corpus - derived data, regenerated by
+                 make_seq_corpus.py
+make_seq_corpus.py  the recorder: drives libcft through ctypes, refuses
+                 to write anything the golden model disagrees with
 ```
 
 `cft_node.js` and `cft_node.wasm` are built by

@@ -391,8 +391,23 @@ int main(void)
                     }
                     continue;
                 }
-                want = cft_supports(dev, (cft_op)op_i, (cft_format)f_i)
-                       ? 0u : CFT_FLAG_INVALID;
+                /* IMUL is the one opcode where cft_supports and the
+                 * software backend disagree, on purpose and in the
+                 * safe direction: opcode 30 was DEFINED on 2026-09-07
+                 * and both executors compute it, but no CAPS bit
+                 * publishes it yet, so cft_supports still answers no.
+                 * More works than is advertised, never less. When the
+                 * caps bit lands this special case collapses back
+                 * into the line below it.
+                 *
+                 * The padding property this block exists for holds
+                 * for it either way: the low 32 bits of zero times
+                 * zero are zero and nothing is raised, so a padded
+                 * tail contributes nothing to the reported flags. */
+                want = (op_i == CFT_IMUL)
+                       ? 0u
+                       : (cft_supports(dev, (cft_op)op_i, (cft_format)f_i)
+                          ? 0u : CFT_FLAG_INVALID);
                 for (r_i = 0; r_i < 5; r_i++) {
                     uint32_t fl = 0xdead;
                     memset(out, 0xa5, sizeof out);
@@ -1671,13 +1686,29 @@ int main(void)
         CHECK(strcmp(cft_op_name(CFT_SUMSQ), "sumsq") == 0 &&
               strcmp(cft_op_name(CFT_SUMABS), "sumabs") == 0,
               "the two new reduction opcodes are named");
-        CHECK(strcmp(cft_op_name((cft_op)30), "reserved") == 0,
-              "30 is the first unassigned opcode now");
+        /* 30 became CFT_IMUL on 2026-09-07, so 31 is the first
+         * unassigned opcode. This line has moved every time the
+         * contract took a number, which is what it is for: an opcode
+         * that still read as "reserved" after being assigned would
+         * let a recorded conformance set naming "reservedNN" replay
+         * against a different operation than the one its answer was
+         * recorded for. */
+        CHECK(strcmp(cft_op_name(CFT_IMUL), "imul") == 0,
+              "the integer multiply is named");
+        CHECK(strcmp(cft_op_name((cft_op)31), "reserved") == 0,
+              "31 is the first unassigned opcode now");
         CHECK(cft_supports(dev, CFT_SUMSQ, CFT_FP256) == 1 &&
               cft_supports(dev, CFT_SUMABS, CFT_FP32) == 1,
               "software backend carries the composed reductions");
-        CHECK(cft_supports(dev, (cft_op)30, CFT_FP32) == 0,
-              "op 30 unassigned");
+        CHECK(cft_supports(dev, (cft_op)31, CFT_FP32) == 0,
+              "op 31 unassigned");
+        /* IMUL is defined and executed - by a sequencer program, and
+         * elementwise on the software backend - but no CAPS bit
+         * publishes it, so a portable caller still cannot ask for it.
+         * When the integer group's caps grow to cover opcode 30 this
+         * is the line that will say so. */
+        CHECK(cft_supports(dev, CFT_IMUL, CFT_FP32) == 0,
+              "imul is not published in CAPS yet");
 
         /* sumSquare([3, 4]) = 9 + 16 = 25, exactly. */
         put32(v, 0x40400000u);          /* 3.0 */

@@ -19,9 +19,12 @@
 #                                      # the language legs, soak, the five workloads,
 #                                      # the browser demos and the remote backend -
 #                                      # after a host build
-#   bash verify/run.sh --budget gate    # ~1 h quiet, 2-3 h loaded: quick + golden,
+#   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, node, wasm, images)
+#   Measured durations for every stage, quiet and loaded, are in
+#   docs/VERIFICATION.md - the simulation suites and the formal gate
+#   run for more than an hour each on a busy box.
 #
 # Why this exists: the gates grew one at a time - pytest, the cocotb
 # suite, yosys, the formal proofs, the library's contract tests, the
@@ -130,9 +133,11 @@ BUDGET=""
 # model's own suite, the vectors, the million-case replay, the
 # transcendentals, MPFR, the C++ header and the two RTL gates that
 # need only a container. `full` is the census. Measured on the
-# Windows desktop (verify/README.md has the table): quick ~20 min,
-# gate ~1 h with the box quiet and 2-3 h loaded, full ~2 h quiet and
-# ~4 h loaded; on the WSL distro the replay stages take seconds.
+# Windows desktop (docs/VERIFICATION.md has the table, quiet against
+# loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
+# now that the formal gate holds thirty-one proofs, full longer by the
+# simulation suite and the two browser replays; on the WSL distro the
+# replay stages take seconds.
 BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
@@ -543,7 +548,7 @@ stage diff "library vs model over the alignment boundary" -- \
   PY "$ROOT/host/tests/diff_check.py" --trials 3000
 
 need host-cc python
-stage seq "the sequencer: C vs model over fuzzed programs" -- \
+stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexed constants and IMUL" -- \
   PY "$ROOT/host/tests/seq_check.py" --trials 250 \
      --formats fp32 fp64 fp128 fp256
 
@@ -707,10 +712,21 @@ do_remote() {
   HOSTMAKE "cft-serve$EXE" "remote-test$EXE" "device-test$EXE" \
            "cft-selftest$EXE" "cft-collatz$EXE" || return 1
   REMOTE_PIDFILE="$RUNDIR/remote-server.pid" \
-    PY "$ROOT/host/tests/remote_check.py"
+    PY "$ROOT/host/tests/remote_check.py" || return 1
+  # The WebSocket transport (2026-09-07), held to the same contract from
+  # JavaScript: bindings/node/remote_test.mjs starts its own server on a
+  # free loopback port, replays a vector subset over WebSocket and over
+  # TCP, compares both with the local wasm module and the published
+  # answers, and runs the negative controls. Node 22 carries a WebSocket
+  # client of its own; without node the leg is reported, not failed.
+  if command -v node >/dev/null 2>&1; then
+    HOSTMAKE wstest
+  else
+    echo "remote: no node on PATH - the WebSocket leg (make -C host wstest) was not run"
+  fi
 }
 need host-cc python mpmath
-stage remote "the remote backend on loopback: cft-serve started and stopped by PID, remote held against software - refusals, device-test, a bounded replay, one workload chain, the round-trip counts" -- do_remote
+stage remote "the remote backend on loopback: cft-serve started and stopped by PID, remote held against software - refusals, device-test, a bounded replay, one workload chain, the round-trip counts; then the same contract over WebSocket from node" -- do_remote
 
 # ---- report --------------------------------------------------------
 {

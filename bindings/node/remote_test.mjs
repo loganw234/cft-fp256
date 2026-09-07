@@ -359,7 +359,7 @@ function chooseSets(dir, sets) {
 
 /** One set's cases, at most `cases` of them, on a stride so the choice
  *  is the file's shape and not its head. One file at a time, because
- *  the whole of vectors/out is 168 sets of 11,800 lines and holding
+ *  the whole of vectors/out is 168 sets of up to 12,000 lines and holding
  *  them all as typed arrays is memory spent for nothing. */
 function loadCases(dir, f, cases) {
   const fmt = FORMAT_OF_NAME[f.split(/[-.]/)[0]];

@@ -47,7 +47,7 @@
 
 module cft_lanes #(
     parameter int BEAT_BITS  = 256,
-    parameter int LATENCY    = 15,
+    parameter int LATENCY    = 16,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
     parameter bit EN_FP256   = 1'b1,

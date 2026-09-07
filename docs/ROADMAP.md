@@ -2338,7 +2338,10 @@ DSP is not the constraint anywhere: two tiles is 524 of the 480T's
 So the open ladder is one comfortable tile on a ~$100 K325T (now 54%
 of it, down from 68% after the 2026-08-30/31 area work, and 47.0%
 routed in the `board` configuration on 2026-09-07 - at about 77 MHz on
-that board's -1 grade, 100 MHz on a -2), two tiles on a **480T** and
+that board's -1 grade, 100 MHz on a -2, and about 119 MHz on a -2 once
+the leading-zero cone was cut into its own stage later that day:
+120 MHz misses by 0.078 ns and the wall is the engine's control chain,
+not the datapath - docs/ARCHITECTURE.md), two tiles on a **480T** and
 not on the 325T or 410T, and the ring above that.
 Reaching two full tiles on a 325T would need ~92,000 LUT each after a
 platform budget; sharing both shift paths projects to ~96,000, and

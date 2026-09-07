@@ -266,7 +266,28 @@ typedef enum cft_op {
      * an infinity ahead of a NaN for these two and ahead of nothing
      * for sum and dot. See the cft_reduce block below. */
     CFT_SUMSQ    = 28,  /* d = sum round(a[i] * a[i]) */
-    CFT_SUMABS   = 29   /* d = sum |a[i]|             */
+    CFT_SUMABS   = 29,  /* d = sum |a[i]|             */
+
+    /* The integer group's one arithmetic member, appended at the first
+     * free number above the composed reductions. d = the LOW 32 BITS
+     * of a's low 32 bits times b's low 32 bits, zero-extended to the
+     * format width. Quiet, attribute-independent, and defined
+     * identically at every format.
+     *
+     * Thirty-two bits and not the format width, which is the one place
+     * this opcode differs in shape from the rest of the group above.
+     * The operation exists for a 32-bit hash - the draw stream of
+     * docs/ATLAS.md, `lowbias32`, whose value must agree bit for bit
+     * with a GPU computing it on a `uint` - and a width-wide low
+     * product would be a 256x256 multiplier at binary256 serving
+     * nothing. Signedness does not enter: the low 32 bits of a
+     * two's-complement product are the same bits either way.
+     *
+     * It is a sequencer opcode first (docs/SEQUENCER.md): a program's
+     * ALU is this same opcode space. Whether a given DEVICE carries it
+     * elementwise is a CAPS question and cft_supports() is where to
+     * ask. */
+    CFT_IMUL     = 30
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance
@@ -436,12 +457,25 @@ typedef struct cft_caps {
                                 * a header's n_consts says - the
                                 * ceiling host/tools/enclose.c chunks
                                 * its Horner kernel around */
-    uint32_t seq_features;     /* CAPS[7:4] of the device: sequencer
-                                * features beyond the base program
-                                * model. Zero in every build shipped so
-                                * far; ask before using one, exactly as
-                                * with cft_supports and an opcode */
+    uint32_t seq_features;     /* bits 3:0 = CAPS[7:4], the sequencer
+                                * feature nibble; bits 7:4 = CAPS[31:28],
+                                * the ALU extensions beyond the group
+                                * bits. CFT_SEQ_FEAT_WIDE_CONST and
+                                * CFT_ALU_EXT_IMUL below are the two
+                                * assigned so far (2026-09-07). A clear
+                                * bit is ABSENT, not unknown: the loader
+                                * refuses an image that uses the feature
+                                * and cft_supports answers no, so ask
+                                * before issuing, as with any opcode */
 } cft_caps;
+
+/* cft_caps.seq_features bits. */
+#define CFT_SEQ_FEAT_WIDE_CONST 0x01u  /* CAPS[4]: an instruction with kx
+                                        * (bit 30) set addresses the whole
+                                        * constant bank through 8-bit
+                                        * indices in its immediate */
+#define CFT_ALU_EXT_IMUL        0x10u  /* CAPS[28]: opcode 30, IMUL, is
+                                        * implemented */
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
 

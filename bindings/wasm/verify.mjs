@@ -395,7 +395,18 @@ const NEEDED = ["cftw_run", "cftw_reduce", "cftw_conformance",
                 // ABI 0.7, package A: 5.4.1's formatOf six.
                 "cftw_formatof_add", "cftw_formatof_sub",
                 "cftw_formatof_mul", "cftw_formatof_div",
-                "cftw_formatof_sqrt", "cftw_formatof_fma"];
+                "cftw_formatof_sqrt", "cftw_formatof_fma",
+                // The orbit sequencer's four program calls, and
+                // CFT_STATUS_DEPOSIT_OVERFLOW projected as a call for
+                // cftw_flags_all's reason - a macro is the one part of
+                // a header the far side of a wasm boundary cannot
+                // reach. Not an ABI step: the library has had these
+                // since 0.1 and this module simply did not export
+                // them, which docs/DEMOS.md recorded as the reason
+                // every demo panel runs its tool's host-loop engine.
+                "cftw_program_load", "cftw_program_free",
+                "cftw_program_get_info", "cftw_program_run",
+                "cftw_status_deposit_overflow"];
 for (const needed of NEEDED) {
   if (!exported.includes(needed)) bad(`the module does not export ${needed}`);
 }

@@ -32,7 +32,8 @@ sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
 # benches that exist only for this configuration. `sim` is the
 # shipping default; this is the third-tier tile's own census.
 simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
-       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \n       board boardkrnl boardseq boardfp256
+       quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \
+       board boardkrnl boardseq boardfp256
 
 # The iterated chunk-column multiplier against exact integer
 # arithmetic, at every column count the three wide rungs can build -
@@ -323,8 +324,18 @@ BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pc
 
 board: boardkrnl boardseq boardfp256
 
+# boardkrnl runs under Verilator by default. Since the leading-zero
+# cone became its own stage (2026-09-07) Icarus evaluates this one
+# configuration - the engine-driven kernel at ten passes with both
+# ladders on - at about 2 ns of simulated time a second, 160x slower
+# than the same bench without the ladders, and never reaches its
+# verdict; Verilator passes both tests in seconds. The RTL is the same
+# either way (Verilator's lint finds no loop), so this is a simulator
+# pathology recorded as a defect against the cone's coding, not a
+# reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
+BOARDKRNL_SIM ?= verilator
 boardkrnl:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml
 
 boardseq:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml

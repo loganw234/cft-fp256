@@ -878,12 +878,14 @@ static void check_caps_enforced(cft_device *dev, const char *who)
         }
     }
 
-    /* The feature nibble is four bits of CAPS. Anything above them is
-     * a decode fault, not a feature. */
+    /* seq_features is CAPS[7:4] in its low nibble and CAPS[31:28] - the
+     * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07).
+     * Anything above those eight bits is a decode fault, not a
+     * feature. */
     checks++;
-    if (c.seq_features & ~0xFu) {
-        printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4]\n",
-               who, (unsigned long)c.seq_features);
+    if (c.seq_features & ~0xFFu) {
+        printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4] "
+               "and CAPS[31:28]\n", who, (unsigned long)c.seq_features);
         failures++;
     }
 }

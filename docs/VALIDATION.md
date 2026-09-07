@@ -5065,3 +5065,940 @@ two hours of CPU across five targets is a first pass, not a clean bill:
 thirteen million executions of the loader found nothing it gets wrong
 about a header it already checks, which is a weaker statement than it
 looks.
+
+## 2026-09-07 - the sequencer's program API in JavaScript, and two demo panels that run on it
+
+`cft_run` applies one operation to every element; a program applies a
+SEQUENCE to every element without the operands making a round trip to
+memory between steps. The library has had `cft_program_load`,
+`cft_program_get_info`, `cft_program_run` and `cft_program_free` since
+the sequencer was written, and until today no JavaScript caller could
+reach any of them: the wasm module exported 111 `cftw_*` entry points
+and not one of those four. docs/DEMOS.md recorded the consequence in
+its own words - "the wasm surface exposes every library operation but
+not the sequencer's program API" - and measured what it cost in a table
+taken from the C tools, because the browser gap could not be measured
+at all.
+
+That is closed. **116 `cftw_*` exports**, five of them new; the node
+package has a `Program`; and the zoom and orbits panels of
+`bindings/wasm/demos.html` carry their tool's program engine as a
+control.
+
+Nothing under `host/src/`, `host/include/`, `host/tools/`, `rtl/`,
+`python/` or `verify/` was touched and **no ABI number moved**: this is
+a binding catching up with a contract that has not changed.
+`host/tests/seq_check.py`, the library's own live gate for the
+sequencer, is unmodified and stays the definition of whether the
+executor is right.
+
+### The C ABI, projected
+
+One wrapper per declaration in cft.h's program section, in cft.h's
+order, plus one projection. Three are not plain passthroughs and each
+reason is the contract's:
+
+- **the handle is an out-parameter** for `cftw_program_load`, as it is
+  for `cftw_open_software`;
+- **`cftw_program_get_info` projects the sized struct into four
+  out-pointers** rather than copying it into the heap - a JS caller
+  reading struct offsets is the silent ABI coupling the `struct_size`
+  handshake exists to prevent. One call rather than four accessors,
+  because a program's shape is fixed at load and because format's `0`
+  is `fp32`, a legitimate answer, so an accessor returning 0 on failure
+  could not say which of the two had happened;
+- **`cftw_status_deposit_overflow()` projects a MACRO**, which is the
+  one part of a header the far side of a wasm boundary cannot reach -
+  the problem `CFT_FLAGS_ALL` has and the same answer. It matters here
+  more than usual: that bit has already moved once, from STATUS[3] to
+  STATUS[4] on 2026-09-01. Both JavaScript surfaces audit it against
+  their own copy at load time and refuse to run if they disagree.
+
+`bindings/node` gains `Program`: `ctx.loadProgram(image)`,
+`prog.format` / `maxDeposits` / `nInsns` / `nConsts` read back through
+`cft_program_get_info`, `prog.run(a, b, c)` returning
+`{ deposits, counts, flags, status, depositOverflow }`, and `free()`.
+There is deliberately **no assembler** in `core.mjs`: an image is
+bytes, `cft_program_load` is the validator, and a second validator on
+the JavaScript side would be a second opinion about what a device may
+execute.
+
+### What was verified
+
+**The recorded corpus: 192 cases, 126 run and 66 refused.**
+`host/tests/seq_check.py` is the live comparison and needs a built
+library and a Python that can import `cft_golden`; `bindings/node` has
+neither by design. So `bindings/node/make_seq_corpus.py` writes the C
+executor's answers down once - refusing to record any case the golden
+model disagrees with - and `program_test.mjs` and `test.mjs` replay
+them through `cft_program_load` / `cft_program_run` in wasm. The
+programs are `cft_golden.seq.random_program` from seed 2609, 48 per
+format; roughly a third are deliberately corrupted by `seq_check.py`'s own `corrupt()`,
+so a binding that loaded every program would pass every value
+comparison in the file and still be wrong about what a loader is for.
+`--check` regenerates the file and refuses if a byte moved; it does.
+
+    node bindings/node/program_test.mjs
+    corpus  126 programs run, 66 refused, 4492 deposits and 2680 counts
+            compared, 46 runs overflowed their deposit budget
+    17 passed, 0 failed
+
+Beside the corpus, programs written by hand - a countdown loop with
+`SETACT` and `DEPOSIT` whose expected deposits are derived from
+docs/SEQUENCER.md and readable beside it - carry the two behaviours a
+fuzz corpus records without explaining: **the early exit is invisible**
+(trip counts 4, 9 and 40 agree on every deposit, count, flag and status
+once every lane has dropped out, which is P3 in the one place a
+JavaScript caller can check it) and **overflow drops the tail and says
+so** (two slots, four deposits: what fit is right, the count is what
+fit, `status` is bit 4 and `flags` is zero, because "your buffer was
+too small" is not one of the five 754 names). Also: `n = 0` is an
+answer; a zero deposit budget is a program and every deposit overflows;
+`b` and `c` may be omitted and those registers start at `+0`; deposit
+addresses do not move when the array grows (P2); a program carries its
+own format; nine loader refusals arrive as errors carrying the
+library's own words; and a freed program refuses every later call.
+
+**Memory.** 2,000 load/run/free cycles, 2,000 load/free cycles, and
+2,000 REFUSED loads - the path nobody exercises, where
+`cft_program_load` frees its own partial allocation - each leave the
+wasm heap the size it was and a probe allocation at the same address.
+
+**A negative control**, because a checker that has never been seen to
+fail proves nothing: one flipped bit in one deposit, a wrong count, a
+wrong flag word, a wrong STATUS word, a wrong deposit budget, and a
+refused program relabelled as one that runs - all six are caught.
+
+### The two demo panels
+
+`demos_core.js` ports `pack_program` and the instruction encoders from
+`host/tools/zoom.c` and `host/tools/orbits.c`. It is the third copy of
+three - each tool carries its own - and a copy is only worth having if
+something checks it, so the check is the bytes:
+
+| image | bytes | sha256 |
+|---|---|---|
+| the nucleus scan, 51 iterations at fp256 | 136 | `8fad50d414aadc68…` |
+| the reference orbit, 1,001 iterations at fp256 | 248 | `9aaefec8adf583c6…` |
+| the reference orbit, 1,001 iterations at fp64 | 176 | `752e5489d358303d…` |
+| the Kepler integration at fp256, 49 instructions | 552 | `adcd627af5f1e71b…` |
+| the Kepler integration at fp64, 37 instructions | 360 | `d1ded7c1613b3509…` |
+
+Every one is the image the C tool loads, **byte for byte**. They were
+dumped from the tools themselves by compiling `host/tools/*.c` exactly
+as they stand and linking with `-Wl,--wrap=cft_program_load` and a shim
+that writes the image out before forwarding; nothing under `host/` was
+edited to get them. `verify_demos.mjs` step 4 now hashes each image the
+core loads against those five, and `demos_core.js` asks
+`cft_program_get_info` what the loader read back and refuses if it
+disagrees with what it packed.
+
+The orbits panel needed a second pair of runs to say anything at all.
+`cft-orbits` refuses `--engine program` with `--rsqrt exact`, for a
+reason that is a fact about the program model rather than the tool: the
+correctly rounded 1/r^3 route is `cft_sqrt` and `cft_div`, themselves
+programs partitioned host-prep / program-core / host-finish, and they
+cannot sit inside another program's loop body. So the recorded
+`fp256`/`fp64` pair stays the correctly rounded route and stays
+loop-only, and a `fp256-newton` / `fp64-newton` pair was recorded beside
+it - the same integration with the tile's own `rsqrt` seed and a
+DERIVED number of Newton refinements, which is the route a program can
+hold. Different arithmetic, its own chains, and not a second spelling
+of the first pair. The recording is now **13 configurations over 15
+chains**.
+
+`engine` is left out of the page's `sameCfg()`, which is the claim
+rather than a way of ducking a comparison: the two engines are one
+configuration, so a chain computed either way is comparable - and if
+they ever parted, the page says DIFFER rather than "other config".
+
+### The gates
+
+| gate | the line it printed |
+|---|---|
+| `node bindings/node/test.mjs` | `126 passed, 0 failed` - the 125 that were there plus the corpus replay, which reports `sequencer  126 programs run and 66 refused from seq_corpus.jsonl, 4492 deposits and 2680 counts compared with the C executor` |
+| `node bindings/node/program_test.mjs` | `17 passed, 0 failed`, over `corpus  126 programs run, 66 refused, 4492 deposits and 2680 counts compared, 46 runs overflowed their deposit budget` |
+| `node bindings/node/conformance.mjs` | `1,067,635 cases over 168 sets, library matches the vectors exactly (1036.5s)`, then `831,635 cases over 148 sets, through this package's own methods, encodings, sequences, scales and flags exact (1030.8s)`, then `1,899,270 cases over 316 set replays in all - a pass.` - the published result line, unchanged |
+| `node bindings/wasm/verify.mjs` | `exports 116 cftw_* entry points`, `needed  85 named entry points checked present`, `831,635 cases over 148 sets driven through the wrappers themselves`, `VERIFY OK` |
+| `node bindings/wasm/verify_demos.mjs` | 44 `ok` lines and no `FAIL`: `VERDICT: the browser's compute core produced the C tools' chains, over the module the conformance page embeds` |
+| Chromium, the committed page over a loopback `http.server` | every panel run with the program engine selected on zoom and orbits: `15 of 15 chains computed in this browser, every one identical to the C tool's`, and **no console message of any level** |
+| `python bindings/node/make_seq_corpus.py --check` | `192 cases, identical to a fresh generation` |
+| two clean container builds, `bindings/wasm/build/` removed between | the module, its node loader and `conformance.html` byte-identical; `demos.html` byte-identical |
+
+### What it bought, measured
+
+Median of fifteen runs each, alternating engine run by run, through
+the compute core on the committed module under node 22. **The machine
+was not quiet** - this desktop was running several other jobs
+throughout, and the per-run spread is wide because of it. Alternating
+the engines is what makes the ratio survive that: both halves of each
+pair met the same load. Read them against the C tools' own gap for the
+same work, measured on 2026-09-04 - 1.40x for the reference orbit and
+1.26x for the Kepler integration. Every row is above its C counterpart,
+which is the prediction docs/DEMOS.md made when it could not yet
+measure this: what a program removes is call boundaries, and a wasm
+boundary costs more than a C one.
+
+| the page's configuration | program | host loop | program removes | library calls |
+|---|---|---|---|---|
+| zoom, the 1,001-iteration reference orbit at fp256 | 0.026 s | 0.040 s | **1.56x** | 12 against 8,019 |
+| zoom, the reference orbit at fp64 | 0.011 s | 0.017 s | **1.51x** | 12 against 8,019 |
+| zoom, the nucleus scan and bisection (one lane a call) at fp256 | 0.050 s | 0.076 s | **1.53x** | not counted - the panel's counters are lowered after the centre is derived |
+| orbits, the whole Kepler integration at fp256, `--rsqrt newton` | 0.865 s | 1.140 s | **1.32x** | 1,100 against 74,827 |
+| orbits, the same at fp64 | 0.287 s | 0.394 s | **1.37x** | 1,100 against 50,251 |
+
+The zoom rows are the two phases the program engine touches, timed
+apart because their call shapes are opposite: the reference orbit is
+one call of 1,001 iterations on one lane, and the nucleus scan is 320
+candidates in one call followed by about two hundred bisection steps of
+one lane each. Together they are under a tenth of a second, so **the
+zoom panel as a whole is no faster** - its nineteen seconds are its
+pixel phase, which runs through `cft_run` in the C tool too, and the
+page's own report line says so. For the orbits panel's `--rsqrt exact` argument the program API
+still buys nothing, which is not a disappointment but the last of
+docs/SEQUENCER.md's recorded asks - a callable composed operation -
+with a number beside it.
+
+### What was rebuilt, and what was not
+
+The module changed, because it gained five exports, and everything
+downstream of it was rebuilt from the pinned container. **Each build
+product was produced twice from a clean `bindings/wasm/build/` and came
+out byte-identical both times**, which is what makes the hashes below
+worth quoting:
+
+| | |
+|---|---|
+| `bindings/node/cft_node.wasm` | 212,642 bytes, sha256 `f0975f3da635e92d8a5060f7843a0cf16af860b8b16f60d15f0edab631104768` |
+| `bindings/wasm/conformance.html` | 1,337,454 bytes, sha256 `89e0dc54fa720247571c7a4be996048b4146fa42b9f48ba56f5a783c77ffef7a` |
+| `bindings/wasm/demos.html` | 523,351 bytes, sha256 `2b75d080fafd8d2a887b0bdd18d5a5befb80e3467067d7b25ccc6487bfade5df` |
+| `bindings/wasm/demos_core.js` | sha256 `0fc4643a77d988253c81ad5c229cbd688d1588e46109d5d90f89880a99b57e5c` |
+
+`bindings/wasm/README.md` still says 111 exports and quotes the
+previous module and page hashes; it is not in this change's scope and
+is stale until an integrator updates it.
+
+### What was not run
+
+- **No device.** The panels and the tests are the software backend,
+  which is the only backend a browser can be. Nothing here is a
+  hardware number, and no sequencer program went through hw_emu or a
+  card in this work.
+- **`host/tests/seq_check.py` was not re-run as a gate** - it is
+  unchanged and its subject is unchanged. `make_seq_corpus.py` drives
+  the same model and the same library and refuses to record a
+  disagreement, so it ran the comparison 126 times while recording.
+- **The demos page's own negative control was rebuilt but not
+  re-driven.** `bindings/wasm/build/demos_negative_control.html` is
+  produced by stage 4 as before; the sabotage site in `demos_core.js`
+  is untouched and still appears exactly once, which `make_demos.py`
+  checks, but no one watched it go red today.
+- **The rates table in docs/DEMOS.md was not re-measured.** It is the
+  2026-09-04 recording and says so; the two newton rows are new and
+  have no browser column in it.
+
+## 2026-09-07 - the multi-cycle rung's exactness, proven at the real chunk width
+
+The 2026-09-06 entry left one thing open. A bounded proof that
+`cft_mulpass`' pass-accumulated product equals the pipe's side-by-side
+array's ran four hours without returning and was stopped, so the rung's
+bit identity rested on the benches and `formal/mulpass.sby` sat outside
+the gate with a comment saying why. This entry closes the claim at
+`CFT_MUL_MCH = 24` - the chunk the tile synthesises - for **every pass
+geometry `cft_lanes` can build**, two independent ways, and records
+what each cost and what did not close. formal/ only: no RTL, bench,
+host or Python file is touched.
+
+**The seven geometries.** `rtl/cft_mulgeom.svh` maps (P, MUL_PASSES) to
+(COLS, passes). `cft_lanes` builds the fp64, fp128 and fp256 rungs at
+P = 53, 113 and 237 and `MUL_PASSES` 2, 5 and 10; fp32 is one chunk and
+never multi-pass. That is seven distinct (P, COLS) pairs, and all seven
+are proven. The pass count each task claims is handed to its harness as
+`EXP_NP` and re-derived there from cft_mulgeom.svh's own functions, so
+a task whose geometry table drifts from the header refuses to elaborate
+rather than proving something about a rung nobody builds.
+
+**What made it close: not asking a solver to compare two multipliers.**
+Split into three lemmas, none of them contains any multiplier
+reasoning.
+
+* **A, the fold** (`formal/tb_mulfold_formal.sv`). Every `dut.pcol[c]`
+  - the column registers - is made a yosys `cutpoint`, which replaces
+  the register and the multiplier behind it with an unconstrained
+  value, and the harness reads those free values back. The claim is
+  that the in-pass tree, the shift-accumulate with its shift-out
+  register, the completed-product latch and the `en`-clocked level
+  chain deliver at level 5 one operation's own column values summed at
+  their column weights. Linear in those values. The .sby then asserts
+  on the prepared model that no `$mul` cell survives, so the
+  abstraction cannot silently not have happened.
+* **B, the operands** (`formal/tb_mulsel_formal.sv`). `dut.a_r` and
+  `dut.bsel_r` are probed: on pass p they hold the captured `a` and
+  chunk group p of the captured `b`, at every offset in the interval
+  including the boundary cycle where the operand registers still carry
+  the previous operation's last pass.
+* **C, the columns** (same harness). The column register holds those
+  operands' product - written from the DUT's own operand wires so that
+  yosys' `opt_merge` folds the reference multiply onto the module's own
+  `$mul`, which the .sby checks by counting cells - a column the tree
+  reads but the geometry does not build holds zero, and a built one is
+  below 2^(P+24). The last two are exactly lemma A's side-conditions.
+
+Multiplication is a function, so equal operands give equal products;
+substituting B and C into A gives `sum_k (a * b[24k +: 24]) << 24k`
+truncated to 2P, which is `cft_fpfma_pipe.sv`'s `g_mul_local`
+expression term for term. formal/README.md writes the substitution out
+and names the one thing the composition asserts rather than proves.
+
+**No copy of the RTL exists anywhere in formal/.** `rtl/cft_mulpass.sv`
+is read unmodified; the cut and the probes are made by `cutpoint` and
+`connect -nounset -set` on the flattened netlist, because the Yosys
+frontend gives formal code no in-language way to name a submodule's
+internals - the same limitation that made the FIFO proof use `abc pdr`
+instead of a hand-written invariant.
+
+**What closed** (`formal/mulexact.sby`, bitwuzla 0.9.1 in the pinned
+cft-formal image, one task at a time on the shared desktop with other
+agents' simulations running, so these are upper bounds):
+
+| task | P | COLS | passes | rung | checks | result | s |
+|---|---|---|---|---|---|---|---|
+| `fold_53c2` | 53 | 2 | 2 | fp64 x2 | 1 assert | pass | 10 |
+| `sel_53c2` | 53 | 2 | 2 | fp64 x2 | 6 asserts | pass | 10 |
+| `fold_53c1` | 53 | 1 | 3 | fp64 x5, x10 | 1 assert | pass | 11 |
+| `sel_53c1` | 53 | 1 | 3 | fp64 x5, x10 | 3 asserts | pass | 11 |
+| `fold_113c3` | 113 | 3 | 2 | fp128 x2 | 1 assert | pass | 9 |
+| `sel_113c3` | 113 | 3 | 2 | fp128 x2 | 9 asserts | pass | 23 |
+| `fold_113c1` | 113 | 1 | 5 | fp128 x5, x10 | 1 assert | pass | 10 |
+| `sel_113c1` | 113 | 1 | 5 | fp128 x5, x10 | 3 asserts | pass | 5 |
+| `fold_237c5` | 237 | 5 | 2 | fp256 x2 | 1 assert | pass | 277 |
+| `sel_237c5` | 237 | 5 | 2 | fp256 x2 | 15 asserts | pass | 78 |
+| `fold_237c2` | 237 | 2 | 5 | fp256 x5 | 1 assert | pass | 19 |
+| `sel_237c2` | 237 | 2 | 5 | fp256 x5 | 6 asserts | pass | 36 |
+| `fold_237c1` | 237 | 1 | 10 | fp256 x10 | 1 assert | pass | 12 |
+| `sel_237c1` | 237 | 1 | 10 | fp256 x10 | 3 asserts | pass | 50 |
+| `cover_fold` | 237 | 1 | 10 | - | 2 covers | pass | 76 |
+| `cover_sel` | 237 | 1 | 10 | - | 4 covers | pass | 93 |
+
+The check counts are read off the model sby actually solved, not off
+the source; see the vacuity paragraph below.
+
+**And the single property closes too, at four of the seven.**
+`formal/mulpass_real.sby` asserts the whole thing in one place - the
+module's output against the pipe's own column-sum expression, both
+multipliers standing, no lemmas and no composition. That is the form
+the 2026-09-06 entry could not get to return. It returns now for every
+single-column geometry and for the smallest two-column one, **including
+fp256 at MUL_PASSES = 10, the deepest configuration the tile builds**,
+and those four tasks are now in the gate as an unfactored check under
+the composition argument:
+
+| task | P | COLS | passes | rung | boolector | bitwuzla |
+|---|---|---|---|---|---|---|
+| `p53c2` | 53 | 2 | 2 | fp64 x2 | **pass, 37 s** | pass, 47 s |
+| `p53c1` | 53 | 1 | 3 | fp64 x5, x10 | **pass, 29 s** | no return in 60 min, step 19 |
+| `p113c1` | 113 | 1 | 5 | fp128 x5, x10 | **pass, 39 s** | no return in 15 min, step 31 |
+| `p237c1` | 237 | 1 | 10 | fp256 x10 | **pass, 133 s** | not run |
+| `p113c3` | 113 | 3 | 2 | fp128 x2 | no return in 28 min, step 13 | no return in 15 min, step 13 |
+| `p237c2` | 237 | 2 | 5 | fp256 x5 | no return in 15 min, step 31 | not run |
+| `p237c5` | 237 | 5 | 2 | fp256 x2 | no return in 15 min, step 13 | not run |
+
+**The obstacle, stated exactly.** Every failing task stalls inside the
+first cycle at which its assertion is active - step 13 where the
+interval is two passes, step 31 where it is five - never on the
+unrolling, which finishes in seconds. That is the first query that
+actually contains both multiplier arrays. The solver cannot match the
+two sides' partial products structurally, because the module's operands
+reach its `$mul` through registers and a variable-index chunk mux while
+the reference's are combinational slices of the same operand at a
+different width, so it bit-blasts a P x 24 array equality. The three
+that stall are the three that build more than one column at P >= 113;
+adding columns multiplies the number of such arrays in each query. Logs
+are under the scratch path in this session's notes; each is an sby
+workdir with the engine's own step-by-step trace.
+
+**The engine mattered more than the property did.** Every other proof in
+formal/ runs on bitwuzla, which is boolector's successor and faster on
+all of them. On this property they are not comparable: bitwuzla did not
+return on `p53c1` in **sixty minutes** and boolector closed the same
+task in **twenty-nine seconds**. On the same task with a five-minute
+bound each, yices, z3 and cvc5 all returned nothing, and the two AIG
+engines never reached a solver at all - `abc bmc3` and `aiger aigbmc`
+both fail in the model build with "Design contains 'x' or 'z' bits",
+eight seconds in. So `formal/mulpass_real.sby` carries its own
+`[engines]` line rather than inheriting the directory's, with the
+measurement written beside it. Six engines were tried; one worked.
+
+**The narrow-chunk file, for the record.** `formal/mulpass.sby` is the
+same single property with `CFT_MUL_MCH_FORMAL=4`, kept out of the gate
+because a narrowed chunk is not the tile's arithmetic. Re-run on
+bitwuzla with the geometry cross-check added: `n18c1` passes in 22 s,
+`n18c3` in 46 s, its `cover` task in 33 s, and the real-chunk `r49c2`
+in 93 s - but `n38c5`, five columns even at a four-bit chunk, did not
+return in 15 minutes. The claim in the 2026-09-06 entry that the narrow
+tasks are where the property closes is therefore only true of the
+narrow tasks with few columns; it is the column count, not the chunk
+width, that this property founders on.
+
+**Commissioning: six mutations, six refutations.** A decomposition can
+be wrong in a way a single property cannot - each lemma passing while
+the seam between them leaks - so each mutation was applied to a scratch
+copy of rtl/ and formal/ and run against the task that ought to catch
+it:
+
+| mutation | caught by | refuted at |
+|---|---|---|
+| `acc <= s[P+K:K]` clears bit 3 - one carry dropped per pass | `fold_53c1`, `fold_53c2` | step 19, step 13 |
+| the shift-out register keeps one stale low bit | `fold_53c1` | step 19 |
+| the level chain is read one enabled edge short | `fold_53c1` | step 19 |
+| the chunk group is selected one pass early (`pidx + 1`) | `sel_53c1`, `sel_53c2` | step 7, step 5 |
+| a column multiplies the wrong chunk of its own group | `sel_53c2` | step 5, on two columns at once |
+| **the harness's** own pass window is one cycle late (`ed[2]`) | `fold_53c1` | step 19 |
+
+The last row mutates nothing in the RTL. It moves the harness's own
+idea of which cycles belong to which operation, and if lemma A were
+checking arithmetic and not timing it would still have passed. It did
+not, so the fold's alignment to the pipeline enable is inside the
+claim.
+
+**A vacuity check that earned itself the same afternoon.** `chparam`
+with a selection that matches nothing is silent. An early
+`formal/mulexact.sby` used `chparam ... tb_*`, which matched nothing,
+and every task ran at the harness's default geometry and passed. The
+harness-side fix is `EXP_NP`. The general fix is in `formal/run.sh`:
+every task, old and new, is now checked after it runs against
+`<workdir>/model/design_prep.il` - the netlist sby handed the engine -
+for a minimum number of surviving `$assert` and `$cover` cells, so a
+task whose checks were dropped fails the gate even though the engine
+said pass. The pre-run preflight is kept for the four single-file
+harnesses; it cannot cover a model that only exists after a flatten and
+a cutpoint, and mirroring those commands in a second script would be a
+copy to drift. The same afternoon also cost an hour to a second silent
+failure: `connect -set` unsets every existing driver of its left-hand
+side, and a bare `assign qv = {qw7, ..., qw0}` in a harness makes `qv`
+and `qw0` one net as far as yosys' signal map is concerned, so the
+default quietly took the harness's own concatenation apart. Every
+`connect` in mulexact.sby now carries `-nounset`, with a comment
+saying why.
+
+**The gate.** `formal/run.sh` was seven verdicts and 33 seconds. It is
+now **27 of 27 in 14 minutes** on this host - 835 seconds of proof time
+plus the preflight - and it still exits nonzero unless every proof
+passes AND `negcontrol.sby`'s deliberately false property is refuted,
+which it was, at step 3, as always. Twenty of the twenty-seven verdicts
+and about thirteen of the fourteen minutes are cft_mulpass; the single
+most expensive task is `mulexact.sby fold_237c5` at 237 seconds, which
+is the widest in-pass tree the tile builds. One small correction went
+in with it: the verdict count is now counted rather than written down,
+because the line had said "11 of 11" while printing seven.
+
+**Not run.** The proofs pace `cft_mulpass` at exactly the live rung's
+pass count, which is what `cft_lanes` gives it; the module's header
+also claims that a lane seeing a LONGER enabled period still produces
+the right product by folding zeros, and that is not proven here.
+`mulpass_real.sby`'s three failing tasks were given 15-minute
+observation bounds rather than the full hour, except `p113c3` which got
+28 minutes and `p53c1` under bitwuzla which got the full 60; no attempt
+was made to find a bound at which they do return. No simulation, no
+synthesis and no board work is in this entry, and none of the
+2026-09-06 entry's area or bench numbers is re-measured or changed.
+
+## 2026-09-07 - the leading-zero cone cut and rebuilt, LATENCY 15 to 16
+
+docs/studies/OPT-C-timing.md's first and seventh ideas, built and gated.
+Idea 1 puts a register boundary inside the S10->S11 leading-zero cone,
+which the 2026-09-06 routed reports made 8.77 ns of an 11.55 ns fp256
+path; idea 7 replaces the cone's two priority scans with balanced
+(valid, count) trees. `LATENCY` is 16 edges now, S0..S15.
+
+**What moved.** `rtl/cft_fpfma_pipe.sv`: the cone is `cft_lzcone`, a
+module at the foot of the file, and a new S11 register holds its answer
+- the window, the total shift, the msb, the empty flag - beside the
+sign, the exponent anchor, the residue rail and the whole specials
+sideband. Every parallel path crossing the boundary is registered in the
+same commit, because this pipe is synchronised rather than linear and
+the last stage added to it produced garbage, not drift. `DEPTH` 15 -> 16
+carried the rounding-attribute delay line with it untouched: its taps
+have always been written relative to `DEPTH`. The three `.LATENCY(15)`
+in `rtl/cft_krnl.sv` and the parameter defaults in `cft_lanes` and
+`cft_seq` follow; `cft_reduce_acc`'s `ADD_LATENCY` follows through
+`cft_engine_stream`'s `LATENCY + 1` with no edit, and `cft_normseg`
+needed none - its two-cycle contract is independent of the pipe's depth.
+Nine testbench sites named 15 and now name 16. One file was already
+ahead of the RTL: `hw/synth_ooc.tcl` says `set latency 16` with a
+comment that the default must track the depth, and at depth 15 that
+script could not have elaborated.
+
+**NBEATS did not have to move, and docs/ROADMAP.md said it would.** That
+file recorded "LATENCY 16 forces NBEATS to 32 and changes the block
+model seq.py is bit-exact to", from the parameter's own comment (`>=
+LATENCY + 1`). The relation is about keeping the pipe full, not about
+correctness - results retire in arrival order through `wb_bt`, and
+`S_ALU_ISSUE` and `S_ALU_WAIT` both run the writeback path - and
+`python/cft_golden/seq.py` does not model blocks at all. `NBEATS` stays
+16, `seq_core`'s nine tests pass at LATENCY 16, and the parameter now
+carries the elaboration guard docs/ROADMAP.md asked for, stating the
+constraint that is real: the register file addresses a beat in four
+bits.
+
+**The shape of the cone was decided by the simulator, not the fabric.**
+Idea 7 as the study writes it is one radix-4 tree over the whole window.
+That was built, proved bit-identical, and measured - and it costs the
+cocotb matrix a factor it cannot afford. `tb_fpfma_fp32` and
+`tb_fpfma_fp256` at `CFT_RANDOM=300`, cocotb's own elapsed time, every
+form at LATENCY 16 and every form bit-identical to the others:
+
+| cft_lzcone form | fp32 | fp256 |
+|---|---|---|
+| the priority scans it replaced | 21.6 s | 18.2 s |
+| one tree, generate pyramid, one assign per node | 528.1 s | - |
+| one tree, one process, per-level loops | 66.7 s | 71.4 s |
+| one tree, one process, flat node loop | 47.6 s | 77.0 s |
+| **chunk detect kept, trees where the scans were** | **20.2 s** | **25.8 s** |
+
+Two things in that table. A generate pyramid needs multiply driven nets
+and Icarus schedules every driver as its own event - 24x on fp32, for a
+netlist that is otherwise identical. And a tree over 717 bits is 341
+nodes where the old cone was twelve vector compares and one
+64-iteration scan, which is the remaining 4x. The shipping form keeps
+the 64-bit chunk zero-detect - the one part of the old cone Vivado
+already mapped well, five CARRY4 for 0.484 ns - and puts trees only
+where the two PRIORITY SCANS were: the twelve chunk flags, and the
+sixty-four bits of the one chunk that matters.
+
+**Gates that returned**, all on the committed tree, in the pinned
+images:
+
+- `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (11 of 11, negative
+  control refuted)`. Four of those eleven are new - `lzcone.sby` at
+  fp32/fp64/fp128/fp256, a combinational equivalence miter of
+  `cft_lzcone` against `formal/cft_lzcone_ref.sv`, the priority-loop
+  form frozen at the moment of the split. Both sides combinational, so
+  each BMC step is the whole input space at that rung: 2^78, 2^165,
+  2^345, 2^717. Solver time 3, 4, 3 and 5 seconds against a 900-second
+  per-rung bound. The vacuity preflight counts three assertion cells in
+  the miter, so it is not passing empty.
+- `make sim` in cft-sim: `SIM_RC=0`, twenty-one targets, zero failures.
+  The four FMA benches are 39,032 + 39,032 + 20,507 + 12,707 = **111,278
+  vectors bit-exact against cft_golden**, which is the suite this
+  project quotes by that number.
+
+**A defect this found.** `tb/Makefile`'s `simmc` target has carried a
+literal backslash-n where a line continuation belonged, since the day
+the board targets were appended to it. `make simmc` therefore ran
+everything up to `seqbanksmc` and then died on `No rule to make target
+'\n'` - so `board`, `boardkrnl`, `boardseq` and `boardfp256`, the three
+benches that exist to run the open-core board's configuration as one
+thing, had never run under that target at all. Fixed; `make -n simmc`
+now lists them.
+
+**Gates still running when this was written**, on a host carrying a
+dozen other agents' simulations: `make MC=10 simmc` (its first thirteen
+targets returned PASS with no failures, including the three `board*`
+ones above), `make MC=2 simmc`, `krnlfused`/`krnlplain`/`cycles`, and
+`make yosys-lint`. The same yosys-lint invocation passed on the
+idea-1-only tree earlier the same day (exit 0, no latches, no errors),
+and Verilator elaborates `cft_krnl` and `tb_normshare` clean - two
+width warnings in `cft_lzcone` were found by exactly that gate and
+fixed before this commit.
+
+**Measured, out of context, tip only so far.** `xcu50-fsvh2104-2-e` at a
+160 MHz ask, `MUL_PASSES=1` with the ladders off - the shipping
+configuration - at 046adae:
+
+| | tip |
+|---|---|
+| synthesis WNS / worst path | +0.410 / `s10_mag_reg[652]` -> `s11_valw_reg[448]`, 25 levels, **5.821 ns** |
+| routed WNS / worst path | +0.120 / `s13_kept_r_reg[11]` -> `d_reg[148]`, 20 levels, **6.111 ns** |
+| routed worst 25 by family | 13 round->pack, 8 `u_engine` `op_r`->`w_cnt`, 4 the cone (worst 6.068 ns) |
+| routed LUT / FF / DSP / BRAM | 120,839 / 57,644 / 262 / 36 |
+
+That confirms the study's central claim on a part it was not measured
+on: **before placement the single worst path in the kernel is the
+leading-zero cone.** It also shows what the routed picture is on this
+part, which the study did not have: after routing the cone and the round
+stage are within 0.04 ns, and the engine control path the study called
+the second wall is third in the list.
+
+**Not run here.** The branch's own implementations. The Kintex-7 325T
+synthesis pair at 120 MHz `MUL_PASSES=10` with the ladders on, the U50
+implementation pair, the idea-1-alone synthesis pair that would separate
+the register cut from the trees, and the two 325T implementations were
+queued one at a time behind the tip run above and had not returned; the
+host was running six Vivado processes belonging to other agents for part
+of the day. So this entry records a change that is PROVED bit-identical
+and gated in simulation, and MEASURED only on the tip side. No frequency
+claim is made for it, and none should be quoted until the pair exists -
+this is the design whose out-of-context proxy has mispredicted the shell
+by 0.88 ns once already.
+
+## 2026-09-07 - two instructions the atlas port asked for: IMUL, and constants addressed through the immediate
+
+docs/ATLAS.md's census of atlas-engine against this ISA found four
+gaps. Two are now built, golden model first: **`IMUL`**, opcode 30,
+the integer group's 32-bit low multiply, and **`kx`**, instruction bit
+30, which moves the three operands' constant indices into the
+immediate and takes the addressable constant bank from sixteen to 256.
+docs/studies/OPT-D-contract.md ranked them 2 and 1 and set the four
+measurements below; this entry is what they returned.
+
+**The encodings, exactly.** `IMUL` is opcode 30 in the same 8-bit
+space every other ALU opcode lives in: `d = ((a[31:0] * b[31:0]) mod
+2^32)`, zero-extended to the format width, at every format. Thirty-two
+bits and not `W`, which is the whole design decision - the caller is
+`lowbias32`, a 32-bit hash whose value has to agree with a GPU
+computing it on a `uint`, and a `W`-bit low product would be a 256x256
+multiplier at binary256 for nobody. Quiet always, attribute-
+independent, `c` unread; signedness does not enter, because the low 32
+bits of a two's-complement product are the same bits either way.
+
+`kx` is bit 30, which was reserved-must-be-zero. When it is set the
+constant indices for the three operands come from `imm[7:0]`,
+`imm[15:8]` and `imm[23:16]` instead of from the four-bit
+`ra`/`rb`/`rc` fields; an operand whose `k` bit is clear still names a
+register through its own field. The canonicity refusals are four more
+applications of the rule docs/SEQUENCER.md already states rather than
+a new one: under `kx`, the four-bit field of an operand that takes its
+index from `imm` must be zero, the `imm` byte of an operand that names
+a register must be zero, `imm[31:24]` must be zero, and `kx` set with
+no operand naming a constant is refused because the bit then selects
+nothing and the instruction has a second encoding. `kx` on a control
+instruction is refused the way `ka` on a `DEPOSIT` always was.
+
+**The version guard already existed, and only covers half.** A loader
+that predates `kx` reads bit 30 as reserved and refuses the program,
+so no program-header VERSION bump is needed and none was made. An old
+BITSTREAM has no such rule - its operand mux would ignore bit 30 and
+read the four-bit field - so what protects a device is a CAPS bit, and
+CAPS publishes neither feature yet. Nothing in the library issues
+`IMUL` or `kx` to a device on its own initiative; `cft_supports`
+answers no for opcode 30 on every device; and `cft-enclose` says so
+where it probes.
+
+**Where it landed.** `python/cft_golden/softfloat.py` gains `imul()`,
+and `seq.py` the `kx` decode, a `sources()` resolver, the refusals and
+an opt-in `extended=True` arm on the fuzz generator - opt-in because
+the default path must draw nothing new, or `tb/test_seq_core.py`'s
+fixed-seed corpus would quietly stop being the 62 programs the RTL has
+been held to. `host/src/softfloat.c` is one case in the integer
+dispatch. `host/src/program.c`'s decoder, validator and executor learn
+`kx` and resolve the three operand sources once per instruction rather
+than once per lane. `rtl/cft_simpleops.sv` computes the product from
+three 16x16 partial products - the fourth lands entirely at bit 32 and
+above and is not computed - on the precomputed-result sideband the
+rest of the integer group already uses, so the fp datapath is
+untouched. `rtl/cft_seq.sv` grows `KREG` from 16 to `KMEM_D`, muxes
+the index, and moves the bank read off the issue path.
+
+**That last move is a saving.** The bank was read combinationally into
+the issue registers once per BEAT, for a value that cannot change
+during a run; it is now read once per INSTRUCTION, in its own
+registered process, in the shadow of the fetch cycle that already
+existed. No cycle was added and none was removed - the benches score
+identical results. What a 256-entry bank does cost is memory: 256 x
+256 bits with three read ports, on the order of 6 RAMB36 where 512 B
+of LUTRAM stood. **No synthesis was run** - the brief forbade Vivado
+on this host - so that is arithmetic on the array's shape, not a
+measurement, and the timing effect is unmeasured. What was measured is
+that the change costs the FRONT END nothing: `cft_seq` alone through
+`read_verilog; hierarchy; proc; opt_clean; stat` takes 8.4 s and
+82 MB against the pre-change file's 6.7 s and 83 MB, and `kmem` stays
+a memory in both rather than being unrolled into registers.
+
+### A bug the feature found on the way, older than the feature
+
+`cft_seq`'s image parser peels one field per cycle and raises `rready`
+only when the parse window is too empty to peel again. The condition
+that decided "too empty" was eight bytes, at every element size. That
+is right at fp64 and wider, where a constant is at least eight bytes,
+and one beat too eager at fp32: the window still held four bytes, the
+parser peeled instead of absorbing, and the beat the memory had
+already handed over on that cycle's handshake fell on the floor. **Any
+fp32 program whose CONSTANT REGION spans more than one beat starved
+forever** - a hang, not a wrong answer, and the module's own header
+had warned about exactly this failure mode for the instruction stream.
+
+Nothing had ever reached it. Every directed case in
+`tb/test_seq_core.py` and every program in the fuzz corpus carries four
+constants or fewer, which is sixteen bytes at fp32 and never crosses a
+32-byte beat; the enclose workload's chunked Horner carries sixteen,
+which does cross a beat at binary256 - but there `esz` is 32 and the
+old condition was correct. The first bench case to load a bank longer
+than a beat at fp32 was written for indexed constants and hung on the
+spot, at 40 constants and 160 bytes. The condition is now the size of
+the NEXT field rather than a constant eight, and the regression that
+finds it lives in `constants_and_rounding` at all four element sizes,
+with banks of 40/20/12/6 - deliberately NOT a `kx` case, because the
+bug is the parser's and predates the feature.
+
+### The four measurements docs/studies/OPT-D-contract.md set
+
+All four on the software backend, this host, 2026-09-07.
+
+**1. The chain is unchanged - the gate.** `cft-enclose --engine
+program` prints the same SHA-256 chain at every format that it printed
+before, and the same one `bindings/wasm/demos_chains.json` recorded on
+2026-09-04. Twenty chains were compared over two engines, four formats
+and two degrees; none moved. `node bindings/wasm/verify_demos.mjs`
+reports 28 checks and no failures over all eleven demo configurations,
+each chain matching both the C tool and the recorded file. `make -C
+host enclosetest` is **2,660 comparisons, 0 failures**, now including a
+section that holds the single-program and chunked Horner shapes to
+byte-identical records at fp256 degree 23 and fp32 degree 127.
+Indexed constants reorder nothing and re-associate nothing, so a
+changed chain would have been a bug and not a design question.
+
+**2. The call count collapses.** `--degree 127`, 4,097 items, batch
+512: **16 chunk programs and 144 library calls become one program and
+9** - one call a batch, which is the floor. At the tool's default
+degree 23 the whole three-kernel run at 17 items goes 95 -> 93 calls at
+fp32 and 359 -> 357 at fp256; the series kernel's divisions dominate
+that configuration and there is little chunking left to remove.
+
+**3. The frames collapse, from the server's own log.** `cft-serve` on
+loopback, fp64, degree 127, 32,769 points, batch 512, counted per
+opcode from `--verbose`: the Horner kernel's program traffic falls
+from **3,120 frames to 67**. The remote backend caches one program
+image, so sixteen images cycling thrash that cache and each of the
+1,040 calls costs `PROG_FREE`, `PROG_LOAD`, `PROG_RUN`; one image pays
+that once and then 65 bare `PROG_RUN`s. Whole-connection frames go
+167,381 -> 164,328, a difference of 3,053, which is 3,120 minus 67 and
+nothing else: the 163,968 `RUN` frames of setup are identical either
+way and dwarf the kernel at this point count. Wall clock over loopback
+11.41 s -> 10.02 s, same chain.
+
+**4. The arithmetic intensity crosses the line.** A program issues
+`1 + 4 * steps` ALU instructions per lane against five element
+transfers - three stream loads in, two deposits out - and
+`cft-enclose` now prints both, from the program it actually built and
+cross-checked against the instruction count that program carries:
+
+| shape | steps | ALU instructions | per element moved |
+|---|---|---|---|
+| chunked | 8 | 33 | 6.6 |
+| one program, degree 23 | 24 | 97 | 19.4 |
+| one program, degree 127 | 128 | 513 | **102.6** |
+
+docs/SEQUENCER.md's crossover is K ~ 30. The chunked kernel sat at a
+fifth of it; a degree-127 polynomial as one program is **3.4x past
+it**, and is the first table-driven kernel here to cross it at all.
+Degree 23 does not cross it even as one program, which is worth saying
+plainly: the feature raises the ceiling, it does not raise every
+kernel through it. The tile's capacities are the next limit and they
+are comfortable - 516 instructions of `IMEM_D`'s 1,024, 256 constants
+of `KMEM_D`'s 256 - which is why the tool caps a program at 128
+coefficients and chunks above that.
+
+### The gates
+
+Golden model, `python/tests`: **2,020 passed, 5 skipped** (2,011 and 5
+before; the nine are the kx and IMUL properties, including one that
+asserts the default fuzz corpus is byte-identical to the old one and
+one that runs `lowbias32` as a program against Python's own integers).
+
+The runner's `seq` stage - `host/tests/seq_check.py --trials 250
+--formats fp32 fp64 fp128 fp256`, now alternating the old corpus with
+an extended one that emits `IMUL` and `kx`: **731 programs run through
+both implementations, 269 refused by both; 319 of them crossed
+libcft's 64-lane block boundary; 500 programs drawn from the extended
+corpus: 268 IMUL instructions, 780 indexed-constant instructions, 515
+constant indices above 15; libcft and the golden model agree on every
+program: deposits, counts, flags and status.** The stage now fails
+loudly if the extended corpus stops producing either feature, because
+a differential that covers nothing new still passes.
+
+cocotb, Icarus, in `cft-sim`: `simpleops` 6/6 (a new `test_imul`
+against the golden model at all four rungs over 6,225 operand pairs,
+24,900 comparisons, with random junk in the bits above 31 that the
+32-bit definition promises not to read); `seq_core` 10/10 (a new
+`indexed_constants_and_imul` suite: constants 16..255 on each of the
+three operand ports at fp32/fp64/fp256, the `kx` and plain forms
+compared where both can encode the operand, a three-entry bank in a
+256-entry memory, IMUL on stream operands at all four rungs, and
+`lowbias32` as a program); `krnlseq` 1/1, `seqbanks` 1/1, `krnl` 2/2.
+
+`make -C host test`: api-test all contract checks passed, with three
+lines moved because 31 is now the first unassigned opcode. `make -C
+host reducetest`: 12,696 reductions, 0 failures. The workloads:
+COLLATZ, ORBITS, ZOOM and MERSENNE CHECK OK, unchanged chains
+throughout.
+
+The conformance round trip, which is where an assigned opcode is
+easiest to get wrong: a freshly generated two-format set replays
+**2,800 cases, all matching**, with 40 `imul` cases and 40
+`reserved31` cases per format; and the same set with `imul` renamed
+back to `reserved30` is REFUSED by name - "this set records an opcode
+as reserved that the contract has since assigned". That refusal is why
+`cft_op_name` had to learn the name today rather than when CAPS
+publishes it.
+
+**Lint.** `make yosys-lint` in the cft-sim image on the branch, re-run
+by the integrator after the session was stopped: exit 0, the
+pre-existing memory-replacement warnings in `cft_lanes.sv` only.
+
+**Formal, not closed.** `formal/imul.sby`'s `value` task - three 16x16
+partial products against one 32x32 multiply, truncated - ran
+twenty-six minutes under bitwuzla without returning and was stopped;
+the `check` task, the decode, the zero extension and the 32-bit rule
+as a self-miter, was still waiting on the solver after sixteen
+minutes in the agent's last attempt and after thirty in the
+integrator's, on a box carrying other agents' simulations. Neither is
+in the gate: the harness and the .sby stay in the tree with `sby -f
+imul.sby check` and `value` to try again, and IMUL's value rests on
+`tb/test_simpleops.py`'s `test_imul` - 6,225 operand pairs at four
+rungs against the golden model - and on `host/tests/seq_check.py`'s
+differential.
+
+### What was not run, and why
+
+- **No synthesis and no timing.** No Vivado on this host by the
+  brief's rule, so the RAMB36 estimate for the widened bank is
+  arithmetic and the registered bank read's effect on the critical
+  path is unmeasured. The datapath and array studies own both.
+- **No hardware.** No hw_emu and no card; the RTL claims here are
+  simulation against the golden model, which is what every other RTL
+  claim in this file rests on until a bitstream exists.
+- **No CAPS bit, no VERSION step, and no rebuilt wasm module**, all
+  three deliberately and all three the integrator's. The last one has
+  a consequence worth naming: `bindings/node/cft_node.wasm` was built
+  on 2026-09-04 and its embedded conformance replayer does not know
+  the name `imul`, so the `node` and `wasm` verify stages refuse a
+  freshly generated vector set with "unknown opcode name" until the
+  module is rebuilt and its recorded SHA re-recorded. That is the same
+  step 24, 26 and 28 each required when they were assigned.
+
+## 2026-09-07 - the improvement round, integrated by hand: what merged, what was held, and the gates on the merged tree
+
+Ten Opus agents were dispatched at once on disjoint targets. Four
+returned their reports and were gated and merged as they landed (the
+det library target, the WebSocket transport, the caps publication as
+ABI 0.8, the fuzz hardening - each has its own entry above). The other
+six sat waiting on hours-long runs and were stopped; their branches
+were reconstructed from the worktrees and the logs, committed as the
+agents left them, and integrated or held here.
+
+**Merged from the worktrees.**
+
+- *The program API in JavaScript* (its entry above): committed as
+  left, merged, the module rebuilt. `test.mjs` 126 passed,
+  `program_test.mjs` 17 passed, on the final module.
+- *The multi-cycle rung's exactness* (its entry above): merged; its
+  gate script became the base every other branch's proofs were ported
+  onto.
+- *The leading-zero cone cut, LATENCY 15 to 16* (its entry above):
+  merged with the formal gate and the kernel's parameter block resolved
+  by hand - the four `lzcone.sby` proofs in the merged gate's own
+  signature, three `.LATENCY(16)` sites. Its own timing was never
+  measured: the agent's queue waited on the tip runs and other agents'
+  Vivado processes all day, and the integrator's attempt found a
+  Vivado still running the tip's K325T implementation. The agent's leftover queue ran them after the stop, and the
+  integrator read the reports: on the U50 at 160 MHz the routed slack
+  went +0.120 to **+0.255** and the cone left the routed worst 25;
+  on the -2 K325T at 120 MHz in the board configuration the tip
+  misses by **-1.817** and the branch by **-0.078**, the wall now the
+  engine's `beats_total -> rd_resv` chain - study C's second wall -
+  so the board is a ~119 MHz part where it was a ~100 MHz one.
+  docs/ARCHITECTURE.md carries the table.
+- *IMUL and indexed constants* (its entry above, placeholders measured
+  by the integrator): merged with four hand-resolved conflicts - the
+  atlas document's step list, the sequencer document's capacities
+  paragraph, the formal gate's proof list, the seq differential's
+  corruption list (now the union: `wrap_trip` beside the five `kx`
+  refusals). Then the integrator's half: **CAPS[4] publishes `kx` and
+  CAPS[28] publishes `IMUL`**, decoded into `cft_caps.seq_features`
+  bits 0 and 4 (`CFT_SEQ_FEAT_WIDE_CONST`, `CFT_ALU_EXT_IMUL`), the
+  software backend reporting both and 256 addressable constants from
+  the file that enforces them, and a clear bit meaning ABSENT: the
+  loader refuses an image that uses either on a device that does not
+  publish it, naming the instruction, and `cft_supports` answers no for
+  opcode 30 there. No VERSION step - VERSION guards the register map and
+  features are announced in CAPS. `SEQ_KIDX_W` is 8; `tb/test_krnl.py`
+  parses the feature and extension literals and resolves `KREG`
+  through `KMEM_D`. The published vectors changed with the opcode: the
+  twenty opcode sets carry 12,000 lines (200 `imul` cases each) where
+  they carried 11,800, 1,071,635 cases over 168 sets where the page
+  said 1,067,635, 29 distinct opcodes where the sampler expected 28;
+  the sampler's stride is 60, and every document that pinned the old
+  numbers moved with them.
+
+**Held on their branches, committed, not merged.**
+
+- *Study A's idea 2, the round window folded into the normalise
+  ladder* (`worktree-agent-a19215c1f69c52ee1`, de7c742). Bit-identical
+  by the agent's model check (658,048 comparisons, 0 mismatches) and its
+  formal miter (pass, negative control refuted); its cocotb gate was
+  still running. Synthesis at 135 MHz on the U50 part, MUL_PASSES=1:
+
+  | ladders | LUT before | LUT after | path before | path after |
+  |---|---|---|---|---|
+  | off | 123,214 | 116,464 | 5.821 ns | 5.965 ns |
+  | on | 108,028 | 102,064 | 5.856 ns | 6.138 ns |
+
+  Six thousand LUTs, more than the study estimated, at 0.14 to 0.28 ns
+  more implied path on the same cone the LZC branch was built to
+  shorten. That is a trade between the two things this project
+  measures, and it is not the integrator's to make silently.
+- *The runner's parallel vector generator*
+  (`worktree-agent-a07f65f9943715fb5`, e18b290). Its own gate is
+  identity: the 168 published sets rolled up by path and sha256 must
+  not move. Against the reference `a0cd4bc4...` the rewritten generator
+  produces `6449e6dc...` at `--jobs 4` and the same `6449e6dc...` at
+  `--jobs 1` - consistent across job counts, but 20 files of the wide
+  formats differ from the original's bytes, so the rewrite and not the
+  scheduling changed them. Held until it reproduces the reference.
+  Its measured baseline (gate budget, per stage) is in the session's
+  scratchpad, and one of its findings - `simmc`'s literal backslash-n -
+  was fixed on the tree the same day.
+
+**Gates on the merged tree**, in the pinned images and on this host:
+
+- `make sim` in cft-sim: 21 targets, 0 failures.
+- `make MC=10 simmc` in cft-sim: sixteen of seventeen targets passed
+  (the thirteen multi-cycle benches and the sequencer-driven and fp256
+  board benches); the seventeenth, `boardkrnl` - the engine-driven
+  kernel at ten passes with both ladders on - **does not finish under
+  Icarus** on this tree: its simulated time advances at about 2 ns a
+  second while the simulator burns a core, 160x slower than the same
+  bench without the ladders, and it was stopped after two and a half
+  hours at 17 microseconds. Isolated the same afternoon: the LZC
+  agent's own tree crawls the same way (so its entry's claim that the
+  board targets passed under `simmc` is not one its logs support -
+  the target never reached a verdict there either), the tree before
+  the ISA merge crawls, Verilator's lint finds no combinational loop
+  on either tree, and **under Verilator the merged tree's board kernel
+  passes both tests in 7.5 s** of wall clock (31,556 ns simulated).
+  So the RTL is right in the board configuration and Icarus's
+  evaluation of the new cone beside the ladders at ten passes is the
+  pathology; `boardkrnl` now selects Verilator, and the cone's coding
+  for Icarus is recorded as the defect to fix, with the board
+  configuration under Icarus as its gate.
+- `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (31 of 31, negative
+  control refuted)`, 420 s of solver time - after a first run had to be
+  stopped at two and a half hours, stuck on `imul.sby`'s `check`
+  task, which the integrator had left in the gate while writing that
+  it was parked; it is parked now, both tasks.
+- `make yosys-lint`: exit 0, the pre-existing memory-replacement warnings only.
+- `make test`: `api-test: all contract checks passed`, `reduce-parts: every
+  canonical partition reproduces the whole`, `168 sets, 1071635
+  cases, all matching`, `C and Python reached the same library and
+  got the same bits` - on the regenerated set.
+- `make remotetest`: `remote_check: every check passed` - 2,256 device-test checks
+  over loopback with 0 failed (after the feature-word mask in
+  `device_test.c` was widened to the eight bits `seq_features` now
+  carries; the first run failed both sides with 0x11), the replay
+  identical local and remote over 184,592 cases, the collatz chain
+  the same both ways, the bench round trips on both div/sqrt routes.
+- `make wstest`: 46 checks, 0 failures, on the rebuilt module.
+- `node bindings/wasm/verify.mjs`: `1,071,635 cases over 168 sets, library matches the vectors
+  exactly` and `831,635 cases over 148 sets driven through the
+  wrappers themselves, encodings, sequences, scales and flags exact`.
+- `node bindings/wasm/verify_demos.mjs`: `the browser's compute core produced the C tools' chains, over the
+  module the conformance page embeds` - after the chains were
+  re-recorded against the rebuilt module, every one of the thirteen
+  runs byte-identical to the previous record.
+- the five workload checks: enclose 2,664 comparisons, collatz 18,110,
+  mersenne 391, zoom 11,223, orbits 26 checks, all with 0 failures; the
+  seq differential agrees on every program.
+
+**Not run.** Anything on a device; the held branches' own gates beyond
+what their logs already recorded.

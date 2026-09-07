@@ -8,19 +8,23 @@
   "exports": {
     ".": "./index.mjs",
     "./lib": "./lib.mjs",
-    "./core": "./core.mjs"
+    "./core": "./core.mjs",
+    "./seq-corpus": "./seq_corpus.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "test": "node test.mjs",
-    "conformance": "node conformance.mjs"
+    "conformance": "node conformance.mjs",
+    "program": "node program_test.mjs"
   },
   "files": [
     "index.mjs",
     "lib.mjs",
     "core.mjs",
+    "seq_corpus.mjs",
+    "seq_corpus.jsonl",
     "cft_node.js",
     "cft_node.wasm",
     "README.md"

@@ -38,6 +38,16 @@ INSN_BYTES = 8
 NREG = 16
 MAX_LOOP_DEPTH = 4
 
+# How many constants an instruction can ADDRESS. Without `kx` an
+# operand's constant index is its own 4-bit field, so sixteen; with
+# `kx` it is a byte of `imm`, so 256 - which is `KMEM_D`, the capacity
+# rtl/cft_seq.sv's header check already permits. `n_consts` above this
+# is not refused (it never was above sixteen either): the constants
+# past it are simply unaddressable, and every index is checked against
+# `n_consts` anyway.
+KADDR_PLAIN = 16
+KADDR_KX = 256
+
 # A program's worst-case instruction count must be finite AND small
 # enough to be a bound rather than a formality. Four nested
 # `repeat 0xffffffff` fit in 104 bytes and describe 3.4e38 iterations,
@@ -73,7 +83,7 @@ class ProgramError(ValueError):
 # ---- encoding --------------------------------------------------------
 
 def encode(op, rd=0, ra=0, rb=0, rc=0, rnd=sf.RND_RNE,
-           ka=False, kb=False, kc=False, ctrl=False, imm=0):
+           ka=False, kb=False, kc=False, ctrl=False, imm=0, kx=False):
     for name, v in (("rd", rd), ("ra", ra), ("rb", rb), ("rc", rc)):
         if not 0 <= v < NREG:
             raise ProgramError(f"{name}={v} outside 0..{NREG - 1}")
@@ -85,7 +95,8 @@ def encode(op, rd=0, ra=0, rb=0, rc=0, rnd=sf.RND_RNE,
         raise ProgramError(f"imm={imm} does not fit 32 bits")
     return (op | (rd << 8) | (ra << 12) | (rb << 16) | (rc << 20)
             | (rnd << 24) | (int(bool(ka)) << 27) | (int(bool(kb)) << 28)
-            | (int(bool(kc)) << 29) | (int(bool(ctrl)) << 31)
+            | (int(bool(kc)) << 29) | (int(bool(kx)) << 30)
+            | (int(bool(ctrl)) << 31)
             | (imm << 32))
 
 
@@ -101,17 +112,72 @@ def decode(word):
         "ka": bool((word >> 27) & 1),
         "kb": bool((word >> 28) & 1),
         "kc": bool((word >> 29) & 1),
-        "rsv": (word >> 30) & 1,
+        "kx": bool((word >> 30) & 1),
         "ctrl": bool((word >> 31) & 1),
         "imm": (word >> 32) & 0xFFFFFFFF,
     }
 
 
+# Which byte of `imm` carries each operand's constant index under `kx`,
+# in a, b, c order: imm[7:0], imm[15:8], imm[23:16]. imm[31:24] is
+# reserved and must be zero, which is what leaves room for a
+# counter-indexed form later without disturbing this one.
+KX_SHIFT = (0, 8, 16)
+KX_RESERVED = 0xFF000000
+
+
+def sources(d):
+    """The three operand sources of a decoded ALU instruction, as
+    (index, is_const) triples in a, b, c order.
+
+    Without `kx` an operand's 4-bit field is a register number, or a
+    constant index when its `k` bit is set - so a program addresses
+    sixteen constants whatever `n_consts` says, which is the wall
+    docs/ENCLOSE.md hit. With `kx` the constant indices come from
+    `imm[7:0]`, `imm[15:8]` and `imm[23:16]` instead and reach 255;
+    an operand whose `k` bit is clear still names a register through
+    its own field, exactly as before.
+    """
+    out = []
+    for field, flag, shift in (("ra", "ka", KX_SHIFT[0]),
+                               ("rb", "kb", KX_SHIFT[1]),
+                               ("rc", "kc", KX_SHIFT[2])):
+        if d[flag]:
+            out.append((((d["imm"] >> shift) & 0xFF) if d["kx"]
+                        else d[field], True))
+        else:
+            out.append((d[field], False))
+    return out
+
+
 # ---- a small assembler, for tests and for writing programs by hand ---
 
 def alu(op, rd, ra=0, rb=0, rc=0, rnd=sf.RND_RNE, ka=False, kb=False,
-        kc=False):
-    return encode(op, rd, ra, rb, rc, rnd, ka, kb, kc, ctrl=False)
+        kc=False, kx=False):
+    """One ALU instruction.
+
+    `ra`/`rb`/`rc` are register numbers, or CONSTANT INDICES where the
+    matching `k` flag is set - the same calling convention either way.
+    With `kx` an index may reach 255 and this packs it into its byte of
+    `imm`, zeroing the 4-bit field it came from, which is what the
+    loader's canonicity rule demands.
+    """
+    if not kx:
+        return encode(op, rd, ra, rb, rc, rnd, ka, kb, kc, ctrl=False)
+    imm = 0
+    fields = []
+    for v, flag, shift in ((ra, ka, KX_SHIFT[0]), (rb, kb, KX_SHIFT[1]),
+                           (rc, kc, KX_SHIFT[2])):
+        if flag:
+            if not 0 <= v < KADDR_KX:
+                raise ProgramError(
+                    f"constant index {v} outside 0..{KADDR_KX - 1}")
+            imm |= v << shift
+            fields.append(0)
+        else:
+            fields.append(v)
+    return encode(op, rd, fields[0], fields[1], fields[2], rnd,
+                  ka, kb, kc, ctrl=False, imm=imm, kx=True)
 
 
 def halt():
@@ -155,6 +221,76 @@ class Program:
 
     # -- validation ----------------------------------------------------
 
+    def _check_operands(self, pc, d):
+        """The operand half of an ALU instruction's refusals: the
+        constant indices are inside the bank, and the encoding of those
+        indices is the only one that spells this operation.
+
+        The canonicity rule is the one docs/SEQUENCER.md already
+        states - *any field an instruction does not read being non-zero
+        is refused* - applied to the fields `kx` brings into play. An
+        ALU instruction has no immediate, so without `kx` all 32 bits
+        of `imm` must be zero. With `kx` set:
+
+        * an operand whose `k` bit is set takes its index from `imm`,
+          so its 4-bit register field is not read and must be zero;
+        * an operand whose `k` bit is clear names a register, so its
+          byte of `imm` is not read and must be zero;
+        * `imm[31:24]` is read by nothing and must be zero, which is
+          what keeps it available for a later form;
+        * and `kx` itself selects nothing when no `k` bit is set, so
+          that combination is refused too - it would otherwise be a
+          second spelling of an ordinary three-register instruction.
+
+        What is deliberately NOT refused: a `kx` instruction whose
+        indices all happen to be below sixteen. That is a second
+        spelling of a plain `k` instruction, and the model tolerates it
+        for the same reason it tolerates a non-zero `rb` on a unary
+        ABS - the rule is about fields the ENCODING does not read, not
+        about which of two legal encodings a compiler chose.
+        """
+        if d["kx"]:
+            if not (d["ka"] or d["kb"] or d["kc"]):
+                raise ProgramError(
+                    f"[{pc}] kx is set and no operand names a constant, so "
+                    f"the bit selects nothing and the instruction has a "
+                    f"second encoding with kx clear")
+            if d["imm"] & KX_RESERVED:
+                raise ProgramError(
+                    f"[{pc}] imm[31:24] is reserved and must be zero")
+        elif d["imm"]:
+            raise ProgramError(
+                f"[{pc}] an ALU instruction without kx has no immediate, "
+                f"so bits 63:32 must be zero - otherwise the same "
+                f"operation has many encodings and a readback hash stops "
+                f"being a hash of the program")
+
+        for key, flag, shift in (("ra", "ka", KX_SHIFT[0]),
+                                 ("rb", "kb", KX_SHIFT[1]),
+                                 ("rc", "kc", KX_SHIFT[2])):
+            byte = (d["imm"] >> shift) & 0xFF
+            if d["kx"] and d[flag]:
+                if d[key]:
+                    raise ProgramError(
+                        f"[{pc}] {key} names constant {byte} through imm "
+                        f"under kx, so the {key} field must be zero and "
+                        f"it is {d[key]}")
+                idx = byte
+            elif d["kx"]:
+                if byte:
+                    raise ProgramError(
+                        f"[{pc}] {key} names a register, so its byte of "
+                        f"imm is not read and must be zero")
+                continue
+            elif d[flag]:
+                idx = d[key]
+            else:
+                continue
+            if idx >= len(self.consts):
+                raise ProgramError(
+                    f"[{pc}] {key} names constant {idx} but the bank "
+                    f"holds {len(self.consts)}")
+
     def validate(self):
         if not 0 <= self.max_deposits <= MAX_DEPOSITS:
             raise ProgramError(
@@ -173,24 +309,12 @@ class Program:
 
         for pc, word in enumerate(self.insns):
             d = decode(word)
-            if d["rsv"]:
-                raise ProgramError(f"[{pc}] reserved bit 30 must be zero")
             worst += mult[-1]
 
             if not d["ctrl"]:
-                for key, flag in (("ra", "ka"), ("rb", "kb"), ("rc", "kc")):
-                    if d[flag] and d[key] >= len(self.consts):
-                        raise ProgramError(
-                            f"[{pc}] {key} names constant {d[key]} but the "
-                            f"bank holds {len(self.consts)}")
+                self._check_operands(pc, d)
                 if d["rnd"] > 4:
                     raise ProgramError(f"[{pc}] rnd={d['rnd']} is reserved")
-                if d["imm"]:
-                    raise ProgramError(
-                        f"[{pc}] an ALU instruction has no immediate, so "
-                        f"bits 63:32 must be zero - otherwise the same "
-                        f"operation has many encodings and a readback "
-                        f"hash stops being a hash of the program")
                 continue
 
             code = d["op"]
@@ -205,7 +329,7 @@ class Program:
             used = {HALT: (), REPEAT: ("imm",), ENDREP: (),
                     DEPOSIT: ("ra",), SETACT: ("ra",), ACTALL: ()}[code]
             for field in ("rd", "ra", "rb", "rc", "rnd", "ka", "kb", "kc",
-                          "imm"):
+                          "kx", "imm"):
                 if field not in used and d[field]:
                     raise ProgramError(
                         f"[{pc}] {CTRL_NAMES[code]} does not read {field}, "
@@ -407,7 +531,8 @@ def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None,
     status = 0
     executed = 0
 
-    def src(lane, idx, is_const):
+    def src(lane, spec):
+        idx, is_const = spec
         return prog.consts[idx] if is_const else regs[lane][idx]
 
     pc = 0
@@ -419,14 +544,17 @@ def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None,
         executed += 1
 
         if not d["ctrl"]:
+            # The three operand sources are a property of the
+            # instruction, not of the lane, so they are resolved once
+            # per instruction - which is also what the hardware does,
+            # since a constant cannot change during a run.
+            sa, sb, sc = sources(d)
             for i in range(n):
                 if not active[i]:
                     continue        # no write, no deposit, and no flags
                 res, fl = sf.compute(
                     fmt, d["op"],
-                    src(i, d["ra"], d["ka"]),
-                    src(i, d["rb"], d["kb"]),
-                    src(i, d["rc"], d["kc"]),
+                    src(i, sa), src(i, sb), src(i, sc),
                     d["rnd"])
                 regs[i][d["rd"]] = res
                 flags |= fl
@@ -489,7 +617,8 @@ def run(prog: Program, a, b, c=None, early_exit=True, insn_budget=None,
     return Result(deposits, flags, status, regs, active, counts, executed)
 
 
-def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False):
+def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
+                   extended=False):
     """A random program, for fuzzing. Returns (insns, consts).
 
     It lives here rather than in a test file because two different
@@ -501,28 +630,49 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False):
     `allow_halt_in_loop` emits the one construction validate() refuses,
     so a test can confirm the rule is load-bearing by watching the fuzz
     break without it.
+
+    `extended` adds the two 2026-09-07 additions - `IMUL` in the opcode
+    pool, and `kx` on some of the constant-naming instructions with a
+    bank deep enough that indices above fifteen are reachable. It is
+    OFF by default and draws nothing from `rng` when off, so the corpus
+    every existing bench generates from a given seed is the corpus it
+    generated before: `tb/test_seq_core.py`'s fuzz suite compares the
+    RTL against the model over the same 62 programs it always did, and
+    the new forms arrive as an additional arm rather than as a
+    reshuffle of the old one.
     """
+    ops = [OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_, OP_ABS_,
+           OP_MIN_, OP_MAXNUM_, OP_CMPLT_, OP_SELECT_, OP_IXOR_]
+    if extended:
+        ops.append(OP_IMUL_)
+        # Deep enough that a kx index of 16 or more is drawn often, and
+        # small enough that a program image stays a few kilobytes at
+        # fp256.
+        nconst = max(nconst, KADDR_PLAIN + 24)
     insns = []
     depth = 0
     for _ in range(rng.randint(4, 22)):
         pick = rng.random()
         if pick < 0.45:
-            op = rng.choice([OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_, OP_ABS_,
-                             OP_MIN_, OP_MAXNUM_, OP_CMPLT_, OP_SELECT_,
-                             OP_IXOR_])
+            op = rng.choice(ops)
             # choose the constant flags first, then draw each operand
             # from the range that flag makes legal - otherwise most
             # instructions name a constant the bank does not hold and
             # the fuzz spends its time being rejected
             kb = rng.random() < 0.3
             kc = rng.random() < 0.2
+            # kx is only meaningful when some operand names a constant,
+            # and the loader refuses it otherwise, so it is drawn only
+            # then. The reach is the whole bank, which is the point.
+            kx = extended and (kb or kc) and rng.random() < 0.6
+            top = nconst if kx else min(nconst, KADDR_PLAIN)
             insns.append(alu(
                 op,
                 rd=rng.randrange(NREG),
                 ra=rng.randrange(NREG),
-                rb=rng.randrange(nconst) if kb else rng.randrange(NREG),
-                rc=rng.randrange(nconst) if kc else rng.randrange(NREG),
-                rnd=rng.randrange(5), kb=kb, kc=kc))
+                rb=rng.randrange(top) if kb else rng.randrange(NREG),
+                rc=rng.randrange(top) if kc else rng.randrange(NREG),
+                rnd=rng.randrange(5), kb=kb, kc=kc, kx=kx))
         elif pick < 0.6 and depth < MAX_LOOP_DEPTH:
             insns.append(repeat(rng.randint(1, 4)))
             depth += 1
@@ -539,8 +689,16 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False):
             insns.append(halt())
     insns += [endrep()] * depth
     insns.append(halt())
-    consts = [sf.zero_bits(fmt), sf.one_bits(fmt),
-              sf.max_normal_bits(fmt)][:nconst]
+    pool = [sf.zero_bits(fmt), sf.one_bits(fmt), sf.max_normal_bits(fmt)]
+    if nconst <= len(pool):
+        consts = pool[:nconst]
+    else:
+        # A deep bank has to hold DISTINGUISHABLE values, or an index
+        # error reads a constant equal to the one it should have read
+        # and the fuzz sees nothing. Every entry past the pool is a
+        # different bit pattern, and the low bits carry the index so a
+        # mis-indexed IMUL is loud.
+        consts = pool + [(i << 4) | 0x9 for i in range(len(pool), nconst)]
     return insns, consts
 
 
@@ -560,6 +718,7 @@ def random_inputs(fmt, rng, n):
 OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_ = sf.OP_FMA, sf.OP_ADD, sf.OP_SUB, sf.OP_MUL
 OP_ABS_, OP_MIN_, OP_MAXNUM_ = sf.OP_ABS, sf.OP_MIN, sf.OP_MAXNUM
 OP_CMPLT_, OP_SELECT_, OP_IXOR_ = sf.OP_CMPLT, sf.OP_SELECT, sf.OP_IXOR
+OP_IMUL_ = sf.OP_IMUL
 
 
 def _matching_endrep(insns, pc):

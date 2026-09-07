@@ -174,20 +174,34 @@
       }
       busy = true;
       cancelled = false;
+      let failure = null;
       try {
         for (const run of msg.runs) {
           if (cancelled) break;
           await runOne({ type: "start", panel: msg.panel, run,
                          overrides: msg.overrides, token: msg.token }, post);
         }
-        post({ type: "idle", token: msg.token, panel: msg.panel });
       } catch (err) {
-        post({ type: "error", token: msg.token, panel: msg.panel,
-               message: String(err && err.message ? err.message : err),
-               stack: String(err && err.stack || "") });
+        failure = err;
       } finally {
         busy = false;
       }
+      // The last message goes out AFTER `busy` is lowered, and that
+      // ordering is load-bearing on the main-thread fallback: there
+      // `post` is a direct call, so a page that advances to its next
+      // run on "idle" re-enters handle() synchronously from inside
+      // this one - and would be refused by a flag this frame had not
+      // got round to clearing. In a Worker postMessage defers and the
+      // ordering never showed; the panels that run one configuration
+      // per message are where it does. (Found 2026-09-07, when the
+      // orbits panel became one of them.)
+      if (failure)
+        post({ type: "error", token: msg.token, panel: msg.panel,
+               message: String(failure && failure.message
+                               ? failure.message : failure),
+               stack: String(failure && failure.stack || "") });
+      else
+        post({ type: "idle", token: msg.token, panel: msg.panel });
     },
     cancel() { cancelled = true; },
     isBusy() { return busy; },
