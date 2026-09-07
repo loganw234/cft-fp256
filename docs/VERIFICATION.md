@@ -8,13 +8,16 @@ executes most of it in one command; this page is the explanation of
 what "green" means at each layer and what you are signing up for when
 you start one.
 
-**Read the durations first.** Two of the gates below routinely run for
-more than an hour, several others for twenty to fifty minutes, and
-every one of them stretches when the box is busy: the numbers in the
-right-hand column were taken on the same day the left-hand ones were,
-with two simulation suites, a formal run and a Vivado implementation
-sharing twelve cores. A gate that seems to have hung has usually just
-not finished. Nothing here is a quick unit test.
+**Read the durations first.** The two simulation suites run for an
+hour or more each on a busy box, several other gates for twenty to
+fifty minutes, and every one of them stretches when the box is shared:
+the numbers in the right-hand column were taken on the same day the
+left-hand ones were, with two simulation suites, a formal run and a
+Vivado implementation sharing twelve cores. A gate that seems to have
+hung has usually just not finished - with one exception worth knowing:
+a formal task that does not close never finishes, and the gate's
+seven-minute norm is the number to hold a run against. Nothing here is
+a quick unit test.
 
 ## The layers, and what each one proves
 
