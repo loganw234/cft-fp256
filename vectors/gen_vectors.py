@@ -143,11 +143,29 @@ regenerate the same cases from the same seed, and a GPU-side det
 library (or any other implementation claiming identity) is scored by
 replaying the file. Vectors are derived data - never hand-edit;
 regenerate and let the seed carry the provenance.
+
+Generating them costs real minutes - 404 s for the five attributes on
+the Windows desktop on 2026-09-07 - and every set is independent of
+every other, so `--jobs N` writes them in N worker processes. A worker
+rebuilds from the seed the operand pool its own files need and shares
+nothing with any other worker, which is why the sets are the same bytes
+at any --jobs rather than the same bytes when the scheduling is kind.
+`--cache DIR` goes further and does not regenerate a set at all when
+the model's source bytes, the generator's, the job's parameters, the
+interpreter's version AND the bytes of the file already on disk are all
+what they were when it was last written; see the block above main() for
+why that cannot go stale, and verify/README.md for why the census
+leaves it off.
 """
 
 import argparse
+import concurrent.futures
+import hashlib
 import json
+import os
+import platform
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
@@ -247,6 +265,471 @@ def character_record(fmt, hexw, rname, rnd, case):
     return rec
 
 
+# ======================================================================
+# The operand pools
+#
+# Every pool below is a pure function of (format, counts, seed). That is
+# the property this whole file rests on and it is what makes a parallel
+# run byte-identical to a serial one, rather than byte-identical when
+# the scheduling is kind: a worker rebuilds from the seed the pool its
+# own files need, nothing is shared between processes, and no result
+# crosses one.
+#
+# lru_cache because a worker often draws two files of one family in a
+# row - the queue is ordered so that a family's attributes are adjacent
+# - and then the pool is built once for both. maxsize 2 is enough for
+# that and keeps a finished fp256 pool from staying resident for the
+# rest of the run.
+# ======================================================================
+
+@lru_cache(maxsize=2)
+def pool_elementwise(fname, directed, nrandom, simple, seed):
+    fmt = FORMATS[fname]
+    return tuple(vectors.testset(fmt, directed, nrandom, seed)
+                 + vectors.simple_cases(fmt, simple, seed + 2))
+
+
+@lru_cache(maxsize=2)
+def pool_transcend(fname, extra, seed):
+    return tuple(vectors.transcend_cases(FORMATS[fname], extra, seed + 6))
+
+
+@lru_cache(maxsize=2)
+def pool_minmaxmag(fname, extra, seed):
+    return tuple(vectors.minmax_mag_cases(FORMATS[fname], extra, seed + 21))
+
+
+@lru_cache(maxsize=2)
+def pool_augmented(fname, extra, seed):
+    return tuple(vectors.augmented_cases(FORMATS[fname], extra, seed + 7))
+
+
+@lru_cache(maxsize=2)
+def pool_reduce(fname, extra, seed):
+    return tuple(vectors.reduce_cases(FORMATS[fname], extra, seed + 8))
+
+
+@lru_cache(maxsize=2)
+def pool_character(fname, extra, seed):
+    return tuple(vectors.character_cases(FORMATS[fname], extra, seed + 17))
+
+
+@lru_cache(maxsize=2)
+def pool_formatof(sname, dname, extra, seed):
+    return tuple(vectors.formatof_cases(FORMATS[sname], FORMATS[dname],
+                                        extra, seed + 21))
+
+
+# ======================================================================
+# One set file at a time
+#
+# Each writer takes its job's own parameters and nothing else, opens the
+# file in TEXT mode - which is what the published sets have always been
+# written in, and on Windows that means CRLF, so changing it would
+# change every byte of every set - and returns the tail of the line the
+# serial generator printed for it. The path is prefixed by the caller,
+# because a line recovered from the cache has to name the directory this
+# run wrote to and not the one the cache entry was made in.
+#
+# A writer with no cases returns None and leaves no file, which is what
+# the old `for rname in args.rounding if tcases else ()` expressed.
+# ======================================================================
+
+def write_elementwise(job, path):
+    fmt = FORMATS[job["fmt"]]
+    hexw = fmt.width // 4
+    rname = job["rnd"]
+    rnd = RND_BY_NAME[rname]
+    cases = pool_elementwise(job["fmt"], job["directed"], job["random"],
+                             job["simple"], job["seed"])
+    with open(path, "w") as f:
+        for op, xa, xb, xc in cases:
+            d, flags = compute(fmt, op, xa, xb, xc, rnd)
+            f.write(json.dumps({
+                "op": OP_NAMES.get(op, f"reserved{op}"),
+                "rnd": rname,
+                "a": f"0x{xa:0{hexw}x}",
+                "b": f"0x{xb:0{hexw}x}",
+                "c": f"0x{xc:0{hexw}x}",
+                "d": f"0x{d:0{hexw}x}",
+                "flags": flags,
+            }) + "\n")
+    return f": {len(cases)} cases (seed {job['seed']}, {rname})"
+
+
+def write_transcend(job, path):
+    fmt = FORMATS[job["fmt"]]
+    hexw = fmt.width // 4
+    rname = job["rnd"]
+    rnd = RND_BY_NAME[rname]
+    tcases = pool_transcend(job["fmt"], job["extra"], job["seed"])
+    if not tcases:
+        return None
+    with open(path, "w") as f:
+        for fn, xa, xb, nn in tcases:
+            d, flags = transcend.compute(fmt, fn, xa, xb, rnd, nn)
+            rec = {
+                "fn": fn,
+                "rnd": rname,
+                "a": f"0x{xa:0{hexw}x}",
+            }
+            if TRANSCEND_ARITY[fn] == 2:
+                rec["b"] = f"0x{xb:0{hexw}x}"
+            if TRANSCEND_INTARG[fn]:
+                rec["n"] = nn
+            rec["d"] = f"0x{d:0{hexw}x}"
+            rec["flags"] = flags
+            f.write(json.dumps(rec) + "\n")
+    return f": {len(tcases)} cases (seed {job['seed']}, {rname})"
+
+
+def write_minmaxmag(job, path):
+    fmt = FORMATS[job["fmt"]]
+    hexw = fmt.width // 4
+    mcases = pool_minmaxmag(job["fmt"], job["extra"], job["seed"])
+    with open(path, "w") as f:
+        for fn, xa, xb in mcases:
+            d, flags = MINMAX_MAG_BY_754[fn](fmt, xa, xb)
+            f.write(json.dumps({
+                "fn": fn,
+                "a": f"0x{xa:0{hexw}x}",
+                "b": f"0x{xb:0{hexw}x}",
+                "d": f"0x{d:0{hexw}x}",
+                "flags": flags,
+            }) + "\n")
+    return (f": {len(mcases)} cases (seed {job['seed']}, "
+            f"no attribute - 9.6 selects, it does not round)")
+
+
+def write_augmented(job, path):
+    fmt = FORMATS[job["fmt"]]
+    hexw = fmt.width // 4
+    acases = pool_augmented(job["fmt"], job["extra"], job["seed"])
+    with open(path, "w") as f:
+        for fn, xa, xb in acases:
+            r, e, flags = augmented.compute(fmt, fn, xa, xb)
+            f.write(json.dumps({
+                "fn": fn,
+                "a": f"0x{xa:0{hexw}x}",
+                "b": f"0x{xb:0{hexw}x}",
+                "r": f"0x{r:0{hexw}x}",
+                "e": f"0x{e:0{hexw}x}",
+                "flags": flags,
+            }) + "\n")
+    return (f": {len(acases)} cases (seed {job['seed']}, "
+            f"roundTiesTowardZero - 9.5 fixes it)")
+
+
+def write_reduce(job, path):
+    fmt = FORMATS[job["fmt"]]
+    hexw = fmt.width // 4
+    rname = job["rnd"]
+    rnd = RND_BY_NAME[rname]
+    rcases = pool_reduce(job["fmt"], job["extra"], job["seed"])
+    elems = 0
+    with open(path, "w") as f:
+        for fn, xs, ys in rcases:
+            out = REDUCE_IMPL[fn](fmt, xs, ys, rnd)
+            rec = {
+                "fn": fn,
+                "rnd": rname,
+                "n": len(xs),
+                "a": [f"0x{v:0{hexw}x}" for v in xs],
+            }
+            if ys is not None:
+                rec["b"] = [f"0x{v:0{hexw}x}" for v in ys]
+            if len(out) == 3:
+                pr, sf_, flags = out
+                rec["pr"] = f"0x{pr:0{hexw}x}"
+                rec["sf"] = sf_
+            else:
+                d, flags = out
+                rec["d"] = f"0x{d:0{hexw}x}"
+            rec["flags"] = flags
+            elems += len(xs)
+            f.write(json.dumps(rec) + "\n")
+    return (f": {len(rcases)} cases, {elems} elements "
+            f"(seed {job['seed']}, {rname})")
+
+
+def write_character(job, path):
+    fmt = FORMATS[job["fmt"]]
+    hexw = fmt.width // 4
+    rname = job["rnd"]
+    rnd = RND_BY_NAME[rname]
+    ccases = pool_character(job["fmt"], job["extra"], job["seed"])
+    written = 0
+    with open(path, "w") as f:
+        for case in ccases:
+            rec = character_record(fmt, hexw, rname, rnd, case)
+            if rec is None:
+                continue
+            f.write(json.dumps(rec) + "\n")
+            written += 1
+    return f": {written} cases (seed {job['seed']}, {rname})"
+
+
+def write_formatof(job, path):
+    sname, dname = job["sfmt"], job["dfmt"]
+    sfmt, dfmt = FORMATS[sname], FORMATS[dname]
+    shexw, dhexw = sfmt.width // 4, dfmt.width // 4
+    rname = job["rnd"]
+    rnd = RND_BY_NAME[rname]
+    fcases = pool_formatof(sname, dname, job["extra"], job["seed"])
+    with open(path, "w") as f:
+        for fn, xa, xb, xc in fcases:
+            long_fn = FORMATOF_LONG[fn]
+            d, flags = formatof.compute(sfmt, dfmt, long_fn, xa, xb, xc, rnd)
+            rec = {
+                "fn": fn,
+                "sfmt": sname,
+                "dfmt": dname,
+                "rnd": rname,
+                "a": f"0x{xa:0{shexw}x}",
+            }
+            arity = FORMATOF_ARITY[long_fn]
+            if arity >= 2:
+                rec["b"] = f"0x{xb:0{shexw}x}"
+            if arity >= 3:
+                rec["c"] = f"0x{xc:0{shexw}x}"
+            rec["d"] = f"0x{d:0{dhexw}x}"
+            rec["flags"] = flags
+            f.write(json.dumps(rec) + "\n")
+    return f": {len(fcases)} cases (seed {job['seed']}, {rname})"
+
+
+WRITERS = {
+    "elementwise": write_elementwise,
+    "transcend":   write_transcend,
+    "minmaxmag":   write_minmaxmag,
+    "augmented":   write_augmented,
+    "reduce":      write_reduce,
+    "character":   write_character,
+    "formatof":    write_formatof,
+}
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def run_group(args):
+    """Write every file of one group, in order. The argument is one
+    tuple because this is what a worker process is handed. Returns
+    (idx, tail, sha256, size) per file, with tail None where the family
+    had nothing to write at this format."""
+    group, outdir = args
+    out = []
+    for job in group:
+        path = Path(outdir) / job["file"]
+        tail = WRITERS[job["kind"]](job, path)
+        if tail is None:
+            out.append((job["idx"], None, None, None))
+        else:
+            out.append((job["idx"], tail, sha256_file(path),
+                        os.path.getsize(path)))
+    return out
+
+
+# ======================================================================
+# The content-hash cache (--cache DIR)
+#
+# A set is REGENERATED unless every one of these holds:
+#
+#   * the bytes of the model and of this generator hash to what they
+#     hashed when the file was written - one digest over every .py in
+#     python/cft_golden and over this file,
+#   * the job descriptor is identical: family, format or ordered format
+#     pair, rounding attribute, every count that family reads, and the
+#     seed,
+#   * the interpreter's version string is identical,
+#   * and the file still on disk hashes to the digest recorded when it
+#     was written, at the recorded length.
+#
+# The last clause is what makes a stale cache impossible rather than
+# unlikely. A set that was hand-edited, truncated, half-written by an
+# interrupted run or copied in from somewhere else does not match its
+# recorded digest and is regenerated.
+#
+# The manifest lives OUTSIDE the output directory (vectors/.gen-cache by
+# default) so that a vector set stays a directory of nothing but vector
+# sets: a consumer that scans it, and the hash walk that proves two runs
+# produced the same bytes, both see exactly what they saw before.
+#
+# It is an edit-and-rerun tool, and it says so in the log - a file it
+# serves prints its recorded line with "[cached]" on the end, so a run
+# that regenerated nothing cannot read as a run that regenerated
+# everything. verify/run.sh leaves it off for the census and turns it on
+# for the development loop (verify/README.md).
+# ======================================================================
+
+CACHE_VERSION = 1
+
+
+def model_digest():
+    """One digest over the model's and this generator's source bytes."""
+    root = Path(__file__).resolve().parents[1]
+    paths = sorted((root / "python" / "cft_golden").glob("*.py"))
+    paths.append(Path(__file__).resolve())
+    h = hashlib.sha256()
+    for p in sorted(paths):
+        h.update(p.resolve().relative_to(root).as_posix().encode())
+        h.update(b"\0")
+        h.update(sha256_file(p).encode())
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def job_key(job, model, pyver):
+    payload = {k: v for k, v in job.items() if k != "idx"}
+    blob = json.dumps({"v": CACHE_VERSION, "model": model, "python": pyver,
+                       "job": payload}, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def load_manifest(cachedir):
+    try:
+        with open(Path(cachedir) / "manifest.json", "r") as f:
+            m = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(m, dict) or m.get("version") != CACHE_VERSION:
+        return {}
+    files = m.get("files")
+    return files if isinstance(files, dict) else {}
+
+
+def save_manifest(cachedir, model, pyver, files):
+    d = Path(cachedir)
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / "manifest.json.tmp"
+    with open(tmp, "w") as f:
+        json.dump({"version": CACHE_VERSION, "model": model,
+                   "python": pyver, "files": files}, f,
+                  indent=1, sort_keys=True)
+    os.replace(tmp, d / "manifest.json")
+
+
+def cache_hit(entry, key, path):
+    """True only if the recorded key matches AND the file on disk is
+    byte for byte the file that key was recorded for."""
+    if not isinstance(entry, dict) or entry.get("key") != key:
+        return False
+    try:
+        if os.path.getsize(path) != entry.get("size"):
+            return False
+        return sha256_file(path) == entry.get("sha256")
+    except OSError:
+        return False
+
+
+# ======================================================================
+# The job list
+#
+# One job per output file, in the order the serial generator wrote them,
+# carrying every parameter that file's contents depend on and nothing
+# else. Jobs that read one pool share a "group" key and are handed to a
+# worker together.
+#
+# The `continue`s of the old per-format loop are preserved exactly:
+# --augmented 0 suppresses the reduction and character sets too, and
+# --reduce -1 suppresses the character sets, because that is what this
+# generator has always done and a set that appears or vanishes on a
+# refactor is a set nobody can score against.
+# ======================================================================
+
+def build_jobs(args):
+    jobs = []
+
+    def add(kind, fname, group, **params):
+        jobs.append(dict(idx=len(jobs), kind=kind, file=fname,
+                         group=group, **params))
+
+    def suffix(rname):
+        return "" if rname == "rne" else f"-{rname}"
+
+    for name in args.formats:
+        g = ("elementwise", name, args.directed, args.random, args.simple,
+             args.seed)
+        for rname in args.rounding:
+            add("elementwise", f"{name}{suffix(rname)}.jsonl", g,
+                fmt=name, rnd=rname, directed=args.directed,
+                random=args.random, simple=args.simple, seed=args.seed)
+
+        if args.transcend > 0:
+            g = ("transcend", name, args.transcend, args.seed)
+            for rname in args.rounding:
+                add("transcend", f"{name}-transcend{suffix(rname)}.jsonl", g,
+                    fmt=name, rnd=rname, extra=args.transcend, seed=args.seed)
+
+        # The four magnitude forms of 754-2019 9.6. ONE file per format,
+        # whatever --rounding asked for, and for a sharper reason than
+        # the augmented set's: these operations SELECT an operand rather
+        # than computing a value, so there is no rounding for an
+        # attribute to direct. Built before the families below because
+        # those bail out with `continue`, and a --character 0 run must
+        # still emit these.
+        if args.minmaxmag > 0:
+            g = ("minmaxmag", name, args.minmaxmag, args.seed)
+            add("minmaxmag", f"{name}-minmaxmag.jsonl", g,
+                fmt=name, extra=args.minmaxmag, seed=args.seed)
+
+        # The augmented arithmetic operations (754-2019 9.5). ONE file
+        # per format, whatever --rounding asked for: the rounding is
+        # fixed by the standard, so there is no attribute to sweep and
+        # no per-attribute file to write. Two outputs per case.
+        if args.augmented <= 0:
+            continue
+        g = ("augmented", name, args.augmented, args.seed)
+        add("augmented", f"{name}-augmented.jsonl", g,
+            fmt=name, extra=args.augmented, seed=args.seed)
+
+        if args.reduce < 0:
+            continue
+        g = ("reduce", name, args.reduce, args.seed)
+        for rname in args.rounding:
+            add("reduce", f"{name}-reduce{suffix(rname)}.jsonl", g,
+                fmt=name, rnd=rname, extra=args.reduce, seed=args.seed)
+
+        if args.character <= 0:
+            continue
+        g = ("character", name, args.character, args.seed)
+        for rname in args.rounding:
+            add("character", f"{name}-character{suffix(rname)}.jsonl", g,
+                fmt=name, rnd=rname, extra=args.character, seed=args.seed)
+
+    # The formatOf arithmetic of 754-2019 5.4.1: one file per ordered
+    # (source, destination) pair per attribute, OUTSIDE the per-format
+    # loop above because a case here has two formats and belongs to
+    # neither of them alone.
+    if args.formatof > 0:
+        for sname in args.formats:
+            for dname in args.formats:
+                g = ("formatof", sname, dname, args.formatof, args.seed)
+                for rname in args.rounding:
+                    add("formatof",
+                        f"{sname}-to-{dname}-formatof{suffix(rname)}.jsonl",
+                        g, sfmt=sname, dfmt=dname, rnd=rname,
+                        extra=args.formatof, seed=args.seed)
+    return jobs
+
+
+def group_cost(group):
+    """A scheduling estimate only - it can be wrong without changing a
+    byte. The widest format in the task times the files it writes: the
+    model's cost per case climbs fast with the format's width, and the
+    longest task sets the makespan, so it starts first."""
+    w = 0
+    for job in group:
+        for k in ("fmt", "sfmt", "dfmt"):
+            if k in job:
+                w = max(w, FORMATS[job[k]].width)
+    return w * len(group)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -279,191 +762,100 @@ def main():
                     help="random operands added to each clause-5.4.1 "
                          "formatOf pool (0 to skip the sets)")
     ap.add_argument("--seed", type=int, default=3)
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="worker processes (default 1, the serial "
+                         "generator). Every worker rebuilds its own "
+                         "pools from the seed, so the sets are the same "
+                         "bytes at any --jobs")
+    ap.add_argument("--cache", metavar="DIR", default=None,
+                    help="reuse a set whose model, parameters and bytes "
+                         "on disk are all unchanged, recording what was "
+                         "written in DIR/manifest.json (default: no "
+                         "cache, everything regenerated)")
     args = ap.parse_args()
 
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
-    for name in args.formats:
-        fmt = FORMATS[name]
-        hexw = fmt.width // 4
-        cases = (vectors.testset(fmt, args.directed, args.random, args.seed)
-                 + vectors.simple_cases(fmt, args.simple, args.seed + 2))
-        for rname in args.rounding:
-            rnd = RND_BY_NAME[rname]
-            # the default attribute keeps the plain filename, so an
-            # existing consumer scoring fp32.jsonl is unaffected
-            suffix = "" if rname == "rne" else f"-{rname}"
-            path = outdir / f"{name}{suffix}.jsonl"
-            with open(path, "w") as f:
-                for op, xa, xb, xc in cases:
-                    d, flags = compute(fmt, op, xa, xb, xc, rnd)
-                    f.write(json.dumps({
-                        "op": OP_NAMES.get(op, f"reserved{op}"),
-                        "rnd": rname,
-                        "a": f"0x{xa:0{hexw}x}",
-                        "b": f"0x{xb:0{hexw}x}",
-                        "c": f"0x{xc:0{hexw}x}",
-                        "d": f"0x{d:0{hexw}x}",
-                        "flags": flags,
-                    }) + "\n")
-            print(f"{path}: {len(cases)} cases (seed {args.seed}, {rname})")
 
-        tcases = (vectors.transcend_cases(fmt, args.transcend, args.seed + 6)
-                  if args.transcend > 0 else [])
-        for rname in args.rounding if tcases else ():
-            rnd = RND_BY_NAME[rname]
-            suffix = "" if rname == "rne" else f"-{rname}"
-            path = outdir / f"{name}-transcend{suffix}.jsonl"
-            with open(path, "w") as f:
-                for fn, xa, xb, nn in tcases:
-                    d, flags = transcend.compute(fmt, fn, xa, xb, rnd, nn)
-                    rec = {
-                        "fn": fn,
-                        "rnd": rname,
-                        "a": f"0x{xa:0{hexw}x}",
-                    }
-                    if TRANSCEND_ARITY[fn] == 2:
-                        rec["b"] = f"0x{xb:0{hexw}x}"
-                    if TRANSCEND_INTARG[fn]:
-                        rec["n"] = nn
-                    rec["d"] = f"0x{d:0{hexw}x}"
-                    rec["flags"] = flags
-                    f.write(json.dumps(rec) + "\n")
-            print(f"{path}: {len(tcases)} cases (seed {args.seed}, {rname})")
+    jobs = build_jobs(args)
 
-        # The four magnitude forms of 754-2019 9.6. ONE file per
-        # format, whatever --rounding asked for, and for a sharper
-        # reason than the augmented set's: these operations SELECT an
-        # operand rather than computing a value, so there is no
-        # rounding for an attribute to direct. Written before the
-        # blocks below because those skip with `continue`, and a
-        # --character 0 run must still emit these.
-        if args.minmaxmag > 0:
-            mcases = vectors.minmax_mag_cases(fmt, args.minmaxmag,
-                                              args.seed + 21)
-            path = outdir / f"{name}-minmaxmag.jsonl"
-            with open(path, "w") as f:
-                for fn, xa, xb in mcases:
-                    d, flags = MINMAX_MAG_BY_754[fn](fmt, xa, xb)
-                    f.write(json.dumps({
-                        "fn": fn,
-                        "a": f"0x{xa:0{hexw}x}",
-                        "b": f"0x{xb:0{hexw}x}",
-                        "d": f"0x{d:0{hexw}x}",
-                        "flags": flags,
-                    }) + "\n")
-            print(f"{path}: {len(mcases)} cases (seed {args.seed}, "
-                  f"no attribute - 9.6 selects, it does not round)")
+    manifest = {}
+    model = pyver = None
+    cached = {}
+    if args.cache:
+        model = model_digest()
+        pyver = platform.python_version()
+        manifest = dict(load_manifest(args.cache))
+        for job in jobs:
+            key = job_key(job, model, pyver)
+            job["_key"] = key
+            if cache_hit(manifest.get(job["file"]), key,
+                         outdir / job["file"]):
+                cached[job["idx"]] = manifest[job["file"]]
 
-        # The augmented arithmetic operations (754-2019 9.5). ONE file
-        # per format, whatever --rounding asked for: the rounding is
-        # fixed by the standard, so there is no attribute to sweep and
-        # no per-attribute file to write. Two outputs per case.
-        if args.augmented <= 0:
-            continue
-        acases = vectors.augmented_cases(fmt, args.augmented, args.seed + 7)
-        path = outdir / f"{name}-augmented.jsonl"
-        with open(path, "w") as f:
-            for fn, xa, xb in acases:
-                r, e, flags = augmented.compute(fmt, fn, xa, xb)
-                f.write(json.dumps({
-                    "fn": fn,
-                    "a": f"0x{xa:0{hexw}x}",
-                    "b": f"0x{xb:0{hexw}x}",
-                    "r": f"0x{r:0{hexw}x}",
-                    "e": f"0x{e:0{hexw}x}",
-                    "flags": flags,
-                }) + "\n")
-        print(f"{path}: {len(acases)} cases (seed {args.seed}, "
-              f"roundTiesTowardZero - 9.5 fixes it)")
+    todo = [j for j in jobs if j["idx"] not in cached]
 
-        if args.reduce < 0:
-            continue
-        rcases = vectors.reduce_cases(fmt, args.reduce, args.seed + 8)
-        for rname in args.rounding:
-            rnd = RND_BY_NAME[rname]
-            suffix = "" if rname == "rne" else f"-{rname}"
-            path = outdir / f"{name}-reduce{suffix}.jsonl"
-            elems = 0
-            with open(path, "w") as f:
-                for fn, xs, ys in rcases:
-                    out = REDUCE_IMPL[fn](fmt, xs, ys, rnd)
-                    rec = {
-                        "fn": fn,
-                        "rnd": rname,
-                        "n": len(xs),
-                        "a": [f"0x{v:0{hexw}x}" for v in xs],
-                    }
-                    if ys is not None:
-                        rec["b"] = [f"0x{v:0{hexw}x}" for v in ys]
-                    if len(out) == 3:
-                        pr, sf_, flags = out
-                        rec["pr"] = f"0x{pr:0{hexw}x}"
-                        rec["sf"] = sf_
-                    else:
-                        d, flags = out
-                        rec["d"] = f"0x{d:0{hexw}x}"
-                    rec["flags"] = flags
-                    elems += len(xs)
-                    f.write(json.dumps(rec) + "\n")
-            print(f"{path}: {len(rcases)} cases, {elems} elements "
-                  f"(seed {args.seed}, {rname})")
+    # One task per FILE, and the dearest first. Not per family, which
+    # was the first shape of this and left the five fp256
+    # transcendental attributes as one task: it was still running with
+    # three workers idle after the other 163 files were done. A worker
+    # that draws a file whose pool it does not have rebuilds it, and
+    # that is cheap - measured 2026-09-07 on this desktop, the fp256
+    # transcendental pool is 2.2 s and the fp256 elementwise pool 0.1 s
+    # against files the model spends minutes on. The estimate below
+    # only orders the queue; being wrong about it costs a little
+    # makespan and cannot change a byte.
+    work = sorted(([job] for job in todo), key=group_cost, reverse=True)
 
-        if args.character <= 0:
-            continue
-        ccases = vectors.character_cases(fmt, args.character, args.seed + 17)
-        for rname in args.rounding:
-            rnd = RND_BY_NAME[rname]
-            suffix = "" if rname == "rne" else f"-{rname}"
-            path = outdir / f"{name}-character{suffix}.jsonl"
-            written = 0
-            with open(path, "w") as f:
-                for case in ccases:
-                    rec = character_record(fmt, hexw, rname, rnd, case)
-                    if rec is None:
-                        continue
-                    f.write(json.dumps(rec) + "\n")
-                    written += 1
-            print(f"{path}: {written} cases (seed {args.seed}, {rname})")
+    results = {}
+    nworkers = max(1, min(args.jobs, len(work)))
+    payload = [(group, str(outdir)) for group in work]
 
-    # The formatOf arithmetic of 754-2019 5.4.1: one file per ordered
-    # (source, destination) pair per attribute, OUTSIDE the per-format
-    # loop above because a case here has two formats and belongs to
-    # neither of them alone.
-    if args.formatof > 0:
-        for sname in args.formats:
-            for dname in args.formats:
-                sfmt, dfmt = FORMATS[sname], FORMATS[dname]
-                shexw, dhexw = sfmt.width // 4, dfmt.width // 4
-                fcases = vectors.formatof_cases(sfmt, dfmt, args.formatof,
-                                                args.seed + 21)
-                for rname in args.rounding:
-                    rnd = RND_BY_NAME[rname]
-                    suffix = "" if rname == "rne" else f"-{rname}"
-                    path = (outdir /
-                            f"{sname}-to-{dname}-formatof{suffix}.jsonl")
-                    with open(path, "w") as f:
-                        for fn, xa, xb, xc in fcases:
-                            long_fn = FORMATOF_LONG[fn]
-                            d, flags = formatof.compute(sfmt, dfmt, long_fn,
-                                                        xa, xb, xc, rnd)
-                            rec = {
-                                "fn": fn,
-                                "sfmt": sname,
-                                "dfmt": dname,
-                                "rnd": rname,
-                                "a": f"0x{xa:0{shexw}x}",
-                            }
-                            arity = FORMATOF_ARITY[long_fn]
-                            if arity >= 2:
-                                rec["b"] = f"0x{xb:0{shexw}x}"
-                            if arity >= 3:
-                                rec["c"] = f"0x{xc:0{shexw}x}"
-                            rec["d"] = f"0x{d:0{dhexw}x}"
-                            rec["flags"] = flags
-                            f.write(json.dumps(rec) + "\n")
-                    print(f"{path}: {len(fcases)} cases (seed {args.seed}, "
-                          f"{rname})")
+    # Reported in the order the serial generator reported it, whatever
+    # order the workers finish in: a file's line waits until every
+    # earlier file has one. Printed as the prefix completes rather than
+    # all at the end, because a stage that says nothing for ten minutes
+    # reads as a stage that has hung.
+    printed = 0
+
+    def report_ready():
+        nonlocal printed
+        while printed < len(jobs):
+            job = jobs[printed]
+            path = outdir / job["file"]
+            if job["idx"] in cached:
+                print(f"{path}{cached[job['idx']]['tail']}  [cached]",
+                      flush=True)
+                printed += 1
+                continue
+            if job["idx"] not in results:
+                return
+            tail, dig, size = results[job["idx"]]
+            printed += 1
+            if tail is None:            # nothing to write at this format
+                continue
+            print(f"{path}{tail}", flush=True)
+            if args.cache:
+                manifest[job["file"]] = {"key": job["_key"], "sha256": dig,
+                                         "size": size, "tail": tail}
+
+    def collect(rows):
+        for idx, tail, dig, size in rows:
+            results[idx] = (tail, dig, size)
+        report_ready()
+
+    if nworkers <= 1:
+        for one in payload:
+            collect(run_group(one))
+    else:
+        with concurrent.futures.ProcessPoolExecutor(
+                max_workers=nworkers) as ex:
+            for rows in ex.map(run_group, payload, chunksize=1):
+                collect(rows)
+    report_ready()
+
+    if args.cache:
+        save_manifest(args.cache, model, pyver, manifest)
 
 
 if __name__ == "__main__":
