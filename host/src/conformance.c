@@ -2253,6 +2253,9 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
             cft_case *cases = NULL;
             size_t ncases = 0, ccap = 0;
             cft_status arr;
+            /* Opcodes this set carries that the device does not publish,
+             * reported once each by name (2026-09-07). */
+            unsigned char skipped_op[256] = {0};
 
             if (ri == 0)
                 snprintf(path, sizeof path, "%s/%s.jsonl", dir, f->name);
@@ -2333,6 +2336,29 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                 GET("d", want_d)
 #undef GET
 
+                /* An ASSIGNED opcode this device does not publish is
+                 * skipped by name, once per set, and not counted as
+                 * checked - it never reaches the array pass either,
+                 * because it is not appended to `cases`. The set-level
+                 * check above asks about FMA, which every image carries;
+                 * this is the case it cannot see: IMUL (opcode 30,
+                 * 2026-09-07) on an image that predates CAPS[28], which
+                 * is every card-day image. Before IMUL no assigned opcode
+                 * could be absent from a device that had its group, and
+                 * a cft_run refusal here would have failed the set. An
+                 * UNASSIGNED opcode is not skipped: cft_supports answers
+                 * no for it by design, but its canonical-qNaN answer is
+                 * the contract's and every device produces it, which is
+                 * exactly what the reserved cases in the set check. */
+                if (cft_sf_op_assigned(op) &&
+                    !cft_supports(dev, (cft_op)op, (cft_format)fi)) {
+                    if (!skipped_op[op]) {
+                        skipped_op[op] = 1;
+                        rep_add(&r, "%s: %s skipped, not on this device\n",
+                                path, cft_op_name((cft_op)op));
+                    }
+                    continue;
+                }
                 memset(got_d, 0, (size_t)esz);
                 st = cft_run(dev, (cft_op)op, (cft_format)fi, (cft_round)rnd,
                              ea, eb, ec, got_d, 1, &got_flags, NULL);

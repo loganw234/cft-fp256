@@ -5949,6 +5949,19 @@ agents left them, and integrated or held here.
   Its measured baseline (gate budget, per stage) is in the session's
   scratchpad, and one of its findings - `simmc`'s literal backslash-n -
   was fixed on the tree the same day.
+  **Correction, later the same day: it reproduces the reference, and
+  always did.** The reference roll-up `a0cd4bc4...` was the runner's
+  `vectors` stage's output, whose opcode sets draw the generator's
+  default pools (19,600 lines a set); the integrator's identity runs
+  used `make vectors`' pools (3000/4000/200, 11,800 lines a set). The
+  twenty files that "differed" were the twenty opcode sets at two
+  pool sizes. Regenerated with the ORIGINAL generator at the same
+  pools, the reference is `6449e6dc...` - the rewrite's own roll-up,
+  at one job and at four, byte for byte. On the merged tree at ABI
+  0.8 the rewrite at four jobs and the original in series both give
+  `edf57497...` over the 168 sets, in 3 min 5 s against 8 min 30 s.
+  Merged the same afternoon; verify/README.md says what the knobs
+  are and why the census leaves the cache off.
 
 **Gates on the merged tree**, in the pinned images and on this host:
 
@@ -6014,3 +6027,57 @@ agents left them, and integrated or held here.
 
 **Not run.** Anything on a device; the held branches' own gates beyond
 what their logs already recorded.
+
+## 2026-09-07 - the card-day check: what today's library says to an image built before today
+
+The staged images predate everything the improvement round put on
+main, so the question was whether tomorrow's runbook still holds on
+them. Three absences are normal and now written into docs/CARDDAY.md:
+`CAPS[27:16]` reads zero, so the library enforces no capacity and the
+tile alone enforces its 64 deposit slots a lane - the two workloads
+that deposit an iteration must be sized by hand on these images
+(`cft-zoom --steps-per-call 32`, `cft-orbits --periods 15`); `CAPS[4]`
+and `CAPS[28]` read zero, so the loader refuses any program using
+indexed constants or `IMUL` by name and `cft_supports` answers no for
+opcode 30; and the published opcode sets now carry 200 `imul` cases
+each.
+
+**The third one was a defect, found by reading rather than running.**
+`cft_conformance` decided per set whether a device carries a format
+(by asking about FMA) and then dispatched every opcode in the set; a
+`cft_run` refusal failed the set. Before today no assigned opcode could
+be absent from a device that had its group, so that was never
+reachable. On a card-day image every one of the twenty opcode sets
+would have failed on its first `imul` case. The replay now skips an
+opcode the device does not publish by name, once per set, and does not
+count the skipped cases as checked - `imul skipped, not on this device`
+twenty times, and a count 4,000 short of what `make vectors` wrote, is
+what tomorrow's `cft-selftest` should print. The skip is for ASSIGNED
+opcodes a device does not publish; the first cut of it asked
+`cft_supports` alone, which answers no for the unassigned `reserved`
+opcodes by design, and so silently dropped the 600 reserved cases a
+set carries - the cases that check every device's canonical-qNaN
+answer - and the replay's own count caught it at 1,055,635 instead
+of 1,071,635. Written against the code; not exercised on a device,
+because no image lacking the opcode can be reached from this host
+before tomorrow. On the software backend, which publishes the
+opcode, nothing changes: `168 sets, 1071635 cases, all matching` and `1071635 cases checked`, no skip line, `api-test: all contract checks passed`, `C and Python reached the same library and got the same bits`.
+
+**Also today.** The eight merged agents' worktrees are removed (their
+branches stay); the two held branches keep theirs. A leftover build
+queue from the area agent and a loopback server from the morning's
+device-test were stopped by PID - the first attempt used `taskkill
+/PID` from Git Bash, which rewrites `/PID` into a path and fails
+silently unless the output is read; `MSYS_NO_PATHCONV=1` is the form
+that works. The round-window fold does not rebase mechanically onto
+the cone stage (two conflicting hunks in the pipe's S11 region and the
+fold's amount select would have to be re-derived against the
+registered cone), so it stays held for a proper rebase rather than a
+cherry-pick. The parallel vector generator's difference is being
+characterised against a freshly regenerated pre-rewrite reference: the original generator
+at the same pool sizes reproduces the rewrite byte for byte, at one job
+and at four, on the model before the ISA merge (`6449e6dc...`) and on
+the merged tree (`edf57497...`, 3 min 5 s at four jobs against 8 min
+30 s serial) - the twenty files the morning's check called different
+were the runner's larger opcode pools against `make vectors`', and the
+branch is merged; the round's entry carries the correction.
