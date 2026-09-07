@@ -162,6 +162,11 @@ describing. Three things follow:
   addressed by lane and deposit index (P2), so the whole orbit comes
   back from one call. `--steps-per-call 1024` turns a 100,000-iteration
   reference into **98 library calls**; the host loop issues 800,000.
+  That is the software backend's figure: a tile holds 64 deposit slots
+  a lane (docs/SEQUENCER.md), so on a device the trip count is at most
+  32 and the same reference is 3,125 calls - still 256x fewer than the
+  host loop - and the tool refuses a higher `--steps-per-call` there
+  by name.
 - **Convergence masking is free.** `SETACT` is the escape condition, and
   an inactive lane writes nothing, deposits nothing and raises no flag.
 - **The last chunk gets its own image.** A program is compiled for its
@@ -652,7 +657,9 @@ Three things in those numbers are worth more than the numbers:
   over lanes and, on a device, a memory round trip per step - neither
   of which a single-lane orbit on a software backend can show. The 98
   library calls against 800,000 is the honest way to state its
-  contribution here.
+  contribution here - on the software backend; at a tile's 32-trip
+  deposit cap it is 3,125 against 800,000, the same argument at a
+  smaller ratio.
 - **The pixel half is 6.6x faster per operation than the reference
   half**, because it is 4,096 elements a call instead of one - and it
   is a narrower format. That asymmetry is the whole shape of
@@ -670,7 +677,7 @@ The headline frame:
 
 | | |
 |---|---|
-| reference | 100,000 iterations at fp256, 0.54 s, **98 library calls** |
+| reference | 100,000 iterations at fp256, 0.54 s, **98 library calls** (software backend; 3,125 at a tile's deposit cap) |
 | smallest \|z\|^2 | 8.45406e-87 at k = 51 |
 | pixels | 4,010 escaped, 0 glitched, 86 interior, escape iterations 307..3227 |
 | pixel work | 1,862,720 pixel-iterations at fp64, 4.6 s |

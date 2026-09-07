@@ -757,10 +757,30 @@ licence into an Alveo-only and a Basic-only copy and pointing
 including 212 Kintex-7 and 210 Artix-7. **A part Vivado says does not
 exist may be a part your active tier does not cover.**
 
-**Still not measured.** Implementation at any pass count, on any part,
-and so no post-route figure on 7-series fabric - where routing rather
-than logic is usually what decides a design of this size, and where
-the K325T's -0.066 ns of synthesis slack is thin enough to matter.
+**Routed, 2026-09-07**, out of context in the `board` configuration
+(ten passes, both ladders on), which settles what the synthesis slack
+left open:
+
+| part | grade | ask | routed WNS | verdict |
+|---|---|---|---|---|
+| xc7k325tffg900-2 | -2 | 100 MHz | **+0.096 ns** | closes; 95,695 LUT (47.0%), 56 DSP |
+| xc7k325tffg676-1 | -1 | 80 MHz | -0.384 ns | misses; about 77 MHz |
+| xc7k325tffg676-1 | -1 | 100 MHz | -2.782 ns | misses |
+| xc7k410tfbg676-2 | -2 | 100 MHz | -0.957 ns | misses; ffg900 identical |
+| xc7k410tfbg676-2 | -2 | 80 MHz | +0.607 ns | closes |
+
+The -2 K325T carries the tile at 100 MHz, the synthesis estimate's
+-0.066 ns becoming +0.096 routed, at 47.0% of the part rather than
+48.5%. **The speed grade is the finding**: the same tile on a -1
+misses 80 MHz, so the cheapest core board docs/PLATFORMS.md lists
+(`xc7k325tffg676-1`) would run it near 77 MHz. The larger 410T is the
+slower part at the same grade, and the whole 1.05 ns gap to the 325T
+is route: docs/studies/OPT-C-timing.md found the two netlists
+identical to a picosecond of logic delay, and 1.33x the fabric area
+predicts 15.3% more wire against 13.5% measured. The package makes no
+difference out of context. **Still not measured:** either part's
+ceiling, which wants the frequency sweep that study specifies, and any
+post-route figure under a shell rather than out of context.
 
 ## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 

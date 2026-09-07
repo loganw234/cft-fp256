@@ -378,6 +378,24 @@ confined to the top level so that P3 holds.
 Loops nest four deep, and `HALT` and `ACTALL` are legal only at the
 top level.
 
+**A tile also has three capacities the contract does not fix.** They
+are build parameters of `cft_seq`, set where rtl/cft_krnl.sv
+instantiates it, and not part of the program model: **`MAXD = 64`
+deposit slots a lane**, `IMEM_D = 1024` instructions and `KMEM_D =
+256` constants. A header that asks for more than any of them is
+refused by the tile at the header, before the constants and
+instructions stream in, in the same check that refuses a precision
+the tile was not configured for. The software backend enforces none
+of the three - it accepts 2^20 deposits a lane - so a program that
+runs there has not been shown to fit a tile, and `cft_caps` does not
+yet publish the caps (docs/studies/OPT-D-contract.md proposes that
+it should). Programs that deposit once an iteration feel the first
+one: `cft-zoom` deposits two values a trip and is held to
+`--steps-per-call 32` on a device, `cft-orbits` deposits four a
+sample for a whole run in one call and is held to 15 samples, and
+both refuse with the flag named rather than let the tile refuse the
+image.
+
 ### What the loader refuses
 
 A program that reaches a device has been checked for all of this, so

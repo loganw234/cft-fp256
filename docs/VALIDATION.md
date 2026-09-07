@@ -4466,3 +4466,56 @@ post-route number under a shell rather than out of context, where this
 project has one recorded 0.88 ns swing; and the frequency sweep that
 would establish either part's ceiling, which docs/studies/OPT-C-timing.md
 specifies and which the routed pairs here make possible.
+
+## 2026-09-07 - what four design studies found wrong, corrected
+
+Four studies (docs/studies/OPT-A to OPT-D) were commissioned for ideas,
+and their ideas stay ideas; what this entry records is the defects and
+stale claims they turned up on the way, each verified before it was
+fixed.
+
+**A live defect for card day: two workloads' defaults do not fit a
+tile.** `cft_seq` refuses a program header whose `max_deposits`
+exceeds `MAXD`, which rtl/cft_krnl.sv sets to 64 slots a lane, and the
+software backend accepts 2^20 - so a program that runs on the software
+backend has not been shown to fit a tile, and neither `cft_caps` nor
+docs/SEQUENCER.md said so. `cft-zoom` deposits two values a trip and
+its default `--steps-per-call 1024` asks for 2,048 slots; `cft-orbits`
+deposits four values a sample plus four at the start, for a whole run
+in one call, and its default of 16 periods sampled once a period asks
+for 68. Both defaults would have been refused by the tile with a
+status bit and no explanation. Both tools now refuse first, on any
+backend but the software one, naming the flag and the bound (32 trips;
+15 samples); the software backend's behaviour and every recorded chain
+are unchanged, and `zoomtest` and `orbitstest` pass. docs/SEQUENCER.md
+now states the three on-chip capacities (`MAXD` 64, `IMEM_D` 1024,
+`KMEM_D` 256) and that the loader does not enforce them.
+
+**Claims that were true of one backend and stated for both.**
+docs/ZOOM.md's "98 library calls" and docs/BENCHMARKS.md's row are the
+software backend's; at the tile's 32-trip cap the same reference is
+3,125 calls, still 256x fewer than the host loop. docs/ORBITS.md's "284
+calls" run is the benchmark's 16-period once-a-period sampling, which
+is 16 samples and would be refused; both documents now say so.
+
+**The 159 MHz ceiling.** docs/studies/OPT-C-timing.md refit the U50
+runs against their asks - each 1 ns taken off the ask bought about
+0.4 ns of path, so the 175 MHz run is a point on a slope rather than
+the floor - and puts the ceiling at 147-157 MHz with 159 as the upper
+end. docs/BRINGUP.md and docs/ROADMAP.md now quote the range.
+
+**The ~$100 board.** The QMTech core board's `xc7k325tffg676-1` is the
+-1 grade the previous entry routed at about 77 MHz; docs/PLATFORMS.md
+and docs/ROADMAP.md recommended it without saying so and now do, with
+the -2 alternatives named.
+
+**Also folded in.** The routed table reached docs/ARCHITECTURE.md,
+whose multi-cycle section still said implementation had not been run;
+`hw/impl_krnl_ooc.tcl` now writes a routed checkpoint and reports 25
+unique-pin paths rather than three, which is what a frequency sweep
+needs to read.
+
+**Not done here, on purpose.** None of the studies' designs - the
+nested rungs, the retimed ladders, the pipelined leading-zero cone,
+the indexed constants and the published caps. Those are proposals
+with their own gates in the study documents.

@@ -1749,10 +1749,22 @@ this section worth an hour.
 **Buy a QMTech XC7K325T core board (~$100, low-confidence price) and
 treat its first job as testing openXC7 rather than hosting a tile.**
 
+*Routed 2026-09-07, and the speed grade is the caveat.* The QMTech
+board's `xc7k325tffg676-1` is the -1 grade, and this tile misses an
+80 MHz ask on it by 0.384 ns - about 77 MHz - where the same tile on a
+-2 K325T closes 100 MHz with 0.096 ns to spare (docs/VALIDATION.md,
+2026-09-07). As the flow test below the board is still right; as a
+board that *runs* the tile, a -2 part is worth the difference - the
+$341 K325T PCIe card of section 5 (`XC7K325T-2FFG676I`, Gen2 x8, 1 GB
+DDR3) or the PZ-K7325T SOM in the Puzhi rows at the end of this
+document, both -2, in the two packages the routed runs covered.
+
 The reasoning is about evidence, not specifications. `xc7k325tffg676-1`
 is the exact die *and package* that openXC7's CI builds
 (`blinky-qmtech`, `blinky-stlv7325`), and a demonstrated part is worth
-more than a better one. A full tile is 60.6% of an XC7K325T, which is
+more than a better one. A full tile is 60.6% of an XC7K325T - 47.0%
+routed in the `board` configuration, docs/VALIDATION.md 2026-09-07 -
+which is
 the comfortable-fit row of §2's table, and Kintex-7 became free-tier
 in Vivado 2026.1 so the same board is also a vendor-flow target - a
 Vivado-versus-openXC7 A/B on one board is exactly the build-diversity
@@ -2018,6 +2030,11 @@ document.
 * Confirm the listing's **package is `ffg676`** - the CI part is
   `xc7k325tffg676-1`. A `ffg900` board is the Genesys 2 / Alinx
   package and is a different chipdb.
+* **Know what the -1 grade costs before choosing this board for a
+  running tile.** `xc7k325tffg676-1` routes this tile at about 77
+  MHz; a -2 closes 100 MHz (docs/VALIDATION.md, 2026-09-07). Right for
+  the flow test this board is for, not the board for the third tier's
+  tile.
 * Confirm DDR3 size and width. The figure found was 256 MB / 16-bit
   (MT41K128M16), and flash size conflicts between sources (128 vs 256
   Mbit).
