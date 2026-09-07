@@ -37,9 +37,11 @@ import { FLAGS_ALL, FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO,
          FLAG_OVERFLOW, FLAG_UNDERFLOW, FORMATOF_METHOD, MINMAG_METHOD,
          is754version1985, is754version2008, is754version2019 }
   from "./lib.mjs";
+import { replayCorpus } from "./seq_corpus.mjs";
 
 let passed = 0, failed = 0;
 const failures = [];
+let seqSummary = null;
 
 function test(name, fn) {
   try { fn(); passed++; }
@@ -2770,6 +2772,41 @@ test("map() sends a formatOf name somewhere useful", () => {
 });
 
 // ---------------------------------------------------------------------
+// the orbit sequencer's programs
+// ---------------------------------------------------------------------
+//
+// One test, and it is the whole recorded corpus: every program in
+// bindings/node/seq_corpus.jsonl loaded and run through
+// cft_program_load / cft_program_run, with every deposit, every
+// deposit count, the IEEE flag word and the STATUS word compared
+// against what libcft's C executor answered - and every deliberately
+// corrupt program refused here because the C loader refused it there.
+//
+// The recording is made by bindings/node/make_seq_corpus.py, which
+// will not write a case the golden model disagrees with;
+// host/tests/seq_check.py is the live comparison and stays the gate
+// for the executor itself. bindings/node/program_test.mjs is the rest
+// of this surface - programs written by hand for SETACT's early exit
+// and for deposit overflow, the refusals one at a time, the memory,
+// and a negative control that shows the comparison failing.
+
+test("the sequencer corpus: the C executor's answers, replayed here",
+     () => {
+  const ctxByName = {};
+  for (const w of WIDTHS) ctxByName[ctxs[w].format.name] = ctxs[w];
+  const s = replayCorpus(ctxByName);
+  ok(s.run > 0, "no program ran - the corpus proved nothing");
+  ok(s.refused > 0,
+     "no program was refused, so half of this check did not run");
+  ok(s.overflows > 0,
+     "no run overflowed its deposit budget, so the STATUS word was " +
+     "never compared against a set bit");
+  ok(s.lanes > 64,
+     "no run crossed libcft's 64-lane block boundary");
+  seqSummary = s;
+});
+
+// ---------------------------------------------------------------------
 // the negative control
 // ---------------------------------------------------------------------
 
@@ -2790,6 +2827,11 @@ test("NEGATIVE CONTROL: the comparisons can fail", () => {
 for (const w of WIDTHS) ctxs[w].close();
 freshCtx.close();
 
+if (seqSummary)
+  console.log(`sequencer  ${seqSummary.run} programs run and ` +
+              `${seqSummary.refused} refused from seq_corpus.jsonl, ` +
+              `${seqSummary.deposits} deposits and ${seqSummary.lanes} ` +
+              `counts compared with the C executor`);
 console.log(`${passed} passed, ${failed} failed`);
 for (const f of failures) console.log(`  FAIL  ${f}`);
 process.exit(failed ? 1 : 0);

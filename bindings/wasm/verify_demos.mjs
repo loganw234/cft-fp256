@@ -254,6 +254,16 @@ function reportLines(text) {
 
 function runCore(panel, runName, cfg) {
   const C = D.createCft(M);
+  // Every program image the core loads, hashed on the way past. A
+  // program is an ARTEFACT - the host DMAs it to the tile and can read
+  // it back to attest what ran - so "the same answer" is not the whole
+  // claim; step 4 compares these against the images the C tools load.
+  const images = [];
+  const load = C.loadProgram;
+  C.loadProgram = (image) => {
+    images.push({ bytes: image.length, sha256: sha256(Buffer.from(image)) });
+    return load.call(C, image);
+  };
   const t0 = Date.now();
   try {
     const job = D.PANELS[panel].create(C, cfg);
@@ -261,6 +271,7 @@ function runCore(panel, runName, cfg) {
     const res = job.result();
     res.seconds = (Date.now() - t0) / 1000;
     res.rate = res.seconds > 0 ? res.work / res.seconds : 0;
+    res.images = images;
     return res;
   } finally {
     try { C.close(C.dev); C.freeAll(); } catch (e) { /* teardown */ }
@@ -287,6 +298,7 @@ console.log(`\n== 3. the chains (${runs.length} configuration${runs.length === 1
             `${NO_NATIVE ? ", --no-native" : ""}) ==`);
 
 const fresh = [];
+const coreResults = {};        // "panel/run" -> the loop engine's result
 for (const r of runs) {
   console.log(`\n  ${r.panel}/${r.run}`);
   note(r.command);
@@ -319,6 +331,7 @@ for (const r of runs) {
     bad(`the compute core threw: ${err.message}`);
     continue;
   }
+  coreResults[`${r.panel}/${r.run}`] = res;
   note(`core: ${res.seconds.toFixed(3)} s, ` +
        `${Math.round(res.rate).toLocaleString("en-US")} ${res.workUnit}/s, ` +
        `${res.stats.calls.toLocaleString("en-US")} library calls, ` +
@@ -355,6 +368,115 @@ for (const r of runs) {
         bad(`${cname}: the tool now prints ${nativeChains[cname]}, and ` +
             `demos_chains.json records ${want} - re-record`);
     }
+  }
+}
+
+// ---------------------------------------------------------------------
+// 4. the two engines, and the images
+//
+// Two claims, and they are different ones.
+//
+//   THE CHAINS. A configuration the sequencer can hold is run again
+//   with `engine: "program"` and must produce the same chains. That is
+//   what lets sameCfg() on the page drop `engine` as a machine
+//   parameter: the two engines are one configuration, and if they ever
+//   parted the page would say DIFFER rather than "other config".
+//
+//   THE IMAGES. Byte for byte, the program image this port builds must
+//   be the program image the C tool loads - not merely one that
+//   computes the same thing. A device reads the image back to attest
+//   what ran (docs/SEQUENCER.md), so a readback hash is only a hash of
+//   "the program" if there is one program.
+//
+// The digests below were taken from the TOOLS: host/tools/zoom.c and
+// host/tools/orbits.c compiled EXACTLY as they stand, linked with
+// -Wl,--wrap=cft_program_load and a shim that writes each image out
+// before forwarding. Nothing in host/ was edited to get them.
+// docs/DEMOS.md records the commands and the sizes.
+// ---------------------------------------------------------------------
+const PROGRAM_IMAGES = {
+  // panel/run -> the images that run loads, in load order
+  "zoom/fp256-reference": [
+    { what: "the nucleus scan, 51 iterations (fp256 whatever the " +
+            "reference format is)", bytes: 136,
+      sha256: "8fad50d414aadc685faba7d64e701a0269a12ccd25d91d75bb656f454722272a" },
+    { what: "the reference orbit, 1,001 iterations at fp256", bytes: 248,
+      sha256: "9aaefec8adf583c63dcc70d1e7b940f596649dfd743f8b6cd574b011cfbe8ff1" },
+  ],
+  "zoom/fp64-reference": [
+    { what: "the nucleus scan, 51 iterations at fp256", bytes: 136,
+      sha256: "8fad50d414aadc685faba7d64e701a0269a12ccd25d91d75bb656f454722272a" },
+    { what: "the reference orbit, 1,001 iterations at fp64", bytes: 176,
+      sha256: "752e5489d358303d190bd3e51a491c69d016ddfe1c3547243ef6ea440ee4c8bc" },
+  ],
+  "orbits/fp256-newton": [
+    { what: "the whole integration, 49 instructions, 6 Newton passes",
+      bytes: 552,
+      sha256: "adcd627af5f1e71bab5647674176967e558f3663d191a08fbc354193b454b382" },
+  ],
+  "orbits/fp64-newton": [
+    { what: "the whole integration, 37 instructions, 3 Newton passes",
+      bytes: 360,
+      sha256: "d1ded7c1613b35099447d3a76a3a3b0e6fed139238d2fd324a2e18fa2511664f" },
+  ],
+};
+
+const engineRuns = runs.filter((r) => PROGRAM_IMAGES[`${r.panel}/${r.run}`]);
+if (engineRuns.length) {
+  console.log(`\n== 4. the sequencer program engine ` +
+              `(${engineRuns.length} configuration` +
+              `${engineRuns.length === 1 ? "" : "s"}) ==`);
+  for (const r of engineRuns) {
+    const key = `${r.panel}/${r.run}`;
+    console.log(`\n  ${key}`);
+    const cfg = Object.assign({}, r.cfg, { engine: "program" });
+    note(D.PANELS[r.panel].command(cfg));
+    let res;
+    try {
+      res = runCore(r.panel, r.run, cfg);
+    } catch (err) {
+      bad(`the program engine threw: ${err.message}`);
+      continue;
+    }
+    const loopRes = coreResults[key];
+    note(`core: ${res.seconds.toFixed(3)} s, ` +
+         `${Math.round(res.rate).toLocaleString("en-US")} ${res.workUnit}/s, ` +
+         `${res.stats.calls.toLocaleString("en-US")} library calls` +
+         (loopRes
+           ? ` (the loop engine: ${loopRes.seconds.toFixed(3)} s, ` +
+             `${Math.round(loopRes.rate).toLocaleString("en-US")}/s, ` +
+             `${loopRes.stats.calls.toLocaleString("en-US")} calls, ` +
+             `${(res.rate / (loopRes.rate || 1)).toFixed(2)}x)`
+           : ""));
+
+    for (const cname of r.chains) {
+      const want = loopRes ? loopRes.chains[cname] : undefined;
+      if (want === undefined) continue;
+      if (res.chains[cname] === want)
+        ok(`${cname}: the program engine and the loop engine agree - ${want}`);
+      else
+        bad(`${cname}: program ${res.chains[cname]} != loop ${want}. The ` +
+            `two engines are one configuration; this is a divergence, not ` +
+            `a retune`);
+    }
+
+    const want = PROGRAM_IMAGES[key];
+    const got = res.images || [];
+    if (got.length !== want.length) {
+      bad(`loaded ${got.length} program image(s), the C tool loads ` +
+          `${want.length}`);
+      continue;
+    }
+    want.forEach((w, i) => {
+      if (got[i].sha256 === w.sha256 && got[i].bytes === w.bytes)
+        ok(`image ${i} (${w.what}): ${w.bytes} bytes, ` +
+           `sha256 ${w.sha256.slice(0, 16)}… - the C tool's image, byte ` +
+           `for byte`);
+      else
+        bad(`image ${i} (${w.what}): this port builds ${got[i].bytes} ` +
+            `bytes sha256 ${got[i].sha256}, the C tool loads ${w.bytes} ` +
+            `bytes sha256 ${w.sha256}`);
+    });
   }
 }
 

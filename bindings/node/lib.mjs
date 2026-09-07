@@ -79,6 +79,24 @@ const FLAG_NAMES = [
  *  line quietly meaning "all but one". */
 export const FLAGS_ALL = FLAG_NAMES.reduce((a, [b]) => a | b, 0);
 
+/** CFT_STATUS_DEPOSIT_OVERFLOW - bit 4 of the STATUS word a sequencer
+ *  program run returns, NOT one of the five IEEE flags above.
+ *
+ *  A macro in cft.h, so it cannot be read out of the module the way an
+ *  entry point can, and therefore transcribed here - which is exactly
+ *  the shape of thing that goes wrong quietly: this bit lived at 3
+ *  until 2026-09-01, when the trimmed-build precision refusal took
+ *  STATUS[3] in the RTL, and it moved while it had never crossed a
+ *  device boundary. audit() asks the module for its value and refuses
+ *  to run if the two disagree, so a second move cannot leave this line
+ *  pointing at somebody else's bit.
+ *
+ *  It does not invalidate a result: a lane that deposits more than the
+ *  program's max_deposits drops the excess and sets this. What fit is
+ *  correct and reproducible; what was lost is the tail (cft.h,
+ *  docs/SEQUENCER.md). */
+export const STATUS_DEPOSIT_OVERFLOW = 1 << 4;
+
 /** The IEEE exception names set in a flag word. An unknown bit is
  *  reported as a number rather than dropped: a flag word this package
  *  cannot name is news, not noise. */
@@ -382,6 +400,27 @@ async function instantiate() {
     formatOfDiv:  M.cwrap("cftw_formatof_div", n, [n,n,n,n,n,n,n,n,n,n]),
     formatOfSqrt: M.cwrap("cftw_formatof_sqrt", n, [n,n,n,n,n,n,n,n,n]),
     formatOfFma:  M.cwrap("cftw_formatof_fma", n, [n,n,n,n,n,n,n,n,n,n,n]),
+
+    // The orbit sequencer's programs (docs/SEQUENCER.md). Four calls,
+    // one per declaration in cft.h: load an IMAGE - header, constant
+    // bank, instruction stream, the same bytes on disk, in this call
+    // and in a device's instruction memory - and get an opaque handle;
+    // ask what shape it is; run it over n elements; free it.
+    //
+    // programLoad writes the handle into an out-pointer and returns
+    // the status, like openSoftware. programGetInfo projects the
+    // sized struct into four out-pointers rather than copying it into
+    // the heap, for the reason capsBackend and its neighbours exist:
+    // reading struct offsets from JavaScript is the silent ABI
+    // coupling the struct_size handshake is there to prevent.
+    //
+    // statusDepositOverflow projects the macro, as flagsAll projects
+    // CFT_FLAGS_ALL; audit() checks it against the constant above.
+    programLoad:  M.cwrap("cftw_program_load", n, [n, n, n, n]),
+    programFree:  M.cwrap("cftw_program_free", null, [n]),
+    programGetInfo: M.cwrap("cftw_program_get_info", n, [n, n, n, n, n]),
+    programRun:   M.cwrap("cftw_program_run", n, [n,n,n,n,n,n,n,n,n]),
+    statusDepositOverflow: M.cwrap("cftw_status_deposit_overflow", n, []),
   };
 
   // ABI 0.3's nine, 0.4's eleven, 0.5's nine and 0.6's ten - the
@@ -446,6 +485,17 @@ function audit(M, C) {
     wrong.push(`CFT_FLAGS_ALL is 0x${moduleAll.toString(16)} in the ` +
                `module, 0x${FLAGS_ALL.toString(16)} here - the library ` +
                `defines an exception this package does not name`);
+  // CFT_STATUS_DEPOSIT_OVERFLOW is a macro too, and it has already
+  // moved once (STATUS[3] to STATUS[4], 2026-09-01). A stale copy here
+  // would report "the deposit buffer overflowed" off a bus-fault bit,
+  // or miss a real overflow - both of which are a run whose tail was
+  // dropped being read as a run that fitted.
+  const moduleOverflow = C.statusDepositOverflow() >>> 0;
+  if (moduleOverflow !== STATUS_DEPOSIT_OVERFLOW)
+    wrong.push(`CFT_STATUS_DEPOSIT_OVERFLOW is ` +
+               `0x${moduleOverflow.toString(16)} in the module, ` +
+               `0x${STATUS_DEPOSIT_OVERFLOW.toString(16)} here - the ` +
+               `sequencer's status bit moved and this package did not`);
   if (wrong.length)
     throw new Error(
       "this package's transcription of cft.h disagrees with the module " +

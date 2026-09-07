@@ -251,7 +251,21 @@
     return on.length ? on.join(" ") : "none";
   }
 
+  // The orbit sequencer's six control codes and its STATUS bit
+  // (docs/SEQUENCER.md). SEQ_STATUS_DEPOSIT_OVERFLOW is a macro in
+  // cft.h, so it is transcribed here and then AUDITED against the
+  // module's cftw_status_deposit_overflow() at open time, exactly as
+  // CFT_FLAGS_ALL is - it has already moved once, from STATUS[3] to
+  // STATUS[4] on 2026-09-01, and a stale copy would read a bus fault
+  // as "your deposit buffer was too small" or miss a dropped tail.
+  const SEQ = { halt: 0, repeat: 1, endrep: 2, deposit: 3, setact: 4,
+                actall: 5 };
+  const SEQ_STATUS_DEPOSIT_OVERFLOW = 1 << 4;
+
   function fail(msg) { throw new Error(msg); }
+
+  const nowMs = () => (typeof performance !== "undefined"
+                       ? performance.now() : Date.now());
 
   /** Wrap an instantiated emscripten module. One device, one bump
    *  allocator, and a table of raw exports - `_cftw_x` where the
@@ -295,6 +309,13 @@
       saveAllFlags: g("cftw_save_all_flags", 1),
       restoreFlags: g("cftw_restore_flags", 3),
       flagsAll: g("cftw_flags_all", 0),
+      // The orbit sequencer. Four calls, one per declaration in
+      // cft.h's program section, plus the macro projected as a call.
+      programLoadRaw: g("cftw_program_load", 4),
+      programFreeRaw: g("cftw_program_free", 1),
+      programInfoRaw: g("cftw_program_get_info", 5),
+      programRunRaw: g("cftw_program_run", 9),
+      statusDepositOverflow: g("cftw_status_deposit_overflow", 0),
     };
 
     const cstr = (p) => M.UTF8ToString(p);
@@ -314,6 +335,12 @@
     if (allFlags !== ourAll)
       fail(`the module's CFT_FLAGS_ALL is 0x${allFlags.toString(16)} and ` +
            `this file knows 0x${ourAll.toString(16)}`);
+    const moduleOverflow = C.statusDepositOverflow() >>> 0;
+    if (moduleOverflow !== SEQ_STATUS_DEPOSIT_OVERFLOW)
+      fail(`the module's CFT_STATUS_DEPOSIT_OVERFLOW is ` +
+           `0x${moduleOverflow.toString(16)} and this file knows ` +
+           `0x${SEQ_STATUS_DEPOSIT_OVERFLOW.toString(16)} - the ` +
+           `sequencer's status bit moved and this file did not`);
 
     // ---- memory ---------------------------------------------------
     // One arena per job, grown by doubling and never freed piecemeal.
@@ -329,6 +356,10 @@
       return p;
     };
     C.freeAll = function () {
+      // Sequencer program handles first: they are the library's own
+      // allocations and cft_program_free is the only thing that can
+      // give one back. `progs` is filled by C.loadProgram below.
+      while (progs.length) C.programFreeRaw(progs.pop());
       while (owned.length) M._free(owned.pop());
     };
     C.u8 = () => M.HEAPU8;
@@ -364,6 +395,7 @@
 
     // ---- scratch out-parameters -----------------------------------
     const flagPtr = C.malloc(4);
+    const busPtr = C.malloc(4);
     const lenPtr = C.malloc(4);
     const i64Ptr = C.malloc(8);
     const ptrPtr = C.malloc(4);
@@ -459,6 +491,65 @@
             "cft_rootn");
       C.calls++; C.elemOps += 1;
       return C.u32()[flagPtr >> 2] >>> 0;
+    };
+
+    // ---- the orbit sequencer --------------------------------------
+    //
+    // Four calls, one per declaration in cft.h's program section.
+    // cft_program_load takes the IMAGE - header, constant bank,
+    // instruction stream, the bytes docs/SEQUENCER.md specifies - and
+    // returns an opaque handle. NOTHING HERE PARSES OR VALIDATES AN
+    // IMAGE: the loader is the validator, and a second one on this
+    // side would be a second opinion about what a device may execute.
+    //
+    // The image copy comes out of the job's arena (small, a few
+    // hundred bytes, and there are at most three per job); the HANDLE
+    // is the library's, so freeAll gives every one back when the job
+    // ends, the way it gives back every malloc.
+    const progs = [];
+    C.loadProgram = function (image) {
+      const p = C.malloc(image.length);
+      C.u8().set(image, p);
+      C.u32()[ptrPtr >> 2] = 0;
+      check(C.programLoadRaw(C.dev, p, image.length, ptrPtr),
+            "cft_program_load");
+      const h = C.u32()[ptrPtr >> 2];
+      if (!h) fail("cft_program_load returned CFT_OK and no handle");
+      progs.push(h);
+      return h;
+    };
+    C.freeProgram = function (h) {
+      const at = progs.indexOf(h);
+      if (at >= 0) progs.splice(at, 1);
+      C.programFreeRaw(h);
+    };
+    /** { format, maxDeposits, nInsns, nConsts } - the shape the loader
+     *  read out of the header, so a caller sizes its buffers from the
+     *  library's answer rather than from its own arithmetic. */
+    C.programInfo = function (h) {
+      const four = C.malloc(16);
+      check(C.programInfoRaw(h, four, four + 4, four + 8, four + 12),
+            "cft_program_get_info");
+      const u = C.u32();
+      return { format: u[four >> 2] | 0, maxDeposits: u[(four >> 2) + 1],
+               nInsns: u[(four >> 2) + 2], nConsts: u[(four >> 2) + 3] };
+    };
+    /** cft_program_run over n elements. `deposits` is
+     *  n * max_deposits elements and `counts` n uint32s, both heap
+     *  pointers the caller owns; b, c and counts may be 0. Returns
+     *  { flags, status } - the IEEE flag union and the STATUS word,
+     *  which is where the deposit-overflow bit arrives and is NOT an
+     *  IEEE flag. Element accounting is the caller's: what a program
+     *  issues per lane is a property of the program. */
+    C.programRun = function (h, a, b, c, deposits, counts, n) {
+      C.u32()[flagPtr >> 2] = 0;
+      C.u32()[busPtr >> 2] = 0;
+      check(C.programRunRaw(h, a | 0, b | 0, c | 0, deposits | 0,
+                            counts | 0, n, flagPtr, busPtr),
+            "cft_program_run");
+      C.calls++;
+      const u = C.u32();
+      return { flags: u[flagPtr >> 2] >>> 0, status: u[busPtr >> 2] >>> 0 };
     };
 
     function ensureTxt(cap) {
@@ -622,6 +713,75 @@
     const one = C.tmp(0);
     C.fromI64(fi.fmt, RND.rne, 1, one);
     C.scaleb(fi.fmt, RND.rne, one, e, out, 1);
+  }
+
+  // =================================================================
+  // The orbit sequencer's assembler
+  //
+  // docs/SEQUENCER.md's encoding, ported from host/tools/zoom.c and
+  // host/tools/orbits.c - which each carry their own copy of these
+  // same three helpers, because each tool is a standalone program.
+  // This is the third copy and it is held to the other two the only
+  // way a copy can be: the images it builds are compared BYTE FOR BYTE
+  // against the images the C tools load, dumped from the tools
+  // themselves (docs/DEMOS.md records the comparison).
+  //
+  // Instruction words are BigInt because they are 64 bits and a JS
+  // number is a binary64 - bit 31 (ctrl) and the 32-bit immediate
+  // above it do not both fit in a double's integer range once the
+  // immediate is large. The C tools never set `rnd`, so neither does
+  // this: every instruction they issue is roundTiesToEven, which is
+  // field 26:24 = 0.
+  // =================================================================
+  function seqAlu(op, rd, ra, rb, rc, ka, kb, kc) {
+    return BigInt(op) | (BigInt(rd) << 8n) | (BigInt(ra) << 12n) |
+           (BigInt(rb) << 16n) | (BigInt(rc) << 20n) |
+           (BigInt(ka ? 1 : 0) << 27n) | (BigInt(kb ? 1 : 0) << 28n) |
+           (BigInt(kc ? 1 : 0) << 29n);
+  }
+  function seqCtl(code, ra, imm) {
+    return BigInt(code) | (BigInt(ra || 0) << 12n) | (1n << 31n) |
+           (BigInt(imm >>> 0) << 32n);
+  }
+
+  /** pack_program: header, constant bank, instruction stream. The
+   *  constants arrive as HEAP POINTERS to encodings, because that is
+   *  where this file keeps values; the C takes a contiguous buffer of
+   *  the same bytes. */
+  function packProgram(C, fi, ins, constPtrs, maxDeposits) {
+    const esz = fi.esz;
+    const img = new Uint8Array(32 + constPtrs.length * esz + ins.length * 8);
+    const dv = new DataView(img.buffer);
+    img[0] = 0x43; img[1] = 0x46; img[2] = 0x54; img[3] = 0x50;  // "CFTP"
+    dv.setUint32(4, 1, true);
+    dv.setUint32(8, ins.length, true);
+    dv.setUint32(12, constPtrs.length, true);
+    dv.setUint32(16, maxDeposits, true);
+    dv.setUint32(20, fi.fmt, true);
+    let off = 32;
+    const h = C.u8();
+    for (const p of constPtrs) {
+      img.set(h.subarray(p, p + esz), off);
+      off += esz;
+    }
+    for (const w of ins) { dv.setBigUint64(off, w, true); off += 8; }
+    return img;
+  }
+
+  /** Ask the LOADER what it read out of the header and compare it
+   *  with what this file thinks it packed. cft_program_get_info exists
+   *  so a caller can size its buffers without parsing the image
+   *  itself; using it as a round-trip check costs one call per program
+   *  and turns a header that did not survive the trip into a refusal
+   *  here rather than a deposit window one element short, found later
+   *  and somewhere else. */
+  function checkProgram(C, handle, fi, nInsns, nConsts, maxDeposits, what) {
+    const got = C.programInfo(handle);
+    const want = { format: fi.fmt, nInsns, nConsts, maxDeposits };
+    for (const k of ["format", "nInsns", "nConsts", "maxDeposits"])
+      if (got[k] !== want[k])
+        fail(`${what}: the loader reports ${k} = ${got[k]} and this file ` +
+             `packed ${want[k]}`);
   }
 
   function bcast(C, fi, dst, src, n) {
@@ -919,11 +1079,69 @@
   // pass and the C's k-th scalar call are the same operation on the
   // same operands; what it saves is 7 * maxk * chunks wasm crossings.
   // =================================================================
+  // ---- zoom's two programs, instruction for instruction -----------
+  //
+  // host/tools/zoom.c's orbit_insns() and scan_insns(). The register
+  // and constant numbering is the tool's, because a program is an
+  // ARTEFACT: the image these build is compared byte for byte against
+  // the image cft-zoom loads, so a register renamed here would be a
+  // different program however equivalent it looked.
+  const ZK = { four: 0, cr: 1, ci: 2 };            // the orbit's bank
+  const ZR = { zr: 0, zi: 1, a: 3, b: 4, m: 5, p: 6, t: 7, d: 8 };
+  const SK = { four: 0 };                          // the scan's bank
+  const SRG = { c: 0, z: 1, s: 2, p: 3 };
+
+  /** One iteration is nine instructions plus the two deposits that ARE
+   *  the orbit. The escape test runs on z_k BEFORE the step, so a lane
+   *  whose |z_k|^2 has passed 4 deposits nothing more and the deposit
+   *  count says exactly how far it got. */
+  function zoomOrbitInsns(reps) {
+    return [
+      seqCtl(SEQ.repeat, 0, reps),
+      seqAlu(OP.mul, ZR.a, ZR.zr, ZR.zr, 0, 0, 0, 0),
+      seqAlu(OP.mul, ZR.b, ZR.zi, ZR.zi, 0, 0, 0, 0),
+      seqAlu(OP.add, ZR.m, ZR.a, 0, ZR.b, 0, 0, 0),
+      seqAlu(OP.cmple, ZR.p, ZR.m, ZK.four, 0, 0, 1, 0),
+      seqCtl(SEQ.setact, ZR.p, 0),
+      seqAlu(OP.add, ZR.t, ZR.zr, 0, ZR.zr, 0, 0, 0),
+      seqAlu(OP.sub, ZR.d, ZR.a, 0, ZR.b, 0, 0, 0),
+      seqAlu(OP.fma, ZR.zi, ZR.t, ZR.zi, ZK.ci, 0, 0, 1),
+      seqAlu(OP.add, ZR.zr, ZR.d, 0, ZK.cr, 0, 0, 1),
+      seqCtl(SEQ.deposit, ZR.zr, 0),
+      seqCtl(SEQ.deposit, ZR.zi, 0),
+      seqCtl(SEQ.endrep, 0, 0),
+      seqCtl(SEQ.actall, 0, 0),
+      seqCtl(SEQ.halt, 0, 0),
+    ];
+  }
+
+  /** r0 = c (stream a), r1 = z, starting at +0 because that is what
+   *  z_0 is - which is why the run passes b = NULL. */
+  function zoomScanInsns(reps) {
+    return [
+      seqCtl(SEQ.repeat, 0, reps),
+      seqAlu(OP.mul, SRG.s, SRG.z, SRG.z, 0, 0, 0, 0),
+      seqAlu(OP.cmple, SRG.p, SRG.s, SK.four, 0, 0, 1, 0),
+      seqCtl(SEQ.setact, SRG.p, 0),
+      seqAlu(OP.add, SRG.z, SRG.s, 0, SRG.c, 0, 0, 0),
+      seqCtl(SEQ.endrep, 0, 0),
+      seqCtl(SEQ.actall, 0, 0),
+      seqCtl(SEQ.deposit, SRG.z, 0),
+      seqCtl(SEQ.halt, 0, 0),
+    ];
+  }
+
   function zoomJob(C, cfg) {
     const fi = measureFormat(C, cfg.format);
     const pf = measureFormat(C, "fp64");
     const f256 = measureFormat(C, "fp256");
     const esz = fi.esz;
+    // --engine program runs the reference orbit and the nucleus scan
+    // as sequencer programs instead of host cft_run loops. The C tool
+    // carries both engines and its own gate holds them to identical
+    // records; this port carries both for the same reason, and the
+    // page shows the two chains side by side.
+    const useProgram = cfg.engine === "program";
     const width = cfg.width;
     if (!width || (width & (width - 1)))
       fail("width must be a power of two");
@@ -960,7 +1178,10 @@
       valPow2(C, z, -3, eighth);
       C.zero(zero, ez);
 
-      // scan_engine, loop route: five opcodes an iteration.
+      // scan_engine. The program route runs one lane per candidate in
+      // one call; the loop route does the same arithmetic with the
+      // active mask spelled out, and the two must agree bit for bit -
+      // zoom.c's own words, and its own gate.
       const cap = SCAN_STEPS;
       const sz = C.malloc(cap * ez), ss = C.malloc(cap * ez);
       const sp = C.malloc(cap * ez), slive = C.malloc(cap * ez);
@@ -970,7 +1191,45 @@
       C.fromI64(z.fmt, RND.rne, 1, oneV);
       bcast(C, z, sfour, four, cap);
 
+      let scanProg = 0, scanDep = 0, scanCounts = 0;
+      if (useProgram) {
+        const ins = zoomScanInsns(period);
+        scanProg = C.loadProgram(packProgram(C, z, ins, [four], 1));
+        // The deposit window is sized from the LOADER's answer rather
+        // than from this file's arithmetic, and the two are compared:
+        // a header that did not round-trip would otherwise be a buffer
+        // one element short, found later and somewhere else.
+        checkProgram(C, scanProg, z, ins.length, 1, 1, "the nucleus scan");
+        scanDep = C.malloc(cap * ez);
+        scanCounts = C.malloc(cap * 4);
+      }
+
       function scanEval(cPtr, outPtr, n) {
+        if (useProgram) {
+          const r = C.programRun(scanProg, cPtr, 0, 0, scanDep, scanCounts,
+                                 n);
+          if (r.status & SEQ_STATUS_DEPOSIT_OVERFLOW)
+            fail("the scan program overflowed its deposit buffer");
+          // The loop route checks the ESCAPE COMPARISON's own flag
+          // word and ignores the multiply's. A program returns one
+          // union over the whole run, so that check is not available
+          // here; the strongest statement this route can make is that
+          // nothing but inexact was raised, which is what the same
+          // arithmetic raises element by element.
+          if (r.flags & ~FLAG.inexact)
+            fail(`the nucleus scan program raised 0x` +
+                 `${r.flags.toString(16)}; only inexact is possible here`);
+          const u = C.u32();
+          for (let i = 0; i < n; i++)
+            if (u[(scanCounts >> 2) + i] !== 1)
+              fail("a scan lane deposited the wrong number of values");
+          C.copy(outPtr, scanDep, n * ez);
+          // two ALU issues a lane an iteration - the MUL and the
+          // comparison; REPEAT, SETACT, ACTALL and DEPOSIT are
+          // control, not arithmetic
+          C.elemOps += n * period * 2;
+          return;
+        }
         C.zero(sz, n * ez);
         bcast(C, z, slive, oneV, n);
         for (let it = 0; it < period; it++) {
@@ -1069,6 +1328,10 @@
     const chain = new Chain();
     const pixchain = new Chain();
     let k = 0, escapedAt = 0, flagsRef = 0, flagsSeen = 0;
+    // The reference phase's own wall time and its own call count -
+    // measured because it is the only part of this panel either engine
+    // changes.
+    let refSeconds = 0, refCalls = 0;
     const orbitPlot = [];
 
     function noteFlags(f) {
@@ -1093,6 +1356,68 @@
       R1(OP.add, od, 0, cr, zr);
       C.copy(zi, onzi, esz);
       return true;
+    }
+
+    // orbit_pass, program route: the same eight ALU issues an
+    // iteration, compiled for the trip count and issued ONCE.
+    //
+    // A program is compiled for its trip count, so the engine gets an
+    // image of exactly the length that remains - the tool's own reason
+    // is that the flag word is a union over the call, so a call that
+    // computed iterations the host discards would report flags for
+    // work that is not in the result. At this configuration
+    // (--ref-iters 1001, the tool's --steps-per-call default 1024) the
+    // C tool issues one call too, which is what makes the two
+    // comparable.
+    let orbProg = 0, orbDep = 0, orbCounts = 0, orbReps = 0;
+    function orbitProgram(reps) {
+      if (orbProg && orbReps === reps) return;
+      if (orbProg) C.freeProgram(orbProg);
+      // The software backend caps a lane at 2^20 deposit slots and
+      // this program deposits two a trip; a tile holds 64, which is
+      // why cft-zoom is held to --steps-per-call 32 on a device and
+      // refuses with the flag named rather than letting the tile
+      // refuse the image.
+      if (2 * reps > (1 << 20))
+        fail(`${reps} iterations in one program is ${2 * reps} deposits a ` +
+             `lane, past the 2^20 the software backend holds - lower the ` +
+             `iteration cap or run --engine loop`);
+      orbReps = reps;
+      const ins = zoomOrbitInsns(reps);
+      orbProg = C.loadProgram(
+        packProgram(C, fi, ins, [four, cr, ci], 2 * reps));
+      checkProgram(C, orbProg, fi, ins.length, 3, 2 * reps,
+                   "the reference orbit");
+      orbDep = C.malloc(2 * reps * esz);
+      orbCounts = C.malloc(4);
+    }
+
+    /** Advance the orbit by up to `reps` iterations from (zr, zi),
+     *  writing the points into orbR/orbI at k+1... Returns how many
+     *  ran; fewer than `reps` means |z|^2 passed 4 on the next one. */
+    function orbitPass(reps) {
+      orbitProgram(reps);
+      const r = C.programRun(orbProg, zr, zi, 0, orbDep, orbCounts, 1);
+      if (r.status & SEQ_STATUS_DEPOSIT_OVERFLOW)
+        fail("the deposit buffer overflowed - the program is wrong");
+      noteFlags(r.flags);
+      const cnt = C.u32()[orbCounts >> 2];
+      if (cnt & 1) fail("the orbit program deposited an odd number of values");
+      const did = cnt >> 1;
+      // eight ALU instructions an iteration - two multiplies, three
+      // adds, a subtract, a fused multiply-add and the comparison;
+      // REPEAT, SETACT and the two DEPOSITs are control, not
+      // arithmetic, and the host loop issues exactly the same eight
+      C.elemOps += did * 8;
+      for (let j = 0; j < did; j++) {
+        C.copy(orbR + (k + 1 + j) * esz, orbDep + (2 * j) * esz, esz);
+        C.copy(orbI + (k + 1 + j) * esz, orbDep + (2 * j + 1) * esz, esz);
+      }
+      if (did) {
+        C.copy(zr, orbR + (k + did) * esz, esz);
+        C.copy(zi, orbI + (k + did) * esz, esz);
+      }
+      return did;
     }
 
     // ---- the pixel phase's state, built when the orbit is done ----
@@ -1231,6 +1556,12 @@
     let phase = "orbit", finished = false;
     let nEsc = 0, nGl = 0, nInt = 0, escMin = 0xffffffff, escMax = 0;
     const ORBIT_CHUNK = 64;
+    // cft-zoom's own --steps-per-call default. The loop route reads it
+    // as a chunk size and the program route as a trip count, and the
+    // page's 1,001 reference iterations are under it either way, so
+    // both engines make ONE pass here - which is what makes their
+    // costs comparable.
+    const ZOOM_STEPS_PER_CALL = 1024;
 
     /** |c_fmt - c_fp256| in pixels: the reference's own representation
      *  error, which is what decides whether a format can serve a zoom
@@ -1256,6 +1587,30 @@
       step() {
         if (finished) return { done: true };
         if (phase === "orbit") {
+          // The reference phase is timed on its own. It is the ONLY
+          // part of this panel the sequencer touches - the pixel phase
+          // is cft_run in the C tool too - so a whole-run figure would
+          // drown the thing being measured in nineteen seconds of
+          // something else.
+          const tPhase = nowMs();
+          if (useProgram) {
+            // One call per chunk, the chunk being the tool's own
+            // --steps-per-call, and a program of exactly the length
+            // that remains when the last chunk is short.
+            const remain = refIters - k;
+            const take = Math.min(remain, ZOOM_STEPS_PER_CALL);
+            const did = orbitPass(take);
+            for (let j = 1; j <= did; j++) {
+              const idx = k + j;
+              chain.absorb(`${idx} ${decInteger0(C, fi, orbR + idx * esz)} ` +
+                           `${decInteger0(C, fi, orbI + idx * esz)}`);
+              if ((idx & 7) === 0 || idx < 64)
+                orbitPlot.push([C.showDouble(fi.fmt, orbR + idx * esz),
+                                C.showDouble(fi.fmt, orbI + idx * esz)]);
+            }
+            k += did;
+            if (did < take) escapedAt = k;
+          } else {
           const target = Math.min(k + ORBIT_CHUNK, refIters);
           while (k < target && !escapedAt) {
             if (!orbitIter()) { escapedAt = k; break; }
@@ -1268,6 +1623,9 @@
               orbitPlot.push([C.showDouble(fi.fmt, orbR + k * esz),
                               C.showDouble(fi.fmt, orbI + k * esz)]);
           }
+          }
+          refSeconds += (nowMs() - tPhase) / 1000;
+          refCalls = C.calls;
           if (k >= refIters || escapedAt) {
             flagsRef = flagsSeen;
             preparePixels();
@@ -1317,6 +1675,9 @@
           chain: pixchain.hex(),
           stats: {
             format: fi.name, prec: fi.prec, pixelFormat: pf.name,
+            engine: useProgram ? "program" : "loop",
+            refSeconds, refCalls,
+            refRate: refSeconds > 0 ? k / refSeconds : 0,
             width, zoomExp, period, refIters: k, escapedAt,
             pixelIters: maxk, glitchBits,
             centre: C.showDecimal(f256.fmt, c256r, 40),
@@ -1354,9 +1715,76 @@
   // correctly rounded route. One library call per operation per
   // ensemble, exactly as opN/sqrtN/divN issue them.
   // =================================================================
+  // ---- orbits' program, instruction for instruction ---------------
+  //
+  // host/tools/orbits.c's build_program(). The register mapping is
+  // FORCED, and orbits.c says why: cft_program_run initialises only
+  // r0, r1 and r2, and the Kepler initial condition has exactly two
+  // non-zero components, so the two that must be zero go in registers
+  // that start at +0 - r2 by passing c = NULL, r3 because r3..r15
+  // always do.
+  const OREG = { q0: 0, v1: 1, q1: 2, v0: 3, x: 4, y: 5, w: 6, e: 7,
+                 z: 8, g: 9 };
+  const OKB = { mone: 0, mhalf: 1 };
+  const okbHd = (s) => 2 + 2 * s;
+  const okbMg = (s) => 3 + 2 * s;
+  const DEPOSITS_PER_SAMPLE = 4;
+
+  function orbitsInsns(fi, nsub, nsamples, stride) {
+    const ins = [];
+    // sample 0: the initial state, before a single step
+    ins.push(seqCtl(SEQ.deposit, OREG.q0, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.q1, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.v0, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.v1, 0));
+    ins.push(seqCtl(SEQ.repeat, 0, nsamples));
+    ins.push(seqCtl(SEQ.repeat, 0, stride));
+    for (let s = 0; s < nsub; s++) {
+      ins.push(seqAlu(OP.fma, OREG.q0, okbHd(s), OREG.v0, OREG.q0, 1, 0, 0));
+      ins.push(seqAlu(OP.fma, OREG.q1, okbHd(s), OREG.v1, OREG.q1, 1, 0, 0));
+      ins.push(seqAlu(OP.mul, OREG.w, OREG.q1, OREG.q1, 0, 0, 0, 0));
+      ins.push(seqAlu(OP.fma, OREG.x, OREG.q0, OREG.q0, OREG.w, 0, 0, 0));
+      ins.push(seqAlu(OP.rsqrt_seed, OREG.y, OREG.x, 0, 0, 0, 0, 0));
+      for (let k = 0; k < fi.newton; k++) {
+        ins.push(seqAlu(OP.mul, OREG.w, OREG.x, OREG.y, 0, 0, 0, 0));
+        ins.push(seqAlu(OP.fma, OREG.e, OREG.w, OREG.y, OKB.mone, 0, 0, 1));
+        ins.push(seqAlu(OP.mul, OREG.z, OREG.y, OKB.mhalf, 0, 0, 1, 0));
+        ins.push(seqAlu(OP.fma, OREG.y, OREG.z, OREG.e, OREG.y, 0, 0, 0));
+      }
+      ins.push(seqAlu(OP.mul, OREG.w, OREG.y, OREG.y, 0, 0, 0, 0));
+      ins.push(seqAlu(OP.mul, OREG.w, OREG.w, OREG.y, 0, 0, 0, 0));
+      ins.push(seqAlu(OP.mul, OREG.g, OREG.w, okbMg(s), 0, 0, 1, 0));
+      ins.push(seqAlu(OP.fma, OREG.v0, OREG.g, OREG.q0, OREG.v0, 0, 0, 0));
+      ins.push(seqAlu(OP.fma, OREG.v1, OREG.g, OREG.q1, OREG.v1, 0, 0, 0));
+      ins.push(seqAlu(OP.fma, OREG.q0, okbHd(s), OREG.v0, OREG.q0, 1, 0, 0));
+      ins.push(seqAlu(OP.fma, OREG.q1, okbHd(s), OREG.v1, OREG.q1, 1, 0, 0));
+    }
+    ins.push(seqCtl(SEQ.endrep, 0, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.q0, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.q1, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.v0, 0));
+    ins.push(seqCtl(SEQ.deposit, OREG.v1, 0));
+    ins.push(seqCtl(SEQ.endrep, 0, 0));
+    ins.push(seqCtl(SEQ.halt, 0, 0));
+    return ins;
+  }
+
   function orbitsJob(C, cfg) {
     const fi = measureFormat(C, cfg.format);
     const esz = fi.esz, M = cfg.members;
+    // --rsqrt is a RUN parameter and not a machine one: the two routes
+    // are different arithmetic and are not expected to agree, which is
+    // why orbits.c's checkpoint records it. --engine is the machine
+    // parameter, and the program engine exists only under newton -
+    // cft_sqrt and cft_div are compositions partitioned host-prep /
+    // program-core / host-finish, so they cannot sit inside another
+    // program's loop body.
+    const useNewton = cfg.rsqrt === "newton";
+    const useProgram = cfg.engine === "program";
+    if (useProgram && !useNewton)
+      fail("--engine program needs --rsqrt newton: the correctly rounded " +
+           "1/r^3 route is host-prep, program core, host finish, and " +
+           "cannot be inlined inside another program's loop body");
     const ncomp = 2, nL = 1;
     const nsteps0 = cfg.periods * cfg.stepsPerPeriod;
     let stride = cfg.sampleEvery || cfg.stepsPerPeriod;
@@ -1368,6 +1796,7 @@
     const arr = (n) => C.malloc(n * esz);
     const q = arr(ncomp * M), v = arr(ncomp * M);
     const x = arr(M), y = arr(M), w = arr(M), g = arr(M);
+    const ev = arr(M), zv = arr(M);        // the Newton route's e and z
     const t1 = arr(M), t2 = arr(M);
     const H0 = arr(M), Hd = arr(M), dHmax = arr(M);
     const L0 = arr(M), Ld = arr(M), dLmax = arr(M);
@@ -1383,7 +1812,14 @@
     valPow2(C, fi, -1, half);
     C.runN(OP.neg, fi.fmt, RND.rne, half, 0, 0, mhalf, 1);
     const cHalf = arr(M), cMu = arr(M), cHd = arr(M), cMg = arr(M);
+    const cMone = arr(M), cMhalf = arr(M);
+    // The same two values one element wide, because the constant BANK
+    // of a program holds one copy shared across lanes - which is most
+    // of the area argument on a chiplet (docs/SEQUENCER.md).
+    const kHd = C.malloc(esz), kMg = C.malloc(esz);
     bcast(C, fi, cHalf, half, M);
+    bcast(C, fi, cMone, mone, M);
+    bcast(C, fi, cMhalf, mhalf, M);
 
     // h = 2 pi / steps_per_period, with pi = acos(-1) from the library.
     {
@@ -1397,13 +1833,13 @@
     C.fromI64(fi.fmt, RND.rne, 1, tmp);
     bcast(C, fi, cMu, tmp, M);
     {
-      const hs = C.malloc(esz), hd = C.malloc(esz), t = C.malloc(esz);
+      const hs = C.malloc(esz), t = C.malloc(esz);
       C.runN(OP.mul, fi.fmt, RND.rne, one, h, 0, hs, 1);
-      C.runN(OP.mul, fi.fmt, RND.rne, hs, half, 0, hd, 1);
-      bcast(C, fi, cHd, hd, M);
+      C.runN(OP.mul, fi.fmt, RND.rne, hs, half, 0, kHd, 1);
+      bcast(C, fi, cHd, kHd, M);
       C.runN(OP.mul, fi.fmt, RND.rne, hs, tmp, 0, t, 1);
-      C.runN(OP.neg, fi.fmt, RND.rne, t, 0, 0, t, 1);
-      bcast(C, fi, cMg, t, M);
+      C.runN(OP.neg, fi.fmt, RND.rne, t, 0, 0, kMg, 1);
+      bcast(C, fi, cMg, kMg, M);
     }
 
     // ---- the initial ensemble ----
@@ -1453,15 +1889,42 @@
     const sqN = (a, d) => note(C.sqrtN(fi.fmt, RND.rne, a, d, M));
     const dvN = (a, b, d) => note(C.divN(fi.fmt, RND.rne, a, b, d, M));
 
+    /** On entry x holds r^2 for every member; on exit `dst` holds
+     *  scale / r^3. The two routes are DIFFERENT ARITHMETIC and are
+     *  not expected to agree - orbits.c's own words, and the reason
+     *  --rsqrt is a run parameter its checkpoint records.
+     *
+     *  The Newton route's iteration count is derived from the format's
+     *  p by measureFormat, never tabulated: the seed's stated relative
+     *  error is below 2^-8.5 so it is good to at least eight bits, a
+     *  Newton step takes b to 2b - 1, and the count is how many times
+     *  that has to run to pass p + 2. */
+    function invR3Scaled(scale, dst) {
+      if (!useNewton) {
+        sqN(x, y);                       // s = sqrt(r^2)
+        opN(OP.mul, x, y, 0, w);         // w = r^2 * s
+        dvN(scale, w, dst);              // dst = scale / r^3
+        return;
+      }
+      opN(OP.rsqrt_seed, x, 0, 0, y);
+      for (let it = 0; it < fi.newton; it++) {
+        opN(OP.mul, x, y, 0, w);              /* w = x*y      */
+        opN(OP.fma, w, y, cMone, ev);         /* e = x y^2 -1 */
+        opN(OP.mul, y, cMhalf, 0, zv);        /* z = -y/2     */
+        opN(OP.fma, zv, ev, y, y);            /* y = y - ye/2 */
+      }
+      opN(OP.mul, y, y, 0, w);                /* w = y^2      */
+      opN(OP.mul, w, y, 0, w);                /* w = y^3      */
+      opN(OP.mul, w, scale, 0, dst);
+    }
+
     function oneStep() {
       // drift; kick; drift  (leapfrog: one substep)
       opN(OP.fma, cHd, CV(0), CQ(0), CQ(0));
       opN(OP.fma, cHd, CV(1), CQ(1), CQ(1));
       opN(OP.mul, CQ(1), CQ(1), 0, w);
       opN(OP.fma, CQ(0), CQ(0), w, x);
-      sqN(x, y);                       // s = sqrt(r^2)
-      opN(OP.mul, x, y, 0, w);         // w = r^2 * s
-      dvN(cMg, w, g);                  // g = -(h mu)/r^3
+      invR3Scaled(cMg, g);             // g = -(h mu)/r^3
       opN(OP.fma, g, CQ(0), CV(0), CV(0));
       opN(OP.fma, g, CQ(1), CV(1), CV(1));
       opN(OP.fma, cHd, CV(0), CQ(0), CQ(0));
@@ -1546,11 +2009,98 @@
       return rec;
     }
 
+    // ---- the program engine -----------------------------------------
+    //
+    // The WHOLE integration is one call and cannot resume: a program
+    // can be entered only at a state with at most three non-zero
+    // components, and only step 0 is such a state - which is the first
+    // of the two facts about the program model orbits.c records as an
+    // ask (docs/SEQUENCER.md, "What the workloads asked").
+    //
+    // The deposits are replayed afterwards through emitSample, THE
+    // SAME host routine the loop engine calls, so the two engines'
+    // records are the same bytes rather than two computations of the
+    // same quantity.
+
+    // Stormer-Verlet, cft-orbits' default scheme: ONE substep of
+    // weight 1. The tool composes higher-order schemes out of several
+    // substeps with different weights and a constant pair each, which
+    // is why its constant bank grows with nsub and why this number is
+    // named rather than folded away.
+    const nsub = 1;
+    const aluPerStep = nsub * (12 + 4 * fi.newton);
+    let progDep = 0, progCounts = 0, progMaxDep = 0;
+    let progInsns = 0, progBytes = 0;
+    function runProgram() {
+      progMaxDep = (nsamples + 1) * DEPOSITS_PER_SAMPLE;
+      // A tile holds 64 deposit slots a lane (MAXD, rtl/cft_krnl.sv),
+      // which is 15 samples; the software backend holds 2^20. The page
+      // is the software backend - a browser has no tile - so this
+      // refuses only at the software cap, and names the tile's so the
+      // number is not a surprise on a device.
+      if (progMaxDep > (1 << 20))
+        fail(`${nsamples} samples is ${progMaxDep} deposits a lane, past ` +
+             `the 2^20 the software backend holds (a tile holds 64, which ` +
+             `is 15 samples) - sample less often or run --engine loop`);
+      const ins = orbitsInsns(fi, nsub, nsamples, stride);
+      const image = packProgram(C, fi, ins, [mone, mhalf, kHd, kMg],
+                                progMaxDep);
+      progInsns = ins.length;
+      progBytes = image.length;
+      const h = C.loadProgram(image);
+      checkProgram(C, h, fi, ins.length, 4, progMaxDep, "the integration");
+      progDep = C.malloc(M * progMaxDep * esz);
+      progCounts = C.malloc(M * 4);
+      const r = C.programRun(h, CQ(0), CV(1), 0, progDep, progCounts, M);
+      if (r.status & SEQ_STATUS_DEPOSIT_OVERFLOW)
+        fail("the deposit buffer overflowed - the program is wrong");
+      note(r.flags);
+      const u = C.u32();
+      for (let m = 0; m < M; m++)
+        if (u[(progCounts >> 2) + m] !== progMaxDep)
+          fail(`lane ${m} deposited ${u[(progCounts >> 2) + m]} values, ` +
+               `not ${progMaxDep}`);
+      // the ALU issues a lane actually performed - the same count the
+      // host loop makes for the same step, which is what lets the two
+      // throughputs be compared
+      C.elemOps += M * nsteps * aluPerStep;
+      C.freeProgram(h);
+    }
+
+    /** Load sample `s` out of the deposit window into q and v, then
+     *  emit it exactly as the loop engine does. Deposit d of element m
+     *  is at m * max_deposits + d - the address depends on the
+     *  element's own index and nothing else (SEQUENCER.md P2). */
+    function replaySample(s) {
+      for (let m = 0; m < M; m++) {
+        const d = progDep + (m * progMaxDep + s * DEPOSITS_PER_SAMPLE) * esz;
+        C.copy(q + (0 * M + m) * esz, d + 0 * esz, esz);
+        C.copy(q + (1 * M + m) * esz, d + 1 * esz, esz);
+        C.copy(v + (0 * M + m) * esz, d + 2 * esz, esz);
+        C.copy(v + (1 * M + m) * esz, d + 3 * esz, esz);
+      }
+      return emitSample(s, s * stride);
+    }
+
     let started = false, finished = false;
     const job = {
       title: "orbits", format: fi, nsamples, nsteps, stride, members: M,
       step() {
         if (finished) return { done: true };
+        if (useProgram) {
+          if (!started) {
+            started = true;
+            runProgram();
+            const rec0 = replaySample(0);
+            return { done: false, progress: 0, emitted: { sample: rec0 } };
+          }
+          sample++;
+          stepNo = sample * stride;
+          const rec = replaySample(sample);
+          if (sample >= nsamples) finished = true;
+          return { done: finished, progress: sample / nsamples,
+                   emitted: { sample: rec } };
+        }
         if (!started) {
           started = true;
           const rec = emitSample(0, 0);
@@ -1577,6 +2127,11 @@
             format: fi.name, prec: fi.prec, members: M, nsteps, nsamples,
             stride, periods: cfg.periods, stepsPerPeriod: cfg.stepsPerPeriod,
             spread: cfg.spread,
+            engine: useProgram ? "program" : "loop",
+            rsqrt: useNewton ? "newton" : "exact",
+            newton: useNewton ? fi.newton : 0,
+            programInsns: progInsns, programBytes: progBytes,
+            programDeposits: progMaxDep,
             h: C.showDecimal(fi.fmt, h, 12),
             dHmax: maxOf(dHmax), dLmax: maxOf(dLmax),
             H0: C.showDouble(fi.fmt, H0), L0: C.showDouble(fi.fmt, L0),
@@ -2276,14 +2831,26 @@
   // =================================================================
   const COLLATZ_DEEP_VALUE = ((1n << 237n) - 1315n).toString();
 
+  // `engine` is a MACHINE parameter and not a result one: the loop and
+  // program engines are held to byte-identical records by each tool's
+  // own gate, so a chain computed either way is a chain about the same
+  // configuration. That is orbits.c's checkpoint doctrine - the file
+  // "carries every number that describes a RESULT and nothing that
+  // describes the MACHINE - no batch size, no engine, no timing" - and
+  // the page's sameCfg() drops the field for that reason.
+  //
+  // `rsqrt` is the opposite: the two 1/r^3 routes are different
+  // arithmetic and are not expected to agree, so it is part of the
+  // configuration and the newton runs have recorded chains of their
+  // own.
   const ZOOM_BASE = {
     width: 128, zoomExp: 196, period: 51, refIters: 1001,
     pixelIters: 1000, batch: 1024, refOffset: 0, glitchBits: 0,
-    centre: null,
+    centre: null, engine: "loop",
   };
   const ORBITS_BASE = {
     members: 8, periods: 4, stepsPerPeriod: 512, sampleEvery: 32,
-    spread: 1,
+    spread: 1, rsqrt: "exact", engine: "loop",
   };
   const ENCLOSE_BASE = {
     points: 16, degree: 23, dotM: 32, dotTop: 60, condMax: 164,
@@ -2299,12 +2866,13 @@
            `--to ${cfg.to} --batch ${cfg.batch}`;
   }
   function zoomCommand(cfg) {
-    return `./host/cft-zoom --engine loop --format ${cfg.format} ` +
+    return `./host/cft-zoom --engine ${cfg.engine} --format ${cfg.format} ` +
            `--width ${cfg.width} --ref-iters ${cfg.refIters} ` +
            `--pixel-iters ${cfg.pixelIters} --batch ${cfg.batch}`;
   }
   function orbitsCommand(cfg) {
-    return `./host/cft-orbits --engine loop --format ${cfg.format} ` +
+    return `./host/cft-orbits --engine ${cfg.engine} ` +
+           `--rsqrt ${cfg.rsqrt} --format ${cfg.format} ` +
            `--members ${cfg.members} --periods ${cfg.periods} ` +
            `--steps-per-period ${cfg.stepsPerPeriod} ` +
            `--sample-every ${cfg.sampleEvery}`;
@@ -2353,6 +2921,17 @@
           cfg: Object.assign({ format: "fp256" }, ORBITS_BASE) },
         { name: "fp64", chains: ["chain"],
           cfg: Object.assign({ format: "fp64" }, ORBITS_BASE) },
+        // The Newton 1/r^3 route, which is what the sequencer can
+        // hold: a program cannot call cft_sqrt and cft_div, so the
+        // correctly rounded route above is a loop-engine route and
+        // these two are where the program engine has something to be
+        // equal to. Different arithmetic, so their own chains.
+        { name: "fp256-newton", chains: ["chain"],
+          cfg: Object.assign({ format: "fp256" }, ORBITS_BASE,
+                             { rsqrt: "newton" }) },
+        { name: "fp64-newton", chains: ["chain"],
+          cfg: Object.assign({ format: "fp64" }, ORBITS_BASE,
+                             { rsqrt: "newton" }) },
       ],
     },
     enclose: {
@@ -2418,6 +2997,14 @@
     encloseCondMax, decInteger, geometryDerive, dotMantissaBits,
     COLLATZ_DEEP_VALUE, MERSENNE_MORE,
     ZOOM_BASE, ORBITS_BASE, ENCLOSE_BASE,
+    // The sequencer's assembler and the three program builders,
+    // exported so verify_demos.mjs can hash the IMAGES this file
+    // produces against the images the C tools load. A program is an
+    // artefact and a device can read it back to attest what ran; two
+    // ports that agree on every answer while emitting different bytes
+    // would be two programs, and the readback hash would say so.
+    SEQ, SEQ_STATUS_DEPOSIT_OVERFLOW, seqAlu, seqCtl, packProgram,
+    zoomOrbitInsns, zoomScanInsns, orbitsInsns, DEPOSITS_PER_SAMPLE,
   };
 })(typeof globalThis !== "undefined" ? globalThis
    : (typeof self !== "undefined" ? self : this));
