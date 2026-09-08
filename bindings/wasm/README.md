@@ -966,3 +966,32 @@ green again. A checker that has never been seen to fail proves nothing.
 **No network at runtime.** Loading the page costs one GET for the file
 and one for the Worker's `blob:` URL. Nothing else appears in the
 network log, from `file://` or over a server.
+
+### Rebuilt at ABI 0.9, 2026-09-08
+
+The block above was measured on 2026-09-04 against module
+`a1f0a4715516d3f6…`; the page was rebuilt onto the 0.8 module on
+2026-09-07 with the program panels, and onto **0.9's
+`1af4ddd3514e3335…`** here. The page embeds `cft_node.wasm` byte for
+byte, so rebuilding the module makes this page stale in the same act
+that makes `conformance.html` stale, and `verify_demos.mjs` step 1 says
+so on one line.
+
+`demos_chains.json` is stamped with the module it was recorded against
+and `build_demos.sh` refuses to assemble a page whose module does not
+match that stamp, so the rebuild went through
+`verify_demos.mjs --record` rather than around it. **Sixteen of the
+seventeen sha256-shaped values in that file came back identical and the
+seventeenth is the module stamp** - every Collatz chain, the zoom orbit
+and pixels, the two zoom images, the four orbits chains and their
+program images. The rest of the diff is the `recorded` date and this
+machine's timings, which are not a claim about anything. The thirteen
+exports ABI 0.9 added are doors; the arithmetic behind them did not
+move, and that is measured rather than assumed.
+
+`demos.html` **532,331 bytes**, sha256 `dfb9f3418522567a…`;
+`demos_core.js` unchanged (sha256 `0fc4643a77d98825…`).
+`verify_demos.mjs` then passed with 44 ok and 0 FAIL, verdict *"the
+browser's compute core produced the C tools' chains, over the module
+the conformance page embeds"*, and the negative control still built and
+still sabotaged.
