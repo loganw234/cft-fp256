@@ -406,7 +406,28 @@ const NEEDED = ["cftw_run", "cftw_reduce", "cftw_conformance",
                 // every demo panel runs its tool's host-loop engine.
                 "cftw_program_load", "cftw_program_free",
                 "cftw_program_get_info", "cftw_program_run",
-                "cftw_status_deposit_overflow"];
+                "cftw_status_deposit_overflow",
+                // ABI 0.9, the sequencer's revision 2: the per-run
+                // constant bank, the attestation over image AND bank,
+                // and the library's SHA-256 exported on its own.
+                // cftw_program_flags is an accessor rather than a
+                // sixth out-pointer on get_info, so that call's shape
+                // does not move with the ABI (wasm_api.c says why).
+                "cftw_program_run_bank", "cftw_program_digest",
+                "cftw_sha256", "cftw_program_flags",
+                // The header flag and the four feature bits, projected
+                // as calls for cftw_flags_all's reason. A JS caller
+                // must be able to ask whether BANK_PTR is published
+                // BEFORE it builds a BANK_EXT image - asking after the
+                // fact is reading a refusal.
+                "cftw_prog_flag_bank_ext", "cftw_seq_feat_wide_const",
+                "cftw_seq_feat_regs32", "cftw_seq_feat_bank_ptr",
+                "cftw_alu_ext_imul",
+                // cft_caps' sequencer capacities, in the struct since
+                // 0.8 and projected by nothing until now, which is the
+                // hole the line above closes.
+                "cftw_caps_seq_features", "cftw_caps_max_deposits",
+                "cftw_caps_max_insns", "cftw_caps_max_consts"];
 for (const needed of NEEDED) {
   if (!exported.includes(needed)) bad(`the module does not export ${needed}`);
 }

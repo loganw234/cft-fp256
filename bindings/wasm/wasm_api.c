@@ -131,6 +131,76 @@ WASM_EXPORT const char *cftw_caps_backend(cft_device *dev)
     return backend;
 }
 
+/* The sequencer's on-chip capacities and its feature word (ABI 0.8's
+ * appended fields, exported here 2026-09-08).
+ *
+ * They were in cft_caps from 0.8 and no wrapper projected them, so a
+ * JavaScript caller could not ask what this device's sequencer can
+ * take. That was survivable while a program image was only ever built
+ * to fit and refused if it did not; revision 2 makes it a real hole,
+ * because a BANK_EXT image LOADS only where CAPS[6] is published and
+ * the only honest way to build one is to ask first. Asking after the
+ * fact is reading a refusal, which is the position cft_caps exists to
+ * get a caller out of.
+ *
+ * ZERO MEANS UNKNOWN for the three capacities and nothing is enforced
+ * against an unknown (cft.h); only a remote server whose caps block
+ * predates the fields can produce it, and there is no remote backend
+ * in this module. A clear seq_features BIT is ABSENT rather than
+ * unknown, which is a different rule and cft.h states it. */
+
+WASM_EXPORT uint32_t cftw_caps_seq_features(cft_device *dev)
+{
+    cft_caps c;
+    return caps_of(dev, &c) == CFT_OK ? c.seq_features : 0u;
+}
+
+WASM_EXPORT uint32_t cftw_caps_max_deposits(cft_device *dev)
+{
+    cft_caps c;
+    return caps_of(dev, &c) == CFT_OK ? c.max_deposits : 0u;
+}
+
+WASM_EXPORT uint32_t cftw_caps_max_insns(cft_device *dev)
+{
+    cft_caps c;
+    return caps_of(dev, &c) == CFT_OK ? c.max_insns : 0u;
+}
+
+WASM_EXPORT uint32_t cftw_caps_max_consts(cft_device *dev)
+{
+    cft_caps c;
+    return caps_of(dev, &c) == CFT_OK ? c.max_consts : 0u;
+}
+
+/* The four assigned bits of cft_caps.seq_features, projected as calls
+ * for the reason cftw_flags_all() projects CFT_FLAGS_ALL: a macro is
+ * the one part of a header a caller on the far side of a wasm boundary
+ * cannot reach, and a bit position copied into JavaScript is a bit
+ * position that can go stale (CFT_STATUS_DEPOSIT_OVERFLOW has already
+ * moved once). They sit beside cftw_caps_seq_features because the word
+ * and the masks it is tested with are one thing. */
+
+WASM_EXPORT uint32_t cftw_seq_feat_wide_const(void)
+{
+    return (uint32_t)CFT_SEQ_FEAT_WIDE_CONST;
+}
+
+WASM_EXPORT uint32_t cftw_seq_feat_regs32(void)
+{
+    return (uint32_t)CFT_SEQ_FEAT_REGS32;
+}
+
+WASM_EXPORT uint32_t cftw_seq_feat_bank_ptr(void)
+{
+    return (uint32_t)CFT_SEQ_FEAT_BANK_PTR;
+}
+
+WASM_EXPORT uint32_t cftw_alu_ext_imul(void)
+{
+    return (uint32_t)CFT_ALU_EXT_IMUL;
+}
+
 /* ---- the work ---------------------------------------------------- *
  *
  * Buffers are plain heap pointers (Module._malloc from JS), dense
@@ -1253,7 +1323,9 @@ WASM_EXPORT int cftw_formatof_fma(cft_device *dev, int sfmt, int dfmt,
  * once. docs/DEMOS.md said so of the demos page ("the wasm surface
  * exposes every library operation but not the sequencer's program
  * API") and docs/studies/OPT-D-contract.md section 1.8 said why it
- * mattered. These four close it.
+ * mattered. These four close it. Revision 2's three - run_bank,
+ * digest, sha256 - and the two accessors are at the end of the
+ * section, added 2026-09-08 with the ABI step that declared them.
  *
  * One wrapper per declaration in cft.h, in cft.h's order: load, free,
  * get_info, run. The image is BYTES - the same bytes on disk, in this
@@ -1349,4 +1421,94 @@ WASM_EXPORT int cftw_program_run(cft_program *prog,
 WASM_EXPORT uint32_t cftw_status_deposit_overflow(void)
 {
     return (uint32_t)CFT_STATUS_DEPOSIT_OVERFLOW;
+}
+
+/* ---- revision 2: the bank as data, and the digest   (ABI 0.9) ------ *
+ *
+ * docs/SEQUENCER.md revision 2, R3. A BANK_EXT image carries no
+ * constant section: `n_consts` says how many constants it addresses
+ * and every run supplies exactly that many format-width values. One
+ * image per positive, loaded once, with the levers riding as data.
+ *
+ * Three wrappers and one accessor, in cft.h's order. Everything is the
+ * usual adaptation - size_t as wasm32's uint32 for the two byte counts
+ * and for n - and nothing here parses the bank or checks its length:
+ * cft_program_run_bank does, against the program's own header, and a
+ * second opinion in this file is the failure the argument checks exist
+ * to prevent. The two run entry points refuse each other's programs in
+ * the library and the refusal reaches JavaScript as the status it is.
+ */
+
+WASM_EXPORT int cftw_program_run_bank(cft_program *prog,
+                                      const void *bank, uint32_t bank_bytes,
+                                      const void *a, const void *b,
+                                      const void *c,
+                                      void *deposits, uint32_t *counts,
+                                      uint32_t n,
+                                      uint32_t *flags_out, uint32_t *bus_out)
+{
+    return (int)cft_program_run_bank(prog, bank, (size_t)bank_bytes,
+                                     a, b, c, deposits, counts, (size_t)n,
+                                     flags_out, bus_out);
+}
+
+/* SHA-256 over the image bytes followed by the bank bytes. `out32` is
+ * 32 bytes of caller heap; a NULL bank with bank_bytes zero is the
+ * image alone, which is the only form a program carrying its own
+ * constants accepts. */
+WASM_EXPORT int cftw_program_digest(cft_program *prog,
+                                    const void *bank, uint32_t bank_bytes,
+                                    uint8_t *out32)
+{
+    return (int)cft_program_digest(prog, bank, (size_t)bank_bytes, out32);
+}
+
+/* The same hash over arbitrary bytes, for a caller that wants to name
+ * a deposit buffer the way a plate's attestation names one. Exported
+ * because the library exports it: a JavaScript harness that computed
+ * its own SHA-256 beside this one would be the fifth private copy the
+ * library's own hash exists to retire (cft.h). */
+WASM_EXPORT int cftw_sha256(const void *data, uint32_t bytes, uint8_t *out32)
+{
+    return (int)cft_sha256(data, (size_t)bytes, out32);
+}
+
+/* cft_program_info.flags, ABI 0.9's appended field.
+ *
+ * An ACCESSOR rather than a sixth out-pointer on cftw_program_get_info,
+ * so that call's shape does not move: a wrapper whose argument list
+ * grows with each ABI step is a wrapper every existing caller has to
+ * be rebuilt against, which is the coupling the struct_size handshake
+ * removed from the C side and should not reintroduce here. The
+ * handshake still happens in C - this asks for the whole sized struct
+ * and returns one field of it.
+ *
+ * It returns 0 where cft_program_get_info fails, and 0 is also a
+ * legitimate answer (an image with no flags set is every image written
+ * before 2026-09-08). That ambiguity is the objection the comment
+ * above raises against accessors, and it is harmless HERE and only
+ * here: a caller reaches this only through a program handle that
+ * loaded, whose get_info has already answered CFT_OK once for its
+ * shape, so the failing arm is a freed or forged handle rather than a
+ * state a running caller can be in. cftw_program_get_info stays the
+ * call that reports a status. */
+WASM_EXPORT uint32_t cftw_program_flags(cft_program *prog)
+{
+    cft_program_info info;
+
+    memset(&info, 0, sizeof info);
+    info.struct_size = sizeof info;
+    if (cft_program_get_info(prog, &info) != CFT_OK)
+        return 0u;
+    return info.flags;
+}
+
+/* CFT_PROG_FLAG_BANK_EXT, projected for cftw_status_deposit_overflow's
+ * reason. It is a HEADER bit - the flags word that was reserved[0]
+ * until 2026-09-08 - and the only one assigned; every other bit is
+ * reserved-must-be-zero and an image that sets one is refused, which
+ * is what lets a later flag be added without a version step. */
+WASM_EXPORT uint32_t cftw_prog_flag_bank_ext(void)
+{
+    return (uint32_t)CFT_PROG_FLAG_BANK_EXT;
 }
