@@ -46,29 +46,42 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
-- [ ] **The 2026-09-07 pair from ed752dd - building tonight on the
-      box, for the day.** main as of that evening: IMUL and the
-      indexed constants, CAPS publishing the sequencer's capacities
-      and both features (so cft-zoom and cft-orbits size themselves
-      and the imul cases replay instead of being skipped), the
-      leading-zero cone as its own stage (LATENCY 16), ABI 0.8 - the
-      hardware the library now expects. Launched 17:06 on amd-arc-box
-      by `~/cardday_0907.sh`: single and quad at 135 MHz, retiming +
-      phys_opt, the 9f73107 recipe below; a half that misses 135 is
-      rebuilt at 130 by the script itself. Each half is checked with
-      hw/verify-image.sh and staged beside its manifest as
-      `~/cardday-0907/cft_hw_{single,quad}.xclbin`, with SHA256SUMS
-      and a README that records each kernel WNS and the verifier's
-      verdict; the chain's logs are `~/cardday-logs/`, and chain.log
-      ends with CARDDAY-0907-COMPLETE when it is done. On arrival:
-      `sha256sum -c SHA256SUMS`, read the README's WNS lines, and use
-      this pair FIRST; the 9f73107 pair in ~/cardday-tip is the
-      fallback. A half the README marks NOT PRODUCED is a half the
-      fallback pair supplies. The commits after ed752dd on main touch
-      RTL this image does not elaborate (a multi-pass counter compare
-      spelled for lint) and comments; `git diff ed752dd..HEAD -- rtl/
-      hw/` shows exactly that, so the manifest's commit is this
-      image's hardware.
+- [x] **THE PAIR FOR THE DAY: 2026-09-07, from ed752dd, both halves
+      at 135 MHz, verified and staged** (built on amd-arc-box the
+      evening before card day). main as of that evening: IMUL and the
+      indexed constants, CAPS publishing the sequencer's capacities and
+      both features (so cft-zoom and cft-orbits size themselves and the
+      imul cases replay instead of being skipped), the leading-zero
+      cone as its own stage (LATENCY 16), ABI 0.8 - the hardware the
+      library expects. The 9f73107 recipe: retiming + phys_opt, default
+      directives. hw/verify-image.sh 8/8 on each; each staged copy
+      re-hashed against its manifest's build-time sha256, byte-identical;
+      the runner's `images` stage over both: PASS (run
+      20260907-213830-ed752dd); `sha256sum -c SHA256SUMS` clean:
+
+          ~/cardday-0907/cft_hw_single.xclbin   one tile,   kernel_wns +0.316  routed +0.055  136 min
+          ~/cardday-0907/cft_hw_quad.xclbin     four tiles, kernel_wns +0.067  routed +0.031  267 min
+          ~/cardday-0907/SHA256SUMS             (+ both manifests, README)
+
+          single  3870fc4371e63b3390278442897c7d2b3c750d44646339768aa8ff42c0c981e0  35,783,663 bytes
+          quad    496f8ac0881581f182b9d95d94b21933881cfd1783e8ea5d3e2fb340d1828307  51,422,147 bytes
+
+      The quad closed with 0 failing endpoints of 984,222 and hold
+      +0.009; its worst kernel path (+0.067) runs from the fp256 bank's
+      read-delay register into a bank64 lane's s13_tiny, a cross-bank
+      path the placer chose, where the 9f73107 quad had +0.143 on the
+      LZC-plus-coarse-normalise path the cone stage since removed. The
+      single's worst (+0.316, against +0.618 before) is the seedop
+      bypass family out of the stream FIFO, 16 to 18 levels. The
+      round's hardware cost margin on both halves and both still meet
+      135 with room; 130 was not needed. Use this pair FIRST; the
+      9f73107 pair in ~/cardday-tip is the fallback, and it lacks
+      IMUL, kx and the published caps (the absences listed under step
+      2 apply to it, not to this pair). The commits after ed752dd on
+      main touch RTL this image does not elaborate (a multi-pass
+      counter compare spelled for lint) and comments; `git diff
+      ed752dd..HEAD -- rtl/ hw/` shows exactly that, and the manifests
+      say `bitstream_sources: rtl/ and hw/ identical to ed752dd`.
 
 - [x] **The PRIMARY pair until the 0907 pair lands: 135 MHz, staged
       and verified**
@@ -186,13 +199,38 @@ the element count is an operand rather than a loop bound.
       nothing inside one reaches the netlist. Rebuilding a good image
       because a documentation commit landed afterwards costs two hours
       and buys nothing.
-- [ ] `sha256sum` of both xclbins recorded somewhere that is not the
-      build box.
-- [ ] `make libcft-test` green on the machine that will host the card.
+- [x] `sha256sum` of both xclbins recorded somewhere that is not the
+      build box: the 0907 pair's hashes are in this file, above, and
+      in docs/VALIDATION.md (2026-09-07 evening).
+- [x] `make libcft-test` green on the machine that will host the card:
+      amd-arc-box, main 6f100ff, 2026-09-07 18:14 - 1,071,635 cases,
+      C and Python the same bits, 10 min, against sets the box
+      generated itself (all 168 byte-identical to the desktop's after
+      CR stripping). The box has no mpmath and cannot make a venv, so
+      the desktop's mpmath 1.3.0 sits in ~/pylib with
+      PYTHONPATH=$HOME/pylib; device-test and cft-bench are built there
+      against /opt/xilinx/xrt.
 - [ ] `bash hw/run-device-test.sh <quad hw_emu image> -q` green, so
       the multi-tile host path is known good before hardware is added
-      as a variable.
-- [ ] `bash hw/run-device-test.sh <quad hw_emu image> -r` green. The
+      as a variable. 2026-09-07 evening, on the desktop's WSL against
+      a quad hw_emu image of ed752dd: the first run returned 0 after
+      five minutes with NONE of device-test's own output and two
+      protobuf parse errors at the first host-to-device copy - the
+      driver's stale-emulation-state class, or a crash the runtime's
+      handler turned into exit 0; not a pass. A re-run is queued behind
+      the sequencer gate; docs/VALIDATION.md carries the verdict.
+- [ ] `bash hw/run-device-test.sh <quad hw_emu image> -r` green. NOT
+      a pre-day check after all: on 2026-09-07 the gate ran 133 min
+      under xsim, about 95 single-element fp32 reductions each
+      completing through the real XRT stack with err=000, and had not
+      finished the first 16-case block, because every case splits
+      into several one-element invocations at about 1.4 min each. The
+      full gate is days of simulation; it was stopped, and the
+      reductions are proven on the card at step 5 instead. What the
+      run did establish: the four-tile image answers through XRT with
+      contract 0x600, all four formats, and CAPS publishing 64
+      deposits, 1,024 instructions, 256 constants and both feature
+      bits, and the library refuses the over-size programs by name. The
       reduction path is the newest hardware and the only one where the
       element count is a real operand rather than a loop bound, so it
       is the one most worth having proven before the card is also a
