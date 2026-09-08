@@ -6038,6 +6038,30 @@ agents left them, and integrated or held here.
   run at about 1,600 ns of simulated time a second under Icarus here,
   the board configuration at 2.5 and then 0.03. Lint under Verilator,
   default and board configurations: clean. Formal, on this tree: `FORMAL GATE: PASS (31 of 31, negative control refuted)` in 4.5 min beside the two simulations.
+  **The ingredient, the same evening.** Three ten-minute Icarus
+  probes of the full-kernel bench on this tree, side by side with the
+  box otherwise quiet: both ladders on at ONE pass, 1.7 ns of
+  simulated time a second (708 ns in seven minutes); the normalise
+  ladder alone at ten passes, about 4 ns a second; the align ladder
+  alone at ten passes, about 15 ns a second; against 1,636 ns a
+  second for ten passes with neither ladder (`krnlmc` above). So the
+  pass budget is not the ingredient - the shared ladders are, each on
+  its own, the normaliser worse than the aligner, and together worse
+  than either. cft_normseg's own benches run at about 1,000 ns a
+  second under Icarus, so it is the ladder IN THE KERNEL that costs:
+  the ladder is written per bit - a continuous assign for each of its
+  720 bits at every level, with elaboration-constant masks, which is
+  the form Vivado folds to 5,269 LUT - and Icarus schedules every one
+  of those assigns as an event each time the ladder's 720-bit input
+  settles, which in the kernel is once per slot whose source changes
+  in a cycle rather than once a cycle as the unit bench drives it.
+  Why the rate then falls another hundredfold inside the
+  1,104-element stream is not established; the probes did not reach
+  it. Recorded for the study that rewrites the ladder level-wise (a
+  vector mask and shift per level, the same bits, a handful of
+  operations where there is now one assign per bit) or that accepts
+  Verilator as the fused configurations' simulator, which `boardkrnl`
+  already does. Not before card day.
 - `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (31 of 31, negative
   control refuted)`, 420 s of solver time - after a first run had to be
   stopped at two and a half hours, stuck on `imul.sby`'s `check`
