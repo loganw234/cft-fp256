@@ -504,11 +504,33 @@ def check_horner_bank(args, name, image, image_path, tmp, caps):
             out.append(acc)
         return out
 
-    banks = {"exp": bank_exp(), "ramp": bank_ramp()}
+    # The bank files are COMMITTED DATA, not something this script
+    # writes and then compares against itself. They are read from the
+    # tree and used as the run's input; separately, each is checked
+    # against the derivation its name claims, so that a row cannot pass
+    # because the check and the data drifted together.
+    banks = {}
+    for tag, derive in (("exp", bank_exp), ("ramp", bank_ramp)):
+        bpath = HERE / f"{name}.{tag}.bank"
+        if not bpath.exists():
+            bad(f"{name}: {tag} bank", f"{bpath.name} is not in the tree")
+            return
+        got = values(bpath.read_bytes(), fmt)
+        if len(got) != nk:
+            bad(f"{name}: {tag} bank",
+                f"{len(got)} values, the program addresses {nk}")
+            return
+        if got != derive():
+            bad(f"{name}: {tag} bank",
+                "the committed file does not match its own derivation")
+            return
+        banks[tag] = got
+    ok(f"{name}: both bank files match their derivations",
+       f"{nk} fp64 values each, {nk * 8} bytes")
+
     spliced_out = {}
     for tag, coeffs in banks.items():
         bpath = HERE / f"{name}.{tag}.bank"
-        bpath.write_bytes(pack(coeffs, fmt))
 
         # The arm that runs today: the same instruction stream with the
         # bank spliced in as an ordinary constant section. It is the

@@ -94,9 +94,12 @@ many polynomials: the image is 240 bytes of pure schedule and the
 twenty-four coefficients arrive per run in
 `horner-bank-fp64.exp.bank` (the truncated exponential series,
 1/(23-k)!) or `horner-bank-fp64.ramp.bank` (1, 2, ..., 24). Its check
-runs both and compares against a softfloat Horner, and asserts that
-two different banks give two different answers - a check that passed
-because it compared against a constant would be no check at all.
+reads both from the tree - they are committed DATA, not something the
+check writes and then compares against itself - holds each against the
+derivation its name claims, runs both and compares against a softfloat
+Horner, and asserts that two different banks give two different
+answers. A check that passed because it compared against a constant
+would be no check at all.
 
 Twenty-four coefficients is past the sixteen a four-bit operand field
 reaches, so the FMAs from `C16` on come out in the indexed (`kx`)

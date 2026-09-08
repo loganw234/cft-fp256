@@ -6285,8 +6285,8 @@ program they must agree, and that is a test rather than a hope.
     make golden                     2068 passed, 5 skipped, 190.6 s
                                     (PYTEST_JOBS=4; 48 of those are
                                     the new test_asm.py, 0.7 s alone)
-    make programs-check             46 passed, 0 failed, 1 skipped,
-                                    12 images, 0.8 s
+    make programs-check             47 passed, 0 failed, 1 skipped,
+                                    12 images, 1.0 s
     cft-asm vs asm.py, ad hoc       8 seqprogs images + 160 fuzz
                                     programs + 10 decimal literals +
                                     one revision-2 source: identical
@@ -6339,6 +6339,8 @@ gate.** Four tampered trees, each run through `check.py` and restored:
     horner's C17 -> C18                  rc=1 at the MANIFEST and at
                                          "exp bank, lane 0 ... vs the
                                          model's"
+    one bit of exp.bank flipped          rc=1: "the committed file does
+                                         not match its own derivation"
 
 The second is worth reading closely: it fails at the MANIFEST and NOT
 at the program's own check, because that check runs the same image
@@ -6363,7 +6365,9 @@ while still running the row: the same instruction stream with the bank
 spliced in as an ordinary constant section, which is the same
 computation by the definition of the flag. Both banks pass against the
 model that way, and the two banks are checked to disagree with each
-other. When the host half merges, that arm additionally requires the
+other, and each bank file is checked against the derivation its name
+claims - the bank is committed DATA, read from the tree, not something
+the check writes and then compares against itself. When the host half merges, that arm additionally requires the
 real bank path to produce the same bits. The digest has a local
 SHA-256 fallback over image-then-bank so the number a plate carries
 does not depend on which half of the tree the runner was built
