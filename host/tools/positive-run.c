@@ -601,6 +601,21 @@ int main(int argc, char **argv)
         }
     }
 
+    /* The bank path's refusal belongs HERE, before the library is
+     * handed the image - today's cft_program_load refuses a BANK_EXT
+     * header for its non-zero reserved word and reports "artifact
+     * missing, unreadable, or not a tile", which is true of the
+     * loader's rules and useless to the person holding the file. */
+#ifndef CFT_SEQ_FEAT_BANK_PTR
+    if (H.flags & FLAG_BANK_EXT)
+        die("%s is a BANK_EXT program and this build of libcft has no "
+            "bank path: cft.h defines no CFT_SEQ_FEAT_BANK_PTR, so "
+            "cft_program_run_bank does not exist here. Rebuild against a "
+            "library that carries docs/SEQUENCER.md revision 2's R3. "
+            "(`positive-run --capabilities` reports this without a file.)",
+            image_path);
+#endif
+
     /* ---- the device -------------------------------------------------- */
     if (device && strcmp(device, "sw") != 0)
         st = cft_open(device, 0, &dev);
@@ -624,11 +639,10 @@ int main(int argc, char **argv)
         if (st != CFT_OK)
             die_st("cft_program_run_bank", st);
 #else
-        die("this build of libcft has no bank path: cft.h does not define "
-            "CFT_SEQ_FEAT_BANK_PTR, so cft_program_run_bank does not "
-            "exist here and a BANK_EXT image cannot be run. Rebuild "
-            "against a library that carries docs/SEQUENCER.md revision "
-            "2's R3.");
+        /* Unreachable: refused above, before the load. Kept so that
+         * the two halves of the #ifdef are both complete statements
+         * and a reader of this branch is not left wondering. */
+        die("this build has no bank path");
 #endif
     } else {
         st = cft_program_run(prog, A, B, C, dep, counts, n, &flags, &bus);
