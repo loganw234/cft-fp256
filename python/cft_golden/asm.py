@@ -875,6 +875,8 @@ class _Asm:
                     self.fail(f"{head!r} is not a directive")
                 handler(toks[1:])
                 continue
+            if self.fmt is None:
+                self.fail(".format must come first")
             low = head.lower()
             if low in CTRL_CODES:
                 self.do_ctrl(CTRL_CODES[low], toks[1:])
