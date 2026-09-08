@@ -57,7 +57,7 @@ INC     := -Iinclude
 SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
            src/clause5.c src/chars.c src/augmented.c src/mpfloat.c src/transcend.c \
            src/program.c src/reduce.c src/formatof.c src/conformance.c \
-           src/backend_remote.c
+           src/sha256.c src/backend_remote.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 

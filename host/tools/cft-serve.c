@@ -362,30 +362,55 @@ static int h_prog_load(conn *C, const uint8_t *p, size_t len, answer *A)
     return 0;
 }
 
-static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A)
+/* PROG_RUN, and PROG_RUN_BANK - one handler, because the bank is the
+ * only difference and a second copy of the operand unpacking is a
+ * second place for the deposit window's shape to drift.
+ *
+ * `with_bank` says which opcode arrived. The bank's length lives in
+ * the fourth fixed word, which PROG_RUN leaves zero and this refuses
+ * to be non-zero there: a client that filled it under the old opcode
+ * is a client this server does not understand, and guessing which of
+ * the two it meant is how a run computes on the wrong numbers. */
+static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
+                      int with_bank)
 {
-    uint32_t handle, present, want_counts;
+    uint32_t handle, present, want_counts, bank_bytes;
     uint64_t n;
     cft_program *prog;
     cft_program_info info;
     size_t esz, opnd, expect, dep_bytes, cnt_bytes, i;
-    const uint8_t *a = NULL, *b = NULL, *c = NULL, *q;
+    const uint8_t *a = NULL, *b = NULL, *c = NULL, *bank = NULL, *q;
     uint8_t *out;
     uint32_t *counts = NULL;
     uint32_t flags = 0, bus = 0;
+    const char *opname = with_bank ? "PROG_RUN_BANK" : "PROG_RUN";
     cft_status st;
 
     if (len < 24) {
-        snprintf(A->why, sizeof A->why, "PROG_RUN payload of %lu bytes is "
-                 "shorter than its fixed fields", (unsigned long)len);
+        snprintf(A->why, sizeof A->why, "%s payload of %lu bytes is "
+                 "shorter than its fixed fields", opname,
+                 (unsigned long)len);
         return -1;
     }
     handle      = cftr_get32(p + 0);
     present     = cftr_get32(p + 4);
     want_counts = cftr_get32(p + 8);
+    bank_bytes  = cftr_get32(p + 12);
     n           = cftr_get64(p + 16);
     if (present & ~7u) {
         snprintf(A->why, sizeof A->why, "operand mask 0x%x", (unsigned)present);
+        return -1;
+    }
+    if (!with_bank && bank_bytes) {
+        snprintf(A->why, sizeof A->why, "PROG_RUN carries a bank length of "
+                 "%lu bytes; the constant bank rides PROG_RUN_BANK",
+                 (unsigned long)bank_bytes);
+        return -1;
+    }
+    if (bank_bytes > len - 24u) {
+        snprintf(A->why, sizeof A->why, "%s names a %lu-byte bank in a "
+                 "%lu-byte payload", opname, (unsigned long)bank_bytes,
+                 (unsigned long)len);
         return -1;
     }
     prog = (cft_program *)slot_get((void **)C->progs, C->nprogs, handle);
@@ -411,15 +436,18 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A)
         return -1;
     }
     opnd   = (size_t)n * esz;
-    expect = 24u + (size_t)popcount3(present) * opnd;
+    expect = 24u + (size_t)bank_bytes + (size_t)popcount3(present) * opnd;
     if (len != expect) {
-        snprintf(A->why, sizeof A->why, "PROG_RUN over %llu lanes with "
-                 "operand mask 0x%x should carry %lu bytes, not %lu",
+        snprintf(A->why, sizeof A->why, "%s over %llu lanes with "
+                 "operand mask 0x%x and a %lu-byte bank should carry %lu "
+                 "bytes, not %lu", opname,
                  (unsigned long long)n, (unsigned)present,
+                 (unsigned long)bank_bytes,
                  (unsigned long)expect, (unsigned long)len);
         return -1;
     }
     q = p + 24;
+    if (bank_bytes)   { bank = q; q += bank_bytes; }
     if (present & 1u) { a = q; q += opnd; }
     if (present & 2u) { b = q; q += opnd; }
     if (present & 4u) { c = q; }
@@ -439,12 +467,21 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A)
             return 0;
         }
     }
-    st = cft_program_run(prog, a, b, c, dep_bytes ? out + 8 : NULL, counts,
+    /* The two entry points refuse each other's programs by name, and
+     * that refusal is the client's to see: a BANK_EXT image reaching
+     * PROG_RUN, or a bank reaching a program that carries its own, is
+     * a caller error and travels back as one rather than being
+     * quietly routed to whichever call would accept it. */
+    st = with_bank
+       ? cft_program_run_bank(prog, bank, (size_t)bank_bytes, a, b, c,
+                              dep_bytes ? out + 8 : NULL, counts,
+                              (size_t)n, &flags, &bus)
+       : cft_program_run(prog, a, b, c, dep_bytes ? out + 8 : NULL, counts,
                          (size_t)n, &flags, &bus);
     if (st != CFT_OK) {
         free(out);
         free(counts);
-        fail(A, st, "cft_program_run");
+        fail(A, st, with_bank ? "cft_program_run_bank" : "cft_program_run");
         return 0;
     }
     cftr_put32(out + 0, flags);
@@ -871,7 +908,9 @@ static int serve_one(conn *C, uint32_t my_abi)
         case CFTR_OP_RUN:        h_run(C, p, h.length, &A, 0); break;
         case CFTR_OP_REDUCE:     h_run(C, p, h.length, &A, 1); break;
         case CFTR_OP_PROG_LOAD:  h_prog_load(C, p, h.length, &A); break;
-        case CFTR_OP_PROG_RUN:   h_prog_run(C, p, h.length, &A); break;
+        case CFTR_OP_PROG_RUN:   h_prog_run(C, p, h.length, &A, 0); break;
+        case CFTR_OP_PROG_RUN_BANK:
+                                 h_prog_run(C, p, h.length, &A, 1); break;
         case CFTR_OP_PROG_FREE:  h_prog_free(C, p, h.length, &A); break;
         case CFTR_OP_BUF_ALLOC:  h_buf_alloc(C, p, h.length, &A); break;
         case CFTR_OP_BUF_FREE:   h_buf_free(C, p, h.length, &A); break;
