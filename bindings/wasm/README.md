@@ -713,9 +713,15 @@ against the header rather than against a version typed into a test.
   exact nondeterminism this project exists to remove - so nothing
   here touches it. The wasm build is deterministic precisely because
   it stays on specified integer semantics.
-* **The sequencer is compiled in but not exported.** No panel drives
-  `cft_program_*` yet, and this page only claims surfaces it
-  exercises.
+* **The sequencer is exported, and no panel drives it.** It was
+  compiled in and unreachable until 2026-09-07, when `wasm_api.c`
+  gained the four calls of cft.h's program section, and revision 2's
+  three followed on 2026-09-08 (below). What is still true is the
+  second half of the old sentence: `conformance.html` has no control
+  that loads a program, so the page claims nothing about the
+  sequencer. The exports exist for `bindings/node` and for any other
+  JavaScript caller, `verify.mjs` gates their presence by name, and
+  `bindings/node/program_test.mjs` is where they are exercised.
 * **The page is at ABI 0.2 as of 2026-09-02, surface included.** The
   page committed on 2026-09-01 (5ec0883) was built eighty minutes
   before the clause-5 completion set landed, so its module answered
@@ -797,7 +803,16 @@ conformance.html     THE DELIVERABLE - committed build product
 verify.mjs           the browserless check of that build product:
                      identity, module hash, the 168-set vector replay,
                      and every non-opcode operation driven through its
-                     own wrapper
+                     own wrapper. Its NEEDED list is the export gate -
+                     a module can carry every entry point but one and
+                     still report the right ABI, which has happened
+                     once per minor step since 0.3
+remote.mjs           docs/REMOTE.md's frame protocol in JavaScript,
+                     over WebSocket and over TCP - the same bytes the
+                     C client sends, including PROG_RUN_BANK (0x0023)
+                     since ABI 0.9. Driven by
+                     bindings/node/remote_test.mjs, which
+                     `make -C host wstest` runs
 build/               untracked: vectors, module, node loader,
                      negative control
 ```
@@ -817,6 +832,48 @@ bytes**, sha256 `e1b42b3873416e39…`; module **211,869 bytes**, sha256
 different by the one constant. `verify.mjs` then ran under
 `bash verify/run.sh --fresh --only vectors,node,wasm`, run id
 `20260904-054715-2216e62`, and passed with the same counts as the block above.
+
+### Rebuilt at ABI 0.9, 2026-09-08
+
+The library reached 0.9 - docs/SEQUENCER.md's revision 2: thirty-two
+registers, 4,096 instructions, the per-run constant bank - and the
+committed module was 0.8, so `verify.mjs` refused the page on its own
+line (`cftw_abi_version() = 8 (0.8); cft.h says 9 (0.9)`) and
+`make -C host wstest` was refused one field earlier still, at HELLO,
+because two libraries whose ABI differs have never been allowed to
+talk.
+
+`wasm_api.c` gained thirteen exports in the same commit as the
+rebuild, which is the 0.5 discipline and not the 0.3 half-step:
+`cftw_program_run_bank`, `cftw_program_digest`, `cftw_sha256`,
+`cftw_program_flags`, the five macro projections
+(`cftw_prog_flag_bank_ext` and the four feature bits) and the four
+`cft_caps` sequencer accessors - `cftw_caps_seq_features`,
+`cftw_caps_max_deposits`, `cftw_caps_max_insns`,
+`cftw_caps_max_consts`. The last four are not an 0.9 addition at all:
+they have been in `cft_caps` since 0.8 and no wrapper projected them,
+so a JavaScript caller could not ask whether the device published
+`BANK_PTR` before building an image that needs it. Asking after the
+fact is reading a refusal, which is the position `cft_caps` exists to
+get a caller out of. All thirteen are in `verify.mjs`'s `NEEDED` list,
+which is the gate.
+
+**129 `cftw_*` exports** where the 0.8 build had 116, exactly the
+thirteen and no more; **219,535 bytes** of wasm where it was 214,508;
+`conformance.html` **1,349,244 bytes**, sha256 `973ed60e7b71b222…`;
+module sha256
+`1af4ddd3514e3335e915fe5ecbe5449e36d88d8acb47ac2d3c4a554841a14aad`,
+the same bytes as `bindings/node/cft_node.wasm`.
+
+**The markup did not change, and this time that is a fact rather than
+a decision.** `page_template.html` names 87 `cftw_*` entry points and
+not one of the thirteen: the page has no control that loads a program,
+so nothing it drives moved. The diff to `conformance.html` is the
+spliced runtime and build-info lines - which is to say, the module
+inside it. The page had to be rebuilt anyway, and not as a choice:
+`-sSINGLE_FILE` embeds the module in the HTML and `verify.mjs` step 3
+holds the node loader to the page's bytes by sha256, so a rebuilt
+loader beside a stale page fails there.
 
 ---
 
