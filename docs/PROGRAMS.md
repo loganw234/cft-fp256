@@ -148,8 +148,15 @@ the corpus:
   revision-2 program at all.
 
 The two are held to each other by `make programs-check`, on every
-source in `programs/` and on a disassemble/re-assemble round trip of
-the images `seqprogs.py` generates.
+source in `programs/`, on a disassemble/re-assemble round trip of the
+images `seqprogs.py` generates, and on a generated **revision-2
+corpus** - a hundred-odd programs using five-bit register fields, an
+external bank, `kx` chosen and forced, all four formats and trip
+counts that set `imm[27:24]`. That last one exists because
+`seq.random_program` is revision 1 and the library uses one revision-2
+feature between its twelve programs: without it the round trip would
+be a round trip over revision 1 with extra steps, and the stage
+asserts what it reached rather than assuming it.
 
 **One thing neither carries: an arity table from libcft.** Which
 operand FIELDS an opcode reads is not in `cft_op_name`, in

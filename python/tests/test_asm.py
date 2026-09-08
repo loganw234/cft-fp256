@@ -115,6 +115,81 @@ def test_the_corpus_actually_reaches_the_interesting_forms():
         f"kx={kx} wide={wide} unread={unread} ctrl_ra={ctrl_ra}")
 
 
+def revision2_source(rng):
+    """A random program the revision-1 generator cannot produce: five-bit
+    register fields, an external bank, kx both chosen and forced, all
+    four formats, and REPEAT trip counts that set imm[27:24]."""
+    fmt = FORMATS[rng.choice(["fp32", "fp64", "fp128", "fp256"])]
+    nk = rng.randrange(0, 40)
+    bank_ext = rng.random() < 0.3
+    head = [f".format {fmt.name}", ".deposits 4"]
+    if bank_ext:
+        head.append(".bank external")
+    for i in range(nk):
+        head.append(f".const K{i}" if bank_ext else
+                    f".const K{i} = 0x{rng.getrandbits(fmt.width):x}")
+    body, depth = [], 0
+    for _ in range(rng.randint(4, 20)):
+        pick = rng.random()
+        if pick < 0.5:
+            op = rng.choice(list(asm.OP_FIELDS))
+            fields = asm.OP_FIELDS[op]
+            args = []
+            for _f in (fields if rng.random() < 0.6 else ("ra", "rb", "rc")):
+                if nk and rng.random() < 0.35:
+                    args.append(f"K{rng.randrange(nk)}")
+                else:
+                    args.append(f"r{rng.randrange(asm.NREG)}")
+            mods = []
+            if rng.random() < 0.4:
+                mods.append(sf.RND_NAMES[rng.randrange(5)])
+            if nk and any(a[0] == "K" for a in args) and rng.random() < 0.3:
+                mods.append("kx")
+            name = asm.OP_NAMES[op] + "".join("." + m for m in mods)
+            body.append(f"{name} r{rng.randrange(asm.NREG)}, "
+                        + ", ".join(args))
+        elif pick < 0.62 and depth < asm.MAX_LOOP_DEPTH:
+            body.append("repeat " + str(rng.choice(
+                [1, 3, 1 << 24, (0xF << 24) | 7, 0xFFFFF])))
+            depth += 1
+        elif pick < 0.72 and depth > 0:
+            body.append("endrep")
+            depth -= 1
+        elif pick < 0.85:
+            body.append(f"deposit r{rng.randrange(asm.NREG)}")
+        elif pick < 0.95:
+            body.append(f"setact r{rng.randrange(asm.NREG)}")
+        elif depth == 0:
+            body.append("actall")
+    body += ["endrep"] * depth
+    body.append("halt")
+    return "\n".join(head + [""] + body) + "\n"
+
+
+def test_round_trip_on_a_revision_two_corpus():
+    """`seq.random_program` is revision 1, so the corpus above never
+    reaches the encoding this round added. This one does, and reports
+    what it reached - a round trip that never saw a five-bit register
+    field would be a round trip over revision 1 with extra steps."""
+    rng = random.Random(2026)
+    n = regs32 = bank = kx = 0
+    for i in range(200):
+        text = revision2_source(rng)
+        try:
+            image = asm.assemble(text, f"r2-{i}")
+        except asm.AsmError:
+            continue                     # a program the loader refuses
+        assert asm.assemble(asm.disassemble(image), f"r2-{i}") == image, text
+        feats = asm.Image.from_bytes(image).features()
+        regs32 += "REGS32" in feats
+        bank += "BANK_PTR" in feats
+        kx += "kx" in feats
+        n += 1
+    assert n > 100, n
+    assert regs32 > 50 and bank > 20 and kx > 20, (
+        f"REGS32={regs32} BANK_PTR={bank} kx={kx}")
+
+
 def test_disassembly_of_an_unnamed_opcode_reassembles():
     """An image may carry an opcode this ISA does not name - 24 and 25
     are the reductions, and 31..255 are unassigned. The numeric escape

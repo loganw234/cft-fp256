@@ -17,7 +17,9 @@ including its "Revision 2 (2026-09-08)" section.
                           out/ and MANIFEST
     make programs-check   re-assemble with python/cft_golden/asm.py,
                           compare byte for byte, round-trip through
-                          the disassembler, and run every check below
+                          the disassembler, cross-check a generated
+                          revision-2 corpus in both languages, and run
+                          every check below
 
 On Windows, one line:
 
@@ -118,12 +120,14 @@ nothing about it, which is the point.
   macro exists, that arm runs and additionally requires the two to
   agree bit for bit. Nothing about this is silent.
 - **A `REGS32` program.** Five-bit register fields are in both
-  assemblers and in `python/tests/test_asm.py`, which builds programs
-  that name `r16..r31` and checks the encoding, the refusals and the
-  round trip. There is no library ROW for one because nothing can
-  execute it yet: `seq.py`'s `NREG` is 16 and so is libcft's executor.
-  A row whose check is "it assembles" would be a row pretending to be
-  a check.
+  assemblers, in `python/tests/test_asm.py`, and in the revision-2
+  corpus `check.py` generates - a hundred-odd programs that name
+  `r16..r31`, declare an external bank, force `kx`, and give REPEAT a
+  trip count with `imm[27:24]` set, all held to identical bytes,
+  disassembly, round trip and `-i` in both languages. There is no
+  library ROW for one because nothing can execute it yet: `seq.py`'s
+  `NREG` is 16 and so is libcft's executor. A row whose check is "it
+  assembles" would be a row pretending to be a check.
 - **A program per positive.** docs/ATLAS.md's sixty-eight maps are
   step 3 of that document and belong to `core/emit-cft.mjs` in
   atlas-engine; this library is the shape they will be emitted into.

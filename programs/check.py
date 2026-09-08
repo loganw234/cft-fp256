@@ -584,6 +584,129 @@ def check_horner_bank(args, name, image, image_path, tmp, caps):
        "identical to the spliced images")
 
 
+# ---- the revision-2 corpus ---------------------------------------------
+#
+# `seq.random_program` is revision 1 - sixteen registers, no BANK_EXT,
+# no register high bits - so the library and that corpus between them
+# never exercise the encoding this round actually added. This generator
+# does: five-bit register fields, an external bank, kx forced and
+# chosen, all four formats, and trip counts that set imm[27:24] (which
+# are register high bits on an instruction that HAS a register and
+# ordinary count bits on REPEAT, and getting that backwards would be
+# invisible everywhere else).
+
+def revision2_program(rng):
+    fmt = FORMATS[rng.choice(["fp32", "fp64", "fp128", "fp256"])]
+    nk = rng.randrange(0, 40)
+    bank_ext = rng.random() < 0.3
+    head = [f".format {fmt.name}", ".deposits 4"]
+    if bank_ext:
+        head.append(".bank external")
+    for i in range(nk):
+        head.append(f".const K{i}" if bank_ext else
+                    f".const K{i} = 0x{rng.getrandbits(fmt.width):x}")
+    body, depth = [], 0
+    for _ in range(rng.randint(4, 20)):
+        pick = rng.random()
+        if pick < 0.5:
+            op = rng.choice(list(asm.OP_FIELDS))
+            fields = asm.OP_FIELDS[op]
+            args = []
+            for _f in (fields if rng.random() < 0.6 else ("ra", "rb", "rc")):
+                if nk and rng.random() < 0.35:
+                    args.append(f"K{rng.randrange(nk)}")
+                else:
+                    args.append(f"r{rng.randrange(asm.NREG)}")
+            mods = []
+            if rng.random() < 0.4:
+                mods.append(sf.RND_NAMES[rng.randrange(5)])
+            if nk and any(a[0] == "K" for a in args) and rng.random() < 0.3:
+                mods.append("kx")
+            name = asm.OP_NAMES[op] + "".join("." + m for m in mods)
+            body.append(f"{name} r{rng.randrange(asm.NREG)}, "
+                        + ", ".join(args))
+        elif pick < 0.62 and depth < asm.MAX_LOOP_DEPTH:
+            trip = rng.choice([1, 3, 1 << 24, (0xF << 24) | 7, 0xFFFFF])
+            body.append(f"repeat {trip}")
+            depth += 1
+        elif pick < 0.72 and depth > 0:
+            body.append("endrep")
+            depth -= 1
+        elif pick < 0.85:
+            body.append(f"deposit r{rng.randrange(asm.NREG)}")
+        elif pick < 0.95:
+            body.append(f"setact r{rng.randrange(asm.NREG)}")
+        elif depth == 0:
+            body.append("actall")
+    body += ["endrep"] * depth
+    body.append("halt")
+    return "\n".join(head + [""] + body) + "\n"
+
+
+# 120 rather than more: each program costs four cft-asm launches and a
+# process spawn on Windows is thirty milliseconds, so this stage is
+# most of the target's wall clock. It reaches every feature it exists
+# for at this size and the check says so rather than assuming it.
+def check_revision2_corpus(args, tmp, trials=120):
+    import random as _random
+    rng = _random.Random(2026)
+    n = regs32 = bank = kx = 0
+    for trial in range(trials):
+        text = revision2_program(rng)
+        try:
+            py = asm.assemble(text, f"r2-{trial}")
+        except asm.AsmError:
+            continue                     # a program the loader refuses
+        tag = f"rev2-{trial}"
+        src = tmp / (tag + ".cfta")
+        out = tmp / (tag + ".cftp")
+        src.write_text(text, encoding="utf-8", newline="\n")
+        r = sh([args.asm, src, "-o", out])
+        if r.returncode != 0:
+            bad(f"revision-2 corpus [{trial}]: cft-asm", r.stderr.strip())
+            return
+        if out.read_bytes() != py:
+            bad(f"revision-2 corpus [{trial}]: two assemblers",
+                "the bytes differ")
+            return
+        r = sh([args.asm, "-d", out])
+        if r.returncode != 0:
+            bad(f"revision-2 corpus [{trial}]: cft-asm -d", r.stderr.strip())
+            return
+        if r.stdout.replace("\r\n", "\n") != asm.disassemble(py):
+            bad(f"revision-2 corpus [{trial}]: two disassemblers",
+                "the texts differ")
+            return
+        if asm.assemble(asm.disassemble(py), tag) != py:
+            bad(f"revision-2 corpus [{trial}]: round trip",
+                "assemble(disassemble(x)) != x")
+            return
+        # -i must agree line for line, the SHA-256 included
+        r = sh([args.asm, "-i", out])
+        ci = r.stdout.replace("\r\n", "\n").splitlines()
+        for pl in asm.info(py).splitlines():
+            key = pl.split()[0]
+            cl = next((l for l in ci if l.startswith(key)), None)
+            if cl != pl:
+                bad(f"revision-2 corpus [{trial}]: -i {key}",
+                    f"{pl!r} vs {cl!r}")
+                return
+        img = asm.Image.from_bytes(py)
+        feats = img.features()
+        regs32 += "REGS32" in feats
+        bank += "BANK_PTR" in feats
+        kx += "kx" in feats
+        n += 1
+    if not (regs32 and bank and kx):
+        bad("revision-2 corpus", f"never reached the features it exists "
+                                 f"for: REGS32={regs32} BANK={bank} "
+                                 f"kx={kx}")
+        return
+    ok(f"revision-2 corpus: {n} programs identical in both languages",
+       f"bytes, disassembly, round trip and -i; {regs32} use REGS32, "
+       f"{bank} BANK_EXT, {kx} kx")
+
+
 # ================= main =================================================
 
 def main():
@@ -637,6 +760,9 @@ def main():
             ok(f"{src.stem}: cft-asm == asm.py == MANIFEST",
                f"{len(image)} bytes, {digest[:16]}")
         roundtrip(args, src.stem, image, tmp)
+
+    print("\n-- the revision-2 corpus, in both languages --")
+    check_revision2_corpus(args, tmp)
 
     print("\n-- each program's own check --")
     for name, (image, image_path) in sorted(images.items()):

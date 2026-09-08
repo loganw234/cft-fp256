@@ -6282,15 +6282,16 @@ program they must agree, and that is a test rather than a hope.
 
 **The runs, in order.**
 
-    make golden                     2068 passed, 5 skipped, 190.6 s
-                                    (PYTEST_JOBS=4; 48 of those are
-                                    the new test_asm.py, 0.7 s alone)
-    make programs-check             47 passed, 0 failed, 1 skipped,
-                                    12 images, 1.0 s
+    make golden                     2068 passed, 5 skipped, 225.1 s
+                                    (PYTEST_JOBS=4; 49 of those are
+                                    the new test_asm.py, 1.3 s alone)
+    make programs-check             48 passed, 0 failed, 1 skipped,
+                                    12 images, 18.6 s - of which the
+                                    revision-2 corpus stage is 17, at
+                                    four cft-asm launches a program
     cft-asm vs asm.py, ad hoc       8 seqprogs images + 160 fuzz
-                                    programs + 10 decimal literals +
-                                    one revision-2 source: identical
-                                    bytes, both directions
+                                    programs + 10 decimal literals:
+                                    identical bytes, both directions
     collatz workload                18110 comparisons, 0 failures
     enclose workload                 2664 comparisons, 0 failures
     mersenne workload                 391 comparisons, 0 failures
@@ -6300,9 +6301,12 @@ program they must agree, and that is a test rather than a hope.
 The five workloads are `make -C host collatztest enclosetest
 mersennetest orbitstest zoomtest`, run because this round touches the
 tools' directory and their Makefile. They are unchanged and green.
-(First attempt: `PYTHON=python` under MSYS make found a python without
-mpmath and enclosetest died at the import. Re-run with the absolute
-path to the interpreter that has it. No code was involved.)
+One trap on this host, twice: `PYTHON=python` under MSYS make finds
+mingw64's interpreter, which has neither mpmath (enclosetest died at
+the import) nor pytest (`make golden` did). Both were re-run with the
+absolute path to the interpreter that has them. No code was involved
+either time, and host/Makefile's own header note about matching the
+compiler's word size to the PYTHON is the same lesson one step over.
 
 **What `make programs-check` actually checks.** Three layers, and they
 are not the same claim:
@@ -6323,6 +6327,19 @@ are not the same claim:
    `lowbias32-fp32` over the index ramp against the hash's definition
    with a clean flag word; and `horner-bank-fp64` over two different
    banks against a softfloat Horner.
+
+A fourth layer was added after the first pass, because the first three
+had a hole. `seq.random_program` is revision 1 - sixteen registers, no
+BANK_EXT, no register high bits - and the library's twelve programs
+use one revision-2 feature between them, so nothing was exercising the
+encoding this round actually added. A generator that does now runs in
+both places: 101 programs through both implementations in
+`programs-check` (bytes, disassembly, round trip and `-i` line for
+line, the SHA-256 included - 101 with REGS32, 37 with BANK_EXT, 75
+with kx), and 100-odd through asm.py alone in `test_asm.py`, each
+asserting what it reached rather than assuming it. A round trip that
+never saw a five-bit register field would be a round trip over
+revision 1 with extra steps.
 
 `programs-check` deliberately does NOT depend on `programs`. That
 target rewrites the MANIFEST, so a check that ran it first would be
