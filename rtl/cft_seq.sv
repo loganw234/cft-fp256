@@ -470,9 +470,14 @@ module cft_seq #(
   // run the writeback path, so a block shorter than the pipe simply
   // drains in the wait state instead of during issue. What IS
   // structural is the register file's address shape - rf_raddr_* and
-  // rf_waddr carry the beat index in FOUR bits, {reg, beat[3:0]} - and
-  // that the block length fits the beat counters. Raise NBEATS past 16
-  // and those selects silently alias one beat onto another.
+  // rf_waddr carry {reg[4:0], beat[NBSH-1:0]} - and that the block
+  // length fits the beat counters. Raise NBEATS past 16 and `bt` and
+  // `wb_bt` no longer hold a block's worth of beats, and the six-bit
+  // beat arguments those row functions take stop covering the block.
+  // (The beat field was a fixed FOUR bits until revision 2, dense only
+  // at NBEATS 16 - the one value anything builds - and is now NBSH, so
+  // a smaller block addresses its own file exactly rather than
+  // indexing past the end of an array the same expression sized.)
   generate
     if (NBEATS < 1 || NBEATS > 16) begin : g_nbeats
       $error("cft_seq: NBEATS must be 1..16 - the register file addresses a beat in four bits");
@@ -1303,9 +1308,10 @@ module cft_seq #(
           rf_wwe <= {WORDS{1'b1}};
           zaddr <= zaddr + 1;
           // ...and, in the same window, blk_n * max_deposits, one bit
-          // of the multiplier per cycle. RF_D is 16 * NBEATS and
-          // NBEATS is at least LATENCY+1, so the CW steps this takes
-          // always finish long before the wipe does.
+          // of the multiplier per cycle. RF_D is 32 * NBEATS, so the
+          // CW steps this takes finish long before the wipe does -
+          // with twice the margin they had before revision 2, since
+          // the wipe is the thing that doubled.
           if (zaddr == 0) begin
             dep_elems  <= '0;
             dep_addend <= 32'(blk_n);
