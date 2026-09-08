@@ -217,8 +217,16 @@ the element count is an operand rather than a loop bound.
       five minutes with NONE of device-test's own output and two
       protobuf parse errors at the first host-to-device copy - the
       driver's stale-emulation-state class, or a crash the runtime's
-      handler turned into exit 0; not a pass. A re-run is queued behind
-      the sequencer gate; docs/VALIDATION.md carries the verdict.
+      handler turned into exit 0; not a pass. Not re-run: the single's
+      own `-q -n 8` ran 221 min and was still inside fp32 (fma 22,
+      sequencer programs 42, composed div/sqrt 50 checks, 0 failed)
+      when it was stopped on the morning of card day, because quick
+      mode is hundreds of invocations now and xsim charges one to
+      three minutes each. The multi-tile host path IS proven another
+      way: `-s -n 24` on the quad image passed 98 checks in all four
+      formats overnight (docs/VALIDATION.md 2026-09-08). Step 2 with
+      the single image and step 3's full matrix cover the rest on the
+      card itself.
 - [ ] `bash hw/run-device-test.sh <quad hw_emu image> -r` green. NOT
       a pre-day check after all: on 2026-09-07 the gate ran 133 min
       under xsim, about 95 single-element fp32 reductions each
