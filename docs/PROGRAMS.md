@@ -19,7 +19,8 @@ runner that takes an image and data in and deposits and a hash out.
 
 **Where it stands.** All three are built and green on the software
 backend. `programs/` holds twelve programs with a check each, `make
-programs-check` runs them in about a second, and the one thing it
+programs-check` runs them and a generated revision-2 corpus in well
+under a minute, and the one thing it
 cannot do yet is the `BANK_EXT` run path, which needs
 `cft_program_run_bank` from the host half of the same round; it says
 SKIP and runs the equivalent constant-carrying image in the meantime.

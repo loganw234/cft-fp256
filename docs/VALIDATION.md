@@ -6286,9 +6286,13 @@ program they must agree, and that is a test rather than a hope.
                                     (PYTEST_JOBS=4; 49 of those are
                                     the new test_asm.py, 1.3 s alone)
     make programs-check             48 passed, 0 failed, 1 skipped,
-                                    12 images, 18.6 s - of which the
-                                    revision-2 corpus stage is 17, at
-                                    four cft-asm launches a program
+                                    12 images, 6.6 to 18.6 s across
+                                    runs - the revision-2 corpus stage
+                                    is nearly all of it and nearly all
+                                    of that is process spawn, at four
+                                    cft-asm launches a program on a
+                                    Windows box whose scanner has
+                                    opinions
     cft-asm vs asm.py, ad hoc       8 seqprogs images + 160 fuzz
                                     programs + 10 decimal literals:
                                     identical bytes, both directions
