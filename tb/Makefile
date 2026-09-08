@@ -331,7 +331,10 @@ board: boardkrnl boardseq boardfp256
 # 1,104-element stream begins: on 2026-09-07 four hours of simulation
 # reached 57 of the 71 operations, every one bit-exact, and the
 # control on the tree before the leading-zero cone became a stage ran
-# the same way, so the configuration is the cause, not a change. The
+# the same way, so the configuration is the cause, not a change - and
+# the ingredient is the shared ladders themselves, not the pass
+# budget: both ladders on at one pass, 1.7 ns a second; ten passes
+# with neither, 1,636 (docs/VALIDATION.md, that evening). The
 # bench has no finite Icarus duration worth quoting. Verilator runs
 # it in 16 s after an eleven-minute compile - 44,920 ns simulated,
 # both tests, the parameters applied, which they were NOT until that

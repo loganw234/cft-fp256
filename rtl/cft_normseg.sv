@@ -29,6 +29,21 @@
 // collapses LUTs, which are. It still ships behind a parameter,
 // default off, until a before/after says so.
 //
+// A simulator note (2026-09-07). The ladder below is written per
+// bit - a continuous assign for each of its WT bits at every level -
+// because that is the form whose masks Vivado folds. Icarus schedules
+// each of those assigns as an event every time the input settles,
+// and inside the kernel the input is a mux over eight slots that
+// settles more than once a cycle, so the full-kernel benches with
+// this ladder on run at a few nanoseconds of simulated time a second
+// under Icarus (1.7 ns/s with both ladders at one pass, against
+// 1,636 with neither), while this module's own benches, driven once
+// a cycle, run at about 1,000. Under Verilator the ladder compiles
+// to vector operations and the same benches finish in seconds;
+// tb/Makefile selects it for the board kernel. A level-wise rewrite
+// - one vector mask and shift per level, the same bits - is the fix
+// if Icarus must run it (docs/VALIDATION.md, that date).
+//
 // UNIFORM SLOTS, AND WHY 90
 //
 // The natural widths (78/165/345/717) do not nest, and non-nesting
