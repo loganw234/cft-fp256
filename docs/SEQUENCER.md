@@ -719,3 +719,154 @@ only as a whole-number gate; and the program engine's margin over the
 host loop on the software backend is 1.06 to 2.1 times, set by how
 much of the step the program holds, which is a statement about a slow
 backend and not about the tile.
+
+## Revision 2 (2026-09-08): thirty-two registers, 4,096 instructions, a per-run constant bank
+
+Three changes, each one of docs/ATLAS.md's requests from the det
+library's port, each announced in CAPS and refused by name where a
+device lacks it. The card-day images (VERSION 0x600, ed752dd) predate
+all three and are unaffected: the host runs them exactly as before and
+every tool keeps the fallback it has. This section is the CONTRACT the
+2026-09-08 round is built against; the sections above describe the
+model as it was, and the round updates them to match.
+
+### R1. Five-bit register fields
+
+*Feature bit CAPS[5] = `cft_caps.seq_features` bit 1 =
+`CFT_SEQ_FEAT_REGS32 0x02u`.*
+
+Each lane owns **32 registers**. A register field is five bits: the
+low four stay in the operand fields where they are, and the fifth bit
+of each lives in `imm[27:24]`, which every ALU form reserves today:
+
+| bit | meaning |
+|---|---|
+| `imm[24]` | `rd[4]` |
+| `imm[25]` | `ra[4]` |
+| `imm[26]` | `rb[4]` |
+| `imm[27]` | `rc[4]` |
+
+`imm[31:28]` stays reserved-must-be-zero. The reserved-field rule
+applies unchanged and settles every corner: an operand whose `k` bit
+is set names a constant, so its high bit is not read and must be zero
+(under `kx` too - the constant index is the byte of `imm`, the
+register high bit is not read); a control instruction reads at most
+`ra` (`DEPOSIT`, `SETACT`), so on those two only `imm[25]` may be set
+and on the other four none. `r16..r31` start at `+0` like `r3..r15`;
+`r0..r2` still load from the streams. Nothing else in the encoding
+moves.
+
+Old loaders refuse any set bit in `imm[31:24]` (the `kx` reserved
+mask), which is the version guard. A new loader refuses a program that
+names a register above 15 on a device whose CAPS[5] is clear, naming
+the instruction and the register, because an old tile's operand mux
+would read the low four bits and silently address the wrong register -
+the same reasoning that made `kx` need a CAPS bit.
+
+RTL: `RF_D = 32 * NBEATS`, the register-file addresses widen by one
+bit, the file doubles from 7.5 to 15 KiB a tile. The round MEASURES
+that out of context (LUT, BRAM, timing at 135 MHz on the U50 part and
+at the K325T's 100 and 120) and records it beside the change; if the
+file cannot double at the card's clock the entry says so and the init
+block of docs/ATLAS.md becomes the escape hatch. Nothing is shrunk to
+make it fit. Model: `NREG = 32`, `encode`, `decode`, `run` and the
+refusals.
+
+### R2. Four thousand and ninety-six instructions
+
+*No feature bit: CAPS[23:20] already publishes log2 IMEM_D, and reads
+12.*
+
+rtl/cft_krnl.sv sets `SEQ_IMEM_D` 1024 -> 4096; `PCW` becomes 12; the
+header check and the worst-case instruction-count rule are unchanged.
+Hosts learn `max_insns = 4096` from CAPS and nothing in the library
+changes but its tests' expectations. Cost: 32 KB of instruction memory
+a tile where it was 8, in block RAM.
+
+### R3. The constant bank as per-run data
+
+*Feature bit CAPS[6] = `cft_caps.seq_features` bit 2 =
+`CFT_SEQ_FEAT_BANK_PTR 0x04u`.*
+
+The header's `reserved[0]` (bytes 24..27) becomes **`flags`**. Bit 0
+is **`BANK_EXT`**: the image carries NO constant section, `n_consts`
+still says how many constants the program addresses, and every run
+supplies exactly that many format-width values in a **bank** buffer.
+`flags[31:1]` and `reserved[1]` stay reserved-must-be-zero. An image
+with `BANK_EXT` set is therefore header, then `n_insns` instructions:
+`bytes == 32 + 8 * n_insns`. One image per positive, loaded once, with
+the levers, the clock and the pass riding as data.
+
+**Register map: `BANK_PTR` at 0x64 (low) and 0x68 (high)**, kernel
+argument id 8, name `bank`, on `m_axi_a` - it rides the A master as the
+image does, and the two never overlap in time. The map grew, so
+**VERSION 0x600 -> 0x700**; the host accepts {0x410, 0x500, 0x600,
+0x700}. hw/kernel.xml gains the argument; hw/link.cfg and
+hw/link_quad.cfg need nothing, since no master is added.
+
+**The tile.** FETCH reads the header as today; with `flags.BANK_EXT`
+set it reads the `n_consts` constants from `BANK_PTR` (dense,
+format-width, exactly as the image's constant section is laid out)
+and the instructions from `cfg_prog + 32`; otherwise from the image as
+today. A set flag bit the tile does not know, or a non-zero
+`reserved[1]`, refuses at the header (STATUS[3]) - the revision-2 tile
+checks both words, which the 0x600 tile does not. That omission is why
+CAPS[6] is the only guard that protects an old bitstream: its FETCH
+would read constants from an image that has none. So
+`cft_program_load` refuses a `BANK_EXT` image on any device whose
+CAPS[6] is clear, by name, before the map is ever touched.
+
+**Host API (ABI 0.9).** Beside `cft_program_run`, not replacing it:
+
+    cft_status cft_program_run_bank(cft_program *prog,
+                                    const void *bank, size_t bank_bytes,
+                                    const void *a, const void *b,
+                                    const void *c,
+                                    void *deposits, uint32_t *counts,
+                                    size_t n,
+                                    uint32_t *flags_out, uint32_t *bus_out);
+
+`bank_bytes` must equal `n_consts` times the format's element size. A
+`BANK_EXT` program refuses `cft_program_run` (CFT_ERR_INVALID_ARGUMENT,
+the message naming `cft_program_run_bank`); a program that carries its
+own constants refuses a non-NULL bank. `cft_program_info` gains
+`uint32_t flags`, struct_size-gated. The attestation the request
+asked for:
+
+    cft_status cft_program_digest(cft_program *prog,
+                                  const void *bank, size_t bank_bytes,
+                                  uint8_t out[32]);
+
+SHA-256 over the image bytes followed by the bank bytes (the image
+alone when there is no bank), so what ran is one hash of image and
+data together. The library therefore carries a SHA-256; the tools
+have one each today and share this one afterwards.
+
+The software backend's executor takes the bank per run. The remote
+backend's protocol gains the run-with-bank message, versioned so an
+older server refuses it by name (docs/REMOTE.md). The XRT backend
+writes `BANK_PTR`, passes the bank as argument 8, and sends an image
+whose constant section is absent. The model's `Program` gains
+`flags`, and `run(prog, a, b, c, bank=None)` takes the bank.
+
+### CAPS after revision 2
+
+| bits | meaning |
+|---|---|
+| [4] | `kx`, indexed constants |
+| [5] | `REGS32`, five-bit register fields |
+| [6] | `BANK_PTR`, the per-run constant bank |
+| [7] | reserved |
+| [23:20] | log2 IMEM_D, now 12 |
+| [28] | `IMUL` |
+
+`cft_caps.seq_features`: bit 0 `kx`, bit 1 `REGS32`, bit 2 `BANK_PTR`,
+bit 4 `IMUL`.
+
+### What revision 2 does not do
+
+No `CALL`, no init block, no counter-indexed constant, no lane shift:
+those stay on docs/ATLAS.md's list with the measurements that will
+decide them. The wider per-sample input block is withdrawn by its
+requester - with `IMUL` in, every per-sample value is integer
+arithmetic in-lane over the index ramp.
