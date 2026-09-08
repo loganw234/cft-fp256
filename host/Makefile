@@ -746,6 +746,50 @@ clean-remote:
 	rm -f cft-serve cft-serve.exe remote-test remote-test.exe
 # ==================== end of the cft-serve block ===================
 
+# ===================================================================
+# cft-asm and positive-run - programs as files (docs/PROGRAMS.md)
+#
+# Its own delimited block on the same terms as the blocks above:
+# TOOLS += plus an explicit `all:` prerequisite, and `clean` gains a
+# prerequisite rather than a longer command line.
+#
+#   make programs-tools     both binaries
+#   make asmtest            the assembler against its Python reference
+#                           and the library in programs/ (this is what
+#                           `make programs-check` at the repo root
+#                           runs; it is here so the tool's own tree
+#                           can run it too)
+#
+# cft-asm links libcft for cft_op_name, the format table and the
+# decimal conversion, and for nothing else - in particular NOT for
+# cft_program_load, because an assembler that could only emit images
+# this tree's loader already accepts could not write a revision-2
+# program until every backend caught up.
+# ===================================================================
+TOOLS += cft-asm$(EXE) positive-run$(EXE)
+all: cft-asm$(EXE) positive-run$(EXE)
+clean: clean-programs
+.PHONY: programs-tools asmtest clean-programs
+
+cft-asm$(EXE): tools/cft-asm.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+positive-run$(EXE): tools/positive-run.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+programs-tools: cft-asm$(EXE) positive-run$(EXE)
+
+# The whole library check, from host/: assemble every .cfta with both
+# implementations, compare byte for byte, and run each program's own
+# check. `make programs-check` at the repo root is the same script.
+asmtest: cft-asm$(EXE) positive-run$(EXE)
+	$(PYTHON) ../programs/check.py --asm ./cft-asm$(EXE) \
+	          --runner ./positive-run$(EXE)
+
+clean-programs:
+	rm -f cft-asm cft-asm.exe positive-run positive-run.exe
+# ==================== end of the cft-asm block =====================
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves
