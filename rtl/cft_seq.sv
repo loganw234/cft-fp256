@@ -20,14 +20,28 @@
 //  1. FETCH. Read the 32-byte program header at cfg_prog, then
 //     n_consts format-width constants, then n_insns 64-bit
 //     instructions (all little-endian, densely packed in that order;
-//     the constant region is NOT beat-padded). The image was
-//     validated by cft_program_load, and the hardware re-checks only
-//     what protects the hardware:
+//     the constant region is NOT beat-padded).
+//
+//     Unless the header's flags.BANK_EXT is set (revision 2), in
+//     which case the image is header then instructions with NO
+//     constant section, the constants come from cfg_bank in a first
+//     pass of the same byte parser, and the instructions from
+//     cfg_prog + 32 in a second. The bank is laid out exactly as an
+//     image's constant section is, which is what lets one parser read
+//     either.
+//
+//     The image was validated by cft_program_load, and the hardware
+//     re-checks only what protects the hardware:
 //         magic   == "CFTP" (0x50544643)
 //         version == 1
 //         format  == cfg_prec (a program is compiled for one format)
 //         n_insns <= IMEM_D, n_consts <= KMEM_D,
 //         max_deposits <= MAXD
+//         flags[31:1] == 0 and the remaining reserved word == 0
+//     (the last line is revision 2's: the 0x600 tile checked neither
+//     header word, which is why BANK_EXT needs a CAPS bit and not
+//     only a flag - that tile would read constants out of an image
+//     that has none)
 //     (max_deposits == 0 is LEGAL - the model allows it, every
 //     deposit then overflows.) Every constant the header declares is
 //     stored, up to KMEM_D: since 2026-09-07 an instruction with `kx`
@@ -46,7 +60,7 @@
 //
 //  2. EXECUTE, in blocks of NBEATS beats = NBEATS * lanes_per_beat
 //     lanes. Per block: r0/r1/r2 load from cfg_a/b/c at the block's
-//     element offset (r3..r15 start +0), a lane is ACTIVE iff its
+//     element offset (r3..r31 start +0), a lane is ACTIVE iff its
 //     global index < cfg_n; then the instruction stream runs to HALT
 //     under seq.py's semantics - ALU results, deposits and FLAG
 //     contributions all masked per-lane by active (P3); REPEAT/ENDREP
@@ -91,8 +105,13 @@
 //   register file   regs[{reg,beat}], 256 bits wide, mirrored twice
 //                   so one cycle reads a, b and c; written with
 //                   per-byte enables so a lane's active bit masks its
-//                   slice. 16 regs x NBEATS beats x 32 B = 8 KiB, the
-//                   same silicon at every precision.
+//                   slice. 32 regs x NBEATS beats x 32 B = 16 KiB, the
+//                   same silicon at every precision. It was 16 regs
+//                   until revision 2; doubling it cost -258 LUT and
+//                   0.000 ns on the U50 at 135 MHz, because the banks
+//                   were already block RAM and 512 x 32 fits the same
+//                   primitive 256 x 32 did (docs/VALIDATION.md,
+//                   2026-09-08).
 //   imem / kmem     the instruction stream, and the KMEM_D addressable
 //                   constants, held already broadcast across the beat
 //                   because a run's format never changes. The bank is

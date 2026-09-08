@@ -104,8 +104,9 @@ kernel flow, XRT host runtime.
   constants from BANK_PTR instead of from the image - and writing
   per-lane deposits and counts. A lane owns **32 registers** of format
   width since revision 2, so the register file is `32 * NBEATS` beats
-  of 32 bytes, 15 KiB a tile at every precision; the instruction
-  memory holds **4,096**. It borrows the A
+  of 32 bytes - 16 KiB a tile at `NBEATS` 16, the same silicon at
+  every precision; the instruction memory holds **4,096**, and
+  Vivado infers one UltraRAM for it. It borrows the A
   and D masters from the streaming engine and issues into the same
   `cft_lanes`. docs/SEQUENCER.md is the design and
   `python/cft_golden/seq.py` the definition of correct; benched

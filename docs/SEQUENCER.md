@@ -336,13 +336,17 @@ all but one idle.
 The pleasing part is that this makes the register file
 **precision-independent**. A beat is 32 bytes whatever the format, so
 
-    register file  =  32 registers * LATENCY beats * 32 bytes  =  15 KiB
+    register file  =  32 registers * LATENCY beats * 32 bytes
 
 at fp32, fp64, fp128 and fp256 alike - 120 fp32 lanes or 15 fp256
-lanes, the same silicon. (It was 16 registers and 7.5 KiB until
-revision 2 doubled the file; what that cost on the U50 is measured in
-docs/VALIDATION.md's 2026-09-08 entry rather than estimated here.) The
-deposit buffer scales the same way:
+lanes, the same silicon. At today's `LATENCY` of 16 that is **16
+KiB**; it was 8 with sixteen registers, and 7.5 before `LATENCY` went
+15 -> 16 on 2026-09-07, which is where the 7.5 KiB in older notes and
+in the revision-2 contract's own summary comes from. Work it out from
+the line above rather than quoting a number, because two of the three
+factors have moved. What the doubling actually cost in silicon is
+measured in docs/VALIDATION.md's 2026-09-08 entry rather than
+estimated here. The deposit buffer scales the same way:
 
     deposit buffer  =  max_deposits * LATENCY beats * 32 bytes
 
