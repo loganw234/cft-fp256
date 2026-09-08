@@ -6,16 +6,24 @@ own encoder to it.
     echo '[{"name":"x","text":".format fp64\\n.deposits 1\\nhalt\\n"}]' \
         | python bindings/node/asm_ref.py
 
-Reads a JSON array of `{name, text}` on stdin, where `text` is `.cfta`
-source (docs/PROGRAMS.md), and writes one JSON object on stdout:
+Reads a JSON array of `{name, text}` on stdin - optionally with
+`banks`, a list of hex constant banks - where `text` is `.cfta` source
+(docs/PROGRAMS.md), and writes one JSON object on stdout:
 
     {"python": "3.12.9",
-     "programs": {"<name>": {"hex": ..., "format": "fp64", "n_insns": 3,
+     "programs": {"<name>": {"hex": "<the image, hex>",
+                             "format": "fp64", "n_insns": 3,
                              "n_consts": 2, "max_deposits": 1,
-                             "flags": 1, "digest": "<sha256 of the image>",
-                             "features": ["BANK_PTR"]},
+                             "flags": 1, "bank_external": true,
+                             "digest": "<sha256 of the image alone>",
+                             "bank_digests": ["<per bank, image+bank>"]},
                   ...},
      "errors": {"<name>": "<why it was refused>"}}
+
+A source the reference refuses is reported in `errors` rather than
+raised, so one bad program does not cost the caller the answers about
+every other one; program_test.mjs turns any entry there into a failure
+naming the program.
 
 WHY THIS EXISTS. `python/cft_golden/asm.py` is the reference encoder
 and `bindings/node/seq_corpus.mjs` carries a second one, because a test
