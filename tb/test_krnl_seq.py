@@ -64,13 +64,18 @@ from cft_golden import (  # noqa: E402
 )
 from cft_golden import seq  # noqa: E402
 
-from test_krnl import run_op, check_seq_caps  # noqa: E402
+from test_krnl import run_op, check_seq_caps, _localparam, RTL  # noqa: E402
+
+# The tile's instruction capacity, PARSED from the RTL rather than
+# restated: a number in a test that copies a number in the RTL is a
+# defect (docs/VERIFICATION.md), and this one moved at revision 2.
+SEQ_IMEM_D = _localparam(RTL / "cft_krnl.sv", "SEQ_IMEM_D")
 
 # CSR map (rtl/cft_csr.sv == hw/kernel.xml == docs/ARCHITECTURE.md)
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
 FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
-PROGPTR, CNTPTR = 0x54, 0x5C
+PROGPTR, CNTPTR, BANKPTR = 0x54, 0x5C, 0x64
 
 MODE_SEQ = 1 << 15          # this run belongs to cft_seq
 CAPS_SEQ = 1 << 15          # ... and this bitstream has one
@@ -82,7 +87,12 @@ ST_DEPOSIT_OVF = 1 << 4
 # with the whole deposit window and a generous guard band.
 A_BASE, B_BASE, C_BASE = 0x00000, 0x20000, 0x40000
 D_BASE, PROG_BASE, CNT_BASE = 0x60000, 0x80000, 0xA0000
+# The per-run constant bank (revision 2). Its own region, far from the
+# image: the whole point of BANK_EXT is that the two are separate
+# buffers, and a tile that quietly read the constants out of the image
+# would pass every check here if they shared one.
 # The elementwise regression's own corner of the same memory.
+BANK_BASE = 0xB0000
 EW_BASES = (0xC0000, 0xD0000, 0xE0000, 0xF0000)
 
 POISON = 0xAA
@@ -140,9 +150,14 @@ async def poll_done(dut, axil, what, tries=3000):
 
 
 async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
-                          prec_code, op_noise=0):
+                          prec_code, op_noise=0, bank=None):
     """Everything a host does between having a program and having an
-    answer, in the order XRT does it."""
+    answer, in the order XRT does it.
+
+    `bank` is a BANK_EXT program's constants, staged in their own region
+    and handed over in BANK_PTR exactly as PROG_PTR hands over the
+    image - which is the whole of what the new register has to do.
+    """
     ebytes = prog.fmt.width // 8
     dep_bytes = n * prog.max_deposits * ebytes
     cnt_bytes = n * 4
@@ -165,10 +180,20 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
     await write64(axil, DPTR, D_BASE)
     await write64(axil, PROGPTR, PROG_BASE)
     await write64(axil, CNTPTR, CNT_BASE)
+    if bank is not None:
+        ram.write(BANK_BASE, pack(prog.fmt, bank))
+        await write64(axil, BANKPTR, BANK_BASE)
+    else:
+        # Deliberately POISONED rather than left alone: a program that
+        # is not BANK_EXT must never read this register, and pointing it
+        # at an address with no constants at it is how that is checked
+        # rather than asserted.
+        await write64(axil, BANKPTR, 0xDEAD_0000)
     await axil.write_dword(CTRL, 1)
 
 
-async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0):
+async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
+                   bank=None):
     """One sequencer run, scored against the model on every observable."""
     fmt = prog.fmt
     ebytes = fmt.width // 8
@@ -177,10 +202,10 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0):
     dep_bytes = n * maxd * ebytes
     cnt_bytes = n * 4
 
-    res = seq.run(prog, va, vb, vc)
+    res = seq.run(prog, va, vb, vc, bank=bank)
 
     await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
-                          PREC_CODE[fmt.name], op_noise)
+                          PREC_CODE[fmt.name], op_noise, bank=bank)
     await poll_done(dut, axil, name)
 
     got_dep = ram.read(D_BASE, dep_bytes + GUARD)
@@ -356,6 +381,113 @@ def prog_zero_deposits(fmt):
     ], consts=[], max_deposits=0)
 
 
+
+def prog_high_registers(fmt):
+    """Revision 2 R1, through the whole kernel: a chain that lives
+    entirely in r16..r31 and deposits from there.
+
+    Not a decoding check - test_seq_core.py's fuzz does that at volume.
+    What this is for is the register FILE: it doubled, its read and
+    write addresses grew a bit, and the beat field moved from a fixed
+    four bits to NBSH. A program that only ever names r0..r15 exercises
+    the low half of the file and would pass with the high half wired to
+    nothing at all.
+
+    r31 is deposited LAST and r16 first, so a file whose high addresses
+    aliased onto the low ones would show up as the wrong value in a
+    slot rather than as a bus fault - which is the failure mode worth
+    catching, because it is the quiet one.
+    """
+    return seq.Program(fmt, [
+        seq.alu(OP_ADD, rd=16, ra=0, rc=2),      # r16 = a + c
+        seq.alu(OP_MUL, rd=31, ra=16, rb=1),     # r31 = r16 * b
+        seq.alu(OP_ADD, rd=23, ra=31, rc=16),    # r23 = r31 + r16
+        seq.deposit(16),
+        seq.deposit(23),
+        seq.deposit(31),
+        seq.deposit(20),                          # never written: +0
+        seq.halt(),
+    ], consts=[], max_deposits=4)
+
+
+def prog_bank_ext(fmt):
+    """Revision 2 R3: an image with no constant section, whose four
+    constants arrive per run through BANK_PTR.
+
+    `bytes == 32 + 8 * n_insns`, asserted here rather than trusted,
+    because that identity IS the feature: if the image still carried
+    the constants there would be nothing for the new register to do.
+    """
+    p = seq.Program(fmt, [
+        seq.alu(OP_MUL, rd=17, ra=0, rb=1),
+        seq.alu(OP_ADD, rd=18, ra=17, rc=0, kc=True),   # + bank[0]
+        seq.deposit(18),
+        seq.alu(OP_ADD, rd=19, ra=18, rc=3, kc=True),   # + bank[3]
+        seq.deposit(19),
+        seq.halt(),
+    ], flags=seq.FLAG_BANK_EXT, n_consts=4, max_deposits=2)
+    assert len(p.to_bytes()) == 32 + 8 * len(p.insns), \
+        "a BANK_EXT image carries no constant section"
+    return p
+
+
+
+def prog_fills_imem(fmt, n_insns):
+    """Revision 2 R2: a program of exactly `n_insns` instructions, the
+    tile's whole instruction memory.
+
+    The point is the deep addresses. IMEM_D went 1024 -> 4096 and PCW
+    with it, so `pc`, `skip_depth` and the loop stack's body pointer
+    all grew a bit, and imem's write cursor now needs twelve. A program
+    that merely DECLARES 4,096 instructions proves only the header
+    check; this one has to reach the last four.
+
+    Executing 4,096 instructions the ordinary way would cost about
+    forty cycles each, which is a bench nobody runs. So the bulk of the
+    program is SKIPPED rather than executed, which is two cycles an
+    instruction and is a stronger test of the memory than executing
+    would be: the skip walks every word from the REPEAT to its matching
+    ENDREP counting nesting, so an imem entry that came back as the
+    wrong word - the aliasing a too-narrow address would cause -
+    lands the skip on the wrong ENDREP and the program diverges. The
+    filler is deliberately half REPEAT/ENDREP pairs so the nesting
+    counter is exercised rather than a run of identical words.
+
+    The last four instructions then execute for real, at PC 4092..4095,
+    which is where all twelve bits of the address are needed:
+
+        0            setact r5    - r5 is +0, so every lane drops out
+        1            repeat 2     - no lane is active, so it is SKIPPED
+        2 .. N-5     filler       - walked by the skip, never executed
+        N-5          endrep       - where the skip must land
+        N-4          actall       - lanes back (top level, so legal)
+        N-3          r20 = a + c
+        N-2          deposit r20
+        N-1          halt
+    """
+    body = [seq.setact(5), seq.repeat(2)]
+    fill_end = n_insns - 5
+    i = 2
+    while i < fill_end:
+        # pairs where they fit, a plain ALU word otherwise, so the
+        # skip's nesting counter sees real structure
+        if i + 1 < fill_end and (i % 3):
+            body += [seq.repeat(2), seq.endrep()]
+            i += 2
+        else:
+            body.append(seq.alu(OP_ADD, rd=(i % 32), ra=0, rc=1))
+            i += 1
+    body += [seq.endrep(), seq.actall(),
+             seq.alu(OP_ADD, rd=20, ra=0, rc=2),
+             seq.deposit(20), seq.halt()]
+    assert len(body) == n_insns, (
+        f"the filler must land exactly on {n_insns}; it made {len(body)}")
+    # the instructions that matter really are at the top of the memory
+    assert seq.decode(body[n_insns - 1])["op"] == seq.HALT
+    assert seq.decode(body[n_insns - 2])["op"] == seq.DEPOSIT
+    return seq.Program(fmt, body, consts=[], max_deposits=1)
+
+
 @cocotb.test()
 async def krnl_sequencer(dut):
     cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
@@ -388,8 +520,8 @@ async def krnl_sequencer(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000600, \
-        "the map grew by four registers at v0.6.0"
+    assert await axil.read_dword(VERSION) == 0x00000700, \
+        "the map grew by two registers at v0.7.0 - BANK_PTR at 0x64/0x68"
     caps = await axil.read_dword(CAPS)
     check_seq_caps(caps)
     assert caps & CAPS_SEQ, (
@@ -402,7 +534,8 @@ async def krnl_sequencer(dut):
     # decodes to the default reads zero, starts a run against address
     # zero, and looks exactly like a sequencer bug.
     for addr, val in ((PROGPTR, 0x0000_0001_2345_6780),
-                      (CNTPTR,  0x0000_0002_4680_ACE0)):
+                      (CNTPTR,  0x0000_0002_4680_ACE0),
+                      (BANKPTR, 0x0000_0003_1470_2580)):
         await write64(axil, addr, val)
         lo = await axil.read_dword(addr)
         hi = await axil.read_dword(addr + 4)
@@ -439,6 +572,52 @@ async def krnl_sequencer(dut):
                    gen_stream(FP32, n, rng), gen_stream(FP32, n, rng),
                    gen_stream(FP32, n, rng), "fp32 constant bank")
 
+
+    # ---- revision 2 R1: the high half of the register file ------------
+    await run_prog(dut, axil, ram, prog_high_registers(FP32),
+                   gen_stream(FP32, n, rng), gen_stream(FP32, n, rng),
+                   gen_stream(FP32, n, rng), "fp32 registers 16..31")
+
+    # ---- revision 2 R3: a BANK_EXT program through BANK_PTR ----------
+    #
+    # The same image, run TWICE with different banks. One run would
+    # prove the pointer is read; two prove the answer follows the bank,
+    # which is the claim - a tile that ignored BANK_PTR and read four
+    # zeros would give the same wrong answer both times, and a tile that
+    # cached the first bank would give the first answer twice.
+    pbank = prog_bank_ext(FP32)
+    for tag, bank in (
+            ("A", [one_bits(FP32), zero_bits(FP32),
+                   max_normal_bits(FP32), one_bits(FP32)]),
+            ("B", [zero_bits(FP32, 1), min_subnormal_bits(FP32),
+                   qnan_bits(FP32), max_normal_bits(FP32)])):
+        await run_prog(dut, axil, ram, pbank,
+                       gen_stream(FP32, n, rng, tame=True),
+                       gen_stream(FP32, n, rng, tame=True),
+                       gen_stream(FP32, n, rng),
+                       f"fp32 BANK_EXT, bank {tag}", bank=bank)
+
+    # The wide rung too: a 256-bit constant is four beats of bank where
+    # an fp32 one is a fraction of a beat, so the bank parser's byte
+    # arithmetic is a different problem at each end of the ladder.
+    pbank256 = prog_bank_ext(FP256)
+    await run_prog(dut, axil, ram, pbank256,
+                   gen_stream(FP256, 2, rng, tame=True),
+                   gen_stream(FP256, 2, rng, tame=True),
+                   gen_stream(FP256, 2, rng),
+                   "fp256 BANK_EXT",
+                   bank=[one_bits(FP256), zero_bits(FP256),
+                         max_normal_bits(FP256), one_bits(FP256)])
+
+    # ...and an ordinary image still runs with BANK_PTR pointing at
+    # rubbish, which stage_and_start arranges on every non-bank run.
+    # It is the negative half of the same claim: the register is read
+    # only when flags.BANK_EXT says to read it.
+    await run_prog(dut, axil, ram, prog_consts(FP32),
+                   gen_stream(FP32, n, rng), gen_stream(FP32, n, rng),
+                   gen_stream(FP32, n, rng),
+                   "fp32 constants in the image, BANK_PTR poisoned")
+
     # ---- a refusal, straight after a run with flags to protect -------
     #
     # A program is compiled for one format, because its constants are
@@ -462,10 +641,78 @@ async def krnl_sequencer(dut):
                       gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
                       "bad magic", flags_before)
 
+
+    # Revision 2's two new header refusals, and the reason CAPS[6]
+    # exists. The 0x600 tile checked NEITHER reserved word, so an image
+    # built for a later revision - one whose flags say something this
+    # tile has never heard of - would have been half-understood and run.
+    # This tile throws it back at the header, before a byte is computed.
+    for offset, value, why in (
+            (24, 1 << 1, "flags[1], a flag bit this tile does not know"),
+            (27, 0x80,   "flags[31], the top of the same word"),
+            (28, 1,      "reserved[1], still reserved")):
+        bad = bytearray(p32.to_bytes())
+        bad[offset] |= value
+        await run_refused(dut, axil, ram, bytes(bad), p32,
+                          gen_stream(FP32, 8, rng), gen_stream(FP32, 8, rng),
+                          gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
+                          f"header {why}", flags_before)
+
+    # The positive control for those three: flags[0] is BANK_EXT and IS
+    # known, so the identical mechanism must NOT refuse it. Without this
+    # line a tile that refused every non-zero flags word would pass the
+    # loop above and fail nothing.
+    pbank_ctl = prog_bank_ext(FP32)
+    assert pbank_ctl.to_bytes()[24] == 1, \
+        "the positive control must actually set flags[0]"
+    await run_prog(dut, axil, ram, pbank_ctl,
+                   gen_stream(FP32, 8, rng, tame=True),
+                   gen_stream(FP32, 8, rng, tame=True),
+                   gen_stream(FP32, 8, rng),
+                   "fp32 BANK_EXT is a KNOWN flag",
+                   bank=[one_bits(FP32), zero_bits(FP32),
+                         one_bits(FP32), zero_bits(FP32, 1)])
+
     # A refusal must not have poisoned the machine either.
     await run_prog(dut, axil, ram, p32,
                    gen_stream(FP32, n, rng), gen_stream(FP32, n, rng),
                    gen_stream(FP32, n, rng), "fp32 after two refusals")
+
+
+    # ---- revision 2 R2: a program that fills the instruction memory --
+    #
+    # SEQ_IMEM_D is 4096, so this is the largest program the tile can
+    # hold: 32,800 bytes of image, and four instructions that execute
+    # at PC 4092..4095 where all twelve address bits are needed. The
+    # bulk is skipped rather than executed - see prog_fills_imem - so
+    # the case costs about 8,200 cycles of skip rather than the 160,000
+    # that executing every instruction would.
+    n_imem = 16
+    pimem = prog_fills_imem(FP32, SEQ_IMEM_D)
+    assert len(pimem.to_bytes()) == 32 + 8 * SEQ_IMEM_D
+    await run_prog(dut, axil, ram, pimem,
+                   gen_stream(FP32, n_imem, rng, tame=True),
+                   gen_stream(FP32, n_imem, rng, tame=True),
+                   gen_stream(FP32, n_imem, rng, tame=True),
+                   f"fp32 {SEQ_IMEM_D} instructions, IMEM full")
+
+    # ...and one more than the memory holds is refused at the header,
+    # which is the boundary the capacity actually is. The image is
+    # emitted in full and honestly, so the refusal is unambiguous
+    # about which check fired.
+    too_big = bytearray(pimem.to_bytes())
+    too_big[8:12] = (SEQ_IMEM_D + 1).to_bytes(4, "little")
+    too_big += bytes(8)   # the honest body for one more insn
+    # Re-read FLAGS here rather than reusing the word captured before
+    # the refusal block: run_refused asserts the refusal did not scrub
+    # the PREVIOUS RUN's flags, and the previous run is the IMEM-full
+    # one just above, which raised inexact.
+    flags_now = await axil.read_dword(FLAGS)
+    await run_refused(dut, axil, ram, bytes(too_big), pimem,
+                      gen_stream(FP32, 8, rng), gen_stream(FP32, 8, rng),
+                      gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
+                      f"n_insns {SEQ_IMEM_D + 1} exceeds IMEM_D",
+                      flags_now)
 
     # ---- the deposit overflow ----------------------------------------
     n8 = 8
