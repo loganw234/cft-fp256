@@ -118,7 +118,13 @@ programs:
 	$(PROGRAM_TOOLS)
 	$(PYTHON) programs/build.py --asm host/cft-asm$(HOSTEXE)
 
-programs-check: programs
+# Deliberately NOT `programs-check: programs`. `programs` REWRITES the
+# MANIFEST, so a check that ran it first would be comparing every hash
+# against one it had just computed - a gate that cannot fail. check.py
+# assembles the sources itself and compares against the COMMITTED
+# manifest, which is the only version of that comparison worth having.
+programs-check:
+	$(PROGRAM_TOOLS)
 	$(MAKE) -C host cft-collatz$(HOSTEXE)
 	$(PYTHON) programs/check.py --asm host/cft-asm$(HOSTEXE) \
 		--runner host/positive-run$(HOSTEXE) --tools-dir host

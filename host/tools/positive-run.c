@@ -557,6 +557,10 @@ int main(int argc, char **argv)
     if (iota >= 0) {
         size_t k;
         n = (size_t)iota;
+        if (esz < 8 && (uint64_t)n > ((uint64_t)1 << (8 * esz)))
+            die("an index ramp of %lu does not fit %s's %lu bytes",
+                (unsigned long)n, cft_format_name((cft_format)H.prec),
+                (unsigned long)esz);
         A = (uint8_t *)xcalloc(n ? n : 1, esz);
         B = (uint8_t *)xcalloc(n ? n : 1, esz);
         C = (uint8_t *)xcalloc(n ? n : 1, esz);
@@ -569,10 +573,6 @@ int main(int argc, char **argv)
             for (byte = 0; byte < 8 && byte < esz; byte++)
                 A[k * esz + byte] = (uint8_t)(v >> (8 * byte));
         }
-        if (esz < 8 && n > ((size_t)1 << (8 * esz)))
-            die("an index ramp of %lu does not fit %s's %lu bytes",
-                (unsigned long)n, cft_format_name((cft_format)H.prec),
-                (unsigned long)esz);
     } else {
         size_t an, bn, cn;
         A = read_file(a_path, &an);
@@ -651,10 +651,13 @@ int main(int argc, char **argv)
     printf("device        %s\n",
            (device && strcmp(device, "sw")) ? device : "software");
 
-    for (i = 0; (size_t)i < n; i++) {
-        total += counts[i];
-        if (counts[i] < cmin) cmin = counts[i];
-        if (counts[i] > cmax) cmax = counts[i];
+    {
+        size_t k;
+        for (k = 0; k < n; k++) {
+            total += counts[k];
+            if (counts[k] < cmin) cmin = counts[k];
+            if (counts[k] > cmax) cmax = counts[k];
+        }
     }
     if (!n) { cmin = 0; cmax = 0; }
     printf("counts        min %u, max %u, total %llu\n",
