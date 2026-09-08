@@ -146,16 +146,46 @@ them and adds one:
    existing `det_sincos` hoist (one call where the plate wrote several)
    is the first remedy and is already measured on the GPU; a `CALL`
    with a return address register is the durable one and is not in
-   the ISA today.
+   the ISA today. **The two capacities are BUILT 2026-09-08**, as
+   revision 2 of the sequencer (docs/SEQUENCER.md): 4,096
+   instructions through the CAPS field that already published the
+   depth, and thirty-two registers a lane through five-bit register
+   fields whose fifth bits sit in `imm[27:24]`, behind CAPS[5].
+   Measured out of context on the U50 part at 135 MHz, the doubled
+   file costs nothing - the block RAM was already deep enough - and
+   the deeper instruction memory landed in an UltraRAM the tile was
+   not using: 119,915 LUT against 120,173, WNS +1.196 ns both ways.
+   So all but the worst handful of positives fit without `CALL`,
+   `det_pow`'s seventeenth register exists, and the init block is
+   not needed as an escape hatch.
+5. **The constant bank as per-run data. BUILT 2026-09-08.** Every
+   positive's image would have carried the eight levers, the clock
+   and the pass data as constants, so every change was a new program
+   and a reload - 256 passes on each of 16 supertiles a plate. Now the
+   header's first reserved word is `flags`, bit 0 says the image
+   carries no constants, a `BANK_PTR` register (0x64/0x68, kernel
+   argument 8, VERSION 0x700) supplies them per run, and the host has
+   `cft_program_run_bank` beside `cft_program_run` and
+   `cft_program_digest`, SHA-256 over image and bank together, as the
+   attestation. One image per positive, loaded once, with levers,
+   clock and pass riding as data; the emitter's plan to put the
+   per-run values at the tail of the bank in a fixed order makes the
+   split a boundary and not a re-emit, exactly as it intended.
 
-None of these is deep. The first two are built (2026-09-07), golden
-model first as always, and published the same day as CAPS bits rather
-than a VERSION step - CAPS[28] for `IMUL`, CAPS[4] for `kx` - because
-VERSION guards the register map and features are announced in CAPS.
-`cft_program_load` refuses an image that uses either on a device that
-does not publish it and `cft_supports` answers for opcode 30, so a
-host asks rather than guesses. The wider input block and the optional
-call remain.
+None of these is deep. Four of the five are built - the first two on
+2026-09-07, the two capacities and the per-run bank on 2026-09-08 -
+golden model first as always, and published as CAPS bits ([28] for
+`IMUL`, [4] for `kx`, [5] for the registers, [6] for the bank) because
+VERSION guards the register map and features are announced in CAPS;
+the bank did step VERSION, to 0x700, because it added a register to
+the map. `cft_program_load` refuses an image that uses any of them on
+a device that does not publish it, by name, so a host asks rather than
+guesses. The wider input block is withdrawn by its requester: with
+`IMUL` in, every per-sample value the shape contract hands a plate is
+integer arithmetic in-lane over the index ramp, about 65
+instructions, and a positive's program takes one stream and leaves
+two free. The optional `CALL` remains, measured rather than guessed:
+at 4,096 words all but the worst handful of positives fit without it.
 
 ## Deposition, the half the tile does not do yet
 
@@ -236,9 +266,16 @@ deposition that column alone can claim.
    resumable, checkpointed, chained) that runs the image on either
    backend and bins the records; the golden-model oracle from
    `seq.py`. `hopf` and `jong` first, as the README says.
-4. **The wider input block and, if the budgets demand it, `CALL`**
-   (cft-fp256), which step 3 will have measured the need for on the
-   sixty-eight positives rather than guessed.
+   **The runner exists (2026-09-08)**: `host/tools/positive-run`
+   takes an image file, `--iota n` or raw streams, an optional bank,
+   and prints the counts, the flags, the program digest and the
+   deposit buffer's SHA-256, on the software backend, in emulation
+   and on the card alike (docs/PROGRAMS.md). The emitter target on
+   the atlas side is the open half of this step.
+4. **`CALL`, if the budgets demand it** (cft-fp256), which step 3
+   measures on the sixty-eight positives rather than guesses; the
+   wider input block is withdrawn (item 3 above) and the two
+   capacities that were the other half of this step are built.
 5. **The GPU record capture and the per-sample comparison**
    (atlas-engine), then the negative's hash beside the matrix.
 

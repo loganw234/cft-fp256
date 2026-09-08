@@ -822,8 +822,13 @@ applies unchanged and settles every corner: an operand whose `k` bit
 is set names a constant, so its high bit is not read and must be zero
 (under `kx` too - the constant index is the byte of `imm`, the
 register high bit is not read); a control instruction reads at most
-`ra` (`DEPOSIT`, `SETACT`), so on those two only `imm[25]` may be set
-and on the other four none. `r16..r31` start at `+0` like `r3..r15`;
+`ra` (`DEPOSIT`, `SETACT`), so on those two only `imm[25]` may be set;
+`HALT`, `ENDREP` and `ACTALL` carry no `imm` at all; and `REPEAT`'s
+`imm` is its trip count, read whole, so there these bits are
+trip-count bits and not register bits - the rule binds instructions
+that name a register, which is how the model, the library and the
+assembler all read it, and how `REPEAT 0xffffffff` stays loadable for
+the worst-case bound to refuse. `r16..r31` start at `+0` like `r3..r15`;
 `r0..r2` still load from the streams. Nothing else in the encoding
 moves.
 

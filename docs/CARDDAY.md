@@ -82,6 +82,13 @@ the element count is an operand rather than a loop bound.
       counter compare spelled for lint) and comments; `git diff
       ed752dd..HEAD -- rtl/ hw/` shows exactly that, and the manifests
       say `bitstream_sources: rtl/ and hw/ identical to ed752dd`.
+      The library on the card host may be newer than the images: ABI
+      0.9, the sequencer's revision 2 of 2026-09-08, still accepts
+      VERSION 0x600 images and refuses by name any program that needs
+      what they lack (thirty-two registers, the per-run bank), and the
+      div/sqrt programs and every tool's kernel fit the old limits - so
+      nothing on the day changes, and the revision-2 hardware gets its
+      own pair after it.
 
 - [x] **The PRIMARY pair until the 0907 pair lands: 135 MHz, staged
       and verified**

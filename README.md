@@ -122,6 +122,8 @@ host/include/cft.h   the C ABI: the contract between this and its users
 host/src/            libcft - software, XRT and remote backends, conformance
 host/tests/          contract tests, device-vs-software, differential
 host/fuzz/           the four parsers that face untrusted bytes, fuzzed (opt-in)
+host/tools/          the workload tools, cft-asm (the assembler) and
+                     positive-run (the image runner)
 host/examples/       the same program in C, Python (ctypes), Julia, Rust,
                      Go, C# and R - byte-identical checksums, each on the
                      platform and date COMPATIBILITY.md records - plus the
@@ -142,6 +144,8 @@ verify/              the standardized verification runner (make verify):
                      docs/VERIFICATION.md is the map of every gate, what
                      each proves and how long each really takes
 vectors/             conformance-set emitter (JSONL)
+programs/            the program library: .cfta sources, a check per
+                     program, a manifest of the built images
 docker/              the simulation container CI and dev boxes share
 docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      TRANSCENDENTALS (the correctly-rounded thirty-nine:
@@ -208,8 +212,13 @@ docs/COMPLIANCE.md walks the standard clause by clause and is the
 conformance statement. ABI 0.8 (2026-09-07) adds what the atlas port
 asked for - a 32-bit integer multiply and constants indexed through
 the immediate - and the sequencer's published capacities, each
-announced in CAPS and refused by name on a device that lacks it. What
-stays outside is named rather than implied: the
+announced in CAPS and refused by name on a device that lacks it. ABI
+0.9 (2026-09-08) is the sequencer's second revision: thirty-two
+registers a lane, 4,096 instructions, the constant bank as per-run
+data with one digest over image and bank, and programs as files - a
+text form, an assembler in two languages held byte for byte, a
+library with a check per program, and a runner (docs/PROGRAMS.md).
+What stays outside is named rather than implied: the
 decimal formats (a different datapath, effectively their own tile),
 clause 8's alternate exception handling, and NaN payload propagation
 through arithmetic, which is a canonical quiet NaN by design. The
