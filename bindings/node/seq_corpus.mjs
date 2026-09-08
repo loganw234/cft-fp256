@@ -186,16 +186,24 @@ export function programImage({ formatCode, elementBytes, insns,
   dv.setUint32(24, flags >>> 0, true);                 // was reserved[0]
   dv.setUint32(28, 0, true);                           // reserved[1]
   let off = 32;
-  if (!bankExternal)
-    for (const k of consts) { bytes.set(k, off); off += elementBytes; }
+  if (!bankExternal) {
+    // The constant section, through packBank - see below: the section
+    // and the bank are ONE layout, and writing it twice is how the two
+    // stop being one.
+    bytes.set(packBank(consts, elementBytes), off);
+    off += carried * elementBytes;
+  }
   for (const w of insns) { dv.setBigUint64(off, w, true); off += 8; }
   return bytes;
 }
 
 /** The bank a BANK_EXT program's run supplies: n_consts format-width
  *  values, densely packed EXACTLY as an image's constant section is
- *  laid out - which is why this is the same loop programImage runs and
- *  not a second layout. */
+ *  laid out (cft.h, docs/SEQUENCER.md R3). programImage lays its
+ *  constant section out by calling this, so the two cannot drift: a
+ *  bank that did not match the section it replaces would be a program
+ *  computing on different numbers depending on where its constants came
+ *  from, which is the whole thing BANK_EXT must not do. */
 export function packBank(consts, elementBytes) {
   const bytes = new Uint8Array(consts.length * elementBytes);
   consts.forEach((k, i) => bytes.set(k, i * elementBytes));
