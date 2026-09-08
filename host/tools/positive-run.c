@@ -684,20 +684,23 @@ int main(int argc, char **argv)
             sha256_end(&hs, digest);
         }
         hex32(digest, hex);
-        printf("program       %s%s\n", hex,
-               from_library ? "" : "  (computed here: this build has no "
-                                   "cft_program_digest)");
+        printf("digest        %s%s\n", hex,
+               from_library ? "  program and bank"
+                            : "  program and bank (computed here: this "
+                              "build has no cft_program_digest)");
     }
 
     if (out_path)
         write_file(out_path, dep, dep_bytes);
 
-    /* The last line, and the one a plate's attestation carries. */
+    /* The last line, and the one a plate's attestation carries.
+     * Labelled distinctly from the `deposits N a lane` line above:
+     * two lines under one key is a report nobody can parse. */
     sha256_start(&hs);
     sha256_push(&hs, dep, dep_bytes);
     sha256_end(&hs, digest);
     hex32(digest, hex);
-    printf("deposits      %s\n", hex);
+    printf("sha256        %s  deposit buffer\n", hex);
 
     cft_program_free(prog);
     cft_close(dev);

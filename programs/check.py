@@ -275,7 +275,7 @@ def check_divsqrt_runs(args, name, image_path, tmp, n=48):
                 f"lane {i}: {bits:#x} vs {want:#x}")
             return
     ok(f"{name}: {n} correctly-rounded {kind}s through positive-run",
-       f"deposits {report.get('deposits', '')[:16]}")
+       f"deposits {report.get('sha256', '')[:16]}")
 
 
 def check_collatz(args, name, image, image_path, tmp):
@@ -411,7 +411,7 @@ def check_zoom_scan(args, name, image, image_path, tmp):
         bad(f"{name}: counts", "a lane deposited the wrong number")
         return
     ok(f"{name}: {n} points bit-identical to seq.py's executor",
-       f"deposits {report.get('deposits', '')[:16]}")
+       f"deposits {report.get('sha256', '')[:16]}")
 
 
 def check_lowbias32(args, name, image, image_path, tmp):
