@@ -1,0 +1,46 @@
+; lowbias32-fp32.cfta - the atlas draw hash, on the index ramp
+;
+; docs/ATLAS.md's `lowbias32`, which is the one caller IMUL exists for
+; and the reason opcode 30 is defined on 32 bits rather than on the
+; format width: its value has to agree with a GPU computing it on a
+; `uint`.
+;
+;     x ^= x >> 16;  x *= 0x7feb352d;
+;     x ^= x >> 15;  x *= 0x846ca68b;
+;     x ^= x >> 16
+;
+;   r0  the seed, as a 32-bit integer bit pattern - which is exactly
+;       what `positive-run --iota n` lays down
+;   deposits: the hashed word
+;
+; Every opcode here is from the integer group: quiet, attribute-
+; independent, and operating on the encoding as a W-bit word. The
+; whole program signals nothing, which is a property the check tests
+; rather than assumes - a draw stream that raised `invalid` would
+; poison the flag word of whatever ran beside it.
+;
+; The four constants are the hash's own, so they are the one place in
+; this library where a literal IS the specification rather than a
+; transcription of one. They are raw encodings, not numbers.
+
+.format   fp32
+.deposits 1
+
+.const    SH16 = 0x00000010       ; the INTEGER 16, raw
+.const    SH15 = 0x0000000f       ; the INTEGER 15, raw
+.const    K1   = 0x7feb352d
+.const    K2   = 0x846ca68b
+
+.reg      x = r0
+.reg      t = r1
+
+ishr t, x, SH16
+ixor x, x, t
+imul x, x, K1
+ishr t, x, SH15
+ixor x, x, t
+imul x, x, K2
+ishr t, x, SH16
+ixor x, x, t
+deposit x
+halt

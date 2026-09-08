@@ -619,16 +619,35 @@ static uint64_t parse_uint(const char *tok, const char *what)
     return (uint64_t)v;
 }
 
-/* A `.const` literal into `out`, format-width, little-endian. */
+/* A `.const` literal into `out`, format-width, little-endian.
+ *
+ * Three forms, decided by a `p`, which is not a hexadecimal digit:
+ * `0x...` without one is the RAW ENCODING; `0x1p237` with one is
+ * 754-2019 5.12.3's hexadecimal-significand sequence (a power of two
+ * at fp256 is otherwise a 64-digit word or a 70-digit decimal, and
+ * both are transcription hazards); anything else is 5.12.2's decimal
+ * sequence, correctly rounded into the format. */
 static void parse_literal(program *P, const char *text, uint8_t *out)
 {
     size_t esz = P->esz;
+    const char *body = (text[0] == '-' || text[0] == '+') ? text + 1 : text;
+    int is_hex = (body[0] == '0' && (body[1] == 'x' || body[1] == 'X'));
     memset(out, 0, MAX_ESZ);
-    if (text[0] == '-' && (text[1] == '0') &&
-        (text[2] == 'x' || text[2] == 'X'))
-        diel("a raw 0x encoding carries its own sign bit; write the "
-             "whole word");
-    if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+    if (is_hex && (strchr(body, 'p') || strchr(body, 'P'))) {
+        const char *in[1];
+        uint32_t fl = 0;
+        cft_status st;
+        in[0] = text;
+        st = cft_from_hex_char(DEV, P->fmt, CFT_RNE, in, out, 1, NULL, &fl);
+        if (st != CFT_OK)
+            diel("'%s' is not a hexadecimal-significand sequence %s can "
+                 "read", text, cft_format_name(P->fmt));
+        return;
+    }
+    if (is_hex && body != text)
+        diel("a raw 0x encoding carries its own sign bit; write the whole "
+             "word, or use the 5.12.3 form with a binary exponent");
+    if (is_hex) {
         const char *p = text + 2;
         size_t nd = strlen(p), i;
         if (!nd)

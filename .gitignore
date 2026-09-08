@@ -121,3 +121,8 @@ host/fuzz/corpus/*/q[0-9a-f]*
 # regenerates any that are missing on its first run; the fp256 ones
 # are tens of kilobytes of decimal and do not belong in the tree.
 host/fuzz/corpus/ckpt/
+
+# programs/ build products: the images are assembled from the .cfta
+# sources by `make programs` and their hashes are in programs/MANIFEST,
+# which IS committed - the images themselves are not
+programs/out/

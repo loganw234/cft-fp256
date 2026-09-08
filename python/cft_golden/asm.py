@@ -722,20 +722,43 @@ class _Asm:
         self.reg_names[low] = n
 
     def literal(self, text):
-        """A constant literal -> the format's bits. `0x...` is the raw
-        encoding at the format's width; everything else goes through
-        the model's decimal conversion, which is round-to-nearest-even
-        into the format and the same routine `cft_from_decimal_char`
-        is the C port of."""
+        """A constant literal -> the format's bits.
+
+        Three forms, and the one that decides between them is a `p`:
+
+        * `0x...` with no `p` is the RAW ENCODING, at the format's
+          width, zero-extended from however many digits are written.
+        * `0x1p237`, `-0x1.8p-3` - a `p` makes it 754-2019 5.12.3's
+          hexadecimal-significand character sequence, exact when it
+          fits and correctly rounded when it does not. This is not
+          decoration: at fp128 and fp256 a power of two is a 64-digit
+          raw word or a 70-digit decimal, and both are transcription
+          hazards where `0x1p237` is a derivation.
+        * anything else is 5.12.2's decimal sequence, round-to-
+          nearest-even into the format - `chars.from_decimal` here and
+          `cft_from_decimal_char` in the tool, which are the same
+          routine in two languages.
+
+        The two forms cannot collide: `p` is not a hexadecimal digit.
+        """
         if self.fmt is None:
             self.fail(".format must come before any constant")
         t = text.strip()
-        if t.lower().startswith("-0x"):
-            self.fail("a raw 0x encoding carries its own sign bit; write "
-                      "the whole word")
-        if t.lower().startswith("0x"):
+        body = t[1:] if t[:1] in "+-" else t
+        if body[:2].lower() == "0x":
+            if "p" in body.lower():
+                try:
+                    bits, _flags = chars.from_hex(self.fmt, t, sf.RND_RNE)
+                except Exception as exc:               # noqa: BLE001
+                    self.fail(f"{text!r} is not a hexadecimal-significand "
+                              f"sequence this format can read ({exc})")
+                return bits
+            if t is not body:
+                self.fail("a raw 0x encoding carries its own sign bit; "
+                          "write the whole word, or use the 5.12.3 form "
+                          "with a binary exponent")
             try:
-                v = int(t[2:], 16)
+                v = int(body[2:], 16)
             except ValueError:
                 self.fail(f"{text!r} is not a hexadecimal encoding")
             if v >= (1 << self.fmt.width):
