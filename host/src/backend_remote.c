@@ -1459,9 +1459,17 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     unsigned npresent = (a ? 1u : 0u) + (b ? 1u : 0u) + (c ? 1u : 0u);
     /* PROG_RUN's fixed fields, and PROG_RUN_BANK's - the same twenty-
      * four bytes with the bank appended after them and its length in
-     * the word PROG_RUN leaves zero. */
-    const uint16_t op = bank_bytes ? CFTR_OP_PROG_RUN_BANK
-                                   : CFTR_OP_PROG_RUN;
+     * the word PROG_RUN leaves zero. Which one is the IMAGE's decision,
+     * read from its header's flags word (BANK_EXT, bit 0), not the
+     * bank's length: a BANK_EXT program whose n_consts is zero has a
+     * legitimately empty bank and must still travel as PROG_RUN_BANK,
+     * because the server's cft_program_run refuses it and only
+     * cft_program_run_bank takes it (found 2026-09-08 by the
+     * JavaScript client, which mirrors this file). */
+    const int bank_ext = image_bytes >= 32 &&
+                         (((const uint8_t *)image)[24] & 1u);
+    const uint16_t op = bank_ext ? CFTR_OP_PROG_RUN_BANK
+                                 : CFTR_OP_PROG_RUN;
     size_t per_lane, lpc, off;
     uint32_t fl_acc = 0, bus_acc = 0;
     uint8_t *req = NULL;

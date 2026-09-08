@@ -49,7 +49,7 @@ output lives in its own header and is compared by eye.
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8); 2026-09-02 as runner stage `lang-csharp` on Windows, the desktop's WSL (dotnet 8.0.130) and CI | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL, and on Windows (R 4.6.1 with Rtools45, whose gcc 14.3 builds the shim) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
 | Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, wasm 211,869 bytes) with drag-drop full-set replay over every published set family - opcodes, transcendentals, augmented, reductions, character sequences, formatOf, the magnitude forms - and a compute panel covering every operation of the library, the status word included | Windows 2026-09-04, node 22.19.0: `verify.mjs` replays 1,223,635 cases through `cft_conformance` and 831,635 through the wrappers themselves; two clean container builds byte-identical (page sha256 `e1b42b3873416e39…`); beside it `demos.html` (2026-09-04), the five contract workloads of docs/BENCHMARKS.md running on the same module bytes, 13 chains matched to the C tools, two builds byte-identical (sha256 `e3711319627e6828…`), live at /demos.html | ABI 0.7 on the identity line; 111 `cftw_*` exports; the program API is not yet wrapped, so the demos run the tools' loop engines |
-| Node / JavaScript | `bindings/node/` (package 0.7.0) | full package: the 111 `cftw_*` exports one-to-one, plus Context/Float scalars, batch `map`/`reduce`, every operation of clause 5 including the cross-format six and the character conversions, all thirty-nine transcendentals, the augmented pairs, every reduction, all eight forms of 9.6, the status word by its 754 names, exact-decimal I/O | Windows 2026-09-04, node 22.19.0: 125 tests; 2,055,270 cases over every set family replayed through the page's own module, the non-opcode families through the package's own methods | the same module as the page, byte for byte |
+| Node / JavaScript | `bindings/node/` (package 0.9.0) | full package: the 129 `cftw_*` exports one-to-one (111 at 0.7, 116 at 0.8), plus Context/Float scalars, batch `map`/`reduce`, every operation of clause 5 including the cross-format six and the character conversions, all thirty-nine transcendentals, the augmented pairs, every reduction, all eight forms of 9.6, the status word by its 754 names, exact-decimal I/O | Windows 2026-09-04, node 22.19.0: 125 tests; 2,055,270 cases over every set family replayed through the page's own module, the non-opcode families through the package's own methods | the same module as the page, byte for byte |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
@@ -419,6 +419,40 @@ is now refused by name and regenerates with `imul` cases.
 | Python (`cftmpfr`) | correct as it stands: its `Caps` mirror passes its own `sizeof` and the handshake truncates there; the four fields are not yet surfaced |
 | Node / Browser | the sequencer's program API reached JavaScript the same day (2026-09-07): **116 `cftw_*` exports** (five new, module 48a2f5c1...), a `Program` in the node package (`loadProgram`, `run`, `free`, the info read back through `cft_program_get_info`), a recorded corpus of 192 sequencer cases replayed through wasm (126 run, 66 refused, deposits and counts compared with the C executor), and the zoom and orbits demo panels on their tools' program engine - `test.mjs` 126 passed, `program_test.mjs` 17 passed, `conformance.mjs` 1,071,635 cases; the WebSocket client reads the four caps fields from a 72-byte block and zero from a 56-byte one; both modules rebuilt on the bumped tree so the ABI test agrees with the header |
 | RTL | `CAPS` reads 0x04A6FF0F on the full tile where it read 0x0000FF0F; `cft_seq` untouched, the values named once in `cft_krnl.sv` |
+
+**ABI 0.9 (2026-09-08)** is the sequencer's second revision, built the
+day the first card came up (docs/SEQUENCER.md, "Revision 2";
+docs/PROGRAMS.md). Three hardware changes, each announced in CAPS and
+refused by name where a device lacks it: thirty-two registers a lane
+through five-bit register fields whose fifth bits sit in `imm[27:24]`
+(CAPS[5], `cft_caps.seq_features` bit 1, `CFT_SEQ_FEAT_REGS32`);
+4,096 instructions through the depth CAPS[23:20] already published;
+and the constant bank as per-run data - the header's first reserved
+word is `flags`, bit 0 `BANK_EXT` says the image carries no constants,
+a `BANK_PTR` register at 0x64/0x68 (kernel argument 8) supplies them
+per run, and the map grew, so VERSION is 0x700 and the host accepts
+{0x410, 0x500, 0x600, 0x700} (CAPS[6], bit 2, `CFT_SEQ_FEAT_BANK_PTR`).
+The C surface grows additively: `cft_program_run_bank` beside
+`cft_program_run` (a `BANK_EXT` program refuses the old call by name
+and a program that carries constants refuses a bank), `cft_program_digest`
+(SHA-256 over image then bank, the attestation), `cft_program_info.flags`
+behind `struct_size`, and one SHA-256 in the library where the tools
+each carried their own. The remote protocol gains `PROG_RUN_BANK`
+(0x0023), refused by name by an older server; 0.8 and 0.9 peers refuse
+each other at HELLO as every minor step has. Programs also became
+files: the `.cfta` text form, an assembler in Python and in C held to
+identical bytes, a `programs/` library with a check per program, and
+the `positive-run` runner. The card-day images (VERSION 0x600) predate
+all of it and run unchanged under this host, which refuses by name any
+program that needs what they lack.
+
+| surface | status at ABI 0.9 |
+|---|---|
+| C (`cft.h`) | complete: the loader's five-bit fields, flags and bank rules; `device_test.c` gains registers 16..31, two banks giving two answers, every refusal by name, the digest, and a kx-form `max_consts` probe (the four-bit one was NOT TESTED); `make libcft-test` 1,071,635 cases, remotetest and the 200,000-image loader differential (0 disagreements with the model) green on the merged tree |
+| C++ (`cft.hpp`) | the two new methods (`run_bank`, `digest`), syntax-checked at C++17 and C++20 |
+| Python (`cftmpfr`) | unchanged; the sequencer is outside its scope |
+| Node / Browser | rebuilt at 0.9 the same day: **129 `cftw_*` exports** (thirteen new: `runBank`, `digest`, `flags`, `bankExternal`, the caps accessors that 0.8 never exported, `sha256`), module `1af4ddd3...` (219,535 bytes), package 0.9.0; `test.mjs` 126, `program_test.mjs` 28 (17 before), `conformance.mjs` 2,063,270 cases over 316 set replays; `verify.mjs` OK with 98 needed exports and 1,231,635 cases; `verify_demos.mjs` 44 ok; the runner's `node` and `wasm` stages PASS (run 20260908-135600-2a4751a); `remote.mjs` speaks `PROG_RUN_BANK` and `make -C host wstest` is **57 checks, 0 failures** (42 at 0.8), with the bank round trip; the JavaScript encoder is held to `asm.py` byte for byte, and it found the empty-bank corner the C remote client had (fixed) |
+| RTL | `cft_seq` at 32 registers, `IMEM_D` 4096, `BANK_PTR`, VERSION 0x700, CAPS feature nibble 0111; the full cocotb suite 64/64 and the multi-cycle sequencer targets 14/14 on the merged tree; out of context on the U50 part the doubled register file costs nothing (119,915 LUT against 120,173, WNS +1.196 ns both ways) and the deeper instruction memory landed in an UltraRAM |
 
 ## Drop-ins
 
