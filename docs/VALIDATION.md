@@ -6623,3 +6623,332 @@ program seed carried the REMOTE frame's magic ("CFTR"), so a seed named
 for an image with no constants and no instructions had only ever been a
 second copy of "the magic is checked". It is "CFTP" now, derived from
 the bytes rather than typed, and it loads.
+
+## 2026-09-08 - ABI 0.9, the JavaScript half of revision 2: the bank as data, and a device a page can ask
+
+`bindings/` brought up to the ABI the rest of the tree reached this
+morning (a15f47c), on DESKTOP-T33SK86: the wasm module rebuilt in the
+pinned emsdk image with thirteen new exports, the Node surface given
+`runBank`/`digest`/the caps accessors, the JavaScript instruction
+encoder taught revision 2 and held to `python/cft_golden/asm.py` in
+bytes, and `PROG_RUN_BANK` spoken over the wire. Nothing outside
+`bindings/` changed except this entry.
+
+**This entry exists because the one above ends with a refusal.** "`make
+-C host wstest` is REFUSED, and that is the contract working … The
+binding is rebuilt by the integrator after this merge; nothing in
+`bindings/` was touched." The committed wasm answered ABI 0.8, the
+server is 0.9, and two libraries whose ABI differs are refused at
+HELLO. It passes now, with four more checks than it had, because the
+vector sets exist here and its golden comparison ran.
+
+### What was built
+
+**bindings/wasm/wasm_api.c, thirteen exports**, in cft.h's order:
+`cftw_program_run_bank`, `cftw_program_digest`, `cftw_sha256`;
+`cftw_program_flags`; the five macro projections
+(`cftw_prog_flag_bank_ext`, `cftw_seq_feat_wide_const`,
+`cftw_seq_feat_regs32`, `cftw_seq_feat_bank_ptr`, `cftw_alu_ext_imul`);
+and the four `cft_caps` sequencer accessors
+(`cftw_caps_seq_features`, `cftw_caps_max_deposits`,
+`cftw_caps_max_insns`, `cftw_caps_max_consts`).
+
+The last four are not an 0.9 addition. They have been in `cft_caps`
+since ABI 0.8 and no wrapper projected them, so a JavaScript caller
+could not ask whether the device published `BANK_PTR` before building
+an image that needs one - and asking afterwards means reading a
+refusal, which is the position `cft_caps` exists to get a caller out
+of. All thirteen went into `verify.mjs`'s `NEEDED` list in the same
+commit as the rebuild, which is the 0.5 discipline rather than the 0.3
+half-step: a module can carry twelve of them and still report 0.9, and
+that failure has happened once per minor step since 0.3.
+
+`cftw_program_flags` is an ACCESSOR rather than a fifth out-pointer on
+`cftw_program_get_info`, so that call's shape does not move with the
+ABI.
+
+**bindings/node.** `Program` gains `flags`, `bankExternal`,
+`bankBytes`, `runBank(bank, a, b, c)` and `digest(bank = null)`.
+`run()` and `runBank()` are ONE implementation with one difference -
+the bank decides which C entry point is called - so every argument
+check, buffer shape and returned field is shared by construction rather
+than by two copies agreeing, which is what `cftr_program_run` in
+`host/src/backend_remote.c` does and for the same reason. `_packBank`
+is the JavaScript half of `seq_check_bank`: a program that carries its
+own constants refuses a bank, a `BANK_EXT` program refuses a bank that
+is not `nConsts` values wide, and `run()` on a `BANK_EXT` program names
+`runBank`. The library makes all three checks again and remains the
+authority; these exist because a caller passing an ARRAY OF VALUES has
+to be told about values, and a byte count it never wrote would send it
+looking in the wrong place.
+
+`Context` gains `seqFeatures`, `seqFeatureNames` and the three
+capacities, with their two rules stated apart: a clear FEATURE bit is
+ABSENT, a zero CAPACITY is UNKNOWN. `lib.mjs` gains the five macro
+transcriptions and `sha256()` - the library's hash, not
+`node:crypto`'s, because a harness that reached for the platform's
+would be the fifth private copy `cft_sha256` exists to retire, and the
+one number it could not check is that libcft's digest is the digest
+everything else quotes. `audit()` holds all five bit positions to the
+module at load, which is what makes them safe to write down:
+`CFT_STATUS_DEPOSIT_OVERFLOW` has moved once already.
+
+**bindings/node/seq_corpus.mjs, the encoder.** Five-bit
+`rd`/`ra`/`rb`/`rc` with the fifth of each in its bit of `imm[27:24]`,
+the `kx` bit, a new `alu()` choosing the indexed form the way the
+assembler does, `programImage`'s `flags` word with NO constant section
+under `BANK_EXT`, and `packBank` - which `programImage` calls to lay
+out its own constant section, so the section and the bank are one
+layout and cannot drift. `ctl()` did not change shape and changed in
+effect: `ra` is five bits on `DEPOSIT` and `SETACT` too, so
+`deposit r20` sets `imm[25]`, and that is the only `imm` bit those two
+may set.
+
+**bindings/wasm/remote.mjs.** `OP.PROG_RUN_BANK = 0x0023` and
+`programRunBank()` beside `programRun()`, both through one
+`_programRun`. The bank's length is the fourth fixed word that
+`PROG_RUN` leaves zero; the bank sits between the fixed fields and the
+operands; it comes OFF the chunk budget rather than being added to it,
+since it rides every chunk. The client refuses to send a bank to a
+server whose device does not publish `CFT_SEQ_FEAT_BANK_PTR`, as the C
+client does. `CAPS_BYTES_V2` stays **72**: the caps block did not grow
+at 0.9 (`CFTR_CAPS_BYTES` in `host/src/remote.h` is still 72) and
+`CFTR_PROTO_VERSION` did not move.
+
+### The module, and the two pages that carry it
+
+    emscripten/emsdk:6.0.9@sha256:96617f27fe164215…   (build.sh's pin)
+
+    bindings/node/cft_node.wasm      219,535 bytes
+      sha256 1af4ddd3514e3335e915fe5ecbe5449e36d88d8acb47ac2d3c4a554841a14aad
+      was    48a2f5c1e34948bfb3a4ecab893311f4fe340c393bd999081b60c124dcecc49b   (0.8, 214,508 bytes)
+    bindings/wasm/conformance.html  1,349,244 bytes
+      sha256 973ed60e7b71b222559b7556db94361c1c9a074f7c332911ce1ec21cade2760b
+    bindings/wasm/demos.html          532,331 bytes
+      sha256 dfb9f3418522567a06aacd5312ecdaa43a84e427a310fe1b718f73ab6d2147e3
+
+    129 cftw_* exports where 0.8 had 116 - exactly the thirteen, no more
+
+**Both pages were rebuilt and neither was a choice.** `-sSINGLE_FILE`
+embeds the module in `conformance.html` and `verify.mjs` step 3 holds
+the node loader to the page's bytes by sha256; `demos.html` embeds
+`cft_node.wasm` byte for byte and `verify_demos.mjs` step 1 checks it.
+A rebuilt loader beside either stale page fails there, on the checks
+that exist so a replay under node is a replay of THE PAGE'S module and
+not of a lookalike. What did not change is the markup:
+`page_template.html` names 87 `cftw_*` entry points and not one of the
+thirteen, because neither page has a control that loads a program. The
+diff to `conformance.html` is the two spliced lines.
+
+`demos_chains.json` had to be re-recorded, because `build_demos.sh`
+refuses to assemble a page whose module does not match the stamp the
+chains were recorded against. **Of the seventeen sha256-shaped values
+in that file, sixteen came back identical and the seventeenth is the
+module stamp** - every Collatz chain, the zoom orbit and pixels, the
+two zoom images, the four orbits chains and their program images. The
+rest of the diff is the `recorded` date and this machine's timings.
+That is the expected result and worth measuring rather than assuming:
+the thirteen exports are doors, and the arithmetic behind them did not
+move.
+
+### Gates
+
+All on this tree, all measured here. The host build line throughout was
+`PATH="/c/msys64/mingw64/bin:$PATH" make -C host CC=gcc OS=Windows_NT
+TMP/TEMP='C:/Users/logan/AppData/Local/Temp'`, and Python is Miniconda
+3.12.9 named by absolute path, because MSYS `make` with
+`PYTHON=python` finds mingw64's interpreter instead.
+
+    bash bindings/wasm/build.sh      rc 0    ~7 min   stages 0-5 in the pinned
+                                                     image; module and page as above
+    bash bindings/wasm/build_demos.sh
+                                     rc 0    ~3 min   stage 2 identity: the split
+                                                     .wasm equals the committed
+                                                     module, 1af4ddd3…
+    gen_vectors.py --rounding rne rtz rdn rup rmm
+                                     rc 0     ~9 min  168 sets, 225 MB (run.sh's own
+                                                      ensure_vectors arguments)
+
+    node bindings/wasm/verify.mjs vectors/out
+                                     rc 0   19m01s   abi 0.9 = cft.h's 0.9; 129
+                                                     exports; 98 NEEDED present; the
+                                                     node loader is the page's module
+                                                     byte for byte; 1,231,635 cases
+                                                     over 168 sets replayed through
+                                                     the page's own bytes; 831,635
+                                                     cases over 148 sets driven
+                                                     through the cftw_* wrappers
+                                                     themselves.  VERIFY OK
+
+    bindings/node  node test.mjs             126 passed, 0 failed  (126 before)
+    bindings/node  node program_test.mjs      28 passed, 0 failed  ( 17 before)
+    bindings/node  node conformance.mjs      2,063,270 cases over 316 set replays
+
+    bash verify/run.sh --only node,wasm      run 20260908-135600-2a4751a
+      node       ok   1518s   test.mjs then the vectors through cft_node.wasm
+      wasm       ok   1191s   the committed page, verified without a browser
+      VERDICT: PASS, nothing skipped - 2 stages executed, 0 failed, 0 skipped
+
+    node bindings/wasm/verify_demos.mjs      44 ok, 0 FAIL
+                                             "the browser's compute core produced
+                                             the C tools' chains, over the module
+                                             the conformance page embeds"
+
+    make -C host wstest              rc 0      7 s   remote_test: 57 checks, 0
+                                                     failures (42 at 0.8, 53 here
+                                                     before the vector sets existed)
+
+`wstest`'s new checks are the bank round trip: a `BANK_EXT` image built
+by this package's encoder and checked to be 32 + 8 * n_insns bytes
+before it is sent; two banks over **96 lanes** - more than one 64-lane
+block - each compared with `cft_program_run_bank` in the test's own
+process for bits, counts, flags and status; the two banks required to
+give two answers; a **hand-built `PROG_RUN_BANK` payload**, so the
+frame's layout is asserted rather than inferred from the answer; and
+opcode `0x00A0`, which the server does not serve, refused by name on a
+connection that then answers the next request - the property the whole
+new-opcode decision rests on.
+
+The four remaining new tests hold this package's encoder to
+`python/cft_golden/asm.py`: four programs written twice, once as
+`.cfta` and once as encoder calls, **27 instructions, identical bytes**;
+the header the binding reports against the header the reference wrote,
+with `cft_program_digest` against the model's own SHA-256;
+`programs/lowbias32-fp32.cfta` over the index ramp, **4,096 draws bit
+for bit** against `docs/ATLAS.md`'s hash recomputed in JavaScript with
+`Math.imul` and the run signalling nothing; and
+`programs/horner-bank-fp64.cfta` with **both committed banks** against
+a Horner recurrence driven through `cft_fma` - 24 coefficients, 5
+points, two answers, two digests, each digest equal to the model's.
+
+### The negative controls, because a check never seen to fail proves nothing
+
+**The encoder comparison, sabotaged.** `RHI_SHIFT` in `seq_corpus.mjs`
+had `rd`'s and `ra`'s entries swapped - `imm[25]` for `rd[4]` where
+`imm[24]` was due - which is the one permutation no round trip can see:
+a program encoded that way disassembles perfectly and addresses the
+wrong registers. Three tests failed, and the byte diff is one nibble:
+
+    this encoder wrote  …0104002000000002…
+    the reference wrote …0104002000000001…
+
+`cft_program_load` refused the image too. Reverted, green.
+
+**The five-bit registers, controlled from inside.** The R1 test has its
+negative control beside it: the same program with every register masked
+to four bits - what an old operand mux does - must NOT give the same
+deposits. Without it the positive test would pass on an encoder whose
+fifth bits reached nothing, because the program would still produce
+*an* answer.
+
+**The bank, controlled by disagreement.** Every bank test - local, over
+the wire, and `horner-bank-fp64` with the library's two committed banks
+- requires that TWO BANKS GIVE TWO ANSWERS. That is what fails if the
+bank never left the process, and it is the only way to catch a run that
+silently computed on constants it was not given.
+
+**The two page builds' own controls, still built and still failing.**
+`build.sh` stage 4 wrote `build/negative_control.html` with one
+expected value flipped (`fp64.jsonl`, sampled line 10, op `fma`:
+`0x7feffffffffffffe` corrupted to `0x7fefffffffffffff`) and
+`build_demos.sh` stage 4 wrote `build/demos_negative_control.html` with
+the Collatz panel's running peak computed with `CFT_MIN` instead of
+`CFT_MAX`. Both untracked; listed because a rebuild that quietly
+stopped producing them would be one whose failure mode nobody could
+demonstrate.
+
+**And the skip path, exercised rather than assumed.** Pointing
+`CFT_PYTHON` at an interpreter that does not exist gives `23 passed, 0
+failed, 4 skipped`, each skip naming its reason.
+
+### One bug found and fixed, from reading the C
+
+`_packBank` refused a `BANK_EXT` program whose `n_consts` is ZERO -
+which the loader accepts, and whose bank is legitimately empty, because
+`seq_check_bank` computes `want = 0` for it and takes a NULL bank. And
+had it not refused, `_runWith` chose its entry point on the buffer's
+TRUTHINESS, so an empty bank would have gone to `cft_program_run` -
+which a `BANK_EXT` program refuses whatever its `n_consts` is. Those
+are two different questions and only one of them is "do this program's
+constants arrive with the run". Fixed with a test (46eff2a): which
+entry point is called now turns on the flag, and a zero-length bank
+crosses as a NULL pointer with a zero length.
+
+**Noted, not changed:** `cftr_program_run` in
+`host/src/backend_remote.c` picks its opcode with `bank_bytes ?
+CFTR_OP_PROG_RUN_BANK : CFTR_OP_PROG_RUN`, so that same degenerate
+program over the remote backend sends `PROG_RUN` and is refused by the
+server's own `cft_program_run`. Latent, and `host/` is not this lane's
+to edit; `bindings/wasm/remote.mjs` mirrors the C deliberately, because
+a wire client that disagreed with the C about which opcode a call
+becomes would be worse than the corner.
+
+### What is NOT tested here, stated rather than skipped
+
+- **No browser.** Both pages were checked headless, over the bytes in
+  git. Nobody opened either. That is the standing position of
+  `verify.mjs` and `verify_demos.mjs` and it has not changed.
+- **No card, no XRT, no emulation.** wasm32 has no PCIe and the module
+  carries only the software backend by construction, so nothing here
+  says anything about the 0x700 register map or the bank as kernel
+  argument 8.
+- **The feature-absent refusals.** The software backend publishes
+  `seq_features 0x17` - `kx`, `REGS32`, `BANK_PTR`, `IMUL` - so a
+  `BANK_EXT` image refused for want of CAPS[6] cannot be produced on
+  this machine. Two guards exist and neither can fire here:
+  `remote.mjs`'s client-side check before it sends a bank, and
+  `remote_test.mjs`'s arm that prints NOT TESTED and FAILS if the
+  server's device ever lacks the bit, because on the software backend
+  that would be news.
+- **`seq_corpus.jsonl` gains no revision-2 cases**, and cannot on this
+  tree: it is generated by `make_seq_corpus.py` from
+  `cft_golden.seq.random_program`, and `python/cft_golden/seq.py` is
+  REVISION 1 - `NREG = 16`, no `BANK_EXT` - while another lane widens
+  it. A recording the golden model cannot produce is not a recording.
+  The revision-2 programs are hand-written in `program_test.mjs`
+  instead, beside the hand-written ones already there for the
+  behaviours a fuzz corpus records but does not explain. **Regenerating
+  that corpus against revision 2 is the next lane's, once `seq.py`
+  widens.**
+
+### The ambiguities in the brief, and what was chosen
+
+**"Do not rebuild the conformance page unless the exports it needs
+changed."** Checked - they did not, `page_template.html` names 87
+`cftw_*` entry points and none of the thirteen - and the page was
+rebuilt anyway, for the reason under "the module" above: `build.sh` has
+no stage that produces the module without the page, `verify.mjs` step 3
+requires the two to agree, and there is no reason to want either
+otherwise. `demos.html`, which the brief did not mention, is in the same
+position and was handled the same way.
+
+**"The corpus gains REGS32 and BANK_EXT programs."** Read as "the
+programs this package's tests run", since `seq_corpus.jsonl` cannot
+carry them; `program_test.mjs` gains eleven tests, six of them revision
+2's.
+
+**"Assemble a handful of `programs/*.cfta` with `asm.py` and compare
+bytes with `programImage`'s output, or at least run the built images
+through the binding."** The first half as written needs a `.cfta`
+PARSER in JavaScript - `programImage` takes an instruction list, not
+text - and an assembler is the one thing this package deliberately does
+not have. Both halves were done at the level each is meaningful: four
+programs written twice and compared byte for byte (which is where a
+permuted `imm[27:24]` shows), and two of the library's own programs
+assembled by `asm.py`, loaded through the binding, and run against
+oracles that are NEITHER implementation. `make programs` was not needed
+for either: `asm.py` produces the image from the source, which is what
+`programs/build.py` asks `cft-asm` for.
+
+**"126 passing with 17 skipped before."** Those are two files and no
+skips: `test.mjs` 126 passed, `program_test.mjs` 17 passed. Both counts
+are above; the four skips that exist now are new, real, and
+demonstrated.
+
+**`bindings/node/package.json`.** Its version tracked cft.h's ABI minor
+from 0.3.1 to 0.7.0, one bump per step, and then stopped - it stayed
+0.7.0 through 0.8 and would have stayed there through 0.9. Bumped to
+**0.9.0**, skipping 0.8.0 rather than passing through it, because the
+surface never had an 0.8-only step: `cft_caps`' sequencer fields
+arrived at 0.8 and are projected for the first time here.
+`"private": true`, so nothing is published either way.
