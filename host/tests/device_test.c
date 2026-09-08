@@ -368,6 +368,25 @@ static void compare_partitioned(cft_device *hw, cft_format fmt, cft_op op,
         split_f |= f;
         off += k;
     }
+    /* The cut list is fixed and sums to 1,120; a larger n used to
+     * trip the coverage check below and report the tail as a
+     * "changed result" (card day, 2026-09-08, at the runbook's
+     * n=4096). One more slice covers whatever is left, so the
+     * invariance holds for any n and the check keeps its meaning. */
+    if (off < n) {
+        uint32_t f = 0;
+        size_t k = n - off;
+        if (cft_run(hw, op, fmt, rnd, B.a + off * esz, B.b + off * esz,
+                    B.c + off * esz, split + off * esz, k, &f, NULL)
+            != CFT_OK) {
+            printf("  FAIL: tail slice run: %s\n", cft_last_error());
+            failures++;
+            free(split); free_buffers(&B);
+            return;
+        }
+        split_f |= f;
+        off += k;
+    }
     CHECK(off == n, "slices covered %lu of %lu elements",
           (unsigned long)off, (unsigned long)n);
     CHECK(memcmp(B.hw, split, n * esz) == 0,
