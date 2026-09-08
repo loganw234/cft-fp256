@@ -6455,3 +6455,171 @@ and says so instead of shipping a row whose check is "it assembles".
 The full cross-check of asm.py against a widened `seq.encode`, and of
 `cft_program_digest` against the local fallback, belong to the
 integrator after the three lanes merge.
+
+## 2026-09-08 - ABI 0.9, the host half of the sequencer's revision 2: thirty-two registers, a per-run constant bank, one SHA-256
+
+The host library built against docs/SEQUENCER.md's "Revision 2
+(2026-09-08)" contract (44e2a07), on DESKTOP-T33SK86 under MSYS2
+mingw64 gcc 16.1.0. The model, the RTL and the assembler are other
+agents' halves of the same round and are not in this entry.
+
+**What was built.** `CFT_ABI_VERSION_MINOR 9`. Five-bit register
+fields with the fifth bits in `imm[27:24]`, behind
+`CFT_SEQ_FEAT_REGS32` (CAPS[5]); the header's `reserved[0]` as `flags`
+with `BANK_EXT` bit 0, behind `CFT_SEQ_FEAT_BANK_PTR` (CAPS[6]), and
+`cft_program_run_bank` beside `cft_program_run`;
+`cft_program_digest`, SHA-256 over image then bank;
+`cft_program_info.flags`, struct_size-gated. VERSION `0x700` in the
+XRT backend's known set, the bank as kernel argument 8 on the A
+master. `CFTR_OP_PROG_RUN_BANK` 0x0023 on the wire. And one SHA-256
+where there were four, exported as `cft_sha256`.
+
+**Gates, all on this tree, all measured here.**
+
+    make vectors                    rc 0    216 s   168 sets
+    make libcft-test                rc 0    571 s   1,071,635 cases, 168 sets;
+                                                    api-test all contract checks passed;
+                                                    reduce-parts 6,294 partitions;
+                                                    the C/Python identity check
+    verify/run.sh --only selfcheck,seq,diff
+      selfcheck                     ok       0 s    2,444 checks, 0 failed
+      diff                          ok       4 s    217,500 cases vs the model
+      seq                           ok       2 s    741 programs both ways, 259
+                                                    refused by both, 309 crossing the
+                                                    64-lane block; 500 from the extended
+                                                    corpus - 260 IMUL, 742 indexed-constant,
+                                                    497 indices above 15
+      VERDICT: PASS, nothing skipped (run 20260908-122447)
+    make -C host remotetest         rc 0    554 s   remote-test 266 checks x 2 routes;
+                                                    device-test over the wire 2,444 checks;
+                                                    conformance replay 184,592 cases
+                                                    local and remote identical (145.9 s
+                                                    remote); cft-collatz sweep 1..2000
+                                                    fp256 the same chain both ways;
+                                                    --bench on both routes
+    make -C host collatztest enclosetest mersennetest orbitstest
+                                    rc 0     47 s   all four CHECK OK, each including
+                                                    "the tool's chain matches hashlib's"
+    device-test sw -n 96            rc 0    145 ms  2,444 checks, 0 failed
+    fuzz/fuzz-program               -        20 s   1.86M executions, no crash
+                                                    (no sanitizer here: mingw has no
+                                                    libasan, so the fuzz gate stays the
+                                                    Docker lane's)
+    g++ -fsyntax-only, C++17 and C++20               cft.hpp with the two new methods
+
+**`make -C host wstest` is REFUSED, and that is the contract
+working.** `ABI mismatch: the other end is libcft 0.9, this end is
+0.8` - `bindings/node`'s committed wasm module is an ABI 0.8 build,
+and the handshake refuses a mismatch rather than warning about it. To
+establish that the ABI step is the ONLY reason, `CFT_ABI_VERSION_MINOR`
+was pinned back to 8, the library and server rebuilt, and wstest re-run:
+**42 checks, 0 failures**, every section - the handshake, HELLO over
+both transports, the vector subset, fragmentation, the refusals, both
+of docs/REMOTE.md's negative controls, the envelope cost, the buffer and
+status-word operations. Then restored to 0.9. The binding is rebuilt by
+the integrator after this merge; nothing in `bindings/` was touched.
+
+**The negative controls, because a check that has never been seen to
+fail proves nothing.** Three faults were injected into
+`host/src/program.c`, run, and reverted:
+
+- `seq_reg()` returning only the low four bits: `seq register
+  renaming: the two programs disagree, first differing byte 2 of 256`.
+  Nothing else in device_test saw it - which is the point. The file's
+  other sequencer checks run one image on two backends, and against
+  `sw` that is the same code twice, so a decoder fault both sides
+  share is invisible to them by construction. The new
+  `compare_seq_images` runs two images on one backend and requires the
+  same deposits; the property is that renaming registers is invisible,
+  and the case is shaped so the aliasing reaches a value the program
+  still needs (r16 drops to r0, an INPUT register). Written the other
+  way round - high registers only written before they are read - a
+  dropped bit gives the right answer by luck, which was checked too.
+- the DEPOSIT path alone losing the fifth bit: both renaming checks
+  fire.
+- the constant bank loaded as zeros instead of read: three checks
+  fire, including `two different banks gave the same deposits over 32
+  elements`.
+
+**One disagreement found and fixed, and it is worth recording.** The
+first `verify --only seq` run was `FAIL, 18 DISAGREEMENTS`, every one
+"the model refuses this program and libcft loads it". The cause was
+`seq_check.py`'s own `kx_reserved_byte` mutation, which set
+`imm[24]`: `kx` reserved the whole of `imm[31:24]`, and revision 2
+took its low nibble for the register high bits, so `imm[24]` is `rd`'s
+fifth bit and is now READ. The mutation moved up to `imm[31:28]`,
+which stays reserved-must-be-zero under both revisions, and a new
+mutation took its place at `imm[26]` - a constant operand's register
+high bit, which the reserved-field rule refuses under revision 2 and
+which revision 1 refuses as part of the reserved byte, so it agrees
+across the model's own transition. The gate is green at 741 programs.
+
+**The max_consts probe, which had been announcing NOT TESTED since the
+capacity fields landed.** It wrote the four-bit index form, so it could
+not NAME an index past 15 and was checking a cap of 256 at 16. It now
+writes the `kx` form where the device publishes `kx` and tests the cap
+itself: `k[255] (kx form) loads, at the cap`. The half that remains
+unrepresentable is a different one and still says so - an index past
+256 does not fit the immediate's byte. `host/src/program.c` gained the
+matching enforcement: a `kx` index is now held to the device's
+`max_consts` as a four-bit one always was. That check cannot fire on
+any device built so far (a device publishing `kx` publishes the whole
+256-entry bank, and a byte cannot name more) and is there because a
+rule that is only unreachable is not a rule that is right.
+
+**What is NOT tested here, stated rather than skipped.**
+
+- The XRT path. There is no card and no emulation on this machine, so
+  the 0x700 register map, the ninth kernel argument and the
+  eight-versus-nine-argument kernel call are asserted only by review.
+  Each mirrors the 0x600 path line for line; the divergence is the
+  argument count, which XRT throws on rather than adapting, so the
+  call has two shapes chosen by contract version and the bank buffer
+  is bound on every 0x700 run whether or not the program has a bank.
+- The two feature-absent refusals, on this machine. Both handles are
+  the software backend and both publish REGS32 and BANK_PTR, so
+  `check_caps_enforced` scores the published-and-loads half here; the
+  refusal half runs against any 0x600 tile and on card day, and its
+  message is asserted by name when it does.
+- `host/fuzz/program_differential.py`, which asks the MODEL the same
+  question the C loader is asked about the same bytes. It cannot be
+  run until the model's half of revision 2 lands: on this tree the C
+  loader accepts `imm[27:24]` on an ALU instruction and seq.py refuses
+  it, which is the intended difference and not a defect in either.
+  That differential is the integrator's re-run.
+
+**One ambiguity in the contract, and what was chosen.** R1 says "a
+control instruction reads at most `ra` (`DEPOSIT`, `SETACT`), so on
+those two only `imm[25]` may be set and on the other four none". Three
+of the other four - `HALT`, `ENDREP`, `ACTALL` - already require `imm`
+to be zero whole, so the sentence adds nothing there. The fourth is
+`REPEAT`, whose `imm` is the trip count and is read ENTIRELY. It is
+read as NOT constrained: the canonicity rule is about fields an
+instruction does not read, and constraining `imm[27:24]` on a `REPEAT`
+would refuse every trip count at or above 2^24 - including the `repeat
+0xffffffff` docs/SEQUENCER.md's own worst-case paragraph relies on
+being loadable and refused by the 2^40 bound instead. If the model
+lands the strict reading, the differential above will say so and the
+change is one line. docs/HOSTAPI.md records the reading beside the
+refusal list.
+
+**The SHA-256 housekeeping.** `host/tools/collatz.c`, `enclose.c`,
+`mersenne.c` and `orbits.c` carried four byte-identical copies of
+SHA-256 and its constant derivation, and `cft_program_digest` wanted a
+fifth. There is one now, `host/src/sha256.c`, lifted from collatz.c
+with the derivation intact - the round constants are computed from the
+cube roots of the first sixty-four primes by integer search, as the
+standing rule asks - plus the exported one-shot `cft_sha256`. The four
+tools bind their own three names to it in four lines each. 909 lines of
+duplicate hash removed, and every chain is unchanged: each tool's check
+recomputes its whole chain with Python's `hashlib` and all four pass,
+`api-test` carries FIPS 180-4's two worked examples ("abc" and the
+56-byte two-block one, copied in the base the standard states them in),
+and remote_check's cft-collatz sweep produces the same chain hash local
+and remote.
+
+Also fixed in passing: `host/fuzz/make_seeds.py`'s `header-only`
+program seed carried the REMOTE frame's magic ("CFTR"), so a seed named
+for an image with no constants and no instructions had only ever been a
+second copy of "the magic is checked". It is "CFTP" now, derived from
+the bytes rather than typed, and it loads.

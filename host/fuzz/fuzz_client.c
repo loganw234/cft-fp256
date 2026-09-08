@@ -164,7 +164,11 @@ static void run(const uint8_t *data, size_t len)
         uint8_t a[16], dep[16];
         uint32_t counts[4];
         memset(a, 0, sizeof a);
-        cftr_program_run(&R, CFT_FP32, g_image, g_image_bytes, 1,
+        /* No bank: the seed image carries its own constants. The
+         * banked path (PROG_RUN_BANK, ABI 0.9) is exercised by
+         * fuzz_serve's corpus from the other side of the wire, which
+         * is where a malformed one can do damage. */
+        cftr_program_run(&R, CFT_FP32, g_image, g_image_bytes, NULL, 0, 1,
                          a, NULL, NULL, dep, counts, 4, &flags, &bus);
         break;
     }

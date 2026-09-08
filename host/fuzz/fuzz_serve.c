@@ -178,7 +178,15 @@ static void one_request(uint16_t op, uint8_t *p, size_t len)
         break;
     case CFTR_OP_PROG_RUN:
         clamp_lanes(p, len, 1);
-        h_prog_run(&g_c, p, len, &A);
+        h_prog_run(&g_c, p, len, &A, 0);
+        break;
+    case CFTR_OP_PROG_RUN_BANK:
+        /* The same clamp: the lane count is in the same fixed word,
+         * and the bank's length is the one that was zero on PROG_RUN
+         * - which h_prog_run holds to the payload's own length before
+         * it reads a byte of it. */
+        clamp_lanes(p, len, 1);
+        h_prog_run(&g_c, p, len, &A, 1);
         break;
     case CFTR_OP_PROG_FREE:  h_prog_free(&g_c, p, len, &A); break;
     case CFTR_OP_BUF_ALLOC:  h_buf_alloc(&g_c, p, len, &A); break;

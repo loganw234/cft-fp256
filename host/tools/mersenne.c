@@ -161,6 +161,7 @@
 #include <inttypes.h>
 
 #include "cft.h"
+#include "../src/sha256.h"
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -209,232 +210,27 @@ static void *xcalloc(size_t n, size_t sz)
 }
 
 /* ===================================================================
- * A 128-bit unsigned, enough to derive SHA-256's constants
+ * SHA-256, from the library
  *
- * The standing rule in this repository is that a constant is derived,
- * or copied in the base it was specified in; it is never retyped from
- * memory. SHA-256's eight initial words and sixty-four round constants
- * are SPECIFIED as the fractional parts of the square and cube roots of
- * the first primes, so that is how they are computed here. This block
- * is collatz.c's, unchanged, and host/tests/mersenne_check.py proves
- * the derivation the same way: by recomputing the chain with hashlib.
+ * There were four copies of this hash in host/tools, one per workload
+ * tool and all byte-identical, plus the one cft_program_digest wanted.
+ * They are now one, in host/src/sha256.c, together with the constant
+ * derivation the standing rule asks for - SHA-256's eight initial
+ * words and sixty-four round constants are SPECIFIED as the fractional
+ * parts of the square and cube roots of the first primes, so that is
+ * how they are computed, by integer search with no floating point and
+ * nothing to mistype.
+ *
+ * Below is the whole adaptation: this file's own three names, bound to
+ * the library's. Not one byte of the chain this tool prints changed in
+ * the move, and host/tests/mersenne_check.py recomputes every line of it
+ * with Python's hashlib, which is what proves that.
  * =================================================================== */
-typedef struct { uint64_t hi, lo; } u128;
+typedef cft_sha256_ctx sha256;
+#define sha256_start(s)       cft_sha256_init(s)
+#define sha256_push(s, d, n)  cft_sha256_update((s), (d), (n))
+#define sha256_end(s, o)      cft_sha256_final((s), (o))
 
-static u128 u128_mk(uint64_t hi, uint64_t lo)
-{
-    u128 r;
-    r.hi = hi;
-    r.lo = lo;
-    return r;
-}
-
-static int u128_cmp(u128 a, u128 b)
-{
-    if (a.hi != b.hi)
-        return a.hi < b.hi ? -1 : 1;
-    if (a.lo != b.lo)
-        return a.lo < b.lo ? -1 : 1;
-    return 0;
-}
-
-static u128 u128_shl(u128 a, int s)
-{
-    u128 r;
-    if (s == 0)
-        return a;
-    if (s >= 64) {
-        r.hi = a.lo << (s - 64);
-        r.lo = 0;
-    } else {
-        r.hi = (a.hi << s) | (a.lo >> (64 - s));
-        r.lo = a.lo << s;
-    }
-    return r;
-}
-
-static u128 u128_mul64(uint64_t a, uint64_t b)
-{
-    uint64_t al = a & 0xffffffffu, ah = a >> 32;
-    uint64_t bl = b & 0xffffffffu, bh = b >> 32;
-    uint64_t ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
-    uint64_t mid = (ll >> 32) + (lh & 0xffffffffu) + (hl & 0xffffffffu);
-    u128 r;
-    r.lo = (ll & 0xffffffffu) | (mid << 32);
-    r.hi = hh + (lh >> 32) + (hl >> 32) + (mid >> 32);
-    return r;
-}
-
-static int u128_mul_small(u128 a, uint64_t b, u128 *out)
-{
-    u128 lo = u128_mul64(a.lo, b);
-    u128 hi = u128_mul64(a.hi, b);
-    if (hi.hi != 0)
-        return 1;
-    lo.hi += hi.lo;
-    if (lo.hi < hi.lo)
-        return 1;
-    *out = lo;
-    return 0;
-}
-
-static int u128_pow(uint64_t v, int root, u128 *out)
-{
-    u128 acc = u128_mk(0, v);
-    int k;
-    for (k = 1; k < root; k++)
-        if (u128_mul_small(acc, v, &acc))
-            return 1;
-    *out = acc;
-    return 0;
-}
-
-static void first_primes(uint32_t *out, int count)
-{
-    int have = 0;
-    uint32_t cand;
-    for (cand = 2; have < count; cand++) {
-        uint32_t dv;
-        int prime = 1;
-        for (dv = 2; dv * dv <= cand; dv++)
-            if (cand % dv == 0) { prime = 0; break; }
-        if (prime)
-            out[have++] = cand;
-    }
-}
-
-static uint32_t root_frac32(uint32_t pr, int root)
-{
-    u128 target = u128_shl(u128_mk(0, pr), 32 * root);
-    uint64_t lo = 0, hi = 1;
-    for (;;) {
-        u128 acc;
-        if (u128_pow(hi, root, &acc) || u128_cmp(acc, target) > 0)
-            break;
-        hi <<= 1;
-    }
-    while (hi - lo > 1) {
-        uint64_t mid = lo + (hi - lo) / 2;
-        u128 acc;
-        if (u128_pow(mid, root, &acc) || u128_cmp(acc, target) > 0)
-            hi = mid;
-        else
-            lo = mid;
-    }
-    return (uint32_t)(lo & 0xffffffffu);
-}
-
-/* ---- SHA-256 ------------------------------------------------------ */
-typedef struct {
-    uint32_t h[8];
-    uint64_t bits;
-    uint8_t  buf[64];
-    size_t   have;
-} sha256;
-
-static uint32_t SHA_K[64];
-static uint32_t SHA_H0[8];
-static int      sha_ready = 0;
-
-static void sha_init_constants(void)
-{
-    uint32_t primes[64];
-    int i;
-    if (sha_ready)
-        return;
-    first_primes(primes, 64);
-    for (i = 0; i < 64; i++)
-        SHA_K[i] = root_frac32(primes[i], 3);
-    for (i = 0; i < 8; i++)
-        SHA_H0[i] = root_frac32(primes[i], 2);
-    sha_ready = 1;
-}
-
-static uint32_t rotr32(uint32_t x, int n)
-{
-    return (x >> n) | (x << (32 - n));
-}
-
-static void sha256_block(sha256 *s, const uint8_t *p)
-{
-    uint32_t w[64], a, b, c, d, e, f, g, h;
-    int i;
-    for (i = 0; i < 16; i++)
-        w[i] = ((uint32_t)p[4 * i] << 24) | ((uint32_t)p[4 * i + 1] << 16) |
-               ((uint32_t)p[4 * i + 2] << 8) | (uint32_t)p[4 * i + 3];
-    for (i = 16; i < 64; i++) {
-        uint32_t s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^
-                      (w[i - 15] >> 3);
-        uint32_t s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^
-                      (w[i - 2] >> 10);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-    }
-    a = s->h[0]; b = s->h[1]; c = s->h[2]; d = s->h[3];
-    e = s->h[4]; f = s->h[5]; g = s->h[6]; h = s->h[7];
-    for (i = 0; i < 64; i++) {
-        uint32_t S1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
-        uint32_t ch = (e & f) ^ (~e & g);
-        uint32_t t1 = h + S1 + ch + SHA_K[i] + w[i];
-        uint32_t S0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
-        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-        uint32_t t2 = S0 + maj;
-        h = g; g = f; f = e; e = d + t1;
-        d = c; c = b; b = a; a = t1 + t2;
-    }
-    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d;
-    s->h[4] += e; s->h[5] += f; s->h[6] += g; s->h[7] += h;
-}
-
-static void sha256_start(sha256 *s)
-{
-    sha_init_constants();
-    memcpy(s->h, SHA_H0, sizeof s->h);
-    s->bits = 0;
-    s->have = 0;
-}
-
-static void sha256_push(sha256 *s, const void *data, size_t n)
-{
-    const uint8_t *p = (const uint8_t *)data;
-    s->bits += (uint64_t)n * 8u;
-    while (n) {
-        size_t take = 64 - s->have;
-        if (take > n)
-            take = n;
-        memcpy(s->buf + s->have, p, take);
-        s->have += take;
-        p += take;
-        n -= take;
-        if (s->have == 64) {
-            sha256_block(s, s->buf);
-            s->have = 0;
-        }
-    }
-}
-
-static void sha256_end(sha256 *s, uint8_t out[32])
-{
-    uint64_t bits = s->bits;
-    int i;
-    s->buf[s->have++] = 0x80;
-    if (s->have > 56) {
-        while (s->have < 64)
-            s->buf[s->have++] = 0;
-        sha256_block(s, s->buf);
-        s->have = 0;
-    }
-    while (s->have < 56)
-        s->buf[s->have++] = 0;
-    for (i = 7; i >= 0; i--)
-        s->buf[s->have++] = (uint8_t)(bits >> (8 * i));
-    sha256_block(s, s->buf);
-    for (i = 0; i < 8; i++) {
-        out[4 * i]     = (uint8_t)(s->h[i] >> 24);
-        out[4 * i + 1] = (uint8_t)(s->h[i] >> 16);
-        out[4 * i + 2] = (uint8_t)(s->h[i] >> 8);
-        out[4 * i + 3] = (uint8_t)s->h[i];
-    }
-}
 
 static void hex32(const uint8_t in[32], char out[65])
 {

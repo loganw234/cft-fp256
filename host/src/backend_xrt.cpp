@@ -127,6 +127,14 @@ constexpr uint32_t CSR_VERSION = 0x48;
 constexpr uint32_t CSR_CAPS    = 0x4C;
 constexpr uint32_t CSR_STATUS  = 0x50;
 constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
+/* The sequencer's three pointer registers are NOT in this list, and
+ * that is deliberate: PROG_PTR (0x54), CNT_PTR (0x5C) and, since
+ * 0x700, BANK_PTR (0x64 low, 0x68 high) are KERNEL ARGUMENTS - 6, 7
+ * and 8 in hw/kernel.xml - and XRT writes each buffer's device address
+ * into its own register when the run is submitted. A host that also
+ * wrote them would be writing them twice, from two different notions
+ * of where the buffer is. They are named here so the map is readable
+ * beside the registers this code does touch. */
 
 /* The hardware contracts this library speaks.
  *
@@ -146,6 +154,12 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  *   0x410  v0.4.1  four rungs, five rounding attributes
  *   0x500  v0.5.0  adds the reduction group (CAPS bit 13)
  *   0x600  v0.6.0  adds PROG_PTR and CNT_PTR, and two kernel arguments
+ *   0x700  v0.7.0  adds BANK_PTR at 0x64/0x68 and a ninth kernel
+ *                  argument, `bank` on the A master - the sequencer's
+ *                  per-run constant bank (docs/SEQUENCER.md revision
+ *                  2, R3). CAPS[6] says whether a tile at this
+ *                  contract will TAKE one, and the loader asks that
+ *                  rather than this
  *
  * Add a version here only when the map is genuinely unchanged; move the
  * map and this list should shrink to the versions that share it.
@@ -156,10 +170,16 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  * they simply have nothing at 0x54. What they cannot do is run a
  * program, and SEQ_VERSION below is what says so - a kernel call with
  * eight arguments against a six-argument xclbin does not misbehave
- * subtly, it throws, and a clear refusal beats an XRT exception. */
+ * subtly, it throws, and a clear refusal beats an XRT exception.
+ *
+ * 0x700 grows it again the same way and the same reasoning applies
+ * twice over: a 0x600 tile is read correctly here and simply has
+ * nothing at 0x64, and BANK_VERSION below is what refuses a banked run
+ * against it. The card-day images are 0x410 and predate all of it. */
 constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u,
-                                        0x00000600u };
+                                        0x00000600u, 0x00000700u };
 constexpr uint32_t SEQ_VERSION = 0x00000600u;   /* first map with PROG_PTR */
+constexpr uint32_t BANK_VERSION = 0x00000700u;  /* first map with BANK_PTR */
 
 inline bool version_known(uint32_t v)
 {
@@ -168,9 +188,11 @@ inline bool version_known(uint32_t v)
     return false;
 }
 
-/* kernel.xml argument ids */
+/* kernel.xml argument ids. `bank` is 8, on m_axi_a - it rides the A
+ * master as the program image does, and the two never overlap in time
+ * (hw/kernel.xml, docs/SEQUENCER.md revision 2). */
 constexpr int ARG_A = 2, ARG_B = 3, ARG_C = 4, ARG_D = 5;
-constexpr int ARG_PROG = 6, ARG_CNT = 7;
+constexpr int ARG_PROG = 6, ARG_CNT = 7, ARG_BANK = 8;
 
 /* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
 constexpr uint32_t MODE_SEQ = 1u << 15;
@@ -277,6 +299,15 @@ struct Tile {
      * a hundred-byte program. */
     xrt::bo     pg, cn;
     size_t      pg_cap = 0, cn_cap = 0;
+    /* And the third, since 0x700: the per-run constant bank, argument
+     * 8 on the A master. Sized like the image and for the same reason -
+     * a bank is n_consts format-width values, tens or hundreds of
+     * bytes, and never grows with n. It is allocated on a 0x700 tile
+     * even for a program that carries its own constants, because the
+     * kernel has the argument either way and XRT will not submit a run
+     * with one unbound; the tile never reads it in that case. */
+    xrt::bo     bk;
+    size_t      bk_cap = 0;
 };
 
 struct Dev {
@@ -467,10 +498,12 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         char buf[256];
         std::snprintf(buf, sizeof buf,
                       "hardware contract 0x%08x is not one this library "
-                      "knows (0x%08x, 0x%08x) - the register map may "
-                      "differ, and guessing is how a host misreads a "
-                      "result. What a tile IMPLEMENTS is CAPS, not this.",
-                      ver, KNOWN_VERSIONS[0], KNOWN_VERSIONS[1]);
+                      "knows (0x%08x, 0x%08x, 0x%08x, 0x%08x) - the "
+                      "register map may differ, and guessing is how a host "
+                      "misreads a result. What a tile IMPLEMENTS is CAPS, "
+                      "not this.",
+                      ver, KNOWN_VERSIONS[0], KNOWN_VERSIONS[1],
+                      KNOWN_VERSIONS[2], KNOWN_VERSIONS[3]);
         delete D;
         set_err(buf);
         return ST_UNSUPPORTED;
@@ -498,7 +531,13 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
          * card-day images are 0x410 and are exactly that case. */
         const uint32_t sizes = (caps >> 16) & 0xFFFu;
         /* The feature nibble, and above it the ALU extensions of
-         * CAPS[31:28] - IMUL is bit 28, cft.h's CFT_ALU_EXT_IMUL. */
+         * CAPS[31:28] - IMUL is bit 28, cft.h's CFT_ALU_EXT_IMUL.
+         *
+         * The nibble shift already carries revision 2's two new bits
+         * and needed no change for them: CAPS[5] lands in
+         * seq_features bit 1 (CFT_SEQ_FEAT_REGS32) and CAPS[6] in bit
+         * 2 (CFT_SEQ_FEAT_BANK_PTR), which is what the field was
+         * shaped for. Shift, do not enumerate. */
         seq->features = ((caps >> 4) & 0xFu) | (((caps >> 28) & 0xFu) << 4);
         if (sizes == 0) {
             seq->max_deposits = 0;
@@ -763,12 +802,16 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
  * from one that wrote the zero it promised.
  */
 extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
-                                size_t image_bytes, uint32_t max_deposits,
+                                size_t image_bytes,
+                                const void *bank, size_t bank_bytes,
+                                uint32_t max_deposits,
                                 const void *a, const void *b, const void *c,
                                 void *deposits, uint32_t *counts, size_t n,
                                 uint32_t *flags, uint32_t *bus)
 {
     if (!hw || !image || image_bytes == 0)
+        return ST_INVALID_ARGUMENT;
+    if (bank_bytes && !bank)
         return ST_INVALID_ARGUMENT;
 
     Dev &D = *static_cast<Dev *>(hw);
@@ -800,6 +843,24 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         set_err(buf);
         return ST_UNSUPPORTED;
     }
+    /* And a tile whose map predates BANK_PTR has no register for a
+     * bank and no ninth argument to bind it to. cft_program_load has
+     * already refused a BANK_EXT image against a tile whose CAPS[6] is
+     * clear, which is the refusal a caller should see; this is the
+     * second line of the same defence, for a device whose CAPS and
+     * whose VERSION disagree. Same reasoning as the check above: a
+     * nine-argument kernel call against an eight-argument xclbin
+     * throws from inside XRT with a message about argument counts. */
+    if (bank_bytes && D.version < BANK_VERSION) {
+        char buf[224];
+        std::snprintf(buf, sizeof buf,
+                      "this bitstream's contract is 0x%08x, which has no "
+                      "BANK_PTR - the per-run constant bank arrived at "
+                      "0x%08x. CAPS bit 6 says in advance which it is.",
+                      D.version, BANK_VERSION);
+        set_err(buf);
+        return ST_UNSUPPORTED;
+    }
 
     if (n == 0) {
         if (flags) *flags = 0;
@@ -817,6 +878,10 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     const size_t dep_bytes  = beat_round(n * max_deposits * esz);
     const size_t cnt_bytes  = beat_round(n * 4);
     const size_t img_bytes  = beat_round(image_bytes);
+    /* One beat when there is no bank, so a 0x700 tile's ninth argument
+     * is always a real, addressable buffer. beat_round(0) is 0 and a
+     * zero-length xrt::bo is not something to rely on. */
+    const size_t bnk_bytes  = bank_bytes ? beat_round(bank_bytes) : 32u;
 
     /* One cap covers a, b, c and d together, so the operand buffers
      * come out as large as the deposit window - max_deposits times
@@ -834,11 +899,26 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         ensure_capacity(D, tile, need);
         ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, img_bytes);
         ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, cnt_bytes);
+        if (D.version >= BANK_VERSION)
+            ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, bnk_bytes);
         stage(tile.a, static_cast<const uint8_t *>(a), real_bytes, opnd_bytes);
         stage(tile.b, static_cast<const uint8_t *>(b), real_bytes, opnd_bytes);
         stage(tile.c, static_cast<const uint8_t *>(c), real_bytes, opnd_bytes);
+        /* The image WHOLE, whatever it holds. A BANK_EXT image is a
+         * header and an instruction stream and has no constant section
+         * to send - cft_program_load sized it that way and kept the
+         * exact bytes - so nothing here has to strip one out, which is
+         * the same reason the image was kept whole in the first place:
+         * what executes is what was loaded. */
         stage(tile.pg, static_cast<const uint8_t *>(image), image_bytes,
               img_bytes);
+        /* The bank, staged exactly as the image is: a NULL source
+         * zeroes the buffer, which is what a program that carries its
+         * own constants leaves at argument 8 and the tile never
+         * reads. */
+        if (D.version >= BANK_VERSION)
+            stage(tile.bk, static_cast<const uint8_t *>(bank), bank_bytes,
+                  bnk_bytes);
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging a program");
         return ST_OUT_OF_MEMORY;
@@ -869,7 +949,17 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     int status = ST_OK;
     std::string err;
     try {
-        xrt::run r = tile.k(mode, static_cast<uint64_t>(n),
+        /* Two shapes, because the ARGUMENT COUNT is what the contract
+         * version guards: a 0x600 xclbin's kernel takes eight and a
+         * 0x700's takes nine, and XRT throws rather than adapts. The
+         * bank buffer is bound on every 0x700 run whether or not this
+         * program has a bank; the tile reads it only when the image's
+         * flags say BANK_EXT. */
+        xrt::run r = (D.version >= BANK_VERSION)
+                   ? tile.k(mode, static_cast<uint64_t>(n),
+                            tile.a, tile.b, tile.c, tile.d,
+                            tile.pg, tile.cn, tile.bk)
+                   : tile.k(mode, static_cast<uint64_t>(n),
                             tile.a, tile.b, tile.c, tile.d,
                             tile.pg, tile.cn);
         ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
