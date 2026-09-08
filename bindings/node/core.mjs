@@ -2549,11 +2549,18 @@ export class Program {
           `pass no bank, or call run(a, b, c)`);
       return null;
     }
-    if (bank === null || bank === undefined)
+    if (bank === null || bank === undefined) {
+      // A BANK_EXT program that addresses NO constants has an empty
+      // bank, and no bank is the right way to pass an empty one - which
+      // is what seq_check_bank does with a want of zero. The image is
+      // still BANK_EXT (it carries no constant section and refuses
+      // run()); it simply has nothing to supply.
+      if (this.bankBytes === 0) return new Uint8Array(0);
       throw new TypeError(
         `${who}: this program's constants arrive with the run (BANK_EXT) ` +
         `and no bank was given - ${this._nConsts} ${fi.ieeeName} values ` +
         `are due`);
+    }
     let buf;
     if (bank instanceof Uint8Array) buf = bank;
     else if (Array.isArray(bank)) {
@@ -2574,10 +2581,14 @@ export class Program {
   }
 
   /** run() and runBank() are one call with one difference, so they are
-   *  one implementation: a bank that is null takes cft_program_run and
-   *  a bank that is not takes cft_program_run_bank, and every argument
-   *  check, buffer shape and returned field below is shared by
-   *  construction rather than by two copies agreeing. */
+   *  one implementation: `bankBuf` is null for cft_program_run and a
+   *  Uint8Array - possibly EMPTY, for a BANK_EXT program that addresses
+   *  no constants - for cft_program_run_bank. Which entry point is
+   *  called turns on `!== null` and not on the length, because those
+   *  two are different questions and only the first one is "does this
+   *  program's constants arrive with the run". Every argument check,
+   *  buffer shape and returned field below is shared by construction
+   *  rather than by two copies agreeing. */
   _runWith(bankBuf, a, b = null, c = null) {
     const M = this._M, C = this._C, fi = this._fi;
     const ctx = this._formatCtx();
@@ -2614,9 +2625,13 @@ export class Program {
       const pd = s.alloc(Math.max(ndep * fi.size, 1));
       const pcnt = s.alloc(Math.max(n * 4, 1));
       const pfl = s.alloc(4), pbus = s.alloc(4);
-      const pbank = bankBuf ? s.put(bankBuf) : 0;
-      const who = bankBuf ? "cft_program_run_bank" : "cft_program_run";
-      const st = bankBuf
+      // A zero-length bank crosses as a NULL pointer with a zero
+      // length, which is what cft_program_run_bank's `bank_bytes ?
+      // bank : NULL` expects and what avoids a malloc(0) here.
+      const pbank = bankBuf && bankBuf.length ? s.put(bankBuf) : 0;
+      const banked = bankBuf !== null;
+      const who = banked ? "cft_program_run_bank" : "cft_program_run";
+      const st = banked
         ? C.programRunBank(this._handle, pbank, bankBuf.length,
                            pa, pb, pc, pd, pcnt, n, pfl, pbus)
         : C.programRun(this._handle, pa, pb, pc, pd, pcnt, n, pfl, pbus);
@@ -2655,7 +2670,7 @@ export class Program {
     this._live("digest");
     const buf = this._packBank(bank, "digest");
     return withScratch(this._M, (s) => {
-      const pbank = buf ? s.put(buf) : 0;
+      const pbank = buf && buf.length ? s.put(buf) : 0;
       const pout = s.alloc(32);
       const st = this._C.programDigest(this._handle, pbank,
                                        buf ? buf.length : 0, pout);

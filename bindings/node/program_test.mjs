@@ -686,6 +686,43 @@ test("R3: the image is the schedule and the digest covers the data", () => {
   } finally { prog.free(); }
 });
 
+test("R3: a BANK_EXT program that addresses no constants has an empty bank",
+     () => {
+  // The corner the C settles and a JavaScript surface can get wrong in
+  // the other direction: seq_check_bank's `want` for such a program is
+  // zero, so NULL and zero bytes is the right bank and the only one.
+  // A surface that demanded a bank because the flag is set would refuse
+  // a program the library accepts; one that took the empty bank as "no
+  // bank" would call cft_program_run, which a BANK_EXT program refuses
+  // whatever its n_consts is. Which entry point is called turns on the
+  // FLAG, and the bank's size is a separate question.
+  const image = programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    nConsts: 0, maxDeposits: 1, flags: FLAG_BANK_EXT,
+    insns: [
+      alu({ op: OP_MUL, rd: 4, ra: 0, rb: 0 }),
+      ctl("deposit", 4),
+      ctl("halt"),
+    ],
+  });
+  eq(image.length, 32 + 3 * 8, "header and instructions only: ");
+  const prog = c64.loadProgram(image);
+  try {
+    eq(prog.bankExternal, true, "bankExternal: ");
+    eq(prog.nConsts, 0, "n_consts: ");
+    eq(prog.bankBytes, 0, "and its bank is empty: ");
+    const r = prog.runBank(null, [3, 4]);
+    eq(r.deposits.map((f) => f.toNumber()).join(","), "9,16",
+       "runBank with no bank runs it: ");
+    eq(Buffer.from(prog.digest()).toString("hex").length, 64,
+       "and digest() with no bank is its digest: ");
+    let ran = null;
+    try { prog.run([3]); } catch (e) { ran = e; }
+    ok(ran && /runBank/.test(ran.message),
+       "run() still refuses it - the flag decides, not the size");
+  } finally { prog.free(); }
+});
+
 test("R3: a program has ONE source of constants, and both calls say so",
      () => {
   const ext = c64.loadProgram(hornerBankProgram());
