@@ -326,13 +326,19 @@ board: boardkrnl boardseq boardfp256
 
 # boardkrnl runs under Verilator by default. Icarus evaluates this one
 # configuration - the engine-driven kernel at ten passes with both
-# ladders on - at about 2.5 ns of simulated time a second, 160x slower
-# than the same bench without the ladders and about 3.5 hours for the
-# bench (measured 2026-09-07 on the tree before and after the
-# leading-zero cone became its own stage: the same rate on both, so
-# the configuration is the cause, not a change); Verilator passes
-# both tests in seconds and its lint finds no loop. A simulator cost,
-# not a reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
+# ladders on - at about 2.5 ns of simulated time a second through the
+# bench's 32-element operations and about 0.03 ns a second once its
+# 1,104-element stream begins: on 2026-09-07 four hours of simulation
+# reached 57 of the 71 operations, every one bit-exact, and the
+# control on the tree before the leading-zero cone became a stage ran
+# the same way, so the configuration is the cause, not a change. The
+# bench has no finite Icarus duration worth quoting. Verilator runs
+# it in 16 s after an eleven-minute compile - 44,920 ns simulated,
+# both tests, the parameters applied, which they were NOT until that
+# evening: cocotb.mk handed KRNL_PARAMS to Icarus only, and the first
+# "Verilator passes it in seconds" was the default kernel wearing
+# this target's name (docs/VALIDATION.md). A simulator cost, not a
+# reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
 BOARDKRNL_SIM ?= verilator
 boardkrnl:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml

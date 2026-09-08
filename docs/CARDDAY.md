@@ -46,7 +46,32 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
-- [x] **The PRIMARY pair: 135 MHz, staged and verified**
+- [ ] **The 2026-09-07 pair from ed752dd - building tonight on the
+      box, for the day.** main as of that evening: IMUL and the
+      indexed constants, CAPS publishing the sequencer's capacities
+      and both features (so cft-zoom and cft-orbits size themselves
+      and the imul cases replay instead of being skipped), the
+      leading-zero cone as its own stage (LATENCY 16), ABI 0.8 - the
+      hardware the library now expects. Launched 17:06 on amd-arc-box
+      by `~/cardday_0907.sh`: single and quad at 135 MHz, retiming +
+      phys_opt, the 9f73107 recipe below; a half that misses 135 is
+      rebuilt at 130 by the script itself. Each half is checked with
+      hw/verify-image.sh and staged beside its manifest as
+      `~/cardday-0907/cft_hw_{single,quad}.xclbin`, with SHA256SUMS
+      and a README that records each kernel WNS and the verifier's
+      verdict; the chain's logs are `~/cardday-logs/`, and chain.log
+      ends with CARDDAY-0907-COMPLETE when it is done. On arrival:
+      `sha256sum -c SHA256SUMS`, read the README's WNS lines, and use
+      this pair FIRST; the 9f73107 pair in ~/cardday-tip is the
+      fallback. A half the README marks NOT PRODUCED is a half the
+      fallback pair supplies. The commits after ed752dd on main touch
+      RTL this image does not elaborate (a multi-pass counter compare
+      spelled for lint) and comments; `git diff ed752dd..HEAD -- rtl/
+      hw/` shows exactly that, so the manifest's commit is this
+      image's hardware.
+
+- [x] **The PRIMARY pair until the 0907 pair lands: 135 MHz, staged
+      and verified**
       (2026-09-01). Built at 39fc2c0, whose rtl/ and hw/ are
       byte-identical to the b1a014c general-purpose tree (the only
       diff is a soak script that never reaches a netlist) - seed
@@ -200,9 +225,10 @@ all; a known version with a CAPS bit clear means the image simply does
 not carry that feature, which is a normal thing for an older
 bitstream to say.
 
-Every staged image predates 2026-09-07, and three things landed in
-the library that day which such an image will show as absences,
-all of them normal (docs/HOSTAPI.md, docs/SEQUENCER.md):
+Every set staged before the 0907 pair predates 2026-09-07, and three
+things landed in the library that day which such an image will show
+as absences, all of them normal (docs/HOSTAPI.md, docs/SEQUENCER.md);
+the 0907 pair carries all three, and on it none of this applies:
 
 - **CAPS[27:16] reads zero**, so `cft_get_caps` reports the
   sequencer's capacities as unknown and enforces nothing against

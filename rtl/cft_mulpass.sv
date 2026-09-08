@@ -133,11 +133,16 @@ module cft_mulpass #(
   // pidx names the pass whose chunk group is being selected this
   // cycle: 0 in the cycle after an enabled edge, then up, saturating
   // at NP (a group of zeros) for a period longer than this lane's own.
+  // PXW is $clog2(NP + 1), so the counter holds NP itself and the
+  // cast below is exact: 2**PXW > NP by construction. Comparing at
+  // the counter's width is the same test as against the int NP,
+  // spelled so Verilator sees no expansion (2026-09-07, the first
+  // time a multi-pass build reached it).
   localparam int PXW = $clog2(NP + 1);
   logic [PXW-1:0] pidx;
   always_ff @(posedge clk) begin
-    if (en)              pidx <= '0;
-    else if (pidx < NP)  pidx <= pidx + 1'b1;
+    if (en)                    pidx <= '0;
+    else if (pidx < PXW'(NP))  pidx <= pidx + 1'b1;
   end
 
   // en_d[j] is `en` delayed by j cycles. The accumulator's load and the

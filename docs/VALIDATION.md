@@ -5997,6 +5997,47 @@ agents left them, and integrated or held here.
   defect to fix; the Verilator default stands as the simulator cost
   it is, and the claim two paragraphs up that Icarus's evaluation of
   the new cone is the pathology is withdrawn.
+  **Second correction, the same evening.** Neither number above was
+  what it claimed. The "7.5 s under Verilator" was the DEFAULT
+  kernel: tb/cocotb.mk added `KRNL_PARAMS` to the compile line under
+  Icarus only, so every parameterized target ever run with
+  `SIM=verilator` - the multi-cycle suite, `krnlfused`, `krnlplain`,
+  the three board targets - simulated the RTL default while its name
+  said otherwise, and the Verilator `boardkrnl` result the paragraph
+  above rests on simulated 31,376 ns, which is the `krnl` target's
+  figure exactly. The tell was in the two logs side by side: the
+  Icarus run spent 1,152 ns of simulated time on an fp256 fma the
+  Verilator run did in 372, which is one iterated multiplier against
+  none. Fixed: cocotb.mk now rewrites `-P<top>.<PARAM>=<v>` to
+  Verilator's `-G<PARAM>=<v>` for the module that is TOPLEVEL and
+  refuses a parameter aimed at any other module (Verilator itself
+  refuses a name the design lacks: "Parameters from the command line
+  were not found in the design"). The first build with the
+  parameters applied raised five width warnings the default
+  configuration never elaborates - the pass counter's saturation
+  compare in cft_mulpass against the int NP, and the three 1-bit
+  ladder switches in cft_krnl receiving a 32-bit `-G` literal - fixed
+  as a cast to the counter's own width (exact, since PXW is
+  $clog2(NP + 1)) and a lint_off pair scoped to the three
+  declarations, the argument beside each. Then the board kernel under
+  Verilator, parameters on: **both tests pass, 44,920 ns simulated in
+  15.8 s** after an eleven-minute compile, the fp256 fma at the same
+  2,732 ns the Icarus run reached it at, and the same simulated length
+  as `krnlmc10` - the multi-cycle count, which the ladders do not
+  change. And the "3.5 hours" was an extrapolation from the rate
+  over the bench's first operations; the Icarus control held that
+  2.5 ns a second through the fifty-seven 32-element operations and
+  then, inside the 1,104-element fp32 stream, advanced 80 ns in forty
+  minutes. Stopped at 3 h 56 min of simulation, 32,280 ns, 57 of 71
+  operations bit-exact: the bench has no finite Icarus duration worth
+  quoting, and the docs now say so. The Icarus targets that exercise
+  the edited counter on this tree, in cft-sim: `mulpass` 1/1,
+  `mulcycle` MC=10 4/4, `mulcycle2` 4/4, `krnlmc` MC=10 2/2 (44,920
+  ns in 28 s), each under a minute with the box quiet - which is also
+  the honest same-simulator comparison: the default and MC=10 kernels
+  run at about 1,600 ns of simulated time a second under Icarus here,
+  the board configuration at 2.5 and then 0.03. Lint under Verilator,
+  default and board configurations: clean. Formal, on this tree: `FORMAL GATE: PASS (31 of 31, negative control refuted)` in 4.5 min beside the two simulations.
 - `formal/run.sh` in cft-formal: `FORMAL GATE: PASS (31 of 31, negative
   control refuted)`, 420 s of solver time - after a first run had to be
   stopped at two and a half hours, stuck on `imul.sby`'s `check`

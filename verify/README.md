@@ -90,8 +90,10 @@ Wall time for the standard set is dominated by `sim`, `formal`,
 `transcend` and `cpp`. `sim` is ~40 min serial in the container, ~25
 min under Verilator on a 36-core box, almost all of it compilation,
 and **55 minutes at four jobs on this desktop beside a Vivado run**
-(2026-09-07); `simmc MC=10`, which is not in any budget, is longer
-still. The targets are parallel-safe by construction - each writes
+(2026-09-07); `simmc MC=10`, which is not in any budget, is about
+50 minutes at four jobs, its engine-driven board kernel under
+Verilator because Icarus does not finish that one
+(docs/VERIFICATION.md). The targets are parallel-safe by construction - each writes
 its own sim_build/<name> and results file - so `SIM_JOBS=n` hands
 make `-j n` (and `-k`, so one failing target does not hide the
 others): the whole suite cold at -j12 on that box is 3 min, warm
