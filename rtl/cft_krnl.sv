@@ -71,9 +71,16 @@ module cft_krnl #(
     // hw/package_kernel.tcl strips user parameters, so a bitstream can
     // only carry these defaults. Both self-gate on the full-tile
     // geometry, so a quarter tile ignores them either way.
+    // A command-line override of a 1-bit parameter is a 32-bit literal
+    // on Verilator's side (-GFUSE_NORM=1), and the truncation it warns
+    // about is the intended one: the value is 0 or 1 and nothing
+    // else is ever passed. The pair below is scoped to these three
+    // declarations; a width warning anywhere else stays fatal.
+    /* verilator lint_off WIDTHTRUNC */
     parameter bit FUSE_MUL  = 1'b0,
     parameter bit FUSE_NORM = 1'b0,
     parameter bit FUSE_ALIGN = 1'b0,
+    /* verilator lint_on WIDTHTRUNC */
     // The multi-cycle tile (docs/ARCHITECTURE.md, "The multi-cycle
     // fp256 rung"): a pass budget for the wide rungs' significand
     // multiplier. 1 is the shipping tile. Above 1 the fp64/fp128/fp256

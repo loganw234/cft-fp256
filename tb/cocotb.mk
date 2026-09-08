@@ -49,6 +49,8 @@ COMPILE_ARGS += -g2012 -I$(RTLDIR)
 # Top-level parameter overrides, Icarus form (-P<top>.<PARAM>=<value>),
 # so one bench can run the kernel in a configuration the RTL default
 # does not select - the fused-ladder build, for one. Empty by default.
+# The Verilator branch below translates the same list; a target's
+# parameters must reach whichever simulator runs it (2026-09-07).
 COMPILE_ARGS += $(KRNL_PARAMS)
 endif
 
@@ -69,6 +71,24 @@ ifeq ($(SIM),verilator)
 # fatal by default - which is the point. Argue a new site where it
 # lives, not here.
 EXTRA_ARGS += -I$(RTLDIR)
+# The same KRNL_PARAMS, in Verilator's form. Verilator overrides a
+# parameter of the top module with -G<PARAM>=<value>, so the Icarus
+# spelling -P<top>.<PARAM>=<value> is rewritten here for the module
+# that is TOPLEVEL - and a parameter aimed at any other module is a
+# refusal, because Verilator has no way to reach it and the run would
+# otherwise proceed on the RTL default. Until 2026-09-07 this list
+# was added under Icarus only, and every parameterized target run
+# with SIM=verilator - the multi-cycle suite, krnlfused, krnlplain,
+# the board targets - simulated the default configuration while its
+# name said otherwise (docs/VALIDATION.md, that date). COMPILE_ARGS,
+# not EXTRA_ARGS: cocotb hands EXTRA_ARGS to the built model at run
+# time as well, and -G belongs to the compiler.
+ifneq ($(strip $(filter-out -P$(TOPLEVEL).%,$(KRNL_PARAMS))),)
+$(error KRNL_PARAMS names a module other than TOPLEVEL=$(TOPLEVEL): \
+  $(filter-out -P$(TOPLEVEL).%,$(KRNL_PARAMS)) - Verilator can only \
+  override the top module's parameters)
+endif
+COMPILE_ARGS += $(patsubst -P$(TOPLEVEL).%,-G%,$(KRNL_PARAMS))
 endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
