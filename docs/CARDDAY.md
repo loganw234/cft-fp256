@@ -253,15 +253,25 @@ the element count is an operand rather than a loop bound.
       every emulation artifact built before 2026-08-30 reports 0x410
       and predates reductions entirely, so it will report the opcode
       group as absent rather than fail.
-- [ ] `xbutil examine` shows the card, and `Above 4G Decoding` is on
-      in the host BIOS (BRINGUP.md gate 0).
+- [x] `xbutil examine` shows the card, and `Above 4G Decoding` is on
+      in the host BIOS (BRINGUP.md gate 0). Done 2026-09-08: the card
+      showed as the golden image first, was flashed to
+      `xilinx_u50_gen3x16_xdma_base_5` (the base package needs
+      `xilinx-cmc-u50` and `xilinx-sc-fw-u50` beside it; `xbmgmt` by
+      its full path under sudo; cold boot), and both functions came
+      up ready. The 4G setting is the Intel platform's "PCI 64-Bit
+      Resource Allocation", enabled by default on this board and
+      readable from efivarfs without touching the menu.
 
 ## The day, in order
 
 Each step is a gate: if it fails, stop and diagnose rather than
 continuing, because every later step assumes the earlier ones.
 
-**1. The card is there.** `xbutil examine`, `xbutil validate`. Record
+**1. The card is there.** `xbutil examine`, `xbutil validate`. (On
+2026-09-08 `validate` died inside xrt-smi's device-info parser before
+any test - "Mac address exceed IP4 maximum value" - a tool bug on this
+card; steps 2 to 5 are the stronger check and ran instead.) Record
 the shell version, the XRT version and the device BDF.
 
 **2. The image loads.** `cft-selftest` cannot do this (it opens the
@@ -306,7 +316,12 @@ the 0907 pair carries all three, and on it none of this applies:
 
 **3. One tile is correct.**
 
-    bash hw/run-device-test.sh ~/cardday-135/cft_hw_single.xclbin -n 4096
+    bash hw/run-device-test.sh ~/cardday-0907/cft_hw_single.xclbin -n 4096
+
+(Run 2026-09-08: 2,258 checks, 0 failed at n=1120, 886 reductions
+checks, 0 failed; the `-n 4096` form tripped the partition test's
+own coverage check on the tree of the day and was fixed the same
+afternoon - docs/VALIDATION.md.)
 
 Full matrix: every format, ten opcodes, five rounding attributes,
 against the software backend, plus the boundary sizes. This is the
@@ -324,7 +339,10 @@ the reduction datapath itself rather than the split.
 
 **4. The conformance vectors, on the card.**
 
-    ./host/cft-selftest vectors/out cardday/single/cft_hw.xclbin
+    ./host/cft-selftest vectors/out ~/cardday-0907/cft_hw_single.xclbin
+
+(Run 2026-09-08: 168 sets, 1,071,635 cases, all matching, 584 s on
+one tile and 587 s on four.)
 
 Every published case replayed through the hardware (1,071,635 over
 168 sets from `make vectors` at ABI 0.8, of which the 4,000 `imul`

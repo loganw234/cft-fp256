@@ -7157,3 +7157,96 @@ from 0.3.1 to 0.7.0, one bump per step, and then stopped - it stayed
 surface never had an 0.8-only step: `cft_caps`' sequencer fields
 arrived at 0.8 and are projected for the first time here.
 `"private": true`, so nothing is published either way.
+
+## 2026-09-08 - card day: first light, and the published sets match on silicon
+
+The Alveo U50 arrived in amd-arc-box (Gigabyte GA-X99-UD4, Xeon
+E5-2697 v4, Ubuntu 24.04 on the GA 6.8.0-139 kernel, XRT 2.19.194).
+The runbook in docs/CARDDAY.md, step by step, with what each printed.
+
+**Step 0, the shell.** A new card runs the factory golden image
+(`xilinx_u50_GOLDEN_9`, one PCI function, no user driver), so the
+deployment shell was flashed first: the four packages from the 2024.1
+re-release tarball already on the box (`xilinx-cmc-u50` 1.0.40,
+`xilinx-sc-fw-u50` 5.2.20, `-validate` and `-base` 5-3499627 - the base
+depends on the first two, which the first install attempt found the
+hard way), `xbmgmt program --base` by its full path since sudo strips
+XRT's PATH, and a cold boot. Two things the day taught about the host:
+the same apt run configured a pending 7.0.0-31 HWE kernel whose DKMS
+step fails on XRT as every 7.0 kernel does, so
+`BUILD_EXCLUSIVE_KERNEL="^6\."` in xrt's dkms.conf is what lets 7.x
+kernels install without failing; and the board's missing "Above 4G
+Decoding" menu item is moot - the Intel platform form's "PCI 64-Bit
+Resource Allocation" is enabled by default and read back as 1 from
+efivarfs (docs on the desktop, `x99-above4g/`).
+
+**Step 1, the card is there.** After the cold boot: shell
+`xilinx_u50_gen3x16_xdma_base_5`, logic UUID
+44654095-25B4-C06A-EC6D-0B479D3FEBE8, functions 02:00.0 (xclmgmt) and
+02:00.1 (xocl), both Device Ready, Gen3 x16 at full width, 30 C and
+11 W idle, every rail reading. `xbutil validate` did not run: xrt-smi
+2.19 dies in its own device-info parser on this card ("Mac address
+exceed IP4 maximum value") before any test starts - the tool, not the
+card - and the steps below are the stronger validation anyway.
+
+**Steps 2 to 5, correctness**, both images from `~/cardday-0907`
+(single sha256 3870fc43..., quad 496f8ac0..., ed752dd, 135 MHz):
+
+    step 2  device-test -q -n 8      single 670 checks, 0 failed, 4 s   quad 670, 0 failed, 8 s
+            device: backend xrt, 1 tile / 4 tiles, contract 0x00000600, fp32 fp64 fp128 fp256
+            device reports max_deposits 64, max_insns 1024, max_consts 256, seq_features 0x11
+    step 3  device-test -n 1120       single 2,258 checks, 0 failed      quad 2,258, 0 failed
+            device-test -r            single 886 checks, 0 failed        quad 886, 0 failed
+    step 4  cft-selftest vectors/out  single 168 sets, 1,071,635 cases, all matching, 584 s
+    step 5  cft-selftest vectors/out  quad   168 sets, 1,071,635 cases, all matching, 587 s
+
+Every published case of every set, every format under every rounding
+attribute, flags included, on silicon - once through one tile and once
+through four - agrees with the model. The runbook's `-n 4096` for step
+3 tripped a coverage self-check inside device-test's partition test
+(its cut list spans 1,120 elements; the nine "failures" at 4,096 were
+the test reporting its own gap, every arithmetic check at that size
+passed); fixed the same afternoon so the check covers any n.
+
+**Step 6, throughput** (`cft-bench -n 1048576 -t 1`, one software
+thread on the same box against each image; `cft_run`, which stages
+every operand across PCIe per call):
+
+    fma      software      single tile            four tiles
+    fp32     3.76 M/s      141.8 M/s  (38x)       175.2 M/s  (47x)
+    fp64     3.24 M/s       81.4 M/s  (25x)        75.5 M/s  (23x)
+    fp128    2.52 M/s       40.3 M/s  (16x)        38.1 M/s  (15x)
+    fp256    1.74 M/s       20.0 M/s  (11.5x)      25.9 M/s  (15x)
+
+Every device row sits at 2.3 to 3.3 GB/s of staged traffic whatever
+the format and whatever the tile count: the bus is the wall in this
+mode, exactly as the bench's own header predicted, and four tiles do
+not move it. The tile's own rate - 108 M beats/s at 135 MHz and 1.25
+cycles a beat - is an order of magnitude above these numbers and needs
+a device-resident-buffer benchmark to be seen; that is the follow-up.
+
+**Step 7, the soak.**
+
+Both images, in turn, on the card (`~/soak_0907.sh` and a second
+pass for the zoom leg):
+
+    device-test -n 1120, five times each     single 5 x 2,258 checks, 0 failed   quad 5 x 2,258, 0 failed
+    cft-selftest, once more each             single 1,071,635 cases, 586 s        quad 1,071,635 cases, 590 s
+    cft-zoom, the reference orbit to 2,000   single 10 runs, one checkpoint hash  quad 10 runs, the same hash
+      iterations, 32 steps a call            51476c5d... - and the software backend, same arguments, 51476c5d...
+
+So the same orbit, deposited by the sequencer 32 steps a call, is one
+set of bytes on one tile, on four, and in software, ten times over;
+the published sets matched a second time through each image; and
+five repetitions of the full matrix agreed with the first. Thermals:
+FPGA 30 C before, 36 C at the hottest reading (after the single's
+replay), 30 C after; Int Vcc 40-41 C; power 15-20 W. The first zoom
+pass had asked for 37 steps a call, which deposits 74 values a lane
+against the card's 64, and the tool refused by name before touching
+the device - the CAPS enforcement the runbook describes, doing its
+job - so the leg was rerun at 32.
+
+**What was not done today:** `xbutil validate` (the tool bug above),
+and the revision-2 hardware, which merged the same day and gets its own
+pair next. Run records: `/tmp/step*.log`, `/tmp/bench-*.csv`,
+`/tmp/soak*.log` on the box.
