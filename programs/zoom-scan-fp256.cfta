@@ -1,0 +1,41 @@
+; zoom-scan-fp256.cfta - the real-axis nucleus scan, fp256
+;
+; host/tools/zoom.c's scan_insns at the tool's own defaults:
+; --format fp256, --period 51. The scan program's only constant is 4,
+; so unlike the same tool's reference-orbit program - whose constants
+; are the run's centre - this image is fixed and belongs in the
+; library.
+;
+;   r0  c, a real point on the axis (stream a)
+;   r1  z, which starts at +0 because that is what z_0 is
+;   deposits: z after `period` iterations
+;
+; z <- z^2 + c on the real axis, guarded: a candidate whose orbit has
+; left the disc of radius 2 stops iterating and keeps the z it had.
+; The guard is a CMPLE feeding SETACT, so a lane narrows and never
+; widens, which is what makes the all-lanes-done early exit meaningful
+; and is the whole reason an escape-time map fits this ISA.
+;
+; ACTALL before the deposit puts every lane back so that the deposit
+; happens for the escaped ones too - outside the loop, which is where
+; the P3 rule confines it.
+
+.format   fp256
+.deposits 1
+
+.const    FOUR = 4.0
+
+.reg      c = r0
+.reg      z = r1
+.reg      s = r2
+.reg      p = r3
+
+repeat 51
+  mul    s, z, z
+  cmple  p, s, FOUR
+  setact p
+  add    z, s, c
+endrep
+actall
+deposit z
+halt

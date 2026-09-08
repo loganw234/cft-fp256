@@ -32,7 +32,8 @@ TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
 .PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin \
-        libcft libcft-test libcft-diff libcft-seq libcft-docker clean help
+        libcft libcft-test libcft-diff libcft-seq libcft-docker clean help \
+        programs programs-check
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
@@ -42,6 +43,8 @@ help:
 	@echo "libcft-diff  libcft against the golden model, boundary-targeted"
 	@echo "libcft-seq   the sequencer: C against the model, over fuzzed programs"
 	@echo "libcft-docker  the same library tests on a second platform"
+	@echo "programs     assemble programs/*.cfta into programs/out, write MANIFEST"
+	@echo "programs-check  re-assemble with the model, compare, run every check"
 	@echo "verify       the standardized verification run (verify/README.md)"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
@@ -90,6 +93,41 @@ libcft-seq:
 
 libcft-diff:
 	$(MAKE) -C host difftest PYTHON=$(PYTHON)
+
+# ---- programs as files (docs/PROGRAMS.md, programs/README.md) --------
+#
+# `programs` assembles every .cfta with cft-asm into programs/out
+# (gitignored) and writes programs/MANIFEST, which IS committed - so a
+# change that moves a byte of an image is a line in a diff.
+#
+# `programs-check` re-assembles every source with the Python reference,
+# compares byte for byte, disassembles both ways and re-assembles, then
+# runs every row's own check. cft-collatz is a prerequisite because the
+# Collatz kernel's check is that tool's own records; a check whose tool
+# is missing says SKIP and why rather than passing quietly.
+#
+# The host build's variables ride down as command-line variables do, so
+# on Windows the whole thing is one line:
+#
+#   PATH="/c/msys64/mingw64/bin:$PATH" make programs-check CC=gcc \
+#        OS=Windows_NT PYTHON=python
+PROGRAM_TOOLS = $(MAKE) -C host cft-asm$(HOSTEXE) positive-run$(HOSTEXE)
+HOSTEXE = $(if $(filter Windows_NT,$(OS)),.exe,)
+
+programs:
+	$(PROGRAM_TOOLS)
+	$(PYTHON) programs/build.py --asm host/cft-asm$(HOSTEXE)
+
+# Deliberately NOT `programs-check: programs`. `programs` REWRITES the
+# MANIFEST, so a check that ran it first would be comparing every hash
+# against one it had just computed - a gate that cannot fail. check.py
+# assembles the sources itself and compares against the COMMITTED
+# manifest, which is the only version of that comparison worth having.
+programs-check:
+	$(PROGRAM_TOOLS)
+	$(MAKE) -C host cft-collatz$(HOSTEXE)
+	$(PYTHON) programs/check.py --asm host/cft-asm$(HOSTEXE) \
+		--runner host/positive-run$(HOSTEXE) --tools-dir host
 
 # The library's own tests on a second platform. The point is the
 # checksum lines printed by the examples: identical here and on the

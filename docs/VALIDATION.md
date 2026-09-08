@@ -6261,3 +6261,197 @@ are annotated accordingly, docs/VERIFICATION.md carries the measured
 costs, and device-test wants an emulation budget - a mode that runs one
 format's worth of each family and stops - before it is used as an
 evening check again. Recorded as a follow-up, not done here.
+
+## 2026-09-08 - programs as files: two assemblers held byte for byte, twelve library programs with a check each, and one skip that is named
+
+The tools half of the revision-2 round (docs/PROGRAMS.md), on a
+worktree branched from 44e2a07. Machine: this Windows box, gcc 16.1.0
+(mingw64), Python 3.12.9, software backend throughout - nothing here
+touched a device or the emulation host.
+
+**What was built.** `python/cft_golden/asm.py` (the reference
+assembler and disassembler), `host/tools/cft-asm.c` (the tool),
+`programs/` with twelve sources and a check apiece,
+`host/tools/positive-run.c` (the runner), `make programs` and `make
+programs-check` at the repo root, and `python/tests/test_asm.py`.
+
+asm.py carries its OWN encoder rather than reusing `seq.py`'s, because
+`seq.py` is revision 1 - sixteen registers, `reserved[0]` must be zero
+- and another lane is widening it. Where the two can express the same
+program they must agree, and that is a test rather than a hope.
+
+**The runs, in order.**
+
+    make golden                     2068 passed, 5 skipped, 225.1 s
+                                    (PYTEST_JOBS=4; 49 of those are
+                                    the new test_asm.py, 1.3 s alone)
+    make programs-check             48 passed, 0 failed, 1 skipped,
+                                    12 images, 6.6 to 18.6 s across
+                                    runs - the revision-2 corpus stage
+                                    is nearly all of it and nearly all
+                                    of that is process spawn, at four
+                                    cft-asm launches a program on a
+                                    Windows box whose scanner has
+                                    opinions
+    cft-asm vs asm.py, ad hoc       8 seqprogs images + 160 fuzz
+                                    programs + 10 decimal literals:
+                                    identical bytes, both directions
+    collatz workload                18110 comparisons, 0 failures
+    enclose workload                 2664 comparisons, 0 failures
+    mersenne workload                 391 comparisons, 0 failures
+    orbits workload                  OK (the 300-digit oracle)
+    zoom workload                   11223 comparisons, 0 failures
+
+The five workloads are `make -C host collatztest enclosetest
+mersennetest orbitstest zoomtest`, run because this round touches the
+tools' directory and their Makefile. They are unchanged and green.
+One trap on this host, twice: `PYTHON=python` under MSYS make finds
+mingw64's interpreter, which has neither mpmath (enclosetest died at
+the import) nor pytest (`make golden` did). Both were re-run with the
+absolute path to the interpreter that has them. No code was involved
+either time, and host/Makefile's own header note about matching the
+compiler's word size to the PYTHON is the same lesson one step over.
+
+**What `make programs-check` actually checks.** Three layers, and they
+are not the same claim:
+
+1. every `.cfta` assembled by `cft-asm` and by `asm.py` must give
+   identical bytes, and those bytes must match the committed
+   `programs/MANIFEST`;
+2. every image disassembled by both, the two texts compared, and
+   re-assembling either must return the same bytes;
+3. each program's own check - byte equality with `seqprogs.py`'s
+   generated image for the eight `div-`/`sqrt-` rows plus 48
+   correctly-rounded divides or square roots each through the runner
+   with the host's own prep and finish either side; the nine constants
+   of `collatz-fp256` against their derivation from fp256 and 64
+   trajectories against `cft-collatz`'s own records (steps and peak
+   exactly); `zoom-scan-fp256` over 32 real points bit-identical to
+   `seq.py`'s executor running the same image; 4,096 draws of
+   `lowbias32-fp32` over the index ramp against the hash's definition
+   with a clean flag word; and `horner-bank-fp64` over two different
+   banks against a softfloat Horner.
+
+A fourth layer was added after the first pass, because the first three
+had a hole. `seq.random_program` is revision 1 - sixteen registers, no
+BANK_EXT, no register high bits - and the library's twelve programs
+use one revision-2 feature between them, so nothing was exercising the
+encoding this round actually added. A generator that does now runs in
+both places: 101 programs through both implementations in
+`programs-check` (bytes, disassembly, round trip and `-i` line for
+line, the SHA-256 included - 101 with REGS32, 37 with BANK_EXT, 75
+with kx), and 100-odd through asm.py alone in `test_asm.py`, each
+asserting what it reached rather than assuming it. A round trip that
+never saw a five-bit register field would be a round trip over
+revision 1 with extra steps.
+
+`programs-check` deliberately does NOT depend on `programs`. That
+target rewrites the MANIFEST, so a check that ran it first would be
+comparing every hash against one it had just computed - a gate that
+cannot fail.
+
+**The negative controls, because a gate that cannot fail is not a
+gate.** Four tampered trees, each run through `check.py` and restored:
+
+    a MANIFEST hash off by one nibble    rc=1, the message names it
+    zoom-scan's trip count 51 -> 52      rc=1 at the MANIFEST
+    collatz's THREE = 3.0 -> 3.5         rc=1 at the MANIFEST and at
+                                         "constant 2 vs the derived"
+    horner's C17 -> C18                  rc=1 at the MANIFEST and at
+                                         "exp bank, lane 0 ... vs the
+                                         model's"
+    one bit of exp.bank flipped          rc=1: "the committed file does
+                                         not match its own derivation"
+
+The second is worth reading closely: it fails at the MANIFEST and NOT
+at the program's own check, because that check runs the same image
+through `seq.py` and libcft and they agree about a 52-iteration scan
+as readily as about a 51-iteration one. The manifest is what pins the
+program to the tool's default; the model arm is what pins libcft to
+the model. Two different claims, and only one of them was ever going
+to catch a changed trip count.
+
+**The one SKIP, and what it waits on.** `positive-run --capabilities`
+reports `bank-path absent`: this build's `cft.h` defines no
+`CFT_SEQ_FEAT_BANK_PTR`, so `cft_program_run_bank` and
+`cft_program_digest` do not exist and a `BANK_EXT` image cannot go
+through the library's own path. The tool refuses one BY NAME rather
+than running something else, and `check.py` prints
+
+    SKIP  horner-bank-fp64: the BANK_EXT path itself  positive-run
+          reports bank-path absent - cft_program_run_bank arrives with
+          the host half
+
+while still running the row: the same instruction stream with the bank
+spliced in as an ordinary constant section, which is the same
+computation by the definition of the flag. Both banks pass against the
+model that way, and the two banks are checked to disagree with each
+other, and each bank file is checked against the derivation its name
+claims - the bank is committed DATA, read from the tree, not something
+the check writes and then compares against itself. When the host half merges, that arm additionally requires the
+real bank path to produce the same bits. The digest has a local
+SHA-256 fallback over image-then-bank so the number a plate carries
+does not depend on which half of the tree the runner was built
+against; that equality is the integrator's to check.
+
+**Four things the round learned rather than assumed.**
+
+*Only two of the four demo tools have a fixed-image kernel at all.*
+`cft-collatz`'s step is fixed once `--steps-per-call` is (every
+constant is derived from the format), and `cft-zoom`'s nucleus scan is
+fixed at a given `--period` (its only constant is 4). `cft-zoom`'s
+reference orbit carries the run's centre, `cft-orbits`' step carries
+the timestep and the system, and `cft-enclose`'s Horner carries the
+polynomial itself. `programs/README.md` has the table; the round wrote
+two rows rather than forcing five.
+
+*`collatz`'s r0, r1 and r2 are ALL streams.* The first attempt fed only
+`--a`, and the lane starting at 1 reported peak +0 against the tool's
+1. That is not a bug in either: the tool seeds r1 with the step count
+so far and r2 with the peak so far, which is what makes the program
+resumable across calls - 1024 steps rarely finish a trajectory. The
+`.cfta` says so now.
+
+*`--iota` is an integer bit pattern, not a float.* The same first
+attempt used the index ramp as Collatz starting values and got
+subnormals. The ramp is for the atlas draw hash and the integer
+opcodes; an arithmetic kernel wants a stream of encodings. Both are
+documented and `lowbias32-fp32` is the row that pins the meaning.
+
+*A REPEAT trip count is not four register fields.* Revision 2 puts the
+fifth bit of each register in `imm[27:24]`, and REPEAT's immediate is a
+32-bit trip count that may set any bit it likes. Reading those four
+bits as register high bits on a control instruction would refuse
+`repeat 0x01000000`, and it would have been invisible in the library,
+where no trip count is that large. Both implementations decide it by
+which instruction reads a register, and `test_asm.py` has the case.
+
+**Two decisions the contract left open, taken and recorded.** An ALU
+line names the operands the opcode READS in `ra, rb, rc` field order
+(`add rd, ra, rc` - ADD does not read rb), with an explicit
+three-field form for the images where a field the opcode ignores is
+non-zero, which the fuzz corpus needs and a short form cannot express.
+And `.kx` on a mnemonic forces the indexed form, because
+docs/SEQUENCER.md deliberately tolerates a `kx` instruction whose
+indices are all below sixteen, and a disassembly that could not say so
+would not re-assemble. A third, smaller one: `divsqrt-<format>.cfta`
+became `div-<format>.cfta` and `sqrt-<format>.cfta`, because a `.cfta`
+holds one program and `seqprogs.py` generates two per format.
+
+**One addition to the text form.** A `.const` literal may be a
+754-2019 5.12.3 hexadecimal-significand sequence (`0x1p237`), decided
+by the `p`, which is not a hexadecimal digit. At fp128 and fp256 a
+power of two is otherwise a 64-digit raw word or a 70-digit decimal,
+and this project has been bitten by hand-typed constants before. Both
+implementations have it, from `chars.from_hex` and
+`cft_from_hex_char`, and they agree on ten literals including `0.1`,
+`1e-320`, `1e309`, `inf`, `nan` and a thirty-digit pi.
+
+**Not done, and not claimed.** No device, no emulation, no RTL. The
+five-bit register fields exist in both assemblers and in the tests,
+and nothing in this tree can execute one - `seq.py`'s `NREG` is 16 and
+so is libcft's executor - which is why `programs/` has no `REGS32` row
+and says so instead of shipping a row whose check is "it assembles".
+The full cross-check of asm.py against a widened `seq.encode`, and of
+`cft_program_digest` against the local fallback, belong to the
+integrator after the three lanes merge.

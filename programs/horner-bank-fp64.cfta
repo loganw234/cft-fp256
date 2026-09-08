@@ -1,0 +1,97 @@
+; horner-bank-fp64.cfta - a degree-23 polynomial whose coefficients
+; are the run's data. The library's BANK_EXT worked example.
+;
+; docs/SEQUENCER.md revision 2, R3: with `flags.BANK_EXT` the image
+; carries NO constant section. `n_consts` still says how many
+; constants the program addresses - twenty-four here - and every run
+; supplies exactly that many format-width values in a bank buffer:
+;
+;     positive-run horner-bank-fp64.cftp --a x.bin \
+;                  --bank horner-bank-fp64.exp.bank
+;
+; One image, many polynomials. That is the point of the feature and
+; the reason docs/ATLAS.md asked for it: one image per positive with
+; the levers, the clock and the pass riding as data, loaded once
+; instead of rebuilt per run.
+;
+; The image is therefore exactly 32 + 8 * n_insns bytes, and its
+; SHA-256 is a hash of the SCHEDULE alone - which is why
+; `cft_program_digest` hashes the image and the bank together. Two
+; runs of this file with two banks are two different computations and
+; they have two different digests, while the image's own hash is the
+; same in both. Both numbers matter and they are not the same number.
+;
+;   r0    x, the evaluation point (stream a)
+;   r3    the accumulator
+;   deposits: p(x)
+;
+; Twenty-four coefficients is past the sixteen a four-bit operand
+; field reaches, so the FMAs from C16 on are emitted in the indexed
+; (`kx`) form automatically - the bank index rides in the immediate.
+; Nothing about the arithmetic changes, which is exactly the property
+; docs/ENCLOSE.md had to demonstrate when the feature landed.
+;
+; COPYSIGN is how the accumulator is loaded: magnitude of a, sign of
+; b, both the same constant, so it is C0 exactly - for -0 and for a
+; NaN too - and it signals nothing. An ADD of +0 would flatten -0 to
+; +0 and a MUL by one would round a subnormal's product; this does
+; neither, and it is the reason the opcode is worth having.
+
+.format   fp64
+.deposits 1
+.bank     external
+
+.const    C0
+.const    C1
+.const    C2
+.const    C3
+.const    C4
+.const    C5
+.const    C6
+.const    C7
+.const    C8
+.const    C9
+.const    C10
+.const    C11
+.const    C12
+.const    C13
+.const    C14
+.const    C15
+.const    C16
+.const    C17
+.const    C18
+.const    C19
+.const    C20
+.const    C21
+.const    C22
+.const    C23
+
+.reg      x   = r0
+.reg      acc = r3
+
+copysign acc, C0, C0
+fma acc, acc, x, C1
+fma acc, acc, x, C2
+fma acc, acc, x, C3
+fma acc, acc, x, C4
+fma acc, acc, x, C5
+fma acc, acc, x, C6
+fma acc, acc, x, C7
+fma acc, acc, x, C8
+fma acc, acc, x, C9
+fma acc, acc, x, C10
+fma acc, acc, x, C11
+fma acc, acc, x, C12
+fma acc, acc, x, C13
+fma acc, acc, x, C14
+fma acc, acc, x, C15
+fma acc, acc, x, C16
+fma acc, acc, x, C17
+fma acc, acc, x, C18
+fma acc, acc, x, C19
+fma acc, acc, x, C20
+fma acc, acc, x, C21
+fma acc, acc, x, C22
+fma acc, acc, x, C23
+deposit acc
+halt

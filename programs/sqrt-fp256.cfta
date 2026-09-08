@@ -1,0 +1,95 @@
+; sqrt-fp256.cfta - the composed square root's on-chip core, fp256
+;
+; python/cft_golden/seqprogs.py's sqrt_program(fp256) as a file. The
+; host centres the operand (sqrt_prep), this program runs the core -
+; seed, 5 Newton steps, the half-ulp finish and two restore
+; passes - and the host rounds once from the deposits (sqrt_finish).
+;
+;   r0  the centred operand, in [1, 4)
+;   deposits: s1, r, d2
+;
+; The check is byte equality with the image seqprogs generates.
+
+.format   fp256
+.deposits 3
+.const    ZERO         = 0x0000000000000000000000000000000000000000000000000000000000000000
+.const    ONE          = 0x3ffff00000000000000000000000000000000000000000000000000000000000
+.const    INT1         = 0x0000000000000000000000000000000000000000000000000000000000000001
+.const    EXP          = 0x7ffff00000000000000000000000000000000000000000000000000000000000
+.const    MW           = 0x000ec00000000000000000000000000000000000000000000000000000000000
+.const    MW1          = 0x000ed00000000000000000000000000000000000000000000000000000000000
+.const    HALF         = 0x3fffe00000000000000000000000000000000000000000000000000000000000
+.const    THREE_HALVES = 0x3ffff80000000000000000000000000000000000000000000000000000000000
+.const    SQ           = 0x401d900000000000000000000000000000000000000000000000000000000000
+.reg      a            = r0
+.reg      y            = r3
+.reg      nb           = r4
+.reg      t1           = r5
+.reg      t2           = r6
+.reg      q            = r7
+.reg      pw           = r8
+.reg      dn           = r9
+.reg      up           = r10
+.reg      tmp          = r11
+.reg      sp           = r12
+
+rsqrt_seed y, a
+neg nb, a
+mul nb, nb, HALF
+mul t1, y, y
+fma t1, nb, t1, THREE_HALVES
+mul y, y, t1
+mul t1, y, y
+fma t1, nb, t1, THREE_HALVES
+mul y, y, t1
+mul t1, y, y
+fma t1, nb, t1, THREE_HALVES
+mul y, y, t1
+mul t1, y, y
+fma t1, nb, t1, THREE_HALVES
+mul y, y, t1
+mul t1, y, y
+fma t1, nb, t1, THREE_HALVES
+mul y, y, t1
+mul t1, a, y
+mul up, y, HALF
+neg nb, t1
+fma t2, nb, t1, a
+fma q, t2, up, t1
+neg nb, q
+fma t2, nb, q, a
+cmplt dn, t2, ZERO
+isub tmp, q, INT1
+select q, tmp, q, dn
+iadd sp, q, INT1
+neg nb, sp
+fma up, nb, sp, a
+cmple up, ZERO, up
+sub tmp, ONE, dn
+mul up, up, tmp
+select q, sp, q, up
+neg nb, q
+fma t2, nb, q, a
+cmplt dn, t2, ZERO
+isub tmp, q, INT1
+select q, tmp, q, dn
+iadd sp, q, INT1
+neg nb, sp
+fma up, nb, sp, a
+cmple up, ZERO, up
+sub tmp, ONE, dn
+mul up, up, tmp
+select q, sp, q, up
+neg nb, q
+fma t2, nb, q, a
+iand pw, q, EXP
+isub up, pw, MW
+mul up, q, up
+sub tmp, t2, up
+ishl pw, pw, INT1
+isub pw, pw, SQ
+sub tmp, tmp, pw
+deposit q
+deposit t2
+deposit tmp
+halt
