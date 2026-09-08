@@ -570,17 +570,77 @@ static uint64_t seq_ctrl(unsigned code, unsigned ra, uint32_t imm)
            ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
 }
 
+/* ---- revision 2's encodings (docs/SEQUENCER.md, 2026-09-08) --------
+ *
+ * The five-bit register form. Each field's low four bits stay where
+ * they were and the fifth goes to imm[27:24] - rd, ra, rb, rc in that
+ * order. A constant operand's fifth bit is NOT set, because a constant
+ * index is four bits (or a byte of imm under kx) and never five; the
+ * loader refuses it if it is, which is a case below.
+ *
+ * seq_alu above stays as it is, with its own call sites: a program
+ * that names only r0..r15 encodes identically either way, and the two
+ * helpers agreeing about those is worth more than one helper. */
+static uint64_t seq_alu5(unsigned op, unsigned rd, unsigned ra,
+                         unsigned rb, unsigned rc, unsigned rnd,
+                         unsigned ka, unsigned kb, unsigned kc)
+{
+    uint32_t imm = ((rd >> 4) & 1u) << 24;
+    if (!ka) imm |= ((ra >> 4) & 1u) << 25;
+    if (!kb) imm |= ((rb >> 4) & 1u) << 26;
+    if (!kc) imm |= ((rc >> 4) & 1u) << 27;
+    return (uint64_t)op | ((uint64_t)(rd & 15u) << 8) |
+           ((uint64_t)(ra & 15u) << 12) | ((uint64_t)(rb & 15u) << 16) |
+           ((uint64_t)(rc & 15u) << 20) | ((uint64_t)rnd << 24) |
+           ((uint64_t)ka << 27) | ((uint64_t)kb << 28) |
+           ((uint64_t)kc << 29) | ((uint64_t)imm << 32);
+}
+
+/* DEPOSIT or SETACT naming a five-bit register: imm[25] is ra's fifth
+ * bit and the only bit of imm either of them may set. */
+static uint64_t seq_ctrl5(unsigned code, unsigned ra)
+{
+    uint32_t imm = ((ra >> 4) & 1u) << 25;
+    return (uint64_t)code | ((uint64_t)(ra & 15u) << 12) |
+           ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
+}
+
+/* The kx form: the three constant indices come from imm[7:0],
+ * imm[15:8] and imm[23:16], so the bank reaches 256 rather than 16.
+ * An operand whose k bit is set must leave its four-bit field zero,
+ * and one whose k bit is clear must leave its imm byte zero. */
+static uint64_t seq_alu_kx(unsigned op, unsigned rd, unsigned ia,
+                           unsigned ib, unsigned ic,
+                           unsigned ka, unsigned kb, unsigned kc)
+{
+    uint32_t imm = (ka ? (ia & 0xFFu) : 0u) |
+                   ((kb ? (ib & 0xFFu) : 0u) << 8) |
+                   ((kc ? (ic & 0xFFu) : 0u) << 16);
+    return (uint64_t)op | ((uint64_t)(rd & 15u) << 8) |
+           ((uint64_t)(ka ? 0u : ia & 15u) << 12) |
+           ((uint64_t)(kb ? 0u : ib & 15u) << 16) |
+           ((uint64_t)(kc ? 0u : ic & 15u) << 20) |
+           ((uint64_t)ka << 27) | ((uint64_t)kb << 28) |
+           ((uint64_t)kc << 29) | ((uint64_t)1 << 30) |
+           ((uint64_t)imm << 32);
+}
+
 static void put_le32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
     p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
 
-/* Pack header + constants + instructions; returns the byte length. */
-static size_t seq_image(uint8_t *out, cft_format fmt,
-                        const uint64_t *insns, unsigned n_insns,
-                        const uint8_t *consts, unsigned n_consts,
-                        uint32_t max_deposits)
+/* Pack header + constants + instructions; returns the byte length.
+ *
+ * `flags` is the header word that was reserved[0] until 2026-09-08.
+ * With CFT_PROG_FLAG_BANK_EXT set the image carries NO constant
+ * section - n_consts still says how many the program addresses - so
+ * `consts` is ignored and the image is 32 + 8*n_insns bytes. */
+static size_t seq_image_flags(uint8_t *out, cft_format fmt,
+                              const uint64_t *insns, unsigned n_insns,
+                              const uint8_t *consts, unsigned n_consts,
+                              uint32_t max_deposits, uint32_t flags)
 {
     size_t esz = cft_format_size(fmt), off = 32;
     unsigned i;
@@ -590,10 +650,12 @@ static size_t seq_image(uint8_t *out, cft_format fmt,
     put_le32(out + 12, n_consts);
     put_le32(out + 16, max_deposits);
     put_le32(out + 20, (uint32_t)fmt);
-    put_le32(out + 24, 0);
+    put_le32(out + 24, flags);
     put_le32(out + 28, 0);
-    memcpy(out + off, consts, n_consts * esz);
-    off += n_consts * esz;
+    if (!(flags & CFT_PROG_FLAG_BANK_EXT)) {
+        memcpy(out + off, consts, n_consts * esz);
+        off += n_consts * esz;
+    }
     for (i = 0; i < n_insns; i++) {
         uint64_t w = insns[i];
         int b;
@@ -602,6 +664,15 @@ static size_t seq_image(uint8_t *out, cft_format fmt,
         off += 8;
     }
     return off;
+}
+
+static size_t seq_image(uint8_t *out, cft_format fmt,
+                        const uint64_t *insns, unsigned n_insns,
+                        const uint8_t *consts, unsigned n_consts,
+                        uint32_t max_deposits)
+{
+    return seq_image_flags(out, fmt, insns, n_insns, consts, n_consts,
+                           max_deposits, 0);
 }
 
 static void compare_seq_one(cft_device *sw, cft_device *hw,
@@ -713,13 +784,19 @@ out:
  * refuse every program on an old server.
  * ==================================================================== */
 
+/* What try_load's first instruction is, when it is not a HALT. */
+enum { PROBE_NONE = 0,   /* every instruction a HALT */
+       PROBE_K4,         /* a constant addressed through the 4-bit field */
+       PROBE_KX,         /* a constant addressed through imm, the kx form */
+       PROBE_REG };      /* a register named by const_idx, five bits wide */
+
 /* One trivial program: `n_insns` HALTs, `n_consts` constants, the
  * declared deposit budget. Nothing runs it; what is under test is
  * whether cft_program_load accepts it. */
 static cft_status try_load(cft_device *dev, cft_format fmt,
                            uint32_t n_insns, uint32_t n_consts,
                            uint32_t maxdep, uint32_t const_idx,
-                           int use_const)
+                           int probe)
 {
     size_t esz = cft_format_size(fmt);
     size_t bytes = 32 + (size_t)n_consts * esz + (size_t)n_insns * 8;
@@ -736,16 +813,57 @@ static cft_status try_load(cft_device *dev, cft_format fmt,
     }
     for (i = 0; i < n_insns; i++)
         ins[i] = seq_ctrl(0, 0, 0);              /* HALT */
-    if (use_const && n_insns) {
-        /* r4 = r0 * k[const_idx] + r2, with kb selecting the bank.
-         * seq_alu's `rb` is the index the kb bit redirects. */
-        ins[0] = seq_alu(0, 4, 0, const_idx, 2, 0, 1, 0);
+    if (probe != PROBE_NONE && n_insns) {
+        switch (probe) {
+        case PROBE_K4:
+            /* r4 = r0 * k[const_idx] + r2, with kb selecting the bank.
+             * seq_alu's `rb` is the index the kb bit redirects, and it
+             * is four bits wide - which is why this probe stops at 15
+             * and PROBE_KX exists. */
+            ins[0] = seq_alu(0, 4, 0, const_idx, 2, 0, 1, 0);
+            break;
+        case PROBE_KX:
+            /* The same instruction in the kx form, where the index is
+             * a byte of imm and reaches 255. */
+            ins[0] = seq_alu_kx(0, 4, 0, const_idx, 2, 0, 1, 0);
+            break;
+        default:                                  /* PROBE_REG */
+            /* r<const_idx> = r0 * r0 + r0, then deposit it, so the
+             * register is both written and read. */
+            ins[0] = seq_alu5(0, const_idx, 0, 0, 0, 0, 0, 0, 0);
+            if (n_insns > 1)
+                ins[1] = seq_ctrl5(3, const_idx);   /* DEPOSIT */
+            break;
+        }
     }
     (void)seq_image(img, fmt, ins, n_insns, kon, n_consts, maxdep);
     st = cft_program_load(dev, img, bytes, &prog);
     if (st == CFT_OK)
         cft_program_free(prog);
     free(img); free(ins); free(kon);
+    return st;
+}
+
+/* A BANK_EXT image: header, instructions, no constant section. What
+ * it computes does not matter here - what is under test is whether
+ * cft_program_load takes an image whose constants arrive per run. */
+static cft_status try_load_bank_ext(cft_device *dev, cft_format fmt,
+                                    uint32_t n_consts)
+{
+    uint8_t img[64];
+    uint64_t ins[3];
+    cft_program *prog = NULL;
+    cft_status st;
+    size_t bytes;
+
+    ins[0] = seq_alu(0, 4, 0, 0, 0, 0, 1, 0);   /* r4 = r0*k[0] + r0 */
+    ins[1] = seq_ctrl(3, 4, 0);                  /* deposit r4 */
+    ins[2] = seq_ctrl(0, 0, 0);                  /* halt */
+    bytes = seq_image_flags(img, fmt, ins, 3, NULL, n_consts, 1,
+                            CFT_PROG_FLAG_BANK_EXT);
+    st = cft_program_load(dev, img, bytes, &prog);
+    if (st == CFT_OK)
+        cft_program_free(prog);
     return st;
 }
 
@@ -773,7 +891,7 @@ static void check_caps_enforced(cft_device *dev, const char *who)
 
     /* Zero is unknown, and an unknown cap must constrain nothing. */
     if (!c.max_deposits) {
-        st = try_load(dev, fmt, 1, 0, 4096, 0, 0);
+        st = try_load(dev, fmt, 1, 0, 4096, 0, PROBE_NONE);
         checks++;
         if (st != CFT_OK) {
             printf("  FAIL %s: max_deposits is 0 (unknown) and a program "
@@ -782,7 +900,7 @@ static void check_caps_enforced(cft_device *dev, const char *who)
             failures++;
         }
     } else {
-        st = try_load(dev, fmt, 1, 0, c.max_deposits, 0, 0);
+        st = try_load(dev, fmt, 1, 0, c.max_deposits, 0, PROBE_NONE);
         checks++;
         if (st != CFT_OK) {
             printf("  FAIL %s: max_deposits %lu is reported and a program "
@@ -792,7 +910,7 @@ static void check_caps_enforced(cft_device *dev, const char *who)
             failures++;
         }
         if (c.max_deposits < 0xFFFFFFFFu) {
-            st = try_load(dev, fmt, 1, 0, c.max_deposits + 1u, 0, 0);
+            st = try_load(dev, fmt, 1, 0, c.max_deposits + 1u, 0, PROBE_NONE);
             checks++;
             if (st == CFT_OK) {
                 printf("  FAIL %s: max_deposits %lu is reported and a "
@@ -817,7 +935,7 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                "NOT TESTED\n", (unsigned long)c.max_insns,
                (unsigned long long)(c.max_insns + 1ull) * 8ull + 32ull);
     } else {
-        st = try_load(dev, fmt, c.max_insns, 0, 1, 0, 0);
+        st = try_load(dev, fmt, c.max_insns, 0, 1, 0, PROBE_NONE);
         checks++;
         if (st != CFT_OK) {
             printf("  FAIL %s: max_insns %lu is reported and a program AT "
@@ -826,7 +944,7 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                    cft_last_error());
             failures++;
         }
-        st = try_load(dev, fmt, c.max_insns + 1u, 0, 1, 0, 0);
+        st = try_load(dev, fmt, c.max_insns + 1u, 0, 1, 0, PROBE_NONE);
         checks++;
         if (st == CFT_OK) {
             printf("  FAIL %s: max_insns %lu is reported and a program with "
@@ -839,26 +957,51 @@ static void check_caps_enforced(cft_device *dev, const char *who)
         }
     }
 
-    /* The addressable constants. An index is a four-bit field, so an
-     * index past 15 cannot be encoded at all: a device that addresses
-     * all sixteen has no representable violation, and that is stated
-     * rather than skipped. */
+    /* The addressable constants.
+     *
+     * Until 2026-09-08 this probe wrote the four-bit form and could
+     * therefore not name an index past 15 at all, so on every device
+     * shipped it tested k[15] and printed NOT TESTED for the rest -
+     * a cap of 256 checked at 16. With kx the index is a byte of the
+     * immediate, so the probe now goes to the cap itself: an
+     * instruction addressing k[max_consts - 1] must load and one
+     * addressing k[max_consts] must not. The second is representable
+     * only while max_consts is below 256, since the index is a byte;
+     * at 256 that half is stated rather than pretended, as before.
+     *
+     * The kx form is used only where the device publishes kx, since
+     * the loader refuses it otherwise and the refusal would be about
+     * the wrong thing. */
     if (!c.max_consts) {
         printf("    max_consts is 0 (unknown): nothing enforced, "
                "nothing tested\n");
     } else {
-        uint32_t hi = c.max_consts > 16u ? 16u : c.max_consts;
-        st = try_load(dev, fmt, 2, hi, 1, hi - 1u, 1);
+        const int wide = (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) != 0;
+        const uint32_t hi = (wide || c.max_consts <= 16u)
+                          ? c.max_consts : 16u;
+        const int form = (hi > 16u) ? PROBE_KX : PROBE_K4;
+        st = try_load(dev, fmt, 2, hi, 1, hi - 1u, form);
         checks++;
         if (st != CFT_OK) {
             printf("  FAIL %s: max_consts %lu is reported and an "
-                   "instruction addressing k[%lu] was refused: %s (%s)\n",
+                   "instruction addressing k[%lu] in the %s form was "
+                   "refused: %s (%s)\n",
                    who, (unsigned long)c.max_consts, (unsigned long)(hi - 1u),
+                   form == PROBE_KX ? "kx" : "four-bit",
                    cft_strerror(st), cft_last_error());
             failures++;
+        } else {
+            printf("    k[%lu] (%s form) loads, at the cap\n",
+                   (unsigned long)(hi - 1u),
+                   form == PROBE_KX ? "kx" : "four-bit");
         }
-        if (c.max_consts < 16u) {
-            st = try_load(dev, fmt, 2, 16, 1, c.max_consts, 1);
+        if (c.max_consts < 256u && (wide || c.max_consts < 16u)) {
+            /* n_consts one past the cap, so the index is inside the
+             * program's own bank and what refuses it is the DEVICE's
+             * reach rather than the header's count. */
+            const int f2 = (c.max_consts >= 16u) ? PROBE_KX : PROBE_K4;
+            st = try_load(dev, fmt, 2, c.max_consts + 1u, 1,
+                          c.max_consts, f2);
             checks++;
             if (st == CFT_OK) {
                 printf("  FAIL %s: max_consts %lu is reported and an "
@@ -872,9 +1015,10 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                        cft_last_error());
             }
         } else {
-            printf("    max_consts %lu: an index past 15 does not fit the "
-                   "four-bit field, NOT TESTED\n",
-                   (unsigned long)c.max_consts);
+            printf("    max_consts %lu: an index past it does not fit the "
+                   "%s, NOT TESTED\n", (unsigned long)c.max_consts,
+                   c.max_consts >= 256u ? "immediate's byte"
+                                        : "four-bit field");
         }
     }
 
@@ -888,30 +1032,549 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                "and CAPS[31:28]\n", who, (unsigned long)c.seq_features);
         failures++;
     }
+    printf("    features:%s%s%s%s\n",
+           (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) ? " kx" : "",
+           (c.seq_features & CFT_SEQ_FEAT_REGS32)     ? " REGS32" : "",
+           (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)   ? " BANK_PTR" : "",
+           (c.seq_features & CFT_ALU_EXT_IMUL)        ? " IMUL" : "");
+
+    /* Revision 2's two feature bits, held to the same invariant as
+     * every capacity above: what a backend PUBLISHES is what it
+     * ENFORCES, in both directions. A published feature must let the
+     * program that uses it load; an absent one must refuse it, and the
+     * refusal must SAY SO - an old tile's operand mux reads the low
+     * four bits of a five-bit register and addresses the wrong one
+     * without a fault, and its fetch reads constants from a BANK_EXT
+     * image that has none, so neither refusal can be made anywhere but
+     * here. */
+    st = try_load(dev, fmt, 2, 0, 1, 31, PROBE_REG);
+    checks++;
+    if (c.seq_features & CFT_SEQ_FEAT_REGS32) {
+        if (st != CFT_OK) {
+            printf("  FAIL %s: REGS32 is published and a program naming "
+                   "r31 was refused: %s (%s)\n", who, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        } else {
+            printf("    REGS32 published, r31 loads\n");
+        }
+    } else if (st == CFT_OK) {
+        printf("  FAIL %s: REGS32 is NOT published and a program naming "
+               "r31 was accepted - its operand mux would address r15\n", who);
+        failures++;
+    } else {
+        checks++;
+        if (!strstr(cft_last_error(), "r31")) {
+            printf("  FAIL %s: r31 without REGS32 was refused (%s) without "
+                   "naming the register: %s\n", who, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        }
+        printf("    REGS32 absent, r31 -> %s: %s\n", cft_strerror(st),
+               cft_last_error());
+    }
+
+    st = try_load_bank_ext(dev, fmt, 2);
+    checks++;
+    if (c.seq_features & CFT_SEQ_FEAT_BANK_PTR) {
+        if (st != CFT_OK) {
+            printf("  FAIL %s: BANK_PTR is published and a BANK_EXT image "
+                   "was refused: %s (%s)\n", who, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        } else {
+            printf("    BANK_PTR published, a BANK_EXT image loads\n");
+        }
+    } else if (st == CFT_OK) {
+        printf("  FAIL %s: BANK_PTR is NOT published and a BANK_EXT image "
+               "was accepted - its fetch would read constants from an "
+               "image that has none\n", who);
+        failures++;
+    } else {
+        checks++;
+        if (!strstr(cft_last_error(), "BANK_EXT")) {
+            printf("  FAIL %s: a BANK_EXT image without BANK_PTR was "
+                   "refused (%s) without naming the flag: %s\n", who,
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        }
+        printf("    BANK_PTR absent, a BANK_EXT image -> %s: %s\n",
+               cft_strerror(st), cft_last_error());
+    }
+}
+
+/* Two images, one device, the same deposits.
+ *
+ * The other comparison in this file - compare_seq_one - runs one image
+ * on two backends, and against `sw` that is the same code twice, which
+ * catches a harness fault and a backend divergence and nothing else. A
+ * fault BOTH sides share is invisible to it by construction. So where
+ * a property can be stated as two programs that must agree, it is
+ * stated that way instead, and the oracle is the contract rather than
+ * a second copy of the implementation. */
+static void compare_seq_images(cft_device *dev, cft_format fmt,
+                               const uint8_t *img1, size_t bytes1,
+                               const uint8_t *img2, size_t bytes2,
+                               uint32_t maxdep, size_t n, uint32_t seed,
+                               const char *label)
+{
+    size_t esz = cft_format_size(fmt);
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *c = (uint8_t *)malloc(n * esz);
+    uint8_t *d1 = (uint8_t *)malloc(n * maxdep * esz + 1);
+    uint8_t *d2 = (uint8_t *)malloc(n * maxdep * esz + 1);
+    uint32_t *c1 = (uint32_t *)malloc(n * 4);
+    uint32_t *c2 = (uint32_t *)malloc(n * 4);
+    cft_program *p1 = NULL, *p2 = NULL;
+    uint32_t f1 = 0, f2 = 0, s1 = 0, s2 = 0;
+
+    if (!a || !b || !c || !d1 || !d2 || !c1 || !c2) {
+        printf("  FAIL %s: out of memory\n", label);
+        failures++;
+        goto out;
+    }
+    rs = seed;
+    fill(a, n, esz);
+    fill(b, n, esz);
+    fill(c, n, esz);
+    memset(d1, 0x5a, n * maxdep * esz);
+    memset(d2, 0xa5, n * maxdep * esz);
+
+    checks++;
+    if (cft_program_load(dev, img1, bytes1, &p1) != CFT_OK ||
+        cft_program_load(dev, img2, bytes2, &p2) != CFT_OK) {
+        printf("  FAIL %s: an image did not load: %s\n", label,
+               cft_last_error());
+        failures++;
+        goto out;
+    }
+    checks++;
+    if (cft_program_run(p1, a, b, c, d1, c1, n, &f1, &s1) != CFT_OK ||
+        cft_program_run(p2, a, b, c, d2, c2, n, &f2, &s2) != CFT_OK) {
+        printf("  FAIL %s: a run failed\n", label);
+        failures++;
+        goto out;
+    }
+    checks++;
+    if (memcmp(d1, d2, n * maxdep * esz) != 0 ||
+        memcmp(c1, c2, n * 4) != 0 || f1 != f2 || s1 != s2) {
+        size_t i;
+        for (i = 0; i < n * maxdep * esz && d1[i] == d2[i]; i++)
+            ;
+        printf("  FAIL %s: the two programs disagree (first differing byte "
+               "%lu of %lu, flags %02x/%02x, status %02x/%02x)\n", label,
+               (unsigned long)i, (unsigned long)(n * maxdep * esz),
+               f1, f2, s1, s2);
+        failures++;
+    }
+out:
+    cft_program_free(p1);
+    cft_program_free(p2);
+    free(a); free(b); free(c); free(d1); free(d2); free(c1); free(c2);
+}
+
+/* The value 1 + 2^-k, packed per format from LAYOUT: the biased
+ * exponent of 1.0 with fraction bit (sbits - k) set. k = 1 is 1.5,
+ * k = 2 is 1.25. Derived from the table check_layout proves rather
+ * than from four transcribed mantissa widths, which is what this
+ * replaced. */
+static void make_one_plus(uint8_t *e, cft_format fmt, int k)
+{
+    int total = LAYOUT[(int)fmt].total_bits;
+    int ebits = LAYOUT[(int)fmt].exp_bits;
+    int sbits = total - 1 - ebits;
+    uint64_t bias = ((uint64_t)1 << (ebits - 1)) - 1;
+
+    memset(e, 0, (size_t)total / 8);
+    put_bits(e, sbits, ebits, bias);
+    put_bits(e, sbits - k, 1, 1);
+}
+
+/* ==== revision 2, run against the software backend ==================
+ *
+ * The per-run constant bank (docs/SEQUENCER.md R3): one image, two
+ * banks, two answers - and each answer equal to the run of an image
+ * with those same constants BAKED IN, which is the claim that matters.
+ * A bank that were quietly ignored, or read from the wrong place,
+ * would still produce an answer; it would just not be that one.
+ *
+ * Also the digest, here rather than in its own pass, because what a
+ * digest has to distinguish is exactly what this function has to
+ * hand: the same image under two banks.
+ * ==================================================================== */
+static void compare_seq_bank(cft_device *sw, cft_device *hw,
+                             cft_format fmt, size_t n, uint32_t seed)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t ext[128], baked[128 + 64];
+    uint8_t bank[2][2 * MAXE];
+    uint8_t k0[MAXE], k1[MAXE];
+    uint64_t insns[3];
+    size_t ext_bytes, baked_bytes[2];
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *dep[2], *dep_hw, *dep_baked;
+    uint32_t *cnt = (uint32_t *)malloc(n * 4);
+    uint32_t *cnt_baked = (uint32_t *)malloc(n * 4);
+    cft_program *pe_sw = NULL, *pe_hw = NULL;
+    uint8_t dig[2][32], dig2[32], dig_img[32];
+    int b;
+
+    dep[0] = (uint8_t *)malloc(n * esz);
+    dep[1] = (uint8_t *)malloc(n * esz);
+    dep_hw = (uint8_t *)malloc(n * esz);
+    dep_baked = (uint8_t *)malloc(n * esz);
+    if (!a || !cnt || !cnt_baked || !dep[0] || !dep[1] || !dep_hw ||
+        !dep_baked) {
+        printf("  FAIL seq bank: out of memory\n");
+        failures++;
+        goto out;
+    }
+
+    /* r4 = r0 * k[0] + k[1]; deposit r4; halt - both constants from
+     * the bank, so nothing about the answer survives losing it. */
+    insns[0] = seq_alu(0, 4, 0, 0, 1, 0, 1, 1);
+    insns[1] = seq_ctrl(3, 4, 0);
+    insns[2] = seq_ctrl(0, 0, 0);
+
+    make_one_plus(k0, fmt, 1);          /* 1.5  */
+    make_one_plus(k1, fmt, 2);          /* 1.25 */
+    memcpy(bank[0], k0, esz);
+    memcpy(bank[0] + esz, k1, esz);
+    memcpy(bank[1], k1, esz);           /* the same two, swapped */
+    memcpy(bank[1] + esz, k0, esz);
+
+    ext_bytes = seq_image_flags(ext, fmt, insns, 3, NULL, 2, 1,
+                                CFT_PROG_FLAG_BANK_EXT);
+    checks++;
+    if (ext_bytes != 32 + 3 * 8) {
+        printf("  FAIL seq bank: a BANK_EXT image of 3 instructions is "
+               "%lu bytes, not %lu\n", (unsigned long)ext_bytes,
+               (unsigned long)(32 + 3 * 8));
+        failures++;
+    }
+    for (b = 0; b < 2; b++)
+        baked_bytes[b] = seq_image(baked, fmt, insns, 3, bank[b], 2, 1);
+    (void)baked_bytes;
+
+    if (cft_program_load(sw, ext, ext_bytes, &pe_sw) != CFT_OK ||
+        cft_program_load(hw, ext, ext_bytes, &pe_hw) != CFT_OK) {
+        printf("  FAIL seq bank: the BANK_EXT image did not load (%s)\n",
+               cft_last_error());
+        failures++;
+        goto out;
+    }
+
+    /* cft_program_info carries the flag back, struct_size-gated. */
+    {
+        cft_program_info info;
+        memset(&info, 0, sizeof info);
+        info.struct_size = sizeof info;
+        checks++;
+        if (cft_program_get_info(pe_sw, &info) != CFT_OK ||
+            !(info.flags & CFT_PROG_FLAG_BANK_EXT) || info.n_consts != 2) {
+            printf("  FAIL seq bank: cft_program_info reports flags 0x%lx, "
+                   "n_consts %lu\n", (unsigned long)info.flags,
+                   (unsigned long)info.n_consts);
+            failures++;
+        }
+    }
+
+    rs = seed;
+    fill_finite(a, fmt, n);
+
+    for (b = 0; b < 2; b++) {
+        cft_program *pb = NULL;
+        uint32_t fl_bank = 0, bus_bank = 0, fl_baked = 0, bus_baked = 0;
+        cft_status st;
+
+        memset(dep[b], 0x5a, n * esz);
+        memset(dep_hw, 0x5a, n * esz);
+        memset(dep_baked, 0x5a, n * esz);
+
+        st = cft_program_run_bank(pe_sw, bank[b], 2 * esz, a, NULL, NULL,
+                                  dep[b], cnt, n, &fl_bank, &bus_bank);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq bank %d: run_bank on software: %s (%s)\n",
+                   b, cft_strerror(st), cft_last_error());
+            failures++;
+            continue;
+        }
+        st = cft_program_run_bank(pe_hw, bank[b], 2 * esz, a, NULL, NULL,
+                                  dep_hw, NULL, n, NULL, NULL);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq bank %d: run_bank on the device: %s (%s)\n",
+                   b, cft_strerror(st), cft_last_error());
+            failures++;
+        } else if (memcmp(dep[b], dep_hw, n * esz) != 0) {
+            printf("  FAIL seq bank %d: the device and the software backend "
+                   "deposited different bytes\n", b);
+            failures++;
+        }
+
+        /* The same program with those constants baked into the image,
+         * run the ordinary way. Same bits, same counts, same flags -
+         * that is what "the bank is data" has to mean. */
+        (void)seq_image(baked, fmt, insns, 3, bank[b], 2, 1);
+        if (cft_program_load(sw, baked, baked_bytes[b], &pb) != CFT_OK) {
+            printf("  FAIL seq bank %d: the baked image did not load\n", b);
+            failures++;
+            continue;
+        }
+        st = cft_program_run(pb, a, NULL, NULL, dep_baked, cnt_baked, n,
+                             &fl_baked, &bus_baked);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq bank %d: the baked image did not run: %s\n",
+                   b, cft_strerror(st));
+            failures++;
+        } else {
+            checks++;
+            if (memcmp(dep[b], dep_baked, n * esz) != 0 ||
+                memcmp(cnt, cnt_baked, n * 4) != 0 ||
+                fl_bank != fl_baked || bus_bank != bus_baked) {
+                printf("  FAIL seq bank %d: the bank run and the baked run "
+                       "disagree (flags %02x/%02x, status %02x/%02x)\n",
+                       b, fl_bank, fl_baked, bus_bank, bus_baked);
+                failures++;
+            }
+        }
+        cft_program_free(pb);
+
+        /* The digest: image then bank. */
+        checks++;
+        if (cft_program_digest(pe_sw, bank[b], 2 * esz, dig[b]) != CFT_OK) {
+            printf("  FAIL seq bank %d: cft_program_digest: %s\n", b,
+                   cft_last_error());
+            failures++;
+        }
+    }
+
+    /* Two banks, two digests; the same bank twice, the same digest;
+     * and neither equal to the hash of the image alone, which is what
+     * a digest over the schedule and not the data would have been. */
+    checks++;
+    if (memcmp(dig[0], dig[1], 32) == 0) {
+        printf("  FAIL seq bank: two different banks gave one digest\n");
+        failures++;
+    }
+    checks++;
+    if (cft_program_digest(pe_sw, bank[0], 2 * esz, dig2) != CFT_OK ||
+        memcmp(dig[0], dig2, 32) != 0) {
+        printf("  FAIL seq bank: the same bank twice gave two digests\n");
+        failures++;
+    }
+    checks++;
+    if (cft_sha256(ext, ext_bytes, dig_img) != CFT_OK ||
+        memcmp(dig_img, dig[0], 32) == 0) {
+        printf("  FAIL seq bank: the digest of image-and-bank equals the "
+               "hash of the image alone\n");
+        failures++;
+    }
+    /* And two banks, two ANSWERS - the check that fails if the bank
+     * were ignored, defaulted or read from the image. */
+    checks++;
+    if (memcmp(dep[0], dep[1], n * esz) == 0) {
+        printf("  FAIL seq bank: two different banks gave the same "
+               "deposits over %lu elements\n", (unsigned long)n);
+        failures++;
+    }
+
+out:
+    cft_program_free(pe_sw);
+    cft_program_free(pe_hw);
+    free(a); free(cnt); free(cnt_baked);
+    free(dep[0]); free(dep[1]); free(dep_hw); free(dep_baked);
+}
+
+/* Every refusal ABI 0.9 adds that a device with the features cannot
+ * escape: the two entry points refusing each other's programs, a bank
+ * of the wrong size, and the header and encoding rules revision 2
+ * brought in. The two feature-absent refusals are not here - they are
+ * in check_caps_enforced, where the device that lacks the feature is.
+ *
+ * Each is checked BY NAME, not only by status: a caller told
+ * CFT_ERR_INVALID_ARGUMENT and nothing else has to guess which of its
+ * eleven arguments was wrong. */
+static void refusal(cft_device *dev, cft_format fmt, const char *label,
+                    const uint8_t *img, size_t bytes, cft_status want,
+                    const char *needle)
+{
+    cft_program *prog = NULL;
+    cft_status st = cft_program_load(dev, img, bytes, &prog);
+    (void)fmt;
+    checks++;
+    if (st != want) {
+        printf("  FAIL refusal %s: %s where %s was due\n", label,
+               cft_strerror(st), cft_strerror(want));
+        failures++;
+        cft_program_free(prog);
+        return;
+    }
+    if (needle && !strstr(cft_last_error(), needle)) {
+        checks++;
+        printf("  FAIL refusal %s: refused as %s but the message does not "
+               "say \"%s\": %s\n", label, cft_strerror(st), needle,
+               cft_last_error());
+        failures++;
+    }
+}
+
+static void check_program_refusals(cft_device *dev, cft_format fmt)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t img[256], konst[2 * MAXE], bank[2 * MAXE];
+    uint64_t insns[3];
+    size_t bytes;
+    cft_program *prog = NULL;
+    cft_status st;
+
+    make_one_plus(konst, fmt, 1);
+    make_one_plus(konst + esz, fmt, 2);
+    memcpy(bank, konst, 2 * esz);
+
+    insns[0] = seq_alu(0, 4, 0, 0, 1, 0, 1, 1);
+    insns[1] = seq_ctrl(3, 4, 0);
+    insns[2] = seq_ctrl(0, 0, 0);
+
+    /* ---- the header ---- */
+    bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 2u);
+    refusal(dev, fmt, "flags bit 1 (unassigned)", img, bytes,
+            CFT_ERR_ARTIFACT, NULL);
+    bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 0x80000000u);
+    refusal(dev, fmt, "flags bit 31", img, bytes, CFT_ERR_ARTIFACT, NULL);
+    bytes = seq_image(img, fmt, insns, 3, konst, 2, 1);
+    put_le32(img + 28, 1);                        /* reserved[1] */
+    refusal(dev, fmt, "reserved[1] non-zero", img, bytes,
+            CFT_ERR_ARTIFACT, NULL);
+    /* A BANK_EXT image that still carries its constant section is the
+     * wrong LENGTH, and a program is exactly its header, its
+     * constants and its instructions. */
+    bytes = seq_image(img, fmt, insns, 3, konst, 2, 1);
+    put_le32(img + 24, CFT_PROG_FLAG_BANK_EXT);
+    refusal(dev, fmt, "BANK_EXT with a constant section", img, bytes,
+            CFT_ERR_ARTIFACT, NULL);
+
+    /* ---- the encoding ---- */
+    {
+        uint64_t bad[3];
+        memcpy(bad, insns, sizeof bad);
+        /* imm[31:28]: read by nothing */
+        bad[0] = insns[0] | ((uint64_t)0x10000000u << 32);
+        bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
+        refusal(dev, fmt, "imm[28] on an ALU instruction", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* a constant operand's fifth bit: not read, must be zero */
+        bad[0] = insns[0] | ((uint64_t)(1u << 26) << 32);  /* rb's, kb set */
+        bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
+        refusal(dev, fmt, "a constant operand's register high bit", img,
+                bytes, CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* DEPOSIT may set imm[25] and nothing else */
+        memcpy(bad, insns, sizeof bad);
+        bad[1] = insns[1] | ((uint64_t)(1u << 24) << 32);
+        bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
+        refusal(dev, fmt, "imm[24] on a DEPOSIT", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* and HALT may set none of them */
+        memcpy(bad, insns, sizeof bad);
+        bad[2] = insns[2] | ((uint64_t)(1u << 25) << 32);
+        bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
+        refusal(dev, fmt, "imm[25] on a HALT", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+    }
+
+    /* ---- the two entry points, refusing each other's programs ---- */
+    bytes = seq_image(img, fmt, insns, 3, konst, 2, 1);
+    if (cft_program_load(dev, img, bytes, &prog) == CFT_OK) {
+        uint8_t dep[MAXE];
+        st = cft_program_run_bank(prog, bank, 2 * esz, konst, NULL, NULL,
+                                  dep, NULL, 1, NULL, NULL);
+        checks++;
+        if (st != CFT_ERR_INVALID_ARGUMENT ||
+            !strstr(cft_last_error(), "cft_program_run")) {
+            printf("  FAIL refusal: run_bank on a program that carries its "
+                   "own constants gave %s (%s)\n", cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        }
+        /* and a NULL bank of zero bytes is the same call as
+         * cft_program_run, which is what makes run_bank universal */
+        checks++;
+        st = cft_program_run_bank(prog, NULL, 0, konst, NULL, NULL, dep,
+                                  NULL, 1, NULL, NULL);
+        if (st != CFT_OK) {
+            printf("  FAIL refusal: run_bank with no bank on an ordinary "
+                   "program gave %s (%s)\n", cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        }
+        cft_program_free(prog);
+        prog = NULL;
+    }
+
+    bytes = seq_image_flags(img, fmt, insns, 3, NULL, 2, 1,
+                            CFT_PROG_FLAG_BANK_EXT);
+    if (cft_program_load(dev, img, bytes, &prog) == CFT_OK) {
+        uint8_t dep[MAXE];
+        st = cft_program_run(prog, konst, NULL, NULL, dep, NULL, 1,
+                             NULL, NULL);
+        checks++;
+        if (st != CFT_ERR_INVALID_ARGUMENT ||
+            !strstr(cft_last_error(), "cft_program_run_bank")) {
+            printf("  FAIL refusal: cft_program_run on a BANK_EXT program "
+                   "gave %s (%s)\n", cft_strerror(st), cft_last_error());
+            failures++;
+        }
+        st = cft_program_run_bank(prog, bank, 2 * esz - 1, konst, NULL,
+                                  NULL, dep, NULL, 1, NULL, NULL);
+        checks++;
+        if (st != CFT_ERR_INVALID_ARGUMENT ||
+            !strstr(cft_last_error(), "bank")) {
+            printf("  FAIL refusal: a bank one byte short gave %s (%s)\n",
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        }
+        st = cft_program_run_bank(prog, NULL, 0, konst, NULL, NULL, dep,
+                                  NULL, 1, NULL, NULL);
+        checks++;
+        if (st != CFT_ERR_INVALID_ARGUMENT) {
+            printf("  FAIL refusal: a BANK_EXT program ran with no bank at "
+                   "all (%s)\n", cft_strerror(st));
+            failures++;
+        }
+        /* the digest holds the bank to the same rule, so a program has
+         * one digest and not two */
+        {
+            uint8_t d[32];
+            checks++;
+            if (cft_program_digest(prog, NULL, 0, d) !=
+                CFT_ERR_INVALID_ARGUMENT) {
+                printf("  FAIL refusal: cft_program_digest accepted a "
+                       "BANK_EXT program with no bank\n");
+                failures++;
+            }
+        }
+        cft_program_free(prog);
+    }
 }
 
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
     uint8_t image[1024];
-    uint8_t konst[32];
+    uint8_t konst[MAXE];
+    cft_caps hcaps;
     size_t bytes;
 
-    /* the constant 1.5, packed per format: biased exponent of 1.0
-     * with the top fraction bit set */
-    memset(konst, 0, sizeof konst);
-    {
-        int man_w = fmt == CFT_FP32 ? 23 : fmt == CFT_FP64 ? 52
-                  : fmt == CFT_FP128 ? 112 : 236;
-        uint64_t bias = fmt == CFT_FP32 ? 127 : fmt == CFT_FP64 ? 1023
-                      : fmt == CFT_FP128 ? 16383 : 262143;
-        int bit;
-        konst[(man_w - 1) / 8] |= (uint8_t)(1u << ((man_w - 1) % 8));
-        for (bit = 0; bit < 20; bit++)
-            if (bias & (1ull << bit))
-                konst[(man_w + bit) / 8] |=
-                    (uint8_t)(1u << ((man_w + bit) % 8));
-    }
+    memset(&hcaps, 0, sizeof hcaps);
+    hcaps.struct_size = sizeof hcaps;
+    if (cft_get_caps(hw, &hcaps) != CFT_OK)
+        memset(&hcaps, 0, sizeof hcaps);
+
+    /* the constant 1.5 */
+    make_one_plus(konst, fmt, 1);
 
     /* 1. fma then deposit: r4 = r0*r1 + r2; deposit r4 */
     {
@@ -964,6 +1627,84 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
         compare_seq_one(sw, hw, fmt, image, bytes, 0, n, seed + 3,
                         "seq zero-budget");
     }
+
+    /* 5. revision 2's upper half of the register file, device against
+     *    software - and then against an ORACLE, because sw-vs-sw
+     *    cannot see a decoder fault both sides share.
+     *
+     *    The oracle is that renaming registers is invisible: the same
+     *    computation written in r16/r17 and in r4/r5 must deposit the
+     *    same bytes. A decoder that dropped the fifth bit would read
+     *    the first as r0/r1 - which are the INPUT registers - so the
+     *    two programs stop agreeing, which is exactly what the check
+     *    is for. Written that way round on purpose: the aliasing has
+     *    to reach a value the program still needs, or a dropped bit
+     *    produces the right answer by luck (it does, if the high
+     *    registers are only ever written before they are read). */
+    if (hcaps.seq_features & CFT_SEQ_FEAT_REGS32) {
+        uint64_t wide[5], narrow[5];
+        uint8_t image2[1024];
+        size_t bytes2;
+
+        wide[0]   = seq_alu5(0, 16, 0, 1, 2, 0, 0, 0, 0); /* r16=r0*r1+r2 */
+        wide[1]   = seq_alu5(1, 17, 16, 0, 0, 0, 0, 0, 0);/* r17=r16+r0   */
+        wide[2]   = seq_ctrl5(3, 17);
+        wide[3]   = seq_ctrl5(3, 16);
+        wide[4]   = seq_ctrl(0, 0, 0);
+        narrow[0] = seq_alu5(0,  4, 0, 1, 2, 0, 0, 0, 0); /* r4 =r0*r1+r2 */
+        narrow[1] = seq_alu5(1,  5,  4, 0, 0, 0, 0, 0, 0);/* r5 =r4+r0    */
+        narrow[2] = seq_ctrl5(3, 5);
+        narrow[3] = seq_ctrl5(3, 4);
+        narrow[4] = seq_ctrl(0, 0, 0);
+
+        bytes  = seq_image(image, fmt, wide, 5, konst, 0, 2);
+        bytes2 = seq_image(image2, fmt, narrow, 5, konst, 0, 2);
+        compare_seq_one(sw, hw, fmt, image, bytes, 2, n, seed + 4,
+                        "seq r16/r17");
+        compare_seq_images(sw, fmt, image, bytes, image2, bytes2, 2, n,
+                           seed + 4, "seq register renaming");
+
+        /* And r31 itself, the highest the five bits reach, with
+         * DEPOSIT and SETACT both naming it - imm[25] is the only bit
+         * of a control instruction's immediate revision 2 opened. */
+        {
+            uint64_t hi5[7], lo5[7];
+            hi5[0] = seq_alu5(0, 31, 0, 1, 2, 0, 0, 0, 0);
+            hi5[1] = seq_ctrl(1, 0, 3);                  /* repeat 3     */
+            hi5[2] = seq_alu5(3, 31, 31, 31, 0, 0, 0, 0, 0);
+            hi5[3] = seq_ctrl5(3, 31);                   /* deposit r31  */
+            hi5[4] = seq_ctrl5(4, 31);                   /* setact  r31  */
+            hi5[5] = seq_ctrl(2, 0, 0);                  /* endrep       */
+            hi5[6] = seq_ctrl(0, 0, 0);
+            memcpy(lo5, hi5, sizeof lo5);
+            lo5[0] = seq_alu5(0, 6, 0, 1, 2, 0, 0, 0, 0);
+            lo5[2] = seq_alu5(3, 6, 6, 6, 0, 0, 0, 0, 0);
+            lo5[3] = seq_ctrl5(3, 6);
+            lo5[4] = seq_ctrl5(4, 6);
+            bytes  = seq_image(image, fmt, hi5, 7, konst, 0, 4);
+            bytes2 = seq_image(image2, fmt, lo5, 7, konst, 0, 4);
+            compare_seq_one(sw, hw, fmt, image, bytes, 4, n, seed + 6,
+                            "seq r31 escape loop");
+            compare_seq_images(sw, fmt, image, bytes, image2, bytes2, 4, n,
+                               seed + 6, "seq r31 renaming");
+        }
+    } else {
+        printf("  seq r16..r31: this device does not publish REGS32, "
+               "NOT COMPARED (the refusal is scored above)\n");
+    }
+
+    /* 6. the per-run constant bank, and the digest over image and
+     *    data together. Same gate, same reason. */
+    if (hcaps.seq_features & CFT_SEQ_FEAT_BANK_PTR)
+        compare_seq_bank(sw, hw, fmt, n, seed + 5);
+    else
+        printf("  seq BANK_EXT: this device does not publish BANK_PTR, "
+               "NOT COMPARED (the refusal is scored above)\n");
+
+    /* 7. the argument refusals, which are the library's own and reach
+     *    no device at all - so they are scored once, on the software
+     *    handle, at every format. */
+    check_program_refusals(sw, fmt);
 }
 
 int main(int argc, char **argv)

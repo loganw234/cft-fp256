@@ -66,6 +66,59 @@ static uint32_t get32(const uint8_t *p)
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/* An instruction word's fields the loader requires to be zero, cleared.
+ *
+ * The immediate is thirty-two bits and almost nothing reads all of it,
+ * so a mutated word is refused for a stray field long before it
+ * reaches a rule worth finding. This puts one back into canonical
+ * shape - keeping whatever the mutation put in the fields that ARE
+ * read, including revision 2's four register high bits in imm[27:24],
+ * which is how those reach the validator and the executor at all.
+ *
+ * Applied to some inputs and not others, for the same reason the
+ * header fixup is: the refusals have to stay reachable. */
+static uint64_t canonical(uint64_t w)
+{
+    const uint32_t reghi = 0x0F000000u;
+    uint32_t imm = (uint32_t)(w >> 32);
+    int ctrl = (int)((w >> 31) & 1);
+    int kx   = (int)((w >> 30) & 1);
+
+    if (!ctrl) {
+        int anyk = (int)((w >> 27) & 7);
+        if (kx && !anyk)
+            w &= ~(1ull << 30);             /* kx selects nothing */
+        imm &= kx ? (0x00FFFFFFu | reghi) : reghi;
+        /* An operand naming a constant does not read its register high
+         * bit, and under kx does not read its four-bit field either. */
+        if ((w >> 27) & 1) { imm &= ~(1u << 25); if (kx) w &= ~(0xFull << 12); }
+        if ((w >> 28) & 1) { imm &= ~(1u << 26); if (kx) w &= ~(0xFull << 16); }
+        if ((w >> 29) & 1) { imm &= ~(1u << 27); if (kx) w &= ~(0xFull << 20); }
+        /* and one naming a register does not read its imm byte */
+        if (kx) {
+            if (!((w >> 27) & 1)) imm &= ~0x000000FFu;
+            if (!((w >> 28) & 1)) imm &= ~0x0000FF00u;
+            if (!((w >> 29) & 1)) imm &= ~0x00FF0000u;
+        }
+        if (((w >> 24) & 7) > 4)
+            w &= ~(7ull << 24);             /* rounding attribute */
+        return (w & 0xFFFFFFFFull) | ((uint64_t)imm << 32);
+    }
+    switch ((int)(w & 0xFF)) {
+    case 1:                                  /* REPEAT: imm is the count */
+        w &= ~0x7FFFF000ull;                 /* rd..rc, rnd, ka..kx */
+        w &= ~(0xFull << 8);
+        return w;
+    case 3: case 4:                          /* DEPOSIT, SETACT: ra only */
+        w &= ~0x7FF00000ull;                 /* rb, rc, rnd, ka..kx */
+        w &= ~(0xFull << 8);                 /* rd */
+        return (w & 0xFFFFFFFFull) |
+               ((uint64_t)(imm & (1u << 25)) << 32);
+    default:                                 /* HALT, ENDREP, ACTALL, bad */
+        return w & 0x800000FFull;
+    }
+}
+
 /* Put a mutated image back into a shape the header check will accept,
  * most of the time. Without this the fuzzer spends its whole budget
  * proving that a wrong magic is refused, and never reaches
@@ -73,7 +126,7 @@ static uint32_t get32(const uint8_t *p)
  * left alone so the refusals are exercised too. */
 static size_t fixup(uint8_t *d, size_t len, size_t cap, uint64_t *st)
 {
-    uint32_t n_consts, n_insns, prec, esz, want;
+    uint32_t n_consts, n_insns, prec, esz, want, flags, kbytes;
     uint64_t r;
     *st += 0x9E3779B97F4A7C15ull;
     r = *st ^ (*st >> 29);
@@ -88,7 +141,6 @@ static size_t fixup(uint8_t *d, size_t len, size_t cap, uint64_t *st)
     }
     put32(d + 0, SEQ_MAGIC);
     put32(d + 4, SEQ_VERSION);
-    put32(d + 24, 0);
     put32(d + 28, 0);
     prec = get32(d + 20) & 3u;
     put32(d + 20, prec);
@@ -97,19 +149,48 @@ static size_t fixup(uint8_t *d, size_t len, size_t cap, uint64_t *st)
     if ((r >> 3) & 1u)
         put32(d + 16, (uint32_t)((r >> 8) & 0xFFFFu));
 
+    /* The header's flags word, which was reserved[0] until 2026-09-08.
+     * Three cases in eight: no flags, BANK_EXT (an image with NO
+     * constant section, whose n_consts still bounds every index), and
+     * once in eight an unassigned bit, which must be CFT_ERR_ARTIFACT
+     * - the version guard for every flag there will ever be. */
+    switch ((int)((r >> 20) & 7u)) {
+    case 0: flags = 1u << (1 + (unsigned)((r >> 44) & 30u)); break;
+    case 1: case 2: case 3: flags = 1u; break;          /* BANK_EXT */
+    default: flags = 0u; break;
+    }
+    put32(d + 24, flags);
+
     /* Choose a small constant bank and let the instructions fill the
-     * rest, then trim the image to exactly what the header describes. */
+     * rest, then trim the image to exactly what the header describes.
+     * A BANK_EXT image has no constant section, so n_consts is free of
+     * the image's length entirely - which is the point of it. */
     n_consts = (uint32_t)((r >> 24) & 3u);
-    if (HDR + (uint64_t)n_consts * esz > len)
-        n_consts = 0;
-    n_insns = (uint32_t)((len - HDR - n_consts * esz) / 8u);
+    kbytes = (flags & 1u) ? 0u : n_consts * esz;
+    if (HDR + (uint64_t)kbytes > len)
+        n_consts = kbytes = 0;
+    n_insns = (uint32_t)((len - HDR - kbytes) / 8u);
     put32(d + 8, n_insns);
     put32(d + 12, n_consts);
-    want = HDR + n_consts * esz + n_insns * 8u;
+    want = HDR + kbytes + n_insns * 8u;
     if (want > cap)
         return len;
     if (want > len)
         memset(d + len, 0, want - len);
+    /* Half the fixed-up inputs get their instruction words put into
+     * canonical shape, so the deep rules - the loop structure, the
+     * worst-case bound, the constant indices, the five-bit registers -
+     * are reached rather than shadowed by a stray-field refusal. */
+    if ((r >> 33) & 1u) {
+        uint32_t i;
+        for (i = 0; i < n_insns; i++) {
+            uint8_t *p = d + HDR + kbytes + (size_t)i * 8u;
+            uint64_t w = (uint64_t)get32(p) | ((uint64_t)get32(p + 4) << 32);
+            w = canonical(w);
+            put32(p, (uint32_t)w);
+            put32(p + 4, (uint32_t)(w >> 32));
+        }
+    }
     return want;
 }
 

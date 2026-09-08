@@ -11,7 +11,8 @@ loads, a program that must not - so the first mutation is already a
 mutation of something the parser gets past its first check.
 
 The program seeds come from python/cft_golden, which is the authority
-on what a program is; nothing here hand-assembles an image.
+on what a program is; nothing here hand-assembles an image - with the
+one temporary exception rev2_seeds() states and explains.
 """
 
 import random
@@ -36,6 +37,7 @@ OP = {
     "HELLO": 0x0001, "CAPS": 0x0002, "STATS": 0x0003,
     "RUN": 0x0010, "REDUCE": 0x0011,
     "PROG_LOAD": 0x0020, "PROG_RUN": 0x0021, "PROG_FREE": 0x0022,
+    "PROG_RUN_BANK": 0x0023,
     "BUF_ALLOC": 0x0030, "BUF_FREE": 0x0031, "BUF_WRITE": 0x0032,
     "BUF_READ": 0x0033,
     "FLAGS_LOWER": 0x0040, "FLAGS_RAISE": 0x0041, "FLAGS_TEST": 0x0042,
@@ -74,8 +76,96 @@ def program_seeds():
     bogus.fmt, bogus.insns = FORMATS["fp32"], [seq.endrep()]
     bogus.consts, bogus.max_deposits = [], 1
     write("program", "unbalanced-fp32", bogus.to_bytes())
-    write("program", "header-only", struct.pack("<8I", MAGIC, 1, 0, 0, 1, 0,
-                                                0, 0))
+    # "CFTP", not the frame's "CFTR": this seed is named for an image
+    # with no constants and no instructions, and with the wrong magic
+    # it was only ever a second copy of "the magic is checked".
+    write("program", "header-only",
+          struct.pack("<8I", PROG_MAGIC, 1, 0, 0, 1, 0, 0, 0))
+    return n + 2 + rev2_seeds()
+
+
+# --- revision 2's shapes (docs/SEQUENCER.md, 2026-09-08) -------------
+#
+# ASSEMBLED HERE rather than asked of the model, which is the one
+# exception to this file's rule and is temporary. The model's half of
+# the 2026-09-08 round - NREG 32, the header's flags word, run() taking
+# a bank - is a separate change landing beside this one, and a seed
+# corpus that waits for it is a corpus that does not cover the parser
+# the round just changed. When seq.py emits these shapes, delete the
+# assembly below and ask it instead; the images must come out
+# byte-identical, which is a test worth writing at that moment.
+#
+# The encodings are docs/SEQUENCER.md's, restated once:
+#   bits 7:0 op | 11:8 rd | 15:12 ra | 19:16 rb | 23:20 rc | 26:24 rnd
+#   27 ka | 28 kb | 29 kc | 30 kx | 31 ctrl | 63:32 imm
+#   imm[24] rd[4] | imm[25] ra[4] | imm[26] rb[4] | imm[27] rc[4]
+#
+# "CFTP", the PROGRAM magic - not MAGIC above, which is "CFTR" and
+# belongs to the remote frame. Derived from the four bytes rather than
+# typed as a number, so the two cannot disagree.
+PROG_MAGIC = int.from_bytes(b"CFTP", "little")
+BANK_EXT = 1
+
+
+def _alu(op, rd, ra=0, rb=0, rc=0, rnd=0, ka=0, kb=0, kc=0):
+    imm = ((rd >> 4) & 1) << 24
+    if not ka:
+        imm |= ((ra >> 4) & 1) << 25
+    if not kb:
+        imm |= ((rb >> 4) & 1) << 26
+    if not kc:
+        imm |= ((rc >> 4) & 1) << 27
+    return (op | ((rd & 15) << 8) | ((ra & 15) << 12) | ((rb & 15) << 16) |
+            ((rc & 15) << 20) | (rnd << 24) | (ka << 27) | (kb << 28) |
+            (kc << 29) | (imm << 32))
+
+
+def _ctrl(code, ra=0, imm=0):
+    return (code | ((ra & 15) << 12) | (1 << 31) |
+            ((imm | (((ra >> 4) & 1) << 25)) << 32))
+
+
+def _image(fmt_code, insns, consts, esz, max_deposits, flags=0):
+    body = b"".join(struct.pack("<Q", w) for w in insns)
+    kon = b"" if flags & BANK_EXT else b"".join(consts)
+    return struct.pack("<8I", PROG_MAGIC, 1, len(insns), len(consts),
+                       max_deposits, fmt_code, flags, 0) + kon + body
+
+
+def rev2_seeds():
+    n = 0
+    for code, fname in enumerate(("fp32", "fp64", "fp128", "fp256")):
+        esz = 4 << code
+        zero = b"\x00" * esz
+        # r16 = r0*r1 + r2; r17 = r16 + r0; deposit r17; deposit r16; halt
+        wide = [_alu(0, 16, 0, 1, 2), _alu(1, 17, 16, 0, 0),
+                _ctrl(3, 17), _ctrl(3, 16), _ctrl(0)]
+        write("program", f"regs32-{fname}",
+              _image(code, wide, [], esz, 2))
+        n += 1
+        # r31 through a loop, with SETACT and DEPOSIT naming it - the
+        # only two control codes whose imm may carry a register bit
+        loop = [_alu(0, 31, 0, 1, 2), _ctrl(1, 0, 3),
+                _alu(3, 31, 31, 31), _ctrl(3, 31), _ctrl(4, 31),
+                _ctrl(2), _ctrl(0)]
+        write("program", f"regs32-loop-{fname}",
+              _image(code, loop, [], esz, 4))
+        n += 1
+        # BANK_EXT: no constant section, two constants addressed
+        ext = [_alu(0, 4, 0, 0, 1, 0, 0, 1, 1), _ctrl(3, 4), _ctrl(0)]
+        write("program", f"bankext-{fname}",
+              _image(code, ext, [zero, zero], esz, 1, BANK_EXT))
+        n += 1
+    # And the two the loader must refuse, so the new refusal paths are
+    # seeded as the old ones are: a flag bit nothing assigns, and a
+    # BANK_EXT image that still carries its constant section.
+    esz = 4
+    ext = [_alu(0, 4, 0, 0, 1, 0, 0, 1, 1), _ctrl(3, 4), _ctrl(0)]
+    write("program", "flags-unassigned-fp32",
+          _image(0, ext, [b"\x00" * esz] * 2, esz, 1, 2))
+    img = _image(0, ext, [b"\x00" * esz] * 2, esz, 1)
+    write("program", "bankext-with-consts-fp32",
+          img[:24] + struct.pack("<I", BANK_EXT) + img[28:])
     return n + 2
 
 
@@ -110,6 +200,19 @@ def serve_seeds():
     write("serve", "prog-tiny",
           rec(OP["HELLO"]) + rec(OP["PROG_LOAD"], tiny) +
           rec(OP["PROG_RUN"], prun))
+
+    # PROG_RUN_BANK: the fourth fixed word is the bank's byte length,
+    # and the bank itself sits between the fixed fields and the
+    # operands. Two fp32 constants, so eight bytes (ABI 0.9).
+    bext = _image(0, [_alu(0, 4, 0, 0, 1, 0, 0, 1, 1), _ctrl(3, 4),
+                      _ctrl(0)], [b"\x00" * esz] * 2, esz, 1, BANK_EXT)
+    prunb = struct.pack("<IIIIQ", 1, 1, 1, 2 * esz, n) + \
+        b"\x00" * (2 * esz) + b"\x00" * (n * esz)
+    write("serve", "prog-bank-run",
+          rec(OP["HELLO"]) + rec(OP["PROG_LOAD"], bext) +
+          rec(OP["PROG_RUN_BANK"], prunb) +
+          rec(OP["PROG_FREE"], struct.pack("<I", 1)))
+    n += 1
 
     write("serve", "buffers",
           rec(OP["HELLO"]) + rec(OP["BUF_ALLOC"], struct.pack("<Q", 256)) +
