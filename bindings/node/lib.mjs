@@ -97,6 +97,60 @@ export const FLAGS_ALL = FLAG_NAMES.reduce((a, [b]) => a | b, 0);
  *  docs/SEQUENCER.md). */
 export const STATUS_DEPOSIT_OVERFLOW = 1 << 4;
 
+/** CFT_PROG_FLAG_BANK_EXT - bit 0 of a program header's `flags` word,
+ *  the word that was reserved[0] until 2026-09-08.
+ *
+ *  The image carries NO constant section: `n_consts` still says how
+ *  many constants the program ADDRESSES, and every run supplies
+ *  exactly that many format-width values through runBank(). One image
+ *  per positive, loaded once, with the levers riding as data
+ *  (docs/SEQUENCER.md revision 2, R3).
+ *
+ *  Every other bit of the word is reserved-must-be-zero and an image
+ *  that sets one is refused, which is what lets a later flag be added
+ *  without a version step. Transcribed, and checked against the module
+ *  by audit(), for STATUS_DEPOSIT_OVERFLOW's reason. */
+export const PROG_FLAG_BANK_EXT = 1 << 0;
+
+/** cft_caps.seq_features - the sequencer's feature word.
+ *
+ *  Low nibble is CAPS[7:4], the sequencer's feature nibble; the next
+ *  is CAPS[31:28], the ALU extensions. A CLEAR BIT IS ABSENT, not
+ *  unknown: the loader refuses an image that uses the feature and says
+ *  which, so ask before issuing - the same discipline as an opcode.
+ *  That is a different rule from the three CAPACITIES beside them in
+ *  cft_caps (maxDeposits, maxInsns, maxConsts), where zero means
+ *  UNKNOWN and nothing is enforced against it.
+ *
+ *  These are the bits a caller tests before building an image that
+ *  needs one - in particular SEQ_FEAT_BANK_PTR before a BANK_EXT
+ *  image, which will not load without it. audit() checks all four
+ *  against the module, because a bit position transcribed here is a
+ *  bit position that can go stale. */
+export const SEQ_FEAT_WIDE_CONST = 0x01;   // CAPS[4]:  kx, indexed constants
+export const SEQ_FEAT_REGS32     = 0x02;   // CAPS[5]:  32 registers a lane
+export const SEQ_FEAT_BANK_PTR   = 0x04;   // CAPS[6]:  the per-run bank
+export const ALU_EXT_IMUL        = 0x10;   // CAPS[28]: opcode 30, IMUL
+
+/** The feature bits' names, for a message. */
+export const SEQ_FEATURE_NAMES = [
+  [SEQ_FEAT_WIDE_CONST, "kx"], [SEQ_FEAT_REGS32, "REGS32"],
+  [SEQ_FEAT_BANK_PTR, "BANK_PTR"], [ALU_EXT_IMUL, "IMUL"],
+];
+
+/** The features a `seq_features` word publishes, by name. An unnamed
+ *  bit is reported as a number rather than dropped, for the reason
+ *  flagNames() does the same: a bit this package cannot name is news. */
+export function seqFeatureNames(features) {
+  const out = [];
+  let rest = features >>> 0;
+  for (const [bit, name] of SEQ_FEATURE_NAMES)
+    if (rest & bit) { out.push(name); rest &= ~bit; }
+  for (let b = 0; b < 32; b++)
+    if (rest & (1 << b)) out.push(`bit${b}`);
+  return out;
+}
+
 /** The IEEE exception names set in a flag word. An unknown bit is
  *  reported as a number rather than dropped: a flag word this package
  *  cannot name is news, not noise. */
@@ -262,6 +316,32 @@ export async function is754version2019() {
   return C.is754version2019() !== 0;
 }
 
+/** cft_sha256 - SHA-256 (FIPS 180-4) of `bytes`, as a Uint8Array of 32
+ *  (ABI 0.9).
+ *
+ *  THE LIBRARY'S hash, not a second one. It exists in libcft because
+ *  cft_program_digest needs one, and it is exported because every tool
+ *  that attests a run wants the same hash over its own outputs - a
+ *  deposit buffer, a chain of printed lines - and four of them had a
+ *  private copy each until this existed (cft.h). A harness here that
+ *  reached for node:crypto instead would be the fifth, and the one
+ *  number it could not check is the one that matters: that this
+ *  library's digest is the digest everything else quotes.
+ *
+ *  An empty message is not an error - it has an answer, and a run over
+ *  no deposits is a legitimate thing to name. */
+export async function sha256(bytes) {
+  const { M, C } = await loadModule();
+  const buf = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  return withScratch(M, (s) => {
+    const p = buf.length ? s.put(buf) : 0;
+    const out = s.alloc(32);
+    const st = C.sha256(p, buf.length, out);
+    checkStatus(C, st, "cft_sha256");
+    return s.get(out, 32);
+  });
+}
+
 async function instantiate() {
   const wasmPath = join(HERE, "cft_node.wasm");
   const jsPath = join(HERE, "cft_node.js");
@@ -295,6 +375,14 @@ async function instantiate() {
     capsAbi:      M.cwrap("cftw_caps_abi_version", n, [n]),
     capsFlagsOk:  M.cwrap("cftw_caps_flags_readable", n, [n]),
     capsBackend:  M.cwrap("cftw_caps_backend", s, [n]),
+    // cft_caps' sequencer fields - in the struct since ABI 0.8 and
+    // projected by no wrapper until 2026-09-08, so a JavaScript caller
+    // could not ask what this device's sequencer takes. Zero is
+    // UNKNOWN for the three capacities; a clear feature BIT is absent.
+    capsSeqFeatures: M.cwrap("cftw_caps_seq_features", n, [n]),
+    capsMaxDeposits: M.cwrap("cftw_caps_max_deposits", n, [n]),
+    capsMaxInsns:    M.cwrap("cftw_caps_max_insns", n, [n]),
+    capsMaxConsts:   M.cwrap("cftw_caps_max_consts", n, [n]),
 
     run:          M.cwrap("cftw_run", n, [n,n,n,n,n,n,n,n,n,n,n]),
     reduce:       M.cwrap("cftw_reduce", n, [n,n,n,n,n,n,n,n,n,n]),
@@ -421,6 +509,34 @@ async function instantiate() {
     programGetInfo: M.cwrap("cftw_program_get_info", n, [n, n, n, n, n]),
     programRun:   M.cwrap("cftw_program_run", n, [n,n,n,n,n,n,n,n,n]),
     statusDepositOverflow: M.cwrap("cftw_status_deposit_overflow", n, []),
+
+    // Revision 2 (ABI 0.9, docs/SEQUENCER.md R3). programRunBank is
+    // programRun with the constant bank and its byte length in front
+    // of the three streams - the argument order cft.h gives it, not a
+    // tidier one, because a wrapper that reorders arguments is a
+    // wrapper whose mistake looks like a numerics bug.
+    //
+    // programFlags is an ACCESSOR and programGetInfo keeps its four
+    // out-pointers: cft_program_info grew a field and the call that
+    // projects it did not have to grow with it (wasm_api.c says why).
+    //
+    // programDigest and sha256 are the same hash - image then bank for
+    // the first, arbitrary bytes for the second - and both write 32
+    // bytes into a caller pointer.
+    programRunBank: M.cwrap("cftw_program_run_bank", n,
+                            [n,n,n,n,n,n,n,n,n,n,n]),
+    programDigest:  M.cwrap("cftw_program_digest", n, [n, n, n, n]),
+    programFlags:   M.cwrap("cftw_program_flags", n, [n]),
+    sha256:         M.cwrap("cftw_sha256", n, [n, n, n]),
+
+    // The header flag and the four feature bits, as calls. A macro is
+    // the one part of a header the far side of a wasm boundary cannot
+    // reach; audit() holds the transcriptions above to these.
+    progFlagBankExt:  M.cwrap("cftw_prog_flag_bank_ext", n, []),
+    seqFeatWideConst: M.cwrap("cftw_seq_feat_wide_const", n, []),
+    seqFeatRegs32:    M.cwrap("cftw_seq_feat_regs32", n, []),
+    seqFeatBankPtr:   M.cwrap("cftw_seq_feat_bank_ptr", n, []),
+    aluExtImul:       M.cwrap("cftw_alu_ext_imul", n, []),
   };
 
   // ABI 0.3's nine, 0.4's eleven, 0.5's nine and 0.6's ten - the
@@ -496,6 +612,24 @@ function audit(M, C) {
                `0x${moduleOverflow.toString(16)} in the module, ` +
                `0x${STATUS_DEPOSIT_OVERFLOW.toString(16)} here - the ` +
                `sequencer's status bit moved and this package did not`);
+  // ABI 0.9's five: the program header's flag bit and the four
+  // published feature bits. Same argument as the two above, and a
+  // sharper consequence for one of them - a stale SEQ_FEAT_BANK_PTR
+  // would have this package build a BANK_EXT image for a device that
+  // cannot take one, or refuse to build one for a device that can.
+  for (const [name, here, ask] of [
+    ["CFT_PROG_FLAG_BANK_EXT", PROG_FLAG_BANK_EXT, C.progFlagBankExt],
+    ["CFT_SEQ_FEAT_WIDE_CONST", SEQ_FEAT_WIDE_CONST, C.seqFeatWideConst],
+    ["CFT_SEQ_FEAT_REGS32", SEQ_FEAT_REGS32, C.seqFeatRegs32],
+    ["CFT_SEQ_FEAT_BANK_PTR", SEQ_FEAT_BANK_PTR, C.seqFeatBankPtr],
+    ["CFT_ALU_EXT_IMUL", ALU_EXT_IMUL, C.aluExtImul],
+  ]) {
+    const got = ask() >>> 0;
+    if (got !== here)
+      wrong.push(`${name} is 0x${got.toString(16)} in the module, ` +
+                 `0x${here.toString(16)} here - a feature bit moved and ` +
+                 `this package would ask the device about the wrong one`);
+  }
   if (wrong.length)
     throw new Error(
       "this package's transcription of cft.h disagrees with the module " +
