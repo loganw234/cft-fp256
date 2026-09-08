@@ -533,10 +533,12 @@ const u64 = (hi32lo) => {
   new DataView(b.buffer).setBigUint64(0, hi32lo, true);
   return b;
 };
+// Raw encodings rather than c64.from(1): what these tests compare is
+// an ENCODER, and routing a constant through the library's decimal
+// conversion would put a second thing under test in the same line.
 const F64 = {
-  one:  u64(0x3ff0000000000000n),   // 1.0
-  two:  u64(0x4000000000000000n),   // 2.0
-  three: u64(0x4008000000000000n),  // 3.0
+  one: u64(0x3ff0000000000000n),   // 1.0
+  two: u64(0x4000000000000000n),   // 2.0
 };
 
 // r20 = x + 1, r4 = x * x, r21 = r20 + 1, r6 = x * r21,
