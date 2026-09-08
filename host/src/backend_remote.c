@@ -1496,9 +1496,19 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     if (st != CFT_OK)
         return st;
 
-    /* Lanes per request: operands in, deposits and counts out. */
+    /* Lanes per request: operands in, deposits and counts out. The
+     * bank comes off the budget rather than being added to it, since
+     * it rides every chunk - a bank as large as the budget would
+     * otherwise make every chunk one byte over. */
     per_lane = (size_t)npresent * esz + (size_t)max_deposits * esz + 4u;
-    lpc = CFTR_CHUNK_BYTES / per_lane;
+    if (bank_bytes >= CFTR_CHUNK_BYTES) {
+        set_err("this program's constant bank is %lu bytes, which does not "
+                "leave room for a lane in a %lu-byte request",
+                (unsigned long)bank_bytes,
+                (unsigned long)CFTR_CHUNK_BYTES);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    lpc = (CFTR_CHUNK_BYTES - bank_bytes) / per_lane;
     if (lpc == 0)
         lpc = 1;
 

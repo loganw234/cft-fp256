@@ -536,9 +536,25 @@ static cft_status seq_check_against_device(cft_device *dev,
             continue;
         if (!c.max_consts)      /* unknown: nothing enforced */
             continue;
-        if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
-        if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;
-        if (d.kc && (uint32_t)d.rc >= c.max_consts) idx = d.rc;
+        /* The index is the four-bit field, or a byte of `imm` under
+         * kx - and BOTH are held to the device's reach. The kx half
+         * had no check until 2026-09-08 and could not fire while it
+         * was missing (every device that publishes kx publishes the
+         * whole 256-entry bank, and a byte cannot name more), but it
+         * is the half a trimmed tile would need, and a rule that is
+         * only unreachable is not a rule that is right. */
+        if (d.kx) {
+            uint32_t ia = d.imm & 0xFFu;
+            uint32_t ib = (d.imm >> 8) & 0xFFu;
+            uint32_t ic = (d.imm >> 16) & 0xFFu;
+            if (d.ka && ia >= c.max_consts) idx = (int)ia;
+            if (d.kb && ib >= c.max_consts) idx = (int)ib;
+            if (d.kc && ic >= c.max_consts) idx = (int)ic;
+        } else {
+            if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
+            if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;
+            if (d.kc && (uint32_t)d.rc >= c.max_consts) idx = d.rc;
+        }
         if (idx >= 0)
             return (cft_status)cft_seq_cap_refusal(
                 "highest constant index", (unsigned long)idx,

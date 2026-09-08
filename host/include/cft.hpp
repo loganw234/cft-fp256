@@ -801,6 +801,38 @@ public:
         return r;
     }
 
+    /* The same run with the constant bank supplied as data (ABI 0.9).
+     * A BANK_EXT program - cft_program_info::flags carrying
+     * CFT_PROG_FLAG_BANK_EXT - has no constants in its image and
+     * needs this; an ordinary one takes (nullptr, 0) here and is
+     * exactly run() above. cft.h's contract, unchanged. */
+    call_result run_bank(const void *bank, std::size_t bank_bytes,
+                         const void *a, const void *b, const void *c,
+                         void *deposits, std::uint32_t *counts,
+                         std::size_t n) noexcept
+    {
+        call_result r;
+        if (!prog_) {
+            r.status = CFT_ERR_INVALID_ARGUMENT;
+            return r;
+        }
+        r.status = cft_program_run_bank(prog_, bank, bank_bytes, a, b, c,
+                                        deposits, counts, n,
+                                        &r.flags, &r.bus);
+        return r;
+    }
+
+    /* SHA-256 of the image bytes then the bank bytes: what ran, as one
+     * hash of program and data together. The bank is held to exactly
+     * the rule run_bank holds it to. */
+    cft_status digest(const void *bank, std::size_t bank_bytes,
+                      std::uint8_t out[32]) const noexcept
+    {
+        if (!prog_)
+            return CFT_ERR_INVALID_ARGUMENT;
+        return cft_program_digest(prog_, bank, bank_bytes, out);
+    }
+
 private:
     friend class device;
     explicit program(cft_program *p) noexcept : prog_(p) {}

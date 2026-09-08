@@ -1686,3 +1686,131 @@ against a copied literal. What is NOT tested, and says so in its own
 output rather than skipping quietly: an image past the software
 backend's instruction cap, which would be 32 GiB, and a constant index
 past 15, which does not fit the instruction's four-bit field.
+
+*The last of those was closed on 2026-09-08. The probe wrote the
+four-bit form, so it could not NAME an index past 15 and was checking
+a cap of 256 at 16; it now writes the `kx` form where the device
+publishes `kx`, and tests the cap at `max_consts - 1` - `k[255]` on the
+software backend. The half that remains unrepresentable is a different
+one, and still says so: an index past 256 does not fit the immediate's
+byte.*
+
+## Programs at ABI 0.9: registers, a bank, a digest (2026-09-08)
+
+Revision 2 of docs/SEQUENCER.md, host side. Three features, two of
+them behind a CAPS bit and each refused BY NAME where a device lacks
+it. Nothing already written changes: every entry point keeps its
+signature, every image built before this loads and runs exactly as it
+did, and the card-day 0x410 images are untouched.
+
+**Thirty-two registers a lane.** A register field is five bits: the
+low four stay in the operand fields and the fifth of each lives in
+`imm[27:24]` - `rd`, `ra`, `rb`, `rc` in that order - which every ALU
+form reserved. `imm[31:28]` stays reserved-must-be-zero.
+`CFT_SEQ_FEAT_REGS32` (bit 1 of `seq_features`, CAPS[5]) publishes it,
+and a program naming a register above 15 on a device without it is
+`CFT_ERR_UNSUPPORTED`, with the instruction, the register and the
+register an old operand mux would have addressed instead:
+
+    instruction 3 names r31 and this device has 16 registers a lane
+    (CAPS[5] clear, cft_caps.seq_features bit 1 - CFT_SEQ_FEAT_REGS32);
+    its operand mux would read the low four bits and address r15 instead
+
+That is the same reasoning `kx` needed a CAPS bit for, and the same
+shape of refusal: the reserved-bit rule protects a NEW host from an
+OLD image, and a CAPS bit protects an OLD bitstream from a NEW one.
+
+**The constant bank as per-run data.** The header's `reserved[0]` is
+now `flags`. Bit 0 is `CFT_PROG_FLAG_BANK_EXT`: the image carries no
+constant section at all - it is exactly `32 + 8 * n_insns` bytes -
+`n_consts` still says how many constants the program addresses and
+still bounds every index, and every run supplies exactly that many
+format-width values. `flags[31:1]` and `reserved[1]` are
+`CFT_ERR_ARTIFACT`, which is the version guard for every flag there
+will ever be: a bit this library cannot read is an image it cannot
+read, and the honest answer to a sentence you cannot parse is not to
+guess. `CFT_SEQ_FEAT_BANK_PTR` (bit 2, CAPS[6]) publishes the feature,
+and `cft_program_load` refuses a `BANK_EXT` image without it, before
+the map is touched - a 0x600 tile's fetch would read `n_consts`
+constants from an image that has none and then run whatever followed,
+which is not a fault the tile can raise.
+
+Two entry points, and each refuses the other's programs by name:
+
+    cft_status cft_program_run_bank(cft_program *prog,
+                                    const void *bank, size_t bank_bytes,
+                                    const void *a, const void *b,
+                                    const void *c,
+                                    void *deposits, uint32_t *counts,
+                                    size_t n,
+                                    uint32_t *flags_out, uint32_t *bus_out);
+
+`bank_bytes` must equal `n_consts` times the format's element size.
+`cft_program_run` on a `BANK_EXT` program is
+`CFT_ERR_INVALID_ARGUMENT` naming `cft_program_run_bank`; a non-NULL
+bank on a program that carries its own constants is the same, naming
+`cft_program_run`. A program has ONE source of constants, and a bank
+that was silently ignored is two machines computing on different
+numbers while agreeing about the image. A NULL bank of zero bytes on
+an ordinary program is accepted and is exactly `cft_program_run`, so a
+caller that always uses `run_bank` needs no branch.
+
+`cft_program_info` gains `uint32_t flags`, struct-size-gated: a caller
+built against the 0.8 header passes the 0.8 `struct_size` and the
+field is not written past it - which `api-test` checks with a sentinel
+rather than trusting.
+
+**The digest.**
+
+    cft_status cft_program_digest(cft_program *prog,
+                                  const void *bank, size_t bank_bytes,
+                                  uint8_t out[32]);
+
+SHA-256 over the image bytes followed by the bank bytes, so what ran
+is one hash of program and data together. It holds the bank to exactly
+the rule the run does, including refusing a `BANK_EXT` program with no
+bank: a digest over a bank the program could not have run names
+nothing, and a program with two ways to be digested has no name at
+all. For a program that carries its own constants the digest is the
+hash of the image, which `cft_sha256` gives independently - and
+`api-test` checks the two agree.
+
+**The library therefore carries a SHA-256**, exported as `cft_sha256`
+because every tool that attests a run wants the same hash over its own
+outputs. There were four private copies in `host/tools` -
+`collatz.c`, `enclose.c`, `mersenne.c`, `orbits.c`, all byte-identical
+- and they now share `host/src/sha256.c`. Its round constants are
+DERIVED, from the cube roots of the first sixty-four primes by integer
+search, as the standing rule asks; FIPS 180-4's own two worked
+examples in `api-test` are what prove the derivation landed on
+SHA-256, and each tool's own check recomputes its whole chain with
+Python's `hashlib`.
+
+**What the loader refuses, in full, after revision 2.** Everything
+docs/SEQUENCER.md lists, plus: a set bit in `flags[31:1]` or a
+non-zero `reserved[1]` (`CFT_ERR_ARTIFACT`); a `BANK_EXT` image whose
+length still includes a constant section (`CFT_ERR_ARTIFACT`, because
+a program is exactly its header, its constants and its instructions);
+`imm[31:28]` non-zero on an ALU instruction; the register high bit of
+an operand whose `k` bit is set, under `kx` as well, since a constant
+index is four bits or a byte of `imm` and never five; any bit but
+`imm[25]` on a `DEPOSIT` or a `SETACT`; any bit of `imm` at all on a
+`HALT`, an `ENDREP` or an `ACTALL`.
+
+**One reading of the contract, recorded because it is a choice.**
+`REPEAT` reads its whole immediate as the trip count and always has,
+so the canonicity rule - "any field an instruction does not read being
+non-zero" - reaches none of it, and `imm[27:24]` on a `REPEAT` is
+count bits rather than register high bits. Constraining them would
+refuse every trip count at or above 2^24, including the `repeat
+0xffffffff` docs/SEQUENCER.md's own worst-case paragraph relies on
+being loadable and refused by the 2^40 bound instead. The contract's
+sentence "on the other four none" is read as being about the four
+codes that do not read `imm`; `REPEAT` is the one that does.
+
+**On the wire and on the tile.** The remote protocol gains
+`PROG_RUN_BANK` (docs/REMOTE.md); the XRT backend accepts VERSION
+`0x700`, writes `BANK_PTR` at 0x64/0x68 by passing the bank as kernel
+argument 8 on the A master, and sends the image whole - a `BANK_EXT`
+image has no constant section to strip, which is the same reason the
+image is kept whole in the first place.
