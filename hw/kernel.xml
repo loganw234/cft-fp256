@@ -71,6 +71,22 @@
       <arg name="cnt" addressQualifier="1" id="7" port="m_axi_d"
            size="0x8" offset="0x5C" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
+      <!-- The per-run constant bank (revision 2, 2026-09-08). APPENDED,
+           for the reason above: id 8 is a new position at the end of
+           every host's kernel call, and inserting one would renumber
+           a, b, c, d, prog and cnt in every binary already built.
+
+           bank is READ, and it is read by the sequencer through the
+           same master the program image arrives on, so it binds to
+           m_axi_a exactly as prog does - the image fetch and the bank
+           fetch are two passes of one FETCH and never overlap in time,
+           which is why no master is added and hw/link.cfg is unchanged.
+           Offset 0x64, matching BANK_PTR in rtl/cft_csr.sv; the size is
+           a pointer's, like every other addressQualifier="1" argument
+           here. -->
+      <arg name="bank" addressQualifier="1" id="8" port="m_axi_a"
+           size="0x8" offset="0x64" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
     </args>
   </kernel>
 </root>

@@ -1,5 +1,12 @@
 # The orbit sequencer
 
+*The sections below describe **revision 2** (2026-09-08): thirty-two
+registers a lane, 4,096 instructions a tile, and a constant bank that
+can ride with the run instead of with the image. The section at the
+end of this file is the record of that change and the reasoning behind
+each of the three; everything before it has been updated to describe
+the model as it now is. VERSION 0x700, CAPS[6:4].*
+
 STATUS: design, golden model, software implementation, kernel
 integration - and, as of 2026-09-01, **the RTL core itself, benched
 bit-exact against the model**. `python/cft_golden/seq.py` is the
@@ -27,8 +34,10 @@ What exists around it as of 2026-09-01: `cft_seq` is instantiated in
 `cft_krnl` as a peer of `cft_engine_stream`, sharing the A and D
 masters *and the tile's one `cft_lanes` array* under a `MODE[15]`
 select registered at the accepted start; the CSR map carries
-`PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C (VERSION 0x600, CAPS bit 15)
-and `hw/kernel.xml` carries the matching arguments 6 and 7;
+`PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C and, since revision 2,
+`BANK_PTR` at 0x64 (VERSION 0x700, CAPS bit 15 for the sequencer and
+[6:4] for its features) and `hw/kernel.xml` carries the matching
+arguments 6, 7 and 8;
 `cft_program_run` dispatches to the device when the program was loaded
 on one, through `cftx_program_run` on a single compute unit;
 and `tb/test_krnl_seq.py` scores a full-kernel run against `seq.py` on
@@ -246,13 +255,24 @@ assumed - the same reason a bitstream carries a hash.
         u32 precision;      // the PREC_CODE ladder; a program is
                             // compiled for one format, because its
                             // constants are format-width values
-        u32 reserved[2];
+        u32 flags;          // bit 0 BANK_EXT; [31:1] reserved, zero
+        u32 reserved;       // reserved, zero
     };
 
 Then `n_consts` format-width constants, then `n_insns` 64-bit
-instructions.
+instructions - unless `flags.BANK_EXT` is set, in which case the image
+carries NO constant section and is exactly `32 + 8 * n_insns` bytes,
+with the constants arriving per run through `BANK_PTR` (R3 below).
+`n_consts` still says how many the program addresses either way.
 
-Each lane owns **16 registers** of format width and one **active**
+Both of the header's last two words are checked, and a set bit in
+either is refused. That is newer than it looks: `flags` was
+`reserved[0]` and the 0x600 tile checked neither word, which is
+exactly why `BANK_EXT` needs a CAPS bit rather than only a header flag
+- an older tile would read the flag as a reserved word it never looks
+at, and then read constants out of an image that has none.
+
+Each lane owns **32 registers** of format width and one **active**
 bit. The constant bank is separate and read-only: constants are shared
 across lanes, so putting them in the register file would multiply
 their cost by the lane count for no benefit. On a chiplet that
@@ -260,7 +280,7 @@ distinction is most of the area argument.
 
 **The inputs are the streams that already exist.** A lane starts with
 `r0`, `r1` and `r2` loaded from the same three operand streams the
-elementwise engine already reads, and `r3..r15` at `+0`. So a
+elementwise engine already reads, and `r3..r31` at `+0`. So a
 sequencer run needs no new input path in the hardware, no new CSR, and
 no new host concept - the seed point, its parameter and whatever else
 the map needs arrive exactly the way `a`, `b` and `c` always have.
@@ -316,14 +336,17 @@ all but one idle.
 The pleasing part is that this makes the register file
 **precision-independent**. A beat is 32 bytes whatever the format, so
 
-    register file  =  16 registers * LATENCY beats * 32 bytes  =  7.5 KiB
+    register file  =  32 registers * LATENCY beats * 32 bytes  =  15 KiB
 
 at fp32, fp64, fp128 and fp256 alike - 120 fp32 lanes or 15 fp256
-lanes, the same silicon. The deposit buffer scales the same way:
+lanes, the same silicon. (It was 16 registers and 7.5 KiB until
+revision 2 doubled the file; what that cost on the U50 is measured in
+docs/VALIDATION.md's 2026-09-08 entry rather than estimated here.) The
+deposit buffer scales the same way:
 
     deposit buffer  =  max_deposits * LATENCY beats * 32 bytes
 
-so it passes the register file at `max_deposits > 16` and dominates
+so it passes the register file at `max_deposits > 32` and dominates
 from there, which is the regime an orbit actually wants. The earlier
 claim that the deposit buffer simply dominates was written before the
 lane-block floor was worked out; both numbers are the design, and
@@ -351,17 +374,28 @@ One 64-bit little-endian word.
 | bits | field | meaning |
 |---|---|---|
 | 7:0 | `op` | ALU opcode when `ctrl=0`, control code when `ctrl=1` |
-| 11:8 | `rd` | destination register |
-| 15:12 | `ra` | source A |
-| 19:16 | `rb` | source B |
-| 23:20 | `rc` | source C |
+| 11:8 | `rd` | destination register, low four bits |
+| 15:12 | `ra` | source A, low four bits |
+| 19:16 | `rb` | source B, low four bits |
+| 23:20 | `rc` | source C, low four bits |
 | 26:24 | `rnd` | 754 rounding attribute for this instruction |
 | 27 | `ka` | source A names the constant bank, not a register |
 | 28 | `kb` | as `ka`, for source B |
 | 29 | `kc` | as `ka`, for source C |
 | 30 | `kx` | the constant indices come from `imm`, not from the operand fields |
 | 31 | `ctrl` | this is a control instruction |
-| 63:32 | `imm` | the trip count on `REPEAT`; the three constant indices under `kx`; zero otherwise |
+| 55:32 | `imm[23:0]` | the three constant indices under `kx`; part of the trip count on `REPEAT`; zero otherwise |
+| 56 | `imm[24]` | `rd[4]`, the fifth bit of the destination register |
+| 57 | `imm[25]` | `ra[4]` |
+| 58 | `imm[26]` | `rb[4]` |
+| 59 | `imm[27]` | `rc[4]` |
+| 63:60 | `imm[31:28]` | reserved, must be zero |
+
+A register field is **five bits**: the low four in the operand field
+above and the fifth in `imm[27:24]`, which is R1 below. `REPEAT` is the
+one instruction that reads `imm` as a whole - its trip count - and it
+names no register, so all thirty-two bits are the trip count there and
+nothing in `imm[27:24]` is a register's high bit.
 
 ### Indexed constants (`kx`), 2026-09-07
 
@@ -436,8 +470,9 @@ top level.
 **A tile also has three capacities the contract does not fix.** They
 are build parameters of `cft_seq`, set where rtl/cft_krnl.sv
 instantiates it, and not part of the program model: **`MAXD = 64`
-deposit slots a lane**, `IMEM_D = 1024` instructions and `KMEM_D =
-256` constants. A header that asks for more than any of them is
+deposit slots a lane**, `IMEM_D = 4096` instructions (1024 until
+revision 2, which is what the card-day images hold) and `KMEM_D = 256`
+constants. A header that asks for more than any of them is
 refused by the tile at the header, before the constants and
 instructions stream in, in the same check that refuses a precision
 the tile was not configured for. A fourth number is not a memory
@@ -453,7 +488,8 @@ device is.
 
 **A host asks rather than guesses.** Since 2026-09-07 the tile
 publishes all four in `CAPS` (0x4C) as log2 - bits 19:16, 23:20 and
-27:24, with 7:4 a still-empty feature nibble - and `cft_get_caps`
+27:24, with 7:4 the feature nibble (`kx` at [4], `REGS32` at [5],
+`BANK_PTR` at [6] since revision 2) - and `cft_get_caps`
 carries them into `cft_caps.max_deposits`, `max_insns`, `max_consts`
 and `seq_features`. **Every backend publishes what it enforces and
 enforces what it publishes**, and `cft_program_load` refuses an
@@ -493,8 +529,23 @@ the hardware does not have to be:
   nested `REPEAT 0xffffffff` fit in 104 bytes and describe 3.4e38
   iterations, which terminates in the same sense the heat death of the
   universe does. The loader multiplies the nest out and refuses.
-- a constant index outside the bank, a reserved bit, a reserved header
-  word, or trailing bytes after the instruction stream
+- a constant index outside the bank, a reserved bit, a set bit in the
+  header's `flags[31:1]` or its remaining reserved word, or trailing
+  bytes after the instruction stream. A `BANK_EXT` image is exactly
+  `32 + 8 * n_insns` bytes and a self-contained one exactly
+  `32 + n_consts * element_bytes + 8 * n_insns`, so "trailing bytes"
+  means the same thing for both.
+- a **missing, wrong-size or unwanted bank**: a `BANK_EXT` program run
+  without one, or with a number of values that is not `n_consts`, or a
+  self-contained program handed one. Two sources for a constant is one
+  source too many, and a run whose constants nobody agreed on is the
+  failure the whole feature exists to make impossible.
+- a program that names a register above 15, or uses `kx`, or is
+  `BANK_EXT`, on a device whose CAPS does not publish that feature -
+  by name, naming the instruction, before the register map is touched.
+  An old tile has no rule that would refuse any of the three: its
+  operand mux reads the low four bits of a register field, and its
+  FETCH reads constants out of an image that may have none.
 - **any field an instruction does not read being non-zero.** An ALU
   instruction has no immediate; `DEPOSIT` reads only `ra`. Leaving
   those free would mean one operation had many encodings, and then a
@@ -508,11 +559,25 @@ the hardware does not have to be:
   under `kx` an operand whose `k` bit is set takes its index from
   `imm`, so its four-bit field is not read and must be zero; an
   operand whose `k` bit is clear names a register, so its byte of
-  `imm` is not read and must be zero; `imm[31:24]` is read by nothing;
+  `imm` is not read and must be zero; `imm[31:28]` is read by nothing;
   and `kx` itself selects nothing when no operand names a constant, so
   that combination is refused too - it is a second spelling of an
   ordinary three-register instruction. `kx` on a control instruction
   is refused for the same reason `ka` on a `DEPOSIT` is.
+
+  The five-bit register fields are four more applications of it again.
+  `imm[27:24]` are the fifth bits of `rd`, `ra`, `rb` and `rc`, so: an
+  operand whose `k` bit is set names a CONSTANT and its register high
+  bit is read by nothing (under `kx` too, where the index is a byte of
+  `imm` and the high bit is not part of it); a control instruction
+  reads at most `ra`, so `DEPOSIT` and `SETACT` may set `imm[25]` and
+  nothing else in that nibble, and `HALT`, `ENDREP` and `ACTALL` may
+  set no part of `imm` at all. `REPEAT` is the one exception and is not
+  really one: it reads `imm` in full as its trip count and names no
+  register, so there is no field there for a high bit to belong to -
+  which is also why `REPEAT 0xffffffff`, the program the worst-case
+  bound above exists for, is still a legal encoding and still runs
+  identically on a revision-1 tile.
 
   One redundancy is deliberately NOT refused: a `kx` instruction whose
   indices all happen to be below sixteen is a second spelling of a
@@ -697,7 +762,9 @@ for bit the program's equal, so nothing waits on them.
   index, or a constant bank the counter can address.
 - **A lane shift and an in-program cross-lane reduction** (Mersenne).
   A carry chain reads a neighbour and a convolution sums across lanes;
-  a lane has sixteen private registers and no path to another. A read
+  a lane has thirty-two private registers and no path to another (it
+  had sixteen when the ask was written; revision 2 widened the file
+  and did not add the path). A read
   of register r of lane i-1 would put the whole carry propagation
   on-chip as one REPEAT with SETACT on "still carrying"; a reduction
   would put the convolution there too. A partial workaround exists

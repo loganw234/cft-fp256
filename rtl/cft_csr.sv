@@ -42,7 +42,7 @@
 //                 a refusal is not a run, and scrubbing the previous
 //                 run's flags would be quietly rewriting history
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000600 (v0.6.0). Guards the REGISTER MAP,
+//   0x48  VERSION RO: 0x00000700 (v0.7.0). Guards the REGISTER MAP,
 //                 not the feature set - features are announced in CAPS.
 //                 A host accepts any version whose map it knows.
 //   0x4C  CAPS    RO: what this bitstream actually implements.
@@ -73,10 +73,14 @@
 //                 before issuing; the alternative is guessing from
 //                 VERSION, which stops working the moment one build
 //                 ships without a group.
-//                 [7:4]   sequencer feature nibble; [4] wide constant
-//                         index is set from 2026-09-07 (kx), the
-//                         other three assignments are reserved at
-//                         the seq_feat port below
+//                 [7:4]   sequencer feature nibble:
+//                         [4] wide constant index (kx, 2026-09-07)
+//                         [5] REGS32 - five-bit register fields, so a
+//                             lane owns 32 registers (2026-09-08)
+//                         [6] BANK_PTR - the per-run constant bank
+//                             at 0x64/0x68 (2026-09-08)
+//                         [7] reserved; assignments are made at the
+//                             seq_feat port below and nowhere else
 //                 [19:16] log2 of the deposit slots a lane (MAXD)
 //                 [23:20] log2 of the instruction capacity (IMEM_D)
 //                 [27:24] log2 of the constants an instruction can
@@ -113,7 +117,12 @@
 //                     SEQUENCER run's program image failed the
 //                     hardware's own header check (bad magic, a format
 //                     that is not MODE's, more instructions, constants
-//                     or deposit slots than the tile holds). That
+//                     or deposit slots than the tile holds, a header
+//                     `flags` bit this tile does not implement, or a
+//                     non-zero reserved[1] - the last two are checked
+//                     from revision 2 and were not before, which is
+//                     what makes an image built for a LATER revision
+//                     thrown back rather than half-understood). That
 //                     second kind may have READ the image before
 //                     refusing it, but it wrote nothing and computed
 //                     nothing, which is what the bit means either way.
@@ -141,8 +150,21 @@
 //                 deposit and the defined value of a slot no lane
 //                 wrote, so the count cannot be recovered from the
 //                 deposit buffer.
+//   0x64  BANK_PTR 64-bit HBM byte address of a run's CONSTANT BANK
+//                 (revision 2). Read by the sequencer only when the
+//                 program header's flags.BANK_EXT is set, and then it
+//                 is the only source of constants: n_consts dense
+//                 format-width values, laid out exactly as an image's
+//                 constant section is. One image per positive, loaded
+//                 once, with the levers riding as data. It binds to
+//                 m_axi_a, the master the image already arrives on -
+//                 the two never overlap in time, so no master is added
+//                 and hw/link.cfg needs nothing. CAPS[6] says whether
+//                 it exists; a 0x600 tile has no such register and its
+//                 FETCH would read constants out of an image that has
+//                 none, which is why the flag alone cannot guard it.
 //
-//                 These two sit ABOVE the read-only block rather than
+//                 These three sit ABOVE the read-only block rather than
 //                 beside the other pointers, because moving A_PTR..
 //                 D_PTR to make room would have changed every existing
 //                 argument offset - and hw/kernel.xml's argument ids
@@ -219,11 +241,12 @@ module cft_csr (
     output logic [63:0] cfg_c,
     output logic [63:0] cfg_d,
     output logic [63:0] cfg_prog,
+    output logic [63:0] cfg_bank,
     output logic [63:0] cfg_cnt
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  // v0.6.0: the sequencer's PROG_PTR and CNT_PTR exist.
+  // v0.7.0: BANK_PTR exists at 0x64/0x68.
   //
   // VERSION guards the REGISTER MAP, not the feature set. Adding an
   // opcode group does not move a register, so a host built for 0x410
@@ -241,12 +264,24 @@ module cft_csr (
   // what this register is for, and it is why 0x600 is a new entry in
   // the host's accepted set rather than a replacement for the old
   // ones - the old maps are still correct, just smaller.
-  localparam [31:0] VERSION = 32'h0000_0600;
+  //
+  // 0x600 -> 0x700 (revision 2, 2026-09-08) is a bump for exactly the
+  // same reason and no other: two registers exist at 0x64 and 0x68
+  // that did not, so a host that writes BANK_PTR to a 0x600 tile
+  // writes into a decode default and runs a BANK_EXT program against
+  // constants at address zero. Revision 2's other two changes do NOT
+  // move VERSION and could not: five-bit register fields and IMEM_D
+  // 4096 add no register, and features are announced in CAPS - REGS32
+  // at [5], BANK_PTR at [6], the instruction capacity in [23:20]
+  // where it was already published. The host accepts {0x410, 0x500,
+  // 0x600, 0x700}: the card-day images are 0x410 and 0x600 and their
+  // maps are still correct, just smaller.
+  localparam [31:0] VERSION = 32'h0000_0700;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
   logic [31:0] mode_q;
-  logic [63:0] n_q, a_q, b_q, c_q, d_q, prog_q, cnt_q;
+  logic [63:0] n_q, a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
 
   assign ap_idle  = !busy;
   assign cfg_op   = mode_q[7:0];
@@ -259,6 +294,7 @@ module cft_csr (
   assign cfg_c = c_q;
   assign cfg_d = d_q;
   assign cfg_prog = prog_q;
+  assign cfg_bank = bank_q;
   assign cfg_cnt  = cnt_q;
 
   // ---- write channel ------------------------------------------------
@@ -299,7 +335,7 @@ module cft_csr (
       ier_q  <= '0;
       mode_q <= '0;
       n_q <= '0; a_q <= '0; b_q <= '0; c_q <= '0; d_q <= '0;
-      prog_q <= '0; cnt_q <= '0;
+      prog_q <= '0; cnt_q <= '0; bank_q <= '0;
     end else begin
       start <= 1'b0;
 
@@ -354,6 +390,10 @@ module cft_csr (
           10'h016: prog_q[63:32] <= (prog_q[63:32] & ~wmask) | (wdata_q & wmask);
           10'h017: cnt_q[31:0]   <= (cnt_q[31:0]   & ~wmask) | (wdata_q & wmask);
           10'h018: cnt_q[63:32]  <= (cnt_q[63:32]  & ~wmask) | (wdata_q & wmask);
+          // 0x64 / 0x68: BANK_PTR, appended for the same reason and in
+          // the same place as the two above.
+          10'h019: bank_q[31:0]  <= (bank_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h01A: bank_q[63:32] <= (bank_q[63:32] & ~wmask) | (wdata_q & wmask);
           default: ;
         endcase
       end
@@ -408,6 +448,8 @@ module cft_csr (
           10'h016: s_axi_control_rdata <= prog_q[63:32];
           10'h017: s_axi_control_rdata <= cnt_q[31:0];
           10'h018: s_axi_control_rdata <= cnt_q[63:32];
+          10'h019: s_axi_control_rdata <= bank_q[31:0];
+          10'h01A: s_axi_control_rdata <= bank_q[63:32];
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end
