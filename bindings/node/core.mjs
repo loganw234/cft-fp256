@@ -31,15 +31,30 @@
 // implements it.
 
 import {
+  ALU_EXT_IMUL,
   CLASS_NAMES, FLAGS_ALL, FORMATOF_ARITY, FORMATOF_METHOD, FP32, FP64,
   FP128, FP256, MINMAG_METHOD, OP_ABS, OP_ADD, OP_CMPEQ,
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
   OP_SUMABS, OP_SUMSQ,
-  RDN, RMM, RNE, RTZ, RUP, STATUS_DEPOSIT_OVERFLOW, TRANSCEND_BINARY,
+  PROG_FLAG_BANK_EXT,
+  RDN, RMM, RNE, RTZ, RUP,
+  SEQ_FEAT_BANK_PTR, SEQ_FEAT_REGS32, SEQ_FEAT_WIDE_CONST,
+  STATUS_DEPOSIT_OVERFLOW, TRANSCEND_BINARY,
   TRANSCEND_INTARG, TRANSCEND_UNARY,
-  checkStatus, flagNames, loadModule, withScratch,
+  checkStatus, flagNames, loadModule, seqFeatureNames, withScratch,
 } from "./lib.mjs";
+
+// Re-exported so a caller that imports the surface gets the constants
+// the surface's own answers are tested with. seqFeatures is a WORD and
+// these are its masks; a package that returned the word and made the
+// caller transcribe the bits would have moved the transcription hazard
+// one file outwards rather than removing it (lib.mjs' audit() holds
+// these five to the module).
+export {
+  ALU_EXT_IMUL, PROG_FLAG_BANK_EXT, SEQ_FEAT_BANK_PTR, SEQ_FEAT_REGS32,
+  SEQ_FEAT_WIDE_CONST, STATUS_DEPOSIT_OVERFLOW, seqFeatureNames,
+};
 
 // Three arities, not two: TRANSCEND_INTARG's second operand is an
 // int64 array rather than an encoding, so it cannot share the binary
@@ -583,6 +598,38 @@ export class Context {
   get rounding() { return ROUNDING_NAME.get(this._rnd); }
   /** "software", or the device runtime's name, from cft_get_caps. */
   get backend() { return this._C.capsBackend(this._dev); }
+
+  /** The sequencer's feature word, cft_caps.seq_features.
+   *
+   *  Test it with SEQ_FEAT_WIDE_CONST, SEQ_FEAT_REGS32,
+   *  SEQ_FEAT_BANK_PTR and ALU_EXT_IMUL, which this module re-exports,
+   *  or read seqFeatureNames for the list. A CLEAR BIT IS ABSENT,
+   *  not unknown: loadProgram() refuses an image that uses the feature
+   *  and names it, so ask before building one - the same discipline as
+   *  an opcode, and the reason this is exported at all. A BANK_EXT
+   *  image will not load where SEQ_FEAT_BANK_PTR is clear, and finding
+   *  that out by reading the refusal is the position cft_caps exists
+   *  to avoid. */
+  get seqFeatures() { return this._C.capsSeqFeatures(this._dev) >>> 0; }
+  /** The features this device publishes, by name. */
+  get seqFeatureNames() { return seqFeatureNames(this.seqFeatures); }
+
+  /** What a program image may declare and still be accepted HERE.
+   *
+   *  These are not part of the program model - docs/SEQUENCER.md fixes
+   *  what an instruction MEANS, not how many of them a tile holds - so
+   *  they differ between backends, and a program that runs on one
+   *  device is not thereby a program that fits another.
+   *
+   *  ZERO MEANS UNKNOWN, not zero capacity, and nothing is enforced
+   *  against an unknown (cft.h). That is a different rule from the
+   *  feature word above, where a clear bit is a definite no. The
+   *  software backend behind this package always answers, so a zero
+   *  here would be news. */
+  get maxDeposits() { return this._C.capsMaxDeposits(this._dev) >>> 0; }
+  get maxInsns() { return this._C.capsMaxInsns(this._dev) >>> 0; }
+  get maxConsts() { return this._C.capsMaxConsts(this._dev) >>> 0; }
+
   get abiVersion() {
     const v = this._C.abiVersion() >>> 0;
     return `${v >>> 16}.${v & 0xffff}`;
@@ -2345,6 +2392,11 @@ export class Program {
     this._maxDeposits = info.maxDeposits;
     this._nInsns = info.nInsns;
     this._nConsts = info.nConsts;
+    // cft_program_info.flags, ABI 0.9's appended field, through the
+    // accessor rather than a fifth out-pointer - cft_program_get_info
+    // grew and cftw_program_get_info deliberately did not. Read once
+    // here because a program's shape is fixed at load.
+    this._flags = this._C.programFlags(handle) >>> 0;
     /** The IEEE flags of the most recent run. */
     this.lastFlags = 0;
     /** The STATUS word of the most recent run - bus faults and the
@@ -2364,7 +2416,41 @@ export class Program {
    *  P2). */
   get maxDeposits() { return this._maxDeposits; }
   get nInsns() { return this._nInsns; }
+  /** How many constants this program ADDRESSES - which is not the same
+   *  as how many its image carries. Under BANK_EXT the image carries
+   *  none and this is how many every run must supply. */
   get nConsts() { return this._nConsts; }
+
+  /** The image header's `flags` word - the header word that was
+   *  reserved[0] until 2026-09-08. PROG_FLAG_BANK_EXT is the only bit
+   *  assigned; every other one is reserved-must-be-zero, and an image
+   *  that sets one never got this far because the loader refused it.
+   *  That rule is what lets a later flag be added without a version
+   *  step, so a caller should test the bit it means rather than
+   *  comparing the word. */
+  get flags() { return this._flags; }
+
+  /** True when the image carries NO constant section: nConsts says how
+   *  many constants the program addresses and every run supplies them
+   *  through runBank(). One image per positive, loaded once, with the
+   *  levers riding as data (docs/SEQUENCER.md revision 2, R3).
+   *
+   *  Such an image only LOADS on a device whose caps carry
+   *  SEQ_FEAT_BANK_PTR, so a Program that answers true here is already
+   *  proof the device published it. */
+  get bankExternal() {
+    return (this._flags & PROG_FLAG_BANK_EXT) !== 0;
+  }
+
+  /** The bank every run of this program must supply, in BYTES:
+   *  nConsts values of the program's format, densely packed exactly as
+   *  an image's constant section is laid out. Zero for a program that
+   *  carries its own constants, which is also the only bank such a
+   *  program accepts. */
+  get bankBytes() {
+    return this.bankExternal ? this._nConsts * this._fi.size : 0;
+  }
+
   /** True once free() has been called. A freed program refuses every
    *  call rather than reaching into a heap block the library has
    *  handed back. */
@@ -2401,6 +2487,109 @@ export class Program {
    *              the excess; what fit is still correct. */
   run(a, b = null, c = null) {
     this._live("run");
+    // A BANK_EXT program has no constants of its own, so this entry
+    // point has nothing to run it on. The library refuses it too, with
+    // CFT_ERR_INVALID_ARGUMENT naming cft_program_run_bank; the check
+    // is repeated here only to name the method a JavaScript caller
+    // actually wants. It is the same rule, not a second opinion about
+    // it - and the library's refusal still stands behind everything
+    // below, which is why nothing here re-validates an image.
+    if (this.bankExternal)
+      throw new TypeError(
+        "this program's header flags carry BANK_EXT, so its constants " +
+        `arrive with the run: call runBank(bank, a, b, c) with the ` +
+        `${this._nConsts} ${this._fi.ieeeName} values it addresses ` +
+        `(${this.bankBytes} bytes)`);
+    return this._runWith(null, a, b, c);
+  }
+
+  /** The same run, with the constant bank supplied as DATA (ABI 0.9).
+   *
+   *  A BANK_EXT program's image is a header and an instruction stream:
+   *  it is the SCHEDULE, and it is what a digest names. Its constants
+   *  arrive here - `nConsts` values of the program's format, densely
+   *  packed exactly as an image's constant section is laid out - so one
+   *  image can be loaded once and run with the levers, the clock and
+   *  the pass riding as data (docs/SEQUENCER.md revision 2, R3).
+   *
+   *  `bank` is an array of values this program's format accepts, or a
+   *  Uint8Array of bankBytes bytes already encoded - the same two forms
+   *  a, b and c take. Everything else is run()'s, unchanged, and so is
+   *  the result.
+   *
+   *  THE TWO ENTRY POINTS REFUSE EACH OTHER'S PROGRAMS, and that is
+   *  deliberate rather than tidy: a program has one source of
+   *  constants, and letting a caller pass a bank that was silently
+   *  ignored is how two machines end up computing on different numbers
+   *  while agreeing about the image (cft.h). */
+  runBank(bank, a, b = null, c = null) {
+    this._live("runBank");
+    return this._runWith(this._packBank(bank, "runBank"), a, b, c);
+  }
+
+  /** The bank a run or a digest was handed, encoded and held to this
+   *  program - the JavaScript half of seq_check_bank in host/src.
+   *
+   *  Two refusals, both about a program having exactly one source of
+   *  constants: a program that carries its own refuses a bank at all,
+   *  and a BANK_EXT program refuses a bank that is not the size its
+   *  nConsts says. The library makes both checks again and its message
+   *  is the one a caller sees when a raw Uint8Array gets through; this
+   *  one exists because a caller passing an ARRAY OF VALUES has to be
+   *  told about values, and a byte count it never wrote would send it
+   *  looking in the wrong place. */
+  _packBank(bank, who) {
+    const fi = this._fi;
+    if (!this.bankExternal) {
+      if (bank !== null && bank !== undefined)
+        throw new TypeError(
+          `${who} was given a constant bank and this program carries its ` +
+          `own ${this._nConsts} constants in its image (its header flags ` +
+          `do not set BANK_EXT). A program has one source of constants; ` +
+          `pass no bank, or call run(a, b, c)`);
+      return null;
+    }
+    if (bank === null || bank === undefined) {
+      // A BANK_EXT program that addresses NO constants has an empty
+      // bank, and no bank is the right way to pass an empty one - which
+      // is what seq_check_bank does with a want of zero. The image is
+      // still BANK_EXT (it carries no constant section and refuses
+      // run()); it simply has nothing to supply.
+      if (this.bankBytes === 0) return new Uint8Array(0);
+      throw new TypeError(
+        `${who}: this program's constants arrive with the run (BANK_EXT) ` +
+        `and no bank was given - ${this._nConsts} ${fi.ieeeName} values ` +
+        `are due`);
+    }
+    let buf;
+    if (bank instanceof Uint8Array) buf = bank;
+    else if (Array.isArray(bank)) {
+      const ctx = this._formatCtx();
+      buf = new Uint8Array(fi.size * bank.length);
+      bank.forEach((v, i) => buf.set(ctx.from(v).bytes, i * fi.size));
+    } else {
+      throw new TypeError(
+        `${who} wants the bank as an array of values or a Uint8Array`);
+    }
+    if (buf.length !== this.bankBytes)
+      throw new RangeError(
+        `${who} was given a ${buf.length}-byte constant bank and this ` +
+        `program's bank is ${this.bankBytes} bytes - ${this._nConsts} ` +
+        `${fi.ieeeName} constants, densely packed, exactly as an image's ` +
+        `constant section is laid out`);
+    return buf;
+  }
+
+  /** run() and runBank() are one call with one difference, so they are
+   *  one implementation: `bankBuf` is null for cft_program_run and a
+   *  Uint8Array - possibly EMPTY, for a BANK_EXT program that addresses
+   *  no constants - for cft_program_run_bank. Which entry point is
+   *  called turns on `!== null` and not on the length, because those
+   *  two are different questions and only the first one is "does this
+   *  program's constants arrive with the run". Every argument check,
+   *  buffer shape and returned field below is shared by construction
+   *  rather than by two copies agreeing. */
+  _runWith(bankBuf, a, b = null, c = null) {
     const M = this._M, C = this._C, fi = this._fi;
     const ctx = this._formatCtx();
     const pack = (arr, what) => {
@@ -2436,9 +2625,17 @@ export class Program {
       const pd = s.alloc(Math.max(ndep * fi.size, 1));
       const pcnt = s.alloc(Math.max(n * 4, 1));
       const pfl = s.alloc(4), pbus = s.alloc(4);
-      const st = C.programRun(this._handle, pa, pb, pc, pd, pcnt, n,
-                              pfl, pbus);
-      checkStatus(C, st, "cft_program_run");
+      // A zero-length bank crosses as a NULL pointer with a zero
+      // length, which is what cft_program_run_bank's `bank_bytes ?
+      // bank : NULL` expects and what avoids a malloc(0) here.
+      const pbank = bankBuf && bankBuf.length ? s.put(bankBuf) : 0;
+      const banked = bankBuf !== null;
+      const who = banked ? "cft_program_run_bank" : "cft_program_run";
+      const st = banked
+        ? C.programRunBank(this._handle, pbank, bankBuf.length,
+                           pa, pb, pc, pd, pcnt, n, pfl, pbus)
+        : C.programRun(this._handle, pa, pb, pc, pd, pcnt, n, pfl, pbus);
+      checkStatus(C, st, who);
       const flags = s.u32(pfl), status = s.u32(pbus);
       const raw = s.get(pd, Math.max(ndep * fi.size, 1));
       const deposits = [];
@@ -2452,6 +2649,33 @@ export class Program {
       this._ctx.lastFlags = flags;
       return { deposits, counts, flags, status,
                depositOverflow: (status & STATUS_DEPOSIT_OVERFLOW) !== 0 };
+    });
+  }
+
+  /** SHA-256 of the image bytes followed by the bank bytes (ABI 0.9),
+   *  as a Uint8Array of 32.
+   *
+   *  What ran, as ONE hash of program and data together. A program is a
+   *  flat byte image precisely so that a readback can attest it, and
+   *  BANK_EXT moves half of what determines the answer out of the
+   *  image - so hashing the image alone would name the schedule and say
+   *  nothing about the numbers it ran on.
+   *
+   *  `bank` follows the same rule as runBank's, and for the same
+   *  reason: a digest over a bank the program could not have run is a
+   *  name for nothing, and a program with two ways to be digested has
+   *  no name at all. A program that carries its own constants takes no
+   *  bank, which is its only form. */
+  digest(bank = null) {
+    this._live("digest");
+    const buf = this._packBank(bank, "digest");
+    return withScratch(this._M, (s) => {
+      const pbank = buf && buf.length ? s.put(buf) : 0;
+      const pout = s.alloc(32);
+      const st = this._C.programDigest(this._handle, pbank,
+                                       buf ? buf.length : 0, pout);
+      checkStatus(this._C, st, "cft_program_digest");
+      return s.get(pout, 32);      // Scratch.get slices, so this outlives s
     });
   }
 
