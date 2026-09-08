@@ -73,6 +73,11 @@ import {
   ROUND_NAMES, FORMAT_SIZE, HDR_BYTES, STATUS_TEXT, crc32, packFrame,
   unpackFrame,
 } from "../wasm/remote.mjs";
+// The encoder, for the BANK_EXT image the bank round trip needs. This
+// file writes a program by hand for the same reason program_test.mjs
+// does, and seq_corpus.mjs is where that encoder lives.
+import { FLAG_BANK_EXT, alu, ctl, packBank, programImage }
+  from "./seq_corpus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -316,6 +321,33 @@ function localRun(M, C, dev, op, fmt, rnd, a, b, c, n) {
     const pd = s.alloc(n * esz), pf = s.alloc(4), pbus = s.alloc(4);
     const st = C.run(dev, op, fmt, rnd, pa, pb, pc, pd, n, pf, pbus);
     return { status: st, d: s.get(pd, n * esz), flags: s.u32(pf) };
+  } finally { s.free(); }
+}
+
+/** The same program and the same bank, run in THIS process through
+ *  cft_program_run_bank (ABI 0.9), so that what came back over the wire
+ *  has something to be equal to. The image is loaded and freed per
+ *  call: the point of comparison is the run, and a cached handle would
+ *  be one more thing the two sides could differ about. */
+function localProgramRunBank(M, C, dev, image, bank, a, n, maxDeposits, esz) {
+  const s = new Scratch(M);
+  try {
+    const pimg = s.put(image), pout = s.alloc(4);
+    const st = C.programLoad(dev, pimg, image.length, pout);
+    if (st !== 0)
+      return { status: st, why: `${C.strerror(st)}: ${C.lastError()}` };
+    const prog = s.u32(pout);
+    try {
+      const pbank = s.put(bank), pa = s.put(a);
+      const pd = s.alloc(Math.max(n * maxDeposits * esz, 1));
+      const pcnt = s.alloc(n * 4), pf = s.alloc(4), pbus = s.alloc(4);
+      const rst = C.programRunBank(prog, pbank, bank.length, pa, 0, 0,
+                                   pd, pcnt, n, pf, pbus);
+      const counts = new Uint32Array(n);
+      for (let i = 0; i < n; i++) counts[i] = s.u32(pcnt + 4 * i);
+      return { status: rst, d: s.get(pd, n * maxDeposits * esz), counts,
+               flags: s.u32(pf), bus: s.u32(pbus) };
+    } finally { C.programFree(prog); }
   } finally { s.free(); }
 }
 
@@ -958,6 +990,139 @@ async function main() {
       const after = await wsDev.capsAgain();
       check(after.backend === wsDev.caps.backend,
             "and the connection still answers CAPS afterwards");
+    }
+    {
+      // PROG_RUN_BANK, docs/REMOTE.md's newest message (ABI 0.9), from
+      // JavaScript. The C side of this is program_bank_tests in
+      // host/tests/remote_test.c and it makes the same three claims;
+      // this is the one that goes over the WebSocket transport and
+      // through bindings/wasm/remote.mjs' own frame builder.
+      //
+      //   - the bank CROSSES THE WIRE and is what the run computed on,
+      //     which is checkable only the way it is here: two banks, two
+      //     answers, each equal to the same image run with the same
+      //     bank in this process;
+      //   - the fourth fixed word, zero-and-reserved on PROG_RUN, is
+      //     the bank's length, and the bank sits between the fixed
+      //     fields and the operands;
+      //   - the image crosses ONCE through PROG_LOAD - it is the
+      //     schedule - and the bank crosses with each run.
+      //
+      // A BANK_EXT image on a server whose device lacks BANK_PTR is
+      // refused by the server's own loader one round trip earlier, and
+      // the client refuses to send the run at all; neither is testable
+      // from here, because the server's device is this library's
+      // software backend and it publishes the bit. It is NOT TESTED
+      // rather than assumed, and it says so.
+      const bankPtr = (wsDev.caps.seqFeatures & 0x04) !== 0;
+      if (!bankPtr) {
+        check(false,
+              `the server's device does not publish BANK_PTR ` +
+              `(seq_features 0x${wsDev.caps.seqFeatures.toString(16)}) - ` +
+              `NOT TESTED, and on the software backend that is news`);
+      } else {
+        // r3 = copysign(K0, K0); r3 = r3 * r0 + K1; deposit r3; halt.
+        // Both constants come from the bank, so nothing about the
+        // answer survives losing it.
+        const image = programImage({
+          formatCode: 0, elementBytes: 4, nConsts: 2, maxDeposits: 1,
+          flags: FLAG_BANK_EXT,
+          insns: [
+            alu({ op: 6, rd: 3, ra: 0, rb: 0, ka: true, kb: true }),
+            alu({ op: 0, rd: 3, ra: 3, rb: 0, rc: 1, kc: true }),
+            ctl("deposit", 3),
+            ctl("halt"),
+          ],
+        });
+        check(image.length === 32 + 4 * 8,
+              "a BANK_EXT image is header and instructions and no more: " +
+              `${image.length} bytes`);
+
+        const f32 = (x) => {
+          const b = new Uint8Array(4);
+          new DataView(b.buffer).setFloat32(0, x, true);
+          return b;
+        };
+        const banks = [
+          packBank([f32(1.5), f32(1.25)], 4),
+          packBank([f32(1.25), f32(1.5)], 4),
+        ];
+        const N = 96;                       // more than one 64-lane block
+        const a = new Uint8Array(N * 4);
+        const av = new DataView(a.buffer);
+        for (let i = 0; i < N; i++) av.setFloat32(i * 4, i + 1, true);
+
+        const loaded = await wsDev.programLoad(image);
+        check(loaded.format === 0 && loaded.maxDeposits === 1,
+              `PROG_LOAD of a BANK_EXT image reports fp32 and one deposit ` +
+              `slot (format ${loaded.format}, ${loaded.maxDeposits})`);
+
+        const answers = [];
+        for (const [i, bank] of banks.entries()) {
+          const got = await wsDev.programRunBank(
+            loaded.handle, loaded.format, bank, { a }, N,
+            loaded.maxDeposits, true);
+          const want = localProgramRunBank(M, C, localDev, image, bank, a, N,
+                                           loaded.maxDeposits, 4);
+          check(want.status === 0,
+                `bank ${i}: the local run succeeded (${C.strerror(want.status)})`);
+          check(same(got.deposits, want.d) &&
+                same([...got.counts], [...want.counts]) &&
+                got.flags === want.flags && got.bus === want.bus,
+                `bank ${i}: the server and this process agree over ${N} ` +
+                `lanes - bits, counts, flags and status`);
+          answers.push(hex(got.deposits));
+        }
+        check(answers[0] !== answers[1],
+              "two banks, two answers over the wire - if they agreed, the " +
+              "bank never left this process and one image would be one " +
+              "polynomial after all");
+
+        // The frame's own shape, asserted rather than inferred from the
+        // answer: the fourth word is the bank length and the bank is
+        // the next bankBytes of payload. Built here the way the client
+        // builds it and sent as a raw frame, so a change to the layout
+        // fails HERE and not as a wrong number somewhere downstream.
+        {
+          const head = new Uint8Array(24);
+          const hv = new DataView(head.buffer);
+          hv.setUint32(0, loaded.handle, true);
+          hv.setUint32(4, 1, true);            // present: a only
+          hv.setUint32(8, 1, true);            // want_counts
+          hv.setUint32(12, banks[0].length, true);
+          hv.setBigUint64(16, 8n, true);       // eight lanes
+          const payload = new Uint8Array(24 + banks[0].length + 8 * 4);
+          payload.set(head, 0);
+          payload.set(banks[0], 24);
+          payload.set(a.subarray(0, 8 * 4), 24 + banks[0].length);
+          const resp = await wsDev.request(OP.PROG_RUN_BANK, payload);
+          check(resp.length === 8 + 8 * 4 + 8 * 4,
+                `a hand-built PROG_RUN_BANK frame answers with the flags, ` +
+                `bus, deposits and counts that are due (${resp.length} bytes)`);
+          const ref = localProgramRunBank(M, C, localDev, image, banks[0],
+                                          a.subarray(0, 8 * 4), 8, 1, 4);
+          check(same(resp.subarray(8, 8 + 32), ref.d),
+                "and the deposits it carries are this process' own");
+        }
+
+        // An opcode the server does not serve is the OPERATION's
+        // failure and not a broken stream - which is the property the
+        // whole "a new opcode rather than a longer PROG_RUN" decision
+        // rests on, and what a pre-0.9 server does with 0x0023. Tested
+        // from the only side this process can reach.
+        let unknown = null;
+        try { await wsDev.request(0x00A0, new Uint8Array(0)); }
+        catch (e) { unknown = e; }
+        check(unknown instanceof RemoteError && !unknown.refusal,
+              `an opcode this server does not serve is refused by name, ` +
+              `not fatally: "${unknown ? unknown.message.slice(0, 60)
+                                       : "(none)"}"`);
+        const alive = await wsDev.capsAgain();
+        check(alive.backend === wsDev.caps.backend,
+              "and the connection answers the next request afterwards");
+
+        await wsDev.programFree(loaded.handle);
+      }
     }
 
     await wsDev.close();
