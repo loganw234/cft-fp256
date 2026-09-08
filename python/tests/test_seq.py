@@ -36,19 +36,70 @@ FP64 = FORMATS["fp64"]
 # ---- encoding --------------------------------------------------------
 
 def test_encode_decode_roundtrip():
+    """Every field survives encode -> decode, with registers reaching 31.
+
+    `imm` is drawn from the bits revision 2 leaves to it - imm[23:0] and
+    imm[31:28] - because imm[27:24] ARE the register high bits and a
+    caller does not write them twice. What comes back out of `imm` is
+    therefore the drawn value with those four bits filled in, which is
+    the second assertion below and the whole of the R1 encoding.
+    """
     rng = random.Random(4)
     for _ in range(2000):
         fields = dict(
-            op=rng.randrange(256), rd=rng.randrange(16),
-            ra=rng.randrange(16), rb=rng.randrange(16),
-            rc=rng.randrange(16), rnd=rng.randrange(5),
+            op=rng.randrange(256), rd=rng.randrange(32),
+            ra=rng.randrange(32), rb=rng.randrange(32),
+            rc=rng.randrange(32), rnd=rng.randrange(5),
             ka=bool(rng.getrandbits(1)), kb=bool(rng.getrandbits(1)),
             kc=bool(rng.getrandbits(1)), kx=bool(rng.getrandbits(1)),
             ctrl=bool(rng.getrandbits(1)),
-            imm=rng.randrange(1 << 32))
+            imm=(rng.randrange(1 << 24)
+                 | (rng.randrange(1 << 4) << 28)))
         d = seq.decode(seq.encode(**fields))
         for k, v in fields.items():
+            if k == "imm":
+                continue
             assert d[k] == v, f"{k} did not survive the round trip"
+        want_hi = sum(((fields[k] >> 4) & 1) << seq.REG_HI_SHIFT[k]
+                      for k in ("rd", "ra", "rb", "rc"))
+        assert d["imm"] == fields["imm"] | want_hi, (
+            "imm[27:24] must come back carrying exactly the four "
+            "register high bits the fields asked for")
+
+
+def test_five_bit_register_fields_land_where_the_contract_says():
+    """R1's table, checked one bit at a time rather than in aggregate:
+    imm[24] is rd[4], imm[25] ra[4], imm[26] rb[4], imm[27] rc[4]."""
+    for name, shift in (("rd", 24), ("ra", 25), ("rb", 26), ("rc", 27)):
+        word = seq.encode(sf.OP_FMA, **{name: 16})
+        assert (word >> 32) == (1 << shift), (
+            f"{name}[4] must be imm[{shift}] and nothing else; the word's "
+            f"immediate is {(word >> 32):#010x}")
+        assert seq.decode(word)[name] == 16
+        # ...and the low four bits stay where they have always been.
+        word = seq.encode(sf.OP_FMA, **{name: 16 + 9})
+        assert seq.decode(word)[name] == 25
+
+
+def test_registers_above_fifteen_run():
+    """r16..r31 exist, start at +0 like r3..r15, and hold a value."""
+    fmt = FP32
+    one = sf.one_bits(fmt)
+    # ADD reads ra and rc (rb is steered to 1.0), so the operands are
+    # named in those two positions.
+    prog = seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, 31, ra=0, rc=2),    # r31 = a + c, and c is +0
+        seq.alu(sf.OP_ADD, 16, ra=31, rc=20),  # r16 = r31 + r20, r20 is +0
+        seq.deposit(16),
+        seq.deposit(20),                       # the untouched high register
+        seq.halt()], max_deposits=2)
+    a = [one, sf.zero_bits(fmt), sf.max_normal_bits(fmt)]
+    res = seq.run(prog, a, [0] * 3, [0] * 3)
+    for i, v in enumerate(a):
+        assert res.deposits[i * 2] == v, "r16 did not carry a through r31"
+        assert res.deposits[i * 2 + 1] == sf.zero_bits(fmt), \
+            "r20 must start at +0 exactly as r3..r15 do"
+    assert len(res.regs[0]) == seq.NREG == 32
 
 
 def test_program_serialisation_roundtrip():
@@ -102,7 +153,34 @@ def test_validation_rejects_malformed_programs():
     with pytest.raises(seq.ProgramError):
         seq.Program(FP32, [seq.alu(sf.OP_FMA, 0, 1, 0, 0, ka=True)])
     with pytest.raises(seq.ProgramError):
-        seq.encode(sf.OP_FMA, rd=16)                            # register
+        seq.encode(sf.OP_FMA, rd=32)          # a register past the file
+    with pytest.raises(seq.ProgramError):
+        # A CONSTANT operand's register high bit is read by nothing, so
+        # it must be zero - the same reserved-field rule, applied to the
+        # four bits R1 brought into play. Written raw, because `alu()`
+        # would never build it.
+        seq.Program(FP32, [seq.encode(sf.OP_FMA, 0, ka=True,
+                                      imm=1 << seq.REG_HI_SHIFT["ra"]),
+                           seq.halt()], consts=[sf.one_bits(FP32)])
+    with pytest.raises(seq.ProgramError, match="high bit"):
+        # ...under kx too: there the index is a byte of imm and the
+        # register high bit is not part of it.
+        seq.Program(FP32, [seq.encode(sf.OP_FMA, 0, kb=True, kx=True,
+                                      imm=(2 << 8)
+                                          | (1 << seq.REG_HI_SHIFT["rb"])),
+                           seq.halt()],
+                    consts=[sf.one_bits(FP32)] * 4)
+    with pytest.raises(seq.ProgramError, match="imm"):
+        # A control code that reads no register may set none of the
+        # four high bits. DEPOSIT reads `ra`, so ra's is legal and
+        # rb's is not.
+        seq.Program(FP32, [seq.encode(seq.DEPOSIT, ra=1, ctrl=True,
+                                      imm=1 << seq.REG_HI_SHIFT["rb"]),
+                           seq.halt()])
+    with pytest.raises(seq.ProgramError, match="imm"):
+        seq.Program(FP32, [seq.encode(seq.ACTALL, ctrl=True,
+                                      imm=1 << seq.REG_HI_SHIFT["ra"]),
+                           seq.halt()])
     with pytest.raises(seq.ProgramError):
         seq.encode(sf.OP_FMA, rnd=5)                            # reserved
     with pytest.raises(seq.ProgramError):
@@ -462,8 +540,20 @@ def test_loader_rejects_a_padded_or_reserved_program():
     raw = bytearray(p.to_bytes())
     with pytest.raises(seq.ProgramError):
         seq.Program.from_bytes(bytes(raw) + b"\x00")      # trailing bytes
+    # Header bytes 24..27 became `flags` at revision 2. Bit 0 is
+    # BANK_EXT and is known; everything above it is reserved, and so is
+    # the whole of the remaining reserved word at 28..31. The tile
+    # checks BOTH, which the 0x600 tile did not.
     bad = bytearray(raw)
-    bad[24] = 1                                            # reserved word
+    bad[24] = 1 << 1                                    # flags[1], unknown
+    with pytest.raises(seq.ProgramError, match="reserved"):
+        seq.Program.from_bytes(bytes(bad))
+    bad = bytearray(raw)
+    bad[27] = 0x80                                      # flags[31]
+    with pytest.raises(seq.ProgramError, match="reserved"):
+        seq.Program.from_bytes(bytes(bad))
+    bad = bytearray(raw)
+    bad[28] = 1                                         # reserved[1]
     with pytest.raises(seq.ProgramError, match="reserved"):
         seq.Program.from_bytes(bytes(bad))
     with pytest.raises(seq.ProgramError, match="max_deposits"):
@@ -530,6 +620,14 @@ def test_p3_fuzz_finds_the_halt_hole_when_the_rule_is_removed():
         prog = seq.Program.__new__(seq.Program)
         prog.fmt, prog.insns, prog.consts, prog.max_deposits = \
             fmt, insns, consts, 3
+        # __init__ is skipped on purpose, so the fields it would have
+        # set are set here by hand. Without them `run` raises on every
+        # program, every iteration lands in the `except` below, and this
+        # control passes by never testing anything - which is precisely
+        # the way a negative control dies quietly, and why the assertion
+        # at the end of this test counts divergences rather than
+        # trusting the loop ran.
+        prog.flags, prog._n_consts = 0, len(consts)
         n = rng.randint(2, 6)
         a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
         try:
@@ -654,10 +752,16 @@ def test_kx_refusals():
     with pytest.raises(seq.ProgramError, match="not read and must be zero"):
         prog(seq.encode(sf.OP_ADD, 0, ra=3, rb=0, kb=True, kx=True,
                         imm=(2 << 0) | (5 << 8)))
-    # imm[31:24], which stays reserved so a later form can use it
-    with pytest.raises(seq.ProgramError, match=r"imm\[31:24\]"):
+    # imm[31:28], which stays reserved so a later form can use it. It
+    # was imm[31:24] until revision 2 took the low four of those for the
+    # register high bits, so bit 28 is the first still-reserved one.
+    with pytest.raises(seq.ProgramError, match=r"imm\[31:28\]"):
         prog(seq.encode(sf.OP_ADD, 0, rb=0, kb=True, kx=True,
-                        imm=(5 << 8) | (1 << 24)))
+                        imm=(5 << 8) | (1 << 28)))
+    # ...and imm[24] is NOT reserved any more: it is rd[4], and rd is
+    # always a register, so a kx instruction may name r16..r31 as its
+    # destination. This is the positive control for the line above.
+    prog(seq.alu(sf.OP_ADD, 30, rb=20, kb=True, kx=True))
     # kx with nothing to select
     with pytest.raises(seq.ProgramError, match="selects nothing"):
         prog(seq.encode(sf.OP_ADD, 0, kx=True))
@@ -811,3 +915,112 @@ def test_default_fuzz_is_unchanged_by_the_extension():
     # and the extended arm is a different corpus, not the same one
     ext = seq.random_program(FP32, random.Random(5), extended=True)
     assert ext != known
+
+
+# ---- revision 2: the per-run constant bank ---------------------------
+
+def _bank_program(fmt, n_consts=4, max_deposits=2):
+    """A BANK_EXT program: the image names constants it does not carry.
+
+    `kx` where an index above fifteen is reachable, and a register above
+    fifteen either way, so the two revision-2 features are exercised in
+    one image rather than in two that never meet.
+    """
+    return seq.Program(
+        fmt,
+        [seq.alu(sf.OP_ADD, 20, ra=0, rc=n_consts - 1, kc=True,
+                 kx=n_consts > seq.KADDR_PLAIN),
+         seq.deposit(20),
+         seq.alu(sf.OP_MUL, 21, ra=20, rb=0),
+         seq.deposit(21),
+         seq.halt()],
+        flags=seq.FLAG_BANK_EXT, n_consts=n_consts,
+        max_deposits=max_deposits)
+
+
+def test_bank_ext_image_carries_no_constant_section():
+    """`bytes == 32 + 8 * n_insns`, whatever n_consts says - that IS the
+    feature: one image per positive, with the levers riding as data."""
+    fmt = FP64
+    p = _bank_program(fmt, n_consts=6)
+    img = p.to_bytes()
+    assert len(img) == 32 + 8 * len(p.insns), (
+        "a BANK_EXT image is header then instructions, with no constant "
+        "section - so its length cannot depend on n_consts")
+    assert p.n_consts == 6 and p.consts == []
+    back = seq.Program.from_bytes(img)
+    assert back.flags == seq.FLAG_BANK_EXT
+    assert back.n_consts == 6 and back.consts == []
+    assert back.to_bytes() == img
+    # n_consts still bounds the instruction stream's constant indices
+    with pytest.raises(seq.ProgramError, match="bank holds 2"):
+        seq.Program(fmt, [seq.alu(sf.OP_ADD, 0, rc=5, kc=True), seq.halt()],
+                    flags=seq.FLAG_BANK_EXT, n_consts=2)
+
+
+def test_bank_ext_runs_on_the_bank_it_is_given():
+    """The same image, two banks, two answers - each identical to the
+    self-contained program built with those constants inside it."""
+    fmt = FP32
+    n = 4
+    a = [sf.one_bits(fmt), sf.zero_bits(fmt), sf.max_normal_bits(fmt),
+         sf.min_subnormal_bits(fmt)]
+    for values in ([sf.one_bits(fmt), sf.zero_bits(fmt),
+                    sf.max_normal_bits(fmt), sf.one_bits(fmt)],
+                   [sf.zero_bits(fmt, 1), sf.min_subnormal_bits(fmt),
+                    sf.inf_bits(fmt), sf.qnan_bits(fmt)]):
+        ext = _bank_program(fmt, n_consts=4)
+        got = seq.run(ext, a, [0] * n, [0] * n, bank=values)
+        # the same program with the constants baked into the image
+        inline = seq.Program(
+            fmt,
+            [seq.alu(sf.OP_ADD, 20, ra=0, rc=3, kc=True),
+             seq.deposit(20),
+             seq.alu(sf.OP_MUL, 21, ra=20, rb=0),
+             seq.deposit(21),
+             seq.halt()],
+            consts=values, max_deposits=2)
+        want = seq.run(inline, a, [0] * n, [0] * n)
+        assert got.state() == want.state(), (
+            "where the constants LIVE must not change a single bit of "
+            "what the program computes")
+
+
+def test_bank_refusals():
+    fmt = FP32
+    n = 2
+    a = [sf.one_bits(fmt)] * n
+    ext = _bank_program(fmt, n_consts=3)
+    with pytest.raises(seq.ProgramError, match="carries no constants"):
+        seq.run(ext, a, [0] * n, [0] * n)                    # missing
+    with pytest.raises(seq.ProgramError, match="header declares 3"):
+        seq.run(ext, a, [0] * n, [0] * n, bank=[0, 0])       # too few
+    with pytest.raises(seq.ProgramError, match="header declares 3"):
+        seq.run(ext, a, [0] * n, [0] * n, bank=[0] * 4)      # too many
+    with pytest.raises(seq.ProgramError, match="does not fit the format"):
+        seq.run(ext, a, [0] * n, [0] * n, bank=[0, 0, 1 << 40])
+    # ...and a self-contained program refuses a bank, because two
+    # sources for one constant is one source too many
+    inline = seq.Program(fmt, [seq.alu(sf.OP_ADD, 0, rc=0, kc=True),
+                               seq.halt()], consts=[sf.one_bits(fmt)])
+    with pytest.raises(seq.ProgramError, match="carries its own constants"):
+        seq.run(inline, a, [0] * n, [0] * n, bank=[sf.one_bits(fmt)])
+    # a BANK_EXT program cannot also carry a constant section
+    with pytest.raises(seq.ProgramError, match="carries no constant section"):
+        seq.Program(fmt, [seq.halt()], consts=[sf.one_bits(fmt)],
+                    flags=seq.FLAG_BANK_EXT, n_consts=1)
+
+
+def test_digest_covers_the_bank():
+    """What ran is ONE hash of image and data together: the image alone
+    cannot distinguish two runs of a BANK_EXT program."""
+    import hashlib
+    fmt = FP32
+    p = _bank_program(fmt, n_consts=3)
+    b1 = [sf.one_bits(fmt), sf.zero_bits(fmt), sf.one_bits(fmt)]
+    b2 = [sf.one_bits(fmt), sf.zero_bits(fmt), sf.zero_bits(fmt)]
+    assert p.digest(b1) != p.digest(b2), \
+        "two banks under one image must not attest identically"
+    assert p.digest(b1) == p.digest(list(b1))
+    # and the image-only digest is still the image's
+    assert p.digest() == hashlib.sha256(p.to_bytes()).hexdigest()
