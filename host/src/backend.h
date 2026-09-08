@@ -105,6 +105,11 @@ int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
  * `image` is the exact byte image cft_program_load validated, DMA'd
  * into the tile whole rather than reassembled from the parsed form -
  * so what executes is what was loaded, and a readback can attest it.
+ * `bank` is NULL for a program that carries its own constants and the
+ * caller's dense array of `n_consts` format-width values for a
+ * BANK_EXT one (docs/SEQUENCER.md revision 2, R3), whose image has no
+ * constant section at all; program.c has already held it to the
+ * program's shape, so a backend may take `bank_bytes` as given.
  * `max_deposits` comes from the image's header and shapes `deposits`
  * at n * max_deposits elements; `counts` may be NULL, though the tile
  * writes the counts regardless and the backend supplies a buffer for
@@ -121,7 +126,9 @@ int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
  * exit is a CROSS-LANE condition, so splitting lanes across tiles is
  * a claim about P3 that wants its own fuzz before it ships. */
 int  cftx_program_run(void *hw, int fmt, const void *image,
-                      size_t image_bytes, uint32_t max_deposits,
+                      size_t image_bytes,
+                      const void *bank, size_t bank_bytes,
+                      uint32_t max_deposits,
                       const void *a, const void *b, const void *c,
                       void *deposits, uint32_t *counts, size_t n,
                       uint32_t *flags, uint32_t *bus);
@@ -193,6 +200,7 @@ const char *cftx_last_error(void);
  * ==================================================================== */
 int cft_backend_program_run(struct cft_device *dev, int fmt,
                             const void *image, size_t image_bytes,
+                            const void *bank, size_t bank_bytes,
                             uint32_t max_deposits,
                             const void *a, const void *b, const void *c,
                             void *deposits, uint32_t *counts, size_t n,

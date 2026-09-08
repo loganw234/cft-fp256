@@ -20,14 +20,28 @@
 //  1. FETCH. Read the 32-byte program header at cfg_prog, then
 //     n_consts format-width constants, then n_insns 64-bit
 //     instructions (all little-endian, densely packed in that order;
-//     the constant region is NOT beat-padded). The image was
-//     validated by cft_program_load, and the hardware re-checks only
-//     what protects the hardware:
+//     the constant region is NOT beat-padded).
+//
+//     Unless the header's flags.BANK_EXT is set (revision 2), in
+//     which case the image is header then instructions with NO
+//     constant section, the constants come from cfg_bank in a first
+//     pass of the same byte parser, and the instructions from
+//     cfg_prog + 32 in a second. The bank is laid out exactly as an
+//     image's constant section is, which is what lets one parser read
+//     either.
+//
+//     The image was validated by cft_program_load, and the hardware
+//     re-checks only what protects the hardware:
 //         magic   == "CFTP" (0x50544643)
 //         version == 1
 //         format  == cfg_prec (a program is compiled for one format)
 //         n_insns <= IMEM_D, n_consts <= KMEM_D,
 //         max_deposits <= MAXD
+//         flags[31:1] == 0 and the remaining reserved word == 0
+//     (the last line is revision 2's: the 0x600 tile checked neither
+//     header word, which is why BANK_EXT needs a CAPS bit and not
+//     only a flag - that tile would read constants out of an image
+//     that has none)
 //     (max_deposits == 0 is LEGAL - the model allows it, every
 //     deposit then overflows.) Every constant the header declares is
 //     stored, up to KMEM_D: since 2026-09-07 an instruction with `kx`
@@ -46,7 +60,7 @@
 //
 //  2. EXECUTE, in blocks of NBEATS beats = NBEATS * lanes_per_beat
 //     lanes. Per block: r0/r1/r2 load from cfg_a/b/c at the block's
-//     element offset (r3..r15 start +0), a lane is ACTIVE iff its
+//     element offset (r3..r31 start +0), a lane is ACTIVE iff its
 //     global index < cfg_n; then the instruction stream runs to HALT
 //     under seq.py's semantics - ALU results, deposits and FLAG
 //     contributions all masked per-lane by active (P3); REPEAT/ENDREP
@@ -91,8 +105,13 @@
 //   register file   regs[{reg,beat}], 256 bits wide, mirrored twice
 //                   so one cycle reads a, b and c; written with
 //                   per-byte enables so a lane's active bit masks its
-//                   slice. 16 regs x NBEATS beats x 32 B = 8 KiB, the
-//                   same silicon at every precision.
+//                   slice. 32 regs x NBEATS beats x 32 B = 16 KiB, the
+//                   same silicon at every precision. It was 16 regs
+//                   until revision 2; doubling it cost -258 LUT and
+//                   0.000 ns on the U50 at 135 MHz, because the banks
+//                   were already block RAM and 512 x 32 fits the same
+//                   primitive 256 x 32 did (docs/VALIDATION.md,
+//                   2026-09-08).
 //   imem / kmem     the instruction stream, and the KMEM_D addressable
 //                   constants, held already broadcast across the beat
 //                   because a run's format never changes. The bank is
@@ -148,6 +167,12 @@ module cft_seq #(
     input  logic [ADDR_W-1:0] cfg_c,
     input  logic [ADDR_W-1:0] cfg_d,
     input  logic [ADDR_W-1:0] cfg_prog,
+    // The per-run constant bank (BANK_PTR, revision 2 R3). Read only
+    // when the header's flags.BANK_EXT is set, and then it is the ONLY
+    // source of constants: the image carries none. It rides the same
+    // master the image does - the two never overlap in time - so no
+    // master is added and hw/link.cfg needs nothing.
+    input  logic [ADDR_W-1:0] cfg_bank,
     input  logic [ADDR_W-1:0] cfg_cnt,
     output logic              busy,
     output logic              done,       // one-cycle pulse
@@ -255,7 +280,7 @@ module cft_seq #(
   // ---- run-latched configuration -------------------------------------
   logic [1:0]        prec_q;
   logic [63:0]       n_q;
-  logic [ADDR_W-1:0] a_q, b_q, c_q, d_q, prog_q, cnt_q;
+  logic [ADDR_W-1:0] a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
 
   // element bytes / lanes per beat / log2(lanes per beat)
   logic [5:0] esz;
@@ -325,14 +350,29 @@ module cft_seq #(
   // whole-word write per bank is the shape every memory compiler
   // recognises - a byte loop over a 256-bit word is the shape that
   // made yosys flatten the file into 130k registers.
-  localparam int RF_D = 16 * NBEATS;
+  // Thirty-two registers a lane since revision 2 (docs/SEQUENCER.md,
+  // R1): the file doubles from 7.5 to 15 KiB a tile and the addresses
+  // grow by the one bit that says which half.
+  localparam int RF_D  = 32 * NBEATS;
+  // The address is {reg[4:0], beat[NBSH-1:0]}, so it is exactly wide
+  // enough for the file and every entry is reachable. It was a fixed
+  // eight bits with a fixed four-bit beat field, which is dense only
+  // at NBEATS = 16 - the one value the kernel and the unit bench both
+  // use, so nothing was ever wrong, but at any smaller block the
+  // address ran off the end of an array the same expression had just
+  // sized. Deriving both from NBEATS costs nothing at 16 and makes
+  // `RF_D = 32 * NBEATS` a true statement about the addressing rather
+  // than only about the declaration.
+  // = 5 + NBSH; written from RF_D because NBSH is declared with the
+  // lane state, further down.
+  localparam int RFAW  = $clog2(RF_D);
   // Declared ahead of the register file that reads it; defined beside
   // the array request it is about.
   logic issue_hold;
-  logic [7:0] rf_raddr_a, rf_raddr_b, rf_raddr_c;
+  logic [RFAW-1:0] rf_raddr_a, rf_raddr_b, rf_raddr_c;
   logic [BEAT_BITS-1:0] rf_rdata_a, rf_rdata_b, rf_rdata_c;
   logic        rf_we;
-  logic [7:0]  rf_waddr;
+  logic [RFAW-1:0]  rf_waddr;
   logic [BEAT_BITS-1:0] rf_wdata;
   logic [WORDS-1:0]     rf_wwe;      // per-word (= per-lane-slice) enables
 
@@ -430,9 +470,14 @@ module cft_seq #(
   // run the writeback path, so a block shorter than the pipe simply
   // drains in the wait state instead of during issue. What IS
   // structural is the register file's address shape - rf_raddr_* and
-  // rf_waddr carry the beat index in FOUR bits, {reg, beat[3:0]} - and
-  // that the block length fits the beat counters. Raise NBEATS past 16
-  // and those selects silently alias one beat onto another.
+  // rf_waddr carry {reg[4:0], beat[NBSH-1:0]} - and that the block
+  // length fits the beat counters. Raise NBEATS past 16 and `bt` and
+  // `wb_bt` no longer hold a block's worth of beats, and the six-bit
+  // beat arguments those row functions take stop covering the block.
+  // (The beat field was a fixed FOUR bits until revision 2, dense only
+  // at NBEATS 16 - the one value anything builds - and is now NBSH, so
+  // a smaller block addresses its own file exactly rather than
+  // indexing past the end of an array the same expression sized.)
   generate
     if (NBEATS < 1 || NBEATS > 16) begin : g_nbeats
       $error("cft_seq: NBEATS must be 1..16 - the register file addresses a beat in four bits");
@@ -559,6 +604,12 @@ module cft_seq #(
 
   logic [255:0] hdr_q;              // the header beat, verbatim
   logic [31:0] kons_left, insn_left;
+  // Which pass of the parser is running: the BANK_EXT constant pass
+  // from BANK_PTR, or the instruction pass from the image. A program
+  // without BANK_EXT never sets it and runs exactly one pass, as it
+  // always did.
+  logic        bank_phase;
+  logic        bank_ext_q;
   logic [31:0] kons_i, insn_i;
 
   // How empty the parse window must become before the reader may take
@@ -634,15 +685,22 @@ module cft_seq #(
   // ---- current instruction --------------------------------------------
   logic [63:0] cur;
   logic [7:0]  c_op;
-  logic [3:0]  c_rd, c_ra, c_rb, c_rc;
+  // FIVE bits each since revision 2 (docs/SEQUENCER.md, R1). The low
+  // four stay in the operand field the encoding has always kept them
+  // in and the fifth comes from `imm`: imm[24] is rd[4], imm[25]
+  // ra[4], imm[26] rb[4], imm[27] rc[4] - which is instruction bits
+  // 56, 57, 58 and 59, all four of them reserved-must-be-zero on
+  // every image an older loader would emit. imm[31:28] stays
+  // reserved. Nothing else in the encoding moves.
+  logic [4:0]  c_rd, c_ra, c_rb, c_rc;
   logic [2:0]  c_rnd;
   logic        c_ka, c_kb, c_kc, c_kx, c_ctrl;
   logic [31:0] c_imm;
   assign c_op   = cur[7:0];
-  assign c_rd   = cur[11:8];
-  assign c_ra   = cur[15:12];
-  assign c_rb   = cur[19:16];
-  assign c_rc   = cur[23:20];
+  assign c_rd   = {cur[56], cur[11:8]};
+  assign c_ra   = {cur[57], cur[15:12]};
+  assign c_rb   = {cur[58], cur[19:16]};
+  assign c_rc   = {cur[59], cur[23:20]};
   assign c_rnd  = cur[26:24];
   assign c_ka   = cur[27];
   assign c_kb   = cur[28];
@@ -658,10 +716,16 @@ module cft_seq #(
   // (a non-zero register field under `kx`, a non-zero imm byte
   // without one, imm[31:24], `kx` with no operand naming a constant),
   // so this mux is the only decision left.
+  //
+  // The FOUR-bit field, explicitly, in the plain form: an operand that
+  // names a constant has no register, so the fifth bit is not its
+  // index's - the loader refuses that bit set on such an operand, and
+  // slicing here rather than trusting it keeps a stream that bypassed
+  // the loader inside the bank instead of sixteen entries past it.
   logic [KAW-1:0] k_idx_a, k_idx_b, k_idx_c;
-  assign k_idx_a = c_kx ? KAW'(c_imm[7:0])   : KAW'(c_ra);
-  assign k_idx_b = c_kx ? KAW'(c_imm[15:8])  : KAW'(c_rb);
-  assign k_idx_c = c_kx ? KAW'(c_imm[23:16]) : KAW'(c_rc);
+  assign k_idx_a = c_kx ? KAW'(c_imm[7:0])   : KAW'(c_ra[3:0]);
+  assign k_idx_b = c_kx ? KAW'(c_imm[15:8])  : KAW'(c_rb[3:0]);
+  assign k_idx_c = c_kx ? KAW'(c_imm[23:16]) : KAW'(c_rc[3:0]);
 
   // The three constants THIS instruction reads, latched out of the
   // bank one cycle behind `cur`. The bank was a 16-entry LUT mux read
@@ -692,7 +756,7 @@ module cft_seq #(
 
   // ---- state ----------------------------------------------------------
   typedef enum logic [5:0] {
-    S_IDLE, S_HDR_GO, S_HDR_R, S_CHECK, S_IMG_GO, S_IMG_PARSE,
+    S_IDLE, S_HDR_GO, S_HDR_R, S_CHECK, S_BNK_GO, S_IMG_GO, S_IMG_PARSE,
     S_BLK_SETUP, S_ZERO, S_LD_GO, S_LD_STREAM,
     S_FETCH, S_FETCH2, S_DECODE,
     S_ALU_ISSUE, S_ALU_WAIT,
@@ -712,7 +776,7 @@ module cft_seq #(
   logic [LB:0]   lane_cursor;
   logic [31:0]   slot_cursor;
   logic          drain_last;         // the element just packed was final
-  logic [8:0]    zaddr;
+  logic [RFAW-1:0] zaddr;
 
   logic [4:0]  flags_q;
   logic        dep_ovf_q;
@@ -989,6 +1053,8 @@ module cft_seq #(
       blk_base <= '0; active <= '0; dcnt <= '0;
       in_off <= '0; dep_off <= '0;
       rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
+      bank_phase <= 1'b0; bank_ext_q <= 1'b0;
+      bank_q <= '0;
 
     end else begin
       done <= 1'b0;
@@ -1059,6 +1125,7 @@ module cft_seq #(
             prec_q <= cfg_prec[1:0];
             n_q <= cfg_n; a_q <= cfg_a; b_q <= cfg_b; c_q <= cfg_c;
             d_q <= cfg_d; prog_q <= cfg_prog; cnt_q <= cfg_cnt;
+            bank_q <= cfg_bank;
             flags_q <= '0; dep_ovf_q <= 1'b0; refuse_q <= 1'b0;
             rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
             if (cfg_n == 0)
@@ -1092,30 +1159,75 @@ module cft_seq #(
           h_ninsns  <= hdr_q[95:64];
           h_nconsts <= hdr_q[127:96];
           h_maxdep  <= hdr_q[159:128];
+          // The header's reserved[0] is `flags` since revision 2, and
+          // bit 0 is BANK_EXT: the image carries no constant section
+          // and the constants come from BANK_PTR instead.
+          bank_ext_q <= hdr_q[192];
           // one block's deposit window: BLK_BYTES of input lanes
           // times max_deposits slots each
           dep_stride <= ADDR_W'({32'b0, hdr_q[159:128]} << BLK_SH);
+          // The two reserved words, checked. A 0x600 tile checked
+          // NEITHER, which is exactly why BANK_EXT needs a CAPS bit
+          // and not only a header flag: that tile would read the
+          // constants out of an image that has none. This one refuses
+          // any flag bit it does not implement and any non-zero
+          // reserved[1], so an image built for a LATER revision is
+          // thrown back here rather than half-understood.
           if (hdr_q[31:0] != 32'h5054_4643 || hdr_q[63:32] != 32'd1 ||
               hdr_q[191:160] != {30'b0, prec_q} ||
               hdr_q[95:64] > IMEM_D || hdr_q[127:96] > KMEM_D ||
-              hdr_q[159:128] > MAXD) begin
+              hdr_q[159:128] > MAXD ||
+              hdr_q[223:193] != 31'b0 || hdr_q[255:224] != 32'b0) begin
             refuse_q <= 1'b1;
             st <= S_FIN;
-          end else
+          end else if (hdr_q[192])
+            st <= S_BNK_GO;
+          else
             st <= S_IMG_GO;
+        end
+
+        // ---- the per-run constant bank (BANK_EXT) --------------------
+        //
+        // One pass of the same parser, pointed at BANK_PTR with the
+        // instruction count set to zero: the bank is laid out exactly
+        // as an image's constant section is - dense, format-width,
+        // little-endian - which is what lets FETCH read one the way it
+        // reads the other rather than growing a second parser. The
+        // instructions then arrive in a second pass from cfg_prog + 32,
+        // where an image without a constant section keeps them.
+        S_BNK_GO: begin
+          rd_addr <= bank_q;
+          rd_sel  <= 2'd0;
+          rd_beats_left <= ((h_nconsts << esz_sh) + 32'd31) >> 5;
+          rd_stream_on <= 1'b1;
+          kons_left <= h_nconsts;
+          insn_left <= '0;
+          kons_i <= '0; insn_i <= '0;
+          pw <= '0; pw_have <= '0;
+          bank_phase <= 1'b1;
+          m_rd_rready <= 1'b1;
+          st <= S_IMG_PARSE;
         end
 
         // ---- constants + instructions: dense byte stream -------------
         S_IMG_GO: begin
           rd_addr <= prog_q + 32;
           rd_sel  <= 2'd0;
+          // Under BANK_EXT the constants have already been read from
+          // the bank, so the image is instructions alone.
           rd_beats_left <=
-            ((h_nconsts << esz_sh) + (h_ninsns << 3) + 32'd31) >> 5;
+            ((bank_ext_q ? 32'd0 : (h_nconsts << esz_sh))
+             + (h_ninsns << 3) + 32'd31) >> 5;
           rd_stream_on <= 1'b1;
-          kons_left <= h_nconsts;
+          kons_left <= bank_ext_q ? 32'd0 : h_nconsts;
           insn_left <= h_ninsns;
+          // Both cursors reset, as they always were. Under BANK_EXT
+          // kons_left is zero so the constant arm never runs again in
+          // this fetch and kons_i is simply unused; the bank pass
+          // already wrote every entry it was going to.
           kons_i <= '0; insn_i <= '0;
           pw <= '0; pw_have <= '0;
+          bank_phase <= 1'b0;
           m_rd_rready <= 1'b1;
           st <= S_IMG_PARSE;
         end
@@ -1160,10 +1272,16 @@ module cft_seq #(
           end else if (kons_left == 0 && insn_left == 0) begin
             m_rd_rready <= 1'b0;
             rd_stream_on <= 1'b0;
-            blk_base <= '0;
-            in_off   <= '0;
-            dep_off  <= '0;
-            st <= S_BLK_SETUP;
+            // The bank pass ends by starting the instruction pass;
+            // only the second one has a whole program in hand.
+            if (bank_phase)
+              st <= S_IMG_GO;
+            else begin
+              blk_base <= '0;
+              in_off   <= '0;
+              dep_off  <= '0;
+              st <= S_BLK_SETUP;
+            end
           end else
             m_rd_rready <= (pw_have < 7'd8);
         end
@@ -1185,14 +1303,15 @@ module cft_seq #(
           // wipe the register file: RF_D cycles per block buys
           // "the previous block cannot leak" with no bookkeeping
           rf_we <= 1'b1;
-          rf_waddr <= zaddr[7:0];
+          rf_waddr <= zaddr;
           rf_wdata <= '0;
           rf_wwe <= {WORDS{1'b1}};
           zaddr <= zaddr + 1;
           // ...and, in the same window, blk_n * max_deposits, one bit
-          // of the multiplier per cycle. RF_D is 16 * NBEATS and
-          // NBEATS is at least LATENCY+1, so the CW steps this takes
-          // always finish long before the wipe does.
+          // of the multiplier per cycle. RF_D is 32 * NBEATS, so the
+          // CW steps this takes finish long before the wipe does -
+          // with twice the margin they had before revision 2, since
+          // the wipe is the thing that doubled.
           if (zaddr == 0) begin
             dep_elems  <= '0;
             dep_addend <= 32'(blk_n);
@@ -1202,7 +1321,7 @@ module cft_seq #(
             dep_addend <= dep_addend << 1;
             dep_mult   <= dep_mult >> 1;
           end
-          if (zaddr == 9'(RF_D - 1)) begin
+          if (zaddr == RFAW'(RF_D - 1)) begin
             // A lane is active iff its index is below the block's
             // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
             // computed one state ago. The first version asked each of
@@ -1237,7 +1356,7 @@ module cft_seq #(
         S_LD_STREAM: begin
           if (m_rd_rvalid && m_rd_rready) begin
             rf_we <= 1'b1;
-            rf_waddr <= {2'b0, ld_reg, bt[3:0]};
+            rf_waddr <= {3'b0, ld_reg, bt[NBSH-1:0]};
             rf_wdata <= m_rd_rdata;
             rf_wwe <= {WORDS{1'b1}};
             bt <= bt + 1;
@@ -1256,7 +1375,7 @@ module cft_seq #(
 
         // ---- fetch/decode --------------------------------------------
         S_FETCH: begin
-          if ({21'b0, pc} >= h_ninsns)
+          if (32'(pc) >= h_ninsns)
             st <= S_DRAIN_SETUP;               // implicit halt
           else begin
             cur <= imem[pc[PCW-1:0]];
@@ -1319,7 +1438,7 @@ module cft_seq #(
 
         // ---- skip to the matching endrep ------------------------------
         S_SKIP_F: begin
-          if ({21'b0, pc} >= h_ninsns)
+          if (32'(pc) >= h_ninsns)
             st <= S_DRAIN_SETUP;               // unbalanced: halt
           else begin
             cur <= imem[pc[PCW-1:0]];
@@ -1359,9 +1478,9 @@ module cft_seq #(
           // whenever it arrives.
           if (!issue_hold) begin
             if (bt < 6'({1'b0, nb_blk})) begin
-              rf_raddr_a <= {c_ra, bt[3:0]};
-              rf_raddr_b <= {c_rb, bt[3:0]};
-              rf_raddr_c <= {c_rc, bt[3:0]};
+              rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
+              rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
+              rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
             end
             if (bt >= 6'd2) begin
               al_valid <= 1'b1;
@@ -1381,7 +1500,7 @@ module cft_seq #(
           // this dropped the first beat of every 16-beat block.
           if (al_ov) begin
             rf_we <= 1'b1;
-            rf_waddr <= {c_rd, wb_bt[3:0]};
+            rf_waddr <= {c_rd, wb_bt[NBSH-1:0]};
             rf_wdata <= al_d;
             rf_wwe <= wb_wwe;
             flags_q <= flags_q | wb_flags_or;
@@ -1392,7 +1511,7 @@ module cft_seq #(
         S_ALU_WAIT: begin
           if (al_ov) begin
             rf_we <= 1'b1;
-            rf_waddr <= {c_rd, wb_bt[3:0]};
+            rf_waddr <= {c_rd, wb_bt[NBSH-1:0]};
             rf_wdata <= al_d;
             rf_wwe <= wb_wwe;
             flags_q <= flags_q | wb_flags_or;
@@ -1406,7 +1525,7 @@ module cft_seq #(
 
         // ---- DEPOSIT ---------------------------------------------------
         S_DEP_RD: begin
-          rf_raddr_a <= {c_ra, bt[3:0]};
+          rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
           st <= S_DEP_W8;
         end
         S_DEP_W8: st <= S_DEP_WR;    // bank read + bus register
@@ -1444,7 +1563,7 @@ module cft_seq #(
 
         // ---- SETACT ----------------------------------------------------
         S_SET_RD: begin
-          rf_raddr_a <= {c_ra, bt[3:0]};
+          rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
           st <= S_SET_W8;
         end
         S_SET_W8: st <= S_SET_AP;

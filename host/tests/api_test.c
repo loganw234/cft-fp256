@@ -2981,6 +2981,223 @@ int main(void)
               "flags_out and bus_out may both be NULL");
     }
 
+    /* --- programs: the argument contract, ABI 0.9 ------------------
+     *
+     * What the vectors cannot express, which is this file's whole
+     * remit: which arguments are refused, which may be NULL, and how
+     * the struct_size handshake behaves for a caller built against the
+     * older header. The BITS a program computes are device_test's and
+     * seq_check.py's; nothing here runs anything interesting.
+     *
+     * The image below is "r4 = r0 * k[0] + k[1]; deposit r4; halt" at
+     * fp32, in two shapes: with the constants in the image, and as a
+     * BANK_EXT program whose constants arrive with the run
+     * (docs/SEQUENCER.md revision 2, R3). */
+    {
+        uint8_t img[64], ext[64], bank[8], a4[4], dep[4], dig[32], dig2[32];
+        uint64_t ins[3];
+        size_t bytes, ext_bytes, w;
+        cft_program *prog = NULL, *pext = NULL;
+        cft_program_info info;
+        uint32_t bus = 0xdeadbeefu;
+
+        /* fma rd=4 ra=0 rb=k0 rc=k1, with kb and kc set (bits 28, 29) */
+        ins[0] = 0u | (4ull << 8) | (0ull << 12) | (0ull << 16) |
+                 (1ull << 20) | (1ull << 28) | (1ull << 29);
+        ins[1] = 3ull | (4ull << 12) | (1ull << 31);      /* deposit r4 */
+        ins[2] = 0ull | (1ull << 31);                     /* halt */
+
+        memset(img, 0, sizeof img);
+        put32(img + 0, 0x50544643u);      /* "CFTP" */
+        put32(img + 4, 1);                /* version */
+        put32(img + 8, 3);                /* n_insns */
+        put32(img + 12, 2);               /* n_consts */
+        put32(img + 16, 1);               /* max_deposits */
+        put32(img + 20, (uint32_t)CFT_FP32);
+        put32(img + 24, 0);               /* flags */
+        put32(img + 28, 0);               /* reserved[1] */
+        put32(img + 32, 0x3fc00000u);     /* k0 = 1.5  */
+        put32(img + 36, 0x3fa00000u);     /* k1 = 1.25 */
+        for (w = 0; w < 3; w++)
+            put64(img + 40 + w * 8, ins[w]);
+        bytes = 40 + 3 * 8;
+
+        memcpy(ext, img, 32);
+        put32(ext + 24, CFT_PROG_FLAG_BANK_EXT);
+        for (w = 0; w < 3; w++)
+            put64(ext + 32 + w * 8, ins[w]);
+        ext_bytes = 32 + 3 * 8;
+        memcpy(bank, img + 32, 8);
+
+        put32(a4, 0x40000000u);           /* a[0] = 2.0 */
+
+        /* -- load -- */
+        CHECK(cft_program_load(NULL, img, bytes, &prog) ==
+              CFT_ERR_INVALID_ARGUMENT, "program_load refuses a NULL device");
+        CHECK(cft_program_load(dev, NULL, bytes, &prog) ==
+              CFT_ERR_INVALID_ARGUMENT, "program_load refuses a NULL image");
+        CHECK(cft_program_load(dev, img, bytes, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT, "program_load refuses a NULL out");
+        CHECK(cft_program_load(dev, img, 31, &prog) == CFT_ERR_ARTIFACT,
+              "an image shorter than its header is an artifact");
+        CHECK(cft_program_load(dev, img, bytes - 1, &prog) ==
+              CFT_ERR_ARTIFACT,
+              "an image is exactly header + constants + instructions");
+        st = cft_program_load(dev, img, bytes, &prog);
+        CHECK(st == CFT_OK && prog != NULL, "program_load: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        st = cft_program_load(dev, ext, ext_bytes, &pext);
+        CHECK(st == CFT_OK && pext != NULL, "a BANK_EXT image loads: %s (%s)",
+              cft_strerror(st), cft_last_error());
+
+        /* -- info, and the struct_size handshake -- */
+        CHECK(cft_program_get_info(NULL, &info) == CFT_ERR_INVALID_ARGUMENT &&
+              cft_program_get_info(prog, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "program_get_info refuses NULLs");
+        memset(&info, 0, sizeof info);
+        info.struct_size = 0;
+        CHECK(cft_program_get_info(prog, &info) == CFT_ERR_INVALID_ARGUMENT,
+              "a struct_size below one field is refused");
+        memset(&info, 0, sizeof info);
+        info.struct_size = sizeof info;
+        st = cft_program_get_info(pext, &info);
+        CHECK(st == CFT_OK && info.struct_size == sizeof info &&
+              info.format == CFT_FP32 && info.n_insns == 3 &&
+              info.n_consts == 2 && info.max_deposits == 1 &&
+              info.flags == CFT_PROG_FLAG_BANK_EXT,
+              "program_get_info reports the header, flags included");
+        {
+            /* An ABI 0.8 caller's struct ends before `flags`. It must
+             * come back with the bytes it asked for and not one more:
+             * a library writing a field the caller has no room for is
+             * the failure the size handshake exists to prevent. */
+            union { cft_program_info info; uint8_t raw[64]; } u;
+            const size_t old_size = offsetof(cft_program_info, flags);
+            memset(&u, 0xa5, sizeof u);
+            memset(&u.info, 0, old_size);
+            u.info.struct_size = old_size;
+            st = cft_program_get_info(pext, &u.info);
+            CHECK(st == CFT_OK && u.info.struct_size == old_size,
+                  "an ABI 0.8 struct_size comes back as itself");
+            for (w = old_size; w < sizeof u; w++)
+                if (u.raw[w] != 0xa5)
+                    break;
+            CHECK(w == sizeof u,
+                  "nothing past an older caller's struct_size is written "
+                  "(byte %lu changed)", (unsigned long)w);
+        }
+
+        /* -- run, and run_bank -- */
+        CHECK(cft_program_run(NULL, a4, NULL, NULL, dep, NULL, 1,
+                              NULL, &bus) == CFT_ERR_INVALID_ARGUMENT,
+              "program_run refuses a NULL program");
+        CHECK(bus == 0, "program_run clears bus_out before anything else");
+        CHECK(cft_program_run(prog, NULL, NULL, NULL, dep, NULL, 1,
+                              NULL, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "the a stream is not optional");
+        CHECK(cft_program_run(prog, a4, NULL, NULL, NULL, NULL, 1,
+                              NULL, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "a deposit budget above zero needs a deposit buffer");
+        bus = 0xdeadbeefu;
+        CHECK(cft_program_run(prog, NULL, NULL, NULL, NULL, NULL, 0,
+                              NULL, &bus) == CFT_OK && bus == 0,
+              "n == 0 is not an error and clears bus_out");
+        put32(dep, 0);
+        st = cft_program_run(prog, a4, NULL, NULL, dep, NULL, 1, NULL, NULL);
+        CHECK(st == CFT_OK && get32(dep) == 0x40880000u,
+              "2.0 * 1.5 + 1.25 = 4.25: %s 0x%08x", cft_strerror(st),
+              get32(dep));
+
+        CHECK(cft_program_run_bank(NULL, bank, 8, a4, NULL, NULL, dep,
+                                   NULL, 1, NULL, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "program_run_bank refuses a NULL program");
+        put32(dep, 0);
+        st = cft_program_run_bank(pext, bank, 8, a4, NULL, NULL, dep,
+                                  NULL, 1, NULL, NULL);
+        CHECK(st == CFT_OK && get32(dep) == 0x40880000u,
+              "the same program with its constants as data: %s 0x%08x",
+              cft_strerror(st), get32(dep));
+        CHECK(cft_program_run_bank(pext, bank, 4, a4, NULL, NULL, dep,
+                                   NULL, 1, NULL, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "a bank of the wrong size is refused");
+        CHECK(cft_program_run_bank(pext, NULL, 8, a4, NULL, NULL, dep,
+                                   NULL, 1, NULL, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "a NULL bank of non-zero length is refused");
+        CHECK(cft_program_run(pext, a4, NULL, NULL, dep, NULL, 1,
+                              NULL, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "a BANK_EXT program refuses cft_program_run");
+        CHECK(cft_program_run_bank(prog, bank, 8, a4, NULL, NULL, dep,
+                                   NULL, 1, NULL, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "a program carrying its own constants refuses a bank");
+
+        /* -- the digest -- */
+        CHECK(cft_program_digest(NULL, NULL, 0, dig) ==
+              CFT_ERR_INVALID_ARGUMENT &&
+              cft_program_digest(prog, NULL, 0, NULL) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "program_digest refuses NULLs");
+        CHECK(cft_program_digest(prog, bank, 8, dig) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "program_digest holds a bank to the same rule the run does");
+        CHECK(cft_program_digest(pext, NULL, 0, dig) ==
+              CFT_ERR_INVALID_ARGUMENT,
+              "a BANK_EXT program has no digest without its bank");
+        st = cft_program_digest(prog, NULL, 0, dig);
+        CHECK(st == CFT_OK && cft_sha256(img, bytes, dig2) == CFT_OK &&
+              memcmp(dig, dig2, 32) == 0,
+              "a program with no bank digests to the hash of its image");
+        st = cft_program_digest(pext, bank, 8, dig);
+        CHECK(st == CFT_OK && cft_sha256(ext, ext_bytes, dig2) == CFT_OK &&
+              memcmp(dig, dig2, 32) != 0,
+              "image and bank do not digest to the image alone");
+
+        cft_program_free(prog);
+        cft_program_free(pext);
+        cft_program_free(NULL);       /* must be safe */
+    }
+
+    /* --- SHA-256, against the vectors that define it ---------------
+     *
+     * FIPS 180-4's own two worked examples, copied in the base the
+     * standard states them in - which is the rule this repository
+     * applies to every constant: derive it, or copy it in its
+     * specified base, never retype it from memory. The library's own
+     * round constants ARE derived (host/src/sha256.c computes them
+     * from the cube roots of the first primes), so these two lines are
+     * what proves the derivation landed on SHA-256 and not on
+     * something adjacent to it. The second example is 56 bytes, which
+     * is the length that forces a second block. */
+    {
+        static const uint8_t abc[32] = {
+            0xba,0x78,0x16,0xbf, 0x8f,0x01,0xcf,0xea,
+            0x41,0x41,0x40,0xde, 0x5d,0xae,0x22,0x23,
+            0xb0,0x03,0x61,0xa3, 0x96,0x17,0x7a,0x9c,
+            0xb4,0x10,0xff,0x61, 0xf2,0x00,0x15,0xad };
+        static const uint8_t two_block[32] = {
+            0x24,0x8d,0x6a,0x61, 0xd2,0x06,0x38,0xb8,
+            0xe5,0xc0,0x26,0x93, 0x0c,0x3e,0x60,0x39,
+            0xa3,0x3c,0xe4,0x59, 0x64,0xff,0x21,0x67,
+            0xf6,0xec,0xed,0xd4, 0x19,0xdb,0x06,0xc1 };
+        static const char *msg2 =
+            "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+        uint8_t h[32];
+
+        CHECK(cft_sha256("abc", 3, h) == CFT_OK &&
+              memcmp(h, abc, 32) == 0, "sha256(\"abc\") is FIPS 180-4's");
+        CHECK(cft_sha256(msg2, strlen(msg2), h) == CFT_OK &&
+              memcmp(h, two_block, 32) == 0,
+              "sha256 of FIPS 180-4's two-block example");
+        CHECK(cft_sha256("abc", 3, NULL) == CFT_ERR_INVALID_ARGUMENT &&
+              cft_sha256(NULL, 3, h) == CFT_ERR_INVALID_ARGUMENT,
+              "cft_sha256 refuses NULLs");
+        CHECK(cft_sha256(NULL, 0, h) == CFT_OK,
+              "the empty message has a hash");
+    }
+
     /* --- buffers ------------------------------------------------- */
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));

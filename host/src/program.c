@@ -12,10 +12,10 @@
  * Lanes are processed in blocks, and that is not an optimisation
  * ---------------------------------------------------------------
  *
- * A lane's state is 16 registers of format width. Holding all of them
- * for a large n would be absurd - a million fp256 elements would want
- * half a gigabyte of register file - so lanes are processed
- * BLOCK_LANES at a time.
+ * A lane's state is 32 registers of format width (16 before revision 2
+ * of docs/SEQUENCER.md, 2026-09-08). Holding all of them for a large n
+ * would be absurd - a million fp256 elements would want a gigabyte of
+ * register file - so lanes are processed BLOCK_LANES at a time.
  *
  * That is a partitioning, and partitioning is exactly what P2 and P3
  * in docs/SEQUENCER.md promise is invisible: deposits are addressed by
@@ -36,6 +36,7 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#include "sha256.h"
 /* Unconditionally, for cft_seq_caps and the two seams device.c owns:
  * which caps a handle publishes, and which executor a program run
  * belongs to. The second is only reachable when a device backend was
@@ -49,7 +50,13 @@
 #define SEQ_VERSION      1u
 #define SEQ_HEADER_BYTES 32
 #define SEQ_INSN_BYTES   8
-#define SEQ_NREG         16
+/* Revision 2's thirty-two registers a lane. The low four bits of each
+ * field stay where they were and the fifth lives in imm[27:24], so a
+ * program that names only r0..r15 encodes exactly as it always did -
+ * which is what lets an image built before this run unchanged. */
+#define SEQ_NREG         32
+#define SEQ_NREG_NARROW  16            /* what a device without
+                                        * CFT_SEQ_FEAT_REGS32 has */
 #define SEQ_MAX_DEPTH    4
 /* The worst-case number of instruction ISSUES a program may perform,
  * loops multiplied out - a run-length bound, not a capacity, and not
@@ -96,12 +103,25 @@ enum { SEQ_HALT = 0, SEQ_REPEAT, SEQ_ENDREP, SEQ_DEPOSIT, SEQ_SETACT,
        SEQ_ACTALL };
 
 /* Indexed constants (`kx`, instruction bit 30). Which byte of `imm`
- * carries each operand's constant index, and the byte above them that
- * stays reserved so a later form can have it. */
+ * carries each operand's constant index. */
 #define SEQ_KX_SHIFT_A   0
 #define SEQ_KX_SHIFT_B   8
 #define SEQ_KX_SHIFT_C  16
-#define SEQ_KX_RESERVED  0xFF000000u
+#define SEQ_KX_INDICES   0x00FFFFFFu   /* imm[23:0]: the three indices */
+
+/* Five-bit register fields (revision 2). imm[24] is rd's fifth bit,
+ * imm[25] ra's, imm[26] rb's, imm[27] rc's - the destination first,
+ * then the operands in their own order. imm[31:28] is what is left of
+ * the byte `kx` reserved, and stays reserved-must-be-zero so a
+ * counter-indexed form can still have it. */
+#define SEQ_REGHI_SHIFT  24
+#define SEQ_REGHI_MASK   0x0F000000u
+#define SEQ_IMM_RESERVED 0xF0000000u
+
+/* The header's flags word, which was reserved[0] until 2026-09-08.
+ * cft.h publishes CFT_PROG_FLAG_BANK_EXT; this is the mask of every
+ * bit this library knows, and a set bit outside it is CFT_ERR_ARTIFACT. */
+#define SEQ_FLAGS_KNOWN  ((uint32_t)CFT_PROG_FLAG_BANK_EXT)
 
 struct cft_program {
     cft_device         *dev;
@@ -110,7 +130,12 @@ struct cft_program {
     uint32_t            max_deposits;
     uint32_t            n_insns;
     uint32_t            n_consts;
+    uint32_t            flags;
     uint64_t           *insns;
+    /* The program's own constants, or NULL under BANK_EXT - where
+     * n_consts still says how many the program ADDRESSES and every run
+     * supplies them. The bounds check on an index is the same either
+     * way, which is the point of keeping n_consts meaningful. */
     cft_bn             *consts;
     /* The exact bytes that were loaded, kept whole.
      *
@@ -124,8 +149,19 @@ struct cft_program {
     size_t              image_bytes;
 };
 
+/* The four-bit fields stay four-bit fields here, and the fifth bits
+ * are kept beside them rather than folded in.
+ *
+ * That is not tidiness. A field is read TWICE and means different
+ * things: as a register number it is five bits wide, and as a constant
+ * index (its `k` bit set, no `kx`) it is the four-bit field alone and
+ * the fifth bit is a reserved bit that must be zero. Folding them
+ * would make the reserved-bit check and the index check reach for the
+ * same variable and one of them would be wrong. seq_reg() below is the
+ * only place the two halves are joined. */
 typedef struct {
     int      op, rd, ra, rb, rc, rnd;
+    int      hd, ha, hb, hc;    /* imm[27:24], the fields' fifth bits */
     int      ka, kb, kc, kx, ctrl;
     uint32_t imm;
 } seq_insn;
@@ -144,6 +180,16 @@ static void seq_decode(uint64_t w, seq_insn *d)
     d->kx   = (int)((w >> 30) & 1);
     d->ctrl = (int)((w >> 31) & 1);
     d->imm  = (uint32_t)((w >> 32) & 0xFFFFFFFFu);
+    d->hd   = (int)((d->imm >> (SEQ_REGHI_SHIFT + 0)) & 1);
+    d->ha   = (int)((d->imm >> (SEQ_REGHI_SHIFT + 1)) & 1);
+    d->hb   = (int)((d->imm >> (SEQ_REGHI_SHIFT + 2)) & 1);
+    d->hc   = (int)((d->imm >> (SEQ_REGHI_SHIFT + 3)) & 1);
+}
+
+/* A five-bit register number from its two halves. */
+static int seq_reg(int lo, int hi)
+{
+    return lo | (hi << 4);
 }
 
 /* The index operand `which` (0 = a, 1 = b, 2 = c) names, and whether
@@ -154,17 +200,23 @@ static void seq_decode(uint64_t w, seq_insn *d)
  * constants whatever the header says, which is the wall docs/ENCLOSE.md
  * hit. With `kx` the constant indices come from imm[7:0], imm[15:8]
  * and imm[23:16] instead and reach 255; an operand whose `k` bit is
- * clear still names a register through its own field. */
+ * clear still names a register through its own field.
+ *
+ * A REGISTER operand is five bits wide since revision 2 and a CONSTANT
+ * index is not: the fifth bit belongs to the register form only, and
+ * on a constant operand it is a reserved bit seq_check_operands
+ * refuses. So the two returns differ in width on purpose. */
 static int seq_source(const seq_insn *d, int which, int *is_const)
 {
     static const int shift[3] = { SEQ_KX_SHIFT_A, SEQ_KX_SHIFT_B,
                                   SEQ_KX_SHIFT_C };
     const int reg[3] = { d->ra, d->rb, d->rc };
+    const int hi[3]  = { d->ha, d->hb, d->hc };
     const int kf[3]  = { d->ka, d->kb, d->kc };
 
     *is_const = kf[which];
     if (!kf[which])
-        return reg[which];
+        return seq_reg(reg[which], hi[which]);
     if (d->kx)
         return (int)((d->imm >> shift[which]) & 0xFFu);
     return reg[which];
@@ -188,34 +240,47 @@ static uint64_t rd_le64(const uint8_t *p)
  *
  * The canonicity rule is the one docs/SEQUENCER.md already states -
  * any field an instruction does not read being non-zero is refused -
- * applied to the fields `kx` brings into play. Without `kx` an ALU
- * instruction has no immediate at all. With it: an operand whose `k`
- * bit is set takes its index from `imm`, so its 4-bit field must be
- * zero; an operand whose `k` bit is clear names a register, so its
- * byte of `imm` must be zero; imm[31:24] is read by nothing; and `kx`
- * itself selects nothing when no operand names a constant, which
- * would leave the instruction with a second encoding. */
+ * applied to the fields `kx` and the five-bit register fields bring
+ * into play. Without `kx` an ALU instruction reads nothing of `imm`
+ * but the four register high bits. With it: an operand whose `k` bit
+ * is set takes its index from `imm`, so its 4-bit field must be zero;
+ * an operand whose `k` bit is clear names a register, so its byte of
+ * `imm` must be zero; and `kx` itself selects nothing when no operand
+ * names a constant, which would leave the instruction with a second
+ * encoding.
+ *
+ * Revision 2 adds two applications of the same rule and no new rule.
+ * imm[31:28] is read by nothing and must be zero - it is what is left
+ * of the byte `kx` reserved whole. And an operand whose `k` bit is set
+ * names a CONSTANT, whose index is four bits or a byte of `imm` and
+ * never five bits, so that operand's register high bit is not read and
+ * must be zero - under `kx` as well, where the index is the immediate
+ * byte and the high bit is still not read. rd is always a register, so
+ * imm[24] is always read and never constrained. */
 static cft_status seq_check_operands(const cft_program *p,
                                      const seq_insn *d)
 {
     static const int shift[3] = { SEQ_KX_SHIFT_A, SEQ_KX_SHIFT_B,
                                   SEQ_KX_SHIFT_C };
     const int reg[3] = { d->ra, d->rb, d->rc };
+    const int hi[3]  = { d->ha, d->hb, d->hc };
     const int kf[3]  = { d->ka, d->kb, d->kc };
     int which;
 
+    if (d->imm & SEQ_IMM_RESERVED)
+        return CFT_ERR_INVALID_ARGUMENT;
     if (d->kx) {
         if (!(d->ka || d->kb || d->kc))
             return CFT_ERR_INVALID_ARGUMENT;
-        if (d->imm & SEQ_KX_RESERVED)
-            return CFT_ERR_INVALID_ARGUMENT;
-    } else if (d->imm != 0) {
+    } else if (d->imm & SEQ_KX_INDICES) {
         return CFT_ERR_INVALID_ARGUMENT;
     }
 
     for (which = 0; which < 3; which++) {
         uint32_t byte = (d->imm >> shift[which]) & 0xFFu;
         uint32_t idx;
+        if (kf[which] && hi[which])
+            return CFT_ERR_INVALID_ARGUMENT;
         if (d->kx && kf[which]) {
             if (reg[which])
                 return CFT_ERR_INVALID_ARGUMENT;
@@ -270,7 +335,24 @@ static cft_status seq_validate(const cft_program *p)
 
         /* Fields a control instruction does not read must be zero, so
          * one operation has one encoding - otherwise a readback hash
-         * is not a hash of the program. */
+         * is not a hash of the program.
+         *
+         * A control instruction reads at most `ra` (DEPOSIT, SETACT),
+         * so of the four register high bits in imm[27:24] only those
+         * two read one - imm[25], ra's - and that is the single
+         * relaxation revision 2 makes here: their `imm` was required
+         * to be zero whole and is now required to be zero but for that
+         * bit. HALT, ENDREP and ACTALL read no field of `imm` at all
+         * and it stays zero whole.
+         *
+         * REPEAT is the exception and reads its `imm` ENTIRELY, as the
+         * trip count - it always has. The canonicity rule is about
+         * fields an instruction does not read, so it reaches nothing
+         * here: constraining imm[27:24] on a REPEAT would refuse every
+         * trip count at or above 2^24, including the `repeat
+         * 0xffffffff` docs/SEQUENCER.md's own worst-case paragraph
+         * relies on being loadable and refused by the 2^40 bound
+         * instead. docs/HOSTAPI.md records the reading. */
         switch (d.op) {
         case SEQ_HALT:
         case SEQ_ENDREP:
@@ -287,7 +369,8 @@ static cft_status seq_validate(const cft_program *p)
         case SEQ_DEPOSIT:
         case SEQ_SETACT:
             if (d.rd || d.rb || d.rc || d.rnd || d.ka || d.kb || d.kc ||
-                d.kx || d.imm)
+                d.kx ||
+                (d.imm & ~(uint32_t)(1u << (SEQ_REGHI_SHIFT + 1))))
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
         default:
@@ -339,9 +422,15 @@ void cft_sw_seq_caps(cft_seq_caps *out)
     out->max_insns    = SEQ_IMAGE_INSNS;
     out->max_consts   = SEQ_ADDR_CONSTS;
     /* This executor decodes kx (bit 30: 8-bit constant indices in the
-     * immediate) and implements IMUL (opcode 30). The bit assignments
-     * are rtl/cft_csr.sv's, surfaced by cft.h. */
-    out->features     = CFT_SEQ_FEAT_WIDE_CONST | CFT_ALU_EXT_IMUL;
+     * immediate), gives every lane the thirty-two registers of
+     * revision 2, takes a constant bank per run, and implements IMUL
+     * (opcode 30). The bit assignments are rtl/cft_csr.sv's, surfaced
+     * by cft.h. Publishing them here is what makes cft_program_load
+     * accept a program that uses them on a software handle - the
+     * software backend is the CONTRACT, so it carries every feature
+     * the contract defines. */
+    out->features     = CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
+                        CFT_SEQ_FEAT_BANK_PTR   | CFT_ALU_EXT_IMUL;
 }
 
 /* A program image against the capacities the device it was loaded for
@@ -372,54 +461,100 @@ static cft_status seq_check_caps(cft_device *dev, uint32_t n_insns,
     return CFT_OK;
 }
 
-/* The constant INDEX an instruction carries, against the number of
- * constants the device can address. Separate from the header check
- * above because it is a property of the instruction stream rather
- * than of the header: a program may declare more constants than it
- * can reach (they are simply unreachable), and what a device refuses
- * to execute is a reference past its bank. Structurally impossible on
- * a device that addresses all sixteen a four-bit field reaches, which
- * is every device shipped so far; it becomes real for a trimmed tile
- * that publishes fewer, and for the wide constant index that
- * CAPS[4] is reserved for. */
-static cft_status seq_check_const_index(cft_device *dev,
-                                        const cft_program *p)
+/* The instruction stream against the DEVICE: the features it uses and
+ * the constant indices it carries.
+ *
+ * Separate from the header check above because these are properties of
+ * the instruction stream rather than of the header: a program may
+ * declare more constants than it can reach (they are simply
+ * unreachable), and what a device refuses to execute is a reference
+ * past its bank. Structurally impossible on a device that addresses
+ * all sixteen a four-bit field reaches, which is every device shipped
+ * so far; it becomes real for a trimmed tile that publishes fewer, and
+ * for the wide constant index CAPS[4] publishes.
+ *
+ * A feature the device does not publish is ABSENT, not unknown, and
+ * every one of these refusals exists because the DEVICE cannot make
+ * it. An old bitstream's operand mux would read a kx instruction's
+ * four-bit fields and compute on the wrong constants without a fault;
+ * it would read a five-bit register's low four bits and address the
+ * wrong register the same way; an integer group without IMUL answers
+ * opcode 30 with the unassigned-opcode result. None of those is a
+ * fault the tile can raise, so each is raised here, by name. */
+static cft_status seq_check_against_device(cft_device *dev,
+                                           const cft_program *p)
 {
     cft_seq_caps c;
     uint32_t pc;
     cft_device_seq_caps(dev, &c);
     for (pc = 0; pc < p->n_insns; pc++) {
         seq_insn d;
-        int idx = -1;
+        int idx = -1, reg = -1;
         seq_decode(p->insns[pc], &d);
+
+        /* Control first, because two of the six name a register too.
+         * DEPOSIT and SETACT read `ra`, five bits wide since revision
+         * 2; the other four read no register at all. */
+        if (d.ctrl) {
+            if (d.op == SEQ_DEPOSIT || d.op == SEQ_SETACT)
+                reg = seq_reg(d.ra, d.ha);
+        } else {
+            if (d.kx && !(c.features & CFT_SEQ_FEAT_WIDE_CONST)) {
+                cft_set_error("instruction %lu uses indexed constants (kx, "
+                              "bit 30) and this device does not publish the "
+                              "feature (CAPS[4] clear, cft_caps.seq_features "
+                              "bit 0); build the program without kx",
+                              (unsigned long)pc);
+                return CFT_ERR_UNSUPPORTED;
+            }
+            if (d.op == 30 && !(c.features & CFT_ALU_EXT_IMUL)) {
+                cft_set_error("instruction %lu is IMUL (opcode 30) and this "
+                              "device does not implement it (CAPS[28] clear, "
+                              "cft_caps.seq_features bit 4)",
+                              (unsigned long)pc);
+                return CFT_ERR_UNSUPPORTED;
+            }
+            /* The destination always names a register; a source does
+             * unless its `k` bit redirects it at the constant bank. */
+            reg = seq_reg(d.rd, d.hd);
+            if (!d.ka && seq_reg(d.ra, d.ha) > reg) reg = seq_reg(d.ra, d.ha);
+            if (!d.kb && seq_reg(d.rb, d.hb) > reg) reg = seq_reg(d.rb, d.hb);
+            if (!d.kc && seq_reg(d.rc, d.hc) > reg) reg = seq_reg(d.rc, d.hc);
+        }
+        if (reg >= SEQ_NREG_NARROW &&
+            !(c.features & CFT_SEQ_FEAT_REGS32)) {
+            cft_set_error("instruction %lu names r%d and this device has "
+                          "%d registers a lane (CAPS[5] clear, "
+                          "cft_caps.seq_features bit 1 - "
+                          "CFT_SEQ_FEAT_REGS32); its operand mux would read "
+                          "the low four bits and address r%d instead",
+                          (unsigned long)pc, reg, SEQ_NREG_NARROW,
+                          reg & (SEQ_NREG_NARROW - 1));
+            return CFT_ERR_UNSUPPORTED;
+        }
         if (d.ctrl)
             continue;
-        /* A feature the device does not publish is ABSENT, not
-         * unknown: an old bitstream's operand mux would read a kx
-         * instruction's four-bit fields and compute on the wrong
-         * constants without a fault, and an integer group without
-         * IMUL answers opcode 30 with the unassigned-opcode result.
-         * Neither is a refusal the tile can make, so it is made here. */
-        if (d.kx && !(c.features & CFT_SEQ_FEAT_WIDE_CONST)) {
-            cft_set_error("instruction %lu uses indexed constants (kx, bit "
-                          "30) and this device does not publish the "
-                          "feature (CAPS[4] clear, cft_caps.seq_features "
-                          "bit 0); build the program without kx",
-                          (unsigned long)pc);
-            return CFT_ERR_UNSUPPORTED;
-        }
-        if (d.op == 30 && !(c.features & CFT_ALU_EXT_IMUL)) {
-            cft_set_error("instruction %lu is IMUL (opcode 30) and this "
-                          "device does not implement it (CAPS[28] clear, "
-                          "cft_caps.seq_features bit 4)",
-                          (unsigned long)pc);
-            return CFT_ERR_UNSUPPORTED;
-        }
         if (!c.max_consts)      /* unknown: nothing enforced */
             continue;
-        if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
-        if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;
-        if (d.kc && (uint32_t)d.rc >= c.max_consts) idx = d.rc;
+        /* The index is the four-bit field, or a byte of `imm` under
+         * kx - and BOTH are held to the device's reach. The kx half
+         * had no check until 2026-09-08 and could not fire while it
+         * was missing (every device that publishes kx publishes the
+         * whole 256-entry bank, and a byte cannot name more), but it
+         * is the half a trimmed tile would need, and a rule that is
+         * only unreachable is not a rule that is right. */
+        if (d.kx) {
+            uint32_t ia = d.imm & 0xFFu;
+            uint32_t ib = (d.imm >> 8) & 0xFFu;
+            uint32_t ic = (d.imm >> 16) & 0xFFu;
+            if (d.ka && ia >= c.max_consts) idx = (int)ia;
+            if (d.kb && ib >= c.max_consts) idx = (int)ib;
+            if (d.kc && ic >= c.max_consts) idx = (int)ic;
+        } else {
+            if (d.ka && (uint32_t)d.ra >= c.max_consts) idx = d.ra;
+            if (d.kb && (uint32_t)d.rb >= c.max_consts) idx = d.rb;
+            if (d.kc && (uint32_t)d.rc >= c.max_consts) idx = d.rc;
+        }
         if (idx >= 0)
             return (cft_status)cft_seq_cap_refusal(
                 "highest constant index", (unsigned long)idx,
@@ -435,8 +570,8 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
 {
     const uint8_t *p = (const uint8_t *)image;
     cft_program *prog;
-    uint32_t magic, ver, n_insns, n_consts, maxdep, prec, rsv0, rsv1;
-    size_t esz, want, i;
+    uint32_t magic, ver, n_insns, n_consts, maxdep, prec, flags, rsv1;
+    size_t esz, want, kbytes, i;
     cft_status st;
 
     if (!dev || !image || !out)
@@ -451,10 +586,22 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     n_consts = rd_le32(p + 12);
     maxdep   = rd_le32(p + 16);
     prec     = rd_le32(p + 20);
-    rsv0     = rd_le32(p + 24);
+    /* reserved[0] became `flags` on 2026-09-08. An image built before
+     * that wrote zero there, which is flags with no bit set, so every
+     * older image reads exactly as it did - which is the whole reason
+     * the word was reserved rather than absent. reserved[1] is still
+     * reserved. */
+    flags    = rd_le32(p + 24);
     rsv1     = rd_le32(p + 28);
 
-    if (magic != SEQ_MAGIC || ver != SEQ_VERSION || rsv0 || rsv1)
+    if (magic != SEQ_MAGIC || ver != SEQ_VERSION || rsv1)
+        return CFT_ERR_ARTIFACT;
+    /* A flag bit this library does not know is an image it cannot
+     * read: the bit says something about the layout or the run, and
+     * the honest answer to a sentence you cannot parse is not to
+     * guess. This is the version guard for everything flags will ever
+     * carry, which is why the round needed no VERSION step. */
+    if (flags & ~SEQ_FLAGS_KNOWN)
         return CFT_ERR_ARTIFACT;
     if (prec > 3)
         return CFT_ERR_ARTIFACT;
@@ -490,8 +637,38 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     if (maxdep > SEQ_MAX_DEPOSITS)
         return CFT_ERR_INVALID_ARGUMENT;
 
+    /* A BANK_EXT image on a device that cannot take a bank, refused
+     * BEFORE the map is ever touched.
+     *
+     * This is the one guard that protects an old bitstream, and it has
+     * to be here rather than in the tile: a 0x600 tile's FETCH reads
+     * n_consts constants from the image whatever the header's flags
+     * say, so it would read the first instructions as constants and
+     * then run whatever followed. There is no status bit for that,
+     * because the tile never notices. */
+    if (flags & CFT_PROG_FLAG_BANK_EXT) {
+        cft_seq_caps sc;
+        cft_device_seq_caps(dev, &sc);
+        if (!(sc.features & CFT_SEQ_FEAT_BANK_PTR)) {
+            cft_set_error("this image's header flags carry BANK_EXT, so its "
+                          "constants arrive per run, and this device does "
+                          "not publish the feature (CAPS[6] clear, "
+                          "cft_caps.seq_features bit 2 - "
+                          "CFT_SEQ_FEAT_BANK_PTR); its fetch would read "
+                          "%lu constants from an image that has none. Build "
+                          "the program with its constants in the image",
+                          (unsigned long)n_consts);
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+
     esz  = (size_t)cft_sf_formats[prec].width / 8;
-    want = (size_t)SEQ_HEADER_BYTES + (size_t)n_consts * esz +
+    /* A BANK_EXT image is a header and an instruction stream, full
+     * stop: n_consts says how many constants the program ADDRESSES,
+     * and none of them is in the file. */
+    kbytes = (flags & CFT_PROG_FLAG_BANK_EXT)
+             ? 0 : (size_t)n_consts * esz;
+    want = (size_t)SEQ_HEADER_BYTES + kbytes +
            (size_t)n_insns * SEQ_INSN_BYTES;
     /* Exactly, not at least: a program is its header, its constants
      * and its instructions, so anything else is a different program
@@ -508,11 +685,12 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     prog->max_deposits = maxdep;
     prog->n_insns      = n_insns;
     prog->n_consts     = n_consts;
+    prog->flags        = flags;
     if (n_insns) {
         prog->insns = (uint64_t *)calloc(n_insns, sizeof(uint64_t));
         if (!prog->insns) { cft_program_free(prog); return CFT_ERR_OUT_OF_MEMORY; }
     }
-    if (n_consts) {
+    if (n_consts && !(flags & CFT_PROG_FLAG_BANK_EXT)) {
         prog->consts = (cft_bn *)calloc(n_consts, sizeof(cft_bn));
         if (!prog->consts) { cft_program_free(prog); return CFT_ERR_OUT_OF_MEMORY; }
     }
@@ -521,11 +699,12 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     memcpy(prog->image, p, bytes);
     prog->image_bytes = bytes;
 
-    for (i = 0; i < n_consts; i++)
-        cft_bn_load(&prog->consts[i], p + SEQ_HEADER_BYTES + i * esz,
-                    (int)esz);
+    if (prog->consts)
+        for (i = 0; i < n_consts; i++)
+            cft_bn_load(&prog->consts[i], p + SEQ_HEADER_BYTES + i * esz,
+                        (int)esz);
     for (i = 0; i < n_insns; i++)
-        prog->insns[i] = rd_le64(p + SEQ_HEADER_BYTES + n_consts * esz +
+        prog->insns[i] = rd_le64(p + SEQ_HEADER_BYTES + kbytes +
                                  i * SEQ_INSN_BYTES);
 
     st = seq_validate(prog);
@@ -535,7 +714,7 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     }
     /* After seq_validate, so that a malformed instruction is reported
      * as malformed rather than as a capacity the device lacks. */
-    st = seq_check_const_index(dev, prog);
+    st = seq_check_against_device(dev, prog);
     if (st != CFT_OK) {
         cft_program_free(prog);
         return st;
@@ -571,6 +750,9 @@ CFT_API cft_status cft_program_get_info(cft_program *prog,
     info.max_deposits = prog->max_deposits;
     info.n_insns      = prog->n_insns;
     info.n_consts     = prog->n_consts;
+    /* Appended in ABI 0.9; a caller with the older struct passes the
+     * older struct_size and the memcpy below stops before it. */
+    info.flags        = prog->flags;
     if (want > sizeof info)
         want = sizeof info;
     info.struct_size = want;
@@ -586,10 +768,16 @@ typedef struct {
     uint32_t counts[BLOCK_LANES];
 } seq_block;
 
-static const cft_bn *seq_src(const cft_program *p, seq_block *B, int lane,
+/* The constants a run computes on: the image's own, or the bank the
+ * caller handed cft_program_run_bank. The executor is given the array
+ * rather than reading it off the program, so that a BANK_EXT program
+ * is the SAME executor with a different pointer and not a second
+ * implementation - which is what makes "the image is the schedule and
+ * the bank is the data" true of this code and not only of the tile. */
+static const cft_bn *seq_src(const cft_bn *konst, seq_block *B, int lane,
                              int idx, int is_const)
 {
-    return is_const ? &p->consts[idx] : &B->regs[lane][idx];
+    return is_const ? &konst[idx] : &B->regs[lane][idx];
 }
 
 /* Skip forward to the ENDREP matching the REPEAT at `pc`. Validation
@@ -612,7 +800,8 @@ static uint32_t seq_matching_endrep(const cft_program *p, uint32_t pc)
     return p->n_insns;      /* unreachable for a validated program */
 }
 
-static cft_status seq_run_block(const cft_program *p, seq_block *B,
+static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
+                                seq_block *B,
                                 int nlane, uint8_t *deposits,
                                 size_t first_elem, size_t esz,
                                 uint32_t *flags, uint32_t *status)
@@ -632,6 +821,7 @@ static cft_status seq_run_block(const cft_program *p, seq_block *B,
              * per instruction - which is what the hardware does too,
              * a constant being unable to change during a run. */
             int ia, ib, ic, ka, kb, kc;
+            int rd = seq_reg(d.rd, d.hd);
             ia = seq_source(&d, 0, &ka);
             ib = seq_source(&d, 1, &kb);
             ic = seq_source(&d, 2, &kc);
@@ -641,12 +831,12 @@ static cft_status seq_run_block(const cft_program *p, seq_block *B,
                 if (!B->active[i])
                     continue;   /* no write, no deposit, and no flags */
                 if (cft_sf_compute(p->f, d.op, d.rnd,
-                                   seq_src(p, B, i, ia, ka),
-                                   seq_src(p, B, i, ib, kb),
-                                   seq_src(p, B, i, ic, kc),
+                                   seq_src(konst, B, i, ia, ka),
+                                   seq_src(konst, B, i, ib, kb),
+                                   seq_src(konst, B, i, ic, kc),
                                    &outv, &fl))
                     return CFT_ERR_INTERNAL;
-                cft_bn_copy(&B->regs[i][d.rd], &outv);
+                cft_bn_copy(&B->regs[i][rd], &outv);
                 *flags |= fl;
             }
             pc++;
@@ -695,8 +885,8 @@ static cft_status seq_run_block(const cft_program *p, seq_block *B,
                 }
                 slot = (first_elem + (size_t)i) * p->max_deposits +
                        B->counts[i];
-                cft_bn_store(&B->regs[i][d.ra], deposits + slot * esz,
-                             (int)esz);
+                cft_bn_store(&B->regs[i][seq_reg(d.ra, d.ha)],
+                             deposits + slot * esz, (int)esz);
                 B->counts[i]++;
             }
             pc++;
@@ -707,7 +897,7 @@ static cft_status seq_run_block(const cft_program *p, seq_block *B,
                 cft_bn mag;
                 if (!B->active[i])
                     continue;       /* narrows only, never widens */
-                cft_bn_copy(&mag, &B->regs[i][d.ra]);
+                cft_bn_copy(&mag, &B->regs[i][seq_reg(d.ra, d.ha)]);
                 cft_bn_clearbit(&mag, p->f->width - 1);
                 B->active[i] = !cft_bn_is_zero(&mag);
             }
@@ -727,12 +917,90 @@ static cft_status seq_run_block(const cft_program *p, seq_block *B,
     return CFT_OK;
 }
 
-CFT_API cft_status cft_program_run(cft_program *prog,
-                                   const void *a, const void *b,
-                                   const void *c,
-                                   void *deposits, uint32_t *counts,
-                                   size_t n,
-                                   uint32_t *flags, uint32_t *bus)
+/* ---- the bank, and the two entry points that take one -------------- */
+
+/* How many bytes a run of this program's constant bank is, or 0 when
+ * the program carries its own. Separate from the check below because
+ * the message wants the number and so does the loader. */
+static size_t seq_bank_bytes(const cft_program *p)
+{
+    size_t esz = (size_t)p->f->width / 8;
+    if (!(p->flags & CFT_PROG_FLAG_BANK_EXT) || !p->n_consts)
+        return 0;
+    if ((size_t)p->n_consts > ((size_t)-1) / esz)
+        return (size_t)-1;      /* not representable here; refused below */
+    return (size_t)p->n_consts * esz;
+}
+
+/* The bank a run or a digest was handed, against the program it names.
+ *
+ * Two refusals, and both are about a program having exactly one source
+ * of constants. A program that carries its own refuses a bank, because
+ * a bank that was quietly ignored is two machines computing on
+ * different numbers while agreeing about the image; and a BANK_EXT
+ * program refuses a bank that is not the size its n_consts says,
+ * because the alternative is reading past the caller's buffer or
+ * running on constants it never supplied.
+ *
+ * `who` is the entry point's own name: a caller that reached the wrong
+ * one should be told which one it wanted. */
+static cft_status seq_check_bank(const cft_program *p, const void *bank,
+                                 size_t bank_bytes, const char *who)
+{
+    size_t want;
+
+    if (!(p->flags & CFT_PROG_FLAG_BANK_EXT)) {
+        if (bank || bank_bytes) {
+            cft_set_error("%s was given a %lu-byte constant bank and this "
+                          "program carries its own %lu constants in its "
+                          "image (its header flags do not set BANK_EXT). "
+                          "A program has one source of constants; pass no "
+                          "bank, or call cft_program_run",
+                          who, (unsigned long)bank_bytes,
+                          (unsigned long)p->n_consts);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        return CFT_OK;
+    }
+    want = seq_bank_bytes(p);
+    if (want == (size_t)-1) {
+        cft_set_error("%s: this program addresses %lu constants, which is "
+                      "more bank than this process can address",
+                      who, (unsigned long)p->n_consts);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (bank_bytes != want) {
+        cft_set_error("%s was given a %lu-byte constant bank and this "
+                      "program's bank is %lu bytes - %lu %s constants, "
+                      "densely packed, exactly as an image's constant "
+                      "section is laid out",
+                      who, (unsigned long)bank_bytes, (unsigned long)want,
+                      (unsigned long)p->n_consts,
+                      cft_format_name((cft_format)p->fmt_code));
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (want && !bank) {
+        cft_set_error("%s: this program's constants arrive with the run "
+                      "(BANK_EXT) and the bank pointer is NULL", who);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    return CFT_OK;
+}
+
+/* The executor and the dispatch, shared by both entry points.
+ *
+ * `bank` is NULL for a program that carries its own constants and the
+ * caller's buffer for a BANK_EXT one; seq_check_bank has already held
+ * it to the program. Everything from here is what cft_program_run
+ * always did, with the constants coming from wherever they come from.
+ */
+static cft_status seq_program_run(cft_program *prog,
+                                  const void *bank, size_t bank_bytes,
+                                  const void *a, const void *b,
+                                  const void *c,
+                                  void *deposits, uint32_t *counts,
+                                  size_t n,
+                                  uint32_t *flags, uint32_t *bus)
 {
     const uint8_t *pa = (const uint8_t *)a;
     const uint8_t *pb = (const uint8_t *)b;
@@ -741,11 +1009,9 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     size_t esz, off;
     uint32_t acc_flags = 0, acc_status = 0;
     seq_block *B;
+    cft_bn *loaded = NULL;
+    const cft_bn *konst;
 
-    if (bus)
-        *bus = 0;
-    if (!prog)
-        return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0) {
         cft_flags_emit(prog->dev, 0, flags);
         return CFT_OK;
@@ -768,8 +1034,8 @@ CFT_API cft_status cft_program_run(cft_program *prog,
      * (docs/SEQUENCER.md P1), the deposit address is a function of the
      * element index alone (P2), and the early exit changes only how
      * long the run takes (P3). So this is a dispatch and not a second
-     * implementation - which is why it hands over the IMAGE and the
-     * caller's own pointers and does nothing else.
+     * implementation - which is why it hands over the IMAGE, the BANK
+     * and the caller's own pointers and does nothing else.
      *
      * max_deposits == 0 was once listed here as a known divergence -
      * legal in software, refused by the tile. It is not one. The
@@ -793,6 +1059,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
              * neither. */
             cft_status st = (cft_status)cft_backend_program_run(
                 prog->dev, prog->fmt_code, prog->image, prog->image_bytes,
+                bank, bank_bytes,
                 prog->max_deposits, a, b, c, deposits, counts, n, &fl, &bs);
             if (st == CFT_OK) {
                 cft_flags_emit(prog->dev, fl, flags);
@@ -804,6 +1071,21 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     }
 #endif
 
+    /* The bank, decoded once for the whole run. A constant cannot
+     * change during a run - that is what makes it a constant - so it
+     * is decoded here and not per block, exactly as the image's own
+     * constants are decoded once at load. */
+    if (bank_bytes) {
+        size_t i;
+        loaded = (cft_bn *)calloc(prog->n_consts, sizeof(cft_bn));
+        if (!loaded)
+            return CFT_ERR_OUT_OF_MEMORY;
+        for (i = 0; i < prog->n_consts; i++)
+            cft_bn_load(&loaded[i], (const uint8_t *)bank + i * esz,
+                        (int)esz);
+    }
+    konst = loaded ? loaded : prog->consts;
+
     /* Every slot is written, including ones no lane deposits into: an
      * untouched slot reads as +0 by definition, and a run that left
      * the caller's previous contents there would not be reproducible.
@@ -812,8 +1094,10 @@ CFT_API cft_status cft_program_run(cft_program *prog,
         memset(pd, 0, n * prog->max_deposits * esz);
 
     B = (seq_block *)calloc(1, sizeof *B);
-    if (!B)
+    if (!B) {
+        free(loaded);
         return CFT_ERR_OUT_OF_MEMORY;
+    }
 
     for (off = 0; off < n; off += BLOCK_LANES) {
         size_t k = n - off < BLOCK_LANES ? n - off : BLOCK_LANES;
@@ -833,10 +1117,11 @@ CFT_API cft_status cft_program_run(cft_program *prog,
             B->counts[i] = 0;
         }
 
-        st = seq_run_block(prog, B, (int)k, pd, off, esz,
+        st = seq_run_block(prog, konst, B, (int)k, pd, off, esz,
                            &acc_flags, &acc_status);
         if (st != CFT_OK) {
             free(B);
+            free(loaded);
             return st;
         }
         if (counts)
@@ -845,6 +1130,7 @@ CFT_API cft_status cft_program_run(cft_program *prog,
     }
 
     free(B);
+    free(loaded);
     cft_flags_emit(prog->dev, acc_flags, flags);
     /* A deposit overflow is reported, not an error. The deposits that
      * fit are correct and the run is reproducible; what the caller
@@ -853,5 +1139,81 @@ CFT_API cft_status cft_program_run(cft_program *prog,
      * means and this is not. */
     if (bus)
         *bus = acc_status;
+    return CFT_OK;
+}
+
+CFT_API cft_status cft_program_run(cft_program *prog,
+                                   const void *a, const void *b,
+                                   const void *c,
+                                   void *deposits, uint32_t *counts,
+                                   size_t n,
+                                   uint32_t *flags, uint32_t *bus)
+{
+    if (bus)
+        *bus = 0;
+    if (!prog)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* A BANK_EXT program has no constants of its own, and running it
+     * with none at all would compute on a bank of +0 that the caller
+     * never chose. Refused by name rather than defaulted: the whole
+     * point of the flag is that the numbers ride as data. */
+    if (prog->flags & CFT_PROG_FLAG_BANK_EXT) {
+        cft_set_error("this program's header flags carry BANK_EXT, so its "
+                      "%lu constants arrive with each run; call "
+                      "cft_program_run_bank",
+                      (unsigned long)prog->n_consts);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    return seq_program_run(prog, NULL, 0, a, b, c, deposits, counts, n,
+                           flags, bus);
+}
+
+CFT_API cft_status cft_program_run_bank(cft_program *prog,
+                                        const void *bank, size_t bank_bytes,
+                                        const void *a, const void *b,
+                                        const void *c,
+                                        void *deposits, uint32_t *counts,
+                                        size_t n,
+                                        uint32_t *flags_out,
+                                        uint32_t *bus_out)
+{
+    cft_status st;
+
+    if (bus_out)
+        *bus_out = 0;
+    if (!prog)
+        return CFT_ERR_INVALID_ARGUMENT;
+    st = seq_check_bank(prog, bank, bank_bytes, "cft_program_run_bank");
+    if (st != CFT_OK)
+        return st;
+    return seq_program_run(prog, bank_bytes ? bank : NULL, bank_bytes,
+                           a, b, c, deposits, counts, n, flags_out, bus_out);
+}
+
+/* ---- attestation --------------------------------------------------- */
+
+CFT_API cft_status cft_program_digest(cft_program *prog,
+                                      const void *bank, size_t bank_bytes,
+                                      uint8_t out[32])
+{
+    cft_sha256_ctx s;
+    cft_status st;
+
+    if (!prog || !out)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* The same bank rule as the run, deliberately: a digest over a
+     * bank the program could not have run is a name for nothing, and a
+     * program that has two ways to be digested has no name at all. */
+    st = seq_check_bank(prog, bank, bank_bytes, "cft_program_digest");
+    if (st != CFT_OK)
+        return st;
+    /* The IMAGE bytes, not the parsed form - the same reason the image
+     * is kept whole and handed to a device whole. Then the bank, so
+     * that what ran is one hash of program and data together. */
+    cft_sha256_init(&s);
+    cft_sha256_update(&s, prog->image, prog->image_bytes);
+    if (bank_bytes)
+        cft_sha256_update(&s, bank, bank_bytes);
+    cft_sha256_final(&s, out);
     return CFT_OK;
 }

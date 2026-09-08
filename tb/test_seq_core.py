@@ -83,6 +83,15 @@ MUL_PASSES = int(os.getenv("CFT_MUL_PASSES", "1"))
 MAXD = 64
 IMEM_D = 1024
 KMEM_D = 256
+# Registers a lane owns, and so the register file's depth (revision 2:
+# 16 -> 32). It appears here only in the CYCLE BUDGET: cft_seq wipes
+# the whole file once per lane block, so the doubling is 256 more
+# cycles of fixed cost per block and a budget that did not know about
+# it timed the geometry suite out at n=300. A bound, not a value under
+# test - but a bound written from the parameter rather than as a
+# number, because the last one was a number and this is what happened.
+REGS = 32
+RF_D = REGS * NBEATS
 
 CLK_NS = 4
 
@@ -91,6 +100,11 @@ CLK_NS = 4
 # size grows with max_deposits.
 RAM_BYTES = 1 << 22
 PROG_BASE = 0x00_1000
+# The per-run constant bank (revision 2 R3), in its own region well
+# away from the image: BANK_EXT exists precisely so the two are
+# separate buffers, and a FETCH that quietly read the constants from
+# the image would pass every check here if they shared a region.
+BANK_BASE = 0x00_8000
 A_BASE = 0x01_0000
 B_BASE = 0x02_0000
 C_BASE = 0x03_0000
@@ -341,6 +355,13 @@ def unchecked(fmt, insns, consts=(), max_deposits=1):
     p.insns = list(insns)
     p.consts = list(consts)
     p.max_deposits = max_deposits
+    # __init__ is skipped deliberately, so every field it would have
+    # set is set here. These two arrived with revision 2 and `run()`
+    # reads both on entry: without them the bypass raises instead of
+    # running, and a case that exists to execute an unloadable program
+    # would fail for the wrong reason.
+    p.flags = 0
+    p._n_consts = len(p.consts)
     return p
 
 
@@ -417,7 +438,7 @@ class Bench:
         dut.start.value = 0
         dut.cfg_prec.value = 0
         for name in ("cfg_n", "cfg_a", "cfg_b", "cfg_c", "cfg_d",
-                     "cfg_prog", "cfg_cnt"):
+                     "cfg_prog", "cfg_bank", "cfg_cnt"):
             getattr(dut, name).value = 0
         cocotb.start_soon(self.ram.serve())
         dut.ap_rst_n.value = 0
@@ -448,11 +469,18 @@ class Bench:
             f"{label}: busy still high eight cycles after done")
         return got
 
-    def _stage(self, fmt, image, a, b, c, n, dep_bytes, cnt_bytes):
+    def _stage(self, fmt, image, a, b, c, n, dep_bytes, cnt_bytes,
+               bank=None):
         ram = self.ram
         ram.poison()
         ram.stage(PROG_BASE, image)
         ebytes = fmt.width // 8
+        if bank is not None:
+            # Laid out exactly as an image's constant section is -
+            # dense, format-width, little-endian - which is what lets
+            # FETCH read one the way it reads the other.
+            ram.stage(BANK_BASE, b"".join(
+                int(v).to_bytes(ebytes, "little") for v in bank))
         for base, vals in ((A_BASE, a), (B_BASE, b), (C_BASE, c)):
             ram.stage(base, b"".join(
                 int(v).to_bytes(ebytes, "little") for v in vals))
@@ -461,7 +489,7 @@ class Bench:
             "max_deposits for this case")
         assert CNT_BASE + cnt_bytes + GUARD <= D_BASE
 
-    def _drive_cfg(self, fmt, n):
+    def _drive_cfg(self, fmt, n, bank_ptr=None):
         dut = self.dut
         dut.cfg_prec.value = PREC_CODE[fmt.name]
         dut.cfg_n.value = n
@@ -471,6 +499,11 @@ class Bench:
         dut.cfg_d.value = D_BASE
         dut.cfg_prog.value = PROG_BASE
         dut.cfg_cnt.value = CNT_BASE
+        # Poisoned unless this run supplies a bank: a program without
+        # flags.BANK_EXT must never read the pointer, and aiming it at
+        # an address with no constants at it is how that is CHECKED
+        # rather than asserted.
+        dut.cfg_bank.value = BANK_BASE if bank_ptr else 0xDEAD_0000
 
     # -- a refused run ---------------------------------------------------
 
@@ -501,7 +534,7 @@ class Bench:
     # -- an accepted run -------------------------------------------------
 
     async def program(self, fmt, prog, a, b, c, n, label,
-                      *, check_flags=True, image=None):
+                      *, check_flags=True, image=None, bank=None):
         """Run `prog` over `n` lanes and compare the whole machine.
 
         `a`, `b`, `c` are the REAL streams, one value per lane in
@@ -516,11 +549,12 @@ class Bench:
         dep_bytes = n * maxdep * ebytes
         cnt_bytes = 4 * n
 
-        want = seq.run(prog, list(a), list(b), list(c))
+        want = seq.run(prog, list(a), list(b), list(c), bank=bank)
 
-        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes)
-        self._padding_selfcheck(fmt, prog, a, b, c, n, want, label)
-        self._drive_cfg(fmt, n)
+        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes, bank=bank)
+        self._padding_selfcheck(fmt, prog, a, b, c, n, want, label,
+                                bank=bank)
+        self._drive_cfg(fmt, n, bank_ptr=bank is not None)
 
         budget = self._budget(fmt, prog, n, len(image))
         refused, flags, err = await self._go(budget, label)
@@ -553,12 +587,16 @@ class Bench:
         # per-instruction cost of a block scales by the budget - the
         # widest rung's period is the budget itself, and using it for
         # every rung keeps this a bound rather than a fit.
+        # Per block: the register-file wipe (RF_D cycles, the whole
+        # file, so that the previous block cannot leak), the three
+        # operand streams, the instructions, and the drain.
         cycles = (3000 + (image_bytes // BEAT_BYTES + 8) * 8
                   + blocks * (worst * ((NBEATS + LATENCY) * MUL_PASSES + 8)
-                              + 6 * NBEATS + 400))
+                              + RF_D + 6 * NBEATS + 400))
         return min(cycles, 4_000_000)
 
-    def _padding_selfcheck(self, fmt, prog, a, b, c, n, want, label):
+    def _padding_selfcheck(self, fmt, prog, a, b, c, n, want, label,
+                           bank=None):
         """The bench's own precondition, not a claim about the DUT.
 
         The model here is run over exactly `n` lanes, all of them
@@ -585,7 +623,7 @@ class Bench:
             return out
 
         pad = seq.run(prog, stream(A_BASE, a), stream(B_BASE, b),
-                      stream(C_BASE, c), n_active=n)
+                      stream(C_BASE, c), bank=bank, n_active=n)
         same = (pad.deposits[:n * prog.max_deposits] == want.deposits
                 and pad.counts[:n] == want.counts
                 and pad.flags == want.flags and pad.status == want.status)
@@ -1583,8 +1621,207 @@ async def indexed_constants_and_imul(dut):
                   bench.cases["program"])
 
 
+
+
 # ======================================================================
-# 9. the one that has to go last
+# 9. revision 2: five-bit register fields, the per-run constant bank
+# ======================================================================
+
+@cocotb.test()
+async def wide_registers(dut):
+    """R1: a lane owns 32 registers, and the fifth bit of each field
+    lives in imm[27:24].
+
+    The file doubled, its read and write addresses grew a bit, and the
+    beat index moved from a fixed four bits to NBSH. What could go
+    wrong is aliasing - r20 landing on r4 - and aliasing is invisible
+    to a program that names only one of any colliding pair. So every
+    case here names BOTH halves and puts different values in them:
+
+      * a chain that walks r0 -> r16 -> r1 -> r17 -> ..., so a file
+        whose high addresses folded onto the low ones would overwrite a
+        value it is about to read;
+      * a deposit from a high register that was never written, which
+        must be +0 exactly as r3..r15 are;
+      * the fuzz generator's wide arm, which draws destinations and
+        sources from all 32 across four rungs.
+    """
+    bench = Bench(dut)
+    await bench.start()
+
+    # -- 1. low and high halves interleaved, on every rung
+    for name, n in (("fp32", 16), ("fp64", 8), ("fp128", 4), ("fp256", 2)):
+        fmt = FORMATS[name]
+        body = []
+        # r16 = a + c; then alternate halves, each step reading the
+        # previous two, so nothing can be dropped without changing the
+        # answer.
+        body.append(seq.alu(sf.OP_ADD, 16, ra=0, rc=2))
+        body.append(seq.alu(sf.OP_MUL, 4, ra=16, rb=1))
+        pairs = [(17, 5), (24, 6), (31, 7), (20, 12)]
+        prev_hi, prev_lo = 16, 4
+        for hi, lo in pairs:
+            body.append(seq.alu(sf.OP_ADD, hi, ra=prev_hi, rc=prev_lo))
+            body.append(seq.alu(sf.OP_MUL, lo, ra=hi, rb=prev_hi))
+            prev_hi, prev_lo = hi, lo
+        body += [seq.deposit(prev_hi), seq.deposit(prev_lo),
+                 seq.deposit(29),          # never written: must be +0
+                 seq.halt()]
+        prog = seq.Program(fmt, body, max_deposits=3)
+        # the case is only meaningful if it really names the high half
+        named = set()
+        for w in prog.insns:
+            d = seq.decode(w)
+            named |= {d["rd"], d["ra"], d["rb"], d["rc"]}
+        assert max(named) >= 16, "no register above fifteen is named"
+        await bench.program(fmt, prog, operands(fmt, n, 1100),
+                            operands(fmt, n, 1101), operands(fmt, n, 1102),
+                            n, f"{name} r16..r31 interleaved with r0..r15")
+
+    # -- 2. the fuzz generator's wide arm
+    #
+    # Same generator, same corpus shape, `wide_regs` on - which draws
+    # every register from 0..31 instead of 0..15 and draws exactly as
+    # many values from `rng`, so this is the existing fuzz aimed at the
+    # other half of the file rather than a different fuzz.
+    made = 0
+    for name, trials, n in (("fp32", 8, 16), ("fp64", 5, 8),
+                            ("fp256", 3, 2)):
+        fmt = FORMATS[name]
+        rng = random.Random(20260908 ^ (fmt.width * 7919))
+        got = 0
+        attempts = 0
+        while got < trials and attempts < trials * 60:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, wide_regs=True)
+            if worst_case_insns(insns) > 400:
+                continue
+            if has_actall(insns):
+                continue          # ragged-block seam; covered elsewhere
+            try:
+                prog = seq.Program(fmt, insns, consts,
+                                   rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"wide-register fuzz {name} #{got}")
+            got += 1
+            made += 1
+        assert got == trials, (
+            f"{name}: only {got} of {trials} wide-register programs were "
+            f"generated in {attempts} attempts")
+    assert made >= 16, f"only {made} wide-register programs were fuzzed"
+    dut._log.info(f"wide registers: {made} fuzzed programs drawing from "
+                  f"r0..r{seq.NREG - 1}")
+
+
+@cocotb.test()
+async def constant_bank_per_run(dut):
+    """R3: a BANK_EXT image carries no constant section, and its
+    constants arrive per run from BANK_PTR.
+
+    FETCH becomes two passes - the bank, then the instructions from
+    cfg_prog + 32 - so what has to be true is that the two land in the
+    right memories and that the second does not disturb the first.
+    Three cases:
+
+      * the SAME image run twice with different banks gives two
+        different answers, each equal to what the self-contained
+        program with those constants inlined gives. One run would only
+        prove the pointer is read; two prove the answer follows it;
+      * a bank that reaches past the plain form's sixteen, through
+        `kx`, because the two features have to compose;
+      * an ordinary image still runs with BANK_PTR aimed at rubbish -
+        the negative half, arranged by _drive_cfg on every run without
+        a bank.
+    """
+    bench = Bench(dut)
+    await bench.start()
+
+    def values(fmt, seed):
+        rng = random.Random(seed)
+        pool = [sf.zero_bits(fmt), sf.zero_bits(fmt, 1), sf.one_bits(fmt),
+                sf.inf_bits(fmt), sf.qnan_bits(fmt),
+                sf.min_subnormal_bits(fmt), sf.max_normal_bits(fmt)]
+        return pool
+
+    # -- 1. one image, two banks, on every rung
+    for name, n in (("fp32", 16), ("fp64", 8), ("fp128", 4), ("fp256", 2)):
+        fmt = FORMATS[name]
+        body = [seq.alu(sf.OP_MUL, 17, ra=0, rb=1),
+                seq.alu(sf.OP_ADD, 18, ra=17, rc=0, kc=True),
+                seq.deposit(18),
+                seq.alu(sf.OP_ADD, 19, ra=18, rc=3, kc=True),
+                seq.deposit(19),
+                seq.halt()]
+        ext = seq.Program(fmt, body, flags=seq.FLAG_BANK_EXT, n_consts=4,
+                          max_deposits=2)
+        image = ext.to_bytes()
+        assert len(image) == 32 + 8 * len(body), (
+            "a BANK_EXT image is header then instructions; if it still "
+            "carried the constants there would be nothing for BANK_PTR "
+            "to do")
+        pool = values(fmt, 0)
+        for tag, bank in (("A", pool[:4]), ("B", pool[3:7])):
+            await bench.program(fmt, ext, operands(fmt, n, 1200),
+                                operands(fmt, n, 1201),
+                                operands(fmt, n, 1202), n,
+                                f"{name} BANK_EXT bank {tag}", bank=bank)
+        # ...and the self-contained program with bank A inlined must
+        # agree with the BANK_EXT run of bank A, which is what makes
+        # "where the constants live" a non-observable.
+        inline = seq.Program(fmt, body, consts=pool[:4], max_deposits=2)
+        await bench.program(fmt, inline, operands(fmt, n, 1200),
+                            operands(fmt, n, 1201),
+                            operands(fmt, n, 1202), n,
+                            f"{name} the same constants, inlined")
+
+    # -- 2. a bank reached through kx, past the plain form's sixteen
+    fmt = FORMATS["fp32"]
+    mask = (1 << fmt.width) - 1
+    deep = [((i * 0x0101_0101) ^ (i << 3) ^ 0x11) & mask for i in range(40)]
+    ext = seq.Program(
+        fmt,
+        [seq.alu(sf.OP_IXOR, 21, ra=0, rb=39, kb=True, kx=True),
+         seq.deposit(21),
+         seq.alu(sf.OP_IOR, 22, ra=21, rb=16, kb=True, kx=True),
+         seq.deposit(22),
+         seq.halt()],
+        flags=seq.FLAG_BANK_EXT, n_consts=40, max_deposits=2)
+    await bench.program(fmt, ext, operands(fmt, 16, 1210),
+                        operands(fmt, 16, 1211), operands(fmt, 16, 1212),
+                        16, "fp32 BANK_EXT reached through kx", bank=deep)
+
+    # -- 3. the header refusals revision 2 adds. The 0x600 tile checked
+    # NEITHER reserved word; this one checks both, which is what makes
+    # an image built for a later revision thrown back rather than
+    # half-understood.
+    body = [seq.alu(sf.OP_ADD, 4, 0, 1, 2), seq.halt()]
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(1 << 1, 0)),
+        "header flags[1]: a flag bit this tile does not implement")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(1 << 31, 0)),
+        "header flags[31]: the top of the same word")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(0, 1)),
+        "header reserved[1]: still reserved")
+    # The positive control: flags[0] is BANK_EXT and IS implemented, so
+    # the identical mechanism must not refuse it. Without this a tile
+    # that refused every non-zero flags word would pass all three above.
+    await bench.program(
+        fmt,
+        seq.Program(fmt, [seq.alu(sf.OP_ADD, 23, ra=0, rc=0, kc=True),
+                          seq.deposit(23), seq.halt()],
+                    flags=seq.FLAG_BANK_EXT, n_consts=1, max_deposits=1),
+        operands(fmt, 16, 1220), operands(fmt, 16, 1221),
+        operands(fmt, 16, 1222), 16,
+        "fp32 BANK_EXT is a KNOWN flag", bank=[sf.one_bits(fmt)])
+
+
+# ======================================================================
+# 10. the one that has to go last
 # ======================================================================
 
 @cocotb.test()

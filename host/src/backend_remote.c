@@ -92,12 +92,14 @@ int cftr_reduce(void *hw, int op, int fmt, int rnd,
     return CFT_ERR_INTERNAL;
 }
 int cftr_program_run(void *hw, int fmt, const void *image,
-                     size_t image_bytes, uint32_t max_deposits,
+                     size_t image_bytes, const void *bank, size_t bank_bytes,
+                     uint32_t max_deposits,
                      const void *a, const void *b, const void *c,
                      void *deposits, uint32_t *counts, size_t n,
                      uint32_t *flags, uint32_t *bus)
 {
     (void)hw; (void)fmt; (void)image; (void)image_bytes; (void)max_deposits;
+    (void)bank; (void)bank_bytes;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
     (void)flags; (void)bus;
     return CFT_ERR_INTERNAL;
@@ -1442,7 +1444,8 @@ static int ensure_program(rdev *R, int fmt, const void *image,
 }
 
 int cftr_program_run(void *hw, int fmt, const void *image,
-                     size_t image_bytes, uint32_t max_deposits,
+                     size_t image_bytes, const void *bank, size_t bank_bytes,
+                     uint32_t max_deposits,
                      const void *a, const void *b, const void *c,
                      void *deposits, uint32_t *counts, size_t n,
                      uint32_t *flags, uint32_t *bus)
@@ -1454,6 +1457,19 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     uint8_t *pd = (uint8_t *)deposits;
     uint32_t present = (a ? 1u : 0u) | (b ? 2u : 0u) | (c ? 4u : 0u);
     unsigned npresent = (a ? 1u : 0u) + (b ? 1u : 0u) + (c ? 1u : 0u);
+    /* PROG_RUN's fixed fields, and PROG_RUN_BANK's - the same twenty-
+     * four bytes with the bank appended after them and its length in
+     * the word PROG_RUN leaves zero. Which one is the IMAGE's decision,
+     * read from its header's flags word (BANK_EXT, bit 0), not the
+     * bank's length: a BANK_EXT program whose n_consts is zero has a
+     * legitimately empty bank and must still travel as PROG_RUN_BANK,
+     * because the server's cft_program_run refuses it and only
+     * cft_program_run_bank takes it (found 2026-09-08 by the
+     * JavaScript client, which mirrors this file). */
+    const int bank_ext = image_bytes >= 32 &&
+                         (((const uint8_t *)image)[24] & 1u);
+    const uint16_t op = bank_ext ? CFTR_OP_PROG_RUN_BANK
+                                 : CFTR_OP_PROG_RUN;
     size_t per_lane, lpc, off;
     uint32_t fl_acc = 0, bus_acc = 0;
     uint8_t *req = NULL;
@@ -1464,6 +1480,21 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         return CFT_ERR_INVALID_ARGUMENT;
     if (max_deposits && !deposits)
         return CFT_ERR_INVALID_ARGUMENT;
+    if (bank_bytes && !bank)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* Never sent to a server that cannot serve it. The image would not
+     * have LOADED against such a device - cft_program_load refuses a
+     * BANK_EXT image where CAPS[6] is clear, and the HELLO caps block
+     * carries the server device's seq_features - so reaching here with
+     * a bank and a server without the feature means the two disagree
+     * about what was published, which is worth naming rather than
+     * discovering as an unsupported opcode. */
+    if (bank_bytes && !(R->seq.features & CFT_SEQ_FEAT_BANK_PTR)) {
+        set_err("this run supplies a constant bank and the server's device "
+                "does not publish CFT_SEQ_FEAT_BANK_PTR (CAPS[6], "
+                "cft_caps.seq_features bit 2), so it cannot take one");
+        return CFT_ERR_UNSUPPORTED;
+    }
     if (n == 0) {
         if (flags) *flags = 0;
         if (bus)   *bus = 0;
@@ -1473,15 +1504,26 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     if (st != CFT_OK)
         return st;
 
-    /* Lanes per request: operands in, deposits and counts out. */
+    /* Lanes per request: operands in, deposits and counts out. The
+     * bank comes off the budget rather than being added to it, since
+     * it rides every chunk - a bank as large as the budget would
+     * otherwise make every chunk one byte over. */
     per_lane = (size_t)npresent * esz + (size_t)max_deposits * esz + 4u;
-    lpc = CFTR_CHUNK_BYTES / per_lane;
+    if (bank_bytes >= CFTR_CHUNK_BYTES) {
+        set_err("this program's constant bank is %lu bytes, which does not "
+                "leave room for a lane in a %lu-byte request",
+                (unsigned long)bank_bytes,
+                (unsigned long)CFTR_CHUNK_BYTES);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    lpc = (CFTR_CHUNK_BYTES - bank_bytes) / per_lane;
     if (lpc == 0)
         lpc = 1;
 
     for (off = 0; off < n; off += lpc) {
         const size_t k = n - off < lpc ? n - off : lpc;
-        const size_t req_len = 24u + (size_t)npresent * k * esz;
+        const size_t req_len = 24u + bank_bytes +
+                               (size_t)npresent * k * esz;
         const size_t dep_bytes = k * (size_t)max_deposits * esz;
         const size_t want = 8u + dep_bytes + (counts ? k * 4u : 0u);
         uint8_t *q, *resp = NULL;
@@ -1494,14 +1536,21 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         cftr_put32(req + 0, R->phandle);
         cftr_put32(req + 4, present);
         cftr_put32(req + 8, counts ? 1u : 0u);
-        cftr_put32(req + 12, 0);
+        /* Zero on PROG_RUN, the bank's byte length on PROG_RUN_BANK.
+         * The bank rides EVERY chunk rather than being staged once,
+         * because a chunk is a whole run of its own lanes on the
+         * server and a program's constants are not chunk-shaped; the
+         * bank is a handful of format-width values beside megabytes of
+         * operands, so the repetition costs nothing measurable. */
+        cftr_put32(req + 12, (uint32_t)bank_bytes);
         cftr_put64(req + 16, (uint64_t)k);
         q = req + 24;
+        if (bank_bytes) { memcpy(q, bank, bank_bytes); q += bank_bytes; }
         if (pa) { memcpy(q, pa + off * esz, k * esz); q += k * esz; }
         if (pb) { memcpy(q, pb + off * esz, k * esz); q += k * esz; }
         if (pc) { memcpy(q, pc + off * esz, k * esz); q += k * esz; }
 
-        if (do_request(R, CFTR_OP_PROG_RUN, req, req_len, &status, &resp,
+        if (do_request(R, op, req, req_len, &status, &resp,
                        &resp_len)) {
             free(req);
             return R->poison_status;
@@ -1513,8 +1562,9 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         if (resp_len != want) {
             char why[160];
             snprintf(why, sizeof why,
-                     "PROG_RUN answered with %lu bytes where %lu were due",
-                     (unsigned long)resp_len, (unsigned long)want);
+                     "op 0x%04x answered with %lu bytes where %lu were due",
+                     (unsigned)op, (unsigned long)resp_len,
+                     (unsigned long)want);
             free(resp);
             free(req);
             poison(R, CFT_ERR_INTERNAL, why);

@@ -78,6 +78,8 @@ client's own copy of the library, which is bit-identical by contract.
 | `cft_reduce` for `CFT_SUMSQ`, `CFT_SUMABS` | the composition on the client, its two passes on the server | `REDUCE` (dot), or `RUN` (abs) then `REDUCE` (sum) |
 | `cft_program_load` | validated on the client, then loaded on the server | `PROG_LOAD` once per distinct image |
 | `cft_program_run` | server | one `PROG_RUN` per chunk of lanes |
+| `cft_program_run_bank` | server | one `PROG_RUN_BANK` per chunk of lanes, the bank on each |
+| `cft_program_digest` | client, over the bytes it holds | nothing |
 | `cft_program_free` | both | `PROG_FREE` |
 | `cft_get_caps`, `cft_supports` | client, from the capabilities the handshake returned | nothing after `HELLO` |
 | `cft_alloc` and the buffer calls | client: host memory, as on the software backend | nothing (see below) |
@@ -227,6 +229,7 @@ payload (the server passes NULL for it, as the caller did).
 | `0x0020` | `PROG_LOAD` | the program image, byte for byte | `u32 handle, u32 fmt, u32 max_deposits, u32 0` |
 | `0x0021` | `PROG_RUN` | `u32 handle, u32 present, u32 want_counts, u32 0, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted` |
 | `0x0022` | `PROG_FREE` | `u32 handle` | - |
+| `0x0023` | `PROG_RUN_BANK` | `u32 handle, u32 present, u32 want_counts, u32 bank_bytes, u64 n, elem[bank], elem[n] per present operand` | as `PROG_RUN` |
 | `0x0030` | `BUF_ALLOC` | `u64 bytes` | `u32 handle` |
 | `0x0031` | `BUF_FREE` | `u32 handle` | - |
 | `0x0032` | `BUF_WRITE` | `u32 handle, u32 0, u64 offset, bytes` | - |
@@ -291,14 +294,59 @@ deposit budget it read, which the client checks against its own; a
 disagreement is a refusal, because the two libraries have the same
 ABI and could only differ if one of them were not the library.
 
-**Chunking.** `RUN` and `PROG_RUN` requests are split by the client
-so that no frame carries more than `CFTR_CHUNK_BYTES` (16 MiB) of
-operand and result data. That is safe for exactly the reason the XRT
-backend's multi-tile partitioning is: an element of an elementwise
-result depends on its own index alone, and a sequencer lane on its
-own lane alone, with the early exit changing only how long a run
-takes (docs/SEQUENCER.md P2, P3). The flag and bus words are ORs over
-the chunks, which is the same union one frame would carry. `REDUCE`
+**The constant bank as data, `PROG_RUN_BANK` (ABI 0.9, 2026-09-08).**
+A program whose header flags carry `BANK_EXT` has no constant section
+in its image: `n_consts` says how many constants it addresses and
+every run supplies them (docs/SEQUENCER.md revision 2, R3). The image
+still crosses once through `PROG_LOAD`, exactly as before - it is the
+schedule, and it is what a digest names - and the bank crosses with
+each run, in the fourth fixed word's worth of bytes.
+
+The fourth word was zero-and-reserved on `PROG_RUN` and is
+`bank_bytes` here; the bank itself sits between the fixed fields and
+the operands, `n_consts` dense format-width values, laid out exactly
+as an image's constant section is. A `bank_bytes` that is not what the
+program's header says is refused by `cft_program_run_bank` on the
+CLIENT, before a frame is sent, so what reaches the server is always
+the right size; the server checks the payload's own arithmetic anyway,
+because a server trusts a frame's length field and nothing else.
+
+**It is a new opcode rather than a longer `PROG_RUN`, and that is the
+whole versioning story.** An older server's dispatch has no case for
+`0x0023`, so it falls to the arm that answers an unknown operation:
+`CFT_ERR_UNSUPPORTED`, a message naming the opcode, and a connection
+that stays open and serves the next request. Widening `PROG_RUN`'s
+payload instead would have reached that server's LENGTH check, which
+is a protocol fault - the connection ends, over a feature the caller
+could have asked about. An older client never sends it because it does
+not have the constant, and a current client never sends it to a server
+whose device lacks `CFT_SEQ_FEAT_BANK_PTR`, because such a device
+refuses a `BANK_EXT` image at `cft_program_load` - one round trip
+earlier, with a message naming the feature. `CFTR_PROTO_VERSION` does
+not move, for the reason the caps block's growth did not move it: the
+field is compared for equality, so a step would turn one refused
+operation into a refused connection.
+
+In practice the two libraries must already have the same ABI to talk
+at all, so an 0.8 server and an 0.9 client are refused at HELLO rather
+than at this opcode. The unknown-opcode path is therefore insurance
+for a future operation added WITHOUT an ABI step, and it is tested
+directly - `remote-test` sends opcode `0x00A0`, checks the refusal,
+and checks the connection answers the next request.
+
+**Chunking.** `RUN`, `PROG_RUN` and `PROG_RUN_BANK` requests are split
+by the client so that no frame carries more than `CFTR_CHUNK_BYTES`
+(16 MiB) of operand and result data. That is safe for exactly the
+reason the XRT backend's multi-tile partitioning is: an element of an
+elementwise result depends on its own index alone, and a sequencer
+lane on its own lane alone, with the early exit changing only how long
+a run takes (docs/SEQUENCER.md P2, P3). The flag and bus words are ORs
+over the chunks, which is the same union one frame would carry. The
+constant bank rides EVERY chunk rather than being staged once: a chunk
+is a whole run of its own lanes on the server, and a program's
+constants are not chunk-shaped. It is a handful of format-width values
+beside up to sixteen megabytes of operands, so the repetition is not
+measurable against the transfer it accompanies. `REDUCE`
 is not chunked - a partial sum is only reusable if its range is a
 node of the tree, and cutting the tree is the XRT backend's job with
 its own tiles, not the transport's - so a reduction whose operands

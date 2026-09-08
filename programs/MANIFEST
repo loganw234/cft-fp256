@@ -1,0 +1,21 @@
+# programs/MANIFEST - sha256 of every built image.
+#
+# Written by `make programs` (programs/build.py) and checked by
+# `make programs-check`. The images themselves are gitignored:
+# these hashes are what the tree commits, so an assembler change
+# that moves a byte shows up as a diff here and has to be
+# explained rather than noticed later.
+#
+# sha256                                                              image
+c135fb3781833fdd2bc2e4330ceec1ec269392607a464fb3b397fb51b67fcf05  collatz-fp256.cftp
+96023d06dc64234f15603dc7652e1ca82cec3dd54129ac7a5b5cca4312c03030  div-fp128.cftp
+7a9a7cfad6b052494211ce3de8aadda906633026a3c2e780651d524e38943d69  div-fp256.cftp
+25052972e3dcf98a33ba4b4e2a06b1bcb0b18116279b275d834771d794a9a2a2  div-fp32.cftp
+f3a44bd0e442e1e4e1ed52f4adb372cb25001f657767dbeae4b41668f7ca63c7  div-fp64.cftp
+b46720ab0df0ecddee33a13415a84fa387592b6fd615cf6fb06c27898afae88f  horner-bank-fp64.cftp
+89a66e7e3901918d8649413e02c30535b646c584eb2a848c5d03c8bd707242ca  lowbias32-fp32.cftp
+762b0b3b9b6b9a68e3e5c4ca1f730d5c4c4ccee3ef662ce913849929041eb3bc  sqrt-fp128.cftp
+9f6690d352eedf2f583d9fe6650acdad6f37d41cbdc365971e8b51ffcca68297  sqrt-fp256.cftp
+32f9cfec653e46809fb476c80638ad9e304af335da5c64e1f367e7a22980065a  sqrt-fp32.cftp
+62dbe481af69aaa777c324f26d424f7732c394993913821f15ae97b8e222f6cb  sqrt-fp64.cftp
+8fad50d414aadc685faba7d64e701a0269a12ccd25d91d75bb656f454722272a  zoom-scan-fp256.cftp

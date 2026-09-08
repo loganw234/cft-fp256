@@ -1,0 +1,84 @@
+; div-fp64.cfta - the composed divide's on-chip core, fp64
+;
+; python/cft_golden/seqprogs.py's div_program(fp64) as a file. The
+; host classifies the operands and centres them (div_prep), this
+; program does the whole core - seed, 3 Newton steps, the
+; truncating Markstein finish and two branchless restore passes - and
+; the host reads guard and sticky off the three deposits and performs
+; the one rounding (div_finish).
+;
+;   r0  the centred dividend, in [1, 2)
+;   r1  the centred divisor,  in [1, 2)
+;   deposits: q2, r2, d2
+;
+; The check is byte equality with the image seqprogs generates, which
+; is the assembler's strongest single test: forty-odd instructions of
+; a real correctly-rounded algorithm, conditionals and encoding
+; surgery and all, and every bit of every word has to land where the
+; model puts it.
+
+.format   fp64
+.deposits 3
+.const    ZERO         = 0x0000000000000000
+.const    ONE          = 0x3ff0000000000000
+.const    INT1         = 0x0000000000000001
+.const    EXP          = 0x7ff0000000000000
+.const    MW           = 0x0340000000000000
+.const    MW1          = 0x0350000000000000
+.reg      a            = r0
+.reg      b            = r1
+.reg      y            = r3
+.reg      nb           = r4
+.reg      t1           = r5
+.reg      t2           = r6
+.reg      q            = r7
+.reg      pw           = r8
+.reg      dn           = r9
+.reg      up           = r10
+.reg      tmp          = r11
+
+recip_seed y, b
+neg nb, b
+fma t1, nb, y, ONE
+fma y, y, t1, y
+fma t1, nb, y, ONE
+fma y, y, t1, y
+fma t1, nb, y, ONE
+fma y, y, t1, y
+mul t1, a, y
+fma t2, nb, t1, a
+fma q, t2, y, t1
+fma t2, nb, q, a
+fma.rtz q, t2, y, q
+fma t2, nb, q, a
+cmplt dn, t2, ZERO
+isub tmp, q, INT1
+select q, tmp, q, dn
+iand pw, q, EXP
+isub pw, pw, MW
+fma up, nb, pw, t2
+cmplt up, ZERO, up
+sub tmp, ONE, dn
+mul up, up, tmp
+iadd tmp, q, INT1
+select q, tmp, q, up
+fma t2, nb, q, a
+cmplt dn, t2, ZERO
+isub tmp, q, INT1
+select q, tmp, q, dn
+iand pw, q, EXP
+isub pw, pw, MW
+fma up, nb, pw, t2
+cmplt up, ZERO, up
+sub tmp, ONE, dn
+mul up, up, tmp
+iadd tmp, q, INT1
+select q, tmp, q, up
+fma t2, nb, q, a
+iand pw, q, EXP
+isub pw, pw, MW1
+fma up, nb, pw, t2
+deposit q
+deposit t2
+deposit up
+halt

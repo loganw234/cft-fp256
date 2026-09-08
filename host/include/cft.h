@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 8   /* 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
+#define CFT_ABI_VERSION_MINOR 9   /* 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -450,30 +450,60 @@ typedef struct cft_caps {
                                 * a program header's max_deposits */
     uint32_t max_insns;        /* instructions in one program image */
     uint32_t max_consts;       /* constants an instruction can ADDRESS.
-                                * The ka/kb/kc bits redirect the
-                                * four-bit operand fields at the
-                                * constant bank, so this is 16 both in
-                                * the tile and in this library, whatever
-                                * a header's n_consts says - the
-                                * ceiling host/tools/enclose.c chunks
-                                * its Horner kernel around */
+                                * Without kx the ka/kb/kc bits redirect
+                                * four-bit operand fields at the bank
+                                * and the reach is 16 whatever a
+                                * header's n_consts says - the ceiling
+                                * host/tools/enclose.c chunked its
+                                * Horner kernel around. With kx
+                                * (CFT_SEQ_FEAT_WIDE_CONST) the indices
+                                * come from the immediate and the reach
+                                * is the bank, which is 256 here and on
+                                * the tile */
     uint32_t seq_features;     /* bits 3:0 = CAPS[7:4], the sequencer
                                 * feature nibble; bits 7:4 = CAPS[31:28],
                                 * the ALU extensions beyond the group
-                                * bits. CFT_SEQ_FEAT_WIDE_CONST and
-                                * CFT_ALU_EXT_IMUL below are the two
-                                * assigned so far (2026-09-07). A clear
+                                * bits. Four are assigned:
+                                * CFT_SEQ_FEAT_WIDE_CONST,
+                                * CFT_SEQ_FEAT_REGS32,
+                                * CFT_SEQ_FEAT_BANK_PTR and
+                                * CFT_ALU_EXT_IMUL, below. A clear
                                 * bit is ABSENT, not unknown: the loader
                                 * refuses an image that uses the feature
                                 * and cft_supports answers no, so ask
                                 * before issuing, as with any opcode */
 } cft_caps;
 
-/* cft_caps.seq_features bits. */
+/* cft_caps.seq_features bits.
+ *
+ * The low nibble is CAPS[7:4], the sequencer's feature nibble; the
+ * next one is CAPS[31:28], the ALU extensions. A clear bit is ABSENT,
+ * not unknown, and cft_program_load refuses an image that uses the
+ * feature by name - which is the whole reason each of these needed a
+ * CAPS bit rather than only a reserved-bit rule: a reserved-bit rule
+ * protects a new HOST from an old image, and a CAPS bit protects an
+ * old BITSTREAM from a new one. */
 #define CFT_SEQ_FEAT_WIDE_CONST 0x01u  /* CAPS[4]: an instruction with kx
                                         * (bit 30) set addresses the whole
                                         * constant bank through 8-bit
                                         * indices in its immediate */
+#define CFT_SEQ_FEAT_REGS32     0x02u  /* CAPS[5]: a lane owns 32 registers
+                                        * rather than 16, the fifth bit of
+                                        * each field living in imm[27:24]
+                                        * (rd, ra, rb, rc in that order).
+                                        * An old tile's operand mux reads
+                                        * only the low four bits, so a
+                                        * program naming r16..r31 there
+                                        * would address the wrong register
+                                        * in silence */
+#define CFT_SEQ_FEAT_BANK_PTR   0x04u  /* CAPS[6]: the constant bank can be
+                                        * supplied per run through
+                                        * cft_program_run_bank, and an
+                                        * image whose header flags carry
+                                        * BANK_EXT (bit 0) carries no
+                                        * constant section at all. An old
+                                        * tile would read constants from an
+                                        * image that has none */
 #define CFT_ALU_EXT_IMUL        0x10u  /* CAPS[28]: opcode 30, IMUL, is
                                         * implemented */
 
@@ -1790,14 +1820,39 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                                     size_t bytes, cft_program **out);
 CFT_API void       cft_program_free(cft_program *prog);
 
+/* Program header flags - the image's `flags` word, which is the header
+ * word that was reserved[0] until 2026-09-08. Every other bit is
+ * reserved-must-be-zero and an image that sets one is CFT_ERR_ARTIFACT,
+ * which is what lets a later flag be added without a version step. */
+#define CFT_PROG_FLAG_BANK_EXT (1u << 0)  /* the image carries NO constant
+                                           * section: n_consts still says
+                                           * how many constants the program
+                                           * addresses, and every run
+                                           * supplies them through
+                                           * cft_program_run_bank. Needs
+                                           * CFT_SEQ_FEAT_BANK_PTR on the
+                                           * device the program is loaded
+                                           * for; the loader refuses it by
+                                           * name elsewhere */
+
 /* What the loaded program is, so a caller can size its buffers
- * without parsing the image itself. */
+ * without parsing the image itself.
+ *
+ * Fields are only ever appended, and struct_size gates them the same
+ * way cft_caps' do: zero the struct, set struct_size to sizeof, and on
+ * return struct_size is how many bytes were actually filled. */
 typedef struct cft_program_info {
     size_t     struct_size;    /* in: sizeof; out: bytes filled */
     cft_format format;
     uint32_t   max_deposits;   /* deposit slots per element */
     uint32_t   n_insns;
     uint32_t   n_consts;
+    /* ---- appended, ABI 0.9 ---- */
+    uint32_t   flags;          /* the header's flags word;
+                                * CFT_PROG_FLAG_BANK_EXT above is the
+                                * only bit assigned. A caller built
+                                * against the older struct passes the
+                                * older struct_size and never sees it */
 } cft_program_info;
 
 CFT_API cft_status cft_program_get_info(cft_program *prog,
@@ -1826,6 +1881,71 @@ CFT_API cft_status cft_program_run(cft_program *prog,
                                    void *deposits, uint32_t *counts,
                                    size_t n,
                                    uint32_t *flags, uint32_t *bus);
+
+/* The same run, with the constant bank supplied as DATA   (ABI 0.9)
+ *
+ * A BANK_EXT image (CFT_PROG_FLAG_BANK_EXT) carries no constant
+ * section: it is a header and an instruction stream, and its constants
+ * arrive here, `n_consts` format-width values, `bank_bytes` of them
+ * exactly. One image per positive, loaded once, with the levers and
+ * the pass riding as data - which is what makes the image's own digest
+ * a stable name for the program while the run's digest still covers
+ * everything that went in.
+ *
+ *   bank        n_consts format-width values, densely packed exactly
+ *               as an image's constant section is laid out
+ *   bank_bytes  must equal n_consts * cft_format_size(format)
+ *
+ * Everything else is cft_program_run's, unchanged. The two refuse each
+ * other's programs and say so: cft_program_run on a BANK_EXT program
+ * is CFT_ERR_INVALID_ARGUMENT naming this call, and this call on a
+ * program that carries its own constants is CFT_ERR_INVALID_ARGUMENT
+ * too - a program has one source of constants, and letting a caller
+ * pass a bank that was silently ignored is how two machines end up
+ * computing on different numbers while agreeing about the image.
+ *
+ * A BANK_EXT program only LOADS on a device whose caps carry
+ * CFT_SEQ_FEAT_BANK_PTR, so reaching this call at all means the device
+ * has the register. docs/SEQUENCER.md, revision 2, R3. */
+CFT_API cft_status cft_program_run_bank(cft_program *prog,
+                                        const void *bank, size_t bank_bytes,
+                                        const void *a, const void *b,
+                                        const void *c,
+                                        void *deposits, uint32_t *counts,
+                                        size_t n,
+                                        uint32_t *flags_out,
+                                        uint32_t *bus_out);
+
+/* SHA-256 of the image bytes followed by the bank bytes   (ABI 0.9)
+ *
+ * What ran, as one hash of program and data together. A program is a
+ * flat byte image precisely so that a readback can attest it, and a
+ * BANK_EXT program moves half of what determines the answer out of the
+ * image - so hashing the image alone would name the schedule and say
+ * nothing about the numbers it ran on.
+ *
+ * `bank` may be NULL with `bank_bytes` zero, which is the image alone
+ * and the only form a program that carries its own constants accepts.
+ * A non-NULL bank must be the size that program's bank is, exactly, as
+ * cft_program_run_bank requires - a digest over a bank the program
+ * could not have run is a name for nothing.
+ *
+ * `out` receives 32 bytes. cft_sha256 below is the same hash, for a
+ * caller that wants to name a deposit buffer the same way. */
+CFT_API cft_status cft_program_digest(cft_program *prog,
+                                      const void *bank, size_t bank_bytes,
+                                      uint8_t out[32]);
+
+/* SHA-256 (FIPS 180-4) of `bytes` bytes                   (ABI 0.9)
+ *
+ * The library carries one because cft_program_digest needs one, and it
+ * is exported because every tool that attests a run wants the same
+ * hash over its own outputs - a deposit buffer, a chain of printed
+ * lines - and four of them had a private copy each until this existed.
+ * `out` receives 32 bytes. A NULL `data` with `bytes` zero is the
+ * empty message, which has an answer. */
+CFT_API cft_status cft_sha256(const void *data, size_t bytes,
+                              uint8_t out[32]);
 
 /* ---------------------------------------------------------------
  * The status word (754-2019 7.1), the six operations on subsets of

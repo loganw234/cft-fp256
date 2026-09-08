@@ -211,6 +211,7 @@ module cft_krnl #(
   logic [2:0]  cfg_rnd;
   logic        cfg_seq;
   logic [63:0] cfg_n, cfg_a, cfg_b, cfg_c, cfg_d, cfg_prog, cfg_cnt;
+  logic [63:0] cfg_bank;
 
   // A run whose MODE selects a precision this build does not carry is
   // REFUSED: the engine never starts, nothing is read or written, the
@@ -254,7 +255,12 @@ module cft_krnl #(
   // for it on card day. docs/studies/OPT-D-contract.md 0.1 is the
   // failure this retires.
   localparam int SEQ_MAXD   = 64;     // deposit slots a lane
-  localparam int SEQ_IMEM_D = 1024;   // instruction capacity
+  // 1024 -> 4096 at revision 2 (docs/SEQUENCER.md, R2). No feature
+  // bit: CAPS[23:20] already publishes log2 IMEM_D and now reads 12,
+  // so a host learns the new capacity from the field it was already
+  // reading. Cost: 32 KB of instruction memory a tile where it was 8,
+  // in block RAM.
+  localparam int SEQ_IMEM_D = 4096;   // instruction capacity
   localparam int SEQ_KMEM_D = 256;    // constant capacity, image side
   // Addressable constants. Since 2026-09-07 an instruction with kx set
   // (bit 30) takes three 8-bit constant indices from its immediate and
@@ -410,12 +416,22 @@ module cft_krnl #(
                 1'b1,       // [2]   min/max
                 1'b1,       // [1]   sign
                 1'b1}),     // [0]   arithmetic
-      // CAPS[7:4]: the sequencer feature nibble. [4] wide constant index
-      // is built here (kx, 2026-09-07): cft_seq reads three 8-bit
-      // constant indices from the immediate when instruction bit 30 is
-      // set. The other three assignments stay reserved in cft_csr.sv; a
-      // build that adds one sets its bit here and nowhere else.
-      .seq_feat(4'b0001),
+      // CAPS[7:4]: the sequencer feature nibble, and the only place an
+      // assignment is made.
+      //   [4] kx, wide constant index (2026-09-07): cft_seq reads three
+      //       8-bit constant indices from the immediate when
+      //       instruction bit 30 is set.
+      //   [5] REGS32 (2026-09-08): register fields are five bits, the
+      //       fifth of each in imm[27:24], and a lane owns 32
+      //       registers. It needs a bit because an OLD tile's operand
+      //       mux would read the low four and silently address the
+      //       wrong register - the same reasoning kx needed one for.
+      //   [6] BANK_PTR (2026-09-08): the header flag BANK_EXT and the
+      //       constant bank at 0x64/0x68. It needs a bit because a
+      //       0x600 tile checks neither reserved header word, so its
+      //       FETCH would read constants out of an image that has none.
+      //   [7] reserved.
+      .seq_feat(4'b0111),
       // CAPS[31:28]: ALU extensions beyond the group bits. [28] IMUL
       // (opcode 30, 2026-09-07) joined the integer group after
       // bitstreams had shipped with that group's bit set, so the group
@@ -436,7 +452,7 @@ module cft_krnl #(
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd),
       .cfg_seq(cfg_seq), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
-      .cfg_prog(cfg_prog), .cfg_cnt(cfg_cnt)
+      .cfg_prog(cfg_prog), .cfg_bank(cfg_bank), .cfg_cnt(cfg_cnt)
   );
 
   // ---- the shared masters --------------------------------------------
@@ -655,7 +671,7 @@ module cft_krnl #(
       // two bits carry nothing the sequencer needs.
       .cfg_prec(cfg_prec[1:0]), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
-      .cfg_prog(cfg_prog), .cfg_cnt(cfg_cnt),
+      .cfg_prog(cfg_prog), .cfg_bank(cfg_bank), .cfg_cnt(cfg_cnt),
       .busy(seq_busy), .done(seq_done), .refuse(seq_refuse),
       .lane_valid(seq_lv), .lane_op(seq_lop), .lane_rnd(seq_lrnd),
       .lane_prec(seq_lprec), .lane_a(seq_la), .lane_b(seq_lb), .lane_c(seq_lc),

@@ -706,6 +706,135 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
     }
 }
 
+/* ---- the constant bank over the wire (ABI 0.9) -------------------------- *
+ *
+ * PROG_RUN_BANK, docs/REMOTE.md's newest message. Three claims:
+ *
+ *  - the bank crosses the wire and is what the run computed on, which
+ *    is checked the only way it can be - two banks, two answers, each
+ *    equal to the local software run of the same image with the same
+ *    bank;
+ *  - the server serves the opcode, and an opcode it does NOT serve is
+ *    refused by name on a connection that stays open, which is the
+ *    property the whole "new opcode rather than a longer PROG_RUN"
+ *    decision rests on;
+ *  - the client never sends it where the server's device cannot take
+ *    it, which needs no test here because the image does not LOAD
+ *    against such a device - and that refusal is device_test's.
+ */
+static void program_bank_tests(cft_device *sw, cft_device *rm)
+{
+    void *hw = cft_device_backend(rm);
+    const size_t esz = 4;                     /* fp32 */
+    uint8_t img[56], bank[2][8], a[16 * 4];
+    uint8_t d_rm[16 * 4], d_sw[16 * 4];
+    uint32_t c_rm[16], c_sw[16];
+    uint64_t ins[3];
+    cft_program *pr = NULL, *ps = NULL;
+    uint8_t *resp = NULL;
+    size_t len = 0, i;
+    int status, b;
+    cft_caps c;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    cft_get_caps(rm, &c);
+
+    printf("the constant bank over the wire:\n");
+    if (!(c.seq_features & CFT_SEQ_FEAT_BANK_PTR)) {
+        printf("  the server's device does not publish BANK_PTR "
+               "(seq_features 0x%lx), NOT TESTED\n",
+               (unsigned long)c.seq_features);
+        return;
+    }
+
+    /* r4 = r0 * k[0] + k[1]; deposit r4; halt - both constants from
+     * the bank, so nothing about the answer survives losing it. */
+    ins[0] = 0u | (4ull << 8) | (1ull << 20) | (1ull << 28) | (1ull << 29);
+    ins[1] = 3ull | (4ull << 12) | (1ull << 31);
+    ins[2] = 0ull | (1ull << 31);
+    memset(img, 0, sizeof img);
+    cftr_put32(img + 0, 0x50544643u);          /* "CFTP" */
+    cftr_put32(img + 4, 1);
+    cftr_put32(img + 8, 3);                    /* n_insns */
+    cftr_put32(img + 12, 2);                   /* n_consts, addressed only */
+    cftr_put32(img + 16, 1);                   /* max_deposits */
+    cftr_put32(img + 20, 0);                   /* fp32 */
+    cftr_put32(img + 24, CFT_PROG_FLAG_BANK_EXT);
+    cftr_put32(img + 28, 0);
+    for (i = 0; i < 3; i++)
+        cftr_put64(img + 32 + i * 8, ins[i]);
+
+    cftr_put32(bank[0] + 0, 0x3fc00000u);      /* 1.5  */
+    cftr_put32(bank[0] + 4, 0x3fa00000u);      /* 1.25 */
+    cftr_put32(bank[1] + 0, 0x3fa00000u);      /* the same two, swapped */
+    cftr_put32(bank[1] + 4, 0x3fc00000u);
+    fill_normal(a, 16, 0);
+
+    CHECK(cft_program_load(rm, img, 32 + 3 * 8, &pr) == CFT_OK && pr,
+          "a BANK_EXT image loads on the remote handle: %s",
+          cft_last_error());
+    CHECK(cft_program_load(sw, img, 32 + 3 * 8, &ps) == CFT_OK && ps,
+          "and on the local software one");
+    if (!pr || !ps) {
+        cft_program_free(pr);
+        cft_program_free(ps);
+        return;
+    }
+    for (b = 0; b < 2; b++) {
+        uint32_t f_rm = 0, f_sw = 0, s_rm = 0, s_sw = 0;
+        memset(d_rm, 0x5a, sizeof d_rm);
+        memset(d_sw, 0xa5, sizeof d_sw);
+        CHECK(cft_program_run_bank(pr, bank[b], 8, a, NULL, NULL, d_rm,
+                                   c_rm, 16, &f_rm, &s_rm) == CFT_OK,
+              "run_bank %d over the wire: %s", b, cft_last_error());
+        CHECK(cft_program_run_bank(ps, bank[b], 8, a, NULL, NULL, d_sw,
+                                   c_sw, 16, &f_sw, &s_sw) == CFT_OK,
+              "run_bank %d locally", b);
+        CHECK(memcmp(d_rm, d_sw, 16 * esz) == 0 &&
+              memcmp(c_rm, c_sw, sizeof c_rm) == 0 &&
+              f_rm == f_sw && s_rm == s_sw,
+              "bank %d: the server and this process agree, bits, counts and "
+              "flags (%02x/%02x)", b, f_rm, f_sw);
+    }
+    /* And the two banks did not give the same answer, which is what
+     * fails if the bank never left this process. */
+    {
+        uint8_t d0[16 * 4];
+        memcpy(d0, d_rm, sizeof d0);
+        CHECK(cft_program_run_bank(pr, bank[0], 8, a, NULL, NULL, d_rm,
+                                   NULL, 16, NULL, NULL) == CFT_OK &&
+              memcmp(d0, d_rm, 16 * esz) != 0,
+              "two banks, two answers over the wire");
+    }
+    /* A BANK_EXT program still refuses PROG_RUN's entry point. */
+    CHECK(cft_program_run(pr, a, NULL, NULL, d_rm, NULL, 16, NULL, NULL) ==
+          CFT_ERR_INVALID_ARGUMENT,
+          "a BANK_EXT program refuses cft_program_run on a remote handle");
+    cft_program_free(pr);
+    cft_program_free(ps);
+
+    /* The versioning claim, tested from the only side this process
+     * can: an opcode the server does not serve is the OPERATION's
+     * failure and not a broken stream - CFT_ERR_UNSUPPORTED, a message
+     * naming the opcode, and a connection that answers the next
+     * request. That is exactly what a pre-0.9 server does with
+     * PROG_RUN_BANK, and it is why the message got a new opcode
+     * instead of four more bytes in PROG_RUN's payload. */
+    CHECK(!cftr_request(hw, 0x00A0u, NULL, 0, &status, &resp, &len) &&
+          status == CFT_ERR_UNSUPPORTED,
+          "an opcode this server does not serve is refused, not fatal "
+          "(status %d)", status);
+    free(resp);
+    resp = NULL;
+    CHECK(!cftr_request(hw, CFTR_OP_STATS, NULL, 0, &status, &resp, &len) &&
+          status == CFT_OK,
+          "and the connection is still there afterwards");
+    free(resp);
+    printf("  two banks, two answers; an unserved opcode is refused by "
+           "name and the connection survives\n");
+}
+
 /* ---- the cost ------------------------------------------------------------ */
 
 static void bench(cft_device *rm)
@@ -888,6 +1017,7 @@ int main(int argc, char **argv)
     if (!do_bench) {
         caps_block_tests(rm, sw);
         protocol_tests(rm);
+        program_bank_tests(sw, rm);
         identity_tests(sw, rm, n);
     } else {
         bench(rm);

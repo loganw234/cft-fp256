@@ -136,7 +136,9 @@ def corrupt(insns, rng):
                "huge_trip", "wrap_trip", "bad_const",
                # the refusals indexed constants added (2026-09-07)
                "kx_wide_const", "kx_stray_reg", "kx_stray_imm",
-               "kx_reserved_byte", "kx_on_control"]
+               "kx_reserved_byte", "kx_on_control",
+               # and the one revision 2 added (2026-09-08)
+               "kx_const_reghi"]
     if loop_at:
         choices += ["halt_in_loop", "actall_in_loop"]
     what = rng.choice(choices)
@@ -173,8 +175,29 @@ def corrupt(insns, rng):
         out.insert(0, seq.encode(seq.sf.OP_ADD, 0, ra=1, rb=0, kb=True,
                                  kx=True, imm=(1 << 0) | (1 << 8)))
     elif what == "kx_reserved_byte":
+        # imm[28], not imm[24].
+        #
+        # `kx` reserved the whole of imm[31:24]. Revision 2 of
+        # docs/SEQUENCER.md (2026-09-08) took the low nibble of that
+        # byte for the five-bit register fields - imm[24] is rd's
+        # fifth bit, and on an instruction whose destination is a
+        # register it is READ - so a bit that used to be reserved is
+        # now part of the encoding, and this case moved up to
+        # imm[31:28], which stays reserved-must-be-zero and is refused
+        # by both implementations under either revision.
+        #
+        # The rule that replaced it at imm[26] is the next case.
         out.insert(0, seq.encode(seq.sf.OP_ADD, 0, rb=0, kb=True,
-                                 kx=True, imm=(1 << 8) | (1 << 24)))
+                                 kx=True, imm=(1 << 8) | (1 << 28)))
+    elif what == "kx_const_reghi":
+        # A constant operand's register high bit. An operand whose `k`
+        # bit is set names a CONSTANT, whose index is four bits or a
+        # byte of imm and never five, so its fifth register bit is not
+        # read and must be zero - the reserved-field rule applied to
+        # what revision 2 added, and refused under revision 1 too,
+        # where the whole byte was reserved.
+        out.insert(0, seq.encode(seq.sf.OP_ADD, 0, rb=0, kb=True,
+                                 kx=True, imm=(1 << 8) | (1 << 26)))
     elif what == "kx_on_control":
         # a field a control instruction does not read
         out.insert(0, seq.encode(seq.DEPOSIT, ra=1, ctrl=True, kx=True))

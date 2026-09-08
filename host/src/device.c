@@ -340,6 +340,7 @@ void *cft_device_backend(const struct cft_device *dev)
  * the backend kind lives, so that program.c names neither of them. */
 int cft_backend_program_run(struct cft_device *dev, int fmt,
                             const void *image, size_t image_bytes,
+                            const void *bank, size_t bank_bytes,
                             uint32_t max_deposits,
                             const void *a, const void *b, const void *c,
                             void *deposits, uint32_t *counts, size_t n,
@@ -349,6 +350,7 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
     if (dev && dev->backend == CFT_BACKEND_XRT) {
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes,
+                                bank, bank_bytes,
                                 max_deposits, a, b, c, deposits, counts, n,
                                 flags, bus);
     }
@@ -357,11 +359,13 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
     if (dev && dev->backend == CFT_BACKEND_REMOTE) {
         backend_call();
         return cftr_program_run(dev->hw, fmt, image, image_bytes,
+                                bank, bank_bytes,
                                 max_deposits, a, b, c, deposits, counts, n,
                                 flags, bus);
     }
 #endif
     (void)fmt; (void)image; (void)image_bytes; (void)max_deposits;
+    (void)bank; (void)bank_bytes;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
     (void)flags; (void)bus;
     return CFT_ERR_INTERNAL;

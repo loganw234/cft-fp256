@@ -6261,3 +6261,899 @@ are annotated accordingly, docs/VERIFICATION.md carries the measured
 costs, and device-test wants an emulation budget - a mode that runs one
 format's worth of each family and stops - before it is used as an
 evening check again. Recorded as a follow-up, not done here.
+
+## 2026-09-08 - programs as files: two assemblers held byte for byte, twelve library programs with a check each, and one skip that is named
+
+The tools half of the revision-2 round (docs/PROGRAMS.md), on a
+worktree branched from 44e2a07. Machine: this Windows box, gcc 16.1.0
+(mingw64), Python 3.12.9, software backend throughout - nothing here
+touched a device or the emulation host.
+
+**What was built.** `python/cft_golden/asm.py` (the reference
+assembler and disassembler), `host/tools/cft-asm.c` (the tool),
+`programs/` with twelve sources and a check apiece,
+`host/tools/positive-run.c` (the runner), `make programs` and `make
+programs-check` at the repo root, and `python/tests/test_asm.py`.
+
+asm.py carries its OWN encoder rather than reusing `seq.py`'s, because
+`seq.py` is revision 1 - sixteen registers, `reserved[0]` must be zero
+- and another lane is widening it. Where the two can express the same
+program they must agree, and that is a test rather than a hope.
+
+**The runs, in order.**
+
+    make golden                     2068 passed, 5 skipped, 225.1 s
+                                    (PYTEST_JOBS=4; 49 of those are
+                                    the new test_asm.py, 1.3 s alone)
+    make programs-check             48 passed, 0 failed, 1 skipped,
+                                    12 images, 6.6 to 18.6 s across
+                                    runs - the revision-2 corpus stage
+                                    is nearly all of it and nearly all
+                                    of that is process spawn, at four
+                                    cft-asm launches a program on a
+                                    Windows box whose scanner has
+                                    opinions
+    cft-asm vs asm.py, ad hoc       8 seqprogs images + 160 fuzz
+                                    programs + 10 decimal literals:
+                                    identical bytes, both directions
+    collatz workload                18110 comparisons, 0 failures
+    enclose workload                 2664 comparisons, 0 failures
+    mersenne workload                 391 comparisons, 0 failures
+    orbits workload                  OK (the 300-digit oracle)
+    zoom workload                   11223 comparisons, 0 failures
+
+The five workloads are `make -C host collatztest enclosetest
+mersennetest orbitstest zoomtest`, run because this round touches the
+tools' directory and their Makefile. They are unchanged and green.
+One trap on this host, twice: `PYTHON=python` under MSYS make finds
+mingw64's interpreter, which has neither mpmath (enclosetest died at
+the import) nor pytest (`make golden` did). Both were re-run with the
+absolute path to the interpreter that has them. No code was involved
+either time, and host/Makefile's own header note about matching the
+compiler's word size to the PYTHON is the same lesson one step over.
+
+**What `make programs-check` actually checks.** Three layers, and they
+are not the same claim:
+
+1. every `.cfta` assembled by `cft-asm` and by `asm.py` must give
+   identical bytes, and those bytes must match the committed
+   `programs/MANIFEST`;
+2. every image disassembled by both, the two texts compared, and
+   re-assembling either must return the same bytes;
+3. each program's own check - byte equality with `seqprogs.py`'s
+   generated image for the eight `div-`/`sqrt-` rows plus 48
+   correctly-rounded divides or square roots each through the runner
+   with the host's own prep and finish either side; the nine constants
+   of `collatz-fp256` against their derivation from fp256 and 64
+   trajectories against `cft-collatz`'s own records (steps and peak
+   exactly); `zoom-scan-fp256` over 32 real points bit-identical to
+   `seq.py`'s executor running the same image; 4,096 draws of
+   `lowbias32-fp32` over the index ramp against the hash's definition
+   with a clean flag word; and `horner-bank-fp64` over two different
+   banks against a softfloat Horner.
+
+A fourth layer was added after the first pass, because the first three
+had a hole. `seq.random_program` is revision 1 - sixteen registers, no
+BANK_EXT, no register high bits - and the library's twelve programs
+use one revision-2 feature between them, so nothing was exercising the
+encoding this round actually added. A generator that does now runs in
+both places: 101 programs through both implementations in
+`programs-check` (bytes, disassembly, round trip and `-i` line for
+line, the SHA-256 included - 101 with REGS32, 37 with BANK_EXT, 75
+with kx), and 100-odd through asm.py alone in `test_asm.py`, each
+asserting what it reached rather than assuming it. A round trip that
+never saw a five-bit register field would be a round trip over
+revision 1 with extra steps.
+
+`programs-check` deliberately does NOT depend on `programs`. That
+target rewrites the MANIFEST, so a check that ran it first would be
+comparing every hash against one it had just computed - a gate that
+cannot fail.
+
+**The negative controls, because a gate that cannot fail is not a
+gate.** Four tampered trees, each run through `check.py` and restored:
+
+    a MANIFEST hash off by one nibble    rc=1, the message names it
+    zoom-scan's trip count 51 -> 52      rc=1 at the MANIFEST
+    collatz's THREE = 3.0 -> 3.5         rc=1 at the MANIFEST and at
+                                         "constant 2 vs the derived"
+    horner's C17 -> C18                  rc=1 at the MANIFEST and at
+                                         "exp bank, lane 0 ... vs the
+                                         model's"
+    one bit of exp.bank flipped          rc=1: "the committed file does
+                                         not match its own derivation"
+
+The second is worth reading closely: it fails at the MANIFEST and NOT
+at the program's own check, because that check runs the same image
+through `seq.py` and libcft and they agree about a 52-iteration scan
+as readily as about a 51-iteration one. The manifest is what pins the
+program to the tool's default; the model arm is what pins libcft to
+the model. Two different claims, and only one of them was ever going
+to catch a changed trip count.
+
+**The one SKIP, and what it waits on.** `positive-run --capabilities`
+reports `bank-path absent`: this build's `cft.h` defines no
+`CFT_SEQ_FEAT_BANK_PTR`, so `cft_program_run_bank` and
+`cft_program_digest` do not exist and a `BANK_EXT` image cannot go
+through the library's own path. The tool refuses one BY NAME rather
+than running something else, and `check.py` prints
+
+    SKIP  horner-bank-fp64: the BANK_EXT path itself  positive-run
+          reports bank-path absent - cft_program_run_bank arrives with
+          the host half
+
+while still running the row: the same instruction stream with the bank
+spliced in as an ordinary constant section, which is the same
+computation by the definition of the flag. Both banks pass against the
+model that way, and the two banks are checked to disagree with each
+other, and each bank file is checked against the derivation its name
+claims - the bank is committed DATA, read from the tree, not something
+the check writes and then compares against itself. When the host half merges, that arm additionally requires the
+real bank path to produce the same bits. The digest has a local
+SHA-256 fallback over image-then-bank so the number a plate carries
+does not depend on which half of the tree the runner was built
+against; that equality is the integrator's to check.
+
+**Four things the round learned rather than assumed.**
+
+*Only two of the four demo tools have a fixed-image kernel at all.*
+`cft-collatz`'s step is fixed once `--steps-per-call` is (every
+constant is derived from the format), and `cft-zoom`'s nucleus scan is
+fixed at a given `--period` (its only constant is 4). `cft-zoom`'s
+reference orbit carries the run's centre, `cft-orbits`' step carries
+the timestep and the system, and `cft-enclose`'s Horner carries the
+polynomial itself. `programs/README.md` has the table; the round wrote
+two rows rather than forcing five.
+
+*`collatz`'s r0, r1 and r2 are ALL streams.* The first attempt fed only
+`--a`, and the lane starting at 1 reported peak +0 against the tool's
+1. That is not a bug in either: the tool seeds r1 with the step count
+so far and r2 with the peak so far, which is what makes the program
+resumable across calls - 1024 steps rarely finish a trajectory. The
+`.cfta` says so now.
+
+*`--iota` is an integer bit pattern, not a float.* The same first
+attempt used the index ramp as Collatz starting values and got
+subnormals. The ramp is for the atlas draw hash and the integer
+opcodes; an arithmetic kernel wants a stream of encodings. Both are
+documented and `lowbias32-fp32` is the row that pins the meaning.
+
+*A REPEAT trip count is not four register fields.* Revision 2 puts the
+fifth bit of each register in `imm[27:24]`, and REPEAT's immediate is a
+32-bit trip count that may set any bit it likes. Reading those four
+bits as register high bits on a control instruction would refuse
+`repeat 0x01000000`, and it would have been invisible in the library,
+where no trip count is that large. Both implementations decide it by
+which instruction reads a register, and `test_asm.py` has the case.
+
+**Two decisions the contract left open, taken and recorded.** An ALU
+line names the operands the opcode READS in `ra, rb, rc` field order
+(`add rd, ra, rc` - ADD does not read rb), with an explicit
+three-field form for the images where a field the opcode ignores is
+non-zero, which the fuzz corpus needs and a short form cannot express.
+And `.kx` on a mnemonic forces the indexed form, because
+docs/SEQUENCER.md deliberately tolerates a `kx` instruction whose
+indices are all below sixteen, and a disassembly that could not say so
+would not re-assemble. A third, smaller one: `divsqrt-<format>.cfta`
+became `div-<format>.cfta` and `sqrt-<format>.cfta`, because a `.cfta`
+holds one program and `seqprogs.py` generates two per format.
+
+**One addition to the text form.** A `.const` literal may be a
+754-2019 5.12.3 hexadecimal-significand sequence (`0x1p237`), decided
+by the `p`, which is not a hexadecimal digit. At fp128 and fp256 a
+power of two is otherwise a 64-digit raw word or a 70-digit decimal,
+and this project has been bitten by hand-typed constants before. Both
+implementations have it, from `chars.from_hex` and
+`cft_from_hex_char`, and they agree on ten literals including `0.1`,
+`1e-320`, `1e309`, `inf`, `nan` and a thirty-digit pi.
+
+**Not done, and not claimed.** No device, no emulation, no RTL. The
+five-bit register fields exist in both assemblers and in the tests,
+and nothing in this tree can execute one - `seq.py`'s `NREG` is 16 and
+so is libcft's executor - which is why `programs/` has no `REGS32` row
+and says so instead of shipping a row whose check is "it assembles".
+The full cross-check of asm.py against a widened `seq.encode`, and of
+`cft_program_digest` against the local fallback, belong to the
+integrator after the three lanes merge.
+
+## 2026-09-08 - ABI 0.9, the host half of the sequencer's revision 2: thirty-two registers, a per-run constant bank, one SHA-256
+
+The host library built against docs/SEQUENCER.md's "Revision 2
+(2026-09-08)" contract (44e2a07), on DESKTOP-T33SK86 under MSYS2
+mingw64 gcc 16.1.0. The model, the RTL and the assembler are other
+agents' halves of the same round and are not in this entry.
+
+**What was built.** `CFT_ABI_VERSION_MINOR 9`. Five-bit register
+fields with the fifth bits in `imm[27:24]`, behind
+`CFT_SEQ_FEAT_REGS32` (CAPS[5]); the header's `reserved[0]` as `flags`
+with `BANK_EXT` bit 0, behind `CFT_SEQ_FEAT_BANK_PTR` (CAPS[6]), and
+`cft_program_run_bank` beside `cft_program_run`;
+`cft_program_digest`, SHA-256 over image then bank;
+`cft_program_info.flags`, struct_size-gated. VERSION `0x700` in the
+XRT backend's known set, the bank as kernel argument 8 on the A
+master. `CFTR_OP_PROG_RUN_BANK` 0x0023 on the wire. And one SHA-256
+where there were four, exported as `cft_sha256`.
+
+**Gates, all on this tree, all measured here.**
+
+    make vectors                    rc 0    216 s   168 sets
+    make libcft-test                rc 0    571 s   1,071,635 cases, 168 sets;
+                                                    api-test all contract checks passed;
+                                                    reduce-parts 6,294 partitions;
+                                                    the C/Python identity check
+    verify/run.sh --only selfcheck,seq,diff
+      selfcheck                     ok       0 s    2,444 checks, 0 failed
+      diff                          ok       4 s    217,500 cases vs the model
+      seq                           ok       2 s    741 programs both ways, 259
+                                                    refused by both, 309 crossing the
+                                                    64-lane block; 500 from the extended
+                                                    corpus - 260 IMUL, 742 indexed-constant,
+                                                    497 indices above 15
+      VERDICT: PASS, nothing skipped (run 20260908-122447)
+    make -C host remotetest         rc 0    554 s   remote-test 266 checks x 2 routes;
+                                                    device-test over the wire 2,444 checks;
+                                                    conformance replay 184,592 cases
+                                                    local and remote identical (145.9 s
+                                                    remote); cft-collatz sweep 1..2000
+                                                    fp256 the same chain both ways;
+                                                    --bench on both routes
+    make -C host collatztest enclosetest mersennetest orbitstest
+                                    rc 0     47 s   all four CHECK OK, each including
+                                                    "the tool's chain matches hashlib's"
+    device-test sw -n 96            rc 0    145 ms  2,444 checks, 0 failed
+    fuzz/fuzz-program               -        20 s   1.86M executions, no crash
+                                                    (no sanitizer here: mingw has no
+                                                    libasan, so the fuzz gate stays the
+                                                    Docker lane's)
+    g++ -fsyntax-only, C++17 and C++20               cft.hpp with the two new methods
+
+**`make -C host wstest` is REFUSED, and that is the contract
+working.** `ABI mismatch: the other end is libcft 0.9, this end is
+0.8` - `bindings/node`'s committed wasm module is an ABI 0.8 build,
+and the handshake refuses a mismatch rather than warning about it. To
+establish that the ABI step is the ONLY reason, `CFT_ABI_VERSION_MINOR`
+was pinned back to 8, the library and server rebuilt, and wstest re-run:
+**42 checks, 0 failures**, every section - the handshake, HELLO over
+both transports, the vector subset, fragmentation, the refusals, both
+of docs/REMOTE.md's negative controls, the envelope cost, the buffer and
+status-word operations. Then restored to 0.9. The binding is rebuilt by
+the integrator after this merge; nothing in `bindings/` was touched.
+
+**The negative controls, because a check that has never been seen to
+fail proves nothing.** Three faults were injected into
+`host/src/program.c`, run, and reverted:
+
+- `seq_reg()` returning only the low four bits: `seq register
+  renaming: the two programs disagree, first differing byte 2 of 256`.
+  Nothing else in device_test saw it - which is the point. The file's
+  other sequencer checks run one image on two backends, and against
+  `sw` that is the same code twice, so a decoder fault both sides
+  share is invisible to them by construction. The new
+  `compare_seq_images` runs two images on one backend and requires the
+  same deposits; the property is that renaming registers is invisible,
+  and the case is shaped so the aliasing reaches a value the program
+  still needs (r16 drops to r0, an INPUT register). Written the other
+  way round - high registers only written before they are read - a
+  dropped bit gives the right answer by luck, which was checked too.
+- the DEPOSIT path alone losing the fifth bit: both renaming checks
+  fire.
+- the constant bank loaded as zeros instead of read: three checks
+  fire, including `two different banks gave the same deposits over 32
+  elements`.
+
+**One disagreement found and fixed, and it is worth recording.** The
+first `verify --only seq` run was `FAIL, 18 DISAGREEMENTS`, every one
+"the model refuses this program and libcft loads it". The cause was
+`seq_check.py`'s own `kx_reserved_byte` mutation, which set
+`imm[24]`: `kx` reserved the whole of `imm[31:24]`, and revision 2
+took its low nibble for the register high bits, so `imm[24]` is `rd`'s
+fifth bit and is now READ. The mutation moved up to `imm[31:28]`,
+which stays reserved-must-be-zero under both revisions, and a new
+mutation took its place at `imm[26]` - a constant operand's register
+high bit, which the reserved-field rule refuses under revision 2 and
+which revision 1 refuses as part of the reserved byte, so it agrees
+across the model's own transition. The gate is green at 741 programs.
+
+**The max_consts probe, which had been announcing NOT TESTED since the
+capacity fields landed.** It wrote the four-bit index form, so it could
+not NAME an index past 15 and was checking a cap of 256 at 16. It now
+writes the `kx` form where the device publishes `kx` and tests the cap
+itself: `k[255] (kx form) loads, at the cap`. The half that remains
+unrepresentable is a different one and still says so - an index past
+256 does not fit the immediate's byte. `host/src/program.c` gained the
+matching enforcement: a `kx` index is now held to the device's
+`max_consts` as a four-bit one always was. That check cannot fire on
+any device built so far (a device publishing `kx` publishes the whole
+256-entry bank, and a byte cannot name more) and is there because a
+rule that is only unreachable is not a rule that is right.
+
+**What is NOT tested here, stated rather than skipped.**
+
+- The XRT path. There is no card and no emulation on this machine, so
+  the 0x700 register map, the ninth kernel argument and the
+  eight-versus-nine-argument kernel call are asserted only by review.
+  Each mirrors the 0x600 path line for line; the divergence is the
+  argument count, which XRT throws on rather than adapting, so the
+  call has two shapes chosen by contract version and the bank buffer
+  is bound on every 0x700 run whether or not the program has a bank.
+- The two feature-absent refusals, on this machine. Both handles are
+  the software backend and both publish REGS32 and BANK_PTR, so
+  `check_caps_enforced` scores the published-and-loads half here; the
+  refusal half runs against any 0x600 tile and on card day, and its
+  message is asserted by name when it does.
+- `host/fuzz/program_differential.py`, which asks the MODEL the same
+  question the C loader is asked about the same bytes. It cannot be
+  run until the model's half of revision 2 lands: on this tree the C
+  loader accepts `imm[27:24]` on an ALU instruction and seq.py refuses
+  it, which is the intended difference and not a defect in either.
+  That differential is the integrator's re-run.
+
+**One ambiguity in the contract, and what was chosen.** R1 says "a
+control instruction reads at most `ra` (`DEPOSIT`, `SETACT`), so on
+those two only `imm[25]` may be set and on the other four none". Three
+of the other four - `HALT`, `ENDREP`, `ACTALL` - already require `imm`
+to be zero whole, so the sentence adds nothing there. The fourth is
+`REPEAT`, whose `imm` is the trip count and is read ENTIRELY. It is
+read as NOT constrained: the canonicity rule is about fields an
+instruction does not read, and constraining `imm[27:24]` on a `REPEAT`
+would refuse every trip count at or above 2^24 - including the `repeat
+0xffffffff` docs/SEQUENCER.md's own worst-case paragraph relies on
+being loadable and refused by the 2^40 bound instead. If the model
+lands the strict reading, the differential above will say so and the
+change is one line. docs/HOSTAPI.md records the reading beside the
+refusal list.
+
+**The SHA-256 housekeeping.** `host/tools/collatz.c`, `enclose.c`,
+`mersenne.c` and `orbits.c` carried four byte-identical copies of
+SHA-256 and its constant derivation, and `cft_program_digest` wanted a
+fifth. There is one now, `host/src/sha256.c`, lifted from collatz.c
+with the derivation intact - the round constants are computed from the
+cube roots of the first sixty-four primes by integer search, as the
+standing rule asks - plus the exported one-shot `cft_sha256`. The four
+tools bind their own three names to it in four lines each. 909 lines of
+duplicate hash removed, and every chain is unchanged: each tool's check
+recomputes its whole chain with Python's `hashlib` and all four pass,
+`api-test` carries FIPS 180-4's two worked examples ("abc" and the
+56-byte two-block one, copied in the base the standard states them in),
+and remote_check's cft-collatz sweep produces the same chain hash local
+and remote.
+
+Also fixed in passing: `host/fuzz/make_seeds.py`'s `header-only`
+program seed carried the REMOTE frame's magic ("CFTR"), so a seed named
+for an image with no constants and no instructions had only ever been a
+second copy of "the magic is checked". It is "CFTP" now, derived from
+the bytes rather than typed, and it loads.
+
+## 2026-09-08 - revision 2 in the model and the tile: 32 registers, IMEM_D 4096, a per-run constant bank - and the register file doubles for nothing
+
+The hardware-contract half of docs/SEQUENCER.md's "Revision 2"
+section, built on 44e2a07: the golden model, rtl/cft_seq.sv,
+rtl/cft_csr.sv, rtl/cft_krnl.sv, hw/kernel.xml and the benches. The
+host library, the tools and the JavaScript binding are other agents'
+work from the same spec and have their own entries.
+
+### The OOC measurement R1 asked for
+
+The contract said to measure what doubling the register file costs, to
+record it even if the answer was bad, and not to shrink NBEATS to make
+it fit. **It costs nothing.** Two out-of-context synthesis runs of
+`cft_krnl` on trees identical apart from revision 2 - Vivado 2026.1,
+xcu50-fsvh2104-2-e, 135 MHz, `hw/synth_krnl_ooc.tcl` with default
+generics, the Windows desktop:
+
+| | revision 1 (16 regs, IMEM_D 1024) | revision 2 (32 regs, IMEM_D 4096) | delta |
+|---|---|---|---|
+| CLB LUTs, tile | 120,173 | 119,915 | **-258 (-0.2%)** |
+| CLB registers, tile | 60,543 | 60,750 | +207 (+0.3%) |
+| Block RAM tiles | 50 | 48 | -2 |
+| URAM | 0 | 1 (of 640) | +1 |
+| DSPs | 307 | 307 | 0 |
+| WNS at 135 MHz | +1.196 ns | **+1.196 ns** | **0.000** |
+| synthesis wall time | 9 min 47 | 11 min 13 | |
+
+`cft_seq` alone, from the hierarchical report: 24,702 -> **24,437**
+LUT, 4,899 -> **5,042** FF, RAMB36 22 -> 20, RAMB18 24 -> 24, URAM
+0 -> 1. Nothing else in the tile moved: `cft_lanes` is identical to
+the LUT (88,184 both ways), `cft_engine_stream` differs by one, and
+`cft_csr` grew 818 -> 824 LUT and 629 -> 693 FF, which is BANK_PTR.
+
+**So the answer to the contract's question is yes, at 135 MHz on the
+U50, with nothing shrunk.** Two facts explain a doubling that costs
+nothing. The register file was already block RAM and stayed in the
+same primitives - eight banks mirrored twice, and 512 x 32 bits fits
+the RAMB18 that 256 x 32 did - so the depth doubled inside memories
+that were already there. And the instruction memory, four times larger
+at 4,096 x 64 bits, stopped fitting block RAM economically and Vivado
+inferred **one UltraRAM** for it, a resource this tile was using none
+of, which is why the BRAM tile count went DOWN by two while the
+capacity went up fourfold.
+
+Timing did not move because `cft_seq` is not on the critical path in
+either tree. The worst path is the same one in both, to the picosecond
+and to the pin:
+
+    Slack (MET) : 1.196ns
+      Source:      u_engine/u_fifo_a/mem_reg_0/CLKARDCLK
+      Destination: u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[24]/D
+
+Two cautions on those numbers. **Out-of-context synthesis is not shell
+timing** - this project paid to learn that once and docs/ROADMAP.md
+carries the accounting - so +1.196 ns is a comparison between two
+trees, not a prediction about a linked build. And this is **Vivado
+2026.1**, where the tile's own recorded history (139,404 LUT at +0.307
+ns) was measured under 2022.2: absolute numbers are not comparable
+across that gap, which is exactly why the revision-1 baseline above
+was re-synthesised today rather than quoted from the file.
+
+The K325T pair (hw/mc_sweep.sh's configuration, MUL_PASSES=10 and both
+ladders) was NOT run. It was second priority in the round and the U50
+answer was decisive; the entry says so rather than leaving a reader to
+assume it passed.
+
+One implementation was run, of the revision-2 tree only - the round
+allowed one and this is the configuration that matters.
+`hw/impl_krnl_ooc.tcl`, same part and clock, **55 min 29 s**, exit 0:
+
+    QOR_ROUTED_WNS_NS: 0.027          (135 MHz, period 7.407 ns)
+    routed LUT 117,308   FF 60,768   BRAM tiles 48   URAM 1   DSP 307
+    worst routed path, 16 levels, 7.314 ns datapath:
+      u_engine/u_fifo_a/mem_reg_1/CLKARDCLK ->
+      u_lanes/g_bank128.g_lane128[1].u_fma/s0_byp_d_reg[29]/D
+    cft_seq routed: 24,014 LUT, 5,042 FF, RAMB36 20, RAMB18 24, URAM 1
+
+It closes, and **it closes on a path that is not the sequencer's**:
+the worst routed path is the same streaming-engine FIFO into the same
+FMA input register that was worst at synthesis in BOTH trees.
+Revision 2 is not what makes it tight.
+
+Two things this run does NOT say, stated because the temptation is to
+read them into it. There is **no revision-1 routed comparison** - one
+implementation was the budget, so the before/after delta above is a
+synthesis delta and nothing here upgrades it. And +0.027 ns of routed
+OOC slack is not headroom: read the path delay, 7.380 ns against a
+7.407 ns period, and remember that the tool works exactly as hard as
+the constraint asks (docs/BRINGUP.md). What the run establishes is
+that the revision-2 tile places and routes at 135 MHz on the U50 at
+all, which is the question the contract asked and the one a synthesis
+number alone could not answer.
+
+### The gates
+
+Everything below ran from this worktree. The container gates are
+`MSYS2_ARG_CONV_EXCL='*' docker run --rm -v <worktree>:/work -w
+/work/tb cft-sim make ...`.
+
+    make -C python pytest (the golden model)      2026 passed, 5 skipped   10 min 0 s
+      - 2,020 before; the six new are R1's bit table, r16..r31 running,
+        the BANK_EXT image's length and its two-bank equivalence, the
+        bank refusals, and the digest over image-plus-bank
+
+    docker cft-sim: make -k -j4 sim                21 targets, 64 tests    18 min 1 s
+                                                   PASS=64 FAIL=0 SKIP=0
+      - the whole shipping suite, not just the sequencer's targets,
+        because rtl/cft_krnl.sv and rtl/cft_csr.sv are shared: fp32
+        fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare
+        seedop reduceacc reduce krnl quarter faults seq_core krnlseq
+        seqbanks mulpass mulcycle mulcycle2
+      - seq_core is 12/12 where it was 10/10: `wide_registers` and
+        `constant_bank_per_run` are new
+      - the box was also carrying the Vivado implementation below, so
+        18 min is a loaded number - and well under the 55 min
+        docs/VERIFICATION.md records for four jobs beside a Vivado,
+        which was a different load
+
+    docker cft-sim: make MC=10 <seq targets>       3 targets, 14 tests    7 min 24 s
+                                                   PASS=14 FAIL=0 SKIP=0
+      - seq_coremc, krnlseqmc, seqbanksmc: the sequencer's share of
+        `make simmc`, the multi-cycle tile's own census. The rest of
+        simmc and the four board targets were not run in this round;
+        they exercise the multiplier and the ladders, which revision 2
+        does not touch.
+
+    docker cft-sim: make yosys-lint                clean, exit 0           1 min
+      - only the pre-existing "Replacing memory with list of
+        registers" notes and the one translate_off warning
+
+    docker cft-sim: verilator 5.020 --lint-only    clean, exit 0, BOTH     2 min
+      cft_krnl, default and board configurations   configurations
+      - warnings fatal, and no -Wno-* at all: tb/cocotb.mk's Verilator
+        branch retired the blanket width suppressions and a width
+        warning is a regression. The board configuration is
+        -GFUSE_NORM=1 -GFUSE_ALIGN=1 -GMUL_PASSES=10, translated from
+        the Icarus -P spelling the way cocotb.mk does it.
+      - separately, -Wall filtered to WIDTH reports NOTHING in either
+        configuration. No lint_off was added anywhere.
+
+The formal gate was not run: it does not cover `cft_seq`, and revision
+2 changes nothing it proves. `make simmc`'s multiplier and board
+targets were not run, for the same kind of reason. No emulation and no
+device run: the card-day images predate all of this and are
+unaffected, and this round produced no bitstream.
+
+### What the benches found
+
+Three things, none of them in the feature under test, which is the
+usual shape:
+
+- **A transcribed pad width.** `rtl/cft_seq.sv` twice wrote
+  `if ({21'b0, pc} >= h_ninsns)` - twenty-one zeros hand-counted to
+  bring an 11-bit program counter up to the 32 bits it is compared
+  against. At `PCW` 12 the counter is thirteen bits and the comparison
+  became thirty-four wide. **The Verilator lint caught it, not a
+  bench**, and the fix is `32'(pc)`, derived from the width on the
+  other side of the comparison rather than counted out by hand.
+- **A cycle budget that carried a cost implicitly.** Doubling the
+  register file doubled the per-block wipe, 256 cycles to 512, and
+  `tb/test_seq_core.py`'s budget had that cost buried inside a literal
+  `400`. The `geometry` suite timed out at fp32 n=300 - three blocks,
+  5,288 cycles allowed - which is a bound being wrong, not a design
+  being slow. The budget now adds `RF_D` by name.
+- **Two negative controls that had stopped failing.** Both
+  `python/tests/test_seq.py`'s P3 fuzz and `tb/test_seq_core.py`'s
+  `unchecked()` build a `Program` through `__new__` to bypass
+  `validate()`, and `run()` reads two fields revision 2 added. The
+  bench one raised; the fuzz one silently reported **zero
+  divergences** - a control that passes by never testing anything,
+  which is precisely the failure the project's third rule names. Both
+  now set the fields `__init__` would have.
+
+Two things were checked rather than assumed. The fuzz generator's
+`wide_regs` arm follows `extended`'s precedent - off by default,
+drawing the same values from `rng` - and 400 corpora generated from
+the pre-change `seq.py` and this one were compared pairwise: 400
+identical, 0 differing, so no existing bench's corpus was reshuffled.
+And the two OOC trees were diffed before the numbers above were
+believed, because two synthesis runs of the same tree would have shown
+exactly the same "no cost".
+
+### One place the contract was ambiguous, and what was chosen
+
+R1 says "a control instruction reads at most `ra` (`DEPOSIT`,
+`SETACT`), so on those two only `imm[25]` may be set and on the other
+four none." Read literally that binds `REPEAT`, whose `imm` is its
+whole trip count - and it would newly refuse `REPEAT 0xffffffff`,
+which is the program docs/SEQUENCER.md's own worst-case-instruction
+rule is written about, is legal today, and runs identically on every
+existing bitstream.
+
+**Chosen:** the register-high-bit rule binds instructions that name a
+register. `REPEAT` names none, so `imm[27:24]` there are trip-count
+bits like any other; `HALT`, `ENDREP` and `ACTALL` may set no part of
+`imm` at all, which is stricter than "none of the four" and was
+already true; `DEPOSIT` and `SETACT` may set `imm[25]` and nothing
+else in the word. That keeps R1's own closing sentence - "Nothing else
+in the encoding moves" - true, and keeps the model from refusing
+programs that are correct on the tile in front of it. It is written
+down as `IMM_ALLOWED` in `python/cft_golden/seq.py` with the reasoning
+beside it, and it is why `validate()` now checks control instructions
+against the raw encoding (`decode_raw`) rather than against
+`decode()`'s merged five-bit view.
+
+## 2026-09-08 - ABI 0.9, the JavaScript half of revision 2: the bank as data, and a device a page can ask
+
+`bindings/` brought up to the ABI the rest of the tree reached this
+morning (a15f47c), on DESKTOP-T33SK86: the wasm module rebuilt in the
+pinned emsdk image with thirteen new exports, the Node surface given
+`runBank`/`digest`/the caps accessors, the JavaScript instruction
+encoder taught revision 2 and held to `python/cft_golden/asm.py` in
+bytes, and `PROG_RUN_BANK` spoken over the wire. Nothing outside
+`bindings/` changed except this entry.
+
+**This entry exists because the one above ends with a refusal.** "`make
+-C host wstest` is REFUSED, and that is the contract working … The
+binding is rebuilt by the integrator after this merge; nothing in
+`bindings/` was touched." The committed wasm answered ABI 0.8, the
+server is 0.9, and two libraries whose ABI differs are refused at
+HELLO. It passes now, with four more checks than it had, because the
+vector sets exist here and its golden comparison ran.
+
+### What was built
+
+**bindings/wasm/wasm_api.c, thirteen exports**, in cft.h's order:
+`cftw_program_run_bank`, `cftw_program_digest`, `cftw_sha256`;
+`cftw_program_flags`; the five macro projections
+(`cftw_prog_flag_bank_ext`, `cftw_seq_feat_wide_const`,
+`cftw_seq_feat_regs32`, `cftw_seq_feat_bank_ptr`, `cftw_alu_ext_imul`);
+and the four `cft_caps` sequencer accessors
+(`cftw_caps_seq_features`, `cftw_caps_max_deposits`,
+`cftw_caps_max_insns`, `cftw_caps_max_consts`).
+
+The last four are not an 0.9 addition. They have been in `cft_caps`
+since ABI 0.8 and no wrapper projected them, so a JavaScript caller
+could not ask whether the device published `BANK_PTR` before building
+an image that needs one - and asking afterwards means reading a
+refusal, which is the position `cft_caps` exists to get a caller out
+of. All thirteen went into `verify.mjs`'s `NEEDED` list in the same
+commit as the rebuild, which is the 0.5 discipline rather than the 0.3
+half-step: a module can carry twelve of them and still report 0.9, and
+that failure has happened once per minor step since 0.3.
+
+`cftw_program_flags` is an ACCESSOR rather than a fifth out-pointer on
+`cftw_program_get_info`, so that call's shape does not move with the
+ABI.
+
+**bindings/node.** `Program` gains `flags`, `bankExternal`,
+`bankBytes`, `runBank(bank, a, b, c)` and `digest(bank = null)`.
+`run()` and `runBank()` are ONE implementation with one difference -
+the bank decides which C entry point is called - so every argument
+check, buffer shape and returned field is shared by construction rather
+than by two copies agreeing, which is what `cftr_program_run` in
+`host/src/backend_remote.c` does and for the same reason. `_packBank`
+is the JavaScript half of `seq_check_bank`: a program that carries its
+own constants refuses a bank, a `BANK_EXT` program refuses a bank that
+is not `nConsts` values wide, and `run()` on a `BANK_EXT` program names
+`runBank`. The library makes all three checks again and remains the
+authority; these exist because a caller passing an ARRAY OF VALUES has
+to be told about values, and a byte count it never wrote would send it
+looking in the wrong place.
+
+`Context` gains `seqFeatures`, `seqFeatureNames` and the three
+capacities, with their two rules stated apart: a clear FEATURE bit is
+ABSENT, a zero CAPACITY is UNKNOWN. `lib.mjs` gains the five macro
+transcriptions and `sha256()` - the library's hash, not
+`node:crypto`'s, because a harness that reached for the platform's
+would be the fifth private copy `cft_sha256` exists to retire, and the
+one number it could not check is that libcft's digest is the digest
+everything else quotes. `audit()` holds all five bit positions to the
+module at load, which is what makes them safe to write down:
+`CFT_STATUS_DEPOSIT_OVERFLOW` has moved once already.
+
+**bindings/node/seq_corpus.mjs, the encoder.** Five-bit
+`rd`/`ra`/`rb`/`rc` with the fifth of each in its bit of `imm[27:24]`,
+the `kx` bit, a new `alu()` choosing the indexed form the way the
+assembler does, `programImage`'s `flags` word with NO constant section
+under `BANK_EXT`, and `packBank` - which `programImage` calls to lay
+out its own constant section, so the section and the bank are one
+layout and cannot drift. `ctl()` did not change shape and changed in
+effect: `ra` is five bits on `DEPOSIT` and `SETACT` too, so
+`deposit r20` sets `imm[25]`, and that is the only `imm` bit those two
+may set.
+
+**bindings/wasm/remote.mjs.** `OP.PROG_RUN_BANK = 0x0023` and
+`programRunBank()` beside `programRun()`, both through one
+`_programRun`. The bank's length is the fourth fixed word that
+`PROG_RUN` leaves zero; the bank sits between the fixed fields and the
+operands; it comes OFF the chunk budget rather than being added to it,
+since it rides every chunk. The client refuses to send a bank to a
+server whose device does not publish `CFT_SEQ_FEAT_BANK_PTR`, as the C
+client does. `CAPS_BYTES_V2` stays **72**: the caps block did not grow
+at 0.9 (`CFTR_CAPS_BYTES` in `host/src/remote.h` is still 72) and
+`CFTR_PROTO_VERSION` did not move.
+
+### The module, and the two pages that carry it
+
+    emscripten/emsdk:6.0.9@sha256:96617f27fe164215…   (build.sh's pin)
+
+    bindings/node/cft_node.wasm      219,535 bytes
+      sha256 1af4ddd3514e3335e915fe5ecbe5449e36d88d8acb47ac2d3c4a554841a14aad
+      was    48a2f5c1e34948bfb3a4ecab893311f4fe340c393bd999081b60c124dcecc49b   (0.8, 214,508 bytes)
+    bindings/wasm/conformance.html  1,349,244 bytes
+      sha256 973ed60e7b71b222559b7556db94361c1c9a074f7c332911ce1ec21cade2760b
+    bindings/wasm/demos.html          532,331 bytes
+      sha256 dfb9f3418522567a06aacd5312ecdaa43a84e427a310fe1b718f73ab6d2147e3
+
+    129 cftw_* exports where 0.8 had 116 - exactly the thirteen, no more
+
+**Both pages were rebuilt and neither was a choice.** `-sSINGLE_FILE`
+embeds the module in `conformance.html` and `verify.mjs` step 3 holds
+the node loader to the page's bytes by sha256; `demos.html` embeds
+`cft_node.wasm` byte for byte and `verify_demos.mjs` step 1 checks it.
+A rebuilt loader beside either stale page fails there, on the checks
+that exist so a replay under node is a replay of THE PAGE'S module and
+not of a lookalike. What did not change is the markup:
+`page_template.html` names 87 `cftw_*` entry points and not one of the
+thirteen, because neither page has a control that loads a program. The
+diff to `conformance.html` is the two spliced lines.
+
+`demos_chains.json` had to be re-recorded, because `build_demos.sh`
+refuses to assemble a page whose module does not match the stamp the
+chains were recorded against. **Of the seventeen sha256-shaped values
+in that file, sixteen came back identical and the seventeenth is the
+module stamp** - every Collatz chain, the zoom orbit and pixels, the
+two zoom images, the four orbits chains and their program images. The
+rest of the diff is the `recorded` date and this machine's timings.
+That is the expected result and worth measuring rather than assuming:
+the thirteen exports are doors, and the arithmetic behind them did not
+move.
+
+### Gates
+
+All on this tree, all measured here. The host build line throughout was
+`PATH="/c/msys64/mingw64/bin:$PATH" make -C host CC=gcc OS=Windows_NT
+TMP/TEMP='C:/Users/logan/AppData/Local/Temp'`, and Python is Miniconda
+3.12.9 named by absolute path, because MSYS `make` with
+`PYTHON=python` finds mingw64's interpreter instead.
+
+    bash bindings/wasm/build.sh      rc 0    ~7 min   stages 0-5 in the pinned
+                                                     image; module and page as above
+    bash bindings/wasm/build_demos.sh
+                                     rc 0    ~3 min   stage 2 identity: the split
+                                                     .wasm equals the committed
+                                                     module, 1af4ddd3…
+    gen_vectors.py --rounding rne rtz rdn rup rmm
+                                     rc 0     ~9 min  168 sets, 225 MB (run.sh's own
+                                                      ensure_vectors arguments)
+
+    node bindings/wasm/verify.mjs vectors/out
+                                     rc 0   19m01s   abi 0.9 = cft.h's 0.9; 129
+                                                     exports; 98 NEEDED present; the
+                                                     node loader is the page's module
+                                                     byte for byte; 1,231,635 cases
+                                                     over 168 sets replayed through
+                                                     the page's own bytes; 831,635
+                                                     cases over 148 sets driven
+                                                     through the cftw_* wrappers
+                                                     themselves.  VERIFY OK
+
+    bindings/node  node test.mjs             126 passed, 0 failed  (126 before)
+    bindings/node  node program_test.mjs      28 passed, 0 failed  ( 17 before)
+    bindings/node  node conformance.mjs      2,063,270 cases over 316 set replays
+
+    bash verify/run.sh --only node,wasm      run 20260908-135600-2a4751a
+      node       ok   1518s   test.mjs then the vectors through cft_node.wasm
+      wasm       ok   1191s   the committed page, verified without a browser
+      VERDICT: PASS, nothing skipped - 2 stages executed, 0 failed, 0 skipped
+
+    node bindings/wasm/verify_demos.mjs      44 ok, 0 FAIL
+                                             "the browser's compute core produced
+                                             the C tools' chains, over the module
+                                             the conformance page embeds"
+
+    make -C host wstest              rc 0      7 s   remote_test: 57 checks, 0
+                                                     failures (42 at 0.8, 53 here
+                                                     before the vector sets existed)
+
+`wstest`'s new checks are the bank round trip: a `BANK_EXT` image built
+by this package's encoder and checked to be 32 + 8 * n_insns bytes
+before it is sent; two banks over **96 lanes** - more than one 64-lane
+block - each compared with `cft_program_run_bank` in the test's own
+process for bits, counts, flags and status; the two banks required to
+give two answers; a **hand-built `PROG_RUN_BANK` payload**, so the
+frame's layout is asserted rather than inferred from the answer; and
+opcode `0x00A0`, which the server does not serve, refused by name on a
+connection that then answers the next request - the property the whole
+new-opcode decision rests on.
+
+The four remaining new tests hold this package's encoder to
+`python/cft_golden/asm.py`: four programs written twice, once as
+`.cfta` and once as encoder calls, **27 instructions, identical bytes**;
+the header the binding reports against the header the reference wrote,
+with `cft_program_digest` against the model's own SHA-256;
+`programs/lowbias32-fp32.cfta` over the index ramp, **4,096 draws bit
+for bit** against `docs/ATLAS.md`'s hash recomputed in JavaScript with
+`Math.imul` and the run signalling nothing; and
+`programs/horner-bank-fp64.cfta` with **both committed banks** against
+a Horner recurrence driven through `cft_fma` - 24 coefficients, 5
+points, two answers, two digests, each digest equal to the model's.
+
+### The negative controls, because a check never seen to fail proves nothing
+
+**The encoder comparison, sabotaged.** `RHI_SHIFT` in `seq_corpus.mjs`
+had `rd`'s and `ra`'s entries swapped - `imm[25]` for `rd[4]` where
+`imm[24]` was due - which is the one permutation no round trip can see:
+a program encoded that way disassembles perfectly and addresses the
+wrong registers. Three tests failed, and the byte diff is one nibble:
+
+    this encoder wrote  …0104002000000002…
+    the reference wrote …0104002000000001…
+
+`cft_program_load` refused the image too. Reverted, green.
+
+**The five-bit registers, controlled from inside.** The R1 test has its
+negative control beside it: the same program with every register masked
+to four bits - what an old operand mux does - must NOT give the same
+deposits. Without it the positive test would pass on an encoder whose
+fifth bits reached nothing, because the program would still produce
+*an* answer.
+
+**The bank, controlled by disagreement.** Every bank test - local, over
+the wire, and `horner-bank-fp64` with the library's two committed banks
+- requires that TWO BANKS GIVE TWO ANSWERS. That is what fails if the
+bank never left the process, and it is the only way to catch a run that
+silently computed on constants it was not given.
+
+**The two page builds' own controls, still built and still failing.**
+`build.sh` stage 4 wrote `build/negative_control.html` with one
+expected value flipped (`fp64.jsonl`, sampled line 10, op `fma`:
+`0x7feffffffffffffe` corrupted to `0x7fefffffffffffff`) and
+`build_demos.sh` stage 4 wrote `build/demos_negative_control.html` with
+the Collatz panel's running peak computed with `CFT_MIN` instead of
+`CFT_MAX`. Both untracked; listed because a rebuild that quietly
+stopped producing them would be one whose failure mode nobody could
+demonstrate.
+
+**And the skip path, exercised rather than assumed.** Pointing
+`CFT_PYTHON` at an interpreter that does not exist gives `23 passed, 0
+failed, 4 skipped`, each skip naming its reason.
+
+### One bug found and fixed, from reading the C
+
+`_packBank` refused a `BANK_EXT` program whose `n_consts` is ZERO -
+which the loader accepts, and whose bank is legitimately empty, because
+`seq_check_bank` computes `want = 0` for it and takes a NULL bank. And
+had it not refused, `_runWith` chose its entry point on the buffer's
+TRUTHINESS, so an empty bank would have gone to `cft_program_run` -
+which a `BANK_EXT` program refuses whatever its `n_consts` is. Those
+are two different questions and only one of them is "do this program's
+constants arrive with the run". Fixed with a test (46eff2a): which
+entry point is called now turns on the flag, and a zero-length bank
+crosses as a NULL pointer with a zero length.
+
+**Noted, not changed:** `cftr_program_run` in
+`host/src/backend_remote.c` picks its opcode with `bank_bytes ?
+CFTR_OP_PROG_RUN_BANK : CFTR_OP_PROG_RUN`, so that same degenerate
+program over the remote backend sends `PROG_RUN` and is refused by the
+server's own `cft_program_run`. Latent, and `host/` is not this lane's
+to edit; `bindings/wasm/remote.mjs` mirrors the C deliberately, because
+a wire client that disagreed with the C about which opcode a call
+becomes would be worse than the corner.
+
+### What is NOT tested here, stated rather than skipped
+
+- **No browser.** Both pages were checked headless, over the bytes in
+  git. Nobody opened either. That is the standing position of
+  `verify.mjs` and `verify_demos.mjs` and it has not changed.
+- **No card, no XRT, no emulation.** wasm32 has no PCIe and the module
+  carries only the software backend by construction, so nothing here
+  says anything about the 0x700 register map or the bank as kernel
+  argument 8.
+- **The feature-absent refusals.** The software backend publishes
+  `seq_features 0x17` - `kx`, `REGS32`, `BANK_PTR`, `IMUL` - so a
+  `BANK_EXT` image refused for want of CAPS[6] cannot be produced on
+  this machine. Two guards exist and neither can fire here:
+  `remote.mjs`'s client-side check before it sends a bank, and
+  `remote_test.mjs`'s arm that prints NOT TESTED and FAILS if the
+  server's device ever lacks the bit, because on the software backend
+  that would be news.
+- **`seq_corpus.jsonl` gains no revision-2 cases**, and cannot on this
+  tree: it is generated by `make_seq_corpus.py` from
+  `cft_golden.seq.random_program`, and `python/cft_golden/seq.py` is
+  REVISION 1 - `NREG = 16`, no `BANK_EXT` - while another lane widens
+  it. A recording the golden model cannot produce is not a recording.
+  The revision-2 programs are hand-written in `program_test.mjs`
+  instead, beside the hand-written ones already there for the
+  behaviours a fuzz corpus records but does not explain. **Regenerating
+  that corpus against revision 2 is the next lane's, once `seq.py`
+  widens.**
+
+### The ambiguities in the brief, and what was chosen
+
+**"Do not rebuild the conformance page unless the exports it needs
+changed."** Checked - they did not, `page_template.html` names 87
+`cftw_*` entry points and none of the thirteen - and the page was
+rebuilt anyway, for the reason under "the module" above: `build.sh` has
+no stage that produces the module without the page, `verify.mjs` step 3
+requires the two to agree, and there is no reason to want either
+otherwise. `demos.html`, which the brief did not mention, is in the same
+position and was handled the same way.
+
+**"The corpus gains REGS32 and BANK_EXT programs."** Read as "the
+programs this package's tests run", since `seq_corpus.jsonl` cannot
+carry them; `program_test.mjs` gains eleven tests, six of them revision
+2's.
+
+**"Assemble a handful of `programs/*.cfta` with `asm.py` and compare
+bytes with `programImage`'s output, or at least run the built images
+through the binding."** The first half as written needs a `.cfta`
+PARSER in JavaScript - `programImage` takes an instruction list, not
+text - and an assembler is the one thing this package deliberately does
+not have. Both halves were done at the level each is meaningful: four
+programs written twice and compared byte for byte (which is where a
+permuted `imm[27:24]` shows), and two of the library's own programs
+assembled by `asm.py`, loaded through the binding, and run against
+oracles that are NEITHER implementation. `make programs` was not needed
+for either: `asm.py` produces the image from the source, which is what
+`programs/build.py` asks `cft-asm` for.
+
+**"126 passing with 17 skipped before."** Those are two files and no
+skips: `test.mjs` 126 passed, `program_test.mjs` 17 passed. Both counts
+are above; the four skips that exist now are new, real, and
+demonstrated.
+
+**`bindings/node/package.json`.** Its version tracked cft.h's ABI minor
+from 0.3.1 to 0.7.0, one bump per step, and then stopped - it stayed
+0.7.0 through 0.8 and would have stayed there through 0.9. Bumped to
+**0.9.0**, skipping 0.8.0 rather than passing through it, because the
+surface never had an 0.8-only step: `cft_caps`' sequencer fields
+arrived at 0.8 and are projected for the first time here.
+`"private": true`, so nothing is published either way.

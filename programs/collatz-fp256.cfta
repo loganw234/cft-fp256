@@ -1,0 +1,99 @@
+; collatz-fp256.cfta - one batch of Collatz steps, exactly, fp256
+;
+; host/tools/collatz.c's build_program at the tool's own defaults:
+; --format fp256, --steps-per-call 1024. The tool's image is fixed
+; once the trip count is - every constant is derived from the format
+; and nothing else changes per run - so this file IS the kernel the
+; tool loads, and `cft-collatz` is its check.
+;
+;   r0  n, the value so far - a positive integer, exactly held
+;   r1  the step count so far (+0 on the first call)
+;   r2  the peak so far, which on the first call is n itself
+;   deposits: n, steps, peak, escaped
+;
+; All three of those are STREAMS, and that is what makes the program
+; resumable: 1024 steps rarely finish a trajectory, so the tool feeds
+; the deposits of one call back as the operands of the next and the
+; run continues exactly where it stopped. It is also why r2 must be
+; seeded with n rather than left at +0 - a lane that is already at 1
+; never enters the loop, and its peak is its own starting value.
+;
+; The step is n/2 for even n and 3n+1 for odd, iterated 1024 times
+; with three things the contract makes possible and an ordinary
+; machine does not:
+;
+;   * PARITY OFF THE ENCODING. The obvious test - add and subtract
+;     2^(p-1) - is exact but raises inexact on every non-integer, so
+;     it would poison the flag word. Five quiet integer opcodes read
+;     the units bit out of the significand instead: shift the exponent
+;     field down, turn it into a shift count, shift the value, mask
+;     one bit. Above 2^p there is no units bit at all and every value
+;     is even, which the CMPLT against TWO_P says explicitly rather
+;     than letting the shift wrap.
+;   * A WITNESS FOR EXACTNESS, PER ELEMENT. flags_out is a union over
+;     the whole call, so it cannot say WHICH element left exact
+;     arithmetic. y - 3n is 1 exactly when the odd step was exact, and
+;     the CMPEQ against ONE is that test; SETACT then stops the
+;     element, and ESC records that it stopped for this reason.
+;   * A NEUTRALISED BRANCH. The odd step is computed for every lane,
+;     so the operand of the one FMA that can round is SELECTed to 1
+;     for an even lane - the multiply-add an even element takes is
+;     exact by construction, and no lane rounds on a branch it did not
+;     take.
+;
+; ACTALL after the loop is why the four deposits happen for every
+; element including the ones that finished early; it is legal here
+; because it is outside the loop, which is the P3 rule.
+
+.format   fp256
+.deposits 4
+
+.const    HALF   = 0.5
+.const    ONE    = 1.0
+.const    THREE  = 3.0
+.const    MTHREE = -3.0
+.const    ZERO   = 0.0
+.const    TWO_P  = 0x1p237        ; 2^p; at or above it every value is even
+.const    IPM1   = 0xec           ; the INTEGER 236 = p - 1, raw
+.const    ISH    = 0x400eb        ; the INTEGER 262379 = (p - 1) + bias, raw
+.const    I1     = 0x1            ; the INTEGER 1, raw
+
+.reg      n      = r0
+.reg      cnt    = r1
+.reg      peak   = r2
+.reg      q      = r3
+.reg      t      = r4
+.reg      odd    = r5
+.reg      nn     = r6
+.reg      y      = r7
+.reg      ex     = r8
+.reg      nd     = r9
+.reg      esc    = r10
+
+repeat 1024
+  cmplt  nd, ONE, n           ; an element already at 1 is finished
+  setact nd
+  mul    q, n, HALF           ; n/2, exact for every integer n >= 1
+  ishr   t, n, IPM1           ; --- parity, from the encoding ---
+  isub   t, ISH, t
+  ishr   t, n, t
+  iand   t, t, I1
+  icmplt odd, ZERO, t
+  cmplt  t, n, TWO_P          ; above 2^p the shift would have wrapped
+  min    odd, odd, t
+  select nn, n, ONE, odd      ; the even lane's 3n+1 is 3*1+1: exact
+  fma    y, nn, THREE, ONE
+  fma    ex, nn, MTHREE, y    ; the witness: y - 3n, which is 1 if exact
+  cmpeq  ex, ex, ONE
+  select esc, ZERO, ONE, ex
+  setact ex                   ; an element that lost exactness stops
+  select n, y, q, odd         ; committed only by the exact
+  add    cnt, cnt, ONE
+  max    peak, peak, n
+endrep
+actall
+deposit n
+deposit cnt
+deposit peak
+deposit esc
+halt

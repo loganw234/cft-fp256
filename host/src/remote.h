@@ -61,6 +61,29 @@ extern "C" {
 #define CFTR_OP_PROG_LOAD        0x0020u
 #define CFTR_OP_PROG_RUN         0x0021u
 #define CFTR_OP_PROG_FREE        0x0022u
+/* PROG_RUN with the constant bank as data (ABI 0.9, docs/SEQUENCER.md
+ * revision 2 R3). A NEW OPCODE rather than a longer PROG_RUN, which is
+ * what makes it versioned in both directions without a protocol step:
+ *
+ *  - an older SERVER refuses it by name. Its dispatch has no case for
+ *    0x0023 and its default arm answers CFT_ERR_UNSUPPORTED with
+ *    "opcode 0x0023 is not one this server serves", on a connection
+ *    that stays open - an operation's own failure, not a broken
+ *    stream. Widening PROG_RUN's payload instead would have reached
+ *    that server's length check and been a REFUSAL, which ends the
+ *    connection over a feature the caller could have asked about.
+ *  - an older CLIENT never sends it, because it does not have the
+ *    constant. A current client never sends it to a server whose
+ *    device lacks CFT_SEQ_FEAT_BANK_PTR either, because a BANK_EXT
+ *    program does not LOAD against such a device - the HELLO caps
+ *    block carries seq_features and cft_program_load refuses the image
+ *    there, one round trip earlier and with a message that names the
+ *    feature.
+ *
+ * CFTR_PROTO_VERSION does not move: it is compared for equality at
+ * both ends, so stepping it would turn "an older server refuses one
+ * operation" into "an older server refuses the connection". */
+#define CFTR_OP_PROG_RUN_BANK    0x0023u
 #define CFTR_OP_BUF_ALLOC        0x0030u
 #define CFTR_OP_BUF_FREE         0x0031u
 #define CFTR_OP_BUF_WRITE        0x0032u
@@ -224,7 +247,9 @@ int  cftr_reduce(void *hw, int op, int fmt, int rnd,
                  const void *a, const void *b, void *d, size_t n,
                  uint32_t *flags, uint32_t *bus);
 int  cftr_program_run(void *hw, int fmt, const void *image,
-                      size_t image_bytes, uint32_t max_deposits,
+                      size_t image_bytes,
+                      const void *bank, size_t bank_bytes,
+                      uint32_t max_deposits,
                       const void *a, const void *b, const void *c,
                       void *deposits, uint32_t *counts, size_t n,
                       uint32_t *flags, uint32_t *bus);

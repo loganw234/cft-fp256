@@ -59,6 +59,16 @@ export const OP = {
   HELLO: 0x0001, CAPS: 0x0002, STATS: 0x0003,
   RUN: 0x0010, REDUCE: 0x0011,
   PROG_LOAD: 0x0020, PROG_RUN: 0x0021, PROG_FREE: 0x0022,
+  // ABI 0.9, 2026-09-08. A NEW OPCODE rather than a longer PROG_RUN,
+  // and that is the whole versioning story: an older server's dispatch
+  // has no case for 0x0023 and falls to the arm that answers an unknown
+  // operation - CFT_ERR_UNSUPPORTED, a message naming the opcode, and a
+  // connection that stays open. A longer PROG_RUN payload would have
+  // reached that server's LENGTH check instead, which is a protocol
+  // fault and ends the connection over a feature the caller could have
+  // asked about. CFTR_PROTO_VERSION does not move, for the reason the
+  // caps block's growth did not move it (docs/REMOTE.md).
+  PROG_RUN_BANK: 0x0023,
   BUF_ALLOC: 0x0030, BUF_FREE: 0x0031, BUF_WRITE: 0x0032, BUF_READ: 0x0033,
   FLAGS_LOWER: 0x0040, FLAGS_RAISE: 0x0041, FLAGS_TEST: 0x0042,
   FLAGS_SAVE: 0x0043, FLAGS_RESTORE: 0x0044, FLAGS_TEST_SAVED: 0x0045,
@@ -673,14 +683,67 @@ export class CftRemote {
    *  `maxDeposits` are what PROG_LOAD read out of the image, and the
    *  response's size is checked against them - a lane's deposits
    *  depend on that lane alone, which is why the chunking is safe. */
-  async programRun(handle, fmt, { a = null, b = null, c = null }, n,
-                   maxDeposits, wantCounts = false) {
+  async programRun(handle, fmt, streams, n, maxDeposits, wantCounts = false) {
+    return this._programRun(handle, fmt, streams, n, maxDeposits, wantCounts,
+                            null);
+  }
+
+  /** cft_program_run_bank, one PROG_RUN_BANK per chunk (ABI 0.9).
+   *
+   *  A program whose header flags carry BANK_EXT has no constant
+   *  section in its image: n_consts says how many constants it
+   *  addresses and every run supplies them. The IMAGE still crosses
+   *  once through PROG_LOAD - it is the schedule, and it is what a
+   *  digest names - and the bank crosses with each run.
+   *
+   *  `bank` is n_consts dense format-width values, laid out exactly as
+   *  an image's constant section is. Its length goes in the fourth
+   *  fixed word, which PROG_RUN leaves zero, and the bank itself sits
+   *  between the fixed fields and the operands (docs/REMOTE.md). */
+  async programRunBank(handle, fmt, bank, streams, n, maxDeposits,
+                       wantCounts = false) {
+    if (!(bank instanceof Uint8Array) || bank.length === 0)
+      throw new Error(
+        "programRunBank wants the constant bank as a non-empty Uint8Array; " +
+        "a program with no bank is programRun's");
+    // Never sent to a server that cannot serve it, which is what the C
+    // client does and for the same reason: the HELLO caps block carries
+    // the server device's seq_features, so reaching here without the
+    // bit means the two disagree about what was published - worth
+    // naming rather than discovering as an unsupported opcode.
+    // SEQ_FEAT_BANK_PTR is CAPS[6], cft_caps.seq_features bit 2.
+    if (this.caps && !(this.caps.seqFeatures & 0x04))
+      throw new Error(
+        "this run supplies a constant bank and the server's device does " +
+        "not publish CFT_SEQ_FEAT_BANK_PTR (CAPS[6], " +
+        "cft_caps.seq_features bit 2), so it cannot take one");
+    return this._programRun(handle, fmt, streams, n, maxDeposits, wantCounts,
+                            bank);
+  }
+
+  /** The two above are one request with one difference - the bank, and
+   *  therefore the opcode - so they are one implementation, exactly as
+   *  cftr_program_run in host/src/backend_remote.c is. Two copies of
+   *  the chunking and the response arithmetic would be two chances to
+   *  get the stride wrong in one of them. */
+  async _programRun(handle, fmt, { a = null, b = null, c = null }, n,
+                    maxDeposits, wantCounts, bank) {
     const esz = FORMAT_SIZE[fmt];
     if (!esz) throw new Error(`format ${fmt} is not one of fp32/64/128/256`);
+    const bankBytes = bank ? bank.length : 0;
+    const op = bankBytes ? OP.PROG_RUN_BANK : OP.PROG_RUN;
+    const name = OP_NAMES[op];
     const present = (a ? 1 : 0) | (b ? 2 : 0) | (c ? 4 : 0);
     const npresent = (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0);
     const perLane = npresent * esz + maxDeposits * esz + 4;
-    const lpc = Math.max(1, Math.floor(CHUNK_BYTES / perLane));
+    // The bank comes OFF the chunk budget rather than being added to
+    // it, since it rides every chunk: a bank as large as the budget
+    // would otherwise make every chunk one byte over.
+    if (bankBytes >= CHUNK_BYTES)
+      throw new Error(
+        `this program's constant bank is ${bankBytes} bytes, which does ` +
+        `not leave room for a lane in a ${CHUNK_BYTES}-byte request`);
+    const lpc = Math.max(1, Math.floor((CHUNK_BYTES - bankBytes) / perLane));
     const deposits = new Uint8Array(n * maxDeposits * esz);
     const counts = wantCounts ? new Uint32Array(n) : null;
     let flags = 0, bus = 0;
@@ -691,17 +754,23 @@ export class CftRemote {
       hv.setUint32(0, handle, true);
       hv.setUint32(4, present, true);
       hv.setUint32(8, wantCounts ? 1 : 0, true);
-      hv.setUint32(12, 0, true);
+      // Zero on PROG_RUN, the bank's byte length on PROG_RUN_BANK. The
+      // bank rides EVERY chunk rather than being staged once, because
+      // a chunk is a whole run of its own lanes on the server and a
+      // program's constants are not chunk-shaped; it is a handful of
+      // format-width values beside up to sixteen megabytes of operands.
+      hv.setUint32(12, bankBytes, true);
       hv.setBigUint64(16, BigInt(k), true);
       const parts = [head];
+      if (bankBytes) parts.push(bank);
       for (const q of [a, b, c])
         if (q) parts.push(q.subarray(off * esz, (off + k) * esz));
-      const resp = await this.request(OP.PROG_RUN, concat(parts));
+      const resp = await this.request(op, concat(parts));
       const depBytes = k * maxDeposits * esz;
       const want = 8 + depBytes + (wantCounts ? k * 4 : 0);
       if (resp.length !== want)
         throw this.poison(new FrameError(
-          `PROG_RUN answered with ${resp.length} bytes where ${want} were due`));
+          `${name} answered with ${resp.length} bytes where ${want} were due`));
       const rv = new DataView(resp.buffer, resp.byteOffset, resp.byteLength);
       flags |= rv.getUint32(0, true);
       bus |= rv.getUint32(4, true);
