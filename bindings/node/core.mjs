@@ -2614,9 +2614,10 @@ export class Program {
       const pd = s.alloc(Math.max(ndep * fi.size, 1));
       const pcnt = s.alloc(Math.max(n * 4, 1));
       const pfl = s.alloc(4), pbus = s.alloc(4);
+      const pbank = bankBuf ? s.put(bankBuf) : 0;
       const who = bankBuf ? "cft_program_run_bank" : "cft_program_run";
       const st = bankBuf
-        ? C.programRunBank(this._handle, s.put(bankBuf), bankBuf.length,
+        ? C.programRunBank(this._handle, pbank, bankBuf.length,
                            pa, pb, pc, pd, pcnt, n, pfl, pbus)
         : C.programRun(this._handle, pa, pb, pc, pd, pcnt, n, pfl, pbus);
       checkStatus(C, st, who);
