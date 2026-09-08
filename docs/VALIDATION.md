@@ -6223,3 +6223,41 @@ images of ed752dd (one tile 33,150,127 bytes in 4 min, four tiles
   fixed in this commit.
 - `-s -n 24` on the quad and `-q` on the single: running at the time of
   writing; their verdicts follow in a later entry.
+
+## 2026-09-08 - emulation overnight: the four-tile image runs every format's programs bit-exact; the quick gates are no longer an evening's work
+
+The chain from the previous entry finished at 05:44, stopped by hand
+in its last gate. Verdicts, on the desktop's WSL against hw_emu images
+of ed752dd, host tools against the era XRT:
+
+    quad   -s -n 24   PASS   98 checks, 0 failed, in 333 min - fp32 38, fp64 20,
+                             fp128 20, fp256 20; "the device and the software
+                             backend agree on every case, bits and flags"
+    single -q -n 8    PARTIAL, stopped at 221 min inside fp32 with every check
+                             so far passed: fma 22, sequencer programs 42, composed
+                             div/sqrt 50 checks, 0 failed; fp64/fp128/fp256 not reached
+    quad   -q -n 8    NOT A VERDICT: the first run exited 0 in 5 min with none of
+                             device-test's output (previous entry); not re-run, because
+                             the single's run showed what a quick gate costs under xsim
+    quad   -r         stopped at 133 min, no block verdict (previous entry)
+
+So the sequencer's row moves: programs in all four formats have now run
+through the real XRT stack on a four-tile image and matched the software
+backend bit for bit and flag for flag - the fp32-only qualification of
+2026-09-02 is lifted. Elementwise, seeds and the composed div/sqrt are
+proven through the stack at fp32 on one tile. The wider formats'
+elementwise paths and the reductions are proven in cocotb and await the
+card, which is what the card is for.
+
+The lesson is about the gate, not the design. device-test's quick mode
+was thirty-three invocations on 2026-09-01; it is now one opcode per
+format plus the programs, the composed div/sqrt, six boundary sizes, the
+partition-invariance cases and nine reductions, hundreds of kernel
+invocations, and under xsim each costs one to three minutes regardless of
+its element count (the handshake and the DMA dominate, not the
+arithmetic). A quick gate is therefore hours per format and the
+reductions gate is days. docs/CARDDAY.md's two pre-day emulation items
+are annotated accordingly, docs/VERIFICATION.md carries the measured
+costs, and device-test wants an emulation budget - a mode that runs one
+format's worth of each family and stops - before it is used as an
+evening check again. Recorded as a follow-up, not done here.

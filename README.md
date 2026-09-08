@@ -214,10 +214,11 @@ decimal formats (a different datapath, effectively their own tile),
 clause 8's alternate exception handling, and NaN payload propagation
 through arithmetic, which is a canonical quiet NaN by design. The
 orbit sequencer is RTL now, holding bit-exact to `seq.py` through the
-kernel's one ALU array in simulation and through hw_emu at fp32 on the
-real XRT stack (2026-09-02); a bitstream that carries a program, and
-silicon, are still ahead of it, and since 2026-09-07 a program can be
-loaded from JavaScript as well as from C. What it does
+kernel's one ALU array in simulation and through hw_emu on the real
+XRT stack - fp32 on 2026-09-02, and on 2026-09-08 all four formats'
+programs on a four-tile image, 98 checks bit-exact; a bitstream that
+carries a program, and silicon, are still ahead of it, and since
+2026-09-07 a program can be loaded from JavaScript as well as from C. What it does
 do, it does bit-exactly, and the file names every gap that remains.
 
 ## Design rules the repo is built around
