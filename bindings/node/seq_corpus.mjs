@@ -42,45 +42,163 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const CTRL = { halt: 0, repeat: 1, endrep: 2, deposit: 3,
                       setact: 4, actall: 5 };
 
+/** Revision 2's shape, 2026-09-08. Each lane owns THIRTY-TWO registers
+ *  (R1) and the header's reserved[0] is a `flags` word (R3).
+ *
+ *  A register field is five bits: the low four stay where they were and
+ *  the fifth of each lives in `imm[27:24]` - rd, ra, rb, rc in that
+ *  order. `imm[31:28]` is read by nothing and must be zero. */
+export const NREG = 32;
+/** How many constants an instruction can ADDRESS: sixteen through the
+ *  four-bit operand field, 256 through a byte of `imm` under `kx`. */
+export const KADDR_PLAIN = 16;
+export const KADDR_KX = 256;
+/** Header flags: bit 0 is BANK_EXT - the image carries NO constant
+ *  section, `n_consts` still says how many constants the program
+ *  addresses, and every run supplies them. Every other bit is
+ *  reserved-must-be-zero. */
+export const FLAG_BANK_EXT = 0x1;
+
+// imm[27:24], in rd, ra, rb, rc order (docs/SEQUENCER.md R1's table),
+// and the byte of imm each operand's constant index rides in under kx.
+const RHI_SHIFT = { rd: 24n, ra: 25n, rb: 26n, rc: 27n };
+const KX_SHIFT = [0, 8, 16];      // ra, rb, rc
+
 /** One 64-bit little-endian instruction word, as a BigInt.
  *
  *  | 7:0 op | 11:8 rd | 15:12 ra | 19:16 rb | 23:20 rc | 26:24 rnd |
- *  | 27 ka | 28 kb | 29 kc | 30 reserved | 31 ctrl | 63:32 imm | */
+ *  | 27 ka | 28 kb | 29 kc | 30 kx | 31 ctrl | 63:32 imm |
+ *
+ *  `rd`/`ra`/`rb`/`rc` are FIVE-BIT register numbers, or - where that
+ *  operand's `k` bit is set - CONSTANT INDICES. The fifth register bit
+ *  goes to its place in `imm` here rather than being the caller's
+ *  problem, which is exactly what asm.py's `encode` does; this file and
+ *  that one are two encoders held to identical output, and the way they
+ *  are held is by writing the same rule twice and comparing bytes.
+ *
+ *  THE RESERVED-FIELD RULE decides every corner and is enforced here so
+ *  a hand-written program is refused where it is written rather than at
+ *  the loader: an operand naming a constant has no register high bit
+ *  (the field is not read, so it must be zero), and under `kx` the
+ *  index is a byte of `imm` and the operand field itself is zero. */
 export function insn({ op = 0, rd = 0, ra = 0, rb = 0, rc = 0, rnd = 0,
-                       ka = false, kb = false, kc = false, ctrl = false,
-                       imm = 0 } = {}) {
-  return BigInt(op) | (BigInt(rd) << 8n) | (BigInt(ra) << 12n) |
-         (BigInt(rb) << 16n) | (BigInt(rc) << 20n) | (BigInt(rnd) << 24n) |
-         (BigInt(ka ? 1 : 0) << 27n) | (BigInt(kb ? 1 : 0) << 28n) |
-         (BigInt(kc ? 1 : 0) << 29n) | (BigInt(ctrl ? 1 : 0) << 31n) |
-         (BigInt(imm >>> 0) << 32n);
+                       ka = false, kb = false, kc = false, kx = false,
+                       ctrl = false, imm = 0 } = {}) {
+  const fields = { rd, ra, rb, rc };
+  const isConst = { rd: false, ra: !!ka, rb: !!kb, rc: !!kc };
+  const shift = { rd: 8n, ra: 12n, rb: 16n, rc: 20n };
+  if (!(op >= 0 && op < 256))
+    throw new RangeError(`op=${op} does not fit the opcode byte`);
+  if (!(rnd >= 0 && rnd <= 4))
+    throw new RangeError(`rnd=${rnd}; the contract defines 0..4`);
+  let immBits = BigInt(imm >>> 0);
+  let word = BigInt(op) | (BigInt(rnd) << 24n) |
+             (BigInt(ka ? 1 : 0) << 27n) | (BigInt(kb ? 1 : 0) << 28n) |
+             (BigInt(kc ? 1 : 0) << 29n) | (BigInt(kx ? 1 : 0) << 30n) |
+             (BigInt(ctrl ? 1 : 0) << 31n);
+  for (const name of ["rd", "ra", "rb", "rc"]) {
+    const v = fields[name];
+    const limit = isConst[name] ? (kx ? KADDR_KX : KADDR_PLAIN) : NREG;
+    if (!(Number.isInteger(v) && v >= 0 && v < limit))
+      throw new RangeError(`${name}=${v} outside 0..${limit - 1}`);
+    if (isConst[name] && kx) continue;   // the index rides in imm
+    word |= BigInt(v & 0xf) << shift[name];
+    if (v >> 4) {
+      if (isConst[name])
+        throw new RangeError(`${name} names constant ${v}, which needs kx`);
+      immBits |= 1n << RHI_SHIFT[name];
+    }
+  }
+  if (immBits >> 32n)
+    throw new RangeError("imm does not fit 32 bits");
+  return word | (immBits << 32n);
+}
+
+/** One ALU instruction, choosing the form the assembler would: indexed
+ *  when any constant index is 16 or more, plain otherwise. Pass
+ *  `kx: true` to force the indexed form, which docs/SEQUENCER.md
+ *  deliberately does not refuse for small indices. */
+export function alu({ op, rd = 0, ra = 0, rb = 0, rc = 0, rnd = 0,
+                      ka = false, kb = false, kc = false, kx = null } = {}) {
+  const idx = [[ra, !!ka], [rb, !!kb], [rc, !!kc]];
+  const indexed = kx === null
+    ? idx.some(([v, f]) => f && v >= KADDR_PLAIN)
+    : !!kx;
+  let imm = 0;
+  if (indexed) {
+    if (!(ka || kb || kc))
+      throw new RangeError("kx with no constant operand selects nothing");
+    idx.forEach(([v, f], i) => {
+      if (!f) return;
+      if (!(v >= 0 && v < KADDR_KX))
+        throw new RangeError(`constant index ${v} outside 0..${KADDR_KX - 1}`);
+      imm |= v << KX_SHIFT[i];
+    });
+  }
+  return insn({ op, rd, ra, rb, rc, rnd, ka, kb, kc,
+                kx: indexed, ctrl: false, imm: imm >>> 0 });
 }
 
 /** A control instruction. Only REPEAT reads `imm`, and only DEPOSIT
  *  and SETACT read `ra`; every other field must be zero or the loader
  *  refuses the program, so that one operation has one encoding and a
- *  readback hash is a hash of the program. */
+ *  readback hash is a hash of the program.
+ *
+ *  Revision 2 touches this in one place and it is easy to miss: `ra` is
+ *  five bits on DEPOSIT and SETACT too, so `deposit r20` sets imm[25],
+ *  and imm[25] is the ONLY imm bit those two may set. insn() puts it
+ *  there. */
 export const ctl = (code, ra = 0, imm = 0) =>
   insn({ op: CTRL[code], ra, imm, ctrl: true });
 
 /** header, constant bank, instruction stream - the bytes a device is
  *  DMA'd and can read back. `consts` are ENCODINGS (Uint8Array of the
  *  format's element size), because a constant bank holds format-width
- *  values and a program is compiled for one format. */
+ *  values and a program is compiled for one format.
+ *
+ *  `flags` is the header word that was reserved[0] until 2026-09-08.
+ *  With FLAG_BANK_EXT set THE IMAGE CARRIES NO CONSTANT SECTION: the
+ *  header's n_consts still says how many constants the program
+ *  addresses and every run supplies them, so pass `nConsts` (or a
+ *  `consts` array whose entries are only counted, never written). The
+ *  second reserved word stays zero; both are reserved-must-be-zero and
+ *  a loader refuses a set bit it does not know, which is what lets a
+ *  later flag arrive without a version step. */
 export function programImage({ formatCode, elementBytes, insns,
-                               consts = [], maxDeposits }) {
-  const bytes = new Uint8Array(32 + consts.length * elementBytes +
+                               consts = [], nConsts = null, maxDeposits,
+                               flags = 0 }) {
+  const bankExternal = (flags & FLAG_BANK_EXT) !== 0;
+  const declared = nConsts === null ? consts.length : nConsts;
+  if (!bankExternal && nConsts !== null && nConsts !== consts.length)
+    throw new RangeError(
+      `this image carries its constant section, so its n_consts is the ` +
+      `${consts.length} values given and cannot be declared as ${nConsts}`);
+  const carried = bankExternal ? 0 : consts.length;
+  const bytes = new Uint8Array(32 + carried * elementBytes +
                                insns.length * 8);
   const dv = new DataView(bytes.buffer);
   bytes.set([0x43, 0x46, 0x54, 0x50], 0);              // "CFTP"
   dv.setUint32(4, 1, true);                            // version
   dv.setUint32(8, insns.length, true);
-  dv.setUint32(12, consts.length, true);
+  dv.setUint32(12, declared, true);                    // ADDRESSED, not carried
   dv.setUint32(16, maxDeposits, true);
   dv.setUint32(20, formatCode, true);                  // the PREC_CODE ladder
+  dv.setUint32(24, flags >>> 0, true);                 // was reserved[0]
+  dv.setUint32(28, 0, true);                           // reserved[1]
   let off = 32;
-  for (const k of consts) { bytes.set(k, off); off += elementBytes; }
+  if (!bankExternal)
+    for (const k of consts) { bytes.set(k, off); off += elementBytes; }
   for (const w of insns) { dv.setBigUint64(off, w, true); off += 8; }
+  return bytes;
+}
+
+/** The bank a BANK_EXT program's run supplies: n_consts format-width
+ *  values, densely packed EXACTLY as an image's constant section is
+ *  laid out - which is why this is the same loop programImage runs and
+ *  not a second layout. */
+export function packBank(consts, elementBytes) {
+  const bytes = new Uint8Array(consts.length * elementBytes);
+  consts.forEach((k, i) => bytes.set(k, i * elementBytes));
   return bytes;
 }
 
