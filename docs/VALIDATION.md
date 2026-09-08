@@ -6261,3 +6261,208 @@ are annotated accordingly, docs/VERIFICATION.md carries the measured
 costs, and device-test wants an emulation budget - a mode that runs one
 format's worth of each family and stops - before it is used as an
 evening check again. Recorded as a follow-up, not done here.
+
+## 2026-09-08 - revision 2 in the model and the tile: 32 registers, IMEM_D 4096, a per-run constant bank - and the register file doubles for nothing
+
+The hardware-contract half of docs/SEQUENCER.md's "Revision 2"
+section, built on 44e2a07: the golden model, rtl/cft_seq.sv,
+rtl/cft_csr.sv, rtl/cft_krnl.sv, hw/kernel.xml and the benches. The
+host library, the tools and the JavaScript binding are other agents'
+work from the same spec and have their own entries.
+
+### The OOC measurement R1 asked for
+
+The contract said to measure what doubling the register file costs, to
+record it even if the answer was bad, and not to shrink NBEATS to make
+it fit. **It costs nothing.** Two out-of-context synthesis runs of
+`cft_krnl` on trees identical apart from revision 2 - Vivado 2026.1,
+xcu50-fsvh2104-2-e, 135 MHz, `hw/synth_krnl_ooc.tcl` with default
+generics, the Windows desktop:
+
+| | revision 1 (16 regs, IMEM_D 1024) | revision 2 (32 regs, IMEM_D 4096) | delta |
+|---|---|---|---|
+| CLB LUTs, tile | 120,173 | 119,915 | **-258 (-0.2%)** |
+| CLB registers, tile | 60,543 | 60,750 | +207 (+0.3%) |
+| Block RAM tiles | 50 | 48 | -2 |
+| URAM | 0 | 1 (of 640) | +1 |
+| DSPs | 307 | 307 | 0 |
+| WNS at 135 MHz | +1.196 ns | **+1.196 ns** | **0.000** |
+| synthesis wall time | 9 min 47 | 11 min 13 | |
+
+`cft_seq` alone, from the hierarchical report: 24,702 -> **24,437**
+LUT, 4,899 -> **5,042** FF, RAMB36 22 -> 20, RAMB18 24 -> 24, URAM
+0 -> 1. Nothing else in the tile moved: `cft_lanes` is identical to
+the LUT (88,184 both ways), `cft_engine_stream` differs by one, and
+`cft_csr` grew 818 -> 824 LUT and 629 -> 693 FF, which is BANK_PTR.
+
+**So the answer to the contract's question is yes, at 135 MHz on the
+U50, with nothing shrunk.** Two facts explain a doubling that costs
+nothing. The register file was already block RAM and stayed in the
+same primitives - eight banks mirrored twice, and 512 x 32 bits fits
+the RAMB18 that 256 x 32 did - so the depth doubled inside memories
+that were already there. And the instruction memory, four times larger
+at 4,096 x 64 bits, stopped fitting block RAM economically and Vivado
+inferred **one UltraRAM** for it, a resource this tile was using none
+of, which is why the BRAM tile count went DOWN by two while the
+capacity went up fourfold.
+
+Timing did not move because `cft_seq` is not on the critical path in
+either tree. The worst path is the same one in both, to the picosecond
+and to the pin:
+
+    Slack (MET) : 1.196ns
+      Source:      u_engine/u_fifo_a/mem_reg_0/CLKARDCLK
+      Destination: u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[24]/D
+
+Two cautions on those numbers. **Out-of-context synthesis is not shell
+timing** - this project paid to learn that once and docs/ROADMAP.md
+carries the accounting - so +1.196 ns is a comparison between two
+trees, not a prediction about a linked build. And this is **Vivado
+2026.1**, where the tile's own recorded history (139,404 LUT at +0.307
+ns) was measured under 2022.2: absolute numbers are not comparable
+across that gap, which is exactly why the revision-1 baseline above
+was re-synthesised today rather than quoted from the file.
+
+The K325T pair (hw/mc_sweep.sh's configuration, MUL_PASSES=10 and both
+ladders) was NOT run. It was second priority in the round and the U50
+answer was decisive; the entry says so rather than leaving a reader to
+assume it passed.
+
+One implementation was run, of the revision-2 tree only - the round
+allowed one and this is the configuration that matters.
+`hw/impl_krnl_ooc.tcl`, same part and clock, **55 min 29 s**, exit 0:
+
+    QOR_ROUTED_WNS_NS: 0.027          (135 MHz, period 7.407 ns)
+    routed LUT 117,308   FF 60,768   BRAM tiles 48   URAM 1   DSP 307
+    worst routed path, 16 levels, 7.314 ns datapath:
+      u_engine/u_fifo_a/mem_reg_1/CLKARDCLK ->
+      u_lanes/g_bank128.g_lane128[1].u_fma/s0_byp_d_reg[29]/D
+    cft_seq routed: 24,014 LUT, 5,042 FF, RAMB36 20, RAMB18 24, URAM 1
+
+It closes, and **it closes on a path that is not the sequencer's**:
+the worst routed path is the same streaming-engine FIFO into the same
+FMA input register that was worst at synthesis in BOTH trees.
+Revision 2 is not what makes it tight.
+
+Two things this run does NOT say, stated because the temptation is to
+read them into it. There is **no revision-1 routed comparison** - one
+implementation was the budget, so the before/after delta above is a
+synthesis delta and nothing here upgrades it. And +0.027 ns of routed
+OOC slack is not headroom: read the path delay, 7.380 ns against a
+7.407 ns period, and remember that the tool works exactly as hard as
+the constraint asks (docs/BRINGUP.md). What the run establishes is
+that the revision-2 tile places and routes at 135 MHz on the U50 at
+all, which is the question the contract asked and the one a synthesis
+number alone could not answer.
+
+### The gates
+
+Everything below ran from this worktree. The container gates are
+`MSYS2_ARG_CONV_EXCL='*' docker run --rm -v <worktree>:/work -w
+/work/tb cft-sim make ...`.
+
+    make -C python pytest (the golden model)      2026 passed, 5 skipped   10 min 0 s
+      - 2,020 before; the six new are R1's bit table, r16..r31 running,
+        the BANK_EXT image's length and its two-bank equivalence, the
+        bank refusals, and the digest over image-plus-bank
+
+    docker cft-sim: make -k -j4 sim                21 targets, 64 tests    18 min 1 s
+                                                   PASS=64 FAIL=0 SKIP=0
+      - the whole shipping suite, not just the sequencer's targets,
+        because rtl/cft_krnl.sv and rtl/cft_csr.sv are shared: fp32
+        fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare
+        seedop reduceacc reduce krnl quarter faults seq_core krnlseq
+        seqbanks mulpass mulcycle mulcycle2
+      - seq_core is 12/12 where it was 10/10: `wide_registers` and
+        `constant_bank_per_run` are new
+      - the box was also carrying the Vivado implementation below, so
+        18 min is a loaded number - and well under the 55 min
+        docs/VERIFICATION.md records for four jobs beside a Vivado,
+        which was a different load
+
+    docker cft-sim: make MC=10 <seq targets>       3 targets, 14 tests    7 min 24 s
+                                                   PASS=14 FAIL=0 SKIP=0
+      - seq_coremc, krnlseqmc, seqbanksmc: the sequencer's share of
+        `make simmc`, the multi-cycle tile's own census. The rest of
+        simmc and the four board targets were not run in this round;
+        they exercise the multiplier and the ladders, which revision 2
+        does not touch.
+
+    docker cft-sim: make yosys-lint                clean, exit 0           1 min
+      - only the pre-existing "Replacing memory with list of
+        registers" notes and the one translate_off warning
+
+    docker cft-sim: verilator 5.020 --lint-only    clean, exit 0, BOTH     2 min
+      cft_krnl, default and board configurations   configurations
+      - warnings fatal, and no -Wno-* at all: tb/cocotb.mk's Verilator
+        branch retired the blanket width suppressions and a width
+        warning is a regression. The board configuration is
+        -GFUSE_NORM=1 -GFUSE_ALIGN=1 -GMUL_PASSES=10, translated from
+        the Icarus -P spelling the way cocotb.mk does it.
+      - separately, -Wall filtered to WIDTH reports NOTHING in either
+        configuration. No lint_off was added anywhere.
+
+The formal gate was not run: it does not cover `cft_seq`, and revision
+2 changes nothing it proves. `make simmc`'s multiplier and board
+targets were not run, for the same kind of reason. No emulation and no
+device run: the card-day images predate all of this and are
+unaffected, and this round produced no bitstream.
+
+### What the benches found
+
+Three things, none of them in the feature under test, which is the
+usual shape:
+
+- **A transcribed pad width.** `rtl/cft_seq.sv` twice wrote
+  `if ({21'b0, pc} >= h_ninsns)` - twenty-one zeros hand-counted to
+  bring an 11-bit program counter up to the 32 bits it is compared
+  against. At `PCW` 12 the counter is thirteen bits and the comparison
+  became thirty-four wide. **The Verilator lint caught it, not a
+  bench**, and the fix is `32'(pc)`, derived from the width on the
+  other side of the comparison rather than counted out by hand.
+- **A cycle budget that carried a cost implicitly.** Doubling the
+  register file doubled the per-block wipe, 256 cycles to 512, and
+  `tb/test_seq_core.py`'s budget had that cost buried inside a literal
+  `400`. The `geometry` suite timed out at fp32 n=300 - three blocks,
+  5,288 cycles allowed - which is a bound being wrong, not a design
+  being slow. The budget now adds `RF_D` by name.
+- **Two negative controls that had stopped failing.** Both
+  `python/tests/test_seq.py`'s P3 fuzz and `tb/test_seq_core.py`'s
+  `unchecked()` build a `Program` through `__new__` to bypass
+  `validate()`, and `run()` reads two fields revision 2 added. The
+  bench one raised; the fuzz one silently reported **zero
+  divergences** - a control that passes by never testing anything,
+  which is precisely the failure the project's third rule names. Both
+  now set the fields `__init__` would have.
+
+Two things were checked rather than assumed. The fuzz generator's
+`wide_regs` arm follows `extended`'s precedent - off by default,
+drawing the same values from `rng` - and 400 corpora generated from
+the pre-change `seq.py` and this one were compared pairwise: 400
+identical, 0 differing, so no existing bench's corpus was reshuffled.
+And the two OOC trees were diffed before the numbers above were
+believed, because two synthesis runs of the same tree would have shown
+exactly the same "no cost".
+
+### One place the contract was ambiguous, and what was chosen
+
+R1 says "a control instruction reads at most `ra` (`DEPOSIT`,
+`SETACT`), so on those two only `imm[25]` may be set and on the other
+four none." Read literally that binds `REPEAT`, whose `imm` is its
+whole trip count - and it would newly refuse `REPEAT 0xffffffff`,
+which is the program docs/SEQUENCER.md's own worst-case-instruction
+rule is written about, is legal today, and runs identically on every
+existing bitstream.
+
+**Chosen:** the register-high-bit rule binds instructions that name a
+register. `REPEAT` names none, so `imm[27:24]` there are trip-count
+bits like any other; `HALT`, `ENDREP` and `ACTALL` may set no part of
+`imm` at all, which is stricter than "none of the four" and was
+already true; `DEPOSIT` and `SETACT` may set `imm[25]` and nothing
+else in the word. That keeps R1's own closing sentence - "Nothing else
+in the encoding moves" - true, and keeps the model from refusing
+programs that are correct on the tile in front of it. It is written
+down as `IMM_ALLOWED` in `python/cft_golden/seq.py` with the reasoning
+beside it, and it is why `validate()` now checks control instructions
+against the raw encoding (`decode_raw`) rather than against
+`decode()`'s merged five-bit view.
