@@ -108,7 +108,12 @@ case "$(basename "$ART")" in
     # So the outgoing directory is renamed rather than removed, one
     # generation deep. Bounded, and the post-mortem survives exactly
     # long enough to be read.
-    for d in "$ROOT" "$ARTDIR"; do
+    # XRT creates .run beside the BINARY (host/.run when RUN_BIN is the
+    # default), not under the repo root, so that directory must be in
+    # this list or the find below deletes the previous run's simulate.log
+    # instead of keeping it as .run.prev - which is how the 2026-09-07
+    # reductions gate lost its evidence.
+    for d in "$ROOT" "$ROOT/host" "$ARTDIR"; do
       [ -d "$d/.run" ] || continue
       rm -rf "$d/.run.prev" 2>/dev/null || true
       mv "$d/.run" "$d/.run.prev" 2>/dev/null || rm -rf "$d/.run"

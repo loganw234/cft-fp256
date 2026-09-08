@@ -6146,3 +6146,80 @@ the merged tree (`edf57497...`, 3 min 5 s at four jobs against 8 min
 30 s serial) - the twenty files the morning's check called different
 were the runner's larger opcode pools against `make vectors`', and the
 branch is merged; the round's entry carries the correction.
+
+## 2026-09-07 - the card-day pair from ed752dd: single +0.316, quad +0.067, both at 135 MHz
+
+Built on amd-arc-box the evening before card day by one detached chain
+(`~/cardday_0907.sh`: pin origin to GitHub, worktree at the exact sha,
+refuse a tree without the round's hardware by name, single and quad in
+parallel, 130 MHz fallback per half, verify, stage, hash), the 9f73107
+recipe - retiming + phys_opt, default directives:
+
+    cd135single  ed752dd, one tile,   135 MHz   17:06 -> 19:22 (136 min)
+                 routed WNS +0.055  kernel WNS +0.316  0 failing endpoints
+                 worst: u_fifo_a BRAM -> g_bank128 lane 1 s0_byp_d, 16 levels (seedop bypass)
+                 35,783,663 bytes  sha256 3870fc43...c981e0  verify-image 8/8
+    cd135quad    ed752dd, four tiles, 135 MHz   17:08 -> 21:36 (267 min)
+                 routed WNS +0.031  TNS 0  0 failing of 984,222  WHS +0.009
+                 kernel WNS +0.067: g_bank256 rd_dly -> g_bank64 lane 0 s13_tiny, cross-bank
+                 51,422,147 bytes  sha256 496f8ac0...828307  verify-image 8/8
+
+Staged as ~/cardday-0907/cft_hw_{single,quad}.xclbin with manifests,
+SHA256SUMS and a README; each copy re-hashed against its manifest,
+byte-identical; `sha256sum -c` clean; `verify/run.sh --only images` over
+both: PASS, run 20260907-213830-ed752dd. Against the 9f73107 pair the
+round's hardware (IMUL and the indexed constants, the 72-byte caps
+block, the cone stage) cost 0.30 ns on the single and 0.08 on the quad,
+and both still close at 135; 130 was never needed. The quad's worst path
+moved: 9f73107's was LZC-plus-coarse-normalise, which the cone stage
+removed, and the new worst is a cross-bank register-to-register path
+the placer chose. docs/CARDDAY.md names this pair as the one for the
+day and the 9f73107 pair as the fallback.
+
+**The card host, prepared the same evening.** amd-arc-box, main
+6f100ff: `make libcft-test` PASS in 10 min - 1,071,635 cases, C and
+Python the same bits - against sets the box generated itself, which are
+byte-identical to the desktop's, all 168, once the desktop's CRLF is
+stripped (the generator writes text mode on Windows). The box carries
+no mpmath and its python cannot build a venv (no ensurepip), so the
+desktop's mpmath 1.3.0 was copied to ~/pylib; device-test and cft-bench
+are built there against XRT 2.19's userspace. The XRT kernel module is
+still unbuilt on the box's 7.0 kernel; GA 6.8 is installed for the card
+session, and the driver builds after that reboot.
+
+**Firmware.** The box is a Gigabyte GA-X99-UD4 at F24c. Its menu has no
+"Above 4G Decoding" because Gigabyte compiled the AMI question out of
+the Setup form (the string survives in the string table, unreferenced),
+but the Intel platform form's "PCI 64-Bit Resource Allocation" exists,
+suppressed unconditionally, default Enabled, at IntelSetup offset 0x56 -
+and efivarfs on that box is world-readable, so the live byte was read
+over ssh: 0x01. MMIOHBase and MMIO High Size sit at their defaults (56 TB,
+256 GB). Nothing to flip for the U50; the extraction kit (UEFIExtract,
+IFRExtractor-RS, a UEFI shell with setup_var 0.3.1, findings and a
+procedure) is kept on the desktop in case the answer ever changes.
+
+**Emulation, the same evening**, on the desktop's WSL against hw_emu
+images of ed752dd (one tile 33,150,127 bytes in 4 min, four tiles
+57,295,639 in 6 min, 135 MHz), host tools against the era XRT:
+
+- The four-tile image answers through the real XRT stack: `device:
+  backend xrt, 4 tiles, contract 0x00000600, formats fp32 fp64 fp128
+  fp256`, and `device reports max_deposits 64, max_insns 1024, max_consts
+  256, seq_features 0x11` - the caps block of ABI 0.8 read from a device
+  for the first time, with the +1-deposit and +1-instruction programs
+  refused by name. The max_consts probe reports NOT TESTED because it
+  still writes the four-bit index form; a kx probe is a small follow-up.
+- `-q -n 8` on the quad: rc=0 in 5 min with none of device-test's own
+  output and two protobuf parse errors at the first host-to-device copy.
+  Not a pass; re-run queued and recorded below when it lands.
+- `-r` on the quad: stopped after 133 min. About 95 single-element fp32
+  reductions, every one completing with err=000, and the first 16-case
+  block still unfinished - each case is several one-element invocations
+  at about 1.4 min under xsim, so the full gate is days. The reductions
+  are proven on the card instead (runbook step 5). The run's simulator
+  log was lost to a defect in hw/run-device-test.sh, which kept one
+  generation of .run under the repo root and the artifact directory but
+  not under host/, where XRT actually writes it next to the binary;
+  fixed in this commit.
+- `-s -n 24` on the quad and `-q` on the single: running at the time of
+  writing; their verdicts follow in a later entry.
