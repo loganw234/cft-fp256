@@ -443,7 +443,8 @@ stage formal "property proofs + negative control (docker cft-formal)" -- do_form
 # One interpreter for every python-touching stage, chosen by PY()'s
 # rule - the libcft stage used to hand make `command -v python3`,
 # which on Windows is the WindowsApps alias PY() exists to avoid.
-SHLIB_NAME=$(if [ "$WIN" = 1 ]; then echo cft.dll; else echo libcft.so; fi)
+# cft.dll on Windows, libcft.dylib on Darwin (2026-09-09), libcft.so elsewhere
+SHLIB_NAME=$(if [ "$WIN" = 1 ]; then echo cft.dll; elif [ "$(uname -s)" = Darwin ]; then echo libcft.dylib; else echo libcft.so; fi)
 PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
           command -v python
         else command -v python3 2>/dev/null || command -v python; fi)
