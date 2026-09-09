@@ -540,12 +540,13 @@ def test_loader_rejects_a_padded_or_reserved_program():
     raw = bytearray(p.to_bytes())
     with pytest.raises(seq.ProgramError):
         seq.Program.from_bytes(bytes(raw) + b"\x00")      # trailing bytes
-    # Header bytes 24..27 became `flags` at revision 2. Bit 0 is
-    # BANK_EXT and is known; everything above it is reserved, and so is
-    # the whole of the remaining reserved word at 28..31. The tile
-    # checks BOTH, which the 0x600 tile did not.
+    # Header bytes 24..27 became `flags` at revision 2 and 28..31
+    # became `scratch_io` at revision 3. Bits 0 (BANK_EXT) and 1
+    # (SCRATCH_IO) are known; everything above them is reserved, and so
+    # is the whole of `scratch_io` while its flag is clear. The tile
+    # checks both words, which the 0x600 tile did not.
     bad = bytearray(raw)
-    bad[24] = 1 << 1                                    # flags[1], unknown
+    bad[24] = 1 << 2                                    # flags[2], unknown
     with pytest.raises(seq.ProgramError, match="reserved"):
         seq.Program.from_bytes(bytes(bad))
     bad = bytearray(raw)
@@ -553,9 +554,19 @@ def test_loader_rejects_a_padded_or_reserved_program():
     with pytest.raises(seq.ProgramError, match="reserved"):
         seq.Program.from_bytes(bytes(bad))
     bad = bytearray(raw)
-    bad[28] = 1                                         # reserved[1]
+    bad[28] = 1                            # scratch_io without the flag
     with pytest.raises(seq.ProgramError, match="reserved"):
         seq.Program.from_bytes(bytes(bad))
+    # ...and a count past the depth, with the flag set. Both halves of
+    # the word, because one of the two would be a rule that only half
+    # exists.
+    for byte, half in ((28, "n_scratch_in"), (30, "n_scratch_out")):
+        bad = bytearray(raw)
+        bad[24] = seq.FLAG_SCRATCH_IO
+        bad[byte] = (seq.SCRATCH_D + 1) & 0xFF
+        bad[byte + 1] = (seq.SCRATCH_D + 1) >> 8
+        with pytest.raises(seq.ProgramError, match=half):
+            seq.Program.from_bytes(bytes(bad))
     with pytest.raises(seq.ProgramError, match="max_deposits"):
         seq.Program(FP32, [seq.halt()], max_deposits=1 << 30)
 
@@ -606,6 +617,51 @@ def test_p3_fuzz_early_exit_is_invisible():
                        "it proved nothing")
 
 
+def test_p3_fuzz_with_the_scratch_on():
+    """The same gate over the scratch, which P3 now has to cover.
+
+    A store is masked by the active bit, so an all-inactive loop body
+    that stores has to leave the scratch exactly as it was - and
+    `Result.state()` carries the scratch and the scratch-out block
+    precisely so that this comparison can see it. Kept as its own
+    test rather than folded into the one above, so the corpus the
+    original gate has run since 2026-09-01 is not reshuffled by a
+    feature added later.
+    """
+    rng = random.Random(20260908)
+    fmt = FP32
+    checked = 0
+    saved = 0
+    stored = 0
+    for _ in range(400):
+        insns, consts = seq.random_program(fmt, rng, scratch=True,
+                                           wide_regs=True)
+        try:
+            prog = seq.Program(fmt, insns, consts, max_deposits=3,
+                               flags=seq.FLAG_SCRATCH_IO,
+                               n_scratch_out=4)
+        except seq.ProgramError:
+            continue
+        n = rng.randint(1, 6)
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+        fast = seq.run(prog, a, b, c, early_exit=True)
+        slow = seq.run(prog, a, b, c, early_exit=False)
+        assert fast.state() == slow.state(), (
+            "early exit changed an observable through the scratch: "
+            f"{[hex(i) for i in insns]}")
+        checked += 1
+        if fast.insns_executed < slow.insns_executed:
+            saved += 1
+        if any(w != 0 for w in fast.scratch_out):
+            stored += 1
+    assert checked > 200, f"only {checked} programs were valid"
+    assert saved > 0, ("the early exit never fired in the whole fuzz, so "
+                       "it proved nothing")
+    assert stored > 20, (
+        f"only {stored} programs left anything in the scratch, so the "
+        f"comparison was mostly over empty blocks")
+
+
 def test_p3_fuzz_finds_the_halt_hole_when_the_rule_is_removed():
     """The rule banning HALT in a loop is load-bearing, and this shows
     it: the same fuzz, with that one construction allowed past the
@@ -628,6 +684,11 @@ def test_p3_fuzz_finds_the_halt_hole_when_the_rule_is_removed():
         # at the end of this test counts divergences rather than
         # trusting the loop ran.
         prog.flags, prog._n_consts = 0, len(consts)
+        # Revision 3 adds two more that `run()` reads on entry, for the
+        # same reason and with the same failure mode if they are
+        # missing: the control stops diverging because it stops
+        # running.
+        prog.n_scratch_in, prog.n_scratch_out = 0, 0
         n = rng.randint(2, 6)
         a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
         try:
@@ -752,10 +813,20 @@ def test_kx_refusals():
     with pytest.raises(seq.ProgramError, match="not read and must be zero"):
         prog(seq.encode(sf.OP_ADD, 0, ra=3, rb=0, kb=True, kx=True,
                         imm=(2 << 0) | (5 << 8)))
-    # imm[31:28], which stays reserved so a later form can use it. It
-    # was imm[31:24] until revision 2 took the low four of those for the
-    # register high bits, so bit 28 is the first still-reserved one.
-    with pytest.raises(seq.ProgramError, match=r"imm\[31:28\]"):
+    # imm[31], which stays reserved so a later form can use it. The
+    # window was imm[31:24] until revision 2 took the low four of those
+    # for the register high bits and revision 3 took imm[30:28] for the
+    # ninth constant-index bits, so bit 31 is all that is left of it -
+    # and is deliberately left, because the largest positive in the
+    # corpus needs 464 of the 512 the ninth bit reaches.
+    with pytest.raises(seq.ProgramError, match=r"imm\[31\]"):
+        prog(seq.encode(sf.OP_ADD, 0, rb=0, kb=True, kx=True,
+                        imm=(5 << 8) | (1 << 31)))
+    # ...and imm[28] is now ra's ninth index bit, so it is refused for
+    # a DIFFERENT reason - ra names a register here, and a ninth bit on
+    # an operand that is not a kx constant is an unread field.
+    with pytest.raises(seq.ProgramError,
+                       match=r"ninth constant-index bit imm\[28\]"):
         prog(seq.encode(sf.OP_ADD, 0, rb=0, kb=True, kx=True,
                         imm=(5 << 8) | (1 << 28)))
     # ...and imm[24] is NOT reserved any more: it is rd[4], and rd is
@@ -1024,3 +1095,323 @@ def test_digest_covers_the_bank():
     assert p.digest(b1) == p.digest(list(b1))
     # and the image-only digest is still the image's
     assert p.digest() == hashlib.sha256(p.to_bytes()).hexdigest()
+
+
+# ---- revision 3: the per-lane scratch ---------------------------------
+#
+# R4 is four control codes and one memory; R5 is the block that fills
+# it before a run and empties it after. Both are about STATE THAT
+# SURVIVES, which is why every case below checks the scratch itself as
+# well as what the program deposited: a load that quietly read +0 would
+# pass a deposit-only check on half of these programs.
+
+def test_scratch_static_round_trip_including_the_highest_slot():
+    fmt = FP32
+    top = seq.SCRATCH_D - 1
+    prog = seq.Program(fmt, [
+        seq.stl(0, 0), seq.stl(1, top),
+        seq.ldl(9, top), seq.ldl(10, 0),
+        seq.deposit(9), seq.deposit(10), seq.halt()],
+        max_deposits=2)
+    a = [sf.one_bits(fmt), sf.max_normal_bits(fmt)]
+    b = [sf.min_subnormal_bits(fmt), sf.inf_bits(fmt)]
+    res = seq.run(prog, a, b)
+    for i in range(2):
+        assert res.deposits[i * 2] == b[i], "the top slot did not survive"
+        assert res.deposits[i * 2 + 1] == a[i]
+        assert res.scratch[i][top] == b[i]
+        assert res.scratch[i][0] == a[i]
+    # no flags: a load and a store are not arithmetic, so an infinity
+    # and a subnormal pass through them silently
+    assert res.flags == 0
+
+
+def test_scratch_indexed_reduces_past_the_depth():
+    """STX/LDX are NOT refused for an index past the depth - the slot
+    is data, so the contract reduces it modulo the depth. Lanes whose
+    indices differ by whole multiples of the depth must land on one
+    slot."""
+    fmt = FP32
+    prog = seq.Program(fmt, [
+        seq.stx(0, 1), seq.ldx(4, 2), seq.deposit(4), seq.halt()],
+        max_deposits=1)
+    val = [0x11111111, 0x22222222, 0x33333333]
+    idx = [5, 5 + seq.SCRATCH_D, 5 + 3 * seq.SCRATCH_D]
+    rd = [5 + 7 * seq.SCRATCH_D, 5, 5 + seq.SCRATCH_D]
+    res = seq.run(prog, val, idx, rd)
+    assert res.deposits == val, [hex(v) for v in res.deposits]
+    for i in range(3):
+        assert res.scratch[i][5] == val[i]
+    # the reduction really was exercised: only lane 0 wrote a slot its
+    # raw index already named
+    assert max(idx) >= seq.SCRATCH_D and max(rd) >= seq.SCRATCH_D
+
+
+def test_a_store_in_an_all_inactive_loop_body_does_nothing():
+    """P3 for the scratch. A store is a register write for the active
+    mask's purposes, so a loop body every lane has dropped out of must
+    leave the scratch exactly as it was - and the early exit, which
+    only makes the body run FEWER times, must not change the answer."""
+    fmt = FP32
+    zero, one = sf.zero_bits(fmt), sf.one_bits(fmt)
+    prog = seq.Program(fmt, [
+        seq.stl(0, 4),            # slot 4 := r0, while every lane is live
+        seq.setact(1),            # r1 is +0, so every lane drops out
+        seq.repeat(9),
+        seq.stl(2, 4),            # ...and this must not reach slot 4
+        seq.stx(2, 2),
+        seq.endrep(),
+        seq.ldl(5, 4), seq.deposit(5), seq.halt()],
+        max_deposits=1)
+    n = 4
+    a = [one] * n
+    res = seq.run(prog, a, [zero] * n, [0xdeadbeef] * n)
+    slow = seq.run(prog, a, [zero] * n, [0xdeadbeef] * n, early_exit=False)
+    assert res.state() == slow.state(), \
+        "the early exit changed the scratch, so a store escaped the mask"
+    for i in range(n):
+        assert res.scratch[i][4] == one, "an inactive lane stored"
+        assert res.scratch[i][0xdeadbeef & seq.SCRATCH_MASK] == zero, \
+            "an inactive lane's indexed store landed"
+    # the deposit is masked by the same bit, so nothing was recorded
+    assert res.counts == [0] * n
+
+
+def test_scratch_io_block_in_and_out():
+    fmt = FP32
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 1),
+        seq.alu(sf.OP_ADD, rd=5, ra=3, rc=4),
+        seq.stl(5, 2), seq.deposit(5), seq.halt()],
+        max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+        n_scratch_in=2, n_scratch_out=3)
+    one, two = sf.one_bits(fmt), 0x40000000
+    n = 3
+    block = [one, one, one, two, two, two]
+    res = seq.run(prog, [0] * n, [0] * n, scratch_in=block)
+    assert len(res.scratch_out) == n * 3
+    for i in range(n):
+        want, _ = sf.compute(fmt, sf.OP_ADD, block[2 * i], 0,
+                             block[2 * i + 1])
+        assert res.scratch_out[i * 3:i * 3 + 3] == \
+            [block[2 * i], block[2 * i + 1], want]
+        assert res.deposits[i] == want
+    # the header word is the two counts, packed, and survives the bytes
+    assert prog.scratch_io_word == 2 | (3 << 16)
+    again = seq.Program.from_bytes(prog.to_bytes())
+    assert again.to_bytes() == prog.to_bytes()
+    assert (again.n_scratch_in, again.n_scratch_out) == (2, 3)
+
+
+def test_scratch_io_resumes_a_run():
+    """The ask R5 answers: a program whose state leaves through
+    `scratch out` and comes back through `scratch in` computes the same
+    thing in two calls as in one. Three iterations, then three more,
+    against six in a single run."""
+    fmt = FP32
+    one = sf.one_bits(fmt)
+    body = [seq.ldl(3, 0),
+            seq.alu(sf.OP_ADD, rd=3, ra=3, rc=0, kc=True),
+            seq.stl(3, 0), seq.deposit(3)]
+
+    def prog(trips, maxdep):
+        return seq.Program(fmt, [seq.repeat(trips)] + body
+                           + [seq.endrep(), seq.halt()],
+                           consts=[one], max_deposits=maxdep,
+                           flags=seq.FLAG_SCRATCH_IO,
+                           n_scratch_in=1, n_scratch_out=1)
+    n = 2
+    zeros = [sf.zero_bits(fmt)] * n
+    whole = seq.run(prog(6, 6), [0] * n, [0] * n, scratch_in=zeros)
+    first = seq.run(prog(3, 3), [0] * n, [0] * n, scratch_in=zeros)
+    second = seq.run(prog(3, 3), [0] * n, [0] * n,
+                     scratch_in=first.scratch_out)
+    for i in range(n):
+        assert first.deposits[i * 3:(i + 1) * 3] == \
+            whole.deposits[i * 6:i * 6 + 3]
+        assert second.deposits[i * 3:(i + 1) * 3] == \
+            whole.deposits[i * 6 + 3:(i + 1) * 6], \
+            "the resumed half does not equal the second half of one run"
+
+
+def test_scratch_io_degenerate_shapes():
+    """In-only, out-only, and the flag set with both counts zero.
+
+    All three are legal and all three are corners: the header word is
+    what carries the counts, so `SCRATCH_IO` with a zero word is an
+    image byte-identical to one without the feature except for the flag
+    bit - which a tile must accept, while it refuses a NON-zero word
+    with the flag clear."""
+    fmt = FP32
+    out_only = seq.Program(fmt, [seq.stl(0, 0), seq.halt()],
+                           max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+                           n_scratch_in=0, n_scratch_out=2)
+    res = seq.run(out_only, [7, 9], [0, 0])
+    assert res.scratch_out == [7, 0, 9, 0], res.scratch_out
+
+    both_zero = seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO)
+    assert both_zero.scratch_io_word == 0
+    assert seq.run(both_zero, [1], [1]).scratch_out == []
+
+    in_only = seq.Program(fmt, [seq.ldl(3, 0), seq.deposit(3), seq.halt()],
+                          max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+                          n_scratch_in=1)
+    res = seq.run(in_only, [0, 0], [0, 0], scratch_in=[11, 22])
+    assert res.deposits == [11, 22] and res.scratch_out == []
+
+    for prog in (out_only, both_zero, in_only):
+        again = seq.Program.from_bytes(prog.to_bytes())
+        assert again.to_bytes() == prog.to_bytes()
+        assert (again.n_scratch_in, again.n_scratch_out) ==             (prog.n_scratch_in, prog.n_scratch_out)
+
+
+def test_scratch_io_padding_lanes_read_and_write_nothing():
+    """A lane at or past the caller's element count is not the
+    caller's: it receives no scratch input and contributes no scratch
+    output, exactly as it receives no deposit slot."""
+    fmt = FP32
+    prog = seq.Program(fmt, [seq.ldl(3, 0), seq.stl(3, 1), seq.halt()],
+                       max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+                       n_scratch_in=1, n_scratch_out=2)
+    n, real = 5, 3
+    block = [0x1000 + i for i in range(n)]
+    res = seq.run(prog, [0] * n, [0] * n, scratch_in=block,
+                  n_active=real)
+    for i in range(real):
+        assert res.scratch_out[i * 2:i * 2 + 2] == [block[i], block[i]]
+    for i in range(real, n):
+        assert res.scratch_out[i * 2:i * 2 + 2] == [0, 0], \
+            "a padding lane wrote its scratch out"
+        assert res.scratch[i] == [0] * seq.SCRATCH_D, \
+            "a padding lane was preloaded"
+
+
+def test_scratch_refusals():
+    fmt = FP32
+    # a STATIC slot past the depth, refused by name - at the assembler
+    # helper, and again in validate() for a hand-built word
+    with pytest.raises(seq.ProgramError, match="scratch slot"):
+        seq.stl(0, seq.SCRATCH_D)
+    for code in (seq.STL, seq.LDL):
+        word = seq.encode(code, ctrl=True, imm=seq.SCRATCH_D)
+        with pytest.raises(seq.ProgramError, match="a lane owns"):
+            seq.Program(fmt, [word, seq.halt()])
+    # ...and the highest legal one is not refused
+    seq.Program(fmt, [seq.stl(0, seq.SCRATCH_D - 1), seq.halt()])
+    # imm[23:0] is read by nothing on the indexed forms
+    with pytest.raises(seq.ProgramError,
+                       match="sets a bit it does not read"):
+        seq.Program(fmt, [seq.encode(seq.STX, ra=1, rb=2, ctrl=True,
+                                     imm=1), seq.halt()])
+    # fields no scratch code reads
+    with pytest.raises(seq.ProgramError, match="does not read rc"):
+        seq.Program(fmt, [seq.encode(seq.STL, ra=1, rc=2, ctrl=True),
+                          seq.halt()])
+    with pytest.raises(seq.ProgramError, match="does not read rnd"):
+        seq.Program(fmt, [seq.encode(seq.LDX, rd=1, rb=2, ctrl=True,
+                                     rnd=sf.RND_RTZ), seq.halt()])
+    with pytest.raises(seq.ProgramError, match="does not read ka"):
+        seq.Program(fmt, [seq.encode(seq.LDL, rd=1, ctrl=True, ka=True),
+                          seq.halt()])
+    # LDL writes rd, so rd's high bit is legal there and ra's is not
+    seq.Program(fmt, [seq.ldl(20, 3), seq.halt()])
+    with pytest.raises(seq.ProgramError,
+                       match="sets a bit it does not read"):
+        seq.Program(fmt, [seq.encode(seq.LDL, rd=1, ctrl=True,
+                                     imm=1 << seq.REG_HI_SHIFT["ra"]),
+                          seq.halt()])
+    # the header's own three
+    with pytest.raises(seq.ProgramError, match="without flags.SCRATCH_IO"):
+        seq.Program(fmt, [seq.halt()], n_scratch_in=1)
+    with pytest.raises(seq.ProgramError, match="past the"):
+        seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO,
+                    n_scratch_out=seq.SCRATCH_D + 1)
+    with pytest.raises(seq.ProgramError, match="does not know"):
+        seq.Program(fmt, [seq.halt()], flags=1 << 2)
+    # and the block's, which are the bank's refusals in the same shape
+    p = seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO,
+                    n_scratch_in=2)
+    with pytest.raises(seq.ProgramError, match="supply 4 values"):
+        seq.run(p, [0, 0], [0, 0])
+    with pytest.raises(seq.ProgramError, match="holds 3 values"):
+        seq.run(p, [0, 0], [0, 0], scratch_in=[0, 0, 0])
+    plain = seq.Program(fmt, [seq.halt()])
+    with pytest.raises(seq.ProgramError,
+                       match="declares no scratch input"):
+        seq.run(plain, [0], [0], scratch_in=[0])
+
+
+def test_scratch_fuzz_arm_leaves_the_old_corpus_alone():
+    """The `scratch` arm follows `extended` and `wide_regs`: off, it
+    draws nothing from rng, so every corpus an existing seed generates
+    is the corpus it generated before. Checked rather than asserted,
+    because this is exactly the kind of claim that quietly stops being
+    true."""
+    for seed in range(120):
+        rng_a = random.Random(seed)
+        rng_b = random.Random(seed)
+        assert (seq.random_program(FP32, rng_a)
+                == seq.random_program(FP32, rng_b, scratch=False))
+    # ...and on, it really does emit all four codes, in loadable programs
+    seen = set()
+    rng = random.Random(7)
+    for _ in range(80):
+        insns, consts = seq.random_program(FP32, rng, scratch=True,
+                                           wide_regs=True)
+        for w in insns:
+            d = seq.decode(w)
+            if d["ctrl"] and d["op"] in (seq.STL, seq.LDL, seq.STX,
+                                         seq.LDX):
+                seen.add(d["op"])
+        seq.Program(FP32, insns, consts, 2)
+    assert seen == {seq.STL, seq.LDL, seq.STX, seq.LDX}, seen
+
+
+# ---- revision 3: the ninth constant-index bit -------------------------
+
+def test_kx9_reaches_five_hundred_and_twelve():
+    fmt = FP32
+    consts = _bank(fmt, 512)
+    for idx in (0, 255, 256, 511):
+        p = seq.Program(fmt, [
+            seq.alu(sf.OP_ADD, 0, ra=0, rc=idx, kc=True, kx=True),
+            seq.deposit(0), seq.halt()], consts, 1)
+        res = seq.run(p, [sf.zero_bits(fmt)], [0], [0])
+        want, _ = sf.compute(fmt, sf.OP_ADD, sf.zero_bits(fmt), 0,
+                             consts[idx])
+        assert res.deposits[0] == want, \
+            f"index {idx} read the wrong constant"
+    # the ninth bit lands where the contract says it does
+    d = seq.decode(seq.alu(sf.OP_ADD, 0, rc=300, kc=True, kx=True))
+    assert (d["imm"] >> seq.KX9_SHIFT["rc"]) & 1 == 1
+    assert (d["imm"] >> seq.KX_SHIFT[2]) & 0xFF == 300 & 0xFF
+    assert seq.sources(d)[2] == (300, True)
+
+
+def test_kx9_refusals():
+    fmt = FP32
+    consts = _bank(fmt, 512)
+    with pytest.raises(seq.ProgramError, match="outside 0..511"):
+        seq.alu(sf.OP_ADD, 0, rb=512, kb=True, kx=True)
+    # a ninth bit set on an operand that names a REGISTER
+    for key, shift in seq.KX9_SHIFT.items():
+        word = seq.encode(sf.OP_ADD, 0, rb=0, kb=True, kx=True,
+                          imm=(5 << 8) | (1 << shift))
+        if key == "rb":
+            # rb IS the constant here, so its ninth bit is read: the
+            # index is 261, which a 512-entry bank holds
+            seq.Program(fmt, [word, seq.halt()], consts, 1)
+            continue
+        with pytest.raises(
+                seq.ProgramError,
+                match=rf"ninth constant-index bit imm\[{shift}\]"):
+            seq.Program(fmt, [word, seq.halt()], consts, 1)
+    # imm[31] is what is left of the reserved window
+    with pytest.raises(seq.ProgramError, match=r"imm\[31\]"):
+        seq.Program(fmt, [seq.encode(sf.OP_ADD, 0, rb=0, kb=True,
+                                     kx=True, imm=(5 << 8) | (1 << 31)),
+                          seq.halt()], consts, 1)
+    # without kx the whole of imm[30:28] is an unread field
+    with pytest.raises(seq.ProgramError, match="63:32 must be zero"):
+        seq.Program(fmt, [seq.encode(sf.OP_ADD, 0, ra=1, imm=1 << 29),
+                          seq.halt()], consts, 1)

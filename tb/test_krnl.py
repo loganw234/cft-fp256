@@ -39,6 +39,9 @@ from cft_golden import (  # noqa: E402
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
 FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
+# The second capability word (revision 3), above the sequencer's
+# pointers because appending is the only change a shipped map takes.
+CAPS2 = 0x6C
 
 import busfx  # noqa: E402
 
@@ -105,6 +108,29 @@ def _port_literal(path, port):
     m = re.search(r"\.%s\(4'b([01]{4})\)" % port, src)
     assert m, f"{path.name} does not wire .{port}(4'b....)"
     return int(m.group(1), 2)
+
+
+def caps2_expected():
+    """CAPS2 as rtl/cft_krnl.sv declares it: [3:0] log2 SCRATCH_D,
+    [4] a scratch exists, [5] its per-run block exists.
+
+    Built from the localparam rather than from the port's own literal,
+    for the reason the CAPS capacities are: two copies of a number is
+    how a capability register ends up describing a memory that is no
+    longer that size."""
+    d = _localparam(RTL / "cft_krnl.sv", "SEQ_SCRATCH_D")
+    assert d == 1 << (d.bit_length() - 1), (
+        f"SEQ_SCRATCH_D={d} is not a power of two; CAPS2 publishes log2, "
+        f"and STX/LDX reduce modulo the depth with a mask")
+    return (1 << 5) | (1 << 4) | (d.bit_length() - 1)
+
+
+def check_caps2(caps2):
+    want = caps2_expected()
+    assert caps2 == want, (
+        f"CAPS2 is {caps2:#010x}, want {want:#010x} - [3:0] log2 of the "
+        f"scratch slots a lane, [4] a scratch exists, [5] the per-run "
+        f"block exists, [31:6] reserved zero")
 
 
 def seq_caps_expected():
@@ -281,11 +307,14 @@ async def krnl_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000700
+    # 0x700 -> 0x800 at revision 3: the map GREW again, by CAPS2 at
+    # 0x6C and the two scratch pointers at 0x70 and 0x78.
+    assert await axil.read_dword(VERSION) == 0x00000800
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0xF, "full tile advertises all four rungs"
     check_op_groups(caps)
     check_seq_caps(caps)
+    check_caps2(await axil.read_dword(CAPS2))
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
 

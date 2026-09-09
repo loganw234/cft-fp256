@@ -51,6 +51,22 @@ NREG = 32
 NREG_REV1 = 16
 MAX_LOOP_DEPTH = 4
 
+# Slots of per-lane SCRATCH memory, revision 3's R4. A power of two, so
+# the indexed forms can reduce modulo it with a mask rather than a
+# division - which is what the hardware does and therefore what the
+# contract says. It is the lane's: lane i's slot s is reachable by lane
+# i alone, which is what keeps P2's "no slot is reachable from two
+# indices" true of the scratch as it is of the deposit buffer.
+#
+# 256 is the tile's build parameter, published in CAPS2[3:0] as log2.
+# The model is not one tile - but unlike max_deposits, whose model cap
+# is deliberately larger than any tile's, this depth is part of the
+# INSTRUCTION's meaning: STX/LDX reduce modulo it, so a model with a
+# different depth would compute different answers rather than merely
+# accept larger programs.
+SCRATCH_D = 256
+SCRATCH_MASK = SCRATCH_D - 1
+
 # The fifth bit of each register field, by position in `imm`. Written
 # as a table rather than four shifts because the RTL decode, the
 # assembler and three refusal rules all read the same four bits, and
@@ -60,13 +76,20 @@ REG_HI_MASK = 0x0F00_0000
 
 # How many constants an instruction can ADDRESS. Without `kx` an
 # operand's constant index is its own 4-bit field, so sixteen; with
-# `kx` it is a byte of `imm`, so 256 - which is `KMEM_D`, the capacity
-# rtl/cft_seq.sv's header check already permits. `n_consts` above this
-# is not refused (it never was above sixteen either): the constants
-# past it are simply unaddressable, and every index is checked against
-# `n_consts` anyway.
+# `kx` it is a byte of `imm` plus a ninth bit (revision 3's R7), so
+# 512 - which is `KMEM_D`, the capacity rtl/cft_seq.sv's header check
+# permits. `n_consts` above this is not refused (it never was above
+# sixteen either): the constants past it are simply unaddressable, and
+# every index is checked against `n_consts` anyway.
+#
+# It was 256 between 2026-09-07 and revision 3, which is the number
+# `KADDR_KX8` keeps: a device whose CAPS[7] is clear addresses eight
+# bits, and the loader refuses an index at or past this on one, by
+# name, because that tile's operand mux would read the low eight and
+# silently address the wrong constant.
 KADDR_PLAIN = 16
-KADDR_KX = 256
+KADDR_KX8 = 256
+KADDR_KX = 512
 
 # A program's worst-case instruction count must be finite AND small
 # enough to be a bound rather than a formality. Four nested
@@ -88,13 +111,29 @@ MAX_DEPOSITS = 1 << 20
 # reserved word - the revision-2 tile checks BOTH, which the 0x600 tile
 # did not, and that omission is why the feature needs a CAPS bit at all
 # rather than only a header flag.
+#
+# SCRATCH_IO (revision 3, R5) says the header's second reserved word is
+# `scratch_io` rather than a reserved zero: [15:0] slots read into every
+# lane before the first instruction, [31:16] slots written out after the
+# last deposit. With the bit CLEAR that word must still be zero, which
+# is what a revision-2 tile enforces and therefore the guard - a tile
+# that predates the flag throws the image back at the header rather
+# than running it with the scratch uninitialised.
 FLAG_BANK_EXT = 1 << 0
-FLAGS_KNOWN = FLAG_BANK_EXT
+FLAG_SCRATCH_IO = 1 << 1
+FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO
 
 # control codes (instruction bit 31 set)
 HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL = 0, 1, 2, 3, 4, 5
+# Revision 3's R4: the per-lane scratch, by static slot and by index.
+# Neither is arithmetic - no rounding attribute, no flags - and both
+# are masked by the lane's active bit, a store because it is a write
+# and a load because it writes `rd`. That is what keeps an
+# all-inactive loop body a no-op and P3 true.
+STL, LDL, STX, LDX = 6, 7, 8, 9
 CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
-              DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall"}
+              DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall",
+              STL: "stl", LDL: "ldl", STX: "stx", LDX: "ldx"}
 
 # The bits of `imm` each control code READS, and so the only bits it
 # may set. Since revision 2 imm[27:24] carry the fifth bits of rd, ra,
@@ -113,6 +152,14 @@ CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
 #                          identically, and why narrowing this would
 #                          newly refuse programs that are legal and
 #                          correct on every existing bitstream.
+#   STL, LDL               read imm[23:0] as the SLOT, plus the high
+#                          bit of the one register they name - ra's
+#                          for the store, rd's for the load.
+#   STX, LDX               take the slot from a register instead, so
+#                          imm[23:0] is read by nothing and must be
+#                          zero; the high bits they may set are the
+#                          two registers they name.
+SCRATCH_SLOT_MASK = 0x00FF_FFFF
 IMM_ALLOWED = {
     HALT: 0,
     REPEAT: 0xFFFF_FFFF,
@@ -120,6 +167,10 @@ IMM_ALLOWED = {
     DEPOSIT: 1 << REG_HI_SHIFT["ra"],
     SETACT: 1 << REG_HI_SHIFT["ra"],
     ACTALL: 0,
+    STL: SCRATCH_SLOT_MASK | (1 << REG_HI_SHIFT["ra"]),
+    LDL: SCRATCH_SLOT_MASK | (1 << REG_HI_SHIFT["rd"]),
+    STX: (1 << REG_HI_SHIFT["ra"]) | (1 << REG_HI_SHIFT["rb"]),
+    LDX: (1 << REG_HI_SHIFT["rd"]) | (1 << REG_HI_SHIFT["rb"]),
 }
 
 # STATUS bits. 0..2 are the engine's bus faults and 3 is the
@@ -224,14 +275,22 @@ def decode_raw(word):
 # in a, b, c order: imm[7:0], imm[15:8], imm[23:16].
 #
 # The reserved window above them was imm[31:24] until revision 2 took
-# imm[27:24] for the register high bits, so it is now imm[31:28] - four
-# bits that nothing reads, still there for the counter-indexed form
-# docs/ATLAS.md keeps asking about. Narrowing it does NOT weaken the
-# version guard: an older loader refuses all eight, so it refuses every
-# revision-2 program that names a register above 15 or an index through
-# `kx`, which is the behaviour a compatibility rule is for.
+# imm[27:24] for the register high bits, and revision 3 takes
+# imm[30:28] for the NINTH bit of each index - ka's, kb's and kc's, the
+# same construction as the register high bits one nibble down. What is
+# left is `imm[31]` alone, and it stays reserved-must-be-zero on
+# purpose: it is the cheap version guard for whatever comes after this,
+# and the largest positive in atlas-engine's corpus needs 464 of the
+# 512.
+#
+# Narrowing the window does NOT weaken the guard for what is already
+# shipped: an older loader refuses all of imm[31:24], so it refuses
+# every revision-2 program that names a register above 15 and every
+# revision-3 program that names a constant above 255.
 KX_SHIFT = (0, 8, 16)
-KX_RESERVED = 0xF000_0000
+KX9_SHIFT = {"ra": 28, "rb": 29, "rc": 30}
+KX9_MASK = 0x7000_0000
+KX_RESERVED = 0x8000_0000
 
 
 def sources(d):
@@ -242,17 +301,22 @@ def sources(d):
     constant index when its `k` bit is set - so a program addresses
     sixteen constants whatever `n_consts` says, which is the wall
     docs/ENCLOSE.md hit. With `kx` the constant indices come from
-    `imm[7:0]`, `imm[15:8]` and `imm[23:16]` instead and reach 255;
-    an operand whose `k` bit is clear still names a register through
-    its own field, exactly as before.
+    `imm[7:0]`, `imm[15:8]` and `imm[23:16]` instead, each with a
+    NINTH bit at `imm[28]`, `imm[29]` and `imm[30]` since revision 3,
+    so they reach 511; an operand whose `k` bit is clear still names a
+    register through its own field, exactly as before.
     """
     out = []
     for field, flag, shift in (("ra", "ka", KX_SHIFT[0]),
                                ("rb", "kb", KX_SHIFT[1]),
                                ("rc", "kc", KX_SHIFT[2])):
         if d[flag]:
-            out.append((((d["imm"] >> shift) & 0xFF) if d["kx"]
-                        else d[field], True))
+            if d["kx"]:
+                idx = ((d["imm"] >> shift) & 0xFF) | (
+                    ((d["imm"] >> KX9_SHIFT[field]) & 1) << 8)
+            else:
+                idx = d[field]
+            out.append((idx, True))
         else:
             out.append((d[field], False))
     return out
@@ -266,9 +330,9 @@ def alu(op, rd, ra=0, rb=0, rc=0, rnd=sf.RND_RNE, ka=False, kb=False,
 
     `ra`/`rb`/`rc` are register numbers, or CONSTANT INDICES where the
     matching `k` flag is set - the same calling convention either way.
-    With `kx` an index may reach 255 and this packs it into its byte of
-    `imm`, zeroing the 4-bit field it came from, which is what the
-    loader's canonicity rule demands.
+    With `kx` an index may reach 511 and this packs it into its byte of
+    `imm` plus the ninth bit at `KX9_SHIFT`, zeroing the 4-bit field it
+    came from, which is what the loader's canonicity rule demands.
 
     A register reaches 31 since revision 2; a constant index in the
     PLAIN form still reaches only 15, because there its index lives in
@@ -286,13 +350,15 @@ def alu(op, rd, ra=0, rb=0, rc=0, rnd=sf.RND_RNE, ka=False, kb=False,
         return encode(op, rd, ra, rb, rc, rnd, ka, kb, kc, ctrl=False)
     imm = 0
     fields = []
-    for v, flag, shift in ((ra, ka, KX_SHIFT[0]), (rb, kb, KX_SHIFT[1]),
-                           (rc, kc, KX_SHIFT[2])):
+    for v, flag, shift, name in ((ra, ka, KX_SHIFT[0], "ra"),
+                                 (rb, kb, KX_SHIFT[1], "rb"),
+                                 (rc, kc, KX_SHIFT[2], "rc")):
         if flag:
             if not 0 <= v < KADDR_KX:
                 raise ProgramError(
                     f"constant index {v} outside 0..{KADDR_KX - 1}")
-            imm |= v << shift
+            imm |= (v & 0xFF) << shift
+            imm |= ((v >> 8) & 1) << KX9_SHIFT[name]
             fields.append(0)
         else:
             fields.append(v)
@@ -326,6 +392,43 @@ def actall():
     return encode(ACTALL, ctrl=True)
 
 
+def stl(ra, slot):
+    """scratch[slot] := ra, for the lane, masked by its active bit."""
+    _check_slot(slot)
+    return encode(STL, ra=ra, ctrl=True, imm=slot)
+
+
+def ldl(rd, slot):
+    """rd := scratch[slot], a masked register write."""
+    _check_slot(slot)
+    return encode(LDL, rd=rd, ctrl=True, imm=slot)
+
+
+def stx(ra, rb):
+    """scratch[rb mod SCRATCH_D] := ra. The slot comes from the low
+    log2(SCRATCH_D) bits of rb's BIT PATTERN read as an unsigned
+    integer, which is where the atlas emitter keeps its loop
+    counters."""
+    return encode(STX, ra=ra, rb=rb, ctrl=True)
+
+
+def ldx(rd, rb):
+    """rd := scratch[rb mod SCRATCH_D]."""
+    return encode(LDX, rd=rd, rb=rb, ctrl=True)
+
+
+def _check_slot(slot):
+    """A STATIC slot past the depth is refused, by name, exactly as a
+    constant index past the bank is - the instruction says which slot
+    and the answer is knowable before the run. An INDEXED slot is not
+    refused, it is reduced: `rb` is data, so refusing it would mean
+    refusing a program for a value it might compute."""
+    if not 0 <= slot < SCRATCH_D:
+        raise ProgramError(
+            f"scratch slot {slot} outside 0..{SCRATCH_D - 1}")
+    return slot
+
+
 # ---- the program object ---------------------------------------------
 
 class Program:
@@ -337,15 +440,24 @@ class Program:
     `n_consts` still says how many constants the program addresses and
     every run supplies exactly that many values through `bank`. One
     image per positive, loaded once, with the levers riding as data.
+
+    Revision 3 spends the header's remaining reserved word the same
+    way. Under `flags` bit 1 - `SCRATCH_IO` - it is `scratch_io`:
+    `[15:0]` slots preloaded into every lane's scratch before the first
+    instruction and `[31:16]` slots read back out of it after the last
+    deposit. With the bit clear the word must be zero, which is exactly
+    what a revision-2 tile enforces and therefore the version guard.
     """
 
     def __init__(self, fmt: FpFormat, insns, consts=(), max_deposits=1,
-                 flags=0, n_consts=None):
+                 flags=0, n_consts=None, n_scratch_in=0, n_scratch_out=0):
         self.fmt = fmt
         self.insns = list(insns)
         self.consts = list(consts)
         self.max_deposits = max_deposits
         self.flags = flags
+        self.n_scratch_in = n_scratch_in
+        self.n_scratch_out = n_scratch_out
         if flags & FLAG_BANK_EXT:
             if self.consts:
                 raise ProgramError(
@@ -373,6 +485,16 @@ class Program:
     @property
     def bank_ext(self):
         return bool(self.flags & FLAG_BANK_EXT)
+
+    @property
+    def scratch_io(self):
+        return bool(self.flags & FLAG_SCRATCH_IO)
+
+    @property
+    def scratch_io_word(self):
+        """The header's second word as the device reads it."""
+        return (self.n_scratch_in & 0xFFFF) | (
+            (self.n_scratch_out & 0xFFFF) << 16)
 
     # -- validation ----------------------------------------------------
 
@@ -419,7 +541,7 @@ class Program:
                 f"second encoding with kx clear")
         if d["imm"] & KX_RESERVED:
             raise ProgramError(
-                f"[{pc}] imm[31:28] is reserved and must be zero")
+                f"[{pc}] imm[31] is reserved and must be zero")
         if not d["kx"] and (d["imm"] & ~REG_HI_MASK & 0xFFFFFFFF):
             raise ProgramError(
                 f"[{pc}] an ALU instruction without kx has no immediate, "
@@ -439,18 +561,28 @@ class Program:
                                  ("rb", "kb", KX_SHIFT[1]),
                                  ("rc", "kc", KX_SHIFT[2])):
             byte = (d["imm"] >> shift) & 0xFF
+            hi9 = (d["imm"] >> KX9_SHIFT[key]) & 1
             if d["kx"] and d[flag]:
                 if d[key]:
                     raise ProgramError(
                         f"[{pc}] {key} names constant {byte} through imm "
                         f"under kx, so the {key} field must be zero and "
                         f"it is {d[key]}")
-                idx = byte
+                idx = byte | (hi9 << 8)
             elif d["kx"]:
                 if byte:
                     raise ProgramError(
                         f"[{pc}] {key} names a register, so its byte of "
                         f"imm is not read and must be zero")
+                # Revision 3's ninth index bit is read only under `kx`
+                # for an operand whose `k` flag is set. On an operand
+                # that names a REGISTER it is an unread field, the same
+                # rule the byte below it obeys.
+                if hi9:
+                    raise ProgramError(
+                        f"[{pc}] {key} names a register, so its ninth "
+                        f"constant-index bit imm[{KX9_SHIFT[key]}] is "
+                        f"read by nothing and must be zero")
                 continue
             elif d[flag]:
                 idx = d[key]
@@ -468,6 +600,33 @@ class Program:
         for k in self.consts:
             if not 0 <= k < (1 << self.fmt.width):
                 raise ProgramError("constant does not fit the format")
+
+        # The header's second word, checked exactly as the tile checks
+        # it: an unknown flag bit, a count past the depth, or a
+        # non-zero `scratch_io` without the flag. The last of the three
+        # is what makes a revision-2 tile the guard for R5 - it refuses
+        # a non-zero reserved[1] at the header, so an image built for
+        # this revision is thrown back rather than run with the scratch
+        # never loaded.
+        if self.flags & ~FLAGS_KNOWN & 0xFFFFFFFF:
+            raise ProgramError(
+                f"header flags {self.flags:#010x} set a bit this loader "
+                f"does not know; the known ones are BANK_EXT and "
+                f"SCRATCH_IO")
+        for name, v in (("n_scratch_in", self.n_scratch_in),
+                        ("n_scratch_out", self.n_scratch_out)):
+            if not 0 <= v <= 0xFFFF:
+                raise ProgramError(
+                    f"{name}={v} does not fit its half of scratch_io")
+            if not self.scratch_io:
+                if v:
+                    raise ProgramError(
+                        f"{name}={v} without flags.SCRATCH_IO: with the "
+                        f"bit clear the header's second word is reserved "
+                        f"and must be zero")
+            elif v > SCRATCH_D:
+                raise ProgramError(
+                    f"{name}={v} past the {SCRATCH_D} slots a lane owns")
 
         depth = 0
         # `mult` tracks how many times the instruction at the current
@@ -508,7 +667,13 @@ class Program:
             # high bits are checked instead through IMM_ALLOWED below,
             # which says per code exactly which bits of `imm` are read.
             used = {HALT: (), REPEAT: ("imm",), ENDREP: (),
-                    DEPOSIT: ("ra",), SETACT: ("ra",), ACTALL: ()}[code]
+                    DEPOSIT: ("ra",), SETACT: ("ra",), ACTALL: (),
+                    # R4's four. STL reads ra and the slot; LDL writes
+                    # rd and reads the slot; the indexed pair take the
+                    # slot from rb instead, so imm[23:0] is read by
+                    # nothing there and IMM_ALLOWED refuses it.
+                    STL: ("ra",), LDL: ("rd",),
+                    STX: ("ra", "rb"), LDX: ("rd", "rb")}[code]
             raw = decode_raw(word)
             for field in ("rd", "ra", "rb", "rc"):
                 if field not in used and raw[field]:
@@ -525,6 +690,19 @@ class Program:
                     f"[{pc}] {CTRL_NAMES[code]} reads only "
                     f"imm & {IMM_ALLOWED[code]:#010x}, so imm="
                     f"{d['imm']:#010x} sets a bit it does not read")
+
+            if code in (STL, LDL):
+                # A STATIC slot past the depth is refused by name, as a
+                # constant index past the bank is: the instruction says
+                # which slot, so the answer is knowable here rather
+                # than at the tile's header check. STX/LDX are NOT
+                # refused - their slot is data, and the reduction
+                # modulo the depth is part of the contract.
+                slot = d["imm"] & SCRATCH_SLOT_MASK
+                if slot >= SCRATCH_D:
+                    raise ProgramError(
+                        f"[{pc}] {CTRL_NAMES[code]} names scratch slot "
+                        f"{slot} but a lane owns {SCRATCH_D}")
 
             if code == REPEAT:
                 if d["imm"] == 0:
@@ -613,6 +791,43 @@ class Program:
         ebytes = self.fmt.width // 8
         return b"".join(k.to_bytes(ebytes, "little") for k in bank)
 
+    def scratch_bytes(self, values):
+        """A run's scratch block as the device receives it: dense,
+        format-width, little-endian, lane-major - the same layout the
+        bank and the image's constant section have, for the same
+        reason (one parser reads them all)."""
+        ebytes = self.fmt.width // 8
+        return b"".join(v.to_bytes(ebytes, "little") for v in values)
+
+    def _check_scratch_in(self, scratch_in, n):
+        """The refusals the scratch-in block carries, which are the
+        bank's refusals in the same shape: a program that declares one
+        cannot run without it, and a program that declares none cannot
+        run with it. Byte counts match exactly or the run is refused -
+        a buffer whose length nobody agreed on is a run whose lanes
+        started somewhere nobody agreed on."""
+        want = (self.n_scratch_in if self.scratch_io else 0) * n
+        if not want:
+            if scratch_in is not None:
+                raise ProgramError(
+                    "this program declares no scratch input, so a "
+                    "scratch_in block would be values no instruction "
+                    "can have been compiled to read")
+            return
+        if scratch_in is None:
+            raise ProgramError(
+                f"this program declares n_scratch_in="
+                f"{self.n_scratch_in}; supply {want} values for {n} lanes")
+        if len(scratch_in) != want:
+            raise ProgramError(
+                f"scratch_in holds {len(scratch_in)} values, the header "
+                f"declares {self.n_scratch_in} a lane over {n} lanes = "
+                f"{want}")
+        for v in scratch_in:
+            if not 0 <= v < (1 << self.fmt.width):
+                raise ProgramError(
+                    "scratch_in value does not fit the format")
+
     def _check_bank(self, bank):
         """The refusals a bank has to carry. A BANK_EXT program cannot
         run without one and a self-contained program cannot run with
@@ -641,7 +856,8 @@ class Program:
         ebytes = self.fmt.width // 8
         out = struct.pack("<8I", MAGIC, VERSION, len(self.insns),
                           self.n_consts, self.max_deposits,
-                          PREC_CODE[self.fmt.name], self.flags, 0)
+                          PREC_CODE[self.fmt.name], self.flags,
+                          self.scratch_io_word)
         # A BANK_EXT image is header then instructions, with no constant
         # section at all - so it is exactly 32 + 8 * n_insns bytes
         # whatever n_consts says, and `self.consts` is empty.
@@ -655,7 +871,7 @@ class Program:
     def from_bytes(cls, data):
         if len(data) < HEADER_WORDS * 4:
             raise ProgramError("shorter than a header")
-        magic, ver, n_insns, n_consts, maxdep, prec, flags, rsv1 = \
+        magic, ver, n_insns, n_consts, maxdep, prec, flags, word7 = \
             struct.unpack("<8I", data[:HEADER_WORDS * 4])
         if magic != MAGIC:
             raise ProgramError(f"bad magic {magic:#010x}, expected "
@@ -663,17 +879,20 @@ class Program:
         if ver != VERSION:
             raise ProgramError(f"program version {ver}, this loader "
                                f"speaks {VERSION}")
-        # The header's first reserved word became `flags` at revision 2;
-        # everything above bit 0 of it, and the whole of the remaining
-        # reserved word, stay must-be-zero. Instruction bit 30 is
-        # refused for being reserved; header words cannot be laxer than
-        # instruction bits.
+        # The header's first reserved word became `flags` at revision 2
+        # and its second became `scratch_io` at revision 3. Everything
+        # above the known flag bits is still must-be-zero, and so is the
+        # whole of `scratch_io` while `SCRATCH_IO` is clear. Instruction
+        # bit 31 is refused for being reserved; header words cannot be
+        # laxer than instruction bits.
         if flags & ~FLAGS_KNOWN & 0xFFFFFFFF:
             raise ProgramError(
                 f"header flags {flags:#010x} set a bit this loader does "
-                f"not know; flags[31:1] are reserved and must be zero")
-        if rsv1:
-            raise ProgramError("reserved header words must be zero")
+                f"not know; flags[31:2] are reserved and must be zero")
+        if not (flags & FLAG_SCRATCH_IO) and word7:
+            raise ProgramError(
+                f"header word 7 is {word7:#010x} without flags.SCRATCH_IO; "
+                f"with the bit clear it is reserved and must be zero")
         name = next((k for k, v in PREC_CODE.items() if v == prec), None)
         if name is None:
             raise ProgramError(f"precision code {prec} is not on the ladder")
@@ -695,17 +914,19 @@ class Program:
                                           off + (i + 1) * INSN_BYTES])[0]
                  for i in range(n_insns)]
         return cls(fmt, insns, consts, maxdep, flags=flags,
-                   n_consts=n_consts)
+                   n_consts=n_consts,
+                   n_scratch_in=word7 & 0xFFFF,
+                   n_scratch_out=(word7 >> 16) & 0xFFFF)
 
 
 # ---- execution -------------------------------------------------------
 
 class Result:
     __slots__ = ("deposits", "flags", "status", "regs", "active",
-                 "counts", "insns_executed")
+                 "counts", "insns_executed", "scratch", "scratch_out")
 
     def __init__(self, deposits, flags, status, regs, active, counts,
-                 insns_executed):
+                 insns_executed, scratch=None, scratch_out=None):
         self.deposits = deposits            # n * max_deposits values
         self.flags = flags                  # sticky IEEE flags
         self.status = status                # bus / sequencer faults
@@ -713,21 +934,44 @@ class Result:
         self.active = active                # final active mask
         self.counts = counts                # deposits made, per lane
         self.insns_executed = insns_executed
+        # The per-lane scratch at the end of the run (revision 3, R4),
+        # and the block a SCRATCH_IO program hands back through
+        # SCRATCH_OUT_PTR: lane i's slot s at i * n_scratch_out + s,
+        # lane-major and dense, the same shape the deposit buffer has.
+        # `scratch_out` is [] for a program that declares none, which is
+        # what the device writes to that pointer: nothing.
+        self.scratch = scratch if scratch is not None else []
+        self.scratch_out = scratch_out if scratch_out is not None else []
 
     def state(self):
         """Everything observable. Used to prove the early exit changes
-        nothing but the instruction count."""
+        nothing but the instruction count.
+
+        The scratch joins it at revision 3 for the same reason the
+        register file is here: an all-inactive loop body that stored
+        into a slot would be observable through the scratch-out block
+        even where it moved no deposit, so P3's fuzz has to see it."""
         return (self.deposits, self.flags, self.status, self.regs,
-                self.active, self.counts)
+                self.active, self.counts, self.scratch, self.scratch_out)
 
 
-def run(prog: Program, a, b, c=None, bank=None, early_exit=True,
-        insn_budget=None, n_active=None):
+def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
+        early_exit=True, insn_budget=None, n_active=None):
     """Execute `prog` over len(a) lanes.
 
     The three input streams initialise r0, r1 and r2 - the same three
     the elementwise engine already reads, so a sequencer run needs no
-    new input path in the hardware. Registers r3..r31 start at +0.
+    new input path in the hardware. Registers r3..r31 start at +0, and
+    so does every one of the lane's SCRATCH_D scratch slots - except
+    the first `prog.n_scratch_in` of them, which a SCRATCH_IO program
+    takes from `scratch_in`.
+
+    `scratch_in` is lane-major and dense: lane i's slot s is element
+    `i * prog.n_scratch_in + s`, `len(a) * n_scratch_in` values in all,
+    the way the device receives them through SCRATCH_IN_PTR. It is
+    refused if it is missing, the wrong size, or handed to a program
+    that declares no scratch input. The matching block on the way out
+    is `Result.scratch_out`.
 
     `bank` is a BANK_EXT program's constants, supplied per run: exactly
     `prog.n_consts` format-width values, dense and in index order, the
@@ -766,6 +1010,8 @@ def run(prog: Program, a, b, c=None, bank=None, early_exit=True,
     if not 0 <= n_active <= n:
         raise ValueError(f"n_active={n_active} outside 0..{n}")
 
+    prog._check_scratch_in(scratch_in, n)
+
     zero = sf.zero_bits(fmt, 0)
     mask = (1 << fmt.width) - 1
     regs = [[zero] * NREG for _ in range(n)]
@@ -776,6 +1022,20 @@ def run(prog: Program, a, b, c=None, bank=None, early_exit=True,
         regs[i][0] = a[i] & mask
         regs[i][1] = b[i] & mask
         regs[i][2] = c[i] & mask
+    # The scratch, one array of SCRATCH_D slots per lane, +0 everywhere
+    # a run begins. Slots start at +0 for the same reason a deposit
+    # slot no lane wrote reads +0: a run whose untouched storage kept
+    # whatever was there before would not be bit-exact between two
+    # machines.
+    scratch = [[zero] * SCRATCH_D for _ in range(n)]
+    nsin = prog.n_scratch_in if prog.scratch_io else 0
+    if nsin:
+        # Lane-major and dense, and PADDING LANES RECEIVE NOTHING: a
+        # lane at or past the caller's element count is not the
+        # caller's, so the tail of the buffer is not read into it.
+        for i in range(min(n, n_active)):
+            for s in range(nsin):
+                scratch[i][s] = scratch_in[i * nsin + s] & mask
     active = [i < n_active for i in range(n)]
     counts = [0] * n
     deposits = [zero] * (n * prog.max_deposits)
@@ -867,13 +1127,51 @@ def run(prog: Program, a, b, c=None, bank=None, early_exit=True,
             active = [True] * n
             pc += 1
             continue
+        if code in (STL, LDL, STX, LDX):
+            # R4. A store is a register write for P3's purposes and a
+            # load writes rd, so both are masked by the active bit and
+            # an all-inactive loop body stays a no-op. Neither is
+            # arithmetic: no rounding attribute is read and no flag is
+            # raised, which is why they cost the verification surface
+            # of a control code rather than of an opcode.
+            static = code in (STL, LDL)
+            slot = (d["imm"] & SCRATCH_SLOT_MASK) if static else None
+            for i in range(n):
+                if not active[i]:
+                    continue
+                if not static:
+                    # The indexed slot is the low log2(SCRATCH_D) bits
+                    # of rb's BIT PATTERN read as an unsigned integer -
+                    # reduced modulo the depth rather than refused,
+                    # because rb is data and a refusal would be a
+                    # refusal for a value the program might compute.
+                    slot = regs[i][d["rb"]] & SCRATCH_MASK
+                if code in (STL, STX):
+                    scratch[i][slot] = regs[i][d["ra"]]
+                else:
+                    regs[i][d["rd"]] = scratch[i][slot]
+            pc += 1
+            continue
         raise ProgramError(f"[{pc}] unknown control code {code}")
 
-    return Result(deposits, flags, status, regs, active, counts, executed)
+    # The scratch-out block, written after the last deposit of a lane
+    # block and laid out exactly as the scratch-in block is. It is not
+    # masked by the active bit - it is a drain, like the deposit
+    # drain, and a lane that converged early still has state worth
+    # carrying to the next call. Padding lanes write nothing, so their
+    # slots stay +0.
+    nsout = prog.n_scratch_out if prog.scratch_io else 0
+    scratch_out = [zero] * (n * nsout)
+    for i in range(min(n, n_active)):
+        for s in range(nsout):
+            scratch_out[i * nsout + s] = scratch[i][s]
+
+    return Result(deposits, flags, status, regs, active, counts, executed,
+                  scratch, scratch_out)
 
 
 def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
-                   extended=False, wide_regs=False):
+                   extended=False, wide_regs=False, scratch=False):
     """A random program, for fuzzing. Returns (insns, consts).
 
     It lives here rather than in a test file because two different
@@ -904,8 +1202,22 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
     range is a parameter rather than `NREG`, which moved. That is the
     whole reason this argument exists instead of the constant being
     read directly.
+
+    `scratch` is revision 3's arm, and it is the strictest form of the
+    same discipline: rather than take a slice of the `pick` chain -
+    which would move every existing threshold and reshuffle the corpus
+    outright - it is an EXTRA instruction appended after the chain, so
+    the sequence of draws that produces a revision-1 or revision-2
+    corpus is untouched to the value. Off, `scratch and ...`
+    short-circuits and nothing is drawn at all.
     """
     nreg = NREG if wide_regs else NREG_REV1
+    # Slots the fuzz uses. A handful of low ones so stores and loads
+    # actually COLLIDE - a corpus that scattered its slots over 256
+    # would spend its time reading +0 out of untouched storage - plus
+    # the highest slot, which is the one an off-by-one in the address
+    # decode reaches past.
+    slots = [0, 1, 2, 3, 7, SCRATCH_D - 1]
     ops = [OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_, OP_ABS_,
            OP_MIN_, OP_MAXNUM_, OP_CMPLT_, OP_SELECT_, OP_IXOR_]
     if extended:
@@ -952,6 +1264,21 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
             insns.append(actall())
         elif allow_halt_in_loop:
             insns.append(halt())
+        # R4's four, appended BESIDE the chain above rather than
+        # inside it. All four are legal at any loop depth: a store is
+        # masked by the active bit exactly as a register write is, so
+        # neither of P3's two rules (ACTALL, HALT) has an analogue
+        # here.
+        if scratch and rng.random() < 0.4:
+            kind = rng.randrange(4)
+            if kind == 0:
+                insns.append(stl(rng.randrange(nreg), rng.choice(slots)))
+            elif kind == 1:
+                insns.append(ldl(rng.randrange(nreg), rng.choice(slots)))
+            elif kind == 2:
+                insns.append(stx(rng.randrange(nreg), rng.randrange(nreg)))
+            else:
+                insns.append(ldx(rng.randrange(nreg), rng.randrange(nreg)))
     insns += [endrep()] * depth
     insns.append(halt())
     pool = [sf.zero_bits(fmt), sf.one_bits(fmt), sf.max_normal_bits(fmt)]
