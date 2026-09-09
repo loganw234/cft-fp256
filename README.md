@@ -184,6 +184,9 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      before buying),
                      REMOTE (the tile behind a socket: the protocol,
                      what crosses the wire, and the OS answer),
+                     INTEGRATION (what to use when: staged, resident,
+                     programs, reductions, remote - and where each
+                     link becomes the wall, in measured numbers),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```

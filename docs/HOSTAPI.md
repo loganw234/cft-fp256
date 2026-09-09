@@ -186,7 +186,9 @@ the same call over the same bytes returns the same bits and the same
 flags either way, which is what `device-test -b` checks and what makes
 this an optimisation rather than a second contract.
 
-**What a port must do.** Four lines, and no second code path:
+**What a port must do.** Four lines, and no second code path
+(docs/INTEGRATION.md says when to take them, and when a program or a
+reduction is the better path):
 
 ```c
 cft_alloc(dev, bytes, &buf);                 /* instead of malloc  */
