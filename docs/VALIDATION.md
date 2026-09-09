@@ -8598,3 +8598,569 @@ backend is the library item; the API is already the right shape.
 
 Run records: `/tmp/r3-single/resident*.txt`, `/tmp/r3-quad/resident*.txt`
 on the box, copied beside this session's scratchpad.
+
+## 2026-09-09 - the read-ahead the card asked for: a memory model with a round trip, and both halves of the engine deepened
+
+docs/BENCHMARKS.md's "The engine, measured" left an RTL item with a
+measured target. One U50 tile sustained 57.8 to 59.9 M beats a second
+at every format and at both n = 65,536 and n = 4,194,304 - 2.25 cycles
+a beat at 135 MHz - where `make cycles` measured 1.250 on the same
+RTL; and a ceiling flat across format and size, well under the
+masters' own 135 M beats a second and under HBM's bandwidth, is a
+depth divided by a latency rather than a bandwidth wall. This entry is
+that item: a bench that can see a latency, a diagnosis that turned out
+to have TWO halves, the fix for both, and what it costs on the part.
+
+Built on the merged tree at f98cac6, on DESKTOP-T33SK86. Changed:
+`rtl/cft_engine_stream.sv`, `rtl/cft_krnl.sv`, `tb/busfx.py`,
+`tb/test_krnl_cycles.py`, `tb/test_krnl.py`, `tb/test_krnl_reduce.py`,
+`tb/test_krnl_faults.py`, `tb/Makefile`, `docs/ARCHITECTURE.md`.
+Commit `34c23ff` carries the RTL, the benches and the architecture
+page; this entry is the commit that follows it.
+
+### The bench had no round trip, so it could not have seen this
+
+Every throughput number this repository has taken in simulation was
+taken against a stock cocotbext-axi RAM, which answers in zero cycles:
+the first R beat lands a cycle or two after ARVALID and BVALID follows
+WLAST just as fast. `tb/busfx.py` gains a section D that gives it one.
+
+The model is PIPELINED, and that distinction is the whole point.
+Delaying inside the slave's own `_process_read` would make each burst
+cost its latency before the next one started - a memory with ONE
+outstanding transaction, which no deeper read-ahead could ever beat.
+Instead each beat is stamped with a release cycle as the slave
+produces it, and a consumer coroutine emits it, in order, when that
+cycle arrives. The slave still produces one beat a cycle, so what the
+DUT sees is a memory with one beat a cycle of bandwidth and `n` cycles
+of latency: the shape whose remedy is more bytes in flight. The delay
+sits on R and B - the response channels - and not on the AR/AW/W
+sinks, because withholding a READY is backpressure, which `stall()`
+already models and which is a different fault.
+
+`RD_LATENCY` and `WR_LATENCY` in tb/Makefile (CFT_RD_LATENCY /
+CFT_WR_LATENCY in the environment) are the knobs; `cycles`, `krnl` and
+`faults` take them - `faults` because an abort has to unwind sixteen
+read bursts and however many write responses are still in the air, and
+at zero latency there is nothing in the air to unwind.
+
+**Zero installs nothing** - no wrapper, no coroutine - so every
+existing bench draws exactly the slave it always drew, and the
+unchanged 1.250/37 below is the check on that.
+
+### The card's number, reproduced twice over - from either end
+
+`make cycles` on the CURRENT tree, marginal cycles a beat (identical
+at all four elementwise rungs; the fp32 reduction is 11.3147 at every
+row and never moves):
+
+| RD_LATENCY | WR_LATENCY | cycles/beat | fixed |
+|---|---|---|---|
+| 0 | 0 | **1.2500** | 37 |
+| 32 | 0 | 1.2500 | 69 |
+| 64 | 0 | 1.2969 | 98 |
+| 96 | 0 | 1.7969 | 98 |
+| 128 | 0 | **2.2969** | 98 |
+| 160 | 0 | 2.7969 | 98 |
+| 192 | 0 | 3.2969 | 98 |
+| 256 | 0 | 4.2969 | 98 |
+| 0 | 8 | 1.7500 | 37 |
+| 0 | 16 | **2.2500** | 37 |
+| 0 | 32 | 3.2500 | 37 |
+| 0 | 64 | 5.2500 | 37 |
+| 0 | 128 | 9.2500 | 37 |
+| 128 | 16 | 2.2969 | 162 |
+| 146 | 146 | 10.3750 | 183 |
+
+Both halves fit exactly, and the fits are the diagnosis:
+
+    read path   cycles/beat = (RD_LATENCY + 19) / 64
+    write path  cycles/beat = (WR_LATENCY + 20) / 16
+
+64 is `AR_DEPTH * 2^BURST_LOG2` - the beats in flight per operand
+stream - and 16 is one write burst. So **the card's 2.25 is reached by
+read latency 125 (a round trip of 144 cycles, 1.07 us at 135 MHz), and
+it is ALSO reached, on its own, by a write response of 16 cycles.**
+The measurement on the card cannot distinguish them, and neither can
+this bench; what it can do is say that either would have produced it,
+which is why both were deepened rather than one.
+
+The write half is the one a reader of the old code would not have
+suspected, and it is visible without any latency at all: 1.250 x 16 =
+20 cycles a burst = one idle cycle, one AW cycle, sixteen data beats
+and a two-cycle response. The writer sat on BRESP before starting the
+next burst, so the write round trip was in the rate once per burst.
+
+### The fix
+
+Three changes in `rtl/cft_engine_stream.sv`, all parameters, with the
+shipping values now named in `rtl/cft_krnl.sv` (hw/package_kernel.tcl
+strips user parameters, so a bitstream carries those defaults):
+
+- **`AR_DEPTH` 4 -> 16, `FIFO_LOG2` 7 -> 9.** 16 bursts of 16 beats is
+  256 beats - 8 KB - in flight per stream, which covers a 256-cycle
+  round trip with the read path still at one beat a cycle. The FIFO
+  has to hold the reservation with room over; that is free on this
+  part, and the OOC table below is the measurement.
+- **`AW_DEPTH` (new) = 16.** The writer no longer waits for BRESP: a
+  `wr_outst` counter tracks bursts issued and unanswered, BREADY is
+  tied high, and the RUN does not finish until the count is zero -
+  which is the property that matters, because a host reads the D
+  buffer after `ap_done`. It costs one 8-bit counter and no storage,
+  because a write burst in flight holds nothing.
+- **A burst is issued at full length or not at all.** Free space used
+  to trim it. That is invisible while reads are the bottleneck (the
+  FIFO is empty, so nothing trims) and costly the moment they are not,
+  because bytes in flight is `AR_DEPTH` times the AVERAGE burst. It is
+  measurable in the regime where the FIFOs do saturate: the 512-beat
+  fp32 reduction in `make cycles` issued **383 AXI read bursts on
+  stream A before this change, 369 of them a single beat, and issues
+  32 sixteen-beat bursts after** - a twelfth of the transactions for
+  the same bytes.
+
+Two latent parameterization bugs were fixed on the way, both found by
+moving the parameters rather than by a bench:
+
+- The RLAST length queue indexed `len_q[len_wp[$clog2(AR_DEPTH)-1:0]]`
+  into an array of `AR_DEPTH` entries. At `AR_DEPTH` 1 that is
+  `len_wp[-1:0]`, an elaboration error; at any non-power-of-two depth
+  the pointers wrap on the next power of two and index past the
+  array's end. Both are configurations docs/ROADMAP.md's open-core
+  part is entitled to ask for. The queue is now `LENQ_D = 1 <<
+  AR_IDX_W` entries with `AR_IDX_W = max(1, $clog2(AR_DEPTH))`.
+- `d_cnt >= w_target` was eight bits against eight bits by
+  coincidence, because `FIFO_LOG2` was 7. At 9 the left side is ten
+  bits. **Verilator's WIDTHEXPAND caught it**, which is why that
+  warning is fatal here; the fix is the explicit 32-bit zero-fill
+  `ex_valid` already used, not a `lint_off`.
+
+Nothing here decides a bit. The determinism contract rests on the
+single issue point popping all three operand FIFOs in index order and
+the single writer emitting in index order, and neither moved; deeper
+queues let the streams run further ahead of each other IN THE MEMORY
+SYSTEM. Sixteen reads in flight need no reorder buffer because every
+read master issues under one hardwired ARID of zero and AXI4 A5.3
+requires read data on one ARID to return in address-issue order; on
+the write side one W state machine emits bursts back to back in index
+order, which is AW order, so responses on the single AWID come back in
+order and the engine only has to count them.
+
+`BURST_LOG2` stays 4, deliberately. It is not what was short, and
+raising it would break a bench silently: `tb/test_krnl_faults.py` arms
+`short_at=1` and `long_at=1` on a 512-element fp32 run, which is 64
+beats - four bursts at 16, ONE burst at 64 - so at `BURST_LOG2` 6 the
+fault would never be injected and the test would fail for the wrong
+reason.
+
+### After: flat at 1.1250 to 200 cycles of latency on both channels
+
+Same bench, same command, the new tree:
+
+| RD_LATENCY | WR_LATENCY | cycles/beat | fixed |
+|---|---|---|---|
+| 0 | 0 | **1.1250** | 40 |
+| 32 | 0 | 1.1250 | 72 |
+| 64 | 0 | 1.1250 | 104 |
+| 96 | 0 | 1.1250 | 136 |
+| 128 | 0 | 1.1250 | 168 |
+| 160 | 0 | 1.1250 | 200 |
+| 192 | 0 | 1.1250 | 232 |
+| 256 | 0 | 1.1250 | 296 |
+| 0 | 16 | 1.1250 | 56 |
+| 0 | 32 | 1.1250 | 72 |
+| 0 | 64 | 1.1250 | 104 |
+| 0 | 128 | 1.1250 | 168 |
+| **125** | **16** | **1.1250** | 181 |
+| 128 | 16 | 1.1250 | 184 |
+| **146** | **146** | **1.1250** | 332 |
+| 200 | 200 | 1.1250 | 440 |
+
+The latency has left the marginal cost entirely and shows up only in
+the fixed cost, which is what a latency should do: one round trip to
+fill, once a run. The fp32 reduction is 11.3147 at every row, exactly
+as before - it is bounded by the accumulator's serialiser, not by
+memory.
+
+**1.1250 cycles a beat is 120.0 M beats a second at 135 MHz**, against
+the 108 the target asked for and the 59.6 the card does today. The
+remaining 0.125 is the writer's per-burst idle and AW cycles (18
+cycles a 16-beat burst); closing it would need the AW overlapped with
+the previous burst's data, which was not done - 1.125 clears the 1.35
+target with room, and the change is smaller without it.
+
+### Predicted card rate
+
+Per tile at 135 MHz, if the shell's round trip is anywhere below ~250
+cycles on reads and ~250 on write responses:
+
+| format | measured today | predicted | ratio |
+|---|---|---|---|
+| fp32 | 462.6 M/s | **960 M/s** | 2.08x |
+| fp64 | 235.1 M/s | **480 M/s** | 2.04x |
+| fp128 | 118.7 M/s | **240 M/s** | 2.02x |
+| fp256 | 59.6 M/s | **120 M/s** | 2.01x |
+
+and 15.4 GB/s a tile over its four streams, 61 GB/s for the quad if
+four tiles still scale exactly four times one. **This is a prediction
+from a cocotb model with a modelled round trip, not a measurement**;
+the honest caveat is the same one that applied to 1.250, one level
+weaker: the model now has a latency but still has no per-transaction
+cost, no refresh, no bank conflict and no contention, so a real
+controller is entitled to disagree. What has changed is that the
+mechanism the card exposed is now IN the model, and the fix is
+measured against it rather than argued.
+
+### The out-of-context cost on the U50
+
+Vivado 2026.1, `xcu50-fsvh2104-2-e`, 135 MHz, `hw/synth_krnl_ooc.tcl`
+with default generics, from scratch copies of `rtl/` and `hw/` so the
+worktree could be edited while they ran:
+
+| | before (f98cac6) | after | delta |
+|---|---|---|---|
+| CLB LUTs, tile | 123,965 | **124,602** | +637 (+0.51%) |
+| CLB registers, tile | 61,774 | 61,821 | +47 |
+| Block RAM tiles | 76.5 | **76.5** | **0** |
+| - RAMB36 | 64 | 64 | 0 |
+| - RAMB18 | 25 | 25 | 0 |
+| URAM | 8 | 8 | 0 |
+| DSPs | 307 | 307 | 0 |
+| WNS at 135 MHz | +1.196 | **+1.196** | **0.000** |
+| synthesis wall time | 15 min 43 | 15 min 40 | |
+
+The before column was RE-SYNTHESISED today rather than quoted, and it
+reproduced the 2026-09-08 entry exactly - 123,965 LUT, 61,774 FF, 76.5
+tiles, 8 URAM, 307 DSP, +1.196 ns - which is also the check that the
+two runs differ by the tree and not by the day.
+
+**The four-times-deeper FIFOs cost no block RAM at all, and that is
+the load-bearing number.** From the hierarchical report, `u_engine`
+holds 16 RAMB36 in both trees, four per stream FIFO. A 256-bit FIFO
+is four RAMB36 in 512x72 simple-dual-port mode at ANY depth up to 512,
+because the WIDTH sets the count and 512 is the deepest that mode
+goes: 4 x 72 = 288 bits >= 256, 512 deep >= 128 and >= 512. So
+`FIFO_LOG2` 7 and 9 build the same sixteen blocks. `FIFO_LOG2` 10
+would be the first depth that costs: two cascaded blocks per 72-bit
+slice, 8 a FIFO, 32 in all, +16 tiles.
+
+The rest of the hierarchy, before -> after: `cft_engine_stream` 6,576
+-> **6,470** LUT and 3,944 -> 3,989 FF; `cft_lanes` 88,184 -> 88,184,
+identical to the LUT; `cft_csr` 949 -> 948. `cft_seq` reads 28,362 ->
+29,106, and `rtl/cft_seq.sv` is byte-identical between the two trees
+(checked with `cmp`, as are cft_lanes.sv, cft_fifo.sv and cft_csr.sv)
+- so that +744 is Vivado moving logic across a boundary between two
+different netlists, not a cost of this change, and the tile total is
+the number to read.
+
+Timing did not move and the worst path is the same one to the
+picosecond and to the pin:
+
+    Slack (MET) : 1.196ns
+      Source:      u_engine/u_fifo_a/mem_reg_0/CLKARDCLK
+      Destination: u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[24]/D
+
+which is the streaming engine's FIFO into the FMA's input register -
+worst at revision 1, at revision 2, at revision 3, and here. Nothing
+was added to that path: the FIFO is the same primitive at the same
+width, and the new logic is a comparator on the AR launch and a
+counter on the write side, neither of which is between the FIFO and
+the array. **Out-of-context synthesis is not shell timing** - this
+project paid to learn that once - so +1.196 ns is a comparison between
+two trees, not a prediction about a linked build.
+
+An intermediate synthesis was also run, of the depth change and the
+pipelined write responses WITHOUT the full-burst rule: 122,883 LUT,
+61,816 FF, 76.5 tiles, +1.196 ns, engine 6,631 LUT. It is recorded
+because it isolates the burst rule's cost, which is inside the
+synthesis-to-synthesis noise on this tile.
+
+### It places and routes, too
+
+One implementation of the final tree, `hw/impl_krnl_ooc.tcl`, same part
+and clock, **53 min 1 s**, exit 0, with the multi-cycle census sharing
+the box for all of it:
+
+    QOR_ROUTED_WNS_NS: 0.481          (135 MHz, period 7.407 ns)
+    0 of 107,972 endpoints failing setup; 0 failing hold (WHS +0.019)
+    routed LUT 121,934   FF 61,837   BRAM tiles 76.5   URAM 8   DSP 307
+    worst routed path, 17 levels, 6.861 ns datapath:
+      u_engine/u_fifo_b/mem_reg_2/CLKARDCLK ->
+      u_lanes/g_lane32[5].u_fma/s0_byp_d_reg[23]/D
+    cft_engine_stream routed: 6,446 LUT, 3,988 FF, 16 RAMB36
+
+**So the deeper tile places and routes at 135 MHz on the U50 with
+0.481 ns to spare**, and it closes on the same path family it always
+has: a stream FIFO's block RAM into an fp32 lane's S0 input register.
+The revision-3 tree recorded +0.447 ns on the same part and clock
+(2026-09-08). Those two numbers are from different trees on different
+days, and placement is heuristic, so nothing here says this tree is
+better - what both say is the thing the round asked: it closes. Read
+the PATH DELAY rather than the slack, which is docs/BRINGUP.md's
+standing instruction: 6.861 ns against a 7.407 ns period, with the
+tool working exactly as hard as the constraint asked.
+
+
+### The open-core part: block RAM, as arithmetic
+
+The K325T figures cannot be run here - this Vivado install carries
+twelve parts, all `virtexuplus` and `virtexuplusHBM` (checked on
+2026-09-08 with `get_parts`, and nothing about that has changed). So
+what follows is arithmetic on the primitive geometry, which is the
+number to check against a real run rather than a substitute for one.
+
+A RAMB36E1 on a 7-series part is 36 Kbit and, like the RAMB36E2 this
+tile is measured on, reaches at most 72 bits wide in simple-dual-port
+mode, at 512 deep. A stream FIFO is 256 bits wide, so:
+
+    ceil(256 / 72) = 4 RAMB36 per FIFO, at any depth 1..512
+    4 FIFOs x 4                        = 16 RAMB36
+
+at `FIFO_LOG2` 7 and at `FIFO_LOG2` 9 alike - which is exactly what
+the U50 report shows, 16 in both trees. **So the read-ahead adds
+nothing to the open-core tile's block RAM either**, and the 2026-09-08
+estimate stands unchanged: 64 + 32 = 96 RAMB36 plus 25 RAMB18, about
+108 block RAM tiles against the K325T's 445, roughly a quarter of the
+part.
+
+What that part would change instead is `AR_DEPTH` and `AW_DEPTH`,
+which cost logic rather than memory, and it can: a 100 MHz board
+against DDR has a shorter round trip to hide, and `AR_DEPTH` 2 /
+`AW_DEPTH` 1 / `FIFO_LOG2` 6 elaborates cleanly (it is one of the
+three configurations the Verilator lint gate below runs). Note that
+shrinking `FIFO_LOG2` alone saves NOTHING in block RAM by the same
+arithmetic - the width sets the count - which is the other half of
+`cft_fifo`'s hardcoded `WIDTH(256)` finding, still open.
+
+### The gates, all on the final tree
+
+Container gates are `MSYS2_ARG_CONV_EXCL='*' docker run --rm -v
+<worktree>:/work -w /work/tb cft-sim make ...`.
+
+    make golden (pytest python/tests)      2,145 passed, 5 skipped   8 min 10 s
+      - unaffected, and run because the brief said to run it once.
+
+    docker cft-sim: make -k -j4 sim        21 targets, 69 tests
+                                                   PASS=69 FAIL=0 SKIP=0
+                                                   25 min 24 s
+      - the whole shipping suite. Run TWICE: once with the OOC
+        implementation sharing the box (the 25 min above), and again
+        on the committed tree afterwards, same 21/69/0/0, because
+        `tb/test_krnl_faults.py` gained its latency hook between the
+        two and a gate has to be the tree that ships.
+      - the test COUNT is unchanged at 69 because the two new benches
+        are longer runs inside existing test functions, not new
+        `@cocotb.test()`s. What changed is the work: `krnl` carries a
+        600-beat elementwise run it did not have, `reduce` a 700-beat
+        sum.
+      - `krnlseq`, `seqbanks` and `seq_core` are in this suite, which
+        is the check the brief asked for: cft_seq borrows the A and D
+        masters from the engine and its bus behaviour moved.
+
+    docker cft-sim: make -k -j4 MC=10 simmc  16 targets, 43 tests
+                                                   PASS=43 FAIL=0 SKIP=0
+                                                   40 min 54 s
+      - the multi-cycle tile's whole census, INCLUDING the four board
+        targets, which the 2026-09-08 round did not run: `boardkrnl`
+        (Verilator), `boardseq` and `boardfp256` under Icarus, plus
+        every *mc target and `mulpass`/`mulcycle`. Also run twice for
+        the reason above, same 16/43/0/0 both times.
+      - the board configuration matters here because it is the one
+        that reaches the smaller parameters the open core would use;
+        `boardseq` is the sequencer driving the shared masters at ten
+        passes with both fused ladders, which is the slowest thing in
+        this repository and the closest thing it has to the open-core
+        tile.
+
+    docker cft-sim: make cycles            the two tables above, 31 runs
+      - before and after, at zero latency and across the sweep. The
+        before column is this tree's parent re-measured today, not
+        quoted: 1.250 marginal and 37 fixed, matching the record.
+
+    docker cft-sim: RD_LATENCY=125 WR_LATENCY=16 krnl    2/2 PASS
+    docker cft-sim: RD_LATENCY=125 WR_LATENCY=16 faults  5/5 PASS
+      - the determinism statement, and the only form it can take here:
+        `test_krnl` scores every result against the golden model and
+        the model has no notion of a cycle, so a run that survives a
+        144-cycle read round trip and a 16-cycle write response and
+        still matches is a statement that the schedule did not reach
+        the answer. That includes the three backpressure duties, which
+        now stall a bus that also has a latency.
+      - `faults` at the same latency is the abort path with something
+        actually in flight: sixteen read bursts and up to sixteen
+        unanswered write responses to unwind, where at zero latency
+        there is nothing in the air. STATUS, ap_done and the clean run
+        after the fault all behave.
+
+    docker cft-sim: verilator 5.020 --lint-only   clean, exit 0, THREE
+      cft_krnl, default / board / small             configurations
+      - the 2026-09-08 entry records the flag set `-Wall
+        -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-VARHIDDEN
+        -Wno-UNDRIVEN -Wno-UNUSEDPARAM --timing -I rtl`. `-I rtl` with
+        a space does not reach Verilator 5.020 as an include path - it
+        is taken as a source file named `rtl` and the run dies before
+        linting anything - so it is `-Irtl` here, and with the include
+        path actually working the tree reports two PRE-EXISTING style
+        categories: 12 GENUNNAMED and 46 PINCONNECTEMPTY, **the same
+        counts before and after this change, in both the default and
+        the board configuration**. They are suppressed for the
+        pass/fail gate and counted separately, so the number is a
+        comparison rather than a claim.
+      - WIDTH stays fatal and unsuppressed: **zero WIDTH reports** in
+        either configuration, before and after. The one width warning
+        this work produced (`d_cnt >= w_target`) was fixed by widening
+        both sides explicitly, not suppressed. `grep -c lint_off
+        rtl/*.sv` is identical before and after - engine 2,
+        fpfma_pipe 1, krnl 1, normseg 1, seedop 6. **No lint_off was
+        added anywhere.**
+      - the third configuration is the open-core corner,
+        `-GAR_DEPTH=2 -GAW_DEPTH=1 -GFIFO_LOG2=6`, which is what the
+        `len_q` fix above exists for.
+
+    docker cft-sim: make yosys-lint        clean, exit 0
+      - 77 warnings, IDENTICAL to the parent tree run the same way: 76
+        pre-existing "Replacing memory with list of registers" notes
+        and the one `translate_off` note. Zero latches.
+
+    make formal                            PASS, 31 of 31, control refuted
+      - `docker build -t cft-formal -f docker/Dockerfile.formal
+        docker` then `docker run --rm -v <worktree>:/work -w /work
+        cft-formal ./formal/run.sh`. The unbounded FIFO proof is the
+        one this round could have disturbed and did not:
+        `fifo.sby prove   cft_fifo contract, unbounded (abc pdr)  31s`,
+        with `cover` reachable in 1 s. `rtl/cft_fifo.sv` is byte
+        for byte unchanged and the proof runs at its own WIDTH 8 /
+        DEPTH_LOG2 3 scope, so the deeper instance is covered by the
+        same argument it always was - the proof is over the module,
+        not over the instantiation.
+
+No bitstream, no emulation, no device run: the brief reserves the
+card, and the integrator builds the pair and measures with
+`cft-resident` against the prediction above.
+
+### The negative controls
+
+Five, each injected on a scratch copy of the tree and reverted, and
+two of them found something that was not the thing under test.
+
+1. **The reservation over-promises by one burst.** `burst_room`
+   returns `free + BURST_MAX`, so `cnt + resv` can reach FDEPTH + 15
+   against a FIFO of FDEPTH. A cocotb probe on the engine's own
+   signals measured the invariant directly: max `cnt+resv` **527**
+   where the correct build measures exactly **512**, and 136 of the
+   700 beats popped out of stream A's FIFO were the wrong beat, the
+   first at index 52. **Caught** by the new long reduction:
+   `fp32 sum n=5600 rne: got 0xcb043ab7 want 0x48519180`.
+
+2. **The reservation removed entirely** (`burst_room` returns FDEPTH).
+   Probe: max `a_cnt` **637** against a 512-deep FIFO. **Caught** by
+   the same run: `got 0xca09891c want 0x48519180`.
+
+3. **A control that could not fail, and the coverage gap under it.**
+   Control 1 was run FIRST against the suite as it stood - `krnl`,
+   `faults` and `reduce` - and every test passed with 136 beats
+   corrupted. Two reasons, both worth the entry:
+   - Nothing in this repository streamed long enough to fill a
+     512-beat FIFO. The longest run in `test_krnl.py` was 150 beats,
+     written when a stream FIFO held 128; elementwise consumes a beat
+     about as fast as a master delivers one, so the FIFO gains a tenth
+     of a beat a cycle and would need four thousand beats to fill. The
+     reduction's serialiser consumes one beat per ~11 cycles while
+     reads arrive at one a cycle, so it fills in a few hundred - which
+     is why the new saturating run is a REDUCTION.
+   - The first version of that run still passed with 136 wrong beats,
+     because `run_sum` draws 30% of its operands from the interesting
+     pool and **one NaN makes the whole sum a NaN**, which compares
+     equal however many beats were lost. That is precisely
+     docs/VERIFICATION.md's third rule - a check that cannot fail -
+     and it was found by a control failing to fail. `run_sum` grew a
+     `specials` argument, default True so every existing caller is
+     unchanged, and the long run passes `specials=False`.
+   Two benches were added as a result: the 5,600-element fp32 sum
+   above, and a 4,800-element fp32 FMA in `test_krnl.py` - 600 beats,
+   38 bursts a stream, which is the first run in this file to wrap the
+   16-entry RLAST length queue at all, and which crosses four 4 KB
+   pages rather than one.
+
+4. **The new bench at the OLD depths.** The final tree elaborated with
+   `-Pcft_krnl.AR_DEPTH=4 -Pcft_krnl.FIFO_LOG2=7 -Pcft_krnl.AW_DEPTH=1`
+   at RD_LATENCY 128 / WR_LATENCY 16 gives **2.2969 cycles a beat,
+   fixed 163** - the parent tree's 2.2969 / 162 to four decimals. So
+   the bench is measuring the depth and not something incidental to
+   the new tree, and the new RTL at the old parameters IS the old
+   engine.
+
+5. **The burst-trimming rule restored.** Reverting the full-burst rule
+   changes NOTHING the elementwise bench can see: 4,096 beats at
+   RD_LATENCY 125 / WR_LATENCY 16 take **4,789 cycles either way**,
+   with an identical 287 full 16-beat ARs on stream A, because the
+   elementwise path never saturates the operand FIFOs at any length
+   this bench can run and because the cocotb memory charges nothing
+   per transaction. Where it does show is the reduction, which does
+   saturate them: the same 512-beat fp32 SUM, at RD_LATENCY 0 /
+   WR_LATENCY 16, costs **383 read bursts on stream A with trimming -
+   369 of them a single beat - and 32 full 16-beat bursts without
+   it**; at RD_LATENCY 128 / WR_LATENCY 16 it is 129 against the same
+   32. That is the measurement the rule is
+   kept on; the throughput argument for it (bytes in flight is
+   AR_DEPTH times the AVERAGE burst) remains an argument, because no
+   bench here can price an AXI transaction.
+
+### Ambiguities, and how each was resolved
+
+- **Which path bound the card.** Both fit the measurement exactly, and
+  nothing available here can separate them: read latency 125 and write
+  response 16 each produce 2.25 on their own. Resolved by fixing both
+  and reporting both fits rather than picking one. If the integrator
+  measures the pair and gets close to 1.125, both were real; if it
+  lands near 1.25, the read path was the only one that mattered and
+  the writer's own 18 cycles a burst is the next thing to attack.
+- **How deep is deep enough.** 256 beats in flight covers a 256-cycle
+  round trip; the card's is about 144. The margin is deliberate and it
+  is free in block RAM on this part, which is the only reason it is
+  not tighter.
+- **Whether to raise BURST_LOG2.** No: it is not what was short, and
+  at 6 the fault bench's `short_at=1` would land on a run with one
+  burst and silently stop injecting anything.
+- **Whether pipelined write responses weaken `ap_done`.** They would
+  if the run finished on the last W beat. It does not: `wfinish`
+  requires `wr_sent == wr_total` AND `wr_outst == 0`, and the abort
+  path's `afinish` gained the same term so an abandoned run cannot
+  leave a response in flight to land during the next run.
+- **AXI ordering with sixteen reads outstanding.** Safe, and by
+  construction rather than by luck: `m_axi_{a,b,c}_arid` is a
+  hardwired zero, and AXI4 A5.3 requires read data for one ARID to
+  return in address-issue order. An ID per burst would be faster on
+  paper and would need a reorder buffer this design does not have.
+- **The 8-bit `rd_outst` counter**, which the width audit left as an
+  open finding when AR_DEPTH was 4 and the reservation guard bound
+  first. At 16 the reservation still binds first, but the argument is
+  no longer needed: `AR_DEPTH > 255` and `AW_DEPTH` outside 1..255 are
+  elaboration errors now, in both the generate and the `initial` form,
+  for the reason cft_fpfma_pipe's guards spell out about which
+  toolchain honours which.
+- **The 4 KB-boundary rule.** Untouched: `burst_want` keeps the
+  `(4096 - addr[11:0]) >> ADDR_SH` term and `BURST_LOG2` stays 4, so a
+  burst is at most 512 B and the boundary term can only shorten it.
+  It is also better exercised than before - the new 600-beat run
+  crosses four pages on all four masters where the old longest run
+  crossed one, and the stock cocotbext-axi slave asserts on a burst
+  that crosses a page, so a DUT that forgot to shorten fails there
+  rather than reading the wrong memory quietly.
+- **`make cycles` writes to a new build directory.** It is
+  `sim_build/cycles<RD>_<WR>` now, so a sweep does not re-elaborate
+  and does not overwrite the zero-latency run's results; the default
+  is `sim_build/cycles0_0` rather than `sim_build/cycles`. Nothing in
+  CI or `verify/run.sh` names that path.
+- **The `-I rtl` in the recorded lint invocation** does not work on
+  Verilator 5.020; see the gates section.
+- **Stale 1.250 figures elsewhere.** docs/PLATFORMS.md, docs/SCALING.md
+  and docs/studies/OPT-B-array.md quote 1.250 cycles a beat from
+  `make cycles`. Those pages are outside this brief (SCALING.md is the
+  integrator's), and the number is now 1.125 at zero latency and
+  1.125 at the card's; they are flagged here rather than edited.
+
+Run records, scripts and every log quoted above sit in this session's
+scratchpad under `readahead/` - the two latency sweeps, the three
+synthesis runs and the implementation, the Verilator and yosys
+censuses before and after, the formal log, the FIFO-occupancy probe,
+and the five control runs.

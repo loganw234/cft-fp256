@@ -21,6 +21,18 @@ burst length, FIFO depth, the reduction's tree walk - and a bench that
 fails whenever performance changes is a bench people delete. The only
 assertions here are that the run completes and that the count is
 physically possible.
+
+AND THE MEMORY MODEL HAS A ROUND TRIP NOW. Everything above was true of
+a slave that answers in zero cycles, which is what cocotbext-axi is and
+what every number this bench has printed was taken against. The card
+disagreed: 2.25 cycles a beat measured on the U50 against the 1.250
+this printed (docs/BENCHMARKS.md, "The engine, measured"). `RD_LATENCY`
+and `WR_LATENCY` (tb/Makefile; CFT_RD_LATENCY / CFT_WR_LATENCY in the
+environment) put a pipelined latency in front of the R and B channels -
+see tb/busfx.py's section D - so the same bench can be run at the
+card's round trip and at zero, and the two read as one curve. Zero is
+the default and installs nothing, so an unqualified `make cycles`
+prints exactly what it always printed.
 """
 
 import math
@@ -43,6 +55,8 @@ from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE,
     OP_FMA, OP_SUM, OP_NAMES, RND_RNE,
 )
+
+import busfx  # noqa: E402
 
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
@@ -144,6 +158,16 @@ async def kernel_cycles_per_beat(dut):
     assert ram_b.mem is ram_a.mem and ram_c.mem is ram_a.mem \
         and ram_d.mem is ram_a.mem
 
+    # The memory's round trip, in kernel-clock cycles. Zero installs
+    # nothing at all (tb/busfx.py), which is why an unqualified run of
+    # this bench is unchanged. Read and write are separate knobs on
+    # purpose: the read path and the write path bound this engine for
+    # different reasons and at different depths, and a single number
+    # could not tell which one moved.
+    rd_lat, wr_lat = busfx.env_latency()
+    busfx.latency(ram_a, ram_b, ram_c, ram_d, clk=dut.ap_clk,
+                  read=rd_lat, write=wr_lat)
+
     dut.ap_rst_n.value = 0
     await ClockCycles(dut.ap_clk, 8)
     dut.ap_rst_n.value = 1
@@ -179,12 +203,22 @@ async def kernel_cycles_per_beat(dut):
 
     dut._log.info(f"cycles on cft_krnl: {SMALL} and {LARGE} beats per rung, "
                   f"slope = steady-state cost of one 256-bit beat")
+    dut._log.info(f"memory model: read-data latency {rd_lat} cycles, "
+                  f"write-response latency {wr_lat} cycles "
+                  f"({'the stock zero-cycle slave' if not (rd_lat or wr_lat) else 'pipelined, one beat a cycle of bandwidth'})")
     dut._log.info(f"  {'rung':<6} {'op':<4} {'cyc@' + str(SMALL):>8} "
                   f"{'cyc@' + str(LARGE):>9} {'cyc/beat':>9} {'fixed':>7} "
                   f"{'pred @135MHz':>14}")
     for name, op, lanes, c_s, c_l, slope, fixed, rate in rows:
         dut._log.info(f"  {name:<6} {op:<4} {c_s:>8} {c_l:>9} {slope:>9.3f} "
                       f"{fixed:>7.0f} {rate/1e6:>11.1f} Me/s")
+    # One machine-readable line per row, so a latency sweep can be
+    # collected without re-parsing a column layout that exists to be
+    # read by people.
+    for name, op, lanes, c_s, c_l, slope, fixed, rate in rows:
+        dut._log.info(f"CYCPB rd={rd_lat} wr={wr_lat} rung={name} op={op} "
+                      f"cycpb={slope:.4f} fixed={fixed:.1f} "
+                      f"beats_per_s={SHIP_HZ/slope:.0f}")
     dut._log.info("cyc/beat is MARGINAL (the slope); `fixed` is the fill, "
                   "burst setup and drain a run pays once - and is why a "
                   "short program is dominated by overhead, which is the "

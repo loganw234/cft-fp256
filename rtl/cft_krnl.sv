@@ -90,7 +90,39 @@ module cft_krnl #(
     // value; what changes is beats per cycle in the wide modes, and
     // the area. Neither CAPS nor VERSION mentions it, because neither
     // bits nor the register map move.
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES = 1,
+    // ---- the streaming engine's read-ahead -----------------------------
+    //
+    // The tile's rate against a real memory, and the ONLY place the
+    // shipping numbers are written down: hw/package_kernel.tcl strips
+    // user parameters, so a bitstream carries these defaults and
+    // nothing else. rtl/cft_engine_stream.sv's header has the
+    // measurement that set them - 2.25 cycles a beat on the U50 at
+    // AR_DEPTH 4, which is 64 beats in flight against a round trip of
+    // about 146 cycles.
+    //
+    //   BURST_LOG2  beats per AXI burst, log2. 16 beats is 512 B, well
+    //               inside the 4 KB rule, and it stays 4: the burst
+    //               length is not what was short.
+    //   AR_DEPTH    read bursts in flight per operand stream. 16 x 16
+    //               beats = 8 KB, which covers a 256-cycle round trip
+    //               at one beat a cycle.
+    //   AW_DEPTH    write bursts issued and unanswered. Costs one
+    //               counter: a write burst in flight holds nothing.
+    //   FIFO_LOG2   per-stream buffer depth, log2. Must hold the read
+    //               reservation (AR_DEPTH*2^BURST_LOG2) with room over.
+    //               512 is four RAMB36 per FIFO on this part, the same
+    //               four that 128 took, so the depth is free here.
+    //
+    // A SMALLER PART CHOOSES SMALLER. docs/ROADMAP.md's K325T target
+    // has block RAM and no UltraRAM, and a 100 MHz board with DDR
+    // rather than HBM has a shorter round trip to hide; every one of
+    // these is a parameter so that build can say so. The engine's
+    // elaboration guards are the whole contract they have to satisfy.
+    parameter int BURST_LOG2 = 4,
+    parameter int AR_DEPTH   = 16,
+    parameter int AW_DEPTH   = 16,
+    parameter int FIFO_LOG2  = 9
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -642,6 +674,8 @@ module cft_krnl #(
 
   cft_engine_stream #(.LATENCY(16), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
                       .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS),
+                      .BURST_LOG2(BURST_LOG2), .FIFO_LOG2(FIFO_LOG2),
+                      .AR_DEPTH(AR_DEPTH), .AW_DEPTH(AW_DEPTH),
                       .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
                       .FUSE_ALIGN(FUSE_ALIGN), .OWN_LANES(1'b0),
                       .MUL_PASSES(MUL_PASSES)) u_engine (

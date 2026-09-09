@@ -80,6 +80,18 @@ async def _bringup(dut):
                         size=2 ** 20, mem=ram_a.mem)
     for r in (ram_a, ram_b, ram_c, ram_d):
         busfx.instrument(r)
+    # Optional memory round trip (tb/Makefile's RD_LATENCY /
+    # WR_LATENCY; zero installs nothing). AFTER instrument(), so the
+    # fault wrappers decide a response at the slave's end of the pipe
+    # and the delay sits in front of them. This is the bench where a
+    # round trip is worth asking for: an abort has to unwind sixteen
+    # read bursts and however many write responses are still in the
+    # air, and at zero latency there is nothing in the air to unwind.
+    rd_lat, wr_lat = busfx.env_latency()
+    if busfx.latency(ram_a, ram_b, ram_c, ram_d, clk=dut.ap_clk,
+                     read=rd_lat, write=wr_lat) != (0, 0):
+        dut._log.info(f"memory model: read latency {rd_lat} cycles, "
+                      f"write-response latency {wr_lat} cycles")
 
     dut.ap_rst_n.value = 0
     await ClockCycles(dut.ap_clk, 8)

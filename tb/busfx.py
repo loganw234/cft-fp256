@@ -38,7 +38,12 @@ slave builds each beat as a transaction object and hands it to
 `send()`, which is the shape of every channel in the library.
 """
 
+import collections
+import os
 import random
+
+import cocotb
+from cocotb.triggers import RisingEdge
 
 from cocotbext.axi.constants import AxiResp
 
@@ -252,3 +257,132 @@ def instrument(ram):
         b_ch.send = send_b
 
     return fx
+
+
+# --------------------------------------------------------------------
+# D. Latency
+# --------------------------------------------------------------------
+#
+# WHY THIS EXISTS. A stock cocotbext-axi RAM answers in ZERO cycles:
+# the first R beat of a burst lands one or two cycles after ARVALID,
+# and BVALID follows the last W beat just as fast. Every throughput
+# number this repository has ever taken in simulation - `make cycles`
+# and its 1.250 marginal cycles a beat - was taken against that slave.
+#
+# On the card the same RTL sustained 2.25 cycles a beat at every
+# format and every size (docs/BENCHMARKS.md, "The engine, measured"),
+# and a ceiling flat across format and size, well under both the
+# masters' own limit and HBM's bandwidth, is the signature of a path
+# bounded by LATENCY rather than by bandwidth: so many bytes in flight
+# per stream, divided by the controller's round trip, IS the rate. The
+# cocotb model could not show it because the cocotb model has no round
+# trip. This is the knob that gives it one.
+#
+# THE MODEL IS PIPELINED, not serialising, and that distinction is the
+# whole point. Delaying inside the slave's own `_process_read` would
+# make each burst cost its latency before the next one started, which
+# is a memory with ONE outstanding transaction - the opposite of what
+# HBM does and a model that could never be beaten by a deeper
+# read-ahead. Instead each beat is stamped with a release cycle as the
+# slave produces it and a consumer coroutine emits it when that cycle
+# arrives, in order. The slave still produces at one beat a cycle, so
+# what the DUT sees is a memory of one beat per cycle of bandwidth and
+# `cycles` of latency: exactly the shape whose remedy is more bytes in
+# flight.
+#
+# The delay lands on R and B - the response channels - and not on the
+# AR/AW/W sinks, because withholding a READY is backpressure, which
+# `stall()` above already models and which is a different fault.
+#
+# Zero (the default everywhere) installs NOTHING: no wrapper, no
+# coroutine, no behaviour change, so every bench that does not ask for
+# latency draws exactly the slave it always drew.
+
+
+def env_latency():
+    """(read, write) latency in clock cycles from the environment.
+
+    CFT_RD_LATENCY delays every R beat, CFT_WR_LATENCY every write
+    response. tb/Makefile exposes them as RD_LATENCY and WR_LATENCY.
+    Unset or empty means zero, which means "do not install anything".
+    """
+    def get(name):
+        v = os.environ.get(name, "")
+        return int(v) if v.strip() else 0
+    return get("CFT_RD_LATENCY"), get("CFT_WR_LATENCY")
+
+
+class _Cycles:
+    """A monotone cycle counter for one clock.
+
+    Deadlines are compared in CYCLES rather than in simulated time so
+    the knob means the same thing whatever period a bench clocks at,
+    and so nothing here has to know the period.
+    """
+
+    def __init__(self, clk):
+        self.n = 0
+        self.clk = clk
+        cocotb.start_soon(self._run())
+
+    async def _run(self):
+        while True:
+            await RisingEdge(self.clk)
+            self.n += 1
+
+
+def _delay_channel(ch, ticks, cycles, cap):
+    """Put `cycles` of pipelined delay in front of one source channel."""
+    orig_send = ch.send
+    queue = collections.deque()
+
+    async def send(obj):
+        # A bound, so a runaway model cannot allocate without limit.
+        # It is far above anything the engine can have in flight - the
+        # cap is a safety net, not a throttle, and a cap that throttled
+        # would silently change what is being measured.
+        while len(queue) >= cap:
+            await RisingEdge(ticks.clk)
+        queue.append((ticks.n + cycles, obj))
+
+    async def drain():
+        while True:
+            if not queue:
+                await RisingEdge(ticks.clk)
+                continue
+            # In order, always: the head's deadline is the earliest,
+            # because deadlines are stamped in production order and the
+            # delay is constant. AXI responses on one ID must not be
+            # reordered, and this is where that is guaranteed.
+            due, obj = queue[0]
+            while ticks.n < due:
+                await RisingEdge(ticks.clk)
+            queue.popleft()
+            await orig_send(obj)
+
+    ch.send = send
+    cocotb.start_soon(drain())
+
+
+def latency(*rams, clk, read=0, write=0, cap=8192):
+    """Give every attached model `read` cycles of read-data latency and
+    `write` cycles of write-response latency.
+
+    Returns the (read, write) pair actually installed, so a bench can
+    print what it measured against. Call AFTER instrument(): the fault
+    wrappers belong at the slave's end of the pipe, where a real
+    controller would decide a response, and the delay in front of them.
+    """
+    if not read and not write:
+        return (0, 0)
+    ticks = _Cycles(clk)
+    for ram in rams:
+        if read:
+            ch = getattr(ram, "r_channel", None)
+            if ch is not None:
+                _delay_channel(ch, ticks, read, cap)
+        if write:
+            ch = getattr(ram, "b_channel", None)
+            if ch is not None:
+                _delay_channel(ch, ticks, write, cap)
+    return (read, write)

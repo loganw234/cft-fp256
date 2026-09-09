@@ -14,7 +14,60 @@
 //     FIFOs are non-empty and the result FIFO has room for
 //     everything already in flight;
 //   - results collect through the latency-matched delay line into
-//     the D FIFO and drain as write bursts on a write-only master.
+//     the D FIFO and drain as write bursts on a write-only master,
+//     up to AW_DEPTH of them unanswered.
+//
+// HOW DEEP, AND WHY - the 2026-09-09 numbers. Both depths are set
+// against a MEASURED round trip rather than an estimated one, which
+// is the difference between this paragraph and the one it replaced.
+//
+// A stream's rate is bytes in flight divided by the round trip, until
+// that quotient reaches one beat a cycle. The card said what the round
+// trip is: on the U50 at 135 MHz, with device-resident buffers and the
+// bus out of the measurement, one tile sustained 57.8 to 59.9 million
+// beats a second at EVERY format and at n = 65,536 and n = 4,194,304
+// alike - 2.25 cycles a beat, flat, well under both the masters' own
+// 135 M beats a second and HBM's bandwidth, and four tiles were
+// exactly four times one (docs/BENCHMARKS.md, "The engine, measured").
+// Flat across format and size is not a bandwidth wall; it is a depth
+// divided by a latency. At the old AR_DEPTH 4 x BURST_MAX 16 = 64
+// beats in flight, 2.25 cycles a beat implies about 146 cycles of
+// round trip through that shell's HBM path.
+//
+// The cocotb memory model could not have shown any of this: it answers
+// in zero cycles, which is why `make cycles` said 1.250. tb/busfx.py
+// now gives it a configurable round trip (tb/Makefile's RD_LATENCY /
+// WR_LATENCY), and at 128 cycles of read latency the OLD parameters
+// reproduce the card's 2.25 - so the diagnosis is reproducible in
+// simulation and the fix is measurable there too.
+//
+// Two things were shallow, not one, and the write path is the half
+// that a reader of the old code would not have suspected:
+//
+//   * READS. 64 beats in flight covers a 64-cycle round trip and
+//     nothing longer. AR_DEPTH 16 makes it 256 beats - 8 KB a stream -
+//     which covers 256 cycles with the read path still at one beat a
+//     cycle. FIFO_LOG2 goes to 9 because the reservation has to fit,
+//     and that is free: a 256-bit FIFO is four RAMB36 in 512x72
+//     simple-dual-port mode at any depth up to 512, so the engine's
+//     sixteen block RAMs are the same sixteen they were.
+//
+//   * WRITES. The writer used to WAIT for BRESP before starting the
+//     next burst, so every burst cost AWLEN+1 beats plus a whole
+//     response latency: (L+20)/16 cycles a beat. That is the 1.250 the
+//     zero-latency model measured, and it is 2.25 on its own at a
+//     16-cycle response - the write path could have accounted for the
+//     card's entire number without the read path being involved. The
+//     responses are counted now instead of waited on (AW_DEPTH of
+//     them), which takes the write round trip out of the rate
+//     altogether and leaves the writer at 18 cycles per 16-beat burst.
+//
+// Neither changes a bit, and the reason is the same one as for the
+// four masters below: the contract rests on the single issue point
+// popping all three operand FIFOs in index order and the single writer
+// emitting in index order, and both are untouched. Deeper queues let
+// the streams run further ahead of each other IN THE MEMORY SYSTEM;
+// compute still consumes beat i of all three before beat i+1 of any.
 //
 // Read, compute and write all overlap across beats. Element order is
 // still total: beats are popped in index order by the single issue
@@ -52,13 +105,57 @@ module cft_engine_stream #(
     // AR_DEPTH bursts of BURST_MAX outstanding, that reservation alone
     // is AR_DEPTH*BURST_MAX beats, and anything left over is what
     // actually smooths the stream.
-    parameter int FIFO_LOG2  = 7,
-    // Bursts in flight per stream. Sized against memory latency, not
-    // against the FIFO: a burst is BURST_MAX beats, so hiding an
-    // L-cycle latency wants roughly L/BURST_MAX bursts queued behind
-    // the one streaming. HBM read latency on this shell is order 60
-    // cycles, 16-beat bursts, hence 4.
-    parameter int AR_DEPTH   = 4,
+    //
+    // 512 on the Alveo path, and the reason it is not smaller is
+    // measured rather than chosen: see AR_DEPTH below. The cost is
+    // nothing on this part - a 256-bit FIFO is four RAMB36 in
+    // 512x72 simple-dual-port mode at ANY depth from 1 to 512, so
+    // 7 and 9 build the same sixteen block RAMs - and a smaller part
+    // that wants the depth back can have it, since this is a
+    // parameter and the guards below are the only thing it has to
+    // satisfy.
+    parameter int FIFO_LOG2  = 9,
+    // Bursts in flight per stream, and THE parameter that sets the
+    // engine's rate against a real memory.
+    //
+    // A stream's throughput is bytes in flight divided by the round
+    // trip, until that quotient reaches one beat a cycle and the
+    // master's own limit takes over. AR_DEPTH*BURST_MAX beats are in
+    // flight, so the round trip this hides is AR_DEPTH*BURST_MAX
+    // cycles - and everything below that is a rate, not a latency to
+    // be amortised away.
+    //
+    // It used to be 4. Four 16-beat bursts is 64 beats, and on the
+    // U50 the engine sustained exactly 64 beats per round trip: 59
+    // million beats a second at 135 MHz, 2.25 cycles a beat, flat
+    // across format and size, which is the signature of a latency
+    // bound and implies a round trip near 146 cycles through that
+    // shell's HBM path (docs/BENCHMARKS.md, "The engine, measured",
+    // 2026-09-09). The cocotb memory model could not have shown it:
+    // it answers in zero cycles. tb/busfx.py's latency knob now gives
+    // it a round trip, and at 128 cycles of read latency the old
+    // depth reproduces the card's number.
+    //
+    // 16 bursts of 16 beats is 256 beats - 8 KB - per stream, which
+    // covers a round trip of 256 cycles with the read path still at
+    // one beat a cycle. The cost is three counters and a 16-deep
+    // length queue per stream; the FIFO that has to hold the
+    // reservation is the same sixteen block RAMs it always was.
+    parameter int AR_DEPTH   = 16,
+    // Write bursts issued and not yet answered. The writer used to
+    // wait for BRESP before starting the next burst, which put the
+    // write round trip on the critical path once per burst: a 16-beat
+    // burst plus an L-cycle response is (L+20)/16 cycles a beat, so
+    // even the zero-latency cocotb slave cost 1.250 and a 16-cycle
+    // response would cost 2.25 on its own. Nothing needs that wait -
+    // the data has left, the address has left, and the only thing the
+    // response decides is whether the run reports a fault - so the
+    // responses are now counted instead of waited on, and the run
+    // still does not finish until every one has landed.
+    //
+    // 16 costs one 8-bit counter and no storage at all, because a
+    // write burst in flight holds nothing here: its beats are gone.
+    parameter int AW_DEPTH   = 16,
     // Share one cft_mulfrac across every lane instead of giving each its
     // own multiplier. Measured NOT to pay on this fabric - see the
     // USE_FUSED_MUL comment below for the numbers and the reason - so it
@@ -287,12 +384,23 @@ module cft_engine_stream #(
 
   localparam int BURST_MAX = 1 << BURST_LOG2;
   localparam int FDEPTH    = 1 << FIFO_LOG2;
-  // Explicitly the low byte. rd_outst counts in 8 bits, so an AR_DEPTH
-  // above 255 would wrap here and stall the launch compare - nothing
-  // guards that (every build uses the default 4; the reservation guard
-  // below binds first for any FIFO this design has ever built, but it
-  // is not a proof). Flagged by the width audit as an open finding.
+  // Explicitly the low byte. rd_outst and wr_outst count in 8 bits, so
+  // a depth above 255 would wrap here and stall the launch compare.
+  // The width audit left that as an open finding when AR_DEPTH was 4
+  // and the reservation guard bound first; at 16 it still does, but
+  // the guards below now say so directly rather than by argument.
   localparam logic [7:0] AR_MAX = AR_DEPTH[7:0];
+  localparam logic [7:0] AW_MAX = AW_DEPTH[7:0];
+
+  // The RLAST length queue's index width. NOT $clog2(AR_DEPTH) used
+  // raw: at AR_DEPTH 1 that is zero and `len_wp[-1:0]` is an
+  // elaboration error, and at any non-power-of-two depth the pointers
+  // wrap modulo the next power of two while the array stops at
+  // AR_DEPTH, which indexes past its end. Both are configurations the
+  // open-core part is entitled to ask for (docs/ROADMAP.md), so the
+  // queue is sized to the power of two the pointers actually use.
+  localparam int AR_IDX_W = (AR_DEPTH <= 1) ? 1 : $clog2(AR_DEPTH);
+  localparam int LENQ_D   = 1 << AR_IDX_W;
 
   // The writer starts a burst only once the result FIFO holds the
   // whole burst, so a burst longer than the FIFO can never start and
@@ -319,15 +427,22 @@ module cft_engine_stream #(
     if (AR_DEPTH < 1) begin : g_ar_depth_zero
       $error("cft_engine_stream: AR_DEPTH must be at least 1");
     end
+    if (AR_DEPTH > 255) begin : g_ar_depth_too_deep
+      $error("cft_engine_stream: AR_DEPTH must fit the 8-bit rd_outst counter");
+    end
+    if (AW_DEPTH < 1 || AW_DEPTH > 255) begin : g_aw_depth_range
+      $error("cft_engine_stream: AW_DEPTH must be 1..255 (the wr_outst counter)");
+    end
     if (AR_DEPTH * BURST_MAX > FDEPTH) begin : g_ar_depth_exceeds_fifo
       $error("cft_engine_stream: AR_DEPTH*BURST_MAX must fit the stream FIFO");
     end
   endgenerate
 
   initial begin
-    if (AR_DEPTH < 1 || AR_DEPTH * BURST_MAX > FDEPTH) begin
-      $display("FATAL: cft_engine_stream AR_DEPTH (%0d) * BURST_MAX (%0d) must fit FDEPTH (%0d)",
-               AR_DEPTH, BURST_MAX, FDEPTH);
+    if (AR_DEPTH < 1 || AR_DEPTH > 255 || AW_DEPTH < 1 || AW_DEPTH > 255 ||
+        AR_DEPTH * BURST_MAX > FDEPTH) begin
+      $display("FATAL: cft_engine_stream AR_DEPTH (%0d) * BURST_MAX (%0d) must fit FDEPTH (%0d), and AR_DEPTH/AW_DEPTH (%0d) must be 1..255",
+               AR_DEPTH, BURST_MAX, FDEPTH, AW_DEPTH);
       $finish;
     end
     if (BURST_MAX >= FDEPTH) begin
@@ -531,10 +646,20 @@ module cft_engine_stream #(
   // what turns four ports into four times the throughput.
   //
   // Ordering is safe with a single AXI ID: responses on one ID return
-  // in issue order, so beats arrive in address order and the FIFO stays
-  // an index-ordered stream. The determinism argument is untouched -
-  // it was never about the memory system, only about issue order at the
+  // in issue order (AXI4 A5.3 - read data for transactions with the
+  // same ARID must be returned in the order the addresses were
+  // issued), so beats arrive in address order and the FIFO stays an
+  // index-ordered stream. That is what lets sixteen ARs be in flight
+  // with no reorder buffer anywhere, and it is why every ARID here is
+  // a hardwired zero rather than a counter: an ID per burst would be
+  // faster on paper and would need the reorder buffer this design
+  // does not have. The determinism argument is untouched - it was
+  // never about the memory system, only about issue order at the
   // single compute point, which is unchanged.
+  //
+  // How deep, in one line: AR_DEPTH*BURST_MAX beats in flight is the
+  // round trip this hides, and the module header has the card
+  // measurement that set it.
   //
   // FIFO space is reserved at AR time, not at R time. Two bursts in
   // flight can together exceed the free space that each looked at
@@ -602,15 +727,38 @@ module cft_engine_stream #(
   assign b_wr = rd_wr[1];
   assign c_wr = rd_wr[2];
 
-  // beats this burst may cover: min(BURST_MAX, remaining, beats to the
-  // 4KB AXI boundary, UNRESERVED FIFO space). Addresses are 32B-aligned
-  // by the host contract, so the boundary term is never zero.
-  function automatic logic [7:0] burst_len(
+  // Beats this burst WANTS: min(BURST_MAX, remaining, beats to the 4KB
+  // AXI boundary). Addresses are 32B-aligned by the host contract, so
+  // the boundary term is never zero.
+  //
+  // The FIFO's free space used to be a fourth term here, cutting the
+  // burst down to whatever room happened to be left. It is a SEPARATE
+  // test now - the burst is either issued at full length or not issued
+  // at all - and the difference is the whole depth argument.
+  //
+  // Trimming looks harmless and is not. Bytes in flight is what sets a
+  // latency-bound stream's rate, and bytes in flight is AR_DEPTH times
+  // the AVERAGE burst, not times BURST_MAX. Once the write path stops
+  // being the slower half, the operand FIFOs fill, free space falls to
+  // a handful of beats, and the trimming rule starts issuing four- and
+  // eight-beat bursts: the same sixteen outstanding, half or a quarter
+  // of the bytes, and a ceiling that silently drops with them. Waiting
+  // for room instead costs nothing, because the only stream that has
+  // to wait is one whose FIFO is nearly FULL - which is a stream
+  // compute cannot be starved by - and it keeps the depth this design
+  // now advertises equal to the depth it actually runs at. It is also
+  // the kinder pattern for the memory: full bursts are what an HBM
+  // controller wants, and what the card measured well at.
+  //
+  // No deadlock, at any parameterization. `free` grows whenever
+  // compute pops a beat, and compute is gated on all three FIFOs being
+  // non-empty - so a stream that cannot launch is one holding beats,
+  // and holding beats is exactly what lets compute run and free the
+  // space it is waiting for.
+  function automatic logic [7:0] burst_want(
       input logic [63:0] rem,
-      input logic [63:0] addr,
-      input logic [FIFO_LOG2:0] cnt,
-      input logic [15:0]        resv);
-    logic [63:0] bound, free, used, l;
+      input logic [63:0] addr);
+    logic [63:0] bound, l;
     begin
       // Beats to the next 4KB boundary. The shift is ADDR_SH, not a
       // literal 5: 5 is log2(32) and only correct while BEAT_BITS is
@@ -620,15 +768,24 @@ module cft_engine_stream #(
       // parameterization bug sitting in the one function whose job is
       // to respect a hard AXI rule.
       bound = (64'd4096 - {52'd0, addr[11:0]}) >> ADDR_SH;
-      used  = {{(63-FIFO_LOG2){1'b0}}, cnt} + {48'd0, resv};
-      // FDEPTH/BURST_MAX zero-filled to the working width; both are
-      // positive powers of two, so sign never enters into it.
-      free  = (used >= {32'd0, FDEPTH}) ? 64'd0 : ({32'd0, FDEPTH} - used);
       l = {32'd0, BURST_MAX};
       if (rem   < l) l = rem;
       if (bound < l) l = bound;
-      if (free  < l) l = free;
-      burst_len = l[7:0];
+      burst_want = l[7:0];
+    end
+  endfunction
+
+  // Beats of this stream's FIFO that are neither occupied nor promised
+  // to an AR already issued. Saturates at zero rather than wrapping:
+  // an underflow here would read as unlimited space and overrun the
+  // FIFO, which corrupts operands instead of stalling.
+  function automatic logic [31:0] burst_room(
+      input logic [FIFO_LOG2:0] cnt,
+      input logic [15:0]        resv);
+    logic [31:0] used;
+    begin
+      used = {{(31-FIFO_LOG2){1'b0}}, cnt} + {16'd0, resv};
+      burst_room = (used >= FDEPTH[31:0]) ? 32'd0 : (FDEPTH[31:0] - used);
     end
   endfunction
 
@@ -637,6 +794,7 @@ module cft_engine_stream #(
     for (rs = 0; rs < 3; rs = rs + 1) begin : g_reader
       logic [63:0] rem, addr;
       logic [7:0]  len;
+      logic [31:0] room;
       logic        launch;
 
       // The function's arguments are read into local SCALARS first, and
@@ -660,13 +818,18 @@ module cft_engine_stream #(
 
       assign rem  = beats_total - issued_s;
       assign addr = base_s + (issued_s << ADDR_SH);
-      assign len  = burst_len(rem, addr, cnt_s, resv_s);
+      assign len  = burst_want(rem, addr);
+      assign room = burst_room(cnt_s, resv_s);
 
-      // The AR request is REGISTERED, and it has to be. addr and len
-      // above are combinational on rd_cnt, the FIFO occupancy, which
-      // falls every time compute pops a beat - so driving them straight
-      // at the port would change ARADDR and ARLEN while ARVALID was
-      // asserted and waiting for ARREADY. AXI4 forbids that (A3.2.1:
+      // The AR request is REGISTERED, and it has to be. `launch` is
+      // combinational on `room`, and `room` on rd_cnt - the FIFO
+      // occupancy, which falls every time compute pops a beat - so
+      // driving addr and len straight at the port would change ARADDR
+      // and ARLEN while ARVALID was asserted and waiting for ARREADY.
+      // (Before the full-burst rule, `len` itself depended on the
+      // occupancy, which is how the bug arrived; the dependency has
+      // moved but the reason for the register has not.)
+      // AXI4 forbids that (A3.2.1:
       // the source must hold payload stable until the handshake), and
       // the failure it produces is not a clean protocol error: the
       // slave latches one length and the reader accounts for another,
@@ -684,7 +847,9 @@ module cft_engine_stream #(
       // issued. An AR already asserted is left alone - ARVALID must
       // hold until ARREADY (AXI4 A3.1.2) - and `!ar_pend` above
       // already prevents this from disturbing one.
+      // `room >= len` rather than a trimmed length - see burst_want.
       assign launch = running && !abort && !ar_pend && (len != 8'd0) &&
+                      (room >= {24'd0, len}) &&
                       (rd_outst[rs] < AR_MAX);
 
       assign rd_araddr[rs]  = ar_addr_q;
@@ -740,11 +905,13 @@ module cft_engine_stream #(
       //
       // Pipelined ARs made it need a queue: with several bursts in
       // flight the length to check against is the OLDEST outstanding
-      // one, not the most recently issued. Depth AR_DEPTH, which is
-      // exactly how many can be waiting.
-      logic [7:0] len_q [0:AR_DEPTH-1];
+      // one, not the most recently issued. LENQ_D entries, which is
+      // AR_DEPTH rounded up to a power of two - see AR_IDX_W: the
+      // pointers wrap on a power of two whatever AR_DEPTH is, so the
+      // array has to as well.
+      logic [7:0] len_q [0:LENQ_D-1];
       logic [7:0] beat_ctr;
-      logic [$clog2(AR_DEPTH):0] len_wp, len_rp;
+      logic [AR_IDX_W:0] len_wp, len_rp;
 
       always_ff @(posedge ap_clk) begin
         if (!ap_rst_n || !running) begin
@@ -755,20 +922,20 @@ module cft_engine_stream #(
         end else begin
           // Pushed at launch, matching where the burst is committed.
           if (launch) begin
-            len_q[len_wp[$clog2(AR_DEPTH)-1:0]] <= len;
+            len_q[len_wp[AR_IDX_W-1:0]] <= len;
             len_wp <= len_wp + 1'b1;
           end
           if (rd_rvalid[rs]) begin
             if (rd_rlast[rs]) begin
               // last beat of this burst: the count must match
-              if ((beat_ctr + 8'd1) != len_q[len_rp[$clog2(AR_DEPTH)-1:0]])
+              if ((beat_ctr + 8'd1) != len_q[len_rp[AR_IDX_W-1:0]])
                 rlen_err[rs] <= 1'b1;
               beat_ctr <= 8'd0;
               len_rp <= len_rp + 1'b1;
             end else begin
               // not last: overrunning the expected length is the
               // other half of the same fault
-              if ((beat_ctr + 8'd1) >= len_q[len_rp[$clog2(AR_DEPTH)-1:0]])
+              if ((beat_ctr + 8'd1) >= len_q[len_rp[AR_IDX_W-1:0]])
                 rlen_err[rs] <= 1'b1;
               beat_ctr <= beat_ctr + 8'd1;
             end
@@ -1177,15 +1344,44 @@ module cft_engine_stream #(
   /* verilator lint_on WIDTHEXPAND */
 
   // ---- writer: index-order bursts from the D FIFO --------------------
-  localparam logic [1:0] W_IDLE = 2'd0, W_AW = 2'd1, W_DATA = 2'd2, W_B = 2'd3;
+  //
+  // THE RESPONSE IS COUNTED, NOT WAITED ON. There used to be a fourth
+  // state here that sat on BVALID before the next burst could start,
+  // and that put the write round trip on the critical path once per
+  // burst: AWLEN+1 beats of data plus a whole response latency, so
+  // (L+20)/16 cycles a beat at a 16-beat burst. Against the cocotb
+  // memory model, which answers in two cycles, that is the 1.250 this
+  // engine measured; against a memory that takes 16 cycles to answer
+  // it is 2.25, which is what the card does - and the write path could
+  // account for the card's number all on its own, whatever the read
+  // path was doing. Nothing needed the wait: the data has been
+  // accepted, the address has been accepted, and the only thing the
+  // response decides is whether the run reports a bus fault. So
+  // `wr_outst` counts bursts that have not been answered, BREADY is
+  // tied high, and the RUN does not finish until the count is zero -
+  // which is the property that actually matters, because a host reads
+  // the D buffer after ap_done.
+  //
+  // Order is untouched. One W state machine emits bursts back to back
+  // in index order, which is also AW order, which is what AXI4
+  // requires of a master that does not interleave write data (A3.4.4)
+  // and what makes B responses on one AWID come back in the same
+  // order. Nothing here decides bits; it decides when they leave.
+  localparam logic [1:0] W_IDLE = 2'd0, W_AW = 2'd1, W_DATA = 2'd2;
 
   logic [1:0]  wr_state;
-  logic [63:0] wr_done;
+  // Beats whose write burst has been fully ISSUED. Addressing runs off
+  // this, so it advances at the last W beat rather than at the
+  // response - the next burst's address does not depend on the memory
+  // having answered for the previous one.
+  logic [63:0] wr_sent;
+  // Bursts issued and not yet answered.
+  logic [7:0]  wr_outst;
   logic [7:0]  w_len, w_cnt;
 
   logic [63:0] rem_w, addr_w;
-  assign rem_w  = wr_total - wr_done;
-  assign addr_w = base_d + (wr_done << ADDR_SH);
+  assign rem_w  = wr_total - wr_sent;
+  assign addr_w = base_d + (wr_sent << ADDR_SH);
 
   // target burst: full-size when possible; the tail is always fully
   // buffered by the time rem_w is what is left, so d_cnt >= target
@@ -1197,7 +1393,7 @@ module cft_engine_stream #(
     // at burst_len(). A hardcoded 5 is only right at BEAT_BITS=256. At
     // the quarter tile's 64 it understates by 4x and reaches ZERO for
     // the last beats of a 4KB page (addr_w[11:0]=4072 gives 24>>5=0),
-    // which clears w_go permanently: wr_done stops, ap_done never
+    // which clears w_go permanently: wr_sent stops, ap_done never
     // asserts, and the run hangs until the host's timeout.
     bound = (64'd4096 - {52'd0, addr_w[11:0]}) >> ADDR_SH;
     l = {32'd0, BURST_MAX};
@@ -1206,21 +1402,37 @@ module cft_engine_stream #(
     w_target = l[7:0];
   end
 
-  logic w_go;
+  logic w_go, w_last_beat;
   // No NEW burst once the run is being abandoned. A burst already
   // committed still finishes - see the abort block.
+  // The occupancy compare is done at 32 bits with both sides
+  // zero-filled EXPLICITLY, the same idiom ex_valid uses above. It
+  // used to be `d_cnt >= w_target` with both sides eight bits by
+  // coincidence - FIFO_LOG2 was 7 - and at FIFO_LOG2 9 the left side
+  // is ten bits and the right is still eight. Verilator's WIDTHEXPAND
+  // caught it, which is why that warning is fatal here.
   assign w_go = running && !abort && (w_target != 8'd0) &&
-                (d_cnt >= w_target);
+                ({{(31-FIFO_LOG2){1'b0}}, d_cnt} >= {24'd0, w_target}) &&
+                (wr_outst < AW_MAX);
+
+  // The handshake that ends a burst: the beat AWLEN asked for last.
+  assign w_last_beat = (wr_state == W_DATA) &&
+                       m_axi_d_wvalid && m_axi_d_wready &&
+                       ((w_cnt + 8'd1) == w_len);
 
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
       wr_state <= W_IDLE;
-      wr_done <= '0;
+      wr_sent  <= '0;
+      wr_outst <= 8'd0;
       w_len <= 8'd0;
       w_cnt <= 8'd0;
     end else if (!running) begin
       wr_state <= W_IDLE;
-      wr_done <= '0;
+      wr_sent  <= '0;
+      // Safe to zero here BECAUSE the run does not end until the count
+      // reaches zero - see wfinish and afinish. Nothing is discarded.
+      wr_outst <= 8'd0;
     end else begin
       case (wr_state)
         W_IDLE: if (w_go) begin
@@ -1236,14 +1448,21 @@ module cft_engine_stream #(
         end
         W_DATA: if (m_axi_d_wvalid && m_axi_d_wready) begin
           w_cnt <= w_cnt + 8'd1;
-          if (w_cnt + 8'd1 == w_len) wr_state <= W_B;
-        end
-        W_B: if (m_axi_d_bvalid) begin
-          wr_done <= wr_done + {56'd0, w_len};
-          wr_state <= W_IDLE;
+          if ((w_cnt + 8'd1) == w_len) begin
+            wr_sent <= wr_sent + {56'd0, w_len};
+            wr_state <= W_IDLE;
+          end
         end
         default: wr_state <= W_IDLE;
       endcase
+
+      // +1 when a burst's last beat goes out, -1 per response. Both in
+      // one cycle once responses are pipelined, so one expression - the
+      // sequential form loses whichever it writes first, which is the
+      // same trap rd_outst documents on the read side.
+      wr_outst <= wr_outst
+                  + (w_last_beat ? 8'd1 : 8'd0)
+                  - ((m_axi_d_bvalid && m_axi_d_bready) ? 8'd1 : 8'd0);
     end
   end
 
@@ -1270,10 +1489,16 @@ module cft_engine_stream #(
   assign m_axi_d_wlast   = (w_cnt == w_len - 8'd1);
   // ...but never pop a FIFO that has nothing in it.
   assign d_rd            = m_axi_d_wvalid && m_axi_d_wready && (d_cnt != 0);
-  assign m_axi_d_bready  = (wr_state == W_B);
+  // Always ready for a response. There is nothing to decide: the count
+  // is the only consumer, and withholding BREADY would put the
+  // interconnect's response buffer in the loop for no gain.
+  assign m_axi_d_bready  = 1'b1;
 
-  assign wfinish = (wr_state == W_B) && m_axi_d_bvalid &&
-                   ((wr_done + {56'd0, w_len}) == wr_total);
+  // Every beat issued AND every response landed. The second half is
+  // what makes ap_done mean "the D buffer is what the host may read":
+  // a run that finished with responses outstanding would be reporting
+  // a write the memory system had not yet acknowledged.
+  assign wfinish = running && (wr_sent == wr_total) && (wr_outst == 8'd0);
 
   // ---- sticky bus faults ---------------------------------------------
   //
@@ -1297,7 +1522,11 @@ module cft_engine_stream #(
           (m_axi_b_rvalid && (m_axi_b_rresp != 2'b00)) ||
           (m_axi_c_rvalid && (m_axi_c_rresp != 2'b00)))
         err_acc[ERR_RRESP] <= 1'b1;
-      if ((wr_state == W_B) && m_axi_d_bvalid && (m_axi_d_bresp != 2'b00))
+      // A response the engine asked for: BREADY is tied high, so every
+      // BVALID with a burst outstanding is one of ours. The old form
+      // tested the state the writer sat in while waiting, which no
+      // longer exists.
+      if ((wr_outst != 8'd0) && m_axi_d_bvalid && (m_axi_d_bresp != 2'b00))
         err_acc[ERR_BRESP] <= 1'b1;
       // Raised per stream by the length queues in the reader generate.
       if (|rlen_err)
@@ -1350,7 +1579,11 @@ module cft_engine_stream #(
     else if (running && |rlen_err) abort <= 1'b1;
   end
 
+  // wr_outst as well as the read counts: an abandoned run must not
+  // leave a write response in flight either, or it lands during the
+  // NEXT run and decrements a counter that is counting something else.
   assign afinish = abort && (wr_state == W_IDLE) &&
+                   (wr_outst == 8'd0) &&
                    (rd_outst[0] == 8'd0) &&
                    (rd_outst[1] == 8'd0) &&
                    (rd_outst[2] == 8'd0);
