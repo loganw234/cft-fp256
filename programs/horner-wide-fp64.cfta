@@ -1,0 +1,635 @@
+; horner-wide-fp64 - a degree-299 Horner whose coefficients arrive per
+; run, past the 256 a byte of imm reaches
+;
+; docs/SEQUENCER.md revision 3, R7: under `kx` a constant index is NINE
+; bits - a byte of `imm` and its ninth in imm[30:28], one per operand -
+; so the bank holds 512 and this program addresses 300 of them. The
+; source says nothing about that: the assembler picks the plain form
+; for an index below sixteen, the indexed form from sixteen, and sets
+; the ninth bit from 256. `cft-asm -i` names KX9 among the features the
+; image needs, and `cft_program_load` refuses the image on a device
+; whose CAPS[7] is clear rather than letting an eight-bit operand mux
+; address the wrong constant.
+;
+; It is also a BANK_EXT program (revision 2's R3), so the image carries
+; no constant section at all: 2448 bytes of pure schedule, and the
+; three hundred coefficients arrive per run in
+; horner-wide-fp64.recip.bank - C[k] = (-1)^k / (k+1), each the
+; library's own correctly-rounded quotient rather than a decimal
+; somebody typed.
+;
+; The first line is a `copysign` of C0 with itself, which is an exact
+; bit copy for every operand including the zeroes and the infinities -
+; the usual `fma acc, zero, x, C0` would be a NaN at x = inf, and a
+; move that is only correct for the inputs a check happens to use is
+; not a move.
+
+.format   fp64
+.deposits 1
+.bank     external
+
+.const    C0
+.const    C1
+.const    C2
+.const    C3
+.const    C4
+.const    C5
+.const    C6
+.const    C7
+.const    C8
+.const    C9
+.const    C10
+.const    C11
+.const    C12
+.const    C13
+.const    C14
+.const    C15
+.const    C16
+.const    C17
+.const    C18
+.const    C19
+.const    C20
+.const    C21
+.const    C22
+.const    C23
+.const    C24
+.const    C25
+.const    C26
+.const    C27
+.const    C28
+.const    C29
+.const    C30
+.const    C31
+.const    C32
+.const    C33
+.const    C34
+.const    C35
+.const    C36
+.const    C37
+.const    C38
+.const    C39
+.const    C40
+.const    C41
+.const    C42
+.const    C43
+.const    C44
+.const    C45
+.const    C46
+.const    C47
+.const    C48
+.const    C49
+.const    C50
+.const    C51
+.const    C52
+.const    C53
+.const    C54
+.const    C55
+.const    C56
+.const    C57
+.const    C58
+.const    C59
+.const    C60
+.const    C61
+.const    C62
+.const    C63
+.const    C64
+.const    C65
+.const    C66
+.const    C67
+.const    C68
+.const    C69
+.const    C70
+.const    C71
+.const    C72
+.const    C73
+.const    C74
+.const    C75
+.const    C76
+.const    C77
+.const    C78
+.const    C79
+.const    C80
+.const    C81
+.const    C82
+.const    C83
+.const    C84
+.const    C85
+.const    C86
+.const    C87
+.const    C88
+.const    C89
+.const    C90
+.const    C91
+.const    C92
+.const    C93
+.const    C94
+.const    C95
+.const    C96
+.const    C97
+.const    C98
+.const    C99
+.const    C100
+.const    C101
+.const    C102
+.const    C103
+.const    C104
+.const    C105
+.const    C106
+.const    C107
+.const    C108
+.const    C109
+.const    C110
+.const    C111
+.const    C112
+.const    C113
+.const    C114
+.const    C115
+.const    C116
+.const    C117
+.const    C118
+.const    C119
+.const    C120
+.const    C121
+.const    C122
+.const    C123
+.const    C124
+.const    C125
+.const    C126
+.const    C127
+.const    C128
+.const    C129
+.const    C130
+.const    C131
+.const    C132
+.const    C133
+.const    C134
+.const    C135
+.const    C136
+.const    C137
+.const    C138
+.const    C139
+.const    C140
+.const    C141
+.const    C142
+.const    C143
+.const    C144
+.const    C145
+.const    C146
+.const    C147
+.const    C148
+.const    C149
+.const    C150
+.const    C151
+.const    C152
+.const    C153
+.const    C154
+.const    C155
+.const    C156
+.const    C157
+.const    C158
+.const    C159
+.const    C160
+.const    C161
+.const    C162
+.const    C163
+.const    C164
+.const    C165
+.const    C166
+.const    C167
+.const    C168
+.const    C169
+.const    C170
+.const    C171
+.const    C172
+.const    C173
+.const    C174
+.const    C175
+.const    C176
+.const    C177
+.const    C178
+.const    C179
+.const    C180
+.const    C181
+.const    C182
+.const    C183
+.const    C184
+.const    C185
+.const    C186
+.const    C187
+.const    C188
+.const    C189
+.const    C190
+.const    C191
+.const    C192
+.const    C193
+.const    C194
+.const    C195
+.const    C196
+.const    C197
+.const    C198
+.const    C199
+.const    C200
+.const    C201
+.const    C202
+.const    C203
+.const    C204
+.const    C205
+.const    C206
+.const    C207
+.const    C208
+.const    C209
+.const    C210
+.const    C211
+.const    C212
+.const    C213
+.const    C214
+.const    C215
+.const    C216
+.const    C217
+.const    C218
+.const    C219
+.const    C220
+.const    C221
+.const    C222
+.const    C223
+.const    C224
+.const    C225
+.const    C226
+.const    C227
+.const    C228
+.const    C229
+.const    C230
+.const    C231
+.const    C232
+.const    C233
+.const    C234
+.const    C235
+.const    C236
+.const    C237
+.const    C238
+.const    C239
+.const    C240
+.const    C241
+.const    C242
+.const    C243
+.const    C244
+.const    C245
+.const    C246
+.const    C247
+.const    C248
+.const    C249
+.const    C250
+.const    C251
+.const    C252
+.const    C253
+.const    C254
+.const    C255
+.const    C256
+.const    C257
+.const    C258
+.const    C259
+.const    C260
+.const    C261
+.const    C262
+.const    C263
+.const    C264
+.const    C265
+.const    C266
+.const    C267
+.const    C268
+.const    C269
+.const    C270
+.const    C271
+.const    C272
+.const    C273
+.const    C274
+.const    C275
+.const    C276
+.const    C277
+.const    C278
+.const    C279
+.const    C280
+.const    C281
+.const    C282
+.const    C283
+.const    C284
+.const    C285
+.const    C286
+.const    C287
+.const    C288
+.const    C289
+.const    C290
+.const    C291
+.const    C292
+.const    C293
+.const    C294
+.const    C295
+.const    C296
+.const    C297
+.const    C298
+.const    C299
+
+.reg      acc = r3
+
+copysign acc, C0, C0
+fma acc, acc, r0, C1
+fma acc, acc, r0, C2
+fma acc, acc, r0, C3
+fma acc, acc, r0, C4
+fma acc, acc, r0, C5
+fma acc, acc, r0, C6
+fma acc, acc, r0, C7
+fma acc, acc, r0, C8
+fma acc, acc, r0, C9
+fma acc, acc, r0, C10
+fma acc, acc, r0, C11
+fma acc, acc, r0, C12
+fma acc, acc, r0, C13
+fma acc, acc, r0, C14
+fma acc, acc, r0, C15
+fma acc, acc, r0, C16
+fma acc, acc, r0, C17
+fma acc, acc, r0, C18
+fma acc, acc, r0, C19
+fma acc, acc, r0, C20
+fma acc, acc, r0, C21
+fma acc, acc, r0, C22
+fma acc, acc, r0, C23
+fma acc, acc, r0, C24
+fma acc, acc, r0, C25
+fma acc, acc, r0, C26
+fma acc, acc, r0, C27
+fma acc, acc, r0, C28
+fma acc, acc, r0, C29
+fma acc, acc, r0, C30
+fma acc, acc, r0, C31
+fma acc, acc, r0, C32
+fma acc, acc, r0, C33
+fma acc, acc, r0, C34
+fma acc, acc, r0, C35
+fma acc, acc, r0, C36
+fma acc, acc, r0, C37
+fma acc, acc, r0, C38
+fma acc, acc, r0, C39
+fma acc, acc, r0, C40
+fma acc, acc, r0, C41
+fma acc, acc, r0, C42
+fma acc, acc, r0, C43
+fma acc, acc, r0, C44
+fma acc, acc, r0, C45
+fma acc, acc, r0, C46
+fma acc, acc, r0, C47
+fma acc, acc, r0, C48
+fma acc, acc, r0, C49
+fma acc, acc, r0, C50
+fma acc, acc, r0, C51
+fma acc, acc, r0, C52
+fma acc, acc, r0, C53
+fma acc, acc, r0, C54
+fma acc, acc, r0, C55
+fma acc, acc, r0, C56
+fma acc, acc, r0, C57
+fma acc, acc, r0, C58
+fma acc, acc, r0, C59
+fma acc, acc, r0, C60
+fma acc, acc, r0, C61
+fma acc, acc, r0, C62
+fma acc, acc, r0, C63
+fma acc, acc, r0, C64
+fma acc, acc, r0, C65
+fma acc, acc, r0, C66
+fma acc, acc, r0, C67
+fma acc, acc, r0, C68
+fma acc, acc, r0, C69
+fma acc, acc, r0, C70
+fma acc, acc, r0, C71
+fma acc, acc, r0, C72
+fma acc, acc, r0, C73
+fma acc, acc, r0, C74
+fma acc, acc, r0, C75
+fma acc, acc, r0, C76
+fma acc, acc, r0, C77
+fma acc, acc, r0, C78
+fma acc, acc, r0, C79
+fma acc, acc, r0, C80
+fma acc, acc, r0, C81
+fma acc, acc, r0, C82
+fma acc, acc, r0, C83
+fma acc, acc, r0, C84
+fma acc, acc, r0, C85
+fma acc, acc, r0, C86
+fma acc, acc, r0, C87
+fma acc, acc, r0, C88
+fma acc, acc, r0, C89
+fma acc, acc, r0, C90
+fma acc, acc, r0, C91
+fma acc, acc, r0, C92
+fma acc, acc, r0, C93
+fma acc, acc, r0, C94
+fma acc, acc, r0, C95
+fma acc, acc, r0, C96
+fma acc, acc, r0, C97
+fma acc, acc, r0, C98
+fma acc, acc, r0, C99
+fma acc, acc, r0, C100
+fma acc, acc, r0, C101
+fma acc, acc, r0, C102
+fma acc, acc, r0, C103
+fma acc, acc, r0, C104
+fma acc, acc, r0, C105
+fma acc, acc, r0, C106
+fma acc, acc, r0, C107
+fma acc, acc, r0, C108
+fma acc, acc, r0, C109
+fma acc, acc, r0, C110
+fma acc, acc, r0, C111
+fma acc, acc, r0, C112
+fma acc, acc, r0, C113
+fma acc, acc, r0, C114
+fma acc, acc, r0, C115
+fma acc, acc, r0, C116
+fma acc, acc, r0, C117
+fma acc, acc, r0, C118
+fma acc, acc, r0, C119
+fma acc, acc, r0, C120
+fma acc, acc, r0, C121
+fma acc, acc, r0, C122
+fma acc, acc, r0, C123
+fma acc, acc, r0, C124
+fma acc, acc, r0, C125
+fma acc, acc, r0, C126
+fma acc, acc, r0, C127
+fma acc, acc, r0, C128
+fma acc, acc, r0, C129
+fma acc, acc, r0, C130
+fma acc, acc, r0, C131
+fma acc, acc, r0, C132
+fma acc, acc, r0, C133
+fma acc, acc, r0, C134
+fma acc, acc, r0, C135
+fma acc, acc, r0, C136
+fma acc, acc, r0, C137
+fma acc, acc, r0, C138
+fma acc, acc, r0, C139
+fma acc, acc, r0, C140
+fma acc, acc, r0, C141
+fma acc, acc, r0, C142
+fma acc, acc, r0, C143
+fma acc, acc, r0, C144
+fma acc, acc, r0, C145
+fma acc, acc, r0, C146
+fma acc, acc, r0, C147
+fma acc, acc, r0, C148
+fma acc, acc, r0, C149
+fma acc, acc, r0, C150
+fma acc, acc, r0, C151
+fma acc, acc, r0, C152
+fma acc, acc, r0, C153
+fma acc, acc, r0, C154
+fma acc, acc, r0, C155
+fma acc, acc, r0, C156
+fma acc, acc, r0, C157
+fma acc, acc, r0, C158
+fma acc, acc, r0, C159
+fma acc, acc, r0, C160
+fma acc, acc, r0, C161
+fma acc, acc, r0, C162
+fma acc, acc, r0, C163
+fma acc, acc, r0, C164
+fma acc, acc, r0, C165
+fma acc, acc, r0, C166
+fma acc, acc, r0, C167
+fma acc, acc, r0, C168
+fma acc, acc, r0, C169
+fma acc, acc, r0, C170
+fma acc, acc, r0, C171
+fma acc, acc, r0, C172
+fma acc, acc, r0, C173
+fma acc, acc, r0, C174
+fma acc, acc, r0, C175
+fma acc, acc, r0, C176
+fma acc, acc, r0, C177
+fma acc, acc, r0, C178
+fma acc, acc, r0, C179
+fma acc, acc, r0, C180
+fma acc, acc, r0, C181
+fma acc, acc, r0, C182
+fma acc, acc, r0, C183
+fma acc, acc, r0, C184
+fma acc, acc, r0, C185
+fma acc, acc, r0, C186
+fma acc, acc, r0, C187
+fma acc, acc, r0, C188
+fma acc, acc, r0, C189
+fma acc, acc, r0, C190
+fma acc, acc, r0, C191
+fma acc, acc, r0, C192
+fma acc, acc, r0, C193
+fma acc, acc, r0, C194
+fma acc, acc, r0, C195
+fma acc, acc, r0, C196
+fma acc, acc, r0, C197
+fma acc, acc, r0, C198
+fma acc, acc, r0, C199
+fma acc, acc, r0, C200
+fma acc, acc, r0, C201
+fma acc, acc, r0, C202
+fma acc, acc, r0, C203
+fma acc, acc, r0, C204
+fma acc, acc, r0, C205
+fma acc, acc, r0, C206
+fma acc, acc, r0, C207
+fma acc, acc, r0, C208
+fma acc, acc, r0, C209
+fma acc, acc, r0, C210
+fma acc, acc, r0, C211
+fma acc, acc, r0, C212
+fma acc, acc, r0, C213
+fma acc, acc, r0, C214
+fma acc, acc, r0, C215
+fma acc, acc, r0, C216
+fma acc, acc, r0, C217
+fma acc, acc, r0, C218
+fma acc, acc, r0, C219
+fma acc, acc, r0, C220
+fma acc, acc, r0, C221
+fma acc, acc, r0, C222
+fma acc, acc, r0, C223
+fma acc, acc, r0, C224
+fma acc, acc, r0, C225
+fma acc, acc, r0, C226
+fma acc, acc, r0, C227
+fma acc, acc, r0, C228
+fma acc, acc, r0, C229
+fma acc, acc, r0, C230
+fma acc, acc, r0, C231
+fma acc, acc, r0, C232
+fma acc, acc, r0, C233
+fma acc, acc, r0, C234
+fma acc, acc, r0, C235
+fma acc, acc, r0, C236
+fma acc, acc, r0, C237
+fma acc, acc, r0, C238
+fma acc, acc, r0, C239
+fma acc, acc, r0, C240
+fma acc, acc, r0, C241
+fma acc, acc, r0, C242
+fma acc, acc, r0, C243
+fma acc, acc, r0, C244
+fma acc, acc, r0, C245
+fma acc, acc, r0, C246
+fma acc, acc, r0, C247
+fma acc, acc, r0, C248
+fma acc, acc, r0, C249
+fma acc, acc, r0, C250
+fma acc, acc, r0, C251
+fma acc, acc, r0, C252
+fma acc, acc, r0, C253
+fma acc, acc, r0, C254
+fma acc, acc, r0, C255
+fma acc, acc, r0, C256
+fma acc, acc, r0, C257
+fma acc, acc, r0, C258
+fma acc, acc, r0, C259
+fma acc, acc, r0, C260
+fma acc, acc, r0, C261
+fma acc, acc, r0, C262
+fma acc, acc, r0, C263
+fma acc, acc, r0, C264
+fma acc, acc, r0, C265
+fma acc, acc, r0, C266
+fma acc, acc, r0, C267
+fma acc, acc, r0, C268
+fma acc, acc, r0, C269
+fma acc, acc, r0, C270
+fma acc, acc, r0, C271
+fma acc, acc, r0, C272
+fma acc, acc, r0, C273
+fma acc, acc, r0, C274
+fma acc, acc, r0, C275
+fma acc, acc, r0, C276
+fma acc, acc, r0, C277
+fma acc, acc, r0, C278
+fma acc, acc, r0, C279
+fma acc, acc, r0, C280
+fma acc, acc, r0, C281
+fma acc, acc, r0, C282
+fma acc, acc, r0, C283
+fma acc, acc, r0, C284
+fma acc, acc, r0, C285
+fma acc, acc, r0, C286
+fma acc, acc, r0, C287
+fma acc, acc, r0, C288
+fma acc, acc, r0, C289
+fma acc, acc, r0, C290
+fma acc, acc, r0, C291
+fma acc, acc, r0, C292
+fma acc, acc, r0, C293
+fma acc, acc, r0, C294
+fma acc, acc, r0, C295
+fma acc, acc, r0, C296
+fma acc, acc, r0, C297
+fma acc, acc, r0, C298
+fma acc, acc, r0, C299
+deposit acc
+halt

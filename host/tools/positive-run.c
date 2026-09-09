@@ -398,6 +398,7 @@ typedef struct {
     uint32_t n_insns, n_consts, max_deposits, prec, flags;
     uint32_t n_scratch_in, n_scratch_out;
     int      uses_scratch;      /* any of the four control codes */
+    int      uses_kx9;          /* a constant index at or past 256 */
 } header;
 
 static void parse_header(const uint8_t *img, size_t n, header *H)
@@ -417,6 +418,7 @@ static void parse_header(const uint8_t *img, size_t n, header *H)
     H->flags        = get_le32(img + 24);
     scratch_io      = get_le32(img + 28);
     H->uses_scratch = 0;
+    H->uses_kx9 = 0;
     if (H->prec > 3)
         die("precision code %u is not on the ladder", (unsigned)H->prec);
     if (H->flags & ~FLAGS_KNOWN)
@@ -429,28 +431,35 @@ static void parse_header(const uint8_t *img, size_t n, header *H)
     H->n_scratch_out = (scratch_io >> 16) & 0xFFFFu;
 }
 
-/* Does the instruction stream reach the scratch at all? Read here so
- * that a build without the scratch can say WHICH feature it lacks,
- * rather than letting cft_program_load report an unknown control code.
- * The image is already known to be exactly its header, constants and
- * instructions by the time this runs. */
-static void scan_scratch(const uint8_t *img, size_t bytes, header *H,
-                         size_t esz)
+/* Which of revision 3's features does the instruction stream actually
+ * need? Read here so that a build without one can say WHICH, rather
+ * than letting cft_program_load report an unknown control code or a
+ * bare "invalid argument". The image is already known to be exactly
+ * its header, constants and instructions by the time this runs. */
+static void scan_features(const uint8_t *img, size_t bytes, header *H,
+                          size_t esz)
 {
     size_t off = HEADER_BYTES +
                  ((H->flags & FLAG_BANK_EXT) ? 0 : (size_t)H->n_consts * esz);
     uint32_t i;
     for (i = 0; i < H->n_insns; i++) {
         const uint8_t *w = img + off + (size_t)i * 8;
-        uint32_t lo;
+        uint32_t lo, hi;
         if (off + (size_t)i * 8 + 8 > bytes)
             return;
         lo = get_le32(w);
+        hi = get_le32(w + 4);
         if ((lo >> 31) & 1u) {
             uint32_t code = lo & 0xFFu;
             if (code >= C_STL && code <= C_LDX)
                 H->uses_scratch = 1;
+            continue;
         }
+        /* R7: under kx, imm[30:28] are the ninth bits of ka's, kb's and
+         * kc's constant indices - so any of them set is an index at or
+         * past 256. */
+        if (((lo >> 30) & 1u) && (hi & 0x70000000u))
+            H->uses_kx9 = 1;
     }
 }
 
@@ -564,6 +573,12 @@ int main(int argc, char **argv)
             printf("digest        local    "
                    "(no cft_program_digest in this library)\n");
 #endif
+#ifdef CFT_SEQ_FEAT_KX9
+            printf("kx9           present\n");
+#else
+            printf("kx9           absent   "
+                   "(cft.h defines no CFT_SEQ_FEAT_KX9)\n");
+#endif
 #ifdef CFT_SEQ_FEAT_SCRATCH
             printf("scratch       present\n");
 #else
@@ -616,7 +631,7 @@ int main(int argc, char **argv)
     img = read_file(image_path, &img_bytes);
     parse_header(img, img_bytes, &H);
     esz = cft_format_size((cft_format)H.prec);
-    scan_scratch(img, img_bytes, &H, esz);
+    scan_features(img, img_bytes, &H, esz);
     have_bank_path = bank_path != NULL;
 
     /* what the header says the image should be, checked before the
@@ -639,6 +654,15 @@ int main(int argc, char **argv)
         die("%s carries its own constants, so --bank has nothing to "
             "supply", image_path);
 
+#ifndef CFT_SEQ_FEAT_KX9
+    if (H.uses_kx9)
+        die("%s addresses a constant at or past 256 (a ninth index bit in "
+            "imm[30:28] under kx) and this build of libcft predates it: "
+            "cft.h defines no CFT_SEQ_FEAT_KX9. Rebuild against a library "
+            "that carries docs/SEQUENCER.md revision 3's R7. "
+            "(`positive-run --capabilities` reports this without a file.)",
+            image_path);
+#endif
     /* The same, for revision 3's two halves, and for the same reason:
      * without the macros the loader would refuse the image for an
      * unknown control code or a non-zero reserved header word, which

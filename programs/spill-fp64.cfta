@@ -1,0 +1,205 @@
+; spill-fp64 - a live set of forty values in a machine with thirty-two registers
+;
+; docs/SEQUENCER.md revision 3, R4: the per-lane scratch.
+;
+; Forty terms t_k = x^(k+1) are computed and then combined, in that
+; order, as
+;
+;     acc = t_0;  for k in 1..39:  acc = fma(acc, W, t_k)
+;
+; and BETWEEN THE TWO PHASES ALL FORTY ARE LIVE - every one of them is
+; read after the last of them is written. A lane owns thirty-two
+; registers, so eight of those values have nowhere to be; here they
+; live in the scratch, written with `stl` and read back with `ldl`.
+;
+; spill-ref-fp64.cfta is the same arithmetic without the spill: the
+; same forty `mul`s and thirty-nine `fma`s, with the same operands, in
+; the same order, but each term consumed the instant it is produced so
+; that no two of them are ever live at once. The two programs must
+; deposit the same bits, because floating-point operations are
+; functions of their operands and neither program reorders one. What
+; differs between the files is eighty scratch accesses on one side and
+; a single exact `copysign` on the other, and neither of those is
+; arithmetic.
+;
+; The check runs both through positive-run and compares the deposits,
+; and holds each against a softfloat model of the same recurrence.
+
+.format   fp64
+.deposits 1
+
+.scratch  64            ; forty slots used, the next power of two
+
+.const    ONE = 1.0
+.const    W   = 0.5
+.reg      p   = r3      ; the running power, x^(k+1)
+.reg      t   = r4      ; one term, read back
+.reg      acc = r5
+
+; phase one: forty terms, into forty slots
+mul  p, r0, ONE         ; p = x, exactly, for every finite x
+stl  p, 0
+mul  p, p, r0
+stl  p, 1
+mul  p, p, r0
+stl  p, 2
+mul  p, p, r0
+stl  p, 3
+mul  p, p, r0
+stl  p, 4
+mul  p, p, r0
+stl  p, 5
+mul  p, p, r0
+stl  p, 6
+mul  p, p, r0
+stl  p, 7
+mul  p, p, r0
+stl  p, 8
+mul  p, p, r0
+stl  p, 9
+mul  p, p, r0
+stl  p, 10
+mul  p, p, r0
+stl  p, 11
+mul  p, p, r0
+stl  p, 12
+mul  p, p, r0
+stl  p, 13
+mul  p, p, r0
+stl  p, 14
+mul  p, p, r0
+stl  p, 15
+mul  p, p, r0
+stl  p, 16
+mul  p, p, r0
+stl  p, 17
+mul  p, p, r0
+stl  p, 18
+mul  p, p, r0
+stl  p, 19
+mul  p, p, r0
+stl  p, 20
+mul  p, p, r0
+stl  p, 21
+mul  p, p, r0
+stl  p, 22
+mul  p, p, r0
+stl  p, 23
+mul  p, p, r0
+stl  p, 24
+mul  p, p, r0
+stl  p, 25
+mul  p, p, r0
+stl  p, 26
+mul  p, p, r0
+stl  p, 27
+mul  p, p, r0
+stl  p, 28
+mul  p, p, r0
+stl  p, 29
+mul  p, p, r0
+stl  p, 30
+mul  p, p, r0
+stl  p, 31
+mul  p, p, r0
+stl  p, 32
+mul  p, p, r0
+stl  p, 33
+mul  p, p, r0
+stl  p, 34
+mul  p, p, r0
+stl  p, 35
+mul  p, p, r0
+stl  p, 36
+mul  p, p, r0
+stl  p, 37
+mul  p, p, r0
+stl  p, 38
+mul  p, p, r0
+stl  p, 39
+
+; forty values are live across this line
+
+; phase two: the same accumulation, reading them back
+ldl  acc, 0
+ldl  t, 1
+fma  acc, acc, W, t
+ldl  t, 2
+fma  acc, acc, W, t
+ldl  t, 3
+fma  acc, acc, W, t
+ldl  t, 4
+fma  acc, acc, W, t
+ldl  t, 5
+fma  acc, acc, W, t
+ldl  t, 6
+fma  acc, acc, W, t
+ldl  t, 7
+fma  acc, acc, W, t
+ldl  t, 8
+fma  acc, acc, W, t
+ldl  t, 9
+fma  acc, acc, W, t
+ldl  t, 10
+fma  acc, acc, W, t
+ldl  t, 11
+fma  acc, acc, W, t
+ldl  t, 12
+fma  acc, acc, W, t
+ldl  t, 13
+fma  acc, acc, W, t
+ldl  t, 14
+fma  acc, acc, W, t
+ldl  t, 15
+fma  acc, acc, W, t
+ldl  t, 16
+fma  acc, acc, W, t
+ldl  t, 17
+fma  acc, acc, W, t
+ldl  t, 18
+fma  acc, acc, W, t
+ldl  t, 19
+fma  acc, acc, W, t
+ldl  t, 20
+fma  acc, acc, W, t
+ldl  t, 21
+fma  acc, acc, W, t
+ldl  t, 22
+fma  acc, acc, W, t
+ldl  t, 23
+fma  acc, acc, W, t
+ldl  t, 24
+fma  acc, acc, W, t
+ldl  t, 25
+fma  acc, acc, W, t
+ldl  t, 26
+fma  acc, acc, W, t
+ldl  t, 27
+fma  acc, acc, W, t
+ldl  t, 28
+fma  acc, acc, W, t
+ldl  t, 29
+fma  acc, acc, W, t
+ldl  t, 30
+fma  acc, acc, W, t
+ldl  t, 31
+fma  acc, acc, W, t
+ldl  t, 32
+fma  acc, acc, W, t
+ldl  t, 33
+fma  acc, acc, W, t
+ldl  t, 34
+fma  acc, acc, W, t
+ldl  t, 35
+fma  acc, acc, W, t
+ldl  t, 36
+fma  acc, acc, W, t
+ldl  t, 37
+fma  acc, acc, W, t
+ldl  t, 38
+fma  acc, acc, W, t
+ldl  t, 39
+fma  acc, acc, W, t
+
+deposit acc
+halt

@@ -20,8 +20,20 @@ things, in this order, and stops at the first failure:
    in programs/README.md: byte equality with the model's generator for
    the composed div and sqrt, the tool's own records for the Collatz
    kernel, the golden model's executor for the escape map, the hash's
-   definition for the draw stream, and a model computation with two
-   different banks for the BANK_EXT worked example.
+   definition for the draw stream, a model computation with two
+   different banks for the BANK_EXT worked example, and - for
+   revision 3's four scratch rows - the same arithmetic without the
+   spill, a softfloat convolution, a longer run's second half, and a
+   softfloat Horner over three hundred coefficients.
+
+Revision 3's rows have two arms and they are not the same claim. The
+STATIC arm - constants against their derivation, the header against
+what the source declares, the encoding against the contract - runs
+today. The EXECUTION arm needs a libcft that knows the four control
+codes, the header's `scratch_io` word and the ninth constant-index
+bit, and those arrive with the model and host halves of the same
+round; until then it says SKIP and WHICH feature it waited on, asking
+`positive-run --capabilities` rather than inferring it from a failure.
 
 A check that cannot run says SKIP and why, and the script still fails
 if anything actually disagrees. Nothing here reports a pass it did not
@@ -166,7 +178,7 @@ def runner_caps(args):
 
 
 def run_image(args, image_path, tmp, tag, iota=None, a=None, b=None,
-              c=None, bank=None):
+              c=None, bank=None, scratch_in=None, scratch_out=None):
     """-> (deposits bytes, report dict), or (None, stderr)."""
     dep = tmp / (tag + ".dep.bin")
     cmd = [args.runner, image_path, "--out", dep]
@@ -180,6 +192,10 @@ def run_image(args, image_path, tmp, tag, iota=None, a=None, b=None,
         cmd += ["--c", c]
     if bank is not None:
         cmd += ["--bank", bank]
+    if scratch_in is not None:
+        cmd += ["--scratch-in", scratch_in]
+    if scratch_out is not None:
+        cmd += ["--scratch-out", scratch_out]
     r = sh(cmd)
     if r.returncode != 0:
         return None, r.stderr.strip()
@@ -584,6 +600,429 @@ def check_horner_bank(args, name, image, image_path, tmp, caps):
        "identical to the spliced images")
 
 
+# ================= revision 3: the scratch rows =========================
+#
+# Four programs the round added, and one reference. Each row's check has
+# two arms and they are not the same claim:
+#
+#   the STATIC arm - the constants against their derivation, the header
+#   against what the source declares, the encoding against the contract
+#   - runs today, on this tree, with no scratch anywhere in it;
+#
+#   the EXECUTION arm needs libcft to know the four control codes, the
+#   header's scratch_io word and the ninth constant-index bit. Those
+#   arrive with the model and host halves of the same round. Until then
+#   the arm says SKIP and WHICH feature it waited on, by name, and
+#   `positive-run --capabilities` is what it asks rather than inferring
+#   it from a failure. This is exactly what last round did for the
+#   BANK_EXT path.
+
+
+def spill_model(fmt, xs, nterms=40):
+    """The arithmetic both spill rows perform: forty terms
+    t_k = x^(k+1), combined as acc = t_0 then acc = fma(acc, W, t_k).
+    Written once here, so that "the two programs agree" and "either
+    program is right" are two different assertions."""
+    one, _ = chars.from_decimal(fmt, "1", sf.RND_RNE)
+    w, _ = chars.from_decimal(fmt, "0.5", sf.RND_RNE)
+    out = []
+    for x in xs:
+        p, _ = sf.compute(fmt, sf.OP_MUL, x, one, 0, sf.RND_RNE)
+        acc = p
+        for _k in range(1, nterms):
+            p, _ = sf.compute(fmt, sf.OP_MUL, p, x, 0, sf.RND_RNE)
+            acc, _ = sf.compute(fmt, sf.OP_FMA, acc, w, p, sf.RND_RNE)
+        out.append(acc)
+    return out
+
+
+def spill_inputs(fmt, n=64):
+    """Points in [-1.5, 1.5), which keeps x^40 finite and gives the
+    accumulation something to round."""
+    xs = []
+    for i in range(n):
+        v, _fl = chars.from_decimal(fmt, f"{-1.5 + 3.0 * i / n:.9f}",
+                                    sf.RND_RNE)
+        xs.append(v)
+    return xs
+
+
+def check_spill_ref(args, name, image, image_path, tmp):
+    """The no-scratch twin, run and held to the model. This row runs
+    TODAY, which is what makes it worth having: when the scratch lands,
+    the spill row is compared against a reference that is already
+    known-good rather than against another unrun program."""
+    fmt = FORMATS["fp64"]
+    xs = spill_inputs(fmt)
+    ap = tmp / (name + ".a.bin")
+    ap.write_bytes(pack(xs, fmt))
+    dep, report = run_image(args, image_path, tmp, name, a=ap)
+    if dep is None:
+        bad(f"{name}: positive-run", report)
+        return None
+    got = values(dep, fmt)
+    want = spill_model(fmt, xs)
+    if got != want:
+        for i, (g, w) in enumerate(zip(got, want)):
+            if g != w:
+                bad(f"{name}: lane {i}", f"{g:#x} vs the model's {w:#x}")
+                return None
+        bad(f"{name}: deposits", f"{len(got)} vs {len(want)}")
+        return None
+    ok(f"{name}: {len(xs)} lanes against a softfloat model of the same "
+       f"forty-term recurrence", f"deposits {report.get('sha256', '')[:16]}")
+    return got
+
+
+def check_spill(args, name, image, image_path, tmp, caps, ref_deposits):
+    """The spilling program: the same arithmetic, with all forty terms
+    live at once and eight of them therefore in the scratch."""
+    fmt = FORMATS["fp64"]
+    img = asm.Image.from_bytes(image)
+
+    # (a) the shape the source claims
+    one, _ = chars.from_decimal(fmt, "1", sf.RND_RNE)
+    half, _ = chars.from_decimal(fmt, "0.5", sf.RND_RNE)
+    if img.consts != [one, half]:
+        bad(f"{name}: constants", "ONE and W are not 1.0 and 0.5")
+        return
+    top, indexed = img.scratch_use()
+    if top != 39 or indexed:
+        bad(f"{name}: the scratch it uses",
+            f"highest static slot {top}, indexed={indexed}; want 39 and "
+            f"no indexing")
+        return
+    n_stl = sum(1 for w in img.insns
+                if asm.decode(w)["ctrl"] and asm.decode(w)["op"] == asm.STL)
+    n_ldl = sum(1 for w in img.insns
+                if asm.decode(w)["ctrl"] and asm.decode(w)["op"] == asm.LDL)
+    if (n_stl, n_ldl) != (40, 40):
+        bad(f"{name}: the spill itself", f"{n_stl} stl and {n_ldl} ldl; "
+                                         f"want forty of each")
+        return
+    if img.features() != ["SCRATCH"]:
+        bad(f"{name}: features", f"{img.features()}, want ['SCRATCH']")
+        return
+    ok(f"{name}: forty values live across the phase boundary",
+       f"40 stl, 40 ldl, slots 0..39, needs SCRATCH")
+
+    # (b) the arithmetic, which needs a libcft that knows the codes
+    if caps.get("scratch") != "present":
+        skip(f"{name}: the same deposits as spill-ref-fp64",
+             "positive-run reports scratch absent - the four control "
+             "codes arrive with the model and host halves")
+        return
+    xs = spill_inputs(fmt)
+    ap = tmp / (name + ".a.bin")
+    ap.write_bytes(pack(xs, fmt))
+    dep, report = run_image(args, image_path, tmp, name, a=ap)
+    if dep is None:
+        bad(f"{name}: positive-run", report)
+        return
+    got = values(dep, fmt)
+    want = spill_model(fmt, xs)
+    if got != want:
+        for i, (g, w) in enumerate(zip(got, want)):
+            if g != w:
+                bad(f"{name}: lane {i}", f"{g:#x} vs the model's {w:#x}")
+                return
+    if ref_deposits is not None and got != ref_deposits:
+        bad(f"{name}: against spill-ref-fp64",
+            "the spilled program and the unspilled one disagree")
+        return
+    ok(f"{name}: {len(xs)} lanes identical to spill-ref-fp64 and to the "
+       f"model", f"deposits {report.get('sha256', '')[:16]}")
+
+
+def conv_model(fmt, xs, nsamp=16, ntap=3):
+    """a[0] = x, a[k+1] = a[k]*GROW + SHIFT; then
+    y[i] = a[i]*W0 + a[i+1]*W1 + a[i+2]*W2, in that order - one mul and
+    two fmas, exactly as the program issues them."""
+    grow, _ = chars.from_decimal(fmt, "1.25", sf.RND_RNE)
+    shift, _ = chars.from_decimal(fmt, "0.5", sf.RND_RNE)
+    w = [chars.from_decimal(fmt, s, sf.RND_RNE)[0]
+         for s in ("0.25", "0.5", "0.25")]
+    out = []
+    for x in xs:
+        a = []
+        v = x                       # copysign(x, x) is x, exactly
+        for _k in range(nsamp):
+            a.append(v)
+            v, _ = sf.compute(fmt, sf.OP_FMA, v, grow, shift, sf.RND_RNE)
+        for i in range(nsamp - ntap + 1):
+            acc, _ = sf.compute(fmt, sf.OP_MUL, a[i], w[0], 0, sf.RND_RNE)
+            for t in range(1, ntap):
+                acc, _ = sf.compute(fmt, sf.OP_FMA, a[i + t], w[t], acc,
+                                    sf.RND_RNE)
+            out.append(acc)
+    return out
+
+
+def check_conv(args, name, image, image_path, tmp, caps):
+    fmt = FORMATS["fp64"]
+    img = asm.Image.from_bytes(image)
+
+    # (a) the six constants, derived here rather than transcribed
+    want = [1]                                   # IONE, the raw integer 1
+    for s in ("1.25", "0.5", "0.25", "0.5", "0.25"):
+        want.append(chars.from_decimal(fmt, s, sf.RND_RNE)[0])
+    if img.consts != want:
+        for i, (g, w) in enumerate(zip(img.consts, want)):
+            if g != w:
+                bad(f"{name}: constant {i}", f"{g:#x} vs the derived {w:#x}")
+                return
+        bad(f"{name}: constants", f"{len(img.consts)} of them, want 6")
+        return
+    top, indexed = img.scratch_use()
+    if top is not None or not indexed:
+        bad(f"{name}: the scratch it uses",
+            f"highest static slot {top}, indexed={indexed}; a convolution "
+            f"under loop counters reaches the memory ONLY through "
+            f"stx/ldx")
+        return
+    if img.max_deposits != 14:
+        bad(f"{name}: deposits", f"{img.max_deposits}, want 14")
+        return
+    ok(f"{name}: an indexed local array, no static slot at all",
+       f"6 constants derived, 14 deposits a lane, needs SCRATCH")
+
+    # (b) the convolution itself
+    if caps.get("scratch") != "present":
+        skip(f"{name}: the convolution against the model",
+             "positive-run reports scratch absent - stx/ldx arrive with "
+             "the model and host halves")
+        return
+    xs = []
+    for i in range(24):
+        v, _fl = chars.from_decimal(fmt, f"{-0.75 + 1.5 * i / 24:.9f}",
+                                    sf.RND_RNE)
+        xs.append(v)
+    ap = tmp / (name + ".a.bin")
+    ap.write_bytes(pack(xs, fmt))
+    dep, report = run_image(args, image_path, tmp, name, a=ap)
+    if dep is None:
+        bad(f"{name}: positive-run", report)
+        return
+    got = values(dep, fmt)
+    want = conv_model(fmt, xs)
+    if got != want:
+        for i, (g, w) in enumerate(zip(got, want)):
+            if g != w:
+                bad(f"{name}: output {i}", f"{g:#x} vs the model's {w:#x}")
+                return
+        bad(f"{name}: deposits", f"{len(got)} vs {len(want)}")
+        return
+    ok(f"{name}: {len(xs)} lanes x 14 outputs against a softfloat "
+       f"three-tap convolution", f"deposits {report.get('sha256', '')[:16]}")
+
+
+def _patch_trip(image, was, now, deposits):
+    """The same program with its one REPEAT's trip count changed and
+    max_deposits scaled to match - which is how the 'single longer run'
+    the resumable row is checked against is built. An image transform,
+    so that the long run is demonstrably the SAME program rather than a
+    second source that might have drifted."""
+    img = asm.Image.from_bytes(image)
+    insns, found = [], 0
+    for word in img.insns:
+        d = asm.decode(word)
+        if d["ctrl"] and d["op"] == asm.REPEAT and d["imm"] == was:
+            word = asm.repeat(now)
+            found += 1
+        insns.append(word)
+    if found != 1:
+        raise ValueError(f"{found} repeat {was} in the image, want one")
+    return asm.Image(img.fmt, insns, img.consts, deposits, img.flags,
+                     scratch_depth=img.scratch_depth,
+                     scratch_io=img.scratch_io)
+
+
+def check_resume(args, name, image, image_path, tmp, caps):
+    fmt = FORMATS["fp64"]
+    img = asm.Image.from_bytes(image)
+
+    # (a) the header the source declares
+    want = [chars.from_decimal(fmt, "1.5", sf.RND_RNE)[0],
+            chars.from_decimal(fmt, "0.25", sf.RND_RNE)[0],
+            1]
+    if img.consts != want:
+        bad(f"{name}: constants", "MUL, ADD and the raw integer 1")
+        return
+    if not img.scratch_io_declared or img.flags != asm.FLAG_SCRATCH_IO:
+        bad(f"{name}: flags", f"{img.flags:#010x}, want SCRATCH_IO alone")
+        return
+    if (img.n_scratch_in, img.n_scratch_out) != (2, 2):
+        bad(f"{name}: scratch_io",
+            f"in {img.n_scratch_in}, out {img.n_scratch_out}; want 2 and 2")
+        return
+    if img.scratch_io != (2 | (2 << 16)):
+        bad(f"{name}: header word 7", f"{img.scratch_io:#010x}")
+        return
+    if img.features() != ["SCRATCH", "SCRATCH_IO"]:
+        bad(f"{name}: features", f"{img.features()}")
+        return
+    ok(f"{name}: carries its state in and out",
+       f"scratch_io 0x{img.scratch_io:08x} behind flags bit 1, "
+       f"{img.max_deposits} deposits a lane")
+
+    # (b) two runs against one longer one
+    if caps.get("scratch-io") != "present":
+        skip(f"{name}: two runs against one longer run",
+             "positive-run reports scratch-io absent - "
+             "cft_program_run_ex arrives with the host half")
+        return
+    n = 32
+    xs = [0] * n                       # the streams are unread here
+    ap = tmp / (name + ".a.bin")
+    ap.write_bytes(pack(xs, fmt))
+    # the initial block: v = 1 + i/32, n = 0, lane-major
+    state = []
+    for i in range(n):
+        v, _fl = chars.from_decimal(fmt, f"{1.0 + i / n:.9f}", sf.RND_RNE)
+        state += [v, 0]
+    s0 = tmp / (name + ".s0.bin")
+    s0.write_bytes(pack(state, fmt))
+
+    long_img = _patch_trip(image, 8, 16, 32)
+    lp = tmp / (name + ".long.cftp")
+    lp.write_bytes(long_img.to_bytes())
+
+    d1, r1 = run_image(args, image_path, tmp, name + "-1", a=ap,
+                       scratch_in=s0, scratch_out=tmp / (name + ".s1.bin"))
+    if d1 is None:
+        bad(f"{name}: first run", r1)
+        return
+    d2, r2 = run_image(args, image_path, tmp, name + "-2", a=ap,
+                       scratch_in=tmp / (name + ".s1.bin"),
+                       scratch_out=tmp / (name + ".s2.bin"))
+    if d2 is None:
+        bad(f"{name}: second run", r2)
+        return
+    dl, rl = run_image(args, lp, tmp, name + "-long", a=ap,
+                       scratch_in=s0, scratch_out=tmp / (name + ".sl.bin"))
+    if dl is None:
+        bad(f"{name}: the long run", rl)
+        return
+    a1, a2, al = values(d1, fmt), values(d2, fmt), values(dl, fmt)
+    if len(al) != len(a1) + len(a2):
+        bad(f"{name}: shapes", f"{len(a1)} + {len(a2)} != {len(al)}")
+        return
+    for i in range(n):
+        first = al[i * 32: i * 32 + 16]
+        second = al[i * 32 + 16: i * 32 + 32]
+        if a1[i * 16:(i + 1) * 16] != first:
+            bad(f"{name}: lane {i}, first half",
+                "the first run is not the long run's first eight steps")
+            return
+        if a2[i * 16:(i + 1) * 16] != second:
+            bad(f"{name}: lane {i}, second half",
+                "the resumed run is not the long run's second eight steps")
+            return
+    if a1 == a2:
+        bad(f"{name}: the two runs", "produced the same deposits, so the "
+                                     "carried state did nothing")
+        return
+    ok(f"{name}: a resumed run IS the second half of a longer one",
+       f"{n} lanes, 8 + 8 steps against 16, "
+       f"scratch-out {r1.get('scratch-out', '')[:16]}")
+
+
+def check_horner_wide(args, name, image, image_path, tmp, caps):
+    fmt = FORMATS["fp64"]
+    img = asm.Image.from_bytes(image)
+    nk = img.n_consts
+
+    # (a) the shape: BANK_EXT, 300 coefficients, and the ninth index bit
+    if not img.bank_external or nk != 300:
+        bad(f"{name}: shape", f"BANK_EXT={img.bank_external}, {nk} consts")
+        return
+    if len(image) != 32 + 8 * len(img.insns):
+        bad(f"{name}: image size", f"{len(image)} bytes")
+        return
+    ninth = 0
+    for word in img.insns:
+        d = asm.decode(word)
+        if d["ctrl"]:
+            continue
+        for k, (idx, is_const) in enumerate(asm.sources(d)):
+            if is_const and idx >= 256:
+                if not ((d["imm"] >> asm.KX9_SHIFT[k]) & 1):
+                    bad(f"{name}: constant {idx}",
+                        f"index past 255 without imm[{asm.KX9_SHIFT[k]}]")
+                    return
+                ninth += 1
+    if ninth != nk - 256:
+        bad(f"{name}: the ninth bits", f"{ninth} of them, want {nk - 256}")
+        return
+    if "KX9" not in img.features():
+        bad(f"{name}: features", f"{img.features()} does not name KX9")
+        return
+    ok(f"{name}: {nk} coefficients, {ninth} of them past 255",
+       f"{len(image)} bytes = 32 + 8 * {len(img.insns)}, "
+       f"features {' '.join(img.features())}")
+
+    # (b) the bank file against its derivation - committed DATA, read
+    #     from the tree, checked against the claim its name makes
+    bpath = HERE / f"{name}.recip.bank"
+    if not bpath.exists():
+        bad(f"{name}: the bank", f"{bpath.name} is not in the tree")
+        return
+    one, _ = chars.from_decimal(fmt, "1", sf.RND_RNE)
+    derived = []
+    for k in range(nk):
+        den, _ = chars.from_decimal(fmt, str(k + 1), sf.RND_RNE)
+        v, _ = sf.div(fmt, one, den, sf.RND_RNE)
+        if k & 1:
+            v ^= 1 << (fmt.width - 1)
+        derived.append(v)
+    coeffs = values(bpath.read_bytes(), fmt)
+    if len(coeffs) != nk:
+        bad(f"{name}: the bank", f"{len(coeffs)} values, want {nk}")
+        return
+    if coeffs != derived:
+        bad(f"{name}: the bank",
+            "the committed file does not match its own derivation, "
+            "C[k] = (-1)^k / (k+1)")
+        return
+    ok(f"{name}: the bank file matches its derivation",
+       f"{nk} fp64 values, {nk * 8} bytes, C[k] = (-1)^k / (k+1)")
+
+    # (c) the Horner itself
+    if caps.get("kx9") != "present":
+        skip(f"{name}: the Horner against a softfloat one",
+             "positive-run reports kx9 absent - the ninth constant-index "
+             "bit arrives with the model and host halves")
+        return
+    xs = []
+    for i in range(16):
+        v, _fl = chars.from_decimal(fmt, f"{-0.9 + 1.8 * i / 16:.6f}",
+                                    sf.RND_RNE)
+        xs.append(v)
+    ap = tmp / (name + ".x.bin")
+    ap.write_bytes(pack(xs, fmt))
+    dep, report = run_image(args, image_path, tmp, name, a=ap, bank=bpath)
+    if dep is None:
+        bad(f"{name}: positive-run", report)
+        return
+    got = values(dep, fmt)
+    want = []
+    for x in xs:
+        acc = coeffs[0]
+        for k in range(1, nk):
+            acc, _fl = sf.compute(fmt, sf.OP_FMA, acc, x, coeffs[k],
+                                  sf.RND_RNE)
+        want.append(acc)
+    if got != want:
+        for i, (g, w) in enumerate(zip(got, want)):
+            if g != w:
+                bad(f"{name}: lane {i}", f"{g:#x} vs the model's {w:#x}")
+                return
+        bad(f"{name}: deposits", f"{len(got)} vs {len(want)}")
+        return
+    ok(f"{name}: {len(xs)} points against a softfloat degree-{nk - 1} "
+       f"Horner", f"deposits {report.get('sha256', '')[:16]}")
+
+
 # ---- the revision-2 corpus ---------------------------------------------
 #
 # `seq.random_program` is revision 1 - sixteen registers, no BANK_EXT,
@@ -707,6 +1146,155 @@ def check_revision2_corpus(args, tmp, trials=120):
        f"{bank} BANK_EXT, {kx} kx")
 
 
+# ---- the revision-3 corpus ---------------------------------------------
+#
+# Revision 2's generator above never emits a scratch instruction, a
+# per-run block or a constant index past 255, and the five library rows
+# that do cannot be executed on this tree - so without this stage the
+# round's own encoding would be checked only where a human wrote it.
+# This one reaches all of it: the four control codes, static slots on
+# both sides of 255 behind a declared depth, indexed slots, the header's
+# scratch_io word, and nine-bit constant indices on each of ra, rb and
+# rc. It asserts what it reached rather than assuming it.
+
+def revision3_program(rng):
+    fmt = FORMATS[rng.choice(["fp32", "fp64", "fp128", "fp256"])]
+    # a bank that sometimes needs the ninth index bit and sometimes
+    # does not, so both spellings are exercised
+    nk = (rng.randrange(0, 40) if rng.random() < 0.6
+          else rng.randrange(250, 330))
+    bank_ext = rng.random() < 0.3
+    depth = rng.choice([16, 256, 256, 512, 1024])
+    head = [f".format {fmt.name}", ".deposits 4", f".scratch {depth}"]
+    if rng.random() < 0.4:
+        head.append(f".scratch in {rng.randrange(0, min(depth, 8) + 1)}")
+    if rng.random() < 0.4:
+        head.append(f".scratch out {rng.randrange(0, min(depth, 8) + 1)}")
+    if bank_ext:
+        head.append(".bank external")
+    for i in range(nk):
+        head.append(f".const K{i}" if bank_ext else
+                    f".const K{i} = 0x{rng.getrandbits(fmt.width):x}")
+    nslots = rng.randrange(0, 4)
+    for i in range(nslots):
+        head.append(f".slot S{i} = {rng.randrange(depth)}")
+    body, nest = [], 0
+    for _ in range(rng.randint(6, 24)):
+        pick = rng.random()
+        if pick < 0.40:
+            op = rng.choice(list(asm.OP_FIELDS))
+            fields = asm.OP_FIELDS[op]
+            args = []
+            for _f in (fields if rng.random() < 0.6 else ("ra", "rb", "rc")):
+                if nk and rng.random() < 0.45:
+                    # bias toward the far half of a big bank, so the
+                    # ninth index bit is reached often rather than
+                    # occasionally
+                    lo = 256 if (nk > 256 and rng.random() < 0.5) else 0
+                    args.append(f"K{rng.randrange(lo, nk)}")
+                else:
+                    args.append(f"r{rng.randrange(asm.NREG)}")
+            mods = []
+            if rng.random() < 0.4:
+                mods.append(sf.RND_NAMES[rng.randrange(5)])
+            if nk and any(a[0] == "K" for a in args) and rng.random() < 0.3:
+                mods.append("kx")
+            name = asm.OP_NAMES[op] + "".join("." + m for m in mods)
+            body.append(f"{name} r{rng.randrange(asm.NREG)}, "
+                        + ", ".join(args))
+        elif pick < 0.62:
+            what = rng.choice(["stl", "ldl", "stx", "ldx"])
+            if what in ("stl", "ldl"):
+                if nslots and rng.random() < 0.4:
+                    slot = f"S{rng.randrange(nslots)}"
+                else:
+                    slot = str(rng.randrange(depth))
+                body.append(f"{what} r{rng.randrange(asm.NREG)}, {slot}")
+            else:
+                body.append(f"{what} r{rng.randrange(asm.NREG)}, "
+                            f"r{rng.randrange(asm.NREG)}")
+        elif pick < 0.72 and nest < asm.MAX_LOOP_DEPTH:
+            body.append("repeat " + str(rng.choice(
+                [1, 3, 1 << 24, (0xF << 24) | 7, 0xFFFFF])))
+            nest += 1
+        elif pick < 0.80 and nest > 0:
+            body.append("endrep")
+            nest -= 1
+        elif pick < 0.90:
+            body.append(f"deposit r{rng.randrange(asm.NREG)}")
+        elif pick < 0.97:
+            body.append(f"setact r{rng.randrange(asm.NREG)}")
+        elif nest == 0:
+            body.append("actall")
+    body += ["endrep"] * nest
+    body.append("halt")
+    return "\n".join(head + [""] + body) + "\n"
+
+
+def check_revision3_corpus(args, tmp, trials=120):
+    import random as _random
+    rng = _random.Random(20260908)
+    n = scratch = scratch_io = kx9 = indexed = deep_slot = 0
+    for trial in range(trials):
+        text = revision3_program(rng)
+        try:
+            py = asm.assemble(text, f"r3-{trial}")
+        except asm.AsmError:
+            continue                     # a program the loader refuses
+        tag = f"rev3-{trial}"
+        src = tmp / (tag + ".cfta")
+        out = tmp / (tag + ".cftp")
+        src.write_text(text, encoding="utf-8", newline="\n")
+        r = sh([args.asm, src, "-o", out])
+        if r.returncode != 0:
+            bad(f"revision-3 corpus [{trial}]: cft-asm", r.stderr.strip())
+            return
+        if out.read_bytes() != py:
+            bad(f"revision-3 corpus [{trial}]: two assemblers",
+                "the bytes differ")
+            return
+        r = sh([args.asm, "-d", out])
+        if r.returncode != 0:
+            bad(f"revision-3 corpus [{trial}]: cft-asm -d", r.stderr.strip())
+            return
+        if r.stdout.replace("\r\n", "\n") != asm.disassemble(py):
+            bad(f"revision-3 corpus [{trial}]: two disassemblers",
+                "the texts differ")
+            return
+        if asm.assemble(asm.disassemble(py), tag) != py:
+            bad(f"revision-3 corpus [{trial}]: round trip",
+                "assemble(disassemble(x)) != x")
+            return
+        r = sh([args.asm, "-i", out])
+        ci = r.stdout.replace("\r\n", "\n").splitlines()
+        for pl in asm.info(py).splitlines():
+            key = pl.split()[0]
+            cl = next((l for l in ci if l.startswith(key)), None)
+            if cl != pl:
+                bad(f"revision-3 corpus [{trial}]: -i {key}",
+                    f"{pl!r} vs {cl!r}")
+                return
+        img = asm.Image.from_bytes(py)
+        feats = img.features()
+        scratch += "SCRATCH" in feats
+        scratch_io += "SCRATCH_IO" in feats
+        kx9 += "KX9" in feats
+        top, ix = img.scratch_use()
+        indexed += ix
+        deep_slot += (top is not None and top >= 256)
+        n += 1
+    if not (scratch and scratch_io and kx9 and indexed and deep_slot):
+        bad("revision-3 corpus",
+            f"never reached the features it exists for: SCRATCH={scratch} "
+            f"SCRATCH_IO={scratch_io} KX9={kx9} indexed={indexed} "
+            f"slot>=256={deep_slot}")
+        return
+    ok(f"revision-3 corpus: {n} programs identical in both languages",
+       f"bytes, disassembly, round trip and -i; {scratch} use the "
+       f"scratch, {indexed} index it, {deep_slot} name a slot past 255, "
+       f"{scratch_io} carry a per-run block, {kx9} need KX9")
+
+
 # ================= main =================================================
 
 def main():
@@ -729,7 +1317,11 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="cft-programs-"))
     caps = runner_caps(args)
     print(f"runner: bank-path {caps.get('bank-path', '?')}, "
-          f"digest {caps.get('digest', '?')}")
+          f"digest {caps.get('digest', '?')}, "
+          f"kx9 {caps.get('kx9', '?')}, "
+          f"scratch {caps.get('scratch', '?')}, "
+          f"scratch-io {caps.get('scratch-io', '?')}, "
+          f"run-path {caps.get('run-path', '?')}")
 
     manifest = {}
     mpath = HERE / "MANIFEST"
@@ -764,8 +1356,19 @@ def main():
     print("\n-- the revision-2 corpus, in both languages --")
     check_revision2_corpus(args, tmp)
 
+    print("\n-- the revision-3 corpus, in both languages --")
+    check_revision3_corpus(args, tmp)
+
     print("\n-- each program's own check --")
-    for name, (image, image_path) in sorted(images.items()):
+    # spill-ref-fp64 is the reference spill-fp64 is compared against, so
+    # it runs first whatever the alphabet says.
+    order = sorted(images)
+    if "spill-ref-fp64" in order:
+        order.remove("spill-ref-fp64")
+        order.insert(0, "spill-ref-fp64")
+    ref_deposits = None
+    for name in order:
+        image, image_path = images[name]
         if name.startswith("div-") or name.startswith("sqrt-"):
             check_divsqrt(name, image)
             check_divsqrt_runs(args, name, image_path, tmp)
@@ -777,6 +1380,18 @@ def main():
             check_lowbias32(args, name, image, image_path, tmp)
         elif name == "horner-bank-fp64":
             check_horner_bank(args, name, image, image_path, tmp, caps)
+        elif name == "spill-ref-fp64":
+            ref_deposits = check_spill_ref(args, name, image, image_path,
+                                           tmp)
+        elif name == "spill-fp64":
+            check_spill(args, name, image, image_path, tmp, caps,
+                        ref_deposits)
+        elif name == "conv-fp64":
+            check_conv(args, name, image, image_path, tmp, caps)
+        elif name == "resume-fp64":
+            check_resume(args, name, image, image_path, tmp, caps)
+        elif name == "horner-wide-fp64":
+            check_horner_wide(args, name, image, image_path, tmp, caps)
         else:
             skip(f"{name}: own check", "no row in programs/README.md")
 
