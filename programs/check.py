@@ -692,13 +692,25 @@ def check_spill(args, name, image, image_path, tmp, caps, ref_deposits):
             f"highest static slot {top}, indexed={indexed}; want 39 and "
             f"no indexing")
         return
-    n_stl = sum(1 for w in img.insns
-                if asm.decode(w)["ctrl"] and asm.decode(w)["op"] == asm.STL)
-    n_ldl = sum(1 for w in img.insns
-                if asm.decode(w)["ctrl"] and asm.decode(w)["op"] == asm.LDL)
-    if (n_stl, n_ldl) != (40, 40):
-        bad(f"{name}: the spill itself", f"{n_stl} stl and {n_ldl} ldl; "
-                                         f"want forty of each")
+    # The SETS of slots, not just their count and their maximum: a
+    # store that moved to a slot another store already writes would
+    # leave the highest slot where it was and the counts where they
+    # were, and only the MANIFEST would notice.
+    stored, loaded = [], []
+    for w in img.insns:
+        d = asm.decode(w)
+        if not d["ctrl"]:
+            continue
+        if d["op"] == asm.STL:
+            stored.append(d["imm"] & asm.SLOT_MASK)
+        elif d["op"] == asm.LDL:
+            loaded.append(d["imm"] & asm.SLOT_MASK)
+    want_slots = list(range(40))
+    if sorted(stored) != want_slots or sorted(loaded) != want_slots:
+        bad(f"{name}: the spill itself",
+            f"{len(stored)} stl over {len(set(stored))} slots and "
+            f"{len(loaded)} ldl over {len(set(loaded))}; want each of "
+            f"slots 0..39 written once and read once")
         return
     if img.features() != ["SCRATCH"]:
         bad(f"{name}: features", f"{img.features()}, want ['SCRATCH']")
