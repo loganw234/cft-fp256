@@ -7503,3 +7503,74 @@ cross-check of `asm.py` against a widened `seq.encode`, of the four
 codes against libcft's executor, and of `cft_program_run_ex` against
 the model's own block, belong to the integrator after the three lanes
 merge.
+
+## 2026-09-08 - the revision-2 pair on silicon: thirty-two registers, 4,096 instructions and the per-run bank, the same afternoon
+
+Built on amd-arc-box from 9c086d3 (main, whose rtl/ and hw/ are the
+revision-2 merge a1113be exactly) by the same detached chain as the
+card-day pair, the same recipe - 135 MHz, retiming + phys_opt, 130 MHz
+fallback per half - and tested on the card the moment each half was
+staged, while the other was still routing:
+
+    r2-135single  one tile,   135 MHz   15:20 -> 17:18 (117 min)
+                  routed WNS +0.055  kernel WNS +0.436  0 failing of 562,083  WHS +0.009
+                  worst: op_r -> g_bank64 lane 3 s0_byp_d, 19 levels (the seedop bypass family)
+                  35,608,395 bytes  sha256 b608a97d...e88a69  verify-image 8/8
+r2-135quad    four tiles, 135 MHz   15:22 -> 19:34 (252 min)
+                  routed WNS +0.022  TNS 0  0 failing of 986,021  WHS +0.009
+                  kernel WNS +0.122: u_fifo_a -> g_lane32[0] s0_byp_d, 17 levels (the same bypass family)
+                  51,334,073 bytes  sha256 9cc37462...dcaf56  verify-image 8/8
+
+Both closed at 135 with more margin than the card-day pair (+0.436
+against +0.316 on one tile, +0.122 against +0.067 on four); 130 was
+never needed.
+
+**On the card, the quad** (`~/cardday-rev2/cft_hw_quad.xclbin`),
+run while its own record was being written:
+
+    device: backend xrt, 4 tiles, contract 0x00000700, formats fp32 fp64 fp128 fp256
+    device reports max_deposits 64, max_insns 4096, max_consts 256, seq_features 0x17
+
+    device-test -q -n 8       858 checks, 0 failed
+    device-test -n 4096       2,446 checks, 0 failed
+    device-test -r            890 checks, 0 failed
+    the Newton program on r20/r31, and the Horner with each of its two banks:
+                              the same three deposit hashes as the single tile and as software
+    cft-selftest vectors/out   168 sets, 1,071,635 cases, all matching, 19:39 -> 19:49 (626 s)
+
+The single closed with MORE margin than the 0x600 single of the day
+before (+0.436 against +0.316): the doubled register file and the
+deeper instruction memory cost nothing at the card's clock, as the
+out-of-context measurement had said (docs/VALIDATION.md, the contract
+half's entry), and the placer found a slightly better arrangement.
+
+**On the card, the single** (`~/cardday-rev2/cft_hw_single.xclbin`):
+
+    device: backend xrt, 1 tile, contract 0x00000700, formats fp32 fp64 fp128 fp256
+    device reports max_deposits 64, max_insns 4096, max_consts 256, seq_features 0x17
+
+    device-test -q -n 8       858 checks, 0 failed   (670 on the 0x600 image: registers 16..31,
+                                                      the bank, the digest and the kx probe now run)
+    device-test -n 4096       2,446 checks, 0 failed (the partition check's tail slice, on hardware)
+    device-test -r            890 checks, 0 failed
+    cft-selftest vectors/out   168 sets, 1,071,635 cases, all matching, 17:19 -> 17:30 (642 s beside the quad's routing)
+
+and the two things only this hardware can do, each run on the software
+backend and on the card with `positive-run` and compared by the
+deposit buffer's SHA-256:
+
+    a Newton reciprocal on r20 and r31 (fp64, 4,096 elements)
+        software 61c1ca0e...  card 61c1ca0e...  flags inexact on both
+    programs/horner-bank-fp64, the external bank supplied per run
+        exp.bank   software 9ad28ff0...  card 9ad28ff0...
+        ramp.bank  software 67190bbd...  card 67190bbd...
+
+The per-run bank travels through BANK_PTR and kernel argument 8 on
+real silicon; two banks give two answers, and each answer is the
+software backend's to the bit.
+
+The pair lives in `~/cardday-rev2` beside the card-day pair; it needs
+a host at ABI 0.9, which the box has (`make libcft-test XRT=1` and the
+program library's check both green there the same afternoon). The
+card-day runbook now names it as the pair for the revision-2 work and
+keeps `~/cardday-0907` as the proven 0x600 pair.
