@@ -644,6 +644,60 @@ static uint64_t seq_alu_kx(unsigned op, unsigned rd, unsigned ia,
            ((uint64_t)imm << 32);
 }
 
+/* ---- revision 3's encodings (docs/SEQUENCER.md, 2026-09-08 evening) -
+ *
+ * The kx form with the NINTH index bits: imm[28], imm[29] and imm[30]
+ * are ka's, kb's and kc's high bits, so the bank reaches 512. imm[31]
+ * stays reserved-must-be-zero. A ninth bit is read only under kx and
+ * only for an operand whose k flag is set, so this sets none for an
+ * operand that names a register. */
+static uint64_t seq_alu_kx9(unsigned op, unsigned rd, unsigned ia,
+                            unsigned ib, unsigned ic,
+                            unsigned ka, unsigned kb, unsigned kc)
+{
+    uint64_t w = seq_alu_kx(op, rd, ia, ib, ic, ka, kb, kc);
+    uint32_t hi = (ka ? ((ia >> 8) & 1u) : 0u) |
+                  ((kb ? ((ib >> 8) & 1u) : 0u) << 1) |
+                  ((kc ? ((ic >> 8) & 1u) : 0u) << 2);
+    return w | ((uint64_t)hi << (32 + 28));
+}
+
+/* The four scratch codes. STL reads ra and imm[23:0]; LDL writes rd
+ * and reads imm[23:0]; STX reads ra and rb; LDX writes rd and reads
+ * rb, and for the indexed pair imm[23:0] must be zero. Registers are
+ * five bits, with the fifth of each in its own bit of imm[27:24]. */
+enum { SEQ_C_STL = 6, SEQ_C_LDL = 7, SEQ_C_STX = 8, SEQ_C_LDX = 9 };
+
+static uint64_t seq_stl(unsigned ra, uint32_t slot)
+{
+    uint32_t imm = (slot & 0x00FFFFFFu) | (((ra >> 4) & 1u) << 25);
+    return (uint64_t)SEQ_C_STL | ((uint64_t)(ra & 15u) << 12) |
+           ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
+}
+
+static uint64_t seq_ldl(unsigned rd, uint32_t slot)
+{
+    uint32_t imm = (slot & 0x00FFFFFFu) | (((rd >> 4) & 1u) << 24);
+    return (uint64_t)SEQ_C_LDL | ((uint64_t)(rd & 15u) << 8) |
+           ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
+}
+
+static uint64_t seq_stx(unsigned ra, unsigned rb)
+{
+    uint32_t imm = (((ra >> 4) & 1u) << 25) | (((rb >> 4) & 1u) << 26);
+    return (uint64_t)SEQ_C_STX | ((uint64_t)(ra & 15u) << 12) |
+           ((uint64_t)(rb & 15u) << 16) |
+           ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
+}
+
+static uint64_t seq_ldx(unsigned rd, unsigned rb)
+{
+    uint32_t imm = (((rd >> 4) & 1u) << 24) | (((rb >> 4) & 1u) << 26);
+    return (uint64_t)SEQ_C_LDX | ((uint64_t)(rd & 15u) << 8) |
+           ((uint64_t)(rb & 15u) << 16) |
+           ((uint64_t)1 << 31) | ((uint64_t)imm << 32);
+}
+
 static void put_le32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
@@ -656,10 +710,11 @@ static void put_le32(uint8_t *p, uint32_t v)
  * With CFT_PROG_FLAG_BANK_EXT set the image carries NO constant
  * section - n_consts still says how many the program addresses - so
  * `consts` is ignored and the image is 32 + 8*n_insns bytes. */
-static size_t seq_image_flags(uint8_t *out, cft_format fmt,
-                              const uint64_t *insns, unsigned n_insns,
-                              const uint8_t *consts, unsigned n_consts,
-                              uint32_t max_deposits, uint32_t flags)
+static size_t seq_image_scratch(uint8_t *out, cft_format fmt,
+                                const uint64_t *insns, unsigned n_insns,
+                                const uint8_t *consts, unsigned n_consts,
+                                uint32_t max_deposits, uint32_t flags,
+                                uint32_t n_sin, uint32_t n_sout)
 {
     size_t esz = cft_format_size(fmt), off = 32;
     unsigned i;
@@ -670,7 +725,10 @@ static size_t seq_image_flags(uint8_t *out, cft_format fmt,
     put_le32(out + 16, max_deposits);
     put_le32(out + 20, (uint32_t)fmt);
     put_le32(out + 24, flags);
-    put_le32(out + 28, 0);
+    /* The word that was reserved[1] until revision 3: scratch_io,
+     * n_scratch_in in [15:0] and n_scratch_out in [31:16], meaningful
+     * only under CFT_PROG_FLAG_SCRATCH_IO and zero without it. */
+    put_le32(out + 28, (n_sin & 0xFFFFu) | ((n_sout & 0xFFFFu) << 16));
     if (!(flags & CFT_PROG_FLAG_BANK_EXT)) {
         memcpy(out + off, consts, n_consts * esz);
         off += n_consts * esz;
@@ -683,6 +741,15 @@ static size_t seq_image_flags(uint8_t *out, cft_format fmt,
         off += 8;
     }
     return off;
+}
+
+static size_t seq_image_flags(uint8_t *out, cft_format fmt,
+                              const uint64_t *insns, unsigned n_insns,
+                              const uint8_t *consts, unsigned n_consts,
+                              uint32_t max_deposits, uint32_t flags)
+{
+    return seq_image_scratch(out, fmt, insns, n_insns, consts, n_consts,
+                             max_deposits, flags, 0, 0);
 }
 
 static size_t seq_image(uint8_t *out, cft_format fmt,
@@ -807,7 +874,15 @@ out:
 enum { PROBE_NONE = 0,   /* every instruction a HALT */
        PROBE_K4,         /* a constant addressed through the 4-bit field */
        PROBE_KX,         /* a constant addressed through imm, the kx form */
+       PROBE_KX9,        /* the kx form with revision 3's ninth bits */
        PROBE_REG };      /* a register named by const_idx, five bits wide */
+
+static const char *probe_form_name(int probe)
+{
+    return probe == PROBE_KX9 ? "kx, nine bits"
+         : probe == PROBE_KX  ? "kx"
+                              : "four-bit";
+}
 
 /* One trivial program: `n_insns` HALTs, `n_consts` constants, the
  * declared deposit budget. Nothing runs it; what is under test is
@@ -846,6 +921,11 @@ static cft_status try_load(cft_device *dev, cft_format fmt,
              * a byte of imm and reaches 255. */
             ins[0] = seq_alu_kx(0, 4, 0, const_idx, 2, 0, 1, 0);
             break;
+        case PROBE_KX9:
+            /* And the same again with revision 3's ninth bit, where it
+             * reaches 511. */
+            ins[0] = seq_alu_kx9(0, 4, 0, const_idx, 2, 0, 1, 0);
+            break;
         default:                                  /* PROBE_REG */
             /* r<const_idx> = r0 * r0 + r0, then deposit it, so the
              * register is both written and read. */
@@ -880,6 +960,34 @@ static cft_status try_load_bank_ext(cft_device *dev, cft_format fmt,
     ins[2] = seq_ctrl(0, 0, 0);                  /* halt */
     bytes = seq_image_flags(img, fmt, ins, 3, NULL, n_consts, 1,
                             CFT_PROG_FLAG_BANK_EXT);
+    st = cft_program_load(dev, img, bytes, &prog);
+    if (st == CFT_OK)
+        cft_program_free(prog);
+    return st;
+}
+
+/* An image that uses the scratch, for the feature and capacity probes.
+ * STL r0 -> `slot`, LDL r4 <- `slot`, deposit r4, halt - so the memory
+ * is both written and read, and `n_sin`/`n_sout` declare a per-run
+ * block when either is non-zero. What it computes does not matter
+ * here; what is under test is whether cft_program_load takes it. */
+static cft_status try_load_scratch(cft_device *dev, cft_format fmt,
+                                   uint32_t slot, uint32_t n_sin,
+                                   uint32_t n_sout)
+{
+    uint8_t img[64];
+    uint64_t ins[4];
+    cft_program *prog = NULL;
+    cft_status st;
+    size_t bytes;
+    uint32_t flags = (n_sin || n_sout) ? CFT_PROG_FLAG_SCRATCH_IO : 0u;
+
+    ins[0] = seq_stl(0, slot);
+    ins[1] = seq_ldl(4, slot);
+    ins[2] = seq_ctrl(3, 4, 0);                  /* deposit r4 */
+    ins[3] = seq_ctrl(0, 0, 0);                  /* halt */
+    bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 1, flags,
+                              n_sin, n_sout);
     st = cft_program_load(dev, img, bytes, &prog);
     if (st == CFT_OK)
         cft_program_free(prog);
@@ -996,9 +1104,16 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                "nothing tested\n");
     } else {
         const int wide = (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) != 0;
-        const uint32_t hi = (wide || c.max_consts <= 16u)
-                          ? c.max_consts : 16u;
-        const int form = (hi > 16u) ? PROBE_KX : PROBE_K4;
+        const int kx9  = (c.seq_features & CFT_SEQ_FEAT_KX9) != 0;
+        /* What an instruction can NAME: sixteen without kx, 256 with
+         * it, 512 with the ninth bits of revision 3. The device's own
+         * cap is held to whichever of those the encoding reaches, so a
+         * cap of 512 on a device without KX9 would be tested at 256 -
+         * which is the honest half rather than a false pass. */
+        const uint32_t reach = kx9 ? 512u : wide ? 256u : 16u;
+        const uint32_t hi = c.max_consts <= reach ? c.max_consts : reach;
+        const int form = (hi > 256u) ? PROBE_KX9
+                       : (hi > 16u)  ? PROBE_KX : PROBE_K4;
         st = try_load(dev, fmt, 2, hi, 1, hi - 1u, form);
         checks++;
         if (st != CFT_OK) {
@@ -1006,19 +1121,19 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                    "instruction addressing k[%lu] in the %s form was "
                    "refused: %s (%s)\n",
                    who, (unsigned long)c.max_consts, (unsigned long)(hi - 1u),
-                   form == PROBE_KX ? "kx" : "four-bit",
+                   probe_form_name(form),
                    cft_strerror(st), cft_last_error());
             failures++;
         } else {
             printf("    k[%lu] (%s form) loads, at the cap\n",
-                   (unsigned long)(hi - 1u),
-                   form == PROBE_KX ? "kx" : "four-bit");
+                   (unsigned long)(hi - 1u), probe_form_name(form));
         }
-        if (c.max_consts < 256u && (wide || c.max_consts < 16u)) {
+        if (c.max_consts < reach && (wide || c.max_consts < 16u)) {
             /* n_consts one past the cap, so the index is inside the
              * program's own bank and what refuses it is the DEVICE's
              * reach rather than the header's count. */
-            const int f2 = (c.max_consts >= 16u) ? PROBE_KX : PROBE_K4;
+            const int f2 = (c.max_consts >= 256u) ? PROBE_KX9
+                         : (c.max_consts >= 16u)  ? PROBE_KX : PROBE_K4;
             st = try_load(dev, fmt, 2, c.max_consts + 1u, 1,
                           c.max_consts, f2);
             checks++;
@@ -1036,26 +1151,78 @@ static void check_caps_enforced(cft_device *dev, const char *who)
         } else {
             printf("    max_consts %lu: an index past it does not fit the "
                    "%s, NOT TESTED\n", (unsigned long)c.max_consts,
-                   c.max_consts >= 256u ? "immediate's byte"
+                   c.max_consts >= 512u ? "immediate's nine bits"
+                 : c.max_consts >= 256u ? "immediate's byte"
                                         : "four-bit field");
         }
     }
 
-    /* seq_features is CAPS[7:4] in its low nibble and CAPS[31:28] - the
-     * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07).
-     * Anything above those eight bits is a decode fault, not a
-     * feature. */
+    /* max_scratch, on exactly the same terms: a static STL slot at the
+     * cap must load and one past it must not. Both halves are always
+     * representable here - the slot is imm[23:0], which reaches sixteen
+     * million - so unlike max_consts there is no arm that says NOT
+     * TESTED. */
+    if (!(c.seq_features & CFT_SEQ_FEAT_SCRATCH)) {
+        printf("    no scratch published: max_scratch %lu, nothing "
+               "tested\n", (unsigned long)c.max_scratch);
+    } else if (!c.max_scratch) {
+        printf("    SCRATCH published with max_scratch 0 (unknown): "
+               "nothing enforced, nothing tested\n");
+    } else {
+        st = try_load_scratch(dev, fmt, c.max_scratch - 1u, 0, 0);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL %s: max_scratch %lu is reported and STL to slot "
+                   "%lu was refused: %s (%s)\n", who,
+                   (unsigned long)c.max_scratch,
+                   (unsigned long)(c.max_scratch - 1u),
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        } else {
+            printf("    scratch slot %lu loads, at the cap\n",
+                   (unsigned long)(c.max_scratch - 1u));
+        }
+        st = try_load_scratch(dev, fmt, c.max_scratch, 0, 0);
+        checks++;
+        if (st == CFT_OK) {
+            printf("  FAIL %s: max_scratch %lu is reported and STL to slot "
+                   "%lu was accepted\n", who, (unsigned long)c.max_scratch,
+                   (unsigned long)c.max_scratch);
+            failures++;
+        } else {
+            checks++;
+            if (!strstr(cft_last_error(), "max_scratch")) {
+                printf("  FAIL %s: STL past max_scratch was refused (%s) "
+                       "without naming the cap: %s\n", who,
+                       cft_strerror(st), cft_last_error());
+                failures++;
+            }
+            printf("    scratch slot %lu -> %s: %s\n",
+                   (unsigned long)c.max_scratch, cft_strerror(st),
+                   cft_last_error());
+        }
+    }
+
+    /* seq_features is CAPS[7:4] in its low nibble, CAPS[31:28] - the
+     * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07),
+     * and CAPS2[7:4] in the third since revision 3. Anything above
+     * those twelve bits is a decode fault, not a feature. */
     checks++;
-    if (c.seq_features & ~0xFFu) {
-        printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4] "
-               "and CAPS[31:28]\n", who, (unsigned long)c.seq_features);
+    if (c.seq_features & ~0xFFFu) {
+        printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4], "
+               "CAPS[31:28] and CAPS2[7:4]\n", who,
+               (unsigned long)c.seq_features);
         failures++;
     }
-    printf("    features:%s%s%s%s\n",
+    printf("    features:%s%s%s%s%s%s%s   max_scratch %lu\n",
            (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) ? " kx" : "",
            (c.seq_features & CFT_SEQ_FEAT_REGS32)     ? " REGS32" : "",
            (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)   ? " BANK_PTR" : "",
-           (c.seq_features & CFT_ALU_EXT_IMUL)        ? " IMUL" : "");
+           (c.seq_features & CFT_SEQ_FEAT_KX9)        ? " KX9" : "",
+           (c.seq_features & CFT_ALU_EXT_IMUL)        ? " IMUL" : "",
+           (c.seq_features & CFT_SEQ_FEAT_SCRATCH)    ? " SCRATCH" : "",
+           (c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) ? " SCRATCH_IO" : "",
+           (unsigned long)c.max_scratch);
 
     /* Revision 2's two feature bits, held to the same invariant as
      * every capacity above: what a backend PUBLISHES is what it
@@ -1119,6 +1286,104 @@ static void check_caps_enforced(cft_device *dev, const char *who)
         }
         printf("    BANK_PTR absent, a BANK_EXT image -> %s: %s\n",
                cft_strerror(st), cft_last_error());
+    }
+
+    /* Revision 3's three, on exactly the same terms. Each names what
+     * an old device would do INSTEAD, because that is the reason none
+     * of these could be a reserved-bit rule: an eight-bit operand mux
+     * addresses constant 255 where 511 was meant, and a tile with no
+     * scratch memory has nothing for STL to reach and no fault to
+     * raise about it. */
+    st = try_load_scratch(dev, fmt, 0, 0, 0);
+    checks++;
+    if (c.seq_features & CFT_SEQ_FEAT_SCRATCH) {
+        if (st != CFT_OK) {
+            printf("  FAIL %s: SCRATCH is published and a program using "
+                   "STL/LDL was refused: %s (%s)\n", who, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        } else {
+            printf("    SCRATCH published, STL/LDL loads\n");
+        }
+    } else if (st == CFT_OK) {
+        printf("  FAIL %s: SCRATCH is NOT published and a program using "
+               "STL was accepted - there is no memory for it to reach\n",
+               who);
+        failures++;
+    } else {
+        checks++;
+        if (!strstr(cft_last_error(), "STL")) {
+            printf("  FAIL %s: STL without SCRATCH was refused (%s) without "
+                   "naming the instruction: %s\n", who, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        }
+        printf("    SCRATCH absent, STL -> %s: %s\n", cft_strerror(st),
+               cft_last_error());
+    }
+
+    st = try_load_scratch(dev, fmt, 0, 2, 2);
+    checks++;
+    if (c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) {
+        if (st != CFT_OK) {
+            printf("  FAIL %s: SCRATCH_IO is published and an image "
+                   "declaring a scratch block was refused: %s (%s)\n", who,
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        } else {
+            printf("    SCRATCH_IO published, a SCRATCH_IO image loads\n");
+        }
+    } else if (st == CFT_OK) {
+        printf("  FAIL %s: SCRATCH_IO is NOT published and an image "
+               "declaring a scratch block was accepted\n", who);
+        failures++;
+    } else {
+        checks++;
+        if (!strstr(cft_last_error(), "SCRATCH_IO")) {
+            printf("  FAIL %s: a SCRATCH_IO image without the feature was "
+                   "refused (%s) without naming the flag: %s\n", who,
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        }
+        printf("    SCRATCH_IO absent, a SCRATCH_IO image -> %s: %s\n",
+               cft_strerror(st), cft_last_error());
+    }
+
+    /* KX9 is asked with an index of 256 and a bank of 257, so what
+     * decides is the DEVICE's ninth bit rather than the header's
+     * count. On a device without kx at all this cannot be asked -
+     * there is no encoding for an index above 15 - and says so. */
+    if (!(c.seq_features & CFT_SEQ_FEAT_WIDE_CONST)) {
+        printf("    kx absent, so KX9 has no encoding to test with, "
+               "NOT TESTED\n");
+    } else {
+        st = try_load(dev, fmt, 2, 257, 1, 256, PROBE_KX9);
+        checks++;
+        if (c.seq_features & CFT_SEQ_FEAT_KX9) {
+            if (st != CFT_OK) {
+                printf("  FAIL %s: KX9 is published and an instruction "
+                       "addressing k[256] was refused: %s (%s)\n", who,
+                       cft_strerror(st), cft_last_error());
+                failures++;
+            } else {
+                printf("    KX9 published, k[256] loads\n");
+            }
+        } else if (st == CFT_OK) {
+            printf("  FAIL %s: KX9 is NOT published and an instruction "
+                   "addressing k[256] was accepted - its operand mux would "
+                   "address k[0]\n", who);
+            failures++;
+        } else {
+            checks++;
+            if (!strstr(cft_last_error(), "CFT_SEQ_FEAT_KX9")) {
+                printf("  FAIL %s: k[256] without KX9 was refused (%s) "
+                       "without naming the feature: %s\n", who,
+                       cft_strerror(st), cft_last_error());
+                failures++;
+            }
+            printf("    KX9 absent, k[256] -> %s: %s\n", cft_strerror(st),
+                   cft_last_error());
+        }
     }
 }
 
@@ -1417,6 +1682,476 @@ out:
  * Each is checked BY NAME, not only by status: a caller told
  * CFT_ERR_INVALID_ARGUMENT and nothing else has to guess which of its
  * eleven arguments was wrong. */
+/* ==== revision 3, run against the software backend ==================
+ *
+ * The per-lane scratch memory (docs/SEQUENCER.md R4) and its per-run
+ * block (R5). Every case here is arranged so the EXPECTED bytes are
+ * the input bytes: a scratch store and load move a register's pattern
+ * and compute nothing, so what a wrong answer would need is a golden
+ * model, and what a right one needs is only memcmp. The one case that
+ * does arithmetic doubles an exactly-representable value, which is
+ * exact in every format and rounds nowhere.
+ * ==================================================================== */
+
+/* A cft_run_args over `n` lanes with `a` and a deposit buffer and
+ * nothing else, which is exactly what cft_program_run fills in. Every
+ * case below starts from this and sets the one field it is about, so
+ * a test that forgets to zero a field cannot pass by accident. */
+static void run_args_init(cft_run_args *A, const void *a, void *deposits,
+                          size_t n)
+{
+    memset(A, 0, sizeof *A);
+    A->struct_size = sizeof *A;
+    A->a           = a;
+    A->n           = n;
+    A->deposits    = deposits;
+}
+
+/* n * `per` elements of `buf` filled with distinct finite patterns,
+ * so a block whose lanes were transposed, shifted by a lane, or read
+ * from the first lane for all of them cannot pass. */
+static void fill_scratch_block(uint8_t *buf, cft_format fmt, size_t n,
+                               uint32_t per)
+{
+    fill_finite(buf, fmt, n * per);
+}
+
+/* An unsigned integer as a raw bit pattern in one element, which is
+ * where the atlas emitter keeps its loop counters and where STX and
+ * LDX read their slot from. NOT a float: the value is the pattern. */
+static void put_index(uint8_t *e, cft_format fmt, uint32_t v)
+{
+    size_t sz = cft_format_size(fmt), j;
+    memset(e, 0, sz);
+    for (j = 0; j < sz && j < 4; j++)
+        e[j] = (uint8_t)(v >> (8 * j));
+}
+
+static void check_scratch(cft_device *dev, cft_format fmt, size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    cft_caps c;
+    uint8_t img[1024];
+    uint64_t ins[16];
+    size_t bytes;
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *cc = (uint8_t *)malloc(n * esz);
+    uint8_t *dep = (uint8_t *)malloc(n * 2 * esz);
+    uint8_t *sin_buf = (uint8_t *)malloc(n * 3 * esz);
+    uint8_t *sout_buf = (uint8_t *)malloc(n * 2 * esz);
+    uint32_t *cnt = (uint32_t *)malloc(n * 4);
+    cft_program *prog = NULL;
+    cft_run_args A;
+    uint32_t top;
+    size_t i;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    if (cft_get_caps(dev, &c) != CFT_OK ||
+        !(c.seq_features & CFT_SEQ_FEAT_SCRATCH)) {
+        printf("  no scratch on this device, R4/R5 not run\n");
+        goto out;
+    }
+    if (!a || !b || !cc || !dep || !sin_buf || !sout_buf || !cnt) {
+        printf("  FAIL seq scratch: out of memory\n");
+        failures++;
+        goto out;
+    }
+    top = c.max_scratch ? c.max_scratch - 1u : 255u;
+    fill_finite(a, fmt, n);
+    fill_finite(b, fmt, n);
+
+    /* ---- 1. STL/LDL round trips, including the highest slot -------
+     * Slot 0 takes r0 and the top slot takes r1, then both are read
+     * back and deposited in the other order. The deposits must be the
+     * INPUT BYTES: a scratch cell that aliased its neighbour, dropped
+     * a bit of the slot index or never wrote at all gives something
+     * else. */
+    ins[0] = seq_stl(0, 0);
+    ins[1] = seq_stl(1, top);
+    ins[2] = seq_ldl(4, top);
+    ins[3] = seq_ldl(5, 0);
+    ins[4] = seq_ctrl(3, 4, 0);
+    ins[5] = seq_ctrl(3, 5, 0);
+    ins[6] = seq_ctrl(0, 0, 0);
+    bytes = seq_image(img, fmt, ins, 7, NULL, 0, 2);
+    checks++;
+    if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+        printf("  FAIL seq scratch: the STL/LDL image did not load: %s\n",
+               cft_last_error());
+        failures++;
+    } else {
+        uint32_t fl = 0xFFu;
+        checks++;
+        if (cft_program_run(prog, a, b, NULL, dep, cnt, n, &fl, NULL)
+            != CFT_OK) {
+            printf("  FAIL seq scratch: the STL/LDL program did not run: "
+                   "%s\n", cft_last_error());
+            failures++;
+        } else {
+            int bad = 0;
+            for (i = 0; i < n; i++) {
+                if (memcmp(dep + (2 * i) * esz, b + i * esz, esz) != 0 ||
+                    memcmp(dep + (2 * i + 1) * esz, a + i * esz, esz) != 0 ||
+                    cnt[i] != 2)
+                    bad = 1;
+            }
+            checks++;
+            if (bad) {
+                printf("  FAIL seq scratch: an STL/LDL round trip through "
+                       "slots 0 and %lu did not return the inputs\n",
+                       (unsigned long)top);
+                failures++;
+            }
+            checks++;
+            if (fl != 0) {
+                printf("  FAIL seq scratch: a store and a load raised "
+                       "flags 0x%02x - neither is arithmetic\n", fl);
+                failures++;
+            }
+        }
+        cft_program_free(prog);
+        prog = NULL;
+    }
+
+    /* ---- 2. STX/LDX reduce modulo the depth ------------------------
+     * r2 holds the bit pattern 3 * SCRATCH_D + 5, an unsigned integer
+     * well past the memory. The contract REDUCES it rather than
+     * refusing it, so both indexed forms must land on slot 5 - which
+     * the static forms then read and write, so an implementation that
+     * reduced by something else, or that refused, fails here. */
+    if (c.max_scratch) {
+        const uint32_t idx = 3u * c.max_scratch + 5u;
+        for (i = 0; i < n; i++)
+            put_index(cc + i * esz, fmt, idx);
+        ins[0] = seq_stl(0, 5);          /* slot 5 := a */
+        ins[1] = seq_ldx(4, 2);          /* r4 := scratch[r2 mod D] */
+        ins[2] = seq_ctrl(3, 4, 0);      /* deposit a */
+        ins[3] = seq_stx(1, 2);          /* scratch[r2 mod D] := b */
+        ins[4] = seq_ldl(5, 5);          /* r5 := slot 5 */
+        ins[5] = seq_ctrl(3, 5, 0);      /* deposit b */
+        ins[6] = seq_ctrl(0, 0, 0);
+        bytes = seq_image(img, fmt, ins, 7, NULL, 0, 2);
+        checks++;
+        if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+            printf("  FAIL seq scratch: the STX/LDX image did not load: "
+                   "%s\n", cft_last_error());
+            failures++;
+        } else {
+            checks++;
+            if (cft_program_run(prog, a, b, cc, dep, cnt, n, NULL, NULL)
+                != CFT_OK) {
+                printf("  FAIL seq scratch: the STX/LDX program did not "
+                       "run: %s\n", cft_last_error());
+                failures++;
+            } else {
+                int bad = 0;
+                for (i = 0; i < n; i++)
+                    if (memcmp(dep + (2 * i) * esz, a + i * esz, esz) != 0 ||
+                        memcmp(dep + (2 * i + 1) * esz, b + i * esz,
+                               esz) != 0)
+                        bad = 1;
+                checks++;
+                if (bad) {
+                    printf("  FAIL seq scratch: an index of %lu did not "
+                           "reduce to slot 5 modulo %lu\n",
+                           (unsigned long)idx,
+                           (unsigned long)c.max_scratch);
+                    failures++;
+                }
+            }
+            cft_program_free(prog);
+            prog = NULL;
+        }
+    }
+
+    /* ---- 3. A store is masked by the active bit --------------------
+     * Two halves of one claim. The first STL runs with every lane
+     * inactive and must write nothing; the second is the body of an
+     * all-inactive loop, which the early exit skips entirely. Either
+     * failing gives b where a was due, or a stored value where +0 was.
+     * That is P3: an all-inactive loop body is a no-op, and a store
+     * is a register write for its purposes. */
+    ins[0]  = seq_stl(0, 0);             /* slot 0 := a, all active */
+    ins[1]  = seq_ctrl(4, 3, 0);         /* SETACT r3 - r3 is +0 */
+    ins[2]  = seq_stl(1, 0);             /* masked: slot 0 keeps a */
+    ins[3]  = seq_ctrl(1, 0, 4);         /* REPEAT 4 */
+    ins[4]  = seq_stl(1, 1);             /*   masked: slot 1 stays +0 */
+    ins[5]  = seq_ctrl(2, 0, 0);         /* ENDREP */
+    ins[6]  = seq_ctrl(5, 0, 0);         /* ACTALL */
+    ins[7]  = seq_ldl(4, 0);
+    ins[8]  = seq_ldl(5, 1);
+    ins[9]  = seq_ctrl(3, 4, 0);
+    ins[10] = seq_ctrl(3, 5, 0);
+    ins[11] = seq_ctrl(0, 0, 0);
+    bytes = seq_image(img, fmt, ins, 12, NULL, 0, 2);
+    checks++;
+    if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+        printf("  FAIL seq scratch: the masked-store image did not load: "
+               "%s\n", cft_last_error());
+        failures++;
+    } else {
+        uint8_t zero[MAXE];
+        int bad = 0;
+        memset(zero, 0, esz);
+        checks++;
+        if (cft_program_run(prog, a, b, NULL, dep, cnt, n, NULL, NULL)
+            != CFT_OK) {
+            printf("  FAIL seq scratch: the masked-store program did not "
+                   "run: %s\n", cft_last_error());
+            failures++;
+        } else {
+            for (i = 0; i < n; i++)
+                if (memcmp(dep + (2 * i) * esz, a + i * esz, esz) != 0 ||
+                    memcmp(dep + (2 * i + 1) * esz, zero, esz) != 0)
+                    bad = 1;
+            checks++;
+            if (bad) {
+                printf("  FAIL seq scratch: a store by an inactive lane "
+                       "reached the memory\n");
+                failures++;
+            }
+        }
+        cft_program_free(prog);
+        prog = NULL;
+    }
+
+    /* ---- 4 and 5. The per-run block, in and out --------------------
+     * Three slots a lane in, two out, over n lanes - which the caller
+     * makes larger than one 64-lane block, so the lane-major layout
+     * and the block boundary are both exercised. The program reads
+     * slots 0 and 2 of the preloaded block and deposits them, then
+     * stores r0 and r1 into slots 0 and 1, so the scratch-out block
+     * must hold the inputs lane by lane and the deposits must hold the
+     * preloaded values. Getting both right at once is what pins the
+     * ORDER down: the preload happens before the first instruction and
+     * the writeback after the last. */
+    if (c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) {
+        fill_scratch_block(sin_buf, fmt, n, 3);
+        memset(sout_buf, 0xA5, n * 2 * esz);
+        ins[0] = seq_ldl(4, 0);
+        ins[1] = seq_ldl(5, 2);
+        ins[2] = seq_ctrl(3, 4, 0);
+        ins[3] = seq_ctrl(3, 5, 0);
+        ins[4] = seq_stl(0, 0);
+        ins[5] = seq_stl(1, 1);
+        ins[6] = seq_ctrl(0, 0, 0);
+        bytes = seq_image_scratch(img, fmt, ins, 7, NULL, 0, 2,
+                                  CFT_PROG_FLAG_SCRATCH_IO, 3, 2);
+        checks++;
+        if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+            printf("  FAIL seq scratch: the SCRATCH_IO image did not load: "
+                   "%s\n", cft_last_error());
+            failures++;
+        } else {
+            cft_program_info info;
+            memset(&info, 0, sizeof info);
+            info.struct_size = sizeof info;
+            checks++;
+            if (cft_program_get_info(prog, &info) != CFT_OK ||
+                info.n_scratch_in != 3 || info.n_scratch_out != 2 ||
+                info.scratch_used != 3) {
+                printf("  FAIL seq scratch: cft_program_info reports "
+                       "%lu/%lu in/out and %lu used, not 3/2 and 3\n",
+                       (unsigned long)info.n_scratch_in,
+                       (unsigned long)info.n_scratch_out,
+                       (unsigned long)info.scratch_used);
+                failures++;
+            }
+            run_args_init(&A, a, dep, n);
+            A.b                 = b;
+            A.counts            = cnt;
+            A.scratch_in        = sin_buf;
+            A.scratch_in_bytes  = n * 3 * esz;
+            A.scratch_out       = sout_buf;
+            A.scratch_out_bytes = n * 2 * esz;
+            checks++;
+            if (cft_program_run_ex(prog, &A) != CFT_OK) {
+                printf("  FAIL seq scratch: the SCRATCH_IO program did not "
+                       "run: %s\n", cft_last_error());
+                failures++;
+            } else {
+                int bad_in = 0, bad_out = 0;
+                for (i = 0; i < n; i++) {
+                    if (memcmp(dep + (2 * i) * esz,
+                               sin_buf + (3 * i) * esz, esz) != 0 ||
+                        memcmp(dep + (2 * i + 1) * esz,
+                               sin_buf + (3 * i + 2) * esz, esz) != 0)
+                        bad_in = 1;
+                    if (memcmp(sout_buf + (2 * i) * esz, a + i * esz,
+                               esz) != 0 ||
+                        memcmp(sout_buf + (2 * i + 1) * esz, b + i * esz,
+                               esz) != 0)
+                        bad_out = 1;
+                }
+                checks++;
+                if (bad_in) {
+                    printf("  FAIL seq scratch: the preloaded block did not "
+                           "reach the lanes it belongs to (n = %lu, three "
+                           "slots a lane)\n", (unsigned long)n);
+                    failures++;
+                }
+                checks++;
+                if (bad_out) {
+                    printf("  FAIL seq scratch: the scratch-out block does "
+                           "not hold each lane's own stores (n = %lu, two "
+                           "slots a lane)\n", (unsigned long)n);
+                    failures++;
+                }
+            }
+            cft_program_free(prog);
+            prog = NULL;
+        }
+    }
+
+    /* ---- 6. A resumable program -----------------------------------
+     * The whole point of R5. One slot in, one slot out, and a body
+     * that doubles the state K times - exact in every format, so the
+     * comparison is bytes and not a tolerance. Three doublings twice,
+     * chained through the block, must equal six doublings once: the
+     * state that came out is the state that goes back in, and a run is
+     * resumable.
+     *
+     * A program that quietly restarted from +0, preloaded the wrong
+     * lane, or wrote the block before the loop rather than after it
+     * would give a different answer to at least one of the two. */
+    if (c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) {
+        uint8_t *state = (uint8_t *)malloc(n * esz);
+        uint8_t *once = (uint8_t *)malloc(n * esz);
+        uint8_t *dep1 = (uint8_t *)malloc(n * esz);
+        int step;
+        if (!state || !once || !dep1) {
+            printf("  FAIL seq scratch: out of memory\n");
+            failures++;
+            free(state); free(once); free(dep1);
+            goto out;
+        }
+        for (step = 0; step < 2; step++) {
+            const uint32_t trips = step ? 6u : 3u;
+            uint8_t *out_buf = step ? once : state;
+            ins[0] = seq_ldl(4, 0);
+            ins[1] = seq_ctrl(1, 0, trips);           /* REPEAT trips */
+            ins[2] = seq_alu(1, 4, 4, 0, 4, 0, 0, 0); /* r4 = r4 + r4 */
+            ins[3] = seq_ctrl(2, 0, 0);               /* ENDREP */
+            ins[4] = seq_stl(4, 0);
+            ins[5] = seq_ctrl(3, 4, 0);
+            ins[6] = seq_ctrl(0, 0, 0);
+            bytes = seq_image_scratch(img, fmt, ins, 7, NULL, 0, 1,
+                                      CFT_PROG_FLAG_SCRATCH_IO, 1, 1);
+            checks++;
+            if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+                printf("  FAIL seq scratch: the resumable image did not "
+                       "load: %s\n", cft_last_error());
+                failures++;
+                break;
+            }
+            run_args_init(&A, a, dep1, n);
+            A.scratch_in        = a;      /* the seed, both times */
+            A.scratch_in_bytes  = n * esz;
+            A.scratch_out       = out_buf;
+            A.scratch_out_bytes = n * esz;
+            checks++;
+            if (cft_program_run_ex(prog, &A) != CFT_OK) {
+                printf("  FAIL seq scratch: the resumable program did not "
+                       "run: %s\n", cft_last_error());
+                failures++;
+                cft_program_free(prog);
+                prog = NULL;
+                break;
+            }
+            if (step == 0) {
+                /* the second half of the chain: the state that came
+                 * out goes straight back in, three more doublings */
+                run_args_init(&A, a, dep1, n);
+                A.scratch_in        = state;
+                A.scratch_in_bytes  = n * esz;
+                A.scratch_out       = sout_buf;
+                A.scratch_out_bytes = n * esz;
+                checks++;
+                if (cft_program_run_ex(prog, &A) != CFT_OK) {
+                    printf("  FAIL seq scratch: the resumed run failed: "
+                           "%s\n", cft_last_error());
+                    failures++;
+                }
+            }
+            cft_program_free(prog);
+            prog = NULL;
+        }
+        checks++;
+        if (memcmp(sout_buf, once, n * esz) != 0) {
+            printf("  FAIL seq scratch: two runs of three doublings chained "
+                   "through the block do not equal one run of six\n");
+            failures++;
+        }
+        /* And the negative control the claim needs: six doublings is
+         * not three, so a chain that had silently restarted would have
+         * produced `state` here and passed nothing. */
+        checks++;
+        if (memcmp(state, once, n * esz) == 0) {
+            printf("  FAIL seq scratch: three doublings and six gave the "
+                   "same bytes, so the comparison above proves nothing\n");
+            failures++;
+        }
+        free(state); free(once); free(dep1);
+    }
+
+    /* ---- 7. A constant at index 511, through kx's ninth bit --------
+     * A bank of 512 where every constant is 2.0 but the last, which is
+     * 1.0, and one MUL naming k[511]. The deposit must be a[i]
+     * exactly: an operand mux that dropped the ninth bit would read
+     * k[255] and deposit twice that, which is the failure CAPS[7]
+     * exists to prevent and the reason this test multiplies rather
+     * than adds. */
+    if ((c.seq_features & CFT_SEQ_FEAT_KX9) && c.max_consts >= 512u) {
+        uint8_t *konst = (uint8_t *)malloc(512 * esz);
+        uint8_t *img9 = (uint8_t *)malloc(512 * esz + 64);
+        if (!konst || !img9) {
+            printf("  FAIL seq scratch: out of memory\n");
+            failures++;
+        } else {
+            uint32_t j;
+            for (j = 0; j < 512; j++)
+                make_pow2(konst + (size_t)j * esz, fmt, 1);   /* 2.0 */
+            make_pow2(konst + 511u * (size_t)esz, fmt, 0);    /* 1.0 */
+            ins[0] = seq_alu_kx9(CFT_MUL, 4, 0, 511, 0, 0, 1, 0);
+            ins[1] = seq_ctrl(3, 4, 0);
+            ins[2] = seq_ctrl(0, 0, 0);
+            bytes = seq_image(img9, fmt, ins, 3, konst, 512, 1);
+            checks++;
+            if (cft_program_load(dev, img9, bytes, &prog) != CFT_OK) {
+                printf("  FAIL seq scratch: the k[511] image did not load: "
+                       "%s\n", cft_last_error());
+                failures++;
+            } else {
+                checks++;
+                if (cft_program_run(prog, a, NULL, NULL, dep, NULL, n,
+                                    NULL, NULL) != CFT_OK) {
+                    printf("  FAIL seq scratch: the k[511] program did not "
+                           "run: %s\n", cft_last_error());
+                    failures++;
+                } else {
+                    checks++;
+                    if (memcmp(dep, a, n * esz) != 0) {
+                        printf("  FAIL seq scratch: k[511] did not multiply "
+                               "by one - the ninth index bit was dropped\n");
+                        failures++;
+                    }
+                }
+                cft_program_free(prog);
+                prog = NULL;
+            }
+        }
+        free(konst);
+        free(img9);
+    }
+
+out:
+    cft_program_free(prog);
+    free(a); free(b); free(cc); free(dep);
+    free(sin_buf); free(sout_buf); free(cnt);
+}
+
 static void refusal(cft_device *dev, cft_format fmt, const char *label,
                     const uint8_t *img, size_t bytes, cft_status want,
                     const char *needle)
@@ -1459,14 +2194,21 @@ static void check_program_refusals(cft_device *dev, cft_format fmt)
     insns[2] = seq_ctrl(0, 0, 0);
 
     /* ---- the header ---- */
-    bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 2u);
-    refusal(dev, fmt, "flags bit 1 (unassigned)", img, bytes,
+    /* Bit 1 was the unassigned bit until revision 3 took it for
+     * SCRATCH_IO, so this moved up to bit 2 - which is what the check
+     * is about: a flag this library cannot read is an image it cannot
+     * read, whichever bit it is. */
+    bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 4u);
+    refusal(dev, fmt, "flags bit 2 (unassigned)", img, bytes,
             CFT_ERR_ARTIFACT, NULL);
     bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 0x80000000u);
     refusal(dev, fmt, "flags bit 31", img, bytes, CFT_ERR_ARTIFACT, NULL);
+    /* scratch_io non-zero with SCRATCH_IO clear: the word is
+     * meaningful only under the flag and is the reserved word it
+     * always was without it. */
     bytes = seq_image(img, fmt, insns, 3, konst, 2, 1);
-    put_le32(img + 28, 1);                        /* reserved[1] */
-    refusal(dev, fmt, "reserved[1] non-zero", img, bytes,
+    put_le32(img + 28, 1);
+    refusal(dev, fmt, "scratch_io non-zero with the flag clear", img, bytes,
             CFT_ERR_ARTIFACT, NULL);
     /* A BANK_EXT image that still carries its constant section is the
      * wrong LENGTH, and a program is exactly its header, its
@@ -1502,6 +2244,112 @@ static void check_program_refusals(cft_device *dev, cft_format fmt)
         bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
         refusal(dev, fmt, "imm[25] on a HALT", img, bytes,
                 CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* imm[31] stays reserved-must-be-zero, which is the version
+         * guard for whatever comes after revision 3 - so it is checked
+         * apart from imm[30:28], which are now the ninth index bits */
+        memcpy(bad, insns, sizeof bad);
+        bad[0] = insns[0] | ((uint64_t)0x80000000u << 32);
+        bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
+        refusal(dev, fmt, "imm[31] on an ALU instruction", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* a ninth index bit without kx: read by nothing */
+        memcpy(bad, insns, sizeof bad);
+        bad[0] = insns[0] | ((uint64_t)0x10000000u << 32);
+        bytes = seq_image(img, fmt, bad, 3, konst, 2, 1);
+        refusal(dev, fmt, "imm[28] without kx", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* and a ninth index bit under kx belonging to an operand that
+         * names a REGISTER: also read by nothing. kb selects the bank
+         * here, so ka's bit (imm[28]) is the unread one. */
+        {
+            uint64_t k[3];
+            k[0] = seq_alu_kx(0, 4, 0, 1, 2, 0, 1, 0) |
+                   ((uint64_t)0x10000000u << 32);
+            k[1] = insns[1];
+            k[2] = insns[2];
+            bytes = seq_image(img, fmt, k, 3, konst, 2, 1);
+            refusal(dev, fmt, "imm[28] for a register operand under kx",
+                    img, bytes, CFT_ERR_INVALID_ARGUMENT, NULL);
+        }
+    }
+
+    /* ---- the four scratch codes' field rules ---- */
+    {
+        uint64_t s[4];
+        s[0] = seq_stl(0, 3);
+        s[1] = seq_ldl(4, 3);
+        s[2] = seq_ctrl(3, 4, 0);
+        s[3] = seq_ctrl(0, 0, 0);
+        /* The positive control first: the same four instructions with
+         * every field where the encoding puts it must LOAD, or the
+         * seven refusals below would all be passing for the wrong
+         * reason. */
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        checks++;
+        if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+            printf("  FAIL refusal: the well-formed STL/LDL program was "
+                   "refused: %s\n", cft_last_error());
+            failures++;
+        }
+        cft_program_free(prog);
+        prog = NULL;
+
+        /* STL writes no register, so rd is a field it does not read */
+        s[0] = seq_stl(0, 3) | ((uint64_t)2u << 8);
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        refusal(dev, fmt, "rd on an STL", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* LDL reads no source register */
+        s[0] = seq_stl(0, 3);
+        s[1] = seq_ldl(4, 3) | ((uint64_t)2u << 12);
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        refusal(dev, fmt, "ra on an LDL", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* the indexed forms take their slot from rb, so imm[23:0] is a
+         * field neither of them reads */
+        s[0] = seq_stx(0, 1) | ((uint64_t)5u << 32);
+        s[1] = seq_ldx(4, 1);
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        refusal(dev, fmt, "imm[23:0] on an STX", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        s[0] = seq_stx(0, 1);
+        s[1] = seq_ldx(4, 1) | ((uint64_t)5u << 32);
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        refusal(dev, fmt, "imm[23:0] on an LDX", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        /* and no scratch code carries a rounding attribute or a k
+         * flag: neither is arithmetic */
+        s[0] = seq_stl(0, 3) | ((uint64_t)1u << 24);
+        s[1] = seq_ldl(4, 3);
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        refusal(dev, fmt, "rnd on an STL", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+        s[0] = seq_stl(0, 3) | ((uint64_t)1u << 27);
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        refusal(dev, fmt, "ka on an STL", img, bytes,
+                CFT_ERR_INVALID_ARGUMENT, NULL);
+    }
+
+    /* ---- the scratch_io word itself ---- */
+    {
+        uint64_t s[2];
+        cft_caps cc;
+        s[0] = seq_ctrl(0, 0, 0);
+        s[1] = seq_ctrl(0, 0, 0);
+        memset(&cc, 0, sizeof cc);
+        cc.struct_size = sizeof cc;
+        if (cft_get_caps(dev, &cc) == CFT_OK && cc.max_scratch) {
+            bytes = seq_image_scratch(img, fmt, s, 2, NULL, 0, 1,
+                                      CFT_PROG_FLAG_SCRATCH_IO,
+                                      cc.max_scratch + 1u, 0);
+            refusal(dev, fmt, "n_scratch_in past max_scratch", img, bytes,
+                    CFT_ERR_UNSUPPORTED, "n_scratch_in");
+            bytes = seq_image_scratch(img, fmt, s, 2, NULL, 0, 1,
+                                      CFT_PROG_FLAG_SCRATCH_IO, 0,
+                                      cc.max_scratch + 1u);
+            refusal(dev, fmt, "n_scratch_out past max_scratch", img, bytes,
+                    CFT_ERR_UNSUPPORTED, "n_scratch_out");
+        }
     }
 
     /* ---- the two entry points, refusing each other's programs ---- */
@@ -1576,6 +2424,140 @@ static void check_program_refusals(cft_device *dev, cft_format fmt)
             }
         }
         cft_program_free(prog);
+        prog = NULL;
+    }
+
+    /* ---- run_ex, and the scratch block's own refusals (ABI 0.10) ---- */
+    {
+        uint64_t s[4];
+        uint8_t dep[MAXE], sin_buf[4 * MAXE], sout_buf[4 * MAXE];
+        cft_run_args A;
+
+        memset(sin_buf, 0, sizeof sin_buf);
+        memset(sout_buf, 0, sizeof sout_buf);
+        s[0] = seq_stl(0, 0);
+        s[1] = seq_ldl(4, 0);
+        s[2] = seq_ctrl(3, 4, 0);
+        s[3] = seq_ctrl(0, 0, 0);
+
+        /* An ORDINARY program refuses a scratch block, for the same
+         * reason it refuses a bank: a block that was quietly ignored
+         * is a caller and a library disagreeing about what ran. */
+        bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
+        if (cft_program_load(dev, img, bytes, &prog) == CFT_OK) {
+            run_args_init(&A, konst, dep, 1);
+            A.scratch_in       = sin_buf;
+            A.scratch_in_bytes = esz;
+            checks++;
+            st = cft_program_run_ex(prog, &A);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "declares no scratch I/O")) {
+                printf("  FAIL refusal: a scratch block on a program that "
+                       "declares none gave %s (%s)\n", cft_strerror(st),
+                       cft_last_error());
+                failures++;
+            }
+            /* and the struct's own size handshake, both directions */
+            run_args_init(&A, konst, dep, 1);
+            A.struct_size = sizeof A - 1u;
+            checks++;
+            st = cft_program_run_ex(prog, &A);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "struct_size")) {
+                printf("  FAIL refusal: a short cft_run_args gave %s (%s)\n",
+                       cft_strerror(st), cft_last_error());
+                failures++;
+            }
+            run_args_init(&A, konst, dep, 1);
+            A.struct_size = sizeof A + 8u;
+            checks++;
+            st = cft_program_run_ex(prog, &A);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "ignored")) {
+                printf("  FAIL refusal: a long cft_run_args gave %s (%s)\n",
+                       cft_strerror(st), cft_last_error());
+                failures++;
+            }
+            /* the plain run through run_ex, so the three above are not
+             * the only thing this program can do */
+            run_args_init(&A, konst, dep, 1);
+            checks++;
+            if (cft_program_run_ex(prog, &A) != CFT_OK) {
+                printf("  FAIL refusal: run_ex with no bank and no scratch "
+                       "on an ordinary program gave %s\n", cft_last_error());
+                failures++;
+            }
+            cft_program_free(prog);
+            prog = NULL;
+        }
+
+        /* A SCRATCH_IO program refuses both older entry points by
+         * name, and refuses a block that is not the size its header
+         * says. */
+        bytes = seq_image_scratch(img, fmt, s, 4, NULL, 0, 1,
+                                  CFT_PROG_FLAG_SCRATCH_IO, 2, 2);
+        if (cft_program_load(dev, img, bytes, &prog) == CFT_OK) {
+            checks++;
+            st = cft_program_run(prog, konst, NULL, NULL, dep, NULL, 1,
+                                 NULL, NULL);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "cft_program_run_ex")) {
+                printf("  FAIL refusal: cft_program_run on a SCRATCH_IO "
+                       "program gave %s (%s)\n", cft_strerror(st),
+                       cft_last_error());
+                failures++;
+            }
+            checks++;
+            st = cft_program_run_bank(prog, NULL, 0, konst, NULL, NULL, dep,
+                                      NULL, 1, NULL, NULL);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "cft_program_run_ex")) {
+                printf("  FAIL refusal: cft_program_run_bank on a "
+                       "SCRATCH_IO program gave %s (%s)\n", cft_strerror(st),
+                       cft_last_error());
+                failures++;
+            }
+            /* one element short */
+            run_args_init(&A, konst, dep, 1);
+            A.scratch_in        = sin_buf;
+            A.scratch_in_bytes  = esz;
+            A.scratch_out       = sout_buf;
+            A.scratch_out_bytes = 2 * esz;
+            checks++;
+            st = cft_program_run_ex(prog, &A);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "scratch-in")) {
+                printf("  FAIL refusal: a scratch-in block one element "
+                       "short gave %s (%s)\n", cft_strerror(st),
+                       cft_last_error());
+                failures++;
+            }
+            /* and none at all */
+            run_args_init(&A, konst, dep, 1);
+            checks++;
+            st = cft_program_run_ex(prog, &A);
+            if (st != CFT_ERR_INVALID_ARGUMENT ||
+                !strstr(cft_last_error(), "scratch-in")) {
+                printf("  FAIL refusal: a SCRATCH_IO program ran with no "
+                       "scratch block at all (%s)\n", cft_strerror(st));
+                failures++;
+            }
+            /* the well-formed call, so the three above are refusals of
+             * something and not of everything */
+            run_args_init(&A, konst, dep, 1);
+            A.scratch_in        = sin_buf;
+            A.scratch_in_bytes  = 2 * esz;
+            A.scratch_out       = sout_buf;
+            A.scratch_out_bytes = 2 * esz;
+            checks++;
+            if (cft_program_run_ex(prog, &A) != CFT_OK) {
+                printf("  FAIL refusal: the well-formed run_ex was refused: "
+                       "%s\n", cft_last_error());
+                failures++;
+            }
+            cft_program_free(prog);
+            prog = NULL;
+        }
     }
 }
 
@@ -1720,7 +2702,15 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
         printf("  seq BANK_EXT: this device does not publish BANK_PTR, "
                "NOT COMPARED (the refusal is scored above)\n");
 
-    /* 7. the argument refusals, which are the library's own and reach
+    /* 7. the per-lane scratch memory and its per-run block, revision
+     *    3's R4 and R5, gated the same way and skipped by name where
+     *    the device does not publish them. Run against the device
+     *    under test rather than the software handle, because a tile
+     *    with the feature has its own memory and its own two
+     *    pointers. */
+    check_scratch(hw, fmt, n);
+
+    /* 8. the argument refusals, which are the library's own and reach
      *    no device at all - so they are scored once, on the software
      *    handle, at every format. */
     check_program_refusals(sw, fmt);

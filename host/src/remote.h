@@ -84,6 +84,25 @@ extern "C" {
  * both ends, so stepping it would turn "an older server refuses one
  * operation" into "an older server refuses the connection". */
 #define CFTR_OP_PROG_RUN_BANK    0x0023u
+/* PROG_RUN with everything a run can carry (ABI 0.10,
+ * docs/SEQUENCER.md revision 3 R5): the bank, and the per-run scratch
+ * block in and out. A THIRD opcode for exactly the reasons the second
+ * one was a second - an older server has no case for 0x0024 and
+ * answers CFT_ERR_UNSUPPORTED by name on a connection that stays open,
+ * where a longer PROG_RUN_BANK would have failed that server's length
+ * check and ended the connection.
+ *
+ * WHICH of the three a run becomes is the IMAGE's decision, read from
+ * its header - SCRATCH_IO (flags bit 1) first, then BANK_EXT (bit 0) -
+ * and never from the buffers' lengths. A BANK_EXT program whose
+ * n_consts is zero has a legitimately empty bank and still needs the
+ * bank opcode, and a SCRATCH_IO program whose two counts are zero has
+ * two legitimately empty blocks and still needs this one, because the
+ * server's cft_program_run and cft_program_run_bank both refuse it and
+ * only cft_program_run_ex takes it. That corner was found by the
+ * JavaScript client on 2026-09-08 and is the reason the rule is
+ * written down here rather than inferred at each call site. */
+#define CFTR_OP_PROG_RUN_EX      0x0024u
 #define CFTR_OP_BUF_ALLOC        0x0030u
 #define CFTR_OP_BUF_FREE         0x0031u
 #define CFTR_OP_BUF_WRITE        0x0032u
@@ -115,9 +134,13 @@ extern "C" {
  * V1 (56 bytes, protocol 1 as first shipped): format_mask, op_groups,
  * tiles, device_version, flags_readable, abi, backend[32].
  * V2 (72): + max_deposits, max_insns, max_consts, seq_features - the
- * sequencer capacities of cft_caps, in the same units. */
+ * sequencer capacities of cft_caps, in the same units.
+ * V3 (76): + max_scratch, the per-lane scratch depth of revision 3.
+ * seq_features carries the two new feature bits in the field it
+ * already had, so only the capacity needed a word. */
 #define CFTR_CAPS_BYTES_V1  56u
-#define CFTR_CAPS_BYTES     72u
+#define CFTR_CAPS_BYTES_V2  72u
+#define CFTR_CAPS_BYTES     76u
 #define CFTR_BACKEND_NAME   32u
 
 /* The default port the server listens on. A choice, not a derivation:
@@ -248,7 +271,7 @@ int  cftr_reduce(void *hw, int op, int fmt, int rnd,
                  uint32_t *flags, uint32_t *bus);
 int  cftr_program_run(void *hw, int fmt, const void *image,
                       size_t image_bytes,
-                      const void *bank, size_t bank_bytes,
+                      const cft_seq_run_io *io,
                       uint32_t max_deposits,
                       const void *a, const void *b, const void *c,
                       void *deposits, uint32_t *counts, size_t n,

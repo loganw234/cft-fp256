@@ -40,7 +40,11 @@ typedef struct cft_seq_caps {
     uint32_t max_deposits;
     uint32_t max_insns;
     uint32_t max_consts;   /* addressable, not the header's n_consts */
-    uint32_t features;     /* CAPS[7:4] in bits 3:0, CAPS[31:28] in 7:4 */
+    uint32_t features;     /* CAPS[7:4] in bits 3:0, CAPS[31:28] in 7:4,
+                            * CAPS2[7:4] in 11:8 */
+    uint32_t max_scratch;  /* scratch slots a lane, CAPS2[3:0] as log2
+                            * (revision 3, R4). Zero is unknown here as
+                            * everywhere else in this struct */
 } cft_seq_caps;
 
 /* Open an artifact. On success fills every out-parameter:
@@ -100,16 +104,46 @@ int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
                  const size_t *lo, const size_t *hi, size_t nranges,
                  void *partials, uint32_t *flags, uint32_t *bus);
 
+/* The per-run DATA a sequencer program carries beside its operands.
+ *
+ * One struct rather than six more positional arguments, for the reason
+ * cft_run_args exists in the public header: revision 2 added two of
+ * them, revision 3 added four, and a backend signature that grows by
+ * an argument a round is one every backend has to be edited to ignore.
+ * Everything here has already been held to the program's own header by
+ * program.c, so a backend may take the byte counts as given.
+ *
+ * bank         NULL for a program that carries its own constants, and
+ *              the caller's dense array of `n_consts` format-width
+ *              values for a BANK_EXT one (revision 2, R3) whose image
+ *              has no constant section at all
+ * scratch_in   NULL, or n * n_scratch_in format-width values,
+ *              LANE-MAJOR and dense - lane i's slot s is element
+ *              i * n_scratch_in + s (revision 3, R5) - preloaded into
+ *              the first slots of each lane's scratch before its first
+ *              instruction
+ * scratch_out  NULL, or n * n_scratch_out likewise, written after each
+ *              lane's last deposit
+ * n_scratch_*  the per-lane slot counts the two blocks are shaped by,
+ *              which a backend that CHUNKS the run needs: a chunk of k
+ *              lanes starting at lane `off` carries the elements
+ *              [off * n_scratch_in, (off + k) * n_scratch_in), and a
+ *              transport that sliced the block by bytes alone would
+ *              hand every chunk the first lanes' slots
+ */
+typedef struct cft_seq_run_io {
+    const void *bank;        size_t bank_bytes;
+    const void *scratch_in;  size_t scratch_in_bytes;
+    void       *scratch_out; size_t scratch_out_bytes;
+    uint32_t    n_scratch_in, n_scratch_out;
+} cft_seq_run_io;
+
 /* Run a sequencer program (docs/SEQUENCER.md) on ONE compute unit.
  *
  * `image` is the exact byte image cft_program_load validated, DMA'd
  * into the tile whole rather than reassembled from the parsed form -
  * so what executes is what was loaded, and a readback can attest it.
- * `bank` is NULL for a program that carries its own constants and the
- * caller's dense array of `n_consts` format-width values for a
- * BANK_EXT one (docs/SEQUENCER.md revision 2, R3), whose image has no
- * constant section at all; program.c has already held it to the
- * program's shape, so a backend may take `bank_bytes` as given.
+ * `io` is the per-run data above.
  * `max_deposits` comes from the image's header and shapes `deposits`
  * at n * max_deposits elements; `counts` may be NULL, though the tile
  * writes the counts regardless and the backend supplies a buffer for
@@ -127,7 +161,7 @@ int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
  * a claim about P3 that wants its own fuzz before it ships. */
 int  cftx_program_run(void *hw, int fmt, const void *image,
                       size_t image_bytes,
-                      const void *bank, size_t bank_bytes,
+                      const cft_seq_run_io *io,
                       uint32_t max_deposits,
                       const void *a, const void *b, const void *c,
                       void *deposits, uint32_t *counts, size_t n,
@@ -200,7 +234,7 @@ const char *cftx_last_error(void);
  * ==================================================================== */
 int cft_backend_program_run(struct cft_device *dev, int fmt,
                             const void *image, size_t image_bytes,
-                            const void *bank, size_t bank_bytes,
+                            const cft_seq_run_io *io,
                             uint32_t max_deposits,
                             const void *a, const void *b, const void *c,
                             void *deposits, uint32_t *counts, size_t n,
