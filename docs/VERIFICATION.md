@@ -140,13 +140,13 @@ suite - so a Linux host lands nearer the quiet column or below it.
 
 | gate | quiet | loaded | notes |
 |---|---|---|---|
-| `golden` (pytest, 2,075 tests since the assembler's 49 joined on 2026-09-08) | 4 to 7 min at four workers; 6.6 serial | 8 to 13 min | |
+| `golden` (pytest, 2,150 tests since revision 3's model and assembler cases joined on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | 5 skip by their own conditions; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
 | `vectors` (`make vectors`, 168 sets) | 5 min | 7 to 8.5 min | |
 | `libcft` / `make -C host test` (build + the 1,071,635-case replay) | 7.5 min | 8.5 to 11 min | |
 | `sim` (21 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
 | `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, **does not finish under Icarus** in this configuration: 2.5 ns of simulated time a second through the small operations and about 0.03 ns a second inside the 1,104-element stream, 57 of 71 operations after four hours, on the tree before the cone change and after it alike; under Verilator, which its target selects, the bench is **16 s of simulation after an eleven-minute compile** (44,920 ns, both tests, parameters applied - until the evening of 2026-09-07 a Verilator build received none of a target's parameters and simulated the default, docs/VALIDATION.md) |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
-| `make programs-check` (the .cfta library: both assemblers, twelve images, a check each, a generated revision-2 corpus) | 5 to 20 s | | not a runner stage yet; `make programs` rebuilds the manifest it checks, so the two are separate on purpose |
+| `make programs-check` (the .cfta library: both assemblers, seventeen images, a check each, generated revision-2 and revision-3 corpora) | 10 to 60 s | | not a runner stage yet; `make programs` rebuilds the manifest it checks, so the two are separate on purpose; four of the checks waited on the revision-3 model and host by name (SKIP, not PASS) until both merged on 2026-09-08 |
 | on the card: `hw/run-device-test.sh <xclbin> -q -n 8`, `-n 4096`, `-r` (docs/CARDDAY.md steps 2-3) | seconds each | | measured 2026-09-08 on the U50: 4 to 8 s, 2 s, 1 s |
 | on the card: `cft-selftest vectors/out <xclbin>`, the published sets through the tile (step 4) | **about 10 min an image** | 11 min beside a Vivado run | one element a call for exact flags, so latency-bound; the same 584-642 s on one tile and on four |
 | on the card: the soak (five matrices, the sets again, ten orbit checkpoints per image; step 7) | about 20 min an image | | a tool that talks to the card must be built with `XRT=1`, or it says "no such device" |
