@@ -37,9 +37,10 @@ import {
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
   OP_SUMABS, OP_SUMSQ,
-  PROG_FLAG_BANK_EXT,
+  PROG_FLAG_BANK_EXT, PROG_FLAG_SCRATCH_IO,
   RDN, RMM, RNE, RTZ, RUP,
-  SEQ_FEAT_BANK_PTR, SEQ_FEAT_REGS32, SEQ_FEAT_WIDE_CONST,
+  SEQ_FEAT_BANK_PTR, SEQ_FEAT_KX9, SEQ_FEAT_REGS32, SEQ_FEAT_SCRATCH,
+  SEQ_FEAT_SCRATCH_IO, SEQ_FEAT_WIDE_CONST,
   STATUS_DEPOSIT_OVERFLOW, TRANSCEND_BINARY,
   TRANSCEND_INTARG, TRANSCEND_UNARY,
   checkStatus, flagNames, loadModule, seqFeatureNames, withScratch,
@@ -52,8 +53,10 @@ import {
 // one file outwards rather than removing it (lib.mjs' audit() holds
 // these five to the module).
 export {
-  ALU_EXT_IMUL, PROG_FLAG_BANK_EXT, SEQ_FEAT_BANK_PTR, SEQ_FEAT_REGS32,
-  SEQ_FEAT_WIDE_CONST, STATUS_DEPOSIT_OVERFLOW, seqFeatureNames,
+  ALU_EXT_IMUL, PROG_FLAG_BANK_EXT, PROG_FLAG_SCRATCH_IO,
+  SEQ_FEAT_BANK_PTR, SEQ_FEAT_KX9, SEQ_FEAT_REGS32, SEQ_FEAT_SCRATCH,
+  SEQ_FEAT_SCRATCH_IO, SEQ_FEAT_WIDE_CONST, STATUS_DEPOSIT_OVERFLOW,
+  seqFeatureNames,
 };
 
 // Three arities, not two: TRANSCEND_INTARG's second operand is an
@@ -629,6 +632,14 @@ export class Context {
   get maxDeposits() { return this._C.capsMaxDeposits(this._dev) >>> 0; }
   get maxInsns() { return this._C.capsMaxInsns(this._dev) >>> 0; }
   get maxConsts() { return this._C.capsMaxConsts(this._dev) >>> 0; }
+  /** Scratch slots a lane (ABI 0.10). Zero is UNKNOWN like the three
+   *  above, and it is a CAPACITY: whether the device has a scratch at
+   *  all is SEQ_FEAT_SCRATCH in the feature word, which is a different
+   *  question with a different rule. A static STL or LDL past this is
+   *  refused at load, by name; an indexed STX or LDX is reduced modulo
+   *  it instead, which the contract fixes rather than leaves to an
+   *  implementation. */
+  get maxScratch() { return this._C.capsMaxScratch(this._dev) >>> 0; }
 
   get abiVersion() {
     const v = this._C.abiVersion() >>> 0;
@@ -2397,6 +2408,11 @@ export class Program {
     // grew and cftw_program_get_info deliberately did not. Read once
     // here because a program's shape is fixed at load.
     this._flags = this._C.programFlags(handle) >>> 0;
+    // And ABI 0.10's three, through accessors for the same reason.
+    // Fixed at load like everything above, so read once.
+    this._scratchIn   = this._C.programScratchIn(handle) >>> 0;
+    this._scratchOut  = this._C.programScratchOut(handle) >>> 0;
+    this._scratchUsed = this._C.programScratchUsed(handle) >>> 0;
     /** The IEEE flags of the most recent run. */
     this.lastFlags = 0;
     /** The STATUS word of the most recent run - bus faults and the
@@ -2451,6 +2467,49 @@ export class Program {
     return this.bankExternal ? this._nConsts * this._fi.size : 0;
   }
 
+  /** True when the header's scratch_io word is meaningful: every run
+   *  preloads the first scratchIn slots of every lane from a buffer
+   *  and reads the first scratchOut back into another
+   *  (docs/SEQUENCER.md revision 3, R5).
+   *
+   *  Such a program takes runEx() and REFUSES run() and runBank() by
+   *  name - neither has anywhere to put the blocks, and running it
+   *  without them would preload every lane with +0 the caller never
+   *  chose and drop the block it meant to read back. Same argument
+   *  BANK_EXT makes about constants, about a different kind of data.
+   *
+   *  It only LOADS on a device whose caps carry SEQ_FEAT_SCRATCH_IO,
+   *  so a Program that answers true here is proof the device published
+   *  it. */
+  get scratchIo() {
+    return (this._flags & PROG_FLAG_SCRATCH_IO) !== 0;
+  }
+
+  /** Scratch slots a lane preloaded before each run, and read back
+   *  after it - the two halves of the header's scratch_io word, and
+   *  what sizes runEx's two buffers: n * scratchIn elements in and
+   *  n * scratchOut out, LANE-MAJOR and dense, lane i's slot s at
+   *  element i * scratchIn + s. Both zero unless scratchIo. */
+  get scratchIn() { return this._scratchIn; }
+  get scratchOut() { return this._scratchOut; }
+
+  /** What the INSTRUCTIONS touch, which is a different question: one
+   *  past the highest slot any STL or LDL names, or the device's whole
+   *  scratch depth when the program uses the indexed forms, whose slot
+   *  is not known until the run. Zero for a program that uses no
+   *  scratch at all. Ask this and Context.maxScratch to find out
+   *  whether a program would fit a smaller tile, rather than
+   *  disassembling the image. */
+  get scratchUsed() { return this._scratchUsed; }
+
+  /** The bytes each block is over `n` lanes, which is what runEx holds
+   *  a caller's buffer to - exactly, not at least. The layout is
+   *  lane-major, so a block of the wrong shape overruns nothing and
+   *  silently gives every lane somebody else's slots, which is why a
+   *  length check is worth having at all. */
+  scratchInBytes(n) { return n * this._scratchIn * this._fi.size; }
+  scratchOutBytes(n) { return n * this._scratchOut * this._fi.size; }
+
   /** True once free() has been called. A freed program refuses every
    *  call rather than reaching into a heap block the library has
    *  handed back. */
@@ -2500,7 +2559,21 @@ export class Program {
         `arrive with the run: call runBank(bank, a, b, c) with the ` +
         `${this._nConsts} ${this._fi.ieeeName} values it addresses ` +
         `(${this.bankBytes} bytes)`);
+    this._refuseScratchIo("run");
     return this._runWith(null, a, b, c);
+  }
+
+  /** A program declaring a per-run scratch block takes runEx() and
+   *  nothing else. The library refuses these two as well, naming
+   *  cft_program_run_ex; this names the method a JavaScript caller
+   *  actually wants, exactly as run()'s BANK_EXT check does. */
+  _refuseScratchIo(who) {
+    if (!this.scratchIo) return;
+    throw new TypeError(
+      `this program's header flags carry SCRATCH_IO, so every run ` +
+      `preloads ${this._scratchIn} scratch slots a lane and reads ` +
+      `${this._scratchOut} back, and ${who}() has nowhere to put them: ` +
+      `call runEx({ a, b, c, scratchIn, scratchOut })`);
   }
 
   /** The same run, with the constant bank supplied as DATA (ABI 0.9).
@@ -2524,7 +2597,57 @@ export class Program {
    *  while agreeing about the image (cft.h). */
   runBank(bank, a, b = null, c = null) {
     this._live("runBank");
-    return this._runWith(this._packBank(bank, "runBank"), a, b, c);
+    const banked = this._packBank(bank, "runBank");
+    this._refuseScratchIo("runBank");
+    return this._runWith(banked, a, b, c);
+  }
+
+  /** Everything a run can carry, in one object (ABI 0.10).
+   *
+   *  cft_run_args exists so the positional signatures stop growing by
+   *  an argument a round, and this is its shape in JavaScript:
+   *
+   *      prog.runEx({ a, b, c, bank, scratchIn, scratchOut })
+   *
+   *  `a` is the r0 stream and is not optional; `b` and `c` may be
+   *  omitted. `bank` follows runBank's rule exactly - a program that
+   *  carries its own constants refuses one, a BANK_EXT program
+   *  requires one of its own size. `scratchIn` is n * scratchIn values
+   *  of this program's format, LANE-MAJOR and dense: lane i's slot s
+   *  is element i * scratchIn + s, so the whole block is one flat
+   *  array or Uint8Array and not an array of arrays.
+   *
+   *  `scratchOut` is optional even for a program that declares one:
+   *  omit it and runEx allocates the block, returns it as
+   *  `scratchOut` in the result, and the run is unchanged. Pass a
+   *  Uint8Array of exactly scratchOutBytes(n) to have the bytes
+   *  written into it instead - which is what a caller chaining one run
+   *  into the next wants, since the block that came out is the block
+   *  that goes back in.
+   *
+   *  Returns run()'s result with two more fields: `scratchOut`, the
+   *  block as Floats (empty when the program declares none), and
+   *  `scratchOutBytes`, the same block unencoded, which is the form to
+   *  hand straight back as the next run's `scratchIn`. Decoding
+   *  n * scratchOut Floats costs something and a resumed run does not
+   *  need them, so both are there and neither is a conversion the
+   *  caller has to write.
+   *
+   *  A program that declares NO scratch I/O refuses a scratchIn or a
+   *  scratchOut here, for the reason a program with its own constants
+   *  refuses a bank: a block that was quietly ignored is a caller and
+   *  a library disagreeing about what ran. */
+  runEx(args = {}) {
+    this._live("runEx");
+    const { a = null, b = null, c = null, bank = null,
+            scratchIn = null, scratchOut = null } = args;
+    for (const k of Object.keys(args))
+      if (!["a", "b", "c", "bank", "scratchIn", "scratchOut"].includes(k))
+        throw new TypeError(
+          `runEx does not know the field "${k}" - it takes a, b, c, bank, ` +
+          `scratchIn and scratchOut`);
+    return this._runWith(this._packBank(bank, "runEx"), a, b, c,
+                         { scratchIn, scratchOut });
   }
 
   /** The bank a run or a digest was handed, encoded and held to this
@@ -2580,16 +2703,18 @@ export class Program {
     return buf;
   }
 
-  /** run() and runBank() are one call with one difference, so they are
-   *  one implementation: `bankBuf` is null for cft_program_run and a
-   *  Uint8Array - possibly EMPTY, for a BANK_EXT program that addresses
-   *  no constants - for cft_program_run_bank. Which entry point is
-   *  called turns on `!== null` and not on the length, because those
-   *  two are different questions and only the first one is "does this
-   *  program's constants arrive with the run". Every argument check,
-   *  buffer shape and returned field below is shared by construction
-   *  rather than by two copies agreeing. */
-  _runWith(bankBuf, a, b = null, c = null) {
+  /** run(), runBank() and runEx() are one call with two differences,
+   *  so they are one implementation: `bankBuf` is null for
+   *  cft_program_run and a Uint8Array - possibly EMPTY, for a BANK_EXT
+   *  program that addresses no constants - for the other two, and
+   *  `scr` is null for the first two and an object for runEx. WHICH
+   *  entry point is called turns on those two being null and never on
+   *  a buffer's length, because those are different questions and only
+   *  the first is "do this program's constants arrive with the run" -
+   *  the corner found at 0.9 and applied here one call further along.
+   *  Every argument check, buffer shape and returned field below is
+   *  shared by construction rather than by three copies agreeing. */
+  _runWith(bankBuf, a, b = null, c = null, scr = null) {
     const M = this._M, C = this._C, fi = this._fi;
     const ctx = this._formatCtx();
     const pack = (arr, what) => {
@@ -2617,6 +2742,70 @@ export class Program {
           `${name} holds ${buf.length / fi.size} elements and a holds ${n}; ` +
           `the three streams are read by the same lane index`);
 
+    // The two scratch blocks, held to this program the way the bank is
+    // - the JavaScript half of seq_check_scratch in host/src. The
+    // library makes both checks again and its message is what a raw
+    // Uint8Array gets; this one exists because a caller passing an
+    // ARRAY OF VALUES has to be told about values, and because the
+    // number it has to fix is a SLOT COUNT and not a byte length.
+    const sinBytes = this.scratchInBytes(n);
+    const soutBytes = this.scratchOutBytes(n);
+    let sinBuf = null;
+    // Empty rather than null under runEx, so the result's two scratch
+    // fields have the same TYPE whether or not the program declares a
+    // block - a caller that reads scratchOutBytes.length should not
+    // have to know which kind of program it holds.
+    let soutBuf = scr ? new Uint8Array(0) : null;
+    if (scr) {
+      if (!this.scratchIo) {
+        for (const [name, v] of [["scratchIn", scr.scratchIn],
+                                 ["scratchOut", scr.scratchOut]])
+          if (v !== null && v !== undefined)
+            throw new TypeError(
+              `runEx was given a ${name} block and this program declares ` +
+              `no scratch I/O (its header flags do not set SCRATCH_IO). ` +
+              `Pass no scratch block`);
+      } else {
+        sinBuf = pack(scr.scratchIn, "scratchIn");
+        if (!sinBuf) {
+          if (sinBytes)
+            throw new TypeError(
+              `runEx: this program preloads ${this._scratchIn} scratch ` +
+              `slots a lane and no scratchIn was given - ${n * this._scratchIn} ` +
+              `${fi.ieeeName} values are due, lane-major`);
+          sinBuf = new Uint8Array(0);
+        }
+        if (sinBuf.length !== sinBytes)
+          throw new RangeError(
+            `runEx was given a ${sinBuf.length}-byte scratchIn block and ` +
+            `this program's is ${sinBytes} bytes - ${n} lanes x ` +
+            `${this._scratchIn} ${fi.ieeeName} values, lane-major and ` +
+            `dense, lane i's slot s at element i * ${this._scratchIn} + s`);
+        // The OUT block may be supplied to be written into - which is
+        // what chaining one run into the next wants - or omitted, in
+        // which case it is allocated here and returned.
+        if (scr.scratchOut !== null && scr.scratchOut !== undefined) {
+          if (!(scr.scratchOut instanceof Uint8Array))
+            throw new TypeError(
+              "runEx wants scratchOut as a Uint8Array to write into, or " +
+              "omitted - it is an OUTPUT, so an array of values would be " +
+              "read and thrown away");
+          if (scr.scratchOut.length !== soutBytes)
+            throw new RangeError(
+              `runEx was given a ${scr.scratchOut.length}-byte scratchOut ` +
+              `block and this program's is ${soutBytes} bytes`);
+          soutBuf = scr.scratchOut;
+        } else {
+          soutBuf = new Uint8Array(soutBytes);
+        }
+      }
+    } else if (this.scratchIo) {
+      // unreachable: run() and runBank() refuse such a program by name
+      // before they get here. Kept because "unreachable" is a claim.
+      throw new TypeError("a SCRATCH_IO program reached _runWith without " +
+                          "its blocks");
+    }
+
     const ndep = n * this._maxDeposits;
     return withScratch(M, (s) => {
       const pa = s.put(ab);
@@ -2629,9 +2818,19 @@ export class Program {
       // length, which is what cft_program_run_bank's `bank_bytes ?
       // bank : NULL` expects and what avoids a malloc(0) here.
       const pbank = bankBuf && bankBuf.length ? s.put(bankBuf) : 0;
+      const psin = sinBuf && sinBuf.length ? s.put(sinBuf) : 0;
+      const psout = soutBuf && soutBuf.length ? s.alloc(soutBuf.length) : 0;
       const banked = bankBuf !== null;
-      const who = banked ? "cft_program_run_bank" : "cft_program_run";
-      const st = banked
+      const who = scr    ? "cft_program_run_ex"
+                : banked ? "cft_program_run_bank"
+                         : "cft_program_run";
+      const st = scr
+        ? C.programRunEx(this._handle, pa, pb, pc, n,
+                         pbank, bankBuf ? bankBuf.length : 0,
+                         psin, sinBuf ? sinBuf.length : 0,
+                         psout, soutBuf ? soutBuf.length : 0,
+                         pd, pcnt, pfl, pbus)
+        : banked
         ? C.programRunBank(this._handle, pbank, bankBuf.length,
                            pa, pb, pc, pd, pcnt, n, pfl, pbus)
         : C.programRun(this._handle, pa, pb, pc, pd, pcnt, n, pfl, pbus);
@@ -2647,8 +2846,24 @@ export class Program {
       this.lastFlags = flags;
       this.lastStatus = status;
       this._ctx.lastFlags = flags;
-      return { deposits, counts, flags, status,
-               depositOverflow: (status & STATUS_DEPOSIT_OVERFLOW) !== 0 };
+      const out = { deposits, counts, flags, status,
+                    depositOverflow:
+                      (status & STATUS_DEPOSIT_OVERFLOW) !== 0 };
+      if (scr) {
+        // The block back out of the heap and into the caller's buffer,
+        // then decoded. Both forms are returned: the BYTES are what a
+        // resumed run hands straight back as its scratchIn, and
+        // decoding n * scratchOut Floats for a run that only wants to
+        // continue would be work nobody asked for.
+        if (psout) soutBuf.set(s.get(psout, soutBuf.length));
+        const so = [];
+        for (let i = 0; i < n * this._scratchOut; i++)
+          so.push(new Float(ctx, soutBuf.slice(i * fi.size,
+                                               (i + 1) * fi.size)));
+        out.scratchOut = so;
+        out.scratchOutBytes = soutBuf;
+      }
+      return out;
     });
   }
 

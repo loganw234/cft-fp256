@@ -173,6 +173,15 @@ WASM_EXPORT uint32_t cftw_caps_max_consts(cft_device *dev)
     return caps_of(dev, &c) == CFT_OK ? c.max_consts : 0u;
 }
 
+/* The per-lane scratch depth, appended to cft_caps at ABI 0.10. Zero
+ * is UNKNOWN here as it is for the three above, and the FEATURE is a
+ * separate question - CFT_SEQ_FEAT_SCRATCH, projected below. */
+WASM_EXPORT uint32_t cftw_caps_max_scratch(cft_device *dev)
+{
+    cft_caps c;
+    return caps_of(dev, &c) == CFT_OK ? c.max_scratch : 0u;
+}
+
 /* The four assigned bits of cft_caps.seq_features, projected as calls
  * for the reason cftw_flags_all() projects CFT_FLAGS_ALL: a macro is
  * the one part of a header a caller on the far side of a wasm boundary
@@ -199,6 +208,27 @@ WASM_EXPORT uint32_t cftw_seq_feat_bank_ptr(void)
 WASM_EXPORT uint32_t cftw_alu_ext_imul(void)
 {
     return (uint32_t)CFT_ALU_EXT_IMUL;
+}
+
+/* And revision 3's three, on the same terms. KX9 lives in the first
+ * feature nibble's last bit; SCRATCH and SCRATCH_IO live in the second
+ * nibble CAPS2 opened, which is why their values are 0x100 and 0x200
+ * rather than the next two bits of the first - and exactly why they
+ * are projected rather than transcribed. */
+
+WASM_EXPORT uint32_t cftw_seq_feat_kx9(void)
+{
+    return (uint32_t)CFT_SEQ_FEAT_KX9;
+}
+
+WASM_EXPORT uint32_t cftw_seq_feat_scratch(void)
+{
+    return (uint32_t)CFT_SEQ_FEAT_SCRATCH;
+}
+
+WASM_EXPORT uint32_t cftw_seq_feat_scratch_io(void)
+{
+    return (uint32_t)CFT_SEQ_FEAT_SCRATCH_IO;
 }
 
 /* ---- the work ---------------------------------------------------- *
@@ -1511,4 +1541,98 @@ WASM_EXPORT uint32_t cftw_program_flags(cft_program *prog)
 WASM_EXPORT uint32_t cftw_prog_flag_bank_ext(void)
 {
     return (uint32_t)CFT_PROG_FLAG_BANK_EXT;
+}
+
+/* ---- revision 3: the scratch, and one call that takes everything --- *
+ *
+ * docs/SEQUENCER.md revision 3, R4 and R5, ABI 0.10.
+ *
+ * cft_run_args is a STRUCT, and a JavaScript caller reading struct
+ * offsets is exactly the silent ABI coupling struct_size exists to
+ * prevent - the same argument cftw_program_get_info's four out-
+ * pointers make in the other direction. So the struct is built HERE,
+ * in C, out of arguments in a fixed order, and struct_size is filled
+ * in by this file rather than by the caller: the layout stays private
+ * and there is nothing on the JavaScript side that can go stale.
+ *
+ * The order is cft_run_args' own, field for field, so the two can be
+ * read side by side. A fourteen-argument wrapper is not pretty; a
+ * wrapper whose argument list is a memory layout would be worse. */
+WASM_EXPORT int cftw_program_run_ex(cft_program *prog,
+                                    const void *a, const void *b,
+                                    const void *c, uint32_t n,
+                                    const void *bank, uint32_t bank_bytes,
+                                    const void *scratch_in,
+                                    uint32_t scratch_in_bytes,
+                                    void *scratch_out,
+                                    uint32_t scratch_out_bytes,
+                                    void *deposits, uint32_t *counts,
+                                    uint32_t *flags_out, uint32_t *bus_out)
+{
+    cft_run_args args;
+    memset(&args, 0, sizeof args);
+    args.struct_size       = sizeof args;
+    args.a                 = a;
+    args.b                 = b;
+    args.c                 = c;
+    args.n                 = (size_t)n;
+    args.bank              = bank;
+    args.bank_bytes        = (size_t)bank_bytes;
+    args.scratch_in        = scratch_in;
+    args.scratch_in_bytes  = (size_t)scratch_in_bytes;
+    args.scratch_out       = scratch_out;
+    args.scratch_out_bytes = (size_t)scratch_out_bytes;
+    args.deposits          = deposits;
+    args.counts            = counts;
+    args.flags_out         = flags_out;
+    args.bus_out           = bus_out;
+    return (int)cft_program_run_ex(prog, &args);
+}
+
+/* cft_program_info's three appended fields, as accessors for
+ * cftw_program_flags' reason: cftw_program_get_info's shape does not
+ * move with the ABI, and the struct_size handshake stays in C.
+ *
+ * Each returns 0 where cft_program_get_info fails, and 0 is a
+ * legitimate answer for all three - a program that declares no block
+ * and touches no scratch reports 0/0/0. The ambiguity is harmless for
+ * the reason cftw_program_flags states: a caller reaches these only
+ * through a handle that loaded and whose get_info has already answered
+ * CFT_OK once. */
+
+static uint32_t info_u32(cft_program *prog, int which)
+{
+    cft_program_info info;
+
+    memset(&info, 0, sizeof info);
+    info.struct_size = sizeof info;
+    if (cft_program_get_info(prog, &info) != CFT_OK)
+        return 0u;
+    return which == 0 ? info.n_scratch_in
+         : which == 1 ? info.n_scratch_out
+                      : info.scratch_used;
+}
+
+WASM_EXPORT uint32_t cftw_program_scratch_in(cft_program *prog)
+{
+    return info_u32(prog, 0);
+}
+
+WASM_EXPORT uint32_t cftw_program_scratch_out(cft_program *prog)
+{
+    return info_u32(prog, 1);
+}
+
+WASM_EXPORT uint32_t cftw_program_scratch_used(cft_program *prog)
+{
+    return info_u32(prog, 2);
+}
+
+/* CFT_PROG_FLAG_SCRATCH_IO, projected beside BANK_EXT and for the
+ * same reason. It is the header flag that makes the scratch_io word -
+ * n_scratch_in and n_scratch_out - meaningful, and with it clear that
+ * word must be zero. */
+WASM_EXPORT uint32_t cftw_prog_flag_scratch_io(void)
+{
+    return (uint32_t)CFT_PROG_FLAG_SCRATCH_IO;
 }

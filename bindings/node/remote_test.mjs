@@ -70,13 +70,14 @@ import {
 } from "./lib.mjs";
 import {
   CftRemote, FrameError, KIND_REFUSAL, KIND_RESPONSE, OP, RemoteError,
-  ROUND_NAMES, FORMAT_SIZE, HDR_BYTES, STATUS_TEXT, crc32, packFrame,
-  unpackFrame,
+  ROUND_NAMES, FORMAT_SIZE, HDR_BYTES, SEQ_FEAT_SCRATCH_IO, STATUS_TEXT,
+  crc32, packFrame, unpackFrame,
 } from "../wasm/remote.mjs";
 // The encoder, for the BANK_EXT image the bank round trip needs. This
 // file writes a program by hand for the same reason program_test.mjs
 // does, and seq_corpus.mjs is where that encoder lives.
-import { FLAG_BANK_EXT, alu, ctl, packBank, programImage }
+import { FLAG_BANK_EXT, FLAG_SCRATCH_IO, alu, ctl, ldl, packBank,
+         programImage, stl }
   from "./seq_corpus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1122,6 +1123,139 @@ async function main() {
               "and the connection answers the next request afterwards");
 
         await wsDev.programFree(loaded.handle);
+      }
+
+      // ---- the per-run scratch block (ABI 0.10) ----
+      //
+      // PROG_RUN_EX. The bank's three claims, one call further along,
+      // plus the two that are new: the block crosses in BOTH
+      // directions, and it is LANE-MAJOR - so the run is over 96
+      // lanes, and each lane's own slots are checked against the block
+      // it was handed. A client that sliced a lane-major block by
+      // bytes would hand every chunk the first lanes' slots.
+      const scratchIo =
+        (wsDev.caps.seqFeatures & SEQ_FEAT_SCRATCH_IO) !== 0;
+      if (!scratchIo) {
+        check(false,
+              `the server's device does not publish SCRATCH_IO ` +
+              `(seq_features 0x${wsDev.caps.seqFeatures.toString(16)}) - ` +
+              `NOT TESTED, and on the software backend that is news`);
+      } else {
+        check(wsDev.caps.maxScratch > 0,
+              `the caps block carries a scratch depth ` +
+              `(max_scratch ${wsDev.caps.maxScratch})`);
+        // LDL r4 <- slot 1; deposit r4; STL r0 -> slot 0;
+        // STL r4 -> slot 1; halt. Two slots in, two out, and the
+        // deposit is the SECOND preloaded slot, so a block delivered a
+        // lane early or read from lane 0 for every lane is a different
+        // answer in at least one of three places.
+        const image = programImage({
+          formatCode: 0, elementBytes: 4, maxDeposits: 1,
+          flags: FLAG_SCRATCH_IO, nScratchIn: 2, nScratchOut: 2,
+          insns: [ldl(4, 1), ctl("deposit", 4), stl(0, 0), stl(4, 1),
+                  ctl("halt")],
+        });
+        const N = 96;                       // more than one 64-lane block
+        const a = new Uint8Array(N * 4);
+        const sin = new Uint8Array(N * 2 * 4);
+        const av = new DataView(a.buffer), sv = new DataView(sin.buffer);
+        for (let i = 0; i < N; i++) {
+          av.setFloat32(i * 4, i + 1, true);
+          sv.setFloat32((2 * i) * 4, 1000 + i, true);
+          sv.setFloat32((2 * i + 1) * 4, 2000 + i, true);
+        }
+
+        const sio = await wsDev.programLoad(image);
+        check(sio.nScratchIn === 2 && sio.nScratchOut === 2 &&
+              (sio.flags & FLAG_SCRATCH_IO) !== 0,
+              `PROG_LOAD's image carries the scratch_io word this client ` +
+              `read out of the header (${sio.nScratchIn}/${sio.nScratchOut})`);
+        const got = await wsDev.programRunEx(
+          sio.handle, sio.format, { a }, N, sio.maxDeposits,
+          { scratchIn: sin, wantCounts: true });
+        check(got.scratchOut.length === N * 2 * 4,
+              `the scratch-out block came back whole ` +
+              `(${got.scratchOut.length} bytes)`);
+        // Each lane's own slots, derived from the block that went in
+        // and the operands - not from a second copy of the run.
+        const wantDep = new Uint8Array(N * 4);
+        const wantOut = new Uint8Array(N * 2 * 4);
+        for (let i = 0; i < N; i++) {
+          wantDep.set(sin.subarray((2 * i + 1) * 4, (2 * i + 2) * 4), i * 4);
+          wantOut.set(a.subarray(i * 4, (i + 1) * 4), (2 * i) * 4);
+          wantOut.set(sin.subarray((2 * i + 1) * 4, (2 * i + 2) * 4),
+                      (2 * i + 1) * 4);
+        }
+        check(same(got.deposits, wantDep),
+              `every lane deposited its OWN slot 1 over ${N} lanes, ` +
+              `lane-major`);
+        check(same(got.scratchOut, wantOut),
+              "and the block that came back holds each lane's own stores");
+
+        // A run RESUMED through the block: the state that came out
+        // goes back in, and three doublings twice is six doublings
+        // once. Doubling is exact, so this is bytes.
+        const chain = (trips) => programImage({
+          formatCode: 0, elementBytes: 4, maxDeposits: 1,
+          flags: FLAG_SCRATCH_IO, nScratchIn: 1, nScratchOut: 1,
+          insns: [ldl(4, 0), ctl("repeat", 0, trips),
+                  alu({ op: 1, rd: 4, ra: 4, rc: 4 }), ctl("endrep"),
+                  stl(4, 0), ctl("deposit", 4), ctl("halt")],
+        });
+        const seed = new Uint8Array(N * 4);
+        const sd = new DataView(seed.buffer);
+        for (let i = 0; i < N; i++) sd.setFloat32(i * 4, i + 1, true);
+        const p3 = await wsDev.programLoad(chain(3));
+        const half = await wsDev.programRunEx(p3.handle, p3.format, { a: seed },
+                                              N, 1, { scratchIn: seed });
+        const resumed = await wsDev.programRunEx(
+          p3.handle, p3.format, { a: seed }, N, 1,
+          { scratchIn: half.scratchOut });
+        await wsDev.programFree(p3.handle);
+        const p6 = await wsDev.programLoad(chain(6));
+        const once = await wsDev.programRunEx(p6.handle, p6.format,
+                                              { a: seed }, N, 1,
+                                              { scratchIn: seed });
+        await wsDev.programFree(p6.handle);
+        check(same(resumed.scratchOut, once.scratchOut) &&
+              same(resumed.deposits, once.deposits),
+              "two runs of three doublings, chained through the block over " +
+              "the wire, equal one run of six");
+        check(!same(half.scratchOut, once.scratchOut),
+              "and three doublings are not six, so that comparison proves " +
+              "something");
+
+        // The frame's own layout, built by hand: the two per-lane slot
+        // counts are the fifth and sixth fixed words and the
+        // scratch-in block sits between the bank and the operands.
+        {
+          const k = 8;
+          const head = new Uint8Array(32);
+          const hv = new DataView(head.buffer);
+          hv.setUint32(0, sio.handle, true);
+          hv.setUint32(4, 1, true);            // present: a only
+          hv.setUint32(8, 0, true);            // no counts
+          hv.setUint32(12, 0, true);           // no bank
+          hv.setBigUint64(16, BigInt(k), true);
+          hv.setUint32(24, 2, true);           // n_scratch_in
+          hv.setUint32(28, 2, true);           // n_scratch_out
+          const payload = new Uint8Array(32 + k * 2 * 4 + k * 4);
+          payload.set(head, 0);
+          payload.set(sin.subarray(0, k * 2 * 4), 32);
+          payload.set(a.subarray(0, k * 4), 32 + k * 2 * 4);
+          const resp = await wsDev.request(OP.PROG_RUN_EX, payload);
+          check(resp.length === 8 + k * 4 + k * 2 * 4,
+                `a hand-built PROG_RUN_EX frame answers with the flags, ` +
+                `bus, deposits and scratch-out block that are due ` +
+                `(${resp.length} bytes)`);
+          check(same(resp.subarray(8, 8 + k * 4), wantDep.subarray(0, k * 4)),
+                "its deposits are the ones the library's own call produced");
+          check(same(resp.subarray(8 + k * 4),
+                     wantOut.subarray(0, k * 2 * 4)),
+                "and so is its scratch-out block");
+        }
+
+        await wsDev.programFree(sio.handle);
       }
     }
 

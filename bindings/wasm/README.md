@@ -810,7 +810,8 @@ verify.mjs           the browserless check of that build product:
 remote.mjs           docs/REMOTE.md's frame protocol in JavaScript,
                      over WebSocket and over TCP - the same bytes the
                      C client sends, including PROG_RUN_BANK (0x0023)
-                     since ABI 0.9. Driven by
+                     since ABI 0.9 and PROG_RUN_EX (0x0024) since
+                     0.10. Driven by
                      bindings/node/remote_test.mjs, which
                      `make -C host wstest` runs
 build/               untracked: vectors, module, node loader,
@@ -874,6 +875,40 @@ inside it. The page had to be rebuilt anyway, and not as a choice:
 `-sSINGLE_FILE` embeds the module in the HTML and `verify.mjs` step 3
 holds the node loader to the page's bytes by sha256, so a rebuilt
 loader beside a stale page fails there.
+
+### Rebuilt at ABI 0.10, 2026-09-08 (evening)
+
+docs/SEQUENCER.md's revision 3 - a per-lane scratch memory with a
+per-run block, 16,384 instructions, a 512-entry bank - and the same
+three refusals as the round before: a committed 0.9 module against an
+0.10 `cft.h` fails `verify.mjs` on its own line and `wstest` at HELLO.
+
+`wasm_api.c` gained **nine** exports in the same commit as the
+rebuild: `cftw_program_run_ex`, the three scratch accessors
+(`cftw_program_scratch_in`, `_out`, `_used`), `cftw_caps_max_scratch`
+and the four macro projections (`cftw_prog_flag_scratch_io`,
+`cftw_seq_feat_kx9`, `cftw_seq_feat_scratch`,
+`cftw_seq_feat_scratch_io`). All nine are in `verify.mjs`'s `NEEDED`
+list, which is the gate.
+
+`cftw_program_run_ex` takes `cft_run_args`' fields POSITIONALLY, in
+the struct's own order, and builds the struct in C. That is not
+laziness about a fourteen-argument wrapper: a JavaScript caller
+writing struct offsets into the heap is the silent ABI coupling
+`struct_size` exists to prevent, and a wrapper whose argument list is
+a memory layout is worse than one that is merely long.
+
+**138 `cftw_*` exports** where the 0.9 build had 129, exactly the nine
+and no more; **225,231 bytes** of wasm where it was 219,535;
+`conformance.html` **1,356,405 bytes**, sha256 `57ea8bfd9709c151…`;
+module sha256
+`39822d677e1783c01ba204285094a33cbd9fd1e6ed50130fc45bf3f15fd0c790`,
+the same bytes as `bindings/node/cft_node.wasm`. `demos.html`
+**539,511 bytes**, sha256 `84b76b30fda1774b…`, rebuilt for the reason
+it was last time - it embeds the module byte for byte - and
+`demos_chains.json` re-recorded: **of its seventeen sha256-shaped
+values, sixteen came back identical and the seventeenth is the module
+stamp.**
 
 ---
 

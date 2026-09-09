@@ -49,7 +49,21 @@ export const HDR_BYTES = 32;
 export const MAX_PAYLOAD = 1 << 30;          // CFTR_MAX_PAYLOAD, 1 GiB
 export const CHUNK_BYTES = 16 << 20;         // CFTR_CHUNK_BYTES, 16 MiB
 export const CAPS_BYTES = 56;                // CFTR_CAPS_BYTES_V1: the least a caps block can be
-export const CAPS_BYTES_V2 = 72;             // CFTR_CAPS_BYTES: + the four sequencer capacities (ABI 0.8)
+export const CAPS_BYTES_V2 = 72;             // CFTR_CAPS_BYTES_V2: + the four sequencer capacities (ABI 0.8)
+export const CAPS_BYTES_V3 = 76;             // CFTR_CAPS_BYTES: + max_scratch (ABI 0.10)
+
+/** The two header flags this client reads out of an image, so it can
+ *  choose the run opcode from the IMAGE and not from a buffer's
+ *  length. Transcribed from cft.h; the node package's audit() holds
+ *  its own copies of both to the module, and these are the same two
+ *  numbers - a wire client cannot load a module to ask. */
+export const PROG_FLAG_BANK_EXT = 0x1;
+export const PROG_FLAG_SCRATCH_IO = 0x2;
+/** CFT_SEQ_FEAT_BANK_PTR (CAPS[6]) and CFT_SEQ_FEAT_SCRATCH_IO
+ *  (CAPS2[5]), the two features this client refuses to send data for
+ *  where the server's device does not publish them. */
+export const SEQ_FEAT_BANK_PTR = 0x04;
+export const SEQ_FEAT_SCRATCH_IO = 0x200;
 export const BACKEND_NAME = 32;              // CFTR_BACKEND_NAME
 export const DEFAULT_PORT = 7754;            // CFTR_DEFAULT_PORT
 
@@ -69,6 +83,12 @@ export const OP = {
   // asked about. CFTR_PROTO_VERSION does not move, for the reason the
   // caps block's growth did not move it (docs/REMOTE.md).
   PROG_RUN_BANK: 0x0023,
+  // ABI 0.10, the same evening: PROG_RUN with everything a run can
+  // carry - the bank, and the per-run scratch block in and out. A
+  // THIRD opcode for the reason the second was a second, and the same
+  // rule about which one a run becomes: the image's header decides,
+  // not the buffers' lengths.
+  PROG_RUN_EX: 0x0024,
   BUF_ALLOC: 0x0030, BUF_FREE: 0x0031, BUF_WRITE: 0x0032, BUF_READ: 0x0033,
   FLAGS_LOWER: 0x0040, FLAGS_RAISE: 0x0041, FLAGS_TEST: 0x0042,
   FLAGS_SAVE: 0x0043, FLAGS_RESTORE: 0x0044, FLAGS_TEST_SAVED: 0x0045,
@@ -445,6 +465,13 @@ export class CftRemote {
     this.nextId = 0;
     this.poisoned = null;
     this.caps = null;
+    // What each loaded program's header said, by handle: the flags
+    // word and the two scratch slot counts. Kept because WHICH OPCODE
+    // a run becomes is the IMAGE's decision and never a buffer's
+    // length - the corner found here at 0.9, where a BANK_EXT program
+    // with no constants still needs the bank opcode. host/src/
+    // backend_remote.c keeps the image bytes for the same reason.
+    this.progs = new Map();
     this.url = opts.url;
     this.timeoutMs = responseTimeout(opts.timeoutMs);
     // The two sabotages of docs/REMOTE.md's negative control, on this
@@ -675,8 +702,25 @@ export class CftRemote {
       throw this.poison(new FrameError(
         "PROG_LOAD answered with the wrong payload size"));
     const dv = new DataView(resp.buffer, resp.byteOffset, resp.byteLength);
-    return { handle: dv.getUint32(0, true), format: dv.getUint32(4, true),
-             maxDeposits: dv.getUint32(8, true) };
+    const handle = dv.getUint32(0, true);
+    // The header's two last words, read HERE and remembered: bytes
+    // 24..27 are `flags` and 28..31 the `scratch_io` word, and between
+    // them they say which of the three run opcodes this program's runs
+    // become. A client that decided from the buffers instead would
+    // send PROG_RUN for a BANK_EXT program whose bank is empty, which
+    // the server's own cft_program_run then refuses.
+    const iv = new DataView(image.buffer, image.byteOffset,
+                            image.byteLength);
+    const flags = image.length >= 32 ? iv.getUint32(24, true) : 0;
+    const sio = image.length >= 32 ? iv.getUint32(28, true) : 0;
+    const shape = { flags,
+                    nScratchIn: (flags & PROG_FLAG_SCRATCH_IO)
+                              ? (sio & 0xffff) : 0,
+                    nScratchOut: (flags & PROG_FLAG_SCRATCH_IO)
+                               ? ((sio >>> 16) & 0xffff) : 0 };
+    this.progs.set(handle, shape);
+    return { handle, format: dv.getUint32(4, true),
+             maxDeposits: dv.getUint32(8, true), ...shape };
   }
 
   /** cft_program_run, one PROG_RUN per chunk of lanes. `fmt` and
@@ -685,7 +729,7 @@ export class CftRemote {
    *  depend on that lane alone, which is why the chunking is safe. */
   async programRun(handle, fmt, streams, n, maxDeposits, wantCounts = false) {
     return this._programRun(handle, fmt, streams, n, maxDeposits, wantCounts,
-                            null);
+                            null, null);
   }
 
   /** cft_program_run_bank, one PROG_RUN_BANK per chunk (ABI 0.9).
@@ -712,30 +756,89 @@ export class CftRemote {
     // bit means the two disagree about what was published - worth
     // naming rather than discovering as an unsupported opcode.
     // SEQ_FEAT_BANK_PTR is CAPS[6], cft_caps.seq_features bit 2.
-    if (this.caps && !(this.caps.seqFeatures & 0x04))
+    if (this.caps && !(this.caps.seqFeatures & SEQ_FEAT_BANK_PTR))
       throw new Error(
         "this run supplies a constant bank and the server's device does " +
         "not publish CFT_SEQ_FEAT_BANK_PTR (CAPS[6], " +
         "cft_caps.seq_features bit 2), so it cannot take one");
     return this._programRun(handle, fmt, streams, n, maxDeposits, wantCounts,
-                            bank);
+                            bank, null);
   }
 
-  /** The two above are one request with one difference - the bank, and
-   *  therefore the opcode - so they are one implementation, exactly as
-   *  cftr_program_run in host/src/backend_remote.c is. Two copies of
-   *  the chunking and the response arithmetic would be two chances to
-   *  get the stride wrong in one of them. */
+  /** cft_program_run_ex, one PROG_RUN_EX per chunk (ABI 0.10).
+   *
+   *  Everything a run can carry: the bank, and the per-run scratch
+   *  block in and out (docs/SEQUENCER.md revision 3, R5). A program
+   *  whose header flags carry SCRATCH_IO takes this and refuses the
+   *  other two on the server, whatever its slot counts are - which is
+   *  why the opcode is chosen from the image's header below and not
+   *  from a buffer's length.
+   *
+   *  `scratchIn` is n * n_scratch_in dense format-width values,
+   *  LANE-MAJOR: lane i's slot s at element i * n_scratch_in + s. The
+   *  chunking slices it BY LANE, which is why the two slot counts
+   *  cross in their own fixed words - a transport that cut the block
+   *  by bytes would hand every chunk the first lanes' slots. The block
+   *  that comes back is returned as `scratchOut`. */
+  async programRunEx(handle, fmt, streams, n, maxDeposits,
+                     { bank = null, scratchIn = null,
+                       wantCounts = false } = {}) {
+    const shape = this.progs.get(handle);
+    if (shape && (shape.flags & PROG_FLAG_SCRATCH_IO) && this.caps &&
+        !(this.caps.seqFeatures & SEQ_FEAT_SCRATCH_IO))
+      throw new Error(
+        "this program declares a per-run scratch block and the server's " +
+        "device does not publish CFT_SEQ_FEAT_SCRATCH_IO (CAPS2[5], " +
+        "cft_caps.seq_features bit 9), so it cannot take one");
+    return this._programRun(handle, fmt, streams, n, maxDeposits, wantCounts,
+                            bank, scratchIn === null ? new Uint8Array(0)
+                                                     : scratchIn);
+  }
+
+  /** The three above are one request with two differences - the bank
+   *  and the scratch block, and therefore the opcode - so they are one
+   *  implementation, exactly as cftr_program_run in
+   *  host/src/backend_remote.c is. Three copies of the chunking and
+   *  the response arithmetic would be three chances to get the stride
+   *  wrong in one of them.
+   *
+   *  WHICH OPCODE is the IMAGE's decision, taken from the header this
+   *  client read at PROG_LOAD and never from the buffers: a BANK_EXT
+   *  program whose n_consts is zero has a legitimately empty bank and
+   *  must still travel as PROG_RUN_BANK, and a SCRATCH_IO program with
+   *  two empty blocks is in the same position one call further along.
+   *  That was found here on 2026-09-08 and is fixed here and in the C
+   *  together. */
   async _programRun(handle, fmt, { a = null, b = null, c = null }, n,
-                    maxDeposits, wantCounts, bank) {
+                    maxDeposits, wantCounts, bank, scratchIn) {
     const esz = FORMAT_SIZE[fmt];
     if (!esz) throw new Error(`format ${fmt} is not one of fp32/64/128/256`);
+    const shape = this.progs.get(handle) ||
+                  { flags: 0, nScratchIn: 0, nScratchOut: 0 };
+    const scratchIo = (shape.flags & PROG_FLAG_SCRATCH_IO) !== 0 ||
+                      scratchIn !== null;
+    const bankExt = (shape.flags & PROG_FLAG_BANK_EXT) !== 0 ||
+                    (bank !== null && bank.length > 0);
     const bankBytes = bank ? bank.length : 0;
-    const op = bankBytes ? OP.PROG_RUN_BANK : OP.PROG_RUN;
+    const nSin = scratchIo ? shape.nScratchIn : 0;
+    const nSout = scratchIo ? shape.nScratchOut : 0;
+    const op = scratchIo ? OP.PROG_RUN_EX
+             : bankExt   ? OP.PROG_RUN_BANK
+                         : OP.PROG_RUN;
+    const fixed = scratchIo ? 32 : 24;
     const name = OP_NAMES[op];
+    const sin = scratchIn || new Uint8Array(0);
+    if (sin.length !== n * nSin * esz)
+      throw new Error(
+        `this program preloads ${nSin} scratch slots a lane, so a run over ` +
+        `${n} lanes wants a ${n * nSin * esz}-byte scratch-in block and ` +
+        `this one is ${sin.length}`);
     const present = (a ? 1 : 0) | (b ? 2 : 0) | (c ? 4 : 0);
     const npresent = (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0);
-    const perLane = npresent * esz + maxDeposits * esz + 4;
+    // The scratch blocks are PER LANE, so unlike the bank they belong
+    // in the per-lane cost rather than off the budget.
+    const perLane = npresent * esz + maxDeposits * esz + 4 +
+                    nSin * esz + nSout * esz;
     // The bank comes OFF the chunk budget rather than being added to
     // it, since it rides every chunk: a bank as large as the budget
     // would otherwise make every chunk one byte over.
@@ -745,29 +848,40 @@ export class CftRemote {
         `not leave room for a lane in a ${CHUNK_BYTES}-byte request`);
     const lpc = Math.max(1, Math.floor((CHUNK_BYTES - bankBytes) / perLane));
     const deposits = new Uint8Array(n * maxDeposits * esz);
+    const scratchOut = new Uint8Array(n * nSout * esz);
     const counts = wantCounts ? new Uint32Array(n) : null;
     let flags = 0, bus = 0;
     for (let off = 0; off < n; off += lpc) {
       const k = Math.min(lpc, n - off);
-      const head = new Uint8Array(24);
+      const head = new Uint8Array(fixed);
       const hv = new DataView(head.buffer);
       hv.setUint32(0, handle, true);
       hv.setUint32(4, present, true);
       hv.setUint32(8, wantCounts ? 1 : 0, true);
-      // Zero on PROG_RUN, the bank's byte length on PROG_RUN_BANK. The
+      // Zero on PROG_RUN, the bank's byte length on the other two. The
       // bank rides EVERY chunk rather than being staged once, because
       // a chunk is a whole run of its own lanes on the server and a
       // program's constants are not chunk-shaped; it is a handful of
       // format-width values beside up to sixteen megabytes of operands.
       hv.setUint32(12, bankBytes, true);
       hv.setBigUint64(16, BigInt(k), true);
+      if (scratchIo) {
+        // The two per-lane slot counts, so the server can shape THIS
+        // CHUNK's blocks without re-reading the image.
+        hv.setUint32(24, nSin, true);
+        hv.setUint32(28, nSout, true);
+      }
       const parts = [head];
       if (bankBytes) parts.push(bank);
+      if (nSin)
+        parts.push(sin.subarray(off * nSin * esz, (off + k) * nSin * esz));
       for (const q of [a, b, c])
         if (q) parts.push(q.subarray(off * esz, (off + k) * esz));
       const resp = await this.request(op, concat(parts));
       const depBytes = k * maxDeposits * esz;
-      const want = 8 + depBytes + (wantCounts ? k * 4 : 0);
+      const cntBytes = wantCounts ? k * 4 : 0;
+      const soutBytes = k * nSout * esz;
+      const want = 8 + depBytes + cntBytes + soutBytes;
       if (resp.length !== want)
         throw this.poison(new FrameError(
           `${name} answered with ${resp.length} bytes where ${want} were due`));
@@ -779,11 +893,19 @@ export class CftRemote {
       if (counts)
         for (let i = 0; i < k; i++)
           counts[off + i] = rv.getUint32(8 + depBytes + i * 4, true);
+      if (soutBytes)
+        scratchOut.set(
+          resp.subarray(8 + depBytes + cntBytes,
+                        8 + depBytes + cntBytes + soutBytes),
+          off * nSout * esz);
     }
-    return { deposits, counts, flags, bus };
+    return { deposits, counts, flags, bus, scratchOut };
   }
 
-  async programFree(handle) { await this.request(OP.PROG_FREE, u32le(handle)); }
+  async programFree(handle) {
+    this.progs.delete(handle);
+    await this.request(OP.PROG_FREE, u32le(handle));
+  }
 
   // ---- the buffer and status-word operations -------------------------
   //
@@ -882,7 +1004,11 @@ export function parseCaps(p) {
     maxInsns: p.length >= CAPS_BYTES_V2 ? dv.getUint32(60, true) : 0,
     maxConsts: p.length >= CAPS_BYTES_V2 ? dv.getUint32(64, true) : 0,
     seqFeatures: p.length >= CAPS_BYTES_V2 ? dv.getUint32(68, true) : 0,
-    extra: p.subarray(Math.min(p.length, CAPS_BYTES_V2)), // whatever a later server appends
+    // Appended at ABI 0.10, on the block's own terms: a server that
+    // predates it answers 72 bytes and this stays zero, which cft_caps
+    // documents as UNKNOWN and nothing is enforced against.
+    maxScratch: p.length >= CAPS_BYTES_V3 ? dv.getUint32(72, true) : 0,
+    extra: p.subarray(Math.min(p.length, CAPS_BYTES_V3)), // whatever a later server appends
   };
 }
 

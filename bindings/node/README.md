@@ -305,6 +305,70 @@ where Python or `cft_golden` is out of reach (`CFT_PYTHON` names the
 interpreter), because this package is a wasm module and a JavaScript
 harness and runs where a toolchain does not.
 
+### Revision 3: a per-lane scratch, and one call that takes everything (ABI 0.10)
+
+docs/SEQUENCER.md's revision 3, the same evening. Every lane owns a
+private **scratch memory** reached by four control codes, the host may
+preload and read back its first slots per run, and the constant bank
+reaches 512. Three features and one new entry point:
+
+```js
+prog.scratchIo;      // PROG_FLAG_SCRATCH_IO: this program takes a block
+prog.scratchIn;      // slots a lane preloaded before each run
+prog.scratchOut;     // slots a lane read back after it
+prog.scratchUsed;    // one past the highest STATIC slot the code names,
+                     // or the whole depth where STX/LDX is used
+prog.scratchInBytes(n);   // n * scratchIn * the format's element size
+prog.scratchOutBytes(n);
+
+const r = prog.runEx({ a, b, c, bank, scratchIn });
+r.scratchOut;        // n * scratchOut Floats, lane-major
+r.scratchOutBytes;   // the same block unencoded - hand it straight back
+```
+
+`runEx` is `cft_run_args` in JavaScript, and the two older calls are
+wrappers over it. `cft_program_run` took nine arguments and
+`cft_program_run_bank` eleven; the struct is what stops that growing
+by an argument a round, and everything below it is one implementation
+so the three cannot drift.
+
+* **The block is LANE-MAJOR and dense**: lane *i*'s slot *s* is
+  element `i * scratchIn + s`, so it is ONE flat array or Uint8Array
+  and never an array of arrays. Its length must be exactly
+  `scratchInBytes(n)`. That is not fussiness - a block of the wrong
+  shape overruns nothing at all and silently gives every lane somebody
+  else's slots, which is the failure a length check is worth having
+  for.
+* **A run RESUMES through it.** `scratchOutBytes` from one run is
+  `scratchIn` for the next, and two runs of *k* steps chained that way
+  are one run of 2*k*. That is the whole point of the feature, and
+  `program_test.mjs` checks it with a body that doubles - exact in
+  every format, so the comparison is bytes.
+* **A program declaring a block refuses `run()` and `runBank()`** by
+  name, and one declaring none refuses a scratch buffer here - the
+  same argument BANK_EXT makes about constants, about a different kind
+  of data. `scratchOut` may be omitted and is then allocated for you.
+* **The ninth constant-index bit** needs nothing on this surface
+  either: `seq_corpus.mjs`'s encoder puts it in `imm[30:28]` and
+  `KADDR_KX` is 512.
+
+Ask before building, as always:
+
+```js
+import { SEQ_FEAT_KX9, SEQ_FEAT_SCRATCH, SEQ_FEAT_SCRATCH_IO }
+  from "./index.mjs";
+ctx.seqFeatures & SEQ_FEAT_SCRATCH;    // CAPS2[4]
+ctx.maxScratch;                        // slots a lane; 0 is UNKNOWN
+ctx.seqFeatureNames;   // ["kx","REGS32","BANK_PTR","KX9","IMUL",
+                       //  "SCRATCH","SCRATCH_IO"]
+```
+
+`SEQ_FEAT_SCRATCH` is `0x100` and `SEQ_FEAT_SCRATCH_IO` `0x200`, not
+the next two bits after `BANK_PTR`: revision 3 opened a SECOND feature
+nibble in `CAPS2` when the first filled up. That is exactly the kind
+of number a transcription gets wrong, so `audit()` holds all four of
+0.10's to the module at load as it holds 0.9's five.
+
 ## What this is a drop-in for: nothing, on purpose
 
 The Python package next door (`bindings/python/cftmpfr`) is a drop-in
