@@ -7300,7 +7300,7 @@ Python is Miniconda 3.12.9 named by absolute path.
     make vectors                    rc 0            168 sets (run.sh's own
                                                     ensure_vectors arguments,
                                                     --jobs 8)
-    make -C host test               rc 0    501 s   api-test all contract checks;
+    make -C host test               rc 0    509 s   api-test all contract checks;
                                                     reduce-parts 6,294 partitions;
                                                     cft-selftest 1,071,635 cases
                                                     over 168 sets; the C/Python
