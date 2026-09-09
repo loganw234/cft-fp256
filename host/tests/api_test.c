@@ -194,6 +194,43 @@ int main(void)
               "struct_size 0 must be refused");
     }
 
+    /* max_scratch, appended at ABI 0.10, and the same sentinel proof
+     * cft_program_info's flags field gets: a caller built against the
+     * 0.9 header passes the 0.9 struct_size and nothing past it is
+     * written. A clear FEATURE bit is absent and a zero CAPACITY is
+     * unknown, so the two are asked separately. */
+    CHECK(caps.max_scratch == 256u &&
+          (caps.seq_features & CFT_SEQ_FEAT_SCRATCH) != 0 &&
+          (caps.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) != 0 &&
+          (caps.seq_features & CFT_SEQ_FEAT_KX9) != 0 &&
+          caps.max_consts == 512u,
+          "the software backend publishes 256 scratch slots, 512 "
+          "constants and revision 3's three features (0x%lx, %lu, %lu)",
+          (unsigned long)caps.seq_features, (unsigned long)caps.max_scratch,
+          (unsigned long)caps.max_consts);
+    {
+        /* An ABI 0.9 caller's struct ends before `max_scratch`. It
+         * must come back with the bytes it asked for and not one
+         * more, and the sentinel has to be a byte the field could not
+         * have been written as - which 0xa5 is and 0x00 is not, since
+         * 256 has a zero low byte. */
+        union { cft_caps caps; uint8_t raw[256]; } u;
+        const size_t old_size = offsetof(cft_caps, max_scratch);
+        size_t w;
+        memset(&u, 0xa5, sizeof u);
+        memset(&u.caps, 0, old_size);
+        u.caps.struct_size = old_size;
+        st = cft_get_caps(dev, &u.caps);
+        CHECK(st == CFT_OK && u.caps.struct_size == old_size,
+              "an ABI 0.9 cft_caps struct_size comes back as itself");
+        for (w = old_size; w < sizeof u; w++)
+            if (u.raw[w] != 0xa5)
+                break;
+        CHECK(w == sizeof u,
+              "nothing past an older caller's cft_caps struct_size is "
+              "written (byte %lu changed)", (unsigned long)w);
+    }
+
     /* --- capability discovery ------------------------------------ */
     CHECK(cft_supports(dev, CFT_FMA, CFT_FP256) == 1, "fma/fp256 supported");
     CHECK(cft_supports(dev, CFT_ICMPLT, CFT_FP32) == 1, "icmplt supported");
@@ -3086,6 +3123,27 @@ int main(void)
                   "nothing past an older caller's struct_size is written "
                   "(byte %lu changed)", (unsigned long)w);
         }
+        {
+            /* And the 0.9 boundary, where ABI 0.10 appended its three
+             * scratch fields. Each new field wants its own line here
+             * or the handshake is only ever proved at the boundary it
+             * had when the check was written. */
+            union { cft_program_info info; uint8_t raw[64]; } u;
+            const size_t old_size = offsetof(cft_program_info, n_scratch_in);
+            memset(&u, 0xa5, sizeof u);
+            memset(&u.info, 0, old_size);
+            u.info.struct_size = old_size;
+            st = cft_program_get_info(pext, &u.info);
+            CHECK(st == CFT_OK && u.info.struct_size == old_size &&
+                  u.info.flags == CFT_PROG_FLAG_BANK_EXT,
+                  "an ABI 0.9 struct_size comes back as itself, with flags");
+            for (w = old_size; w < sizeof u; w++)
+                if (u.raw[w] != 0xa5)
+                    break;
+            CHECK(w == sizeof u,
+                  "nothing past an ABI 0.9 caller's struct_size is written "
+                  "(byte %lu changed)", (unsigned long)w);
+        }
 
         /* -- run, and run_bank -- */
         CHECK(cft_program_run(NULL, a4, NULL, NULL, dep, NULL, 1,
@@ -3133,6 +3191,179 @@ int main(void)
                                    NULL, 1, NULL, NULL) ==
               CFT_ERR_INVALID_ARGUMENT,
               "a program carrying its own constants refuses a bank");
+
+        /* -- cft_run_args and cft_program_run_ex (ABI 0.10) --
+         *
+         * The struct is an INPUT, so its size handshake runs the other
+         * way from cft_caps' and cft_program_info's: a size this
+         * library does not recognise is REFUSED in both directions
+         * rather than truncated, because truncating an input means
+         * silently ignoring a field a newer caller set - and a run
+         * that dropped a scratch buffer without saying so is exactly
+         * what every byte-count rule here exists to prevent. */
+        {
+            cft_run_args A;
+            uint8_t sblk[8];
+            memset(sblk, 0, sizeof sblk);
+
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = a4; A.n = 1; A.deposits = dep;
+            put32(dep, 0);
+            st = cft_program_run_ex(prog, &A);
+            CHECK(st == CFT_OK && get32(dep) == 0x40880000u,
+                  "run_ex is cft_program_run with a struct: %s 0x%08x",
+                  cft_strerror(st), get32(dep));
+
+            CHECK(cft_program_run_ex(NULL, &A) ==
+                  CFT_ERR_INVALID_ARGUMENT &&
+                  cft_program_run_ex(prog, NULL) ==
+                  CFT_ERR_INVALID_ARGUMENT,
+                  "run_ex refuses NULLs");
+
+            A.struct_size = 0;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT,
+                  "a struct_size of zero is refused");
+            A.struct_size = sizeof A - 1u;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT,
+                  "a struct_size one byte short is refused");
+            A.struct_size = sizeof A + 8u;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT,
+                  "a struct_size from a NEWER caller is refused, not "
+                  "truncated");
+
+            /* bus_out is cleared before anything else, as the two
+             * older calls clear theirs. */
+            A.struct_size = sizeof A;
+            bus = 0xdeadbeefu;
+            A.bus_out = &bus;
+            A.a = NULL;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT &&
+                  bus == 0,
+                  "run_ex refuses a NULL `a` and clears bus_out first");
+            A.a = a4;
+            A.bus_out = NULL;
+
+            /* The bank and the scratch, each held to the program. */
+            A.bank = bank; A.bank_bytes = 8;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT,
+                  "run_ex: a program carrying its own constants refuses a "
+                  "bank");
+            A.bank = NULL; A.bank_bytes = 0;
+            A.scratch_in = sblk; A.scratch_in_bytes = 4;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT,
+                  "run_ex: a program declaring no scratch I/O refuses a "
+                  "scratch-in block");
+            A.scratch_in = NULL; A.scratch_in_bytes = 0;
+            A.scratch_out = sblk; A.scratch_out_bytes = 4;
+            CHECK(cft_program_run_ex(prog, &A) == CFT_ERR_INVALID_ARGUMENT,
+                  "run_ex: and a scratch-out block");
+            A.scratch_out = NULL; A.scratch_out_bytes = 0;
+
+            /* A BANK_EXT program through run_ex, which is what
+             * run_bank now is underneath. */
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = a4; A.n = 1; A.deposits = dep;
+            A.bank = bank; A.bank_bytes = 8;
+            put32(dep, 0);
+            st = cft_program_run_ex(pext, &A);
+            CHECK(st == CFT_OK && get32(dep) == 0x40880000u,
+                  "run_ex takes a BANK_EXT program's bank: %s 0x%08x",
+                  cft_strerror(st), get32(dep));
+        }
+
+        /* -- the scratch block, and the three fields info gained -- */
+        {
+            uint8_t sio[64], sin_buf[8], sout_buf[8];
+            cft_program *ps = NULL;
+            cft_run_args A;
+            uint64_t sins[4];
+            size_t sbytes, j;
+
+            /* STL r0 -> slot 0; LDL r4 <- slot 1; deposit r4; halt.
+             * Two slots in, one out, so every field below is a
+             * different number and a transposition shows. */
+            sins[0] = 6ull | (0ull << 12) | (1ull << 31) | (0ull << 32);
+            sins[1] = 7ull | (4ull << 8)  | (1ull << 31) | (1ull << 32);
+            sins[2] = 3ull | (4ull << 12) | (1ull << 31);
+            sins[3] = 0ull | (1ull << 31);
+            memset(sio, 0, sizeof sio);
+            put32(sio + 0, 0x50544643u);
+            put32(sio + 4, 1);
+            put32(sio + 8, 4);
+            put32(sio + 12, 0);
+            put32(sio + 16, 1);
+            put32(sio + 20, (uint32_t)CFT_FP32);
+            put32(sio + 24, CFT_PROG_FLAG_SCRATCH_IO);
+            put32(sio + 28, 2u | (1u << 16));      /* 2 in, 1 out */
+            for (j = 0; j < 4; j++)
+                put64(sio + 32 + j * 8, sins[j]);
+            sbytes = 32 + 4 * 8;
+
+            st = cft_program_load(dev, sio, sbytes, &ps);
+            CHECK(st == CFT_OK && ps != NULL,
+                  "a SCRATCH_IO image loads: %s (%s)", cft_strerror(st),
+                  cft_last_error());
+            if (ps) {
+                memset(&info, 0, sizeof info);
+                info.struct_size = sizeof info;
+                st = cft_program_get_info(ps, &info);
+                CHECK(st == CFT_OK && info.n_scratch_in == 2 &&
+                      info.n_scratch_out == 1 && info.scratch_used == 2,
+                      "info carries 2/1 scratch slots and 2 used, not "
+                      "%lu/%lu and %lu",
+                      (unsigned long)info.n_scratch_in,
+                      (unsigned long)info.n_scratch_out,
+                      (unsigned long)info.scratch_used);
+
+                CHECK(cft_program_run(ps, a4, NULL, NULL, dep, NULL, 1,
+                                      NULL, NULL) ==
+                      CFT_ERR_INVALID_ARGUMENT,
+                      "a SCRATCH_IO program refuses cft_program_run");
+                CHECK(cft_program_run_bank(ps, NULL, 0, a4, NULL, NULL, dep,
+                                           NULL, 1, NULL, NULL) ==
+                      CFT_ERR_INVALID_ARGUMENT,
+                      "a SCRATCH_IO program refuses cft_program_run_bank");
+
+                put32(sin_buf + 0, 0x40000000u);   /* slot 0 = 2.0 */
+                put32(sin_buf + 4, 0x40400000u);   /* slot 1 = 3.0 */
+                put32(sout_buf, 0xdeadbeefu);
+                put32(dep, 0);
+                memset(&A, 0, sizeof A);
+                A.struct_size       = sizeof A;
+                A.a                 = a4;
+                A.n                 = 1;
+                A.deposits          = dep;
+                A.scratch_in        = sin_buf;
+                A.scratch_in_bytes  = 8;
+                A.scratch_out       = sout_buf;
+                A.scratch_out_bytes = 4;
+                st = cft_program_run_ex(ps, &A);
+                CHECK(st == CFT_OK && get32(dep) == 0x40400000u &&
+                      get32(sout_buf) == 0x40000000u,
+                      "the block goes in and comes back: %s dep 0x%08x "
+                      "out 0x%08x", cft_strerror(st), get32(dep),
+                      get32(sout_buf));
+
+                A.scratch_in_bytes = 4;
+                CHECK(cft_program_run_ex(ps, &A) ==
+                      CFT_ERR_INVALID_ARGUMENT,
+                      "a scratch-in block of the wrong size is refused");
+                A.scratch_in_bytes = 8;
+                A.scratch_out_bytes = 8;
+                CHECK(cft_program_run_ex(ps, &A) ==
+                      CFT_ERR_INVALID_ARGUMENT,
+                      "a scratch-out block of the wrong size is refused");
+                A.scratch_out_bytes = 4;
+                A.scratch_in = NULL;
+                CHECK(cft_program_run_ex(ps, &A) ==
+                      CFT_ERR_INVALID_ARGUMENT,
+                      "a NULL scratch-in block of non-zero length is "
+                      "refused");
+                cft_program_free(ps);
+            }
+        }
 
         /* -- the digest -- */
         CHECK(cft_program_digest(NULL, NULL, 0, dig) ==

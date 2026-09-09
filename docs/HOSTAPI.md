@@ -1814,3 +1814,143 @@ codes that do not read `imm`; `REPEAT` is the one that does.
 argument 8 on the A master, and sends the image whole - a `BANK_EXT`
 image has no constant section to strip, which is the same reason the
 image is kept whole in the first place.
+
+## Programs at ABI 0.10: a scratch, a block, and one entry point (2026-09-08)
+
+Revision 3 of docs/SEQUENCER.md, host side. Three features, each
+behind a CAPS bit and each refused BY NAME where a device lacks it,
+and one entry point that stops the positional signatures growing.
+Nothing already written changes: every call keeps its signature, every
+image built before this loads and runs exactly as it did.
+
+### `cft_run_args` and `cft_program_run_ex`
+
+`cft_program_run` took nine arguments, `cft_program_run_bank` eleven,
+and this round would have made it thirteen. So one entry point takes
+everything a run can carry, and the two calls above are WRAPPERS that
+fill the struct - the same executor, the same checks, the same
+answers, so nothing that used them has to move and the three cannot
+drift:
+
+    typedef struct cft_run_args {
+        size_t      struct_size;          /* in: sizeof(cft_run_args) */
+        const void *a, *b, *c;            /* the streams; b and c may be NULL */
+        size_t      n;
+        const void *bank;        size_t bank_bytes;
+        const void *scratch_in;  size_t scratch_in_bytes;
+        void       *scratch_out; size_t scratch_out_bytes;
+        void       *deposits;    uint32_t *counts;
+        uint32_t   *flags_out;   uint32_t *bus_out;
+    } cft_run_args;
+
+    cft_status cft_program_run_ex(cft_program *prog, const cft_run_args *args);
+
+**The size handshake runs the other way from `cft_caps`', and that is
+the one thing a porter must not miss.** An OUTPUT struct is truncated
+to what the caller can hold; truncating an INPUT would mean silently
+ignoring a field a newer caller set, and a run that quietly dropped a
+scratch buffer is precisely what every byte-count rule here exists to
+prevent. So a `struct_size` this library does not recognise is
+`CFT_ERR_INVALID_ARGUMENT` in BOTH directions, with a different
+message for each - too short is a caller missing a field this call
+reads, too long is a caller whose extra fields would be ignored.
+
+**Byte counts must match exactly**, all three of them. A buffer that
+is merely large enough would let the library and the caller disagree
+about the shape of the block while both believed they agreed; and
+because the scratch blocks are lane-major, a wrong `n_scratch_in`
+overruns nothing at all - it silently gives every lane somebody else's
+slots, which is the failure mode a length check is worth having for.
+
+### The per-lane scratch (R4), and its per-run block (R5)
+
+Four control codes reach a lane's own scratch memory: `STL ra, imm`
+and `LDL rd, imm` by static slot, `STX ra, rb` and `LDX rd, rb` by a
+slot taken from the low `log2(SCRATCH_D)` bits of `rb`'s BIT PATTERN,
+**reduced modulo the depth** - the reduction is part of the contract
+rather than an accident, so an indexed access is never out of range
+and is never refused. A store is a register write for P3's purposes
+and is masked by the active bit, so an all-inactive loop body stays a
+no-op; a load writes `rd` and is masked the same way. Neither is
+arithmetic: no rounding attribute, no flags.
+
+`CFT_SEQ_FEAT_SCRATCH` (bit 8 of `seq_features`, CAPS2[4]) publishes
+the memory and `cft_caps.max_scratch` its depth, 256 here and on the
+tile. The two are asked SEPARATELY and follow different rules: a clear
+feature bit is ABSENT, a zero capacity is UNKNOWN.
+
+The header's second reserved word becomes `scratch_io` -
+`[15:0] = n_scratch_in`, `[31:16] = n_scratch_out` - meaningful only
+under `CFT_PROG_FLAG_SCRATCH_IO` (bit 1 of `flags`), and zero without
+it as the reserved word it was. Every run then preloads the first
+`n_scratch_in` slots of every lane from `scratch_in` and reads the
+first `n_scratch_out` back into `scratch_out`, both **lane-major and
+dense**: lane *i*'s slot *s* is element `i * n_scratch_in + s`, the
+whole block `n * n_scratch_in` elements. Padding lanes receive nothing
+and write nothing. That is what makes a run RESUMABLE - the state that
+came out is the state that goes back in - and what the init block and
+the "load registers from a per-lane block" asks became once the
+scratch existed.
+
+`CFT_SEQ_FEAT_SCRATCH_IO` (bit 9, CAPS2[5]) publishes it. A program
+that declares a block refuses `cft_program_run` and
+`cft_program_run_bank` by name and takes `run_ex`; a program that
+declares none refuses a non-NULL scratch buffer, for the reason a
+program with its own constants refuses a bank.
+
+`cft_program_info` gains `n_scratch_in`, `n_scratch_out` and
+`scratch_used` - one past the highest STATIC slot any `STL` or `LDL`
+names, or the device's whole depth when an indexed form is present,
+because an `STX`'s slot is not known until the run. All three
+struct-size-gated, as `flags` is.
+
+### The ninth constant-index bit (R7)
+
+Under `kx`, `imm[28]`, `imm[29]` and `imm[30]` are the ninth bits of
+`ka`'s, `kb`'s and `kc`'s constant indices - the same construction as
+the fifth register bits one nibble down - so the addressable bank is
+**512**. `imm[31]` STAYS reserved-must-be-zero: it is the cheap
+version guard for whatever comes after this. A ninth bit is read only
+under `kx` and only for an operand whose `k` flag is set, so anywhere
+else it is a field nothing reads and the program is refused.
+
+`CFT_SEQ_FEAT_KX9` (bit 3, CAPS[7]) publishes it, and what the loader
+refuses on a device without it is not the bit but the INDEX: an index
+at or past 256, naming the instruction and the constant a
+revision-2 operand mux would have read instead. The two are the same
+refusal, since the bit cannot be set without changing the index.
+
+### What the loader refuses, added at revision 3
+
+Everything docs/SEQUENCER.md lists, plus: a `scratch_io` word that is
+non-zero with `SCRATCH_IO` clear (`CFT_ERR_ARTIFACT`); an
+`n_scratch_in` or `n_scratch_out` past the device's `max_scratch`
+(`CFT_ERR_UNSUPPORTED`, naming the field and both numbers); a static
+`STL`/`LDL` slot at or past `max_scratch` (the same, naming the cap);
+any of the four scratch codes on a device without
+`CFT_SEQ_FEAT_SCRATCH`, or a `SCRATCH_IO` image on one without
+`CFT_SEQ_FEAT_SCRATCH_IO`, or a constant index at or past 256 on one
+without `CFT_SEQ_FEAT_KX9`, each by name; `imm[31]` non-zero on an ALU
+instruction; a ninth index bit set without `kx`, or for an operand
+that names a register; and, on the four scratch codes, every field
+none of them reads - `rd` on an `STL`, `ra` on an `LDL`, `imm[23:0]`
+on an `STX` or an `LDX`, and `rnd` or any `k` flag on all four.
+
+### On the wire and on the tile
+
+The remote protocol gains `PROG_RUN_EX` (docs/REMOTE.md), a third
+opcode for the reason the second was a second. **Which of the three a
+run becomes is read from the IMAGE's header flags and never from a
+buffer's length** - a `BANK_EXT` program whose `n_consts` is zero has
+a legitimately empty bank and still needs the bank opcode, and a
+`SCRATCH_IO` program with two empty blocks is in the same position one
+call further along.
+
+The XRT backend accepts VERSION `0x800`, reads `CAPS2` at 0x6C for the
+depth and the two feature bits, and binds `scratch_in` (kernel
+argument 9, on the A master) and `scratch_out` (argument 10, on the D
+master) on every 0x800 run - with a minimum one-beat buffer when the
+program declares none, because the kernel has the arguments either way
+and XRT will not submit a run with one unbound. A 0x700 tile keeps its
+nine-argument call and a 0x600 its eight: the ARGUMENT COUNT is what
+the contract version guards, and XRT throws rather than adapts.

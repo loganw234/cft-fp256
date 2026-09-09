@@ -37,7 +37,7 @@ OP = {
     "HELLO": 0x0001, "CAPS": 0x0002, "STATS": 0x0003,
     "RUN": 0x0010, "REDUCE": 0x0011,
     "PROG_LOAD": 0x0020, "PROG_RUN": 0x0021, "PROG_FREE": 0x0022,
-    "PROG_RUN_BANK": 0x0023,
+    "PROG_RUN_BANK": 0x0023, "PROG_RUN_EX": 0x0024,
     "BUF_ALLOC": 0x0030, "BUF_FREE": 0x0031, "BUF_WRITE": 0x0032,
     "BUF_READ": 0x0033,
     "FLAGS_LOWER": 0x0040, "FLAGS_RAISE": 0x0041, "FLAGS_TEST": 0x0042,
@@ -71,17 +71,18 @@ def program_seeds():
         write("program", f"sqrt-{fname}", seqprogs.sqrt_program(fmt).to_bytes())
         n += 2
     # An image the loader must refuse, so the refusal paths are seeded
-    # too: an endrep with no repeat.
-    bogus = seq.Program.__new__(seq.Program)
-    bogus.fmt, bogus.insns = FORMATS["fp32"], [seq.endrep()]
-    bogus.consts, bogus.max_deposits = [], 1
-    write("program", "unbalanced-fp32", bogus.to_bytes())
+    # too: an endrep with no repeat. Assembled with _image below rather
+    # than through seq.Program.__new__, which reached past the model's
+    # constructor into fields it has since renamed - a seed generator
+    # that breaks when the model refactors is a seed generator nobody
+    # can run on the day they need it.
+    write("program", "unbalanced-fp32", _image(0, [_ctrl(2)], [], 4, 1))
     # "CFTP", not the frame's "CFTR": this seed is named for an image
     # with no constants and no instructions, and with the wrong magic
     # it was only ever a second copy of "the magic is checked".
     write("program", "header-only",
           struct.pack("<8I", PROG_MAGIC, 1, 0, 0, 1, 0, 0, 0))
-    return n + 2 + rev2_seeds()
+    return n + 2 + rev2_seeds() + rev3_seeds()
 
 
 # --- revision 2's shapes (docs/SEQUENCER.md, 2026-09-08) -------------
@@ -125,11 +126,110 @@ def _ctrl(code, ra=0, imm=0):
             ((imm | (((ra >> 4) & 1) << 25)) << 32))
 
 
-def _image(fmt_code, insns, consts, esz, max_deposits, flags=0):
+def _image(fmt_code, insns, consts, esz, max_deposits, flags=0,
+           n_sin=0, n_sout=0):
     body = b"".join(struct.pack("<Q", w) for w in insns)
     kon = b"" if flags & BANK_EXT else b"".join(consts)
+    scratch_io = (n_sin & 0xFFFF) | ((n_sout & 0xFFFF) << 16)
     return struct.pack("<8I", PROG_MAGIC, 1, len(insns), len(consts),
-                       max_deposits, fmt_code, flags, 0) + kon + body
+                       max_deposits, fmt_code, flags,
+                       scratch_io) + kon + body
+
+
+# --- revision 3's shapes (docs/SEQUENCER.md, 2026-09-08 evening) -----
+#
+# Assembled here for the reason rev2_seeds is, and with the same note
+# attached: when seq.py emits the four scratch codes, the scratch_io
+# header word and the ninth constant-index bits, delete this and ask
+# the model instead - the images must come out byte-identical.
+#
+#   control 6 STL ra, imm[23:0] | 7 LDL rd, imm[23:0]
+#           8 STX ra, rb        | 9 LDX rd, rb
+#   imm[28] ka[8] | imm[29] kb[8] | imm[30] kc[8], under kx only
+#   imm[31] reserved, must be zero
+SCRATCH_IO = 2
+
+
+def _stl(ra, slot):
+    return (6 | ((ra & 15) << 12) | (1 << 31) |
+            (((slot & 0xFFFFFF) | (((ra >> 4) & 1) << 25)) << 32))
+
+
+def _ldl(rd, slot):
+    return (7 | ((rd & 15) << 8) | (1 << 31) |
+            (((slot & 0xFFFFFF) | (((rd >> 4) & 1) << 24)) << 32))
+
+
+def _stx(ra, rb):
+    return (8 | ((ra & 15) << 12) | ((rb & 15) << 16) | (1 << 31) |
+            (((((ra >> 4) & 1) << 25) | (((rb >> 4) & 1) << 26)) << 32))
+
+
+def _ldx(rd, rb):
+    return (9 | ((rd & 15) << 8) | ((rb & 15) << 16) | (1 << 31) |
+            (((((rd >> 4) & 1) << 24) | (((rb >> 4) & 1) << 26)) << 32))
+
+
+def _alu_kx(op, rd, ia, ib, ic, ka=0, kb=0, kc=0):
+    """The kx form with revision 3's ninth index bits."""
+    imm = ((ia & 0xFF) if ka else 0) | \
+          (((ib & 0xFF) if kb else 0) << 8) | \
+          (((ic & 0xFF) if kc else 0) << 16)
+    imm |= ((((ia >> 8) & 1) if ka else 0) << 28)
+    imm |= ((((ib >> 8) & 1) if kb else 0) << 29)
+    imm |= ((((ic >> 8) & 1) if kc else 0) << 30)
+    return (op | ((rd & 15) << 8) |
+            (((0 if ka else ia) & 15) << 12) |
+            (((0 if kb else ib) & 15) << 16) |
+            (((0 if kc else ic) & 15) << 20) |
+            (ka << 27) | (kb << 28) | (kc << 29) | (1 << 30) | (imm << 32))
+
+
+def rev3_seeds():
+    n = 0
+    for code, fname in enumerate(("fp32", "fp64", "fp128", "fp256")):
+        esz = 4 << code
+        zero = b"\x00" * esz
+        # the four codes: a static round trip at slot 0 and the highest
+        # slot the executor has, then the indexed pair through r2
+        scratch = [_stl(0, 0), _stl(1, 255), _ldl(4, 255), _ldl(5, 0),
+                   _stx(0, 2), _ldx(6, 2),
+                   _ctrl(3, 4), _ctrl(3, 5), _ctrl(3, 6), _ctrl(0)]
+        write("program", f"scratch-{fname}", _image(code, scratch, [], esz, 3))
+        n += 1
+        # the five-bit register forms of all four, which are the only
+        # imm bits any of them may set beside the slot
+        wide = [_stl(20, 7), _ldl(21, 7), _stx(20, 22), _ldx(23, 22),
+                _ctrl(3, 21), _ctrl(0)]
+        write("program", f"scratch-regs32-{fname}",
+              _image(code, wide, [], esz, 1))
+        n += 1
+        # the per-run block: two slots in, one out, and a program that
+        # reads what was preloaded and writes what is read back
+        block = [_ldl(4, 1), _ctrl(3, 4), _stl(0, 0), _ctrl(0)]
+        write("program", f"scratch-io-{fname}",
+              _image(code, block, [], esz, 1, SCRATCH_IO, 2, 1))
+        n += 1
+        # the ninth constant-index bit: k[300] and k[511] under kx
+        deep = [_alu_kx(0, 4, 0, 300, 511, 0, 1, 1), _ctrl(3, 4), _ctrl(0)]
+        write("program", f"kx9-{fname}",
+              _image(code, deep, [zero] * 512, esz, 1))
+        n += 1
+    # And the refusals, seeded as the others are: a slot past the
+    # executor's depth, a scratch_io word with the flag clear, a
+    # scratch_io count past the depth, and imm[31] set on an ALU
+    # instruction - the one bit revision 3 left reserved.
+    esz = 4
+    write("program", "scratch-slot-past-depth-fp32",
+          _image(0, [_stl(0, 256), _ctrl(0)], [], esz, 1))
+    img = _image(0, [_ctrl(0)], [], esz, 1)
+    write("program", "scratch-io-word-without-flag-fp32",
+          img[:28] + struct.pack("<I", 1) + img[32:])
+    write("program", "scratch-io-count-past-depth-fp32",
+          _image(0, [_ctrl(0)], [], esz, 1, SCRATCH_IO, 257, 0))
+    write("program", "imm31-fp32",
+          _image(0, [_alu(0, 4, 0, 1, 2) | (1 << 63), _ctrl(0)], [], esz, 1))
+    return n + 4
 
 
 def rev2_seeds():
@@ -161,8 +261,10 @@ def rev2_seeds():
     # BANK_EXT image that still carries its constant section.
     esz = 4
     ext = [_alu(0, 4, 0, 0, 1, 0, 0, 1, 1), _ctrl(3, 4), _ctrl(0)]
+    # Bit 2, not bit 1: revision 3 assigned bit 1 to SCRATCH_IO, and a
+    # seed named for an unassigned flag has to stay one.
     write("program", "flags-unassigned-fp32",
-          _image(0, ext, [b"\x00" * esz] * 2, esz, 1, 2))
+          _image(0, ext, [b"\x00" * esz] * 2, esz, 1, 4))
     img = _image(0, ext, [b"\x00" * esz] * 2, esz, 1)
     write("program", "bankext-with-consts-fp32",
           img[:24] + struct.pack("<I", BANK_EXT) + img[28:])
@@ -214,6 +316,19 @@ def serve_seeds():
           rec(OP["PROG_FREE"], struct.pack("<I", 1)))
     n += 1
 
+    # PROG_RUN_EX: two more fixed words after the bank's length and the
+    # lane count - the per-lane scratch slot counts - then the bank,
+    # then the scratch-in block, then the operands (ABI 0.10).
+    sio = _image(0, [_ldl(4, 1), _ctrl(3, 4), _stl(0, 0), _ctrl(0)],
+                 [], esz, 1, SCRATCH_IO, 2, 1)
+    prunx = struct.pack("<IIIIQII", 1, 1, 1, 0, n, 2, 1) + \
+        b"\x00" * (2 * n * esz) + b"\x00" * (n * esz)
+    write("serve", "prog-scratch-run",
+          rec(OP["HELLO"]) + rec(OP["PROG_LOAD"], sio) +
+          rec(OP["PROG_RUN_EX"], prunx) +
+          rec(OP["PROG_FREE"], struct.pack("<I", 1)))
+    n += 1
+
     write("serve", "buffers",
           rec(OP["HELLO"]) + rec(OP["BUF_ALLOC"], struct.pack("<Q", 256)) +
           rec(OP["BUF_WRITE"], struct.pack("<IIQ", 1, 0, 0) + b"\xa5" * 64) +
@@ -228,7 +343,7 @@ def serve_seeds():
           rec(OP["FLAGS_RESTORE"], struct.pack("<II", 0x1F, 0x1F)) +
           rec(OP["FLAGS_TEST_SAVED"], struct.pack("<II", 0x1F, 0x1F)) +
           rec(OP["FLAGS_LOWER"], struct.pack("<I", 0x1F)))
-    return 11
+    return 12
 
 
 # --- fuzz_client: mode | patch | a stream of reply frames ------------

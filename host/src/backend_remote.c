@@ -92,14 +92,14 @@ int cftr_reduce(void *hw, int op, int fmt, int rnd,
     return CFT_ERR_INTERNAL;
 }
 int cftr_program_run(void *hw, int fmt, const void *image,
-                     size_t image_bytes, const void *bank, size_t bank_bytes,
+                     size_t image_bytes, const cft_seq_run_io *io,
                      uint32_t max_deposits,
                      const void *a, const void *b, const void *c,
                      void *deposits, uint32_t *counts, size_t n,
                      uint32_t *flags, uint32_t *bus)
 {
     (void)hw; (void)fmt; (void)image; (void)image_bytes; (void)max_deposits;
-    (void)bank; (void)bank_bytes;
+    (void)io;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
     (void)flags; (void)bus;
     return CFT_ERR_INTERNAL;
@@ -1184,12 +1184,20 @@ int cftr_open(const char *url, int index, void **out,
     memcpy(R->server_backend, resp + 24, CFTR_BACKEND_NAME);
     R->server_backend[CFTR_BACKEND_NAME] = '\0';
     memset(&R->seq, 0, sizeof R->seq);
-    if (resp_len >= CFTR_CAPS_BYTES) {
+    if (resp_len >= CFTR_CAPS_BYTES_V2) {
         R->seq.max_deposits = cftr_get32(resp + 56);
         R->seq.max_insns    = cftr_get32(resp + 60);
         R->seq.max_consts   = cftr_get32(resp + 64);
         R->seq.features     = cftr_get32(resp + 68);
     }
+    /* The block grows by appending and a client reads what it
+     * recognises: a server that predates the scratch depth answers 72
+     * bytes and this stays zero, which cft_caps documents as UNKNOWN
+     * and nothing is enforced against. The two scratch FEATURE bits
+     * need no new word - they are bits 8 and 9 of seq_features, in a
+     * field the block has carried since 0.8. */
+    if (resp_len >= CFTR_CAPS_BYTES)
+        R->seq.max_scratch  = cftr_get32(resp + 72);
     free(resp);
 
     *format_mask    = R->format_mask & 0xFu;
@@ -1444,7 +1452,7 @@ static int ensure_program(rdev *R, int fmt, const void *image,
 }
 
 int cftr_program_run(void *hw, int fmt, const void *image,
-                     size_t image_bytes, const void *bank, size_t bank_bytes,
+                     size_t image_bytes, const cft_seq_run_io *io,
                      uint32_t max_deposits,
                      const void *a, const void *b, const void *c,
                      void *deposits, uint32_t *counts, size_t n,
@@ -1455,21 +1463,40 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     const uint8_t *pa = (const uint8_t *)a, *pb = (const uint8_t *)b;
     const uint8_t *pc = (const uint8_t *)c;
     uint8_t *pd = (uint8_t *)deposits;
+    const void *bank        = io ? io->bank : NULL;
+    size_t      bank_bytes  = io ? io->bank_bytes : 0;
+    const uint8_t *psi      = io ? (const uint8_t *)io->scratch_in : NULL;
+    uint8_t       *pso      = io ? (uint8_t *)io->scratch_out : NULL;
+    uint32_t    n_sin       = io ? io->n_scratch_in : 0;
+    uint32_t    n_sout      = io ? io->n_scratch_out : 0;
     uint32_t present = (a ? 1u : 0u) | (b ? 2u : 0u) | (c ? 4u : 0u);
     unsigned npresent = (a ? 1u : 0u) + (b ? 1u : 0u) + (c ? 1u : 0u);
-    /* PROG_RUN's fixed fields, and PROG_RUN_BANK's - the same twenty-
-     * four bytes with the bank appended after them and its length in
-     * the word PROG_RUN leaves zero. Which one is the IMAGE's decision,
-     * read from its header's flags word (BANK_EXT, bit 0), not the
-     * bank's length: a BANK_EXT program whose n_consts is zero has a
-     * legitimately empty bank and must still travel as PROG_RUN_BANK,
-     * because the server's cft_program_run refuses it and only
-     * cft_program_run_bank takes it (found 2026-09-08 by the
-     * JavaScript client, which mirrors this file). */
+    /* PROG_RUN's fixed fields, PROG_RUN_BANK's and PROG_RUN_EX's - the
+     * same twenty-four bytes, with the bank appended after them and its
+     * length in the word PROG_RUN leaves zero, and with two more fixed
+     * words and the scratch-in block on the third opcode.
+     *
+     * WHICH of the three is the IMAGE's decision, read from its header
+     * flags - SCRATCH_IO (bit 1) first, then BANK_EXT (bit 0) - and
+     * never from the buffers' lengths. A BANK_EXT program whose
+     * n_consts is zero has a legitimately empty bank and must still
+     * travel as PROG_RUN_BANK, because the server's cft_program_run
+     * refuses it and only cft_program_run_bank takes it (found
+     * 2026-09-08 by the JavaScript client, which mirrors this file);
+     * a SCRATCH_IO program whose two counts are zero is in exactly the
+     * same position one call further along, and this is where that
+     * lesson is applied rather than relearned. */
     const int bank_ext = image_bytes >= 32 &&
                          (((const uint8_t *)image)[24] & 1u);
-    const uint16_t op = bank_ext ? CFTR_OP_PROG_RUN_BANK
-                                 : CFTR_OP_PROG_RUN;
+    const int scratch_io = image_bytes >= 32 &&
+                           (((const uint8_t *)image)[24] & 2u);
+    const uint16_t op = scratch_io ? CFTR_OP_PROG_RUN_EX
+                      : bank_ext   ? CFTR_OP_PROG_RUN_BANK
+                                   : CFTR_OP_PROG_RUN;
+    /* PROG_RUN_EX's payload carries two more fixed words - the two
+     * per-lane slot counts - before the bank and the scratch-in block,
+     * so the server can slice a chunk without re-reading the image. */
+    const size_t fixed = scratch_io ? 32u : 24u;
     size_t per_lane, lpc, off;
     uint32_t fl_acc = 0, bus_acc = 0;
     uint8_t *req = NULL;
@@ -1481,6 +1508,8 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     if (max_deposits && !deposits)
         return CFT_ERR_INVALID_ARGUMENT;
     if (bank_bytes && !bank)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if ((n_sin && !psi) || (n_sout && !pso))
         return CFT_ERR_INVALID_ARGUMENT;
     /* Never sent to a server that cannot serve it. The image would not
      * have LOADED against such a device - cft_program_load refuses a
@@ -1495,6 +1524,17 @@ int cftr_program_run(void *hw, int fmt, const void *image,
                 "cft_caps.seq_features bit 2), so it cannot take one");
         return CFT_ERR_UNSUPPORTED;
     }
+    /* And the same for the scratch block, which is asked of the image
+     * rather than of the buffers for the reason above: a program that
+     * declares SCRATCH_IO needs the feature whether or not its counts
+     * are zero. */
+    if (scratch_io && !(R->seq.features & CFT_SEQ_FEAT_SCRATCH_IO)) {
+        set_err("this program declares a per-run scratch block and the "
+                "server's device does not publish CFT_SEQ_FEAT_SCRATCH_IO "
+                "(CAPS2[5], cft_caps.seq_features bit 9), so it cannot "
+                "take one");
+        return CFT_ERR_UNSUPPORTED;
+    }
     if (n == 0) {
         if (flags) *flags = 0;
         if (bus)   *bus = 0;
@@ -1504,11 +1544,14 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     if (st != CFT_OK)
         return st;
 
-    /* Lanes per request: operands in, deposits and counts out. The
-     * bank comes off the budget rather than being added to it, since
-     * it rides every chunk - a bank as large as the budget would
-     * otherwise make every chunk one byte over. */
-    per_lane = (size_t)npresent * esz + (size_t)max_deposits * esz + 4u;
+    /* Lanes per request: operands and the scratch-in block in,
+     * deposits, counts and the scratch-out block out. The scratch
+     * blocks are PER LANE, so unlike the bank they belong in the
+     * per-lane cost rather than off the budget. The bank comes off the
+     * budget because it rides every chunk - a bank as large as the
+     * budget would otherwise make every chunk one byte over. */
+    per_lane = (size_t)npresent * esz + (size_t)max_deposits * esz + 4u +
+               (size_t)n_sin * esz + (size_t)n_sout * esz;
     if (bank_bytes >= CFTR_CHUNK_BYTES) {
         set_err("this program's constant bank is %lu bytes, which does not "
                 "leave room for a lane in a %lu-byte request",
@@ -1522,10 +1565,13 @@ int cftr_program_run(void *hw, int fmt, const void *image,
 
     for (off = 0; off < n; off += lpc) {
         const size_t k = n - off < lpc ? n - off : lpc;
-        const size_t req_len = 24u + bank_bytes +
+        const size_t sin_bytes = (size_t)n_sin * k * esz;
+        const size_t sout_bytes = (size_t)n_sout * k * esz;
+        const size_t req_len = fixed + bank_bytes + sin_bytes +
                                (size_t)npresent * k * esz;
         const size_t dep_bytes = k * (size_t)max_deposits * esz;
-        const size_t want = 8u + dep_bytes + (counts ? k * 4u : 0u);
+        const size_t want = 8u + dep_bytes + (counts ? k * 4u : 0u) +
+                            sout_bytes;
         uint8_t *q, *resp = NULL;
         size_t resp_len = 0;
         int status;
@@ -1536,7 +1582,7 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         cftr_put32(req + 0, R->phandle);
         cftr_put32(req + 4, present);
         cftr_put32(req + 8, counts ? 1u : 0u);
-        /* Zero on PROG_RUN, the bank's byte length on PROG_RUN_BANK.
+        /* Zero on PROG_RUN, the bank's byte length on the other two.
          * The bank rides EVERY chunk rather than being staged once,
          * because a chunk is a whole run of its own lanes on the
          * server and a program's constants are not chunk-shaped; the
@@ -1544,8 +1590,22 @@ int cftr_program_run(void *hw, int fmt, const void *image,
          * operands, so the repetition costs nothing measurable. */
         cftr_put32(req + 12, (uint32_t)bank_bytes);
         cftr_put64(req + 16, (uint64_t)k);
-        q = req + 24;
+        if (scratch_io) {
+            /* The two counts, so the server can shape THIS CHUNK's
+             * blocks. The chunk's scratch-in is the slice of the whole
+             * block belonging to its own lanes - lane-major, so lanes
+             * [off, off + k) are a contiguous run of k * n_scratch_in
+             * elements - which is why the counts have to cross and a
+             * byte length alone would not do. */
+            cftr_put32(req + 24, n_sin);
+            cftr_put32(req + 28, n_sout);
+        }
+        q = req + fixed;
         if (bank_bytes) { memcpy(q, bank, bank_bytes); q += bank_bytes; }
+        if (sin_bytes) {
+            memcpy(q, psi + off * (size_t)n_sin * esz, sin_bytes);
+            q += sin_bytes;
+        }
         if (pa) { memcpy(q, pa + off * esz, k * esz); q += k * esz; }
         if (pb) { memcpy(q, pb + off * esz, k * esz); q += k * esz; }
         if (pc) { memcpy(q, pc + off * esz, k * esz); q += k * esz; }
@@ -1579,6 +1639,13 @@ int cftr_program_run(void *hw, int fmt, const void *image,
             for (i = 0; i < k; i++)
                 counts[off + i] = cftr_get32(resp + 8 + dep_bytes + i * 4u);
         }
+        /* The scratch-out block last in the response, after the
+         * deposits and whatever counts were asked for, and sliced back
+         * into the caller's whole-run buffer at this chunk's lanes. */
+        if (sout_bytes)
+            memcpy(pso + off * (size_t)n_sout * esz,
+                   resp + 8 + dep_bytes + (counts ? k * 4u : 0u),
+                   sout_bytes);
         free(resp);
     }
     free(req);

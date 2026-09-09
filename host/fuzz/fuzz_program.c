@@ -80,6 +80,10 @@ static uint32_t get32(const uint8_t *p)
 static uint64_t canonical(uint64_t w)
 {
     const uint32_t reghi = 0x0F000000u;
+    /* imm[30:28], the ninth bits of the three constant indices since
+     * revision 3. imm[31] alone is still reserved-must-be-zero. */
+    const uint32_t kx9 = 0x70000000u;
+    const uint32_t slot = 0x00FFFFFFu;       /* imm[23:0], a scratch slot */
     uint32_t imm = (uint32_t)(w >> 32);
     int ctrl = (int)((w >> 31) & 1);
     int kx   = (int)((w >> 30) & 1);
@@ -88,17 +92,18 @@ static uint64_t canonical(uint64_t w)
         int anyk = (int)((w >> 27) & 7);
         if (kx && !anyk)
             w &= ~(1ull << 30);             /* kx selects nothing */
-        imm &= kx ? (0x00FFFFFFu | reghi) : reghi;
+        imm &= kx ? (slot | reghi | kx9) : reghi;
         /* An operand naming a constant does not read its register high
          * bit, and under kx does not read its four-bit field either. */
         if ((w >> 27) & 1) { imm &= ~(1u << 25); if (kx) w &= ~(0xFull << 12); }
         if ((w >> 28) & 1) { imm &= ~(1u << 26); if (kx) w &= ~(0xFull << 16); }
         if ((w >> 29) & 1) { imm &= ~(1u << 27); if (kx) w &= ~(0xFull << 20); }
-        /* and one naming a register does not read its imm byte */
+        /* and one naming a register reads neither its imm byte nor its
+         * ninth index bit */
         if (kx) {
-            if (!((w >> 27) & 1)) imm &= ~0x000000FFu;
-            if (!((w >> 28) & 1)) imm &= ~0x0000FF00u;
-            if (!((w >> 29) & 1)) imm &= ~0x00FF0000u;
+            if (!((w >> 27) & 1)) imm &= ~(0x000000FFu | (1u << 28));
+            if (!((w >> 28) & 1)) imm &= ~(0x0000FF00u | (1u << 29));
+            if (!((w >> 29) & 1)) imm &= ~(0x00FF0000u | (1u << 30));
         }
         if (((w >> 24) & 7) > 4)
             w &= ~(7ull << 24);             /* rounding attribute */
@@ -114,8 +119,34 @@ static uint64_t canonical(uint64_t w)
         w &= ~(0xFull << 8);                 /* rd */
         return (w & 0xFFFFFFFFull) |
                ((uint64_t)(imm & (1u << 25)) << 32);
-    default:                                 /* HALT, ENDREP, ACTALL, bad */
-        return w & 0x800000FFull;
+    /* Revision 3's four scratch codes. Each reads a different subset,
+     * and this puts the rest back to zero so a mutated word reaches
+     * the SLOT rule rather than being refused for a stray rnd. */
+    case 6:                                  /* STL: ra, imm[23:0] */
+        w &= ~0x7FF00000ull;                 /* rb, rc, rnd, ka..kx */
+        w &= ~(0xFull << 8);                 /* rd */
+        return (w & 0xFFFFFFFFull) |
+               ((uint64_t)(imm & (slot | (1u << 25))) << 32);
+    case 7:                                  /* LDL: rd, imm[23:0] */
+        w &= ~0x7FFF0000ull;                 /* rb, rc, rnd, ka..kx */
+        w &= ~(0xFull << 12);                /* ra */
+        return (w & 0xFFFFFFFFull) |
+               ((uint64_t)(imm & (slot | (1u << 24))) << 32);
+    case 8:                                  /* STX: ra, rb */
+        w &= ~0x7F000000ull;                 /* rnd, ka..kx */
+        w &= ~(0xFull << 8);                 /* rd */
+        w &= ~(0xFull << 20);                /* rc */
+        return (w & 0xFFFFFFFFull) |
+               ((uint64_t)(imm & ((1u << 25) | (1u << 26))) << 32);
+    default:                                 /* LDX, and the rest */
+        if ((w & 0xFF) == 9) {               /* LDX: rd, rb */
+            w &= ~0x7F000000ull;             /* rnd, ka..kx */
+            w &= ~(0xFull << 12);            /* ra */
+            w &= ~(0xFull << 20);            /* rc */
+            return (w & 0xFFFFFFFFull) |
+                   ((uint64_t)(imm & ((1u << 24) | (1u << 26))) << 32);
+        }
+        return w & 0x800000FFull;            /* HALT, ENDREP, ACTALL, bad */
     }
 }
 
@@ -141,7 +172,6 @@ static size_t fixup(uint8_t *d, size_t len, size_t cap, uint64_t *st)
     }
     put32(d + 0, SEQ_MAGIC);
     put32(d + 4, SEQ_VERSION);
-    put32(d + 28, 0);
     prec = get32(d + 20) & 3u;
     put32(d + 20, prec);
     esz = 4u << prec;
@@ -150,16 +180,31 @@ static size_t fixup(uint8_t *d, size_t len, size_t cap, uint64_t *st)
         put32(d + 16, (uint32_t)((r >> 8) & 0xFFFFu));
 
     /* The header's flags word, which was reserved[0] until 2026-09-08.
-     * Three cases in eight: no flags, BANK_EXT (an image with NO
-     * constant section, whose n_consts still bounds every index), and
-     * once in eight an unassigned bit, which must be CFT_ERR_ARTIFACT
-     * - the version guard for every flag there will ever be. */
+     * Four cases in eight: no flags, BANK_EXT (an image with NO
+     * constant section, whose n_consts still bounds every index),
+     * SCRATCH_IO (revision 3's per-run scratch block), and once in
+     * eight an unassigned bit, which must be CFT_ERR_ARTIFACT - the
+     * version guard for every flag there will ever be. Bit 1 stopped
+     * being unassigned when SCRATCH_IO took it, so the unassigned case
+     * starts at 2. */
     switch ((int)((r >> 20) & 7u)) {
-    case 0: flags = 1u << (1 + (unsigned)((r >> 44) & 30u)); break;
-    case 1: case 2: case 3: flags = 1u; break;          /* BANK_EXT */
+    case 0: flags = 1u << (2 + (unsigned)((r >> 44) & 29u)); break;
+    case 1: case 2: flags = 1u; break;                  /* BANK_EXT */
+    case 3: flags = 2u; break;                          /* SCRATCH_IO */
+    case 4: flags = 3u; break;                          /* both */
     default: flags = 0u; break;
     }
     put32(d + 24, flags);
+    /* And the word that was reserved[1]: scratch_io, n_scratch_in in
+     * [15:0] and n_scratch_out in [31:16], which is meaningful only
+     * under the flag and must be zero without it. Under the flag the
+     * counts are mostly inside the executor's 256 slots and sometimes
+     * past them, so the capacity refusal stays reachable too. */
+    if (flags & 2u)
+        put32(d + 28, (uint32_t)(((r >> 32) & 0x1FFu) |
+                                 (((r >> 41) & 0x1FFu) << 16)));
+    else
+        put32(d + 28, 0);
 
     /* Choose a small constant bank and let the instructions fill the
      * rest, then trim the image to exactly what the header describes.

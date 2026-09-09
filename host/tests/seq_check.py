@@ -275,10 +275,23 @@ def main():
                 try:
                     prog = seq.Program(fmt, insns, consts, maxdep)
                 except seq.ProgramError:
-                    # the model refused it; the C loader must too
+                    # The model refused it; the C loader must too - so
+                    # the refused program still has to be serialised,
+                    # which means building the object WITHOUT the
+                    # constructor that just rejected it.
+                    #
+                    # Every field to_bytes() reads is set here by name,
+                    # including the two the constructor computes:
+                    # `flags` and the private `_n_consts` behind the
+                    # n_consts property. Revision 2 added both and this
+                    # bypass was not updated, so the stage had been
+                    # failing with an AttributeError before it compared
+                    # anything (found 2026-09-08 evening).
                     bogus = seq.Program.__new__(seq.Program)
                     bogus.fmt, bogus.insns = fmt, insns
                     bogus.consts, bogus.max_deposits = consts, maxdep
+                    bogus.flags = 0
+                    bogus._n_consts = len(consts)
                     handle = ctypes.c_void_p()
                     image = bogus.to_bytes()
                     rc = lib.cft_program_load(dev, image, len(image),

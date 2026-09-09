@@ -116,6 +116,11 @@ host/remote-test
 host/fuzz/fuzz-program
 host/fuzz/fuzz-serve
 host/fuzz/fuzz-client
+# and their Windows names, which the three lines above do NOT cover -
+# `host/*.exe` near the top of this file stops at host/, so a `git add
+# -A` on Windows swept fuzz-program.exe and fuzz-serve.exe into the
+# tree on 2026-09-08 before anyone noticed
+host/fuzz/*.exe
 host/fuzz/cft_fuzz.o
 host/fuzz/bin/
 host/fuzz/work/
