@@ -904,6 +904,22 @@ def default_loopback() -> str:
     return base
 
 
+def resolve_exe(path: str) -> str:
+    """Absolute, and in the platform's own separator.
+
+    Windows CreateProcess does not accept a RELATIVE application name
+    written with forward slashes, which is how anyone typing a path
+    from this repository's documentation writes one - so
+    `--loopback bindings/arduino/loopback/cft-replay-loopback-tiny`
+    failed with "the system cannot find the file specified" on a file
+    that os.path.exists reported was there. abspath fixes both halves
+    at once. Adds the .exe if the caller left it off."""
+    p = os.path.abspath(path)
+    if not os.path.exists(p) and os.path.exists(p + ".exe"):
+        p += ".exe"
+    return p
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n")[0],
@@ -947,7 +963,7 @@ def main() -> int:
         return 0
 
     if args.corrupt:
-        exe = args.loopback or default_loopback()
+        exe = resolve_exe(args.loopback or default_loopback())
         if not os.path.exists(exe):
             out.write("no loopback binary at %s\n"
                       "build it: make -C bindings/arduino/loopback\n" % exe)
@@ -955,7 +971,7 @@ def main() -> int:
         return corrupt_battery(exe, args.vectors, out)
 
     if args.loopback is not None:
-        exe = args.loopback or default_loopback()
+        exe = resolve_exe(args.loopback or default_loopback())
         if not os.path.exists(exe):
             out.write("no loopback binary at %s\n"
                       "build it: make -C bindings/arduino/loopback\n" % exe)
