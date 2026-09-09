@@ -40,13 +40,24 @@
  * significand. host/tests/clause5_check.py holds the two identical.
  */
 
+/* This module is optional: the clause-5 completion set, removed
+ * entirely by -DCFT_NO_CLAUSE5. Removed rather than left for the
+ * linker to garbage-collect, because what does not fit on a part with
+ * 32 KB of flash is as often a constant table as it is code, and a
+ * table reachable from one live function is not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_CLAUSE5
+
 #include <stdlib.h>
 #include <string.h>
 
 #include "../include/cft.h"
 #include "softfloat.h"
 
-#define CHUNK 4096
+/* Elements per pass; divsqrt.c's CHUNK, for the same reason and with
+ * the same guarantee - the value follows the target's RAM and changes
+ * no answer. cft_config.h picks it. */
+#define CHUNK ((size_t)CFT_CHUNK)
 
 /* ---- lane accessors and classification (divsqrt.c's, restated) ---- */
 
@@ -164,7 +175,9 @@ static cft_status c5_validate(cft_device *dev, cft_format fmt,
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)
         return CFT_OK;
@@ -530,7 +543,9 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
     size_t i;
     cft_status st;
 
-    if ((int)dfmt < 0 || (int)dfmt > 3)
+    if (CFT_FMT_ABSENT(dfmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(dfmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (!rnd_ok(rnd))
         return CFT_ERR_INVALID_ARGUMENT;
@@ -1477,3 +1492,11 @@ CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
 {
     return minmax_mag_batch(dev, fmt, a, b, d, n, flags_out, 1, 1);
 }
+
+#else  /* CFT_NO_CLAUSE5 */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_clause5_module_omitted;
+
+#endif /* CFT_NO_CLAUSE5 */

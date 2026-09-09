@@ -35,7 +35,9 @@
  * where a call is about to reach a device backend, so that a message
  * libcft wrote never goes on explaining a failure that is not its.
  * Defined with the slot, below. */
+#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
 static void backend_call(void);
+#endif
 
 /* ==== the remote backend (docs/REMOTE.md) ============================
  * A device behind a socket, opened with "cft://host:port". Compiled in
@@ -158,7 +160,14 @@ struct cft_buffer {
  * recognised at all, and is staged from host memory exactly as any
  * other pointer is: the same answer the caller would have got before
  * buffers existed, including the same out-of-bounds read if that is
- * what they asked for. */
+ * what they asked for.
+ *
+ * Compiled only where something recognises a pointer: the one caller
+ * is bind_role below, which is the XRT backend's binding path. A
+ * software-only build has no device copies for a pointer to be a
+ * window into, so this would be an unused function - and it would
+ * warn, which is worse than absent. */
+#ifdef CFT_ENABLE_XRT
 static cft_buffer *buf_find(cft_device *dev, const void *p, size_t bytes,
                             size_t *off)
 {
@@ -188,6 +197,7 @@ static cft_buffer *buf_find(cft_device *dev, const void *p, size_t bytes,
     }
     return NULL;
 }
+#endif /* CFT_ENABLE_XRT */
 
 /* Bring a buffer's mirror up to date before anything READS it.
  *
@@ -283,14 +293,14 @@ CFT_API const char *cft_strerror(cft_status s)
 
 CFT_API size_t cft_format_size(cft_format f)
 {
-    if ((int)f < 0 || (int)f > 3)
+    if (CFT_FMT_OUT_OF_RANGE(f))
         return 0;
     return (size_t)cft_sf_formats[(int)f].width / 8;
 }
 
 CFT_API const char *cft_format_name(cft_format f)
 {
-    if ((int)f < 0 || (int)f > 3)
+    if (CFT_FMT_OUT_OF_RANGE(f))
         return "invalid";
     return cft_sf_formats[(int)f].name;
 }
@@ -426,8 +436,12 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         return CFT_ERR_OUT_OF_MEMORY;
     dev->backend        = CFT_BACKEND_SW;
     dev->index          = index;
-    dev->format_mask    = (1u << CFT_FP32) | (1u << CFT_FP64) |
-                          (1u << CFT_FP128) | (1u << CFT_FP256);
+    /* Every format this build carries. That is all four unless
+     * CFT_MAX_FORMAT lowered the ceiling for a part whose RAM cannot
+     * hold the wide ones' intermediates (cft_config.h), and then it is
+     * the ones below it - published here so a caller finds out from
+     * cft_get_caps rather than from a refusal. */
+    dev->format_mask    = CFT_FORMAT_MASK_BUILD;
     /* Every assigned group, reductions (bit 5) and the divide/sqrt
      * seeds (bit 6) included. The software backend is the contract,
      * so it implements all of it; a device advertises what its
@@ -439,8 +453,26 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     /* Its own limits, from the file that enforces them, so that the
      * caps this backend reports and the caps it holds a program to
      * are one declaration (host/src/program.c). Deliberately NOT the
-     * tile's - see the note there. */
+     * tile's - see the note there. A build with no sequencer has no
+     * CAPACITIES to report and leaves the zeroes calloc gave: a caller
+     * reading max_insns == 0 is being told there is no executor here,
+     * which is the same thing cft_program_load's absent symbol says
+     * at link time.
+     *
+     * CFT_ALU_EXT_IMUL is the exception, and it has to be. That bit
+     * says the ALU implements opcode 30, which this one does whether
+     * or not a sequencer is compiled in - it lives in seq_features
+     * only because CAPS[28] is where the hardware puts it. Left out,
+     * cft_supports() answers no for IMUL and cft_run() refuses an
+     * opcode the library computes correctly; the elementwise vector
+     * sets then skip 200 cases on a small build and pass, which is
+     * exactly the shape of a hole a conformance run must not have.
+     * Found by the loopback replay, 2026-09-09. */
+#ifndef CFT_NO_PROGRAM
     cft_sw_seq_caps(&dev->seq);
+#else
+    dev->seq.features = CFT_ALU_EXT_IMUL;
+#endif
     dev->backend_name   = "software";
     dev->hw             = NULL;
     *out = dev;
@@ -570,22 +602,37 @@ CFT_API void cft_close(cft_device *dev)
  * load would go on explaining a run that failed for another reason
  * ten calls later.
  *
- * The one producer today is cft_program_load's capacity refusal. */
-static char g_msg[320];
+ * The one producer today is cft_program_load's capacity refusal.
+ *
+ * Its size is a build choice (cft_config.h): a profile with no
+ * sequencer and no device backend has no producer at all, and on a
+ * part with two kilobytes of RAM a 320-byte buffer that nothing ever
+ * writes is sixteen percent of it. At CFT_ERRMSG_MAX == 1 the slot is
+ * the empty string cft_last_error() must still return, and the
+ * vsnprintf that would have filled it - the library's only formatted
+ * output - goes with it. */
+static char g_msg[CFT_ERRMSG_MAX];
 
 void cft_set_error(const char *fmt, ...)
 {
+#if CFT_ERRMSG_MAX > 1
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(g_msg, sizeof g_msg, fmt, ap);
     va_end(ap);
+#else
+    (void)fmt;
+#endif
 }
 
-/* Called immediately before handing anything to a device backend. */
+#if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
+/* Called immediately before handing anything to a device backend. A
+ * build with no device backend hands nothing to one. */
 static void backend_call(void)
 {
     g_msg[0] = '\0';
 }
+#endif
 
 int cft_seq_cap_refusal(const char *field, unsigned long asked,
                         unsigned long cap, const char *units,
@@ -692,7 +739,7 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
     int group;
     if (!dev)
         return 0;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return 0;
     if (!(dev->format_mask & (1u << (int)fmt)))
         return 0;
@@ -751,7 +798,9 @@ CFT_API cft_status cft_run(cft_device *dev,
         *bus_out = 0;
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
         return CFT_ERR_INVALID_ARGUMENT;
@@ -968,7 +1017,9 @@ CFT_API cft_status cft_reduce(cft_device *dev,
         *bus_out = 0;
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
         return CFT_ERR_INVALID_ARGUMENT;

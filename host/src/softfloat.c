@@ -662,7 +662,13 @@ static int sf_integer_op(const cft_fmt_desc *f, int op, const cft_bn *xa,
  * proven by test_seeds.py) would round to even. In (2^17, 2^18). */
 static uint32_t seed_recip_entry(uint32_t i)
 {
-    uint32_t num = 1u << 28;              /* 2^18 * 2^10 */
+    /* 1uL, not 1u: `unsigned int` is SIXTEEN bits on an 8-bit AVR and
+     * a shift by 28 is then undefined - measured as zero, which makes
+     * every reciprocal seed zero and every division wrong, silently.
+     * The suffix is the whole fix and it costs nothing anywhere else.
+     * The same applies to every wide literal shift in this library;
+     * they are all `L` for this reason. */
+    uint32_t num = 1uL << 28;             /* 2^18 * 2^10 */
     uint32_t den = (1u << 10) + (i << 1) + 1u;
     uint32_t q = num / den, r = num % den;
     if (2u * r > den || (2u * r == den && (q & 1u)))

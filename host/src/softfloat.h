@@ -24,15 +24,22 @@
 
 #include "bigint.h"
 
+/* int32_t rather than int for the three exponent fields, and that is
+ * not pedantry: `int` is SIXTEEN bits on an 8-bit AVR, and binary256's
+ * bias and emax are 262,143. Stored in an int there, the fp256 row of
+ * the table below silently holds -3,073. The four small fields are
+ * widths and precisions - 8 to 256, inside any int - and stay int so
+ * that the hundreds of expressions built from them read as they
+ * always did. */
 typedef struct {
     const char *name;
     int      exp_w;      /* exponent field width */
     int      man_w;      /* trailing significand field width */
     int      width;      /* 1 + exp_w + man_w */
     int      prec;       /* man_w + 1, the hidden bit included */
-    int      bias;
-    int      emax;
-    int      emin;
+    int32_t  bias;
+    int32_t  emax;
+    int32_t  emin;
     uint32_t exp_mask;
 } cft_fmt_desc;
 

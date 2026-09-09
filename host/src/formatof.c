@@ -119,6 +119,14 @@
  * published <sfmt>-to-<dfmt>-formatof[-<rnd>].jsonl sets replay it.
  */
 
+/* This module is optional: the 5.4.1 mixed-format arithmetic, removed
+ * entirely by -DCFT_NO_FORMATOF. Removed rather than left for the
+ * linker to garbage-collect, because what does not fit on a part with
+ * 32 KB of flash is as often a constant table as it is code, and a
+ * table reachable from one live function is not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_FORMATOF
+
 #include <string.h>
 
 #include "../include/cft.h"
@@ -701,7 +709,7 @@ static cft_status fo_widen_batch(cft_device *dev, int op, cft_format sfmt,
 
 static int fo_fmt_ok(cft_format f)
 {
-    return (int)f >= 0 && (int)f <= 3;
+    return !CFT_FMT_OUT_OF_RANGE(f);
 }
 
 static cft_status fo_validate(cft_device *dev, int op, cft_format sfmt,
@@ -711,6 +719,11 @@ static cft_status fo_validate(cft_device *dev, int op, cft_format sfmt,
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* A case here names TWO formats and needs both; a build that
+     * carries neither the source nor the destination refuses for the
+     * same reason a device without one does (cft_config.h). */
+    if (CFT_FMT_ABSENT(sfmt) || CFT_FMT_ABSENT(dfmt))
+        return CFT_ERR_UNSUPPORTED;
     if (!fo_fmt_ok(sfmt) || !fo_fmt_ok(dfmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
@@ -869,3 +882,11 @@ CFT_API cft_status cft_formatof_fma(cft_device *dev, cft_format sfmt,
     return fo_batch(dev, FO_FMA, sfmt, dfmt, rnd, a, b, c, d, n,
                     flags_out, bus_out);
 }
+
+#else  /* CFT_NO_FORMATOF */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_formatof_module_omitted;
+
+#endif /* CFT_NO_FORMATOF */

@@ -65,6 +65,14 @@
  * <fmt>-augmented.jsonl sets replay this one.
  */
 
+/* This module is optional: the 9.5 augmented arithmetic, removed
+ * entirely by -DCFT_NO_AUGMENTED. Removed rather than left for the
+ * linker to garbage-collect, because what does not fit on a part with
+ * 32 KB of flash is as often a constant table as it is code, and a
+ * table reachable from one live function is not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_AUGMENTED
+
 #include <string.h>
 
 #include "../include/cft.h"
@@ -367,7 +375,9 @@ static cft_status aug_validate(cft_device *dev, cft_format fmt,
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)
         return CFT_OK;
@@ -480,3 +490,11 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
 {
     return aug_batch(dev, fmt, 1, a, b, r, e, n, flags_out);
 }
+
+#else  /* CFT_NO_AUGMENTED */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_augmented_module_omitted;
+
+#endif /* CFT_NO_AUGMENTED */

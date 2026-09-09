@@ -18,6 +18,15 @@
  * "nothing was checked" instead of as a pass.
  */
 
+/* This module is optional: cft_conformance() reads vector sets from a
+ * directory, removed entirely by -DCFT_NO_CONFORMANCE. Removed rather
+ * than left for the linker to garbage-collect, because what does not
+ * fit on a part with 32 KB of flash is as often a constant table as it
+ * is code, and a table reachable from one live function is not
+ * collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_CONFORMANCE
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -2661,3 +2670,11 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
             sets, sets == 1 ? "" : "s", (unsigned long)total);
     return CFT_OK;
 }
+
+#else  /* CFT_NO_CONFORMANCE */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_conformance_module_omitted;
+
+#endif /* CFT_NO_CONFORMANCE */

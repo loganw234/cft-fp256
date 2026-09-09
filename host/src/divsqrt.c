@@ -51,13 +51,25 @@
  * later chunks never revisit earlier slices.
  */
 
+/* This module is optional: cft_div and cft_sqrt, removed entirely by
+ * -DCFT_NO_DIVSQRT. Removed rather than left for the linker to
+ * garbage-collect, because what does not fit on a part with 32 KB of
+ * flash is as often a constant table as it is code, and a table
+ * reachable from one live function is not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_DIVSQRT
+
 #include <stdlib.h>
 #include <string.h>
 
 #include "../include/cft.h"
 #include "softfloat.h"
 
-#define CHUNK 4096
+/* Elements per pass. 4096 on a host, and whatever a small part can
+ * hold on one (cft_config.h derives the scratch bytes per format).
+ * The value never changes an answer - a chunk boundary is where the
+ * loop reloads its slice - so it is free to follow the target's RAM. */
+#define CHUNK ((size_t)CFT_CHUNK)
 
 /* Newton iteration counts, derived from the proven seed bound 2^-8.5:
  * each step squares the relative error. Keyed by precision. */
@@ -820,7 +832,14 @@ static cft_status sqrt_chunk(cft_device *dev, const cft_fmt_desc *f,
  * CFT_DIVSQRT_SEQ=1|0 in the environment forces the choice either way
  * - =1 is how the tests drive this route through the software
  * executor's program interpreter without a device.
+ *
+ * All of it is behind CFT_NO_PROGRAM, because all of it is
+ * cft_program_load and cft_program_run - and a build with no sequencer
+ * has neither. What is left is the chunk route, which is the route the
+ * software backend takes anyway: the same steps, in the same order,
+ * under the same attributes, and therefore the same bits.
  */
+#ifndef CFT_NO_PROGRAM
 
 #include "backend.h"
 
@@ -852,7 +871,7 @@ static uint64_t sq_word(int op, int rd, int ra, int rb, int rc, int rnd,
 
 static uint64_t sq_ctrlw(int code, int ra)
 {
-    return (uint64_t)((uint32_t)code | ((uint32_t)ra << 12) | (1u << 31));
+    return (uint64_t)((uint32_t)code | ((uint32_t)ra << 12) | (1uL << 31));
 }
 #define SQ_CTRL_HALT    0
 #define SQ_CTRL_DEPOSIT 3
@@ -1327,11 +1346,13 @@ static cft_status sqrt_prog_chunk(const cft_fmt_desc *f, int rnd,
 /* Route choice; see the section banner. */
 static int divsqrt_route_program(cft_device *dev)
 {
+#ifndef CFT_NO_GETENV
     const char *e = getenv("CFT_DIVSQRT_SEQ");
     if (e && e[0] == '0' && !e[1])
         return 0;
     if (e && e[0] == '1' && !e[1])
         return 1;
+#endif
     /* Any device backend takes the program route: the tile, or the
      * remote device of docs/REMOTE.md, where one PROG_RUN frame per
      * chunk replaces twenty-odd RUN round trips. */
@@ -1405,6 +1426,8 @@ static cft_status divsqrt_via_program(cft_device *dev,
     return CFT_OK;
 }
 
+#endif /* CFT_NO_PROGRAM */
+
 /* ---- entry points ------------------------------------------------- */
 
 static cft_status divsqrt_validate(cft_device *dev, cft_format fmt,
@@ -1413,7 +1436,9 @@ static cft_status divsqrt_validate(cft_device *dev, cft_format fmt,
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
         return CFT_ERR_INVALID_ARGUMENT;
@@ -1459,6 +1484,7 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
 
+#ifndef CFT_NO_PROGRAM
     if (divsqrt_route_program(dev)) {
         st = divsqrt_via_program(dev, f, fmt, (int)rnd, 0,
                                  (const uint8_t *)a, (const uint8_t *)b,
@@ -1470,6 +1496,7 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
         }
         acc = 0;         /* bitstream cannot run programs; d untouched */
     }
+#endif
 
     if (scratch_alloc(&s, esz))
         return CFT_ERR_OUT_OF_MEMORY;
@@ -1515,6 +1542,7 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
 
+#ifndef CFT_NO_PROGRAM
     if (divsqrt_route_program(dev)) {
         st = divsqrt_via_program(dev, f, fmt, (int)rnd, 1,
                                  (const uint8_t *)a, NULL,
@@ -1526,6 +1554,7 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
         }
         acc = 0;         /* bitstream cannot run programs; d untouched */
     }
+#endif
 
     if (scratch_alloc(&s, esz))
         return CFT_ERR_OUT_OF_MEMORY;
@@ -1545,3 +1574,11 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
     cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
 }
+
+#else  /* CFT_NO_DIVSQRT */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_divsqrt_module_omitted;
+
+#endif /* CFT_NO_DIVSQRT */

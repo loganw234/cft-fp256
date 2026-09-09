@@ -62,6 +62,15 @@
  * every rule above rounds up and why none of them is an estimate.
  */
 
+/* This module is optional: the multiprecision evaluator the
+ * transcendentals use, removed entirely by -DCFT_NO_TRANSCEND. Removed
+ * rather than left for the linker to garbage-collect, because what
+ * does not fit on a part with 32 KB of flash is as often a constant
+ * table as it is code, and a table reachable from one live function is
+ * not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_TRANSCEND
+
 #include <string.h>
 
 #include "mpfloat.h"
@@ -748,7 +757,7 @@ int cft_mp_round(const cft_mp *a, int sign, const cft_fmt_desc *f, int rnd,
     *decided = 0;
     if (a->zero)
         return 1;                 /* the callers never round an exact 0 */
-    if (a->exp > (1 << 24) || a->exp < -(1 << 24))
+    if (a->exp > (1L << 24) || a->exp < -(1L << 24))
         return 1;                 /* the screens keep this unreachable */
 
     enclosure(a, &lo, &hi, &ok);
@@ -767,3 +776,11 @@ int cft_mp_round(const cft_mp *a, int sign, const cft_fmt_desc *f, int rnd,
     *decided = 1;
     return 0;
 }
+
+#else  /* CFT_NO_TRANSCEND */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_mpfloat_module_omitted;
+
+#endif /* CFT_NO_TRANSCEND */

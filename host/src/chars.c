@@ -87,6 +87,15 @@
  * done in full.
  */
 
+/* This module is optional: the clause-5.12 character conversions and
+ * 9.7's payloads, removed entirely by -DCFT_NO_CHARS. Removed rather
+ * than left for the linker to garbage-collect, because what does not
+ * fit on a part with 32 KB of flash is as often a constant table as it
+ * is code, and a table reachable from one live function is not
+ * collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_CHARS
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -1428,7 +1437,7 @@ CFT_API size_t cft_format_decimal_digits(cft_format fmt)
     const cft_fmt_desc *f;
     nat ten, two;
     size_t k = 0;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return 0;
     f = &cft_sf_formats[(int)fmt];
     /* 1 + ceiling(p * log10(2)), derived: ceiling(p * log10 2) is the
@@ -1477,7 +1486,9 @@ static cft_status from_char_batch(cft_device *dev, cft_format fmt,
         *bad_index = 0;
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3 || !rnd_ok(rnd))
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt) || !rnd_ok(rnd))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0) {
         cft_flags_emit(dev, 0, flags_out);
@@ -1539,7 +1550,9 @@ CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
     cft_flags_emit(dev, 0, flags_out);
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     /* The attribute is range-checked even in the exact mode, where it
      * is not consumed: one entry point that sometimes reads `rnd` and
@@ -1576,7 +1589,9 @@ CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
         *len = 0;
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (!a || (cap && !out))
         return CFT_ERR_INVALID_ARGUMENT;
@@ -1609,7 +1624,9 @@ static cft_status payload_validate(cft_device *dev, cft_format fmt,
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)
         return CFT_OK;
@@ -1732,3 +1749,11 @@ CFT_API cft_status cft_set_payload_signaling(cft_device *dev, cft_format fmt,
 {
     return set_payload_core(dev, fmt, a, d, n, 1);
 }
+
+#else  /* CFT_NO_CHARS */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_chars_module_omitted;
+
+#endif /* CFT_NO_CHARS */

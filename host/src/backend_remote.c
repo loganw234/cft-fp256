@@ -46,6 +46,14 @@
 #  define _DEFAULT_SOURCE 1
 #endif
 
+/* This module is optional: the cft:// device of docs/REMOTE.md,
+ * removed entirely by -DCFT_NO_REMOTE. Removed rather than left for
+ * the linker to garbage-collect, because what does not fit on a part
+ * with 32 KB of flash is as often a constant table as it is code, and
+ * a table reachable from one live function is not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_REMOTE
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1655,3 +1663,11 @@ int cftr_program_run(void *hw, int fmt, const void *image,
 }
 
 #endif /* __EMSCRIPTEN__ */
+
+#else  /* CFT_NO_REMOTE */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_backend_remote_module_omitted;
+
+#endif /* CFT_NO_REMOTE */

@@ -63,6 +63,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* The build profile: which of this header's entry points the library
+ * next to it actually contains, and how wide its intermediates are.
+ * With no macro defined it supplies the values the library has always
+ * had, so including it changes nothing about a default build; see
+ * cft_config.h for what a reduced one leaves out and why. */
+#include "cft_config.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

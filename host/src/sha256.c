@@ -24,6 +24,15 @@
  * ===================================================================
  */
 
+/* This module is optional: cft_sha256(), whose caller in the library
+ * is the program digest, removed entirely by -DCFT_NO_PROGRAM. Removed
+ * rather than left for the linker to garbage-collect, because what
+ * does not fit on a part with 32 KB of flash is as often a constant
+ * table as it is code, and a table reachable from one live function is
+ * not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_PROGRAM
+
 #include <string.h>
 
 #include "sha256.h"
@@ -273,3 +282,11 @@ CFT_API cft_status cft_sha256(const void *data, size_t bytes,
     cft_sha256_final(&s, out);
     return CFT_OK;
 }
+
+#else  /* CFT_NO_PROGRAM */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_sha256_module_omitted;
+
+#endif /* CFT_NO_PROGRAM */

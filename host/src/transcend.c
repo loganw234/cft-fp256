@@ -64,6 +64,15 @@
  * status, never a plausible number.
  */
 
+/* This module is optional: the 39 transcendentals and mp_2opi.h's
+ * table of 2/pi, removed entirely by -DCFT_NO_TRANSCEND. Removed
+ * rather than left for the linker to garbage-collect, because what
+ * does not fit on a part with 32 KB of flash is as often a constant
+ * table as it is code, and a table reachable from one live function is
+ * not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_TRANSCEND
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -117,9 +126,19 @@ static int tr_start_prec(const cft_fmt_desc *f)
 {
     static int probed, forced;
     if (!probed) {
+#ifndef CFT_NO_GETENV
         const char *e = getenv("CFT_TRANSCEND_MINPREC");
         probed = 1;
         forced = e ? atoi(e) : 0;
+#else
+        /* No environment on this target (cft_config.h): the override
+         * is a test hook, and its absence leaves the schedule at the
+         * first attempt every ordinary call already takes. The two
+         * assignments are in the order the line above them was written
+         * in, so that a default build compiles to the same bytes. */
+        probed = 1;
+        forced = 0;
+#endif
     }
     if (forced > 0) {
         int cap = 8 * f->prec + 128;
@@ -274,7 +293,7 @@ static void put_one(const cft_fmt_desc *f, int sign, cft_bn *out)
 static int round_exact(const cft_fmt_desc *f, int sign, const cft_bn *m,
                        long e, int rnd, cft_bn *out, uint32_t *flags)
 {
-    if (e > (1 << 24) || e < -(1 << 24))
+    if (e > (1L << 24) || e < -(1L << 24))
         return 1;
     return cft_sf_round_pack(f, sign, m, (int)e, 0, rnd, out, flags);
 }
@@ -803,7 +822,7 @@ static int mp_exp_full(cft_mp *r, const cft_mp *t, int W)
     if (cft_mp_mul(&q, t, &e2, W))
         return 1;
     k = cft_mp_trunc_to_int(&q);
-    if (k > (1 << 24) || k < -(1 << 24))
+    if (k > (1L << 24) || k < -(1L << 24))
         return 1;                       /* the screens keep this away */
     if (k == 0) {
         cft_mp_copy(&s, t);
@@ -4764,7 +4783,9 @@ static cft_status tr_validate(cft_device *dev, cft_format fmt,
 {
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
-    if ((int)fmt < 0 || (int)fmt > 3)
+    if (CFT_FMT_ABSENT(fmt))
+        return CFT_ERR_UNSUPPORTED;
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)
         return CFT_OK;
@@ -5092,3 +5113,11 @@ cft_status cft_tr_apply(cft_device *dev, int fn, cft_format fmt,
 {
     return tr_batch(dev, fn, fmt, rnd, a, b, nn, d, n, flags_out);
 }
+
+#else  /* CFT_NO_TRANSCEND */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_transcend_module_omitted;
+
+#endif /* CFT_NO_TRANSCEND */

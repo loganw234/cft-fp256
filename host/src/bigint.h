@@ -35,11 +35,23 @@
 
 #include <stdint.h>
 
-/* 2048 bits. The widest intermediate any operation here can produce is
- * the near-case fp256 addend alignment at about 5*prec + 3 = 1188
- * bits; the rest is margin, and margin costs stack rather than time
- * because operations run over `n` limbs, not over the container. */
+#include "../include/cft_config.h"
+
+/* 2048 bits at the default profile. The widest intermediate any
+ * operation here can produce is the near-case fp256 addend alignment
+ * at about 5*prec + 3 = 1188 bits; the rest is margin, and margin
+ * costs stack rather than time because operations run over `n` limbs,
+ * not over the container.
+ *
+ * A build that carries fewer formats needs fewer bits and, on a part
+ * with kilobytes of RAM rather than gigabytes, cannot spare the
+ * margin: cft_config.h sizes CFT_BN_LIMBS from CFT_MAX_FORMAT and
+ * argues the numbers. Nothing here changes with it - every function
+ * below is written against the macro, and a value that was too small
+ * would refuse rather than truncate. */
+#ifndef CFT_BN_LIMBS
 #define CFT_BN_LIMBS 64
+#endif
 #define CFT_BN_BITS  (CFT_BN_LIMBS * 32)
 
 typedef struct {

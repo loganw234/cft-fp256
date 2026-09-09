@@ -31,6 +31,14 @@
  * latency, and neither choice is observable.
  */
 
+/* This module is optional: the sequencer and its image loader, removed
+ * entirely by -DCFT_NO_PROGRAM. Removed rather than left for the
+ * linker to garbage-collect, because what does not fit on a part with
+ * 32 KB of flash is as often a constant table as it is code, and a
+ * table reachable from one live function is not collected. */
+#include "../include/cft_config.h"
+#ifndef CFT_NO_PROGRAM
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -90,7 +98,7 @@
  * same 16 in the tile (rtl/cft_seq.sv's KREG). It is not the header's
  * n_consts, which may legally be larger and simply leaves the excess
  * unreachable. */
-#define SEQ_MAX_DEPOSITS (1u << 20)
+#define SEQ_MAX_DEPOSITS (1uL << 20)
 #define SEQ_IMAGE_INSNS  0xFFFFFFFFu
 #define SEQ_ADDR_CONSTS  512u  /* with kx (2026-09-07) an instruction's
                                 * 8-bit indices reach 256 of the bank,
@@ -1807,3 +1815,11 @@ CFT_API cft_status cft_program_digest(cft_program *prog,
     cft_sha256_final(&s, out);
     return CFT_OK;
 }
+
+#else  /* CFT_NO_PROGRAM */
+
+/* An empty translation unit is not strictly conforming C99 and
+ * -Wpedantic says so, so leave one declaration behind. */
+typedef int cft_program_module_omitted;
+
+#endif /* CFT_NO_PROGRAM */
