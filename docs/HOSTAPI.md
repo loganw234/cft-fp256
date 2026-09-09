@@ -106,9 +106,17 @@ a failure.
   over four tiles returns exactly what one tile returns, bit for bit.
 - **Buffer staging** *(device backend)*. `cft_run` takes host pointers
   and does the device round trip itself. `cft_alloc` exists for when
-  that round trip is the bottleneck; today it is a plain allocation
-  and the sync calls are no-ops, which is what keeps code written that
-  way portable rather than dual-path.
+  that round trip is the bottleneck: allocate with it, fill through
+  `cft_buffer_data`, publish with `cft_buffer_to_device`, and the
+  library recognises its own pointers in `cft_run`, `cft_reduce` and
+  `cft_program_run_ex` and does not stage those operands again. On a
+  backend with no device memory - software, and a remote handle,
+  whose buffers stay on the client - the same calls are a plain
+  allocation and two no-ops, which is what keeps code written that
+  way portable rather than dual-path. `cft_caps.buffers_resident`
+  says which kind of device you have; `cft_buffer_get_info` says what
+  actually happened to one buffer. **How it works, and what a port
+  must do to get the rate, is the section below.**
 - **A per-run size ceiling** *(device backend, 2026-08-31)*. Each
   master owns exactly one HBM pseudo-channel (hw/link.cfg - done for
   response ordering, see there), so each argument buffer is capped at
@@ -165,6 +173,125 @@ carry and receiving a buffer of zeros with clean flags. A library
 whose product is exception-exact reproducibility cannot run in that
 mode, so it says so and stops.
 
+### Device-resident buffers, and what a port must do to get the rate
+
+The measured gap is the whole reason this exists. On the card, through
+`cft_run` staging every operand on every call, one tile does **141.8 /
+81.4 / 40.3 / 20.0** M fma elements a second at fp32/64/128/256. With
+the operands already on the device the same tile does **462.6 / 235.1
+/ 118.7 / 59.6**, and four tiles do **1,833.9 / 937.2 / 474.0 /
+238.4** (docs/BENCHMARKS.md). Everything below is the machinery that
+lets `libcft` reach the second set, and none of it changes an answer:
+the same call over the same bytes returns the same bits and the same
+flags either way, which is what `device-test -b` checks and what makes
+this an optimisation rather than a second contract.
+
+**What a port must do.** Four lines, and no second code path:
+
+```c
+cft_alloc(dev, bytes, &buf);                 /* instead of malloc  */
+memcpy(cft_buffer_data(buf), src, bytes);    /* fill the mirror    */
+cft_buffer_to_device(buf);                   /* publish it, once   */
+/* ... many cft_run / cft_reduce calls on cft_buffer_data(buf) ... */
+cft_buffer_from_device(out);                 /* collect the result */
+```
+
+That is the entire difference, and it is the difference `cft-bench
+--resident` makes to its own numbers. On the software backend the same
+four lines are an allocation and two no-ops, so the port stays one
+program. Two rules complete it: **fill once, publish once, run many** -
+a `cft_buffer_to_device` inside the loop asks for the transfer back -
+and **read the output back before you read its memory**, because a run
+that wrote a buffer leaves the device copy authoritative until
+`cft_buffer_from_device`.
+
+**Recognition** is a registry. `cft_alloc` records the buffer on its
+device, and each of a call's operand pointers is resolved against that
+list before dispatch: a pointer inside a live buffer becomes "this
+buffer, at this byte offset", and anything else stays a plain pointer
+and is staged. Interior pointers work, which is what lets a caller run
+over a window of a larger allocation. The lookup is a linear scan
+because the thing being counted is how many buffers one program holds
+at once, and it lives in `host/src/device.c` rather than in the
+backend, so it is C and testable without a card.
+
+**A device copy is per (tile, role), not per buffer.** Each compute
+unit's four AXI masters own one HBM pseudo-channel each
+(`hw/link.cfg`, `hw/link_quad.cfg`), so memory reachable by tile 1's
+`a` port is reachable by nothing else - not by tile 2's `a` port and
+not by tile 1's `b` port. A buffer feeding a four-tile run as `a`
+therefore has four copies, created lazily on first use as that role,
+each in the group `kernel.group_id()` names for that argument. The
+256 MB per-channel ceiling above applies to each of them: a buffer
+larger than a channel simply is not made resident, and is staged in
+slices exactly as a plain pointer is.
+
+**Each copy holds that tile's window** - its slice of the run, padded
+up to a whole 256-bit beat with zeros, which is byte for byte what
+staging puts in a staging buffer. So the kernel argument is the copy
+itself, at its own base address, and **no XRT sub-buffer is involved.**
+That was a decision, and the alternative was measured before it was
+rejected: a sub-buffer's offset must satisfy the device's base-address
+alignment, which is **4096 bytes** on the XRT this project builds
+against (`xrt_core::bo::alignment()`, XRT 2.14.354, measured on
+cft2204), while `slice.h` cuts at 32-byte beats. Binding a window at
+an offset the runtime is entitled to round is the one failure this
+mechanism must not have; holding the cuts to 4096 instead would mean a
+different partition for resident runs than for staged ones, which is
+two answers where the contract promises one. Per-tile slice copies
+avoid the question and cost less HBM as well, since each tile holds
+its quarter rather than the whole array.
+
+A copy is reused only when the window is the same one again - which is
+the common case by construction, since the same call in a loop asks
+for the same `n`, format and tile count - and otherwise it refills,
+which costs exactly what staging costs and never more. **There is no
+case in which residency is slower than the staged path it replaces.**
+
+**Authority.** One mirror, several copies, and exactly one of them is
+authoritative:
+
+| after | authoritative | what a run reads |
+|---|---|---|
+| `cft_alloc`, `cft_buffer_to_device` | the host mirror | the mirror, copied into each window on first use |
+| a run that wrote the buffer as `d` | the device copies that wrote | those copies |
+| `cft_buffer_from_device` | the host mirror again | the mirror |
+
+`cft_buffer_to_device` moves nothing: it marks every copy stale, and
+each refills at its next binding for the window that binding needs.
+Pushing eagerly would mean pushing the whole buffer into every tile's
+channel and then pushing the right windows again at the first run.
+
+**Breaking the rule costs time, never correctness.** A buffer that is
+device-authoritative and is fed in as an input is read back by the
+library first, before the tile or the host layer can see the stale
+mirror - so 9.4's infinity scan in `cft_reduce`, the software
+backend's own loop and the next run all see the bytes the last run
+wrote. The one case the library cannot see is a store into the mirror
+with no `cft_buffer_to_device` after it, because a plain store leaves
+no trace; that is why the sync calls exist, and `device-test -b`'s
+publish check is what proves publishing takes effect.
+
+**What is not resident.** `cft_reduce`'s partials are the library's
+own array; the composed reductions (`CFT_DOT`, `CFT_SUMSQ`,
+`CFT_SUMABS`) pass through an internal scratch array, so those spend
+one staged pass whatever their operands are; and
+`cft_program_run_ex` binds `a`, `b`, `c` and `deposits` but stages the
+image, the constant bank, the counts and the two scratch blocks, none
+of which is operand-shaped and two of which do not grow with `n` at
+all.
+
+**Asking rather than assuming**, as everywhere else here:
+`cft_caps.buffers_resident` says whether this device keeps device
+copies, and `cft_buffer_get_info` says what one buffer actually got -
+whether copies are live, whether a run has written it, and how many
+operand bindings were served without a transfer against how many had
+to copy, with the reason for the last copy in words. A residency
+mechanism that quietly staged everything would return every right
+answer and do nothing, so both the test leg and `cft-bench --resident`
+print those counters beside their results rather than leaving a reader
+to infer them from a rate.
+
 ### How it is tested without a card
 
 `host/tests/device_test.c` opens the device backend and the software
@@ -183,6 +310,21 @@ is what the library does internally across tiles - at sizes chosen to
 straddle beat and tile boundaries (1, 2, 3, 7, 8, 9, 31, 32, 33, 37).
 
 The same binary is what to run on the card. Only the xclbin changes.
+
+`-b` is the device-resident leg: the same elementwise matrix and the
+same reductions, run through `cft_alloc`'d operands, and every byte
+and every flag compared against the same calls on plain host pointers
+AND against the software backend. It adds four claims the pointer path
+cannot make - back-to-back runs on resident operands do not drift, an
+output buffer used as an input without being read back gives the run
+that just happened rather than the one before it, `cft_buffer_to_device`
+takes effect, and at least one binding on a device that reports
+resident buffers was actually served without a transfer. It runs
+against `sw` too, which is how the leg itself is proven able to fail
+before an hour of emulation is spent on it:
+
+    ./device-test sw -b -n 256          # the contract, no card
+    bash hw/run-device-test.sh <image> -b -n 4096
 
 ## What is not there yet
 

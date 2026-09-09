@@ -2780,6 +2780,364 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     check_program_refusals(sw, fmt);
 }
 
+/* ---------------------------------------------------------------
+ * Device-resident buffers, held to the host-pointer path   (-b)
+ *
+ * cft_alloc's promise is that the SAME call gives the SAME bits and
+ * the SAME flags whether its operands are host pointers or buffers
+ * this library allocated - the second only faster. So every check in
+ * this section runs the call twice on the device and once in
+ * software, and compares all three: nothing here is allowed to be
+ * "close enough because it is the fast path".
+ *
+ * It runs on the software backend too, where cft_alloc is a plain
+ * allocation and the sync calls do nothing. That is not a wasted run:
+ * it is what proves the harness can fail (inject a fault into the
+ * library and this leg goes red without a card), and it is the only
+ * leg that can be run on a laptop before an hour of emulation.
+ * --------------------------------------------------------------- */
+
+struct rbuf { cft_buffer *b; uint8_t *p; };
+
+static int rbuf_alloc(cft_device *dev, struct rbuf *r, size_t bytes)
+{
+    r->b = NULL;
+    r->p = NULL;
+    if (cft_alloc(dev, bytes, &r->b) != CFT_OK)
+        return 0;
+    r->p = (uint8_t *)cft_buffer_data(r->b);
+    return r->p != NULL;
+}
+
+static void rbuf_free(struct rbuf *r)
+{
+    cft_buffer_free(r->b);
+    r->b = NULL;
+    r->p = NULL;
+}
+
+/* Publish `bytes` from `src` into a buffer's mirror. Two calls, in the
+ * order cft.h prescribes, and the reason the write and the publish are
+ * one helper is that separating them is exactly the mistake this
+ * mechanism punishes. */
+static int rbuf_put(struct rbuf *r, const void *src, size_t bytes)
+{
+    memcpy(r->p, src, bytes);
+    return cft_buffer_to_device(r->b) == CFT_OK;
+}
+
+/* Totals for the summary line: how many operand bindings across the
+ * whole leg were served without a transfer, and how many were not.
+ * Zero and zero on a backend with no device memory, which is the
+ * right answer there and is what makes the line honest. */
+static uint64_t leg_resident_binds, leg_staged_binds;
+static char     leg_last_why[112];
+
+static void note_binds(struct rbuf *r)
+{
+    cft_buffer_info bi;
+    memset(&bi, 0, sizeof bi);
+    bi.struct_size = sizeof bi;
+    if (cft_buffer_get_info(r->b, &bi) != CFT_OK)
+        return;
+    leg_resident_binds += bi.resident_binds;
+    leg_staged_binds   += bi.staged_binds;
+    if (bi.staged_why[0])
+        memcpy(leg_last_why, bi.staged_why, sizeof leg_last_why);
+}
+
+/* One (format, op, attribute) at n elements, three ways. */
+static void compare_buffers(cft_device *sw, cft_device *hw, cft_format fmt,
+                            cft_op op, cft_round rnd, size_t n,
+                            uint32_t seed)
+{
+    size_t esz = cft_format_size(fmt), i, bad = 0;
+    uint32_t fsw = 0, fhost = 0, fbuf = 0, bus = 0;
+    cft_status ssw, shost, sbuf;
+    struct buf B;
+    struct rbuf ra, rb, rc, rd;
+    int ok;
+
+    if (!alloc_buffers(&B, n, esz)) {
+        printf("  FAIL: out of memory\n");
+        failures++;
+        return;
+    }
+    ok = rbuf_alloc(hw, &ra, n * esz) && rbuf_alloc(hw, &rb, n * esz) &&
+         rbuf_alloc(hw, &rc, n * esz) && rbuf_alloc(hw, &rd, n * esz);
+    if (!ok) {
+        printf("  FAIL: cft_alloc of four %lu-byte buffers\n",
+               (unsigned long)(n * esz));
+        failures++;
+        rbuf_free(&ra); rbuf_free(&rb); rbuf_free(&rc); rbuf_free(&rd);
+        free_buffers(&B);
+        return;
+    }
+
+    rs = seed ? seed : 1;
+    fill(B.a, n, esz);
+    fill(B.b, n, esz);
+    fill(B.c, n, esz);
+    memset(B.sw, 0, n * esz);
+    memset(B.hw, 0, n * esz);
+
+    ok = rbuf_put(&ra, B.a, n * esz) && rbuf_put(&rb, B.b, n * esz) &&
+         rbuf_put(&rc, B.c, n * esz);
+    CHECK(ok, "publishing three buffers for %s %s",
+          cft_format_name(fmt), cft_op_name(op));
+
+    ssw   = cft_run(sw, op, fmt, rnd, B.a, B.b, B.c, B.sw, n, &fsw, NULL);
+    shost = cft_run(hw, op, fmt, rnd, B.a, B.b, B.c, B.hw, n, &fhost, &bus);
+    sbuf  = cft_run(hw, op, fmt, rnd, ra.p, rb.p, rc.p, rd.p, n, &fbuf, &bus);
+
+    CHECK(ssw == CFT_OK, "software %s %s n=%lu: %s", cft_format_name(fmt),
+          cft_op_name(op), (unsigned long)n, cft_strerror(ssw));
+    CHECK(shost == CFT_OK, "device host-pointer %s %s n=%lu: %s (%s)",
+          cft_format_name(fmt), cft_op_name(op), (unsigned long)n,
+          cft_strerror(shost), cft_last_error());
+    CHECK(sbuf == CFT_OK, "device buffer %s %s n=%lu: %s (%s)",
+          cft_format_name(fmt), cft_op_name(op), (unsigned long)n,
+          cft_strerror(sbuf), cft_last_error());
+    /* The output buffer is device-authoritative now; this is where a
+     * caller collects it, and where the counters below become real. */
+    CHECK(cft_buffer_from_device(rd.b) == CFT_OK,
+          "reading the result buffer back");
+
+    if (ssw == CFT_OK && shost == CFT_OK && sbuf == CFT_OK) {
+        for (i = 0; i < n; i++) {
+            if (memcmp(B.hw + i * esz, rd.p + i * esz, esz) != 0 ||
+                memcmp(B.sw + i * esz, rd.p + i * esz, esz) != 0) {
+                if (bad < 3) {
+                    char h1[2 * MAXE + 1], h2[2 * MAXE + 1];
+                    char h3[2 * MAXE + 1];
+                    hex(B.sw + i * esz, esz, h1);
+                    hex(B.hw + i * esz, esz, h2);
+                    hex(rd.p + i * esz, esz, h3);
+                    printf("  FAIL: %s %s %d element %lu of %lu\n"
+                           "        software        %s\n"
+                           "        device pointers %s\n"
+                           "        device buffers  %s\n",
+                           cft_format_name(fmt), cft_op_name(op), (int)rnd,
+                           (unsigned long)i, (unsigned long)n, h1, h2, h3);
+                }
+                bad++;
+            }
+        }
+        checks++;
+        if (bad) {
+            failures++;
+            printf("  FAIL: %lu of %lu elements differ between the "
+                   "buffer path and the pointer path\n",
+                   (unsigned long)bad, (unsigned long)n);
+        }
+        CHECK(fsw == fhost && fhost == fbuf,
+              "%s %s flags: software 0x%02x, pointers 0x%02x, "
+              "buffers 0x%02x", cft_format_name(fmt), cft_op_name(op),
+              (unsigned)fsw, (unsigned)fhost, (unsigned)fbuf);
+
+        /* Run it AGAIN on the same resident operands, with nothing
+         * republished. This is the case the whole feature exists for -
+         * the second call is the one that costs no transfer - and it
+         * is the case a stale copy would break: the answer must not
+         * move, and it must still be the software answer.
+         *
+         * The read back is deliberately NOT here. What comes next
+         * needs rd device-authoritative, and a from_device would take
+         * that away. */
+        {
+            uint32_t f2 = 0;
+            memset(rd.p, 0, n * esz);
+            CHECK(cft_run(hw, op, fmt, rnd, ra.p, rb.p, rc.p, rd.p, n,
+                          &f2, NULL) == CFT_OK,
+                  "the second run on resident operands");
+            CHECK(f2 == fsw,
+                  "%s %s: the second run's flags moved (0x%02x, was 0x%02x)",
+                  cft_format_name(fmt), cft_op_name(op), (unsigned)f2,
+                  (unsigned)fsw);
+        }
+
+        /* THE AUTHORITY RULE, from the wrong side. rd holds the run
+         * that just finished and the caller does NOT read it back
+         * before feeding it in as an input. cft.h promises that costs
+         * a round trip and not an answer, so the abs below must be the
+         * abs of the run that just happened - not of the one before
+         * it, and not of the zeros the mirror was memset to. Those two
+         * wrong answers are why this is worth a check: both are
+         * plausible, and only one of them is even noisy. */
+        {
+            uint32_t f3 = 0, f4 = 0;
+            uint8_t *swd = malloc(n * esz);
+            if (swd) {
+                CHECK(cft_run(sw, CFT_ABS, fmt, CFT_RNE, B.sw, NULL, NULL,
+                              swd, n, &f3, NULL) == CFT_OK,
+                      "software abs of the previous result");
+                CHECK(cft_run(hw, CFT_ABS, fmt, CFT_RNE, rd.p, NULL, NULL,
+                              B.hw, n, &f4, NULL) == CFT_OK,
+                      "device abs of an unread result buffer");
+                CHECK(memcmp(swd, B.hw, n * esz) == 0 && f3 == f4,
+                      "%s %s: a buffer used as an input without being read "
+                      "back did not give the run that wrote it",
+                      cft_format_name(fmt), cft_op_name(op));
+                free(swd);
+            }
+        }
+
+        /* And now the read back, which the line above already forced
+         * the library to do. The second run's bytes must be here. */
+        CHECK(cft_buffer_from_device(rd.b) == CFT_OK,
+              "reading the second run back");
+        CHECK(memcmp(B.sw, rd.p, n * esz) == 0,
+              "%s %s: back-to-back runs on resident operands drifted",
+              cft_format_name(fmt), cft_op_name(op));
+    }
+
+    note_binds(&ra); note_binds(&rb); note_binds(&rc); note_binds(&rd);
+    rbuf_free(&ra); rbuf_free(&rb); rbuf_free(&rc); rbuf_free(&rd);
+    free_buffers(&B);
+}
+
+/* A reduction over a resident input. The single output element goes to
+ * a host pointer, which is what cft_reduce's signature offers, so what
+ * this checks is the input side and the tree above it. */
+static void compare_buffers_reduce(cft_device *sw, cft_device *hw,
+                                   cft_format fmt, cft_op op, cft_round rnd,
+                                   size_t n, uint32_t seed, int finite)
+{
+    size_t esz = cft_format_size(fmt);
+    size_t bytes = (n ? n : 1) * esz;
+    uint32_t fsw = 0, fhost = 0, fbuf = 0;
+    uint8_t *a = malloc(bytes), *b = malloc(bytes);
+    uint8_t dsw[MAXE], dhost[MAXE], dbuf[MAXE];
+    struct rbuf ra, rb;
+    cft_status ssw, shost, sbuf;
+
+    if (!a || !b) {
+        printf("  FAIL: out of memory\n");
+        failures++;
+        free(a); free(b);
+        return;
+    }
+    if (!rbuf_alloc(hw, &ra, bytes) || !rbuf_alloc(hw, &rb, bytes)) {
+        printf("  FAIL: cft_alloc for a reduction\n");
+        failures++;
+        rbuf_free(&ra); rbuf_free(&rb);
+        free(a); free(b);
+        return;
+    }
+
+    rs = seed ? seed : 1;
+    if (finite) {
+        fill_finite(a, fmt, n);
+        fill_finite(b, fmt, n);
+    } else {
+        fill(a, n, esz);
+        fill(b, n, esz);
+    }
+    memset(dsw, 0, sizeof dsw);
+    memset(dhost, 0, sizeof dhost);
+    memset(dbuf, 0, sizeof dbuf);
+    CHECK(rbuf_put(&ra, a, bytes) && rbuf_put(&rb, b, bytes),
+          "publishing a reduction's operands");
+
+    ssw   = cft_reduce(sw, op, fmt, rnd, a, op == CFT_DOT ? b : NULL,
+                       dsw, n, &fsw, NULL);
+    shost = cft_reduce(hw, op, fmt, rnd, a, op == CFT_DOT ? b : NULL,
+                       dhost, n, &fhost, NULL);
+    sbuf  = cft_reduce(hw, op, fmt, rnd, ra.p, op == CFT_DOT ? rb.p : NULL,
+                       dbuf, n, &fbuf, NULL);
+
+    CHECK(ssw == CFT_OK && shost == CFT_OK && sbuf == CFT_OK,
+          "%s %s n=%lu: software %s, pointers %s, buffers %s (%s)",
+          cft_format_name(fmt), cft_op_name(op), (unsigned long)n,
+          cft_strerror(ssw), cft_strerror(shost), cft_strerror(sbuf),
+          cft_last_error());
+    if (ssw == CFT_OK && shost == CFT_OK && sbuf == CFT_OK) {
+        char h1[2 * MAXE + 1], h2[2 * MAXE + 1], h3[2 * MAXE + 1];
+        checks++;
+        if (memcmp(dsw, dbuf, esz) != 0 || memcmp(dhost, dbuf, esz) != 0) {
+            hex(dsw, esz, h1);
+            hex(dhost, esz, h2);
+            hex(dbuf, esz, h3);
+            printf("  FAIL: %s %s n=%lu rnd=%d\n"
+                   "        software        %s\n"
+                   "        device pointers %s\n"
+                   "        device buffers  %s\n",
+                   cft_format_name(fmt), cft_op_name(op),
+                   (unsigned long)n, (int)rnd, h1, h2, h3);
+            failures++;
+        }
+        CHECK(fsw == fhost && fhost == fbuf,
+              "%s %s n=%lu flags: software 0x%02x, pointers 0x%02x, "
+              "buffers 0x%02x", cft_format_name(fmt), cft_op_name(op),
+              (unsigned long)n, (unsigned)fsw, (unsigned)fhost,
+              (unsigned)fbuf);
+    }
+
+    note_binds(&ra); note_binds(&rb);
+    rbuf_free(&ra); rbuf_free(&rb);
+    free(a);
+    free(b);
+}
+
+/* The one thing the library cannot see, checked from both sides.
+ *
+ * Writing the mirror and NOT publishing it is the single case cft.h
+ * documents as changing an answer, because a plain store leaves no
+ * trace. Publishing it must then take effect. So: publish, run,
+ * rewrite the mirror, publish again, run again - and the second answer
+ * must be the one the new bytes give. A backend that cached a device
+ * copy and ignored cft_buffer_to_device passes every other check in
+ * this file and fails this one. */
+static void check_publish_takes_effect(cft_device *sw, cft_device *hw,
+                                       cft_format fmt, size_t n,
+                                       uint32_t seed)
+{
+    size_t esz = cft_format_size(fmt), bytes = n * esz;
+    uint8_t *a1 = malloc(bytes), *a2 = malloc(bytes);
+    uint8_t *want = malloc(bytes), *got = malloc(bytes);
+    struct rbuf ra, rd;
+    uint32_t f1 = 0, f2 = 0;
+
+    if (!a1 || !a2 || !want || !got) {
+        free(a1); free(a2); free(want); free(got);
+        return;
+    }
+    if (!rbuf_alloc(hw, &ra, bytes) || !rbuf_alloc(hw, &rd, bytes)) {
+        printf("  FAIL: cft_alloc for the publish check\n");
+        failures++;
+        rbuf_free(&ra); rbuf_free(&rd);
+        free(a1); free(a2); free(want); free(got);
+        return;
+    }
+
+    rs = seed ? seed : 1;
+    fill_finite(a1, fmt, n);
+    fill_finite(a2, fmt, n);
+
+    CHECK(rbuf_put(&ra, a1, bytes), "publishing the first operand");
+    CHECK(cft_run(hw, CFT_ABS, fmt, CFT_RNE, ra.p, NULL, NULL, rd.p, n,
+                  &f1, NULL) == CFT_OK, "the first run");
+    CHECK(cft_buffer_from_device(rd.b) == CFT_OK, "reading the first");
+
+    /* New bytes into the same mirror, published. */
+    CHECK(rbuf_put(&ra, a2, bytes), "republishing with new bytes");
+    CHECK(cft_run(hw, CFT_ABS, fmt, CFT_RNE, ra.p, NULL, NULL, rd.p, n,
+                  &f2, NULL) == CFT_OK, "the second run");
+    CHECK(cft_buffer_from_device(rd.b) == CFT_OK, "reading the second");
+    memcpy(got, rd.p, bytes);
+
+    CHECK(cft_run(sw, CFT_ABS, fmt, CFT_RNE, a2, NULL, NULL, want, n,
+                  NULL, NULL) == CFT_OK, "the software answer");
+    CHECK(memcmp(want, got, bytes) == 0,
+          "%s: cft_buffer_to_device did not take effect - the run used "
+          "the bytes the buffer held before", cft_format_name(fmt));
+    (void)f1; (void)f2;
+
+    note_binds(&ra); note_binds(&rd);
+    rbuf_free(&ra); rbuf_free(&rd);
+    free(a1); free(a2); free(want); free(got);
+}
+
 int main(int argc, char **argv)
 {
     static const cft_op ops[] = {CFT_FMA, CFT_ADD, CFT_SUB, CFT_MUL,
@@ -2797,6 +3155,7 @@ int main(int argc, char **argv)
     int quick = 0;          /* one opcode, one attribute */
     int only_reduce = 0;    /* skip elementwise; reductions are slow enough */
     int only_seq = 0;       /* sequencer programs only */
+    int only_buf = 0;       /* device-resident buffers only */
     int f, o, r, argi;
 
     /* Emulation is orders of magnitude slower than silicon, so the
@@ -2810,6 +3169,8 @@ int main(int argc, char **argv)
             only_seq = 1;
         } else if (!strcmp(argv[argi], "-r")) {
             only_reduce = 1;
+        } else if (!strcmp(argv[argi], "-b")) {
+            only_buf = 1;
         } else if (!strcmp(argv[argi], "-n") && argi + 1 < argc) {
             n = (size_t)strtoul(argv[++argi], NULL, 10);
         } else if (!strcmp(argv[argi], "-f") && argi + 1 < argc) {
@@ -2825,15 +3186,27 @@ int main(int argc, char **argv)
         } else if (argv[argi][0] != '-' && !artifact) {
             artifact = argv[argi];
         } else {
-            fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
-                            "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s]\n",
+            fprintf(stderr,
+                    "usage: %s <artifact.xclbin> [-n elements] "
+                    "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b]\n"
+                    "  -q  one opcode and one attribute a format\n"
+                    "  -r  reductions only\n"
+                    "  -s  sequencer programs only\n"
+                    "  -b  device-resident buffers only: the same "
+                    "elementwise matrix and\n"
+                    "      the same reductions run through cft_alloc, "
+                    "compared byte for\n"
+                    "      byte and flag for flag with the host-pointer "
+                    "path and with\n"
+                    "      the software backend\n",
                     argv[0]);
             return 2;
         }
     }
     if (!artifact) {
         fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
-                        "[-f fp32|fp64|fp128|fp256] [-q]\n", argv[0]);
+                        "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b]\n",
+                argv[0]);
         return 2;
     }
     argv[1] = (char *)artifact;
@@ -2886,7 +3259,7 @@ int main(int argc, char **argv)
 
     for (f = 0; f < 4; f++) {
         cft_format fmt = (cft_format)f;
-        int nops = (only_reduce || only_seq) ? 0
+        int nops = (only_reduce || only_seq || only_buf) ? 0
                  : quick      ? 1
                  : (int)(sizeof ops / sizeof ops[0]);
         int nrnd = quick ? 1 : (int)(sizeof rnds / sizeof rnds[0]);
@@ -2900,6 +3273,87 @@ int main(int argc, char **argv)
         }
         printf("%s\n", cft_format_name(fmt));
         fflush(stdout);
+
+        /* -b: cft_alloc's buffers held to the host-pointer path.
+         *
+         * The elementwise matrix and the reductions, run through
+         * device-resident operands and compared byte for byte and flag
+         * for flag against the same calls on plain pointers and
+         * against the software backend. Its own leg because it costs a
+         * second and a third run of everything, and because on a card
+         * it is what proves the fast path is the same path. */
+        if (only_buf) {
+            int bo, br;
+            int bops = quick ? 2 : (int)(sizeof ops / sizeof ops[0]);
+            for (bo = 0; bo < bops; bo++) {
+                if (!cft_supports(hw, ops[bo], fmt)) {
+                    note_skip(cft_op_name(ops[bo]));
+                    continue;
+                }
+                for (br = 0; br < nrnd; br++)
+                    compare_buffers(sw, hw, fmt, ops[bo], rnds[br], n,
+                                    0xbf00000u +
+                                    (uint32_t)(f * 100 + bo * 10 + br));
+            }
+            printf("  buffers, elementwise: %d checks, %d failed\n",
+                   checks, failures);
+            fflush(stdout);
+
+            /* The sizes that straddle a beat and a tile boundary, which
+             * are where a window that is a whole number of beats stops
+             * being one - and where a copy sized from the wrong end of
+             * the arithmetic would read the caller's next elements as
+             * padding. */
+            {
+                static const size_t odd[] = {1, 2, 3, 7, 8, 9, 31, 33, 37};
+                size_t i2, nodd = quick ? 5 : sizeof odd / sizeof odd[0];
+                for (i2 = 0; i2 < nodd; i2++)
+                    compare_buffers(sw, hw, fmt, CFT_FMA, CFT_RNE, odd[i2],
+                                    0xbf50000u + (uint32_t)(f * 50 + i2));
+                printf("  buffers, boundary sizes: %d checks, %d failed\n",
+                       checks, failures);
+                fflush(stdout);
+            }
+
+            check_publish_takes_effect(sw, hw, fmt, n, 0xbfaa000u +
+                                       (uint32_t)f);
+            printf("  buffers, publish takes effect: %d checks, %d "
+                   "failed\n", checks, failures);
+            fflush(stdout);
+
+            if (cft_supports(hw, CFT_SUM, fmt)) {
+                static const size_t rn[] = {0, 1, 2, 3, 5, 8, 9, 17, 33, 37};
+                size_t i2, nrn = quick ? 5 : sizeof rn / sizeof rn[0];
+                for (i2 = 0; i2 < nrn; i2++)
+                    compare_buffers_reduce(sw, hw, fmt, CFT_SUM, CFT_RNE,
+                                           rn[i2], 0xbf60000u +
+                                           (uint32_t)(f * 50 + i2), 1);
+                compare_buffers_reduce(sw, hw, fmt, CFT_SUM, CFT_RNE,
+                                       quick ? 9 : 37,
+                                       0xbf70000u + (uint32_t)f, 0);
+                if (cft_supports(hw, CFT_DOT, fmt))
+                    for (i2 = 0; i2 < (quick ? 3u : 6u) && i2 < nrn; i2++)
+                        compare_buffers_reduce(sw, hw, fmt, CFT_DOT,
+                                               CFT_RNE, rn[i2], 0xbf80000u +
+                                               (uint32_t)(f * 50 + i2), 1);
+                if (cft_supports(hw, CFT_SUMSQ, fmt))
+                    for (i2 = 0; i2 < (quick ? 3u : 5u) && i2 < nrn; i2++)
+                        compare_buffers_reduce(sw, hw, fmt, CFT_SUMSQ,
+                                               CFT_RNE, rn[i2], 0xbf90000u +
+                                               (uint32_t)(f * 50 + i2), 1);
+                if (cft_supports(hw, CFT_SUMABS, fmt))
+                    for (i2 = 0; i2 < (quick ? 3u : 5u) && i2 < nrn; i2++)
+                        compare_buffers_reduce(sw, hw, fmt, CFT_SUMABS,
+                                               CFT_RNE, rn[i2], 0xbfb0000u +
+                                               (uint32_t)(f * 50 + i2), 1);
+                printf("  buffers, reductions: %d checks, %d failed\n",
+                       checks, failures);
+                fflush(stdout);
+            } else {
+                note_skip(cft_op_name(CFT_SUM));
+            }
+            continue;
+        }
         for (o = 0; o < nops; o++) {
             if (!cft_supports(hw, ops[o], fmt)) {
                 note_skip(cft_op_name(ops[o]));
@@ -3068,6 +3522,33 @@ int main(int argc, char **argv)
             note_skip(cft_op_name(CFT_SUM));
             printf("  no reduction opcode group on this device "
                    "(CAPS says so) - nothing to check\n");
+        }
+    }
+
+    /* What the buffer leg actually got, before the handles go.
+     *
+     * A residency mechanism that quietly staged everything would pass
+     * every comparison above - the answers would be right, and the
+     * whole point would be missing. So the counters are printed, and
+     * on a device that says it keeps device copies at least one
+     * binding has to have been served without a transfer or this leg
+     * has proven only that the fallback works. */
+    if (only_buf) {
+        printf("\nbindings: %lu served from a device copy with no "
+               "transfer, %lu copied\n",
+               (unsigned long)leg_resident_binds,
+               (unsigned long)leg_staged_binds);
+        if (leg_last_why[0])
+            printf("  the last copy was made because: %s\n", leg_last_why);
+        if (caps.buffers_resident) {
+            CHECK(leg_resident_binds > 0,
+                  "this device reports resident buffers and not one "
+                  "binding avoided a transfer - the answers are right "
+                  "and the mechanism did nothing");
+        } else {
+            printf("  this backend keeps no device copies, so both "
+                   "counters are zero by construction and the leg has "
+                   "proven the CONTRACT, not the saving\n");
         }
     }
 

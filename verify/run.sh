@@ -465,10 +465,18 @@ stage libcft "host library: build + contract tests + conformance replay" -- do_l
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1
-  (cd "$ROOT/host" && "./device-test$EXE" sw -n 96)
+  # Both legs. -b is the device-resident one: the same matrix and the
+  # same reductions through cft_alloc'd operands, every byte and every
+  # flag held to the host-pointer path. Against `sw` it cannot prove
+  # the SAVING - there are no device copies to serve from - but it
+  # proves the CONTRACT and it proves the leg can fail, which is what a
+  # census wants running on every machine rather than only where a card
+  # is (docs/HOSTAPI.md, "Device-resident buffers").
+  (cd "$ROOT/host" && "./device-test$EXE" sw -n 96 \
+                   && "./device-test$EXE" sw -b -n 96)
 }
 need host-cc
-stage selfcheck "device-test harness, software-vs-software full matrix (seeds + div/sqrt included)" \
+stage selfcheck "device-test harness, software-vs-software full matrix (seeds + div/sqrt included), then the same through cft_alloc'd buffers" \
   -- do_selfcheck
 
 need host-cc python

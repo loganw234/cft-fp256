@@ -67,13 +67,93 @@ int  cftx_open(const char *artifact, int index, void **out,
 
 void cftx_close(void *hw);
 
+/* ====================================================================
+ * Device-resident buffers (cft.h's cft_alloc; docs/HOSTAPI.md)
+ *
+ * The public API takes host pointers, and a backend that always
+ * copied them would be simple and would spend its life on the bus.
+ * cft_alloc gives a caller a pointer the library RECOGNISES, and this
+ * block is how the recognition reaches a backend.
+ *
+ * device.c owns the registry - it is a linear scan of the live
+ * buffers a device holds, which is pure C and testable without a card
+ * - and resolves each of a call's operand pointers into "this backend
+ * buffer object, at this byte offset". The backend owns the device
+ * memory, because only it knows what a memory group is.
+ * ==================================================================== */
+
+/* The four operand slots, in the kernel's own argument order. A role
+ * is not decoration: each compute unit's four AXI masters own one HBM
+ * pseudo-channel each (hw/link.cfg), so the same host buffer used as
+ * `a` and as `b` needs two device copies in two different channels,
+ * and "the device copy of this buffer" is not a thing that exists. */
+enum { CFT_ROLE_A = 0, CFT_ROLE_B = 1, CFT_ROLE_C = 2, CFT_ROLE_D = 3 };
+
+/* Which of a call's operands live in a resident buffer, and where in
+ * it they start. A NULL `buf[r]` is an operand that is ordinary host
+ * memory and will be staged, which is every operand on a backend
+ * without resident buffers - so a NULL `cft_bindings *` means "none of
+ * them", and a backend that ignores this argument entirely behaves
+ * exactly as it did before the field existed. */
+typedef struct cft_bindings {
+    void  *buf[4];     /* cftx_buffer_create's object, or NULL */
+    size_t off[4];     /* byte offset of the caller's pointer inside it */
+} cft_bindings;
+
+/* Create the backend's side of one cft_buffer.
+ *
+ * `host` is the buffer's host mirror, which device.c allocates and
+ * owns for the buffer's whole life, and `bytes` is its length. No
+ * device memory is taken here: the copies are per (tile, role) and are
+ * made on first use as that role, when the window they must hold is
+ * finally known. A backend that cannot make device copies at all does
+ * not implement this seam, and device.c leaves the buffer as plain
+ * host memory.
+ *
+ * The object holds `hw` and is invalidated by cftx_buffer_destroy,
+ * which device.c calls for every live buffer before cftx_close - so a
+ * cft_buffer outliving its device stays valid as host memory, which is
+ * the tolerance cft_close() has always promised. */
+int  cftx_buffer_create(void *hw, void *host, size_t bytes, void **out);
+void cftx_buffer_destroy(void *buf);
+
+/* The mirror is the truth: drop every device copy's claim on the
+ * contents, including one a run wrote and nobody has read back. The
+ * copies refill from the mirror the next time they are bound, so this
+ * call moves nothing and cannot fail on a transfer. */
+int  cftx_buffer_to_device(void *buf);
+
+/* The device is the truth: copy back everything a run wrote into this
+ * buffer's copies and has not yet returned, into the mirror, and
+ * leave the mirror authoritative. A no-op when no run has written it.
+ *
+ * device.c calls this ITSELF, before any operation that reads the
+ * mirror or feeds the buffer in as an input, so that a caller who
+ * skips it gets the round trip rather than the previous run's bytes.
+ * See cft.h: breaking the rule costs time, never correctness. */
+int  cftx_buffer_from_device(void *buf);
+
+/* What happened to this buffer, for cft_buffer_get_info. `why` takes
+ * the reason the most recent staged binding staged, truncated to
+ * `why_bytes` and always NUL-terminated. */
+void cftx_buffer_stat(void *buf, int *resident, int *device_authority,
+                      uint64_t *resident_binds, uint64_t *staged_binds,
+                      char *why, size_t why_bytes);
+
 /* Elementwise over n elements, partitioned across every tile. flags is
  * the OR of all tiles' sticky words; bus is the OR of their fault
  * registers and is only meaningful when the return is
- * CFT_ERR_BUS_FAULT. */
+ * CFT_ERR_BUS_FAULT.
+ *
+ * `bind` names the operands that live in resident buffers, or is NULL
+ * when none do. The host pointers are still passed and are still what
+ * a staged operand is copied from - a binding is an OPTIMISATION and
+ * never the only description of an operand, so a backend that fails
+ * to bind one falls back to the pointer and returns the same bits. */
 int  cftx_run(void *hw, int op, int fmt, int rnd,
               const void *a, const void *b, const void *c, void *d,
-              size_t n, uint32_t *flags, uint32_t *bus);
+              size_t n, const cft_bindings *bind,
+              uint32_t *flags, uint32_t *bus);
 
 /* Reduce index ranges of `a`, writing ONE element per range into
  * `partials`.
@@ -100,9 +180,14 @@ int  cftx_run(void *hw, int op, int fmt, int rnd,
  *
  * flags is the OR across every tile used; bus likewise, and only
  * meaningful on CFT_ERR_BUS_FAULT. */
+/* `bind` names `a` when it is resident, in slot CFT_ROLE_A, and is
+ * NULL otherwise; the other three slots are unused, because a
+ * reduction reads one stream and writes one element per range into
+ * the caller's own `partials`. */
 int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
                  const size_t *lo, const size_t *hi, size_t nranges,
-                 void *partials, uint32_t *flags, uint32_t *bus);
+                 void *partials, const cft_bindings *bind,
+                 uint32_t *flags, uint32_t *bus);
 
 /* The per-run DATA a sequencer program carries beside its operands.
  *
@@ -159,12 +244,18 @@ typedef struct cft_seq_run_io {
  * its own index alone, and a sequencer lane does too - but the early
  * exit is a CROSS-LANE condition, so splitting lanes across tiles is
  * a claim about P3 that wants its own fuzz before it ships. */
+/* `bind` names a, b, c and `deposits` when they are resident, in the
+ * four role slots - deposits being the D master's buffer, which is
+ * what CFT_ROLE_D means here. The image, the constant bank, the
+ * counts and the two scratch blocks are staged always: none is
+ * operand-shaped, and the image and bank do not grow with n at all. */
 int  cftx_program_run(void *hw, int fmt, const void *image,
                       size_t image_bytes,
                       const cft_seq_run_io *io,
                       uint32_t max_deposits,
                       const void *a, const void *b, const void *c,
                       void *deposits, uint32_t *counts, size_t n,
+                      const cft_bindings *bind,
                       uint32_t *flags, uint32_t *bus);
 
 /* The backend handle behind a device, or NULL if it was opened without
