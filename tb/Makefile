@@ -8,6 +8,10 @@
 #   make fp32 | fp64 | fp128 | fp256 | krnl   one bench
 #   make SIM=verilator sim    alternative simulator
 #   CFT_RANDOM=20000 make fp32   crank the vector count
+#   make RD_LATENCY=125 WR_LATENCY=16 cycles
+#                             give the memory model a round trip (see
+#                             RD_LATENCY below); 0, the default,
+#                             installs nothing at all
 
 SIM ?= icarus
 
@@ -15,6 +19,35 @@ SIM ?= icarus
 # `simmc` (rtl/cft_lanes.sv MUL_PASSES). 10 is the one-column-per-lane
 # corner - fp64/fp128/fp256 at 3/5/10 passes; 2 halves every wide rung.
 MC ?= 10
+
+# THE MEMORY MODEL'S ROUND TRIP, in kernel-clock cycles.
+#
+# RD_LATENCY delays every R beat; WR_LATENCY delays every write
+# response. Both reach the benches as CFT_RD_LATENCY / CFT_WR_LATENCY
+# and are implemented in tb/busfx.py (section D) as a PIPELINED delay -
+# one beat a cycle of bandwidth, `n` cycles of latency - not as a stall
+# inside the slave, which would model a memory with one outstanding
+# transaction and could never be beaten by a deeper read-ahead.
+#
+# ZERO IS THE DEFAULT AND INSTALLS NOTHING: no wrapper, no coroutine,
+# no behaviour change. Every target below draws the stock cocotbext-axi
+# slave, which answers in zero cycles, unless a latency is asked for.
+#
+# Why it exists: the card sustains 2.25 cycles a beat where `cycles`
+# measured 1.250 on the same RTL, and a ceiling flat across format and
+# size is a read path bounded by latency (docs/BENCHMARKS.md, "The
+# engine, measured"). The knob is what lets that be reproduced, and
+# what says whether a deeper read-ahead fixes it. Reads and writes are
+# separate numbers because the two paths bound the engine for
+# different reasons.
+#
+#   make RD_LATENCY=150 WR_LATENCY=150 cycles     the card's round trip
+#   make RD_LATENCY=150 cycles                    reads only
+#   make WR_LATENCY=150 cycles                    writes only
+#   make RD_LATENCY=150 WR_LATENCY=150 krnl       the SAME bits, slowly
+RD_LATENCY ?= 0
+WR_LATENCY ?= 0
+LATENCY_ENV = CFT_RD_LATENCY=$(RD_LATENCY) CFT_WR_LATENCY=$(WR_LATENCY)
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
@@ -256,7 +289,7 @@ fp256:
 		COCOTB_RESULTS_FILE=sim_build/fp256/results.xml
 
 krnl:
-	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnl \
 		COCOTB_RESULTS_FILE=sim_build/krnl/results.xml
 
@@ -358,10 +391,15 @@ boardfp256:
 # and the rate those imply at the shipping clock, labelled a
 # prediction. Out of `sim` on purpose - it measures rather than
 # checks, and its numbers move for legitimate reasons.
+#
+# RD_LATENCY / WR_LATENCY above give the memory model a round trip; the
+# build directory carries the pair so a sweep does not re-elaborate and
+# does not overwrite the zero-latency run's results.
 cycles:
-	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
-		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cycles \
-		COCOTB_RESULTS_FILE=sim_build/cycles/results.xml
+	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_cycles \
+		SIM_BUILD=sim_build/cycles$(RD_LATENCY)_$(WR_LATENCY) \
+		COCOTB_RESULTS_FILE=sim_build/cycles$(RD_LATENCY)_$(WR_LATENCY)/results.xml
 
 # The sequencer against BANKED memory: one private store per master,
 # nothing mirrored. test_krnl_seq.py shares a single store on purpose
@@ -384,8 +422,12 @@ quarter:
 # directions. The only bench where STATUS is ever non-zero, and the
 # only one that asserts ap_done arrives at all - a design that latches
 # a fault and then waits forever passes every other target here.
+#
+# Takes RD_LATENCY / WR_LATENCY too, and it is the bench where they buy
+# the most: an abort has to unwind every read burst and write response
+# still in the air, and at zero latency there is nothing in the air.
 faults:
-	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_faults SIM_BUILD=sim_build/faults \
 		COCOTB_RESULTS_FILE=sim_build/faults/results.xml
 

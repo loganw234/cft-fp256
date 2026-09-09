@@ -301,6 +301,17 @@ async def krnl_end_to_end(dut):
         "the four masters must address one memory or this bench proves " \
         "nothing about address decode"
 
+    # Optional memory round trip (tb/Makefile's RD_LATENCY / WR_LATENCY;
+    # zero installs nothing). This bench scores every result against the
+    # golden model, so running it at the card's latency is the statement
+    # that a deeper read-ahead changed the SCHEDULE and not the bits -
+    # which is the only property that matters here.
+    rd_lat, wr_lat = busfx.env_latency()
+    if busfx.latency(ram_a, ram_b, ram_c, ram_d, clk=dut.ap_clk,
+                     read=rd_lat, write=wr_lat) != (0, 0):
+        dut._log.info(f"memory model: read latency {rd_lat} cycles, "
+                      f"write-response latency {wr_lat} cycles")
+
     dut.ap_rst_n.value = 0
     await ClockCycles(dut.ap_clk, 8)
     dut.ap_rst_n.value = 1
@@ -423,6 +434,28 @@ async def krnl_end_to_end(dut):
     # here rather than quietly reading the wrong memory.
     await run_op(dut, axil, ram, FP32, OP_FMA, 1104, seed=250)
     await run_op(dut, axil, ram, FP64, OP_ADD, 600, seed=251)
+
+    # ---- more bursts than the RLAST length queue holds ----------------
+    #
+    # With AR_DEPTH bursts in flight, each reader keeps a queue of the
+    # lengths it is still expecting an RLAST for, and that queue wraps
+    # at AR_DEPTH. Nothing above reached it: 150 beats is nine 16-beat
+    # bursts against a queue of sixteen, so the write and read pointers
+    # had never crossed a wrap in this file.
+    #
+    # 4,800 fp32 elements is 600 beats, 38 bursts a stream - two full
+    # laps and change. It also crosses four 4KB pages rather than one,
+    # and drives roughly four times the longest stream this bench had.
+    # Scored against the model like every other run, so the failure
+    # mode is wrong bits rather than a hang.
+    #
+    # It does NOT saturate the operand FIFOs, and it is worth saying
+    # so: elementwise consumes a beat about as fast as a master
+    # delivers one, so 600 beats leaves the FIFO a tenth full and the
+    # RESERVATION never binds. The bench that puts the reservation
+    # under load is the long reduction in test_krnl_reduce.py, for the
+    # reason its comment gives.
+    await run_op(dut, axil, ram, FP32, OP_FMA, 4800, seed=252)
 
     # ---- and now with a slave that is not cooperative ----------------
     #

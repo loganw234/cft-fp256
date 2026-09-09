@@ -120,16 +120,18 @@ kernel flow, XRT host runtime.
 - **cft_csr** - AXI4-Lite slave, Vitis ap_ctrl_hs protocol, argument
   registers, and the read-only FLAGS/MAGIC/VERSION/CAPS block.
 - **cft_engine_stream** - the v1 streaming sequencer the kernel
-  instantiates: burst reads into three per-stream FIFOs (arbitrated
-  a > b > c, one AR outstanding, 4KB-safe), one beat issued per cycle
-  to `cft_lanes` at the precision MODE selects, whenever operands and
-  result space exist, collection through a latency-matched delay line
-  into a D FIFO, index-order burst writes out. Read, compute and write
-  overlap across beats; issue and write order stay total, so
-  determinism is untouched. All four banks share the one delay line
-  because every `cft_fpfma_pipe` instance has the same structural
-  depth regardless of width. `cft_reduce_acc`, the streaming reduction
-  accumulator, hangs off the same issue point: its adds ride the
+  instantiates: burst reads into three per-stream FIFOs (one read-only
+  master each, sixteen 16-beat bursts in flight, 4KB-safe), one beat
+  issued per cycle to `cft_lanes` at the precision MODE selects,
+  whenever operands and result space exist, collection through a
+  latency-matched delay line into a D FIFO, index-order burst writes
+  out (sixteen of those in flight too, their responses counted rather
+  than waited on). Read, compute and write overlap across beats; issue
+  and write order stay total, so determinism is untouched. All four
+  banks share the one delay line because every `cft_fpfma_pipe`
+  instance has the same structural depth regardless of width.
+  `cft_reduce_acc`, the streaming reduction accumulator, hangs off the
+  same issue point: its adds ride the
   shared request as `fma(x, 1.0, y)` through lane 0, with its operands
   **registered** on the way in and `ADD_LATENCY` set to `LATENCY + 1`
   to match. That register is not tidiness - see the timing section.
@@ -415,10 +417,11 @@ path for an operand stream - four half-duplex masters cost less than
 one full-duplex master would suggest.
 
 Single ID per master, INCR bursts up to 16 beats (512 B), never
-crossing a 4KB boundary, full write strobes. Up to `AR_DEPTH` (4)
-bursts in flight per stream into 128-beat FIFOs; writes drain the
-result FIFO in full bursts (the tail is always fully buffered, so
-short final bursts need no special case).
+crossing a 4KB boundary, full write strobes. Up to `AR_DEPTH` (16)
+read bursts in flight per operand stream - 256 beats, 8 KB - into
+512-beat FIFOs, and up to `AW_DEPTH` (16) write bursts issued and not
+yet answered; writes drain the result FIFO in full bursts (the tail is
+always fully buffered, so short final bursts need no special case).
 
 Both of those are the same fix. The design used to share one 256-bit
 port between three operand reads and one result write, and steady
@@ -431,14 +434,61 @@ after every RLAST, and a 16-beat burst followed by a ~60-cycle bubble
 is ~4.8 cycles/beat, which is where it started. Pipelining the ARs is
 what converts four ports into four times the throughput.
 
-**Measured: 1.25 cycles/beat, against the shared port's ~4.4.** That
-is a 3.5x, and it is a simulation number taken against cocotbext-axi's
-memory model - which is cooperative in exactly the way a real HBM
-controller is not obliged to be, so it is a ceiling rather than a
-promise. What it does settle is that the port was the bottleneck and
-splitting it removed that bottleneck; where the number lands on
-silicon is a card-day measurement, and CARDDAY.md step 6 is where it
-gets taken.
+### How deep, and why (2026-09-09)
+
+**The depths are set against a measured round trip, not an estimated
+one, and that is the whole content of this section.** A stream's rate
+is bytes in flight divided by the round trip until that quotient
+reaches one beat a cycle. `AR_DEPTH * 2^BURST_LOG2` beats are in
+flight, so `AR_DEPTH * 2^BURST_LOG2` cycles is the round trip a read
+path hides; below that it is a rate.
+
+The card said what the round trip is. On the U50 at 135 MHz with
+device-resident buffers, one tile sustained 57.8 to 59.9 M beats a
+second at every format and at both n = 65,536 and n = 4,194,304 -
+2.25 cycles a beat, flat - while `make cycles` measured 1.250 on the
+same RTL (docs/BENCHMARKS.md, "The engine, measured"). A ceiling flat
+across format and size, well under the masters' own 135 M beats a
+second and under HBM's bandwidth, is a depth divided by a latency.
+
+The cocotb memory model could not have shown it: it answers in zero
+cycles. `tb/busfx.py` now gives it a pipelined round trip
+(`RD_LATENCY` / `WR_LATENCY` in tb/Makefile), and against the OLD
+parameters the bench reproduces the card twice over, from either end:
+
+| what is delayed | latency that gives 2.25 cycles/beat | fit |
+|---|---|---|
+| read data only | **125 cycles** (round trip 144) | `(L + 19) / 64` |
+| write response only | **16 cycles** | `(L + 20) / 16` |
+
+Both fits are exact across the sweep. So the card's number was
+reachable by either path alone, and the measurement on its own cannot
+say which one bound it - the honest reading, and the reason both were
+deepened:
+
+- **Reads.** 4 bursts of 16 beats is 64 beats, and 64 beats per round
+  trip IS 2.25 cycles a beat at a 144-cycle round trip. `AR_DEPTH` 16
+  makes it 256 beats, covering a 256-cycle round trip at one beat a
+  cycle. `FIFO_LOG2` goes to 9 because the reservation has to fit with
+  room over, and on this part that is free: a 256-bit FIFO is four
+  RAMB36 in 512x72 simple-dual-port mode at any depth up to 512, so
+  the engine's sixteen block RAMs are the same sixteen.
+- **A burst is now issued at full length or not at all.** Free space
+  used to trim it, which is invisible while reads are the bottleneck
+  (the FIFO is empty, so nothing trims) and costly the moment they are
+  not: bytes in flight is `AR_DEPTH` times the AVERAGE burst, so a
+  half-full FIFO would have quietly halved the ceiling the depth was
+  bought for. A stream that has to wait for room is one whose FIFO is
+  nearly full, which is not a stream compute can starve on.
+- **Writes.** The writer used to WAIT for BRESP before starting the
+  next burst, putting the write round trip in the rate once per burst:
+  `(L + 20) / 16` cycles a beat. That is where the zero-latency
+  model's 1.250 came from, and it reaches the card's 2.25 at a
+  16-cycle response on its own. Responses are counted now, not waited
+  on, up to `AW_DEPTH` of them - one counter, no storage, because a
+  write burst in flight holds nothing - and the run still does not
+  assert `ap_done` until every response has landed, which is what
+  makes done mean "the D buffer is what the host may read".
 
 FIFO space is reserved at AR time, not at R time. Two bursts in flight
 can together exceed the free space each looked at separately, and the
@@ -447,6 +497,23 @@ overflow would corrupt operands rather than stall - so a per-stream
 free-space test subtracts it. That reservation is also what makes
 RREADY safe to tie high: the engine never asks for a beat it has
 nowhere to put.
+
+Sixteen reads in flight need no reorder buffer because every master
+issues under one ARID, and AXI4 (A5.3) requires read data for
+transactions with the same ARID to return in the order the addresses
+were issued. An ID per burst would let a memory answer out of order
+and would need the buffer this design does not have; the ID is a
+hardwired zero on all three read masters for exactly that reason. On
+the write side one W state machine emits bursts back to back in index
+order, which is also AW order - AXI4 forbids write-data interleaving
+(A3.4.4) - so responses on the single AWID come back in the same
+order, and the engine only has to count them.
+
+Every one of these is a build parameter on `cft_krnl`, because a
+smaller part wants smaller: docs/ROADMAP.md's K325T target has block
+RAM and no UltraRAM, and a 100 MHz board against DDR has a shorter
+round trip to hide. `hw/package_kernel.tcl` strips user parameters, so
+an Alveo bitstream carries the defaults above and nothing else.
 
 hw/link.cfg gives each master its own HBM pseudo-channel group, and
 the quad gives all sixteen their own. Four masters sharing one group
