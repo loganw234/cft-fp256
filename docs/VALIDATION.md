@@ -8548,3 +8548,53 @@ where the staging path's time is spent; no more is read into them.
 - **The open-core part** is still arithmetic, not a synthesis result.
 - **Emulation** was not run for this pair; the two pairs before it
   went from the same recipe to silicon, and the silicon is the test.
+
+## 2026-09-09 - the engine's own rate: cft-resident on the revision-3 pair
+
+The measurement docs/BENCHMARKS.md had refused to guess at since the
+card came up: the pipeline's rate with the bus taken out. A new tool,
+`host/tools/cft-resident` (XRT-only, `make -C host XRT=1 cft-resident`),
+fills each compute unit's four buffers once, runs the kernel on them
+back to back, times only the runs, and then holds the result to
+libcft's software backend over the same operands, to every other unit
+(all of which got the same operands) and to one more run, with STATUS
+read back. Run on amd-arc-box on the revision-3 pair the morning after
+it was built (main 99d2700; single `f9a48201...`, quad `af26a699...`),
+one million elements a run, twenty timed runs after a warm-up, `fma`,
+`add` and `mul` at all four formats:
+
+| format | one tile, resident | four tiles at once | one tile, staged (card day) | software, one thread |
+|---|---|---|---|---|
+| fp32 | **462.6 M/s** (2.16 ns) | **1,833.9 M/s** (0.545 ns) | 141.8 M/s | 3.76 M/s |
+| fp64 | **235.1 M/s** (4.25 ns) | **937.2 M/s** (1.07 ns) | 81.4 M/s | 3.24 M/s |
+| fp128 | **118.7 M/s** (8.43 ns) | **474.0 M/s** (2.11 ns) | 40.3 M/s | 2.52 M/s |
+| fp256 | **59.6 M/s** (16.8 ns) | **238.4 M/s** (4.20 ns) | 20.0 M/s | 1.74 M/s |
+
+Every row: STATUS 0, FLAGS 0x10 (inexact) on the card and the same word
+from software, the deposit bytes identical on every unit, on repeat and
+in software. `add` and `mul` within half a percent of `fma` at every
+format. The quad's one-unit run (`--cus 1`) reproduces the single's
+numbers, and its four-unit run is four times them: 29.3 to 30.5 GB/s
+over sixteen streams, each unit at 57 to 60 M beats a second.
+
+Two more sizes on the single, `fma`: n = 4,194,304 gives 474.7 / 238.6
+/ 119.6 / 59.9 M/s (59.3 to 59.9 M beats a second), n = 65,536 gives
+401.8 / 183.7 / 101.2 / 54.4 M/s - a fixed cost of about 35
+microseconds a run, and otherwise the same ceiling.
+
+**The finding.** One tile sustains 57.8 to 59.9 M beats a second at
+every format and every size: 2.25 cycles a beat at 135 MHz, against
+the 1.250 `make cycles` measures on the RTL (108 M beats a second). A
+ceiling flat across format and size, well under the masters' own
+limit and HBM's, is a read path bounded by latency - so many bytes in
+flight per stream, divided by the controller's round trip - and the
+cocotb memory model that gave 1.250 answered faster than HBM does. The
+remedy is a deeper read-ahead in `cft_engine_stream`; the target is
+measured now, 1.8x. The bus below that path costs a further 3.0x to
+3.3x: `cft_run` stages every call, and `cft_alloc` is a plain
+allocation on every backend today, so through the library a port still
+gets the card-day table. Making the buffer API resident on the XRT
+backend is the library item; the API is already the right shape.
+
+Run records: `/tmp/r3-single/resident*.txt`, `/tmp/r3-quad/resident*.txt`
+on the box, copied beside this session's scratchpad.

@@ -222,18 +222,26 @@ hardware trees.
 
 **4. Buffer staging.** `cft_run` stages operands into per-tile
 buffers, so a call touches O(tiles) allocations and O(tiles) PCIe
-transfers. Device-resident buffers (`cft_alloc`) already avoid the
-per-call copy; at high tile counts they stop being an optimisation and
-become the only workable path. Measured 2026-09-08 with the staging in
-place (docs/BENCHMARKS.md): every format and both tile counts sit at
-2.3 to 3.3 GB/s and four tiles barely move the number, so the bus is
-the wall long before the eight-tile interface limit above.
+transfers. Device-resident buffers are the remedy, and `cft_alloc`'s
+API is shaped for them - though today it is a plain allocation on
+every backend and `cft_run` stages regardless (docs/HOSTAPI.md); at
+high tile counts the resident path stops being an optimisation and
+becomes the only workable one. Measured 2026-09-08 with the staging
+in place (docs/BENCHMARKS.md): every format and both tile counts sit
+at 2.3 to 3.3 GB/s and four tiles barely move the number, so the bus
+is the wall long before the eight-tile interface limit above. And
+measured 2026-09-09 with the bus taken out (`cft-resident`, the same
+file): 7.4 to 7.6 GB/s a tile and 30 GB/s over four, each tile at
+the rate it has alone - so behind the bus the next wall is the read
+path's own latency at 59 M beats a second a tile, and not HBM.
 
 ## What scales fine
 
 - **Arithmetic.** Elementwise work is embarrassingly parallel and each
   tile is independent.
-- **HBM bandwidth.** ~13.3 GB/s per tile against 316 GB/s available.
+- **HBM bandwidth.** ~13.3 GB/s per tile projected against 316 GB/s
+  available; 7.6 GB/s a tile measured on 2026-09-09 at the read path's
+  current depth, 30 GB/s over four tiles, scaling exactly.
 - **DSPs.** 292 per tile with the ladders off, 277 with them on, so
   four tiles are 1,168 or 1,108 of the part's 5,952 - **19.6% or
   18.6%**, up from 17.67% before the sequencer. Not a constraint on
