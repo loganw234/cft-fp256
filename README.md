@@ -237,6 +237,11 @@ memory a lane with load and store by slot, its first slots carried
 into and out of a run as per-lane blocks, 16,384 instructions, a
 512-entry bank through a ninth index bit, and one `cft_program_run_ex`
 that takes everything a run carries, the two older calls wrapping it.
+ABI 0.11 (2026-09-09) is the step the card's own measurement asked
+for: the buffer API is real on the device, so a caller who fills a
+`cft_alloc` buffer once and runs many times gets the engine's rate
+through the library rather than the bus's, on the same four calls
+that are no-ops on the software backend (docs/HOSTAPI.md).
 What stays outside is named rather than implied: the
 decimal formats (a different datapath, effectively their own tile),
 clause 8's alternate exception handling, and NaN payload propagation

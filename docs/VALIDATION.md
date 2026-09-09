@@ -9513,3 +9513,98 @@ buffer freed sixty lines earlier. Reverted; both silent again.
   and the deposit window through the same `buf_bind` the elementwise
   path uses and was not run under emulation.
 
+## 2026-09-09 - the two items the resident measurement named, integrated: the read-ahead merged and building, the library's resident path on the card at the engine's rate, ABI 0.11
+
+The morning's measurement (the cft-resident entry above) named two
+items, and both went to agents in their own worktrees at once: a deeper
+read-ahead in the streaming engine, and device-resident buffers in the
+library. Their entries are above this one. This is the integrator's
+record of what happened when they met the tree and the card; the
+read-ahead pair's measured rate follows in its own entry when the pair
+lands.
+
+### The merges
+
+- **Read-ahead** (51140af on shared-lanes, main 49a9a1b at 07:43,
+  pushed; the pair build started from it on the box the same minute).
+  The certifying runner on 51140af - lint, formal, sim, simmc,
+  selfcheck, seq, diff - PASS and certified (run
+  20260909-074330-51140af): the full suite 21 targets 69/69, the
+  multi-cycle census 43/43, formal 31 of 31 with the negative control
+  refuted, lint 60 s. Nothing conflicted.
+- **Resident buffers** (06d794d; the only conflict this file's tail,
+  both entries kept). The agent left `CFT_ABI_VERSION_MINOR` at 10 on
+  purpose, because `verify.mjs` holds the shipped module to the macro
+  and the remote protocol refuses any ABI difference; the integrator
+  bumped it (e01b689, with the node package to 0.11.0), rebuilt the
+  module (c189f32) and merged to main 2bc1609 at 09:30, pushed - so no
+  commit on main reports a version its shipped module lacks.
+
+### ABI 0.11's rebuild
+
+    bash bindings/wasm/build.sh                  rc 0     44 s    module 29cce150... 225,354 bytes
+                                                                  (225,231 at 0.10); 138 cftw_*
+                                                                  exports, none new - wasm32 has
+                                                                  no device, so the step is the
+                                                                  version and nothing else
+    node bindings/wasm/verify.mjs vectors/out    rc 0   1174 s    abi 11 on both sides; 1,071,635
+                                                                  cases through the page's bytes,
+                                                                  831,635 through the wrappers
+    node test.mjs / program_test.mjs             rc 0            126 and 37 passed
+    node conformance.mjs                         rc 0   1158 s    1,903,270 cases over 316 replays
+    node verify_demos.mjs --record, build_demos.sh, verify_demos.mjs
+                                                 rc 0            44 ok, 0 FAIL; of demos_chains.json's
+                                                                  sha256 values only the module stamp
+                                                                  moved, the rest cost lines and the date
+    make -C host wstest                          rc 0     14 s    67 checks, 0 failures
+    verify --only node,wasm                      PASS   2419 s    node 1,369 s, wasm 1,047 s (run
+                                                                  20260909-084149-e01b689, flagged dirty
+                                                                  because the rebuilt files under test
+                                                                  were not yet committed)
+
+One ordering note for the next rebuild: `verify_demos.mjs --record`
+checks the page's embedded module before it records, so run it AFTER
+`build.sh` and BEFORE `build_demos.sh` and then verify again - the
+first pass here ran it against the stale page, which it said, and the
+clean re-record after the rebuild is what is committed.
+
+### The library's resident path on the card
+
+On the revision-3 pair, with the box's host at e01b689 (everything
+built `XRT=1`, the library gate green there first: 1,071,635 cases):
+
+    device-test -b -n 4096       4,363 checks, 0 failed   both images (4,363 at n = 96,
+    device-test -b -q -n 8         699 checks, 0 failed    699 at -q -n 8): the matrix and
+                                                           the reductions through cft_alloc'd
+                                                           operands, every byte and flag held
+                                                           to the host-pointer path
+
+    cft-bench, fma, one million elements a call, elements per second:
+                        staged          --resident       cft-resident (the tool, same session)
+      one tile   fp32   141.6 M         453.7 M          460.4 M
+                 fp64    76.4 M         233.0 M          234.5 M
+                 fp128   38.0 M         118.3 M          118.5 M
+                 fp256   19.1 M          59.6 M           59.6 M
+      four tiles fp32   167.0 M       1,570.0 M        1,843.8 M
+                 fp64    80.4 M         898.0 M          937.3 M
+                 fp128   40.2 M         466.0 M          474.0 M
+                 fp256   25.6 M         234.1 M          238.4 M
+
+The library reaches the engine's rate: within 1.5 percent of the tool
+on one tile, two to fifteen percent under it on four, the gap being
+the library's per-call bookkeeping across four tiles at the shortest
+runs (a fp32 run of a million elements is half a millisecond on four
+tiles). `mul` and `add` are within 0.3 percent of `fma` in every row.
+The design decision the numbers rest on is the agent's: no XRT
+sub-buffers, because XRT aligns them at 4 KB and the tile cuts its
+slices at 32-byte beats, so a resident run holds each tile's window in
+its own copy and partitions exactly as a staged one does.
+
+### One process note
+
+An integrator's mistake, recorded because it is repeatable: a page
+script was "dry-run" by executing it with a stubbed `patch` function,
+and the script's own `def patch` shadowed the stub, so it wrote the
+pages with two placeholders in them. Caught by the diff, reverted with
+`git checkout` before anything was committed. A dry run is a separate
+code path or it is not a dry run.

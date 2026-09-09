@@ -222,18 +222,24 @@ hardware trees.
 
 **4. Buffer staging.** `cft_run` stages operands into per-tile
 buffers, so a call touches O(tiles) allocations and O(tiles) PCIe
-transfers. Device-resident buffers are the remedy, and `cft_alloc`'s
-API is shaped for them - though today it is a plain allocation on
-every backend and `cft_run` stages regardless (docs/HOSTAPI.md); at
-high tile counts the resident path stops being an optimisation and
-becomes the only workable one. Measured 2026-09-08 with the staging
+transfers. Device-resident buffers are the remedy, and since ABI
+0.11 (2026-09-09) `cft_alloc` is real on the XRT backend: `cft_run`,
+`cft_reduce` and `cft_program_run_ex` bind a resident buffer's device
+copy - one per tile and role, holding that tile's window - and stage
+nothing for it (docs/HOSTAPI.md, "Device-resident buffers"; measured
+through the library on the card in docs/BENCHMARKS.md). At high tile
+counts the resident path stops being an optimisation and becomes the
+only workable one. Measured 2026-09-08 with the staging
 in place (docs/BENCHMARKS.md): every format and both tile counts sit
 at 2.3 to 3.3 GB/s and four tiles barely move the number, so the bus
 is the wall long before the eight-tile interface limit above. And
 measured 2026-09-09 with the bus taken out (`cft-resident`, the same
 file): 7.4 to 7.6 GB/s a tile and 30 GB/s over four, each tile at
 the rate it has alone - so behind the bus the next wall is the read
-path's own latency at 59 M beats a second a tile, and not HBM.
+path's own latency at 59 M beats a second a tile, and not HBM. The
+deeper read-ahead merged the same day (docs/ARCHITECTURE.md, the
+engine's in-flight depth) predicts 120 M beats a second a tile, about
+15 GB/s; its pair is measured in docs/BENCHMARKS.md when it lands.
 
 ## What scales fine
 
