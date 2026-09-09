@@ -654,13 +654,23 @@ class Bench:
         # file, so that the previous block cannot leak), the scratch
         # wipe, the scratch-in preload (an element a cycle plus its
         # beats), the three operand streams, the instructions, the
-        # drain, and the scratch-out drain (three cycles an element).
-        lanes = lanes_per_block(fmt)
+        # deposit drain, and the scratch-out drain.
+        #
+        # The two DRAINS are counted per element rather than folded
+        # into the fixed term they used to hide in. Each visits (lane,
+        # slot) at three cycles an element plus a send per beat, so a
+        # block of 128 lanes at three deposits apiece is 1,152 cycles -
+        # more than the whole fixed term. That was covered by accident
+        # while every multi-block case deposited once; the first case
+        # to run three lane blocks with three deposits and three
+        # scratch slots landed within 1% of the bound.
+        blk = min(n, lanes_per_block(fmt))
         cycles = (3000 + (image_bytes // BEAT_BYTES + 8) * 8
                   + blocks * (worst * per_insn
                               + RF_D + wipe * NBEATS
-                              + lanes * nsin * 2 + 64
-                              + lanes * nsout * 4 + 64
+                              + blk * nsin * 2 + 64
+                              + blk * nsout * 4 + 64
+                              + blk * prog.max_deposits * 4 + 64
                               + 6 * NBEATS + 400))
         return min(cycles, 8_000_000)
 
@@ -2064,6 +2074,35 @@ async def scratch_static_and_indexed(dut):
                             operands(fmt, n, 1322), n,
                             f"{name} one slot through both forms")
 
+    # -- MORE THAN ONE LANE BLOCK, which nothing above reaches: 40
+    # lanes at fp32 is one block of 128 and 20 at fp256 is two blocks
+    # of 16. Two things are only testable here.
+    #
+    #   * the per-block WIPE. Each block loads slot 5 BEFORE it stores
+    #     to it, so block 1 must read +0 there and not block 0's value.
+    #     A tile that wiped once per run instead of once per block
+    #     passes every case above and fails this one on lane 16.
+    #   * the indexed form across blocks, where the slot is the lane's
+    #     own data and the lane state is rebuilt between blocks.
+    for name, n in (("fp32", 300), ("fp64", 150), ("fp256", 20)):
+        fmt = FORMATS[name]
+        blocks = -(-n // lanes_per_block(fmt))
+        assert blocks >= 2, f"{name} n={n} is one block; the case is idle"
+        prog = seq.Program(fmt, [
+            seq.ldl(26, 5),          # +0 in EVERY block, wiped or not yet used
+            seq.deposit(26),
+            seq.stl(0, 5),
+            seq.ldl(27, 5),
+            seq.deposit(27),
+            seq.stx(1, 2),
+            seq.ldx(28, 2),
+            seq.deposit(28),
+            seq.halt()], max_deposits=3)
+        idx = [_int_bits(fmt, i * 3 + SCRATCH_D * (i % 2)) for i in range(n)]
+        await bench.program(fmt, prog, operands(fmt, n, 1390),
+                            operands(fmt, n, 1391), idx, n,
+                            f"{name} the scratch across {blocks} lane blocks")
+
     dut._log.info(f"scratch: {bench.cases['program']} runs")
 
 
@@ -2173,6 +2212,26 @@ async def scratch_io_block(dut):
                             operands(fmt, n, 1351), operands(fmt, n, 1352),
                             n, f"{name} out deeper than in",
                             scratch_in=operands(fmt, n, 1353))
+
+    # -- more than one lane block, so the two BLOCK STRIDES are under
+    # test. Each is a header count shifted by BLK_SH rather than a
+    # product, which is right by accident at one block: lane 128's
+    # slots have to come from element 128 * n_scratch_in of the
+    # buffer and not from element 0 of a second read of the first.
+    fmt = FP32
+    n = 300
+    assert -(-n // lanes_per_block(fmt)) >= 3, "fewer than three blocks"
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 1), seq.ldl(5, 2),
+        seq.alu(sf.OP_ADD, rd=6, ra=3, rc=5),
+        seq.stl(6, 1),
+        seq.deposit(4),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=3, n_scratch_out=3)
+    await bench.program(fmt, prog, operands(fmt, n, 1370),
+                        operands(fmt, n, 1371), operands(fmt, n, 1372),
+                        n, "fp32 scratch in 3, out 3, three lane blocks",
+                        scratch_in=operands(fmt, 3 * n, 1373))
 
     # -- the resumable run, on one rung, in full. Three iterations then
     # three more must equal six, deposit for deposit.

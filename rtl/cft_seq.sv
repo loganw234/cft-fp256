@@ -516,9 +516,10 @@ module cft_seq #(
   // Eight always_ff blocks writing slices of one shared VARIABLE is
   // the shape the register file's comment names as illegal
   // SystemVerilog that Icarus punishes with event-storm molasses, and
-  // it is avoided here for the same reason. 32 KiB * 4 = 128 KiB a
-  // tile at SCRATCH_D 256 and NBEATS 16, at every precision, because
-  // a beat is 32 bytes whatever the format.
+  // it is avoided here for the same reason. SCRATCH_D * NBEATS
+  // entries of BEAT_BITS is 128 KiB a tile at 256 and 16 - eight
+  // banks of 4,096 x 32 bits, 16 KiB each - and it is that at every
+  // precision, because a beat is 32 bytes whatever the format.
   //
   // ONE read port and ONE write port, which is what the contract asks
   // for and all the four codes need - but each bank carries its OWN

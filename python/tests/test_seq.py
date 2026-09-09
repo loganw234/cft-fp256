@@ -617,6 +617,51 @@ def test_p3_fuzz_early_exit_is_invisible():
                        "it proved nothing")
 
 
+def test_p3_fuzz_with_the_scratch_on():
+    """The same gate over the scratch, which P3 now has to cover.
+
+    A store is masked by the active bit, so an all-inactive loop body
+    that stores has to leave the scratch exactly as it was - and
+    `Result.state()` carries the scratch and the scratch-out block
+    precisely so that this comparison can see it. Kept as its own
+    test rather than folded into the one above, so the corpus the
+    original gate has run since 2026-09-01 is not reshuffled by a
+    feature added later.
+    """
+    rng = random.Random(20260908)
+    fmt = FP32
+    checked = 0
+    saved = 0
+    stored = 0
+    for _ in range(400):
+        insns, consts = seq.random_program(fmt, rng, scratch=True,
+                                           wide_regs=True)
+        try:
+            prog = seq.Program(fmt, insns, consts, max_deposits=3,
+                               flags=seq.FLAG_SCRATCH_IO,
+                               n_scratch_out=4)
+        except seq.ProgramError:
+            continue
+        n = rng.randint(1, 6)
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+        fast = seq.run(prog, a, b, c, early_exit=True)
+        slow = seq.run(prog, a, b, c, early_exit=False)
+        assert fast.state() == slow.state(), (
+            "early exit changed an observable through the scratch: "
+            f"{[hex(i) for i in insns]}")
+        checked += 1
+        if fast.insns_executed < slow.insns_executed:
+            saved += 1
+        if any(w != 0 for w in fast.scratch_out):
+            stored += 1
+    assert checked > 200, f"only {checked} programs were valid"
+    assert saved > 0, ("the early exit never fired in the whole fuzz, so "
+                       "it proved nothing")
+    assert stored > 20, (
+        f"only {stored} programs left anything in the scratch, so the "
+        f"comparison was mostly over empty blocks")
+
+
 def test_p3_fuzz_finds_the_halt_hole_when_the_rule_is_removed():
     """The rule banning HALT in a loop is load-bearing, and this shows
     it: the same fuzz, with that one construction allowed past the
@@ -1187,6 +1232,37 @@ def test_scratch_io_resumes_a_run():
         assert second.deposits[i * 3:(i + 1) * 3] == \
             whole.deposits[i * 6 + 3:(i + 1) * 6], \
             "the resumed half does not equal the second half of one run"
+
+
+def test_scratch_io_degenerate_shapes():
+    """In-only, out-only, and the flag set with both counts zero.
+
+    All three are legal and all three are corners: the header word is
+    what carries the counts, so `SCRATCH_IO` with a zero word is an
+    image byte-identical to one without the feature except for the flag
+    bit - which a tile must accept, while it refuses a NON-zero word
+    with the flag clear."""
+    fmt = FP32
+    out_only = seq.Program(fmt, [seq.stl(0, 0), seq.halt()],
+                           max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+                           n_scratch_in=0, n_scratch_out=2)
+    res = seq.run(out_only, [7, 9], [0, 0])
+    assert res.scratch_out == [7, 0, 9, 0], res.scratch_out
+
+    both_zero = seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO)
+    assert both_zero.scratch_io_word == 0
+    assert seq.run(both_zero, [1], [1]).scratch_out == []
+
+    in_only = seq.Program(fmt, [seq.ldl(3, 0), seq.deposit(3), seq.halt()],
+                          max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+                          n_scratch_in=1)
+    res = seq.run(in_only, [0, 0], [0, 0], scratch_in=[11, 22])
+    assert res.deposits == [11, 22] and res.scratch_out == []
+
+    for prog in (out_only, both_zero, in_only):
+        again = seq.Program.from_bytes(prog.to_bytes())
+        assert again.to_bytes() == prog.to_bytes()
+        assert (again.n_scratch_in, again.n_scratch_out) ==             (prog.n_scratch_in, prog.n_scratch_out)
 
 
 def test_scratch_io_padding_lanes_read_and_write_nothing():
