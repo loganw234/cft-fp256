@@ -2096,6 +2096,70 @@ static void check_scratch(cft_device *dev, cft_format fmt, size_t n)
         free(state); free(once); free(dep1);
     }
 
+    /* ---- 6b. BOTH flags at once ------------------------------------
+     * A program may be BANK_EXT and SCRATCH_IO together, and then one
+     * run_ex carries the bank AND both blocks. Nothing in either
+     * feature says the other is excluded, so the combination is legal
+     * and is the one shape no test above reaches: the bank arrives
+     * whole, the scratch arrives per lane, and a backend that packed
+     * them in the wrong order would still answer.
+     *
+     * r4 = LDL slot 0; r4 = r4 * k[0]; deposit r4; STL r4 -> slot 0.
+     * The bank's one constant is 1.0, so the deposit is the preloaded
+     * value exactly and the block that comes back is it too. */
+    if ((c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) &&
+        (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)) {
+        uint8_t bank[MAXE];
+        make_pow2(bank, fmt, 0);                 /* 1.0 */
+        ins[0] = seq_ldl(4, 0);
+        ins[1] = seq_alu(CFT_MUL, 4, 4, 0, 0, 0, 1, 0);  /* r4 *= k[0] */
+        ins[2] = seq_ctrl(3, 4, 0);
+        ins[3] = seq_stl(4, 0);
+        ins[4] = seq_ctrl(0, 0, 0);
+        bytes = seq_image_scratch(img, fmt, ins, 5, NULL, 1, 1,
+                                  CFT_PROG_FLAG_BANK_EXT |
+                                  CFT_PROG_FLAG_SCRATCH_IO, 1, 1);
+        checks++;
+        if (bytes != 32 + 5 * 8) {
+            printf("  FAIL seq scratch: a BANK_EXT + SCRATCH_IO image is "
+                   "%lu bytes, not %lu\n", (unsigned long)bytes,
+                   (unsigned long)(32 + 5 * 8));
+            failures++;
+        }
+        checks++;
+        if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+            printf("  FAIL seq scratch: the BANK_EXT + SCRATCH_IO image did "
+                   "not load: %s\n", cft_last_error());
+            failures++;
+        } else {
+            fill_finite(sin_buf, fmt, n);
+            memset(sout_buf, 0xA5, n * esz);
+            run_args_init(&A, a, dep, n);
+            A.bank              = bank;
+            A.bank_bytes        = esz;
+            A.scratch_in        = sin_buf;
+            A.scratch_in_bytes  = n * esz;
+            A.scratch_out       = sout_buf;
+            A.scratch_out_bytes = n * esz;
+            checks++;
+            if (cft_program_run_ex(prog, &A) != CFT_OK) {
+                printf("  FAIL seq scratch: the BANK_EXT + SCRATCH_IO "
+                       "program did not run: %s\n", cft_last_error());
+                failures++;
+            } else {
+                checks++;
+                if (memcmp(dep, sin_buf, n * esz) != 0 ||
+                    memcmp(sout_buf, sin_buf, n * esz) != 0) {
+                    printf("  FAIL seq scratch: one run_ex did not carry "
+                           "the bank and both blocks at once\n");
+                    failures++;
+                }
+            }
+            cft_program_free(prog);
+            prog = NULL;
+        }
+    }
+
     /* ---- 7. A constant at index 511, through kx's ninth bit --------
      * A bank of 512 where every constant is 2.0 but the last, which is
      * 1.0, and one MUL naming k[511]. The deposit must be a[i]
