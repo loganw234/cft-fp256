@@ -7277,16 +7277,20 @@ revision-3 corpus; `python/tests/test_asm.py` goes from 49 tests to
                                     those are test_asm.py, 1.3 s alone,
                                     3 of them skipped on the model)
     make programs-check             66 passed, 0 failed, 4 skipped,
-                                    17 images, 7.9 to 13.6 s across
-                                    runs
-    cft-asm vs asm.py, ad hoc       19 hand-written revision-3 cases:
-                                    static slots, indexed slots, both
-                                    scratch-I/O halves, depths of 16
-                                    to 2048, a 512-constant bank, and
-                                    eleven refusals. Identical bytes,
-                                    identical disassembly, identical
-                                    `-i`, and the eleven refusals
-                                    worded the same in both languages
+                                    17 images, 7.4 to 13.6 s across
+                                    runs (a clean `make -C host clean`
+                                    first, then 8.6 s)
+    cft-asm vs asm.py, ad hoc       19 hand-written revision-3 cases -
+                                    nine that assemble and ten that
+                                    are refused: static slots, indexed
+                                    slots, both scratch-I/O halves,
+                                    depths of 16 to 2048, ninth index
+                                    bits on all three operands, a
+                                    512-constant bank. Identical
+                                    bytes, identical disassembly,
+                                    identical `-i`, and the ten
+                                    refusals worded the same in both
+                                    languages
     negative controls               7 tampered trees, 7 caught
     verify/run.sh --only workloads  PASS, 89 s
 
