@@ -1,0 +1,2662 @@
+/* Copyright 2026 Logan W.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * libcft - the Coordinated Fusion Tile host API.
+ *
+ * STATUS: the software backend is implemented and is checked against
+ * the golden model over the whole interesting input space (see
+ * host/tests/). The XRT device backend is implemented behind the same
+ * calls (build with CFT_ENABLE_XRT); a build without it reports
+ * CFT_ERR_NO_DEVICE from cft_open() with an artifact path.
+ *
+ * ---------------------------------------------------------------
+ * What this library promises
+ * ---------------------------------------------------------------
+ *
+ * The same call, with the same inputs, returns the same bits. On every
+ * backend, on every machine, on every day. That is the entire product;
+ * speed and precision are what you get on top of it.
+ *
+ * Concretely: cft_run() with a software backend on a laptop and
+ * cft_run() with the FPGA tile produce byte-identical output buffers
+ * and identical exception flags. Not "within an ulp" - identical. A
+ * result that differs is a bug in this library, not a tolerance to
+ * document.
+ *
+ * ---------------------------------------------------------------
+ * Why C
+ * ---------------------------------------------------------------
+ *
+ * Because the fields that need reproducible arithmetic do not write
+ * their numerics in one language. A C ABI is directly callable from
+ * Fortran (iso_c_binding), Julia (ccall), Python (ctypes/cffi), Rust,
+ * Go, MATLAB, R, C# and Java without a binding generator or a build
+ * step. Porting this library to a language means writing a shim, never
+ * reimplementing semantics - and semantics reimplemented is exactly how
+ * "identical bits" quietly stops being true.
+ *
+ * ---------------------------------------------------------------
+ * The device is a backend, not a requirement
+ * ---------------------------------------------------------------
+ *
+ * Open with a NULL artifact and you get the software backend, which
+ * needs no card, no driver and no Linux. Open with an xclbin and you
+ * get the tile. The call sites do not change. Adopt the library first,
+ * add hardware later, and nothing above the API notices except the
+ * clock on the wall.
+ *
+ * ---------------------------------------------------------------
+ * How you check we are telling the truth
+ * ---------------------------------------------------------------
+ *
+ * cft_conformance() replays the project's published vector sets - the
+ * .jsonl files under vectors/ - through whatever backend you opened
+ * and reports the first disagreement. A backend, a binding, a port, or somebody
+ * else's independent implementation is correct if and only if it
+ * replays those files exactly. Do not take the guarantee above on
+ * trust; it is machine-checkable, so check it.
+ */
+
+#ifndef CFT_H
+#define CFT_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+/* The build profile: which of this header's entry points the library
+ * next to it actually contains, and how wide its intermediates are.
+ * With no macro defined it supplies the values the library has always
+ * had, so including it changes nothing about a default build; see
+ * cft_config.h for what a reduced one leaves out and why. */
+#include "cft_config.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Everything not marked CFT_API is internal and not exported, so the
+ * shared library's surface is exactly this header. Define
+ * CFT_BUILD_SHARED when building the DLL and CFT_USE_SHARED when
+ * linking against it; static builds need neither. */
+#if defined(_WIN32) || defined(__CYGWIN__)
+#  if defined(CFT_BUILD_SHARED)
+#    define CFT_API __declspec(dllexport)
+#  elif defined(CFT_USE_SHARED)
+#    define CFT_API __declspec(dllimport)
+#  else
+#    define CFT_API
+#  endif
+#elif defined(__GNUC__) && __GNUC__ >= 4
+#  define CFT_API __attribute__((visibility("default")))
+#else
+#  define CFT_API
+#endif
+
+/* ---------------------------------------------------------------
+ * ABI version
+ *
+ * Major changes break source or binary compatibility; minor additions
+ * do not. Check at runtime rather than trusting the header you
+ * compiled against - a binding loaded against a different shared
+ * library is the normal case, not the exceptional one.
+ * --------------------------------------------------------------- */
+#define CFT_ABI_VERSION_MAJOR 0
+#define CFT_ABI_VERSION_MINOR 11  /* 0.11 (2026-09-09), bumped by the integrator together with the WebAssembly module's rebuild, as every step is (bindings/wasm/verify.mjs holds the shipped module's cftw_abi_version() to this macro, and the remote protocol refuses a frame whose ABI word differs at all, docs/REMOTE.md); a caller can also detect the 0.11 additions through the size handshake, since cft_get_caps returns a struct_size that reaches cft_caps.buffers_resident and an older library does not. 0.11: the buffer API becomes real on a device backend - cft_alloc's pointers are recognised in cft_run, cft_reduce and cft_program_run_ex and the operands they name are not staged again, so a caller who fills once and runs many gets the engine's rate rather than the bus's. cft_caps.buffers_resident says whether THIS device does that; cft_buffer_get_info and cft_buffer_info say what actually happened to one buffer. Nothing moved and nothing changed meaning: code written against 0.10 gets the same bits, and on the software and remote backends the same no-ops it always had. 0.10: the sequencer's revision 3 - a per-lane scratch memory behind CFT_SEQ_FEAT_SCRATCH with its per-run block behind CFT_SEQ_FEAT_SCRATCH_IO, the ninth constant-index bit behind CFT_SEQ_FEAT_KX9, and cft_run_args with cft_program_run_ex so the positional signatures stop growing by an argument a round - cft_program_run and cft_program_run_bank are wrappers over it now. cft_caps.max_scratch; cft_program_info.n_scratch_in, n_scratch_out and scratch_used. 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
+
+/* Returns (major << 16) | minor of the library actually loaded.
+ *
+ * The minor version is a floor on what is present, and each step of it
+ * is additive: 0.1 was the elementwise opcodes, the reductions and the
+ * composed div/sqrt; 0.2 added the clause-5 completion set; 0.3 added
+ * the nine correctly-rounded transcendentals below; 0.4 added the
+ * eleven trigonometric functions whose argument reduction is exact -
+ * sinPi, cosPi, tanPi, asin, acos, atan, atan2 and the four Pi-forms
+ * of the inverses; 0.5 added sin, cos and tan of a radian argument and
+ * the six hyperbolics; 0.6 added the rest of table 9.1 (exp2m1, exp10,
+ * exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn), the
+ * character conversions of 5.12 with 9.7's payload operations, the
+ * augmented arithmetic of 9.5 and the remaining reductions of 9.4. A
+ * caller that needs one of those checks the number rather than the
+ * header it compiled against. */
+CFT_API uint32_t cft_abi_version(void);
+
+/* ---------------------------------------------------------------
+ * Status
+ * --------------------------------------------------------------- */
+typedef enum cft_status {
+    CFT_OK = 0,
+    CFT_ERR_INVALID_ARGUMENT,
+    CFT_ERR_UNSUPPORTED,   /* op or format not available on this device;
+                            * ask cft_supports() first. Also a program
+                            * past a capacity this device publishes -
+                            * ask cft_get_caps() first, and see
+                            * cft_last_error() for which cap and by how
+                            * much */
+    CFT_ERR_NO_DEVICE,
+    CFT_ERR_ARTIFACT,      /* a file this library was told to load is
+                            * missing, unreadable, or not what it claims:
+                            * an xclbin that is not a tile, a vector set
+                            * that is not a vector set */
+    CFT_ERR_BUS_FAULT,     /* the memory system did not vouch for the
+                            * data. The output buffer is NOT valid: a
+                            * bad pointer or a fabric error means the
+                            * kernel computed on bits that were never
+                            * delivered. Distinct from a wrong answer,
+                            * and worth distinguishing. */
+    CFT_ERR_OUT_OF_MEMORY,
+    CFT_ERR_TIMEOUT,
+    CFT_ERR_INTERNAL
+} cft_status;
+
+/* Static, human-readable; never NULL, never needs freeing. */
+CFT_API const char *cft_strerror(cft_status s);
+
+/* Detail on the most recent failure, or "" if there is none to add.
+ * cft_strerror() says what kind of thing went wrong; this says what
+ * the device runtime said about it, which on a bad night at the bench
+ * is the only explanation anybody is going to get. Static storage,
+ * overwritten by the next failure, and not thread-safe - consistent
+ * with cft_device, which is not either. Never NULL. */
+CFT_API const char *cft_last_error(void);
+
+/* ---------------------------------------------------------------
+ * Formats, operations, rounding
+ *
+ * These values are normative for callers. They happen to match the
+ * hardware's MODE encoding, which keeps the mapping auditable, but a
+ * caller depends on the names here and never on the register layout.
+ * --------------------------------------------------------------- */
+typedef enum cft_format {
+    CFT_FP32  = 0,   /* IEEE binary32  - 4 bytes per element */
+    CFT_FP64  = 1,   /* IEEE binary64  - 8 bytes */
+    CFT_FP128 = 2,   /* IEEE binary128 - 16 bytes */
+    CFT_FP256 = 3    /* IEEE binary256 - 32 bytes, 237-bit significand */
+} cft_format;
+
+CFT_API size_t cft_format_size(cft_format f); /* bytes per element; 0 if bad */
+
+/* Canonical names, so a binding, a log line and a conformance report
+ * all say "fp128" rather than 2. Static storage, never NULL. */
+CFT_API const char *cft_format_name(cft_format f);
+
+typedef enum cft_op {
+    /* Arithmetic. These round, and consult the rounding attribute. */
+    CFT_FMA      = 0,   /* d = a*b + c, one rounding, exact product */
+    CFT_ADD      = 1,   /* d = a + c   (b ignored) */
+    CFT_SUB      = 2,   /* d = a - c   (b ignored) */
+    CFT_MUL      = 3,   /* d = a * b   (c ignored) */
+
+    /* Sign operations (754-2019 5.5.1). Quiet: they signal nothing at
+     * all, not even for a signaling NaN, and preserve NaN payloads. */
+    CFT_ABS      = 4,
+    CFT_NEG      = 5,
+    CFT_COPYSIGN = 6,   /* magnitude of a, sign of b */
+
+    /* Minimum and maximum (754-2019 9.6). min(+0,-0) is -0 and
+     * max(+0,-0) is +0: signed zeros compare equal but are not
+     * interchangeable. The NUM forms return the number when one
+     * operand is NaN; the plain forms propagate the NaN. */
+    CFT_MIN      = 7,
+    CFT_MAX      = 8,
+    CFT_MINNUM   = 9,
+    CFT_MAXNUM   = 10,
+
+    /* Data movement and predicates. The predicates yield 1.0 or +0.0
+     * rather than a boolean so that CFT_SELECT consumes them directly
+     * and the result lives in the same arrays as everything else -
+     * which is what makes branchless conditional code expressible.
+     *
+     * There is no "greater" or "greater or equal", and none is needed:
+     * a > b is CFT_CMPLT with the a and b arguments swapped. */
+    CFT_SELECT   = 11,  /* d = (c != 0) ? a : b; moves NaNs intact */
+    CFT_CMPLT    = 12,
+    CFT_CMPLE    = 13,
+    CFT_CMPEQ    = 14,
+
+    /* The encoding as an unsigned integer of the format's width. Not
+     * floating point: no rounding, no signalling, no NaN handling. The
+     * bits are just bits. These exist because reproducible algebraic
+     * kernels start from integer seeds - a reciprocal-square-root
+     * estimate is a constant minus a shifted exponent field. */
+    CFT_IAND     = 16,
+    CFT_IOR      = 17,
+    CFT_IXOR     = 18,
+    CFT_IADD     = 19,  /* wraps modulo 2^width */
+    CFT_ISUB     = 20,
+    CFT_ISHL     = 21,  /* count from b, modulo the format width */
+    CFT_ISHR     = 22,  /* logical, never arithmetic */
+    CFT_ICMPLT   = 23,  /* unsigned; yields 1.0 or +0.0 */
+
+    /* Reductions: n inputs, ONE output. They take the same opcode
+     * space so the device's opcode field stays one field, but they do
+     * not share the elementwise calling convention, so they are issued
+     * through cft_reduce() and cft_run() refuses them.
+     *
+     * The tree shape is fixed by element index and is part of the
+     * contract, not an implementation detail - see docs/DETERMINISM.md
+     * and python/cft_golden/reduce.py, which is the definition. */
+    CFT_SUM      = 24,  /* d = sum a[i] */
+    CFT_DOT      = 25,  /* d = sum round(a[i] * b[i]) */
+
+    /* Divide/sqrt seeds: quiet table lookups, relative error < 2^-8.5,
+     * from which cft_div and cft_sqrt Newton-refine to full precision.
+     * Elementwise and unary (b and c ignored), they run through
+     * cft_run like any other opcode, raise no flags ever, and ignore
+     * the rounding attribute. Exposed rather than hidden inside
+     * cft_div because a caller building its own iteration deserves the
+     * same starting point the library uses.
+     *
+     * Special classes give the limit values: seed(NaN) is the
+     * canonical quiet NaN, recip_seed of +/-inf is +/-0, rsqrt_seed of
+     * a negative is NaN - and ZERO AND EVERY SUBNORMAL give the
+     * correspondingly-signed infinity. That last one is deliberate
+     * (flush-at-input): a value-based seed on a subnormal would cost
+     * hardware that nothing uses, because cft_div and cft_sqrt
+     * pre-normalise before seeding. */
+    CFT_RECIP_SEED = 26,   /* ~ 1/a   */
+    CFT_RSQRT_SEED = 27,   /* ~ 1/sqrt(a) */
+
+    /* The other two of clause 9.4's sum reductions, appended (never
+     * inserted, never renumbered - an opcode number is on the wire and
+     * in every published vector set). Issued through cft_reduce() like
+     * CFT_SUM and CFT_DOT.
+     *
+     * Neither is separate hardware, and neither needs to be: they are
+     * the SAME tree over a different leaf, so the library issues the
+     * composition and both backends get the same bits by
+     * construction -
+     *
+     *     CFT_SUMSQ  == CFT_DOT over (a, a)
+     *     CFT_SUMABS == CFT_ABS pass, then CFT_SUM
+     *
+     * with one documented exception in each, where 754-2019 9.4 orders
+     * an infinity ahead of a NaN for these two and ahead of nothing
+     * for sum and dot. See the cft_reduce block below. */
+    CFT_SUMSQ    = 28,  /* d = sum round(a[i] * a[i]) */
+    CFT_SUMABS   = 29,  /* d = sum |a[i]|             */
+
+    /* The integer group's one arithmetic member, appended at the first
+     * free number above the composed reductions. d = the LOW 32 BITS
+     * of a's low 32 bits times b's low 32 bits, zero-extended to the
+     * format width. Quiet, attribute-independent, and defined
+     * identically at every format.
+     *
+     * Thirty-two bits and not the format width, which is the one place
+     * this opcode differs in shape from the rest of the group above.
+     * The operation exists for a 32-bit hash - the draw stream of
+     * docs/ATLAS.md, `lowbias32`, whose value must agree bit for bit
+     * with a GPU computing it on a `uint` - and a width-wide low
+     * product would be a 256x256 multiplier at binary256 serving
+     * nothing. Signedness does not enter: the low 32 bits of a
+     * two's-complement product are the same bits either way.
+     *
+     * It is a sequencer opcode first (docs/SEQUENCER.md): a program's
+     * ALU is this same opcode space. Whether a given DEVICE carries it
+     * elementwise is a CAPS question and cft_supports() is where to
+     * ask. */
+    CFT_IMUL     = 30
+} cft_op;
+
+/* The canonical name, so a binding, a log line and a conformance
+ * report all say "minnum" rather than 9. Static storage, never NULL;
+ * anything unassigned reads back as "reserved". */
+CFT_API const char *cft_op_name(cft_op op);
+
+/* Rounding-direction attributes, IEEE 754-2019 clause 4.3. Ignored by
+ * every operation from CFT_ABS onward - those do not round. */
+typedef enum cft_round {
+    CFT_RNE = 0,   /* roundTiesToEven - the default, and what the
+                    * contract means unless a call says otherwise */
+    CFT_RTZ = 1,   /* roundTowardZero */
+    CFT_RDN = 2,   /* roundTowardNegative */
+    CFT_RUP = 3,   /* roundTowardPositive */
+    CFT_RMM = 4    /* roundTiesToAway */
+} cft_round;
+
+/* Sticky exception flags, OR-accumulated across a whole call. */
+typedef enum cft_exception {
+    CFT_FLAG_INVALID   = 1u << 0,
+    CFT_FLAG_DIVBYZERO = 1u << 1,   /* raised by cft_div for x/0 */
+    CFT_FLAG_OVERFLOW  = 1u << 2,
+    CFT_FLAG_UNDERFLOW = 1u << 3,   /* tiny AND inexact */
+    CFT_FLAG_INEXACT   = 1u << 4
+} cft_exception;
+
+/* ---------------------------------------------------------------
+ * Devices
+ * --------------------------------------------------------------- */
+typedef struct cft_device cft_device;
+
+/* Open a device.
+ *
+ *   artifact == NULL   the software backend. Always available, needs
+ *                      no card, no driver, no Linux. Same bits.
+ *   artifact != NULL   path to an .xclbin; the tile.
+ *
+ * index selects among identical devices when more than one is present;
+ * pass 0 unless you know otherwise.
+ *
+ * A cft_device is NOT thread-safe. Open one per thread, or serialise
+ * calls yourself. Opening several handles to the same physical device
+ * is allowed.
+ */
+CFT_API cft_status cft_open(const char *artifact, int index,
+                            cft_device **out);
+CFT_API void       cft_close(cft_device *dev);
+
+/* ==== a device behind a socket (docs/REMOTE.md) =====================
+ *
+ *   artifact == "cft://host:port"   a REMOTE device: a cft-serve
+ *                                   process at that address holding a
+ *                                   library device of its own - the
+ *                                   software backend, or an xclbin on
+ *                                   a machine that has the card.
+ *
+ * One additive spelling of the argument above; every other string
+ * still means what it always did. The handle behaves like any other:
+ * cft_run, cft_reduce and cft_program_run cross the wire and run on
+ * the server's device, and everything the library computes on the
+ * host - clause 5's host operations, the transcendentals, the
+ * character conversions, the reductions' host parts, the composed
+ * operations' bookkeeping - runs in this process on this copy of the
+ * library, which is bit-identical to the server's by contract. Only
+ * the calls that touch a device make a round trip, and the composed
+ * operations (cft_div, cft_sqrt, cft_rint, cft_scaleb, cft_cmp_sig,
+ * the formatOf widening route) make one per pass, or one per chunk on
+ * the program route; docs/REMOTE.md measures both.
+ *
+ * cft_get_caps reports backend "remote" and the SERVER's device for
+ * everything else: its format mask, opcode groups, tile count,
+ * hardware contract version and flags_readable. `index` must be 0 -
+ * the URL names the device - and anything else is CFT_ERR_NO_DEVICE.
+ *
+ * The status word (7.1) is THIS handle's, kept here and never sent:
+ * every remote call returns its flag word in the response and this
+ * library ORs it in through the same seam every backend uses, so the
+ * six operations of 5.7.4 cost no round trip and a composed
+ * operation's internal passes are muted exactly as they are locally.
+ *
+ * Outcomes: a malformed URL is CFT_ERR_INVALID_ARGUMENT; a server that
+ * cannot be reached is CFT_ERR_NO_DEVICE, with the socket's own reason
+ * in cft_last_error(); a server built from a library with a different
+ * ABI version is CFT_ERR_UNSUPPORTED - a mismatch is refused, not
+ * warned about, because the two libraries need not agree on which
+ * operations exist; and a corrupted, truncated or out-of-step frame
+ * poisons the handle, so that every later call is CFT_ERR_INTERNAL
+ * with "close it and open it again" in cft_last_error(), the same
+ * discipline the XRT backend applies to a handle whose compute units
+ * may still be running. A receive that outlasts CFT_TIMEOUT_MS
+ * (default twenty minutes) is CFT_ERR_TIMEOUT.
+ *
+ * Scope, stated plainly: no authentication and no encryption. The
+ * server binds to 127.0.0.1 unless told otherwise, and serves its
+ * connections' requests one at a time, in arrival order. It is a
+ * transport, not a security boundary.
+ *
+ * The socket API is the operating system's - Winsock on Windows, BSD
+ * sockets elsewhere - and adds no dependency and no link flag: on
+ * Windows the library loads ws2_32.dll at first use, so linking
+ * libcft.a is exactly what it was. host/tools/cft-serve.c is the
+ * server.
+ * ==================================================================== */
+
+/* What this device actually implements.
+ *
+ * A trimmed build may carry fewer formats than the full tile, and a
+ * future one will carry more operations. Ask rather than assume: the
+ * whole point of a portable contract is that the same binary runs
+ * against several generations of device.
+ *
+ * Zero the struct, set struct_size to sizeof(cft_caps), then call. On
+ * return struct_size is how many bytes were actually filled, so a
+ * caller built against a newer header can tell what it got instead of
+ * reading its own zeroes as answers.
+ *
+ * Fields are only ever appended to this struct, never reordered or
+ * resized. That is what makes the size handshake safe in both
+ * directions: an older caller's struct always ends on a field
+ * boundary of the newer one. */
+typedef struct cft_caps {
+    size_t   struct_size;      /* in: sizeof(cft_caps); out: bytes filled */
+    uint32_t format_mask;      /* bit (1u << cft_format) per format */
+    uint32_t tiles;            /* compute units; partitioning is
+                                * internal and invisible to callers */
+    uint32_t abi_version;
+    uint32_t device_version;   /* hardware contract version, or 0 */
+    int      flags_readable;   /* some runtimes cannot read the status
+                                * registers; when 0, the flags_out
+                                * argument of cft_run is left untouched
+                                * and you must not treat it as clean */
+    char     backend[32];      /* "software", "xrt", ... */
+
+    /* ---- the sequencer's on-chip capacities (appended, ABI 0.8) ----
+     *
+     * What a program image may declare and still be accepted HERE.
+     * They are not part of the program model - docs/SEQUENCER.md's
+     * contract fixes what an instruction MEANS, not how many of them
+     * a particular tile holds - so they differ between backends, and
+     * a program that runs on one device is not thereby a program that
+     * fits another. Before these fields existed a tool had to guess:
+     * the software backend accepts a million deposit slots a lane, a
+     * tile holds sixty-four, and the first symptom of the difference
+     * was the tile refusing the image with STATUS[3] and no
+     * explanation (docs/studies/OPT-D-contract.md 0.1).
+     *
+     * ZERO MEANS UNKNOWN, not zero capacity, and nothing is enforced
+     * against an unknown. Only one thing can produce it today: a
+     * remote server whose caps block predates these fields.
+     *
+     * cft_program_load refuses an image past any of them with a
+     * message that names the cap and both values, so a tool learns
+     * which knob to turn instead of receiving a status bit.
+     *
+     * A caller compiled against the older struct passes the older
+     * struct_size and never sees these; that is what the size
+     * handshake is for. */
+    uint32_t max_deposits;     /* deposit slots a lane, the ceiling on
+                                * a program header's max_deposits */
+    uint32_t max_insns;        /* instructions in one program image */
+    uint32_t max_consts;       /* constants an instruction can ADDRESS.
+                                * Without kx the ka/kb/kc bits redirect
+                                * four-bit operand fields at the bank
+                                * and the reach is 16 whatever a
+                                * header's n_consts says - the ceiling
+                                * host/tools/enclose.c chunked its
+                                * Horner kernel around. With kx
+                                * (CFT_SEQ_FEAT_WIDE_CONST) the indices
+                                * come from the immediate and the reach
+                                * is the bank: 256 through the byte
+                                * alone, and 512 where CFT_SEQ_FEAT_KX9
+                                * adds the ninth bit, which is what
+                                * this reads here and on the tile */
+    uint32_t seq_features;     /* bits 3:0 = CAPS[7:4], the sequencer
+                                * feature nibble; bits 7:4 = CAPS[31:28],
+                                * the ALU extensions beyond the group
+                                * bits; bits 11:8 = CAPS2[7:4], the
+                                * second feature nibble revision 3
+                                * opened. Seven are assigned:
+                                * CFT_SEQ_FEAT_WIDE_CONST,
+                                * CFT_SEQ_FEAT_REGS32,
+                                * CFT_SEQ_FEAT_BANK_PTR,
+                                * CFT_SEQ_FEAT_KX9, CFT_ALU_EXT_IMUL,
+                                * CFT_SEQ_FEAT_SCRATCH and
+                                * CFT_SEQ_FEAT_SCRATCH_IO, below. A clear
+                                * bit is ABSENT, not unknown: the loader
+                                * refuses an image that uses the feature
+                                * and cft_supports answers no, so ask
+                                * before issuing, as with any opcode */
+
+    /* ---- the per-lane scratch memory (appended, ABI 0.10) ----
+     *
+     * Slots a lane, from CAPS2[3:0] as log2 with CAPS2[4] set
+     * (docs/SEQUENCER.md revision 3, R4). The same ZERO IS UNKNOWN
+     * rule as the three capacities above, and the same consequence:
+     * an unknown depth is enforced against nothing, so a static
+     * STL/LDL slot is held to it only where a device stated one.
+     *
+     * It is a CAPACITY and CFT_SEQ_FEAT_SCRATCH is the FEATURE; the
+     * two are asked separately, because a device that publishes no
+     * scratch at all publishes neither and a device that predates the
+     * register publishes a clear bit with a zero depth. 256 here and
+     * on the tile. */
+    uint32_t max_scratch;      /* scratch slots a lane, 0 = none or
+                                * unknown */
+
+    /* ---- device-resident buffers (appended, ABI 0.11) ----
+     *
+     * Does cft_alloc on THIS device produce a buffer whose contents
+     * live on the device, so that a cft_run naming it skips the
+     * staging copy? 1 on a backend that keeps device copies (XRT
+     * today), 0 on one where cft_alloc is a host allocation and the
+     * two sync calls are no-ops (software, remote).
+     *
+     * This is a PORTABILITY question and not a performance one, which
+     * is why it is a capability rather than a benchmark: the buffer
+     * calls exist and behave identically on every backend, so code
+     * written with them runs everywhere. What differs is whether the
+     * round trip was actually avoided, and a caller that wants to
+     * report its own throughput honestly has to be able to say which
+     * it got. cft_buffer_get_info answers the same question for one
+     * buffer, after the fact and in detail.
+     *
+     * NOT zero-is-unknown: every backend in this library answers it,
+     * and a remote server whose caps block predates the field is a
+     * client-side question anyway - a remote handle's buffers are the
+     * client's host memory whatever the far end does, so the client
+     * reports 0 from its own knowledge rather than from HELLO. */
+    int      buffers_resident;
+} cft_caps;
+
+/* cft_caps.seq_features bits.
+ *
+ * The low nibble is CAPS[7:4], the sequencer's feature nibble; the
+ * next one is CAPS[31:28], the ALU extensions; the third is
+ * CAPS2[7:4], the second sequencer nibble revision 3 opened when the
+ * first one filled up. A clear bit is ABSENT, not unknown, and
+ * cft_program_load refuses an image that uses the feature by name -
+ * which is the whole reason each of these needed a CAPS bit rather
+ * than only a reserved-bit rule: a reserved-bit rule protects a new
+ * HOST from an old image, and a CAPS bit protects an old BITSTREAM
+ * from a new one. */
+#define CFT_SEQ_FEAT_WIDE_CONST 0x01u  /* CAPS[4]: an instruction with kx
+                                        * (bit 30) set addresses the whole
+                                        * constant bank through 8-bit
+                                        * indices in its immediate */
+#define CFT_SEQ_FEAT_REGS32     0x02u  /* CAPS[5]: a lane owns 32 registers
+                                        * rather than 16, the fifth bit of
+                                        * each field living in imm[27:24]
+                                        * (rd, ra, rb, rc in that order).
+                                        * An old tile's operand mux reads
+                                        * only the low four bits, so a
+                                        * program naming r16..r31 there
+                                        * would address the wrong register
+                                        * in silence */
+#define CFT_SEQ_FEAT_BANK_PTR   0x04u  /* CAPS[6]: the constant bank can be
+                                        * supplied per run through
+                                        * cft_program_run_bank, and an
+                                        * image whose header flags carry
+                                        * BANK_EXT (bit 0) carries no
+                                        * constant section at all. An old
+                                        * tile would read constants from an
+                                        * image that has none */
+#define CFT_SEQ_FEAT_KX9        0x08u  /* CAPS[7]: under kx, imm[28],
+                                        * imm[29] and imm[30] are the
+                                        * NINTH bits of ka's, kb's and
+                                        * kc's constant indices, so the
+                                        * addressable bank is 512 rather
+                                        * than 256. The feature nibble's
+                                        * last bit. A revision-2 tile's
+                                        * operand mux reads eight, so an
+                                        * index at or past 256 would
+                                        * address the wrong constant in
+                                        * silence - which is why this
+                                        * needed a CAPS bit and not only
+                                        * the reserved-bit rule */
+#define CFT_ALU_EXT_IMUL        0x10u  /* CAPS[28]: opcode 30, IMUL, is
+                                        * implemented */
+#define CFT_SEQ_FEAT_SCRATCH    0x100u /* CAPS2[4]: every lane owns a
+                                        * private scratch memory of
+                                        * cft_caps.max_scratch slots,
+                                        * reached by the four control
+                                        * codes STL, LDL, STX and LDX
+                                        * (docs/SEQUENCER.md revision 3,
+                                        * R4). Lane i's slot s is lane
+                                        * i's alone */
+#define CFT_SEQ_FEAT_SCRATCH_IO 0x200u /* CAPS2[5]: the host may preload
+                                        * the first slots of every lane
+                                        * from a buffer before the run
+                                        * and read the first slots back
+                                        * after it - the header's
+                                        * scratch_io word, CFT_PROG_FLAG_
+                                        * SCRATCH_IO, and the two scratch
+                                        * pointers of cft_run_args. A
+                                        * revision-2 tile refuses a
+                                        * non-zero reserved[1] at the
+                                        * header, but the loader refuses
+                                        * this one first and by name */
+
+CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
+
+/* Is this (op, format) pair implemented here? Returns 1, or 0.
+ *
+ * An unassigned opcode answers 0 while still being runnable - see
+ * cft_run below. The two are not in conflict: this reports what the
+ * device implements, cft_run reports what it does when you ask
+ * anyway. */
+CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
+
+/* ---------------------------------------------------------------
+ * The core call
+ *
+ * Elementwise over three input arrays into one output array:
+ *
+ *     d[i] = op(a[i], b[i], c[i])   for i in [0, n)
+ *
+ * Element i of the output depends on element i of the inputs and
+ * nothing else, so there is no ordering question to get wrong and no
+ * reduction to make non-deterministic.
+ *
+ * Buffers are dense, little-endian, and cft_format_size(fmt) bytes per
+ * element. Unused operands (b for ADD, c for MUL) may be NULL.
+ *
+ * n is ARBITRARY. The hardware works in whole 256-bit beats, but that
+ * is the library's problem, not yours: a partial tail is padded and
+ * masked internally, and padding never contributes to the flags.
+ *
+ * d may alias a, b or c. Each element is read before it is written and
+ * elements are independent, so computing in place is well defined -
+ * which matters for the long chains of elementwise steps that
+ * branchless code turns into.
+ *
+ * An opcode the contract leaves unassigned (15, and 30 upward) is not
+ * an error: it returns CFT_OK having written the canonical quiet NaN
+ * and raised invalid, because that is exactly what the device does,
+ * and "the same call returns the same bits" has to hold for the
+ * uninteresting inputs too. Ask cft_supports() if you want to know
+ * before issuing one. Values outside 0..255 do not fit the device's
+ * opcode field and are CFT_ERR_INVALID_ARGUMENT.
+ *
+ * flags_out and bus_out may be NULL if you do not want them. If
+ * bus_out is non-NULL and the call returns CFT_ERR_BUS_FAULT, it
+ * carries the raw fault bits for diagnosis.
+ *
+ * On any error the contents of d are unspecified. Do not read them.
+ */
+CFT_API cft_status cft_run(cft_device *dev,
+                           cft_op      op,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           const void *c,
+                           void       *d,
+                           size_t      n,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out);
+
+/* ---------------------------------------------------------------
+ * Reductions
+ *
+ *     d[0] = sum over i in [0, n) of a[i]              CFT_SUM
+ *     d[0] = sum over i in [0, n) of round(a[i]*b[i])  CFT_DOT
+ *     d[0] = sum over i in [0, n) of round(a[i]*a[i])  CFT_SUMSQ
+ *     d[0] = sum over i in [0, n) of |a[i]|            CFT_SUMABS
+ *
+ * d receives exactly ONE element - cft_format_size(fmt) bytes - not n.
+ * That is the whole reason this is a separate entry point: cft_run's
+ * promise is that element i of the output depends on element i of the
+ * inputs, and a reduction cannot keep it. Issuing CFT_SUM or CFT_DOT
+ * through cft_run() is CFT_ERR_INVALID_ARGUMENT rather than a
+ * plausible-looking array.
+ *
+ * b is unused by CFT_SUM, CFT_SUMSQ and CFT_SUMABS and may be NULL.
+ *
+ * THE TREE SHAPE IS PART OF THE CONTRACT. Results are the fixed
+ * binary tree over the index range, evaluated with the given rounding
+ * attribute at every node - never a sequential accumulation, never
+ * reassociated, never padded to a power of two.
+ *
+ * A node splits so that its LEFT child is the largest power of two
+ * strictly smaller than the range: T(0,5) is add(T(0,4), a[4]). Not
+ * the floor midpoint, which is the tidier-looking balanced tree and
+ * was the first version of this. The two agree only when n is a power
+ * of two, and this one is the shape a streaming binary-counter
+ * accumulator produces - which is what the hardware is. Depth is
+ * ceil(log2 n) either way, so the accuracy argument for pairwise
+ * summation is the same for both.
+ *
+ * Two conforming implementations therefore return the same bits, and
+ * a reduction split across four tiles returns what one tile returns.
+ * python/cft_golden/reduce.py is the definition; that shape is why a
+ * float reduction can be part of a determinism contract at all.
+ *
+ * Consequences worth knowing before they surprise you:
+ *   n == 0 gives +0.0 and raises nothing.
+ *   n == 1 gives a[0] verbatim and raises nothing - one leaf means
+ *          zero additions, so not even a signalling NaN is quieted.
+ *          (For CFT_SUMSQ the leaf IS a multiply, so it quiets and
+ *          signals; for CFT_SUMABS the leaf is an abs, which by 5.5.1
+ *          signals nothing at all, so a lone sNaN comes back with its
+ *          sign cleared and no flag.)
+ *
+ * CFT_SUMSQ AND CFT_SUMABS ARE COMPOSITIONS, AND THAT IS THE CONTRACT.
+ * They are the same tree over a different leaf, so the library issues
+ * exactly `cft_reduce(CFT_DOT, a, a)` and `cft_run(CFT_ABS)` followed
+ * by `cft_reduce(CFT_SUM)`. There is no second tree walker to keep in
+ * step, so the device and software backends agree by construction
+ * rather than by testing - and a caller who wants the pieces can have
+ * them without changing the answer. Both identities hold bit for bit,
+ * flags included, on every input and every attribute EXCEPT one:
+ *
+ *   754-2019 9.4 says "For sumSquare and sumAbs, if any operand
+ *   element is an infinity, +inf is returned. Otherwise, if any
+ *   operand element is a NaN a quiet NaN is returned" - infinity
+ *   ahead of NaN, where sum and dot put NaN first.
+ *
+ * So a vector holding BOTH an infinity and a NaN returns +inf here,
+ * where the plain dot or sum would return a quiet NaN; invalid is
+ * raised only if one of those NaNs is signalling (9.4's blanket rule),
+ * and no other flag is. That single row is the whole difference, and
+ * it is the only place either operation is not the plain composition.
+ * With an infinity and no NaN the tree already returns +inf on its
+ * own, since no term of either operation is negative.
+ *
+ * A device that does not implement the reduction opcode group returns
+ * CFT_ERR_UNSUPPORTED; ask cft_supports() to know in advance. The two
+ * composed reductions also need the group their composition runs
+ * through - arithmetic for CFT_SUMSQ, sign for CFT_SUMABS - and
+ * cft_supports() accounts for that, so asking about the opcode itself
+ * is the right question.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_reduce(cft_device *dev,
+                              cft_op      op,
+                              cft_format  fmt,
+                              cft_round   rnd,
+                              const void *a,
+                              const void *b,
+                              void       *d,
+                              size_t      n,
+                              uint32_t   *flags_out,
+                              uint32_t   *bus_out);
+
+/* ---------------------------------------------------------------
+ * Division and square root
+ *
+ *     d[i] = a[i] / b[i]          cft_div
+ *     d[i] = squareRoot(a[i])     cft_sqrt
+ *
+ * Correctly rounded per IEEE 754-2019 5.4.1, in the caller's rounding
+ * attribute, with the contract flags: invalid (sNaN, 0/0, inf/inf,
+ * sqrt of a negative), divideByZero (x/0), and inexact / underflow /
+ * overflow from the single final rounding. python/cft_golden's div
+ * and sqrt are the definition of these bits.
+ *
+ * These are NOT single opcodes, and that is a fact about the design
+ * rather than a gap in it: the tile's divide hardware is the two seed
+ * tables (CFT_RECIP_SEED / CFT_RSQRT_SEED) and its FMA. This call
+ * composes them - seed, Newton refinement, an exactly-measured
+ * residual, one rounding - as a fixed sequence of cft_run steps, the
+ * same on every backend. On the software backend that reproduces the
+ * contract functions bit for bit; on a device the floating-point
+ * steps run on the tile and this library keeps only the exact
+ * integer bookkeeping between them, the same division of labour
+ * cft_reduce draws when it folds partial sums.
+ * python/cft_golden/sequences.py is the sequence's specification and
+ * is held bit-identical to the contract by its own test matrix.
+ *
+ * Because the sequence issues many elementwise runs, each element
+ * costs roughly 25-30 opcode passes; this is the price of correct
+ * rounding built from an FMA, and it is the same price on every
+ * conforming implementation of this route.
+ *
+ * On a device that can execute sequencer programs (docs/SEQUENCER.md)
+ * the same sequence is issued as ONE on-chip program instead - the
+ * identical steps over register-resident lanes, so the pass count
+ * stands but the per-pass round trip and its memory traffic do not.
+ * The choice is automatic and invisible in the results, which the
+ * test matrix holds bit-identical across both routes; setting
+ * CFT_DIVSQRT_SEQ=0 (or =1) in the environment forces the elementwise
+ * (or program) route when a measurement wants one of them
+ * specifically.
+ *
+ * d may alias a or b. b unused by cft_sqrt. A device whose bitstream
+ * lacks the seed opcodes (opcode group 6, CAPS bit 14), the arithmetic group or
+ * the sign group cannot run the sequence and answers
+ * CFT_ERR_UNSUPPORTED; ask cft_supports(dev, CFT_RECIP_SEED, fmt)
+ * to know in advance.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_div(cft_device *dev,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           void       *d,
+                           size_t      n,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out);
+
+CFT_API cft_status cft_sqrt(cft_device *dev,
+                            cft_format  fmt,
+                            cft_round   rnd,
+                            const void *a,
+                            void       *d,
+                            size_t      n,
+                            uint32_t   *flags_out,
+                            uint32_t   *bus_out);
+
+/* ---------------------------------------------------------------
+ * The remaining clause-5 operations
+ *
+ * Everything IEEE 754-2019 clause 5 still asked of this library after
+ * division and square root landed. python/cft_golden/softfloat.py
+ * defines every bit and flag below; none of it needed new hardware,
+ * and the entry points say which of two shapes each operation takes:
+ *
+ *   COMPOSED (cft_rint, cft_scaleb, cft_cmp_sig): the floating-point
+ *   work is cft_run() passes - on a device it runs on the tile - with
+ *   the host keeping exact integer bookkeeping, like cft_div.
+ *   python/cft_golden/sequences.py specifies the routes.
+ *
+ *   HOST (everything else): no floating-point arithmetic exists in
+ *   the operation at all - it is rounding-position bit surgery - so
+ *   there is no pass to issue and nothing to accelerate. The device
+ *   argument is context; results are bit-identical on every backend
+ *   by construction. These do not gate on the device's format mask
+ *   for the same reason.
+ *
+ * Common rules, from the contract: any NaN in yields the canonical
+ * quiet NaN out (payloads canonicalise; the documented deviation), a
+ * signaling NaN raises invalid except in the non-computational
+ * operations (class, totalOrder), which signal nothing ever. Every
+ * same-format entry point keeps cft_run's aliasing rule - d may alias
+ * a or b, each element read before it is written; cft_convert is the
+ * one exception and says so.
+ * --------------------------------------------------------------- */
+
+/* roundToIntegral (5.3.1). exact = 0: the five named operations -
+ * direction from `rnd`, inexact NEVER signalled. exact != 0:
+ * roundToIntegralExact, which signals inexact when the value changed.
+ * The zero result keeps the operand's sign: rint(-0.4) is -0.
+ * Composed: needs CFT_ADD and CFT_COPYSIGN on the device. */
+CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
+                            int exact, const void *a, void *d, size_t n,
+                            uint32_t *flags_out, uint32_t *bus_out);
+
+/* scaleB (5.3.3): d[i] = a[i] * 2^nexp, one rounding, full flags.
+ * Composed as multiplies by exact powers of two (needs CFT_MUL);
+ * |nexp| beyond the subnormal floor takes an equivalent host path. */
+CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, int64_t nexp, void *d, size_t n,
+                              uint32_t *flags_out, uint32_t *bus_out);
+
+/* Signaling comparisons (5.6.1): same 1.0/+0.0 predicate values as
+ * the quiet opcodes - unordered is false - but invalid is raised for
+ * ANY NaN operand, quiet included. cmp selects CFT_CMPLT, CFT_CMPLE
+ * or CFT_CMPEQ; greater/greaterEqual are the usual operand swap. */
+CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out,
+                               uint32_t *bus_out);
+
+/* formatOf-convertFormat (5.4.2), any of the four formats to any
+ * other. Widening is exact and silent; narrowing rounds once with
+ * full overflow/underflow/inexact; NaNs canonicalise into the
+ * destination. d MUST NOT overlap a - elements change size, so
+ * in-place conversion is not well defined here. */
+CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
+                               cft_format dfmt, cft_round rnd,
+                               const void *a, void *d, size_t n,
+                               uint32_t *flags_out);
+
+/* convertFromInt (5.4.1). Zero converts to +0; inexact where the
+ * integer outruns the significand; nothing else can signal. */
+CFT_API cft_status cft_cvt_from_i32(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const int32_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_cvt_from_u32(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const uint32_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_cvt_from_i64(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const int64_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_cvt_from_u64(cft_device *dev, cft_format fmt,
+                                    cft_round rnd, const uint64_t *src,
+                                    void *d, size_t n, uint32_t *flags_out);
+
+/* convertToInteger (5.4.1), direction from `rnd`; exact != 0 selects
+ * the ...Exact family, which alone reports inexact. 754 leaves the
+ * delivered value of the invalid cases open; determinism cannot, so
+ * this contract fixes them to RISC-V's FCVT table: NaN and +inf to
+ * the type's maximum, -inf and negative overflow to its minimum, a
+ * negative rounded BELOW zero to unsigned 0 - always with invalid,
+ * which pre-empts inexact. A negative that rounds TO zero is simply
+ * zero. */
+CFT_API cft_status cft_cvt_to_i32(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  int32_t *dst, size_t n,
+                                  uint32_t *flags_out);
+CFT_API cft_status cft_cvt_to_u32(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  uint32_t *dst, size_t n,
+                                  uint32_t *flags_out);
+CFT_API cft_status cft_cvt_to_i64(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  int64_t *dst, size_t n,
+                                  uint32_t *flags_out);
+CFT_API cft_status cft_cvt_to_u64(cft_device *dev, cft_format fmt,
+                                  cft_round rnd, int exact, const void *a,
+                                  uint64_t *dst, size_t n,
+                                  uint32_t *flags_out);
+
+/* logB (5.3.3), delivered in the operand's own format. Value-based:
+ * a subnormal reports its true exponent. Always exact. logB(0) is
+ * -inf and signals divideByZero; logB(+-inf) is +inf, silently. */
+CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
+                            void *d, size_t n, uint32_t *flags_out);
+
+/* nextUp / nextDown (5.3.1). One step on the encoding. The edges are
+ * the standard's own: nextUp(+-0) is the smallest positive subnormal,
+ * nextUp of the most negative subnormal is -0, the largest finite
+ * steps to infinity WITHOUT overflow - invalid on sNaN is the only
+ * signal these can raise. */
+CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
+                               const void *a, void *d, size_t n,
+                               uint32_t *flags_out);
+CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
+                                 const void *a, void *d, size_t n,
+                                 uint32_t *flags_out);
+
+/* class (5.7.2), one byte per element. The values are RISC-V fclass
+ * bit INDICES - one table for anyone porting between the two, the
+ * same reasoning that chose frm for the rounding encoding. Every is*
+ * predicate of 5.7.2 is a subset test on this byte; isCanonical is
+ * constantly true here and radix constantly 2. Non-computational:
+ * signals nothing, so there is no flags argument to mislead. */
+typedef enum cft_class_value {
+    CFT_CLASS_NEG_INF  = 0,
+    CFT_CLASS_NEG_NORM = 1,
+    CFT_CLASS_NEG_SUB  = 2,
+    CFT_CLASS_NEG_ZERO = 3,
+    CFT_CLASS_POS_ZERO = 4,
+    CFT_CLASS_POS_SUB  = 5,
+    CFT_CLASS_POS_NORM = 6,
+    CFT_CLASS_POS_INF  = 7,
+    CFT_CLASS_SNAN     = 8,
+    CFT_CLASS_QNAN     = 9
+} cft_class_value;
+
+CFT_API cft_status cft_class(cft_device *dev, cft_format fmt, const void *a,
+                             uint8_t *cls, size_t n);
+
+/* totalOrder / totalOrderMag (5.10), as 1.0/+0.0 predicates a SELECT
+ * consumes. Defined on the entire encoding space - NaNs ordered by
+ * sign, then quiet bit, then payload - and signals nothing on
+ * anything, which is what makes it the sort key compareQuiet* cannot
+ * be. */
+CFT_API cft_status cft_total_order(cft_device *dev, cft_format fmt,
+                                   const void *a, const void *b, void *d,
+                                   size_t n);
+CFT_API cft_status cft_total_order_mag(cft_device *dev, cft_format fmt,
+                                       const void *a, const void *b, void *d,
+                                       size_t n);
+
+/* remainder (5.3.1): d[i] = a[i] - b[i]*n, n the integer nearest
+ * a[i]/b[i], ties to even. EXACT always - no rounding attribute is
+ * consumed because none is used, and inexact/overflow/underflow
+ * cannot occur. A zero result takes a's sign. remainder(inf, y) and
+ * remainder(x, 0) are invalid; remainder(x, inf) is x. The host walks
+ * the exponent gap a quotient bit at a time - a handful of steps
+ * normally, up to ~524.5k (about ten milliseconds) PER LANE for an
+ * adversarial fp256 pair, paid per element over an array - where the
+ * model does one unbounded division. */
+CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
+                           const void *b, void *d, size_t n,
+                           uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The phase-1 transcendental set (ABI 0.3)
+ *
+ *   d[i] = exp(a[i])        cft_exp        d[i] = log(a[i])    cft_log
+ *   d[i] = exp(a[i]) - 1    cft_expm1      d[i] = log(1+a[i])  cft_log1p
+ *   d[i] = 2 ** a[i]        cft_exp2       d[i] = log2(a[i])   cft_log2
+ *                                          d[i] = log10(a[i])  cft_log10
+ *   d[i] = a[i] ** b[i]     cft_pow
+ *   d[i] = sqrt(a[i]^2 + b[i]^2)           cft_hypot
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, at every format, with
+ * exact flags - not "accurate to an ulp", not "faithful", not
+ * "algorithm-defined". A result here is defined by the mathematics
+ * alone, so every correct implementation agrees bit for bit and this
+ * library's answer is checkable against any of them. That is the whole
+ * reason these are in a determinism contract at all: an "accurate"
+ * transcendental is precisely the thing this project exists to
+ * replace, because two of them never agree and neither can be scored.
+ * python/cft_golden/transcend.py is the definition;
+ * docs/TRANSCENDENTALS.md is the design and its proofs.
+ *
+ * HOST operations, like most of the clause-5 set: they issue no device
+ * pass, so there is no bus word and no bus_out argument, and the
+ * device argument is context. That is a design choice with a reason -
+ * see docs/TRANSCENDENTALS.md - and not a gap: division composes from
+ * the tile's opcodes because it has an exactly measurable residual,
+ * and an exponential has none. A tile-assisted fast path for the
+ * narrow formats would have to reproduce these bits exactly, and is a
+ * later optimisation rather than a different answer.
+ *
+ * INEXACT is raised for every result except the ones that are exactly
+ * representable, and those are decided by exact arithmetic rather than
+ * by a tolerance: exp and expm1 are exact only at zero; log and log1p
+ * only at 1 and 0; exp2 exactly when the argument is an integer whose
+ * power the format holds; log2 exactly at the powers of two; log10
+ * exactly at the powers of ten the format represents; pow exactly when
+ * the true value is a representable dyadic rational; hypot exactly
+ * when x^2 + y^2 is a perfect square. Overflow, underflow and the
+ * signed zero follow clause 7 through the same round_pack every
+ * arithmetic result uses.
+ *
+ * The 754-2019 clause 9.2.1 special values apply in full. The ones
+ * implementations most often differ on, stated here so a porter does
+ * not have to infer them:
+ *
+ *   exp(-inf) = +0            expm1(-inf) = -1      exp2(-inf) = +0
+ *   log(+-0)  = -inf, divideByZero      log(x < 0) = qNaN, invalid
+ *   log1p(-1) = -inf, divideByZero      log1p(x < -1) = qNaN, invalid
+ *   expm1(+-0) = +-0 and log1p(+-0) = +-0 - the operand's sign, which
+ *     is half of why those two functions exist
+ *   pow(x, +-0) = 1 for ANY x, including a quiet NaN or an infinity
+ *   pow(+1, y)  = 1 for ANY y, including a quiet NaN
+ *   pow(-1, +-inf) = 1
+ *   pow(x, y) with x finite negative and y a non-integer is invalid
+ *   pow(+-0, y) for finite y < 0 signals divideByZero; pow(+-0, -inf)
+ *     is +inf and signals NOTHING - that is the |x| < 1 row, and the
+ *     divideByZero is the pole at a finite exponent, not the limit
+ *   hypot(+-inf, y) = +inf for any y, INCLUDING a quiet NaN
+ *
+ * A SIGNALING NaN operand is not covered by those rows - 9.2.1's
+ * wording is "even a quiet NaN" - so it raises invalid and delivers
+ * the canonical quiet NaN, exactly as every other operation in this
+ * contract does. That differs from C's pow(sNaN, 0), and the
+ * difference is deliberate and documented rather than accidental.
+ *
+ * If an input cannot be shown correctly rounded within the library's
+ * working-precision cap, the call returns CFT_ERR_INTERNAL and writes
+ * nothing useful to d. It does not return a plausible number. The cap
+ * is sized so that no input the formats can express should reach it
+ * (docs/TRANSCENDENTALS.md does that arithmetic); if one ever does,
+ * that is a bug worth a report, and a status is how you would find
+ * out.
+ *
+ * d may alias a or b: each element is read before it is written.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_exp(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_expm1(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_exp2(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_log(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_log1p(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_log2(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_log10(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* b[i] is the exponent for cft_pow and the second leg for cft_hypot;
+ * neither may be NULL. */
+CFT_API cft_status cft_pow(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, const void *b, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_hypot(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const void *b, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The phase-2 trigonometric set (ABI 0.4)
+ *
+ *   d[i] = sin(pi*a[i])     cft_sinpi      d[i] = asin(a[i])   cft_asin
+ *   d[i] = cos(pi*a[i])     cft_cospi      d[i] = acos(a[i])   cft_acos
+ *   d[i] = tan(pi*a[i])     cft_tanpi      d[i] = atan(a[i])   cft_atan
+ *   d[i] = asin(a[i])/pi    cft_asinpi     d[i] = atan2(a[i], b[i])
+ *   d[i] = acos(a[i])/pi    cft_acospi                         cft_atan2
+ *   d[i] = atan(a[i])/pi    cft_atanpi     d[i] = atan2(a,b)/pi
+ *                                                            cft_atan2pi
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, at every format, with
+ * exact flags, on the same terms as the nine above: the mathematics
+ * defines the bits, so every correct implementation agrees.
+ *
+ * WHAT THESE ELEVEN HAVE IN COMMON is what they do NOT need: an
+ * argument reduction against pi. sinPi's reduction is x mod 2, and
+ * every operand is a dyadic rational, so that reduction is a mask on
+ * the encoding and is exact at every magnitude - sinPi of the largest
+ * finite binary256 is a zero decided by integer arithmetic. The
+ * inverse functions take an argument in [-1, 1] or a ratio and meet pi
+ * only as a factor of the answer. `sin`, `cos` and `tan` of a RADIAN
+ * argument are a different problem and are not here.
+ *
+ * HOST operations, like the nine: no device pass, no bus word, the
+ * device argument is context, `d` may alias `a` or `b`.
+ *
+ * INEXACT is raised for every result except the exact ones, and the
+ * exact ones are an enumeration with a proof behind it rather than a
+ * tolerance. Niven's theorem bounds the forward set: sin(pi r) is
+ * rational for a rational r only at 0, +-1/2 and +-1, and a dyadic r
+ * cannot reach +-1/2 - so sinPi and cosPi are exact exactly at the
+ * half-integers and tanPi exactly at the quarter-integers.
+ * Hermite-Lindemann bounds the inverse set: asin, atan and atan2 of a
+ * nonzero dyadic rational are transcendental, so those are exact only
+ * where the answer is a zero, and acos only at acos(1) = +0. The
+ * Pi-forms get a much larger table for Niven's reason:
+ *
+ *   asinPi(+-0) = +-0      asinPi(+-1) = +-1/2
+ *   acosPi(1)   = +0       acosPi(+-0) = 1/2       acosPi(-1) = 1
+ *   atanPi(+-0) = +-0      atanPi(+-1) = +-1/4     atanPi(+-inf) = +-1/2
+ *   atan2Pi on every axis and diagonal: 0, +-1/4, +-1/2, +-3/4, +-1
+ *
+ * while asinPi(1/2) is exactly 1/6 - rational, but NOT a dyadic
+ * rational, so it is inexact and still decidable.
+ *
+ * The 754-2019 clause 9.2.1 special values apply in full. The rows a
+ * porter should not have to infer, each confirmed against MPFR 4.2.2:
+ *
+ *   sinPi(+-0) = +-0, and sinPi of an integer n is a zero with the
+ *     sign of the ARGUMENT: sinPi(1) = +0, sinPi(-1) = -0
+ *   cosPi(+-0) = 1, cosPi(n) = (-1)^n, cosPi(n + 1/2) = +0 for every n
+ *     and both signs - cosPi is even, so that zero has no sign to carry
+ *   tanPi is sinPi/cosPi in every respect: tanPi(1) = -0, and tanPi at
+ *     a half-integer is +-infinity with divideByZero (7.3's rule for an
+ *     exact infinity from finite operands)
+ *   tanPi cannot overflow at any format here: a representable argument
+ *     is at least 2^-p from a pole, so |tanPi| stays below 2^p
+ *   sinPi/cosPi/tanPi of an infinity is invalid - there is no limit
+ *   asin, acos, asinPi and acosPi of an operand with |x| > 1 are
+ *     invalid, infinities included
+ *   atan2(+-0, -0) = +-pi and atan2Pi(+-0, -0) = +-1: a MINUS zero
+ *     denominator names the negative real axis, so the answer is pi
+ *     and not zero. That is the row implementations most often miss
+ *   atan2(+-0, +0) = +-0; atan2(y, +-0) = +-pi/2; atan2(+-inf, +inf)
+ *     = +-pi/4 and (+-inf, -inf) = +-3pi/4
+ *   a quiet NaN operand does NOT outrank this table the way it does
+ *     pow's: atan2 of a NaN is a NaN
+ *
+ * Overflow cannot occur anywhere in this set. Underflow can, and comes
+ * through the same round_pack as everything else: sinPi of a tiny x is
+ * about pi*x and atanPi of one is about x/pi, and both land subnormal.
+ *
+ * A SIGNALING NaN raises invalid and delivers the canonical quiet NaN,
+ * as everywhere else in this contract.
+ *
+ * If an input cannot be shown correctly rounded within the working
+ * precision cap the call returns CFT_ERR_INTERNAL, never a plausible
+ * number. docs/TRANSCENDENTALS.md is the design and its proofs.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_sinpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_cospi(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_tanpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_asin(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_acos(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_atan(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_asinpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_acospi(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_atanpi(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+
+/* a[i] is y and b[i] is x - the C order, y first, because that is what
+ * every caller of atan2 expects; neither may be NULL. */
+CFT_API cft_status cft_atan2(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const void *b, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_atan2pi(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               void *d, size_t n, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * Character sequences (754-2019 clause 5.12) and NaN payloads (9.7)
+ * Part of the 0.6 step.
+ *
+ *   a decimal sequence  -> fmt   cft_from_decimal_char   (5.12.2)
+ *   fmt -> a decimal sequence    cft_to_decimal_char     (5.12.2)
+ *   a hex sequence      -> fmt   cft_from_hex_char       (5.12.3)
+ *   fmt -> a hex sequence        cft_to_hex_char         (5.12.3)
+ *   getPayload / setPayload / setPayloadSignaling        (9.7)
+ *
+ * These are the last REQUIRED part of clause 5 this library lacked.
+ * 5.12 opens with "Implementations shall provide conversions between
+ * each supported binary format and external decimal character
+ * sequences such that, under roundTiesToEven, conversion from the
+ * supported format to external decimal character sequence and back
+ * recovers the original floating-point representation" - a shall, not
+ * a should, and one this library now keeps at all four rungs.
+ *
+ * CORRECTLY ROUNDED, in the caller's attribute, with exact flags, and
+ * the standard's H is UNBOUNDED here. 5.12.2 allows an implementation
+ * to cap the digit count it will round correctly at some H >= M + 3;
+ * this one does not need a cap, because a decimal sequence's value is
+ * a rational and an encoding's value is a dyadic rational, and both
+ * are held exactly in integer arithmetic. Every digit count from 1
+ * upward is correctly rounded on the way out, and a sequence of any
+ * length at all is correctly rounded on the way in - no pre-rounding
+ * to H digits, no "additional rounding of the order of 10^(M-H)"
+ * which 5.12.2's NOTE 1 permits and which this library never incurs.
+ * python/cft_golden/chars.py is the definition of every result below.
+ *
+ * HOST operations, like most of the clause-5 set and all of clause 9:
+ * they issue no device pass, so there is no bus word and the device
+ * argument is context. There is nothing here for a tile to
+ * accelerate - the work is exact integer division and digit
+ * generation - so they are bit-identical on every backend by
+ * construction.
+ *
+ * WHY THE TWO DIRECTIONS HAVE DIFFERENT SHAPES, which is a decision
+ * rather than an oversight. The from_ calls are BATCHES: an array of
+ * C strings in, a dense array of encodings out, n arbitrary, the flag
+ * word the OR across the batch - the same shape as every other entry
+ * point in this header. The to_ calls are PER ELEMENT, one value and
+ * one buffer, and they have to be: an output sequence's length is not
+ * known until the conversion has run, it is wildly non-uniform (three
+ * bytes for "inf", about 183,000 for the exact decimal of the
+ * smallest binary256 subnormal), and no dense output array can hold
+ * that. A batch would mean three parallel arrays - buffers,
+ * capacities, lengths - that a caller could not size in advance
+ * anyway, so it would degenerate into the per-element two-call
+ * protocol with extra ceremony. One call per value is the honest
+ * shape; a caller batching them ORs the flag words itself, which is
+ * all cft_run does with them.
+ *
+ * SIZING AN OUTPUT BUFFER is the usual two-call protocol, and *len is
+ * ALWAYS set - on success and on refusal alike - to the number of
+ * bytes required INCLUDING the terminating NUL. Pass cap = 0 with out
+ * = NULL to ask, then call again with a buffer that size. A buffer
+ * too small for the answer is CFT_ERR_INVALID_ARGUMENT with *len set
+ * and NOTHING written: this library does not truncate a number.
+ *
+ * A SEQUENCE OUTSIDE THE SYNTAX IS REFUSED, not guessed at.
+ * cft_from_decimal_char and cft_from_hex_char return
+ * CFT_ERR_INVALID_ARGUMENT, write nothing to d, and - if bad_index is
+ * non-NULL - report which element of the batch was at fault, because
+ * a caller reading a file of numbers needs the line and not just the
+ * verdict. The syntax accepted is exactly:
+ *
+ *   decimal   sign? ( digit* "." digit* | digit+ )  ( [eE] sign? digit+ )?
+ *   hex       sign? "0" [xX] ( hexDigit* "." hexDigit* | hexDigit+ )
+ *                            [pP] sign? digit+
+ *   either    sign? ( "inf" | "infinity" | "nan" | "snan" ) payload?
+ *   payload   "(" ( digit+ | "0" [xX] hexDigit+ ) ")"
+ *
+ * with at least one digit in the significand, the words case
+ * insensitive, and the hex form's binary exponent REQUIRED - 5.12.3's
+ * grammar writes {decExponent}, not {decExponent}?. No leading or
+ * trailing whitespace, no digit separators, no locale, no hexadecimal
+ * in the decimal parser or decimal in the hex one. What this library
+ * writes, this library reads back.
+ *
+ * NaNs KEEP THEIR PAYLOAD AND THEIR SIGNALING BIT in both directions,
+ * and that is deliberate. docs/DETERMINISM.md's canonical-NaN rule
+ * governs arithmetic, where the divergence between implementations is
+ * over which operand's payload survives; these are ENCODING
+ * operations, like abs/negate/copySign/select, and 5.12's own
+ * requirement is that the round trip recover the original
+ * representation. A signaling NaN is written "snan" rather than
+ * "nan", which 5.12.1 allows and which is the spelling that raises
+ * NOTHING - the alternative it offers, writing "nan" and signaling
+ * invalid, would lose the distinction the round trip has to keep. So
+ * no conversion here ever raises invalid.
+ * --------------------------------------------------------------- */
+
+/* Pmin(fmt) from 5.12.2: the significant-digit count at which a
+ * to-decimal / from-decimal round trip under a round-to-nearest
+ * attribute is GUARANTEED to reproduce the original encoding - 9, 17,
+ * 36 and 73 for the four rungs. Derived from 1 + ceiling(p*log10 2),
+ * not tabulated. Returns 0 for a format this library does not carry.
+ *
+ * Fewer digits than this is not a rounding error, it is a different
+ * number: at Pmin - 1 there are encodings whose decimals collide, and
+ * host/tests/character_check.py exhibits one per format rather than
+ * asserting that none exists. */
+CFT_API size_t cft_format_decimal_digits(cft_format fmt);
+
+/* convertFromDecimalCharacter (5.4.2, 5.12.2), n sequences at a time.
+ *
+ * in[i] is a NUL-terminated sequence; d receives n encodings. Every
+ * sequence is converted exactly or correctly rounded under `rnd`, with
+ * inexact / overflow / underflow exactly as round_pack delivers them
+ * for an arithmetic result of the same value. A sequence outside the
+ * syntax refuses the WHOLE call (see the block comment); on any
+ * refusal the contents of d are unspecified. */
+CFT_API cft_status cft_from_decimal_char(cft_device *dev, cft_format fmt,
+                                         cft_round rnd,
+                                         const char *const *in, void *d,
+                                         size_t n, size_t *bad_index,
+                                         uint32_t *flags_out);
+
+/* convertToDecimalCharacter (5.4.2, 5.12.2), ONE value.
+ *
+ * digits == 0 is the EXACT conversion 5.12.2 asks for: every digit of
+ * the exact value, however many that is, trailing zeros removed. Every
+ * binary float is a finite decimal (2^-k = 5^k * 10^-k) so this always
+ * terminates - and for the extremes it is long: about 183,000
+ * significant digits for the smallest binary256 subnormal, 78,914 for
+ * the largest binary256 normal. `rnd` is not consulted and no flag is
+ * raised.
+ *
+ * digits >= 1 asks for exactly that many significant digits,
+ * correctly rounded under `rnd`, trailing zeros KEPT so a caller who
+ * asked for H digits can count H of them. inexact is raised when any
+ * digit was dropped and is the only flag possible: the exponent is
+ * written out in full, so 5.12.2's "exponent not of sufficient width"
+ * overflow and underflow cannot arise.
+ *
+ * The form is sign, one digit, a point, the rest, "e", an explicitly
+ * signed decimal exponent - "-1.5e+3", "1e+0", "5e-324". Zeros are
+ * "0" and "-0" at every digit count (a zero has no significant digit
+ * to round or to pad); the specials are the words above. */
+CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
+                                       cft_round rnd, const void *a,
+                                       size_t digits, char *out, size_t cap,
+                                       size_t *len, uint32_t *flags_out);
+
+/* convertFromHexCharacter (5.4.3, 5.12.3), n sequences at a time.
+ * Exact when the sequence fits the format, correctly rounded under
+ * `rnd` when it carries more bits than the format holds - a hex
+ * sequence's value is dyadic, so "exact" is the common case and the
+ * rounding is the same one round_pack performs anywhere else. */
+CFT_API cft_status cft_from_hex_char(cft_device *dev, cft_format fmt,
+                                     cft_round rnd, const char *const *in,
+                                     void *d, size_t n, size_t *bad_index,
+                                     uint32_t *flags_out);
+
+/* convertToHexCharacter (5.4.3, 5.12.3), ONE value: the shortest
+ * sequence that represents it EXACTLY, which is what 5.12.3 requires
+ * "in the absence of an explicit precision specification". Canonical:
+ * one leading 1, no trailing zeros in the fraction, an explicitly
+ * signed binary exponent - so a subnormal prints with its true
+ * exponent (0x1p-149 for the smallest binary32) and the spelling
+ * depends on the value rather than on which side of the format's
+ * subnormal boundary it sits. Zero is "0x0p+0".
+ *
+ * Exact always, so there is no rounding attribute to consult and no
+ * flag word to mislead - the same reason cft_class has neither. */
+CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
+                                   const void *a, char *out, size_t cap,
+                                   size_t *len);
+
+/* The 9.7 NaN payload operations, elementwise over arrays. 9.7 says
+ * these "signal no exceptions", so none of them has a flags argument.
+ * They are ENCODING operations and say so here for the same reason
+ * the conversions above do: the canonical-NaN rule is about
+ * arithmetic, and reading or writing a payload is not arithmetic.
+ *
+ * The payload is bits d2..d(p-1) of the trailing significand (6.2.1) -
+ * everything below the quiet bit - so the admissible set is
+ * 0 .. 2^(man_w - 1) - 1, and 1 upward for the signaling form, since
+ * payload 0 with the quiet bit clear is an INFINITY encoding rather
+ * than a NaN.
+ *
+ *   cft_get_payload   NaN -> the payload as a floating-point integer;
+ *                     anything else -> -1, which is 9.7's own answer.
+ *   cft_set_payload   a non-negative floating-point integer in the
+ *                     admissible set -> a quiet NaN carrying it;
+ *                     ANYTHING else -> +0, per 9.7.
+ *   cft_set_payload_signaling
+ *                     the same with a signaling NaN, and payload 0 is
+ *                     not admissible, so setPayloadSignaling(+-0) is
+ *                     +0.
+ *
+ * The admissibility test is on the VALUE, so -0 passes it as the
+ * integer zero - 754 settles that -0 equals 0, and every other
+ * value-based operation in this contract reads it the same way. The
+ * NaN a set produces has sign 0, matching the non-negative operand it
+ * came from; 9.7 fixes the sign of the +0 fallback and leaves the
+ * NaN's to the implementation.
+ *
+ * d may alias a: each element is read before it is written. */
+CFT_API cft_status cft_get_payload(cft_device *dev, cft_format fmt,
+                                   const void *a, void *d, size_t n);
+CFT_API cft_status cft_set_payload(cft_device *dev, cft_format fmt,
+                                   const void *a, void *d, size_t n);
+CFT_API cft_status cft_set_payload_signaling(cft_device *dev,
+                                             cft_format fmt, const void *a,
+                                             void *d, size_t n);
+
+/* ---------------------------------------------------------------
+ * The rest of IEEE 754-2019 table 9.1 (part of the 0.6 step)
+ *
+ *   d[i] = 2^a[i] - 1        d[i] = log2(1 + a[i])    d[i] = 1/sqrt(a[i])
+ *   d[i] = 10^a[i]           d[i] = log10(1 + a[i])
+ *   d[i] = 10^a[i] - 1
+ *
+ *   d[i] = a[i]^n[i]         (pown)      d[i] = a[i]^b[i]   (powr)
+ *   d[i] = (1 + a[i])^n[i]   (compound)  d[i] = a[i]^(1/n[i]) (rootn)
+ *
+ * With these ten the library implements every operation table 9.1
+ * lists for the binary formats. CORRECTLY ROUNDED at every format
+ * under every attribute, with clause 9.2.1's special values and exact
+ * flags, on exactly the terms the twenty-nine above are. HOST
+ * operations, like all of them: no cft_run pass, no bus word, `dev` is
+ * context, `d` may alias `a`, and the flag word is the OR across the
+ * batch.
+ *
+ * WHAT IS NEW IS EXACTNESS, NOT MACHINERY. There is no new reduction
+ * and no constant beyond the ln 10 and log10 e phase 1 already
+ * generates. What each of these has is a LARGER exact-case table than
+ * the function it is built from, and each table is proved closed in
+ * docs/TRANSCENDENTALS.md before the Ziv loop under it is allowed to
+ * run - a true value sitting on a rounding boundary is exactly where
+ * that loop does not terminate:
+ *
+ *   exp2m1    EXACT at every integer argument: 2^n - 1 is a dyadic
+ *             rational for every n, and a rounding boundary while
+ *             |n| <= p+1. Past that the value is still known exactly
+ *             and is delivered by a SIDE - 2^n - 1 sits in the top
+ *             quarter of the gap below 2^n, and -(1 - 2^n) in the half
+ *             gap above -1.
+ *   exp10     EXACT at the non-negative integers whose 5^n fits in p+1
+ *             bits. A negative power of ten is not dyadic at all.
+ *   exp10m1   EXACT at the non-negative integers whose 10^n - 1 (odd,
+ *             so its own odd part) fits in p+1 bits.
+ *   log2p1    EXACT where 1 + x is a power of two; log10p1 where it is
+ *             a power of ten. 1 + x is formed EXACTLY on the encoding
+ *             and never as a rounded sum, which is the whole reason
+ *             these functions exist.
+ *   rSqrt     EXACT exactly at the even powers of two, and it can
+ *             neither overflow nor underflow at any rung.
+ *   pown      pow's dyadic analysis with an integer exponent.
+ *   powr      the same with a non-negative base, so no sign question.
+ *   compound  1 + x exactly, then pown's procedure on it.
+ *   rootn     EXACT when the odd significand is a perfect |n|-th power
+ *             and |n| divides the exponent - one verified integer root.
+ *
+ * THE INTEGER OPERAND. 9.2.1 says "n is a finite integral value in
+ * integralFormat", so pown, compound and rootn take an `int64_t`
+ * array beside the encoding array rather than a second encoding that
+ * would have to be asked whether it is integral. That moves the
+ * element count to `count`; `n` is the exponent array, one per
+ * element, and must not be NULL.
+ *
+ * Rows a porter should not have to infer, every one of them confirmed
+ * against MPFR 4.2.2 before it was written down:
+ *
+ *   - rSqrt(+-0) is +-INFINITY with divideByZero. The sign SURVIVES:
+ *     rSqrt(-0) is -infinity. GNU MPFR's mpfr_rec_sqrt returns +inf
+ *     for both zeros; the standard's row is +-inf and this contract
+ *     follows the standard.
+ *   - powr is NOT pow. powr(x, y) for x < 0 is invalid for EVERY y, a
+ *     NaN included; powr(+-0, +-0), powr(+inf, +-0) and powr(+1, +-inf)
+ *     are invalid; and powr(qNaN, y) is a quiet NaN where pow(qNaN, 0)
+ *     is 1. powr(+1, qNaN) is a quiet NaN here - the standard's row is
+ *     "powr(+1, y) is 1 for FINITE y" and it lists powr(x, qNaN) for
+ *     x >= 0 separately - where mpfr_powr returns 1.
+ *   - pown(x, 0) is 1 for any x that is not a signaling NaN, an
+ *     infinity and a quiet NaN included.
+ *   - compound(x, 0) is 1 "for x >= -1 or quiet NaN", so compound of an
+ *     x BELOW -1 with n = 0 is invalid rather than 1. compound(-1, n)
+ *     is +infinity with divideByZero for n < 0 and +0 for n > 0;
+ *     compound(+-0, n) is 1.
+ *   - rootn(x, 0) is invalid: zero is outside the domain for every x.
+ *     rootn(x, 1) is x, exactly and silently. rootn(x, 2) is
+ *     squareRoot(x) on every input EXCEPT x = -0, where the standard's
+ *     own NOTE says they differ: rootn(-0, 2) is +0 by the even-n row
+ *     where squareRoot(-0) is -0.
+ *   - log2p1(-1) and log10p1(-1) are -infinity with divideByZero, and
+ *     an operand below -1 is invalid.
+ *   - A signaling NaN raises invalid and delivers the canonical quiet
+ *     NaN, as everywhere else in this contract.
+ *
+ * docs/TRANSCENDENTALS.md's "Table 9.1, completed" section is the
+ * design, the exact-case proofs and the neighbour-rule derivations -
+ * including which functions get NO neighbour rule and why.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_exp2m1(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_exp10(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_exp10m1(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_log2p1(cft_device *dev, cft_format fmt, cft_round rnd,
+                              const void *a, void *d, size_t n,
+                              uint32_t *flags_out);
+CFT_API cft_status cft_log10p1(cft_device *dev, cft_format fmt,
+                               cft_round rnd, const void *a, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_rsqrt(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* x**y on [0, +inf] x [-inf, +inf], two encodings like pow. */
+CFT_API cft_status cft_powr(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const void *b, void *d, size_t n,
+                            uint32_t *flags_out);
+
+/* The three with an INTEGER exponent. `n` is the per-element exponent
+ * array and `count` the number of elements - the one place in this
+ * header where those two names are not the same argument. */
+CFT_API cft_status cft_pown(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, const int64_t *n, void *d,
+                            size_t count, uint32_t *flags_out);
+CFT_API cft_status cft_compound(cft_device *dev, cft_format fmt,
+                                cft_round rnd, const void *a,
+                                const int64_t *n, void *d, size_t count,
+                                uint32_t *flags_out);
+CFT_API cft_status cft_rootn(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, const int64_t *n, void *d,
+                             size_t count, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
+ *
+ *   d[i] = sin  a[i]      d[i] = sinh  a[i]      d[i] = asinh a[i]
+ *   d[i] = cos  a[i]      d[i] = cosh  a[i]      d[i] = acosh a[i]
+ *   d[i] = tan  a[i]      d[i] = tanh  a[i]      d[i] = atanh a[i]
+ *
+ * CORRECTLY ROUNDED at every format under every attribute, with clause
+ * 9.2.1's special values and exact flags, on exactly the terms the
+ * twenty above are. **The argument of sin, cos and tan is in RADIANS**;
+ * cft_sinpi and friends are the same functions of a half-turn and are
+ * a different, cheaper problem.
+ *
+ * WHAT THESE NINE NEEDED THAT THE TWENTY DID NOT. One thing, and only
+ * the first three need it: `x mod (pi/2)` for an argument as large as
+ * 2^262143. That is a Payne-Hanek reduction against a stored 2/pi of
+ * 270,336 bits (host/src/mp_2opi.h, generated, never transcribed), and
+ * the cancellation it has to survive is a MEASUREMENT rather than a
+ * theorem - the irrationality measure of pi is far too weak to bound it
+ * usefully at this exponent range. The reduction measures the
+ * cancellation from the bits it has and widens its window until the
+ * working precision is covered; past what the stored constant covers it
+ * REFUSES with CFT_ERR_INTERNAL, as everything else in this contract
+ * does rather than return a plausible number.
+ *
+ * The six hyperbolics need no reduction and no new constant: they are
+ * exp and log in different clothes, in the cancellation-free forms
+ * phase 1 already justifies.
+ *
+ * HOST operations, like the twenty: no cft_run pass is issued, no bus
+ * word is produced, `dev` is context, `d` may alias `a`, `n` is
+ * arbitrary and the flag word is the OR across the batch.
+ *
+ * THE EXACT CASES ARE THE ZEROS, AND THAT IS A THEOREM. By
+ * Hermite-Lindemann, e^z is transcendental for every nonzero algebraic
+ * z; sin(x) = a algebraic makes e^(ix) a root of z^2 - 2iaz - 1, and
+ * sinh(x) = a makes e^x a root of z^2 - 2az - 1, so both force x = 0.
+ * Every operand here is a dyadic rational, hence algebraic. So:
+ *
+ *   sin, tan, sinh, tanh, asinh, atanh   exact only at +-0, giving +-0
+ *   cos, cosh                            exact only at 0, giving 1
+ *   acosh                                exact only at 1, giving +0
+ *
+ * and EVERY other result is inexact. There is no half-integer table
+ * here the way there is for sinPi: an odd multiple of pi/2 is
+ * irrational, so no representable argument is ever a zero of cos or a
+ * pole of tan.
+ *
+ * Rows a porter should not have to infer:
+ *
+ *   - sin, cos and tan of an INFINITY are invalid: no limit exists.
+ *   - `tanh(+-inf) = +-1`, EXACTLY, raising nothing. It is a limit that
+ *     happens to be representable.
+ *   - `atanh(+-1) = +-infinity` with **divideByZero** - 754-2019 7.3's
+ *     rule for an exact infinity from finite operands, the same row
+ *     tanPi takes at a pole - and `|x| > 1` is invalid, infinities
+ *     included.
+ *   - `acosh(x)` for any x below 1 is invalid: zeros, every negative
+ *     value, and -infinity. `acosh(+inf)` is +infinity.
+ *   - sinh and cosh OVERFLOW for a large argument, through round_pack
+ *     like any other overflow, so roundTowardZero delivers maxfinite.
+ *     tan can overflow too, near a pole; sin, cos, tanh, asinh, acosh
+ *     and atanh cannot.
+ *   - UNDERFLOW happens for sin, tan, sinh, asinh, atanh and tanh of a
+ *     tiny argument and follows clause 7 through the same round_pack.
+ *   - A signaling NaN raises invalid and delivers the canonical quiet
+ *     NaN, as everywhere else in this contract.
+ *
+ * docs/TRANSCENDENTALS.md's phase-3 section is the design, the
+ * reduction's error bound, and the measured cancellation per format.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_sin(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_cos(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_tan(cft_device *dev, cft_format fmt, cft_round rnd,
+                           const void *a, void *d, size_t n,
+                           uint32_t *flags_out);
+CFT_API cft_status cft_sinh(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_cosh(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_tanh(cft_device *dev, cft_format fmt, cft_round rnd,
+                            const void *a, void *d, size_t n,
+                            uint32_t *flags_out);
+CFT_API cft_status cft_asinh(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_acosh(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+CFT_API cft_status cft_atanh(cft_device *dev, cft_format fmt, cft_round rnd,
+                             const void *a, void *d, size_t n,
+                             uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The scaled product reductions (clause 9.4)
+ *
+ *   scaleB(pr, sf) ~ product over i in [0, n) of a[i]         cft_scaled_prod
+ *   scaleB(pr, sf) ~ product of (a[i] + b[i])             cft_scaled_prod_sum
+ *   scaleB(pr, sf) ~ product of (a[i] - b[i])            cft_scaled_prod_diff
+ *
+ * The last three operations of 754-2019 9.4, added 2026-09-03 as part
+ * of the 0.6 step. They return a PAIR - a significand and an integer
+ * scale - which is why they are not cft_reduce opcodes: that entry
+ * point delivers one element, and a pair does not fit through it.
+ *
+ * THREE NAMED ENTRY POINTS RATHER THAN ONE WITH A `kind` ARGUMENT.
+ * cft_run and cft_reduce take an opcode because an opcode is a field
+ * in a device word; these issue no device pass, so a `kind` enum would
+ * be a second opcode space living beside cft_op with none of its
+ * meaning - and docs/DETERMINISM.md records what a stale opcode number
+ * costs. The arities differ too (one vector, then two), so a single
+ * entry point would need a b-is-NULL-unless rule checked at run time
+ * where three functions check it at compile time. Every other
+ * pair-free host operation in this header - cft_div, cft_pow,
+ * cft_atan2 - is named, and these follow it.
+ *
+ *   pr        receives ONE element, cft_format_size(fmt) bytes.
+ *   scale_out receives the int64 scale. Neither may be NULL.
+ *   b         is required by _sum and _diff, and is not read by
+ *             cft_scaled_prod, which does not take it.
+ *
+ * WHY A SCALED PRODUCT EXISTS: a product of many elements leaves any
+ * format's range long before it stops being meaningful. This one
+ * cannot overflow or underflow at all, and that is a property of the
+ * construction rather than a claim about typical inputs:
+ *
+ *   THE TREE IS THE SAME TREE cft_reduce uses - the fixed
+ *   index-shaped one - and every node carries (significand, scale)
+ *   with the significand in +-[1, 2). A node multiplies its two
+ *   children's significands under the caller's attribute, which is the
+ *   node's ONE rounding, then extracts the binade back out: the
+ *   product is in +-[1, 4), so that extraction is a shift of 0, 1 or 2
+ *   binades and is exact. Both multiply operands are therefore always
+ *   in +-[1, 2), and no such product can leave any rung of the ladder.
+ *
+ * 754-2019 9.4 requires exactly that - "the scaled result, pr, shall
+ * not be affected by overflow or underflow" - and leaves the scaling
+ * itself implementation-defined, which a determinism contract may not:
+ * pinning the tree and the [1, 2) normalisation is what makes two
+ * conforming implementations return the same pair.
+ *
+ * pr is in +-[1, 2) for every n, INCLUDING n == 0, where 9.4 fixes the
+ * answer: "pr is 1 and sf is +0 without exception" - the
+ * multiplicative identity, where an empty sum gives the additive one.
+ *
+ * THE LEAF OF _sum AND _diff IS ONE CONTRACT ROUNDING of a[i] + b[i]
+ * (or a[i] - b[i]) in the caller's attribute, and its result is the
+ * factor everything below sees. Those two are therefore the ONLY ones
+ * that can signal overflow or underflow, and only from that addition -
+ * never from the product tree. Both are compositions, and hold as
+ * such bit for bit:
+ *
+ *     cft_scaled_prod_sum(a, b)  == cft_scaled_prod(cft_run(ADD, a, b))
+ *     cft_scaled_prod_diff(a, b) == cft_scaled_prod(cft_run(SUB, a, b))
+ *
+ * with the add's flags OR'd in.
+ *
+ * SPECIAL VALUES are 9.4's, in 9.4's order, applied to the FACTORS -
+ * which for _sum and _diff are the rounded sums, not the raw operands:
+ *
+ *   - any factor a NaN            -> quiet NaN, sf = 0. invalid only
+ *                                    if some operand was signalling.
+ *   - an infinity AND a zero      -> invalid, quiet NaN, sf = 0.
+ *                                    ("A product of inf x 0 signals
+ *                                     the invalid operation
+ *                                     exception.")
+ *   - an infinity, no zero        -> that infinity, sf = 0, NO
+ *                                    exception.
+ *   - a zero, no infinity         -> a zero, sf = 0, no exception.
+ *
+ * The sign of that infinity or zero is the sign of the true product,
+ * the XOR of every factor's sign bit. 9.4 leaves it open; a
+ * determinism contract cannot. A sum of unlike infinities needs no row
+ * of its own: that addition raises invalid and produces a quiet NaN by
+ * itself, and the NaN row then delivers it.
+ *
+ * divideByZero is NEVER signalled - 9.4 asks for that explicitly
+ * ("even if implemented with logB"), and this is not implemented with
+ * logB: the binade comes out of the encoding, and a zero never reaches
+ * the tree.
+ *
+ * THE SCALE is an int64 and is accumulated with checked additions. If
+ * one would leave the int64 range the call signals invalid and
+ * delivers the canonical quiet NaN for pr with sf = 0, which is what
+ * 9.4 requires of a scale factor too large for integralFormat. It is
+ * unreachable in practice - a leaf contributes at most emax + p - 1 =
+ * 262,379 at fp256 and a node at most 2, so a vector would need about
+ * 3.5e13 elements, 1.1 PB of fp256 - and it is implemented anyway,
+ * because "cannot happen" is not a result.
+ *
+ * HOST operations: no cft_run pass is issued, no bus word is produced
+ * and `dev` is context, exactly like the transcendentals. There is no
+ * tile accumulator for a scaled product - the accumulator streams
+ * ADDs - so there is nothing here for a device to carry, and the
+ * results are bit-identical across backends by construction.
+ *
+ * python/cft_golden/reduce.py's scaled_prod() is the definition of
+ * every bit; docs/DETERMINISM.md holds the contract's statement of it.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_scaled_prod(cft_device *dev, cft_format fmt,
+                                   cft_round rnd, const void *a,
+                                   void *pr, int64_t *scale_out,
+                                   size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_scaled_prod_sum(cft_device *dev, cft_format fmt,
+                                       cft_round rnd, const void *a,
+                                       const void *b, void *pr,
+                                       int64_t *scale_out, size_t n,
+                                       uint32_t *flags_out);
+CFT_API cft_status cft_scaled_prod_diff(cft_device *dev, cft_format fmt,
+                                        cft_round rnd, const void *a,
+                                        const void *b, void *pr,
+                                        int64_t *scale_out, size_t n,
+                                        uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * The augmented arithmetic operations (754-2019 clause 9.5)
+ *
+ *   augmentedAddition(x, y)        cft_augmented_add
+ *   augmentedSubtraction(x, y)     cft_augmented_sub
+ *   augmentedMultiplication(x, y)  cft_augmented_mul
+ *
+ * Each returns a PAIR: r[i], the operation rounded, and e[i], the error
+ * that rounding made. Together they carry the exact result the format
+ * alone cannot hold, which is what a compensated summation, a
+ * double-double product or an exactly-rounded dot product is built out
+ * of - and what those algorithms currently reconstruct by hand from
+ * TwoSum and Dekker splitting, correctly only under assumptions the
+ * compiler is free to break.
+ *
+ * THESE TAKE NO ROUNDING ATTRIBUTE, and that is the standard's choice
+ * rather than a simplification. 9.5 fixes the rounding itself:
+ *
+ *   "This standard specifies a single rounding direction to be used in
+ *    the operations in this subclause, defined as roundTiesTowardZero:
+ *    the floating-point number nearest to the infinitely precise result
+ *    shall be delivered; if the two nearest floating-point numbers
+ *    bracketing an unrepresentable infinitely precise result are
+ *    equally near, the one with smaller magnitude shall be delivered."
+ *
+ * That direction is not one of the five attributes of clause 4.3 and
+ * this library does not add a sixth attribute for it: passing a
+ * cft_round is impossible here because there is nothing to pass. The
+ * tie rule differs from roundTiesToEven only at an exact midpoint, and
+ * only where the lower neighbour's last bit is odd - so an
+ * implementation that quietly used roundTiesToEven would pass every
+ * test that did not aim at that case, which is why the vector sets aim
+ * at it at every binade edge.
+ *
+ * HOST operations, like the clause-5 set and the transcendentals: no
+ * cft_run pass is issued, no bus word is produced, `dev` is context,
+ * `n` is arbitrary and the flag word is the OR across the batch. r and
+ * e must not overlap each other - passing the same pointer for both is
+ * CFT_ERR_INVALID_ARGUMENT, and any other overlap is undefined - while
+ * either MAY alias a or b, since each element is read before either
+ * output is written. A tile-composed route (a TwoSum, or an FMA
+ * residual for the product) is a plausible later fast path and would
+ * have to reproduce these bits exactly; it is not what runs today, and
+ * the rounding is a reason as well as the arithmetic, since the tile's
+ * five attributes do not include this one.
+ *
+ * THE SPECIAL CASES, from 9.5 rather than from habit:
+ *
+ *   - Any NaN operand gives the canonical quiet NaN as BOTH results
+ *     ("propagates a NaN as both results"), invalid raised only for a
+ *     signaling one. An invalid operation - inf + (-inf) for the sum,
+ *     inf * 0 for the product - "produces the same quiet NaN for both
+ *     outputs" with invalid raised.
+ *   - An infinite r gives that infinity as BOTH results. When it came
+ *     from an infinite OPERAND it signals nothing; when it came from
+ *     overflow it signals overflow and inexact.
+ *   - OVERFLOW happens strictly above 2^emax x (2 - 2^-p), and a result
+ *     landing exactly ON that midpoint rounds to the largest finite
+ *     "with no change in sign" - and raises NOTHING, because 9.5
+ *     signals inexact "only when roundTiesTowardZero(x + y) overflows".
+ *     Overflow always delivers an infinity here, in both directions:
+ *     "roundTiesTowardZero carries all overflows to infinity with the
+ *     sign of the intermediate result".
+ *   - UNDERFLOW is a statement about the ERROR TERM, not about r: it is
+ *     raised when e is "non-zero and lies strictly between +-b^emin".
+ *     Since e is exact, that is underflow WITHOUT inexact - the one
+ *     place in this contract where those two part company. A subnormal
+ *     r with an exactly representable residual raises nothing at all:
+ *     "the operation's subnormal and zero results are exact".
+ *   - THE SIGN OF A ZERO e is the sign of r when the residual is
+ *     exactly zero, so augmentedAddition(-3, 0) delivers (-3, -0) and
+ *     augmentedAddition(3, -3) delivers (+0, +0). r's own zero sign is
+ *     6.3's: +0 for an exact cancellation, the operands' sign for
+ *     like-signed zeros, the XOR of the signs for a product.
+ *   - e IS ALWAYS REPRESENTABLE for the sum and the difference: both
+ *     operands are multiples of the format's smallest quantum, so their
+ *     exact sum is, and the residual is at most half an ulp of r.
+ *     cft_augmented_mul has the one exception 9.5 names - a product
+ *     residual with "non-zero digits ... strictly between
+ *     +-b^(emin-p+1)" - and delivers that residual ROUNDED the same
+ *     way, raising underflow and inexact. That is the only case in
+ *     which r + e is not exactly x op y, and it is the only case in
+ *     which either operation raises inexact without overflowing.
+ *
+ * python/cft_golden/augmented.py defines every bit and flag;
+ * docs/DETERMINISM.md carries the contract statement and
+ * docs/HOSTAPI.md the design. Part of the 0.6 step.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_augmented_add(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
+                                     const void *a, const void *b,
+                                     void *r, void *e, size_t n,
+                                     uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * Device-resident buffers (optional, for throughput)   (real in 0.11)
+ *
+ * cft_run copies host memory in and out. That is the right default -
+ * it always works and it is what a first port should use - but it
+ * costs a round trip per call. When the same operands feed several
+ * calls, allocate here instead and hand the mapped pointers to
+ * cft_run: the library recognises its own buffers and skips staging.
+ *
+ * On the software backend these are ordinary allocations and the sync
+ * calls are no-ops, so code written this way stays portable. Ask
+ * cft_caps.buffers_resident which kind of device you have, and
+ * cft_buffer_get_info what actually happened to a particular buffer.
+ *
+ * WHAT IT IS WORTH. On the card, cft_run staging every operand across
+ * PCIe on every call gives 141.8 / 81.4 / 40.3 / 20.0 M fma elements
+ * a second at fp32/64/128/256 for one tile; the same tile with its
+ * operands already there does 462.6 / 235.1 / 118.7 / 59.6, and four
+ * tiles do 1,833.9 / 937.2 / 474.0 / 238.4 (docs/BENCHMARKS.md). The
+ * difference is the bus, and these five calls are how a caller stops
+ * paying for it.
+ *
+ * ---------------------------------------------------------------
+ * HOW TO USE IT
+ * ---------------------------------------------------------------
+ *
+ *     cft_alloc(dev, bytes, &buf);
+ *     memcpy(cft_buffer_data(buf), ..., bytes);   fill the mirror
+ *     cft_buffer_to_device(buf);                  publish it
+ *     for (...) cft_run(dev, op, fmt, rnd,
+ *                       cft_buffer_data(a), ..., cft_buffer_data(d),
+ *                       n, &flags, NULL);         no staging
+ *     cft_buffer_from_device(d);                  read the result
+ *     ... = cft_buffer_data(d);
+ *     cft_buffer_free(buf);
+ *
+ * An INTERIOR POINTER works: cft_buffer_data(buf) + k is recognised
+ * as byte k of that buffer, so a caller may run over a window of a
+ * larger allocation. The window must lie wholly inside the buffer -
+ * one that runs off the end is treated as ordinary host memory and
+ * staged, because a device copy that is shorter than the run is how
+ * a library returns bytes nobody wrote.
+ *
+ * ---------------------------------------------------------------
+ * WHO OWNS THE CONTENTS - the one rule
+ * ---------------------------------------------------------------
+ *
+ * A device-resident buffer has one HOST MIRROR (what cft_buffer_data
+ * returns) and, on a device backend, one or more DEVICE COPIES that
+ * the library creates as it needs them. They are separate memory, and
+ * exactly one of them is authoritative at any moment:
+ *
+ *   - after cft_alloc, and after cft_buffer_to_device, the HOST
+ *     MIRROR is authoritative: write it through cft_buffer_data, then
+ *     call cft_buffer_to_device to publish what you wrote;
+ *   - after a run that writes the buffer as its `d` output, the
+ *     DEVICE COPY is authoritative and the mirror is stale, until
+ *     cft_buffer_from_device brings it back.
+ *
+ * A CALLER WHO BREAKS THE RULE GETS CORRECT BITS, SLOWLY - never
+ * wrong ones. Specifically:
+ *
+ *   - Using a device-authoritative buffer as an INPUT without calling
+ *     cft_buffer_from_device first is honoured: the library reads the
+ *     device copy back itself, then feeds it in. The answer is the
+ *     one the rule would have given; what it costs is the round trip
+ *     the rule exists to avoid.
+ *   - cft_buffer_from_device on a buffer no run has written is a
+ *     no-op, as is cft_buffer_to_device on one whose copies are
+ *     already current. Both are always safe to call.
+ *   - Writing the mirror through cft_buffer_data and NOT calling
+ *     cft_buffer_to_device is the one thing the library cannot see,
+ *     because a plain store leaves no trace. The run then uses the
+ *     bytes the buffer last published. On the software backend the
+ *     mirror IS the buffer, so the same code sees the new bytes - so
+ *     this is the one place where forgetting a sync call changes an
+ *     answer, and it is why the sync calls exist at all. Call
+ *     cft_buffer_to_device after every write to the mirror; it costs
+ *     nothing when nothing changed hands.
+ *
+ * cft_buffer_free releases the device copies with the mirror. Closing
+ * the device first is allowed and releases them too: the buffer stays
+ * valid as plain host memory afterwards, and cft_buffer_free on it is
+ * still correct - the same NULL- and order-tolerance cft_close() has
+ * always promised.
+ *
+ * ---------------------------------------------------------------
+ * WHAT THE LIBRARY DOES WITH IT
+ * ---------------------------------------------------------------
+ *
+ * A device copy is per (TILE, ROLE), created lazily the first time
+ * the buffer is used in that role on that tile, and it lives in the
+ * memory group that tile's kernel argument reaches - because each
+ * compute unit's four AXI masters own one HBM pseudo-channel each
+ * (hw/link.cfg, hw/link_quad.cfg), so "the device copy" is not one
+ * thing: a buffer read as `a` by tile 0 and as `b` by tile 1 has two
+ * copies in two channels of two groups. That is also the ceiling:
+ * each channel is 256 MB per tile, so a buffer larger than that
+ * cannot be resident and is staged in slices instead, exactly as a
+ * plain host pointer is.
+ *
+ * A run split across tiles gives each tile a WINDOW of the buffer.
+ * XRT's sub-buffers carry an offset alignment (measured: 4096 bytes
+ * on XRT 2.14), and this library's slices are cut at 256-bit beats,
+ * so a window whose offset is not a multiple of that alignment is
+ * STAGED for that call rather than bound - the answer is identical
+ * either way and the cost is the copy. In practice every run large
+ * enough for the rate to matter is aligned; cft_buffer_get_info's
+ * counters say which you got, and its `staged_why` says why not.
+ *
+ * cft_reduce binds its input the same way. Its `partials` are the
+ * library's own and never resident, and the composed reductions
+ * (CFT_DOT, CFT_SUMSQ, CFT_SUMABS) pass through an internal scratch
+ * array which is likewise not resident, so those spend one staged
+ * pass whatever their operands are. cft_program_run_ex binds a, b, c
+ * and `deposits`; its image, constant bank, counts and scratch
+ * blocks are staged always, being neither operand-shaped nor large.
+ * --------------------------------------------------------------- */
+typedef struct cft_buffer cft_buffer;
+
+CFT_API cft_status cft_alloc(cft_device *dev, size_t bytes,
+                             cft_buffer **out);
+CFT_API void      *cft_buffer_data(cft_buffer *buf); /* host-visible ptr */
+CFT_API cft_status cft_buffer_to_device(cft_buffer *buf);
+CFT_API cft_status cft_buffer_from_device(cft_buffer *buf);
+CFT_API void       cft_buffer_free(cft_buffer *buf);
+
+/* What actually happened to this buffer                   (ABI 0.11)
+ *
+ * cft_caps.buffers_resident says what the DEVICE does; this says what
+ * one BUFFER got, which is a different question with the same shape
+ * as every other honesty check in this library. Residency is created
+ * lazily and can decline to happen - a buffer too large for an HBM
+ * channel, a window at an offset XRT will not bind - and a program
+ * that reports its own throughput while silently staging every call
+ * is reporting a number about the bus.
+ *
+ * So the counters are cumulative over the buffer's life and count
+ * OPERAND BINDINGS, not calls: one cft_run on four tiles binds its
+ * `a` buffer four times, once per tile, and each of those four is
+ * counted separately because each is a separate decision.
+ *
+ * Fields are only ever appended and struct_size gates them exactly as
+ * cft_caps' does: zero the struct, set struct_size to sizeof, and on
+ * return struct_size is how many bytes were actually filled. */
+typedef struct cft_buffer_info {
+    size_t   struct_size;      /* in: sizeof; out: bytes filled */
+    size_t   bytes;            /* what cft_alloc was asked for */
+    int      resident;         /* 1 if this buffer has device copies
+                                * NOW. Zero before the first run that
+                                * uses it, since they are created on
+                                * first use, and zero forever on a
+                                * backend whose caps say so */
+    int      device_authority; /* 1 if a run has written this buffer as
+                                * its `d` output and cft_buffer_from_
+                                * device has not been called since - so
+                                * the mirror is stale and reading it
+                                * would read the run before last */
+    uint64_t resident_binds;   /* operand bindings served from a device
+                                * copy, with no transfer */
+    uint64_t staged_binds;     /* operand bindings that were copied
+                                * anyway, for a reason below */
+    char     staged_why[112];  /* why the most recent staged binding
+                                * staged, or "" if none ever did */
+} cft_buffer_info;
+
+CFT_API cft_status cft_buffer_get_info(cft_buffer *buf,
+                                       cft_buffer_info *out);
+
+/* ---------------------------------------------------------------
+ * Programs - the orbit sequencer
+ *
+ * cft_run applies one operation to every element. A program applies a
+ * SEQUENCE to every element, on-chip, without the operands making a
+ * round trip to memory between steps - which is the difference
+ * between 0.125 flops per byte and something worth putting four
+ * compute units behind.
+ *
+ * This sits beside cft_run rather than replacing it, exactly as
+ * docs/HOSTAPI.md said it would. docs/SEQUENCER.md is the design and
+ * the instruction encoding; python/cft_golden/seq.py is the
+ * definition of correct.
+ *
+ * A program is a flat byte image - header, constant bank, instruction
+ * stream - so it is the same bytes on disk, in this call, and in the
+ * device's instruction memory. cft_program_load validates it: a
+ * program a device could execute ambiguously is refused here rather
+ * than interpreted there.
+ * --------------------------------------------------------------- */
+typedef struct cft_program cft_program;
+
+/* Sticky status bits, reported through cft_program_run's bus_out.
+ * Bits 0..2 are the engine's bus faults and mean the output is not
+ * valid; bit 3 is the trimmed-build precision refusal - which is why
+ * this one moved to bit 4 on 2026-09-01, before any device had ever
+ * reported it. It does NOT invalidate the output: a lane that
+ * deposits more than the program's max_deposits drops the excess and
+ * sets it - what fit is correct and reproducible, and what was lost
+ * is the tail. */
+#define CFT_STATUS_DEPOSIT_OVERFLOW (1u << 4)
+
+CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
+                                    size_t bytes, cft_program **out);
+CFT_API void       cft_program_free(cft_program *prog);
+
+/* Program header flags - the image's `flags` word, which is the header
+ * word that was reserved[0] until 2026-09-08. Every other bit is
+ * reserved-must-be-zero and an image that sets one is CFT_ERR_ARTIFACT,
+ * which is what lets a later flag be added without a version step. */
+#define CFT_PROG_FLAG_BANK_EXT (1u << 0)  /* the image carries NO constant
+                                           * section: n_consts still says
+                                           * how many constants the program
+                                           * addresses, and every run
+                                           * supplies them through
+                                           * cft_program_run_bank. Needs
+                                           * CFT_SEQ_FEAT_BANK_PTR on the
+                                           * device the program is loaded
+                                           * for; the loader refuses it by
+                                           * name elsewhere */
+#define CFT_PROG_FLAG_SCRATCH_IO (1u << 1) /* the header's second reserved
+                                            * word is `scratch_io`:
+                                            * [15:0] n_scratch_in,
+                                            * [31:16] n_scratch_out, each
+                                            * at most the device's
+                                            * max_scratch. Every run then
+                                            * preloads the first
+                                            * n_scratch_in slots of every
+                                            * lane from a buffer and reads
+                                            * the first n_scratch_out back
+                                            * into another, through
+                                            * cft_program_run_ex - which
+                                            * such a program takes and
+                                            * the two older entry points
+                                            * refuse by name. Needs
+                                            * CFT_SEQ_FEAT_SCRATCH_IO;
+                                            * with the bit CLEAR the
+                                            * scratch_io word must be
+                                            * zero, as the reserved word
+                                            * it was always had to be */
+
+/* What the loaded program is, so a caller can size its buffers
+ * without parsing the image itself.
+ *
+ * Fields are only ever appended, and struct_size gates them the same
+ * way cft_caps' do: zero the struct, set struct_size to sizeof, and on
+ * return struct_size is how many bytes were actually filled. */
+typedef struct cft_program_info {
+    size_t     struct_size;    /* in: sizeof; out: bytes filled */
+    cft_format format;
+    uint32_t   max_deposits;   /* deposit slots per element */
+    uint32_t   n_insns;
+    uint32_t   n_consts;
+    /* ---- appended, ABI 0.9 ---- */
+    uint32_t   flags;          /* the header's flags word;
+                                * CFT_PROG_FLAG_BANK_EXT and
+                                * CFT_PROG_FLAG_SCRATCH_IO above are the
+                                * bits assigned. A caller built
+                                * against the older struct passes the
+                                * older struct_size and never sees it */
+    /* ---- appended, ABI 0.10: the per-lane scratch ----
+     *
+     * The first two are the header's scratch_io word split in half,
+     * and are zero unless CFT_PROG_FLAG_SCRATCH_IO is set. They are
+     * what sizes the two buffers of cft_run_args: n * n_scratch_in
+     * elements in and n * n_scratch_out out, lane-major and dense, so
+     * a caller sizes its buffers from the program rather than from a
+     * number it wrote down somewhere else. */
+    uint32_t   n_scratch_in;   /* slots a lane preloaded before the run */
+    uint32_t   n_scratch_out;  /* slots a lane read back after it */
+    /* What the INSTRUCTIONS touch, which is a different question: one
+     * past the highest slot any STL or LDL names, or the device's whole
+     * scratch depth when the program uses the indexed forms STX/LDX,
+     * whose slot is not known until the run. Zero for a program that
+     * uses no scratch at all. A tool that wants to know whether a
+     * program will fit a smaller tile asks this and cft_caps.max_scratch,
+     * rather than disassembling the image. */
+    uint32_t   scratch_used;
+} cft_program_info;
+
+CFT_API cft_status cft_program_get_info(cft_program *prog,
+                                        cft_program_info *out);
+
+/* Run a program over n elements.
+ *
+ *   a, b, c    initialise each lane's r0, r1 and r2 - the same three
+ *              streams cft_run reads. b and c may be NULL, in which
+ *              case those registers start at +0.
+ *   deposits   n * max_deposits elements. Every slot is written: one
+ *              a lane never deposited into reads as +0, and that is
+ *              normative, because a run whose untouched slots kept
+ *              whatever the buffer held would not be reproducible.
+ *   counts     n deposit counts, or NULL. Needed to tell a deposited
+ *              +0 from an untouched slot, which the buffer alone
+ *              cannot express.
+ *
+ * Deposit i,d lands at index i * max_deposits + d, which depends on
+ * the element's own index and nothing else - so a run split across
+ * four tiles writes the same bytes to the same places as a run on one.
+ */
+CFT_API cft_status cft_program_run(cft_program *prog,
+                                   const void *a, const void *b,
+                                   const void *c,
+                                   void *deposits, uint32_t *counts,
+                                   size_t n,
+                                   uint32_t *flags, uint32_t *bus);
+
+/* The same run, with the constant bank supplied as DATA   (ABI 0.9)
+ *
+ * A BANK_EXT image (CFT_PROG_FLAG_BANK_EXT) carries no constant
+ * section: it is a header and an instruction stream, and its constants
+ * arrive here, `n_consts` format-width values, `bank_bytes` of them
+ * exactly. One image per positive, loaded once, with the levers and
+ * the pass riding as data - which is what makes the image's own digest
+ * a stable name for the program while the run's digest still covers
+ * everything that went in.
+ *
+ *   bank        n_consts format-width values, densely packed exactly
+ *               as an image's constant section is laid out
+ *   bank_bytes  must equal n_consts * cft_format_size(format)
+ *
+ * Everything else is cft_program_run's, unchanged. The two refuse each
+ * other's programs and say so: cft_program_run on a BANK_EXT program
+ * is CFT_ERR_INVALID_ARGUMENT naming this call, and this call on a
+ * program that carries its own constants is CFT_ERR_INVALID_ARGUMENT
+ * too - a program has one source of constants, and letting a caller
+ * pass a bank that was silently ignored is how two machines end up
+ * computing on different numbers while agreeing about the image.
+ *
+ * A BANK_EXT program only LOADS on a device whose caps carry
+ * CFT_SEQ_FEAT_BANK_PTR, so reaching this call at all means the device
+ * has the register. docs/SEQUENCER.md, revision 2, R3. */
+CFT_API cft_status cft_program_run_bank(cft_program *prog,
+                                        const void *bank, size_t bank_bytes,
+                                        const void *a, const void *b,
+                                        const void *c,
+                                        void *deposits, uint32_t *counts,
+                                        size_t n,
+                                        uint32_t *flags_out,
+                                        uint32_t *bus_out);
+
+/* Everything a run can carry, in one struct               (ABI 0.10)
+ *
+ * cft_program_run took nine arguments, cft_program_run_bank eleven,
+ * and revision 3 would have made it thirteen. So the positional
+ * signatures stop growing here: one entry point takes a struct, and
+ * the two calls above become wrappers that fill it - the same
+ * executor, the same checks, the same answers, so nothing that used
+ * them has to move.
+ *
+ *   struct_size   sizeof(cft_run_args), so the struct can grow the way
+ *                 cft_caps does. It is an INPUT struct, though, and
+ *                 that reverses one rule: a size this library does not
+ *                 recognise is REFUSED rather than truncated, because
+ *                 the fields a newer caller set would otherwise be
+ *                 silently ignored - and a run that quietly dropped a
+ *                 scratch buffer is exactly the failure the byte-count
+ *                 rules below exist to prevent.
+ *   a, b, c       initialise r0, r1 and r2, as cft_program_run's do;
+ *                 b and c may be NULL and those registers start at +0
+ *   n             elements
+ *   bank          the constant bank of a CFT_PROG_FLAG_BANK_EXT
+ *                 program, n_consts format-width values;
+ *                 bank_bytes must be exactly that, and both are zero
+ *                 and NULL for a program that carries its own
+ *   scratch_in    n * n_scratch_in format-width values, LANE-MAJOR
+ *                 and dense - lane i's slot s is element
+ *                 i * n_scratch_in + s - preloaded into the first
+ *                 slots of each lane's scratch before its first
+ *                 instruction. NULL with zero bytes for a program
+ *                 that declares no scratch I/O
+ *   scratch_out   n * n_scratch_out likewise, written after each
+ *                 lane's last deposit. Every element is written: an
+ *                 untouched slot reads as +0, the same normative rule
+ *                 the deposit buffer has
+ *   deposits      n * max_deposits elements, as cft_program_run's
+ *   counts        n deposit counts, or NULL
+ *   flags_out     the run's sticky IEEE exceptions, or NULL
+ *   bus_out       STATUS, carrying CFT_STATUS_DEPOSIT_OVERFLOW, or NULL
+ *
+ * BYTE COUNTS MUST MATCH EXACTLY, all three of them. A buffer that is
+ * merely large enough would let the library and the caller disagree
+ * about the shape of the block while both believing they agreed, and
+ * the lane-major layout means a wrong n_scratch_in does not overrun
+ * anything - it silently gives every lane somebody else's slots.
+ *
+ * A program that declares scratch I/O refuses cft_program_run and
+ * cft_program_run_bank by name and takes this call; a program that
+ * declares none refuses a non-NULL scratch buffer here, for the same
+ * reason a program with its own constants refuses a bank.
+ *
+ * docs/SEQUENCER.md revision 3, R4 and R5; docs/HOSTAPI.md. */
+typedef struct cft_run_args {
+    size_t      struct_size;          /* in: sizeof(cft_run_args) */
+    const void *a, *b, *c;            /* the streams; b and c may be NULL */
+    size_t      n;
+    const void *bank;        size_t bank_bytes;         /* BANK_EXT programs */
+    const void *scratch_in;  size_t scratch_in_bytes;   /* n * n_scratch_in * esz, or NULL */
+    void       *scratch_out; size_t scratch_out_bytes;  /* n * n_scratch_out * esz, or NULL */
+    void       *deposits;    uint32_t *counts;
+    uint32_t   *flags_out;   uint32_t *bus_out;
+} cft_run_args;
+
+CFT_API cft_status cft_program_run_ex(cft_program *prog,
+                                      const cft_run_args *args);
+
+/* SHA-256 of the image bytes followed by the bank bytes   (ABI 0.9)
+ *
+ * What ran, as one hash of program and data together. A program is a
+ * flat byte image precisely so that a readback can attest it, and a
+ * BANK_EXT program moves half of what determines the answer out of the
+ * image - so hashing the image alone would name the schedule and say
+ * nothing about the numbers it ran on.
+ *
+ * `bank` may be NULL with `bank_bytes` zero, which is the image alone
+ * and the only form a program that carries its own constants accepts.
+ * A non-NULL bank must be the size that program's bank is, exactly, as
+ * cft_program_run_bank requires - a digest over a bank the program
+ * could not have run is a name for nothing.
+ *
+ * `out` receives 32 bytes. cft_sha256 below is the same hash, for a
+ * caller that wants to name a deposit buffer the same way. */
+CFT_API cft_status cft_program_digest(cft_program *prog,
+                                      const void *bank, size_t bank_bytes,
+                                      uint8_t out[32]);
+
+/* SHA-256 (FIPS 180-4) of `bytes` bytes                   (ABI 0.9)
+ *
+ * The library carries one because cft_program_digest needs one, and it
+ * is exported because every tool that attests a run wants the same
+ * hash over its own outputs - a deposit buffer, a chain of printed
+ * lines - and four of them had a private copy each until this existed.
+ * `out` receives 32 bytes. A NULL `data` with `bytes` zero is the
+ * empty message, which has an answer. */
+CFT_API cft_status cft_sha256(const void *data, size_t bytes,
+                              uint8_t out[32]);
+
+/* ---------------------------------------------------------------
+ * The status word (754-2019 7.1), the six operations on subsets of
+ * flags (5.7.4), and the conformance predicates (5.7.1)   (ABI 0.7)
+ *
+ * Every call above returns the exceptions IT raised in flags_out.
+ * That is a per-call answer, and 7.1 asks for something else as well:
+ *
+ *   "For each kind of exception the implementation shall provide a
+ *    corresponding status flag ... Status flags shall be lowered only
+ *    at the user's request."
+ *
+ * and goes on to require that the user can test and alter them
+ * individually or collectively and save and restore them all at once
+ * - 5.7.4's six operations.
+ *
+ * So a device handle carries a STATUS WORD: one uint32_t in the same
+ * cft_exception bits, into which every entry point ORs the union of
+ * its per-element flags, and which nothing in this library ever
+ * lowers. A caller lowers it; nobody else. flags_out keeps working
+ * exactly as before and is unaffected by any of this - the two are
+ * written from the same value at the same moment, so they can never
+ * disagree about what a call signalled.
+ *
+ * THE WORD NEVER INFLUENCES A RESULT. Nothing in libcft reads it back
+ * to decide anything: not a rounding, not a special case, not a
+ * branch. It is write-only to the arithmetic and readable only
+ * through the six calls below, so the determinism contract
+ * (docs/DETERMINISM.md) is exactly what it was - the same inputs give
+ * the same bits whatever the word holds, and clearing it or not
+ * changes no answer anywhere.
+ *
+ * A fresh device opens with every flag lowered, which is 7.1's "A
+ * program that does not inherit status flags from another source
+ * begins execution with all status flags lowered." The word is per
+ * DEVICE, and a cft_device is not thread-safe (as this header has
+ * always said), so the flags of two threads do not collide because
+ * two threads do not share a device.
+ *
+ * Each operation takes a mask - 5.7.4's exceptionGroup, "any subset
+ * of the exceptions" - built from cft_exception bits. CFT_FLAGS_ALL
+ * is the whole set, for the collective forms.
+ *
+ * A NULL device is accepted everywhere here and behaves as a handle
+ * whose word is permanently zero: the three mutators (lower, raise,
+ * restore) do nothing, cft_test_flags answers 0, and
+ * cft_save_all_flags returns 0. That matches
+ * cft_close() and cft_buffer_free(), which have always tolerated
+ * NULL, and it means a caller need not branch on a device it failed
+ * to open before asking a question the answer to which is "nothing
+ * was raised".
+ * --------------------------------------------------------------- */
+
+/* Every exception this library defines, as one mask. Derived from the
+ * cft_exception bits rather than written out, so a sixth flag would
+ * not need this line edited. */
+#define CFT_FLAGS_ALL ((uint32_t)(CFT_FLAG_INVALID | CFT_FLAG_DIVBYZERO | \
+                                  CFT_FLAG_OVERFLOW | CFT_FLAG_UNDERFLOW | \
+                                  CFT_FLAG_INEXACT))
+
+/* lowerFlags(exceptionGroup): clear the flags named by mask. One of
+ * the only two things in the system that can lower a flag;
+ * cft_restore_flags, below, is the other. */
+CFT_API void cft_lower_flags(cft_device *dev, uint32_t mask);
+
+/* raiseFlags(exceptionGroup): set the flags named by mask, without an
+ * exception having been signalled - 7.1's "status flags are raised
+ * without an exception being signaled only at the user's request". */
+CFT_API void cft_raise_flags(cft_device *dev, uint32_t mask);
+
+/* testFlags(exceptionGroup): nonzero if ANY flag named by mask is
+ * raised, 0 otherwise. A predicate, not an intersection: the value is
+ * 1 or 0 so that it cannot be mistaken for a flag word. */
+CFT_API int cft_test_flags(cft_device *dev, uint32_t mask);
+
+/* saveAllFlags(): "Returns a representation of the state of all
+ * status flags." That representation is the word itself, in
+ * cft_exception bits, which is what makes it directly comparable with
+ * any call's flags_out. */
+CFT_API uint32_t cft_save_all_flags(cft_device *dev);
+
+/* restoreFlags(flags, exceptionGroup): put the flags named by mask
+ * back to their state in `saved`. RESTORES rather than ORs - a flag
+ * inside the mask that is low in `saved` comes back low - so that
+ *
+ *     uint32_t s = cft_save_all_flags(dev);
+ *     ... anything ...
+ *     cft_restore_flags(dev, s, CFT_FLAGS_ALL);
+ *
+ * is the round trip 5.7.4 exists to provide. Flags outside the mask
+ * are untouched. */
+CFT_API void cft_restore_flags(cft_device *dev, uint32_t saved,
+                               uint32_t mask);
+
+/* testSavedFlags(flags, exceptionGroup): the same question as
+ * cft_test_flags, asked of a word the caller already holds. No device
+ * argument, because no device is involved - 5.7.4 puts the saved
+ * flags in the first operand precisely so that this is a pure
+ * predicate. */
+CFT_API int cft_test_saved_flags(uint32_t saved, uint32_t mask);
+
+/* 5.7.1's three conformance predicates, "true if and only if this
+ * programming environment conforms to" the named version. They are
+ * constants, and each rests on something stated elsewhere rather than
+ * on this header's opinion:
+ *
+ *   is754version2019 - TRUE from ABI 0.7 on. What it rests on is
+ *     clause 5 being complete for the binary formats this library
+ *     supports, together with clause 4's attributes and clauses 6
+ *     and 7 as written; docs/COMPLIANCE.md is that statement, clause
+ *     by clause, and is where a reader should go to check it rather
+ *     than take this line's word. The claim is radix 2 only: decimal
+ *     formats are excluded by design (3.5 permits a per-radix claim),
+ *     and clause 8's alternate exception handling is a recommendation
+ *     this library does not implement.
+ *
+ *   is754version2008 - FALSE, and not because anything is missing.
+ *     754-2008 REQUIRED minNum, maxNum, minNumMag and maxNumMag in
+ *     its clause 5.3.1. 754-2019 removed them and put the magnitude
+ *     forms among the recommended operations of 9.6 instead - the
+ *     NOTE at the end of 2019's 5.3.1 says exactly that: "The minNum
+ *     and maxNum operations of the 2008 version of the standard have
+ *     been replaced by the recommended operations of 9.6." The two
+ *     differ on a signaling NaN: 2019's minimumNumber signals invalid
+ *     and still returns the number, where 2008's minNum returned the
+ *     other operand quietly for a quiet NaN and had no such rule.
+ *     This library implements the 2019 semantics (see cft_min_mag and
+ *     friends below, and CFT_MINNUM), so it does not provide 2008's
+ *     required operations and cannot claim 2008.
+ *
+ *   is754version1985 - FALSE. Not because it is believed untrue, but
+ *     because it has never been evaluated against the 1985 text: no
+ *     part of this project's verification is written against that
+ *     document, and a predicate that says "true" on the strength of
+ *     nobody having checked is exactly the kind of claim 5.7.1 exists
+ *     to make answerable.
+ *
+ * These describe a programming environment, so they take no device
+ * and no format, and they are safe to call before cft_open(). */
+CFT_API int cft_is754version1985(void);
+CFT_API int cft_is754version2008(void);
+CFT_API int cft_is754version2019(void);
+
+/* ---------------------------------------------------------------
+ * The magnitude forms of minimum and maximum (754-2019 9.6)
+ *
+ * The other four of clause 9.6, beside the four opcodes CFT_MIN,
+ * CFT_MAX, CFT_MINNUM and CFT_MAXNUM. The standard defines each in
+ * one line, by deferral:
+ *
+ *   "minimumMagnitude(x, y) is x if |x| < |y|, y if |y| < |x|,
+ *    otherwise minimum(x, y)." (9.6)
+ *
+ * and the same shape for the other three, with minimumNumber,
+ * maximum and maximumNumber in the last position and the comparison
+ * reversed for the two maxima.
+ *
+ * HOST operations of the nextUp kind: a comparison of the two
+ * sign-cleared encodings and then a selection, with no rounding, no
+ * attribute, no arithmetic and no opcode - so there is nothing for a
+ * device to accelerate, no `rnd` argument, and results are
+ * bit-identical on every backend by construction. Like the other host
+ * entry points they do not gate on the device's format mask.
+ *
+ * Reading the definition literally settles all three edge families,
+ * and this library does read it literally:
+ *
+ *   * A NaN has no magnitude, so neither |x| < |y| nor |y| < |x| can
+ *     hold and every NaN case is the "otherwise" - which means each
+ *     of these four inherits the NaN rule of the operation named in
+ *     its last position. The two plain forms return the canonical
+ *     quiet NaN if either operand is a NaN; the two ...Number forms
+ *     return the number when the other operand is a NaN, and a quiet
+ *     NaN only when both are. Either way a signaling NaN operand
+ *     raises invalid and nothing else can be raised at all.
+ *   * Equal magnitudes of opposite sign are the "otherwise" too:
+ *     cft_min_mag(+3, -3) is minimum(+3, -3) = -3 and
+ *     cft_max_mag(+3, -3) is maximum(+3, -3) = +3. An implementation
+ *     that quietly prefers x or y on that tie is not conforming, and
+ *     it is the one case worth a test of its own.
+ *   * +-0 have equal magnitude, so the zeros also come from the base
+ *     operation: -0 for the two minima, +0 for the two maxima.
+ *
+ * The result is always one of the two operand encodings, bit for bit,
+ * except where the base operation delivers a NaN - and then it is
+ * this contract's canonical quiet NaN, the same canonicalisation
+ * every other operation here performs (docs/DETERMINISM.md).
+ *
+ * python/cft_golden/softfloat.py's fminmag/fmaxmag/fminnummag/
+ * fmaxnummag define every bit and flag below. d may alias a or b:
+ * each element is read before it is written, as everywhere else.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_min_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_max_mag(cft_device *dev, cft_format fmt,
+                               const void *a, const void *b, void *d,
+                               size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_minnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out);
+CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, uint32_t *flags_out);
+
+/* ---------------------------------------------------------------
+ * Conformance
+ *
+ * Replay the published vector sets through this device and report the
+ * first disagreement. This is how a port, a backend, or an independent
+ * implementation proves itself - and how you audit ours.
+ *
+ * dir is the directory holding the .jsonl sets (vectors/out when
+ * NULL). Returns CFT_OK when every case matched, CFT_ERR_INTERNAL on a
+ * disagreement - which is a bug in this library, since the vectors are
+ * the definition - and CFT_ERR_ARTIFACT if no set could be read.
+ *
+ * report (if non-NULL) is filled in every case, not only on failure:
+ * on success it names the sets that ran and the ones skipped because
+ * this device lacks the format. A conformance pass that quietly
+ * checked nothing would be worse than a failing one, so the summary is
+ * not optional.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
+                                   char *report, size_t report_size,
+                                   uint64_t *cases_checked);
+
+/* ---------------------------------------------------------------
+ * The formatOf arithmetic operations (754-2019 clause 5.4.1)
+ *
+ *   formatOf-addition(a, b)              cft_formatof_add
+ *   formatOf-subtraction(a, b)           cft_formatof_sub
+ *   formatOf-multiplication(a, b)        cft_formatof_mul
+ *   formatOf-division(a, b)              cft_formatof_div
+ *   formatOf-squareRoot(a)               cft_formatof_sqrt
+ *   formatOf-fusedMultiplyAdd(a, b, c)   cft_formatof_fma
+ *
+ * The six arithmetic operations with the OPERANDS in one binary format
+ * and the RESULT in another, rounded once. 5.4.1 requires them for
+ * every ordered pair of supported arithmetic formats, in these words:
+ *
+ *   "... for destinations of all supported arithmetic formats, and,
+ *    for each destination format, for operands of all supported
+ *    arithmetic formats with the same radix as the destination
+ *    format"
+ *
+ * - the six being addition, subtraction, multiplication, division,
+ * squareRoot and fusedMultiplyAdd, each in its formatOf form.
+ *
+ * Everything above this block takes one cft_format and uses it for the
+ * operands and the result both. These take two: `sfmt` for a, b and c,
+ * `dfmt` for d. Sixteen ordered pairs x six operations x five
+ * attributes, and the same-format pairs are the operations that were
+ * already here, bit for bit.
+ *
+ * SIX ENTRY POINTS RATHER THAN ONE DISPATCHER, and the reason is not
+ * taste. A dispatcher would need a first argument naming the operation,
+ * and the only such namespace this library has is cft_op - an OPCODE
+ * space that is on the wire, in the device's opcode field and in every
+ * published vector set. Two of these six have no opcode and never will:
+ * division and square root are COMPOSITIONS here (cft.h says so above),
+ * not tile instructions, so a dispatcher keyed on cft_op could not
+ * express half of the clause without inventing opcode numbers for
+ * things the hardware does not do. The arities differ too - one, two
+ * and three operands - so a single signature would carry three pointers
+ * whose meaning changed per operation, which is exactly the shape
+ * cft_run has and pays for with the steering table. That table exists
+ * because ADD, SUB, MUL and FMA really are one hardware opcode. These
+ * six are not.
+ *
+ * WHICH DIRECTION DOES WHAT, AND WHY YOU SHOULD CARE
+ *
+ * dfmt AT LEAST AS WIDE AS sfmt: the operands are widened exactly with
+ * cft_convert and the existing same-format operation is issued. The
+ * interchange ladder nests - every binary32 value is a binary64 value,
+ * in significand bits and in exponent range both - so the widening
+ * rounds nothing and the operation's rounding is still the only one.
+ * The point of taking this route rather than a host-side one is that
+ * the arithmetic still runs where it would have run: on a device
+ * backend the cft_run / cft_div / cft_sqrt underneath is a tile pass,
+ * and bus_out carries its fault word.
+ *
+ * dfmt NARROWER THAN sfmt: the exact result is formed on the host and
+ * rounded ONCE against the destination's descriptor, through the same
+ * cft_sf_round_pack seam every other operation in this library rounds
+ * through. There is no tile pass and bus_out reads back 0.
+ *
+ * WHY NOT ROUND IN sfmt AND CONVERT DOWN. Because it gives the wrong
+ * answer, and not only in principle. The rule that says otherwise -
+ * double rounding through an intermediate of at least 2p + 2 bits is
+ * innocuous for the basic operations - has a hypothesis this
+ * configuration does not meet: it is about operands of the
+ * DESTINATION's precision. Here they carry the SOURCE's, and a quotient
+ * or a root of two wide values can sit as close as it likes to a narrow
+ * midpoint. python/cft_golden/formatof.py's double_rounding_witness()
+ * constructs the counterexample from the format descriptors alone, for
+ * division, square root and fused multiply-add, on every ordered pair
+ * of this ladder; python/tests/test_formatof.py runs all eighteen and
+ * host/src/formatof.c's banner carries the arithmetic. The composed
+ * route lands one ulp low every time, the tie in the destination broken
+ * to even by a first rounding that should not have happened. So all
+ * six narrow the exact way, and the FMA - which no intermediate width
+ * can rescue, because its addend is a free choice of source value - is
+ * only the most obvious member of the family rather than the only one.
+ *
+ * THE REST IS THE ORDINARY CONTRACT. d receives n elements of
+ * cft_format_size(dfmt) bytes; a, b and c hold n elements of
+ * cft_format_size(sfmt). Unused operands may be NULL (b for add and
+ * sub, b and c for sqrt, c for mul and div). The rounding attribute is
+ * consulted for the single rounding. Flags are the OR across the batch;
+ * every exception is the DESTINATION's - a product of two unremarkable
+ * binary64 values overflows a binary32 destination and says so, and a
+ * difference of two lands on binary32's subnormal grid and raises
+ * underflow with inexact. A signaling NaN operand raises invalid and
+ * the result is dfmt's canonical quiet NaN (6.2.1, and this contract's
+ * standing payload deviation).
+ *
+ * ALIASING: d MUST NOT overlap a, b or c. Unlike the same-format entry
+ * points, the elements change size here, so an in-place call would
+ * overwrite operand i+1 while writing result i - the same rule, and the
+ * same reason, cft_convert states. It is not policed.
+ *
+ * 5.11 - COMPARISON ACROSS TWO BINARY FORMATS - NEEDS NO ENTRY POINT.
+ * The clause asks that comparisons of data in different binary formats
+ * be "exact, as if the data were converted to a common format with
+ * unbounded exponent range and precision". On this ladder the common
+ * format is the wider of the two and cft_convert into it is exact, so
+ * the composition IS the comparison: convert the narrower operand, then
+ * use CFT_CMPLT / CFT_CMPLE / CFT_CMPEQ or cft_cmp_sig. A signaling NaN
+ * raises invalid on the way through the conversion exactly as it would
+ * have in the comparison, so the signal is neither lost nor doubled.
+ * python/cft_golden/formatof.py's compare() states the composition and
+ * python/tests/test_formatof.py checks it against exact rationals;
+ * docs/DETERMINISM.md records it as a composition rather than a gap.
+ *
+ * python/cft_golden/formatof.py defines every bit and flag below.
+ * --------------------------------------------------------------- */
+CFT_API cft_status cft_formatof_add(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_sub(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_mul(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_div(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+CFT_API cft_status cft_formatof_sqrt(cft_device *dev, cft_format sfmt,
+                                     cft_format dfmt, cft_round rnd,
+                                     const void *a, void *d,
+                                     size_t n, uint32_t *flags_out,
+                                     uint32_t *bus_out);
+CFT_API cft_status cft_formatof_fma(cft_device *dev, cft_format sfmt,
+                                    cft_format dfmt, cft_round rnd,
+                                    const void *a, const void *b,
+                                    const void *c, void *d,
+                                    size_t n, uint32_t *flags_out,
+                                    uint32_t *bus_out);
+
+#ifdef __cplusplus
+}  /* extern "C" */
+#endif
+
+#endif /* CFT_H */

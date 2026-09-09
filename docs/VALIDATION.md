@@ -9737,3 +9737,205 @@ The pair lives in `~/cardday-ra` beside the three before it and needs
 a host at ABI 0.11 or later, which the box has; docs/CARDDAY.md names
 it. Run records: `/tmp/res-ra-*/`, `/tmp/r3-ra-*/` on the box, copied
 beside this session's scratchpad.
+
+## 2026-09-09 - libcft on microcontrollers, and a serial vector replay
+
+The library on parts with kilobytes: a Raspberry Pi Pico, an ESP32 dev
+module, and the 8-bit ATmegas of the Arduino Uno, Nano and Mega.
+Nothing was ported - libcft has no floating-point dependence to port -
+so what this campaign establishes is two other things: **how much of
+the library fits on which part**, decided by measurement, and **a way
+to hold a board to the published vectors** that works on anything with
+a UART. docs/EMBEDDED.md carries all of it; this is the ledger entry.
+
+**No board was attached.** Every board number below is a COMPILE
+result. The conformance results are replays through host processes
+built from the bytes a board would run, and the pending list at the end
+names what only silicon can answer.
+
+### The mechanism
+
+A build profile, `host/include/cft_config.h`: one macro per removable
+piece, one profile macro (`CFT_TINY`) for what an 8-bit part needs, and
+a default for every one of them that reproduces the library as it was.
+`bindings/arduino/sync.py` vendors host/include and host/src into the
+Arduino library byte for byte and records a sha256 each;
+`--check` is the gate that keeps the copy honest.
+`host/tools/serial_replay.py` is the host half of the replay,
+`bindings/arduino/cft-arduino/src/cft_replay.c` the device half, and
+`bindings/arduino/loopback` runs that same device half as a host
+process so the harness can be exercised - and made to fail - before any
+board exists. `make embedded` runs the lot.
+
+**How close "reproduces it as it was" came, measured.** Fourteen of the
+fifteen translation units compile at the default profile to objects
+BYTE-IDENTICAL to the ones the same compiler produced at the parent
+commit. The fifteenth is device.c: same sections, same symbols, same
+sizes, and the difference is fourteen instructions of cft_reduce that
+the scheduler ordered differently around an added test it folds away to
+nothing. Total text across all fifteen is 280,248 bytes both ways.
+
+### Four changes the library itself needed, each a number
+
+    softfloat.h   cft_fmt_desc's bias/emax/emin were `int`, and `int`
+                  is 16 bits on an AVR. fp256's row holds 262,143;
+                  stored in an int16 it reads -3,073. Now int32_t,
+                  which is what `int` already was everywhere else.
+    softfloat.c   `uint32_t num = 1u << 28` in the reciprocal seed. On
+                  a 16-bit int that shift is undefined and measures
+                  ZERO - every seed zero, every division wrong,
+                  silently. `1uL`. Four more of the same shape in
+                  mpfloat.c, transcend.c, program.c and divsqrt.c.
+    divsqrt.c     CHUNK, the fixed scratch a composed operation holds,
+    clause5.c     was 4,096 elements: 393 KB at binary64 and 1.5 MB at
+                  binary256. Every cft_div on every board here would
+                  have answered CFT_ERR_OUT_OF_MEMORY. It is CFT_CHUNK
+                  now - 4,096 on a host, 32 on a 32-bit board, 8 under
+                  CFT_TINY - and a chunk boundary is where the loop
+                  reloads its slice, so no answer moves.
+    device.c      CFT_ALU_EXT_IMUL is published by cft_sw_seq_caps(),
+                  which a build with no sequencer does not call. So a
+                  CFT_TINY device answered "unsupported" for opcode 30
+                  and 2,000 elementwise cases were SKIPPED rather than
+                  checked - a hole that passes. Found by the loopback
+                  replay. The bit describes the ALU, so it is published
+                  either way now.
+
+### binary128 and binary256 are refused on an 8-bit AVR
+
+By the compiler, with the number that refuses them. An unpacked
+significand's exponent reaches emin - (p-1), and the fused multiply-add
+adds two of them on its first line:
+
+    format   emin-(p-1)   ep at worst   fits int16?
+    fp32           -149          -298   yes, 100x over
+    fp64         -1,074        -2,148   yes, 15x over
+    fp128       -16,494       -32,988   NO, and by 220
+    fp256      -262,378      -524,756   no, by a factor of 16
+
+So the binding limit on the Mega is the width of `int`, not its 8 KB.
+The transcendentals are out for a second, independent reason:
+mp_2opi.h is 117,220 bytes of table and on AVR a const object is RAM.
+
+### CFT_BN_LIMBS: the requirement and no margin
+
+9 limbs at fp64 and 18 at fp128 against bigint.h's 5p+3 bound of 269
+and 568 bits, where fp256 keeps its historical 64. The asymmetry is
+deliberate: too few limbs is LOUD (bigint.c refuses, softfloat.c
+returns CFT_ERR_INTERNAL, the replay reports it on the first case that
+needs the width) and too little stack is SILENT. Measured on an
+ATmega328P, avr-gcc 7.3.0 -Os -fstack-usage, cft_run + cft_sf_compute:
+
+    limbs   sizeof(cft_bn)   bits    fp64
+        8               34    256     630 bytes
+        9               38    288     686
+       10               42    320     742
+       12               50    384     854
+       16               66    512   1,072
+
+8 limbs - below the bound - also replays every published fp32 and fp64
+case without a refusal. It is not the value chosen, and that is the
+point of having a bound: the sets are a sample, 269 bits is a statement
+about the whole input space.
+
+The whole chain one replayed fp64 case takes on an ATmega328P, from
+the .su files of the profile the sketch builds:
+
+    cft_replay_line (rp_do_run inlined into it)   168
+    cft_run                                       210
+    cft_sf_compute  (sf_fma inlined into it)      476
+    deepest leaf under it, cft_bn_mul              91
+                                          worst   945
+
+against 1,117 bytes free in the Uno's VectorReplay build - about 130
+bytes of margin, and no recursion in the chain.
+
+### What ran, and what it said
+
+One host: Windows 11, mingw64 gcc 16.1.0, avr-gcc 7.3.0,
+arduino-cli 1.5.2-rc.1 (arduino:avr 1.8.8, esp32:esp32 3.3.0,
+rp2040:rp2040 6.1.0), Python 3.12.9.
+
+    the host gates, unchanged by any of the above:
+      make -C host test        api-test, reduce-parts, cft-selftest over
+                               vectors/out - 168 sets, 1,071,635 cases,
+                               all matching - and the C/ctypes check
+      make -C host remotetest  remote_check: every check passed
+      make -C host wstest      remote_test: 67 checks, 0 failures
+
+    the loopback census, one profile per board class, every one of them
+    compiling the VENDORED copy of the library:
+      full      (a host)          168 sets, 1,071,635 cases, all matching
+      board     (Pico, ESP32)     168 sets, 1,071,635 cases, all matching
+      tiny      (Uno/Nano/Mega)    24 sets,   195,248 cases, all matching
+      tiny128   (fp128 ceiling)    36 sets,   271,776 cases, all matching
+
+    the negative control, six ways of answering wrongly, six caught:
+      bits   one nibble of the result encoding          CAUGHT
+      flags  one nibble of the exception flags          CAUGHT
+      crc    the frame's checksum, answer intact        CAUGHT
+      seq    the sequence number, answer intact         CAUGHT
+      drop   no answer at all                           CAUGHT
+      text   one nibble of a to_decimal sequence        CAUGHT
+
+    pytest python/tests/test_serial_replay.py   20 passed
+      the frame, CRC-16/CCITT-FALSE against its published check value
+      0x29B1, the refusals, the set-discovery order, and an end-to-end
+      run against the loopback and against a loopback that lies.
+
+    arduino-cli compile --warnings all, five FQBNs by three examples,
+    fifteen of fifteen, ZERO warnings:
+
+      FQBN                     sketch          flash        RAM     free
+      arduino:avr:uno          Hello          13,180  40%    608    1,440
+      arduino:avr:uno          VectorReplay   22,246  68%    931    1,117
+      arduino:avr:uno          Bench          14,754  45%    812    1,236
+      arduino:avr:nano         Hello          13,180  42%    608    1,440
+      arduino:avr:nano         VectorReplay   22,246  72%    931    1,117
+      arduino:avr:nano         Bench          14,754  48%    812    1,236
+      arduino:avr:mega         Hello          13,524   5%    608    7,584
+      arduino:avr:mega         VectorReplay   38,980  15%  4,193    3,999
+      arduino:avr:mega         Bench          15,120   5%  2,092    6,100
+      esp32:esp32:esp32        Hello         304,535  23% 21,016  306,664
+      esp32:esp32:esp32        VectorReplay  419,323  31% 78,520  249,160
+      esp32:esp32:esp32        Bench         303,211  23% 53,784  273,896
+      rp2040:rp2040:rpipico    Hello          63,520   3%  9,204  252,940
+      rp2040:rp2040:rpipico    VectorReplay  173,096   8% 66,736  195,408
+      rp2040:rp2040:rpipico    Bench          62,824   3% 41,972  220,172
+
+Most of the ESP32 and Pico flash is their cores: Hello on an ESP32 is
+304 KB of which the Arduino-ESP32 runtime is about 290. The library's
+own weight shows in the Pico column, where Hello (elementwise only) is
+63 KB and VectorReplay (which reaches the transcendentals, the
+character conversions and the formatOf arithmetic) is 173 KB.
+
+Two sizings were decided by a failure rather than an estimate. 104 KB
+of static replay buffers overflowed the ESP32 linker's dram0_0_seg by
+3,088 bytes - that segment is about 160 KB after the IDF's statics, not
+the 520 KB the part has; 56 KB fits. And VectorReplay with the whole
+verb set is about 38 KB against the Uno's 32,256, so on a part with
+under 64 KB of flash the responder carries the elementwise verb and the
+staging and drops the explanatory half of a refusal - which is a choice
+about the replay TOOL and not the library, since cft_reduce and the
+rest are still there for a sketch that calls one.
+
+The Uno and the Nano therefore replay the elementwise sets: fp32 and
+fp64, every opcode, all five rounding attributes, all five exception
+flags. The Mega adds the reductions, the augmented arithmetic and 9.6.
+The Pico and the ESP32 carry everything, and skip 25 of the 2,145 fp256
+to_decimal cases, whose sequences run past their 32 KB character buffer
+(the longest is 183,476 characters).
+
+### Pending on hardware
+
+None of the above ran on a part. What a board settles, and the command
+that settles it, is the last section of docs/EMBEDDED.md; in short:
+`Hello` for the ABI, the backend and one fused multiply-add whose
+answer is known in advance; `Bench` for elements a second per format
+and operation; and `serial_replay.py --port COMn` for the sets each
+board carries. Two numbers in particular are static analyses rather
+than measurements and want a board to confirm them: the 130-byte stack
+margin on an ATmega328P, whose failure mode is corruption rather than a
+refusal, and what a large `to_decimal` costs the Pico's heap, where the
+arbitrary-precision natural behind the sequence is allocated and
+nothing here has measured it.
