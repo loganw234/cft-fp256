@@ -37,11 +37,14 @@
 //         format  == cfg_prec (a program is compiled for one format)
 //         n_insns <= IMEM_D, n_consts <= KMEM_D,
 //         max_deposits <= MAXD
-//         flags[31:1] == 0 and the remaining reserved word == 0
-//     (the last line is revision 2's: the 0x600 tile checked neither
-//     header word, which is why BANK_EXT needs a CAPS bit and not
-//     only a flag - that tile would read constants out of an image
-//     that has none)
+//         flags[31:2] == 0; the second header word is zero unless
+//           flags.SCRATCH_IO, and under it neither of its halves is
+//           past SCRATCH_D
+//     (the last line is revision 2's and revision 3's: the 0x600 tile
+//     checked neither header word, which is why BANK_EXT needs a CAPS
+//     bit and not only a flag - that tile would read constants out of
+//     an image that has none - and the revision-2 tile's refusal of a
+//     non-zero second word is in turn what guards SCRATCH_IO)
 //     (max_deposits == 0 is LEGAL - the model allows it, every
 //     deposit then overflows.) Every constant the header declares is
 //     stored, up to KMEM_D: since 2026-09-07 an instruction with `kx`
@@ -59,11 +62,16 @@
 //     executes as HALT, an unmatched ENDREP as HALT.
 //
 //  2. EXECUTE, in blocks of NBEATS beats = NBEATS * lanes_per_beat
-//     lanes. Per block: r0/r1/r2 load from cfg_a/b/c at the block's
-//     element offset (r3..r31 start +0), a lane is ACTIVE iff its
-//     global index < cfg_n; then the instruction stream runs to HALT
-//     under seq.py's semantics - ALU results, deposits and FLAG
-//     contributions all masked per-lane by active (P3); REPEAT/ENDREP
+//     lanes. Per block: the scratch is wiped to +0 as far as the
+//     program can reach into it and, under flags.SCRATCH_IO, its
+//     first n_scratch_in slots are preloaded per lane from cfg_sin
+//     (lane-major and dense, so the preload is a transpose and runs
+//     one element a cycle); r0/r1/r2 load from cfg_a/b/c at the
+//     block's element offset (r3..r31 start +0), a lane is ACTIVE iff
+//     its global index < cfg_n; then the instruction stream runs to
+//     HALT under seq.py's semantics - ALU results, deposits, SCRATCH
+//     STORES, SCRATCH LOADS and FLAG contributions all masked
+//     per-lane by active (P3); REPEAT/ENDREP
 //     from a 4-deep loop stack; SETACT narrows on (magnitude != 0, so
 //     -0 deactivates); ACTALL reactivates every lane THE CALLER HAS
 //     (global index < cfg_n) - the padding lanes the model never sees
@@ -77,9 +85,11 @@
 //     cfg_d is written - a lane's d-th deposit at element index
 //     (i * max_deposits + d), slots the lane never reached as +0
 //     (P2: addressed by index, never arrival) - then the per-lane
-//     deposit counts as uint32 at cfg_cnt + 4*i. Lanes at or beyond
-//     cfg_n get neither deposits nor counts: the tail of the caller's
-//     buffers is theirs, untouched.
+//     deposit counts as uint32 at cfg_cnt + 4*i, then, under
+//     flags.SCRATCH_IO, n_scratch_out slots a lane at cfg_sout in the
+//     same lane-major layout the preload reads. Lanes at or beyond
+//     cfg_n get none of the three: the tail of the caller's buffers
+//     is theirs, untouched.
 //
 //  4. DONE. `flags` is the sticky OR of active-lane contributions
 //     across the whole run; err[2:0] carry the engine's three bus
@@ -127,6 +137,19 @@
 //                   Slots are append-only, so "slot < count" IS the
 //                   written mask and untouched slots need no
 //                   bookkeeping to read back as +0.
+//   scratch         SCRATCH_D x NBEATS entries of BEAT_BITS,
+//                   addressed {slot, beat} exactly as the register
+//                   file is addressed {reg, beat}: 128 KiB a tile at
+//                   256 slots and 16 beats, the same silicon at every
+//                   precision. One write port and one read port, but
+//                   each of the eight word banks carries its OWN
+//                   address, because STX and LDX take the slot from
+//                   `rb` and the lanes of one beat hold divergent rb
+//                   values - the deposit buffer's refinement, for the
+//                   deposit buffer's exact reason. Wiped per block to
+//                   as far as the program can reach into it, so a
+//                   program that names no slot pays no cycles and a
+//                   slot no lane wrote still reads +0.
 //
 // The issue/drain machine is the one the design sketched: an ALU
 // instruction issues over the block's beats back to back, results
@@ -142,7 +165,19 @@ module cft_seq #(
     parameter int NBEATS     = 16,     // lane block; see the guard below
     parameter int MAXD       = 64,     // deposit slots per lane, hw cap
     parameter int IMEM_D     = 1024,   // instruction capacity
-    parameter int KMEM_D     = 256,    // constant capacity (image-side)
+    // Constant capacity (image-side). 256 -> 512 at revision 3, where
+    // imm[30:28] became the ninth bit of each kx index. This DEFAULT
+    // matters beyond the unit bench: tb/test_krnl.py resolves
+    // `localparam int KREG = KMEM_D` through it and holds
+    // cft_krnl's SEQ_KIDX_W against the result, so a default that
+    // lagged the instantiation would have CAPS advertising a bank the
+    // decoder could not address.
+    parameter int KMEM_D     = 512,
+    // Scratch slots a lane (revision 3, R4). A POWER OF TWO: the
+    // indexed forms reduce rb modulo this, and a mask is the only
+    // reduction a cycle can afford. SCRATCH_D * NBEATS beats of
+    // BEAT_BITS is 128 KiB at 256 and 16.
+    parameter int SCRATCH_D  = 256,
     parameter int ADDR_W     = 64,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
@@ -173,6 +208,15 @@ module cft_seq #(
     // master the image does - the two never overlap in time - so no
     // master is added and hw/link.cfg needs nothing.
     input  logic [ADDR_W-1:0] cfg_bank,
+    // The per-run scratch block (SCRATCH_IN_PTR / SCRATCH_OUT_PTR,
+    // revision 3 R5). Read and written only when the header's
+    // flags.SCRATCH_IO is set, and then only for the slots the header
+    // declares. cfg_sin rides the A master with the image and the
+    // bank - three phases of one read stream that never overlap in
+    // time - and cfg_sout rides the D master with the deposits and
+    // the counts, for the same reason.
+    input  logic [ADDR_W-1:0] cfg_sin,
+    input  logic [ADDR_W-1:0] cfg_sout,
     input  logic [ADDR_W-1:0] cfg_cnt,
     output logic              busy,
     output logic              done,       // one-cycle pulse
@@ -275,12 +319,28 @@ module cft_seq #(
 
   // control codes (instruction bit 31 set), from seq.py
   localparam logic [7:0] C_HALT = 8'd0, C_REPEAT = 8'd1, C_ENDREP = 8'd2,
-                         C_DEPOSIT = 8'd3, C_SETACT = 8'd4, C_ACTALL = 8'd5;
+                         C_DEPOSIT = 8'd3, C_SETACT = 8'd4, C_ACTALL = 8'd5,
+                         C_STL = 8'd6, C_LDL = 8'd7,
+                         C_STX = 8'd8, C_LDX = 8'd9;
+
+  // ---- the scratch's geometry (revision 3, R4) -----------------------
+  // SCRSW is the slot field's width and the reduction the indexed
+  // forms apply: rb's low SCRSW bits ARE the slot, which is a mask and
+  // not a division only because SCRATCH_D is a power of two.
+  // At least one bit, so a one-slot build does not elaborate a [-1:0]
+  // index - the same guard KAW carries.
+  localparam int SCRSW = (SCRATCH_D > 1) ? $clog2(SCRATCH_D) : 1;
+  localparam int SCR_D = SCRATCH_D * NBEATS;
+  // = SCRSW + NBSH, and written from SCR_D for the reason RFAW is:
+  // NBSH is declared with the lane state, further down. The address is
+  // {slot, beat}, exactly the register file's {reg, beat}.
+  localparam int SCRAW = $clog2(SCR_D);
 
   // ---- run-latched configuration -------------------------------------
   logic [1:0]        prec_q;
   logic [63:0]       n_q;
   logic [ADDR_W-1:0] a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
+  logic [ADDR_W-1:0] sin_q, sout_q;
 
   // element bytes / lanes per beat / log2(lanes per beat)
   logic [5:0] esz;
@@ -315,6 +375,19 @@ module cft_seq #(
 
   // ---- program state --------------------------------------------------
   logic [31:0] h_ninsns, h_nconsts, h_maxdep;
+  // The header's second word under flags.SCRATCH_IO (revision 3, R5):
+  // slots preloaded into every lane before the first instruction, and
+  // slots read back out after the last deposit. Both are refused past
+  // SCRATCH_D at the header, so SCRSW+1 bits hold either.
+  logic [SCRSW:0] h_nsin, h_nsout;
+  logic           scr_io_q;
+  // What the INSTRUCTION STREAM can reach, learned while it is parsed:
+  // one past the highest static STL/LDL slot, and whether any STX or
+  // LDX appears at all. The per-block wipe is sized from these, which
+  // is what keeps a program that uses no scratch costing no cycles for
+  // one - and every existing bench's cycle count unchanged.
+  logic [SCRSW:0] scr_hi;
+  logic           scr_all;
   logic [63:0] imem [0:IMEM_D-1];
   logic [BEAT_BITS-1:0] kmem [0:KREG-1];   // broadcast across the beat
 
@@ -434,6 +507,53 @@ module cft_seq #(
     end
   endgenerate
 
+  // ---- the scratch (revision 3, R4) -----------------------------------
+  //
+  // Organised exactly like the register file: SCR_D = SCRATCH_D *
+  // NBEATS entries of BEAT_BITS, addressed {slot, beat}, eight 32-bit
+  // word banks each with its own always_ff and its own local arrays,
+  // driving its slice of a shared read bus with a continuous assign.
+  // Eight always_ff blocks writing slices of one shared VARIABLE is
+  // the shape the register file's comment names as illegal
+  // SystemVerilog that Icarus punishes with event-storm molasses, and
+  // it is avoided here for the same reason. 32 KiB * 4 = 128 KiB a
+  // tile at SCRATCH_D 256 and NBEATS 16, at every precision, because
+  // a beat is 32 bytes whatever the format.
+  //
+  // ONE read port and ONE write port, which is what the contract asks
+  // for and all the four codes need - but each bank carries its OWN
+  // address, which the register file does not do. That is the deposit
+  // buffer's refinement and it is here for the deposit buffer's exact
+  // reason: STX and LDX take the slot from `rb`, and the lanes of one
+  // beat hold DIVERGENT rb values, so a shared address would force a
+  // lane-serial access. Independent BRAMs make independent addresses
+  // free, and a lane's element is a whole number of words, so a
+  // lane's banks always move together.
+  logic [WORDS-1:0]        scr_we;
+  logic [WORDS*SCRAW-1:0]  scr_waddr;
+  logic [WORDS*32-1:0]     scr_wdata;
+  logic [WORDS*SCRAW-1:0]  scr_raddr;
+  logic [WORDS*32-1:0]     scr_rdata;
+
+  generate
+    for (genvar gs = 0; gs < WORDS; gs = gs + 1) begin : g_scr
+      logic [31:0] bank [0:SCR_D-1];
+      logic [31:0] rd_q;
+      always_ff @(posedge ap_clk) begin
+        if (scr_we[gs])
+          bank[scr_waddr[gs*SCRAW +: SCRAW]] <= scr_wdata[gs*32 +: 32];
+        // Unconditional, like the deposit buffer's and the constant
+        // bank's: one write port and one unconditional synchronous
+        // read port is the shape an inference engine recognises as a
+        // memory, and the address is stable whenever the answer is
+        // wanted, so a read enable would buy nothing and cost a
+        // condition.
+        rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
+      end
+      assign scr_rdata[gs*32 +: 32] = rd_q;
+    end
+  endgenerate
+
   // ---- lane state -----------------------------------------------------
   // Packed, not unpacked arrays: Verilator refuses non-blocking
   // element writes to unpacked arrays inside loops, and Icarus's
@@ -485,11 +605,24 @@ module cft_seq #(
     if ((1 << NBSH) != NBEATS) begin : g_nbeats_pow2
       $error("cft_seq: NBEATS must be a power of two - the beat index is NBSH bits wide");
     end
+    // The indexed scratch forms reduce rb MODULO the depth, and the
+    // model does the same, so the reduction is part of the contract.
+    // A mask is the only reduction a cycle can afford, and a mask is
+    // only a modulo for a power of two - a depth that was not one
+    // would make the hardware and the model disagree about every
+    // STX/LDX, silently.
+    if ((1 << SCRSW) != SCRATCH_D) begin : g_scratch_pow2
+      $error("cft_seq: SCRATCH_D must be a power of two - STX/LDX reduce rb with a mask");
+    end
   endgenerate
 
   initial begin
     if (NBEATS < 1 || NBEATS > 16 || (1 << NBSH) != NBEATS) begin
       $display("FATAL: cft_seq NBEATS=%0d must be a power of two in 1..16", NBEATS);
+      $fatal(1);
+    end
+    if ((1 << SCRSW) != SCRATCH_D) begin
+      $display("FATAL: cft_seq SCRATCH_D=%0d must be a power of two", SCRATCH_D);
       $fatal(1);
     end
   end
@@ -579,6 +712,13 @@ module cft_seq #(
   logic [ADDR_W-1:0] in_off;       // blk_base * esz
   logic [ADDR_W-1:0] dep_off;      // blk_base * esz * h_maxdep
   logic [ADDR_W-1:0] dep_stride;   // BLK_BYTES * h_maxdep
+  // ...and the same construction for the two scratch blocks, which
+  // are laid out exactly as the deposit buffer is: lane-major, dense,
+  // format-width. blk_cap * esz is BLK_BYTES at every precision, so
+  // the stride is a header field shifted by a compile-time constant
+  // and not a product.
+  logic [ADDR_W-1:0] sin_off,  sout_off;
+  logic [ADDR_W-1:0] sin_stride, sout_stride;
 
   // blk_n * max_deposits, the block's deposit-element count. Both
   // factors are run-time values, so this is the one product in the
@@ -588,6 +728,12 @@ module cft_seq #(
   logic [31:0]   dep_elems;
   logic [31:0]   dep_addend;
   logic [CW-1:0] dep_mult;
+  // The two scratch blocks want the same product against their own
+  // counts, so they share the ADDEND - one shifter, three
+  // accumulators, three multiplier registers. The longest of the
+  // three is SCRSW+1 steps, still an order of magnitude inside RF_D.
+  logic [31:0]    sin_elems, sout_elems;
+  logic [SCRSW:0] sin_mult, sout_mult;
 
   // ---- byte-stream image parser (constants + instructions) -----------
   // The peel window never holds more than one absorbed beat plus the
@@ -636,6 +782,11 @@ module cft_seq #(
   logic [6:0] kons_room;
   assign kons_room = ((kons_left > 32'd1) && (esz < 6'd8)) ? {1'b0, esz}
                                                           : 7'd8;
+  // The same two constraints for the scratch-in preload, which peels
+  // format-width elements out of the same window for the same reason.
+  logic [6:0] sin_room;
+  assign sin_room = ((sin_left > 32'd1) && (esz < 6'd8)) ? {1'b0, esz}
+                                                        : 7'd8;
 
   // ---- AXI read side (single outstanding burst) -----------------------
   logic [ADDR_W-1:0] rd_addr;
@@ -722,10 +873,18 @@ module cft_seq #(
   // index's - the loader refuses that bit set on such an operand, and
   // slicing here rather than trusting it keeps a stream that bypassed
   // the loader inside the bank instead of sixteen entries past it.
+  //
+  // The NINTH bit, revision 3's R7: under `kx` an operand's index is
+  // its byte of `imm` plus one more bit from imm[30:28] - ka's, kb's
+  // and kc's in that order - so the bank reaches 512. Same
+  // construction as the fifth register bits one nibble down, and read
+  // only under `kx` for an operand whose `k` flag is set; the loader
+  // refuses it set anywhere else, as an unread field. imm[31] stays
+  // reserved-must-be-zero, the next cheap version guard.
   logic [KAW-1:0] k_idx_a, k_idx_b, k_idx_c;
-  assign k_idx_a = c_kx ? KAW'(c_imm[7:0])   : KAW'(c_ra[3:0]);
-  assign k_idx_b = c_kx ? KAW'(c_imm[15:8])  : KAW'(c_rb[3:0]);
-  assign k_idx_c = c_kx ? KAW'(c_imm[23:16]) : KAW'(c_rc[3:0]);
+  assign k_idx_a = c_kx ? KAW'({c_imm[28], c_imm[7:0]})   : KAW'(c_ra[3:0]);
+  assign k_idx_b = c_kx ? KAW'({c_imm[29], c_imm[15:8]})  : KAW'(c_rb[3:0]);
+  assign k_idx_c = c_kx ? KAW'({c_imm[30], c_imm[23:16]}) : KAW'(c_rc[3:0]);
 
   // The three constants THIS instruction reads, latched out of the
   // bank one cycle behind `cur`. The bank was a 16-entry LUT mux read
@@ -757,14 +916,16 @@ module cft_seq #(
   // ---- state ----------------------------------------------------------
   typedef enum logic [5:0] {
     S_IDLE, S_HDR_GO, S_HDR_R, S_CHECK, S_BNK_GO, S_IMG_GO, S_IMG_PARSE,
-    S_BLK_SETUP, S_ZERO, S_LD_GO, S_LD_STREAM,
+    S_BLK_SETUP, S_ZERO, S_SIN_GO, S_SIN_PARSE, S_LD_GO, S_LD_STREAM,
     S_FETCH, S_FETCH2, S_DECODE,
     S_ALU_ISSUE, S_ALU_WAIT,
     S_DEP_RD, S_DEP_W8, S_DEP_WR,
     S_SET_RD, S_SET_W8, S_SET_AP,
+    S_SCR_RD, S_SCR_W8, S_SCR_AD, S_SCR_W9, S_SCR_WB,
     S_SKIP_F, S_SKIP_D,
     S_DRAIN_SETUP, S_DRAIN_RD, S_DRAIN_W8, S_DRAIN_PACK, S_DRAIN_SEND,
     S_CNT_SETUP, S_CNT_PACK, S_CNT_SEND,
+    S_SO_SETUP, S_SO_RD, S_SO_W8, S_SO_PACK, S_SO_SEND,
     S_WAIT_B, S_NEXT_BLK, S_FIN
   } state_e;
   state_e st;
@@ -777,6 +938,28 @@ module cft_seq #(
   logic [31:0]   slot_cursor;
   logic          drain_last;         // the element just packed was final
   logic [RFAW-1:0] zaddr;
+  // The scratch wipe's cursor, and how far it has to go. One more bit
+  // than the address, so "done" is a comparison the counter can reach
+  // rather than a wrap.
+  logic [SCRAW:0]  szaddr, szlimit;
+  logic            z_first;
+  // Slots this block has to wipe: every one if the program indexes,
+  // otherwise the highest static slot it names and the slots the
+  // scratch-out drain will read. Nothing above that is reachable, so
+  // nothing above that is a value any program can distinguish - and a
+  // program that never touches the scratch wipes nothing, which is
+  // what keeps every existing bench's cycle count exactly where it
+  // was.
+  logic [SCRSW:0]  scr_wipe_slots;
+  assign scr_wipe_slots = scr_all ? (SCRSW+1)'(SCRATCH_D)
+                        : (scr_hi > h_nsout) ? scr_hi : h_nsout;
+  // The scratch-in preload's cursors: which lane and which of its
+  // slots the next element belongs to. Two counters rather than a
+  // division, exactly as the deposit drain carries lane_cursor and
+  // slot_cursor instead of dividing an element index.
+  logic [LB:0]     sin_lane;
+  logic [SCRSW:0]  sin_slot;
+  logic [31:0]     sin_left;
 
   logic [4:0]  flags_q;
   logic        dep_ovf_q;
@@ -958,6 +1141,145 @@ module cft_seq #(
   endfunction
   logic [WORDS-1:0] wb_wwe;
   assign wb_wwe = wb_wwe_fn(wb_act, wpe_sh);
+  // The same mask for the beat the SCRATCH states are working on. A
+  // store is a register write for P3's purposes and a load writes rd,
+  // so both are masked by exactly this - an all-inactive loop body
+  // that stores is a no-op by construction, not by argument.
+  logic [WORDS-1:0] bt_wwe;
+  assign bt_wwe = wb_wwe_fn(bt_act, wpe_sh);
+
+  // ---- reaching the scratch (revision 3, R4) --------------------------
+  //
+  // Three pieces, all built the way everything else in this module
+  // reaches a lane: loops over CONSTANT indices with an equality test
+  // picking the position, never a computed part-select of a wide
+  // packed vector.
+  //
+  // 1. The SLOT each lane position wants. For STL and LDL it is
+  //    imm[23:0], the same for every lane - sliced to SCRSW bits here
+  //    rather than trusted, so a stream that bypassed the loader
+  //    stays inside the memory instead of indexing past it, exactly
+  //    as k_idx_* slices a constant index. For STX and LDX it is the
+  //    low SCRSW bits of the lane's own `rb`, which arrives on the
+  //    register file's B read port.
+  //
+  //    A lane's low 32 bits sit in the FIRST word of its run of
+  //    words (position p occupies banks p << wpe_sh upward, little
+  //    end first - drain_elem_fn is the same geometry read the other
+  //    way), so no shift is involved anywhere: the slot is a slice of
+  //    one 32-bit word, selected by an equality against a constant
+  //    bank number.
+  function automatic [SCRSW-1:0] lane_slot_fn(input [WORDS*32-1:0] rdata,
+                                              input [2:0] posn,
+                                              input [1:0] wsh);
+    logic [SCRSW-1:0] r;
+    begin
+      r = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        if (32'(w) == (32'({29'b0, posn}) << wsh))
+          r = rdata[w*32 +: SCRSW];
+      lane_slot_fn = r;
+    end
+  endfunction
+
+  logic c_scr_idx;                       // this instruction is STX/LDX
+  assign c_scr_idx = c_ctrl && (c_op == C_STX || c_op == C_LDX);
+  logic [WORDS*SCRSW-1:0] scr_slot;      // the slot each position wants
+  generate
+    for (genvar gsl = 0; gsl < WORDS; gsl = gsl + 1) begin : g_slot
+      assign scr_slot[gsl*SCRSW +: SCRSW] =
+          c_scr_idx ? lane_slot_fn(rf_rdata_b, 3'(gsl), wpe_sh)
+                    : SCRSW'(c_imm[SCRSW-1:0]);
+    end
+  endgenerate
+
+  // 2. The per-bank ADDRESS those slots imply, for the beat named.
+  //    Bank w serves lane position w >> wsh, so it takes that lane's
+  //    slot; the beat is the low NBSH bits, as it is in the register
+  //    file's rf_waddr.
+  function automatic [WORDS*SCRAW-1:0] scr_addr_fn(
+                                         input [WORDS*SCRSW-1:0] slots,
+                                         input [5:0] beat,
+                                         input [1:0] wsh);
+    logic [WORDS*SCRAW-1:0] r;
+    logic [SCRSW-1:0]       s;
+    begin
+      r = '0;
+      for (int w = 0; w < WORDS; w = w + 1) begin
+        s = '0;
+        for (int p = 0; p < WORDS; p = p + 1)
+          if (32'(p) == (32'(w) >> wsh))
+            s = slots[p*SCRSW +: SCRSW];
+        r[w*SCRAW +: SCRAW] = SCRAW'({s, beat[NBSH-1:0]});
+      end
+      scr_addr_fn = r;
+    end
+  endfunction
+
+  // ...and the same address for every bank, which is what a phase
+  // that visits ONE lane at a time wants: the scratch-out drain and
+  // the scratch-in preload both do, because their buffers are
+  // lane-major.
+  function automatic [WORDS*SCRAW-1:0] scr_flat_fn(input [SCRSW-1:0] slot,
+                                                   input [5:0] beat);
+    logic [WORDS*SCRAW-1:0] r;
+    begin
+      r = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        r[w*SCRAW +: SCRAW] = SCRAW'({slot, beat[NBSH-1:0]});
+      scr_flat_fn = r;
+    end
+  endfunction
+
+  // 3. Placing ONE element into the word banks its lane owns, and the
+  //    write enables that go with it - drain_elem_fn run backwards.
+  //    The preload uses both; the four codes use only the second,
+  //    because there the data is already a whole beat in lane order.
+  function automatic [WORDS*32-1:0] place_elem_fn(input [255:0] v,
+                                                  input [2:0] posn,
+                                                  input [1:0] wsh);
+    logic [WORDS*32-1:0] r;
+    begin
+      r = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        for (int k = 0; k < WORDS; k = k + 1)
+          if (k < (32'd1 << wsh) &&
+              32'(w) == 32'({29'b0, posn} << wsh) + k)
+            r[w*32 +: 32] = v[k*32 +: 32];
+      place_elem_fn = r;
+    end
+  endfunction
+
+  function automatic [WORDS-1:0] lane_wwe_fn(input [2:0] posn,
+                                             input [1:0] wsh);
+    logic [WORDS-1:0] e;
+    begin
+      e = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        if ((32'(w) >> wsh) == 32'({29'b0, posn}))
+          e[w] = 1'b1;
+      lane_wwe_fn = e;
+    end
+  endfunction
+
+  // The element the scratch-out drain is packing: the same selection
+  // drain_elem_fn makes out of the deposit banks, with no "did this
+  // lane reach this slot" question - every slot of the scratch has a
+  // defined value, because the wipe gave it one.
+  function automatic [255:0] scr_elem_fn(input [2:0] posn,
+                                         input [WORDS*32-1:0] rdata,
+                                         input [1:0] wsh);
+    logic [255:0] v;
+    begin
+      v = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        for (int src = 0; src < WORDS; src = src + 1)
+          if (w < (32'd1 << wsh) &&
+              src == 32'({29'b0, posn} << wsh) + w)
+            v[w*32 +: 32] = rdata[src*32 +: 32];
+      scr_elem_fn = v;
+    end
+  endfunction
 
   // The block's opening active mask: slot (b, p) belongs to a lane
   // the caller has iff the position exists at this format and the
@@ -1027,6 +1349,14 @@ module cft_seq #(
   assign drain_elem = drain_elem_fn(dc_posn, slot_cursor, cur_cnt,
                                     db_rdata, wpe_sh);
 
+  // ...and the same for the scratch-out drain, which visits (lane,
+  // slot) in the same order and reads the scratch instead of the
+  // deposit banks. No "did this lane reach this slot" question here:
+  // every slot the drain reads was given a value by the wipe or by
+  // the program.
+  logic [255:0] scr_out_elem;
+  assign scr_out_elem = scr_elem_fn(dc_posn, scr_rdata, wpe_sh);
+
 
   // ==== the machine ====================================================
   always_ff @(posedge ap_clk) begin
@@ -1052,9 +1382,13 @@ module cft_seq #(
       cur <= '0;
       blk_base <= '0; active <= '0; dcnt <= '0;
       in_off <= '0; dep_off <= '0;
+      sin_off <= '0; sout_off <= '0;
       rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
       bank_phase <= 1'b0; bank_ext_q <= 1'b0;
-      bank_q <= '0;
+      bank_q <= '0; sin_q <= '0; sout_q <= '0;
+      scr_we <= '0; scr_raddr <= '0;
+      scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0;
+      h_nsin <= '0; h_nsout <= '0;
 
     end else begin
       done <= 1'b0;
@@ -1063,6 +1397,7 @@ module cft_seq #(
       if (!issue_hold) al_valid <= 1'b0;
       rf_we <= 1'b0;
       db_we <= '0;
+      scr_we <= '0;
 
       // ---- read channel: one burst in flight --------------------------
       if (m_rd_arvalid && m_rd_arready)
@@ -1126,6 +1461,7 @@ module cft_seq #(
             n_q <= cfg_n; a_q <= cfg_a; b_q <= cfg_b; c_q <= cfg_c;
             d_q <= cfg_d; prog_q <= cfg_prog; cnt_q <= cfg_cnt;
             bank_q <= cfg_bank;
+            sin_q <= cfg_sin; sout_q <= cfg_sout;
             flags_q <= '0; dep_ovf_q <= 1'b0; refuse_q <= 1'b0;
             rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
             if (cfg_n == 0)
@@ -1161,23 +1497,47 @@ module cft_seq #(
           h_maxdep  <= hdr_q[159:128];
           // The header's reserved[0] is `flags` since revision 2, and
           // bit 0 is BANK_EXT: the image carries no constant section
-          // and the constants come from BANK_PTR instead.
+          // and the constants come from BANK_PTR instead. Bit 1 is
+          // SCRATCH_IO since revision 3, and it is what makes the
+          // header's SECOND word mean something.
           bank_ext_q <= hdr_q[192];
+          scr_io_q   <= hdr_q[193];
+          // scratch_io: [15:0] slots in, [31:16] slots out. Latched
+          // as zero when the flag is clear, so nothing downstream has
+          // to ask twice - and the check below has already refused a
+          // non-zero word in that case.
+          h_nsin  <= hdr_q[193] ? (SCRSW+1)'(hdr_q[239:224]) : '0;
+          h_nsout <= hdr_q[193] ? (SCRSW+1)'(hdr_q[255:240]) : '0;
           // one block's deposit window: BLK_BYTES of input lanes
           // times max_deposits slots each
           dep_stride <= ADDR_W'({32'b0, hdr_q[159:128]} << BLK_SH);
-          // The two reserved words, checked. A 0x600 tile checked
-          // NEITHER, which is exactly why BANK_EXT needs a CAPS bit
-          // and not only a header flag: that tile would read the
-          // constants out of an image that has none. This one refuses
-          // any flag bit it does not implement and any non-zero
-          // reserved[1], so an image built for a LATER revision is
-          // thrown back here rather than half-understood.
+          sin_stride  <= hdr_q[193]
+                       ? ADDR_W'({48'b0, hdr_q[239:224]} << BLK_SH) : '0;
+          sout_stride <= hdr_q[193]
+                       ? ADDR_W'({48'b0, hdr_q[255:240]} << BLK_SH) : '0;
+          // The two words above the precision, checked. A 0x600 tile
+          // checked NEITHER, which is exactly why BANK_EXT needs a
+          // CAPS bit and not only a header flag: that tile would read
+          // the constants out of an image that has none. This one
+          // refuses any flag bit it does not implement, a scratch
+          // count past the depth, and a non-zero scratch_io word with
+          // the flag clear - the last of which is what makes a
+          // revision-2 tile the guard for SCRATCH_IO, and what makes
+          // an image built for a LATER revision get thrown back here
+          // rather than half-understood.
           if (hdr_q[31:0] != 32'h5054_4643 || hdr_q[63:32] != 32'd1 ||
               hdr_q[191:160] != {30'b0, prec_q} ||
               hdr_q[95:64] > IMEM_D || hdr_q[127:96] > KMEM_D ||
               hdr_q[159:128] > MAXD ||
-              hdr_q[223:193] != 31'b0 || hdr_q[255:224] != 32'b0) begin
+              hdr_q[223:194] != 30'b0 ||
+              (!hdr_q[193] && hdr_q[255:224] != 32'b0) ||
+              // 32'(): both counts are SIXTEEN-bit halves of one word,
+              // so the comparison is widened from the slice's width
+              // rather than left to the tool - the fixed pad width
+              // revision 2's Verilator gate caught in this same file
+              // was exactly this shape counted out by hand.
+              (hdr_q[193] && (32'(hdr_q[239:224]) > SCRATCH_D ||
+                              32'(hdr_q[255:240]) > SCRATCH_D))) begin
             refuse_q <= 1'b1;
             st <= S_FIN;
           end else if (hdr_q[192])
@@ -1228,6 +1588,9 @@ module cft_seq #(
           kons_i <= '0; insn_i <= '0;
           pw <= '0; pw_have <= '0;
           bank_phase <= 1'b0;
+          // What the stream about to arrive can reach in the scratch,
+          // reset before it is scanned.
+          scr_hi <= '0; scr_all <= 1'b0;
           m_rd_rready <= 1'b1;
           st <= S_IMG_PARSE;
         end
@@ -1254,6 +1617,21 @@ module cft_seq #(
           end else if (kons_left == 0 && insn_left != 0 &&
                        pw_have >= 7'd8) begin
             imem[insn_i[PCW-1:0]] <= pw[63:0];
+            // ...and, on the way past, how far into the scratch this
+            // instruction can reach. The per-block wipe is sized from
+            // the answer, so a program that never touches the scratch
+            // pays nothing for it and one that only uses slot 3 wipes
+            // four. pw[31] is `ctrl`, pw[7:0] the code, and pw[55:32]
+            // the static slot - sliced to SCRSW bits here rather than
+            // trusted, exactly as k_idx_* slices a constant index: the
+            // loader has already refused a slot past the depth, and a
+            // stream that bypassed it must still stay inside the
+            // memory.
+            if (pw[31] && (pw[7:0] == C_STL || pw[7:0] == C_LDL) &&
+                (SCRSW+1)'(pw[32 +: SCRSW]) >= scr_hi)
+              scr_hi <= (SCRSW+1)'(pw[32 +: SCRSW]) + (SCRSW+1)'(1);
+            if (pw[31] && (pw[7:0] == C_STX || pw[7:0] == C_LDX))
+              scr_all <= 1'b1;
             pw <= pw >> 64;
             pw_have <= pw_have - 7'd8;
             insn_left <= insn_left - 1;
@@ -1280,6 +1658,8 @@ module cft_seq #(
               blk_base <= '0;
               in_off   <= '0;
               dep_off  <= '0;
+              sin_off  <= '0;
+              sout_off <= '0;
               st <= S_BLK_SETUP;
             end
           end else
@@ -1295,6 +1675,24 @@ module cft_seq #(
                      ? (LB+1)'(blk_cap)
                      : (LB+1)'(n_q - blk_base);
             zaddr <= '0;
+            szaddr <= '0;
+            z_first <= 1'b1;
+            // How much of the scratch this block has to wipe. The
+            // register file is wiped whole every block, which buys
+            // "the previous block cannot leak" with no bookkeeping -
+            // but the scratch is eight times larger, and wiping all of
+            // it would cost SCR_D cycles a block whether or not the
+            // program owns a single slot. So the wipe covers exactly
+            // what the block can OBSERVE: every slot if the program
+            // indexes, otherwise the highest static slot it names and
+            // the slots the scratch-out drain will read. Anything
+            // above that is unreachable this run, so its contents are
+            // not a value any program can distinguish.
+            // The preload writes slots 0..n_scratch_in-1 immediately
+            // after, so those need no wipe of their own - but n_out
+            // may exceed n_in, and those slots are read on the way
+            // out even if nothing wrote them.
+            szlimit <= (SCRAW+1)'(scr_wipe_slots) << NBSH;
             st <= S_ZERO;
           end
         end
@@ -1307,21 +1705,52 @@ module cft_seq #(
           rf_wdata <= '0;
           rf_wwe <= {WORDS{1'b1}};
           zaddr <= zaddr + 1;
+          // ...and the scratch, in the same window and on its own
+          // cursor, because the two are different depths. A slot a
+          // lane never wrote must read +0, for the reason a deposit
+          // slot no lane reached must: a run whose untouched storage
+          // kept the previous block's values would not be bit-exact,
+          // and two machines would disagree about memory neither of
+          // them computed.
+          if (szaddr < szlimit) begin
+            scr_we    <= {WORDS{1'b1}};
+            scr_waddr <= scr_flat_fn(szaddr[SCRAW-1:NBSH],
+                                     6'(szaddr[NBSH-1:0]));
+            scr_wdata <= '0;
+            szaddr    <= szaddr + 1;
+          end
           // ...and, in the same window, blk_n * max_deposits, one bit
           // of the multiplier per cycle. RF_D is 32 * NBEATS, so the
           // CW steps this takes finish long before the wipe does -
           // with twice the margin they had before revision 2, since
           // the wipe is the thing that doubled.
-          if (zaddr == 0) begin
+          //
+          // The two scratch blocks want the same product against
+          // their own counts, so they share the ADDEND: one shifter,
+          // three accumulators. Keyed on `z_first` and not on
+          // `zaddr == 0`, because the scratch wipe can outlast the
+          // register file's and zaddr then WRAPS - which would
+          // restart the multiplier mid-flight and hand the drain a
+          // partial product.
+          if (z_first) begin
+            z_first    <= 1'b0;
             dep_elems  <= '0;
+            sin_elems  <= '0;
+            sout_elems <= '0;
             dep_addend <= 32'(blk_n);
             dep_mult   <= h_maxdep[CW-1:0];
+            sin_mult   <= h_nsin;
+            sout_mult  <= h_nsout;
           end else begin
-            if (dep_mult[0]) dep_elems <= dep_elems + dep_addend;
+            if (dep_mult[0])  dep_elems  <= dep_elems  + dep_addend;
+            if (sin_mult[0])  sin_elems  <= sin_elems  + dep_addend;
+            if (sout_mult[0]) sout_elems <= sout_elems + dep_addend;
             dep_addend <= dep_addend << 1;
             dep_mult   <= dep_mult >> 1;
+            sin_mult   <= sin_mult >> 1;
+            sout_mult  <= sout_mult >> 1;
           end
-          if (zaddr == RFAW'(RF_D - 1)) begin
+          if (zaddr == RFAW'(RF_D - 1) && (szaddr + 1) >= szlimit) begin
             // A lane is active iff its index is below the block's
             // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
             // computed one state ago. The first version asked each of
@@ -1338,8 +1767,79 @@ module cft_seq #(
             ld_reg <= 2'd0;
             pc <= '0;
             lp_sp <= '0;
-            st <= S_LD_GO;
+            // The scratch-in block goes in BEFORE the operand streams
+            // and therefore before the first instruction, which is
+            // where the contract puts it: a program that declares
+            // none skips the phase entirely and touches neither the
+            // pointer nor the bus.
+            st <= (h_nsin != 0) ? S_SIN_GO : S_LD_GO;
           end
+        end
+
+        // ---- the scratch-in block (revision 3, R5) -------------------
+        //
+        // n_scratch_in slots for each of the block's lanes, lane-major
+        // and dense: lane i's slot s is element i * n_scratch_in + s,
+        // format-width, exactly the shape the deposit buffer has on
+        // the way out. The SCRATCH is beat-organised, so this is a
+        // transpose - which is why it runs one element per cycle
+        // through the same peel window the image parser uses, rather
+        // than a beat at a time: two elements of one bus beat can
+        // belong to one lane at two slots (same banks, different
+        // addresses) and no write port can serve both.
+        //
+        // Padding lanes receive nothing, and get it for free: the
+        // element count is blk_n * n_scratch_in, so the stream simply
+        // ends before their slots would begin.
+        S_SIN_GO: begin
+          rd_addr <= sin_q + sin_off;
+          rd_sel  <= 2'd0;         // the A master, with the image
+          rd_beats_left <= ((sin_elems << esz_sh) + 32'd31) >> 5;
+          rd_stream_on <= 1'b1;
+          sin_left <= sin_elems;
+          sin_lane <= '0;
+          sin_slot <= '0;
+          pw <= '0; pw_have <= '0;
+          m_rd_rready <= 1'b1;
+          st <= S_SIN_PARSE;
+        end
+
+        S_SIN_PARSE: begin
+          // One action per cycle - peel an element or absorb a beat -
+          // with rready asserted ONLY when the window is too empty to
+          // peel, for the reason S_IMG_PARSE's comment gives at
+          // length: hold it high while peeling and the beat the
+          // memory hands over falls on the floor.
+          if (sin_left != 0 && pw_have >= {1'b0, esz}) begin
+            scr_we    <= lane_wwe_fn(sin_lane[2:0] & 3'(lpb - 4'd1),
+                                     wpe_sh);
+            scr_waddr <= scr_flat_fn(sin_slot[SCRSW-1:0],
+                                     6'(32'(sin_lane[LB-1:0]) >> lpb_sh));
+            scr_wdata <= place_elem_fn(
+                             256'(pw) & ~(~256'b0 << ({26'b0, esz} << 3)),
+                             sin_lane[2:0] & 3'(lpb - 4'd1), wpe_sh);
+            pw <= pw >> ({26'b0, esz} << 3);
+            pw_have <= pw_have - {1'b0, esz};
+            sin_left <= sin_left - 1;
+            // slot within the lane, then on to the next lane - two
+            // counters instead of dividing an element index
+            if ((sin_slot + (SCRSW+1)'(1)) >= h_nsin) begin
+              sin_slot <= '0;
+              sin_lane <= sin_lane + 1;
+            end else
+              sin_slot <= sin_slot + (SCRSW+1)'(1);
+            m_rd_rready <= ((pw_have - {1'b0, esz}) < sin_room) &&
+                           (sin_left != 1);
+          end else if (m_rd_rvalid && m_rd_rready) begin
+            pw <= pw | (PWW'(m_rd_rdata) << ({4'b0, pw_have[2:0]} << 3));
+            pw_have <= pw_have + 7'(BEAT_BYTES);
+            m_rd_rready <= 1'b0;
+          end else if (sin_left == 0) begin
+            m_rd_rready <= 1'b0;
+            rd_stream_on <= 1'b0;
+            st <= S_LD_GO;
+          end else
+            m_rd_rready <= (pw_have < 7'd8);
         end
 
         S_LD_GO: begin
@@ -1431,9 +1931,78 @@ module cft_seq #(
                 pc <= pc + 1;
                 st <= S_FETCH;
               end
+              // R4's four. All of them walk the block's beats the way
+              // DEPOSIT and SETACT do, because that is what a per-lane
+              // memory needs and none of them is arithmetic: the ALU
+              // array is not asked, no rounding attribute is read and
+              // no flag is raised.
+              C_STL, C_LDL, C_STX, C_LDX: begin
+                bt <= '0;
+                st <= S_SCR_RD;
+              end
               default: st <= S_DRAIN_SETUP;    // HALT and unknowns
             endcase
           end
+        end
+
+        // ---- the scratch: STL / LDL / STX / LDX ------------------------
+        //
+        // A register's latency discipline, one beat at a time. The
+        // register file costs TWO cycles from address to data - the
+        // address registers into the bank read, the read registers
+        // into the slice bus - which is the S_*_RD / S_*_W8 pair
+        // DEPOSIT and SETACT already carry; the scratch costs the same
+        // two, which is the second pair. A store is therefore three
+        // cycles a beat and a load five.
+        //
+        // Port A carries the value a store writes (ra) and port B the
+        // register an INDEXED access takes its slot from (rb). Both
+        // are presented together, because STX reads both at once.
+        S_SCR_RD: begin
+          rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
+          rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
+          st <= S_SCR_W8;
+        end
+        S_SCR_W8: st <= S_SCR_AD;   // bank read + bus register
+        S_SCR_AD: begin
+          // rf_rdata_a is regs[ra][bt] and rf_rdata_b regs[rb][bt], so
+          // scr_slot now holds the slot every lane position wants -
+          // imm's for the static forms, the low SCRSW bits of the
+          // lane's own rb for the indexed ones, which IS the reduction
+          // modulo the depth the contract states.
+          if (c_op == C_STL || c_op == C_STX) begin
+            // A store is a register write for P3's purposes, so it
+            // takes exactly the register file's per-lane mask.
+            scr_we    <= bt_wwe;
+            scr_waddr <= scr_addr_fn(scr_slot, bt, wpe_sh);
+            scr_wdata <= rf_rdata_a;
+            bt <= bt + 1;
+            if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
+              pc <= pc + 1;
+              st <= S_FETCH;
+            end else
+              st <= S_SCR_RD;
+          end else begin
+            scr_raddr <= scr_addr_fn(scr_slot, bt, wpe_sh);
+            st <= S_SCR_W9;
+          end
+        end
+        S_SCR_W9: st <= S_SCR_WB;   // the scratch's own read latency
+        S_SCR_WB: begin
+          // ...and a load is a masked register write, which is the
+          // other half of what keeps an all-inactive loop body a
+          // no-op. rf_we is free here: no ALU request is in flight
+          // while a control instruction runs.
+          rf_we <= 1'b1;
+          rf_waddr <= {c_rd, bt[NBSH-1:0]};
+          rf_wdata <= scr_rdata;
+          rf_wwe <= bt_wwe;
+          bt <= bt + 1;
+          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
+            pc <= pc + 1;
+            st <= S_FETCH;
+          end else
+            st <= S_SCR_RD;
         end
 
         // ---- skip to the matching endrep ------------------------------
@@ -1708,9 +2277,86 @@ module cft_seq #(
             m_wr_wlast <= (wr_burst_left == 1);
             as_fill <= '0; as_strb <= '0; as_data <= '0;
             if (drain_last)
-              st <= S_WAIT_B;
+              // The scratch-out block goes out AFTER the last deposit
+              // of the block, which is where the contract puts it; a
+              // program that declares none touches neither the
+              // pointer nor the bus.
+              st <= (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
             else
               st <= S_CNT_PACK;
+          end
+        end
+
+        // ---- the scratch-out block (revision 3, R5) -------------------
+        //
+        // The deposit drain's shape exactly, reading the scratch
+        // instead of the deposit banks: (lane, slot) in the caller's
+        // index order, packed into beats by the same assembler, out
+        // through the same write master. It is NOT masked by the
+        // active bit - it is a drain, like the deposit drain, and a
+        // lane that converged early still has state worth carrying to
+        // the next call. Padding lanes write nothing, because the
+        // element count is blk_n * n_scratch_out.
+        S_SO_SETUP: begin
+          lane_cursor <= '0;
+          slot_cursor <= '0;
+          as_fill <= '0; as_strb <= '0; as_data <= '0;
+          drain_last <= 1'b0;
+          // Wait for the counts stream to go quiet before switching
+          // targets, exactly as S_CNT_SETUP waits for the deposits.
+          if (wr_burst_left == 0 && !m_wr_awvalid && !wr_aw_open &&
+              !m_wr_wvalid && wr_beats_left == 0) begin
+            wr_addr <= sout_q + sout_off;
+            wr_beats_left <= ((sout_elems << esz_sh)
+                              + 32'(BEAT_BYTES) - 32'd1) >> 5;
+            st <= S_SO_RD;
+          end
+        end
+
+        S_SO_RD: begin
+          // One lane at a time, so every bank takes the same address -
+          // the per-bank addressing the four codes need is idle here.
+          scr_raddr <= scr_flat_fn(slot_cursor[SCRSW-1:0], dc_beat);
+          st <= S_SO_W8;
+        end
+        S_SO_W8: st <= S_SO_PACK;
+
+        S_SO_PACK: begin
+          for (int w = 0; w < WORDS; w = w + 1)
+            if ((32'(w) >> wpe_sh) == (32'(as_fill) >> esz_sh)) begin
+              as_data[w*32 +: 32] <=
+                scr_out_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1))
+                             * 32 +: 32];
+              as_strb[w*4 +: 4] <= 4'hf;
+            end
+          as_fill <= as_fill + esz;
+          if (32'(lane_cursor) == 32'(blk_n) - 1 &&
+              slot_cursor == 32'(h_nsout) - 32'd1)
+            drain_last <= 1'b1;
+          if (slot_cursor == 32'(h_nsout) - 32'd1) begin
+            slot_cursor <= '0;
+            lane_cursor <= lane_cursor + 1;
+          end else
+            slot_cursor <= slot_cursor + 1;
+          if ({1'b0, as_fill} + {1'b0, esz} == 7'(BEAT_BYTES) ||
+              (32'(lane_cursor) == 32'(blk_n) - 1 &&
+               slot_cursor == 32'(h_nsout) - 32'd1))
+            st <= S_SO_SEND;
+          else
+            st <= S_SO_RD;
+        end
+
+        S_SO_SEND: begin
+          if ((!m_wr_wvalid || m_wr_wready) && wr_burst_left != 0) begin
+            m_wr_wvalid <= 1'b1;
+            m_wr_wdata <= as_data;
+            m_wr_wstrb <= as_strb;
+            m_wr_wlast <= (wr_burst_left == 1);
+            as_fill <= '0; as_strb <= '0; as_data <= '0;
+            if (drain_last)
+              st <= S_WAIT_B;
+            else
+              st <= S_SO_RD;
           end
         end
 
@@ -1727,6 +2373,8 @@ module cft_seq #(
           blk_base <= blk_base + {56'b0, blk_cap};
           in_off   <= in_off  + ADDR_W'(BLK_BYTES);
           dep_off  <= dep_off + dep_stride;
+          sin_off  <= sin_off  + sin_stride;
+          sout_off <= sout_off + sout_stride;
           st <= S_BLK_SETUP;
         end
 

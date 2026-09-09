@@ -212,6 +212,7 @@ module cft_krnl #(
   logic        cfg_seq;
   logic [63:0] cfg_n, cfg_a, cfg_b, cfg_c, cfg_d, cfg_prog, cfg_cnt;
   logic [63:0] cfg_bank;
+  logic [63:0] cfg_sin, cfg_sout;
 
   // A run whose MODE selects a precision this build does not carry is
   // REFUSED: the engine never starts, nothing is read or written, the
@@ -255,20 +256,32 @@ module cft_krnl #(
   // for it on card day. docs/studies/OPT-D-contract.md 0.1 is the
   // failure this retires.
   localparam int SEQ_MAXD   = 64;     // deposit slots a lane
-  // 1024 -> 4096 at revision 2 (docs/SEQUENCER.md, R2). No feature
-  // bit: CAPS[23:20] already publishes log2 IMEM_D and now reads 12,
-  // so a host learns the new capacity from the field it was already
-  // reading. Cost: 32 KB of instruction memory a tile where it was 8,
-  // in block RAM.
-  localparam int SEQ_IMEM_D = 4096;   // instruction capacity
-  localparam int SEQ_KMEM_D = 256;    // constant capacity, image side
+  // 1024 -> 4096 at revision 2, 4096 -> 16384 at revision 3
+  // (docs/SEQUENCER.md, R2 and R6). No feature bit either time:
+  // CAPS[23:20] publishes log2 IMEM_D and now reads 14, so a host
+  // learns the new capacity from the field it was already reading.
+  // Cost: 128 KB of instruction memory a tile where revision 2 had 32
+  // and revision 1 had 8 - four UltraRAMs on the U50 part, block RAM
+  // on the open-core one.
+  localparam int SEQ_IMEM_D = 16384;  // instruction capacity
+  // 256 -> 512 at revision 3 (R7), which is 16 KiB at beat width. The
+  // ninth index bit is what makes the second half reachable, and it
+  // takes CAPS[7] because a revision-2 tile's operand mux reads eight
+  // bits and would silently address the wrong constant.
+  localparam int SEQ_KMEM_D = 512;    // constant capacity, image side
+  // Scratch slots a lane (revision 3, R4). Published in CAPS2[3:0] as
+  // log2 with CAPS2[4] set, because a log2 field of zero would have to
+  // mean one slot rather than none. 128 KiB a tile at 256, the same
+  // silicon at every precision for the reason the register file is.
+  localparam int SEQ_SCRATCH_D = 256;
   // Addressable constants. Since 2026-09-07 an instruction with kx set
-  // (bit 30) takes three 8-bit constant indices from its immediate and
-  // reaches the whole 256-entry bank; without it the 4-bit ka/kb/kc
-  // fields reach 16. CAPS publishes the wider reach, and it must equal
-  // cft_seq's `localparam int KREG` (KMEM_D) - tb/test_krnl.py parses
-  // both out of the RTL and fails if they part company.
-  localparam int SEQ_KIDX_W = 8;
+  // (bit 30) takes three constant indices from its immediate: eight
+  // bits each until revision 3, nine since, so the whole 512-entry
+  // bank is reachable; without kx the 4-bit ka/kb/kc fields reach 16.
+  // CAPS publishes the wider reach, and it must equal cft_seq's
+  // `localparam int KREG` (KMEM_D) - tb/test_krnl.py parses both out
+  // of the RTL and fails if they part company.
+  localparam int SEQ_KIDX_W = 9;
   // CAPS carries the EXPONENT of each capacity in four bits, which is
   // only honest while the capacity is a power of two: a capacity that
   // was not one would be published rounded DOWN, and a host would
@@ -430,8 +443,25 @@ module cft_krnl #(
       //       constant bank at 0x64/0x68. It needs a bit because a
       //       0x600 tile checks neither reserved header word, so its
       //       FETCH would read constants out of an image that has none.
-      //   [7] reserved.
-      .seq_feat(4'b0111),
+      //   [7] KX9 (revision 3, 2026-09-08): under kx, imm[30:28] are
+      //       the ninth bits of the three constant indices, so the
+      //       bank reaches 512. It needs a bit for kx's own reason
+      //       one step further out - a revision-2 tile's operand mux
+      //       reads eight bits and would address constant 5 where the
+      //       program meant 261.
+      // The nibble is now FULL. The next sequencer feature takes a
+      // bit of CAPS2, which is what that register is for.
+      .seq_feat(4'b1111),
+      // CAPS2 (0x6C): [3:0] log2 SCRATCH_D, [4] a scratch exists,
+      // [5] its per-run block exists. Built from the same localparam
+      // cft_seq elaborates the memory from, for the reason the three
+      // log2 fields of CAPS are: two copies of a number is how a
+      // capability register ends up describing a memory that is no
+      // longer that size.
+      .caps2({1'b1,        // [5] SCRATCH_IO: the header's flag and
+                           //     the two pointers at 0x70 and 0x78
+              1'b1,        // [4] SCRATCH: STL/LDL/STX/LDX decode
+              4'($clog2(SEQ_SCRATCH_D))}),
       // CAPS[31:28]: ALU extensions beyond the group bits. [28] IMUL
       // (opcode 30, 2026-09-07) joined the integer group after
       // bitstreams had shipped with that group's bit set, so the group
@@ -452,7 +482,8 @@ module cft_krnl #(
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd),
       .cfg_seq(cfg_seq), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
-      .cfg_prog(cfg_prog), .cfg_bank(cfg_bank), .cfg_cnt(cfg_cnt)
+      .cfg_prog(cfg_prog), .cfg_bank(cfg_bank),
+      .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt)
   );
 
   // ---- the shared masters --------------------------------------------
@@ -661,6 +692,7 @@ module cft_krnl #(
   // publishes their log2 and the two must be the same numbers.
   cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(16), .NBEATS(16),
             .MAXD(SEQ_MAXD), .IMEM_D(SEQ_IMEM_D), .KMEM_D(SEQ_KMEM_D),
+            .SCRATCH_D(SEQ_SCRATCH_D),
             .ADDR_W(64),
             .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
             .EN_FP256(EN_FP256), .OWN_LANES(1'b0),
@@ -671,7 +703,8 @@ module cft_krnl #(
       // two bits carry nothing the sequencer needs.
       .cfg_prec(cfg_prec[1:0]), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
-      .cfg_prog(cfg_prog), .cfg_bank(cfg_bank), .cfg_cnt(cfg_cnt),
+      .cfg_prog(cfg_prog), .cfg_bank(cfg_bank),
+      .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt),
       .busy(seq_busy), .done(seq_done), .refuse(seq_refuse),
       .lane_valid(seq_lv), .lane_op(seq_lop), .lane_rnd(seq_lrnd),
       .lane_prec(seq_lprec), .lane_a(seq_la), .lane_b(seq_lb), .lane_c(seq_lc),

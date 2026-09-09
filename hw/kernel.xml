@@ -87,6 +87,33 @@
       <arg name="bank" addressQualifier="1" id="8" port="m_axi_a"
            size="0x8" offset="0x64" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
+      <!-- The per-run scratch block (revision 3, 2026-09-08). APPENDED
+           again, for the reason every argument above was: an id is a
+           position in every host's kernel call, so inserting one would
+           renumber a, b, c, d, prog, cnt and bank in every binary
+           already built.
+
+           scratch_in is READ, by the same sequencer through the same
+           master the image and the bank arrive on, so it binds to
+           m_axi_a exactly as prog and bank do - the image fetch, the
+           bank fetch and the preload are three phases of one run that
+           never overlap in time, which is why no master is added and
+           hw/link.cfg is unchanged again. scratch_out is WRITTEN,
+           after the last deposit of each lane block, so it binds to
+           m_axi_d beside d and cnt - which is what puts it in the HBM
+           group the write master can actually reach.
+
+           Offsets 0x70 and 0x78, matching SCRATCH_IN_PTR and
+           SCRATCH_OUT_PTR in rtl/cft_csr.sv. The read-only CAPS2 at
+           0x6C sits between the bank and these two and is deliberately
+           absent here, like every other read-only CSR: a host reads it
+           with read_register, not by binding it. -->
+      <arg name="scratch_in" addressQualifier="1" id="9" port="m_axi_a"
+           size="0x8" offset="0x70" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
+      <arg name="scratch_out" addressQualifier="1" id="10" port="m_axi_d"
+           size="0x8" offset="0x78" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
     </args>
   </kernel>
 </root>

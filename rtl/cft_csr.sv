@@ -42,7 +42,7 @@
 //                 a refusal is not a run, and scrubbing the previous
 //                 run's flags would be quietly rewriting history
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000700 (v0.7.0). Guards the REGISTER MAP,
+//   0x48  VERSION RO: 0x00000800 (v0.8.0). Guards the REGISTER MAP,
 //                 not the feature set - features are announced in CAPS.
 //                 A host accepts any version whose map it knows.
 //   0x4C  CAPS    RO: what this bitstream actually implements.
@@ -163,8 +163,42 @@
 //                 it exists; a 0x600 tile has no such register and its
 //                 FETCH would read constants out of an image that has
 //                 none, which is why the flag alone cannot guard it.
+//   0x6C  CAPS2   RO: the second capability word (revision 3). CAPS
+//                 (0x4C) is full - its feature nibble ends at [7] and
+//                 its three log2 capacity fields fill [27:16] - so a
+//                 fourth capacity needed a register rather than a
+//                 field. It carries:
+//                 [3:0]  log2 of the SCRATCH slots a lane (SCRATCH_D)
+//                 [4]    a per-lane scratch exists: the four control
+//                        codes STL/LDL/STX/LDX decode
+//                 [5]    the scratch I/O block exists: the header's
+//                        flags.SCRATCH_IO is understood and the two
+//                        pointers below are read
+//                 [31:6] reserved, zero - room for the capacities and
+//                        features that come next, so the NEXT one
+//                        does not move the map again
+//                 A log2 field of zero would have to mean "one slot",
+//                 not "no scratch", which is why [4] exists beside
+//                 [3:0]; and a tile older than this register reads
+//                 0x00000000 from an unmapped address, which says
+//                 "none of it" correctly by accident and by the
+//                 default arm below on purpose.
+//   0x70  SCRATCH_IN_PTR  64-bit HBM byte address of a run's scratch
+//                 preload: n * n_scratch_in format-width values,
+//                 lane-major and dense (lane i's slot s at element
+//                 i * n_scratch_in + s). Read by the sequencer only
+//                 when the program header's flags.SCRATCH_IO is set,
+//                 in its own phase after the image and the bank and
+//                 before the first instruction. It binds to m_axi_a,
+//                 the master the image and the bank already arrive
+//                 on - the three never overlap in time.
+//   0x78  SCRATCH_OUT_PTR 64-bit HBM byte address of the block the
+//                 run hands back: n * n_scratch_out values in the same
+//                 layout, written after the last deposit of each lane
+//                 block. It binds to m_axi_d, beside the deposits and
+//                 the counts, because it is written.
 //
-//                 These three sit ABOVE the read-only block rather than
+//                 These five sit ABOVE the read-only block rather than
 //                 beside the other pointers, because moving A_PTR..
 //                 D_PTR to make room would have changed every existing
 //                 argument offset - and hw/kernel.xml's argument ids
@@ -212,14 +246,21 @@ module cft_csr (
     // two features:
     //   [4] wide constant index - an instruction addresses more than
     //       the 16 constants a 4-bit operand field reaches
-    //   [5] init block - a program carries initial register values
-    //       rather than taking three from the a/b/c streams
-    //   [6] per-lane flags - the run reports each lane's exceptions,
-    //       not only their union
-    //   [7] static deposit - a deposit's slot is named by the
-    //       instruction instead of by a running per-lane counter
+    //   [5] REGS32 - five-bit register fields (2026-09-08)
+    //   [6] BANK_PTR - the per-run constant bank (2026-09-08)
+    //   [7] KX9 - a ninth constant-index bit under kx, so the bank
+    //       reaches 512 (revision 3, 2026-09-08)
     // A host reads them the way it reads op_caps: ask, then issue.
+    // The nibble is now FULL; the next sequencer feature takes a bit
+    // of CAPS2 below, which is what that register exists for.
     input  logic [3:0]  seq_feat,    // constant; CAPS[7:4]
+    // CAPS2 (0x6C), the second capability word: [3:0] log2 of the
+    // scratch slots a lane, [4] a scratch exists, [5] its per-run
+    // block exists, [31:6] reserved. Assembled by cft_krnl from the
+    // same localparams cft_seq elaborates its scratch from, so the
+    // register cannot drift from the memory it describes without the
+    // elaboration changing too.
+    input  logic [5:0]  caps2,
     // The sequencer's on-chip capacities, as LOG2, from the very
     // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
     // the memories it describes without the elaboration changing too.
@@ -242,11 +283,13 @@ module cft_csr (
     output logic [63:0] cfg_d,
     output logic [63:0] cfg_prog,
     output logic [63:0] cfg_bank,
+    output logic [63:0] cfg_sin,
+    output logic [63:0] cfg_sout,
     output logic [63:0] cfg_cnt
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
-  // v0.7.0: BANK_PTR exists at 0x64/0x68.
+  // v0.8.0: CAPS2 at 0x6C and the two scratch pointers at 0x70/0x78.
   //
   // VERSION guards the REGISTER MAP, not the feature set. Adding an
   // opcode group does not move a register, so a host built for 0x410
@@ -276,12 +319,25 @@ module cft_csr (
   // where it was already published. The host accepts {0x410, 0x500,
   // 0x600, 0x700}: the card-day images are 0x410 and 0x600 and their
   // maps are still correct, just smaller.
-  localparam [31:0] VERSION = 32'h0000_0700;
+  //
+  // 0x700 -> 0x800 (revision 3, 2026-09-08) is the same bump a third
+  // time, and it is the whole of why VERSION moves: THREE registers
+  // exist at 0x6C, 0x70/0x74 and 0x78/0x7C that did not, so a host
+  // that writes SCRATCH_IN_PTR to a 0x700 tile writes into a decode
+  // default and would run a SCRATCH_IO program against a preload at
+  // address zero. Revision 3's other two changes add no register and
+  // could not move it: IMEM_D 16384 and the ninth constant-index bit
+  // are published in CAPS[23:20] and CAPS[7], in fields that already
+  // existed. The host accepts {0x410, 0x500, 0x600, 0x700, 0x800} -
+  // every one of those maps is still correct, just smaller, and the
+  // card-day images are 0x410 and 0x600.
+  localparam [31:0] VERSION = 32'h0000_0800;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
   logic [31:0] mode_q;
   logic [63:0] n_q, a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
+  logic [63:0] sin_q, sout_q;
 
   assign ap_idle  = !busy;
   assign cfg_op   = mode_q[7:0];
@@ -295,6 +351,8 @@ module cft_csr (
   assign cfg_d = d_q;
   assign cfg_prog = prog_q;
   assign cfg_bank = bank_q;
+  assign cfg_sin  = sin_q;
+  assign cfg_sout = sout_q;
   assign cfg_cnt  = cnt_q;
 
   // ---- write channel ------------------------------------------------
@@ -336,6 +394,7 @@ module cft_csr (
       mode_q <= '0;
       n_q <= '0; a_q <= '0; b_q <= '0; c_q <= '0; d_q <= '0;
       prog_q <= '0; cnt_q <= '0; bank_q <= '0;
+      sin_q <= '0; sout_q <= '0;
     end else begin
       start <= 1'b0;
 
@@ -394,6 +453,15 @@ module cft_csr (
           // the same place as the two above.
           10'h019: bank_q[31:0]  <= (bank_q[31:0]  & ~wmask) | (wdata_q & wmask);
           10'h01A: bank_q[63:32] <= (bank_q[63:32] & ~wmask) | (wdata_q & wmask);
+          // 0x6C is CAPS2 and is READ-ONLY, so 10'h01B has no write
+          // arm - it falls to the default and is dropped, exactly as
+          // a write to FLAGS, MAGIC, VERSION, CAPS or STATUS is.
+          // 0x70 / 0x78: the two scratch pointers, appended after it
+          // for the reason the three before them were appended.
+          10'h01C: sin_q[31:0]   <= (sin_q[31:0]   & ~wmask) | (wdata_q & wmask);
+          10'h01D: sin_q[63:32]  <= (sin_q[63:32]  & ~wmask) | (wdata_q & wmask);
+          10'h01E: sout_q[31:0]  <= (sout_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h01F: sout_q[63:32] <= (sout_q[63:32] & ~wmask) | (wdata_q & wmask);
           default: ;
         endcase
       end
@@ -450,6 +518,11 @@ module cft_csr (
           10'h018: s_axi_control_rdata <= cnt_q[63:32];
           10'h019: s_axi_control_rdata <= bank_q[31:0];
           10'h01A: s_axi_control_rdata <= bank_q[63:32];
+          10'h01B: s_axi_control_rdata <= {26'b0, caps2};
+          10'h01C: s_axi_control_rdata <= sin_q[31:0];
+          10'h01D: s_axi_control_rdata <= sin_q[63:32];
+          10'h01E: s_axi_control_rdata <= sout_q[31:0];
+          10'h01F: s_axi_control_rdata <= sout_q[63:32];
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end
