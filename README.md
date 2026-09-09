@@ -47,7 +47,10 @@ published case on silicon - 1,071,635 through one tile and through
 four - a soak repeated the matrix, the sets and the sequencer's orbit
 to the same bytes, and the revision-2 single closed with more margin
 than the pair before it and ran registers above 15 and the per-run
-bank on real hardware the same afternoon (docs/VALIDATION.md;
+bank on real hardware the same afternoon, and the revision-3 pair,
+built overnight, ran the per-lane scratch, its per-run block and the
+512-entry bank on silicon to the software backend's bytes
+(docs/VALIDATION.md;
 docs/CARDDAY.md is the runbook as it was run; docs/BENCHMARKS.md has
 the measured throughput and what bounds it). The claim before that day
 was narrower and checkable - the RTL is bit-exact against a golden
