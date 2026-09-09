@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 10  /* 0.10: the sequencer's revision 3 - a per-lane scratch memory behind CFT_SEQ_FEAT_SCRATCH with its per-run block behind CFT_SEQ_FEAT_SCRATCH_IO, the ninth constant-index bit behind CFT_SEQ_FEAT_KX9, and cft_run_args with cft_program_run_ex so the positional signatures stop growing by an argument a round - cft_program_run and cft_program_run_bank are wrappers over it now. cft_caps.max_scratch; cft_program_info.n_scratch_in, n_scratch_out and scratch_used. 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
+#define CFT_ABI_VERSION_MINOR 10  /* THE NUMBER IS NOT BUMPED HERE, ON PURPOSE, AND THE 0.11 STEP'S C IS ALREADY BELOW IT. bindings/wasm/verify.mjs reads this macro out of this file and holds the shipped WebAssembly module's cftw_abi_version() to it, and the remote protocol refuses a frame whose ABI word differs at all (docs/REMOTE.md) - so a header that moved on its own would fail the wasm lane and `make -C host wstest` while the module still said 0.10, and would be reporting a version no shipped artifact had. The integrator bumps CFT_ABI_VERSION_MINOR once for a whole step, together with the module rebuild (bindings/wasm/README.md says so twice, at 0.3 and again at 0.7). Until then a caller detects the 0.11 additions the way the size handshake was built for: cft_get_caps returns a struct_size that reaches cft_caps.buffers_resident, and does not on an older library. 0.11 (this step): the buffer API becomes real on a device backend - cft_alloc's pointers are recognised in cft_run, cft_reduce and cft_program_run_ex and the operands they name are not staged again, so a caller who fills once and runs many gets the engine's rate rather than the bus's. cft_caps.buffers_resident says whether THIS device does that; cft_buffer_get_info and cft_buffer_info say what actually happened to one buffer. Nothing moved and nothing changed meaning: code written against 0.10 gets the same bits, and on the software and remote backends the same no-ops it always had. 0.10: the sequencer's revision 3 - a per-lane scratch memory behind CFT_SEQ_FEAT_SCRATCH with its per-run block behind CFT_SEQ_FEAT_SCRATCH_IO, the ninth constant-index bit behind CFT_SEQ_FEAT_KX9, and cft_run_args with cft_program_run_ex so the positional signatures stop growing by an argument a round - cft_program_run and cft_program_run_bank are wrappers over it now. cft_caps.max_scratch; cft_program_info.n_scratch_in, n_scratch_out and scratch_used. 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -494,6 +494,30 @@ typedef struct cft_caps {
      * on the tile. */
     uint32_t max_scratch;      /* scratch slots a lane, 0 = none or
                                 * unknown */
+
+    /* ---- device-resident buffers (appended, ABI 0.11) ----
+     *
+     * Does cft_alloc on THIS device produce a buffer whose contents
+     * live on the device, so that a cft_run naming it skips the
+     * staging copy? 1 on a backend that keeps device copies (XRT
+     * today), 0 on one where cft_alloc is a host allocation and the
+     * two sync calls are no-ops (software, remote).
+     *
+     * This is a PORTABILITY question and not a performance one, which
+     * is why it is a capability rather than a benchmark: the buffer
+     * calls exist and behave identically on every backend, so code
+     * written with them runs everywhere. What differs is whether the
+     * round trip was actually avoided, and a caller that wants to
+     * report its own throughput honestly has to be able to say which
+     * it got. cft_buffer_get_info answers the same question for one
+     * buffer, after the fact and in detail.
+     *
+     * NOT zero-is-unknown: every backend in this library answers it,
+     * and a remote server whose caps block predates the field is a
+     * client-side question anyway - a remote handle's buffers are the
+     * client's host memory whatever the far end does, so the client
+     * reports 0 from its own knowledge rather than from HELLO. */
+    int      buffers_resident;
 } cft_caps;
 
 /* cft_caps.seq_features bits.
@@ -1821,7 +1845,7 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
                                      uint32_t *flags_out);
 
 /* ---------------------------------------------------------------
- * Device-resident buffers (optional, for throughput)
+ * Device-resident buffers (optional, for throughput)   (real in 0.11)
  *
  * cft_run copies host memory in and out. That is the right default -
  * it always works and it is what a first port should use - but it
@@ -1830,7 +1854,113 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  * cft_run: the library recognises its own buffers and skips staging.
  *
  * On the software backend these are ordinary allocations and the sync
- * calls are no-ops, so code written this way stays portable.
+ * calls are no-ops, so code written this way stays portable. Ask
+ * cft_caps.buffers_resident which kind of device you have, and
+ * cft_buffer_get_info what actually happened to a particular buffer.
+ *
+ * WHAT IT IS WORTH. On the card, cft_run staging every operand across
+ * PCIe on every call gives 141.8 / 81.4 / 40.3 / 20.0 M fma elements
+ * a second at fp32/64/128/256 for one tile; the same tile with its
+ * operands already there does 462.6 / 235.1 / 118.7 / 59.6, and four
+ * tiles do 1,833.9 / 937.2 / 474.0 / 238.4 (docs/BENCHMARKS.md). The
+ * difference is the bus, and these five calls are how a caller stops
+ * paying for it.
+ *
+ * ---------------------------------------------------------------
+ * HOW TO USE IT
+ * ---------------------------------------------------------------
+ *
+ *     cft_alloc(dev, bytes, &buf);
+ *     memcpy(cft_buffer_data(buf), ..., bytes);   fill the mirror
+ *     cft_buffer_to_device(buf);                  publish it
+ *     for (...) cft_run(dev, op, fmt, rnd,
+ *                       cft_buffer_data(a), ..., cft_buffer_data(d),
+ *                       n, &flags, NULL);         no staging
+ *     cft_buffer_from_device(d);                  read the result
+ *     ... = cft_buffer_data(d);
+ *     cft_buffer_free(buf);
+ *
+ * An INTERIOR POINTER works: cft_buffer_data(buf) + k is recognised
+ * as byte k of that buffer, so a caller may run over a window of a
+ * larger allocation. The window must lie wholly inside the buffer -
+ * one that runs off the end is treated as ordinary host memory and
+ * staged, because a device copy that is shorter than the run is how
+ * a library returns bytes nobody wrote.
+ *
+ * ---------------------------------------------------------------
+ * WHO OWNS THE CONTENTS - the one rule
+ * ---------------------------------------------------------------
+ *
+ * A device-resident buffer has one HOST MIRROR (what cft_buffer_data
+ * returns) and, on a device backend, one or more DEVICE COPIES that
+ * the library creates as it needs them. They are separate memory, and
+ * exactly one of them is authoritative at any moment:
+ *
+ *   - after cft_alloc, and after cft_buffer_to_device, the HOST
+ *     MIRROR is authoritative: write it through cft_buffer_data, then
+ *     call cft_buffer_to_device to publish what you wrote;
+ *   - after a run that writes the buffer as its `d` output, the
+ *     DEVICE COPY is authoritative and the mirror is stale, until
+ *     cft_buffer_from_device brings it back.
+ *
+ * A CALLER WHO BREAKS THE RULE GETS CORRECT BITS, SLOWLY - never
+ * wrong ones. Specifically:
+ *
+ *   - Using a device-authoritative buffer as an INPUT without calling
+ *     cft_buffer_from_device first is honoured: the library reads the
+ *     device copy back itself, then feeds it in. The answer is the
+ *     one the rule would have given; what it costs is the round trip
+ *     the rule exists to avoid.
+ *   - cft_buffer_from_device on a buffer no run has written is a
+ *     no-op, as is cft_buffer_to_device on one whose copies are
+ *     already current. Both are always safe to call.
+ *   - Writing the mirror through cft_buffer_data and NOT calling
+ *     cft_buffer_to_device is the one thing the library cannot see,
+ *     because a plain store leaves no trace. The run then uses the
+ *     bytes the buffer last published. On the software backend the
+ *     mirror IS the buffer, so the same code sees the new bytes - so
+ *     this is the one place where forgetting a sync call changes an
+ *     answer, and it is why the sync calls exist at all. Call
+ *     cft_buffer_to_device after every write to the mirror; it costs
+ *     nothing when nothing changed hands.
+ *
+ * cft_buffer_free releases the device copies with the mirror. Closing
+ * the device first is allowed and releases them too: the buffer stays
+ * valid as plain host memory afterwards, and cft_buffer_free on it is
+ * still correct - the same NULL- and order-tolerance cft_close() has
+ * always promised.
+ *
+ * ---------------------------------------------------------------
+ * WHAT THE LIBRARY DOES WITH IT
+ * ---------------------------------------------------------------
+ *
+ * A device copy is per (TILE, ROLE), created lazily the first time
+ * the buffer is used in that role on that tile, and it lives in the
+ * memory group that tile's kernel argument reaches - because each
+ * compute unit's four AXI masters own one HBM pseudo-channel each
+ * (hw/link.cfg, hw/link_quad.cfg), so "the device copy" is not one
+ * thing: a buffer read as `a` by tile 0 and as `b` by tile 1 has two
+ * copies in two channels of two groups. That is also the ceiling:
+ * each channel is 256 MB per tile, so a buffer larger than that
+ * cannot be resident and is staged in slices instead, exactly as a
+ * plain host pointer is.
+ *
+ * A run split across tiles gives each tile a WINDOW of the buffer.
+ * XRT's sub-buffers carry an offset alignment (measured: 4096 bytes
+ * on XRT 2.14), and this library's slices are cut at 256-bit beats,
+ * so a window whose offset is not a multiple of that alignment is
+ * STAGED for that call rather than bound - the answer is identical
+ * either way and the cost is the copy. In practice every run large
+ * enough for the rate to matter is aligned; cft_buffer_get_info's
+ * counters say which you got, and its `staged_why` says why not.
+ *
+ * cft_reduce binds its input the same way. Its `partials` are the
+ * library's own and never resident, and the composed reductions
+ * (CFT_DOT, CFT_SUMSQ, CFT_SUMABS) pass through an internal scratch
+ * array which is likewise not resident, so those spend one staged
+ * pass whatever their operands are. cft_program_run_ex binds a, b, c
+ * and `deposits`; its image, constant bank, counts and scratch
+ * blocks are staged always, being neither operand-shaped nor large.
  * --------------------------------------------------------------- */
 typedef struct cft_buffer cft_buffer;
 
@@ -1840,6 +1970,48 @@ CFT_API void      *cft_buffer_data(cft_buffer *buf); /* host-visible ptr */
 CFT_API cft_status cft_buffer_to_device(cft_buffer *buf);
 CFT_API cft_status cft_buffer_from_device(cft_buffer *buf);
 CFT_API void       cft_buffer_free(cft_buffer *buf);
+
+/* What actually happened to this buffer                   (ABI 0.11)
+ *
+ * cft_caps.buffers_resident says what the DEVICE does; this says what
+ * one BUFFER got, which is a different question with the same shape
+ * as every other honesty check in this library. Residency is created
+ * lazily and can decline to happen - a buffer too large for an HBM
+ * channel, a window at an offset XRT will not bind - and a program
+ * that reports its own throughput while silently staging every call
+ * is reporting a number about the bus.
+ *
+ * So the counters are cumulative over the buffer's life and count
+ * OPERAND BINDINGS, not calls: one cft_run on four tiles binds its
+ * `a` buffer four times, once per tile, and each of those four is
+ * counted separately because each is a separate decision.
+ *
+ * Fields are only ever appended and struct_size gates them exactly as
+ * cft_caps' does: zero the struct, set struct_size to sizeof, and on
+ * return struct_size is how many bytes were actually filled. */
+typedef struct cft_buffer_info {
+    size_t   struct_size;      /* in: sizeof; out: bytes filled */
+    size_t   bytes;            /* what cft_alloc was asked for */
+    int      resident;         /* 1 if this buffer has device copies
+                                * NOW. Zero before the first run that
+                                * uses it, since they are created on
+                                * first use, and zero forever on a
+                                * backend whose caps say so */
+    int      device_authority; /* 1 if a run has written this buffer as
+                                * its `d` output and cft_buffer_from_
+                                * device has not been called since - so
+                                * the mirror is stale and reading it
+                                * would read the run before last */
+    uint64_t resident_binds;   /* operand bindings served from a device
+                                * copy, with no transfer */
+    uint64_t staged_binds;     /* operand bindings that were copied
+                                * anyway, for a reason below */
+    char     staged_why[112];  /* why the most recent staged binding
+                                * staged, or "" if none ever did */
+} cft_buffer_info;
+
+CFT_API cft_status cft_buffer_get_info(cft_buffer *buf,
+                                       cft_buffer_info *out);
 
 /* ---------------------------------------------------------------
  * Programs - the orbit sequencer

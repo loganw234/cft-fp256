@@ -3429,14 +3429,89 @@ int main(void)
               "the empty message has a hash");
     }
 
-    /* --- buffers ------------------------------------------------- */
+    /* --- buffers, the contract (ABI 0.11) --------------------------
+     *
+     * On this backend cft_alloc is a host allocation and the two sync
+     * calls do nothing - and that is precisely what has to be checked,
+     * because it is the property that keeps code written this way
+     * portable. Every check below is a claim about the API's SHAPE,
+     * true on every backend; whether a buffer is actually device
+     * resident is cft_caps.buffers_resident's answer and is nobody's
+     * business here.
+     *
+     * device-test's -b leg runs the whole elementwise matrix and the
+     * reductions through these calls against a device, which is where
+     * "the same bits either way" is proven. This is the argument
+     * contract only. */
+    CHECK(cft_alloc(NULL, 4096, &buf) == CFT_ERR_INVALID_ARGUMENT,
+          "cft_alloc refuses a NULL device");
+    CHECK(cft_alloc(dev, 4096, NULL) == CFT_ERR_INVALID_ARGUMENT,
+          "cft_alloc refuses a NULL out");
+    CHECK(cft_alloc(dev, 0, &buf) == CFT_ERR_INVALID_ARGUMENT,
+          "a zero-byte buffer is refused");
+    CHECK(cft_buffer_to_device(NULL) == CFT_ERR_INVALID_ARGUMENT &&
+          cft_buffer_from_device(NULL) == CFT_ERR_INVALID_ARGUMENT,
+          "the sync calls refuse a NULL buffer");
+    CHECK(cft_buffer_data(NULL) == NULL, "cft_buffer_data(NULL) is NULL");
+
     st = cft_alloc(dev, 4096, &buf);
     CHECK(st == CFT_OK && buf != NULL, "cft_alloc: %s", cft_strerror(st));
     if (buf) {
         uint8_t *p = (uint8_t *)cft_buffer_data(buf);
+        cft_buffer_info bi;
+
         CHECK(p != NULL, "buffer data pointer");
+        CHECK(cft_buffer_data(buf) == p,
+              "cft_buffer_data answers the same pointer every time");
         CHECK(cft_buffer_to_device(buf) == CFT_OK, "to_device");
         CHECK(cft_buffer_from_device(buf) == CFT_OK, "from_device");
+        /* Both are safe to call again, in either order and any number
+         * of times: a caller that syncs defensively must not be
+         * punished for it, and one that never had a run to read back
+         * must not be told it did. */
+        CHECK(cft_buffer_from_device(buf) == CFT_OK &&
+              cft_buffer_to_device(buf) == CFT_OK &&
+              cft_buffer_to_device(buf) == CFT_OK,
+              "the sync calls are idempotent and order-free");
+
+        /* -- cft_buffer_get_info and its struct_size handshake -- */
+        CHECK(cft_buffer_get_info(NULL, &bi) == CFT_ERR_INVALID_ARGUMENT &&
+              cft_buffer_get_info(buf, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "buffer_get_info refuses NULLs");
+        memset(&bi, 0, sizeof bi);
+        bi.struct_size = 0;
+        CHECK(cft_buffer_get_info(buf, &bi) == CFT_ERR_INVALID_ARGUMENT,
+              "a struct_size below one field is refused");
+        memset(&bi, 0xa5, sizeof bi);
+        bi.struct_size = sizeof bi;
+        st = cft_buffer_get_info(buf, &bi);
+        CHECK(st == CFT_OK && bi.struct_size == sizeof bi &&
+              bi.bytes == 4096,
+              "buffer_get_info reports the size it was asked for");
+        /* This backend keeps no device copies, so it must not claim to:
+         * every counter zero, nothing device-authoritative, and a
+         * reason a reader can act on rather than an empty string. */
+        CHECK(bi.resident == 0 && bi.device_authority == 0 &&
+              bi.resident_binds == 0 && bi.staged_binds == 0 &&
+              bi.staged_why[0] != '\0',
+              "a backend with no device memory says so and counts nothing");
+        CHECK(caps.buffers_resident == 0,
+              "the software backend does not report resident buffers");
+        /* The older caller: a short struct_size is filled to its own
+         * length and nothing past it is touched. */
+        {
+            uint8_t raw[sizeof(cft_buffer_info)];
+            cft_buffer_info *shorty = (cft_buffer_info *)(void *)raw;
+            memset(raw, 0x5a, sizeof raw);
+            shorty->struct_size = sizeof(size_t) * 2;
+            st = cft_buffer_get_info(buf, shorty);
+            CHECK(st == CFT_OK &&
+                  shorty->struct_size == sizeof(size_t) * 2 &&
+                  shorty->bytes == 4096 &&
+                  raw[sizeof(size_t) * 2] == 0x5a,
+                  "a short struct_size is filled to its own length only");
+        }
+
         if (p) {
             /* Buffer memory is ordinary memory here, so it feeds
              * cft_run directly - which is the property that keeps code
@@ -3449,8 +3524,237 @@ int main(void)
                   "run over a device buffer");
         }
         cft_buffer_free(buf);
+        buf = NULL;
     }
     cft_buffer_free(NULL);          /* must be safe */
+
+    /* --- buffers against host pointers, bit for bit and flag for flag
+     *
+     * The claim the whole mechanism rests on: the same call over the
+     * same bytes gives the same answer whether the operands came from
+     * cft_alloc or from malloc. Here that is true by construction -
+     * this backend has one kind of memory - so what it proves is the
+     * HARNESS: an interior pointer, an aliased output, a reduction and
+     * a program run all reach the library the same way through both,
+     * and device-test's -b leg runs the identical shape where the two
+     * really are different memory. */
+    {
+        enum { NBUF = 96 };
+        cft_buffer *ba = NULL, *bb = NULL, *bc = NULL, *bd = NULL;
+        static uint8_t ha[NBUF * 8], hb[NBUF * 8], hc[NBUF * 8];
+        static uint8_t hd[NBUF * 8], hd2[NBUF * 8];
+        uint32_t fh = 0, fb = 0;
+        uint32_t rs2 = 0xb0ffe511u;
+        size_t k;
+
+        for (k = 0; k < sizeof ha; k++) {
+            rs2 ^= rs2 << 13; rs2 ^= rs2 >> 17; rs2 ^= rs2 << 5;
+            ha[k] = (uint8_t)rs2;
+            rs2 ^= rs2 << 13; rs2 ^= rs2 >> 17; rs2 ^= rs2 << 5;
+            hb[k] = (uint8_t)rs2;
+            rs2 ^= rs2 << 13; rs2 ^= rs2 >> 17; rs2 ^= rs2 << 5;
+            hc[k] = (uint8_t)rs2;
+        }
+
+        if (cft_alloc(dev, sizeof ha, &ba) == CFT_OK &&
+            cft_alloc(dev, sizeof hb, &bb) == CFT_OK &&
+            cft_alloc(dev, sizeof hc, &bc) == CFT_OK &&
+            cft_alloc(dev, sizeof hd, &bd) == CFT_OK) {
+            uint8_t *pa = (uint8_t *)cft_buffer_data(ba);
+            uint8_t *pb = (uint8_t *)cft_buffer_data(bb);
+            uint8_t *pc = (uint8_t *)cft_buffer_data(bc);
+            uint8_t *pd = (uint8_t *)cft_buffer_data(bd);
+
+            memcpy(pa, ha, sizeof ha);
+            memcpy(pb, hb, sizeof hb);
+            memcpy(pc, hc, sizeof hc);
+            CHECK(cft_buffer_to_device(ba) == CFT_OK &&
+                  cft_buffer_to_device(bb) == CFT_OK &&
+                  cft_buffer_to_device(bc) == CFT_OK,
+                  "publishing three buffers");
+
+            /* fp64 fma over the whole array, both ways. */
+            memset(hd, 0, sizeof hd);
+            memset(pd, 0, sizeof hd);
+            st = cft_run(dev, CFT_FMA, CFT_FP64, CFT_RNE, ha, hb, hc, hd,
+                         NBUF, &fh, NULL);
+            CHECK(st == CFT_OK, "host-pointer fma: %s", cft_strerror(st));
+            st = cft_run(dev, CFT_FMA, CFT_FP64, CFT_RNE, pa, pb, pc, pd,
+                         NBUF, &fb, NULL);
+            CHECK(st == CFT_OK, "buffer fma: %s", cft_strerror(st));
+            CHECK(cft_buffer_from_device(bd) == CFT_OK, "reading d back");
+            CHECK(memcmp(hd, pd, sizeof hd) == 0 && fh == fb,
+                  "buffers and host pointers give the same bits and flags");
+
+            /* An INTERIOR pointer: a window at a byte offset inside
+             * each buffer, which is the case a registry that only
+             * recognised base addresses would silently stage. */
+            memset(hd2, 0, sizeof hd2);
+            st = cft_run(dev, CFT_MUL, CFT_FP64, CFT_RNE, ha + 64, hb + 64,
+                         NULL, hd2 + 64, NBUF / 2, &fh, NULL);
+            CHECK(st == CFT_OK, "host-pointer window: %s", cft_strerror(st));
+            memset(pd, 0, sizeof hd);
+            CHECK(cft_buffer_to_device(bd) == CFT_OK, "republishing d");
+            st = cft_run(dev, CFT_MUL, CFT_FP64, CFT_RNE, pa + 64, pb + 64,
+                         NULL, pd + 64, NBUF / 2, &fb, NULL);
+            CHECK(st == CFT_OK, "buffer window: %s", cft_strerror(st));
+            CHECK(cft_buffer_from_device(bd) == CFT_OK, "reading a window");
+            CHECK(memcmp(hd2, pd, sizeof hd2) == 0 && fh == fb,
+                  "a window inside a buffer computes the same bits");
+
+            /* d aliasing a, which the contract allows because every
+             * element is read before it is written. On a device the
+             * two are different memory and the answer must still be
+             * this one. */
+            memcpy(hd, ha, sizeof ha);
+            st = cft_run(dev, CFT_ABS, CFT_FP64, CFT_RNE, hd, NULL, NULL,
+                         hd, NBUF, &fh, NULL);
+            CHECK(st == CFT_OK, "host-pointer aliased abs");
+            st = cft_run(dev, CFT_ABS, CFT_FP64, CFT_RNE, pa, NULL, NULL,
+                         pa, NBUF, &fb, NULL);
+            CHECK(st == CFT_OK, "buffer aliased abs");
+            CHECK(cft_buffer_from_device(ba) == CFT_OK, "reading a back");
+            CHECK(memcmp(hd, pa, sizeof hd) == 0 && fh == fb,
+                  "an output aliasing its own input agrees");
+            memcpy(pa, ha, sizeof ha);
+            CHECK(cft_buffer_to_device(ba) == CFT_OK, "restoring a");
+
+            /* A reduction reads the whole vector and writes one
+             * element; the element goes to a host pointer here, which
+             * is what cft_reduce's signature offers. */
+            {
+                uint8_t r1[8], r2[8];
+                st = cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, hb, NULL,
+                                r1, NBUF, &fh, NULL);
+                CHECK(st == CFT_OK, "host-pointer sum: %s",
+                      cft_strerror(st));
+                st = cft_reduce(dev, CFT_SUM, CFT_FP64, CFT_RNE, pb, NULL,
+                                r2, NBUF, &fb, NULL);
+                CHECK(st == CFT_OK, "buffer sum: %s", cft_strerror(st));
+                CHECK(memcmp(r1, r2, 8) == 0 && fh == fb,
+                      "a reduction over a buffer is the same sum");
+            }
+
+            /* Counting: nothing here is resident on this backend, so
+             * every counter must still be zero after all of that. A
+             * counter that moved would mean the software path had
+             * grown a device concept. */
+            {
+                cft_buffer_info bi2;
+                memset(&bi2, 0, sizeof bi2);
+                bi2.struct_size = sizeof bi2;
+                CHECK(cft_buffer_get_info(ba, &bi2) == CFT_OK &&
+                      bi2.resident_binds == 0 && bi2.staged_binds == 0 &&
+                      bi2.resident == 0,
+                      "no bindings are counted where there is no device");
+            }
+        } else {
+            CHECK(0, "allocating four buffers");
+        }
+        cft_buffer_free(ba);
+        cft_buffer_free(bb);
+        cft_buffer_free(bc);
+        cft_buffer_free(bd);
+    }
+
+    /* --- a program run over buffers, and the closing order ---------
+     *
+     * cft_program_run_ex takes a, b, c and the deposit window, and all
+     * four are recognised the same way cft_run's are. The image, the
+     * bank and the counts are not: they are staged always, which is a
+     * decision docs/HOSTAPI.md records and this only has to not
+     * contradict.
+     *
+     * The second claim is the ordering one: closing the device before
+     * freeing a buffer is allowed. A device backend releases the
+     * buffer's device side there, and the buffer stays valid host
+     * memory - which is the only order a garbage-collected binding can
+     * promise. It needs its own device, because the check is that this
+     * one is gone. */
+    {
+        cft_device *d2 = NULL;
+        cft_buffer *pa = NULL, *pd = NULL;
+        uint8_t img[64];
+        uint64_t ins[3];
+        size_t w, bytes;
+        cft_program *prog = NULL;
+
+        ins[0] = 0u | (4ull << 8) | (0ull << 12) | (0ull << 16) |
+                 (1ull << 20) | (1ull << 28) | (1ull << 29);
+        ins[1] = 3ull | (4ull << 12) | (1ull << 31);
+        ins[2] = 0ull | (1ull << 31);
+        memset(img, 0, sizeof img);
+        put32(img + 0, 0x50544643u);
+        put32(img + 4, 1);
+        put32(img + 8, 3);
+        put32(img + 12, 2);
+        put32(img + 16, 1);
+        put32(img + 20, (uint32_t)CFT_FP32);
+        put32(img + 32, 0x3fc00000u);     /* k0 = 1.5  */
+        put32(img + 36, 0x3fa00000u);     /* k1 = 1.25 */
+        for (w = 0; w < 3; w++)
+            put64(img + 40 + w * 8, ins[w]);
+        bytes = 40 + 3 * 8;
+
+        st = cft_open(NULL, 0, &d2);
+        CHECK(st == CFT_OK && d2 != NULL, "a second software device");
+        if (d2 && cft_program_load(d2, img, bytes, &prog) == CFT_OK &&
+            cft_alloc(d2, 4 * 4, &pa) == CFT_OK &&
+            cft_alloc(d2, 4 * 4, &pd) == CFT_OK) {
+            uint8_t *ap = (uint8_t *)cft_buffer_data(pa);
+            uint8_t *dp = (uint8_t *)cft_buffer_data(pd);
+            uint8_t ha2[16], hd3[16];
+            uint32_t cnt[4], cnt2[4];
+            cft_run_args args;
+
+            put32(ha2 + 0,  0x40000000u);        /* 2.0  */
+            put32(ha2 + 4,  0x40400000u);        /* 3.0  */
+            put32(ha2 + 8,  0x3f800000u);        /* 1.0  */
+            put32(ha2 + 12, 0x00000000u);        /* +0   */
+            memcpy(ap, ha2, sizeof ha2);
+            CHECK(cft_buffer_to_device(pa) == CFT_OK, "publishing a");
+
+            memset(&args, 0, sizeof args);
+            args.struct_size = sizeof args;
+            args.a = ha2;
+            args.n = 4;
+            args.deposits = hd3;
+            args.counts = cnt;
+            st = cft_program_run_ex(prog, &args);
+            CHECK(st == CFT_OK, "host-pointer program run: %s",
+                  cft_strerror(st));
+
+            args.a = ap;
+            args.deposits = dp;
+            args.counts = cnt2;
+            st = cft_program_run_ex(prog, &args);
+            CHECK(st == CFT_OK, "buffer program run: %s", cft_strerror(st));
+            CHECK(cft_buffer_from_device(pd) == CFT_OK, "reading deposits");
+            CHECK(memcmp(hd3, dp, sizeof hd3) == 0 &&
+                  memcmp(cnt, cnt2, sizeof cnt) == 0,
+                  "a program over buffers deposits the same bytes");
+        } else {
+            CHECK(0, "a program and two buffers on the second device");
+        }
+        cft_program_free(prog);
+        cft_close(d2);
+        /* AFTER the close, deliberately. */
+        CHECK(cft_buffer_data(pa) != NULL,
+              "a buffer outlives its device as host memory");
+        CHECK(cft_buffer_to_device(pa) == CFT_OK &&
+              cft_buffer_from_device(pa) == CFT_OK,
+              "the sync calls still answer after the device closed");
+        {
+            cft_buffer_info bi3;
+            memset(&bi3, 0, sizeof bi3);
+            bi3.struct_size = sizeof bi3;
+            CHECK(cft_buffer_get_info(pa, &bi3) == CFT_OK &&
+                  bi3.resident == 0 && bi3.staged_why[0] != '\0',
+                  "and say what they are now");
+        }
+        cft_buffer_free(pa);
+        cft_buffer_free(pd);
+    }
 
     cft_close(dev);
     cft_close(NULL);                /* must be safe */

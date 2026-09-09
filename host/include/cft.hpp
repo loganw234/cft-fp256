@@ -671,6 +671,11 @@ struct capabilities {
     std::uint32_t device_version = 0;
     bool          flags_readable = false;
     std::string   backend;
+    /* Does cft_alloc on this device produce a buffer whose contents
+     * live on the device, so a run naming it skips the staging copy?
+     * cft_caps.buffers_resident; false on a backend that keeps none.
+     * See cft.h's buffer section and docs/HOSTAPI.md. */
+    bool          buffers_resident = false;
 
     bool has_format(cft_format f) const noexcept
     {
@@ -954,6 +959,13 @@ public:
         out.abi_version    = c.abi_version;
         out.device_version = c.device_version;
         out.flags_readable = c.flags_readable != 0;
+        /* Appended behind the size handshake, so an older RUNTIME
+         * leaves it zero and this reads false - which is the right
+         * answer about a library that has no such buffers. */
+        out.buffers_resident =
+            c.struct_size >= offsetof(cft_caps, buffers_resident) +
+                             sizeof c.buffers_resident &&
+            c.buffers_resident != 0;
         /* backend[] is a fixed-width array; take it up to the NUL, or
          * up to the array's end if a future runtime fills it. */
         const void *nul = std::memchr(c.backend, '\0', sizeof c.backend);

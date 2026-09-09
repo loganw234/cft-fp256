@@ -9164,3 +9164,352 @@ scratchpad under `readahead/` - the two latency sweeps, the three
 synthesis runs and the implementation, the Verilator and yosys
 censuses before and after, the formal log, the FIFO-occupancy probe,
 and the five control runs.
+## 2026-09-09 - the buffer API made real on the XRT backend: per-tile slice copies, one authority rule, and the rate the library could not reach
+
+Commits 3fd07d4 (the library: `cft.h`, `cft.hpp`, `backend.h`,
+`backend_xrt.cpp`, `device.c`) and bc1d58f (the tests, `cft-bench
+--resident`, and the `-b` leg added to `verify/run.sh`'s selfcheck
+stage).
+
+The item the entry above left open. `cft_alloc`, `cft_buffer_data`,
+`cft_buffer_to_device`, `cft_buffer_from_device` and `cft_buffer_free`
+have been in `cft.h` since the beginning and were a plain `calloc` and
+two `return CFT_OK`s on every backend, so a caller who wrote the
+portable shape still paid the bus on every call: 141.8 / 81.4 / 40.3 /
+20.0 M fma elements a second at fp32/64/128/256 through `cft_run`,
+against 462.6 / 235.1 / 118.7 / 59.6 one tile and 1,833.9 / 937.2 /
+474.0 / 238.4 four tiles with the operands already there
+(`cft-resident`, the entry above). This makes the five calls do what
+the header always said they did, on the XRT backend, without changing
+one bit of one answer.
+
+### The design, and the questions it had to settle
+
+**Recognition is a registry, in C.** `cft_alloc` records the buffer on
+its device and `host/src/device.c` resolves each operand pointer of
+`cft_run`, `cft_reduce` and `cft_program_run_ex` against that list
+before dispatch, into "this backend buffer object, at this byte
+offset". Interior pointers resolve, so a window of a larger allocation
+works. The scan is linear because the thing being counted is how many
+buffers one program holds at once. It lives in device.c and not in the
+backend for the reason `slice.h` does: the arithmetic that decides
+which bytes a run reads should be testable without a card.
+
+A window that does NOT lie wholly inside the buffer is not recognised
+at all and is staged from host memory, exactly as any other pointer -
+the same answer as before buffers existed. A device copy is exactly as
+long as its window, so serving a run that reached past the end is the
+one failure this mechanism must not have.
+
+**A device copy is per (tile, role), created lazily.** Each compute
+unit's four AXI masters own one HBM pseudo-channel each
+(`hw/link.cfg`, `hw/link_quad.cfg`), so "the device copy of this
+buffer" is not a thing that exists: a buffer feeding a four-tile run
+as `a` has four copies, in four groups, each from
+`kernel.group_id(arg)` for that tile's kernel. They are made on first
+use as that role, when the window they have to hold is finally known.
+
+**No XRT sub-buffers, and that was the decision worth measuring.** A
+run split across tiles gives each tile a window at an offset, and the
+obvious implementation is one whole-buffer copy per tile with an
+`xrt::bo(parent, size, offset)` per slice. XRT's sub-buffer offset has
+to satisfy the device's base-address alignment, and that alignment was
+**measured, not assumed: `xrt_core::bo::alignment()` returns 4096** on
+XRT 2.14.354 (the install on cft2204; the value was read by linking
+the symbol out of `libxrt_coreutil.so` and printing it). `slice.h`
+cuts at 32-byte beats, so most slice offsets are not multiples of it.
+The three ways out were aligning the cuts, caching per-tile slice
+copies, or falling back to staging for the unaligned case.
+
+Aligning the cuts was rejected because it would give a resident run a
+different partition from a staged one - two answers where the contract
+promises one - and falling back would leave the fast path unavailable
+at exactly the tile counts the fast path is for. So: **each copy holds
+that tile's window and nothing else**, beat-padded with zeros the way
+`stage()` pads a staging buffer, and the kernel argument is the copy
+itself at its own base address. No offset is ever handed to XRT, the
+alignment question does not arise, and each tile holds its quarter
+instead of the whole array. A copy is reused when the window is the
+same one again - which the same call in a loop always asks for - and
+otherwise refills, which costs exactly what staging costs. **There is
+no case in which residency is slower than the staged path it
+replaces**, and none in which it gives different bytes.
+
+**One authority rule, enforced by the library rather than promised.**
+The mirror is authoritative after `cft_alloc` and after
+`cft_buffer_to_device`; the device copies are after a run wrote the
+buffer as `d`, until `cft_buffer_from_device`. What a caller who
+breaks it gets is documented in `cft.h` and is the same in every case:
+**correct bits, slowly.** `device.c` calls `cft_buffer_from_device`
+ITSELF before anything reads a buffer - before the tile is handed it
+as an input, and before 9.4's infinity scan in `cft_reduce` walks the
+caller's array on the host - so a caller who forgets pays the round
+trip and never reads the run before last. The one case the library
+cannot see is a store into the mirror with no `cft_buffer_to_device`
+after it, because a plain store leaves no trace; that is stated in the
+header as the reason the sync calls exist, and `device-test -b`'s
+publish check is what proves publishing takes effect.
+
+`cft_buffer_to_device` moves nothing: it marks every copy stale and
+each refills at its next binding, for the window that binding needs.
+Pushing eagerly would push the whole buffer into every tile's channel
+and then push the right windows again at the first run.
+
+**Freeing, and the closing order.** `cft_buffer_free` unlinks from the
+registry first, so nothing can resolve a pointer into a buffer that is
+going away, then releases the device copies with the mirror; whatever
+a run wrote and nobody read back goes with it, which is what free
+means. `cft_close` on a device that still has buffers releases their
+device side and unlinks them, and the buffers stay valid host memory
+afterwards - so closing first is allowed and is not a use-after-free,
+which is the tolerance `cft_close()` has always promised and the only
+order a garbage-collected binding can guarantee.
+
+**Memory.** Each master owns one HBM pseudo-channel, 256 MB a tile, so
+a copy that does not fit is not made and the operand is staged in
+slices exactly as a plain pointer is. The run still gives the right
+answer; `cft_buffer_get_info`'s `staged_why` says why it was slow.
+
+**What is not resident, on purpose.** `cft_reduce`'s partials are the
+library's own array. The composed reductions (`CFT_DOT`, `CFT_SUMSQ`,
+`CFT_SUMABS`) pass through an internal scratch array, so they spend one
+staged pass whatever their operands are - making that scratch resident
+would need the `d` copies and the `a` copies to be the same memory,
+which the per-master channel rule forbids. `cft_program_run_ex` binds
+`a`, `b`, `c` and `deposits`; the image, the constant bank, the counts
+and the two scratch blocks are staged always, none being
+operand-shaped and two not growing with `n` at all.
+
+**Ports and backends unchanged.** The software backend keeps a plain
+allocation and two no-ops. A remote handle keeps its buffers on the
+client and still sends them as bytes in every `RUN`
+(docs/REMOTE.md, which now says why residency there is a by-handle
+`RUN` and not a client-side copy of the server's partitioning). The
+JavaScript binding is untouched.
+
+### The ABI, and the one thing deliberately left undone
+
+This is an additive minor step and it is **0.11**: `cft_caps` gains
+`buffers_resident` appended behind the size handshake, and there is one
+new entry point, `cft_buffer_get_info`, returning a `cft_buffer_info`
+with the same appended-fields-behind-`struct_size` contract. Both
+answer questions this repository refuses to leave to inference - the
+first "does this DEVICE keep device copies", the second "did THIS
+buffer actually get them, how many bindings avoided a transfer, and
+why did the last one not" - because a residency mechanism that quietly
+staged everything would return every right answer and do nothing.
+
+**`CFT_ABI_VERSION_MINOR` still reads 10, and that is on purpose.**
+`bindings/wasm/verify.mjs` reads the macro out of `cft.h` and holds the
+shipped WebAssembly module's `cftw_abi_version()` to it, and the remote
+protocol refuses any frame whose ABI word differs at all - so a header
+that moved on its own fails the `wasm` lane and `make -C host wstest`
+while the module still says 0.10. That was observed here, not
+predicted: the bump was made first and `wstest` went red with
+`ABI mismatch: the other end is libcft 0.11, this end is 0.10`. It is
+also exactly the division of labour `bindings/wasm/README.md` records
+twice, at 0.3 and again at 0.7: *"the integrator bumps
+`CFT_ABI_VERSION_MINOR` once, for the whole step"*, together with the
+module rebuild. So the macro is left where the integrator will move
+it, the comment beside it says what the 0.11 step is and why the
+number has not moved, and until then a caller detects the additions the
+way the size handshake was built for - `cft_get_caps` returns a
+`struct_size` that reaches `buffers_resident`, and does not on an older
+library. **Hand-off: bump the macro with the wasm module rebuild.**
+
+### What ran
+
+### What ran
+
+**The gates, on this Windows host** (`PATH=/c/msys64/mingw64/bin gcc`,
+`PYTHON=C:/Users/logan/AppData/Local/Programs/Miniconda3/python.exe`):
+
+| gate | result |
+|---|---|
+| `make -C host test` | api-test all contract checks passed; reduce-parts 6,294 partitions across 4 formats x 29 sizes x 7 part counts x 5 attributes; `cft-selftest` **168 sets, 1,071,635 cases, all matching**; C and ctypes identical |
+| `make -C host remotetest` | `remote_check: every check passed` |
+| `make -C host wstest` | `remote_test: 67 checks, 0 failures` over both transports |
+| `make -C host clean && make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt` on WSL cft2204, then `clean` again | **exit 0**, and `backend_xrt.cpp` compiled with no warning at `-Wall -Wextra -Wpedantic -Wshadow` in both the static and the PIC pass |
+
+**The new legs.** `device-test sw -b`, which is the whole elementwise
+matrix and the reductions run through `cft_alloc`'d operands and
+compared byte for byte and flag for flag against the same calls on
+plain pointers and against the software backend:
+
+    ./device-test sw -b -n 256      4,360 checks, 0 failed
+    ./device-test sw -b -n 64 -q      696 checks, 0 failed  (ASan build)
+
+and it is now the second half of `verify/run.sh`'s `selfcheck` stage,
+so every census runs it on every machine. On `sw` it cannot prove the
+SAVING - there are no device copies to serve from, and it says so in
+its own summary line rather than letting a reader assume otherwise -
+but it proves the CONTRACT, and it is what makes the leg able to fail
+before an hour of emulation is spent.
+
+`api-test` gained the buffer contract: the refusals, the idempotence
+and order-freedom of the two sync calls, `cft_buffer_get_info`'s
+`struct_size` handshake in both directions, an interior-pointer window,
+an output aliasing its own input, a reduction and a
+`cft_program_run_ex` run through buffers held to the host-pointer path,
+and a buffer outliving `cft_close` as host memory.
+
+`cft-bench --resident` fills the four operands through `cft_alloc`
+once, publishes once, and runs the same timing loop on them, reporting
+the same columns; after the timed runs it reads the result back and
+holds it to the same call on plain pointers over a bounded prefix, so
+a rate reported for the wrong bytes fails the run. On the software
+backend (`./cft-bench --resident -n 4096 -t 0.05 -f fp64`) it is the
+same measurement twice, which is the point of being able to run it
+there: 4 rows checked, identical.
+
+### On the device: hw_emu, the four-tile 0x600 image
+
+`/root/cft-fp256/build-emu-0907q/cft_hw_emu.xclbin` on cft2204, four
+compute units, staged into a scratch copy so nothing was written into
+another checkout. A purpose-built probe rather than `device-test -b`,
+because at **roughly ten minutes of wall clock per phase** in this
+image the whole `-b` leg would be an evening: n = 64 fp32 is 8 beats,
+so two beats on each of four tiles - the multi-tile window split, at
+three non-zero offsets.
+
+    device: backend xrt, 4 tile(s), contract 0x00000600, buffers_resident=1
+
+    == launch 1: cft_run over resident operands
+      a  resident=1 authority=0 resident_binds=0 staged_binds=4
+         why: first use of this window on this tile and role
+      b  resident=1 authority=0 resident_binds=0 staged_binds=4   (same)
+      c  resident=1 authority=0 resident_binds=0 staged_binds=4   (same)
+      d  resident=1 authority=0 resident_binds=4 staged_binds=0
+
+    == launch 2: the SAME call again, nothing republished
+      a  resident=1 authority=0 resident_binds=4 staged_binds=4
+      b  resident=1 authority=0 resident_binds=4 staged_binds=4
+      c  resident=1 authority=0 resident_binds=4 staged_binds=4
+      d  resident=1 authority=0 resident_binds=8 staged_binds=0
+
+**That table is the claim, measured.** Launch 1 filled one window per
+tile per input role - four each, the first use - and allocated the
+output windows without a transfer. Launch 2 added four RESIDENT
+bindings to each input and **zero staged ones**: the second call moved
+no operand bytes at all. Both launches produced bytes and a flag word
+identical to the software backend's over the same operands (no `FAIL`
+line was printed, and the counter assertions - staged unchanged,
+resident grown, the first run's staged count equal to the tile count -
+all passed).
+
+The simulator's own trace is the other half of it. Twelve tile runs,
+twelve `DONE`s, `err=000` on every one, `flags=10000` (inexact), and
+each tile reading **its own HBM group**:
+
+    START op=0 n=16 beats=2 a=0x00000000 b=0x10000000 c=0x20000000 d=0x30000000
+    START op=0 n=16 beats=2 a=0x40000000 b=0x50000000 c=0x60000000 d=0x70000000
+    START op=0 n=16 beats=2 a=0x80000000 b=0x90000000 c=0xa0000000 d=0xb0000000
+    START op=0 n=16 beats=2 a=0xc0000000 b=0xd0000000 c=0xe0000000 d=0xf0000000
+    ... the same four again for launch 2 ...
+    START op=24 n=16 beats=2 a=0x00000000 b=0x10001000 c=0x20001000 d=0x30001000
+    START op=24 n=16 beats=2 a=0x40000000 b=0x50001000 c=0x60001000 d=0x70001000
+    START op=24 n=16 beats=2 a=0x80000000 b=0x90001000 c=0xa0001000 d=0xb0001000
+    START op=24 n=16 beats=2 a=0xc0000000 b=0xd0001000 c=0xe0001000 d=0xf0001000
+
+`n=16` a tile is 64/4, so the window split is the one `slice.h` plans.
+The four base addresses are the four tiles' pseudo-channel groups, which
+is the per-(tile, role) copy landing where `group_id()` said it should.
+And the reduction (`op=24`, the last four) is the design in one line:
+`a` at the tile's bank base - the resident copy from the elementwise
+run, **reused with no transfer because the reduction's canonical range
+is the same window** - while `b`, `c` and `d` sit at +0x1000, the
+tile's own staging buffers, because a reduction's other three operands
+are zeros this library makes up and one element of an answer.
+
+The run did not print the reduction's comparison: every kernel it asked
+for completed cleanly, but the emulator was still working when a
+one-hour cap I had set on the probe stopped it. So **the reduction's
+resident BINDING is observed and its RESULT is not**, on a device; the
+result is checked on the software backend by `device-test -b`
+(`compare_buffers_reduce`, sum/dot/sumsq/sumabs at ten sizes a format)
+and is for the integrator to confirm on the card.
+
+### The negative controls
+
+Three faults injected, run, and reverted.
+
+**1. A slice bound at the wrong offset** (`bind->off[r] + s.first_elem
+* esz` becomes `bind->off[r]`, so every tile is handed the buffer's
+first window instead of its own), hw_emu, one launch.
+
+The probe's first comparison failed at once - `FAIL: the resident run
+disagrees with software (flags sw 0x10 hw 0x10)`. Note WHICH half
+failed. The flag words agree, because every tile still computed
+real operands and still raised exactly inexact; only the BYTES are
+wrong, and only for the three tiles whose window moved. The counters
+are unchanged too - `staged_binds=4` per input, `resident_binds=4` on
+the output - so the mechanism reported a perfectly healthy binding
+while serving the wrong quarter of the array. Plausible bytes,
+plausible flags, healthy counters: this is the failure mode the whole
+comparison exists for, and nothing short of comparing against another
+implementation would have seen it. Reverted; the same probe on the
+same image is the green run above.
+
+**2. A stale copy served after a run** (`cft_buffer_from_device` marks
+the copy clean without fetching it), hw_emu, one launch.
+
+The same first comparison failed - `FAIL: the resident run disagrees
+with software (flags sw 0x10 hw 0x10)` - because the mirror still held
+the zeros `cft_alloc` gave it while the tiles' output copies held the
+answer. Two details are worth keeping. The flag word is still right,
+since the flags come from the tiles' registers and not from the bytes,
+so a check on flags alone would have passed. And the buffer reported
+`d ... authority=0`: the control cleared the dirty mark without
+fetching, so `cft_buffer_get_info` said the readback had happened. A
+mechanism can lie about itself, which is why the leg compares bytes
+against another implementation rather than trusting the counters.
+Reverted.
+
+The FIRST attempt at this control exited 139 before the probe printed
+anything at all - before `cft_open` returned - and that is emulation
+state rather than the injected fault: a segmentation fault at device
+open is not something a change to a readback path can cause, and this
+repository has twice lost an evening to stale simulator sockets and
+run directories presenting as design failures (`hw/run-device-test.sh`
+carries both post-mortems). The retry after a full reap is the run
+above. Recorded because a control that has to be re-run once is worth
+saying so about.
+
+**3. A freed buffer's pointer left in the registry**
+(`cft_buffer_free` no longer unlinks). This one needs no device -
+`buf_sync_in` walks the list on every `cft_run` and `cft_reduce`
+whatever the backend - so it ran under AddressSanitizer in an isolated
+copy, in seconds rather than an hour, with a clean baseline first
+(api-test all passed, `device-test sw -b -n 64 -q` 696 checks 0
+failed). Injected, both binaries abort:
+
+    ERROR: AddressSanitizer: heap-use-after-free ... READ of size 8
+        #0 buf_sync_in            src/device.c:217
+        #1 cft_reduce             src/device.c:1023
+        #2 main                   tests/api_test.c:3627
+      freed by thread T0 here:
+        #1 cft_buffer_free        src/device.c:1368
+        #2 main                   tests/api_test.c:3526
+      previously allocated by thread T0 here:
+        #1 cft_alloc              src/device.c:1231
+
+which names the unlink, the free and the allocation in three frames -
+and lands on the reduction in the new api-test block, reached through a
+buffer freed sixty lines earlier. Reverted; both silent again.
+
+### What is asserted by review rather than measured
+
+- **The card.** Nothing here touched silicon. `device-test -b` and
+  `cft-bench --resident` are the two runs to make on the box, and on
+  the card the second should reproduce `cft-resident`'s table through
+  the library: 462.6 / 235.1 / 118.7 / 59.6 M fma elements a second one
+  tile, four times that on four.
+- **The 256 MB refusal path.** A buffer too large for an HBM channel
+  falls back to staging with the reason recorded; the fallback code is
+  the same code every other decline takes, and the decline was
+  exercised (as a window overrun) only by review.
+- **`cft_program_run_ex`'s device binding.** The software backend's
+  agreement is checked in api-test; the XRT path binds `a`, `b`, `c`
+  and the deposit window through the same `buf_bind` the elementwise
+  path uses and was not run under emulation.
+
