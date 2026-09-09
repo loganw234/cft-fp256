@@ -7447,6 +7447,16 @@ constructor gained `flags` and a private `_n_consts` behind the
   generator that breaks when the model refactors is a generator nobody
   can run on the day they need it.
 
+**And one break of my own, caught by a `make clean`.** The fuzz
+commit swept `host/fuzz/fuzz-program.exe` and `fuzz-serve.exe` into
+the tree: `.gitignore` names the three harnesses by their
+extensionless Linux forms and the `host/*.exe` line near the top of
+the file stops at `host/` rather than reaching `host/fuzz/`, so a
+`git add -A` on Windows took 2.6 MB of build product with it. Removed,
+and `host/fuzz/*.exe` is ignored now with the reason written beside
+it. They remain in this branch's history; nothing else the branch adds
+is a build product.
+
 **What is NOT tested here, stated rather than skipped.**
 
 - **The XRT path.** No card and no emulation on this machine, so the
