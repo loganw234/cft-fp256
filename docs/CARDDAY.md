@@ -416,6 +416,15 @@ entitled to disagree with - so the interesting question is not whether
 is already the wall. That is the number deciding whether the sequencer
 is urgent or merely desirable.
 
+*Measured 2026-09-09, the morning after the revision-3 pair
+(docs/BENCHMARKS.md, "The engine, measured"): 59 to 60 M beats a
+second a tile at every format against the 108 predicted - 2.25
+cycles a beat - and four tiles exactly four times one, byte-identical
+to each other and to software. HBM is not the wall; the read path's
+own latency is, and a deeper read-ahead is the RTL item that closes
+the gap. The staged path through `cft_run` sits a further factor of
+three below that, which is the bus.*
+
 **7. Soak.** The same run, repeated, for as long as the day allows.
 Every repetition must produce the identical checksum. A determinism
 claim that holds for one run and not for a thousand is not a

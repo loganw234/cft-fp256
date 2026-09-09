@@ -208,6 +208,17 @@ cft-selftest$(EXE): tools/cft_selftest.c libcft.a
 cft-bench$(EXE): tools/cft_bench.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
+# The engine's own rate: device-resident buffers filled once, the kernel
+# run on them back to back, timed, and the result held to the software
+# backend, to every other compute unit and to one more run
+# (tools/cft_resident.cpp). XRT-only, so it joins $(TOOLS) only under
+# XRT=1, and C++ for the reason backend_xrt.cpp is.
+ifeq ($(XRT),1)
+TOOLS += cft-resident$(EXE)
+endif
+cft-resident$(EXE): tools/cft_resident.cpp libcft.a
+	$(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) $(XRTINC) $(XRTDEF) $^ -o $@ $(XRTLIBS)
+
 # Collatz trajectories computed exactly - a benchmark designed FOR the
 # contract rather than adapted to it, and a working demonstration of
 # the orbit sequencer with a workload that is not div/sqrt. Same

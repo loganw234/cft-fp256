@@ -52,7 +52,10 @@ built overnight, ran the per-lane scratch, its per-run block and the
 512-entry bank on silicon to the software backend's bytes
 (docs/VALIDATION.md;
 docs/CARDDAY.md is the runbook as it was run; docs/BENCHMARKS.md has
-the measured throughput and what bounds it). The claim before that day
+the measured throughput - through the library, bus-bound, and with
+the bus taken out, where one tile moves 59 million beats a second at
+every format and four tiles move four times that - and what bounds
+each). The claim before that day
 was narrower and checkable - the RTL is bit-exact against a golden
 model that is itself proven against implementations sharing no code
 with it, through the same interfaces XRT drives on silicon - and the

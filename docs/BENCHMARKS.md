@@ -8,13 +8,16 @@ already run, and - since 2026-09-08 - the Alveo U50 itself.
   ("Throughput. Now, and not before, measure."), on the day the first
   card came up, and they measure `cft_run`: the path a first port
   gets, which stages every operand across PCIe on each call. That is
-  the honest default and it is bus-bound, as the section below shows;
-  the pipeline's own rate needs a device-resident-buffer benchmark,
-  which is the next measurement, not a number this file guesses at.
-  The projection in docs/SCALING.md (`make cycles` measures 1.250
-  cycles per beat marginal and 36 fixed on the RTL; cycles x period
-  is the prediction) stays labelled as a projection; the measured
-  number is where it meets the bus.
+  the honest default and it is bus-bound, as the section below shows.
+  The pipeline's own rate was measured the next morning, 2026-09-09,
+  with `cft-resident` - device-resident buffers filled once and the
+  kernel run on them back to back - and "The engine, measured" below
+  says what it is and what bounds it now. The projection in
+  docs/SCALING.md (`make cycles` measures 1.250 cycles per beat
+  marginal and 36 fixed on the RTL; cycles x period is the
+  prediction) stays labelled as a projection, and the measured
+  number is where it meets HBM: 2.25 cycles a beat, for a reason
+  that section names.
 - Emulation produces no throughput numbers at all. hw_emu is an RTL
   simulation running many orders of magnitude below fabric speed; its
   wall clock measures the simulator. (Its cycle counts are real, and
@@ -101,10 +104,8 @@ integrator's entry has the rows; the revision-2 pair was never
 benched).
 
 What the design rate looks like when the bus is taken out of the
-measurement is the next benchmark: device-resident buffers, filled
-once, then back-to-back `cft_run` calls on them (docs/SCALING.md item
-4 names the mechanism). Until it exists this file publishes no number
-for it.
+measurement is the next section, measured the morning after the
+revision-3 pair was built.
 
 **The soak, the same day**, is the measurement that matters for the
 contract rather than for speed: on each image, five repetitions of the
@@ -113,6 +114,73 @@ a second time, all matching; and the sequencer's reference orbit to
 2,000 iterations, deposited 32 steps a call, produced one checkpoint
 hash in ten runs on one tile, ten on four, and one on the software
 backend - the same bytes everywhere, which is the claim.
+
+## The engine, measured (2026-09-09)
+
+`host/tools/cft-resident` (`make -C host XRT=1 cft-resident`; XRT-only,
+C++ because XRT's API is) takes the bus out: each compute unit's four
+buffers are filled once, then the kernel runs on them back to back
+and only the runs are timed. It is not only a stopwatch. Every unit
+gets the same operands, and after the timed runs the result is held
+to the software backend, to every other unit and to one more run,
+with STATUS read back - so the rate comes with the correctness check
+the staged numbers could not make, at the rate where the engine's
+flow control and its four masters are doing what a cocotb memory
+model only stood in for. Provenance: the revision-3 pair from main
+99d2700 (single `f9a48201...`, quad `af26a699...`), amd-arc-box, the
+morning after they were built; every row's status clean, every row's
+bytes identical on every unit, on repeat and in software, the flags
+the same word (inexact) on both sides.
+
+`fma`, one million elements a run, twenty timed runs after a warm-up;
+`add` and `mul` within half a percent of every row:
+
+| format | one tile, resident | four tiles at once | one tile, staged (card day) | software, one thread |
+|---|---|---|---|---|
+| fp32 | **462.6 M/s** (2.16 ns) | **1,833.9 M/s** (0.545 ns) | 141.8 M/s | 3.76 M/s |
+| fp64 | **235.1 M/s** (4.25 ns) | **937.2 M/s** (1.07 ns) | 81.4 M/s | 3.24 M/s |
+| fp128 | **118.7 M/s** (8.43 ns) | **474.0 M/s** (2.11 ns) | 40.3 M/s | 2.52 M/s |
+| fp256 | **59.6 M/s** (16.8 ns) | **238.4 M/s** (4.20 ns) | 20.0 M/s | 1.74 M/s |
+
+Three things the table says. **The engine is format-blind**: one
+tile moves 57.8 to 59.7 million beats a second whatever the width,
+7.4 to 7.6 GB/s over its four streams, so a wider format costs
+exactly its width and nothing more, which is what a beat-wide
+datapath promises and the staged numbers could not show. **Four
+tiles are four times one**: 29.3 to 30.5 GB/s in all, each unit at
+the rate it has alone and byte-identical to the others, because
+hw/link_quad.cfg gives each its own HBM group; nothing shared is in
+the way at four, and docs/SCALING.md's crossbar question starts
+above that. And **the bus was hiding a factor of three**: resident
+against staged is 3.0x to 3.3x at every format, and 123x to 34x one
+core of the host.
+
+**What bounds it now is not the pipeline.** `make cycles` measures
+1.250 cycles a beat marginal on the RTL, which at 135 MHz is 108 M
+beats a second; the card sustains 59 to 60, which is 2.25 cycles a
+beat, at every format and at n = 65,536 and n = 4,194,304 alike (the
+small size shows a fixed cost of about 35 microseconds a run and
+nothing else). A ceiling flat across format and size, well under
+both the masters' own limit (135 M beats a second each at the kernel
+clock) and the channels' (docs/SCALING.md), is the signature of a
+read path bounded by latency: the streaming engine keeps only so
+many bytes in flight per stream, and against the real controller's
+round trip, that many bytes a round trip IS the rate. The cocotb
+model answered faster than HBM does - exactly the disagreement
+docs/CARDDAY.md's step 6 said a real controller was entitled to. The
+remedy is a deeper read-ahead in `cft_engine_stream`, more
+outstanding bursts per master, and it is an RTL item with a measured
+target: 108 M beats a second, 1.8x what the card does today.
+
+**What a port gets today.** `cft_run` stages, and `cft_alloc` is a
+plain allocation on every backend whose sync calls are no-ops
+(docs/HOSTAPI.md), so through the library the numbers are still the
+card-day table's. The buffer API is already the right shape for the
+resident path - allocate, sync to the device, run, sync back - and
+making it real on the XRT backend, with `cft_run` zero-copy on a
+buffer that is already there, is the library item that hands this
+table to a port. Until then the rate is reachable through XRT
+directly, which is how `cft-resident` reaches it.
 
 ## Width inside the library
 
