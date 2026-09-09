@@ -1168,8 +1168,13 @@ def test_a_constant_past_255_reaches_the_model():
     prog = seq.Program.from_bytes(image)
     one = chars.from_decimal(FP64, "1")[0]
     res = seq.run(prog, [one], [0], [0])
-    want, _fl = sf.compute(FP64, sf.OP_ADD, one,
-                           chars.from_decimal(FP64, str(n - 1))[0], 0,
+    # ADD is a + c through the operand mux (b is replaced by one), and
+    # `add rd, ra, K` puts K in c - so the expectation names c, not b.
+    # The test had K in b and expected 1 + 0; it was skipped until the
+    # model addressed 512 constants, and ran for the first time on the
+    # merged tree (2026-09-08, evening).
+    want, _fl = sf.compute(FP64, sf.OP_ADD, one, 0,
+                           chars.from_decimal(FP64, str(n - 1))[0],
                            sf.RND_RNE)
     assert res.deposits[0] == want
 
