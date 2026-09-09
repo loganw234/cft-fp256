@@ -46,6 +46,15 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
+- [x] **THE REVISION-3 PAIR: built overnight 2026-09-08 into 09-09 from
+      main 99d2700, both halves at 135 MHz, verified, staged and run on
+      the card as each landed** (`~/cardday-rev3`; docs/VALIDATION.md,
+      the integrator's revision-3 entry). A 256-slot per-lane scratch
+      with its per-run block, 16,384 instructions, a 512-entry bank,
+      VERSION 0x800, CAPS feature nibble 1111 and CAPS2 - it needs a
+      host at ABI 0.10, which the box has. Use it for anything that
+      needs revision 3; the two pairs below stay as they were.
+
 - [x] **THE REVISION-2 PAIR: 2026-09-08, from 9c086d3, both halves at
       135 MHz, verified, staged and run on the card the same afternoon**
       (`~/cardday-rev2`; docs/VALIDATION.md, that entry). Thirty-two

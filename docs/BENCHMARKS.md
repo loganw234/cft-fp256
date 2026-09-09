@@ -92,6 +92,14 @@ the same bus transfer with the same bus. The speed-ups above are real
 and they are the bus's, which is exactly what the bench's header said
 they would be.
 
+The revision-3 pair, measured the same way the next night, lands in
+the same band - its numbers within the run-to-run spread of a
+bus-bound measurement, the single's taken beside a Vivado route on
+the same host - which is what a change confined to the sequencer
+must do to the elementwise path (docs/VALIDATION.md, the revision-3
+integrator's entry has the rows; the revision-2 pair was never
+benched).
+
 What the design rate looks like when the bus is taken out of the
 measurement is the next benchmark: device-resident buffers, filled
 once, then back-to-back `cft_run` calls on them (docs/SCALING.md item

@@ -454,6 +454,51 @@ program that needs what they lack.
 | Node / Browser | rebuilt at 0.9 the same day: **129 `cftw_*` exports** (thirteen new: `runBank`, `digest`, `flags`, `bankExternal`, the caps accessors that 0.8 never exported, `sha256`), module `1af4ddd3...` (219,535 bytes), package 0.9.0; `test.mjs` 126, `program_test.mjs` 28 (17 before), `conformance.mjs` 2,063,270 cases over 316 set replays; `verify.mjs` OK with 98 needed exports and 1,231,635 cases; `verify_demos.mjs` 44 ok; the runner's `node` and `wasm` stages PASS (run 20260908-135600-2a4751a); `remote.mjs` speaks `PROG_RUN_BANK` and `make -C host wstest` is **57 checks, 0 failures** (42 at 0.8), with the bank round trip; the JavaScript encoder is held to `asm.py` byte for byte, and it found the empty-bank corner the C remote client had (fixed) |
 | RTL | `cft_seq` at 32 registers, `IMEM_D` 4096, `BANK_PTR`, VERSION 0x700, CAPS feature nibble 0111; the full cocotb suite 64/64 and the multi-cycle sequencer targets 14/14 on the merged tree; out of context on the U50 part the doubled register file costs nothing (119,915 LUT against 120,173, WNS +1.196 ns both ways) and the deeper instruction memory landed in an UltraRAM |
 
+**ABI 0.10 (2026-09-08, evening)** is the sequencer's third revision,
+built to atlas-engine's measured second round of asks
+(docs/SEQUENCER.md, "Revision 3"; docs/PROGRAMS.md; docs/ATLAS.md
+items 6 to 9). Four hardware changes, each announced and refused by
+name where a device lacks it: a 256-slot per-lane scratch memory
+reached by four control codes - `STL`/`LDL` by a static slot,
+`STX`/`LDX` by a register's low bits reduced modulo the depth -
+(CAPS2[4], `cft_caps.seq_features` bit 8, `CFT_SEQ_FEAT_SCRATCH`, the
+depth as `cft_caps.max_scratch` from CAPS2[3:0]); the scratch's first
+slots as a per-run block in and out - the header's second reserved
+word is `scratch_io` under flags bit 1, `SCRATCH_IN_PTR` at 0x70/0x74
+and `SCRATCH_OUT_PTR` at 0x78/0x7C are kernel arguments 9 and 10, and
+the map grew, so VERSION is 0x800 and the host accepts {0x410, 0x500,
+0x600, 0x700, 0x800} (CAPS2[5], bit 9, `CFT_SEQ_FEAT_SCRATCH_IO`);
+16,384 instructions through the depth CAPS[23:20] already published;
+and a ninth constant-index bit - `imm[30:28]` under `kx`, `KMEM_D` 512
+(CAPS[7], bit 3, `CFT_SEQ_FEAT_KX9`) - with `imm[31]` still reserved
+as the next guard. The C surface grows additively: `cft_run_args` and
+`cft_program_run_ex`, with `cft_program_run` and `cft_program_run_bank`
+now wrappers that fill the struct (a program that declares scratch I/O
+refuses the two older calls by name, and a `struct_size` the library
+does not recognise on this INPUT struct is refused rather than
+truncated, since truncating an input silently drops what a newer caller
+set); `cft_caps.max_scratch`; `cft_program_info.n_scratch_in`,
+`n_scratch_out` and `scratch_used` behind `struct_size`. The remote
+protocol gains `PROG_RUN_EX` (0x0024) carrying the struct's buffers,
+refused by name by an older server, and the caps block grows from 72
+to 76 bytes; 0.9 and 0.10 peers refuse each other at HELLO as every
+minor step has. The text form gains the four mnemonics, `.slot`,
+`.scratch in`/`out` and constant names past 255 under the ninth bit,
+and the library five programs: a forty-term spill held to its
+spill-free reference, a convolution through indexed slots, a resumable
+program carried out and back in through the block, a degree-299 Horner
+through a 300-entry bank. The revision-2 pair (VERSION 0x700) and the
+card-day pair (0x600) predate all of it and run unchanged under this
+host, which refuses by name any program that needs what they lack.
+
+| surface | status at ABI 0.10 |
+|---|---|
+| C (`cft.h`) | complete: the loader's four scratch codes, the `scratch_io` word and the ninth-bit rule; `device_test.c` gains the scratch matrix, the lane-major block in both directions, a program that is `BANK_EXT` and `SCRATCH_IO` at once, and every refusal by name (2,656 checks, 2,444 at 0.9); on the merged tree `make -C host test` 1,071,635 cases and `remotetest` 280 checks a route with 184,592 cases local and remote identical; seven faults injected into `program.c` and reverted, every one caught (one first attempt caught nothing and was a bad injection, recorded); the XRT 0x800 path - CAPS2, the two pointers, eleven arguments - asserted by review until the revision-3 pair runs |
+| C++ (`cft.hpp`) | `run_ex`, syntax-checked at C++17 and C++20 |
+| Python (`cftmpfr`) | unchanged; the sequencer is outside its scope |
+| Node / Browser | rebuilt at 0.10 the same evening: **138 `cftw_*` exports** (nine new, `runEx` and the scratch accessors among them), module `39822d67...` (225,231 bytes), package 0.10.0; `test.mjs` 126, `program_test.mjs` 37 (28 before), `conformance.mjs` 1,903,270 cases over 316 set replays; `verify.mjs` OK with 107 needed exports and 1,071,635 cases through the page's bytes plus 831,635 through the wrappers; `verify_demos.mjs` 44 ok, sixteen of the seventeen recorded hashes unchanged and the seventeenth the module stamp; the runner's `node` and `wasm` stages PASS; `remote.mjs` speaks `PROG_RUN_EX` and `make -C host wstest` is **67 checks, 0 failures** (57 at 0.9); the JavaScript encoder is held to the C loader, and its own corpus generator had `ka`'s and `kb`'s ninth bits swapped - the permutation no round trip sees - caught by the bit before it shipped |
+| RTL | `cft_seq` with a 256-slot per-lane scratch (eight banks of 4,096 x 32 bits, one URAM288 each), `IMEM_D` 16384 (block RAM now: a four-URAM cascade wants pipeline stages the fetch path does not have), `KMEM_D` 512, CAPS2 at 0x6C with the two scratch pointers, VERSION 0x800, CAPS feature nibble 1111; on the merged tree the full cocotb suite is 21 targets, 69/69 (`seq_core` 17/17 where revision 2 had 12) and the multi-cycle census 43/43 at MC=10, formal 31/31 with the negative control refuted, yosys-lint and the Verilator width gate clean (run 20260908-231544-24e8304); out of context on the U50 at 135 MHz the tile costs +4,050 LUT (+3.4%), +28.5 block RAM tiles and +7 UltraRAMs against revision 2 re-synthesised the same day, and 0.000 ns of timing - WNS +1.196 ns in both trees on the same FIFO-to-FMA path - and it places and routes at +0.447 ns with 0 of 107,678 endpoints failing |
+
 ## Drop-ins
 
 Higher-level packages that slot into an existing ecosystem's shape,

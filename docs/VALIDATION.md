@@ -8281,3 +8281,270 @@ number in this entry from the agent's logs and reports with its own
 entry here. The two model tests added after the agent's golden run
 (`test_p3_fuzz_with_the_scratch_on`, `test_scratch_io_degenerate_shapes`)
 are covered by the merged-tree golden run in the integrator's entry.
+
+## 2026-09-08 (evening into 2026-09-09) - revision 3 integrated, gated on the merged tree, and the revision-3 pair on silicon
+
+The integrator's record of the round that docs/SEQUENCER.md's
+"Revision 3" contract (0e3fb89) started at about 18:50: three agents'
+halves merged, the two seams the merge found, the gates on the merged
+tree, and the pair built from main 99d2700 and run on the U50 in
+amd-arc-box. The three halves have their own entries above this one
+(the tools half, the host and bindings half, the model and tile half);
+this one is about what happened when they met.
+
+### The merges, in order
+
+- **Tools** (6b762c4, the afternoon): `asm.py`, `cft-asm`, five new
+  library programs, `positive-run --scratch-in/--scratch-out`. Four of
+  its checks said SKIP by name until the other two halves existed.
+- **Host and bindings** (36eef4e, 21:35): ABI 0.10. The only conflict
+  was the tail of this file, both halves having appended an entry;
+  both are kept. The XRT backend's 0x800 map was read against the
+  contract branch's `rtl/cft_csr.sv` and `hw/kernel.xml` before the
+  merge: CAPS2 at 0x6C (index 0x1B), SCRATCH_IN_PTR at 0x1C/0x1D,
+  SCRATCH_OUT_PTR at 0x1E/0x1F, arguments 9 on `m_axi_a` and 10 on
+  `m_axi_d` - the same on both sides, line for line.
+- **Model and tile** (aae776f, 22:06). The agent was stopped by the
+  user's instruction at its final step, with the work done and its
+  entry drafted; the integrator let its last bench finish, committed
+  its uncommitted changes on its branch (5967123), merged, re-derived
+  its numbers from its logs and appended its entry (127f8f6).
+
+The three halves touched disjoint files, which is what the contract
+was for; the merges themselves were clean. What the merge found was in
+the places where one half's code READS another half's:
+
+### Two seams, both fixed before main
+
+1. **The differential's refusal arm died on the merged model.**
+   `host/tests/seq_check.py` serialises a program the model refused by
+   building a `Program` through `__new__` and setting the fields
+   `to_bytes()` reads. The host half had just fixed this for revision
+   2 (`flags`, `_n_consts`); the revision-3 model's `to_bytes()` also
+   reads `n_scratch_in` and `n_scratch_out` through `scratch_io_word`,
+   so the `seq` stage failed with an `AttributeError` the moment both
+   halves were in one tree - the same bypass, one merge later.
+   `bindings/node/make_seq_corpus.py` carried the same bypass and had
+   been updated for neither revision. Both set every field by name
+   now (0b59530).
+2. **A test that had never run was wrong.** `test_asm.py`'s
+   `test_a_constant_past_255_reaches_the_model` was skipped until the
+   model addressed 512 constants; on the merged tree it ran for the
+   first time and failed, expecting 1.0 where the model deposited
+   300.0. ADD is `a + c` through the operand mux (b is replaced by
+   one) and `add rd, ra, K` puts K in c; the test had fed K to b. The
+   assembler and the model were right; the expectation was fixed
+   (24e8304), and golden is 2,145 passed, 5 skipped.
+
+### The cross-check neither half could run alone
+
+The C executor of the scratch and its golden model were written by
+two different hands from the same page, and the only execution
+comparison between them before this was the library's three scratch
+programs. `seq_check.py` gained a THIRD corpus (0b59530), from its own
+seed so the first two draw what they always drew: the four scratch
+codes, five-bit registers, `kx` indices at or past 256 over a
+300-constant bank, and the header's block, through `cft_program_run_ex`
+on one side and `run(..., scratch_in=...)` on the other, compared on the
+scratch-out block as well as deposits, counts, flags and status, with
+ten instruction-level and three header-level corruptions revision 3
+refuses. At the gate's `--trials 250` over all four formats:
+
+    741 programs from the two older corpora, 259 refused by both
+    340 programs from the scratch corpus, 160 refused by both,
+        147 across the 64-lane block boundary:
+        678 STL, 693 LDL, 660 STX, 638 LDX, 203 with a block declared,
+        82 constant indices at or past 256
+    libcft and the golden model agree on every program
+
+The scratch-out drain was the one semantic the contract left open and
+both halves had to choose the same way: the model's entry says the
+drain is NOT masked by the active bit; `program.c`'s writeback loop
+writes every lane's slots regardless of the bit. Read on both sides
+before the corpus was run, and then the corpus said so too.
+
+### The gates on the merged tree
+
+Everything measured on the Windows desktop unless stated. The host
+gates ran on 36eef4e, whose `host/` and `bindings/` differ from main
+only by the two bypass fixes and the differential's new corpus; the
+model and RTL gates ran on 127f8f6 and 24e8304, whose `rtl/`, `tb/`,
+`hw/` and the model (`python/cft_golden/seq.py`, `softfloat.py`) are
+byte-identical to main 99d2700 - 24e8304 IS main's tree.
+
+    make -C host test               rc 0    544 s   1,071,635 cases; api-test; 6,294 partitions;
+                                                    C and Python the same bits
+    make -C host remotetest         rc 0    534 s   2,656 device-test checks over the wire; 184,592
+                                                    cases local and remote identical; the Collatz
+                                                    chain both ways; --bench 26 checks x 2
+    make -C host wstest             rc 0      7 s   67 checks, 0 failures
+    make programs-check             rc 0     10 s   70 passed, 0 failed, 0 skipped, 17 images -
+                                                    the four checks that said SKIP by name on
+                                                    the afternoon's tree ran, and passed
+    verify --only node,wasm          PASS  2943 s   node 1,690 s, wasm 1,250 s
+                                                    (run 20260908-214022-36eef4e)
+    verify --only lint               ok      74 s   (run 20260908-220736-aae776f)
+    make golden (four workers)      rc 0    158 s   2,145 passed, 5 skipped
+    verify --only selfcheck,seq,diff PASS    12 s   (run 20260908-221428-127f8f6)
+    program_differential 200,000    rc 0     12 s   25,659 accepted by both, 174,341 refused by
+                                                    both, 0 disagreements
+    verify --only selfcheck,seq,diff,
+                formal,sim,simmc,workloads
+                                     PASS  3329 s   sim 984 s: 21 targets, 69/69 (seq_core 17/17);
+                                                    simmc 2,055 s: the multi-cycle census at MC=10,
+                                                    16 cocotb summaries, 43/43, the board kernel
+                                                    under Verilator; formal 231 s: 31 of 31, the
+                                                    negative control refuted; workloads 49 s: the
+                                                    five contract workloads against their oracles
+                                                    (run 20260908-231544-24e8304; an identical
+                                                    pass at 20260908-221645-127f8f6 before it,
+                                                    started with the test fix uncommitted)
+
+Two things about the runner's own bookkeeping. Its census line says
+"TREE DIRTY - this run certifies nothing" for both RTL runs, and has
+said it for every run on this desktop since 2026-09-06: `git status
+--porcelain` sees two untracked files in the repository root - a
+Vivado `clockInfo.txt` from an out-of-context run launched there,
+and a Windows shortcut - neither tracked, built nor read by any
+stage. They are excluded locally now (`.git/info/exclude`), so the
+next census can say what it means. And one interpreter trap,
+recorded because it cost a rerun: with MSYS2's
+mingw64 `python` first on PATH, `remotetest`'s Python leg exits 1
+after device-test has passed, and the runner's `golden` stage skips
+for want of pytest. Both gates above were run with the Miniconda
+interpreter named by absolute path, which is the interpreter every
+entry on this page measured with.
+
+### The pair
+
+Built on amd-arc-box from main 99d2700 by the same detached chain and
+the same recipe as the two pairs before it - 135 MHz, retiming +
+phys_opt, a 130 MHz fallback per half that was not needed - each half
+verified against its manifest with `hw/verify-image.sh` and staged in
+`~/cardday-rev3` with SHA256SUMS and a README; the single tested on the
+card while the quad was still routing:
+
+    r3-135single  one tile,   135 MHz   22:20 -> 00:28 (128 min)
+                  routed WNS +0.047  TNS 0  0 failing of 566,644  WHS +0.009
+                  kernel WNS +0.277: u_fifo_a -> g_lane32[2] s0_byp_d, 16 levels (the same FIFO-to-FMA family)
+                  0 failing of 129,683 kernel endpoints
+                  37,053,150 bytes  sha256 f9a48201...8a40d9  verify-image 8/8
+    r3-135quad    four tiles, 135 MHz   22:21 -> 02:33 (251 min)
+                  routed WNS +0.020  TNS 0  0 failing of 1,004,168  WHS +0.009
+                  kernel WNS +0.040: u_fifo_a -> g_bank64 lane 3 s0_byp_d, 17 levels (the same family)
+                  0 failing of 518,591 kernel endpoints
+                  51,465,308 bytes  sha256 af26a699...f4c64b  verify-image 8/8
+
+Both closed at 135 MHz on the first attempt, with LESS margin than the
+revision-2 pair (+0.277 against +0.436 on one tile, +0.040 against
++0.122 on four) and about the margin of the card-day pair (+0.316 and
++0.067). The worst path is the same FIFO-to-FMA-input family every
+build since revision 1 has had; the tile grew by 3.4% of its logic
+and 28.5 block RAM tiles, and the placer had that much less room. The
+four-tile margin of forty picoseconds is met, not comfortable, and it
+is the number to watch if a fourth revision grows the tile again: the
+130 MHz fallback was not needed tonight, and would be the answer the
+night it is.
+
+Both halves carry the sanity greps the chain refuses without: CAPS2 at
+10'h01B, SCRATCH_OUT_PTR's high word at 10'h01F, VERSION 0x800,
+IMEM_D 16384, KMEM_D 512, SCRATCH_D 256, the feature nibble 1111, and
+kernel arguments 9 and 10 in hw/kernel.xml.
+
+### On the card
+
+The series each pair before it had - the device-test matrix three
+ways, the published sets through the tile, the throughput bench and the
+soak - plus what only this hardware can do: the seventeen programs of
+the library run on the software backend and on the card by
+`positive-run` with identical arguments and compared on every hash
+they print (the deposit buffer's SHA-256, and for the resumable program
+the scratch-out block's, twice).
+
+**The single** (`~/cardday-rev3/cft_hw_single.xclbin`):
+
+    device: backend xrt, 1 tile, contract 0x00000800, formats fp32 fp64 fp128 fp256
+    device reports max_deposits 64, max_insns 16384, max_consts 512, seq_features 0x31f,
+                   max_scratch 256 (kx REGS32 BANK_PTR KX9 IMUL SCRATCH SCRATCH_IO)
+    positive-run --capabilities: bank-path, kx9, scratch, scratch-io present; run-path cft_program_run_ex
+
+    device-test -q -n 8       1,070 checks, 0 failed  (858 on the revision-2 image: the scratch
+                                                       matrix, the lane-major block both ways and the
+                                                       BANK_EXT-and-SCRATCH_IO program now run)
+    device-test -n 4096       2,658 checks, 0 failed
+    device-test -r              902 checks, 0 failed
+    cft-selftest vectors/out  168 sets, 1,071,635 cases, all matching, 00:30 -> 00:41 (642 s,
+                              beside the quad's routing)
+
+    the library, 4,096 elements a run, software against the card - 18 comparisons, 18 identical:
+      the eight div/sqrt cores, collatz, zoom-scan, lowbias32 (IMUL)
+      horner-bank-fp64 with exp.bank and with ramp.bank      9ad28ff0..., 67190bbd...  (the same two
+                                                             hashes the revision-2 pair gave)
+      horner-wide-fp64 with its 300-entry bank, 44 of its    543c622d...
+        coefficients reached through the ninth index bit
+      spill-fp64 and spill-ref-fp64                          c35020473aed1b46... for BOTH - forty terms
+                                                             through the scratch equal forty terms
+                                                             held in registers, on silicon
+      conv-fp64, sixteen slots under loop counters (STX/LDX) 1a89f794...
+      resume-fp64, run twice through the scratch block       deposits x2 and scratch-out x2 identical,
+        (2 slots in, 2 out, entered from zeros then from     de2f2560...
+        its own state)
+
+    soak: ten cft-zoom runs (--steps-per-call 32, 2,000 reference iterations) -> ONE checkpoint
+          hash, 51476c5dfc2ce021..., the hash the 0x600 pair, the revision-2 pair and the software
+          backend gave on card day; five full matrices at n=1120, 2,658 checks each, 0 failed;
+          the published sets once more, 1,071,635 all matching (667 s)
+    FPGA 32 C before, 36 C after the bench, 35 C at the end; 15 to 20 W
+
+**The quad** (`~/cardday-rev3/cft_hw_quad.xclbin`):
+
+    device: backend xrt, 4 tiles, contract 0x00000800, formats fp32 fp64 fp128 fp256
+    device reports max_deposits 64, max_insns 16384, max_consts 512, seq_features 0x31f, max_scratch 256
+
+    device-test -q -n 8       1,070 checks, 0 failed
+    device-test -n 4096       2,658 checks, 0 failed
+    device-test -r              902 checks, 0 failed
+    cft-selftest vectors/out  168 sets, 1,071,635 cases, all matching, 02:35 -> 02:45 (592 s)
+
+    the library, software against the card: 18 comparisons, 18 identical - every hash the same
+      as the single's and the software backend's (horner-wide's 300-entry bank 543c622d..., the
+      resumable program's two runs de2f2560..., spill and spill-ref both c35020473aed1b46...,
+      the two horner-bank banks 9ad28ff0... and 67190bbd...)
+
+    soak: ten cft-zoom runs -> ONE checkpoint hash, 51476c5dfc2ce021..., the same as the single's,
+          the two earlier pairs' and the software backend's; five matrices at n=1120, 2,658 checks
+          each, 0 failed; the published sets once more, 1,071,635 all matching (590 s)
+    FPGA 28 to 32 C throughout; 15 to 21 W
+
+**Throughput**, `cft-bench -n 1048576 -t 1 --csv`, `fma`, elements per
+second, beside the pairs before it:
+
+    fma, elements per second (ns per element)   fp32            fp64            fp128           fp256
+    software, one thread (card day)             3.76 M (266)    3.24 M (309)    2.52 M (396)    1.74 M (575)
+    card-day single, 0x600 (2026-09-08)         141.8 M (7.05)  81.4 M (12.3)   40.3 M (24.8)   20.0 M (50.0)
+    card-day quad, 0x600                        175.2 M (5.71)  75.5 M (13.2)   38.1 M (26.3)   25.9 M (38.6)
+    revision-3 single, 0x800 (00:42, beside     137.2 M (7.29)  75.1 M (13.3)   37.5 M (26.7)   18.8 M (53.3)
+      the quad's Vivado routing on the host)
+    revision-3 quad, 0x800 (02:45, the host   161.6 M (6.19)  70.0 M (14.3)   35.5 M (28.2)   23.5 M (42.5)
+      otherwise idle)
+
+    Staged traffic 2.2 to 2.4 GB/s on the single and 2.2 to 3.0 on the
+    quad at every format, the band the card-day pair sat in (2.3 to
+    3.3); `mul`, `add` and `abs` within three percent of `fma` again. The revision-2 pair was never
+    benched, so there is no row for it.
+
+The same bus-bound band as the card-day pair, as docs/BENCHMARKS.md
+says it must be until the device-resident benchmark exists: revision 3
+adds nothing to the elementwise path and takes nothing from it. The
+single's rows are a few percent under the card-day single's and were
+taken while Vivado was routing the quad on the same host, which is
+where the staging path's time is spent; no more is read into them.
+
+### What this round did not do
+
+- **No revision-3 routed comparison against revision 2**; the tile
+  half's entry says why, and the pair's own timing numbers are the
+  linked build's, not the OOC's.
+- **The open-core part** is still arithmetic, not a synthesis result.
+- **Emulation** was not run for this pair; the two pairs before it
+  went from the same recipe to silicon, and the silicon is the test.
