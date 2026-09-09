@@ -403,20 +403,24 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
         CHECK(cftr_get32(resp + 56) == c.max_deposits &&
               cftr_get32(resp + 60) == c.max_insns &&
               cftr_get32(resp + 64) == c.max_consts &&
-              cftr_get32(resp + 68) == c.seq_features,
+              cftr_get32(resp + 68) == c.seq_features &&
+              cftr_get32(resp + 72) == c.max_scratch,
               "the block's sequencer capacities are what cft_get_caps "
-              "reports (%lu/%lu/%lu/0x%lx on the wire, %lu/%lu/%lu/0x%lx "
-              "from the handle)",
+              "reports (%lu/%lu/%lu/0x%lx/%lu on the wire, "
+              "%lu/%lu/%lu/0x%lx/%lu from the handle)",
               (unsigned long)cftr_get32(resp + 56),
               (unsigned long)cftr_get32(resp + 60),
               (unsigned long)cftr_get32(resp + 64),
               (unsigned long)cftr_get32(resp + 68),
+              (unsigned long)cftr_get32(resp + 72),
               (unsigned long)c.max_deposits, (unsigned long)c.max_insns,
-              (unsigned long)c.max_consts, (unsigned long)c.seq_features);
+              (unsigned long)c.max_consts, (unsigned long)c.seq_features,
+              (unsigned long)c.max_scratch);
         printf("  max_deposits %lu, max_insns %lu, max_consts %lu, "
-               "seq_features 0x%lx\n",
+               "seq_features 0x%lx, max_scratch %lu\n",
                (unsigned long)c.max_deposits, (unsigned long)c.max_insns,
-               (unsigned long)c.max_consts, (unsigned long)c.seq_features);
+               (unsigned long)c.max_consts, (unsigned long)c.seq_features,
+               (unsigned long)c.max_scratch);
     }
     free(resp);
 
@@ -432,7 +436,8 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
         CHECK(c.max_deposits == cs.max_deposits &&
               c.max_insns == cs.max_insns &&
               c.max_consts == cs.max_consts &&
-              c.seq_features == cs.seq_features,
+              c.seq_features == cs.seq_features &&
+              c.max_scratch == cs.max_scratch,
               "a software server's capacities are this library's own");
     } else {
         printf("  server backend is '%s', not compared with the local "
@@ -835,6 +840,285 @@ static void program_bank_tests(cft_device *sw, cft_device *rm)
            "name and the connection survives\n");
 }
 
+/* ---- the per-run scratch block over the wire (ABI 0.10) ----------------- *
+ *
+ * PROG_RUN_EX, docs/REMOTE.md's newest message again. The claims are
+ * the bank's, one call further along, plus the one that is new:
+ *
+ *  - the block crosses in BOTH directions and is LANE-MAJOR, so the
+ *    run is done over 96 lanes - more than one 64-lane block here and
+ *    more than one chunk's worth is not needed to catch the slicing,
+ *    since the client cuts the block by lane and a client that cut it
+ *    by bytes would hand the wrong lanes their slots;
+ *  - the answer equals the same program run locally, bits, counts,
+ *    flags and status;
+ *  - a resumable run: the state that came back goes in again, and two
+ *    runs of three doublings equal one run of six. Doubling is exact,
+ *    so the comparison is memcmp and not a tolerance;
+ *  - and the frame's own layout, asserted by building a PROG_RUN_EX
+ *    payload BY HAND rather than inferring it from the answer.
+ */
+static void program_scratch_tests(cft_device *sw, cft_device *rm)
+{
+    void *hw = cft_device_backend(rm);
+    const size_t esz = 4;                     /* fp32 */
+    const size_t N = 96;
+    uint8_t img[96];
+    uint8_t *a, *sin_buf, *sout_rm, *sout_sw, *d_rm, *d_sw, *state, *once;
+    uint32_t *c_rm, *c_sw;
+    uint64_t ins[7];
+    cft_program *pr = NULL, *ps = NULL;
+    cft_run_args A;
+    size_t i;
+    cft_caps c;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    cft_get_caps(rm, &c);
+
+    printf("the per-run scratch block over the wire:\n");
+    if (!(c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
+        printf("  the server's device does not publish SCRATCH_IO "
+               "(seq_features 0x%lx), NOT TESTED\n",
+               (unsigned long)c.seq_features);
+        return;
+    }
+    printf("  max_scratch %lu\n", (unsigned long)c.max_scratch);
+
+    a        = (uint8_t *)malloc(N * esz);
+    sin_buf  = (uint8_t *)malloc(N * 2 * esz);
+    sout_rm  = (uint8_t *)malloc(N * 2 * esz);
+    sout_sw  = (uint8_t *)malloc(N * 2 * esz);
+    d_rm     = (uint8_t *)malloc(N * esz);
+    d_sw     = (uint8_t *)malloc(N * esz);
+    state    = (uint8_t *)malloc(N * esz);
+    once     = (uint8_t *)malloc(N * esz);
+    c_rm     = (uint32_t *)malloc(N * 4);
+    c_sw     = (uint32_t *)malloc(N * 4);
+    if (!a || !sin_buf || !sout_rm || !sout_sw || !d_rm || !d_sw ||
+        !state || !once || !c_rm || !c_sw) {
+        printf("  FAIL: out of memory\n");
+        goto out;
+    }
+
+    /* LDL r4 <- slot 1; deposit r4; STL r0 -> slot 0; STL r4 -> slot 1;
+     * halt. Two slots in, two out, and the deposit is the second
+     * preloaded slot - so a block delivered a lane early, transposed,
+     * or read from the first lane for every lane gives a different
+     * answer in at least one of the three places. */
+    ins[0] = 7ull  | (4ull << 8)  | (1ull << 31) | (1ull << 32);   /* LDL */
+    ins[1] = 3ull  | (4ull << 12) | (1ull << 31);                  /* DEP */
+    ins[2] = 6ull  | (0ull << 12) | (1ull << 31) | (0ull << 32);   /* STL */
+    ins[3] = 6ull  | (4ull << 12) | (1ull << 31) | (1ull << 32);   /* STL */
+    ins[4] = 0ull  | (1ull << 31);                                 /* HALT */
+    memset(img, 0, sizeof img);
+    cftr_put32(img + 0, 0x50544643u);
+    cftr_put32(img + 4, 1);
+    cftr_put32(img + 8, 5);                    /* n_insns */
+    cftr_put32(img + 12, 0);
+    cftr_put32(img + 16, 1);                   /* max_deposits */
+    cftr_put32(img + 20, 0);                   /* fp32 */
+    cftr_put32(img + 24, CFT_PROG_FLAG_SCRATCH_IO);
+    cftr_put32(img + 28, 2u | (2u << 16));     /* 2 in, 2 out */
+    for (i = 0; i < 5; i++)
+        cftr_put64(img + 32 + i * 8, ins[i]);
+
+    fill_normal(a, N, 0);
+    fill_normal(sin_buf, N * 2, 0);
+
+    CHECK(cft_program_load(rm, img, 32 + 5 * 8, &pr) == CFT_OK && pr,
+          "a SCRATCH_IO image loads on the remote handle: %s",
+          cft_last_error());
+    CHECK(cft_program_load(sw, img, 32 + 5 * 8, &ps) == CFT_OK && ps,
+          "and on the local software one");
+    if (!pr || !ps)
+        goto out;
+
+    {
+        uint32_t f_rm = 0, f_sw = 0, s_rm = 0, s_sw = 0;
+        memset(sout_rm, 0x5a, N * 2 * esz);
+        memset(sout_sw, 0xa5, N * 2 * esz);
+        memset(&A, 0, sizeof A);
+        A.struct_size       = sizeof A;
+        A.a                 = a;
+        A.n                 = N;
+        A.deposits          = d_rm;
+        A.counts            = c_rm;
+        A.scratch_in        = sin_buf;
+        A.scratch_in_bytes  = N * 2 * esz;
+        A.scratch_out       = sout_rm;
+        A.scratch_out_bytes = N * 2 * esz;
+        A.flags_out         = &f_rm;
+        A.bus_out           = &s_rm;
+        CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+              "run_ex over the wire: %s", cft_last_error());
+        A.deposits    = d_sw;
+        A.counts      = c_sw;
+        A.scratch_out = sout_sw;
+        A.flags_out   = &f_sw;
+        A.bus_out     = &s_sw;
+        CHECK(cft_program_run_ex(ps, &A) == CFT_OK, "and locally");
+        CHECK(memcmp(d_rm, d_sw, N * esz) == 0 &&
+              memcmp(sout_rm, sout_sw, N * 2 * esz) == 0 &&
+              memcmp(c_rm, c_sw, N * 4) == 0 &&
+              f_rm == f_sw && s_rm == s_sw,
+              "the server and this process agree over %lu lanes - deposits, "
+              "the scratch-out block, counts, flags and status",
+              (unsigned long)N);
+        /* And the block really did cross, both ways: the deposit is
+         * lane i's own slot 1 and the scratch-out is lane i's own r0
+         * and r4. A block that never left this process, or that
+         * handed every chunk the first lanes' slots, fails here. */
+        {
+            int bad = 0;
+            for (i = 0; i < N; i++)
+                if (memcmp(d_rm + i * esz, sin_buf + (2 * i + 1) * esz,
+                           esz) != 0 ||
+                    memcmp(sout_rm + (2 * i) * esz, a + i * esz, esz) != 0 ||
+                    memcmp(sout_rm + (2 * i + 1) * esz,
+                           sin_buf + (2 * i + 1) * esz, esz) != 0)
+                    bad = 1;
+            CHECK(!bad, "each lane got its own slots, lane-major, over the "
+                        "wire");
+        }
+    }
+
+    /* A SCRATCH_IO program refuses the two older entry points on a
+     * remote handle too - the refusal is the library's and reaches no
+     * frame, which is the point: it costs no round trip. */
+    CHECK(cft_program_run(pr, a, NULL, NULL, d_rm, NULL, N, NULL, NULL) ==
+          CFT_ERR_INVALID_ARGUMENT,
+          "a SCRATCH_IO program refuses cft_program_run remotely");
+    cft_program_free(pr);
+    cft_program_free(ps);
+    pr = ps = NULL;
+
+    /* The resumable claim, over the wire. */
+    ins[0] = 7ull | (4ull << 8)  | (1ull << 31) | (0ull << 32);   /* LDL 0 */
+    ins[1] = 1ull | (1ull << 31);                                 /* REPEAT */
+    ins[2] = 1ull | (4ull << 8) | (4ull << 12) | (4ull << 20);    /* r4+=r4 */
+    ins[3] = 2ull | (1ull << 31);                                 /* ENDREP */
+    ins[4] = 6ull | (4ull << 12) | (1ull << 31) | (0ull << 32);   /* STL 0 */
+    ins[5] = 3ull | (4ull << 12) | (1ull << 31);                  /* DEP */
+    ins[6] = 0ull | (1ull << 31);                                 /* HALT */
+    cftr_put32(img + 8, 7);
+    cftr_put32(img + 28, 1u | (1u << 16));     /* 1 in, 1 out */
+    {
+        int step;
+        for (step = 0; step < 2; step++) {
+            const uint64_t trips = step ? 6u : 3u;
+            ins[1] = 1ull | (1ull << 31) | (trips << 32);
+            for (i = 0; i < 7; i++)
+                cftr_put64(img + 32 + i * 8, ins[i]);
+            if (cft_program_load(rm, img, 32 + 7 * 8, &pr) != CFT_OK) {
+                CHECK(0, "the resumable image loads remotely: %s",
+                      cft_last_error());
+                break;
+            }
+            memset(&A, 0, sizeof A);
+            A.struct_size       = sizeof A;
+            A.a                 = a;
+            A.n                 = N;
+            A.deposits          = d_rm;
+            A.scratch_in        = a;
+            A.scratch_in_bytes  = N * esz;
+            A.scratch_out       = step ? once : state;
+            A.scratch_out_bytes = N * esz;
+            CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+                  "%llu doublings over the wire: %s",
+                  (unsigned long long)trips, cft_last_error());
+            if (step == 0) {
+                A.scratch_in  = state;
+                A.scratch_out = sout_rm;
+                CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+                      "and the run resumed from what came back: %s",
+                      cft_last_error());
+            }
+            cft_program_free(pr);
+            pr = NULL;
+        }
+        CHECK(memcmp(sout_rm, once, N * esz) == 0,
+              "two runs of three doublings, chained through the block over "
+              "the wire, equal one run of six");
+        CHECK(memcmp(state, once, N * esz) != 0,
+              "and three doublings are not six, so that comparison proves "
+              "something");
+    }
+
+    /* The frame's own layout, built by hand: handle, present, counts,
+     * bank_bytes, n, then the two slot counts, then the scratch-in
+     * block, then the operands. Inferring the layout from an answer
+     * the same client produced would prove only that the client
+     * agrees with itself. */
+    {
+        uint8_t *req;
+        uint8_t *resp = NULL;
+        size_t len = 0, k = 4, req_len;
+        int status;
+        uint32_t handle = 0;
+
+        /* one lane block's worth is unnecessary here; four lanes is
+         * enough for a layout, and the layout is what is under test */
+        if (cft_program_load(rm, img, 32 + 7 * 8, &pr) == CFT_OK) {
+            /* the handle the server holds is the one the client's last
+             * run established, which STATS cannot report - so this
+             * runs the program once through the library to establish
+             * it, then asks the raw frame with handle 1, which is the
+             * first slot a connection hands out. */
+            memset(&A, 0, sizeof A);
+            A.struct_size       = sizeof A;
+            A.a                 = a;
+            A.n                 = k;
+            A.deposits          = d_rm;
+            A.scratch_in        = a;
+            A.scratch_in_bytes  = k * esz;
+            A.scratch_out       = sout_rm;
+            A.scratch_out_bytes = k * esz;
+            if (cft_program_run_ex(pr, &A) == CFT_OK) {
+                handle = 1;
+                req_len = 32 + k * esz + k * esz;
+                req = (uint8_t *)malloc(req_len);
+                if (req) {
+                    cftr_put32(req + 0, handle);
+                    cftr_put32(req + 4, 1u);     /* present: a only */
+                    cftr_put32(req + 8, 0u);     /* no counts */
+                    cftr_put32(req + 12, 0u);    /* no bank */
+                    cftr_put64(req + 16, (uint64_t)k);
+                    cftr_put32(req + 24, 1u);    /* n_scratch_in */
+                    cftr_put32(req + 28, 1u);    /* n_scratch_out */
+                    memcpy(req + 32, a, k * esz);
+                    memcpy(req + 32 + k * esz, a, k * esz);
+                    CHECK(!cftr_request(hw, CFTR_OP_PROG_RUN_EX, req,
+                                        req_len, &status, &resp, &len) &&
+                          status == CFT_OK &&
+                          len == 8 + k * esz + k * esz,
+                          "a hand-built PROG_RUN_EX frame is served "
+                          "(status %d, %lu bytes)", status,
+                          (unsigned long)len);
+                    if (resp && len == 8 + k * esz + k * esz)
+                        CHECK(memcmp(resp + 8 + k * esz, sout_rm,
+                                     k * esz) == 0,
+                              "and its scratch-out block is the one the "
+                              "library's own call produced");
+                    free(resp);
+                    free(req);
+                }
+            }
+            cft_program_free(pr);
+            pr = NULL;
+        }
+    }
+    printf("  the block crosses both ways lane-major, a run resumes, and "
+           "the frame's layout is asserted by hand\n");
+
+out:
+    cft_program_free(pr);
+    cft_program_free(ps);
+    free(a); free(sin_buf); free(sout_rm); free(sout_sw);
+    free(d_rm); free(d_sw); free(state); free(once);
+    free(c_rm); free(c_sw);
+}
+
 /* ---- the cost ------------------------------------------------------------ */
 
 static void bench(cft_device *rm)
@@ -1018,6 +1302,7 @@ int main(int argc, char **argv)
         caps_block_tests(rm, sw);
         protocol_tests(rm);
         program_bank_tests(sw, rm);
+        program_scratch_tests(sw, rm);
         identity_tests(sw, rm, n);
     } else {
         bench(rm);
