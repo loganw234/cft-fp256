@@ -1,38 +1,45 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The `.cfta` text form: assembler, disassembler, and the revision-2
+"""The `.cfta` text form: assembler, disassembler, and the revision-3
 encoder they are written against.
 
 docs/PROGRAMS.md is the specification of the text form;
-docs/SEQUENCER.md and its "Revision 2 (2026-09-08)" section are the
-encoding. This module is the reference implementation of both, and
-`host/tools/cft-asm.c` is held byte-for-byte to it.
+docs/SEQUENCER.md and its "Revision 2 (2026-09-08)" and "Revision 3
+(2026-09-08, evening)" sections are the encoding. This module is the
+reference implementation of both, and `host/tools/cft-asm.c` is held
+byte-for-byte to it.
 
 **Why this file carries its own encoder.** `seq.py` is the definition
-of correct for the program model, and it is REVISION 1: sixteen
-registers, four-bit fields, a header whose `reserved[0]` must be zero.
-Revision 2 widens the register fields to five bits (the fifth of each
-in `imm[27:24]`) and turns that same header word into `flags`, whose
-bit 0 is `BANK_EXT`. Those two changes land in `seq.py` on their own
-schedule; this file is written to the revision-2 contract from the
-start so that the assembler exists before the model catches up, and
+of correct for the program model, and it moves one revision at a time
+on its own lane. Revision 2 widened the register fields to five bits
+(the fifth of each in `imm[27:24]`) and turned the header's
+`reserved[0]` into `flags`, whose bit 0 is `BANK_EXT`; revision 3 adds
+a per-lane scratch memory with four control codes, turns
+`reserved[1]` into `scratch_io` behind `flags` bit 1, and gives each
+constant index a ninth bit in `imm[30:28]` under `kx`. This file is
+written to the revision-3 contract from the start so that the
+assembler exists before the model catches up, and
 `python/tests/test_asm.py` pins the two together where they overlap -
-a program that stays inside revision 1's limits must encode to
+a program that stays inside what `seq.py` can express must encode to
 `seq.encode`'s exact words and run identically in `seq.run`.
 
-So: where this file and `seq.py` disagree about a program revision 1
-can express, THIS FILE IS WRONG. Where they disagree about a program
-only revision 2 can express, seq.py has not got there yet.
+So: where this file and `seq.py` disagree about a program `seq.py` can
+express, THIS FILE IS WRONG. Where they disagree about a program only
+the newer revision can express, seq.py has not got there yet.
 
 The text form, in one paragraph. One instruction a line; `;` starts a
 comment; names are case-insensitive; numbers are decimal or `0x` hex.
 `.format` and `.deposits` are required and `.format` comes first;
 `.bank external` declares a program whose constants arrive per run;
 `.const NAME = value` appends to the bank; `.reg NAME = rN` names a
-register. An ALU line is a mnemonic (with an optional rounding suffix)
-followed by the destination and the operands the opcode reads, in
-`ra, rb, rc` field order; the control lines are `repeat N` / `endrep`,
-`deposit rA`, `setact rA`, `actall` and `halt`.
+register; `.slot NAME = N` names a scratch slot; `.scratch N` declares
+the scratch depth the program assumes and `.scratch in N` /
+`.scratch out M` the per-run block it wants carried in and out. An ALU
+line is a mnemonic (with an optional rounding suffix) followed by the
+destination and the operands the opcode reads, in `ra, rb, rc` field
+order; the control lines are `repeat N` / `endrep`, `deposit rA`,
+`setact rA`, `actall`, `halt`, `stl rA, SLOT`, `ldl rD, SLOT`,
+`stx rA, rB` and `ldx rD, rB`.
 """
 
 import hashlib
@@ -43,7 +50,7 @@ from .formats import FORMATS, PREC_CODE, FpFormat
 from . import chars
 from . import softfloat as sf
 
-# ---- the image, revision 2 -------------------------------------------
+# ---- the image, revision 3 -------------------------------------------
 
 MAGIC = 0x50544643        # "CFTP" little-endian
 VERSION = 1               # the PROGRAM version; VERSION guards the CSR
@@ -58,29 +65,76 @@ NREG = 32
 REG_FIELD = 16            # what the four-bit operand field alone reaches
 
 # R3: header word 6 (bytes 24..27) is `flags`; bit 0 is BANK_EXT.
+# R5: bit 1 is SCRATCH_IO, and word 7 (bytes 28..31) - `reserved[1]`
+# until revision 3 - is `scratch_io`: [15:0] in, [31:16] out, and zero
+# unless the flag is set.
 FLAG_BANK_EXT = 0x1
-FLAGS_RESERVED = ~FLAG_BANK_EXT & 0xFFFFFFFF
+FLAG_SCRATCH_IO = 0x2
+FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO
+FLAGS_RESERVED = ~FLAGS_KNOWN & 0xFFFFFFFF
 
 MAX_LOOP_DEPTH = 4
 MAX_INSTRUCTIONS = 1 << 40
 MAX_DEPOSITS = 1 << 20
 
 # How many constants an instruction can ADDRESS: sixteen through the
-# four-bit operand field, 256 through a byte of `imm` under `kx`.
+# four-bit operand field, 512 through a byte of `imm` plus the ninth
+# bit in imm[30:28] under `kx` (R7).
 KADDR_PLAIN = 16
-KADDR_KX = 256
+KADDR_KX = 512
 
-HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL = 0, 1, 2, 3, 4, 5
+# R4: the per-lane scratch. `SCRATCH_D` is a build parameter of the
+# tile and not part of the program model, so a SOURCE declares the
+# depth it assumes with `.scratch N` and the assembler refuses a static
+# slot at or past it; 256 is the depth revision 3 builds. The slot of
+# a STL/LDL is imm[23:0], so a static slot cannot exceed that field
+# whatever a device publishes.
+SCRATCH_D_DEFAULT = 256
+SCRATCH_D_MAX = 1 << 24
+SLOT_MASK = 0x00FFFFFF
+# Each half of `scratch_io` is sixteen bits wide.
+SCRATCH_IO_MAX = 0xFFFF
+
+(HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL,
+ STL, LDL, STX, LDX) = range(10)
 CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
-              DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall"}
+              DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall",
+              STL: "stl", LDL: "ldl", STX: "stx", LDX: "ldx"}
 CTRL_CODES = {v: k for k, v in CTRL_NAMES.items()}
+SCRATCH_CODES = (STL, LDL, STX, LDX)
 
-# Which byte of `imm` carries each operand's constant index under `kx`.
+# What each control code READS, which is the whole of its encoding
+# rule: the register fields it names, and whether imm[23:0] is a
+# scratch slot. Everything not named here must be zero - the register
+# fields, their high bits in imm[27:24], `rnd`, `ka`/`kb`/`kc`, `kx`
+# and imm[31:24] - which is docs/SEQUENCER.md's reserved-field rule
+# applied once per code rather than restated per code.
+#
+# REPEAT is the exception and is not really one: it names no register,
+# so it reads `imm` WHOLE as its trip count and none of imm[27:24] is
+# a register's high bit there.
+CTRL_USE = {
+    HALT:    ((),           False),
+    REPEAT:  ((),           False),
+    ENDREP:  ((),           False),
+    DEPOSIT: (("ra",),      False),
+    SETACT:  (("ra",),      False),
+    ACTALL:  ((),           False),
+    STL:     (("ra",),      True),      # scratch[imm] := ra
+    LDL:     (("rd",),      True),      # rd := scratch[imm]
+    STX:     (("ra", "rb"), False),     # scratch[rb mod D] := ra
+    LDX:     (("rd", "rb"), False),     # rd := scratch[rb mod D]
+}
+
+# Which byte of `imm` carries each operand's constant index under `kx`,
+# and where that index's ninth bit lives (R7).
 KX_SHIFT = (0, 8, 16)
+KX9_SHIFT = (28, 29, 30)
 # imm[27:24] are the four register high bits, in rd, ra, rb, rc order;
-# imm[31:28] is read by nothing at all and must be zero.
+# imm[31] is read by nothing at all and must be zero - it is the cheap
+# version guard for whatever comes after revision 3.
 RHI_SHIFT = {"rd": 24, "ra": 25, "rb": 26, "rc": 27}
-IMM_RESERVED = 0xF0000000
+IMM_RESERVED = 0x80000000
 
 
 class AsmError(ValueError):
@@ -155,7 +209,7 @@ RND_NAMES = dict(sf.RND_NAMES)
 
 def encode(op, rd=0, ra=0, rb=0, rc=0, rnd=sf.RND_RNE,
            ka=False, kb=False, kc=False, ctrl=False, imm=0, kx=False):
-    """One 64-bit instruction word, revision 2.
+    """One 64-bit instruction word, revision 3.
 
     `rd`/`ra`/`rb`/`rc` are FIVE-BIT register numbers: the low four bits
     go to the field they always went to and the fifth to its bit of
@@ -165,9 +219,9 @@ def encode(op, rd=0, ra=0, rb=0, rc=0, rnd=sf.RND_RNE,
     read, so it must be zero.
 
     `imm` is whatever the instruction reads as an immediate: the trip
-    count on REPEAT, the packed constant indices under `kx`, nothing
-    otherwise. The register high bits are OR-ed into it here rather
-    than being the caller's problem.
+    count on REPEAT, the scratch slot on STL/LDL, the packed constant
+    indices under `kx`, nothing otherwise. The register high bits are
+    OR-ed into it here rather than being the caller's problem.
     """
     fields = {"rd": rd, "ra": ra, "rb": rb, "rc": rc}
     kflag = {"rd": False, "ra": ka, "rb": kb, "rc": kc}
@@ -224,14 +278,18 @@ def decode(word):
 
 def sources(d):
     """The three operand sources of a decoded ALU instruction, as
-    (index, is_const) triples in a, b, c order."""
+    (index, is_const) triples in a, b, c order. Under `kx` an index is
+    nine bits: a byte of `imm` and its ninth bit in imm[30:28] (R7)."""
     out = []
-    for field, flag, shift in (("ra", "ka", KX_SHIFT[0]),
-                               ("rb", "kb", KX_SHIFT[1]),
-                               ("rc", "kc", KX_SHIFT[2])):
+    for k, (field, flag) in enumerate((("ra", "ka"), ("rb", "kb"),
+                                       ("rc", "kc"))):
         if d[flag]:
-            out.append((((d["imm"] >> shift) & 0xFF) if d["kx"]
-                        else d[field + "_lo"], True))
+            if d["kx"]:
+                idx = ((d["imm"] >> KX_SHIFT[k]) & 0xFF) | \
+                      (((d["imm"] >> KX9_SHIFT[k]) & 1) << 8)
+            else:
+                idx = d[field + "_lo"]
+            out.append((idx, True))
         else:
             out.append((d[field], False))
     return out
@@ -249,12 +307,13 @@ def alu(op, rd, ra=0, rb=0, rc=0, rnd=sf.RND_RNE, ka=False, kb=False,
     if kx:
         if not (ka or kb or kc):
             raise AsmError("kx with no constant operand selects nothing")
-        for (v, flag), shift in zip(idx, KX_SHIFT):
+        for k, (v, flag) in enumerate(idx):
             if flag:
                 if not 0 <= v < KADDR_KX:
                     raise AsmError(f"constant index {v} outside "
                                    f"0..{KADDR_KX - 1}")
-                imm |= v << shift
+                imm |= (v & 0xFF) << KX_SHIFT[k]
+                imm |= (v >> 8) << KX9_SHIFT[k]
     return encode(op, rd, ra, rb, rc, rnd, ka, kb, kc, ctrl=False,
                   imm=imm, kx=kx)
 
@@ -285,26 +344,91 @@ def actall():
     return encode(ACTALL, ctrl=True)
 
 
+def _slot_imm(slot):
+    if not 0 <= slot <= SLOT_MASK:
+        raise AsmError(f"scratch slot {slot} does not fit imm[23:0]")
+    return slot
+
+
+def stl(ra, slot):
+    """`scratch[slot] := ra`. Reads `ra` and imm[23:0]."""
+    return encode(STL, ra=ra, ctrl=True, imm=_slot_imm(slot))
+
+
+def ldl(rd, slot):
+    """`rd := scratch[slot]`. Writes `rd`, reads imm[23:0]."""
+    return encode(LDL, rd=rd, ctrl=True, imm=_slot_imm(slot))
+
+
+def stx(ra, rb):
+    """`scratch[rb mod SCRATCH_D] := ra`. imm[23:0] must be zero."""
+    return encode(STX, ra=ra, rb=rb, ctrl=True)
+
+
+def ldx(rd, rb):
+    """`rd := scratch[rb mod SCRATCH_D]`. imm[23:0] must be zero."""
+    return encode(LDX, rd=rd, rb=rb, ctrl=True)
+
+
+def infer_scratch_depth(insns, scratch_io=0, flags=0):
+    """The depth a READBACK assumes: the smallest power of two, at
+    least the default, that covers every static slot and both
+    scratch-I/O counts.
+
+    The depth is not in the image - `SCRATCH_D` is a build parameter of
+    the tile, published in `CAPS2[3:0]` - so an image is legal against
+    whatever depth the device has, and a reader that simply defaulted
+    to 256 would refuse a perfectly good program written for a deeper
+    tile. Both implementations infer the same number, and the
+    disassembler writes it back as `.scratch N`, so the round trip
+    holds.
+    """
+    need = 1
+    for word in insns:
+        d = decode(word)
+        if d["ctrl"] and d["op"] in (STL, LDL):
+            need = max(need, (d["imm"] & SLOT_MASK) + 1)
+    if flags & FLAG_SCRATCH_IO:
+        need = max(need, scratch_io & 0xFFFF, (scratch_io >> 16) & 0xFFFF)
+    depth = SCRATCH_D_DEFAULT
+    while depth < need:
+        depth *= 2
+    return depth
+
+
 # ---- the image -------------------------------------------------------
 
 class Image:
     """A program as bytes, plus the names the text form gave its parts.
 
-    This is deliberately NOT seq.Program: it is the revision-2 image,
-    it validates itself against the revision-2 loader's rules, and it
-    knows about a bank the model does not have yet. `to_bytes()` is
-    what a `.cftp` file holds and what `cft_program_load` is handed.
+    This is deliberately NOT seq.Program: it is the revision-3 image,
+    it validates itself against the revision-3 loader's rules, and it
+    knows about the bank and the scratch block the model reaches on its
+    own schedule. `to_bytes()` is what a `.cftp` file holds and what
+    `cft_program_load` is handed.
+
+    `scratch_depth` is the depth the PROGRAM assumes - `.scratch N` in
+    the source. It is not in the image (SCRATCH_D is a build parameter
+    of the tile, published in CAPS2), so `from_bytes` infers the
+    smallest depth that could have produced the image and the
+    disassembler writes that same number back. What is in the image is
+    `scratch_io`, and only when `flags.SCRATCH_IO` says so.
     """
 
     def __init__(self, fmt: FpFormat, insns, consts=(), max_deposits=1,
-                 flags=0, const_names=None, reg_names=None):
+                 flags=0, const_names=None, reg_names=None,
+                 scratch_depth=SCRATCH_D_DEFAULT, scratch_io=0,
+                 slot_names=None):
         self.fmt = fmt
         self.insns = list(insns)
         self.consts = list(consts)
         self.max_deposits = max_deposits
         self.flags = flags
+        self.scratch_depth = scratch_depth
+        self.scratch_io = scratch_io
         self.const_names = list(const_names or [])
         self.reg_names = dict(reg_names or {})
+        self.slot_names = dict(slot_names or {})
         self.validate()
 
     # -- properties ----------------------------------------------------
@@ -312,6 +436,35 @@ class Image:
     @property
     def bank_external(self):
         return bool(self.flags & FLAG_BANK_EXT)
+
+    @property
+    def scratch_io_declared(self):
+        return bool(self.flags & FLAG_SCRATCH_IO)
+
+    @property
+    def n_scratch_in(self):
+        return self.scratch_io & 0xFFFF
+
+    @property
+    def n_scratch_out(self):
+        return (self.scratch_io >> 16) & 0xFFFF
+
+    def scratch_use(self):
+        """-> (highest static slot or None, does it index?). What
+        `cft-asm -i` reports and what `cft_program_info` calls
+        `scratch_used`: one past the highest static slot, or the whole
+        depth when the program reaches it through STX/LDX."""
+        top, indexed = None, False
+        for word in self.insns:
+            d = decode(word)
+            if not d["ctrl"]:
+                continue
+            if d["op"] in (STL, LDL):
+                slot = d["imm"] & SLOT_MASK
+                top = slot if top is None else max(top, slot)
+            elif d["op"] in (STX, LDX):
+                indexed = True
+        return top, indexed
 
     @property
     def n_consts(self):
@@ -330,20 +483,30 @@ class Image:
 
     def features(self):
         """The feature bits this image needs a device to publish, as
-        names, in CAPS bit order (kx is CAPS[4], REGS32 [5], BANK_PTR
-        [6], IMUL [28]). A tool prints these; `cft_program_load`
-        refuses the image where CAPS is missing one."""
+        names, in CAPS bit order followed by CAPS2's: `kx` is CAPS[4],
+        `REGS32` [5], `BANK_PTR` [6], `KX9` [7], `IMUL` [28], and then
+        `SCRATCH` is CAPS2[4] and `SCRATCH_IO` CAPS2[5]. A tool prints
+        these; `cft_program_load` refuses the image where CAPS is
+        missing one."""
         want = set()
         for word in self.insns:
             d = decode(word)
             if d["ctrl"]:
-                # Only DEPOSIT and SETACT have a register to extend;
-                # REPEAT's imm[25] is a bit of the trip count.
-                if d["op"] in (DEPOSIT, SETACT) and d["ra"] >= REG_FIELD:
-                    want.add("REGS32")
+                # Which control codes have a register to extend is
+                # CTRL_USE's business; REPEAT's imm[25] is a bit of the
+                # trip count and not a register's fifth bit.
+                regs, _slot = CTRL_USE.get(d["op"], ((), False))
+                for name in regs:
+                    if d[name] >= REG_FIELD:
+                        want.add("REGS32")
+                if d["op"] in SCRATCH_CODES:
+                    want.add("SCRATCH")
                 continue
             if d["kx"]:
                 want.add("kx")
+                for idx, is_const in sources(d):
+                    if is_const and idx >= 256:
+                        want.add("KX9")
             if d["op"] == sf.OP_IMUL:
                 want.add("IMUL")
             for name in ("rd", "ra", "rb", "rc"):
@@ -351,7 +514,10 @@ class Image:
                     want.add("REGS32")
         if self.bank_external:
             want.add("BANK_PTR")
-        return [f for f in ("kx", "REGS32", "BANK_PTR", "IMUL")
+        if self.scratch_io_declared:
+            want.add("SCRATCH_IO")
+        return [f for f in ("kx", "REGS32", "BANK_PTR", "KX9", "IMUL",
+                            "SCRATCH", "SCRATCH_IO")
                 if f in want]
 
     # -- validation ----------------------------------------------------
@@ -367,17 +533,28 @@ class Image:
         if d["rnd"] > 4:
             raise AsmError(f"[{pc}] rnd={d['rnd']} is reserved")
         if d["imm"] & IMM_RESERVED:
-            raise AsmError(f"[{pc}] imm[31:28] is reserved and must be zero")
+            raise AsmError(f"[{pc}] imm[31] is reserved and must be zero")
         if d["kx"] and not (d["ka"] or d["kb"] or d["kc"]):
             raise AsmError(
                 f"[{pc}] kx is set and no operand names a constant, so the "
                 f"bit selects nothing and the instruction has a second "
                 f"encoding with kx clear")
 
-        for key, flag, shift in (("ra", "ka", KX_SHIFT[0]),
-                                 ("rb", "kb", KX_SHIFT[1]),
-                                 ("rc", "kc", KX_SHIFT[2])):
+        for k, (key, flag, shift) in enumerate(
+                (("ra", "ka", KX_SHIFT[0]),
+                 ("rb", "kb", KX_SHIFT[1]),
+                 ("rc", "kc", KX_SHIFT[2]))):
             byte = (d["imm"] >> shift) & 0xFF
+            ninth = (d["imm"] >> KX9_SHIFT[k]) & 1
+            # R7: imm[30:28] are the ninth bits of ka's, kb's and kc's
+            # indices, read only under kx for an operand whose k flag is
+            # set. Anywhere else the bit is an unread field.
+            if ninth and not (d["kx"] and d[flag]):
+                raise AsmError(
+                    f"[{pc}] imm[{KX9_SHIFT[k]}] is the ninth bit of "
+                    f"{key}'s constant index, which is read only under kx "
+                    f"for an operand that names a constant, so it must be "
+                    f"zero")
             if d[flag]:
                 # A constant operand reads neither the register high
                 # bit nor - under kx - the four-bit field.
@@ -389,10 +566,11 @@ class Image:
                 if d["kx"]:
                     if d[key + "_lo"]:
                         raise AsmError(
-                            f"[{pc}] {key} names constant {byte} through imm "
-                            f"under kx, so the {key} field must be zero and "
+                            f"[{pc}] {key} names constant "
+                            f"{byte | (ninth << 8)} through imm under kx, "
+                            f"so the {key} field must be zero and "
                             f"it is {d[key + '_lo']}")
-                    idx = byte
+                    idx = byte | (ninth << 8)
                 else:
                     idx = d[key + "_lo"]
             else:
@@ -416,31 +594,42 @@ class Image:
         code = d["op"]
         if code not in CTRL_NAMES:
             raise AsmError(f"[{pc}] unknown control code {code}")
-        # DEPOSIT and SETACT read `ra`, which is five bits, so imm[25]
-        # may be set on those two and no other imm bit may be. REPEAT
-        # reads `imm` WHOLE - the trip count is a 32-bit immediate, and
-        # imm[27:24] are register high bits only on an instruction that
-        # has a register to extend, which REPEAT has not. The other four
-        # read nothing at all.
-        used = {HALT: (), REPEAT: ("imm",), ENDREP: (),
-                DEPOSIT: ("ra",), SETACT: ("ra",), ACTALL: ()}[code]
+        name = CTRL_NAMES[code]
+        # Every control code's encoding is CTRL_USE's two entries: the
+        # register fields it names, and whether imm[23:0] is a scratch
+        # slot. Everything else is a field the instruction does not
+        # read, and must be zero. REPEAT is the exception: it names no
+        # register, so it reads `imm` whole as its trip count and
+        # imm[27:24] are count bits there rather than register high
+        # bits.
+        regs, slot = CTRL_USE[code]
         for field in ("rd", "ra", "rb", "rc"):
-            if field not in used and d[field + "_lo"]:
+            if field not in regs and d[field + "_lo"]:
                 raise AsmError(
-                    f"[{pc}] {CTRL_NAMES[code]} does not read {field}, so "
+                    f"[{pc}] {name} does not read {field}, so "
                     f"it must be zero")
         for field in ("rnd", "ka", "kb", "kc", "kx"):
             if d[field]:
                 raise AsmError(
-                    f"[{pc}] {CTRL_NAMES[code]} does not read {field}, so "
+                    f"[{pc}] {name} does not read {field}, so "
                     f"it must be zero")
-        if "imm" not in used:
-            allowed_imm = (1 << RHI_SHIFT["ra"]) if "ra" in used else 0
-            if d["imm"] & ~allowed_imm & 0xFFFFFFFF:
+        if code != REPEAT:
+            allowed = SLOT_MASK if slot else 0
+            for field in regs:
+                allowed |= 1 << RHI_SHIFT[field]
+            if d["imm"] & ~allowed & 0xFFFFFFFF:
                 raise AsmError(
-                    f"[{pc}] {CTRL_NAMES[code]} does not read imm beyond "
-                    f"its register high bit, so imm[31:0] must be zero "
-                    f"there and it is {d['imm']:#010x}")
+                    f"[{pc}] {name} does not read imm beyond "
+                    f"{'its slot and ' if slot else ''}its register high "
+                    f"bit(s), so the rest of imm must be zero and imm is "
+                    f"{d['imm']:#010x}")
+        if slot:
+            v = d["imm"] & SLOT_MASK
+            if v >= self.scratch_depth:
+                raise AsmError(
+                    f"[{pc}] {name} names scratch slot {v} and the program "
+                    f"declares a scratch of {self.scratch_depth} slots "
+                    f"(.scratch N)")
 
     def validate(self):
         if self.fmt.name not in PREC_CODE:
@@ -450,8 +639,33 @@ class Image:
                 f"max_deposits={self.max_deposits}, cap {MAX_DEPOSITS}")
         if self.flags & FLAGS_RESERVED:
             raise AsmError(
-                f"header flags {self.flags:#010x}: only BANK_EXT is "
-                f"defined and the rest are reserved-must-be-zero")
+                f"header flags {self.flags:#010x}: only BANK_EXT and "
+                f"SCRATCH_IO are defined and the rest are "
+                f"reserved-must-be-zero")
+        if self.n_consts > KADDR_KX:
+            raise AsmError(
+                f"{self.n_consts} constants; an index is nine bits under "
+                f"kx, so the bank addresses at most {KADDR_KX}")
+        if (self.scratch_depth & (self.scratch_depth - 1)) or \
+                not 1 <= self.scratch_depth <= SCRATCH_D_MAX:
+            raise AsmError(
+                f"a scratch depth is a power of two in 1..{SCRATCH_D_MAX} "
+                f"and this one is {self.scratch_depth}")
+        # R5: `scratch_io` is meaningful only behind its flag, and with
+        # the flag clear the word must be zero - the same rule the
+        # header word carried when it was `reserved[1]`.
+        if not self.scratch_io_declared and self.scratch_io:
+            raise AsmError(
+                f"header word 7 is {self.scratch_io:#010x} with SCRATCH_IO "
+                f"clear; with the flag clear it must be zero")
+        if not 0 <= self.scratch_io < (1 << 32):
+            raise AsmError("scratch_io does not fit 32 bits")
+        for what, count in (("in", self.n_scratch_in),
+                            ("out", self.n_scratch_out)):
+            if count > self.scratch_depth:
+                raise AsmError(
+                    f".scratch {what} {count} is more than the "
+                    f"{self.scratch_depth} slots the program declares")
         for k in self.consts:
             if not 0 <= k < (1 << self.fmt.width):
                 raise AsmError("constant does not fit the format")
@@ -506,7 +720,8 @@ class Image:
     def to_bytes(self):
         out = struct.pack("<8I", MAGIC, VERSION, len(self.insns),
                           self.n_consts, self.max_deposits,
-                          PREC_CODE[self.fmt.name], self.flags, 0)
+                          PREC_CODE[self.fmt.name], self.flags,
+                          self.scratch_io)
         if not self.bank_external:
             for k in self.consts:
                 out += k.to_bytes(self.esz, "little")
@@ -538,21 +753,30 @@ class Image:
         return out
 
     @classmethod
-    def from_bytes(cls, data):
+    def from_bytes(cls, data, scratch_depth=None):
+        """The image back. `scratch_depth` is what the reader assumes
+        the tile has; None INFERS it - the smallest power of two, at
+        least the default 256, that covers every static slot and both
+        scratch-I/O counts. Inferring rather than defaulting is what
+        keeps a legal image for a 512-slot tile readable on a tree
+        whose own default is 256, and it is what the disassembler
+        writes back as `.scratch N`."""
         if len(data) < HEADER_BYTES:
             raise AsmError("shorter than a header")
         (magic, ver, n_insns, n_consts, maxdep, prec, flags,
-         rsv1) = struct.unpack("<8I", data[:HEADER_BYTES])
+         scratch_io) = struct.unpack("<8I", data[:HEADER_BYTES])
         if magic != MAGIC:
             raise AsmError(f"bad magic {magic:#010x}, expected {MAGIC:#010x}")
         if ver != VERSION:
             raise AsmError(f"program version {ver}, this loader speaks "
                            f"{VERSION}")
-        if rsv1:
-            raise AsmError("reserved header word 7 must be zero")
         if flags & FLAGS_RESERVED:
-            raise AsmError(f"header flags {flags:#010x}: only BANK_EXT is "
-                           f"defined and the rest are reserved")
+            raise AsmError(f"header flags {flags:#010x}: only BANK_EXT and "
+                           f"SCRATCH_IO are defined and the rest are "
+                           f"reserved")
+        if not (flags & FLAG_SCRATCH_IO) and scratch_io:
+            raise AsmError("reserved header word 7 must be zero unless "
+                           "flags.SCRATCH_IO says it is scratch_io")
         name = next((k for k, v in PREC_CODE.items() if v == prec), None)
         if name is None:
             raise AsmError(f"precision code {prec} is not on the ladder")
@@ -579,7 +803,10 @@ class Image:
             # number - so the declared bank is carried as placeholders
             # that to_bytes() never writes.
             consts = [0] * n_consts
-        return cls(fmt, insns, consts, maxdep, flags)
+        if scratch_depth is None:
+            scratch_depth = infer_scratch_depth(insns, scratch_io, flags)
+        return cls(fmt, insns, consts, maxdep, flags,
+                   scratch_depth=scratch_depth, scratch_io=scratch_io)
 
 
 # ---- the assembler ---------------------------------------------------
@@ -613,6 +840,13 @@ class _Asm:
         self.const_names = []
         self.const_index = {}
         self.reg_names = {}
+        self.slot_names = {}
+        self.scratch_depth = SCRATCH_D_DEFAULT
+        self.have_depth = False
+        self.n_scratch_in = 0
+        self.n_scratch_out = 0
+        self.have_scratch_in = False
+        self.have_scratch_out = False
         self.insns = []
         self.lineno = 0
 
@@ -632,11 +866,34 @@ class _Asm:
             if low in self.const_index:
                 self.fail(f"{tok} is a constant, and this operand must be "
                           f"a register")
+            if low in self.slot_names:
+                self.fail(f"{tok} is a scratch slot, and this operand must "
+                          f"be a register")
             self.fail(f"{tok!r} is not a register")
         n = int(m.group(1))
         if not 0 <= n < NREG:
             self.fail(f"r{n} is outside r0..r{NREG - 1}")
         return n
+
+    def slot(self, tok):
+        """A scratch slot operand -> number: a `.slot` name, or a
+        decimal or 0x literal. Refuses a register or a constant name,
+        so `stl r3, r4` is a message rather than slot 4."""
+        low = tok.lower()
+        if low in self.slot_names:
+            return self.slot_names[low]
+        if _IDENT.match(tok):
+            what = ("a register" if (low in self.reg_names
+                                     or _REGNAME.match(tok))
+                    else "a constant" if low in self.const_index
+                    else None)
+            if what:
+                self.fail(f"{tok} is {what}, and a static slot is a number "
+                          f"or a `.slot` name - the indexed form is `stx` "
+                          f"and `ldx`")
+            self.fail(f"{tok!r} is not a slot")
+        v = _parse_uint(tok, "a scratch slot")
+        return v
 
     def operand(self, tok):
         """-> (value, is_const). A constant NAME sets that operand's k
@@ -673,6 +930,67 @@ class _Asm:
                       "turns into declarations")
         self.flags |= FLAG_BANK_EXT
 
+    def do_scratch(self, args):
+        """`.scratch N` - the depth the program assumes; `.scratch in N`
+        and `.scratch out M` - the per-run block, which is the header's
+        `scratch_io` and `flags.SCRATCH_IO`.
+
+        All three must precede the instructions: a depth that changed
+        halfway through would make the slot bound depend on where a
+        line sits, and a scratch-I/O count is a header word, not
+        something a program acquires as it goes."""
+        if self.insns:
+            self.fail(".scratch must come before the instructions")
+        if len(args) == 1:
+            if self.have_depth:
+                self.fail(".scratch N appears twice")
+            v = _parse_uint(args[0], ".scratch")
+            if v < 1 or v > SCRATCH_D_MAX or (v & (v - 1)):
+                self.fail(f".scratch takes a power of two in "
+                          f"1..{SCRATCH_D_MAX}")
+            self.scratch_depth = v
+            self.have_depth = True
+            return
+        if len(args) != 2 or args[0].lower() not in ("in", "out"):
+            self.fail(".scratch takes a depth, or `in N`, or `out M`")
+        which = args[0].lower()
+        v = _parse_uint(args[1], f".scratch {which}")
+        if v > SCRATCH_IO_MAX:
+            self.fail(f".scratch {which} is a sixteen-bit count, at most "
+                      f"{SCRATCH_IO_MAX}")
+        if which == "in":
+            if self.have_scratch_in:
+                self.fail(".scratch in appears twice")
+            self.n_scratch_in = v
+            self.have_scratch_in = True
+        else:
+            if self.have_scratch_out:
+                self.fail(".scratch out appears twice")
+            self.n_scratch_out = v
+            self.have_scratch_out = True
+        # Either half declares the block, so the flag is set even by a
+        # count of zero: the flag says the word is MEANINGFUL, and a
+        # program that carries nothing in and something out is a
+        # program that says so.
+        self.flags |= FLAG_SCRATCH_IO
+
+    def do_slot(self, args):
+        if len(args) != 3 or args[1] != "=":
+            self.fail(".slot takes NAME = N")
+        name = args[0]
+        if not _IDENT.match(name):
+            self.fail(f"{name!r} is not a name")
+        low = name.lower()
+        if (low in self.const_index or low in self.reg_names
+                or low in self.slot_names):
+            self.fail(f"{name} is already defined")
+        if _REGNAME.match(name):
+            self.fail(f"{name} would shadow a register")
+        v = _parse_uint(args[2], ".slot")
+        if v > SLOT_MASK:
+            self.fail(f"a static slot is imm[23:0], so at most {SLOT_MASK}")
+        self.slot_names[low] = v
+
     def do_const(self, args):
         # Under `.bank external` a `.const` line declares a NAME and its
         # place in the order, and the run supplies the value - so the
@@ -686,7 +1004,8 @@ class _Asm:
         if not _IDENT.match(name):
             self.fail(f"{name!r} is not a name")
         low = name.lower()
-        if low in self.const_index or low in self.reg_names:
+        if (low in self.const_index or low in self.reg_names
+                or low in self.slot_names):
             self.fail(f"{name} is already defined")
         if _REGNAME.match(name):
             self.fail(f"{name} would shadow a register")
@@ -709,7 +1028,8 @@ class _Asm:
         if not _IDENT.match(name):
             self.fail(f"{name!r} is not a name")
         low = name.lower()
-        if low in self.const_index or low in self.reg_names:
+        if (low in self.const_index or low in self.reg_names
+                or low in self.slot_names):
             self.fail(f"{name} is already defined")
         if _REGNAME.match(name):
             self.fail(f"{name} would shadow a register")
@@ -788,6 +1108,22 @@ class _Asm:
                 self.fail(f"{CTRL_NAMES[code]} takes one register")
             r = self.reg(args[0])
             self.insns.append(deposit(r) if code == DEPOSIT else setact(r))
+        elif code in (STL, LDL):
+            if len(args) != 2:
+                self.fail(f"{CTRL_NAMES[code]} takes a register and a slot")
+            r = self.reg(args[0])
+            s = self.slot(args[1])
+            if s > SLOT_MASK:
+                self.fail(f"a static slot is imm[23:0], so at most "
+                          f"{SLOT_MASK}")
+            self.insns.append(stl(r, s) if code == STL else ldl(r, s))
+        elif code in (STX, LDX):
+            if len(args) != 2:
+                self.fail(f"{CTRL_NAMES[code]} takes two registers - the "
+                          f"value and the index")
+            r0 = self.reg(args[0])
+            r1 = self.reg(args[1])
+            self.insns.append(stx(r0, r1) if code == STX else ldx(r0, r1))
         else:
             if args:
                 self.fail(f"{CTRL_NAMES[code]} takes no operands")
@@ -870,7 +1206,9 @@ class _Asm:
                            ".deposits": self.do_deposits,
                            ".bank": self.do_bank,
                            ".const": self.do_const,
-                           ".reg": self.do_reg}.get(directive)
+                           ".reg": self.do_reg,
+                           ".slot": self.do_slot,
+                           ".scratch": self.do_scratch}.get(directive)
                 if handler is None:
                     self.fail(f"{head!r} is not a directive")
                 handler(toks[1:])
@@ -888,11 +1226,16 @@ class _Asm:
             self.fail(".format is required")
         if self.max_deposits is None:
             self.fail(".deposits is required")
+        scratch_io = (self.n_scratch_in & 0xFFFF) | \
+                     ((self.n_scratch_out & 0xFFFF) << 16)
         try:
             return Image(self.fmt, self.insns, self.consts,
                          self.max_deposits, self.flags,
                          const_names=self.const_names,
-                         reg_names=self.reg_names)
+                         reg_names=self.reg_names,
+                         scratch_depth=self.scratch_depth,
+                         scratch_io=scratch_io,
+                         slot_names=self.slot_names)
         except AsmError as exc:
             raise AsmError(f"{self.source}: {exc}") from None
 
@@ -928,6 +1271,15 @@ def disassemble(image) -> str:
     out = []
     out.append(f".format   {img.fmt.name}")
     out.append(f".deposits {img.max_deposits}")
+    # The depth is not in the image, so what is written back is what
+    # `from_bytes` inferred - and only when it is not the default, so
+    # that an image which needs no scratch reads exactly as it did
+    # before revision 3.
+    if img.scratch_depth != SCRATCH_D_DEFAULT:
+        out.append(f".scratch  {img.scratch_depth}")
+    if img.scratch_io_declared:
+        out.append(f".scratch  in {img.n_scratch_in}")
+        out.append(f".scratch  out {img.n_scratch_out}")
     if img.bank_external:
         out.append(".bank     external")
     for i in range(img.n_consts):
@@ -958,6 +1310,14 @@ def disassemble(image) -> str:
                 indent += 1
             elif code in (DEPOSIT, SETACT):
                 out.append(f"{pad}{name} r{d['ra']}")
+            elif code == STL:
+                out.append(f"{pad}{name} r{d['ra']}, {d['imm'] & SLOT_MASK}")
+            elif code == LDL:
+                out.append(f"{pad}{name} r{d['rd']}, {d['imm'] & SLOT_MASK}")
+            elif code == STX:
+                out.append(f"{pad}{name} r{d['ra']}, r{d['rb']}")
+            elif code == LDX:
+                out.append(f"{pad}{name} r{d['rd']}, r{d['rb']}")
             else:
                 out.append(f"{pad}{name}")
             continue
@@ -1000,14 +1360,30 @@ def info(image) -> str:
         img = image
         data = img.to_bytes()
     feats = img.features()
+    names = [n for bit, n in ((FLAG_BANK_EXT, "BANK_EXT"),
+                              (FLAG_SCRATCH_IO, "SCRATCH_IO"))
+             if img.flags & bit]
+    top, indexed = img.scratch_use()
+    if top is None and not indexed:
+        scratch = "-"
+    else:
+        parts = []
+        if top is not None:
+            parts.append(f"highest static slot {top}")
+        parts.append("indexed" if indexed else "not indexed")
+        scratch = ", ".join(parts)
     lines = [
         f"format        {img.fmt.name}",
         f"instructions  {len(img.insns)}",
         f"constants     {img.n_consts}"
         + ("  (external: supplied per run)" if img.bank_external else ""),
         f"deposits      {img.max_deposits}",
+        f"scratch       {scratch}",
+        f"scratch-io    "
+        + (f"in {img.n_scratch_in}, out {img.n_scratch_out}"
+           if img.scratch_io_declared else "-"),
         f"flags         0x{img.flags:08x}"
-        + ("  BANK_EXT" if img.bank_external else ""),
+        + ("  " + " ".join(names) if names else ""),
         f"bytes         {len(data)}",
         f"features      {' '.join(feats) if feats else '-'}",
         f"sha256        {hashlib.sha256(data).hexdigest()}",

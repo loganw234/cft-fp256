@@ -2,7 +2,8 @@
 
 Orbit-sequencer programs as FILES. The text form, the assembler and
 the runner are docs/PROGRAMS.md; the encoding is docs/SEQUENCER.md,
-including its "Revision 2 (2026-09-08)" section.
+including its "Revision 2 (2026-09-08)" and "Revision 3 (2026-09-08,
+evening)" sections.
 
     programs/
       README.md            this index
@@ -17,9 +18,9 @@ including its "Revision 2 (2026-09-08)" section.
                           out/ and MANIFEST
     make programs-check   re-assemble with python/cft_golden/asm.py,
                           compare byte for byte, round-trip through
-                          the disassembler, cross-check a generated
-                          revision-2 corpus in both languages, and run
-                          every check below
+                          the disassembler, cross-check generated
+                          revision-2 and revision-3 corpora in both
+                          languages, and run every check below
 
 On Windows, one line:
 
@@ -50,10 +51,17 @@ so in the open.
 | `zoom-scan-fp256` | fp256 | 9 | 1 | 1 | - | 51 iterations of the guarded real-axis map `z <- z^2 + c`, the nucleus scan | 32 real points bit-identical to `seq.py`'s executor running the same image |
 | `lowbias32-fp32` | fp32 | 10 | 4 | 1 | `IMUL` | docs/ATLAS.md's draw hash over the index ramp | 4,096 draws against the hash's definition, and the run must signal nothing |
 | `horner-bank-fp64` | fp64 | 26 | 24 | 1 | `kx`, `BANK_PTR` | a degree-23 Horner polynomial whose coefficients are the RUN's data | the image carries no constant section (240 = 32 + 8 x 26 bytes); two different banks against a softfloat Horner; and the bank path itself when the library has one |
+| `spill-ref-fp64` | fp64 | 82 | 2 | 1 | - | forty terms `x^(k+1)` combined as `acc = fma(acc, 1/2, t_k)`, each consumed the instant it is produced | 64 lanes against a softfloat model of the same recurrence, through `positive-run` |
+| `spill-fp64` | fp64 | 161 | 2 | 1 | `SCRATCH` | the same arithmetic with all forty terms live at once, eight of them past the thirty-two registers and all forty in the scratch through `stl`/`ldl` | forty `stl` and forty `ldl` over slots 0..39; then the same deposits as `spill-ref-fp64` and the same model, when the library has the codes |
+| `conv-fp64` | fp64 | 19 | 6 | 14 | `SCRATCH` | a sixteen-sample local array written and read under loop counters through `stx`/`ldx`, and a three-tap convolution over it | the six constants against their derivation and no static slot at all; then 24 lanes x 14 outputs against a softfloat three-tap convolution |
+| `resume-fp64` | fp64 | 11 | 3 | 16 | `SCRATCH`, `SCRATCH_IO` | eight steps of `v <- 1.5v + 0.25` with a step count, entered and left through the per-run scratch block | `scratch_io` 0x00020002 behind `flags` bit 1; then two runs whose deposits are the two halves of a single sixteen-step run's |
+| `horner-wide-fp64` | fp64 | 302 | 300 | 1 | `kx`, `BANK_PTR`, `KX9` | a degree-299 Horner over a 300-entry external bank - 44 coefficients past the 256 a byte of `imm` reaches | 44 ninth index bits in `imm[30:28]`, the bank file against `C[k] = (-1)^k/(k+1)`; then 16 points against a softfloat Horner |
 
-`needs` is what a device must publish in `CAPS` before the image will
-load: `kx` is CAPS[4], `REGS32` CAPS[5], `BANK_PTR` CAPS[6], `IMUL`
-CAPS[28]. `cft-asm -i` prints the same list for any image.
+`needs` is what a device must publish before the image will load:
+`kx` is CAPS[4], `REGS32` CAPS[5], `BANK_PTR` CAPS[6], `KX9` CAPS[7],
+`IMUL` CAPS[28], and revision 3's two are in CAPS2 - `SCRATCH` at
+CAPS2[4] and `SCRATCH_IO` at CAPS2[5]. `cft-asm -i` prints the same
+list for any image, in that order.
 
 ## The families, and where they came from
 
@@ -91,6 +99,62 @@ down. It is the smallest complete example of the whole path: a file, a
 ramp, a deposit buffer and a hash - and it is the row that proves
 `--iota` means the integer BIT PATTERN and not the float.
 
+**`spill-fp64`** and **`spill-ref-fp64`** are one experiment in two
+files. Both compute forty terms `t_k = x^(k+1)` and combine them as
+`acc = t_0` then `acc = fma(acc, 1/2, t_k)` for k = 1..39 - the same
+forty `mul`s and thirty-nine `fma`s, with the same operands, in the
+same order. The difference is WHEN each term is consumed. `spill-fp64`
+computes all forty first, so that between the phases forty values are
+live at once in a machine that has thirty-two registers, and eight of
+them have nowhere to be but the scratch; it writes all forty with
+`stl` and reads them back with `ldl`. `spill-ref-fp64` consumes each
+term the instant it is produced, so no two are ever live, and it needs
+no scratch at all.
+
+They must deposit the same bits, because a floating-point operation is
+a function of its operands and neither program reorders one. What
+differs between the files is eighty scratch accesses on one side and a
+single exact `copysign` on the other, and neither of those is
+arithmetic. The reference row runs TODAY and is held to a softfloat
+model; that is the point of having it as a row rather than as a string
+inside `check.py` - when the scratch lands, the spilling program is
+compared against something already known good.
+
+**`conv-fp64`** is the indexed form's reason for existing. `stx` and
+`ldx` take the slot from the low `log2(SCRATCH_D)` bits of a
+register's BIT PATTERN, read as an unsigned integer, which is where an
+emitter keeps its loop counters - so one `stx` inside a `repeat`
+reaches sixteen slots because the counter moves, where one `stl` would
+reach the same slot sixteen times. A register starts a run at `+0`,
+whose encoding IS the integer zero, so the counters need no
+initialiser; `iadd` on a raw `0x...01` is how they move. It is the one
+row with no static slot at all, and `cft-asm -i` says so.
+
+**`resume-fp64`** is R5: the host preloads the first slots of every
+lane before a run and reads them back after it, so a program can stop
+and continue. It carries two values, the iterate and an integer step
+count, and deposits both. The step count is what makes the check a
+real claim: the iterate alone would resume correctly even if the block
+lost everything else, whereas a block that dropped the count would
+deposit steps 1..8 twice instead of 1..8 and then 9..16. The check
+runs the program twice, feeding the second run the first run's
+`--scratch-out` file, and compares against the same image with its
+trip count doubled - an image TRANSFORM, so the longer run is
+demonstrably the same program rather than a second source that might
+have drifted.
+
+**`horner-wide-fp64`** is R7 and R3 together. Three hundred
+coefficients is past the 256 a byte of `imm` reaches under `kx`, so
+the last forty-four ride the ninth index bit in `imm[30]`; and the
+bank is external, so the image is 2,448 bytes of pure schedule with
+the coefficients arriving per run in `horner-wide-fp64.recip.bank` -
+`C[k] = (-1)^k / (k+1)`, each the library's own correctly-rounded
+quotient rather than a decimal somebody typed, and checked against
+that derivation. The source says nothing about `kx` or the ninth bit:
+the assembler picks the plain form below sixteen, the indexed form
+from sixteen and the ninth bit from 256, and `cft-asm -i` names KX9
+among the features the image needs.
+
 **`horner-bank-fp64`** is the `BANK_EXT` worked example. One image,
 many polynomials: the image is 240 bytes of pure schedule and the
 twenty-four coefficients arrive per run in
@@ -119,15 +183,23 @@ nothing about it, which is the point.
   the flag - and prints SKIP for the arm it could not run. The day the
   macro exists, that arm runs and additionally requires the two to
   agree bit for bit. Nothing about this is silent.
-- **A `REGS32` program.** Five-bit register fields are in both
-  assemblers, in `python/tests/test_asm.py`, and in the revision-2
-  corpus `check.py` generates - a hundred-odd programs that name
-  `r16..r31`, declare an external bank, force `kx`, and give REPEAT a
-  trip count with `imm[27:24]` set, all held to identical bytes,
-  disassembly, round trip and `-i` in both languages. There is no
-  library ROW for one because nothing can execute it yet: `seq.py`'s
-  `NREG` is 16 and so is libcft's executor. A row whose check is "it
-  assembles" would be a row pretending to be a check.
+- **Revision 3's execution arms.** The four scratch rows above
+  assemble, disassemble, round-trip and cross-check today, and their
+  static arms - constants against their derivation, headers against
+  what the sources declare, the ninth index bits against the contract
+  - all PASS. What none of them can do yet is RUN: `stl`/`ldl`/`stx`/
+  `ldx`, the header's `scratch_io` word and the ninth constant-index
+  bit arrive in `seq.py` and in libcft with the other two halves of
+  the same round. Until then `positive-run --capabilities` reports
+
+      kx9           absent   (cft.h defines no CFT_SEQ_FEAT_KX9)
+      scratch       absent   (cft.h defines no CFT_SEQ_FEAT_SCRATCH)
+      scratch-io    absent   (cft.h defines no CFT_SEQ_FEAT_SCRATCH_IO)
+
+  the tool refuses such an image BY NAME rather than running something
+  else, and `check.py` prints four SKIPs that say which feature each
+  waited on. `spill-ref-fp64` runs today and passes, which is why the
+  spill row's reference is a committed program rather than a promise.
 - **A program per positive.** docs/ATLAS.md's sixty-eight maps are
   step 3 of that document and belong to `core/emit-cft.mjs` in
   atlas-engine; this library is the shape they will be emitted into.
@@ -153,5 +225,12 @@ Then
     host/cft-asm mine.cfta -o mine.cftp
     host/cft-asm -i mine.cftp          # header, features, sha256
     host/positive-run mine.cftp --iota 1024
+
+A program that uses the scratch adds `.scratch N` (the depth it
+assumes; 256 by default, and a static slot at or past it is refused),
+`.slot NAME = N` for a named slot, and `stl`/`ldl` for a static one or
+`stx`/`ldx` for one a register indexes. One that wants its state
+carried in and out adds `.scratch in N` and `.scratch out M`, and runs
+with `positive-run --scratch-in FILE --scratch-out FILE`.
 
 and, to earn a row, a check in `check.py` and a line in the table.

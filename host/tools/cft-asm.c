@@ -39,9 +39,13 @@
  * cross-check against asm.py is what keeps them honest.
  *
  * The encoding is docs/SEQUENCER.md's, INCLUDING its "Revision 2
- * (2026-09-08)" section: five-bit register fields whose high bits live
- * in imm[27:24], and a header whose word 6 is `flags` with BANK_EXT at
- * bit 0.
+ * (2026-09-08)" and "Revision 3 (2026-09-08, evening)" sections:
+ * five-bit register fields whose high bits live in imm[27:24]; a
+ * header whose word 6 is `flags`, with BANK_EXT at bit 0 and
+ * SCRATCH_IO at bit 1, and whose word 7 is `scratch_io` behind that
+ * second flag; four control codes for the per-lane scratch; and a
+ * ninth constant-index bit per operand in imm[30:28] under kx, which
+ * leaves imm[31] as the only reserved-must-be-zero bit of the word.
  */
 
 #include <stdarg.h>
@@ -54,27 +58,69 @@
 #include "cft.h"
 
 #define MAX_ESZ        32
-#define MAX_CONSTS     256
+#define MAX_CONSTS     512
 #define MAX_INSNS      65536
 #define MAX_NAMES      1024
 #define MAX_LINE       1024
 #define NREG           32
 #define REG_FIELD      16
 #define KADDR_PLAIN    16
-#define KADDR_KX       256
+#define KADDR_KX       512
 #define MAX_LOOP_DEPTH 4
 #define HEADER_BYTES   32
-#define FLAG_BANK_EXT  0x1u
+#define FLAG_BANK_EXT   0x1u
+#define FLAG_SCRATCH_IO 0x2u
+#define FLAGS_KNOWN    (FLAG_BANK_EXT | FLAG_SCRATCH_IO)
+/* R4: `SCRATCH_D` is a build parameter of the tile and not part of the
+ * program model, so a SOURCE declares the depth it assumes with
+ * `.scratch N` and a static slot at or past it is refused. 256 is what
+ * revision 3 builds; the slot itself is imm[23:0], which is the ceiling
+ * whatever a device publishes. */
+#define SCRATCH_D_DEFAULT 256
+#define SCRATCH_D_MAX     (1u << 24)
+#define SLOT_MASK         0x00FFFFFFu
+#define SCRATCH_IO_MAX    0xFFFFu
 /* 2^40: a program's worst-case instruction count must be a bound and
  * not merely finite. Written as a shift, so nobody has to count the
  * zeros in a literal. */
 #define MAX_WORST      ((uint64_t)1 << 40)
 #define MAX_DEPOSITS   ((uint32_t)1 << 20)
 
-enum { C_HALT = 0, C_REPEAT, C_ENDREP, C_DEPOSIT, C_SETACT, C_ACTALL };
-static const char *const CTRL_NAMES[6] = {
-    "halt", "repeat", "endrep", "deposit", "setact", "actall"
+enum { C_HALT = 0, C_REPEAT, C_ENDREP, C_DEPOSIT, C_SETACT, C_ACTALL,
+       C_STL, C_LDL, C_STX, C_LDX, C_NCODES };
+static const char *const CTRL_NAMES[C_NCODES] = {
+    "halt", "repeat", "endrep", "deposit", "setact", "actall",
+    "stl", "ldl", "stx", "ldx"
 };
+
+/* What each control code READS, which is the whole of its encoding
+ * rule: `regs` names the register fields (1 = rd, ra, rb, rc in the
+ * FIELD_SHIFT order) and `slot` says whether imm[23:0] is a scratch
+ * slot. Everything not named is a field the instruction does not read
+ * and must be zero - the other register fields, their high bits in
+ * imm[27:24], rnd, ka/kb/kc, kx and the rest of imm.
+ *
+ * REPEAT is the exception and is not really one: it names no register,
+ * so it reads `imm` WHOLE as its trip count and none of imm[27:24] is
+ * a register's high bit there. */
+typedef struct { int regs[4]; int slot; } ctrluse;
+static const ctrluse CTRL_USE[C_NCODES] = {
+    /* rd ra rb rc  slot */
+    { { 0, 0, 0, 0 }, 0 },      /* HALT    */
+    { { 0, 0, 0, 0 }, 0 },      /* REPEAT  - imm is the trip count */
+    { { 0, 0, 0, 0 }, 0 },      /* ENDREP  */
+    { { 0, 1, 0, 0 }, 0 },      /* DEPOSIT ra */
+    { { 0, 1, 0, 0 }, 0 },      /* SETACT  ra */
+    { { 0, 0, 0, 0 }, 0 },      /* ACTALL  */
+    { { 0, 1, 0, 0 }, 1 },      /* STL  scratch[imm] := ra */
+    { { 1, 0, 0, 0 }, 1 },      /* LDL  rd := scratch[imm] */
+    { { 0, 1, 1, 0 }, 0 },      /* STX  scratch[rb mod D] := ra */
+    { { 1, 0, 1, 0 }, 0 }       /* LDX  rd := scratch[rb mod D] */
+};
+static int is_scratch_code(int c)
+{
+    return c == C_STL || c == C_LDL || c == C_STX || c == C_LDX;
+}
 
 /* Which operand fields each opcode reads, as a 3-character string over
  * 'a', 'b', 'c'. This follows softfloat.steer and the arity of the
@@ -436,6 +482,10 @@ static int rhi_shift(int field)      /* 0=rd 1=ra 2=rb 3=rc */
 
 static const int FIELD_SHIFT[4] = { 8, 12, 16, 20 };
 static const int KX_SHIFT[3]    = { 0, 8, 16 };
+/* R7: the ninth bit of ka's, kb's and kc's constant index. Read only
+ * under kx for an operand whose k flag is set; imm[31] stays
+ * reserved-must-be-zero. */
+static const int KX9_SHIFT[3]   = { 28, 29, 30 };
 
 /* One ALU or control word. `reg[4]` is rd, ra, rb, rc as FIVE-BIT
  * values - or, where the matching k flag is set, a constant index.
@@ -501,12 +551,16 @@ static void decode(uint64_t word, insn *d)
 }
 
 /* The source index of operand `k` (0=a,1=b,2=c), or -1 when it names a
- * register. */
+ * register. Under kx the index is NINE bits: a byte of imm and its
+ * ninth bit in imm[30:28]. */
 static int const_index(const insn *d, int k)
 {
     if (!d->kflag[k])
         return -1;
-    return d->kx ? (int)((d->imm >> KX_SHIFT[k]) & 0xFF) : d->lo[k + 1];
+    if (!d->kx)
+        return d->lo[k + 1];
+    return (int)(((d->imm >> KX_SHIFT[k]) & 0xFFu) |
+                 (((d->imm >> KX9_SHIFT[k]) & 1u) << 8));
 }
 
 /* ---- the program under construction --------------------------------- */
@@ -519,6 +573,13 @@ typedef struct {
     uint32_t   flags;
     size_t     esz;
 
+    /* R4/R5: the depth the SOURCE assumes, and the per-run block. The
+     * depth is not in the image; scratch_io is header word 7. */
+    uint32_t scratch_depth;
+    int      have_depth;
+    uint32_t n_scratch_in, n_scratch_out;
+    int      have_scratch_in, have_scratch_out;
+
     int      n_consts;
     uint8_t  consts[MAX_CONSTS][MAX_ESZ];
     char     const_name[MAX_CONSTS][64];
@@ -527,9 +588,21 @@ typedef struct {
     char     reg_name[MAX_NAMES][64];
     int      reg_value[MAX_NAMES];
 
+    int      n_slots;
+    char     slot_name[MAX_NAMES][64];
+    uint32_t slot_value[MAX_NAMES];
+
     uint32_t n_insns;
     uint64_t insns[MAX_INSNS];
 } program;
+
+/* The depth a READBACK assumes: the smallest power of two, at least
+ * the default, that covers every static slot and both scratch-I/O
+ * counts. The depth is not in the image, so a reader that simply
+ * defaulted to 256 would refuse a legal program written for a deeper
+ * tile; python/cft_golden/asm.py infers the same number and the
+ * disassembler writes it back as `.scratch N`. */
+static uint32_t infer_scratch_depth(const program *P);
 
 static cft_device *DEV = NULL;
 
@@ -588,6 +661,15 @@ static int find_reg_name(const program *P, const char *name)
     return -1;
 }
 
+static int find_slot_name(const program *P, const char *name)
+{
+    int i;
+    for (i = 0; i < P->n_slots; i++)
+        if (streq_ci(P->slot_name[i], name))
+            return i;
+    return -1;
+}
+
 static int parse_reg(const program *P, const char *tok)
 {
     int i = find_reg_name(P, tok);
@@ -599,6 +681,9 @@ static int parse_reg(const program *P, const char *tok)
         if (find_const(P, tok) >= 0)
             diel("%s is a constant, and this operand must be a register",
                  tok);
+        if (find_slot_name(P, tok) >= 0)
+            diel("%s is a scratch slot, and this operand must be a "
+                 "register", tok);
         diel("'%s' is not a register", tok);
     }
     if (n >= NREG)
@@ -617,6 +702,31 @@ static uint64_t parse_uint(const char *tok, const char *what)
     if (*end || end == tok)
         diel("%s: '%s' is not a number", what, tok);
     return (uint64_t)v;
+}
+
+/* A static scratch slot: a `.slot` name, or a decimal or 0x literal.
+ * Refuses a register or a constant name, so `stl r3, r4` is a message
+ * rather than slot 4 - the indexed form is `stx`/`ldx`. */
+static uint32_t parse_slot(const program *P, const char *tok)
+{
+    int i = find_slot_name(P, tok);
+    uint64_t v;
+    if (i >= 0)
+        return P->slot_value[i];
+    if (is_ident(tok)) {
+        if (find_reg_name(P, tok) >= 0 || reg_literal(tok) >= 0)
+            diel("%s is a register, and a static slot is a number or a "
+                 "`.slot` name - the indexed form is `stx` and `ldx`", tok);
+        if (find_const(P, tok) >= 0)
+            diel("%s is a constant, and a static slot is a number or a "
+                 "`.slot` name - the indexed form is `stx` and `ldx`", tok);
+        diel("'%s' is not a slot", tok);
+    }
+    v = parse_uint(tok, "a scratch slot");
+    if (v > SLOT_MASK)
+        diel("a static slot is imm[23:0], so at most %u",
+             (unsigned)SLOT_MASK);
+    return (uint32_t)v;
 }
 
 /* A `.const` literal into `out`, format-width, little-endian.
@@ -719,6 +829,19 @@ static void do_ctrl(program *P, int code, char **tok, int ntok)
         if (ntok != 1)
             diel("%s takes one register", CTRL_NAMES[code]);
         reg[1] = parse_reg(P, tok[0]);
+    } else if (code == C_STL || code == C_LDL) {
+        /* stl rA, SLOT   ldl rD, SLOT - the slot is imm[23:0] */
+        if (ntok != 2)
+            diel("%s takes a register and a slot", CTRL_NAMES[code]);
+        reg[code == C_STL ? 1 : 0] = parse_reg(P, tok[0]);
+        imm = parse_slot(P, tok[1]);
+    } else if (code == C_STX || code == C_LDX) {
+        /* stx rA, rB   ldx rD, rB - the slot comes from rB */
+        if (ntok != 2)
+            diel("%s takes two registers - the value and the index",
+                 CTRL_NAMES[code]);
+        reg[code == C_STX ? 1 : 0] = parse_reg(P, tok[0]);
+        reg[2] = parse_reg(P, tok[1]);
     } else if (ntok) {
         diel("%s takes no operands", CTRL_NAMES[code]);
     }
@@ -828,8 +951,10 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
              "spelling of the plain form");
     if (kx) {
         for (i = 0; i < 3; i++)
-            if (kflag[i])
-                imm |= (uint32_t)reg[i + 1] << KX_SHIFT[i];
+            if (kflag[i]) {
+                imm |= (uint32_t)(reg[i + 1] & 0xFF) << KX_SHIFT[i];
+                imm |= (uint32_t)(reg[i + 1] >> 8) << KX9_SHIFT[i];
+            }
     }
     emit(P, encode(op, reg, kflag, rnd, kx, 0, imm));
 }
@@ -891,6 +1016,70 @@ static void assemble_line(program *P, char *line)
                 diel(".bank external must precede the .const lines it "
                      "turns into declarations");
             P->flags |= FLAG_BANK_EXT;
+        } else if (!strcmp(d, ".scratch")) {
+            /* `.scratch N` is the depth the program assumes;
+             * `.scratch in N` / `.scratch out M` are the per-run block,
+             * which is header word 7 behind flags.SCRATCH_IO. All three
+             * precede the instructions: a depth that changed halfway
+             * would make the slot bound depend on where a line sits. */
+            if (P->n_insns)
+                diel(".scratch must come before the instructions");
+            if (ntok == 2) {
+                uint64_t v = parse_uint(tok[1], ".scratch");
+                if (P->have_depth)
+                    diel(".scratch N appears twice");
+                if (v < 1 || v > SCRATCH_D_MAX || (v & (v - 1)))
+                    diel(".scratch takes a power of two in 1..%u",
+                         (unsigned)SCRATCH_D_MAX);
+                P->scratch_depth = (uint32_t)v;
+                P->have_depth = 1;
+            } else if (ntok == 3 &&
+                       (streq_ci(tok[1], "in") || streq_ci(tok[1], "out"))) {
+                int is_in = streq_ci(tok[1], "in");
+                uint64_t v = parse_uint(tok[2], ".scratch");
+                if (v > SCRATCH_IO_MAX)
+                    diel(".scratch %s is a sixteen-bit count, at most %u",
+                         is_in ? "in" : "out", (unsigned)SCRATCH_IO_MAX);
+                if (is_in) {
+                    if (P->have_scratch_in)
+                        diel(".scratch in appears twice");
+                    P->n_scratch_in = (uint32_t)v;
+                    P->have_scratch_in = 1;
+                } else {
+                    if (P->have_scratch_out)
+                        diel(".scratch out appears twice");
+                    P->n_scratch_out = (uint32_t)v;
+                    P->have_scratch_out = 1;
+                }
+                /* Either half declares the block, so the flag is set
+                 * even by a count of zero: the flag says the word is
+                 * MEANINGFUL. */
+                P->flags |= FLAG_SCRATCH_IO;
+            } else {
+                diel(".scratch takes a depth, or `in N`, or `out M`");
+            }
+        } else if (!strcmp(d, ".slot")) {
+            uint64_t v;
+            if (ntok != 4 || strcmp(tok[2], "="))
+                diel(".slot takes NAME = N");
+            if (!is_ident(tok[1]))
+                diel("'%s' is not a name", tok[1]);
+            if (find_const(P, tok[1]) >= 0 || find_reg_name(P, tok[1]) >= 0
+                || find_slot_name(P, tok[1]) >= 0)
+                diel("%s is already defined", tok[1]);
+            if (reg_literal(tok[1]) >= 0)
+                diel("%s would shadow a register", tok[1]);
+            v = parse_uint(tok[3], ".slot");
+            if (v > SLOT_MASK)
+                diel("a static slot is imm[23:0], so at most %u",
+                     (unsigned)SLOT_MASK);
+            if (P->n_slots >= MAX_NAMES)
+                diel("too many slot names");
+            if (strlen(tok[1]) >= sizeof P->slot_name[0])
+                diel("that name is too long");
+            strcpy(P->slot_name[P->n_slots], tok[1]);
+            P->slot_value[P->n_slots] = (uint32_t)v;
+            P->n_slots++;
         } else if (!strcmp(d, ".const")) {
             int bare = (ntok == 2) && (P->flags & FLAG_BANK_EXT);
             char joined[MAX_LINE];
@@ -901,7 +1090,8 @@ static void assemble_line(program *P, char *line)
                      ? ", or NAME alone under .bank external" : "");
             if (!is_ident(tok[1]))
                 diel("'%s' is not a name", tok[1]);
-            if (find_const(P, tok[1]) >= 0 || find_reg_name(P, tok[1]) >= 0)
+            if (find_const(P, tok[1]) >= 0 || find_reg_name(P, tok[1]) >= 0
+                || find_slot_name(P, tok[1]) >= 0)
                 diel("%s is already defined", tok[1]);
             if (reg_literal(tok[1]) >= 0)
                 diel("%s would shadow a register", tok[1]);
@@ -935,7 +1125,8 @@ static void assemble_line(program *P, char *line)
                 diel(".reg takes NAME = rN");
             if (!is_ident(tok[1]))
                 diel("'%s' is not a name", tok[1]);
-            if (find_const(P, tok[1]) >= 0 || find_reg_name(P, tok[1]) >= 0)
+            if (find_const(P, tok[1]) >= 0 || find_reg_name(P, tok[1]) >= 0
+                || find_slot_name(P, tok[1]) >= 0)
                 diel("%s is already defined", tok[1]);
             if (reg_literal(tok[1]) >= 0)
                 diel("%s would shadow a register", tok[1]);
@@ -959,7 +1150,7 @@ static void assemble_line(program *P, char *line)
 
     {
         int c;
-        for (c = 0; c < 6; c++)
+        for (c = 0; c < C_NCODES; c++)
             if (streq_ci(tok[0], CTRL_NAMES[c])) {
                 need_fmt(P);
                 do_ctrl(P, c, tok + 1, ntok - 1);
@@ -984,8 +1175,8 @@ static void check_alu(const program *P, uint32_t pc, const insn *d)
     int k;
     if (d->rnd > 4)
         diel("[%u] rnd=%d is reserved", pc, d->rnd);
-    if (d->imm & 0xF0000000u)
-        diel("[%u] imm[31:28] is reserved and must be zero", pc);
+    if (d->imm & 0x80000000u)
+        diel("[%u] imm[31] is reserved and must be zero", pc);
     if (d->kx && !(d->kflag[0] || d->kflag[1] || d->kflag[2]))
         diel("[%u] kx is set and no operand names a constant, so the bit "
              "selects nothing and the instruction has a second encoding "
@@ -993,7 +1184,15 @@ static void check_alu(const program *P, uint32_t pc, const insn *d)
     for (k = 0; k < 3; k++) {
         static const char *const KN[3] = { "ra", "rb", "rc" };
         uint32_t byte = (d->imm >> KX_SHIFT[k]) & 0xFFu;
+        uint32_t ninth = (d->imm >> KX9_SHIFT[k]) & 1u;
         int idx;
+        /* R7: imm[30:28] are the ninth bits of ka's, kb's and kc's
+         * indices, read only under kx for an operand whose k flag is
+         * set. Anywhere else the bit is an unread field. */
+        if (ninth && !(d->kx && d->kflag[k]))
+            diel("[%u] imm[%d] is the ninth bit of %s's constant index, "
+                 "which is read only under kx for an operand that names a "
+                 "constant, so it must be zero", pc, KX9_SHIFT[k], KN[k]);
         if (d->kflag[k]) {
             if (d->hi[k + 1])
                 diel("[%u] %s names a constant, so its register high bit "
@@ -1003,8 +1202,9 @@ static void check_alu(const program *P, uint32_t pc, const insn *d)
                 if (d->lo[k + 1])
                     diel("[%u] %s names constant %u through imm under kx, "
                          "so the %s field must be zero and it is %d",
-                         pc, KN[k], (unsigned)byte, KN[k], d->lo[k + 1]);
-                idx = (int)byte;
+                         pc, KN[k], (unsigned)(byte | (ninth << 8)), KN[k],
+                         d->lo[k + 1]);
+                idx = (int)(byte | (ninth << 8));
             } else {
                 idx = d->lo[k + 1];
             }
@@ -1025,19 +1225,20 @@ static void check_alu(const program *P, uint32_t pc, const insn *d)
              "being a hash of the program", pc);
 }
 
-static void check_ctrl(uint32_t pc, const insn *d)
+static void check_ctrl(const program *P, uint32_t pc, const insn *d)
 {
     static const char *const FN[4] = { "rd", "ra", "rb", "rc" };
     int code = d->op, i;
-    int reads_ra = (code == C_DEPOSIT || code == C_SETACT);
+    const ctrluse *u;
     uint32_t allowed_imm;
-    if (code > C_ACTALL)
+    if (code >= C_NCODES)
         diel("[%u] unknown control code %d", pc, code);
+    u = &CTRL_USE[code];
     /* the raw four-bit fields: imm[27:24] are register HIGH bits only
      * on an instruction that has a register to extend, and REPEAT's
      * immediate is a trip count that may set any bit it likes */
     for (i = 0; i < 4; i++) {
-        if (i == 1 && reads_ra)
+        if (u->regs[i])
             continue;
         if (d->lo[i])
             diel("[%u] %s does not read %s, so it must be zero",
@@ -1053,11 +1254,23 @@ static void check_ctrl(uint32_t pc, const insn *d)
     if (d->kx)
         diel("[%u] %s does not read kx, so it must be zero",
              pc, CTRL_NAMES[code]);
-    allowed_imm = reads_ra ? (1u << rhi_shift(1)) : 0u;
+    allowed_imm = u->slot ? SLOT_MASK : 0u;
+    for (i = 0; i < 4; i++)
+        if (u->regs[i])
+            allowed_imm |= 1u << rhi_shift(i);
     if (code != C_REPEAT && (d->imm & ~allowed_imm))
-        diel("[%u] %s does not read imm beyond its register high bit, so "
-             "imm[31:0] must be zero there and it is 0x%08x",
-             pc, CTRL_NAMES[code], (unsigned)d->imm);
+        diel("[%u] %s does not read imm beyond %sits register high bit(s), "
+             "so the rest of imm must be zero and imm is 0x%08x",
+             pc, CTRL_NAMES[code], u->slot ? "its slot and " : "",
+             (unsigned)d->imm);
+    if (u->slot) {
+        uint32_t v = d->imm & SLOT_MASK;
+        if (v >= P->scratch_depth)
+            diel("[%u] %s names scratch slot %u and the program declares a "
+                 "scratch of %u slots (.scratch N)",
+                 pc, CTRL_NAMES[code], (unsigned)v,
+                 (unsigned)P->scratch_depth);
+    }
 }
 
 static void validate(const program *P)
@@ -1072,9 +1285,31 @@ static void validate(const program *P)
     if (P->max_deposits > MAX_DEPOSITS)
         diel("max_deposits=%u, cap %u", (unsigned)P->max_deposits,
              (unsigned)MAX_DEPOSITS);
-    if (P->flags & ~FLAG_BANK_EXT)
-        diel("header flags 0x%08x: only BANK_EXT is defined and the rest "
-             "are reserved-must-be-zero", (unsigned)P->flags);
+    if (P->flags & ~FLAGS_KNOWN)
+        diel("header flags 0x%08x: only BANK_EXT and SCRATCH_IO are "
+             "defined and the rest are reserved-must-be-zero",
+             (unsigned)P->flags);
+    if (P->n_consts > MAX_CONSTS)
+        diel("%d constants; an index is nine bits under kx, so the bank "
+             "addresses at most %d", P->n_consts, MAX_CONSTS);
+    if (P->scratch_depth < 1 || P->scratch_depth > SCRATCH_D_MAX ||
+        (P->scratch_depth & (P->scratch_depth - 1)))
+        diel("a scratch depth is a power of two in 1..%u and this one "
+             "is %u", (unsigned)SCRATCH_D_MAX, (unsigned)P->scratch_depth);
+    /* R5: `scratch_io` is meaningful only behind its flag, and with the
+     * flag clear the word must be zero - the same rule the header word
+     * carried when it was `reserved[1]`. */
+    if (!(P->flags & FLAG_SCRATCH_IO) &&
+        (P->n_scratch_in || P->n_scratch_out))
+        diel("header word 7 is scratch_io only behind flags.SCRATCH_IO");
+    if (P->n_scratch_in > P->scratch_depth)
+        diel(".scratch in %u is more than the %u slots the program "
+             "declares", (unsigned)P->n_scratch_in,
+             (unsigned)P->scratch_depth);
+    if (P->n_scratch_out > P->scratch_depth)
+        diel(".scratch out %u is more than the %u slots the program "
+             "declares", (unsigned)P->n_scratch_out,
+             (unsigned)P->scratch_depth);
     mult[0] = 1;
     for (pc = 0; pc < P->n_insns; pc++) {
         insn d;
@@ -1083,7 +1318,7 @@ static void validate(const program *P)
         if (!d.ctrl) {
             check_alu(P, pc, &d);
         } else {
-            check_ctrl(pc, &d);
+            check_ctrl(P, pc, &d);
             if (d.op == C_REPEAT) {
                 if (d.imm == 0)
                     diel("[%u] repeat 0 is not a loop; omit it", pc);
@@ -1133,7 +1368,8 @@ static uint8_t *to_bytes(const program *P, size_t *bytes_out)
     put_le32(img + 16, P->max_deposits);
     put_le32(img + 20, (uint32_t)P->fmt);
     put_le32(img + 24, P->flags);
-    put_le32(img + 28, 0);
+    put_le32(img + 28, (P->n_scratch_in & 0xFFFFu) |
+                       ((P->n_scratch_out & 0xFFFFu) << 16));
     off = HEADER_BYTES;
     for (i = 0; i < carried; i++) {
         memcpy(img + off, P->consts[i], P->esz);
@@ -1197,11 +1433,12 @@ static void load_image(const uint8_t *data, size_t n, program *P)
         diel("bad magic 0x%08x, expected 0x50544643", (unsigned)magic);
     if (ver != 1)
         diel("program version %u, this loader speaks 1", (unsigned)ver);
-    if (rsv1)
-        diel("reserved header word 7 must be zero");
-    if (flags & ~FLAG_BANK_EXT)
-        diel("header flags 0x%08x: only BANK_EXT is defined and the rest "
-             "are reserved", (unsigned)flags);
+    if (flags & ~FLAGS_KNOWN)
+        diel("header flags 0x%08x: only BANK_EXT and SCRATCH_IO are "
+             "defined and the rest are reserved", (unsigned)flags);
+    if (!(flags & FLAG_SCRATCH_IO) && rsv1)
+        diel("reserved header word 7 must be zero unless flags.SCRATCH_IO "
+             "says it is scratch_io");
     if (prec > 3)
         diel("precision code %u is not on the ladder", (unsigned)prec);
     if (n_consts > MAX_CONSTS)
@@ -1216,6 +1453,10 @@ static void load_image(const uint8_t *data, size_t n, program *P)
     P->max_deposits = maxdep;
     P->have_deposits = 1;
     P->flags = flags;
+    P->n_scratch_in = rsv1 & 0xFFFFu;
+    P->n_scratch_out = (rsv1 >> 16) & 0xFFFFu;
+    P->have_scratch_in = P->have_scratch_out = (flags & FLAG_SCRATCH_IO)
+                                               ? 1 : 0;
     P->n_consts = (int)n_consts;
     P->n_insns = n_insns;
     carried = (flags & FLAG_BANK_EXT) ? 0 : n_consts;
@@ -1234,6 +1475,31 @@ static void load_image(const uint8_t *data, size_t n, program *P)
         P->insns[i] = get_le64(data + off);
         off += 8;
     }
+    P->scratch_depth = infer_scratch_depth(P);
+    P->have_depth = 1;
+}
+
+static uint32_t infer_scratch_depth(const program *P)
+{
+    uint32_t need = 1, depth = SCRATCH_D_DEFAULT, pc;
+    for (pc = 0; pc < P->n_insns; pc++) {
+        insn d;
+        decode(P->insns[pc], &d);
+        if (d.ctrl && (d.op == C_STL || d.op == C_LDL)) {
+            uint32_t slot = (d.imm & SLOT_MASK) + 1;
+            if (slot > need)
+                need = slot;
+        }
+    }
+    if (P->flags & FLAG_SCRATCH_IO) {
+        if (P->n_scratch_in > need)
+            need = P->n_scratch_in;
+        if (P->n_scratch_out > need)
+            need = P->n_scratch_out;
+    }
+    while (depth < need)
+        depth *= 2;
+    return depth;
 }
 
 /* ---- the disassembler ------------------------------------------------ */
@@ -1253,6 +1519,16 @@ static void disassemble(const program *P, FILE *out)
     int indent = 0, i;
     fprintf(out, ".format   %s\n", cft_format_name(P->fmt));
     fprintf(out, ".deposits %u\n", (unsigned)P->max_deposits);
+    /* The depth is not in the image, so what is written back is what
+     * load_image INFERRED - and only when it is not the default, so
+     * that an image which needs no scratch reads exactly as it did
+     * before revision 3. */
+    if (P->scratch_depth != SCRATCH_D_DEFAULT)
+        fprintf(out, ".scratch  %u\n", (unsigned)P->scratch_depth);
+    if (P->flags & FLAG_SCRATCH_IO) {
+        fprintf(out, ".scratch  in %u\n", (unsigned)P->n_scratch_in);
+        fprintf(out, ".scratch  out %u\n", (unsigned)P->n_scratch_out);
+    }
     if (P->flags & FLAG_BANK_EXT)
         fprintf(out, ".bank     external\n");
     for (i = 0; i < P->n_consts; i++) {
@@ -1288,6 +1564,18 @@ static void disassemble(const program *P, FILE *out)
                 indent++;
             } else if (d.op == C_DEPOSIT || d.op == C_SETACT) {
                 fprintf(out, "%s%s r%d\n", pad, CTRL_NAMES[d.op], d.reg[1]);
+            } else if (d.op == C_STL) {
+                fprintf(out, "%s%s r%d, %u\n", pad, CTRL_NAMES[d.op],
+                        d.reg[1], (unsigned)(d.imm & SLOT_MASK));
+            } else if (d.op == C_LDL) {
+                fprintf(out, "%s%s r%d, %u\n", pad, CTRL_NAMES[d.op],
+                        d.reg[0], (unsigned)(d.imm & SLOT_MASK));
+            } else if (d.op == C_STX) {
+                fprintf(out, "%s%s r%d, r%d\n", pad, CTRL_NAMES[d.op],
+                        d.reg[1], d.reg[2]);
+            } else if (d.op == C_LDX) {
+                fprintf(out, "%s%s r%d, r%d\n", pad, CTRL_NAMES[d.op],
+                        d.reg[0], d.reg[2]);
             } else {
                 fprintf(out, "%s%s\n", pad, CTRL_NAMES[d.op]);
             }
@@ -1356,22 +1644,37 @@ static void disassemble(const program *P, FILE *out)
 
 /* ---- the header report ----------------------------------------------- */
 
+/* The feature bits this image needs a device to publish, in CAPS bit
+ * order followed by CAPS2's: kx is CAPS[4], REGS32 [5], BANK_PTR [6],
+ * KX9 [7], IMUL [28], and then SCRATCH is CAPS2[4] and SCRATCH_IO
+ * CAPS2[5]. */
 static void features(const program *P, char *out, size_t cap)
 {
-    int kx = 0, regs32 = 0, imul = 0, i;
+    int kx = 0, regs32 = 0, imul = 0, kx9 = 0, scratch = 0, i;
     uint32_t pc;
     for (pc = 0; pc < P->n_insns; pc++) {
         insn d;
         decode(P->insns[pc], &d);
         if (d.ctrl) {
-            /* only DEPOSIT and SETACT have a register to extend */
-            if ((d.op == C_DEPOSIT || d.op == C_SETACT) &&
-                d.reg[1] >= REG_FIELD)
-                regs32 = 1;
+            /* which control codes have a register to extend is
+             * CTRL_USE's business; REPEAT's imm[25] is a trip-count bit
+             * and not a register's fifth */
+            const ctrluse *u = (d.op < C_NCODES) ? &CTRL_USE[d.op] : NULL;
+            if (u) {
+                for (i = 0; i < 4; i++)
+                    if (u->regs[i] && d.reg[i] >= REG_FIELD)
+                        regs32 = 1;
+            }
+            if (is_scratch_code(d.op))
+                scratch = 1;
             continue;
         }
-        if (d.kx)
+        if (d.kx) {
             kx = 1;
+            for (i = 0; i < 3; i++)
+                if (const_index(&d, i) >= 256)
+                    kx9 = 1;
+        }
         if (d.op == CFT_IMUL)
             imul = 1;
         for (i = 0; i < 4; i++)
@@ -1385,32 +1688,81 @@ static void features(const program *P, char *out, size_t cap)
         strncat(out, "REGS32 ", cap - strlen(out) - 1);
     if (P->flags & FLAG_BANK_EXT)
         strncat(out, "BANK_PTR ", cap - strlen(out) - 1);
+    if (kx9)
+        strncat(out, "KX9 ", cap - strlen(out) - 1);
     if (imul)
         strncat(out, "IMUL ", cap - strlen(out) - 1);
+    if (scratch)
+        strncat(out, "SCRATCH ", cap - strlen(out) - 1);
+    if (P->flags & FLAG_SCRATCH_IO)
+        strncat(out, "SCRATCH_IO ", cap - strlen(out) - 1);
     if (!out[0])
         strncat(out, "-", cap - strlen(out) - 1);
     else
         out[strlen(out) - 1] = 0;
 }
 
+/* What `-i` says about the scratch: the highest STATIC slot, and
+ * whether the program reaches the memory through STX/LDX at all. */
+static void scratch_words(const program *P, char *out, size_t cap)
+{
+    long top = -1;
+    int indexed = 0;
+    uint32_t pc;
+    for (pc = 0; pc < P->n_insns; pc++) {
+        insn d;
+        decode(P->insns[pc], &d);
+        if (!d.ctrl)
+            continue;
+        if (d.op == C_STL || d.op == C_LDL) {
+            long slot = (long)(d.imm & SLOT_MASK);
+            if (slot > top)
+                top = slot;
+        } else if (d.op == C_STX || d.op == C_LDX) {
+            indexed = 1;
+        }
+    }
+    if (top < 0 && !indexed)
+        snprintf(out, cap, "-");
+    else if (top < 0)
+        snprintf(out, cap, "indexed");
+    else
+        snprintf(out, cap, "highest static slot %ld, %s", top,
+                 indexed ? "indexed" : "not indexed");
+}
+
 static void print_info(const program *P, const uint8_t *img, size_t bytes)
 {
     sha256 h;
     uint8_t digest[32];
-    char hex[65], feat[128];
+    char hex[65], feat[160], scr[64], fl[48];
     sha256_start(&h);
     sha256_push(&h, img, bytes);
     sha256_end(&h, digest);
     hex32(digest, hex);
     features(P, feat, sizeof feat);
+    scratch_words(P, scr, sizeof scr);
+    fl[0] = 0;
+    if (P->flags & FLAG_BANK_EXT)
+        strncat(fl, "BANK_EXT ", sizeof fl - strlen(fl) - 1);
+    if (P->flags & FLAG_SCRATCH_IO)
+        strncat(fl, "SCRATCH_IO ", sizeof fl - strlen(fl) - 1);
+    if (fl[0])
+        fl[strlen(fl) - 1] = 0;
     printf("format        %s\n", cft_format_name(P->fmt));
     printf("instructions  %u\n", (unsigned)P->n_insns);
     printf("constants     %d%s\n", P->n_consts,
            (P->flags & FLAG_BANK_EXT) ? "  (external: supplied per run)"
                                       : "");
     printf("deposits      %u\n", (unsigned)P->max_deposits);
-    printf("flags         0x%08x%s\n", (unsigned)P->flags,
-           (P->flags & FLAG_BANK_EXT) ? "  BANK_EXT" : "");
+    printf("scratch       %s\n", scr);
+    if (P->flags & FLAG_SCRATCH_IO)
+        printf("scratch-io    in %u, out %u\n",
+               (unsigned)P->n_scratch_in, (unsigned)P->n_scratch_out);
+    else
+        printf("scratch-io    -\n");
+    printf("flags         0x%08x%s%s\n", (unsigned)P->flags,
+           fl[0] ? "  " : "", fl);
     printf("bytes         %lu\n", (unsigned long)bytes);
     printf("features      %s\n", feat);
     printf("sha256        %s\n", hex);
@@ -1428,6 +1780,9 @@ static void usage(void)
 "  cft-asm -d image.cftp            disassemble to stdout\n"
 "  cft-asm -i image.cftp            header, features and SHA-256\n"
 "\n"
+"-i also reports the scratch the image uses: the highest static slot,\n"
+"whether it indexes, and the per-run scratch-I/O counts.\n"
+"\n"
 "The text form is docs/PROGRAMS.md; python/cft_golden/asm.py is the\n"
 "reference this tool is held to byte for byte.\n");
 }
@@ -1437,7 +1792,10 @@ int main(int argc, char **argv)
     const char *in = NULL, *out = NULL;
     int mode = 'a', i;
     cft_status st;
-    program P;
+    /* static, not automatic: with 512 constants and 65,536 instructions
+     * this is most of a megabyte, which is a whole default thread stack
+     * on Windows. */
+    static program P;
 
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -1479,6 +1837,7 @@ int main(int argc, char **argv)
             return 1;
         }
         memset(&P, 0, sizeof P);
+        P.scratch_depth = SCRATCH_D_DEFAULT;
         SRC = in;
         LINENO = 0;
         while (fgets(line, sizeof line, f)) {

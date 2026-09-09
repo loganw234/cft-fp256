@@ -29,6 +29,10 @@ def main():
     ap.add_argument("--out", default=str(HERE / "out"))
     ap.add_argument("--manifest", default=str(HERE / "MANIFEST"))
     args = ap.parse_args()
+    # Absolute, for the reason programs/check.py resolves its own:
+    # Windows CreateProcess will not resolve a relative path written
+    # with forward slashes even when the file is plainly there.
+    args.asm = str(Path(args.asm).resolve())
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
