@@ -42,11 +42,18 @@ of the fp32- and fp64-heavy tile mixes.
 | `host/` | **libcft** - ~19,900 lines of C99 across `src/`, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++ - the last of those through `host/include/cft.hpp`, a header-only C++17 layer (RAII for the handles, a fixed-width byte type per format, span batches, operators bound to an explicit context rather than a hidden global rounding attribute) that computes nothing itself and is held to the C entry points one by one, at C++17 and C++20, by `make -C host cpptest`. The software backend replays 1,223,635 conformance cases over 168 sets at the census's pool sizes (1,071,635 at `make vectors`') and agrees with the golden model on 216,000 differential cases; `cft_div`/`cft_sqrt` compose the tile's seed opcodes into correctly-rounded division and square root, proven against **23.9 billion cases of the host CPU's own IEEE hardware and 999,000 cases of GNU MPFR** (docs/VALIDATION.md); as of 2026-09-01 the **rest of clause 5** ships too - roundToIntegral, every conversion, scaleB/logB, nextUp/nextDown, class, totalOrder, signaling compares, exact remainder - composed or host-exact, zero new RTL, held identical to the model over 112,372 per-element checks; as of 2026-09-02 so do the **phase-1 transcendentals** (ABI 0.3), correctly rounded at every format under every attribute on a multiprecision evaluator built on the same bigint core, and as of 2026-09-03 the **phase-2 trigonometrics** (ABI 0.4) - sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi, atan2Pi - the eleven whose argument reduction is exact, and as of 2026-09-03 the **phase-3 set** (ABI 0.5) - sin, cos, tan of a radian argument, reduced against a generated 270,336-bit 2/pi with the cancellation measured per format rather than assumed, and sinh, cosh, tanh, asinh, acosh, atanh - all thirty-nine since ABI 0.6 completed Table 9.1 - and with it clause 9.5's augmented arithmetic, all seven reductions of 9.4, clause 5.12's character conversions and 9.7's payload operations - held identical to the model over 607,217 per-element checks (with 140,088 augmented pairs, 12,696 reductions and 20,819 character conversions beside them) and to **GNU MPFR over 739,234 cases with zero value and zero flag mismatches**; an XRT backend drives up to 64 compute units and has been exercised against a **four-tile hw_emu image with no card present**; a remote backend puts a tile behind a socket with the same bits (docs/REMOTE.md), over TCP or WebSocket, so a Windows client or a browser computes on a Linux-hosted card; and the four parsers that face untrusted bytes are fuzzed under sanitizers (`host/fuzz/`, opt-in). Reductions add the tree-aware multi-tile split, so a sum over four tiles returns what one tile returns. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt - as do C++, Rust, Julia, Go, C# and R, each on the platform and date docs/COMPATIBILITY.md records; Fortran reaches the same library through iso_c_binding and is the one example that prints no checksum line. **Validate the contract in your browser, nothing installed: https://loganw234.github.io/cft-fp256/** - the software backend compiled to WebAssembly, replaying the published vectors, the transcendental sets included since 2026-09-03, with a calculator panel that reaches every opcode, composed div/sqrt, all thirty-nine transcendentals, the augmented pairs, the scaled products and the character conversions; and a demos page at https://loganw234.github.io/cft-fp256/demos.html where the five contract workloads run in the browser on the same module bytes, each panel's SHA-256 chain checked against the C tool's - the zoom and orbits panels on their tools' program engine since 2026-09-07, when the sequencer's program API reached JavaScript |
 | `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |
 
-No physical card yet; card day is 2026-09-08, and docs/CARDDAY.md is
-the runbook, checked against today's library. The claim made so far is
-narrower and checkable: the RTL is bit-exact against a golden model
-that is itself proven against implementations sharing no code with
-it, through the same interfaces XRT drives on silicon.
+The card came up on 2026-09-08. Both card-day images reproduced every
+published case on silicon - 1,071,635 through one tile and through
+four - a soak repeated the matrix, the sets and the sequencer's orbit
+to the same bytes, and the revision-2 single closed with more margin
+than the pair before it and ran registers above 15 and the per-run
+bank on real hardware the same afternoon (docs/VALIDATION.md;
+docs/CARDDAY.md is the runbook as it was run; docs/BENCHMARKS.md has
+the measured throughput and what bounds it). The claim before that day
+was narrower and checkable - the RTL is bit-exact against a golden
+model that is itself proven against implementations sharing no code
+with it, through the same interfaces XRT drives on silicon - and the
+day confirmed it.
 
 ## Quickstart
 
@@ -249,8 +256,8 @@ do, it does bit-exactly, and the file names every gap that remains.
 
 ## Where this is going
 
-docs/ROADMAP.md, in one line each: v0.x puts this bitstream on the
-card and reproduces the vectors (card day is 2026-09-08); the
+docs/ROADMAP.md, in one line each: v0.x put this bitstream on the
+card and reproduced the vectors (done 2026-09-08); the
 sequencer with hardware-guaranteed deposition order already exists in
 RTL and the rounding attributes shipped with it; the third tier after
 the card is the same tile on an open Kintex-7 board - one tile at 46%

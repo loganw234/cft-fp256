@@ -49,7 +49,14 @@ memory model cannot find bugs in *when* a slave samples, in what a
 design does with an error response, or in a parameter combination
 nobody instantiates. Those need either a hostile driver or a reader.
 
-## v0.x - hardware bring-up (needs the Vitis box + card)
+## v0.x - hardware bring-up (done 2026-09-08: the card reproduces the vectors)
+
+**Done, 2026-09-08.** Both card-day images reproduced `vectors/out`
+exactly on the U50 - 1,071,635 cases through one tile and through
+four - with the run recorded (platform, XRT, shell, xclbin hashes, the
+commit) in docs/VALIDATION.md and docs/CARDDAY.md; throughput is
+measured in docs/BENCHMARKS.md. The gates below are kept as the record
+of how it was reached.
 
 Gates in docs/BRINGUP.md, in order: package_xo validates; hw_emu run
 of the kernel test pattern; timing closure at a reduced clock; first
@@ -2399,8 +2406,8 @@ PCIe path with a DMA engine and a driver, a toolchain that can build
 for that board, and a price - and outside the used Alveo market no
 candidate has all five, because the shelled, maintained, affordable
 accelerator card was a product of the 2017-2020 cloud-FPGA wave and
-the wave has receded. If card day goes well the design is validated,
-and the question that remains is reach. This plan buys reach by
+the wave has receded. Card day went well - 2026-09-08, the design is
+validated on silicon - and the question that remains is reach. This plan buys reach by
 dropping an assumption under three of the five requirements rather
 than any requirement itself: that a tile has to be a full-width
 datapath on a bus. The contract is about bits; throughput is a product

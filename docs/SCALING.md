@@ -224,7 +224,10 @@ hardware trees.
 buffers, so a call touches O(tiles) allocations and O(tiles) PCIe
 transfers. Device-resident buffers (`cft_alloc`) already avoid the
 per-call copy; at high tile counts they stop being an optimisation and
-become the only workable path.
+become the only workable path. Measured 2026-09-08 with the staging in
+place (docs/BENCHMARKS.md): every format and both tile counts sit at
+2.3 to 3.3 GB/s and four tiles barely move the number, so the bus is
+the wall long before the eight-tile interface limit above.
 
 ## What scales fine
 

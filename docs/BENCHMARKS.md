@@ -1,20 +1,20 @@
-# Benchmarks: the software tier, measured
+# Benchmarks: measured, in software and on the card
 
-This file holds the project's measured performance numbers. Today that
-means the SOFTWARE tier only - libcft's software backend against the
-libraries a prospective user could already run - because those are the
-only performance numbers that can currently be measured honestly:
+This file holds the project's measured performance numbers: libcft's
+software backend against the libraries a prospective user could
+already run, and - since 2026-09-08 - the Alveo U50 itself.
 
-- There is no card in the machine yet, so there are no hardware
-  numbers. When there are, they get measured under docs/CARDDAY.md's
-  gate 6 ("Throughput. Now, and not before, measure.") and recorded
-  here. Until then this repo publishes no projected hardware
-  throughput next to measured software throughput; the projection
-  lives in docs/SCALING.md and is labelled as one. As of 2026-09-02
-  that projection is no longer a bound calculated from the beat
-  geometry - `make cycles` measures cycles per beat on the RTL itself
-  (1.250 marginal, 36 fixed, every rung) - but cycles x period is
-  still a prediction, and it stays on that side of the line.
+- The hardware numbers were measured under docs/CARDDAY.md's step 6
+  ("Throughput. Now, and not before, measure."), on the day the first
+  card came up, and they measure `cft_run`: the path a first port
+  gets, which stages every operand across PCIe on each call. That is
+  the honest default and it is bus-bound, as the section below shows;
+  the pipeline's own rate needs a device-resident-buffer benchmark,
+  which is the next measurement, not a number this file guesses at.
+  The projection in docs/SCALING.md (`make cycles` measures 1.250
+  cycles per beat marginal and 36 fixed on the RTL; cycles x period
+  is the prediction) stays labelled as a projection; the measured
+  number is where it meets the bus.
 - Emulation produces no throughput numbers at all. hw_emu is an RTL
   simulation running many orders of magnitude below fabric speed; its
   wall clock measures the simulator. (Its cycle counts are real, and
@@ -57,6 +57,54 @@ bias - the fast-path cost of a realistic element (the generator and
 the reasoning are in cft_bench.c). Every measurement auto-repeats to
 at least 0.35 s. Cells still wobble a few percent between runs; read
 the ratios, not the third digit.
+
+## The card, measured (2026-09-08)
+
+Provenance: amd-arc-box (Gigabyte GA-X99-UD4, Xeon E5-2697 v4,
+Ubuntu 24.04, kernel 6.8.0-139, XRT 2.19.194, shell
+`xilinx_u50_gen3x16_xdma_base_5`, Gen3 x16 at full width); the
+card-day pair from ed752dd at 135 MHz (single sha256 3870fc43...,
+quad 496f8ac0...); `cft-bench -n 1048576 -t 1 --csv`, the software
+backend single-threaded on the same box first, then each image. The
+day's correctness record is docs/VALIDATION.md's card-day entry: the
+same images matched every published case, 1,071,635 through one tile
+and through four, before any of this was measured.
+
+`fma`, one million elements a call, elements per second:
+
+| format | software, one thread | single tile | four tiles |
+|---|---|---|---|
+| fp32 | 3.76 M (266 ns) | **141.8 M** (7.05 ns), 38x | **175.2 M** (5.71 ns), 47x |
+| fp64 | 3.24 M (309 ns) | **81.4 M** (12.3 ns), 25x | **75.5 M** (13.2 ns), 23x |
+| fp128 | 2.52 M (396 ns) | **40.3 M** (24.8 ns), 16x | **38.1 M** (26.3 ns), 15x |
+| fp256 | 1.74 M (575 ns) | **20.0 M** (50.0 ns), 11.5x | **25.9 M** (38.6 ns), 15x |
+
+`mul` and `add` sit within two percent of `fma` on the device at every
+format, and `abs` within one: the arithmetic is not what sets the
+time. Read the bench's `mb_per_s` column instead - every device row,
+every format, both tile counts, lands between 2.3 and 3.3 GB/s of
+staged traffic. That is the PCIe round trip of `cft_run`: three
+operand buffers in and one result out, per call, through XRT's
+host-memory staging. Against it the tile's own work is small - a
+million fp256 elements is about 9 ms of pipeline at 108 M beats/s, and
+the measured call takes 50 - so four tiles cannot show: they finish
+the same bus transfer with the same bus. The speed-ups above are real
+and they are the bus's, which is exactly what the bench's header said
+they would be.
+
+What the design rate looks like when the bus is taken out of the
+measurement is the next benchmark: device-resident buffers, filled
+once, then back-to-back `cft_run` calls on them (docs/SCALING.md item
+4 names the mechanism). Until it exists this file publishes no number
+for it.
+
+**The soak, the same day**, is the measurement that matters for the
+contract rather than for speed: on each image, five repetitions of the
+full device-test matrix agreed with the first; the published sets ran
+a second time, all matching; and the sequencer's reference orbit to
+2,000 iterations, deposited 32 steps a call, produced one checkpoint
+hash in ten runs on one tile, ten on four, and one on the software
+backend - the same bytes everywhere, which is the claim.
 
 ## Width inside the library
 
