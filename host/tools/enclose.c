@@ -226,7 +226,7 @@
  * round constants are derived from the cube roots of the primes.
  */
 #if !defined(_WIN32)
-#  define _POSIX_C_SOURCE 199309L
+#  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */
 #endif
 
 #include <stdio.h>

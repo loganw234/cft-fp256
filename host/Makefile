@@ -145,6 +145,15 @@ ifeq ($(OS),Windows_NT)
                 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 DOTNET_NOLOGO=1 \
                 DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                 $(if $(GOROOT),GOROOT="$(GOROOT)",)
+else ifeq ($(shell uname -s),Darwin)
+  # macOS (2026-09-09, an M2 MacBook): the shared library is a dylib
+  # with an @rpath install name, and everything else is the unix branch.
+  WINENV :=
+  SHLIB   := libcft.dylib
+  SHFLAGS := -dynamiclib -Wl,-install_name,@rpath/libcft.dylib
+  SHDEF   :=
+  PIC     := -fPIC -fvisibility=hidden
+  EXE     :=
 else
   WINENV :=
   SHLIB   := libcft.so
