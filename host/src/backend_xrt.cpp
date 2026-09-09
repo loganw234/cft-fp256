@@ -425,6 +425,188 @@ void stage(xrt::bo &bo, const uint8_t *src, size_t real_bytes,
     bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded_bytes, 0);
 }
 
+/* ====================================================================
+ * Device-resident buffers (cft.h's cft_alloc; backend.h's seam)
+ *
+ * WHAT A DEVICE COPY IS. Not "the buffer, on the card". Each compute
+ * unit's four AXI masters own one HBM pseudo-channel each (hw/link.cfg,
+ * hw/link_quad.cfg), so memory reachable by tile 1's `a` port is
+ * reachable by nothing else - not by tile 2's `a` port and not by tile
+ * 1's `b` port. A copy is therefore per (TILE, ROLE), and one host
+ * buffer feeding a four-tile run as `a` has four of them.
+ *
+ * WHAT A COPY HOLDS: exactly the WINDOW that tile was last asked for -
+ * its slice of the run, padded up to a whole 256-bit beat with zeros,
+ * which is precisely what stage() puts in a staging buffer today. Two
+ * consequences, and they are the design:
+ *
+ *   - the kernel argument is the copy ITSELF, at its own base address,
+ *     so nothing here needs an XRT SUB-BUFFER. That matters: a
+ *     sub-buffer's offset must satisfy the device's base-address
+ *     alignment, measured at 4096 bytes on the XRT this project builds
+ *     against (xrt_core::bo::alignment(), XRT 2.14.354), while
+ *     slice.h cuts at 32-byte beats. Binding a window at an offset the
+ *     runtime is entitled to round would be the one failure this
+ *     mechanism must not have, and holding the cuts to 4096 would mean
+ *     a different partition for resident runs than for staged ones -
+ *     two answers where the contract promises one. Per-tile slice
+ *     copies avoid the question entirely, and cost less HBM as well:
+ *     each tile holds its own quarter rather than the whole array.
+ *
+ *   - a copy is REUSED only when the window is the same one again.
+ *     That is the common case by construction - the same call in a
+ *     loop asks for the same n, the same format and the same tile
+ *     count, so every tile wants the window it already has - and when
+ *     it is not, the copy refills, which costs exactly what staging
+ *     costs and never more. There is no case in which residency is
+ *     slower than the staged path it replaces.
+ *
+ * WHO IS AUTHORITATIVE is cft.h's rule and this is its machinery:
+ * `gen` is bumped whenever the host mirror becomes the truth, a copy
+ * remembers the `gen` it was filled at, and a copy a run WROTE is
+ * `dirty` until cftx_buffer_from_device carries it home. device.c
+ * calls that itself before the buffer can be read, so a caller who
+ * skips it pays the transfer rather than reading the run before last.
+ * ==================================================================== */
+
+/* Role index (backend.h's CFT_ROLE_*) to kernel argument id. */
+constexpr int ROLE_ARG[4] = {ARG_A, ARG_B, ARG_C, ARG_D};
+
+struct BufCopy {
+    xrt::bo  bo;
+    size_t   off    = 0;      /* first byte of the buffer this holds */
+    size_t   real   = 0;      /* bytes of the caller's data in it */
+    size_t   padded = 0;      /* bytes allocated: whole beats */
+    uint64_t gen    = 0;      /* the buffer generation it was filled at */
+    bool     live   = false;  /* the bo exists and the window means
+                               * something */
+    bool     dirty  = false;  /* a run wrote this window and the mirror
+                               * has not been told */
+};
+
+struct Buf {
+    Dev                 *D = nullptr;
+    uint8_t             *host = nullptr;   /* device.c owns this */
+    size_t               bytes = 0;
+    /* Bumped every time the mirror becomes the truth. Starts at 1 so
+     * that a copy's zero-initialised `gen` can never be mistaken for
+     * current. */
+    uint64_t             gen = 1;
+    std::vector<BufCopy> copies;           /* tiles * 4, [t * 4 + role] */
+    uint64_t             resident_binds = 0, staged_binds = 0;
+    std::string          why;
+};
+
+/* Carry one copy's window home. The whole copy is synced and only the
+ * real bytes are written into the mirror: the pad is beat padding this
+ * file put there and is nobody's data. */
+void buf_flush(Buf &B, BufCopy &c)
+{
+    if (!c.dirty)
+        return;
+    c.bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, c.padded, 0);
+    std::memcpy(B.host + c.off, c.bo.map<uint8_t *>(), c.real);
+    c.dirty = false;
+}
+
+/* Bind one operand of one slice, or decline.
+ *
+ * Returns the buffer object to hand the kernel, or nullptr to say
+ * "stage this one from host memory as before" - which is never wrong,
+ * only slower, and is what every failure here degrades to.
+ *
+ * `output` is the D role: its contents before the run are nobody's
+ * business, so a window that matches binds whatever generation it was
+ * filled at, and a fresh one is not filled at all. */
+xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
+                  size_t real, size_t padded, bool output)
+{
+    if (!B.D || tile >= B.D->tiles.size() || role < 0 || role > 3)
+        return nullptr;
+
+    BufCopy &c = B.copies[tile * 4 + static_cast<size_t>(role)];
+    const bool same_window =
+        c.live && c.off == off && c.real == real && c.padded == padded;
+
+    if (same_window && (output || c.gen == B.gen)) {
+        B.resident_binds++;
+        return &c.bo;
+    }
+
+    /* Whatever a previous run wrote into this copy has to reach the
+     * mirror before the window is repurposed OR the binding is given
+     * up on, or the bytes are simply lost - the one place in this file
+     * where a performance path could silently drop a result. It
+     * happens BEFORE the decision to decline for exactly that reason:
+     * a declined output is staged instead, and the staged path writes
+     * the mirror itself when the run finishes, so this copy's older
+     * window must land first or it would overwrite the newer bytes on
+     * the next cft_buffer_from_device. */
+    if (c.dirty)
+        buf_flush(B, c);
+
+    if (off > B.bytes || real > B.bytes - off) {
+        /* device.c's registry already refuses a window that overruns,
+         * so reaching this means the slice arithmetic and the lookup
+         * disagree. Stage, and say so rather than serve short bytes. */
+        B.why = "the window runs past the end of the buffer";
+        B.staged_binds++;
+        return nullptr;
+    }
+
+    if (!c.live || c.padded != padded) {
+        try {
+            c.live = false;
+            c.bo = xrt::bo();          /* release before requesting */
+            c.bo = xrt::bo(B.D->dev, padded, xrt::bo::flags::normal,
+                           B.D->tiles[tile].k.group_id(ROLE_ARG[role]));
+        } catch (const std::exception &e) {
+            /* An HBM channel is 256 MB a tile. A buffer that does not
+             * fit one is staged in slices, exactly as a plain host
+             * pointer is, and the run still gives the right answer. */
+            c.live = false;
+            B.why = std::string("no device memory for this window (each "
+                                "tile's channel is 256 MB): ") + e.what();
+            if (B.why.size() > 200)
+                B.why.resize(200);
+            B.staged_binds++;
+            return nullptr;
+        }
+    }
+    c.off = off; c.real = real; c.padded = padded; c.live = true;
+    c.dirty = false;
+    c.gen = B.gen;
+
+    if (!output) {
+        auto *p = c.bo.map<uint8_t *>();
+        std::memcpy(p, B.host + off, real);
+        if (padded > real)
+            std::memset(p + real, 0, padded - real);
+        c.bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded, 0);
+        B.staged_binds++;
+        B.why = same_window
+                    ? "the mirror was republished, so this copy refilled"
+                    : "first use of this window on this tile and role";
+    } else {
+        /* Nothing crossed the bus: an output copy is written by the
+         * tile, and allocating one is not a transfer. */
+        B.resident_binds++;
+    }
+    return &c.bo;
+}
+
+/* After a successful run, the copies the tiles wrote hold bytes the
+ * mirror does not. Only ever called on ST_OK: a failed run's output is
+ * not valid, and marking it authoritative would let a later
+ * cftx_buffer_from_device carry a bus fault's leavings into the
+ * caller's array. */
+void buf_mark_written(Buf &B, size_t tile, int role)
+{
+    BufCopy &c = B.copies[tile * 4 + static_cast<size_t>(role)];
+    if (c.live)
+        c.dirty = true;
+}
+
 }  // namespace
 
 extern "C" const char *cftx_last_error(void)
@@ -633,9 +815,110 @@ extern "C" void cftx_close(void *hw)
     delete static_cast<Dev *>(hw);
 }
 
+/* ---- the buffer seam (backend.h) ---------------------------------- */
+
+extern "C" int cftx_buffer_create(void *hw, void *host, size_t bytes,
+                                  void **out)
+{
+    if (!hw || !host || bytes == 0 || !out)
+        return ST_INVALID_ARGUMENT;
+    *out = nullptr;
+    Dev &D = *static_cast<Dev *>(hw);
+    Buf *B = new (std::nothrow) Buf();
+    if (!B)
+        return ST_OUT_OF_MEMORY;
+    B->D = &D;
+    B->host = static_cast<uint8_t *>(host);
+    B->bytes = bytes;
+    try {
+        /* Sized once and never resized, because buf_bind hands out a
+         * pointer INTO this vector and a reallocation would leave the
+         * kernel holding a dangling one. The tile count cannot change
+         * during a device's life. */
+        B->copies.resize(D.tiles.size() * 4);
+    } catch (const std::exception &) {
+        delete B;
+        return ST_OUT_OF_MEMORY;
+    }
+    *out = B;
+    return ST_OK;
+}
+
+extern "C" void cftx_buffer_destroy(void *buf)
+{
+    /* Whatever a run wrote and nobody read back goes with it, which is
+     * what cft_buffer_free means and what cft.h says. */
+    delete static_cast<Buf *>(buf);
+}
+
+extern "C" int cftx_buffer_to_device(void *buf)
+{
+    if (!buf)
+        return ST_INVALID_ARGUMENT;
+    Buf &B = *static_cast<Buf *>(buf);
+    /* The mirror is the truth: every copy is stale and every claim a
+     * run had on the contents is dropped. Nothing moves - each copy
+     * refills at its next binding, for the window that binding needs,
+     * rather than for a window nobody may ask for again. */
+    B.gen++;
+    for (auto &c : B.copies)
+        c.dirty = false;
+    return ST_OK;
+}
+
+extern "C" int cftx_buffer_from_device(void *buf)
+{
+    if (!buf)
+        return ST_INVALID_ARGUMENT;
+    Buf &B = *static_cast<Buf *>(buf);
+    bool moved = false;
+    try {
+        for (auto &c : B.copies) {
+            if (!c.dirty)
+                continue;
+            buf_flush(B, c);
+            moved = true;
+        }
+    } catch (const std::exception &e) {
+        set_err(std::string("reading a resident buffer back: ") + e.what());
+        return ST_INTERNAL;
+    }
+    /* Only when something actually came back. A no-op read must not
+     * invalidate the input copies, or a caller who calls this after
+     * every run - which is the correct thing to do - would refill them
+     * every time and never see the rate this exists for. */
+    if (moved)
+        B.gen++;
+    return ST_OK;
+}
+
+extern "C" void cftx_buffer_stat(void *buf, int *resident,
+                                 int *device_authority,
+                                 uint64_t *resident_binds,
+                                 uint64_t *staged_binds,
+                                 char *why, size_t why_bytes)
+{
+    if (!buf)
+        return;
+    Buf &B = *static_cast<Buf *>(buf);
+    int live = 0, dirty = 0;
+    for (const auto &c : B.copies) {
+        if (c.live)   live = 1;
+        if (c.dirty)  dirty = 1;
+    }
+    if (resident)         *resident = live;
+    if (device_authority) *device_authority = dirty;
+    if (resident_binds)   *resident_binds = B.resident_binds;
+    if (staged_binds)     *staged_binds = B.staged_binds;
+    if (why && why_bytes) {
+        std::snprintf(why, why_bytes, "%s", B.why.c_str());
+    }
+}
+
 extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
                         const void *a, const void *b, const void *c,
-                        void *d, size_t n, uint32_t *flags, uint32_t *bus)
+                        void *d, size_t n, const cft_bindings *bind,
+                        uint32_t *flags, uint32_t *bus)
 {
     Dev &D = *static_cast<Dev *>(hw);
     g_err.clear();
@@ -678,19 +961,53 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     std::vector<cft_slice> slices(ntiles);
     slices.resize(cft_plan_slices(n, esz, ntiles, slices.data()));
 
+    /* Which buffer object each of this slice's four operands is bound
+     * to. A null entry means "the tile's own staging buffer", which is
+     * what every operand was before resident buffers existed - so a
+     * run with no bindings at all walks exactly the old path. */
+    struct SliceBind { xrt::bo *bo[4]; };
+    std::vector<SliceBind> sb(slices.size());
+    for (auto &e : sb) { e.bo[0] = e.bo[1] = e.bo[2] = e.bo[3] = nullptr; }
+
     /* Staging touches only host-visible buffers and starts nothing, so
      * a failure here leaves every compute unit idle and the device
-     * perfectly reusable. */
+     * perfectly reusable. Binding a resident buffer allocates and may
+     * fill, which is the same kind of work and the same guarantee. */
     try {
-        for (const auto &s : slices) {
+        const uint8_t *src[4] = {pa, pb, pc, nullptr};
+        for (size_t i = 0; i < slices.size(); i++) {
+            const cft_slice &s = slices[i];
             Tile &tile = D.tiles[s.tile];
-            ensure_capacity(D, tile, s.padded * esz);
-            stage(tile.a, pa ? pa + s.first_elem * esz : nullptr,
-                  s.real * esz, s.padded * esz);
-            stage(tile.b, pb ? pb + s.first_elem * esz : nullptr,
-                  s.real * esz, s.padded * esz);
-            stage(tile.c, pc ? pc + s.first_elem * esz : nullptr,
-                  s.real * esz, s.padded * esz);
+            size_t staged_need = 0;
+
+            for (int r = 0; r < 4; r++) {
+                if (!bind || !bind->buf[r])
+                    continue;
+                Buf &B = *static_cast<Buf *>(bind->buf[r]);
+                sb[i].bo[r] = buf_bind(B, s.tile, r,
+                                       bind->off[r] + s.first_elem * esz,
+                                       s.real * esz, s.padded * esz,
+                                       r == CFT_ROLE_D);
+            }
+            /* The tile's own buffers are grown only for what is left,
+             * and not at all when every operand is resident: one cap
+             * still covers all four, so asking for the run's size when
+             * nothing needs it would take HBM from the copies. */
+            for (int r = 0; r < 4; r++)
+                if (!sb[i].bo[r])
+                    staged_need = s.padded * esz;
+            ensure_capacity(D, tile, staged_need);
+
+            xrt::bo *tb[4] = {&tile.a, &tile.b, &tile.c, &tile.d};
+            for (int r = 0; r < CFT_ROLE_D; r++) {
+                if (sb[i].bo[r])
+                    continue;                     /* already on the device */
+                stage(*tb[r], src[r] ? src[r] + s.first_elem * esz : nullptr,
+                      s.real * esz, s.padded * esz);
+            }
+            for (int r = 0; r < 4; r++)
+                if (!sb[i].bo[r])
+                    sb[i].bo[r] = tb[r];
         }
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging operands");
@@ -721,11 +1038,13 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     int status = ST_OK;
     std::string err;
 
-    for (const auto &s : slices) {
+    for (size_t i = 0; i < slices.size(); i++) {
+        const cft_slice &s = slices[i];
         try {
             Tile &tile = D.tiles[s.tile];
             runs.push_back(tile.k(mode, static_cast<uint64_t>(s.padded),
-                                  tile.a, tile.b, tile.c, tile.d));
+                                  *sb[i].bo[0], *sb[i].bo[1],
+                                  *sb[i].bo[2], *sb[i].bo[3]));
         } catch (const std::exception &e) {
             err = std::string("starting tile ") + std::to_string(s.tile) +
                   ": " + e.what();
@@ -841,8 +1160,19 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     }
 
     try {
-        for (const auto &s : slices) {
+        for (size_t i = 0; i < slices.size(); i++) {
+            const cft_slice &s = slices[i];
             Tile &tile = D.tiles[s.tile];
+            /* A RESIDENT output does not come back. The bytes are on
+             * the device, that copy is now the authority, and the
+             * caller collects them with cft_buffer_from_device when it
+             * wants them - which is the whole saving on this side of
+             * the call, and the reason the rule in cft.h exists. */
+            if (bind && bind->buf[CFT_ROLE_D] && sb[i].bo[3] != &tile.d) {
+                buf_mark_written(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
+                                 s.tile, CFT_ROLE_D);
+                continue;
+            }
             tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, s.padded * esz, 0);
             std::memcpy(pd + s.first_elem * esz, tile.d.map<uint8_t *>(),
                         s.real * esz);
@@ -882,6 +1212,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                                 uint32_t max_deposits,
                                 const void *a, const void *b, const void *c,
                                 void *deposits, uint32_t *counts, size_t n,
+                                const cft_bindings *bind,
                                 uint32_t *flags, uint32_t *bus)
 {
     if (!hw || !image || image_bytes == 0 || !io)
@@ -993,19 +1324,49 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     const size_t sin_pad    = sin_bytes  ? beat_round(sin_bytes)  : 32u;
     const size_t sout_pad   = sout_bytes ? beat_round(sout_bytes) : 32u;
 
-    /* One cap covers a, b, c and d together, so the operand buffers
-     * come out as large as the deposit window - max_deposits times
-     * bigger than they need to be. That is the price of leaving the
-     * elementwise path's allocator alone for v1; the fix when it bites
-     * is a cap per buffer rather than one for four, not a second
-     * allocator. */
-    const size_t need = std::max(opnd_bytes, dep_bytes);
-
     Tile &tile = D.tiles[0];
+
+    /* Which of the four operand-shaped buffers came from cft_alloc.
+     * The image, the bank, the counts and the two scratch blocks are
+     * staged always: none of them is operand-shaped, the image and the
+     * bank do not grow with n at all, and the counts are four bytes an
+     * element whatever the format. */
+    xrt::bo *ob[4] = {nullptr, nullptr, nullptr, nullptr};
 
     /* Staging touches only host-visible buffers and starts nothing, so
      * a failure here leaves the compute unit idle and reusable. */
     try {
+        if (bind) {
+            const void *src[3] = {a, b, c};
+            for (int r = 0; r < 3; r++)
+                if (bind->buf[r] && src[r])
+                    ob[r] = buf_bind(*static_cast<Buf *>(bind->buf[r]),
+                                     0, r, bind->off[r], real_bytes,
+                                     opnd_bytes, false);
+            if (bind->buf[CFT_ROLE_D] && deposits && max_deposits)
+                ob[3] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
+                                 0, CFT_ROLE_D, bind->off[CFT_ROLE_D],
+                                 n * max_deposits * esz, dep_bytes, true);
+        }
+
+        /* One cap covers a, b, c and d together, so the operand
+         * buffers come out as large as the deposit window -
+         * max_deposits times bigger than they need to be. That is the
+         * price of leaving the elementwise path's allocator alone for
+         * v1; the fix when it bites is a cap per buffer rather than
+         * one for four, not a second allocator.
+         *
+         * What residency changes is only which of the four still need
+         * it: a run whose operands are all resident asks for the
+         * deposit window alone. The d buffer gets a beat whatever
+         * happens, because a program with max_deposits of zero is
+         * legal and XRT will not submit a run with an argument
+         * unbound. */
+        size_t need = 0;
+        if (!ob[0] || !ob[1] || !ob[2])
+            need = opnd_bytes;
+        if (!ob[3])
+            need = std::max(need, std::max(dep_bytes, static_cast<size_t>(32)));
         ensure_capacity(D, tile, need);
         ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, img_bytes);
         ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, cnt_bytes);
@@ -1017,9 +1378,21 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT,
                        sout_pad);
         }
-        stage(tile.a, static_cast<const uint8_t *>(a), real_bytes, opnd_bytes);
-        stage(tile.b, static_cast<const uint8_t *>(b), real_bytes, opnd_bytes);
-        stage(tile.c, static_cast<const uint8_t *>(c), real_bytes, opnd_bytes);
+        if (!ob[0])
+            stage(tile.a, static_cast<const uint8_t *>(a), real_bytes,
+                  opnd_bytes);
+        if (!ob[1])
+            stage(tile.b, static_cast<const uint8_t *>(b), real_bytes,
+                  opnd_bytes);
+        if (!ob[2])
+            stage(tile.c, static_cast<const uint8_t *>(c), real_bytes,
+                  opnd_bytes);
+        {
+            xrt::bo *tb[4] = {&tile.a, &tile.b, &tile.c, &tile.d};
+            for (int r = 0; r < 4; r++)
+                if (!ob[r])
+                    ob[r] = tb[r];
+        }
         /* The image WHOLE, whatever it holds. A BANK_EXT image is a
          * header and an instruction stream and has no constant section
          * to send - cft_program_load sized it that way and kept the
@@ -1085,14 +1458,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * flags say BANK_EXT or SCRATCH_IO. */
         xrt::run r = (D.version >= SCRATCH_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
-                            tile.a, tile.b, tile.c, tile.d,
+                            *ob[0], *ob[1], *ob[2], *ob[3],
                             tile.pg, tile.cn, tile.bk, tile.si, tile.so)
                    : (D.version >= BANK_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
-                            tile.a, tile.b, tile.c, tile.d,
+                            *ob[0], *ob[1], *ob[2], *ob[3],
                             tile.pg, tile.cn, tile.bk)
                    : tile.k(mode, static_cast<uint64_t>(n),
-                            tile.a, tile.b, tile.c, tile.d,
+                            *ob[0], *ob[1], *ob[2], *ob[3],
                             tile.pg, tile.cn);
         ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
         if (st != ERT_CMD_STATE_COMPLETED) {
@@ -1174,11 +1547,22 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * the transfer is skipped rather than issued for no bytes -
          * the memcpy below is already guarded and a zero-length DMA is
          * at best a no-op that XRT is under no obligation to define. */
-        if (dep_bytes)
-            tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, dep_bytes, 0);
-        if (deposits && max_deposits)
-            std::memcpy(deposits, tile.d.map<uint8_t *>(),
-                        n * max_deposits * esz);
+        /* A RESIDENT deposit window does not come back: the tile wrote
+         * it, that copy is the authority now, and the caller collects
+         * it with cft_buffer_from_device. Every slot is still written
+         * - the untouched ones as +0, which SEQUENCER.md makes
+         * normative - so what comes home later is the whole window and
+         * not a partial one. */
+        if (ob[3] != &tile.d) {
+            buf_mark_written(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]), 0,
+                             CFT_ROLE_D);
+        } else {
+            if (dep_bytes)
+                tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, dep_bytes, 0);
+            if (deposits && max_deposits)
+                std::memcpy(deposits, tile.d.map<uint8_t *>(),
+                            n * max_deposits * esz);
+        }
         tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, cnt_bytes, 0);
         if (counts)
             std::memcpy(counts, tile.cn.map<uint8_t *>(), n * 4);
@@ -1222,6 +1606,7 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
                            const void *a,
                            const size_t *lo, const size_t *hi,
                            size_t nranges, void *partials,
+                           const cft_bindings *bind,
                            uint32_t *flags, uint32_t *bus)
 {
     if (!hw || !a || !lo || !hi || !partials || nranges == 0)
@@ -1279,14 +1664,30 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         std::vector<xrt::run> runs;
         runs.reserve(wave);
 
+        /* Which object carries this wave's `a` for each tile: the
+         * resident buffer's own copy of that range, or the tile's
+         * staging buffer. b, c and d are the tile's either way - b and
+         * c are zeros this file makes up, and one element of d is the
+         * answer - so `a` is the only operand a reduction can save,
+         * which is also the only one that carries the whole vector. */
+        std::vector<xrt::bo *> wa(wave, nullptr);
+
         try {
             for (size_t j = 0; j < wave; j++) {
                 const size_t k = base + j;
                 const size_t m = hi[k] - lo[k];
                 const size_t padded = ((m + epb - 1) / epb) * epb;
                 Tile &tile = D.tiles[j];
+                if (bind && bind->buf[CFT_ROLE_A])
+                    wa[j] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_A]),
+                                     j, CFT_ROLE_A,
+                                     bind->off[CFT_ROLE_A] + lo[k] * esz,
+                                     m * esz, padded * esz, false);
                 ensure_capacity(D, tile, padded * esz);
-                stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
+                if (!wa[j]) {
+                    stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
+                    wa[j] = &tile.a;
+                }
                 /* b and c are unread by a sum, but the engine streams
                  * all three - one read enable feeds all three FIFOs -
                  * so they must be real, readable memory of the same
@@ -1308,7 +1709,7 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
             try {
                 Tile &tile = D.tiles[j];
                 runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
-                                      tile.a, tile.b, tile.c, tile.d));
+                                      *wa[j], tile.b, tile.c, tile.d));
             } catch (const std::exception &e) {
                 err = std::string("starting tile ") + std::to_string(j) +
                       " for a reduction: " + e.what();

@@ -77,6 +77,17 @@ struct cft_device {
      * running, so that the scaffolding's flags reach the pass's own
      * flags_out and not the word above. See cft_flags_mute. */
     int         flags_muted;
+    /* Every live cft_buffer this device allocated, newest first.
+     *
+     * The registry that makes cft.h's "the library recognises its own
+     * buffers" true. It is a LIST and the lookup is a linear scan,
+     * because the thing being counted is how many cft_alloc'd buffers
+     * one program holds at once - three or four in every use this API
+     * has - and a hash table keyed on address ranges would be more
+     * code, more state to keep correct, and no faster at that size.
+     * If a caller ever holds hundreds, the scan is the place to look
+     * and the fix is local to this file. */
+    struct cft_buffer *bufs;
 };
 
 /* Which CAPS opcode-group bit covers an opcode. The groups exist
@@ -119,10 +130,127 @@ static int reduce_helper_group(int op)
 }
 
 struct cft_buffer {
-    cft_device *dev;
+    cft_device *dev;            /* NULL once the device has been closed */
     size_t      bytes;
-    void       *data;
+    void       *data;           /* the host mirror; this file owns it */
+    void       *dbuf;           /* the backend's object, or NULL when the
+                                 * backend keeps no device copies */
+    struct cft_buffer *next;    /* the device's registry, newest first */
 };
+
+/* ---------------------------------------------------------------
+ * The buffer registry (cft.h's cft_alloc, docs/HOSTAPI.md)
+ *
+ * Everything below turns "the caller handed cft_run a pointer" into
+ * "that pointer is byte k of this device-resident buffer", which is
+ * the whole of what recognition means. It lives here, in C, and not
+ * in the device backend, for the reason slice.h lives here: the
+ * arithmetic that decides which bytes a run reads is testable without
+ * a card, and a backend should only be asked what a memory group is.
+ * --------------------------------------------------------------- */
+
+/* Does [p, p + bytes) lie wholly inside a live buffer of this device?
+ *
+ * WHOLLY, and that is not fussiness. A device copy is exactly as long
+ * as the buffer, so a run that reached past the end would be served
+ * bytes nobody wrote - which is the one failure mode this whole
+ * mechanism must not have. A window that overruns is therefore not
+ * recognised at all, and is staged from host memory exactly as any
+ * other pointer is: the same answer the caller would have got before
+ * buffers existed, including the same out-of-bounds read if that is
+ * what they asked for. */
+static cft_buffer *buf_find(cft_device *dev, const void *p, size_t bytes,
+                            size_t *off)
+{
+    cft_buffer *b;
+    const uint8_t *q = (const uint8_t *)p;
+
+    if (!dev || !p)
+        return NULL;
+    for (b = dev->bufs; b; b = b->next) {
+        const uint8_t *base = (const uint8_t *)b->data;
+        if (!b->dbuf || !base)
+            continue;
+        /* Comparing pointers into different objects is not defined by
+         * C, which is why this compares INTEGERS: the arithmetic is
+         * the same and the language is not being asked a question it
+         * declines to answer. */
+        {
+            uintptr_t bi = (uintptr_t)base, qi = (uintptr_t)q;
+            if (qi < bi || qi - bi > b->bytes)
+                continue;
+            if (bytes > b->bytes - (qi - bi))
+                continue;
+            if (off)
+                *off = (size_t)(qi - bi);
+            return b;
+        }
+    }
+    return NULL;
+}
+
+/* Bring a buffer's mirror up to date before anything READS it.
+ *
+ * The authority rule in cft.h says a caller should call
+ * cft_buffer_from_device after a run wrote the buffer. This is what
+ * happens when the caller does not: the library does it, here, before
+ * the bytes could be misread - whether the reader is the tile (the
+ * buffer is about to be an input) or this file itself (9.4's infinity
+ * scan walks the caller's array on the host). Breaking the rule costs
+ * the round trip; it never costs the answer. */
+static void buf_sync_in(cft_device *dev, const void *p, size_t bytes)
+{
+    cft_buffer *b;
+    (void)bytes;
+    if (!dev || !p)
+        return;
+    /* Deliberately NOT buf_find. That one demands the whole window fit,
+     * because a window that overruns must not be BOUND; this one only
+     * has to decide whether the mirror about to be read is stale, and
+     * the answer to that is the same whether the caller's length is
+     * sensible or not. A buffer whose start this points into gets
+     * brought home, and an overrunning run then reads a current mirror
+     * and whatever is past it - which is the caller's own bug, not a
+     * stale answer this library handed back. */
+    for (b = dev->bufs; b; b = b->next) {
+        uintptr_t bi, qi;
+        if (!b->dbuf || !b->data)
+            continue;
+        bi = (uintptr_t)b->data;
+        qi = (uintptr_t)p;
+        if (qi < bi || qi - bi > b->bytes)
+            continue;
+#ifdef CFT_ENABLE_XRT
+        (void)cftx_buffer_from_device(b->dbuf);
+#endif
+        return;
+    }
+}
+
+#ifdef CFT_ENABLE_XRT
+static void bind_clear(cft_bindings *bd)
+{
+    int i;
+    for (i = 0; i < 4; i++) {
+        bd->buf[i] = NULL;
+        bd->off[i] = 0;
+    }
+}
+
+static void bind_role(cft_device *dev, cft_bindings *bd, int role,
+                      const void *p, size_t bytes)
+{
+    size_t off = 0;
+    cft_buffer *b;
+    if (!p || bytes == 0)
+        return;
+    b = buf_find(dev, p, bytes, &off);
+    if (!b)
+        return;
+    bd->buf[role] = b->dbuf;
+    bd->off[role] = off;
+}
+#endif
 
 /* ---------------------------------------------------------------
  * Static descriptions
@@ -348,10 +476,26 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
 {
 #ifdef CFT_ENABLE_XRT
     if (dev && dev->backend == CFT_BACKEND_XRT) {
+        cft_bindings bd;
+        size_t esz = cft_format_size((cft_format)fmt);
+        bind_clear(&bd);
+        /* The three streams and the deposit window. `counts` is four
+         * bytes an element whatever the format and the image and bank
+         * do not grow with n at all, so none of them is worth a
+         * device copy - backend.h says so beside the signature. */
+        buf_sync_in(dev, a, n * esz);
+        buf_sync_in(dev, b, n * esz);
+        buf_sync_in(dev, c, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_B, b, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_C, c, n * esz);
+        if (max_deposits)
+            bind_role(dev, &bd, CFT_ROLE_D, deposits,
+                      n * max_deposits * esz);
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,
-                                flags, bus);
+                                &bd, flags, bus);
     }
 #endif
 #ifndef CFT_NO_REMOTE
@@ -375,6 +519,33 @@ CFT_API void cft_close(cft_device *dev)
 {
     if (!dev)
         return;
+    /* Release every live buffer's DEVICE side before the device goes,
+     * and unlink it from the handle that is about to stop existing.
+     *
+     * The buffer itself survives as plain host memory: its mirror is
+     * this file's allocation and cft_buffer_data still answers,
+     * cft_buffer_free is still the way to release it, and the two
+     * sync calls become the no-ops they are on a backend without
+     * device memory. That keeps the promise cft_close() and
+     * cft_buffer_free() have always made about order and NULLs -
+     * closing first is allowed and is not a use-after-free - and it is
+     * the only ordering a language binding with a garbage collector
+     * can actually guarantee. */
+    {
+        cft_buffer *b = dev->bufs;
+        while (b) {
+            cft_buffer *next = b->next;
+#ifdef CFT_ENABLE_XRT
+            if (b->dbuf)
+                cftx_buffer_destroy(b->dbuf);
+#endif
+            b->dbuf = NULL;
+            b->dev  = NULL;
+            b->next = NULL;
+            b = next;
+        }
+        dev->bufs = NULL;
+    }
 #ifdef CFT_ENABLE_XRT
     if (dev->hw && dev->backend == CFT_BACKEND_XRT)
         cftx_close(dev->hw);
@@ -494,6 +665,17 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
     c.seq_features   = dev->seq.features;
     /* Appended in ABI 0.10, on the same terms again. */
     c.max_scratch    = dev->seq.max_scratch;
+    /* And in ABI 0.11. Answered from which BACKEND this is, not from
+     * anything a device told us: the software backend's cft_alloc is
+     * a host allocation, a remote handle's buffers stay on the client
+     * (docs/REMOTE.md), and only the XRT backend keeps device copies.
+     * A build without XRT has no such backend at all and answers 0
+     * everywhere, which is exactly true of it. */
+#ifdef CFT_ENABLE_XRT
+    c.buffers_resident = (dev->backend == CFT_BACKEND_XRT) ? 1 : 0;
+#else
+    c.buffers_resident = 0;
+#endif
 
     if (want > sizeof c)
         want = sizeof c;
@@ -630,10 +812,24 @@ CFT_API cft_status cft_run(cft_device *dev,
     if (dev->backend == CFT_BACKEND_XRT) {
         uint32_t fl = 0;
         cft_status st;
+        cft_bindings bd;
+        bind_clear(&bd);
+        /* Inputs first: a buffer a previous run wrote and nobody has
+         * read back is brought home before it is fed in, so the rule
+         * in cft.h costs a caller who ignores it time and not bits.
+         * `d` needs none of this - it is written, not read, and the
+         * backend flushes a device copy it is about to repurpose. */
+        buf_sync_in(dev, a, n * esz);
+        buf_sync_in(dev, b, n * esz);
+        buf_sync_in(dev, c, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_B, b, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_C, c, n * esz);
+        bind_role(dev, &bd, CFT_ROLE_D, d, n * esz);
         backend_call();
         st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
                                              (int)rnd, a, b, c, d, n,
-                                             &fl, bus_out);
+                                             &bd, &fl, bus_out);
         if (st == CFT_OK)
             cft_flags_emit(dev, fl, flags_out);
         return st;
@@ -819,6 +1015,14 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
 
+    /* Before ANY path below, because two of them read the caller's
+     * array on the host: the composed sumSquare and sumAbs walk it
+     * for 9.4's infinity override, and the software backend reads all
+     * of it. A buffer whose last writer was a run has a stale mirror
+     * until this brings it home. */
+    buf_sync_in(dev, a, n * esz);
+    buf_sync_in(dev, b, n * esz);
+
     /* sumSquare and sumAbs are COMPOSITIONS of what is already here,
      * and are implemented as such rather than as a second tree walker.
      * 754-2019 9.4 defines them as sums of squares and of magnitudes;
@@ -933,10 +1137,18 @@ CFT_API cft_status cft_reduce(cft_device *dev,
             if (!partials)
                 return CFT_ERR_OUT_OF_MEMORY;
 
-            backend_call();
-            st = (cft_status)cftx_reduce(dev->hw, (int)op, (int)fmt,
-                                         (int)rnd, a, lo, hi, nr,
-                                         partials, &fl, bus_out);
+            /* One operand and one role: a reduction reads `a` and
+             * writes one element per range into `partials`, which is
+             * this file's own allocation and never resident. */
+            {
+                cft_bindings bd;
+                bind_clear(&bd);
+                bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
+                backend_call();
+                st = (cft_status)cftx_reduce(dev->hw, (int)op, (int)fmt,
+                                             (int)rnd, a, lo, hi, nr,
+                                             partials, &bd, &fl, bus_out);
+            }
             if (st != CFT_OK) {
                 free(partials);
                 return st;
@@ -992,9 +1204,18 @@ CFT_API cft_status cft_reduce(cft_device *dev,
 /* ---------------------------------------------------------------
  * Buffers
  *
- * On the software backend these are ordinary allocations and the sync
- * calls do nothing, which is the whole point: code written against
- * this API stays portable to the device backend without a second path.
+ * On a backend with no device memory these are ordinary allocations
+ * and the sync calls do nothing, which is the whole point: code
+ * written against this API stays portable to the device backend
+ * without a second path.
+ *
+ * On the XRT backend the mirror allocated here is still the caller's
+ * pointer and still what cft_buffer_data returns - the device copies
+ * live behind buf->dbuf and are the backend's business - so nothing a
+ * caller can observe about cft_buffer_data changed when they arrived.
+ * cft.h states the authority rule between the two; this file's part
+ * of it is buf_sync_in() above, which enforces it on the caller's
+ * behalf at every point where the mirror is about to be read.
  * --------------------------------------------------------------- */
 
 CFT_API cft_status cft_alloc(cft_device *dev, size_t bytes, cft_buffer **out)
@@ -1017,6 +1238,18 @@ CFT_API cft_status cft_alloc(cft_device *dev, size_t bytes, cft_buffer **out)
     }
     buf->dev   = dev;
     buf->bytes = bytes;
+#ifdef CFT_ENABLE_XRT
+    /* The backend's side, if this device has one. NO device memory is
+     * taken here: a copy is per (tile, role) and is made on first use
+     * as that role, when the window it has to hold is finally known.
+     * A failure to create the object is not a failure to allocate -
+     * the buffer works, it simply stages like any other pointer - so
+     * it is not reported as one. */
+    if (dev->backend == CFT_BACKEND_XRT && dev->hw)
+        (void)cftx_buffer_create(dev->hw, buf->data, bytes, &buf->dbuf);
+#endif
+    buf->next = dev->bufs;
+    dev->bufs = buf;
     *out = buf;
     return CFT_OK;
 }
@@ -1026,20 +1259,111 @@ CFT_API void *cft_buffer_data(cft_buffer *buf)
     return buf ? buf->data : NULL;
 }
 
+/* The mirror is the truth from here.
+ *
+ * On a device backend this MOVES NOTHING: it marks every device copy
+ * stale, and each refills from the mirror the next time it is bound,
+ * for the window that binding actually needs. Pushing eagerly would
+ * mean pushing a whole buffer into every tile's channel - a tile
+ * cannot read another tile's memory, so "publish" would be four
+ * transfers of everything - and then pushing the right windows again
+ * at the first run. So the transfer happens once, at the first use,
+ * and this call is free and always safe to make. */
 CFT_API cft_status cft_buffer_to_device(cft_buffer *buf)
 {
-    return buf ? CFT_OK : CFT_ERR_INVALID_ARGUMENT;
+    if (!buf)
+        return CFT_ERR_INVALID_ARGUMENT;
+#ifdef CFT_ENABLE_XRT
+    if (buf->dbuf)
+        return (cft_status)cftx_buffer_to_device(buf->dbuf);
+#endif
+    return CFT_OK;
 }
 
+/* And the other direction: everything a run wrote into this buffer
+ * and has not yet returned, copied back into the mirror. A no-op when
+ * no run has written it, so it is safe to call unconditionally. */
 CFT_API cft_status cft_buffer_from_device(cft_buffer *buf)
 {
-    return buf ? CFT_OK : CFT_ERR_INVALID_ARGUMENT;
+    if (!buf)
+        return CFT_ERR_INVALID_ARGUMENT;
+#ifdef CFT_ENABLE_XRT
+    if (buf->dbuf)
+        return (cft_status)cftx_buffer_from_device(buf->dbuf);
+#endif
+    return CFT_OK;
+}
+
+/* What happened to this buffer                            (ABI 0.11)
+ *
+ * The counters come from the backend, because it is the backend that
+ * decides each binding; the rest is this file's. A buffer on a
+ * backend with no device memory answers zeroes and says why, which is
+ * a real answer and not a missing one - the calls are portable, and a
+ * caller comparing two machines wants to be told which kind it has
+ * rather than left to infer it from a rate. */
+CFT_API cft_status cft_buffer_get_info(cft_buffer *buf,
+                                       cft_buffer_info *out)
+{
+    cft_buffer_info info;
+    size_t want;
+
+    if (!buf || !out)
+        return CFT_ERR_INVALID_ARGUMENT;
+    want = out->struct_size;
+    if (want < sizeof(size_t))
+        return CFT_ERR_INVALID_ARGUMENT;
+
+    memset(&info, 0, sizeof info);
+    info.bytes = buf->bytes;
+#ifdef CFT_ENABLE_XRT
+    if (buf->dbuf) {
+        cftx_buffer_stat(buf->dbuf, &info.resident, &info.device_authority,
+                         &info.resident_binds, &info.staged_binds,
+                         info.staged_why, sizeof info.staged_why);
+    } else
+#endif
+    {
+        strncpy(info.staged_why,
+                buf->dev ? "this backend keeps no device copies: the "
+                           "buffer is host memory and the sync calls "
+                           "are no-ops"
+                         : "the device this buffer was allocated on has "
+                           "been closed; it is host memory now",
+                sizeof info.staged_why - 1);
+    }
+
+    if (want > sizeof info)
+        want = sizeof info;
+    info.struct_size = want;
+    memcpy(out, &info, want);
+    return CFT_OK;
 }
 
 CFT_API void cft_buffer_free(cft_buffer *buf)
 {
     if (!buf)
         return;
+    /* Unlink from the device's registry first, so that nothing can
+     * resolve a pointer into a buffer that is going away. A buffer
+     * whose device was closed first was already unlinked there. */
+    if (buf->dev) {
+        cft_buffer **pp = &buf->dev->bufs;
+        while (*pp) {
+            if (*pp == buf) {
+                *pp = buf->next;
+                break;
+            }
+            pp = &(*pp)->next;
+        }
+    }
+#ifdef CFT_ENABLE_XRT
+    if (buf->dbuf)
+        cftx_buffer_destroy(buf->dbuf);
+#endif
+    /* Whatever a run wrote and nobody read back goes with it. That is
+     * what free means, and cft.h says to call cft_buffer_from_device
+     * first if the bytes were wanted. */
     free(buf->data);
     free(buf);
 }
