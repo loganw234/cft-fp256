@@ -46,6 +46,16 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
+- [x] **THE READ-AHEAD PAIR: built 2026-09-09 morning from main 49a9a1b,
+      both halves at 135 MHz, verified, staged and measured as each
+      landed** (`~/cardday-ra`; docs/VALIDATION.md, the read-ahead
+      pair's entry). Revision 3 plus the streaming engine's deeper
+      read-ahead: 107 million beats a second a tile with the bus taken
+      out, 1.8x the pair below, the same bits; it needs a host at ABI
+      0.11 or later, which the box has. Use it for anything that
+      needs the rate; its worst path is the sequencer's instruction
+      memory now, and thin on four tiles.
+
 - [x] **THE REVISION-3 PAIR: built overnight 2026-09-08 into 09-09 from
       main 99d2700, both halves at 135 MHz, verified, staged and run on
       the card as each landed** (`~/cardday-rev3`; docs/VALIDATION.md,

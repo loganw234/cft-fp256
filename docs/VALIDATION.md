@@ -9608,3 +9608,132 @@ and the script's own `def patch` shadowed the stub, so it wrote the
 pages with two placeholders in them. Caught by the diff, reverted with
 `git checkout` before anything was committed. A dry run is a separate
 code path or it is not a dry run.
+
+## 2026-09-09 - the read-ahead pair on silicon: 107 million beats a second a tile, measured against 120 predicted
+
+The pair built overnight-into-morning from main 49a9a1b - revision 3
+plus the streaming engine's deeper read-ahead (`AR_DEPTH` 16,
+`AW_DEPTH` 16, `FIFO_LOG2` 9; the read-ahead entry above has the
+model, the sweep and the out-of-context cost) - by the same detached
+chain and recipe as the three pairs before it, verified against its
+manifests and staged in `~/cardday-ra`:
+
+    ra-135single  one tile,   135 MHz   07:43 -> 09:42 (118 min)
+                  routed WNS +0.055  kernel WNS +0.089  0 failing of 129,963 kernel endpoints
+                  worst: u_seq imem block-RAM cascade -> al_b_reg, 8 levels
+                  35,345,646 bytes  sha256 3bf0c9db...90824e  verify-image 8/8
+    ra-135quad    four tiles, 135 MHz   07:44 -> 11:54 (249 min)
+                  routed WNS +0.032  kernel WNS +0.079  0 failing of 519,726 kernel endpoints
+                  worst: u_fifo_a -> g_bank64 lane 1 s0_byp_d, 16 levels (the FIFO-to-FMA family again)
+                  51,331,228 bytes  sha256 03c035f1...d8c5a0  verify-image 8/8
+
+Both closed at 135 MHz on the first attempt, and the quad with MORE
+margin than the revision-3 quad's +0.040: +0.079, on the same
+FIFO-to-FMA family, while the single's worst path moved to the
+sequencer's instruction-memory cascade at +0.089. The deeper FIFOs cost
+no block RAM, and the placer found a slightly better arrangement of the
+same logic - a reminder that the tens of picoseconds between builds are
+placement, not design.
+
+The worst path MOVED. Every pair since revision 1 closed on the
+streaming engine's FIFO into the FMA's input register; this one closes
+on the sequencer's 16,384-word instruction memory, a seven-deep block
+RAM cascade, with the read-ahead's larger FIFOs no longer the limiting
+family at all. That is the path a fourth revision of the sequencer
+watches, and the one a register stage in the fetch path would buy back.
+
+**The rate, with the bus taken out** (`cft-resident`, one million
+elements a run, twenty timed runs; every row status clean, the same
+bytes on every unit, on repeat and in software):
+
+    one tile, fma        ns/elem   M elem/s   GB/s    M beats/s   (revision 3 before it)
+      fp32               1.243     804.7      12.9    100.6       (462.6, 57.8)
+      fp64               2.405     415.9      13.3    104.0       (235.1, 58.8)
+      fp128              4.728     211.5      13.5    105.8       (118.7, 59.3)
+      fp256              9.360     106.8      13.7    106.8       ( 59.6, 59.6)
+    four units at once, fma (cft-resident; the library's cft-bench --resident in the last column)
+                         ns/elem   M elem/s   GB/s    M beats/s a unit   library
+      fp32               0.311     3,219.6    51.5    100.6              2,544.0
+      fp64               0.601     1,664.3    53.3    104.0              1,455.9
+      fp128              1.183       845.5    54.1    105.7                787.9
+      fp256              2.341       427.3    54.7    106.8                410.0
+    and a steady stream at four million elements a unit: fp256 fma/add/mul 430.7 M/s each,
+    55.1 GB/s, 107.7 M beats a second a unit; fp32 fma 3,366.7 M/s, 53.9 GB/s, 105.2 a unit
+
+**Against the prediction.** The model said 1.125 cycles a beat, 120 M
+beats a second, flat from zero to 200 cycles of latency; the card
+gives 100.6 to 106.8, which is 1.26 to 1.34 cycles a beat - 1.8x the
+revision-3 tile's 59 against the 2.0x predicted, and 84 to 89 percent
+of the target. The shape of the shortfall is itself information: the
+rate rises with the format (fp32 lowest, fp256 highest), where
+revision 3's was flat, so what remains is a per-beat cost that the
+wider formats amortise over more cycles of arithmetic per beat - a
+turnaround between bursts, or the write channel's accept rate,
+rather than latency, which the deeper queue now hides. The model's
+memory answered every beat back to back and the card's does not quite;
+the latency bench's next refinement is a bandwidth-limited slave,
+and the target for the RTL after that is the 13 percent between here
+and the pipeline.
+
+**And through the library** (`cft-bench --resident`, the same call a
+port writes): 785.3 / 412.6 / 210.1 / 106.7 M fma elements a second on
+one tile, within 2.4 percent of the tool. **The staged path gained
+too**: `cft-bench` through `cft_run` on host pointers gives 165.6 /
+89.2 / 44.2 / 22.0 against the revision-3 single's 141.6 / 76.4 / 38.0
+/ 19.1 - about fifteen percent, which is the writer no longer waiting
+on every response, visible even under the bus.
+
+**Power, read from the card's own rails** (`xbutil examine -r
+electrical`, one-second samples). The U50 is a 75 W card fed from the
+slot alone (its auxiliary 12 V rail reads zero); the shell reports a
+150 W electrical budget. With an image loaded and the tiles idle the
+board draws 14.9 W - the shell, the HBM and the idle fabric, 5.1 A on
+the 0.85 V core rail. One tile streaming fp256 at 107 M beats a
+second (the soak's run phases) draws 18.2 to 18.6 W, the core rail at
+8.2 A. Four tiles streaming fp256 at 4 million elements a unit draw
+34.8 W, the core rail at 21.4 A (18.2 W of core), the 12 V slot rail
+at 2.45 A; fp32 the same stream 33.7 W. So a tile at full rate costs
+about 3.5 W of core power and about 5 W at the board, the four-tile
+card sits under half its rating, and the 15 W floor is most of what a
+one-tile card spends. Per joule of core power that is about 31
+million fp256 fused multiply-adds, or 250 million at fp32; against
+the software backend on one host core (1.74 M fp256 fma a second at
+a core's tens of watts) it is two to three orders of magnitude, and
+against a GPU's native fp32 it is two orders the other way, which is
+not the comparison this tile was built for. Nothing in the design
+gates a clock or an idle lane; the power is the datapath switching.
+
+**The series each pair has**, the same on this one:
+
+    the single (09:43 -> 10:06):
+      device: backend xrt, 1 tile, contract 0x00000800; caps 64 / 16384 / 512 / 0x31f, max_scratch 256
+      device-test -q -n 8 / -n 4096 / -r     1,070 / 2,658 / 902 checks, 0 failed
+      device-test -b -n 4096 (resident leg)  4,363 checks, 0 failed
+      cft-selftest vectors/out               168 sets, 1,071,635 cases, all matching (638 s)
+      the library, software against the card   18 comparisons, 18 identical - the same hashes the
+                                             revision-3 pair gave (the scratch block both ways, the
+                                             300-entry bank, spill equal to spill-ref)
+      soak: ten zoom checkpoints -> one hash, 51476c5dfc2ce021... (every pair's); five matrices at
+            n=1120, 2,658 checks each, 0 failed; the sets again, 1,071,635 all matching (644 s)
+      FPGA 33 to 35 C, about 15 W
+    the quad (12:00 -> 12:21):
+      device: backend xrt, 4 tiles, contract 0x00000800; the same caps
+      device-test -q -n 8 / -n 4096 / -r     1,070 / 2,658 / 902 checks, 0 failed
+      device-test -b -n 4096 (resident leg)  4,363 checks, 0 failed
+      cft-selftest vectors/out               168 sets, 1,071,635 cases, all matching (593 s)
+      the library, software against the card   18 comparisons, 18 identical
+      soak: ten zoom checkpoints -> one hash, 51476c5dfc2ce021...; five matrices at n=1120,
+            2,658 checks each, 0 failed; the sets again, 1,071,635 all matching (593 s)
+      FPGA 29 to 30 C during the series, 20 to 21 W; 34.8 W and 30 C under the four-unit stream
+
+    And an fp256 soak on the single while the quad built: 541 passes in 70 minutes, each a
+    resident run of a million elements at fma, add and mul (100 timed repetitions, the result
+    hash held to the first pass: d942847f31e432d3..., which is also the revision-3 tile's hash
+    for the same inputs), every tenth pass at four million, the fp256 device-test matrix at
+    n = 1120 (690 checks) and the fp256 reference orbit to its checkpoint - 0 failures, the rate
+    106 to 107 M/s throughout, the FPGA 33 to 38 C.
+
+The pair lives in `~/cardday-ra` beside the three before it and needs
+a host at ABI 0.11 or later, which the box has; docs/CARDDAY.md names
+it. Run records: `/tmp/res-ra-*/`, `/tmp/r3-ra-*/` on the box, copied
+beside this session's scratchpad.

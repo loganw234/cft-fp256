@@ -197,6 +197,27 @@ the card (4,363 checks, both images). Staged stays the default a
 first port gets, and it is the honest one for a call whose operands
 change every time.
 
+**The read-ahead, measured the same morning.** A pair built from the
+deeper read-ahead (docs/ARCHITECTURE.md, the engine's in-flight depth;
+docs/VALIDATION.md's read-ahead entries) moves the ceiling: one tile
+sustains **100.6 to 106.8 M beats a second** - 804.7 / 415.9 / 211.5 /
+106.8 M fma elements a second at fp32/64/128/256, 12.9 to 13.7 GB/s -
+against 59 before it, 1.8x, and 84 to 89 percent of the 120 the model
+predicted; through `cft-bench --resident` 785.3 / 412.6 / 210.1 /
+106.7. The staged path rose about fifteen percent with it (165.6 /
+89.2 / 44.2 / 22.0), the writer no longer waiting on every write
+response. What remains between 107 and the pipeline's 120 rises with
+the format where revision 3's ceiling was flat, which names a
+per-beat cost rather than latency; the latency bench's next
+refinement is a bandwidth-limited slave. Four tiles at once: 3,219.6
+/ 1,664.3 / 845.5 / 427.3 M fma elements a second, 51 to 55 GB/s,
+each unit at the single's rate. **Power**, from the card's own
+rails: 14.9 W with an image loaded and the tiles idle, 18.5 W with
+one tile streaming fp256, 34.8 W with four - about 3.5 W of core
+power a tile at full rate, on a 75 W card; the read-ahead pair's
+entry in docs/VALIDATION.md has the rails and the per-joule
+arithmetic.
+
 ## Width inside the library
 
 `cft-bench`, software backend, ns per element:
