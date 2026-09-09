@@ -272,3 +272,39 @@ A run reads, in full:
     digest        89a66e7e3901918d...  program and bank (computed here:
                                         this build has no cft_program_digest)
     sha256        6290bc41ab11a777b152c69115d5050d3b10ea5968cacd306f79420417d53ffe  deposit buffer
+
+
+## Revision 3 in the text form, the library and the runner
+
+*Contract of the 2026-09-08 evening round; docs/SEQUENCER.md's
+"Revision 3" is the hardware side.*
+
+- Four mnemonics: `stl rA, SLOT`, `ldl rD, SLOT`, `stx rA, rB`,
+  `ldx rD, rB`. `SLOT` is a decimal or `0x` number, or a name declared
+  with `.slot NAME = N` (an alias, like `.reg`); the assembler refuses
+  a slot at or past the depth it is told (`.scratch 256` declares the
+  depth the program assumes, default 256, and `cft-asm -i` reports the
+  highest static slot and whether the program indexes).
+- `.scratch in N` and `.scratch out M` set the header's `scratch_io`
+  counts and `flags.SCRATCH_IO`; both default to none.
+- A constant name whose index is 256 or more is emitted under `kx`
+  with the ninth bit in `imm[30:28]`; the assembler refuses more than
+  512 constants, and `cft-asm -i` names `KX9` among the features the
+  image needs (with `SCRATCH` and `SCRATCH_IO`).
+- The disassembler produces all of this from any valid image, and
+  `assemble(disassemble(image)) == image` stays a test over the
+  library, the revision-2 corpus and a generated revision-3 corpus
+  (spills, indexed slots, scratch I/O, indices past 255).
+- The library gains a program whose live set exceeds thirty-two
+  values and spills through `stl`/`ldl` (checked against the same
+  arithmetic without the spill); a small convolution over a local
+  array through `stx`/`ldx` under loop counters, checked against the
+  model; a resumable program run twice with its state carried out and
+  back in through `.scratch out`/`.scratch in` (the second run's
+  deposits equal a single run's second half); and a Horner past 255
+  coefficients through a 300-entry external bank. Each with a check
+  in `make programs-check`.
+- `positive-run` gains `--scratch-in FILE` and `--scratch-out FILE`
+  (raw format-width, lane-major, exactly `n * count` elements), prints
+  the SHA-256 of each on its own line, and runs through
+  `cft_program_run_ex`; the digest line is unchanged.
