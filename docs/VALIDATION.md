@@ -7250,3 +7250,287 @@ job - so the leg was rerun at 32.
 and the revision-2 hardware, which merged the same day and gets its own
 pair next. Run records: `/tmp/step*.log`, `/tmp/bench-*.csv`,
 `/tmp/soak*.log` on the box.
+
+## 2026-09-08 - ABI 0.10, the host and JavaScript halves of the sequencer's revision 3: a per-lane scratch, one run_ex, a 512-entry bank
+
+The host library and the JavaScript binding built against
+docs/SEQUENCER.md's "Revision 3 (2026-09-08, evening)" contract
+(0e3fb89), on DESKTOP-T33SK86 under MSYS2 mingw64 gcc 16.1.0 and node
+v22.19.0. The model, the RTL, the assembler and the program library
+are other agents' halves of the same round and are not in this entry.
+
+**What was built.** `CFT_ABI_VERSION_MINOR 10`.
+
+- **R4, the per-lane scratch.** Four control codes - `STL ra, imm`
+  (6), `LDL rd, imm` (7), `STX ra, rb` (8), `LDX rd, rb` (9) - behind
+  `CFT_SEQ_FEAT_SCRATCH` (0x100, CAPS2[4]), with
+  `cft_caps.max_scratch` as the depth and 256 in the software backend.
+  A store is masked by the active bit; a load is a masked register
+  write; neither reads a rounding attribute or raises a flag. The
+  indexed pair takes the slot from the low eight bits of `rb`'s bit
+  pattern, reduced modulo the depth.
+- **R5, the per-run block.** The header's second reserved word becomes
+  `scratch_io` under `CFT_PROG_FLAG_SCRATCH_IO` (flags bit 1), behind
+  `CFT_SEQ_FEAT_SCRATCH_IO` (0x200, CAPS2[5]). Lane-major and dense in
+  both directions; the executor preloads before the first instruction
+  and writes back after the last deposit, per lane block.
+- **R7, the ninth constant-index bits.** `imm[30:28]` under `kx`, with
+  `imm[31]` still reserved-must-be-zero, behind `CFT_SEQ_FEAT_KX9`
+  (0x08, CAPS[7]); `SEQ_ADDR_CONSTS` 512.
+- **`cft_run_args` and `cft_program_run_ex`.** One entry point that
+  takes everything a run can carry, with `cft_program_run` and
+  `cft_program_run_bank` as WRAPPERS that fill the struct - so the
+  three cannot drift and nothing that used them moved.
+  `cft_caps.max_scratch`; `cft_program_info.n_scratch_in`,
+  `n_scratch_out`, `scratch_used`; `cft.hpp` gains `run_ex`.
+- VERSION `0x800` in the XRT backend's known set, `CAPS2` at 0x6C, and
+  `scratch_in`/`scratch_out` as kernel arguments 9 and 10.
+  `CFTR_OP_PROG_RUN_EX` 0x0024 on the wire, and the caps block 72 to
+  76 bytes.
+- The JavaScript half: nine new `cftw_*` exports, `runEx({...})` and
+  the four new getters on `Program`, `maxScratch` on `Context`, the
+  encoder taught the four codes and the two new header fields, and
+  `PROG_RUN_EX` in `remote.mjs`.
+
+**Gates, all on this tree, all measured here.** The host build line
+throughout was `PATH="/c/msys64/mingw64/bin:$PATH" make -C host CC=gcc
+OS=Windows_NT TMP/TEMP='C:/Users/logan/AppData/Local/Temp'`, and
+Python is Miniconda 3.12.9 named by absolute path.
+
+    make vectors                    rc 0            168 sets (run.sh's own
+                                                    ensure_vectors arguments,
+                                                    --jobs 8)
+    make -C host test               rc 0    501 s   api-test all contract checks;
+                                                    reduce-parts 6,294 partitions;
+                                                    cft-selftest 1,071,635 cases
+                                                    over 168 sets; the C/Python
+                                                    identity check
+    device-test sw -n 96            rc 0    192 ms  2,640 checks, 0 failed
+                                                    (2,444 at 0.9)
+    verify/run.sh --only selfcheck,seq,diff         run 20260908-201512-1dcd6bc
+      selfcheck                     ok       1 s    2,640 checks, 0 failed
+      diff                          ok       4 s    217,500 cases vs the model
+      seq                           ok       2 s    741 programs both ways, 259
+                                                    refused by both, 309 crossing
+                                                    the 64-lane block; 500 from
+                                                    the extended corpus
+      VERDICT: PASS, nothing skipped
+    make -C host remotetest         rc 0    ~13 min remote-test 280 checks x 2
+                                                    routes (266 at 0.9);
+                                                    device-test over the wire
+                                                    2,640 checks; conformance
+                                                    replay 184,592 cases local and
+                                                    remote identical (remote
+                                                    170.4 s); cft-collatz sweep
+                                                    1..2000 fp256 the same chain
+                                                    both ways; --bench on both
+                                                    routes
+    make -C host wstest             rc 0      8 s   remote_test 67 checks, 0
+                                                    failures (57 at 0.9)
+    fuzz/fuzz-program               -        25 s   1.96M executions, no crash
+    fuzz/fuzz-serve                 -        20 s   1.08M executions, no crash
+                                                    (no sanitizer: mingw has no
+                                                    libasan, so the fuzz gate
+                                                    stays the Docker lane's, and
+                                                    fuzz-client is POSIX-only)
+
+    bash bindings/wasm/build.sh     rc 0     ~9 min stages 0-5 in the pinned image
+    bash bindings/wasm/build_demos.sh
+                                    rc 0     ~4 min stage 2 identity: the split
+                                                    .wasm equals the committed
+                                                    module
+    node bindings/wasm/verify.mjs vectors/out
+                                    rc 0     ~19 min abi 0.10 = cft.h's 0.10; 138
+                                                    exports; 107 NEEDED present;
+                                                    the node loader is the page's
+                                                    module byte for byte;
+                                                    1,071,635 cases over 168 sets
+                                                    through the page's own bytes;
+                                                    831,635 over 148 sets driven
+                                                    through the cftw_* wrappers.
+                                                    VERIFY OK
+    bindings/node  node test.mjs           363 s    126 passed, 0 failed
+    bindings/node  node program_test.mjs     1.5 s  37 passed, 0 failed (28 at 0.9)
+    bindings/node  node conformance.mjs     ~21 min 1,903,270 cases over 316 set
+                                                    replays
+    node bindings/wasm/verify_demos.mjs             44 ok, 0 FAIL
+
+**A count that moved, said rather than smoothed over.** The 0.9 entry
+records `verify.mjs` replaying **1,231,635** cases over 168 sets and
+`conformance.mjs` 2,063,270 (which is that number plus 831,635). On
+this tree `verify.mjs`, `conformance.mjs` and `cft-selftest` all
+report **1,071,635** over the same 168 sets, generated with the same
+`gen_vectors.py` arguments - and 1,071,635 is also what the 0.9
+entry's own `make libcft-test` line records. So the three independent
+replays agree with each other here, which is the property that
+matters; what I cannot explain from this tree is why the 0.9 round's
+`verify.mjs` counted 160,000 more than its own `cft-selftest` did.
+Nothing in this round touches the vectors, the replay or the counting.
+
+**The negative controls, because a check that has never been seen to
+fail proves nothing.** Seven faults were injected into
+`host/src/program.c`, built, run and reverted, and `device-test sw -n
+96` was the judge each time (2,640 checks clean):
+
+- the lane index dropped from a scratch address (`&scratch[slot]`
+  instead of `&scratch[lane * D + slot]`): **20 failures**, every
+  scratch case including both halves of the lane-major block;
+- a store not masked by the active bit: 4, all of them "a store by an
+  inactive lane reached the memory";
+- `STX`/`LDX` reducing modulo 251 instead of the depth: 4, "an index
+  of 773 did not reduce to slot 5 modulo 256";
+- the ninth constant-index bit dropped in the executor: 4, "k[511] did
+  not multiply by one";
+- the scratch-out writeback MOVED to before the run: 8 - and note
+  which ones. The block test fires, and so does the RESUMABLE test's
+  own negative control ("three doublings and six gave the same bytes,
+  so the comparison above proves nothing"), which is that control
+  doing exactly its job;
+- the scratch-out block never written at all: 9, including the
+  chaining test itself;
+- the scratch-in preload skipped: 8.
+
+The first attempt at the fifth of those fired NOTHING, and the reason
+is worth recording: it ADDED a writeback before the run without
+removing the one after it, so the correct write simply won. A negative
+control that does not fail is either a missing test or a bad
+injection, and the way to tell is to look at the injection first.
+
+**And on the JavaScript side, the same discipline.** `KX9_SHIFT` in
+`seq_corpus.mjs` had `ka`'s and `kb`'s ninth-bit positions swapped -
+the permutation no round trip can see, exactly as `RHI_SHIFT`'s was at
+0.9. Two tests failed: the encoder check by the bit
+(`expected 5, got 6` in `imm[31:28]`) and the k[511] run by the
+loader's refusal. Reverted, green.
+
+**The module, and the two pages that carry it.**
+
+    emscripten/emsdk:6.0.9@sha256:96617f27fe164215…   (build.sh's pin)
+
+    bindings/node/cft_node.wasm      225,231 bytes
+      sha256 39822d677e1783c01ba204285094a33cbd9fd1e6ed50130fc45bf3f15fd0c790
+      was    1af4ddd3514e3335e915fe5ecbe5449e36d88d8acb47ac2d3c4a554841a14aad   (0.9, 219,535 bytes)
+    bindings/wasm/conformance.html  1,356,405 bytes
+      sha256 57ea8bfd9709c1519e4f2295f65f889c9469b416524e3c45cc6a09becf5674e2
+    bindings/wasm/demos.html          539,511 bytes
+      sha256 84b76b30fda1774b3292ce4d45401c88e2453336034493f8b1a7bf52ff05cbc1
+
+    138 cftw_* exports where 0.9 had 129 - exactly the nine, no more
+
+Both pages were rebuilt and neither was a choice, for the reason the
+0.9 entry gives: `-sSINGLE_FILE` embeds the module in
+`conformance.html` and `verify.mjs` step 3 holds the node loader to
+the page's bytes by sha256; `demos.html` embeds `cft_node.wasm` byte
+for byte and `build_demos.sh` refuses to assemble a page whose module
+does not match the stamp `demos_chains.json` was recorded against. The
+chains were therefore re-recorded, and **of the seventeen
+sha256-shaped values in that file, sixteen came back identical and the
+seventeenth is the module stamp** - every Collatz chain, the zoom
+orbit and pixels, the two zoom images, the four orbits chains and
+their program images. The nine exports are doors; the arithmetic
+behind them did not move.
+
+**Two pre-existing breaks found by running the gates, and fixed.**
+Neither is this round's doing and both had been failing since the
+revision-2 model landed, because the revision-2 `seq.Program`
+constructor gained `flags` and a private `_n_consts` behind the
+`n_consts` property:
+
+- `host/tests/seq_check.py`'s refusal arm builds a `Program` through
+  `__new__` to serialise an image the MODEL rejected, and never set
+  the two new fields - so `verify --only seq` died with an
+  `AttributeError` before comparing anything. Every field `to_bytes()`
+  reads is now set by name.
+- `host/fuzz/make_seeds.py` did the same thing for its
+  `unbalanced-fp32` seed, so the seed generator could not run at all.
+  It builds those bytes with the file's own `_image()` now: a
+  generator that breaks when the model refactors is a generator nobody
+  can run on the day they need it.
+
+**What is NOT tested here, stated rather than skipped.**
+
+- **The XRT path.** No card and no emulation on this machine, so the
+  0x800 register map, `CAPS2` at 0x6C, the tenth and eleventh kernel
+  arguments and the eleven-versus-nine-argument call are asserted by
+  REVIEW ALONE. Each mirrors the 0x700 path line for line; the
+  divergence is the argument count, which XRT throws on rather than
+  adapting, so the call now has three shapes chosen by contract
+  version and the two scratch buffers are bound on every 0x800 run
+  whether or not the program declares a block.
+- **The feature-absent refusals.** The software backend publishes
+  `seq_features 0x31f` - kx, REGS32, BANK_PTR, KX9, IMUL, SCRATCH,
+  SCRATCH_IO - and both handles here are it, so
+  `check_caps_enforced` scores the published-and-loads half of all
+  three new features and cannot produce the refusal half. Each refusal
+  is written, each names its feature, and each runs against a tile
+  that lacks the bit.
+- **`host/fuzz/program_differential.py` RUNS, and disagrees on
+  purpose.** Over 3,000 mutated images: 447 accepted by both, 2,435
+  refused by both, **118 disagreements, every one of them a
+  revision-3 construct `seq.py` does not yet know** - 105 "unknown
+  control code" (the four scratch codes) and 13 "imm[31:28] is
+  reserved" (the ninth index bits), classified by replaying every
+  saved image through the model. `python/cft_golden/seq.py` is
+  revision 2 on this branch. **That differential is the integrator's
+  re-run**, and the checked-in `repeat-trip-product-wraps` reproducer
+  is still refused by both.
+- **`bindings/node/seq_corpus.jsonl` gains no revision-3 cases**, for
+  the same reason it gained no revision-2 ones: it is generated from
+  `cft_golden.seq.random_program`, and a recording the golden model
+  cannot produce is not a recording. The revision-3 programs are
+  hand-written in `program_test.mjs` instead.
+- **No browser, no card, no emulation.** Both pages were checked
+  headless over the bytes in git; nobody opened either. wasm32 has no
+  PCIe and the module carries only the software backend.
+
+**The ambiguities in the contract, and what was chosen.**
+
+**`cft_run_args`' size handshake, which the contract does not
+specify.** `cft_caps` and `cft_program_info` are OUTPUT structs and
+are TRUNCATED to what the caller can hold. `cft_run_args` is an INPUT,
+and truncating an input means silently ignoring a field a newer caller
+set - which is precisely the failure the byte-count rules exist to
+prevent. So a `struct_size` this library does not recognise is
+REFUSED, in both directions and with a different message for each.
+`api-test` checks all three cases.
+
+**`scratch_used` when the device published no depth.** The contract
+says "one past the highest static slot, or `SCRATCH_D` when the
+program uses `STX`/`LDX`", and `SCRATCH_D` is a device parameter. Read
+as: the DEVICE's `max_scratch` when it published one, and this
+library's own executor depth (256) otherwise. For every device that
+exists today the two are the same number.
+
+**A `SCRATCH_IO` program whose two counts are both zero.** Legal, by
+the same reasoning that made a `BANK_EXT` program with `n_consts` zero
+legal at 0.9 - and it still takes `run_ex` and still travels as
+`PROG_RUN_EX`, because the opcode is read from the header and never
+from a buffer's length. That is the corner the JavaScript client found
+at 0.9, applied one call further along before it could be found again;
+`host/src/backend_remote.c` now chooses all three opcodes from the
+image's flags, which also retires the latent `bank_bytes ?` the 0.9
+entry recorded as "noted, not changed".
+
+**The library's own ceiling on a static scratch slot.** The device's
+`max_scratch` is what the loader enforces, and zero is UNKNOWN and
+enforces nothing - but the software executor has a fixed 256 slots a
+lane, so an `n_scratch_in` or `n_scratch_out` past `SEQ_SCRATCH_D` is
+refused unconditionally after the device check, exactly where
+`SEQ_MAX_DEPOSITS` is. Only reachable when the device published no
+depth of its own.
+
+**The backend seam took a struct too.** `cftx_program_run` and
+`cftr_program_run` would have grown from fifteen positional arguments
+to twenty-one, so the per-run data moved into `cft_seq_run_io` in
+`backend.h` - the same argument `cft_run_args` makes in the public
+header, one layer down. The two scratch slot COUNTS are in it because
+a backend that chunks needs them: the remote client slices a
+lane-major block by lane, and one that sliced by bytes would hand
+every chunk the first lanes' slots.
+
+**The scratch is allocated only where it is used.** `SEQ_SCRATCH_D`
+slots across a 64-lane block is four megabytes at fp256, and every
+program written before this evening touches none of it - so the
+executor keeps the scratch out of `seq_block` and allocates it only
+for a program that uses a scratch code or declares a block.
+`device-test sw -n 96` runs in 192 ms, unchanged.
