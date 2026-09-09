@@ -9737,3 +9737,302 @@ The pair lives in `~/cardday-ra` beside the three before it and needs
 a host at ABI 0.11 or later, which the box has; docs/CARDDAY.md names
 it. Run records: `/tmp/res-ra-*/`, `/tmp/r3-ra-*/` on the box, copied
 beside this session's scratchpad.
+
+## 2026-09-09 - a third client for the same frames: an Arduino streams the protocol, and a Nano computes in binary256
+
+The remote backend now has three clients and they all put the same
+bytes on the wire: `host/src/backend_remote.c` in C,
+`bindings/wasm/remote.mjs` in JavaScript, and
+`bindings/arduino/cft-arduino/src/remote/` in C++ small enough for a
+board with two kilobytes of memory. The third one reaches `cft-serve`
+two ways - over Wi-Fi from an ESP32 through `WiFiClient`, and over a USB
+serial port from anything at all through `host/tools/cft-serial-bridge.py`,
+which copies bytes between the port and a TCP socket and understands
+none of them. docs/REMOTE.md's new section "The board reaches the tile"
+is the normative description.
+
+**The claim is the usual one and it is the only one worth making**: a
+sketch gets the SAME BITS. Not a tolerance, not a subset, not "close
+enough for a microcontroller". An AVR cannot represent a binary64
+number - its `double` IS its `float`, thirty-two bits - and that turns
+out not to matter, because carrying an encoding needs no arithmetic
+type for it. The board is a courier; the device does the arithmetic;
+the answer is the answer.
+
+### What is new, and what streaming costs
+
+The two existing clients hold a payload: build it, checksum it, send
+it. A Nano cannot hold one. So this client STREAMS - it asks the
+caller's `Operands` object for one element at a time and hands each
+result straight to a `Results` object - and it never allocates. The
+protocol turns out to permit that exactly, which was not designed for:
+a frame's length is arithmetic rather than a walk, the payload is dense
+elements in a fixed order, and the CRC runs over the header then the
+payload in order.
+
+The one price is stated in the header and measured in the gate. The
+CRC is IN the header, which goes out first, so the whole payload must
+have been seen before the frame's first byte is sent: the generator is
+asked for every element TWICE, once to checksum and once to send, and
+must answer the same both times. `host_check.cc` counts the calls on
+every RUN it issues and fails on anything but exactly two per element
+per operand per frame.
+
+The mirror is on the way back - a result element reaches the caller
+before its frame's CRC has been checked, because the CRC arrived in the
+header - and `cftr::Results` says so; `runOne()` and `reduce()` hold
+their single element back until the frame checks out, because one
+element fits.
+
+### The budget, measured rather than estimated
+
+`arduino:avr:uno`, avr-gcc 7.3.0, `-Os`:
+
+    cftr::Client                        148 bytes
+    cftr::StreamTransport                 4
+    cftr::NetTransport                   70   (64 of them the staging buffer)
+    deepest call chain, stack           271   runOne -> run -> sendRunLike ->
+                                              sendHeader, from -fstack-usage;
+                                              the transport's read/write adds
+                                              about a dozen more
+
+    ESP32 / RP2040: Client 332, StreamTransport 8, NetTransport 548
+    (536 the staging buffer)
+
+So a conversation with a cft device costs an Uno about 152 bytes of
+its 2,048 permanently and about 285 at the deepest moment of a call.
+The largest single object the client ever holds is ONE element,
+thirty-two bytes at binary256. `src/remote/cft_remote_config.h` carries
+every number that moves it - `CFT_REMOTE_CHUNK_BYTES` (256 on AVR, the
+frame cap a sketch lowers), `CFT_REMOTE_ERR_BYTES` (64),
+`CFT_REMOTE_MAX_ELEM_BYTES` (32, drop to 8 for a binary64-only sketch),
+`CFT_REMOTE_MAX_RECV_BYTES`, `CFT_REMOTE_TIMEOUT_MS` - each with what
+it buys written beside it.
+
+The CRC is bitwise with no table: a 1 kB table is half a Nano's memory
+and eight shifts a byte is nothing beside a line that moves eleven
+kilobytes a second.
+
+### The host-side proof: the same .cpp, the desktop's compiler, a real server
+
+    python bindings/arduino/cft-arduino/src/remote/test/host_check.py
+    python bindings/arduino/cft-arduino/src/remote/test/host_check.py --via-bridge
+
+g++ 16.1.0 (msys64 mingw64) compiles the same `cft_remote.cpp` an Uno
+compiles, `-Wall -Wextra -Wshadow` clean, links it against `libcft.a`
+and drives it at a `cft-serve` started on a free loopback port and
+stopped BY ITS PID - with the software backend open in the SAME PROCESS,
+so "the same bits" is a `memcmp` and not a story. The second form puts
+`cft-serial-bridge.py --serial-tcp` in the path, so the bytes go
+client -> byte pipe -> bridge -> `cft-serve` and back: the board's path
+with the board replaced.
+
+It is built and run TWICE, from the same sources: once with the 32-bit
+defaults and once with the configuration an Uno gets - no message
+store, no backend name, no sequencer capacities, a 256-byte chunk
+budget. That second pass is not a formality. Those are `#if` branches
+that nothing else runs, and the small budget makes every run a
+different number of frames: the binary256 chunked case is 7 elements
+in four frames of two rather than 97 in four frames of thirty-two.
+
+**48 checks passed, 0 failed with the defaults; 45 passed, 0 failed as
+an Uno sees it** - three fewer because the backend-name, sequencer-
+capacity and server-message checks are compiled out with the stores
+they read. Both again with the bridge in the path. In full:
+
+    CRC-32          the check value 0xCBF43926 for "123456789"
+                    512 random buffers against cftr_crc32 from libcft.a - a
+                    bitwise implementation and a table-driven one, no shared code
+    chunking        fp32 512 / fp64 256 / fp128 128 / fp256 64 elements a frame
+                    with one operand; half that with three
+    HELLO           format_mask 0xf, tiles 1, flags_readable 1, backend "software",
+                    abi 0x0000000b, caps block 76 bytes, and the four sequencer
+                    capacities - each against cft_get_caps on the local device
+    RUN             16 opcodes (fma, add, sub, mul, abs, neg, copysign, minnum,
+                    maxnum, select, cmplt, ixor, iadd, imul, recip_seed,
+                    rsqrt_seed) at all four formats, identical to cft_run
+                    including the flag and bus words
+    rounding        fma over 7 elements at rne, rtz, rdn, rup, rmm, all four formats
+    chunked RUN     769 / 385 / 193 / 97 elements in four frames each, identical
+    REDUCE          sum, dot, sumsq, sumabs over 33 elements, all four formats
+    a big REDUCE    binary256 sum over 4,096 elements - 128 kB streamed out of a
+                    generator in ONE frame, because a reduction's response is eight
+                    bytes and one element and nothing about it is held
+    the sweep       the 256-case generated replay below, digest and flag union
+    status word     lower, raise, test, save, restore, test_saved - and held to
+                    cft.h's actual semantics, that test is a PREDICATE (1 or 0)
+                    and save is the word itself
+    a failed op     CFT_SUM through RUN is the OPERATION's failure: status 1, the
+                    server's own words in the payload, the handle NOT poisoned,
+                    and the next RUN on that connection correct
+    a local refusal an unknown format costs no round trip
+
+and three negative controls:
+
+    one flipped bit in a HELLO response  -> ERR_INTERNAL, reason "crc", handle
+                                            poisoned, every later call answered
+                                            without touching the pipe
+    an ABI one minor step out (0.12)     -> ERR_UNSUPPORTED, reason "abi", and the
+                                            client kept the server's 0x0000000b so
+                                            a board can print both
+    eight bytes of text before HELLO     -> the connection ends, which is what a
+                                            sketch printing on its one UART does
+                                            and why the bridge has --framed
+
+The transcribed constants are held at COMPILE time, which is the only
+reason the embedded header is allowed to have any. `host_check.cc`
+includes `host/src/remote.h` and `host/include/cft.h` beside
+`cft_remote.h` and `static_assert`s every pair: the magic (derived from
+'C' 'F' 'T' 'R' at both ends, not typed), the protocol version, the
+header size, the default port, all twenty-one opcodes, all three kinds,
+all nine `cft_status` values, four formats, five rounding attributes,
+five flag bits, all thirty-one `cft_op` numbers this client names, and
+the caps block's three lengths. A value that drifts is a compile error
+in the gate.
+
+### The sweep a board can run without being sent a case
+
+`src/remote/cft_remote_replay.h` is 256 binary256 fma cases generated
+by lowbias32 over the case index - the same function on the board and
+on the host, so nothing has to be transmitted - and one CRC-32 over
+every result encoding in index order comes back. The digest is
+**0x9F924345**, derived by `host_check.cc` from libcft case by case and
+then held: the header carries the constant and the gate fails if the
+arithmetic or the generator ever moves it. It is exact and it needs no
+arithmetic type on the board: 8 kB of binary256 results proven bit for
+bit on a chip with no 64-bit float.
+
+### The bridge, and the one thing it does that is not a pure pipe
+
+`host/tools/cft-serial-bridge.py` (Python 3 + pyserial 3.5) is
+deliberately framing-agnostic: it does not parse, buffer, reorder or
+rewrite, because the frames carry their own length and CRC and a
+transport that helps is one that can corrupt.
+
+    --loopback   12 checks, 0 failed: the header decoder (a RUN header's op,
+                 length and abi; a wrong magic, a protocol version it does not
+                 know, a nonzero reserved word each rejected), the scanner fed
+                 ONE BYTE AT A TIME over text-then-two-frames, a 2,080-byte
+                 request and a 232-byte response through two threads byte for
+                 byte, and --framed separating 47 bytes of log from two frames
+    --probe-abi  reads a server's ABI out of the header of the refusal it sends
+                 to a HELLO claiming 0.0, and prints the #define to paste. That
+                 is how a client which is not libcft learns the number it must
+                 claim; against this tree it printed 0x0000000B (libcft 0.11)
+    --framed     the exception, and it exists for one board: an Uno has ONE UART
+                 and a sketch that prints has to print down it. Whole frames are
+                 forwarded, bytes between them are shown as the board's log. The
+                 resync rule is strict - a run stops being a candidate the moment
+                 it stops being a prefix of C F T R - so a log line ending in "C"
+                 cannot swallow the frame after it, which the loopback checks
+
+### Five boards, eleven builds, no warning of this half's
+
+`src/remote/test/compile_check.py`, arduino-cli 1.5.2-rc.1, cores
+arduino:avr 1.8.8, esp32:esp32 3.3.0, rp2040:rp2040 6.1.0:
+
+    example          board   flash             RAM (globals)
+    RemoteSerialFma  Uno       9,126 / 32,256      422 / 2,048
+    RemoteSerialFma  Nano      9,126 / 30,720      422 / 2,048
+    RemoteSerialFma  Mega      9,498 / 253,952     422 / 8,192
+    RemoteSerialFma  ESP32   301,511 / 1,310,720  21,032
+    RemoteSerialFma  Pico     59,444 / 2,093,056   9,172
+    RemoteReplay     Uno       8,698 / 32,256      418 / 2,048
+    RemoteReplay     Nano      8,698 / 30,720      418 / 2,048
+    RemoteReplay     Mega      9,070 / 253,952     418 / 8,192
+    RemoteReplay     ESP32   301,075 / 1,310,720  21,032
+    RemoteReplay     Pico     59,044 / 2,093,056   9,172
+    RemoteWiFiFma    ESP32   918,699 / 1,310,720  45,484
+
+The Uno figure includes the core, `Serial`'s two 64-byte rings and the
+sketch's own constants; the client's own share of it is the 152 bytes
+above. With `--warnings all --clean` every build is warning-free in this
+half's files; what is left is the cores' own (`new.cpp`'s unused `tag`
+parameter on AVR, the ESP32 IDF's touch-sensor deprecation `#warning`),
+and the Pico produces none at all.
+
+`make -C host remotetest` was run on this tree and every check passed -
+the protocol refusals, `device-test` over the full opcode matrix
+(2,656 checks), the bounded conformance replay, a workload chain and
+both round-trip benches. Nothing under `host/src` was touched and the
+only addition to `host/` is the bridge, so that is confirmation rather
+than news; it is here because a third client of a protocol is exactly
+the change that would break the other two if it had touched anything
+shared, and it touched nothing.
+
+### What was NOT run
+
+- **No board.** None was attached while this was written; the five
+  builds are compiles, and every number above the compile table comes
+  from the desktop's own compiler and from a real server over a real
+  socket and a real bridge. The commands to run on hardware are below,
+  and until one of them has run the claim about a board is a claim
+  about code that compiles for one.
+- **Nothing crossed a network.** `RemoteWiFiFma` compiles for the
+  ESP32 and its transport is exercised in the host proof only in the
+  sense that `NetTransport` and `StreamTransport` are the same
+  interface - the socket path from a board to a `--bind 0.0.0.0`
+  server has not been run.
+- **No program opcodes.** `PROG_LOAD` and the three run-with-data
+  opcodes are deliberately absent from this client: an image must be
+  held to be checksummed and holding a buffer is what the budget
+  forbids. The buffer operations and `STATS` are simply not
+  implemented.
+- **One integration point is open.** This is half of one Arduino
+  library; the on-chip half owns `library.properties` and the rest of
+  `src/`. `compile_check.py` therefore builds from a scratch copy and
+  SYNTHESISES a `library.properties` when there is none, saying so on
+  every run. On the merged tree it uses the real one.
+
+### The commands for when the boards arrive
+
+Never flash a port `arduino-cli board list` does not show a recognised
+board on, and never COM1 - that is the motherboard's serial port.
+
+    # 0. which port is which
+    arduino-cli board list
+    python host/tools/cft-serial-bridge.py --list
+
+    # 1. a server, and the ABI to claim
+    host/cft-serve --port 7754
+    python host/tools/cft-serial-bridge.py --probe-abi 127.0.0.1:7754
+    #   -> edit CFT_REMOTE_ABI in the sketch if it is not 0x0000000B
+
+    # 2. flash (COMn from step 0, and only a recognised board)
+    arduino-cli compile --fqbn arduino:avr:uno   --libraries bindings/arduino \
+        bindings/arduino/cft-arduino/examples/RemoteSerialFma
+    arduino-cli upload  --fqbn arduino:avr:uno   -p COMn \
+        bindings/arduino/cft-arduino/examples/RemoteSerialFma
+    #   arduino:avr:nano needs -p COMn --fqbn arduino:avr:nano:cpu=atmega328old
+    #   on an older bootloader; rp2040:rp2040:rpipico uploads over UF2
+
+    # 3. close every serial monitor, then run the bridge
+    python host/tools/cft-serial-bridge.py --serial COMn \
+        --server 127.0.0.1:7754 --framed --forever --verbose
+
+    # expected, on any of the four serial boards:
+    #   cft: server backend "software", 1 tile(s), formats 0xF, abi 0xB
+    #   cft: binary64  d = 0x3cc0000000000000   flags 0x10
+    #   cft: binary256 d = 0x3ff1400000000000000000000000000000000000000000000000000000000000
+    #   cft: PASS - every bit is the bit libcft computes
+
+    # 4. the sweep
+    arduino-cli upload --fqbn arduino:avr:nano -p COMn \
+        bindings/arduino/cft-arduino/examples/RemoteReplay
+    #   expected: 256 results, digest 0x9F924345, PASS
+
+    # 5. the ESP32 over Wi-Fi
+    cp bindings/arduino/cft-arduino/examples/RemoteWiFiFma/arduino_secrets_example.h \
+       bindings/arduino/cft-arduino/examples/RemoteWiFiFma/arduino_secrets.h
+    #   edit it - the .gitignore beside it keeps it out of the tree - and set
+    #   CFT_SERVER_HOST in the sketch to this machine
+    host/cft-serve --port 7754 --bind 0.0.0.0     # read docs/REMOTE.md first
+    arduino-cli upload --fqbn esp32:esp32:esp32 -p COMn \
+        bindings/arduino/cft-arduino/examples/RemoteWiFiFma
+    #   expected: the same binary256 digit string, plus a per-round-trip time
+
+    # and the two gates, on any machine, with no board at all
+    python bindings/arduino/cft-arduino/src/remote/test/host_check.py
+    python bindings/arduino/cft-arduino/src/remote/test/host_check.py --via-bridge
+    python host/tools/cft-serial-bridge.py --loopback
+    python bindings/arduino/cft-arduino/src/remote/test/compile_check.py --warnings
