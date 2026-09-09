@@ -36,7 +36,12 @@ PYTHON="${PYTHON:-python3}"
 CC="${CC:-cc}"
 ARDUINO_CLI="${ARDUINO_CLI:-arduino-cli}"
 VECTORS="${VECTORS:-$REPO/vectors/out}"
-BUILD="${BUILD:-${TMPDIR:-/tmp}/cft-arduino-verify}"
+# Under the repository's own build/ (which .gitignore covers) rather
+# than /tmp: on Windows this script runs from an MSYS shell and its
+# recipes run from make's, and the two do not always resolve /tmp to
+# the same directory - which put the logs somewhere the failure
+# reports could not read them back (2026-09-09).
+BUILD="${BUILD:-$REPO/build/arduino-verify}"
 
 QUICK=0
 BOARDS=1
