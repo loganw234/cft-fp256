@@ -1,0 +1,54 @@
+; resume-fp64 - eight steps of an iteration, entered and left through
+; the per-run scratch block
+;
+; docs/SEQUENCER.md revision 3, R5: `flags.SCRATCH_IO` and the header's
+; `scratch_io` word let the host preload the first slots of every lane
+; before a run and read them back after it. That is what makes a
+; program RESUMABLE: this one carries two values - the iterate `v` and
+; an integer step count `n` - so a run continues exactly where the
+; previous one stopped, and the second run's deposits are the second
+; half of a single longer run's.
+;
+; The step count is what makes that a real claim rather than a
+; tautology. `v` alone would resume correctly if the block carried
+; nothing but `v`; `n` is deposited too, so a block that lost it would
+; deposit 1..8 twice instead of 1..8 and then 9..16.
+;
+; The buffers are lane-major: lane i's slot s is element
+; i * n_scratch_in + s, format-width, n * n_scratch_in elements in all.
+; `positive-run --scratch-in` / `--scratch-out` are the two files, and
+; each is hashed on its own line because what a run entered with is
+; part of what ran.
+;
+; The slot names are STATE_V and STATE_N rather than V and N because
+; `.slot` shares one case-insensitive namespace with `.reg` and
+; `.const`, so a slot cannot be spelled the same as the register it
+; holds. That is deliberate: one name, one meaning, per file.
+
+.format   fp64
+.deposits 16
+.scratch  4
+.scratch  in 2
+.scratch  out 2
+
+.const    MUL  = 1.5
+.const    ADD  = 0.25
+.const    IONE = 0x0000000000000001   ; the raw encoding of integer 1
+
+.slot     STATE_V = 0   ; the iterate
+.slot     STATE_N = 1   ; the step count, an integer in the encoding
+
+.reg      v = r3
+.reg      n = r4
+
+ldl  v, STATE_V
+ldl  n, STATE_N
+repeat 8
+  fma  v, v, MUL, ADD
+  iadd n, n, IONE
+  deposit v
+  deposit n
+endrep
+stl  v, STATE_V
+stl  n, STATE_N
+halt

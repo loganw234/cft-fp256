@@ -946,3 +946,171 @@ those stay on docs/ATLAS.md's list with the measurements that will
 decide them. The wider per-sample input block is withdrawn by its
 requester - with `IMUL` in, every per-sample value is integer
 arithmetic in-lane over the index ramp.
+
+## Revision 3 (2026-09-08, evening): a per-lane scratch memory, 16,384 instructions, a 512-entry bank
+
+The second round of atlas-engine's asks (that repository's
+docs/CFT-GAPS.md: thirty positives over thirty-two registers, six over
+4,096 words, two over 256 constants, each measured over the scheduled
+programs), plus what the round adds so the same seams are not reopened
+next week. This section is the CONTRACT the 2026-09-08 evening round
+builds against; the sections above describe revision 2 and are
+updated by the round to match. Every feature is announced and refused
+by name where absent. The revision-2 images of this afternoon predate
+all of it and are unaffected.
+
+### R4. A per-lane scratch memory: load and store by slot
+
+*Build parameter `SCRATCH_D = 256` slots a lane, a power of two,
+published in `CAPS2[3:0]` as log2 with `CAPS2[4]` set; `cft_caps`
+gains `max_scratch` (slots a lane, 0 = none or unknown); feature
+`CFT_SEQ_FEAT_SCRATCH 0x100u` in `cft_caps.seq_features`.*
+
+Storage is organised like the register file - `SCRATCH_D * NBEATS`
+beats of `BEAT_BITS`, 128 KiB a tile at 256 - one write port and one
+read port, and it is the lane's: lane i's slot s is reachable by lane
+i alone. Four control codes (`ctrl = 1`):
+
+| code | name | effect |
+|---|---|---|
+| 6 | `STL ra, imm[23:0]` | `scratch[imm] := ra` |
+| 7 | `LDL rd, imm[23:0]` | `rd := scratch[imm]` |
+| 8 | `STX ra, rb` | `scratch[rb mod SCRATCH_D] := ra` |
+| 9 | `LDX rd, rb` | `rd := scratch[rb mod SCRATCH_D]` |
+
+A store is a register write for P3's purposes - masked by the lane's
+active bit, so an all-inactive loop body stays a no-op - and a load
+writes `rd`, so it is masked the same way. Neither is arithmetic:
+no rounding attribute, no flags, P1 holds as it did for `IMUL`. The
+indexed form takes the slot from the low `log2(SCRATCH_D)` bits of
+`rb`'s bit pattern, an unsigned integer where the atlas emitter keeps
+its loop counters, reduced modulo the depth - the model does the same,
+so the reduction is part of the contract rather than an accident.
+
+The reserved-field rule settles the encoding: `STL` reads `ra` (its
+high bit at `imm[25]` may be set) and `imm[23:0]`; `LDL` writes `rd`
+(`imm[24]`) and reads `imm[23:0]`; `STX` reads `ra` and `rb`
+(`imm[25]`, `imm[26]`), `LDX` writes `rd` and reads `rb` (`imm[24]`,
+`imm[26]`), and for those two `imm[23:0]` must be zero; every other
+field - the remaining register fields, `rnd`, `ka/kb/kc`, `kx` - must
+be zero on all four. A slot at or past `SCRATCH_D` in `STL`/`LDL` is
+refused by the loader by name, as a constant index past the bank is;
+an indexed access is not refused, it is reduced. Slots start at `+0`
+for every lane at the start of a run, except where R5 preloads them.
+`seq.py` gets the four codes, `SCRATCH_D`, and the refusals; the C
+executor the same; the RTL the memory, the two ports, and the four
+codes in its decode and write-back, with the same latency discipline
+as a register.
+
+### R5. The scratch as a per-run block, in and out
+
+*`CAPS2[5]` = `CFT_SEQ_FEAT_SCRATCH_IO 0x200u`.*
+
+Two older asks - the init block (enter a program with more than three
+loaded registers) and orbits' and Collatz's "load registers from a
+per-lane block" - are one mechanism once the scratch exists: the host
+may preload the first slots of every lane from a buffer before the run
+and read the first slots back after it.
+
+The header's `reserved[1]` (bytes 28..31) becomes **`scratch_io`**:
+`[15:0] = n_scratch_in`, `[31:16] = n_scratch_out`, each at most
+`SCRATCH_D`, meaningful only when **`flags` bit 1, `SCRATCH_IO`**, is
+set (with the bit clear the word must be zero, as before). A
+revision-2 tile refuses a non-zero `reserved[1]` at the header, which
+is the guard; the loader refuses `SCRATCH_IO` on a device without
+`CAPS2[5]` by name before that.
+
+The buffers are lane-major and dense: lane i's slot s of the scratch-in
+buffer is element `i * n_scratch_in + s`, format-width, `n *
+n_scratch_in` elements in all; the scratch-out buffer likewise with
+`n_scratch_out`. Padding lanes (index at or past n) receive nothing and
+write nothing. The tile reads the scratch-in block for each lane block
+after the image and the bank and before the first instruction, and
+writes the scratch-out block for each lane block after its last
+deposit; a run whose program declares no scratch I/O touches neither
+buffer and neither pointer.
+
+**Register map: `CAPS2` at 0x6C (read-only), `SCRATCH_IN_PTR` at
+0x70/0x74 and `SCRATCH_OUT_PTR` at 0x78/0x7C** - address indices
+10'h01B through 10'h01F, following BANK_PTR at 10'h019/10'h01A.
+Kernel arguments: id 9 `scratch_in` on `m_axi_a` (it rides the A master
+as the image and the bank do, in its own phase), id 10 `scratch_out` on
+`m_axi_d` beside the deposits and counts. The map grew twice, so
+**VERSION 0x700 -> 0x800**; the host accepts {0x410, 0x500, 0x600,
+0x700, 0x800}, and binds the two scratch buffers on every 0x800 run
+(a minimum one-beat buffer when the program declares none), as it
+binds the bank.
+
+`CAPS2`: `[3:0]` log2 `SCRATCH_D`, `[4]` scratch present, `[5]`
+scratch I/O present, `[7:6]` reserved, `[31:8]` reserved for the
+capacities and features that come next. `cft_caps.seq_features` bits
+`11:8` mirror `CAPS2[7:4]`.
+
+### R6. Sixteen thousand three hundred and eighty-four instructions
+
+*No feature bit: `CAPS[23:20]` publishes log2 IMEM_D and reads 14.*
+
+`SEQ_IMEM_D` 4096 -> 16384, `PCW` 14, 128 KB of instruction memory a
+tile - four UltraRAMs on the U50 part, block RAM on the open-core
+part. The header check and the worst-case bound are unchanged; hosts
+learn the depth from CAPS and nothing in the library changes but its
+tests' expectations.
+
+### R7. A ninth constant-index bit: the bank to 512
+
+*Feature bit CAPS[7], the feature nibble's last, = `cft_caps.seq_features`
+bit 3 = `CFT_SEQ_FEAT_KX9 0x08u`.*
+
+Under `kx`, `imm[28]`, `imm[29]` and `imm[30]` are the ninth bits of
+the three constant indices - `ka`'s, `kb`'s and `kc`'s respectively -
+the same construction as the fifth register bits in `imm[27:24]`, and
+`KMEM_D` becomes 512 (16 KiB at beat width), which `CAPS[27:24]`
+publishes as 9. A ninth bit is read only under `kx` for an operand
+whose `k` flag is set; set anywhere else it is an unread field and the
+program is refused. `imm[31]` STAYS reserved-must-be-zero: it is the
+cheap version guard for whatever comes after this, and the largest
+positive in the corpus needs 464 of the 512. Old loaders refuse the
+set bits by the reserved rule; the loader refuses an index at or past
+256 on a device whose CAPS[7] is clear, by name, because a revision-2
+tile's operand mux would read eight bits and address the wrong
+constant. `SEQ_ADDR_CONSTS` 512.
+
+### Host API (ABI 0.10)
+
+One entry point that takes everything a run can carry, so the
+positional signatures stop growing by an argument a round:
+
+    typedef struct cft_run_args {
+        size_t      struct_size;          /* in: sizeof(cft_run_args) */
+        const void *a, *b, *c;            /* the streams; b and c may be NULL */
+        size_t      n;
+        const void *bank;        size_t bank_bytes;         /* BANK_EXT programs */
+        const void *scratch_in;  size_t scratch_in_bytes;   /* n * n_scratch_in * esz, or NULL */
+        void       *scratch_out; size_t scratch_out_bytes;  /* n * n_scratch_out * esz, or NULL */
+        void       *deposits;    uint32_t *counts;
+        uint32_t   *flags_out;   uint32_t *bus_out;
+    } cft_run_args;
+
+    cft_status cft_program_run_ex(cft_program *prog, const cft_run_args *args);
+
+`cft_program_run` and `cft_program_run_bank` remain, as wrappers that
+fill the struct; a program that declares scratch I/O refuses both by
+name and takes `run_ex`, and a program that declares none refuses a
+non-NULL scratch buffer. Byte counts must match exactly. `cft_caps`
+gains `max_scratch`; `cft_program_info` gains `n_scratch_in`,
+`n_scratch_out` and `scratch_used` (one past the highest static slot,
+or `SCRATCH_D` when the program uses `STX`/`LDX`), all behind
+`struct_size`. The digest is unchanged - image then bank - and the
+scratch-in block is run data the runner hashes on its own line. The
+remote protocol gains `PROG_RUN_EX` (0x0024) carrying the struct's
+buffers, refused by name by an older server; the software executor
+takes the block per run; the XRT backend writes the two pointers and
+passes arguments 9 and 10.
+
+### What revision 3 does not do
+
+`CALL` (41,435 words across the corpus, deciding no fit at 16,384),
+the active mask scoped to a loop (six positives' inner loops, bounds
+6 to 32), a per-lane flag output, and a counter-indexed constant: all
+stay on docs/ATLAS.md's list with the measurements that will decide
+them.

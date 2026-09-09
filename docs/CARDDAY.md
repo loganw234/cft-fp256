@@ -46,6 +46,14 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
+- [x] **THE REVISION-2 PAIR: 2026-09-08, from 9c086d3, both halves at
+      135 MHz, verified, staged and run on the card the same afternoon**
+      (`~/cardday-rev2`; docs/VALIDATION.md, that entry). Thirty-two
+      registers a lane, 4,096 instructions, the per-run constant bank,
+      VERSION 0x700, CAPS feature nibble 0111 - it needs a host at ABI
+      0.9, which the box has. Use it for anything that needs revision
+      2; the pair below stays the proven 0x600 pair.
+
 - [x] **THE PAIR FOR THE DAY: 2026-09-07, from ed752dd, both halves
       at 135 MHz, verified and staged** (built on amd-arc-box the
       evening before card day). main as of that evening: IMUL and the

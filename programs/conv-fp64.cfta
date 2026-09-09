@@ -1,0 +1,61 @@
+; conv-fp64 - a three-tap convolution over a local array, written and
+; read through loop counters
+;
+; docs/SEQUENCER.md revision 3, R4: `stx` and `ldx` take the slot from
+; the low log2(SCRATCH_D) bits of a register's BIT PATTERN, read as an
+; unsigned integer and reduced modulo the depth. That is where the
+; atlas emitter keeps its loop counters, and it is why this program
+; needs no unrolling: one `stx` inside a loop reaches sixteen slots
+; because the counter moves, where one `stl` would reach the same slot
+; sixteen times.
+;
+; A register starts a run at +0, whose encoding IS the integer zero, so
+; `i` and `j` need no initialiser - and `iadd` on a raw 1 is how they
+; move, since the counter is an integer in the encoding and not a
+; float.
+;
+; Phase one lays down a[0..15] with a[0] = x and a[k+1] = a[k]*GROW +
+; SHIFT. Phase two deposits the fourteen inner points of
+;
+;     y[i] = a[i]*W0  +  a[i+1]*W1  +  a[i+2]*W2
+;
+; evaluated in that order, as one `mul` and two `fma`s, which is what
+; the check's model computes.
+
+.format   fp64
+.deposits 14
+.scratch  256
+
+.const    IONE  = 0x0000000000000001   ; the raw encoding of integer 1
+.const    GROW  = 1.25
+.const    SHIFT = 0.5
+.const    W0    = 0.25
+.const    W1    = 0.5
+.const    W2    = 0.25
+
+.reg      i   = r3      ; the write index; +0 is the integer 0
+.reg      v   = r4      ; the sample being written
+.reg      j   = r5      ; the read index
+.reg      s   = r6      ; one sample, read back
+.reg      acc = r7
+
+copysign v, r0, r0            ; a[0] = x, exactly
+repeat 16
+  stx  v, i                   ; a[i] = v
+  iadd i, i, IONE
+  fma  v, v, GROW, SHIFT      ; the next sample
+endrep
+
+repeat 14
+  ldx  s, j                   ; a[j]
+  mul  acc, s, W0
+  iadd j, j, IONE
+  ldx  s, j                   ; a[j+1]
+  fma  acc, s, W1, acc
+  iadd j, j, IONE
+  ldx  s, j                   ; a[j+2]
+  fma  acc, s, W2, acc
+  isub j, j, IONE             ; net +1 a trip: the window slides by one
+  deposit acc
+endrep
+halt

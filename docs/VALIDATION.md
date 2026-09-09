@@ -7250,3 +7250,327 @@ job - so the leg was rerun at 32.
 and the revision-2 hardware, which merged the same day and gets its own
 pair next. Run records: `/tmp/step*.log`, `/tmp/bench-*.csv`,
 `/tmp/soak*.log` on the box.
+
+## 2026-09-08 - revision 3, the tools half: the scratch in the text form, five new library rows, and four skips that name what they wait on
+
+The tools half of the sequencer's revision-3 round (docs/PROGRAMS.md's
+last section, docs/SEQUENCER.md's "Revision 3 (2026-09-08, evening)"),
+on a worktree branched from 0e3fb89 on `shared-lanes`. Machine: this
+Windows box, DESKTOP-T33SK86, gcc 16.1.0 (mingw64), Python 3.12.9
+(Miniconda), software backend throughout - nothing here touched a
+device, the emulation host or the card.
+
+**What was built.** `python/cft_golden/asm.py` and
+`host/tools/cft-asm.c` gain R4's four control codes, R5's `scratch_io`
+header word and R7's ninth constant-index bit;
+`host/tools/positive-run.c` gains `--scratch-in` / `--scratch-out` and
+the `cft_program_run_ex` path; `programs/` grows from twelve rows to
+seventeen; `programs/check.py` gains four row checks and a generated
+revision-3 corpus; `python/tests/test_asm.py` goes from 49 tests to
+107.
+
+**The runs, in order.**
+
+    make golden                     2130 passed, 8 skipped, 157.2 s
+                                    (PYTEST_JOBS=4 and the absolute
+                                    Miniconda path as PYTHON; 107 of
+                                    those are test_asm.py, 1.3 s alone,
+                                    3 of them skipped on the model)
+    make programs-check             66 passed, 0 failed, 4 skipped,
+                                    17 images, 7.4 to 13.6 s across
+                                    runs (a clean `make -C host clean`
+                                    first, then 8.6 s)
+    cft-asm vs asm.py, ad hoc       19 hand-written revision-3 cases -
+                                    nine that assemble and ten that
+                                    are refused: static slots, indexed
+                                    slots, both scratch-I/O halves,
+                                    depths of 16 to 2048, ninth index
+                                    bits on all three operands, a
+                                    512-constant bank. Identical
+                                    bytes, identical disassembly,
+                                    identical `-i`, and the ten
+                                    refusals worded the same in both
+                                    languages
+    negative controls               7 tampered trees, 7 caught
+    verify/run.sh --only workloads  PASS, 89 s
+
+The workloads are run because this round touches `host/tools`: Collatz
+18,110 comparisons, enclose 2,664, Mersenne 391, orbits 26 checks
+against the 300-digit oracle, zoom 11,223 - 0 failures each, all five
+unchanged and green.
+
+One trap, and it is the same one as last round one step over.
+`verify/run.sh` picks its interpreter with `command -v python`, and
+`PATH="/c/msys64/mingw64/bin:$PATH"` puts mingw64's python first,
+which has no mpmath - so the stage SKIPped in five seconds with
+"python has no mpmath module". Appending mingw64 instead of prefixing
+it is not the fix either: `gcc` then resolves to mingw32's, a 32-bit
+compiler beside a 64-bit interpreter, which is exactly what
+host/Makefile's header warns about. What works is putting the
+Miniconda directory in FRONT of mingw64's:
+
+    PATH="/c/Users/logan/AppData/Local/Programs/Miniconda3:/c/msys64/mingw64/bin:$PATH"
+
+so `gcc` is mingw64's and `python` is Miniconda's.
+
+**What `make programs-check` checks now.** The three layers from last
+round, plus two more:
+
+4. **a generated revision-3 corpus**, beside revision 2's, because the
+   five new rows cannot be EXECUTED on this tree and a round trip that
+   never saw a ninth index bit would be revision 2's round trip with
+   extra steps. 97 of 120 generated programs, identical in both
+   languages by bytes, disassembly, round trip and `-i` line for line
+   (the SHA-256 included): 94 use the scratch, 81 index it, 28 name a
+   static slot past 255 behind a declared depth, 55 carry a per-run
+   block, 30 need KX9. `test_asm.py` runs a second generator of the
+   same shape through asm.py alone - 167 of 200 accepted, 162 with the
+   scratch, 136 indexing, 43 past slot 255, 94 with a block, 49
+   needing KX9 - and each stage ASSERTS what it reached rather than
+   assuming it.
+
+5. **each new row's static arm**, which runs today: `spill-fp64`'s two
+   constants and its forty stores and forty loads over exactly slots
+   0..39; `conv-fp64`'s six constants against their derivation and
+   that it has no static slot at all; `resume-fp64`'s `scratch_io`
+   word, both counts and its flag; `horner-wide-fp64`'s BANK_EXT
+   shape, its forty-four ninth index bits and its committed bank
+   against `C[k] = (-1)^k / (k+1)`.
+
+`spill-ref-fp64` is the one new row whose EXECUTION arm runs here: 64
+lanes through `positive-run` against a softfloat model of the same
+forty-term recurrence, bit for bit.
+
+**The four SKIPs, and what each waits on.** `positive-run
+--capabilities` on this build reports
+
+    bank-path     present
+    digest        cft_program_digest
+    kx9           absent   (cft.h defines no CFT_SEQ_FEAT_KX9)
+    scratch       absent   (cft.h defines no CFT_SEQ_FEAT_SCRATCH)
+    scratch-io    absent   (cft.h defines no CFT_SEQ_FEAT_SCRATCH_IO)
+    run-path      cft_program_run / cft_program_run_bank
+
+- `spill-fp64: the same deposits as spill-ref-fp64` - waits on
+  `CFT_SEQ_FEAT_SCRATCH`, R4's four control codes in libcft's
+  executor;
+- `conv-fp64: the convolution against the model` - the same, for
+  `stx`/`ldx`;
+- `resume-fp64: two runs against one longer run` - waits on
+  `CFT_SEQ_FEAT_SCRATCH_IO` and `cft_program_run_ex`;
+- `horner-wide-fp64: the Horner against a softfloat one` - waits on
+  `CFT_SEQ_FEAT_KX9`, R7's ninth index bit.
+
+Last round's one SKIP is gone: `cft_program_run_bank` and
+`cft_program_digest` landed with the host half of the afternoon, and
+`horner-bank-fp64: both banks through cft_program_run_bank` now
+PASSES, identical to the spliced images. That is the pattern working
+once through, which is the reason to trust it a second time.
+
+**INTEGRATOR: the three tests that need the widened `seq.py`.** In
+`python/tests/test_asm.py`, gated and skipping here:
+
+    test_the_spill_and_its_twin_agree_in_the_model     R4, stl/ldl
+    test_the_convolution_runs_in_the_model             R4, stx/ldx
+    test_a_constant_past_255_reaches_the_model         R7
+
+They are gated on a BEHAVIOURAL probe, not on a version number or an
+attribute name: each assembles the smallest program that needs its
+feature and asks `seq.run` to run it, so nothing in this lane has to
+guess what the model lane will call things, and there is no flag to
+flip after the merge - they turn themselves on. A fourth test,
+executing a scratch-I/O program in the model, is deliberately NOT
+written: it needs a `seq.run` that takes the block, and only the model
+lane can name that argument. What this tree can assert about R5's
+header - the flag, the word, the byte offsets, the round trip - it
+asserts.
+
+The four `check.py` SKIPs are the integrator's other flip, and they
+need no edit either: each asks `positive-run --capabilities` and runs
+the moment the macro exists.
+
+**The negative controls.** Seven tampered trees, each run through
+`check.py` and restored:
+
+    a MANIFEST hash off by one nibble       rc=1, names the row
+    spill-fp64's W 0.5 -> 0.25              rc=1 at the MANIFEST and
+                                            at "ONE and W are not 1.0
+                                            and 0.5"
+    spill-fp64's last store 39 -> 38        rc=1 at the MANIFEST, and
+                                            (after the fix below) at
+                                            "40 stl over 39 slots"
+    resume-fp64's .scratch out 2 -> 3       rc=1 at the MANIFEST and
+                                            at "in 2, out 3; want 2
+                                            and 2"
+    conv-fp64's W1 0.5 -> 0.75              rc=1 at the MANIFEST and
+                                            at "constant 4 ... vs the
+                                            derived"
+    one bit of the wide bank flipped        rc=1: "the committed file
+                                            does not match its own
+                                            derivation"
+    horner-wide's C299 -> C298              rc=1 at the MANIFEST
+
+The third found a real hole and is the reason a commit exists for it.
+The check originally asserted the HIGHEST static slot and the COUNTS
+of `stl` and `ldl`, and moving one store from slot 39 to slot 38
+changes neither - phase two still reads 39, and there are still forty
+of each. Forty stores over thirty-nine slots is a different program,
+so the check now requires each of slots 0..39 to be written once and
+read once. A count and a maximum are not a set.
+
+**Decisions the contract left open, taken and recorded.**
+
+*The scratch depth is a source-level declaration and is not in the
+image.* `SCRATCH_D` is a build parameter published in `CAPS2[3:0]`, so
+an image is legal against whatever depth the device has. `.scratch N`
+is what the PROGRAM assumes, and a readback INFERS the smallest power
+of two - at least the default 256 - that covers every static slot and
+both scratch-I/O counts, which both implementations compute the same
+way and the disassembler writes back when it is not the default. The
+alternative, defaulting a reader to 256, would refuse a perfectly
+legal program written for a 512-slot tile, and a readback that refuses
+legal images is not a readback.
+
+*Either half of `.scratch in` / `.scratch out` sets the flag, a count
+of zero included.* The flag says the header word is MEANINGFUL. Making
+zero mean "no flag" would make `in 0, out 4` unspellable and the round
+trip ill-defined.
+
+*`.slot` shares one case-insensitive namespace with `.reg` and
+`.const`.* One name, one meaning, per file. It cost the round's first
+`resume-fp64.cfta` its `V` and `N`, which are now `STATE_V` and
+`STATE_N`, and the source says why.
+
+*`cft-asm -i` reports the highest static slot and whether the program
+indexes, but NOT the depth*, because the depth is not a property of
+the image and printing an inferred number under a header that
+otherwise reports facts would be a small lie.
+
+*The feature order is CAPS bit order, then CAPS2's*: `kx`, `REGS32`,
+`BANK_PTR`, `KX9`, `IMUL`, `SCRATCH`, `SCRATCH_IO`. `IMUL` stays where
+it is relative to the CAPS word rather than being pushed to the end.
+
+*`--scratch-in` is required where the header declares one;
+`--scratch-out` is optional.* The first is run DATA and the rule is
+`--bank`'s: a run whose data nobody agreed on is what these rules
+exist to make impossible. The second is a place to WRITE, like
+`--out`, so the buffer is allocated and hashed either way.
+
+*The digest line is unchanged, and the two blocks get hashes of their
+own.* `cft_program_digest` answers "which program and which
+constants"; the block a run entered with is a third thing, and folding
+it into that number would change what a plate's existing digest means.
+
+*A fifth library row.* The contract asked for four programs;
+`spill-ref-fp64` is a fifth, because "checked against the same
+arithmetic without the spill" needs that arithmetic to exist as
+something, and a committed program that runs today and passes against
+a softfloat model is a better something than a string inside
+`check.py`. It earns its row by that check.
+
+**Two things worth reading closely.**
+
+*The two spill programs are the same arithmetic, and that is a claim
+about ORDER, not about instructions.* Both perform forty `mul`s and
+thirty-nine `fma`s with identical operands. `spill-fp64` issues all
+forty muls first, so forty values are live at once; `spill-ref-fp64`
+interleaves, so two are. The results are bit-identical because a
+floating-point operation is a function of its operands and neither
+program reorders one relative to its own inputs - and the sticky flag
+word matches too, because it is an OR over the same set of operations.
+The files differ by eighty scratch accesses on one side and a single
+exact `copysign` on the other, and neither of those is arithmetic.
+
+*A count and a maximum are not a set* - see the third negative control
+above. It is the second time this round that a check which looked
+sufficient was not, and both times a tampered tree said so.
+
+**One bug, found by the first full run.** `header.uses_kx9` in
+`positive-run.c` was declared and never zeroed, and `header H;` is an
+automatic - so an uninitialised byte refused eleven perfectly ordinary
+images with a message about a feature none of them used. It failed
+loudly and immediately, which is the good kind, but it is worth
+recording that the new field was added to the struct and to the
+scanner and not to the initialiser.
+
+**Not done, and not claimed.** No device, no emulation, no RTL. The
+four control codes, the per-run block and the ninth index bit exist in
+both assemblers, in five library programs and in 264 generated corpus
+programs across the two stages, and NOTHING IN THIS TREE CAN EXECUTE
+ONE - which is why four checks say SKIP and name what they wait on
+rather than a fifth row appearing whose check is "it assembles". The
+cross-check of `asm.py` against a widened `seq.encode`, of the four
+codes against libcft's executor, and of `cft_program_run_ex` against
+the model's own block, belong to the integrator after the three lanes
+merge.
+
+## 2026-09-08 - the revision-2 pair on silicon: thirty-two registers, 4,096 instructions and the per-run bank, the same afternoon
+
+Built on amd-arc-box from 9c086d3 (main, whose rtl/ and hw/ are the
+revision-2 merge a1113be exactly) by the same detached chain as the
+card-day pair, the same recipe - 135 MHz, retiming + phys_opt, 130 MHz
+fallback per half - and tested on the card the moment each half was
+staged, while the other was still routing:
+
+    r2-135single  one tile,   135 MHz   15:20 -> 17:18 (117 min)
+                  routed WNS +0.055  kernel WNS +0.436  0 failing of 562,083  WHS +0.009
+                  worst: op_r -> g_bank64 lane 3 s0_byp_d, 19 levels (the seedop bypass family)
+                  35,608,395 bytes  sha256 b608a97d...e88a69  verify-image 8/8
+r2-135quad    four tiles, 135 MHz   15:22 -> 19:34 (252 min)
+                  routed WNS +0.022  TNS 0  0 failing of 986,021  WHS +0.009
+                  kernel WNS +0.122: u_fifo_a -> g_lane32[0] s0_byp_d, 17 levels (the same bypass family)
+                  51,334,073 bytes  sha256 9cc37462...dcaf56  verify-image 8/8
+
+Both closed at 135 with more margin than the card-day pair (+0.436
+against +0.316 on one tile, +0.122 against +0.067 on four); 130 was
+never needed.
+
+**On the card, the quad** (`~/cardday-rev2/cft_hw_quad.xclbin`),
+run while its own record was being written:
+
+    device: backend xrt, 4 tiles, contract 0x00000700, formats fp32 fp64 fp128 fp256
+    device reports max_deposits 64, max_insns 4096, max_consts 256, seq_features 0x17
+
+    device-test -q -n 8       858 checks, 0 failed
+    device-test -n 4096       2,446 checks, 0 failed
+    device-test -r            890 checks, 0 failed
+    the Newton program on r20/r31, and the Horner with each of its two banks:
+                              the same three deposit hashes as the single tile and as software
+    cft-selftest vectors/out   168 sets, 1,071,635 cases, all matching, 19:39 -> 19:49 (626 s)
+
+The single closed with MORE margin than the 0x600 single of the day
+before (+0.436 against +0.316): the doubled register file and the
+deeper instruction memory cost nothing at the card's clock, as the
+out-of-context measurement had said (docs/VALIDATION.md, the contract
+half's entry), and the placer found a slightly better arrangement.
+
+**On the card, the single** (`~/cardday-rev2/cft_hw_single.xclbin`):
+
+    device: backend xrt, 1 tile, contract 0x00000700, formats fp32 fp64 fp128 fp256
+    device reports max_deposits 64, max_insns 4096, max_consts 256, seq_features 0x17
+
+    device-test -q -n 8       858 checks, 0 failed   (670 on the 0x600 image: registers 16..31,
+                                                      the bank, the digest and the kx probe now run)
+    device-test -n 4096       2,446 checks, 0 failed (the partition check's tail slice, on hardware)
+    device-test -r            890 checks, 0 failed
+    cft-selftest vectors/out   168 sets, 1,071,635 cases, all matching, 17:19 -> 17:30 (642 s beside the quad's routing)
+
+and the two things only this hardware can do, each run on the software
+backend and on the card with `positive-run` and compared by the
+deposit buffer's SHA-256:
+
+    a Newton reciprocal on r20 and r31 (fp64, 4,096 elements)
+        software 61c1ca0e...  card 61c1ca0e...  flags inexact on both
+    programs/horner-bank-fp64, the external bank supplied per run
+        exp.bank   software 9ad28ff0...  card 9ad28ff0...
+        ramp.bank  software 67190bbd...  card 67190bbd...
+
+The per-run bank travels through BANK_PTR and kernel argument 8 on
+real silicon; two banks give two answers, and each answer is the
+software backend's to the bit.
+
+The pair lives in `~/cardday-rev2` beside the card-day pair; it needs
+a host at ABI 0.9, which the box has (`make libcft-test XRT=1` and the
+program library's check both green there the same afternoon). The
+card-day runbook now names it as the pair for the revision-2 work and
+keeps `~/cardday-0907` as the proven 0x600 pair.
