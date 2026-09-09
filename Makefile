@@ -33,7 +33,7 @@ BUILD    := build
 
 .PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin \
         libcft libcft-test libcft-diff libcft-seq libcft-docker clean help \
-        programs programs-check
+        programs programs-check embedded
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
@@ -45,6 +45,10 @@ help:
 	@echo "libcft-docker  the same library tests on a second platform"
 	@echo "programs     assemble programs/*.cfta into programs/out, write MANIFEST"
 	@echo "programs-check  re-assemble with the model, compare, run every check"
+	@echo "embedded     the microcontroller gate (docs/EMBEDDED.md): the"
+	@echo "             vendored copy against host/, the loopback in four"
+	@echo "             profiles, the vectors replayed through each, the"
+	@echo "             negative control, and every example for every board"
 	@echo "verify       the standardized verification run (verify/README.md)"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "docker-image build the simulation container"
@@ -128,6 +132,22 @@ programs-check:
 	$(MAKE) -C host cft-collatz$(HOSTEXE)
 	$(PYTHON) programs/check.py --asm host/cft-asm$(HOSTEXE) \
 		--runner host/positive-run$(HOSTEXE) --tools-dir host
+
+# The microcontroller gate (docs/EMBEDDED.md). Every leg that needs no
+# board: the vendored copy of libcft under bindings/arduino checked
+# against host/ by sha256, the replay responder built as a host process
+# in all four build profiles, the published vector sets replayed
+# through each of them, the negative control that makes those replays
+# evidence, and arduino-cli over five FQBNs by three examples.
+#
+# The arduino-cli leg is skipped by name if arduino-cli is not on PATH,
+# so this target is useful on a machine with no board toolchain at all;
+# --no-boards skips it deliberately and --quick shortens the census.
+#   make embedded EMBEDDED_ARGS=--quick
+EMBEDDED_ARGS ?=
+embedded:
+	PYTHON="$(PYTHON)" CC="$(CC)" TMP="$(TMP)" TEMP="$(TEMP)" \
+		bindings/arduino/verify.sh $(EMBEDDED_ARGS)
 
 # The library's own tests on a second platform. The point is the
 # checksum lines printed by the examples: identical here and on the

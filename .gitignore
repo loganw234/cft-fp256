@@ -130,6 +130,18 @@ host/fuzz/corpus/*/q[0-9a-f]*
 # are tens of kilobytes of decimal and do not belong in the tree.
 host/fuzz/corpus/ckpt/
 
+# The replay responder built as a host process (docs/EMBEDDED.md,
+# make -C bindings/arduino/loopback). Four binaries, one per build
+# profile, each generated from the vendored library beside it.
+#
+# The VENDORED SOURCES under bindings/arduino/cft-arduino/src/cft are
+# NOT build products and are committed: an Arduino build cannot reach
+# outside a library directory, so the library has to contain them.
+# bindings/arduino/vendor.json holds a sha256 for each and
+# `sync.py --check` is what keeps that copy honest.
+bindings/arduino/loopback/cft-replay-loopback-*
+bindings/arduino/loopback/*.o
+
 # programs/ build products: the images are assembled from the .cfta
 # sources by `make programs` and their hashes are in programs/MANIFEST,
 # which IS committed - the images themselves are not
