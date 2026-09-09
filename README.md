@@ -225,6 +225,12 @@ registers a lane, 4,096 instructions, the constant bank as per-run
 data with one digest over image and bank, and programs as files - a
 text form, an assembler in two languages held byte for byte, a
 library with a check per program, and a runner (docs/PROGRAMS.md).
+ABI 0.10, the same evening, is the third revision, built to
+atlas-engine's measured second round of asks: a 256-slot scratch
+memory a lane with load and store by slot, its first slots carried
+into and out of a run as per-lane blocks, 16,384 instructions, a
+512-entry bank through a ninth index bit, and one `cft_program_run_ex`
+that takes everything a run carries, the two older calls wrapping it.
 What stays outside is named rather than implied: the
 decimal formats (a different datapath, effectively their own tile),
 clause 8's alternate exception handling, and NaN payload propagation

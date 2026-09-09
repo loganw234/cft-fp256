@@ -187,6 +187,69 @@ instructions, and a positive's program takes one stream and leaves
 two free. The optional `CALL` remains, measured rather than guessed:
 at 4,096 words all but the worst handful of positives fit without it.
 
+### The second round: what stops the other thirty. BUILT 2026-09-08, evening
+
+atlas-engine's docs/CFT-GAPS.md measured, over the scheduled programs
+of the corpus, what stops the thirty positives that do not fit
+revision 2: thirty over thirty-two registers as scheduled (twenty-three
+still over with every per-run value hoisted into the bank, five of
+them above sixty-four - `throughput` 183, `vlsi` 134, `rule30` 128,
+`threebody` 102, `universal` 91 - and those are live values carried
+through a loop, not scheduling slack), six over 4,096 words (the
+largest, `throughput`, 12,618), and two over 256 constants
+(`throughput` 464 with the hoisted frontier in the bank, `vlsi` 318).
+It asked for three things. Revision 3 of the sequencer
+(docs/SEQUENCER.md, R4 to R7; docs/PROGRAMS.md for the text form)
+builds the three and one more, golden model first as always:
+
+6. **A per-lane spill memory. BUILT.** 256 slots a lane, the lane's
+   own, reached by four control codes: `STL`/`LDL` by a static slot
+   in the immediate, `STX`/`LDX` by a register's low bits reduced
+   modulo the depth. A store is a register write for the active
+   mask's purposes, a load writes `rd`, neither rounds or raises a
+   flag. Published as log2 depth in CAPS2[3:0] behind CAPS2[4]
+   (`CFT_SEQ_FEAT_SCRATCH`), read as `cft_caps.max_scratch`, refused
+   by name where absent. The spiller is the engine's; the memory
+   and the `stl`/`ldl` mnemonics are here, with a forty-term spill
+   held to the same arithmetic without one in the program library.
+7. **The image to 16,384 words. BUILT.** Through the CAPS field that
+   already published the depth, as revision 2's 4,096 was. It holds
+   every positive as it lowers today, with room for the spills.
+8. **The bank to 512. BUILT.** Under `kx`, `imm[28]`, `imm[29]` and
+   `imm[30]` are the ninth bits of the three constant indices - the
+   construction of R1's fifth register bits - behind CAPS[7]
+   (`CFT_SEQ_FEAT_KX9`), `KMEM_D` 512; `imm[31]` stays reserved as
+   the next version guard. A revision-2 tile would read eight bits
+   and address the wrong constant in silence, which is why this took
+   a CAPS bit and not only the reserved-bit rule.
+9. **The scratch as a per-run block, in and out.** Not asked this
+   round, but two older asks - the init block, and the orbits
+   workload's per-lane register load - are one mechanism once the
+   scratch exists: the header's second reserved word carries
+   `n_scratch_in` and `n_scratch_out` under flags bit 1, the host
+   preloads the first slots of every lane from a lane-major buffer
+   before the first instruction and reads the first slots back after
+   the last deposit, through `SCRATCH_IN_PTR` and `SCRATCH_OUT_PTR`
+   (0x70/0x74 and 0x78/0x7C, kernel arguments 9 and 10; the map grew,
+   so VERSION is 0x800; CAPS2[5], `CFT_SEQ_FEAT_SCRATCH_IO`). On the
+   host, ABI 0.10's `cft_program_run_ex` takes everything a run
+   carries in one `cft_run_args`, and the two older calls are
+   wrappers over it, so the positional signatures stop growing by an
+   argument a round. A program run twice with its state carried out
+   and back in, held to one longer run, is the library's check.
+
+Measured and not asked, as that file says and this one keeps:
+`CALL` (41,435 words of inlined copies across the corpus, 2,065 of
+them in `throughput`, which it would still leave at 8,330 - so it
+halves most images and decides no positive's fit once the image is
+16,384), the active mask scoped to a loop (six positives' inner
+loops, bounds 6 to 32; `SETACT` at the top level already serves the
+other forty-two and the engine did that the same evening), and a
+per-sample clock (0 to 3 bank slots a positive when the shutter is
+open). What the engine does next is its own list in that file:
+hoisting the per-run frontier into the bank, copy coalescing, then
+the spiller against item 6 and the parity harness behind it.
+
 ## Deposition, the half the tile does not do yet
 
 On a GPU the deposit is a float atomic into the plate, and the order
@@ -276,6 +339,11 @@ deposition that column alone can claim.
    measures on the sixty-eight positives rather than guesses; the
    wider input block is withdrawn (item 3 above) and the two
    capacities that were the other half of this step are built.
+   Measured 2026-09-08, evening (atlas-engine's docs/CFT-GAPS.md):
+   41,435 words across the corpus, and it decides no positive's fit
+   once the image is 16,384 - so it stays optional with its number
+   known, and the second round's spill memory, deeper image and
+   wider bank (items 6 to 9 above) are built in its place.
 5. **The GPU record capture and the per-sample comparison**
    (atlas-engine), then the negative's hash beside the matrix.
 
