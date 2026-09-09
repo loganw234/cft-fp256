@@ -61,6 +61,37 @@ fails=0
 skips=0
 mkdir -p "$BUILD"
 
+# ---- the Windows profile, when make took it away -------------------
+#
+# MSYS2's make hands a recipe a stripped environment: HOME, PATH and a
+# few system variables, and no USERPROFILE, APPDATA or LOCALAPPDATA.
+# arduino-cli keeps its cores under %LOCALAPPDATA%\Arduino15 and reads
+# the profile to find it, so under `make embedded` it reported
+#
+#   Unable to get user home dir: %userprofile% is not defined
+#   Error during build: Platform 'arduino:avr' not found
+#
+# on a machine where arduino:avr is installed - and started downloading
+# a fresh toolchain into a directory nobody asked for. host/Makefile
+# hit the same thing with dotnet, go, julia and R, and its WINENV block
+# is where this comes from; the registry is asked because HKCU's
+# Volatile Environment is the profile Windows itself uses and reg.exe
+# reads it whatever the process environment lost. `//v`, not `/v`: from
+# an MSYS shell a lone /v is rewritten into a path before reg.exe sees
+# it.
+if [ -z "${USERPROFILE:-}" ] && command -v reg > /dev/null 2>&1; then
+  WINHOME=$(reg query "HKCU\\Volatile Environment" //v USERPROFILE 2>/dev/null \
+            | sed -n 's/.*REG_SZ[[:space:]]*//p' | tr -d '\r')
+  if [ -z "$WINHOME" ] && command -v cygpath > /dev/null 2>&1; then
+    WINHOME=$(cygpath -w "$HOME" 2>/dev/null)
+  fi
+  if [ -n "$WINHOME" ]; then
+    export USERPROFILE="$WINHOME"
+    export APPDATA="$WINHOME\\AppData\\Roaming"
+    export LOCALAPPDATA="$WINHOME\\AppData\\Local"
+  fi
+fi
+
 banner() { printf '\n=== %s ===\n' "$1"; }
 pass()   { printf 'PASS  %s\n' "$1"; }
 fail()   { printf 'FAIL  %s\n' "$1"; fails=$((fails + 1)); }
