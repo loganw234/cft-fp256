@@ -362,6 +362,10 @@ def unchecked(fmt, insns, consts=(), max_deposits=1):
     # would fail for the wrong reason.
     p.flags = 0
     p._n_consts = len(p.consts)
+    # Revision 3 adds two more `run()` reads on entry, on the same
+    # terms.
+    p.n_scratch_in = 0
+    p.n_scratch_out = 0
     return p
 
 
