@@ -7,6 +7,7 @@
  *
  *   positive-run <image.cftp> (--iota n | --a A [--b B] [--c C])
  *                [--bank bank.bin] [--out deposits.bin]
+ *                [--scratch-in in.bin] [--scratch-out out.bin]
  *                [--device sw|<xclbin>]
  *
  * It is the SAME BINARY on the software backend, in emulation and on
@@ -41,6 +42,28 @@
  * followed by the bank bytes, which is what the library computes. The
  * two are the same bytes either way, and that is checkable the day
  * both exist.
+ *
+ * ---------------------------------------------------------------
+ * The scratch, and a THIRD run path
+ * ---------------------------------------------------------------
+ *
+ * docs/SEQUENCER.md revision 3 gives every lane a scratch memory
+ * (R4), and lets the host preload its first slots and read them back
+ * (R5, `flags.SCRATCH_IO` and the header's `scratch_io` word). Those
+ * buffers are run data exactly as the bank is, so `--scratch-in` and
+ * `--scratch-out` name files of raw format-width values, LANE-MAJOR
+ * and dense - lane i's slot s is element `i * n_scratch_in + s`, and
+ * the file is exactly `n * n_scratch_in` elements. The tool prints the
+ * SHA-256 of each on its own line, because what went in is as much
+ * part of what ran as the image is; the `digest` line is unchanged,
+ * image then bank, which is what `cft_program_digest` returns.
+ *
+ * The run itself then goes through `cft_program_run_ex` and the
+ * `cft_run_args` struct - ABI 0.10's one entry point that takes
+ * everything a run can carry - compiled under `CFT_SEQ_FEAT_SCRATCH_IO`
+ * the way the bank path is compiled under `CFT_SEQ_FEAT_BANK_PTR`.
+ * Without the macro this tool still builds and still runs every image
+ * that does not need the scratch, and refuses one that does BY NAME.
  */
 
 #include <stdarg.h>
@@ -51,9 +74,17 @@
 
 #include "cft.h"
 
-#define HEADER_BYTES  32
-#define FLAG_BANK_EXT 0x1u
-#define MAX_ESZ       32
+#define HEADER_BYTES    32
+#define FLAG_BANK_EXT   0x1u
+#define FLAG_SCRATCH_IO 0x2u
+#define FLAGS_KNOWN     (FLAG_BANK_EXT | FLAG_SCRATCH_IO)
+#define MAX_ESZ         32
+/* The four control codes of docs/SEQUENCER.md's R4, read here so the
+ * tool can name what an image needs before the loader is handed it. */
+#define C_STL 6
+#define C_LDL 7
+#define C_STX 8
+#define C_LDX 9
 
 /* ---- failure ------------------------------------------------------- */
 
@@ -365,10 +396,13 @@ static uint32_t get_le32(const uint8_t *p)
 
 typedef struct {
     uint32_t n_insns, n_consts, max_deposits, prec, flags;
+    uint32_t n_scratch_in, n_scratch_out;
+    int      uses_scratch;      /* any of the four control codes */
 } header;
 
 static void parse_header(const uint8_t *img, size_t n, header *H)
 {
+    uint32_t scratch_io;
     if (n < HEADER_BYTES)
         die("the image is shorter than a header");
     if (get_le32(img) != 0x50544643u)
@@ -381,13 +415,43 @@ static void parse_header(const uint8_t *img, size_t n, header *H)
     H->max_deposits = get_le32(img + 16);
     H->prec         = get_le32(img + 20);
     H->flags        = get_le32(img + 24);
+    scratch_io      = get_le32(img + 28);
+    H->uses_scratch = 0;
     if (H->prec > 3)
         die("precision code %u is not on the ladder", (unsigned)H->prec);
-    if (get_le32(img + 28))
-        die("reserved header word 7 must be zero");
-    if (H->flags & ~FLAG_BANK_EXT)
-        die("header flags 0x%08x: only BANK_EXT is defined",
-            (unsigned)H->flags);
+    if (H->flags & ~FLAGS_KNOWN)
+        die("header flags 0x%08x: only BANK_EXT and SCRATCH_IO are "
+            "defined", (unsigned)H->flags);
+    if (!(H->flags & FLAG_SCRATCH_IO) && scratch_io)
+        die("reserved header word 7 must be zero unless flags.SCRATCH_IO "
+            "says it is scratch_io");
+    H->n_scratch_in  = scratch_io & 0xFFFFu;
+    H->n_scratch_out = (scratch_io >> 16) & 0xFFFFu;
+}
+
+/* Does the instruction stream reach the scratch at all? Read here so
+ * that a build without the scratch can say WHICH feature it lacks,
+ * rather than letting cft_program_load report an unknown control code.
+ * The image is already known to be exactly its header, constants and
+ * instructions by the time this runs. */
+static void scan_scratch(const uint8_t *img, size_t bytes, header *H,
+                         size_t esz)
+{
+    size_t off = HEADER_BYTES +
+                 ((H->flags & FLAG_BANK_EXT) ? 0 : (size_t)H->n_consts * esz);
+    uint32_t i;
+    for (i = 0; i < H->n_insns; i++) {
+        const uint8_t *w = img + off + (size_t)i * 8;
+        uint32_t lo;
+        if (off + (size_t)i * 8 + 8 > bytes)
+            return;
+        lo = get_le32(w);
+        if ((lo >> 31) & 1u) {
+            uint32_t code = lo & 0xFFu;
+            if (code >= C_STL && code <= C_LDX)
+                H->uses_scratch = 1;
+        }
+    }
 }
 
 /* ---- flags, for the human line ------------------------------------- */
@@ -422,6 +486,7 @@ static void usage(void)
 "\n"
 "  positive-run <image.cftp> (--iota n | --a A [--b B] [--c C])\n"
 "               [--bank bank.bin] [--out deposits.bin]\n"
+"               [--scratch-in in.bin] [--scratch-out out.bin]\n"
 "               [--device sw|<xclbin>]\n"
 "\n"
 "  --iota n        stream a is the element index as a format-width\n"
@@ -430,6 +495,11 @@ static void usage(void)
 "                  element count comes from --a's length\n"
 "  --bank PATH     a BANK_EXT program's constants: n_consts values,\n"
 "                  raw, format-width, dense\n"
+"  --scratch-in PATH   the per-run scratch block a SCRATCH_IO program\n"
+"                  enters with: raw, format-width, LANE-MAJOR, exactly\n"
+"                  n * n_scratch_in elements\n"
+"  --scratch-out PATH  where to write the block it leaves, likewise\n"
+"                  n * n_scratch_out elements\n"
 "  --out PATH      write the raw deposit buffer\n"
 "  --device sw     the software backend (default), or an .xclbin\n"
 "  --capabilities  say which paths THIS BINARY carries, and exit\n"
@@ -452,9 +522,12 @@ int main(int argc, char **argv)
     const char *image_path = NULL, *bank_path = NULL, *out_path = NULL;
     const char *device = NULL;
     const char *a_path = NULL, *b_path = NULL, *c_path = NULL;
+    const char *sin_path = NULL, *sout_path = NULL;
     long long iota = -1;
     int i, have_bank_path;
     uint8_t *img = NULL, *bank = NULL;
+    uint8_t *sin_buf = NULL, *sout_buf = NULL;
+    size_t sin_bytes = 0, sout_bytes = 0;
     size_t img_bytes = 0, bank_bytes = 0;
     header H;
     size_t esz, n = 0;
@@ -491,6 +564,24 @@ int main(int argc, char **argv)
             printf("digest        local    "
                    "(no cft_program_digest in this library)\n");
 #endif
+#ifdef CFT_SEQ_FEAT_SCRATCH
+            printf("scratch       present\n");
+#else
+            printf("scratch       absent   "
+                   "(cft.h defines no CFT_SEQ_FEAT_SCRATCH)\n");
+#endif
+#ifdef CFT_SEQ_FEAT_SCRATCH_IO
+            printf("scratch-io    present\n");
+            printf("run-path      cft_program_run_ex\n");
+#else
+            printf("scratch-io    absent   "
+                   "(cft.h defines no CFT_SEQ_FEAT_SCRATCH_IO)\n");
+            printf("run-path      cft_program_run"
+#ifdef CFT_SEQ_FEAT_BANK_PTR
+                   " / cft_program_run_bank"
+#endif
+                   "\n");
+#endif
             return 0;
         } else if (!strcmp(arg, "--iota")) {
             iota = strtoll(need(argc, argv, &i), NULL, 10);
@@ -500,6 +591,10 @@ int main(int argc, char **argv)
         else if (!strcmp(arg, "--b"))   b_path = need(argc, argv, &i);
         else if (!strcmp(arg, "--c"))   c_path = need(argc, argv, &i);
         else if (!strcmp(arg, "--bank")) bank_path = need(argc, argv, &i);
+        else if (!strcmp(arg, "--scratch-in"))
+            sin_path = need(argc, argv, &i);
+        else if (!strcmp(arg, "--scratch-out"))
+            sout_path = need(argc, argv, &i);
         else if (!strcmp(arg, "--out"))  out_path = need(argc, argv, &i);
         else if (!strcmp(arg, "--device")) device = need(argc, argv, &i);
         else if (arg[0] == '-' && arg[1])
@@ -521,6 +616,7 @@ int main(int argc, char **argv)
     img = read_file(image_path, &img_bytes);
     parse_header(img, img_bytes, &H);
     esz = cft_format_size((cft_format)H.prec);
+    scan_scratch(img, img_bytes, &H, esz);
     have_bank_path = bank_path != NULL;
 
     /* what the header says the image should be, checked before the
@@ -542,6 +638,48 @@ int main(int argc, char **argv)
     if (!(H.flags & FLAG_BANK_EXT) && have_bank_path)
         die("%s carries its own constants, so --bank has nothing to "
             "supply", image_path);
+
+    /* The same, for revision 3's two halves, and for the same reason:
+     * without the macros the loader would refuse the image for an
+     * unknown control code or a non-zero reserved header word, which
+     * is true and useless. */
+#ifndef CFT_SEQ_FEAT_SCRATCH
+    if (H.uses_scratch)
+        die("%s uses the per-lane scratch (stl/ldl/stx/ldx) and this "
+            "build of libcft predates it: cft.h defines no "
+            "CFT_SEQ_FEAT_SCRATCH. Rebuild against a library that "
+            "carries docs/SEQUENCER.md revision 3's R4. "
+            "(`positive-run --capabilities` reports this without a file.)",
+            image_path);
+#endif
+#ifndef CFT_SEQ_FEAT_SCRATCH_IO
+    if (H.flags & FLAG_SCRATCH_IO)
+        die("%s declares a per-run scratch block (flags.SCRATCH_IO, "
+            "in %u out %u) and this build of libcft predates it: cft.h "
+            "defines no CFT_SEQ_FEAT_SCRATCH_IO, so cft_program_run_ex "
+            "does not exist here. Rebuild against a library that carries "
+            "docs/SEQUENCER.md revision 3's R5. "
+            "(`positive-run --capabilities` reports this without a file.)",
+            image_path, (unsigned)H.n_scratch_in,
+            (unsigned)H.n_scratch_out);
+#endif
+
+    /* The same two rules for the scratch block. A program that
+     * declares one needs it supplied - the block is run DATA, and a
+     * run whose data nobody agreed on is the failure --bank's rules
+     * exist to make impossible - while a program that declares none
+     * has nowhere to put a file it was handed. --scratch-out is
+     * different in kind: it is a place to WRITE, like --out, so it is
+     * optional and the buffer exists either way. */
+    if (H.n_scratch_in && !sin_path)
+        die("%s declares a scratch-in block of %u slots a lane: give it "
+            "with --scratch-in", image_path, (unsigned)H.n_scratch_in);
+    if (!H.n_scratch_in && sin_path)
+        die("%s declares no scratch-in block, so --scratch-in has nothing "
+            "to supply", image_path);
+    if (!H.n_scratch_out && sout_path)
+        die("%s declares no scratch-out block, so --scratch-out would "
+            "write nothing", image_path);
 
     if (have_bank_path) {
         bank = read_file(bank_path, &bank_bytes);
@@ -601,6 +739,22 @@ int main(int argc, char **argv)
         }
     }
 
+    /* ---- the scratch block, now that `n` is known ------------------ */
+    sin_bytes  = n * (size_t)H.n_scratch_in * esz;
+    sout_bytes = n * (size_t)H.n_scratch_out * esz;
+    if (sin_path) {
+        size_t got;
+        sin_buf = read_file(sin_path, &got);
+        if (got != sin_bytes)
+            die("%s is %lu bytes; %lu lanes x %u slots x %lu bytes is %lu "
+                "- the block is lane-major and dense",
+                sin_path, (unsigned long)got, (unsigned long)n,
+                (unsigned)H.n_scratch_in, (unsigned long)esz,
+                (unsigned long)sin_bytes);
+    }
+    if (sout_bytes)
+        sout_buf = (uint8_t *)xcalloc(sout_bytes, 1);
+
     /* The bank path's refusal belongs HERE, before the library is
      * handed the image - today's cft_program_load refuses a BANK_EXT
      * header for its non-zero reserved word and reports "artifact
@@ -632,6 +786,35 @@ int main(int argc, char **argv)
     dep = (uint8_t *)xcalloc(dep_bytes ? dep_bytes : 1, 1);
     counts = (uint32_t *)xcalloc(n ? n : 1, sizeof(uint32_t));
 
+#ifdef CFT_SEQ_FEAT_SCRATCH_IO
+    /* ABI 0.10's one entry point that takes everything a run can
+     * carry, so this tool stops growing a branch per feature. The
+     * struct is zeroed and struct_size-stamped, which is how a caller
+     * built against an older header still works against a newer
+     * library. */
+    {
+        cft_run_args ra;
+        memset(&ra, 0, sizeof ra);
+        ra.struct_size = sizeof ra;
+        ra.a = A;
+        ra.b = B;
+        ra.c = C;
+        ra.n = n;
+        ra.bank = bank;
+        ra.bank_bytes = bank_bytes;
+        ra.scratch_in = sin_buf;
+        ra.scratch_in_bytes = sin_buf ? sin_bytes : 0;
+        ra.scratch_out = sout_buf;
+        ra.scratch_out_bytes = sout_buf ? sout_bytes : 0;
+        ra.deposits = dep;
+        ra.counts = counts;
+        ra.flags_out = &flags;
+        ra.bus_out = &bus;
+        st = cft_program_run_ex(prog, &ra);
+        if (st != CFT_OK)
+            die_st("cft_program_run_ex", st);
+    }
+#else
     if (H.flags & FLAG_BANK_EXT) {
 #ifdef CFT_SEQ_FEAT_BANK_PTR
         st = cft_program_run_bank(prog, bank, bank_bytes, A, B, C,
@@ -649,6 +832,7 @@ int main(int argc, char **argv)
         if (st != CFT_OK)
             die_st("cft_program_run", st);
     }
+#endif
 
     /* ---- the report -------------------------------------------------- */
     printf("image         %s\n", image_path);
@@ -662,6 +846,29 @@ int main(int argc, char **argv)
     if (have_bank_path)
         printf("bank          %s, %lu bytes\n", bank_path,
                (unsigned long)bank_bytes);
+    /* The scratch block is run data, so what went in gets a hash of
+     * its own beside what came out - the digest line below covers the
+     * image and the bank, which is what cft_program_digest returns and
+     * what a plate quotes for "which program, which constants". */
+    if (H.n_scratch_in) {
+        sha256_start(&hs);
+        sha256_push(&hs, sin_buf, sin_bytes);
+        sha256_end(&hs, digest);
+        hex32(digest, hex);
+        printf("scratch-in    %s  %s, %lu bytes (%lu lanes x %u)\n",
+               hex, sin_path, (unsigned long)sin_bytes,
+               (unsigned long)n, (unsigned)H.n_scratch_in);
+    }
+    if (H.n_scratch_out) {
+        sha256_start(&hs);
+        sha256_push(&hs, sout_buf, sout_bytes);
+        sha256_end(&hs, digest);
+        hex32(digest, hex);
+        printf("scratch-out   %s  %s%s%lu bytes (%lu lanes x %u)\n",
+               hex, sout_path ? sout_path : "", sout_path ? ", " : "",
+               (unsigned long)sout_bytes, (unsigned long)n,
+               (unsigned)H.n_scratch_out);
+    }
     printf("device        %s\n",
            (device && strcmp(device, "sw")) ? device : "software");
 
@@ -709,6 +916,8 @@ int main(int argc, char **argv)
 
     if (out_path)
         write_file(out_path, dep, dep_bytes);
+    if (sout_path)
+        write_file(sout_path, sout_buf, sout_bytes);
 
     /* The last line, and the one a plate's attestation carries.
      * Labelled distinctly from the `deposits N a lane` line above:
@@ -723,6 +932,8 @@ int main(int argc, char **argv)
     cft_close(dev);
     free(img);
     free(bank);
+    free(sin_buf);
+    free(sout_buf);
     free(A);
     free(B);
     free(C);
