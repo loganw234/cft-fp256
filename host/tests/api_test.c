@@ -3123,6 +3123,27 @@ int main(void)
                   "nothing past an older caller's struct_size is written "
                   "(byte %lu changed)", (unsigned long)w);
         }
+        {
+            /* And the 0.9 boundary, where ABI 0.10 appended its three
+             * scratch fields. Each new field wants its own line here
+             * or the handshake is only ever proved at the boundary it
+             * had when the check was written. */
+            union { cft_program_info info; uint8_t raw[64]; } u;
+            const size_t old_size = offsetof(cft_program_info, n_scratch_in);
+            memset(&u, 0xa5, sizeof u);
+            memset(&u.info, 0, old_size);
+            u.info.struct_size = old_size;
+            st = cft_program_get_info(pext, &u.info);
+            CHECK(st == CFT_OK && u.info.struct_size == old_size &&
+                  u.info.flags == CFT_PROG_FLAG_BANK_EXT,
+                  "an ABI 0.9 struct_size comes back as itself, with flags");
+            for (w = old_size; w < sizeof u; w++)
+                if (u.raw[w] != 0xa5)
+                    break;
+            CHECK(w == sizeof u,
+                  "nothing past an ABI 0.9 caller's struct_size is written "
+                  "(byte %lu changed)", (unsigned long)w);
+        }
 
         /* -- run, and run_bank -- */
         CHECK(cft_program_run(NULL, a4, NULL, NULL, dep, NULL, 1,
