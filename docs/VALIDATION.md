@@ -7305,23 +7305,23 @@ Python is Miniconda 3.12.9 named by absolute path.
                                                     cft-selftest 1,071,635 cases
                                                     over 168 sets; the C/Python
                                                     identity check
-    device-test sw -n 96            rc 0    192 ms  2,640 checks, 0 failed
+    device-test sw -n 96            rc 0    168 ms  2,656 checks, 0 failed
                                                     (2,444 at 0.9)
-    verify/run.sh --only selfcheck,seq,diff         run 20260908-201512-1dcd6bc
-      selfcheck                     ok       1 s    2,640 checks, 0 failed
+    verify/run.sh --only selfcheck,seq,diff         run 20260908-210854-6ebefca
+      selfcheck                     ok       1 s    2,656 checks, 0 failed
       diff                          ok       4 s    217,500 cases vs the model
-      seq                           ok       2 s    741 programs both ways, 259
+      seq                           ok       3 s    741 programs both ways, 259
                                                     refused by both, 309 crossing
                                                     the 64-lane block; 500 from
                                                     the extended corpus
       VERDICT: PASS, nothing skipped
-    make -C host remotetest         rc 0    ~13 min remote-test 280 checks x 2
+    make -C host remotetest         rc 0    532 s   remote-test 280 checks x 2
                                                     routes (266 at 0.9);
                                                     device-test over the wire
-                                                    2,640 checks; conformance
+                                                    2,656 checks; conformance
                                                     replay 184,592 cases local and
                                                     remote identical (remote
-                                                    170.4 s); cft-collatz sweep
+                                                    164.3 s); cft-collatz sweep
                                                     1..2000 fp256 the same chain
                                                     both ways; --bench on both
                                                     routes
@@ -7355,6 +7355,11 @@ Python is Miniconda 3.12.9 named by absolute path.
                                                     replays
     node bindings/wasm/verify_demos.mjs             44 ok, 0 FAIL
 
+    bash verify/run.sh --only node,wasm      run 20260908-202905-1dcd6bc
+      node       ok   1891 s  test.mjs then the vectors through cft_node.wasm
+      wasm       ok   1365 s  the committed page, verified without a browser
+      VERDICT: PASS, nothing skipped - 2 stages executed, 0 failed, 0 skipped
+
 **A count that moved, said rather than smoothed over.** The 0.9 entry
 records `verify.mjs` replaying **1,231,635** cases over 168 sets and
 `conformance.mjs` 2,063,270 (which is that number plus 831,635). On
@@ -7370,7 +7375,7 @@ Nothing in this round touches the vectors, the replay or the counting.
 **The negative controls, because a check that has never been seen to
 fail proves nothing.** Seven faults were injected into
 `host/src/program.c`, built, run and reverted, and `device-test sw -n
-96` was the judge each time (2,640 checks clean):
+96` was the judge each time (2,656 checks clean):
 
 - the lane index dropped from a scratch address (`&scratch[slot]`
   instead of `&scratch[lane * D + slot]`): **20 failures**, every
@@ -7543,4 +7548,4 @@ slots across a 64-lane block is four megabytes at fp256, and every
 program written before this evening touches none of it - so the
 executor keeps the scratch out of `seq_block` and allocates it only
 for a program that uses a scratch code or declares a block.
-`device-test sw -n 96` runs in 192 ms, unchanged.
+`device-test sw -n 96` runs in 168 ms, unchanged.
