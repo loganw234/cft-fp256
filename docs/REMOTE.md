@@ -82,7 +82,8 @@ client's own copy of the library, which is bit-identical by contract.
 | `cft_program_digest` | client, over the bytes it holds | nothing |
 | `cft_program_free` | both | `PROG_FREE` |
 | `cft_get_caps`, `cft_supports` | client, from the capabilities the handshake returned | nothing after `HELLO` |
-| `cft_alloc` and the buffer calls | client: host memory, as on the software backend | nothing (see below) |
+| `cft_alloc`, `cft_buffer_to_device`, `cft_buffer_from_device`, `cft_buffer_free` | client: host memory, as on the software backend | nothing (see below) |
+| `cft_get_caps().buffers_resident`, `cft_buffer_get_info` | client, from its own knowledge: 0 and no device copies | nothing |
 | the six status-word operations (5.7.4) | client | nothing (see below) |
 | `cft_div`, `cft_sqrt`, `cft_rint`, `cft_scaleb`, `cft_cmp_sig`, the formatOf widening route | the composition on the client, each pass on the server | one request per pass, or one `PROG_RUN` per chunk on the program route |
 | the clause-5 host operations, the transcendentals, the character conversions, the augmented operations, the scaled products, the magnitude forms, `cft_convert` | client | nothing |
@@ -110,16 +111,37 @@ state and a client that is not libcft - a test, a thin binding - may
 want it; libcft's client never issues them.
 
 **Why the buffers stay on the client.** `cft_alloc` on the software
-backend is a host allocation and the sync calls are no-ops, and
-`cft_run` copies from whatever pointers it is given on every backend
-today - the "recognises its own buffers and skips staging" of cft.h is
-a design intention the XRT backend has not yet built either. A remote
-handle therefore treats buffers exactly as the software backend does.
-The protocol serves buffer allocate, free, write and read (`BUF_*`
-below) so that a later step which adds by-handle operands to `RUN` can
-do so without a protocol version bump, and so that the server's buffer
-path is exercised now rather than discovered later; libcft's client
-does not use them.
+backend is a host allocation and the sync calls are no-ops, and a
+remote handle treats buffers exactly as the software backend does: a
+resident buffer on the client is still sent as bytes in the `RUN`
+frame, every call, and `cft_caps.buffers_resident` reads 0 on a remote
+handle whatever the far end is.
+
+That stayed true when the XRT backend made `cft_alloc` real
+(docs/HOSTAPI.md, "Device-resident buffers"), and the reason is worth
+stating because it is not laziness. Residency there is a device copy
+per (tile, role) holding that tile's window, created because the
+library knows which compute unit will read which slice. A remote
+client knows none of that: the server's own `libcft` does the
+partitioning, one hop further along, and a client-side handle is a
+socket. Making a remote buffer resident would mean the CLIENT deciding
+what the SERVER's tiles hold - which is either a second partitioner on
+this side of the wire or a protocol that ships the plan with the data,
+and both are how two implementations of the same split start
+disagreeing. What a remote caller wants instead is the operand to stop
+crossing the socket on every call, and that is a by-handle `RUN`,
+which the `BUF_*` operations below already reserve the shape for. It
+is not built, and libcft's client still does not issue them.
+
+The protocol therefore serves buffer allocate, free, write and read
+(`BUF_*` below) so that a later step which adds by-handle operands to
+`RUN` can do so without a protocol version bump, and so that the
+server's buffer path is exercised now rather than discovered later.
+Note what such a step would inherit for free: the server's device may
+be a tile, its own `cft_alloc` is already resident there, and a
+by-handle `RUN` would land the client's bytes in a server-side
+`cft_buffer` that the server's XRT backend keeps on the card - so the
+two mechanisms compose rather than compete.
 
 ## The frame
 
