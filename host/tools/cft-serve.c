@@ -198,6 +198,10 @@ static void caps_block(conn *C, uint8_t out[CFTR_CAPS_BYTES])
     cftr_put32(out + 60, caps.max_insns);
     cftr_put32(out + 64, caps.max_consts);
     cftr_put32(out + 68, caps.seq_features);
+    /* And the scratch depth, appended again at 0.10. The two scratch
+     * FEATURE bits needed no word: they are bits 8 and 9 of
+     * seq_features, which the block has carried since 0.8. */
+    cftr_put32(out + 72, caps.max_scratch);
 }
 
 /* ---- the handlers ------------------------------------------------------ *
@@ -362,31 +366,42 @@ static int h_prog_load(conn *C, const uint8_t *p, size_t len, answer *A)
     return 0;
 }
 
-/* PROG_RUN, and PROG_RUN_BANK - one handler, because the bank is the
- * only difference and a second copy of the operand unpacking is a
- * second place for the deposit window's shape to drift.
+/* PROG_RUN, PROG_RUN_BANK and PROG_RUN_EX - one handler, because the
+ * per-run data is the only difference and a second copy of the operand
+ * unpacking is a second place for the deposit window's shape to drift.
  *
- * `with_bank` says which opcode arrived. The bank's length lives in
- * the fourth fixed word, which PROG_RUN leaves zero and this refuses
- * to be non-zero there: a client that filled it under the old opcode
- * is a client this server does not understand, and guessing which of
- * the two it meant is how a run computes on the wrong numbers. */
+ * `mode` says which opcode arrived: RUN_PLAIN, RUN_BANK or RUN_EX. The
+ * bank's length lives in the fourth fixed word, which PROG_RUN leaves
+ * zero and this refuses to be non-zero there: a client that filled it
+ * under the old opcode is a client this server does not understand,
+ * and guessing which of the three it meant is how a run computes on
+ * the wrong numbers. PROG_RUN_EX adds two more fixed words, the
+ * per-lane scratch slot counts, so that the block's shape crosses with
+ * it rather than being inferred from a byte length. */
+enum { RUN_PLAIN = 0, RUN_BANK = 1, RUN_EX = 2 };
+
 static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
-                      int with_bank)
+                      int mode)
 {
     uint32_t handle, present, want_counts, bank_bytes;
+    uint32_t n_sin = 0, n_sout = 0;
     uint64_t n;
     cft_program *prog;
     cft_program_info info;
     size_t esz, opnd, expect, dep_bytes, cnt_bytes, i;
+    size_t fixed = (mode == RUN_EX) ? 32u : 24u;
+    size_t sin_bytes = 0, sout_bytes = 0;
     const uint8_t *a = NULL, *b = NULL, *c = NULL, *bank = NULL, *q;
+    const uint8_t *sin = NULL;
     uint8_t *out;
     uint32_t *counts = NULL;
     uint32_t flags = 0, bus = 0;
-    const char *opname = with_bank ? "PROG_RUN_BANK" : "PROG_RUN";
+    const char *opname = (mode == RUN_EX)   ? "PROG_RUN_EX"
+                       : (mode == RUN_BANK) ? "PROG_RUN_BANK"
+                                            : "PROG_RUN";
     cft_status st;
 
-    if (len < 24) {
+    if (len < fixed) {
         snprintf(A->why, sizeof A->why, "%s payload of %lu bytes is "
                  "shorter than its fixed fields", opname,
                  (unsigned long)len);
@@ -397,17 +412,21 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     want_counts = cftr_get32(p + 8);
     bank_bytes  = cftr_get32(p + 12);
     n           = cftr_get64(p + 16);
+    if (mode == RUN_EX) {
+        n_sin  = cftr_get32(p + 24);
+        n_sout = cftr_get32(p + 28);
+    }
     if (present & ~7u) {
         snprintf(A->why, sizeof A->why, "operand mask 0x%x", (unsigned)present);
         return -1;
     }
-    if (!with_bank && bank_bytes) {
+    if (mode == RUN_PLAIN && bank_bytes) {
         snprintf(A->why, sizeof A->why, "PROG_RUN carries a bank length of "
                  "%lu bytes; the constant bank rides PROG_RUN_BANK",
                  (unsigned long)bank_bytes);
         return -1;
     }
-    if (bank_bytes > len - 24u) {
+    if (bank_bytes > len - fixed) {
         snprintf(A->why, sizeof A->why, "%s names a %lu-byte bank in a "
                  "%lu-byte payload", opname, (unsigned long)bank_bytes,
                  (unsigned long)len);
@@ -435,26 +454,51 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
                  (unsigned long long)n);
         return -1;
     }
+    /* The chunk's scratch blocks, shaped by the two counts the frame
+     * carries and held to the PROGRAM's own header: a client that
+     * named a different slot count than the image declares is a client
+     * this server does not understand, and the library would refuse
+     * the byte count a moment later anyway. Saying so here names the
+     * frame's field rather than the buffer's size. */
+    if (mode == RUN_EX &&
+        (n_sin != info.n_scratch_in || n_sout != info.n_scratch_out)) {
+        snprintf(A->why, sizeof A->why, "PROG_RUN_EX names %lu/%lu scratch "
+                 "slots a lane and the program declares %lu/%lu",
+                 (unsigned long)n_sin, (unsigned long)n_sout,
+                 (unsigned long)info.n_scratch_in,
+                 (unsigned long)info.n_scratch_out);
+        return -1;
+    }
+    if ((n_sin && n > (uint64_t)(CFTR_MAX_PAYLOAD / esz / n_sin)) ||
+        (n_sout && n > (uint64_t)(CFTR_MAX_PAYLOAD / esz / n_sout))) {
+        snprintf(A->why, sizeof A->why, "n = %llu lanes of scratch cannot "
+                 "fit a frame", (unsigned long long)n);
+        return -1;
+    }
+    sin_bytes  = (size_t)n * n_sin * esz;
+    sout_bytes = (size_t)n * n_sout * esz;
     opnd   = (size_t)n * esz;
-    expect = 24u + (size_t)bank_bytes + (size_t)popcount3(present) * opnd;
+    expect = fixed + (size_t)bank_bytes + sin_bytes +
+             (size_t)popcount3(present) * opnd;
     if (len != expect) {
         snprintf(A->why, sizeof A->why, "%s over %llu lanes with "
-                 "operand mask 0x%x and a %lu-byte bank should carry %lu "
-                 "bytes, not %lu", opname,
+                 "operand mask 0x%x, a %lu-byte bank and a %lu-byte "
+                 "scratch-in block should carry %lu bytes, not %lu", opname,
                  (unsigned long long)n, (unsigned)present,
-                 (unsigned long)bank_bytes,
+                 (unsigned long)bank_bytes, (unsigned long)sin_bytes,
                  (unsigned long)expect, (unsigned long)len);
         return -1;
     }
-    q = p + 24;
+    q = p + fixed;
     if (bank_bytes)   { bank = q; q += bank_bytes; }
+    if (sin_bytes)    { sin = q; q += sin_bytes; }
     if (present & 1u) { a = q; q += opnd; }
     if (present & 2u) { b = q; q += opnd; }
     if (present & 4u) { c = q; }
 
     dep_bytes = (size_t)n * info.max_deposits * esz;
     cnt_bytes = want_counts ? (size_t)n * 4u : 0u;
-    out = (uint8_t *)malloc(8u + dep_bytes + cnt_bytes + 1u);
+    out = (uint8_t *)malloc(8u + dep_bytes + cnt_bytes + sout_bytes + 1u);
     if (!out) {
         fail(A, CFT_ERR_OUT_OF_MEMORY, "allocating the deposits");
         return 0;
@@ -467,21 +511,44 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
             return 0;
         }
     }
-    /* The two entry points refuse each other's programs by name, and
+    /* The three entry points refuse each other's programs by name, and
      * that refusal is the client's to see: a BANK_EXT image reaching
-     * PROG_RUN, or a bank reaching a program that carries its own, is
-     * a caller error and travels back as one rather than being
-     * quietly routed to whichever call would accept it. */
-    st = with_bank
-       ? cft_program_run_bank(prog, bank, (size_t)bank_bytes, a, b, c,
-                              dep_bytes ? out + 8 : NULL, counts,
-                              (size_t)n, &flags, &bus)
-       : cft_program_run(prog, a, b, c, dep_bytes ? out + 8 : NULL, counts,
-                         (size_t)n, &flags, &bus);
+     * PROG_RUN, a bank reaching a program that carries its own, or a
+     * SCRATCH_IO image reaching either of the older two, is a caller
+     * error and travels back as one rather than being quietly routed
+     * to whichever call would accept it. */
+    if (mode == RUN_EX) {
+        cft_run_args args;
+        memset(&args, 0, sizeof args);
+        args.struct_size       = sizeof args;
+        args.a = a; args.b = b; args.c = c;
+        args.n                 = (size_t)n;
+        args.bank              = bank;
+        args.bank_bytes        = (size_t)bank_bytes;
+        args.scratch_in        = sin;
+        args.scratch_in_bytes  = sin_bytes;
+        args.scratch_out       = sout_bytes
+                               ? out + 8 + dep_bytes + cnt_bytes : NULL;
+        args.scratch_out_bytes = sout_bytes;
+        args.deposits          = dep_bytes ? out + 8 : NULL;
+        args.counts            = counts;
+        args.flags_out         = &flags;
+        args.bus_out           = &bus;
+        st = cft_program_run_ex(prog, &args);
+    } else if (mode == RUN_BANK) {
+        st = cft_program_run_bank(prog, bank, (size_t)bank_bytes, a, b, c,
+                                  dep_bytes ? out + 8 : NULL, counts,
+                                  (size_t)n, &flags, &bus);
+    } else {
+        st = cft_program_run(prog, a, b, c, dep_bytes ? out + 8 : NULL,
+                             counts, (size_t)n, &flags, &bus);
+    }
     if (st != CFT_OK) {
         free(out);
         free(counts);
-        fail(A, st, with_bank ? "cft_program_run_bank" : "cft_program_run");
+        fail(A, st, (mode == RUN_EX)   ? "cft_program_run_ex"
+                  : (mode == RUN_BANK) ? "cft_program_run_bank"
+                                       : "cft_program_run");
         return 0;
     }
     cftr_put32(out + 0, flags);
@@ -491,7 +558,10 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     free(counts);
     A->status   = CFT_OK;
     A->resp     = out;
-    A->resp_len = 8u + dep_bytes + cnt_bytes;
+    /* The scratch-out block is written in place, after the counts, by
+     * cft_program_run_ex itself - so it is already where the response
+     * wants it and there is no second copy to keep in step. */
+    A->resp_len = 8u + dep_bytes + cnt_bytes + sout_bytes;
     return 0;
 }
 
@@ -908,9 +978,14 @@ static int serve_one(conn *C, uint32_t my_abi)
         case CFTR_OP_RUN:        h_run(C, p, h.length, &A, 0); break;
         case CFTR_OP_REDUCE:     h_run(C, p, h.length, &A, 1); break;
         case CFTR_OP_PROG_LOAD:  h_prog_load(C, p, h.length, &A); break;
-        case CFTR_OP_PROG_RUN:   h_prog_run(C, p, h.length, &A, 0); break;
+        case CFTR_OP_PROG_RUN:   h_prog_run(C, p, h.length, &A, RUN_PLAIN);
+                                 break;
+        case CFTR_OP_PROG_RUN_EX:
+                                 h_prog_run(C, p, h.length, &A, RUN_EX);
+                                 break;
         case CFTR_OP_PROG_RUN_BANK:
-                                 h_prog_run(C, p, h.length, &A, 1); break;
+                                 h_prog_run(C, p, h.length, &A, RUN_BANK);
+                                 break;
         case CFTR_OP_PROG_FREE:  h_prog_free(C, p, h.length, &A); break;
         case CFTR_OP_BUF_ALLOC:  h_buf_alloc(C, p, h.length, &A); break;
         case CFTR_OP_BUF_FREE:   h_buf_free(C, p, h.length, &A); break;

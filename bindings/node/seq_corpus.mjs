@@ -37,10 +37,25 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // way host/tools/zoom.c and host/tools/orbits.c each carry their own
 // copy of the same three helpers rather than sharing a header. The
 // loader is the authority on what is legal; nothing here validates.
+//
+// FOR THE INTEGRATOR, 2026-09-08 evening. Revision 3's encodings below
+// - the four scratch codes, the header's `scratch_io` word and the
+// ninth constant-index bits in imm[30:28] - are written to
+// docs/SEQUENCER.md's contract and are NOT yet cross-checked against
+// `python/cft_golden/asm.py`, because asm.py on this branch is still
+// revision 2 and another lane is widening it. `program_test.mjs`
+// holds this encoder to asm.py byte for byte over four programs, and
+// those four are revision 2's; the revision-3 tests beside them are
+// this encoder against the LOADER, which is the C port of the same
+// contract. When asm.py lands, add revision-3 programs to that
+// comparison: it is where a permuted imm[30:28] would show, exactly as
+// a permuted imm[27:24] showed at 0.9.
 
-/** The six control codes, docs/SEQUENCER.md's table. */
+/** The ten control codes, docs/SEQUENCER.md's table - six through
+ *  revision 2, and revision 3's four scratch codes (R4). */
 export const CTRL = { halt: 0, repeat: 1, endrep: 2, deposit: 3,
-                      setact: 4, actall: 5 };
+                      setact: 4, actall: 5,
+                      stl: 6, ldl: 7, stx: 8, ldx: 9 };
 
 /** Revision 2's shape, 2026-09-08. Each lane owns THIRTY-TWO registers
  *  (R1) and the header's reserved[0] is a `flags` word (R3).
@@ -50,19 +65,34 @@ export const CTRL = { halt: 0, repeat: 1, endrep: 2, deposit: 3,
  *  order. `imm[31:28]` is read by nothing and must be zero. */
 export const NREG = 32;
 /** How many constants an instruction can ADDRESS: sixteen through the
- *  four-bit operand field, 256 through a byte of `imm` under `kx`. */
+ *  four-bit operand field, 256 through a byte of `imm` under `kx`, and
+ *  512 with revision 3's ninth bits in `imm[30:28]` (R7). */
 export const KADDR_PLAIN = 16;
-export const KADDR_KX = 256;
+export const KADDR_KX = 512;
 /** Header flags: bit 0 is BANK_EXT - the image carries NO constant
  *  section, `n_consts` still says how many constants the program
- *  addresses, and every run supplies them. Every other bit is
- *  reserved-must-be-zero. */
+ *  addresses, and every run supplies them. Bit 1 is SCRATCH_IO
+ *  (revision 3, R5): the header's SECOND reserved word becomes
+ *  `scratch_io`, n_scratch_in in [15:0] and n_scratch_out in [31:16],
+ *  and every run preloads and reads back that many slots a lane. Every
+ *  other bit is reserved-must-be-zero. */
 export const FLAG_BANK_EXT = 0x1;
+export const FLAG_SCRATCH_IO = 0x2;
+/** Scratch slots a lane on the tile and in the software executor
+ *  (SCRATCH_D). A static STL or LDL past it is refused at load; an
+ *  indexed STX or LDX is reduced modulo it, which the contract fixes
+ *  rather than leaving to an implementation. */
+export const SCRATCH_D = 256;
 
 // imm[27:24], in rd, ra, rb, rc order (docs/SEQUENCER.md R1's table),
 // and the byte of imm each operand's constant index rides in under kx.
 const RHI_SHIFT = { rd: 24n, ra: 25n, rb: 26n, rc: 27n };
 const KX_SHIFT = [0, 8, 16];      // ra, rb, rc
+// imm[28], imm[29], imm[30] - the NINTH bits of ka's, kb's and kc's
+// constant indices under kx (revision 3, R7), the same construction as
+// the fifth register bits one nibble down. imm[31] stays
+// reserved-must-be-zero: it is the version guard for what comes next.
+const KX9_SHIFT = [28n, 29n, 30n];
 
 /** One 64-bit little-endian instruction word, as a BigInt.
  *
@@ -132,12 +162,49 @@ export function alu({ op, rd = 0, ra = 0, rb = 0, rc = 0, rnd = 0,
       if (!f) return;
       if (!(v >= 0 && v < KADDR_KX))
         throw new RangeError(`constant index ${v} outside 0..${KADDR_KX - 1}`);
-      imm |= v << KX_SHIFT[i];
+      // The low byte where it always went, and the ninth bit in its
+      // own place in imm[30:28]. A ninth bit is READ only under kx and
+      // only for an operand whose k flag is set, so it is written
+      // nowhere else - which is what the loader's reserved-field rule
+      // requires and what makes this encoder's output canonical.
+      imm |= (v & 0xff) << KX_SHIFT[i];
+      if (v >> 8) imm = Number(BigInt(imm >>> 0) | (1n << KX9_SHIFT[i]));
     });
   }
   return insn({ op, rd, ra, rb, rc, rnd, ka, kb, kc,
                 kx: indexed, ctrl: false, imm: imm >>> 0 });
 }
+
+/** The four scratch codes of revision 3, R4.
+ *
+ *  | 6 STL ra, slot | 7 LDL rd, slot | 8 STX ra, rb | 9 LDX rd, rb |
+ *
+ *  The reserved-field rule settles each: STL reads `ra` and imm[23:0];
+ *  LDL writes `rd` and reads imm[23:0]; STX reads `ra` and `rb`; LDX
+ *  writes `rd` and reads `rb`, and for the indexed pair imm[23:0] is a
+ *  field nothing reads. Registers are five bits and insn() puts each
+ *  fifth bit in its place, so the only imm bits any of these carry are
+ *  the slot and the high bits of the registers they NAME.
+ *
+ *  A static slot is held to SCRATCH_D here, where the program is
+ *  written, rather than at the loader - the same courtesy alu() does
+ *  for a constant index. An INDEXED slot is not bounded at all,
+ *  because the contract reduces it modulo the depth. */
+function scratchSlot(slot, who) {
+  if (!(Number.isInteger(slot) && slot >= 0 && slot < SCRATCH_D))
+    throw new RangeError(
+      `${who} names scratch slot ${slot}, outside 0..${SCRATCH_D - 1}`);
+  return slot;
+}
+
+export const stl = (ra, slot) =>
+  insn({ op: CTRL.stl, ra, imm: scratchSlot(slot, "stl"), ctrl: true });
+export const ldl = (rd, slot) =>
+  insn({ op: CTRL.ldl, rd, imm: scratchSlot(slot, "ldl"), ctrl: true });
+export const stx = (ra, rb) =>
+  insn({ op: CTRL.stx, ra, rb, ctrl: true });
+export const ldx = (rd, rb) =>
+  insn({ op: CTRL.ldx, rd, rb, ctrl: true });
 
 /** A control instruction. Only REPEAT reads `imm`, and only DEPOSIT
  *  and SETACT read `ra`; every other field must be zero or the loader
@@ -161,13 +228,25 @@ export const ctl = (code, ra = 0, imm = 0) =>
  *  header's n_consts still says how many constants the program
  *  addresses and every run supplies them, so pass `nConsts` (or a
  *  `consts` array whose entries are only counted, never written). The
- *  second reserved word stays zero; both are reserved-must-be-zero and
- *  a loader refuses a set bit it does not know, which is what lets a
- *  later flag arrive without a version step. */
+ *  The second reserved word became `scratch_io` at revision 3 and is
+ *  meaningful only under FLAG_SCRATCH_IO: n_scratch_in in [15:0] and
+ *  n_scratch_out in [31:16], each at most SCRATCH_D. With the flag
+ *  clear the word must be zero, exactly as the reserved word it was -
+ *  which is what lets a later field arrive without a version step. */
 export function programImage({ formatCode, elementBytes, insns,
                                consts = [], nConsts = null, maxDeposits,
-                               flags = 0 }) {
+                               flags = 0, nScratchIn = 0,
+                               nScratchOut = 0 }) {
   const bankExternal = (flags & FLAG_BANK_EXT) !== 0;
+  const scratchIo = (flags & FLAG_SCRATCH_IO) !== 0;
+  if (!scratchIo && (nScratchIn || nScratchOut))
+    throw new RangeError(
+      `this image does not set SCRATCH_IO, so its scratch_io word must ` +
+      `be zero and it cannot declare ${nScratchIn}/${nScratchOut} slots`);
+  for (const [name, v] of [["nScratchIn", nScratchIn],
+                           ["nScratchOut", nScratchOut]])
+    if (!(Number.isInteger(v) && v >= 0 && v <= SCRATCH_D))
+      throw new RangeError(`${name}=${v} outside 0..${SCRATCH_D}`);
   const declared = nConsts === null ? consts.length : nConsts;
   if (!bankExternal && nConsts !== null && nConsts !== consts.length)
     throw new RangeError(
@@ -184,7 +263,9 @@ export function programImage({ formatCode, elementBytes, insns,
   dv.setUint32(16, maxDeposits, true);
   dv.setUint32(20, formatCode, true);                  // the PREC_CODE ladder
   dv.setUint32(24, flags >>> 0, true);                 // was reserved[0]
-  dv.setUint32(28, 0, true);                           // reserved[1]
+  dv.setUint32(28,                                     // was reserved[1]
+               ((nScratchIn & 0xffff) |
+                ((nScratchOut & 0xffff) << 16)) >>> 0, true);
   let off = 32;
   if (!bankExternal) {
     // The constant section, through packBank - see below: the section

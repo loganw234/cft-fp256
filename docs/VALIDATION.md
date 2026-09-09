@@ -7574,3 +7574,710 @@ a host at ABI 0.9, which the box has (`make libcft-test XRT=1` and the
 program library's check both green there the same afternoon). The
 card-day runbook now names it as the pair for the revision-2 work and
 keeps `~/cardday-0907` as the proven 0x600 pair.
+## 2026-09-08 - ABI 0.10, the host and JavaScript halves of the sequencer's revision 3: a per-lane scratch, one run_ex, a 512-entry bank
+
+The host library and the JavaScript binding built against
+docs/SEQUENCER.md's "Revision 3 (2026-09-08, evening)" contract
+(0e3fb89), on DESKTOP-T33SK86 under MSYS2 mingw64 gcc 16.1.0 and node
+v22.19.0. The model, the RTL, the assembler and the program library
+are other agents' halves of the same round and are not in this entry.
+
+**What was built.** `CFT_ABI_VERSION_MINOR 10`.
+
+- **R4, the per-lane scratch.** Four control codes - `STL ra, imm`
+  (6), `LDL rd, imm` (7), `STX ra, rb` (8), `LDX rd, rb` (9) - behind
+  `CFT_SEQ_FEAT_SCRATCH` (0x100, CAPS2[4]), with
+  `cft_caps.max_scratch` as the depth and 256 in the software backend.
+  A store is masked by the active bit; a load is a masked register
+  write; neither reads a rounding attribute or raises a flag. The
+  indexed pair takes the slot from the low eight bits of `rb`'s bit
+  pattern, reduced modulo the depth.
+- **R5, the per-run block.** The header's second reserved word becomes
+  `scratch_io` under `CFT_PROG_FLAG_SCRATCH_IO` (flags bit 1), behind
+  `CFT_SEQ_FEAT_SCRATCH_IO` (0x200, CAPS2[5]). Lane-major and dense in
+  both directions; the executor preloads before the first instruction
+  and writes back after the last deposit, per lane block.
+- **R7, the ninth constant-index bits.** `imm[30:28]` under `kx`, with
+  `imm[31]` still reserved-must-be-zero, behind `CFT_SEQ_FEAT_KX9`
+  (0x08, CAPS[7]); `SEQ_ADDR_CONSTS` 512.
+- **`cft_run_args` and `cft_program_run_ex`.** One entry point that
+  takes everything a run can carry, with `cft_program_run` and
+  `cft_program_run_bank` as WRAPPERS that fill the struct - so the
+  three cannot drift and nothing that used them moved.
+  `cft_caps.max_scratch`; `cft_program_info.n_scratch_in`,
+  `n_scratch_out`, `scratch_used`; `cft.hpp` gains `run_ex`.
+- VERSION `0x800` in the XRT backend's known set, `CAPS2` at 0x6C, and
+  `scratch_in`/`scratch_out` as kernel arguments 9 and 10.
+  `CFTR_OP_PROG_RUN_EX` 0x0024 on the wire, and the caps block 72 to
+  76 bytes.
+- The JavaScript half: nine new `cftw_*` exports, `runEx({...})` and
+  the four new getters on `Program`, `maxScratch` on `Context`, the
+  encoder taught the four codes and the two new header fields, and
+  `PROG_RUN_EX` in `remote.mjs`.
+
+**Gates, all on this tree, all measured here.** The host build line
+throughout was `PATH="/c/msys64/mingw64/bin:$PATH" make -C host CC=gcc
+OS=Windows_NT TMP/TEMP='C:/Users/logan/AppData/Local/Temp'`, and
+Python is Miniconda 3.12.9 named by absolute path.
+
+    make vectors                    rc 0            168 sets (run.sh's own
+                                                    ensure_vectors arguments,
+                                                    --jobs 8)
+    make -C host test               rc 0    509 s   api-test all contract checks;
+                                                    reduce-parts 6,294 partitions;
+                                                    cft-selftest 1,071,635 cases
+                                                    over 168 sets; the C/Python
+                                                    identity check
+    device-test sw -n 96            rc 0    168 ms  2,656 checks, 0 failed
+                                                    (2,444 at 0.9)
+    verify/run.sh --only selfcheck,seq,diff         run 20260908-210854-6ebefca
+      selfcheck                     ok       1 s    2,656 checks, 0 failed
+      diff                          ok       4 s    217,500 cases vs the model
+      seq                           ok       3 s    741 programs both ways, 259
+                                                    refused by both, 309 crossing
+                                                    the 64-lane block; 500 from
+                                                    the extended corpus
+      VERDICT: PASS, nothing skipped
+    make -C host remotetest         rc 0    532 s   remote-test 280 checks x 2
+                                                    routes (266 at 0.9);
+                                                    device-test over the wire
+                                                    2,656 checks; conformance
+                                                    replay 184,592 cases local and
+                                                    remote identical (remote
+                                                    164.3 s); cft-collatz sweep
+                                                    1..2000 fp256 the same chain
+                                                    both ways; --bench on both
+                                                    routes
+    make -C host wstest             rc 0      8 s   remote_test 67 checks, 0
+                                                    failures (57 at 0.9)
+    fuzz/fuzz-program               -        25 s   1.96M executions, no crash
+    fuzz/fuzz-serve                 -        20 s   1.08M executions, no crash
+                                                    (no sanitizer: mingw has no
+                                                    libasan, so the fuzz gate
+                                                    stays the Docker lane's, and
+                                                    fuzz-client is POSIX-only)
+
+    bash bindings/wasm/build.sh     rc 0     ~9 min stages 0-5 in the pinned image
+    bash bindings/wasm/build_demos.sh
+                                    rc 0     ~4 min stage 2 identity: the split
+                                                    .wasm equals the committed
+                                                    module
+    node bindings/wasm/verify.mjs vectors/out
+                                    rc 0     ~19 min abi 0.10 = cft.h's 0.10; 138
+                                                    exports; 107 NEEDED present;
+                                                    the node loader is the page's
+                                                    module byte for byte;
+                                                    1,071,635 cases over 168 sets
+                                                    through the page's own bytes;
+                                                    831,635 over 148 sets driven
+                                                    through the cftw_* wrappers.
+                                                    VERIFY OK
+    bindings/node  node test.mjs           363 s    126 passed, 0 failed
+    bindings/node  node program_test.mjs     1.5 s  37 passed, 0 failed (28 at 0.9)
+    bindings/node  node conformance.mjs     ~21 min 1,903,270 cases over 316 set
+                                                    replays
+    node bindings/wasm/verify_demos.mjs             44 ok, 0 FAIL
+
+    bash verify/run.sh --only node,wasm      run 20260908-202905-1dcd6bc
+      node       ok   1891 s  test.mjs then the vectors through cft_node.wasm
+      wasm       ok   1365 s  the committed page, verified without a browser
+      VERDICT: PASS, nothing skipped - 2 stages executed, 0 failed, 0 skipped
+
+**A count that moved, said rather than smoothed over.** The 0.9 entry
+records `verify.mjs` replaying **1,231,635** cases over 168 sets and
+`conformance.mjs` 2,063,270 (which is that number plus 831,635). On
+this tree `verify.mjs`, `conformance.mjs` and `cft-selftest` all
+report **1,071,635** over the same 168 sets, generated with the same
+`gen_vectors.py` arguments - and 1,071,635 is also what the 0.9
+entry's own `make libcft-test` line records. So the three independent
+replays agree with each other here, which is the property that
+matters; what I cannot explain from this tree is why the 0.9 round's
+`verify.mjs` counted 160,000 more than its own `cft-selftest` did.
+Nothing in this round touches the vectors, the replay or the counting.
+
+**The negative controls, because a check that has never been seen to
+fail proves nothing.** Seven faults were injected into
+`host/src/program.c`, built, run and reverted, and `device-test sw -n
+96` was the judge each time (2,656 checks clean):
+
+- the lane index dropped from a scratch address (`&scratch[slot]`
+  instead of `&scratch[lane * D + slot]`): **20 failures**, every
+  scratch case including both halves of the lane-major block;
+- a store not masked by the active bit: 4, all of them "a store by an
+  inactive lane reached the memory";
+- `STX`/`LDX` reducing modulo 251 instead of the depth: 4, "an index
+  of 773 did not reduce to slot 5 modulo 256";
+- the ninth constant-index bit dropped in the executor: 4, "k[511] did
+  not multiply by one";
+- the scratch-out writeback MOVED to before the run: 8 - and note
+  which ones. The block test fires, and so does the RESUMABLE test's
+  own negative control ("three doublings and six gave the same bytes,
+  so the comparison above proves nothing"), which is that control
+  doing exactly its job;
+- the scratch-out block never written at all: 9, including the
+  chaining test itself;
+- the scratch-in preload skipped: 8.
+
+The first attempt at the fifth of those fired NOTHING, and the reason
+is worth recording: it ADDED a writeback before the run without
+removing the one after it, so the correct write simply won. A negative
+control that does not fail is either a missing test or a bad
+injection, and the way to tell is to look at the injection first.
+
+**And on the JavaScript side, the same discipline.** `KX9_SHIFT` in
+`seq_corpus.mjs` had `ka`'s and `kb`'s ninth-bit positions swapped -
+the permutation no round trip can see, exactly as `RHI_SHIFT`'s was at
+0.9. Two tests failed: the encoder check by the bit
+(`expected 5, got 6` in `imm[31:28]`) and the k[511] run by the
+loader's refusal. Reverted, green.
+
+**The module, and the two pages that carry it.**
+
+    emscripten/emsdk:6.0.9@sha256:96617f27fe164215…   (build.sh's pin)
+
+    bindings/node/cft_node.wasm      225,231 bytes
+      sha256 39822d677e1783c01ba204285094a33cbd9fd1e6ed50130fc45bf3f15fd0c790
+      was    1af4ddd3514e3335e915fe5ecbe5449e36d88d8acb47ac2d3c4a554841a14aad   (0.9, 219,535 bytes)
+    bindings/wasm/conformance.html  1,356,405 bytes
+      sha256 57ea8bfd9709c1519e4f2295f65f889c9469b416524e3c45cc6a09becf5674e2
+    bindings/wasm/demos.html          539,511 bytes
+      sha256 84b76b30fda1774b3292ce4d45401c88e2453336034493f8b1a7bf52ff05cbc1
+
+    138 cftw_* exports where 0.9 had 129 - exactly the nine, no more
+
+Both pages were rebuilt and neither was a choice, for the reason the
+0.9 entry gives: `-sSINGLE_FILE` embeds the module in
+`conformance.html` and `verify.mjs` step 3 holds the node loader to
+the page's bytes by sha256; `demos.html` embeds `cft_node.wasm` byte
+for byte and `build_demos.sh` refuses to assemble a page whose module
+does not match the stamp `demos_chains.json` was recorded against. The
+chains were therefore re-recorded, and **of the seventeen
+sha256-shaped values in that file, sixteen came back identical and the
+seventeenth is the module stamp** - every Collatz chain, the zoom
+orbit and pixels, the two zoom images, the four orbits chains and
+their program images. The nine exports are doors; the arithmetic
+behind them did not move.
+
+**Two pre-existing breaks found by running the gates, and fixed.**
+Neither is this round's doing and both had been failing since the
+revision-2 model landed, because the revision-2 `seq.Program`
+constructor gained `flags` and a private `_n_consts` behind the
+`n_consts` property:
+
+- `host/tests/seq_check.py`'s refusal arm builds a `Program` through
+  `__new__` to serialise an image the MODEL rejected, and never set
+  the two new fields - so `verify --only seq` died with an
+  `AttributeError` before comparing anything. Every field `to_bytes()`
+  reads is now set by name.
+- `host/fuzz/make_seeds.py` did the same thing for its
+  `unbalanced-fp32` seed, so the seed generator could not run at all.
+  It builds those bytes with the file's own `_image()` now: a
+  generator that breaks when the model refactors is a generator nobody
+  can run on the day they need it.
+
+**And one break of my own, caught by a `make clean`.** The fuzz
+commit swept `host/fuzz/fuzz-program.exe` and `fuzz-serve.exe` into
+the tree: `.gitignore` names the three harnesses by their
+extensionless Linux forms and the `host/*.exe` line near the top of
+the file stops at `host/` rather than reaching `host/fuzz/`, so a
+`git add -A` on Windows took 2.6 MB of build product with it. Removed,
+and `host/fuzz/*.exe` is ignored now with the reason written beside
+it. They remain in this branch's history; nothing else the branch adds
+is a build product.
+
+**What is NOT tested here, stated rather than skipped.**
+
+- **The XRT path.** No card and no emulation on this machine, so the
+  0x800 register map, `CAPS2` at 0x6C, the tenth and eleventh kernel
+  arguments and the eleven-versus-nine-argument call are asserted by
+  REVIEW ALONE. Each mirrors the 0x700 path line for line; the
+  divergence is the argument count, which XRT throws on rather than
+  adapting, so the call now has three shapes chosen by contract
+  version and the two scratch buffers are bound on every 0x800 run
+  whether or not the program declares a block.
+- **The feature-absent refusals.** The software backend publishes
+  `seq_features 0x31f` - kx, REGS32, BANK_PTR, KX9, IMUL, SCRATCH,
+  SCRATCH_IO - and both handles here are it, so
+  `check_caps_enforced` scores the published-and-loads half of all
+  three new features and cannot produce the refusal half. Each refusal
+  is written, each names its feature, and each runs against a tile
+  that lacks the bit.
+- **`host/fuzz/program_differential.py` RUNS, and disagrees on
+  purpose.** Over 3,000 mutated images: 447 accepted by both, 2,435
+  refused by both, **118 disagreements, every one of them a
+  revision-3 construct `seq.py` does not yet know** - 105 "unknown
+  control code" (the four scratch codes) and 13 "imm[31:28] is
+  reserved" (the ninth index bits), classified by replaying every
+  saved image through the model. `python/cft_golden/seq.py` is
+  revision 2 on this branch. **That differential is the integrator's
+  re-run**, and the checked-in `repeat-trip-product-wraps` reproducer
+  is still refused by both.
+- **`bindings/node/seq_corpus.jsonl` gains no revision-3 cases**, for
+  the same reason it gained no revision-2 ones: it is generated from
+  `cft_golden.seq.random_program`, and a recording the golden model
+  cannot produce is not a recording. The revision-3 programs are
+  hand-written in `program_test.mjs` instead.
+- **No browser, no card, no emulation.** Both pages were checked
+  headless over the bytes in git; nobody opened either. wasm32 has no
+  PCIe and the module carries only the software backend.
+
+**The ambiguities in the contract, and what was chosen.**
+
+**`cft_run_args`' size handshake, which the contract does not
+specify.** `cft_caps` and `cft_program_info` are OUTPUT structs and
+are TRUNCATED to what the caller can hold. `cft_run_args` is an INPUT,
+and truncating an input means silently ignoring a field a newer caller
+set - which is precisely the failure the byte-count rules exist to
+prevent. So a `struct_size` this library does not recognise is
+REFUSED, in both directions and with a different message for each.
+`api-test` checks all three cases.
+
+**`scratch_used` when the device published no depth.** The contract
+says "one past the highest static slot, or `SCRATCH_D` when the
+program uses `STX`/`LDX`", and `SCRATCH_D` is a device parameter. Read
+as: the DEVICE's `max_scratch` when it published one, and this
+library's own executor depth (256) otherwise. For every device that
+exists today the two are the same number.
+
+**A `SCRATCH_IO` program whose two counts are both zero.** Legal, by
+the same reasoning that made a `BANK_EXT` program with `n_consts` zero
+legal at 0.9 - and it still takes `run_ex` and still travels as
+`PROG_RUN_EX`, because the opcode is read from the header and never
+from a buffer's length. That is the corner the JavaScript client found
+at 0.9, applied one call further along before it could be found again;
+`host/src/backend_remote.c` now chooses all three opcodes from the
+image's flags, which also retires the latent `bank_bytes ?` the 0.9
+entry recorded as "noted, not changed".
+
+**The library's own ceiling on a static scratch slot.** The device's
+`max_scratch` is what the loader enforces, and zero is UNKNOWN and
+enforces nothing - but the software executor has a fixed 256 slots a
+lane, so an `n_scratch_in` or `n_scratch_out` past `SEQ_SCRATCH_D` is
+refused unconditionally after the device check, exactly where
+`SEQ_MAX_DEPOSITS` is. Only reachable when the device published no
+depth of its own.
+
+**The backend seam took a struct too.** `cftx_program_run` and
+`cftr_program_run` would have grown from fifteen positional arguments
+to twenty-one, so the per-run data moved into `cft_seq_run_io` in
+`backend.h` - the same argument `cft_run_args` makes in the public
+header, one layer down. The two scratch slot COUNTS are in it because
+a backend that chunks needs them: the remote client slices a
+lane-major block by lane, and one that sliced by bytes would hand
+every chunk the first lanes' slots.
+
+**The scratch is allocated only where it is used.** `SEQ_SCRATCH_D`
+slots across a 64-lane block is four megabytes at fp256, and every
+program written before this evening touches none of it - so the
+executor keeps the scratch out of `seq_block` and allocates it only
+for a program that uses a scratch code or declares a block.
+`device-test sw -n 96` runs in 168 ms, unchanged.
+
+## 2026-09-08 - revision 3 in the model and the tile: a per-lane scratch, its per-run block, 16,384 instructions, a 512-entry bank - and where 128 KiB of new memory lands on the U50
+
+The hardware-contract half of docs/SEQUENCER.md's "Revision 3"
+section, built on 0e3fb89: the golden model, rtl/cft_seq.sv,
+rtl/cft_csr.sv, rtl/cft_krnl.sv, hw/kernel.xml and the benches. The
+host library, the bindings and the tools are other agents' work from
+the same spec and have their own entries.
+
+### The OOC measurement the round asked for
+
+Two out-of-context synthesis runs of `cft_krnl` on trees identical
+apart from revision 3 - Vivado 2026.1, xcu50-fsvh2104-2-e, 135 MHz,
+`hw/synth_krnl_ooc.tcl` with default generics, the Windows desktop:
+
+| | revision 2 (0e3fb89) | revision 3 | delta |
+|---|---|---|---|
+| CLB LUTs, tile | 119,915 | 123,965 | **+4,050 (+3.4%)** |
+| CLB registers, tile | 60,750 | 61,774 | +1,024 (+1.7%) |
+| Block RAM tiles | 48 | **76.5** | +28.5 |
+| - RAMB36 | 36 | 64 | +28 |
+| - RAMB18 | 24 | 25 | +1 |
+| URAM | 1 (of 640) | **8 (of 640)** | +7 |
+| DSPs | 307 | 307 | **0** |
+| WNS at 135 MHz | +1.196 ns | **+1.196 ns** | **0.000** |
+| synthesis wall time | 12 min 35 | 14 min 0 | |
+
+`cft_seq` alone, from the hierarchical report: 24,437 -> **28,362**
+LUT, 5,042 -> **5,939** FF, RAMB36 20 -> 48, RAMB18 24 -> 25, URAM
+1 -> 8. `cft_csr` grew 824 -> 949 LUT and 693 -> 821 FF, which is
+CAPS2 and the two scratch pointers. Nothing else in the tile moved:
+`cft_lanes` is identical to the LUT (88,184 both ways) and
+`cft_engine_stream` to the LUT as well (6,576).
+
+**So 128 KiB of scratch plus 128 KB of instruction memory plus a
+16 KiB bank fit at 135 MHz on the U50 with room to spare, and cost
+3.4% of the tile's logic and nothing at all in timing.** Where the
+memory went is worth reading, because Vivado moved one of the pieces
+between the two runs:
+
+- The **scratch** is eight banks of 4,096 x 32 bits, and each one
+  became **one URAM288**. A URAM is 4,096 x 72, so each bank uses 32
+  of its 72 bits - 44% - which is what eight INDEPENDENT ADDRESSES
+  cost. That is the deposit buffer's bargain (`STX` and `LDX` take
+  their slot from `rb`, and a beat's lanes hold divergent `rb`
+  values), paid in a resource the tile was using one of.
+- The **instruction memory**, four times larger at 16,384 x 64, stopped
+  being a URAM and became block RAM: `RAM ("cft_seq:/imem_reg") is
+  implemented using BRAM instead of URAM due to insufficient pipeline
+  registers`. At 4,096 it fitted one URAM and Vivado took it; at
+  16,384 it needs four cascaded, and a URAM cascade wants pipeline
+  stages the fetch path does not have. Its 1,048,576 bits are the bulk
+  of the +28 RAMB36; the constant bank's doubling to 512 x 256 bits is
+  the rest of that and the one added RAMB18. The exact split between
+  the two is not separable from the reports - Vivado names which RAM
+  went to which primitive KIND, not how many of each it took - so what
+  is claimed here is the total, which is measured, and the attribution,
+  which follows from the sizes.
+
+The tile now sits at **14.2% of the U50's LUTs, 5.7% of its block RAM,
+1.25% of its URAM and 5.2% of its DSPs**. Margin is not the constraint
+on this part.
+
+Timing did not move because `cft_seq` is not on the critical path in
+either tree, and the worst path is the same one to the picosecond and
+to the pin:
+
+    Slack (MET) : 1.196ns
+      Source:      u_engine/u_fifo_a/mem_reg_0/CLKARDCLK
+      Destination: u_lanes/g_lane32[0].u_fma/s0_byp_d_reg[24]/D
+
+which is the streaming engine's FIFO into the FMA's input register -
+the same path that was worst at revision 1 and at revision 2.
+
+Two cautions, repeated because they do not stop being true.
+**Out-of-context synthesis is not shell timing** - this project paid
+to learn that once and docs/ROADMAP.md carries the accounting - so
++1.196 ns is a comparison between two trees, not a prediction about a
+linked build. And the revision-2 baseline above was **re-synthesised
+today** rather than quoted from the 2026-09-08 morning entry, for the
+reason that entry gives about 2022.2 and 2026.1: it reproduced the
+recorded numbers exactly (119,915 LUT, +1.196 ns, cft_seq 24,437 LUT /
+5,042 FF / RAMB36 20 / RAMB18 24 / URAM 1), which is also the check
+that the two runs differ by the tree and not by the day.
+
+### It places and routes, too
+
+One implementation was run, of the revision-3 tree only - the round
+allowed one and this is the configuration that matters.
+`hw/impl_krnl_ooc.tcl`, same part and clock, **56 min 14 s**, exit 0,
+with the simulation suite sharing the box for most of it:
+
+    QOR_ROUTED_WNS_NS: 0.447          (135 MHz, period 7.407 ns)
+    0 of 107,678 endpoints failing setup; 0 failing hold (WHS +0.019)
+    routed LUT 121,383   FF 61,792   BRAM tiles 76.5   URAM 8   DSP 307
+    worst routed path, 19 levels, 6.940 ns datapath:
+      u_engine/op_r_reg[3]/C ->
+      u_lanes/g_lane32[7].u_fma/s0_byp_d_reg[27]/D
+    cft_seq routed: 27,966 LUT, 5,939 FF, RAMB36 48, RAMB18 25, URAM 8
+
+So **the revision-3 tile closes at 135 MHz on the U50 with 0.447 ns to
+spare, and it closes on a path that is not the sequencer's**: the
+worst routed path runs from the streaming engine's opcode register
+into the same FMA input register that was worst at synthesis in both
+trees. The scratch is not what makes it tight; nothing about revision
+3 is.
+
+Two things this run does NOT say. There is **no revision-3 routed
+comparison against revision 2** - one implementation was the budget,
+so the before/after delta in the table above is a SYNTHESIS delta and
+nothing here upgrades it. This morning's revision-2 entry records a
+routed +0.027 ns for that tree; this one is +0.447 on the same part
+at the same clock, and the honest reading is NOT that revision 3 made
+timing better. Placement and routing are heuristic and their results
+move between runs of the same netlist; the two numbers are from
+different trees, different days and different machine loads, and
+nothing was run today that would let one be subtracted from the other.
+What both establish is the same thing, which is the question the
+contract asked: the tile places and routes at 135 MHz on the U50.
+
+And read the PATH DELAY rather than the slack, which is
+docs/BRINGUP.md's standing instruction: 6.940 ns against a 7.407 ns
+period, with the tool working exactly as hard as the constraint asked
+it to.
+
+### The open-core part: not measured, and why - with the arithmetic that stands in
+
+The K325T figures were second priority in the round and they were
+**not run, because this machine cannot run them**. The Vivado 2026.1
+install on the Windows desktop carries **twelve parts, all
+`virtexuplus` and `virtexuplusHBM`** - the U50's two families and
+nothing else - so `synth_design` for `xc7k325tffg900-2` ends at
+`ERROR: [Coretcl 2-106] Specified part could not be found` about
+thirty seconds in. That was checked rather than assumed: a
+`get_parts` listing is in the run record, and `get_parts xc7k325t*`
+returns zero while `get_parts xcu50*` returns four. The build host
+that does carry 7-series was off limits this round.
+
+So what follows is **arithmetic on the geometry, not a synthesis
+result**, and it is written that way on purpose - it is the number to
+check against a real run, not a substitute for one.
+
+The U50 build puts the tile's memories in 64 RAMB36, 25 RAMB18 and
+**8 URAM288**, and the eight URAMs are exactly the scratch: one per
+32-bit word bank, each bank 4,096 deep. A 7-series part has no
+UltraRAM, so those eight banks have to land in block RAM. A RAMB36E1
+is 36 Kbit and reaches 4,096 deep only at 9 bits wide, so a
+4,096 x 32 bank takes **four RAMB36** and the scratch takes
+**thirty-two**. Everything else is already block RAM and the
+primitives are the same size, so the open-core tile should need on the
+order of
+
+    64 + 32 = 96 RAMB36  +  25 RAMB18  ~  108 block RAM tiles
+
+against the K325T's **445**, which is about a quarter of the part's
+block RAM for a tile that already uses roughly half its logic
+(98,929 LUT at MUL_PASSES 10 with both ladders, docs/ARCHITECTURE.md).
+Block RAM is therefore NOT what stops a revision-3 tile on the
+open-core part; logic and timing at 100 MHz remain the questions they
+were.
+
+The lever if that estimate turns out wrong is the parameter itself:
+`SCRATCH_D` is a build parameter, the tile publishes its log2 in
+`CAPS2[3:0]`, and `cft_program_load` refuses a program past what a
+device publishes. A 64-slot open-core scratch is 8 RAMB36 and still
+answers the spill and the local-array asks; it is the resumable-state
+block that would want the depth.
+
+### The gates
+
+Everything below ran from this worktree, on the final tree. The
+container gates are `MSYS2_ARG_CONV_EXCL='*' docker run --rm -v
+<worktree>:/work -w /work/tb cft-sim make ...`.
+
+    make golden (pytest python/tests)             1,224 passed, 5 skipped   3 min 42 s
+                                                   (before the last two tests
+                                                   below were added; the merged
+                                                   tree's count is in the
+                                                   integrator's entry)
+      - 1,216 tests collected on 0e3fb89 and 1,227 here: eleven new,
+        covering the static round trip including slot 255, the indexed
+        form reducing modulo the depth, a store in an all-inactive
+        loop body compared state-for-state against the same run with
+        the early exit off, the block in and out, a run resumed
+        through it, the padding lanes, the three degenerate scratch
+        I/O shapes, the scratch refusals, the fuzz arm's corpus
+        stability, the ninth index bit at 0, 255, 256 and 511, and its
+        refusals - plus a SECOND P3 fuzz with the scratch arm on,
+        because `Result.state()` now carries the scratch and the
+        property is newly observable through it.
+
+    docker cft-sim: make -k -j4 sim                21 targets, 69 tests
+                                                   PASS=69 FAIL=0 SKIP=0
+                                                   24 min 30 s
+      - the whole shipping suite, not just the sequencer's targets,
+        because rtl/cft_krnl.sv and rtl/cft_csr.sv are shared: fp32
+        fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare
+        seedop reduceacc reduce krnl quarter faults seq_core krnlseq
+        seqbanks mulpass mulcycle mulcycle2
+      - seq_core is 17/17 where it was 12/12: scratch_static_and_-
+        indexed, scratch_is_masked_by_the_active_bit, scratch_io_block,
+        scratch_header_refusals and scratch_fuzz are new, and
+        indexed_constants_and_imul gained the ninth-bit case
+      - the box was also carrying the Vivado implementation below, so
+        this is a loaded number
+
+    docker cft-sim: make MC=10 <seq targets>       3 targets, 19 tests
+                                                   PASS=19 FAIL=0 SKIP=0
+                                                   13 min 29 s
+      - seq_coremc, krnlseqmc, seqbanksmc: the sequencer's share of
+        `make simmc`, the multi-cycle tile's own census. The rest of
+        simmc and the four board targets were not run in this round;
+        they exercise the multiplier and the ladders, which revision 3
+        does not touch.
+
+    docker cft-sim: krnlplain, cycles, seqprobe    3 targets, 4 tests
+                                                   PASS=4 FAIL=0 SKIP=0
+    docker cft-sim: SIM=verilator krnlfused        2 tests, PASS=2 FAIL=0
+                                                   (10.9 s of simulated time after
+                                                   the Verilator compile)
+      - the four sequencer-adjacent targets that are NOT in `sim`.
+        krnlfused and krnlplain run test_krnl.py, which this round
+        changed (VERSION 0x800 and the CAPS2 check); `cycles` measures
+        rather than checks and is here because the per-block scratch
+        wipe is the one thing in revision 3 that could have moved its
+        numbers; seqprobe is the diagnostic that now drives the two
+        new cfg_* ports so a trace has no X in it.
+      - `cycles` reports what it reported before, which is the point:
+        1.250 cycles a beat at every rung with a fixed cost of 37,
+        and 11.315 for the reduction. Revision 3 moves neither,
+        because a program that names no scratch slot wipes none - and
+        this bench drives the ELEMENTWISE engine, which the sequencer
+        does not touch at all.
+      - krnlfused is the one target that had to change simulator.
+        With both fused ladders on, Icarus simulates this kernel at
+        about 1.7 ns of simulated time a second (docs/VERIFICATION.md
+        records the same figure for the board configuration), which is
+        roughly twenty hours for test_krnl's 120,000 ns; the run was
+        stopped at 2,952 ns after twenty-four minutes and re-run under
+        Verilator, which is what tb/Makefile's board targets already
+        do for this exact reason. That is a simulator cost this round
+        did not introduce and did not change.
+
+    docker cft-sim: verilator 5.020 --lint-only    clean, exit 0, BOTH
+      cft_krnl, default and board configurations   configurations
+      - warnings fatal, and no -Wno-* at all. The board configuration
+        is -GFUSE_NORM=1 -GFUSE_ALIGN=1 -GMUL_PASSES=10.
+      - separately, -Wall filtered to WIDTH reports NOTHING in either
+        configuration - zero lines. No lint_off was added anywhere.
+        The two width warnings this work did produce were both in the
+        new header check, comparing a sixteen-bit half of `scratch_io`
+        against SCRATCH_D, and both were fixed by widening from the
+        slice rather than by suppressing.
+
+    docker cft-sim: make yosys-lint                clean, exit 0
+      - zero latches; only the pre-existing "Replacing memory with
+        list of registers" notes and the one translate_off warning.
+        None of those notes names cft_seq, so the scratch inferred as
+        a memory rather than as 131,072 flip-flops - which is the
+        whole reason its eight banks are eight always_ff blocks with
+        their own local arrays rather than slices of one shared
+        variable.
+
+The formal gate was not run: it does not cover `cft_seq`, and revision
+3 changes nothing it proves. No emulation and no device run: the
+card-day images predate all of this and are unaffected, and this round
+produced no bitstream.
+
+### What the benches found
+
+Three things, none of them in the feature under test, which is the
+usual shape:
+
+- **The operand mux had not moved.** R7's ninth constant-index bit
+  went into `seq.py`, into `CAPS[27:24]` and into `KMEM_D`, and
+  `cft_seq`'s `k_idx_*` still sliced eight bits - so
+  `indexed_constants_and_imul` read constant 255 where the program
+  named 511 and 12 of 48 deposit slots differed. The bench found it in
+  the first run after `KMEM_D` moved. The lesson is the one CAPS
+  exists for, one level down: a capacity and the encoding that reaches
+  it have to move in the same commit, or the register advertises a
+  bank the decoder cannot address.
+- **The bench's program region no longer fit its image.** At `IMEM_D`
+  16,384 a full program is 131,104 bytes; `tb/test_krnl_seq.py`'s
+  `PROG_BASE` had 0xA0000 above it, so the last ninety-six bytes ran
+  into the count region - which `stage_and_start` then poisons, so the
+  tile fetched twelve corrupted instructions and every deposit
+  differed. The image now gets the top of the model RAM, which has
+  512 KB clear.
+- **A negative control with nothing under it.** The new scratch-out
+  check asserts that a program declaring no block leaves the region
+  alone, and the region was only poisoned for `sout_bytes + GUARD` -
+  which is 64 bytes when the block is empty, and the check read 256.
+  It now poisons a fixed 256 bytes past whatever the run needs. A
+  control that cannot fail is the failure docs/VERIFICATION.md's third
+  rule names, and this one was caught by the assertion firing on a run
+  that had done nothing wrong.
+
+Two things were checked rather than assumed. **The revision-1 and
+revision-2 fuzz corpora are unchanged bit for bit**: 400 corpora from
+`random_program()` and 400 more with `extended` and `wide_regs` on,
+generated from 0e3fb89's `seq.py` and from this one, hashed and
+compared - identical both ways
+(`c7ef1e89...` and `3c01a76b...`). The `scratch` arm follows
+`extended`'s precedent and draws nothing from `rng` when off, and it
+is an EXTRA instruction appended after the `pick` chain rather than a
+slice of it, because taking a slice would have moved every existing
+threshold. And **the two OOC trees were diffed before the numbers
+above were believed**, because two synthesis runs of the same tree
+would have shown exactly the same "no timing cost".
+
+And one thing was given a SECOND OPINION before the RTL was judged
+against it. `seq.py` runs the machine in lockstep, because that is the
+only way to express an early exit that is a cross-lane condition -
+which is the right shape and also the shape a per-lane mistake hides
+in: a store masked by the wrong lane's active bit, an indexed slot
+taken from the wrong lane's `rb`, a preload transposed. So the
+semantics were written a second time the other way, each lane run to
+completion alone with the early exit off, and the two compared over
+**4,000 random programs** across all four rungs - deposits, counts,
+scratch-out, FLAGS and STATUS, all identical, with 3,928 of the
+programs using the scratch, 1,559 declaring a block and 2,586 dropping
+a lane. That reference is a scratchpad check rather than a committed
+test: the committed gate for these semantics is `tb/test_seq_core.py`
+holding the RTL to `seq.py`, and this exists so that what it holds the
+RTL to had been questioned first.
+
+### The per-block wipe, and the one design decision the contract left open
+
+A slot no lane wrote must read `+0`, for the reason an untouched
+deposit slot must: a run whose storage kept the previous lane block's
+values would not be bit-exact. The register file buys that with a
+whole-file wipe per lane block, `RF_D` = 512 cycles, and the obvious
+reading of the contract is to do the same for the scratch - which is
+`SCRATCH_D * NBEATS` = **4,096 cycles a block**, eight times the
+register file's, paid by every program whether or not it owns a single
+slot. At fp32 that is 4,096 cycles per 128 lanes; a program of ten
+instructions would spend more than half its run wiping a memory it
+never touches, and `tb/test_krnl_cycles.py` would have said so.
+
+**Chosen:** the wipe covers exactly what the program can OBSERVE -
+every slot if it uses `STX` or `LDX`, otherwise one past the highest
+static `STL`/`LDL` slot, and at least `n_scratch_out` because the
+drain reads those whether the program wrote them or not. Anything
+above that is unreachable this run, so its contents are not a value
+any program can distinguish. The quantity is learned while the
+instruction stream is parsed - an 8-bit compare and a flag, in the
+shadow of a write that was already happening - and it is the same
+number `cft_program_info`'s `scratch_used` reports to a host, which
+is what suggested it.
+
+The consequence worth stating: **a program that names no scratch slot
+costs nothing for the scratch**, so every bench and every cycle
+measurement that predates revision 3 has exactly the cost it had. The
+one that pays in full is a program using the indexed forms, and it
+pays 4,096 cycles a block - which is the honest price of a 256-slot
+per-lane memory whose addresses are data.
+
+### Two places the contract was ambiguous, and what was chosen
+
+**1. What the scratch's `SCRATCH_D` is to the MODEL.** The contract
+calls it "a build parameter" and puts it in CAPS2 beside `MAXD`,
+`IMEM_D` and `KMEM_D`, which the model deliberately does NOT fix - the
+software backend accepts 2^20 deposit slots a lane because it models
+the program model and not one tile.
+
+**Chosen:** `SCRATCH_D` is fixed in the model at 256, unlike the other
+three. It is not purely a capacity: `STX`/`LDX` reduce `rb` MODULO it,
+and the contract says so explicitly ("the model does the same, so the
+reduction is part of the contract rather than an accident"). A model
+with a different depth would compute DIFFERENT ANSWERS for the same
+program rather than merely accept larger ones, which is the line
+between a capacity and a semantic. It is also why `cft_seq` carries an
+elaboration guard that `SCRATCH_D` be a power of two: a mask is the
+only reduction a cycle can afford, and a mask is a modulo only for a
+power of two.
+
+**2. Whether the scratch-out drain is masked by the active bit.** R5
+says the block is written "after the last deposit of a lane block" and
+says nothing about `active`; R4 says a store IS masked, which could be
+read as making the whole feature lane-mask-sensitive.
+
+**Chosen:** the drain is NOT masked. It is a drain, like the deposit
+drain, which writes every slot in the window for every lane the caller
+has regardless of whether that lane was still active - and a lane that
+converged early is exactly the lane whose state is worth carrying to
+the next call, which is what the resumable-run ask was about. What IS
+masked is every instruction that put something there. Padding lanes -
+index at or past `n` - receive nothing and write nothing, because the
+element count is `blk_n * n_scratch_out` and the stream ends before
+their slots would begin.
+
+### How this entry was closed
+
+The agent that built this half was stopped by the integrator at its
+final step - it had finished the work, drafted every section above
+from its own logs, and was polling the last bench (the fused kernel
+under Verilator) every few seconds. The integrator let that bench
+finish (it passed, as recorded above), committed the agent's last
+uncommitted changes on its branch (the multi-block scratch cases in
+`tb/test_seq_core.py`, the VERSION 0x800 expectations in the quarter
+and reduce benches, `seqprobe` driving the two new ports, two model
+tests, and the contract text of docs/SEQUENCER.md and
+docs/ARCHITECTURE.md updated to describe revision 3), re-derived every
+number in this entry from the agent's logs and reports with its own
+`collect_numbers.py` rather than copying the draft, and appended the
+entry here. The two model tests added after the agent's golden run
+(`test_p3_fuzz_with_the_scratch_on`, `test_scratch_io_degenerate_shapes`)
+are covered by the merged-tree golden run in the integrator's entry.

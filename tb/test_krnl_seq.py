@@ -64,18 +64,26 @@ from cft_golden import (  # noqa: E402
 )
 from cft_golden import seq  # noqa: E402
 
-from test_krnl import run_op, check_seq_caps, _localparam, RTL  # noqa: E402
+from test_krnl import (  # noqa: E402
+    run_op, check_seq_caps, check_caps2, _localparam, RTL,
+)
 
 # The tile's instruction capacity, PARSED from the RTL rather than
 # restated: a number in a test that copies a number in the RTL is a
 # defect (docs/VERIFICATION.md), and this one moved at revision 2.
 SEQ_IMEM_D = _localparam(RTL / "cft_krnl.sv", "SEQ_IMEM_D")
+# ...and the scratch's depth, parsed from the same file for the same
+# reason. It moved into existence at revision 3.
+SEQ_SCRATCH_D = _localparam(RTL / "cft_krnl.sv", "SEQ_SCRATCH_D")
 
 # CSR map (rtl/cft_csr.sv == hw/kernel.xml == docs/ARCHITECTURE.md)
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
 FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
 PROGPTR, CNTPTR, BANKPTR = 0x54, 0x5C, 0x64
+# Revision 3's three: the second capability word, and the two pointers
+# the per-run scratch block rides on.
+CAPS2, SINPTR, SOUTPTR = 0x6C, 0x70, 0x78
 
 MODE_SEQ = 1 << 15          # this run belongs to cft_seq
 CAPS_SEQ = 1 << 15          # ... and this bitstream has one
@@ -86,13 +94,28 @@ ST_DEPOSIT_OVF = 1 << 4
 # Far enough apart that a run cannot reach its neighbour's region even
 # with the whole deposit window and a generous guard band.
 A_BASE, B_BASE, C_BASE = 0x00000, 0x20000, 0x40000
-D_BASE, PROG_BASE, CNT_BASE = 0x60000, 0x80000, 0xA0000
+D_BASE, CNT_BASE = 0x60000, 0xA0000
+# The image gets the TOP of the model RAM, and needs it: at IMEM_D
+# 16384 a full program is 32 + 8 * 16384 = 131,104 bytes, which is four
+# times what revision 2 held. It used to sit at 0x80000 with 0xA0000
+# above it, and the first 16,384-instruction case staged an image whose
+# last ninety-six bytes ran into the count region - which the run then
+# poisoned, so the tile fetched twelve corrupted instructions and every
+# deposit differed. 0x180000 leaves 512 KB clear below the 2 MB the
+# model RAM is.
+PROG_BASE = 0x180000
 # The per-run constant bank (revision 2). Its own region, far from the
 # image: the whole point of BANK_EXT is that the two are separate
 # buffers, and a tile that quietly read the constants out of the image
 # would pass every check here if they shared one.
 # The elementwise regression's own corner of the same memory.
 BANK_BASE = 0xB0000
+# The two scratch blocks (revision 3), each in its own region: the
+# preload is read through m_axi_a with the image and the bank, and the
+# scratch-out block is written through m_axi_d beside the deposits and
+# the counts, so an overlap would hide exactly the mistakes these
+# regions exist to catch.
+SIN_BASE, SOUT_BASE = 0x110000, 0x140000
 EW_BASES = (0xC0000, 0xD0000, 0xE0000, 0xF0000)
 
 POISON = 0xAA
@@ -150,17 +173,21 @@ async def poll_done(dut, axil, what, tries=3000):
 
 
 async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
-                          prec_code, op_noise=0, bank=None):
+                          prec_code, op_noise=0, bank=None,
+                          scratch_in=None):
     """Everything a host does between having a program and having an
     answer, in the order XRT does it.
 
     `bank` is a BANK_EXT program's constants, staged in their own region
     and handed over in BANK_PTR exactly as PROG_PTR hands over the
     image - which is the whole of what the new register has to do.
+    `scratch_in` is the same story one revision later, through
+    SCRATCH_IN_PTR, with SCRATCH_OUT_PTR as its answer.
     """
     ebytes = prog.fmt.width // 8
     dep_bytes = n * prog.max_deposits * ebytes
     cnt_bytes = n * 4
+    sout_bytes = n * prog.n_scratch_out * ebytes
 
     if n:
         ram.write(A_BASE, pack(prog.fmt, va))
@@ -171,6 +198,11 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
     # about what the tile wrote and not about what the buffer held.
     ram.write(D_BASE, bytes([POISON]) * (dep_bytes + GUARD))
     ram.write(CNT_BASE, bytes([POISON]) * (cnt_bytes + GUARD))
+    # ...and a fixed 256 bytes past whatever this program's block
+    # needs, so the NEGATIVE half - a program that declares no scratch
+    # output must not write here at all - has ground to stand on even
+    # when the window is zero bytes wide.
+    ram.write(SOUT_BASE, bytes([POISON]) * (sout_bytes + 256 + GUARD))
 
     await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ)
     await write64(axil, NREG, n)
@@ -189,11 +221,24 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
         # at an address with no constants at it is how that is checked
         # rather than asserted.
         await write64(axil, BANKPTR, 0xDEAD_0000)
+    # The two scratch pointers, written the way PROG_PTR and BANK_PTR
+    # are, and poisoned on the same terms: a program without
+    # flags.SCRATCH_IO must read neither and write neither, and the
+    # write one is the sharper check - a scratch-out block nobody asked
+    # for would land in a host buffer that does not exist.
+    if scratch_in is not None:
+        ram.write(SIN_BASE, pack(prog.fmt, scratch_in))
+    if prog.scratch_io:
+        await write64(axil, SINPTR, SIN_BASE)
+        await write64(axil, SOUTPTR, SOUT_BASE)
+    else:
+        await write64(axil, SINPTR, 0xDEAD_1000)
+        await write64(axil, SOUTPTR, 0xDEAD_2000)
     await axil.write_dword(CTRL, 1)
 
 
 async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
-                   bank=None):
+                   bank=None, scratch_in=None, tries=3000):
     """One sequencer run, scored against the model on every observable."""
     fmt = prog.fmt
     ebytes = fmt.width // 8
@@ -202,11 +247,13 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
     dep_bytes = n * maxd * ebytes
     cnt_bytes = n * 4
 
-    res = seq.run(prog, va, vb, vc, bank=bank)
+    res = seq.run(prog, va, vb, vc, bank=bank, scratch_in=scratch_in)
+    sout_bytes = n * prog.n_scratch_out * ebytes
 
     await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
-                          PREC_CODE[fmt.name], op_noise, bank=bank)
-    await poll_done(dut, axil, name)
+                          PREC_CODE[fmt.name], op_noise, bank=bank,
+                          scratch_in=scratch_in)
+    await poll_done(dut, axil, name, tries=tries)
 
     got_dep = ram.read(D_BASE, dep_bytes + GUARD)
     bad = 0
@@ -232,6 +279,24 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
     assert got_cnt[cnt_bytes:] == bytes([POISON]) * GUARD, \
         f"{name}: the tile wrote past the count window"
 
+    # The block the run hands back, read the way a host reads it: out
+    # of the buffer SCRATCH_OUT_PTR named. A program that declares none
+    # must have left the region entirely poison, which is the negative
+    # half and runs on every other case in this file.
+    got_so = ram.read(SOUT_BASE, sout_bytes + GUARD)
+    for k in range(n * prog.n_scratch_out):
+        g = int.from_bytes(got_so[k * ebytes:(k + 1) * ebytes], "little")
+        assert g == res.scratch_out[k], (
+            f"{name}: scratch_out element {k} (lane "
+            f"{k // prog.n_scratch_out}, slot {k % prog.n_scratch_out}) "
+            f"got {g:#x} want {res.scratch_out[k]:#x}")
+    assert got_so[sout_bytes:] == bytes([POISON]) * GUARD, \
+        f"{name}: the tile wrote past the scratch-out window"
+    if not prog.scratch_io:
+        assert ram.read(SOUT_BASE, 256) == bytes([POISON]) * 256, (
+            f"{name}: a program that declares no scratch output wrote "
+            f"the scratch-out region anyway")
+
     got_f = await axil.read_dword(FLAGS)
     assert got_f == res.flags, \
         f"{name}: FLAGS {got_f:#07b}, model says {res.flags:#07b}"
@@ -241,7 +306,7 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
 
     dut._log.info(f"{name}: {n} lanes x {maxd} deposits bit-exact, "
                   f"flags {got_f:#07b}, status {got_st:#07b}")
-    return got_f
+    return res
 
 
 async def run_refused(dut, axil, ram, image, prog, va, vb, vc, n,
@@ -520,10 +585,14 @@ async def krnl_sequencer(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000700, \
-        "the map grew by two registers at v0.7.0 - BANK_PTR at 0x64/0x68"
+    assert await axil.read_dword(VERSION) == 0x00000800, \
+        ("the map grew again at v0.8.0 - CAPS2 at 0x6C and the two "
+         "scratch pointers at 0x70/0x74 and 0x78/0x7C")
     caps = await axil.read_dword(CAPS)
     check_seq_caps(caps)
+    # CAPS2 against the localparam cft_krnl elaborates the scratch
+    # from, so the register cannot drift from the memory it describes.
+    check_caps2(await axil.read_dword(CAPS2))
     assert caps & CAPS_SEQ, (
         "CAPS bit 15 must advertise the sequencer - it is what a host asks "
         "before it writes PROG_PTR, and the alternative is guessing from "
@@ -535,12 +604,21 @@ async def krnl_sequencer(dut):
     # zero, and looks exactly like a sequencer bug.
     for addr, val in ((PROGPTR, 0x0000_0001_2345_6780),
                       (CNTPTR,  0x0000_0002_4680_ACE0),
-                      (BANKPTR, 0x0000_0003_1470_2580)):
+                      (BANKPTR, 0x0000_0003_1470_2580),
+                      (SINPTR,  0x0000_0004_1357_9BD0),
+                      (SOUTPTR, 0x0000_0005_2468_ACE0)):
         await write64(axil, addr, val)
         lo = await axil.read_dword(addr)
         hi = await axil.read_dword(addr + 4)
         assert (hi << 32) | lo == val, \
             f"CSR {addr:#x} read back {(hi << 32) | lo:#x}, wrote {val:#x}"
+    # ...and CAPS2 is READ-ONLY, which the map says and nothing else
+    # checks: a writable capability register is a capability register a
+    # host can be lied to by.
+    caps2_before = await axil.read_dword(CAPS2)
+    await axil.write_dword(CAPS2, 0xFFFF_FFFF)
+    assert await axil.read_dword(CAPS2) == caps2_before, \
+        "CAPS2 took a write; it is read-only like CAPS, MAGIC and VERSION"
 
     rng = random.Random(4242)
 
@@ -564,9 +642,10 @@ async def krnl_sequencer(dut):
     # iteration; the rest run all three. Chosen rather than drawn, so
     # the count divergence is guaranteed to be in the run.
     vb = [zero_bits(FP32) if i % 2 else one_bits(FP32) for i in range(n)]
-    flags_loop = await run_prog(dut, axil, ram, prog_loop_setact(FP32),
-                                va, vb, gen_stream(FP32, n, rng),
-                                "fp32 loop+setact")
+    res_loop = await run_prog(dut, axil, ram, prog_loop_setact(FP32),
+                              va, vb, gen_stream(FP32, n, rng),
+                              "fp32 loop+setact")
+    flags_loop = res_loop.flags
 
     await run_prog(dut, axil, ram, prog_consts(FP32),
                    gen_stream(FP32, n, rng), gen_stream(FP32, n, rng),
@@ -647,10 +726,13 @@ async def krnl_sequencer(dut):
     # built for a later revision - one whose flags say something this
     # tile has never heard of - would have been half-understood and run.
     # This tile throws it back at the header, before a byte is computed.
+    # flags[1] became SCRATCH_IO at revision 3, so the first bit this
+    # tile does not know moved up to [2]; the second header word is
+    # `scratch_io` and is still reserved while its flag is clear.
     for offset, value, why in (
-            (24, 1 << 1, "flags[1], a flag bit this tile does not know"),
+            (24, 1 << 2, "flags[2], a flag bit this tile does not know"),
             (27, 0x80,   "flags[31], the top of the same word"),
-            (28, 1,      "reserved[1], still reserved")):
+            (28, 1,      "scratch_io set without flags.SCRATCH_IO")):
         bad = bytearray(p32.to_bytes())
         bad[offset] |= value
         await run_refused(dut, axil, ram, bytes(bad), p32,
@@ -694,7 +776,15 @@ async def krnl_sequencer(dut):
                    gen_stream(FP32, n_imem, rng, tame=True),
                    gen_stream(FP32, n_imem, rng, tame=True),
                    gen_stream(FP32, n_imem, rng, tame=True),
-                   f"fp32 {SEQ_IMEM_D} instructions, IMEM full")
+                   f"fp32 {SEQ_IMEM_D} instructions, IMEM full",
+                   # The default budget is 30,000 cycles and this run
+                   # needs more than twice that at IMEM_D 16384: about
+                   # 20,500 to parse a 131 KB image an instruction a
+                   # cycle, and about 33,000 more for the skip to walk
+                   # every word of it to the matching ENDREP. It was
+                   # inside the default at 4,096 and is the one case
+                   # whose cost grew fourfold with R6.
+                   tries=30000)
 
     # ...and one more than the memory holds is refused at the header,
     # which is the boundary the capacity actually is. The image is
@@ -775,6 +865,160 @@ async def krnl_sequencer(dut):
     await run_prog(dut, axil, ram, prog_two_deposits(FP256),
                    gen_stream(FP256, n2, rng), gen_stream(FP256, n2, rng),
                    gen_stream(FP256, n2, rng), "fp256 two-deposits")
+
+    # ---- revision 3 R4/R5: the scratch, and its per-run block --------
+    #
+    # What only a full-kernel bench can say about this feature is that
+    # the two new CSRs reach cft_seq and that the scratch-out block
+    # comes back through m_axi_d - the write master - rather than
+    # through the master the preload arrives on. The unit bench
+    # (tb/test_seq_core.py) owns the semantics; this owns the plumbing.
+    n_s = 24
+    pscr = seq.Program(FP32, [
+        seq.stl(0, 0),                       # slot 0 := a
+        seq.stl(1, SEQ_SCRATCH_D - 1),       # ...and b at the top slot
+        seq.ldl(20, SEQ_SCRATCH_D - 1),
+        seq.deposit(20),
+        seq.stx(20, 2),                      # scratch[c mod D] := b
+        seq.ldx(21, 2),
+        seq.deposit(21),
+        seq.halt()], max_deposits=2)
+    await run_prog(dut, axil, ram, pscr,
+                   gen_stream(FP32, n_s, rng), gen_stream(FP32, n_s, rng),
+                   [i * 5 + SEQ_SCRATCH_D * (i % 3) for i in range(n_s)],
+                   f"fp32 STL/LDL/STX/LDX, top slot {SEQ_SCRATCH_D - 1}")
+
+    # The block, in and out, through SCRATCH_IN_PTR and
+    # SCRATCH_OUT_PTR. run_prog reads the scratch-out region back the
+    # way a host does and compares it to the model element for element,
+    # and asserts the guard band past it is untouched.
+    pio = seq.Program(FP32, [
+        seq.ldl(3, 0), seq.ldl(4, 1),
+        seq.alu(OP_ADD, rd=5, ra=3, rc=4),
+        seq.stl(5, 2),
+        seq.deposit(5),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=2, n_scratch_out=3)
+    assert pio.to_bytes()[28:32] == (2 | (3 << 16)).to_bytes(4, "little"), \
+        "the header's second word must carry the two counts, packed"
+    sin = gen_stream(FP32, 2 * n_s, rng, tame=True)
+    await run_prog(dut, axil, ram, pio,
+                   gen_stream(FP32, n_s, rng), gen_stream(FP32, n_s, rng),
+                   gen_stream(FP32, n_s, rng),
+                   "fp32 scratch in 2, out 3", scratch_in=sin)
+
+    # ...and the wide rung, where an element is a whole beat and the
+    # preload's transpose is a different problem: at fp256 one lane
+    # owns every word of a beat, at fp32 eight lanes share one.
+    pio256 = seq.Program(FP256, [
+        seq.ldl(3, 0),
+        seq.alu(OP_MUL, rd=4, ra=3, rb=3),
+        seq.stl(4, 1),
+        seq.deposit(4),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=1, n_scratch_out=2)
+    n_s256 = 3
+    await run_prog(dut, axil, ram, pio256,
+                   gen_stream(FP256, n_s256, rng, tame=True),
+                   gen_stream(FP256, n_s256, rng, tame=True),
+                   gen_stream(FP256, n_s256, rng),
+                   "fp256 scratch in 1, out 2",
+                   scratch_in=gen_stream(FP256, n_s256, rng, tame=True))
+
+    # A run RESUMED through the two pointers: the second call's
+    # deposits must equal the second half of a single call's, which is
+    # the ask R5 answers and the one thing a single run cannot show.
+    body = [seq.ldl(3, 0),
+            seq.alu(OP_ADD, rd=3, ra=3, rc=0, kc=True),
+            seq.stl(3, 0), seq.deposit(3)]
+
+    def resumable(trips, maxdep):
+        return seq.Program(FP32, [seq.repeat(trips)] + body
+                           + [seq.endrep(), seq.halt()],
+                           consts=[one_bits(FP32)], max_deposits=maxdep,
+                           flags=seq.FLAG_SCRATCH_IO,
+                           n_scratch_in=1, n_scratch_out=1)
+
+    n_r = 16
+    va_r = gen_stream(FP32, n_r, rng)
+    vb_r = gen_stream(FP32, n_r, rng)
+    vc_r = gen_stream(FP32, n_r, rng)
+    zeros = [zero_bits(FP32)] * n_r
+    whole = await run_prog(dut, axil, ram, resumable(4, 4),
+                           va_r, vb_r, vc_r, "fp32 four trips in one call",
+                           scratch_in=zeros)
+    half = await run_prog(dut, axil, ram, resumable(2, 2),
+                          va_r, vb_r, vc_r, "fp32 two trips, state out",
+                          scratch_in=zeros)
+    # The state really came back OUT of the tile's buffer: read it from
+    # the RAM rather than from the model, so the round trip goes
+    # through memory the way a host's would.
+    carried = [int.from_bytes(ram.read(SOUT_BASE + i * 4, 4), "little")
+               for i in range(n_r)]
+    assert carried == half.scratch_out, \
+        "the scratch-out buffer does not hold what the model says it does"
+    rest = await run_prog(dut, axil, ram, resumable(2, 2),
+                          va_r, vb_r, vc_r, "fp32 ...and two more, state in",
+                          scratch_in=carried)
+    for i in range(n_r):
+        assert rest.deposits[i * 2:(i + 1) * 2] == \
+            whole.deposits[i * 4 + 2:(i + 1) * 4], (
+                f"lane {i}: the resumed half does not equal the second "
+                f"half of a single run - the state did not survive the "
+                f"round trip through SCRATCH_OUT_PTR and SCRATCH_IN_PTR")
+
+    # The header refusals R5 adds, and the positive control that stops
+    # "refuse everything" from passing them.
+    io_flag = seq.FLAG_SCRATCH_IO
+    flags_before = await axil.read_dword(FLAGS)
+    for word, why in (
+            ((SEQ_SCRATCH_D + 1), "n_scratch_in past the depth"),
+            ((SEQ_SCRATCH_D + 1) << 16, "n_scratch_out past the depth")):
+        bad = bytearray(p32.to_bytes())
+        bad[24] |= io_flag
+        bad[28:32] = word.to_bytes(4, "little")
+        await run_refused(dut, axil, ram, bytes(bad), p32,
+                          gen_stream(FP32, 8, rng), gen_stream(FP32, 8, rng),
+                          gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
+                          f"header {why}", flags_before)
+    # SCRATCH_D exactly is the largest legal count, which is what says
+    # the comparison is a `>` and not a `>=`.
+    pmax = seq.Program(FP32, [seq.ldl(3, SEQ_SCRATCH_D - 1),
+                              seq.deposit(3), seq.halt()],
+                       max_deposits=1, flags=io_flag,
+                       n_scratch_in=SEQ_SCRATCH_D,
+                       n_scratch_out=SEQ_SCRATCH_D)
+    n_max = 4
+    await run_prog(dut, axil, ram, pmax,
+                   gen_stream(FP32, n_max, rng), gen_stream(FP32, n_max, rng),
+                   gen_stream(FP32, n_max, rng),
+                   f"fp32 scratch in and out at exactly {SEQ_SCRATCH_D}",
+                   scratch_in=gen_stream(FP32, n_max * SEQ_SCRATCH_D, rng))
+
+    # ---- revision 3 R7: a constant at index 511 through kx -----------
+    #
+    # The whole 512-entry bank, addressed through the ninth index bit
+    # on all three operand ports - imm[28], imm[29], imm[30] for ka, kb
+    # and kc - so a decode that wired one of the three to the wrong
+    # operand gets two right and one wrong.
+    deep = [((i * 0x0101_0101) ^ (i << 3) ^ 0x11) & 0xFFFF_FFFF
+            for i in range(512)]
+    pdeep = seq.Program(FP32, [
+        # kc's ninth bit is imm[30], kb's imm[29], ka's imm[28] - one
+        # port each, so a decode that crossed two of them gets one
+        # answer right and one wrong rather than all three wrong.
+        seq.alu(OP_ADD, 6, ra=0, rc=511, kc=True, kx=True),
+        seq.deposit(6),
+        seq.alu(OP_MUL, 7, ra=0, rb=300, kb=True, kx=True),
+        seq.deposit(7),
+        seq.alu(OP_CMPLT, 8, ra=256, rb=1, ka=True, kx=True),
+        seq.deposit(8),
+        seq.halt()], consts=deep, max_deposits=3)
+    n_k = 12
+    await run_prog(dut, axil, ram, pdeep,
+                   gen_stream(FP32, n_k, rng), gen_stream(FP32, n_k, rng),
+                   gen_stream(FP32, n_k, rng),
+                   "fp32 kx9: constants 256, 300 and 511")
 
     # ---- n = 0 -------------------------------------------------------
     #

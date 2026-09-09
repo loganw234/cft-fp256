@@ -94,7 +94,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 9   /* 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
+#define CFT_ABI_VERSION_MINOR 10  /* 0.10: the sequencer's revision 3 - a per-lane scratch memory behind CFT_SEQ_FEAT_SCRATCH with its per-run block behind CFT_SEQ_FEAT_SCRATCH_IO, the ninth constant-index bit behind CFT_SEQ_FEAT_KX9, and cft_run_args with cft_program_run_ex so the positional signatures stop growing by an argument a round - cft_program_run and cft_program_run_bank are wrappers over it now. cft_caps.max_scratch; cft_program_info.n_scratch_in, n_scratch_out and scratch_used. 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -458,31 +458,55 @@ typedef struct cft_caps {
                                 * Horner kernel around. With kx
                                 * (CFT_SEQ_FEAT_WIDE_CONST) the indices
                                 * come from the immediate and the reach
-                                * is the bank, which is 256 here and on
-                                * the tile */
+                                * is the bank: 256 through the byte
+                                * alone, and 512 where CFT_SEQ_FEAT_KX9
+                                * adds the ninth bit, which is what
+                                * this reads here and on the tile */
     uint32_t seq_features;     /* bits 3:0 = CAPS[7:4], the sequencer
                                 * feature nibble; bits 7:4 = CAPS[31:28],
                                 * the ALU extensions beyond the group
-                                * bits. Four are assigned:
+                                * bits; bits 11:8 = CAPS2[7:4], the
+                                * second feature nibble revision 3
+                                * opened. Seven are assigned:
                                 * CFT_SEQ_FEAT_WIDE_CONST,
                                 * CFT_SEQ_FEAT_REGS32,
-                                * CFT_SEQ_FEAT_BANK_PTR and
-                                * CFT_ALU_EXT_IMUL, below. A clear
+                                * CFT_SEQ_FEAT_BANK_PTR,
+                                * CFT_SEQ_FEAT_KX9, CFT_ALU_EXT_IMUL,
+                                * CFT_SEQ_FEAT_SCRATCH and
+                                * CFT_SEQ_FEAT_SCRATCH_IO, below. A clear
                                 * bit is ABSENT, not unknown: the loader
                                 * refuses an image that uses the feature
                                 * and cft_supports answers no, so ask
                                 * before issuing, as with any opcode */
+
+    /* ---- the per-lane scratch memory (appended, ABI 0.10) ----
+     *
+     * Slots a lane, from CAPS2[3:0] as log2 with CAPS2[4] set
+     * (docs/SEQUENCER.md revision 3, R4). The same ZERO IS UNKNOWN
+     * rule as the three capacities above, and the same consequence:
+     * an unknown depth is enforced against nothing, so a static
+     * STL/LDL slot is held to it only where a device stated one.
+     *
+     * It is a CAPACITY and CFT_SEQ_FEAT_SCRATCH is the FEATURE; the
+     * two are asked separately, because a device that publishes no
+     * scratch at all publishes neither and a device that predates the
+     * register publishes a clear bit with a zero depth. 256 here and
+     * on the tile. */
+    uint32_t max_scratch;      /* scratch slots a lane, 0 = none or
+                                * unknown */
 } cft_caps;
 
 /* cft_caps.seq_features bits.
  *
  * The low nibble is CAPS[7:4], the sequencer's feature nibble; the
- * next one is CAPS[31:28], the ALU extensions. A clear bit is ABSENT,
- * not unknown, and cft_program_load refuses an image that uses the
- * feature by name - which is the whole reason each of these needed a
- * CAPS bit rather than only a reserved-bit rule: a reserved-bit rule
- * protects a new HOST from an old image, and a CAPS bit protects an
- * old BITSTREAM from a new one. */
+ * next one is CAPS[31:28], the ALU extensions; the third is
+ * CAPS2[7:4], the second sequencer nibble revision 3 opened when the
+ * first one filled up. A clear bit is ABSENT, not unknown, and
+ * cft_program_load refuses an image that uses the feature by name -
+ * which is the whole reason each of these needed a CAPS bit rather
+ * than only a reserved-bit rule: a reserved-bit rule protects a new
+ * HOST from an old image, and a CAPS bit protects an old BITSTREAM
+ * from a new one. */
 #define CFT_SEQ_FEAT_WIDE_CONST 0x01u  /* CAPS[4]: an instruction with kx
                                         * (bit 30) set addresses the whole
                                         * constant bank through 8-bit
@@ -504,8 +528,41 @@ typedef struct cft_caps {
                                         * constant section at all. An old
                                         * tile would read constants from an
                                         * image that has none */
+#define CFT_SEQ_FEAT_KX9        0x08u  /* CAPS[7]: under kx, imm[28],
+                                        * imm[29] and imm[30] are the
+                                        * NINTH bits of ka's, kb's and
+                                        * kc's constant indices, so the
+                                        * addressable bank is 512 rather
+                                        * than 256. The feature nibble's
+                                        * last bit. A revision-2 tile's
+                                        * operand mux reads eight, so an
+                                        * index at or past 256 would
+                                        * address the wrong constant in
+                                        * silence - which is why this
+                                        * needed a CAPS bit and not only
+                                        * the reserved-bit rule */
 #define CFT_ALU_EXT_IMUL        0x10u  /* CAPS[28]: opcode 30, IMUL, is
                                         * implemented */
+#define CFT_SEQ_FEAT_SCRATCH    0x100u /* CAPS2[4]: every lane owns a
+                                        * private scratch memory of
+                                        * cft_caps.max_scratch slots,
+                                        * reached by the four control
+                                        * codes STL, LDL, STX and LDX
+                                        * (docs/SEQUENCER.md revision 3,
+                                        * R4). Lane i's slot s is lane
+                                        * i's alone */
+#define CFT_SEQ_FEAT_SCRATCH_IO 0x200u /* CAPS2[5]: the host may preload
+                                        * the first slots of every lane
+                                        * from a buffer before the run
+                                        * and read the first slots back
+                                        * after it - the header's
+                                        * scratch_io word, CFT_PROG_FLAG_
+                                        * SCRATCH_IO, and the two scratch
+                                        * pointers of cft_run_args. A
+                                        * revision-2 tile refuses a
+                                        * non-zero reserved[1] at the
+                                        * header, but the loader refuses
+                                        * this one first and by name */
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
 
@@ -1834,6 +1891,26 @@ CFT_API void       cft_program_free(cft_program *prog);
                                            * device the program is loaded
                                            * for; the loader refuses it by
                                            * name elsewhere */
+#define CFT_PROG_FLAG_SCRATCH_IO (1u << 1) /* the header's second reserved
+                                            * word is `scratch_io`:
+                                            * [15:0] n_scratch_in,
+                                            * [31:16] n_scratch_out, each
+                                            * at most the device's
+                                            * max_scratch. Every run then
+                                            * preloads the first
+                                            * n_scratch_in slots of every
+                                            * lane from a buffer and reads
+                                            * the first n_scratch_out back
+                                            * into another, through
+                                            * cft_program_run_ex - which
+                                            * such a program takes and
+                                            * the two older entry points
+                                            * refuse by name. Needs
+                                            * CFT_SEQ_FEAT_SCRATCH_IO;
+                                            * with the bit CLEAR the
+                                            * scratch_io word must be
+                                            * zero, as the reserved word
+                                            * it was always had to be */
 
 /* What the loaded program is, so a caller can size its buffers
  * without parsing the image itself.
@@ -1849,10 +1926,29 @@ typedef struct cft_program_info {
     uint32_t   n_consts;
     /* ---- appended, ABI 0.9 ---- */
     uint32_t   flags;          /* the header's flags word;
-                                * CFT_PROG_FLAG_BANK_EXT above is the
-                                * only bit assigned. A caller built
+                                * CFT_PROG_FLAG_BANK_EXT and
+                                * CFT_PROG_FLAG_SCRATCH_IO above are the
+                                * bits assigned. A caller built
                                 * against the older struct passes the
                                 * older struct_size and never sees it */
+    /* ---- appended, ABI 0.10: the per-lane scratch ----
+     *
+     * The first two are the header's scratch_io word split in half,
+     * and are zero unless CFT_PROG_FLAG_SCRATCH_IO is set. They are
+     * what sizes the two buffers of cft_run_args: n * n_scratch_in
+     * elements in and n * n_scratch_out out, lane-major and dense, so
+     * a caller sizes its buffers from the program rather than from a
+     * number it wrote down somewhere else. */
+    uint32_t   n_scratch_in;   /* slots a lane preloaded before the run */
+    uint32_t   n_scratch_out;  /* slots a lane read back after it */
+    /* What the INSTRUCTIONS touch, which is a different question: one
+     * past the highest slot any STL or LDL names, or the device's whole
+     * scratch depth when the program uses the indexed forms STX/LDX,
+     * whose slot is not known until the run. Zero for a program that
+     * uses no scratch at all. A tool that wants to know whether a
+     * program will fit a smaller tile asks this and cft_caps.max_scratch,
+     * rather than disassembling the image. */
+    uint32_t   scratch_used;
 } cft_program_info;
 
 CFT_API cft_status cft_program_get_info(cft_program *prog,
@@ -1915,6 +2011,71 @@ CFT_API cft_status cft_program_run_bank(cft_program *prog,
                                         size_t n,
                                         uint32_t *flags_out,
                                         uint32_t *bus_out);
+
+/* Everything a run can carry, in one struct               (ABI 0.10)
+ *
+ * cft_program_run took nine arguments, cft_program_run_bank eleven,
+ * and revision 3 would have made it thirteen. So the positional
+ * signatures stop growing here: one entry point takes a struct, and
+ * the two calls above become wrappers that fill it - the same
+ * executor, the same checks, the same answers, so nothing that used
+ * them has to move.
+ *
+ *   struct_size   sizeof(cft_run_args), so the struct can grow the way
+ *                 cft_caps does. It is an INPUT struct, though, and
+ *                 that reverses one rule: a size this library does not
+ *                 recognise is REFUSED rather than truncated, because
+ *                 the fields a newer caller set would otherwise be
+ *                 silently ignored - and a run that quietly dropped a
+ *                 scratch buffer is exactly the failure the byte-count
+ *                 rules below exist to prevent.
+ *   a, b, c       initialise r0, r1 and r2, as cft_program_run's do;
+ *                 b and c may be NULL and those registers start at +0
+ *   n             elements
+ *   bank          the constant bank of a CFT_PROG_FLAG_BANK_EXT
+ *                 program, n_consts format-width values;
+ *                 bank_bytes must be exactly that, and both are zero
+ *                 and NULL for a program that carries its own
+ *   scratch_in    n * n_scratch_in format-width values, LANE-MAJOR
+ *                 and dense - lane i's slot s is element
+ *                 i * n_scratch_in + s - preloaded into the first
+ *                 slots of each lane's scratch before its first
+ *                 instruction. NULL with zero bytes for a program
+ *                 that declares no scratch I/O
+ *   scratch_out   n * n_scratch_out likewise, written after each
+ *                 lane's last deposit. Every element is written: an
+ *                 untouched slot reads as +0, the same normative rule
+ *                 the deposit buffer has
+ *   deposits      n * max_deposits elements, as cft_program_run's
+ *   counts        n deposit counts, or NULL
+ *   flags_out     the run's sticky IEEE exceptions, or NULL
+ *   bus_out       STATUS, carrying CFT_STATUS_DEPOSIT_OVERFLOW, or NULL
+ *
+ * BYTE COUNTS MUST MATCH EXACTLY, all three of them. A buffer that is
+ * merely large enough would let the library and the caller disagree
+ * about the shape of the block while both believing they agreed, and
+ * the lane-major layout means a wrong n_scratch_in does not overrun
+ * anything - it silently gives every lane somebody else's slots.
+ *
+ * A program that declares scratch I/O refuses cft_program_run and
+ * cft_program_run_bank by name and takes this call; a program that
+ * declares none refuses a non-NULL scratch buffer here, for the same
+ * reason a program with its own constants refuses a bank.
+ *
+ * docs/SEQUENCER.md revision 3, R4 and R5; docs/HOSTAPI.md. */
+typedef struct cft_run_args {
+    size_t      struct_size;          /* in: sizeof(cft_run_args) */
+    const void *a, *b, *c;            /* the streams; b and c may be NULL */
+    size_t      n;
+    const void *bank;        size_t bank_bytes;         /* BANK_EXT programs */
+    const void *scratch_in;  size_t scratch_in_bytes;   /* n * n_scratch_in * esz, or NULL */
+    void       *scratch_out; size_t scratch_out_bytes;  /* n * n_scratch_out * esz, or NULL */
+    void       *deposits;    uint32_t *counts;
+    uint32_t   *flags_out;   uint32_t *bus_out;
+} cft_run_args;
+
+CFT_API cft_status cft_program_run_ex(cft_program *prog,
+                                      const cft_run_args *args);
 
 /* SHA-256 of the image bytes followed by the bank bytes   (ABI 0.9)
  *

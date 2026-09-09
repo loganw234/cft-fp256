@@ -822,6 +822,31 @@ public:
         return r;
     }
 
+    /* Everything a run can carry, in one struct (ABI 0.10). A program
+     * that declares scratch I/O - cft_program_info::flags carrying
+     * CFT_PROG_FLAG_SCRATCH_IO - refuses run() and run_bank() by name
+     * and takes this.
+     *
+     * The caller fills cft_run_args itself, including struct_size,
+     * because the whole point of the struct is that a field can be
+     * added without a signature moving; a wrapper that took the
+     * fields positionally would put that back. flags_out and bus_out
+     * are the two this fills in, so the answer arrives the way every
+     * other call_result does. */
+    call_result run_ex(cft_run_args args) noexcept
+    {
+        call_result r;
+        if (!prog_) {
+            r.status = CFT_ERR_INVALID_ARGUMENT;
+            return r;
+        }
+        args.struct_size = sizeof(cft_run_args);
+        args.flags_out   = &r.flags;
+        args.bus_out     = &r.bus;
+        r.status = cft_program_run_ex(prog_, &args);
+        return r;
+    }
+
     /* SHA-256 of the image bytes then the bank bytes: what ran, as one
      * hash of program and data together. The bank is held to exactly
      * the rule run_bank holds it to. */

@@ -54,8 +54,13 @@ async def probe(dut):
     cocotb.start_soon(Clock(dut.ap_clk, core.CLK_NS, units="ns").start())
     dut.start.value = 0
     dut.cfg_prec.value = 0
+    # cfg_bank and the two scratch pointers are driven here even
+    # though no program this probe runs reads them: the module latches
+    # all three at start, and an X in a register is a question nobody
+    # should have to answer while reading a cycle-by-cycle trace.
     for name in ("cfg_n", "cfg_a", "cfg_b", "cfg_c", "cfg_d",
-                 "cfg_prog", "cfg_cnt"):
+                 "cfg_prog", "cfg_bank", "cfg_sin", "cfg_sout",
+                 "cfg_cnt"):
         getattr(dut, name).value = 0
     cocotb.start_soon(ram.serve())
     dut.ap_rst_n.value = 0

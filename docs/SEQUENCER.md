@@ -1,11 +1,13 @@
 # The orbit sequencer
 
-*The sections below describe **revision 2** (2026-09-08): thirty-two
-registers a lane, 4,096 instructions a tile, and a constant bank that
-can ride with the run instead of with the image. The section at the
-end of this file is the record of that change and the reasoning behind
-each of the three; everything before it has been updated to describe
-the model as it now is. VERSION 0x700, CAPS[6:4].*
+*The sections below describe **revision 3** (2026-09-08, evening):
+thirty-two registers a lane, a **256-slot per-lane scratch memory**
+with a per-run block that fills it and empties it, **16,384
+instructions** a tile, and a **512-entry constant bank** that can ride
+with the run instead of with the image. The two sections at the end of
+this file are the record of revisions 2 and 3 and the reasoning behind
+each change; everything before them has been updated to describe the
+model as it now is. VERSION 0x800, CAPS[7:4] and CAPS2.*
 
 STATUS: design, golden model, software implementation, kernel
 integration - and, as of 2026-09-01, **the RTL core itself, benched
@@ -34,10 +36,14 @@ What exists around it as of 2026-09-01: `cft_seq` is instantiated in
 `cft_krnl` as a peer of `cft_engine_stream`, sharing the A and D
 masters *and the tile's one `cft_lanes` array* under a `MODE[15]`
 select registered at the accepted start; the CSR map carries
-`PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C and, since revision 2,
-`BANK_PTR` at 0x64 (VERSION 0x700, CAPS bit 15 for the sequencer and
-[6:4] for its features) and `hw/kernel.xml` carries the matching
-arguments 6, 7 and 8;
+`PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C, `BANK_PTR` at 0x64 since
+revision 2, and since revision 3 the read-only `CAPS2` at 0x6C with
+`SCRATCH_IN_PTR` at 0x70 and `SCRATCH_OUT_PTR` at 0x78 (VERSION 0x800,
+CAPS bit 15 for the sequencer and [7:4] for its features, CAPS2[5:0]
+for the scratch), and `hw/kernel.xml` carries the matching
+arguments 6 through 10 - `prog`, `bank` and `scratch_in` on `m_axi_a`
+because they are read, `cnt` and `scratch_out` on `m_axi_d` because
+they are written;
 `cft_program_run` dispatches to the device when the program was loaded
 on one, through `cftx_program_run` on a single compute unit;
 and `tb/test_krnl_seq.py` scores a full-kernel run against `seq.py` on
@@ -46,11 +52,14 @@ ahead of the core, which is the point of writing the contract down
 first.
 
 The core is green - `tb/test_seq_core.py` scores its fetch, execute
-and drain body against `seq.py` directly, 10/10 suites since indexed
-constants added one on 2026-09-07 - and both sequencer targets,
+and drain body against `seq.py` directly, **17/17 suites** since
+revision 3 added five (the four scratch codes, the block in and out,
+the header refusals, and a scratch fuzz), where indexed constants
+made it 10 on 2026-09-07 and revision 2 made it 12 - and both
+sequencer targets,
 `krnlseq` and `seq_core`, are in `make sim`, folded in on the day the
 core passed, which was the only day the claim would mean anything. On
-this tree the whole set holds: seq_core 10/10, krnlseq 1/1, krnl 2/2,
+this tree the whole set holds: seq_core 17/17, krnlseq 1/1, krnl 2/2,
 reduce 3/3, reduceacc 5/5, krnlfused 2/2, krnlplain 2/2, quarter 1/1,
 faults 4/4, the golden model's own pytest cases, `make yosys-lint`
 clean, and the Verilator width gate clean. The last of
@@ -214,9 +223,13 @@ if it could change a result, the sequencer would be a machine whose
 output depended on how fast its inputs converged. Three rules make the
 invisibility provable rather than probable:
 
-- every register write, every deposit **and every exception flag** is
-  masked by the lane's active bit, so an all-inactive loop body is a
-  no-op by construction;
+- every register write, every deposit, **every scratch store and
+  load** and **every exception flag** is masked by the lane's active
+  bit, so an all-inactive loop body is a no-op by construction. The
+  scratch is the newest reason this rule has to be stated as "every
+  write" rather than enumerated: a store that escaped the mask would
+  be invisible in the deposits and visible in the scratch-out block,
+  which is the shape of divergence that is hardest to notice;
 - `ACTALL`, the only instruction that can reactivate a lane, is
   illegal inside a loop body;
 - `HALT` is illegal inside a loop body too.
@@ -255,8 +268,12 @@ assumed - the same reason a bitstream carries a hash.
         u32 precision;      // the PREC_CODE ladder; a program is
                             // compiled for one format, because its
                             // constants are format-width values
-        u32 flags;          // bit 0 BANK_EXT; [31:1] reserved, zero
-        u32 reserved;       // reserved, zero
+        u32 flags;          // bit 0 BANK_EXT, bit 1 SCRATCH_IO;
+                            // [31:2] reserved, zero
+        u32 scratch_io;     // [15:0] n_scratch_in, [31:16]
+                            // n_scratch_out, each <= SCRATCH_D;
+                            // meaningful only under flags.SCRATCH_IO,
+                            // and zero without it
     };
 
 Then `n_consts` format-width constants, then `n_insns` 64-bit
@@ -265,26 +282,38 @@ carries NO constant section and is exactly `32 + 8 * n_insns` bytes,
 with the constants arriving per run through `BANK_PTR` (R3 below).
 `n_consts` still says how many the program addresses either way.
 
-Both of the header's last two words are checked, and a set bit in
-either is refused. That is newer than it looks: `flags` was
-`reserved[0]` and the 0x600 tile checked neither word, which is
-exactly why `BANK_EXT` needs a CAPS bit rather than only a header flag
-- an older tile would read the flag as a reserved word it never looks
-at, and then read constants out of an image that has none.
+Both of the header's last two words are checked, and a set bit the
+tile does not implement is refused in either. That is newer than it
+looks: `flags` was `reserved[0]` and the 0x600 tile checked neither
+word, which is exactly why `BANK_EXT` needs a CAPS bit rather than
+only a header flag - an older tile would read the flag as a reserved
+word it never looks at, and then read constants out of an image that
+has none. The revision-2 tile's refusal of a non-zero SECOND word is
+in turn what guards `SCRATCH_IO`, which is what that word became.
 
-Each lane owns **32 registers** of format width and one **active**
-bit. The constant bank is separate and read-only: constants are shared
-across lanes, so putting them in the register file would multiply
-their cost by the lane count for no benefit. On a chiplet that
-distinction is most of the area argument.
+Each lane owns **32 registers** of format width, **256 scratch slots**
+of format width, and one **active** bit. The registers are the working
+set and the scratch is where a live set larger than thirty-two spills,
+where a small local array lives, and where the host may hand state in
+and take it out (R4 and R5 below). The constant bank is separate and
+read-only: constants are shared across lanes, so putting them in the
+register file would multiply their cost by the lane count for no
+benefit. On a chiplet that distinction is most of the area argument.
 
-**The inputs are the streams that already exist.** A lane starts with
+**The inputs are the streams that already exist** - and, since
+revision 3, a fourth that is optional. A lane starts with
 `r0`, `r1` and `r2` loaded from the same three operand streams the
-elementwise engine already reads, and `r3..r31` at `+0`. So a
-sequencer run needs no new input path in the hardware, no new CSR, and
+elementwise engine already reads, `r3..r31` at `+0`, and every scratch
+slot at `+0` except the first `n_scratch_in` under `flags.SCRATCH_IO`,
+which come from `SCRATCH_IN_PTR`. The three streams needed no new
+input path in the hardware, no new CSR, and
 no new host concept - the seed point, its parameter and whatever else
-the map needs arrive exactly the way `a`, `b` and `c` always have.
-Only the output widens, from one element per lane to `max_deposits`.
+the map needs arrive exactly the way `a`, `b` and `c` always have. The
+scratch block DOES add a path, and that is what it is for: three
+values is a state a program can be entered at, and thirty is not.
+The output widens the same way - from one element per lane to
+`max_deposits`, plus `n_scratch_out` slots a lane where the program
+asks for them, which is what lets a run be resumed by the next one.
 
 **Flags are masked by the active bit, not just writes.** This looks
 like an implementation detail and is not: if only the register writes
@@ -309,6 +338,12 @@ So a lane whose index is at or beyond `n` starts inactive. The
 hardware knows both numbers, the mask costs one comparator, and the
 whole class of problem goes away. This is a real difference from
 `cft_run`, where padding is genuinely free.
+
+The scratch block follows the same rule from the other side: a padding
+lane **receives nothing and writes nothing**. Both buffers are
+`n * count` elements, so the tile's stream simply ends before a
+padding lane's slots would begin - the tail of the caller's buffer is
+the caller's, exactly as it is for deposits and counts.
 
 ## Execution model, and why the lane block has a floor
 
@@ -357,6 +392,20 @@ lane-block floor was worked out; both numbers are the design, and
 trading pipeline depth against deposit depth is the axis a chiplet
 turns.
 
+Revision 3's scratch is the same arithmetic with a much larger first
+factor:
+
+    scratch  =  SCRATCH_D slots * LATENCY beats * 32 bytes
+
+which at 256 and 16 is **128 KiB a tile**, eight times the register
+file and the largest of the three on today's parameters - and the same
+size, to the byte, as the instruction memory R6 grew, which is not one
+of the three because it is per tile rather than per lane. It is
+precision-independent for the reason the other two are, and it is the
+number a smaller part turns down first: `SCRATCH_D` is a build
+parameter, the tile publishes its log2 in `CAPS2[3:0]`, and a program
+that needs more than a device has is refused where it was built.
+
 Two consequences worth stating now, because they constrain the RTL:
 
 - **`n` below `L` cannot fill the pipe.** At fp256 that means fewer
@@ -388,12 +437,15 @@ One 64-bit little-endian word.
 | 29 | `kc` | as `ka`, for source C |
 | 30 | `kx` | the constant indices come from `imm`, not from the operand fields |
 | 31 | `ctrl` | this is a control instruction |
-| 55:32 | `imm[23:0]` | the three constant indices under `kx`; part of the trip count on `REPEAT`; zero otherwise |
+| 55:32 | `imm[23:0]` | the three constant indices under `kx`; the SLOT on `STL`/`LDL`; part of the trip count on `REPEAT`; zero otherwise |
 | 56 | `imm[24]` | `rd[4]`, the fifth bit of the destination register |
 | 57 | `imm[25]` | `ra[4]` |
 | 58 | `imm[26]` | `rb[4]` |
 | 59 | `imm[27]` | `rc[4]` |
-| 63:60 | `imm[31:28]` | reserved, must be zero |
+| 60 | `imm[28]` | under `kx`, the ninth bit of `ka`'s constant index |
+| 61 | `imm[29]` | as above, for `kb` |
+| 62 | `imm[30]` | as above, for `kc` |
+| 63 | `imm[31]` | reserved, must be zero |
 
 A register field is **five bits**: the low four in the operand field
 above and the fifth in `imm[27:24]`, which is R1 below. `REPEAT` is the
@@ -413,11 +465,19 @@ a polynomial was chunked eight coefficients at a time - and the one
 Bit 30 was reserved and must-be-zero, and `imm` is thirty-two bits that
 an ALU instruction had no use for. **When `kx` is set the constant
 indices for the three operands come from `imm[7:0]`, `imm[15:8]` and
-`imm[23:16]`**, so the addressable bank is **256** - which is
+`imm[23:16]`**, so the addressable bank was **256** - which was
 `KMEM_D`, the capacity `cft_seq`'s header check already permitted and
-only its storage and operand mux fell short of. `imm[31:24]` stays
-reserved-must-be-zero, which leaves room for a counter-indexed form
-later without disturbing this one.
+only its storage and operand mux fell short of.
+
+Revision 3 adds a **ninth bit to each index**, at `imm[28]`, `imm[29]`
+and `imm[30]` for `ka`, `kb` and `kc` respectively - the same
+construction as the fifth register bits one nibble down - so the bank
+is **512** and `KMEM_D` is 512 with it. A ninth bit is read only under
+`kx` for an operand whose `k` flag is set; set anywhere else it is an
+unread field and the program is refused. `imm[31]` stays
+reserved-must-be-zero, which is the cheap version guard for whatever
+comes after this and leaves room for a counter-indexed form without
+disturbing either.
 
 An operand whose `k` bit is CLEAR still names a register through its
 own four-bit field, exactly as before, so `kx` widens the constant
@@ -436,7 +496,10 @@ bit, `cft_caps.seq_features` bit 0 - and CAPS[28] publishes `IMUL`
 (bit 4 of the same word); `cft_program_load` refuses an image that uses
 either on a device that does not publish it, naming the instruction,
 so a host never has to guess and `host/tools/enclose.c` falls back to
-its chunked shape where the loader says no. No VERSION step: VERSION
+its chunked shape where the loader says no. Revision 3's ninth index
+bit takes CAPS[7] on exactly the same argument one step further out: a
+revision-2 tile reads eight index bits and would address constant 5
+where the program meant 261. No VERSION step for any of them: VERSION
 guards the register map, and features are announced in CAPS
 (rtl/cft_csr.sv).
 
@@ -462,6 +525,27 @@ write can `ACTALL` outside the loop.
 | 3 | `DEPOSIT ra` | append register `ra` to this lane's output |
 | 4 | `SETACT ra` | `active := active AND (ra != 0)` |
 | 5 | `ACTALL` | `active := true`; illegal inside a loop |
+| 6 | `STL ra, imm[23:0]` | `scratch[imm] := ra` |
+| 7 | `LDL rd, imm[23:0]` | `rd := scratch[imm]` |
+| 8 | `STX ra, rb` | `scratch[rb mod SCRATCH_D] := ra` |
+| 9 | `LDX rd, rb` | `rd := scratch[rb mod SCRATCH_D]` |
+
+Codes 6 to 9 are revision 3's per-lane scratch (R4). A store is a
+register write for P3's purposes - masked by the lane's active bit, so
+an all-inactive loop body stays a no-op - and a load writes `rd`, so it
+is masked the same way; neither is legal-only-at-top-level, because
+neither can be observed through the early exit. Neither is arithmetic
+either: no rounding attribute, no flags, and P1 holds as it did for
+`IMUL`. The indexed forms take the slot from the low
+`log2(SCRATCH_D)` bits of `rb`'s bit pattern read as an unsigned
+integer, **reduced modulo the depth**; the model does the same, so the
+reduction is part of the contract rather than an accident. A slot at
+or past `SCRATCH_D` in `STL`/`LDL` is refused by the loader by name,
+as a constant index past the bank is - the instruction says which slot,
+so the answer is knowable before the run; an indexed access is not
+refused, because `rb` is data and refusing it would be refusing a
+program for a value it might compute. Slots start at `+0` for every
+lane at the start of a run, except where R5 preloads them.
 
 `SETACT` narrows and never widens. Lanes drop out as they converge and
 stay out, which is what an escape-time iteration wants and what makes
@@ -471,32 +555,44 @@ confined to the top level so that P3 holds.
 Loops nest four deep, and `HALT` and `ACTALL` are legal only at the
 top level.
 
-**A tile also has three capacities the contract does not fix.** They
+**A tile also has four capacities the contract does not fix.** They
 are build parameters of `cft_seq`, set where rtl/cft_krnl.sv
 instantiates it, and not part of the program model: **`MAXD = 64`
-deposit slots a lane**, `IMEM_D = 4096` instructions (1024 until
-revision 2, which is what the card-day images hold) and `KMEM_D = 256`
-constants. A header that asks for more than any of them is
+deposit slots a lane**, `IMEM_D = 16384` instructions (4096 at
+revision 2, 1024 before it, which is what the card-day images hold),
+`KMEM_D = 512` constants (256 until revision 3), and **`SCRATCH_D =
+256` scratch slots a lane**, new at revision 3. A header that asks for
+more than any of them - including a scratch count past the depth - is
 refused by the tile at the header, before the constants and
 instructions stream in, in the same check that refuses a precision
-the tile was not configured for. A fourth number is not a memory
-depth at all but the reach of the instruction's own operand field:
-the `ka`/`kb`/`kc` bits redirect four-bit fields at the constant
-bank, so until 2026-09-07 **a program addressed sixteen constants**
-whatever `n_consts` said, on the tile and in the library alike, and
-host/tools/enclose.c chunked its Horner kernel around it. `kx`
-(below) closed that gap the same day: with it set the indices come
-from the immediate, the whole 256-entry bank is both stored and
-addressable, and `cft_caps.max_consts` says which of the two a
-device is.
+the tile was not configured for.
+
+`SCRATCH_D` is the one of the four that is NOT purely a capacity: the
+indexed forms `STX`/`LDX` reduce `rb` modulo it, so a tile with a
+different depth would compute different answers rather than merely
+accept larger programs. That is why the model fixes it too, and why
+it must be a power of two.
+
+A fifth number is not a memory depth at all but the reach of the
+instruction's own operand field: the `ka`/`kb`/`kc` bits redirect
+four-bit fields at the constant bank, so until 2026-09-07 **a program
+addressed sixteen constants** whatever `n_consts` said, on the tile
+and in the library alike, and host/tools/enclose.c chunked its Horner
+kernel around it. `kx` (below) closed that gap the same day: with it
+set the indices come from the immediate, and revision 3's ninth bit
+took the reach to the whole 512-entry bank. `cft_caps.max_consts` says
+which of the three a device is.
 
 **A host asks rather than guesses.** Since 2026-09-07 the tile
-publishes all four in `CAPS` (0x4C) as log2 - bits 19:16, 23:20 and
+publishes all of them in `CAPS` (0x4C) as log2 - bits 19:16, 23:20 and
 27:24, with 7:4 the feature nibble (`kx` at [4], `REGS32` at [5],
-`BANK_PTR` at [6] since revision 2) - and `cft_get_caps`
-carries them into `cft_caps.max_deposits`, `max_insns`, `max_consts`
-and `seq_features`. **Every backend publishes what it enforces and
-enforces what it publishes**, and `cft_program_load` refuses an
+`BANK_PTR` at [6] since revision 2, `KX9` at [7] since revision 3) -
+and in **`CAPS2` (0x6C)**, whose `[3:0]` is log2 `SCRATCH_D` with `[4]`
+saying a scratch exists at all and `[5]` that its per-run block does.
+`cft_get_caps` carries them into `cft_caps.max_deposits`,
+`max_insns`, `max_consts`, `max_scratch` and `seq_features`. **Every
+backend publishes what it enforces and enforces what it publishes**,
+and `cft_program_load` refuses an
 image past the device's own caps with a message naming the cap and
 both numbers, so a program that will not fit is refused where it was
 built rather than by the tile with a status bit. The numbers differ
@@ -506,7 +602,8 @@ not one tile, so "it ran on software" still does not mean "it fits a
 tile" - what has changed is that a tool can now find out in one call.
 Zero in a field means the device did not say (only a remote server
 older than the fields), and an unknown cap is enforced against
-nothing.
+nothing. The nibble at CAPS[7:4] is now FULL; the next sequencer
+feature takes a bit of CAPS2, which is what that register exists for.
 
 Programs that deposit once an iteration feel the deposit budget
 first: `cft-zoom` deposits two values a trip and takes
@@ -533,23 +630,34 @@ the hardware does not have to be:
   nested `REPEAT 0xffffffff` fit in 104 bytes and describe 3.4e38
   iterations, which terminates in the same sense the heat death of the
   universe does. The loader multiplies the nest out and refuses.
-- a constant index outside the bank, a reserved bit, a set bit in the
-  header's `flags[31:1]` or its remaining reserved word, or trailing
-  bytes after the instruction stream. A `BANK_EXT` image is exactly
-  `32 + 8 * n_insns` bytes and a self-contained one exactly
+- a constant index outside the bank, a **scratch slot at or past
+  `SCRATCH_D` in a `STL` or `LDL`**, a reserved bit, a set bit in the
+  header's `flags[31:2]`, a non-zero `scratch_io` word without
+  `flags.SCRATCH_IO`, a scratch count past `SCRATCH_D` with it, or
+  trailing bytes after the instruction stream. A `BANK_EXT` image is
+  exactly `32 + 8 * n_insns` bytes and a self-contained one exactly
   `32 + n_consts * element_bytes + 8 * n_insns`, so "trailing bytes"
-  means the same thing for both.
+  means the same thing for both. An INDEXED scratch access is not
+  refused for its slot: `rb` is data, and the contract reduces it
+  modulo the depth.
 - a **missing, wrong-size or unwanted bank**: a `BANK_EXT` program run
   without one, or with a number of values that is not `n_consts`, or a
   self-contained program handed one. Two sources for a constant is one
   source too many, and a run whose constants nobody agreed on is the
-  failure the whole feature exists to make impossible.
+  failure the whole feature exists to make impossible. The **scratch
+  block** carries the same three refusals in the same shape: a
+  `SCRATCH_IO` program run without the block it declares, one whose
+  block is not `n * n_scratch_in` values, or a program that declares
+  none handed one.
 - a program that names a register above 15, or uses `kx`, or is
-  `BANK_EXT`, on a device whose CAPS does not publish that feature -
-  by name, naming the instruction, before the register map is touched.
-  An old tile has no rule that would refuse any of the three: its
-  operand mux reads the low four bits of a register field, and its
-  FETCH reads constants out of an image that may have none.
+  `BANK_EXT`, or uses the scratch, or declares scratch I/O, or names a
+  constant at or past 256, on a device whose CAPS or CAPS2 does not
+  publish that feature - by name, naming the instruction, before the
+  register map is touched. An old tile has no rule that would refuse
+  any of them: its operand mux reads the low four bits of a register
+  field or the low eight of a constant index, its FETCH reads
+  constants out of an image that may have none, and it decodes an
+  unknown control code as `HALT`.
 - **any field an instruction does not read being non-zero.** An ALU
   instruction has no immediate; `DEPOSIT` reads only `ra`. Leaving
   those free would mean one operation had many encodings, and then a
@@ -563,7 +671,9 @@ the hardware does not have to be:
   under `kx` an operand whose `k` bit is set takes its index from
   `imm`, so its four-bit field is not read and must be zero; an
   operand whose `k` bit is clear names a register, so its byte of
-  `imm` is not read and must be zero; `imm[31:28]` is read by nothing;
+  `imm` is not read and must be zero - and, since revision 3, so is
+  its NINTH index bit, which is read only under `kx` for an operand
+  whose `k` flag is set; `imm[31]` is read by nothing;
   and `kx` itself selects nothing when no operand names a constant, so
   that combination is refused too - it is a second spelling of an
   ordinary three-register instruction. `kx` on a control instruction
@@ -582,6 +692,17 @@ the hardware does not have to be:
   which is also why `REPEAT 0xffffffff`, the program the worst-case
   bound above exists for, is still a legal encoding and still runs
   identically on a revision-1 tile.
+
+  Revision 3's four scratch codes are four more applications again,
+  and they are the reason the rule is worth stating as a rule rather
+  than as a list. `STL` reads `ra` and `imm[23:0]`, so `imm[25]` may
+  be set and nothing else may; `LDL` writes `rd` and reads
+  `imm[23:0]`, so `imm[24]` may; `STX` reads `ra` and `rb` and `LDX`
+  writes `rd` and reads `rb`, so those two may set their own two high
+  bits and must leave `imm[23:0]` at zero, because their slot comes
+  from a register and the immediate is read by nothing. On all four,
+  every remaining register field, `rnd`, `ka`/`kb`/`kc` and `kx` must
+  be zero.
 
   One redundancy is deliberately NOT refused: a `kx` instruction whose
   indices all happen to be below sixteen is a second spelling of a
@@ -657,7 +778,7 @@ systems: on a board where all masters reach one DDR or one PCIe
 window, the steering is a no-op and any master would do - the fix
 costs nothing there and is required here.
 
-Three structures, sized in the section above:
+Four structures, sized in the section above:
 
 - **Register file**, organised beat-wide rather than lane-wise:
   `regs[reg][beat]` is one 256-bit word, so a whole beat's worth of
@@ -669,6 +790,25 @@ Three structures, sized in the section above:
   run and readable back for attestation.
 - **Deposit buffer**, written by lane index, drained to memory in
   index order.
+- **Scratch** (revision 3), addressed `{slot, beat}` exactly as the
+  register file is addressed `{reg, beat}`, with one write port and
+  one read port because that is all four codes need. One thing it
+  takes from the deposit buffer rather than the register file: each
+  32-bit word bank carries its OWN address, because `STX` and `LDX`
+  take the slot from `rb` and the lanes of one beat hold divergent
+  `rb` values. A shared address would make an indexed access
+  lane-serial; independent banks make divergent addresses free, which
+  is the same argument that gives the deposit buffer per-bank write
+  addresses for divergent deposit counts.
+
+  The scratch is wiped to `+0` per lane block, as the register file
+  is - but only as far as the program can reach into it: every slot if
+  the program indexes, otherwise the highest static slot it names and
+  the slots the scratch-out drain will read. Wiping all of it every
+  block would cost `SCRATCH_D * NBEATS` cycles - 4,096 at today's
+  parameters, eight times the register file's - whether or not the
+  program owns a slot, and a program that names none must cost nothing
+  for a memory it never touches.
 
 The control is an issue/drain state machine, and the counts fall out
 of the sizing: issue `LATENCY` beats of one instruction back to back,
@@ -704,6 +844,17 @@ per-lane deposit count, and it is an output rather than a convenience
 because `+0` is both a legal deposit and the defined value of an
 untouched slot.
 
+Two more entry points sit beside it rather than replacing it, one per
+revision: `cft_program_run_bank` for a `BANK_EXT` program's constants
+(R3), and `cft_program_run_ex`, which takes a `cft_run_args` struct
+carrying everything a run can carry - the streams, the bank, the two
+scratch blocks, the outputs (R5's ABI 0.10). The struct exists so the
+positional signatures stop growing by an argument a round; the older
+two remain as wrappers that fill it, and a program that declares
+scratch I/O refuses both by name and takes `run_ex`. The model's
+`run(prog, a, b, c, bank=None, scratch_in=None)` is the same shape,
+and returns the scratch-out block beside the deposits.
+
 Partitioning across tiles, beat padding and flag accumulation stay the
 library's problem, and stay invisible. Because deposit addresses
 derive from the global element index (P2), the library can hand tile
@@ -737,14 +888,20 @@ designed. None is built; all five tools keep a host loop that is bit
 for bit the program's equal, so nothing waits on them.
 
 - **More input streams, or a way to load registers from the deposit
-  buffer** (Collatz, orbits). `cft_program_run` initialises `r0..r2`
-  and the rest start at +0, so a program can be entered only at a state
-  with three non-zero components. The Collatz step fits because its
-  fourth value is an output that starts at +0; a planar Kepler orbit
-  fits at step 0 only, so the whole integration is one call that
-  cannot resume; the outer solar system's thirty values cannot enter a
-  program at all. Sixteen registers already hold the state - only the
-  loading is missing.
+  buffer** (Collatz, orbits). **BUILT, revision 3**, as R5's scratch
+  block: the host preloads the first `n_scratch_in` slots of every
+  lane before the run and reads the first `n_scratch_out` back after
+  it, so a program is entered at any state it can spell and a run that
+  writes its state out can be resumed by a run that reads it in. The
+  ask as written was for more streams; what it needed was somewhere
+  per-lane to put them, which is what the scratch is.
+  *The original ask, for the record:* `cft_program_run` initialises
+  `r0..r2` and the rest start at +0, so a program could be entered
+  only at a state with three non-zero components. The Collatz step
+  fits because its fourth value is an output that starts at +0; a
+  planar Kepler orbit fit at step 0 only, so the whole integration was
+  one call that could not resume; the outer solar system's thirty
+  values could not enter a program at all.
 - **An optional per-element flag output** (Collatz). `flags_out` is a
   union over the call, so a program that spans many iterations and
   elements cannot say which element left exactness; the Collatz tool
@@ -753,7 +910,8 @@ for bit the program's equal, so nothing waits on them.
   sufficient.
 - **More than sixteen addressable constants** (enclose). **BUILT,
   2026-09-07**, as `kx` above: `imm`'s low three bytes carry the three
-  constant indices and the bank reaches 256. The interval Horner is one
+  constant indices and the bank reached 256; revision 3's ninth bit at
+  `imm[30:28]` took it to 512. The interval Horner is one
   program to degree 127 where it was sixteen chunks, its arithmetic
   intensity goes from 6.6 to 102.6 operations per element moved, and
   the chain it prints is unchanged at every format - which is the gate
@@ -766,9 +924,12 @@ for bit the program's equal, so nothing waits on them.
   index, or a constant bank the counter can address.
 - **A lane shift and an in-program cross-lane reduction** (Mersenne).
   A carry chain reads a neighbour and a convolution sums across lanes;
-  a lane has thirty-two private registers and no path to another (it
-  had sixteen when the ask was written; revision 2 widened the file
-  and did not add the path). A read
+  a lane has thirty-two private registers and 256 private scratch
+  slots and no path to another lane (it had sixteen registers when the
+  ask was written; revision 2 widened the file, revision 3 added the
+  scratch, and neither added the path - lane *i*'s slot *s* is
+  reachable by lane *i* alone, which is what keeps P2 true of the
+  scratch as it is of the deposit buffer). A read
   of register r of lane i-1 would put the whole carry propagation
   on-chip as one REPEAT with SETACT on "still carrying"; a reduction
   would put the convolution there too. A partial workaround exists
@@ -958,6 +1119,15 @@ builds against; the sections above describe revision 2 and are
 updated by the round to match. Every feature is announced and refused
 by name where absent. The revision-2 images of this afternoon predate
 all of it and are unaffected.
+
+*Built the same evening. What the tile's half cost, measured out of
+context on the U50 at 135 MHz: +4,050 LUT (+3.4%), +28.5 block RAM
+tiles, +7 UltraRAMs, and **0.000 ns** of timing - the worst path is
+the streaming engine's FIFO into the FMA input register at +1.196 ns,
+the same one, to the picosecond and to the pin, that was worst at
+revisions 1 and 2. docs/VALIDATION.md's entry of that evening carries
+the table, where the eight UltraRAMs went, and the one place the
+contract left a choice.*
 
 ### R4. A per-lane scratch memory: load and store by slot
 

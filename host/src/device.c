@@ -340,7 +340,7 @@ void *cft_device_backend(const struct cft_device *dev)
  * the backend kind lives, so that program.c names neither of them. */
 int cft_backend_program_run(struct cft_device *dev, int fmt,
                             const void *image, size_t image_bytes,
-                            const void *bank, size_t bank_bytes,
+                            const cft_seq_run_io *io,
                             uint32_t max_deposits,
                             const void *a, const void *b, const void *c,
                             void *deposits, uint32_t *counts, size_t n,
@@ -349,8 +349,7 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
 #ifdef CFT_ENABLE_XRT
     if (dev && dev->backend == CFT_BACKEND_XRT) {
         backend_call();
-        return cftx_program_run(dev->hw, fmt, image, image_bytes,
-                                bank, bank_bytes,
+        return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,
                                 flags, bus);
     }
@@ -358,14 +357,13 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
 #ifndef CFT_NO_REMOTE
     if (dev && dev->backend == CFT_BACKEND_REMOTE) {
         backend_call();
-        return cftr_program_run(dev->hw, fmt, image, image_bytes,
-                                bank, bank_bytes,
+        return cftr_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,
                                 flags, bus);
     }
 #endif
     (void)fmt; (void)image; (void)image_bytes; (void)max_deposits;
-    (void)bank; (void)bank_bytes;
+    (void)io;
     (void)a; (void)b; (void)c; (void)deposits; (void)counts; (void)n;
     (void)flags; (void)bus;
     return CFT_ERR_INTERNAL;
@@ -494,6 +492,8 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
     c.max_insns      = dev->seq.max_insns;
     c.max_consts     = dev->seq.max_consts;
     c.seq_features   = dev->seq.features;
+    /* Appended in ABI 0.10, on the same terms again. */
+    c.max_scratch    = dev->seq.max_scratch;
 
     if (want > sizeof c)
         want = sizeof c;

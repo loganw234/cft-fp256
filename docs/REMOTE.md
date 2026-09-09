@@ -230,6 +230,7 @@ payload (the server passes NULL for it, as the caller did).
 | `0x0021` | `PROG_RUN` | `u32 handle, u32 present, u32 want_counts, u32 0, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted` |
 | `0x0022` | `PROG_FREE` | `u32 handle` | - |
 | `0x0023` | `PROG_RUN_BANK` | `u32 handle, u32 present, u32 want_counts, u32 bank_bytes, u64 n, elem[bank], elem[n] per present operand` | as `PROG_RUN` |
+| `0x0024` | `PROG_RUN_EX` | `u32 handle, u32 present, u32 want_counts, u32 bank_bytes, u64 n, u32 n_scratch_in, u32 n_scratch_out, elem[bank], elem[n * n_scratch_in], elem[n] per present operand` | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted, then elem[n * n_scratch_out]` |
 | `0x0030` | `BUF_ALLOC` | `u64 bytes` | `u32 handle` |
 | `0x0031` | `BUF_FREE` | `u32 handle` | - |
 | `0x0032` | `BUF_WRITE` | `u32 handle, u32 0, u64 offset, bytes` | - |
@@ -242,24 +243,27 @@ payload (the server passes NULL for it, as the caller did).
 | `0x0045` | `FLAGS_TEST_SAVED` | `u32 saved, u32 mask` | `u32 result` |
 | `0x00FF` | `BYE` | - | -, and both sides close |
 
-**The caps block** (72 bytes): `u32 format_mask, u32 op_groups,
+**The caps block** (76 bytes): `u32 format_mask, u32 op_groups,
 u32 tiles, u32 device_version, u32 flags_readable, u32 abi,
 char backend[32]`, then `u32 max_deposits, u32 max_insns,
-u32 max_consts, u32 seq_features` - the server's device as
-`cft_get_caps` reports it, with `op_groups` derived by asking
-`cft_supports` one representative opcode per group, and `backend` the
-NAME OF THE SERVER'S BACKEND (`software`, `xrt`), NUL-padded. The
-client reports its own backend as `remote` and keeps the server's name
-for the message a failure carries.
+u32 max_consts, u32 seq_features`, then `u32 max_scratch` - the
+server's device as `cft_get_caps` reports it, with `op_groups` derived
+by asking `cft_supports` one representative opcode per group, and
+`backend` the NAME OF THE SERVER'S BACKEND (`software`, `xrt`),
+NUL-padded. The client reports its own backend as `remote` and keeps
+the server's name for the message a failure carries.
 
 **The block grows by appending, and a client reads what it
 recognises.** It was 56 bytes until 2026-09-07, when the sequencer's
-on-chip capacities were added (docs/HOSTAPI.md, docs/SEQUENCER.md);
+on-chip capacities were added, and 72 until 2026-09-08 evening, when
+the per-lane scratch depth was (docs/HOSTAPI.md, docs/SEQUENCER.md);
 the client accepts any block of at least the original 56 and leaves
 the fields a shorter one does not carry at zero, which `cft_caps`
 documents as UNKNOWN and against which nothing is enforced. A block
 shorter than 56 is not an older version, it is a stream that is not a
-caps block, and the connection ends.
+caps block, and the connection ends. The two scratch FEATURE bits
+needed no new word: they are bits 8 and 9 of `seq_features`, which the
+block has carried since 0.8 - only the capacity had to be appended.
 
 **`CFTR_PROTO_VERSION` does not move for this**, and that is
 deliberate. The `proto` field is compared for EQUALITY at both ends,
@@ -334,9 +338,50 @@ for a future operation added WITHOUT an ABI step, and it is tested
 directly - `remote-test` sends opcode `0x00A0`, checks the refusal,
 and checks the connection answers the next request.
 
-**Chunking.** `RUN`, `PROG_RUN` and `PROG_RUN_BANK` requests are split
-by the client so that no frame carries more than `CFTR_CHUNK_BYTES`
-(16 MiB) of operand and result data. That is safe for exactly the
+**Everything a run can carry, `PROG_RUN_EX` (ABI 0.10, 2026-09-08
+evening).** A program whose header flags carry `SCRATCH_IO` preloads
+the first `n_scratch_in` slots of every lane's scratch memory before
+its first instruction and reads the first `n_scratch_out` back after
+its last deposit (docs/SEQUENCER.md revision 3, R5). Both blocks are
+**lane-major and dense**: lane *i*'s slot *s* is element
+`i * n_scratch_in + s`, and the whole block is `n * n_scratch_in`
+elements.
+
+A THIRD opcode rather than a longer `PROG_RUN_BANK`, for the reason
+the second one was a second and with the same versioning story: an
+older server has no case for `0x0024` and answers
+`CFT_ERR_UNSUPPORTED` by name on a connection that stays open, where a
+longer payload would have failed its LENGTH check and ended the
+connection. `CFTR_PROTO_VERSION` does not move.
+
+Its payload adds TWO fixed words after `n` - the two per-lane slot
+counts - and puts the scratch-in block between the bank and the
+operands; its response appends the scratch-out block after the
+deposits and whatever counts were asked for. The counts cross rather
+than being inferred from a byte length because the CHUNKING slices the
+block BY LANE: a chunk of *k* lanes starting at lane `off` carries
+elements `[off * n_scratch_in, (off + k) * n_scratch_in)`, and a
+transport that cut it by bytes would hand every chunk the first lanes'
+slots. The server checks the two counts against the program's own
+header and refuses a frame that names different ones.
+
+**WHICH of the three opcodes a run becomes is the IMAGE's decision**,
+read from its header flags - `SCRATCH_IO` first, then `BANK_EXT` - and
+never from the buffers' lengths. A `BANK_EXT` program whose `n_consts`
+is zero has a legitimately empty bank and must still travel as
+`PROG_RUN_BANK`, because the server's `cft_program_run` refuses it; a
+`SCRATCH_IO` program with two empty blocks is in exactly the same
+position one call further along. That corner was found by the
+JavaScript client on 2026-09-08 and the rule is written down here
+rather than inferred at each call site.
+
+The scratch blocks are **per lane**, so unlike the bank they come out
+of the per-lane chunk cost rather than off the budget: the bank rides
+every chunk whole and a chunk's scratch is its own lanes' slice.
+
+**Chunking.** `RUN`, `PROG_RUN`, `PROG_RUN_BANK` and `PROG_RUN_EX`
+requests are split by the client so that no frame carries more than
+`CFTR_CHUNK_BYTES` (16 MiB) of operand and result data. That is safe for exactly the
 reason the XRT backend's multi-tile partitioning is: an element of an
 elementwise result depends on its own index alone, and a sequencer
 lane on its own lane alone, with the early exit changing only how long

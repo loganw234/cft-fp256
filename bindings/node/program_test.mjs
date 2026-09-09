@@ -37,9 +37,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Context } from "./index.mjs";
-import { STATUS_DEPOSIT_OVERFLOW } from "./lib.mjs";
-import { CTRL, FLAG_BANK_EXT, alu, ctl, insn, packBank, programImage,
-         readCorpus, replayCorpus }
+import { SEQ_FEAT_KX9, STATUS_DEPOSIT_OVERFLOW } from "./lib.mjs";
+import { CTRL, FLAG_BANK_EXT, FLAG_SCRATCH_IO, alu, ctl, insn, ldl, ldx,
+         packBank, programImage, readCorpus, replayCorpus, stl, stx }
   from "./seq_corpus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1065,6 +1065,309 @@ test("programs/horner-bank-fp64.cfta with its two committed banks", () => {
     return `24 coefficients, ${xs.length} points, two banks, two answers, ` +
            `two digests`;
   } finally { prog.free(); }
+});
+
+// ---------------------------------------------------------------------
+// revision 3, 2026-09-08 evening: the per-lane scratch and its block
+// ---------------------------------------------------------------------
+//
+//   R4  four control codes reach a lane's own scratch memory. A store
+//       is a register write for P3's purposes and is masked by the
+//       active bit; the indexed forms take their slot from a
+//       register's bit pattern, REDUCED modulo the depth.
+//   R5  the header's second reserved word is `scratch_io`, and every
+//       run preloads and reads back a lane-major block - which is what
+//       makes a run resumable.
+//   R7  under kx, imm[30:28] are the ninth bits of the three constant
+//       indices, so the bank reaches 512.
+//
+// Every case is arranged so a wrong answer is a DIFFERENT answer
+// rather than a refusal, and mostly so the expected bytes are the
+// INPUT bytes: a scratch store and load move a register's pattern and
+// compute nothing, so there is nothing to derive and nothing to round.
+
+test("R4: an STL/LDL round trip returns the bytes that went in", () => {
+  const top = ctxs.fp64.maxScratch - 1;
+  const prog = c64.loadProgram(programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    maxDeposits: 2,
+    insns: [stl(0, 0), stl(1, top), ldl(4, top), ldl(5, 0),
+            ctl("deposit", 4), ctl("deposit", 5), ctl("halt")],
+  }));
+  try {
+    eq(prog.scratchIo, false, "an image with no block: ");
+    eq(prog.scratchUsed, top + 1,
+       "scratchUsed is one past the highest static slot: ");
+    const xs = [3, 5, 0.5], ys = [-7, 11, 0.25];
+    const r = prog.run(xs, ys);
+    eq(r.deposits.map((f) => f.toNumber()).join(","),
+       xs.flatMap((x, i) => [ys[i], x]).join(","),
+       `slots 0 and ${top} gave back what was stored: `);
+    eq(r.flags, 0, "a store and a load are not arithmetic: ");
+  } finally { prog.free(); }
+});
+
+test("R4: STX and LDX reduce the index modulo the depth", () => {
+  // r2 holds the BIT PATTERN 3 * SCRATCH_D + 5 as an unsigned integer,
+  // which is where the atlas emitter keeps its loop counters. The
+  // contract reduces it rather than refusing it, so both indexed forms
+  // must land on slot 5 - which the static forms then read and write.
+  const D = ctxs.fp64.maxScratch;
+  const idx = new Uint8Array(3 * 8);
+  const iv = new DataView(idx.buffer);
+  for (let i = 0; i < 3; i++) iv.setBigUint64(i * 8, BigInt(3 * D + 5), true);
+  const prog = c64.loadProgram(programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    maxDeposits: 2,
+    insns: [stl(0, 5), ldx(4, 2), ctl("deposit", 4),
+            stx(1, 2), ldl(5, 5), ctl("deposit", 5), ctl("halt")],
+  }));
+  try {
+    eq(prog.scratchUsed, D,
+       "an indexed form makes the whole depth reachable: ");
+    const xs = [3, 5, 0.5], ys = [-7, 11, 0.25];
+    const r = prog.run(xs, ys, idx);
+    eq(r.deposits.map((f) => f.toNumber()).join(","),
+       xs.flatMap((x, i) => [x, ys[i]]).join(","),
+       `an index of ${3 * D + 5} reduced to slot 5 modulo ${D}: `);
+  } finally { prog.free(); }
+});
+
+test("R4: a store by an inactive lane reaches nothing", () => {
+  // Two halves of one claim. The first STL runs with every lane
+  // inactive; the second is the body of an all-inactive loop, which
+  // the early exit skips entirely. Either failing gives y where x was
+  // due, or a stored value where +0 was - which is P3: a store is a
+  // register write for its purposes, and an all-inactive loop body is
+  // a no-op.
+  const prog = c64.loadProgram(programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    maxDeposits: 2,
+    insns: [
+      stl(0, 0),                    // slot 0 := x, all lanes active
+      ctl("setact", 3),             // r3 is +0, so every lane drops out
+      stl(1, 0),                    // masked: slot 0 keeps x
+      ctl("repeat", 0, 4),
+      stl(1, 1),                    //   masked: slot 1 stays +0
+      ctl("endrep"),
+      ctl("actall"),
+      ldl(4, 0), ldl(5, 1),
+      ctl("deposit", 4), ctl("deposit", 5), ctl("halt"),
+    ],
+  }));
+  try {
+    const r = prog.run([3, 5, 0.5], [-7, 11, 0.25]);
+    eq(r.deposits.map((f) => f.toNumber()).join(","),
+       "3,0,5,0,0.5,0",
+       "the masked stores wrote nothing: ");
+  } finally { prog.free(); }
+});
+
+// Three slots a lane in, two out: the program deposits slots 0 and 2 of
+// what was preloaded and stores r0 and r1 into slots 0 and 1, so the
+// block has to be right in BOTH directions and the order of the two -
+// preload before the first instruction, writeback after the last - is
+// what the test pins down.
+function blockProgram() {
+  return programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    maxDeposits: 2, flags: FLAG_SCRATCH_IO, nScratchIn: 3, nScratchOut: 2,
+    insns: [ldl(4, 0), ldl(5, 2), ctl("deposit", 4), ctl("deposit", 5),
+            stl(0, 0), stl(1, 1), ctl("halt")],
+  });
+}
+
+test("R5: the block goes in lane-major and comes back lane by lane", () => {
+  const prog = c64.loadProgram(blockProgram());
+  try {
+    eq(prog.scratchIo, true, "scratchIo: ");
+    eq(prog.scratchIn, 3, "scratchIn: ");
+    eq(prog.scratchOut, 2, "scratchOut: ");
+    eq(prog.scratchUsed, 3, "scratchUsed: ");
+    // n larger than one 64-lane block in the executor, so the block
+    // boundary and the lane-major layout are both exercised: a
+    // preload that used the lane's index WITHIN its block instead of
+    // its global one would give lanes 64.. the first lanes' slots.
+    const n = 96;
+    const xs = [], ys = [], sin = [];
+    for (let i = 0; i < n; i++) {
+      xs.push(i + 1);
+      ys.push(-(i + 1));
+      sin.push(1000 + i * 3, 2000 + i * 3, 3000 + i * 3);
+    }
+    eq(prog.scratchInBytes(n), n * 3 * 8, "scratchInBytes: ");
+    eq(prog.scratchOutBytes(n), n * 2 * 8, "scratchOutBytes: ");
+    const r = prog.runEx({ a: xs, b: ys, scratchIn: sin });
+    const wantDep = [];
+    for (let i = 0; i < n; i++) wantDep.push(sin[3 * i], sin[3 * i + 2]);
+    eq(r.deposits.map((f) => f.toNumber()).join(","), wantDep.join(","),
+       "each lane read its own preloaded slots 0 and 2: ");
+    const wantOut = [];
+    for (let i = 0; i < n; i++) wantOut.push(xs[i], ys[i]);
+    eq(r.scratchOut.map((f) => f.toNumber()).join(","), wantOut.join(","),
+       "and the block that came back holds each lane's own stores: ");
+    eq(r.scratchOutBytes.length, n * 2 * 8,
+       "the same block unencoded, for a run that only wants to resume: ");
+  } finally { prog.free(); }
+});
+
+test("R5: a run resumes - three doublings twice is six doublings once",
+     () => {
+  // The whole point of R5. One slot in, one slot out, and a body that
+  // doubles the state K times: doubling is exact in every format, so
+  // the comparison is bytes and not a tolerance.
+  const chain = (trips) => programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    maxDeposits: 1, flags: FLAG_SCRATCH_IO, nScratchIn: 1, nScratchOut: 1,
+    insns: [ldl(4, 0), ctl("repeat", 0, trips),
+            alu({ op: OP_ADD, rd: 4, ra: 4, rc: 4 }), ctl("endrep"),
+            stl(4, 0), ctl("deposit", 4), ctl("halt")],
+  });
+  const seed = [1, 3, -5, 0.25];
+  const three = c64.loadProgram(chain(3));
+  const six = c64.loadProgram(chain(6));
+  try {
+    const first = three.runEx({ a: seed, scratchIn: seed });
+    const resumed = three.runEx({ a: seed,
+                                  scratchIn: first.scratchOutBytes });
+    const once = six.runEx({ a: seed, scratchIn: seed });
+    eq(resumed.scratchOut.map(hexOf).join(" "),
+       once.scratchOut.map(hexOf).join(" "),
+       "the chained state and the single run's: ");
+    eq(resumed.deposits.map(hexOf).join(" "),
+       once.deposits.map(hexOf).join(" "),
+       "and the deposits: ");
+    // The negative control the claim needs: if three doublings and six
+    // agreed, the comparison above would prove nothing at all.
+    ok(first.scratchOut.map(hexOf).join(" ") !==
+       once.scratchOut.map(hexOf).join(" "),
+       "three doublings must not equal six, or the chaining test is " +
+       "comparing a program with itself");
+    // And the state really is the state: 2^3 then 2^3 again is 2^6.
+    eq(once.deposits.map((f) => f.toNumber()).join(","),
+       seed.map((v) => v * 64).join(","), "six doublings: ");
+  } finally { three.free(); six.free(); }
+});
+
+test("R5: a SCRATCH_IO program refuses run() and runBank() by name",
+     () => {
+  const prog = c64.loadProgram(blockProgram());
+  try {
+    for (const [what, fn] of [["run", () => prog.run([1, 2])],
+                              ["runBank", () => prog.runBank(null, [1, 2])]]) {
+      let msg = null;
+      try { fn(); } catch (e) { msg = e.message; }
+      ok(msg && /runEx/.test(msg),
+         `${what}() on a SCRATCH_IO program must name runEx: ${msg}`);
+    }
+    // And the block's own shape, checked where the caller can act on
+    // it: a slot count, not a byte count it never wrote.
+    let msg = null;
+    try { prog.runEx({ a: [1, 2], scratchIn: [1, 2, 3] }); }
+    catch (e) { msg = e.message; }
+    ok(msg && /scratchIn/.test(msg),
+       `a short scratchIn must be refused by name: ${msg}`);
+    msg = null;
+    try { prog.runEx({ a: [1, 2] }); } catch (e) { msg = e.message; }
+    ok(msg && /scratchIn/.test(msg),
+       `no scratchIn at all must be refused by name: ${msg}`);
+    msg = null;
+    try { prog.runEx({ a: [1, 2], scratchIn: new Array(6).fill(0),
+                       nope: 1 }); }
+    catch (e) { msg = e.message; }
+    ok(msg && /nope/.test(msg),
+       `an unknown runEx field must be refused by name: ${msg}`);
+  } finally { prog.free(); }
+});
+
+test("R5: a program declaring no block refuses one, and runEx is run()",
+     () => {
+  const prog = c64.loadProgram(programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    maxDeposits: 1,
+    insns: [alu({ op: OP_MUL, rd: 4, ra: 0, rb: 0 }),
+            ctl("deposit", 4), ctl("halt")],
+  }));
+  try {
+    let msg = null;
+    try { prog.runEx({ a: [3], scratchIn: [1] }); }
+    catch (e) { msg = e.message; }
+    ok(msg && /declares no scratch I\/O/.test(msg),
+       `a scratch block on a program that declares none: ${msg}`);
+    const plain = prog.run([3, 5]);
+    const ex = prog.runEx({ a: [3, 5] });
+    eq(ex.deposits.map(hexOf).join(" "), plain.deposits.map(hexOf).join(" "),
+       "runEx with nothing set is run(): ");
+    eq(ex.scratchOutBytes.length, 0,
+       "and its scratch-out block is empty rather than absent: ");
+  } finally { prog.free(); }
+});
+
+test("R7: a constant at index 511, through kx's ninth bit", () => {
+  // A bank of 512 where every constant is 2.0 but the last, which is
+  // 1.0, and one MUL naming k[511]. An operand mux that dropped the
+  // ninth bit would read k[255] and deposit twice the input - which is
+  // the failure CAPS[7] exists to prevent and the reason this
+  // multiplies rather than adds.
+  if (!(ctxs.fp64.seqFeatures & SEQ_FEAT_KX9))
+    skip("this device does not publish CFT_SEQ_FEAT_KX9");
+  const consts = [];
+  for (let i = 0; i < 512; i++) consts.push(F64.two);
+  consts[511] = F64.one;
+  const prog = c64.loadProgram(programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    consts, maxDeposits: 1,
+    insns: [alu({ op: OP_MUL, rd: 4, ra: 0, rb: 511, kb: true }),
+            ctl("deposit", 4), ctl("halt")],
+  }));
+  try {
+    eq(prog.nConsts, 512, "n_consts: ");
+    const xs = [3, 5, 0.5, -7];
+    const r = prog.run(xs);
+    eq(r.deposits.map((f) => f.toNumber()).join(","), xs.join(","),
+       "k[511] is 1.0, so the deposit is the input: ");
+    // The negative control, and the one that matters: k[255] holds 2.0,
+    // so an encoder or a mux that lost the ninth bit gives 2x.
+    const wrong = c64.loadProgram(programImage({
+      formatCode: c64.format.code, elementBytes: c64.format.size,
+      consts, maxDeposits: 1,
+      insns: [alu({ op: OP_MUL, rd: 4, ra: 0, rb: 255, kb: true }),
+              ctl("deposit", 4), ctl("halt")],
+    }));
+    try {
+      eq(wrong.run(xs).deposits.map((f) => f.toNumber()).join(","),
+         xs.map((x) => x * 2).join(","),
+         "k[255] is 2.0, so losing the ninth bit is visible: ");
+    } finally { wrong.free(); }
+    return "512 constants, k[511] through imm[30], and k[255] as the control";
+  } finally { prog.free(); }
+});
+
+test("R7: the encoder puts the ninth bit in imm[30:28] and nowhere else",
+     () => {
+  // Read the WORD, not the answer. imm[28] is ka's ninth bit, imm[29]
+  // kb's, imm[30] kc's, and imm[31] stays reserved-must-be-zero - the
+  // one permutation a round trip cannot see, exactly as imm[27:24]'s
+  // was at 0.9.
+  const w = alu({ op: OP_FMA, rd: 4, ra: 0x101, rb: 5, rc: 0x1ff,
+                  ka: true, kc: true });
+  const imm = Number(w >> 32n);
+  eq((imm >>> 28) & 0xf, 0b0101,
+     "imm[31:28] with ka and kc ninth bits set and kb's clear: ");
+  eq(imm & 0xff, 0x01, "ka's low byte: ");
+  eq((imm >>> 8) & 0xff, 0x00, "kb names a register, so its byte is zero: ");
+  eq((imm >>> 16) & 0xff, 0xff, "kc's low byte: ");
+  const plain = alu({ op: OP_FMA, rd: 4, ra: 1, rb: 5, rc: 0xff,
+                      ka: true, kc: true });
+  eq(Number(plain >> 32n) >>> 28, 0,
+     "no index above 255, so no ninth bit is set: ");
+  // And the loader agrees the word is canonical.
+  const prog = c64.loadProgram(programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    consts: new Array(512).fill(F64.one), maxDeposits: 1,
+    insns: [w, ctl("deposit", 4), ctl("halt")],
+  }));
+  prog.free();
 });
 
 // ---------------------------------------------------------------------

@@ -112,6 +112,20 @@ export const STATUS_DEPOSIT_OVERFLOW = 1 << 4;
  *  by audit(), for STATUS_DEPOSIT_OVERFLOW's reason. */
 export const PROG_FLAG_BANK_EXT = 1 << 0;
 
+/** CFT_PROG_FLAG_SCRATCH_IO - bit 1 of the same word (ABI 0.10).
+ *
+ *  The header's SECOND reserved word becomes `scratch_io`:
+ *  n_scratch_in in [15:0] and n_scratch_out in [31:16]. Every run then
+ *  preloads the first n_scratch_in slots of every lane's scratch from
+ *  a buffer and reads the first n_scratch_out back into another, which
+ *  is what makes a run resumable (docs/SEQUENCER.md revision 3, R5).
+ *
+ *  A program with this bit set takes runEx() and refuses run() and
+ *  runBank() by name; with the bit CLEAR the scratch_io word must be
+ *  zero, as the reserved word it was always had to be. Transcribed and
+ *  checked by audit(), for the reason above. */
+export const PROG_FLAG_SCRATCH_IO = 1 << 1;
+
 /** cft_caps.seq_features - the sequencer's feature word.
  *
  *  Low nibble is CAPS[7:4], the sequencer's feature nibble; the next
@@ -130,12 +144,20 @@ export const PROG_FLAG_BANK_EXT = 1 << 0;
 export const SEQ_FEAT_WIDE_CONST = 0x01;   // CAPS[4]:  kx, indexed constants
 export const SEQ_FEAT_REGS32     = 0x02;   // CAPS[5]:  32 registers a lane
 export const SEQ_FEAT_BANK_PTR   = 0x04;   // CAPS[6]:  the per-run bank
+export const SEQ_FEAT_KX9        = 0x08;   // CAPS[7]:  the ninth index bit
 export const ALU_EXT_IMUL        = 0x10;   // CAPS[28]: opcode 30, IMUL
+// The third nibble is CAPS2[7:4], which revision 3 opened when the
+// first one filled up - which is why these two are 0x100 and 0x200
+// rather than the next bits of the first, and why audit() checks them.
+export const SEQ_FEAT_SCRATCH    = 0x100;  // CAPS2[4]: the per-lane scratch
+export const SEQ_FEAT_SCRATCH_IO = 0x200;  // CAPS2[5]: its per-run block
 
 /** The feature bits' names, for a message. */
 export const SEQ_FEATURE_NAMES = [
   [SEQ_FEAT_WIDE_CONST, "kx"], [SEQ_FEAT_REGS32, "REGS32"],
-  [SEQ_FEAT_BANK_PTR, "BANK_PTR"], [ALU_EXT_IMUL, "IMUL"],
+  [SEQ_FEAT_BANK_PTR, "BANK_PTR"], [SEQ_FEAT_KX9, "KX9"],
+  [ALU_EXT_IMUL, "IMUL"],
+  [SEQ_FEAT_SCRATCH, "SCRATCH"], [SEQ_FEAT_SCRATCH_IO, "SCRATCH_IO"],
 ];
 
 /** The features a `seq_features` word publishes, by name. An unnamed
@@ -383,6 +405,8 @@ async function instantiate() {
     capsMaxDeposits: M.cwrap("cftw_caps_max_deposits", n, [n]),
     capsMaxInsns:    M.cwrap("cftw_caps_max_insns", n, [n]),
     capsMaxConsts:   M.cwrap("cftw_caps_max_consts", n, [n]),
+    // And the scratch depth, appended at ABI 0.10 on the same terms.
+    capsMaxScratch:  M.cwrap("cftw_caps_max_scratch", n, [n]),
 
     run:          M.cwrap("cftw_run", n, [n,n,n,n,n,n,n,n,n,n,n]),
     reduce:       M.cwrap("cftw_reduce", n, [n,n,n,n,n,n,n,n,n,n]),
@@ -537,6 +561,25 @@ async function instantiate() {
     seqFeatRegs32:    M.cwrap("cftw_seq_feat_regs32", n, []),
     seqFeatBankPtr:   M.cwrap("cftw_seq_feat_bank_ptr", n, []),
     aluExtImul:       M.cwrap("cftw_alu_ext_imul", n, []),
+
+    // Revision 3 (ABI 0.10, docs/SEQUENCER.md R4 and R5). programRunEx
+    // takes cft_run_args' fields POSITIONALLY, in the struct's own
+    // order, and wasm_api.c assembles the struct on the far side: a
+    // JavaScript caller writing struct offsets into the heap is the
+    // silent ABI coupling struct_size exists to prevent, so the layout
+    // never crosses.
+    //
+    // The three scratch fields are accessors for programFlags' reason,
+    // and programGetInfo again keeps its four out-pointers.
+    programRunEx:   M.cwrap("cftw_program_run_ex", n,
+                            [n,n,n,n,n,n,n,n,n,n,n,n,n,n,n]),
+    programScratchIn:   M.cwrap("cftw_program_scratch_in", n, [n]),
+    programScratchOut:  M.cwrap("cftw_program_scratch_out", n, [n]),
+    programScratchUsed: M.cwrap("cftw_program_scratch_used", n, [n]),
+    progFlagScratchIo:  M.cwrap("cftw_prog_flag_scratch_io", n, []),
+    seqFeatKx9:         M.cwrap("cftw_seq_feat_kx9", n, []),
+    seqFeatScratch:     M.cwrap("cftw_seq_feat_scratch", n, []),
+    seqFeatScratchIo:   M.cwrap("cftw_seq_feat_scratch_io", n, []),
   };
 
   // ABI 0.3's nine, 0.4's eleven, 0.5's nine and 0.6's ten - the
@@ -623,6 +666,14 @@ function audit(M, C) {
     ["CFT_SEQ_FEAT_REGS32", SEQ_FEAT_REGS32, C.seqFeatRegs32],
     ["CFT_SEQ_FEAT_BANK_PTR", SEQ_FEAT_BANK_PTR, C.seqFeatBankPtr],
     ["CFT_ALU_EXT_IMUL", ALU_EXT_IMUL, C.aluExtImul],
+    // ABI 0.10's four. The two scratch bits live in a SECOND nibble,
+    // so a transcription that guessed "the next two bits after
+    // BANK_PTR" would be wrong by a byte and would have this package
+    // report a device with no scratch as having one.
+    ["CFT_PROG_FLAG_SCRATCH_IO", PROG_FLAG_SCRATCH_IO, C.progFlagScratchIo],
+    ["CFT_SEQ_FEAT_KX9", SEQ_FEAT_KX9, C.seqFeatKx9],
+    ["CFT_SEQ_FEAT_SCRATCH", SEQ_FEAT_SCRATCH, C.seqFeatScratch],
+    ["CFT_SEQ_FEAT_SCRATCH_IO", SEQ_FEAT_SCRATCH_IO, C.seqFeatScratchIo],
   ]) {
     const got = ask() >>> 0;
     if (got !== here)

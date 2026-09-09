@@ -126,15 +126,22 @@ constexpr uint32_t CSR_MAGIC   = 0x44;
 constexpr uint32_t CSR_VERSION = 0x48;
 constexpr uint32_t CSR_CAPS    = 0x4C;
 constexpr uint32_t CSR_STATUS  = 0x50;
+/* The second capability word, since 0x800 (docs/SEQUENCER.md revision
+ * 3, R4/R5): [3:0] log2 of the scratch depth, [4] scratch present, [5]
+ * scratch I/O present, [7:6] reserved, [31:8] reserved for what comes
+ * next. Read-only, and the one register the map grew that this code
+ * reads rather than XRT writing it. */
+constexpr uint32_t CSR_CAPS2   = 0x6C;
 constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
-/* The sequencer's three pointer registers are NOT in this list, and
- * that is deliberate: PROG_PTR (0x54), CNT_PTR (0x5C) and, since
- * 0x700, BANK_PTR (0x64 low, 0x68 high) are KERNEL ARGUMENTS - 6, 7
- * and 8 in hw/kernel.xml - and XRT writes each buffer's device address
- * into its own register when the run is submitted. A host that also
- * wrote them would be writing them twice, from two different notions
- * of where the buffer is. They are named here so the map is readable
- * beside the registers this code does touch. */
+/* The sequencer's pointer registers are NOT in this list, and that is
+ * deliberate: PROG_PTR (0x54), CNT_PTR (0x5C), BANK_PTR (0x64 low,
+ * 0x68 high) since 0x700, and SCRATCH_IN_PTR (0x70/0x74) and
+ * SCRATCH_OUT_PTR (0x78/0x7C) since 0x800 are KERNEL ARGUMENTS - 6, 7,
+ * 8, 9 and 10 in hw/kernel.xml - and XRT writes each buffer's device
+ * address into its own register when the run is submitted. A host that
+ * also wrote them would be writing them twice, from two different
+ * notions of where the buffer is. They are named here so the map is
+ * readable beside the registers this code does touch. */
 
 /* The hardware contracts this library speaks.
  *
@@ -160,6 +167,16 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  *                  2, R3). CAPS[6] says whether a tile at this
  *                  contract will TAKE one, and the loader asks that
  *                  rather than this
+ *   0x800  v0.8.0  adds CAPS2 at 0x6C (read-only), SCRATCH_IN_PTR at
+ *                  0x70/0x74 and SCRATCH_OUT_PTR at 0x78/0x7C, with
+ *                  two more kernel arguments - `scratch_in` (id 9) on
+ *                  the A master beside the image and the bank, and
+ *                  `scratch_out` (id 10) on the D master beside the
+ *                  deposits and the counts. The per-lane scratch
+ *                  memory and its per-run block (docs/SEQUENCER.md
+ *                  revision 3, R4 and R5). CAPS2[4] and CAPS2[5] say
+ *                  whether a tile at this contract HAS them, and the
+ *                  loader asks that rather than this
  *
  * Add a version here only when the map is genuinely unchanged; move the
  * map and this list should shrink to the versions that share it.
@@ -175,11 +192,22 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  * 0x700 grows it again the same way and the same reasoning applies
  * twice over: a 0x600 tile is read correctly here and simply has
  * nothing at 0x64, and BANK_VERSION below is what refuses a banked run
- * against it. The card-day images are 0x410 and predate all of it. */
+ * against it. The card-day images are 0x410 and predate all of it.
+ *
+ * 0x800 is the third growth and the third time the same three things
+ * are true: every older tile is still read correctly, it simply has
+ * nothing at 0x6C, and SCRATCH_VERSION below refuses a run that
+ * carries a scratch block against it. The ARGUMENT COUNT is what makes
+ * that refusal necessary rather than tidy - eleven arguments against a
+ * nine-argument xclbin throws from inside XRT with a message about
+ * argument counts. */
 constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u,
-                                        0x00000600u, 0x00000700u };
+                                        0x00000600u, 0x00000700u,
+                                        0x00000800u };
 constexpr uint32_t SEQ_VERSION = 0x00000600u;   /* first map with PROG_PTR */
 constexpr uint32_t BANK_VERSION = 0x00000700u;  /* first map with BANK_PTR */
+/* first map with CAPS2 and the two scratch pointers */
+constexpr uint32_t SCRATCH_VERSION = 0x00000800u;
 
 inline bool version_known(uint32_t v)
 {
@@ -190,9 +218,13 @@ inline bool version_known(uint32_t v)
 
 /* kernel.xml argument ids. `bank` is 8, on m_axi_a - it rides the A
  * master as the program image does, and the two never overlap in time
- * (hw/kernel.xml, docs/SEQUENCER.md revision 2). */
+ * (hw/kernel.xml, docs/SEQUENCER.md revision 2). `scratch_in` is 9 and
+ * rides the A master for the same reason and in its own phase;
+ * `scratch_out` is 10 and rides the D master beside the deposits and
+ * the counts, because it is written rather than read (revision 3, R5). */
 constexpr int ARG_A = 2, ARG_B = 3, ARG_C = 4, ARG_D = 5;
 constexpr int ARG_PROG = 6, ARG_CNT = 7, ARG_BANK = 8;
+constexpr int ARG_SCRATCH_IN = 9, ARG_SCRATCH_OUT = 10;
 
 /* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
 constexpr uint32_t MODE_SEQ = 1u << 15;
@@ -308,6 +340,18 @@ struct Tile {
      * with one unbound; the tile never reads it in that case. */
     xrt::bo     bk;
     size_t      bk_cap = 0;
+    /* And the two of 0x800: the per-run scratch block in and out,
+     * arguments 9 and 10. These DO grow with n - the block is
+     * n_scratch_in slots a lane - so they are sized per run like the
+     * counts buffer rather than like the image, and for the same
+     * reason they are not folded into `cap`: their shape is the
+     * program's slot count, not the operand width. A program that
+     * declares no scratch I/O still gets one beat of each bound,
+     * because the kernel has the arguments either way and XRT will not
+     * submit a run with one unbound; the tile never reads or writes
+     * them in that case. */
+    xrt::bo     si, so;
+    size_t      si_cap = 0, so_cap = 0;
 };
 
 struct Dev {
@@ -458,7 +502,7 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
     }
 
     /* Ask the hardware what it is before believing the filename. */
-    uint32_t magic = 0, caps = 0, ver = 0;
+    uint32_t magic = 0, caps = 0, ver = 0, caps2 = 0;
     try {
         magic = D->tiles[0].k.read_register(CSR_MAGIC);
         ver   = D->tiles[0].k.read_register(CSR_VERSION);
@@ -498,15 +542,34 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         char buf[256];
         std::snprintf(buf, sizeof buf,
                       "hardware contract 0x%08x is not one this library "
-                      "knows (0x%08x, 0x%08x, 0x%08x, 0x%08x) - the "
+                      "knows (0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x) - the "
                       "register map may differ, and guessing is how a host "
                       "misreads a result. What a tile IMPLEMENTS is CAPS, "
                       "not this.",
                       ver, KNOWN_VERSIONS[0], KNOWN_VERSIONS[1],
-                      KNOWN_VERSIONS[2], KNOWN_VERSIONS[3]);
+                      KNOWN_VERSIONS[2], KNOWN_VERSIONS[3],
+                      KNOWN_VERSIONS[4]);
         delete D;
         set_err(buf);
         return ST_UNSUPPORTED;
+    }
+
+    /* CAPS2 only where the map has it. A tile below 0x800 has nothing
+     * at 0x6C, and reading a register that is not there is not a
+     * question with a defined answer - so it is not asked, and the
+     * word stays zero, which the decode below reads as no scratch and
+     * an unknown depth. Read AFTER the version check for exactly that
+     * reason: the version is what says the register exists. */
+    if (ver >= SCRATCH_VERSION) {
+        try {
+            caps2 = D->tiles[0].k.read_register(CSR_CAPS2);
+        } catch (const std::exception &e) {
+            delete D;
+            set_err(std::string("this bitstream's contract is 0x800, whose "
+                                "map has CAPS2 at 0x6C, and reading it "
+                                "failed: ") + e.what());
+            return ST_UNSUPPORTED;
+        }
     }
 
     D->version      = ver;
@@ -539,6 +602,18 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
          * 2 (CFT_SEQ_FEAT_BANK_PTR), which is what the field was
          * shaped for. Shift, do not enumerate. */
         seq->features = ((caps >> 4) & 0xFu) | (((caps >> 28) & 0xFu) << 4);
+        /* CAPS2[7:4] is the second sequencer feature nibble and lands
+         * in seq_features bits 11:8, which is CFT_SEQ_FEAT_SCRATCH at
+         * [4] and CFT_SEQ_FEAT_SCRATCH_IO at [5]. Shift, do not
+         * enumerate, exactly as the first nibble does - the two bits
+         * revision 3 assigns and the two it reserves travel together. */
+        seq->features |= ((caps2 >> 4) & 0xFu) << 8;
+        /* And the depth: CAPS2[3:0] is log2 of it, meaningful only
+         * where CAPS2[4] says the memory is there. A tile below 0x800
+         * reads a zero word here, which is no scratch and a depth of
+         * zero - UNKNOWN, and enforced against nothing, which is the
+         * behaviour such a tile had before the register existed. */
+        seq->max_scratch = (caps2 & 0x10u) ? (1u << (caps2 & 0xFu)) : 0u;
         if (sizes == 0) {
             seq->max_deposits = 0;
             seq->max_insns    = 0;
@@ -803,15 +878,23 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
  */
 extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                                 size_t image_bytes,
-                                const void *bank, size_t bank_bytes,
+                                const cft_seq_run_io *io,
                                 uint32_t max_deposits,
                                 const void *a, const void *b, const void *c,
                                 void *deposits, uint32_t *counts, size_t n,
                                 uint32_t *flags, uint32_t *bus)
 {
-    if (!hw || !image || image_bytes == 0)
+    if (!hw || !image || image_bytes == 0 || !io)
         return ST_INVALID_ARGUMENT;
+    const void *bank         = io->bank;
+    const size_t bank_bytes  = io->bank_bytes;
+    const void *scratch_in   = io->scratch_in;
+    const size_t sin_bytes   = io->scratch_in_bytes;
+    void *scratch_out        = io->scratch_out;
+    const size_t sout_bytes  = io->scratch_out_bytes;
     if (bank_bytes && !bank)
+        return ST_INVALID_ARGUMENT;
+    if ((sin_bytes && !scratch_in) || (sout_bytes && !scratch_out))
         return ST_INVALID_ARGUMENT;
 
     Dev &D = *static_cast<Dev *>(hw);
@@ -861,6 +944,25 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         set_err(buf);
         return ST_UNSUPPORTED;
     }
+    /* And the same again for the scratch block, a third time and for
+     * the third identical reason: a tile below 0x800 has no
+     * SCRATCH_IN_PTR, no SCRATCH_OUT_PTR and no tenth or eleventh
+     * kernel argument. cft_program_load has already refused a
+     * SCRATCH_IO image against a tile whose CAPS2[5] is clear, which
+     * is the refusal a caller should see; this is the second line of
+     * the same defence, for a device whose CAPS2 and whose VERSION
+     * disagree. */
+    if ((sin_bytes || sout_bytes) && D.version < SCRATCH_VERSION) {
+        char buf[256];
+        std::snprintf(buf, sizeof buf,
+                      "this bitstream's contract is 0x%08x, which has no "
+                      "SCRATCH_IN_PTR or SCRATCH_OUT_PTR - the per-run "
+                      "scratch block arrived at 0x%08x. CAPS2 bit 5 says in "
+                      "advance which it is.",
+                      D.version, SCRATCH_VERSION);
+        set_err(buf);
+        return ST_UNSUPPORTED;
+    }
 
     if (n == 0) {
         if (flags) *flags = 0;
@@ -882,6 +984,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
      * is always a real, addressable buffer. beat_round(0) is 0 and a
      * zero-length xrt::bo is not something to rely on. */
     const size_t bnk_bytes  = bank_bytes ? beat_round(bank_bytes) : 32u;
+    /* The two scratch blocks, on exactly the same terms: bound on
+     * every 0x800 run whether or not the program declares one, with a
+     * minimum of one beat when it does not. Unlike the bank they grow
+     * with n - the block is n_scratch_in slots for each of n lanes -
+     * so they are sized per run and cached by ensure_one like the
+     * counts buffer. */
+    const size_t sin_pad    = sin_bytes  ? beat_round(sin_bytes)  : 32u;
+    const size_t sout_pad   = sout_bytes ? beat_round(sout_bytes) : 32u;
 
     /* One cap covers a, b, c and d together, so the operand buffers
      * come out as large as the deposit window - max_deposits times
@@ -901,6 +1011,12 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, cnt_bytes);
         if (D.version >= BANK_VERSION)
             ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, bnk_bytes);
+        if (D.version >= SCRATCH_VERSION) {
+            ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN,
+                       sin_pad);
+            ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT,
+                       sout_pad);
+        }
         stage(tile.a, static_cast<const uint8_t *>(a), real_bytes, opnd_bytes);
         stage(tile.b, static_cast<const uint8_t *>(b), real_bytes, opnd_bytes);
         stage(tile.c, static_cast<const uint8_t *>(c), real_bytes, opnd_bytes);
@@ -919,6 +1035,16 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         if (D.version >= BANK_VERSION)
             stage(tile.bk, static_cast<const uint8_t *>(bank), bank_bytes,
                   bnk_bytes);
+        /* The scratch-IN block, staged exactly as the bank is: a NULL
+         * source zeroes the buffer, which is what a program declaring
+         * no scratch I/O leaves at argument 9 and the tile never
+         * reads. The scratch-OUT buffer is not staged at all - it is
+         * the tile's to write, the same reason the deposit window is
+         * not pre-zeroed here, and every element of it is written by a
+         * run that declares one. */
+        if (D.version >= SCRATCH_VERSION)
+            stage(tile.si, static_cast<const uint8_t *>(scratch_in),
+                  sin_bytes, sin_pad);
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging a program");
         return ST_OUT_OF_MEMORY;
@@ -949,13 +1075,19 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     int status = ST_OK;
     std::string err;
     try {
-        /* Two shapes, because the ARGUMENT COUNT is what the contract
-         * version guards: a 0x600 xclbin's kernel takes eight and a
-         * 0x700's takes nine, and XRT throws rather than adapts. The
-         * bank buffer is bound on every 0x700 run whether or not this
-         * program has a bank; the tile reads it only when the image's
-         * flags say BANK_EXT. */
-        xrt::run r = (D.version >= BANK_VERSION)
+        /* Three shapes, because the ARGUMENT COUNT is what the contract
+         * version guards: a 0x600 xclbin's kernel takes eight, a
+         * 0x700's takes nine and an 0x800's takes eleven, and XRT
+         * throws rather than adapts. Every buffer the map has is bound
+         * on every run of that contract whether or not this program
+         * uses it - the bank on a 0x700, the two scratch blocks on an
+         * 0x800; the tile reads or writes each only when the image's
+         * flags say BANK_EXT or SCRATCH_IO. */
+        xrt::run r = (D.version >= SCRATCH_VERSION)
+                   ? tile.k(mode, static_cast<uint64_t>(n),
+                            tile.a, tile.b, tile.c, tile.d,
+                            tile.pg, tile.cn, tile.bk, tile.si, tile.so)
+                   : (D.version >= BANK_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             tile.a, tile.b, tile.c, tile.d,
                             tile.pg, tile.cn, tile.bk)
@@ -1050,6 +1182,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, cnt_bytes, 0);
         if (counts)
             std::memcpy(counts, tile.cn.map<uint8_t *>(), n * 4);
+        /* And the scratch-out block, on exactly the same terms as the
+         * deposits: skipped entirely when the program declares none,
+         * so a run that touches neither pointer costs neither
+         * transfer. */
+        if (sout_bytes) {
+            tile.so.sync(XCL_BO_SYNC_BO_FROM_DEVICE, sout_pad, 0);
+            std::memcpy(scratch_out, tile.so.map<uint8_t *>(), sout_bytes);
+        }
     } catch (const std::exception &e) {
         set_err(std::string("reading program results: ") + e.what());
         return ST_INTERNAL;

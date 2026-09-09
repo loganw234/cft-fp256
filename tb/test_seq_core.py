@@ -82,7 +82,13 @@ NBEATS = 16
 MUL_PASSES = int(os.getenv("CFT_MUL_PASSES", "1"))
 MAXD = 64
 IMEM_D = 1024
-KMEM_D = 256
+# 256 -> 512 at revision 3 (R7): the ninth kx index bit made the
+# second half of the bank reachable, and cft_seq's DEFAULT moved with
+# it because tb/test_krnl.py holds cft_krnl's SEQ_KIDX_W against it.
+KMEM_D = 512
+# Scratch slots a lane (revision 3, R4), and the reduction the indexed
+# forms apply. A power of two by construction.
+SCRATCH_D = 256
 # Registers a lane owns, and so the register file's depth (revision 2:
 # 16 -> 32). It appears here only in the CYCLE BUDGET: cft_seq wipes
 # the whole file once per lane block, so the doubling is 256 more
@@ -109,6 +115,13 @@ A_BASE = 0x01_0000
 B_BASE = 0x02_0000
 C_BASE = 0x03_0000
 CNT_BASE = 0x04_0000
+# The two scratch blocks (revision 3, R5), each in its own region and
+# each far from the other four for the reason BANK_BASE is far from
+# the image: a preload that quietly read the A stream, or a drain that
+# quietly overwrote the counts, would pass every check here if the
+# regions overlapped.
+SIN_BASE = 0x05_0000
+SOUT_BASE = 0x08_0000
 D_BASE = 0x10_0000
 
 POISON = 0xA5
@@ -362,6 +375,10 @@ def unchecked(fmt, insns, consts=(), max_deposits=1):
     # would fail for the wrong reason.
     p.flags = 0
     p._n_consts = len(p.consts)
+    # Revision 3 adds two more `run()` reads on entry, on the same
+    # terms.
+    p.n_scratch_in = 0
+    p.n_scratch_out = 0
     return p
 
 
@@ -438,7 +455,8 @@ class Bench:
         dut.start.value = 0
         dut.cfg_prec.value = 0
         for name in ("cfg_n", "cfg_a", "cfg_b", "cfg_c", "cfg_d",
-                     "cfg_prog", "cfg_bank", "cfg_cnt"):
+                     "cfg_prog", "cfg_bank", "cfg_sin", "cfg_sout",
+                     "cfg_cnt"):
             getattr(dut, name).value = 0
         cocotb.start_soon(self.ram.serve())
         dut.ap_rst_n.value = 0
@@ -470,7 +488,7 @@ class Bench:
         return got
 
     def _stage(self, fmt, image, a, b, c, n, dep_bytes, cnt_bytes,
-               bank=None):
+               bank=None, scratch_in=None):
         ram = self.ram
         ram.poison()
         ram.stage(PROG_BASE, image)
@@ -481,6 +499,11 @@ class Bench:
             # FETCH read one the way it reads the other.
             ram.stage(BANK_BASE, b"".join(
                 int(v).to_bytes(ebytes, "little") for v in bank))
+        if scratch_in is not None:
+            # Lane-major and dense, in the same encoding: lane i's slot
+            # s at element i * n_scratch_in + s.
+            ram.stage(SIN_BASE, b"".join(
+                int(v).to_bytes(ebytes, "little") for v in scratch_in))
         for base, vals in ((A_BASE, a), (B_BASE, b), (C_BASE, c)):
             ram.stage(base, b"".join(
                 int(v).to_bytes(ebytes, "little") for v in vals))
@@ -489,7 +512,7 @@ class Bench:
             "max_deposits for this case")
         assert CNT_BASE + cnt_bytes + GUARD <= D_BASE
 
-    def _drive_cfg(self, fmt, n, bank_ptr=None):
+    def _drive_cfg(self, fmt, n, bank_ptr=None, scratch=False):
         dut = self.dut
         dut.cfg_prec.value = PREC_CODE[fmt.name]
         dut.cfg_n.value = n
@@ -504,6 +527,13 @@ class Bench:
         # an address with no constants at it is how that is CHECKED
         # rather than asserted.
         dut.cfg_bank.value = BANK_BASE if bank_ptr else 0xDEAD_0000
+        # ...and the same for the two scratch pointers, which a program
+        # without flags.SCRATCH_IO must never read OR WRITE. The write
+        # one matters more: a run that wrote a scratch-out block it was
+        # not asked for would land on a host buffer that does not exist,
+        # and here it lands on the write logger's window assertion.
+        dut.cfg_sin.value = SIN_BASE if scratch else 0xDEAD_1000
+        dut.cfg_sout.value = SOUT_BASE if scratch else 0xDEAD_2000
 
     # -- a refused run ---------------------------------------------------
 
@@ -534,7 +564,8 @@ class Bench:
     # -- an accepted run -------------------------------------------------
 
     async def program(self, fmt, prog, a, b, c, n, label,
-                      *, check_flags=True, image=None, bank=None):
+                      *, check_flags=True, image=None, bank=None,
+                      scratch_in=None):
         """Run `prog` over `n` lanes and compare the whole machine.
 
         `a`, `b`, `c` are the REAL streams, one value per lane in
@@ -549,12 +580,16 @@ class Bench:
         dep_bytes = n * maxdep * ebytes
         cnt_bytes = 4 * n
 
-        want = seq.run(prog, list(a), list(b), list(c), bank=bank)
+        want = seq.run(prog, list(a), list(b), list(c), bank=bank,
+                       scratch_in=scratch_in)
+        sout_bytes = n * prog.n_scratch_out * ebytes
 
-        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes, bank=bank)
+        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes, bank=bank,
+                    scratch_in=scratch_in)
         self._padding_selfcheck(fmt, prog, a, b, c, n, want, label,
-                                bank=bank)
-        self._drive_cfg(fmt, n, bank_ptr=bank is not None)
+                                bank=bank, scratch_in=scratch_in)
+        self._drive_cfg(fmt, n, bank_ptr=bank is not None,
+                        scratch=prog.scratch_io)
 
         budget = self._budget(fmt, prog, n, len(image))
         refused, flags, err = await self._go(budget, label)
@@ -570,11 +605,14 @@ class Bench:
             windows.append((D_BASE, dep_bytes, "deposit"))
         if cnt_bytes:
             windows.append((CNT_BASE, cnt_bytes, "count"))
+        if sout_bytes:
+            windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
         self.ram.assert_writes_inside(windows, label)
         self.ram.assert_guards(windows, label)
 
         self._compare(fmt, prog, n, want, flags, err, a, b, c, label,
                       check_flags)
+        self._compare_scratch_out(fmt, prog, n, want, label)
         self.cases["program"] += 1
         return want
 
@@ -587,16 +625,94 @@ class Bench:
         # per-instruction cost of a block scales by the budget - the
         # widest rung's period is the budget itself, and using it for
         # every rung keeps this a bound rather than a fit.
+        # A scratch LOAD is five cycles a beat - the register file's
+        # two, the scratch's own two, and the write-back - and it does
+        # not go near the array, so the pass budget does not pace it.
+        # At NBEATS 16 that is 80 cycles, more than an ALU instruction
+        # costs at MUL_PASSES 1, so the per-instruction term is the
+        # larger of the two rather than the ALU's alone.
+        per_insn = max((NBEATS + LATENCY) * MUL_PASSES + 8, 5 * NBEATS + 8)
+        # ...and the per-block fixed cost gains the scratch wipe, which
+        # cft_seq sizes from what the program can reach: every slot if
+        # it indexes, otherwise the highest static slot it names and
+        # the slots the scratch-out drain will read. A program that
+        # names none wipes none, which is why every case that predates
+        # revision 3 has exactly the budget it had.
+        slots, indexed = 0, False
+        for word in prog.insns:
+            d = seq.decode(word)
+            if not d["ctrl"]:
+                continue
+            if d["op"] in (seq.STL, seq.LDL):
+                slots = max(slots, (d["imm"] & seq.SCRATCH_SLOT_MASK) + 1)
+            elif d["op"] in (seq.STX, seq.LDX):
+                indexed = True
+        nsin = prog.n_scratch_in if prog.scratch_io else 0
+        nsout = prog.n_scratch_out if prog.scratch_io else 0
+        wipe = SCRATCH_D if indexed else max(slots, nsout)
         # Per block: the register-file wipe (RF_D cycles, the whole
-        # file, so that the previous block cannot leak), the three
-        # operand streams, the instructions, and the drain.
+        # file, so that the previous block cannot leak), the scratch
+        # wipe, the scratch-in preload (an element a cycle plus its
+        # beats), the three operand streams, the instructions, the
+        # deposit drain, and the scratch-out drain.
+        #
+        # The two DRAINS are counted per element rather than folded
+        # into the fixed term they used to hide in. Each visits (lane,
+        # slot) at three cycles an element plus a send per beat, so a
+        # block of 128 lanes at three deposits apiece is 1,152 cycles -
+        # more than the whole fixed term. That was covered by accident
+        # while every multi-block case deposited once; the first case
+        # to run three lane blocks with three deposits and three
+        # scratch slots landed within 1% of the bound.
+        blk = min(n, lanes_per_block(fmt))
         cycles = (3000 + (image_bytes // BEAT_BYTES + 8) * 8
-                  + blocks * (worst * ((NBEATS + LATENCY) * MUL_PASSES + 8)
-                              + RF_D + 6 * NBEATS + 400))
-        return min(cycles, 4_000_000)
+                  + blocks * (worst * per_insn
+                              + RF_D + wipe * NBEATS
+                              + blk * nsin * 2 + 64
+                              + blk * nsout * 4 + 64
+                              + blk * prog.max_deposits * 4 + 64
+                              + 6 * NBEATS + 400))
+        return min(cycles, 8_000_000)
+
+    def _compare_scratch_out(self, fmt, prog, n, want, label):
+        """The block the run hands back through SCRATCH_OUT_PTR, against
+        the model's, element for element.
+
+        A program that declares NO scratch output must leave the region
+        entirely alone; the write-window assertion above already says
+        so by address, and this says it again by content, because a
+        write of the right bytes to the right place is not the same
+        claim as a write that never happened."""
+        nsout = prog.n_scratch_out if prog.scratch_io else 0
+        ebytes = fmt.width // 8
+        if not nsout:
+            assert self.ram.fetch(SOUT_BASE, 1024) == bytes([POISON]) * 1024, \
+                (f"{label}: the scratch-out region was written by a run "
+                 f"whose program declares none")
+            return
+        got = self.ram.fetch(SOUT_BASE, n * nsout * ebytes)
+        bad = 0
+        for idx in range(n * nsout):
+            g = int.from_bytes(got[idx * ebytes:(idx + 1) * ebytes],
+                               "little")
+            if g == want.scratch_out[idx]:
+                continue
+            bad += 1
+            if bad <= 8:
+                lane, slot = divmod(idx, nsout)
+                self.dut._log.error(
+                    f"{label}: scratch_out[lane {lane} slot {slot}] "
+                    f"(element {idx}, {SOUT_BASE + idx * ebytes:#x}) "
+                    f"got {g:#x} want {want.scratch_out[idx]:#x}")
+        assert bad == 0, (
+            f"{label}: {bad}/{n * nsout} scratch-out elements differ from "
+            f"the model. n_scratch_in={prog.n_scratch_in} "
+            f"n_scratch_out={nsout} n={n} "
+            f"program={[hex(w) for w in prog.insns]}")
+        self.cases["scratch_out"] += 1
 
     def _padding_selfcheck(self, fmt, prog, a, b, c, n, want, label,
-                           bank=None):
+                           bank=None, scratch_in=None):
         """The bench's own precondition, not a claim about the DUT.
 
         The model here is run over exactly `n` lanes, all of them
@@ -622,10 +738,21 @@ class Bench:
                     self.ram.fetch(base + i * ebytes, ebytes), "little"))
             return out
 
+        # The scratch-in block is sized by the model's OWN lane count,
+        # so the padded re-run needs the padding lanes' slots appended -
+        # and they must be read as +0, because the tile's element count
+        # is blk_n * n_scratch_in and its stream simply ends before
+        # they would begin.
+        nsin = prog.n_scratch_in if prog.scratch_io else 0
+        pad_sin = (list(scratch_in) + [0] * ((padded - n) * nsin)
+                   if nsin else None)
         pad = seq.run(prog, stream(A_BASE, a), stream(B_BASE, b),
-                      stream(C_BASE, c), bank=bank, n_active=n)
+                      stream(C_BASE, c), bank=bank, scratch_in=pad_sin,
+                      n_active=n)
+        nsout = prog.n_scratch_out if prog.scratch_io else 0
         same = (pad.deposits[:n * prog.max_deposits] == want.deposits
                 and pad.counts[:n] == want.counts
+                and pad.scratch_out[:n * nsout] == want.scratch_out
                 and pad.flags == want.flags and pad.status == want.status)
         assert same, (
             f"{label}: BENCH PRECONDITION - this program run at n={n} "
@@ -1541,6 +1668,40 @@ async def indexed_constants_and_imul(dut):
                             operands(fmt, n, 901), operands(fmt, n, 902),
                             n, f"{name} kx: constants 16..{KMEM_D - 1}")
 
+        # -- 1b. revision 3's NINTH index bit, on all three ports at
+        # once. imm[28], imm[29] and imm[30] are ka's, kb's and kc's,
+        # so an index past 255 uses a different bit on each port and a
+        # decode that wired one of the three to the wrong operand
+        # produces the right answer twice and the wrong one once.
+        # These indices are the whole point of R7: a revision-2 tile
+        # reads eight bits and would answer with constant 5 where the
+        # program meant 261.
+        deep = seq.Program(
+            fmt,
+            [seq.alu(sf.OP_IOR, 8, ra=KMEM_D - 1, rb=5, rc=5,
+                     ka=True, kx=True),
+             seq.deposit(8),
+             seq.alu(sf.OP_IOR, 9, ra=5, rb=261, rc=5, kb=True, kx=True),
+             seq.deposit(9),
+             seq.alu(sf.OP_SELECT, 10, ra=0, rb=1, rc=256,
+                     kc=True, kx=True),
+             seq.deposit(10),
+             seq.alu(sf.OP_IXOR, 11, ra=300, rb=511, rc=0,
+                     ka=True, kb=True, kx=True),
+             seq.deposit(11),
+             seq.halt()],
+            consts=bank, max_deposits=4)
+        for w in deep.insns:
+            d = seq.decode(w)
+            if d["ctrl"]:
+                continue
+            assert any(is_k and idx >= 256 for idx, is_k in seq.sources(d)), \
+                "an instruction here names no constant past 255, so the " \
+                "ninth index bit is not under test"
+        await bench.program(fmt, deep, operands(fmt, n, 910),
+                            operands(fmt, n, 911), operands(fmt, n, 912),
+                            n, f"{name} kx9: constants 256..{KMEM_D - 1}")
+
     # -- 2. the two encodings agree where both can express the operand
     for name, n in (("fp32", 9), ("fp128", 4)):
         fmt = FORMATS[name]
@@ -1798,15 +1959,19 @@ async def constant_bank_per_run(dut):
     # an image built for a later revision thrown back rather than
     # half-understood.
     body = [seq.alu(sf.OP_ADD, 4, 0, 1, 2), seq.halt()]
+    # flags[1] became SCRATCH_IO at revision 3 and is now IMPLEMENTED,
+    # so the first unknown bit moved up to [2]. The scratch cases below
+    # carry the positive control for [1]; here what matters is that the
+    # rule still bites on the first bit this tile does not know.
     await bench.refuse(
-        fmt, raw_image(fmt, body, rsv=(1 << 1, 0)),
-        "header flags[1]: a flag bit this tile does not implement")
+        fmt, raw_image(fmt, body, rsv=(1 << 2, 0)),
+        "header flags[2]: a flag bit this tile does not implement")
     await bench.refuse(
         fmt, raw_image(fmt, body, rsv=(1 << 31, 0)),
         "header flags[31]: the top of the same word")
     await bench.refuse(
         fmt, raw_image(fmt, body, rsv=(0, 1)),
-        "header reserved[1]: still reserved")
+        "header word 7 without flags.SCRATCH_IO: still reserved")
     # The positive control: flags[0] is BANK_EXT and IS implemented, so
     # the identical mechanism must not refuse it. Without this a tile
     # that refused every non-zero flags word would pass all three above.
@@ -1820,8 +1985,426 @@ async def constant_bank_per_run(dut):
         "fp32 BANK_EXT is a KNOWN flag", bank=[sf.one_bits(fmt)])
 
 
+
+
 # ======================================================================
-# 10. the one that has to go last
+# 10. revision 3: the per-lane scratch and its per-run block
+# ======================================================================
+
+def _int_bits(fmt, v):
+    """An integer as a format-width bit pattern - the shape the atlas
+    emitter keeps a loop counter in, and what STX/LDX reduce."""
+    return int(v) & ((1 << fmt.width) - 1)
+
+
+@cocotb.test()
+async def scratch_static_and_indexed(dut):
+    """R4: STL/LDL by slot, STX/LDX by register, on every rung.
+
+    Four things have to be true, and each is arranged to fail loudly
+    on its own:
+
+      * a value stored and loaded back comes back UNCHANGED, including
+        at the highest slot the depth allows - the one an off-by-one in
+        the address decode reaches past;
+      * a slot no lane wrote reads +0, which is normative for the same
+        reason an untouched deposit slot is;
+      * the indexed forms take the slot from the LOW log2(SCRATCH_D)
+        bits of rb, reduced modulo the depth rather than refused, so
+        lanes whose indices differ by whole multiples of the depth
+        collide on one slot;
+      * lane i's slot s is lane i's alone - the scratch is beat-wide
+        storage, so a beat's lanes writing DIVERGENT indexed slots is
+        exactly the case a shared address would get wrong, and the
+        streams below give every lane a different index.
+
+    Neither form is arithmetic, so FLAGS must stay whatever the rest of
+    the program made it; every case here is scored on the whole machine
+    against seq.py, FLAGS included.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    top = SCRATCH_D - 1
+
+    for name, n in (("fp32", 40), ("fp64", 20), ("fp128", 12),
+                    ("fp256", 6)):
+        fmt = FORMATS[name]
+        # -- static: two slots, one of them the top one, round-tripped
+        # through registers the plain form could not even name.
+        prog = seq.Program(fmt, [
+            seq.stl(0, 0), seq.stl(1, top),
+            seq.ldl(20, top), seq.ldl(21, 0),
+            seq.deposit(20), seq.deposit(21),
+            # a slot nothing wrote: +0, not whatever the last block left
+            seq.ldl(22, 5), seq.deposit(22),
+            seq.halt()], max_deposits=3)
+        await bench.program(fmt, prog, operands(fmt, n, 1300),
+                            operands(fmt, n, 1301), operands(fmt, n, 1302),
+                            n, f"{name} STL/LDL, slot 0 and slot {top}")
+
+        # -- indexed, with every lane on its own slot and a third of
+        # them past the depth. r1 carries the index; the streams below
+        # are integers, not the specials mix, because an index is a bit
+        # pattern read as an unsigned integer.
+        idx = [_int_bits(fmt, i * 7 + (SCRATCH_D * (i % 3)))
+               for i in range(n)]
+        rdx = [_int_bits(fmt, i * 7 + (SCRATCH_D * ((i + 1) % 4)))
+               for i in range(n)]
+        prog = seq.Program(fmt, [
+            seq.stx(0, 1),          # scratch[r1 mod D] := r0
+            seq.ldx(23, 2),         # r23 := scratch[r2 mod D]
+            seq.deposit(23),
+            seq.halt()], max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 1310), idx, rdx,
+                            n, f"{name} STX/LDX, indices past the depth")
+
+        # -- the two forms addressing the SAME slot from both sides,
+        # which is what says the static and indexed address paths land
+        # in one memory rather than two.
+        prog = seq.Program(fmt, [
+            seq.stl(0, 9),
+            seq.ldx(24, 1),         # r1 == 9 for every lane below
+            seq.deposit(24),
+            seq.stx(24, 1),
+            seq.ldl(25, 9),
+            seq.deposit(25),
+            seq.halt()], max_deposits=2)
+        nine = [_int_bits(fmt, 9 + SCRATCH_D * (i % 5)) for i in range(n)]
+        await bench.program(fmt, prog, operands(fmt, n, 1320), nine,
+                            operands(fmt, n, 1322), n,
+                            f"{name} one slot through both forms")
+
+    # -- MORE THAN ONE LANE BLOCK, which nothing above reaches: 40
+    # lanes at fp32 is one block of 128 and 20 at fp256 is two blocks
+    # of 16. Two things are only testable here.
+    #
+    #   * the per-block WIPE. Each block loads slot 5 BEFORE it stores
+    #     to it, so block 1 must read +0 there and not block 0's value.
+    #     A tile that wiped once per run instead of once per block
+    #     passes every case above and fails this one on lane 16.
+    #   * the indexed form across blocks, where the slot is the lane's
+    #     own data and the lane state is rebuilt between blocks.
+    for name, n in (("fp32", 300), ("fp64", 150), ("fp256", 20)):
+        fmt = FORMATS[name]
+        blocks = -(-n // lanes_per_block(fmt))
+        assert blocks >= 2, f"{name} n={n} is one block; the case is idle"
+        prog = seq.Program(fmt, [
+            seq.ldl(26, 5),          # +0 in EVERY block, wiped or not yet used
+            seq.deposit(26),
+            seq.stl(0, 5),
+            seq.ldl(27, 5),
+            seq.deposit(27),
+            seq.stx(1, 2),
+            seq.ldx(28, 2),
+            seq.deposit(28),
+            seq.halt()], max_deposits=3)
+        idx = [_int_bits(fmt, i * 3 + SCRATCH_D * (i % 2)) for i in range(n)]
+        await bench.program(fmt, prog, operands(fmt, n, 1390),
+                            operands(fmt, n, 1391), idx, n,
+                            f"{name} the scratch across {blocks} lane blocks")
+
+    dut._log.info(f"scratch: {bench.cases['program']} runs")
+
+
+@cocotb.test()
+async def scratch_is_masked_by_the_active_bit(dut):
+    """P3 for the scratch: a store in an all-inactive loop body does
+    nothing at all.
+
+    A store is a register write for the active mask's purposes and a
+    load writes rd, so a loop body every lane has dropped out of must
+    leave the scratch exactly as it was. That is not an optimisation
+    the module may skip - it is what makes the early exit invisible,
+    and the early exit is what the whole design is allowed to do.
+
+    The check has two halves. The MODEL says the scratch is unchanged
+    (python/tests/test_seq.py compares the run against the same run
+    with the early exit forced off); here the RTL is scored against the
+    model on deposits, counts and FLAGS, and the value deposited at the
+    end IS the slot's contents - so a store that escaped the mask lands
+    in the deposit buffer where the comparison can see it.
+    """
+    bench = Bench(dut)
+    await bench.start()
+
+    for name, n in (("fp32", 32), ("fp256", 8)):
+        fmt = FORMATS[name]
+        zero, one = sf.zero_bits(fmt), sf.one_bits(fmt)
+        prog = seq.Program(fmt, [
+            seq.stl(0, 4),          # slot 4 := r0, every lane still live
+            seq.stl(0, 7),
+            seq.setact(1),          # r1 is +0, so every lane drops out
+            seq.repeat(6),
+            seq.stl(2, 4),          # ...and neither of these may land
+            seq.stx(2, 2),
+            seq.ldl(9, 7),          # nor may this write r9
+            seq.endrep(),
+            seq.actall(),           # wake them to report
+            seq.ldl(10, 4), seq.deposit(10),
+            seq.deposit(9),
+            seq.halt()], max_deposits=2)
+        a = operands(fmt, n, 1330)
+        b = [zero] * n
+        c = [_int_bits(fmt, 0xDEAD_BEEF + i) for i in range(n)]
+        await bench.program(fmt, prog, a, b, c, n,
+                            f"{name} a store in an all-inactive loop body")
+        # ...and the positive control, one letter apart: the same
+        # program with a NON-zero SETACT operand, where the body DOES
+        # run and the slot really is overwritten. Without it a module
+        # that ignored STL entirely would pass the case above.
+        await bench.program(fmt, prog, a, [one] * n, c, n,
+                            f"{name} ...and the same body when it runs")
+    assert one != zero
+    dut._log.info("scratch masking: the dead body and its control")
+
+
+@cocotb.test()
+async def scratch_io_block(dut):
+    """R5: the scratch as a per-run block, in and out.
+
+    Three claims, and the third is the one that makes the feature worth
+    having:
+
+      * the block that goes IN is readable by LDL - lane-major and
+        dense, so lane i's slot s is element i * n_scratch_in + s, and
+        a transposed preload would deposit some other lane's value;
+      * the block that comes OUT is what the program left in the
+        slots, written after the last deposit, in the same layout;
+      * a run whose state leaves through one and comes back through the
+        other computes in two calls what one call computes - which is
+        the resumable-integration ask docs/SEQUENCER.md records against
+        orbits and Collatz.
+
+    The write-window assertion in `program` covers the negative half on
+    every OTHER case in this file: a program without flags.SCRATCH_IO
+    has its two pointers aimed at rubbish, and a run that wrote a
+    scratch-out block it was not asked for would be caught by address.
+    """
+    bench = Bench(dut)
+    await bench.start()
+
+    for name, n in (("fp32", 24), ("fp64", 12), ("fp128", 8), ("fp256", 5)):
+        fmt = FORMATS[name]
+        # in 2, out 3: read both slots, combine them, store the result
+        # in a slot NEITHER of them occupies, and let all three leave.
+        prog = seq.Program(fmt, [
+            seq.ldl(3, 0), seq.ldl(4, 1),
+            seq.alu(sf.OP_ADD, rd=5, ra=3, rc=4),
+            seq.stl(5, 2),
+            seq.deposit(5),
+            seq.halt()], max_deposits=1,
+            flags=seq.FLAG_SCRATCH_IO, n_scratch_in=2, n_scratch_out=3)
+        block = operands(fmt, 2 * n, 1340)
+        await bench.program(fmt, prog, operands(fmt, n, 1341),
+                            operands(fmt, n, 1342), operands(fmt, n, 1343),
+                            n, f"{name} scratch in 2, out 3",
+                            scratch_in=block)
+
+        # n_scratch_out > n_scratch_in: the slots between the two were
+        # never preloaded and never written, so they must leave as +0 -
+        # which is the wipe's job, and the case that fails if the wipe
+        # is sized off n_scratch_in.
+        prog = seq.Program(fmt, [
+            seq.ldl(6, 0), seq.stl(6, 1), seq.deposit(6), seq.halt()],
+            max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+            n_scratch_in=1, n_scratch_out=4)
+        await bench.program(fmt, prog, operands(fmt, n, 1350),
+                            operands(fmt, n, 1351), operands(fmt, n, 1352),
+                            n, f"{name} out deeper than in",
+                            scratch_in=operands(fmt, n, 1353))
+
+    # -- more than one lane block, so the two BLOCK STRIDES are under
+    # test. Each is a header count shifted by BLK_SH rather than a
+    # product, which is right by accident at one block: lane 128's
+    # slots have to come from element 128 * n_scratch_in of the
+    # buffer and not from element 0 of a second read of the first.
+    fmt = FP32
+    n = 300
+    assert -(-n // lanes_per_block(fmt)) >= 3, "fewer than three blocks"
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 1), seq.ldl(5, 2),
+        seq.alu(sf.OP_ADD, rd=6, ra=3, rc=5),
+        seq.stl(6, 1),
+        seq.deposit(4),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=3, n_scratch_out=3)
+    await bench.program(fmt, prog, operands(fmt, n, 1370),
+                        operands(fmt, n, 1371), operands(fmt, n, 1372),
+                        n, "fp32 scratch in 3, out 3, three lane blocks",
+                        scratch_in=operands(fmt, 3 * n, 1373))
+
+    # -- the resumable run, on one rung, in full. Three iterations then
+    # three more must equal six, deposit for deposit.
+    fmt = FP32
+    n = 24
+    one = sf.one_bits(fmt)
+    body = [seq.ldl(3, 0),
+            seq.alu(sf.OP_ADD, rd=3, ra=3, rc=0, kc=True),
+            seq.stl(3, 0), seq.deposit(3)]
+
+    def resumable(trips, maxdep):
+        return seq.Program(fmt, [seq.repeat(trips)] + body
+                           + [seq.endrep(), seq.halt()],
+                           consts=[one], max_deposits=maxdep,
+                           flags=seq.FLAG_SCRATCH_IO,
+                           n_scratch_in=1, n_scratch_out=1)
+
+    zeros = [sf.zero_bits(fmt)] * n
+    a = operands(fmt, n, 1360)
+    b = operands(fmt, n, 1361)
+    c = operands(fmt, n, 1362)
+    whole = await bench.program(fmt, resumable(6, 6), a, b, c, n,
+                                "fp32 six trips in one call",
+                                scratch_in=zeros)
+    first = await bench.program(fmt, resumable(3, 3), a, b, c, n,
+                                "fp32 three trips, state out",
+                                scratch_in=zeros)
+    second = await bench.program(fmt, resumable(3, 3), a, b, c, n,
+                                 "fp32 ...and three more, state in",
+                                 scratch_in=first.scratch_out)
+    for i in range(n):
+        assert first.deposits[i * 3:(i + 1) * 3] == \
+            whole.deposits[i * 6:i * 6 + 3], f"lane {i}: first half"
+        assert second.deposits[i * 3:(i + 1) * 3] == \
+            whole.deposits[i * 6 + 3:(i + 1) * 6], (
+                f"lane {i}: the resumed half does not equal the second "
+                f"half of a single run - the state did not survive the "
+                f"round trip through the two pointers")
+    dut._log.info(
+        f"scratch I/O: {bench.cases['scratch_out']} blocks compared, "
+        f"and a run resumed across two calls")
+
+
+@cocotb.test()
+async def scratch_header_refusals(dut):
+    """The three the tile owes at the header, and their controls.
+
+    An unknown flag bit, a count past the depth, and a non-zero
+    scratch_io word without the flag. The last is the one that makes a
+    revision-2 tile the version guard for this whole feature: it
+    refuses a non-zero second header word, so an image built for
+    revision 3 is thrown back rather than run with the scratch never
+    loaded.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    body = [seq.alu(sf.OP_ADD, 4, 0, 1, 2), seq.halt()]
+    io = seq.FLAG_SCRATCH_IO
+
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(0, 1)),
+        "scratch_io = 1 with flags.SCRATCH_IO clear")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(0, 1 << 16)),
+        "scratch_io's OUT half set with the flag clear")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(io, SCRATCH_D + 1)),
+        f"n_scratch_in {SCRATCH_D + 1} past the {SCRATCH_D} slots a lane owns")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(io, (SCRATCH_D + 1) << 16)),
+        f"n_scratch_out {SCRATCH_D + 1} past the depth")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(io, 0xFFFF | (0xFFFF << 16))),
+        "both halves at 65535")
+    await bench.refuse(
+        fmt, raw_image(fmt, body, rsv=(1 << 2, 0)),
+        "flags[2]: the first bit above SCRATCH_IO, still unknown")
+
+    # The positive controls, without which a tile that refused every
+    # non-zero header word would pass all six above. SCRATCH_D exactly
+    # is the largest legal count, which is what says the comparison is
+    # a `>` and not a `>=`.
+    n = 16
+    await bench.program(
+        fmt,
+        seq.Program(fmt, [seq.ldl(3, 0), seq.deposit(3), seq.halt()],
+                    max_deposits=1, flags=io, n_scratch_in=1,
+                    n_scratch_out=1),
+        operands(fmt, n, 1370), operands(fmt, n, 1371),
+        operands(fmt, n, 1372), n,
+        "SCRATCH_IO is a KNOWN flag", scratch_in=operands(fmt, n, 1373))
+    big = seq.Program(fmt, [seq.stl(0, SCRATCH_D - 1),
+                            seq.ldl(4, SCRATCH_D - 1),
+                            seq.deposit(4), seq.halt()],
+                      max_deposits=1, flags=io,
+                      n_scratch_in=SCRATCH_D, n_scratch_out=SCRATCH_D)
+    # ...at a small n, because n * SCRATCH_D elements is the whole
+    # scratch of every lane in both directions.
+    n = 8
+    await bench.program(fmt, big, operands(fmt, n, 1380),
+                        operands(fmt, n, 1381), operands(fmt, n, 1382), n,
+                        f"n_scratch_in and out at exactly {SCRATCH_D}",
+                        scratch_in=operands(fmt, n * SCRATCH_D, 1383))
+    dut._log.info(f"scratch header: {bench.cases['refusal']} refusals "
+                  f"and their controls")
+
+
+@cocotb.test()
+async def scratch_fuzz(dut):
+    """The model's own generator with the scratch arm on, whole state
+    compared - the same discipline the revision-2 fuzz applies to the
+    features it added.
+
+    seq.random_program's `scratch` arm emits all four codes at every
+    loop depth, with slots chosen to COLLIDE (a corpus that scattered
+    its slots over 256 would spend its time reading +0 out of untouched
+    storage) and with the highest slot among them.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    rng = random.Random(20260908)
+    kinds = Counter()
+    runs = 0
+
+    # Caps well below fuzz_programs', and deliberately: a scratch LOAD
+    # is five cycles a beat where an ALU instruction is paced by the
+    # pipe, and an INDEXED program makes the per-block wipe the whole
+    # depth. The same corpus at fuzz_programs' bounds ran for over
+    # fifteen minutes on one rung; what this suite is for is the four
+    # codes through the RTL, not a second census.
+    for name, sizes, cap in (("fp32", (8, 33), 120), ("fp64", (12,), 100),
+                             ("fp128", (7,), 80), ("fp256", (5,), 50)):
+        fmt = FORMATS[name]
+        for n in sizes:
+            for _ in range(3):
+                while True:
+                    insns, consts = seq.random_program(
+                        fmt, rng, scratch=True, wide_regs=True)
+                    if worst_case_insns(insns) > cap:
+                        continue
+                    try:
+                        prog = seq.Program(fmt, insns, consts, 3)
+                    except seq.ProgramError:
+                        continue
+                    break
+                m = n
+                if has_actall(insns):
+                    m = max(1, -(-n // lanes_per_block(fmt))) \
+                        * lanes_per_block(fmt)
+                    if m > 64:
+                        m = lanes_per_block(fmt)
+                for w in insns:
+                    d = seq.decode(w)
+                    if d["ctrl"] and d["op"] in (seq.STL, seq.LDL,
+                                                 seq.STX, seq.LDX):
+                        kinds[d["op"]] += 1
+                await bench.program(fmt, prog, operands(fmt, m, rng.randrange(1 << 20)),
+                                    operands(fmt, m, rng.randrange(1 << 20)),
+                                    operands(fmt, m, rng.randrange(1 << 20)),
+                                    m, f"{name} scratch fuzz n={m}")
+                runs += 1
+    assert set(kinds) == {seq.STL, seq.LDL, seq.STX, seq.LDX}, (
+        f"the corpus did not exercise all four codes: {dict(kinds)} - a "
+        f"fuzz that never reaches the instruction it is named for passes "
+        f"for the wrong reason")
+    dut._log.info(f"scratch fuzz: {runs} programs, "
+                  f"STL {kinds[seq.STL]} LDL {kinds[seq.LDL]} "
+                  f"STX {kinds[seq.STX]} LDX {kinds[seq.LDX]}")
+
+
+# ======================================================================
+# 11. the one that has to go last
 # ======================================================================
 
 @cocotb.test()

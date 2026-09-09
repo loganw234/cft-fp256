@@ -127,6 +127,13 @@ def main():
                     bogus = seq.Program.__new__(seq.Program)
                     bogus.fmt, bogus.insns = fmt, insns
                     bogus.consts, bogus.max_deposits = consts, maxdep
+                    # every field to_bytes() reads, by name - the
+                    # header's flags word (revision 2) and the two
+                    # scratch counts (revision 3) included; this
+                    # bypass had not been updated for either
+                    bogus.flags = 0
+                    bogus.n_scratch_in = bogus.n_scratch_out = 0
+                    bogus._n_consts = len(consts)
                     image = bogus.to_bytes()
                     handle = ctypes.c_void_p()
                     rc = lib.cft_program_load(dev, image, len(image),

@@ -427,7 +427,26 @@ const NEEDED = ["cftw_run", "cftw_reduce", "cftw_conformance",
                 // 0.8 and projected by nothing until now, which is the
                 // hole the line above closes.
                 "cftw_caps_seq_features", "cftw_caps_max_deposits",
-                "cftw_caps_max_insns", "cftw_caps_max_consts"];
+                "cftw_caps_max_insns", "cftw_caps_max_consts",
+                // ABI 0.10, the sequencer's revision 3: one entry
+                // point that takes everything a run can carry, with
+                // the cft_run_args struct built in C out of arguments
+                // in a fixed order - a JS caller reading struct
+                // offsets is the coupling struct_size exists to
+                // prevent. Then the per-run scratch block's three
+                // program fields as accessors, for the reason
+                // cftw_program_flags is one.
+                "cftw_program_run_ex", "cftw_program_scratch_in",
+                "cftw_program_scratch_out", "cftw_program_scratch_used",
+                // The scratch depth, and the header flag and three
+                // feature bits revision 3 assigns. SCRATCH and
+                // SCRATCH_IO live in CAPS2's nibble, so their values
+                // are 0x100 and 0x200 rather than the next two bits of
+                // the first nibble - which is exactly why nothing here
+                // transcribes them.
+                "cftw_caps_max_scratch", "cftw_prog_flag_scratch_io",
+                "cftw_seq_feat_kx9", "cftw_seq_feat_scratch",
+                "cftw_seq_feat_scratch_io"];
 for (const needed of NEEDED) {
   if (!exported.includes(needed)) bad(`the module does not export ${needed}`);
 }
