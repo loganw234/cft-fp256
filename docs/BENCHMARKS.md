@@ -172,15 +172,30 @@ remedy is a deeper read-ahead in `cft_engine_stream`, more
 outstanding bursts per master, and it is an RTL item with a measured
 target: 108 M beats a second, 1.8x what the card does today.
 
-**What a port gets today.** `cft_run` stages, and `cft_alloc` is a
-plain allocation on every backend whose sync calls are no-ops
-(docs/HOSTAPI.md), so through the library the numbers are still the
-card-day table's. The buffer API is already the right shape for the
-resident path - allocate, sync to the device, run, sync back - and
-making it real on the XRT backend, with `cft_run` zero-copy on a
-buffer that is already there, is the library item that hands this
-table to a port. Until then the rate is reachable through XRT
-directly, which is how `cft-resident` reaches it.
+**What a port gets, since ABI 0.11 the same day.** `cft_alloc` is
+real on the XRT backend now (docs/HOSTAPI.md, "Device-resident
+buffers"): allocate, fill through `cft_buffer_data`, call
+`cft_buffer_to_device` once, run as many times as you like, call
+`cft_buffer_from_device` before reading a result - the same four calls
+that are an allocation and two no-ops on the software and remote
+backends, so there is no second code path. `cft-bench --resident`
+measures exactly that through `cft_run`, on the revision-3 pair,
+`fma`, one million elements a call:
+
+| format | one tile, `cft_run` staged | one tile, `cft_run` resident | one tile, the standalone tool | four tiles resident | four tiles, the tool |
+|---|---|---|---|---|---|
+| fp32 | 141.6 M/s | **453.7 M/s** | 460.4 M/s | **1,570 M/s** | 1,844 M/s |
+| fp64 | 76.4 M/s | **233.0 M/s** | 234.5 M/s | **898 M/s** | 937 M/s |
+| fp128 | 38.0 M/s | **118.3 M/s** | 118.5 M/s | **466 M/s** | 474 M/s |
+| fp256 | 19.1 M/s | **59.6 M/s** | 59.6 M/s | **234 M/s** | 238 M/s |
+
+The library is within 1.5 percent of the tool on one tile and two to
+fifteen percent under it on four, the gap being its per-call
+bookkeeping across four tiles at the shortest runs; `device-test -b`
+holds every byte and flag of the resident path to the staged one on
+the card (4,363 checks, both images). Staged stays the default a
+first port gets, and it is the honest one for a call whose operands
+change every time.
 
 ## Width inside the library
 
