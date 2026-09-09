@@ -56,14 +56,31 @@ async def write64(axil, addr, val):
     await axil.write_dword(addr + 4, (val >> 32) & 0xFFFFFFFF)
 
 
-async def run_sum(dut, axil, ram, fmt, n, rnd, seed):
+async def run_sum(dut, axil, ram, fmt, n, rnd, seed, specials=True):
+    """One CFT_SUM run, scored against the model's tree.
+
+    `specials` draws 30% of the operands from the interesting pool -
+    infinities, NaNs, subnormals, zeros - which is what a reduction
+    over a handful of elements should see, and is the default so every
+    caller written before this argument existed is unchanged.
+
+    IT MUST BE OFF FOR A LONG RUN, and the reason is the third rule in
+    docs/VERIFICATION.md. One NaN anywhere in a sum makes the sum a
+    NaN, and over hundreds of elements a 30% special rate makes that a
+    certainty - so `got == want` holds no matter WHICH elements were
+    summed, which elements were dropped, or how many times each was
+    counted. A long run drawn that way is a check that cannot fail.
+    Found exactly that way: a deliberately broken FIFO reservation
+    dropped 136 of 700 beats and the assertion here never moved
+    (docs/VALIDATION.md, 2026-09-09).
+    """
     rng = random.Random(seed)
     pool = vectors.interesting_operands(fmt)
     ebytes = fmt.width // 8
 
     vals = []
     for _ in range(n):
-        if rng.random() < 0.30:
+        if specials and rng.random() < 0.30:
             vals.append(pool[rng.randrange(len(pool))])
         else:
             sign = rng.getrandbits(1)
@@ -158,6 +175,43 @@ async def sum_end_to_end(dut):
             total += await run_sum(dut, axil, ram_a, fmt, n, 0, seed=100 + n)
         dut._log.info(f"{fmt.name}: sums over {len(per_fmt[fmt])} sizes "
                       f"straddling the beat boundary, bit-exact")
+
+    # ---- and one long enough to SATURATE the operand FIFOs -----------
+    #
+    # Every size above is a beat-boundary case, and none of them is
+    # more than 33 elements. That leaves one thing in the read path
+    # untested by anything in this repository: the FIFO reservation
+    # under load, which only binds when a stream FIFO is actually FULL.
+    #
+    # A reduction is the cheapest way to get there, and it is the only
+    # cheap way. Elementwise consumes a beat about as fast as a master
+    # can deliver one, so the FIFO gains a tenth of a beat a cycle and
+    # a run would need four thousand beats to fill 512 of them. The
+    # reduction's serialiser consumes one beat per ~11 cycles while the
+    # reads still arrive at one a cycle, so the FIFOs fill within a few
+    # hundred and STAY full for the rest of the run - which is the
+    # regime where `burst_room` decides whether an AR may go out, and
+    # where an off-by-one in it overwrites operands that have not been
+    # read yet.
+    #
+    # ORDINARY OPERANDS ONLY, and that is load-bearing rather than
+    # tidy: one NaN makes the whole sum a NaN, and at the 30% special
+    # rate every other run here uses, a 700-beat sum is a NaN with
+    # certainty - which would compare equal however many beats the
+    # engine had lost. See run_sum's docstring.
+    #
+    # 5,600 fp32 elements is 700 beats: saturated after roughly the
+    # first 550 and reserving against a full FIFO for the rest. The
+    # answer is one number scored against the model, so the failure is
+    # a wrong SUM rather than a hang. This is the run that catches the
+    # deliberately over-promising reservation of docs/VALIDATION.md's
+    # 2026-09-09 negative control; without it the fault passed every
+    # bench in this repository.
+    total += await run_sum(dut, axil, ram_a, FP32, 5600, 0, seed=7700,
+                           specials=False)
+    dut._log.info("fp32: a 700-beat sum, operand FIFOs saturated for most "
+                  "of it, bit-exact")
+
     dut._log.info(f"reduction end-to-end: {total} elements summed, exact")
 
 
