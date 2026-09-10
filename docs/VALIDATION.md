@@ -10471,7 +10471,7 @@ while 59 was outstanding") ended the run. Temperature held between
 42.3 and 43.3 C across the whole hour and free heap never moved, so
 for the third time the answer is neither heat nor a leak.
 
-### What the binary128 fault is, and what it is not
+### The fault is an hour of the USB link, not binary128 and not a case
 
 A second run, in the original order with `--retry` and
 `--reset-on-timeout` turned OFF so it would stop at the fault instead
@@ -10501,12 +10501,47 @@ stopped answering - which argues against a single deterministic bug in
 one code path and for something environmental that presents either way.
 
 Uptime and cumulative work are confounded at a steady rate, since about
-510,000 cases IS about an hour at 220 a second. The run separating them
-is the obvious one: replay the same census at a longer pace, so the
-clock still reaches an hour on time while the case count at that moment
-is far lower. At `--pace 10` the rate is 83 a second, which puts one
-hour near 300,000 cases and 510,000 cases near 102 minutes. Whichever
-of the two the fault follows, it will say so.
+510,000 cases IS about an hour at 220 a second. So the census was run a
+third time at `--pace 10`, 83 cases a second instead of 220: the clock
+still reaches an hour on time, but the case count at that moment is far
+lower. It said so.
+
+      run      pace    failed at      elapsed   board uptime   the request that went unanswered
+      one      2 ms    506,000        59.3 min    ~59 min      (recovered by a reset, then desynced)
+      two      2 ms    516,000        60.2 min     61 min      fp128 rdn minnum, against a signalling NaN
+      three   10 ms    296,000        66.3 min   68.7 min      fp64 rne atan2pi(-inf, -1)
+
+**Cases vary by a factor of 1.74 across the three; uptime varies by
+1.16.** The fault follows the clock, not the work. And the third
+failure is not in binary128 at all - it is an fp64 transcendental. The
+binary128 association was an artefact of where a 220-a-second run
+happens to be when the hour runs out.
+
+One correction to the first run's account, which matters for reading
+the other two. Its "restart" was not spontaneous: run one had
+`--reset-on-timeout` enabled, so the harness pulsed DTR/RTS itself
+after a timeout, and the uptime falling to 2,830 ms is the harness's
+own recovery rather than a board that crashed. Runs two and three had
+recovery off, stopped at the first timeout, and show no restart at all.
+**All three failures are therefore the same event: after about an hour
+of continuous request and response, an answer stops arriving.**
+
+So it is not arithmetic - nothing ever disagreed, in any run, at any
+format. It is not a case: three different operations at two different
+formats. It is not heat and not a leak: temperature and free heap were
+flat through every run. It is not cumulative work. What is left is the
+link itself, USB CDC, after about an hour of continuous traffic, and
+**this evidence does not say whether the device or the host's USB stack
+is the one that stops** - the symptom is identical from where the
+harness sits.
+
+The practical consequence is already in hand rather than pending.
+`--retry N --reset-on-timeout` recovers the link: run one carried on
+for another 2,000 cases after its reset. What then ended it was the
+resync, an answer for sequence 58 arriving while 59 was outstanding, so
+the useful work is in the harness's re-greeting after a reset rather
+than in the board. A census longer than an hour needs that path to be
+solid; a census shorter than an hour does not need it at all.
 
 A caution for whoever reads this next: an isolated replay of a suspect
 set **cannot** reproduce a long-run fault, because opening the serial
@@ -10521,12 +10556,15 @@ board restart in fp128). Each fix revealed the next thing.
 
 ### Pending
 
-The binary128 fault above is the open item on this board. The narrow
-step - replaying the suspect families alone - has been done and came
-back clean, which was informative only in ruling a case out. The
-discriminating run, the same census at a longer pace to separate an
-hour of uptime from half a million cases of work, was in flight when
-this was written. The Pico, the Uno, the Nano and the Mega are still
+The hour-long link fault above is characterised but not diagnosed: it
+is the USB CDC link after about an hour of continuous traffic, and
+nothing here says whether the device or the host's USB stack stops.
+Two things would settle it, neither done: close and reopen the port
+WITHOUT pulsing reset, and see whether the board answers - if it does,
+the host stack is the one that stopped; and run the same hour against a
+different host, since every run here was the same Windows machine. The
+harness's resync after a reset is the piece worth hardening either way,
+because it is what would let a census outlast the fault. The Pico, the Uno, the Nano and the Mega are still
 unattached. The two static analyses named in the entry above - the
 ATmega328P's 130-byte stack margin, and what a large `to_decimal`
 costs the Pico's heap - are still analyses.
