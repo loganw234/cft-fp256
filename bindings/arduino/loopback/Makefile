@@ -52,7 +52,9 @@ DEF_board   := -DCFT_NO_REMOTE -DCFT_NO_CONFORMANCE
 
 PROFILES := full tiny tiny128 board
 
-all: $(addprefix cft-replay-loopback-,$(PROFILES))
+# The suffixed names, or `make OS=Windows_NT` (which the host build
+# needs on this Windows box) has no rule for the unsuffixed ones.
+all: $(addsuffix $(EXE),$(addprefix cft-replay-loopback-,$(PROFILES)))
 	@echo "built: $(addsuffix $(EXE),$(addprefix cft-replay-loopback-,$(PROFILES)))"
 
 # One rule per profile rather than a pattern rule with a lookup,
