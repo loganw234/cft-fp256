@@ -84,7 +84,7 @@ same library the card runs, compiled small.
 |---|---|
 | `python/cft_golden` | The definition of correct. Exact, dependency-free Python: 30 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
 | `rtl/` | The tile. A 16-stage pipelined fused-multiply-add core that splits one 256-bit lane into 2x fp128, 4x fp64 or 8x fp32, plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. Yosys-clean, portability enforced in CI. |
-| `tb/` and `formal/` | 21 simulation targets checking every result and every flag against the golden model, and 31 machine-checked proofs with a negative control. |
+| `tb/` and `formal/` | 21 simulation targets checking every result and every flag against the golden model, and 30 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
 | `host/` | **libcft**: about 19,900 lines of C99, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
@@ -170,7 +170,7 @@ python/tests/        golden proven against native f64, math.fma, mpmath, 754 anc
 rtl/                 the FMA core, the per-tile lane array, the CSR block,
                      the streaming engine, the sequencer, the kernel top
 tb/                  cocotb benches + Makefiles (SIM=icarus default, verilator alt)
-formal/              the property proofs (make formal): 31 tasks + a negative control
+formal/              the property proofs (make formal): 30 tasks + a negative control
 hw/                  kernel.xml, packaging, link.cfg, out-of-context timing builds
 host/include/cft.h   the C ABI: the contract between this and its users
 host/src/            libcft - software, XRT and remote backends, conformance
@@ -212,7 +212,7 @@ throughput and what bounds each number.
 
 `docs/ROADMAP.md` has the detail. In short: the card is up and
 reproducing the vectors; the next tier is the same tile on an open
-Kintex-7 board, where one tile fits in 46% of a 325T; and the roadmap
+Kintex-7 board, where one tile fits in 47% of a 325T; and the roadmap
 now also carries what the first outside workload asked the library for,
 ranked by measurement rather than by guess.
 

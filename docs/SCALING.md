@@ -239,7 +239,11 @@ the rate it has alone - so behind the bus the next wall is the read
 path's own latency at 59 M beats a second a tile, and not HBM. The
 deeper read-ahead merged the same day (docs/ARCHITECTURE.md, the
 engine's in-flight depth) predicts 120 M beats a second a tile, about
-15 GB/s; its pair is measured in docs/BENCHMARKS.md when it lands.
+15 GB/s. Its pair landed on 2026-09-09 and measures **100.6 to
+106.8 M beats a second** (docs/BENCHMARKS.md, "The engine,
+measured"), 84 to 89% of the prediction above - close enough that
+the read path, and not HBM, is confirmed as the wall it was argued
+to be.
 
 ## What scales fine
 
@@ -250,7 +254,10 @@ engine's in-flight depth) predicts 120 M beats a second a tile, about
   current depth, 30 GB/s over four tiles, scaling exactly.
 - **DSPs.** 292 per tile with the ladders off, 277 with them on, so
   four tiles are 1,168 or 1,108 of the part's 5,952 - **19.6% or
-  18.6%**, up from 17.67% before the sequencer. Not a constraint on
+  18.6%**, up from 17.67% before the sequencer. Those two are the
+  pre-route estimate; the routed design reports 262 a tile
+  (docs/ARCHITECTURE.md's MUL_PASSES table), so the real quad is 1,048
+  and 17.6%, and every number in this bullet is an upper bound. Not a constraint on
   this part and it will not become one; `cft_seq` contributes none of
   them at all since its address arithmetic came off the DSP columns
   (15 -> 0), which is why area moved and this barely did.
@@ -361,10 +368,12 @@ Done:
 
 Deliberately not done:
 
-- **Link configurations beyond 8.** `hw/link_quad.cfg` is generated
-  rather than typed, and the generator extends to any power of two, but
-  16 CUs do not fit and 16 x 4 masters exceeds the pseudo-channel
-  budget. Generate 1, 2, 4, 8 when a part can hold them.
+- **Link configurations beyond 8.** `hw/layouts/u50-4xfp256.cfg` is the
+  generated twin of the hand-written `hw/link_quad.cfg` - identical
+  connectivity, and docs/LAYOUTS.md says so. The generator writes only
+  into `hw/layouts/`, and its family stops at eight tiles because 32
+  pseudo-channels over four masters a tile is eight; 16 CUs would not
+  fit the part anyway. Generate 1, 2, 4, 8 when a part can hold them.
 - **The orchestrator itself.** The gate on this was "design the
   interface when the sequencer RTL is designed", and as of 2026-09-01
   that has happened - so the interface is now designable and nobody has

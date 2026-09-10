@@ -54,7 +54,10 @@ output lives in its own header and is compared by eye.
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
 The pattern for adding a language is deliberately boring: load the
-shared library (or link the static one), declare a dozen functions,
+shared library (or link the static one - with `XRT=1` that additionally
+needs `-L$(XRT_ROOT)/lib -lxrt_coreutil -lstdc++ -lpthread -luuid`, and
+it cannot be linked into a shared object of your own; see
+docs/HOSTAPI.md, "The device backend"), declare a dozen functions,
 drive the same vectors, diff the checksums. A binding that needs more
 than that is evidence the ABI failed at its one job.
 

@@ -117,7 +117,8 @@ backend - the same bytes everywhere, which is the claim.
 
 ## The engine, measured (2026-09-09)
 
-`host/tools/cft-resident` (`make -C host XRT=1 cft-resident`; XRT-only,
+`host/tools/cft_resident.cpp` (`make -C host XRT=1 cft-resident`, which
+builds `host/cft-resident`; XRT-only,
 C++ because XRT's API is) takes the bus out: each compute unit's four
 buffers are filled once, then the kernel runs on them back to back
 and only the runs are timed. It is not only a stopwatch. Every unit
@@ -392,7 +393,7 @@ bits identical to what the software tier already produced.
 
 **The Python tier is its own decade.** mpmath at any precision costs
 more than libcft at fp256, and ~40-60x MPFR. That is the audience
-bindings/cftmpfr exists for: same Python, contract bits, and a path
+bindings/python/cftmpfr exists for: same Python, contract bits, and a path
 down to the C prices above (and eventually the card) without leaving
 the language.
 

@@ -4,7 +4,9 @@
 # The gates. Job one proves the golden model against arbiters that
 # share no code with it (native binary64, math.fma, mpmath, and the
 # hand-written IEEE 754 anchors). Job two proves the RTL against the
-# golden model, streamed, plus the full kernel through AXI. Job four
+# golden model, streamed, plus the full kernel through AXI. Job three
+# elaborates every RTL file in Yosys, which is what keeps the open-core
+# port a wrapper rather than a fork. Job four
 # builds the host library and runs every language that calls it,
 # through verify/run.sh, each binding and example a named stage that
 # is required to run rather than allowed to skip.
