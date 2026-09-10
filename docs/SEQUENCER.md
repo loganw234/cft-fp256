@@ -61,7 +61,7 @@ sequencer targets,
 core passed, which was the only day the claim would mean anything. On
 this tree the whole set holds: seq_core 17/17, krnlseq 1/1, krnl 2/2,
 reduce 3/3, reduceacc 5/5, krnlfused 2/2, krnlplain 2/2, quarter 1/1,
-faults 4/4, the golden model's own pytest cases, `make yosys-lint`
+faults 5/5, the golden model's own pytest cases, `make yosys-lint`
 clean, and the Verilator width gate clean. The last of
 those is not decoration: it is fatal-on-width here, and it caught seven
 implicit-width sites in `cft_seq.sv` that Icarus and yosys both
@@ -128,6 +128,11 @@ result is not known yet, so there is no closed bitstream for the
 sequencer tile either - and there is still no card in the machine.
 docs/BRINGUP.md is the gate record.
 
+*Both halves of that sentence were answered. The builds returned the
+same day: single +0.618, quad +0.143, both at 135 MHz from 9f73107
+(docs/VALIDATION.md, 2026-09-02). The card arrived on 2026-09-08 and
+ran them.*
+
 *Status 2026-09-02, from docs/VALIDATION.md's entry "the sequencer
 passes on a device": the bank fix (40149b1) put every sequencer
 program through hw_emu on the real XRT stack at fp32 - 28 checks, 0
@@ -136,6 +141,13 @@ stopped the run in fp64. The emulation gate is met for the sequencer
 at fp32; fp64 and above are unrun there, not failed; and there is
 still no card. The paragraph above is kept as the record of the
 morning that found the bug.*
+
+*Status 2026-09-08: programs in all four formats went through the real
+XRT stack on a four-tile hw_emu image - `device-test -s -n 24`, 98
+checks, 0 failed - which lifts the fp32-only qualification; and the
+card ran the sequencer the same week, most visibly in card day's soak,
+where the zoom reference orbit deposited one checkpoint hash on one
+tile, on four and in software.*
 
 So a program can be written and run today, on any machine, with no
 card. What the hardware adds is speed and the on-chip iteration that
@@ -347,9 +359,12 @@ the caller's, exactly as it is for deposits and counts.
 
 ## Execution model, and why the lane block has a floor
 
-The ALU is `cft_fpfma_pipe`: **15 stages, fixed latency, no stall path
-and no ready signal.** A sequencer that issued one instruction and
-waited for its result would bubble 14 cycles out of every 15 - which
+The ALU is `cft_fpfma_pipe`: **16 stages, fixed latency, no stall path
+and no ready signal** (15 until the leading-zero cone became its own
+stage on 2026-09-07; `LATENCY` is the parameter and the number below
+is written in terms of it). A sequencer that issued one instruction and
+waited for its result would bubble LATENCY-1 cycles out of every
+LATENCY - which
 would cost more than the arithmetic intensity the sequencer exists to
 buy, and the whole design would be pointless.
 
@@ -358,8 +373,8 @@ so one instruction issued across a block of lanes is that many
 independent operations, and they fill the pipe on their own.
 
 The engine already instantiates one ALU per lane per beat - eight at
-fp32, one at fp256 - and issues one beat per cycle. So to keep a
-15-stage pipeline full the sequencer must hold
+fp32, one at fp256 - and issues one beat per cycle. So to keep the
+pipeline full the sequencer must hold
 
     LATENCY beats  =  LATENCY * lanes_per_beat  lanes
 
@@ -373,8 +388,9 @@ The pleasing part is that this makes the register file
 
     register file  =  32 registers * LATENCY beats * 32 bytes
 
-at fp32, fp64, fp128 and fp256 alike - 120 fp32 lanes or 15 fp256
-lanes, the same silicon. At today's `LATENCY` of 16 that is **16
+at fp32, fp64, fp128 and fp256 alike - at today's `LATENCY` of 16,
+128 fp32 lanes or 16 fp256 lanes, the same silicon
+(`rtl/cft_seq.sv`'s `BLK_LANES = NBEATS * WORDS`). At today's `LATENCY` of 16 that is **16
 KiB**; it was 8 with sixteen registers, and 7.5 before `LATENCY` went
 15 -> 16 on 2026-09-07, which is where the 7.5 KiB in older notes and
 in the revision-2 contract's own summary comes from. Work it out from
@@ -413,8 +429,8 @@ Two consequences worth stating now, because they constrain the RTL:
   speed. It is correct, just slow, and the library should not pretend
   otherwise.
 - **The early exit may fire late, and that is free.** `any(active)` is
-  a cross-lane reduction over a mask that the last `SETACT` writes 15
-  cycles after it issues, so testing it exactly at the loop back-edge
+  a cross-lane reduction over a mask that the last `SETACT` writes
+  LATENCY cycles after it issues, so testing it exactly at the loop back-edge
   would cost a drain every iteration. It does not have to be exact:
   firing an iteration or two late is *still invisible*, because those
   iterations are no-ops by P3. The hardware can use whatever mask it

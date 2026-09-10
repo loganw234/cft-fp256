@@ -6,9 +6,10 @@
  * cft-serve's request handlers are static, and the smallest possible
  * diff to fuzz them is no diff at all: this file includes the server
  * whole, with its main() renamed out of the way, and calls the
- * handlers directly. Two other agents are editing that file today
- * (a WebSocket layer, the HELLO caps block); including it rather than
- * refactoring it keeps this harness out of both their ways.
+ * handlers directly. That was first done to stay out of the way of two
+ * concurrent edits to cft-serve.c (the WebSocket layer of tools/ws.c
+ * and the HELLO caps block); both landed, and the reason to keep the
+ * include is now the static symbols alone.
  *
  * An input is a sequence of requests
  *
@@ -18,7 +19,9 @@
  * BUF_WRITE into a buffer BUF_ALLOC made, PROG_RUN against a handle
  * PROG_LOAD returned - is reachable. The socket is not involved: the
  * handlers take (payload, length) and fill an `answer`, and the frame
- * layer around them is fuzz_frame's target.
+ * layer around them is fuzz_client.c mode 0's target: it drives
+ * cftr_recv_frame directly, and the server reads frames with the same
+ * function, so that harness covers both ends' framing.
  *
  * One harness-side policy, stated because it changes what is tested:
  * REPEAT immediates inside a PROG_LOAD image are clamped to 1..8

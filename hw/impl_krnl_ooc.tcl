@@ -3,8 +3,7 @@
 #
 # Out-of-context IMPLEMENTATION of the full kernel: synthesis, then
 # opt/place/route with no shell around it, for the parts the multi-cycle
-# tile is meant for (docs/ARCHITECTURE.md, "The multi-cycle fp256
-# rung"). hw/synth_krnl_ooc.tcl stops at synthesis; a synthesis-only
+# tile is meant for (docs/ARCHITECTURE.md, "The multi-cycle rung"). hw/synth_krnl_ooc.tcl stops at synthesis; a synthesis-only
 # path delay is an estimate with no wire in it, and on a 7-series part
 # at speed grade -1 the wire is most of the number.
 #

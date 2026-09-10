@@ -14,15 +14,18 @@ totalOrder, the signaling comparisons, remainder - every one with
 zero new RTL, which is the composition methodology paying out. The
 word "general purpose" hung on programmability alone - and later the
 SAME day, the orbit sequencer's RTL landed and benched bit-exact
-against its model. The boxes below say exactly where everything
-stands, including the honest distance between "benched" and "yes".
+against its model; on 2026-09-08 it went through the real XRT stack in
+all four formats and then onto silicon, which is what closed the last
+gap between "benched" and "yes". The boxes below say exactly where
+everything stands, and the distance between those two marks is kept in
+the key because it is the file's whole discipline.
 
 | mark | meaning |
 |---|---|
 | **yes** | in the RTL and verified bit-exact against the golden model, in simulation and through the real XRT stack |
 | **composed** | the hardware supplies the primitive; libcft composes the full operation as a fixed sequence of those calls, identical on every backend, with the integer bookkeeping done exactly on the host - the same division of labour the multi-tile reduction fold uses. Bit-identical to the contract |
 | **library** | in libcft and defined by the golden model, but the operation contains NO floating-point arithmetic at all - it is rounding-position bit surgery - so there is no backend pass to issue and nothing for a tile to accelerate. Bit-identical on every backend by construction |
-| **benched** | in the RTL and held bit-exact against the golden model by the cocotb benches - but not yet through the real XRT stack, which is the last mile a **yes** requires. The remaining NUMERIC work is plumbing validation (hw_emu, then silicon); the remaining engineering is not, and 2026-09-01 is the proof - fitting the sequencer tile on the part meant deleting a duplicated ALU array, and closing timing in the shell meant a register on the reduction path. Neither gate is finished |
+| **benched** | in the RTL and held bit-exact against the golden model by the cocotb benches - but not yet through the real XRT stack, which is the last mile a **yes** requires. No row carries this mark today: the sequencer was the last one, and it crossed to **yes** on 2026-09-08. The definition is kept because the distinction is the file's whole discipline, and the next block of RTL will start here |
 | **model** | defined in `python/cft_golden` and covered by conformance vectors, but no hardware - a host can use it, the tile cannot |
 | **no** | not implemented anywhere |
 | **out** | deliberately excluded; the reason is given |
@@ -226,7 +229,7 @@ The distance to running it on-chip:
 | `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
 | division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright; on a program-capable device the whole composition issues as ONE sequencer program rather than ~28 elementwise round trips |
 | `floor`, `round`, `step` | **composed** (2026-09-01) - `cft_rint` under the directed attributes IS floor/ceil/trunc/round; `step` was always cmple+select |
-| a sequencer to run a chain on-chip | **benched, and passing in emulation** (2026-09-02) - `cft_seq` drives the kernel's one ALU array and holds bit-exact to `seq.py`: 9/9 unit suites across four formats, the full-kernel bench, and a banked-memory bench that proves each operand arrives through its own master. It FAILED its first device run - every program, bus faults - because all three operand reads left through m_axi_a while `link.cfg` binds that master to one HBM pseudo-channel; the reads are now steered per bank and the same gate returns **28 checks, 0 failed** at fp32 through real XRT, where it had returned 4 of 4 failing. Still open: fp64 and wider on a device (the emulation cap cut the run short), a bitstream carrying this fix, and silicon. Emulation is not a card |
+| a sequencer to run a chain on-chip | **yes** (2026-09-08) - `cft_seq` drives the kernel's one ALU array and holds bit-exact to `seq.py`: 9/9 unit suites across four formats, the full-kernel bench, and a banked-memory bench that proves each operand arrives through its own master. It FAILED its first device run - every program, bus faults - because all three operand reads left through m_axi_a while `link.cfg` binds that master to one HBM pseudo-channel; the reads are now steered per bank. Since then: **28 checks, 0 failed** at fp32 through real XRT (2026-09-02), programs in all four formats bit-exact against the software backend on a four-tile hw_emu image (2026-09-08, 98 checks, 0 failed), and then silicon - card day's soak ran the zoom reference orbit as a sequencer program, 32 steps a call, to one checkpoint hash on one tile, on four, and in software, ten runs each. docs/VALIDATION.md carries all three |
 
 Today a det_* function could be evaluated as a hybrid - the tile doing
 the fma passes, the host doing the integer and select work between
@@ -246,13 +249,13 @@ on-chip program is the ~25x traffic win).
 | capability discovery (CAPS) | **yes** | formats and opcode groups this bitstream carries |
 | unsupported precision | **refused** | STATUS[3]: engine never starts, memory untouched, done still asserts - an error, not an output |
 | bus-fault reporting (STATUS) | **yes** | including the abandon-on-length-violation path, so a protocol fault is a prompt error rather than a hang |
-| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. The quad image is built and verified - on the pre-sequencer design; the sequencer-era quad is still building |
+| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. Quad images have been built and run on the card at every sequencer revision since - the card-day pair (2026-09-08), revision 2, revision 3 and the read-ahead pair - each replaying the published sets on four tiles to the same bits as one |
 | reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | strided or gathered access | **no** | three dense linear streams |
-| on-chip program / loop | **benched** | `cft_seq` behind MODE[15] (VERSION 0x600, CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level. Every program shape passed hw_emu at fp32 through the real XRT stack on 2026-09-02; fp64 and wider are not yet through, and no bitstream carries a program yet |
+| on-chip program / loop | **yes** | `cft_seq` behind MODE[15] (VERSION 0x800 at revision 3, CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level, then through real XRT in all four formats, then on silicon. Revision 3's capacities, from `rtl/cft_krnl.sv`: 32 registers a lane, 16,384 instructions, a 512-entry constant bank, 256 scratch slots a lane and 64 deposit slots a lane, every one of them published in CAPS/CAPS2 so a host sizes a program instead of discovering a refusal |
 | in-place operation (D aliasing A/B/C) | **yes** | documented in cft.h: each element is read before written |
 | a tile reached from another machine | **yes** (2026-09-06) | `cft_open("cft://host:port")` and `cft-serve`: only device-touching calls cross the wire, the same bits come back, and a Windows client computes against a Linux-hosted device - docs/REMOTE.md |
-| a tile on a part a third the size | **the DSP axis, yes** (2026-09-06) | `MUL_PASSES` iterates the multiplier: 262 DSPs to 56, bit-identical, fp32 at full rate. LUTs move 6.4%, so the fused ladders remain the area lever; with both on, a tile is 99,287 LUT and 56 DSP on 7-series fabric, and routes at 100 MHz on a -2 Kintex-7 325T at 47.0% of the part (2026-09-07) - docs/ARCHITECTURE.md |
+| a tile on a part a third the size | **the DSP axis, yes** (2026-09-06) | `MUL_PASSES` iterates the multiplier: 262 DSPs to 56, bit-identical, fp32 at full rate. LUTs move 6.4%, so the fused ladders remain the area lever; with both on, a tile synthesises to 99,287 LUT and 56 DSP on 7-series fabric, and IMPLEMENTS at 95,695 LUT - 47.0% of a -2 Kintex-7 325T - routing at 100 MHz with +0.096 ns (2026-09-07). The -1 grade of the same part misses, at about 77 MHz: the speed grade is the finding - docs/ARCHITECTURE.md |
 
 ### Host access
 
@@ -265,19 +268,21 @@ in docs/COMPATIBILITY.md) gets the full story.
 
 ## What "general purpose" would take from here
 
-1. **Programmability.** The structural gap, now closing: the orbit
+1. ~~**Programmability.**~~ **Closed** (2026-09-08). The orbit
    sequencer's RTL landed 2026-09-01 - pulled forward from v2 on the
    open-core argument that a DDR- or PCIe-fed tile cannot afford a
    memory pass per step - and holds bit-exact to seq.py at unit and
-   full-kernel bench level (see the **benched** rows above). What made
-   the tile a vector ALU rather than a processor is no longer a
-   NUMERIC question. It is still an engineering one, and that was
-   underestimated here: the first sequencer tile did not fit the part
-   at all, sharing the ALU array to make it fit put a real timing
-   regression on the reduction path, and as of 2026-09-01 evening
-   hw_emu is part-run, no sequencer bitstream has closed, and there is
-   no card. Until those, a det_* function still runs as ~25-30
-   host-issued passes; after them, one launch.
+   full-kernel bench level. The engineering that this entry said was
+   underestimated was real and is done: the first sequencer tile did
+   not fit the part at all, sharing the ALU array to make it fit put a
+   timing regression on the reduction path, and for a week after that
+   hw_emu was part-run, no sequencer bitstream had closed and there
+   was no card. All three have since happened - programs in all four
+   formats through real XRT on a four-tile image (2026-09-08), then
+   silicon, then three more pairs at revisions 2 and 3 and the
+   read-ahead. A det_* function can be one launch rather than ~25-30
+   host-issued passes; what is not done is the port itself, and
+   docs/ATLAS.md tracks that.
 
 2. ~~The cheap operations, which are cheap.~~ **Done** (2026-09-01):
    `roundToIntegral`, the conversions, classification, and the rest of
@@ -317,15 +322,23 @@ in docs/COMPATIBILITY.md) gets the full story.
   operations read and write a payload, they do not carry one through
   an add), the decimal formats and clause 8.
 - As a **general-purpose float processor**: the blocker was
-  programmability alone, and programmability now exists in RTL and is
-  benched against its model. What separates "benched" from "yes" is
-  the XRT stack, a bitstream that closes, and a slot in a card. This
-  file called that validation distance rather than design distance
-  until 2026-09-01, when fitting the sequencer took a duplicated ALU
-  array out of the tile and closing timing put a register on the
-  reduction path. Neither moved a result - the numbers are the same
-  numbers - but calling the remaining work plumbing was wrong, and
-  docs/BRINGUP.md is where it is now tracked honestly.
+  programmability alone, and it is gone. Programmability exists in
+  RTL, is benched against its model, has been through the real XRT
+  stack in all four formats, and has run on silicon - the same
+  sequencer program deposited the same checkpoint hash on one tile, on
+  four and in software (2026-09-08). This file called the remaining
+  work validation distance rather than design distance until
+  2026-09-01, when fitting the sequencer took a duplicated ALU array
+  out of the tile and closing timing put a register on the reduction
+  path. Neither moved a result - the numbers are the same numbers -
+  but calling that work plumbing was wrong, and docs/BRINGUP.md is
+  where every gate's verdict now lives. What is still short of a
+  general-purpose processor is not the sequencer: it is the access
+  pattern. The engine reads three dense linear streams, there is no
+  device-side scatter and no gather (the row above), and the first
+  outside workload found that to be the cost that decides its rate -
+  docs/ROADMAP.md ranks it, docs/INTEGRATION.md says how to recognise
+  it.
 - As a **library people can already run something on**: five
   workloads written for the contract rather than adapted to it - exact
   Collatz trajectories, rigorous enclosures, Lucas-Lehmer on fp256
@@ -336,7 +349,8 @@ in docs/COMPATIBILITY.md) gets the full story.
   loses on each, or that it loses nothing.
 - For the **atlas det library**: every primitive it refines from
   exists on the tile, including its seeds and now floor/round; the
-  on-chip sequence to chain them exists in RTL and is benched. The
+  on-chip sequence to chain them exists in RTL, is benched, and has
+  run on the card. The
   det_* -> program port's first half landed on 2026-09-07
   (atlas-engine branch `cft-detlib`): all nineteen functions of the
   shipped library emit as sequencer instruction sequences and

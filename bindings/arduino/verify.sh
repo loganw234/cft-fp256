@@ -14,7 +14,9 @@
 #   2  the loopback builds in all four profiles
 #   3  the harness replays the published vectors through each profile
 #   4  the harness catches a loopback that lies        (--corrupt)
-#   5  every example compiles for every board, warnings on
+#   5  three examples - Hello, VectorReplay, Bench - compile for every
+#      board, warnings on. The three Remote* sketches are not in this
+#      leg; src/remote/test/compile_check.py is theirs.
 #
 # Every leg prints PASS or FAIL with its own numbers, and the exit
 # status is 0 only if all of them passed. A leg whose tool is missing

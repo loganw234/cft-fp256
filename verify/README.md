@@ -32,7 +32,7 @@ three cuts, kept in `run.sh` beside the stage list:
 |---|---|---|
 | `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
 | `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about an hour with the box quiet; 2-3 hours beside a CUDA job |
-| `full` | everything: gate + sim, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
+| `full` | everything: gate + sim, simmc, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
 
 The slow stages are the replays and the RTL simulation, and they are
 slow on THIS host: libcft, cpp, vectors and wasm took 1794, 1471, 1170
@@ -49,6 +49,7 @@ command in the `cft2204` distro.
 | golden | the model's own invariants and oracles | python |
 | vectors | the conformance sets regenerate from the model | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
+| simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration - in `full` only, never in `quick` or `gate` | docker |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 14 minutes of solver time quiet and well over an hour loaded (formal/README.md) | docker |
 | libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |

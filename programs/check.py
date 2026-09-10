@@ -31,9 +31,10 @@ STATIC arm - constants against their derivation, the header against
 what the source declares, the encoding against the contract - runs
 today. The EXECUTION arm needs a libcft that knows the four control
 codes, the header's `scratch_io` word and the ninth constant-index
-bit, and those arrive with the model and host halves of the same
-round; until then it says SKIP and WHICH feature it waited on, asking
-`positive-run --capabilities` rather than inferring it from a failure.
+bit. Those arrived with the model and host halves of the same round,
+so the arm runs; while it did not, it said SKIP and WHICH feature it
+waited on, asking `positive-run --capabilities` rather than inferring
+it from a failure. The mechanism is kept for the next revision.
 
 A check that cannot run says SKIP and why, and the script still fails
 if anything actually disagrees. Nothing here reports a pass it did not
@@ -619,11 +620,12 @@ def check_horner_bank(args, name, image, image_path, tmp, caps):
 #
 #   the EXECUTION arm needs libcft to know the four control codes, the
 #   header's scratch_io word and the ninth constant-index bit. Those
-#   arrive with the model and host halves of the same round. Until then
-#   the arm says SKIP and WHICH feature it waited on, by name, and
-#   `positive-run --capabilities` is what it asks rather than inferring
-#   it from a failure. This is exactly what last round did for the
-#   BANK_EXT path.
+#   arrived with the model and host halves of the same round, so the
+#   arm runs. While it did not, it said SKIP and WHICH feature it
+#   waited on, by name, and `positive-run --capabilities` is what it
+#   asks rather than inferring it from a failure - which is what the
+#   round before did for the BANK_EXT path, and what the next
+#   revision will use again.
 
 
 def spill_model(fmt, xs, nterms=40):

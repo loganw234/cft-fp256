@@ -75,7 +75,7 @@ streaming accumulator.
 A binary-counter accumulator carries when a level is occupied: level
 `j+1` needs level `j`'s result. Resolve that eagerly and every carry
 costs the adder's full latency, because the next carry cannot start
-until the previous one retires. With a 15-stage adder that is
+until the previous one retires. With a 16-stage adder that is
 `ADD_LATENCY` per *level*, and it serialises the whole reduction.
 
 Deferring the carries - letting levels be in flight together and

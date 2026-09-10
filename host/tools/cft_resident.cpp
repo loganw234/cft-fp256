@@ -18,7 +18,11 @@
 // pipeline's rate at the card's clock against HBM - the number
 // docs/SCALING.md projects from `make cycles` (1.250 cycles a beat
 // marginal, 36 fixed: 108 M beats a second at 135 MHz) and this repo
-// has refused to publish until it was measured.
+// refused to publish until it was measured. It has been, twice: 59 M
+// beats a second a tile on the revision-3 pair (2026-09-09), which is
+// 2.25 cycles a beat and named the read path's latency as the wall,
+// and 107 M on the read-ahead pair the same day. docs/BENCHMARKS.md,
+// "The engine, measured", carries both.
 //
 // It is not only a stopwatch, because a rate without a correctness
 // check is a number about nothing. Every compute unit gets the SAME

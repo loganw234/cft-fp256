@@ -4,7 +4,10 @@
   Vitis kernel description for cft_krnl. The argument offsets ARE the
   register map in rtl/cft_csr.sv; change them together or not at all.
   Read-only CSRs (FLAGS 0x40, MAGIC 0x44, VERSION 0x48, CAPS 0x4C,
-  STATUS 0x50) are not arguments and deliberately absent here - hosts
+  STATUS 0x50, CAPS2 0x6C) are not arguments and deliberately absent
+  here - CAPS2 is the one that is easy to miss, because it sits
+  between the bank pointer and the two scratch pointers rather than
+  with the other read-only registers - hosts
   reach them with xrt::kernel::read_register / pyxrt read_register.
   STATUS especially: a sequencer run reports both its refusal and its
   deposit overflow there and nowhere else, so a host that binds only

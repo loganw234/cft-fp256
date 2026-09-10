@@ -51,12 +51,16 @@ help:
 	@echo "             negative control, and every example for every board"
 	@echo "verify       the standardized verification run (verify/README.md)"
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
+	@echo "yosys-lint   elaborate every RTL file in Yosys: no latches, no errors"
+	@echo "formal       the property gate (formal/README.md), in the cft-formal image"
+	@echo "formal-image build that container"
 	@echo "docker-image build the simulation container"
 	@echo "sim-docker   run the cocotb RTL suite inside the container"
 	@echo "check-env    report Vitis/Vivado/XRT tool and card visibility"
 	@echo "emconfig     emit build/emconfig.json for hw_emu runs"
 	@echo "xo           package rtl/ into build/cft_krnl.xo (needs Vivado)"
 	@echo "xclbin       link for $(PLATFORM), TARGET=$(TARGET) (needs Vitis)"
+	@echo "clean        remove build/ and the simulation build trees"
 
 check-env:
 	@echo "--- tools ---"
@@ -185,10 +189,16 @@ verify:
 
 .PHONY: verify formal formal-image yosys-lint
 
-# The formal property gate (formal/README.md): unbounded FIFO proof,
-# complete seedop special-routing proof, and the simpleops-vs-frozen-
-# ref equivalence miter, all inside the pinned cft-formal image. The
-# recipe exits nonzero unless every proof passes AND the negative
+# The formal property gate (formal/README.md): six proof files run as
+# thirty tasks - the unbounded FIFO proof, the complete seedop
+# special-routing proof, the simpleops-vs-frozen-ref equivalence
+# miter, the leading-zero cone against the priority form it replaced
+# at all four window widths, and cft_mulpass' exactness at the real
+# 24-bit chunk for every pass geometry the tile builds (as two lemmas
+# per geometry, plus the whole claim as one property for the four
+# geometries where a solver takes it) - plus the negative control, all
+# inside the pinned cft-formal image. formal/run.sh is the list, and
+# the recipe exits nonzero unless every task passes AND the negative
 # control is refuted.
 formal: formal-image
 	docker run --rm -v "$(CURDIR):/work" -w /work cft-formal \

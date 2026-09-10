@@ -47,8 +47,10 @@ RETIMING=${RETIMING:-0}
 #
 # A design sitting near its edge does not have ONE achievable WNS; it
 # has a distribution, and the way to sample it is to vary how the tools
-# get there. This tile is exactly that design - the quad missed 135 MHz
-# by 0.113 ns, which is well inside the spread a directive change moves.
+# get there. This tile was exactly that design - the quad missed 135 MHz
+# by 0.113 ns, which is well inside the spread a directive change moves,
+# and on 2026-09-02 the tree with the case-table ROM and the S12
+# precompute closed it at +0.143 kernel WNS through this machinery.
 #
 # NOTE, because it is the first thing anyone reaches for: Vivado has no
 # placer "seed". `place_design` takes -directive, not -seed. The

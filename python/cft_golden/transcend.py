@@ -1,11 +1,20 @@
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The phase-1 transcendental set, correctly rounded: the definition.
+"""The transcendental set, correctly rounded: the definition.
 
-exp, expm1, exp2, log, log1p, log2, log10, pow and hypot, at all four
+All thirty-nine functions of IEEE 754-2019 table 9.1, at all four
 rungs of the interchange ladder, under all five rounding-direction
-attributes, with the IEEE 754-2019 clause 9.2 special-value tables and
-the contract's exact flags. Every bit this module returns is what
+attributes, with the clause 9.2 special-value tables and the
+contract's exact flags. They arrived in three phases and `TRANSCEND_FNS`
+below is the whole list:
+
+    phase 1 (nine)    exp, expm1, exp2, log, log1p, log2, log10, pow,
+                      hypot
+    phase 2 (eleven)  sinPi, cosPi, tanPi, asin, acos, atan, atan2,
+                      asinPi, acosPi, atanPi, atan2Pi
+    phase 3 (nine)    sin, cos, tan and the six hyperbolics
+    the rest (ten)    exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt,
+                      pown, powr, compound, rootn Every bit this module returns is what
 host/src/transcend.c must return; the vector sets are generated from
 here and host/tests/transcend_check.py replays the C against it.
 

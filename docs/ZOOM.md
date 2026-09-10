@@ -116,7 +116,7 @@ about the format.
 orbit-sequencer program (`docs/SEQUENCER.md`) and runs
 `--steps-per-call` iterations of it per library call. `r0` and `r1`
 arrive from the `a` and `b` streams as `cft_program_run` defines;
-`r2..r15` start at `+0`; `cr`, `ci` and `4` are the constant bank.
+`r2..r31` start at `+0`; `cr`, `ci` and `4` are the constant bank.
 
 ```
   REPEAT  K                          ; K = --steps-per-call
@@ -208,11 +208,14 @@ needs six live values per step: four per-lane and persistent (`dr`,
 same for every lane (`zr_k`, `zi_k`). The program model provides:
 
 - three input streams, which initialise `r0`, `r1`, `r2` once per call;
-- fifteen further registers, which persist across a `REPEAT` - so the
-  four per-lane values are fine;
-- a constant bank fixed at load time and **addressed by the 4-bit
-  register field, so at most 16 constants** - which is not enough to
-  unroll more than a handful of iterations' worth of `z_k`.
+- twenty-nine further registers (`r3..r31`), which persist across a
+  `REPEAT` - so the four per-lane values are fine;
+- a constant bank fixed at load time. When this was written an index
+  was the 4-bit register field, so at most 16 constants; since
+  2026-09-07 an instruction with `kx` set takes its three indices from
+  the immediate and reaches 256, and 512 with revision 3's ninth bit.
+  Either way it is a bank fixed at load time, and unrolling `z_k` was
+  never what it could not do.
 
 There is no operand source that advances with the loop counter. So the
 one thing this workload needs that the ISA cannot express is **a
@@ -236,14 +239,14 @@ Three smaller notes from the same direction:
 - **A reference orbit is ONE lane.** `docs/SEQUENCER.md`'s lane-block
   floor says `n` below `LATENCY * lanes_per_beat` runs at pipeline
   speed rather than throughput speed - 16 lanes at binary256. A single
-  reference orbit would use one fifteenth of a tile. The domain's own
+  reference orbit would use one sixteenth of a tile. The domain's own
   answer is to run many references at once, which is exactly what
   multi-reference rendering does and exactly the batch a sequencer
   likes; a tile rendering a frame would carry 16 or 64 references, not
   one.
 - **Depositing every iteration is the regime where the deposit buffer
   dominates.** `docs/SEQUENCER.md` puts the crossover at
-  `max_deposits > 16`; this program's `max_deposits` is `2K` = 2,048 at
+  `max_deposits > 32`, the register count; this program's `max_deposits` is `2K` = 2,048 at
   the default. An orbit sequencer's flagship customer is therefore the
   case that makes the deposit buffer, not the register file, the area
   question - which is what that document predicted and is worth having
@@ -701,7 +704,7 @@ the software backend and issues the identical program. What changes:
   of the exercise. Both engines would still have to agree with each
   other and with the software backend.
 - **The reference orbit would run at pipeline speed, not throughput
-  speed.** One lane at binary256 is one fifteenth of the tile's issue
+  speed.** One lane at binary256 is one sixteenth of the tile's issue
   rate (`docs/SEQUENCER.md`'s lane-block floor). A tile rendering a
   frame should carry 16 or 64 references at once - which is what
   multi-reference deep-zoom rendering does anyway, and what turns this

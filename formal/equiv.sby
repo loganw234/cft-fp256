@@ -1,6 +1,7 @@
 # Equivalence miter: rtl/cft_simpleops.sv (the area rewrite) against
 # tb/wrappers/cft_simpleops_ref.sv (the frozen flat form it replaced),
-# op constrained off the two reassigned seed codes - see
+# op constrained off the three reassigned codes (26 and 27 to
+# cft_seedop, 30 to IMUL) - see
 # tb_simpleops_equiv.sv for the story and the carve-out's provenance.
 #
 # Both modules are combinational, so bmc at depth 2 is a complete

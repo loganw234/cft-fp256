@@ -16,7 +16,9 @@ binary32/64 - and with **GNU MPFR itself**:
 [host/tools/mpfr_check.c](../../host/tools/mpfr_check.c) drives add,
 sub, mul, fma, div and sqrt against MPFR's IEEE emulation at all four
 precisions under all five rounding attributes - **999,000 cases,
-values and flags, zero disagreements**. One asterisk, stated rather
+values and flags, zero disagreements** - and, since ABI 0.3, the
+transcendentals and the clause-5.12 conversions through the same
+oracle, which for those is the only one there is. One asterisk, stated rather
 than buried: MPFR has no roundTiesToAway, so that suite's RNDNA rows
 compare against a ties-to-away oracle *built from* pure-MPFR
 intermediates (the p+1 guard/sticky construction) - there is no
@@ -36,7 +38,7 @@ of guessing, and everything else works.
 Build the library once (from the repo root):
 
 ```bash
-make -C host              # produces host/cft.dll or host/libcft.so
+make -C host              # produces host/cft.dll, host/libcft.so or host/libcft.dylib
 ```
 
 Then, from this directory (or with it on `PYTHONPATH`; set `CFT_LIB`
@@ -70,7 +72,7 @@ Run the demo and the tests:
 
 ```bash
 python demo_mpfr_dropin.py        # 100k-element binary256 workload
-python -m pytest test_cftmpfr.py  # 834 tests at ABI 0.7; skips gmpy2/numpy parts if absent
+python -m pytest test_cftmpfr.py  # 834 tests when last counted (2026-09-04, ABI 0.7); skips gmpy2/numpy parts if absent
 ```
 
 ## What the demo measures, honestly
@@ -216,10 +218,11 @@ compiler is free to break. `r + e` is exact in every case but one: a
 product whose residual falls below the subnormal grid, which 9.5
 delivers rounded with underflow and inexact raised.
 
-## The package at ABI 0.7
+## The package, from ABI 0.7 on
 
 The two sections above are the first two steps; the package kept pace
-with every step after them, and this is the map. Every method is on
+with every step after them - the library is at ABI 0.11 now - and this
+is the map. Every method is on
 `Context` and, where the C has a batch shape, in `batch` too; the
 semantics are the library's, documented in docs/HOSTAPI.md, and
 `test_cftmpfr.py` holds each one to the library bit for bit.

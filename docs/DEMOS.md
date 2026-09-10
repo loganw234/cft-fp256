@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 523,351 bytes |
-| sha256 | `2b75d080fafd8d2a887b0bdd18d5a5befb80e3467067d7b25ccc6487bfade5df` |
-| module | `bindings/node/cft_node.wasm`, 212,642 bytes, sha256 `f0975f3da635e92d8a5060f7843a0cf16af860b8b16f60d15f0edab631104768` |
+| page | `bindings/wasm/demos.html`, 539,646 bytes |
+| sha256 | `b78d6a6dd57e7411ef98783c17f080bb3d429ab50e021926fba2638e9924fdc1` |
+| module | `bindings/node/cft_node.wasm`, 225,354 bytes, sha256 `29cce150ec46676ba4783e5d8395c825ce85930b0999de2e422ad7b050bcfea4` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-09-07, DESKTOP-T33SK86 |
+| recorded | 2026-09-09, per `bindings/wasm/demos_chains.json`'s own `recorded` field |
 
 ---
 
@@ -267,10 +267,14 @@ the `--engine loop` path, because their step does not fit the program
 model and each says exactly what stopped it - docs/SEQUENCER.md's "What
 the workloads asked of the program model" is that list. **Two of them,
 zoom and orbits, carry both engines**, because since 2026-09-07 the
-wasm module exports the sequencer's program API: `cftw_program_load`,
-`cftw_program_get_info`, `cftw_program_run`, `cftw_program_free` and
-`cftw_status_deposit_overflow`, one per declaration in cft.h's program
-section plus the macro projected as a call.
+wasm module exports the sequencer's program API. It began as five -
+`cftw_program_load`, `cftw_program_get_info`, `cftw_program_run`,
+`cftw_program_free` and `cftw_status_deposit_overflow`, one per
+declaration in cft.h's program section plus the macro projected as a
+call - and grew with each sequencer revision the same way: thirteen in
+`bindings/wasm/wasm_api.c` today, adding `cftw_program_run_bank`,
+`cftw_program_digest`, `cftw_program_flags`, `cftw_program_run_ex`,
+the three scratch accessors and two more macro projections.
 
 The engine is a control on those two panels and it changes no bit. Each
 tool's own gate already holds its two engines to byte-identical
@@ -509,7 +513,11 @@ one fact is not paranoia when the fact is the whole argument.
 `2b75d080fafd8d2a887b0bdd18d5a5befb80e3467067d7b25ccc6487bfade5df`,
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
-the same way).
+the same way). Those are that day's bytes. The page has been rebuilt
+with the module since - the committed one is 539,646 bytes, sha256
+`b78d6a6dd57e7411...`, at ABI 0.11 - so read the pair above as the
+2026-09-07 measurement and the table at the top of this file as what
+is in the tree.
 
 ### Where the compute runs
 
