@@ -28,12 +28,13 @@ fails.
 | `fifo.sby cover` | rtl/cft_fifo.sv | all 8 control shapes reachable | bmc to depth 24 |
 | `seedop.sby check` | rtl/cft_seedop.sv | special-case routing + decode exactness, every input | complete (comb, bmc), ~5 s |
 | `seedop.sby cover` | rtl/cft_seedop.sv | all 12 operand-class antecedents satisfiable | comb cover |
-| `equiv.sby check` | rtl/cft_simpleops.sv | bit-exact to the frozen pre-rewrite ref on `valid`, `d`, `flags`, for every op except 26/27 | complete (comb miter, bmc), ~2 s |
-| `equiv.sby cover` | rtl/cft_simpleops.sv | the carve-out's neighbour opcodes (25, 28) still trap in both | comb cover |
+| `equiv.sby check` | rtl/cft_simpleops.sv | bit-exact to the frozen pre-rewrite ref on `valid`, `d`, `flags`, for every op except 26, 27 and 30 | complete (comb miter, bmc), ~2 s |
+| `equiv.sby cover` | rtl/cft_simpleops.sv | both carve-outs' neighbour opcodes (25 and 28 around the seeds, 29 and 31 around IMUL) still trap in both | comb cover |
 | `mulexact.sby fold_*` | rtl/cft_mulpass.sv | the pass fold, the tree and the level chain deliver the columns' weighted sum, at the **real 24-bit chunk**, for all 7 pass geometries | bmc over 7 enabled intervals, column registers cut |
 | `mulexact.sby sel_*` | rtl/cft_mulpass.sv | on pass p the columns are handed `a` and chunk group p of `b`; the column register holds their product; an unbuilt column holds zero | bmc over 3 enabled intervals, operand and column registers probed |
 | `mulexact.sby cover_*` | rtl/cft_mulpass.sv | the claims are reached with a non-zero product, a product carrying into the top bit, and every pass's selection | cover |
 | `mulpass_real.sby` x4 | rtl/cft_mulpass.sv | the same exactness claim as ONE property, unfactored, at the four geometries a solver will take that way | bmc, both multipliers standing, **boolector** |
+| `lzcone.sby` x4 | rtl/cft_fpfma_pipe.sv | `cft_lzcone` bit-identical to `formal/cft_lzcone_ref.sv`, the priority-loop cone frozen at the moment of the split (2026-09-07), at each of the four window widths - 78, 165, 345 and 717 bits | comb miter; one bmc step is the whole input space at each width |
 | `negcontrol.sby` | rtl/cft_fifo.sv | "the head bypass was never needed" - **deliberately false, must be refuted** | bmc, cex at step 3 |
 
 In detail:
@@ -69,11 +70,13 @@ In detail:
 * **cft_simpleops** (at EXP_W=8, MAN_W=23): the area rewrite is
   bit-identical to tb/wrappers/cft_simpleops_ref.sv - the frozen flat
   form it replaced - on all three outputs, for all 2^104 input values
-  with `op != 26 && op != 27`. Those two codes were deliberately
-  reassigned to cft_seedop (tb/test_simpleops.py REASSIGNED_OPS); the
-  ref predates the reassignment and still traps them, so they are the
-  one sanctioned divergence, excluded by assumption and bracketed by
-  covers proving 25 and 28 still trap in both. This was scoped as a
+  with `op != 26 && op != 27 && op != 30`. Three codes left the
+  reserved set: 26 and 27 on 2026-08-31 for cft_seedop, and 30 on
+  2026-09-07 for IMUL (tb/test_simpleops.py's REASSIGNED_OPS and
+  ADDED_OPS). The frozen ref predates both moves and still traps all
+  three, so they are the sanctioned divergences, excluded by
+  assumption and bracketed by covers proving 25, 28, 29 and 31 still
+  trap in both. This was scoped as a
   try-and-report stretch goal with a 30-minute solver budget; bitwuzla
   closed it in about two seconds.
 
@@ -269,7 +272,7 @@ consequences shape this directory:
   induction whose hypothesis the engine finds rather than a human
   writes (the price: the invariant is not a readable artifact);
 * run.sh checks for assertion cells twice - once before anything runs,
-  on the four single-file harnesses, and once per task afterwards on
+  on the five single-file harnesses, and once per task afterwards on
   the model sby actually built and solved - because the frontend's
   failure mode for unsupported constructs is silence;
 * the negative control is not decoration. It is the proof that the

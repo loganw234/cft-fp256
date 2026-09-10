@@ -190,7 +190,11 @@
  * On 2026-09-07 instruction bit 30 became `kx`: when it is set the
  * three constant indices come from imm[7:0], imm[15:8] and imm[23:16]
  * instead of from the operand fields, and the bank grows from sixteen
- * addressable to 256. The kernel now asks the loader at startup
+ * addressable to 256 - and to 512 at revision 3, where a ninth index
+ * bit in imm[30:28] reaches the second half of the bank. This tool
+ * still sizes itself to 256, which is what CHUNK_KX below is half of;
+ * the extra reach is available and unused here. The kernel asks the
+ * loader at startup
  * whether it takes that encoding - by trying to load a one-instruction
  * program that names constant 16, which nothing else can - and folds
  * up to 128 coefficients into a single program where it does.
@@ -647,7 +651,7 @@ static void put_le64(uint8_t *p, uint64_t v)
 }
 
 /* Registers, all of them named so the program reads like the doc.
- * r5 is the zero: r3..r15 start at +0 on every run and this program
+ * r5 is the zero: r3..r31 start at +0 on every run and this program
  * never writes it, so the constant bank does not have to spend one of
  * its sixteen slots on a zero. */
 enum { P_X = 0, P_LO = 1, P_HI = 2, P_ZERO = 5, P_NN = 6, P_MA = 7,

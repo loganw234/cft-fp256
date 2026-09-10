@@ -125,7 +125,8 @@
  * --engine loop issues the same step as twenty-three cft_run passes per
  * iteration from the host. It exists to be compared against: the two
  * must agree bit for bit on every element, and it is what a device
- * without the sequencer would run. The three extra passes are the
+ * without the sequencer would run. Twenty-three against nineteen: the
+ * four extra passes are the
  * price of doing by hand what the active mask does for free -
  * neutralising the odd branch for elements that are no longer live,
  * so that a finished element cannot push a flag into the run.
