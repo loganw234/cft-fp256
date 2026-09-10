@@ -163,7 +163,8 @@
  * rather than about this tool:
  *
  *   (1) THREE INPUT STREAMS. cft_program_run initialises r0, r1 and
- *       r2 from a, b and c; r3..r15 start at +0, normatively. A
+ *       r2 from a, b and c; r3..r31 start at +0, normatively (r3..r15
+ *       before the sequencer's revision 2 doubled the file). A
  *       Hamiltonian system with d degrees of freedom has 2d state
  *       values per lane, and 2d > 3 for everything here: 4 for the
  *       planar Kepler problem, 30 for the outer solar system. So a
@@ -182,7 +183,8 @@
  *       prep (operand classification and the prenormalise/centre
  *       surgery), PROGRAM core, HOST finish (round_pack, the
  *       contract's single rounding authority). The core alone uses
- *       r0..r12 of the sixteen registers. So the composed route
+ *       r0..r12 of the thirty-two registers a lane owns. So the
+ *       composed route
  *       cannot be inlined inside a larger program's loop body: it
  *       needs the host between its halves, and it would not leave
  *       room for the orbit state if it did not. --rsqrt exact is
@@ -1063,7 +1065,7 @@ static void emit_sample(runstate *R, uint64_t sample, uint64_t step,
  * The mapping is forced. cft_program_run can initialise only r0, r1
  * and r2, and the Kepler initial condition has exactly two non-zero
  * components, so the two that must be zero are put in registers that
- * start at +0 - r2 by passing c = NULL, r3 because r3..r15 always do.
+ * start at +0 - r2 by passing c = NULL, r3 because r3..r31 always do.
  * =================================================================== */
 enum { R_Q0 = 0, R_V1 = 1, R_Q1 = 2, R_V0 = 3,
        R_X = 4, R_Y = 5, R_W = 6, R_E = 7, R_Z = 8, R_G = 9 };

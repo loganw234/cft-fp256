@@ -44,11 +44,14 @@ WHAT IS NOT COPIED
                       take it from host/include, which is where it is
                       tested (make -C host cpptest).
 
-WHAT IS OURS, NOT VENDORED: library.properties, README.md, the
-examples, src/cft.h (three lines that point at the vendored header so
-a sketch can write `#include <cft.h>`), and src/cft_replay.[ch]. Those
-are listed in vendor.json under "owned" so this script can tell them
-apart from a stale copy and leave them alone.
+WHAT IS OURS, NOT VENDORED: library.properties, README.md,
+keywords.txt, src/cft.h (three lines that point at the vendored header
+so a sketch can write `#include <cft.h>`), and src/cft_replay.[ch].
+Those six are OWNED below and in vendor.json, so this script can tell
+them apart from a stale copy and leave them alone. The examples and
+src/cft_remote.h are ours too and are in no list, because the audit
+only ever walks src/cft - a file outside that subtree is never
+examined either way.
 
 AND ONE DIRECTORY THIS SCRIPT DOES NOT LOOK AT: src/remote/. The
 remote client for these same boards is built alongside this and owns

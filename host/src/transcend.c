@@ -1,19 +1,30 @@
 /* Copyright 2026 Logan W.
  * SPDX-License-Identifier: Apache-2.0
  *
- * The transcendental set: phase 1's exp, expm1, exp2, log, log1p,
- * log2, log10, pow and hypot, and phase 2's sinPi, cosPi, tanPi, asin,
- * acos, atan, atan2, asinPi, acosPi, atanPi and atan2Pi - correctly
- * rounded at all four formats under all five rounding attributes, with
- * the 754-2019 clause 9.2 special values and the contract's exact
- * flags.
+ * The transcendental set: all thirty-nine functions of 754-2019
+ * table 9.1, correctly rounded at all four formats under all five
+ * rounding attributes, with the clause 9.2 special values and the
+ * contract's exact flags. They arrived in three phases and the file is
+ * still organised that way:
+ *
+ *   phase 1 (nine)    exp, expm1, exp2, log, log1p, log2, log10, pow,
+ *                     hypot
+ *   phase 2 (eleven)  sinPi, cosPi, tanPi, asin, acos, atan, atan2,
+ *                     asinPi, acosPi, atanPi, atan2Pi
+ *   phase 3 (nine)    sin, cos, tan and the six hyperbolics
+ *   the rest (ten)    exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt,
+ *                     pown, powr, compound, rootn
+ *
+ * transcend.h's `cft_tr_fn` enum is the list - `CFT_TR_COUNT` is 39 -
+ * and `cft_tr_name` below is the switch over it, with a case for each.
  *
  * Phase 2 is the part of clause 9 whose argument reduction is EXACT.
  * sinPi reduces by x mod 2 and x is a dyadic rational, so the
  * reduction is a mask on the encoding at every magnitude; the inverse
  * functions have nothing to reduce and meet pi only as a factor of the
- * answer. sin, cos and tan of a radian argument - the reduction
- * against pi itself - are not here.
+ * answer. sin, cos and tan of a RADIAN argument need the reduction
+ * against pi itself, which is why they waited for phase 3 and for
+ * mp_2opi.h's table of 2/pi - they are here now, through do_radian().
  *
  * python/cft_golden/transcend.py is the definition of every bit here,
  * and the correspondence is deliberate: the same special-value order,

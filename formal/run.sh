@@ -9,7 +9,8 @@
 # (docker/Dockerfile.formal), so the host needs Docker and nothing
 # else. Same gate on a developer box and in CI, same claim.
 #
-# The gate is six proofs and a tripwire, in this order:
+# The gate is six proof files - thirty tasks - and a tripwire, in this
+# order:
 #
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
@@ -31,7 +32,7 @@
 #
 # VACUITY IS CHECKED TWICE, and the second check is the general one.
 #
-# Before any proof runs, a preflight elaborates the four single-file
+# Before any proof runs, a preflight elaborates the five single-file
 # harnesses and counts their assertion cells, because the frontend's
 # failure mode for unsupported constructs is silence, not an error.
 # That check cannot cover mulexact.sby, whose model only exists after a

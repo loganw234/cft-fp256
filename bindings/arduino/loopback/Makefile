@@ -7,6 +7,9 @@
 #   make full            everything, as the RP2040 and the ESP32 carry it
 #   make tiny            CFT_TINY: fp32 and fp64, as the Uno/Nano carry it
 #   make tiny128         CFT_TINY at fp128, as the Mega is measured at
+#   make board           everything except the socket backend and the
+#                        file-reading replay, which is what a 32-bit
+#                        board (RP2040, ESP32) actually compiles
 #   make CC=clang        or any other C99 compiler
 #
 # It compiles the VENDORED sources - ../cft-arduino/src/cft - and not

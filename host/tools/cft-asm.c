@@ -19,17 +19,22 @@
  * What it needs from libcft, and what it deliberately does not
  * ---------------------------------------------------------------
  *
- * It links libcft for three things and no more:
+ * It links libcft for shared TABLES and shared CONVERSIONS, and for
+ * nothing that would tie the assembler to this tree's loader:
  *
  *   cft_op_name         the mnemonics. NOT retyped here: this file
  *                       carries only which operand FIELDS each opcode
  *                       reads, which no table in either language
  *                       carries, and takes every name from the shared
  *                       one. A name typed twice is a name that drifts.
- *   cft_format_name     the four rungs and their sizes, likewise.
+ *   cft_format_name     the four rungs, likewise, and
+ *   cft_format_size     their widths.
  *   cft_from_decimal_char   a decimal literal correctly rounded into
- *                       the format - the same routine, and the same
- *                       rounding, python/cft_golden/chars.py performs.
+ *   cft_from_hex_char   the format, and an exact hexadecimal one -
+ *                       the same routines, and the same rounding,
+ *                       python/cft_golden/chars.py performs.
+ *   cft_open/cft_close  a software device, for the disassemble-and-
+ *                       reassemble round trip only.
  *
  * It does NOT use cft_program_load. An assembler that could only
  * produce images the LOADER IN THIS TREE already accepts could not

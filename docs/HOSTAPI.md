@@ -140,7 +140,45 @@ nothing but the C functions in `src/backend.h` - so the library still
 builds with no dependencies at all when XRT is absent, which is the
 whole reason the software backend exists.
 
-    make -C host XRT=1
+    make -C host XRT=1                        # XRT under /opt/xilinx/xrt
+    make -C host XRT=1 XRT_ROOT=/path/to/xrt  # if it lives elsewhere
+
+**`XRT=1` is not the default, and a default build cannot open a card.**
+`make -C host` on its own produces a software-and-remote-only library:
+`cft_open()` with an artifact path returns `CFT_ERR_NO_DEVICE` and
+`cft_open("cft://host:port")` still works, because the remote client is
+plain sockets. That is deliberate - a library whose point is that it
+compiles anywhere must not need a vendor runtime to compile - but it
+means a caller who wants the card has to ask for it at build time, and
+the symptom of forgetting is a device that reports it is not there
+rather than a build error.
+
+### Linking against an XRT-enabled `libcft.a`
+
+An XRT build folds `src/backend_xrt.o` into the archive, and that
+object needs XRT's runtime and the C++ one at the final link. A program
+that links `libcft.a` must therefore add what `host/Makefile` adds
+(`XRTLIBS`):
+
+    -L$(XRT_ROOT)/lib -lxrt_coreutil -lstdc++ -lpthread -luuid
+
+Without them the link fails with a page of undefined references to
+`xrt::bo`, `xrt::device` and friends, which names neither the cause nor
+the fix. A build without `XRT=1` needs none of it: the archive is C99
+objects and nothing else, and that is the case the "no dependencies"
+claim above is about.
+
+**The static archive cannot go into a shared object.** `libcft.a`'s
+objects are compiled without `-fPIC` (`%.o` in `host/Makefile`; only
+the `%.lo` rule adds `$(PIC)`), and `backend_xrt.o` is C++ besides, so
+linking the archive into a `.so` fails on relocations - the one seen
+downstream is `R_X86_64_PC32 against symbol _ZSt7nothrow@@GLIBCXX_3.4`.
+That is not a defect to work around: the shared library is already a
+build product of the same `make`. `make -C host` builds **both**, from
+two sets of objects - `libcft.a` from the `.o` files and
+`libcft.so` / `libcft.dylib` / `cft.dll` from the PIC `.lo` files, with
+`XRTLIBS` already on its link line. A caller who needs a shared object
+links the shared library rather than repackaging the archive.
 
 Multi-tile is the substance of it. A four-CU bitstream is not four
 times one CU from the host's side: each CU's AXI master is wired to
@@ -328,10 +366,30 @@ before an hour of emulation is spent on it:
     ./device-test sw -b -n 256          # the contract, no card
     bash hw/run-device-test.sh <image> -b -n 4096
 
-## What is not there yet
+## What has been on silicon, and what has not
 
-- **Card validation.** Everything above has been exercised in
-  emulation. Nothing has touched silicon.
+Everything above was written and exercised in emulation first, and the
+paragraph here used to say nothing had touched silicon. That stopped
+being true on 2026-09-08 (docs/CARDDAY.md is the runbook, docs/VALIDATION.md
+the record):
+
+- **The device backend, on a card.** Both card-day images - one tile
+  and four - replayed the published sets through this API on an Alveo
+  U50: 168 sets, 1,071,635 cases, all matching, once through each,
+  with `device-test`'s full matrix and its partition and reduction legs
+  clean beside them.
+- **Programs, on a card.** The sequencer's revisions 2 and 3 and the
+  deeper read-ahead each got their own pair, built, verified and run
+  (docs/CARDDAY.md's "Before the day" list carries the dates).
+- **The resident buffer path, on a card.** `device-test -b` holds every
+  byte and every flag of the `cft_alloc` path to the staged path on the
+  card, and `cft-bench --resident` measures what it buys
+  (docs/BENCHMARKS.md).
+
+What has NOT been on silicon is the multi-card and multi-host case: the
+determinism claim across two different devices in two different
+machines still rests on one card, on emulation, and on the software
+backend. docs/VALIDATION.md is where that gets recorded when it exists.
 
 ## Reductions, and why they are a second entry point
 
@@ -1577,7 +1635,12 @@ they are re-derivable rather than remembered.
 
 ## Calling it from somewhere else
 
-`host/examples/` has the same program three times:
+`host/examples/` has the same program in nine languages - C, C++,
+Python, Fortran, Rust, Julia, Go, C# and R - each printing the same
+four checksum lines, each diffed against the C example's bytes by its
+own `make -C host lang-*` leg (docs/COMPATIBILITY.md has the per-language
+platforms and dates). Three of them carry the argument this document
+makes:
 
 - `vector_fma.c` - C, linked against the static library.
 - `vector_fma_ctypes.py` - Python, via `ctypes.CDLL` and eight

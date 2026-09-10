@@ -123,7 +123,7 @@ by `cft_sqrt`, correctly rounded. The check script recovers `a` and
 
 The two zeros in that initial condition are not a convenience. They
 are the only reason the sequencer can run this problem at all - see
-"Where the step runs".
+"The step, and where it runs".
 
 ### `--problem outer`
 
@@ -274,8 +274,9 @@ orbit-sequencer program (docs/SEQUENCER.md) and runs as one
   HALT
 ```
 
-`12 + 4n` ALU instructions per substep - **36 at binary256** - four
-constants per substep plus two shared, and `4 (nsamples + 1)` deposit
+`12 + 4n` ALU instructions per substep - **36 at binary256** - two
+constants per substep plus two shared (`nk = 2 + 2 * nsub` in
+`host/tools/orbits.c`), and `4 (nsamples + 1)` deposit
 slots per lane. The register map is
 
     r0 = q0  (the a stream)      r4 = r^2     r7 = e
@@ -294,7 +295,7 @@ worked around by writing the program differently.
 
 **(1) Three input streams against 2d state values.**
 `cft_program_run` initialises `r0`, `r1` and `r2` from `a`, `b` and
-`c`; `r3..r15` start at `+0`, normatively. A Hamiltonian system with
+`c`; `r3..r31` start at `+0`, normatively. A Hamiltonian system with
 `d` degrees of freedom has `2d` state values per lane, and
 
     planar Kepler          2d = 4
@@ -304,7 +305,7 @@ So **a program can be entered only at a state with at most three
 non-zero components.** The Kepler initial condition has exactly two -
 `q = (1-e, 0)`, `v = (0, v0)` - and the two components that must be
 zero can be put in registers that start at `+0` (`r2` by passing
-`c = NULL`, `r3` because `r3..r15` always do). Step 0 is therefore
+`c = NULL`, `r3` because `r3..r31` always do). Step 0 is therefore
 reachable and **no later step is**, which is why the program engine
 runs the whole integration in one call, cannot resume into the middle
 of one, and cannot exist at all for the outer solar system. It is also
@@ -316,8 +317,9 @@ needed four pieces of state and "only fits because the fourth is an
 output that always starts at +0". This one shows the limit binding.
 **A fourth input stream, or a "load `r3..` from the deposit buffer"
 mode, would make every 2-degree-of-freedom system resumable and every
-3-degree-of-freedom one expressible.** Sixteen registers is already
-enough for a 6-value state; only the loading is missing.
+3-degree-of-freedom one expressible.** Thirty-two registers are
+already far more than a 6-value state needs; only the loading is
+missing.
 
 **(2) Correctly rounded divide and square root are not programs.**
 `python/cft_golden/seqprogs.py` is the library's own in-program
@@ -325,8 +327,8 @@ enough for a 6-value state; only the loading is missing.
 prep (operand classification, the exact prenormalise/centre surgery),
 **program** core (seed, Newton, the truncating Markstein finish, the
 restore passes), **host** finish (`round_pack`, the contract's single
-rounding authority). The core alone occupies `r0..r12` of the sixteen
-registers.
+rounding authority). The core alone occupies `r0..r12` of the
+thirty-two registers a lane owns.
 
 So the composed route cannot be inlined into a larger program's loop
 body: it needs the host between its halves, and it would not leave
@@ -919,8 +921,8 @@ the software backend and issues the identical calls. What changes:
   predicts. This workload is thus a clean example of the difference
   the sequencer makes and of the case where it cannot be applied.
 - **The lane count.** A tile issues one beat per cycle - one fp256
-  lane - and the pipeline is 15 stages deep with no stall path, so an
-  ensemble below 15 members runs at pipeline speed rather than
+  lane - and the pipeline is 16 stages deep with no stall path, so an
+  ensemble below 16 members runs at pipeline speed rather than
   throughput speed. `--members 16` clears that; `--members 4`, used
   for the long drift runs here because they are about drift rather
   than about throughput, would not.

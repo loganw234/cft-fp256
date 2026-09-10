@@ -910,6 +910,28 @@ it was last time - it embeds the module byte for byte - and
 values, sixteen came back identical and the seventeenth is the module
 stamp.**
 
+### Rebuilt again at ABI 0.11, 2026-09-09 - and the block above is now history
+
+The numbers in the 0.10 block are the 0.10 build's, and the files in
+this directory are not that build any more. ABI 0.11 is the
+device-resident buffer step, and wasm32 has no device, so the rebuild
+added **no export**: the step is the version word and nothing else,
+which is exactly why the module still had to be rebuilt - `verify.mjs`
+holds the shipped module's `cftw_abi_version()` to `CFT_ABI_VERSION_MINOR`
+and the remote protocol refuses a frame whose ABI word differs at all.
+
+What is committed today, measured on the files themselves:
+
+    bindings/node/cft_node.wasm      225,354 bytes  sha256 29cce150ec46676b...
+    bindings/wasm/conformance.html 1,356,544 bytes  sha256 698b9b975b770ae5...
+    bindings/wasm/demos.html         539,646 bytes  sha256 b78d6a6dd57e7411...
+
+still 138 `cftw_*` exports, and `bindings/node/package.json` at
+0.11.0. docs/COMPATIBILITY.md's ABI 0.11 row is the record of what the
+rebuild was held to; the older blocks below and above are kept as the
+history of each step, so read a hash in them as that step's, not as
+this directory's.
+
 ---
 
 ## A second page: the five workloads, measured (2026-09-04)

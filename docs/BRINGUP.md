@@ -306,7 +306,7 @@ linking on Linux is a legitimate split while the Linux Vitis lands.
 Still holds for any future RTL change: the testbenches guard the RTL,
 so changes loop through `make sim-docker` before repackaging.
 
-## 2. Gate: hardware emulation - **MET on v1 (2026-08-29); MET on the sequencer tile at fp32 (2026-09-02); fp64 and wider programs not yet through**
+## 2. Gate: hardware emulation - **MET on v1 (2026-08-29); MET on the sequencer tile at fp32 (2026-09-02); MET for programs in all four formats, on a four-tile image (2026-09-08)**
 
 **2026-09-02.** The gate that condemned the sequencer that morning
 passed it that night: at 8f5f149 every program failed with a bus
@@ -318,6 +318,18 @@ image pipeline returned **28 checks, 0 failed** through real XRT. fp32
 completed its whole program set; the 90-minute emulation cap stopped
 the run in fp64, so the wider rungs are not yet through on a device.
 Emulation is not silicon.
+
+**2026-09-08, and this is what lifted the fp32 qualification above.**
+An overnight run on the desktop's WSL put the quad hw_emu image of
+ed752dd through `device-test -s -n 24`: **98 checks, 0 failed in 333
+minutes** - fp32 38, fp64 20, fp128 20, fp256 20 - "the device and the
+software backend agree on every case, bits and flags". Programs in all
+four formats have now run through the real XRT stack on a four-tile
+image. What that run did NOT reach, because a quick gate costs hours
+per format under xsim, is the wider formats' elementwise paths and the
+reductions on one tile; those are proven in cocotb and were left for
+the card. docs/VALIDATION.md, that date, has the verdicts and the cost
+lesson.
 
 **Where this stands on the sequencer tile (2026-09-01, evening).** A
 fresh `hw_emu` image was built from the shared-lanes commit and it **is
@@ -667,7 +679,7 @@ violation, so a bitstream existing IS the closure evidence; the routed
 WNS is in
 `build/_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt`.)
 
-## 4. Gate: first light
+## 4. Gate: first light - **MET 2026-09-08 on the U50, both images**
 
 ```bash
 python3 host/examples/vector_fma.py build/cft_hw.xclbin \
@@ -689,12 +701,32 @@ the memory system did not deliver what the kernel computed on, and the
 comparison against the golden model is meaningless until it is clean -
 check the pointers are in range and 32-byte aligned first.
 
-## 5. Gate: the vectors
+**Met 2026-09-08**, on both `~/cardday-0907` images (ed752dd, 135 MHz),
+through `host/tests/device_test.c` rather than the smoke script - a
+wider matrix than this gate asks for, and the same verdict:
 
-Replay `vectors/out/*.jsonl` (gen_vectors.py emits them; a small
-replay host is a natural first contribution here) so the card is
-scored against the identical artifact any other implementation of the
-contract is scored against. Record the run.
+    device-test -q -n 8      single 670 checks, 0 failed    quad 670, 0 failed
+    device-test -n 1120      single 2,258 checks, 0 failed  quad 2,258, 0 failed
+    device-test -r           single 886 checks, 0 failed    quad 886, 0 failed
+
+STATUS clean on every run, FLAGS matching, all four precisions.
+docs/VALIDATION.md's card-day entry has the shell, the thermals and
+the two host-side traps the day taught.
+
+## 5. Gate: the vectors - **MET 2026-09-08, one tile and four**
+
+Replay `vectors/out/*.jsonl` (gen_vectors.py emits them; `cft-selftest`
+is the replay host - `cft_conformance()` with a `main()` around it) so
+the card is scored against the identical artifact any other
+implementation of the contract is scored against. Record the run.
+
+**Met 2026-09-08:** `cft-selftest vectors/out <xclbin>` against each
+card-day image - **168 sets, 1,071,635 cases, all matching**, 584 s on
+one tile and 587 s on four, then a second time each in the soak. Every
+published case of every set, every format under every rounding
+attribute, flags included, on silicon, agreeing with the model. The
+run is recorded in docs/VALIDATION.md's card-day entry; docs/CARDDAY.md
+is the runbook it followed.
 
 ## Known open questions to settle on the box
 

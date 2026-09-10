@@ -18,8 +18,8 @@ Three things are being tested and they are not the same thing:
      `seq.run`. Where they disagree there, asm.py is wrong. The three
      tests that EXECUTE a revision-3 program are gated on a
      behavioural probe - they assemble the smallest program that needs
-     the feature and ask the model to run it - so they skip here and
-     turn themselves on the day the model lands.
+     the feature and ask the model to run it. They were written to
+     skip until the model landed revision 3; it has, so they run.
 
   3. **The refusals.** A file that assembles must be a file that
      loads, so every rule docs/SEQUENCER.md's "What the loader
@@ -1066,15 +1066,15 @@ def test_the_library_scratch_rows_round_trip():
 
 # ---- 4. what waits on the model ----------------------------------------
 #
-# `seq.py` reaches revision 3 on its own lane - the four control codes,
+# `seq.py` reached revision 3 on its own lane - the four control codes,
 # `SCRATCH_D`, the header's `scratch_io` word and the ninth
-# constant-index bit. Until it does, a test that EXECUTES one of those
-# programs cannot run here, so each is gated on a behavioural probe
-# rather than on a version number or an attribute name: the probe
-# assembles the smallest program that needs the feature and asks the
-# model to run it. The day the model lands, these turn themselves on.
-#
-# INTEGRATOR: these three are the tests that need the widened seq.py.
+# constant-index bit - and until it did, a test that EXECUTES one of
+# those programs could not run here. Each is therefore gated on a
+# behavioural probe rather than on a version number or an attribute
+# name: the probe assembles the smallest program that needs the
+# feature and asks the model to run it. The model has landed, so these
+# three run; the probes stay, because they are what makes the gate
+# turn itself on rather than a number somebody has to remember.
 
 
 def _model_runs(src, inputs, want):

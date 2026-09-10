@@ -3,11 +3,19 @@
  *
  * libcft - the Coordinated Fusion Tile host API.
  *
- * STATUS: the software backend is implemented and is checked against
- * the golden model over the whole interesting input space (see
- * host/tests/). The XRT device backend is implemented behind the same
- * calls (build with CFT_ENABLE_XRT); a build without it reports
- * CFT_ERR_NO_DEVICE from cft_open() with an artifact path.
+ * STATUS: three backends, all implemented behind these same calls.
+ * The SOFTWARE backend is checked against the golden model over the
+ * whole interesting input space (see host/tests/). The REMOTE backend
+ * is compiled in by default - cft_open("cft://host:port") reaches a
+ * cft-serve holding a device elsewhere, over plain sockets, and
+ * -DCFT_NO_REMOTE leaves it out. The XRT DEVICE backend is NOT on by
+ * default: build with CFT_ENABLE_XRT (`make -C host XRT=1`), or
+ * cft_open() of an artifact PATH reports CFT_ERR_NO_DEVICE - which is
+ * the only artifact string that answer applies to, since a cft:// URL
+ * is dispatched before the XRT branch and works either way. An
+ * XRT-enabled libcft.a also needs XRT's own libraries at the final
+ * link; docs/HOSTAPI.md, "The device backend", has the flag list and
+ * says why the shared library exists.
  *
  * ---------------------------------------------------------------
  * What this library promises

@@ -232,8 +232,10 @@ for the sequencer's designers:
 **That is what was built, on 2026-09-07.** Instruction bit 30 was
 reserved-must-be-zero; it is now `kx`, and when it is set the three
 constant indices come from `imm[7:0]`, `imm[15:8]` and `imm[23:16]`
-instead of from the operand fields. The bank reaches 256, so one
-program holds 128 interval coefficients. `docs/SEQUENCER.md` carries
+instead of from the operand fields. The bank reaches 256 - and 512
+since revision 3 added a ninth index bit in `imm[30:28]` - and this
+tool sizes itself to the 256 it was written against, so one program
+holds 128 interval coefficients. `docs/SEQUENCER.md` carries
 the encoding and the canonicity rules; what follows is what it did to
 this workload, measured.
 
@@ -304,11 +306,17 @@ default, and a small polynomial - does not cross it even as one
 program, which is worth stating plainly: the feature raises the
 ceiling, it does not raise every kernel through it.
 
-The tile's own capacity is the next limit, and it is a comfortable
-one: 516 instructions of `IMEM_D`'s 1,024 and 256 constants of
-`KMEM_D`'s 256. A degree-255 polynomial would want 512 constants and
-1,028 instructions and is chunked at 128 coefficients for both
-reasons.
+The tile's own capacity was the next limit when this was written:
+516 instructions of `IMEM_D`'s 1,024 and 256 constants of `KMEM_D`'s
+256, so a degree-255 polynomial - 512 constants and 1,028
+instructions - was chunked at 128 coefficients for both reasons.
+
+**Revision 3 removed both ceilings**: `rtl/cft_krnl.sv` publishes
+`SEQ_IMEM_D = 16384` and `SEQ_KMEM_D = 512`, so 1,028 instructions is
+no longer close to the limit and 512 constants exactly fits. What
+still chunks this kernel at 128 is the tool's own `CHUNK_KX`
+(`host/tools/enclose.c`), which was sized to the 256-entry reach and
+has not been raised. That is a tool limit now, not a tile one.
 
 Two smaller notes on the same subject, both consistent with what
 `docs/COLLATZ.md` recorded:
@@ -805,8 +813,8 @@ the software backend and issues the identical program.
   (`docs/SEQUENCER.md`, "the first customer"), so a device run would
   accelerate the kernel without the tool changing a line.
 - **The lane count.** A tile issues one beat per cycle - eight fp32
-  lanes or one fp256 lane - and the pipeline is fifteen stages deep with
-  no stall path, so a batch below `15 * lanes_per_beat` runs at pipeline
+  lanes or one fp256 lane - and the pipeline is sixteen stages deep with
+  no stall path, so a batch below `LATENCY * lanes_per_beat` runs at pipeline
   speed rather than throughput speed. `--batch 512` is comfortably above
   that at every format.
 - **What would not be measured honestly.** Numbers from `hw_emu` are RTL

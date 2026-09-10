@@ -19,7 +19,7 @@
  * libcft.a is linked by the Fortran, Go and Rust examples, the soak
  * tools and the C++ tests, none of which name ws2_32 - and Go's cgo
  * link would fail on an unresolved WSAStartup with no way to fix it
- * outside the example. So on Windows the sixteen Winsock entry points
+ * outside the example. So on Windows the fifteen Winsock entry points
  * this file uses are looked up in ws2_32.dll at first use, through a
  * table below, and the archive's link set is exactly what it was. On
  * POSIX the BSD calls are in libc and there is nothing to arrange.

@@ -26,7 +26,7 @@
  * promise that is only argued is a promise that is only probably kept.
  *
  * The hardware has the same structure for a different reason: its
- * block must be at least the ALU's 15-stage latency for the pipeline
+ * block must be at least the ALU's 16-stage latency for the pipeline
  * to stay full. Here the number is chosen for cache, not for
  * latency, and neither choice is observable.
  */

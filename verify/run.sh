@@ -21,7 +21,8 @@
 #                                      # after a host build
 #   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
-#   bash verify/run.sh --budget full    # everything: the census (adds sim, node, wasm, images)
+#   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
+#                                      # node, wasm, images)
 #   Measured durations for every stage, quiet and loaded, are in
 #   docs/VERIFICATION.md - the simulation suites and the formal gate
 #   run for more than an hour each on a busy box.
