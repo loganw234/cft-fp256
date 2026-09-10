@@ -10469,9 +10469,50 @@ it restarted - after which the harness's recovery carried it another
 2,000 cases before a sequence desync ("answer for sequence 58 arrived
 while 59 was outstanding") ended the run. Temperature held between
 42.3 and 43.3 C across the whole hour and free heap never moved, so
-for the third time the answer is neither heat nor a leak. What
-destabilises it is somewhere in binary128, about 8,400 cases into that
-family, and it is uncharacterised.
+for the third time the answer is neither heat nor a leak.
+
+### What the binary128 fault is, and what it is not
+
+A second run, in the original order with `--retry` and
+`--reset-on-timeout` turned OFF so it would stop at the fault instead
+of recovering past it, caught it with the request in hand:
+
+      run fp128 rdn minnum
+          d893800aa924d05103357661e6ab8e73
+          7fff0000000000000000000000000001
+          bfffffffffffffffffffffffffffffff
+
+That second operand is a binary128 **signalling NaN**. It is tempting
+to stop there, and it would be wrong. **The case is not the cause**,
+and two facts say so. `fp128-rtz` is the set that failed the first
+time; it passed cleanly the second. And both binary128 sets involved
+replay clean when run alone, 12,000 cases each.
+
+What the two failures share is not a case but a duration:
+
+      run   failed at        board uptime   symptom
+      one   506,000 cases    ~59 min        restarted (uptime 3,553,233 ms -> 2,830)
+      two   516,000 cases    ~61 min        hung, no restart, no answer in 20 s
+
+Different sets, different offsets, different symptoms, the same hour.
+Temperature and free heap were flat through both. Note that the two
+symptoms are not the same failure mode - one part rebooted and one
+stopped answering - which argues against a single deterministic bug in
+one code path and for something environmental that presents either way.
+
+Uptime and cumulative work are confounded at a steady rate, since about
+510,000 cases IS about an hour at 220 a second. The run separating them
+is the obvious one: replay the same census at a longer pace, so the
+clock still reaches an hour on time while the case count at that moment
+is far lower. At `--pace 10` the rate is 83 a second, which puts one
+hour near 300,000 cases and 510,000 cases near 102 minutes. Whichever
+of the two the fault follows, it will say so.
+
+A caution for whoever reads this next: an isolated replay of a suspect
+set **cannot** reproduce a long-run fault, because opening the serial
+port pulses the ESP32's reset line and every isolated run therefore
+starts from a freshly booted board. Two such runs came back clean here
+and proved only that.
 
 Progress across the three attempts is worth stating as a sequence,
 because each fault was hidden by the one before it: 84,000 cases
@@ -10480,10 +10521,12 @@ board restart in fp128). Each fix revealed the next thing.
 
 ### Pending
 
-The binary128 restart above is the open item on this board, and the
-next step on it is the narrow one - replay the fp128 families alone,
-with the trace, and find whether the restart is reproducible at the
-same place. The Pico, the Uno, the Nano and the Mega are still
+The binary128 fault above is the open item on this board. The narrow
+step - replaying the suspect families alone - has been done and came
+back clean, which was informative only in ruling a case out. The
+discriminating run, the same census at a longer pace to separate an
+hour of uptime from half a million cases of work, was in flight when
+this was written. The Pico, the Uno, the Nano and the Mega are still
 unattached. The two static analyses named in the entry above - the
 ATmega328P's 130-byte stack margin, and what a large `to_decimal`
 costs the Pico's heap - are still analyses.
