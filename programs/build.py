@@ -23,6 +23,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
+def _write_lf(path, text):
+    """Write text with LF line ends on every platform. Path.write_text
+    grew its newline= argument in Python 3.10; a Mac's system Python is
+    3.9 (found 2026-09-09), so this goes through open()."""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--asm", required=True, help="the cft-asm binary")
@@ -65,7 +73,7 @@ def main():
         "# sha256                                                            "
         "  image\n"
         + "\n".join(lines) + "\n")
-    Path(args.manifest).write_text(text, encoding="utf-8", newline="\n")
+    _write_lf(Path(args.manifest), text)
     print(f"  MANIFEST: {len(lines)} images")
 
 

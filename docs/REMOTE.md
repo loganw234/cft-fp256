@@ -445,9 +445,40 @@ writes to `--pid-file PATH` if asked. `--verbose` logs every request
 with its opcode, length and status; the default is one line per
 connection.
 
-One library device per connection, opened at accept and closed at
-disconnect, so a client's status word, buffers and programs are its
-own and a client that exits mid-run leaves nothing behind. The
+One library device per connection, opened at its first HELLO and
+closed at disconnect, so a client's status word, buffers and
+programs are its own and a client that exits mid-run leaves nothing
+behind. **At HELLO and not at accept, and that distinction is the
+whole of it.** A device on a card holds every compute unit it spans,
+exclusively, and a device on the quad IS the quad: the XRT backend
+opens all four `cft_krnl` units as one device's four tiles. A device
+opened at accept would therefore be a card claimed by any connection
+at all - a port scan, a health check, a stray `nc` left open in a
+terminal. One did exactly that on 2026-09-09: a probe left connected
+held the read-ahead quad for seventeen minutes, and every real
+client meanwhile was told the artifact was not a tile, which is what
+an XRT `open_cu_context` failure looks like from outside. The card
+is claimed by a client that has said HELLO and by nothing else; a
+connection refused for a bad magic, a wrong ABI or a truncated frame
+never touches it.
+
+**A client that vanishes AFTER its HELLO is the remaining case.** A
+laptop that loses its Wi-Fi route mid-session sends no FIN; its
+socket on the server stays established, nobody writes to it, so it
+never becomes readable, and its device stays held. Every accepted
+socket therefore carries `SO_KEEPALIVE`, tuned where the knobs exist
+(Linux) to probe after 30 s of silence, every 10 s, three times: a
+dead client releases its tile in about a minute. Windows keeps its
+two-hour default, long but bounded. A client that closes properly
+never waits on any of this.
+
+One thing the same day taught the protocol battery about real
+networks: `remote-test`'s truncated-frame check closes a connection
+mid-frame and then opens another, and on loopback the server has
+seen the EOF before the second connect arrives. Over a wireless link
+it need not have, and the check would read a few milliseconds of
+latency as a failure. It now asks again for up to two seconds, which
+is waiting for the server, not weakening the check. The
 device's exception flags are read the way every backend reads them
 and returned in every `RUN`, `REDUCE` and `PROG_RUN` response, so a
 server fronting a tile whose `flags_readable` is 0 reports that in
@@ -773,6 +804,321 @@ transport. The page's own dropped-set replay ran 300 cases of
   five workload tools are C and speak the TCP one; a chain over
   WebSocket would need the tools to take a `ws://` URL, which is a
   change to `host/src` this step did not make.
+
+## The board reaches the tile: the same frames over a serial port
+
+A Nano has two kilobytes of memory, no network, no operating system,
+no `malloc` worth the name, and no floating-point type wider than
+thirty-two bits. It cannot represent a binary256 number. It can compute
+with one, exactly, and get the same bits a desktop gets - because the
+arithmetic is not on the board and never was.
+
+The client is `bindings/arduino/cft-arduino/src/remote/`, an Arduino
+library half. The transport underneath it is either a socket (an ESP32
+opens one to `cft-serve` and there is nothing in between) or the
+board's USB serial port with `host/tools/cft-serial-bridge.py` copying
+bytes between it and the server's TCP port. Neither is a new protocol.
+The frames are the frames of "The frame" above, byte for byte, and the
+bridge understands none of them.
+
+### A third client, and why it is the interesting one
+
+`host/src/backend_remote.c` and `bindings/wasm/remote.mjs` are the two
+references, and both hold a payload in memory: build it, checksum it,
+send it. A `cft_run` of a million binary256 elements is a 96 MB
+`malloc` in the C client and a chunked one at 16 MiB, and neither
+number means anything to a board whose whole address space is 2,048
+bytes.
+
+So the third client does not hold a payload. It STREAMS - and the
+protocol turns out to be exactly the shape that allows it, which was
+not designed for and is worth stating:
+
+- **A frame's LENGTH is arithmetic, not a walk.** `24 + npresent * k *
+  esz` for a `RUN`, and the client knows all four numbers before it
+  starts. Nothing has to be built to find out how big it is.
+- **The payload is dense elements in a fixed order** - every `a`, then
+  every `b`, then every `c` - so it can be emitted from a generator
+  indexed by element, and the generator never learns that chunking
+  exists.
+- **The CRC is over the header and then the payload, in order**, so it
+  can be accumulated as the bytes go past rather than computed over a
+  buffer.
+- **Nothing in a response has to be kept.** The flags, the bus word and
+  then `n` elements: a client can hand each element to the caller and
+  forget it.
+
+What this costs is one thing, and it is the only price: the header,
+which carries the CRC, goes out FIRST, so the whole payload has to have
+been SEEN before the first byte of the frame is sent. The C client
+walks its buffer twice for free. The embedded client asks the caller's
+generator for every element twice - once for the checksum pass, once
+for the send pass - and the caller's contract is that the same index
+gives the same bytes both times. A generator that reads a sensor
+between the passes will checksum one number and send another; the
+server's CRC catches it, refuses the frame and closes, which is a
+detected failure rather than a wrong answer, but it is still a bug and
+it is the caller's. `src/remote/test/host_check.cc` counts the calls
+and holds them to exactly two per element per frame.
+
+The mirror of that is on the response side: a result element is handed
+to the caller BEFORE the frame's CRC has been checked, because the CRC
+arrived in the header. `cftr::Results` says so, and says the rule -
+accumulate, store, count, but do not ACT on an element until `run()`
+has returned - and the two calls that return a single element
+(`runOne`, `reduce`) hold theirs back until the frame checks out,
+because one element fits.
+
+### The budget, in bytes, measured
+
+On an `arduino:avr:uno` build (avr-gcc 7.3.0, `-Os`):
+
+    cftr::Client                        148 bytes
+    cftr::StreamTransport                 4
+    cftr::NetTransport                   70   (64 of them the staging buffer)
+    deepest call chain, stack           271   (runOne -> run -> sendRunLike -> sendHeader,
+                                               from -fstack-usage; the transport's own
+                                               read/write adds about a dozen more)
+
+and on a 32-bit core (ESP32, RP2040): `Client` 332, `StreamTransport`
+8, `NetTransport` 548 of which 536 are the staging buffer.
+
+Nothing there is an estimate and nothing there allocates. The largest
+single object the client ever has in hand is ONE element - thirty-two
+bytes at binary256 - and `src/remote/cft_remote_config.h` is where
+every number that sizes it lives:
+
+    CFT_REMOTE_CHUNK_BYTES        256 on AVR, 4096 elsewhere. The most
+                                  operand-and-result data one RUN frame
+                                  carries: CFTR_CHUNK_BYTES's discipline,
+                                  four orders of magnitude smaller. A
+                                  sketch may lower it.
+    CFT_REMOTE_MAX_RECV_BYTES     1 MiB on AVR. NOT an allocation limit -
+                                  the client allocates nothing and reads a
+                                  payload it does not understand straight
+                                  into the checksum and out of existence -
+                                  but the bound on how long a corrupted
+                                  length field can make it read.
+    CFT_REMOTE_ERR_BYTES          64 on AVR. Bytes of the SERVER's own
+                                  message kept for message(); 0 keeps none
+                                  and the numeric status and reason still
+                                  say what happened.
+    CFT_REMOTE_MAX_ELEM_BYTES     32. Lower it to 8 and a binary64-only
+                                  sketch saves 24 bytes twice.
+    CFT_REMOTE_BACKEND_NAME_BYTES 0 on AVR, 32 elsewhere.
+    CFT_REMOTE_KEEP_SEQ_CAPS      0 on AVR: this client does not issue
+                                  PROG_LOAD at all, so the sequencer
+                                  capacities are 20 bytes it cannot use.
+    CFT_REMOTE_TIMEOUT_MS         10,000, and a per-read STALL rather than
+                                  a per-frame budget, so a long transfer
+                                  that keeps moving never trips it. The C
+                                  client waits twenty MINUTES because a
+                                  server may be running a ten-million-step
+                                  program; a board wants to know it is
+                                  stuck.
+
+The CRC is bitwise, with no table. A 1 kB table is half a Nano's memory
+if it is not in program space and a quarter of the flash budget if it
+is; eight shifts a byte is nothing beside a line that moves eleven
+kilobytes a second. It is the same value - `crcSelfcheck()` holds it to
+the standard's own check value before the first frame is sent, exactly
+as `cftr_crc32_selfcheck()` does, and the host-side proof holds it to
+`cftr_crc32` over five hundred and twelve random buffers.
+
+### What an eight-bit board can and cannot do
+
+CAN:
+
+- `HELLO`, `CAPS` and the caps block, including a longer one from a
+  newer server - the fields it does not know are checksummed and
+  dropped, which is the growth rule of "The caps block" above read from
+  the small end.
+- `RUN` at every format, every opcode and every rounding attribute,
+  over any number of elements, chunked.
+- `REDUCE` over more elements than the board could ever store. The
+  request streams out of a generator and the response is eight bytes
+  and one element, so nothing about a reduction is chunked or held: a
+  Nano can `sum` four thousand binary256 values it makes up as it goes.
+- The five status-word operations, which libcft's own client never
+  issues because libcft keeps that word on the host. Over the wire the
+  word lives on the server, so a board can read it.
+- CARRY an encoding it cannot represent. This is the whole point. A
+  binary256 operand is thirty-two bytes to an AVR, a binary64 one is
+  eight, and couriering bytes needs no arithmetic type for them - which
+  is why `RemoteReplay` can prove eight kilobytes of binary256 results
+  exactly right on a chip with no 64-bit float.
+
+CANNOT:
+
+- `PROG_LOAD`, `PROG_RUN` and the three run-with-data opcodes. Not for
+  want of room: an image must be HELD to be checksummed, and holding a
+  buffer is the one thing the budget forbids. The sequencer's whole
+  value on a remote device is collapsing round trips, and a board's
+  round trips are already dominated by the wire.
+- The buffer operations and `STATS`. Neither is implemented; both are
+  frames a future version could add without changing anything here.
+- Represent what it computes with. An AVR's `double` IS its `float`,
+  thirty-two bits, so there is no way to make a binary64 encoding out
+  of an arithmetic value on one. `packF32` exists everywhere;
+  `packF64` exists only where the compiler has a 64-bit double, guarded
+  by `CFT_REMOTE_HAVE_F64`; wider operands are carried as bytes, from
+  program memory, and printed as hex.
+
+### The ABI a client that is not libcft has to claim
+
+Every frame carries the SENDER's `cft_abi_version()` and both ends
+compare for EQUALITY, so a client must SAY which ABI it is. The
+JavaScript client makes it a required option for this reason and the
+embedded one makes it an argument to `begin()`: a number compiled into
+a sketch is a number that goes stale against a server nobody rebuilt,
+and there is no negotiation to fall back on.
+
+Finding it is one command, and it is not a guess:
+
+    python host/tools/cft-serial-bridge.py --probe-abi 127.0.0.1:7754
+
+    server            127.0.0.1:7754
+    kind              refusal
+    message           ABI mismatch: the other end is libcft 0.0, this end is 0.11 - ...
+    abi word          0x0000000b   (libcft 0.11)
+
+    put this in the sketch:
+        #define CFT_REMOTE_ABI 0x0000000BUL
+
+That works because a REFUSAL is a frame and a frame's header carries
+its sender's ABI. The probe sends a `HELLO` claiming 0.0, which no
+libcft has ever been, and reads the server's own number out of the
+refusal it gets back. Nothing is transcribed and nothing is inferred
+from a string. A wrong value in a sketch is not a silent hazard either:
+it is a refusal at `HELLO` with both versions in the message, and the
+client keeps the peer's ABI even when the mismatch is what failed, so
+the board can print "it is 0.11, you claimed 0.10".
+
+### The bridge
+
+    python host/tools/cft-serial-bridge.py --serial COM5 --server HOST:PORT
+           [--baud 115200] [--verbose] [--framed] [--forever] [--settle S]
+           [--rtscts] [--serial-tcp PORT] [--loopback] [--probe-abi H:P]
+           [--list]
+
+Python 3 and pyserial, and nothing else. By default it is a PURE PIPE:
+it does not parse, buffer, reorder or rewrite anything, because the
+frames already carry their own length and their own CRC and a transport
+that helps is a transport that can corrupt. What crosses it is byte for
+byte what the board sent, and the CRC on the far end is what says so.
+
+`--verbose` decodes each frame's header as it goes past and forwards
+every byte unchanged - a window, not a filter:
+
+    board->server request  RUN            id 3     abi 0.11    120 bytes  status 0 (ok)
+    server->board response RUN            id 3     abi 0.11     40 bytes  status 0 (ok)
+
+`--serial-tcp PORT` takes the board side from a TCP connection instead
+of a serial port, which is what lets the host-side proof put the bridge
+in the pipeline with no hardware, and what a networked serial device
+server would use.
+
+`--loopback` proves the bridge with no board and no server: a socket
+pair stands in for the port, another for `cft-serve`, and twelve checks
+cover the header decoder (magic, protocol version, reserved word), the
+scanner fed one byte at a time, a 2 kB request and a response through
+two threads byte for byte, and `--framed` separating a log from a
+protocol.
+
+### One UART, two purposes
+
+An Uno and a Nano have ONE serial port, and it is the one a sketch
+prints to. Print on it while a conversation is open and those bytes go
+to the server, which reads them as a frame header, does not find the
+magic, refuses and closes - which is correct, and useless.
+
+`--framed` is the one mode that is not a pure pipe. In the board-to-
+server direction the bridge follows the framing: whole frames are
+forwarded, and bytes BETWEEN frames are printed here as the board's log
+instead of being sent. It costs nothing on the wire, it never touches
+the server-to-board direction, and it holds at most thirty-two bytes -
+a candidate header - at a time. The resync rule is the strict one: a
+run of bytes stops being a candidate the moment it stops being a prefix
+of `C` `F` `T` `R`, its first byte becomes log text and the rest is
+re-examined, so a log line ending in `C` cannot swallow the frame that
+follows it and the four characters appearing inside a message cannot
+either. The loopback checks exactly that case.
+
+A Mega, an ESP32 or a Pico has a second port and the question does not
+arise: point the client at `Serial1`, keep `Serial` for the monitor,
+and run the bridge as a plain pipe.
+
+### The board's part of the library
+
+    src/cft_remote.h                 the one include a sketch needs
+    src/remote/cft_remote.h/.cpp     the codec and the client
+    src/remote/cft_remote_config.h   every number in the budget above
+    src/remote/cft_remote_stream.h   over an Arduino Stream (Serial)
+    src/remote/cft_remote_net.h      over an Arduino Client (WiFiClient)
+    src/remote/cft_remote_flash.h    operands out of program memory
+    src/remote/cft_remote_replay.h   the generated sweep and its digest
+    src/remote/test/                 the host-side proof and the compile gate
+    examples/RemoteSerialFma         an fma at binary64 and binary256, over the bridge
+    examples/RemoteWiFiFma           the same at binary256, over Wi-Fi from an ESP32
+    examples/RemoteReplay            256 generated binary256 cases, one number back
+
+`src/cft_remote.h` is at the ROOT of `src/` and that is not a stylistic
+choice: arduino-cli's library resolver indexes a library by the headers
+that sit directly in `src/` and by nothing deeper, so a sketch whose
+first include is `<remote/cft_remote.h>` resolves no library at all.
+Once any root header has pulled the library in, `src/` is on the
+include path and every subdirectory include works. It is four
+`#include`s and it is the only file of this half outside `src/remote/`.
+
+The two transports are one interface with two implementations and no
+conditional anywhere above them, which is what makes the serial route
+and the Wi-Fi route unable to disagree about an answer. `NetTransport`
+takes the Arduino `Client` base class rather than `WiFiClient`, so an
+Ethernet shield works unchanged; it stages a frame and flushes once,
+because the ESP32's `WiFiClient::write()` is one `send()` per call and
+a frame written in thirty-two-byte elements would otherwise be thirty
+packets. `TCP_NODELAY` is the sketch's to set, on the concrete client
+and after the connect, and it should: without it Nagle holds a small
+request back for the previous response's acknowledgement, which is a
+delay on every round trip.
+
+### Held to the contract before any board existed
+
+The claim being made is that a sketch gets the SAME BITS, so the check
+has to be a `memcmp` against libcft and not a story about one. The same
+`cft_remote.cpp` an Uno compiles is compiled by the desktop's g++
+against a socket transport and driven at a real `cft-serve`, with the
+software backend open in the SAME PROCESS for comparison:
+
+    python bindings/arduino/cft-arduino/src/remote/test/host_check.py
+    python bindings/arduino/cft-arduino/src/remote/test/host_check.py --via-bridge
+
+The second puts `cft-serial-bridge.py --serial-tcp` in the path, so the
+bytes go client -> byte pipe -> bridge -> `cft-serve` and back, which is
+the board's path with the board replaced. Both own the server's
+lifecycle and stop it BY ITS PID.
+
+Each builds and runs the sources TWICE: with the 32-bit defaults, and
+with the configuration an Uno gets - no message store, no backend name,
+no sequencer capacities, a 256-byte chunk budget. Those are `#if`
+branches that nothing else runs, and the small budget changes how many
+frames every call becomes, so the second pass is a different program
+against the same server and not a repetition.
+
+The transcribed constants are held at COMPILE time, which is the only
+reason the embedded header is allowed to have them: `host_check.cc`
+includes `host/src/remote.h` and `host/include/cft.h` beside
+`cft_remote.h` and `static_assert`s every pair equal - the magic, the
+protocol version, the header size, all twenty-one opcodes, all nine
+statuses, four formats, five rounding attributes, five flag bits and
+the caps block's three lengths. A value that drifts is a compile error
+in the gate rather than a refusal on a bench.
+
+`src/remote/test/compile_check.py` compiles the examples for
+`arduino:avr:uno`, `arduino:avr:nano`, `arduino:avr:mega`,
+`esp32:esp32:esp32` and `rp2040:rp2040:rpipico` and reports flash and
+RAM per board. docs/VALIDATION.md's entry for 2026-09-09 carries what
+both of them said.
 
 ## Round trips, and what the program route saves
 

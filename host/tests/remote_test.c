@@ -27,12 +27,39 @@
  * Exit status 0 only if every check passed.
  */
 
+/* nanosleep - the one wait in this file - is POSIX, not C99; this
+ * asks for it on Linux and the Mac before any header is read, and
+ * MinGW, which takes the Sleep branch, ignores it. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200112L
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "cft.h"
+
+#if defined(_WIN32)
+#  include <windows.h>
+#else
+#  include <time.h>
+#endif
+
+/* A short wait, for the one check that has to let the server catch
+ * up with a close it has not seen yet (below). */
+static void nap_ms(int ms)
+{
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}
 #include "remote.h"
 
 static int failures, checks;
@@ -296,8 +323,24 @@ static void refusal_tests(const char *url)
             cftr_sock_close(s);
         }
     }
-    hello_header(hdr, cft_abi_version(), CFTR_OP_HELLO, 0, NULL);
-    rc = raw_exchange(host, port, hdr, NULL, 0, &status, msg, sizeof msg);
+    /* The server releases the truncated connection's device when it
+     * sees the EOF. On loopback that happens before the next connect;
+     * over a real network it need not, and the next connection then
+     * finds the device still held for a few milliseconds - seen from
+     * a Mac against the box over Wi-Fi on 2026-09-09. So this asks
+     * again for up to two seconds: a wait for the server, not a
+     * weakening of what is checked, which is that it recovers. */
+    {
+        int tries;
+        for (tries = 0; tries < 20; tries++) {
+            hello_header(hdr, cft_abi_version(), CFTR_OP_HELLO, 0, NULL);
+            rc = raw_exchange(host, port, hdr, NULL, 0, &status, msg,
+                              sizeof msg);
+            if (rc == 1 && status == CFT_OK)
+                break;
+            nap_ms(100);
+        }
+    }
     CHECK(rc == 1 && status == CFT_OK,
           "after a truncated frame the server still answers: rc %d "
           "status %d", rc, status);

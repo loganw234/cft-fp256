@@ -1,0 +1,4 @@
+# The network this board joins is the person who flashed it's business,
+# not the repository's. RemoteWiFiFma.ino includes this file when it
+# exists and compiles with placeholders when it does not.
+arduino_secrets.h

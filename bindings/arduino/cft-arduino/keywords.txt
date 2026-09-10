@@ -1,0 +1,90 @@
+#######################################
+# Syntax colouring for the Arduino IDE.
+# KEYWORD1 types, KEYWORD2 functions, LITERAL1 constants.
+# Tab-separated - the IDE does not accept spaces here.
+#######################################
+
+cft_device	KEYWORD1
+cft_format	KEYWORD1
+cft_round	KEYWORD1
+cft_op	KEYWORD1
+cft_status	KEYWORD1
+cft_caps	KEYWORD1
+cft_replay	KEYWORD1
+
+cft_open	KEYWORD2
+cft_close	KEYWORD2
+cft_run	KEYWORD2
+cft_reduce	KEYWORD2
+cft_div	KEYWORD2
+cft_sqrt	KEYWORD2
+cft_rint	KEYWORD2
+cft_scaleb	KEYWORD2
+cft_convert	KEYWORD2
+cft_class	KEYWORD2
+cft_logb	KEYWORD2
+cft_next_up	KEYWORD2
+cft_next_down	KEYWORD2
+cft_rem	KEYWORD2
+cft_total_order	KEYWORD2
+cft_augmented_add	KEYWORD2
+cft_augmented_sub	KEYWORD2
+cft_augmented_mul	KEYWORD2
+cft_min_mag	KEYWORD2
+cft_max_mag	KEYWORD2
+cft_minnum_mag	KEYWORD2
+cft_maxnum_mag	KEYWORD2
+cft_scaled_prod	KEYWORD2
+cft_get_caps	KEYWORD2
+cft_supports	KEYWORD2
+cft_format_size	KEYWORD2
+cft_format_name	KEYWORD2
+cft_op_name	KEYWORD2
+cft_strerror	KEYWORD2
+cft_last_error	KEYWORD2
+cft_abi_version	KEYWORD2
+cft_save_all_flags	KEYWORD2
+cft_restore_flags	KEYWORD2
+cft_lower_flags	KEYWORD2
+cft_raise_flags	KEYWORD2
+cft_test_flags	KEYWORD2
+cft_replay_init	KEYWORD2
+cft_replay_line	KEYWORD2
+cft_replay_crc16	KEYWORD2
+
+CFT_FP32	LITERAL1
+CFT_FP64	LITERAL1
+CFT_FP128	LITERAL1
+CFT_FP256	LITERAL1
+CFT_RNE	LITERAL1
+CFT_RTZ	LITERAL1
+CFT_RDN	LITERAL1
+CFT_RUP	LITERAL1
+CFT_RMM	LITERAL1
+CFT_FMA	LITERAL1
+CFT_ADD	LITERAL1
+CFT_SUB	LITERAL1
+CFT_MUL	LITERAL1
+CFT_ABS	LITERAL1
+CFT_NEG	LITERAL1
+CFT_COPYSIGN	LITERAL1
+CFT_MIN	LITERAL1
+CFT_MAX	LITERAL1
+CFT_MINNUM	LITERAL1
+CFT_MAXNUM	LITERAL1
+CFT_SELECT	LITERAL1
+CFT_SUM	LITERAL1
+CFT_DOT	LITERAL1
+CFT_SUMSQ	LITERAL1
+CFT_SUMABS	LITERAL1
+CFT_IMUL	LITERAL1
+CFT_OK	LITERAL1
+CFT_FLAG_INVALID	LITERAL1
+CFT_FLAG_DIVBYZERO	LITERAL1
+CFT_FLAG_OVERFLOW	LITERAL1
+CFT_FLAG_UNDERFLOW	LITERAL1
+CFT_FLAG_INEXACT	LITERAL1
+CFT_TINY	LITERAL1
+CFT_MAX_FORMAT	LITERAL1
+CFT_BN_LIMBS	LITERAL1
+CFT_CHUNK	LITERAL1
