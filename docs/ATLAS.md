@@ -315,13 +315,17 @@ deposition that column alone can claim.
    needs a seventeenth register.
 2. **`IMUL` and indexed constants** (cft-fp256): model, softfloat,
    RTL, cocotb, CAPS and VERSION; the API gains nothing, since a
-   program image is data. **Done on 2026-09-07 except CAPS and
-   VERSION, which are the integrator's** - the model, libcft,
+   program image is data. **Done.** The model, libcft,
    `cft_simpleops`, `cft_seq`, three benches, a formal proof and the
-   enclose measurement are in; `cft_caps` does not yet publish either
-   feature and the sequencer VERSION has not been stepped, so a host
-   still cannot ask a device whether its bitstream carries them. The
-   indexed form is what lets step 3 emit one image per positive.
+   enclose measurement landed on 2026-09-07; the integrator's half -
+   the CAPS bits and the VERSION step - followed with revisions 2 and
+   3. A host asks rather than guesses today: `rtl/cft_krnl.sv` drives
+   `alu_ext` to publish `IMUL` at CAPS[28] and the sequencer feature
+   nibble to `4'b1111`, so `kx` reads at CAPS[4], and VERSION is
+   `0x800`. `cft.h` names those bits `CFT_ALU_EXT_IMUL` and
+   `CFT_SEQ_FEAT_WIDE_CONST`, and `cft_program_load` refuses an image
+   that uses either on a device that does not publish it. The indexed
+   form is what lets step 3 emit one image per positive.
 3. **The emitter target** (atlas-engine): `core/emit-cft.mjs` from the
    same parse, producing the image, the constant bank, the seven-wide
    input block and the deposit schema; a runner in cft-fp256
@@ -329,8 +333,8 @@ deposition that column alone can claim.
    resumable, checkpointed, chained) that runs the image on either
    backend and bins the records; the golden-model oracle from
    `seq.py`. `hopf` and `jong` first, as the README says.
-   **The runner exists (2026-09-08)**: `host/tools/positive-run`
-   takes an image file, `--iota n` or raw streams, an optional bank,
+   **The runner exists (2026-09-08)**: `host/tools/positive-run.c`,
+   built as `host/positive-run`, takes an image file, `--iota n` or raw streams, an optional bank,
    and prints the counts, the flags, the program digest and the
    deposit buffer's SHA-256, on the software backend, in emulation
    and on the card alike (docs/PROGRAMS.md). The emitter target on
