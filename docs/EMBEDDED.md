@@ -570,20 +570,77 @@ gcc 16.1.0, Python 3.12.9):
   over all 168: the same. `CFT_TINY` over the fp32 and fp64 sets: 24
   sets, 195,248 cases. `CFT_TINY` at fp128: 36 sets, 271,776 cases.
 - **The negative control**: six corruptions, six caught.
-- **pytest** `python/tests/test_serial_replay.py`: 20 tests over the
+- **pytest** `python/tests/test_serial_replay.py`: 25 tests over the
   frame, the checksum against its published check value, the refusals,
-  the set-discovery order, and an end-to-end run against the loopback
-  and against a loopback that lies.
+  the set-discovery order, the `env` reading, and an end-to-end run
+  against the loopback and against a loopback that lies.
+- **One board has run**, an ESP32-S3, and the section below says what
+  it did rather than what it would fit.
 
 `docs/VALIDATION.md` carries the run with every number.
 
+## What a board has run
+
+**ESP32-S3** (Waveshare ESP32-S3-Touch-LCD-1.69, native USB CDC,
+`esp32:esp32:esp32s3:CDCOnBoot=cdc`). It replayed the published sets
+case by case over its serial line and reached **508,000 cases, all of
+them matching** before an unrelated fault stopped the run:
+
+      fp32, every family, complete            232,174 cases
+      fp64, every family, complete            485,611 cumulative
+      into fp128                              508,000, then a restart
+
+Every elementwise opcode, every transcendental, the augmented pairs,
+the reductions, the character conversions and the magnitude forms, at
+binary32 and binary64, all five rounding attributes and all five
+exception flags, computed on the part and compared against the same
+files a host is compared against. Nothing disagreed.
+
+**Rate.** Measured on sets replayed in isolation, which is the only
+clean way to read it:
+
+      fp32 elementwise            about 525-554 cases a second
+      fp32 transcendentals        about 129
+      fp128 elementwise           about 211
+      fp128 round-toward-zero     about 199
+
+Rates taken from inside a long census are NOT usable: they track how
+busy the HOST is, not the board. In one census the fp64 region read
+slower than the fp128 region, which is the wrong way round and is
+explained entirely by a five-board compile running on the host at the
+time. The `--progress` line prints the rate over the last 2,000 cases
+beside the cumulative one for exactly this reason, and `--trace` writes
+both to a CSV with the board's own readings beside them.
+
+**Temperature and memory.** Across every run on this part, from a cold
+start through an hour of continuous arithmetic, the die stayed between
+**41.3 C and 45.3 C** and free heap never moved from its steady value.
+A thermal explanation for a slowing census was proposed, instrumented
+and refuted; see docs/VALIDATION.md. The part is a bare plastic package
+on a small board with no heatsink, and it did not need one.
+
+**Two environment fixes were needed, neither in the library.** Both are
+described above and both are the same shape - the board's environment,
+not its arithmetic:
+
+- the ESP32 loop task's 8 KB stack against a correctly-rounded
+  transcendental, raised to 96 KB;
+- the core's 256-byte USB CDC receive ring against a published
+  4,096-character line, raised to twice `VR_LINE`.
+
+**One open fault.** After about an hour of continuous work, deep into
+binary128, the board restarted: the trace caught its uptime falling
+from 3,553,233 ms to 2,830. Neither of the two binary128 sets involved
+reproduces it when replayed alone, 12,000 cases each, clean. Isolated
+replays cannot reproduce a long-run effect by construction, because
+opening the serial port pulses the reset line and every isolated run
+therefore starts from a freshly booted board. It is uncharacterised.
+
 ## Pending on hardware
 
-No board has been attached. Everything above that involves a board is a
-COMPILE result; nothing here reports a board run, and the sizes are the
-linker's rather than a measurement of a running part.
-
-What is pending, and the command that settles each:
+Four boards have not been attached: the Pico, the Uno, the Nano and the
+Mega. Everything this document says about them is a COMPILE result, and
+the sizes are the linker's rather than a measurement of a running part.
 
 | pending | command |
 |---|---|
@@ -591,10 +648,11 @@ What is pending, and the command that settles each:
 | elements a second, per format and operation, per board | `Bench`, above |
 | the fp32 and fp64 sets on an Uno and a Nano | `serial_replay.py --port COM7 --sets 'fp32*,fp64*'` |
 | the same plus the reductions, augmented arithmetic and 9.6 on a Mega | the same command; the Mega carries the full verb set |
-| all 168 sets on a Pico and an ESP32 | `serial_replay.py --port COM7 --progress` |
-| the RAM a running part actually has free | `Hello` prints it |
+| all 168 sets on a Pico | `serial_replay.py --port COM7 --progress --trace run.csv` |
+| the RAM a running part actually has free | `Hello` prints it; `env` reports it during a run |
+| the binary128 restart on the ESP32-S3 | a full census in the original order, `--trace` on, no `--retry` and no `--reset-on-timeout`, so it stops at the fault instead of recovering past it |
 
-Two things in particular are worth watching on the first board run,
+Two things in particular are worth watching on the next board run,
 because they are the places where a static analysis stops being enough:
 
 **The stack margin on an ATmega328P is about 130 bytes** and it is a
@@ -602,7 +660,9 @@ sum of frames rather than a measurement of a running part. If it is
 wrong, the symptom is corruption rather than a refusal. `Hello` prints
 the free RAM; a `VectorReplay` that answers the first few hundred fp64
 cases and then stops answering is the signature to look for, and
-`VR_LINE` in the sketch is the knob.
+`VR_LINE` in the sketch is the knob. The ESP32-S3 gave the general
+warning here: a static size that fits says nothing about a driver, a
+task stack or a watchdog that does not.
 
 **The heap on a Pico during a large `to_decimal`.** `chars.c` builds
 the exact decimal in an arbitrary-precision natural it allocates, and
@@ -611,7 +671,5 @@ within the buffer. Nothing here has measured what that costs on a part
 with 195 KB free. A case that cannot be allocated answers
 `err internal` and is skipped by name, so the failure is visible rather
 than silent - but the count of them is a number this document does not
-yet have.
-
-When a board is attached, `arduino-cli board list` must show a
-recognised board on the port before anything is flashed to it.
+yet have. `env` now reports free heap during a run, which is the
+cheapest way to watch it.
