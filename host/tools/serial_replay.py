@@ -1150,6 +1150,12 @@ def main() -> int:
                     help="seconds to wait for one answer (default 10)")
     ap.add_argument("--list-sets", action="store_true",
                     help="print the sets that would run, and stop")
+    ap.add_argument("--max-line", type=int, metavar="N",
+                    help="send no request longer than N characters, "
+                         "whatever `id` advertises - for a board whose "
+                         "DRIVER cannot deliver the line its parser "
+                         "could hold (an ESP32-S3's USB CDC ring is 256 "
+                         "bytes by default against a 4096 line)")
     ap.add_argument("--trace", metavar="FILE",
                     help="append a CSV row at the start and every 2,000 "
                          "cases: cases, elapsed, the rate over the last "
@@ -1197,6 +1203,15 @@ def main() -> int:
     try:
         dev = Device(link, retry=args.retry,
                      reset_on_timeout=args.reset_on_timeout)
+        if args.max_line and args.max_line < dev.line_cap:
+            # What the board says it can parse, lowered to what its
+            # driver can actually deliver. Everything sizes its chunks
+            # from this one number, and a case that no longer fits is
+            # skipped by name and counted, exactly as on a small board.
+            out.write("line capped at %d characters by --max-line "
+                      "(the board advertises %d)\n"
+                      % (args.max_line, dev.line_cap))
+            dev.line_cap = args.max_line
         print_device(dev, transport, out)
         out.write("\nreplaying %s\n"
                   % os.path.relpath(args.vectors, REPO).replace(os.sep, "/"))

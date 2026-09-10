@@ -238,6 +238,21 @@ static int board_env(void *ctx, char *out, size_t cap)
 
 void setup()
 {
+#if defined(ARDUINO_ARCH_ESP32)
+    /* The receive ring has to hold a whole request, and the core's
+     * default for USB CDC is 256 bytes (HWCDC.cpp), while VR_LINE
+     * publishes 4,096. That gap is invisible until something sends a
+     * long line: an S3 answered a 275-character `put` and never
+     * answered a 403-character one, which is where a census died at
+     * 222,000 cases (2026-09-09). The reduction sets are the first to
+     * send one, so every set before them passes and the board looks
+     * healthy. Must precede begin(); costs RAM the S3 has.
+     *
+     * All three of the ESP32's serial classes - HWCDC, USBCDC and the
+     * UART - carry this method, so it does not matter which `Serial`
+     * the board's variant binds. */
+    Serial.setRxBufferSize(VR_LINE * 2);
+#endif
     Serial.begin(VR_BAUD);
     while (!Serial && millis() < 3000)
         ;                                  /* native USB: wait, briefly */
