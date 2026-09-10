@@ -10417,11 +10417,43 @@ why a connect probe is not evidence that a session will hold, and
       harness tests    25 passed
       make embedded    every profile, every board, corruption control caught
 
+### The census on the fixed board: 508,000 cases, and where it stops now
+
+Re-run end to end on the S3 with the receive ring raised, it reached
+**508,000 cases, every one of them matching**, in 59 minutes, and then
+stopped for a third reason:
+
+      fp32, all families, complete            232,174 cases
+      fp64, all families, complete            485,611 cumulative
+      into fp128 elementwise                  508,000, then a fault
+
+That is every elementwise opcode, every transcendental, the augmented
+pairs, the reductions, the character conversions and the magnitude
+forms, at binary32 and binary64, all five rounding attributes and all
+five exception flags, computed on a microcontroller and compared case
+by case against the published sets. No arithmetic disagreed.
+
+The stop was not arithmetic and not the ring. The trace shows the
+board's uptime falling from 3,553,233 ms to 2,830 at case 506,000 -
+it restarted - after which the harness's recovery carried it another
+2,000 cases before a sequence desync ("answer for sequence 58 arrived
+while 59 was outstanding") ended the run. Temperature held between
+42.3 and 43.3 C across the whole hour and free heap never moved, so
+for the third time the answer is neither heat nor a leak. What
+destabilises it is somewhere in binary128, about 8,400 cases into that
+family, and it is uncharacterised.
+
+Progress across the three attempts is worth stating as a sequence,
+because each fault was hidden by the one before it: 84,000 cases
+(stopped by hand), then 222,000 (the receive ring), then 508,000 (a
+board restart in fp128). Each fix revealed the next thing.
+
 ### Pending
 
-The full 1,071,635-case census on the fixed S3 is running as this is
-written; the 222,000 cases before the `put` fault all matched. The
-Pico, the Uno, the Nano and the Mega are still unattached, and the two
-static analyses named in the entry above - the ATmega328P's 130-byte
-stack margin and what a large `to_decimal` costs the Pico's heap - are
-still analyses.
+The binary128 restart above is the open item on this board, and the
+next step on it is the narrow one - replay the fp128 families alone,
+with the trace, and find whether the restart is reproducible at the
+same place. The Pico, the Uno, the Nano and the Mega are still
+unattached. The two static analyses named in the entry above - the
+ATmega328P's 130-byte stack margin, and what a large `to_decimal`
+costs the Pico's heap - are still analyses.
