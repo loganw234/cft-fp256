@@ -191,6 +191,10 @@ docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
                      INTEGRATION (what to use when: staged, resident,
                      programs, reductions, remote - and where each
                      link becomes the wall, in measured numbers),
+                     EMBEDDED (the same library on a microcontroller:
+                     the build profiles, what an 8-bit part cannot
+                     have and why, the serial replay harness, and
+                     what an ESP32-S3 actually ran),
                      NOVEL (results with no prior description found)
 CAPABILITIES.md      what the tile can and cannot do, with the gaps named
 ```
