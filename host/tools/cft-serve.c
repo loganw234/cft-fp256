@@ -84,6 +84,8 @@ typedef struct {
     ws_conn       w;
     cft_device   *dev;
     cft_status    open_status;      /* why dev is NULL, if it is */
+    const char   *artifact;         /* opened at HELLO, not at accept */
+    int           open_tried;       /* asked the driver once already */
     cft_program **progs;
     uint32_t      nprogs;
     cft_buffer  **bufs;
@@ -822,7 +824,6 @@ static int h_stats(conn *C, answer *A)
 static void conn_open(conn *C, cftr_sock s, unsigned long id,
                       const char *artifact, int is_ws)
 {
-    cft_caps caps;
     memset(C, 0, sizeof *C);
     C->open = 1;
     C->s = s;
@@ -836,16 +837,40 @@ static void conn_open(conn *C, cftr_sock s, unsigned long id,
      * exactly as a frame is. */
     C->ws_pending = is_ws;
     cftr_sock_timeout(s, STALL_MS);
-    C->open_status = cft_open(artifact, 0, &C->dev);
+    /* The DEVICE is NOT opened here; conn_device below opens it at
+     * this connection's first HELLO. A device on a card holds every
+     * compute unit it spans, exclusively - and a device on the quad
+     * IS the quad, all four cft_krnl units as one device's four
+     * tiles. Opening one at accept would hand the whole card to any
+     * connection at all: a port scan, a health check, a stray `nc`
+     * left open in a terminal. One did exactly that on 2026-09-09,
+     * holding the read-ahead quad for seventeen minutes while every
+     * real client was told the artifact was not a tile. */
+    C->artifact = artifact;
+    logline("connection %lu: accepted", id);
+}
+
+/* This connection's device, opened at its first HELLO and held until
+ * it disconnects. Asked of the driver once: a second HELLO after a
+ * failure gets the same answer without asking again. */
+static cft_device *conn_device(conn *C)
+{
+    cft_caps caps;
+    if (C->open_tried)
+        return C->dev;
+    C->open_tried = 1;
+    C->open_status = cft_open(C->artifact, 0, &C->dev);
     memset(&caps, 0, sizeof caps);
     caps.struct_size = sizeof caps;
     if (C->dev) {
         cft_get_caps(C->dev, &caps);
-        logline("connection %lu: opened, device backend %s", id, caps.backend);
+        logline("connection %lu: device opened, backend %s", C->id,
+                caps.backend);
     } else {
-        logline("connection %lu: opened, but its device did not: %s (%s)",
-                id, cft_strerror(C->open_status), cft_last_error());
+        logline("connection %lu: its device did not open: %s (%s)",
+                C->id, cft_strerror(C->open_status), cft_last_error());
     }
+    return C->dev;
 }
 
 static void conn_close(conn *C)
@@ -960,7 +985,7 @@ static int serve_one(conn *C, uint32_t my_abi)
                 snprintf(A.why, sizeof A.why, "HELLO/CAPS carry no payload");
                 break;
             }
-            if (!C->dev) {
+            if (!conn_device(C)) {
                 fail(&A, C->open_status, "opening this connection's device");
                 break;
             }

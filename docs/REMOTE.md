@@ -445,9 +445,40 @@ writes to `--pid-file PATH` if asked. `--verbose` logs every request
 with its opcode, length and status; the default is one line per
 connection.
 
-One library device per connection, opened at accept and closed at
-disconnect, so a client's status word, buffers and programs are its
-own and a client that exits mid-run leaves nothing behind. The
+One library device per connection, opened at its first HELLO and
+closed at disconnect, so a client's status word, buffers and
+programs are its own and a client that exits mid-run leaves nothing
+behind. **At HELLO and not at accept, and that distinction is the
+whole of it.** A device on a card holds every compute unit it spans,
+exclusively, and a device on the quad IS the quad: the XRT backend
+opens all four `cft_krnl` units as one device's four tiles. A device
+opened at accept would therefore be a card claimed by any connection
+at all - a port scan, a health check, a stray `nc` left open in a
+terminal. One did exactly that on 2026-09-09: a probe left connected
+held the read-ahead quad for seventeen minutes, and every real
+client meanwhile was told the artifact was not a tile, which is what
+an XRT `open_cu_context` failure looks like from outside. The card
+is claimed by a client that has said HELLO and by nothing else; a
+connection refused for a bad magic, a wrong ABI or a truncated frame
+never touches it.
+
+**A client that vanishes AFTER its HELLO is the remaining case.** A
+laptop that loses its Wi-Fi route mid-session sends no FIN; its
+socket on the server stays established, nobody writes to it, so it
+never becomes readable, and its device stays held. Every accepted
+socket therefore carries `SO_KEEPALIVE`, tuned where the knobs exist
+(Linux) to probe after 30 s of silence, every 10 s, three times: a
+dead client releases its tile in about a minute. Windows keeps its
+two-hour default, long but bounded. A client that closes properly
+never waits on any of this.
+
+One thing the same day taught the protocol battery about real
+networks: `remote-test`'s truncated-frame check closes a connection
+mid-frame and then opens another, and on loopback the server has
+seen the EOF before the second connect arrives. Over a wireless link
+it need not have, and the check would read a few milliseconds of
+latency as a failure. It now asks again for up to two seconds, which
+is waiting for the server, not weakening the check. The
 device's exception flags are read the way every backend reads them
 and returned in every `RUN`, `REDUCE` and `PROG_RUN` response, so a
 server fronting a tile whose `flags_readable` is 0 reports that in
