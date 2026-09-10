@@ -677,7 +677,7 @@ static uint8_t *pack_program(const fmt_info *fi, const uint64_t *ins,
 
 /* ---- the reference orbit ------------------------------------------
  *
- *   r0 = zr, r1 = zi        (streams a and b; r2..r15 start at +0)
+ *   r0 = zr, r1 = zi        (streams a and b; r2..r31 start at +0)
  *   constants: 4, cr, ci
  *
  * One iteration is nine instructions plus the two deposits that ARE

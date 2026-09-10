@@ -101,6 +101,9 @@ startup. 117 KB into 8 KB is not a tuning problem.
 
 ## The examples
 
+The three that compute ON the board, and are what
+`bindings/arduino/verify.sh` compiles for every FQBN:
+
 - **Hello** - what the board is, and one fused multiply-add whose
   answer is known in advance. Flash this first.
 - **VectorReplay** - answers `host/tools/serial_replay.py` over the
@@ -108,6 +111,12 @@ startup. 117 KB into 8 KB is not a tuning problem.
   board. See below.
 - **Bench** - elements a second for add, multiply and fused
   multiply-add at every format the build carries.
+
+And three that make the board a CLIENT of a tile elsewhere, over the
+frame protocol of docs/REMOTE.md rather than CSRP/1 - **RemoteSerialFma**,
+**RemoteWiFiFma** and **RemoteReplay**. They belong to `src/remote/`
+and are compiled by `src/remote/test/compile_check.py`, not by the
+loop above.
 
 ## Replaying the vectors
 
@@ -147,8 +156,11 @@ Not a fork and not a port: byte-identical files, with
 copy exists only because an Arduino build cannot compile sources
 outside a library directory.
 
-`src/cft.h`, `src/cft_replay.[ch]`, `library.properties`, this README
-and the examples are written here rather than copied.
+`src/cft.h`, `src/cft_replay.[ch]`, `library.properties`,
+`keywords.txt`, this README and the examples are written here rather
+than copied. The first six are listed in `vendor.json` under `owned`;
+the examples and `src/remote/` are simply outside the subtree
+`sync.py` audits.
 
 Do not edit anything under `src/cft/`. Edit `host/` and run:
 

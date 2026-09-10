@@ -26,8 +26,11 @@
 // what ref and new are allowed to differ about, so the assumption
 // below excludes exactly them and nothing else - the sweep's
 // carve-out, restated to the solver. What the live module does
-// instead is proven elsewhere: 26/27 by cft_seedop's own gate, 30 by
-// imul.sby, which is a miter of the same shape as this one. The
+// instead is proven elsewhere: 26/27 by cft_seedop's own gate. 30 is
+// the one with no proof behind it - imul.sby is a miter of the same
+// shape as this one, it does not close inside a wall bound, and it is
+// parked outside formal/run.sh; tb/test_simpleops.py's test_imul and
+// tb/test_seq_core.py carry it instead. The
 // reserved codes bracketing both carve-outs (25, 28, 29, 31) stay
 // INSIDE this proof, trapping in both instances.
 //

@@ -110,9 +110,13 @@ them and adds one:
    integer group already uses. `softfloat.py`'s `imul()` is the
    one-line definition; `host/src/softfloat.c` is the port;
    `tb/test_simpleops.py`'s `test_imul` and `tb/test_seq_core.py`'s
-   `indexed_constants_and_imul` are the benches, and `formal/imul.sby`
-   proves the three partial products equal a truncated 32x32 multiply
-   over every input at fp32's width. The whole draw stream is now
+   `indexed_constants_and_imul` are the benches. `formal/imul.sby`
+   STATES the claim that the three partial products equal a truncated
+   32x32 multiply, and it does NOT close: both its tasks were stopped
+   without returning - a miter over a multiplier is what a bit-blasting
+   engine does worst at - so it is parked outside `formal/run.sh` with
+   its measurements in that file. IMUL's value rests on the two benches
+   above and on `host/tests/seq_check.py`'s differential. The whole draw stream is now
    in-lane and the three input streams are enough.
 2. **Indexed constants. BUILT 2026-09-07.** Bit 30 of the instruction
    word was reserved and `imm` is 32 bits wide and unused by ALU
@@ -305,8 +309,9 @@ deposition that column alone can claim.
    that repository's docs/CFT-DETLIB.md, and
    `tools/verify-cft-detlib.mjs` holds every one bit-identical to
    the shipped library on 4,096-point sweeps through libcft's
-   software backend, `hashu` with its two `IMUL`s emulated since the
-   opcode does not exist yet. It corrected this document three times
+   software backend, `hashu` with its two `IMUL`s emulated because the
+   opcode did not exist on that branch's day; it does now, at 30, and
+   CAPS[28] publishes it. It corrected this document three times
    on the way (the table above): the library is unfused, `min`/`max`
    are comparisons, `u2f` is nine instructions. Eleven of the
    nineteen need indexed constants (`det_div` lands on exactly 16,

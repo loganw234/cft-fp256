@@ -47,9 +47,10 @@ OUT = HW / "layouts"
 #   builds (docs/SCALING.md, "LUTs"). SHELL_PER_EXTRA_CU: the quad's
 #   fixed cost came to 161,775 (sixteen masters of crossbar), so each
 #   CU past the first adds (161,775 - 123,897) / 3.
-# The model is deliberately a little conservative: it predicts 724k for
-# the routed quad that placed at 701,664, because cross-boundary
-# optimisation at link time is not something an OOC sum can see.
+# The model is a little OPTIMISTIC, by about 2%: it predicts 687,319
+# for the routed quad that placed at 701,664 (docs/LAYOUTS.md carries
+# the same pair), because an OOC sum cannot see what link-time
+# placement and crossbar routing add around the tiles.
 # HBM_PCS / MASTERS_PER_TILE: 32 pseudo-channels, four masters a tile,
 #   one PC per master for ordering (docs/SCALING.md) - eight tiles hard.
 LUT_DEVICE          = 870_720
@@ -97,7 +98,7 @@ BANK_LUT = {
 # practice - TARGETS TO MEASURE, not results.
 VARIANTS = {
     "cft_krnl":      dict(rungs=("fp32", "fp64", "fp128", "fp256"), generics="",
-                          mhz=135, clock="measured: single +0.045 @135 retimed; quad pending"),
+                          mhz=135, clock="measured: single +0.618, quad +0.143 kernel WNS @135 (9f73107, 2026-09-02, retimed + phys_opt)"),
     "cft_krnl_f128": dict(rungs=("fp32", "fp64", "fp128"), generics="EN_FP256=0",
                           mhz=150, clock="target, unmeasured"),
     "cft_krnl_f64":  dict(rungs=("fp32", "fp64"), generics="EN_FP128=0 EN_FP256=0",

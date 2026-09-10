@@ -180,7 +180,7 @@ element.
 | configuration | beat | lanes (32/64/128/256) | LUT | for |
 |---|---|---|---|---|
 | full tile | 256 | 8 / 4 / 2 / 1 | **139,404 OOC** (292 DSP); 123,599 with the fused ladders on (277 DSP) | Alveo; 256 is the HBM pseudo-channel width |
-| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated, **pre-sequencer** | see ROADMAP's open-core sizing |
+| half tile | 128 | 4 / 2 / 1 / - | ~44k estimated, **pre-sequencer**; the estimate is this table's own and is not re-derived elsewhere | see docs/ROADMAP.md's "The open core" |
 | quarter tile | 64 | 2 / 1 / - / - | ~20k estimated, **pre-sequencer** | an Alchitry Au conformance node; a chiplet trading lanes for deposition buffer |
 
 The full-tile figure moved after this table was written: 129,708 with
@@ -863,7 +863,10 @@ rather than a fixed pass count.
 
 **Measured**, out-of-context synthesis of `cft_krnl` on
 `xcu50-fsvh2104-2-e` at a 135 MHz ask, Vivado 2026.1, one build at a
-time (`hw/mc_sweep.sh`, summaries in its `summary.txt`):
+time (`hw/mc_sweep.sh`, summaries in its `summary.txt`). These supersede the
+292/277 DSP pair in the geometry table near the top of this file, which
+predates the seed ROM becoming case tables; the routed design reports
+**262**:
 
 | MUL_PASSES | LUT | FF | DSP | BRAM | implied path delay | levels |
 |---|---|---|---|---|---|---|
@@ -884,8 +887,8 @@ multiplier ten ways cuts DSPs by **79%** (262 to 56) and LUTs by
 **6.4%** (123,214 to 115,310). The tile's LUTs are in the aligner and
 the normaliser, which are linear in format width and were already
 shared; the multiplier is DSPs, which is exactly what the sharing
-doctrine in docs/ROADMAP.md says - "linear in format width shares at
-1x, quadratic does not" - and what `cft_mulfrac` measured from the
+doctrine in docs/ROADMAP.md says - "share what is LINEAR in the format
+width, not what is QUADRATIC" - and what `cft_mulfrac` measured from the
 other side in 2026-08-30, saving no DSPs and costing LUTs.
 
 So this parameter buys **DSP headroom, not LUT headroom**, and LUTs are
