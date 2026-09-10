@@ -10409,6 +10409,36 @@ stayed reliable throughout it (60 of 60 over three minutes), which is
 why a connect probe is not evidence that a session will hold, and
 `caffeinate -i` was not enough where `-dimsu` is.
 
+### The whole published census, over the network, against the card
+
+The remote backend had been held to a bounded generated set by
+`remotetest` and to `device-test`'s matrix. This is the whole thing:
+
+      168 sets, 1,071,635 cases, all matching
+      elapsed                     4,656 s (77.6 min)
+      remote                        230 cases a second
+      the same sets on the box    1,674 cases a second
+      penalty                       7.3x
+
+The elementwise and transcendental sets replay twice - once an element
+at a time so the exception flags are pinned exactly, then as arrays so
+the backend's partitioning across tiles is exercised - and the
+character sets likewise wherever the entry point takes an array. A
+reduction case is already an array call, so those replay once.
+
+**The 7.3x is an upper bound on the link penalty, not a measurement of
+it.** Both ends were on Wi-Fi for this run and the host was busy
+pumping a serial census at the same time, so latency stacked in a way a
+wired path would not. Recorded because the run passed, not because the
+rate is clean; the honest link numbers are in docs/BENCHMARKS.md and
+docs/INTEGRATION.md, measured deliberately.
+
+A caution for whoever reads the server's log next: its counter is
+REQUESTS, and an array call carries many cases in one request. Reading
+requests a second as cases a second understates the rate by whatever
+the batch factor happens to be, and an extrapolation built on it will
+be wrong by the same factor. It was, here, by about seven.
+
 ### The host-side gates, on the tree that carries all of this
 
       remotetest       67 checks, 0 failures (2,656 device checks, 0 failed)
