@@ -27,6 +27,13 @@
  * Exit status 0 only if every check passed.
  */
 
+/* nanosleep - the one wait in this file - is POSIX, not C99; this
+ * asks for it on Linux and the Mac before any header is read, and
+ * MinGW, which takes the Sleep branch, ignores it. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200112L
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
