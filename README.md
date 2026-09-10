@@ -1,73 +1,121 @@
 # cft-fp256
 
-The Coordinated Fusion Compute Tile: a deterministic, dynamically
-scalable IEEE 754-2019 math coprocessor - fp256 at the top of the
-ladder, fracturing down to 8x fp32 lanes - built on the AMD/Xilinx
-Alveo U50C (VU35P, 8 GB HBM2) through the open Vitis RTL kernel flow.
+**A math coprocessor that gets the same answer everywhere.**
 
-**The product is a contract, not a chip**: same inputs, same op, same
-bits - on this tile, on the pure-Python golden model, and on any other
-implementation that claims conformance. docs/DETERMINISM.md states the
-contract clause-by-clause against IEEE Std 754-2019; `vectors/` makes
-it scoreable.
+It does IEEE 754 arithmetic at four precisions - 32, 64, 128 and 256
+bits - and guarantees that the same inputs give the same bits whether
+the work runs on a laptop CPU, in a browser tab, on a microcontroller,
+or on the FPGA card it was designed for.
 
-The adoption story is two tiers with one contract. A software library
-anyone can run on anything - the proven case is
-[atlas-engine](https://github.com/loganw234/atlas-engine)'s pinned
-GLSL det library, one hash across NVIDIA, AMD, and Intel GPUs - and
-this hardware for heavy compute: identical bits, more speed, and
-precision up to fp256 when the problem needs it (deep-zoom orbits,
-reference oracles, interval arithmetic to come). The entry point stays
-a simple library; the tile only makes it faster.
+That guarantee is the product. The hardware only makes it faster.
 
-**What this is not for.** Raw fp32 and fp64 throughput. Every CPU and
-GPU made serves those formats at clocks and lane counts an FPGA fabric
-will not match, and nothing here tries to. binary32 and binary64 are
-carried because they are rungs of the same IEEE 754 ladder as
-binary128 and binary256, and carrying the whole ladder is what lets
-one contract - bit-exact, deterministic, the same result on every
-backend - cover all of them. Their support is a convenience and a
-conformance story; the tile's reason to exist is the precision
-commodity hardware does not offer, and docs/LAYOUTS.md says the same
-of the fp32- and fp64-heavy tile mixes.
+Formally it is the Coordinated Fusion Compute Tile, built for the
+AMD/Xilinx Alveo U50C through the open Vitis RTL kernel flow, and
+everything here is Apache-2.0.
 
-## What exists today
+## Try it without installing anything
 
-| piece | state |
+**<https://loganw234.github.io/cft-fp256/>**
+
+That page is this project's software compiled to WebAssembly. It replays
+the published conformance vectors in front of you, and its calculator
+reaches every operation: all four precisions, all five rounding modes,
+the thirty-nine transcendental functions, the character conversions.
+Drop a vector file on it and it scores itself.
+
+A second page,
+[demos.html](https://loganw234.github.io/cft-fp256/demos.html), runs five
+real workloads in the browser, each one's checksum chain matched against
+the command-line tool's.
+
+## Why this exists
+
+Floating-point arithmetic is permitted to differ between machines, and
+it does. Two GPUs from different vendors, or the same source through a
+different compiler, can disagree in the last bits and then diverge. For
+anything iterative - orbital mechanics, deep-zoom fractal geometry,
+reproducible science - that ends the run.
+
+The usual answer is to require agreement only within a tolerance. This
+project takes the other route: define one exact result for every
+operation, score every implementation against it, and make runs
+reproducible bit for bit.
+
+Exactness buys things a tolerance cannot. You can cache a result and
+trust it later. You can replay a computation and get an identical trace.
+You can compare two machines with `diff`.
+
+The proven case is [atlas-engine](https://github.com/loganw234/atlas-engine)'s
+geometry library, which produces **one hash across NVIDIA, AMD and Intel
+GPUs**.
+
+## What it is not for
+
+Raw fp32 and fp64 throughput. Every CPU and GPU on the market serves
+those formats at clocks and lane counts an FPGA fabric will not match,
+and nothing here pretends otherwise. They are carried because they are
+rungs of the same ladder as 128 and 256, and carrying the whole ladder
+is what lets one contract cover all of it.
+
+The tile earns its place at the precisions commodity hardware does not
+offer, and on the guarantee that the answer does not move.
+
+## Where it runs, and how fast
+
+The same library, the same bits, on four very different machines. Rates
+are for binary256, the widest and slowest format; binary32 runs roughly
+eight times faster on every row.
+
+| where | what it is | binary256 throughput |
+|---|---|---|
+| a browser, or any CPU | the software library, no dependencies | 1.7 million elements a second |
+| a microcontroller | the same C, on an ESP32-S3 over a serial line | a few hundred cases a second |
+| the FPGA card, one tile | the same work, with the bus out of the way | 107 million elements a second |
+| the FPGA card, four tiles | four times over | 427 million, at about 35 watts |
+
+The microcontroller row is not a stunt. That part replayed **508,000
+published conformance cases** - every binary32 and binary64 family,
+complete - and disagreed with the reference on none of them. It is the
+same library the card runs, compiled small.
+
+## What is built and working
+
+| piece | what it is |
 |---|---|
-| `python/cft_golden` | exact fp32/fp64/fp128/fp256, 30 opcodes (arithmetic, sign, min/max, predicates, integer/bitwise with a 32-bit multiply since 2026-09-07, and reductions with an index-fixed tree) under all five 754 rounding attributes, plus the full clause-5 contract function set (div/sqrt, roundToIntegral, every conversion, scaleB/logB, nextUp/nextDown, class, totalOrder, signaling compares, remainder), the transcendentals correctly rounded (exp/expm1/exp2/log/log1p/log2/log10/pow/hypot, sinPi/cosPi/tanPi/asin/acos/atan/atan2/asinPi/acosPi/atanPi/atan2Pi, and sin/cos/tan of a radian argument with sinh/cosh/tanh/asinh/acosh/atanh, and since ABI 0.6 the rest of Table 9.1 - exp2m1, exp10, exp10m1, log2p1, log10p1, rSqrt, pown, powr, compound, rootn - all thirty-nine, and since ABI 0.7 the cross-format arithmetic of 5.4.1 and the magnitude forms of 9.6, with the exact cases decided by exact arithmetic and proved complete by Niven's theorem and Hermite-Lindemann, and a Ziv loop over rigorous enclosures for the rest), and the orbit sequencer's execution model; dependency-free; **pytest green** against native binary64, `math.fma`, mpmath, math.remainder/nextafter/ldexp, an exact-rational rounding reference, and hand-computed 754 anchors |
-| `rtl/` | the v1 16-stage pipelined FMA core (one parameterized source serving all four rungs: 8x fp32 / 4x fp64 / 2x fp128 / 1x fp256 per 256-bit beat), operand steering, ap_ctrl_hs CSR block with CAPS discovery, streaming engine with one AXI master per operand stream and pipelined address phases, a streaming reduction accumulator, the orbit sequencer (`cft_seq`: on-chip programs over the existing opcodes behind MODE[15], benched bit-exact against `seq.py`; hw_emu passing at fp32 through real XRT since 2026-09-02, once its reads were steered to the HBM bank that holds them), and **one ALU array per tile** (`cft_lanes`, owned by `cft_krnl`): the streaming engine and the sequencer each present a per-issue request and MODE[15] - already the AXI owner-select - says whose reaches the array, with no arbitration because they never run at once. The sequencer's private second copy is gone, and out of context at 135 MHz that is 288,764 -> 162,482 LUT a tile, 139,404 after the sequencer's control diet, 129,708 with the seed ROM as case tables and 123,420 with the round stage's arithmetic moved up a stage (2026-09-02, docs/ROADMAP.md). The optional fused ladders live in the array too (`FUSE_MUL`/`FUSE_NORM`/`FUSE_ALIGN`, **all default off**): the 2026-08-31 campaign's `FUSE_NORM`/`FUSE_ALIGN` stay equivalence-proven step by step and are worth 15,805 LUT here (139,404 -> 123,599), but they leave only +0.097 ns of out-of-context slack at 135 MHz against ladders-off's +0.307, and a shell build is what settled that a thin out-of-context margin is not a margin. BRAM-backed stream FIFOs, Vitis kernel top; the v0 behavioural core stays as the readable reference; **Yosys-clean** (CI-enforced portability). Since 2026-09-07 the leading-zero cone is a stage of its own (`cft_lzcone`, proven equal to the priority form it replaced at every window width; the cone left the routed critical path on both parts measured), the multiplier can be iterated (`MUL_PASSES`: 262 DSPs to 56 at ten passes, bit-identical, fp32 never slower), `CAPS` publishes the sequencer's capacities and the two new instructions, and the open-core configuration - ten passes, both ladders - routes at 100 MHz on a -2 Kintex-7 325T at 46% of the part and misses 120 by 0.078 ns (docs/ARCHITECTURE.md) |
-| `tb/` | cocotb: streamed unit benches for all four widths + full-kernel AXI end-to-end via cocotbext-axi, every result and flag bit checked against the golden model - **green** across `make sim`'s 21 targets, and `make simmc`'s seventeen at ten passes with the board configuration among them (its engine-driven kernel under Verilator, which finishes the bench Icarus cannot - docs/VERIFICATION.md), including the reduction accumulator, full-kernel reductions, the divide/sqrt seed opcodes (85,264 comparisons), trimmed-build precision refusal, bus-fault injection, and the sequencer's unit and full-kernel benches against seq.py (Icarus 12, cocotb 1.9.2, in the `docker/` container). Two more targets sit beside the aggregate rather than in it, `krnlfused` and `krnlplain`, which run the full kernel with the fused ladders on and off and hold both to the same bits - the ladders are a resource trade, not a numeric one. Beside it, `formal/`: machine-checked proofs - the stream FIFO unbounded, the seed special-cases complete, the simpleops area rewrite proven equivalent over all 2^104 inputs, the leading-zero cone equal to the form it replaced, and the multi-cycle multiplier exact at the real chunk for every pass geometry the tile builds - 31 proofs and a negative control, about seven minutes (docs/VERIFICATION.md maps every gate and what it costs) |
-| `hw/` | kernel.xml (== the CSR map), package_xo script, HBM link.cfg, the era-matched `rebuild-2022.sh` pipeline, `gen_layouts.py` + `layouts/` (every tile mix the U50 could carry, derived - docs/LAYOUTS.md) - **packaging and hw_emu gates MET** (bit-exact vs golden through real XRT), hw bitstreams built (docs/BRINGUP.md records each gate honestly) |
-| `host/` | **libcft** - ~19,900 lines of C99 across `src/`, no dependencies, no build step for callers: one ABI reachable from Fortran, Julia, Python, Rust, C and C++ - the last of those through `host/include/cft.hpp`, a header-only C++17 layer (RAII for the handles, a fixed-width byte type per format, span batches, operators bound to an explicit context rather than a hidden global rounding attribute) that computes nothing itself and is held to the C entry points one by one, at C++17 and C++20, by `make -C host cpptest`. The software backend replays 1,223,635 conformance cases over 168 sets at the census's pool sizes (1,071,635 at `make vectors`') and agrees with the golden model on 216,000 differential cases; `cft_div`/`cft_sqrt` compose the tile's seed opcodes into correctly-rounded division and square root, proven against **23.9 billion cases of the host CPU's own IEEE hardware and 999,000 cases of GNU MPFR** (docs/VALIDATION.md); as of 2026-09-01 the **rest of clause 5** ships too - roundToIntegral, every conversion, scaleB/logB, nextUp/nextDown, class, totalOrder, signaling compares, exact remainder - composed or host-exact, zero new RTL, held identical to the model over 112,372 per-element checks; as of 2026-09-02 so do the **phase-1 transcendentals** (ABI 0.3), correctly rounded at every format under every attribute on a multiprecision evaluator built on the same bigint core, and as of 2026-09-03 the **phase-2 trigonometrics** (ABI 0.4) - sinPi, cosPi, tanPi, asin, acos, atan, atan2, asinPi, acosPi, atanPi, atan2Pi - the eleven whose argument reduction is exact, and as of 2026-09-03 the **phase-3 set** (ABI 0.5) - sin, cos, tan of a radian argument, reduced against a generated 270,336-bit 2/pi with the cancellation measured per format rather than assumed, and sinh, cosh, tanh, asinh, acosh, atanh - all thirty-nine since ABI 0.6 completed Table 9.1 - and with it clause 9.5's augmented arithmetic, all seven reductions of 9.4, clause 5.12's character conversions and 9.7's payload operations - held identical to the model over 607,217 per-element checks (with 140,088 augmented pairs, 12,696 reductions and 20,819 character conversions beside them) and to **GNU MPFR over 739,234 cases with zero value and zero flag mismatches**; an XRT backend drives up to 64 compute units and has been exercised against a **four-tile hw_emu image with no card present**; a remote backend puts a tile behind a socket with the same bits (docs/REMOTE.md), over TCP or WebSocket, so a Windows client or a browser computes on a Linux-hosted card; and the four parsers that face untrusted bytes are fuzzed under sanitizers (`host/fuzz/`, opt-in). Reductions add the tree-aware multi-tile split, so a sum over four tiles returns what one tile returns. The C and Python examples print identical checksums on Linux/glibc and Windows/msvcrt - as do C++, Rust, Julia, Go, C# and R, each on the platform and date docs/COMPATIBILITY.md records; Fortran reaches the same library through iso_c_binding and is the one example that prints no checksum line. **Validate the contract in your browser, nothing installed: https://loganw234.github.io/cft-fp256/** - the software backend compiled to WebAssembly, replaying the published vectors, the transcendental sets included since 2026-09-03, with a calculator panel that reaches every opcode, composed div/sqrt, all thirty-nine transcendentals, the augmented pairs, the scaled products and the character conversions; and a demos page at https://loganw234.github.io/cft-fp256/demos.html where the five contract workloads run in the browser on the same module bytes, each panel's SHA-256 chain checked against the C tool's - the zoom and orbits panels on their tools' program engine since 2026-09-07, when the sequencer's program API reached JavaScript |
-| `vectors/` | deterministic conformance-set emitter (JSONL, seeded) |
+| `python/cft_golden` | The definition of correct. Exact, dependency-free Python: 30 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
+| `rtl/` | The tile. A 16-stage pipelined fused-multiply-add core that splits one 256-bit lane into 2x fp128, 4x fp64 or 8x fp32, plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. Yosys-clean, portability enforced in CI. |
+| `tb/` and `formal/` | 21 simulation targets checking every result and every flag against the golden model, and 31 machine-checked proofs with a negative control. |
+| `host/` | **libcft**: about 19,900 lines of C99, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
+| `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
+| `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
+| `vectors/` | The conformance sets: 1,071,635 cases, deterministic and seeded. |
 
-The card came up on 2026-09-08. Both card-day images reproduced every
-published case on silicon - 1,071,635 through one tile and through
-four - a soak repeated the matrix, the sets and the sequencer's orbit
-to the same bytes, and the revision-2 single closed with more margin
-than the pair before it and ran registers above 15 and the per-run
-bank on real hardware the same afternoon, and the revision-3 pair,
-built overnight, ran the per-lane scratch, its per-run block and the
-512-entry bank on silicon to the software backend's bytes
-(docs/VALIDATION.md;
-docs/CARDDAY.md is the runbook as it was run; docs/BENCHMARKS.md has
-the measured throughput - through the library, bus-bound, and with
-the bus taken out, where one tile moved 59 million beats a second at
-every format on the revision-3 pair and 107 million on the read-ahead
-pair built the next morning, four tiles moving four times that - and
-what bounds each). The same library answers cases on an ESP32-S3 over
-a serial line, one at a time, at a few hundred a second - the same
-published sets, compared the same way, which is the point of it being
-the same library (docs/EMBEDDED.md). The claim before that day
-was narrower and checkable - the RTL is bit-exact against a golden
-model that is itself proven against implementations sharing no code
-with it, through the same interfaces XRT drives on silicon - and the
-day confirmed it.
+Each of these has a document in `docs/` carrying the detail, the dates
+and the measurements.
+
+## How the claims are checked
+
+The rule is that a number in a document has a run behind it, and the
+runs that failed stay in the record. The load-bearing ones:
+
+- **The card reproduced every published case on silicon**, through one
+  tile and through four. `docs/CARDDAY.md` is the runbook as it was
+  actually run; `docs/VALIDATION.md` is the running record.
+- **Division and square root** are held against 23.9 billion cases of
+  the host CPU's own IEEE hardware, and 999,000 cases of GNU MPFR.
+- **The transcendentals** are held against MPFR over 739,234 cases, with
+  zero value and zero flag mismatches.
+- **The same program in nine languages** prints byte-identical
+  checksums, each on the platform and date `docs/COMPATIBILITY.md`
+  records.
+- **CI's green tick does not cover synthesis, timing or silicon.**
+  `docs/BRINGUP.md` owns those gates and defines "done" for each;
+  `docs/VERIFICATION.md` maps every gate, what it proves, and how long
+  it really takes.
 
 ## Quickstart
 
-Golden model self-tests (any Python 3.10+; mpmath optional but
+The golden model's self-tests (any Python 3.10+, mpmath optional but
 recommended):
 
 ```bash
@@ -75,30 +123,30 @@ pip install pytest mpmath
 make golden
 ```
 
-RTL simulation - identical locally and in CI, via the container
-(Docker Desktop on Windows works; native `make sim` needs Icarus):
+The host library, which needs no FPGA toolchain at all:
+
+```bash
+make libcft            # C99, no dependencies
+make libcft-test       # contract tests, the published sets replayed, C vs Python
+make libcft-diff       # against the golden model, boundary-targeted
+```
+
+RTL simulation, identical locally and in CI through the container:
 
 ```bash
 make docker-image
 make sim-docker
 ```
 
-Or everything at once - the standardized verification run (model,
-vectors, RTL suite, yosys, formal proofs, library gates, oracle spot
-checks), resumable and logged, ending in a census block:
+Everything at once - model, vectors, RTL suite, yosys, formal proofs,
+library gates, oracle spot checks - resumable and logged:
 
 ```bash
 make verify
 ```
 
-Conformance vectors:
-
-```bash
-make vectors
-```
-
-Hardware (needs Vitis/Vivado + XRT on a Linux box; see docs/BRINGUP.md
-before running these):
+Hardware needs Vitis/Vivado and XRT on a Linux box. Read
+`docs/BRINGUP.md` first:
 
 ```bash
 make xo                                  # package rtl/ -> build/cft_krnl.xo
@@ -106,17 +154,8 @@ make xclbin TARGET=hw_emu                # emulation link
 make xclbin PLATFORM=$(xbutil-reported)  # hardware link
 ```
 
-The host library, which needs none of that:
-
-```bash
-make libcft            # C99, no dependencies
-make libcft-test       # contract tests, the published sets replayed, C vs Python
-make libcft-diff       # against the golden model, boundary-targeted
-make libcft-docker     # the same tests on a second platform
-```
-
-And against a device, in emulation or on a card - the same command
-either way, because the artifact's name selects the environment:
+Against a device, in emulation or on a card. The same command either
+way, because the artifact's name selects the environment:
 
 ```bash
 make -C host XRT=1 device-test
@@ -128,189 +167,72 @@ bash hw/run-device-test.sh cardday/quad/cft_hw.xclbin -n 4096
 ```
 python/cft_golden/   the definition of correct: exact softfloat + vector gen
 python/tests/        golden proven against native f64, math.fma, mpmath, 754 anchors
-rtl/                 cft_fpfma (core) / _pipe / cft_opmux, gathered into the
-                     one per-tile array cft_lanes; cft_csr / cft_engine_stream /
-                     cft_seq / cft_krnl; cft_mulpass and cft_normseg, the
-                     iterated multiplier and the shared normalise ladder
+rtl/                 the FMA core, the per-tile lane array, the CSR block,
+                     the streaming engine, the sequencer, the kernel top
 tb/                  cocotb benches + Makefiles (SIM=icarus default, verilator alt)
-hw/                  kernel.xml, package_kernel.tcl, link.cfg; mc_sweep.sh and
-                     impl_krnl_ooc.tcl, the out-of-context timing builds
+formal/              the property proofs (make formal): 31 tasks + a negative control
+hw/                  kernel.xml, packaging, link.cfg, out-of-context timing builds
 host/include/cft.h   the C ABI: the contract between this and its users
 host/src/            libcft - software, XRT and remote backends, conformance
 host/tests/          contract tests, device-vs-software, differential
 host/fuzz/           the four parsers that face untrusted bytes, fuzzed (opt-in)
-host/tools/          the workload tools, cft-asm (the assembler) and
-                     positive-run (the image runner)
-host/examples/       the same program in C, Python (ctypes), Julia, Rust,
-                     Go, C# and R - byte-identical checksums, each on the
-                     platform and date COMPATIBILITY.md records - plus the
-                     Fortran iso_c_binding demonstration, the one example
-                     outside that diff; the full language/drop-in matrix
-                     with per-row verification status is
-                     docs/COMPATIBILITY.md
-bindings/            cftmpfr (the Python MPFR drop-in), the WASM build
-                     behind the browser conformance page and the demos
-                     page, and the Node package that loads that same
-                     module outside a browser
-formal/              the property proofs (make formal): FIFO, seeds,
-                     simpleops equivalence, the leading-zero cone, the
-                     multi-cycle multiplier's exactness, plus the negative
-                     control - 31 tasks
-verify/              the standardized verification runner (make verify):
-                     every gate, one resumable logged run, census output;
-                     docs/VERIFICATION.md is the map of every gate, what
-                     each proves and how long each really takes
+host/tools/          the workload tools, the assembler, the image runner
+host/examples/       the same program in nine languages, byte-identical checksums
+bindings/            the WASM build, the Node package, the Python MPFR drop-in
+verify/              the standardized verification runner (make verify)
 vectors/             conformance-set emitter (JSONL)
-programs/            the program library: .cfta sources, a check per
-                     program, a manifest of the built images
+programs/            the program library: sources, a check per program, a manifest
 docker/              the simulation container CI and dev boxes share
-docs/                DETERMINISM (the contract), ARCHITECTURE, HOSTAPI,
-                     TRANSCENDENTALS (the correctly-rounded thirty-nine:
-                     algorithms, error bounds, exactness proofs and the
-                     Table Maker's Dilemma stated honestly),
-                     SEQUENCER, SCALING, ROADMAP, BRINGUP, CARDDAY,
-                     VERIFICATION (every gate, what it proves, and the
-                     measured wall time - none of it is quick),
-                     BENCHMARKS (the software tier measured against
-                     MPFR, __float128 and the CPU itself, and the
-                     five workloads written for the contract),
-                     COLLATZ, ENCLOSE, MERSENNE, ORBITS, ZOOM (those
-                     workloads: exact integers, rigorous enclosures,
-                     Lucas-Lehmer, symplectic orbits, deep zoom),
-                     DEMOS (the same five in the browser, chains
-                     matched to the C tools),
-                     ATLAS (the atlas-engine integration: the emitter
-                     seam, the det library on the ISA - emitted and
-                     bit-identical since 2026-09-07 - and the four asks,
-                     two of them built),
-                     PLATFORMS (the board and platform survey: what fits
-                     the tile, what the licence covers, what to verify
-                     before buying),
-                     REMOTE (the tile behind a socket: the protocol,
-                     what crosses the wire, and the OS answer),
-                     INTEGRATION (what to use when: staged, resident,
-                     programs, reductions, remote - and where each
-                     link becomes the wall, in measured numbers),
-                     EMBEDDED (the same library on a microcontroller:
-                     the build profiles, what an 8-bit part cannot
-                     have and why, the serial replay harness, and
-                     what an ESP32-S3 actually ran),
-                     NOVEL (results with no prior description found)
-CAPABILITIES.md      what the tile can and cannot do, with the gaps named
+docs/                one file per subject; see below
 ```
 
-![The deep-zoom demo in the browser: the frame from an fp256 reference orbit beside the frame an fp64 reference produces at the same 10^-61 centre](docs/img/demos/zoom.png)
-
-*The five workloads of docs/BENCHMARKS.md run in the browser on the
-module the conformance page embeds, at
-https://loganw234.github.io/cft-fp256/demos.html; every panel prints the
-SHA-256 chain it computed beside the C tool's, and they match
-(docs/DEMOS.md).*
-
-**Start with [CAPABILITIES.md](CAPABILITIES.md)** if you want to know
-whether this is useful to you. It stays deliberately unflattering:
-IEEE 754-2019 is now covered on the binary side as far as the
-contract's stated exceptions allow. Every operation of clause 5 is
-there: the six arithmetic operations (division and square root
-composed from the tile's own seed opcodes and FMA), the completion set
-from roundToIntegral to exact remainder, and - as of 2026-09-03 - the
-character-sequence conversions of 5.12, decimal and hexadecimal in both
-directions, correctly rounded with no cap on the digit count. So is
-every recommended operation of clause 9 for binary formats: all
-thirty-nine functions of Table 9.1, **correctly rounded** at every
-format under every attribute with exact flags (docs/TRANSCENDENTALS.md
-- a stronger claim than any libm makes and the only one that can be
-scored), the seven reductions of 9.4 over a contractual tree, the three
-augmented operations of 9.5 with their ties-toward-zero rounding, all
-eight minimum/maximum operations of 9.6 (four as tile opcodes, the
-magnitude four as host operations) and the three payload operations
-of 9.7. Since ABI 0.7 (2026-09-04) the library **conforms to
-IEEE 754-2019 in radix 2**, in the standard's own words (3.1.2):
-binary32, binary64 and binary128 as supported arithmetic and
-interchange formats and binary256 as a further one; every clause-5
-operation for each of them, the cross-format forms of the six
-arithmetic operations included; a status word lowered only by the
-caller; the conformance predicates; and every recommended operation
-of clause 9 for binary formats, the magnitude four of 9.6 among them.
-docs/COMPLIANCE.md walks the standard clause by clause and is the
-conformance statement. ABI 0.8 (2026-09-07) adds what the atlas port
-asked for - a 32-bit integer multiply and constants indexed through
-the immediate - and the sequencer's published capacities, each
-announced in CAPS and refused by name on a device that lacks it. ABI
-0.9 (2026-09-08) is the sequencer's second revision: thirty-two
-registers a lane, 4,096 instructions, the constant bank as per-run
-data with one digest over image and bank, and programs as files - a
-text form, an assembler in two languages held byte for byte, a
-library with a check per program, and a runner (docs/PROGRAMS.md).
-ABI 0.10, the same evening, is the third revision, built to
-atlas-engine's measured second round of asks: a 256-slot scratch
-memory a lane with load and store by slot, its first slots carried
-into and out of a run as per-lane blocks, 16,384 instructions, a
-512-entry bank through a ninth index bit, and one `cft_program_run_ex`
-that takes everything a run carries, the two older calls wrapping it.
-ABI 0.11 (2026-09-09) is the step the card's own measurement asked
-for: the buffer API is real on the device, so a caller who fills a
-`cft_alloc` buffer once and runs many times gets the engine's rate
-through the library rather than the bus's, on the same four calls
-that are no-ops on the software backend (docs/HOSTAPI.md).
-What stays outside is named rather than implied: the
-decimal formats (a different datapath, effectively their own tile),
-clause 8's alternate exception handling, and NaN payload propagation
-through arithmetic, which is a canonical quiet NaN by design. The
-orbit sequencer is RTL now, holding bit-exact to `seq.py` through the
-kernel's one ALU array in simulation and through hw_emu on the real
-XRT stack - fp32 on 2026-09-02, and on 2026-09-08 all four formats'
-programs on a four-tile image, 98 checks bit-exact; a bitstream that
-carries a program, and silicon, are still ahead of it, and since
-2026-09-07 a program can be loaded from JavaScript as well as from C. What it does
-do, it does bit-exactly, and the file names every gap that remains.
+In `docs/`, start with **DETERMINISM** (the contract itself),
+**ARCHITECTURE** (how the tile works), **HOSTAPI** (how to call it) and
+**INTEGRATION** (which path to use, and where each one's wall is).
+**VERIFICATION** maps every gate and its real cost; **VALIDATION** is the
+running record of what was run and what it said, with failures kept
+beside passes. **EMBEDDED** covers the microcontroller row above,
+**REMOTE** the tile behind a socket, and **BENCHMARKS** the measured
+throughput and what bounds each number.
 
 ## Design rules the repo is built around
 
 - **One definition of correct.** The golden model is integer-exact
-  Python with zero dependencies; RTL, host, and vectors are all scored
+  Python with zero dependencies. RTL, host and vectors are all scored
   against it, never against each other.
-- **The contract outranks the implementation.** rtl/cft_opmux.sv,
-  `softfloat.steer`, kernel.xml, and the CSR map each exist in exactly
-  one other place (docs), and changes move together.
-- **Claims stay measurable.** CI's green tick covers the golden gates
-  and simulation; it does not cover synthesis, timing, or silicon -
-  docs/BRINGUP.md owns those gates and says what "done" means for
-  each, and docs/VERIFICATION.md maps every gate, what it proves and
-  how long it really takes.
-- **Everything open.** Apache-2.0; the toolchain path is the standard
-  Vitis RTL kernel flow (`package_xo` + `v++`), host is pyxrt, and
-  verification is cocotb + cocotbext-axi + mpmath - all open source.
+- **The contract outranks the implementation.** Each shared definition
+  exists in exactly one other place, and changes move together.
+- **Claims stay measurable.** A number has a run behind it, and a
+  hypothesis that turned out wrong stays in the record with the
+  measurement that killed it.
+- **Everything open.** Apache-2.0, the standard Vitis flow, and a
+  verification stack of cocotb, mpmath and pytest - all permissive.
 
 ## Where this is going
 
-docs/ROADMAP.md, in one line each: v0.x put this bitstream on the
-card and reproduced the vectors (done 2026-09-08); the
-sequencer with hardware-guaranteed deposition order already exists in
-RTL and the rounding attributes shipped with it; the third tier after
-the card is the same tile on an open Kintex-7 board - one tile at 46%
-of a 325T, about 119 MHz on a -2 part with the multiplier iterated -
-and the atlas parity column and the high-precision oracle role follow
-from the program API and the det library's port, both of which now
-exist.
+`docs/ROADMAP.md` has the detail. In short: the card is up and
+reproducing the vectors; the next tier is the same tile on an open
+Kintex-7 board, where one tile fits in 46% of a 325T; and the roadmap
+now also carries what the first outside workload asked the library for,
+ranked by measurement rather than by guess.
 
 ## Neighbours
 
 The workload this tile exists to serve is
-[atlas-engine](https://github.com/loganw234/atlas-engine), and the
-plates it evaluates are the
+[atlas-engine](https://github.com/loganw234/atlas-engine), and the plates
+it evaluates are the
 [PrettyCloud](https://github.com/loganw234/PrettyCloud) atlas at
-prettycloud.io; docs/ATLAS.md is the assessment of what the backend swap
-needs, and its first step is done: the det library emits as sequencer
-programs, bit-identical to the pinned GLSL on 4,096-point sweeps
-(atlas-engine branch `cft-detlib`), with the two instructions it asked
-for now on the ISA. The camera whose census this README cites as its proven case is
-atlas-darkroom, which is private, and it labels the citation from its
-own side: one of the operator's projects vouching for another is worth
+prettycloud.io. `docs/ATLAS.md` assesses what the backend swap needs; its
+first step is done, with that library emitting as sequencer programs
+bit-identical to the pinned GLSL over 4,096-point sweeps.
+
+The camera whose census this README cites as its proven case is
+atlas-darkroom, which is private, and it labels the citation from its own
+side: one of the operator's projects vouching for another is worth
 exactly what the census behind it is worth, and nothing more.
 
 ## License
 
 Apache-2.0 (see LICENSE, NOTICE). Dependencies: cocotb (BSD-3),
-cocotbext-axi (MIT), mpmath (BSD), pytest (MIT), XRT/pyxrt
-(Apache-2.0) - all permissive, per the project's ground rule.
+cocotbext-axi (MIT), mpmath (BSD), pytest (MIT), XRT/pyxrt (Apache-2.0)
+- all permissive, per the project's ground rule.
