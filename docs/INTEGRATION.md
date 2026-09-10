@@ -111,6 +111,54 @@ stream of fresh data: that is bus-bound on every board, the U50 mildest
 among them, and the design's answer on a slow link is a program, not a
 faster stream.
 
+## When your own gather is the wall, which happens before the link does
+
+Everything above assumes a call's operands are already contiguous. When
+they are not - when a step gathers scattered elements, computes, and
+scatters the answer back - the cost that decides your rate is **the
+number of calls, not the number of elements**, and that is a wall a
+caller can hit at one tile with the link entirely idle.
+
+The software backend charges per ELEMENT. A device charges per CALL:
+the control-plane round trip is fixed, so a call of eight elements and
+a call of eight thousand cost nearly the same. A pattern that is free
+on the software backend can therefore dominate on a tile, and the
+profile will not look like the bus.
+
+Measured on an N-body integrator (IAS15, binary256, through the
+program engine) whose force is computed over particle PAIRS and then
+scattered back onto particles as one vector add per partner:
+
+      share of wall clock in the scatter    software      card
+      8 bodies                                  3.6%     20.9%
+      32 bodies                                 6.3%     42.2%
+      64 bodies                                 6.7%     36.0%
+
+Six percent on a CPU and forty on the tile, for the same arithmetic.
+At 64 bodies the scatter is 63 separate vector adds of 192 elements
+each per force evaluation; the CPU sees 12,096 elements and shrugs,
+the tile sees 63 round trips. Removing that cost - the same work
+issued as one device-side scatter rather than 63 calls - would take
+that workload from 1.99x the CPU to about 3.1x, so it is worth more
+than every other optimisation tried on it. Two others were tried and
+measured first: skipping a convergence test that accounted for 13 to
+19 percent of all calls bought 4 to 9 percent, and the host memory
+copies in the same routine were a red herring, being host work charged
+equally to both sides.
+
+**What to do about it.** Restructure so the scattered step is one call
+rather than many: accumulate into a contiguous buffer and issue a
+single wide operation, even if that means computing values you discard.
+On a device, arithmetic on elements you do not need is usually cheaper
+than a second call. Where the pattern cannot be flattened, that is the
+honest limit of the current API, and it is a known gap rather than a
+mystery - the device has no scatter-add and no gather primitive today.
+
+**How to tell this is what you have.** Divide your wall clock by your
+call count. If the quotient is flat as you widen the problem, you are
+paying per call and the fix is fewer, wider calls. If it falls, you are
+paying per element and the fix is a faster path (resident, programs).
+
 ## The numbers, in one place
 
 `fma`, one million elements a call, elements per second, measured on
