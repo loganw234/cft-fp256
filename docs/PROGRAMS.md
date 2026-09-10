@@ -242,7 +242,7 @@ re-assembles, and runs every row's check. On Windows:
         TMP='C:/Users/logan/AppData/Local/Temp' \
         TEMP='C:/Users/logan/AppData/Local/Temp'
 
-## The runner, `host/tools/positive-run`   **BUILT**
+## The runner, `host/tools/positive-run.c`   **BUILT**
 
 docs/ATLAS.md's step 3, built on the pattern of the workload tools:
 

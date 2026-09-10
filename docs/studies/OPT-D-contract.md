@@ -830,9 +830,10 @@ Every candidate has the same defect. A tier that let an implementation
 pick its own reduction tree would produce different bits and end the
 product. A tier that let a small tile round differently would too. A
 tier that let a tile *refuse* operations already exists - it is CAPS,
-and `docs/CAPABILITIES.md`'s "a MODE selecting a precision this build
-lacks is refused... rather than answered with plausible garbage from
-banks that are not there" is exactly the right behaviour. And a tier
+and `CAPABILITIES.md`'s (repository root) "A MODE selecting a
+precision the build lacks is **refused** ... rather than answered with
+plausible garbage from banks that are not there" is exactly the right
+behaviour. And a tier
 that let a tile be *slower* needs no contract change at all, because
 latency and rate are nowhere in the contract - which is the observation
 `docs/ROADMAP.md`'s `MUL_PASSES` step already banked.
