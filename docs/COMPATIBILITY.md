@@ -534,6 +534,29 @@ LUTs and no block RAM. The macro moved to 0.11 with the module rebuild;
 | Node / Browser | the module rebuilt at 0.11 with no new export - wasm32 has no device, so the step is the version and nothing else: module `29cce150...` (225,354 bytes, from 225,231), 138 `cftw_*` exports, package 0.11.0; `verify.mjs` OK (abi 11 both sides, 1,071,635 cases through the page's bytes and 831,635 through the wrappers), `test.mjs` 126, `program_test.mjs` 37, `conformance.mjs` 1,903,270 cases over 316 set replays, `verify_demos.mjs` every chain the C tools' with `demos_chains.json` re-recorded - the only sha256 that moved in it is the module stamp - and `make -C host wstest` 67 checks, 0 failures; the runner's `node` and `wasm` stages PASS (run 20260909-084149-e01b689) |
 | RTL | the read-ahead: `AR_DEPTH` 4 to 16, `FIFO_LOG2` 7 to 9, `AW_DEPTH` 16 new, bursts issued at full length or not at all, a latency-modelled cocotb memory (`RD_LATENCY`/`WR_LATENCY`) that reproduces the card's 2.25 cycles a beat at a 125-cycle read latency and a 16-cycle write response; on the merged tree the full suite 69/69, the multi-cycle census 43/43, formal 31/31 with the FIFO proof still unbounded, both lints clean with no suppression added (run 20260909-074330-51140af, certified); out of context +637 LUT (+0.51%), 0 block RAM, WNS +1.196 unchanged, one implementation routed at +0.481 ns. The pair built from it (main 49a9a1b) measured 100.6 to 106.8 M beats a second a tile on the card - 1.8x revision 3's 59, 84 to 89 percent of the predicted 120 - with every check clean (docs/VALIDATION.md, the read-ahead pair's entry). |
 
+## Hosts and boards
+
+Where the library has been built and run, as opposed to where it is
+expected to work. A row says what was measured, not what compiles.
+
+| Host | Toolchain | What ran |
+|---|---|---|
+| Windows 11 x86_64 | mingw64 gcc 16.1 | everything: `make -C host test` over all 1,071,635 published cases, `remotetest`, `wstest`, `programs-check`, the runner's stages, and the card through XRT from WSL |
+| Linux x86_64 (the box) | gcc 13.3 + XRT | the card itself - `cft-serve`, `device-test`, `cft-selftest`, `cft-resident`, the soaks; the tile numbers in docs/BENCHMARKS.md are from here |
+| macOS 26 arm64 | Apple clang 21 | the library and its gates locally (1,071,635 cases in 388 s), and the card as a remote client: `remote-test` 279 checks and `device-test -n 256` 2,658 checks, 0 failed, agreeing with the card bit for bit. **The whole published census over the network is NOT yet claimed from this host** - `cft-selftest` against a remote device stops early with an internal error on a request the server logged as answered; macOS-specific, parked, docs/VALIDATION.md has the evidence |
+| WebAssembly | emscripten, node 22 | no device; the software backend, 1,903,270 cases over 316 set replays |
+
+| Board | Part | What ran |
+|---|---|---|
+| Waveshare ESP32-S3-Touch-LCD-1.69 | ESP32-S3, 512 KB SRAM | **on the bench.** The elementwise, transcendental and augmented sets replayed case by case over its USB serial, 222,000 of them matching bit for bit before an unrelated transport fault; the reduction, character and magnitude sets replay clean since. Two environment fixes were needed and are in docs/EMBEDDED.md: a 96 KB loop-task stack, and a USB receive ring raised to match the line the responder publishes |
+| Raspberry Pi Pico | RP2040 | compiles, all three sketches, no warnings. **Not run on the part** |
+| Arduino Mega | ATmega2560 | compiles, all three sketches. **Not run on the part** |
+| Arduino Uno / Nano | ATmega328P | compiles at the `CFT_TINY` profile, 24,266 bytes of flash and 957 of RAM for VectorReplay. **Not run on the part**, and the 130-byte stack margin is still a static analysis |
+
+The distinction matters: a board that compiles has been checked against
+the sizes it must fit, and nothing else. Only the S3 has answered a
+case.
+
 ## Drop-ins
 
 Higher-level packages that slot into an existing ecosystem's shape,

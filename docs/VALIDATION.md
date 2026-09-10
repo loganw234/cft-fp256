@@ -10237,3 +10237,191 @@ margin on an ATmega328P, whose failure mode is corruption rather than a
 refusal, and what a large `to_decimal` costs the Pico's heap, where the
 arbitrary-precision natural behind the sequence is allocated and
 nothing here has measured it.
+
+
+## 2026-09-09 - the ESP32-S3 answers, and a card any connection could hold
+
+The previous entry ended "None of the above ran on a part." A part ran.
+It also cost most of an afternoon to two faults that had nothing to do
+with arithmetic, and both are worth writing down because both looked
+like something else.
+
+### A published line and a deliverable line are different numbers
+
+The S3 replays the sets over its native USB serial. Its `id` answer
+publishes a 4,096-character line, which is `VR_LINE`, the size of the
+buffer the responder parses into. Nothing published the size of the
+buffer the DRIVER fills, and the Arduino-ESP32 core gives USB CDC 256
+bytes (`HWCDC.cpp` calls `setRxBufferSize(256)`). A request longer than
+the ring was lost before the sketch ever saw a byte of it.
+
+Measured on the board, by sending a `put` of a doubling payload:
+
+      payload   request line   answered
+      128 B         275 ch     yes
+      192 B         403 ch     no
+      2,024 B     4,067 ch     no
+
+Nothing revealed this for 222,000 cases, because the elementwise,
+transcendental and augmented sets all send short lines. The reduction
+sets are the first to stage a vector - about 2 KB per `put` - and the
+census stopped there, on the first one, with a timeout that three
+retries and three board resets could not clear. It read exactly like a
+hung board and it was a dropped request.
+
+`setup()` now raises the ring to twice `VR_LINE` before `begin()`; all
+three of the ESP32's serial classes carry `setRxBufferSize`, so it does
+not matter which `Serial` a variant binds. The same board then answered
+the full 4,067-character line, 2,024 bytes of payload, and replayed the
+reduction, character and magnitude sets clean. The harness gained
+`--max-line N` for the other direction: send no request longer than N
+whatever `id` advertises, so a board whose driver cannot take its
+published line can still be replayed, and diagnosed, without a reflash.
+
+This is the second of its kind on this part. The first, in the entry
+above, was the ESP32 loop task's 8 KB stack against a correctly-rounded
+transcendental. Both were the board's environment rather than the
+library, and neither was visible from a host.
+
+### The throughput decayed, and it was not the die
+
+The instrumented census was built to answer a specific question: a
+census run earlier the same day held 239 cases a second for 60,000
+cases and then fell steadily to 205 by 84,000, and an S3 is a bare
+plastic package on a small board with no heatsink. So CSRP/1 gained
+`env` - the responder's counters, plus whatever the sketch's hook adds
+as key=value tokens; the reference sketch reports die temperature, free
+heap and uptime - and the harness reads it every 2,000 cases, shows the
+rate over the last 2,000 beside the overall rate, and writes both to a
+`--trace` CSV.
+
+Over 186,000 cases the answer was unambiguous, and it was no:
+
+      die temperature    42.3 C low, 45.3 C high
+      free heap          198,300 bytes, not one byte moved
+      rate, host busy    120-180 cases/s
+      rate, host quiet   212-239 cases/s
+
+The rate recovered on its own the moment a five-board compile finished
+on the host, while temperature and heap never moved. The decay was the
+desktop starving the serial pump, not the part throttling. A heatsink
+would have measured nothing, and the overall rate - a cumulative
+average, which absorbs a slow stretch and never recovers from it - was
+what made it look like a trend. The window rate is now printed beside
+it for that reason.
+
+Worth stating plainly: the instrument built to confirm a thermal
+hypothesis refuted it, and found an unrelated real defect on the way.
+
+### A stray connection held the whole quad for seventeen minutes
+
+`cft-serve` opened its connection's device at accept. A device on a
+card holds every compute unit it spans, exclusively, and a device on
+the quad IS the quad - the XRT backend opens all four `cft_krnl` units
+as one device's four tiles. So the card belonged to whichever socket
+connected first, whatever it then said, or said nothing at all.
+
+A one-line `nc host port`, left open from a demonstration of a keepalive
+timer, did precisely that. For seventeen minutes every real client got
+"artifact missing, unreadable, or not a tile", which is what an XRT
+`open_cu_context` failure looks like from outside and reads as a broken
+card or a bad artifact. The diagnosis went the wrong way twice: first
+to a Mac's networking, then to a server bug in the truncated-frame
+path. A bisect settled it - the Mac passed 280 protocol checks twice
+against a software server on the same Wi-Fi, while the box's own client
+failed against its own card, so the failure followed the held card and
+not the wire - and the actual culprit was visible in one line of
+`ss -tnp` the whole time.
+
+The server now stores the artifact at accept and opens the card in
+`conn_device`, at the connection's first HELLO, asked of the driver
+once. Nothing downstream changes: every other opcode already required
+`hello_done`, and HELLO already refused a connection whose device would
+not open, so no handler can meet a NULL device that could not meet one
+before. A connection refused for a bad magic, a wrong ABI, an oversize
+length or a truncated frame now never touches the card.
+
+Checked on the card itself, with a silent connection held open beside
+the client - the exact condition that caused the outage:
+
+      a real client, silent connection held open   279 checks, 0 failures
+      control, nothing else connected              279 checks, 0 failures
+      what the server made of that battery         21 accepted, 6 devices opened
+
+Fifteen of twenty-one connections were refused before the card was ever
+asked for.
+
+### Keepalive, for the client that vanishes after HELLO
+
+Lazy opening covers the connection that never greets. The other half is
+a client that greets, works, and then disappears without a FIN - a
+laptop losing its route mid-session. Its socket stays established,
+nobody writes to it, so it never becomes readable, and its device stays
+held until the server exits. Every accepted socket now carries
+`SO_KEEPALIVE`, tuned where the knobs exist (Linux) to probe after 30 s
+of silence, every 10 s, three times, so a dead client releases its tile
+in about a minute; Windows keeps its two-hour default, long but
+bounded. A client that closes properly waits on none of it.
+
+One thing the same day taught the protocol battery about real networks:
+`remote-test`'s truncated-frame check closes a connection mid-frame and
+opens another, and on loopback the server has seen the EOF before the
+second connect lands. Over a wireless link it need not have. The check
+now asks again for up to two seconds, which is waiting for the server
+rather than weakening the check.
+
+### The Mac against the hardware: compliant. Over the network: not yet
+
+The MacBook Pro M2, arm64 Apple clang, driving the read-ahead quad:
+
+      remote-test, three consecutive runs   279 checks, 0 failures each
+      remote-test --bench                    26 checks, 0 failures
+      device-test -n 256                  2,658 checks, 0 failed
+
+The last of those is the one that matters, and it is the compliance
+claim: the card and the Mac's own software backend agree on every case,
+bits and flags, across every operation, format and rounding attribute
+device-test covers.
+
+**What is NOT yet claimed is the whole published census over the
+network from this host.** `cft-selftest vectors/out cft://...` from the
+Mac stops early - twice, at request 141 and at request 148 of the first
+set - reporting "cft_run failed: internal error". The server's log
+shows that same request answered `ok, 12 bytes`, so the card computed
+and the server replied; the Mac's client made an error out of a good
+answer. It is macOS-specific: the desktop ran the same binary against
+the same card past 5,275 requests without a fault in the same window.
+
+That is parked rather than chased. macOS is not a required platform
+yet, the compliance the card needs is already proven by the table
+above, and the remote path itself is proven end-to-end from the
+desktop. When it is picked up, the evidence to start from is the
+mismatch between a server that logged success and a client that
+reported an internal error on the same request number.
+
+Distinguish it from a separate failure the same evening, which was the
+MacBook sleeping - confirmed by its owner. That signature is worth
+recognising and is not this one: the server logs "Connection reset by
+peer" mid-session, the client reports a broken pipe and then poisons
+its handle, and every later check fails on the dead handle, so one
+transport fault presented as 229 arithmetic failures. Bare connects
+stayed reliable throughout it (60 of 60 over three minutes), which is
+why a connect probe is not evidence that a session will hold, and
+`caffeinate -i` was not enough where `-dimsu` is.
+
+### The host-side gates, on the tree that carries all of this
+
+      remotetest       67 checks, 0 failures (2,656 device checks, 0 failed)
+      wstest           26 checks, 0 failures
+      programs-check   70 passed, 0 failed
+      harness tests    25 passed
+      make embedded    every profile, every board, corruption control caught
+
+### Pending
+
+The full 1,071,635-case census on the fixed S3 is running as this is
+written; the 222,000 cases before the `put` fault all matched. The
+Pico, the Uno, the Nano and the Mega are still unattached, and the two
+static analyses named in the entry above - the ATmega328P's 130-byte
+stack margin and what a large `to_decimal` costs the Pico's heap - are
+still analyses.

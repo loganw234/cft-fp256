@@ -56,7 +56,10 @@ the measured throughput - through the library, bus-bound, and with
 the bus taken out, where one tile moved 59 million beats a second at
 every format on the revision-3 pair and 107 million on the read-ahead
 pair built the next morning, four tiles moving four times that - and
-what bounds each). The claim before that day
+what bounds each). The same library answers cases on an ESP32-S3 over
+a serial line, one at a time, at a few hundred a second - the same
+published sets, compared the same way, which is the point of it being
+the same library (docs/EMBEDDED.md). The claim before that day
 was narrower and checkable - the RTL is bit-exact against a golden
 model that is itself proven against implementations sharing no code
 with it, through the same interfaces XRT drives on silicon - and the
