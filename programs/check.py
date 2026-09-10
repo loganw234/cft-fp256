@@ -61,6 +61,14 @@ PASS, FAIL, SKIP = [], [], []
 T0 = time.time()
 
 
+def _write_lf(path, text):
+    """Write text with LF line ends on every platform. Path.write_text
+    grew its newline= argument in Python 3.10; a Mac's system Python is
+    3.9 (found 2026-09-09), so this goes through open()."""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def ok(name, detail=""):
     PASS.append(name)
     print(f"  PASS  {name}" + (f"  {detail}" if detail else ""))
@@ -151,7 +159,7 @@ def roundtrip(args, name, image, tmp):
         bad(f"{name}: two disassemblers", "the texts differ")
         return
     src = tmp / (name + ".rt.cfta")
-    src.write_text(pytext, encoding="utf-8", newline="\n")
+    _write_lf(src, pytext)
     back = tmp / (name + ".rt2.cftp")
     r = sh([args.asm, src, "-o", back])
     if r.returncode != 0:
@@ -1111,7 +1119,7 @@ def check_revision2_corpus(args, tmp, trials=120):
         tag = f"rev2-{trial}"
         src = tmp / (tag + ".cfta")
         out = tmp / (tag + ".cftp")
-        src.write_text(text, encoding="utf-8", newline="\n")
+        _write_lf(src, text)
         r = sh([args.asm, src, "-o", out])
         if r.returncode != 0:
             bad(f"revision-2 corpus [{trial}]: cft-asm", r.stderr.strip())
@@ -1256,7 +1264,7 @@ def check_revision3_corpus(args, tmp, trials=120):
         tag = f"rev3-{trial}"
         src = tmp / (tag + ".cfta")
         out = tmp / (tag + ".cftp")
-        src.write_text(text, encoding="utf-8", newline="\n")
+        _write_lf(src, text)
         r = sh([args.asm, src, "-o", out])
         if r.returncode != 0:
             bad(f"revision-3 corpus [{trial}]: cft-asm", r.stderr.strip())
