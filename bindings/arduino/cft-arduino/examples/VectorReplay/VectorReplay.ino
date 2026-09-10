@@ -189,6 +189,17 @@ static void send_toobig(const char *req)
  * in a shape the host's resync counter will notice. */
 static bool ready;
 
+/* The ESP32 Arduino core runs loop() on an 8 KB stack, and the
+ * correctly-rounded transcendentals want far more than that - the first
+ * `trn` on an ESP32-S3 overflowed it and the board reset without
+ * answering (2026-09-09, the first board this ran on). The core's own
+ * hook raises it; 96 KB is a tenth of the S3's RAM and covers the
+ * deepest path with room. The RP2040 core gives loop() the main stack,
+ * and the AVRs have no transcendentals to run. */
+#if defined(ARDUINO_ARCH_ESP32)
+SET_LOOP_TASK_STACK_SIZE(96 * 1024);
+#endif
+
 void setup()
 {
     Serial.begin(VR_BAUD);
