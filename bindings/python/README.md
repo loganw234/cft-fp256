@@ -38,7 +38,7 @@ of guessing, and everything else works.
 Build the library once (from the repo root):
 
 ```bash
-make -C host              # produces host/cft.dll or host/libcft.so
+make -C host              # produces host/cft.dll, host/libcft.so or host/libcft.dylib
 ```
 
 Then, from this directory (or with it on `PYTHONPATH`; set `CFT_LIB`
