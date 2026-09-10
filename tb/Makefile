@@ -438,10 +438,11 @@ faults:
 # definition of correct, and this scores the RTL against it the way
 # the FMA core was scored against softfloat.py.
 #
-# NOT in `make sim` yet, deliberately. cft_seq is being written, and an
+# In `make sim`. It was held out while cft_seq was being written - an
 # aggregate target that goes red for a module still under construction
-# trains people to ignore it. Fold it in the day it is green - the
-# suite is the place a finished module proves it stays finished.
+# trains people to ignore it - and folded in the day it went green,
+# alongside krnlseq, because the suite is the place a finished module
+# proves it stays finished.
 #
 # Wrapped in a timeout, and that is not belt and braces. Every timeout
 # inside the bench is a SIMULATION-time timeout, and a simulation-time

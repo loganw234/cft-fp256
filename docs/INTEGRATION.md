@@ -9,6 +9,28 @@ docs/HOSTAPI.md). Nothing here changes an answer. Every path below
 returns the bits the golden model returns, which is the only reason
 the choice can be made on speed alone.
 
+## Building the library you are choosing a path in
+
+Two build facts decide which of the paths below you can reach at all,
+and both are easy to miss because neither produces an error where the
+mistake is made. `make -C host` builds a **static** library, a
+**shared** library (`libcft.so` / `libcft.dylib` / `cft.dll`) and the
+tools; either is a complete library for the software and remote paths,
+and the shared one is what a `ctypes` or `ccall` caller loads. But:
+
+- **A default build has no device backend.** `XRT=1` compiles it in
+  (`XRT_ROOT` defaults to `/opt/xilinx/xrt`); without it, `cft_open`
+  on an artifact path returns `CFT_ERR_NO_DEVICE` rather than failing
+  to build, so a port can be finished and correct and never touch the
+  card.
+- **An XRT build changes what linking against `libcft.a` costs.**
+  `-L$(XRT_ROOT)/lib -lxrt_coreutil -lstdc++ -lpthread -luuid`, or the
+  link ends in undefined references to `xrt::bo`. And the archive is
+  not position-independent, so it cannot be linked into a shared
+  object of your own - link the shared library this same `make` built.
+
+docs/HOSTAPI.md, "The device backend", has both in full.
+
 ## The paths, and what bounds each
 
 | path | the call | what moves per call | what bounds it | one tile, fp64 fma, measured |
@@ -165,12 +187,12 @@ paying per element and the fix is a faster path (resident, programs).
 the Alveo U50 at 135 MHz (docs/BENCHMARKS.md has the dates, images and
 provenance for each column):
 
-| format | software, one core | staged, one tile | resident, one tile (revision 3) | resident, one tile (read-ahead) | resident, four tiles (revision 3) |
-|---|---|---|---|---|---|
-| fp32 | 3.76 M | 141.8 to 165.6 M | 462.6 M | 804.7 M | 1,833.9 M |
-| fp64 | 3.24 M | 81.4 to 89.2 M | 235.1 M | 415.9 M | 937.2 M |
-| fp128 | 2.52 M | 40.3 to 44.2 M | 118.7 M | 211.5 M | 474.0 M |
-| fp256 | 1.74 M | 20.0 to 22.0 M | 59.6 M | 106.8 M | 238.4 M |
+| format | software, one core | staged, one tile | resident, one tile (revision 3) | resident, one tile (read-ahead) | resident, four tiles (revision 3) | resident, four tiles (read-ahead) |
+|---|---|---|---|---|---|---|
+| fp32 | 3.76 M | 141.8 to 165.6 M | 462.6 M | 804.7 M | 1,833.9 M | 3,219.6 M |
+| fp64 | 3.24 M | 81.4 to 89.2 M | 235.1 M | 415.9 M | 937.2 M | 1,664.3 M |
+| fp128 | 2.52 M | 40.3 to 44.2 M | 118.7 M | 211.5 M | 474.0 M | 845.5 M |
+| fp256 | 1.74 M | 20.0 to 22.0 M | 59.6 M | 106.8 M | 238.4 M | 427.3 M |
 
 Through the library rather than the standalone tool, the resident
 column is within 1.5 percent on one tile and two to fifteen percent
@@ -195,8 +217,9 @@ tool that does not discovers the limits as a status bit on card day.
   engine's streaming rate sits on the card's host.
 - The bank and the scratch block of a program run are per-run data
   and travel with the run; they are small by design.
-- The read-ahead's four-tile number is measured when its pair lands;
-  the revision-3 quad's is the four-tile column above.
+- Both four-tile columns above are measured: the revision-3 quad on
+  2026-09-08 into 09-09 and the read-ahead quad on 2026-09-09, each
+  unit at the single tile's rate (docs/BENCHMARKS.md).
 - Every rate on this page is a bus-bound or engine-bound number on one
   card, one shell and one clock; the open-core boards have their own
   clocks and their own links, and docs/SCALING.md is where the
