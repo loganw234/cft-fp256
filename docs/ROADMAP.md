@@ -2516,6 +2516,73 @@ step 2 is a purchase; step 4 is the hard one and is the reason the
 others came first. What step 4 now waits on is a board and an open
 flow, not a smaller tile.
 
+## What a real workload asked for (status, 2026-09-10)
+
+The first application built on libcft that is somebody else's algorithm
+rather than this project's own is REBOUND's IAS15 integrator, ported so
+that every floating-point operation is a `cft.h` call and run on the
+read-ahead quad. It is a fifteenth-order adaptive N-body integrator and
+it wants things the library does not have. Three, in the order the
+measurements rank them - which is not the order they were guessed in.
+
+**1. A device-side scatter. This is the expensive one.**
+
+The integrator computes gravity over particle PAIRS and then scatters
+each pair's contribution back onto its two particles. Issued through
+the current API that is N-1 vector adds of width 3N per force
+evaluation - at 64 bodies, 63 separate calls of 192 elements.
+
+Profiled on the card against the same run on the software backend:
+
+      share of wall clock in the scatter    software      card
+      8 bodies                                  3.6%     20.9%
+      32 bodies                                 6.3%     42.2%
+      64 bodies                                 6.7%     36.0%
+
+Six percent on a CPU charging per element, forty on a tile charging per
+call, for identical arithmetic. Removing it - the same work as one
+device-side scatter rather than sixty-three calls - projects that
+workload from 1.99x a core to about 3.1x, which is worth more than
+every other optimisation tried on it combined. The projection assumes
+the device-side operation is free, which it will not be, so treat it as
+an upper bound.
+
+The general statement is in docs/INTEGRATION.md, "When your own gather
+is the wall": a caller whose access pattern is irregular hits a wall
+that has nothing to do with the bus and can hit it at one tile.
+
+**2. `scratch_in` / `scratch_out` that bind `cft_alloc` buffers.**
+
+The sequencer's scratch block is staged on every run. It is exactly
+where an integrator's per-step state lives - the b, g and e coefficient
+arrays - and that state is read and rewritten every substep of every
+corrector pass without the host needing to see it. Resident buffers
+already exist for `cft_run` operands (ABI 0.11); the scratch pointers
+are the obvious next binding and would remove a staging round trip from
+the innermost loop.
+
+**3. A `CFT_MAX` reduction. Real, and smaller than it looks.**
+
+The corrector's convergence test is a maximum over every coordinate,
+and with no device-side maximum it is a host loop of width-one calls -
+about 2*3N of them per pass. It accounts for 13 to 19 percent of all
+library calls.
+
+But measured, removing the test entirely is worth only **4 to 9 percent
+of wall clock on the card and nothing at all on software**. It was
+proposed as the explanation for that workload's performance ceiling and
+is not; the scatter is. Recorded here because the discipline of the
+project is that a wrong hypothesis with a number beats a right one
+without, and because it correctly ranks the three.
+
+**What the same exercise found the library does NOT need.** Nothing
+about difficulty: a problem with close encounters, whose adaptive step
+collapses over three orders of magnitude and whose corrector needs 45
+percent more passes, moves the card-versus-CPU ratio by 0.01. Harder
+arithmetic buys more calls at the same rate, not slower calls, so it
+scales both sides identically. The lever is vector width and only
+vector width.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
