@@ -1375,8 +1375,15 @@ Every claim above is a test somewhere, and the layers share no code:
 | `host/tests/minmax_mag_check.py` | the sticky status word (7.1, 5.7.4), the 5.7.1 predicates, and 9.6's four magnitude forms | the golden model per element for 9.6; the standard's own sentences for the word, which is state and has no model counterpart |
 | `vectors/gen_vectors.py` | any external implementation | replayable JSONL conformance sets |
 
-What is deliberately NOT claimed yet: behaviour on a physical card
-(docs/BRINGUP.md gates that), and any timing/performance number.
+What this lattice does NOT claim is any timing or performance number;
+those live in docs/BENCHMARKS.md and are not part of the contract.
+Behaviour on a physical card WAS outside it when this was written, and
+is not any more: on 2026-09-08 both card-day images replayed the
+published sets on an Alveo U50 - 1,071,635 cases through one tile and
+through four, all matching (docs/CARDDAY.md, docs/VALIDATION.md).
+docs/BRINGUP.md still owns the gates. What no card has yet shown is the
+cross-DEVICE half of the promise: two different cards in two different
+machines returning the same bits.
 
 ## Clause locator index
 
