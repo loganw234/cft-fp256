@@ -386,13 +386,13 @@ travel as **names**, resolved on the device through the library's own
 `cft_op_name()` and `cft_tr_from_name()`, so there is no third table
 for the mapping to drift in.
 
-Verbs: `id`, `run`, `trn`, `aug`, `mmg`, `fof`, `red`, `chs`, `chw`,
-`pay`, `put`, `get`, `clr`. Which of them a build carries follows the
+Verbs: `id`, `env`, `run`, `trn`, `aug`, `mmg`, `fof`, `red`, `chs`,
+`chw`, `pay`, `put`, `get`, `clr`. Which of them a build carries follows the
 library's profile - there is no `trn` where there are no
 transcendentals - and `id` reports the list.
 
 `CFT_REPLAY_MIN`, on a part with under 64 KB of flash, narrows that to
-`id`, `clr`, `put`, `get`, `run` and drops the explanatory text from a
+`id`, `env`, `clr`, `put`, `get`, `run` and drops the explanatory text from a
 refusal. Both are flash and RAM decisions with numbers behind them: the
 full verb set is 38 KB against the Uno's 32,256, and on AVR a string
 literal passed as an argument is RAM whether or not the callee reads
@@ -472,8 +472,59 @@ then leave the whole thing overnight.
     --sets 'fp32*'          globs over set names, comma-separated
     --limit 500             at most N cases per set
     --list-sets             what would run, with case counts
-    --progress              a running count on stderr
+    --progress              a running count on stderr, with the rate
+                            over the last 2,000 cases and the
+                            board's readings beside the overall rate
     --timeout 30            seconds to wait for one answer
+    --pace 2                milliseconds of quiet before each request
+    --retry 3               ask again after a protocol failure, N times
+    --reset-on-timeout      on no answer, pulse DTR/RTS, wait for the
+                            banner, greet again, then retry
+    --trace run.csv         a CSV row at the start and every 2,000
+                            cases: the rates and the board's readings
+
+**The three that ask again exist because of the ESP32-S3.** Its
+native USB serial (HWCDC) stopped answering after tens of thousands
+of cases on core 3.3.0, with the loop task parked in
+`esp_cpu_wait_for_intr`, and the TinyUSB alternative corrupted reply
+bytes instead. A wrong answer is never retried - it is what the run
+exists to find - but a checksum failure, a wrong sequence number or
+a silence is a transport event, and a census that dies at case
+60,000 of 1,071,635 has measured nothing about case 60,001. The
+report counts every retry and every reset, so a run that needed
+them says so. With core 3.3.11 and `--pace 2 --retry 3
+--reset-on-timeout`, the S3 ran 84,000 cases without either
+(2026-09-09).
+
+### The board's own readings
+
+That same run's throughput decayed steadily from 62,000 cases on -
+239 cases a second held for 60,000 cases, then 236, 232, 228 and
+down to 205 by 84,000 - which is either the die warming (an S3 in a
+bare plastic package on a small PCB, no heatsink, doing fp256
+arithmetic flat out) or something growing in memory. The two are
+told apart only by numbers the board itself holds, so the protocol
+gained a verb for them.
+
+`env` answers the responder's counters (requests seen, answered,
+refused) and then whatever the sketch's hook adds as `key=value`
+tokens. The reference sketch reports `temp=` (the die temperature
+in degrees C: `temperatureRead()` on the ESP32, `analogReadTemp()`
+on the RP2040; the ATmegas have no sensor), `heap=` (free bytes;
+on AVR the gap between the heap's end and the stack pointer) and
+`up=` (milliseconds since reset). The hook is the sketch's, set
+after `cft_replay_init`, so the library stays portable C with no
+idea what a temperature sensor is; a loopback has no hook and
+answers the counters alone.
+
+The harness reads `env` once at the start and every 2,000 cases,
+prints the temperature and heap on the `--progress` line beside the
+rate over the last 2,000 cases (the overall rate averages a decay
+away; the window shows it), writes them to `--trace` as CSV, and
+closes the report with the temperature's start, end and extremes
+and the heap's start and end. Two runs of the same census, one with
+a heatsink or a fan on the package and one without, laid side by
+side in that CSV, answer the thermal question directly.
 
 ## Keeping the copy honest
 

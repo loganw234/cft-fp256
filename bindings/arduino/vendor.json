@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend_remote.c",
       "dest": "src/cft/src/backend_remote.c",
-      "sha256": "833215f8ac58b599c30ff778cea43305fa6dd876cfa46494d54d8d9404155080"
+      "sha256": "372d11fd390cfad5fd17f86e7f50ff992cc2a3c1c6426195fd59e51cfef08aa6"
     },
     {
       "source": "host/src/bigint.c",

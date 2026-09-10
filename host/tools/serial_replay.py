@@ -144,6 +144,9 @@ class Link:
         self.seq = 0
         self.sent = 0
         self.resyncs = 0
+        self.pace = 0.0        # seconds to wait before each request
+        self.retries = 0       # requests asked again after a protocol failure
+        self.resets = 0        # boards reset and greeted again
 
     # -- transport, supplied by a subclass --------------------------
     def _write(self, data: bytes) -> None:
@@ -154,6 +157,11 @@ class Link:
 
     def close(self) -> None:
         pass
+
+    def reset_board(self) -> bool:
+        """Reset the device behind this link, if the transport can.
+        Returns True when it did; the caller greets the board again."""
+        return False
 
     # -- the protocol ------------------------------------------------
     def ask(self, body: str) -> tuple[str, list[str]]:
@@ -166,6 +174,13 @@ class Link:
         self.seq = (self.seq + 1) & 0xFF
         head = (">%02x %s" % (seq, body)).encode("ascii")
         line = head + (" *%04x\n" % crc16(head)).encode("ascii")
+        if self.pace > 0:
+            # A USB-CDC stack that is fed back to back can wedge (an
+            # ESP32-S3's hardware CDC blocked in its write path after
+            # tens of thousands of cases, 2026-09-09); a few
+            # milliseconds of air between requests is cheap insurance
+            # against a driver race, and it is the caller's to choose.
+            time.sleep(self.pace)
         self._write(line)
         self.sent += 1
 
@@ -307,14 +322,77 @@ class SerialLink(Link):
         except Exception:
             pass
 
+    def reset_board(self) -> bool:
+        """Pulse the control lines the way every Arduino-class board's
+        auto-reset is wired - DTR for the AVRs, RTS (EN) for an ESP32 -
+        then wait for the boot noise to end. The board comes up with
+        nothing in flight, which is the point: a case is stateless, so
+        asking it again after a reset is the same question."""
+        try:
+            self.ser.dtr = False
+            self.ser.rts = True
+            time.sleep(0.1)
+            self.ser.rts = False
+            self.ser.dtr = True
+            time.sleep(0.05)
+            self.ser.dtr = False
+        except Exception:
+            return False
+        # Drain the banner: read until the line stream goes quiet, or
+        # the ready line arrives, whichever is first, capped at 5 s.
+        deadline = time.perf_counter() + 5.0
+        self.ser.timeout = 0.5
+        while time.perf_counter() < deadline:
+            line = self.ser.readline()
+            if not line:
+                break
+            if b"ready" in line:
+                break
+        self.ser.reset_input_buffer()
+        self.resets += 1
+        return True
+
 
 # ---------------------------------------------------------------------
 # The device, as this harness sees it
 # ---------------------------------------------------------------------
 
+def parse_env(fields: list[str]) -> dict[str, str]:
+    """An `env` answer's fields as a dict: the three counters as
+    'lines', 'ok' and 'err', then every key=value token the board
+    added (temp=, heap=, up= from the reference sketch). A token
+    without '=' is not an error, just not a reading; it is kept
+    under its own name with an empty value so it is not lost."""
+    if len(fields) < 3:
+        raise ProtocolError("env: %s" % " ".join(fields))
+    d = {"lines": fields[0], "ok": fields[1], "err": fields[2]}
+    for tok in fields[3:]:
+        k, eq, v = tok.partition("=")
+        if k:
+            d[k] = v if eq else ""
+    return d
+
+
+def env_brief(env: dict[str, str]) -> str:
+    """The readings worth a progress line: temperature and heap."""
+    bits = []
+    if env.get("temp"):
+        bits.append("%s C" % env["temp"])
+    if env.get("heap"):
+        bits.append("heap %s" % env["heap"])
+    return (", " + ", ".join(bits)) if bits else ""
+
+
 class Device:
-    def __init__(self, link: Link) -> None:
+    def __init__(self, link: Link, retry: int = 0,
+                 reset_on_timeout: bool = False) -> None:
         self.link = link
+        self.retry = retry
+        self.reset_on_timeout = reset_on_timeout
+        self._hello()
+
+    def _hello(self) -> None:
+        link = self.link
         status, f = link.ask("id")
         if status != "ok" or len(f) < 7:
             raise ProtocolError("id: %s %s" % (status, " ".join(f)))
@@ -348,13 +426,49 @@ class Device:
         if len(body) + 10 > self.line_cap:
             raise Skip("the request is %d characters and this device's "
                        "line is %d" % (len(body) + 10, self.line_cap))
-        return self.link.ask(body)
+        return self._ask_retry(body)
+
+    def _ask_retry(self, body: str) -> tuple[str, list[str]]:
+        """link.ask, asked again after a protocol failure when the run
+        allows it. A timeout with --reset-on-timeout resets the board and
+        greets it before the retry; a bad checksum or a wrong sequence
+        just asks again. A WRONG ANSWER is never retried - it is not a
+        protocol failure and it is what the run exists to find."""
+        last = None
+        for attempt in range(self.retry + 1):
+            try:
+                return self.link.ask(body)
+            except ProtocolError as e:
+                last = e
+                if attempt >= self.retry:
+                    break
+                self.link.retries += 1
+                if "no answer" in str(e) and self.reset_on_timeout:
+                    if self.link.reset_board():
+                        self._hello()
+                    else:
+                        break
+        assert last is not None
+        raise last
 
     # -- the staged transfers ---------------------------------------
     def clr(self) -> None:
-        st, f = self.link.ask("clr")
+        st, f = self._ask_retry("clr")
         if st != "ok":
             raise ProtocolError("clr: %s" % " ".join(f))
+
+    def env(self) -> dict[str, str]:
+        """The board's counters and readings (parse_env), or {} from
+        a build without `env` - an older responder, which `id` says
+        or which answers `err verb`; neither is a failure."""
+        if self.verbs and "env" not in self.verbs:
+            return {}
+        st, f = self._ask_retry("env")
+        if st != "ok":
+            if f and f[0] == "verb":
+                return {}
+            raise ProtocolError("env: %s %s" % (st, " ".join(f)))
+        return parse_env(f)
 
     def put(self, slot: int, data: bytes) -> None:
         """Fill a staging buffer, in chunks the device's line can hold."""
@@ -715,6 +829,25 @@ class Report:
         # timing is known and a printer that assumed the last note was
         # the timing would then swallow a real one.
         self.elapsed = 0.0
+        # The board's own readings, first and last, and the extremes
+        # of its temperature - what a thermal question is answered by.
+        self.env_first: dict[str, str] | None = None
+        self.env_last: dict[str, str] | None = None
+        self.temp_min: float | None = None
+        self.temp_max: float | None = None
+
+    def env_seen(self, env: dict[str, str]) -> None:
+        if not env:
+            return
+        if self.env_first is None:
+            self.env_first = env
+        self.env_last = env
+        try:
+            t = float(env["temp"])
+        except (KeyError, ValueError):
+            return
+        self.temp_min = t if self.temp_min is None else min(self.temp_min, t)
+        self.temp_max = t if self.temp_max is None else max(self.temp_max, t)
 
     def note(self, text: str) -> None:
         self.notes.append(text)
@@ -723,8 +856,23 @@ class Report:
         self.skipped[why] = self.skipped.get(why, 0) + 1
 
 
+def _trace_row(trace, rep: Report, el: float, win: float,
+               env: dict[str, str]) -> None:
+    trace.write("%d,%.1f,%.1f,%.1f,%s,%s,%s,%s,%s,%s\n"
+                % (rep.cases, el, win, rep.cases / el if el > 0 else 0.0,
+                   env.get("temp", ""), env.get("heap", ""),
+                   env.get("up", ""), env.get("lines", ""),
+                   env.get("ok", ""), env.get("err", "")))
+    trace.flush()
+
+
 def replay(dev: Device, vdir: str, patterns: list[str] | None,
-           limit: int | None, out, progress: bool) -> Report:
+           limit: int | None, out, progress: bool, trace=None) -> Report:
+    """`trace`, when given, is an open text file that receives one
+    CSV row at the start and every 2,000 cases: the case count, the
+    elapsed seconds, the rate over the last 2,000 and overall, and
+    the board's readings - so a long run can be plotted against its
+    temperature and heap. The header is main()'s to write."""
     rep = Report()
     all_sets = discover(vdir)
     if not all_sets:
@@ -745,6 +893,11 @@ def replay(dev: Device, vdir: str, patterns: list[str] | None,
         return rep
 
     t0 = time.perf_counter()
+    t_win = t0
+    env = dev.env()
+    rep.env_seen(env)
+    if trace is not None:
+        _trace_row(trace, rep, 0.0, 0.0, env)
     for path, kind, meta in chosen:
         rel = os.path.relpath(path, REPO).replace(os.sep, "/")
         fmt = meta["fmt"]
@@ -780,21 +933,56 @@ def replay(dev: Device, vdir: str, patterns: list[str] | None,
                     return rep
                 rep.cases += 1
                 n_here += 1
-                if progress and rep.cases % 2000 == 0:
-                    el = time.perf_counter() - t0
-                    out.write("\r  %d cases, %.0f/s   "
-                              % (rep.cases, rep.cases / el if el else 0))
-                    out.flush()
+                if (progress or trace is not None) and rep.cases % 2000 == 0:
+                    now = time.perf_counter()
+                    el = now - t0
+                    win = 2000.0 / (now - t_win) if now > t_win else 0.0
+                    t_win = now
+                    env = dev.env()
+                    rep.env_seen(env)
+                    if progress:
+                        out.write("\r  %d cases, %.0f/s (%.0f/s over the "
+                                  "last 2000)%s   "
+                                  % (rep.cases, rep.cases / el if el else 0,
+                                     win, env_brief(env)))
+                        out.flush()
+                    if trace is not None:
+                        _trace_row(trace, rep, el, win, env)
     if progress:
-        out.write("\r" + " " * 40 + "\r")
+        out.write("\r" + " " * 78 + "\r")
         out.flush()
     rep.elapsed = time.perf_counter() - t0
     return rep
 
 
+def env_summary(rep: Report) -> str:
+    """One line on the board's readings, or '' when there were none:
+    the temperature's start, end and extremes, the heap's start and
+    end, and the refusals the board itself counted."""
+    a, z = rep.env_first, rep.env_last
+    if not a or not z:
+        return ""
+    parts = []
+    if rep.temp_min is not None and a.get("temp") and z.get("temp"):
+        parts.append("die temperature %s C at the start and %s C at the "
+                     "end (min %.1f, max %.1f)"
+                     % (a["temp"], z["temp"], rep.temp_min, rep.temp_max))
+    if a.get("heap") and z.get("heap"):
+        parts.append("free heap %s bytes at the start and %s at the end"
+                     % (a["heap"], z["heap"]))
+    if z.get("err", "").isdigit():
+        n = int(z["err"])
+        parts.append("%d request%s refused by the board (a refusal a set "
+                     "asserts counts here as much as a bad frame does)"
+                     % (n, "" if n == 1 else "s"))
+    return ("the board's own readings: " + "; ".join(parts) + "\n"
+            if parts else "")
+
+
 def print_report(dev: Device, vdir: str, rep: Report, out) -> None:
     for n in rep.notes:
         out.write(n + "\n")
+    out.write(env_summary(rep))
     if rep.failure:
         out.write("\n" + rep.failure)
         out.write("\nCONFORMANCE FAILED after %d matching cases\n"
@@ -826,6 +1014,11 @@ def print_device(dev: Device, transport: str, out) -> None:
     out.write("buffers        line %d, stage %d x2, out %d\n"
               % (dev.line_cap, dev.stage_cap, dev.out_cap))
     out.write("verbs          %s\n" % ",".join(sorted(dev.verbs)))
+    env = dev.env()
+    readings = ["%s=%s" % kv for kv in env.items()
+                if kv[0] not in ("lines", "ok", "err")]
+    if readings:
+        out.write("board          %s\n" % " ".join(readings))
 
 
 # ---------------------------------------------------------------------
@@ -943,10 +1136,25 @@ def main() -> int:
     ap.add_argument("--sets", help="comma-separated globs over set names, "
                                    "e.g. 'fp32*,fp64-reduce*'")
     ap.add_argument("--limit", type=int, help="at most N cases per set")
+    ap.add_argument("--pace", type=float, default=0.0, metavar="MS",
+                    help="milliseconds of air before every request "
+                         "(a USB-CDC stack fed back to back can wedge)")
+    ap.add_argument("--retry", type=int, default=0, metavar="N",
+                    help="ask a case again up to N times after a protocol "
+                         "failure (never after a wrong answer)")
+    ap.add_argument("--reset-on-timeout", action="store_true",
+                    help="with --retry: a board that stops answering is "
+                         "reset through the port's control lines, greeted "
+                         "again, and the case is retried")
     ap.add_argument("--timeout", type=float, default=10.0,
                     help="seconds to wait for one answer (default 10)")
     ap.add_argument("--list-sets", action="store_true",
                     help="print the sets that would run, and stop")
+    ap.add_argument("--trace", metavar="FILE",
+                    help="append a CSV row at the start and every 2,000 "
+                         "cases: cases, elapsed, the rate over the last "
+                         "2,000 and overall, and the board's readings "
+                         "(temperature, heap, uptime, its counters)")
     ap.add_argument("--progress", action="store_true",
                     help="a running case count on stderr")
     args = ap.parse_args()
@@ -980,20 +1188,39 @@ def main() -> int:
         transport = "loopback %s" % os.path.basename(exe)
     elif args.port:
         link = SerialLink(args.port, args.baud, args.timeout, args.settle)
+        link.pace = args.pace / 1000.0
         transport = "%s at %d baud" % (args.port, args.baud)
     else:
         ap.error("give --port or --loopback")
         return 2
 
     try:
-        dev = Device(link)
+        dev = Device(link, retry=args.retry,
+                     reset_on_timeout=args.reset_on_timeout)
         print_device(dev, transport, out)
         out.write("\nreplaying %s\n"
                   % os.path.relpath(args.vectors, REPO).replace(os.sep, "/"))
         patterns = args.sets.split(",") if args.sets else None
-        rep = replay(dev, args.vectors, patterns, args.limit, sys.stderr,
-                     args.progress)
+        trace = None
+        if args.trace:
+            fresh = (not os.path.exists(args.trace)
+                     or os.path.getsize(args.trace) == 0)
+            trace = open(args.trace, "a", encoding="utf-8", newline="\n")
+            if fresh:
+                trace.write("cases,elapsed_s,rate_last_2000,rate_overall,"
+                            "temp_c,heap_bytes,up_ms,lines,ok,err\n")
+        try:
+            rep = replay(dev, args.vectors, patterns, args.limit,
+                         sys.stderr, args.progress, trace)
+        finally:
+            if trace is not None:
+                trace.close()
         print_report(dev, args.vectors, rep, out)
+        if link.retries or link.resets:
+            out.write("%d request%s asked again after a protocol failure, "
+                      "%d board reset%s\n"
+                      % (link.retries, "" if link.retries == 1 else "s",
+                         link.resets, "" if link.resets == 1 else "s"))
         if link.resyncs:
             out.write("%d line%s on this link were not answers to the "
                       "request outstanding\n"

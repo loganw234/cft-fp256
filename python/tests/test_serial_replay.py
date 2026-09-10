@@ -221,3 +221,73 @@ def test_loopback_replays_a_subset_and_the_control_catches_a_lie():
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert lied.returncode != 0, lied.stdout
     assert "CONFORMANCE FAILED" in lied.stdout
+
+
+# ---- the board's readings -------------------------------------------
+#
+# `env` answers the responder's three counters and then whatever the
+# board's hook added as key=value tokens. The harness reads it at the
+# start and every 2,000 cases so a long run can be laid against the
+# board's temperature and heap (the ESP32-S3's throughput decayed
+# steadily from 62,000 cases on, 2026-09-09).
+
+def test_parse_env_reads_counters_and_tokens():
+    d = sr.parse_env(["12", "11", "1", "temp=41.5", "heap=298000",
+                      "up=1234", "odd"])
+    assert d == {"lines": "12", "ok": "11", "err": "1", "temp": "41.5",
+                 "heap": "298000", "up": "1234", "odd": ""}
+
+
+def test_parse_env_wants_the_three_counters():
+    with pytest.raises(sr.ProtocolError):
+        sr.parse_env(["12", "11"])
+
+
+def test_env_brief_names_only_temperature_and_heap():
+    assert sr.env_brief({"lines": "1", "ok": "1", "err": "0"}) == ""
+    assert sr.env_brief({"temp": "41.5", "heap": "298000", "up": "9"}) \
+        == ", 41.5 C, heap 298000"
+    assert sr.env_brief({"heap": "1500"}) == ", heap 1500"
+
+
+def test_report_remembers_first_last_and_extremes():
+    rep = sr.Report()
+    rep.env_seen({})
+    assert rep.env_first is None and sr.env_summary(rep) == ""
+    rep.env_seen({"lines": "0", "ok": "0", "err": "0", "temp": "38.0",
+                  "heap": "300000"})
+    rep.env_seen({"lines": "9", "ok": "9", "err": "0", "temp": "53.1",
+                  "heap": "299000"})
+    rep.env_seen({"lines": "20", "ok": "19", "err": "1", "temp": "52.4",
+                  "heap": "299000"})
+    assert (rep.temp_min, rep.temp_max) == (38.0, 53.1)
+    line = sr.env_summary(rep)
+    assert "38.0 C at the start and 52.4 C at the end" in line
+    assert "max 53.1" in line
+    assert "300000 bytes at the start and 299000 at the end" in line
+    assert "1 request refused by the board" in line
+
+
+@pytest.mark.skipif(_loopback() is None,
+                    reason="no loopback binary; "
+                           "make -C bindings/arduino/loopback")
+def test_loopback_trace_has_a_header_and_a_first_row(tmp_path):
+    exe = _loopback()
+    vec = os.path.join(REPO, "vectors", "out")
+    if not os.path.isdir(vec):
+        pytest.skip("no vectors/out; make vectors")
+    trace = tmp_path / "trace.csv"
+    run = subprocess.run(
+        [sys.executable, TOOL, "--loopback", exe, "--sets", "fp32",
+         "--limit", "50", "--trace", str(trace)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert run.returncode == 0, run.stdout
+    rows = trace.read_text(encoding="utf-8").splitlines()
+    assert rows[0] == ("cases,elapsed_s,rate_last_2000,rate_overall,"
+                       "temp_c,heap_bytes,up_ms,lines,ok,err")
+    assert len(rows) >= 2 and rows[1].startswith("0,0.0,0.0,0.0,")
+    # A loopback built with `env` fills the counters; an older one
+    # leaves the row's tail empty. Either is a row, not a failure.
+    tail = rows[1].split(",")[7:]
+    assert tail == ["", "", ""] or all(t.isdigit() for t in tail)
+

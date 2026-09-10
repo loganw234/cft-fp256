@@ -144,6 +144,17 @@
  *     so the device converts nothing); `get` reads the out buffer.
  *     `clr` empties all three.
  *
+ *   env                                       -> ok <lines> <ok> <err> [k=v ...]
+ *     The responder's own counters - requests seen, answered and
+ *     refused since reset - and after them whatever the embedder's
+ *     hook adds: key=value tokens the protocol does not interpret.
+ *     The reference sketch reports temp= (die temperature, degrees
+ *     C, where the part has a sensor), heap= (free bytes) and up=
+ *     (milliseconds), so a long run can be read against the board's
+ *     thermals and memory: an ESP32-S3's throughput decayed steadily
+ *     from 62,000 cases on (2026-09-09), and whether that is heat or
+ *     a leak is a question only a number from the board answers.
+ *
  * ERROR REASONS: crc, frame, verb, field, unsupported, refused,
  * toobig, range, internal. Every one of them is a refusal to answer,
  * never a computed value - so a harness can treat "not ok" as "this
@@ -231,6 +242,17 @@ typedef struct {
     uint32_t    n_lines;        /* requests seen, answers given, and   */
     uint32_t    n_ok;           /* refusals - what `id` cannot say and */
     uint32_t    n_err;          /* a long run wants to know afterwards */
+
+    /* Optional: what the board can say that the library cannot. `env`
+     * appends this hook's text to its answer. Set it AFTER
+     * cft_replay_init, which zeroes the struct; NULL means the answer
+     * ends at the counters. The hook writes key=value tokens separated
+     * by spaces into `out`, at most `cap` bytes including the NUL, and
+     * returns the length - snprintf's convention, so a sketch can
+     * return snprintf itself: a negative value or a length of `cap` or
+     * more means "nothing to add", and the answer ends at the counters. */
+    int       (*env)(void *ctx, char *out, size_t cap);
+    void       *env_ctx;
 } cft_replay;
 
 /* Wire it up. Returns 0, or -1 if a required pointer is missing.

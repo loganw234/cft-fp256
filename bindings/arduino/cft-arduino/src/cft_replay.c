@@ -450,7 +450,7 @@ static int rp_do_id(cft_replay *r, rp_buf *b)
         rp_put_u32(b, (uint32_t)r->line_cap) || rp_putc(b, ' ') ||
         rp_put_u32(b, (uint32_t)r->stage_cap) || rp_putc(b, ' ') ||
         rp_put_u32(b, (uint32_t)r->out_cap) || rp_putc(b, ' ') ||
-        rp_puts(b, "id,clr,put,get,run"
+        rp_puts(b, "id,env,clr,put,get,run"
 #if !defined(CFT_NO_TRANSCEND) && !defined(CFT_REPLAY_MIN)
                    ",trn"
 #endif
@@ -999,6 +999,27 @@ static int rp_do_clr(cft_replay *r, rp_buf *b)
     return rp_finish(b);
 }
 
+static int rp_do_env(cft_replay *r, rp_buf *b)
+{
+    if (rp_puts(b, "ok ") || rp_put_u32(b, r->n_lines) || rp_putc(b, ' ') ||
+        rp_put_u32(b, r->n_ok) || rp_putc(b, ' ') || rp_put_u32(b, r->n_err))
+        return -1;
+    if (r->env) {
+        /* The hook writes straight into the answer's remaining room,
+         * after a separating space; rp_finish needs its seven bytes
+         * back. What does not fit is left out rather than cut short,
+         * so a token is whole or absent. */
+        size_t room = (b->cap > b->len + 8) ? b->cap - b->len - 8 : 0;
+        int n = room ? r->env(r->env_ctx, b->p + b->len + 1, room) : 0;
+        if (n > 0 && (size_t)n < room) {
+            b->p[b->len] = ' ';
+            b->len += 1 + (size_t)n;
+        }
+        b->p[b->len] = '\0';
+    }
+    return rp_finish(b);
+}
+
 /* ---- the line ------------------------------------------------------ */
 
 int cft_replay_line(cft_replay *r, char *line, char *resp, size_t resp_cap)
@@ -1072,6 +1093,7 @@ int cft_replay_line(cft_replay *r, char *line, char *resp, size_t resp_cap)
         else if (strcmp(v, "put") == 0) rc = rp_do_put(r, &b, tok, nt);
         else if (strcmp(v, "get") == 0) rc = rp_do_get(r, &b, tok, nt);
         else if (strcmp(v, "clr") == 0) rc = rp_do_clr(r, &b);
+        else if (strcmp(v, "env") == 0) rc = rp_do_env(r, &b);
 #if !defined(CFT_NO_TRANSCEND) && !defined(CFT_REPLAY_MIN)
         else if (strcmp(v, "trn") == 0) rc = rp_do_trn(r, &b, tok, nt);
 #endif

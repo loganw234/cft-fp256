@@ -29,6 +29,7 @@
  * the measured numbers per board.
  */
 
+#include <stdio.h>
 #include <string.h>
 
 #include <cft.h>
@@ -200,6 +201,41 @@ static bool ready;
 SET_LOOP_TASK_STACK_SIZE(96 * 1024);
 #endif
 
+/* What `env` adds after the responder's counters: the die temperature
+ * where the part has a sensor, the free heap, and the uptime, as
+ * key=value tokens. A long run can then be read against the board's
+ * thermals and memory. The ESP32-S3's throughput decayed steadily
+ * from 62,000 cases on (2026-09-09); its package is bare plastic on
+ * the PCB with no heatsink, and whether the decay is heat or a leak
+ * is a question these two numbers answer between them. */
+static int board_env(void *ctx, char *out, size_t cap)
+{
+    (void)ctx;
+#if defined(ARDUINO_ARCH_ESP32)
+    return snprintf(out, cap, "temp=%.1f heap=%lu up=%lu",
+                    (double)temperatureRead(),
+                    (unsigned long)ESP.getFreeHeap(),
+                    (unsigned long)millis());
+#elif defined(ARDUINO_ARCH_RP2040)
+    return snprintf(out, cap, "temp=%.1f heap=%lu up=%lu",
+                    (double)analogReadTemp(),
+                    (unsigned long)rp2040.getFreeHeap(),
+                    (unsigned long)millis());
+#elif defined(__AVR__)
+    /* No die sensor on an ATmega. Free RAM is the gap between the
+     * heap's end and the stack pointer - the classic measurement,
+     * and the one number a 2 KB part most wants watched. */
+    extern int __heap_start, *__brkval;
+    int v;
+    int free_ram = (int)&v - (__brkval == 0 ? (int)&__heap_start
+                                             : (int)__brkval);
+    return snprintf(out, cap, "heap=%d up=%lu", free_ram,
+                    (unsigned long)millis());
+#else
+    return snprintf(out, cap, "up=%lu", (unsigned long)millis());
+#endif
+}
+
 void setup()
 {
     Serial.begin(VR_BAUD);
@@ -219,6 +255,8 @@ void setup()
                              NULL, 0,
 #endif
                              VR_LINE) == 0);
+    if (ready)
+        R.env = board_env;         /* after init, which zeroes R */
     if (ready)
         Serial.println(F("# cft VectorReplay ready - csrp/1"));
     else

@@ -386,6 +386,19 @@ static int set_nodelay(cftr_sock s)
                          (const char *)&on, (int)sizeof on);
 }
 
+/* A client that vanished without closing - a laptop that lost its
+ * route mid-run - would otherwise hold this connection's device until
+ * the server exits, because a socket nobody writes to never becomes
+ * readable. Keepalive probes turn that silence into a close. Windows
+ * starts probing after its default two hours of idle: long, but
+ * bounded; the Linux path tunes it to about a minute. */
+static int set_keepalive(cftr_sock s)
+{
+    BOOL on = TRUE;
+    return W.setsockopt_((SOCKET)s, SOL_SOCKET, SO_KEEPALIVE,
+                         (const char *)&on, (int)sizeof on);
+}
+
 int cftr_sock_timeout(cftr_sock s, long ms)
 {
     DWORD v = (DWORD)(ms < 0 ? 0 : ms);
@@ -496,6 +509,7 @@ cftr_sock cftr_sock_accept(cftr_sock listener)
         return CFTR_BAD_SOCK;
     }
     set_nodelay((cftr_sock)c);
+    set_keepalive((cftr_sock)c);
     return (cftr_sock)c;
 }
 
@@ -602,6 +616,25 @@ static int set_nodelay(cftr_sock s)
     return setsockopt((int)s, IPPROTO_TCP, TCP_NODELAY, &on, sizeof on);
 }
 
+/* See the Windows twin above. Where the knobs exist (Linux), the
+ * probes start after 30 s of silence, repeat every 10 s and give up
+ * after three, so a dead client releases its tile in about a minute;
+ * elsewhere the OS defaults apply, long but bounded. */
+static int set_keepalive(cftr_sock s)
+{
+    int on = 1;
+    int rc = setsockopt((int)s, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
+#if defined(TCP_KEEPIDLE) && defined(TCP_KEEPINTVL) && defined(TCP_KEEPCNT)
+    if (rc == 0) {
+        int idle = 30, intvl = 10, cnt = 3;
+        setsockopt((int)s, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+        setsockopt((int)s, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
+        setsockopt((int)s, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt);
+    }
+#endif
+    return rc;
+}
+
 int cftr_sock_timeout(cftr_sock s, long ms)
 {
     struct timeval tv;
@@ -706,6 +739,7 @@ cftr_sock cftr_sock_accept(cftr_sock listener)
         return CFTR_BAD_SOCK;
     }
     set_nodelay(c);
+    set_keepalive(c);
     return c;
 }
 
