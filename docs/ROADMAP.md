@@ -520,7 +520,16 @@ this round built the driver.
       capacity clamped at fp32's geometry that overran the register
       file at every wider format. Still ahead, in order: hw_emu
       through the real XRT stack, a bitstream, first light.
-- **Orbit/walk engine** (the RTL): a micro-sequencer running iterated maps
+
+      **All three since happened**, which is what closes the bullet
+      below as well: fp32 through real XRT on 2026-09-02, every format
+      on a four-tile hw_emu image on 2026-09-08, then bitstreams and
+      first light on 2026-09-08 with three more pairs after it
+      (revisions 2 and 3 and the read-ahead). VERSION is 0x800 now, not
+      the 0x600 this entry was written against.
+- [x] **Orbit/walk engine** (the RTL) - the same item as the two above,
+  and kept because it is how this section named it before the design
+  had one: a micro-sequencer running iterated maps
   on-chip (the atlas positive's inner loop: fma chains, exact
   selections, integer/bit ops, the hash), with point deposition into
   HBM and deterministic-by-index accumulation. This is where the
@@ -2494,14 +2503,21 @@ size. The steps, in order, each with the gate that says it is done:
    stand-in was: on a Kintex-7 325T at its -2 grade the tile is 48.5%
    of the device with 9.698 ns of implied path against a 100 MHz ask,
    about 103 MHz, where the Zynq-7020's -1 fabric had suggested 58;
-   an Artix-7 200T holds it at 73.5% and about 57 MHz. So step 4's
+   an Artix-7 200T holds it at 73.5% and about 57 MHz - and the routed
+   run a day later beat the synthesis estimate on the -2 K325T:
+   **95,695 LUT, 47.0% of the part, +0.096 ns at 100 MHz**. So step 4's
    board is reachable at a real clock, the pass count is what stops a DSP-poor part refusing
-   outright, and the ladders remain the LUT lever. The
-   formal proof of the pass accumulation does **not** close - a bounded
-   model check over a multiplier is the shape a SAT solver does worst
-   at, and the real-width task ran four hours without returning - so it
-   is parked out of `formal/run.sh` with its reason in the file and the
-   bit identity rests on the benches, as the fused ladders' does.
+   outright, and the ladders remain the LUT lever. **The formal proof
+   of the pass accumulation closed on 2026-09-07**, which this step
+   said it had not: split into a fold lemma, an operand lemma and a
+   column lemma so that no task asks a solver to compare two
+   multipliers, `mulexact.sby` proves exactness at the REAL 24-bit
+   chunk for all seven `(P, COLS)` geometries `cft_lanes` can build,
+   and `mulpass_real.sby` re-proves the whole claim as one unfactored
+   property at four of them. Twenty of the gate's thirty tasks are that
+   proof. What stays parked, with its reason in `formal/run.sh`, is the
+   narrowed-chunk `mulpass.sby`, `mulpass_real.sby`'s other five tasks
+   and `imul.sby` - none of which returns inside a wall bound.
 4. **An Ethernet-attached tile** on the Arty A7-100T or the K325T: the
    first tile with no vendor runtime anywhere in its path. Gate: the
    census, on an open flow, from a client that does not know which
