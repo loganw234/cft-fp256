@@ -216,6 +216,47 @@ Kintex-7 board, where one tile fits in 46% of a 325T; and the roadmap
 now also carries what the first outside workload asked the library for,
 ranked by measurement rather than by guess.
 
+## Built on it
+
+**[cft-rebound](https://github.com/loganw234/cft-rebound)** is the first
+application here that is somebody else's algorithm rather than this
+project's own: [REBOUND](https://github.com/hannorein/rebound)'s IAS15,
+a fifteenth-order adaptive N-body integrator used in real
+orbital-dynamics research, with every floating-point operation routed
+through libcft. The same integration then runs at binary64, binary128
+and binary256, and on the tile.
+
+It is a separate repository under GPL-3.0, because REBOUND is GPL-3.0
+and Apache-2.0 combines into that licence but not the reverse.
+
+What it has shown so far:
+
+- **At binary64 the port is REBOUND's own IAS15, bit for bit.** That
+  equivalence is the correctness gate, and it holds across long runs and
+  the awkward paths - rejected steps, iteration caps.
+- **On the card, every comparison against the software backend produced
+  an identical record.** Not only the trajectories: the adaptive
+  corrector took the same number of passes, which a single differing bit
+  would have moved.
+- **binary128 is worth having; binary256 mostly is not, for this
+  integrator.** IAS15 was designed to sit at the binary64 round-off
+  floor, and moving to binary128 recovers about four orders of magnitude
+  of accuracy at once. Going further to binary256 changes nothing on the
+  same test, because the method's own truncation error dominates by
+  then. That is a negative result, measured and kept.
+- **The tile overtakes one CPU core between 8 and 32 bodies** and
+  saturates around 2.7 to 2.9 times it. Below that it is slower, by up
+  to 4.6 times on a two-body problem, because the engine's width is its
+  whole advantage and a small system leaves it idle.
+
+It also sent work back the other way: what that integrator needs and the
+library does not have is recorded in `docs/ROADMAP.md`, ranked by
+measurement, and the general lesson about irregular access patterns is
+in `docs/INTEGRATION.md`.
+
+The port is in active development and its own `docs/VALIDATION.md`
+carries the numbers, the dates and the failures.
+
 ## Neighbours
 
 The workload this tile exists to serve is
