@@ -165,6 +165,8 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | the workload checks (`collatztest` ... `zoomtest`) | 1 to 3 min each | 1 to 3 min each | |
 | `remote` (`make -C host remotetest`) | | 10 to 12 min | the bounded replay is most of it |
 | `wstest` | | 2 min | |
+| `embedded` (`make embedded`) | 18 to 19 min | | the vendored-copy check, four loopback profiles built, the published sets replayed through each (1,071,635 cases twice, 271,776 and 195,248 for the two `CFT_TINY` profiles), the corruption control, and fifteen board compiles through `arduino-cli`. Needs the AVR, ESP32 and RP2040 cores installed; skips the compiles with a note if `arduino-cli` is absent |
+| a board census (`serial_replay.py --port COMn`) | 1 h+ per board | | not a gate and not in the runner: it needs a part plugged in. About 200 to 550 cases a second on an ESP32-S3 depending on format and operation, so the full 1,071,635 is hours. Use `--sets` and `--limit` for anything routine |
 | the fuzz lane (`make -C host fuzz-run`) | 30 min per target by design | | `FUZZ_SECONDS`; the sanitizers need the `cft-sim` image, MSYS gcc has none |
 | a wasm module rebuild (`bindings/wasm/build.sh`) | 5 min | | in the pinned emscripten image |
 | OOC synthesis, one kernel (`hw/mc_sweep.sh ... synth`) | 10 to 32 min | | U50 647 to 1,905 s; K325T 626 to 1,272 s; A200T and Z020 6 to 12 min |
