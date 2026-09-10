@@ -46,7 +46,9 @@ kernel flow, XRT host runtime.
               place of the per-lane ones
 ```
 
-- **cft_fpfma_pipe** - the parameterized 15-stage FMA core (v1):
+- **cft_fpfma_pipe** - the parameterized 16-stage FMA core (v1; 15
+  until the leading-zero cone became its own stage on 2026-09-07,
+  below):
   staged significand multiplier (24-bit chunk columns + four
   registered tree levels), coarse/fine alignment with the sticky
   marker, split-carry add, per-64 LZC normalize, a single rounding
@@ -68,7 +70,9 @@ kernel flow, XRT host runtime.
   quiet predicates + `select`, and the integer/bitwise group. A sign
   bit, one magnitude comparison and one shifter, computed
   combinationally - and proven bit-identical to its pre-rewrite self
-  over all 2^104 inputs by the formal gate. Beside it, **cft_seedop**
+  over all 2^104 inputs with `op` outside {26, 27, 30} by the formal
+  gate, those three being the codes that left the reserved set for
+  cft_seedop and IMUL after the ref was frozen. Beside it, **cft_seedop**
   answers the divide/sqrt seed opcodes (26/27) from two model-derived
   ROMs.
   Its answer reaches the output through the pipe's precomputed-result
@@ -260,8 +264,10 @@ other pointers, and that is not tidiness losing to history. `A_PTR`
 through `D_PTR` are `hw/kernel.xml` argument ids 2 to 5, and an id is a
 position in every host's kernel call - moving them to open a gap would
 silently rebind every existing binary's operands to the wrong ports.
-Appending is the only change a shipped argument list can take, so the
-sequencer's pointers are ids 6 and 7 at the first free offsets.
+Appending is the only change a shipped argument list can take, so
+every pointer added since has taken the next free id: `hw/kernel.xml`
+now runs to id 10 - `prog` 6, `cnt` 7, `bank` 8, `scratch_in` 9,
+`scratch_out` 10 - which is what the rows above record.
 
 ### Opcodes (MODE[7:0])
 
@@ -296,10 +302,15 @@ sequencer's pointers are ids 6 and 7 at the first free offsets.
 | 27 | `rsqrt_seed` | seed | ~1/sqrt(a), the square-root starting point; quiet, no flags |
 | 28 | `sumsq` | reduction | sum of round(a[i]*a[i]) over the tree (ABI 0.6) |
 | 29 | `sumabs` | reduction | sum of \|a[i]\| over the tree (ABI 0.6) |
+| 30 | `imul` | integer | low 32 bits of an unsigned 32x32 product, at every rung; announced in CAPS[28] rather than by the integer group bit, because bitstreams shipped with that bit set before it existed (2026-09-07) |
 
-Opcode 15 and everything from 30 up are unassigned, and return
+Opcode 15, 31 and everything above are unassigned, and return
 the canonical quiet NaN with invalid raised - in hardware and in the
-golden model alike. The field was four
+golden model alike (`rtl/cft_simpleops.sv`'s `is_reserved`, and
+`python/cft_golden/softfloat.py`'s own note that "15, 31 and above are
+unassigned"). Codes 24, 25, 28 and 29 are reserved in `cft_simpleops`
+too, because they are reductions and belong to the accumulator rather
+than to the ALU. The field was four
 bits until the integer group needed a fifteenth opcode; it is a byte
 now so that divide, square root, conversions and the reductions have
 somewhere to go without moving the precision and rounding fields again.
@@ -383,12 +394,17 @@ hardware far more than it needs a transcendental.
   STATUS is what makes a bit-exactness claim mean anything: without
   it, a run that computed on data the memory system never delivered
   is indistinguishable from one that succeeded.
-- **Known gap: pyxrt cannot read the status CSRs.** Checked on both
-  XRT 2.14.354 (era emulation) and 2.19.194 (2025.1, what the card
-  will run): `pyxrt.kernel` exposes only `group_id` and the CU access
-  modes - no `read_register`, and there is no `pyxrt.ip` class. So
+- **Known gap: pyxrt may not be able to read the status CSRs.**
+  Checked on both XRT 2.14.354 (era emulation) and 2.19.194 (2025.1,
+  what the card runs): `pyxrt.kernel` exposed only `group_id` and the
+  CU access modes - no `read_register`, and no `pyxrt.ip` class. So
   FLAGS, STATUS and CAPS are reachable from the C++ API and from
-  cocotb, but **not** from the Python host example. What that costs
+  cocotb, and may not be from the Python host example - which is why
+  `host/examples/vector_fma.py` CALLS `krnl.read_register(0x50)`
+  inside a `try` and warns when the binding has no such method,
+  rather than either assuming it or giving up on it. Every caller
+  reaching the card through libcft gets the registers regardless,
+  because the device backend is C++. What that costs
   is diagnosis, not correctness: the D-buffer comparison against the
   golden model is the actual gate, and a bus fault corrupts D, so a
   fault still fails the run - it just fails as "wrong answer" rather
@@ -533,7 +549,8 @@ same CSR contract.
 
 ## Timing (v1, measured)
 
-The 15-stage core closes ~232 MHz fp32 / ~148 MHz fp256 **out of
+The core, at the 15 stages it had when this was measured, closes
+~232 MHz fp32 / ~148 MHz fp256 **out of
 context** (fp64/fp128 land between; QoR numbers recorded in
 ROADMAP.md).
 
@@ -653,15 +670,20 @@ leave +0.097 ns OOC where off leaves +0.307, and this build is the
 evidence that a thin OOC margin does not survive the shell. Five points
 of device area is not worth a bitstream that does not close.
 
-**Status (2026-09-02).** Ladders off, 135 MHz, in the shell: the
-single closes at +0.045 with retiming and at +0.045 without it, and
-at +0.050 at 130; the quad has not closed at 135 - -0.113 without
+**Status (2026-09-02, morning).** Ladders off, 135 MHz, in the shell:
+the single closes at +0.045 with retiming and at +0.045 without it,
+and at +0.050 at 130; the quad has not closed at 135 - -0.113 without
 retiming, -0.141 with it - and its worst paths are named in
 docs/ROADMAP.md. The tree with the case-table ROM and the S12
 precompute is building as a quad on two hosts at 135 with 130 queued
-behind; until one of those returns an image, the closed quads are
-the 130 MHz pairs already staged for card day. Nothing here claims
-silicon.
+behind.
+
+**And it returned, the same day.** From `9f73107` - the case-table ROM
+plus the S12 precompute - the quad closes at 135 MHz with kernel WNS
+**+0.143** and 0 of 1,028,763 endpoints failing, and the single at
+**+0.618** (docs/VALIDATION.md, both entries of 2026-09-02). That pair
+is the tree card day ran. The paragraph above is kept as the morning's
+state, because it is the measurement the afternoon answered.
 
 A reduced clock changes nothing about results - determinism is
 clock-independent by construction. The v0 behavioural core (one
@@ -884,7 +906,9 @@ the sweep script takes both.
 together.** The Vivado 2026.1 install on this host carries only the
 UltraScale+ and Versal families, and the 2022.2 install in the
 `cft2204` distro carries Zynq-7000 but is licensed for Alveo devices
-only - so the matrix's `xc7k325t` and `xc7a200t` cells are unrun. What
+only - so the matrix's `xc7k325t` and `xc7a200t` cells were unrun when
+this paragraph was written. They were run, and the tables below are
+what they said. What
 is free in every edition and present there is `xc7z020`, whose fabric
 is Artix-7 class: CARRY4 and 6-input LUTs rather than UltraScale+'s
 CARRY8, which is the difference that matters for a tile bound by its
@@ -1067,11 +1091,16 @@ switches with the pipe draining, 160 of nothing but specials.
 
 ## HBM
 
-`hw/link.cfg` maps the single master to HBM[0:3] (one pseudo-channel
-group). The U50 HBM subsystem exposes 32 pseudo-channels; scaling
-plans (multiple CUs, per-CU PC groups, the RAMA IP for scatter
-workloads) belong to the orbit-engine milestone, which is when access
-patterns stop being three linear streams.
+`hw/link.cfg` gives each of the four masters its own single HBM
+pseudo-channel - `m_axi_a:HBM[0]`, `b:HBM[1]`, `c:HBM[2]`, `d:HBM[3]`.
+It used to say `HBM[0:3]`, spanning one master across a group, and
+that file's own header says why it stopped: a spanned master reorders
+responses. The U50 HBM subsystem exposes 32 pseudo-channels, which is
+what bounds a build to eight tiles at four masters each;
+`hw/link_quad.cfg` and the eleven configurations under `hw/layouts/`
+are the multi-CU case, built and run. What still belongs to a later
+milestone is the RAMA IP and anything else for scatter workloads,
+because access patterns here are still three linear streams.
 
 ## Platform notes
 

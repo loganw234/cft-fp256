@@ -50,9 +50,9 @@ so in the open.
 | `collatz-fp256` | fp256 | 27 | 9 | 4 | - | 1024 Collatz steps with parity read off the encoding and a per-element exactness witness; deposits n, steps, peak, escaped | its nine constants against their derivation from the format, and 64 trajectories against `cft-collatz`'s own records - steps and peak exactly |
 | `zoom-scan-fp256` | fp256 | 9 | 1 | 1 | - | 51 iterations of the guarded real-axis map `z <- z^2 + c`, the nucleus scan | 32 real points bit-identical to `seq.py`'s executor running the same image |
 | `lowbias32-fp32` | fp32 | 10 | 4 | 1 | `IMUL` | docs/ATLAS.md's draw hash over the index ramp | 4,096 draws against the hash's definition, and the run must signal nothing |
-| `horner-bank-fp64` | fp64 | 26 | 24 | 1 | `kx`, `BANK_PTR` | a degree-23 Horner polynomial whose coefficients are the RUN's data | the image carries no constant section (240 = 32 + 8 x 26 bytes); two different banks against a softfloat Horner; and the bank path itself when the library has one |
+| `horner-bank-fp64` | fp64 | 26 | 24 | 1 | `kx`, `BANK_PTR` | a degree-23 Horner polynomial whose coefficients are the RUN's data | the image carries no constant section (240 = 32 + 8 x 26 bytes); two different banks against a softfloat Horner; and the bank path itself, which the library has carried since ABI 0.9 |
 | `spill-ref-fp64` | fp64 | 82 | 2 | 1 | - | forty terms `x^(k+1)` combined as `acc = fma(acc, 1/2, t_k)`, each consumed the instant it is produced | 64 lanes against a softfloat model of the same recurrence, through `positive-run` |
-| `spill-fp64` | fp64 | 161 | 2 | 1 | `SCRATCH` | the same arithmetic with all forty terms live at once, eight of them past the thirty-two registers and all forty in the scratch through `stl`/`ldl` | forty `stl` and forty `ldl` over slots 0..39; then the same deposits as `spill-ref-fp64` and the same model, when the library has the codes |
+| `spill-fp64` | fp64 | 161 | 2 | 1 | `SCRATCH` | the same arithmetic with all forty terms live at once, eight of them past the thirty-two registers and all forty in the scratch through `stl`/`ldl` | forty `stl` and forty `ldl` over slots 0..39; then the same deposits as `spill-ref-fp64` and the same model, which the library has carried since ABI 0.10 |
 | `conv-fp64` | fp64 | 19 | 6 | 14 | `SCRATCH` | a sixteen-sample local array written and read under loop counters through `stx`/`ldx`, and a three-tap convolution over it | the six constants against their derivation and no static slot at all; then 24 lanes x 14 outputs against a softfloat three-tap convolution |
 | `resume-fp64` | fp64 | 11 | 3 | 16 | `SCRATCH`, `SCRATCH_IO` | eight steps of `v <- 1.5v + 0.25` with a step count, entered and left through the per-run scratch block | `scratch_io` 0x00020002 behind `flags` bit 1; then two runs whose deposits are the two halves of a single sixteen-step run's |
 | `horner-wide-fp64` | fp64 | 302 | 300 | 1 | `kx`, `BANK_PTR`, `KX9` | a degree-299 Horner over a 300-entry external bank - 44 coefficients past the 256 a byte of `imm` reaches | 44 ninth index bits in `imm[30:28]`, the bank file against `C[k] = (-1)^k/(k+1)`; then 16 points against a softfloat Horner |
@@ -172,34 +172,42 @@ reaches, so the FMAs from `C16` on come out in the indexed (`kx`)
 form. The assembler chooses that per instruction and the source says
 nothing about it, which is the point.
 
-## What is not here yet, and why
+## What waited on another half of the round, and no longer does
+
+Both entries below were written while the halves of the 2026-09-08
+round were landing separately. Both have landed; the paragraphs are
+kept because the SHAPE of the answer - a capability the tool reports,
+a check that says SKIP and names what it waited on, never a quiet pass
+- is the part worth keeping.
 
 - **The `BANK_EXT` path itself.** `cft_program_run_bank` and
-  `cft_program_digest` arrive with the host half of the 2026-09-08
-  round. Until then `positive-run --capabilities` says `bank-path
-  absent`, the check runs the *equivalent constant-carrying image* -
-  the same instruction stream with the bank spliced in as an ordinary
-  constant section, which is the same computation by the definition of
-  the flag - and prints SKIP for the arm it could not run. The day the
-  macro exists, that arm runs and additionally requires the two to
-  agree bit for bit. Nothing about this is silent.
+  `cft_program_digest` arrived with the host half of that round, at
+  ABI 0.9 (`cft.h`). While they were missing, `positive-run
+  --capabilities` said `bank-path absent`, the check ran the
+  *equivalent constant-carrying image* - the same instruction stream
+  with the bank spliced in as an ordinary constant section, which is
+  the same computation by the definition of the flag - and printed
+  SKIP for the arm it could not run. Today the tool prints `bank-path
+  present`, that arm runs, and it additionally requires the two to
+  agree bit for bit. Nothing about this was ever silent.
 - **Revision 3's execution arms.** The four scratch rows above
-  assemble, disassemble, round-trip and cross-check today, and their
-  static arms - constants against their derivation, headers against
-  what the sources declare, the ninth index bits against the contract
-  - all PASS. What none of them can do yet is RUN: `stl`/`ldl`/`stx`/
-  `ldx`, the header's `scratch_io` word and the ninth constant-index
-  bit arrive in `seq.py` and in libcft with the other two halves of
-  the same round. Until then `positive-run --capabilities` reports
+  assemble, disassemble, round-trip and cross-check, and their static
+  arms - constants against their derivation, headers against what the
+  sources declare, the ninth index bits against the contract - all
+  PASS. They could not RUN until `stl`/`ldl`/`stx`/`ldx`, the header's
+  `scratch_io` word and the ninth constant-index bit reached `seq.py`
+  and libcft, which is why `positive-run --capabilities` reported
 
       kx9           absent   (cft.h defines no CFT_SEQ_FEAT_KX9)
       scratch       absent   (cft.h defines no CFT_SEQ_FEAT_SCRATCH)
       scratch-io    absent   (cft.h defines no CFT_SEQ_FEAT_SCRATCH_IO)
 
-  the tool refuses such an image BY NAME rather than running something
-  else, and `check.py` prints four SKIPs that say which feature each
-  waited on. `spill-ref-fp64` runs today and passes, which is why the
-  spill row's reference is a committed program rather than a promise.
+  and `check.py` printed four SKIPs naming what each waited on. All
+  three landed: `seq.py` carries `STL, LDL, STX, LDX`,
+  `FLAG_SCRATCH_IO`, `SCRATCH_D` and `KX9_SHIFT`, and `cft.h` defines
+  all three macros, so those lines read `present` and the four SKIPs
+  are gone. The mechanism stays - a tool that lacks a feature refuses
+  such an image BY NAME rather than running something else.
 - **A program per positive.** docs/ATLAS.md's sixty-eight maps are
   step 3 of that document and belong to `core/emit-cft.mjs` in
   atlas-engine; this library is the shape they will be emitted into.

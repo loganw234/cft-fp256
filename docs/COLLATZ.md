@@ -184,7 +184,7 @@ Two edges make this right rather than lucky:
 
 The program is what `build_program()` emits; this is its body, one
 Collatz step per iteration. `r0..r2` arrive from the `a`, `b` and `c`
-streams as `cft_program_run` defines, and `r3..r15` start at +0.
+streams as `cft_program_run` defines, and `r3..r31` start at +0.
 
 ```
   REPEAT  K                          ; K = --steps-per-call
@@ -522,8 +522,8 @@ the software backend and issues the identical program. What changes:
   loaded once and deposited once for hundreds of steps of work, which
   is the regime the multi-tile design exists for.
 - **The lane count.** A tile issues one beat per cycle - eight fp32
-  lanes or one fp256 lane - and the pipeline is 15 stages deep with no
-  stall path, so a batch below `15 * lanes_per_beat` runs at pipeline
+  lanes or one fp256 lane - and the pipeline is 16 stages deep with no
+  stall path, so a batch below `LATENCY * lanes_per_beat` runs at pipeline
   speed rather than throughput speed. `--batch 4096` is comfortably
   above that at every format.
 - **What would not be measured honestly.** Numbers from `hw_emu` are

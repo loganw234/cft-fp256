@@ -23,13 +23,12 @@ runner that takes an image and data in and deposits and a hash out.
 backend. `programs/` holds seventeen programs with a check each, `make
 programs-check` runs them and generated revision-2 and revision-3
 corpora in about twelve seconds. The `BANK_EXT` run path landed with
-the host half of the afternoon round and now passes. What cannot run
-yet is revision 3's own arithmetic - the four scratch codes, the
-per-run scratch block and the ninth constant-index bit are in both
-assemblers, in the library and in the tests, and arrive in `seq.py`
-and libcft with the other two halves of the evening round; four checks
-say SKIP and which feature each waited on. docs/VALIDATION.md's two
-2026-09-08 entries are the run records.
+the host half of the afternoon round and passes; revision 3's own
+arithmetic - the four scratch codes, the per-run scratch block and the
+ninth constant-index bit - reached `seq.py` and libcft with the
+evening round, so the four checks that said SKIP and named what they
+waited on now run. docs/VALIDATION.md's two 2026-09-08 entries are the
+run records.
 
 ## The text form, `.cfta`   **BUILT**
 
@@ -440,29 +439,34 @@ The run goes through `cft_program_run_ex` and `cft_run_args`, ABI
 0.10's one entry point that takes everything a run can carry,
 compiled under `CFT_SEQ_FEAT_SCRATCH_IO`.
 
-### What waits on the other halves, and how it says so
+### What waited on the other halves, and how it said so
 
 `stl`/`ldl`/`stx`/`ldx`, the header's `scratch_io` word and the ninth
-constant-index bit are in both assemblers, in the library, in
-`test_asm.py` and in a generated revision-3 corpus. What none of them
-can do on the tools' own tree is RUN, because `seq.py` and libcft
-reach revision 3 on their own lanes. So:
+constant-index bit reached the assemblers, the library, `test_asm.py`
+and a generated revision-3 corpus before `seq.py` and libcft carried
+them, because each moves on its own lane. For that interval none of
+them could RUN, and this is the machinery that said so - kept written
+down, because the next revision will use it again. All three have
+since landed (`seq.py`'s `STL, LDL, STX, LDX`, `SCRATCH_D` and
+`KX9_SHIFT`; `cft.h`'s `CFT_SEQ_FEAT_KX9`, `_SCRATCH` and
+`_SCRATCH_IO`), so every line below now reads the other way.
 
-- `positive-run --capabilities` reports `kx9`, `scratch` and
-  `scratch-io` as `absent`, naming the `cft.h` macro each is missing,
-  and says which run path the binary actually holds;
+- `positive-run --capabilities` reported `kx9`, `scratch` and
+  `scratch-io` as `absent`, naming the `cft.h` macro each was missing,
+  and said which run path the binary actually held - today all three
+  read `present`;
 - the tool refuses such an image BY NAME - naming the feature and the
   section of the contract that carries it - rather than running
   something else or letting `cft_program_load` report an unknown
   control code;
-- `programs/check.py` runs each new row's STATIC arm today (constants
+- `programs/check.py` ran each new row's STATIC arm (constants
   against their derivation, headers against what the sources declare,
-  the ninth index bits against the contract) and prints four SKIPs
-  that each say which feature the execution arm waited on;
+  the ninth index bits against the contract) and printed four SKIPs
+  that each said which feature the execution arm waited on;
 - `test_asm.py`'s three model-executing tests are gated on a
   BEHAVIOURAL probe - each assembles the smallest program that needs
-  its feature and asks `seq.run` to run it - so they turn themselves
-  on the day the model lands, with nothing to switch by hand.
+  its feature and asks `seq.run` to run it - so they turned themselves
+  on the day the model landed, with nothing to switch by hand.
 
-This is the shape last round used for the `BANK_EXT` path, which has
-since landed and now passes.
+This is the shape the round before used for the `BANK_EXT` path, which
+landed the same way.

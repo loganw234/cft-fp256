@@ -143,7 +143,7 @@ exact rational floor division, sharing no code path with the model.
 
 ## The non-arithmetic operations
 
-Nineteen opcodes that do not round, do not consult the rounding
+Twenty opcodes that do not round, do not consult the rounding
 attribute, and cannot be inexact:
 
 | group | operations | clause |
@@ -152,7 +152,7 @@ attribute, and cannot be inexact:
 | min/max | `minimum`, `maximum`, `minimumNumber`, `maximumNumber` | 9.6 |
 | predicate | `cmplt`, `cmple`, `cmpeq` (quiet comparisons) | 5.11 |
 | data | `select` | - |
-| integer | `iand`, `ior`, `ixor`, `iadd`, `isub`, `ishl`, `ishr`, `icmplt` | - |
+| integer | `iand`, `ior`, `ixor`, `iadd`, `isub`, `ishl`, `ishr`, `icmplt`, `imul` (2026-09-07; the low 32 bits of an unsigned 32x32 product, at every format) | - |
 
 Rules worth stating because they are the ones implementations get
 wrong:
@@ -198,16 +198,18 @@ and this table is that definition.
 
 ### Unassigned opcodes
 
-Opcode 15 and everything from **30** up are unassigned. They return the
+Opcode 15, opcode **31** and everything above are unassigned - 30
+became `imul` on 2026-09-07. They return the
 canonical quiet NaN with **invalid** raised, in the hardware and in
 the golden model alike. Deterministic, and visible in the flags, so a
 host that issues one early learns it now rather than getting a
 plausible number that changes meaning under a later bitstream.
 
-The hazard is not hypothetical; it has now fired three times. 24 and 25
+The hazard is not hypothetical; it has now fired four times. 24 and 25
 became `sum` and `dot` (2026-08-30), 26 and 27 became the
-divide/sqrt seeds (2026-08-31), and 28 and 29 became `sumsq` and
-`sumabs` (2026-09-03) - each time, a vector set generated
+divide/sqrt seeds (2026-08-31), 28 and 29 became `sumsq` and
+`sumabs` (2026-09-03), and 30 became `imul` (2026-09-07) - each time,
+a vector set generated
 before the assignment still named the opcode "reservedNN", and
 replaying one would score the new operation against an answer recorded
 for the unassigned-opcode result. `cft_conformance` detects that

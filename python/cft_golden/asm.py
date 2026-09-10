@@ -16,16 +16,21 @@ on its own lane. Revision 2 widened the register fields to five bits
 `reserved[0]` into `flags`, whose bit 0 is `BANK_EXT`; revision 3 adds
 a per-lane scratch memory with four control codes, turns
 `reserved[1]` into `scratch_io` behind `flags` bit 1, and gives each
-constant index a ninth bit in `imm[30:28]` under `kx`. This file is
-written to the revision-3 contract from the start so that the
-assembler exists before the model catches up, and
+constant index a ninth bit in `imm[30:28]` under `kx`. This file was
+written to the revision-3 contract from the start, before the model
+carried it; `seq.py` has since landed revision 3 as well (`NREG = 32`,
+`SCRATCH_D = 256`, the four control codes, `FLAG_SCRATCH_IO` and
+`KX9_SHIFT`), so the two now overlap on everything. And
 `python/tests/test_asm.py` pins the two together where they overlap -
 a program that stays inside what `seq.py` can express must encode to
 `seq.encode`'s exact words and run identically in `seq.run`.
 
 So: where this file and `seq.py` disagree about a program `seq.py` can
-express, THIS FILE IS WRONG. Where they disagree about a program only
-the newer revision can express, seq.py has not got there yet.
+express, THIS FILE IS WRONG. The rule was written for a period when a
+program might be outside what the model could express; the model has
+caught up, so today there is no such program and the rule has no
+second clause - which is where it should stay until the next
+revision opens one.
 
 The text form, in one paragraph. One instruction a line; `;` starts a
 comment; names are case-insensitive; numbers are decimal or `0x` hex.

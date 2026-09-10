@@ -284,10 +284,10 @@ chain.** This is the observation for the sequencer's designers, and it
 is a different one from the Collatz tool's:
 
 - a convolution coefficient is a **cross-element reduction**. A lane
-  has sixteen private registers, three input streams and **no path to
-  another lane** (`docs/SEQUENCER.md`), and `cft_reduce`'s tree is not
-  in the sequencer's opcode set. Sixteen registers could hold sixteen
-  limbs, but nothing can get limb *j* into lane *i*.
+  has thirty-two private registers, three input streams and **no path
+  to another lane** (`docs/SEQUENCER.md`), and `cft_reduce`'s tree is
+  not in the sequencer's opcode set. Thirty-two registers could hold
+  thirty-two limbs, but nothing can get limb *j* into lane *i*.
 - the carry chain's shifted add reads the **neighbouring** element's
   carry. Same obstacle.
 
@@ -642,8 +642,8 @@ the software backend and issues the identical program. What changes:
   or a lane shift, is what would absorb the 195 - see the section
   above.
 - **The lane count.** A tile issues one beat per cycle - one fp256 lane
-  - and the pipeline is 15 stages deep with no stall path, so a call
-  below 15 elements runs at pipeline speed rather than throughput
+  - and the pipeline is 16 stages deep with no stall path, so a call
+  below 16 elements runs at pipeline speed rather than throughput
   speed. That is a real constraint here: a linear convolution's dots
   are 1, 2, 3, ... elements long at the ends, and at L = 12 **every one
   of the 23** is under 15. The small exponents would gain least from a
