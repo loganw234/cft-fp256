@@ -119,9 +119,19 @@ MAX_DEPOSITS = 1 << 20
 # is what a revision-2 tile enforces and therefore the guard - a tile
 # that predates the flag throws the image back at the header rather
 # than running it with the scratch uninitialised.
+#
+# SCRATCH_STRICT (revision 4, R8) says an indexed scratch access at or
+# past SCRATCH_D is to be REPORTED rather than reduced modulo it. With
+# the bit clear the modulo stands, so every program built before this
+# revision runs unchanged and this file still defines what it computes.
+# The bit is the program asking for the stricter contract, and a tile
+# that cannot honour it refuses the image rather than running it with
+# the old meaning - which is the same guard SCRATCH_IO needed and for
+# the same reason.
 FLAG_BANK_EXT = 1 << 0
 FLAG_SCRATCH_IO = 1 << 1
-FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO
+FLAG_SCRATCH_STRICT = 1 << 2
+FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO | FLAG_SCRATCH_STRICT
 
 # control codes (instruction bit 31 set)
 HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL = 0, 1, 2, 3, 4, 5
@@ -182,6 +192,11 @@ IMM_ALLOWED = {
 # mean what 754 says they mean, and "your buffer was too small" is
 # not one of them.
 STATUS_DEPOSIT_OVERFLOW = 1 << 4
+# Revision 4's R8, and deliberately the bit after the deposit's: the two
+# mean the same kind of thing, a lane asking for a slot that is not
+# there, and they are reported the same way. Not an IEEE flag, for the
+# reason given above the deposit bit.
+STATUS_SCRATCH_RANGE = 1 << 5
 
 
 class ProgramError(ValueError):
@@ -1014,6 +1029,11 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
 
     zero = sf.zero_bits(fmt, 0)
     mask = (1 << fmt.width) - 1
+    # Revision 4's R8. Read once: the flag is the image's, so it cannot
+    # change under a running program, and reading it per access would
+    # invite someone to make it per lane - which would be a contract that
+    # depends on data rather than on the image.
+    strict = bool(prog.flags & FLAG_SCRATCH_STRICT)
     regs = [[zero] * NREG for _ in range(n)]
     for i in range(n):
         # Registers are format-width; the hardware truncates and so
@@ -1140,12 +1160,31 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                 if not active[i]:
                     continue
                 if not static:
-                    # The indexed slot is the low log2(SCRATCH_D) bits
-                    # of rb's BIT PATTERN read as an unsigned integer -
-                    # reduced modulo the depth rather than refused,
-                    # because rb is data and a refusal would be a
-                    # refusal for a value the program might compute.
-                    slot = regs[i][d["rb"]] & SCRATCH_MASK
+                    # The indexed slot is rb's BIT PATTERN read as an
+                    # unsigned integer. Without FLAG_SCRATCH_STRICT it is
+                    # reduced modulo the depth, which is what every
+                    # program written before revision 4 means and so what
+                    # this file must keep computing for them.
+                    #
+                    # With the flag, an index at or past the depth is
+                    # REPORTED instead: the access is suppressed and the
+                    # run continues, exactly as a deposit past
+                    # max_deposits is. That is what makes the depth
+                    # portable - a program inside its declared
+                    # scratch_used computes the same answer at every
+                    # depth, and one outside it is told rather than
+                    # quietly given a different number.
+                    idx = regs[i][d["rb"]]
+                    if strict and idx >= SCRATCH_D:
+                        status |= STATUS_SCRATCH_RANGE
+                        if code == LDX:
+                            # +0, the same thing an untouched slot reads
+                            # back as; never a stale register, which
+                            # would make the result depend on what the
+                            # lane happened to hold.
+                            regs[i][d["rd"]] = zero
+                        continue
+                    slot = idx & SCRATCH_MASK
                 if code in (STL, STX):
                     scratch[i][slot] = regs[i][d["ra"]]
                 else:

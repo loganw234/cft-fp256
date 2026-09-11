@@ -546,7 +546,10 @@ def test_loader_rejects_a_padded_or_reserved_program():
     # is the whole of `scratch_io` while its flag is clear. The tile
     # checks both words, which the 0x600 tile did not.
     bad = bytearray(raw)
-    bad[24] = 1 << 2                                    # flags[2], unknown
+    # The lowest bit above every flag this loader knows. Derived, not
+    # written out: revision 4 spent bit 2 and a transcribed number would
+    # have made this test assert the previous contract.
+    bad[24] = 1 << seq.FLAGS_KNOWN.bit_length()         # the first unknown flag
     with pytest.raises(seq.ProgramError, match="reserved"):
         seq.Program.from_bytes(bytes(bad))
     bad = bytearray(raw)
@@ -1286,6 +1289,51 @@ def test_scratch_io_padding_lanes_read_and_write_nothing():
             "a padding lane was preloaded"
 
 
+def test_scratch_strict_is_reported_not_wrapped():
+    """Revision 4's R8. See docs/SEQUENCER.md.
+
+    An indexed scratch access past the depth used to be reduced modulo
+    it, which meant the same program computed different answers on
+    tiles of different depth and said nothing. With
+    FLAG_SCRATCH_STRICT it is reported instead, in the shape a deposit
+    past max_deposits already had: the access is suppressed, the run
+    continues, and a sticky status bit says so.
+    """
+    fmt = FORMATS["fp64"]
+    val = sf.one_bits(fmt)
+    zero = sf.zero_bits(fmt)
+    past = seq.SCRATCH_D + 7          # wraps to 7 under the old meaning
+    inside = 7
+
+    def build(flags):
+        return seq.Program(fmt, [
+            seq.encode(seq.STX, ra=0, rb=2, ctrl=True),   # scratch[c] := a
+            seq.encode(seq.LDX, rd=1, rb=2, ctrl=True),   # r1 := scratch[c]
+            seq.encode(seq.DEPOSIT, ra=1, ctrl=True),
+            seq.halt(),
+        ], max_deposits=2, flags=flags)
+
+    # 1. the old meaning is untouched: past the depth still wraps, and
+    #    wrapping to a slot this program just wrote returns the value.
+    r = seq.run(build(0), [val], [val], [past])
+    assert r.status == 0, f"a wrapping build raised status 0x{r.status:02x}"
+    assert r.deposits[0] == val, "the old meaning stopped wrapping"
+
+    # 2. with the flag the same index is reported, not wrapped
+    r = seq.run(build(seq.FLAG_SCRATCH_STRICT), [val], [val], [past])
+    assert r.status & seq.STATUS_SCRATCH_RANGE, \
+        "an index past the depth did not raise STATUS_SCRATCH_RANGE"
+    assert r.deposits[0] == zero, \
+        "an out-of-range load must read +0, not a stale register"
+
+    # 3. in range, the two agree exactly - the portability claim
+    a = seq.run(build(0), [val], [val], [inside])
+    b = seq.run(build(seq.FLAG_SCRATCH_STRICT), [val], [val], [inside])
+    assert a.status == b.status == 0
+    assert a.deposits[:a.counts[0]] == b.deposits[:b.counts[0]], \
+        "an in-range program must not depend on the flag"
+
+
 def test_scratch_refusals():
     fmt = FP32
     # a STATIC slot past the depth, refused by name - at the assembler
@@ -1327,7 +1375,8 @@ def test_scratch_refusals():
         seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO,
                     n_scratch_out=seq.SCRATCH_D + 1)
     with pytest.raises(seq.ProgramError, match="does not know"):
-        seq.Program(fmt, [seq.halt()], flags=1 << 2)
+        seq.Program(fmt, [seq.halt()],
+                    flags=1 << seq.FLAGS_KNOWN.bit_length())
     # and the block's, which are the bank's refusals in the same shape
     p = seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO,
                     n_scratch_in=2)
