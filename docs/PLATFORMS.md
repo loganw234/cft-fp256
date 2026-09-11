@@ -1614,7 +1614,10 @@ Per candidate:
 
 The Windows box already runs Vivado 2026.1 with Above-4G decoding
 active (docs/BRINGUP.md), so the missing piece for a bare-card Windows
-path is the host library's device backend, not the machine.
+path is a bare-XDMA device backend in the host library, not the
+machine. The XRT backend exists and works; what a card outside the
+Alveo programme needs is a different one, against the XDMA driver
+directly.
 
 ## 7. Renting instead of buying
 

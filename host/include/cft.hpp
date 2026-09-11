@@ -5,8 +5,12 @@
  *
  * Header-only, C++17 minimum, no dependencies beyond the standard
  * library and cft.h. Include it, link libcft, done: there is nothing
- * to build here, because a wrapper that needed a build step would cost
- * more than the twelve extern "C" declarations it saves.
+ * to build here, because everything it adds is inline anyway and a
+ * wrapper that needed a build step would be pure cost. Note it does
+ * NOT save you any extern "C" declarations: cft.h carries its own
+ * guard, so C++ can include it directly and call all ~120 entry points
+ * with nothing declared by hand. What this adds is types, contexts,
+ * lifetimes and operators - not access.
  *
  * ---------------------------------------------------------------
  * What this adds, and what it emphatically does not

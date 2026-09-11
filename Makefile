@@ -163,8 +163,14 @@ libcft-docker:
 		sh -c "make -C host clean && make -C host test PYTHON=python3 && \
 		       make -C host clean"
 
+# The simulation targets live in tb/Makefile. These forward so that the
+# way the documents cite them - "measured, `make cycles`" - is also the
+# way you run them, from wherever you happen to be.
 sim:
 	$(MAKE) -C tb sim SIM=$(SIM)
+
+cycles krnlfused krnlplain simmc:
+	$(MAKE) -C tb $@ SIM=$(SIM)
 
 # Open-toolchain portability gate: the whole kernel must elaborate in
 # Yosys with no latches and no errors. This is what keeps the open-core

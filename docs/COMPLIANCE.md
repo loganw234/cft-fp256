@@ -107,7 +107,7 @@ program.
 |---|---|---|
 | 9.1 | conforming language-defined operations | language |
 | 9.2 | Table 9.1, all 39 | yes - correctly rounded in every format and attribute with exact flags, which is what 9.2 asks of a conforming operation; docs/TRANSCENDENTALS.md holds the proofs |
-| 9.3 | getBinaryRoundingDirection, setBinaryRoundingDirection, saveModes, restoreModes, defaultModes | yes (contexts) - the rounding attribute on the Python `Context` and the C++ context; the decimal pair excluded |
+| 9.3 | getBinaryRoundingDirection, setBinaryRoundingDirection, saveModes, restoreModes, defaultModes | yes (contexts), with the mechanism being a context object that CARRIES the rounding attribute rather than five separately named calls: `cft::basic_context<F>` in host/include/cft.hpp and `class Context` in bindings/python/cftmpfr/core.py, each a format, a rounding attribute and a device. Getting and setting are reading and writing that attribute; saving and restoring a mode is holding a context and using it again. The decimal pair is excluded. Note the golden model in python/cft_golden has no context - it takes the attribute per operation, which is 4.2's static form |
 | 9.4 | sum, dot, sumSquare, sumAbs, scaledProd, scaledProdSum, scaledProdDiff | yes - over a contractual tree, where the clause leaves the order to the implementation |
 | 9.5 | augmentedAddition, augmentedSubtraction, augmentedMultiplication, with roundTiesTowardZero | yes |
 | 9.6 | minimum, minimumNumber, maximum, maximumNumber | yes - the four opcodes |
