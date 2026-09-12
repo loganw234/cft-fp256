@@ -87,7 +87,22 @@ void cftx_close(void *hw);
  * pseudo-channel each (hw/link.cfg), so the same host buffer used as
  * `a` and as `b` needs two device copies in two different channels,
  * and "the device copy of this buffer" is not a thing that exists. */
-enum { CFT_ROLE_A = 0, CFT_ROLE_B = 1, CFT_ROLE_C = 2, CFT_ROLE_D = 3 };
+/* The operand roles a resident buffer can be bound as. A..D are the
+ * elementwise call's three inputs and its output, which a program run
+ * reuses for its three streams and its deposit window. SI and SO are a
+ * program's two scratch blocks (docs/SEQUENCER.md R5): they are
+ * operand-shaped in the same sense D is - n * count format-width
+ * elements, lane-major and dense, growing with n - which is why they
+ * can be bound at all.
+ *
+ * CFT_ROLE_COUNT is the stride of every per-(tile, role) array.
+ * Derive it; do not write the number. It was written out six times
+ * before the scratch roles existed, and the one that would have gone
+ * wrong silently was bind_clear's loop bound - two roles left holding
+ * whatever the stack held, read by a backend as a resident binding to
+ * an arbitrary pointer. */
+enum { CFT_ROLE_A = 0, CFT_ROLE_B = 1, CFT_ROLE_C = 2, CFT_ROLE_D = 3,
+       CFT_ROLE_SI = 4, CFT_ROLE_SO = 5, CFT_ROLE_COUNT = 6 };
 
 /* Which of a call's operands live in a resident buffer, and where in
  * it they start. A NULL `buf[r]` is an operand that is ordinary host
@@ -96,8 +111,8 @@ enum { CFT_ROLE_A = 0, CFT_ROLE_B = 1, CFT_ROLE_C = 2, CFT_ROLE_D = 3 };
  * them", and a backend that ignores this argument entirely behaves
  * exactly as it did before the field existed. */
 typedef struct cft_bindings {
-    void  *buf[4];     /* cftx_buffer_create's object, or NULL */
-    size_t off[4];     /* byte offset of the caller's pointer inside it */
+    void  *buf[CFT_ROLE_COUNT]; /* cftx_buffer_create's object, or NULL */
+    size_t off[CFT_ROLE_COUNT]; /* byte offset of the pointer inside it */
 } cft_bindings;
 
 /* Create the backend's side of one cft_buffer.
