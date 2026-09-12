@@ -994,6 +994,30 @@ static cft_status try_load_scratch(cft_device *dev, cft_format fmt,
     return st;
 }
 
+/* An image asking for revision 4's strict scratch range. Only flags[2]
+ * decides whether the loader takes it; the indexed pair is here because
+ * that is what the flag is ABOUT, and a test image that did not use the
+ * feature it names would be a worse description of the thing. */
+static cft_status try_load_strict(cft_device *dev, cft_format fmt)
+{
+    uint8_t img[64];
+    uint64_t ins[4];
+    cft_program *prog = NULL;
+    cft_status st;
+    size_t bytes;
+
+    ins[0] = seq_stx(0, 1);                      /* scratch[r1] := r0 */
+    ins[1] = seq_ldx(4, 1);                      /* r4 := scratch[r1] */
+    ins[2] = seq_ctrl(3, 4, 0);                  /* deposit r4 */
+    ins[3] = seq_ctrl(0, 0, 0);                  /* halt */
+    bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 1,
+                              CFT_PROG_FLAG_SCRATCH_STRICT, 0, 0);
+    st = cft_program_load(dev, img, bytes, &prog);
+    if (st == CFT_OK)
+        cft_program_free(prog);
+    return st;
+}
+
 static void check_caps_enforced(cft_device *dev, const char *who)
 {
     cft_caps c;
@@ -1346,6 +1370,43 @@ static void check_caps_enforced(cft_device *dev, const char *who)
             failures++;
         }
         printf("    SCRATCH_IO absent, a SCRATCH_IO image -> %s: %s\n",
+               cft_strerror(st), cft_last_error());
+    }
+
+    /* Revision 4's R8, on exactly SCRATCH_IO's terms: published means a
+     * strict image loads, absent means it is refused AND the refusal
+     * names the flag. The absent branch is the one that matters, and no
+     * software device can reach it - the software backend is the
+     * contract and carries every feature it defines - so it fires
+     * against a tile that predates R8, which is every tile there is
+     * until the RTL lands. Accepting a strict image on a device that
+     * cannot honour it would run the program under the modulo, and that
+     * is a different contract, not a graceful degradation. */
+    st = try_load_strict(dev, fmt);
+    checks++;
+    if (c.seq_features & CFT_SEQ_FEAT_SCRATCH_STRICT) {
+        if (st != CFT_OK) {
+            printf("  FAIL %s: SCRATCH_STRICT is published and an image "
+                   "asking for it was refused: %s (%s)\n", who,
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        } else {
+            printf("    SCRATCH_STRICT published, a strict image loads\n");
+        }
+    } else if (st == CFT_OK) {
+        printf("  FAIL %s: SCRATCH_STRICT is NOT published and a strict "
+               "image was accepted - it would run under the modulo, which "
+               "is a different contract\n", who);
+        failures++;
+    } else {
+        checks++;
+        if (!strstr(cft_last_error(), "SCRATCH_STRICT")) {
+            printf("  FAIL %s: a strict image without the feature was "
+                   "refused (%s) without naming the flag: %s\n", who,
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        }
+        printf("    SCRATCH_STRICT absent, a strict image -> %s: %s\n",
                cft_strerror(st), cft_last_error());
     }
 
@@ -2259,11 +2320,14 @@ static void check_program_refusals(cft_device *dev, cft_format fmt)
 
     /* ---- the header ---- */
     /* Bit 1 was the unassigned bit until revision 3 took it for
-     * SCRATCH_IO, so this moved up to bit 2 - which is what the check
-     * is about: a flag this library cannot read is an image it cannot
-     * read, whichever bit it is. */
-    bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 4u);
-    refusal(dev, fmt, "flags bit 2 (unassigned)", img, bytes,
+     * SCRATCH_IO, and bit 2 until revision 4 took it for
+     * SCRATCH_STRICT, so this has moved up twice now - which is exactly
+     * what the check is about: a flag this library cannot read is an
+     * image it cannot read, whichever bit it is. The bit named here has
+     * to be one SEQ_FLAGS_KNOWN does not carry, so when revision 5
+     * assigns it, MOVE this rather than deleting it. */
+    bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 8u);
+    refusal(dev, fmt, "flags bit 3 (unassigned)", img, bytes,
             CFT_ERR_ARTIFACT, NULL);
     bytes = seq_image_flags(img, fmt, insns, 3, konst, 2, 1, 0x80000000u);
     refusal(dev, fmt, "flags bit 31", img, bytes, CFT_ERR_ARTIFACT, NULL);

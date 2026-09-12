@@ -302,7 +302,11 @@ def scratch_corpus(lib, dev, fmt, name, args, S):
         io = rng.random() < 0.6
         nsin = rng.choice([0, 1, 2, 3, 5]) if io else 0
         nsout = rng.choice([0, 1, 2, 4]) if io else 0
-        flags = seq.FLAG_SCRATCH_IO if io else 0
+        # Revision 4 R8: with SCRATCH_STRICT an indexed access at or
+        # past the depth is reported rather than reduced modulo it.
+        strict = rng.random() < 0.35
+        flags = ((seq.FLAG_SCRATCH_IO if io else 0)
+                 | (seq.FLAG_SCRATCH_STRICT if strict else 0))
         kind = None
         if rng.random() < 0.3:
             insns, kind = corrupt_scratch(insns, rng)
@@ -347,6 +351,8 @@ def scratch_corpus(lib, dev, fmt, name, args, S):
                   f"program corrupted as {kind}")
         if io:
             S["io"] += 1
+        if prog.flags & seq.FLAG_SCRATCH_STRICT:
+            S["strict"] += 1
         n = rng.choice([1, 2, 63, 64, 65, 100, 129])
         if n > 64:
             S["blocked"] += 1
@@ -355,6 +361,10 @@ def scratch_corpus(lib, dev, fmt, name, args, S):
         c = seq.random_inputs(fmt, rng, n)
         sin = seq.random_inputs(fmt, rng, n * nsin) if nsin else None
         want = seq.run(prog, a, b, c, scratch_in=sin)
+        # The bit is what R8 adds; a strict corpus that never sets it
+        # compared the modulo path twice and proved nothing.
+        if want.status & seq.STATUS_SCRATCH_RANGE:
+            S["range"] += 1
         try:
             got_dep, got_counts, got_flags, got_status, got_so = \
                 run_in_c_ex(lib, dev, prog, a, b, c, sin)
@@ -518,7 +528,7 @@ def main():
     blocked = 0
     extended = saw_kx = saw_imul = saw_wide = 0
     S = dict(total=0, refused=0, bad=0, stl=0, ldl=0, stx=0, ldx=0,
-             io=0, kx9=0, blocked=0)
+             io=0, kx9=0, blocked=0, strict=0, range=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -636,14 +646,19 @@ def main():
           f"both, {S['refused']} refused by both, {S['blocked']} across "
           f"the block boundary: {S['stl']} STL, {S['ldl']} LDL, "
           f"{S['stx']} STX, {S['ldx']} LDX, {S['io']} with a scratch "
-          f"block declared, {S['kx9']} constant indices at or past 256")
+          f"block declared, {S['kx9']} constant indices at or past "
+          f"256, {S['strict']} with SCRATCH_STRICT of which "
+          f"{S['range']} reported an out-of-range index")
     bad += S["bad"]
     if S["total"] and not (S["stl"] and S["ldl"] and S["stx"]
                            and S["ldx"] and S["io"] and S["kx9"]
-                           and S["refused"]):
-        print("THE SCRATCH CORPUS DID NOT REACH EVERY REVISION-3 FORM - "
-              "a code, the block or the ninth bit went uncompared, or "
-              "no refusal was exercised")
+                           and S["refused"] and S["strict"]
+                           and S["range"]):
+        print("THE SCRATCH CORPUS DID NOT REACH EVERY FORM - a code, "
+              "the block or the ninth bit went uncompared, no refusal "
+              "was exercised, or no SCRATCH_STRICT program reported an "
+              "out-of-range index (revision 4 R8), which would mean the "
+              "strict path was never actually compared")
         return 1
     if not total:
         print("NO PROGRAM WAS COMPARED - the generator produced nothing "
