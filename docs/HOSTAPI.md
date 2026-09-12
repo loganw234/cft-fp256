@@ -213,6 +213,19 @@ mode, so it says so and stops.
 
 ### Device-resident buffers, and what a port must do to get the rate
 
+**Which buffers can be resident.** The operand-shaped ones: a `cft_run`'s
+three inputs and its output, and a program run's three streams, its
+deposit window and - since 2026-09-12 - its two scratch blocks. Those all
+grow with `n`, which is what makes a device copy worth keeping.
+
+The rest of a program run is staged on every call, and the reasons are
+structural rather than unfinished: the image and the constant bank do not
+grow with `n` at all, and the per-lane deposit counts are four bytes an
+element whatever the format. `cft_buffer_get_info` says what actually
+happened to one buffer, and its `staged_why` says why, when a number
+looks wrong.
+
+
 The measured gap is the whole reason this exists. On the card, through
 `cft_run` staging every operand on every call, one tile does **141.8 /
 81.4 / 40.3 / 20.0** M fma elements a second at fp32/64/128/256. With
