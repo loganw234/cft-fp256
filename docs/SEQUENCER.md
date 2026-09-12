@@ -1,13 +1,23 @@
 # The orbit sequencer
 
-*The sections below describe **revision 3** (2026-09-08, evening):
-thirty-two registers a lane, a **256-slot per-lane scratch memory**
-with a per-run block that fills it and empties it, **16,384
-instructions** a tile, and a **512-entry constant bank** that can ride
-with the run instead of with the image. The two sections at the end of
-this file are the record of revisions 2 and 3 and the reasoning behind
-each change; everything before them has been updated to describe the
-model as it now is. VERSION 0x800, CAPS[7:4] and CAPS2.*
+*The sections below describe **revision 4** (2026-09-11): revision 3's
+thirty-two registers a lane, **256-slot per-lane scratch memory** with a
+per-run block that fills it and empties it, **16,384 instructions** a
+tile and **512-entry constant bank**, plus **R8** - a program may ask
+that an indexed scratch access at or past the depth be REPORTED rather
+than reduced modulo it. The three sections at the end of this file are
+the record of revisions 2, 3 and 4 and the reasoning behind each change;
+everything before them has been updated to describe the model as it now
+is. VERSION 0x800, CAPS[7:4] and CAPS2.*
+
+*Revision 4 is not in the RTL, and the asymmetry is worth stating rather
+than leaving to be discovered. The golden model, libcft's executor and
+both assemblers carry R8; no tile does. That is not a divergence: every
+tile refuses a strict image at its header check, under the reserved-bit
+rule that has guarded `flags` since revision 2, so no device computes a
+different answer from the model - it declines to run at all. The loader
+refuses it earlier and by name. What the tile half needs is CAPS2[6] and
+a range test in `cft_seq.sv`.*
 
 STATUS: design, golden model, software implementation, kernel
 integration - and, as of 2026-09-01, **the RTL core itself, benched
@@ -26,7 +36,9 @@ driving the whole kernel through the CSR exactly as XRT will.
 Remaining distance on the evening of 2026-09-01: hw_emu through the
 real XRT stack, a bitstream, silicon. hw_emu was met at fp32 the next
 day (the status note under the gates paragraph below); a bitstream
-carrying a program and silicon are still open. The RTL was pulled
+carrying a program and silicon were still open as this was written, and
+BOTH were met the following week - see the dated status note a hundred
+lines down, which is the current one. The RTL was pulled
 forward from v2 deliberately: an open core fed by DDR or
 PCIe-to-host-RAM cannot afford a memory pass per step, so the
 sequencer stops being a throughput refinement there and becomes the
@@ -280,8 +292,9 @@ assumed - the same reason a bitstream carries a hash.
         u32 precision;      // the PREC_CODE ladder; a program is
                             // compiled for one format, because its
                             // constants are format-width values
-        u32 flags;          // bit 0 BANK_EXT, bit 1 SCRATCH_IO;
-                            // [31:2] reserved, zero
+        u32 flags;          // bit 0 BANK_EXT, bit 1 SCRATCH_IO,
+                            // bit 2 SCRATCH_STRICT (revision 4);
+                            // [31:3] reserved, zero
         u32 scratch_io;     // [15:0] n_scratch_in, [31:16]
                             // n_scratch_out, each <= SCRATCH_D;
                             // meaningful only under flags.SCRATCH_IO,
@@ -648,14 +661,20 @@ the hardware does not have to be:
   universe does. The loader multiplies the nest out and refuses.
 - a constant index outside the bank, a **scratch slot at or past
   `SCRATCH_D` in a `STL` or `LDL`**, a reserved bit, a set bit in the
-  header's `flags[31:2]`, a non-zero `scratch_io` word without
+  header's `flags[31:3]`, a non-zero `scratch_io` word without
   `flags.SCRATCH_IO`, a scratch count past `SCRATCH_D` with it, or
   trailing bytes after the instruction stream. A `BANK_EXT` image is
   exactly `32 + 8 * n_insns` bytes and a self-contained one exactly
   `32 + n_consts * element_bytes + 8 * n_insns`, so "trailing bytes"
-  means the same thing for both. An INDEXED scratch access is not
-  refused for its slot: `rb` is data, and the contract reduces it
-  modulo the depth.
+  means the same thing for both. An INDEXED scratch access is never
+  refused for its slot, because `rb` is data and the loader cannot see
+  it. What an out-of-range index DOES depends on the header: without
+  `flags.SCRATCH_STRICT` the contract reduces it modulo the depth,
+  which is what every image built before revision 4 means and so what
+  the model must keep computing for them; with the flag (revision 4's
+  R8) the access is suppressed and `STATUS[5]` is raised instead.
+  Neither is a refusal. The refusal is at LOAD, and only when the
+  device cannot honour the flag at all.
 - a **missing, wrong-size or unwanted bank**: a `BANK_EXT` program run
   without one, or with a number of values that is not `n_consts`, or a
   self-contained program handed one. Two sources for a constant is one
@@ -1300,3 +1319,76 @@ the active mask scoped to a loop (six positives' inner loops, bounds
 6 to 32), a per-lane flag output, and a counter-indexed constant: all
 stay on docs/ATLAS.md's list with the measurements that will decide
 them.
+
+
+## Revision 4 (2026-09-11): an out-of-range scratch index is reported
+
+One change, and a small one to describe: a program may ask to be told
+when an indexed scratch access falls outside the memory it was given.
+It exists because the depth is a BUILD PARAMETER, which makes a
+correct-looking program silently portable in the wrong way.
+
+This section is the CONTRACT; the sections above describe it. Unlike
+revisions 2 and 3, it carries no build-cost note, because the tile half
+has not been built. Saying anything else in this position would read as
+a measurement.
+
+### R8. `SCRATCH_STRICT`: the index that is not there
+
+*Header `flags` bit 2, `CFT_PROG_FLAG_SCRATCH_STRICT`. Device feature
+CAPS2[6], `CFT_SEQ_FEAT_SCRATCH_STRICT`. Reports `STATUS[5]`,
+`CFT_STATUS_SCRATCH_RANGE`. Assembler directive `.scratch strict`.*
+
+`STX` and `LDX` take their slot from `rb`'s bit pattern read as an
+unsigned integer - the register where the atlas emitter keeps its loop
+counters. Since revision 3 that index has been reduced modulo
+`SCRATCH_D`, and the reduction is part of the contract rather than an
+accident: it is defined, it is the same in the model and in every
+executor, and an out-of-range index has never been a refusal.
+
+The cost of that is portability of the quiet kind. `SCRATCH_D` is a
+build parameter. A program that walks 300 slots on a 256-slot tile does
+not fail there; it wraps, computes a wrong answer, and returns it. Move
+the same program to a 512-slot tile and it computes a different wrong
+answer, or a right one. Nothing in the run says which happened.
+
+With `flags.SCRATCH_STRICT` set, an index at or past the depth raises
+`STATUS[5]`, the access is suppressed, and `LDX` reads **+0** - what an
+untouched slot reads back as, never a stale register, which would make
+the result depend on what the lane happened to be holding. The run
+continues. That is deliberately the shape a deposit past `max_deposits`
+already has: what fit is correct and reproducible, and the report says
+what was lost. `STATUS[5]` is not an IEEE flag, for the same reason
+`STATUS[4]` is not - the five in `FLAGS` mean what 754 says they mean,
+and "the slot you asked for is not there" is not one of them.
+
+With the bit CLEAR the modulo stands, unchanged and undated, so every
+image built before revision 4 keeps its meaning exactly.
+
+**Why a header flag and not a mode.** The program is the thing that
+knows whether its indices are supposed to be in range. A run-time switch
+would make the same image mean two things, and the reason the flag can
+be added at all without a VERSION step is that `flags` has been
+must-be-zero above its defined bits since revision 2 - so a tile that
+has never heard of R8 throws the image back at the header rather than
+running it with the old meaning. That guard is what makes an
+announced-and-refused feature cheap, and it is the third time it has
+paid for itself.
+
+**Detecting it is the work, not branching on it.** Both executors read
+the slot from the low `log2(SCRATCH_D)` bits of `rb`, so before this
+flag existed neither could SEE an out-of-range index - every index was
+in range by construction. `libcft` now tests `cft_bn_bitlen(rb) >
+SEQ_SCRATCH_LOG2`, which is exact at any register width because the
+depth is published as a log2 and is therefore a power of two. A tile
+will need the same: an OR-reduction of the index bits above
+`$clog2(SCRATCH_D)`, not a wider comparator.
+
+### What revision 4 does not do
+
+It does not touch the RTL, so no tile publishes CAPS2[6] and every tile
+refuses a strict image at its header. It does not change what a program
+without the flag computes, anywhere. And it does not make the depth
+itself portable - a program that needs 300 slots still needs a tile with
+300 slots. It makes the difference between having them and not having
+them *audible*, which is the part that was missing.

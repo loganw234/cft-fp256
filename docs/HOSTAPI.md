@@ -1932,11 +1932,15 @@ now `flags`. Bit 0 is `CFT_PROG_FLAG_BANK_EXT`: the image carries no
 constant section at all - it is exactly `32 + 8 * n_insns` bytes -
 `n_consts` still says how many constants the program addresses and
 still bounds every index, and every run supplies exactly that many
-format-width values. `flags[31:1]` and `reserved[1]` are
-`CFT_ERR_ARTIFACT`, which is the version guard for every flag there
-will ever be: a bit this library cannot read is an image it cannot
-read, and the honest answer to a sentence you cannot parse is not to
-guess. `CFT_SEQ_FEAT_BANK_PTR` (bit 2, CAPS[6]) publishes the feature,
+format-width values. Every bit above the defined flags, and
+`reserved[1]`, are `CFT_ERR_ARTIFACT` - which is the version guard for
+every flag there will ever be: a bit this library cannot read is an
+image it cannot read, and the honest answer to a sentence you cannot
+parse is not to guess. At revision 2 that range was `flags[31:1]`,
+since bit 0 was the only flag; revision 3 took bit 1 for `SCRATCH_IO`
+and revision 4 bit 2 for `SCRATCH_STRICT`, so it is `flags[31:3]`
+today. The RULE is what has not moved, and the numbering lives in
+`python/cft_golden/seqflags.py` with `cft.h` gated against it. `CFT_SEQ_FEAT_BANK_PTR` (bit 2, CAPS[6]) publishes the feature,
 and `cft_program_load` refuses a `BANK_EXT` image without it, before
 the map is touched - a 0x600 tile's fetch would read `n_consts`
 constants from an image that has none and then run whatever followed,
@@ -1993,8 +1997,14 @@ examples in `api-test` are what prove the derivation landed on
 SHA-256, and each tool's own check recomputes its whole chain with
 Python's `hashlib`.
 
-**What the loader refuses, in full, after revision 2.** Everything
-docs/SEQUENCER.md lists, plus: a set bit in `flags[31:1]` or a
+**What the loader refuses, as of revision 2.** Complete when it was
+written and not since: revision 3 added `SCRATCH_IO`'s refusals and
+revision 4 `SCRATCH_STRICT`'s, including the one this list could not
+have anticipated - a strict image on a device that does not publish
+CAPS2[6] is `CFT_ERR_UNSUPPORTED`, by name, rather than
+`CFT_ERR_ARTIFACT`. docs/SEQUENCER.md carries the current list.
+Everything it lists, plus: a set bit above the defined flags
+(`flags[31:1]` when this was written, `flags[31:3]` now) or a
 non-zero `reserved[1]` (`CFT_ERR_ARTIFACT`); a `BANK_EXT` image whose
 length still includes a constant section (`CFT_ERR_ARTIFACT`, because
 a program is exactly its header, its constants and its instructions);

@@ -612,6 +612,21 @@ module cft_seq #(
     // only a modulo for a power of two - a depth that was not one
     // would make the hardware and the model disagree about every
     // STX/LDX, silently.
+    //
+    // Since revision 4 the model does the same only while the header's
+    // SCRATCH_STRICT is clear; with it, an index at or past the depth
+    // is reported (STATUS[5]) instead. The sentence above still holds
+    // for THIS tile because it refuses a strict image at the header -
+    // flags[2] is inside the reserved range checked there - so every
+    // image it accepts is one the model reduces too. It stops holding
+    // the moment this file implements R8, and the first thing that
+    // work touches is the header check, not this comment.
+    //
+    // The assertion below is load-bearing twice now. A power-of-two
+    // depth is what makes a mask a modulo, AND what makes
+    // `bitlen(rb) > SCRSW` the same question as `rb >= SCRATCH_D` -
+    // which is the range test R8 wants, and cheaper than a comparator:
+    // an OR of the index bits above SCRSW.
     if ((1 << SCRSW) != SCRATCH_D) begin : g_scratch_pow2
       $error("cft_seq: SCRATCH_D must be a power of two - STX/LDX reduce rb with a mask");
     end
