@@ -222,7 +222,8 @@ module cft_seq #(
     output logic              done,       // one-cycle pulse
     output logic              refuse,     // valid with done
     output logic [4:0]        flags,      // valid from done to next start
-    output logic [3:0]        err,        // [2:0] bus faults, [3] dep ovf
+    output logic [4:0]        err,        // [2:0] bus faults, [3] dep ovf,
+                                          // [4] scratch index out of range
 
     // ---- the ALU array (cft_lanes) ---------------------------------
     // The per-issue request the issue machine builds, and the array's
@@ -381,6 +382,8 @@ module cft_seq #(
   // SCRATCH_D at the header, so SCRSW+1 bits hold either.
   logic [SCRSW:0] h_nsin, h_nsout;
   logic           scr_io_q;
+  logic           scr_strict_q;   // flags[2], revision 4's R8
+  logic [WORDS-1:0] scr_oor_q;    // banks whose lane indexed past it
   // What the INSTRUCTION STREAM can reach, learned while it is parsed:
   // one past the highest static STL/LDL slot, and whether any STX or
   // LDX appears at all. The per-block wipe is sized from these, which
@@ -979,11 +982,17 @@ module cft_seq #(
 
   logic [4:0]  flags_q;
   logic        dep_ovf_q;
+  // Revision 4's R8. Sticky for the whole run, like the deposit
+  // overflow it is modelled on, and reported the same way: what the
+  // run computed is correct and reproducible, and this says a lane
+  // asked for a slot that is not there.
+  logic        scr_rng_q;
   logic        refuse_q;
   logic        rd_fault_q, wr_fault_q, len_fault_q;
 
   assign flags  = flags_q;
-  assign err    = {dep_ovf_q, len_fault_q, wr_fault_q, rd_fault_q};
+  assign err    = {scr_rng_q, dep_ovf_q, len_fault_q, wr_fault_q,
+                   rd_fault_q};
   assign refuse = refuse_q;
   assign busy   = (st != S_IDLE);
 
@@ -1198,9 +1207,67 @@ module cft_seq #(
     end
   endfunction
 
+  // Revision 4's R8: is this position's `rb` at or past the depth?
+  //
+  // lane_slot_fn takes the LOW SCRSW bits, so "past the depth" is
+  // "any bit above those is set" - over every word the lane owns,
+  // which is eight of them at fp256. An OR, not a comparator, and
+  // exact because SCRATCH_D is a power of two, which g_scratch_pow2
+  // asserts at elaboration. Same geometry as lane_slot_fn: a lane's
+  // low 32 bits sit in the first word of its run.
+  function automatic logic lane_oor_fn(input [WORDS*32-1:0] rdata,
+                                       input [2:0] posn,
+                                       input [1:0] wsh);
+    logic r;
+    logic [31:0] base;
+    begin
+      r = 1'b0;
+      base = 32'({29'b0, posn}) << wsh;
+      for (int w = 0; w < WORDS; w = w + 1) begin
+        if (32'(w) == base)
+          r = r | (|rdata[w*32 + SCRSW +: 32 - SCRSW]);
+        else if (32'(w) > base && 32'(w) < base + (32'd1 << wsh))
+          r = r | (|rdata[w*32 +: 32]);
+      end
+      lane_oor_fn = r;
+    end
+  endfunction
+
+  // Detection is per POSITION; the write enables are per BANK, and
+  // bank w serves position w >> wsh - the mapping scr_addr_fn uses.
+  function automatic [WORDS-1:0] oor_banks_fn(input [WORDS-1:0] pos_oor,
+                                              input [1:0] wsh);
+    logic [WORDS-1:0] r;
+    begin
+      r = '0;
+      for (int w = 0; w < WORDS; w = w + 1)
+        for (int p = 0; p < WORDS; p = p + 1)
+          if (32'(p) == (32'(w) >> wsh))
+            r[w] = pos_oor[p];
+      oor_banks_fn = r;
+    end
+  endfunction
+
+  // A load still WRITES on a suppressed access - the model reads +0
+  // rather than leaving the register alone, because a stale register
+  // would make the answer depend on what the lane happened to hold.
+  function automatic [WORDS*32-1:0] zero_oor_fn(input [WORDS*32-1:0] v,
+                                                input [WORDS-1:0] banks);
+    logic [WORDS*32-1:0] r;
+    begin
+      r = v;
+      for (int w = 0; w < WORDS; w = w + 1)
+        if (banks[w])
+          r[w*32 +: 32] = 32'b0;
+      zero_oor_fn = r;
+    end
+  endfunction
+
   logic c_scr_idx;                       // this instruction is STX/LDX
   assign c_scr_idx = c_ctrl && (c_op == C_STX || c_op == C_LDX);
   logic [WORDS*SCRSW-1:0] scr_slot;      // the slot each position wants
+  logic [WORDS-1:0]       scr_oor;       // ...and whether it exists
+  logic [WORDS-1:0]       scr_oor_bk;    // the same, by bank
   generate
     for (genvar gsl = 0; gsl < WORDS; gsl = gsl + 1) begin : g_slot
       assign scr_slot[gsl*SCRSW +: SCRSW] =
@@ -1208,6 +1275,19 @@ module cft_seq #(
                     : SCRSW'(c_imm[SCRSW-1:0]);
     end
   endgenerate
+
+  // Only the INDEXED forms, and only under the flag. A static STL or
+  // LDL slot is in the IMAGE and was refused at load if it was past the
+  // depth; an indexed one is data and cannot be. Without the flag an
+  // out-of-range index is not an error at all - it is the modulo, which
+  // is what every image built before revision 4 means.
+  generate
+    for (genvar goo = 0; goo < WORDS; goo = goo + 1) begin : g_oor
+      assign scr_oor[goo] = c_scr_idx && scr_strict_q &&
+                            lane_oor_fn(rf_rdata_b, 3'(goo), wpe_sh);
+    end
+  endgenerate
+  assign scr_oor_bk = oor_banks_fn(scr_oor, wpe_sh);
 
   // 2. The per-bank ADDRESS those slots imply, for the beat named.
   //    Bank w serves lane position w >> wsh, so it takes that lane's
@@ -1379,7 +1459,7 @@ module cft_seq #(
     if (!ap_rst_n) begin
       st <= S_IDLE;
       done <= 1'b0; refuse_q <= 1'b0;
-      flags_q <= '0; dep_ovf_q <= 1'b0;
+      flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
       rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
       m_rd_arvalid <= 1'b0; m_rd_rready <= 1'b0; m_rd_sel <= 2'd0;
       m_wr_awvalid <= 1'b0; m_wr_wvalid <= 1'b0; m_wr_bready <= 1'b0;
@@ -1404,6 +1484,7 @@ module cft_seq #(
       bank_q <= '0; sin_q <= '0; sout_q <= '0;
       scr_we <= '0; scr_raddr <= '0;
       scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0;
+      scr_strict_q <= 1'b0; scr_oor_q <= '0;
       h_nsin <= '0; h_nsout <= '0;
 
     end else begin
@@ -1478,7 +1559,8 @@ module cft_seq #(
             d_q <= cfg_d; prog_q <= cfg_prog; cnt_q <= cfg_cnt;
             bank_q <= cfg_bank;
             sin_q <= cfg_sin; sout_q <= cfg_sout;
-            flags_q <= '0; dep_ovf_q <= 1'b0; refuse_q <= 1'b0;
+            flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
+            refuse_q <= 1'b0;
             rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
             if (cfg_n == 0)
               done <= 1'b1;
@@ -1518,6 +1600,12 @@ module cft_seq #(
           // header's SECOND word mean something.
           bank_ext_q <= hdr_q[192];
           scr_io_q   <= hdr_q[193];
+          // Bit 2 is SCRATCH_STRICT since revision 4: an indexed
+          // access at or past the depth is REPORTED rather than
+          // reduced modulo it. With the bit clear the modulo
+          // stands, so every image built before revision 4 keeps
+          // its meaning exactly.
+          scr_strict_q <= hdr_q[194];
           // scratch_io: [15:0] slots in, [31:16] slots out. Latched
           // as zero when the flag is clear, so nothing downstream has
           // to ask twice - and the check below has already refused a
@@ -1545,7 +1633,7 @@ module cft_seq #(
               hdr_q[191:160] != {30'b0, prec_q} ||
               hdr_q[95:64] > IMEM_D || hdr_q[127:96] > KMEM_D ||
               hdr_q[159:128] > MAXD ||
-              hdr_q[223:194] != 30'b0 ||
+              hdr_q[223:195] != 29'b0 ||
               (!hdr_q[193] && hdr_q[255:224] != 32'b0) ||
               // 32'(): both counts are SIXTEEN-bit halves of one word,
               // so the comparison is widened from the slice's width
@@ -1986,10 +2074,22 @@ module cft_seq #(
           // imm's for the static forms, the low SCRSW bits of the
           // lane's own rb for the indexed ones, which IS the reduction
           // modulo the depth the contract states.
+          // R8: a lane whose index is past the depth is REPORTED and
+          // its access suppressed. bt_wwe carries the per-lane activity
+          // mask, so ANDing with it reports only lanes that would have
+          // gone - an inactive lane never reaches the point in the model
+          // where the bit is raised either. Latched for S_SCR_WB rather
+          // than recomputed there: rf_rdata_b would still be valid two
+          // states on, but that is a timing argument and this needs none.
+          scr_oor_q <= scr_oor_bk;
+          if (|(bt_wwe & scr_oor_bk))
+            scr_rng_q <= 1'b1;
           if (c_op == C_STL || c_op == C_STX) begin
             // A store is a register write for P3's purposes, so it
-            // takes exactly the register file's per-lane mask.
-            scr_we    <= bt_wwe;
+            // takes exactly the register file's per-lane mask - less any
+            // lane R8 suppressed, whose store does not land anywhere
+            // rather than landing on the slot the modulo would name.
+            scr_we    <= bt_wwe & ~scr_oor_bk;
             scr_waddr <= scr_addr_fn(scr_slot, bt, wpe_sh);
             scr_wdata <= rf_rdata_a;
             bt <= bt + 1;
@@ -2011,7 +2111,11 @@ module cft_seq #(
           // while a control instruction runs.
           rf_we <= 1'b1;
           rf_waddr <= {c_rd, bt[NBSH-1:0]};
-          rf_wdata <= scr_rdata;
+          // A suppressed load still WRITES, and writes +0 - what an
+          // untouched slot reads back as. Not the slot the modulo would
+          // have named, and not the register's old value, which would
+          // make the result depend on what the lane happened to hold.
+          rf_wdata <= zero_oor_fn(scr_rdata, scr_oor_q);
           rf_wwe <= bt_wwe;
           bt <= bt + 1;
           if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin

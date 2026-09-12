@@ -112,17 +112,25 @@ def _port_literal(path, port):
 
 def caps2_expected():
     """CAPS2 as rtl/cft_krnl.sv declares it: [3:0] log2 SCRATCH_D,
-    [4] a scratch exists, [5] its per-run block exists.
+    [4] a scratch exists, [5] its per-run block exists, [6] an indexed
+    access past the depth is reported rather than reduced (revision 4).
 
     Built from the localparam rather than from the port's own literal,
     for the reason the CAPS capacities are: two copies of a number is
     how a capability register ends up describing a memory that is no
-    longer that size."""
+    longer that size.
+
+    The whole word is pinned on purpose, so a capability bit cannot
+    appear without somebody noticing. Revision 4's did, and this is
+    where it was noticed - so ADD the bit here deliberately rather than
+    loosening the comparison."""
     d = _localparam(RTL / "cft_krnl.sv", "SEQ_SCRATCH_D")
     assert d == 1 << (d.bit_length() - 1), (
         f"SEQ_SCRATCH_D={d} is not a power of two; CAPS2 publishes log2, "
-        f"and STX/LDX reduce modulo the depth with a mask")
-    return (1 << 5) | (1 << 4) | (d.bit_length() - 1)
+        f"and STX/LDX reduce modulo the depth with a mask - and, since "
+        f"revision 4, decide `past the depth` by bit length, which is "
+        f"the same question only for a power of two")
+    return (1 << 6) | (1 << 5) | (1 << 4) | (d.bit_length() - 1)
 
 
 def check_caps2(caps2):
@@ -130,7 +138,7 @@ def check_caps2(caps2):
     assert caps2 == want, (
         f"CAPS2 is {caps2:#010x}, want {want:#010x} - [3:0] log2 of the "
         f"scratch slots a lane, [4] a scratch exists, [5] the per-run "
-        f"block exists, [31:6] reserved zero")
+        f"block exists, [6] SCRATCH_STRICT, [31:7] reserved zero")
 
 
 def seq_caps_expected():

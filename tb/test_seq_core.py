@@ -817,6 +817,16 @@ class Bench:
             f"{label}: err[3] (deposit overflow -> STATUS[4]) is "
             f"{bool(err & 0x8)}, model says {want_ovf}. "
             f"max_deposits={maxdep}, counts={want.counts[:8]}")
+        # Revision 4's R8. Checked here rather than only in the directed
+        # case, so every program this file runs - both fuzz corpora
+        # included - holds the tile to the model on it.
+        want_rng = bool(want.status & seq.STATUS_SCRATCH_RANGE)
+        assert bool(err & 0x10) == want_rng, (
+            f"{label}: err[4] (scratch index past the depth -> STATUS[5]) "
+            f"is {bool(err & 0x10)}, model says {want_rng}. The flag is "
+            f"{'set' if prog.flags & seq.FLAG_SCRATCH_STRICT else 'clear'}; "
+            f"with it clear the index is reduced modulo the depth and this "
+            f"bit must never be raised.")
         assert (err & 0x7) == 0, (
             f"{label}: err[2:0]={err & 0x7} - the model memory answered "
             f"OKAY on every beat, so a bus fault here is the module's")
@@ -1964,8 +1974,8 @@ async def constant_bank_per_run(dut):
     # carry the positive control for [1]; here what matters is that the
     # rule still bites on the first bit this tile does not know.
     await bench.refuse(
-        fmt, raw_image(fmt, body, rsv=(1 << 2, 0)),
-        "header flags[2]: a flag bit this tile does not implement")
+        fmt, raw_image(fmt, body, rsv=(1 << 3, 0)),
+        "header flags[3]: a flag bit this tile does not implement")
     await bench.refuse(
         fmt, raw_image(fmt, body, rsv=(1 << 31, 0)),
         "header flags[31]: the top of the same word")
@@ -2308,8 +2318,8 @@ async def scratch_header_refusals(dut):
         fmt, raw_image(fmt, body, rsv=(io, 0xFFFF | (0xFFFF << 16))),
         "both halves at 65535")
     await bench.refuse(
-        fmt, raw_image(fmt, body, rsv=(1 << 2, 0)),
-        "flags[2]: the first bit above SCRATCH_IO, still unknown")
+        fmt, raw_image(fmt, body, rsv=(1 << 3, 0)),
+        "flags[3]: the first bit above SCRATCH_STRICT, still unknown")
 
     # The positive controls, without which a tile that refused every
     # non-zero header word would pass all six above. SCRATCH_D exactly
@@ -2401,6 +2411,71 @@ async def scratch_fuzz(dut):
     dut._log.info(f"scratch fuzz: {runs} programs, "
                   f"STL {kinds[seq.STL]} LDL {kinds[seq.LDL]} "
                   f"STX {kinds[seq.STX]} LDX {kinds[seq.LDX]}")
+
+
+@cocotb.test()
+async def scratch_strict_range(dut):
+    """R8: an indexed slot at or past the depth is REPORTED, not reduced.
+
+    The same program twice, and the PAIR is the case. Without
+    SCRATCH_STRICT the index is taken modulo the depth - what every
+    image built before revision 4 means, and what this tile did
+    unconditionally until now. With it the access is suppressed, LDX
+    reads +0, and STATUS[5] says a lane asked for a slot that is not
+    there.
+
+    The indices are 9 + 256k, so one lane in five is IN range. That is
+    deliberate: a case where every lane was out of range would pass
+    just as well against a tile that suppressed every indexed access it
+    ever saw, which is the opposite defect and an easy one to write.
+
+    The deposits differing between the two runs is what says the flag
+    changed the ANSWER rather than only raising a bit beside it.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, n in (("fp32", 24), ("fp64", 12), ("fp256", 5)):
+        fmt = FORMATS[name]
+        body = [
+            seq.stl(0, 9),           # slot 9 := a
+            seq.ldx(24, 1),          # r24 := scratch[r1], r1 == 9 + 256k
+            seq.deposit(24),
+            seq.stx(24, 1),          # scratch[r1] := r24
+            seq.ldl(25, 9),          # and read slot 9 back the static way
+            seq.deposit(25),
+            seq.halt()]
+        idx = [_int_bits(fmt, 9 + SCRATCH_D * (i % 5)) for i in range(n)]
+        lanes_in = sum(1 for i in range(n) if (i % 5) == 0)
+        assert 0 < lanes_in < n, (
+            f"{name} n={n}: {lanes_in} lanes in range - this case needs "
+            f"both kinds, or it cannot tell a correct suppression from a "
+            f"tile that suppresses everything")
+
+        loose  = seq.Program(fmt, body, max_deposits=2)
+        strict = seq.Program(fmt, body, max_deposits=2,
+                             flags=seq.FLAG_SCRATCH_STRICT)
+
+        w_loose = await bench.program(
+            fmt, loose, operands(fmt, n, 1500), idx,
+            operands(fmt, n, 1502), n, f"{name} indexed, modulo (no flag)")
+        w_strict = await bench.program(
+            fmt, strict, operands(fmt, n, 1500), idx,
+            operands(fmt, n, 1502), n, f"{name} indexed, SCRATCH_STRICT")
+
+        assert not (w_loose.status & seq.STATUS_SCRATCH_RANGE), (
+            f"{name}: the model raised STATUS[5] without the flag - the "
+            f"modulo is not an error and never was")
+        assert w_strict.status & seq.STATUS_SCRATCH_RANGE, (
+            f"{name}: the model did not raise STATUS[5] with the flag and "
+            f"{n - lanes_in} lanes indexing past the depth, so this case "
+            f"proves nothing about suppression")
+        assert w_loose.deposits != w_strict.deposits, (
+            f"{name}: the two runs deposited the same bytes, so the flag "
+            f"changed nothing observable and both sides could be wrong "
+            f"together")
+
+    dut._log.info(f"strict range: {bench.cases['program']} runs, "
+                  f"each paired with its own modulo control")
 
 
 # ======================================================================

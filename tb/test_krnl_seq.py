@@ -726,11 +726,17 @@ async def krnl_sequencer(dut):
     # built for a later revision - one whose flags say something this
     # tile has never heard of - would have been half-understood and run.
     # This tile throws it back at the header, before a byte is computed.
-    # flags[1] became SCRATCH_IO at revision 3, so the first bit this
-    # tile does not know moved up to [2]; the second header word is
+    # flags[1] became SCRATCH_IO at revision 3 and flags[2]
+    # SCRATCH_STRICT at revision 4, so the first bit this tile does not
+    # know has moved up twice, to [3]; the second header word is
     # `scratch_io` and is still reserved while its flag is clear.
+    #
+    # MOVE this at revision 5 rather than deleting it. The check is
+    # about a flag the tile does not know, whichever bit that happens to
+    # be, so it needs one the header check still refuses - and the day
+    # there is no such bit left is the day flags needs a VERSION step.
     for offset, value, why in (
-            (24, 1 << 2, "flags[2], a flag bit this tile does not know"),
+            (24, 1 << 3, "flags[3], a flag bit this tile does not know"),
             (27, 0x80,   "flags[31], the top of the same word"),
             (28, 1,      "scratch_io set without flags.SCRATCH_IO")):
         bad = bytearray(p32.to_bytes())

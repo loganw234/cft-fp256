@@ -235,8 +235,9 @@ module cft_csr (
     input  logic        busy,
     input  logic        done,        // one-cycle pulse
     input  logic [4:0]  eng_flags,
-    input  logic [4:0]  eng_err,     // sticky faults + refusal + deposit
-                                     // overflow, see STATUS
+    input  logic [5:0]  eng_err,     // sticky faults + refusal + deposit
+                                     // overflow + scratch range, see
+                                     // STATUS
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     input  logic [7:0]  op_caps,     // constant; opcode groups present
     // CAPS[7:4]: what the SEQUENCER can do beyond the base program
@@ -260,7 +261,7 @@ module cft_csr (
     // same localparams cft_seq elaborates its scratch from, so the
     // register cannot drift from the memory it describes without the
     // elaboration changing too.
-    input  logic [5:0]  caps2,
+    input  logic [6:0]  caps2,
     // The sequencer's on-chip capacities, as LOG2, from the very
     // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
     // the memories it describes without the elaboration changing too.
@@ -511,14 +512,14 @@ module cft_csr (
           10'h012: s_axi_control_rdata <= VERSION;
           10'h013: s_axi_control_rdata <= {alu_ext, cap_kreg, cap_imem, cap_maxd,
                                            op_caps, seq_feat, prec_caps};
-          10'h014: s_axi_control_rdata <= {27'b0, eng_err};
+          10'h014: s_axi_control_rdata <= {26'b0, eng_err};
           10'h015: s_axi_control_rdata <= prog_q[31:0];
           10'h016: s_axi_control_rdata <= prog_q[63:32];
           10'h017: s_axi_control_rdata <= cnt_q[31:0];
           10'h018: s_axi_control_rdata <= cnt_q[63:32];
           10'h019: s_axi_control_rdata <= bank_q[31:0];
           10'h01A: s_axi_control_rdata <= bank_q[63:32];
-          10'h01B: s_axi_control_rdata <= {26'b0, caps2};
+          10'h01B: s_axi_control_rdata <= {25'b0, caps2};
           10'h01C: s_axi_control_rdata <= sin_q[31:0];
           10'h01D: s_axi_control_rdata <= sin_q[63:32];
           10'h01E: s_axi_control_rdata <= sout_q[31:0];

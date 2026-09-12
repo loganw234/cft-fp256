@@ -237,7 +237,7 @@ module cft_krnl #(
   logic [2:0]  eng_err;
   logic        seq_busy, seq_done, seq_refuse;
   logic [4:0]  seq_flags;
-  logic [3:0]  seq_err;
+  logic [4:0]  seq_err;
   logic [7:0]  cfg_op;
   logic [3:0]  cfg_prec;
   logic [2:0]  cfg_rnd;
@@ -332,12 +332,16 @@ module cft_krnl #(
   logic [4:0] run_flags, flags_pub, flags_hold_q;
   logic [2:0] run_bus;
   logic       run_ovf;
+  logic       run_rng;   // revision 4 R8: an index past the depth
 
   assign run_busy  = mode_seq_q ? seq_busy      : eng_busy;
   assign run_done  = mode_seq_q ? seq_done      : eng_done;
   assign run_flags = mode_seq_q ? seq_flags     : eng_flags;
   assign run_bus   = mode_seq_q ? seq_err[2:0]  : eng_err;
   assign run_ovf   = mode_seq_q ? seq_err[3]    : 1'b0;
+  // The engine has no scratch and no indexed access, so this is a
+  // sequencer-only bit, exactly as the deposit overflow above is.
+  assign run_rng   = mode_seq_q ? seq_err[4]    : 1'b0;
   assign refuse_any = refused_q | seq_refused_q;
 
   // FLAGS is the last RUN's truth, and a refusal is not a run.
@@ -426,7 +430,7 @@ module cft_krnl #(
       // "this did not happen" without also telling it the memory
       // system is broken. Bit 4, the deposit overflow, is masked with
       // them: a run that never deposited cannot have overflowed.
-      .eng_err({run_ovf & ~refuse_any, refuse_any,
+      .eng_err({run_rng & ~refuse_any, run_ovf & ~refuse_any, refuse_any,
                 run_bus & {3{~refuse_any}}}),
       .prec_caps(PREC_CAPS),
       //
@@ -490,7 +494,16 @@ module cft_krnl #(
       // log2 fields of CAPS are: two copies of a number is how a
       // capability register ends up describing a memory that is no
       // longer that size.
-      .caps2({1'b1,        // [5] SCRATCH_IO: the header's flag and
+      .caps2({1'b1,        // [6] SCRATCH_STRICT: revision 4's R8, an
+                           //     indexed access at or past the depth
+                           //     is reported (STATUS[5]) rather than
+                           //     reduced modulo it. A host that does
+                           //     not see this bit must not send an
+                           //     image whose flags[2] is set - and
+                           //     libcft refuses to, by name, rather
+                           //     than letting the header check say it
+                           //     with STATUS[3] after the crossing.
+              1'b1,        // [5] SCRATCH_IO: the header's flag and
                            //     the two pointers at 0x70 and 0x78
               1'b1,        // [4] SCRATCH: STL/LDL/STX/LDX decode
               4'($clog2(SEQ_SCRATCH_D))}),
