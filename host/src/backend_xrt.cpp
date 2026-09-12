@@ -469,8 +469,22 @@ void stage(xrt::bo &bo, const uint8_t *src, size_t real_bytes,
  * skips it pays the transfer rather than reading the run before last.
  * ==================================================================== */
 
-/* Role index (backend.h's CFT_ROLE_*) to kernel argument id. */
-constexpr int ROLE_ARG[4] = {ARG_A, ARG_B, ARG_C, ARG_D};
+/* Role index (backend.h's CFT_ROLE_*) to kernel argument id.
+ *
+ * One entry per role, sized by CFT_ROLE_COUNT rather than by a literal.
+ * The scratch roles were added to the enum on 2026-09-12 and NOT to this
+ * table, and the failure was not a compile error: ROLE_ARG[CFT_ROLE_SI]
+ * read past a constexpr array and passed whatever followed it to
+ * group_id(), which XRT range-checked and threw - "__n (which is 1040)".
+ * The gate caught it on the card. */
+constexpr int ROLE_ARG[CFT_ROLE_COUNT] = {ARG_A, ARG_B, ARG_C, ARG_D,
+                                          ARG_SCRATCH_IN, ARG_SCRATCH_OUT};
+/* A role added without an argument id leaves the tail of that list
+ * zero-initialised, which is not a compile error and IS a valid-looking
+ * argument index - it would bind the wrong buffer silently. ARG_A is 2,
+ * so no real argument id is zero. */
+static_assert(ROLE_ARG[CFT_ROLE_COUNT - 1] != 0,
+              "every CFT_ROLE_* needs a kernel argument id in ROLE_ARG");
 
 struct BufCopy {
     xrt::bo  bo;
