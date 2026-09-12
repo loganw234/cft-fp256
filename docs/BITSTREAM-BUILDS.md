@@ -7,10 +7,31 @@ them exit zero.
 Written 2026-09-12, after an overnight run produced two images at the
 wrong clock and a probe script quietly disabled XRT on the build host.
 
+## Which host, and why it is not a coin flip
+
+**Default to `amd-arc-box`:** `ssh logan@192.168.0.201` (key auth), 36
+threads, 46 GB, Vitis at `/data/Xilinx`, and **the U50 is in this box**
+(`02:00.0 Alveo U50 XMDA Platform`) — so an image can be tested where it
+was built instead of moved. `docs/BRINGUP.md` already names it for
+`-t hw` links.
+
+**`cft2204` is a WSL distro on the Windows desktop, not a separate
+machine.** 12 threads and 47 GB, shared with everything running on
+Windows, Vitis at `/opt/Xilinx`, no card. It links correctly — it
+produced working images on 2026-09-11 — but it is the fallback, not the
+default.
+
+The distinction is written down because collapsing it is not a
+hypothetical: "the Linux box" was read as cft2204 on 2026-09-12 and a
+five-hour build went to the host with a third of the cores and no card
+to verify against. `hw/rebuild-2022.sh` searches both Vitis roots, so
+the host choice is yours to make and nothing will correct it for you.
+
+Nothing FPGA runs on Windows itself — `xclbinutil` is Linux-only.
+
 ## The commands
 
-On a 2022.2 host (`cft2204` WSL distro, or the amd-arc-box), from the
-repo root:
+From the repo root, on whichever host you chose:
 
 ```bash
 # 1. the tree, asserted - not assumed

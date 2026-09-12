@@ -61,7 +61,7 @@ hw_manager access that stock U50s route through the PCIe shell only.
 
 | box | hardware | role |
 |---|---|---|
-| amd-arc-box | Xeon E5-2697 v4 36t, 32 GB, 238 GB NVMe (167 free), RX 7600 + Arc B580 + Arc A750, Ubuntu 24.04 | **build box** (Vitis + v++); card host IF its X99-UD4 BIOS exposes Above 4G Decoding (common on X99 - check; /proc/iomem shows none mapped today) |
+| amd-arc-box | Xeon E5-2697 v4 36t, 48 GB, two NVMes 233 GB + 234 GB (83 / 115 free), RX 7600 + Arc B580 + Arc A750, Ubuntu 24.04 | **build box** (Vitis + v++) **and the card host** - `ssh logan@192.168.0.201`. The Above 4G Decoding question this row used to leave open is settled: the U50 enumerates at 02:00.0, xocl/xclmgmt load, and the card is in regular service. Figures measured 2026-09-12; the 32 GB this row claimed disagreed with the 46 GB at the build-host table below. |
 | nvidia-box | i5-6600K 4t, 8 GB, 117 GB SSD, GTX 1080, mini-ITX, Ubuntu 24.04 | too small for v++ links (8 GB); last-resort card host - single slot means pulling the 1080, which breaks an atlas census column |
 | Windows box (MSI PRO B760-P) | Vivado 2026.1 installed with U50 part support; Above-4G decoding confirmed ACTIVE | .xo packaging + synthesis experiments today; strong card-host fallback via dual-boot Ubuntu on a spare drive |
 
