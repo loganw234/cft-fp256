@@ -135,6 +135,21 @@ faster stream.
 
 ## When your own gather is the wall, which happens before the link does
 
+**One part of this has an answer since 2026-09-12, and it is worth saying
+which part.** If what you are broadcasting is ONE value over a batch - a
+reference point against every pixel, a carry base, a coefficient - that is
+not a gather and never was, and `cft_run_ex` with
+`cft_elem_args.scalar_mask` now reads it once instead of making you fill
+an array with copies. A stride of zero needs no index and no address
+arithmetic, which is why it was the cheap one.
+
+Everything below still stands. A genuine gather needs an index per
+element, and a scatter needs that plus an ordering rule - a scatter-add
+whose indices collide has an order, and this contract requires order fixed
+by index rather than by arrival. Stride-0 is not a step toward either; it
+is the case that turned out not to need them.
+
+
 Everything above assumes a call's operands are already contiguous. When
 they are not - when a step gathers scattered elements, computes, and
 scatters the answer back - the cost that decides your rate is **the

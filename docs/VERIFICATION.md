@@ -39,7 +39,7 @@ authority:
    MPFR where they can arbitrate. Nothing below re-litigates a value it
    has decided.
 2. **The conformance vectors** (`make vectors`). The model writes 168
-   sets, 1,071,635 cases, every format under every rounding attribute,
+   sets, 1,068,915 cases, every format under every rounding attribute,
    with the expected result and the expected flags per case. These are
    the fixed points every other implementation replays.
 3. **The C library** (`host/`, `make -C host test`). Contract tests
@@ -142,7 +142,8 @@ suite - so a Linux host lands nearer the quiet column or below it.
 |---|---|---|---|
 | `golden` (pytest, 2,150 tests since revision 3's model and assembler cases joined on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | 5 skip by their own conditions; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
 | `vectors` (`make vectors`, 168 sets) | 5 min | 7 to 8.5 min | |
-| `libcft` / `make -C host test` (build + the 1,071,635-case replay) | 7.5 min | 8.5 to 11 min | |
+| `libcft` / `make -C host test` (build + the 1,068,915-case replay) | 7.5 min | 8.5 to 11 min | the census was 1,071,635 until 2026-09-12, when opcode 31 became `maxall`: a reduction has no elementwise case to inherit, so 4,000 `reserved31` cases left and 1,280 maxall cases arrived. A document recording an earlier RUN still says 1,071,635 and is right to |
+| `make -C host reducetest` (`reduce_check.py --trials 1500`: the tree, the scaling, the bits and the flags against the model) | 2 to 3 min | | listed here from 2026-09-12, having been absent from a page that calls itself the map of everything - found by asking which docs the round had made stale rather than by a gate. 13,516 reductions over four formats and all seven of clause 9.4 plus `maxall`, whose two sides are deliberately DIFFERENT SHAPES: the model folds left, the library halves. Comparing them is what tests 754-2019 `maximum`'s associativity instead of assuming it |
 | `sim` (21 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
 | `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, **does not finish under Icarus** in this configuration: 2.5 ns of simulated time a second through the small operations and about 0.03 ns a second inside the 1,104-element stream, 57 of 71 operations after four hours, on the tree before the cone change and after it alike; under Verilator, which its target selects, the bench is **16 s of simulation after an eleven-minute compile** (44,920 ns, both tests, parameters applied - until the evening of 2026-09-07 a Verilator build received none of a target's parameters and simulated the default, docs/VALIDATION.md) |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
@@ -159,14 +160,14 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `bindings` (cftmpfr vs gmpy2) | 2.4 min | 8 min | |
 | `cpp` (C++17 and C++20, each a full replay) | 25 min | not measured loaded | |
 | `node` (unit tests + `conformance.mjs`) | 5 min + 17 min | | |
-| `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | 1,071,635 cases, then 831,635 through the wrappers |
+| `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | 1,068,915 cases through the page's bytes, then 832,915 over 148 sets through the wrappers. The module must be REBUILT when an opcode is assigned, not merely revisioned: this lane replays the sets, so one predating opcode 31 failed 128 of 148 - all twenty reduce sets, each at its first `maxall` case |
 | `mpfr` | 8 min | | |
 | `soak-quick` | 1.6 min | | |
 | the workload checks (`collatztest` ... `zoomtest`) | 1 to 3 min each | 1 to 3 min each | |
 | `remote` (`make -C host remotetest`) | | 10 to 12 min | the bounded replay is most of it |
 | `wstest` | | 2 min | |
-| `embedded` (`make embedded`) | 18 to 19 min | | the vendored-copy check, four loopback profiles built, the published sets replayed through each (1,071,635 cases twice, 271,776 and 195,248 for the two `CFT_TINY` profiles), the corruption control, and fifteen board compiles through `arduino-cli`. Needs the AVR, ESP32 and RP2040 cores installed; skips the compiles with a note if `arduino-cli` is absent |
-| a board census (`serial_replay.py --port COMn`) | 1 h+ per board | | not a gate and not in the runner: it needs a part plugged in. About 200 to 550 cases a second on an ESP32-S3 depending on format and operation, so the full 1,071,635 is hours. Use `--sets` and `--limit` for anything routine |
+| `embedded` (`make embedded`) | 18 to 19 min | | the vendored-copy check, four loopback profiles built, the published sets replayed through each (1,068,915 cases twice, 271,776 and 195,248 for the two `CFT_TINY` profiles), the corruption control, and fifteen board compiles through `arduino-cli`. Needs the AVR, ESP32 and RP2040 cores installed; skips the compiles with a note if `arduino-cli` is absent |
+| a board census (`serial_replay.py --port COMn`) | 1 h+ per board | | not a gate and not in the runner: it needs a part plugged in. About 200 to 550 cases a second on an ESP32-S3 depending on format and operation, so the full 1,068,915 is hours. Use `--sets` and `--limit` for anything routine |
 | the fuzz lane (`make -C host fuzz-run`) | 30 min per target by design | | `FUZZ_SECONDS`; the sanitizers need the `cft-sim` image, MSYS gcc has none |
 | a wasm module rebuild (`bindings/wasm/build.sh`) | 5 min | | in the pinned emscripten image |
 | OOC synthesis, one kernel (`hw/mc_sweep.sh ... synth`) | 10 to 32 min | | U50 647 to 1,905 s; K325T 626 to 1,272 s; A200T and Z020 6 to 12 min |

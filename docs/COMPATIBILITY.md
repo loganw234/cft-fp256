@@ -537,6 +537,51 @@ LUTs and no block RAM. The macro moved to 0.11 with the module rebuild;
 | Node / Browser | the module rebuilt at 0.11 with no new export - wasm32 has no device, so the step is the version and nothing else: module `29cce150...` (225,354 bytes, from 225,231), 138 `cftw_*` exports, package 0.11.0; `verify.mjs` OK (abi 11 both sides, 1,071,635 cases through the page's bytes and 831,635 through the wrappers), `test.mjs` 126, `program_test.mjs` 37, `conformance.mjs` 1,903,270 cases over 316 set replays, `verify_demos.mjs` every chain the C tools' with `demos_chains.json` re-recorded - the only sha256 that moved in it is the module stamp - and `make -C host wstest` 67 checks, 0 failures; the runner's `node` and `wasm` stages PASS (run 20260909-084149-e01b689) |
 | RTL | the read-ahead: `AR_DEPTH` 4 to 16, `FIFO_LOG2` 7 to 9, `AW_DEPTH` 16 new, bursts issued at full length or not at all, a latency-modelled cocotb memory (`RD_LATENCY`/`WR_LATENCY`) that reproduces the card's 2.25 cycles a beat at a 125-cycle read latency and a 16-cycle write response; on the merged tree the full suite 69/69, the multi-cycle census 43/43, formal 31/31 with the FIFO proof still unbounded, both lints clean with no suppression added (run 20260909-074330-51140af, certified); out of context +637 LUT (+0.51%), 0 block RAM, WNS +1.196 unchanged, one implementation routed at +0.481 ns. The pair built from it (main 49a9a1b) measured 100.6 to 106.8 M beats a second a tile on the card - 1.8x revision 3's 59, 84 to 89 percent of the predicted 120 - with every check clean (docs/VALIDATION.md, the read-ahead pair's entry). |
 
+**ABI 0.12 (2026-09-12)** is the step a real workload asked for, twice.
+The asks are cft-rebound's, stated in its `docs/HARDWARE.md`; this repo's
+own list had recorded three of six until that day, so the list that is the
+input to "what next" was incomplete and a round of work went elsewhere
+first on the strength of it. Two additions answer two of them, and both
+are ADDITIVE - code written against 0.11 gets the same bits from the same
+calls.
+
+`CFT_MAXALL` (31) is a maximum over the array, the fifth COMPOSED
+reduction. It has no hardware on purpose: a tile handed opcode 31 as a
+reduction would decode it as ELEMENTWISE - `cfg_is_reduce` is
+`(cfg_op == 8'd24)` - and write `n` elements where a reduction's caller
+sized `d` for one, which is memory corruption rather than a wrong number.
+So the composition sits above the backend dispatch where `sumSquare`'s and
+`sumAbs`'s do, and no tile ever sees the opcode. It also needs no tree
+contract, which is what makes it the simplest of the five rather than the
+hardest: 754-2019 `maximum` is exactly associative and commutative
+*including its flags*, so a halving composition, a left fold and the sum
+tree's own shape all return the same bits, four tiles fold their partials
+with a maximum, and a hardware version added later could not move an
+answer.
+
+`cft_run_ex` with `cft_elem_args` is an elementwise run whose operands
+need not all be arrays: `scalar_mask` makes one of `a`, `b` or `c` a
+single element applying to the whole run. On a tile that is MODE[18:16]
+and **one beat read instead of `n`**, behind CAPS2[7]. The capability bit
+is load-bearing rather than advisory - nothing checked MODE[31:16] before
+this step, so a tile predating it would have IGNORED the flag and read `n`
+elements from a one-element buffer, which the negative control
+demonstrates as a segfault rather than an argument. MODE now carries the
+reserved-bit guard it never had; it cannot teach the four staged pairs to
+refuse, but it makes every bit added after it fail safe. The CALL is
+portable and the SAVING is not: the software backend indexes element 0,
+the remote backend expands locally because its frames chunk, and
+`cft_caps` reports `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it
+has.
+
+| surface | status at ABI 0.12 |
+|---|---|
+| C (`cft.h`) | complete: `CFT_MAXALL`, `cft_elem_args`, `cft_run_ex`, `CFT_SEQ_FEAT_SCALAR`. `reducetest` 13,516 reductions over four formats and all seven of 9.4 plus maxall, 0 failures - the library's halving scored against the model's left fold, which TESTS the associativity above instead of assuming it; `cft-selftest` 168 sets, 1,068,915 cases, all matching; `make -C host test` through to C and Python at the same bits; three refusals held by `api-test` (a reserved mask bit, a NULL scalar operand, an unrecognised `struct_size`) and a fourth by the 256-opcode sweep, where `cft_run` must refuse a reduction; the scalar probe bit-identical to an array of copies at all four formats, with a negative control that segfaults. `XRT=1` compiles on cft2204, which no Windows build can check - and caught a `-Wshadow` the Windows builds could not see |
+| C++ (`cft.hpp`) | unchanged; the additions are C entry points with no wrapper surface yet |
+| Python (`cftmpfr`) | unchanged |
+| Node / Browser | the module rebuilt at 0.12, and the rebuild was NOT optional: `verify.mjs` replays the sets through the module, and one predating opcode 31 cannot score maxall - it failed 128 of 148 sets, all twenty reduce sets, each at its first maxall case. After the rebuild `verify.mjs` OK, 832,915 cases over 148 sets with the reduction family 10,240 over 20/20, abi 12 both sides; `make -C host wstest` 67 checks, 0 failures. `make_page.py` refused the build twice on its own asserts first - the elementwise opcode census 29 to 28 (DOWN, where IMUL left it unchanged) and the sample stride 60 to 59, to keep landing on exactly 200 lines of 11,800 |
+| RTL | MODE[18:16] and the guard on MODE[31:19]; CAPS2[7] published from the same localparam the refusal reads, so a tile cannot advertise a bit it would turn away. A scalar stream's budget is one beat and its FIFO is never popped, so its `rd_data` holds beat 0 all run - and `ex_valid` already required every FIFO non-empty, which an unpopped one satisfies forever, so nothing had to change for a one-beat stream. `bcast_beat` replicates element 0 per precision, the construction `one_beat` already used: a beat is eight elements at fp32, so handing the base beat to the array unchanged would give lane *i* element *i*. `make krnl` TESTS=2 PASS=2 with the scalar buffer poisoned so a tile that streamed `n` would compute from the poison; `test_seq_core` 18/18, `test_krnl_seq` 1/1, `yosys-lint` rc=0 with zero latches. VERSION stays 0x800: no register grew |
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is

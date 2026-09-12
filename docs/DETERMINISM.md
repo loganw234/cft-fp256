@@ -205,14 +205,25 @@ the golden model alike. Deterministic, and visible in the flags, so a
 host that issues one early learns it now rather than getting a
 plausible number that changes meaning under a later bitstream.
 
-The hazard is not hypothetical; it has now fired four times. 24 and 25
+The hazard is not hypothetical; it has now fired five times. 24 and 25
 became `sum` and `dot` (2026-08-30), 26 and 27 became the
 divide/sqrt seeds (2026-08-31), 28 and 29 became `sumsq` and
-`sumabs` (2026-09-03), and 30 became `imul` (2026-09-07) - each time,
+`sumabs` (2026-09-03), 30 became `imul` (2026-09-07), and 31 became
+`maxall` (2026-09-12) - each time,
 a vector set generated
 before the assignment still named the opcode "reservedNN", and
 replaying one would score the new operation against an answer recorded
-for the unassigned-opcode result. `cft_conformance` detects that
+for the unassigned-opcode result. **The fifth was different in a way worth recording**, because it is the
+first assignment that changed the SIZE of the published census rather
+than only a name. `imul` is an elementwise opcode, so its two hundred
+cases a set simply began reading `imul` where they had read
+`reserved30`. `maxall` is a REDUCTION: there is no elementwise case for
+it to become, so its cases left the elementwise sets altogether and
+1,280 reduction cases arrived in their place - 1,071,635 to 1,068,915
+over all 168 sets. A document recording a run before that date still
+says 1,071,635 and is right to; that run replayed that many.
+
+`cft_conformance` detects that
 specifically and says so, rather than reporting a mismatch; on the
 third occasion that refusal is what caught it, in the generator's own
 "unassigned representative" list. Note that
