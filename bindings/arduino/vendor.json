@@ -76,7 +76,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "2fa163e4d13ae4a15e56b895a922af22f82a98a0c9d6f2bef943782eb368241d"
+      "sha256": "5823a53d7f509edd70619768389c5dd41c46f00a7105b46ffa97f712bca88388"
     },
     {
       "source": "host/src/divsqrt.c",

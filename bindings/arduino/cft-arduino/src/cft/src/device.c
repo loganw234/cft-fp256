@@ -916,16 +916,21 @@ static cft_status run_impl(cft_device *dev,
          * n * esz would fail to match a resident one-element buffer and
          * the run would quietly stage it instead - correct, slower, and
          * invisible because nothing fails. */
-        const size_t ab = (scalar_mask & 1u) ? esz : n * esz;
-        const size_t bb = (scalar_mask & 2u) ? esz : n * esz;
-        const size_t cb = (scalar_mask & 4u) ? esz : n * esz;
+        /* a_bytes, not ab: `bb` shadowed the cft_bn temporaries this
+         * function already declares, and -Wshadow said so - on the
+         * LINUX box, because this whole block is behind
+         * #ifdef CFT_ENABLE_XRT and XRT is off by default, so no build
+         * on the Windows host compiles it at all. */
+        const size_t a_bytes = (scalar_mask & 1u) ? esz : n * esz;
+        const size_t b_bytes = (scalar_mask & 2u) ? esz : n * esz;
+        const size_t c_bytes = (scalar_mask & 4u) ? esz : n * esz;
 
-        buf_sync_in(dev, a, ab);
-        buf_sync_in(dev, b, bb);
-        buf_sync_in(dev, c, cb);
-        bind_role(dev, &bd, CFT_ROLE_A, a, ab);
-        bind_role(dev, &bd, CFT_ROLE_B, b, bb);
-        bind_role(dev, &bd, CFT_ROLE_C, c, cb);
+        buf_sync_in(dev, a, a_bytes);
+        buf_sync_in(dev, b, b_bytes);
+        buf_sync_in(dev, c, c_bytes);
+        bind_role(dev, &bd, CFT_ROLE_A, a, a_bytes);
+        bind_role(dev, &bd, CFT_ROLE_B, b, b_bytes);
+        bind_role(dev, &bd, CFT_ROLE_C, c, c_bytes);
         bind_role(dev, &bd, CFT_ROLE_D, d, n * esz);
         backend_call();
         st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
