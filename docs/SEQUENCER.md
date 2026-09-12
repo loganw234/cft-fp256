@@ -10,14 +10,16 @@ the record of revisions 2, 3 and 4 and the reasoning behind each change;
 everything before them has been updated to describe the model as it now
 is. VERSION 0x800, CAPS[7:4] and CAPS2.*
 
-*Revision 4 is not in the RTL, and the asymmetry is worth stating rather
-than leaving to be discovered. The golden model, libcft's executor and
-both assemblers carry R8; no tile does. That is not a divergence: every
-tile refuses a strict image at its header check, under the reserved-bit
-rule that has guarded `flags` since revision 2, so no device computes a
-different answer from the model - it declines to run at all. The loader
-refuses it earlier and by name. What the tile half needs is CAPS2[6] and
-a range test in `cft_seq.sv`.*
+*Revision 4 is complete through the RTL as of 2026-09-11: the golden
+model, libcft's executor, both assemblers and `rtl/cft_seq.sv` carry R8,
+and `cft_krnl` publishes CAPS2[6]. What has NOT happened is a bitstream -
+every image on a card today predates the feature, reads CAPS2[6] as
+zero, and refuses a strict image at its header check under the
+reserved-bit rule that has guarded `flags` since revision 2. That is not
+a divergence: such a tile declines to run rather than computing
+something else, and libcft refuses the image earlier and by name
+(`CFT_ERR_UNSUPPORTED`) rather than letting the header check say it with
+STATUS[3] after the crossing.*
 
 STATUS: design, golden model, software implementation, kernel
 integration - and, as of 2026-09-01, **the RTL core itself, benched
@@ -1386,9 +1388,17 @@ will need the same: an OR-reduction of the index bits above
 
 ### What revision 4 does not do
 
-It does not touch the RTL, so no tile publishes CAPS2[6] and every tile
-refuses a strict image at its header. It does not change what a program
-without the flag computes, anywhere. And it does not make the depth
-itself portable - a program that needs 300 slots still needs a tile with
-300 slots. It makes the difference between having them and not having
-them *audible*, which is the part that was missing.
+It has not been built. The RTL is written and simulated - 18/18 and 1/1
+under Verilator and again under Icarus, `yosys-lint` clean, and the
+directed case fails when the flag is disconnected - but no bitstream
+carries it, so every card in service reads CAPS2[6] as zero and turns a
+strict image away.
+
+It does not change what a program without the flag computes, anywhere:
+the modulo is untouched, and that is what every image built before
+revision 4 means.
+
+And it does not make the depth portable. A program that needs 300 slots
+still needs a tile with 300 slots. What it makes is the difference
+between having them and not having them *audible*, which is the part
+that was missing.
