@@ -2538,8 +2538,18 @@ The first application built on libcft that is somebody else's algorithm
 rather than this project's own is REBOUND's IAS15 integrator, ported so
 that every floating-point operation is a `cft.h` call and run on the
 read-ahead quad. It is a fifteenth-order adaptive N-body integrator and
-it wants things the library does not have. Three, in the order the
-measurements rank them - which is not the order they were guessed in.
+it wants things the library does not have.
+
+**Six, and this list said three until 2026-09-12.** The requester's own
+statement is `cft-rebound/docs/HARDWARE.md`, which its ROADMAP.md:302
+names as the place the asks live; the three that were missing here are
+the gather, the lane mask and the scalar broadcast. A list that is the
+input to "what next" is worth exactly its completeness, and an
+incomplete one sent a round of work somewhere else first.
+
+The first three are in the order the measurements rank them - which is
+not the order they were guessed in - and the last three carry the
+requester's own ranking.
 
 **1. A device-side scatter. This is the expensive one.**
 
@@ -2567,15 +2577,36 @@ The general statement is in docs/INTEGRATION.md, "When your own gather
 is the wall": a caller whose access pattern is irregular hits a wall
 that has nothing to do with the bus and can hit it at one tile.
 
-**2. `scratch_in` / `scratch_out` that bind `cft_alloc` buffers.**
+**2. `scratch_in` / `scratch_out` that bind `cft_alloc` buffers. DONE,
+2026-09-12.**
 
-The sequencer's scratch block is staged on every run. It is exactly
+The sequencer's scratch block was staged on every run. It is exactly
 where an integrator's per-step state lives - the b, g and e coefficient
 arrays - and that state is read and rewritten every substep of every
-corrector pass without the host needing to see it. Resident buffers
-already exist for `cft_run` operands (ABI 0.11); the scratch pointers
-are the obvious next binding and would remove a staging round trip from
-the innermost loop.
+corrector pass without the host needing to see it.
+
+The blocks now bind as the deposit window has since ABI 0.11, and the
+reason they can is that they are the same shape: `n * count`
+format-width elements, lane-major, dense, growing with `n`. They had
+been excluded as "not operand-shaped", which was wrong and which the
+same function's own sizing comment already contradicted. No public ABI
+change: the caller passes an ordinary pointer and `buf_find` recognises
+it.
+
+Measured on the card (the read-ahead single tile, all four formats):
+deposits and the scratch-out block identical between a staged run and a
+resident one, and the second of two runs on an unchanged window served
+from the device copy with no new staging. The negative control - the two
+bindings removed - fails all four assertions.
+
+Two defects found in the building of it, both on the card and neither by
+inspection. `ROLE_ARG` was a `constexpr int[4]` indexed by role, so a
+new role read past it and handed `group_id()` a garbage argument id. And
+the staging guard for an unbound block was evaluated AFTER the fallback
+that fills `ob[]`, so the staged path silently stopped being filled -
+which nothing covered, because the software gates do not use XRT and the
+residency leg allocates every buffer with `cft_alloc`. There is a leg
+for it now (`compare_program_staged`).
 
 **3. A `CFT_MAX` reduction. Real, and smaller than it looks.**
 
@@ -2590,6 +2621,29 @@ proposed as the explanation for that workload's performance ceiling and
 is not; the scatter is. Recorded here because the discipline of the
 project is that a wrong hypothesis with a number beats a right one
 without, and because it correctly ranks the three.
+
+**4. A device-side gather.** Steps 2 and 3 of that integrator's force
+evaluation need a lane to read another lane's result, and the prototype's
+host does it. The asks are a device-side index-table copy, or a
+program-model change letting a lane read a neighbour's deposit
+(`cft-rebound/docs/HARDWARE.md:236-239`). The sequencer's scratch cannot
+serve it: lane *i*'s slot is reachable by lane *i* alone, which is what
+keeps P2 true of the scratch as it is of the deposit buffer.
+
+**5. A per-run lane mask in `cft_run_args`.** A host-supplied bitmap the
+engine honours, so an idle lane costs neither a beat nor a byte. The
+prototype masks a member that has left the corrector by a byte snapshot
+and restore on the host; on a tile that is a `SETACT` mask, which the
+sequencer has, but the masked lanes still compute and their state still
+crosses the bus in the scratch block. The waste is measured:
+`pc_lane_efficiency` 0.77 to 0.92 at binary64
+(`cft-rebound/docs/HARDWARE.md:303-314`).
+
+**6. A scalar-broadcast operand for `cft_run`.** Stated as the smallest
+of the six and worth 300 staged vectors a step: about 300 of the ~350
+vectors an ensemble carries are broadcast constants, and today their
+width is bus traffic rather than device memory
+(`cft-rebound/docs/HARDWARE.md:353-358`).
 
 **What the same exercise found the library does NOT need.** Nothing
 about difficulty: a problem with close encounters, whose adaptive step

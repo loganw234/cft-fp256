@@ -10568,3 +10568,94 @@ because it is what would let a census outlast the fault. The Pico, the Uno, the 
 unattached. The two static analyses named in the entry above - the
 ATmega328P's 130-byte stack margin, and what a large `to_decimal`
 costs the Pico's heap - are still analyses.
+
+
+## 2026-09-12 - the scratch blocks bind resident: cft-rebound's first ask, and two defects the gate found on the card
+
+The first of the six asks `docs/ROADMAP.md` now records from REBOUND's
+IAS15 port. The sequencer's two scratch blocks bind `cft_alloc` buffers,
+so an integrator's per-step state - the b, g and e coefficient arrays -
+can stay on the device across a corrector pass instead of being staged
+on every run.
+
+**Why they can bind, and why they were not.** The blocks are `n * count`
+format-width elements, lane-major and dense (`docs/SEQUENCER.md` R5) -
+the same shape as the deposit window's `n * max_deposits`, which has
+bound since ABI 0.11. `backend_xrt.cpp` excluded them with "none of them
+is operand-shaped", and the same function's sizing comment twelve lines
+above already said "Unlike the bank they grow with n". Two comments in
+one function, disagreeing; the code followed the wrong one. No public ABI
+change: the caller passes an ordinary pointer and `buf_find` recognises
+it, exactly as for a, b and c.
+
+### Measured, on the read-ahead single tile (`~/cardday-ra`, 0x800)
+
+| leg | result |
+|---|---|
+| `device-test -b`, all four formats | deposits and the scratch-out block identical between a staged run and a resident one, **0 failed** |
+| the second of two runs, unchanged window | scratch-in and scratch-out both served from the device copy, no new staging |
+| `compare_program_staged`, all four formats | a scratch program through ordinary host pointers, identical to the software backend |
+| negative control: both bindings removed | **all four assertions fire**; restored clean |
+| `make -C host test` | 168 sets, 1,071,635 cases, all matching |
+| `make -C host seqtest` | model and library agree on deposits, counts, flags and status |
+
+### Two defects of mine, both found on the card, neither by reading
+
+**`ROLE_ARG` was the third table to widen.** `constexpr int ROLE_ARG[4]`
+maps a role to a kernel argument id, and a new role read past it - XRT
+answered `vector::_M_range_check: __n (which is 1040)`. The first sweep
+found the `copies` stride and `bind_clear`'s loop bound and missed this
+one because it grepped the stride ARITHMETIC (`* 4 +`, `role > 3`,
+`tiles.size() * 4`) and this site is a bare `[4]`. **Grep for the index
+type, not the arithmetic.** The other five `[4]` arrays were then checked
+one at a time and are genuine four-role paths. A `static_assert` now
+catches the next version, where a role is added without an argument id
+and the list's tail is zero-initialised - not a compile error, and zero
+is a valid-looking argument index.
+
+**The staged path stopped being filled, and every gate stayed green.**
+The `tb[]` fallback assigns the tile's own buffers into `ob[]` before the
+staging guard reads it, so `if (!ob[CFT_ROLE_SI])` at the stage site was
+never true for an UNBOUND role - it had already become `&tile.si` - and
+the tile read a buffer nobody filled. The a/b/c stages escape it only
+because they sit above the fallback. It is pointer identity now, the
+idiom the readback already used.
+
+Nothing covered that case: the software gates do not use XRT, and the
+residency leg allocates every buffer with `cft_alloc`. **No test in this
+project had run a scratch program on a device through ordinary host
+pointers** - the plainest thing a caller can do.
+
+### How the second one was found, because the route is the finding
+
+The negative control for the binding failed on the DEPOSITS as well as
+on the two counters, and role D's binding was never touched, so that made
+no sense. Three steps settled it rather than one reading:
+
+1. a first hypothesis - `cft_buffer_from_device` clobbering a correct
+   staged result - died on the code: it flushes only `dirty` copies and
+   is a no-op otherwise;
+2. disabling one half at a time put the failure in scratch-IN, not
+   scratch-out;
+3. running the **pre-round library with this round's test** showed the
+   staged path was correct before the change, so the defect was mine and
+   not older.
+
+A control that fails in a way you did not predict is worth more than one
+that fails the way you designed it to, and the temptation is to accept
+the expected half and move on.
+
+### Also in this round
+
+`sync.py --check` was red before it started and redder after. Re-synced:
+28 vendored files, all identical to `host/`. The drift was mine (`cft.h`,
+`backend.h`, `device.c`, `program.c`, and `cft_seq_flags.h`, which was
+new) and older (`backend_remote.c`, `mpfloat.c`, `transcend.c`, all
+changed upstream without a re-sync). The mechanism was sound throughout -
+it refused by name and printed both hashes per file; it had simply not
+been run.
+
+And `docs/ROADMAP.md`'s ask list said three where the requester states
+six. The gather, the lane mask and the scalar broadcast were missing, so
+the list that is the input to "what next" was incomplete, and a round of
+work went elsewhere first on the strength of it.
