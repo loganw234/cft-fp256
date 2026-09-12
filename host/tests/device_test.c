@@ -3280,41 +3280,95 @@ static void compare_buffers_program(cft_device *sw, cft_device *hw,
         ok = 0;
     }
 
-    /* And the assertion that makes this a gate. Identical bits prove
-     * nothing about WHERE the block lived: staging everything produces
-     * the same answer, which is the state this change replaced. On a
-     * device with resident buffers the two scratch blocks must report a
-     * resident binding and no staged one. */
-    memset(&bi, 0, sizeof bi);
-    bi.struct_size = sizeof bi;
-    if (resident_expected &&
-        cft_buffer_get_info(rin.b, &bi) == CFT_OK) {
-        if (bi.resident_binds == 0 || bi.staged_binds != 0) {
-            printf("  FAIL %s program scratch: scratch-in was not bound "
-                   "resident (resident=%lu staged=%lu%s%s)\n",
-                   cft_format_name(fmt),
-                   (unsigned long)bi.resident_binds,
-                   (unsigned long)bi.staged_binds,
-                   bi.staged_why[0] ? " - " : "",
-                   bi.staged_why[0] ? bi.staged_why : "");
+    /* Now the part that makes this a gate, and it needs a SECOND run.
+     *
+     * Identical bits prove nothing about where the block lived: staging
+     * everything gives the same answer, which is the state this round
+     * replaced. But an INPUT role's first bind legitimately counts as
+     * staged - buf_bind must fill the device copy once - and only a
+     * later bind of the same window counts resident. So the promise
+     * under test is residency ACROSS CALLS, which is also the ask: an
+     * integrator's state staying on the device through a corrector
+     * pass.
+     *
+     * No republish between the two runs. cft_buffer_to_device bumps the
+     * buffer's generation, and a bound window whose generation moved is
+     * refilled - correctly, and it would mask exactly what is being
+     * measured here. */
+    {
+        cft_buffer_info b1, b2;
+        uint64_t in_res = 0, in_stg = 0, out_res = 0, out_stg = 0;
+        uint8_t *dep2 = (uint8_t *)malloc(blk);
+        uint8_t *out2 = (uint8_t *)malloc(blk);
+
+        memset(&b1, 0, sizeof b1); b1.struct_size = sizeof b1;
+        memset(&b2, 0, sizeof b2); b2.struct_size = sizeof b2;
+        if (cft_buffer_get_info(rin.b, &b1) == CFT_OK)
+            { in_res = b1.resident_binds; in_stg = b1.staged_binds; }
+        if (cft_buffer_get_info(rout.b, &b2) == CFT_OK)
+            { out_res = b2.resident_binds; out_stg = b2.staged_binds; }
+
+        if (!dep2 || !out2) {
+            printf("  FAIL %s program scratch: out of memory for the "
+                   "second run\n", cft_format_name(fmt));
             failures++;
             ok = 0;
-        }
-        memset(&bi, 0, sizeof bi);
-        bi.struct_size = sizeof bi;
-        if (cft_buffer_get_info(rout.b, &bi) == CFT_OK &&
-            (bi.resident_binds == 0 || bi.staged_binds != 0)) {
-            printf("  FAIL %s program scratch: scratch-out was not bound "
-                   "resident (resident=%lu staged=%lu%s%s)\n",
-                   cft_format_name(fmt),
-                   (unsigned long)bi.resident_binds,
-                   (unsigned long)bi.staged_binds,
-                   bi.staged_why[0] ? " - " : "",
-                   bi.staged_why[0] ? bi.staged_why : "");
+        } else if (cft_program_run_ex(p_hw, &A) != CFT_OK ||
+                   cft_buffer_from_device(rdep.b) != CFT_OK ||
+                   cft_buffer_from_device(rout.b) != CFT_OK) {
+            printf("  FAIL %s program scratch: the second resident run "
+                   "failed: %s\n", cft_format_name(fmt), cft_last_error());
             failures++;
             ok = 0;
+        } else {
+            memcpy(dep2, rdep.p, blk);
+            memcpy(out2, rout.p, blk);
+            if (memcmp(dep_hw, dep2, blk) || memcmp(out_hw, out2, blk)) {
+                printf("  FAIL %s program scratch: back-to-back runs on "
+                       "resident scratch drifted\n", cft_format_name(fmt));
+                failures++;
+                ok = 0;
+            }
+            memset(&b1, 0, sizeof b1); b1.struct_size = sizeof b1;
+            memset(&b2, 0, sizeof b2); b2.struct_size = sizeof b2;
+            if (resident_expected &&
+                cft_buffer_get_info(rin.b, &b1) == CFT_OK &&
+                cft_buffer_get_info(rout.b, &b2) == CFT_OK) {
+                if (b1.resident_binds <= in_res || b1.staged_binds != in_stg) {
+                    printf("  FAIL %s program scratch: the second run did "
+                           "not serve scratch-in from the device copy "
+                           "(resident %lu -> %lu, staged %lu -> %lu%s%s)\n",
+                           cft_format_name(fmt),
+                           (unsigned long)in_res,
+                           (unsigned long)b1.resident_binds,
+                           (unsigned long)in_stg,
+                           (unsigned long)b1.staged_binds,
+                           b1.staged_why[0] ? " - " : "",
+                           b1.staged_why[0] ? b1.staged_why : "");
+                    failures++;
+                    ok = 0;
+                }
+                if (b2.resident_binds <= out_res ||
+                    b2.staged_binds != out_stg) {
+                    printf("  FAIL %s program scratch: the second run did "
+                           "not serve scratch-out from the device copy "
+                           "(resident %lu -> %lu, staged %lu -> %lu%s%s)\n",
+                           cft_format_name(fmt),
+                           (unsigned long)out_res,
+                           (unsigned long)b2.resident_binds,
+                           (unsigned long)out_stg,
+                           (unsigned long)b2.staged_binds,
+                           b2.staged_why[0] ? " - " : "",
+                           b2.staged_why[0] ? b2.staged_why : "");
+                    failures++;
+                    ok = 0;
+                }
+            }
         }
+        free(out2);
+        free(dep2);
     }
+
     note_binds(&ra);
     note_binds(&rdep);
     note_binds(&rin);
