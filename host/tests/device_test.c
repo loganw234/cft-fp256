@@ -3143,6 +3143,119 @@ static void compare_buffers_reduce(cft_device *sw, cft_device *hw,
     free(b);
 }
 
+/* A PROGRAM's scratch blocks through ORDINARY HOST POINTERS on a device.
+ *
+ * The plainest thing a caller can do, and until 2026-09-12 nothing ran
+ * it: the software gates do not use XRT, and the residency leg below
+ * allocates everything with cft_alloc. So when the scratch binding
+ * landed and its staging guard was evaluated after the fallback that
+ * fills ob[] - skipping the staging of the unbound case and leaving the
+ * tile reading a buffer nobody filled - every gate stayed green.
+ *
+ * Held to the software backend, which is the authority for what the
+ * program computes.
+ */
+static void compare_program_staged(cft_device *sw, cft_device *hw,
+                                   cft_format fmt, size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t *a = NULL, *sin_h = NULL;
+    uint8_t *dep_sw = NULL, *dep_hw = NULL;
+    uint8_t *out_sw = NULL, *out_hw = NULL;
+    cft_program *p_sw = NULL, *p_hw = NULL;
+    uint8_t img[64];
+    uint64_t ins[4];
+    size_t bytes, blk = n * esz;
+    uint32_t fl = 0, bus = 0;
+    cft_run_args A;
+    int ok = 1;
+
+    ins[0] = seq_ldl(4, 0);
+    ins[1] = seq_ctrl(3, 4, 0);
+    ins[2] = seq_stl(4, 0);
+    ins[3] = seq_ctrl(0, 0, 0);
+    bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 1,
+                              CFT_PROG_FLAG_SCRATCH_IO, 1, 1);
+
+    a      = (uint8_t *)malloc(blk);
+    sin_h  = (uint8_t *)malloc(blk);
+    dep_sw = (uint8_t *)malloc(blk);
+    dep_hw = (uint8_t *)malloc(blk);
+    out_sw = (uint8_t *)malloc(blk);
+    out_hw = (uint8_t *)malloc(blk);
+    if (!a || !sin_h || !dep_sw || !dep_hw || !out_sw || !out_hw) {
+        printf("  FAIL %s staged scratch: out of memory\n",
+               cft_format_name(fmt));
+        failures++;
+        goto done;
+    }
+    fill_finite(a, fmt, n);
+    fill_scratch_block(sin_h, fmt, n, 1);
+
+    if (cft_program_load(sw, img, bytes, &p_sw) != CFT_OK ||
+        cft_program_load(hw, img, bytes, &p_hw) != CFT_OK) {
+        printf("  FAIL %s staged scratch: the image did not load: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    run_args_init(&A, a, dep_sw, n);
+    A.scratch_in        = sin_h;
+    A.scratch_in_bytes  = blk;
+    A.scratch_out       = out_sw;
+    A.scratch_out_bytes = blk;
+    A.flags_out         = &fl;
+    A.bus_out           = &bus;
+    if (cft_program_run_ex(p_sw, &A) != CFT_OK) {
+        printf("  FAIL %s staged scratch: the software run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    /* The same run on the device, every buffer an ordinary pointer. */
+    run_args_init(&A, a, dep_hw, n);
+    A.scratch_in        = sin_h;
+    A.scratch_in_bytes  = blk;
+    A.scratch_out       = out_hw;
+    A.scratch_out_bytes = blk;
+    A.flags_out         = &fl;
+    A.bus_out           = &bus;
+    if (cft_program_run_ex(p_hw, &A) != CFT_OK) {
+        printf("  FAIL %s staged scratch: the device run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    if (memcmp(dep_sw, dep_hw, blk)) {
+        printf("  FAIL %s staged scratch: the deposits differ from the "
+               "software backend - the scratch-in block did not reach the "
+               "tile\n", cft_format_name(fmt));
+        failures++;
+        ok = 0;
+    }
+    if (memcmp(out_sw, out_hw, blk)) {
+        printf("  FAIL %s staged scratch: the scratch-out block differs "
+               "from the software backend\n", cft_format_name(fmt));
+        failures++;
+        ok = 0;
+    }
+    checks++;
+    if (ok)
+        printf("    %-5s staged scratch: %lu lanes through host pointers, "
+               "identical to software\n",
+               cft_format_name(fmt), (unsigned long)n);
+
+done:
+    cft_program_free(p_hw);
+    cft_program_free(p_sw);
+    free(out_hw); free(out_sw);
+    free(dep_hw); free(dep_sw);
+    free(sin_h);  free(a);
+}
+
 /* A PROGRAM's two scratch blocks, resident, held to the staged path.
  *
  * The blocks are operand-shaped - n * count format-width elements,
@@ -3639,6 +3752,10 @@ int main(int argc, char **argv)
              * leg that failed there would be calling the tile's age a
              * defect. */
             if (caps.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) {
+                /* The staged path first: it is the one a caller gets
+                 * without adopting cft_alloc, and the one a binding
+                 * added beside it can silently break. */
+                compare_program_staged(sw, hw, fmt, n);
                 compare_buffers_program(sw, hw, fmt, n,
                                         caps.buffers_resident ? 1 : 0);
                 printf("  buffers, a program's scratch: %d checks, %d "

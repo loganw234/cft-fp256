@@ -1463,7 +1463,15 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * the tile's to write, the same reason the deposit window is
          * not pre-zeroed here, and every element of it is written by a
          * run that declares one. */
-        if (D.version >= SCRATCH_VERSION && !ob[CFT_ROLE_SI])
+        /* Pointer identity, NOT `!ob[CFT_ROLE_SI]`, and the difference is
+         * a bug this file already had once. The tb[] fallback above has
+         * run by now, so an UNBOUND role is no longer null - it is
+         * &tile.si - and a null test here skips the staging of exactly
+         * the case that needs it, leaving the tile reading a buffer
+         * nobody filled. The a/b/c stages escape this only because they
+         * sit ABOVE the fallback. This is the same idiom the readback
+         * uses to tell resident from staged. */
+        if (D.version >= SCRATCH_VERSION && ob[CFT_ROLE_SI] == &tile.si)
             stage(tile.si, static_cast<const uint8_t *>(scratch_in),
                   sin_bytes, sin_pad);
     } catch (const std::bad_alloc &) {
