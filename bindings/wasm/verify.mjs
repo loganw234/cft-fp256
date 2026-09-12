@@ -147,7 +147,14 @@ const AUGMENTED_SETS = FORMATS.map((f, i) => ({
 // 24/25/28/29 through cftw_reduce; the scaled products have their own
 // entry points, because a pair does not fit through an entry point
 // that delivers one element.
-const REDUCE_OPCODE = { sum: 24, dot: 25, sumsq: 28, sumabs: 29 };
+// maxall (31) joined on 2026-09-12. Unary and unscaled, so it needs no
+// entry in REDUCE_BINARY or REDUCE_SCALED below - this table is the
+// only one. It is the TENTH place the reduction list is written out
+// by hand across the repo, and the fourth to refuse a set naming a
+// function it did not know rather than skipping it, which is the
+// behaviour that makes these tables safe to transcribe at all.
+const REDUCE_OPCODE = { sum: 24, dot: 25, sumsq: 28, sumabs: 29,
+                        maxall: 31 };
 const REDUCE_SCALED = { scaled_prod: "scaled_prod",
                         scaled_prod_sum: "scaled_prod_sum",
                         scaled_prod_diff: "scaled_prod_diff" };

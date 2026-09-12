@@ -1382,9 +1382,13 @@ the slot from the low `log2(SCRATCH_D)` bits of `rb`, so before this
 flag existed neither could SEE an out-of-range index - every index was
 in range by construction. `libcft` now tests `cft_bn_bitlen(rb) >
 SEQ_SCRATCH_LOG2`, which is exact at any register width because the
-depth is published as a log2 and is therefore a power of two. A tile
-will need the same: an OR-reduction of the index bits above
-`$clog2(SCRATCH_D)`, not a wider comparator.
+depth is published as a log2 and is therefore a power of two.
+
+`rtl/cft_seq.sv` does the same, and has since 2026-09-11: `lane_oor_fn`
+ORs the index bits above `$clog2(SCRATCH_D)` across every word a lane
+owns, which is exact for the same reason and is not a wider comparator.
+Suppression is per BANK while detection is per POSITION, through the
+mapping `scr_addr_fn` already uses.
 
 ### What revision 4 does not do
 

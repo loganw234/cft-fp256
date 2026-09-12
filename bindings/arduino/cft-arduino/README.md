@@ -120,7 +120,7 @@ loop above.
 
 ## Replaying the vectors
 
-The repository publishes 168 conformance vector sets, 1,071,635 cases:
+The repository publishes 168 conformance vector sets, 1,068,915 cases:
 every operation, every format, every rounding attribute, each with the
 expected encoding and the expected exception flags. On a host,
 `cft-selftest` replays them by opening the files. A microcontroller has

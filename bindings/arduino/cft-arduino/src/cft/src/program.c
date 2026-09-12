@@ -26,7 +26,7 @@
  * promise that is only argued is a promise that is only probably kept.
  *
  * The hardware has the same structure for a different reason: its
- * block must be at least the ALU's 15-stage latency for the pipeline
+ * block must be at least the ALU's 16-stage latency for the pipeline
  * to stay full. Here the number is chosen for cache, not for
  * latency, and neither choice is observable.
  */
@@ -147,11 +147,19 @@ enum { SEQ_HALT = 0, SEQ_REPEAT, SEQ_ENDREP, SEQ_DEPOSIT, SEQ_SETACT,
 #define SEQ_IMM_RESERVED 0x80000000u
 
 /* The header's flags word, which was reserved[0] until 2026-09-08.
- * cft.h publishes CFT_PROG_FLAG_BANK_EXT and, since revision 3,
- * CFT_PROG_FLAG_SCRATCH_IO; this is the mask of every bit this library
- * knows, and a set bit outside it is CFT_ERR_ARTIFACT. */
+ * This is the mask of every bit this library IMPLEMENTS - not every bit
+ * cft.h defines, which is a different and larger thing whenever a flag
+ * has been assigned a number before the code to honour it exists. A set
+ * bit outside this mask is CFT_ERR_ARTIFACT.
+ *
+ * Do not list the members in prose here. The comment that did say them
+ * named two of three by 2026-09-11, which is how the flag list came to
+ * be written out by hand in nine places at three different revisions;
+ * host/include/cft_seq_flags.h renders the names from whatever mask you
+ * hand it. */
 #define SEQ_FLAGS_KNOWN  ((uint32_t)CFT_PROG_FLAG_BANK_EXT | \
-                          (uint32_t)CFT_PROG_FLAG_SCRATCH_IO)
+                          (uint32_t)CFT_PROG_FLAG_SCRATCH_IO | \
+                          (uint32_t)CFT_PROG_FLAG_SCRATCH_STRICT)
 
 struct cft_program {
     cft_device         *dev;
@@ -545,7 +553,7 @@ void cft_sw_seq_caps(cft_seq_caps *out)
     out->features     = CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
                         CFT_SEQ_FEAT_BANK_PTR   | CFT_SEQ_FEAT_KX9 |
                         CFT_ALU_EXT_IMUL        | CFT_SEQ_FEAT_SCRATCH |
-                        CFT_SEQ_FEAT_SCRATCH_IO;
+                        CFT_SEQ_FEAT_SCRATCH_IO | CFT_SEQ_FEAT_SCRATCH_STRICT;
 }
 
 /* A program image against the capacities the device it was loaded for
@@ -930,6 +938,31 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
             return CFT_ERR_INVALID_ARGUMENT;
     }
 
+    /* And revision 4's strict scratch range, on exactly the same terms.
+     * A tile that does not publish the feature refuses this image at its
+     * own header check - flags[2] sits inside the reserved range every
+     * revision before 4 enforces - but with STATUS[3] and no
+     * explanation, after the image has crossed. The loader says it
+     * first, by name, and says which feature.
+     *
+     * Clearing the flag would let the same program run, which is why
+     * this is a refusal and not a fallback: under the modulo it is a
+     * DIFFERENT contract, and answering a different question quietly is
+     * the one thing this library must not do. */
+    if (flags & CFT_PROG_FLAG_SCRATCH_STRICT) {
+        cft_seq_caps strict_caps;
+        cft_device_seq_caps(dev, &strict_caps);
+        if (!(strict_caps.features & CFT_SEQ_FEAT_SCRATCH_STRICT)) {
+            cft_set_error("this image's header flags carry SCRATCH_STRICT, "
+                          "so an indexed scratch access at or past the "
+                          "device's depth is reported rather than reduced "
+                          "modulo it, and this device does not publish the "
+                          "feature (CAPS2[6] clear, cft_caps.seq_features "
+                          "bit 10 - CFT_SEQ_FEAT_SCRATCH_STRICT)");
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+
     esz  = (size_t)cft_sf_formats[prec].width / 8;
     /* A BANK_EXT image is a header and an instruction stream, full
      * stop: n_consts says how many constants the program ADDRESSES,
@@ -1229,20 +1262,51 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
             break;
         }
 
-        /* The indexed forms take the slot from the low log2(SCRATCH_D)
-         * bits of `rb`'s BIT PATTERN, an unsigned integer where the
-         * atlas emitter keeps its loop counters, reduced modulo the
-         * depth. The reduction is part of the contract rather than an
-         * accident, so it is done here and in the model alike and an
-         * out-of-range index is never a refusal. */
+        /* The indexed forms take the slot from `rb`'s BIT PATTERN read as
+         * an unsigned integer - where the atlas emitter keeps its loop
+         * counters.
+         *
+         * WITHOUT CFT_PROG_FLAG_SCRATCH_STRICT the index is reduced
+         * modulo the depth. That reduction is part of the contract
+         * rather than an accident: it is what every image built before
+         * revision 4 means, so it is done here and in the model alike.
+         *
+         * WITH the flag (revision 4, R8) an index at or past the depth
+         * is REPORTED instead - the access is suppressed, LDX reads +0,
+         * and the run continues, exactly as a deposit past max_deposits
+         * does. That is what makes the depth portable: a program inside
+         * its declared scratch_used computes the same answer at every
+         * depth, and one outside it is told rather than quietly handed
+         * a different slot.
+         *
+         * The range test is a BIT LENGTH, not a wider extract, and that
+         * is the substance of R8 on this side. The line below reads
+         * only the low SEQ_SCRATCH_LOG2 bits, so before this flag
+         * existed the executor could not SEE an out-of-range index -
+         * every index was in range by construction. The depth is
+         * published as a log2 and is therefore a power of two, which
+         * makes `idx >= SEQ_SCRATCH_D` exactly
+         * `cft_bn_bitlen(idx) > SEQ_SCRATCH_LOG2` at any register
+         * width, with no truncation anywhere. */
         case SEQ_STX:
         case SEQ_LDX: {
             int rb = seq_reg(d.rb, d.hb);
+            int strict_range = (p->flags & CFT_PROG_FLAG_SCRATCH_STRICT) != 0;
             for (i = 0; i < nlane; i++) {
                 cft_bn *cell;
                 uint32_t slot;
                 if (!B->active[i])
                     continue;
+                if (strict_range &&
+                    cft_bn_bitlen(&B->regs[i][rb]) > SEQ_SCRATCH_LOG2) {
+                    *status |= CFT_STATUS_SCRATCH_RANGE;
+                    /* +0, which is what an untouched slot reads back as.
+                     * Never a stale register: that would make the result
+                     * depend on whatever the lane happened to hold. */
+                    if (d.op == SEQ_LDX)
+                        cft_bn_zero(&B->regs[i][seq_reg(d.rd, d.hd)]);
+                    continue;
+                }
                 slot = cft_bn_extract(&B->regs[i][rb], 0, SEQ_SCRATCH_LOG2)
                        & (SEQ_SCRATCH_D - 1u);
                 cell = seq_scratch_at(B, i, slot);

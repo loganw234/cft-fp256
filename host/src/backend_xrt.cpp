@@ -469,8 +469,22 @@ void stage(xrt::bo &bo, const uint8_t *src, size_t real_bytes,
  * skips it pays the transfer rather than reading the run before last.
  * ==================================================================== */
 
-/* Role index (backend.h's CFT_ROLE_*) to kernel argument id. */
-constexpr int ROLE_ARG[4] = {ARG_A, ARG_B, ARG_C, ARG_D};
+/* Role index (backend.h's CFT_ROLE_*) to kernel argument id.
+ *
+ * One entry per role, sized by CFT_ROLE_COUNT rather than by a literal.
+ * The scratch roles were added to the enum on 2026-09-12 and NOT to this
+ * table, and the failure was not a compile error: ROLE_ARG[CFT_ROLE_SI]
+ * read past a constexpr array and passed whatever followed it to
+ * group_id(), which XRT range-checked and threw - "__n (which is 1040)".
+ * The gate caught it on the card. */
+constexpr int ROLE_ARG[CFT_ROLE_COUNT] = {ARG_A, ARG_B, ARG_C, ARG_D,
+                                          ARG_SCRATCH_IN, ARG_SCRATCH_OUT};
+/* A role added without an argument id leaves the tail of that list
+ * zero-initialised, which is not a compile error and IS a valid-looking
+ * argument index - it would bind the wrong buffer silently. ARG_A is 2,
+ * so no real argument id is zero. */
+static_assert(ROLE_ARG[CFT_ROLE_COUNT - 1] != 0,
+              "every CFT_ROLE_* needs a kernel argument id in ROLE_ARG");
 
 struct BufCopy {
     xrt::bo  bo;
@@ -492,7 +506,8 @@ struct Buf {
      * that a copy's zero-initialised `gen` can never be mistaken for
      * current. */
     uint64_t             gen = 1;
-    std::vector<BufCopy> copies;           /* tiles * 4, [t * 4 + role] */
+    std::vector<BufCopy> copies;  /* tiles * CFT_ROLE_COUNT,
+                                   * [t * CFT_ROLE_COUNT + role] */
     uint64_t             resident_binds = 0, staged_binds = 0;
     std::string          why;
 };
@@ -521,10 +536,12 @@ void buf_flush(Buf &B, BufCopy &c)
 xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
                   size_t real, size_t padded, bool output)
 {
-    if (!B.D || tile >= B.D->tiles.size() || role < 0 || role > 3)
+    if (!B.D || tile >= B.D->tiles.size() ||
+        role < 0 || role >= CFT_ROLE_COUNT)
         return nullptr;
 
-    BufCopy &c = B.copies[tile * 4 + static_cast<size_t>(role)];
+    BufCopy &c =
+        B.copies[tile * CFT_ROLE_COUNT + static_cast<size_t>(role)];
     const bool same_window =
         c.live && c.off == off && c.real == real && c.padded == padded;
 
@@ -602,7 +619,8 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
  * caller's array. */
 void buf_mark_written(Buf &B, size_t tile, int role)
 {
-    BufCopy &c = B.copies[tile * 4 + static_cast<size_t>(role)];
+    BufCopy &c =
+        B.copies[tile * CFT_ROLE_COUNT + static_cast<size_t>(role)];
     if (c.live)
         c.dirty = true;
 }
@@ -835,7 +853,7 @@ extern "C" int cftx_buffer_create(void *hw, void *host, size_t bytes,
          * pointer INTO this vector and a reallocation would leave the
          * kernel holding a dangling one. The tile count cannot change
          * during a device's life. */
-        B->copies.resize(D.tiles.size() * 4);
+        B->copies.resize(D.tiles.size() * CFT_ROLE_COUNT);
     } catch (const std::exception &) {
         delete B;
         return ST_OUT_OF_MEMORY;
@@ -915,9 +933,15 @@ extern "C" void cftx_buffer_stat(void *buf, int *resident,
     }
 }
 
+/* MODE[18:16], the stride-0 operands. Named rather than written as a
+ * shift at the use site, because MODE's layout lives in docs/HOSTAPI.md
+ * and one place here. */
+constexpr uint32_t MODE_SCALAR_SH = 16;
+
 extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
                         const void *a, const void *b, const void *c,
-                        void *d, size_t n, const cft_bindings *bind,
+                        void *d, size_t n, uint32_t scalar_mask,
+                        const cft_bindings *bind,
                         uint32_t *flags, uint32_t *bus)
 {
     Dev &D = *static_cast<Dev *>(hw);
@@ -936,7 +960,8 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     const size_t ntiles = D.tiles.size();
     const uint32_t mode = static_cast<uint32_t>(op & 0xFF) |
                           (static_cast<uint32_t>(fmt & 0xF) << 8) |
-                          (static_cast<uint32_t>(rnd & 0x7) << 12);
+                          (static_cast<uint32_t>(rnd & 0x7) << 12) |
+                          ((scalar_mask & 7u) << MODE_SCALAR_SH);
 
     const auto *pa = static_cast<const uint8_t *>(a);
     const auto *pb = static_cast<const uint8_t *>(b);
@@ -980,13 +1005,23 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
             Tile &tile = D.tiles[s.tile];
             size_t staged_need = 0;
 
+            /* A SCALAR operand is not partitioned. Every tile reads
+             * element 0 of the same one-element buffer, so its offset is
+             * not advanced by first_elem and its length is one element
+             * rather than the slice's - get this wrong and tile 2 reads
+             * element first_elem, which is a plausible number and
+             * therefore the worst kind of wrong. CFT_ROLE_D is never
+             * scalar: a run writes every element it was asked for. */
             for (int r = 0; r < 4; r++) {
                 if (!bind || !bind->buf[r])
                     continue;
+                const bool scal = (r < 3) && (((scalar_mask >> r) & 1u) != 0);
                 Buf &B = *static_cast<Buf *>(bind->buf[r]);
                 sb[i].bo[r] = buf_bind(B, s.tile, r,
-                                       bind->off[r] + s.first_elem * esz,
-                                       s.real * esz, s.padded * esz,
+                                       bind->off[r] +
+                                           (scal ? 0u : s.first_elem * esz),
+                                       scal ? esz : s.real * esz,
+                                       scal ? esz : s.padded * esz,
                                        r == CFT_ROLE_D);
             }
             /* The tile's own buffers are grown only for what is left,
@@ -1002,8 +1037,14 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
             for (int r = 0; r < CFT_ROLE_D; r++) {
                 if (sb[i].bo[r])
                     continue;                     /* already on the device */
-                stage(*tb[r], src[r] ? src[r] + s.first_elem * esz : nullptr,
-                      s.real * esz, s.padded * esz);
+                {
+                    const bool scal = ((scalar_mask >> r) & 1u) != 0;
+                    stage(*tb[r],
+                          src[r] ? src[r] + (scal ? 0u : s.first_elem * esz)
+                                 : nullptr,
+                          scal ? esz : s.real * esz,
+                          scal ? esz : s.padded * esz);
+                }
             }
             for (int r = 0; r < 4; r++)
                 if (!sb[i].bo[r])
@@ -1326,12 +1367,18 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
 
     Tile &tile = D.tiles[0];
 
-    /* Which of the four operand-shaped buffers came from cft_alloc.
-     * The image, the bank, the counts and the two scratch blocks are
-     * staged always: none of them is operand-shaped, the image and the
-     * bank do not grow with n at all, and the counts are four bytes an
-     * element whatever the format. */
-    xrt::bo *ob[4] = {nullptr, nullptr, nullptr, nullptr};
+    /* Which of the operand-shaped buffers came from cft_alloc: the three
+     * streams, the deposit window, and the two scratch blocks.
+     *
+     * The image, the bank and the counts are staged always, and those
+     * reasons are real: the image and the bank do not grow with n at
+     * all, and the counts are four bytes an element whatever the
+     * format. The scratch blocks used to be listed beside them on the
+     * same grounds, which was wrong - the sizing comment above this one
+     * already said they grow with n, and they are n * count
+     * format-width elements exactly as the deposit window is. */
+    xrt::bo *ob[CFT_ROLE_COUNT] = {nullptr, nullptr, nullptr,
+                                   nullptr, nullptr, nullptr};
 
     /* Staging touches only host-visible buffers and starts nothing, so
      * a failure here leaves the compute unit idle and reusable. */
@@ -1347,6 +1394,22 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                 ob[3] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
                                  0, CFT_ROLE_D, bind->off[CFT_ROLE_D],
                                  n * max_deposits * esz, dep_bytes, true);
+            /* The scratch blocks, on the deposit window's terms. Guarded
+             * on the BYTE COUNT and not only the pointer: a program that
+             * declares no scratch I/O gets a one-beat staging buffer at
+             * arguments 9 and 10 that the tile never reads, and binding a
+             * caller's buffer for a block of zero length would be a
+             * window no run has. */
+            if (bind->buf[CFT_ROLE_SI] && scratch_in && sin_bytes)
+                ob[CFT_ROLE_SI] =
+                    buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_SI]),
+                             0, CFT_ROLE_SI, bind->off[CFT_ROLE_SI],
+                             sin_bytes, sin_pad, false);
+            if (bind->buf[CFT_ROLE_SO] && scratch_out && sout_bytes)
+                ob[CFT_ROLE_SO] =
+                    buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_SO]),
+                             0, CFT_ROLE_SO, bind->off[CFT_ROLE_SO],
+                             sout_bytes, sout_pad, true);
         }
 
         /* One cap covers a, b, c and d together, so the operand
@@ -1373,10 +1436,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         if (D.version >= BANK_VERSION)
             ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, bnk_bytes);
         if (D.version >= SCRATCH_VERSION) {
-            ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN,
-                       sin_pad);
-            ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT,
-                       sout_pad);
+            /* Only the halves that are not resident need the tile's own
+             * buffer; a bound block is handed to the kernel directly. */
+            if (!ob[CFT_ROLE_SI])
+                ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN,
+                           sin_pad);
+            if (!ob[CFT_ROLE_SO])
+                ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT,
+                           sout_pad);
         }
         if (!ob[0])
             stage(tile.a, static_cast<const uint8_t *>(a), real_bytes,
@@ -1388,8 +1455,12 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             stage(tile.c, static_cast<const uint8_t *>(c), real_bytes,
                   opnd_bytes);
         {
-            xrt::bo *tb[4] = {&tile.a, &tile.b, &tile.c, &tile.d};
-            for (int r = 0; r < 4; r++)
+            /* tile.si and tile.so are only created on an 0x800 device,
+             * and the kernel call below only passes them there, so an
+             * older contract never dereferences these two. */
+            xrt::bo *tb[CFT_ROLE_COUNT] = {&tile.a, &tile.b, &tile.c,
+                                           &tile.d, &tile.si, &tile.so};
+            for (int r = 0; r < CFT_ROLE_COUNT; r++)
                 if (!ob[r])
                     ob[r] = tb[r];
         }
@@ -1415,7 +1486,15 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * the tile's to write, the same reason the deposit window is
          * not pre-zeroed here, and every element of it is written by a
          * run that declares one. */
-        if (D.version >= SCRATCH_VERSION)
+        /* Pointer identity, NOT `!ob[CFT_ROLE_SI]`, and the difference is
+         * a bug this file already had once. The tb[] fallback above has
+         * run by now, so an UNBOUND role is no longer null - it is
+         * &tile.si - and a null test here skips the staging of exactly
+         * the case that needs it, leaving the tile reading a buffer
+         * nobody filled. The a/b/c stages escape this only because they
+         * sit ABOVE the fallback. This is the same idiom the readback
+         * uses to tell resident from staged. */
+        if (D.version >= SCRATCH_VERSION && ob[CFT_ROLE_SI] == &tile.si)
             stage(tile.si, static_cast<const uint8_t *>(scratch_in),
                   sin_bytes, sin_pad);
     } catch (const std::bad_alloc &) {
@@ -1459,7 +1538,8 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         xrt::run r = (D.version >= SCRATCH_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             *ob[0], *ob[1], *ob[2], *ob[3],
-                            tile.pg, tile.cn, tile.bk, tile.si, tile.so)
+                            tile.pg, tile.cn, tile.bk,
+                            *ob[CFT_ROLE_SI], *ob[CFT_ROLE_SO])
                    : (D.version >= BANK_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             *ob[0], *ob[1], *ob[2], *ob[3],
@@ -1571,8 +1651,21 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * so a run that touches neither pointer costs neither
          * transfer. */
         if (sout_bytes) {
-            tile.so.sync(XCL_BO_SYNC_BO_FROM_DEVICE, sout_pad, 0);
-            std::memcpy(scratch_out, tile.so.map<uint8_t *>(), sout_bytes);
+            /* A RESIDENT scratch-out block does not come back, for the
+             * deposit window's reason above: the tile wrote it, that copy
+             * is the authority, and the caller collects it with
+             * cft_buffer_from_device. This is the half that makes the
+             * binding worth having - an integrator's state can stay on
+             * the device across a whole corrector pass. */
+            if (ob[CFT_ROLE_SO] != &tile.so) {
+                buf_mark_written(
+                    *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), 0,
+                    CFT_ROLE_SO);
+            } else {
+                tile.so.sync(XCL_BO_SYNC_BO_FROM_DEVICE, sout_pad, 0);
+                std::memcpy(scratch_out, tile.so.map<uint8_t *>(),
+                            sout_bytes);
+            }
         }
     } catch (const std::exception &e) {
         set_err(std::string("reading program results: ") + e.what());

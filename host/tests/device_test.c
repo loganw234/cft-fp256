@@ -3143,6 +3143,367 @@ static void compare_buffers_reduce(cft_device *sw, cft_device *hw,
     free(b);
 }
 
+/* A PROGRAM's scratch blocks through ORDINARY HOST POINTERS on a device.
+ *
+ * The plainest thing a caller can do, and until 2026-09-12 nothing ran
+ * it: the software gates do not use XRT, and the residency leg below
+ * allocates everything with cft_alloc. So when the scratch binding
+ * landed and its staging guard was evaluated after the fallback that
+ * fills ob[] - skipping the staging of the unbound case and leaving the
+ * tile reading a buffer nobody filled - every gate stayed green.
+ *
+ * Held to the software backend, which is the authority for what the
+ * program computes.
+ */
+static void compare_program_staged(cft_device *sw, cft_device *hw,
+                                   cft_format fmt, size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t *a = NULL, *sin_h = NULL;
+    uint8_t *dep_sw = NULL, *dep_hw = NULL;
+    uint8_t *out_sw = NULL, *out_hw = NULL;
+    cft_program *p_sw = NULL, *p_hw = NULL;
+    uint8_t img[64];
+    uint64_t ins[4];
+    size_t bytes, blk = n * esz;
+    uint32_t fl = 0, bus = 0;
+    cft_run_args A;
+    int ok = 1;
+
+    ins[0] = seq_ldl(4, 0);
+    ins[1] = seq_ctrl(3, 4, 0);
+    ins[2] = seq_stl(4, 0);
+    ins[3] = seq_ctrl(0, 0, 0);
+    bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 1,
+                              CFT_PROG_FLAG_SCRATCH_IO, 1, 1);
+
+    a      = (uint8_t *)malloc(blk);
+    sin_h  = (uint8_t *)malloc(blk);
+    dep_sw = (uint8_t *)malloc(blk);
+    dep_hw = (uint8_t *)malloc(blk);
+    out_sw = (uint8_t *)malloc(blk);
+    out_hw = (uint8_t *)malloc(blk);
+    if (!a || !sin_h || !dep_sw || !dep_hw || !out_sw || !out_hw) {
+        printf("  FAIL %s staged scratch: out of memory\n",
+               cft_format_name(fmt));
+        failures++;
+        goto done;
+    }
+    fill_finite(a, fmt, n);
+    fill_scratch_block(sin_h, fmt, n, 1);
+
+    if (cft_program_load(sw, img, bytes, &p_sw) != CFT_OK ||
+        cft_program_load(hw, img, bytes, &p_hw) != CFT_OK) {
+        printf("  FAIL %s staged scratch: the image did not load: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    run_args_init(&A, a, dep_sw, n);
+    A.scratch_in        = sin_h;
+    A.scratch_in_bytes  = blk;
+    A.scratch_out       = out_sw;
+    A.scratch_out_bytes = blk;
+    A.flags_out         = &fl;
+    A.bus_out           = &bus;
+    if (cft_program_run_ex(p_sw, &A) != CFT_OK) {
+        printf("  FAIL %s staged scratch: the software run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    /* The same run on the device, every buffer an ordinary pointer. */
+    run_args_init(&A, a, dep_hw, n);
+    A.scratch_in        = sin_h;
+    A.scratch_in_bytes  = blk;
+    A.scratch_out       = out_hw;
+    A.scratch_out_bytes = blk;
+    A.flags_out         = &fl;
+    A.bus_out           = &bus;
+    if (cft_program_run_ex(p_hw, &A) != CFT_OK) {
+        printf("  FAIL %s staged scratch: the device run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    if (memcmp(dep_sw, dep_hw, blk)) {
+        printf("  FAIL %s staged scratch: the deposits differ from the "
+               "software backend - the scratch-in block did not reach the "
+               "tile\n", cft_format_name(fmt));
+        failures++;
+        ok = 0;
+    }
+    if (memcmp(out_sw, out_hw, blk)) {
+        printf("  FAIL %s staged scratch: the scratch-out block differs "
+               "from the software backend\n", cft_format_name(fmt));
+        failures++;
+        ok = 0;
+    }
+    checks++;
+    if (ok)
+        printf("    %-5s staged scratch: %lu lanes through host pointers, "
+               "identical to software\n",
+               cft_format_name(fmt), (unsigned long)n);
+
+done:
+    cft_program_free(p_hw);
+    cft_program_free(p_sw);
+    free(out_hw); free(out_sw);
+    free(dep_hw); free(dep_sw);
+    free(sin_h);  free(a);
+}
+
+/* A PROGRAM's two scratch blocks, resident, held to the staged path.
+ *
+ * The blocks are operand-shaped - n * count format-width elements,
+ * lane-major, dense - so they bind exactly as the deposit window does
+ * (docs/SEQUENCER.md R5, host/src/backend.h's role list). Before that
+ * binding existed they were staged on every run, which put a transfer
+ * in an integrator's innermost loop: the b, g and e coefficient arrays
+ * live in the scratch and are rewritten every corrector pass
+ * (cft-rebound/docs/HARDWARE.md, the first ask).
+ *
+ * Instruction ORDER is load-then-store deliberately. LDL first means the
+ * deposits carry what scratch-IN supplied, so a block that never
+ * arrived shows up in the deposits; STL last means scratch-OUT carries
+ * it back out. Reversed, this would pass with scratch_in undelivered.
+ */
+static void compare_buffers_program(cft_device *sw, cft_device *hw,
+                                    cft_format fmt, size_t n,
+                                    int resident_expected)
+{
+    const size_t esz = cft_format_size(fmt);
+    struct rbuf rin, rout, ra, rdep;
+    uint8_t *a = NULL, *sin_h = NULL;
+    uint8_t *dep_sw = NULL, *dep_hw = NULL;
+    uint8_t *out_sw = NULL, *out_hw = NULL;
+    cft_program *p_sw = NULL, *p_hw = NULL;
+    uint8_t img[64];
+    uint64_t ins[4];
+    size_t bytes, blk = n * esz;
+    uint32_t fl = 0, bus = 0;
+    cft_run_args A;
+    cft_buffer_info bi;
+    int ok = 1;
+
+    ins[0] = seq_ldl(4, 0);                      /* r4 <- scratch[0] */
+    ins[1] = seq_ctrl(3, 4, 0);                  /* deposit r4       */
+    ins[2] = seq_stl(4, 0);                      /* scratch[0] <- r4 */
+    ins[3] = seq_ctrl(0, 0, 0);                  /* halt             */
+    bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 1,
+                              CFT_PROG_FLAG_SCRATCH_IO, 1, 1);
+
+    a      = (uint8_t *)malloc(blk);
+    sin_h  = (uint8_t *)malloc(blk);
+    dep_sw = (uint8_t *)malloc(blk);
+    dep_hw = (uint8_t *)malloc(blk);
+    out_sw = (uint8_t *)malloc(blk);
+    out_hw = (uint8_t *)malloc(blk);
+    if (!a || !sin_h || !dep_sw || !dep_hw || !out_sw || !out_hw) {
+        printf("  FAIL %s program scratch: out of memory\n",
+               cft_format_name(fmt));
+        failures++;
+        goto done_host;
+    }
+    fill_finite(a, fmt, n);
+    fill_scratch_block(sin_h, fmt, n, 1);
+
+    /* The staged reference, on the software backend. */
+    if (cft_program_load(sw, img, bytes, &p_sw) != CFT_OK) {
+        printf("  FAIL %s program scratch: the image did not load on "
+               "software: %s\n", cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done_host;
+    }
+    run_args_init(&A, a, dep_sw, n);
+    A.scratch_in        = sin_h;
+    A.scratch_in_bytes  = blk;
+    A.scratch_out       = out_sw;
+    A.scratch_out_bytes = blk;
+    A.flags_out         = &fl;
+    A.bus_out           = &bus;
+    if (cft_program_run_ex(p_sw, &A) != CFT_OK) {
+        printf("  FAIL %s program scratch: the software run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done_host;
+    }
+
+    /* The resident run. Every operand-shaped buffer comes from
+     * cft_alloc, so a device that binds binds all four. */
+    if (!rbuf_alloc(hw, &ra, blk) || !rbuf_alloc(hw, &rdep, blk) ||
+        !rbuf_alloc(hw, &rin, blk) || !rbuf_alloc(hw, &rout, blk)) {
+        printf("  FAIL %s program scratch: cft_alloc\n",
+               cft_format_name(fmt));
+        failures++;
+        goto done_all;
+    }
+    if (!rbuf_put(&ra, a, blk) || !rbuf_put(&rin, sin_h, blk)) {
+        printf("  FAIL %s program scratch: publishing the inputs: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done_all;
+    }
+    if (cft_program_load(hw, img, bytes, &p_hw) != CFT_OK) {
+        printf("  FAIL %s program scratch: the image did not load on the "
+               "device: %s\n", cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done_all;
+    }
+    run_args_init(&A, ra.p, rdep.p, n);
+    A.scratch_in        = rin.p;
+    A.scratch_in_bytes  = blk;
+    A.scratch_out       = rout.p;
+    A.scratch_out_bytes = blk;
+    A.flags_out         = &fl;
+    A.bus_out           = &bus;
+    if (cft_program_run_ex(p_hw, &A) != CFT_OK) {
+        printf("  FAIL %s program scratch: the resident run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done_all;
+    }
+    /* A resident output is the device's until it is collected - the
+     * whole point of the binding, and the step whose absence would
+     * leave the comparison reading a stale mirror. */
+    if (cft_buffer_from_device(rdep.b) != CFT_OK ||
+        cft_buffer_from_device(rout.b) != CFT_OK) {
+        printf("  FAIL %s program scratch: collecting the outputs: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done_all;
+    }
+    memcpy(dep_hw, rdep.p, blk);
+    memcpy(out_hw, rout.p, blk);
+
+    if (memcmp(dep_sw, dep_hw, blk)) {
+        printf("  FAIL %s program scratch: the deposits differ between a "
+               "staged run and a resident one\n", cft_format_name(fmt));
+        failures++;
+        ok = 0;
+    }
+    if (memcmp(out_sw, out_hw, blk)) {
+        printf("  FAIL %s program scratch: the scratch-out block differs "
+               "between a staged run and a resident one\n",
+               cft_format_name(fmt));
+        failures++;
+        ok = 0;
+    }
+
+    /* Now the part that makes this a gate, and it needs a SECOND run.
+     *
+     * Identical bits prove nothing about where the block lived: staging
+     * everything gives the same answer, which is the state this round
+     * replaced. But an INPUT role's first bind legitimately counts as
+     * staged - buf_bind must fill the device copy once - and only a
+     * later bind of the same window counts resident. So the promise
+     * under test is residency ACROSS CALLS, which is also the ask: an
+     * integrator's state staying on the device through a corrector
+     * pass.
+     *
+     * No republish between the two runs. cft_buffer_to_device bumps the
+     * buffer's generation, and a bound window whose generation moved is
+     * refilled - correctly, and it would mask exactly what is being
+     * measured here. */
+    {
+        cft_buffer_info b1, b2;
+        uint64_t in_res = 0, in_stg = 0, out_res = 0, out_stg = 0;
+        uint8_t *dep2 = (uint8_t *)malloc(blk);
+        uint8_t *out2 = (uint8_t *)malloc(blk);
+
+        memset(&b1, 0, sizeof b1); b1.struct_size = sizeof b1;
+        memset(&b2, 0, sizeof b2); b2.struct_size = sizeof b2;
+        if (cft_buffer_get_info(rin.b, &b1) == CFT_OK)
+            { in_res = b1.resident_binds; in_stg = b1.staged_binds; }
+        if (cft_buffer_get_info(rout.b, &b2) == CFT_OK)
+            { out_res = b2.resident_binds; out_stg = b2.staged_binds; }
+
+        if (!dep2 || !out2) {
+            printf("  FAIL %s program scratch: out of memory for the "
+                   "second run\n", cft_format_name(fmt));
+            failures++;
+            ok = 0;
+        } else if (cft_program_run_ex(p_hw, &A) != CFT_OK ||
+                   cft_buffer_from_device(rdep.b) != CFT_OK ||
+                   cft_buffer_from_device(rout.b) != CFT_OK) {
+            printf("  FAIL %s program scratch: the second resident run "
+                   "failed: %s\n", cft_format_name(fmt), cft_last_error());
+            failures++;
+            ok = 0;
+        } else {
+            memcpy(dep2, rdep.p, blk);
+            memcpy(out2, rout.p, blk);
+            if (memcmp(dep_hw, dep2, blk) || memcmp(out_hw, out2, blk)) {
+                printf("  FAIL %s program scratch: back-to-back runs on "
+                       "resident scratch drifted\n", cft_format_name(fmt));
+                failures++;
+                ok = 0;
+            }
+            memset(&b1, 0, sizeof b1); b1.struct_size = sizeof b1;
+            memset(&b2, 0, sizeof b2); b2.struct_size = sizeof b2;
+            if (resident_expected &&
+                cft_buffer_get_info(rin.b, &b1) == CFT_OK &&
+                cft_buffer_get_info(rout.b, &b2) == CFT_OK) {
+                if (b1.resident_binds <= in_res || b1.staged_binds != in_stg) {
+                    printf("  FAIL %s program scratch: the second run did "
+                           "not serve scratch-in from the device copy "
+                           "(resident %lu -> %lu, staged %lu -> %lu%s%s)\n",
+                           cft_format_name(fmt),
+                           (unsigned long)in_res,
+                           (unsigned long)b1.resident_binds,
+                           (unsigned long)in_stg,
+                           (unsigned long)b1.staged_binds,
+                           b1.staged_why[0] ? " - " : "",
+                           b1.staged_why[0] ? b1.staged_why : "");
+                    failures++;
+                    ok = 0;
+                }
+                if (b2.resident_binds <= out_res ||
+                    b2.staged_binds != out_stg) {
+                    printf("  FAIL %s program scratch: the second run did "
+                           "not serve scratch-out from the device copy "
+                           "(resident %lu -> %lu, staged %lu -> %lu%s%s)\n",
+                           cft_format_name(fmt),
+                           (unsigned long)out_res,
+                           (unsigned long)b2.resident_binds,
+                           (unsigned long)out_stg,
+                           (unsigned long)b2.staged_binds,
+                           b2.staged_why[0] ? " - " : "",
+                           b2.staged_why[0] ? b2.staged_why : "");
+                    failures++;
+                    ok = 0;
+                }
+            }
+        }
+        free(out2);
+        free(dep2);
+    }
+
+    note_binds(&ra);
+    note_binds(&rdep);
+    note_binds(&rin);
+    note_binds(&rout);
+    if (ok)
+        printf("    %-5s program scratch: %lu lanes, deposits and the "
+               "scratch-out block identical staged and resident\n",
+               cft_format_name(fmt), (unsigned long)n);
+
+done_all:
+    cft_program_free(p_hw);
+    rbuf_free(&rout);
+    rbuf_free(&rin);
+    rbuf_free(&rdep);
+    rbuf_free(&ra);
+done_host:
+    cft_program_free(p_sw);
+    free(out_hw); free(out_sw);
+    free(dep_hw); free(dep_sw);
+    free(sin_h);  free(a);
+}
+
 /* The one thing the library cannot see, checked from both sides.
  *
  * Writing the mirror and NOT publishing it is the single case cft.h
@@ -3383,6 +3744,26 @@ int main(int argc, char **argv)
                                        (uint32_t)f);
             printf("  buffers, publish takes effect: %d checks, %d "
                    "failed\n", checks, failures);
+            fflush(stdout);
+
+            /* A program's scratch blocks, which bind as the deposit
+             * window does. Gated on the feature the device publishes:
+             * a 0x600 or 0x700 tile has no per-run block at all, and a
+             * leg that failed there would be calling the tile's age a
+             * defect. */
+            if (caps.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) {
+                /* The staged path first: it is the one a caller gets
+                 * without adopting cft_alloc, and the one a binding
+                 * added beside it can silently break. */
+                compare_program_staged(sw, hw, fmt, n);
+                compare_buffers_program(sw, hw, fmt, n,
+                                        caps.buffers_resident ? 1 : 0);
+                printf("  buffers, a program's scratch: %d checks, %d "
+                       "failed\n", checks, failures);
+            } else {
+                printf("  buffers, a program's scratch: SKIPPED - this "
+                       "device does not publish SCRATCH_IO\n");
+            }
             fflush(stdout);
 
             if (cft_supports(hw, CFT_SUM, fmt)) {

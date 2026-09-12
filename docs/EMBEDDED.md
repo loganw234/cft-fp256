@@ -274,7 +274,7 @@ is the fp256 `cft_sf_compute`, and it has 195 KB free.
 
 ## The replay harness
 
-The published vectors are 168 set files and 1,071,635 cases: every
+The published vectors are 168 set files and 1,068,915 cases: every
 operation, every format, every rounding attribute, each with the
 expected encoding and the expected exception flags.
 `host/tools/cft_selftest.c` replays them by opening the files. A
@@ -463,7 +463,7 @@ monitor open at 115200.
 ### Rate, and how long a full replay takes
 
 `--limit` and `--sets` exist because a board is not a host. The whole
-census is 1,071,635 cases and every case is a round trip; at 115,200
+census is 1,068,915 cases and every case is a round trip; at 115,200
 baud the wire alone is about 1 ms for a `run` pair, so the ceiling is
 roughly a thousand cases a second before the arithmetic. Start with a
 few hundred cases of one set, then run the subset the board carries,
@@ -490,7 +490,7 @@ of cases on core 3.3.0, with the loop task parked in
 bytes instead. A wrong answer is never retried - it is what the run
 exists to find - but a checksum failure, a wrong sequence number or
 a silence is a transport event, and a census that dies at case
-60,000 of 1,071,635 has measured nothing about case 60,001. The
+60,000 of 1,068,915 has measured nothing about case 60,001. The
 report counts every retry and every reset, so a run that needed
 them says so. With core 3.3.11 and `--pace 2 --retry 3
 --reset-on-timeout`, the S3 ran 84,000 cases without either
@@ -560,13 +560,13 @@ gcc 16.1.0, Python 3.12.9):
 
 - **The host gates are unchanged.** `make -C host test`: the API
   contract, the canonical-partition property, `cft-selftest` over
-  `vectors/out` (168 sets, 1,071,635 cases, all matching), and the
+  `vectors/out` (168 sets, 1,068,915 cases, all matching), and the
   C/ctypes identity check. `make -C host remotetest` and `wstest` on
   the same tree. And the object-code comparison above.
 - **Fifteen board compiles**, five FQBNs by three sketches, warnings
   on, zero warnings.
 - **The loopback census, four profiles.** The full profile over all 168
-  sets: 1,071,635 cases, all matching. The board profile (Pico, ESP32)
+  sets: 1,068,915 cases, all matching. The board profile (Pico, ESP32)
   over all 168: the same. `CFT_TINY` over the fp32 and fp64 sets: 24
   sets, 195,248 cases. `CFT_TINY` at fp128: 36 sets, 271,776 cases.
 - **The negative control**: six corruptions, six caught.

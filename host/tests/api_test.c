@@ -415,7 +415,8 @@ int main(void)
                  * from the sweep, because the refusal itself is worth
                  * asserting - checked immediately below. */
                 if (op_i == CFT_SUM || op_i == CFT_DOT ||
-                    op_i == CFT_SUMSQ || op_i == CFT_SUMABS) {
+                    op_i == CFT_SUMSQ || op_i == CFT_SUMABS ||
+                    op_i == CFT_MAXALL) {
                     st = cft_run(dev, (cft_op)op_i, (cft_format)f_i,
                                  CFT_RNE, zero, zero, zero, out, 1,
                                  NULL, NULL);
@@ -1732,13 +1733,21 @@ int main(void)
          * recorded for. */
         CHECK(strcmp(cft_op_name(CFT_IMUL), "imul") == 0,
               "the integer multiply is named");
-        CHECK(strcmp(cft_op_name((cft_op)31), "reserved") == 0,
-              "31 is the first unassigned opcode now");
+        CHECK(strcmp(cft_op_name((cft_op)31), "maxall") == 0,
+              "31 names maxall since 2026-09-12");
+        CHECK(strcmp(cft_op_name((cft_op)15), "reserved") == 0,
+              "15 is an unassigned opcode");
         CHECK(cft_supports(dev, CFT_SUMSQ, CFT_FP256) == 1 &&
               cft_supports(dev, CFT_SUMABS, CFT_FP32) == 1,
               "software backend carries the composed reductions");
-        CHECK(cft_supports(dev, (cft_op)31, CFT_FP32) == 0,
-              "op 31 unassigned");
+        /* maxall IS supported wherever min/max is, because that is what
+         * it composes from - reduce_helper_group says so and this is the
+         * line that holds it to it. The unassigned-opcode assertion moved
+         * to 15 above when 31 was taken. */
+        CHECK(cft_supports(dev, CFT_MAXALL, CFT_FP32) == 1,
+              "maxall is supported where min/max is");
+        CHECK(cft_supports(dev, (cft_op)15, CFT_FP32) == 0,
+              "op 15 unassigned");
         /* IMUL is defined and executed - by a sequencer program, and
          * elementwise on the software backend - but no CAPS bit
          * publishes it, so a portable caller still cannot ask for it.

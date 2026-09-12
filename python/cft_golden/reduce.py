@@ -214,12 +214,13 @@ and implemented anyway, because "cannot happen" is not a result.
 from .formats import FpFormat
 from .softfloat import (
     FLAG_INEXACT, FLAG_INVALID, RND_RNE, add as _add, mul as _mul,
-    sub as _sub, fabs as _fabs, inf_bits, one_bits, qnan_bits, unpack,
+    sub as _sub, fabs as _fabs, fmax as _fmax, inf_bits, one_bits,
+    qnan_bits, unpack,
     zero_bits, _check_mode,
 )
 
 __all__ = [
-    "OP_SUM", "OP_DOT", "OP_SUMSQ", "OP_SUMABS",
+    "OP_SUM", "OP_DOT", "OP_SUMSQ", "OP_SUMABS", "OP_MAXALL",
     "REDUCE_OPS", "REDUCE_OP_NAMES",
     "SP_PROD", "SP_PROD_SUM", "SP_PROD_DIFF",
     "SCALED_KINDS", "SCALED_KIND_NAMES", "SCALE_MIN", "SCALE_MAX",
@@ -253,9 +254,33 @@ OP_DOT = 25
 OP_SUMSQ = 28
 OP_SUMABS = 29
 
-REDUCE_OPS = (OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS)
+# A maximum over the array, appended 2026-09-12 - never inserted, never
+# reordered, for the reason stated above. 31 was the last unassigned code
+# inside the byte apart from 15 and 255, and taking it is the FIFTH time
+# vectors.py's unassigned list has shed a member; the conformance
+# replayer refuses a set whose reserved case has since been assigned,
+# which is what caught 26, 28 and 30.
+#
+# It is the first reduction since CFT_SUM that is not a composition. The
+# other three reach the accumulator as a sum - dot is rounded products
+# then the tree, sumSquare is dot over (a, a), sumAbs is an abs pass then
+# the tree - and a maximum cannot be written as a sum.
+#
+# It also needs no tree, which no other reduction here can say. fmax is
+# exactly associative and commutative INCLUDING its flags: any NaN gives
+# a canonical qNaN rather than a propagated payload (softfloat.py's
+# _minmax), invalid is raised exactly when some operand is signalling and
+# every element is an operand of one comparison whatever the shape, and
+# max(+0, -0) is +0 which is also the maximum among zeros. So the fold
+# order cannot reach the answer, the multi-tile fold is a maximum over
+# the partials, and there is nothing here for docs/DETERMINISM.md to fix
+# about a shape.
+OP_MAXALL = 31
+
+REDUCE_OPS = (OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, OP_MAXALL)
 REDUCE_OP_NAMES = {OP_SUM: "sum", OP_DOT: "dot",
-                   OP_SUMSQ: "sumsq", OP_SUMABS: "sumabs"}
+                   OP_SUMSQ: "sumsq", OP_SUMABS: "sumabs",
+                   OP_MAXALL: "maxall"}
 
 # The scaled products. NOT opcodes: they return a pair, so they cannot
 # come back through cft_reduce()'s one-element output, and no tile
@@ -563,6 +588,43 @@ def fsumabs(fmt: FpFormat, xs, rnd: int = RND_RNE):
     if special is not None:
         return special
     return fsum(fmt, [_fabs(fmt, x)[0] for x in xs], rnd)
+
+
+def fmaxall(fmt: FpFormat, xs, rnd: int = RND_RNE):
+    """maxall: the 754-2019 9.6 maximum over a vector -> (bits, flags).
+
+    A left fold, and the fold shape is not part of the contract because
+    it cannot be: fmax is exactly associative and commutative, flags and
+    NaN payload included (the block above OP_MAXALL has the argument).
+    Any other order gives the same bits, which is what lets a tile
+    accumulate in whatever order its hardware finds convenient and lets
+    four tiles fold their partials with the same call.
+
+    `rnd` is accepted and unused. maximum selects an operand rather than
+    computing one, so it never rounds - the same reason every opcode in
+    softfloat.py's non-arithmetic group ignores the attribute.
+
+    n == 0 is the identity, and for a maximum that is -infinity: the
+    value that loses to every other, so that folding an empty partial
+    into a non-empty one is a no-op. That is a CHOICE and not inherited
+    from 754, which says nothing about an empty reduction; it is the
+    choice that makes the multi-tile fold associative with an empty
+    range, and a tile with nothing to do returns it rather than a zero
+    that would win against negatives.
+
+    n == 1 is the input verbatim with no flags - one leaf is no
+    comparisons - which is the edge fsum and fsumabs already document:
+    maxall of a single signalling NaN is that pattern, not a quiet one.
+    """
+    xs = list(xs)
+    if not xs:
+        return inf_bits(fmt, 1), 0
+    acc = xs[0]
+    flags = 0
+    for x in xs[1:]:
+        acc, f = _fmax(fmt, acc, x)
+        flags |= f
+    return acc, flags
 
 
 # ---- the scaled products --------------------------------------------

@@ -991,15 +991,24 @@ static cft_status augmented_set(cft_device *dev, int fi, int esz,
 #define RD_PROD       4
 #define RD_PROD_SUM   5
 #define RD_PROD_DIFF  6
+/* Appended 2026-09-12. These are INTERNAL indices, not wire opcodes, so
+ * appending is free - but see reduce_fn_scaled, which was a range test
+ * `fn >= RD_PROD` and would have silently called maxall a scaled
+ * product. A range test over an enum someone will append to is a defect
+ * waiting for its next member. */
+#define RD_MAXALL     7
 
 static int reduce_fn_from_name(const char *s)
 {
-    static const char *const names[7] = {
+    /* Unsized, and the loop bound derived from it: the two cannot
+     * disagree, which a hand-written 7 in both places could. */
+    static const char *const names[] = {
         "sum", "dot", "sumsq", "sumabs",
-        "scaled_prod", "scaled_prod_sum", "scaled_prod_diff"
+        "scaled_prod", "scaled_prod_sum", "scaled_prod_diff",
+        "maxall"
     };
     int i;
-    for (i = 0; i < 7; i++)
+    for (i = 0; i < (int)(sizeof names / sizeof names[0]); i++)
         if (strcmp(names[i], s) == 0)
             return i;
     return -1;
@@ -1012,6 +1021,7 @@ static const char *reduce_fn_name(int fn)
     case RD_DOT:       return "dot";
     case RD_SUMSQ:     return "sumsq";
     case RD_SUMABS:    return "sumabs";
+    case RD_MAXALL:    return "maxall";
     case RD_PROD:      return "scaled_prod";
     case RD_PROD_SUM:  return "scaled_prod_sum";
     case RD_PROD_DIFF: return "scaled_prod_diff";
@@ -1026,7 +1036,11 @@ static int reduce_fn_binary(int fn)
 
 static int reduce_fn_scaled(int fn)
 {
-    return fn >= RD_PROD;
+    /* Named rather than a range. It WAS `fn >= RD_PROD`, which made
+     * every future appended function a scaled product by default -
+     * maxall was the first and would have been asked for a scale
+     * factor it does not have. */
+    return fn == RD_PROD || fn == RD_PROD_SUM || fn == RD_PROD_DIFF;
 }
 
 static cft_status reduce_set(cft_device *dev, int fi, int esz,
@@ -1149,6 +1163,10 @@ static cft_status reduce_set(cft_device *dev, int fi, int esz,
             break;
         case RD_SUMABS:
             st = cft_reduce(dev, CFT_SUMABS, (cft_format)fi, (cft_round)rnd,
+                            va, NULL, got_d, n, &got_flags, NULL);
+            break;
+        case RD_MAXALL:
+            st = cft_reduce(dev, CFT_MAXALL, (cft_format)fi, (cft_round)rnd,
                             va, NULL, got_d, n, &got_flags, NULL);
             break;
         case RD_PROD:

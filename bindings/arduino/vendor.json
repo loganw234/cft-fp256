@@ -21,12 +21,17 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "747d32dad4658ffbb9cc56994e47e92289aef0961228354acaaa091404a90a0c"
+      "sha256": "a78b8828ed082f6aed041553473b4ad154d22ce5eaab92ee3cce0c0a37230b76"
     },
     {
       "source": "host/include/cft_config.h",
       "dest": "src/cft/include/cft_config.h",
       "sha256": "5a707aee3765c5a6aa2beab74a81c71a93ff655f88296b85ec7fe736f69e0685"
+    },
+    {
+      "source": "host/include/cft_seq_flags.h",
+      "dest": "src/cft/include/cft_seq_flags.h",
+      "sha256": "1363bd5c3ffee76ad1c544e3b72cff1ccf2fa572552302c2580567fe36ebc5fa"
     },
     {
       "source": "host/src/augmented.c",
@@ -36,12 +41,12 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "c74141335f873d6e23dd23c8724072e8b7d9e96e2bf1389805e5f92bc545396c"
+      "sha256": "a7af67224b9ef46415a33f9a83b3bdb9a186baac358e913560d089f33879a08a"
     },
     {
       "source": "host/src/backend_remote.c",
       "dest": "src/cft/src/backend_remote.c",
-      "sha256": "372d11fd390cfad5fd17f86e7f50ff992cc2a3c1c6426195fd59e51cfef08aa6"
+      "sha256": "ec78a7b708b119e84eae4320962e3e008afc0a89897caa052d8d5024ab409e85"
     },
     {
       "source": "host/src/bigint.c",
@@ -66,12 +71,12 @@
     {
       "source": "host/src/conformance.c",
       "dest": "src/cft/src/conformance.c",
-      "sha256": "c1f0958b816bcc42669345d0c2ab8053db31626076ca98edffef8ef5d671418d"
+      "sha256": "8ee74d013ea9c6b550c220e44b8f11de045cf8732ad0bf405b3ad9e0acd5fc28"
     },
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "a02753255f9ababe867f6b7ddcd7b29b8076bd0b68296d1ca239f77cb39fbec4"
+      "sha256": "5823a53d7f509edd70619768389c5dd41c46f00a7105b46ffa97f712bca88388"
     },
     {
       "source": "host/src/divsqrt.c",
@@ -96,7 +101,7 @@
     {
       "source": "host/src/mpfloat.c",
       "dest": "src/cft/src/mpfloat.c",
-      "sha256": "db6ff8205f13a90a812d607152ea13e45f23e5e04d6912a5d5743ec40933423e"
+      "sha256": "2b05f9c123c9700740a9c4fd3a82dcf9217db464f9240bac4bcd6a405e8c6262"
     },
     {
       "source": "host/src/mpfloat.h",
@@ -106,7 +111,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "992b9bee3a7cb9e83b1a535b664227e6c044ba1584d6e305e3193e364e13d4ad"
+      "sha256": "7cfedb0e0ad96e79cef4086b5b0501d948af798835d708d23d057bee445432c4"
     },
     {
       "source": "host/src/reduce.c",
@@ -136,17 +141,17 @@
     {
       "source": "host/src/softfloat.c",
       "dest": "src/cft/src/softfloat.c",
-      "sha256": "6684ad58a61a909df456195e28aabe262b4a3d6ca0600de322cb6129c4ddd6f2"
+      "sha256": "4479ee96f597dc3343a2ff934f61e13cf3f3b48265921e8030ad60d5ffb4337e"
     },
     {
       "source": "host/src/softfloat.h",
       "dest": "src/cft/src/softfloat.h",
-      "sha256": "d038f37cff715195405d6338ddba2cff2d77a71cd51631437d4917669f5d6ac7"
+      "sha256": "97e7b0f67b00a37ff452ef6dcf9216b09b8becbbee122b032510aaa5ab39936d"
     },
     {
       "source": "host/src/transcend.c",
       "dest": "src/cft/src/transcend.c",
-      "sha256": "5cf25f2b36a08a1c53b12d689079339cac7cb7f5791cc31a49a0cd9a1a047e4d"
+      "sha256": "3bf4406c532a3a581c942266204556fbdf1bc55abee23c114991f53c58bbc2e3"
     },
     {
       "source": "host/src/transcend.h",

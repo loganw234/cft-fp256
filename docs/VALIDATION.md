@@ -10568,3 +10568,383 @@ because it is what would let a census outlast the fault. The Pico, the Uno, the 
 unattached. The two static analyses named in the entry above - the
 ATmega328P's 130-byte stack margin, and what a large `to_decimal`
 costs the Pico's heap - are still analyses.
+
+
+## 2026-09-12 - the scratch blocks bind resident: cft-rebound's first ask, and two defects the gate found on the card
+
+The first of the six asks `docs/ROADMAP.md` now records from REBOUND's
+IAS15 port. The sequencer's two scratch blocks bind `cft_alloc` buffers,
+so an integrator's per-step state - the b, g and e coefficient arrays -
+can stay on the device across a corrector pass instead of being staged
+on every run.
+
+**Why they can bind, and why they were not.** The blocks are `n * count`
+format-width elements, lane-major and dense (`docs/SEQUENCER.md` R5) -
+the same shape as the deposit window's `n * max_deposits`, which has
+bound since ABI 0.11. `backend_xrt.cpp` excluded them with "none of them
+is operand-shaped", and the same function's sizing comment twelve lines
+above already said "Unlike the bank they grow with n". Two comments in
+one function, disagreeing; the code followed the wrong one. No public ABI
+change: the caller passes an ordinary pointer and `buf_find` recognises
+it, exactly as for a, b and c.
+
+### Measured, on the read-ahead single tile (`~/cardday-ra`, 0x800)
+
+| leg | result |
+|---|---|
+| `device-test -b`, all four formats | deposits and the scratch-out block identical between a staged run and a resident one, **0 failed** |
+| the second of two runs, unchanged window | scratch-in and scratch-out both served from the device copy, no new staging |
+| `compare_program_staged`, all four formats | a scratch program through ordinary host pointers, identical to the software backend |
+| negative control: both bindings removed | **all four assertions fire**; restored clean |
+| `make -C host test` | 168 sets, 1,071,635 cases, all matching |
+| `make -C host seqtest` | model and library agree on deposits, counts, flags and status |
+
+### Two defects of mine, both found on the card, neither by reading
+
+**`ROLE_ARG` was the third table to widen.** `constexpr int ROLE_ARG[4]`
+maps a role to a kernel argument id, and a new role read past it - XRT
+answered `vector::_M_range_check: __n (which is 1040)`. The first sweep
+found the `copies` stride and `bind_clear`'s loop bound and missed this
+one because it grepped the stride ARITHMETIC (`* 4 +`, `role > 3`,
+`tiles.size() * 4`) and this site is a bare `[4]`. **Grep for the index
+type, not the arithmetic.** The other five `[4]` arrays were then checked
+one at a time and are genuine four-role paths. A `static_assert` now
+catches the next version, where a role is added without an argument id
+and the list's tail is zero-initialised - not a compile error, and zero
+is a valid-looking argument index.
+
+**The staged path stopped being filled, and every gate stayed green.**
+The `tb[]` fallback assigns the tile's own buffers into `ob[]` before the
+staging guard reads it, so `if (!ob[CFT_ROLE_SI])` at the stage site was
+never true for an UNBOUND role - it had already become `&tile.si` - and
+the tile read a buffer nobody filled. The a/b/c stages escape it only
+because they sit above the fallback. It is pointer identity now, the
+idiom the readback already used.
+
+Nothing covered that case: the software gates do not use XRT, and the
+residency leg allocates every buffer with `cft_alloc`. **No test in this
+project had run a scratch program on a device through ordinary host
+pointers** - the plainest thing a caller can do.
+
+### How the second one was found, because the route is the finding
+
+The negative control for the binding failed on the DEPOSITS as well as
+on the two counters, and role D's binding was never touched, so that made
+no sense. Three steps settled it rather than one reading:
+
+1. a first hypothesis - `cft_buffer_from_device` clobbering a correct
+   staged result - died on the code: it flushes only `dirty` copies and
+   is a no-op otherwise;
+2. disabling one half at a time put the failure in scratch-IN, not
+   scratch-out;
+3. running the **pre-round library with this round's test** showed the
+   staged path was correct before the change, so the defect was mine and
+   not older.
+
+A control that fails in a way you did not predict is worth more than one
+that fails the way you designed it to, and the temptation is to accept
+the expected half and move on.
+
+### Also in this round
+
+`sync.py --check` was red before it started and redder after. Re-synced:
+28 vendored files, all identical to `host/`. The drift was mine (`cft.h`,
+`backend.h`, `device.c`, `program.c`, and `cft_seq_flags.h`, which was
+new) and older (`backend_remote.c`, `mpfloat.c`, `transcend.c`, all
+changed upstream without a re-sync). The mechanism was sound throughout -
+it refused by name and printed both hashes per file; it had simply not
+been run.
+
+And `docs/ROADMAP.md`'s ask list said three where the requester states
+six. The gather, the lane mask and the scalar broadcast were missing, so
+the list that is the input to "what next" was incomplete, and a round of
+work went elsewhere first on the strength of it.
+
+## 2026-09-12 - a maximum reduction, the first opcode assignment to shrink the published census
+
+`CFT_MAXALL` (31): a maximum over the array, `cft-rebound`'s third ask
+(`docs/HARDWARE.md:347`, *"a `CFT_MAX` reduction would keep it on the
+tile, and that ask stands"*). Its convergence test was a host loop of
+width-one calls, about `2*3N` per corrector pass and 13 to 19 percent of
+all library calls.
+
+**Composed, not hardware**, and the code chose that rather than taste.
+Two findings, both checked:
+
+- `CAPS[15:8]` is full - all eight opcode-group bits are assigned
+  (`rtl/cft_krnl.sv:448-467`). *Not* the blocker it first looked like:
+  CAPS2 is already decoded (`seq->features |= ((caps2 >> 4) & 0xFu) << 8`,
+  `backend_xrt.cpp:810`), so `CAPS2[7]` is one RTL line and one `#define`.
+  An earlier draft of this entry said a new bit cost an ABI step; that
+  was wrong and is corrected here rather than quietly.
+- **A tile handed opcode 31 as a reduction would corrupt memory, not
+  answer wrongly.** `cfg_is_reduce` is `(cfg_op == 8'd24)`
+  (`rtl/cft_engine_stream.sv:523`), so 31 decodes as ELEMENTWISE and the
+  tile writes `n` elements where a reduction's caller sized `d` for one.
+  Distinct from the unassigned-opcode rule, which is benign by design -
+  an unassigned opcode answers canonical qNaN + invalid, loudly.
+
+So the composition sits above the backend dispatch, where `CFT_SUMSQ`
+and `CFT_SUMABS` put theirs, and no tile ever sees the opcode:
+
+    CFT_MAXALL  ->  ceil(log2 n) x cft_run(CFT_MAX, first half, second half)
+
+**The property that makes this a complete answer and not a staging
+post:** 754-2019 `maximum` is exactly associative and commutative
+*including its flags* - any NaN gives a canonical quiet NaN rather than a
+propagated payload, `invalid` is raised exactly when some operand is
+signalling and every element is an operand of one comparison whatever the
+shape, and `max(+0, -0)` is `+0`, which is also the maximum among zeros.
+So the halving, a left fold and the sum tree's own shape all return the
+same bits. Hence no tree contract, a multi-tile fold with nothing to get
+right twice, and a hardware maxall - if one is ever built behind
+`CAPS2[7]` - that cannot move an answer. It works on all four staged
+pairs today with no new silicon.
+
+`host/tests/reduce_check.py` compares the library's halving against the
+model's left fold, which TESTS that associativity rather than assuming
+it. The empty array is `-infinity`, chosen (754 says nothing about an
+empty reduction) so that folding an empty range into a non-empty one is a
+no-op; `+0`, the additive identity the other four use, would win against
+every negative element.
+
+### The census moved, and this is the first assignment that shrank it
+
+**1,071,635 -> 1,068,915.** Opcode 31 was one of three unassigned codes
+whose *defined* answer the elementwise sets score, and an assigned opcode
+is not a reserved one - so its 4,000 cases left (200 a set, 20 sets) and
+1,280 published maxall reduction cases arrived. Net -2,720.
+
+This is the FIFTH assignment to shed a member of that list - 24 became
+`CFT_SUM`, 26 `RECIP_SEED`, 28 `CFT_SUMSQ`, 30 `CFT_IMUL` - and the first
+to shrink the census, for a reason worth recording: **IMUL is
+elementwise, so its 200 cases a set simply changed name** from
+`reserved30` to `imul`. A reduction has no elementwise case to rename.
+
+Docs that RECORD a past run still say 1,071,635 and are right to: that
+run replayed that many. 15 live claims moved across 8 files; 51
+historical measurements were left alone, including all 35 in this file.
+A reader will see both numbers, and that is correct. One
+misclassification of mine was caught mid-way: `docs/EMBEDDED.md` holds
+both kinds, and its "what has been checked" numbers are records of *this*
+commit's gate run - so they move only because that gate was re-run.
+
+### Five gates caught this, every one by design
+
+| gate | what it said |
+|---|---|
+| `python/tests/test_reduce.py` | `REDUCE_OPS == (24, 25, 28, 29)` - pins the wire numbers, so an INSERTION cannot pass |
+| `host/tests/api_test.c` | opcode 31 must name "reserved", and `cft_supports(31)` must answer no |
+| the same file's 256-opcode sweep | `cft_run` must REFUSE a reduction; maxall was missing from the skip list |
+| `host/tests/reduce_check.py` | its own op-31 unassigned check |
+| `python/cft_golden/vectors.py` | the unassigned list, whose comment already read *"this list has now shed a member FOUR times"* |
+
+The sixth was `host/src/conformance.c`, and it is the one that matters
+most: the replayer REFUSED the regenerated sets -
+`fp32-reduce.jsonl:257: unknown reduction name` - rather than skipping a
+function it did not know. A set naming an operation the replayer cannot
+score is exactly what must not pass silently.
+
+### A defect in the replayer, found by appending to it
+
+`reduce_fn_scaled(fn)` was `return fn >= RD_PROD;`. Appending
+`RD_MAXALL = 7` therefore made maxall a *scaled product* by default, and
+it would have been asked for a scale factor it does not have. Now named
+rather than ranged. A range test over an enum someone will append to is a
+defect waiting for its next member, and maxall was the next member.
+
+Two transcribed array bounds went the same way and are now derived from
+`sizeof`: `cft_op_name`'s `names[31]`, which silently DISCARDED the
+32nd initialiser so `cft_op_name(31)` kept answering "reserved", and
+`reduce_fn_from_name`'s `names[7]` with a matching `i < 7`.
+
+And one conservative default had to be taught: `cft_sf_op_operands`
+answers `1u | 2u` for an assigned opcode it does not know, so assigning
+31 without naming it there refused every maxall call whose `b` is NULL -
+which is all of them. That was 800 of the first run's 804 failures.
+
+### Three stale-artifact errors, all mine
+
+Worth the space because they are one mistake wearing three hats, and the
+gates were right every time:
+
+1. Built `libcft.a`, tested the **shared** library. The first run's
+   `maxall n=0: status 1` was a stale DLL, not a defect.
+2. Piped a build to `/dev/null` and reported `rc=0` as clean. The
+   compiler had printed
+   `src/device.c:336: warning: excess elements in array initializer`,
+   naming the `names[31]` bug directly.
+3. Ran a stale `api-test.exe` and reported "all contract checks passed".
+   `all:` is `libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)` - **api-test is in
+   `$(TESTS)`**, so `make all` never built it. `make test` built the
+   current one and it failed 4.
+
+`reduce_check.py` prints only its first five failures (`if self.failed
+<= 5`) while counting all of them, so 804 failures showed as five lines.
+Reading the summary rather than the visible output is what kept the count
+honest.
+
+### Measured
+
+| gate | result |
+|---|---|
+| `make -C host reducetest` (`--trials 1500`) | **13,516 reductions across 4 formats, all seven of 9.4 plus maxall, 0 failures** |
+| `cft-selftest vectors/out` | **168 sets, 1,068,915 cases, all matching** |
+| `make -C host test` | api-test, the canonical partition, the full replay, and C/ctypes to the same bits |
+| `api-test` | all contract checks, from a freshly built binary |
+| `make golden` | 2172 passed, 5 skipped |
+| `sync.py --check` | 28 vendored files, all identical to `host/` |
+| build | `-std=c99 -Wall -Wextra -Wpedantic -Wshadow`, zero warnings |
+
+No RTL changed, no ABI step, and no capability bit: a caller asks
+`cft_supports(CFT_MAXALL, fmt)`, which answers through the **min/max**
+group because that is what the composition runs on.
+
+## 2026-09-12 - a stride-0 operand, the MODE guard it needed, and a contract I misread
+
+`cft_run_ex` with `cft_elem_args.scalar_mask`: one of `a`, `b` or `c` may
+be a single element that applies to the whole run. cft-rebound's fourth
+ask (its `docs/HARDWARE.md`), worth about 300 staged vectors a step to
+that workload; `docs/HOSTAPI.md` had it recorded as an ask since the demos
+found the same cost from the other side - 6,144 JavaScript stores a pixel
+iteration, and in C the same loop.
+
+On a tile it is MODE[18:16] and **one beat read instead of n**, behind
+CAPS2[7]. No register grew, so VERSION stays 0x800 - the rule
+`docs/ARCHITECTURE.md` states for the capacity fields: values inside a
+register that already exists do not move it.
+
+### The guard is the substance, and it is a safety fix rather than a feature
+
+**Nothing checked MODE[31:16].** Grepped `cft_csr.sv`, `cft_krnl.sv` and
+`cft_engine_stream.sv`: no reserved-bit guard, and the register table said
+only "[31:16] reserved, write 0". So a stride-0 run on a tile that
+predates the feature would have been IGNORED, and the engine would have
+read n elements from a one-element buffer.
+
+That is not a wrong answer, it is an out-of-bounds read of n-1 elements,
+and it is **measured rather than argued**: the host-side control of that
+shape - the scalar flag disconnected, the buffer still one element -
+**segfaults**, reading ~1,150 bytes past a 32-byte allocation at fp256.
+
+So `run_ok` now refuses any bit of MODE[31:19], and any of MODE[18:16] a
+build does not carry, the way it already refuses an absent precision:
+STATUS[3], nothing starts, no memory touched, FLAGS left alone because a
+refusal is not a run. The same reasoning `docs/ARCHITECTURE.md` records
+for REGS32 and KX9 - "an OLD bitstream has no rule that would refuse the
+new form" - which is why each of the three bits needs a capability bit and
+why libcft refuses by name on a device without CAPS2[7].
+
+The guard cannot teach the four staged pairs to refuse. It makes every
+MODE bit added after it fail safe, which is the most a guard can do.
+
+### What made it small, and the one trap
+
+The engine already wanted it. `rem = beats_total - issued_s` per stream,
+so a scalar stream's budget is one beat and its address never advances.
+The three FIFOs share `abc_rd`, so gating that per stream leaves a scalar
+stream NEVER popped - its `rd_data` holds beat 0 for the whole run, which
+is what a broadcast wants. And `ex_valid` requires all three FIFOs
+non-empty, which an unpopped FIFO holding one beat satisfies forever, so a
+one-beat stream cannot hang the run. Nothing had to change for that.
+
+**A BEAT IS NOT AN ELEMENT**, which is the trap. At fp32 one beat holds
+eight lanes, so reading the base beat repeatedly would give lane *i*
+element *i*. `bcast_beat` replicates element 0 across the beat per
+precision - the same construction `one_beat` already uses for the
+reduction's `fma(x, 1.0, y)`. fp256 is one lane a beat, where the copy is
+the identity, and that is the rung a per-lane loop gets wrong.
+
+Two more places the partitioning had to learn it. `cftx_run` offsets every
+operand by `s.first_elem` per tile, so tile 2 would have read element
+`first_elem` - a plausible number, therefore the worst kind of wrong - and
+`bind_role`/`buf_sync_in` ask `buf_find` for an EXACT byte count, so
+`n * esz` would have failed to match a resident one-element buffer and
+staged it silently instead.
+
+The remote backend is not given the mask at all: its frames chunk k
+elements, so element 0 would have to ride every chunk. The value is
+expanded locally and an ordinary run is sent - the same bits, the same
+wire traffic as before, `docs/REMOTE.md` untouched. The CALL is portable
+and the SAVING is not, which is why `cft_caps` reports
+`CFT_SEQ_FEAT_SCALAR` rather than this being silent.
+
+### The contract I misread, and it cost half an hour
+
+I wrote the tb case at `n = 37` - "odd, not a beat multiple, so the tail
+path runs" - and it failed: elements 0..31 correct, 32..36 still holding
+the `0xAA` fill. I read that as the elementwise engine dropping a partial
+final beat, and noticed that **all 43 existing elementwise cases in
+`tb/test_krnl.py` use an n that is an exact multiple of the beat's lane
+count**, which looked like a coverage hole that had hidden a real defect.
+
+It is neither. `host/src/slice.h:22` says it outright: "each slice covers
+a whole number of 256-bit beats, because the engine's beat count is
+`n >> (LANE_SH - prec)` and **a partial beat would be truncated away
+rather than rounded up**". `cft_plan_slices` rounds up and hands the tile
+`padded`; the library copies back `n`. A partial beat is something no
+`cft_run` can produce, and the bench drives the CSR directly - so 37 was
+outside the contract, the engine was right, and those 43 cases are exact
+BECAUSE that is the contract.
+
+Proven rather than assumed: a plain `run_op(FP32, OP_FMA, 37)` with no
+scalar flag anywhere fails identically, `5/37 elements differ`. The case
+now uses 40/8, 36/4, 38/2 and 37/1 - a whole number of beats at each rung,
+with the comment saying why, so the next person driving the CSR does not
+repeat it.
+
+### Measured
+
+| gate | result |
+|---|---|
+| `tb` scalar case, all four formats | **bit-exact against an array of copies**, flags matched per case (0b11000, 0b10100, 0b10101, 0b00001 - real and differing exception sets, not trivially clean) |
+| the poison | the scalar buffer is ONE element followed by `0x5A`; a tile that streamed n would compute from it |
+| the flag-clear control | the same shape with full arrays still correct, so a path that quietly streamed could not pass both halves |
+| `make krnl` | TESTS=2 PASS=2 FAIL=0 |
+| `test_seq_core` / `test_krnl_seq` | 18/18 and 1/1 |
+| `yosys-lint` | rc=0, zero latches |
+| host probe, all four formats | bit-identical, flags included |
+| host refusals | a reserved mask bit, a NULL scalar operand, an unrecognised `struct_size` |
+| the host negative control | **segfault** - the out-of-bounds read, demonstrated |
+| `sync.py --check` | 28 vendored files identical |
+
+`CAPS2[7]` is published from the same localparam the CSR's refusal reads,
+so a tile cannot advertise a bit it would turn away - the failure CAPS[13]
+has for `dot`, where the group bit is set and the opcode answers qNaN.
+
+And the gate that caught the bit arriving: `tb/test_krnl.py`'s
+`check_caps2` pins the WHOLE word, so `CAPS2 is 0x000000f8, want
+0x00000078` was its second catch of the day after CAPS2[6]. Its
+expectation is now DERIVED from the RTL - a new `_localparam_bit` reads
+`FEAT_SCALAR` out of `cft_krnl.sv` - so a trimmed build that clears the
+flag makes the test follow rather than fail.
+
+### ABI 0.12, and a gate I said was not there
+
+`CFT_ABI_VERSION_MINOR` 11 -> 12, with the WebAssembly module rebuilt in
+the same step - the division of labour `bindings/wasm/README.md` states at
+0.3 and again at 0.7. The order is not arbitrary: `verify.mjs` compares
+the macro against the module's own `cftw_abi_version()`, and the module
+gets that by COMPILING the header, so the macro moves first and the build
+follows.
+
+**The correction.** Asked whether the module could wait until the
+bitstreams were building, I checked `verify.mjs`'s ABI identity test and
+its `NEEDED` export list, found neither would object, and said no gate
+blocked that order. Both of those were true and both were beside the
+point: `verify.mjs` also REPLAYS `vectors/out` through the module, and a
+module that predates opcode 31 has no wrapper for maxall. It failed
+**128 of 148 sets clean**, all twenty reduce sets (four formats x five
+attributes), each at line 257 - its first maxall case - with
+`unknown reduction name`.
+
+Which is the same refusal that caught the host's `conformance.c` earlier
+the same day, in the vendored copy of that file compiled to wasm. Twice in
+one day the replayer refused a set naming a function it could not score,
+and the second time I had already been told what the mechanism was.
+
+So the gate exists, it was red, and the module rebuild is what makes the
+bump legal rather than a formality. Both additions are ADDITIVE - code
+written against 0.11 gets the same bits from the same calls - which is why
+a stale module was wrong about the version and about twenty sets, and
+about nothing else.

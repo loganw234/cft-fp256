@@ -125,6 +125,22 @@ extern const cft_fmt_desc cft_sf_formats[4];
 #define CFT_SF_SUMSQ    28
 #define CFT_SF_SUMABS   29
 
+/* A maximum over the array, appended at the next free opcode above
+ * IMUL's 30. The first reduction since CFT_SF_SUM that is NOT a
+ * composition: sumSquare and sumAbs reach the accumulator as a sum, and
+ * a maximum cannot be written as one.
+ *
+ * It is also the only reduction whose SHAPE is free. 754-2019 9.6
+ * maximum is exactly associative and commutative including its flags -
+ * any NaN gives a canonical quiet NaN rather than a propagated payload,
+ * invalid is raised exactly when some operand is signalling and every
+ * element is an operand of one comparison whatever the shape, and
+ * max(+0, -0) is +0 which is also the maximum among zeros. So no tree
+ * contract exists for it, four tiles fold their partials with a
+ * maximum, and the rounding attribute is accepted and unused because a
+ * maximum selects an operand instead of computing one. */
+#define CFT_SF_MAXALL   31
+
 /* The integer group's one arithmetic member, appended at the first free
  * opcode above the composed reductions: the LOW 32 BITS of the product
  * of the two operands' low 32 bits, zero-extended to the format width.

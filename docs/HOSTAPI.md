@@ -213,6 +213,19 @@ mode, so it says so and stops.
 
 ### Device-resident buffers, and what a port must do to get the rate
 
+**Which buffers can be resident.** The operand-shaped ones: a `cft_run`'s
+three inputs and its output, and a program run's three streams, its
+deposit window and - since 2026-09-12 - its two scratch blocks. Those all
+grow with `n`, which is what makes a device copy worth keeping.
+
+The rest of a program run is staged on every call, and the reasons are
+structural rather than unfinished: the image and the constant bank do not
+grow with `n` at all, and the per-lane deposit counts are four bytes an
+element whatever the format. `cft_buffer_get_info` says what actually
+happened to one buffer, and its `staged_why` says why, when a number
+looks wrong.
+
+
 The measured gap is the whole reason this exists. On the card, through
 `cft_run` staging every operand on every call, one tile does **141.8 /
 81.4 / 40.3 / 20.0** M fma elements a second at fp32/64/128/256. With
@@ -912,6 +925,63 @@ a device backend is the host reading the whole input array.
 the arithmetic group and `CFT_SUMABS` the sign group, so asking about
 the opcode itself is the right question and a device missing one says
 `CFT_ERR_UNSUPPORTED` before the sequence starts.
+
+### maxall (2026-09-12), the third composition and the only one with no tree
+
+`CFT_MAXALL` (31) is a maximum over the array - 754-2019 9.6 `maximum`,
+reduced. It is **not** one of 9.4's seven; it exists because a real
+workload asked for it (`cft-rebound/docs/HARDWARE.md`: the convergence
+test of an N-body integrator reads `3N x E` deposits per corrector pass,
+and a maximum on the device keeps it there).
+
+It is a composition like the two above, but not the same kind. Those are
+the sum tree over a different leaf; a maximum cannot be written as a sum
+at all. What makes it cheap is the opposite property:
+
+    CFT_MAXALL  ->  ceil(log2 n) x cft_run(CFT_MAX, first half, second half)
+
+**It has no tree contract, and that is the whole design.** 754-2019
+`maximum` is exactly associative and commutative *including its flags*:
+any NaN yields a canonical quiet NaN rather than a propagated payload,
+`invalid` is raised exactly when some operand is signalling and every
+element is an operand of one comparison whatever the shape, and
+`max(+0, -0)` is `+0`, which is also the maximum among zeros. So every
+shape agrees. Three consequences follow, and they are the reason this
+reduction is simpler than the other four rather than harder:
+
+- the halving above, a left fold, and the sum tree's own shape all
+  return the same bits, so none of them had to be named the contract;
+- four tiles fold their partials with a maximum, with nothing to get
+  right twice - the failure mode docs/DETERMINISM.md describes for a
+  sum's fold cannot arise;
+- a hardware maxall added later, behind a capability bit, would return
+  these same bits. The composition is therefore a complete answer and
+  not a staging post.
+
+The published sets score it: 1,280 cases across the reduction families,
+and `host/tests/reduce_check.py` compares the library's halving against
+the model's left fold, which TESTS the associativity above instead of
+assuming it.
+
+Two edges, both inherited and both already true of `CFT_SUM`: a single
+element is returned verbatim with no flags, so maxall of one signalling
+NaN is that pattern rather than a quiet one; and the rounding attribute
+is accepted and unused, because a maximum selects an operand instead of
+computing one.
+
+The empty array is **-infinity** - the identity that loses to every
+other value. 754 says nothing about an empty reduction, so this is
+chosen, and chosen so that folding an empty range into a non-empty one
+cannot change it. A `+0` there, the additive identity the other four
+use, would win against every negative element.
+
+`cft_supports()` answers for it through the **min/max** group, since
+that is what it composes from. And `cft_run` refuses it, as it refuses
+every reduction: opcode 31 reaching a tile would be decoded as
+elementwise - `cfg_is_reduce` is `(cfg_op == 8'd24)` - and would write
+`n` elements where the caller sized one, which is memory corruption
+rather than a wrong number. The composition therefore sits above the
+backend dispatch, and no tile ever sees the opcode.
 
 **Three are named host entry points**, because they return a PAIR:
 
@@ -1699,13 +1769,29 @@ built; docs/SEQUENCER.md holds the program-model ones.
    certifies exactness per element with a witness FMA because the
    union cannot say which element raised inexact; the ask would remove
    the witness and the cost of computing it.
-2. **A scalar (stride-0) operand for `cft_run`.** Every workload that
-   applies one value to a batch - the zoom's reference point against
-   every pixel, the Mersenne carry base, an interval coefficient - fills
-   an array with copies first; in the demos that is 6,144 JavaScript
-   stores per pixel iteration, and in C it is the same loop. A stride-0
-   operand is a contract shape, not a backend detail, so it would need
-   the model and the tile to agree on it first.
+2. ~~**A scalar (stride-0) operand for `cft_run`.**~~ **DONE,
+   2026-09-12**, as `cft_run_ex` with `cft_elem_args.scalar_mask` -
+   MODE[18:16] on the tile, behind CAPS2[7]. Every workload that applies
+   one value to a batch - the zoom's reference point against every pixel,
+   the Mersenne carry base, an interval coefficient - filled an array with
+   copies first; in the demos that was 6,144 JavaScript stores per pixel
+   iteration, and in C the same loop.
+
+   This entry said it "would need the model and the tile to agree on it
+   first", and that turned out to be half right. The TILE needed real work
+   - one beat read instead of n, and element 0 replicated across the
+   beat's lanes, since a beat is eight elements at fp32 and handing it to
+   the array unchanged would give lane *i* element *i*. The MODEL needed
+   nothing: a scalar operand computes exactly what an array of copies
+   computes, the same `op()` on the same values, so there is no new
+   rounding rule to define. What the contract needed was a sentence, and
+   it is in cft.h beside the struct.
+
+   The saving is NOT portable and the call is. On a tile the value crosses
+   once; the software backend indexes element 0 (free, and saves nothing);
+   the remote backend expands locally, because its frames chunk and
+   element 0 would have to ride every chunk. `cft_caps` reports
+   `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it has.
 3. **The program API in the wasm surface.** `cftw_*` carries every
    library operation but not `cft_program_load/run`, so the demos run
    the tools' loop engines; the program engines were measured native

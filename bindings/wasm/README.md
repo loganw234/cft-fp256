@@ -47,7 +47,7 @@ four formats, all five rounding attributes and every opcode class,
 the divide/sqrt seeds 26/27 and the unassigned `reserved15/31/255`
 included - that list lost 28 when ABI 0.6 assigned it to `sumsq` and
 30 when `imul` took it on 2026-09-07. For
-the full 1,071,635-case claim, generate the sets in a
+the full 1,068,915-case claim, generate the sets in a
 checkout (`make vectors`) and drag the `vectors/out/*.jsonl` files
 onto the page - same code path, whole files. Verified at build time:
 the full 20-set drop replays with zero mismatches, from both
@@ -556,7 +556,7 @@ what a rerun on the same sources should do.
   four magnitude sets of 9.6 (**9,728**) and eighty formatOf sets of
   5.4.1 (**176,250**), one per ordered pair of formats per attribute.
   `make vectors` writes all 168; the drop zone accepts all 168. (That
-  count is larger than the **1,071,635** the page quotes for
+  count is larger than the **1,068,915** the page quotes for
   `make vectors`, and the difference is entirely the opcode sets:
   `verify/run.sh`'s own `vectors` stage takes the generator's default
   directed/random/simple pools rather than `make vectors`'s

@@ -88,7 +88,7 @@ same library the card runs, compiled small.
 | `host/` | **libcft**: about 22,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
-| `vectors/` | The conformance sets: 1,071,635 cases, deterministic and seeded. |
+| `vectors/` | The conformance sets: 1,068,915 cases, deterministic and seeded. |
 
 Each of these has a document in `docs/` carrying the detail, the dates
 and the measurements.

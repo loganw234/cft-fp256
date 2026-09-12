@@ -108,6 +108,9 @@ static int op_group_bit(int op)
                                            * and CAPS[28] must ALSO be set
                                            * - checked beside the group */
     if (op >= 24 && op <= 25) return 5;   /* reduction */
+    if (op == 31)             return 5;   /* reduction: maxall
+                                           * (2026-09-12), composed - see
+                                           * reduce_helper_group */
     if (op >= 26 && op <= 27) return 6;   /* divide/sqrt (the seeds) */
     /* sumSquare and sumAbs are the reduction group too, although no
      * accumulator streams them: they are issued as a dot (or an abs
@@ -128,6 +131,7 @@ static int reduce_helper_group(int op)
 {
     if (op == 28) return 0;               /* sumsq  -> mul  */
     if (op == 29) return 1;               /* sumabs -> abs  */
+    if (op == 31) return 2;               /* maxall -> min/max */
     return -1;
 }
 
@@ -241,7 +245,9 @@ static void buf_sync_in(cft_device *dev, const void *p, size_t bytes)
 static void bind_clear(cft_bindings *bd)
 {
     int i;
-    for (i = 0; i < 4; i++) {
+    /* CFT_ROLE_COUNT, never a literal: a role this loop does not reach
+     * is a pointer a backend would read as a live binding. */
+    for (i = 0; i < CFT_ROLE_COUNT; i++) {
         bd->buf[i] = NULL;
         bd->off[i] = 0;
     }
@@ -307,7 +313,13 @@ CFT_API const char *cft_format_name(cft_format f)
 
 CFT_API const char *cft_op_name(cft_op op)
 {
-    static const char *const names[31] = {
+    /* UNSIZED on purpose, since 2026-09-12. It was names[31], and
+     * appending maxall's string made a 32nd initialiser that the
+     * compiler DISCARDED with a warning - so cft_op_name(31) kept
+     * answering "reserved" and the opcode-assignment gate below
+     * caught it. The bound on the lookup is sizeof names, so an
+     * unsized array cannot disagree with itself. */
+    static const char *const names[] = {
         "fma", "add", "sub", "mul",
         "abs", "neg", "copysign",
         "min", "max", "minnum", "maxnum",
@@ -326,7 +338,8 @@ CFT_API const char *cft_op_name(cft_op op)
          * with the canonical quiet NaN must be refused rather than
          * replayed against a multiply, and it is this string that
          * makes the refusal fire. */
-        "imul"
+        "imul",
+        "maxall"
     };
     if ((int)op >= 0 && (int)op < (int)(sizeof names / sizeof names[0]) &&
         names[(int)op])
@@ -511,10 +524,20 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
         cft_bindings bd;
         size_t esz = cft_format_size((cft_format)fmt);
         bind_clear(&bd);
-        /* The three streams and the deposit window. `counts` is four
-         * bytes an element whatever the format and the image and bank
-         * do not grow with n at all, so none of them is worth a
-         * device copy - backend.h says so beside the signature. */
+        /* The three streams, the deposit window, and the two scratch
+         * blocks. `counts` is four bytes an element whatever the format
+         * and the image and bank do not grow with n at all, so none of
+         * THOSE is worth a device copy - backend.h says so beside the
+         * signature.
+         *
+         * The scratch blocks are not in that category and used to be
+         * filed with it. They are n_scratch_in slots for each of n
+         * lanes, lane-major and dense (docs/SEQUENCER.md R5) - the same
+         * shape as the deposit window's n * max_deposits, and they grow
+         * with n for the same reason. An integrator's per-step state
+         * lives there and is rewritten every corrector pass, so staging
+         * it put a round trip in the innermost loop
+         * (cft-rebound/docs/HARDWARE.md, the first ask). */
         buf_sync_in(dev, a, n * esz);
         buf_sync_in(dev, b, n * esz);
         buf_sync_in(dev, c, n * esz);
@@ -524,6 +547,17 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
         if (max_deposits)
             bind_role(dev, &bd, CFT_ROLE_D, deposits,
                       n * max_deposits * esz);
+        if (io && io->scratch_in_bytes) {
+            /* Read by the tile, so it is brought home first, exactly as
+             * a, b and c are. scratch_out needs none of this: it is
+             * written and not read, which is why `d` needs none. */
+            buf_sync_in(dev, io->scratch_in, io->scratch_in_bytes);
+            bind_role(dev, &bd, CFT_ROLE_SI, io->scratch_in,
+                      io->scratch_in_bytes);
+        }
+        if (io && io->scratch_out_bytes)
+            bind_role(dev, &bd, CFT_ROLE_SO, io->scratch_out,
+                      io->scratch_out_bytes);
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,
@@ -774,7 +808,14 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
  * The core call
  * --------------------------------------------------------------- */
 
-CFT_API cft_status cft_run(cft_device *dev,
+/* The elementwise run, with the scalar mask. cft_run and cft_run_ex are
+ * both one line over this; the body stayed where it was rather than being
+ * moved into a new entry point, because the diff of a move is unreadable
+ * and this is the function every backend dispatch lives in.
+ *
+ * scalar_mask: bit 0 a, bit 1 b, bit 2 c. A set bit makes that operand
+ * one element that applies to the whole run. */
+static cft_status run_impl(cft_device *dev,
                            cft_op      op,
                            cft_format  fmt,
                            cft_round   rnd,
@@ -783,6 +824,7 @@ CFT_API cft_status cft_run(cft_device *dev,
                            const void *c,
                            void       *d,
                            size_t      n,
+                           uint32_t    scalar_mask,
                            uint32_t   *flags_out,
                            uint32_t   *bus_out)
 {
@@ -868,16 +910,32 @@ CFT_API cft_status cft_run(cft_device *dev,
          * in cft.h costs a caller who ignores it time and not bits.
          * `d` needs none of this - it is written, not read, and the
          * backend flushes a device copy it is about to repurpose. */
-        buf_sync_in(dev, a, n * esz);
-        buf_sync_in(dev, b, n * esz);
-        buf_sync_in(dev, c, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_B, b, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_C, c, n * esz);
+        /* A scalar operand's buffer is ONE element everywhere it is
+         * measured: buf_sync_in brings home exactly what the caller
+         * owns, and bind_role asks buf_find for an EXACT byte count, so
+         * n * esz would fail to match a resident one-element buffer and
+         * the run would quietly stage it instead - correct, slower, and
+         * invisible because nothing fails. */
+        /* a_bytes, not ab: `bb` shadowed the cft_bn temporaries this
+         * function already declares, and -Wshadow said so - on the
+         * LINUX box, because this whole block is behind
+         * #ifdef CFT_ENABLE_XRT and XRT is off by default, so no build
+         * on the Windows host compiles it at all. */
+        const size_t a_bytes = (scalar_mask & 1u) ? esz : n * esz;
+        const size_t b_bytes = (scalar_mask & 2u) ? esz : n * esz;
+        const size_t c_bytes = (scalar_mask & 4u) ? esz : n * esz;
+
+        buf_sync_in(dev, a, a_bytes);
+        buf_sync_in(dev, b, b_bytes);
+        buf_sync_in(dev, c, c_bytes);
+        bind_role(dev, &bd, CFT_ROLE_A, a, a_bytes);
+        bind_role(dev, &bd, CFT_ROLE_B, b, b_bytes);
+        bind_role(dev, &bd, CFT_ROLE_C, c, c_bytes);
         bind_role(dev, &bd, CFT_ROLE_D, d, n * esz);
         backend_call();
         st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
                                              (int)rnd, a, b, c, d, n,
+                                             scalar_mask,
                                              &bd, &fl, bus_out);
         if (st == CFT_OK)
             cft_flags_emit(dev, fl, flags_out);
@@ -892,10 +950,41 @@ CFT_API cft_status cft_run(cft_device *dev,
     if (dev->backend == CFT_BACKEND_REMOTE) {
         uint32_t fl = 0;
         cft_status st;
+        /* A scalar operand is EXPANDED here rather than carried on the
+         * wire. The RUN request chunks - k elements a frame - so element
+         * 0 would have to ride every chunk, and docs/REMOTE.md would grow
+         * a field for a saving a socket does not have: the whole array
+         * crosses either way. Expanding keeps the protocol exactly as it
+         * is and the answer exactly what the contract says, which are the
+         * two things that have to be true.
+         *
+         * Not a fallback to be ashamed of: the SAVING was never portable
+         * (cft_caps says so through CFT_SEQ_FEAT_SCALAR), only the CALL
+         * is. */
+        void *exp[3] = {NULL, NULL, NULL};
+        const void *opnd[3] = {a, b, c};
+        if (scalar_mask) {
+            int r;
+            for (r = 0; r < 3; r++) {
+                size_t k;
+                if (!((scalar_mask >> r) & 1u) || !opnd[r])
+                    continue;
+                exp[r] = malloc(n * esz);
+                if (!exp[r]) {
+                    while (r-- > 0) free(exp[r]);
+                    return CFT_ERR_OUT_OF_MEMORY;
+                }
+                for (k = 0; k < n; k++)
+                    memcpy((uint8_t *)exp[r] + k * esz, opnd[r], esz);
+                opnd[r] = exp[r];
+            }
+        }
         backend_call();
         st = (cft_status)cftr_run(dev->hw, (int)op, (int)fmt,
-                                             (int)rnd, a, b, c, d, n,
+                                             (int)rnd, opnd[0], opnd[1],
+                                             opnd[2], d, n,
                                              &fl, bus_out);
+        free(exp[2]); free(exp[1]); free(exp[0]);
         if (st == CFT_OK)
             cft_flags_emit(dev, fl, flags_out);
         return st;
@@ -912,20 +1001,93 @@ CFT_API cft_status cft_run(cft_device *dev,
     cft_bn_zero(&bb);
     cft_bn_zero(&bc);
 
+    /* A scalar operand is element 0 for every element, which on this
+     * backend is an index and nothing more - so the software answer is
+     * the contract's by construction rather than by testing: it is the
+     * same op() on the same values a caller would have got from an array
+     * of copies. */
+    {
+        const size_t sa = (scalar_mask & 1u) ? 0u : 1u;
+        const size_t sb = (scalar_mask & 2u) ? 0u : 1u;
+        const size_t sc = (scalar_mask & 4u) ? 0u : 1u;
+
     for (i = 0; i < n; i++) {
         uint32_t fl = 0;
         /* Load before storing, so d may alias a, b or c. */
-        if (pa) cft_bn_load(&ba, pa + i * esz, (int)esz);
-        if (pb) cft_bn_load(&bb, pb + i * esz, (int)esz);
-        if (pc) cft_bn_load(&bc, pc + i * esz, (int)esz);
+        if (pa) cft_bn_load(&ba, pa + sa * i * esz, (int)esz);
+        if (pb) cft_bn_load(&bb, pb + sb * i * esz, (int)esz);
+        if (pc) cft_bn_load(&bc, pc + sc * i * esz, (int)esz);
         if (cft_sf_compute(f, (int)op, (int)rnd, &ba, &bb, &bc, &bo, &fl))
             return CFT_ERR_INTERNAL;
         acc |= fl;
         cft_bn_store(&bo, pd + i * esz, (int)esz);
     }
+    }
 
     cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
+}
+
+CFT_API cft_status cft_run(cft_device *dev,
+                           cft_op      op,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           const void *c,
+                           void       *d,
+                           size_t      n,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out)
+{
+    return run_impl(dev, op, fmt, rnd, a, b, c, d, n, 0u,
+                    flags_out, bus_out);
+}
+
+CFT_API cft_status cft_run_ex(cft_device *dev,
+                              cft_op      op,
+                              cft_format  fmt,
+                              cft_round   rnd,
+                              const cft_elem_args *args)
+{
+    if (!dev || !args)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* An INPUT struct, so an unrecognised size is REFUSED rather than
+     * truncated - the same reversal cft_run_args documents. A newer
+     * caller's scalar_mask silently ignored is exactly the run that
+     * would return an array's worth of the wrong answer. */
+    if (args->struct_size != sizeof(cft_elem_args))
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* Bits above the three operands are reserved, and refused rather
+     * than masked off: a caller setting bit 3 means something this
+     * library does not implement. */
+    if (args->scalar_mask & ~7u)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* An operand that is not supplied cannot be scalar. Caught here
+     * because a NULL pointer with its bit set would otherwise read
+     * element 0 of nothing. */
+    if (((args->scalar_mask & 1u) && !args->a) ||
+        ((args->scalar_mask & 2u) && !args->b) ||
+        ((args->scalar_mask & 4u) && !args->c))
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* A scalar operand on a device that cannot do it is refused BY NAME,
+     * which is the whole reason CAPS2[7] exists. The alternative - run it
+     * anyway and let the tile ignore MODE[18:16] - reads n elements from
+     * a one-element buffer, and that is an out-of-bounds read rather than
+     * a wrong number. The software and remote backends always carry it:
+     * one indexes 0 and the other expands locally. */
+    if (args->scalar_mask && dev->backend == CFT_BACKEND_XRT &&
+        !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
+        cft_set_error(
+            "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
+            "does not publish (CAPS2[7]); ask cft_get_caps before issuing "
+            "one, or pass the value as an array of copies - which is what "
+            "this run would otherwise have read past the end of");
+        return CFT_ERR_UNSUPPORTED;
+    }
+    return run_impl(dev, op, fmt, rnd, args->a, args->b, args->c, args->d,
+                    args->n, args->scalar_mask,
+                    args->flags_out, args->bus_out);
 }
 
 /* ---------------------------------------------------------------
@@ -1048,13 +1210,23 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     f   = &cft_sf_formats[(int)fmt];
     esz = (size_t)f->width / 8;
 
-    /* n == 0 is +0.0 and raises nothing: the additive identity, and
-     * the only result here that is not a function of any input. It is
-     * handled before the operand check because a sum of nothing does
-     * not need anything to sum. */
+    /* n == 0 raises nothing and is the op's IDENTITY - the only result
+     * here that is not a function of any input. It is handled before the
+     * operand check because a reduction of nothing needs nothing to
+     * reduce.
+     *
+     * +0 for the four sum reductions, the additive identity. -infinity
+     * for maxall, the value that loses to every other: 754 says nothing
+     * about an empty reduction, so this is chosen, and chosen so that
+     * folding an empty range into a non-empty one is a no-op. A +0 here
+     * would WIN against every negative element, which is the failure
+     * this branch exists to prevent. */
     if (n == 0) {
         cft_bn z;
-        cft_bn_zero(&z);
+        if (op == CFT_MAXALL)
+            cft_sf_inf(f, 1, &z);
+        else
+            cft_bn_zero(&z);
         cft_bn_store(&z, (uint8_t *)d, (int)esz);
         cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
@@ -1091,6 +1263,82 @@ CFT_API cft_status cft_reduce(cft_device *dev,
      *
      * Recursion is one level deep and cannot be more: the calls below
      * name CFT_DOT and CFT_SUM, which take the tree path directly. */
+    /* maxall: halving with the elementwise maximum.
+     *
+     * The fifth composed reduction, and the first whose composition is
+     * not one pass plus the sum tree. No tile streams a maximum and none
+     * needs to - but unlike sumSquare and sumAbs, opcode 31 must NEVER
+     * be handed to a tile as a reduction: `cfg_is_reduce` is
+     * `(cfg_op == 8'd24)`, so a tile would decode 31 as elementwise and
+     * write n elements where a reduction's caller sized `d` for one.
+     * That is memory corruption, not a wrong answer, and it is why this
+     * block sits above the device dispatch rather than beside it.
+     *
+     * Halving is allowed to BE the shape because 754-2019 maximum is
+     * exactly associative and commutative, flags included: any NaN gives
+     * a canonical quiet NaN rather than a propagated payload, invalid is
+     * raised exactly when some operand is signalling and every element is
+     * an operand of one comparison whatever the shape, and max(+0, -0) is
+     * +0 which is also the maximum among zeros. So these bits are the
+     * software tree's bits, and a hardware maxall added later behind a
+     * capability bit would return them too - which is what makes this a
+     * complete answer rather than a staging post.
+     *
+     * ceil(log2 n) device passes against the ~2n width-one calls the
+     * first caller issues today (cft-rebound/docs/HARDWARE.md).
+     */
+    if (op == CFT_MAXALL) {
+        uint32_t cf = 0;
+        cft_status st = CFT_OK;
+        const int muted = cft_flags_mute(dev, 1);
+        uint8_t *buf[2] = {NULL, NULL};
+        const void *src = a;
+        size_t m = n, which = 0;
+
+        /* n == 0 never arrives: the identity is handled at the one
+         * n == 0 site above, beside every other reduction's. */
+        if (n > 1) {
+            /* ceil(n/2) + 1 covers every pass: the odd element is
+             * carried rather than dropped. */
+            size_t cap = (n / 2 + 2) * esz;
+            buf[0] = (uint8_t *)malloc(cap);
+            buf[1] = (uint8_t *)malloc(cap);
+            if (!buf[0] || !buf[1]) {
+                free(buf[1]); free(buf[0]);
+                (void)cft_flags_mute(dev, muted);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+        }
+        while (m > 1 && st == CFT_OK) {
+            const size_t h   = m / 2;          /* pairs this pass */
+            const int    odd = (m & 1u) != 0;  /* one element carried */
+            uint8_t     *dst = buf[which];
+            uint32_t     pf  = 0;
+
+            st = cft_run(dev, CFT_MAX, fmt, rnd,
+                         src, (const uint8_t *)src + h * esz, NULL,
+                         dst, h, &pf, bus_out);
+            cf |= pf;
+            if (st != CFT_OK)
+                break;
+            if (odd)
+                memcpy(dst + h * esz,
+                       (const uint8_t *)src + 2 * h * esz, esz);
+            src   = dst;
+            m     = h + (size_t)odd;
+            which ^= 1u;
+        }
+        (void)cft_flags_mute(dev, muted);
+        if (st == CFT_OK)
+            memcpy(d, src, esz);
+        free(buf[1]);
+        free(buf[0]);
+        if (st != CFT_OK)
+            return st;
+        cft_flags_emit(dev, cf, flags_out);
+        return CFT_OK;
+    }
+
     if (op == CFT_SUMSQ || op == CFT_SUMABS) {
         uint32_t cf = 0;
         cft_status st;

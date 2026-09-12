@@ -173,21 +173,28 @@ def simple_cases(fmt: FpFormat, per_op: int, seed: int = 5):
     shifty = [0, 1, 2, fmt.man_w, fmt.width - 1, fmt.width, fmt.width + 1,
               2 * fmt.width - 1]
     cases = []
-    # 15, 31 and 255 are unassigned: one inside the float block, one
-    # just past the integer group's newest member, one at the top of
-    # the byte. This list has now shed a member FOUR times - 24 became
-    # CFT_SUM, 26 became RECIP_SEED, 28 became CFT_SUMSQ on 2026-09-03,
-    # and 30 became CFT_IMUL on 2026-09-07 - which is the exact hazard
+    # 15 and 255 are unassigned: one inside the float block, one at the
+    # top of the byte. This list has now shed a member FIVE times - 24
+    # became CFT_SUM, 26 became RECIP_SEED, 28 became CFT_SUMSQ on
+    # 2026-09-03, 30 became CFT_IMUL on 2026-09-07, and 31 became
+    # CFT_MAXALL on 2026-09-12 - which is the exact hazard
     # docs/DETERMINISM.md warns about for anyone who issued an
     # unassigned opcode early: the conformance replayer refuses a set
     # whose "reserved" case has since been assigned, and that refusal
     # is what caught 26 here, and 28 again, and 30 again.
     #
+    # 31's departure costs the published sets 200 cases each, 4,000 in
+    # all, and it is NOT replaced: maxall is a reduction, so there is no
+    # elementwise case to record for it. The reduction families carry it
+    # instead. Two unassigned codes remain and two is enough - the point
+    # of the row is that SOME unassigned code's defined answer is scored,
+    # not that a particular number is.
+    #
     # The seed opcodes themselves get the same per-op budget as the
     # rest: they are unary and quiet, but their special classes (the
     # limit values, and the flush-at-input rule for subnormals) are
     # contract surface an independent implementation can get wrong.
-    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 31, 255):
+    for op in sf.SIMPLE_OPS + sf.SEED_OPS + (15, 255):
         is_shift = op in (sf.OP_ISHL, sf.OP_ISHR)
         for i in range(per_op):
             if i % 3 == 0:
@@ -965,10 +972,17 @@ def transcend_cases(fmt: FpFormat, extra: int, seed: int = 9):
 # The scaled products need more than that again: they return a PAIR, so
 # their cases carry two answers.
 
-REDUCE_FNS = ("sum", "dot", "sumsq", "sumabs",
+# maxall joined on 2026-09-12, and it is the reason the elementwise
+# pool lost opcode 31: an assigned opcode stops being a "reserved" case,
+# and a REDUCTION has no elementwise case to become instead - unlike
+# IMUL, whose 200 cases a set simply changed name from "reserved30" to
+# "imul" when it was assigned. So the published census moves, and the
+# published surface is completed here rather than left with an operation
+# the contract names and no set scores.
+REDUCE_FNS = ("sum", "dot", "sumsq", "sumabs", "maxall",
               "scaled_prod", "scaled_prod_sum", "scaled_prod_diff")
 
-REDUCE_ARITY = {"sum": 1, "dot": 2, "sumsq": 1, "sumabs": 1,
+REDUCE_ARITY = {"sum": 1, "dot": 2, "sumsq": 1, "sumabs": 1, "maxall": 1,
                 "scaled_prod": 1, "scaled_prod_sum": 2,
                 "scaled_prod_diff": 2}
 
