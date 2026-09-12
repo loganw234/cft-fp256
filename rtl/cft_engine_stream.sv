@@ -197,6 +197,11 @@ module cft_engine_stream #(
     input  logic [3:0]   cfg_prec,
     input  logic [2:0]   cfg_rnd,
     input  logic [63:0]  cfg_n,
+    /* MODE[18:16]. A set bit makes that operand STRIDE-0: one beat is
+     * read and element 0 of it broadcasts over the run. Refused by the
+     * CSR when this build does not carry the feature, so the engine may
+     * assume a set bit means it is implemented here. */
+    input  logic [2:0]   cfg_scalar,
     input  logic [63:0]  cfg_a,
     input  logic [63:0]  cfg_b,
     input  logic [63:0]  cfg_c,
@@ -619,15 +624,15 @@ module cft_engine_stream #(
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_a (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
       .wr_en(a_wr), .wr_data(m_axi_a_rdata),
-      .rd_en(abc_rd), .rd_data(a_q), .count(a_cnt));
+      .rd_en(abc_rd && !cfg_scalar[0]), .rd_data(a_q), .count(a_cnt));
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_b (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
       .wr_en(b_wr), .wr_data(m_axi_b_rdata),
-      .rd_en(abc_rd), .rd_data(b_q), .count(b_cnt));
+      .rd_en(abc_rd && !cfg_scalar[1]), .rd_data(b_q), .count(b_cnt));
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_c (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
       .wr_en(c_wr), .wr_data(m_axi_c_rdata),
-      .rd_en(abc_rd), .rd_data(c_q), .count(c_cnt));
+      .rd_en(abc_rd && !cfg_scalar[2]), .rd_data(c_q), .count(c_cnt));
   /* verilator lint_on WIDTHEXPAND */
 
   // ---- readers: one per stream, ARs pipelined ------------------------
@@ -816,7 +821,12 @@ module cft_engine_stream #(
       assign issued_s = rd_issued[rs];
       assign base_s   = rd_base[rs];
 
-      assign rem  = beats_total - issued_s;
+      /* A scalar operand's whole budget is ONE beat, which is where the
+       * traffic saving lives: the array is not read at all, only element
+       * 0's beat. issued_s is 0 for that one beat, so `addr` is base_s
+       * and the walk below never advances - no separate address path. */
+      assign rem  = cfg_scalar[rs] ? (64'd1 - issued_s)
+                                   : (beats_total - issued_s);
       assign addr = base_s + (issued_s << ADDR_SH);
       assign len  = burst_want(rem, addr);
       assign room = burst_room(cnt_s, resv_s);
@@ -1252,6 +1262,38 @@ module cft_engine_stream #(
     endcase
   end
 
+  /* Element 0 of a beat, replicated into every lane at prec_r - the
+   * same construction as one_beat above, with a value where that has a
+   * literal. This is the half of a stride-0 operand that makes it a
+   * BROADCAST: a beat holds eight lanes at fp32, so handing the base
+   * beat to the array unchanged would give lane i element i.
+   *
+   * fp256 is one lane a beat, so the beat IS the element and the copy is
+   * the identity - written out rather than special-cased, because a
+   * `default` that silently did nothing is how the fp128 lane of
+   * one_beat was wrong once (see ONE128_HI above). */
+  function automatic logic [BEAT_BITS-1:0] bcast_beat(
+      input logic [BEAT_BITS-1:0] beat, input logic [1:0] prec);
+    logic [BEAT_BITS-1:0] r;
+    begin
+      r = '0;
+      case (prec)
+        PREC_FP32:
+          for (int i = 0; i < LANES32; i = i + 1)
+            r[i*32 +: 32] = beat[31:0];
+        PREC_FP64:
+          for (int i = 0; i < LANES64; i = i + 1)
+            r[i*64 +: 64] = beat[63:0];
+        PREC_FP128:
+          for (int i = 0; i < LANES128; i = i + 1)
+            r[i*128 +: 128] = beat[127:0];
+        default:
+          r = beat;
+      endcase
+      bcast_beat = r;
+    end
+  endfunction
+
   // The accumulator's operands are REGISTERED here, and the reason is
   // a measured shell failure rather than caution.
   //
@@ -1296,9 +1338,16 @@ module cft_engine_stream #(
   assign lane_op    = is_reduce ? 8'd0 : op_r;           // 0 = CFT_FMA
   assign lane_rnd   = rnd_r;
   assign lane_prec  = prec_r;
-  assign lane_a     = is_reduce ? red_add_a_q : a_q;
-  assign lane_b     = is_reduce ? one_beat    : b_q;
-  assign lane_c     = is_reduce ? red_add_b_q : c_q;
+  /* A reduction never takes a scalar operand - its operands are the
+   * accumulator's, and cfg_scalar is refused beside it at the header -
+   * so the reduce mux stays outermost and the scalar one sits inside it
+   * rather than beside it. */
+  assign lane_a     = is_reduce ? red_add_a_q
+                    : cfg_scalar[0] ? bcast_beat(a_q, prec_r) : a_q;
+  assign lane_b     = is_reduce ? one_beat
+                    : cfg_scalar[1] ? bcast_beat(b_q, prec_r) : b_q;
+  assign lane_c     = is_reduce ? red_add_b_q
+                    : cfg_scalar[2] ? bcast_beat(c_q, prec_r) : c_q;
 
   logic [BEAT_BITS-1:0]      arr_d;
   logic [BEAT_BITS/32*5-1:0] arr_lf;

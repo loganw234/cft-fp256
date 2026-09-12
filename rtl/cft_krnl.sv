@@ -258,6 +258,15 @@ module cft_krnl #(
   // 4-bit field are refused on every build for the same reason.
   localparam [3:0] PREC_CAPS = {EN_FP256, EN_FP128, EN_FP64, 1'b1};
 
+  /* MODE[18:16], the stride-0 operands. 0 until the engine's operand
+   * fetch honours them, and the CSR refuses the bits while it is 0 -
+   * so this localparam is the single place that says whether this build
+   * carries the feature, and CAPS2[7] is published from the same bit
+   * rather than from a second opinion. */
+  localparam bit FEAT_SCALAR = 1'b1;
+
+  logic [2:0] cfg_scalar;
+  logic mode_bad;
   logic prec_ok, refused_q, refuse_done_q;
   assign prec_ok = (cfg_prec[3:2] == 2'b00) && PREC_CAPS[cfg_prec[1:0]];
 
@@ -271,7 +280,12 @@ module cft_krnl #(
   // engines and the refusal registers consult; at 256 it IS prec_ok.
   localparam bit SEQ_OK = (BEAT_BITS == 256);
   logic run_ok;
-  assign run_ok = prec_ok && (SEQ_OK || !cfg_seq);
+  /* A MODE bit this build will not honour joins an absent precision in
+   * the one predicate every engine and the refusal registers consult.
+   * Refused means refused the same way: STATUS[3], nothing starts, no
+   * memory is touched, and FLAGS are left alone because a refusal is not
+   * a run. */
+  assign run_ok = prec_ok && (SEQ_OK || !cfg_seq) && !mode_bad;
 
   // ---- the sequencer's on-chip capacities ----------------------------
   //
@@ -494,7 +508,15 @@ module cft_krnl #(
       // log2 fields of CAPS are: two copies of a number is how a
       // capability register ends up describing a memory that is no
       // longer that size.
-      .caps2({1'b1,        // [6] SCRATCH_STRICT: revision 4's R8, an
+      .caps2({FEAT_SCALAR, // [7] SCALAR: MODE[18:16] make an operand
+                           //     stride-0, so one value broadcasts over
+                           //     the run. Published from the same
+                           //     localparam the CSR's refusal reads, so
+                           //     a tile cannot advertise a bit it will
+                           //     turn away - the failure CAPS[13] has
+                           //     for `dot`, where the group bit is set
+                           //     and the opcode answers qNaN.
+              1'b1,        // [6] SCRATCH_STRICT: revision 4's R8, an
                            //     indexed access at or past the depth
                            //     is reported (STATUS[5]) rather than
                            //     reduced modulo it. A host that does
@@ -528,7 +550,9 @@ module cft_krnl #(
       .cfg_seq(cfg_seq), .cfg_n(cfg_n),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
       .cfg_prog(cfg_prog), .cfg_bank(cfg_bank),
-      .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt)
+      .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt),
+      .cfg_scalar(cfg_scalar), .cfg_mode_bad(mode_bad),
+      .feat_scalar(FEAT_SCALAR)
   );
 
   // ---- the shared masters --------------------------------------------
@@ -697,6 +721,7 @@ module cft_krnl #(
       .flags_acc(eng_flags),
       .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
+      .cfg_scalar(cfg_scalar),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
       .lane_valid(eng_lv), .lane_op(eng_lop), .lane_rnd(eng_lrnd),
       .lane_prec(eng_lprec), .lane_a(eng_la), .lane_b(eng_lb), .lane_c(eng_lc),

@@ -1769,13 +1769,29 @@ built; docs/SEQUENCER.md holds the program-model ones.
    certifies exactness per element with a witness FMA because the
    union cannot say which element raised inexact; the ask would remove
    the witness and the cost of computing it.
-2. **A scalar (stride-0) operand for `cft_run`.** Every workload that
-   applies one value to a batch - the zoom's reference point against
-   every pixel, the Mersenne carry base, an interval coefficient - fills
-   an array with copies first; in the demos that is 6,144 JavaScript
-   stores per pixel iteration, and in C it is the same loop. A stride-0
-   operand is a contract shape, not a backend detail, so it would need
-   the model and the tile to agree on it first.
+2. ~~**A scalar (stride-0) operand for `cft_run`.**~~ **DONE,
+   2026-09-12**, as `cft_run_ex` with `cft_elem_args.scalar_mask` -
+   MODE[18:16] on the tile, behind CAPS2[7]. Every workload that applies
+   one value to a batch - the zoom's reference point against every pixel,
+   the Mersenne carry base, an interval coefficient - filled an array with
+   copies first; in the demos that was 6,144 JavaScript stores per pixel
+   iteration, and in C the same loop.
+
+   This entry said it "would need the model and the tile to agree on it
+   first", and that turned out to be half right. The TILE needed real work
+   - one beat read instead of n, and element 0 replicated across the
+   beat's lanes, since a beat is eight elements at fp32 and handing it to
+   the array unchanged would give lane *i* element *i*. The MODEL needed
+   nothing: a scalar operand computes exactly what an array of copies
+   computes, the same `op()` on the same values, so there is no new
+   rounding rule to define. What the contract needed was a sentence, and
+   it is in cft.h beside the struct.
+
+   The saving is NOT portable and the call is. On a tile the value crosses
+   once; the software backend indexes element 0 (free, and saves nothing);
+   the remote backend expands locally, because its frames chunk and
+   element 0 would have to ride every chunk. `cft_caps` reports
+   `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it has.
 3. **The program API in the wasm surface.** `cftw_*` carries every
    library operation but not `cft_program_load/run`, so the demos run
    the tools' loop engines; the program engines were measured native

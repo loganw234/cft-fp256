@@ -28,6 +28,23 @@
 //                 build lacks is exactly as unrunnable here as there.
 //                 The op field is a byte because four bits ran out at
 //                 15 opcodes and the integer group needed eight more.
+//                 [18:16] SCALAR operands: a set bit makes
+//                 that operand STRIDE-0 - the engine reads element 0
+//                 for every element, so one value broadcasts over the
+//                 run. [16] a, [17] b, [18] c. Advertised in CAPS2[7];
+//                 a build without it REFUSES the bit rather than
+//                 ignoring it, because ignoring it would read n
+//                 elements from a one-element buffer.
+//                 [31:19] RESERVED, MUST BE ZERO. A non-zero bit here
+//                 is refused at start with STATUS[3], nothing begins
+//                 and no memory is touched. This guard did not exist
+//                 before the scalar bits, which is exactly why the three bits
+//                 above each need a CAPS2 bit: a tile that predates
+//                 the guard IGNORES an unknown MODE bit, and an
+//                 ignored stride-0 flag is an out-of-bounds read
+//                 rather than a wrong answer. The guard cannot teach
+//                 a shipped bitstream to refuse; it makes every bit
+//                 added after it fail safe.
 //   0x18  N       element count, 64-bit (lo at 0x18, hi at 0x1C)
 //   0x20  A_PTR   64-bit HBM byte address, 32-byte aligned (one beat;
 //                 XRT buffer objects are 4 KB aligned anyway)
@@ -261,7 +278,7 @@ module cft_csr (
     // same localparams cft_seq elaborates its scratch from, so the
     // register cannot drift from the memory it describes without the
     // elaboration changing too.
-    input  logic [6:0]  caps2,
+    input  logic [7:0]  caps2,
     // The sequencer's on-chip capacities, as LOG2, from the very
     // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
     // the memories it describes without the elaboration changing too.
@@ -286,6 +303,14 @@ module cft_csr (
     output logic [63:0] cfg_bank,
     output logic [63:0] cfg_sin,
     output logic [63:0] cfg_sout,
+    /* The MODE bits are decoded here so every consumer reads one
+     * name rather than a bit index, which is how MODE[15] is handled. */
+    output logic [2:0]  cfg_scalar,    // MODE[18:16], a/b/c stride-0
+    output logic        cfg_mode_bad,  // a MODE bit this build refuses
+    /* Constants from cft_krnl's localparams, exactly as prec_caps and
+     * op_caps are: the tile decides what it carries, the CSR decides
+     * what to refuse, and neither hard-codes the other's answer. */
+    input  logic        feat_scalar,
     output logic [63:0] cfg_cnt
 );
 
@@ -354,6 +379,20 @@ module cft_csr (
   assign cfg_bank = bank_q;
   assign cfg_sin  = sin_q;
   assign cfg_sout = sout_q;
+
+  assign cfg_scalar   = mode_q[18:16];
+
+  /* A MODE bit this build will not honour, which must be REFUSED and
+   * never ignored: an ignored stride-0 flag reads n elements from a
+   * one-element buffer. [31:22] is reserved on every build; [21:16] is
+   * refused unless the feature parameter says this tile carries it.
+   *
+   * Written as an OR of named terms rather than a mask compare, for the
+   * reason op_caps is written as a bit per group in cft_krnl.sv: a mask
+   * is one typo away from silently permitting a bit. */
+  assign cfg_mode_bad =
+      (mode_q[31:19] != 13'b0)                    ||
+      (|mode_q[18:16] && !feat_scalar);
   assign cfg_cnt  = cnt_q;
 
   // ---- write channel ------------------------------------------------
@@ -519,7 +558,7 @@ module cft_csr (
           10'h018: s_axi_control_rdata <= cnt_q[63:32];
           10'h019: s_axi_control_rdata <= bank_q[31:0];
           10'h01A: s_axi_control_rdata <= bank_q[63:32];
-          10'h01B: s_axi_control_rdata <= {25'b0, caps2};
+          10'h01B: s_axi_control_rdata <= {24'b0, caps2};
           10'h01C: s_axi_control_rdata <= sin_q[31:0];
           10'h01D: s_axi_control_rdata <= sin_q[63:32];
           10'h01E: s_axi_control_rdata <= sout_q[31:0];

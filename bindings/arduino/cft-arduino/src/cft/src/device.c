@@ -808,7 +808,14 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
  * The core call
  * --------------------------------------------------------------- */
 
-CFT_API cft_status cft_run(cft_device *dev,
+/* The elementwise run, with the scalar mask. cft_run and cft_run_ex are
+ * both one line over this; the body stayed where it was rather than being
+ * moved into a new entry point, because the diff of a move is unreadable
+ * and this is the function every backend dispatch lives in.
+ *
+ * scalar_mask: bit 0 a, bit 1 b, bit 2 c. A set bit makes that operand
+ * one element that applies to the whole run. */
+static cft_status run_impl(cft_device *dev,
                            cft_op      op,
                            cft_format  fmt,
                            cft_round   rnd,
@@ -817,6 +824,7 @@ CFT_API cft_status cft_run(cft_device *dev,
                            const void *c,
                            void       *d,
                            size_t      n,
+                           uint32_t    scalar_mask,
                            uint32_t   *flags_out,
                            uint32_t   *bus_out)
 {
@@ -902,16 +910,27 @@ CFT_API cft_status cft_run(cft_device *dev,
          * in cft.h costs a caller who ignores it time and not bits.
          * `d` needs none of this - it is written, not read, and the
          * backend flushes a device copy it is about to repurpose. */
-        buf_sync_in(dev, a, n * esz);
-        buf_sync_in(dev, b, n * esz);
-        buf_sync_in(dev, c, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_B, b, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_C, c, n * esz);
+        /* A scalar operand's buffer is ONE element everywhere it is
+         * measured: buf_sync_in brings home exactly what the caller
+         * owns, and bind_role asks buf_find for an EXACT byte count, so
+         * n * esz would fail to match a resident one-element buffer and
+         * the run would quietly stage it instead - correct, slower, and
+         * invisible because nothing fails. */
+        const size_t ab = (scalar_mask & 1u) ? esz : n * esz;
+        const size_t bb = (scalar_mask & 2u) ? esz : n * esz;
+        const size_t cb = (scalar_mask & 4u) ? esz : n * esz;
+
+        buf_sync_in(dev, a, ab);
+        buf_sync_in(dev, b, bb);
+        buf_sync_in(dev, c, cb);
+        bind_role(dev, &bd, CFT_ROLE_A, a, ab);
+        bind_role(dev, &bd, CFT_ROLE_B, b, bb);
+        bind_role(dev, &bd, CFT_ROLE_C, c, cb);
         bind_role(dev, &bd, CFT_ROLE_D, d, n * esz);
         backend_call();
         st = (cft_status)cftx_run(dev->hw, (int)op, (int)fmt,
                                              (int)rnd, a, b, c, d, n,
+                                             scalar_mask,
                                              &bd, &fl, bus_out);
         if (st == CFT_OK)
             cft_flags_emit(dev, fl, flags_out);
@@ -926,10 +945,41 @@ CFT_API cft_status cft_run(cft_device *dev,
     if (dev->backend == CFT_BACKEND_REMOTE) {
         uint32_t fl = 0;
         cft_status st;
+        /* A scalar operand is EXPANDED here rather than carried on the
+         * wire. The RUN request chunks - k elements a frame - so element
+         * 0 would have to ride every chunk, and docs/REMOTE.md would grow
+         * a field for a saving a socket does not have: the whole array
+         * crosses either way. Expanding keeps the protocol exactly as it
+         * is and the answer exactly what the contract says, which are the
+         * two things that have to be true.
+         *
+         * Not a fallback to be ashamed of: the SAVING was never portable
+         * (cft_caps says so through CFT_SEQ_FEAT_SCALAR), only the CALL
+         * is. */
+        void *exp[3] = {NULL, NULL, NULL};
+        const void *opnd[3] = {a, b, c};
+        if (scalar_mask) {
+            int r;
+            for (r = 0; r < 3; r++) {
+                size_t k;
+                if (!((scalar_mask >> r) & 1u) || !opnd[r])
+                    continue;
+                exp[r] = malloc(n * esz);
+                if (!exp[r]) {
+                    while (r-- > 0) free(exp[r]);
+                    return CFT_ERR_OUT_OF_MEMORY;
+                }
+                for (k = 0; k < n; k++)
+                    memcpy((uint8_t *)exp[r] + k * esz, opnd[r], esz);
+                opnd[r] = exp[r];
+            }
+        }
         backend_call();
         st = (cft_status)cftr_run(dev->hw, (int)op, (int)fmt,
-                                             (int)rnd, a, b, c, d, n,
+                                             (int)rnd, opnd[0], opnd[1],
+                                             opnd[2], d, n,
                                              &fl, bus_out);
+        free(exp[2]); free(exp[1]); free(exp[0]);
         if (st == CFT_OK)
             cft_flags_emit(dev, fl, flags_out);
         return st;
@@ -946,20 +996,93 @@ CFT_API cft_status cft_run(cft_device *dev,
     cft_bn_zero(&bb);
     cft_bn_zero(&bc);
 
+    /* A scalar operand is element 0 for every element, which on this
+     * backend is an index and nothing more - so the software answer is
+     * the contract's by construction rather than by testing: it is the
+     * same op() on the same values a caller would have got from an array
+     * of copies. */
+    {
+        const size_t sa = (scalar_mask & 1u) ? 0u : 1u;
+        const size_t sb = (scalar_mask & 2u) ? 0u : 1u;
+        const size_t sc = (scalar_mask & 4u) ? 0u : 1u;
+
     for (i = 0; i < n; i++) {
         uint32_t fl = 0;
         /* Load before storing, so d may alias a, b or c. */
-        if (pa) cft_bn_load(&ba, pa + i * esz, (int)esz);
-        if (pb) cft_bn_load(&bb, pb + i * esz, (int)esz);
-        if (pc) cft_bn_load(&bc, pc + i * esz, (int)esz);
+        if (pa) cft_bn_load(&ba, pa + sa * i * esz, (int)esz);
+        if (pb) cft_bn_load(&bb, pb + sb * i * esz, (int)esz);
+        if (pc) cft_bn_load(&bc, pc + sc * i * esz, (int)esz);
         if (cft_sf_compute(f, (int)op, (int)rnd, &ba, &bb, &bc, &bo, &fl))
             return CFT_ERR_INTERNAL;
         acc |= fl;
         cft_bn_store(&bo, pd + i * esz, (int)esz);
     }
+    }
 
     cft_flags_emit(dev, acc, flags_out);
     return CFT_OK;
+}
+
+CFT_API cft_status cft_run(cft_device *dev,
+                           cft_op      op,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           const void *c,
+                           void       *d,
+                           size_t      n,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out)
+{
+    return run_impl(dev, op, fmt, rnd, a, b, c, d, n, 0u,
+                    flags_out, bus_out);
+}
+
+CFT_API cft_status cft_run_ex(cft_device *dev,
+                              cft_op      op,
+                              cft_format  fmt,
+                              cft_round   rnd,
+                              const cft_elem_args *args)
+{
+    if (!dev || !args)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* An INPUT struct, so an unrecognised size is REFUSED rather than
+     * truncated - the same reversal cft_run_args documents. A newer
+     * caller's scalar_mask silently ignored is exactly the run that
+     * would return an array's worth of the wrong answer. */
+    if (args->struct_size != sizeof(cft_elem_args))
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* Bits above the three operands are reserved, and refused rather
+     * than masked off: a caller setting bit 3 means something this
+     * library does not implement. */
+    if (args->scalar_mask & ~7u)
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* An operand that is not supplied cannot be scalar. Caught here
+     * because a NULL pointer with its bit set would otherwise read
+     * element 0 of nothing. */
+    if (((args->scalar_mask & 1u) && !args->a) ||
+        ((args->scalar_mask & 2u) && !args->b) ||
+        ((args->scalar_mask & 4u) && !args->c))
+        return CFT_ERR_INVALID_ARGUMENT;
+    /* A scalar operand on a device that cannot do it is refused BY NAME,
+     * which is the whole reason CAPS2[7] exists. The alternative - run it
+     * anyway and let the tile ignore MODE[18:16] - reads n elements from
+     * a one-element buffer, and that is an out-of-bounds read rather than
+     * a wrong number. The software and remote backends always carry it:
+     * one indexes 0 and the other expands locally. */
+    if (args->scalar_mask && dev->backend == CFT_BACKEND_XRT &&
+        !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
+        cft_set_error(
+            "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
+            "does not publish (CAPS2[7]); ask cft_get_caps before issuing "
+            "one, or pass the value as an array of copies - which is what "
+            "this run would otherwise have read past the end of");
+        return CFT_ERR_UNSUPPORTED;
+    }
+    return run_impl(dev, op, fmt, rnd, args->a, args->b, args->c, args->d,
+                    args->n, args->scalar_mask,
+                    args->flags_out, args->bus_out);
 }
 
 /* ---------------------------------------------------------------

@@ -165,9 +165,13 @@ void cftx_buffer_stat(void *buf, int *resident, int *device_authority,
  * a staged operand is copied from - a binding is an OPTIMISATION and
  * never the only description of an operand, so a backend that fails
  * to bind one falls back to the pointer and returns the same bits. */
+/* scalar_mask: bit 0 a, bit 1 b, bit 2 c - MODE[18:16]. A set bit makes
+ * that operand one element the tile reads once and broadcasts, which is
+ * where the saving is; the caller has already been refused if this device
+ * does not publish CFT_SEQ_FEAT_SCALAR. */
 int  cftx_run(void *hw, int op, int fmt, int rnd,
               const void *a, const void *b, const void *c, void *d,
-              size_t n, const cft_bindings *bind,
+              size_t n, uint32_t scalar_mask, const cft_bindings *bind,
               uint32_t *flags, uint32_t *bus);
 
 /* Reduce index ranges of `a`, writing ONE element per range into

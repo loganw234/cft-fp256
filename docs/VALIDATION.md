@@ -10799,3 +10799,152 @@ honest.
 No RTL changed, no ABI step, and no capability bit: a caller asks
 `cft_supports(CFT_MAXALL, fmt)`, which answers through the **min/max**
 group because that is what the composition runs on.
+
+## 2026-09-12 - a stride-0 operand, the MODE guard it needed, and a contract I misread
+
+`cft_run_ex` with `cft_elem_args.scalar_mask`: one of `a`, `b` or `c` may
+be a single element that applies to the whole run. cft-rebound's fourth
+ask (its `docs/HARDWARE.md`), worth about 300 staged vectors a step to
+that workload; `docs/HOSTAPI.md` had it recorded as an ask since the demos
+found the same cost from the other side - 6,144 JavaScript stores a pixel
+iteration, and in C the same loop.
+
+On a tile it is MODE[18:16] and **one beat read instead of n**, behind
+CAPS2[7]. No register grew, so VERSION stays 0x800 - the rule
+`docs/ARCHITECTURE.md` states for the capacity fields: values inside a
+register that already exists do not move it.
+
+### The guard is the substance, and it is a safety fix rather than a feature
+
+**Nothing checked MODE[31:16].** Grepped `cft_csr.sv`, `cft_krnl.sv` and
+`cft_engine_stream.sv`: no reserved-bit guard, and the register table said
+only "[31:16] reserved, write 0". So a stride-0 run on a tile that
+predates the feature would have been IGNORED, and the engine would have
+read n elements from a one-element buffer.
+
+That is not a wrong answer, it is an out-of-bounds read of n-1 elements,
+and it is **measured rather than argued**: the host-side control of that
+shape - the scalar flag disconnected, the buffer still one element -
+**segfaults**, reading ~1,150 bytes past a 32-byte allocation at fp256.
+
+So `run_ok` now refuses any bit of MODE[31:19], and any of MODE[18:16] a
+build does not carry, the way it already refuses an absent precision:
+STATUS[3], nothing starts, no memory touched, FLAGS left alone because a
+refusal is not a run. The same reasoning `docs/ARCHITECTURE.md` records
+for REGS32 and KX9 - "an OLD bitstream has no rule that would refuse the
+new form" - which is why each of the three bits needs a capability bit and
+why libcft refuses by name on a device without CAPS2[7].
+
+The guard cannot teach the four staged pairs to refuse. It makes every
+MODE bit added after it fail safe, which is the most a guard can do.
+
+### What made it small, and the one trap
+
+The engine already wanted it. `rem = beats_total - issued_s` per stream,
+so a scalar stream's budget is one beat and its address never advances.
+The three FIFOs share `abc_rd`, so gating that per stream leaves a scalar
+stream NEVER popped - its `rd_data` holds beat 0 for the whole run, which
+is what a broadcast wants. And `ex_valid` requires all three FIFOs
+non-empty, which an unpopped FIFO holding one beat satisfies forever, so a
+one-beat stream cannot hang the run. Nothing had to change for that.
+
+**A BEAT IS NOT AN ELEMENT**, which is the trap. At fp32 one beat holds
+eight lanes, so reading the base beat repeatedly would give lane *i*
+element *i*. `bcast_beat` replicates element 0 across the beat per
+precision - the same construction `one_beat` already uses for the
+reduction's `fma(x, 1.0, y)`. fp256 is one lane a beat, where the copy is
+the identity, and that is the rung a per-lane loop gets wrong.
+
+Two more places the partitioning had to learn it. `cftx_run` offsets every
+operand by `s.first_elem` per tile, so tile 2 would have read element
+`first_elem` - a plausible number, therefore the worst kind of wrong - and
+`bind_role`/`buf_sync_in` ask `buf_find` for an EXACT byte count, so
+`n * esz` would have failed to match a resident one-element buffer and
+staged it silently instead.
+
+The remote backend is not given the mask at all: its frames chunk k
+elements, so element 0 would have to ride every chunk. The value is
+expanded locally and an ordinary run is sent - the same bits, the same
+wire traffic as before, `docs/REMOTE.md` untouched. The CALL is portable
+and the SAVING is not, which is why `cft_caps` reports
+`CFT_SEQ_FEAT_SCALAR` rather than this being silent.
+
+### The contract I misread, and it cost half an hour
+
+I wrote the tb case at `n = 37` - "odd, not a beat multiple, so the tail
+path runs" - and it failed: elements 0..31 correct, 32..36 still holding
+the `0xAA` fill. I read that as the elementwise engine dropping a partial
+final beat, and noticed that **all 43 existing elementwise cases in
+`tb/test_krnl.py` use an n that is an exact multiple of the beat's lane
+count**, which looked like a coverage hole that had hidden a real defect.
+
+It is neither. `host/src/slice.h:22` says it outright: "each slice covers
+a whole number of 256-bit beats, because the engine's beat count is
+`n >> (LANE_SH - prec)` and **a partial beat would be truncated away
+rather than rounded up**". `cft_plan_slices` rounds up and hands the tile
+`padded`; the library copies back `n`. A partial beat is something no
+`cft_run` can produce, and the bench drives the CSR directly - so 37 was
+outside the contract, the engine was right, and those 43 cases are exact
+BECAUSE that is the contract.
+
+Proven rather than assumed: a plain `run_op(FP32, OP_FMA, 37)` with no
+scalar flag anywhere fails identically, `5/37 elements differ`. The case
+now uses 40/8, 36/4, 38/2 and 37/1 - a whole number of beats at each rung,
+with the comment saying why, so the next person driving the CSR does not
+repeat it.
+
+### Measured
+
+| gate | result |
+|---|---|
+| `tb` scalar case, all four formats | **bit-exact against an array of copies**, flags matched per case (0b11000, 0b10100, 0b10101, 0b00001 - real and differing exception sets, not trivially clean) |
+| the poison | the scalar buffer is ONE element followed by `0x5A`; a tile that streamed n would compute from it |
+| the flag-clear control | the same shape with full arrays still correct, so a path that quietly streamed could not pass both halves |
+| `make krnl` | TESTS=2 PASS=2 FAIL=0 |
+| `test_seq_core` / `test_krnl_seq` | 18/18 and 1/1 |
+| `yosys-lint` | rc=0, zero latches |
+| host probe, all four formats | bit-identical, flags included |
+| host refusals | a reserved mask bit, a NULL scalar operand, an unrecognised `struct_size` |
+| the host negative control | **segfault** - the out-of-bounds read, demonstrated |
+| `sync.py --check` | 28 vendored files identical |
+
+`CAPS2[7]` is published from the same localparam the CSR's refusal reads,
+so a tile cannot advertise a bit it would turn away - the failure CAPS[13]
+has for `dot`, where the group bit is set and the opcode answers qNaN.
+
+And the gate that caught the bit arriving: `tb/test_krnl.py`'s
+`check_caps2` pins the WHOLE word, so `CAPS2 is 0x000000f8, want
+0x00000078` was its second catch of the day after CAPS2[6]. Its
+expectation is now DERIVED from the RTL - a new `_localparam_bit` reads
+`FEAT_SCALAR` out of `cft_krnl.sv` - so a trimmed build that clears the
+flag makes the test follow rather than fail.
+
+### ABI 0.12, and a gate I said was not there
+
+`CFT_ABI_VERSION_MINOR` 11 -> 12, with the WebAssembly module rebuilt in
+the same step - the division of labour `bindings/wasm/README.md` states at
+0.3 and again at 0.7. The order is not arbitrary: `verify.mjs` compares
+the macro against the module's own `cftw_abi_version()`, and the module
+gets that by COMPILING the header, so the macro moves first and the build
+follows.
+
+**The correction.** Asked whether the module could wait until the
+bitstreams were building, I checked `verify.mjs`'s ABI identity test and
+its `NEEDED` export list, found neither would object, and said no gate
+blocked that order. Both of those were true and both were beside the
+point: `verify.mjs` also REPLAYS `vectors/out` through the module, and a
+module that predates opcode 31 has no wrapper for maxall. It failed
+**128 of 148 sets clean**, all twenty reduce sets (four formats x five
+attributes), each at line 257 - its first maxall case - with
+`unknown reduction name`.
+
+Which is the same refusal that caught the host's `conformance.c` earlier
+the same day, in the vendored copy of that file compiled to wasm. Twice in
+one day the replayer refused a set naming a function it could not score,
+and the second time I had already been told what the mechanism was.
+
+So the gate exists, it was red, and the module rebuild is what makes the
+bump legal rather than a formality. Both additions are ADDITIVE - code
+written against 0.11 gets the same bits from the same calls - which is why
+a stale module was wrong about the version and about twenty sets, and
+about nothing else.

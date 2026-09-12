@@ -76,7 +76,19 @@ from pathlib import Path
 
 STRIDE = 59
 LINES_PER_SET = 11800
-EXPECTED_OPS = 29          # 4 arithmetic + 19 simple + imul + 2 seeds + 3 reserved
+# 4 arithmetic + 19 simple + imul + 2 seeds + 2 reserved. Was 29 with
+# THREE reserved codes until 2026-09-12, when 31 became CFT_MAXALL -
+# and maxall is a REDUCTION, so unlike IMUL it does not take its
+# predecessor's place in the elementwise pool, it simply leaves. That
+# is why this number went down rather than staying put, and why the
+# published census went down with it.
+#
+# A pinned literal rather than a derived one because this file is
+# deliberately pure stdlib - it cannot import cft_golden to count -
+# and the assert below is what makes a pinned number safe: it refused
+# the build rather than shipping a page whose prose disagreed with its
+# own sample.
+EXPECTED_OPS = 28
 
 FORMATS = ("fp32", "fp64", "fp128", "fp256")
 ROUNDINGS = ("rne", "rtz", "rdn", "rup", "rmm")

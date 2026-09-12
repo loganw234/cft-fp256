@@ -130,7 +130,29 @@ def caps2_expected():
         f"and STX/LDX reduce modulo the depth with a mask - and, since "
         f"revision 4, decide `past the depth` by bit length, which is "
         f"the same question only for a power of two")
-    return (1 << 6) | (1 << 5) | (1 << 4) | (d.bit_length() - 1)
+    # [7] is READ FROM THE RTL rather than written here, the way the
+    # depth below is: a trimmed build that clears FEAT_SCALAR must make
+    # this expectation follow it, not fail. The whole word is pinned so a
+    # capability bit cannot appear unnoticed - which is what caught
+    # CAPS2[6] and then CAPS2[7].
+    scalar = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCALAR")
+    return ((scalar << 7) | (1 << 6) | (1 << 5) | (1 << 4) |
+            (d.bit_length() - 1))
+
+
+def _localparam_bit(path, name):
+    """The value of `localparam bit <name> = 1'bX;` in a file.
+
+    Its own parser because _localparam requires `int`, and a feature flag
+    has to stay `bit`: it is concatenated into CAPS2, where an `int` would
+    be thirty-two bits wide and silently shift every field above it.
+    """
+    import re
+    src = path.read_text(encoding="utf-8")
+    m = re.search(r"^\s*localparam\s+bit\s+%s\s*=\s*1'b([01])\s*;" % name,
+                  src, re.MULTILINE)
+    assert m, f"{path.name} has no `localparam bit {name}`"
+    return int(m.group(1))
 
 
 def check_caps2(caps2):
@@ -138,7 +160,8 @@ def check_caps2(caps2):
     assert caps2 == want, (
         f"CAPS2 is {caps2:#010x}, want {want:#010x} - [3:0] log2 of the "
         f"scratch slots a lane, [4] a scratch exists, [5] the per-run "
-        f"block exists, [6] SCRATCH_STRICT, [31:7] reserved zero")
+        f"block exists, [6] SCRATCH_STRICT, [7] SCALAR operands, "
+        f"[31:8] reserved zero")
 
 
 def seq_caps_expected():
@@ -274,6 +297,83 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
                   f"bit-exact, flags {got_f:#07b}")
 
 
+# MODE[18:16] - a set bit makes that operand STRIDE-0: one value read once
+# and applied to the whole run (CAPS2[7]).
+async def run_scalar(dut, axil, ram, fmt, op, n, seed, which, rnd=RND_RNE):
+    """One operand stride-0, scored against an array of copies.
+
+    `which` is 0, 1 or 2 for a, b or c. The scalar's buffer holds ONE
+    element and everything after it is POISON, which is what makes this
+    case unable to pass for the wrong reason: a tile that ignored
+    MODE[18:16] would stream n elements, read the poison, and differ.
+
+    That is the empirical form of the argument CAPS2[7] exists for. The
+    host-side control of the same shape does not merely differ - it
+    SEGFAULTS, reading n elements out of a one-element allocation.
+    """
+    ebytes = fmt.width // 8
+    rng = random.Random(seed)
+    vs = [gen_stream(fmt, n, rng), gen_stream(fmt, n, rng),
+          gen_stream(fmt, n, rng)]
+    scal = vs[which][0]
+    vs[which] = [scal] * n          # what the contract says it computes
+
+    exp = [compute(fmt, op, vs[0][i], vs[1][i], vs[2][i], rnd)
+           for i in range(n)]
+    exp_d = [e[0] for e in exp]
+    exp_f = 0
+    for e in exp:
+        exp_f |= e[1]
+
+    bases = (A_BASE, B_BASE, C_BASE)
+    for r in range(3):
+        if r == which:
+            ram.write(bases[r], scal.to_bytes(ebytes, "little"))
+            ram.write(bases[r] + ebytes, b"\x5A" * ((n - 1) * ebytes))
+        else:
+            ram.write(bases[r],
+                      b"".join(v.to_bytes(ebytes, "little") for v in vs[r]))
+    ram.write(D_BASE, b"\xAA" * (n * ebytes))
+
+    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 8) |
+                                 (rnd << 12) | (1 << (16 + which)))
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await axil.write_dword(CTRL, 1)
+
+    for _ in range(5000):
+        await ClockCycles(dut.ap_clk, 10)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            break
+    else:
+        raise AssertionError(f"{fmt.name} scalar[{which}]: never finished")
+
+    got = ram.read(D_BASE, n * ebytes)
+    bad = 0
+    for i in range(n):
+        g = int.from_bytes(got[i * ebytes:(i + 1) * ebytes], "little")
+        if g != exp_d[i]:
+            bad += 1
+            if bad <= 6:
+                dut._log.error(
+                    f"{fmt.name} scalar[{which}] [{i}]: got={g:#x} "
+                    f"want={exp_d[i]:#x} (scalar={scal:#x})")
+    assert bad == 0, (
+        f"{fmt.name} scalar[{which}]: {bad}/{n} differ - a tile that "
+        f"streamed n elements would have read the 0x5A poison after the "
+        f"single element, so a high count is that failure")
+
+    got_f = await axil.read_dword(FLAGS)
+    assert got_f == exp_f,         f"{fmt.name} scalar[{which}]: FLAGS {got_f:#07b} want {exp_f:#07b}"
+    got_err = await axil.read_dword(STATUS)
+    assert got_err == 0, f"{fmt.name} scalar[{which}]: STATUS {got_err:#05b}"
+    dut._log.info(f"{fmt.name} scalar[{which}] n={n}: bit-exact against an "
+                  f"array of copies, flags {got_f:#07b}")
+
+
 @cocotb.test()
 async def krnl_end_to_end(dut):
     cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
@@ -349,6 +449,47 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP128, OP_FMA, 8, seed=110)
     await run_op(dut, axil, ram, FP128, OP_ADD, 6, seed=111)
     await run_op(dut, axil, ram, FP64, OP_MUL, 4, seed=112)  # single-beat run
+
+    # MODE[18:16], the stride-0 operands (CAPS2[7], 2026-09-12).
+    #
+    # n = 37 is odd and not a beat multiple at any rung, so the tail path
+    # runs. Every format, because the broadcast is PER LANE and the lane
+    # count differs at each rung - 8 at fp32, 1 at fp256, where the beat
+    # IS the element and the replication is the identity. fp256 is the
+    # rung a per-lane loop gets wrong.
+    #
+    # Skipped rather than failed on a build that does not carry it, the
+    # way an absent precision is: FEAT_SCALAR is a localparam and a
+    # trimmed tile may clear it.
+    # n MUST BE A WHOLE NUMBER OF BEATS here, and that is the contract
+    # rather than a convenience. host/src/slice.h:22 - "each slice covers
+    # a whole number of 256-bit beats, because the engine's beat count is
+    # n >> (LANE_SH - prec) and a partial beat would be TRUNCATED AWAY
+    # rather than rounded up". cft_plan_slices rounds up and hands the
+    # tile ; the library copies back . So a partial beat is
+    # something no cft_run can produce, and driving one at the CSR - as
+    # this bench does - is outside the contract.
+    #
+    # Written down because I got it wrong: n=37 at fp32 is 4 beats and 5
+    # lanes, the engine correctly dropped the partial fifth, and it read
+    # as an engine defect for half an hour. Every other case in this file
+    # uses an exact multiple for the same reason, which looked like a
+    # coverage gap and is the contract.
+    if int(await axil.read_dword(CAPS2)) & (1 << 7):
+        for which in (0, 1, 2):
+            await run_scalar(dut, axil, ram, FP32, OP_FMA, 40,
+                             seed=0x5CA1 + which, which=which)
+        await run_scalar(dut, axil, ram, FP64, OP_FMA, 36, seed=0x5CB0, which=1)
+        await run_scalar(dut, axil, ram, FP128, OP_FMA, 38, seed=0x5CB1, which=1)
+        await run_scalar(dut, axil, ram, FP256, OP_FMA, 37, seed=0x5CB2, which=1)
+        # The control: the same shape with the flag CLEAR and full arrays
+        # must still be right, so a scalar path that quietly streamed
+        # could not pass both halves - the poison is what separates them.
+        await run_op(dut, axil, ram, FP32, OP_FMA, 40, seed=0x5CA0)
+        dut._log.info("stride-0 operands: every format, and the "
+                      "flag-clear control still streams full arrays")
+    else:
+        dut._log.info("CAPS2[7] clear: this build carries no stride-0 operand")
 
     # stream-engine stressors: multi-burst runs, a ragged tail, and
     # buffers placed so bursts must split at 4KB AXI boundaries

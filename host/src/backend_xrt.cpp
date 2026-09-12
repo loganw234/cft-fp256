@@ -933,9 +933,15 @@ extern "C" void cftx_buffer_stat(void *buf, int *resident,
     }
 }
 
+/* MODE[18:16], the stride-0 operands. Named rather than written as a
+ * shift at the use site, because MODE's layout lives in docs/HOSTAPI.md
+ * and one place here. */
+constexpr uint32_t MODE_SCALAR_SH = 16;
+
 extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
                         const void *a, const void *b, const void *c,
-                        void *d, size_t n, const cft_bindings *bind,
+                        void *d, size_t n, uint32_t scalar_mask,
+                        const cft_bindings *bind,
                         uint32_t *flags, uint32_t *bus)
 {
     Dev &D = *static_cast<Dev *>(hw);
@@ -954,7 +960,8 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     const size_t ntiles = D.tiles.size();
     const uint32_t mode = static_cast<uint32_t>(op & 0xFF) |
                           (static_cast<uint32_t>(fmt & 0xF) << 8) |
-                          (static_cast<uint32_t>(rnd & 0x7) << 12);
+                          (static_cast<uint32_t>(rnd & 0x7) << 12) |
+                          ((scalar_mask & 7u) << MODE_SCALAR_SH);
 
     const auto *pa = static_cast<const uint8_t *>(a);
     const auto *pb = static_cast<const uint8_t *>(b);
@@ -998,13 +1005,23 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
             Tile &tile = D.tiles[s.tile];
             size_t staged_need = 0;
 
+            /* A SCALAR operand is not partitioned. Every tile reads
+             * element 0 of the same one-element buffer, so its offset is
+             * not advanced by first_elem and its length is one element
+             * rather than the slice's - get this wrong and tile 2 reads
+             * element first_elem, which is a plausible number and
+             * therefore the worst kind of wrong. CFT_ROLE_D is never
+             * scalar: a run writes every element it was asked for. */
             for (int r = 0; r < 4; r++) {
                 if (!bind || !bind->buf[r])
                     continue;
+                const bool scal = (r < 3) && (((scalar_mask >> r) & 1u) != 0);
                 Buf &B = *static_cast<Buf *>(bind->buf[r]);
                 sb[i].bo[r] = buf_bind(B, s.tile, r,
-                                       bind->off[r] + s.first_elem * esz,
-                                       s.real * esz, s.padded * esz,
+                                       bind->off[r] +
+                                           (scal ? 0u : s.first_elem * esz),
+                                       scal ? esz : s.real * esz,
+                                       scal ? esz : s.padded * esz,
                                        r == CFT_ROLE_D);
             }
             /* The tile's own buffers are grown only for what is left,
@@ -1020,8 +1037,14 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
             for (int r = 0; r < CFT_ROLE_D; r++) {
                 if (sb[i].bo[r])
                     continue;                     /* already on the device */
-                stage(*tb[r], src[r] ? src[r] + s.first_elem * esz : nullptr,
-                      s.real * esz, s.padded * esz);
+                {
+                    const bool scal = ((scalar_mask >> r) & 1u) != 0;
+                    stage(*tb[r],
+                          src[r] ? src[r] + (scal ? 0u : s.first_elem * esz)
+                                 : nullptr,
+                          scal ? esz : s.real * esz,
+                          scal ? esz : s.padded * esz);
+                }
             }
             for (int r = 0; r < 4; r++)
                 if (!sb[i].bo[r])
