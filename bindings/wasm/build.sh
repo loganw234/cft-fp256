@@ -33,7 +33,7 @@
 #   3  make_page.py samples the sets and assembles the page. THE
 #      SAMPLING RULE (also stated in make_page.py and on the page):
 #      from each of the 20 OPCODE sets (4 formats x 5 rounding
-#      attributes, 12,000 lines each) take every 60th line - 0-based
+#      attributes, 11,800 lines each) take every 59th line - 0-based
 #      lines 0, 60, 120, ... = exactly 200 per set - then add the
 #      set's first line of any opcode name the stride missed, so every
 #      opcode class is embedded per set by construction, seeds 26/27

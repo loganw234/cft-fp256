@@ -791,13 +791,15 @@ static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
 int cft_sf_op_assigned(int op)
 {
     return (op >= 0 && op <= 14) || (op >= 16 && op <= 23) ||
-           (op >= CFT_SF_SUM && op <= CFT_SF_SUMABS);
+           (op >= CFT_SF_SUM && op <= CFT_SF_SUMABS) ||
+           op == CFT_SF_MAXALL;
 }
 
 int cft_sf_is_reduction(int op)
 {
     return op == CFT_SF_SUM || op == CFT_SF_DOT ||
-           op == CFT_SF_SUMSQ || op == CFT_SF_SUMABS;
+           op == CFT_SF_SUMSQ || op == CFT_SF_SUMABS ||
+           op == CFT_SF_MAXALL;
 }
 
 unsigned cft_sf_op_operands(int op)
@@ -818,6 +820,12 @@ unsigned cft_sf_op_operands(int op)
      * not read a second one, and b may be NULL for both. */
     case CFT_SF_SUMSQ:
     case CFT_SF_SUMABS:   return 1u;
+    /* maxall reads one vector too. It has to be named here and not left
+     * to the default, which is deliberately conservative - an ASSIGNED
+     * opcode it does not know requires both operands - so assigning 31
+     * without this line refuses every maxall call whose b is NULL, which
+     * is all of them. */
+    case CFT_SF_MAXALL:   return 1u;
     default:              return cft_sf_op_assigned(op) ? (1u | 2u) : 0u;
     }
 }
@@ -896,7 +904,13 @@ int cft_sf_reduce(const cft_fmt_desc *f, int op, int rnd,
 
     /* ADD reads a and c - b is steered to 1.0 - so the two addends go
      * in the first and THIRD slots. Passing them as a and b would
-     * silently compute a*1.0 + 0.0 and drop the right subtree. */
+     * silently compute a*1.0 + 0.0 and drop the right subtree.
+     *
+     * MAX reads a and b instead, which is why the operand slots are
+     * chosen per op rather than shared: the same two subtrees, in the
+     * positions the opcode actually reads. Getting this wrong is silent
+     * for a maximum too - max(left, 0) returns left whenever left is
+     * non-negative, so a small positive array would look correct. */
     cft_bn_zero(&dummy);
     if (cft_sf_compute(f, CFT_SF_ADD, rnd, &left, &dummy, &right, out, &af))
         return 1;

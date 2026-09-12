@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "af205c7aed9edfed7d29ca2980f314401e0c2b424586ae58aa1f805b03fe81f8"
+      "sha256": "49dd66c29fe1278c02240e22ff9d9148affe762104f2327eb45ca29d70387104"
     },
     {
       "source": "host/include/cft_config.h",
@@ -71,12 +71,12 @@
     {
       "source": "host/src/conformance.c",
       "dest": "src/cft/src/conformance.c",
-      "sha256": "c1f0958b816bcc42669345d0c2ab8053db31626076ca98edffef8ef5d671418d"
+      "sha256": "8ee74d013ea9c6b550c220e44b8f11de045cf8732ad0bf405b3ad9e0acd5fc28"
     },
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "168e4be2fab61c34e4d77565ec5e9d4c9fa3c424b8e25cb2d7163de39d0d2b39"
+      "sha256": "ded56e111051413ebd1820eed2a76b0fb7cd154ec80e5d7fad53c6a167fab20f"
     },
     {
       "source": "host/src/divsqrt.c",
@@ -141,12 +141,12 @@
     {
       "source": "host/src/softfloat.c",
       "dest": "src/cft/src/softfloat.c",
-      "sha256": "6684ad58a61a909df456195e28aabe262b4a3d6ca0600de322cb6129c4ddd6f2"
+      "sha256": "4479ee96f597dc3343a2ff934f61e13cf3f3b48265921e8030ad60d5ffb4337e"
     },
     {
       "source": "host/src/softfloat.h",
       "dest": "src/cft/src/softfloat.h",
-      "sha256": "d038f37cff715195405d6338ddba2cff2d77a71cd51631437d4917669f5d6ac7"
+      "sha256": "97e7b0f67b00a37ff452ef6dcf9216b09b8becbbee122b032510aaa5ab39936d"
     },
     {
       "source": "host/src/transcend.c",

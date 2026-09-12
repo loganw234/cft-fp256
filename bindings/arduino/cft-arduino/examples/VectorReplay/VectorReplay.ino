@@ -9,7 +9,7 @@
  *     python host/tools/serial_replay.py --port COM7          (all of it)
  *
  * The host reads vectors/out - the same 168 set files
- * host/tools/cft_selftest.c replays, 1,071,635 cases - sends each case
+ * host/tools/cft_selftest.c replays, 1,068,915 cases - sends each case
  * over the wire, and compares the encoding and the five exception
  * flags this board answers with, bit for bit, against what the file
  * records. This sketch is the device half: a line in, a line out, and
@@ -185,7 +185,7 @@ static void send_toobig(const char *req)
 }
 
 /* A line whose device could not be opened is not a line to answer:
- * every reply would be a refusal, and a harness would score 1,071,635
+ * every reply would be a refusal, and a harness would score 1,068,915
  * skips as a successful run of nothing. Say it once a second, forever,
  * in a shape the host's resync counter will notice. */
 static bool ready;

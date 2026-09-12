@@ -2608,19 +2608,40 @@ which nothing covered, because the software gates do not use XRT and the
 residency leg allocates every buffer with `cft_alloc`. There is a leg
 for it now (`compare_program_staged`).
 
-**3. A `CFT_MAX` reduction. Real, and smaller than it looks.**
+**3. A `CFT_MAX` reduction. DONE, 2026-09-12, as `CFT_MAXALL` (31).**
 
 The corrector's convergence test is a maximum over every coordinate,
-and with no device-side maximum it is a host loop of width-one calls -
-about 2*3N of them per pass. It accounts for 13 to 19 percent of all
-library calls.
+and with no device-side maximum it was a host loop of width-one calls -
+about 2*3N of them per pass, 13 to 19 percent of all library calls.
 
 But measured, removing the test entirely is worth only **4 to 9 percent
 of wall clock on the card and nothing at all on software**. It was
 proposed as the explanation for that workload's performance ceiling and
-is not; the scatter is. Recorded here because the discipline of the
-project is that a wrong hypothesis with a number beats a right one
-without, and because it correctly ranks the three.
+is not; the scatter is. Kept because the discipline of the project is
+that a wrong hypothesis with a number beats a right one without, and
+because it correctly ranked these three.
+
+It is **composed**, not hardware: `ceil(log2 n)` elementwise `CFT_MAX`
+passes on the tile, which is the same door `CFT_SUMSQ` and `CFT_SUMABS`
+came through. Two things made that the right answer rather than the
+cheap one. A tile handed opcode 31 as a reduction would decode it as
+ELEMENTWISE - `cfg_is_reduce` is `(cfg_op == 8'd24)` - and write `n`
+elements where the caller sized one, so the opcode must never reach a
+tile at all. And 754-2019 `maximum` is exactly associative and
+commutative including its flags, so the composition's bits ARE the bits
+a hardware maxall would return: it works on all four staged pairs today
+with no new silicon, and forecloses nothing.
+
+What it cost elsewhere, because an opcode assignment is never local: the
+published census moved **1,071,635 -> 1,068,915**. Opcode 31 was one of
+the three unassigned codes whose defined answer the elementwise sets
+score, and an assigned opcode is not a reserved one - so its 4,000 cases
+left and 1,280 maxall reduction cases arrived. This is the FIFTH
+assignment to shed a member of that list (24, 26, 28, 30 before it) and
+the first to shrink the census, because IMUL is elementwise and simply
+renamed its cases where a reduction has none to rename. Docs that RECORD
+a past run still say 1,071,635 and are correct to - that run replayed
+that many.
 
 **4. A device-side gather.** Steps 2 and 3 of that integrator's force
 evaluation need a lane to read another lane's result, and the prototype's

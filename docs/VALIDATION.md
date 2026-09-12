@@ -10659,3 +10659,143 @@ And `docs/ROADMAP.md`'s ask list said three where the requester states
 six. The gather, the lane mask and the scalar broadcast were missing, so
 the list that is the input to "what next" was incomplete, and a round of
 work went elsewhere first on the strength of it.
+
+## 2026-09-12 - a maximum reduction, the first opcode assignment to shrink the published census
+
+`CFT_MAXALL` (31): a maximum over the array, `cft-rebound`'s third ask
+(`docs/HARDWARE.md:347`, *"a `CFT_MAX` reduction would keep it on the
+tile, and that ask stands"*). Its convergence test was a host loop of
+width-one calls, about `2*3N` per corrector pass and 13 to 19 percent of
+all library calls.
+
+**Composed, not hardware**, and the code chose that rather than taste.
+Two findings, both checked:
+
+- `CAPS[15:8]` is full - all eight opcode-group bits are assigned
+  (`rtl/cft_krnl.sv:448-467`). *Not* the blocker it first looked like:
+  CAPS2 is already decoded (`seq->features |= ((caps2 >> 4) & 0xFu) << 8`,
+  `backend_xrt.cpp:810`), so `CAPS2[7]` is one RTL line and one `#define`.
+  An earlier draft of this entry said a new bit cost an ABI step; that
+  was wrong and is corrected here rather than quietly.
+- **A tile handed opcode 31 as a reduction would corrupt memory, not
+  answer wrongly.** `cfg_is_reduce` is `(cfg_op == 8'd24)`
+  (`rtl/cft_engine_stream.sv:523`), so 31 decodes as ELEMENTWISE and the
+  tile writes `n` elements where a reduction's caller sized `d` for one.
+  Distinct from the unassigned-opcode rule, which is benign by design -
+  an unassigned opcode answers canonical qNaN + invalid, loudly.
+
+So the composition sits above the backend dispatch, where `CFT_SUMSQ`
+and `CFT_SUMABS` put theirs, and no tile ever sees the opcode:
+
+    CFT_MAXALL  ->  ceil(log2 n) x cft_run(CFT_MAX, first half, second half)
+
+**The property that makes this a complete answer and not a staging
+post:** 754-2019 `maximum` is exactly associative and commutative
+*including its flags* - any NaN gives a canonical quiet NaN rather than a
+propagated payload, `invalid` is raised exactly when some operand is
+signalling and every element is an operand of one comparison whatever the
+shape, and `max(+0, -0)` is `+0`, which is also the maximum among zeros.
+So the halving, a left fold and the sum tree's own shape all return the
+same bits. Hence no tree contract, a multi-tile fold with nothing to get
+right twice, and a hardware maxall - if one is ever built behind
+`CAPS2[7]` - that cannot move an answer. It works on all four staged
+pairs today with no new silicon.
+
+`host/tests/reduce_check.py` compares the library's halving against the
+model's left fold, which TESTS that associativity rather than assuming
+it. The empty array is `-infinity`, chosen (754 says nothing about an
+empty reduction) so that folding an empty range into a non-empty one is a
+no-op; `+0`, the additive identity the other four use, would win against
+every negative element.
+
+### The census moved, and this is the first assignment that shrank it
+
+**1,071,635 -> 1,068,915.** Opcode 31 was one of three unassigned codes
+whose *defined* answer the elementwise sets score, and an assigned opcode
+is not a reserved one - so its 4,000 cases left (200 a set, 20 sets) and
+1,280 published maxall reduction cases arrived. Net -2,720.
+
+This is the FIFTH assignment to shed a member of that list - 24 became
+`CFT_SUM`, 26 `RECIP_SEED`, 28 `CFT_SUMSQ`, 30 `CFT_IMUL` - and the first
+to shrink the census, for a reason worth recording: **IMUL is
+elementwise, so its 200 cases a set simply changed name** from
+`reserved30` to `imul`. A reduction has no elementwise case to rename.
+
+Docs that RECORD a past run still say 1,071,635 and are right to: that
+run replayed that many. 15 live claims moved across 8 files; 51
+historical measurements were left alone, including all 35 in this file.
+A reader will see both numbers, and that is correct. One
+misclassification of mine was caught mid-way: `docs/EMBEDDED.md` holds
+both kinds, and its "what has been checked" numbers are records of *this*
+commit's gate run - so they move only because that gate was re-run.
+
+### Five gates caught this, every one by design
+
+| gate | what it said |
+|---|---|
+| `python/tests/test_reduce.py` | `REDUCE_OPS == (24, 25, 28, 29)` - pins the wire numbers, so an INSERTION cannot pass |
+| `host/tests/api_test.c` | opcode 31 must name "reserved", and `cft_supports(31)` must answer no |
+| the same file's 256-opcode sweep | `cft_run` must REFUSE a reduction; maxall was missing from the skip list |
+| `host/tests/reduce_check.py` | its own op-31 unassigned check |
+| `python/cft_golden/vectors.py` | the unassigned list, whose comment already read *"this list has now shed a member FOUR times"* |
+
+The sixth was `host/src/conformance.c`, and it is the one that matters
+most: the replayer REFUSED the regenerated sets -
+`fp32-reduce.jsonl:257: unknown reduction name` - rather than skipping a
+function it did not know. A set naming an operation the replayer cannot
+score is exactly what must not pass silently.
+
+### A defect in the replayer, found by appending to it
+
+`reduce_fn_scaled(fn)` was `return fn >= RD_PROD;`. Appending
+`RD_MAXALL = 7` therefore made maxall a *scaled product* by default, and
+it would have been asked for a scale factor it does not have. Now named
+rather than ranged. A range test over an enum someone will append to is a
+defect waiting for its next member, and maxall was the next member.
+
+Two transcribed array bounds went the same way and are now derived from
+`sizeof`: `cft_op_name`'s `names[31]`, which silently DISCARDED the
+32nd initialiser so `cft_op_name(31)` kept answering "reserved", and
+`reduce_fn_from_name`'s `names[7]` with a matching `i < 7`.
+
+And one conservative default had to be taught: `cft_sf_op_operands`
+answers `1u | 2u` for an assigned opcode it does not know, so assigning
+31 without naming it there refused every maxall call whose `b` is NULL -
+which is all of them. That was 800 of the first run's 804 failures.
+
+### Three stale-artifact errors, all mine
+
+Worth the space because they are one mistake wearing three hats, and the
+gates were right every time:
+
+1. Built `libcft.a`, tested the **shared** library. The first run's
+   `maxall n=0: status 1` was a stale DLL, not a defect.
+2. Piped a build to `/dev/null` and reported `rc=0` as clean. The
+   compiler had printed
+   `src/device.c:336: warning: excess elements in array initializer`,
+   naming the `names[31]` bug directly.
+3. Ran a stale `api-test.exe` and reported "all contract checks passed".
+   `all:` is `libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)` - **api-test is in
+   `$(TESTS)`**, so `make all` never built it. `make test` built the
+   current one and it failed 4.
+
+`reduce_check.py` prints only its first five failures (`if self.failed
+<= 5`) while counting all of them, so 804 failures showed as five lines.
+Reading the summary rather than the visible output is what kept the count
+honest.
+
+### Measured
+
+| gate | result |
+|---|---|
+| `make -C host reducetest` (`--trials 1500`) | **13,516 reductions across 4 formats, all seven of 9.4 plus maxall, 0 failures** |
+| `cft-selftest vectors/out` | **168 sets, 1,068,915 cases, all matching** |
+| `make -C host test` | api-test, the canonical partition, the full replay, and C/ctypes to the same bits |
+| `api-test` | all contract checks, from a freshly built binary |
+| `make golden` | 2172 passed, 5 skipped |
+| `sync.py --check` | 28 vendored files, all identical to `host/` |
+| build | `-std=c99 -Wall -Wextra -Wpedantic -Wshadow`, zero warnings |
+
+No RTL changed, no ABI step, and no capability bit: a caller asks
+`cft_supports(CFT_MAXALL, fmt)`, which answers through the **min/max**
+group because that is what the composition runs on.

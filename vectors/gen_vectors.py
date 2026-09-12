@@ -186,7 +186,8 @@ from cft_golden.formatof import (  # noqa: E402
 #: so neither name is written out twice.
 FORMATOF_LONG = {v: k for k, v in FORMATOF_SHORT.items()}
 from cft_golden.reduce import (  # noqa: E402
-    SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, fdot, fsum, fsumabs, fsumsq,
+    SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, fdot, fmaxall, fsum, fsumabs,
+    fsumsq,
     scaled_prod,
 )
 
@@ -196,6 +197,7 @@ REDUCE_IMPL = {
     "dot":     lambda fmt, xs, ys, rnd: fdot(fmt, xs, ys, rnd),
     "sumsq":   lambda fmt, xs, ys, rnd: fsumsq(fmt, xs, rnd),
     "sumabs":  lambda fmt, xs, ys, rnd: fsumabs(fmt, xs, rnd),
+    "maxall":  lambda fmt, xs, ys, rnd: fmaxall(fmt, xs, rnd),
     "scaled_prod":
         lambda fmt, xs, ys, rnd: scaled_prod(fmt, xs, None, SP_PROD, rnd),
     "scaled_prod_sum":

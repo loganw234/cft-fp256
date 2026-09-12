@@ -108,6 +108,9 @@ static int op_group_bit(int op)
                                            * and CAPS[28] must ALSO be set
                                            * - checked beside the group */
     if (op >= 24 && op <= 25) return 5;   /* reduction */
+    if (op == 31)             return 5;   /* reduction: maxall
+                                           * (2026-09-12), composed - see
+                                           * reduce_helper_group */
     if (op >= 26 && op <= 27) return 6;   /* divide/sqrt (the seeds) */
     /* sumSquare and sumAbs are the reduction group too, although no
      * accumulator streams them: they are issued as a dot (or an abs
@@ -128,6 +131,7 @@ static int reduce_helper_group(int op)
 {
     if (op == 28) return 0;               /* sumsq  -> mul  */
     if (op == 29) return 1;               /* sumabs -> abs  */
+    if (op == 31) return 2;               /* maxall -> min/max */
     return -1;
 }
 
@@ -309,7 +313,13 @@ CFT_API const char *cft_format_name(cft_format f)
 
 CFT_API const char *cft_op_name(cft_op op)
 {
-    static const char *const names[31] = {
+    /* UNSIZED on purpose, since 2026-09-12. It was names[31], and
+     * appending maxall's string made a 32nd initialiser that the
+     * compiler DISCARDED with a warning - so cft_op_name(31) kept
+     * answering "reserved" and the opcode-assignment gate below
+     * caught it. The bound on the lookup is sizeof names, so an
+     * unsized array cannot disagree with itself. */
+    static const char *const names[] = {
         "fma", "add", "sub", "mul",
         "abs", "neg", "copysign",
         "min", "max", "minnum", "maxnum",
@@ -328,7 +338,8 @@ CFT_API const char *cft_op_name(cft_op op)
          * with the canonical quiet NaN must be refused rather than
          * replayed against a multiply, and it is this string that
          * makes the refusal fire. */
-        "imul"
+        "imul",
+        "maxall"
     };
     if ((int)op >= 0 && (int)op < (int)(sizeof names / sizeof names[0]) &&
         names[(int)op])
@@ -1071,13 +1082,23 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     f   = &cft_sf_formats[(int)fmt];
     esz = (size_t)f->width / 8;
 
-    /* n == 0 is +0.0 and raises nothing: the additive identity, and
-     * the only result here that is not a function of any input. It is
-     * handled before the operand check because a sum of nothing does
-     * not need anything to sum. */
+    /* n == 0 raises nothing and is the op's IDENTITY - the only result
+     * here that is not a function of any input. It is handled before the
+     * operand check because a reduction of nothing needs nothing to
+     * reduce.
+     *
+     * +0 for the four sum reductions, the additive identity. -infinity
+     * for maxall, the value that loses to every other: 754 says nothing
+     * about an empty reduction, so this is chosen, and chosen so that
+     * folding an empty range into a non-empty one is a no-op. A +0 here
+     * would WIN against every negative element, which is the failure
+     * this branch exists to prevent. */
     if (n == 0) {
         cft_bn z;
-        cft_bn_zero(&z);
+        if (op == CFT_MAXALL)
+            cft_sf_inf(f, 1, &z);
+        else
+            cft_bn_zero(&z);
         cft_bn_store(&z, (uint8_t *)d, (int)esz);
         cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
@@ -1114,6 +1135,82 @@ CFT_API cft_status cft_reduce(cft_device *dev,
      *
      * Recursion is one level deep and cannot be more: the calls below
      * name CFT_DOT and CFT_SUM, which take the tree path directly. */
+    /* maxall: halving with the elementwise maximum.
+     *
+     * The fifth composed reduction, and the first whose composition is
+     * not one pass plus the sum tree. No tile streams a maximum and none
+     * needs to - but unlike sumSquare and sumAbs, opcode 31 must NEVER
+     * be handed to a tile as a reduction: `cfg_is_reduce` is
+     * `(cfg_op == 8'd24)`, so a tile would decode 31 as elementwise and
+     * write n elements where a reduction's caller sized `d` for one.
+     * That is memory corruption, not a wrong answer, and it is why this
+     * block sits above the device dispatch rather than beside it.
+     *
+     * Halving is allowed to BE the shape because 754-2019 maximum is
+     * exactly associative and commutative, flags included: any NaN gives
+     * a canonical quiet NaN rather than a propagated payload, invalid is
+     * raised exactly when some operand is signalling and every element is
+     * an operand of one comparison whatever the shape, and max(+0, -0) is
+     * +0 which is also the maximum among zeros. So these bits are the
+     * software tree's bits, and a hardware maxall added later behind a
+     * capability bit would return them too - which is what makes this a
+     * complete answer rather than a staging post.
+     *
+     * ceil(log2 n) device passes against the ~2n width-one calls the
+     * first caller issues today (cft-rebound/docs/HARDWARE.md).
+     */
+    if (op == CFT_MAXALL) {
+        uint32_t cf = 0;
+        cft_status st = CFT_OK;
+        const int muted = cft_flags_mute(dev, 1);
+        uint8_t *buf[2] = {NULL, NULL};
+        const void *src = a;
+        size_t m = n, which = 0;
+
+        /* n == 0 never arrives: the identity is handled at the one
+         * n == 0 site above, beside every other reduction's. */
+        if (n > 1) {
+            /* ceil(n/2) + 1 covers every pass: the odd element is
+             * carried rather than dropped. */
+            size_t cap = (n / 2 + 2) * esz;
+            buf[0] = (uint8_t *)malloc(cap);
+            buf[1] = (uint8_t *)malloc(cap);
+            if (!buf[0] || !buf[1]) {
+                free(buf[1]); free(buf[0]);
+                (void)cft_flags_mute(dev, muted);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+        }
+        while (m > 1 && st == CFT_OK) {
+            const size_t h   = m / 2;          /* pairs this pass */
+            const int    odd = (m & 1u) != 0;  /* one element carried */
+            uint8_t     *dst = buf[which];
+            uint32_t     pf  = 0;
+
+            st = cft_run(dev, CFT_MAX, fmt, rnd,
+                         src, (const uint8_t *)src + h * esz, NULL,
+                         dst, h, &pf, bus_out);
+            cf |= pf;
+            if (st != CFT_OK)
+                break;
+            if (odd)
+                memcpy(dst + h * esz,
+                       (const uint8_t *)src + 2 * h * esz, esz);
+            src   = dst;
+            m     = h + (size_t)odd;
+            which ^= 1u;
+        }
+        (void)cft_flags_mute(dev, muted);
+        if (st == CFT_OK)
+            memcpy(d, src, esz);
+        free(buf[1]);
+        free(buf[0]);
+        if (st != CFT_OK)
+            return st;
+        cft_flags_emit(dev, cf, flags_out);
+        return CFT_OK;
+    }
+
     if (op == CFT_SUMSQ || op == CFT_SUMABS) {
         uint32_t cf = 0;
         cft_status st;

@@ -4,7 +4,7 @@
  * CSRP/1 - the cft serial replay protocol.
  *
  * WHAT THIS IS FOR. The published conformance vectors (vectors/out,
- * 168 set files, 1,071,635 cases) are what every implementation of
+ * 168 set files, 1,068,915 cases) are what every implementation of
  * this contract is held to, and host/src/conformance.c replays them by
  * opening the files. A microcontroller has no files and no room for
  * 194 MB of them, so the sets stay on the host and the CASES travel:

@@ -58,10 +58,10 @@ from cft_golden import (  # noqa: E402
     min_subnormal_bits, unpack,
 )
 from cft_golden.reduce import (  # noqa: E402
-    OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, SP_PROD, SP_PROD_SUM,
-    SP_PROD_DIFF, SCALED_KINDS, SCALED_KIND_NAMES,
-    canonical_ranges, combine, fdot, fsum, fsumabs, fsumsq, reduce_bits,
-    scaled_prod, split,
+    OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, OP_MAXALL, SP_PROD,
+    SP_PROD_SUM, SP_PROD_DIFF, SCALED_KINDS, SCALED_KIND_NAMES,
+    canonical_ranges, combine, fdot, fmaxall, fsum, fsumabs, fsumsq,
+    reduce_bits, scaled_prod, split,
 )
 
 RND_BY_NAME = {v: k for k, v in RND_NAMES.items()}
@@ -72,17 +72,26 @@ CFT_ERR_UNSUPPORTED = 2
 
 OP_FMA = 0          # an elementwise opcode, for the refusal check
 
-# The four reductions cft_reduce carries, and the model function each
+# The five reductions cft_reduce carries, and the model function each
 # is scored against. Keyed by opcode so a new one cannot be added to
 # the sweep without also being given a definition to be wrong against.
+#
+# maxall is the one whose two sides are deliberately DIFFERENT SHAPES:
+# the model folds left, the library halves with the elementwise maximum.
+# That is not an oversight to be tidied - 754-2019 maximum is exactly
+# associative and commutative including its flags, so comparing the two
+# shapes is what TESTS that claim rather than assuming it. For every
+# other row the shape is the contract and both sides walk the same tree.
 REDUCE_REF = {
     OP_SUM:    lambda fmt, xs, ys, rnd: fsum(fmt, xs, rnd),
     OP_DOT:    lambda fmt, xs, ys, rnd: fdot(fmt, xs, ys, rnd),
     OP_SUMSQ:  lambda fmt, xs, ys, rnd: fsumsq(fmt, xs, rnd),
     OP_SUMABS: lambda fmt, xs, ys, rnd: fsumabs(fmt, xs, rnd),
+    OP_MAXALL: lambda fmt, xs, ys, rnd: fmaxall(fmt, xs, rnd),
 }
 REDUCE_NAMES = {OP_SUM: "sum", OP_DOT: "dot",
-                OP_SUMSQ: "sumsq", OP_SUMABS: "sumabs"}
+                OP_SUMSQ: "sumsq", OP_SUMABS: "sumabs",
+                OP_MAXALL: "maxall"}
 
 
 def load_library():
@@ -449,11 +458,19 @@ def check_refusals(lib, dev, fmt):
     # reserved, or a recorded conformance set naming it "reservedNN"
     # would replay against a different operation than the one its
     # answer was recorded for.
-    if lib.cft_op_name(31) != b"reserved":
-        print("FAIL opcode 31 should still be unassigned")
+    # Moved 31 -> 15 on 2026-09-12, when 31 became maxall. 15 is the
+    # remaining unassigned code inside the float block; 255 is the other
+    # one, at the top of the byte.
+    if lib.cft_op_name(15) != b"reserved":
+        print("FAIL opcode 15 should still be unassigned")
         bad += 1
-    if lib.cft_supports(dev, 31, PREC_CODE[fmt.name]):
+    if lib.cft_supports(dev, 15, PREC_CODE[fmt.name]):
         print("FAIL cft_supports says an unassigned opcode is supported")
+        bad += 1
+    # And 31 must now read as what it became, or a set recorded against
+    # "reserved31" would replay against maxall.
+    if lib.cft_op_name(31) != b"maxall":
+        print("FAIL opcode 31 should now name maxall")
         bad += 1
     # IMUL is named, and NOT yet published: the opcode exists and the
     # sequencer executes it, but no CAPS bit says a device carries it,
@@ -622,7 +639,8 @@ def main():
             for rnd in rounds:
                 xs = [rand_operand(fmt, rng) for _ in range(n)]
                 ys = [rand_operand(fmt, rng) for _ in range(n)]
-                for op in (OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS):
+                for op in (OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS,
+                           OP_MAXALL):
                     ck.one(op, fmt, rnd, xs, ys)
 
         for _ in range(args.trials):

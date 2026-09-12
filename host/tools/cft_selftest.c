@@ -9,7 +9,7 @@
  * With no artifact it exercises the software backend. With one it
  * opens that device and replays every case through the hardware,
  * which is the run docs/CARDDAY.md keeps: on 2026-09-08 that was 168
- * sets and 1,071,635 published cases, all matching, through one tile
+ * sets and 1,068,915 published cases, all matching, through one tile
  * and through four - the claim this project exists to make, checked on
  * silicon. The count is whatever `make vectors` last emitted; the tool
  * prints it rather than assuming it.

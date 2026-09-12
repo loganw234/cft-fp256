@@ -926,6 +926,63 @@ the arithmetic group and `CFT_SUMABS` the sign group, so asking about
 the opcode itself is the right question and a device missing one says
 `CFT_ERR_UNSUPPORTED` before the sequence starts.
 
+### maxall (2026-09-12), the third composition and the only one with no tree
+
+`CFT_MAXALL` (31) is a maximum over the array - 754-2019 9.6 `maximum`,
+reduced. It is **not** one of 9.4's seven; it exists because a real
+workload asked for it (`cft-rebound/docs/HARDWARE.md`: the convergence
+test of an N-body integrator reads `3N x E` deposits per corrector pass,
+and a maximum on the device keeps it there).
+
+It is a composition like the two above, but not the same kind. Those are
+the sum tree over a different leaf; a maximum cannot be written as a sum
+at all. What makes it cheap is the opposite property:
+
+    CFT_MAXALL  ->  ceil(log2 n) x cft_run(CFT_MAX, first half, second half)
+
+**It has no tree contract, and that is the whole design.** 754-2019
+`maximum` is exactly associative and commutative *including its flags*:
+any NaN yields a canonical quiet NaN rather than a propagated payload,
+`invalid` is raised exactly when some operand is signalling and every
+element is an operand of one comparison whatever the shape, and
+`max(+0, -0)` is `+0`, which is also the maximum among zeros. So every
+shape agrees. Three consequences follow, and they are the reason this
+reduction is simpler than the other four rather than harder:
+
+- the halving above, a left fold, and the sum tree's own shape all
+  return the same bits, so none of them had to be named the contract;
+- four tiles fold their partials with a maximum, with nothing to get
+  right twice - the failure mode docs/DETERMINISM.md describes for a
+  sum's fold cannot arise;
+- a hardware maxall added later, behind a capability bit, would return
+  these same bits. The composition is therefore a complete answer and
+  not a staging post.
+
+The published sets score it: 1,280 cases across the reduction families,
+and `host/tests/reduce_check.py` compares the library's halving against
+the model's left fold, which TESTS the associativity above instead of
+assuming it.
+
+Two edges, both inherited and both already true of `CFT_SUM`: a single
+element is returned verbatim with no flags, so maxall of one signalling
+NaN is that pattern rather than a quiet one; and the rounding attribute
+is accepted and unused, because a maximum selects an operand instead of
+computing one.
+
+The empty array is **-infinity** - the identity that loses to every
+other value. 754 says nothing about an empty reduction, so this is
+chosen, and chosen so that folding an empty range into a non-empty one
+cannot change it. A `+0` there, the additive identity the other four
+use, would win against every negative element.
+
+`cft_supports()` answers for it through the **min/max** group, since
+that is what it composes from. And `cft_run` refuses it, as it refuses
+every reduction: opcode 31 reaching a tile would be decoded as
+elementwise - `cfg_is_reduce` is `(cfg_op == 8'd24)` - and would write
+`n` elements where the caller sized one, which is memory corruption
+rather than a wrong number. The composition therefore sits above the
+backend dispatch, and no tile ever sees the opcode.
+
 **Three are named host entry points**, because they return a PAIR:
 
 ```c

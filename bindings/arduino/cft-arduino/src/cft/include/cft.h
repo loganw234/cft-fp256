@@ -302,7 +302,35 @@ typedef enum cft_op {
      * ALU is this same opcode space. Whether a given DEVICE carries it
      * elementwise is a CAPS question and cft_supports() is where to
      * ask. */
-    CFT_IMUL     = 30
+    CFT_IMUL     = 30,
+
+    /* A maximum over the array: 754-2019 9.6 `maximum`, reduced.
+     * Issued through cft_reduce(), whose first argument is an opcode,
+     * which is the only reason it has a number - no tile streams it.
+     *
+     * COMPOSED, like sumSquare and sumAbs, and by halving with the
+     * elementwise CFT_MAX: ceil(log2 n) passes rather than the tree. A
+     * maximum cannot be written as a sum, so it is the first reduction
+     * since CFT_SUM that the sum tree cannot serve.
+     *
+     * The halving is not a compromise. 754-2019 maximum is exactly
+     * associative and commutative INCLUDING its flags - any NaN yields a
+     * canonical quiet NaN rather than a propagated payload, invalid is
+     * raised exactly when some operand is signalling, and max(+0, -0) is
+     * +0 which is also the maximum among zeros - so every shape returns
+     * the same bits. That is why this reduction has no tree contract,
+     * why four tiles fold their partials with a maximum, and why a
+     * hardware maxall added later cannot change an answer.
+     *
+     * The rounding attribute is accepted and unused: a maximum selects
+     * an operand instead of computing one. An EMPTY array is -infinity,
+     * the identity that loses to every other value - chosen, since 754
+     * says nothing about an empty reduction, and chosen so that folding
+     * an empty range into a non-empty one is a no-op. A single element
+     * is returned verbatim with no flags, so maxall of one signalling
+     * NaN is that pattern rather than a quiet one - the edge CFT_SUM and
+     * CFT_SUMABS already document. */
+    CFT_MAXALL   = 31
 } cft_op;
 
 /* The canonical name, so a binding, a log line and a conformance

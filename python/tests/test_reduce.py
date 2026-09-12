@@ -38,7 +38,7 @@ from cft_golden import (  # noqa: E402
     negate, is_nan, vectors,
 )
 from cft_golden.reduce import (  # noqa: E402
-    OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, REDUCE_OPS, REDUCE_OP_NAMES,
+    OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, OP_MAXALL, REDUCE_OPS, REDUCE_OP_NAMES,
     SP_PROD, SP_PROD_SUM, SP_PROD_DIFF, SCALED_KINDS, SCALED_KIND_NAMES,
     SCALE_MIN, SCALE_MAX,
     split, tree_adds, canonical_ranges, reduce_bits, fsum, fdot, combine,
@@ -977,11 +977,15 @@ def test_scaled_kinds_are_distinct_and_named():
 
 
 def test_new_reduction_opcodes_are_appended_not_inserted():
-    """28 and 29, after the divide/sqrt seeds at 26 and 27. An opcode
-    number is on the wire and in every published vector set, so this
-    asserts the NUMBERS rather than the order of an enum."""
+    """28 and 29 after the divide/sqrt seeds at 26 and 27, and 31 after
+    IMUL at 30. An opcode number is on the wire and in every published
+    vector set, so this asserts the NUMBERS rather than the order of an
+    enum - and it is the gate that catches an INSERTION, which would
+    silently redefine every recorded case naming a later opcode."""
     assert OP_SUM == 24 and OP_DOT == 25
     assert OP_SUMSQ == 28 and OP_SUMABS == 29
-    assert REDUCE_OPS == (24, 25, 28, 29)
+    assert OP_MAXALL == 31
+    assert REDUCE_OPS == (24, 25, 28, 29, 31)
     assert REDUCE_OP_NAMES[OP_SUMSQ] == "sumsq"
     assert REDUCE_OP_NAMES[OP_SUMABS] == "sumabs"
+    assert REDUCE_OP_NAMES[OP_MAXALL] == "maxall"
