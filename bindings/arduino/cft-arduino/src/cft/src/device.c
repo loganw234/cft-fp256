@@ -241,7 +241,9 @@ static void buf_sync_in(cft_device *dev, const void *p, size_t bytes)
 static void bind_clear(cft_bindings *bd)
 {
     int i;
-    for (i = 0; i < 4; i++) {
+    /* CFT_ROLE_COUNT, never a literal: a role this loop does not reach
+     * is a pointer a backend would read as a live binding. */
+    for (i = 0; i < CFT_ROLE_COUNT; i++) {
         bd->buf[i] = NULL;
         bd->off[i] = 0;
     }
@@ -511,10 +513,20 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
         cft_bindings bd;
         size_t esz = cft_format_size((cft_format)fmt);
         bind_clear(&bd);
-        /* The three streams and the deposit window. `counts` is four
-         * bytes an element whatever the format and the image and bank
-         * do not grow with n at all, so none of them is worth a
-         * device copy - backend.h says so beside the signature. */
+        /* The three streams, the deposit window, and the two scratch
+         * blocks. `counts` is four bytes an element whatever the format
+         * and the image and bank do not grow with n at all, so none of
+         * THOSE is worth a device copy - backend.h says so beside the
+         * signature.
+         *
+         * The scratch blocks are not in that category and used to be
+         * filed with it. They are n_scratch_in slots for each of n
+         * lanes, lane-major and dense (docs/SEQUENCER.md R5) - the same
+         * shape as the deposit window's n * max_deposits, and they grow
+         * with n for the same reason. An integrator's per-step state
+         * lives there and is rewritten every corrector pass, so staging
+         * it put a round trip in the innermost loop
+         * (cft-rebound/docs/HARDWARE.md, the first ask). */
         buf_sync_in(dev, a, n * esz);
         buf_sync_in(dev, b, n * esz);
         buf_sync_in(dev, c, n * esz);
@@ -524,6 +536,17 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
         if (max_deposits)
             bind_role(dev, &bd, CFT_ROLE_D, deposits,
                       n * max_deposits * esz);
+        if (io && io->scratch_in_bytes) {
+            /* Read by the tile, so it is brought home first, exactly as
+             * a, b and c are. scratch_out needs none of this: it is
+             * written and not read, which is why `d` needs none. */
+            buf_sync_in(dev, io->scratch_in, io->scratch_in_bytes);
+            bind_role(dev, &bd, CFT_ROLE_SI, io->scratch_in,
+                      io->scratch_in_bytes);
+        }
+        if (io && io->scratch_out_bytes)
+            bind_role(dev, &bd, CFT_ROLE_SO, io->scratch_out,
+                      io->scratch_out_bytes);
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,

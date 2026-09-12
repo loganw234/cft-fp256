@@ -3,11 +3,19 @@
  *
  * libcft - the Coordinated Fusion Tile host API.
  *
- * STATUS: the software backend is implemented and is checked against
- * the golden model over the whole interesting input space (see
- * host/tests/). The XRT device backend is implemented behind the same
- * calls (build with CFT_ENABLE_XRT); a build without it reports
- * CFT_ERR_NO_DEVICE from cft_open() with an artifact path.
+ * STATUS: three backends, all implemented behind these same calls.
+ * The SOFTWARE backend is checked against the golden model over the
+ * whole interesting input space (see host/tests/). The REMOTE backend
+ * is compiled in by default - cft_open("cft://host:port") reaches a
+ * cft-serve holding a device elsewhere, over plain sockets, and
+ * -DCFT_NO_REMOTE leaves it out. The XRT DEVICE backend is NOT on by
+ * default: build with CFT_ENABLE_XRT (`make -C host XRT=1`), or
+ * cft_open() of an artifact PATH reports CFT_ERR_NO_DEVICE - which is
+ * the only artifact string that answer applies to, since a cft:// URL
+ * is dispatched before the XRT branch and works either way. An
+ * XRT-enabled libcft.a also needs XRT's own libraries at the final
+ * link; docs/HOSTAPI.md, "The device backend", has the flag list and
+ * says why the shared library exists.
  *
  * ---------------------------------------------------------------
  * What this library promises
@@ -594,6 +602,12 @@ typedef struct cft_caps {
                                         * non-zero reserved[1] at the
                                         * header, but the loader refuses
                                         * this one first and by name */
+/* RESERVED, revision 4's R8, and published by no bitstream yet - every
+ * existing image reads this bit as zero, which is the correct answer
+ * for them. A device that does not advertise it cannot honour
+ * CFT_PROG_FLAG_SCRATCH_STRICT, and such a program is refused by name
+ * rather than run with the modulo meaning. */
+#define CFT_SEQ_FEAT_SCRATCH_STRICT 0x400u /* CAPS2[6] */
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
 
@@ -2052,6 +2066,17 @@ typedef struct cft_program cft_program;
  * is the tail. */
 #define CFT_STATUS_DEPOSIT_OVERFLOW (1u << 4)
 
+/* RESERVED, revision 4's R8, and not yet produced by anything in this
+ * library. An indexed scratch access at or past the device's scratch
+ * depth, in a program whose header sets CFT_PROG_FLAG_SCRATCH_STRICT:
+ * the access is suppressed, LDX reads +0, and the run continues, which
+ * is what a deposit past max_deposits already does. The number is
+ * published here before any device can report it for the reason the
+ * bit above moved to 4 - a status bit is free to choose only while it
+ * has never crossed a device boundary. Like the deposit bit it is
+ * deliberately not an IEEE flag. */
+#define CFT_STATUS_SCRATCH_RANGE (1u << 5)
+
 CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
                                     size_t bytes, cft_program **out);
 CFT_API void       cft_program_free(cft_program *prog);
@@ -2090,6 +2115,18 @@ CFT_API void       cft_program_free(cft_program *prog);
                                             * scratch_io word must be
                                             * zero, as the reserved word
                                             * it was always had to be */
+/* RESERVED, revision 4's R8. NOT yet in this library's known-flag mask:
+ * an image that sets it is still CFT_ERR_ARTIFACT, because the bit asks
+ * for a contract the software backend does not yet implement and the
+ * honest answer to that is a refusal rather than the old meaning
+ * silently. The number is published now so it cannot be assigned twice.
+ *
+ * What it will mean: an indexed scratch access at or past the depth is
+ * REPORTED - CFT_STATUS_SCRATCH_RANGE - rather than reduced modulo the
+ * depth. With the bit clear the modulo stands, so every image built
+ * before revision 4 keeps its meaning exactly. Will need
+ * CFT_SEQ_FEAT_SCRATCH_STRICT on the device. */
+#define CFT_PROG_FLAG_SCRATCH_STRICT (1u << 2)
 
 /* What the loaded program is, so a caller can size its buffers
  * without parsing the image itself.
@@ -2104,12 +2141,13 @@ typedef struct cft_program_info {
     uint32_t   n_insns;
     uint32_t   n_consts;
     /* ---- appended, ABI 0.9 ---- */
-    uint32_t   flags;          /* the header's flags word;
-                                * CFT_PROG_FLAG_BANK_EXT and
-                                * CFT_PROG_FLAG_SCRATCH_IO above are the
-                                * bits assigned. A caller built
-                                * against the older struct passes the
-                                * older struct_size and never sees it */
+    uint32_t   flags;          /* the header's flags word. The assigned
+                                * bits are the CFT_PROG_FLAG_* macros
+                                * above - do not keep a list here, which
+                                * is how this comment came to name two
+                                * of the three. A caller built against
+                                * the older struct passes the older
+                                * struct_size and never sees it */
     /* ---- appended, ABI 0.10: the per-lane scratch ----
      *
      * The first two are the header's scratch_io word split in half,

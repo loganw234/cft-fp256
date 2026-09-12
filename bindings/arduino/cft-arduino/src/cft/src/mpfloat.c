@@ -32,6 +32,11 @@
  *                ea*eb. The cross term is below 2^-W as long as
  *                Ea*Eb < 2^W, which the saturation at 2^40 and the
  *                minimum W of 88 guarantee.           Ea + Eb + 3
+ *                (CFT_TRANSCEND_MINPREC can lower that minimum, but
+ *                it is a test-only hook - see transcend.c, "an
+ *                override for tests only" - whose whole purpose is
+ *                to force the escalation path that ordinary use has
+ *                never taken. It cannot change a result.)
  *
  *   div          The same, with (1+ea)/(1+eb) = 1 + ea - eb + O(eb^2)
  *                and eb below 1/2 throughout.          Ea + Eb + 3
