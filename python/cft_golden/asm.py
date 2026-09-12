@@ -52,7 +52,8 @@ import re
 import struct
 
 from .formats import FORMATS, PREC_CODE, FpFormat
-from .seqflags import FLAG_BANK_EXT, FLAG_SCRATCH_IO, names as flag_names
+from .seqflags import (FLAG_BANK_EXT, FLAG_SCRATCH_IO,
+                       FLAG_SCRATCH_STRICT, names as flag_names)
 from . import chars
 from . import softfloat as sf
 
@@ -74,12 +75,12 @@ REG_FIELD = 16            # what the four-bit operand field alone reaches
 # R5: bit 1 is SCRATCH_IO, and word 7 (bytes 28..31) - `reserved[1]`
 # until revision 3 - is `scratch_io`: [15:0] in, [31:16] out, and zero
 # unless the flag is set.
-# Numbering from .seqflags. The subset is this ASSEMBLER's own and is
-# deliberately smaller than the loader's: seq.py implements R8's
-# SCRATCH_STRICT and this cannot yet emit it, so an image asking for
-# it is refused here rather than assembled into something no tile
-# will load.
-FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO
+# Numbering from .seqflags. The subset is this ASSEMBLER's own; it now
+# matches the loader's, because `.scratch strict` can emit R8 and
+# reading one back is no longer a refusal. It is still declared here
+# rather than imported as a whole: the day a flag is numbered before
+# this file can write it, the two differ again and that is correct.
+FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO | FLAG_SCRATCH_STRICT
 FLAGS_RESERVED = ~FLAGS_KNOWN & 0xFFFFFFFF
 
 MAX_LOOP_DEPTH = 4
@@ -780,9 +781,9 @@ class Image:
             raise AsmError(f"program version {ver}, this loader speaks "
                            f"{VERSION}")
         if flags & FLAGS_RESERVED:
-            raise AsmError(f"header flags {flags:#010x}: only BANK_EXT and "
-                           f"SCRATCH_IO are defined and the rest are "
-                           f"reserved")
+            raise AsmError(f"header flags {flags:#010x}: only "
+                           f"{flag_names(FLAGS_KNOWN)} are defined and the "
+                           f"rest are reserved")
         if not (flags & FLAG_SCRATCH_IO) and scratch_io:
             raise AsmError("reserved header word 7 must be zero unless "
                            "flags.SCRATCH_IO says it is scratch_io")
@@ -950,6 +951,15 @@ class _Asm:
         something a program acquires as it goes."""
         if self.insns:
             self.fail(".scratch must come before the instructions")
+        if len(args) == 1 and args[0].lower() == "strict":
+            # Revision 4's R8: an indexed access at or past the depth
+            # is REPORTED rather than reduced modulo it. It belongs on
+            # .scratch because it is a property of the scratch, and a
+            # tile that cannot honour it refuses the image.
+            if self.flags & FLAG_SCRATCH_STRICT:
+                self.fail(".scratch strict appears twice")
+            self.flags |= FLAG_SCRATCH_STRICT
+            return
         if len(args) == 1:
             if self.have_depth:
                 self.fail(".scratch N appears twice")
@@ -961,7 +971,7 @@ class _Asm:
             self.have_depth = True
             return
         if len(args) != 2 or args[0].lower() not in ("in", "out"):
-            self.fail(".scratch takes a depth, or `in N`, or `out M`")
+            self.fail(".scratch takes a depth, `strict`, or `in N`, or `out M`")
         which = args[0].lower()
         v = _parse_uint(args[1], f".scratch {which}")
         if v > SCRATCH_IO_MAX:

@@ -859,13 +859,34 @@ def test_a_scratch_io_count_past_the_declared_depth_is_refused():
             "sixteen-bit count")
 
 
-def test_the_reserved_flag_bits_after_revision_three():
-    """BANK_EXT and SCRATCH_IO are the two defined bits; bit 2 up is
-    still reserved-must-be-zero."""
+def test_the_reserved_flag_bits_after_revision_four():
+    """Revision 4 took bit 2 for SCRATCH_STRICT, so the first bit this
+    assembler cannot read moved up again, to 3.
+
+    MOVED rather than deleted, exactly as revision 3 moved it off bit 1:
+    the check is about a flag this assembler does not know, whichever
+    bit that happens to be. It needs a bit outside FLAGS_KNOWN, and it
+    will need moving again at revision 5."""
     image = bytearray(asm.assemble(HEAD + "halt\n", "<test>"))
-    image[24:28] = (asm.FLAG_BANK_EXT | 0x4).to_bytes(4, "little")
-    with pytest.raises(asm.AsmError, match="only BANK_EXT and SCRATCH_IO"):
+    image[24:28] = (asm.FLAG_BANK_EXT | 0x8).to_bytes(4, "little")
+    with pytest.raises(asm.AsmError,
+                       match="BANK_EXT, SCRATCH_IO and SCRATCH_STRICT"):
         asm.Image.from_bytes(bytes(image))
+
+
+def test_scratch_strict_survives_the_header():
+    """`.scratch strict` sets the flag, and a header carrying it reads
+    back with the flag still set.
+
+    Both halves matter. A bit that assembles but does not parse back
+    changes a program's contract the first time a tool reads its own
+    output, and this flag's absence is silent: the run computes an
+    answer either way, just a different one."""
+    image = asm.assemble(HEAD + ".scratch strict\nhalt\n", "<test>")
+    assert asm.Image.from_bytes(image).flags & asm.FLAG_SCRATCH_STRICT
+
+    plain = asm.assemble(HEAD + "halt\n", "<test>")
+    assert not (asm.Image.from_bytes(plain).flags & asm.FLAG_SCRATCH_STRICT)
 
 
 # ---- 3g. revision 3: the ninth constant-index bit -----------------------

@@ -83,9 +83,11 @@
  * than every defined flag: CFT_PROG_FLAG_SCRATCH_STRICT exists and this
  * cannot emit it, so an image asking for it is refused here rather than
  * written out as something no tile will load. */
-#define FLAG_BANK_EXT   CFT_PROG_FLAG_BANK_EXT
-#define FLAG_SCRATCH_IO CFT_PROG_FLAG_SCRATCH_IO
-#define FLAGS_KNOWN    (FLAG_BANK_EXT | FLAG_SCRATCH_IO)
+#define FLAG_BANK_EXT       CFT_PROG_FLAG_BANK_EXT
+#define FLAG_SCRATCH_IO     CFT_PROG_FLAG_SCRATCH_IO
+#define FLAG_SCRATCH_STRICT CFT_PROG_FLAG_SCRATCH_STRICT
+#define FLAGS_KNOWN    (FLAG_BANK_EXT | FLAG_SCRATCH_IO | \
+                        FLAG_SCRATCH_STRICT)
 /* R4: `SCRATCH_D` is a build parameter of the tile and not part of the
  * program model, so a SOURCE declares the depth it assumes with
  * `.scratch N` and a static slot at or past it is refused. 256 is what
@@ -1039,7 +1041,16 @@ static void assemble_line(program *P, char *line)
              * would make the slot bound depend on where a line sits. */
             if (P->n_insns)
                 diel(".scratch must come before the instructions");
-            if (ntok == 2) {
+            if (ntok == 2 && streq_ci(tok[1], "strict")) {
+                /* Revision 4's R8: an indexed access at or past the
+                 * depth is REPORTED rather than reduced modulo it.
+                 * On .scratch because it is a property of the
+                 * scratch, and a tile that cannot honour it refuses
+                 * the image rather than running the old meaning. */
+                if (P->flags & FLAG_SCRATCH_STRICT)
+                    diel(".scratch strict appears twice");
+                P->flags |= FLAG_SCRATCH_STRICT;
+            } else if (ntok == 2) {
                 uint64_t v = parse_uint(tok[1], ".scratch");
                 if (P->have_depth)
                     diel(".scratch N appears twice");
@@ -1071,7 +1082,7 @@ static void assemble_line(program *P, char *line)
                  * MEANINGFUL. */
                 P->flags |= FLAG_SCRATCH_IO;
             } else {
-                diel(".scratch takes a depth, or `in N`, or `out M`");
+                diel(".scratch takes a depth, `strict`, or `in N`, or `out M`");
             }
         } else if (!strcmp(d, ".slot")) {
             uint64_t v;
@@ -1546,6 +1557,11 @@ static void disassemble(const program *P, FILE *out)
      * before revision 3. */
     if (P->scratch_depth != SCRATCH_D_DEFAULT)
         fprintf(out, ".scratch  %u\n", (unsigned)P->scratch_depth);
+    /* Written back so an image round-trips: a header carrying R8
+     * that disassembled without it would reassemble into a program
+     * with a different contract, silently. */
+    if (P->flags & FLAG_SCRATCH_STRICT)
+        fprintf(out, ".scratch  strict\n");
     if (P->flags & FLAG_SCRATCH_IO) {
         fprintf(out, ".scratch  in %u\n", (unsigned)P->n_scratch_in);
         fprintf(out, ".scratch  out %u\n", (unsigned)P->n_scratch_out);
