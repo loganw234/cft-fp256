@@ -52,6 +52,7 @@ import re
 import struct
 
 from .formats import FORMATS, PREC_CODE, FpFormat
+from .seqflags import FLAG_BANK_EXT, FLAG_SCRATCH_IO, names as flag_names
 from . import chars
 from . import softfloat as sf
 
@@ -73,8 +74,11 @@ REG_FIELD = 16            # what the four-bit operand field alone reaches
 # R5: bit 1 is SCRATCH_IO, and word 7 (bytes 28..31) - `reserved[1]`
 # until revision 3 - is `scratch_io`: [15:0] in, [31:16] out, and zero
 # unless the flag is set.
-FLAG_BANK_EXT = 0x1
-FLAG_SCRATCH_IO = 0x2
+# Numbering from .seqflags. The subset is this ASSEMBLER's own and is
+# deliberately smaller than the loader's: seq.py implements R8's
+# SCRATCH_STRICT and this cannot yet emit it, so an image asking for
+# it is refused here rather than assembled into something no tile
+# will load.
 FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO
 FLAGS_RESERVED = ~FLAGS_KNOWN & 0xFFFFFFFF
 
@@ -644,8 +648,8 @@ class Image:
                 f"max_deposits={self.max_deposits}, cap {MAX_DEPOSITS}")
         if self.flags & FLAGS_RESERVED:
             raise AsmError(
-                f"header flags {self.flags:#010x}: only BANK_EXT and "
-                f"SCRATCH_IO are defined and the rest are "
+                f"header flags {self.flags:#010x}: only "
+                f"{flag_names(FLAGS_KNOWN)} are defined and the rest are "
                 f"reserved-must-be-zero")
         if self.n_consts > KADDR_KX:
             raise AsmError(

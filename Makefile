@@ -31,12 +31,14 @@ PART     ?= xcu50-fsvh2104-2-e
 TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
-.PHONY: golden vectors sim docker-image sim-docker check-env emconfig xo xclbin \
+.PHONY: golden seqflags vectors sim docker-image sim-docker check-env emconfig xo xclbin \
         libcft libcft-test libcft-diff libcft-seq libcft-docker clean help \
         programs programs-check embedded
 
 help:
 	@echo "golden       run the golden-model self-tests (pytest)"
+	@echo "seqflags     prove cft_seq_flags.h and cft.h agree with the"
+	@echo "             golden model on the header flags numbering"
 	@echo "vectors      emit conformance vector sets to vectors/out/"
 	@echo "libcft       build the C library (host/), no dependencies"
 	@echo "libcft-test  contract tests + vector replay + the C/Python check"
@@ -77,7 +79,15 @@ $(BUILD)/emconfig.json:
 	mkdir -p $(BUILD)
 	emconfigutil --platform $(PLATFORM) --od $(BUILD)
 
-golden:
+# The header `flags` word is numbered in python/cft_golden/seqflags.py
+# and nowhere else. This proves host/include/cft_seq_flags.h is what
+# that file generates and that cft.h assigns the same bits - the check
+# that was missing while the flag list drifted to three revisions at
+# once across eight hand-written copies of it.
+seqflags:
+	$(PYTHON) python/gen_seq_flags.py --check
+
+golden: seqflags
 	$(PYTHON) -m pytest python/tests -q $(if $(XDIST_N),-n $(XDIST_N),)
 
 # Every format and every rounding attribute. Each attribute is its own
@@ -90,7 +100,7 @@ vectors:
 		--directed 3000 --random 4000 --simple 200 \
 		--jobs $(VECTOR_JOBS)
 
-libcft:
+libcft: seqflags
 	$(MAKE) -C host
 
 libcft-test:

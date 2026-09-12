@@ -61,6 +61,7 @@
 #include <ctype.h>
 
 #include "cft.h"
+#include "cft_seq_flags.h"
 
 #define MAX_ESZ        32
 #define MAX_CONSTS     512
@@ -73,8 +74,17 @@
 #define KADDR_KX       512
 #define MAX_LOOP_DEPTH 4
 #define HEADER_BYTES   32
-#define FLAG_BANK_EXT   0x1u
-#define FLAG_SCRATCH_IO 0x2u
+/* Aliases, not copies. The numbering is cft.h's and there is one of it;
+ * these two lines held their own 0x1u and 0x2u until 2026-09-11, which
+ * made this file two of the eight places the flag list had been written
+ * out by hand - and those eight had drifted to three revisions at once.
+ *
+ * FLAGS_KNOWN below stays this tool's OWN subset, deliberately smaller
+ * than every defined flag: CFT_PROG_FLAG_SCRATCH_STRICT exists and this
+ * cannot emit it, so an image asking for it is refused here rather than
+ * written out as something no tile will load. */
+#define FLAG_BANK_EXT   CFT_PROG_FLAG_BANK_EXT
+#define FLAG_SCRATCH_IO CFT_PROG_FLAG_SCRATCH_IO
 #define FLAGS_KNOWN    (FLAG_BANK_EXT | FLAG_SCRATCH_IO)
 /* R4: `SCRATCH_D` is a build parameter of the tile and not part of the
  * program model, so a SOURCE declares the depth it assumes with
@@ -1290,10 +1300,13 @@ static void validate(const program *P)
     if (P->max_deposits > MAX_DEPOSITS)
         diel("max_deposits=%u, cap %u", (unsigned)P->max_deposits,
              (unsigned)MAX_DEPOSITS);
-    if (P->flags & ~FLAGS_KNOWN)
-        diel("header flags 0x%08x: only BANK_EXT and SCRATCH_IO are "
+    if (P->flags & ~FLAGS_KNOWN) {
+        char flagnames[CFT_SEQ_FLAG_NAMES_MAX];
+        diel("header flags 0x%08x: only %s are "
              "defined and the rest are reserved-must-be-zero",
-             (unsigned)P->flags);
+             (unsigned)P->flags,
+             cft_seq_flag_names(FLAGS_KNOWN, flagnames, sizeof flagnames));
+    }
     if (P->n_consts > MAX_CONSTS)
         diel("%d constants; an index is nine bits under kx, so the bank "
              "addresses at most %d", P->n_consts, MAX_CONSTS);
@@ -1438,9 +1451,12 @@ static void load_image(const uint8_t *data, size_t n, program *P)
         diel("bad magic 0x%08x, expected 0x50544643", (unsigned)magic);
     if (ver != 1)
         diel("program version %u, this loader speaks 1", (unsigned)ver);
-    if (flags & ~FLAGS_KNOWN)
-        diel("header flags 0x%08x: only BANK_EXT and SCRATCH_IO are "
-             "defined and the rest are reserved", (unsigned)flags);
+    if (flags & ~FLAGS_KNOWN) {
+        char flagnames[CFT_SEQ_FLAG_NAMES_MAX];
+        diel("header flags 0x%08x: only %s are "
+             "defined and the rest are reserved", (unsigned)flags,
+             cft_seq_flag_names(FLAGS_KNOWN, flagnames, sizeof flagnames));
+    }
     if (!(flags & FLAG_SCRATCH_IO) && rsv1)
         diel("reserved header word 7 must be zero unless flags.SCRATCH_IO "
              "says it is scratch_io");

@@ -29,6 +29,8 @@ code, because they are the whole determinism argument:
 import struct
 
 from .formats import FORMATS, PREC_CODE, FpFormat
+from .seqflags import (FLAG_BANK_EXT, FLAG_SCRATCH_IO,
+                       FLAG_SCRATCH_STRICT, names as flag_names)
 from . import softfloat as sf
 
 MAGIC = 0x50544643        # "CFTP" little-endian
@@ -128,9 +130,11 @@ MAX_DEPOSITS = 1 << 20
 # that cannot honour it refuses the image rather than running it with
 # the old meaning - which is the same guard SCRATCH_IO needed and for
 # the same reason.
-FLAG_BANK_EXT = 1 << 0
-FLAG_SCRATCH_IO = 1 << 1
-FLAG_SCRATCH_STRICT = 1 << 2
+# The three names above are defined in .seqflags, which is the one
+# place a flag's bit is written down. What follows is this LOADER's
+# own declaration of the subset it implements - the assembler's is
+# deliberately smaller, and every refusal below renders its list
+# from this mask rather than naming flags by hand.
 FLAGS_KNOWN = FLAG_BANK_EXT | FLAG_SCRATCH_IO | FLAG_SCRATCH_STRICT
 
 # control codes (instruction bit 31 set)
@@ -626,8 +630,8 @@ class Program:
         if self.flags & ~FLAGS_KNOWN & 0xFFFFFFFF:
             raise ProgramError(
                 f"header flags {self.flags:#010x} set a bit this loader "
-                f"does not know; the known ones are BANK_EXT and "
-                f"SCRATCH_IO")
+                f"does not know; the known ones are "
+                f"{flag_names(FLAGS_KNOWN)}")
         for name, v in (("n_scratch_in", self.n_scratch_in),
                         ("n_scratch_out", self.n_scratch_out)):
             if not 0 <= v <= 0xFFFF:
@@ -903,7 +907,9 @@ class Program:
         if flags & ~FLAGS_KNOWN & 0xFFFFFFFF:
             raise ProgramError(
                 f"header flags {flags:#010x} set a bit this loader does "
-                f"not know; flags[31:2] are reserved and must be zero")
+                f"not know; the known ones are {flag_names(FLAGS_KNOWN)} "
+                f"(mask {FLAGS_KNOWN:#010x}) and every other bit is "
+                f"reserved and must be zero")
         if not (flags & FLAG_SCRATCH_IO) and word7:
             raise ProgramError(
                 f"header word 7 is {word7:#010x} without flags.SCRATCH_IO; "

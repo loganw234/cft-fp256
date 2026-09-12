@@ -73,10 +73,20 @@
 #include <stdint.h>
 
 #include "cft.h"
+#include "cft_seq_flags.h"
 
 #define HEADER_BYTES    32
-#define FLAG_BANK_EXT   0x1u
-#define FLAG_SCRATCH_IO 0x2u
+/* Aliases, not copies. The numbering is cft.h's and there is one of it;
+ * these two lines held their own 0x1u and 0x2u until 2026-09-11, which
+ * made this file two of the eight places the flag list had been written
+ * out by hand - and those eight had drifted to three revisions at once.
+ *
+ * FLAGS_KNOWN below stays this tool's OWN subset, deliberately smaller
+ * than every defined flag: CFT_PROG_FLAG_SCRATCH_STRICT exists and this
+ * cannot emit it, so an image asking for it is refused here rather than
+ * written out as something no tile will load. */
+#define FLAG_BANK_EXT   CFT_PROG_FLAG_BANK_EXT
+#define FLAG_SCRATCH_IO CFT_PROG_FLAG_SCRATCH_IO
 #define FLAGS_KNOWN     (FLAG_BANK_EXT | FLAG_SCRATCH_IO)
 #define MAX_ESZ         32
 /* The four control codes of docs/SEQUENCER.md's R4, read here so the
@@ -421,9 +431,12 @@ static void parse_header(const uint8_t *img, size_t n, header *H)
     H->uses_kx9 = 0;
     if (H->prec > 3)
         die("precision code %u is not on the ladder", (unsigned)H->prec);
-    if (H->flags & ~FLAGS_KNOWN)
-        die("header flags 0x%08x: only BANK_EXT and SCRATCH_IO are "
-            "defined", (unsigned)H->flags);
+    if (H->flags & ~FLAGS_KNOWN) {
+        char flagnames[CFT_SEQ_FLAG_NAMES_MAX];
+        die("header flags 0x%08x: only %s are "
+            "defined", (unsigned)H->flags,
+            cft_seq_flag_names(FLAGS_KNOWN, flagnames, sizeof flagnames));
+    }
     if (!(H->flags & FLAG_SCRATCH_IO) && scratch_io)
         die("reserved header word 7 must be zero unless flags.SCRATCH_IO "
             "says it is scratch_io");
