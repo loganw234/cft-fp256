@@ -226,13 +226,28 @@ static struct result time_op(cft_device *dev, cft_op op, cft_format fmt,
 
 int main(int argc, char **argv)
 {
-    static const cft_op OPS[] = { CFT_FMA, CFT_MUL, CFT_ADD, CFT_ABS };
+    /* EVERY elementwise opcode cft_run accepts, cheapest first so the
+     * spread reads down the column. The point of timing all of them is to
+     * find the weak one: an opcode that costs ten times its neighbours is
+     * a finding, and four opcodes cannot show it. Reductions (CFT_SUM and
+     * up) are a different call shape - n in, one out - and are not here.
+     *
+     * A device need not publish every group; CAPS decides, and an opcode
+     * it refuses is skipped by name below rather than ending the run. */
+    static const cft_op OPS[] = {
+        CFT_ABS, CFT_NEG, CFT_COPYSIGN,
+        CFT_MIN, CFT_MAX, CFT_MINNUM, CFT_MAXNUM,
+        CFT_CMPLT, CFT_CMPLE, CFT_CMPEQ, CFT_SELECT,
+        CFT_IAND, CFT_IOR, CFT_IXOR, CFT_IADD, CFT_ISUB,
+        CFT_ISHL, CFT_ISHR, CFT_ICMPLT,
+        CFT_ADD, CFT_SUB, CFT_MUL, CFT_FMA
+    };
     static const int NOPS = (int)(sizeof OPS / sizeof OPS[0]);
 
     const char *artifact = NULL;
     size_t n = 4096;
     double target_s = 0.35;
-    int only_fmt = -1, csv = 0, spread = 8, argi, f, o;
+    int only_fmt = -1, csv = 0, spread = 8, argi, f, o, skipped = 0;
     int resident = 0;
     unsigned char *a = NULL, *b = NULL, *c = NULL, *d = NULL;
     /* --resident's four buffers, and the host copies the check needs.
@@ -417,6 +432,17 @@ int main(int argc, char **argv)
             }
 
             r = time_op(dev, op, fmt, a, b, c, d, n, target_s);
+            /* A capability this device does not publish is a SKIP, named, and
+             * the run goes on - with twenty-three opcodes and more than one
+             * artifact, a device that refuses a group is ordinary. Any other
+             * status is still fatal: "cannot" and "got it wrong" are
+             * different sentences. */
+            if (r.st == CFT_ERR_UNSUPPORTED) {
+                skipped++;
+                fprintf(stderr, "  SKIP %s %s: not available on this device\n",
+                        cft_format_name(fmt), cft_op_name(op));
+                continue;
+            }
             if (r.st != CFT_OK) {
                 fprintf(stderr, "%s %s: %s\n  %s\n", cft_format_name(fmt),
                         cft_op_name(op), cft_strerror(r.st), cft_last_error());
@@ -477,7 +503,19 @@ int main(int argc, char **argv)
              * out. ABS and NEG read one, but charging them all four
              * would flatter them; count what the op reads. */
             {
-                int nin = (op == CFT_ABS || op == CFT_NEG) ? 1 : 3;
+                /* Operands the call actually READS, for the bytes-moved
+                 * column. Charging a one-operand opcode for three would
+                 * flatter it; charging a three-operand one for two would
+                 * flatter it the other way. */
+                int nin;
+                switch (op) {
+                case CFT_ABS: case CFT_NEG:
+                    nin = 1; break;
+                case CFT_FMA: case CFT_SELECT:
+                    nin = 3; break;
+                default:
+                    nin = 2; break;
+                }
                 mbps = r.elems_per_s * (double)sz * (double)(nin + 1) / 1e6;
             }
 
@@ -543,6 +581,13 @@ int main(int argc, char **argv)
     } else {
         free(a); free(b); free(c); free(d);
     }
+    /* Named and counted, every run. With twenty-three opcodes across
+     * four formats a device that publishes fewer groups is ordinary,
+     * and a column missing from a sweep must be explained by a line
+     * somebody can read rather than by its absence. */
+    if (skipped)
+        fprintf(stderr, "%d opcode/format pair(s) skipped: not "
+                        "available on this device\n", skipped);
     cft_close(dev);
     return verify_bad ? 1 : 0;
 }
