@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-label="Speedup against the best available software, by format">
+<rect width="900" height="470" fill="#0d1117"/>
+<text x="32" y="30" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" font-weight="600" fill="#e6edf3">Where hardware starts to pay</text>
+<text x="32" y="52" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Resident tiles against the fastest real software, each at the largest element count both sides measured. Above the line, the card wins.</text>
+<line x1="92" y1="338.0" x2="872" y2="338.0" stroke="#30363d" stroke-width="1"/>
+<text x="84" y="342.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#9198a1" text-anchor="end">0.1x</text>
+<line x1="92" y1="251.3" x2="872" y2="251.3" stroke="#30363d" stroke-width="1"/>
+<text x="84" y="255.3" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#9198a1" text-anchor="end">1x</text>
+<line x1="92" y1="164.7" x2="872" y2="164.7" stroke="#30363d" stroke-width="1"/>
+<text x="84" y="168.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#9198a1" text-anchor="end">10x</text>
+<line x1="92" y1="78.0" x2="872" y2="78.0" stroke="#30363d" stroke-width="1"/>
+<text x="84" y="82.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#9198a1" text-anchor="end">100x</text>
+<line x1="92" y1="251.3" x2="872" y2="251.3" stroke="#6e7681" stroke-width="1.75" stroke-dasharray="6 4"/>
+<text x="98" y="244.3" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#9198a1">parity</text>
+<rect x="115.5" y="251.3" width="34.0" height="18.6" fill="#f85149" opacity="0.62"/>
+<text x="132.5" y="283.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">/1.6</text>
+<text x="132.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 132.5 358)">1 tile vs x86-64</text>
+<rect x="153.5" y="221.0" width="34.0" height="30.4" fill="#3fb950" opacity="1"/>
+<text x="170.5" y="216.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">2.2x</text>
+<text x="170.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 170.5 358)">4 tiles vs x86-64</text>
+<rect x="191.5" y="251.3" width="34.0" height="74.5" fill="#f85149" opacity="0.62"/>
+<text x="208.5" y="333.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">/7.2</text>
+<text x="208.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 208.5 358)">1 tile vs arm64</text>
+<rect x="229.5" y="251.3" width="34.0" height="25.5" fill="#f85149" opacity="1"/>
+<text x="246.5" y="289.9" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">/2.0</text>
+<text x="246.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 246.5 358)">4 tiles vs arm64</text>
+<text x="189.5" y="440" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">binary32</text>
+<text x="189.5" y="456" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">vs cpu-hw at n = 4,194,304</text>
+<rect x="310.5" y="251.3" width="34.0" height="4.1" fill="#f85149" opacity="0.62"/>
+<text x="327.5" y="268.4" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">/1.1</text>
+<text x="327.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 327.5 358)">1 tile vs x86-64</text>
+<rect x="348.5" y="204.8" width="34.0" height="46.6" fill="#3fb950" opacity="1"/>
+<text x="365.5" y="199.8" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">3.4x</text>
+<text x="365.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 365.5 358)">4 tiles vs x86-64</text>
+<rect x="386.5" y="251.3" width="34.0" height="74.1" fill="#f85149" opacity="0.62"/>
+<text x="403.5" y="333.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">/7.2</text>
+<text x="403.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 403.5 358)">1 tile vs arm64</text>
+<rect x="424.5" y="251.3" width="34.0" height="23.4" fill="#f85149" opacity="1"/>
+<text x="441.5" y="287.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">/1.9</text>
+<text x="441.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 441.5 358)">4 tiles vs arm64</text>
+<text x="384.5" y="440" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">binary64</text>
+<text x="384.5" y="456" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">vs cpu-hw at n = 4,194,304</text>
+<rect x="505.5" y="195.0" width="34.0" height="56.3" fill="#3fb950" opacity="0.62"/>
+<text x="522.5" y="190.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">4.5x</text>
+<text x="522.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 522.5 358)">1 tile vs x86-64</text>
+<rect x="543.5" y="143.6" width="34.0" height="107.8" fill="#3fb950" opacity="1"/>
+<text x="560.5" y="138.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">17.5x</text>
+<text x="560.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 560.5 358)">4 tiles vs x86-64</text>
+<rect x="581.5" y="213.1" width="34.0" height="38.2" fill="#3fb950" opacity="0.62"/>
+<text x="598.5" y="208.1" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">2.8x</text>
+<text x="598.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 598.5 358)">1 tile vs arm64</text>
+<rect x="619.5" y="161.7" width="34.0" height="89.7" fill="#3fb950" opacity="1"/>
+<text x="636.5" y="156.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">10.8x</text>
+<text x="636.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 636.5 358)">4 tiles vs arm64</text>
+<text x="579.5" y="440" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">binary128</text>
+<text x="579.5" y="456" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">vs quadmath at n = 4,194,304</text>
+<rect x="700.5" y="187.2" width="34.0" height="64.1" fill="#3fb950" opacity="0.62"/>
+<text x="717.5" y="182.2" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">5.5x</text>
+<text x="717.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 717.5 358)">1 tile vs x86-64</text>
+<rect x="738.5" y="136.6" width="34.0" height="114.7" fill="#3fb950" opacity="1"/>
+<text x="755.5" y="131.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">21.1x</text>
+<text x="755.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 755.5 358)">4 tiles vs x86-64</text>
+<rect x="776.5" y="199.4" width="34.0" height="51.9" fill="#3fb950" opacity="0.62"/>
+<text x="793.5" y="194.4" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">4.0x</text>
+<text x="793.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 793.5 358)">1 tile vs arm64</text>
+<rect x="814.5" y="148.7" width="34.0" height="102.6" fill="#3fb950" opacity="1"/>
+<text x="831.5" y="143.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="10.5" fill="#e6edf3" text-anchor="middle">15.3x</text>
+<text x="831.5" y="358" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="9.5" fill="#9198a1" text-anchor="end" transform="rotate(-34 831.5 358)">4 tiles vs arm64</text>
+<text x="774.5" y="440" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="middle">binary256</text>
+<text x="774.5" y="456" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10.5" fill="#9198a1" text-anchor="middle">vs mpfr at n = 1,048,576</text>
+<line x1="92" y1="338" x2="872" y2="338" stroke="#6e7681"/>
+</svg>

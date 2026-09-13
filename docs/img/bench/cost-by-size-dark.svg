@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="700" viewBox="0 0 900 700" role="img" aria-label="Nanoseconds per element against problem size, by format">
+<rect width="900" height="700" fill="#0d1117"/>
+<text x="24" y="30" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" font-weight="600" fill="#e6edf3">What it costs, by problem size</text>
+<text x="24" y="52" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9198a1">Nanoseconds per element, multiply. Both axes logarithmic; lower is faster. Where two lines cross is where the choice changes.</text>
+<rect x="82.0" y="104.0" width="345.0" height="186.0" fill="#161b22"/>
+<line x1="82.0" y1="272.1" x2="427.0" y2="272.1" stroke="#30363d"/>
+<text x="76.0" y="275.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">1 ns</text>
+<line x1="82.0" y1="238.6" x2="427.0" y2="238.6" stroke="#30363d"/>
+<text x="76.0" y="242.1" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 ns</text>
+<line x1="82.0" y1="205.1" x2="427.0" y2="205.1" stroke="#30363d"/>
+<text x="76.0" y="208.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 ns</text>
+<line x1="82.0" y1="171.6" x2="427.0" y2="171.6" stroke="#30363d"/>
+<text x="76.0" y="175.1" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">1 us</text>
+<line x1="82.0" y1="138.0" x2="427.0" y2="138.0" stroke="#30363d"/>
+<text x="76.0" y="141.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 us</text>
+<line x1="82.0" y1="104.5" x2="427.0" y2="104.5" stroke="#30363d"/>
+<text x="76.0" y="108.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 us</text>
+<line x1="82.0" y1="104.0" x2="82.0" y2="290.0" stroke="#30363d"/>
+<text x="82.0" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1</text>
+<line x1="127.8" y1="104.0" x2="127.8" y2="290.0" stroke="#30363d"/>
+<text x="127.8" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10</text>
+<line x1="173.7" y1="104.0" x2="173.7" y2="290.0" stroke="#30363d"/>
+<text x="173.7" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100</text>
+<line x1="219.5" y1="104.0" x2="219.5" y2="290.0" stroke="#30363d"/>
+<text x="219.5" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1k</text>
+<line x1="265.4" y1="104.0" x2="265.4" y2="290.0" stroke="#30363d"/>
+<text x="265.4" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10k</text>
+<line x1="311.2" y1="104.0" x2="311.2" y2="290.0" stroke="#30363d"/>
+<text x="311.2" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100k</text>
+<line x1="357.1" y1="104.0" x2="357.1" y2="290.0" stroke="#30363d"/>
+<text x="357.1" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1M</text>
+<line x1="402.9" y1="104.0" x2="402.9" y2="290.0" stroke="#30363d"/>
+<text x="402.9" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10M</text>
+<path d="M82.0,253.4 L109.6,266.9 L137.2,276.3 L164.8,279.4 L192.4,283.3 L220.0,282.8 L247.6,280.1 L275.2,280.0 L302.8,278.8 L330.4,280.1 L358.0,281.2 L385.6,276.9" fill="none" stroke="#a371f7" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M82.0,192.6 L95.8,194.0 L109.6,194.2 L123.4,193.5 L137.2,193.7 L151.0,193.5 L164.8,193.5 L178.6,193.2 L192.4,193.0 L206.2,192.9 L220.0,191.2 L233.8,193.1 L247.6,193.0 L261.4,193.0 L275.2,193.1 L289.0,193.1 L302.8,193.1 L316.6,193.1 L330.4,193.1 L344.2,193.1 L358.0,193.1 L371.8,193.1 L385.6,193.1 L399.4,193.1 L413.2,193.1 L427.0,192.7" fill="none" stroke="#484f58" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round"/>
+<path d="M82.0,104.0 L95.8,113.1 L109.6,123.1 L123.4,132.0 L137.2,142.9 L151.0,152.8 L164.8,163.1 L178.6,175.3 L192.4,182.9 L206.2,192.8 L220.0,202.8 L233.8,211.9 L247.6,220.7 L261.4,228.6 L275.2,234.6 L289.0,236.1 L302.8,240.5 L316.6,243.3 L330.4,243.7 L344.2,244.7 L358.0,245.6 L371.8,247.3 L385.6,246.7 L399.4,246.5 L413.2,246.5 L427.0,247.2" fill="none" stroke="#f85149" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M82.0,118.5 L95.8,127.3 L109.6,136.0 L123.4,151.4 L137.2,163.6 L151.0,166.5 L164.8,180.0 L178.6,188.0 L192.4,196.3 L206.2,211.6 L220.0,217.6 L233.8,230.1 L247.6,236.8 L261.4,247.7 L275.2,253.7 L289.0,260.5 L302.8,264.4 L316.6,267.6 L330.4,265.8 L344.2,267.6 L358.0,268.7 L371.8,269.3 L385.6,269.7 L399.4,269.8 L413.2,269.9 L427.0,270.0" fill="none" stroke="#db6d28" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M82.0,117.1 L95.8,127.2 L109.6,135.5 L123.4,146.3 L137.2,152.7 L151.0,159.5 L164.8,170.6 L178.6,179.7 L192.4,189.0 L206.2,201.3 L220.0,210.7 L233.8,221.4 L247.6,230.3 L261.4,241.5 L275.2,247.2 L289.0,258.8 L302.8,265.9 L316.6,273.7 L330.4,280.1 L344.2,284.4 L358.0,285.2 L371.8,287.3 L385.6,288.6 L399.4,289.5 L413.2,289.8 L427.0,290.0" fill="none" stroke="#54aeff" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="82.0" y="94.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3">binary32</text>
+<text x="427.0" y="94.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="end">best software: cpu-hw</text>
+<text x="254.5" y="320.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="middle">elements per call</text>
+<rect x="519.0" y="104.0" width="345.0" height="186.0" fill="#161b22"/>
+<line x1="519.0" y1="279.1" x2="864.0" y2="279.1" stroke="#30363d"/>
+<text x="513.0" y="282.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">1 ns</text>
+<line x1="519.0" y1="244.2" x2="864.0" y2="244.2" stroke="#30363d"/>
+<text x="513.0" y="247.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 ns</text>
+<line x1="519.0" y1="209.3" x2="864.0" y2="209.3" stroke="#30363d"/>
+<text x="513.0" y="212.8" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 ns</text>
+<line x1="519.0" y1="174.4" x2="864.0" y2="174.4" stroke="#30363d"/>
+<text x="513.0" y="177.9" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">1 us</text>
+<line x1="519.0" y1="139.5" x2="864.0" y2="139.5" stroke="#30363d"/>
+<text x="513.0" y="143.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 us</text>
+<line x1="519.0" y1="104.5" x2="864.0" y2="104.5" stroke="#30363d"/>
+<text x="513.0" y="108.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 us</text>
+<line x1="519.0" y1="104.0" x2="519.0" y2="290.0" stroke="#30363d"/>
+<text x="519.0" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1</text>
+<line x1="566.8" y1="104.0" x2="566.8" y2="290.0" stroke="#30363d"/>
+<text x="566.8" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10</text>
+<line x1="614.5" y1="104.0" x2="614.5" y2="290.0" stroke="#30363d"/>
+<text x="614.5" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100</text>
+<line x1="662.3" y1="104.0" x2="662.3" y2="290.0" stroke="#30363d"/>
+<text x="662.3" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1k</text>
+<line x1="710.0" y1="104.0" x2="710.0" y2="290.0" stroke="#30363d"/>
+<text x="710.0" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10k</text>
+<line x1="757.8" y1="104.0" x2="757.8" y2="290.0" stroke="#30363d"/>
+<text x="757.8" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100k</text>
+<line x1="805.5" y1="104.0" x2="805.5" y2="290.0" stroke="#30363d"/>
+<text x="805.5" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1M</text>
+<line x1="853.3" y1="104.0" x2="853.3" y2="290.0" stroke="#30363d"/>
+<text x="853.3" y="304.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10M</text>
+<path d="M519.0,260.8 L547.8,277.2 L576.5,286.6 L605.2,290.0 L634.0,287.3 L662.8,287.7 L691.5,283.4 L720.2,284.1 L749.0,282.8 L777.8,281.1 L806.5,281.0 L835.2,267.9" fill="none" stroke="#a371f7" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M519.0,194.4 L533.4,193.2 L547.8,193.5 L562.1,191.4 L576.5,195.1 L590.9,195.2 L605.2,195.4 L619.6,194.8 L634.0,194.8 L648.4,194.9 L662.8,195.0 L677.1,195.0 L691.5,194.9 L705.9,195.0 L720.2,195.0 L734.6,195.0 L749.0,195.0 L763.4,194.1 L777.8,195.0 L792.1,194.9 L806.5,195.0 L820.9,195.0 L835.2,194.9 L849.6,194.9 L864.0,194.8" fill="none" stroke="#484f58" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round"/>
+<path d="M519.0,104.0 L533.4,113.0 L547.8,125.0 L562.1,137.9 L576.5,145.9 L590.9,155.0 L605.2,166.6 L619.6,176.3 L634.0,185.2 L648.4,196.4 L662.8,205.7 L677.1,214.7 L691.5,223.6 L705.9,229.5 L720.2,232.7 L734.6,235.4 L749.0,239.2 L763.4,239.4 L777.8,240.3 L792.1,240.8 L806.5,242.7 L820.9,242.2 L835.2,241.7 L849.6,242.1 L864.0,242.7" fill="none" stroke="#f85149" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M519.0,119.8 L533.4,135.5 L547.8,144.7 L562.1,150.9 L576.5,167.4 L590.9,174.6 L605.2,180.8 L619.6,190.9 L634.0,200.6 L648.4,212.0 L662.8,223.4 L677.1,234.2 L691.5,242.9 L705.9,248.6 L720.2,256.1 L734.6,260.6 L749.0,263.0 L763.4,261.9 L777.8,263.8 L792.1,265.0 L806.5,265.7 L820.9,266.0 L835.2,266.2 L849.6,266.3 L864.0,266.3" fill="none" stroke="#db6d28" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M519.0,121.8 L533.4,130.3 L547.8,140.3 L562.1,149.0 L576.5,152.6 L590.9,162.2 L605.2,172.3 L619.6,182.6 L634.0,193.2 L648.4,203.3 L662.8,215.8 L677.1,224.6 L691.5,236.3 L705.9,247.1 L720.2,255.9 L734.6,262.2 L749.0,270.1 L763.4,276.1 L777.8,281.6 L792.1,282.3 L806.5,284.4 L820.9,285.8 L835.2,286.6 L849.6,287.0 L864.0,287.2" fill="none" stroke="#54aeff" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="519.0" y="94.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3">binary64</text>
+<text x="864.0" y="94.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="end">best software: cpu-hw</text>
+<text x="691.5" y="320.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="middle">elements per call</text>
+<rect x="82.0" y="406.0" width="345.0" height="186.0" fill="#161b22"/>
+<line x1="82.0" y1="557.1" x2="427.0" y2="557.1" stroke="#30363d"/>
+<text x="76.0" y="560.6" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 ns</text>
+<line x1="82.0" y1="519.5" x2="427.0" y2="519.5" stroke="#30363d"/>
+<text x="76.0" y="523.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 ns</text>
+<line x1="82.0" y1="482.0" x2="427.0" y2="482.0" stroke="#30363d"/>
+<text x="76.0" y="485.5" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">1 us</text>
+<line x1="82.0" y1="444.4" x2="427.0" y2="444.4" stroke="#30363d"/>
+<text x="76.0" y="447.9" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 us</text>
+<line x1="82.0" y1="406.9" x2="427.0" y2="406.9" stroke="#30363d"/>
+<text x="76.0" y="410.4" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 us</text>
+<line x1="82.0" y1="406.0" x2="82.0" y2="592.0" stroke="#30363d"/>
+<text x="82.0" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1</text>
+<line x1="131.8" y1="406.0" x2="131.8" y2="592.0" stroke="#30363d"/>
+<text x="131.8" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10</text>
+<line x1="181.7" y1="406.0" x2="181.7" y2="592.0" stroke="#30363d"/>
+<text x="181.7" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100</text>
+<line x1="231.5" y1="406.0" x2="231.5" y2="592.0" stroke="#30363d"/>
+<text x="231.5" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1k</text>
+<line x1="281.3" y1="406.0" x2="281.3" y2="592.0" stroke="#30363d"/>
+<text x="281.3" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10k</text>
+<line x1="331.1" y1="406.0" x2="331.1" y2="592.0" stroke="#30363d"/>
+<text x="331.1" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100k</text>
+<line x1="381.0" y1="406.0" x2="381.0" y2="592.0" stroke="#30363d"/>
+<text x="381.0" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1M</text>
+<path d="M82.0,551.3 L112.0,554.1 L142.0,555.2 L172.0,555.2 L202.0,554.7 L232.0,552.0 L262.0,546.1 L292.0,545.2 L322.0,547.2 L352.0,545.1 L382.0,545.2 L412.0,545.1" fill="none" stroke="#a371f7" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M82.0,500.2 L97.0,500.8 L112.0,500.8 L127.0,501.1 L142.0,500.7 L157.0,501.0 L172.0,500.8 L187.0,500.7 L202.0,500.7 L217.0,500.7 L232.0,500.6 L247.0,499.6 L262.0,500.6 L277.0,500.6 L292.0,500.5 L307.0,500.5 L322.0,500.0 L337.0,500.6 L352.0,499.7 L367.0,500.6 L382.0,500.6 L397.0,500.6 L412.0,500.1 L427.0,500.6" fill="none" stroke="#484f58" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round"/>
+<path d="M82.0,406.0 L97.0,418.5 L112.0,428.5 L127.0,438.7 L142.0,449.9 L157.0,460.8 L172.0,474.0 L187.0,482.5 L202.0,494.6 L217.0,504.7 L232.0,514.3 L247.0,525.1 L262.0,530.4 L277.0,535.7 L292.0,536.7 L307.0,539.3 L322.0,540.3 L337.0,541.8 L352.0,542.9 L367.0,544.4 L382.0,544.2 L397.0,544.0 L412.0,543.8 L427.0,544.2" fill="none" stroke="#f85149" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M82.0,429.2 L97.0,432.6 L112.0,445.2 L127.0,455.9 L142.0,466.7 L157.0,481.7 L172.0,488.2 L187.0,499.6 L202.0,511.2 L217.0,524.6 L232.0,530.0 L247.0,543.7 L262.0,555.5 L277.0,557.7 L292.0,562.9 L307.0,566.0 L322.0,564.8 L337.0,566.8 L352.0,568.1 L367.0,568.9 L382.0,569.3 L397.0,569.4 L412.0,569.5 L427.0,569.6" fill="none" stroke="#db6d28" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M82.0,421.1 L97.0,431.4 L112.0,438.7 L127.0,445.9 L142.0,457.1 L157.0,469.0 L172.0,479.6 L187.0,490.6 L202.0,502.7 L217.0,513.1 L232.0,526.8 L247.0,538.2 L262.0,548.9 L277.0,556.7 L292.0,565.0 L307.0,573.5 L322.0,580.2 L337.0,585.8 L352.0,586.8 L367.0,589.0 L382.0,590.5 L397.0,591.3 L412.0,591.8 L427.0,592.0" fill="none" stroke="#54aeff" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="82.0" y="396.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3">binary128</text>
+<text x="427.0" y="396.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="end">best software: mpfr, quadmath</text>
+<text x="254.5" y="622.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="middle">elements per call</text>
+<rect x="519.0" y="406.0" width="345.0" height="186.0" fill="#161b22"/>
+<line x1="519.0" y1="567.2" x2="864.0" y2="567.2" stroke="#30363d"/>
+<text x="513.0" y="570.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 ns</text>
+<line x1="519.0" y1="527.4" x2="864.0" y2="527.4" stroke="#30363d"/>
+<text x="513.0" y="530.9" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 ns</text>
+<line x1="519.0" y1="487.7" x2="864.0" y2="487.7" stroke="#30363d"/>
+<text x="513.0" y="491.2" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">1 us</text>
+<line x1="519.0" y1="447.9" x2="864.0" y2="447.9" stroke="#30363d"/>
+<text x="513.0" y="451.4" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">10 us</text>
+<line x1="519.0" y1="408.2" x2="864.0" y2="408.2" stroke="#30363d"/>
+<text x="513.0" y="411.7" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="end">100 us</text>
+<line x1="519.0" y1="406.0" x2="519.0" y2="592.0" stroke="#30363d"/>
+<text x="519.0" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1</text>
+<line x1="571.1" y1="406.0" x2="571.1" y2="592.0" stroke="#30363d"/>
+<text x="571.1" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10</text>
+<line x1="623.2" y1="406.0" x2="623.2" y2="592.0" stroke="#30363d"/>
+<text x="623.2" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100</text>
+<line x1="675.3" y1="406.0" x2="675.3" y2="592.0" stroke="#30363d"/>
+<text x="675.3" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1k</text>
+<line x1="727.4" y1="406.0" x2="727.4" y2="592.0" stroke="#30363d"/>
+<text x="727.4" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">10k</text>
+<line x1="779.5" y1="406.0" x2="779.5" y2="592.0" stroke="#30363d"/>
+<text x="779.5" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">100k</text>
+<line x1="831.6" y1="406.0" x2="831.6" y2="592.0" stroke="#30363d"/>
+<text x="831.6" y="606.0" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace" font-size="9.5" fill="#9198a1" text-anchor="middle">1M</text>
+<path d="M519.0,544.2 L550.4,544.4 L581.7,545.4 L613.1,543.8 L644.5,543.1 L675.8,542.1 L707.2,542.3 L738.5,542.3 L769.9,542.3 L801.3,537.7 L832.6,538.9 L864.0,539.5" fill="none" stroke="#a371f7" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M519.0,501.3 L534.7,498.1 L550.4,501.4 L566.0,501.5 L581.7,501.5 L597.4,501.8 L613.1,501.4 L628.8,501.4 L644.5,501.5 L660.1,501.5 L675.8,501.4 L691.5,501.2 L707.2,501.4 L722.9,501.4 L738.5,501.4 L754.2,501.4 L769.9,501.4 L785.6,499.5 L801.3,501.4 L817.0,501.4 L832.6,501.3 L848.3,501.4 L864.0,501.0" fill="none" stroke="#484f58" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round"/>
+<path d="M519.0,406.0 L534.7,417.4 L550.4,429.3 L566.0,442.2 L581.7,453.2 L597.4,464.5 L613.1,476.6 L628.8,488.8 L644.5,499.1 L660.1,510.2 L675.8,519.4 L691.5,527.0 L707.2,528.9 L722.9,532.4 L738.5,536.2 L754.2,537.2 L769.9,539.1 L785.6,540.2 L801.3,542.0 L817.0,541.3 L832.6,541.3 L848.3,541.1 L864.0,541.7" fill="none" stroke="#f85149" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M519.0,423.1 L534.7,435.0 L550.4,447.9 L566.0,459.1 L581.7,471.4 L597.4,487.1 L613.1,494.4 L628.8,510.9 L644.5,518.2 L660.1,532.4 L675.8,541.7 L691.5,550.5 L707.2,557.2 L722.9,561.9 L738.5,564.8 L754.2,563.5 L769.9,565.6 L785.6,566.9 L801.3,567.8 L817.0,568.1 L832.6,568.4 L848.3,568.4" fill="none" stroke="#db6d28" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M519.0,422.9 L534.7,430.3 L550.4,437.5 L566.0,449.3 L581.7,461.5 L597.4,473.9 L613.1,485.8 L628.8,497.9 L644.5,507.7 L660.1,522.6 L675.8,533.2 L691.5,545.5 L707.2,554.8 L722.9,563.8 L738.5,573.1 L754.2,579.8 L769.9,585.9 L785.6,586.6 L801.3,589.5 L817.0,590.9 L832.6,591.6 L848.3,592.0" fill="none" stroke="#54aeff" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="519.0" y="396.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#e6edf3">binary256</text>
+<text x="864.0" y="396.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="end">best software: mpfr</text>
+<text x="691.5" y="622.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" fill="#9198a1" text-anchor="middle">elements per call</text>
+<line x1="24.0" y1="650.0" x2="46.0" y2="650.0" stroke="#a371f7" stroke-width="2.4"/>
+<text x="52.0" y="654.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">best available software</text>
+<line x1="308.0" y1="650.0" x2="330.0" y2="650.0" stroke="#484f58" stroke-width="2.4" stroke-dasharray="4 3"/>
+<text x="336.0" y="654.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">libcft softfloat (the reference, not a rival)</text>
+<line x1="592.0" y1="650.0" x2="614.0" y2="650.0" stroke="#f85149" stroke-width="2.4"/>
+<text x="620.0" y="654.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">1 tile, over PCIe</text>
+<line x1="24.0" y1="672.0" x2="46.0" y2="672.0" stroke="#db6d28" stroke-width="2.4"/>
+<text x="52.0" y="676.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">1 tile, resident</text>
+<line x1="308.0" y1="672.0" x2="330.0" y2="672.0" stroke="#54aeff" stroke-width="2.4"/>
+<text x="336.0" y="676.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#e6edf3">4 tiles, resident</text>
+</svg>

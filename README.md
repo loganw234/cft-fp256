@@ -78,6 +78,62 @@ published conformance cases** - every binary32 and binary64 family,
 complete - and disagreed with the reference on none of them. It is the
 same library the card runs, compiled small.
 
+### When this matters, and when it does not
+
+The first row of that table is **this library's own softfloat**. It
+defines the contract; it does not compete for speed. MPFR beats it by
+six to nineteen times on add, multiply and fused multiply-add, and by
+ninety-four to three hundred times on divide and square root. Charting
+the card against it would produce speedups that are true, meaningless,
+and the reason nobody believes accelerator numbers. So the baseline below is
+the fastest implementation a user could actually reach for at each
+format - the CPU's own FPU where the format has one, gcc's
+`__float128` where the compiler has it, MPFR otherwise - measured by
+`host/tools/cft_bench_peers.c` on two machines.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/bench/when-hardware-pays-dark.svg">
+  <img alt="Speedup of the resident tiles against the fastest available software, by format. The card loses at binary32 and binary64 and wins by four to twenty-one times at binary128 and binary256." src="docs/img/bench/when-hardware-pays-light.svg">
+</picture>
+
+**Read the losses first.** At binary32 and binary64 a single tile is
+*slower* than a CPU - 1.6x and 1.1x behind an x86-64 workstation, and
+7.2x behind an M2 Pro, which vectorises both formats hard. Four tiles
+pass the workstation and still lose to the laptop. Those formats have
+been in silicon for forty years, this tile runs at 135 MHz, and it was
+never going to win them.
+
+**At binary128 and binary256 that inverts and stays inverted** - 4.5x
+and 5.5x on one tile, 17.5x and 21.1x on four, against the best
+software on the same machine. The reason is structural rather than
+clever: the tile is beat-limited, so one binary256 element costs it
+exactly eight times a binary32 element, while software climbs far
+faster than that. Two measurements from the same run make the point on
+their own. `__float128` multiplies in 20.8 ns and *fuses* in 817 ns -
+a 39x cliff inside one library, flat across every problem size,
+because `fmaq` is a soft routine. And on Apple Silicon `__float128`
+does not exist at all, so at binary128 MPFR is not the best
+alternative there, it is the only one.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/bench/cost-by-size-dark.svg">
+  <img alt="Nanoseconds per element against problem size, log-log, one panel per format, showing where the card's curves cross the best available software." src="docs/img/bench/cost-by-size-light.svg">
+</picture>
+
+Size decides the rest. A device call has a fixed cost, so below a few
+thousand elements software wins at every format; one tile passes MPFR
+at about **1,000 elements** for binary256 and **2,700** for binary128.
+And the gap between the two card curves is the bus: staging operands
+across PCIe costs roughly five times running them from device memory,
+so at binary256 **one tile over PCIe is about parity with MPFR** and
+the win needs resident execution.
+
+Every number above is in `docs/bench/` - the raw sweeps, the peer
+runs from both machines, and `tipping-points.json` with each crossing
+and the bracket it was interpolated from. `docs/BENCHMARKS.md` carries
+the tables and the method; the charts regenerate with
+`python/readme_charts.py`.
+
 ## What is built and working
 
 | piece | what it is |

@@ -304,6 +304,72 @@ in shape, not rigor; mpmath has no fma):
 | div | 1592 | 1696 | 1843 | 2162 |
 | sqrt | 2545 | 2853 | 3189 | 4160 |
 
+## Across problem size, and on a second architecture (2026-09-13)
+
+The tables above are one element count on one machine, which answers
+"how fast" and not "from what size, on whose hardware". This run
+answers both: `hw/bench-sweep.sh` over the device and the softfloat
+backend, and `cft-bench-peers` over a ladder of powers of four from 1
+to 4,194,304, on **x86-64** (amd-arc-box, U50 at 135 MHz) and on an
+**M2 Pro MacBook Pro**. 14,715 rows, 988 crossings.
+
+The peers ladder uses powers of four and the device sweep powers of
+two, so the two meet on the powers of four; a crossing is only ever
+computed at an element count present in both. Each format is reported
+at the largest such point it has - binary256 stops at 1,048,576
+because a deposit window outgrows its HBM group before the others do.
+
+**Multiply, ns per element, at the top of each format's shared ladder:**
+
+| format | n | best software, x86-64 | best software, arm64 | 1 tile resident | 4 tiles resident | 1 tile over PCIe |
+|---|---|---|---|---|---|---|
+| fp32 | 4,194,304 | `cpu-hw` 0.72 | `cpu-hw` 0.16 | 1.185 | 0.322 | 5.74 |
+| fp64 | 4,194,304 | `cpu-hw` 2.10 | `cpu-hw` 0.33 | 2.342 | 0.609 | 11.77 |
+| fp128 | 4,194,304 | `quadmath` 20.79 | `mpfr` 12.85 | 4.657 | 1.187 | 22.63 |
+| fp256 | 1,048,576 | `mpfr` 51.38 | `mpfr` 37.21 | 9.361 | 2.438 | 44.80 |
+
+**libcft's own softfloat is not in that table on purpose.** It defines
+the contract; MPFR beats it by 6-19x on add/mul/fma and by 94-316x on
+div/sqrt (measured, n=65,536, all four formats), so a speedup measured
+against it is a statement about our reference implementation rather
+than about the card. It is still plotted, faint, in the README charts.
+
+Four things this run establishes that the single-point tables could
+not:
+
+**1. The tile is beat-limited, and the measurement says so.** One
+element costs it exactly the format's width in beats: 1.185, 2.342,
+4.657, 9.361 ns is a doubling per rung, off exact by 1.18%, 0.58% and
+0.50%. Software does not double - it climbs far more slowly - which is
+the whole reason the answer inverts between binary64 and binary128
+rather than anywhere else.
+
+**2. `__float128` has a 39x cliff on fma.** `quadmath` multiplies in
+20.8 ns and fuses in **817 ns**, flat at every n from 1 to 4,194,304 -
+10 to 19 times slower than MPFR's fma, which is not a cache effect but
+a soft routine. A binary128 program that reaches for `fmaq` is paying
+forty multiplies for it. (The 811.3 ns in the table above, measured
+independently at n=4096, is the same number.)
+
+**3. Apple Silicon has no binary128 at all.** `cft-bench-peers` emits
+15 rows a point there against x86-64's 20: `__float128` is absent, and
+`long double` is 64-bit. At binary128 MPFR is not the best alternative
+on that machine - it is the only one.
+
+**4. The CPU's own FPU falls off a cache cliff and the card does
+not.** `cpu-hw` at fp64 holds between 0.49 and 0.88 ns a element from
+n=64 all the way to n=1,048,576, then jumps to **2.10 ns at
+n=4,194,304** - a 2.4x step in one rung, where 32 MB of doubles stops
+fitting L3. The tile streams from HBM at a fixed rate and is flat
+across the same range. So the margin four tiles hold at fp64 is partly
+the host's memory system, not arithmetic, and it would shrink on a
+machine with more cache.
+
+The crossings themselves, with the bracket each was interpolated from,
+are in `docs/bench/tipping-points.json`. Raw sweeps and peer runs
+for both machines are beside it, and `python/readme_charts.py`
+regenerates the two README charts from exactly those files.
+
 ## Workloads designed for the contract
 
 The tables above adapt other libraries' benchmarks to this one. The

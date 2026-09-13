@@ -74,7 +74,7 @@ running.
 | [ENCLOSE.md](ENCLOSE.md) | 844 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 647 | `cft-collatz` — Collatz trajectories |
 | [DEMOS.md](DEMOS.md) | 744 | the same five workloads in one browser tab, on the conformance wasm module |
-| [BENCHMARKS.md](BENCHMARKS.md) | 407 | what all of the above measure, in software and on the card |
+| [BENCHMARKS.md](BENCHMARKS.md) | 473 | what all of the above measure, in software and on the card |
 
 ## Operations — doing a thing to hardware
 

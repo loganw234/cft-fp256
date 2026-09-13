@@ -41,14 +41,63 @@ import pathlib
 import sys
 from collections import defaultdict
 
-CONFIGS = [
-    ("software", "host", "0", "software", "#6b7280"),
-    ("device", "host", "1", "1 tile, over PCIe", "#dc2626"),
-    ("device", "resident", "1", "1 tile, resident", "#ea580c"),
-    ("device", "host", "4", "4 tiles, over PCIe", "#2563eb"),
-    ("device", "resident", "4", "4 tiles, resident", "#0891b2"),
-]
+# Styling for the configurations we expect. Anything else is discovered and
+# given a colour from SPARE, so a sweep from a machine nobody anticipated is
+# drawn rather than silently dropped.
+KNOWN = {
+    ("software", "host", "0"):        ("software (x86-64)", "#6b7280"),
+    ("software-arm64", "host", "0"):  ("software (arm64)",  "#7c3aed"),
+    ("device", "host", "1"):          ("1 tile, over PCIe", "#dc2626"),
+    ("device", "resident", "1"):      ("1 tile, resident",  "#ea580c"),
+    ("device", "host", "4"):          ("4 tiles, over PCIe", "#2563eb"),
+    ("device", "resident", "4"):      ("4 tiles, resident",  "#0891b2"),
+}
+SPARE = ["#059669", "#c026d3", "#0284c7", "#65a30d", "#9f1239", "#475569"]
 FORMAT_ORDER = ["fp32", "fp64", "fp128", "fp256"]
+
+# cft-bench-peers implementations, in the order they should read in a
+# legend: the CPU's own FPU first because it is the ceiling, then the
+# libraries, then our softfloat (which load_peers drops - the sweep
+# already carries it over a far wider ladder).
+PEER_COLOURS = {
+    "cpu-hw":   "#059669",
+    "mpfr":     "#d97706",
+    "mpfr+754": "#fbbf24",
+    "quadmath": "#9333ea",
+}
+PEER_ORDER = ["cpu-hw", "quadmath", "mpfr", "mpfr+754"]
+FORMAT_BYTES = {"fp32": 4, "fp64": 8, "fp128": 16, "fp256": 32}
+
+
+def is_software(key):
+    """A baseline is anything whose backend names software.
+
+    Deliberately a prefix test rather than a fixed list: the sweep's --label
+    exists so a second machine can be told apart, and the report must follow
+    that convention without being taught each new name.
+    """
+    return key[0].startswith("software")
+
+
+def discover(rows):
+    """-> [(key, label, colour)], software baselines first, then devices."""
+    seen = []
+    for r in rows:
+        k = (r["backend"], r["path"], r["tiles"])
+        if k not in seen:
+            seen.append(k)
+    spare = list(SPARE)
+    out = []
+    for k in sorted(seen, key=lambda k: (not is_software(k), k)):
+        if k in KNOWN:
+            label, colour = KNOWN[k]
+        else:
+            label = "%s%s, %s" % (k[0],
+                                  "" if k[2] in ("0", "") else " x%s" % k[2],
+                                  k[1])
+            colour = spare.pop(0) if spare else "#334155"
+        out.append((k, label, colour))
+    return out
 
 
 def load(path):
@@ -65,6 +114,58 @@ def load(path):
                 continue
             rows.append(r)
     return rows
+
+
+def load_peers(path, arch):
+    """cft-bench-peers CSV -> the sweep's schema, as software baselines.
+
+    `arch` names the machine, because "when does the card beat MPFR" has a
+    different answer on a workstation and on a laptop, and a chart that
+    merged them would answer neither. It becomes part of the backend name
+    so is_software()'s prefix test keeps working untouched.
+
+    libcft's own rows are DROPPED. They are the same softfloat the sweep
+    already measures across a much wider element ladder, and drawing the
+    same series twice in two colours is how a reader concludes there are
+    two of something. They are still read, and returned separately, so a
+    caller can check the two agree rather than assume it.
+    """
+    rows, own = [], []
+    with open(path, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            try:
+                impl = r["impl"]
+                out = {
+                    "backend": "software-%s%s" % (impl,
+                                                  "" if not arch else "-" + arch),
+                    "path": "host",
+                    "tiles": "0",
+                    "format": r["format"],
+                    "op": r["op"],
+                    "bytes_per_elem": str(FORMAT_BYTES.get(r["format"], 0)),
+                    "n": int(r["n"]),
+                    "ns_per_elem": float(r["ns_per_elem"]),
+                    "elems_per_s": float(r["elems_per_s"]),
+                    "reps": int(r["reps"]),
+                    "seconds": float(r["seconds"]),
+                }
+            except (KeyError, ValueError):
+                continue
+            if impl == "libcft":
+                own.append(out)
+                continue
+            key = (out["backend"], "host", "0")
+            if key not in KNOWN:
+                colour = PEER_COLOURS.get(impl)
+                if colour and arch:
+                    # a second machine's peers must not collide with the
+                    # first's; shift to a spare rather than redraw a colour
+                    # the reader has already learned.
+                    colour = None
+                KNOWN[key] = ("%s (%s)" % (impl, arch) if arch else impl,
+                              colour or SPARE[len(KNOWN) % len(SPARE)])
+            rows.append(out)
+    return rows, own
 
 
 def key_of(r):
@@ -136,7 +237,7 @@ def crossover(sw, dev):
                                     if swm[last[0]][0] else None}
 
 
-def svg_chart(fmt, op, by_cfg, width=560, height=330):
+def svg_chart(fmt, op, by_cfg, configs, width=560, height=330):
     """One log-log chart: n across, ns/element up. Lower is faster."""
     pad_l, pad_r, pad_t, pad_b = 62, 14, 30, 46
     pts = [(n, ns) for s in by_cfg.values() for n, ns, _ in s if ns > 0]
@@ -185,8 +286,8 @@ def svg_chart(fmt, op, by_cfg, width=560, height=330):
     o.append('<text class="axlab" transform="translate(13,%.1f) rotate(-90)" '
              'text-anchor="middle">ns per element</text>' % ((pad_t + height - pad_b) / 2))
 
-    for backend, path, tiles, label, colour in CONFIGS:
-        s = by_cfg.get((backend, path, tiles))
+    for key, label, colour in configs:
+        s = by_cfg.get(key)
         if not s:
             continue
         d = " ".join("%s%.1f,%.1f" % ("M" if i == 0 else "L", px(n), py(ns))
@@ -217,6 +318,9 @@ def main(argv=None):
     ap.add_argument("csv", help="sweep.csv from hw/bench-sweep.sh")
     ap.add_argument("--out", default=None,
                     help="directory for the report (default: beside the csv)")
+    ap.add_argument("--peers", action="append", default=[], metavar="ARCH=FILE",
+                    help="cft-bench-peers CSV for one machine, e.g. "
+                         "x86-64=peers.csv; repeatable")
     a = ap.parse_args(argv)
 
     src = pathlib.Path(a.csv)
@@ -228,29 +332,59 @@ def main(argv=None):
         sys.stderr.write("no usable rows in %s\n" % src)
         return 1
 
+    # Peer CSVs are split on the FIRST "=" so a Windows drive letter in the
+    # path cannot be mistaken for the separator.
+    peer_sources = []
+    for spec in a.peers:
+        arch, sep, fname = spec.partition("=")
+        if not sep:
+            sys.stderr.write("--peers wants ARCH=FILE, got %r\n" % spec)
+            return 1
+        pr, own = load_peers(fname, arch)
+        if not pr:
+            sys.stderr.write("no usable peer rows in %s\n" % fname)
+            return 1
+        rows.extend(pr)
+        peer_sources.append((arch, fname, len(pr), len(own)))
+        sys.stderr.write("peers %-8s %-40s %5d rows (+%d libcft rows dropped)\n"
+                         % (arch, fname, len(pr), len(own)))
+
     ser = series(rows)
     formats = [f for f in FORMAT_ORDER if any(k[0] == f for k in ser)]
     ops = sorted({k[1] for k in ser})
 
-    tips = {"source": str(src), "rows": len(rows), "points": {}}
+    configs = discover(rows)
+    baselines = [(k, lab) for k, lab, _c in configs if is_software(k)]
+    devices = [(k, lab) for k, lab, _c in configs if not is_software(k)]
+
+    tips = {"source": str(src), "rows": len(rows),
+            "peers": [{"arch": ar, "file": fn, "rows": nr}
+                      for ar, fn, nr, _o in peer_sources],
+            "baselines": [lab for _k, lab in baselines],
+            "points": {}}
     for fmt in formats:
         for op in ops:
             by_cfg = ser.get((fmt, op))
             if not by_cfg:
                 continue
-            sw = by_cfg.get(("software", "host", "0"))
-            if not sw:
-                continue
-            for backend, path, tiles, label, _c in CONFIGS:
-                if backend == "software":
+            for bkey, blab in baselines:
+                sw = by_cfg.get(bkey)
+                if not sw:
                     continue
-                dev = by_cfg.get((backend, path, tiles))
-                if not dev:
-                    continue
-                tips["points"]["%s/%s/%s" % (fmt, op, label)] = crossover(sw, dev)
+                for dkey, dlab in devices:
+                    dev = by_cfg.get(dkey)
+                    if not dev:
+                        continue
+                    tips["points"]["%s/%s/%s vs %s"
+                                   % (fmt, op, dlab, blab)] = crossover(sw, dev)
 
+    # newline="" keeps this LF on Windows too. tipping-points.json is a
+    # committed artifact, and write_text without it emits CRLF - which
+    # leaves the working tree disagreeing with the normalised blob and
+    # warns on every `git add`.
     (out / "tipping-points.json").write_text(
-        json.dumps(tips, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        json.dumps(tips, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8", newline="")
 
     html = [_HEAD]
     html.append("<h1>Where hardware starts to pay</h1>")
@@ -260,7 +394,9 @@ def main(argv=None):
                 "call. Where a coloured line drops below the grey one, the "
                 "device has overtaken the software backend for that operation "
                 "at that size.</p>" % (len(rows), src.name))
-    html.append(_LEGEND)
+    html.append("<div class=key>" + "".join(
+        '<span><i class=sw style="background:%s"></i>%s</span>' % (c, lab)
+        for _k, lab, c in configs) + "</div>")
 
     # The crossover table first: it is the answer, and the charts are the
     # evidence for it.
@@ -271,10 +407,11 @@ def main(argv=None):
                 "bracketing measurements for every entry, so the "
                 "interpolation can be checked rather than trusted.</p>")
     html.append("<table><thead><tr><th>format</th><th>op</th>"
-                "<th>configuration</th><th>crosses at</th>"
+                "<th>configuration</th><th>against</th><th>crosses at</th>"
                 "<th>speed-up at the largest size measured</th></tr></thead><tbody>")
     for name, c in sorted(tips["points"].items()):
-        fmt, op, label = name.split("/", 2)
+        fmt, op, rest = name.split("/", 2)
+        label, _, base = rest.partition(" vs ")
         if c["status"] == "crosses":
             at = "<strong>%s</strong> elements" % f"{c['n']:,}"
             sp = ("%.1fx at n=%s" % (c["speedup_at_largest_measured"],
@@ -292,7 +429,8 @@ def main(argv=None):
             at = "<span class=lose>%s</span>" % c["status"]
             sp = "-"
         html.append("<tr><td>%s</td><td><code>%s</code></td><td>%s</td>"
-                    "<td>%s</td><td>%s</td></tr>" % (fmt, op, label, at, sp))
+                    "<td>%s</td><td>%s</td><td>%s</td></tr>"
+                    % (fmt, op, label, base, at, sp))
     html.append("</tbody></table>")
 
     for fmt in formats:
@@ -302,11 +440,12 @@ def main(argv=None):
             if not by_cfg:
                 continue
             html.append("<figure><figcaption>%s &middot; <code>%s</code></figcaption>%s</figure>"
-                        % (fmt, op, svg_chart(fmt, op, by_cfg)))
+                        % (fmt, op, svg_chart(fmt, op, by_cfg, configs)))
         html.append("</div>")
 
     html.append(_FOOT)
-    (out / "bench-report.html").write_text("\n".join(html), encoding="utf-8")
+    (out / "bench-report.html").write_text("\n".join(html),
+                                           encoding="utf-8", newline="")
 
     crosses = sum(1 for c in tips["points"].values() if c["status"] == "crosses")
     always = sum(1 for c in tips["points"].values()
