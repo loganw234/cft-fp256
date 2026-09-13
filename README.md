@@ -98,10 +98,10 @@ and the measurements.
 One command runs the gates, in three sizes:
 
 ```bash
-make verify-quick   # ~20 min, 24 of 37 stages: model-vs-C, the bindings,
+make verify-quick   # ~20 min, 23 of 36 stages: model-vs-C, the bindings,
                     # seven language legs, soak, the five workloads,
                     # the browser demos and the remote backend
-make verify-gate    # ~2 h, 32 of 37: the above plus the golden model,
+make verify-gate    # ~2 h, 31 of 36: the above plus the golden model,
                     # vectors, libcft, transcendentals, MPFR, C++,
                     # the Yosys lint and the formal proofs
 make verify         # the full census, hours: adds the cocotb suites,
@@ -111,7 +111,7 @@ make verify         # the full census, hours: adds the cocotb suites,
 Every stage names itself, logs itself and writes a `.ok` or `.fail`
 marker; `--resume` continues an interrupted run and refuses to cross
 commits. A stage whose tools are absent is **skipped by name with the
-reason** rather than passed. `bash verify/run.sh --list` prints all 37 with
+reason** rather than passed. `bash verify/run.sh --list` prints all 36 with
 a `*` against the ones a given budget selects, and `docs/VERIFICATION.md`
 maps what each one proves and how long it really takes.
 

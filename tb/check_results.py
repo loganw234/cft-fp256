@@ -89,6 +89,7 @@ def main(argv):
     total_skipped = 0
     failed_benches = []
     missing = []
+    empty = []
 
     for path in paths:
         got = read_one(path)
@@ -108,6 +109,16 @@ def main(argv):
                 print("       %s" % line)
             continue
         total_cases += cases
+        # A bench that ran and compared NOTHING is not a bench that passed.
+        # Measured 2026-09-12: a parseable results.xml with an empty
+        # <testsuite> printed "ok 0 case(s)" and this file returned 0 - the
+        # same vacuity it exists to close, one layer in. cocotb writes at
+        # least one testcase for any bench that reached its coroutine, so zero
+        # means the bench was collected and never ran.
+        if cases == 0:
+            empty.append(bench)
+            print("  %-14s EMPTY    parsed, but recorded no test case" % bench)
+            continue
         if bad:
             failed_benches.append(bench)
             print("  %-14s FAIL     %d case(s) of %d" % (bench, len(bad), cases))
@@ -120,7 +131,7 @@ def main(argv):
     print("-- %d bench(es), %d case(s), %d skipped" %
           (len(paths), total_cases, total_skipped))
 
-    if missing or failed_benches:
+    if missing or failed_benches or empty:
         # stdout holds the per-bench detail and stderr the verdict; without
         # this flush the verdict overtakes the table it summarises, and a
         # CI log reads "FAIL" with the reason printed underneath it.
@@ -132,6 +143,9 @@ def main(argv):
         if missing:
             parts.append("%d wrote no results (%s)" %
                          (len(missing), " ".join(missing)))
+        if empty:
+            parts.append("%d recorded no cases (%s)" %
+                         (len(empty), " ".join(empty)))
         sys.stderr.write("FAIL: " + ", ".join(parts) + "\n")
         return 1
 

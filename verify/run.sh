@@ -199,11 +199,20 @@ if [ "$LIST" = 1 ]; then
   done < <(grep -E '^stage [a-z0-9-]+ "' "$SELF" \
     | sed -E 's/^stage ([a-z0-9-]+) +"([^"]*)".*/\1\t\2/')
   echo
+  # The counts are DERIVED and printed, so nothing downstream has to count
+  # them. On 2026-09-12 three documents published 37/24/32 because the
+  # counting probe was `--list | grep -c '^\*'` and the legend below used to
+  # begin with a `*` too - so it counted itself. It no longer starts with one,
+  # and the numbers come from here. Cite these; do not re-derive them.
+  n_all=$(grep -cE '^stage [a-z0-9-]+ "' "$SELF")
+  n_quick=$(echo "$BUDGET_QUICK" | tr ',' '\n' | grep -c .)
+  n_gate=$(echo "$BUDGET_GATE" | tr ',' '\n' | grep -c .)
+  echo "stages: $n_all total; $n_quick in --budget quick; $n_gate in --budget gate"
   if [ -n "$ONLY" ]; then
-    printf '* = would run%s. Unmarked stages are NOT part of this selection.\n' \
+    printf 'marked = would run%s. Unmarked stages are NOT part of this selection.\n' \
         "${BUDGET:+ under --budget $BUDGET}"
   else
-    echo "* = would run: every stage, the full census (no --only, no --budget)."
+    echo "marked = would run: every stage, the full census (no --only, no --budget)."
   fi
   exit 0
 fi
