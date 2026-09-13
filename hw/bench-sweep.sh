@@ -50,6 +50,12 @@ BENCH="$ROOT/host/cft-bench"
 [ -x "$BENCH" ] || BENCH="$ROOT/host/cft-bench.exe"
 
 SINGLE=""; QUAD=""; OUT="$ROOT/bench-sweep"; TSEC=0.15; QUICK=0
+# What the software rows are called. A sweep on a second machine is a
+# second SOFTWARE data point, not a replacement for the first, and the
+# two are only comparable if a reader can tell which silicon each ran
+# on. Anything beginning "software" is treated as a software series by
+# python/bench_report.py.
+LABEL="software"
 FORMATS="fp32 fp64 fp128 fp256"
 
 die () { echo "FATAL: $*" >&2; exit 2; }
@@ -61,6 +67,7 @@ while [ $# -gt 0 ]; do
     --out)     OUT=${2:?};    shift 2;;
     --time)    TSEC=${2:?};   shift 2;;
     --formats) FORMATS=${2:?}; shift 2;;
+    --label)   LABEL=${2:?};  shift 2;;
     --quick)   QUICK=1; shift;;
     -h|--help) sed -n '2,48p' "$0"; exit 0;;
     *) die "unknown option $1";;
@@ -122,14 +129,15 @@ sweep_point () {         # <backend> <path> <tiles> <format> <n> [artifact] [--r
 }
 
 echo "== sweep begins $(date -Is)" | tee -a "$LOG"
-echo "   bench $BENCH, -t $TSEC, quick=$QUICK" | tee -a "$LOG"
+echo "   bench $BENCH, -t $TSEC, quick=$QUICK, label=$LABEL" | tee -a "$LOG"
+echo "   host $(uname -n), $(uname -sm)" | tee -a "$LOG"
 
 for fmt in $FORMATS; do
   esz=$(esz_of "$fmt")
   [ "$esz" -gt 0 ] || die "unknown format $fmt"
   for n in $(ladder_for "$esz"); do
     printf "%-6s n=%-9s" "$fmt" "$n" | tee -a "$LOG"
-    sweep_point software host 0 "$fmt" "$n" && printf " sw" | tee -a "$LOG"
+    sweep_point "$LABEL" host 0 "$fmt" "$n" && printf " sw" | tee -a "$LOG"
     if [ -n "$SINGLE" ]; then
       sweep_point device host     1 "$fmt" "$n" "$SINGLE"             && printf " 1t-host" | tee -a "$LOG"
       sweep_point device resident 1 "$fmt" "$n" "$SINGLE" --resident  && printf " 1t-res"  | tee -a "$LOG"
