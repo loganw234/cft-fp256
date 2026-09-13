@@ -55,6 +55,12 @@ export const OP_RECIP_SEED = 26, OP_RSQRT_SEED = 27;
 // makes - DOT over (a, a), and an ABS pass then SUM - with one row of
 // their own, 9.4's infinity ahead of NaN.
 export const OP_SUMSQ = 28, OP_SUMABS = 29;
+// Appended by ABI 0.12, on the same terms. A maximum over the array, and the
+// fifth reduction the library COMPOSES rather than issues: a tile handed 31 as
+// a reduction would decode it as elementwise and write n elements where the
+// caller sized one. 754-2019 maximum is exactly associative and commutative
+// including its flags, so the composition's shape cannot move an answer.
+export const OP_MAXALL = 31;
 
 export const RNE = 0, RTZ = 1, RDN = 2, RUP = 3, RMM = 4;
 
@@ -699,6 +705,7 @@ const OPS_BY_NAME = {
   sum: OP_SUM, dot: OP_DOT,
   recip_seed: OP_RECIP_SEED, rsqrt_seed: OP_RSQRT_SEED,
   sumsq: OP_SUMSQ, sumabs: OP_SUMABS,
+  maxall: OP_MAXALL,
 };
 export { OPS_BY_NAME };
 

@@ -36,7 +36,7 @@ import {
   FP128, FP256, MINMAG_METHOD, OP_ABS, OP_ADD, OP_CMPEQ,
   OP_CMPLE, OP_CMPLT, OP_COPYSIGN, OP_DOT, OP_FMA, OP_MAX, OP_MAXNUM,
   OP_MIN, OP_MINNUM, OP_MUL, OP_NEG, OP_SELECT, OP_SUB, OP_SUM,
-  OP_SUMABS, OP_SUMSQ,
+  OP_MAXALL, OP_SUMABS, OP_SUMSQ,
   PROG_FLAG_BANK_EXT, PROG_FLAG_SCRATCH_IO,
   RDN, RMM, RNE, RTZ, RUP,
   SEQ_FEAT_BANK_PTR, SEQ_FEAT_KX9, SEQ_FEAT_REGS32, SEQ_FEAT_SCRATCH,
@@ -2296,10 +2296,15 @@ export class Context {
   reduce(op, a, b = null) {
     const M = this._M, fi = this._fi;
     const REDUCE_OPS = { sum: OP_SUM, dot: OP_DOT,
-                         sumsq: OP_SUMSQ, sumabs: OP_SUMABS };
+                         sumsq: OP_SUMSQ, sumabs: OP_SUMABS,
+                         maxall: OP_MAXALL };
     const code = REDUCE_OPS[op];
     if (code === undefined)
-      throw new TypeError(`reduce wants "sum", "dot", "sumsq" or "sumabs"`);
+      // Derived from the map it just failed against, never typed beside it.
+      // The literal list here read "sum", "dot", "sumsq" or "sumabs" for the
+      // whole of ABI 0.12, naming a set the map no longer matched.
+      throw new TypeError(`reduce wants ` +
+        Object.keys(REDUCE_OPS).map((k) => `"${k}"`).join(", "));
     if (b && code !== OP_DOT)
       throw new TypeError(`${op} reads one operand array; only dot takes b`);
     const n = a.length;

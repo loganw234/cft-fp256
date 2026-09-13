@@ -94,7 +94,7 @@ const AUG_METHOD = { augmentedAddition: "augmentedAdd",
 // The reduction sets: a case is a whole VECTOR and one answer - two
 // for the three scaled products, which return a pair.
 const REDUCE_SETS = perFmtRnd("reduce");
-const REDUCE_PLAIN = new Set(["sum", "dot", "sumsq", "sumabs"]);
+const REDUCE_PLAIN = new Set(["sum", "dot", "sumsq", "sumabs", "maxall"]);
 const SCALED_METHOD = { scaled_prod: "scaledProd",
                         scaled_prod_sum: "scaledProdSum",
                         scaled_prod_diff: "scaledProdDiff" };

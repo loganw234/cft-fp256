@@ -35,6 +35,7 @@ import { Context, formatFor } from "./index.mjs";
 import { decode, encodeExact } from "./core.mjs";
 import { FLAGS_ALL, FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO,
          FLAG_OVERFLOW, FLAG_UNDERFLOW, FORMATOF_METHOD, MINMAG_METHOD,
+         OPS_BY_NAME,
          is754version1985, is754version2008, is754version2019 }
   from "./lib.mjs";
 import { replayCorpus } from "./seq_corpus.mjs";
@@ -42,6 +43,8 @@ import { replayCorpus } from "./seq_corpus.mjs";
 let passed = 0, failed = 0;
 const failures = [];
 let seqSummary = null;
+
+const skipped = [];
 
 function test(name, fn) {
   try { fn(); passed++; }
@@ -104,6 +107,56 @@ function abiFromHeader() {
 test("the module is the tree's own ABI, on the software backend", () => {
   eq(c64.abiVersion, abiFromHeader(), "abi (cft.h says): ");
   eq(c64.backend, "software", "backend: ");
+});
+
+/** Every reduction name the MODEL emits must be one this package resolves.
+ *
+ *  The list of reductions is not written here, because a list written here
+ *  agrees with a stale binding exactly as happily as with a current one -
+ *  which is what happened: CFT_MAXALL landed at ABI 0.12 and three separate
+ *  hand-written lists in this package (lib.mjs's OPS_BY_NAME, core.mjs's
+ *  REDUCE_OPS, conformance.mjs's REDUCE_PLAIN) went on describing four
+ *  reductions. conformance.mjs did refuse - "unknown reduction \"maxall\"" -
+ *  but seven hundred seconds in, twenty sets at a time, and only against
+ *  vector sets fresh enough to contain the opcode.
+ *
+ *  So the names come from the sets the golden model wrote. Add a reduction to
+ *  the model and this goes red until the binding learns it, which is the
+ *  direction the dependency has to run.
+ *
+ *  Skipped BY NAME when the sets are absent: this file is runnable without
+ *  `make vectors`, and a silent pass there would be the vacuity the rest of
+ *  this suite refuses. */
+function reduceNamesFromVectors() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const set = join(resolve(here, "..", ".."), "vectors", "out",
+                   "fp32-reduce.jsonl");
+  let text;
+  try { text = readFileSync(set, "utf8"); }
+  catch { return null; }
+  const names = new Set();
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("{")) continue;
+    const m = line.match(/"fn"\s*:\s*"([a-z0-9_]+)"/);
+    if (m) names.add(m[1]);
+  }
+  return names;
+}
+
+test("every reduction the model emits is one this package can name", () => {
+  const names = reduceNamesFromVectors();
+  if (names === null) {
+    skipped.push("reduction names: vectors/out/fp32-reduce.jsonl absent - " +
+                 "run `make vectors`");
+    return;
+  }
+  ok(names.size > 0, "the reduce set named no reductions at all");
+  const unknown = [...names].filter(
+    (n) => OPS_BY_NAME[n] === undefined && !n.startsWith("scaled_prod"));
+  ok(unknown.length === 0,
+     `the model emits reduction(s) this package cannot resolve: ` +
+     `${unknown.join(", ")} - OPS_BY_NAME, core.mjs's REDUCE_OPS and ` +
+     `conformance.mjs's REDUCE_PLAIN all need it`);
 });
 
 test("all four formats open and report their own geometry", () => {
@@ -2832,6 +2885,10 @@ if (seqSummary)
               `${seqSummary.refused} refused from seq_corpus.jsonl, ` +
               `${seqSummary.deposits} deposits and ${seqSummary.lanes} ` +
               `counts compared with the C executor`);
-console.log(`${passed} passed, ${failed} failed`);
+console.log(`${passed} passed, ${failed} failed` +
+            (skipped.length ? `, ${skipped.length} skipped` : ""));
 for (const f of failures) console.log(`  FAIL  ${f}`);
+// A skip nobody prints is a skip nobody has. Named, with the reason, every
+// run - the rule verify/run.sh applies to its stages, applied here.
+for (const s of skipped) console.log(`  SKIP  ${s}`);
 process.exit(failed ? 1 : 0);
