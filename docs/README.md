@@ -32,7 +32,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 241 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 270 | Every gate, what it proves, how long it really takes. Twelve tiers, thirty-seven runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 287 | Every gate, what it proves, how long it really takes. Twelve tiers, thirty-seven runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -81,7 +81,7 @@ running.
 | document | lines | what it is for |
 |---|---|---|
 | [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 176 | Building a bitstream, and the four traps — three of which exit 0. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 580 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
+| [CARDDAY.md](CARDDAY.md) | 588 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 761 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record

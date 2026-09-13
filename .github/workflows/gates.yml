@@ -72,4 +72,10 @@ jobs:
           node-version: "22"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gfortran
       - run: pip install pytest mpmath gmpy2 numpy
-      - run: bash verify/run.sh --require-all --only vectors,libcft,augmented,reduce,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos
+      # `docs` and `generated` lead because they are a second each and
+      # they are the two that catch drift rather than breakage. Neither
+      # was in this list before 2026-09-13, which is how six stale stage
+      # counts and two stale generated artifacts reached main: the stages
+      # existed, sat in the quick budget, and nothing on push selected
+      # them. A gate that CI does not name is a gate that does not run.
+      - run: bash verify/run.sh --require-all --only docs,generated,vectors,libcft,augmented,reduce,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos

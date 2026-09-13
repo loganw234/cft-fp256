@@ -264,6 +264,13 @@ def main():
     if bad:
         print(f"{bad} checkpoint(s) did something other than refuse cleanly "
               f"- see host/fuzz/crashes/ckpt")
+        # This used to `return 0` regardless, which made the driver report
+        # success on exactly the outcomes its own docstring calls findings:
+        # a crash, a hang, a sanitiser report, or an exit that is not the
+        # contract's named refusal. run_ckpt.sh `exec`s this file, so that
+        # zero was the whole chain's exit status and a fuzzing session that
+        # found real defects looked clean to anything scripting it.
+        return 1
     return 0
 
 

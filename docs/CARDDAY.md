@@ -327,11 +327,19 @@ any test - "Mac address exceed IP4 maximum value" - a tool bug on this
 card; steps 2 to 5 are the stronger check and ran instead.) Record
 the shell version, the XRT version and the device BDF.
 
-**2. The image loads.** `cft-selftest` cannot do this (it opens the
-software backend), so use `device-test` with the single-tile image and
+**2. The image loads.** Use `device-test` with the single-tile image and
 `-q -n 8`. The first thing it prints is the tile count, the contract
 version and the format mask read from the card's own registers. If
 MAGIC is wrong, nothing after this matters.
+
+This step used to justify that with "`cft-selftest` cannot do this (it
+opens the software backend)", which was wrong, and wrong in this
+document alone: the tool takes `[vector-directory] [artifact.xclbin]`,
+its own header names this file as the run it keeps, and **step 4 below
+invokes it against an image**. The real reason it is not the tool for
+step 2 is cost, not capability - it replays the published sets, about
+ten minutes an image (docs/VERIFICATION.md), where step 2 wants the
+register identity in a second and wants it before spending anything.
 
 VERSION is a narrower signal than it looks: it guards the REGISTER
 MAP, not the feature set, so the host accepts a SET of known versions
