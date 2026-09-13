@@ -11134,3 +11134,94 @@ opaque agent hash was itself part of the mess.
 Checkout 13,508 MB -> 5,985 MB. Copies of `device.c` visible to an
 unscoped search: 3 -> 2, the second being the Arduino vendored copy, which
 `sync.py --check` confirms is byte-identical to `host/`.
+
+## 2026-09-13 - the revision-4 pair, built and exercised on the U50
+
+Both halves from `f636cf3`, 135 MHz, retiming and phys_opt, default
+directives, built by `hw/build-pair.sh` on amd-arc-box.
+
+### Built
+
+| | time | kernel WNS | routed WNS | failing endpoints | verify-image |
+|---|---|---|---|---|---|
+| single | 127 min | **+0.210** | +0.055 | 0 of 129,804 | 8/8 |
+| quad | 318 min | **+0.022** | +0.021 | 0 of 519,061 | 8/8 |
+
+`sha256` `0f77d00f…b903c` and `d2d80fea…a7c371`, each re-hashed byte-identical
+after staging into `~/cardday-rev4/`; `sha256sum -c SHA256SUMS` clean on all
+four files.
+
+**The quad is the thinnest margin in the lineage** - +0.022 ns against a
+7.407 ns period, about 0.3%, where the read-ahead pair closed at +0.089 and
++0.079. It met with zero failing endpoints, so the image is valid rather than
+marginal in the sense of being wrong, but it is the figure to watch if anything
+is ever added to that path.
+
+**And the path is the same one, for the same reason as always.** Both halves are
+limited by operand FIFO A's block RAM output into an FMA's stage-0 bypass
+register - `u_fifo_a/mem_reg_0` to `g_bank64.g_lane64[N].u_fma/s0_byp_d_reg[26]`,
+eighteen logic levels, mostly DSP. Lane 1 on the single, lane 3 on the quad,
+same source register and same destination bit. The split says where the margin
+went:
+
+| | logic | route | data path |
+|---|---|---|---|
+| single | 4.398 ns (63.0%) | 2.579 ns | 6.977 ns |
+| quad | 4.377 ns (60.0%) | **2.914 ns** | 7.291 ns |
+
+The logic is identical - marginally *faster* on the quad. The whole loss is
+route delay, +0.335 ns of congestion from four compute units competing around
+one structural path. The broadcast mux does not cost more at scale; the routing
+does.
+
+### Exercised on the card
+
+U50 at `0000:02:00.1`, shell `xilinx_u50_gen3x16_xdma_base_5`, Device Ready.
+`device-test` built `XRT=1` and confirmed XRT-linked with `ldd` before any
+verdict was believed - a host built without it reports `no such device` and
+reads exactly like a broken card.
+
+Both images report `contract 0x00000800` (VERSION correctly unmoved: both new
+bits live inside registers that already existed) and `seq_features 0xf1f`.
+
+| run | single | quad |
+|---|---|---|
+| `-q -n 64` one opcode and attribute a format | 1,072 checks, 0 failed | 1,072 checks, 0 failed |
+| `-b -n 64` device-resident buffers | 4,369 checks, 0 failed | 4,369 checks, 0 failed |
+| `-s -n 64` sequencer programs | 500 checks, 0 failed | - |
+| `-r -n 64` reductions | 904 checks, 0 failed | - |
+| stride-0 probe | 5 checks, 0 failed | 5 checks, 0 failed |
+
+**12,296 checks, 0 failed**, every verdict the skip-aware form - *"the device
+and the software backend agree on every case, bits and flags"* rather than
+"every case that RAN", which is the wording the summary downgrades itself to
+when anything was skipped. Nothing was.
+
+**Ask 1 on silicon.** The buffer run reports *"fp256 program scratch: 64 lanes,
+deposits and the scratch-out block identical staged and resident"*, and the
+counter beside it proves residency actually happened rather than silently
+falling back to staging: **1,412 bindings served from a device copy with no
+transfer** on the single, **5,326** on the quad. A staged fallback would have
+been correct, slower, and invisible.
+
+**R8 on silicon.** `SCRATCH_STRICT published, a strict image loads`.
+
+**Ask 2 on silicon, and it needed a probe written for it.** `device-test` at
+this commit has no scalar case: the tile published CAPS2[7] and nothing drove
+it, which is the advertised-but-unexercised state a capability bit must not be
+left in. So one multiply with `b` a single element through `cft_run_ex`
+(`scalar_mask = 2`) against the same multiply with `b` expanded to 64 copies
+through `cft_run` - bit-identical and flag-identical on both images. The scalar
+buffer is 64 elements wide with only element 0 set and the rest `0x5A`, so a
+tile that ignored MODE[18:16] and streamed n elements would compute from the
+poison rather than read past a one-element allocation where the damage is
+invisible. The negative control is inside the positive test.
+
+### Housekeeping
+
+Twelve build trees reclaimed once nothing was linking, 12,136 MB, after the
+forensics were extracted - manifest, gzipped routed report and a distilled
+worst-path file per build, 10 MB in all under `~/cardday-forensics/`. Two trees
+were **refused rather than deleted** because nothing was extractable from them
+(`build-135-hw`, `build-seq135q`); the rev4 pair's own trees are kept until the
+pair has been used in anger. 79 GB free became 91 GB.

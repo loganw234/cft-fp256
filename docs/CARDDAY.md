@@ -54,6 +54,24 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
+- [x] **THE REVISION-4 PAIR: built 2026-09-12 into 09-13 from main
+      f636cf3, both halves at 135 MHz, verified, staged and exercised on
+      the card** (`~/cardday-rev4`; docs/VALIDATION.md, 2026-09-13).
+      The read-ahead pair plus two capability bits and the guard that
+      came with the second: CAPS2[6] SCRATCH_STRICT, so an indexed
+      scratch access at or past SCRATCH_D is REPORTED in STATUS[5]
+      rather than reduced modulo the depth; CAPS2[7] SCALAR, so
+      MODE[18:16] make a, b or c stride-0 and the engine reads ONE BEAT
+      instead of n; and a refusal on any non-zero bit in MODE[31:19].
+      VERSION stays 0x800 - both bits live inside registers that already
+      existed - and it needs a host at ABI 0.12 for cft_run_ex, while
+      0.11 and earlier drive everything else on it. **Its quad is the
+      thinnest margin in the lineage at +0.022 ns**, met with zero
+      failing endpoints of 519,061; the single is +0.210. An image using
+      neither flag computes exactly what revision 3 computed, so the
+      pair is a superset rather than a different answer. 12,296 checks
+      on the card, 0 failed.
+
 - [x] **THE READ-AHEAD PAIR: built 2026-09-09 morning from main 49a9a1b,
       both halves at 135 MHz, verified, staged and measured as each
       landed** (`~/cardday-ra`; docs/VALIDATION.md, the read-ahead
