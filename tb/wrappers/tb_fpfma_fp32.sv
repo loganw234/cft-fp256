@@ -36,12 +36,32 @@ module tb_fpfma_fp32 #(
   localparam int PHW = (NP > 1) ? $clog2(NP) : 1;
   logic [PHW-1:0] ph;
   logic           en;
+  // fp32 is the one format whose mantissa fits a SINGLE multiplier pass:
+  // cft_mul_passes(24, MUL_PASSES) is 1 here where fp64/128/256 give more.
+  // So PHW'(NP - 1) is zero, and an unsigned `ph >= 0` is constant-true -
+  // which is the INTENDED behaviour, not a bug: at one pass every cycle
+  // completes a pass and `en` is always asserted. Verilator says so as
+  // UNSIGNED, and warnings are fatal in this suite by design, so
+  // `make fp32 SIM=verilator` could not even elaborate.
+  //
+  // The `>=` stays. It is what carries NP > 1, where ph counts up to
+  // NP - 1, and PHW = $clog2(NP) can hold values ABOVE NP - 1 for a
+  // non-power-of-two NP - so `>=` is the form that resets the counter
+  // from a value `==` would step past. Narrowing it to `==` to please a
+  // lint would trade a constant-true comparison in one configuration for
+  // a reachable wrong one in another.
+  //
+  // Scoped to these two lines only. An UNSIGNED warning anywhere else in
+  // this wrapper stays fatal, and the three sibling wrappers carry no
+  // pragma because at NP > 1 the comparison is not constant.
+  /* verilator lint_off UNSIGNED */
   always_ff @(posedge clk) begin
     if (!rst_n)                       ph <= '0;
     else if (ph >= PHW'(NP - 1))      ph <= '0;
     else                              ph <= ph + 1'b1;
   end
   assign en       = (ph >= PHW'(NP - 1));
+  /* verilator lint_on UNSIGNED */
   assign in_ready = en;
 
   logic bv; logic [31:0] bd; logic [4:0] bf;

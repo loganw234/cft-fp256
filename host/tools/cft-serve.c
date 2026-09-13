@@ -1188,7 +1188,18 @@ int main(int argc, char **argv)
         return 2;
     }
     if (ws_port >= 0) {
-        char ws_port_s[16];
+        /* Sized for any long, not for a port. The value IS a port -
+         * rejected above if > 65535, and this branch needs >= 0 - so five
+         * digits is all that can arrive and [16] never truncated. But the
+         * compiler cannot see that: the bound is split across
+         * `ws_port > 65535` and this `ws_port >= 0`, and GCC loses the
+         * range between them, so -Wformat-truncation flags a write of up
+         * to 20 bytes into 16 under XRT=1. Its sibling `port_s` above is
+         * NOT flagged, because `port`'s check is a single condition GCC
+         * can follow - so do not "fix" that one to match.
+         * The length is derived from the widest long, not counted by
+         * hand: 20 digits, a sign, and the NUL the literal carries. */
+        char ws_port_s[sizeof("-9223372036854775808")];
         snprintf(ws_port_s, sizeof ws_port_s, "%ld", ws_port);
         ws_listener = cftr_sock_listen(bind_addr, ws_port_s, 16, &ws_bound);
         if (ws_listener == CFTR_BAD_SOCK) {

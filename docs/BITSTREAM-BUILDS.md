@@ -29,7 +29,29 @@ the host choice is yours to make and nothing will correct it for you.
 
 Nothing FPGA runs on Windows itself — `xclbinutil` is Linux-only.
 
-## The commands
+## The script, which is the short answer
+
+```bash
+setsid nohup hw/build-pair.sh --tag rev4 \
+    --commit <sha> --require <token> --require-in rtl/cft_krnl.sv:<token> \
+    > ~/build-rev4.out 2>&1 &
+```
+
+`hw/build-pair.sh` is this document as an executable. It sets the clock,
+retiming and phys_opt rather than inheriting the defaults; **refuses a
+clock below 100 MHz** instead of quietly building the one that meets
+timing trivially; asserts the commit *and* greps the sources for content
+only the intended commit has; builds single before quad and skips the quad
+entirely if the single did not verify; runs `hw/verify-image.sh` before
+anything is staged; re-hashes each staged copy against its manifest; and
+writes `SHA256SUMS` and a README naming the lineage. `--dry-run` runs every
+assertion and builds nothing, which is how the refusals are tested.
+
+It exists because this recipe was rebuilt from memory several times and
+memory got it wrong in ways that exit 0 — once costing five hours on a
+10 MHz image.
+
+## The commands it runs, which are the explanation
 
 From the repo root, on whichever host you chose:
 

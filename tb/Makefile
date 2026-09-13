@@ -49,15 +49,42 @@ RD_LATENCY ?= 0
 WR_LATENCY ?= 0
 LATENCY_ENV = CFT_RD_LATENCY=$(RD_LATENCY) CFT_WR_LATENCY=$(WR_LATENCY)
 
+# Matches the parent Makefile's default. The parent does not export
+# it, and `make -C tb` is a fresh make.
+PYTHON ?= python3
+
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
         seq_core seqprobe krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
-sim: fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-     seedop reduceacc reduce krnl quarter faults seq_core krnlseq \
-     seqbanks mulpass mulcycle mulcycle2
+# The full suite, as one list. `sim` runs these and then READS WHAT THEY
+# WROTE, which until 2026-09-12 it did not.
+#
+# cocotb cannot set an exit code - its own makefile says so at
+# Makefile.inc:88 and checks only that a results file EXISTS. So a bench
+# that ran, compared against the golden model, found a mismatch and
+# recorded it in XML left `make sim` reporting success. Compile failures
+# and hangs were always caught (cocotb deletes the results file before
+# each run; the `timeout` wrappers handle the rest) - what escaped was
+# the one outcome this project exists to detect.
+SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
+              normshare seedop reduceacc reduce krnl quarter faults \
+              seq_core krnlseq seqbanks mulpass mulcycle mulcycle2
+
+# A bench writes sim_build/<target name>/results.xml. One does not: the
+# multi-cycle multiplier bench is parameterised by the pass budget, so
+# its directory carries MC and the name cannot be derived. Override it
+# here rather than keeping a second copy of the whole list - a list of
+# twenty-one names maintained twice is how a bench ends up run but
+# unchecked, which is the defect above wearing a typo.
+SIM_DIR_mulcycle = mulcycle$(MC)
+SIM_RESULTS = $(foreach b,$(SIM_BENCHES),\
+    sim_build/$(if $(SIM_DIR_$(b)),$(SIM_DIR_$(b)),$(b))/results.xml)
+
+sim: $(SIM_BENCHES)
+	@$(PYTHON) check_results.py $(SIM_RESULTS)
 
 # The suite at the multi-cycle pass budget MC: every bench that holds a
 # pipe, a lane array or the kernel, run against the same golden model

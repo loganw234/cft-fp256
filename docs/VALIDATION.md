@@ -10948,3 +10948,189 @@ bump legal rather than a formality. Both additions are ADDITIVE - code
 written against 0.11 gets the same bits from the same calls - which is why
 a stale module was wrong about the version and about twenty sets, and
 about nothing else.
+
+## 2026-09-12 - two gates that could not fail, and the path that has always been the critical one
+
+A cleanup round, not a feature. Three of the four items were repairs to
+the machinery that decides whether anything else in this file is true.
+
+### `make sim` now has an exit code that means something
+
+cocotb **cannot set an exit code**. Its own makefile says so, at
+`Makefile.inc:88` of cocotb 1.9.2: `# Check that the COCOTB_RESULTS_FILE
+was created, since we can't set an exit code from cocotb`, and the check it
+defines tests that the file EXISTS. A bench whose assertions failed still
+wrote a results file, so the file existed, so the check passed, so
+`make sim` - twenty-one benches - returned 0. Three real RTL failures were
+reported as passes this way.
+
+Two outcomes were always caught and still are, which is why the hole was
+narrow rather than total: a compile or elaboration failure (cocotb removes
+the results file before each run, so a bench that never wrote one trips the
+existence check - measured, `rc=2` on a Verilator elaboration error) and a
+hang (the `timeout` wrappers on the sequencer targets). What escaped was
+the single outcome this project exists to detect: a bench that ran,
+compared against the golden model, found a mismatch, and recorded it in XML
+that nothing opened.
+
+`tb/check_results.py` reads them. The files it reads are DERIVED from
+`SIM_BENCHES` rather than listed beside it - one `SIM_DIR_mulcycle`
+override for the bench whose directory carries the pass budget - because a
+second hand-written list of twenty-one names is how a bench ends up run and
+unchecked, which is the defect itself wearing a typo. (The maxall round,
+nine days of this log earlier, is the same disease: one opcode number, ten
+hand-written lists.)
+
+### Measured, gate controls first
+
+- **The gate refuses.** Five synthetic cases: clean -> `rc=0`; a
+  `<failure>` -> `rc=1`, naming `test_krnl.test_scalar: golden mismatch at
+  element 7`; an `<error>` -> `rc=1`; a MISSING results file -> `rc=1`; an
+  unparseable one -> `rc=1`. Skipped cases are reported and do not fail.
+- **Against real cocotb output**: 41 results files on disk, 120 cases
+  parsed, and it immediately found one recorded failure nothing had ever
+  read - `seqprobe`, from **2026-09-01**, `test_seq_probe.probe` hitting its
+  "no done in N cycles" assertion from when `cft_seq` was under
+  construction. A diagnostic target, not in `make sim`, and `seq_core`
+  itself is 18/18 - so a stale artifact rather than a live defect. It is
+  also the argument for the explicit list over a glob: the glob is what
+  reached an eleven-day-old file.
+- **End to end, both directions.** `make sim SIM_BENCHES=fp32 SIM=icarus`:
+  bench PASS, checker PASS, `rc=0`. The same with the results list pointed
+  at that stale `seqprobe` file: `make: *** [Makefile:87: sim] Error 1`.
+  The target goes red and says which bench and why.
+
+### `make all XRT=1` was not building `cft-resident`
+
+`all:` is read at `host/Makefile:180` and make expands a prerequisite list
+when it READS the rule - confirmed with a four-line makefile rather than
+from the manual: `T := one` / `all: $(T)` / `T += two` builds only `one`.
+Every tool added below that line therefore carries TWO lines, `TOOLS += x`
+and a second `all: x` that make merges, and the block at `Makefile:586`
+says so outright. Six tools do it. `cft-resident`, added under
+`ifeq ($(XRT),1)`, wrote the first and not the second: present in
+`$(TOOLS)` (measured, position 5 under `XRT=1`), absent from `all:`'s
+prerequisites. Nothing built it, so whatever binary was on disk dated from
+the last time someone named it explicitly - the stale-artifact class that
+cost three separate hours earlier the same day. It had no clean rule
+either; one was added OUTSIDE the ifeq, so an XRT-linked binary cannot
+outlive a `clean` run without XRT.
+
+Measured on cft2204 (WSL, XRT at `/opt/xilinx/xrt`, no card - the right
+host for a compile check while amd-arc-box links the quad): clean tree,
+`make -C host XRT=1 all`, `rc=0`, `cft-resident` built by `all` and linked
+against XRT. `all:` under `XRT=0` unchanged.
+
+### The XRT=1 build is warning-free, and two of its three warnings were phantoms
+
+The first run reported three. Two were `-Wshadow` on `device.c:920` for a
+`bb` that **does not exist in main** - the clone was detached at `8b7dea1`,
+which predates the `ab/bb/cb` -> `a_bytes/b_bytes/c_bytes` rename. A stale
+checkout reporting a warning that was already fixed is the same class as a
+stale binary reporting a passing test, and it came one step from being
+written down as a live finding. Pinning the clone to `f636cf3` and
+asserting content (`grep a_bytes host/src/device.c`) removed both.
+
+The third was real: `cft-serve.c:1192`, `-Wformat-truncation`, a `long`
+into `char[16]`. The value is a port, rejected above 65535, so five digits
+is all that can arrive and it could never truncate - but the bound is split
+across `ws_port > 65535` and a later `ws_port >= 0` and GCC loses the range
+between them. Its sibling `port_s` is not flagged, because `port`'s check
+is one condition. Sized from the widest long rather than by hand:
+`char ws_port_s[sizeof("-9223372036854775808")]`, 21 bytes. **XRT=1 now
+builds with zero errors and zero warnings, for the first time.**
+
+This also corrects this log's own earlier description of the item. The
+`%ld` specifier is CORRECT for a `long`; the defect was the buffer, which
+is a different claim, and a reading that checked only the specifier
+concluded the item did not exist.
+
+### `make fp32 SIM=verilator` could not elaborate
+
+fp32 is the one format whose mantissa fits a single multiplier pass -
+`cft_mul_passes(24, MUL_PASSES)` is 1, where fp64/128/256 give more - so
+`PHW'(NP - 1)` is zero and the unsigned `ph >= 0` is constant-true. That is
+the intended behaviour at one pass: every cycle completes a pass and `en`
+is always asserted. Verilator reports it as UNSIGNED, warnings are fatal in
+this suite by design, and the bench therefore did not compile - on the
+simulator `CLAUDE.md` recommends for iteration, measured at 9.7x faster.
+
+Scoped `lint_off UNSIGNED` over the two lines with the argument beside
+them, the convention the four existing sites in `rtl/` use. The `>=` was
+left alone: it is what carries NP > 1, where `PHW = $clog2(NP)` can hold
+values above NP - 1 for a non-power-of-two NP, so narrowing it to `==`
+would trade a constant comparison in one configuration for a reachable
+wrong one in another. Measured: `fp32` PASS under Verilator in 6.92 s
+against 17.52 s under Icarus, and since Verilator compiles every wrapper in
+`VERILOG_SOURCES` in one pass, the other twenty-odd wrappers are proven to
+elaborate by the same run.
+
+### The finding that was not a repair: the critical path has not moved
+
+This morning's question - is revision 4 limited by the same path as the
+read-ahead pair, or did the broadcast mux create a new one - **could not be
+answered**, because the read-ahead build tree had been deleted by an
+earlier tidy-up and the staged `cardday-ra` holds the xclbin and manifest
+but no timing report. The margin comparison stayed a population argument.
+
+So before reclaiming the 13.4 GB of intermediate trees now on the box, the
+reports were extracted: manifest, the routed timing summary gzipped, and a
+distilled worst-path file per build. 13,415 MB of build tree -> **9 MB
+kept**. The first distillation was itself wrong in the way the morning's
+reading had been - it took the first `Max Delay Paths` entry in the file,
+which belongs to whichever clock group prints first (`io_clk_freerun_00`,
+a shell clock at +7.283 ns) rather than to the kernel clock. Rewritten to
+find the `From Clock`/`To Clock` section naming the kernel clock and read
+the first path inside it, and cross-checked against the figure found by
+hand.
+
+With that, the comparison is a path-level one:
+
+| build | commit | kernel WNS | limiting path |
+|---|---|---|---|
+| `build-135s` | `39fc2c04` | +0.255 | `u_fifo_a/mem_reg_2` -> `g_lane32[6].u_fma/s0_byp_d_reg[7]` |
+| `build-ms-single` | `b1a014cb` | +0.220 | `u_fifo_a/mem_reg_2` -> `g_lane32[5].u_fma/s0_byp_d_reg[14]` |
+| `build-rev4-hw` | `f636cf39` | +0.210 | `u_fifo_a/mem_reg_0` -> `g_bank64.g_lane64[1].u_fma/s0_byp_d_reg[26]` |
+
+**The same structural path has limited every successful single**: operand
+FIFO A's block RAM output into an FMA's stage-0 bypass register, 18 logic
+levels, mostly DSP. Revision 4 did not create a new critical path, it
+inherited this one - and the broadcast mux, which sits exactly there
+(`cfg_scalar[0] ? bcast_beat(a_q, prec_r) : a_q` on FIFO A's read data),
+cost about 0.01 ns against `ms-single`, inside placement variance. The
+read-ahead pair's +0.089 was the low draw of this population, not the norm
+it was read as this morning.
+
+Also preserved rather than deleted: `build-seq135s` at **-0.286**, a
+sequencer build that did NOT close, limited by
+`u_seq/prec_q_reg[1]_rep__1_replica` -> `u_seq/wr_addr_reg[56]`. A failed
+build is evidence about what fails and why; it was one `rm -rf` from being
+gone.
+
+### And the repository itself
+
+14 abandoned agent worktrees, 7.5 GB of a 13.5 GB checkout, against 76 MB
+of `.git`. The disk was not the problem: fourteen worktrees plus main meant
+every unscoped `grep -r` returned FIFTEEN copies of every answer with the
+stale ones sorting first, which is how a hand-written list gets missed or a
+September-7 copy gets found and believed. A fifteenth directory was on disk
+that `git worktree list` never showed - already pruned from git's metadata,
+files still there, and no `.git` of its own, so `git -C` on it silently
+answered about the PARENT repo and reported it clean. Every file in it was
+checked against git's object store before deletion: 193 differed from main
+(it was a September-9 snapshot), one file was unique to it, and the 20
+whose content git had never seen were all `.exe`, `.dll`, `.a`, `.o` and
+`.pyc`. No source, no document.
+
+20 of 21 agent branches were merged into main and were deleted with `-d`,
+which refuses an unmerged branch. The 21st was kept and renamed
+`study-a-roundfold`: `de7c742` carries ~2,000 lines not in main - study A's
+idea 2, the round window folded into the normalise ladder, with a frozen
+reference pipe, a formal equivalence check, 658,048 model comparisons at 0
+mismatches, and 123,214 -> 116,464 LUT. Its cocotb gate was still running
+when the session was stopped, so it is unfinished, not abandoned, and an
+opaque agent hash was itself part of the mess.
+
+Checkout 13,508 MB -> 5,985 MB. Copies of `device.c` visible to an
+unscoped search: 3 -> 2, the second being the Arduino vendored copy, which
+`sync.py --check` confirms is byte-identical to `host/`.

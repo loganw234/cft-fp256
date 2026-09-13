@@ -49,15 +49,49 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 4. **One heavy link at a time.** A quad `place_design` wants 25–30 GB,
    and an OOM kill reads like a design failure.
 
-## Gates that cannot fail (known, unfixed)
+## Gates, and which ones mean something
 
-- **`make sim` exits 0 even when cocotb reports failures.** `results.xml`
-  records them and nothing reads it. Read `TESTS=`/`FAIL=` out of the
-  log; never trust the exit code. Three real RTL failures were reported
-  as a pass this way.
-- **`bindings/arduino/sync.py --check` fails on a clean checkout** —
-  vendored files differ at HEAD, so `make embedded` is red independently
-  of whatever you changed.
+**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-one
+benches and then reads the `results.xml` each one wrote, via
+`tb/check_results.py`. A recorded failure, a missing results file or an
+unparseable one all fail the target and name the bench and the message.
+Before this, cocotb's inability to set an exit code — stated in its own
+makefile at `Makefile.inc:88`, which checks only that the file *exists* —
+meant three real RTL failures were reported as a pass.
+
+Two things were always caught and still are: a compile or elaboration
+failure (cocotb deletes the results file before each run, so a bench that
+never wrote one trips cocotb's own check) and a hang (the `timeout`
+wrappers). The hole was a bench that ran, compared against the golden
+model, found a mismatch, and recorded it in XML nothing opened.
+
+The bench list is the variable `SIM_BENCHES` and the files checked are
+*derived* from it, so a bench cannot be added to the run and left out of
+the check. Override it to gate a subset: `make sim SIM_BENCHES=fp32`.
+
+**`make all XRT=1` now builds `cft-resident` (fixed 2026-09-12).** It
+appended to `$(TOOLS)` from below the `all` rule, and make expands a
+prerequisite list when it *reads* the rule — so the tool was in `$(TOOLS)`
+and absent from `all:`. The repo's idiom is a second `all: <tool>` line,
+which make merges; this one tool had skipped it. It also had no clean
+rule, so a stale binary could outlive a `clean`.
+
+**`bindings/arduino/sync.py --check` passes.** Measured 2026-09-12: 28
+vendored files, all identical to `host/`. This entry previously claimed it
+failed on a clean checkout; it does not. Treat a failure from it as a real
+divergence.
+
+**The XRT=1 host build is warning-free as of 2026-09-12** — the first time.
+`cft-serve.c` was writing a `long` into `char[16]` under
+`-Wformat-truncation`; provably unreachable, because the value is a port
+validated to five digits, but GCC could not see the bound across two
+conditions. Treat any warning there as new.
+
+**`make fp32 SIM=verilator` elaborates again (fixed 2026-09-12).** fp32 is
+the one format whose mantissa fits a single multiplier pass, so its pass
+counter compares against zero and Verilator called it constant — fatal,
+since warnings are fatal in this suite by design. Scoped `lint_off
+UNSIGNED` on the two lines, with the argument beside them.
 
 ## Before believing a remote build
 

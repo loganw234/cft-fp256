@@ -55,7 +55,16 @@ authority:
    operations, the status word, the cross-format arithmetic, the
    alignment boundary, the sequencer's fuzzed programs, the reductions.
 4. **The RTL, in simulation** (`tb/`, `make sim` in the `cft-sim`
-   image). Twenty-one cocotb targets hold the hardware to the model:
+   image). Twenty-one cocotb targets hold the hardware to the model, and
+   since 2026-09-12 the target's exit code reports whether they passed:
+   `tb/check_results.py` reads every `results.xml` the run wrote and fails
+   on a recorded failure, a missing file or an unparseable one. cocotb
+   cannot set an exit code itself — its makefile says so and checks only
+   that the file exists — so until that date this tier could report
+   success with any number of its benches red, and three real RTL failures
+   were reported as a pass. The files checked are derived from the bench
+   list rather than written beside it, so a bench cannot be run and left
+   unchecked. The benches:
    the four rung benches replay 111,278 published vectors through
    `cft_fpfma_pipe` bit for bit, flags included; the kernel is driven
    through its CSR and AXI interfaces, by the streaming engine and by

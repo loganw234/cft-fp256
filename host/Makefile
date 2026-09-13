@@ -224,7 +224,24 @@ cft-bench$(EXE): tools/cft_bench.c libcft.a
 # XRT=1, and C++ for the reason backend_xrt.cpp is.
 ifeq ($(XRT),1)
 TOOLS += cft-resident$(EXE)
+# The second line the idiom at Makefile:586 requires, and the one this
+# tool went without until 2026-09-12. `all:` above was read before this
+# point, so its prerequisite list is already expanded and `TOOLS +=`
+# cannot reach it; a separate `all:` rule for the same target is how
+# make merges a prerequisite in from below. Without it `make all XRT=1`
+# silently skipped this tool and any cft-resident on disk was left over
+# from whenever somebody last named it explicitly.
+all: cft-resident$(EXE)
 endif
+
+# Outside the ifeq on purpose. An XRT=1 build leaves an XRT-linked
+# binary here; if `clean` only removed it under XRT=1, a later XRT=0
+# build would leave that executable in place looking current.
+clean: clean-resident
+clean-resident:
+	rm -f cft-resident cft-resident.exe
+.PHONY: clean-resident
+
 cft-resident$(EXE): tools/cft_resident.cpp libcft.a
 	$(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) $(XRTINC) $(XRTDEF) $^ -o $@ $(XRTLIBS)
 
