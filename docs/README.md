@@ -32,7 +32,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 241 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 287 | Every gate, what it proves, how long it really takes. Twelve tiers, thirty-seven runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 311 | Every gate, what it proves, how long it really takes. Twelve tiers, thirty-seven runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract

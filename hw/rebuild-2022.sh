@@ -263,7 +263,12 @@ for t in $TARGETS; do
     # NOT `extra` as the loop variable: that name already holds
     # --clock.freqHz, and reusing it silently dropped the clock
     # constraint - a bitstream built at the platform default while
-    # still reporting success. Caught by the stub-v++ argv test.
+    # still reporting success. hw/test-rebuild-argv.sh is the test
+    # that catches it: stub v++ and vivado on PATH, the real script
+    # run with VPP_PROPS set, and the argv read back. It credited
+    # that test from the day the bug was fixed; the test was written
+    # 2026-09-13, and its negative control puts this defect back and
+    # requires the check to catch it.
     for vp in $VPP_PROPS; do vprop+=(--vivado.prop "$vp"); done
     if [ ${#vprop[@]} -gt 0 ]; then
       echo "== implementation exploration: place='${PLACE_DIRECTIVE:-default}'" \

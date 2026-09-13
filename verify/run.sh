@@ -139,7 +139,7 @@ BUDGET=""
 # now that the formal gate holds thirty-one proofs, full longer by the
 # simulation suite and the two browser replays; on the WSL distro the
 # replay stages take seconds.
-BUDGET_QUICK=docs,generated,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,generated,buildargs,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -469,6 +469,29 @@ do_generated() {
 }
 need python
 stage generated "every committed generated file still matches its generator" -- do_generated
+
+# The bitstream script's link line, without a bitstream. hw/rebuild-2022.sh
+# builds `--clock.freqHz` into a shell variable and an inner loop once
+# reused that variable's name, erasing the clock constraint while the build
+# still reported success - two hours to discover, and only by reading a
+# timing report rather than an exit code. hw/test-rebuild-argv.sh puts stub
+# v++ and vivado on PATH, runs the REAL script with VPP_PROPS set (an empty
+# VPP_PROPS is exactly the case that never broke), and reads back the argv.
+# Its negative control reintroduces the defect and requires the check to
+# catch it.
+#
+# `need` with no arguments only clears any skip reason the previous stage
+# left. The condition here is not a missing tool but a present one: a real
+# Vitis is sourced by rebuild-2022.sh before it looks for v++, and that
+# prepends the real toolchain, so the stub loses and a two-hour link starts
+# on a build host. Measured on amd-arc-box, which is why this is a refusal
+# rather than a hope.
+need
+for _vroot in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
+  [ -f "$_vroot/Vitis/2022.2/settings64.sh" ] && STAGE_SKIP_REASON="a real Vitis at $_vroot is sourced by rebuild-2022.sh and takes PATH from the stub"
+done
+stage buildargs "hw/rebuild-2022.sh hands v++ the clock constraint, with VPP_PROPS set, plus the negative control" -- \
+  bash "$ROOT/hw/test-rebuild-argv.sh"
 
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q

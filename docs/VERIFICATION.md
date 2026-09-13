@@ -185,7 +185,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | a shell link, four tiles | 3 to 4 h | | 25 to 30 GB of the build box's 46; one at a time or the placer is killed and it looks like a design failure |
 
 The budgets in `verify/run.sh` are cuts of that table: `quick` is the
-`docs` and `generated` checks, the model-versus-C stages, the bindings, the language
+`docs`, `generated` and `buildargs` checks, the model-versus-C stages, the bindings, the language
 legs, the soak spot check, the workloads, the demos and the remote
 backend - about twenty minutes after a host build; `gate` adds the golden suite, the vectors,
 the library replay, the transcendentals, MPFR, the C++ replay, lint and
@@ -199,7 +199,7 @@ fresh invocation re-runs everything and `--resume` is the only thing that
 skips work. (cft-rebound is the sibling repo with a content-addressed gate
 cache and a warm five-second check; this runner does not have one.)
 
-`bash verify/run.sh --list` prints all thirty-seven stages with a marker
+`bash verify/run.sh --list` prints all thirty-eight stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second
@@ -227,6 +227,30 @@ comment true. `make_seq_corpus.py` needs a built libcft and `cft_golden`
 on the path and is skipped by name when they are absent, so staleness is
 recognised from the generator's own message rather than from exit status
 alone.
+
+`buildargs` is the third of that family and the only one that tests a
+build without building. `hw/rebuild-2022.sh` assembles the v++ link line
+in shell variables, and an inner loop once reused the name that held
+`--clock.freqHz`, so setting `VPP_PROPS` **erased the clock constraint
+while the build still reported success** - the failure CLAUDE.md warns
+about, two hours to reach and visible only in a timing report. The script
+credited "the stub-v++ argv test" with catching it from the day it was
+fixed; that test did not exist until 2026-09-13.
+`hw/test-rebuild-argv.sh` is it: stub `v++` and `vivado` on `PATH`, the
+REAL script run with `VPP_PROPS` set (an empty `VPP_PROPS` is exactly the
+case the bug never broke), and the argv v++ was handed read back - for
+the single and the quad link configs, checking the frequency and that the
+constraint names every compute unit. Its negative control puts the defect
+back into a copy of the script and requires the check to catch it, the
+same rule `formal/` keeps.
+
+It is **skipped by name on any host with Vitis installed**, and that is a
+refusal rather than an oversight: `rebuild-2022.sh` sources
+`$root/Vitis/2022.2/settings64.sh` before it looks for `v++`, which
+prepends the real toolchain - measured on amd-arc-box, where a stub first
+on `PATH` became `/data/Xilinx/Vitis/2022.2/bin/v++` after the source. The
+stub would lose and a two-hour link would start on a build host. So the
+stage runs where Vitis is absent, which includes CI.
 
 Two things are always true of the wall time. **Vivado runs one at a
 time** on a shared host - the queue scripts this project uses check
