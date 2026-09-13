@@ -18,6 +18,24 @@
 name: gates
 on: [push, pull_request]
 
+# Only the tip of a branch is worth a runner. The `host` job alone takes
+# about an hour and a half, so a run of four commits pushed over twenty
+# minutes - which is what 2026-09-13 looked like - left three obsolete
+# runs grinding to a verdict nobody would read, on code main had already
+# moved past. Superseded runs are cancelled; the group is per-ref, so
+# branches and pull requests never cancel each other, and `pages` keeps
+# its own group.
+#
+# What this costs, stated because it is a real trade: an intermediate
+# commit pushed and then superseded within the hour gets no verdict of
+# its own. "main is green" then means the TIP is green, which is what it
+# has to mean for the cost to be bearable - and a commit that needs its
+# own answer can always get one from `gh run rerun` or a `verify/run.sh`
+# census, which is the record docs/VALIDATION.md actually keeps.
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   golden:
     runs-on: ubuntu-24.04
