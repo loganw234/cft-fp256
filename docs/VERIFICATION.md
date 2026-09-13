@@ -185,15 +185,31 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | a shell link, four tiles | 3 to 4 h | | 25 to 30 GB of the build box's 46; one at a time or the placer is killed and it looks like a design failure |
 
 The budgets in `verify/run.sh` are cuts of that table: `quick` is the
-model-versus-C stages, the bindings, the language legs, the soak spot
-check, the workloads, the demos and the remote backend - about twenty
-minutes after a host build; `gate` adds the golden suite, the vectors,
+`docs` index check, the model-versus-C stages, the bindings, the language
+legs, the soak spot check, the workloads, the demos and the remote
+backend - about twenty minutes after a host build; `gate` adds the golden suite, the vectors,
 the library replay, the transcendentals, MPFR, the C++ replay, lint and
 formal - **about two hours quiet and four loaded on this host**, most
 of it `cpp`, `transcend` and `formal`; `full` adds the simulation
 suite, node, wasm and the staged images, which is the census. The
 runner writes a `.ok` per stage and `--resume` reruns only what has
-none, so an interrupted run loses at most the stage it was in.
+none, so an interrupted run loses at most the stage it was in. There is
+**no cache across runs**: a run id is a timestamp plus the commit, so a
+fresh invocation re-runs everything and `--resume` is the only thing that
+skips work. (cft-rebound is the sibling repo with a content-addressed gate
+cache and a warm five-second check; this runner does not have one.)
+
+`bash verify/run.sh --list` prints all thirty-seven stages with a `*`
+against the ones the given `--budget` or `--only` would actually run, so
+the list cannot imply a budget covers more than it does. The stage names
+are derived from the `stage` calls themselves rather than kept in a second
+list - they were kept by hand in three places once, and two of the copies
+drifted.
+
+The `docs` stage is the cheapest of them and exists for the same reason:
+`docs/README.md` indexes the thirty-four documents, and
+`python/check_docs_index.py` refuses a broken link, a document missing from
+the index, or a stated line count that no longer matches the file.
 
 Two things are always true of the wall time. **Vivado runs one at a
 time** on a shared host - the queue scripts this project uses check

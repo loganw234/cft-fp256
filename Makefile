@@ -31,7 +31,7 @@ PART     ?= xcu50-fsvh2104-2-e
 TARGET   ?= hw        # hw | hw_emu
 BUILD    := build
 
-.PHONY: golden seqflags vectors sim docker-image sim-docker check-env emconfig xo xclbin \
+.PHONY: golden seqflags docs-check vectors sim docker-image sim-docker check-env emconfig xo xclbin \
         libcft libcft-test libcft-diff libcft-seq libcft-docker clean help \
         programs programs-check embedded
 
@@ -39,6 +39,8 @@ help:
 	@echo "golden       run the golden-model self-tests (pytest)"
 	@echo "seqflags     prove cft_seq_flags.h and cft.h agree with the"
 	@echo "             golden model on the header flags numbering"
+	@echo "docs-check   prove docs/README.md indexes every document, that"
+	@echo "             every link resolves, and that its line counts are true"
 	@echo "vectors      emit conformance vector sets to vectors/out/"
 	@echo "libcft       build the C library (host/), no dependencies"
 	@echo "libcft-test  contract tests + vector replay + the C/Python check"
@@ -51,7 +53,15 @@ help:
 	@echo "             vendored copy against host/, the loopback in four"
 	@echo "             profiles, the vectors replayed through each, the"
 	@echo "             negative control, and every example for every board"
-	@echo "verify       the standardized verification run (verify/README.md)"
+	@echo ""
+	@echo "START HERE, if you changed something and want to know if it still holds:"
+	@echo "verify-quick ~20 min: model-vs-C, bindings, the seven language legs,"
+	@echo "             soak, the five workloads, the browser demos, remote"
+	@echo "verify-gate  ~2 h: the above plus golden, vectors, libcft, transcend,"
+	@echo "             mpfr, cpp, yosys lint and the formal proofs"
+	@echo "verify       everything, the full census (hours; adds sim, simmc,"
+	@echo "             node, wasm, images). BUDGET= and ARGS= also accepted"
+	@echo ""
 	@echo "sim          run cocotb RTL suite natively (needs iverilog)"
 	@echo "yosys-lint   elaborate every RTL file in Yosys: no latches, no errors"
 	@echo "formal       the property gate (formal/README.md), in the cft-formal image"
@@ -86,6 +96,16 @@ $(BUILD)/emconfig.json:
 # once across eight hand-written copies of it.
 seqflags:
 	$(PYTHON) python/gen_seq_flags.py --check
+
+# docs/README.md is the index of the thirty-four documents: it must link
+# every one of them, every link must resolve, and the line counts it
+# states must be the files' own. A hand-written list of files is exactly
+# what drifted twice before in this repo (verify/run.sh's stage names,
+# and one opcode number across ten lists), and an index that omits a new
+# document fails in the most useless way available - the file that exists
+# to make documents findable becomes the reason one is not.
+docs-check:
+	$(PYTHON) python/check_docs_index.py
 
 golden: seqflags
 	$(PYTHON) -m pytest python/tests -q $(if $(XDIST_N),-n $(XDIST_N),)
@@ -200,10 +220,28 @@ yosys-lint:
 
 # The standardized verification run: every gate, one command,
 # resumable and logged, census block at the end. verify/README.md.
+#
+# BUDGET picks a cut instead of the whole census. verify/run.sh has had
+# `quick`, `gate` and `full` for a while; until 2026-09-12 this target
+# forwarded nothing, so the only make-reachable run was `full` - hours -
+# and the twenty-minute answer was reachable only by calling the script
+# directly, which nobody reading the Makefile would know to do.
+#
+#   make verify-quick        ~20 min, the daily answer
+#   make verify-gate         ~2 h quiet, what a change should pass
+#   make verify              everything, the census
+#   make verify BUDGET=gate  the same as verify-gate
+#   make verify ARGS='--only sim,formal --resume'
 verify:
-	bash verify/run.sh
+	bash verify/run.sh $(if $(BUDGET),--budget $(BUDGET),) $(ARGS)
 
-.PHONY: verify formal formal-image yosys-lint
+verify-quick:
+	bash verify/run.sh --budget quick $(ARGS)
+
+verify-gate:
+	bash verify/run.sh --budget gate $(ARGS)
+
+.PHONY: verify verify-quick verify-gate formal formal-image yosys-lint
 
 # The formal property gate (formal/README.md): six proof files run as
 # thirty tasks - the unbounded FIFO proof, the complete seedop

@@ -3,6 +3,33 @@
 Short, and only things that are non-obvious AND have already cost hours.
 The README says what this project is; this says what will bite you.
 
+## Start here: one command answers "does it still hold?"
+
+```
+make verify-quick            # ~20 min, 24 of 37 stages
+make verify-gate             # ~2 h quiet, 32 of 37 - what a change should pass
+make verify                  # the full census, hours
+bash verify/run.sh --list    # every stage, with * on the ones a budget selects
+```
+
+`verify/run.sh` is the runner and `docs/VERIFICATION.md` is the map of what
+each stage proves. **Reach for this before hand-running targets.** The
+budgets existed for some time while nothing outside that script pointed at
+them, and a whole session on 2026-09-12 ran `make sim`, `make -C host all`,
+`api-test`, `sync.py --check` and `gen_seq_flags.py --check` one at a time
+instead - which is how this heading came to exist.
+
+**There is no gate cache here.** A run id is timestamp + commit and each
+stage drops a `.ok` marker, so `--resume` (or `--resume last`) reruns only
+what has not passed, and resuming refuses to cross commits. A *fresh*
+invocation runs everything again, same commit or not. cft-rebound is the
+repo with the content-addressed cache and the 5-second warm
+`make check-quick`; do not expect that behaviour from this one.
+
+A stage whose tools are missing is **skipped by name with a reason**, never
+silently passed - so read the skip list, and use `--require-all` on a host
+that claims to be a full verification host.
+
 ## The machines, and the one that gets confused
 
 You are working from **a Windows desktop**. There are two Linux

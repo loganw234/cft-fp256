@@ -139,7 +139,7 @@ BUDGET=""
 # now that the formal gate holds thirty-one proofs, full longer by the
 # simulation suite and the two browser replays; on the WSL distro the
 # replay stages take seconds.
-BUDGET_QUICK=selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -176,13 +176,35 @@ done
 # about what `make verify` does is worse than no list, and the last
 # comment here said deriving it was worth more than another comment
 # the next time the list grew. It grew: the language stages.
+# Defined here rather than with the other helpers because --list below
+# exits before them, and --list must decide "will this stage run?" with
+# the SAME predicate stage() uses. Two copies of that rule is how the
+# stage list lied twice before it was derived.
+in_list() {  # name, comma-list
+  case ",$2," in *",$1,"*) return 0;; esac
+  return 1
+}
+
 SELF="${BASH_SOURCE[0]}"
 STAGELIST=$(grep -E '^stage [a-z0-9-]+ "' "$SELF" | awk '{print $2}' | tr '\n' ' ')
 STAGELIST="${STAGELIST% }"
 if [ "$LIST" = 1 ]; then
-  grep -E '^stage [a-z0-9-]+ "' "$SELF" \
-    | sed -E 's/^stage ([a-z0-9-]+) +"([^"]*)".*/\1\t\2/' \
-    | awk -F'\t' '{printf "%-13s%s\n", $1, $2}'
+  # `*` marks the stages THIS invocation would run, tested with in_list
+  # against the same ONLY that stage() consults. Without it, a --list
+  # beside --budget quick printed the whole file and read as though the
+  # budget covered all of it.
+  while IFS=$'\t' read -r _nm _ds; do
+    if [ -z "$ONLY" ] || in_list "$_nm" "$ONLY"; then _mk="*"; else _mk=" "; fi
+    printf '%s %-13s%s\n' "$_mk" "$_nm" "$_ds"
+  done < <(grep -E '^stage [a-z0-9-]+ "' "$SELF" \
+    | sed -E 's/^stage ([a-z0-9-]+) +"([^"]*)".*/\1\t\2/')
+  echo
+  if [ -n "$ONLY" ]; then
+    printf '* = would run%s. Unmarked stages are NOT part of this selection.\n' \
+        "${BUDGET:+ under --budget $BUDGET}"
+  else
+    echo "* = would run: every stage, the full census (no --only, no --budget)."
+  fi
   exit 0
 fi
 
@@ -267,10 +289,6 @@ RAN=0
 CACHED=0
 declare -a ROWS=()
 
-in_list() {  # name, comma-list
-  case ",$2," in *",$1,"*) return 0;; esac
-  return 1
-}
 
 note() { ROWS+=("$1"); printf '%s\n' "$1"; }
 
@@ -400,6 +418,9 @@ if [ "$BUDGET" = quick ]; then
 fi
 
 need python pytest
+stage docs "docs/README.md indexes every document, links resolve, counts true" -- \
+  PY "$ROOT/python/check_docs_index.py" --quiet
+
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q
 

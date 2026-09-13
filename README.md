@@ -95,6 +95,26 @@ and the measurements.
 
 ## How the claims are checked
 
+One command runs the gates, in three sizes:
+
+```bash
+make verify-quick   # ~20 min, 24 of 37 stages: model-vs-C, the bindings,
+                    # seven language legs, soak, the five workloads,
+                    # the browser demos and the remote backend
+make verify-gate    # ~2 h, 32 of 37: the above plus the golden model,
+                    # vectors, libcft, transcendentals, MPFR, C++,
+                    # the Yosys lint and the formal proofs
+make verify         # the full census, hours: adds the cocotb suites,
+                    # node, wasm and the staged images
+```
+
+Every stage names itself, logs itself and writes a `.ok` or `.fail`
+marker; `--resume` continues an interrupted run and refuses to cross
+commits. A stage whose tools are absent is **skipped by name with the
+reason** rather than passed. `bash verify/run.sh --list` prints all 37 with
+a `*` against the ones a given budget selects, and `docs/VERIFICATION.md`
+maps what each one proves and how long it really takes.
+
 The rule is that a number in a document has a run behind it, and the
 runs that failed stay in the record. The load-bearing ones:
 
