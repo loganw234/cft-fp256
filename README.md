@@ -13,6 +13,13 @@ Formally it is the Coordinated Fusion Compute Tile, built for the
 AMD/Xilinx Alveo U50C through the open Vitis RTL kernel flow, and
 everything here is Apache-2.0.
 
+| What it computes | How you call it | How it is checked | On the card | When it pays |
+|---|---|---|---|---|
+| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50, run on silicon | **binary128 4.5x**, **binary256 5.5x** |
+| 30 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **38** gate stages, 21 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+
+<sub>Speed-ups are one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. [Where that line falls, measured](#when-this-matters-and-when-it-does-not).</sub>
+
 ## Try it without installing anything
 
 **<https://loganw234.github.io/cft-fp256/>**
