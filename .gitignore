@@ -94,6 +94,13 @@ verify/_mpfr-prefix-build/
 # make clean removes these and none of them belong in the tree
 host/cft-selftest
 host/cft-bench
+# Both of these were missed when the tool was added, and both turned up
+# untracked on a Linux and a macOS host on 2026-09-13. The .exe forms
+# were always covered by `host/*.exe` above, so the gap only showed where
+# the binary has no extension - which is every host that actually builds
+# them. Adding a tool means a line here as well as one in host/Makefile.
+host/cft-bench-peers
+host/cft-resident
 host/api-test
 host/reduce-parts
 host/vector-fma
