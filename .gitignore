@@ -72,6 +72,14 @@ host/.out-*.err
 # This repo is Apache-2.0 and public; third-party pages carry their own
 # copyright (the Cornell FP page that landed here says so at the foot),
 # and a `git add -A` will sweep them in without asking.
+#
+# This entry is CASE-INSENSITIVE in practice: git sets core.ignorecase
+# true on Windows and macOS, so `Data/` also swallows `data/` anywhere
+# in the tree, silently and with no warning from `git add`. A
+# docs/data/ directory of benchmark CSVs disappeared this way on
+# 2026-09-13 and is now docs/bench/. Keep measured output out of any
+# directory spelled `data`, and do not add a `!` exception here - the
+# rule above is the reason this one exists.
 Data/
 # dotnet run's build litter beside the C# example; go's local binary
 host/examples/bin/

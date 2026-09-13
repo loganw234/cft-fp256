@@ -526,7 +526,8 @@ formatoftest: all
 # validate.
 divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
-	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ $(LDLIBS) -lm
+	  -frounding-math tools/divsqrt_soak.c libcft.a -o $@ \
+	  $(XRTLIBS) $(LDLIBS) -lm
 
 # The same oracle, aimed at the clause-5 completion set: rint, scaleb,
 # the conversions, logb, next, class and remainder against libm and
@@ -537,7 +538,7 @@ divsqrt-soak$(EXE): tools/divsqrt_soak.c libcft.a
 clause5-soak$(EXE): tools/clause5_soak.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
 	  -frounding-math $(C5DEFS) tools/clause5_soak.c libcft.a -o $@ \
-	  $(LDLIBS) -lm
+	  $(XRTLIBS) $(LDLIBS) -lm
 
 # Convenience alias for Windows, where the real target carries .exe.
 # Guarded: with EXE empty the alias would be a circular self-edge.
@@ -555,7 +556,24 @@ endif
 # for the RMM construction and the flag-derivation policy.
 mpfr-check$(EXE): tools/mpfr_check.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
-	  -o $@ $(LDLIBS) -lmpfr -lgmp -lm
+	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
+
+# libquadmath is linked if and only if the compiler would COMPILE the
+# __float128 rows. cft_bench_peers.c gates them on
+# `__GNUC__ && __SIZEOF_FLOAT128__ && !_WIN32`, so the link line has to
+# ask the same question rather than assume the answer. Apple clang on
+# arm64 and gcc on aarch64 define no __SIZEOF_FLOAT128__ - their long
+# double is already binary128 - and ship no libquadmath, so the
+# hardcoded `-lquadmath` this replaces made the target unbuildable on
+# both; the 2026-09-13 MacBook peer run had to compile it by hand.
+#
+# All three terms of the gate are checked, `_WIN32` included, so a mingw
+# build - which defines __SIZEOF_FLOAT128__ and ships libquadmath, but
+# compiles none of those rows - does not link a library it never calls.
+# Recursively expanded (`=`, not `:=`) so the probe runs only when this
+# recipe does, not on every make.
+QUADLIB = $(shell echo | $(CC) -dM -E - 2>/dev/null | awk \
+    '/__SIZEOF_FLOAT128__/{f=1} / _WIN32 /{w=1} END{if(f&&!w)print "-lquadmath"}')
 
 # The software backend priced against the libraries people already
 # use: MPFR at matched precision (raw, and emulating the binary format
@@ -566,8 +584,8 @@ mpfr-check$(EXE): tools/mpfr_check.c libcft.a
 # docs/BENCHMARKS.md holds measured numbers.
 cft-bench-peers$(EXE): tools/cft_bench_peers.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) -fno-math-errno \
-	  tools/cft_bench_peers.c libcft.a -o $@ $(LDLIBS) -lmpfr -lgmp \
-	  -lquadmath -lm
+	  tools/cft_bench_peers.c libcft.a -o $@ $(XRTLIBS) $(LDLIBS) \
+	  -lmpfr -lgmp $(QUADLIB) -lm
 
 # The same idea as difftest, for programs rather than arithmetic: two
 # independent ports of the sequencer, one in Python and one in C, over
