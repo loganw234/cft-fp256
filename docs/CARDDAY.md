@@ -502,3 +502,61 @@ spirit - enough to replay, not enough to be a chore.
   from a slow slave, which is why the timeout still exists. Read the
   STATUS bits the timeout path now reports alongside it - clean STATUS
   with a timeout is a stalled interconnect, not a kernel bug.
+
+## The build trees, and what is kept when they go
+
+A staged pair holds the image, its manifest and `SHA256SUMS`. That is
+enough to load an image and prove it is the one the manifest describes. It
+is **not** enough to answer a question about the design, and the difference
+cost a real answer on 2026-09-12: asked whether revision 4's broadcast mux
+had created a new critical path, the only honest reply was that the
+read-ahead pair's build tree had already been cleaned, so the comparison
+could be made between *margins* and not between *paths*.
+
+A build tree is 1-3 GB, almost all of it the `_x_hw` intermediate. The part
+worth keeping is under a megabyte. So `~/cardday-forensics/<build dir>/`
+holds, per build:
+
+- the manifest, which carries commit, flags, both WNS figures and the
+  image's sha256;
+- the routed timing summary, gzipped - the whole report, for when the
+  distillation is not enough;
+- `*.worst.txt`, the distilled part: the kernel clock's row in the
+  intra-clock table and the worst path inside that clock group, with source
+  cell, destination cell, requirement, data path delay and logic levels.
+
+13,415 MB of build tree reduced to 9 MB that way.
+
+**The distillation names the KERNEL clock on purpose.** A routed timing
+summary prints its clock groups in its own order, and the first `Max Delay
+Paths` entry in the file belongs to whichever group came first - on these
+U50 images `io_clk_freerun_00`, a shell clock sitting around +7.3 ns. The
+design's margin is `clk_out1_ulp_clk_wiz_0`, named by the manifest's
+`kernel_clock:` line. A reader who takes the first number in the file gets
+a figure that is correct about the wrong clock, which is worse than no
+figure; the first attempt at this archive made exactly that mistake and had
+to be redone.
+
+What the archive makes possible, as an example - the limiting path of every
+single-tile build that closed:
+
+| build | commit | kernel WNS | limiting path |
+|---|---|---|---|
+| `build-135s` | `39fc2c04` | +0.255 | `u_fifo_a/mem_reg_2` -> `g_lane32[6].u_fma/s0_byp_d_reg[7]` |
+| `build-ms-single` | `b1a014cb` | +0.220 | `u_fifo_a/mem_reg_2` -> `g_lane32[5].u_fma/s0_byp_d_reg[14]` |
+| `build-rev4-hw` | `f636cf39` | +0.210 | `u_fifo_a/mem_reg_0` -> `g_bank64.g_lane64[1].u_fma/s0_byp_d_reg[26]` |
+
+One structural path - operand FIFO A's block RAM output into an FMA's
+stage-0 bypass register, eighteen logic levels, mostly DSP - has limited
+this design across three revisions. That is a useful thing to know before
+optimising somewhere else, and it is not recoverable from a staged pair.
+
+A failed build is evidence too: `build-seq135s` is preserved at **-0.286**,
+limited by `u_seq/prec_q_reg[1]_rep__1_replica` -> `u_seq/wr_addr_reg[56]`,
+which is a record of what the sequencer could not do at 135 MHz.
+
+**Extract before reclaiming, as two separate runs.** A script that extracts
+and deletes in one pass, and fails in the middle, has deleted something it
+did not copy. Reclamation additionally refuses to run while any `v++` or
+`vivado` is alive, since a live link owns its build directory, and skips any
+build whose forensics are not already on disk.
