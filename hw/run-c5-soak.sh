@@ -11,6 +11,10 @@
 #
 #   bash hw/run-c5-soak.sh                # the full campaign
 #   QUICK=1 bash hw/run-c5-soak.sh       # minutes-long smoke, same shape
+#
+#   CFT_SOAK_ARTIFACT=<artifact.xclbin> QUICK=1 bash hw/run-c5-soak.sh
+#       ... against a TILE. The oracle is the host CPU either way; see
+#       hw/run-soak.sh's header for why this matters and what it costs.
 #   JOBS=24 RANDN=100000000 bash hw/run-c5-soak.sh   # tune width/depth
 #
 # The campaign:

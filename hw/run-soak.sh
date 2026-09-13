@@ -11,6 +11,23 @@
 #   QUICK=1 bash hw/run-soak.sh        # minutes-long smoke of the same shape
 #   JOBS=24 RANDN=100000000 bash hw/run-soak.sh   # tune width and depth
 #
+#   CFT_SOAK_ARTIFACT=~/cardday-rev4/cft_hw_single.xclbin \
+#       QUICK=1 bash hw/run-soak.sh    # ... against a TILE instead
+#
+# THE ARTIFACT VARIANT IS THE POINT OF THIS SCRIPT ON A CARD DAY. The oracle
+# does not change - it is the host CPU's own IEEE hardware either way - so the
+# same billions of cases that have only ever scored the software backend can
+# score silicon. Until 2026-09-13 both soak tools opened `cft_open(NULL, ...)`
+# and nothing else, so the strongest independent oracle in the project had
+# never been pointed at a tile: the card's entire coverage was device-test's
+# matrix, measured at 2,660 checks in 0.348 s on a U50.
+#
+# Each job prints which backend it opened, first line, because a card soak and
+# a software soak are otherwise indistinguishable in a log and one of them is
+# evidence about hardware. Expect it to be far slower than software per case -
+# every case crosses the bus - so use QUICK or a reduced RANDN the first time
+# and read the rate before committing a night to it.
+#
 # The campaign:
 #   * fp32 sqrt EXHAUSTIVE - all 2^32 encodings - under all five
 #     rounding attributes (RMM rides the RNE oracle; sqrt has no ties,

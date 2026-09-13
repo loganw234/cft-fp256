@@ -1924,9 +1924,33 @@ int main(int argc, char **argv)
         modename = MODES[mi].name;
     }
 
-    if (cft_open(NULL, 0, &dev) != CFT_OK) {
-        fprintf(stderr, "cft_open failed\n");
-        return 2;
+    /* CFT_SOAK_ARTIFACT names an .xclbin to soak instead of the software
+     * backend. Unset it and this is exactly the call that was here before:
+     * NULL selects software. The oracle does not change - it is the host
+     * CPU's own IEEE hardware either way - so the same billions of cases
+     * that scored software now score a tile. */
+    {
+        const char *art = getenv("CFT_SOAK_ARTIFACT");
+        cft_status ost;
+        if (art && !*art) art = NULL;
+        ost = cft_open(art, 0, &dev);
+        if (ost != CFT_OK) {
+            /* cft_strerror always says something. cft_last_error is set
+             * only on the paths that bothered, and a refusal with an
+             * empty reason is the kind this contract calls a defect. */
+            const char *detail = cft_last_error();
+            fprintf(stderr, "cft_open(%s) failed: %s%s%s\n",
+                    art ? art : "software", cft_strerror(ost),
+                    (detail && *detail) ? " - " : "",
+                    (detail && *detail) ? detail : "");
+            return 2;
+        }
+        /* Named, every run. A card soak and a software soak are otherwise
+         * indistinguishable in a log, and one of them is evidence about
+         * hardware. */
+        fprintf(stderr, "soaking the %s backend%s%s\n",
+                art ? "DEVICE" : "software",
+                art ? ": " : "", art ? art : "");
     }
     fesetround(FE_TONEAREST);
 
