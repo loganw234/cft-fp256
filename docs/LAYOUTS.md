@@ -145,12 +145,22 @@ Every layout that names a narrow variant is a complete, correct link
 config for an `.xo` that does not exist yet. Two changes, both in the
 build flow and neither in the RTL:
 
-1. **Variant packaging.** `hw/package_kernel.tcl` packages `cft_krnl`
-   with its generic defaults and `hw/kernel.xml` names it. It needs to
-   take a kernel name and a generics list (`set_property generic` on
-   the fileset before `ipx::package_project`, the name substituted
-   into the xml), and `rebuild-2022.sh` needs to package one `.xo` per
-   variant a layout uses and hand all of them to `v++ -l`.
+1. **Variant packaging.** Half done as of 2026-09-14. The generics
+   half: `CFT_GENERICS="EN_FP256=0" bash hw/rebuild-2022.sh` reaches
+   `hw/package_kernel.tcl`, which sets each value on the HDL parameter
+   before it strips the user parameters (the same mechanism
+   cft-rebound proved on its binary128 image, `docs/BITSTREAM.md`
+   there), prints every parameter the `.xo` carries as `HDLPARAM:`,
+   and with generics set `rebuild-2022.sh` runs `hw/verify_xo.tcl` -
+   the packaged IP instantiated and its synthesis wrapper read back -
+   and refuses to link if a requested value is not in the wrapper. The
+   manifest records `generics:` and the `HDLPARAM:` lines. The kernel
+   keeps the name `cft_krnl`, and the host no longer cares: it opens
+   compute units by what the image declares and what each answers to
+   `MAGIC`, so the variant names in this catalogue need no host change
+   to open. Still open: substituting the name into `hw/kernel.xml`, and
+   `rebuild-2022.sh` packaging one `.xo` per variant a *mixed* layout
+   uses and handing all of them to `v++ -l`.
 2. **Per-variant clocks.** `rebuild-2022.sh` derives one `--clock.freqHz`
    from `KERNEL_FREQ` and the first `nk=` line. A layout with two
    variants needs the `[clock]` lines each config already carries

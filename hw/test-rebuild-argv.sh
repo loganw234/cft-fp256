@@ -63,12 +63,30 @@ cat > "$TMP/bin/vivado" <<'STUB'
 #!/usr/bin/env bash
 # -version is asked for in a $(...) before the real call.
 case "${1:-}" in -version) echo "Vivado v2022.2 (64-bit)"; exit 0;; esac
+# Which script was it handed?
+src=""; prev=""
+for a in "$@"; do [ "$prev" = "-source" ] && src="$a"; prev="$a"; done
+case "$src" in
+  *verify_xo.tcl)
+    # The wrapper read-back. Answer every requested generic with the
+    # value asked for - unless told to lie, in which case report each at
+    # the RTL default of 1, which is exactly the failure this read-back
+    # exists to catch.
+    for g in ${CFT_GENERICS:-}; do
+      n=${g%%=*}; v=${g#*=}
+      [ "${STUB_VERIFY_LIE:-0}" = 1 ] && v=1
+      echo "WRAPPER_PARAM: .${n}(1'b${v}),"
+    done
+    exit 0;;
+esac
 # package_kernel.tcl's contract: -tclargs <part> <build>; make the .xo
-# the link step consumes so the real script can carry on.
-b=""
-prev=""
-for a in "$@"; do [ "$prev" = "-tclargs" ] && part="$a"; b="$a"; prev="$a"; done
+# the link step consumes so the real script can carry on. Record the
+# generics that reached this process's environment, which is the whole
+# question the generics leg asks.
+b=""; prev=""
+for a in "$@"; do b="$a"; prev="$a"; done
 mkdir -p "$b" && : > "$b/cft_krnl.xo"
+printf '%s\n' "${CFT_GENERICS:-}" > "$b/generics-seen.txt"
 exit 0
 STUB
 
@@ -100,6 +118,7 @@ run_it() {                       # run_it <script> <link-cfg> <tag>
     VPP_PROPS="run.impl_1.STEPS.OPT_DESIGN.IS_ENABLED=true" \
     LINK_CFG="$cfg" \
     bash "$script" ) > "$TMP/out-$tag.txt" 2>&1
+  echo $? > "$TMP/rc-$tag"
   echo "$log"
 }
 
@@ -141,6 +160,40 @@ for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
     || say_fail "$tag: --vivado.prop missing, so VPP_PROPS never reached v++"
 done
 
+# ------------------------------------------------------------- generics
+# CFT_GENERICS must reach vivado's environment unchanged and be written
+# into the manifest as what was asked for.
+echo "== generics: the request reaches vivado, and the manifest =="
+log=$(CFT_GENERICS="EN_FP256=0" run_it "$SCRIPT" "hw/link.cfg" "generics")
+seen=$(cat "$TMP/build-generics/generics-seen.txt" 2>/dev/null)
+if [ "$seen" != "EN_FP256=0" ]; then
+  say_fail "generics: vivado saw CFT_GENERICS='$seen', not 'EN_FP256=0'"
+elif ! grep -q '^generics:      EN_FP256=0$' "$TMP/build-generics/cft_hw.manifest.txt" 2>/dev/null; then
+  say_fail "generics: the manifest does not record 'generics:      EN_FP256=0'"
+  grep -E '^generics:' "$TMP/build-generics/cft_hw.manifest.txt" 2>/dev/null | sed 's/^/        /'
+elif [ -z "$(clock_arg_of "$log")" ]; then
+  say_fail "generics: --clock.freqHz went missing with CFT_GENERICS set"
+else
+  echo "  ok   generics: reached vivado, recorded in the manifest, clock intact"
+fi
+
+# And the control for the read-back: the stub reports the generic at its
+# RTL default, so rebuild-2022.sh must refuse to link. v++ must never be
+# reached - a build that stops here has saved the two hours.
+echo "== generics control: a generic that did not survive packaging =="
+log=$(CFT_GENERICS="EN_FP256=0" STUB_VERIFY_LIE=1 run_it "$SCRIPT" "hw/link.cfg" "genlie")
+rc=$(cat "$TMP/rc-genlie")
+if [ "$rc" = 0 ]; then
+  say_fail "control: the wrapper reported EN_FP256 at its default and the build still succeeded"
+elif [ -s "$log" ]; then
+  say_fail "control: the build failed but v++ had already been invoked - the read-back did not stop it"
+elif ! grep -q "does not carry EN_FP256=0" "$TMP/out-genlie.txt"; then
+  say_fail "control: the build stopped, but not for the wrapper mismatch"
+  tail -4 "$TMP/out-genlie.txt" | sed 's/^/        /'
+else
+  echo "  ok   control: the lie is caught before v++ runs (rc=$rc)"
+fi
+
 # ---------------------------------------------------------------- control
 # Put the historical defect back and require that the above catches it.
 echo "== negative control: the 2026 bug reintroduced =="
@@ -164,8 +217,9 @@ fi
 
 echo
 if [ "$fails" -eq 0 ]; then
-  echo "rebuild-2022.sh argv: the clock constraint survives VPP_PROPS, and"
-  echo "the check still fails when the defect is put back."
+  echo "rebuild-2022.sh: the clock constraint survives VPP_PROPS, CFT_GENERICS"
+  echo "reaches vivado and the manifest, a lying wrapper read-back stops the"
+  echo "build before v++, and each check still fails when its defect is put back."
   exit 0
 fi
 echo "$fails failure(s); stub output under $TMP (kept only until exit)"

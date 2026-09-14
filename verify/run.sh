@@ -451,7 +451,7 @@ need
 for _vroot in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
   [ -f "$_vroot/Vitis/2022.2/settings64.sh" ] && STAGE_SKIP_REASON="a real Vitis at $_vroot is sourced by rebuild-2022.sh and takes PATH from the stub"
 done
-stage buildargs "hw/rebuild-2022.sh hands v++ the clock constraint, with VPP_PROPS set, plus the negative control" -- \
+stage buildargs "hw/rebuild-2022.sh hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++; each with its negative control" -- \
   bash "$ROOT/hw/test-rebuild-argv.sh"
 
 stage golden "golden-model pytest suite (the definition of correct)" -- \

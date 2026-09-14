@@ -242,7 +242,13 @@ case the bug never broke), and the argv v++ was handed read back - for
 the single and the quad link configs, checking the frequency and that the
 constraint names every compute unit. Its negative control puts the defect
 back into a copy of the script and requires the check to catch it, the
-same rule `formal/` keeps.
+same rule `formal/` keeps. Since 2026-09-14 it also holds the generics
+plumbing: `CFT_GENERICS` must reach the `vivado` invocation's
+environment and be recorded in the manifest, and - the control - when
+the stubbed wrapper read-back reports a requested generic at its RTL
+default, `rebuild-2022.sh` must stop before `v++` is ever invoked,
+because a `.xo` that silently packaged the full tile is the two-hour
+mistake `hw/verify_xo.tcl` exists to catch in twenty minutes.
 
 It is **skipped by name on any host with Vitis installed**, and that is a
 refusal rather than an oversight: `rebuild-2022.sh` sources

@@ -242,8 +242,38 @@ rm -f "$BUILD/cft_krnl.xo"
 rm -rf "$BUILD/packaged_kernel" "$BUILD/tmp_kernel_pack"
 
 echo "== package_xo (Vivado $(vivado -version | head -1))"
+# Generics reach hw/package_kernel.tcl through the environment, never
+# through -tclargs (cmd.exe splits at '='; the script's header says
+# why). Said here so a log that shows a full tile where a trimmed one
+# was meant has the request on the line above the packaging.
+echo "   generics: ${CFT_GENERICS:-defaults}"
 vivado -mode batch -nolog -nojournal -source hw/package_kernel.tcl \
-    -tclargs "$PART" "$BUILD"
+    -tclargs "$PART" "$BUILD" 2>&1 | tee "$BUILD/package.log"
+
+# With generics asked for, prove they were packaged BEFORE spending a
+# link on them: instantiate the .xo's IP the way v++ will and read the
+# parameter values back out of its synthesis wrapper. A requested value
+# the wrapper does not carry stops the build here. The check is on the
+# digits of the value appearing in the wrapper's override for that name
+# - "0" against .EN_FP256(1'b0) - which is weak against a two-digit
+# value whose digits both appear anyway, and is said to be.
+if [ -n "${CFT_GENERICS:-}" ]; then
+  echo "== verify_xo: the packaged IP's wrapper, against the request"
+  vivado -mode batch -nolog -nojournal -source hw/verify_xo.tcl \
+      -tclargs "$PART" "$BUILD/packaged_kernel" "$BUILD/xo_verify" \
+      2>&1 | tee "$BUILD/verify_xo.log"
+  for g in $CFT_GENERICS; do
+    gname=${g%%=*}; gval=${g#*=}
+    if ! grep -E "^WRAPPER_PARAM: \.${gname}\(.*${gval}" "$BUILD/verify_xo.log" >/dev/null; then
+      echo "ERROR: the packaged IP's wrapper does not carry ${gname}=${gval}:" >&2
+      grep -E "^WRAPPER_PARAM: \.${gname}\(" "$BUILD/verify_xo.log" >&2 || \
+        echo "       (no override for ${gname} in the wrapper at all)" >&2
+      echo "       The .xo would link as the RTL default. Not linking it." >&2
+      exit 1
+    fi
+  done
+  echo "   every requested generic is in the wrapper"
+fi
 
 for t in $TARGETS; do
   echo "== v++ link -t $t"
@@ -328,6 +358,10 @@ for t in $TARGETS; do
     echo "route_directive: ${ROUTE_DIRECTIVE:-default}"
     echo "phys_opt:      $PHYS_OPT"
     echo "vpp_props:     ${VPP_PROPS:-none}"
+    # What was packaged, by name, from the packager's own HDLPARAM lines
+    # - the values the .xo carries, not the ones that were asked for.
+    echo "generics:      ${CFT_GENERICS:-defaults}"
+    grep '^HDLPARAM: ' "$BUILD/package.log" 2>/dev/null | sed 's/^HDLPARAM: /  hdlparam:    /' || true
     echo "clock_cus:     $CLOCK_CUS"
     echo "clock_arg:     ${KERNEL_FREQ}:${CLOCK_ARG}"
     echo "vivado:        $(vivado -version 2>/dev/null | head -1)"

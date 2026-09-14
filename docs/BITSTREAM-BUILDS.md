@@ -70,6 +70,13 @@ KERNEL_FREQ=135000000 BUILD=build-<name> TARGETS=hw \
     LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh        # one tile
 KERNEL_FREQ=135000000 BUILD=build-<name>q TARGETS=hw \
     LINK_CFG=hw/link_quad.cfg bash hw/rebuild-2022.sh   # four
+
+# 3b. a TRIMMED tile: generics reach hw/package_kernel.tcl through the
+#     environment (never -tclargs: cmd.exe splits at '='), the .xo's
+#     wrapper is read back before the link, and the manifest records
+#     what was packaged as generics: and hdlparam: lines
+CFT_GENERICS="EN_FP256=0" KERNEL_FREQ=150000000 BUILD=build-<name>f128 \
+    TARGETS=hw LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh
 ```
 
 `BUILD` differs per link because `rebuild-2022.sh` parameterises it for
