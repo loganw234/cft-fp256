@@ -327,10 +327,21 @@ What it has shown so far:
   of accuracy at once. Going further to binary256 changes nothing on the
   same test, because the method's own truncation error dominates by
   then. That is a negative result, measured and kept.
-- **The tile overtakes one CPU core between 8 and 32 bodies** and
-  saturates around 2.7 to 2.9 times it. Below that it is slower, by up
-  to 4.6 times on a two-body problem, because the engine's width is its
-  whole advantage and a small system leaves it idle.
+- **One tile overtakes the software backend somewhere between 6 and 64
+  bodies, and is still pulling away at 512.** Measured 2026-09-14 on a
+  one-tile binary128 image at 150 MHz, against the same integration in
+  software at binary128 (cft-rebound's `docs/VALIDATION.md`, entry 37):
+  0.13 to 0.25x on two-, three- and six-body problems, 2.2x at 64
+  bodies, 3.7x at 256 and 3.9x at 512 - no plateau seen. The engine's
+  width is its whole advantage and a small system leaves it idle; the
+  point where that turns over was not sampled between 6 and 64. Two
+  results from the same run that a first reading would get wrong: four
+  tiles and six were *slower* than one at every size, because the
+  library partitions each call across every tile and this integrator
+  issues thousands of short calls a step; and at 256 bodies over half
+  the card's time was the correctly rounded divide and square root, not
+  the tile - which is now the first thing that integrator asks of this
+  library.
 
 It also sent work back the other way: what that integrator needs and the
 library does not have is recorded in `docs/ROADMAP.md`, ranked by
