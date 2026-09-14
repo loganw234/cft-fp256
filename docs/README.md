@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Thirty-four files, 40,870 lines. Flat in one directory they look like one
+Thirty-five files, 41,164 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **15,140 lines you consult while working** — the three under *Start here*,
@@ -8,12 +8,12 @@ undifferentiated pile; they are not, and the split is close to even:
 - **5,317 lines of tool manual**, one per shipped program;
 - **1,499 lines of operations**, read when you are about to do something to
   hardware;
-- **18,914 lines of record and argument** — the ledger, the roadmap and the
+- **19,208 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
 Nearly half is therefore history. That is deliberate, and it is also why a
-flat listing of thirty-four names feels heavier than the work actually is.
+flat listing of thirty-five names feels heavier than the work actually is.
 
 This index exists because the README links eight of these and nothing linked
 the other twenty-six. Nothing has moved: a file's path is part of its
@@ -96,6 +96,7 @@ reading material for a working session.
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |
 | [FUNDING.md](FUNDING.md) | 44 | Funding landscape. |
+| [SITES.md](SITES.md) | 294 | The four format sites - binary32.com, binary64.com, binary128.com, binary256.com: one template, four fillings, what each site carries, how the project appears on a page that is not about it, and how four custom domains are served from GitHub Pages. A plan, nothing built. |
 
 ## The design studies
 
