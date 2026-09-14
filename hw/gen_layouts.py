@@ -19,8 +19,8 @@ with their provenance, never transcribed from memory.
     python hw/gen_layouts.py            # writes hw/layouts/*.cfg, prints the table
     python hw/gen_layouts.py --check    # exit 1 if the committed cfgs are stale
 
-The four kernel variants are one RTL with three generics off
-(rtl/cft_krnl.sv: EN_FP64 / EN_FP128 / EN_FP256). prec_ok refuses the
+The kernel variants are one RTL with generics off (rtl/cft_krnl.sv:
+EN_FP32 / EN_FP64 / EN_FP128 / EN_FP256). prec_ok refuses the
 rungs a variant lacks and CAPS[3:0] advertises what it has, so a host
 that reads CAPS cannot be lied to. Only `cft_krnl` (all four rungs)
 is packaged today; the narrow variants need hw/package_kernel.tcl to
@@ -105,11 +105,17 @@ VARIANTS = {
                           mhz=170, clock="target, unmeasured"),
     "cft_krnl_f32":  dict(rungs=("fp32",), generics="EN_FP64=0 EN_FP128=0 EN_FP256=0",
                           mhz=190, clock="target, unmeasured"),
+    # The shape cft-rebound asked for (its docs/BITSTREAM.md, ask 5):
+    # binary64 and binary128 with NEITHER end, expressible since
+    # 2026-09-14 when fp32 gained a generic. Its clock target is the
+    # fp128 rung's, the widest it carries.
+    "cft_krnl_f64f128": dict(rungs=("fp64", "fp128"), generics="EN_FP32=0 EN_FP256=0",
+                             mhz=150, clock="target, unmeasured"),
 }
 TOP = {"cft_krnl": "fp256", "cft_krnl_f128": "fp128", "cft_krnl_f64": "fp64",
-       "cft_krnl_f32": "fp32"}
+       "cft_krnl_f32": "fp32", "cft_krnl_f64f128": "fp128"}
 SHORT = {"cft_krnl": "fp256", "cft_krnl_f128": "fp128", "cft_krnl_f64": "fp64",
-         "cft_krnl_f32": "fp32"}
+         "cft_krnl_f32": "fp32", "cft_krnl_f64f128": "fp64fp128"}
 
 
 def tile_lut(variant: str) -> int:
@@ -171,6 +177,12 @@ def family():
     for v in ladder[1:]:
         k = homogeneous(v)
         rows.append((f"u50-{k}x{SHORT[v]}", [(v, k)], "homogeneous: works with the current host"))
+    # Off the ladder on purpose: a workload's tile, not a rung of the
+    # family, so only its homogeneous layout is catalogued - the number
+    # cft-rebound's ask 5 was really after.
+    k = homogeneous("cft_krnl_f64f128")
+    rows.append((f"u50-{k}xfp64fp128", [("cft_krnl_f64f128", k)],
+                 "homogeneous: works with the current host; the binary64/128 tile cft-rebound asked for"))
     return rows
 
 
@@ -195,7 +207,8 @@ def render_cfg(name, mix, note) -> str:
     p(f"# fp256 contract compliant: {'YES' if any(v == 'cft_krnl' for v, _ in mix) else 'no - no tile carries binary256'}\n")
     if placeholder:
         p("#\n# PLACEHOLDER: names kernel variants that are not packaged yet. Needs\n")
-        p("#   hw/package_kernel.tcl to take a kernel name + generics, and\n")
+        p("#   hw/package_kernel.tcl to take a kernel NAME (it takes the\n")
+        p("#   generics through CFT_GENERICS since 2026-09-14), and\n")
         p("#   rebuild-2022.sh to package one .xo per variant and pass the\n")
         p("#   [clock] lines below instead of one KERNEL_FREQ for every CU.\n")
     if note:

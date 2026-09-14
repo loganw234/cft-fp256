@@ -44,8 +44,14 @@
 
 module cft_krnl #(
     // Bank trims for constrained targets (open-core conformance
-    // nodes); the full Alveo tile keeps all four rungs. fp32 is the
-    // baseline and always present. Advertised in the CAPS CSR.
+    // nodes, and a tile shaped to one workload); the full Alveo tile
+    // keeps all four rungs. Any subset builds, down to one rung; a
+    // tile with none is refused at elaboration. fp32 was the fixed
+    // baseline until 2026-09-14, when the tile a workload actually
+    // wanted was binary64 and binary128 with neither end
+    // (cft-rebound's docs/BITSTREAM.md, ask 5) - a bank of 26.6k LUT
+    // it could not leave out. Advertised in the CAPS CSR.
+    parameter bit EN_FP32  = 1'b1,
     parameter bit EN_FP64  = 1'b1,
     parameter bit EN_FP128 = 1'b1,
     parameter bit EN_FP256 = 1'b1,
@@ -256,7 +262,7 @@ module cft_krnl #(
   // told an honest host not to ask; this makes the answer to a
   // dishonest one an error instead of an output. Codes 4-15 of the
   // 4-bit field are refused on every build for the same reason.
-  localparam [3:0] PREC_CAPS = {EN_FP256, EN_FP128, EN_FP64, 1'b1};
+  localparam [3:0] PREC_CAPS = {EN_FP256, EN_FP128, EN_FP64, EN_FP32};
 
   /* MODE[18:16], the stride-0 operands. 0 until the engine's operand
    * fetch honours them, and the CSR refuses the bits while it is 0 -
@@ -695,7 +701,8 @@ module cft_krnl #(
   // own issue on it, and each is a no-op at MUL_PASSES=1 where the
   // strobe is a constant 1.
   cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(16),
-              .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+              .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
+              .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
               .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
               .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES)) u_lanes (
       .clk(ap_clk), .rst_n(ap_rst_n),
@@ -709,8 +716,9 @@ module cft_krnl #(
       .in_ready(arr_rdy),
       .out_valid(arr_ov), .d(arr_d), .lane_flags(arr_lf));
 
-  cft_engine_stream #(.LATENCY(16), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
-                      .EN_FP256(EN_FP256), .BEAT_BITS(BEAT_BITS),
+  cft_engine_stream #(.LATENCY(16), .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
+                      .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+                      .BEAT_BITS(BEAT_BITS),
                       .BURST_LOG2(BURST_LOG2), .FIFO_LOG2(FIFO_LOG2),
                       .AR_DEPTH(AR_DEPTH), .AW_DEPTH(AW_DEPTH),
                       .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
@@ -766,7 +774,7 @@ module cft_krnl #(
             .MAXD(SEQ_MAXD), .IMEM_D(SEQ_IMEM_D), .KMEM_D(SEQ_KMEM_D),
             .SCRATCH_D(SEQ_SCRATCH_D),
             .ADDR_W(64),
-            .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
+            .EN_FP32(EN_FP32), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
             .EN_FP256(EN_FP256), .OWN_LANES(1'b0),
             .MUL_PASSES(MUL_PASSES)) u_seq (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),

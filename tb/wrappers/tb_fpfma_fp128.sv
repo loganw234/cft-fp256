@@ -26,12 +26,23 @@ module tb_fpfma_fp128 #(
   localparam int PHW = (NP > 1) ? $clog2(NP) : 1;
   logic [PHW-1:0] ph;
   logic           en;
+  // At MUL_PASSES=1 this rung is single-pass too - cft_mul_passes
+  // spreads the chunks over as many columns as the budget allows, so
+  // NP is 1 for every rung at the default - and PHW'(NP - 1) is zero:
+  // `ph >= 0` is constant-true, the intended behaviour, and Verilator
+  // reports it as UNSIGNED, fatal here by design. tb_fpfma_fp32.sv
+  // carries the argument for why `>=` stays and why the pragma is
+  // scoped to these lines. That wrapper was fixed alone on 2026-09-12
+  // on the belief that its siblings were never constant; on
+  // 2026-09-14 `make sim SIM=verilator` refused all three of them.
+  /* verilator lint_off UNSIGNED */
   always_ff @(posedge clk) begin
     if (!rst_n)                       ph <= '0;
     else if (ph >= PHW'(NP - 1))      ph <= '0;
     else                              ph <= ph + 1'b1;
   end
   assign en       = (ph >= PHW'(NP - 1));
+  /* verilator lint_on UNSIGNED */
   assign in_ready = en;
 
   logic bv; logic [127:0] bd; logic [4:0] bf;

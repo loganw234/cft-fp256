@@ -54,7 +54,7 @@ LATENCY_ENV = CFT_RD_LATENCY=$(RD_LATENCY) CFT_WR_LATENCY=$(WR_LATENCY)
 PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-        normprobe seedop reduceacc reduce krnl krnlf128 krnlseq quarter faults \
+        normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
         seq_core seqprobe krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
@@ -70,7 +70,8 @@ PYTHON ?= python3
 # each run; the `timeout` wrappers handle the rest) - what escaped was
 # the one outcome this project exists to detect.
 SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
-              normshare seedop reduceacc reduce krnl krnlf128 quarter faults \
+              normshare seedop reduceacc reduce krnl krnlf128 krnlf64f128 \
+              quarter faults \
               seq_core krnlseq seqbanks mulpass mulcycle mulcycle2
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
@@ -337,6 +338,19 @@ krnlf128:
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlf128 \
 		KRNL_PARAMS="$(foreach g,$(KRNLF128_GENERICS),-Pcft_krnl.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/krnlf128/results.xml
+
+# The tile cft-rebound actually wants (its docs/BITSTREAM.md, ask 5):
+# binary64 and binary128 with NEITHER end, which fp32's generic made
+# expressible on 2026-09-14. The bench's shape-specific cases are
+# written in beats of the narrowest rung a build carries, so the same
+# test_krnl proves this tile: CAPS[3:0] 0x6, both rungs bit-exact, and
+# precisions 0 and 3 refused with STATUS[3].
+KRNLF64F128_GENERICS = EN_FP32=0 EN_FP256=0
+krnlf64f128:
+	CFT_GENERICS="$(KRNLF64F128_GENERICS)" $(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlf64f128 \
+		KRNL_PARAMS="$(foreach g,$(KRNLF64F128_GENERICS),-Pcft_krnl.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/krnlf64f128/results.xml
 
 # The orbit sequencer through the same kernel: program image staged in
 # RAM, PROG_PTR and CNT_PTR written, MODE[15] set, deposits and counts

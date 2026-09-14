@@ -95,6 +95,7 @@
 
 module cft_engine_stream #(
     parameter int LATENCY    = 15,
+    parameter bit EN_FP32    = 1'b1,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
     parameter bit EN_FP256   = 1'b1,
@@ -361,6 +362,13 @@ module cft_engine_stream #(
   localparam int LANES64    = (BEAT_BITS >= 64)  ? BEAT_BITS / 64  : 0;
   localparam int LANES128   = (BEAT_BITS >= 128) ? BEAT_BITS / 128 : 0;
   localparam int LANES256   = (BEAT_BITS >= 256) ? BEAT_BITS / 256 : 0;
+  // Element widths a beat can actually hold, for slices in code that
+  // elaborates at every BEAT_BITS. A `beat[127:0]` inside a loop that
+  // is dead at 64 bits is still a 128-bit select of a 64-bit vector to
+  // a lint (Verilator SELRANGE, fatal here), which is how the quarter
+  // bench could not build under Verilator from 2026-09-12 to -14.
+  localparam int BW64       = (BEAT_BITS >= 64)  ? 64  : BEAT_BITS;
+  localparam int BW128      = (BEAT_BITS >= 128) ? 128 : BEAT_BITS;
 
   generate
     if (BEAT_BITS != (1 << ADDR_SH) * 8)
@@ -373,6 +381,8 @@ module cft_engine_stream #(
       $error("EN_FP128 needs BEAT_BITS >= 128");
     if (EN_FP256 && BEAT_BITS < 256)
       $error("EN_FP256 needs BEAT_BITS >= 256");
+    if (!(EN_FP32 || EN_FP64 || EN_FP128 || EN_FP256))
+      $error("a tile carries at least one rung");
     // Upper bound, deliberately. This parameterization exists to make
     // the tile SMALLER - a quarter-tile for an open-core conformance
     // node, or a chiplet trading lanes for deposition buffer. Going
@@ -1283,10 +1293,10 @@ module cft_engine_stream #(
             r[i*32 +: 32] = beat[31:0];
         PREC_FP64:
           for (int i = 0; i < LANES64; i = i + 1)
-            r[i*64 +: 64] = beat[63:0];
+            r[i*BW64 +: BW64] = beat[BW64-1:0];
         PREC_FP128:
           for (int i = 0; i < LANES128; i = i + 1)
-            r[i*128 +: 128] = beat[127:0];
+            r[i*BW128 +: BW128] = beat[BW128-1:0];
         default:
           r = beat;
       endcase
@@ -1354,7 +1364,8 @@ module cft_engine_stream #(
   generate
     if (OWN_LANES) begin : g_own_lanes
       cft_lanes #(.BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
-                  .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+                  .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
+                  .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
                   .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
                   .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES)) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),

@@ -159,9 +159,13 @@ Elements per beat: fp32 -> 8, fp64 -> 4, fp128 -> 2, fp256 -> 1.
 
 ### Geometry parameters
 
-`cft_krnl` takes `EN_FP64/EN_FP128/EN_FP256` to drop rungs and
-`BEAT_BITS` to narrow the beat itself. What remains is advertised in
-CAPS and is bit-identical to the full tile on the rungs it carries.
+`cft_krnl` takes `EN_FP32/EN_FP64/EN_FP128/EN_FP256` to drop rungs -
+any subset down to one; a tile with none is refused at elaboration -
+and `BEAT_BITS` to narrow the beat itself. What remains is advertised
+in CAPS and is bit-identical to the full tile on the rungs it carries.
+fp32 was the fixed baseline until 2026-09-14, when the tile a workload
+actually wanted (cft-rebound: binary64 and binary128, neither end)
+could not be expressed.
 
 **Lane counts are not independent parameters.** A beat holds
 `BEAT_BITS/width` elements of each format, so the beat width sets all

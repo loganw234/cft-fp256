@@ -48,6 +48,11 @@
 module cft_lanes #(
     parameter int BEAT_BITS  = 256,
     parameter int LATENCY    = 16,
+    // Any subset of the four rungs builds, down to one; none is
+    // refused at elaboration. fp32 gained its generic on 2026-09-14,
+    // when the tile a workload actually wanted was binary64 and
+    // binary128 with neither end (cft_krnl's header says whose).
+    parameter bit EN_FP32    = 1'b1,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
     parameter bit EN_FP256   = 1'b1,
@@ -131,7 +136,7 @@ module cft_lanes #(
   localparam int P64  = 52 + 1;
   localparam int P128 = 112 + 1;
   localparam int P256 = 236 + 1;
-  localparam int NP32  = cft_mul_passes(P32, MUL_PASSES);
+  localparam int NP32  = EN_FP32  ? cft_mul_passes(P32, MUL_PASSES)  : 1;
   localparam int NP64  = EN_FP64  ? cft_mul_passes(P64, MUL_PASSES)  : 1;
   localparam int NP128 = EN_FP128 ? cft_mul_passes(P128, MUL_PASSES) : 1;
   localparam int NP256 = EN_FP256 ? cft_mul_passes(P256, MUL_PASSES) : 1;
@@ -148,6 +153,9 @@ module cft_lanes #(
     end
     if (MUL_PASSES < 1) begin : g_bad_budget
       $error("cft_lanes: MUL_PASSES must be at least 1");
+    end
+    if (!(EN_FP32 || EN_FP64 || EN_FP128 || EN_FP256)) begin : g_no_rung
+      $error("cft_lanes: a tile carries at least one rung");
     end
   endgenerate
 
@@ -199,7 +207,7 @@ module cft_lanes #(
   // rungs it is sized for. See cft_engine_stream's history for the
   // measurements behind each default.
   localparam bit USE_FUSED_MUL = FUSE_MUL && (BEAT_BITS == 256) &&
-                                 EN_FP64 && EN_FP128 && EN_FP256;
+                                 EN_FP32 && EN_FP64 && EN_FP128 && EN_FP256;
 
   // The shared array is single-pass by construction and the multi-cycle
   // multiplier is private by construction; the pipe refuses the pair
@@ -267,7 +275,7 @@ module cft_lanes #(
 
   // ---- the shared normalise ladder -----------------------------------
   localparam bit USE_FUSED_NORM = FUSE_NORM && (BEAT_BITS == 256) &&
-                                  EN_FP64 && EN_FP128 && EN_FP256;
+                                  EN_FP32 && EN_FP64 && EN_FP128 && EN_FP256;
 
   // Eight uniform slots of 90 bits: the smallest slot holding an fp32
   // window (78) whose eight-fold tiling holds an fp256 one (717). Lane
@@ -334,7 +342,7 @@ module cft_lanes #(
 
   // ---- the shared ALIGN ladder ---------------------------------------
   localparam bit USE_FUSED_ALIGN = FUSE_ALIGN && (BEAT_BITS == 256) &&
-                                   EN_FP64 && EN_FP128 && EN_FP256;
+                                   EN_FP32 && EN_FP64 && EN_FP128 && EN_FP256;
 
   // AW = 3*MAN_W + 8 per rung - one bit under the normalise window.
   localparam int AW32  = 77;
@@ -403,50 +411,63 @@ module cft_lanes #(
   endgenerate
 
   // ---- fp32 bank -----------------------------------------------------
+  //
+  // Guarded like the other three since 2026-09-14. fp32 was "the
+  // baseline and always present" until the tile cft-rebound wanted
+  // turned out to be binary64 and binary128 with NEITHER end - and
+  // this bank is 26.6k LUT a tile (docs/LAYOUTS.md) that a generic
+  // can now leave out. The array still elaborates with any one rung.
   logic [BEAT_BITS-1:0] d32;
   logic [4:0] f32_l [0:LANES32-1];
   genvar gi;
   generate
-    for (gi = 0; gi < LANES32; gi = gi + 1) begin : g_lane32
-      logic [31:0] sa, sb, sc, fa, fb, fc, dd;
-      assign sa = a[gi*32 +: 32];
-      assign sb = b[gi*32 +: 32];
-      assign sc = c[gi*32 +: 32];
-      cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
-          .op(op), .a(sa), .b(sb), .c(sc),
-          .fa(fa), .fb(fb), .fc(fc));
-      logic bv; logic [31:0] bd; logic [4:0] bf;
-      cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
-          .op(op), .a(sa), .b(sb), .c(sc),
-          .valid(bv), .d(bd), .flags(bf));
-      // Divide/sqrt seeds: quiet unary precomputed results, delivered
-      // through the SAME bypass sideband as simpleops - which is why no
-      // new collection plumbing exists for them. Opcode sets disjoint,
-      // so the merge is an OR.
-      logic sev; logic [31:0] sed;
-      cft_seedop #(.EXP_W(8), .MAN_W(23)) u_seed (
-          .op(op), .a(sa), .valid(sev), .d(sed));
-      logic bv_m; logic [31:0] bd_m; logic [4:0] bf_m;
-      assign bv_m = bv | sev;
-      assign bd_m = sev ? sed : bd;
-      assign bf_m = sev ? 5'b0 : bf;
-      cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
-                       .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
-                       .EXT_ALIGN(USE_FUSED_ALIGN),
-                       .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP32)) u_fma (
-          .clk(clk), .rst_n(rst_n), .en(en),
-          .in_valid(in_valid && (prec == PREC_FP32)),
-          .rnd(rnd),
-          .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
-          .a(fa), .b(fb), .c(fc),
-          .out_valid(), .d(dd), .flags(f32_l[gi]),
-          .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
-          .mul_p(mf_p[gi*48 +: 48]),
-          .nrm_v(nv32[gi]), .nrm_csh(nc32[gi]), .nrm_fsh(nf32[gi]),
-          .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]),
-          .aln_v(av32[gi]), .aln_csh(ac32[gi]), .aln_fsh(af32[gi]),
-          .aln_dir(ad32[gi]), .aln_d(as_dout[gi*NSEG_SLOTW +: AW32]));
-      assign d32[gi*32 +: 32] = dd;
+    if (EN_FP32 && LANES32 > 0) begin : g_bank32
+      for (gi = 0; gi < LANES32; gi = gi + 1) begin : g_lane32
+        logic [31:0] sa, sb, sc, fa, fb, fc, dd;
+        assign sa = a[gi*32 +: 32];
+        assign sb = b[gi*32 +: 32];
+        assign sc = c[gi*32 +: 32];
+        cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
+            .op(op), .a(sa), .b(sb), .c(sc),
+            .fa(fa), .fb(fb), .fc(fc));
+        logic bv; logic [31:0] bd; logic [4:0] bf;
+        cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
+            .op(op), .a(sa), .b(sb), .c(sc),
+            .valid(bv), .d(bd), .flags(bf));
+        // Divide/sqrt seeds: quiet unary precomputed results, delivered
+        // through the SAME bypass sideband as simpleops - which is why no
+        // new collection plumbing exists for them. Opcode sets disjoint,
+        // so the merge is an OR.
+        logic sev; logic [31:0] sed;
+        cft_seedop #(.EXP_W(8), .MAN_W(23)) u_seed (
+            .op(op), .a(sa), .valid(sev), .d(sed));
+        logic bv_m; logic [31:0] bd_m; logic [4:0] bf_m;
+        assign bv_m = bv | sev;
+        assign bd_m = sev ? sed : bd;
+        assign bf_m = sev ? 5'b0 : bf;
+        cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
+                         .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
+                         .EXT_ALIGN(USE_FUSED_ALIGN),
+                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP32)) u_fma (
+            .clk(clk), .rst_n(rst_n), .en(en),
+            .in_valid(in_valid && (prec == PREC_FP32)),
+            .rnd(rnd),
+            .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
+            .a(fa), .b(fb), .c(fc),
+            .out_valid(), .d(dd), .flags(f32_l[gi]),
+            .mul_a(mfa32[gi]), .mul_b(mfb32[gi]),
+            .mul_p(mf_p[gi*48 +: 48]),
+            .nrm_v(nv32[gi]), .nrm_csh(nc32[gi]), .nrm_fsh(nf32[gi]),
+            .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]),
+            .aln_v(av32[gi]), .aln_csh(ac32[gi]), .aln_fsh(af32[gi]),
+            .aln_dir(ad32[gi]), .aln_d(as_dout[gi*NSEG_SLOTW +: AW32]));
+        assign d32[gi*32 +: 32] = dd;
+      end
+    end else begin : g_no_bank32
+      assign d32 = '0;
+      always_comb
+        for (int i = 0; i < LANES32; i = i + 1)
+          f32_l[i] = '0;
     end
   endgenerate
 

@@ -32,10 +32,10 @@ in CAPS[3:0].
 
 ## The variants
 
-One RTL, three generics (`rtl/cft_krnl.sv`: `EN_FP64`, `EN_FP128`,
-`EN_FP256`). A narrow variant does not build the banks it drops; the
-engine, sequencer, FIFOs, reduction accumulator and CSR are
-`BEAT_BITS`-wide and stay.
+One RTL, four generics (`rtl/cft_krnl.sv`: `EN_FP32`, `EN_FP64`,
+`EN_FP128`, `EN_FP256` - any subset down to one rung). A narrow
+variant does not build the banks it drops; the engine, sequencer,
+FIFOs, reduction accumulator and CSR are `BEAT_BITS`-wide and stay.
 
 | kernel | rungs | generics off | clock (MHz) | provenance |
 |---|---|---|---|---|
@@ -43,6 +43,7 @@ engine, sequencer, FIFOs, reduction accumulator and CSR are
 | `cft_krnl_f128` | fp32 fp64 fp128 | `EN_FP256=0` | 150* | target, unmeasured |
 | `cft_krnl_f64` | fp32 fp64 | `EN_FP128=0 EN_FP256=0` | 170* | target, unmeasured |
 | `cft_krnl_f32` | fp32 | `EN_FP64=0 EN_FP128=0 EN_FP256=0` | 190* | target, unmeasured |
+| `cft_krnl_f64f128` | fp64 fp128 | `EN_FP32=0 EN_FP256=0` | 150* | target, unmeasured; the tile cft-rebound asked for (its docs/BITSTREAM.md, ask 5), expressible since fp32 gained a generic on 2026-09-14 |
 
 `*` targets, not results: the OOC ceilings in docs/ARCHITECTURE.md
 (232 MHz at fp32, 148 at fp256, the middle rungs between) less the
@@ -95,6 +96,7 @@ the numbers that matter are the fp128 and fp256 ones.
 | `u50-5xfp128` | 5x fp128-max | 5 | 20 | 150* | 654,666 | 75.2% | fits |  | placeholder (needs variant packaging; host-ready) |
 | `u50-7xfp64` | 7x fp64-max | 7 | 28 | 170* | 679,580 | 78.0% | fits |  | placeholder (needs variant packaging; host-ready) |
 | `u50-8xfp32` | 8x fp32-max | 8 | 32 | 190* | 558,335 | 64.1% | fits |  | placeholder (needs variant packaging; host-ready) |
+| `u50-7xfp64fp128` | 7x fp64fp128-max | 7 | 28 | 150* | 685,880 | 78.8% | fits |  | placeholder (needs variant packaging; host-ready) |
 
 *(this table is written by `python hw/gen_layouts.py`; the two "built" rows are `hw/link_quad.cfg` and `hw/link.cfg` by another name - identical connectivity)*
 

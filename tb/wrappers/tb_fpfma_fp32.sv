@@ -52,8 +52,12 @@ module tb_fpfma_fp32 #(
   // a reachable wrong one in another.
   //
   // Scoped to these two lines only. An UNSIGNED warning anywhere else in
-  // this wrapper stays fatal, and the three sibling wrappers carry no
-  // pragma because at NP > 1 the comparison is not constant.
+  // this wrapper stays fatal. The three sibling wrappers carry the same
+  // pragma since 2026-09-14: this comment used to say they needed none
+  // "because at NP > 1 the comparison is not constant", but at the
+  // default MUL_PASSES=1 every rung is single-pass (cft_mul_passes
+  // spreads chunks over columns), so NP is 1 in all four, and Verilator
+  // refused fp64, fp128 and fp256 the day the whole suite ran under it.
   /* verilator lint_off UNSIGNED */
   always_ff @(posedge clk) begin
     if (!rst_n)                       ph <= '0;

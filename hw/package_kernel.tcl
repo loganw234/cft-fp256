@@ -17,7 +17,7 @@
 # portable; packaging on Windows and linking on Linux is a supported
 # split.)
 #
-# GENERICS. cft_krnl carries trim generics - EN_FP64, EN_FP128,
+# GENERICS. cft_krnl carries trim generics - EN_FP32, EN_FP64, EN_FP128,
 # EN_FP256, MUL_PASSES, the FUSE_* pair - and until 2026-09-14 none of
 # them could reach a bitstream through this script: the loop below
 # removes every user parameter from the packaged IP, so the .xo only

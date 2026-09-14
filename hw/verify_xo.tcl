@@ -43,7 +43,7 @@ foreach f [get_files -all -of_objects [get_ips cft_krnl_v]] {
     set txt [read $fh]
     close $fh
     foreach line [split $txt "\n"] {
-      if {[regexp {\.(EN_FP64|EN_FP128|EN_FP256|BEAT_BITS|MUL_PASSES|FUSE_[A-Z]+|AR_DEPTH|AW_DEPTH|FIFO_LOG2|BURST_LOG2)\s*\(} $line]} {
+      if {[regexp {\.(EN_FP32|EN_FP64|EN_FP128|EN_FP256|BEAT_BITS|MUL_PASSES|FUSE_[A-Z]+|AR_DEPTH|AW_DEPTH|FIFO_LOG2|BURST_LOG2)\s*\(} $line]} {
         puts "WRAPPER_PARAM: [string trim $line]"
       }
     }

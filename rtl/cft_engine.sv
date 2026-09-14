@@ -11,7 +11,7 @@
 // four rungs share the one beat, the one delay line, and the one
 // flags rail; only the lane slicing differs. N must be a whole
 // number of beats (host contract; see docs/ARCHITECTURE.md). The
-// EN_FP64/EN_FP128/EN_FP256 parameters let a trimmed tile (open-core
+// EN_FP32/EN_FP64/EN_FP128/EN_FP256 parameters let a trimmed tile (open-core
 // conformance nodes, docs/ROADMAP.md) drop banks it cannot fit; what
 // remains is advertised in the CAPS CSR and behaves identically.
 // 256 bits is also the native width of an HBM pseudo-channel, so no
@@ -36,6 +36,7 @@
 
 module cft_engine #(
     parameter int LATENCY  = 15,
+    parameter bit EN_FP32  = 1'b1,
     parameter bit EN_FP64  = 1'b1,
     parameter bit EN_FP128 = 1'b1,
     parameter bit EN_FP256 = 1'b1,
@@ -144,6 +145,8 @@ module cft_engine #(
       $error("EN_FP128 needs BEAT_BITS >= 128");
     if (EN_FP256 && BEAT_BITS < 256)
       $error("EN_FP256 needs BEAT_BITS >= 256");
+    if (!(EN_FP32 || EN_FP64 || EN_FP128 || EN_FP256))
+      $error("a tile carries at least one rung");
     // Upper bound, deliberately. This parameterization exists to make
     // the tile SMALLER - a quarter-tile for an open-core conformance
     // node, or a chiplet trading lanes for deposition buffer. Going
@@ -230,46 +233,51 @@ module cft_engine #(
 
   // 8 x fp32 lanes
   logic [BEAT_BITS-1:0] d32;
-  logic [4:0]   f32_l [0:LANES32-1];
   logic [4:0]   f32_or;
   genvar gi;
   generate
-    for (gi = 0; gi < LANES32; gi = gi + 1) begin : g_lane32
-      logic [31:0] sa, sb, sc, fa, fb, fc, dd;
-      assign sa = abuf[gi*32 +: 32];
-      assign sb = bbuf[gi*32 +: 32];
-      assign sc = cbuf[gi*32 +: 32];
-      cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
-          .op(op_r), .a(sa), .b(sb), .c(sc),
-          .fa(fa), .fb(fb), .fc(fc));
-      logic bv; logic [31:0] bd; logic [4:0] bf;
-      cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
-          .op(op_r), .a(sa), .b(sb), .c(sc),
-          .valid(bv), .d(bd), .flags(bf));
-      cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
-          .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
-          .in_valid(ex_valid && (prec_r == PREC_FP32)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
-          .a(fa), .b(fb), .c(fc),
-          .out_valid(), .d(dd), .flags(f32_l[gi]),
-          // EXT_MUL is left at its default here, so the lane builds its
-          // own multiplier and these three are inert. They still have to
-          // be NAMED. This engine is the uninstantiated readable
-          // reference, so when cft_fpfma_pipe grew the shared-multiplier
-          // port it was never updated - Icarus tolerates a missing pin
-          // and nothing else read this file. Verilator makes it fatal,
-          // which is why `make SIM=verilator sim` has never run despite
-          // being advertised at the top of tb/Makefile.
-          .mul_a(), .mul_b(), .mul_p('0),
-          .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
-          .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
-      assign d32[gi*32 +: 32] = dd;
+    if (EN_FP32 && LANES32 > 0) begin : g_bank32
+      logic [4:0] f32_l [0:LANES32-1];
+      for (gi = 0; gi < LANES32; gi = gi + 1) begin : g_lane32
+        logic [31:0] sa, sb, sc, fa, fb, fc, dd;
+        assign sa = abuf[gi*32 +: 32];
+        assign sb = bbuf[gi*32 +: 32];
+        assign sc = cbuf[gi*32 +: 32];
+        cft_opmux #(.EXP_W(8), .MAN_W(23)) u_mux (
+            .op(op_r), .a(sa), .b(sb), .c(sc),
+            .fa(fa), .fb(fb), .fc(fc));
+        logic bv; logic [31:0] bd; logic [4:0] bf;
+        cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
+            .op(op_r), .a(sa), .b(sb), .c(sc),
+            .valid(bv), .d(bd), .flags(bf));
+        cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
+            .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
+            .in_valid(ex_valid && (prec_r == PREC_FP32)),
+            .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
+            .a(fa), .b(fb), .c(fc),
+            .out_valid(), .d(dd), .flags(f32_l[gi]),
+            // EXT_MUL is left at its default here, so the lane builds its
+            // own multiplier and these three are inert. They still have to
+            // be NAMED. This engine is the uninstantiated readable
+            // reference, so when cft_fpfma_pipe grew the shared-multiplier
+            // port it was never updated - Icarus tolerates a missing pin
+            // and nothing else read this file. Verilator makes it fatal,
+            // which is why `make SIM=verilator sim` has never run despite
+            // being advertised at the top of tb/Makefile.
+            .mul_a(), .mul_b(), .mul_p('0),
+            .nrm_v(), .nrm_csh(), .nrm_fsh(), .nrm_d('0),
+            .aln_v(), .aln_csh(), .aln_fsh(), .aln_dir(), .aln_d('0));
+        assign d32[gi*32 +: 32] = dd;
+      end
+      always_comb begin
+        f32_or = 5'b0;
+        for (int i = 0; i < LANES32; i = i + 1) f32_or = f32_or | f32_l[i];
+      end
+    end else begin : g_bank32_off
+      assign d32 = '0;
+      assign f32_or = 5'b0;
     end
   endgenerate
-  always_comb begin
-    f32_or = 5'b0;
-    for (int i = 0; i < LANES32; i = i + 1) f32_or = f32_or | f32_l[i];
-  end
 
   // 4 x fp64 lanes
   logic [BEAT_BITS-1:0] d64;

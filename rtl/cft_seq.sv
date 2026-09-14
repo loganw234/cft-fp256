@@ -179,6 +179,7 @@ module cft_seq #(
     // BEAT_BITS is 128 KiB at 256 and 16.
     parameter int SCRATCH_D  = 256,
     parameter int ADDR_W     = 64,
+    parameter bit EN_FP32    = 1'b1,
     parameter bit EN_FP64    = 1'b1,
     parameter bit EN_FP128   = 1'b1,
     parameter bit EN_FP256   = 1'b1,
@@ -685,7 +686,8 @@ module cft_seq #(
     if (OWN_LANES) begin : g_own_lanes
       cft_lanes #(
           .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
-          .EN_FP64(EN_FP64), .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+          .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
+          .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
           .MUL_PASSES(MUL_PASSES)
       ) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
