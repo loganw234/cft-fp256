@@ -2674,6 +2674,69 @@ arithmetic buys more calls at the same rate, not slower calls, so it
 scales both sides identically. The lever is vector width and only
 vector width.
 
+**7. A per-system reduction - and it is not `CFT_MAXALL` (2026-09-14).**
+A seventh, from a later section of the same document
+(`cft-rebound/docs/HARDWARE.md:526-536`), after the easy asks of its
+BITSTREAM.md list were closed. The corrector's convergence test is
+`pc_error` (`cft-rebound/src/ias15_cft.c:923`): at pass n = 7, per
+system s over its L = 3N coordinates, the maximum of |tmp/at| in
+INDIVIDUAL mode or max|tmp| / max|at| in every other mode - over the
+NORMAL values only, from +0 (REBOUND zeroes the estimate each pass, so a
+system with no normal coordinate reports +0), with a system that has
+already left the corrector given 1/1 so that it raises nothing. Today
+the host reads 3N x E deposits a pass and loops. ABI 0.12's `CFT_MAXALL`
+is IEEE `maximum` over the whole array: one result, NaN-propagating,
+subnormals and infinities counted. It expresses neither property, and
+the requester says so themselves ("needs thought rather than a
+substitution").
+
+*What the tile can already do, and what it cannot.* The normal-only
+mask is elementwise: |x| is `abs`; normal is `MIN_NORMAL <= |x| < +inf`,
+two compares whose results are exactly 1.0 or +0.0; `select`
+(d = c != 0 ? a : b) folds them and zeroes everything else. Five
+ordinary instructions, all of them legal inside the sequencer program
+the corrector already is; no `class` opcode exists on the tile and none
+is needed. What does not exist is the reduction PER SEGMENT. The
+engine's accumulator folds one stream to one value; the sequencer's
+lanes cannot read across lanes; a maximum over one system's L
+coordinates - a block of L consecutive lanes - is a cross-lane
+operation neither can do. E separate `cft_reduce` calls express it at E
+round trips: at E = 1,000 that is about 35 ms a pass against the ~0.2 ms
+the deposit read-back costs now. Not a route.
+
+*The routes, priced.*
+
+- (A) Leave it on the host and remove the test instead: the recorded
+  corrector schedule replays a known pass count, bit for bit; their doc
+  prices it at 13-19% of calls. Zero library work, and their decision.
+- (B) `cft_reduce_seg(dev, op, fmt, rnd, a, b, n, seg, d, flags, bus)`:
+  n/seg results, `d[s]` DEFINED as `cft_reduce(op, a + s*seg, ..., seg)`
+  - the same tree on each slice, so the software backend is exact by
+  definition and gains nothing new. The engine gets a MODE-carried
+  segment length; the accumulator restarts and deposits every `seg`
+  elements; the sequencer is untouched. RTL: `cft_reduce_acc`,
+  `cft_engine_stream`, a CSR field and a CAPS bit; golden `reduce.py`;
+  libcft, nine bindings, the corpus. Until the RTL lands the device
+  backend REFUSES it by name rather than looping E calls - a caller must
+  never pay 35 ms believing it fast. Segmented `maxall` after the
+  five-op mask is then `pc_error` in both modes exactly, +0 identity
+  included (a masked element is +0, and maximum(+0, +0) is +0).
+- (C) A cross-lane block reduce as a sequencer instruction, one value
+  deposited per block of `seg` lanes. The whole test on-chip, resident,
+  no host between passes. Larger: a new instruction class, a tree
+  across lane slices, P2's deposit addressing extended to per-block
+  results, and the golden `seq.py` model. Worth it only if (B)'s one
+  round trip a pass is still the wall once the resident corrector
+  lands, which their own "measurement that should come first" says
+  nobody knows yet.
+
+*Recommendation: (B), API first.* One entry across the ABI whose
+software semantics are a restatement of what exists, and a mask that
+costs no ABI at all. It is also nine bindings and a MODE field, so it is
+a decision rather than a chore, and the requester's next measurement
+(which of per-call latency, staged bytes and the host's gather
+dominates) is the input it wants. Not started.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
