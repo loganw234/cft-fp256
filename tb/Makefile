@@ -54,7 +54,7 @@ LATENCY_ENV = CFT_RD_LATENCY=$(RD_LATENCY) CFT_WR_LATENCY=$(WR_LATENCY)
 PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
-        normprobe seedop reduceacc reduce krnl krnlseq quarter faults \
+        normprobe seedop reduceacc reduce krnl krnlf128 krnlseq quarter faults \
         seq_core seqprobe krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
@@ -70,7 +70,7 @@ PYTHON ?= python3
 # each run; the `timeout` wrappers handle the rest) - what escaped was
 # the one outcome this project exists to detect.
 SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
-              normshare seedop reduceacc reduce krnl quarter faults \
+              normshare seedop reduceacc reduce krnl krnlf128 quarter faults \
               seq_core krnlseq seqbanks mulpass mulcycle mulcycle2
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
@@ -319,6 +319,24 @@ krnl:
 	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnl \
 		COCOTB_RESULTS_FILE=sim_build/krnl/results.xml
+
+# The full-beat tile with binary256 left out - the kernel cft-rebound
+# shipped (EN_FP256=0 at BEAT_BITS=256) - which no bench had proved
+# before 2026-09-14: test_krnl issued fp256 unconditionally and
+# test_krnl_quarter is trimmed the other way, to BEAT_BITS=64. Same
+# bench, same golden model; CAPS[3:0] must read 0x7, the three rungs are
+# bit-exact, precision 3 is refused with STATUS[3] and touches nothing.
+#
+# ONE list is the source of both the -P override the simulator builds
+# with and the CFT_GENERICS the bench derives its expected CAPS from, in
+# the NAME=VALUE spelling hw/package_kernel.tcl takes - so the build and
+# the expectation cannot be told two different stories.
+KRNLF128_GENERICS = EN_FP256=0
+krnlf128:
+	CFT_GENERICS="$(KRNLF128_GENERICS)" $(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl SIM_BUILD=sim_build/krnlf128 \
+		KRNL_PARAMS="$(foreach g,$(KRNLF128_GENERICS),-Pcft_krnl.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/krnlf128/results.xml
 
 # The orbit sequencer through the same kernel: program image staged in
 # RAM, PROG_PTR and CNT_PTR written, MODE[15] set, deposits and counts

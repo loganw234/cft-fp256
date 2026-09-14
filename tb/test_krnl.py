@@ -11,6 +11,7 @@ cft_golden.compute - which makes this one test cover the CSR block,
 the engine FSM, the AXI master, the operand steering muxes, and both
 compute banks."""
 
+import os
 import random
 import sys
 from pathlib import Path
@@ -42,6 +43,33 @@ FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
 # The second capability word (revision 3), above the sequencer's
 # pointers because appending is the only change a shipped map takes.
 CAPS2 = 0x6C
+
+# ---- which rungs THIS build carries ------------------------------------
+# tb/Makefile's `krnlf128` builds the kernel with -Pcft_krnl.EN_FP256=0
+# and hands the same list here as CFT_GENERICS="EN_FP256=0" - the
+# NAME=VALUE spelling hw/package_kernel.tcl, hw/impl_krnl_ooc.tcl and
+# hw/synth_krnl_ooc.tcl take - derived from one Makefile variable, so the
+# simulator's build and this bench's expectation cannot disagree. Empty
+# is the full tile. The mask mirrors rtl/cft_krnl.sv's
+# PREC_CAPS = {EN_FP256, EN_FP128, EN_FP64, 1'b1}: fp32 has no generic.
+def prec_mask_from_env():
+    en = {"EN_FP64": 1, "EN_FP128": 1, "EN_FP256": 1}
+    for g in os.environ.get("CFT_GENERICS", "").split():
+        name, _, value = g.partition("=")
+        if name in en:
+            if value not in ("0", "1"):
+                raise ValueError(f"CFT_GENERICS {g!r}: {name} is a bit")
+            en[name] = int(value)
+    return 1 | (en["EN_FP64"] << 1) | (en["EN_FP128"] << 2) | (en["EN_FP256"] << 3)
+
+
+PREC_MASK = prec_mask_from_env()
+
+
+def carried(fmt):
+    """True if this build advertises the rung; a case at an absent rung is
+    not run - it is REFUSED, and that refusal is asserted below."""
+    return bool(PREC_MASK & (1 << PREC_CODE[fmt.name]))
 
 import busfx  # noqa: E402
 
@@ -430,7 +458,20 @@ async def krnl_end_to_end(dut):
     # 0x6C and the two scratch pointers at 0x70 and 0x78.
     assert await axil.read_dword(VERSION) == 0x00000800
     caps = await axil.read_dword(CAPS)
-    assert (caps & 0xF) == 0xF, "full tile advertises all four rungs"
+    # CAPS[3:0] against what this bench was BUILT with, not against 0xF: a
+    # trimmed build (make krnlf128) must advertise exactly the rungs it
+    # kept and nothing more, and a full build all four.
+    built = os.environ.get("CFT_GENERICS", "") or "(nothing: the full tile)"
+    assert (caps & 0xF) == PREC_MASK, (
+        f"CAPS[3:0] is {caps & 0xF:#x}; this bench was built with "
+        f"CFT_GENERICS={built!r}, which is {PREC_MASK:#x}")
+    absent = [f for f in (FP32, FP64, FP128, FP256) if not carried(f)]
+    dut._log.info("rungs carried: "
+                  + " ".join(f.name for f in (FP32, FP64, FP128, FP256)
+                             if carried(f))
+                  + (("; absent, to be refused: "
+                      + " ".join(f.name for f in absent)) if absent
+                     else "; all four, so absent-rung refusals are NOT TESTED"))
     check_op_groups(caps)
     check_seq_caps(caps)
     check_caps2(await axil.read_dword(CAPS2))
@@ -441,8 +482,10 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP32, OP_ADD, 32, seed=102)
     await run_op(dut, axil, ram, FP32, OP_SUB, 32, seed=103)
     await run_op(dut, axil, ram, FP32, OP_MUL, 32, seed=104)
-    await run_op(dut, axil, ram, FP256, OP_FMA, 6, seed=105)
-    await run_op(dut, axil, ram, FP256, OP_MUL, 4, seed=106)
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_FMA, 6, seed=105)
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_MUL, 4, seed=106)
     await run_op(dut, axil, ram, FP32, OP_FMA, 16, seed=107)  # single-beat run
     await run_op(dut, axil, ram, FP64, OP_FMA, 24, seed=108)
     await run_op(dut, axil, ram, FP64, OP_SUB, 16, seed=109)
@@ -481,7 +524,8 @@ async def krnl_end_to_end(dut):
                              seed=0x5CA1 + which, which=which)
         await run_scalar(dut, axil, ram, FP64, OP_FMA, 36, seed=0x5CB0, which=1)
         await run_scalar(dut, axil, ram, FP128, OP_FMA, 38, seed=0x5CB1, which=1)
-        await run_scalar(dut, axil, ram, FP256, OP_FMA, 37, seed=0x5CB2, which=1)
+        if carried(FP256):
+            await run_scalar(dut, axil, ram, FP256, OP_FMA, 37, seed=0x5CB2, which=1)
         # The control: the same shape with the flag CLEAR and full arrays
         # must still be right, so a scalar path that quietly streamed
         # could not pass both halves - the poison is what separates them.
@@ -495,7 +539,8 @@ async def krnl_end_to_end(dut):
     # buffers placed so bursts must split at 4KB AXI boundaries
     await run_op(dut, axil, ram, FP32, OP_FMA, 296, seed=113)  # 37 beats
     await run_op(dut, axil, ram, FP64, OP_ADD, 128, seed=114)  # 32 beats
-    await run_op(dut, axil, ram, FP256, OP_FMA, 40, seed=115)  # 3 bursts
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_FMA, 40, seed=115)  # 3 bursts
     await run_op(dut, axil, ram, FP32, OP_MUL, 64, seed=116,
                  bases=(0x00FE0, 0x41FC0, 0x82FA0, 0xC3F20))
 
@@ -504,7 +549,8 @@ async def krnl_end_to_end(dut):
         await run_op(dut, axil, ram, FP32, OP_FMA, 32, seed=120 + rnd, rnd=rnd)
     await run_op(dut, axil, ram, FP64, OP_FMA, 16, seed=130, rnd=RND_RDN)
     await run_op(dut, axil, ram, FP128, OP_MUL, 6, seed=131, rnd=RND_RUP)
-    await run_op(dut, axil, ram, FP256, OP_FMA, 4, seed=132, rnd=RND_RTZ)
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_FMA, 4, seed=132, rnd=RND_RTZ)
 
     # back-to-back runs that differ only in attribute must differ in
     # results the way the contract says, and the CSR must not leak the
@@ -521,9 +567,11 @@ async def krnl_end_to_end(dut):
         await run_op(dut, axil, ram, FP32, op, 32, seed=200 + i)
     await run_op(dut, axil, ram, FP64, OP_MINNUM, 16, seed=210)
     await run_op(dut, axil, ram, FP128, OP_COPYSIGN, 8, seed=211)
-    await run_op(dut, axil, ram, FP256, OP_MAX, 4, seed=212)
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_MAX, 4, seed=212)
     await run_op(dut, axil, ram, FP64, OP_CMPLT, 16, seed=213)
-    await run_op(dut, axil, ram, FP256, OP_SELECT, 4, seed=214)
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_SELECT, 4, seed=214)
     # select is the only non-arithmetic opcode that reads c, so it is
     # the only end-to-end check that each bank's c slice is wired to
     # that bank's own operand. Run it on every rung, not just two.
@@ -538,15 +586,16 @@ async def krnl_end_to_end(dut):
     await run_op(dut, axil, ram, FP32, OP_RECIP_SEED, 32, seed=217)
     await run_op(dut, axil, ram, FP64, OP_RSQRT_SEED, 16, seed=218)
     await run_op(dut, axil, ram, FP128, OP_RSQRT_SEED, 8, seed=219)
-    await run_op(dut, axil, ram, FP256, OP_RECIP_SEED, 4, seed=220)
+    if carried(FP256):
+        await run_op(dut, axil, ram, FP256, OP_RECIP_SEED, 4, seed=220)
 
     # A MODE precision code outside 0-3 is refused on EVERY build, the
     # full tile included: STATUS[3], done still asserted, memory
     # untouched, and the next accepted run clears the sticky (run_op's
-    # own STATUS==0 assert proves that part). The trimmed-build
-    # refusals - real precisions this build lacks - live in
-    # test_krnl_quarter, which is the only bench that HAS a trimmed
-    # build to point at.
+    # own STATUS==0 assert proves that part). Real precisions a trimmed
+    # build lacks are refused the same way and are held to it below -
+    # since 2026-09-14 for the full-beat trim (`make krnlf128`), and in
+    # test_krnl_quarter for the BEAT_BITS=64 one.
     ram.write(D_BASE, b"\xAA" * 64)
     await axil.write_dword(MODE, 0 | (9 << 8))
     await write64(axil, NREG, 4)
@@ -565,6 +614,49 @@ async def krnl_end_to_end(dut):
     assert (await axil.read_dword(STATUS)) == 0x8, "want the refusal bit"
     assert ram.read(D_BASE, 64) == b"\xAA" * 64, "a refused run wrote"
     await run_op(dut, axil, ram, FP32, OP_ADD, 8, seed=221)
+
+    # ---- a real rung this build LACKS --------------------------------
+    #
+    # The kernel cft-rebound shipped is a full-beat tile with binary256
+    # left out - EN_FP256=0 at BEAT_BITS=256 - and until 2026-09-14 no
+    # bench had ever built that shape: this file issued fp256 cases
+    # unconditionally, and the one trimmed bench, test_krnl_quarter, is
+    # trimmed the other way. `make krnlf128` builds it, and this is the
+    # proof cft-rebound said "would have proved this image's RTL before a
+    # link did" (its docs/BITSTREAM.md, ask 4): CAPS[3:0] exactly the
+    # kept rungs (asserted above), the kept rungs bit-exact (every case
+    # above), and the absent one refused with STATUS[3] - done still
+    # asserted, nothing written, and FLAGS untouched, because a refusal
+    # is not a run (rtl/cft_krnl.sv: "FLAGS are left alone"). The
+    # out-of-range block above does not check FLAGS; this one does.
+    # On a full build the loop is empty and the banner above says so.
+    for fmt in absent:
+        flags_before = await axil.read_dword(FLAGS)
+        ram.write(D_BASE, b"\xA5" * 64)
+        await axil.write_dword(MODE, OP_FMA | (PREC_CODE[fmt.name] << 8))
+        await write64(axil, NREG, 4)
+        await write64(axil, APTR, A_BASE)
+        await write64(axil, BPTR, B_BASE)
+        await write64(axil, CPTR, C_BASE)
+        await write64(axil, DPTR, D_BASE)
+        await axil.write_dword(CTRL, 1)
+        refused_done = False
+        for _ in range(200):
+            await ClockCycles(dut.ap_clk, 5)
+            if (await axil.read_dword(CTRL)) & 0x2:
+                refused_done = True
+                break
+        assert refused_done, f"{fmt.name}: a refused run must still complete"
+        got = await axil.read_dword(STATUS)
+        assert got == 0x8, \
+            f"{fmt.name} on a build without it: STATUS {got:#05b}, want the " \
+            f"refusal bit alone"
+        assert ram.read(D_BASE, 64) == b"\xA5" * 64, \
+            f"{fmt.name}: a refused run wrote to D"
+        assert (await axil.read_dword(FLAGS)) == flags_before, \
+            f"{fmt.name}: a refusal moved FLAGS, and a refusal is not a run"
+        dut._log.info(f"{fmt.name}: refused with STATUS[3], D and FLAGS untouched")
+        await run_op(dut, axil, ram, FP32, OP_ADD, 8, seed=222)
 
     # ---- across a 4KB page -------------------------------------------
     #
@@ -628,7 +720,8 @@ async def krnl_end_to_end(dut):
         dut._log.info(f"backpressure: duty {duty} on every channel")
         await run_op(dut, axil, ram, FP32, OP_FMA, 40, seed=300 + i)
         await run_op(dut, axil, ram, FP64, OP_ADD, 20, seed=310 + i)
-        await run_op(dut, axil, ram, FP256, OP_FMA, 5, seed=320 + i)
+        if carried(FP256):
+            await run_op(dut, axil, ram, FP256, OP_FMA, 5, seed=320 + i)
         # 136 fp32 is 17 beats: one full 16-beat burst plus a single
         # ragged one. That is the awkward size for an ELEMENTWISE run -
         # a whole number of beats that is not a whole number of bursts.

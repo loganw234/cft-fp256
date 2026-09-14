@@ -55,7 +55,7 @@ authority:
    operations, the status word, the cross-format arithmetic, the
    alignment boundary, the sequencer's fuzzed programs, the reductions.
 4. **The RTL, in simulation** (`tb/`, `make sim` in the `cft-sim`
-   image). Twenty-one cocotb targets hold the hardware to the model, and
+   image). Twenty-two cocotb targets hold the hardware to the model, and
    since 2026-09-12 the target's exit code reports whether they passed:
    `tb/check_results.py` reads every `results.xml` the run wrote and fails
    on a recorded failure, a missing file or an unparseable one. cocotb
@@ -70,12 +70,13 @@ authority:
    through its CSR and AXI interfaces, by the streaming engine and by
    the sequencer; the shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction
-   accumulator, the fault paths, the quarter-tile trim and the seed
-   opcodes have benches of their own. `make simmc MC=10` runs the same
-   suite with the multiplier iterated ten ways, plus the `board`
-   configuration (ten passes and both ladders on) that the open-core
-   Kintex-7 tile would ship as - thirteen multi-cycle targets and four
-   board targets, the third tier's own census.
+   accumulator, the fault paths, the seed opcodes and both trims - the
+   quarter tile, and the full beat with binary256 left out, which is
+   the shape cft-rebound ships - have benches of their own. `make simmc
+   MC=10` runs the same suite with the multiplier iterated ten ways,
+   plus the `board` configuration (ten passes and both ladders on) that
+   the open-core Kintex-7 tile would ship as - thirteen multi-cycle
+   targets and four board targets, the third tier's own census.
 5. **The RTL, elaborated** (`make yosys-lint`). Every RTL file through
    Yosys: no latches, no width surprises, no construct the open flow
    cannot take.
@@ -153,7 +154,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `vectors` (`make vectors`, 168 sets) | 5 min | 7 to 8.5 min | |
 | `libcft` / `make -C host test` (build + the 1,068,915-case replay) | 7.5 min | 8.5 to 11 min | the census was 1,071,635 until 2026-09-12, when opcode 31 became `maxall`: a reduction has no elementwise case to inherit, so 4,000 `reserved31` cases left and 1,280 maxall cases arrived. A document recording an earlier RUN still says 1,071,635 and is right to |
 | `make -C host reducetest` (`reduce_check.py --trials 1500`: the tree, the scaling, the bits and the flags against the model) | 2 to 3 min | | listed here from 2026-09-12, having been absent from a page that calls itself the map of everything - found by asking which docs the round had made stale rather than by a gate. 13,516 reductions over four formats and all seven of clause 9.4 plus `maxall`, whose two sides are deliberately DIFFERENT SHAPES: the model folds left, the library halves. Comparing them is what tests 754-2019 `maximum`'s associativity instead of assuming it |
-| `sim` (21 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
+| `sim` (22 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
 | `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, **does not finish under Icarus** in this configuration: 2.5 ns of simulated time a second through the small operations and about 0.03 ns a second inside the 1,104-element stream, 57 of 71 operations after four hours, on the tree before the cone change and after it alike; under Verilator, which its target selects, the bench is **16 s of simulation after an eleven-minute compile** (44,920 ns, both tests, parameters applied - until the evening of 2026-09-07 a Verilator build received none of a target's parameters and simulated the default, docs/VALIDATION.md) |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
 | `make programs-check` (the .cfta library: both assemblers, seventeen images, a check each, generated revision-2 and revision-3 corpora) | 10 to 60 s | | not a runner stage yet; `make programs` rebuilds the manifest it checks, so the two are separate on purpose; four of the checks waited on the revision-3 model and host by name (SKIP, not PASS) until both merged on 2026-09-08 |

@@ -84,7 +84,8 @@ def check_stage_counts(problems, root):
         37: "thirty-seven", 38: "thirty-eight",
     }
 
-    for name in ("CLAUDE.md", "README.md", "docs/VERIFICATION.md"):
+    for name in ("CLAUDE.md", "README.md", "docs/VERIFICATION.md",
+                 "docs/README.md"):
         f = root / name
         if not f.is_file():
             continue
@@ -119,12 +120,66 @@ def check_stage_counts(problems, root):
             if int(n) != total:
                 problems.append("%s says 'all %s' where the runner derives %d"
                                 % (name, n, total))
+        # "thirty-six stages", and docs/README.md's "thirty-seven runner
+        # stages" - which the bare form let drift past 38 on 2026-09-14.
         for word, num in ((w, n) for n, w in WORDS.items()):
-            if ("%s stages" % word) in body and num != total:
-                problems.append("%s says '%s stages' where the runner derives "
-                                "%d" % (name, word, total))
+            if re.search(r"\b%s (?:runner )?stages\b" % word, body) \
+                    and num != total:
+                problems.append("%s says '%s ... stages' where the runner "
+                                "derives %d" % (name, word, total))
 
     return derived
+
+def check_sim_bench_count(problems, root):
+    """Stated RTL-bench counts must match what tb/Makefile derives.
+
+    SIM_BENCHES is the list `make sim` runs and `check_results.py` reads,
+    so it is the only authority. Four documents quoted "21" by hand on
+    2026-09-14 when the twenty-second bench (krnlf128) was added; a count
+    that is transcribed is a count that drifts, which is what the stage
+    counts above already learned.
+    """
+    mk = root / "tb" / "Makefile"
+    if not mk.is_file():
+        problems.append("tb/Makefile is missing; cannot check the bench count")
+        return None
+    text = mk.read_text(encoding="utf-8", errors="replace")
+    # The assignment spans backslash-continued lines.
+    text = text.replace("\\\n", " ")
+    m = re.search(r"^SIM_BENCHES\s*=\s*(.*)$", text, re.M)
+    if not m:
+        problems.append("tb/Makefile has no SIM_BENCHES assignment")
+        return None
+    total = len(m.group(1).split())
+
+    WORDS = {20: "twenty", 21: "twenty-one", 22: "twenty-two",
+             23: "twenty-three", 24: "twenty-four", 25: "twenty-five"}
+    ABOUT = ("sim", "bench", "cocotb", "rtl", "target")
+    for name in ("CLAUDE.md", "README.md", "docs/VERIFICATION.md",
+                 "verify/run.sh"):
+        f = root / name
+        if not f.is_file():
+            continue
+        # Flattened, because prose wraps: "twenty-one\nbenches" is one
+        # count, and a per-line scan (this check's first draft) missed it
+        # in CLAUDE.md within the hour. The ABOUT filter applies to a
+        # window before each match instead of to a line.
+        body = re.sub(r"\s+", " ",
+                      f.read_text(encoding="utf-8", errors="replace")).lower()
+        pat = (r"\b(\d+|" + "|".join(WORDS.values()) +
+               r") (?:rtl sims|simulation targets|targets|benches|cocotb targets)\b")
+        for m in re.finditer(pat, body):
+            window = body[max(0, m.start() - 120):m.end()]
+            if not any(k in window for k in ABOUT):
+                continue
+            tok = m.group(1)
+            n = int(tok) if tok.isdigit() else \
+                next(k for k, w in WORDS.items() if w == tok)
+            if n != total:
+                problems.append("%s: %r says %s where tb/Makefile derives %d "
+                                "benches" % (name, m.group(0), tok, total))
+    return total
+
 
 def main(argv):
     quiet = "--quiet" in argv[1:]
@@ -170,6 +225,7 @@ def main(argv):
                             % (href, claimed, actual))
 
     stages = check_stage_counts(problems, root)
+    check_sim_bench_count(problems, root)
 
     if problems:
         sys.stderr.write("check_docs_index: %d problem(s)\n" % len(problems))
