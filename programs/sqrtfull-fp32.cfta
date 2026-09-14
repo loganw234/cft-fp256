@@ -1,0 +1,260 @@
+; sqrtfull-fp32.cfta - the WHOLE square root on the chip, fp32
+;
+; python/cft_golden/divfull.py's sqrt_full_program(fp32) as a file:
+; the operand raw in r0, the class read off the encoding, the specials
+; answered by SELECT in softfloat.sqrt's order (NaN, +-0 as itself, any
+; other negative invalid, +inf as itself), a subnormal scaled by an even
+; power of two, an odd exponent doubled into [2, 4), the core (seed,
+; 2 Newton steps, the half-ulp finish, two restore passes, the exact
+; residual and d2), then round_pack in integer instructions. Two
+; deposits a lane: the correctly rounded root and its five IEEE flags.
+;
+; BANK_EXT: the run supplies 49 constants - divfull.bank_sqrt(fp32,
+; rnd) - the last five the rounding mode as 0/1 words (RNE, RTZ, RDN,
+; RUP, RMM). libcft copies deposit 0 and ORs deposit 1.
+;
+; The check is byte equality with the image the model generates, and
+; the run arm holds the deposits to softfloat.sqrt, specials included.
+;
+;   r0  a, raw
+;   deposits: root, flags
+
+.format   fp32
+.deposits 2
+.bank     external
+.const    k0
+.const    k1
+.const    k2
+.const    k3
+.const    k4
+.const    k5
+.const    k6
+.const    k7
+.const    k8
+.const    k9
+.const    k10
+.const    k11
+.const    k12
+.const    k13
+.const    k14
+.const    k15
+.const    k16
+.const    k17
+.const    k18
+.const    k19
+.const    k20
+.const    k21
+.const    k22
+.const    k23
+.const    k24
+.const    k25
+.const    k26
+.const    k27
+.const    k28
+.const    k29
+.const    k30
+.const    k31
+.const    k32
+.const    k33
+.const    k34
+.const    k35
+.const    k36
+.const    k37
+.const    k38
+.const    k39
+.const    k40
+.const    k41
+.const    k42
+.const    k43
+.const    k44
+.const    k45
+.const    k46
+.const    k47
+.const    k48
+
+iand r15, r0, k0
+ishr r2, r0, k37
+iand r19, r0, k3
+iand r20, r0, k10
+icmplt r21, r20, k2
+icmplt r20, k12, r19
+icmplt r19, r19, k2
+select r22, k0, r20, r21
+select r23, r20, k0, r21
+select r24, r19, k0, r21
+select r25, k0, r19, r21
+iand r19, r0, k11
+icmplt r19, r19, k2
+select r26, r22, k0, r19
+ior r17, r0, k0
+iand r18, r0, k0
+select r27, k0, r2, r24
+select r17, k17, r17, r27
+select r18, k19, r18, r27
+select r17, k17, r17, r22
+select r31, k19, k0, r26
+select r18, r31, r18, r22
+select r16, k1, r23, r24
+select r16, k1, r16, r27
+select r16, k1, r16, r22
+mul r19, r0, k40
+select r19, r19, r0, r25
+select r14, k41, k0, r25
+iand r21, r19, k3
+ishr r21, r21, k16
+isub r21, r21, k31
+iand r22, r21, k2
+iand r13, r19, k10
+ior r13, r13, k1
+mul r20, r13, k43
+select r13, r20, r13, r22
+isub r21, r21, r22
+iadd r21, r21, k9
+ishr r21, r21, k2
+isub r21, r21, k42
+iadd r14, r14, r21
+select r13, k1, r13, r16
+rsqrt_seed r3, r13
+neg r4, r13
+mul r4, r4, k6
+mul r5, r3, r3
+fma r5, r4, r5, k7
+mul r3, r3, r5
+mul r5, r3, r3
+fma r5, r4, r5, k7
+mul r3, r3, r5
+mul r5, r13, r3
+mul r10, r3, k6
+neg r4, r5
+fma r6, r4, r5, r13
+fma r7, r6, r10, r5
+neg r4, r7
+fma r6, r4, r7, r13
+cmplt r9, r6, k0
+isub r11, r7, k2
+select r7, r11, r7, r9
+iadd r12, r7, k2
+neg r4, r12
+fma r10, r4, r12, r13
+cmple r10, k0, r10
+sub r11, k1, r9
+mul r10, r10, r11
+select r7, r12, r7, r10
+neg r4, r7
+fma r6, r4, r7, r13
+cmplt r9, r6, k0
+isub r11, r7, k2
+select r7, r11, r7, r9
+iadd r12, r7, k2
+neg r4, r12
+fma r10, r4, r12, r13
+cmple r10, k0, r10
+sub r11, k1, r9
+mul r10, r10, r11
+select r7, r12, r7, r10
+neg r4, r7
+fma r6, r4, r7, r13
+iand r8, r7, k3
+isub r10, r8, k4
+mul r10, r7, r10
+sub r11, r6, r10
+ishl r8, r8, k2
+isub r8, r8, k8
+sub r11, r11, r8
+iand r19, r6, k36
+icmplt r19, r19, k2
+ishr r21, r11, k37
+select r22, k0, k2, r21
+select r22, k0, r22, r19
+select r23, k0, k2, r19
+iand r24, r7, k10
+ior r24, r24, k24
+ishl r24, r24, k25
+ishl r25, r22, k2
+ior r24, r24, r25
+ior r24, r24, r23
+iand r25, r7, k3
+ishr r25, r25, k16
+iadd r25, r25, r14
+isub r25, r25, k26
+isub r26, k27, r25
+ixor r27, r26, k9
+icmplt r28, k29, r27
+select r29, r26, k25, r28
+icmplt r30, k28, r29
+select r29, k28, r29, r30
+ishr r30, r24, r29
+ishl r31, k2, r29
+isub r31, r31, k2
+iand r3, r24, r31
+isub r4, r29, k2
+ishl r4, k2, r4
+icmplt r5, r3, r4
+select r5, k0, k2, r5
+isub r8, r4, k2
+iand r8, r3, r8
+icmplt r8, k0, r8
+select r8, k2, k0, r8
+select r9, k2, r8, r5
+iand r11, r30, k2
+select r12, k2, r11, r8
+select r12, r12, k0, r5
+select r13, k2, r8, r5
+select r19, r13, k0, r2
+select r13, k0, r13, r2
+select r20, r5, k0, k48
+select r20, r13, r20, k47
+select r20, r19, r20, k46
+select r20, r12, r20, k44
+iadd r21, r30, r20
+iadd r22, r25, k30
+iadd r23, r22, k31
+ishl r23, r23, k16
+iadd r23, r23, r21
+isub r23, r23, k33
+ior r23, r23, r15
+icmplt r27, r21, k34
+select r27, k0, k2, r27
+iadd r27, r22, r27
+ixor r27, r27, k9
+icmplt r27, k35, r27
+select r29, k46, k47, r2
+select r29, k2, r29, k44
+select r29, k2, r29, k48
+ior r30, r15, k18
+ior r31, r15, k32
+select r30, r30, r31, r29
+select r23, r30, r23, r27
+select r31, k21, k0, r9
+select r31, k23, r31, r27
+ior r3, r15, r21
+ishr r4, r24, k25
+iand r5, r24, k2
+ishr r8, r24, k2
+iand r8, r8, k2
+iand r11, r4, k2
+select r12, k2, r11, r5
+select r12, r12, k0, r8
+select r13, k2, r5, r8
+select r19, r13, k0, r2
+select r13, k0, r13, r2
+select r29, r8, k0, k48
+select r29, r13, r29, k47
+select r29, r19, r29, k46
+select r29, r12, r29, k44
+iadd r4, r4, r29
+icmplt r4, r4, k34
+select r4, k0, k2, r4
+icmplt r5, r26, k38
+icmplt r8, r26, k39
+select r5, k0, r8, r5
+select r5, r4, k0, r5
+select r8, k21, k22, r5
+select r8, r8, k0, r9
+select r3, r3, r23, r28
+select r8, r8, r31, r28
+select r3, r17, r3, r16
+select r8, r18, r8, r16
+deposit r3
+deposit r8
+halt

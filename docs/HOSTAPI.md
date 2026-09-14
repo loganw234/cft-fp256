@@ -473,6 +473,29 @@ is the price of correct rounding built from an FMA - on any
 implementation of this route - and it buys the property the project
 exists for: the same bits from the laptop and the card.
 
+**On a device, since 2026-09-14, the whole operation is one program.**
+The passes above were first folded into a sequencer program with the
+classify/centre and the final rounding still on the host (three
+deposits a lane, two host loops), and cft-rebound measured that shape
+at 1.6 us an element at binary128 on the card against 4.3 ns for an
+FMA on the same tile. `python/cft_golden/divfull.py` puts the prep and
+`round_pack` into the instruction stream too: the raw operands go in,
+the correctly rounded result and its five flags come out as two
+deposits, and libcft computes nothing per element - it copies one
+deposit and ORs the other. One image a format (BANK_EXT: the rounding
+mode is the run's data, the bank's last five words), generated from the
+model into `host/src/divfull_images.h` by `python/gen_divfull.py` and
+held to it by the `generated` gate; the same images are
+`programs/divfull-*.cfta` and `sqrtfull-*.cfta` as text. `cft_div` and
+`cft_sqrt` take it first on any program-capable device and fall back by
+`CFT_ERR_UNSUPPORTED` - a tile whose caps lack `BANK_PTR`, `REGS32` or
+`kx` refuses the image by name, d untouched - to the older program
+route and then to the chunk route; `CFT_DIVSQRT_FULL=0` forces the
+older route, and the software backend keeps the chunk route, which
+remains the definition. The bits are the contract's on every route:
+`host/tests/divsqrt_check.py` runs the same 29,124-case matrix over all
+three.
+
 ## The clause-5 completion set (ABI 0.2)
 
 Everything clause 5 still asked for after div/sqrt landed on

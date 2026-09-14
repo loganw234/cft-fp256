@@ -546,7 +546,8 @@ stage libcft "host library: build + contract tests + conformance replay" -- do_l
 do_generated() {
   local rc=0 g out grc
   for g in hw/gen_layouts.py host/tools/gen_2opi.py \
-           host/tools/gen_mp_consts.py bindings/node/make_seq_corpus.py; do
+           host/tools/gen_mp_consts.py bindings/node/make_seq_corpus.py \
+           python/gen_divfull.py; do
     out=$(PY "$ROOT/$g" --check 2>&1); grc=$?
     if [ $grc -eq 0 ]; then
       printf '  ok    %s\n' "$g"

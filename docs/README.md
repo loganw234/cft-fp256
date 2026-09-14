@@ -52,7 +52,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,281 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2,304 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,353 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |
@@ -92,7 +92,7 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 11,307 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 2,781 | What is built, what is next, and what was decided against. |
+| [ROADMAP.md](ROADMAP.md) | 2,807 | What is built, what is next, and what was decided against. |
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |
 | [FUNDING.md](FUNDING.md) | 44 | Funding landscape. |

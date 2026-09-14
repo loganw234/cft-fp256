@@ -56,6 +56,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "python"))
 
 from cft_golden import FORMATS, asm, chars, seq, seqprogs   # noqa: E402
+from cft_golden import divfull                              # noqa: E402
 from cft_golden import softfloat as sf                      # noqa: E402
 
 PASS, FAIL, SKIP = [], [], []
@@ -607,6 +608,75 @@ def check_horner_bank(args, name, image, image_path, tmp, caps):
             return
     ok(f"{name}: both banks through cft_program_run_bank",
        "identical to the spliced images")
+
+
+def check_full(name, image):
+    """The whole divide / square root on the chip: byte equality with
+    the image divfull.py generates - which is also the image libcft
+    carries in host/src/divfull_images.h, so this row and the library's
+    generated header are held to the same bytes."""
+    kind, fmtname = name.split("-")
+    fmt = FORMATS[fmtname]
+    prog = (divfull.div_full_program_for(fmt) if kind == "divfull"
+            else divfull.sqrt_full_program_for(fmt))
+    want = prog.to_bytes()
+    if image != want:
+        bad(f"{name}: equals divfull", f"{len(image)} bytes vs {len(want)}")
+        return
+    ok(f"{name}: byte-identical to divfull.{kind[:-4]}_full_program({fmtname})",
+       f"{len(prog.insns)} insns, BANK_EXT, {prog.n_consts} bank words")
+
+
+def check_full_runs(args, name, image_path, tmp, n=64):
+    """The run arm: RAW operands - specials, subnormals, the hard
+    families and randoms - through positive-run with the RNE bank, and
+    both deposits held to the contract. No host prep, no host finish:
+    if the deposits are right, the whole operation is on the chip."""
+    kind, fmtname = name.split("-")
+    fmt = FORMATS[fmtname]
+    is_sqrt = kind == "sqrtfull"
+    rng = random.Random(sum(ord(ch) for ch in name))
+    one = sf.one_bits(fmt)
+    xs = [0, fmt.sign_mask, sf.inf_bits(fmt, 0), sf.inf_bits(fmt, 1),
+          sf.qnan_bits(fmt), sf.snan_bits(fmt), 1, fmt.man_mask,
+          sf.min_normal_bits(fmt), one, one | fmt.sign_mask,
+          sf.max_normal_bits(fmt), one + 1, one - 1]
+    while len(xs) < n:
+        xs.append(rng.getrandbits(fmt.width))
+    ys = [rng.getrandbits(fmt.width) for _ in xs]
+    ys[:6] = [one, one, one, 0, fmt.sign_mask, sf.inf_bits(fmt, 0)]
+    bank = (divfull.bank_sqrt(fmt, sf.RND_RNE) if is_sqrt
+            else divfull.bank(fmt, sf.RND_RNE))
+    ap = tmp / (name + ".a.bin")
+    bp = tmp / (name + ".b.bin")
+    kp = tmp / (name + ".bank.bin")
+    ap.write_bytes(pack(xs, fmt))
+    bp.write_bytes(pack(ys, fmt))
+    kp.write_bytes(pack(bank, fmt))
+    dep, report = run_image(args, image_path, tmp, name, a=ap,
+                            b=None if is_sqrt else bp, bank=kp)
+    if dep is None:
+        bad(f"{name}: positive-run", report)
+        return
+    got = values(dep, fmt)
+    if len(got) != 2 * len(xs):
+        bad(f"{name}: deposits", f"{len(got)} words for {len(xs)} lanes")
+        return
+    flags = 0
+    for i, a in enumerate(xs):
+        want, wf = (sf.sqrt(fmt, a, sf.RND_RNE) if is_sqrt
+                    else sf.div(fmt, a, ys[i], sf.RND_RNE))
+        flags |= wf
+        if got[2 * i] != want:
+            bad(f"{name}: {kind[:-4]} through the runner",
+                f"lane {i}: {got[2 * i]:#x} vs {want:#x}")
+            return
+        if got[2 * i + 1] != wf:
+            bad(f"{name}: flags through the runner",
+                f"lane {i}: {got[2 * i + 1]:#x} vs {wf:#x}")
+            return
+    ok(f"{name}: {len(xs)} raw lanes, bits and flags, through positive-run",
+       f"specials included; flags {flags:#07b}")
 
 
 # ================= revision 3: the scratch rows =========================
@@ -1394,6 +1464,9 @@ def main():
         if name.startswith("div-") or name.startswith("sqrt-"):
             check_divsqrt(name, image)
             check_divsqrt_runs(args, name, image_path, tmp)
+        elif name.startswith("divfull-") or name.startswith("sqrtfull-"):
+            check_full(name, image)
+            check_full_runs(args, name, image_path, tmp)
         elif name == "collatz-fp256":
             check_collatz(args, name, image, image_path, tmp)
         elif name == "zoom-scan-fp256":

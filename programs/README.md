@@ -47,6 +47,14 @@ so in the open.
 | `sqrt-fp64` | fp64 | 54 | 9 | 3 | - | as above | as above |
 | `sqrt-fp128` | fp128 | 57 | 9 | 3 | - | as above | as above |
 | `sqrt-fp256` | fp256 | 60 | 9 | 3 | - | as above | as above |
+| `divfull-fp32` | fp32 | 210 | 42 | 2 | `kx`, `REGS32`, `BANK_PTR` | the WHOLE divide: class off the encoding, the specials by `select` in `softfloat.div`'s order, subnormals scaled by 2^p, the `div-fp32` core, then `round_pack` in integer instructions; deposits the correctly rounded quotient and its five flags. The rounding mode is the bank's last five words | byte-identical to `divfull.div_full_program(fp32)` (the image libcft carries in `host/src/divfull_images.h`), and 64 raw lanes - specials included - through `positive-run --bank`, both deposits against `softfloat.div` |
+| `divfull-fp64` | fp64 | 212 | 42 | 2 | as above | as above, the `div-fp64` core | as above |
+| `divfull-fp128` | fp128 | 214 | 42 | 2 | as above | as above, the `div-fp128` core | as above |
+| `divfull-fp256` | fp256 | 216 | 42 | 2 | as above | as above, the `div-fp256` core | as above |
+| `sqrtfull-fp32` | fp32 | 186 | 49 | 2 | `kx`, `REGS32`, `BANK_PTR` | the WHOLE square root: class off the encoding, the specials in `softfloat.sqrt`'s order (`+-0` as itself, any other negative invalid), a subnormal scaled by an even power, an odd exponent doubled into [2, 4), the `sqrt-fp32` core, then `round_pack`; deposits the root and its flags | byte-identical to `divfull.sqrt_full_program(fp32)`, and 64 raw lanes through `positive-run --bank` against `softfloat.sqrt` |
+| `sqrtfull-fp64` | fp64 | 189 | 49 | 2 | as above | as above, the `sqrt-fp64` core | as above |
+| `sqrtfull-fp128` | fp128 | 192 | 49 | 2 | as above | as above, the `sqrt-fp128` core | as above |
+| `sqrtfull-fp256` | fp256 | 195 | 49 | 2 | as above | as above, the `sqrt-fp256` core | as above |
 | `collatz-fp256` | fp256 | 27 | 9 | 4 | - | 1024 Collatz steps with parity read off the encoding and a per-element exactness witness; deposits n, steps, peak, escaped | its nine constants against their derivation from the format, and 64 trajectories against `cft-collatz`'s own records - steps and peak exactly |
 | `zoom-scan-fp256` | fp256 | 9 | 1 | 1 | - | 51 iterations of the guarded real-axis map `z <- z^2 + c`, the nucleus scan | 32 real points bit-identical to `seq.py`'s executor running the same image |
 | `lowbias32-fp32` | fp32 | 10 | 4 | 1 | `IMUL` | docs/ATLAS.md's draw hash over the index ramp | 4,096 draws against the hash's definition, and the run must signal nothing |
@@ -75,6 +83,21 @@ IADD/ISUB on the encoding, and every bit of every word has to land
 where the model puts it. The functional arm runs the host's own
 `div_prep` / `div_finish` around the image so that the row proves a
 DIVIDE and not merely a byte string.
+
+**`divfull-*` and `sqrtfull-*`** (2026-09-14) are
+`python/cft_golden/divfull.py` as text: the same cores with the prep
+and the finish moved INTO the instruction stream, so the operands go
+in raw and the correctly rounded result and its five flags come out as
+two deposits - nothing per element on the host. cft-rebound measured
+the split route at 1.6 us an element at binary128 on the card, which
+is what these exist to remove (docs/ROADMAP.md, workload ask 8). They
+are BANK_EXT so that one image a format serves every rounding
+attribute: the bank's last five words are the mode as 0/1, and libcft
+builds the bank from the fixed words `python/gen_divfull.py` writes
+into `host/src/divfull_images.h` beside these same images - the row's
+byte-equality check and the library's generated header are therefore
+held to one another through the model. The run arm hands `positive-run`
+raw lanes that include every special and compares both deposits.
 
 **`collatz-fp256`** and **`zoom-scan-fp256`** are the demo tools'
 kernels, at each tool's own defaults. Which of the four tools have a

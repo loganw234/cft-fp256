@@ -1426,6 +1426,123 @@ static cft_status divsqrt_via_program(cft_device *dev,
     return CFT_OK;
 }
 
+/* ---- the whole divide, and square root, on the chip (2026-09-14) ----
+ *
+ * The route above still computes per element on the host: classify and
+ * centre before the run, guard/sticky and round_pack after it, three
+ * deposits a lane in between. cft-rebound measured what that costs on a
+ * card - 1.6 us an element at binary128 against 4.3 ns for an FMA on
+ * the same tile - and asked for the divide to be one program with the
+ * contract's bits (docs/ROADMAP.md, workload ask 8).
+ *
+ * python/cft_golden/divfull.py is that program - and the square root's,
+ * built the same way: prep, core and round_pack in the instruction
+ * stream, the raw operands in r0/r1, two deposits a lane - the result
+ * and its flag word. The IMAGE is
+ * generated from the model into divfull_images.h (python/gen_divfull.py,
+ * gated by verify/run.sh) rather than hand-ported into emitter calls
+ * like sq_emit above: two hundred instructions kept in sync by eye is
+ * the transcription this repo has paid for before. The rounding mode
+ * is DATA: the image is BANK_EXT, the header carries the 38 bank words
+ * that do not depend on the attribute, and this code appends the five
+ * mode words with a 1 in the caller's slot. Nothing per element is
+ * computed here: d takes deposit 0 by copy and *acc ORs deposit 1.
+ *
+ * Route: tried first whenever the program route is; a tile whose caps
+ * lack what the image needs (BANK_PTR, REGS32, WIDE_CONST) refuses the
+ * load by name and the ladder falls through to the route above, then
+ * to the chunk route - d untouched at that point, so the fall-through
+ * is legal under aliasing exactly as before. CFT_DIVSQRT_FULL=0 in the
+ * environment forces the old program route, which is how the tests
+ * keep both under the same matrix. */
+#include "divfull_images.h"
+
+static int divsqrt_route_full(void)
+{
+#ifndef CFT_NO_GETENV
+    const char *e = getenv("CFT_DIVSQRT_FULL");
+    if (e && e[0] == '0' && !e[1])
+        return 0;
+#endif
+    return 1;
+}
+
+static cft_status full_via_program(cft_device *dev,
+                                   const cft_fmt_desc *f, cft_format fmt,
+                                   int rnd, int is_sqrt,
+                                   const uint8_t *a, const uint8_t *b,
+                                   uint8_t *d, size_t n, uint32_t *acc,
+                                   uint32_t *bus_out)
+{
+    const cft_divfull_entry *img = is_sqrt
+        ? &cft_sqrtfull_images[(int)fmt] : &cft_divfull_images[(int)fmt];
+    size_t esz = (size_t)(f->width / 8), off = 0, i;
+    uint8_t bank[CFT_SQRTFULL_NCONSTS * 32];
+    uint8_t *deps = NULL;
+    uint32_t *cnt = NULL;
+    cft_program *prog = NULL;
+    cft_status st;
+    int wrote_any = 0;
+    int muted;
+
+    st = cft_program_load(dev, img->image, img->image_bytes, &prog);
+    if (st != CFT_OK)
+        return st;                   /* UNSUPPORTED: the caller falls back */
+    memcpy(bank, img->bank, img->n_fixed * esz);
+    memset(bank + img->n_fixed * esz, 0, CFT_DIVFULL_NMODES * esz);
+    bank[(img->n_fixed + (size_t)rnd) * esz] = 1;   /* little-endian 1 */
+    deps = (uint8_t *)malloc(CHUNK * CFT_DIVFULL_NDEPOSITS * esz);
+    cnt = (uint32_t *)malloc(CHUNK * sizeof *cnt);
+    if (!deps || !cnt) {
+        free(deps);
+        free(cnt);
+        cft_program_free(prog);
+        return CFT_ERR_OUT_OF_MEMORY;
+    }
+    /* The run's own FLAGS are scaffolding - the core's Newton steps, a
+     * MUL of a NaN operand on a special lane - and must not reach the
+     * status word; the contract flags are deposit 1. */
+    muted = cft_flags_mute(dev, 1);
+    while (off < n) {
+        size_t c = n - off > CHUNK ? CHUNK : n - off;
+        st = cft_program_run_bank(prog, bank, img->n_consts * esz,
+                                  a + off * esz,
+                                  is_sqrt ? NULL : b + off * esz, NULL,
+                                  deps, cnt, c, NULL, bus_out);
+        if (st == CFT_OK) {
+            for (i = 0; i < c; i++) {
+                if (cnt[i] != CFT_DIVFULL_NDEPOSITS) {
+                    st = CFT_ERR_INTERNAL;
+                    break;
+                }
+                memcpy(d + (off + i) * esz,
+                       deps + (CFT_DIVFULL_NDEPOSITS * i) * esz, esz);
+                *acc |= (uint32_t)deps[(CFT_DIVFULL_NDEPOSITS * i + 1) * esz]
+                        & 0x1Fu;
+            }
+        }
+        if (st != CFT_OK) {
+            /* As above: support cannot change between chunks of one
+             * call, so an UNSUPPORTED after d has been written is an
+             * internal error, never a fall-back. */
+            if (st == CFT_ERR_UNSUPPORTED && wrote_any)
+                st = CFT_ERR_INTERNAL;
+            free(deps);
+            free(cnt);
+            cft_program_free(prog);
+            (void)cft_flags_mute(dev, muted);
+            return st;
+        }
+        wrote_any = 1;
+        off += c;
+    }
+    free(deps);
+    free(cnt);
+    cft_program_free(prog);
+    (void)cft_flags_mute(dev, muted);
+    return CFT_OK;
+}
+
 #endif /* CFT_NO_PROGRAM */
 
 /* ---- entry points ------------------------------------------------- */
@@ -1491,6 +1608,17 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
 
 #ifndef CFT_NO_PROGRAM
     if (divsqrt_route_program(dev)) {
+        if (divsqrt_route_full()) {
+            st = full_via_program(dev, f, fmt, (int)rnd, 0,
+                                  (const uint8_t *)a, (const uint8_t *)b,
+                                  (uint8_t *)d, n, &acc, bus_out);
+            if (st != CFT_ERR_UNSUPPORTED) {
+                if (st == CFT_OK)
+                    cft_flags_emit(dev, acc, flags_out);
+                return st;
+            }
+            acc = 0;     /* the image needs a register this tile lacks */
+        }
         st = divsqrt_via_program(dev, f, fmt, (int)rnd, 0,
                                  (const uint8_t *)a, (const uint8_t *)b,
                                  (uint8_t *)d, n, &acc, bus_out);
@@ -1549,6 +1677,17 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
 
 #ifndef CFT_NO_PROGRAM
     if (divsqrt_route_program(dev)) {
+        if (divsqrt_route_full()) {
+            st = full_via_program(dev, f, fmt, (int)rnd, 1,
+                                  (const uint8_t *)a, NULL,
+                                  (uint8_t *)d, n, &acc, bus_out);
+            if (st != CFT_ERR_UNSUPPORTED) {
+                if (st == CFT_OK)
+                    cft_flags_emit(dev, acc, flags_out);
+                return st;
+            }
+            acc = 0;     /* the image needs a register this tile lacks */
+        }
         st = divsqrt_via_program(dev, f, fmt, (int)rnd, 1,
                                  (const uint8_t *)a, NULL,
                                  (uint8_t *)d, n, &acc, bus_out);

@@ -2769,7 +2769,33 @@ text to the model. libcft's `cft_div`/`cft_sqrt` keep their signatures
 and pick the one-program route when CAPS says the sequencer with the
 integer group is present; the software backend is unchanged and remains
 the definition. Estimated a few days of modelling against the executor;
-no RTL, no ABI. Next after the fp64/fp128 image is exercised.
+no RTL, no ABI.
+
+*Done the same afternoon (2026-09-14), model and library.*
+`python/cft_golden/divfull.py`: the whole divide in 210-216 instructions
+a format and the whole square root in 186-195, prep and `round_pack`
+in integer instructions, two deposits a lane (result, flags), BANK_EXT
+with the mode as the bank's last five words. Held to `softfloat.div`
+and `softfloat.sqrt` bits AND flags - every special pairing per lane,
+the subnormal boundary where tininess is decided, the overflow boundary
+in every attribute, test_sequences' pool, the hard families, random
+stress: `test_divfull.py`, 38 tests, and 16,720 + 6,300 checker cases
+plus 80,000 random pairs, zero mismatches. Two defects on the way, both
+caught by the matrix before anything shipped: SELECT tests its
+condition's MAGNITUDE, so a bare sign bit read as false and every
+directed-mode negative quotient rounded the wrong way (the sign is a
+0/1 word now); and nothing else. libcft carries the images generated
+from the model (`python/gen_divfull.py` -> `host/src/divfull_images.h`,
+gated in `generated`) and `cft_div`/`cft_sqrt` take them first on any
+program-capable device, falling back by UNSUPPORTED to the older
+program route and then the chunk route; `divsqrt_check.py` passes on
+all three (29,124 cases each), and a sabotaged bank word makes the
+whole-program route fail while the forced old route still passes,
+which is what proves the route ran. `programs/divfull-*.cfta` and
+`sqrtfull-*.cfta` are the same images as text with their own rows.
+Still owed: the per-element time ON THE CARD, which is the number the
+ask was about - the f128 image, or the fp64/fp128 one, once the box is
+free of its link.
 
 ## The adoption story these serve
 

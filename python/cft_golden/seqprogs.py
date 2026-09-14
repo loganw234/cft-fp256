@@ -106,10 +106,10 @@ _A, _B = 0, 1
 _Y, _NB, _T1, _T2, _Q, _PW, _DN, _UP, _TMP, _SP = 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 
-def _restore_pass_div(p):
+def _restore_pass_div(p, A=_A):
     a = seq.alu
     p += [
-        a(OP_FMA, _T2, _NB, _Q, _A),                       # exact residual
+        a(OP_FMA, _T2, _NB, _Q, A),                        # exact residual
         a(OP_CMPLT, _DN, _T2, K_ZERO, kb=True),            # r2 < 0 (not -0)
         a(OP_ISUB, _TMP, _Q, K_INT1, kb=True),
         a(OP_SELECT, _Q, _TMP, _Q, _DN),                   # ulp down if so
@@ -125,14 +125,19 @@ def _restore_pass_div(p):
     return p
 
 
-def div_program(fmt: FpFormat) -> seq.Program:
-    """The div core as a program: r0 = centred dividend, r1 = centred
-    divisor, both in [1, 2). Deposits q2, r2, d2."""
+def _div_core(p, fmt: FpFormat, A=_A, B=_B):
+    """The core on registers A (centred dividend) and B (centred
+    divisor), both in [1, 2): seed, Newton, the truncating Markstein
+    finish, two restore passes, then the exact remainder and the
+    midpoint probe. Leaves q2 in _Q, r2 in _T2 and d2 in _UP; touches
+    r3..r11 and nothing else. On the defaults this is div_program's
+    body, byte for byte; divfull.py runs it on r12/r13 after an
+    on-chip prep."""
     a = seq.alu
     N = _NEWTON[fmt.man_w + 1]
-    p = [
-        a(OP_RECIP_SEED, _Y, _B),
-        a(OP_NEG, _NB, _B),
+    p += [
+        a(OP_RECIP_SEED, _Y, B),
+        a(OP_NEG, _NB, B),
     ]
     for _ in range(N):                                     # y -> 1/bc
         p += [
@@ -140,19 +145,28 @@ def div_program(fmt: FpFormat) -> seq.Program:
             a(OP_FMA, _Y, _Y, _T1, _Y),                    # y += y*e
         ]
     p += [
-        a(OP_MUL, _T1, _A, _Y),                            # q02
-        a(OP_FMA, _T2, _NB, _T1, _A),                      # r0, exact
+        a(OP_MUL, _T1, A, _Y),                             # q02
+        a(OP_FMA, _T2, _NB, _T1, A),                       # r0, exact
         a(OP_FMA, _Q, _T2, _Y, _T1),                       # q1, RNE tighten
-        a(OP_FMA, _T2, _NB, _Q, _A),                       # r1, exact
+        a(OP_FMA, _T2, _NB, _Q, A),                        # r1, exact
         a(OP_FMA, _Q, _T2, _Y, _Q, rnd=RND_RTZ),           # q2: no ties
     ]
-    _restore_pass_div(p)
-    _restore_pass_div(p)
+    _restore_pass_div(p, A)
+    _restore_pass_div(p, A)
     p += [
-        a(OP_FMA, _T2, _NB, _Q, _A),                       # exact remainder
+        a(OP_FMA, _T2, _NB, _Q, A),                        # exact remainder
         a(OP_IAND, _PW, _Q, K_EXP, kb=True),
         a(OP_ISUB, _PW, _PW, K_MW1, kb=True),              # 2^(e-1)
         a(OP_FMA, _UP, _NB, _PW, _T2),                     # d: midpoint probe
+    ]
+    return p
+
+
+def div_program(fmt: FpFormat) -> seq.Program:
+    """The div core as a program: r0 = centred dividend, r1 = centred
+    divisor, both in [1, 2). Deposits q2, r2, d2."""
+    p = _div_core([], fmt)
+    p += [
         seq.deposit(_Q),
         seq.deposit(_T2),
         seq.deposit(_UP),
@@ -161,17 +175,17 @@ def div_program(fmt: FpFormat) -> seq.Program:
     return seq.Program(fmt, p, consts=_consts_div(fmt), max_deposits=3)
 
 
-def _restore_pass_sqrt(p):
+def _restore_pass_sqrt(p, A=_A):
     a = seq.alu
     p += [
         a(OP_NEG, _NB, _Q),
-        a(OP_FMA, _T2, _NB, _Q, _A),                       # exact residual
+        a(OP_FMA, _T2, _NB, _Q, A),                        # exact residual
         a(OP_CMPLT, _DN, _T2, K_ZERO, kb=True),            # r < 0 (not -0)
         a(OP_ISUB, _TMP, _Q, K_INT1, kb=True),
         a(OP_SELECT, _Q, _TMP, _Q, _DN),                   # ulp down if so
         a(OP_IADD, _SP, _Q, K_INT1, kb=True),              # candidate s+1
         a(OP_NEG, _NB, _SP),
-        a(OP_FMA, _UP, _NB, _SP, _A),                      # rp = a - sp^2
+        a(OP_FMA, _UP, _NB, _SP, A),                       # rp = a - sp^2
         a(OP_CMPLE, _UP, K_ZERO, _UP, ka=True),            # rp >= 0
         a(OP_SUB, _TMP, K_ONE, 0, _DN, ka=True),           # 1 - down
         a(OP_MUL, _UP, _UP, _TMP),                         # up & !down
@@ -180,14 +194,16 @@ def _restore_pass_sqrt(p):
     return p
 
 
-def sqrt_program(fmt: FpFormat) -> seq.Program:
-    """The sqrt core as a program: r0 = centred operand in [1, 4).
-    Deposits s1, r, d2."""
+def _sqrt_core(p, fmt: FpFormat, A=_A):
+    """The core on register A (the centred operand in [1, 4)): seed,
+    Newton, the half-ulp finish, two restore passes, the exact residual
+    and d2. Leaves s1 in _Q, r in _T2 and d2 in _TMP; touches r3..r12.
+    On the default this is sqrt_program's body, byte for byte."""
     a = seq.alu
     N = _NEWTON[fmt.man_w + 1]
-    p = [
-        a(OP_RSQRT_SEED, _Y, _A),
-        a(OP_NEG, _NB, _A),
+    p += [
+        a(OP_RSQRT_SEED, _Y, A),
+        a(OP_NEG, _NB, A),
         a(OP_MUL, _NB, _NB, K_HALF, kb=True),              # -(a/2), exact
     ]
     for _ in range(N):                                     # y -> 1/sqrt(a)
@@ -197,17 +213,17 @@ def sqrt_program(fmt: FpFormat) -> seq.Program:
             a(OP_MUL, _Y, _Y, _T1),
         ]
     p += [
-        a(OP_MUL, _T1, _A, _Y),                            # s0
+        a(OP_MUL, _T1, A, _Y),                             # s0
         a(OP_MUL, _UP, _Y, K_HALF, kb=True),               # h0
         a(OP_NEG, _NB, _T1),
-        a(OP_FMA, _T2, _NB, _T1, _A),                      # r0, exact
+        a(OP_FMA, _T2, _NB, _T1, A),                       # r0, exact
         a(OP_FMA, _Q, _T2, _UP, _T1),                      # s1: within 1/2 ulp
     ]
-    _restore_pass_sqrt(p)
-    _restore_pass_sqrt(p)
+    _restore_pass_sqrt(p, A)
+    _restore_pass_sqrt(p, A)
     p += [
         a(OP_NEG, _NB, _Q),
-        a(OP_FMA, _T2, _NB, _Q, _A),                       # exact, >= 0
+        a(OP_FMA, _T2, _NB, _Q, A),                        # exact, >= 0
         a(OP_IAND, _PW, _Q, K_EXP, kb=True),               # pwm
         a(OP_ISUB, _UP, _PW, K_MW, kb=True),               # 2^e
         a(OP_MUL, _UP, _Q, _UP),                           # s*u, exact
@@ -215,6 +231,15 @@ def sqrt_program(fmt: FpFormat) -> seq.Program:
         a(OP_ISHL, _PW, _PW, K_INT1, kb=True),             # field 2E
         a(OP_ISUB, _PW, _PW, K_SQ, kb=True),               # 2^(2e-2)
         a(OP_SUB, _TMP, _TMP, 0, _PW),                     # d2, exact
+    ]
+    return p
+
+
+def sqrt_program(fmt: FpFormat) -> seq.Program:
+    """The sqrt core as a program: r0 = centred operand in [1, 4).
+    Deposits s1, r, d2."""
+    p = _sqrt_core([], fmt)
+    p += [
         seq.deposit(_Q),
         seq.deposit(_T2),
         seq.deposit(_TMP),

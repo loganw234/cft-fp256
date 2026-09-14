@@ -193,6 +193,51 @@ def check_sqrt(dev, fmt, rnds, trials):
     return bad, len(pool) * len(rnds)
 
 
+def check_lanes(dev, fmt, rnds):
+    """One element per call, so the FLAGS compare per element - the
+    batch checks above OR them over thousands of lanes, and on
+    2026-09-14 a route that had lost INEXACT on every normal-path
+    quotient passed them, because the batch's subnormal and overflow
+    lanes still carried the bit. Every special pairing and the hard
+    families, both operations, every attribute."""
+    one = one_bits(fmt)
+    mn = min_normal_bits(fmt)
+    S = [0, fmt.sign_mask, sf.inf_bits(fmt, 0), sf.inf_bits(fmt, 1),
+         sf.qnan_bits(fmt), sf.snan_bits(fmt), 1, fmt.man_mask,
+         1 | fmt.sign_mask, mn, mn | fmt.sign_mask, one,
+         one | fmt.sign_mask, sf.max_normal_bits(fmt),
+         (fmt.bias - 1) << fmt.man_w, one + 1, one - 1]
+    pairs = [(a, b) for a in S for b in S[:14]]
+    pairs += [(one, one - 1), (one, one + 1), (one - 1, one),
+              (one | fmt.man_mask, one), (mn, one + 1)]
+    bad = 0
+    count = 0
+    for rnd in rnds:
+        for a, b in pairs:
+            want = sf.div(fmt, a, b, rnd)
+            got = dev.div(fmt, rnd, [a], [b])
+            got = (got[0][0], got[1])
+            count += 1
+            if got != want:
+                bad += 1
+                if bad <= 8:
+                    print(f"  {fmt.name} {RND_NAMES[rnd]} lane {a:#x}/{b:#x}: "
+                          f"lib=({got[0]:#x}, {got[1]:#07b}) "
+                          f"model=({want[0]:#x}, {want[1]:#07b})")
+        for a in S + [mn + 1, mn - 1, one | fmt.man_mask]:
+            want = sf.sqrt(fmt, a, rnd)
+            got = dev.sqrt(fmt, rnd, [a])
+            got = (got[0][0], got[1])
+            count += 1
+            if got != want:
+                bad += 1
+                if bad <= 8:
+                    print(f"  {fmt.name} {RND_NAMES[rnd]} lane sqrt({a:#x}): "
+                          f"lib=({got[0]:#x}, {got[1]:#07b}) "
+                          f"model=({want[0]:#x}, {want[1]:#07b})")
+    return bad, count
+
+
 def check_seeds(dev, fmt, trials):
     """The seed opcodes through cft_run, one element per call so the
     (quiet) flags compare per element too."""
@@ -258,6 +303,7 @@ def main():
         for fn, lbl in ((lambda: check_div(dev, fmt, rnds, trials), "div"),
                         (lambda: check_sqrt(dev, fmt, rnds,
                                             2 * trials), "sqrt"),
+                        (lambda: check_lanes(dev, fmt, rnds), "lanes"),
                         (lambda: check_seeds(dev, fmt, 2 * trials), "seeds")):
             bad, count = fn()
             total_bad += bad
