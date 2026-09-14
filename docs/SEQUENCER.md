@@ -839,7 +839,8 @@ Four structures, sized in the section above:
   addresses for divergent deposit counts.
 
   The scratch is wiped to `+0` per lane block, as the register file
-  is - but only as far as the program can reach into it: every slot if
+  was until revision 5 (it carries a valid bit per entry now and reads
+  `+0` where nothing has written) - but only as far as the program can reach into it: every slot if
   the program indexes, otherwise the highest static slot it names and
   the slots the scratch-out drain will read. Wiping all of it every
   block would cost `SCRATCH_D * NBEATS` cycles - 4,096 at today's

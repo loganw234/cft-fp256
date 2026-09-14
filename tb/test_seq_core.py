@@ -650,11 +650,12 @@ class Bench:
         nsin = prog.n_scratch_in if prog.scratch_io else 0
         nsout = prog.n_scratch_out if prog.scratch_io else 0
         wipe = SCRATCH_D if indexed else max(slots, nsout)
-        # Per block: the register-file wipe (RF_D cycles, the whole
-        # file, so that the previous block cannot leak), the scratch
-        # wipe, the scratch-in preload (an element a cycle plus its
-        # beats), the three operand streams, the instructions, the
-        # deposit drain, and the scratch-out drain.
+        # Per block: RF_D cycles that WERE the register-file wipe until
+        # 2026-09-14 (valid bits replaced it; the term stays as slack,
+        # this is a bound), the scratch wipe, the scratch-in preload
+        # (an element a cycle plus its beats), the three operand
+        # streams, the instructions, the deposit drain, and the
+        # scratch-out drain.
         #
         # The two DRAINS are counted per element rather than folded
         # into the fixed term they used to hide in. Each visits (lane,

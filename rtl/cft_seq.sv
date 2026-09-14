@@ -62,7 +62,9 @@
 //     executes as HALT, an unmatched ENDREP as HALT.
 //
 //  2. EXECUTE, in blocks of NBEATS beats = NBEATS * lanes_per_beat
-//     lanes. Per block: the scratch is wiped to +0 as far as the
+//     lanes. Per block: the register file's valid bits clear (an
+//     unwritten entry reads +0; until 2026-09-14 the whole file was
+//     wiped instead, RF_D cycles a block), the scratch is wiped to +0 as far as the
 //     program can reach into it and, under flags.SCRATCH_IO, its
 //     first n_scratch_in slots are preloaded per lane from cfg_sin
 //     (lane-major and dense, so the preload is a transpose and runs
@@ -81,7 +83,10 @@
 //     even a stale view errs toward extra no-op iterations, which P3
 //     makes invisible.
 //
-//  3. DRAIN, per block: every deposit slot in the block's window of
+//  3. DRAIN, per block, one element a cycle through the deposit
+//     banks' pipeline and one beat of eight counts a cycle (both
+//     2026-09-14; both were an element a cycle at three states each,
+//     the count drain a lane a cycle): every deposit slot in the block's window of
 //     cfg_d is written - a lane's d-th deposit at element index
 //     (i * max_deposits + d), slots the lane never reached as +0
 //     (P2: addressed by index, never arrival) - then the per-lane
@@ -392,6 +397,12 @@ module cft_seq #(
   // one - and every existing bench's cycle count unchanged.
   logic [SCRSW:0] scr_hi;
   logic           scr_all;
+  // Which of r0..r2 the program names as a REGISTER operand (a field
+  // with its k flag clear, under kx or not; the control codes that read
+  // one), gathered by the image parser: the block load skips the
+  // streams it never reads. Over-approximate by design - a unary
+  // opcode's unread field still counts - which only ever loads more.
+  logic [2:0]     rd_need;
   logic [63:0] imem [0:IMEM_D-1];
   logic [BEAT_BITS-1:0] kmem [0:KREG-1];   // broadcast across the beat
 
@@ -459,30 +470,61 @@ module cft_seq #(
   // each writing a slice of one shared VARIABLE is illegal
   // SystemVerilog that Icarus punishes with event-storm molasses
   // rather than an error message.
+  // Zero on first read (2026-09-14). Every block used to WIPE the file
+  // - RF_D = 512 cycles a block, which is 16 cycles a lane at fp128 and
+  // was measured on the card as the largest share of a program run's
+  // fixed cost - so that r3..r31 read +0. Now one valid bit per
+  // {reg, beat} entry says whether the entry has been written THIS
+  // block: a read of an unwritten entry answers +0, and the FIRST write
+  // to an entry writes every lane slice - the result where the lane's
+  // enable is on, +0 where it is off - after which writes mask per
+  // lane as before. That is exactly seq.py's state: a lane's register
+  // is +0 until the lane writes it while active, and a masked write
+  // leaves it alone; the only lane whose slice a first write zeroes is
+  // one that has never written the register this block, whose value
+  // IS +0. The bits clear in one cycle at S_BLK_SETUP (rf_clear, wired
+  // where the state is declared). 512 flops and three 512:1 selects
+  // replace 512 cycles a block.
+  logic [RF_D-1:0] rf_v;
+  logic            rf_clear;
+  logic            rf_first;
+  assign rf_first = rf_we && !rf_v[rf_waddr];
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || rf_clear)
+      rf_v <= '0;
+    else if (rf_we)
+      rf_v[rf_waddr] <= 1'b1;
+  end
   generate
     for (genvar gw = 0; gw < WORDS; gw = gw + 1) begin : g_rf
       logic [31:0] bank0 [0:RF_D-1];
       logic [31:0] bank1 [0:RF_D-1];
       logic [31:0] ra_q, rb_q, rc_q;
+      logic        va_q, vb_q, vc_q;
       always_ff @(posedge ap_clk) begin
         // The read registers hold with the issue machine (issue_hold,
         // below): S_ALU_ISSUE fires beat c-2 from the data that beat
         // c's address request put on the bus two STEPS ago, and a
         // step is a cycle the array accepts, not a clock. Every other
-        // reader of this bus runs when nothing is held.
+        // reader of this bus runs when nothing is held. The valid bit
+        // rides the same register, so data and its validity are always
+        // from the same address on the same cycle.
         if (!issue_hold) begin
           ra_q <= bank0[rf_raddr_a];
           rb_q <= bank0[rf_raddr_b];
           rc_q <= bank1[rf_raddr_c];
+          va_q <= rf_v[rf_raddr_a];
+          vb_q <= rf_v[rf_raddr_b];
+          vc_q <= rf_v[rf_raddr_c];
         end
-        if (rf_we && rf_wwe[gw]) begin
-          bank0[rf_waddr] <= rf_wdata[gw*32 +: 32];
-          bank1[rf_waddr] <= rf_wdata[gw*32 +: 32];
+        if (rf_we && (rf_wwe[gw] || rf_first)) begin
+          bank0[rf_waddr] <= rf_wwe[gw] ? rf_wdata[gw*32 +: 32] : 32'b0;
+          bank1[rf_waddr] <= rf_wwe[gw] ? rf_wdata[gw*32 +: 32] : 32'b0;
         end
       end
-      assign rf_rdata_a[gw*32 +: 32] = ra_q;
-      assign rf_rdata_b[gw*32 +: 32] = rb_q;
-      assign rf_rdata_c[gw*32 +: 32] = rc_q;
+      assign rf_rdata_a[gw*32 +: 32] = va_q ? ra_q : 32'b0;
+      assign rf_rdata_b[gw*32 +: 32] = vb_q ? rb_q : 32'b0;
+      assign rf_rdata_c[gw*32 +: 32] = vc_q ? rc_q : 32'b0;
     end
   endgenerate
 
@@ -744,8 +786,9 @@ module cft_seq #(
   // blk_n * max_deposits, the block's deposit-element count. Both
   // factors are run-time values, so this is the one product in the
   // module that no shift replaces; it is formed one bit of the
-  // multiplier per cycle inside the register-file wipe, which is RF_D
-  // cycles long and has CW of them to spare.
+  // multiplier per cycle in S_ZERO, which lasts CW + 1 cycles for it
+  // (it used to last the register-file wipe's RF_D, with CW to spare;
+  // the file's valid bits replaced the wipe on 2026-09-14).
   logic [31:0]   dep_elems;
   logic [31:0]   dep_addend;
   logic [CW-1:0] dep_mult;
@@ -944,12 +987,13 @@ module cft_seq #(
     S_SET_RD, S_SET_W8, S_SET_AP,
     S_SCR_RD, S_SCR_W8, S_SCR_AD, S_SCR_W9, S_SCR_WB,
     S_SKIP_F, S_SKIP_D,
-    S_DRAIN_SETUP, S_DRAIN_RD, S_DRAIN_W8, S_DRAIN_PACK, S_DRAIN_SEND,
+    S_DRAIN_SETUP, S_DRAIN_RUN,
     S_CNT_SETUP, S_CNT_PACK, S_CNT_SEND,
     S_SO_SETUP, S_SO_RD, S_SO_W8, S_SO_PACK, S_SO_SEND,
     S_WAIT_B, S_NEXT_BLK, S_FIN
   } state_e;
   state_e st;
+  assign rf_clear = (st == S_BLK_SETUP);
 
   logic [PCW:0]  pc;
   logic [PCW:0]  skip_depth;
@@ -958,6 +1002,26 @@ module cft_seq #(
   logic [LB:0]   lane_cursor;
   logic [31:0]   slot_cursor;
   logic          drain_last;         // the element just packed was final
+  // The deposit drain's pipeline (2026-09-14): one element a cycle
+  // through the banks' two-cycle read, where it was three states an
+  // element - measured on the card as ~40 ns a deposit a lane. Stage 0
+  // issues a read and its tag (lane, slot, where in the beat it lands,
+  // whether it closes the beat, whether it is the block's last); the
+  // tag reaches stage 2 with the data. A beat that completes goes to
+  // the write channel that cycle; while the channel cannot take it the
+  // whole pipeline holds, and the held address keeps the banks' output
+  // where it was, so nothing in flight is lost.
+  logic        dr_v0, dr_v1;
+  logic [LB:0] dr_lane0, dr_lane1;
+  logic [31:0] dr_slot0, dr_slot1;
+  logic [5:0]  dr_fill0, dr_fill1;
+  logic        dr_end0, dr_end1, dr_last0, dr_last1;
+  logic        dr_issued;            // the last element has been issued
+  logic [LB:0] dr_ilane;             // the issue cursors
+  logic [31:0] dr_islot;
+  logic [5:0]  dr_ifill;
+  logic        dr_ilast, dr_iend;    // this issue closes the block / the beat
+  logic        dr_stall;
   logic [RFAW-1:0] zaddr;
   // The scratch wipe's cursor, and how far it has to go. One more bit
   // than the address, so "done" is a comparison the counter can reach
@@ -1381,8 +1445,8 @@ module cft_seq #(
 
   // The block's opening active mask: slot (b, p) belongs to a lane
   // the caller has iff the position exists at this format and the
-  // lane's index within the block is below blk_n. Both the per-block
-  // wipe and ACTALL want exactly this, and ACTALL's contract is that
+  // lane's index within the block is below blk_n. Both the block's
+  // start and ACTALL want exactly this, and ACTALL's contract is that
   // it reactivates every lane THE CALLER HAS, so the two must not be
   // allowed to drift apart.
   function automatic [BLK_LANES-1:0] blk_act_fn(input [LB:0] bn,
@@ -1419,6 +1483,23 @@ module cft_seq #(
   // through a function's scope, so it is in the sensitivity.
   logic [WORDS*CW-1:0] dc_row;
   logic [CW-1:0]       cur_cnt;
+  // The count drain's beat (2026-09-14): eight consecutive lanes'
+  // counts, each from its own row and position, and a strobe per lane
+  // that exists. A count is four bytes whatever the format, so a
+  // 32-byte beat is eight lanes of counts at every precision - which
+  // is why this is eight picks and not lpb.
+  logic [BEAT_BITS-1:0] cnt_beat;
+  logic [WORDS-1:0]     cnt_beat_ok;
+  generate
+    for (genvar gc = 0; gc < WORDS; gc = gc + 1) begin : g_cnt_beat
+      logic [LB:0] cl;
+      assign cl = lane_cursor + (LB+1)'(gc);
+      assign cnt_beat[gc*32 +: 32] =
+          32'(pick_cnt_fn(row_cnt_fn(dcnt, 6'(32'(cl) >> lpb_sh)),
+                          3'(cl[2:0] & 3'(lpb - 4'd1))));
+      assign cnt_beat_ok[gc] = (32'(cl) < 32'(blk_n));
+    end
+  endgenerate
   assign dc_row  = row_cnt_fn(dcnt, dc_beat);
   assign cur_cnt = pick_cnt_fn(dc_row, dc_posn);
 
@@ -1443,9 +1524,50 @@ module cft_seq #(
       drain_elem_fn = v;
     end
   endfunction
-  logic [255:0] drain_elem;
-  assign drain_elem = drain_elem_fn(dc_posn, slot_cursor, cur_cnt,
-                                    db_rdata, wpe_sh);
+  // The element arriving at stage 2: its lane's count from its own row
+  // and position (dcnt is stable through the drain), the data from the
+  // banks, zero if the lane never reached the slot - drain_elem_fn as
+  // before, fed from the tag instead of the cursors.
+  logic [5:0]          pk_beat;
+  logic [2:0]          pk_posn;
+  logic [CW-1:0]       pk_cnt;
+  logic [255:0]        pk_elem;
+  logic [BEAT_BITS-1:0] pk_data;
+  logic [WORDS*4-1:0]  pk_strb;
+  assign pk_beat = 6'(32'(dr_lane1) >> lpb_sh);
+  assign pk_posn = dr_lane1[2:0] & 3'(lpb - 4'd1);
+  assign pk_cnt  = pick_cnt_fn(row_cnt_fn(dcnt, pk_beat), pk_posn);
+  assign pk_elem = drain_elem_fn(pk_posn, dr_slot1, pk_cnt, db_rdata,
+                                 wpe_sh);
+  // the beat with this element placed at its slot (whole words: every
+  // format's element is a whole number of them)
+  always_comb begin
+    pk_data = as_data;
+    pk_strb = as_strb;
+    for (int w = 0; w < WORDS; w = w + 1)
+      if ((32'(w) >> wpe_sh) == (32'(dr_fill1) >> esz_sh)) begin
+        pk_data[w*32 +: 32] =
+          pk_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1)) * 32 +: 32];
+        pk_strb[w*4 +: 4] = 4'hf;
+      end
+  end
+  // The open burst's beats left AFTER this cycle's acceptance, if any:
+  // a beat presented in the cycle the previous one is taken must take
+  // its WLAST - and its right to go at all - from the count the master
+  // is about to have (AXI4 A3.4.1; the unit bench's RAM asserts it).
+  // Every send site below uses this and nothing uses wr_burst_left
+  // directly for a beat's WLAST any more.
+  logic [8:0] wr_after;
+  assign wr_after = wr_burst_left -
+                    ((m_wr_wvalid && m_wr_wready) ? 9'd1 : 9'd0);
+  // hold everything while a completed beat cannot leave
+  assign dr_stall = dr_v1 && dr_end1 &&
+                    !((!m_wr_wvalid || m_wr_wready) && wr_after != 0);
+  // what the next issue closes
+  assign dr_ilast = (32'(dr_ilane) == 32'(blk_n) - 1) &&
+                    (dr_islot == h_maxdep - 1);
+  assign dr_iend  = ({1'b0, dr_ifill} + {1'b0, esz} == 7'(BEAT_BYTES)) ||
+                    dr_ilast;
 
   // ...and the same for the scratch-out drain, which visits (lane,
   // slot) in the same order and reads the scratch instead of the
@@ -1485,7 +1607,7 @@ module cft_seq #(
       bank_phase <= 1'b0; bank_ext_q <= 1'b0;
       bank_q <= '0; sin_q <= '0; sout_q <= '0;
       scr_we <= '0; scr_raddr <= '0;
-      scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0;
+      scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0; rd_need <= '0;
       scr_strict_q <= 1'b0; scr_oor_q <= '0;
       h_nsin <= '0; h_nsout <= '0;
 
@@ -1696,7 +1818,7 @@ module cft_seq #(
           bank_phase <= 1'b0;
           // What the stream about to arrive can reach in the scratch,
           // reset before it is scanned.
-          scr_hi <= '0; scr_all <= 1'b0;
+          scr_hi <= '0; scr_all <= 1'b0; rd_need <= '0;
           m_rd_rready <= 1'b1;
           st <= S_IMG_PARSE;
         end
@@ -1738,6 +1860,26 @@ module cft_seq #(
               scr_hi <= (SCRSW+1)'(pw[32 +: SCRSW]) + (SCRSW+1)'(1);
             if (pw[31] && (pw[7:0] == C_STX || pw[7:0] == C_LDX))
               scr_all <= 1'b1;
+            // ...and which operand streams it reads. The register
+            // fields are {imm[25..27], the 4-bit field} since revision
+            // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX) or
+            // rb (STX, LDX) and never rc.
+            if (!pw[31]) begin
+              if (!pw[27] && {pw[57], pw[15:12]} < 5'd3)
+                rd_need[pw[13:12]] <= 1'b1;
+              if (!pw[28] && {pw[58], pw[19:16]} < 5'd3)
+                rd_need[pw[17:16]] <= 1'b1;
+              if (!pw[29] && {pw[59], pw[23:20]} < 5'd3)
+                rd_need[pw[21:20]] <= 1'b1;
+            end else begin
+              if ((pw[7:0] == C_DEPOSIT || pw[7:0] == C_SETACT ||
+                   pw[7:0] == C_STL || pw[7:0] == C_STX) &&
+                  {pw[57], pw[15:12]} < 5'd3)
+                rd_need[pw[13:12]] <= 1'b1;
+              if ((pw[7:0] == C_STX || pw[7:0] == C_LDX) &&
+                  {pw[58], pw[19:16]} < 5'd3)
+                rd_need[pw[17:16]] <= 1'b1;
+            end
             pw <= pw >> 64;
             pw_have <= pw_have - 7'd8;
             insn_left <= insn_left - 1;
@@ -1804,13 +1946,13 @@ module cft_seq #(
         end
 
         S_ZERO: begin
-          // wipe the register file: RF_D cycles per block buys
-          // "the previous block cannot leak" with no bookkeeping
-          rf_we <= 1'b1;
-          rf_waddr <= zaddr;
-          rf_wdata <= '0;
-          rf_wwe <= {WORDS{1'b1}};
-          zaddr <= zaddr + 1;
+          // The register file is not wiped any more - its valid bits
+          // are (see the file's declaration), in the one cycle of
+          // S_BLK_SETUP. What stays here is the scratch wipe and the
+          // serial multiplier below, and the state lasts as long as
+          // the longer of the two: CW + 1 cycles for the product.
+          if (zaddr < RFAW'(CW + 1))
+            zaddr <= zaddr + 1;
           // ...and the scratch, in the same window and on its own
           // cursor, because the two are different depths. A slot a
           // lane never wrote must read +0, for the reason a deposit
@@ -1856,7 +1998,7 @@ module cft_seq #(
             sin_mult   <= sin_mult >> 1;
             sout_mult  <= sout_mult >> 1;
           end
-          if (zaddr == RFAW'(RF_D - 1) && (szaddr + 1) >= szlimit) begin
+          if (zaddr >= RFAW'(CW + 1) && (szaddr + 1) >= szlimit) begin
             // A lane is active iff its index is below the block's
             // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
             // computed one state ago. The first version asked each of
@@ -1949,14 +2091,24 @@ module cft_seq #(
         end
 
         S_LD_GO: begin
-          rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
-                     + in_off;
-          rd_sel  <= ld_reg;   // ld_reg IS the stream index
-          rd_beats_left <= {27'b0, nb_blk};
-          rd_stream_on <= 1'b1;
-          m_rd_rready <= 1'b1;
-          bt <= '0;
-          st <= S_LD_STREAM;
+          if (!rd_need[ld_reg]) begin
+            // A stream the program never reads is not loaded: its
+            // register entries stay unwritten and would read +0, and
+            // nothing reads them.
+            if (ld_reg == 2'd2)
+              st <= S_FETCH;
+            else
+              ld_reg <= ld_reg + 1;
+          end else begin
+            rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
+                       + in_off;
+            rd_sel  <= ld_reg;   // ld_reg IS the stream index
+            rd_beats_left <= {27'b0, nb_blk};
+            rd_stream_on <= 1'b1;
+            m_rd_rready <= 1'b1;
+            bt <= '0;
+            st <= S_LD_STREAM;
+          end
         end
 
         S_LD_STREAM: begin
@@ -2289,67 +2441,61 @@ module cft_seq #(
           wr_stream_on <= 1'b1;
           wr_bresp_left <= '0;
           m_wr_bready <= 1'b1;
+          dr_v0 <= 1'b0; dr_v1 <= 1'b0;
+          dr_issued <= 1'b0;
+          dr_ilane <= '0; dr_islot <= '0; dr_ifill <= '0;
           if (h_maxdep == 0)
             st <= S_CNT_SETUP;
           else begin
             db_raddr <= DBA'(0);
-            st <= S_DRAIN_RD;
+            st <= S_DRAIN_RUN;
           end
         end
 
-        S_DRAIN_RD: begin
-          db_raddr <= DBA'((32'(lane_cursor) >> lpb_sh) * MAXD
-                           + slot_cursor);
-          st <= S_DRAIN_W8;
-        end
-        S_DRAIN_W8: st <= S_DRAIN_PACK;
-
-        S_DRAIN_PACK: begin
-          // An element lands on an ELEMENT boundary, never an
-          // arbitrary byte one: as_fill starts at zero and advances by
-          // esz, so a beat is a row of lpb slots and this fills slot
-          // as_fill >> esz_sh - whole 32-bit words, because every
-          // format's element is a whole number of words. Expressed as
-          // a byte loop over a variable base it was a 256-bit
-          // variable byte shifter: 32 output bytes each selected from
-          // 32 sources, for a value that only ever lands on one of at
-          // most eight slots.
-          for (int w = 0; w < WORDS; w = w + 1)
-            if ((32'(w) >> wpe_sh) == (32'(as_fill) >> esz_sh)) begin
-              as_data[w*32 +: 32] <=
-                drain_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1))
-                           * 32 +: 32];
-              as_strb[w*4 +: 4] <= 4'hf;
+        S_DRAIN_RUN: begin
+          if (!dr_stall) begin
+            // stage 2: the element whose data is on db_rdata lands in
+            // the beat; a beat that this element completes leaves now
+            if (dr_v1) begin
+              if (dr_end1) begin
+                m_wr_wvalid <= 1'b1;
+                m_wr_wdata  <= pk_data;
+                m_wr_wstrb  <= pk_strb;
+                m_wr_wlast  <= (wr_after == 1);
+                as_data <= '0; as_strb <= '0;
+                if (dr_last1)
+                  st <= S_CNT_SETUP;
+              end else begin
+                as_data <= pk_data;
+                as_strb <= pk_strb;
+              end
             end
-          as_fill <= as_fill + esz;
-          if (32'(lane_cursor) == 32'(blk_n) - 1 &&
-              slot_cursor == h_maxdep - 1)
-            drain_last <= 1'b1;
-          if (slot_cursor == h_maxdep - 1) begin
-            slot_cursor <= '0;
-            lane_cursor <= lane_cursor + 1;
-          end else
-            slot_cursor <= slot_cursor + 1;
-          if ({1'b0, as_fill} + {1'b0, esz} == 7'(BEAT_BYTES) ||
-              (32'(lane_cursor) == 32'(blk_n) - 1 &&
-               slot_cursor == h_maxdep - 1))
-            st <= S_DRAIN_SEND;
-          else
-            st <= S_DRAIN_RD;
-        end
-
-        S_DRAIN_SEND: begin
-          // wait for an open burst window and a free W slot
-          if ((!m_wr_wvalid || m_wr_wready) && wr_burst_left != 0) begin
-            m_wr_wvalid <= 1'b1;
-            m_wr_wdata <= as_data;
-            m_wr_wstrb <= as_strb;
-            m_wr_wlast <= (wr_burst_left == 1);
-            as_fill <= '0; as_strb <= '0; as_data <= '0;
-            if (drain_last)
-              st <= S_CNT_SETUP;
-            else
-              st <= S_DRAIN_RD;
+            // stage 1: the tag follows the read
+            dr_v1    <= dr_v0;
+            dr_lane1 <= dr_lane0;
+            dr_slot1 <= dr_slot0;
+            dr_fill1 <= dr_fill0;
+            dr_end1  <= dr_end0;
+            dr_last1 <= dr_last0;
+            // stage 0: issue the next element's read with its tag
+            if (!dr_issued) begin
+              db_raddr <= DBA'((32'(dr_ilane) >> lpb_sh) * MAXD + dr_islot);
+              dr_v0    <= 1'b1;
+              dr_lane0 <= dr_ilane;
+              dr_slot0 <= dr_islot;
+              dr_fill0 <= dr_ifill;
+              dr_end0  <= dr_iend;
+              dr_last0 <= dr_ilast;
+              if (dr_ilast)
+                dr_issued <= 1'b1;
+              if (dr_islot == h_maxdep - 1) begin
+                dr_islot <= '0;
+                dr_ilane <= dr_ilane + 1;
+              end else
+                dr_islot <= dr_islot + 1;
+              dr_ifill <= dr_iend ? 6'd0 : dr_ifill + esz;
+            end else
+              dr_v0 <= 1'b0;
           end
         end
 
@@ -2374,29 +2520,24 @@ module cft_seq #(
         end
 
         S_CNT_PACK: begin
-          // A count is one word and as_fill advances by four, so the
-          // same word-slot argument as S_DRAIN_PACK applies, with the
-          // slot fixed at four bytes.
+          // A whole beat at once: eight lanes' counts (cnt_beat, built
+          // beside cur_cnt), strobed where the lane exists. One cycle
+          // a beat where it was one a lane.
+          as_data <= cnt_beat;
           for (int w = 0; w < WORDS; w = w + 1)
-            if (32'(w) == (32'(as_fill) >> 2)) begin
-              as_data[w*32 +: 32] <= 32'(cur_cnt);
-              as_strb[w*4 +: 4] <= 4'hf;
-            end
-          as_fill <= as_fill + 6'd4;
-          if (32'(lane_cursor) == 32'(blk_n) - 1)
+            as_strb[w*4 +: 4] <= cnt_beat_ok[w] ? 4'hf : 4'h0;
+          if (32'(lane_cursor) + 32'(WORDS) >= 32'(blk_n))
             drain_last <= 1'b1;
-          lane_cursor <= lane_cursor + 1;
-          if ({1'b0, as_fill} + 7'd4 == 7'(BEAT_BYTES) ||
-              32'(lane_cursor) == 32'(blk_n) - 1)
-            st <= S_CNT_SEND;
+          lane_cursor <= lane_cursor + (LB+1)'(WORDS);
+          st <= S_CNT_SEND;
         end
 
         S_CNT_SEND: begin
-          if ((!m_wr_wvalid || m_wr_wready) && wr_burst_left != 0) begin
+          if ((!m_wr_wvalid || m_wr_wready) && wr_after != 0) begin
             m_wr_wvalid <= 1'b1;
             m_wr_wdata <= as_data;
             m_wr_wstrb <= as_strb;
-            m_wr_wlast <= (wr_burst_left == 1);
+            m_wr_wlast <= (wr_after == 1);
             as_fill <= '0; as_strb <= '0; as_data <= '0;
             if (drain_last)
               // The scratch-out block goes out AFTER the last deposit
@@ -2469,11 +2610,11 @@ module cft_seq #(
         end
 
         S_SO_SEND: begin
-          if ((!m_wr_wvalid || m_wr_wready) && wr_burst_left != 0) begin
+          if ((!m_wr_wvalid || m_wr_wready) && wr_after != 0) begin
             m_wr_wvalid <= 1'b1;
             m_wr_wdata <= as_data;
             m_wr_wstrb <= as_strb;
-            m_wr_wlast <= (wr_burst_left == 1);
+            m_wr_wlast <= (wr_after == 1);
             as_fill <= '0; as_strb <= '0; as_data <= '0;
             if (drain_last)
               st <= S_WAIT_B;
