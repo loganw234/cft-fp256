@@ -684,6 +684,83 @@ int cft_seq_cap_refusal(const char *field, unsigned long asked,
     return CFT_ERR_UNSUPPORTED;
 }
 
+/* The CAPS[15:8] opcode groups by name, in op_group_bit's numbering. */
+static const char *const group_names[8] = {
+    "arithmetic", "sign", "min/max", "predicate/select",
+    "integer", "reduction", "divide/sqrt seeds", "sequencer"
+};
+
+/* "fp32 fp64 fp128": the formats a mask names, space-separated, in
+ * the library's own vocabulary. A mask with nothing set is said so,
+ * because an empty list reads as a formatting accident. */
+static const char *render_format_mask(uint32_t mask, char *buf, size_t len)
+{
+    int f;
+    size_t used = 0;
+    buf[0] = '\0';
+    for (f = 0; f < 4; f++) {
+        int k;
+        if (!(mask & (1u << f)))
+            continue;
+        k = snprintf(buf + used, len - used, "%s%s", used ? " " : "",
+                     cft_format_name((cft_format)f));
+        if (k < 0 || (size_t)k >= len - used)
+            break;
+        used += (size_t)k;
+    }
+    if (!buf[0])
+        snprintf(buf, len, "no format at all");
+    return buf;
+}
+
+int cft_absent_format_refusal(int fmt)
+{
+    char have[64];
+    /* The same shape as the device refusal below - what IS carried,
+     * then what was asked for - because a caller reads both the same
+     * way, and device-test holds both to naming every carried format. */
+    cft_set_error("this libcft build carries %s; %s is above its format "
+                  "ceiling (CFT_MAX_FORMAT is %d in cft_config.h), so no "
+                  "backend of this build can carry it - cft_get_caps - "
+                  "cft_caps.format_mask - says so before a run",
+                  render_format_mask(CFT_FORMAT_MASK_BUILD, have, sizeof have),
+                  cft_format_name((cft_format)fmt), (int)CFT_MAX_FORMAT);
+    return CFT_ERR_UNSUPPORTED;
+}
+
+int cft_device_format_refusal(uint32_t mask, int fmt, const char *entry)
+{
+    char have[64];
+    cft_set_error("%s: this device carries %s; %s is not among them. "
+                  "cft_supports(dev, op, fmt), or cft_get_caps - "
+                  "cft_caps.format_mask - says so before a run; a device "
+                  "refuses a precision it lacks itself, with STATUS[3] "
+                  "and no explanation",
+                  entry, render_format_mask(mask, have, sizeof have),
+                  cft_format_name((cft_format)fmt));
+    return CFT_ERR_UNSUPPORTED;
+}
+
+int cft_op_group_refusal(int op, const char *entry)
+{
+    int g = op_group_bit(op);
+    cft_set_error("%s: opcode %d (%s) is in CAPS group %d (%s, CAPS[%d]), "
+                  "which this device does not implement - "
+                  "cft_supports(dev, op, fmt) says so before a run",
+                  entry, op, cft_op_name((cft_op)op), g,
+                  (g >= 0 && g < 8) ? group_names[g] : "unassigned", 8 + g);
+    return CFT_ERR_UNSUPPORTED;
+}
+
+int cft_composed_refusal(const char *entry, const char *needs, int fmt)
+{
+    cft_set_error("%s is composed from %s, which this device does not "
+                  "support at %s - cft_supports(dev, %s, fmt) says so "
+                  "before a call",
+                  entry, needs, cft_format_name((cft_format)fmt), needs);
+    return CFT_ERR_UNSUPPORTED;
+}
+
 void cft_device_seq_caps(const struct cft_device *dev, cft_seq_caps *out)
 {
     if (!out)
@@ -841,7 +918,7 @@ static cft_status run_impl(cft_device *dev,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
@@ -852,7 +929,8 @@ static cft_status run_impl(cft_device *dev,
     if ((int)op < 0 || (int)op > 255)
         return CFT_ERR_INVALID_ARGUMENT;
     if (!(dev->format_mask & (1u << (int)fmt)))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_device_format_refusal(dev->format_mask,
+                                                     (int)fmt, "cft_run");
     /* A reduction cannot be evaluated elementwise, so this is not the
      * call for it. Refused BEFORE the backend dispatch below, so the
      * software and device paths give the same answer - the alternative
@@ -873,7 +951,7 @@ static cft_status run_impl(cft_device *dev,
     {
         int group = op_group_bit((int)op);
         if (group >= 0 && !(dev->op_groups & (1u << group)))
-            return CFT_ERR_UNSUPPORTED;
+            return (cft_status)cft_op_group_refusal((int)op, "cft_run");
         if ((int)op == (int)CFT_IMUL &&
             !(dev->seq.features & CFT_ALU_EXT_IMUL)) {
             cft_set_error("opcode 30 (imul) is not implemented by this "
@@ -1180,7 +1258,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
@@ -1191,18 +1269,26 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (!cft_sf_is_reduction((int)op))
         return CFT_ERR_INVALID_ARGUMENT;
     if (!(dev->format_mask & (1u << (int)fmt)))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_device_format_refusal(dev->format_mask,
+                                                     (int)fmt, "cft_reduce");
     {
         int group = op_group_bit((int)op);
         if (group < 0 || !(dev->op_groups & (1u << group)))
-            return CFT_ERR_UNSUPPORTED;
+            return (cft_status)cft_op_group_refusal((int)op, "cft_reduce");
         /* A composed reduction also needs the group its composition
          * runs through - the multiply for sumSquare, the abs for
          * sumAbs - and a device missing one must say so here rather
          * than fail partway through the sequence. */
         group = reduce_helper_group((int)op);
-        if (group >= 0 && !(dev->op_groups & (1u << group)))
+        if (group >= 0 && !(dev->op_groups & (1u << group))) {
+            cft_set_error("cft_reduce: %s is composed, and its %s step "
+                          "needs CAPS group %d (%s, CAPS[%d]), which this "
+                          "device does not implement - cft_supports says "
+                          "so before a run",
+                          cft_op_name(op), group_names[group], group,
+                          group_names[group], 8 + group);
             return CFT_ERR_UNSUPPORTED;
+        }
     }
     if (!d)
         return CFT_ERR_INVALID_ARGUMENT;

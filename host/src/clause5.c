@@ -53,6 +53,7 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#include "backend.h"
 
 /* Elements per pass; divsqrt.c's CHUNK, for the same reason and with
  * the same guarantee - the value follows the target's RAM and changes
@@ -176,7 +177,7 @@ static cft_status c5_validate(cft_device *dev, cft_format fmt,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)
@@ -232,7 +233,10 @@ CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
         return st;
     if (!cft_supports(dev, CFT_ADD, fmt) ||
         !cft_supports(dev, CFT_COPYSIGN, fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_composed_refusal(
+            "cft_rint", cft_supports(dev, CFT_ADD, fmt) ? "CFT_COPYSIGN"
+                                                        : "CFT_ADD",
+            (int)fmt);
     if (n == 0) {
         cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
@@ -367,7 +371,8 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
     if (st != CFT_OK)
         return st;
     if (!cft_supports(dev, CFT_MUL, fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_composed_refusal("cft_scaleb", "CFT_MUL",
+                                                (int)fmt);
     if (n == 0) {
         cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
@@ -496,7 +501,8 @@ CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
     if (st != CFT_OK)
         return st;
     if (!cft_supports(dev, cmp, fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_composed_refusal("cft_cmp_sig",
+                                                cft_op_name(cmp), (int)fmt);
     if (n == 0) {
         cft_flags_emit(dev, 0, flags_out);
         return CFT_OK;
@@ -544,7 +550,7 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
     cft_status st;
 
     if (CFT_FMT_ABSENT(dfmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)dfmt);
     if (CFT_FMT_OUT_OF_RANGE(dfmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (!rnd_ok(rnd))

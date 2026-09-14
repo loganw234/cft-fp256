@@ -52,7 +52,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,259 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2281 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,353 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |

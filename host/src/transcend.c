@@ -90,6 +90,7 @@
 #include "../include/cft.h"
 #include "mpfloat.h"
 #include "softfloat.h"
+#include "backend.h"
 #include "transcend.h"
 
 /* Instrumentation. Not API - statically linked tools read it, which is
@@ -4795,7 +4796,7 @@ static cft_status tr_validate(cft_device *dev, cft_format fmt,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)

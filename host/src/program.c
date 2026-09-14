@@ -846,8 +846,19 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
      * format-width values. Refuse it here rather than at the first
      * instruction that would issue a precision this device does not
      * carry. */
-    if (!cft_supports(dev, CFT_FMA, (cft_format)prec))
-        return CFT_ERR_UNSUPPORTED;
+    if (!cft_supports(dev, CFT_FMA, (cft_format)prec)) {
+        /* Name what the device DOES carry, which is the sentence a
+         * caller holding an image for the wrong rung actually needs. */
+        cft_caps pc;
+        memset(&pc, 0, sizeof pc);
+        pc.struct_size = sizeof pc;
+        if (cft_get_caps(dev, &pc) == CFT_OK)
+            return (cft_status)cft_device_format_refusal(
+                pc.format_mask, (int)prec,
+                "cft_program_load: a program is compiled for one format");
+        return (cft_status)cft_composed_refusal("cft_program_load",
+                                                "CFT_FMA", (int)prec);
+    }
     /* And against the capacities THIS device publishes, in the same
      * breath and for the same reason: the alternative is a program
      * that loads, runs on a laptop, and is refused by the tile at its

@@ -1450,7 +1450,12 @@ static cft_status divsqrt_validate(cft_device *dev, cft_format fmt,
     if (!cft_supports(dev, CFT_FMA, fmt) ||
         !cft_supports(dev, CFT_NEG, fmt) ||
         !cft_supports(dev, seed_op, fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_composed_refusal(
+            seed_op == CFT_RECIP_SEED ? "cft_div" : "cft_sqrt",
+            !cft_supports(dev, CFT_FMA, fmt) ? "CFT_FMA"
+            : !cft_supports(dev, CFT_NEG, fmt) ? "CFT_NEG"
+            : cft_op_name(seed_op),
+            (int)fmt);
     if (n == 0)
         return CFT_OK;
     if (!a || !d)

@@ -303,21 +303,48 @@ void cft_device_seq_caps(const struct cft_device *dev, cft_seq_caps *out);
 void cft_sw_seq_caps(cft_seq_caps *out);
 
 /* This library's own last-error slot, behind cft_last_error(). For
- * refusals libcft makes WITHOUT reaching a device backend - the only
- * one today is a program past a device's published capacity - so that
- * a caller is told which cap and by how much rather than only that
+ * refusals libcft makes WITHOUT reaching a device backend, so that a
+ * caller is told which cap, which format or which opcode group, and
+ * what would have answered in advance, rather than only that
  * something was unsupported. Cleared the moment anything reaches a
  * backend, so it never explains someone else's failure.
  *
- * cft_seq_cap_refusal formats one of those and returns the status to
- * return (CFT_ERR_UNSUPPORTED as int, since this header stays
- * independent of the public one): `field` is the program's, `units`
- * says what the device's number counts, and `caps_field` is the
- * cft_caps member that would have answered in advance. */
+ * Every CFT_ERR_UNSUPPORTED this library returns goes through one of
+ * these, because a refusal without a sentence leaves cft_last_error()
+ * empty - or worse, still holding the previous failure's - at exactly
+ * the moment a caller wants to be told "this device carries fp32 fp64
+ * fp128". That is what cft-rebound found on 2026-09-13 (its
+ * docs/BITSTREAM.md, ask 3) and worked around at open. Each returns
+ * the status to return (CFT_ERR_UNSUPPORTED as int, since this header
+ * stays independent of the public one); they are implemented in
+ * device.c, which has the names.
+ *
+ *   cft_seq_cap_refusal      a program past a device's published
+ *                            capacity: `field` is the program's,
+ *                            `units` what the device's number counts,
+ *                            `caps_field` the cft_caps member that
+ *                            would have answered
+ *   cft_absent_format_refusal
+ *                            a format above this BUILD's ceiling
+ *                            (CFT_MAX_FORMAT, cft_config.h), which no
+ *                            backend of this library can carry
+ *   cft_device_format_refusal
+ *                            a format THIS device does not carry:
+ *                            `mask` is its format_mask, and the
+ *                            sentence lists what it does carry
+ *   cft_op_group_refusal     an opcode whose CAPS group this device
+ *                            does not implement
+ *   cft_composed_refusal     an entry point composed from a primitive
+ *                            (`needs`, named as its CFT_ opcode) that
+ *                            this device lacks at `fmt` */
 void cft_set_error(const char *fmt, ...);
 int  cft_seq_cap_refusal(const char *field, unsigned long asked,
                          unsigned long cap, const char *units,
                          const char *caps_field);
+int  cft_absent_format_refusal(int fmt);
+int  cft_device_format_refusal(uint32_t mask, int fmt, const char *entry);
+int  cft_op_group_refusal(int op, const char *entry);
+int  cft_composed_refusal(const char *entry, const char *needs, int fmt);
 
 /* The message from the most recent failure, or "". Static storage,
  * overwritten by the next one. XRT's exceptions carry the only

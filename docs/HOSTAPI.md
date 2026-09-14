@@ -1957,6 +1957,28 @@ now has a third source, cleared the moment anything reaches a device
 backend, so a refusal libcft made never goes on explaining someone
 else's failure.
 
+**Every `CFT_ERR_UNSUPPORTED` carries a sentence (2026-09-14).** It did
+not: `cft_run`, `cft_reduce` and `cft_program_load` refused a format
+the device lacked, or an opcode group it did not implement, with
+`cft_last_error()` empty - or, worse, still holding the previous
+failure's text. cft-rebound found this on its trimmed binary128 image
+and worked around it at open (its `docs/BITSTREAM.md`, ask 3). Now
+a format the device lacks says what it does carry:
+
+    cft_run: this device carries fp32 fp64 fp128; fp256 is not among
+    them. cft_supports(dev, op, fmt), or cft_get_caps -
+    cft_caps.format_mask - says so before a run; a device refuses a
+    precision it lacks itself, with STATUS[3] and no explanation
+
+a format above the *build's* ceiling (`CFT_MAX_FORMAT` in
+`cft_config.h`) says so and names the widest rung compiled in; an
+opcode names its CAPS group and bit; and an entry point composed from
+primitives - `cft_rint`, `cft_scaleb`, `cft_cmp_sig`, `cft_div`,
+`cft_sqrt` - names the primitive it needed. `device-test` holds the
+first two entry points to this on every image and reports NOT TESTED
+on an image that carries all four formats, since there is then nothing
+to refuse.
+
 **The two workload tools size themselves from the answer.** `cft-zoom`
 took `--steps-per-call` from a `#define TILE_MAX_DEPOSITS 64` copied
 out of the RTL; it now reads `cft_caps.max_deposits`, and when the
