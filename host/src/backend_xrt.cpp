@@ -90,6 +90,22 @@
 #include <xrt/xrt_bo.h>
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_kernel.h>
+/* The xclbin listing API, where this XRT has it. The discriminator is
+ * the NEWER header path: XRT 2.19 (amd-arc-box) ships it at
+ * xrt/experimental/xrt_xclbin.h; XRT 2.14 (the cft2204 WSL distro) has
+ * no xrt/experimental/ at all and its experimental/xrt_xclbin.h is an
+ * EMPTY file, so testing for that one would say yes and deliver nothing.
+ * Without the API, compute units are found the way they always were,
+ * by probing cft_krnl_1.. by name. */
+#if defined(__has_include)
+#  if __has_include(<xrt/experimental/xrt_xclbin.h>)
+#    include <xrt/experimental/xrt_xclbin.h>
+#    define CFT_XRT_XCLBIN_API 1
+#  endif
+#endif
+#ifndef CFT_XRT_XCLBIN_API
+#  define CFT_XRT_XCLBIN_API 0
+#endif
 
 #include "backend.h"
 #include "slice.h"
@@ -255,6 +271,26 @@ inline size_t beat_round(size_t bytes)
  * that binds before the hardware does is a limit that gets discovered
  * on card day. */
 constexpr int MAX_TILES = 64;
+
+#if CFT_XRT_XCLBIN_API
+/* The number a compute-unit name ends in - "cft_krnl:{cft_krnl_12}" is
+ * 12 - or -1 if it ends in none. Only used to put tiles in a stable
+ * order; nothing decides what a compute unit IS from its name. Only
+ * where the listing branch exists, which is the only place it is
+ * called. */
+static long cu_ordinal(const std::string &nm)
+{
+    size_t end = nm.size();
+    if (end && nm[end - 1] == '}')
+        --end;
+    size_t beg = end;
+    while (beg && nm[beg - 1] >= '0' && nm[beg - 1] <= '9')
+        --beg;
+    if (beg == end)
+        return -1;
+    return std::strtol(nm.c_str() + beg, nullptr, 10);
+}
+#endif
 
 std::string g_err;
 
@@ -668,36 +704,99 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         return ST_ARTIFACT;
     }
 
-    /* Enumerate the compute units by probing their names. The
-     * alternative is parsing IP_LAYOUT, which is a different API in
-     * every XRT generation; a name that fails to open is the same
-     * answer in all of them. Exclusive access is required for the
-     * status registers to be readable at all.
+    /* Which compute units to open, and in what order.
      *
-     * The FIRST failure's message is kept, because the commonest
-     * reason cft_krnl_1 will not open is that another process holds
-     * it - and reporting live contention as "this is not a tile" sends
-     * the reader to entirely the wrong place. */
-    std::string first_failure;
-    for (int i = 1; i <= MAX_TILES; i++) {
-        std::string nm = "cft_krnl:{cft_krnl_" + std::to_string(i) + "}";
+     * Preferred: the names the image itself declares, read out of it
+     * with xrt::xclbin, and then what each one IS decided by MAGIC read
+     * from it before it is kept - a compute unit that opens but does
+     * not answer "CFT0" is dropped, not trusted. So a kernel packaged
+     * under a variant name (hw/layouts' cft_krnl_f128_N) opens exactly
+     * as cft_krnl_N does, and a foreign kernel sharing the image is
+     * left alone. Until 2026-09-14 this loop probed the literal name
+     * cft_krnl:{cft_krnl_N} and nothing else; cft-rebound's binary128
+     * image had to keep the name cft_krnl to open at all (its
+     * docs/BITSTREAM.md, ask 2), and docs/LAYOUTS.md's variant names
+     * would have opened zero tiles.
+     *
+     * Fallback: an XRT without the listing API (see the include block)
+     * probes cft_krnl_1..MAX_TILES by name as before, stopping at the
+     * first gap.
+     *
+     * Exclusive access either way, because the status registers are
+     * not readable otherwise. The FIRST failure's message is kept,
+     * because the commonest reason a compute unit will not open is
+     * that another process holds it - and reporting live contention as
+     * "this is not a tile" sends the reader to entirely the wrong
+     * place. */
+    std::vector<std::string> names;
+    std::string declared;          /* what the image lists, for the message */
+#if CFT_XRT_XCLBIN_API
+    try {
+        /* By std::string, not const char*: XRT 2.19 also has
+         * xclbin(const std::string_view&), which takes the xclbin's
+         * BYTES, and a const char* converts to both - ambiguous at
+         * compile time, and the wrong pick would parse a path as an
+         * image. */
+        const std::string art(artifact);
+        xrt::xclbin xb(art);
+        for (const auto &k : xb.get_kernels())
+            for (const auto &cu : k.get_cus()) {
+                names.push_back(k.get_name() + ":{" + cu.get_name() + "}");
+                declared += (declared.empty() ? "" : " ") + cu.get_name();
+            }
+    } catch (const std::exception &) {
+        names.clear();             /* the probe below takes over */
+    }
+    /* Tile 0 is _1 whatever order the image lists them in, and _10 does
+     * not sort before _2: order by the number a name ends in. */
+    std::sort(names.begin(), names.end(),
+              [](const std::string &a, const std::string &b) {
+                  long x = cu_ordinal(a), y = cu_ordinal(b);
+                  return x != y ? x < y : a < b;
+              });
+#endif
+    const bool probing = names.empty();
+    if (probing)
+        for (int i = 1; i <= MAX_TILES; i++)
+            names.push_back("cft_krnl:{cft_krnl_" + std::to_string(i) + "}");
+
+    std::string first_failure, not_tiles;
+    for (const std::string &nm : names) {
         try {
             xrt::kernel k(D->dev, D->uuid, nm,
                           xrt::kernel::cu_access_mode::exclusive);
+            if (!probing) {
+                uint32_t m = 0;
+                try {
+                    m = k.read_register(CSR_MAGIC);
+                } catch (const std::exception &) {
+                    m = 0;
+                }
+                if (m != TILE_MAGIC) {
+                    not_tiles += (not_tiles.empty() ? "" : " ") + nm;
+                    continue;      /* opened, answered, not ours; released */
+                }
+            }
             D->tiles.emplace_back();
             D->tiles.back().k = std::move(k);
         } catch (const std::exception &e) {
-            if (i == 1)
+            if (first_failure.empty())
                 first_failure = e.what();
-            break;
+            if (probing)
+                break;             /* the probe stops at the first gap */
         }
     }
     if (D->tiles.empty()) {
         delete D;
-        set_err(std::string("no cft_krnl compute unit could be opened in ") +
-                artifact + ": " + first_failure +
-                " (a compute unit already held by another process reports"
-                " the same way as one that is not there)");
+        std::string msg = "no cft tile could be opened in " + std::string(artifact);
+        if (!probing)
+            msg += ": the image declares compute unit(s) " + declared +
+                   (not_tiles.empty() ? "" : "; opened but not a cft tile by MAGIC: " + not_tiles);
+        if (!first_failure.empty())
+            msg += "; first failure: " + first_failure +
+                   " (a compute unit already held by another process reports"
+                   " the same way as one that is not there)";
+        set_err(msg);
         return ST_ARTIFACT;
     }
 
