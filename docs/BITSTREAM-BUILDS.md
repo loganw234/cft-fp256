@@ -77,6 +77,13 @@ KERNEL_FREQ=135000000 BUILD=build-<name>q TARGETS=hw \
 #     what was packaged as generics: and hdlparam: lines
 CFT_GENERICS="EN_FP256=0" KERNEL_FREQ=150000000 BUILD=build-<name>f128 \
     TARGETS=hw LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh
+
+# 3c. package and verify ONLY - three minutes, no link: the check that a
+#     trim's generics reached the wrapper, before committing to hours.
+#     TARGETS="" is the spelling; since 2026-09-14 an empty TARGETS is a
+#     request (before that it fell through to "hw hw_emu")
+CFT_GENERICS="EN_FP32=0 EN_FP256=0" BUILD=build-<name>-pkg TARGETS="" \
+    bash hw/rebuild-2022.sh
 ```
 
 `BUILD` differs per link because `rebuild-2022.sh` parameterises it for

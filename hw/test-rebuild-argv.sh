@@ -113,7 +113,7 @@ run_it() {                       # run_it <script> <link-cfg> <tag>
     VPP_ARGV_LOG="$log" \
     PLATFORM_REPO_PATHS="$TMP/plat" \
     BUILD="$TMP/build-$tag" \
-    TARGETS=hw \
+    TARGETS="${TARGETS_FOR_RUN-hw}" \
     KERNEL_FREQ=135000000 \
     VPP_PROPS="run.impl_1.STEPS.OPT_DESIGN.IS_ENABLED=true" \
     LINK_CFG="$cfg" \
@@ -194,6 +194,28 @@ else
   echo "  ok   control: the lie is caught before v++ runs (rc=$rc)"
 fi
 
+# --------------------------------------------------------- package only
+# TARGETS="" packages the .xo, reads the wrapper back, and links NOTHING:
+# rc 0, the generics seen by vivado, and v++ never invoked. Until
+# 2026-09-14 the empty spelling fell through to "hw hw_emu" and started a
+# two-hour link on a box another session was using; this leg is the
+# control that keeps `${TARGETS-...}` from drifting back to `:-`.
+echo "== package only: TARGETS=\"\" packages, verifies, links nothing =="
+log=$(TARGETS_FOR_RUN="" CFT_GENERICS="EN_FP32=0 EN_FP256=0" run_it "$SCRIPT" "hw/link.cfg" "pkgonly")
+rc=$(cat "$TMP/rc-pkgonly")
+seen=$(cat "$TMP/build-pkgonly/generics-seen.txt" 2>/dev/null)
+if [ "$rc" != 0 ]; then
+  say_fail "package only: rc=$rc"
+  tail -4 "$TMP/out-pkgonly.txt" | sed 's/^/        /'
+elif [ -s "$log" ]; then
+  say_fail "package only: v++ was invoked - an empty TARGETS still links"
+  head -3 "$log" | sed 's/^/        /'
+elif [ "$seen" != "EN_FP32=0 EN_FP256=0" ]; then
+  say_fail "package only: vivado saw CFT_GENERICS='$seen', not 'EN_FP32=0 EN_FP256=0'"
+else
+  echo "  ok   package only: packaged and verified, v++ never invoked (rc=0)"
+fi
+
 # ---------------------------------------------------------------- control
 # Put the historical defect back and require that the above catches it.
 echo "== negative control: the 2026 bug reintroduced =="
@@ -219,7 +241,8 @@ echo
 if [ "$fails" -eq 0 ]; then
   echo "rebuild-2022.sh: the clock constraint survives VPP_PROPS, CFT_GENERICS"
   echo "reaches vivado and the manifest, a lying wrapper read-back stops the"
-  echo "build before v++, and each check still fails when its defect is put back."
+  echo "build before v++, TARGETS=\"\" packages without linking, and each check"
+  echo "still fails when its defect is put back."
   exit 0
 fi
 echo "$fails failure(s); stub output under $TMP (kept only until exit)"

@@ -741,8 +741,21 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         xrt::xclbin xb(art);
         for (const auto &k : xb.get_kernels())
             for (const auto &cu : k.get_cus()) {
-                names.push_back(k.get_name() + ":{" + cu.get_name() + "}");
-                declared += (declared.empty() ? "" : " ") + cu.get_name();
+                /* XRT 2.19 answers the QUALIFIED name here -
+                 * "cft_krnl:cft_krnl_1" - and the open string wants
+                 * kernel:{instance}. Composed naively this read
+                 * cft_krnl:{cft_krnl:cft_krnl_1} and opened no tile on
+                 * the card (2026-09-14, the first run of this branch on
+                 * silicon; both header generations had only been
+                 * COMPILED before). The instance is what follows the
+                 * last ':', or the whole name from an XRT that answers
+                 * bare. */
+                std::string inst = cu.get_name();
+                const size_t colon = inst.rfind(':');
+                if (colon != std::string::npos)
+                    inst = inst.substr(colon + 1);
+                names.push_back(k.get_name() + ":{" + inst + "}");
+                declared += (declared.empty() ? "" : " ") + inst;
             }
     } catch (const std::exception &) {
         names.clear();             /* the probe below takes over */

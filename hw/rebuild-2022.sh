@@ -10,12 +10,19 @@
 #
 #   bash hw/rebuild-2022.sh            # package + link hw + hw_emu
 #   TARGETS="hw" bash hw/rebuild-2022.sh   # subset
+#   TARGETS="" CFT_GENERICS="EN_FP32=0 EN_FP256=0" bash hw/rebuild-2022.sh
+#                                      # package + verify only, no link
 set -euo pipefail
 
 PLATFORM=${PLATFORM:-xilinx_u50_gen3x16_xdma_5_202210_1}
 PART=${PART:-xcu50-fsvh2104-2-e}
 KERNEL_FREQ=${KERNEL_FREQ:-10000000}   # v0 behavioural core: ~10 MHz
-TARGETS=${TARGETS:-"hw hw_emu"}
+# `-` not `:-`: an EMPTY TARGETS is a request, not an omission - package
+# the .xo and verify it (hw/verify_xo.tcl) without linking anything,
+# the three-minute check that a trim's generics reached the wrapper.
+# With `:-` the empty spelling linked hw AND hw_emu (2026-09-14, on a
+# box another session was using).
+TARGETS=${TARGETS-"hw hw_emu"}
 # Output directory. Parameterized so several links can run side by
 # side on one host at different clocks (a frequency sweep); each
 # needs its own .xo, temp dir and xclbin or they overwrite one
@@ -445,4 +452,11 @@ if [[ "$TARGETS" == *hw_emu* ]]; then
 fi
 
 echo "== done:"
-ls -la "$BUILD"/*.xclbin 2>/dev/null
+if [ -z "$TARGETS" ]; then
+  # Nothing was linked, so no xclbin to list - and under `set -e` an `ls`
+  # of a glob that matches nothing is exit 2, which is how the first
+  # package-only run failed AFTER every step of it had succeeded.
+  echo "   package + verify only (TARGETS empty):" "$BUILD"/*.xo
+else
+  ls -la "$BUILD"/*.xclbin 2>/dev/null
+fi

@@ -80,7 +80,7 @@ running.
 
 | document | lines | what it is for |
 |---|---|---|
-| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 183 | Building a bitstream, and the four traps — three of which exit 0. `hw/build-pair.sh` is this document as an executable. |
+| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 190 | Building a bitstream, and the four traps — three of which exit 0. `hw/build-pair.sh` is this document as an executable. |
 | [CARDDAY.md](CARDDAY.md) | 588 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 761 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
