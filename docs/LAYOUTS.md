@@ -43,7 +43,7 @@ FIFOs, reduction accumulator and CSR are `BEAT_BITS`-wide and stay.
 | `cft_krnl_f128` | fp32 fp64 fp128 | `EN_FP256=0` | 150* | target, unmeasured |
 | `cft_krnl_f64` | fp32 fp64 | `EN_FP128=0 EN_FP256=0` | 170* | target, unmeasured |
 | `cft_krnl_f32` | fp32 | `EN_FP64=0 EN_FP128=0 EN_FP256=0` | 190* | target, unmeasured |
-| `cft_krnl_f64f128` | fp64 fp128 | `EN_FP32=0 EN_FP256=0` | 150* | target, unmeasured; the tile cft-rebound asked for (its docs/BITSTREAM.md, ask 5), expressible since fp32 gained a generic on 2026-09-14 |
+| `cft_krnl_f64f128` | fp64 fp128 | `EN_FP32=0 EN_FP256=0` | 135 | measured: single closes +0.253 ns kernel WNS at 135 MHz (c56b368, 2026-09-14, retimed + phys_opt, 0 of 89,576 endpoints failing), about 72.2k LUT in-shell against the 69,461 modelled; the tile cft-rebound asked for (its docs/BITSTREAM.md, ask 5), and the first narrow variant on silicon: CAPS 0x6, fp32 refused by name, 543 device-test checks agreeing with the software backend (docs/VALIDATION.md, that day) |
 
 `*` targets, not results: the OOC ceilings in docs/ARCHITECTURE.md
 (232 MHz at fp32, 148 at fp256, the middle rungs between) less the

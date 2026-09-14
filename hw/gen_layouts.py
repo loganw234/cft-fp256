@@ -110,7 +110,7 @@ VARIANTS = {
     # 2026-09-14 when fp32 gained a generic. Its clock target is the
     # fp128 rung's, the widest it carries.
     "cft_krnl_f64f128": dict(rungs=("fp64", "fp128"), generics="EN_FP32=0 EN_FP256=0",
-                             mhz=150, clock="target, unmeasured"),
+                             mhz=135, clock="measured: single closes +0.253 kernel WNS @135 (c56b368, 2026-09-14, retimed + phys_opt; 0 of 89,576 endpoints failing, ~72.2k LUT in-shell against the 69,461 modelled)"),
 }
 TOP = {"cft_krnl": "fp256", "cft_krnl_f128": "fp128", "cft_krnl_f64": "fp64",
        "cft_krnl_f32": "fp32", "cft_krnl_f64f128": "fp128"}

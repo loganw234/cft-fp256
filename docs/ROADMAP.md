@@ -2841,6 +2841,22 @@ memory bill, and both would move every program cft-rebound runs, the
 resident corrector included - which makes them the next measurement
 to price, not this route.
 
+*Priced and built the same evening* (docs/SEQUENCER.md, revision 5;
+0843b62 and the commit after it). The per-lane fixed cost was the
+register-file wipe - 512 cycles a block, sixteen a lane at fp128 - and
+it is gone (a valid bit per entry); the streams load only when read;
+the deposit and count drains run an element and a beat a cycle; and
+instructions overlap, the next issuing while the last retires, a
+dependent one a beat behind the beat it needs. In the unit bench's
+cycle probe (`make seqcycles`, model RAM) a block that only halts went
+from 621 to 37 cycles at fp128, one IAND and one deposit from 823 to
+177, and an instruction from 38 cycles to 21 whether or not it reads
+the one before - the remaining 21 being sixteen beats, two of read
+lead and three of fetch and decode. What the card says is in
+docs/VALIDATION.md under the image that carries it; the whole program
+above was 2.3 us an element at binary128 with the instruction cost at
+38 cycles, and 210 instructions at 21 is a different number.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on

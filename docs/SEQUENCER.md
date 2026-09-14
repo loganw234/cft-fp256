@@ -1407,3 +1407,155 @@ And it does not make the depth portable. A program that needs 300 slots
 still needs a tile with 300 slots. What it makes is the difference
 between having them and not having them *audible*, which is the part
 that was missing.
+
+
+## Revision 5 (2026-09-14): the per-lane costs
+
+Measured on the card the same afternoon (docs/VALIDATION.md, "the
+sequencer is the wall"): with resident operands, a program that only
+HALTS cost 0.07 / 0.11 / 0.18 us per lane at fp32 / fp64 / fp128, each
+deposit about 40 ns a lane more, and each instruction ~2.2 cycles a
+beat - so a fifty-instruction pass over 8,192 fp64 lanes ran at about
+2.9 M lane-passes a second a tile against the 107 M/s the elementwise
+engine gives the same silicon. Nothing in a program's arithmetic was
+the cost; the machine around it was. Revision 5 is five changes to
+`rtl/cft_seq.sv` and no change to anything a program, a host or a
+bitstream's caller can observe: the same deposits, counts, flags and
+addresses, P2's layout untouched, no new CAPS bit because there is
+nothing new to advertise - only that every block costs less. The model
+(`seq.py`) runs one instruction at a time to completion and is the
+definition; the machine now runs them overlapped and must agree with
+it bit for bit, which is what the benches below check.
+
+### R9. No register-file wipe: a valid bit per entry
+
+`S_ZERO` wiped the whole file every block - RF_D = 32 x NBEATS = 512
+cycles, sixteen cycles a lane at fp128 - so that r3..r31 read `+0`. Now
+one valid bit per `{reg, beat}` entry says whether the entry has been
+written THIS block; the bits clear in the one cycle of `S_BLK_SETUP`.
+A read of an unwritten entry answers `+0`. The FIRST write to an entry
+writes every lane slice - the result where the lane's enable is on,
+`+0` where it is off - and later writes mask per lane as before. That
+is exactly `seq.py`'s state: a lane's register is `+0` until the lane
+writes it while active, a masked write leaves it alone, and the only
+slice a first write zeroes belongs to a lane that has never written the
+register this block, whose value is `+0`. 512 flops and three 512:1
+selects, in place of 512 cycles a block.
+
+### R10. Operand streams on demand
+
+All three streams were loaded every block. The image parser, on its way
+past each instruction, notes which of r0..r2 the program names as a
+REGISTER operand - a field with its `k` flag clear, under `kx` or not,
+and the control codes that read one (DEPOSIT, SETACT, STL, STX read
+`ra`; STX, LDX read `rb`) - and the block load skips the rest. It
+over-approximates on purpose: a unary opcode's unread field still
+counts, which only ever loads more. A program that reads r0 alone (a
+square root, the normal-only mask) loads one stream instead of three.
+
+### R11. The drains, one element and one beat a cycle
+
+The deposit drain spent three states an element (address, bank read,
+pack). It is a pipeline: one element a cycle through the deposit banks'
+two-cycle read, the tag - lane, slot, where in the beat it lands,
+whether it closes the beat, whether it is the block's last - riding
+beside the data, a completed beat handed to the write channel the cycle
+it completes, and the whole pipeline held while the channel cannot take
+it (the held address keeps the banks' output where it was, so nothing
+in flight is lost). The count drain packed one count a cycle; a count
+is four bytes whatever the format, so it packs a beat of eight lanes'
+counts a cycle.
+
+One slip on the way, and the unit bench's RAM caught it: the pipeline
+can present a beat in the same cycle the previous one is accepted, and
+`WLAST` was taken from the burst count BEFORE that acceptance - the
+last beat of a burst went out without it. The old drains had the same
+form and never reached a send in an acceptance cycle. Every send now
+takes its `WLAST`, and its right to go at all, from the count the
+master is about to have.
+
+### R12. Instructions overlap: the next one issues while this one retires
+
+An instruction cost its beats plus LATENCY plus fetch - about 38 cycles
+at sixteen beats - because the machine waited for the last result of
+one instruction to land before fetching the next, and the ALU pipe
+stood empty for the whole of that wait. Now the destinations of up to
+two ALU instructions are queued (`q_rd0` retiring, `q_rd1` behind it):
+an instruction's last beat enters the array, its destination is queued,
+and the NEXT instruction is fetched and decoded while the results land
+- the retire path runs in every state, writing the head's beats as the
+array delivers them and popping the head after its last. In-order, so a
+write after a write lands in order; a later instruction writing a
+register an earlier one READ is safe because the earlier one's reads
+all left the file before its last beat issued. Every control code that
+reads the file (DEPOSIT, SETACT, the scratch ops), moves the mask
+(SETACT, ACTALL) or ends the block (HALT, the implicit halt) waits for
+the queue to empty first; REPEAT and ENDREP read only the mask, which
+no result moves, and do not.
+
+### R13. The one hazard, a beat at a time
+
+Read-after-write is the hazard that remains: an instruction that reads
+the destination now retiring. It could wait for the whole retire - and
+did, for a day - which put every link of a dependent chain back at
+beats + LATENCY, and every real program is a dependent chain. But
+results land in beat order, one a step, and the issue reads operands in
+beat order, one a step, two beats ahead of the array: beat b of the
+dependent instruction needs only beat b of the retiring one to have
+landed. So the wait moved from decode to the issue itself. The
+instruction issues; at the cycle beat b's address would go on the bus,
+if it reads the retiring destination (`iss_dep`) and that destination's
+beat b has not landed (`wb_bt <= bt`), the issue machine and the file's
+read registers hold a cycle (`raw_hold`) and try again - never the
+array's standing request, which the array takes as usual, so nothing
+fires twice and nothing in the two-ahead pipe is lost. "Landed" is
+enough: the write is in the bank by the end of that cycle, and the
+address put on the bus is read at the end of the next unheld cycle at
+the earliest. At NBEATS 16 against LATENCY 16 a full block never
+holds - the fetch and decode between two instructions are already one
+cycle longer than the pipe needs - so a dependent instruction costs
+exactly what an independent one costs: its beats, two cycles of read
+lead and three of fetch and decode, 21 at sixteen beats. A block
+shorter than the pipe (a run's last) holds for the difference, and a
+multi-pass tile (`MUL_PASSES` > 1) steps its issue and its results on
+the same enable, so the argument holds there unchanged.
+
+The bench for it is `the_whole_divide_and_root` in `tb/test_seq_core.py`:
+divfull's programs - some two hundred and ten instructions of dense
+register reuse, the same register written and read three instructions
+apart, written twice in a row, read by a SELECT the previous
+instruction wrote, a masked lane beside an active one in every beat -
+over a block boundary, in two rounding attributes, fp32/64/128, against
+the model's one-at-a-time executor.
+
+### What it measures
+
+`make seqcycles` (`tb/probe_seq_cycles.py`, a diagnostic beside
+`seqprobe`, not part of `make sim`): cycles per block through the unit
+bench's harness, four blocks, model RAM (so HBM latency is not in these;
+every cycle the state machine spends is). Three columns: before
+revision 5, after R9-R11 (0843b62), after R12-R13.
+
+| program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
+|---|---|---|---|
+| halt only, no deposit | 729 / 61 / 61 | 657 / 45 / 45 | 621 / 37 / 37 |
+| one IAND, one deposit | 1,219 / 299 / 297 | 955 / 219 / 217 | 823 / 179 / 177 |
+| one IAND, four deposits | 2,573 / 837 / 835 | 1,733 / 565 / 563 | 1,313 / 429 / 427 |
+| twenty IANDs, one deposit | 1,947 / 1,027 / 702 | 1,683 / 947 / 622 | 1,551 / 907 / 582 |
+| twenty dependent FMAs, one deposit | - / 1,005 / 720 | - / 925 / 640 | - / 885 / 600 |
+
+Per instruction, from the twenty-IAND row: 38 cycles before R12, 21
+after, dependent or not - the dependent row sits 18 cycles above the
+IAND row at every format, and that is the r1 stream the FMA reads
+and the IAND does not (sixteen beats and two of setup), not a wait:
+(720 - 18 - 297) / 19 is the same 21. Per lane, one deposit: 9.5 -> 2.3 cycles at
+fp32, 14.9 -> 3.4 at fp64, 25.7 -> 5.6 at fp128. What is left per
+instruction is the sixteen beats, the two-beat read lead and three
+cycles of fetch and decode; the floor is the beats, and reaching it
+means fetching under the issue and streaming one instruction's
+addresses behind another's fires, which is the next revision's work if
+the card says the instruction cost is what remains.
+
+Benches: `seq_core` 19/19 (the divide case new), `krnlseq`, `seqbanks`
+and `faults` under Verilator and again under Icarus; `yosys-lint`
+clean. The four-change commit is 0843b62.

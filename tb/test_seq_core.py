@@ -2480,6 +2480,60 @@ async def scratch_strict_range(dut):
 
 
 # ======================================================================
+# 10b. the whole divide and square root: two hundred instructions of
+#      real register traffic, with every hazard the overlap can meet
+# ======================================================================
+
+def _mixed_operands(fmt, n, seed):
+    """Every class in both signs, then randoms: the operands that make a
+    divide take every path through its program."""
+    rng = random.Random(seed)
+    w, mw = fmt.width, fmt.man_w
+    pool = [0, fmt.sign_mask, sf.inf_bits(fmt, 0), sf.inf_bits(fmt, 1),
+            sf.qnan_bits(fmt), sf.snan_bits(fmt), 1, fmt.man_mask,
+            sf.min_normal_bits(fmt), sf.one_bits(fmt), sf.one_bits(fmt, 1),
+            sf.max_normal_bits(fmt), (fmt.bias - 1) << mw, (fmt.bias + 1) << mw]
+    out = list(pool[:n])
+    while len(out) < n:
+        out.append(rng.getrandbits(w))
+    return out
+
+
+@cocotb.test()
+async def the_whole_divide_and_root(dut):
+    """divfull's programs through the machine: the raw operands in, the
+    correctly rounded result and its flags out, over a block boundary,
+    in two rounding attributes, against the model's executor.
+
+    Why this case exists (2026-09-14): the instruction overlap lets an
+    ALU instruction issue while the previous one retires, gated by one
+    read-after-write check. These programs are ~210 instructions of
+    dense register reuse - the same register written and read three
+    instructions apart, written twice in a row, read by a SELECT that
+    the previous instruction wrote - and a masked lane (a special) beside
+    an active one in every beat. If the overlap ever issued a read
+    against a destination still in flight, this is where a bit would
+    move; the model, which runs one instruction at a time, is the
+    definition.
+    """
+    from cft_golden import divfull
+    bench = Bench(dut)
+    await bench.start()
+    for name, n in (("fp32", 40), ("fp64", 40), ("fp128", 40)):
+        fmt = FORMATS[name]
+        for rnd in (sf.RND_RNE, sf.RND_RDN):
+            a = _mixed_operands(fmt, n, 900 + rnd)
+            b = _mixed_operands(fmt, n, 950 + rnd)
+            c = operands(fmt, n, 990)
+            await bench.program(fmt, divfull.div_full_program_for(fmt),
+                                a, b, c, n, f"{name} whole divide rnd={rnd}",
+                                bank=divfull.bank(fmt, rnd))
+            await bench.program(fmt, divfull.sqrt_full_program_for(fmt),
+                                a, b, c, n, f"{name} whole root rnd={rnd}",
+                                bank=divfull.bank_sqrt(fmt, rnd))
+
+
+# ======================================================================
 # 11. the one that has to go last
 # ======================================================================
 

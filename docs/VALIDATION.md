@@ -11401,3 +11401,113 @@ route ran (host/tests/divsqrt_check.py, the sabotage control; the first
 draft corrupted a flag word and passed, because the matrix ORs flags
 over a batch and the subnormal lanes still carried INEXACT - the matrix
 now compares flags per lane too).
+
+## 2026-09-14 - the fp64/fp128 tile on silicon: the first narrow variant, and it is the one that was asked for
+
+**amd-arc-box, the U50 at 02:00.1, `~/cardday-f64f128/cft_hw_f64f128_1x.xclbin`
+(sha256 48901c92...), built from c56b368 by `CFT_GENERICS="EN_FP32=0
+EN_FP256=0" KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 TARGETS=hw bash
+hw/rebuild-2022.sh` under `nice` while cft-rebound's CPU suite ran on the
+same box - 13:14 to 14:52. Host tools at 0843b62, XRT=1.**
+
+**The link.** Kernel WNS +0.253 ns at 135 MHz, 0 of 89,576 kernel
+endpoints failing (the whole design +0.035 ns, 526,541 endpoints);
+196,102 LUTs placed in all, which against the 123,897 the single-tile
+shell costs (docs/SCALING.md) is about 72.2k for the tile - 4% over the
+69,461 `hw/gen_layouts.py` models for it by subtracting the fp32 and
+fp256 banks from the full tile, the same direction and size of error the
+model shows on the quad. The manifest records `generics: EN_FP32=0
+EN_FP256=0` and the wrapper read-back that `verify_xo.tcl` performed
+before the link.
+
+**On the card, through the host at 0843b62:**
+
+    $ cft-bench cft_hw_f64f128_1x.xclbin --probe
+    backend=xrt tiles=1 format_mask=0x6 formats=fp64,fp128 buffers_resident=1
+
+    $ device-test cft_hw_f64f128_1x.xclbin -q -n 8
+    device: backend xrt, 1 tile, contract 0x00000800, formats fp64 fp128
+      format refusals: 2 absent formats, 4 checks, 0 failed
+    fp32   not on this device, skipped
+    ...
+    543 checks, 0 failed
+    the device and the software backend agree on every case, bits and flags
+
+The refusals are 2ec3cfa's: `cft_run` and `cft_reduce` at fp32 and at
+fp256 answer `CFT_ERR_UNSUPPORTED` with a sentence naming fp64, fp128
+and the format asked for, before a byte is issued - and `device-test`
+skips the fp32 matrix by name rather than failing it. `cft-resident`,
+which issues MODE straight at the kernel with no CAPS check, is how the
+hardware is seen refusing for itself: fp64 fma 414 Melem/s and fp128
+212 Melem/s at 13.3 GB/s - the same beat ceiling as the full tile on the
+rungs it carries - and an fp32 run answers `STATUS 0x8`, the refusal
+bit alone, which the tool reports as the row failing its check, which
+it did.
+
+**What this settles.** The fp32 generic (5c73564) reaches a bitstream
+through `CFT_GENERICS` (c2c67b6), the image loads and opens through the
+listing branch (c56b368), and the tile computes the two rungs it kept
+bit for bit against the model. `hw/gen_layouts.py` and docs/LAYOUTS.md
+carry the variant as measured now - 135 MHz, the first non-`*` clock in
+the narrow rows - and the seven-tile homogeneous layout it models
+(`u50-7xfp64fp128.cfg`) is the layout cft-rebound's ask 5 was after.
+The divide on this tile: fp128 1.55 us an element on the older program
+route and 2.43 on the whole program, the same shape as the f128 image an
+hour earlier, for the same reason.
+
+## 2026-09-14 - the sequencer's per-lane cost, taken apart in RTL: revision 5
+
+**The Windows desktop's Docker sim image (Verilator 5, cocotb), then the
+box's for Icarus. RTL 0843b62 (R9-R11) and the commit after it (R12-R13,
+this entry). Numbers from `make seqcycles`, the cycle probe added with
+R9 - the unit bench's harness with model RAM, four blocks a run, so what
+it counts is the state machine and nothing of HBM's.**
+
+The card said (the entry two above) that a program run's cost was the
+machine around the arithmetic: 0.18 us a LANE at fp128 for a program
+that only halts, 40 ns a deposit a lane, 2.2 cycles a beat an
+instruction. Read in the RTL, those were: `S_ZERO` wiping RF_D = 512
+register-file entries every block, all three operand streams loaded
+whether read or not, the deposit drain spending three states an element
+and the count drain a state a lane, and an instruction waiting for the
+last result of the one before it - beats + LATENCY + fetch, ~38
+cycles - before the next was even fetched.
+
+**Cycles per block, before / after R9-R11 / after R12-R13:**
+
+| program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
+|---|---|---|---|
+| halt only, no deposit | 729 / 61 / 61 | 657 / 45 / 45 | 621 / 37 / 37 |
+| one IAND, one deposit | 1,219 / 299 / 297 | 955 / 219 / 217 | 823 / 179 / 177 |
+| one IAND, four deposits | 2,573 / 837 / 835 | 1,733 / 565 / 563 | 1,313 / 429 / 427 |
+| twenty IANDs, one deposit | 1,947 / 1,027 / 702 | 1,683 / 947 / 622 | 1,551 / 907 / 582 |
+| twenty dependent FMAs, one deposit | - / 1,005 / 720 | - / 925 / 640 | - / 885 / 600 |
+
+The halt-only block at fp128: 621 to 37, which is the wipe. One deposit
+a lane: 25.7 to 5.6 cycles at fp128, 9.5 to 2.3 at fp32. An
+instruction: (1,027 - 299) / 19 = 38 cycles before R12, (702 - 297) /
+19 = 21 after, and the dependent-FMA row - which R12 alone left at 37,
+because a dependent instruction waited for the whole retire - is the
+same 21 after R13's beat-at-a-time wait: it sits 18 cycles above the
+IAND row at every format, which is the r1 stream the FMA reads and the
+IAND (`r3 = r0 & r0`) does not, sixteen beats and two of setup, and
+(720 - 18 - 297) / 19 = 21.3 against (702 - 297) / 19 = 21.3. What the
+21 is: sixteen beats, the two-cycle read lead, three cycles of fetch
+and decode.
+
+**What proves the overlap is right.** The model runs one instruction to
+completion before the next; the machine now has two in flight and a
+read racing a write a beat behind it. `tb/test_seq_core.py` gained
+`the_whole_divide_and_root`: divfull's fp32/64/128 divide and square
+root programs - about 210 instructions each of the densest register
+reuse the repo has, over a block boundary, RNE and RDN, specials beside
+normals in every beat - against `seq.run`. Under Verilator: `seq_core`
+19/19, `krnlseq` 1/1, `seqbanks` 1/1, `faults` 5/5; `yosys-lint` clean
+(no latches; the array's usual memory-to-register notes). One slip on
+the way to R11 is recorded in docs/SEQUENCER.md: a `WLAST` taken from
+the burst count before the same-cycle acceptance, caught by the bench's
+RAM as "WLAST at beat 3 of a burst AWLEN said was 3 beats long".
+
+Icarus on the same benches, and the full `make sim` under Verilator, ran
+on the box after the push; their lines follow this entry. The image
+that carries revision 5 is the next entry's.
