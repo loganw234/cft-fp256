@@ -11305,3 +11305,99 @@ committed.
 `cft_krnl_f64f128` link (`EN_FP32=0 EN_FP256=0`, 135 MHz, retimed +
 phys_opt) was started at 13:15 under `nice`; its entry follows when it
 has been exercised.
+
+## 2026-09-14 - the whole divide on the chip, measured: the sequencer is the wall, not the host
+
+**amd-arc-box, the U50 at 02:00.1, cft-rebound's f128 image
+(`~/cardday-f128s`, ca19fe3, `EN_FP256=0`), libcft at 7b3c10c built
+XRT=1, the box also linking an fp64/fp128 image under `nice`. Medians
+of 10-12 calls through libcft's own entry points from Python/ctypes.**
+
+The ask (docs/ROADMAP.md, workload ask 8) was cft-rebound's: the composed
+divide costs 1.6 us an element at binary128 on the card, because the
+program route still classifies and centres before the run and rounds
+after it. So the whole operation went on the chip - prep, core and
+round_pack in the instruction stream, two deposits a lane, nothing per
+element on the host (7b3c10c) - and was then measured, which is the
+order this repo's rules ask for and the order that saved the default.
+
+**`cft_div` and `cft_sqrt`, n = 768, per element:**
+
+| | older program route | whole program |
+|---|---|---|
+| fp64 div | 1.094 us | 1.289 us |
+| fp64 sqrt | 1.093 us | 1.196 us |
+| fp128 div | 1.695 us | 2.330 us |
+| fp128 sqrt | 1.806 us | 2.277 us |
+| (software backend, one core, fp128 div) | 9.18 us | 9.11 us |
+
+The older route reproduces cft-rebound's number. The whole program is
+slower, and the difference at fp128 (0.49 ms a call) is exactly 167
+instructions x 384 beats at 7.4 ns - one cycle a beat a instruction,
+which the next table refines to ~2.2.
+
+**A program call taken apart, `cft_program_run` with resident operands
+and deposits so that staging is out of it (fp128 unless stated, 8192
+lanes, per lane):**
+
+| program | per lane | per beat |
+|---|---|---|
+| `halt` alone, no deposit | 0.175 us | 350 ns, 47 cycles |
+| one IAND, one deposit | 0.224 us | 447 ns |
+| one IAND, four deposits | 0.329 us | 658 ns |
+| twenty IANDs, one deposit | 0.382 us | 764 ns |
+| fp64, `halt` alone | 0.108 us | 431 ns |
+| fp32, `halt` alone | 0.068 us | 545 ns |
+| `cft_run` MUL, resident, same lanes | 0.011 us | 22 ns |
+| `cft_run` MUL, host pointers | 0.026 us | |
+
+and the same one-instruction program with host pointers at 768 / 8192 /
+65,536 lanes: 0.488 / 0.243 / 0.215 us a lane; with resident buffers
+0.314 / 0.236 / 0.205. Residency moves almost nothing.
+
+Three costs, all in the sequencer:
+
+1. **A fixed cost per LANE**, not per beat: 0.068 / 0.108 / 0.175 us at
+   fp32 / fp64 / fp128 for a program that only halts - and it scales
+   with the element size, about 40 ns plus 8.5 ns a byte. The per-lane
+   deposit COUNT is written whether or not anything deposits, at four
+   bytes a lane, and the lane bookkeeping is per lane. A beat of eight
+   fp32 lanes costs 73 cycles before the first instruction.
+2. **About 40 ns a deposit a lane** (36 / 39 / 49 ns at fp32 / 64 /
+   128): element-sized writes at P2's lane-major addresses,
+   `base + (i * max_deposits + d) * esz`, one transaction each.
+3. **About 2.2 cycles a beat an instruction** (15.5-16.7 ns a beat,
+   every format, both from IAND x 1 -> x 20 here and IAND x 1 -> x 47
+   -> x 214 in the first pass): a 16-beat block drains the 16-deep pipe
+   between dependent instructions, so an instruction costs beats plus
+   latency, not beats.
+
+Against these, the host prep and finish the whole program replaced come
+to about 0.3 us an element, and its 167 extra instructions cost 1.1 ms
+a call. So `divsqrt_route_full()` is opt-in (`CFT_DIVSQRT_FULL=1`; the
+Makefile's `divsqrttest` runs the matrix under all three settings), the
+images, the model, the tests and the generated header stay because they
+are correct and proven, and what the whole program is FOR is the
+contract's bits inside a resident program, where the alternative is a
+round trip - which is what cft-rebound's `1/r^3` needs and where the
+1.6 us was never going to be won back on the host side.
+
+**What this says about their plan.** The resident corrector is a
+program over 3N x E lanes a pass; at fp64 that is 0.11 us a lane before
+an instruction runs and 4 ns a lane an instruction after, so a
+fifty-instruction pass is ~0.35 us a lane - 2.9 M lane-passes a second
+a tile, against the 107 M/s their HARDWARE.md took as the floor from the
+elementwise engine. The levers are RTL: deposit and count writes
+coalesced into beats (or a deposit-major layout, a change to P2), and a
+second lane block in flight so an instruction costs beats rather than
+beats plus latency. Both carry a memory bill; both move every program
+they run. Priced next, not done here.
+
+**Also proven on the card in passing:** the whole-program route runs
+where it is asked for - `cft_div(1, 3)` under `CFT_DIVSQRT_FULL=1`
+answers the contract's bits, and with a corrupted packing constant in
+the generated bank it answers the wrong ones, which is what shows the
+route ran (host/tests/divsqrt_check.py, the sabotage control; the first
+draft corrupted a flag word and passed, because the matrix ORs flags
+over a batch and the subnormal lanes still carried INEXACT - the matrix
+now compares flags per lane too).

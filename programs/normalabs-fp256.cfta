@@ -1,0 +1,44 @@
+; normalabs-fp256.cfta - the normal-only mask, fp256
+;
+; python/cft_golden/seqprogs.py's normal_abs_program(fp256) as a file:
+; |x| where x is NORMAL (either sign; class positiveNormal or
+; negativeNormal), and +0 everywhere else - zero, subnormal, infinity,
+; NaN. cft-rebound's corrector convergence test (its src/ias15_cft.c,
+; pc_error) is a maximum over the normal values of |tmp| and |at| per
+; system, from +0, and a maximum starting at +0 over THESE values is
+; that maximum exactly: the masked lanes cannot raise it. This is the
+; half of that test a program can carry today; the other half, the
+; maximum per system rather than per array, is docs/ROADMAP.md's
+; workload ask 7.
+;
+; Read off the encoding with integer instructions rather than the
+; floating-point compares, which would signal INVALID on a signaling
+; NaN: a corrector program's FLAGS are its own. Normal is an exponent
+; field that is neither zero nor all ones - two unsigned compares on
+; the masked field - and SELECT folds the three. Seven instructions in
+; r3..r5; inside a larger program, drop the deposit.
+;
+; The check is byte equality with the image the model generates, and
+; 64 raw lanes - every class, both signs - through positive-run held
+; to softfloat's class.
+;
+;   r0  x, raw
+;   deposits: |x| if normal else +0
+
+.format   fp256
+.deposits 1
+.const    k0 = 0x0000000000000000000000000000000000000000000000000000000000000000
+.const    k1 = 0x0000000000000000000000000000000000000000000000000000000000000001
+.const    k2 = 0x7ffff00000000000000000000000000000000000000000000000000000000000
+.const    k3 = 0x7fffefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+.const    k4 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+iand r3, r0, k2
+icmplt r4, r3, k1
+icmplt r3, k3, r3
+select r4, k0, k1, r4
+select r4, k0, r4, r3
+iand r5, r0, k4
+select r5, r5, k0, r4
+deposit r5
+halt

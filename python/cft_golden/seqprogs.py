@@ -58,7 +58,7 @@ from .softfloat import (
     OP_RECIP_SEED, OP_RSQRT_SEED,
     OP_FMA, OP_MUL, OP_NEG, OP_SUB,
     OP_SELECT, OP_CMPLT, OP_CMPLE,
-    OP_IAND, OP_ISUB, OP_IADD, OP_ISHL,
+    OP_IAND, OP_ISUB, OP_IADD, OP_ISHL, OP_ICMPLT,
     unpack, NAN, INF, ZERO,
     zero_bits, one_bits, inf_bits, qnan_bits,
     FLAG_INVALID, FLAG_DIVZERO,
@@ -262,6 +262,75 @@ def sqrt_program_for(fmt: FpFormat) -> seq.Program:
     if fmt.width not in _SQRT_CACHE:
         _SQRT_CACHE[fmt.width] = sqrt_program(fmt)
     return _SQRT_CACHE[fmt.width]
+
+
+# ---- the normal-only mask --------------------------------------------
+#
+# cft-rebound's corrector convergence test (its src/ias15_cft.c,
+# pc_error) is a maximum over the NORMAL values of |tmp| and |at| per
+# system, from +0. ABI 0.12's CFT_MAXALL is a maximum over the whole
+# array with every value counted, so the mask is the part of that test
+# a program can express today (docs/ROADMAP.md, workload ask 7): |x|
+# where x is normal - either sign, class positiveNormal or
+# negativeNormal - and +0 everywhere else, so that a maximum starting
+# at +0 over the masked values IS the maximum over the normal ones.
+#
+# Read off the encoding with integer instructions, not with the
+# floating-point compares: those signal INVALID on a signaling NaN, and
+# a corrector program's FLAGS are its own. Normal is an exponent field
+# that is neither zero nor all ones, which is two unsigned compares on
+# the masked field; |x| is the magnitude mask; SELECT folds the three.
+# Seven instructions, r3..r5, and it deposits the result so the file in
+# programs/ is its own row - inside a larger program, drop the deposit.
+
+K_NA_ZERO, K_NA_INT1, K_NA_EXP, K_NA_EXPM1, K_NA_ABSM = range(5)
+
+
+def _consts_normal_abs(fmt: FpFormat):
+    return [
+        zero_bits(fmt),                                  # +0.0
+        1,                                               # integer 1
+        fmt.exp_mask << fmt.man_w,                       # the exponent field
+        (fmt.exp_mask << fmt.man_w) - 1,                 # field == all ones test
+        ((1 << fmt.width) - 1) ^ fmt.sign_mask,          # magnitude mask
+    ]
+
+
+def normal_abs_program(fmt: FpFormat) -> seq.Program:
+    """r0 = x, raw. Deposits |x| if x is normal, else +0."""
+    a = seq.alu
+    p = [
+        a(OP_IAND, 3, 0, K_NA_EXP, kb=True),             # the exponent field
+        a(OP_ICMPLT, 4, 3, K_NA_INT1, kb=True),          # field == 0: zero or subnormal
+        a(OP_ICMPLT, 3, K_NA_EXPM1, 3, ka=True),         # field == all ones: inf or NaN
+        a(OP_SELECT, 4, K_NA_ZERO, K_NA_INT1, 4, ka=True, kb=True),   # not (field == 0)
+        a(OP_SELECT, 4, K_NA_ZERO, 4, 3, ka=True),       # ... and not all ones: normal
+        a(OP_IAND, 5, 0, K_NA_ABSM, kb=True),            # |x|
+        a(OP_SELECT, 5, 5, K_NA_ZERO, 4, kb=True),       # normal ? |x| : +0
+        seq.deposit(5),
+        seq.halt(),
+    ]
+    return seq.Program(fmt, p, consts=_consts_normal_abs(fmt), max_deposits=1)
+
+
+_NA_CACHE = {}
+
+
+def normal_abs_program_for(fmt: FpFormat) -> seq.Program:
+    if fmt.width not in _NA_CACHE:
+        _NA_CACHE[fmt.width] = normal_abs_program(fmt)
+    return _NA_CACHE[fmt.width]
+
+
+def normal_abs(fmt: FpFormat, x: int) -> int:
+    """The definition the program is held to: softfloat's class."""
+    ua = unpack(fmt, x)
+    return (x & ~fmt.sign_mask) if ua.kind == sf.NORM else zero_bits(fmt)
+
+
+def run_normal_abs(fmt: FpFormat, xs):
+    res = seq.run(normal_abs_program_for(fmt), list(xs), [0] * len(xs))
+    return [res.deposits[i] for i in range(len(xs))], res.flags
 
 
 # ---- host halves -----------------------------------------------------

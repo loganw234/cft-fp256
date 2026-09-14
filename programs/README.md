@@ -55,6 +55,10 @@ so in the open.
 | `sqrtfull-fp64` | fp64 | 189 | 49 | 2 | as above | as above, the `sqrt-fp64` core | as above |
 | `sqrtfull-fp128` | fp128 | 192 | 49 | 2 | as above | as above, the `sqrt-fp128` core | as above |
 | `sqrtfull-fp256` | fp256 | 195 | 49 | 2 | as above | as above, the `sqrt-fp256` core | as above |
+| `normalabs-fp32` | fp32 | 9 | 5 | 1 | - | the normal-only mask: `\|x\|` where x is normal (either sign), `+0` for zero, subnormal, infinity and NaN - read off the encoding with integer instructions so it signals nothing; the half of cft-rebound's convergence test a program can carry today (docs/ROADMAP.md, workload ask 7) | byte-identical to `seqprogs.normal_abs_program(fp32)`, and 64 raw lanes of every class in both signs through `positive-run` against `softfloat`'s class, no flag raised |
+| `normalabs-fp64` | fp64 | 9 | 5 | 1 | - | as above | as above |
+| `normalabs-fp128` | fp128 | 9 | 5 | 1 | - | as above | as above |
+| `normalabs-fp256` | fp256 | 9 | 5 | 1 | - | as above | as above |
 | `collatz-fp256` | fp256 | 27 | 9 | 4 | - | 1024 Collatz steps with parity read off the encoding and a per-element exactness witness; deposits n, steps, peak, escaped | its nine constants against their derivation from the format, and 64 trajectories against `cft-collatz`'s own records - steps and peak exactly |
 | `zoom-scan-fp256` | fp256 | 9 | 1 | 1 | - | 51 iterations of the guarded real-axis map `z <- z^2 + c`, the nucleus scan | 32 real points bit-identical to `seq.py`'s executor running the same image |
 | `lowbias32-fp32` | fp32 | 10 | 4 | 1 | `IMUL` | docs/ATLAS.md's draw hash over the index ramp | 4,096 draws against the hash's definition, and the run must signal nothing |
@@ -89,8 +93,12 @@ DIVIDE and not merely a byte string.
 and the finish moved INTO the instruction stream, so the operands go
 in raw and the correctly rounded result and its five flags come out as
 two deposits - nothing per element on the host. cft-rebound measured
-the split route at 1.6 us an element at binary128 on the card, which
-is what these exist to remove (docs/ROADMAP.md, workload ask 8). They
+the split route at 1.6 us an element at binary128 on the card, and
+these were written to remove the host's share of it (docs/ROADMAP.md,
+workload ask 8); measured the same afternoon, that share was 0.3 us and
+the 167 extra instructions cost more, so libcft keeps the split route
+by default and takes these on `CFT_DIVSQRT_FULL=1` - their value is the
+contract's bits inside a resident program, not a faster call. They
 are BANK_EXT so that one image a format serves every rounding
 attribute: the bank's last five words are the mode as 0/1, and libcft
 builds the bank from the fixed words `python/gen_divfull.py` writes

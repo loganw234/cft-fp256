@@ -483,15 +483,16 @@ difftest: all
 # chunk route, then the sequencer-program route forced through the
 # software executor (CFT_DIVSQRT_SEQ=1) - the same matrix over the
 # route a program-capable device takes.
-# Three routes since 2026-09-14: the chunk route; the whole divide as
-# ONE program (divfull_images.h, generated from cft_golden/divfull.py),
-# which CFT_DIVSQRT_SEQ=1 now reaches first; and the older program route
-# with host prep and finish, forced with CFT_DIVSQRT_FULL=0, which a
-# tile without the bank register still takes.
+# Three routes since 2026-09-14: the chunk route; the program route with
+# host prep and finish, which CFT_DIVSQRT_SEQ=1 reaches and a device
+# takes by default (measured faster on the card); and the whole divide
+# as ONE program (divfull_images.h, generated from cft_golden/divfull.py),
+# opt-in with CFT_DIVSQRT_FULL=1 - the contract's bits with nothing per
+# element on the host, for a resident program's sake.
 divsqrttest: all
 	$(PYTHON) tests/divsqrt_check.py
 	CFT_DIVSQRT_SEQ=1 $(PYTHON) tests/divsqrt_check.py
-	CFT_DIVSQRT_SEQ=1 CFT_DIVSQRT_FULL=0 $(PYTHON) tests/divsqrt_check.py
+	CFT_DIVSQRT_SEQ=1 CFT_DIVSQRT_FULL=1 $(PYTHON) tests/divsqrt_check.py
 
 # The clause-5 completion set against the model: every new entry point
 # (rint, scaleb, the conversions, the signaling compares, logB, next,

@@ -1448,23 +1448,32 @@ static cft_status divsqrt_via_program(cft_device *dev,
  * mode words with a 1 in the caller's slot. Nothing per element is
  * computed here: d takes deposit 0 by copy and *acc ORs deposit 1.
  *
- * Route: tried first whenever the program route is; a tile whose caps
- * lack what the image needs (BANK_PTR, REGS32, WIDE_CONST) refuses the
- * load by name and the ladder falls through to the route above, then
- * to the chunk route - d untouched at that point, so the fall-through
- * is legal under aliasing exactly as before. CFT_DIVSQRT_FULL=0 in the
- * environment forces the old program route, which is how the tests
- * keep both under the same matrix. */
+ * Route: taken when CFT_DIVSQRT_FULL=1 asks for it (see the switch
+ * below for why it is not the default); a tile whose caps lack what
+ * the image needs (BANK_PTR, REGS32, WIDE_CONST) refuses the load by
+ * name and the ladder falls through to the route above, then to the
+ * chunk route - d untouched at that point, so the fall-through is
+ * legal under aliasing exactly as before. The tests run the matrix
+ * under both settings. */
 #include "divfull_images.h"
 
+/* OPT-IN, since the afternoon it was measured. On cft-rebound's f128
+ * image at binary128, n = 768: the older program route 1.70 us an
+ * element, the whole program 2.33 - slower, because a sequencer
+ * instruction costs ~2.3 cycles a beat on this tile and the 167 extra
+ * instructions cost 1.1 ms, more than the host prep and finish they
+ * replaced (~0.3 us an element). What the whole program buys is the
+ * contract's bits INSIDE a resident program, where the alternative is
+ * a round trip, not a faster cft_div; libcft keeps the faster route by
+ * default and the tests exercise both (docs/ROADMAP.md, ask 8). */
 static int divsqrt_route_full(void)
 {
 #ifndef CFT_NO_GETENV
     const char *e = getenv("CFT_DIVSQRT_FULL");
-    if (e && e[0] == '0' && !e[1])
-        return 0;
+    if (e && e[0] == '1' && !e[1])
+        return 1;
 #endif
-    return 1;
+    return 0;
 }
 
 static cft_status full_via_program(cft_device *dev,

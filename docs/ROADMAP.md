@@ -2696,7 +2696,13 @@ two compares whose results are exactly 1.0 or +0.0; `select`
 (d = c != 0 ? a : b) folds them and zeroes everything else. Five
 ordinary instructions, all of them legal inside the sequencer program
 the corrector already is; no `class` opcode exists on the tile and none
-is needed. What does not exist is the reduction PER SEGMENT. The
+is needed. The mask exists as a program since the same afternoon -
+`programs/normalabs-<fmt>.cfta`, `seqprogs.normal_abs_program`, seven
+instructions read off the encoding with integer ops so that a
+signaling NaN raises nothing, held to softfloat's class over every
+class in both signs - and a maximum from +0 over its output is
+pc_error's maximum over the normal values exactly. What does not exist
+is the reduction PER SEGMENT. The
 engine's accumulator folds one stream to one value; the sequencer's
 lanes cannot read across lanes; a maximum over one system's L
 coordinates - a block of L consecutive lanes - is a cross-lane
@@ -2793,9 +2799,47 @@ all three (29,124 cases each), and a sabotaged bank word makes the
 whole-program route fail while the forced old route still passes,
 which is what proves the route ran. `programs/divfull-*.cfta` and
 `sqrtfull-*.cfta` are the same images as text with their own rows.
-Still owed: the per-element time ON THE CARD, which is the number the
-ask was about - the f128 image, or the fp64/fp128 one, once the box is
-free of its link.
+*Measured on the card an hour later, and the premise was wrong.* The
+f128 image, binary128, n = 768, medians: the older program route 1.70
+us an element - cft-rebound's number, reproduced - and the whole
+program 2.33 us. Slower. Taking a program call apart on the same image
+(`cft_program_run` with resident operands, so staging is out of it):
+
+    fp128, 8192 lanes                       per lane   per beat
+    halt only, no deposit                   0.175 us   350 ns   (47 cycles)
+    one IAND, one deposit                   0.224 us
+    one IAND, four deposits                 0.329 us
+    twenty IANDs, one deposit               0.382 us
+    fp64, halt only                         0.108 us   431 ns
+    fp32, halt only                         0.068 us   545 ns
+    cft_run MUL, resident, same lanes       0.011 us    22 ns
+
+Three costs, all in the sequencer and none of them the host:
+
+- **a fixed cost PER LANE**, 0.07 / 0.11 / 0.18 us at fp32 / 64 / 128
+  for a program that does nothing but halt - the per-lane deposit
+  COUNT write and the lane bookkeeping, element-sized, so a beat of
+  eight fp32 lanes costs 73 cycles before an instruction runs;
+- **~40 ns per deposit per lane**, element-sized writes at P2's
+  lane-major addresses rather than beats;
+- **~2.2 cycles per beat per instruction** (16.7 ns a beat, every
+  format): a 16-beat block drains the 16-deep pipe between dependent
+  instructions, so each instruction costs beats + latency.
+
+Against these the 167 instructions the whole program adds cost 1.1 ms
+at 384 beats, and the host prep and finish they replaced cost about
+0.3 us an element. So `cft_div` keeps the older route by default and
+the whole program is opt-in (`CFT_DIVSQRT_FULL=1`); what it buys is
+the contract's bits INSIDE a resident program where the alternative is
+a round trip, not a faster call. The images, the model, the tests and
+the library path stay - they are correct and proven - but the ask's
+number moves only when the RTL does: deposit and count writes
+coalesced into beats (or a deposit-major layout, which is a change to
+P2's contract), and a second lane block in flight so an instruction
+costs beats rather than beats plus latency. Both are RTL work with a
+memory bill, and both would move every program cft-rebound runs, the
+resident corrector included - which makes them the next measurement
+to price, not this route.
 
 ## The adoption story these serve
 

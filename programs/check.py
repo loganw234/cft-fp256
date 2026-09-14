@@ -679,6 +679,48 @@ def check_full_runs(args, name, image_path, tmp, n=64):
        f"specials included; flags {flags:#07b}")
 
 
+def check_normalabs(args, name, image, image_path, tmp, n=64):
+    """The normal-only mask: byte equality with seqprogs, then every
+    class in both signs and randoms through positive-run, held to
+    softfloat's class - |x| for a normal, +0 for anything else - and the
+    run must signal nothing (integer instructions, not FP compares)."""
+    fmt = FORMATS[name.split("-")[1]]
+    prog = seqprogs.normal_abs_program_for(fmt)
+    want = prog.to_bytes()
+    if image != want:
+        bad(f"{name}: equals seqprogs", f"{len(image)} bytes vs {len(want)}")
+        return
+    ok(f"{name}: byte-identical to seqprogs.normal_abs_program({fmt.name})",
+       f"{len(prog.insns)} insns, {len(prog.consts)} consts")
+    rng = random.Random(sum(ord(ch) for ch in name))
+    xs = [0, fmt.sign_mask, sf.inf_bits(fmt, 0), sf.inf_bits(fmt, 1),
+          sf.qnan_bits(fmt), sf.snan_bits(fmt), sf.snan_bits(fmt) | fmt.sign_mask,
+          1, fmt.man_mask, 1 | fmt.sign_mask, sf.min_normal_bits(fmt),
+          sf.min_normal_bits(fmt) | fmt.sign_mask, sf.max_normal_bits(fmt),
+          sf.max_normal_bits(fmt, 1), sf.one_bits(fmt), sf.one_bits(fmt, 1)]
+    while len(xs) < n:
+        xs.append(rng.getrandbits(fmt.width))
+    ap = tmp / (name + ".a.bin")
+    ap.write_bytes(pack(xs, fmt))
+    dep, report = run_image(args, image_path, tmp, name, a=ap)
+    if dep is None:
+        bad(f"{name}: positive-run", report)
+        return
+    got = values(dep, fmt)
+    for i, x in enumerate(xs):
+        w = seqprogs.normal_abs(fmt, x)
+        if got[i] != w:
+            bad(f"{name}: the mask through the runner",
+                f"lane {i}: {x:#x} -> {got[i]:#x} vs {w:#x}")
+            return
+    flags = report.get("flags", "0").split()[0] if report.get("flags") else "0"
+    if int(flags, 0) != 0:
+        bad(f"{name}: the mask signalled", f"flags {report.get('flags')}")
+        return
+    ok(f"{name}: {len(xs)} raw lanes of every class through positive-run",
+       "and no flag raised")
+
+
 # ================= revision 3: the scratch rows =========================
 #
 # Four programs the round added, and one reference. Each row's check has
@@ -1467,6 +1509,8 @@ def main():
         elif name.startswith("divfull-") or name.startswith("sqrtfull-"):
             check_full(name, image)
             check_full_runs(args, name, image_path, tmp)
+        elif name.startswith("normalabs-"):
+            check_normalabs(args, name, image, image_path, tmp)
         elif name == "collatz-fp256":
             check_collatz(args, name, image, image_path, tmp)
         elif name == "zoom-scan-fp256":
