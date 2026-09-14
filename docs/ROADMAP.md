@@ -2850,12 +2850,13 @@ instructions overlap, the next issuing while the last retires, a
 dependent one a beat behind the beat it needs. In the unit bench's
 cycle probe (`make seqcycles`, model RAM) a block that only halts went
 from 621 to 37 cycles at fp128, one IAND and one deposit from 823 to
-177, and an instruction from 38 cycles to 21 whether or not it reads
-the one before - the remaining 21 being sixteen beats, two of read
-lead and three of fetch and decode. What the card says is in
+177, and an instruction from 38 cycles to 16 - its beats, the next
+instruction fetched under its issue and addressed from the cycle after
+its last address - or 20 when it reads the one before, the data
+dependence through the register file. What the card says is in
 docs/VALIDATION.md under the image that carries it; the whole program
 above was 2.3 us an element at binary128 with the instruction cost at
-38 cycles, and 210 instructions at 21 is a different number.
+38 cycles, and 210 instructions at 16 to 20 is a different number.
 
 ## The adoption story these serve
 

@@ -11511,3 +11511,104 @@ RAM as "WLAST at beat 3 of a burst AWLEN said was 3 beats long".
 Icarus on the same benches, and the full `make sim` under Verilator, ran
 on the box after the push; their lines follow this entry. The image
 that carries revision 5 is the next entry's.
+
+**Icarus on the box, 6e1c418, after the push:** `seq_core` 19/19
+(1,065 s), `krnlseq` 1/1, `seqbanks` 1/1, `faults` 5/5; and the full
+`make sim` under Verilator there, 23 benches, no failures recorded.
+Every gate green - and the next entry is about the defect all of them
+missed.
+
+## 2026-09-14 - the drain slipped an element at a burst boundary, and the bench that found it is the one written for the streaming issue
+
+**The Windows desktop's Docker sim image, Verilator. RTL: the working
+tree with R14 (below), 6e1c418, and 51c8be5 side by side.**
+
+A new `seq_core` case, `the_pipe_at_every_block_length` - one program
+with every hazard shape the streaming issue has to get right, run at
+every block length from one beat to sixteen and ragged between, at
+fp32/64/128 - passed at twenty-one of its twenty-two lengths and failed
+at fp128, 32 lanes: one deposit slot of 224, lane 18 slot 3, `2.0`
+where the model said `-1.2e-1811`. Traced (`tb/probe_trace.py`, every
+cycle of the pipe and the retire to a file): the register file held
+the right value, the DEPOSIT read the right value, the deposit banks
+were written the right value at the right address. The drain delivered
+the neighbour: lane 18 slot 4 is `2.0` in that lane.
+
+R11's drain pipeline holds its address and its tags while the write
+channel cannot take a completed beat, and its comment said the held
+address kept the banks' output where it was. The address it holds is
+the NEXT element's - issued the cycle before the stall - and the banks'
+read register, which sampled every cycle, moved on to that element's
+data while stage 2 still held the stalled element's tag; on release the
+stalled element went out with its successor's data. The stall happens
+when a beat-completing element arrives while the next burst is not yet
+open, so it takes a drain longer than one burst and the timing to land
+on the gap: at fp128 a beat completes every second element, and seven
+deposits over thirty-two lanes are seven bursts. Every bench in the
+suite, Icarus and Verilator, on the box and here, was green with this
+in the RTL for an hour and a half, because none of them drained more
+than a burst at the width that lands on the gap; 51c8be5, with the
+three-state drain, passes the case, and 6e1c418 fails it exactly as the
+working tree did. The fix is one enable: the banks' read register holds
+with the stall (`g_db`, `dr_stall` declared beside `issue_hold` for the
+same reason). The case passes at every length after it.
+
+What this means for the images: `cft_hw_f64f128_1x` (c56b368) and
+every image before today's sequencer work have the three-state drain
+and are not affected. The image linking as this is written
+(`build-seq5-f128`, 6e1c418) carries the slip: any program whose
+deposit output exceeds one burst of sixteen beats can lose the first
+beat-completing element after a burst boundary to its successor. Its
+timing is what it will be measured for; its results are not to be
+trusted past a burst, and the next image carries the fix.
+
+## 2026-09-14 - the streaming issue (R14): an instruction costs its beats
+
+**The Windows desktop's Docker sim image, Verilator. RTL: the working
+tree over 6e1c418 - the streaming issue, the every-block-length bench
+and the drain fix of the entry above, committed together.**
+
+The 21 cycles an instruction cost after R13 were sixteen beats, a
+two-cycle read lead and three cycles of fetch and decode between one
+instruction's last fire and the next one's first address, with the
+array taking nothing in between. R14 makes the issue a three-stage pipe
+that runs every cycle whatever state the machine is in - addresses,
+the file's read, the fire - each stage carrying its beat's instruction
+context, reads the next instruction from the instruction memory under
+this one's issue, and admits it the cycle after this one's last
+address. Up to three instructions are in flight with their
+destinations queued from admission; each operand of an admitted
+instruction records the youngest queued producer of its register, and
+R13's per-beat wait becomes "hold the address stage unless that
+producer is the head and its beat has landed".
+
+**The first attempt hung four benches** on two-beat blocks: the hold
+froze the whole pipe, and with a block shorter than the array the beat
+a dependent instruction was waiting on was still in the fire stage,
+frozen by the wait for its own landing. The hold now stops the address
+stage alone; the fire stage drains what was addressed. The probe's
+full blocks never saw it, which is why the bench below runs every
+length.
+
+**Cycles per block, after R13 -> after R14** (`make seqcycles`):
+
+| program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
+|---|---|---|---|
+| twenty IANDs, one deposit | 702 -> 607 | 622 -> 527 | 582 -> 487 |
+| twenty dependent FMAs, one deposit | 720 -> 701 | 640 -> 621 | 600 -> 581 |
+
+Per instruction: 21 -> 16 independent; 21 -> 20 dependent, which is the
+data dependence through the register file - the producer's beat lands
+LATENCY + 1 cycles after it fires, is in the bank the cycle after, is
+read the cycle after that and fires two cycles on. The halt-only and
+one-instruction rows are unchanged.
+
+**Benches:** `seq_core` 20/20 with `the_pipe_at_every_block_length`
+new - one program with every hazard shape (a chain, two producers read
+at once, a write after a write, a write after a read, constants at an
+instruction boundary, three independent then one reading all three, a
+loop on itself, a mask change mid-program, a register nothing wrote) at
+one, two, three, five, nine and sixteen beats and ragged between,
+across a block boundary, fp32/64/128 - `krnlseq` 1/1, `seqbanks` 1/1,
+`faults` 5/5, the full `make sim` under Verilator, `yosys-lint` clean;
+Icarus on the box after the push, recorded below when it has run.

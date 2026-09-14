@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seqprobe seqcycles krnlfused krnlplain cycles seqbanks \
+        seq_core seqprobe seqcycles seqtrace krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -537,6 +537,14 @@ seqcycles:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=probe_seq_cycles SIM_BUILD=sim_build/seqcycles \
 		COCOTB_RESULTS_FILE=sim_build/seqcycles/results.xml
+
+# The other diagnostic: one program, every cycle of the issue pipe and
+# the retire written to sim_build/trace/trace.txt (tb/probe_trace.py).
+seqtrace:
+	mkdir -p sim_build/trace
+	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=probe_trace SIM_BUILD=sim_build/trace \
+		COCOTB_RESULTS_FILE=sim_build/trace/results.xml
 
 clean:
 	rm -rf sim_build results.xml

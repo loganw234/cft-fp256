@@ -159,13 +159,17 @@
 // The issue/drain machine is the one the design sketched: an ALU
 // instruction issues over the block's beats back to back, results
 // retire LATENCY later through the same per-lane masking, and the next
-// instruction issues while they do - a dependent one a beat behind the
-// beat it needs (2026-09-14; until then a dependent chain cost beats +
-// LATENCY + a few cycles of state machine a link, and an independent
-// one the same, because every instruction waited for the last result
-// of the one before). At NBEATS 16 against LATENCY 16 a full block
-// never waits: an instruction costs its beats, two cycles of read
-// lead and three of fetch and decode, dependent or not.
+// instruction's beats follow this one's without a gap - it is fetched
+// under this one's issue and addressed from the cycle after this one's
+// last address (2026-09-14; until that day a dependent chain cost
+// beats + LATENCY + a few cycles of state machine a link, and an
+// independent one the same, because every instruction waited for the
+// last result of the one before). An instruction costs its beats. A
+// dependent one waits, a beat at a time, for the beat it needs to
+// land: LATENCY + 4 cycles behind the beat that produced it (the fire
+// is a registered request, the landing a registered write, the read
+// a registered sample, and the lead two), so a dependent chain costs
+// 20 a link at sixteen beats.
 
 `timescale 1ns/1ps
 
@@ -464,7 +468,10 @@ module cft_seq #(
   // destinations.
   logic issue_hold;
   logic raw_hold;                   // a dependent beat has not landed yet
-  logic rd_hold;                    // either: the read registers hold
+  logic rd_hold;                    // either: the A stage holds
+  logic dr_stall;                   // the deposit drain holds (declared here
+                                    // for the banks' read register, defined
+                                    // with the drain's pipeline)
   logic [RFAW-1:0] rf_raddr_a, rf_raddr_b, rf_raddr_c;
   logic [BEAT_BITS-1:0] rf_rdata_a, rf_rdata_b, rf_rdata_c;
   logic        rf_we;
@@ -510,16 +517,17 @@ module cft_seq #(
       logic [31:0] ra_q, rb_q, rc_q;
       logic        va_q, vb_q, vc_q;
       always_ff @(posedge ap_clk) begin
-        // The read registers hold with the issue machine (rd_hold: the
-        // array not taking a request, or a dependent beat not landed
-        // yet - both defined with the queue, below): S_ALU_ISSUE fires
-        // beat c-2 from the data that beat c's address request put on
-        // the bus two STEPS ago, and a step is a cycle the issue
-        // advances, not a clock. Every other reader of this bus runs
-        // when nothing is held. The valid bit rides the same register,
-        // so data and its validity are always from the same address on
-        // the same cycle.
-        if (!rd_hold) begin
+        // The read registers hold with the array's standing request
+        // (issue_hold, below): the F stage fires beat c-2 from the data
+        // that beat c's address request put on the bus two STEPS ago,
+        // and a step is a cycle the array accepts, not a clock. They do
+        // NOT hold with a dependent beat's wait (raw_hold), which holds
+        // the A stage alone: an address already on the bus is sampled
+        // and fired on schedule, whatever A is waiting for. Every other
+        // reader of this bus runs when nothing is held. The valid bit
+        // rides the same register, so data and its validity are always
+        // from the same address on the same cycle.
+        if (!issue_hold) begin
           ra_q <= bank0[rf_raddr_a];
           rb_q <= bank0[rf_raddr_b];
           rc_q <= bank1[rf_raddr_c];
@@ -557,7 +565,18 @@ module cft_seq #(
       always_ff @(posedge ap_clk) begin
         if (db_we[gb])
           bank[db_waddr[gb*DBA +: DBA]] <= db_wdata[gb*32 +: 32];
-        rd_q <= bank[db_raddr];
+        // The read register holds with the drain's stall (2026-09-14,
+        // the same day the drain became a pipeline). While the write
+        // channel cannot take a completed beat the pipeline holds its
+        // address and its tags - but the address it holds is the NEXT
+        // element's, issued the cycle before, and a register that kept
+        // sampling it moved on to that element's data while stage 2
+        // still held the stalled element's tag: on release the stalled
+        // element went out with its successor's data. A drain longer
+        // than a burst, with a beat completing as the next burst was
+        // not yet open, was what it took to see it.
+        if (!dr_stall)
+          rd_q <= bank[db_raddr];
       end
       assign db_rdata[gb*32 +: 32] = rd_q;
     end
@@ -966,13 +985,14 @@ module cft_seq #(
   // COMBINATIONALLY on the issue path; at 256 entries it is a memory,
   // and a memory wants a registered read.
   //
-  // There is no cycle cost. `cur` is written in S_FETCH and does not
-  // change again until the instruction retires, so these registers
-  // are valid from S_DECODE onward - S_FETCH2 already existed to
-  // cover imem's own read latency and this read fills the same
-  // shadow. It is also strictly LESS work than before: one read per
-  // instruction where the issue path did one per beat, for a value
-  // that cannot change during a run.
+  // There is no cycle cost. `cur` holds an instruction from the cycle
+  // it is decoded until the cycle after its last address, and the F
+  // stage fires a beat two cycles after its address from kq2_*, which
+  // is this register a stage later - so what F sees is always the
+  // constants of the instruction that addressed the beat, across the
+  // cycle `cur` moves on to the next one. It is also strictly LESS
+  // work than before: one read per instruction where the issue path
+  // did one per beat, for a value that cannot change during a run.
   //
   // In its own always_ff, not in the state machine's, and that is not
   // tidiness: one write port and three unconditional synchronous read
@@ -1005,47 +1025,119 @@ module cft_seq #(
   } state_e;
   state_e st;
   assign rf_clear = (st == S_BLK_SETUP);
-  assign raw_hold = (st == S_ALU_ISSUE) && iss_dep && (q_n != 2'd0) &&
-                    (bt < 6'({1'b0, nb_blk})) && (wb_bt <= bt);
+  assign wb_pop  = al_ov && (wb_bt == 6'({1'b0, nb_blk} - 6'd1));
+  assign q_after = q_n - {1'b0, wb_pop};
+  assign q_e0    = wb_pop ? q_rd1 : q_rd0;
+  assign q_e1    = wb_pop ? q_rd2 : q_rd1;
+  assign q_room  = (q_after != 2'd3);
+  // Admission: from S_DECODE, the decoded instruction if it is
+  // arithmetic; from the last address cycle of an issue, the word read
+  // under it if that is here, is arithmetic and is not past the end.
+  assign adm_go  = (st == S_DECODE) ? !c_ctrl :
+                   (st == S_ALU_ISSUE) && !rd_hold &&
+                   (bt == 6'({1'b0, nb_blk} - 6'd1)) && nxt_ok &&
+                   (32'(pc) + 32'd1 < h_ninsns) && !imem_q[31];
+  assign q_push  = adm_go && q_room;
+  assign adm_w   = (st == S_ALU_ISSUE) ? imem_q : cur;
+  assign adm_rd  = {adm_w[56], adm_w[11:8]};
+  assign adm_ra  = {adm_w[57], adm_w[15:12]};
+  assign adm_rb  = {adm_w[58], adm_w[19:16]};
+  assign adm_rc  = {adm_w[59], adm_w[23:20]};
+  assign adm_ka  = adm_w[27];
+  assign adm_kb  = adm_w[28];
+  assign adm_kc  = adm_w[29];
+  // the youngest queued writer of each register operand, if any
+  assign dep_n_a = !adm_ka && ((q_after >= 2'd2 && q_e1 == adm_ra) ||
+                               (q_after >= 2'd1 && q_e0 == adm_ra));
+  assign dep_p_a = (q_after >= 2'd2 && q_e1 == adm_ra) ? 2'd1 : 2'd0;
+  assign dep_n_b = !adm_kb && ((q_after >= 2'd2 && q_e1 == adm_rb) ||
+                               (q_after >= 2'd1 && q_e0 == adm_rb));
+  assign dep_p_b = (q_after >= 2'd2 && q_e1 == adm_rb) ? 2'd1 : 2'd0;
+  assign dep_n_c = !adm_kc && ((q_after >= 2'd2 && q_e1 == adm_rc) ||
+                               (q_after >= 2'd1 && q_e0 == adm_rc));
+  assign dep_p_c = (q_after >= 2'd2 && q_e1 == adm_rc) ? 2'd1 : 2'd0;
+  // the per-beat wait: the producer is not the head yet, or its beat
+  // for the one being addressed has not landed
+  assign dep_hold_a = dep_v_a && (dep_pos_a != 2'd0 || wb_bt <= bt);
+  assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 || wb_bt <= bt);
+  assign dep_hold_c = dep_v_c && (dep_pos_c != 2'd0 || wb_bt <= bt);
+  assign raw_hold = (st == S_ALU_ISSUE) &&
+                    (dep_hold_a || dep_hold_b || dep_hold_c);
   assign rd_hold  = issue_hold || raw_hold;
-  assign q_push = (st == S_ALU_ISSUE) && !rd_hold &&
-                  (bt == 6'({1'b0, nb_blk} + 6'd1));
-  assign wb_pop = al_ov && (wb_bt == 6'({1'b0, nb_blk} - 6'd1));
 
   logic [PCW:0]  pc;
   logic [PCW:0]  skip_depth;
   logic [5:0]    bt, wb_bt;
-  // Instruction overlap (2026-09-14): the results of up to two ALU
-  // instructions are in flight - the one retiring and the one issuing.
-  // q_rd0 is the destination retiring now (wb_bt counts its beats),
-  // q_rd1 the one queued behind it, q_n how many are queued. An
-  // instruction that does not read q_rd0 issues while q_rd0 retires;
-  // one that does waits in S_DECODE, and so does every control code
-  // that reads the file, moves the mask or ends the block. The retire
-  // block below the state machine writes q_rd0's beats as the array
-  // delivers them and pops after nb_blk of them.
-  logic [4:0]    q_rd0, q_rd1;
+  // Instruction overlap (2026-09-14, in two steps). The issue is a
+  // three-stage pipe that runs every unheld cycle whatever state the
+  // machine is in: A puts a beat's three register addresses on the
+  // file's bus (the state machine, in S_ALU_ISSUE), B is the file's
+  // read (the bank registers into the slice bus), F fires the beat into
+  // the array with the data now on the bus and the constants read two
+  // stages ago (kq2_*). Each stage carries the context of the
+  // instruction its beat belongs to, because A can be addressing one
+  // instruction's first beat while F fires the previous one's last:
+  // the next instruction is read under this one's issue (imem_q) and
+  // admitted the cycle after this one's last address, and the beats
+  // never stop. Up to three ALU instructions are then in flight -
+  // retiring, in the array, being addressed - and their destinations
+  // sit in q_rd0..2 from admission until their last beat lands; q_rd0
+  // is the one retiring (wb_bt counts its landed beats), and the retire
+  // block below the state machine writes its beats as the array
+  // delivers them and pops it after nb_blk of them.
+  //
+  // Read-after-write is the one hazard: in-order, so writes land in
+  // order, and an instruction's reads all leave the file before the
+  // instruction behind it writes anything. At admission each operand
+  // that names a register finds the YOUNGEST queued instruction that
+  // writes it - dep_v / dep_pos, a position from the head that every
+  // pop moves down - and at the cycle beat b's address would go on the
+  // bus the issue holds (raw_hold) unless that producer is the head
+  // and its beat b has landed (wb_bt > bt). Landed is enough: the
+  // write is in the bank by the end of the cycle, and the address put
+  // on the bus now is read at the end of the next unheld cycle at the
+  // earliest. Results land in beat order one a step and the issue
+  // reads in beat order one a step, so a beat that is late is the
+  // first beat that is late. The hold is on the A stage ALONE: B and F
+  // drain what A already addressed - they must, because with a block
+  // shorter than the pipe the beat A is waiting on can still be in F,
+  // and a hold that froze F waited for a landing it was itself
+  // preventing - and the array's standing request is taken as usual.
+  // Nothing fires twice and nothing in the pipe is lost. Every control code
+  // that reads the file, moves the mask or ends the block waits for
+  // the queue to empty; REPEAT and ENDREP read only the mask, which no
+  // result moves.
+  logic [4:0]    q_rd0, q_rd1, q_rd2;
   logic [1:0]    q_n;
-  logic          alu_haz;           // the decoded instruction reads q_rd0
-  logic          q_push, wb_pop;    // this cycle: a destination queued / retired
-  assign alu_haz = (q_n != 2'd0) &&
-                   ((!c_ka && c_ra == q_rd0) || (!c_kb && c_rb == q_rd0) ||
-                    (!c_kc && c_rc == q_rd0));
-  // The read-after-write wait, a beat at a time. An instruction that
-  // reads the retiring destination issues anyway (iss_dep remembers
-  // that it does), and at the cycle beat b's address would go on the
-  // bus it holds if the retiring instruction's beat b has not landed:
-  // wb_bt counts landed beats, so `wb_bt <= bt` is "not yet". Landed
-  // is enough - the write is in the bank by the end of this cycle, and
-  // the address put on the bus now is read from the bank at the end of
-  // the next unheld cycle at the earliest. Results land in beat order
-  // one a step and the issue reads in beat order one a step, so a beat
-  // that is late is the first beat that is late; the head popping
-  // (q_n back to 0) releases the rest. The hold is on the issue machine
-  // and the file's read registers only: the array's standing request
-  // is taken as usual and the default below the reset clears it, so
-  // nothing fires twice and nothing in the two-ahead pipe is lost.
-  logic          iss_dep;           // the issuing instruction reads q_rd0
+  logic          q_push, wb_pop;    // this cycle: a destination admitted / retired
+  logic [1:0]    q_after;           // queued after this cycle's pop
+  logic [4:0]    q_e0, q_e1;        // the head and the one behind, after that pop
+  logic          q_room;            // a fourth would not fit
+  logic          adm_go;            // this cycle admits, given room
+  logic [63:0]   adm_w;             // the word being admitted
+  logic [4:0]    adm_rd, adm_ra, adm_rb, adm_rc;
+  logic          adm_ka, adm_kb, adm_kc;
+  logic          dep_v_a, dep_v_b, dep_v_c;        // the operand waits on a producer
+  logic [1:0]    dep_pos_a, dep_pos_b, dep_pos_c;  // ...this far from the head
+  logic          dep_n_a, dep_n_b, dep_n_c;        // ...as computed at admission
+  logic [1:0]    dep_p_a, dep_p_b, dep_p_c;
+  logic          dep_hold_a, dep_hold_b, dep_hold_c;
+  // the pipe's B and F stages: a beat is in the stage, and whose
+  logic          pb_v, pf_v;
+  logic [7:0]    pb_op, pf_op;
+  logic [2:0]    pb_rnd, pf_rnd;
+  logic          pb_ka, pb_kb, pb_kc, pf_ka, pf_kb, pf_kc;
+  logic [BEAT_BITS-1:0] kq2_a, kq2_b, kq2_c;   // the constants F fires with
+  // The instruction memory's one read register: its address is pc + 1
+  // while an instruction issues (the next one, read under the issue)
+  // and pc otherwise (S_FETCH and the skip take their word from it a
+  // cycle after presenting the address). nxt_ok says the register
+  // holds imem[pc + 1] - it drops for the cycle after pc moves.
+  logic [63:0]    imem_q;
+  logic [PCW-1:0] imem_a;
+  logic           nxt_ok;
+  assign imem_a = (st == S_ALU_ISSUE) ? pc[PCW-1:0] + PCW'(1) : pc[PCW-1:0];
+  always_ff @(posedge ap_clk) imem_q <= imem[imem_a];
   logic [1:0]    ld_reg;
   logic [LB:0]   lane_cursor;
   logic [31:0]   slot_cursor;
@@ -1057,8 +1149,9 @@ module cft_seq #(
   // whether it closes the beat, whether it is the block's last); the
   // tag reaches stage 2 with the data. A beat that completes goes to
   // the write channel that cycle; while the channel cannot take it the
-  // whole pipeline holds, and the held address keeps the banks' output
-  // where it was, so nothing in flight is lost.
+  // whole pipeline holds - address, tags AND the banks' read register
+  // (g_db, above), because the held address is already the next
+  // element's - so nothing in flight is lost.
   logic        dr_v0, dr_v1;
   logic [LB:0] dr_lane0, dr_lane1;
   logic [31:0] dr_slot0, dr_slot1;
@@ -1069,7 +1162,6 @@ module cft_seq #(
   logic [31:0] dr_islot;
   logic [5:0]  dr_ifill;
   logic        dr_ilast, dr_iend;    // this issue closes the block / the beat
-  logic        dr_stall;
   logic [RFAW-1:0] zaddr;
   // The scratch wipe's cursor, and how far it has to go. One more bit
   // than the address, so "done" is a comparison the counter can reach
@@ -1643,7 +1735,8 @@ module cft_seq #(
       wr_aw_open <= 1'b0; wr_bresp_left <= '0;
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0; q_n <= '0;
-      iss_dep <= 1'b0;
+      pb_v <= 1'b0; pf_v <= 1'b0; nxt_ok <= 1'b0;
+      dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
       // The constant bank is read unconditionally on every cycle, so
       // the instruction word that supplies its three addresses must
       // start defined; an X index into a memory is a simulator
@@ -2187,18 +2280,18 @@ module cft_seq #(
           if (32'(pc) >= h_ninsns) begin       // implicit halt
             if (q_n == 2'd0)
               st <= S_DRAIN_SETUP;             // ...once every result landed
-          end else begin
-            cur <= imem[pc[PCW-1:0]];
-            st <= S_FETCH2;
-          end
+          end else
+            st <= S_FETCH2;                    // imem_q <= imem[pc] this cycle
         end
-        S_FETCH2: st <= S_DECODE;
+        S_FETCH2: begin
+          cur <= imem_q;
+          st <= S_DECODE;
+        end
 
         S_DECODE: begin
           if (!c_ctrl) begin
-            if (q_n != 2'd2) begin
+            if (q_room) begin                  // admitted: q_push, below
               bt <= '0;
-              iss_dep <= alu_haz;    // reads the retiring one: a beat behind it
               st <= S_ALU_ISSUE;
             end
             // otherwise wait here for a slot to free
@@ -2344,17 +2437,15 @@ module cft_seq #(
         S_SKIP_F: begin
           if (32'(pc) >= h_ninsns)
             st <= S_DRAIN_SETUP;               // unbalanced: halt
-          else begin
-            cur <= imem[pc[PCW-1:0]];
-            st <= S_SKIP_D;
-          end
+          else
+            st <= S_SKIP_D;                    // imem_q <= imem[pc] this cycle
         end
         S_SKIP_D: begin
           pc <= pc + 1;
           st <= S_SKIP_F;
-          if (c_ctrl && c_op == C_REPEAT)
+          if (imem_q[31] && imem_q[7:0] == C_REPEAT)
             skip_depth <= skip_depth + 1;
-          else if (c_ctrl && c_op == C_ENDREP) begin
+          else if (imem_q[31] && imem_q[7:0] == C_ENDREP) begin
             if (skip_depth == 1)
               st <= S_FETCH;
             else
@@ -2362,49 +2453,52 @@ module cft_seq #(
           end
         end
 
-        // ---- ALU issue / writeback ------------------------------------
+        // ---- ALU issue: the A stage -----------------------------------
         S_ALU_ISSUE: begin
           // The banked register file costs TWO cycles from address to
           // data (the address registers into the bank read, the read
           // registers into the slice bus), so addresses run two beats
-          // ahead of the array: cycle c presents beat c's address and
-          // fires beat c-2 from the data now on the bus. Getting this
-          // off by one shifted every operand a beat and failed every
-          // deposit slot at once - the bench's first catch.
+          // ahead of the array: this state puts beat bt's addresses on
+          // the bus, and the F stage below the case fires beat bt-2
+          // from the data now on the bus. Getting this off by one
+          // shifted every operand a beat and failed every deposit slot
+          // at once - the bench's first catch.
           //
           // "Cycle" here means a STEP: a cycle in which no request is
           // standing untaken and no dependent beat is waiting to land
           // (rd_hold, defined with the queue). On the multi-cycle tile
           // the array takes one beat per pass period, and between
-          // acceptances the whole issue machine - addresses, the bank
-          // read registers, bt, and the request itself - holds, so the
-          // two-ahead relation is unchanged in accepted beats. A
-          // dependent beat's hold (raw_hold) holds the same machine but
-          // not the request: the array takes that as usual and the
-          // default clears it. Writeback, in the retire block below
-          // the case, is outside every hold: a result is a pulse and
-          // is taken whenever it arrives.
+          // acceptances the whole pipe - addresses, the bank read
+          // registers, the stage contexts, bt, and the request itself -
+          // holds, so the two-ahead relation is unchanged in accepted
+          // beats. A dependent beat's hold (raw_hold) holds THIS stage
+          // only: B and F drain the beats already addressed, and the
+          // request the array has stands until taken. Writeback, in
+          // the retire block below the case, is outside every hold: a
+          // result is a pulse and is taken whenever it arrives.
           if (!rd_hold) begin
-            if (bt < 6'({1'b0, nb_blk})) begin
-              rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
-              rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
-              rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
-            end
-            if (bt >= 6'd2) begin
-              al_valid <= 1'b1;
-              al_op <= c_op;
-              al_rnd <= c_rnd;
-              al_a <= c_ka ? kq_a : rf_rdata_a;
-              al_b <= c_kb ? kq_b : rf_rdata_b;
-              al_c <= c_kc ? kq_c : rf_rdata_c;
-            end
+            rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
+            rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
+            rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
             bt <= bt + 1;
-            if (bt == 6'({1'b0, nb_blk} + 6'd1)) begin
-              // every beat is in the array: its destination is queued
-              // (q_push, below the case) and the next instruction is
-              // fetched while these retire
+            if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
+              // The last address. The next instruction, read under this
+              // one, is admitted and addressed from the next cycle if
+              // it is arithmetic and the queue has room (adm_go and
+              // q_push, with the queue); a control code goes to decode
+              // with its word already in hand; past the end, or with
+              // the word not read yet (a one-beat block), the fetch
+              // state takes over and the implicit halt with it. The
+              // pipe fires this instruction's last two beats meanwhile.
               pc <= pc + 1;
-              st <= S_FETCH;
+              if (nxt_ok && (32'(pc) + 32'd1 < h_ninsns)) begin
+                cur <= imem_q;
+                if (!imem_q[31] && q_room)
+                  bt <= '0;
+                else
+                  st <= S_DECODE;
+              end else
+                st <= S_FETCH;
             end
           end
         end
@@ -2692,6 +2786,38 @@ module cft_seq #(
         default: st <= S_IDLE;
       endcase
 
+      // ---- the issue pipe's B and F stages, every accepted cycle -------
+      // B: the file reads what A addressed (the bank registers, in the
+      // generate above, sample under the same hold), and the context
+      // follows. F: the beat fires with the data on the bus and the
+      // constants read two stages ago; the request it makes stands
+      // until taken, and is re-made for the next beat the cycle it is.
+      // A held on a dependent beat (raw_hold) is simply a cycle A put
+      // nothing on the bus: a bubble, drained like any other beat.
+      if (!issue_hold) begin
+        pb_v   <= (st == S_ALU_ISSUE) && !raw_hold;
+        pb_op  <= c_op;
+        pb_rnd <= c_rnd;
+        pb_ka  <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
+        pf_v   <= pb_v;
+        pf_op  <= pb_op;
+        pf_rnd <= pb_rnd;
+        pf_ka  <= pb_ka; pf_kb <= pb_kb; pf_kc <= pb_kc;
+        kq2_a  <= kq_a; kq2_b <= kq_b; kq2_c <= kq_c;
+        if (pf_v) begin
+          al_valid <= 1'b1;
+          al_op <= pf_op;
+          al_rnd <= pf_rnd;
+          al_a <= pf_ka ? kq2_a : rf_rdata_a;
+          al_b <= pf_kb ? kq2_b : rf_rdata_b;
+          al_c <= pf_kc ? kq2_c : rf_rdata_c;
+        end
+      end
+      // the read register holds imem[pc + 1] from the cycle after an
+      // issue begins until the cycle pc moves
+      nxt_ok <= (st == S_ALU_ISSUE) &&
+                !(!rd_hold && bt == 6'({1'b0, nb_blk} - 6'd1));
+
       // ---- retire: the array's results, whatever state the machine is
       // in, to the destination at the head of the queue ------------------
       if (al_ov) begin
@@ -2702,16 +2828,31 @@ module cft_seq #(
         flags_q <= flags_q | wb_flags_or;
         wb_bt <= wb_pop ? 6'd0 : wb_bt + 6'd1;
       end
-      // the queue: a push lands at the head when the queue is empty or
-      // empties this cycle, else behind; a pop with two queued promotes
-      if (q_push) begin
-        if (q_n == 2'd0 || wb_pop)
-          q_rd0 <= c_rd;
-        else
-          q_rd1 <= c_rd;
-      end else if (wb_pop && q_n == 2'd2)
+      // the queue: a pop moves everything down, and an admission lands
+      // behind whatever is left
+      if (wb_pop) begin
         q_rd0 <= q_rd1;
-      q_n <= q_n + {1'b0, q_push} - {1'b0, wb_pop};
+        q_rd1 <= q_rd2;
+      end
+      if (q_push) begin
+        case (q_after)
+          2'd0:    q_rd0 <= adm_rd;
+          2'd1:    q_rd1 <= adm_rd;
+          default: q_rd2 <= adm_rd;
+        endcase
+      end
+      q_n <= q_after + {1'b0, q_push};
+      // the admitted instruction's producers, positions from the head;
+      // a pop moves them down, and the head popping releases the operand
+      if (q_push) begin
+        dep_v_a <= dep_n_a; dep_pos_a <= dep_p_a;
+        dep_v_b <= dep_n_b; dep_pos_b <= dep_p_b;
+        dep_v_c <= dep_n_c; dep_pos_c <= dep_p_c;
+      end else if (wb_pop) begin
+        if (dep_pos_a == 2'd0) dep_v_a <= 1'b0; else dep_pos_a <= dep_pos_a - 2'd1;
+        if (dep_pos_b == 2'd0) dep_v_b <= 1'b0; else dep_pos_b <= dep_pos_b - 2'd1;
+        if (dep_pos_c == 2'd0) dep_v_c <= 1'b0; else dep_pos_c <= dep_pos_c - 2'd1;
+      end
     end
   end
 

@@ -2534,6 +2534,81 @@ async def the_whole_divide_and_root(dut):
 
 
 # ======================================================================
+# 10c. the issue pipe at every block length, with every hazard shape
+# ======================================================================
+
+def _pipe_program(fmt):
+    """Every shape the streaming issue has to get right, in one program:
+    a dependent chain, a read of two producers at once, a write after a
+    write and a write after a read of the same register, constants at
+    an instruction boundary, three independent instructions then one
+    that reads all three, a loop whose body depends on itself, a mask
+    change in the middle, a register nothing wrote, and deposits."""
+    A, M, F = sf.OP_ADD, sf.OP_MUL, sf.OP_FMA
+    one, two = sf.one_bits(fmt), sf.from_int(fmt, 2)[0]
+    insns = [
+        seq.alu(A, 3, 0, 1),               # r3  = a + b
+        seq.alu(M, 4, 3, 2),               # r4  = r3 * c        (reads the one before)
+        seq.alu(A, 5, 4, 3),               # r5  = r4 + r3       (two producers)
+        seq.alu(F, 6, 5, 4, 3),            # r6  = r5 * r4 + r3  (three)
+        seq.alu(A, 7, 0, 1),               # r7  = a + b
+        seq.alu(M, 7, 7, 2),               # r7  = r7 * c        (write after write, and read)
+        seq.alu(A, 8, 7, 0),               # r8  = r7 + a        (reads r7...)
+        seq.alu(A, 7, 1, 2),               # r7  = b + c         (...which is then overwritten)
+        seq.alu(F, 9, 3, 0, 1, kb=True, kc=True),   # r9 = r3 * K0 + K1 (constants at a boundary)
+        seq.alu(A, 10, 0, 1),              # three with nothing between them
+        seq.alu(A, 11, 1, 2),
+        seq.alu(A, 12, 0, 2),
+        seq.alu(F, 13, 10, 11, 12),        # r13 = r10 * r11 + r12 (all three in flight)
+        seq.alu(A, 14, 9, 0),              # r14 = r9 + a
+        seq.repeat(3),
+        seq.alu(F, 14, 14, 3, 1, kc=True), # r14 = r14 * r3 + K1  (a loop on itself)
+        seq.endrep(),
+        seq.alu(sf.OP_CMPLT, 15, 0, 1),    # r15 = a < b
+        seq.setact(15),                    # half the lanes go quiet...
+        seq.alu(A, 3, 3, 4),               # r3  = r3 + r4  (masked write over a live value)
+        seq.alu(M, 16, 13, 6),             # r16 = r13 * r6 (a high register, masked)
+        seq.actall(),                      # ...and come back
+        seq.alu(A, 17, 16, 3),             # r17 = r16 + r3 (reads what the mask left)
+        seq.deposit(6), seq.deposit(8), seq.deposit(9), seq.deposit(13),
+        seq.deposit(14), seq.deposit(17), seq.deposit(29),   # r29: never written, +0
+        seq.halt(),
+    ]
+    return seq.Program(fmt, insns, consts=[one, two], max_deposits=7)
+
+
+@cocotb.test()
+async def the_pipe_at_every_block_length(dut):
+    """The streaming issue (docs/SEQUENCER.md, R14) against the model at
+    every block length a run can have.
+
+    The issue is a three-stage pipe that fetches the next instruction
+    under this one and admits it the cycle after this one's last
+    address; up to three instructions are in flight and a dependent
+    beat waits, at its address, for the producer's beat to land. Every
+    one of those mechanisms changes shape with the block length: a
+    one-beat block never admits by continuation, a two-beat block has
+    the producer's beat still in the fire stage when the consumer's
+    address comes up (the hang of the first attempt), a five-beat block
+    fills the queue, a sixteen-beat block never holds. So the same
+    program runs at 1, 2, 3, 5, 9 and 16 beats and ragged in between,
+    across a block boundary, at three formats.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 9, 16, 24, 40, 72, 128, 136, 150)),
+                     ("fp64", (4, 5, 8, 20, 64, 66)),
+                     ("fp128", (2, 3, 10, 32, 33))):
+        fmt = FORMATS[name]
+        prog = _pipe_program(fmt)
+        for n in ns:
+            await bench.program(fmt, prog, operands(fmt, n, 1200 + n),
+                                operands(fmt, n, 1300 + n),
+                                operands(fmt, n, 1400 + n), n,
+                                f"{name} the pipe at n={n}")
+
+
+# ======================================================================
 # 11. the one that has to go last
 # ======================================================================
 

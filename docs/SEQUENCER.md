@@ -1474,6 +1474,19 @@ form and never reached a send in an acceptance cycle. Every send now
 takes its `WLAST`, and its right to go at all, from the count the
 master is about to have.
 
+A second slip, found the same evening by R14's bench and recorded in
+docs/VALIDATION.md: the pipeline held its address and its tags while
+the channel could not take a beat, and this section's first draft said
+the held address kept the banks' output where it was. The held address
+is the NEXT element's, and the banks' read register, sampling every
+cycle, moved on to that element's data while stage 2 still held the
+stalled element's tag - so a stalled element went out with its
+successor's data. It needs a drain longer than a burst and a beat
+completing as the next burst is not yet open, which the suite never
+did at a width that lands on the gap. The read register now holds with
+the stall. 0843b62 and 6e1c418 carry the slip; no image built from them
+should be trusted past one burst of deposits.
+
 ### R12. Instructions overlap: the next one issues while this one retires
 
 An instruction cost its beats plus LATENCY plus fetch - about 38 cycles
@@ -1528,34 +1541,88 @@ instruction wrote, a masked lane beside an active one in every beat -
 over a block boundary, in two rounding attributes, fp32/64/128, against
 the model's one-at-a-time executor.
 
+
+
+### R14. The beats never stop: fetch under the issue, three in flight
+
+R12 and R13 left 21 cycles an instruction at sixteen beats: the beats,
+a two-cycle read lead, and three cycles of fetch and decode between one
+instruction's last fire and the next one's first address, during which
+the array took nothing. The issue is now a three-stage pipe that runs
+every cycle whatever state the machine is in: A puts a beat's three
+register addresses on the file's bus (the state machine, in
+`S_ALU_ISSUE`), B is the file's read, F fires the beat into the array
+with the data on the bus and the constants read two stages ago. Each
+stage carries the context of the instruction its beat belongs to -
+opcode, rounding attribute, which operands are constants - because A
+can be addressing one instruction's first beat while F fires the
+previous one's last. The next instruction is read from the instruction
+memory under this one's issue (the memory's one read register carries
+`pc + 1` while an instruction issues and `pc` otherwise; fetch and the
+skip take their word from the same register a cycle after presenting
+the address) and, if it is arithmetic and the queue has room, admitted
+the cycle after this one's last address. An instruction costs its
+beats: sixteen cycles a block, one a beat, the floor of a one-beat-a-
+cycle array.
+
+Up to three instructions are then in flight - retiring, in the array,
+being addressed - with their destinations queued from admission until
+their last beat lands. Each operand of an admitted instruction that
+names a register records the youngest queued producer of it as a
+position from the head, which every pop moves down; the per-beat wait
+of R13 becomes "hold A unless that producer is the head and its beat
+has landed". The hold is on A alone. B and F drain what A already
+addressed, and they must: with a block shorter than the pipe, the beat
+A is waiting on can still be in F, and the first attempt - which froze
+the whole pipe - waited for a landing it was itself preventing. Four
+benches hung on two-beat blocks and said so.
+
+What a dependent link costs now: the producer's beat fires from F,
+lands LATENCY + 1 cycles later (the request is registered), is in the
+bank the cycle after, is read the cycle after that and fires two cycles
+on - 20 cycles behind the beat that produced it, so a dependent chain
+costs 20 a link against 21 before. That is a data dependence through
+the register file, not the machine; forwarding a landing beat straight
+to F, from the array's output, from the write in flight or from the
+write that landed as B sampled, would close it to 17, and is the next
+step if the card says dependent chains are what remains.
+
+The bench for it, `the_pipe_at_every_block_length` in
+`tb/test_seq_core.py`: one program with every hazard shape - a chain,
+a read of two producers at once, a write after a write, a write after a
+read, constants at an instruction boundary, three independent
+instructions then one that reads all three, a loop on itself, a mask
+change mid-program, a register nothing wrote - at one, two, three,
+five, nine and sixteen beats and ragged between, across a block
+boundary, fp32/64/128, against the model.
+
 ### What it measures
 
 `make seqcycles` (`tb/probe_seq_cycles.py`, a diagnostic beside
 `seqprobe`, not part of `make sim`): cycles per block through the unit
 bench's harness, four blocks, model RAM (so HBM latency is not in these;
-every cycle the state machine spends is). Three columns: before
-revision 5, after R9-R11 (0843b62), after R12-R13.
+every cycle the state machine spends is). Four columns: before
+revision 5, after R9-R11 (0843b62), after R12-R13 (6e1c418), after R14.
 
 | program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
 |---|---|---|---|
-| halt only, no deposit | 729 / 61 / 61 | 657 / 45 / 45 | 621 / 37 / 37 |
-| one IAND, one deposit | 1,219 / 299 / 297 | 955 / 219 / 217 | 823 / 179 / 177 |
-| one IAND, four deposits | 2,573 / 837 / 835 | 1,733 / 565 / 563 | 1,313 / 429 / 427 |
-| twenty IANDs, one deposit | 1,947 / 1,027 / 702 | 1,683 / 947 / 622 | 1,551 / 907 / 582 |
-| twenty dependent FMAs, one deposit | - / 1,005 / 720 | - / 925 / 640 | - / 885 / 600 |
+| halt only, no deposit | 729 / 61 / 61 / 61 | 657 / 45 / 45 / 45 | 621 / 37 / 37 / 37 |
+| one IAND, one deposit | 1,219 / 299 / 297 / 297 | 955 / 219 / 217 / 217 | 823 / 179 / 177 / 177 |
+| one IAND, four deposits | 2,573 / 837 / 835 / 835 | 1,733 / 565 / 563 / 563 | 1,313 / 429 / 427 / 427 |
+| twenty IANDs, one deposit | 1,947 / 1,027 / 702 / 607 | 1,683 / 947 / 622 / 527 | 1,551 / 907 / 582 / 487 |
+| twenty dependent FMAs, one deposit | - / 1,005 / 720 / 701 | - / 925 / 640 / 621 | - / 885 / 600 / 581 |
 
 Per instruction, from the twenty-IAND row: 38 cycles before R12, 21
-after, dependent or not - the dependent row sits 18 cycles above the
-IAND row at every format, and that is the r1 stream the FMA reads
-and the IAND does not (sixteen beats and two of setup), not a wait:
-(720 - 18 - 297) / 19 is the same 21. Per lane, one deposit: 9.5 -> 2.3 cycles at
-fp32, 14.9 -> 3.4 at fp64, 25.7 -> 5.6 at fp128. What is left per
-instruction is the sixteen beats, the two-beat read lead and three
-cycles of fetch and decode; the floor is the beats, and reaching it
-means fetching under the issue and streaming one instruction's
-addresses behind another's fires, which is the next revision's work if
-the card says the instruction cost is what remains.
+after, 16 after R14. The dependent row sits 18 cycles above the IAND
+row at every format, and that is the r1 stream the FMA reads and the
+IAND does not (sixteen beats and two of setup), not a wait: after R13,
+(720 - 18 - 297) / 19 is the same 21 as the IAND's; after R14 it is
+20 against the IAND's 16, the data dependence through the file. Per
+lane, one deposit: 9.5 -> 2.3 cycles at fp32, 14.9 -> 3.4 at fp64,
+25.7 -> 5.6 at fp128.
 
-Benches: `seq_core` 19/19 (the divide case new), `krnlseq`, `seqbanks`
-and `faults` under Verilator and again under Icarus; `yosys-lint`
-clean. The four-change commit is 0843b62.
+Benches: `seq_core` 20/20 (the divide case and the every-block-length
+case new), `krnlseq`, `seqbanks` and `faults` under Verilator and again
+under Icarus; `yosys-lint` clean. The four-change commit is 0843b62,
+the overlap 6e1c418, the streaming issue and the drain's read-register
+hold the commit after it.
