@@ -2737,6 +2737,40 @@ a decision rather than a chore, and the requester's next measurement
 (which of per-call latency, staged bytes and the host's gather
 dominates) is the input it wants. Not started.
 
+**8. Correct rounding of divide and square root ON the card
+(2026-09-14).** Their measurement (`cft-rebound/docs/HARDWARE.md:604-612`):
+at 256 bodies and binary128, `cft_div` and `cft_sqrt` are 59% of a card
+step at **1.6 us an element** against 4.3 ns for an FMA on the same
+tile, and their order for the card is "cut the call count, then fix the
+divide, then residency". The composed route is why: `cft_div` is host
+prep on the operand bits (`seqprogs.div_prep`: specials, subnormal
+scaling by 2^p, centring, the exponent difference), ONE program run
+(`programs/div-<fmt>.cfta`: seed, Newton, the truncating Markstein
+finish, two restore passes, three deposits), and host finish
+(`div_finish`: guard and sticky off the deposits, `round_pack`). Per
+element that is a staged pass, a deposit read-back and two host loops;
+the seed-and-Newton program alone is fast and gives different bits,
+which the bit-for-bit record cannot use.
+
+*The ask is the prep and the finish on the chip, so the whole divide is
+one program and the bits are the contract's.* The ISA already has what
+they need: integer ops on the encoding (`iand/ior/ixor/iadd/isub`),
+shifts by a REGISTER amount (`ishl/ishr` read A and B), `icmplt`,
+`select` for branchless specials, `setact` for lane masks, a rounding
+attribute on every arithmetic instruction, and exact scaling by 2^p
+through the FMA for the subnormal cases. `round_pack` is the part that
+earns care - overflow, underflow, a subnormal result's variable shift
+and five modes - and the mode is per instruction rather than per run,
+so either five images a format or the mode as a bank constant steering
+`select`s. Verification is the harness that exists: `programs/check.py`
+runs each image through `seq.py`'s executor against `sf.div`/`sf.sqrt`
+across the hard families, and byte equality with `seqprogs` holds the
+text to the model. libcft's `cft_div`/`cft_sqrt` keep their signatures
+and pick the one-program route when CAPS says the sequencer with the
+integer group is present; the software backend is unchanged and remains
+the definition. Estimated a few days of modelling against the executor;
+no RTL, no ABI. Next after the fp64/fp128 image is exercised.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
