@@ -3668,6 +3668,88 @@ int main(int argc, char **argv)
         printf("\n");
         if (!caps.flags_readable)
             printf("  WARNING: flags are not readable on this device\n");
+
+        /* A format this image does not carry must be refused WITH a
+         * sentence, and the sentence must name every format it does
+         * carry - the moment a caller most wants to be told "this
+         * device carries fp32 fp64 fp128" is the moment it asked for
+         * fp256. cft-rebound filed this on 2026-09-13 (its
+         * docs/BITSTREAM.md, ask 3): cft_run, cft_reduce and the
+         * program path returned CFT_ERR_UNSUPPORTED with
+         * cft_last_error() empty or stale, and it works around it at
+         * open. Both entry points are held here; the program path is
+         * held by loading against a format the image lacks in the
+         * sequencer section below.
+         *
+         * On an image that carries all four formats there is nothing
+         * to refuse, and that is reported as NOT TESTED rather than
+         * counted as agreement - the rule the R8 capability checks
+         * keep. */
+        {
+            static const unsigned char zero[64];
+            static unsigned char out[64];
+            int absent = 0, before = checks;
+            for (f = 0; f < 4; f++) {
+                cft_format fmt = (cft_format)f;
+                uint32_t fl = 0, bus = 0;
+                int g, k;
+                if (caps.format_mask & (1u << f))
+                    continue;
+                absent++;
+                for (k = 0; k < 2; k++) {
+                    const char *which = k ? "cft_reduce" : "cft_run";
+                    const char *msg;
+                    st = k ? cft_reduce(hw, CFT_SUM, fmt, CFT_RNE, zero,
+                                        NULL, out, 1, &fl, &bus)
+                           : cft_run(hw, CFT_ADD, fmt, CFT_RNE, zero, zero,
+                                     NULL, out, 1, &fl, &bus);
+                    msg = cft_last_error();
+                    checks++;
+                    if (st != CFT_ERR_UNSUPPORTED) {
+                        printf("  FAIL %s(%s) on an image without it: %s, "
+                               "not CFT_ERR_UNSUPPORTED\n", which,
+                               cft_format_name(fmt), cft_strerror(st));
+                        failures++;
+                        continue;
+                    }
+                    if (!msg[0]) {
+                        printf("  FAIL %s(%s) refused with no sentence: "
+                               "cft_last_error() is empty\n", which,
+                               cft_format_name(fmt));
+                        failures++;
+                        continue;
+                    }
+                    for (g = 0; g < 4; g++) {
+                        if (!(caps.format_mask & (1u << g)))
+                            continue;
+                        if (!strstr(msg, cft_format_name((cft_format)g))) {
+                            printf("  FAIL %s(%s) refused, but the sentence "
+                                   "does not name %s, which this device "
+                                   "carries:\n    %s\n", which,
+                                   cft_format_name(fmt),
+                                   cft_format_name((cft_format)g), msg);
+                            failures++;
+                            break;
+                        }
+                    }
+                    if (!strstr(msg, cft_format_name(fmt))) {
+                        printf("  FAIL %s(%s) refused, but the sentence "
+                               "does not name the format asked for:\n"
+                               "    %s\n", which, cft_format_name(fmt),
+                               msg);
+                        failures++;
+                    }
+                }
+            }
+            if (!absent)
+                printf("  format refusals: this image carries all four "
+                       "formats, NOT TESTED\n");
+            else
+                printf("  format refusals: %d absent format%s, %d checks, "
+                       "%d failed\n", absent, absent == 1 ? "" : "s",
+                       checks - before, failures);
+            fflush(stdout);
+        }
     }
     printf("comparing %lu elements per case against the software "
            "backend\n", (unsigned long)n);
