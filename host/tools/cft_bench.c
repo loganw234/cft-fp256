@@ -224,6 +224,8 @@ static struct result time_op(cft_device *dev, cft_op op, cft_format fmt,
     return r;
 }
 
+static int probe = 0;   /* --probe: print caps and exit */
+
 int main(int argc, char **argv)
 {
     /* EVERY elementwise opcode cft_run accepts, cheapest first so the
@@ -273,6 +275,8 @@ int main(int argc, char **argv)
             csv = 1;
         } else if (!strcmp(argv[argi], "--resident")) {
             resident = 1;
+        } else if (!strcmp(argv[argi], "--probe")) {
+            probe = 1;
         } else if (!strcmp(argv[argi], "-f") && argi + 1 < argc) {
             const char *want = argv[++argi];
             int i;
@@ -288,11 +292,15 @@ int main(int argc, char **argv)
             fprintf(stderr,
                     "usage: %s [artifact.xclbin] [-n elements] "
                     "[-t seconds] [-f fmt] [-s spread] [--csv] "
-                    "[--resident]\n"
+                    "[--resident] [--probe]\n"
                     "  --resident  operands in cft_alloc'd buffers, "
                     "filled and published once,\n"
                     "              so the columns report the engine "
-                    "rather than the bus\n", argv[0]);
+                    "rather than the bus\n"
+                    "  --probe     open, print backend= tiles= "
+                    "format_mask= formats= buffers_resident=, exit;\n"
+                    "              what a sweep reads an image's tile "
+                    "count from\n", argv[0]);
             return 2;
         }
     }
@@ -304,6 +312,32 @@ int main(int argc, char **argv)
                 artifact ? artifact : "software", cft_strerror(st),
                 cft_last_error());
         return 2;
+    }
+    if (probe) {
+        /* One line, key=value, from cft_get_caps and nothing else: the
+         * tile count here is the one the library will partition every
+         * cft_run across, which is the number a sweep must label its
+         * rows with. Reading it from the image is what stops a
+         * six-tile artifact being filed as "quad" because that was the
+         * flag it was handed under. */
+        cft_caps pc;
+        int pf;
+        memset(&pc, 0, sizeof pc);
+        pc.struct_size = sizeof pc;
+        if (cft_get_caps(dev, &pc) != CFT_OK) {
+            fprintf(stderr, "cft_get_caps: %s\n", cft_last_error());
+            cft_close(dev);
+            return 2;
+        }
+        printf("backend=%s tiles=%u format_mask=0x%x formats=",
+               pc.backend, (unsigned)pc.tiles, (unsigned)pc.format_mask);
+        for (pf = 0; pf < 4; pf++)
+            if (pc.format_mask & (1u << pf))
+                printf("%s%s", (pc.format_mask & ((1u << pf) - 1u)) ? "," : "",
+                       cft_format_name((cft_format)pf));
+        printf(" buffers_resident=%d\n", pc.buffers_resident ? 1 : 0);
+        cft_close(dev);
+        return 0;
     }
 
     /* One allocation at the widest element, reused for every format.

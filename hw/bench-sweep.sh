@@ -6,10 +6,26 @@
 # "at what size does hardware start to pay?" has an answer with a number rather
 # than an opinion.
 #
-#   bash hw/bench-sweep.sh --single ~/cardday-rev4/cft_hw_single.xclbin \
-#                          --quad   ~/cardday-rev4/cft_hw_quad.xclbin
+#   bash hw/bench-sweep.sh --artifact ~/cardday-rev4/cft_hw_single.xclbin \
+#                          --artifact ~/cardday-rev4/cft_hw_quad.xclbin
+#   bash hw/bench-sweep.sh --artifact f128=~/cardday-f128x6b/cft_hw_f128_6x.xclbin
 #   bash hw/bench-sweep.sh --quick            # the ladder thinned, for a smoke
 #   bash hw/bench-sweep.sh                    # software only, no card needed
+#
+#   --artifact [LABEL=]PATH, any number of times. The TILE COUNT of each is
+#   read from the image (`cft-bench --probe`, which asks cft_get_caps), never
+#   from the flag: this script took exactly one --single and one --quad until
+#   2026-09-14, and cft-rebound's six-tile f128 image could not be swept by it
+#   at all (its docs/BITSTREAM.md, ask 7). --single and --quad still work and
+#   mean --artifact; the tile count comes from the image either way, so a
+#   six-tile image handed to --quad is filed as six.
+#
+#   LABEL tells apart two images with the same tile count - a full single and
+#   an f128 single are both "1 tile" and would otherwise share a row key. It
+#   becomes the backend column, "device-LABEL"; unlabelled images are
+#   "device". python/bench_report.py treats anything not beginning
+#   "software" as a device series, so a labelled image is drawn and crossed
+#   against every baseline without being taught its name.
 #
 # THE GRID
 #   backend x path : software(host) | device(host-pointer) | device(resident)
@@ -49,7 +65,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BENCH="$ROOT/host/cft-bench"
 [ -x "$BENCH" ] || BENCH="$ROOT/host/cft-bench.exe"
 
-SINGLE=""; QUAD=""; OUT="$ROOT/bench-sweep"; TSEC=0.15; QUICK=0
+ARTS=(); OUT="$ROOT/bench-sweep"; TSEC=0.15; QUICK=0
 # What the software rows are called. A sweep on a second machine is a
 # second SOFTWARE data point, not a replacement for the first, and the
 # two are only comparable if a reader can tell which silicon each ran
@@ -62,20 +78,39 @@ die () { echo "FATAL: $*" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --single)  SINGLE=${2:?}; shift 2;;
-    --quad)    QUAD=${2:?};   shift 2;;
+    --artifact) ARTS+=("${2:?}"); shift 2;;
+    # the old spellings: an artifact each, filed by its OWN tile count
+    --single|--quad) ARTS+=("${2:?}"); shift 2;;
     --out)     OUT=${2:?};    shift 2;;
     --time)    TSEC=${2:?};   shift 2;;
     --formats) FORMATS=${2:?}; shift 2;;
     --label)   LABEL=${2:?};  shift 2;;
     --quick)   QUICK=1; shift;;
-    -h|--help) sed -n '2,48p' "$0"; exit 0;;
+    -h|--help) sed -n '2,61p' "$0"; exit 0;;
     *) die "unknown option $1";;
   esac
 done
 
 [ -x "$BENCH" ] || die "no cft-bench built; make -C host cft-bench"
-for a in $SINGLE $QUAD; do [ -f "$a" ] || die "no such artifact: $a"; done
+
+# Each artifact, probed once: its label, its path, and the tile count the
+# library will actually partition across. A probe that fails is fatal
+# rather than a row filed under a guess.
+ART_LABEL=(); ART_PATH=(); ART_TILES=(); ART_BACKEND=()
+for spec in ${ARTS[@]+"${ARTS[@]}"}; do
+  case "$spec" in
+    *=*) label=${spec%%=*}; path=${spec#*=};;
+    *)   label="";          path=$spec;;
+  esac
+  [ -f "$path" ] || die "no such artifact: $path"
+  probe=$("$BENCH" --probe "$path" 2>&1) || die "cannot open $path: $probe"
+  tiles=$(printf '%s\n' "$probe" | sed -n 's/.*tiles=\([0-9][0-9]*\).*/\1/p')
+  [ -n "$tiles" ] || die "probe of $path printed no tile count: $probe"
+  ART_LABEL+=("${label:-${tiles}t}")
+  ART_PATH+=("$path")
+  ART_TILES+=("$tiles")
+  ART_BACKEND+=("device${label:+-$label}")
+done
 
 mkdir -p "$OUT"
 CSV="$OUT/sweep.csv"
@@ -130,6 +165,11 @@ sweep_point () {         # <backend> <path> <tiles> <format> <n> [artifact] [--r
 
 echo "== sweep begins $(date -Is)" | tee -a "$LOG"
 echo "   bench $BENCH, -t $TSEC, quick=$QUICK, label=$LABEL" | tee -a "$LOG"
+i=0
+while [ "$i" -lt "${#ART_PATH[@]}" ]; do
+  echo "   artifact ${ART_LABEL[$i]}: ${ART_TILES[$i]} tile(s), ${ART_PATH[$i]}" | tee -a "$LOG"
+  i=$((i + 1))
+done
 echo "   host $(uname -n), $(uname -sm)" | tee -a "$LOG"
 
 for fmt in $FORMATS; do
@@ -138,14 +178,14 @@ for fmt in $FORMATS; do
   for n in $(ladder_for "$esz"); do
     printf "%-6s n=%-9s" "$fmt" "$n" | tee -a "$LOG"
     sweep_point "$LABEL" host 0 "$fmt" "$n" && printf " sw" | tee -a "$LOG"
-    if [ -n "$SINGLE" ]; then
-      sweep_point device host     1 "$fmt" "$n" "$SINGLE"             && printf " 1t-host" | tee -a "$LOG"
-      sweep_point device resident 1 "$fmt" "$n" "$SINGLE" --resident  && printf " 1t-res"  | tee -a "$LOG"
-    fi
-    if [ -n "$QUAD" ]; then
-      sweep_point device host     4 "$fmt" "$n" "$QUAD"               && printf " 4t-host" | tee -a "$LOG"
-      sweep_point device resident 4 "$fmt" "$n" "$QUAD" --resident    && printf " 4t-res"  | tee -a "$LOG"
-    fi
+    i=0
+    while [ "$i" -lt "${#ART_PATH[@]}" ]; do
+      sweep_point "${ART_BACKEND[$i]}" host     "${ART_TILES[$i]}" "$fmt" "$n" "${ART_PATH[$i]}" \
+        && printf " %s-host" "${ART_LABEL[$i]}" | tee -a "$LOG"
+      sweep_point "${ART_BACKEND[$i]}" resident "${ART_TILES[$i]}" "$fmt" "$n" "${ART_PATH[$i]}" --resident \
+        && printf " %s-res"  "${ART_LABEL[$i]}" | tee -a "$LOG"
+      i=$((i + 1))
+    done
     echo | tee -a "$LOG"
   done
 done
