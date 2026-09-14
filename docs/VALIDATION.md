@@ -11225,3 +11225,83 @@ worst-path file per build, 10 MB in all under `~/cardday-forensics/`. Two trees
 were **refused rather than deleted** because nothing was extractable from them
 (`build-135-hw`, `build-seq135q`); the rev4 pair's own trees are kept until the
 pair has been used in anger. 79 GB free became 91 GB.
+
+## 2026-09-14 - the listing branch on silicon, and a package-only mode that packaged a bitstream
+
+**amd-arc-box, U50 at 02:00.1, XRT 2.19, Vitis 2022.2, host tools built
+XRT=1 at c56b368; the card cleared by Logan while cft-rebound's CPU suite
+ran on the same box.** Everything this entry measures was owed from the
+card-free window: three things had been proved on the desktop and none
+of them on a card.
+
+**The listing branch did not open a tile.** 55bbc35 taught `backend_xrt.cpp`
+to read the compute units an image declares (`xrt::xclbin`, XRT 2.19's
+`xrt/experimental/xrt_xclbin.h`) instead of probing `cft_krnl:{cft_krnl_N}`
+literally, so that a variant kernel name could open. It had been compiled
+against both header generations from the desktop - 2.14 on WSL with the
+listing off, 2.19's headers copied from the box with it on - and never run.
+On the card, against cft-rebound's f128 image (`~/cardday-f128s`,
+ca19fe3, `EN_FP256=0` packaged by their own `package_variant.tcl`):
+
+    cft_open(...cft_hw_f128_1x.xclbin): artifact missing, unreadable, or not a tile
+      no cft tile could be opened ...: the image declares compute unit(s)
+      cft_krnl:cft_krnl_1; first failure: No compute units matching
+      'cft_krnl:{cft_krnl:cft_krnl_1}'
+
+XRT 2.19's `ip::get_name()` answers the QUALIFIED name, `cft_krnl:cft_krnl_1`,
+and the open string wants `kernel:{instance}`; composed naively the
+instance was qualified twice. Both `cft-bench --probe` and `device-test`
+failed the same way. The fix (c56b368) takes what follows the last `:`,
+or the whole name from an XRT that answers bare, and the message that
+found it stays - it named both the declared unit and the failing spelling,
+which is what made the defect a one-line read. Compiling both header
+generations was the neighbour of the fact; running one of them was the
+fact.
+
+**After the fix, the f128 image through the new host:**
+
+    $ cft-bench cft_hw_f128_1x.xclbin --probe
+    backend=xrt tiles=1 format_mask=0x7 formats=fp32,fp64,fp128 buffers_resident=1
+
+    $ device-test cft_hw_f128_1x.xclbin -q -n 8
+    device: backend xrt, 1 tile, contract 0x00000800, formats fp32 fp64 fp128
+      format refusals: 1 absent format, 2 checks, 0 failed
+    ...
+    815 checks, 0 failed
+    the device and the software backend agree on every case, bits and flags
+
+The two refusal checks are 2ec3cfa's: `cft_run` and `cft_reduce` at fp256
+answer `CFT_ERR_UNSUPPORTED` with a sentence naming fp32, fp64, fp128 and
+the format asked for, before a byte is issued. cft-rebound's asks 2 and 3
+on silicon, on their own image.
+
+**The first `CFT_GENERICS` packaging on real Vivado**, c2c67b6's path that
+had only ever run under the stub v++ of `hw/test-rebuild-argv.sh`.
+`CFT_GENERICS="EN_FP256=0"`: `GENERIC: EN_FP256 "1" -> "0"`, the HDL
+parameters read back with `EN_FP32 = "1"` (5c73564's new generic, inferred
+as a bitString like its siblings), and `verify_xo.tcl` found every requested
+generic in the wrapper. Then `CFT_GENERICS="EN_FP32=0 EN_FP256=0"` -
+cft-rebound's tile, ask 5 - `GENERIC: EN_FP32 "1" -> "0"`, `EN_FP256 "1" ->
+"0"`, wrapper `.EN_FP32(1'B0)` and `.EN_FP256(1'B0)`, `.EN_FP64(1'B1)`,
+`.EN_FP128(1'B1)`: every requested generic in the wrapper, 173,294-byte
+`.xo`.
+
+**And the packaging run I meant as a three-minute check linked a bitstream.**
+`TARGETS=""` was my spelling for "package and verify, link nothing";
+`rebuild-2022.sh` read `${TARGETS:-"hw hw_emu"}`, which treats an empty
+variable as unset, and started a full hw link on a box another session was
+using. Caught at three minutes from `cfgen` lines in the log; killed by
+PID - the tree I had started, then four Vivado processes that had
+re-parented out of it, identified by `/proc/<pid>/cwd` under my build
+directory, never by image name. c56b368 makes an empty `TARGETS` a
+request (`${TARGETS-...}`), documents it as step 3c, and adds the stub leg
+that proves it: rc 0, the generics seen by vivado, `v++` never invoked.
+The first run of the new leg failed with rc 2 after every step had
+succeeded - the closing `ls "$BUILD"/*.xclbin` of a build with no xclbin,
+under `set -e`. That is the leg earning its keep before it was even
+committed.
+
+**Not measured here:** an fp32-less image on silicon. The single-tile
+`cft_krnl_f64f128` link (`EN_FP32=0 EN_FP256=0`, 135 MHz, retimed +
+phys_opt) was started at 13:15 under `nice`; its entry follows when it
+has been exercised.
