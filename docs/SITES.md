@@ -1,6 +1,12 @@
 # The four format sites: binary32.com, binary64.com, binary128.com, binary256.com
 
-A layout plan, written 2026-09-14, before anything is built. The four
+A layout plan, written 2026-09-14, before anything was built. **Built
+the same day**: the sites live in
+[loganw234/binary-sites](https://github.com/loganw234/binary-sites), one
+tree that generates all four, with the module pinned by hash to this
+repository's committed conformance page. What is built follows this
+plan; where the two differ, the repository is the record and this file
+is the argument. The four
 domains are the names of the IEEE 754 binary interchange formats, and
 the brief is that each site teaches its format first, points at the
 software that serves that format best, and carries this project as one
