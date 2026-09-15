@@ -301,9 +301,13 @@ that makes the rest worth having.
    in `host/src/program.c` (`seq_block`, line 1084, and the block loop
    after `seq_program_run`) - the two definitions you are extending, in
    that order.
-6. `host/src/backend_xrt.cpp`: `ensure_one`, `bind_role`, the program
-   launch around line 1560 - where your four tables bind, in slots P0
-   already passes.
+6. `host/src/device.c`: `bind_role` (line 256, the registry's binding
+   path) and its six calls for a program run (around line 544) - where
+   your four tables join the registry beside the scratch block's; then
+   `host/src/backend_xrt.cpp`: `ensure_one`, `buf_bind` into `ob[r]`
+   (around line 1556), the staging that follows it, and the program
+   launch around line 1640, where P0 passes `tile.ia .. tile.mk` as
+   one-beat stand-ins in slots 12..16.
 7. What the ask is for: `cft-rebound/src/ias15_cft.c` lines 620-700
    (`build_scatter`) and 762-810 (`gravity_body`), read-only, in
    another agent's repository. Do not edit anything there.
@@ -388,12 +392,21 @@ there is no card day inside a parcel.
 - `host/src/program.c` - the executor's block loop where streams and
   the scratch preload are loaded; nothing in the loader or the ISA
   decode.
-- `host/src/device.c` - only the refusals P0 left in the index-table
-  path of `cft_program_run_ex`'s validation, which you replace with the
-  bounds checks; nothing in `cft_run_ex` (P2's).
-- `host/src/backend_xrt.cpp` - `bind_role` for the four index roles and
-  the program launch's staging of them; not the launch sites (P0 made
-  them pass every argument already) and not the reduction paths.
+- `host/src/device.c` - the refusals P0 left in `seq_check_round2`
+  (in `program.c`, below) are replaced there; here you own the four
+  `bind_role` calls for `CFT_ROLE_IA .. CFT_ROLE_ISI` beside the scratch
+  block's two (around line 555) and the sizes they bind; nothing in
+  `cft_run_ex` (P2's).
+- `host/src/program.c` - `seq_check_round2`'s index-table arms become
+  the bounds checks (an index at or past its source, by name and by
+  value), and the executor's block loop gathers; the lane-mask arms
+  stay as P0 left them (P3's).
+- `host/src/backend_xrt.cpp` - inside `cftx_program_run` only: the four
+  tables staged into `tile.ia .. tile.isi` when not resident and taken
+  from `ob[CFT_ROLE_IA ..]` when they are, exactly as `scratch_in`
+  is, and the five operands at the end of the launch's argument list
+  changed from the stand-ins to the resolved pointers. Not the
+  reduction paths, not `ensure_one` itself, not the version list.
 - `tb/test_seq_core.py`, `tb/test_krnl_seq.py`: your cases.
 - `host/tests/seq_check.py`: a fourth corpus with tables, from its own
   seed so the three existing corpora draw what they always drew.
@@ -641,9 +654,12 @@ in the load/preload states P1 just landed or the issue pipe.
 `rtl/cft_krnl.sv` - `caps2` bit [10] only. `python/cft_golden/seq.py` -
 `lane_mask` in `run()`. `host/src/program.c` - the block loop's
 `active[]` initialisation and the three output writes.
-`host/src/device.c` - the mask's refusal in `cft_program_run_ex`'s
-validation, replaced by the shape check. `host/src/backend_xrt.cpp` -
-`bind_role` for the mask and the repack. `host/src/backend_remote.c` -
+`host/src/program.c` - `seq_check_round2`'s lane-mask arm, the refusal
+replaced by the shape check that already precedes it. `host/src/device.c`
+- the `bind_role` call for `CFT_ROLE_MASK` beside the scratch block's.
+`host/src/backend_xrt.cpp` - inside `cftx_program_run`: the mask's
+staging or binding, the per-tile repack, and the last operand of the
+launch. `host/src/backend_remote.c` -
 the client-side route: run unmasked on the server and copy back only
 active lanes' outputs (bit-identical to a masked run by P3's own
 contract, since a masked lane's output is by definition the caller's
