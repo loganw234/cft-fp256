@@ -84,9 +84,19 @@ PROGPTR, CNTPTR, BANKPTR = 0x54, 0x5C, 0x64
 # Revision 3's three: the second capability word, and the two pointers
 # the per-run scratch block rides on.
 CAPS2, SINPTR, SOUTPTR = 0x6C, 0x70, 0x78
+# ABI 0.14: the four index-table pointers and the lane mask's.
+IDXAPTR, IDXBPTR, IDXCPTR = 0x88, 0x90, 0x98
+IDXSIPTR, MASKPTR = 0xA0, 0xA8
 
 MODE_SEQ = 1 << 15          # this run belongs to cft_seq
 CAPS_SEQ = 1 << 15          # ... and this bitstream has one
+# MODE[22:19]: which input blocks are fetched through a table (R16),
+# and MODE[23]: the lane mask (R17), which no build carries yet.
+MODE_IDX_A, MODE_IDX_B = 1 << 19, 1 << 20
+MODE_IDX_C, MODE_IDX_SI = 1 << 21, 1 << 22
+MODE_LANE_MASK = 1 << 23
+CAPS2_INDEXED = 1 << 9
+CAPS2_LANE_MASK = 1 << 10
 
 ST_REFUSED = 1 << 3
 ST_DEPOSIT_OVF = 1 << 4
@@ -116,6 +126,12 @@ BANK_BASE = 0xB0000
 # the counts, so an overlap would hide exactly the mistakes these
 # regions exist to catch.
 SIN_BASE, SOUT_BASE = 0x110000, 0x140000
+# The four index tables (ABI 0.14), each in its own region and far from
+# the buffers it indexes, for the reason BANK_BASE is far from the
+# image: a gather that read its entries out of the stream it indexes
+# would pass every check here if the two regions touched.
+IA_BASE, IB_BASE = 0x150000, 0x158000
+IC_BASE, ISI_BASE = 0x160000, 0x168000
 EW_BASES = (0xC0000, 0xD0000, 0xE0000, 0xF0000)
 
 POISON = 0xAA
@@ -172,9 +188,18 @@ async def poll_done(dut, axil, what, tries=3000):
     raise AssertionError(f"{what}: the kernel never finished")
 
 
+def pack_idx(table):
+    """An index table as the device receives it: u32 little-endian,
+    dense, and BEAT-PADDED - the tile reads whole beats and a block's
+    last one may reach past the entries the caller has."""
+    raw = b"".join(int(t).to_bytes(4, "little") for t in table)
+    return raw + bytes(POISON for _ in range(-len(raw) % 32))
+
+
 async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
                           prec_code, op_noise=0, bank=None,
-                          scratch_in=None):
+                          scratch_in=None, idx=(None, None, None, None),
+                          mode_extra=0):
     """Everything a host does between having a program and having an
     answer, in the order XRT does it.
 
@@ -190,6 +215,8 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
     sout_bytes = n * prog.n_scratch_out * ebytes
 
     if n:
+        # The streams as given: with a table these are the SOURCES and
+        # have no reason to hold n elements.
         ram.write(A_BASE, pack(prog.fmt, va))
         ram.write(B_BASE, pack(prog.fmt, vb))
         ram.write(C_BASE, pack(prog.fmt, vc))
@@ -204,7 +231,25 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
     # when the window is zero bytes wide.
     ram.write(SOUT_BASE, bytes([POISON]) * (sout_bytes + 256 + GUARD))
 
-    await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ)
+    # ABI 0.14's four tables, staged and pointed at exactly as the
+    # scratch block is, and their MODE bits set only where a table was
+    # given. A pointer with no bit set is POISONED, so a tile that read
+    # an unselected table would read nothing that exists.
+    idx_mode = 0
+    for table, bit, base, reg in (
+            (idx[0], MODE_IDX_A, IA_BASE, IDXAPTR),
+            (idx[1], MODE_IDX_B, IB_BASE, IDXBPTR),
+            (idx[2], MODE_IDX_C, IC_BASE, IDXCPTR),
+            (idx[3], MODE_IDX_SI, ISI_BASE, IDXSIPTR)):
+        if table is None:
+            await write64(axil, reg, 0xDEAD_7000 | bit)
+            continue
+        ram.write(base, pack_idx(table))
+        await write64(axil, reg, base)
+        idx_mode |= bit
+    await write64(axil, MASKPTR, 0xDEAD_8000)
+    await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ |
+                           idx_mode | mode_extra)
     await write64(axil, NREG, n)
     await write64(axil, APTR, A_BASE)
     await write64(axil, BPTR, B_BASE)
@@ -238,21 +283,29 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
 
 
 async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
-                   bank=None, scratch_in=None, tries=3000):
-    """One sequencer run, scored against the model on every observable."""
+                   bank=None, scratch_in=None, tries=3000,
+                   idx=(None, None, None, None), n=None):
+    """One sequencer run, scored against the model on every observable.
+
+    With an index table, `va`/`vb`/`vc` are the SOURCES that table
+    indexes rather than the run's elements, so `n` stops being
+    len(va) and is passed - which is the whole shape of R16 on the
+    host side too."""
     fmt = prog.fmt
     ebytes = fmt.width // 8
-    n = len(va)
+    n = len(va) if n is None else n
     maxd = prog.max_deposits
     dep_bytes = n * maxd * ebytes
     cnt_bytes = n * 4
 
-    res = seq.run(prog, va, vb, vc, bank=bank, scratch_in=scratch_in)
+    res = seq.run(prog, va, vb, vc, bank=bank, scratch_in=scratch_in,
+                  idx_a=idx[0], idx_b=idx[1], idx_c=idx[2],
+                  idx_scratch_in=idx[3])
     sout_bytes = n * prog.n_scratch_out * ebytes
 
     await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
                           PREC_CODE[fmt.name], op_noise, bank=bank,
-                          scratch_in=scratch_in)
+                          scratch_in=scratch_in, idx=idx)
     await poll_done(dut, axil, name, tries=tries)
 
     got_dep = ram.read(D_BASE, dep_bytes + GUARD)
@@ -338,6 +391,39 @@ async def run_refused(dut, axil, ram, image, prog, va, vb, vc, n,
         f"the last one's flags is rewriting history")
     dut._log.info(f"{name}: refused, STATUS {got_st:#07b}, "
                   f"FLAGS held at {got_f:#07b}")
+
+
+async def run_refused_mode(dut, axil, ram, prog, va, vb, vc, n,
+                           mode_extra, name, want_flags):
+    """A run the CSR throws back for a MODE bit this build does not
+    carry: STATUS[3], no write anywhere, and the previous run's FLAGS
+    left alone. The refusal is the CSR's, so the image is valid and the
+    only thing wrong with the run is the bit."""
+    ebytes = prog.fmt.width // 8
+    dep_bytes = n * prog.max_deposits * ebytes
+    cnt_bytes = n * 4
+    ram.write(D_BASE, bytes([POISON]) * (dep_bytes + GUARD))
+    ram.write(CNT_BASE, bytes([POISON]) * (cnt_bytes + GUARD))
+    await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
+                          PREC_CODE[prog.fmt.name], mode_extra=mode_extra)
+    await poll_done(dut, axil, name)
+    got_st = await axil.read_dword(STATUS)
+    assert got_st == ST_REFUSED, (
+        f"{name}: STATUS {got_st:#07b}, want exactly {ST_REFUSED:#07b} - a "
+        f"MODE bit this build does not honour must be REFUSED and never "
+        f"ignored, because a run that quietly read the dense stream "
+        f"would answer from the wrong elements with clean flags")
+    assert ram.read(D_BASE, dep_bytes + GUARD) == \
+        bytes([POISON]) * (dep_bytes + GUARD), \
+        f"{name}: a refused run wrote deposits"
+    assert ram.read(CNT_BASE, cnt_bytes + GUARD) == \
+        bytes([POISON]) * (cnt_bytes + GUARD), \
+        f"{name}: a refused run wrote counts"
+    got_f = await axil.read_dword(FLAGS)
+    assert got_f == want_flags, (
+        f"{name}: FLAGS {got_f:#07b} after a refusal, want the previous "
+        f"run's {want_flags:#07b}")
+    dut._log.info(f"{name}: refused, STATUS {got_st:#07b}")
 
 
 # ---- the programs ----------------------------------------------------
@@ -1043,6 +1129,63 @@ async def krnl_sequencer(dut):
     assert ram.read(CNT_BASE, GUARD) == bytes([POISON]) * GUARD, \
         "n=0 wrote counts"
     assert (await axil.read_dword(STATUS)) == 0, "n=0 is not a fault"
+
+    # ---- ABI 0.14, R16: an input block through its index table -------
+    #
+    # The whole kernel this time: the CSR decodes MODE[22:19], the
+    # pointers arrive through the register map, and the reads go out on
+    # the master hw/kernel.xml binds each argument to. What the unit
+    # bench proves about the gather's addresses, this proves about the
+    # path a host actually drives.
+    assert (await axil.read_dword(CAPS2)) & CAPS2_INDEXED, (
+        "CAPS2[9] must be set on a build whose cft_seq gathers - a host "
+        "asks this register before it sets a MODE bit, and the "
+        "alternative is guessing from VERSION")
+    rng_ix = random.Random(0x1D60)
+    for fmt in (FP32, FP64, FP256):
+        pg = prog_two_deposits(fmt)
+        n_ix = 40 if fmt is FP32 else (20 if fmt is FP64 else 9)
+        src = gen_stream(fmt, 31, rng_ix, tame=True)
+        dense_b = gen_stream(fmt, n_ix, rng_ix, tame=True)
+        dense_c = gen_stream(fmt, n_ix, rng_ix, tame=True)
+        table = [rng_ix.randrange(len(src)) for _ in range(n_ix)]
+        for k in range(0, n_ix, 4):
+            table[k] = seq.IDX_NONE
+        await run_prog(dut, axil, ram, pg, src, dense_b, dense_c,
+                       f"{fmt.name} gathered a from a {len(src)}-element "
+                       f"source", idx=(table, None, None, None), n=n_ix)
+    # ...and an identity table is the dense run, through the same path.
+    pg32 = prog_two_deposits(FP32)
+    n_id = 24
+    a_id = gen_stream(FP32, n_id, rng_ix, tame=True)
+    b_id = gen_stream(FP32, n_id, rng_ix, tame=True)
+    c_id = gen_stream(FP32, n_id, rng_ix, tame=True)
+    await run_prog(dut, axil, ram, pg32, a_id, b_id, c_id,
+                   "fp32 identity table through the CSR",
+                   idx=(list(range(n_id)), None, None, None), n=n_id)
+    dense_dep = ram.read(D_BASE, n_id * pg32.max_deposits * 4)
+    await run_prog(dut, axil, ram, pg32, a_id, b_id, c_id,
+                   "fp32 the same run, dense")
+    assert ram.read(D_BASE, n_id * pg32.max_deposits * 4) == dense_dep, (
+        "an identity table must be bit-identical to the dense run, and "
+        "both of these came off the tile")
+
+    # ---- the guard is still armed on the bit above ours ---------------
+    #
+    # MODE[23] is the lane mask, which no build carries yet: it must be
+    # REFUSED with STATUS[3] and no memory touched - the same control
+    # every parcel inherits, run here to prove that opening MODE[22:19]
+    # did not open the reserved window with it.
+    flags_before = await axil.read_dword(FLAGS)
+    assert not ((await axil.read_dword(CAPS2)) & CAPS2_LANE_MASK), (
+        "this case asserts that MODE[23] is refused, which is only a "
+        "control while CAPS2[10] is clear")
+    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                           MODE_LANE_MASK, "MODE[23] with CAPS2[10] clear",
+                           flags_before)
+    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                           1 << 31, "MODE[31], reserved on every build",
+                           flags_before)
 
     # ---- and elementwise still works after all of it ------------------
     await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
