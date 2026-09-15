@@ -76,8 +76,8 @@ async def cycles_per_block(dut):
 # address, the return, the pack. On the card each of those reads is an
 # HBM round trip and the read side carries ONE burst at a time, so the
 # card's cost per gathered element is a round trip and not this - which
-# is what tb/probe_gather_card.py measures and what the read counts
-# printed here predict.
+# is what host/tools/gathertime.py measures on a card and what the read
+# counts printed here predict.
 
 @cocotb.test()
 async def gathered_against_dense(dut):

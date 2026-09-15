@@ -3603,6 +3603,266 @@ done:
  * arrived shows up in the deposits; STL last means scratch-OUT carries
  * it back out. Reversed, this would pass with scratch_in undelivered.
  */
+/* ==== R16 through the BUFFER path ====================================
+ *
+ * Everything above proves the gather's answers. This proves where its
+ * operands lived: the four index tables and an indexed SOURCE
+ * registered with cft_alloc, run resident, against the same call made
+ * out of plain host pointers. The "bound where it is resident"
+ * argument - device.c's four bind_role calls and backend_xrt.cpp's
+ * buf_bind of ob[CFT_ROLE_IA..] - had no gate on any backend until
+ * this leg, and it is the argument the whole feature's cost rests on:
+ * a table rebuilt once a step and read by every call in it.
+ *
+ * Two things this can catch that the answer alone cannot. A table
+ * bound at the wrong WINDOW - the run's n elements rather than the
+ * source's idx_*_src - gives the right bits on the software backend
+ * and truncates on a card; and a table that is staged every time when
+ * it could be bound gives the right bits and none of the saving, which
+ * `resident_binds` is here to say.
+ *
+ * The program deposits the gathered stream element AND the gathered
+ * scratch slot, so both kinds of table are observable in the output:
+ * slot 0 is a[idx_a[i]] and slot 1 is pool[idx_si[i]].
+ * ==================================================================== */
+
+/* Every byte zero: the encoding of +0 at every format, which is
+ * what CFT_IDX_NONE reads as. */
+static int is_zero(const uint8_t *p, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        if (p[i])
+            return 0;
+    return 1;
+}
+
+static void compare_buffers_indexed(cft_device *sw, cft_device *hw,
+                                    cft_format fmt, size_t n,
+                                    int resident_expected)
+{
+    const size_t esz = cft_format_size(fmt);
+    /* Deliberately unrelated to n, and deliberately SHORTER: that is
+     * the shape the feature exists for, and it is the one whose
+     * binding window is the source's length and not the run's. */
+    const size_t src_n = (n / 3) + 2;
+    const size_t pool_n = (n / 2) + 3;
+    struct rbuf rsrc, rpool, rta, rtsi, rdep;
+    uint8_t *src = NULL, *pool = NULL;
+    uint8_t *dep_sw = NULL, *dep_hw = NULL;
+    uint32_t *ta = NULL, *tsi = NULL;
+    cft_program *p_sw = NULL, *p_hw = NULL;
+    uint8_t img[64];
+    uint64_t ins[4];
+    size_t bytes, dep_bytes = n * 2 * esz;
+    size_t i;
+    uint32_t fl = 0, bus = 0;
+    cft_run_args A;
+    int ok = 1, have = 0;
+
+    ins[0] = seq_ldl(4, 0);                   /* r4 <- scratch[0]     */
+    ins[1] = seq_ctrl(3, 0, 0);               /* deposit r0 (gathered)*/
+    ins[2] = seq_ctrl(3, 4, 0);               /* deposit r4 (gathered)*/
+    ins[3] = seq_ctrl(0, 0, 0);               /* halt                 */
+    bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 2,
+                              CFT_PROG_FLAG_SCRATCH_IO, 1, 0);
+
+    memset(&rsrc, 0, sizeof rsrc); memset(&rpool, 0, sizeof rpool);
+    memset(&rta, 0, sizeof rta);   memset(&rtsi, 0, sizeof rtsi);
+    memset(&rdep, 0, sizeof rdep);
+
+    src    = (uint8_t *)malloc(src_n * esz);
+    pool   = (uint8_t *)malloc(pool_n * esz);
+    dep_sw = (uint8_t *)malloc(dep_bytes);
+    dep_hw = (uint8_t *)malloc(dep_bytes);
+    ta     = (uint32_t *)malloc(n * 4);
+    tsi    = (uint32_t *)malloc(n * 4);
+    if (!src || !pool || !dep_sw || !dep_hw || !ta || !tsi) {
+        printf("  FAIL %s indexed buffers: out of memory\n",
+               cft_format_name(fmt));
+        failures++;
+        goto done;
+    }
+    fill_finite(src, fmt, src_n);
+    fill_finite(pool, fmt, pool_n);
+    /* Distinct entries where the source allows it, and one sentinel in
+     * five, which must read +0 and cost no read. */
+    for (i = 0; i < n; i++) {
+        ta[i]  = (i % 5 == 0) ? CFT_IDX_NONE
+                              : (uint32_t)((i * 7 + 1) % src_n);
+        tsi[i] = (i % 7 == 0) ? CFT_IDX_NONE
+                              : (uint32_t)((i * 3 + 2) % pool_n);
+    }
+
+    if (cft_program_load(sw, img, bytes, &p_sw) != CFT_OK ||
+        cft_program_load(hw, img, bytes, &p_hw) != CFT_OK) {
+        printf("  FAIL %s indexed buffers: the image did not load: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+#define IDXBUF_ARGS(a_, si_, ta_, tsi_, dep_)                          \
+    do {                                                               \
+        run_args_init(&A, (a_), (dep_), n);                            \
+        A.scratch_in        = (si_);                                   \
+        A.scratch_in_bytes  = pool_n * esz;                            \
+        A.idx_a             = (ta_);                                   \
+        A.idx_a_src         = src_n;                                   \
+        A.idx_scratch_in    = (tsi_);                                  \
+        A.idx_scratch_src   = pool_n;                                  \
+        A.flags_out         = &fl;                                     \
+        A.bus_out           = &bus;                                    \
+    } while (0)
+
+    /* The staged reference: plain host pointers, software backend. */
+    memset(dep_sw, 0x5a, dep_bytes);
+    IDXBUF_ARGS(src, pool, ta, tsi, dep_sw);
+    checks++;
+    if (cft_program_run_ex(p_sw, &A) != CFT_OK) {
+        printf("  FAIL %s indexed buffers: the software run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+
+    /* The resident run: EVERY operand-shaped buffer from cft_alloc -
+     * the source, the pool, both tables and the deposit window - so a
+     * device that binds binds all five. */
+    if (!rbuf_alloc(hw, &rsrc, src_n * esz) ||
+        !rbuf_alloc(hw, &rpool, pool_n * esz) ||
+        !rbuf_alloc(hw, &rta, n * 4) ||
+        !rbuf_alloc(hw, &rtsi, n * 4) ||
+        !rbuf_alloc(hw, &rdep, dep_bytes)) {
+        printf("  FAIL %s indexed buffers: cft_alloc\n",
+               cft_format_name(fmt));
+        failures++;
+        goto done;
+    }
+    if (!rbuf_put(&rsrc, src, src_n * esz) ||
+        !rbuf_put(&rpool, pool, pool_n * esz) ||
+        !rbuf_put(&rta, ta, n * 4) ||
+        !rbuf_put(&rtsi, tsi, n * 4)) {
+        printf("  FAIL %s indexed buffers: publishing the inputs: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+    have = 1;
+    memset(rdep.p, 0x5a, dep_bytes);
+    IDXBUF_ARGS(rsrc.p, rpool.p, (const uint32_t *)rta.p,
+                (const uint32_t *)rtsi.p, rdep.p);
+    checks++;
+    if (cft_program_run_ex(p_hw, &A) != CFT_OK) {
+        printf("  FAIL %s indexed buffers: the resident run failed: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+    if (cft_buffer_from_device(rdep.b) != CFT_OK) {
+        printf("  FAIL %s indexed buffers: collecting the deposits: %s\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto done;
+    }
+    memcpy(dep_hw, rdep.p, dep_bytes);
+    checks++;
+    if (memcmp(dep_sw, dep_hw, dep_bytes) != 0) {
+        for (i = 0; i < dep_bytes && dep_sw[i] == dep_hw[i]; i++)
+            ;
+        printf("  FAIL %s indexed buffers: a resident gather differs "
+               "from a staged one, first at byte %lu (lane %lu, slot "
+               "%lu)\n", cft_format_name(fmt), (unsigned long)i,
+               (unsigned long)(i / esz / 2), (unsigned long)((i / esz) % 2));
+        failures++;
+        ok = 0;
+    }
+    /* ...and the answer is the gather's definition, so a run that
+     * bound the wrong window cannot pass by agreeing with itself. */
+    checks++;
+    for (i = 0; i < n; i++) {
+        const uint8_t *w0 = (ta[i] == CFT_IDX_NONE)
+                          ? NULL : src + (size_t)ta[i] * esz;
+        const uint8_t *w1 = (tsi[i] == CFT_IDX_NONE)
+                          ? NULL : pool + (size_t)tsi[i] * esz;
+        const uint8_t *g0 = dep_hw + (i * 2) * esz;
+        const uint8_t *g1 = dep_hw + (i * 2 + 1) * esz;
+        int bad0 = w0 ? (memcmp(g0, w0, esz) != 0) : !is_zero(g0, esz);
+        int bad1 = w1 ? (memcmp(g1, w1, esz) != 0) : !is_zero(g1, esz);
+        if (bad0 || bad1) {
+            printf("  FAIL %s indexed buffers: lane %lu is not "
+                   "source[idx] (idx_a %u, idx_si %u)\n",
+                   cft_format_name(fmt), (unsigned long)i, ta[i], tsi[i]);
+            failures++;
+            ok = 0;
+            break;
+        }
+    }
+
+    /* A second run with no republish between, which is where residency
+     * across calls shows: an input role's FIRST bind fills the device
+     * copy and counts as staged, and only a later bind of the same
+     * window counts resident. The tables are the buffers this leg
+     * exists for - an integrator builds them once a step and runs many
+     * times against them. */
+    {
+        cft_buffer_info bt, bs;
+        uint64_t t_res = 0, s_res = 0;
+        memset(dep_hw, 0x5a, dep_bytes);
+        memset(rdep.p, 0x5a, dep_bytes);
+        checks++;
+        if (cft_program_run_ex(p_hw, &A) != CFT_OK ||
+            cft_buffer_from_device(rdep.b) != CFT_OK) {
+            printf("  FAIL %s indexed buffers: the second resident run "
+                   "failed: %s\n", cft_format_name(fmt), cft_last_error());
+            failures++;
+            ok = 0;
+        } else if (memcmp(dep_sw, rdep.p, dep_bytes) != 0) {
+            printf("  FAIL %s indexed buffers: back-to-back resident "
+                   "gathers drifted\n", cft_format_name(fmt));
+            failures++;
+            ok = 0;
+        }
+        memset(&bt, 0, sizeof bt); bt.struct_size = sizeof bt;
+        memset(&bs, 0, sizeof bs); bs.struct_size = sizeof bs;
+        if (resident_expected &&
+            cft_buffer_get_info(rta.b, &bt) == CFT_OK &&
+            cft_buffer_get_info(rsrc.b, &bs) == CFT_OK) {
+            t_res = bt.resident_binds;
+            s_res = bs.resident_binds;
+            checks++;
+            if (!t_res || !s_res) {
+                printf("  FAIL %s indexed buffers: this device reports "
+                       "resident buffers, and the second run bound the "
+                       "table %lu time(s) and the source %lu time(s) - "
+                       "a table that is staged every call is the round "
+                       "trip this feature exists to remove\n",
+                       cft_format_name(fmt), (unsigned long)t_res,
+                       (unsigned long)s_res);
+                failures++;
+                ok = 0;
+            }
+        }
+        if (ok)
+            printf("  %s indexed buffers: %lu lanes through a "
+                   "%lu-element source and a %lu-element pool, resident "
+                   "== staged, table binds %lu\n",
+                   cft_format_name(fmt), (unsigned long)n,
+                   (unsigned long)src_n, (unsigned long)pool_n,
+                   (unsigned long)t_res);
+    }
+#undef IDXBUF_ARGS
+
+done:
+    (void)have;
+    rbuf_free(&rsrc); rbuf_free(&rpool);
+    rbuf_free(&rta);  rbuf_free(&rtsi);
+    rbuf_free(&rdep);
+    cft_program_free(p_sw);
+    cft_program_free(p_hw);
+    free(src); free(pool); free(dep_sw); free(dep_hw); free(ta); free(tsi);
+}
+
 static void compare_buffers_program(cft_device *sw, cft_device *hw,
                                     cft_format fmt, size_t n,
                                     int resident_expected)
@@ -4174,6 +4434,21 @@ int main(int argc, char **argv)
                                         caps.buffers_resident ? 1 : 0);
                 printf("  buffers, a program's scratch: %d checks, %d "
                        "failed\n", checks, failures);
+                /* ...and R16's four tables and an indexed source
+                 * through the same binding path (ABI 0.14). Gated
+                 * on the feature bit, as every indexed case is. */
+                if (caps.seq_features & CFT_SEQ_FEAT_INDEXED) {
+                    compare_buffers_indexed(
+                        sw, hw, fmt, n,
+                        caps.buffers_resident ? 1 : 0);
+                    printf("  buffers, an indexed program: %d "
+                           "checks, %d failed\n", checks,
+                           failures);
+                } else {
+                    printf("  buffers, an indexed program: "
+                           "SKIPPED - this device does not "
+                           "publish CFT_SEQ_FEAT_INDEXED\n");
+                }
             } else {
                 printf("  buffers, a program's scratch: SKIPPED - this "
                        "device does not publish SCRATCH_IO\n");
