@@ -438,6 +438,146 @@ async def maxall_on_the_tile(dut):
                       f"bit-exact")
 
 
+# ======================================================================
+# the beat-wide tree (2026-09-15)
+# ======================================================================
+#
+# The tree reduces a whole beat in the lanes a reduction leaves idle
+# and hands the accumulator one partial at level log2(epb), instead of
+# handing it epb elements one at a time. The PAIRING is unchanged and
+# every assertion above is the proof of that - they pass or they do
+# not.
+#
+# What they cannot show is that the tree ran at all. A build that
+# quietly fell back to the serializer at every size returns exactly the
+# same bits, so the tree's own beat counter is read here and held to a
+# number DERIVED from n, seg and the format. It must be nonzero where
+# the sizes allow the tree and zero where they do not, and both halves
+# are cases below.
+
+def wide_beats_expected(fmt, n, seg):
+    """Beats the tree may take, from the shape alone.
+
+    A beat goes through the tree when it is FULL and its elements are
+    one aligned group of the segment - which is exactly "seg is a
+    multiple of epb", the whole array (seg = 0) included. Only the last
+    beat of a run can be short. fp256 is one element a beat and has no
+    tree.
+    """
+    epb = 256 // fmt.width
+    if epb == 1:
+        return 0
+    if seg and (seg % epb) != 0:
+        return 0
+    return n // epb
+
+
+def wide_beats_seen(dut):
+    return int(dut.u_engine.wide_beats.value)
+
+
+@cocotb.test()
+async def the_wide_path_is_taken_exactly_where_the_sizes_allow(dut):
+    """Bits against the model AND the tree's beat count against the
+    shape, at every format, across the seams: a segment boundary inside
+    a beat, a segment one element short of a beat, a whole-array
+    reduction whose n is one more than a multiple of epb."""
+    axil, ram = await _bring_up(dut)
+    total = 0
+    zero_seen = 0
+    wide_seen = 0
+    for fmt in FORMATS:
+        epb = 256 // fmt.width
+        shapes = [
+            # whole array, exactly beats
+            (4 * epb, 0),
+            # whole array, one element PAST a beat: every full beat
+            # goes wide and a one-element tail goes serial, which is
+            # the seam between the two paths
+            (4 * epb + 1, 0),
+            # whole array, one element short: the last beat is partial
+            (4 * epb - 1, 0),
+            # segments that are whole beats
+            (8 * epb, epb),
+            (8 * epb, 2 * epb),
+            (4 * epb, 4 * epb),
+            # a segment boundary INSIDE a beat: the tree must stand
+            # down entirely
+            (5 * 7, 7),
+            (6 * 3, 3),
+            # a segment one element short of a beat
+            (6 * (epb - 1), epb - 1) if epb > 1 else (6, 1),
+            # a segment one element past a beat
+            (5 * (epb + 1), epb + 1),
+        ]
+        for n, seg in shapes:
+            total += await run_reduce(dut, axil, ram, fmt, n, 0,
+                                      seed=1300 + n * 7 + seg, seg=seg)
+            got = wide_beats_seen(dut)
+            want = wide_beats_expected(fmt, n, seg)
+            assert got == want, (
+                f"{fmt.name} n={n} seg={seg}: the tree took {got} beats, "
+                f"the shape allows {want} - a fallback that still gives "
+                f"the right bits is exactly what this counter is for")
+            if want:
+                wide_seen += 1
+            else:
+                zero_seen += 1
+    # Both halves of the control must actually have happened.
+    assert wide_seen > 0 and zero_seen > 0, (
+        f"the sizes above must cover both: {wide_seen} shapes took the "
+        f"tree and {zero_seen} refused it")
+    dut._log.info(f"the wide path: {wide_seen} shapes took it and "
+                  f"{zero_seen} correctly did not, {total} elements exact")
+
+
+@cocotb.test()
+async def the_wide_path_at_every_attribute_and_opcode(dut):
+    """Five rounding attributes x four formats x sum and maxall, on
+    shapes the tree takes, with the count asserted each time. The tree
+    is epb-1 adds in the lanes beside the accumulator's, so every one
+    of them has to round the way the run asks."""
+    axil, ram = await _bring_up(dut)
+    total = 0
+    for rnd in range(5):
+        for fmt in FORMATS:
+            epb = 256 // fmt.width
+            for op in (OP_SUM, OP_MAXALL):
+                for n, seg in ((6 * epb, 0), (6 * epb, 2 * epb),
+                               (6 * epb + 1, 0)):
+                    total += await run_reduce(
+                        dut, axil, ram, fmt, n, rnd,
+                        seed=2100 + rnd * 17 + n + seg, seg=seg, op=op,
+                        specials=(rnd == 0))
+                    got = wide_beats_seen(dut)
+                    want = wide_beats_expected(fmt, n, seg)
+                    assert got == want, (
+                        f"{fmt.name} op {op} n={n} seg={seg} rnd={rnd}: "
+                        f"tree took {got} beats, shape allows {want}")
+    dut._log.info(f"the wide path at five attributes x four formats x "
+                  f"two opcodes: {total} elements, exact")
+
+
+@cocotb.test()
+async def the_wide_path_under_load(dut):
+    """Long enough to saturate the operand FIFOs and the tree's own
+    credit, with ORDINARY operands for the reason run_sum's docstring
+    gives: one NaN would make every wrong answer compare equal. This is
+    the run where the tree is admitting a beat a cycle, the credit
+    counter is the throttle, and the partial queue is never empty."""
+    axil, ram = await _bring_up(dut)
+    for fmt, n, seg in ((FP32, 5600, 0), (FP32, 5600, 32),
+                        (FP64, 2800, 0), (FP128, 1400, 0),
+                        (FP64, 2800, 8)):
+        await run_reduce(dut, axil, ram, fmt, n, 0, seed=8800 + n + seg,
+                         seg=seg)
+        got = wide_beats_seen(dut)
+        want = wide_beats_expected(fmt, n, seg)
+        assert got == want, (
+            f"{fmt.name} n={n} seg={seg}: tree took {got}, want {want}")
+    dut._log.info("the wide path under load: FIFOs saturated, bit-exact")
+
+
 @cocotb.test()
 async def segmented_flags_are_the_or_over_segments(dut):
     """Specials in: a NaN segment beside a clean one, invalid from a

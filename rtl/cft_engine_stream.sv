@@ -183,7 +183,15 @@ module cft_engine_stream #(
     // The multi-cycle multiplier's pass budget, for the private array
     // only (cft_lanes has the story); the kernel's array is paced by
     // the kernel and reaches this module as lane_ready.
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES = 1,
+    // The beat-wide reduction tree. 1 builds it; 0 leaves every
+    // reduction on the one-element-a-cycle serialiser it used before
+    // the tree existed. NOT a numeric knob - the two paths return the
+    // same bits and the same flags at every n, every seg and every
+    // attribute, because they build the same pairs - and it is a
+    // parameter so that "the same bits at the old cycle count" is a
+    // BUILD rather than an argument. See "the beat-wide tree" below.
+    parameter bit EN_WIDE    = 1'b1
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -1003,6 +1011,12 @@ module cft_engine_stream #(
   // result before the mux appears further down.
   logic [BEAT_BITS-1:0] beat_d;
   logic [4:0]           beat_f;
+  // Lane 0's flags on their own, and the OR of every lane above it.
+  // A reduction's lane 0 is the accumulator's add and the rest is the
+  // beat-wide tree, and the two reach the run's FLAGS by different
+  // routes - see the accumulator instance and the sticky-flag block.
+  logic [4:0]           lane0_f;
+  logic [4:0]           wide_f;
 
   logic is_reduce, is_max;
   assign is_max    = (op_r == OP_MAXALL);
@@ -1047,6 +1061,34 @@ module cft_engine_stream #(
   // the generate that binds it sits with the array instance below.
   logic arr_rdy;
 
+  // ---- the beat-wide tree, declared here and built below -------------
+  //
+  // The serializer hands the accumulator ONE element a cycle, so a
+  // reduction cost epb cycles a beat whatever the memory could
+  // deliver. The tree below reduces a whole aligned, full beat in the
+  // ALU lanes a reduction leaves idle and hands the accumulator ONE
+  // partial per beat, at level log2(epb). These four signals are its
+  // interface to the serializer above, which is why they are declared
+  // here and assigned there.
+  logic wide_en;        // this run may use the tree at all
+  logic beat_is_full;   // the beat about to be popped holds epb real elements
+  logic wide_take;      // this beat goes to the tree, not the serializer
+  logic wide_pend;      // a beat the tree took has not reached the counter yet
+
+  // A beat may go through the tree only when its epb elements are one
+  // ALIGNED GROUP of the segment being reduced. Segments are
+  // contiguous and all of length seg, so that is exactly "seg is a
+  // multiple of epb" - and seg == 0, the whole array, trivially is.
+  // Anything else puts a segment boundary inside a beat and the
+  // elements either side of it belong to different counters, so those
+  // beats fall back to the serializer, which is the path they always
+  // took. fp256 is one element a beat and has no tree to build.
+  assign wide_en = EN_WIDE && is_reduce && (beat_sh_r != 6'd0) &&
+                   ((seg_r & {26'd0, (epb - 6'd1)}) == 32'd0);
+  // Only the LAST beat of a run can be short, so this is also "the
+  // beat is not the tail".
+  assign beat_is_full = (ser_rem >= {58'd0, epb});
+
   // The active element, right-aligned. Everything above the element's
   // width is zero and the accumulator never looks at it; the adder it
   // hands work to is the one for this precision.
@@ -1072,16 +1114,27 @@ module cft_engine_stream #(
     endcase
   end
 
-  assign red_in_valid = ser_busy && (ser_idx < ser_cnt);
+  // The serial element path is held while the tree still owes the
+  // counter a partial. The two paths feed the SAME counter and an
+  // element must enter it at the level its index gives it: the tail's
+  // elements have the highest indices, so they go in after every
+  // group, never beside one. (It also keeps the accumulator's two
+  // input ports from ever wanting the adder in the same cycle.)
+  assign red_in_valid = ser_busy && (ser_idx < ser_cnt) && !wide_pend;
 
-  logic red_take_beat;            // pop a beat into the serializer
+  logic red_take_beat, beat_avail, ser_take;
   // All three operand FIFOs share one read enable, so a reduction that
   // only looks at `a` still pops b and c - and cft_fifo has no underflow
   // guard by design ("callers check count"). So all three must be
   // non-empty, exactly as the elementwise path requires.
-  assign red_take_beat = is_reduce && running && !ser_busy &&
-                         (a_cnt != 0) && (b_cnt != 0) && (c_cnt != 0) &&
-                         (ser_beat_idx < beats_total);
+  assign beat_avail = is_reduce && running && !ser_busy &&
+                      (a_cnt != 0) && (b_cnt != 0) && (c_cnt != 0) &&
+                      (ser_beat_idx < beats_total);
+  // A full beat in a wide run goes to the tree, a short one or a
+  // non-wide run to the serializer. Neither fires while the tree has
+  // no credit left, and the beat simply waits in the FIFO.
+  assign ser_take      = beat_avail && !(wide_en && beat_is_full);
+  assign red_take_beat = wide_take || ser_take;
 
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n || !running) begin
@@ -1092,6 +1145,11 @@ module cft_engine_stream #(
       ser_data     <= '0;
     end else if (is_reduce) begin
       if (red_take_beat) begin
+        // The beat index advances for either path - the tree consumes
+        // `a_q` in this same cycle - but only the serializer loads.
+        ser_beat_idx <= ser_beat_idx + 64'd1;
+      end
+      if (ser_take) begin
         ser_data <= a_q;
         ser_idx  <= '0;
         // real elements left, capped at one beat.
@@ -1111,7 +1169,6 @@ module cft_engine_stream #(
         // min(ser_rem, epb). The chosen value is at most epb < 64, so
         // the six-bit select keeps it exactly.
         ser_cnt  <= (ser_rem < {58'd0, epb}) ? ser_rem[5:0] : epb;
-        ser_beat_idx <= ser_beat_idx + 64'd1;
         ser_busy <= 1'b1;
       end else if (acc_take) begin
         // The accumulator advances on the array's strobe, so its
@@ -1139,17 +1196,25 @@ module cft_engine_stream #(
   // unless that result was the run's last, in which case the writer
   // finishes the run. seg_r == 0 never fills, so the flush comes only
   // at the end, as it always did.
+  //
+  // A partial from the tree stands for a whole aligned group, so it
+  // counts as epb elements. seg is a multiple of epb wherever the tree
+  // runs at all (wide_en), so the count still lands exactly on seg.
   logic [31:0] seg_cnt;
   logic        seg_full, seg_open, seg_clear, acc_take, red_last;
+  logic        wpart_take;
   assign seg_full = (seg_r != 32'd0) && (seg_cnt == seg_r);
   assign seg_open = !seg_full;
   assign acc_take = ser_busy && red_in_valid && seg_open &&
                     red_in_ready && arr_rdy;
-  // every element consumed: the result being produced is the run's last
-  assign red_last = !ser_busy && (ser_beat_idx >= beats_total);
+  // every element consumed: the result being produced is the run's
+  // last. `wide_pend` is the tree's half of it - beats it has taken
+  // are elements the counter has not seen yet.
+  assign red_last = !ser_busy && !wide_pend && (ser_beat_idx >= beats_total);
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n || start_accept || seg_clear) seg_cnt <= '0;
     else if (acc_take)                          seg_cnt <= seg_cnt + 32'd1;
+    else if (wpart_take)                        seg_cnt <= seg_cnt + {26'd0, epb};
   end
 
   // Flush once every element has been handed over - or the segment is.
@@ -1170,6 +1235,213 @@ module cft_engine_stream #(
     endcase
   end
 
+  // ---- the beat-wide tree ---------------------------------------------
+  //
+  // WHAT IT IS. An aligned group of 2^k consecutive elements has a
+  // FIXED sub-tree in the counter cft_reduce_acc implements: pairs
+  // (0,1)(2,3)..., then pairs of those, and so on, k levels of it, and
+  // the single value that comes out is what level k would have held
+  // had the group been streamed in one element at a time
+  // (cft_reduce_acc's header argues this from the counter). A beat IS
+  // such a group whenever it is full and no segment boundary falls
+  // inside it. So the beat's k levels can be computed anywhere, and
+  // the counter told the answer - the pairing does not move.
+  //
+  // WHERE THE ADDS GO. A reduction uses lane 0 of the array and leaves
+  // epb-1 lanes computing fma(+0, 1.0, +0). The tree is exactly
+  // epb-1 adds - epb/2 + epb/4 + ... + 1 - so it fits those lanes
+  // EXACTLY, with lane 0 still the counter's own carry: 4+2+1+1 at
+  // fp32, 2+1+1 at fp64, 1+1 at fp128. That is also the ceiling: n-1
+  // adds over n/epb beats is epb adds a beat against epb adders, so
+  // one beat a cycle is 100% of the arithmetic and anything that goes
+  // idle costs throughput. It is a bound, not a promise.
+  //
+  // THE LAYOUT IS A HEAP, and that is what makes the wiring free.
+  // Lane p takes lanes 2p and 2p+1; the bottom level (lanes epb/2 ..
+  // epb-1) takes the beat's own elements, lane p getting elements
+  // 2p-epb and 2p-epb+1; the root is lane 1 and it is the partial.
+  // Every stage is the same permutation, so ONE register holds the
+  // whole request and the reordering is wires.
+  //
+  // THE SCHEDULE IS SYSTOLIC. Level j of beat t and level j+1 of beat
+  // t - AL are independent, so they ride the same beat-op: at any
+  // cycle the array is carrying the bottom level of the newest beat,
+  // the next level of the beat AL cycles older, and so on. Stages are
+  // spaced by exactly AL, the accumulator's own add latency in
+  // accepted edges, because a stage's operands are the previous
+  // stage's results captured into the same operand register the
+  // accumulator's own issue goes through. Nothing stalls INSIDE the
+  // tree - a stage issues in the cycle its operands land or they are
+  // lost - so the only throttle is admission.
+  //
+  // ADMISSION IS CREDIT-BASED, and that is the whole flow control. A
+  // beat is admitted only while fewer than WPART_DEPTH beats are
+  // between admission and the counter, so the queue below can always
+  // accept the partial and no stage ever has to stall. The depth has
+  // to cover the round trip - k*AL cycles of tree plus the queue - or
+  // it becomes the rate: 64 covers 3*17 at fp32 with room over.
+  //
+  // WHY THE QUEUE IS NEEDED AT ALL. The counter's single issue port is
+  // the bottleneck, not the tree: it must place one partial and issue
+  // about one carry per beat, and the two collide. Measured on this
+  // tile before any of this existed, the serial path sustained 11.3
+  // cycles for 8 elements rather than 8 - the accumulator refusing
+  // inputs while a result re-issued. The queue lets the tree run at
+  // the memory's rate and the counter absorb it at its own.
+  //
+  // AND IT IS WHAT MAKES SEGMENTS FREE. A segment boundary stalls the
+  // counter for a whole flush and fold; the queue holds the next
+  // segment's partials meanwhile, so the tree never has to drain and
+  // refill at a boundary.
+  localparam int AL          = LATENCY + 1;   // adder latency, accepted edges
+  // Three stages is the most a 256-bit beat can want (BEAT_BITS > 256
+  // is refused at elaboration above), so the shift register is sized
+  // for three whatever this build's beat is; the unused taps prune.
+  localparam int WSR_LEN     = 3 * AL;
+  localparam int WPART_LOG2  = 6;
+  localparam int WPART_DEPTH = 1 << WPART_LOG2;
+  localparam int WCW         = WPART_LOG2 + 2;   // credit counter width
+
+  // Element `idx` of a beat, right-aligned - the same four-arm select
+  // the serializer's red_in_elem is, and deliberately the same
+  // expression, because a tree that read elements differently from the
+  // serializer would put different values in the same pairs.
+  function automatic logic [BEAT_BITS-1:0] get_el(
+      input logic [BEAT_BITS-1:0] beat, input logic [5:0] idx,
+      input logic [1:0] prec);
+    logic [BEAT_BITS-1:0] r;
+    begin
+      r = '0;
+      case (prec)
+        PREC_FP64:  r[RED_W64-1:0]  = beat[idx*RED_W64  +: RED_W64];
+        PREC_FP128: r[RED_W128-1:0] = beat[idx*RED_W128 +: RED_W128];
+        PREC_FP256: r               = beat;
+        default:    r[31:0]         = beat[idx*32 +: 32];
+      endcase
+      get_el = r;
+    end
+  endfunction
+
+  // A beat holding `val` at element `idx` and +0 everywhere else. The
+  // zeros are load bearing: a lane with +0 on both operands computes
+  // fma(+0, 1.0, +0) - or max(+0, +0) - and raises nothing, which is
+  // how an idle lane stays out of the run's flags.
+  function automatic logic [BEAT_BITS-1:0] put_el(
+      input logic [5:0] idx, input logic [BEAT_BITS-1:0] val,
+      input logic [1:0] prec);
+    logic [BEAT_BITS-1:0] r;
+    begin
+      r = '0;
+      case (prec)
+        PREC_FP64:  r[idx*RED_W64  +: RED_W64]  = val[RED_W64-1:0];
+        PREC_FP128: r[idx*RED_W128 +: RED_W128] = val[RED_W128-1:0];
+        PREC_FP256: r                           = val;
+        default:    r[idx*32 +: 32]             = val[31:0];
+      endcase
+      put_el = r;
+    end
+  endfunction
+
+  logic [WSR_LEN-1:0]   wsr;          // stage-0 admissions, for the later taps
+  logic [WCW-1:0]       wcred;        // beats admitted and not yet counted
+  logic [3:1]           stg_go;       // stage 1..3's issue strobe
+  logic [2:0]           lvl_go;       // heap level 0..2 issues this cycle
+  logic                 st0_go, wpart_go;
+  logic [BEAT_BITS-1:0] wx_n, wy_n;   // the tree's operands, this cycle
+  logic [BEAT_BITS-1:0] wq_a, wq_c;   // ... registered, with lane 0's beside
+  logic                 wq_valid;
+  logic [WPART_LOG2:0]  wf_cnt;
+  logic [BEAT_BITS-1:0] wf_q;
+  logic                 wf_wr, win_valid, win_ready;
+
+  // Admission. `arr_rdy` because a stage-0 issue IS a beat-op, and the
+  // credit test is what stops the queue overflowing.
+  assign wide_take = beat_avail && wide_en && beat_is_full && arr_rdy &&
+                     (wcred < WCW'(WPART_DEPTH));
+  assign st0_go    = wide_take;
+  assign wide_pend = (wcred != '0);
+
+  // Stage j's operands are the results of stage j-1, which land AL
+  // accepted edges after that stage issued; one more edge puts them in
+  // the operand register, so stages are AL apart and the tap for stage
+  // j is j*AL - 1 cycles back. The partial is stage k-1's result, one
+  // stage further on again.
+  assign stg_go[1] = wsr[AL-1];
+  assign stg_go[2] = wsr[2*AL-1];
+  assign stg_go[3] = wsr[3*AL-1];
+  always_comb begin
+    case (beat_sh_r)
+      6'd1:    wpart_go = stg_go[1];
+      6'd2:    wpart_go = stg_go[2];
+      6'd3:    wpart_go = stg_go[3];
+      default: wpart_go = 1'b0;
+    endcase
+  end
+
+  // Heap level l (l = 0 is the root, lane 1) is stage k-1-l: the
+  // BOTTOM level of the heap is the stage that reads the beat.
+  always_comb begin
+    lvl_go = 3'b0;
+    for (int l = 0; l < 3; l = l + 1) begin
+      if (l < int'(beat_sh_r)) begin
+        case (int'(beat_sh_r) - 1 - l)
+          0:       lvl_go[l] = st0_go;
+          1:       lvl_go[l] = stg_go[1];
+          default: lvl_go[l] = stg_go[2];
+        endcase
+      end
+    end
+  end
+
+  // The permutation. Lane p at heap level l, sourcing the beat at the
+  // bottom level and the array's own result everywhere else. Written
+  // with OR rather than read-modify-write because the lanes are
+  // disjoint by construction, which makes it a tree of ORs instead of
+  // a chain of muxes.
+  always_comb begin
+    wx_n = '0;
+    wy_n = '0;
+    for (int l = 0; l < 3; l = l + 1) begin
+      for (int p = (1 << l); p < (2 << l); p = p + 1) begin
+        if ((p < LANES32) && lvl_go[l]) begin
+          if (l == int'(beat_sh_r) - 1) begin
+            wx_n = wx_n | put_el(6'(p), get_el(a_q, 6'(2*p) - epb,        prec_r), prec_r);
+            wy_n = wy_n | put_el(6'(p), get_el(a_q, 6'(2*p) - epb + 6'd1, prec_r), prec_r);
+          end else begin
+            wx_n = wx_n | put_el(6'(p), get_el(beat_d, 6'(2*p),        prec_r), prec_r);
+            wy_n = wy_n | put_el(6'(p), get_el(beat_d, 6'(2*p) + 6'd1, prec_r), prec_r);
+          end
+        end
+      end
+    end
+  end
+
+  // The partial queue. Deep enough that admission, not the queue, is
+  // the flow control; cleared with the stream FIFOs at start, and NOT
+  // at a segment boundary, because what it holds then is the next
+  // segment's work.
+  assign wf_wr = wpart_go && arr_rdy;
+  /* verilator lint_off WIDTHEXPAND */
+  cft_fifo #(.WIDTH(256), .DEPTH_LOG2(WPART_LOG2)) u_fifo_w (
+      .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
+      .wr_en(wf_wr), .wr_data(get_el(beat_d, 6'd1, prec_r)),
+      .rd_en(wpart_take), .rd_data(wf_q), .count(wf_cnt));
+  /* verilator lint_on WIDTHEXPAND */
+
+  assign win_valid  = is_reduce && (wf_cnt != '0) && seg_open;
+  assign wpart_take = win_valid && win_ready && arr_rdy;
+
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || !running) begin
+      wsr   <= '0;
+      wcred <= '0;
+    end else if (arr_rdy) begin
+      wsr   <= {wsr[WSR_LEN-2:0], st0_go};
+      wcred <= wcred + (st0_go ? WCW'(1) : WCW'(0))
+                     - (wpart_take ? WCW'(1) : WCW'(0));
+    end
+  end
+
   // ADD_LATENCY is LATENCY + 1, not LATENCY: the operands are
   // registered on their way into the shared array (see the lane
   // request below), so a sum comes back one cycle later than the
@@ -1184,9 +1456,19 @@ module cft_engine_stream #(
       .clear(start_accept || seg_clear),
       .in_valid(red_in_valid && is_reduce && seg_open), .in_data(red_in_elem),
       .in_ready(red_in_ready),
+      // The tree's partial, entering at the group's level. beat_sh_r
+      // IS log2(epb), which is the level an aligned beat's worth of
+      // elements would have reached on its own.
+      .win_valid(win_valid), .win_data(wf_q), .win_lvl(beat_sh_r),
+      .win_ready(win_ready),
       .flush(red_flush),
       .add_valid(red_add_valid), .add_a(red_add_a), .add_b(red_add_b),
-      .add_res(red_add_res), .add_flags(beat_f),
+      // LANE 0's flags, not the beat's OR. They were the same thing
+      // while lanes 1.. computed fma(+0,1,+0); now those lanes carry
+      // the tree's adds, whose flags belong to whatever beat they came
+      // from rather than to the result this accumulator is about to
+      // return. They are collected beside the run's flags instead.
+      .add_res(red_add_res), .add_flags(lane0_f),
       .out_valid(red_out_valid), .out_data(red_out_data),
       .out_flags(red_out_flags));
 
@@ -1410,21 +1692,32 @@ module cft_engine_stream #(
   // holds stands for a whole pass period and is taken at the next
   // strobe: still one accepted edge after the accumulator issued it,
   // which is the +1 ADD_LATENCY carries.
+  //
+  // The beat-wide tree rides the SAME register, in the lanes above
+  // lane 0: its operands are either the beat just popped or the
+  // array's own result permuted by wires, so its path into the array
+  // is register -> mux -> steering -> S0 exactly as lane 0's is, and
+  // it is that register that fixes the stages one adder latency plus
+  // one cycle apart. The OR is exact because the accumulator's
+  // operands are zero above their element - every value it holds was
+  // masked to the element on the way in - and the tree never writes
+  // lane 0.
   logic                 red_add_valid_q;
-  logic [BEAT_BITS-1:0] red_add_a_q, red_add_b_q;
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
       red_add_valid_q <= 1'b0;
-      red_add_a_q     <= '0;
-      red_add_b_q     <= '0;
+      wq_a            <= '0;
+      wq_c            <= '0;
+      wq_valid        <= 1'b0;
     end else if (arr_rdy) begin
       red_add_valid_q <= red_add_valid;
-      red_add_a_q     <= red_add_a;
-      red_add_b_q     <= red_add_b;
+      wq_a            <= red_add_a | wx_n;
+      wq_c            <= red_add_b | wy_n;
+      wq_valid        <= |lvl_go;
     end
   end
 
-  assign lane_valid = is_reduce ? red_add_valid_q : ex_valid;
+  assign lane_valid = is_reduce ? (red_add_valid_q || wq_valid) : ex_valid;
   // A sum folds with the FMA (a * 1 + b is one rounding of a + b); a
   // maximum folds with CFT_MAX itself, which takes a and b.
   assign lane_op    = is_reduce ? (is_max ? OP_MAX : 8'd0) : op_r;   // 0 = CFT_FMA
@@ -1434,11 +1727,11 @@ module cft_engine_stream #(
    * accumulator's, and cfg_scalar is refused beside it at the header -
    * so the reduce mux stays outermost and the scalar one sits inside it
    * rather than beside it. */
-  assign lane_a     = is_reduce ? red_add_a_q
+  assign lane_a     = is_reduce ? wq_a
                     : cfg_scalar[0] ? bcast_beat(a_q, prec_r) : a_q;
-  assign lane_b     = is_reduce ? (is_max ? red_add_b_q : one_beat)
+  assign lane_b     = is_reduce ? (is_max ? wq_c : one_beat)
                     : cfg_scalar[1] ? bcast_beat(b_q, prec_r) : b_q;
-  assign lane_c     = is_reduce ? red_add_b_q
+  assign lane_c     = is_reduce ? wq_c
                     : cfg_scalar[2] ? bcast_beat(c_q, prec_r) : c_q;
 
   logic [BEAT_BITS-1:0]      arr_d;
@@ -1470,6 +1763,10 @@ module cft_engine_stream #(
     beat_f = 5'b0;
     for (int i = 0; i < LANES32; i = i + 1)
       beat_f = beat_f | arr_lf[i*5 +: 5];
+    lane0_f = arr_lf[4:0];
+    wide_f  = 5'b0;
+    for (int i = 1; i < LANES32; i = i + 1)
+      wide_f = wide_f | arr_lf[i*5 +: 5];
   end
 
   // A reduction writes exactly one beat, holding the single result in
@@ -1738,11 +2035,21 @@ module cft_engine_stream #(
   // once, when that result appears. cft_reduce_acc has been ORing every
   // add's flags along the way, which is the same set the elementwise
   // path would have gathered and in an order that cannot matter.
+  //
+  // The beat-wide tree is the third contributor and it needs its own
+  // arm: its adds are real adds, they land in cycles the accumulator
+  // is not returning anything in, and they may belong to a segment
+  // other than the one the accumulator is on. FLAGS is the OR over the
+  // whole RUN, so where a tree add's flags are collected cannot matter
+  // - only that they are. An idle tree lane holds +0 on both operands
+  // and raises nothing, so this arm is silent whenever the tree is.
+  logic [4:0] wide_f_now;
+  assign wide_f_now = (is_reduce && running && arr_rdy) ? wide_f : 5'b0;
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n)          flags_acc <= 5'b0;
     else if (start_accept)  flags_acc <= 5'b0;
     else if (red_push) begin
-      flags_acc <= flags_acc | red_out_flags;
+      flags_acc <= flags_acc | red_out_flags | wide_f_now;
       // synthesis translate_off
       // RED_W128-wide, not [127:0]: a quarter tile's beat is 64 bits, and
       // the simulator lints inside translate_off (a synthesis pragma).
@@ -1756,6 +2063,22 @@ module cft_engine_stream #(
       $display("[CFT-ENGS] EXQ prec=%0d d=0x%h flags=%b", prec_r, beat_d[RED_W128-1:0], beat_f);
       // synthesis translate_on
     end
+    else if (|wide_f_now) flags_acc <= flags_acc | wide_f_now;
   end
+
+  // ---- what the tree actually did, for the bench ---------------------
+  //
+  // Beats reduced by the tree in this run. A bench that only checked
+  // the bits could not tell a tree that ran from one that quietly fell
+  // back to the serializer at every size, and both return the same
+  // answer - so it reads this and asserts it against the sizes.
+  // Simulation only: no CSR carries it.
+  // synthesis translate_off
+  logic [63:0] wide_beats;
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || start_accept) wide_beats <= 64'd0;
+    else if (wide_take)            wide_beats <= wide_beats + 64'd1;
+  end
+  // synthesis translate_on
 
 endmodule

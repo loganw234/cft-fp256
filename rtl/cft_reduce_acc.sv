@@ -69,6 +69,38 @@
 // ADD_LATENCY cycles later; it carries the destination level alongside
 // in its own delay line. That keeps it independent of which adder is
 // used, and lets the engine share the one it already has.
+//
+// THE WIDE INPUT: ENTERING THE COUNTER ABOVE LEVEL 0
+//
+// A caller that can reduce a whole ALIGNED GROUP of 2^k consecutive
+// elements on its own - the engine's beat-wide tree does, in the ALU
+// lanes this accumulator leaves idle - holds a value that is exactly
+// what level k would have held had those elements been streamed in one
+// at a time. The counter says so and it is a statement about the tree
+// rather than about timing: inserting 2^k elements into a counter whose
+// levels 0..k-1 are empty leaves those levels empty again and one value
+// at level k, and that value IS the balanced tree over the group, with
+// the pairs the counter would have made. So a group may be handed over
+// through `win_*` at level k and NOTHING about the pairing moves.
+//
+// Two rules the caller keeps, and the engine keeps both:
+//
+//   * groups arrive in index order, and an element that does NOT
+//     arrive in a group arrives at level 0 with an index above every
+//     group's - in practice whole aligned groups first and a short
+//     tail afterwards, never interleaved. A tail of fewer than 2^k
+//     elements cannot carry out of level k-1, so it never reaches the
+//     group level and the two never collide.
+//   * `win_lvl` does not change while an accumulation runs.
+//
+// Level `win_lvl` gets its own REGISTER, `slotw`, rather than a second
+// write port on the levels RAM. A returning result and a group partial
+// can land in the same cycle - a carry above the group level beside
+// the next group's placement - and a distributed RAM has one write
+// port; that is the same argument the slot0/slotm split is made of,
+// one level further up. The invariant that keeps the two apart - a
+// RESULT never targets win_lvl while groups are arriving - is checked
+// in simulation below rather than assumed.
 
 `timescale 1ns/1ps
 
@@ -78,7 +110,14 @@ module cft_reduce_acc #(
     // engine can stream in a human lifetime and costs 40 registers of
     // W bits; the flush fold walks them once per run.
     parameter int LEVELS      = 40,
-    parameter int ADD_LATENCY = 15
+    parameter int ADD_LATENCY = 15,
+    // Width of a level index ON THE PORTS, which must be
+    // $clog2(LEVELS+1) - the guard at the end of the file holds it
+    // there. It is a parameter rather than that expression written
+    // into the port list because no other module in this tree puts a
+    // system function in a port range and the lint gate spans three
+    // front ends.
+    parameter int LVL_W       = 6
 ) (
     input  logic         clk,
     input  logic         rst_n,
@@ -94,6 +133,15 @@ module cft_reduce_acc #(
     input  logic         in_valid,
     input  logic [W-1:0] in_data,
     output logic         in_ready,
+
+    // ---- the wide input -------------------------------------------
+    // A partial covering an aligned group of 2^win_lvl consecutive
+    // elements, entering the counter at that level - see the header.
+    // Tie win_valid low and this module is exactly what it was.
+    input  logic             win_valid,
+    input  logic [W-1:0]     win_data,
+    input  logic [LVL_W-1:0] win_lvl,
+    output logic             win_ready,
 
     input  logic         flush,        // stream ended; produce the result
 
@@ -149,6 +197,16 @@ module cft_reduce_acc #(
   logic [W-1:0]  slotm [0:LEVELS-2];     // levels 1..LEVELS-1
   logic [LEVELS-1:0] occ;
 
+  // Level `win_lvl`, once a group has arrived at one: its own register
+  // for the reason the header gives - a result and a group partial can
+  // want to be placed in the same cycle, and slotm has one write port.
+  // wlvl_r is which level that is and wlvl_v whether any group has
+  // arrived since the last clear; until one has, every level lives
+  // where it always did.
+  logic [W-1:0]  slotw;
+  logic [LVL_W-1:0] wlvl_r;
+  logic          wlvl_v;
+
   // Destination level travelling with an in-flight add. The adder does
   // not know or care about levels, so the bookkeeping lives here.
   logic          dly_v   [0:ADD_LATENCY-1];
@@ -183,9 +241,22 @@ module cft_reduce_acc #(
   // A result never targets level 0 (an issue from level t targets t+1,
   // and t >= 0), so a result and an input can never contend for the
   // same slot. Only the adder port is contended.
-  logic res_needs_issue, in_needs_issue;
+  //
+  // A group partial (win_*) sits between the two: it is not yet in the
+  // machine, so a result still beats it, but it stands for 2^win_lvl
+  // elements where a single input stands for one, so it goes ahead of
+  // the input path. The engine never offers both at once - whole
+  // groups first, the tail after - but the order is written down
+  // rather than assumed, so the module alone behaves as its bench and
+  // the engine both expect.
+  logic res_needs_issue, in_needs_issue, win_needs_issue;
+  logic win_issue, in_issue;
   assign res_needs_issue = res_v && occ[res_lvl];
+  assign win_needs_issue = win_valid && occ[win_lvl];
   assign in_needs_issue  = in_valid && occ[0];
+  assign win_issue = (st == S_ACC) && win_needs_issue && !res_needs_issue;
+  assign in_issue  = (st == S_ACC) && in_needs_issue && !res_needs_issue &&
+                     !win_issue;
 
   logic fold_issue;
   assign fold_issue = (st == S_SCAN) && fold_started &&
@@ -197,7 +268,9 @@ module cft_reduce_acc #(
   assign seed_read = (st == S_SCAN) && !fold_started &&
                      (ptr < LEVELS[LW-1:0]) && occ[ptr];
 
-  assign in_ready = (st == S_ACC) && !(res_needs_issue && in_needs_issue);
+  assign win_ready = (st == S_ACC) && !(res_needs_issue && win_needs_issue);
+  assign in_ready  = (st == S_ACC) &&
+                     !(in_needs_issue && (res_needs_issue || win_issue));
 
   // ---- one read port, not four ---------------------------------------
   //
@@ -228,6 +301,7 @@ module cft_reduce_acc #(
     if      (fold_issue)      slot_idx = ptr;
     else if (res_needs_issue) slot_idx = res_lvl;
     else if (seed_read)       slot_idx = ptr;
+    else if (win_issue)       slot_idx = win_lvl;   // the group's level
     else                      slot_idx = '0;   // the input path reads level 0
   end
 
@@ -236,34 +310,55 @@ module cft_reduce_acc #(
   // zero for the level-0 case rather than left to wrap to all-ones:
   // the mux discards it either way, but an out-of-range read is an X
   // in simulation and a needless decode in hardware.
+  // The wide level is a third case, and a 3:1 mux rather than a 2:1.
+  // It is only ever selected once a group HAS arrived, because until
+  // then wlvl_v is low and nothing can be occupied at that level.
   logic [LW-1:0] rd_addr, wr_addr;
   assign rd_addr = (slot_idx == '0) ? '0 : (slot_idx - 1'b1);
   assign wr_addr = res_lvl - 1'b1;
-  assign slot_rd = (slot_idx == '0) ? slot0 : slotm[rd_addr];
+  assign slot_rd = (slot_idx == '0)                  ? slot0
+                 : (wlvl_v && (slot_idx == wlvl_r))  ? slotw
+                 :                                     slotm[rd_addr];
 
   // The two write ports, each in its own process with no reset, which
   // is the shape distributed-RAM inference wants. The enables are the
   // same conditions the placement block below uses, with the reset
   // term made explicit because that block's `else` no longer covers
   // them.
-  logic res_place, in_place;
+  logic res_place, in_place, win_place, res_to_w;
+  // A result that targets the wide level. It cannot happen while the
+  // caller keeps the header's rules, and the assertion below says so -
+  // but it is ROUTED correctly rather than left to corrupt slotm, so
+  // the storage stays consistent even under a caller that breaks them.
+  assign res_to_w  = wlvl_v && (res_lvl == wlvl_r);   // LW == LVL_W, guarded
   assign res_place = rst_n && !clear && clk_en && res_v && (st != S_WAIT) &&
                      !occ[res_lvl];
   assign in_place  = rst_n && !clear && clk_en && (st == S_ACC) &&
                      in_valid && in_ready && !occ[0];
+  assign win_place = rst_n && !clear && clk_en && (st == S_ACC) &&
+                     win_valid && win_ready && !occ[win_lvl];
 
   always_ff @(posedge clk) begin
     if (in_place) slot0 <= in_data;
   end
 
   always_ff @(posedge clk) begin
-    if (res_place) slotm[wr_addr] <= add_res;
+    if (res_place && !res_to_w) slotm[wr_addr] <= add_res;
+  end
+
+  always_ff @(posedge clk) begin
+    if      (win_place)             slotw <= win_data;
+    else if (res_place && res_to_w) slotw <= add_res;
   end
 
   // synthesis translate_off
   always_ff @(posedge clk) begin
     if (res_place && (res_lvl == '0))
       $fatal(1, "cft_reduce_acc: a result targeted level 0 - the split of slot0 from slotm is invalid");
+    if (clk_en && (st == S_ACC) && win_valid && win_ready && (win_lvl == '0))
+      $fatal(1, "cft_reduce_acc: a group arrived at level 0 - that level belongs to the single-element input");
+    if (res_place && res_to_w)
+      $fatal(1, "cft_reduce_acc: a result targeted the wide level %0d - groups and single elements overlapped, and the pairing is no longer the counter's", wlvl_r);
   end
   // synthesis translate_on
 
@@ -284,6 +379,13 @@ module cft_reduce_acc #(
       add_valid = 1'b1;
       add_a     = slot_rd;
       add_b     = add_res;
+    end else if (win_issue) begin
+      // The group already at win_lvl covers the LOWER indices, as a
+      // level's contents always do; the arriving group is the upper
+      // half and the sum carries to win_lvl + 1.
+      add_valid = 1'b1;
+      add_a     = slot_rd;
+      add_b     = win_data;
     end else if (in_valid && in_ready && in_needs_issue) begin
       add_valid = 1'b1;
       add_a     = slot_rd;
@@ -296,6 +398,7 @@ module cft_reduce_acc #(
   always_comb begin
     if (fold_issue)                                 issue_lvl = ptr;
     else if (res_needs_issue)                       issue_lvl = res_lvl + 1'b1;
+    else if (win_issue)                             issue_lvl = win_lvl + 1'b1;
     else                                            issue_lvl = {{(LW-1){1'b0}}, 1'b1};
   end
 
@@ -308,6 +411,8 @@ module cft_reduce_acc #(
       ptr       <= '0;
       fold_r    <= '0;
       fold_started <= 1'b0;
+      wlvl_r    <= '0;
+      wlvl_v    <= 1'b0;
       out_valid <= 1'b0;
       out_data  <= '0;
       out_flags <= 5'b0;
@@ -341,6 +446,16 @@ module cft_reduce_acc #(
       if (res_v && (st != S_WAIT)) begin
         if (occ[res_lvl]) occ[res_lvl] <= 1'b0;      // consumed by the re-issue
         else              occ[res_lvl] <= 1'b1;
+      end
+
+      // A group partial, at its own level. Its level and the input's
+      // are different by the header's rules and by the assertion
+      // above, so these two arms never write the same bit of occ.
+      if (st == S_ACC && win_valid && win_ready) begin
+        if (occ[win_lvl]) occ[win_lvl] <= 1'b0;      // consumed by the issue
+        else              occ[win_lvl] <= 1'b1;
+        wlvl_r <= win_lvl;
+        wlvl_v <= 1'b1;
       end
 
       if (st == S_ACC && in_valid && in_ready) begin
@@ -412,11 +527,15 @@ module cft_reduce_acc #(
     if (ADD_LATENCY < 1) begin : g_lat
       $error("cft_reduce_acc: ADD_LATENCY must be at least 1");
     end
+    if (LVL_W != $clog2(LEVELS + 1)) begin : g_lvlw
+      $error("cft_reduce_acc: LVL_W must be $clog2(LEVELS+1)");
+    end
   endgenerate
 
   initial begin
-    if (LEVELS < 2 || ADD_LATENCY < 1) begin
-      $display("FATAL: cft_reduce_acc LEVELS=%0d ADD_LATENCY=%0d", LEVELS, ADD_LATENCY);
+    if (LEVELS < 2 || ADD_LATENCY < 1 || LVL_W != $clog2(LEVELS + 1)) begin
+      $display("FATAL: cft_reduce_acc LEVELS=%0d ADD_LATENCY=%0d LVL_W=%0d",
+               LEVELS, ADD_LATENCY, LVL_W);
       $finish;
     end
   end
