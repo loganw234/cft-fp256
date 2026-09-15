@@ -68,6 +68,26 @@ run. It is planned here as the smallest parcel, last in the merge order,
 with an honest number attached; whether to dispatch it is Logan's call
 and the plan says so where it is decided.
 
+**Corrected 2026-09-15 12:51 (P3's measurement, the ledger).** The
+ceiling above priced two things the mask would remove from a program
+run: idle lanes' BYTES and idle lanes' COMPUTE. The bytes half is real
+and P3 delivers it (a masked lane's deposit slots, count and scratch-out
+slots are the caller's bytes, it contributes no flag, and an all-masked
+block leaves its loops at the first test). The compute half is not
+there to remove: the sequencer issues per BEAT, and a block's active
+mask decides what is written, not what is computed - a lane that drops
+out at `SETACT` has cost its block the same since revision 1. Measured
+with `make seqcycles` at P3's tip, four blocks: half-masked and
+all-masked cost the same, dense plus one single-beat read a block (four
+cycles at every format; fp32 1,189 -> 1,205 over four blocks; block
+setup 60.8 -> 64.8 a block), and dense is unchanged. Skipping a beat
+with no active lane in the issue pipe and in the stream loads would buy
+the compute; that is R14/R15 and R10, which two parcels just landed in,
+and it is a revision-7 item recorded in docs/ROADMAP.md with these
+numbers as the before-side - not this round's. The requester's item 4
+gets its tile-side answer from this: zero, so their ensemble
+measurement prices the host side alone.
+
 And one thing not on the list that yesterday's measurement put there:
 the tile's reduction accumulator streams ONE element a cycle, which is
 why `cft_reduce_seg` on the card returned the contract's bits but was
