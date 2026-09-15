@@ -1307,46 +1307,6 @@ module cft_engine_stream #(
   // spans three of them.
   localparam logic [WCW-1:0] WCRED_MAX = WPART_DEPTH[WCW-1:0];
 
-  // Element `idx` of a beat, right-aligned - the same four-arm select
-  // the serializer's red_in_elem is, and deliberately the same
-  // expression, because a tree that read elements differently from the
-  // serializer would put different values in the same pairs.
-  function automatic logic [BEAT_BITS-1:0] get_el(
-      input logic [BEAT_BITS-1:0] beat, input logic [5:0] idx,
-      input logic [1:0] prec);
-    logic [BEAT_BITS-1:0] r;
-    begin
-      r = '0;
-      case (prec)
-        PREC_FP64:  r[RED_W64-1:0]  = beat[idx*RED_W64  +: RED_W64];
-        PREC_FP128: r[RED_W128-1:0] = beat[idx*RED_W128 +: RED_W128];
-        PREC_FP256: r               = beat;
-        default:    r[31:0]         = beat[idx*32 +: 32];
-      endcase
-      get_el = r;
-    end
-  endfunction
-
-  // A beat holding `val` at element `idx` and +0 everywhere else. The
-  // zeros are load bearing: a lane with +0 on both operands computes
-  // fma(+0, 1.0, +0) - or max(+0, +0) - and raises nothing, which is
-  // how an idle lane stays out of the run's flags.
-  function automatic logic [BEAT_BITS-1:0] put_el(
-      input logic [5:0] idx, input logic [BEAT_BITS-1:0] val,
-      input logic [1:0] prec);
-    logic [BEAT_BITS-1:0] r;
-    begin
-      r = '0;
-      case (prec)
-        PREC_FP64:  r[idx*RED_W64  +: RED_W64]  = val[RED_W64-1:0];
-        PREC_FP128: r[idx*RED_W128 +: RED_W128] = val[RED_W128-1:0];
-        PREC_FP256: r                           = val;
-        default:    r[idx*32 +: 32]             = val[31:0];
-      endcase
-      put_el = r;
-    end
-  endfunction
-
   logic [WSR_LEN-1:0]   wsr;          // stage-0 admissions, for the later taps
   logic [WCW-1:0]       wcred;        // beats admitted and not yet counted
   logic [3:1]           stg_go;       // stage 1..3's issue strobe
@@ -1403,22 +1363,86 @@ module cft_engine_stream #(
   // with OR rather than read-modify-write because the lanes are
   // disjoint by construction, which makes it a tree of ORs instead of
   // a chain of muxes.
+  //
+  // ONE ARM PER PRECISION, and that is what makes it wiring. epb, the
+  // element width and "is this the bottom level" are all constants
+  // inside an arm, so every select below is a constant slice of the
+  // beat - the permutation costs no logic at all, and only `lvl_go`
+  // is a runtime term. Written the other way round, with the element
+  // index computed from the runtime `epb`, each lane becomes a
+  // beat-wide dynamic shifter: yosys was still elaborating one such
+  // draft after ten minutes, and every arm a precision does not take
+  // still asked for a slice off the end of the beat.
+  //
+  // The three arms are the same eight lines with a different width,
+  // deliberately spelled out rather than shared through a function: a
+  // function taking the width as an argument is exactly the dynamic
+  // select this avoids.
+  localparam int EPB32  = LANES32;
+  localparam int EPB64  = (LANES64  > 0) ? LANES64  : 1;
+  localparam int EPB128 = (LANES128 > 0) ? LANES128 : 1;
+  localparam int K32    = $clog2(EPB32);
+  localparam int K64    = $clog2(EPB64);
+  localparam int K128   = $clog2(EPB128);
   always_comb begin
     wx_n = '0;
     wy_n = '0;
-    for (int l = 0; l < 3; l = l + 1) begin
-      for (int p = (1 << l); p < (2 << l); p = p + 1) begin
-        if ((p < LANES32) && lvl_go[l]) begin
-          if (6'(l) == beat_sh_r - 6'd1) begin
-            wx_n = wx_n | put_el(6'(p), get_el(a_q, 6'(2*p) - epb,        prec_r), prec_r);
-            wy_n = wy_n | put_el(6'(p), get_el(a_q, 6'(2*p) - epb + 6'd1, prec_r), prec_r);
-          end else begin
-            wx_n = wx_n | put_el(6'(p), get_el(beat_d, 6'(2*p),        prec_r), prec_r);
-            wy_n = wy_n | put_el(6'(p), get_el(beat_d, 6'(2*p) + 6'd1, prec_r), prec_r);
-          end
-        end
-      end
-    end
+    case (prec_r)
+      PREC_FP32:
+        for (int l = 0; l < K32; l = l + 1)
+          for (int p = (1 << l); p < (2 << l); p = p + 1)
+            if (lvl_go[l]) begin
+              if (l == K32 - 1) begin
+                wx_n[p*32 +: 32] = a_q[(2*p - EPB32)*32     +: 32];
+                wy_n[p*32 +: 32] = a_q[(2*p - EPB32 + 1)*32 +: 32];
+              end else begin
+                wx_n[p*32 +: 32] = beat_d[(2*p)*32     +: 32];
+                wy_n[p*32 +: 32] = beat_d[(2*p + 1)*32 +: 32];
+              end
+            end
+      PREC_FP64:
+        for (int l = 0; l < K64; l = l + 1)
+          for (int p = (1 << l); p < (2 << l); p = p + 1)
+            if (lvl_go[l]) begin
+              if (l == K64 - 1) begin
+                wx_n[p*RED_W64 +: RED_W64] = a_q[(2*p - EPB64)*RED_W64     +: RED_W64];
+                wy_n[p*RED_W64 +: RED_W64] = a_q[(2*p - EPB64 + 1)*RED_W64 +: RED_W64];
+              end else begin
+                wx_n[p*RED_W64 +: RED_W64] = beat_d[(2*p)*RED_W64     +: RED_W64];
+                wy_n[p*RED_W64 +: RED_W64] = beat_d[(2*p + 1)*RED_W64 +: RED_W64];
+              end
+            end
+      PREC_FP128:
+        for (int l = 0; l < K128; l = l + 1)
+          for (int p = (1 << l); p < (2 << l); p = p + 1)
+            if (lvl_go[l]) begin
+              if (l == K128 - 1) begin
+                wx_n[p*RED_W128 +: RED_W128] = a_q[(2*p - EPB128)*RED_W128     +: RED_W128];
+                wy_n[p*RED_W128 +: RED_W128] = a_q[(2*p - EPB128 + 1)*RED_W128 +: RED_W128];
+              end else begin
+                wx_n[p*RED_W128 +: RED_W128] = beat_d[(2*p)*RED_W128     +: RED_W128];
+                wy_n[p*RED_W128 +: RED_W128] = beat_d[(2*p + 1)*RED_W128 +: RED_W128];
+              end
+            end
+      default: ;   // fp256 is one element a beat: no tree to build
+    endcase
+  end
+
+  // The beat's partial is the heap's root, lane 1 - the same constant
+  // slice per precision, with the base clipped so an arm a narrow beat
+  // cannot take still elaborates in range.
+  localparam int RT32  = (LANES32  > 1) ? 32       : 0;
+  localparam int RT64  = (LANES64  > 1) ? RED_W64  : 0;
+  localparam int RT128 = (LANES128 > 1) ? RED_W128 : 0;
+  logic [BEAT_BITS-1:0] wpart_d;
+  always_comb begin
+    wpart_d = '0;
+    case (prec_r)
+      PREC_FP64:  wpart_d[RED_W64-1:0]  = beat_d[RT64  +: RED_W64];
+      PREC_FP128: wpart_d[RED_W128-1:0] = beat_d[RT128 +: RED_W128];
+      PREC_FP256: wpart_d               = beat_d;
+      default:    wpart_d[31:0]         = beat_d[RT32  +: 32];
+    endcase
   end
 
   // The partial queue. Deep enough that admission, not the queue, is
@@ -1429,7 +1453,7 @@ module cft_engine_stream #(
   /* verilator lint_off WIDTHEXPAND */
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(WPART_LOG2)) u_fifo_w (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
-      .wr_en(wf_wr), .wr_data(get_el(beat_d, 6'd1, prec_r)),
+      .wr_en(wf_wr), .wr_data(wpart_d),
       .rd_en(wpart_take), .rd_data(wf_q), .count(wf_cnt));
   /* verilator lint_on WIDTHEXPAND */
 
