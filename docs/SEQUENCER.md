@@ -1448,10 +1448,16 @@ All three streams were loaded every block. The image parser, on its way
 past each instruction, notes which of r0..r2 the program names as a
 REGISTER operand - a field with its `k` flag clear, under `kx` or not,
 and the control codes that read one (DEPOSIT, SETACT, STL, STX read
-`ra`; STX, LDX read `rb`) - and the block load skips the rest. It
-over-approximates on purpose: a unary opcode's unread field still
-counts, which only ever loads more. A program that reads r0 alone (a
-square root, the normal-only mask) loads one stream instead of three.
+`ra`; STX, LDX read `rb`) - and the block load skips the rest. Since
+2026-09-15 "names" means READS: the opcode's operand use decides
+(`op_reads` in the RTL, held to the model's own steering by
+`tb/test_seq_core.py` for all 256 opcodes), so an ADD's defaulted `rb`
+field costs nothing. Until then the rule over-approximated on purpose -
+a unary opcode's unread field still counted, which only ever loaded
+more - and R16 turned "more" into the whole table plus a round trip per
+entry for a stream nothing read (found by round 2's V1). A program that
+reads r0 alone (a square root, the normal-only mask) loads one stream
+instead of three.
 
 ### R11. The drains, one element and one beat a cycle
 

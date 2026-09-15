@@ -425,11 +425,15 @@ module cft_seq #(
   // one - and every existing bench's cycle count unchanged.
   logic [SCRSW:0] scr_hi;
   logic           scr_all;
-  // Which of r0..r2 the program names as a REGISTER operand (a field
-  // with its k flag clear, under kx or not; the control codes that read
-  // one), gathered by the image parser: the block load skips the
-  // streams it never reads. Over-approximate by design - a unary
-  // opcode's unread field still counts - which only ever loads more.
+  // Which of r0..r2 the program READS - by the opcode's operand use
+  // (op_reads, below, held to the model's own steering by
+  // tb/test_seq_core.py), never by a field that merely names one, plus
+  // the control codes that read one - gathered by the image parser: the
+  // block load skips the streams it never reads. The first rule counted
+  // any register field below three, which over-approximated by design
+  // and cost a beat read dense; once a stream could be gathered through
+  // a table (R16) it cost the whole table plus a round trip per entry
+  // for a stream nothing read. Found by round 2's V1, 2026-09-15.
   logic [2:0]     rd_need;
   logic [63:0] imem [0:IMEM_D-1];
   logic [BEAT_BITS-1:0] kmem [0:KREG-1];   // broadcast across the beat
