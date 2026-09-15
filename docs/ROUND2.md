@@ -688,10 +688,14 @@ edit). `host/tests/device_test.c` - one leg beside `compare`.
 `host/tests/remote_test.c` - the indexed case in `identity_tests`.
 `bindings/wasm/wasm_api.c` - nothing, in the end: P2 measured
 (2026-09-15 13:05) that the shipped module is already at 0.14 and
-that emscripten's `cwrap` is lazy, so the `cftw_run_ex` export and its
-JavaScript entry point (`lib.mjs`'s eager table, `core.mjs`,
-`test.mjs`) land together in the lead's rebuild at the docs sweep,
-never one without the other.
+that emscripten's `cwrap` of a MISSING export returns `undefined` -
+neither a throw at import nor a deferred failure (P5 measured it,
+15:30: the node gates would have passed unchanged and the entry point
+would have silently not existed) - so the `cftw_run_ex` export, its
+JavaScript entry point (`lib.mjs`'s table, `core.mjs`, `test.mjs`) and
+the rebuilt module land together, in P5's one commit, and P5 made the
+rule enforceable: `lib.mjs` CALLS a projected constant at load and
+`verify.mjs` names the exports it needs.
 **Corrected 2026-09-15 11:58 (P2's finding):** this brief said
 `cftw_run_ex` and an elementwise `runEx` "grow the six arguments"; they
 do not exist - ABI 0.12's `cft_run_ex` was never bound in wasm or node,
