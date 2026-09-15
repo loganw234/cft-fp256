@@ -11717,3 +11717,55 @@ Arduino copy.
 The card has no image with the register yet. The measurement the ask
 was for - one run of `seg = L` over `E * L` resident coordinates against
 the host loop it replaces - is the next image's.
+
+## 2026-09-14 - the seq5 image's program costs on a clean unit: the per-lane cost, measured on the card
+
+**amd-arc-box, the U50, `cft_hw_seq5_1x.xclbin` (6e1c418: R9-R13, the
+retire-gate hang of the entry above still in it - so every run here is
+a program on a freshly programmed unit, no engine call before it, which
+is the sequence that image can run). Host tools at 78b4a3b, XRT=1. The
+same three scripts as the morning's entry on cft-rebound's f128 image
+(ca19fe3, the old sequencer), so the columns are comparable: `depcost`
+8,192 resident lanes, medians of 8; `progcost` 768 lanes, medians of 10;
+`divtime` 768 elements, 12 reps.**
+
+**Per lane, resident (`depcost`), morning -> now:**
+
+| program | fp32 | fp64 | fp128 |
+|---|---|---|---|
+| halt only, no deposit | 0.068 -> 0.017 us | 0.108 -> 0.019 us | 0.175 -> 0.025 us |
+| one IAND, one deposit | - -> 0.040 us | - -> 0.049 us | 0.224 -> 0.070 us |
+| one IAND, four deposits | - -> 0.070 us | - -> 0.089 us | 0.329 -> 0.134 us |
+| twenty IANDs, one deposit | - -> 0.061 us | - -> 0.095 us | 0.382 -> 0.170 us |
+
+The fixed cost a lane - what a program that does nothing paid - is
+seven times smaller at fp128 and four times at fp32; a deposit went
+from about 40 ns a lane to about 20 (fp128: 0.134 - 0.070 over three
+deposits). What is left in the halt-only row is HBM: 50-135 ns a beat
+of it, the block's count write and its bursts, which the model-RAM
+probe cannot see and which is now the whole of that row.
+
+**Per instruction (`progcost`, fp128, 768 lanes = 384 beats):** nop x 1
+0.21 us an element, nop x 47 0.49, nop x 214 1.49 - (1,145.5 - 162.1)
+us over 213 instructions and 384 beats is 12 ns a beat an instruction,
+1.6 cycles at 135 MHz, against 2.2 in the morning and the 21 / 16 =
+1.3 the R13 machine spends in the probe; the difference is the card's
+memory between blocks. The whole divide (214 instructions) 1.58 us an
+element here and the divide core (47) 0.61.
+
+**The divide (`divtime`, per element):**
+
+| | older program route | whole program |
+|---|---|---|
+| fp64 div | 1.094 -> 0.911 us | 1.289 -> 0.944 us |
+| fp64 sqrt | 1.093 -> 1.150 us | 1.196 -> 0.873 us |
+| fp128 div | 1.695 -> 1.859 us | 2.330 -> 1.523 us |
+| fp128 sqrt | - -> 1.642 us | - -> 1.394 us |
+
+The whole program is now the faster route at fp128 (1.52 against 1.86)
+and at fp64 for the square root; the older route's numbers moved less
+because half of its time is the host's prep and finish, which no
+sequencer change touches. The default stays the older route until the
+image with the streaming issue (R14, 16 cycles an instruction) and the
+retire fix is measured, which is the next entry; that measurement
+decides it.

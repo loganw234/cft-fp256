@@ -91,7 +91,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 11,719 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 11771 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 2,882 | What is built, what is next, and what was decided against. |
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |
