@@ -523,10 +523,21 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
           "CAPS answers %u bytes, got %lu", (unsigned)CFTR_CAPS_BYTES,
           (unsigned long)len);
     if (resp && len == CFTR_CAPS_BYTES) {
+        /* CFT_SEQ_FEAT_INDEXED is the one bit the client does NOT
+         * adopt from the block (ABI 0.14, R16): the bit means "a
+         * program run with index tables succeeds on this device", and
+         * the program run's remote route does not carry a table yet -
+         * it is a client-side gather and it is parcel P2's. A server
+         * that is itself a software device publishes it truthfully
+         * about ITSELF, so the wire has it and the handle must not,
+         * and that is asserted below rather than papered over here.
+         * P2 removes the mask, the refusal in device.c's remote
+         * branch, and these three lines together. */
         CHECK(cftr_get32(resp + 56) == c.max_deposits &&
               cftr_get32(resp + 60) == c.max_insns &&
               cftr_get32(resp + 64) == c.max_consts &&
-              cftr_get32(resp + 68) == c.seq_features &&
+              (cftr_get32(resp + 68) & ~(uint32_t)CFT_SEQ_FEAT_INDEXED)
+                  == c.seq_features &&
               cftr_get32(resp + 72) == c.max_scratch,
               "the block's sequencer capacities are what cft_get_caps "
               "reports (%lu/%lu/%lu/0x%lx/%lu on the wire, "
@@ -559,9 +570,24 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
         CHECK(c.max_deposits == cs.max_deposits &&
               c.max_insns == cs.max_insns &&
               c.max_consts == cs.max_consts &&
-              c.seq_features == cs.seq_features &&
+              c.seq_features ==
+                  (cs.seq_features & ~(uint32_t)CFT_SEQ_FEAT_INDEXED) &&
               c.max_scratch == cs.max_scratch,
-              "a software server's capacities are this library's own");
+              "a software server's capacities are this library's own, "
+              "less CFT_SEQ_FEAT_INDEXED");
+        /* ...and the mask is a POSITIVE claim, not a tolerance: the
+         * local software backend has the bit, and a remote handle to
+         * that same backend must NOT report it, because
+         * cft_program_run_ex with a table is refused on this route
+         * and a capability word that says yes to a call that says no
+         * is what cft_get_caps exists to prevent. */
+        CHECK((cs.seq_features & CFT_SEQ_FEAT_INDEXED) != 0,
+              "the local software backend publishes "
+              "CFT_SEQ_FEAT_INDEXED");
+        CHECK((c.seq_features & CFT_SEQ_FEAT_INDEXED) == 0,
+              "a REMOTE handle does not, because the program run's "
+              "remote route does not carry an index table yet "
+              "(docs/ROUND2.md, parcel P2)");
     } else {
         printf("  server backend is '%s', not compared with the local "
                "software backend\n", cftr_server_backend(hw));

@@ -393,6 +393,19 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         dev->device_version = ver;
         dev->flags_readable = readable;
         dev->seq            = seq;
+        /* ...except CFT_SEQ_FEAT_INDEXED, which is MASKED OFF on a
+         * remote handle (ABI 0.14, R16). The bit's meaning is
+         * "cft_program_run_ex with index tables SUCCEEDS on this
+         * device", and the program run's remote route does not carry a
+         * table yet - it is a client-side gather and it is parcel P2's
+         * (docs/ROUND2.md). A server that is itself a software device
+         * publishes the bit truthfully about ITSELF, and a client that
+         * adopted it would read a capability word saying yes to a call
+         * that then says no. A caller is told to ask cft_get_caps
+         * before issuing one, so the answer has to be the one the call
+         * will give. P2 removes this mask and the refusal in
+         * cft_backend_program_run's remote branch together. */
+        dev->seq.features  &= ~(uint32_t)CFT_SEQ_FEAT_INDEXED;
         dev->backend_name   = "remote";
         dev->hw             = hw;
         *out = dev;
