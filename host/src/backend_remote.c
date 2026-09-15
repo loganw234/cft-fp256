@@ -1590,6 +1590,31 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     uint8_t       *pso      = io ? (uint8_t *)io->scratch_out : NULL;
     uint32_t    n_sin       = io ? io->n_scratch_in : 0;
     uint32_t    n_sout      = io ? io->n_scratch_out : 0;
+    /* R17's lane mask, and the client's whole implementation of it.
+     *
+     * The protocol has no field for a mask and needs none: a masked
+     * lane runs no instruction and writes no byte, so the run the
+     * server has to make is the run over the lanes the mask KEEPS.
+     * This file compacts each chunk down to those lanes, sends them as
+     * an ordinary dense run, and scatters the answers back to the
+     * lanes they came from. What arrives at the server is a shorter
+     * run and not a masked one, which is why nothing about the
+     * protocol, the server or its own backend has to learn the mask.
+     *
+     * Why an active lane's bits are unchanged by that: a program is
+     * per-lane and the contract has no cross-lane addressing at all -
+     * every register, every scratch slot and every deposit slot
+     * belongs to one lane, and the only cross-lane quantity in the
+     * machine is the early exit, which docs/SEQUENCER.md's P3 makes
+     * invisible in the results. So lane i's outputs depend on lane
+     * i's inputs and the program, not on which other lanes are in the
+     * run - which is the same property that lets the tile split a run
+     * into lane blocks and the backend split it into chunks. FLAGS is
+     * the one thing compaction gets RIGHT that running unmasked would
+     * get wrong: the sticky word is the OR over the lanes that ran,
+     * and here exactly the caller's lanes ran. */
+    const uint8_t *msk      = io ? io->lane_mask : NULL;
+    size_t *sel = NULL;             /* this chunk's kept lanes, or NULL */
     uint32_t present = (a ? 1u : 0u) | (b ? 2u : 0u) | (c ? 4u : 0u);
     unsigned npresent = (a ? 1u : 0u) + (b ? 1u : 0u) + (c ? 1u : 0u);
     /* PROG_RUN's fixed fields, PROG_RUN_BANK's and PROG_RUN_EX's - the
@@ -1684,22 +1709,47 @@ int cftr_program_run(void *hw, int fmt, const void *image,
     if (lpc == 0)
         lpc = 1;
 
+    /* One chunk's worth of lane indices, allocated once. A mask is the
+     * only thing that makes a chunk's lanes non-contiguous. */
+    if (msk) {
+        sel = (size_t *)malloc(lpc * sizeof *sel);
+        if (!sel)
+            return CFT_ERR_OUT_OF_MEMORY;
+    }
+
     for (off = 0; off < n; off += lpc) {
-        const size_t k = n - off < lpc ? n - off : lpc;
-        const size_t sin_bytes = (size_t)n_sin * k * esz;
-        const size_t sout_bytes = (size_t)n_sout * k * esz;
-        const size_t req_len = fixed + bank_bytes + sin_bytes +
-                               (size_t)npresent * k * esz;
-        const size_t dep_bytes = k * (size_t)max_deposits * esz;
-        const size_t want = 8u + dep_bytes + (counts ? k * 4u : 0u) +
-                            sout_bytes;
+        const size_t kall = n - off < lpc ? n - off : lpc;
+        size_t k = kall, j;
+        size_t sin_bytes, sout_bytes, req_len, dep_bytes, want;
         uint8_t *q, *resp = NULL;
         size_t resp_len = 0;
         int status;
 
+        if (msk) {
+            k = 0;
+            for (j = 0; j < kall; j++)
+                if (msk[(off + j) >> 3] & (uint8_t)(1u << ((off + j) & 7u)))
+                    sel[k++] = off + j;
+            /* Every lane of this chunk masked: nothing to compute and
+             * nothing to write, so no request is made at all. A run
+             * whose every lane is masked therefore costs no round trip,
+             * which is the same "completes with nothing written" R17
+             * states for the tile. */
+            if (k == 0)
+                continue;
+        }
+        sin_bytes = (size_t)n_sin * k * esz;
+        sout_bytes = (size_t)n_sout * k * esz;
+        req_len = fixed + bank_bytes + sin_bytes +
+                  (size_t)npresent * k * esz;
+        dep_bytes = k * (size_t)max_deposits * esz;
+        want = 8u + dep_bytes + (counts ? k * 4u : 0u) + sout_bytes;
+
         req = (uint8_t *)realloc(req, req_len);
-        if (!req)
+        if (!req) {
+            free(sel);
             return CFT_ERR_OUT_OF_MEMORY;
+        }
         cftr_put32(req + 0, R->phandle);
         cftr_put32(req + 4, present);
         cftr_put32(req + 8, counts ? 1u : 0u);
@@ -1724,19 +1774,43 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         q = req + fixed;
         if (bank_bytes) { memcpy(q, bank, bank_bytes); q += bank_bytes; }
         if (sin_bytes) {
-            memcpy(q, psi + off * (size_t)n_sin * esz, sin_bytes);
+            if (!msk) {
+                memcpy(q, psi + off * (size_t)n_sin * esz, sin_bytes);
+            } else {
+                /* Lane-major, so a kept lane's slots are a contiguous
+                 * run of n_scratch_in elements - gathered here in the
+                 * order the compacted run will read them. */
+                for (j = 0; j < k; j++)
+                    memcpy(q + j * (size_t)n_sin * esz,
+                           psi + sel[j] * (size_t)n_sin * esz,
+                           (size_t)n_sin * esz);
+            }
             q += sin_bytes;
         }
-        if (pa) { memcpy(q, pa + off * esz, k * esz); q += k * esz; }
-        if (pb) { memcpy(q, pb + off * esz, k * esz); q += k * esz; }
-        if (pc) { memcpy(q, pc + off * esz, k * esz); q += k * esz; }
+        {
+            const uint8_t *const strm[3] = {pa, pb, pc};
+            int r;
+            for (r = 0; r < 3; r++) {
+                if (!strm[r])
+                    continue;
+                if (!msk) {
+                    memcpy(q, strm[r] + off * esz, k * esz);
+                } else {
+                    for (j = 0; j < k; j++)
+                        memcpy(q + j * esz, strm[r] + sel[j] * esz, esz);
+                }
+                q += k * esz;
+            }
+        }
 
         if (do_request(R, op, req, req_len, &status, &resp,
                        &resp_len)) {
+            free(sel);
             free(req);
             return R->poison_status;
         }
         if (status != CFT_OK) {
+            free(sel);
             free(req);
             return status;
         }
@@ -1746,6 +1820,7 @@ int cftr_program_run(void *hw, int fmt, const void *image,
                      "op 0x%04x answered with %lu bytes where %lu were due",
                      (unsigned)op, (unsigned long)resp_len,
                      (unsigned long)want);
+            free(sel);
             free(resp);
             free(req);
             poison(R, CFT_ERR_INTERNAL, why);
@@ -1753,22 +1828,44 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         }
         fl_acc  |= cftr_get32(resp + 0);
         bus_acc |= cftr_get32(resp + 4);
-        if (dep_bytes)
-            memcpy(pd + off * (size_t)max_deposits * esz, resp + 8, dep_bytes);
+        /* Back to the lanes they came from. Without a mask the three
+         * blocks are contiguous and this is the memcpy it always was;
+         * with one, lane j of the compacted run is lane sel[j] of the
+         * caller's, and a lane not in sel is not written AT ALL - the
+         * caller's deposit slots, count and scratch-out slots keep
+         * what they held, which is R17's sentence. */
+        if (dep_bytes) {
+            if (!msk) {
+                memcpy(pd + off * (size_t)max_deposits * esz, resp + 8,
+                       dep_bytes);
+            } else {
+                const size_t dl = (size_t)max_deposits * esz;
+                for (j = 0; j < k; j++)
+                    memcpy(pd + sel[j] * dl, resp + 8 + j * dl, dl);
+            }
+        }
         if (counts) {
-            size_t i;
-            for (i = 0; i < k; i++)
-                counts[off + i] = cftr_get32(resp + 8 + dep_bytes + i * 4u);
+            for (j = 0; j < k; j++)
+                counts[msk ? sel[j] : off + j] =
+                    cftr_get32(resp + 8 + dep_bytes + j * 4u);
         }
         /* The scratch-out block last in the response, after the
          * deposits and whatever counts were asked for, and sliced back
          * into the caller's whole-run buffer at this chunk's lanes. */
-        if (sout_bytes)
-            memcpy(pso + off * (size_t)n_sout * esz,
-                   resp + 8 + dep_bytes + (counts ? k * 4u : 0u),
-                   sout_bytes);
+        if (sout_bytes) {
+            const uint8_t *so = resp + 8 + dep_bytes +
+                                (counts ? k * 4u : 0u);
+            if (!msk) {
+                memcpy(pso + off * (size_t)n_sout * esz, so, sout_bytes);
+            } else {
+                const size_t sl = (size_t)n_sout * esz;
+                for (j = 0; j < k; j++)
+                    memcpy(pso + sel[j] * sl, so + j * sl, sl);
+            }
+        }
         free(resp);
     }
+    free(sel);
     free(req);
     if (flags) *flags = fl_acc;
     if (bus)   *bus = bus_acc;

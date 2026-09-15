@@ -19,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cft_golden import FORMATS, FP32, FP64, FP128, seq  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from test_seq_core import (  # noqa: E402
-    Bench, CLK_NS, IA_BASE, lanes_per_block,
+    Bench, BEAT_BYTES, CLK_NS, IA_BASE, MASK_BASE, POISON,
+    lanes_per_block,
 )
 
 FP256 = FORMATS["fp256"]
@@ -114,3 +115,122 @@ async def gathered_against_dense(dut):
             f"({gc / n:6.2f}/lane, {gr:4d} reads)   "
             f"x{gc / dc:5.2f} cycles, +{gr - dr:4d} reads, "
             f"{(gc - dc) / n:6.2f} extra cycles a lane")
+
+
+# ---- revision 6, R17: what a lane mask costs --------------------------
+#
+# Two numbers, at each of the four formats, on the same program the
+# table above runs: the DENSE run, and the same run with HALF THE LANES
+# masked. The mask costs one single-beat read a block at block setup
+# and saves whatever the masked lanes would have computed - and on this
+# model RAM, which answers in the cycle it is asked, the read is four
+# cycles rather than a round trip, so what is left in the difference is
+# the state machine's own cost per block against the issue cost per
+# lane. On the card the fetch is one HBM round trip a block (the read
+# side carries one burst at a time, P1's measurement) and the saving is
+# unchanged, so the card's number is this one plus a round trip a
+# block.
+#
+# The requester's item 4 (cft-rebound/docs/HARDWARE.md) asks what idle
+# lanes cost inside a program run, and this is the half of the answer
+# that lives in this repository: the tile's side of it, in cycles, with
+# the block setup priced separately below.
+
+@cocotb.test()
+async def masked_against_dense(dut):
+    b = Bench(dut)
+    await b.start()
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    insns = [iand, seq.deposit(3), seq.halt()]
+    dut._log.info("== R17: one stream, dense against half-masked "
+                  "(the same program, half the lanes)")
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        pool = [sf.one_bits(fmt)] * n
+        prog = seq.Program(fmt, insns, consts=(), max_deposits=1)
+        esz = fmt.width // 8
+        out = {}
+        # ...and ALL the lanes masked, which BOUNDS the saving: if a
+        # run that computes nothing at all costs what the dense run
+        # costs, then masking a lane saves no issue cycle, and what the
+        # mask buys is the bytes and the flags rather than the compute.
+        # The bound is worth more than the half-masked number, because
+        # it is the number the round's value statement rests on.
+        for step, what in ((0, "dense"), (2, "half masked"),
+                           (None, "all masked")):
+            b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                     n * esz, 4 * n)
+            if step is not None and step:
+                raw = bytearray((n + 7) // 8)
+                for i in range(0, n, step):       # every `step`th lane
+                    raw[i >> 3] |= 1 << (i & 7)
+                pad = -len(raw) % BEAT_BYTES
+                b.ram.stage(MASK_BASE,
+                            bytes(raw) + bytes([POISON]) * pad)
+            elif step is None:
+                raw = bytearray((n + 7) // 8)     # every bit clear
+                pad = -len(raw) % BEAT_BYTES
+                b.ram.stage(MASK_BASE,
+                            bytes(raw) + bytes([POISON]) * pad)
+            b._drive_cfg(fmt, n, lane_mask=(step != 0))
+            t0 = get_sim_time("ns")
+            refused, _flags, err = await b._go(8_000_000, what)
+            assert refused == 0 and err == 0, (what, refused, err)
+            out[what] = ((get_sim_time("ns") - t0) / CLK_NS,
+                         b.ram.ar_count)
+        (dc, dr), (mc, mr) = out["dense"], out["half masked"]
+        (zc, zr) = out["all masked"]
+        dut._log.info(
+            f"  {fmt.name:<6} {n:4d} lanes  dense {dc:8.0f} cyc "
+            f"({dc / n:6.2f}/lane, {dr:4d} reads)   half masked "
+            f"{mc:8.0f} cyc ({mc / n:6.2f}/lane, {mr:4d} reads)   "
+            f"all masked {zc:8.0f} cyc ({zr:4d} reads)   "
+            f"x{mc / dc:5.2f} half, x{zc / dc:5.2f} all, "
+            f"{(mc - dc) / blocks:+7.1f} cycles a block")
+
+
+# ---- and the block setup alone ---------------------------------------
+#
+# The same two runs over a program that computes NOTHING - a bare HALT,
+# no deposit - so what is measured is the per-block machinery and the
+# mask fetch inside it, with no issue and no drain to hide behind.
+# This is the number that says what the fetch itself costs, which the
+# two-percent ceiling in docs/ROUND2.md assumes is one burst.
+
+@cocotb.test()
+async def block_setup_dense_against_masked(dut):
+    b = Bench(dut)
+    await b.start()
+    dut._log.info("== R17: block setup alone (HALT, no deposit), dense "
+                  "against masked")
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        pool = [sf.one_bits(fmt)] * n
+        prog = seq.Program(fmt, [seq.halt()], consts=(), max_deposits=0)
+        out = {}
+        for use_mask, what in ((False, "dense"), (True, "masked")):
+            b._stage(fmt, prog.to_bytes(), pool, pool, pool, n, 0, 4 * n)
+            if use_mask:
+                raw = bytearray((n + 7) // 8)
+                for i in range(0, n, 2):
+                    raw[i >> 3] |= 1 << (i & 7)
+                pad = -len(raw) % BEAT_BYTES
+                b.ram.stage(MASK_BASE,
+                            bytes(raw) + bytes([POISON]) * pad)
+            b._drive_cfg(fmt, n, lane_mask=use_mask)
+            t0 = get_sim_time("ns")
+            refused, _flags, err = await b._go(4_000_000, what)
+            assert refused == 0 and err == 0, (what, refused, err)
+            out[what] = ((get_sim_time("ns") - t0) / CLK_NS,
+                         b.ram.ar_count)
+        (dc, dr), (mc, mr) = out["dense"], out["masked"]
+        dut._log.info(
+            f"  {fmt.name:<6} {n:4d} lanes in {blocks} blocks  dense "
+            f"{dc:7.0f} cyc ({dc / blocks:6.1f}/block, {dr:3d} reads)   "
+            f"masked {mc:7.0f} cyc ({mc / blocks:6.1f}/block, {mr:3d} "
+            f"reads)   {(mc - dc) / blocks:+6.1f} cycles and "
+            f"{(mr - dr) / blocks:+4.1f} reads a block")

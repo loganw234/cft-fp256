@@ -70,7 +70,10 @@
 //     (lane-major and dense, so the preload is a transpose and runs
 //     one element a cycle); r0/r1/r2 load from cfg_a/b/c at the
 //     block's element offset (r3..r31 start +0), a lane is ACTIVE iff
-//     its global index < cfg_n; then the instruction stream runs to
+//     its global index < cfg_n and, under MODE[23], its bit in the
+//     lane mask at cfg_mask is set (revision 6, R17: the block's mask
+//     bits are one single-beat read at block setup, and a masked lane
+//     is not a lane the caller has); then the instruction stream runs to
 //     HALT under seq.py's semantics - ALU results, deposits, SCRATCH
 //     STORES, SCRATCH LOADS and FLAG contributions all masked
 //     per-lane by active (P3); REPEAT/ENDREP
@@ -94,7 +97,11 @@
 //     flags.SCRATCH_IO, n_scratch_out slots a lane at cfg_sout in the
 //     same lane-major layout the preload reads. Lanes at or beyond
 //     cfg_n get none of the three: the tail of the caller's buffers
-//     is theirs, untouched.
+//     is theirs, untouched. A MASKED lane (R17) gets none of the three
+//     either, and for the same reason - it is not a lane the caller
+//     gave this run - but it sits INSIDE the window rather than past
+//     it, so what "untouched" means on the bus is a beat whose bytes
+//     for that lane's elements carry no write strobe.
 //
 //  4. DONE. `flags` is the sticky OR of active-lane contributions
 //     across the whole run; err[2:0] carry the engine's three bus
@@ -246,6 +253,17 @@ module cft_seq #(
     input  logic [ADDR_W-1:0] cfg_idx_b,
     input  logic [ADDR_W-1:0] cfg_idx_c,
     input  logic [ADDR_W-1:0] cfg_idx_si,
+    /* ABI 0.14, docs/SEQUENCER.md R17: the per-run LANE MASK, decoded
+     * in the CSR out of MODE[23] and pointed at by MASK_PTR (0xA8).
+     * The CSR has already REFUSED the bit on a build whose
+     * FEAT_LANE_MASK is clear, so a bit that arrives here is one this
+     * module implements - the same division of labour cfg_prec and
+     * cfg_indexed have. Bit i of the buffer is lane i, GLOBAL, and a
+     * clear bit is a lane the caller does not have: it runs no
+     * instruction, contributes no flag, and none of the three drains
+     * writes one of its elements. */
+    input  logic              cfg_mask_en,
+    input  logic [ADDR_W-1:0] cfg_mask,
     output logic              busy,
     output logic              done,       // one-cycle pulse
     output logic              refuse,     // valid with done
@@ -376,6 +394,9 @@ module cft_seq #(
   // run reads.
   logic [ADDR_W-1:0] idx_a_q, idx_b_q, idx_c_q, idx_si_q;
   logic [3:0]        idx_en_q;
+  // R17's mask pointer and its enable, latched for the same reason.
+  logic [ADDR_W-1:0] mask_q;
+  logic              mask_en_q;
 
   // element bytes / lanes per beat / log2(lanes per beat)
   logic [5:0] esz;
@@ -1173,7 +1194,8 @@ module cft_seq #(
   // ---- state ----------------------------------------------------------
   typedef enum logic [5:0] {
     S_IDLE, S_HDR_GO, S_HDR_R, S_CHECK, S_BNK_GO, S_IMG_GO, S_IMG_PARSE,
-    S_BLK_SETUP, S_ZERO, S_SIN_GO, S_SIN_PARSE, S_LD_GO, S_LD_STREAM,
+    S_BLK_SETUP, S_MSK_GO, S_MSK_W,
+    S_ZERO, S_SIN_GO, S_SIN_PARSE, S_LD_GO, S_LD_STREAM,
     S_GTH_GO, S_GTH_TBL, S_GTH_ELEM, S_GTH_WAIT,
     S_FETCH, S_FETCH2, S_DECODE,
     S_ALU_ISSUE,
@@ -1862,8 +1884,78 @@ module cft_seq #(
       blk_act_fn = m;
     end
   endfunction
+  // R17. The block's mask bits, DENSE by lane index within the block -
+  // mask_lane[l] is the caller's bit for global lane blk_base + l -
+  // and all ones for a run without a mask, so every expression below
+  // is the one it was before the mask existed. Held for the whole
+  // block: the fetch writes it at block setup and nothing else does.
+  logic [BLK_LANES-1:0] mask_lane;
+  // ...and the same bits addressed by SLOT, which is what the active
+  // mask is addressed by: slot (b, p) is lane (b << lpb_sh) + p, the
+  // expression blk_act_fn already uses for the same mapping.
+  function automatic [BLK_LANES-1:0] mask_slot_fn(input [BLK_LANES-1:0] ml,
+                                                  input [3:0] lanes,
+                                                  input [1:0] lsh);
+    logic [BLK_LANES-1:0] m;
+    begin
+      m = '0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        for (int p = 0; p < WORDS; p = p + 1)
+          if ((p < 32'(lanes)) && (((32'(b) << lsh) + p) < BLK_LANES))
+            m[b*WORDS + p] = ml[(32'(b) << lsh) + p];
+      mask_slot_fn = m;
+    end
+  endfunction
   logic [BLK_LANES-1:0] blk_act;
-  assign blk_act = blk_act_fn(blk_n, lpb, lpb_sh);
+  // The lanes THE CALLER HAS: the block's own lanes, and of those the
+  // ones the mask keeps. Both readers of blk_act want exactly this -
+  // the block's opening active mask and ACTALL, whose contract is
+  // that it reactivates every lane the caller has and whose sentence
+  // R17 completes ("a masked lane is not one the caller has") - so
+  // the mask is applied HERE, once, and the two cannot drift apart.
+  assign blk_act = blk_act_fn(blk_n, lpb, lpb_sh) &
+                   mask_slot_fn(mask_lane, lpb, lpb_sh);
+
+  // R17's fetch, the block's bits out of the beat that holds them.
+  //
+  // A beat is 256 bits and a mask bit is a lane, so ONE beat holds 256
+  // consecutive lanes' bits at every format: the beat a block's bits
+  // live in is `blk_base >> 8` and the block's first bit sits at
+  // `blk_base[7:0]` inside it. A block is `blk_cap = NBEATS << lpb_sh`
+  // lanes, at most 128 at NBEATS 16, and blk_base is a multiple of it -
+  // so a block's bits NEVER straddle two beats and the fetch is one
+  // single-beat read a block whatever the format. What makes that true
+  // is the NBEATS guard above (1..16, a power of two): NBEATS << 3 is
+  // the widest a block can be and 128 is at most half a beat.
+  //
+  // The slice is picked by an EQUALITY on a small set of elaboration-
+  // time positions, not by shifting the beat: blk_base is a multiple of
+  // `blk_cap = NBEATS << lpb_sh` and therefore of NBEATS whatever the
+  // format, so the only positions a block can start at are the
+  // multiples of NBEATS - sixteen of them in a beat at NBEATS 16, one
+  // comparison each. The first draft computed the block's width inside
+  // the loop and made its BOUND depend on it, which is what yosys means
+  // by "2nd expression of procedural for-loop is not constant"; every
+  // bound here is a parameter expression and every index is a literal.
+  //
+  // The `& (BEAT_BITS-1)` on the bit select is not arithmetic: it makes
+  // every one of the elaborated indices legal, including the ones the
+  // guard beside it has already excluded. Nothing reads a bit at or
+  // past the block's own lanes, because `bn` is blk_n.
+  function automatic [BLK_LANES-1:0] mask_blk_fn(input [BEAT_BITS-1:0] beat,
+                                                 input [LB:0] bn,
+                                                 input [7:0] mbit);
+    logic [BLK_LANES-1:0] v;
+    begin
+      v = '0;
+      for (int j = 0; j < BEAT_BITS / NBEATS; j = j + 1)
+        if (32'(mbit) == j * NBEATS)
+          for (int t = 0; t < BLK_LANES; t = t + 1)
+            if ((j * NBEATS + t) < BEAT_BITS && t < 32'(bn))
+              v[t] = beat[(j * NBEATS + t) & (BEAT_BITS - 1)];
+      mask_blk_fn = v;
+    end
+  endfunction
 
   // Where THIS block's index table starts, for whichever block is
   // being gathered - written once, read twice in S_GTH_GO, so the
@@ -1907,7 +1999,12 @@ module cft_seq #(
       assign cnt_beat[gc*32 +: 32] =
           32'(pick_cnt_fn(row_cnt_fn(dcnt, 6'(32'(cl) >> lpb_sh)),
                           3'(cl[2:0] & 3'(lpb - 4'd1))));
-      assign cnt_beat_ok[gc] = (32'(cl) < 32'(blk_n));
+      // ...strobed where the lane exists AND the caller has it (R17):
+      // a masked lane's count is not written and the caller's array
+      // keeps whatever was in it, which is the same claim the deposit
+      // drain makes about its slots one strobe along.
+      assign cnt_beat_ok[gc] = (32'(cl) < 32'(blk_n)) &&
+                               mask_lane[cl[LB-1:0]];
     end
   endgenerate
   assign dc_row  = row_cnt_fn(dcnt, dc_beat);
@@ -1951,6 +2048,17 @@ module cft_seq #(
                                  wpe_sh);
   // the beat with this element placed at its slot (whole words: every
   // format's element is a whole number of them)
+  // R17: a masked lane's element keeps its POSITION in the stream and
+  // loses its STROBE. The beat still carries it - the deposit window's
+  // layout is n * max_deposits whatever the mask says, and a drain
+  // that packed only the active lanes would move every later lane's
+  // slot - so what "not written" means on the bus is a beat whose
+  // bytes for that element are not strobed, and the caller's buffer
+  // keeps what it held. Taken from mask_lane and not from the active
+  // bit: an active bit is cleared by SETACT too, and a lane that
+  // converged is a lane the caller HAS, whose slots are written.
+  logic dr_keep1;
+  assign dr_keep1 = mask_lane[dr_lane1[LB-1:0]];
   always_comb begin
     pk_data = as_data;
     pk_strb = as_strb;
@@ -1958,7 +2066,7 @@ module cft_seq #(
       if ((32'(w) >> wpe_sh) == (32'(dr_fill1) >> esz_sh)) begin
         pk_data[w*32 +: 32] =
           pk_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1)) * 32 +: 32];
-        pk_strb[w*4 +: 4] = 4'hf;
+        pk_strb[w*4 +: 4] = dr_keep1 ? 4'hf : 4'h0;
       end
   end
   // The open burst's beats left AFTER this cycle's acceptance, if any:
@@ -2019,6 +2127,10 @@ module cft_seq #(
       rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
       idx_a_q <= '0; idx_b_q <= '0; idx_c_q <= '0; idx_si_q <= '0;
       idx_en_q <= '0;
+      // All ones, not zero: mask_lane is ANDed into the lanes the
+      // caller has, so its idle value has to be the one that says
+      // "every lane", and a run without a mask never writes it.
+      mask_q <= '0; mask_en_q <= 1'b0; mask_lane <= {BLK_LANES{1'b1}};
       gt_tbl <= '0; gt_have <= '0; gt_left <= '0; gt_taddr <= '0;
       gt_base <= '0; gt_idx <= '0; gt_scr <= 1'b0; gt_beat <= '0;
       gt_pos <= '0; gt_lane <= '0; gt_slot <= '0;
@@ -2156,6 +2268,13 @@ module cft_seq #(
             idx_a_q <= cfg_idx_a; idx_b_q <= cfg_idx_b;
             idx_c_q <= cfg_idx_c; idx_si_q <= cfg_idx_si;
             idx_en_q <= cfg_indexed;
+            // R17. mask_lane goes back to all ones at every start, so
+            // a masked run cannot leave a previous run's bits behind
+            // for an unmasked one - the register file's valid bits and
+            // the scratch wipe make the same promise about state that
+            // outlives a run, and for the same reason.
+            mask_q <= cfg_mask; mask_en_q <= cfg_mask_en;
+            mask_lane <= {BLK_LANES{1'b1}};
             flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
             refuse_q <= 1'b0;
             rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
@@ -2422,6 +2541,42 @@ module cft_seq #(
             // may exceed n_in, and those slots are read on the way
             // out even if nothing wrote them.
             szlimit <= (SCRAW+1)'(scr_wipe_slots) << NBSH;
+            // R17: the block's mask bits, one single-beat read, before
+            // the wipe rather than under it. Under it would hide the
+            // round trip on a fast memory and hide nothing on the card
+            // (the wipe is a few dozen cycles against a hundred and
+            // fifty), and it would put a second reader on the beat the
+            // scratch preload is about to use. A run without a mask
+            // goes straight on with mask_lane left at all ones.
+            st <= mask_en_q ? S_MSK_GO : S_ZERO;
+          end
+        end
+
+        // ---- the block's lane mask (revision 6, R17) -----------------
+        //
+        // One beat holds 256 consecutive lanes' bits at every format,
+        // and a block is at most 128 lanes and starts at a multiple of
+        // its own size, so this is ONE single-beat read a block and the
+        // block's bits are a fixed slice of what comes back. The
+        // address is the BEAT the block's first bit lives in - blk_base
+        // counts lanes, so blk_base >> 8 counts beats - and nothing
+        // here is scaled by the element size: a mask bit is a lane at
+        // every precision, which is the one thing the four index
+        // tables and this have in common.
+        S_MSK_GO: begin
+          rd_addr <= mask_q + ((blk_base >> 8) << 5);
+          rd_sel  <= 2'd0;          // the mask rides the A master
+          rd_beats_left <= 32'd1;
+          rd_stream_on <= 1'b1;
+          m_rd_rready <= 1'b1;
+          st <= S_MSK_W;
+        end
+
+        S_MSK_W: begin
+          if (m_rd_rvalid && m_rd_rready) begin
+            mask_lane <= mask_blk_fn(m_rd_rdata, blk_n, blk_base[7:0]);
+            m_rd_rready <= 1'b0;
+            rd_stream_on <= 1'b0;
             st <= S_ZERO;
           end
         end
@@ -3190,7 +3345,15 @@ module cft_seq #(
               as_data[w*32 +: 32] <=
                 scr_out_elem[(32'(w) & ((32'd1 << wpe_sh) - 32'd1))
                              * 32 +: 32];
-              as_strb[w*4 +: 4] <= 4'hf;
+              // R17, and this is the drain the comment above is about:
+              // NOT masked by the active bit, because a lane that
+              // converged early still has state worth carrying - and
+              // masked by the CALLER'S bit, because a lane the caller
+              // did not give the run has no state of this run's at
+              // all. The two are different questions and this is the
+              // one place where the difference is visible in bytes.
+              as_strb[w*4 +: 4] <=
+                mask_lane[lane_cursor[LB-1:0]] ? 4'hf : 4'h0;
             end
           as_fill <= as_fill + esz;
           if (32'(lane_cursor) == 32'(blk_n) - 1 &&

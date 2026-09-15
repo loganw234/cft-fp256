@@ -24,6 +24,7 @@
 
 #include "cft.h"
 #include "../src/slice.h"
+#include "../src/mask_bits.h"
 
 static int failures;
 
@@ -595,6 +596,82 @@ int main(void)
             printf("  work splits correctly for 27 sizes x 4 formats x "
                    "64 tile counts, and the padding total never depends "
                    "on the tile count\n");
+    }
+
+    /* --- a lane mask cut for one tile (ABI 0.14, R17) -------------
+     *
+     * host/src/mask_bits.h, here for slice.h's reason and beside it:
+     * the XRT backend repacks a tile's mask from the slice's first
+     * LANE, which is a bit offset and not a byte one - slice.h cuts in
+     * beats and a beat is one lane at fp256, so tile 1 of an fp256 run
+     * can begin at bit 4 of byte 1. Reaching that code needs a card;
+     * reaching this function needs nothing. A run on one tile starts
+     * at lane 0, so that is the only offset today's launches use, and
+     * it is the offsets they do NOT use that this exists for. */
+    {
+        static const size_t lens[] = {1, 2, 7, 8, 9, 15, 16, 17, 31, 32,
+                                      33, 63, 64, 65, 127, 128, 129, 255};
+        uint8_t msrc[64], mdst[64];
+        size_t li, fi, mi;
+        int bad = 0;
+        for (mi = 0; mi < sizeof msrc; mi++)      /* a pattern, not a fill */
+            msrc[mi] = (uint8_t)(mi * 37u + 11u);
+        for (li = 0; li < sizeof lens / sizeof lens[0] && !bad; li++) {
+            size_t lanes = lens[li];
+            for (fi = 0; fi < 64 && !bad; fi++) {
+                size_t first = fi;
+                size_t nb;
+                if ((first + lanes + 7u) / 8u > sizeof msrc)
+                    continue;             /* would read past the pattern */
+                nb = cft_mask_bytes(lanes);
+                memset(mdst, 0x5A, sizeof mdst);
+                cft_mask_repack(mdst, msrc, first, lanes);
+                for (mi = 0; mi < lanes; mi++) {
+                    size_t b = first + mi;
+                    int want = (msrc[b >> 3] >> (b & 7u)) & 1;
+                    int got = (mdst[mi >> 3] >> (mi & 7u)) & 1;
+                    if (want != got) {
+                        CHECK(0, "mask repack lanes %lu first %lu: bit %lu "
+                              "is %d, source bit %lu is %d",
+                              (unsigned long)lanes, (unsigned long)first,
+                              (unsigned long)mi, got, (unsigned long)b, want);
+                        bad = 1;
+                        break;
+                    }
+                }
+                if (!bad && (lanes & 7u) &&
+                    (mdst[nb - 1] >> (lanes & 7u)) != 0) {
+                    CHECK(0, "mask repack lanes %lu first %lu: the last "
+                          "byte carries a lane this tile does not have",
+                          (unsigned long)lanes, (unsigned long)first);
+                    bad = 1;
+                }
+                if (!bad && mdst[nb] != 0x5Au) {
+                    CHECK(0, "mask repack lanes %lu first %lu: it wrote "
+                          "past (lanes + 7) / 8 bytes",
+                          (unsigned long)lanes, (unsigned long)first);
+                    bad = 1;
+                }
+            }
+        }
+        /* first = 0 is a copy, which is the only case a run on one
+         * tile produces - stated as its own check so a change that
+         * broke exactly it could not hide in the sweep. */
+        memset(mdst, 0x5A, sizeof mdst);
+        cft_mask_repack(mdst, msrc, 0, 64);
+        CHECK(memcmp(mdst, msrc, 8) == 0,
+              "a mask cut at lane 0 is a copy of the caller's bytes");
+        /* ...and no mask at all is every lane, never no lanes. */
+        memset(mdst, 0x00, sizeof mdst);
+        cft_mask_repack(mdst, NULL, 0, 20);
+        CHECK(mdst[0] == 0xFFu && mdst[1] == 0xFFu && mdst[2] == 0x0Fu &&
+              mdst[3] == 0x00u,
+              "no mask is every lane, with the last byte's spare bits "
+              "clear: %02x %02x %02x", mdst[0], mdst[1], mdst[2]);
+        if (!bad)
+            printf("  a lane mask repacks correctly for 18 lane counts x "
+                   "64 bit offsets, writing no byte past the tile's own "
+                   "lanes\n");
     }
 
     /* --- divide and square root ----------------------------------
@@ -3395,13 +3472,16 @@ int main(void)
               memcmp(dig, dig2, 32) != 0,
               "image and bank do not digest to the image alone");
 
-        /* -- ABI 0.14's fields on a program run (docs/ROUND2.md, P0) --
+        /* -- ABI 0.14's fields on a program run (docs/ROUND2.md) --
          *
-         * Declared and refused: the shape rules are argument errors
-         * with a sentence naming the field, and a well-formed table or
-         * mask is CFT_ERR_UNSUPPORTED naming the parcel that builds it.
-         * The dense run beside them still runs, which is what makes
-         * the refusals additive rather than a regression. */
+         * The SHAPE rules are the lead's and are argument errors with
+         * a sentence naming the field; they were true when the fields
+         * were only declared and are true now that P1 and P3 have
+         * built them. What has changed is the other half: a
+         * well-formed table or mask no longer answers
+         * CFT_ERR_UNSUPPORTED naming its parcel, it RUNS. The dense
+         * run beside them still runs, which is what makes the two
+         * features additive rather than a regression. */
         {
             cft_run_args R;
             uint32_t ix[1], fl2 = 0;
@@ -3476,13 +3556,25 @@ int main(void)
                   strstr(cft_last_error(), "lane_mask_bytes"),
                   "a mask of the wrong length is a shape error: %s (%s)",
                   cft_strerror(st), cft_last_error());
+            /* P3 has landed too, so a well-formed mask RUNS - and the
+             * bytes of a lane it clears are the caller's, which is the
+             * one thing about R17 that can be seen from here: the
+             * deposit slot keeps the pattern written into it rather
+             * than the +0 an untouched slot of a lane the run OWNS
+             * would read. */
             R.lane_mask_bytes = 1;
             st = cft_program_run_ex(prog, &R);
-            CHECK(st == CFT_ERR_UNSUPPORTED &&
-                  strstr(cft_last_error(), "ROUND2") &&
-                  strstr(cft_last_error(), "P3"),
-                  "a well-formed lane mask is refused by name: %s (%s)",
+            CHECK(st == CFT_OK, "an all-ones lane mask runs: %s (%s)",
                   cft_strerror(st), cft_last_error());
+            memcpy(dep2, "\xAA\xAA\xAA\xAA", 4);
+            mask1[0] = 0x00u;              /* the run's one lane, masked */
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_OK, "a mask with every lane clear runs: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            CHECK(memcmp(dep2, "\xAA\xAA\xAA\xAA", 4) == 0 && fl2 == 0,
+                  "a masked lane's deposit slot was written, or its run "
+                  "raised a flag");
+            mask1[0] = 0x01u;
             R.lane_mask = NULL; R.lane_mask_bytes = 0;
             st = cft_program_run_ex(prog, &R);
             CHECK(st == CFT_OK, "and the dense run still runs after them: %s",

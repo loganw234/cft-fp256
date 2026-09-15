@@ -109,6 +109,7 @@
 
 #include "backend.h"
 #include "slice.h"
+#include "mask_bits.h"
 
 /* mirrors cft_status; see backend.h */
 enum {
@@ -477,6 +478,30 @@ void ensure_one(Dev &D, Tile &t, xrt::bo &bo, size_t &cap, int arg,
     bo = xrt::bo();
     bo = xrt::bo(D.dev, bytes, xrt::bo::flags::normal, t.k.group_id(arg));
     cap = bytes;
+}
+
+/* One tile's LANE MASK (R17), repacked into its buffer.
+ *
+ * Not a copy and not a window: bit 0 of what the tile reads is the
+ * TILE's lane 0, so the caller's bits are shifted down from `first`,
+ * which is a bit offset and not a byte one (slice.h cuts in beats and
+ * a beat is one lane at fp256). The arithmetic is cft_mask_repack in
+ * host/src/mask_bits.h, a pure function api_test.c exercises at every
+ * offset; what is here is the buffer and the sync.
+ *
+ * A null mask writes all ones - every lane - so that an 0xA00 tile's
+ * argument 16 is a real buffer on every launch, the way the four table
+ * arguments are, and so that a MODE[23] the host did not set could
+ * only ever read as "every lane" if something did. */
+void stage_mask(xrt::bo &bo, const uint8_t *src, size_t first,
+                size_t lanes, size_t padded_bytes)
+{
+    auto *p = bo.map<uint8_t *>();
+    const size_t real = cft_mask_bytes(lanes);
+    cft_mask_repack(p, src, first, lanes);
+    if (padded_bytes > real)
+        std::memset(p + real, src ? 0 : 0xFF, padded_bytes - real);
+    bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded_bytes, 0);
 }
 
 /* Copy one operand slice in, zero-filling the beat padding. A null
@@ -1522,6 +1547,23 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         return ST_UNSUPPORTED;
     }
 
+    /* And a fifth time, for the lane mask: MASK_PTR and argument 16
+     * arrived in the same contract the tables did, so a tile below
+     * 0xA00 has nowhere to put one. device.c has already refused a
+     * mask against a device whose CAPS2[10] is clear, which is the
+     * refusal a caller should see; this is the second line of the same
+     * defence, for a device whose CAPS2 and whose VERSION disagree. */
+    if (io && io->lane_mask && D.version < IDX_VERSION) {
+        char buf[256];
+        std::snprintf(buf, sizeof buf,
+                      "this bitstream's contract is 0x%08x, which has no "
+                      "MASK_PTR - the per-run lane mask arrived at 0x%08x. "
+                      "CAPS2 bit 10 says in advance which it is.",
+                      D.version, IDX_VERSION);
+        set_err(buf);
+        return ST_UNSUPPORTED;
+    }
+
     if (n == 0) {
         if (flags) *flags = 0;
         if (bus)   *bus   = 0;
@@ -1592,6 +1634,30 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     for (int r = 0; r < 4; r++)
         if (itab[r] && itab_bytes[r])
             idx_mode |= 1u << (19 + r);
+    /* ABI 0.14's lane mask (R17). ONE BIT A LANE at every format, so
+     * the tile's buffer is (lanes + 7) / 8 bytes rounded up to a beat,
+     * and one beat when there is no mask - an 0xA00 tile's argument 16
+     * is always a real buffer, the way 12..15 are. MODE[23] is set
+     * from the same pointer the bytes come from, so a mask cannot be
+     * staged without its bit or a bit set without its mask.
+     *
+     * `mask_first` is the first LANE of this launch's slice, which is
+     * what the repack starts from. A program run is tile 0 and the
+     * whole run today (`Tile &tile = D.tiles[0]` below, and no
+     * cft_plan_slices on this path), so it is zero - but it is named
+     * and passed rather than assumed, because the day a program run is
+     * split the mask is the one operand whose slice is not a byte
+     * offset, and a split that got everything else right would give
+     * every tile but the first the wrong lanes' bits. */
+    const uint8_t *const lane_mask =
+        io ? static_cast<const uint8_t *>(
+                 static_cast<const void *>(io->lane_mask)) : nullptr;
+    const size_t mask_first = 0;
+    const size_t mask_lanes = n;
+    const size_t mask_real = lane_mask ? cft_mask_bytes(mask_lanes) : 0;
+    const size_t mask_pad = mask_real ? beat_round(mask_real) : 32u;
+    if (lane_mask)
+        idx_mode |= 1u << 23;
 
     Tile &tile = D.tiles[0];
 
@@ -1703,6 +1769,9 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                 if (!ob[CFT_ROLE_IA + r])
                     ensure_one(D, tile, *ib[r], *ic[r], iarg[r],
                                itab_pad[r]);
+            /* The lane mask's buffer, sized per run like the tables
+             * and unlike them never bound: see the staging below. */
+            ensure_one(D, tile, tile.mk, tile.mk_cap, ARG_MASK, mask_pad);
         }
         if (!ob[0])
             stage(tile.a, static_cast<const uint8_t *>(a), sreal[0],
@@ -1772,6 +1841,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                     stage(*ib[r],
                           reinterpret_cast<const uint8_t *>(itab[r]),
                           itab_bytes[r], itab_pad[r]);
+            /* The mask, unconditionally and never from a bound buffer:
+             * this tile's bit 0 is this tile's lane 0, and the caller's
+             * buffer says nothing about which lane that is. One bit a
+             * lane, so the copy is n/8 bytes beside the n * esz of a
+             * single operand - a thirty-second of one stream at fp32
+             * and a two-hundred-and-fifty-sixth at fp256. */
+            stage_mask(tile.mk, lane_mask, mask_first, mask_lanes,
+                       mask_pad);
         }
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging a program");
@@ -1811,16 +1888,13 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * uses it - the bank on a 0x700, the two scratch blocks on an
          * 0x800; the tile reads or writes each only when the image's
          * flags say BANK_EXT or SCRATCH_IO. */
-        if (D.version >= IDX_VERSION) {
-            /* The four tables have their real buffers by now - bound,
-             * or created and staged above - and the MASK is still one
-             * beat until P3 binds the caller's: the kernel has five
-             * arguments and a launch on this map passes all seventeen,
-             * because XRT's start sends the whole argument register
-             * image and a declared argument the launch does not set
-             * goes out as zero (2026-09-14). */
-            ensure_one(D, tile, tile.mk, tile.mk_cap, ARG_MASK, 32);
-        }
+        /* The four tables have their real buffers by now - bound, or
+         * created and staged above - and so has the mask, which is
+         * created and staged and never bound. The kernel has five new
+         * arguments and a launch on this map passes all seventeen,
+         * because XRT's start sends the whole argument register image
+         * and a declared argument the launch does not set goes out as
+         * zero (2026-09-14). */
         xrt::run r = (D.version >= IDX_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             *ob[0], *ob[1], *ob[2], *ob[3],

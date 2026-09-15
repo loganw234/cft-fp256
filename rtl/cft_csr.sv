@@ -35,14 +35,13 @@
 //                 a build without it REFUSES the bit rather than
 //                 ignoring it, because ignoring it would read n
 //                 elements from a one-element buffer.
-//                 [23:19] RESERVED FOR ABI 0.14 (docs/ROUND2.md): [19]
-//                 a, [20] b, [21] c and [22] scratch_in fetched through
-//                 the index table at 0x88..0xA0, honoured only under
-//                 CAPS2[9]; [23] the lane mask at 0xA8, only under
-//                 CAPS2[10]. Until those bits are set (parcels P1 and
-//                 P3) the five are refused exactly as the rest of
-//                 [31:19] are:
-//                 [31:19] RESERVED, MUST BE ZERO. A non-zero bit here
+//                 [23:19] ABI 0.14 (docs/ROUND2.md): [19] a, [20] b,
+//                 [21] c and [22] scratch_in fetched through the index
+//                 table at 0x88..0xA0, honoured only under CAPS2[9];
+//                 [23] the lane mask at 0xA8, only under CAPS2[10]. A
+//                 build whose feature parameter is clear REFUSES its
+//                 bit exactly as the reserved range is refused:
+//                 [31:24] RESERVED, MUST BE ZERO. A non-zero bit here
 //                 is refused at start with STATUS[3], nothing begins
 //                 and no memory is touched. This guard did not exist
 //                 before the scalar bits, which is exactly why the three bits
@@ -358,6 +357,10 @@ module cft_csr (
      * 0x88..0xA0. Decoded here beside cfg_scalar and for the same
      * reason: the sequencer reads one name rather than a bit index. */
     output logic [3:0]  cfg_indexed,
+    /* MODE[23] (ABI 0.14, R17): the run carries a lane mask at
+     * MASK_PTR. Decoded here beside cfg_indexed and for the same
+     * reason - the sequencer reads one name rather than a bit index. */
+    output logic        cfg_mask_en,
     output logic        cfg_mode_bad,  // a MODE bit this build refuses
     /* Constants from cft_krnl's localparams, exactly as prec_caps and
      * op_caps are: the tile decides what it carries, the CSR decides
@@ -369,6 +372,12 @@ module cft_csr (
      * table would read the dense stream and answer confidently from
      * the wrong elements. */
     input  logic        feat_indexed,
+    /* ...and the same for the lane mask (CAPS2[10]). A build whose
+     * sequencer does not read MASK_PTR refuses MODE[23] rather than
+     * ignoring it: an ignored mask would run every lane and write
+     * over the caller's bytes in the lanes it was told to leave
+     * alone, confidently and with clean flags. */
+    input  logic        feat_lane_mask,
     output logic [63:0] cfg_cnt,
     // SEG / NRES (0x80 / 0x84): a reduction's segment length and its
     // result count; zero is the whole array.
@@ -478,6 +487,7 @@ module cft_csr (
 
   assign cfg_scalar   = mode_q[18:16];
   assign cfg_indexed  = mode_q[22:19];
+  assign cfg_mask_en  = mode_q[23];
 
   /* A MODE bit this build will not honour, which must be REFUSED and
    * never ignored: an ignored stride-0 flag reads n elements from a
@@ -490,11 +500,12 @@ module cft_csr (
    * reason op_caps is written as a bit per group in cft_krnl.sv: a mask
    * is one typo away from silently permitting a bit.
    *
-   * MODE[23], the lane mask, is still reserved-must-be-zero on every
-   * build: it stays inside the first term until the parcel that reads
-   * it (P3) gives it a feature bit of its own. */
+   * MODE[23], the lane mask, has its own feature bit as of P3 and is
+   * refused exactly where the tile cannot honour it; [31:24] is what
+   * is left of the reserved range. */
   assign cfg_mode_bad =
-      (mode_q[31:23] != 9'b0)                     ||
+      (mode_q[31:24] != 8'b0)                     ||
+      (mode_q[23] && !feat_lane_mask)             ||
       (|mode_q[22:19] && !feat_indexed)           ||
       (|mode_q[18:16] && !feat_scalar);
   assign cfg_cnt  = cnt_q;

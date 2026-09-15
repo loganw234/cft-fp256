@@ -3016,6 +3016,208 @@ out:
     free(d_id); free(d_pm); free(cnt); free(tab); free(ident);
 }
 
+/* ABI 0.14's lane mask (docs/SEQUENCER.md R17), device against
+ * software. Three claims, and they fail differently:
+ *
+ *   1. the two backends agree, lane for lane, under a mask with holes;
+ *   2. an ALL-ONES mask is bit-identical to no mask, and a mask with
+ *      holes is not - the second half being what makes the first a
+ *      gate rather than a tautology;
+ *   3. a masked lane's deposit slots and count are NOT WRITTEN - the
+ *      buffers keep the pattern put there before the run, which is the
+ *      one claim a comparison against a zeroed buffer cannot make,
+ *      because "+0 written" and "not written" are the same bytes
+ *      there.
+ *
+ * Every output buffer is filled with a pattern before every run, the
+ * discipline the other legs in this file use for the same reason. */
+static void check_masked(cft_device *sw, cft_device *hw, cft_format fmt,
+                         size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t img[256];
+    uint64_t ins[3];
+    size_t bytes, i;
+    cft_caps hc;
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *d_sw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_hw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_pl = (uint8_t *)malloc(n * esz);
+    uint8_t *d_on = (uint8_t *)malloc(n * esz);
+    uint32_t *c_sw = (uint32_t *)malloc(n * 4);
+    uint32_t *c_hw = (uint32_t *)malloc(n * 4);
+    uint8_t *mask = (uint8_t *)malloc((n + 7) / 8);
+    uint8_t *ones = (uint8_t *)malloc((n + 7) / 8);
+    cft_program *ps = NULL, *ph = NULL;
+    cft_run_args A;
+    uint32_t fl = 0, bus = 0;
+    cft_status st;
+    size_t masked_lanes = 0;
+
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    if (cft_get_caps(hw, &hc) != CFT_OK)
+        memset(&hc, 0, sizeof hc);
+    if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK)) {
+        printf("  seq lane mask: this device does not publish "
+               "CFT_SEQ_FEAT_LANE_MASK, NOT COMPARED\n");
+        goto out;
+    }
+    if (!a || !b || !d_sw || !d_hw || !d_pl || !d_on || !c_sw || !c_hw ||
+        !mask || !ones) {
+        printf("  FAIL seq lane mask: out of memory\n");
+        failures++;
+        goto out;
+    }
+
+    rs = 0x17A7 + (uint32_t)fmt;
+    fill(a, n, esz);
+    fill(b, n, esz);
+    /* Every third lane masked, derived here and read back the same
+     * way below - never a typed list of lanes. */
+    memset(mask, 0, (n + 7) / 8);
+    memset(ones, 0xFF, (n + 7) / 8);
+    for (i = 0; i < n; i++) {
+        if (i % 3 == 0)
+            masked_lanes++;
+        else
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    }
+
+    /* r3 = r0 + r1. ADD reads ra and rc, so both input streams
+     * are read and a lane that ran when it should not have shows
+     * in the deposits; rb is r3, a register at or above three, so
+     * no stream is loaded for a field the opcode does not read
+     * (P1, 2026-09-15). */
+    ins[0] = seq_alu(CFT_ADD, 3, 0, 3, 1, CFT_RNE, 0, 0);
+    ins[1] = seq_ctrl(3, 3, 0);                          /* DEPOSIT r3 */
+    ins[2] = seq_ctrl(0, 0, 0);                          /* HALT */
+    bytes = seq_image(img, fmt, ins, 3, NULL, 0, 1);
+
+    st = cft_program_load(sw, img, bytes, &ps);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask: the software backend refused the "
+               "image (%s)\n", cft_strerror(st));
+        failures++;
+        goto out;
+    }
+    st = cft_program_load(hw, img, bytes, &ph);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask: the device refused the image "
+               "(%s)\n", cft_strerror(st));
+        failures++;
+        goto out;
+    }
+
+#define MASK_RUN(prog_, dst_, cnt_, msk_)                              \
+    do {                                                               \
+        memset(&A, 0, sizeof A);                                       \
+        A.struct_size = sizeof A;                                      \
+        A.a = a; A.b = b; A.c = b;                                     \
+        A.n = n;                                                       \
+        A.deposits = (dst_);                                           \
+        A.counts = (cnt_);                                             \
+        A.flags_out = &fl;                                             \
+        A.bus_out = &bus;                                              \
+        A.lane_mask = (msk_);                                          \
+        A.lane_mask_bytes = (msk_) ? (n + 7) / 8 : 0;                  \
+        memset((dst_), 0x5a, n * esz);                                 \
+        memset((cnt_), 0x5a, n * 4);                                   \
+        st = cft_program_run_ex((prog_), &A);                          \
+    } while (0)
+
+    /* 1. the masked run, software against the device. */
+    MASK_RUN(ps, d_sw, c_sw, mask);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask: the software backend refused the "
+               "run (%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    MASK_RUN(ph, d_hw, c_hw, mask);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask: the device refused the run "
+               "(%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    checks++;
+    if (memcmp(d_sw, d_hw, n * esz) != 0 ||
+        memcmp(c_sw, c_hw, n * 4) != 0) {
+        printf("  FAIL seq lane mask: the device and the software "
+               "backend differ under a mask\n");
+        failures++;
+    }
+
+    /* 2. a masked lane's bytes are the caller's, on the DEVICE. */
+    checks++;
+    for (i = 0; i < n; i++) {
+        int kept = (mask[i >> 3] >> (i & 7u)) & 1;
+        const uint8_t *slot = d_hw + i * esz;
+        size_t k;
+        int patterned = 1;
+        for (k = 0; k < esz; k++)
+            if (slot[k] != 0x5a)
+                patterned = 0;
+        if (!kept && (!patterned || c_hw[i] != 0x5a5a5a5au)) {
+            printf("  FAIL seq lane mask: lane %lu is masked and its "
+                   "deposit slot or count was written\n",
+                   (unsigned long)i);
+            failures++;
+            break;
+        }
+        if (kept && patterned) {
+            printf("  FAIL seq lane mask: lane %lu is NOT masked and "
+                   "its deposit slot still holds the pattern\n",
+                   (unsigned long)i);
+            failures++;
+            break;
+        }
+    }
+
+    /* 3. the control: all ones is the unmasked run, and the mask with
+     *    holes above is not. */
+    MASK_RUN(ph, d_pl, c_hw, NULL);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask: the dense run was refused (%s)\n",
+               cft_strerror(st));
+        failures++;
+        goto out;
+    }
+    MASK_RUN(ph, d_on, c_hw, ones);
+    checks++;
+    if (st != CFT_OK || memcmp(d_pl, d_on, n * esz) != 0) {
+        printf("  FAIL seq lane mask: an all-ones mask is not the "
+               "unmasked run on this device\n");
+        failures++;
+    }
+    checks++;
+    if (masked_lanes && memcmp(d_pl, d_hw, n * esz) == 0) {
+        printf("  FAIL seq lane mask: a mask with %lu holes gave the "
+               "unmasked run's bits, so the control above could not "
+               "have failed - the mask may be being ignored\n",
+               (unsigned long)masked_lanes);
+        failures++;
+    }
+#undef MASK_RUN
+
+    printf("  seq lane mask: %lu lanes, %lu of them masked, device == "
+           "software, masked lanes untouched, all-ones == dense and "
+           "holed != dense\n",
+           (unsigned long)n, (unsigned long)masked_lanes);
+out:
+    cft_program_free(ps);
+    cft_program_free(ph);
+    free(a); free(b); free(d_sw); free(d_hw); free(d_pl); free(d_on);
+    free(c_sw); free(c_hw); free(mask); free(ones);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -3169,6 +3371,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
      *     same way and skipped by name where the device does not
      *     publish it. */
     check_indexed(sw, hw, fmt, n);
+    check_masked(sw, hw, fmt, n);
 
     /* 8. the argument refusals, which are the library's own and reach
      *    no device at all - so they are scored once, on the software

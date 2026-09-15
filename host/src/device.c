@@ -569,6 +569,20 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                 "the dense block");
             return CFT_ERR_UNSUPPORTED;
         }
+        /* R17 on a tile that cannot mask, for the same reason and with
+         * the same shape: an ignored mask runs every lane and writes
+         * over the caller's bytes in the lanes it was told to leave
+         * alone - confidently, with clean flags and the right answer
+         * in the lanes anyone would check. */
+        if (io && io->lane_mask &&
+            !(dev->seq.features & CFT_SEQ_FEAT_LANE_MASK)) {
+            cft_set_error(
+                "a lane mask needs CFT_SEQ_FEAT_LANE_MASK, which this "
+                "device does not publish (CAPS2[10]); ask cft_get_caps "
+                "before passing one, or run the masked lanes and ignore "
+                "their outputs");
+            return CFT_ERR_UNSUPPORTED;
+        }
         /* R16: a stream with a table is the SOURCE the table indexes,
          * and its length is `idx_*_src` rather than n - shorter than
          * the run in the shape this feature exists for, and allowed to
@@ -634,6 +648,22 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                 buf_sync_in(dev, io->idx_scratch_in, ib);
                 bind_role(dev, &bd, CFT_ROLE_ISI, io->idx_scratch_in, ib);
             }
+            /* ...and the lane mask (R17), which is brought home like
+             * the tables and then NOT BOUND. A tile's mask is a
+             * function of the tile's SLICE and not a window of the
+             * caller's buffer: its bit 0 has to be the tile's lane 0,
+             * and a slice does not start on a byte boundary at every
+             * format (host/src/slice.h cuts in beats and a beat is one
+             * lane at fp256). So the backend repacks it into the
+             * tile's own buffer on every launch, the way it pads an
+             * operand up to a beat, and there is no configuration in
+             * which pointing the tile at the caller's bytes is right
+             * for more than one tile. The sync still has to happen -
+             * the repack READS the host mirror, so a resident buffer's
+             * device copy is brought home first, exactly as it is for
+             * a table. */
+            if (io->lane_mask && io->lane_mask_bytes)
+                buf_sync_in(dev, io->lane_mask, io->lane_mask_bytes);
         }
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
