@@ -686,9 +686,12 @@ nothing in the frames (`remote.h` and `cft-serve.c` are unchanged: no
 new opcode, and if you find you need one, that is a report, not an
 edit). `host/tests/device_test.c` - one leg beside `compare`.
 `host/tests/remote_test.c` - the indexed case in `identity_tests`.
-`bindings/wasm/wasm_api.c` - a `cftw_run_ex` export as a pure
-pass-through of `cft_run_ex` (the scalar mask and the three tables),
-safe on its own because nothing `cwrap`s it until the lead's rebuild.
+`bindings/wasm/wasm_api.c` - nothing, in the end: P2 measured
+(2026-09-15 13:05) that the shipped module is already at 0.14 and
+that emscripten's `cwrap` is lazy, so the `cftw_run_ex` export and its
+JavaScript entry point (`lib.mjs`'s eager table, `core.mjs`,
+`test.mjs`) land together in the lead's rebuild at the docs sweep,
+never one without the other.
 **Corrected 2026-09-15 11:58 (P2's finding):** this brief said
 `cftw_run_ex` and an elementwise `runEx` "grow the six arguments"; they
 do not exist - ABI 0.12's `cft_run_ex` was never bound in wasm or node,
