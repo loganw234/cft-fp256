@@ -1465,6 +1465,37 @@ static cft_status seq_check_scratch(const cft_program *p,
     }
     for (which = 0; which < 2; which++) {
         size_t want = seq_scratch_bytes(p, A->n, which);
+        /* R16 (ABI 0.14): with a table, `scratch_in` is the POOL the
+         * table indexes and not the block - the block's shape is the
+         * table's, n * n_scratch_in entries - so the buffer's length is
+         * the pool's, which `idx_scratch_src` states as a count. The
+         * two statements of one number must agree, for the reason the
+         * dense check exists at all: a buffer whose length nobody
+         * agreed on is a run reading somewhere nobody agreed on. Only
+         * the IN side; the block on the way out is dense either way.
+         *
+         * `want != (size_t)-1` guards the substitution rather than the
+         * comparison: the table is n * n_scratch_in entries whatever
+         * the pool's length, so a block that is not representable here
+         * is still not representable, and the refusal below must not
+         * be lost by replacing the number that says so. */
+        if (which == 0 && A->idx_scratch_in && want != (size_t)-1 &&
+            (p->flags & CFT_PROG_FLAG_SCRATCH_IO)) {
+            size_t esz = (size_t)p->f->width / 8;
+            want = (A->idx_scratch_src > ((size_t)-1) / esz)
+                 ? (size_t)-1 : A->idx_scratch_src * esz;
+            if (want != (size_t)-1 && side[0].bytes != want) {
+                cft_set_error("%s was given a %lu-byte scratch-in pool and "
+                              "idx_scratch_src names %lu elements, which is "
+                              "%lu bytes - with idx_scratch_in the block is "
+                              "gathered THROUGH the table and scratch_in is "
+                              "the pool it reads from",
+                              who, (unsigned long)side[0].bytes,
+                              (unsigned long)A->idx_scratch_src,
+                              (unsigned long)want);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
         if (want == (size_t)-1) {
             cft_set_error("%s: this program's scratch-%s block is %lu slots "
                           "a lane over %lu lanes, which is more than this "
@@ -1507,6 +1538,32 @@ static cft_status seq_check_scratch(const cft_program *p,
  * absent. Everything from here is what cft_program_run always did,
  * with the constants and the scratch coming from wherever they come
  * from. */
+/* One input element, dense or gathered - the whole of R16 on this
+ * executor, in the one place both the streams and the scratch block
+ * reach it.
+ *
+ * `idx` NULL is the dense case and the call is what it always was.
+ * With a table, element e is `src[idx[e]]` and CFT_IDX_NONE is +0,
+ * which is `cft_bn_zero` and not a load of anything: there is no
+ * element to read and no address to compute, so a sentinel entry
+ * issues no read here exactly as it issues none on the tile. Every
+ * index has already been held to the source's declared length by
+ * seq_check_round2, before the run started - so this function cannot
+ * be the place a bad index is discovered, and does not look. */
+static void seq_load_in(cft_bn *dst, const uint8_t *src,
+                        const uint32_t *idx, size_t e, size_t esz)
+{
+    if (!idx) {
+        cft_bn_load(dst, src + e * esz, (int)esz);
+        return;
+    }
+    if (idx[e] == CFT_IDX_NONE) {
+        cft_bn_zero(dst);
+        return;
+    }
+    cft_bn_load(dst, src + (size_t)idx[e] * esz, (int)esz);
+}
+
 static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
 {
     const void *bank   = A->bank;
@@ -1520,6 +1577,12 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
     const uint8_t *pb = (const uint8_t *)A->b;
     const uint8_t *pc_ = (const uint8_t *)A->c;
     const uint8_t *psi = (const uint8_t *)A->scratch_in;
+    /* The four tables, or NULL each for a dense block (ABI 0.14). With
+     * a table, `pa` and `psi` are the SOURCE and the POOL rather than
+     * the run's elements, and the only thing that knows the difference
+     * is seq_load_in below. */
+    const uint32_t *ia = A->idx_a, *ib = A->idx_b, *ic = A->idx_c;
+    const uint32_t *isi = A->idx_scratch_in;
     uint8_t *pso = (uint8_t *)A->scratch_out;
     uint8_t *pd = (uint8_t *)deposits;
     size_t esz, off;
@@ -1579,6 +1642,23 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
             io.scratch_out_bytes = A->scratch_out_bytes;
             io.n_scratch_in      = prog->n_scratch_in;
             io.n_scratch_out     = prog->n_scratch_out;
+            /* ABI 0.14's tables, handed across unchanged: the backend
+             * binds or stages them and the TILE does the gather, which
+             * is the whole point of the feature - a host-side gather is
+             * the round trip per element the ask exists to remove.
+             * Every field is set, including the mask's, because `io` is
+             * an automatic and a field nobody assigns is whatever was
+             * on the stack. */
+            io.idx_a             = A->idx_a;
+            io.idx_b             = A->idx_b;
+            io.idx_c             = A->idx_c;
+            io.idx_scratch_in    = A->idx_scratch_in;
+            io.idx_a_src         = A->idx_a_src;
+            io.idx_b_src         = A->idx_b_src;
+            io.idx_c_src         = A->idx_c_src;
+            io.idx_scratch_src   = A->idx_scratch_src;
+            io.lane_mask         = A->lane_mask;
+            io.lane_mask_bytes   = A->lane_mask_bytes;
             /* Which device backend is device.c's business: the
              * dispatcher in backend.h hands the run to the XRT one or
              * the remote one (docs/REMOTE.md) and this file names
@@ -1648,11 +1728,17 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
             int r;
             for (r = 0; r < SEQ_NREG; r++)
                 cft_bn_zero(&B->regs[i][r]);
-            cft_bn_load(&B->regs[i][0], pa + (off + i) * esz, (int)esz);
+            /* The GLOBAL lane index, off + i, indexes the table as it
+             * indexes the dense stream: the table is the caller's, over
+             * the whole run, and this loop is a block of it. Slicing it
+             * per block is the trap R16 names - a table sliced by beat
+             * rather than by lane reads a plausible neighbour's element
+             * and no assertion catches it. */
+            seq_load_in(&B->regs[i][0], pa, ia, off + i, esz);
             if (pb)
-                cft_bn_load(&B->regs[i][1], pb + (off + i) * esz, (int)esz);
+                seq_load_in(&B->regs[i][1], pb, ib, off + i, esz);
             if (pc_)
-                cft_bn_load(&B->regs[i][2], pc_ + (off + i) * esz, (int)esz);
+                seq_load_in(&B->regs[i][2], pc_, ic, off + i, esz);
             B->active[i] = 1;
             B->counts[i] = 0;
             /* "Slots start at +0 for every lane at the start of a run,
@@ -1668,10 +1754,9 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
                 memset(&B->scratch[i * SEQ_SCRATCH_D], 0,
                        (size_t)SEQ_SCRATCH_D * sizeof(cft_bn));
                 for (s = 0; psi && s < prog->n_scratch_in; s++)
-                    cft_bn_load(&B->scratch[i * SEQ_SCRATCH_D + s],
-                                psi + ((off + i) * prog->n_scratch_in + s)
-                                      * esz,
-                                (int)esz);
+                    seq_load_in(&B->scratch[i * SEQ_SCRATCH_D + s], psi,
+                                isi,
+                                (off + i) * prog->n_scratch_in + s, esz);
             }
         }
 
@@ -1802,21 +1887,56 @@ static cft_status seq_check_round2(const cft_program *p,
                       (unsigned long)((A->n + 7u) / 8u));
         return CFT_ERR_INVALID_ARGUMENT;
     }
+    /* The bound, checked BEFORE the run on every backend (R16): an
+     * index at or past the source's declared length is refused by name
+     * and by value, because a device must never read past a buffer for
+     * a caller - and a check made here is one the tile, the software
+     * executor and the model all inherit without any of them having to
+     * agree on what a bad index would have computed.
+     *
+     * Every entry is examined, including a padding lane's: the run's
+     * last block is padded up to the tile's lane block and the check
+     * has to be the same on both executors, so "the lanes the caller
+     * has" is n and nothing else. CFT_IDX_NONE is not an index and is
+     * never out of range. */
     for (r = 0; r < 3; r++) {
-        if (idx[r]) {
-            cft_set_error("%s: an indexed stream (idx_%c) is declared at "
-                          "ABI 0.14 and not yet built on any backend "
-                          "(docs/ROUND2.md, parcel P1); the run is refused "
-                          "rather than made over the dense stream",
-                          who, 'a' + r);
-            return CFT_ERR_UNSUPPORTED;
+        size_t i;
+        if (!idx[r])
+            continue;
+        for (i = 0; i < A->n; i++) {
+            if (idx[r][i] == CFT_IDX_NONE)
+                continue;
+            if ((size_t)idx[r][i] >= src[r]) {
+                cft_set_error("%s: idx_%c[%lu] = %lu is at or past the %lu "
+                              "elements idx_%c_src says stream %c holds",
+                              who, 'a' + r, (unsigned long)i,
+                              (unsigned long)idx[r][i],
+                              (unsigned long)src[r], 'a' + r, 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
         }
     }
     if (A->idx_scratch_in) {
-        cft_set_error("%s: an indexed scratch block (idx_scratch_in) is "
-                      "declared at ABI 0.14 and not yet built on any backend "
-                      "(docs/ROUND2.md, parcel P1)", who);
-        return CFT_ERR_UNSUPPORTED;
+        size_t e, entries;
+        /* n * n_scratch_in entries, lane-major as the block is. The
+         * product cannot overflow: seq_check_scratch has already held
+         * the block to a byte count this process can address. */
+        entries = A->n * (size_t)p->n_scratch_in;
+        for (e = 0; e < entries; e++) {
+            if (A->idx_scratch_in[e] == CFT_IDX_NONE)
+                continue;
+            if ((size_t)A->idx_scratch_in[e] >= A->idx_scratch_src) {
+                cft_set_error("%s: idx_scratch_in[%lu] = %lu (lane %lu slot "
+                              "%lu) is at or past the %lu elements "
+                              "idx_scratch_src says the pool holds",
+                              who, (unsigned long)e,
+                              (unsigned long)A->idx_scratch_in[e],
+                              (unsigned long)(e / p->n_scratch_in),
+                              (unsigned long)(e % p->n_scratch_in),
+                              (unsigned long)A->idx_scratch_src);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
     }
     if (A->lane_mask) {
         cft_set_error("%s: the lane mask is declared at ABI 0.14 and not "

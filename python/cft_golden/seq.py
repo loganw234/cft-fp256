@@ -940,6 +940,13 @@ class Program:
                    n_scratch_out=(word7 >> 16) & 0xFFFF)
 
 
+# The index that reads as +0, `CFT_IDX_NONE` in host/include/cft.h.
+# Written as the literal the header writes, not as (1 << 32) - 1: the
+# two are the same number and only one of them is greppable from the
+# other side of the ABI.
+IDX_NONE = 0xFFFFFFFF
+
+
 # ---- execution -------------------------------------------------------
 
 class Result:
@@ -974,6 +981,39 @@ class Result:
         even where it moved no deposit, so P3's fuzz has to see it."""
         return (self.deposits, self.flags, self.status, self.regs,
                 self.active, self.counts, self.scratch, self.scratch_out)
+
+
+def gather(src, table, fmt, name="index"):
+    """An input block fetched through an index table - revision 6's R16
+    and the whole of parcel P1's definition, which is two lines:
+
+        A[i] = src[table[i]]         for an index in range
+        A[i] = +0                    for CFT_IDX_NONE
+
+    and an index at or past `len(src)` is REFUSED rather than reduced,
+    wrapped or clamped. The device must never read past a buffer for a
+    caller, so the bound is a property of the call and not of what
+    happens to be mapped - and because it is refused BEFORE the run,
+    both executors and the tile agree without any of them having to
+    describe what a bad index would have computed.
+
+    There is no new rounding rule here and there could not be: nothing
+    is computed. The answer is the dense run over what this returns,
+    which is what makes an identity table bit-identical to a dense run
+    by construction rather than by test."""
+    zero = sf.zero_bits(fmt, 0)
+    mask = (1 << fmt.width) - 1
+    out = []
+    for i, ix in enumerate(table):
+        if ix == IDX_NONE:
+            out.append(zero)
+            continue
+        if not 0 <= ix < len(src):
+            raise ProgramError(
+                f"{name}[{i}] = {ix} is at or past the {len(src)} "
+                f"elements the source holds")
+        out.append(src[ix] & mask)
+    return out
 
 
 def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
@@ -1029,7 +1069,15 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     a table, the stream argument is the SOURCE, of any length, and an
     index at or past it is refused. `idx_scratch_in` likewise for the
     scratch block, `n * n_scratch_in` indices lane-major into the pool
-    passed as `scratch_in`. Parcel P1 writes the definition.
+    passed as `scratch_in`.
+
+    The tables are resolved by `gather()` above, BEFORE anything else
+    reads a stream, so an indexed run is the dense run over the
+    gathered block and not a second execution model - which is the
+    contract's own sentence ("the run proceeds exactly as a dense run
+    over A") written as code rather than as a promise. With a table on
+    a stream, `n` is the TABLE's length, since the stream argument has
+    stopped being the run's elements.
 
     `lane_mask` - a list of n booleans, or None for every lane. A masked
     lane runs no instruction and writes nothing: its deposit slots, its
@@ -1038,12 +1086,8 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     cycle; `n_active` is the prefix form of the same thing. Parcel P3
     writes the definition.
 
-    Until each lands, a non-None value is refused by name.
+    Until the mask lands, a non-None `lane_mask` is refused by name.
     """
-    if any(t is not None for t in (idx_a, idx_b, idx_c, idx_scratch_in)):
-        raise NotImplementedError(
-            "indexed inputs are declared at ABI 0.14 and not built in the "
-            "model yet: docs/ROUND2.md, parcel P1")
     if lane_mask is not None:
         raise NotImplementedError(
             "the lane mask is declared at ABI 0.14 and not built in the "
@@ -1051,8 +1095,28 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     fmt = prog.fmt
     prog._check_bank(bank)
     consts = list(bank) if prog.bank_ext else prog.consts
-    n = len(a)
-    if len(b) != n or (c is not None and len(c) != n):
+    # R16, resolved first. The run's length is the table's where there
+    # is one: an indexed stream's argument is the SOURCE, which has no
+    # reason to be n elements long and in the gravity shape this was
+    # built for is a great deal shorter.
+    n = len(idx_a) if idx_a is not None else len(a)
+    for nm, strm, tbl in (("a", a, idx_a), ("b", b, idx_b), ("c", c, idx_c)):
+        if tbl is None:
+            continue
+        if strm is None:
+            raise ValueError(
+                f"idx_{nm} indexes stream {nm}, which is None")
+        if len(tbl) != n:
+            raise ValueError(
+                f"idx_{nm} holds {len(tbl)} indices and the run is {n} "
+                f"lanes: a table is one index a lane")
+    if idx_a is not None:
+        a = gather(a, idx_a, fmt, "idx_a")
+    if idx_b is not None:
+        b = gather(b, idx_b, fmt, "idx_b")
+    if idx_c is not None:
+        c = gather(c, idx_c, fmt, "idx_c")
+    if len(a) != n or len(b) != n or (c is not None and len(c) != n):
         raise ValueError("input streams differ in length")
     if c is None:
         c = [0] * n
@@ -1060,6 +1124,27 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         n_active = n
     if not 0 <= n_active <= n:
         raise ValueError(f"n_active={n_active} outside 0..{n}")
+
+    if idx_scratch_in is not None:
+        # The block's table is lane-major over the same block the dense
+        # preload fills, so it is n * n_scratch_in entries whatever the
+        # pool's length - and once gathered it IS that dense block, so
+        # the ordinary refusals below check it unchanged.
+        want = (prog.n_scratch_in if prog.scratch_io else 0) * n
+        if not want:
+            raise ProgramError(
+                "idx_scratch_in is set and this program declares no "
+                "scratch input - there is no block to gather into")
+        if scratch_in is None:
+            raise ProgramError(
+                "idx_scratch_in indexes scratch_in, which is None")
+        if len(idx_scratch_in) != want:
+            raise ProgramError(
+                f"idx_scratch_in holds {len(idx_scratch_in)} indices; the "
+                f"header declares {prog.n_scratch_in} slots a lane over "
+                f"{n} lanes = {want}")
+        scratch_in = gather(scratch_in, idx_scratch_in, fmt,
+                            "idx_scratch_in")
 
     prog._check_scratch_in(scratch_in, n)
 
