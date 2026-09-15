@@ -12266,3 +12266,29 @@ and the Arduino copy true. On the merged tree with the lead's three
 edits, `krnlseq` under Verilator with the second-half case 1/1, and
 the host gates again; the box's full suite at the pushed tip follows
 in the next entry.
+
+## 2026-09-15 - wave 1 on the box: main with P4 alone, then main with both parts of P1 and P4, green at their pushed tips
+
+The two entries above each end on a box run that had not finished.
+Both have. Main with P4 alone (a061d3f; `~/cft-fp256-b`, 12:24-13:24
+under `nice`, three suites sharing the machine): `make sim
+SIM=verilator` 25 benches, no failures recorded; `seq_coremc` 27/27,
+`krnlseqmc` 1/1, `seqbanksmc` 1/1, `reducemc` 11/11, `krnlmc` 2/2;
+`yosys-lint` clean. Main with both parts of P1 and P4 - the tip the
+round's wave 2 merges onto, 01729e4 (`~/cft-fp256-d`, a fourth checkout
+cloned for it, 12:57-13:56): 25 benches, no failures recorded, the same
+five census targets green (thirty `TESTS=` lines in the raw log, none
+with a failure, no simulator error line), lint clean. The Icarus tails
+of both run on as this is written and are read when they land; no
+verdict in this file has ever moved on an Icarus tail, and the
+sequencer benches of the earlier tips today (b812a53, 1c6b63a, 9a24607)
+were green under Icarus too.
+
+Two small facts about the runs themselves, for whoever repeats them.
+The box script checks the tree it is about to run by grepping a mark
+in `rtl/cft_seq.sv` or `rtl/cft_engine_stream.sv`, and a mark from a
+bench file fails the launch with exit 4 after the checkout succeeded -
+which is what happened at 12:56, and the relaunch a minute later is the
+run above. And the filtered log is block-buffered through `grep`, so a
+suite's lines appear together when `make sim` exits; the raw log beside
+it (`<log>.raw`) is where progress is read.
