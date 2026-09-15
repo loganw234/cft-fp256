@@ -3064,3 +3064,174 @@ async def gathered_stream_no_instruction_reads_is_never_fetched(dut):
     bench._check_gather_reads(fmt, IA_BASE, A_BASE, ta, n, 1,
                               "fp32: the a stream")
     dut._log.info("an unread indexed stream costs no read, table included")
+
+
+# ======================================================================
+# 14. R10's rule, corrected 2026-09-15: a stream is needed when the
+#     OPCODE reads it, not when an operand field happens to name it
+#
+# The old rule marked a stream from the field alone, so
+# `alu(op, rd, ra=.., rc=..)` - rb defaulted to 0 - marked stream a.
+# Dense that was one extra beat read a block and the section that
+# introduced it called it free. Through an index table it is the whole
+# table plus one round trip an entry, which is the most expensive path
+# the module has, for a stream nothing reads.
+#
+# Under-approximating the other way is a silent wrong answer: the
+# stream is not loaded and its register reads +0. So the RTL's table is
+# derived from the MODEL here and asserted opcode by opcode, and the
+# read counts are measured on the tile beside it.
+# ======================================================================
+
+def _model_reads(op):
+    """Which operand positions opcode `op` consumes, taken from the
+    model's own code rather than from a second copy of the table.
+
+    For the four arithmetic opcodes the authority is `sf.steer`, which
+    maps (op, a, b, c) onto the FMA's three inputs exactly as the RTL's
+    operand mux does: vary one input, and if the mapped triple does not
+    move, the ALU cannot read it. (Membership would be wrong here -
+    SUB passes `negate(xc)`, which is not `xc`.)
+
+    For the simple group the authority is the implementation's own
+    SIGNATURE: `def fabs(fmt, xa, *_)` reads a and nothing else, and
+    `*_` is exactly the statement "the rest is not read".
+
+    An opcode the model does not implement reads all three, which is
+    what the RTL must also assume."""
+    import inspect
+    if op in sf.ARITH_OPS:
+        fmt = FP64
+        base = (0x3FF1_1111_1111_1111, 0x4002_2222_2222_2222,
+                0x4008_3333_3333_3333)
+        alt = (0x3FF4_4444_4444_4444, 0x4005_5555_5555_5555,
+               0x400A_6666_6666_6666)
+        ref = sf.steer(fmt, op, *base)
+        out = []
+        for i in range(3):
+            args = list(base)
+            args[i] = alt[i]
+            out.append(sf.steer(fmt, op, *args) != ref)
+        return tuple(out)
+    impl = sf.SIMPLE_IMPL.get(op)
+    if impl is None:
+        return (True, True, True)
+    names = [p.name for p in inspect.signature(impl).parameters.values()
+             if p.kind is p.POSITIONAL_OR_KEYWORD]
+    return ("xa" in names, "xb" in names, "xc" in names)
+
+
+def _rtl_op_reads():
+    """The RTL's own table, parsed out of rtl/cft_seq.sv's `op_reads`
+    rather than retyped: `8'dN: op_reads = 3'bCBA;`, with the default
+    arm filling every opcode the case does not name."""
+    import re
+    src = (Path(__file__).resolve().parents[1] / "rtl" /
+           "cft_seq.sv").read_text(encoding="utf-8")
+    body = src.split("function automatic [2:0] op_reads", 1)[1]
+    body = body.split("endfunction", 1)[0]
+    table = {}
+    for m in re.finditer(r"8'd(\d+):\s*op_reads\s*=\s*3'b([01]{3})", body):
+        bits = m.group(2)
+        table[int(m.group(1))] = (bits[2] == "1", bits[1] == "1",
+                                  bits[0] == "1")
+    dm = re.search(r"default:\s*op_reads\s*=\s*3'b([01]{3})", body)
+    assert dm, "cft_seq.sv's op_reads has no default arm"
+    d = dm.group(1)
+    default = (d[2] == "1", d[1] == "1", d[0] == "1")
+    assert table, "cft_seq.sv's op_reads named no opcode"
+    return table, default
+
+
+@cocotb.test()
+async def operand_use_is_the_opcode_s(dut):
+    """The RTL's `op_reads` against the model, for all 256 opcodes.
+
+    This is the assertion that stands between a narrowed rd_need and a
+    silent wrong answer: an opcode whose table says "does not read b"
+    while the ALU reads b would leave r1 at +0 for a whole run.
+    """
+    table, default = _rtl_op_reads()
+    bad = []
+    for op in range(256):
+        want = _model_reads(op)
+        got = table.get(op, default)
+        # The RTL may over-approximate (loading a stream nobody reads
+        # is only slower); it may never under-approximate.
+        for p in range(3):
+            if want[p] and not got[p]:
+                bad.append((op, "abc"[p], "model reads it, the RTL "
+                                          "would skip the stream"))
+    assert not bad, (
+        f"rtl/cft_seq.sv's op_reads under-approximates for "
+        f"{len(bad)} (opcode, operand) pair(s), each of which would "
+        f"leave a stream register at +0: {bad[:8]}")
+    # ...and it is not simply "all three everywhere", which would pass
+    # the loop above and buy nothing.
+    narrowed = sum(1 for op, r in table.items() if not all(r))
+    assert narrowed >= 20, (
+        f"only {narrowed} opcodes have a narrowed operand use, so this "
+        f"case is passing on an over-approximation that would leave "
+        f"R16's saving inverted")
+    dut._log.info(f"op_reads: {len(table)} opcodes named, {narrowed} of "
+                  f"them narrower than a, b and c, none under the model")
+
+
+@cocotb.test()
+async def an_unread_stream_costs_nothing_dense_or_gathered(dut):
+    """V1's case, measured. `ADD rd, ra, rc` with rb defaulted to zero
+    names r0 in its rb FIELD and does not read it; neither the stream
+    nor - when it is indexed - its table may be touched.
+
+    Both halves are here because they are different failures: dense it
+    is beats the module did not need, gathered it is a round trip an
+    entry."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP64
+    # ADD reads ra and rc. Both are registers at or above three, so no
+    # stream is read at all - but rb defaults to 0, which is r0.
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 1),
+        seq.alu(sf.OP_ADD, rd=6, ra=3, rc=4),
+        seq.deposit(6), seq.halt()],
+        max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+        n_scratch_in=2, n_scratch_out=0)
+    assert seq.decode(prog.insns[2])["rb"] == 0, \
+        "this case needs the defaulted rb field that names r0"
+    n = 70
+    block = operands(fmt, n * 2, 4400)
+    await bench.program(fmt, prog, operands(fmt, n, 4401),
+                        operands(fmt, n, 4402), operands(fmt, n, 4403),
+                        n, "fp64: ADD with a defaulted rb, dense",
+                        scratch_in=block)
+    got = bench.ram.reads_in(A_BASE, A_BASE + (1 << 16))
+    assert not got, (
+        f"the a stream was read {len(got)} time(s) by a program whose "
+        f"only mention of r0 is an rb field an ADD does not read: "
+        f"{got[:4]}. R10 skips a stream no instruction READS.")
+
+    # ...and the same program with a table on a. Nothing may be read
+    # from either region - the table above all, which is the cost R16
+    # turned from one beat into one round trip an entry.
+    src = operands(fmt, 23, 4404)
+    tbl = _perm_table(n, len(src), 4405)
+    await bench.gathered(
+        fmt, prog, src, operands(fmt, n, 4402), operands(fmt, n, 4403),
+        n, "fp64: ADD with a defaulted rb, a indexed",
+        idx_a=tbl, scratch_in=block,
+        idx_scratch_in=_perm_table(n * 2, len(block), 4406),
+        check_reads=False)
+    for base, what in ((IA_BASE, "the a table"), (A_BASE, "the a stream")):
+        got = bench.ram.reads_in(base, base + (1 << 16))
+        assert not got, (
+            f"{what} was read {len(got)} time(s) for a stream the "
+            f"program does not read: {got[:4]}. Through a table that "
+            f"is the whole table plus a round trip an entry.")
+    # ...while the block that IS indexed was gathered, so the case is
+    # not passing because nothing happened.
+    bench._check_gather_reads(fmt, ISI_BASE, SIN_BASE,
+                              _perm_table(n * 2, len(block), 4406), n, 2,
+                              "fp64: the scratch block")
+    dut._log.info("an operand field the opcode does not read costs no "
+                  "stream and no table")

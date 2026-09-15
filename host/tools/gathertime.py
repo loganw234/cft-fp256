@@ -36,9 +36,20 @@ the program folds the slots:
 
 r3 and not r0, which is what the round's plan sketched: r0, r1 and r2
 are the three INPUT STREAMS and a lane's r0 is a[i], not +0. r3..r31
-are the registers that start at +0 (docs/SEQUENCER.md R9), so the fold's
-accumulator is one of those - and using it also means the program names
-no stream at all, so R10 loads none of the three.
+are the registers that start at +0 (docs/SEQUENCER.md R9), so the
+fold's accumulator is one of those.
+
+That the three streams are then never LOADED is a second fact and it
+was not true until 2026-09-15. `seq.alu(OP_ADD, rd=3, ra=3, rc=4)`
+leaves the rb field at its default of zero, which is r0, and R10's
+rule used to mark a stream needed from the FIELD - so this fold read
+the whole a stream, and through a table would have read the whole
+table and one element per entry for a stream it does not read. R10 now
+decides from the OPCODE's operand use (an ADD reads ra and rc; b is
+steered to 1.0), so the fold names no stream the ALU reads and none of
+the three is loaded. A program written for this tile should still give
+every operand field a register at or above three where it can: it
+costs nothing and it does not depend on the decode being right.
 
 A particle whose row has run out contributes +0, which is
 `CFT_IDX_NONE` and costs no read; the requester's own argument for why

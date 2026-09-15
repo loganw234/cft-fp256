@@ -2818,6 +2818,14 @@ static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
     size_t bytes, i;
     cft_caps hc;
     uint8_t *src = (uint8_t *)malloc(src_n * esz);
+    /* The DENSE operands, at n elements. cft_program_run_ex reads b
+     * and c for every one of the run's n lanes whatever the program
+     * names - the executor loads r1 and r2 from them unless the
+     * pointer is NULL - so handing it the short SOURCE here read n
+     * lanes out of a src_n-element allocation, which V1 reproduced
+     * against a guard page. An indexed operand is the only one whose
+     * buffer may be short, and only through its own table. */
+    uint8_t *bdense = (uint8_t *)malloc(n * esz);
     uint8_t *dense = (uint8_t *)malloc(n * esz);
     uint8_t *d_sw = (uint8_t *)malloc(n * esz);
     uint8_t *d_hw = (uint8_t *)malloc(n * esz);
@@ -2841,8 +2849,8 @@ static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
                "CFT_SEQ_FEAT_INDEXED, NOT COMPARED\n");
         goto out;
     }
-    if (!src || !dense || !d_sw || !d_hw || !d_id || !d_pm || !cnt ||
-        !tab || !ident) {
+    if (!src || !bdense || !dense || !d_sw || !d_hw || !d_id ||
+        !d_pm || !cnt || !tab || !ident) {
         printf("  FAIL seq indexed: out of memory\n");
         failures++;
         goto out;
@@ -2850,6 +2858,7 @@ static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
 
     rs = 0x1D6E + (uint32_t)fmt;
     fill(src, src_n, esz);
+    fill(bdense, n, esz);
 
     /* One in five entries is CFT_IDX_NONE, which must read as +0 -
      * derived here and checked below against the same rule, never
@@ -2891,7 +2900,7 @@ static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
     do {                                                               \
         memset(&A, 0, sizeof A);                                       \
         A.struct_size = sizeof A;                                      \
-        A.a = (a_); A.b = (a_); A.c = (a_);                            \
+        A.a = (a_); A.b = bdense;  A.c = bdense;                            \
         A.n = n;                                                       \
         A.deposits = (dst_);                                           \
         A.counts = cnt;                                                \
@@ -3003,8 +3012,8 @@ static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
 out:
     cft_program_free(ps);
     cft_program_free(ph);
-    free(src); free(dense); free(d_sw); free(d_hw); free(d_id);
-    free(d_pm); free(cnt); free(tab); free(ident);
+    free(src); free(bdense); free(dense); free(d_sw); free(d_hw);
+    free(d_id); free(d_pm); free(cnt); free(tab); free(ident);
 }
 
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,

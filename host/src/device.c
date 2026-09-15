@@ -569,12 +569,30 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                 "the dense block");
             return CFT_ERR_UNSUPPORTED;
         }
-        buf_sync_in(dev, a, n * esz);
-        buf_sync_in(dev, b, n * esz);
-        buf_sync_in(dev, c, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_B, b, n * esz);
-        bind_role(dev, &bd, CFT_ROLE_C, c, n * esz);
+        /* R16: a stream with a table is the SOURCE the table indexes,
+         * and its length is `idx_*_src` rather than n - shorter than
+         * the run in the shape this feature exists for, and allowed to
+         * be longer. The window this registers and brings home has to
+         * be that one: bound at n * esz, a longer source would be
+         * truncated on the device and a shorter one over-read, and the
+         * bound the run is held to (seq_check_round2 refuses an index
+         * at or past idx_*_src) would be checked against a length
+         * nothing had staged. The scratch pool already works this way
+         * - scratch_in_bytes IS the pool's length - and this is the
+         * same rule for the three streams, which have no such field. */
+        {
+            const void *strm[3];
+            size_t sbytes[3];
+            int r;
+            strm[0] = a; strm[1] = b; strm[2] = c;
+            sbytes[0] = ((io && io->idx_a) ? io->idx_a_src : n) * esz;
+            sbytes[1] = ((io && io->idx_b) ? io->idx_b_src : n) * esz;
+            sbytes[2] = ((io && io->idx_c) ? io->idx_c_src : n) * esz;
+            for (r = 0; r < 3; r++) {
+                buf_sync_in(dev, strm[r], sbytes[r]);
+                bind_role(dev, &bd, CFT_ROLE_A + r, strm[r], sbytes[r]);
+            }
+        }
         if (max_deposits)
             bind_role(dev, &bd, CFT_ROLE_D, deposits,
                       n * max_deposits * esz);

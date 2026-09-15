@@ -1532,9 +1532,25 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     if (max_deposits && n > (static_cast<size_t>(-1) / max_deposits / esz))
         return ST_INVALID_ARGUMENT;
 
-    const size_t epb        = 32u / esz;         /* elements per beat */
-    const size_t real_bytes = n * esz;
-    const size_t opnd_bytes = ((n + epb - 1) / epb) * epb * esz;
+    /* R16: an INDEXED stream's buffer is the SOURCE the table indexes,
+     * `idx_*_src` elements, which has no reason to be n. Both numbers
+     * matter and for different failures: `sreal` is what buf_bind
+     * memcpys out of the host mirror and what stage() copies, so a
+     * source LONGER than n would be truncated on the device - resident
+     * or staged, since a resident bind makes a device copy the same
+     * way - and `spad` is the buffer the tile may address, so a source
+     * SHORTER than n would have stage() read past the caller's
+     * allocation. Dense, both are what they always were:
+     * beat_round(n * esz) is the element-padded n * esz this used to
+     * compute as `((n + epb - 1) / epb) * epb * esz`, because epb *
+     * esz is exactly one beat - so the dense path's two byte counts
+     * are the same two numbers they have always been. */
+    const size_t sreal[3] = {
+        ((io && io->idx_a) ? io->idx_a_src : n) * esz,
+        ((io && io->idx_b) ? io->idx_b_src : n) * esz,
+        ((io && io->idx_c) ? io->idx_c_src : n) * esz};
+    const size_t spad[3] = {beat_round(sreal[0]), beat_round(sreal[1]),
+                            beat_round(sreal[2])};
     const size_t dep_bytes  = beat_round(n * max_deposits * esz);
     const size_t cnt_bytes  = beat_round(n * 4);
     const size_t img_bytes  = beat_round(image_bytes);
@@ -1600,8 +1616,8 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             for (int r = 0; r < 3; r++)
                 if (bind->buf[r] && src[r])
                     ob[r] = buf_bind(*static_cast<Buf *>(bind->buf[r]),
-                                     0, r, bind->off[r], real_bytes,
-                                     opnd_bytes, false);
+                                     0, r, bind->off[r], sreal[r],
+                                     spad[r], false);
             if (bind->buf[CFT_ROLE_D] && deposits && max_deposits)
                 ob[3] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
                                  0, CFT_ROLE_D, bind->off[CFT_ROLE_D],
@@ -1651,8 +1667,9 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * legal and XRT will not submit a run with an argument
          * unbound. */
         size_t need = 0;
-        if (!ob[0] || !ob[1] || !ob[2])
-            need = opnd_bytes;
+        for (int r = 0; r < 3; r++)
+            if (!ob[r] && spad[r] > need)
+                need = spad[r];
         if (!ob[3])
             need = std::max(need, std::max(dep_bytes, static_cast<size_t>(32)));
         ensure_capacity(D, tile, need);
@@ -1688,14 +1705,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                                itab_pad[r]);
         }
         if (!ob[0])
-            stage(tile.a, static_cast<const uint8_t *>(a), real_bytes,
-                  opnd_bytes);
+            stage(tile.a, static_cast<const uint8_t *>(a), sreal[0],
+                  spad[0]);
         if (!ob[1])
-            stage(tile.b, static_cast<const uint8_t *>(b), real_bytes,
-                  opnd_bytes);
+            stage(tile.b, static_cast<const uint8_t *>(b), sreal[1],
+                  spad[1]);
         if (!ob[2])
-            stage(tile.c, static_cast<const uint8_t *>(c), real_bytes,
-                  opnd_bytes);
+            stage(tile.c, static_cast<const uint8_t *>(c), sreal[2],
+                  spad[2]);
         {
             /* tile.si and tile.so are only created on an 0x800 device,
              * and the kernel call below only passes them there, so an

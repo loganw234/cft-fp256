@@ -970,6 +970,77 @@ module cft_seq #(
   logic [3:0]        wr_bresp_left;
   logic              wr_stream_on;
 
+  /* WHICH OF THE THREE OPERANDS AN OPCODE ACTUALLY READS.
+   *
+   * R10 skips a stream no instruction reads, and until 2026-09-15 it
+   * decided that from the OPERAND FIELD - a register number below
+   * three in any of ra, rb, rc marked that stream needed. That is an
+   * over-approximation, and the section that introduced it said so and
+   * called it free, because it "only ever loads more": a defaulted
+   * field is zero, so `alu(op, rd, ra=.., rc=..)` marked stream a and
+   * cost one extra beat read a block.
+   *
+   * R16 made it anything but free. Through an index table that same
+   * unread stream costs the whole table's beats AND one memory round
+   * trip per entry - measured by this parcel's verifier at 9 table
+   * bursts plus 70 element bursts for an fp64 program that names r0
+   * only through a defaulted rb. The saving inverted into the most
+   * expensive path the module has.
+   *
+   * So the rule is now the opcode's, and it is the model's: an operand
+   * the ALU steers away from is not read. ADD and SUB take a and c
+   * (b is steered to 1.0); MUL takes a and b (c is steered to a zero
+   * of the product's sign); FMA and SELECT take all three; the unary
+   * members of the simple group take a alone and the binary ones a and
+   * b. Anything unassigned on this datapath keeps all three, because a
+   * decode that guessed narrow would leave a register reading +0 and
+   * answer confidently.
+   *
+   * Under-approximating here is a SILENT WRONG ANSWER - the stream is
+   * not loaded and its register reads +0 - so the table is held to the
+   * model twice over: tb/test_seq_core.py derives the same three bits
+   * from `sf.steer` and the signatures of `sf.SIMPLE_IMPL` and asserts
+   * every opcode, and every single-op, fuzz and corpus case in the
+   * suite runs opcodes over r0..r2 and compares to the model, where a
+   * stream wrongly skipped is a deposit that differs. */
+  function automatic [2:0] op_reads(input [7:0] op);
+    begin
+      case (op)
+        8'd0:  op_reads = 3'b111;   // FMA          a, b, c
+        8'd1:  op_reads = 3'b101;   // ADD          a, c
+        8'd2:  op_reads = 3'b101;   // SUB          a, c
+        8'd3:  op_reads = 3'b011;   // MUL          a, b
+        8'd4:  op_reads = 3'b001;   // ABS          a
+        8'd5:  op_reads = 3'b001;   // NEG          a
+        8'd6:  op_reads = 3'b011;   // COPYSIGN     a, b
+        8'd7:  op_reads = 3'b011;   // MIN
+        8'd8:  op_reads = 3'b011;   // MAX
+        8'd9:  op_reads = 3'b011;   // MINNUM
+        8'd10: op_reads = 3'b011;   // MAXNUM
+        8'd11: op_reads = 3'b111;   // SELECT       a, b, c
+        8'd12: op_reads = 3'b011;   // CMPLT
+        8'd13: op_reads = 3'b011;   // CMPLE
+        8'd14: op_reads = 3'b011;   // CMPEQ
+        8'd16: op_reads = 3'b011;   // IAND
+        8'd17: op_reads = 3'b011;   // IOR
+        8'd18: op_reads = 3'b011;   // IXOR
+        8'd19: op_reads = 3'b011;   // IADD
+        8'd20: op_reads = 3'b011;   // ISUB
+        8'd21: op_reads = 3'b011;   // ISHL
+        8'd22: op_reads = 3'b011;   // ISHR
+        8'd23: op_reads = 3'b011;   // ICMPLT
+        8'd26: op_reads = 3'b001;   // RECIP_SEED   a
+        8'd27: op_reads = 3'b001;   // RSQRT_SEED   a
+        8'd30: op_reads = 3'b011;   // IMUL         a, b
+        // 15, 24, 25, 28, 29 and 31 upward are unassigned on this
+        // datapath (24/25/28/29/31 are the REDUCTIONS, which a program
+        // cannot issue). All three, so a stream is never skipped for
+        // an opcode whose operand use nobody has written down.
+        default: op_reads = 3'b111;
+      endcase
+    end
+  endfunction
+
   function automatic [7:0] burst_len(input [ADDR_W-1:0] addr,
                                      input [31:0] beats);
     logic [31:0] to4k, cap;
@@ -990,6 +1061,14 @@ module cft_seq #(
   // moment its inputs first change - simulation time stops with vvp
   // at full CPU. The bisect that found this took nine builds; the
   // assign form is semantically identical and immune.
+  // The operand use of the instruction at the head of the peel window.
+  // A continuous assign and not an inline call: a function's result
+  // cannot be part-selected here, and calling it three times would
+  // elaborate three copies of the decode. Assign rather than
+  // always_comb, for the reason rd_bl below is an assign.
+  logic [2:0] pw_reads;
+  assign pw_reads = op_reads(pw[7:0]);
+
   logic [7:0] rd_bl, wr_bl;
   assign rd_bl = burst_len(rd_addr, rd_beats_left);
   assign wr_bl = burst_len(wr_addr, wr_beats_left);
@@ -2254,12 +2333,20 @@ module cft_seq #(
             // fields are {imm[25..27], the 4-bit field} since revision
             // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX) or
             // rb (STX, LDX) and never rc.
+            //
+            // `op_reads` gates each field by what the OPCODE consumes,
+            // for the reason its own comment gives at length: through a
+            // table, a stream marked by a defaulted field costs the
+            // whole table and a round trip an entry.
             if (!pw[31]) begin
-              if (!pw[27] && {pw[57], pw[15:12]} < 5'd3)
+              if (pw_reads[0] &&
+                  !pw[27] && {pw[57], pw[15:12]} < 5'd3)
                 rd_need[pw[13:12]] <= 1'b1;
-              if (!pw[28] && {pw[58], pw[19:16]} < 5'd3)
+              if (pw_reads[1] &&
+                  !pw[28] && {pw[58], pw[19:16]} < 5'd3)
                 rd_need[pw[17:16]] <= 1'b1;
-              if (!pw[29] && {pw[59], pw[23:20]} < 5'd3)
+              if (pw_reads[2] &&
+                  !pw[29] && {pw[59], pw[23:20]} < 5'd3)
                 rd_need[pw[21:20]] <= 1'b1;
             end else begin
               if ((pw[7:0] == C_DEPOSIT || pw[7:0] == C_SETACT ||
