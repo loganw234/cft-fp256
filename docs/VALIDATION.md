@@ -11843,3 +11843,70 @@ lead, whatever the array's pace. `seq_coremc` 20/20 and `krnlseqmc`
 after it; the single-pass benches unchanged. No shipping image is
 multi-pass, so no image carried this; the census is why it was found
 the same day.
+
+## 2026-09-14 - the seq6 image: revision 5 complete and ask 7 on silicon
+
+**amd-arc-box, the U50, `~/cardday-seq6/cft_hw_seq6_1x.xclbin` (122eb69:
+R9-R15 with the retire gate and the multi-pass constants, `EN_FP256=0`,
+kernel WNS +0.140 ns at 135 MHz, 21:34-23:20 under `nice`, the box
+otherwise idle for the timing runs). Host tools rebuilt on the box from
+the sources of the commit after 122eb69, XRT=1.**
+
+**Two host defects first, both found by this image and neither in the
+RTL.** `device-test` refused the image: "hardware contract 0x900 is not
+one this library knows" - the box's binary was the morning's (13:12),
+statically linked against the morning's library, because `make -C host
+all` does not build it; rebuilt, it ran. And `cft_reduce_seg` returned
+one result where a thousand were due while the software backend agreed
+with the model on all thousand: the SEG/NRES pair had been written
+through the exclusive handle before the launch, and XRT's start sends
+the whole argument register image, a declared argument the launch did
+not set going out as zero - the pair was erased at every start. It is
+the twelfth argument of the launch now, with the map's other buffers
+bound as the program launch binds them (created one beat long where a
+device only ever reduces), and zero for a whole-array reduction. After
+that: `segtime.py` fp64, 64 systems x 192, sum and maxall, 64/64
+results the same bits as 64 calls of `cft_reduce` and as the model.
+`device-test -q -n 8` then failed one check of 2,006: its own mask of
+known capability bits stopped at CAPS2[7]; with CAPS2[8] known, `-q -n
+8` is 815 checks, 0 failed - "the device and the software backend agree
+on every case, bits and flags" - and `-q -n 64` before the mask was the
+same 815 with that one check failing and nothing else. The first image
+of revision 5 to pass device-test, and the first image at 0x900.
+
+**The corrector's shape (`segtime.py`, E = 1,000 systems x L = 192,
+staged operands, medians):**
+
+| | one `cft_reduce_seg` | 1,000 `cft_reduce` calls | a Python fold on the host |
+|---|---|---|---|
+| fp64 sum | 4.15 ms | 90.7 ms | 6.5 ms |
+| fp64 maxall | 4.15 ms | 86.4 ms | 4.4 ms |
+| fp128 sum | 5.40 ms | 83.2 ms | 8.2 ms |
+| fp128 maxall | 5.52 ms | 99.7 ms | 5.5 ms |
+
+Every result of every row the model's bits. One call is twenty-two
+times the thousand calls it replaces - the round trips the ask was
+about. It is NOT faster than the host: 4.15 ms for 192,000 fp64
+elements is 21.6 ns an element, three cycles, where the tile's
+accumulator streams one element a cycle (1.4 ms) and the rest is
+staging 1.5 MB in and the call; a C loop over the read-back
+(cft-rebound's today, about 0.2 ms of read-back and a loop of the same
+order) is faster than either. Resident operands would take the staging
+off and leave the accumulator's rate, which is the real limit: a beat a
+cycle needs a beat-wide accumulator, and that is the item this
+measurement puts on the roadmap. What the entry point delivers today is
+the contract's bits in one round trip; what it does not deliver is the
+speed, and the requester's doc asked for exactly this measurement
+before deciding.
+
+**Programs on the same image (`progcost` fp128 768 lanes; `divtime` 768
+elements, the box idle):** nop x 214 1.08 us an element (R14 1.09, seq5
+1.49, the morning 2.3); the whole divide 1.15 us (R14 1.25). `divtime`:
+fp64 div 0.809 / 0.725 us an element (older route / whole program),
+fp64 sqrt 0.740 / 0.652, fp128 div 1.011 / 1.185, fp128 sqrt 0.978 /
+1.122. The older route's numbers in the seq5 and R14 entries (1.86,
+1.92 at fp128) were taken while the box ran the confirmation sims, and
+that route is half host time; idle, it is 1.01 - so the whole program
+is NOT the faster route at fp128 after all, and the default stays the
+older route. `depcost` within noise of the two entries before (fp128
+0.025 / 0.071 / 0.135 / 0.151 us a lane).

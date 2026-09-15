@@ -226,15 +226,15 @@ constexpr uint32_t BANK_VERSION = 0x00000700u;  /* first map with BANK_PTR */
 constexpr uint32_t SCRATCH_VERSION = 0x00000800u;
 /* 0x900 (2026-09-14): SEG and NRES at 0x80/0x84, kernel argument 11 - a
  * reduction's segment length and result count, zero for the whole
- * array. Written through the exclusive handle rather than passed as an
- * argument: an argument list is the whole list or XRT throws, and a
- * reduction has always been launched with six. The pair is written
- * before EVERY reduction on such a tile, zero included, because the
- * register keeps its last value and a whole-array reduction after a
- * segmented one must not inherit a segment. */
+ * array - passed as the TWELFTH ARGUMENT of every reduction launched on
+ * such a tile, with the map's other buffers bound as the program launch
+ * binds them. Not written through the handle: the first version did,
+ * and the card returned one result where a thousand were due, because
+ * XRT's start sends the whole argument register image and a declared
+ * argument the launch did not set goes out as zero, erasing the pair.
+ * The pair travels with the launch or not at all; zero for a
+ * whole-array reduction, so one after a segmented one inherits nothing. */
 constexpr uint32_t SEG_VERSION = 0x00000900u;
-constexpr uint32_t CSR_SEG  = 0x80;
-constexpr uint32_t CSR_NRES = 0x84;
 
 inline bool version_known(uint32_t v)
 {
@@ -1930,13 +1930,26 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
             const size_t m = hi[k] - lo[k];
             try {
                 Tile &tile = D.tiles[j];
+                /* every buffer the twelve-argument launch binds must
+                 * exist, one beat at least; the program path creates
+                 * them on first use and a device that only ever reduces
+                 * would never have */
                 if (D.version >= SEG_VERSION) {
-                    /* the whole range, one result: SEG 0 (see SEG_VERSION) */
-                    tile.k.write_register(CSR_SEG, 0u);
-                    tile.k.write_register(CSR_NRES, 0u);
+                    ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, 32);
+                    ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, 32);
+                    ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, 32);
+                    ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN, 32);
+                    ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT, 32);
                 }
-                runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
-                                      *wa[j], tile.b, tile.c, tile.d));
+                /* the whole range, one result: SEG 0, as the twelfth
+                 * argument on a map that has it (see SEG_VERSION) */
+                runs.push_back(D.version >= SEG_VERSION
+                    ? tile.k(mode, static_cast<uint64_t>(m),
+                             *wa[j], tile.b, tile.c, tile.d,
+                             tile.pg, tile.cn, tile.bk, tile.si, tile.so,
+                             static_cast<uint64_t>(0))
+                    : tile.k(mode, static_cast<uint64_t>(m),
+                             *wa[j], tile.b, tile.c, tile.d));
             } catch (const std::exception &e) {
                 err = std::string("starting tile ") + std::to_string(j) +
                       " for a reduction: " + e.what();
@@ -2120,11 +2133,24 @@ extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
         const size_t m = (s0[j + 1] - s0[j]) * seg;
         try {
             Tile &tile = D.tiles[j];
-            tile.k.write_register(CSR_SEG, static_cast<uint32_t>(seg));
-            tile.k.write_register(CSR_NRES,
-                                  static_cast<uint32_t>(s0[j + 1] - s0[j]));
+            /* every buffer the twelve-argument launch binds must
+             * exist, one beat at least; the program path creates
+             * them on first use and a device that only ever reduces
+             * would never have */
+            if (D.version >= SEG_VERSION) {
+                ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, 32);
+                ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, 32);
+                ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, 32);
+                ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN, 32);
+                ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT, 32);
+            }
+            const uint64_t seg_word =
+                (static_cast<uint64_t>(s0[j + 1] - s0[j]) << 32) |
+                static_cast<uint64_t>(seg);
             runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
-                                  *wa[j], tile.b, tile.c, tile.d));
+                                  *wa[j], tile.b, tile.c, tile.d,
+                                  tile.pg, tile.cn, tile.bk, tile.si, tile.so,
+                                  seg_word));
         } catch (const std::exception &e) {
             err = std::string("starting tile ") + std::to_string(j) +
                   " for a segmented reduction: " + e.what();

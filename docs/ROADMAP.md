@@ -2870,7 +2870,9 @@ its last address - or 20 when it reads the one before, the data
 dependence through the register file. What the card says is in
 docs/VALIDATION.md under the image that carries it; the whole program
 above was 2.3 us an element at binary128 with the instruction cost at
-38 cycles, and 210 instructions at 16 to 20 is a different number.
+38 cycles, and 210 instructions at 16 to 18 is a different number:
+the R14 image measured it at 1.25 us an element, the older route at
+1.92 (docs/VALIDATION.md, the same evening).
 
 ## The adoption story these serve
 

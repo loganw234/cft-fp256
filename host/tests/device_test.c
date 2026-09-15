@@ -1229,10 +1229,11 @@ static void check_caps_enforced(cft_device *dev, const char *who)
 
     /* seq_features is CAPS[7:4] in its low nibble, CAPS[31:28] - the
      * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07),
-     * and CAPS2[7:4] in the third since revision 3. Anything above
-     * those twelve bits is a decode fault, not a feature. */
+     * CAPS2[7:4] in the third since revision 3, and CAPS2[8] on bit 12
+     * since ABI 0.13 (CFT_FEAT_REDUCE_SEG). Anything above
+     * those thirteen bits is a decode fault, not a feature. */
     checks++;
-    if (c.seq_features & ~0xFFFu) {
+    if (c.seq_features & ~0x1FFFu) {
         printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4], "
                "CAPS[31:28] and CAPS2[7:4]\n", who,
                (unsigned long)c.seq_features);
