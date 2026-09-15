@@ -14,8 +14,9 @@ and drives every check through it:
   1. the CRC-32 the frames carry, held against zlib.crc32 - an
      implementation that shares no code with the C one;
   2. remote-test: the protocol refusals, the operations libcft's own
-     client never issues, and a bit-identity sample against the
-     software backend on BOTH div/sqrt routes;
+     client never issues, the segmented reduction's frame and its
+     refusals on the wire and in the client, and a bit-identity sample
+     against the software backend on BOTH div/sqrt routes;
   3. device-test: the remote backend against the software one over the
      full opcode matrix, partition invariance and the awkward
      reduction lengths - the same harness that holds the XRT backend;

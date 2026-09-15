@@ -1168,6 +1168,22 @@ control flips one byte of a returned encoding inside the client, and
 separately corrupts a frame's length, to show the replay and the chain
 fail and the refusal fires.
 
+The segmented reduction (`REDUCE_SEG`, ABI 0.13) is held the same way
+since 2026-09-15, a day after both ends of its frame were written and
+before anything had driven one: `remote-test` issues it end to end for
+every reduction opcode the server serves in two shapes (n in four
+segments, and the largest multiple of six below n in segments of six -
+a partial beat at every format) and holds `seg == n` to `cft_reduce`'s
+bytes from both handles; sends the server's two shape refusals on the
+wire after a HELLO of their own - an n that is not a whole number of
+segments, a segment of zero - and checks each is a refusal that closes;
+and shows the client's own refusals for the same shapes never become a
+frame, by the server's counters. `device-test`'s reduction leg carries
+`cft_reduce_seg` over twelve (n, seg) shapes and `CFT_MAXALL` over the
+whole encoding space, so the remote backend is held to the software one
+on both exactly as the XRT backend is - and on a device without
+CAPS2[8] the leg holds the refusal by name that the contract requires.
+
 Since 2026-09-07 both ends are also fuzzed: `host/fuzz` drives the
 server's request handlers and the client's response parsing in
 process, about 6,000 to 8,500 executions a second each under

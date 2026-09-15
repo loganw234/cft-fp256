@@ -12,8 +12,11 @@
  * well-formed request naming a bad handle or an unknown opcode is
  * answered with a status and the connection continues. It exercises
  * the operations libcft's own client never issues (the buffers, the
- * status word, STATS), and holds a sample of cft_run, cft_reduce and
- * the composed operations against the software backend, both routes.
+ * status word, STATS), and holds a sample of cft_run, cft_reduce,
+ * cft_reduce_seg and the composed operations against the software
+ * backend, both routes. The segmented reduction (ABI 0.13) is driven
+ * end to end here and nowhere else in C: its frame, its two refusals
+ * on the wire and the client's own refusal that never becomes one.
  *
  * --bench: the composed operations' round trips, read from the
  * server's STATS counters before and after each call rather than
@@ -407,6 +410,83 @@ static void refusal_tests(const char *url)
         }
     }
     printf("  answer past cap   -> refused before the run, not after\n");
+
+    /* 9. and 10. REDUCE_SEG's own two refusals (ABI 0.13), each after a
+     * HELLO on its own connection: an n that is not a whole number of
+     * segments, and a segment of zero. Both are shape rules the server
+     * applies before it reads an operand - the payload names none, as
+     * item 8's does, so 28 bytes are a complete request - and both are
+     * REFUSALS that close the connection, not statuses, because a
+     * client that sent either has a wrong idea of the frame rather
+     * than an unlucky operand. The library's own client never sends
+     * them (protocol_tests holds that); this is what a client that is
+     * not libcft gets. */
+    {
+        static const struct { uint64_t n; uint32_t seg; const char *what; }
+            bad_seg[2] = { { 7, 3, "n not a whole number of segments" },
+                           { 6, 0, "a segment of zero" } };
+        int k;
+        for (k = 0; k < 2; k++) {
+            cftr_sock s = cftr_sock_connect(host, port);
+            CHECK(s != CFTR_BAD_SOCK, "connecting for the REDUCE_SEG %s test",
+                  bad_seg[k].what);
+            if (s == CFTR_BAD_SOCK)
+                continue;
+            {
+                cftr_hdr h;
+                uint8_t *p = NULL;
+                char why[256];
+                uint32_t crc;
+                cftr_sock_timeout(s, 20000);
+                hello_header(hdr, cft_abi_version(), CFTR_OP_HELLO, 0, NULL);
+                cftr_sock_send_all(s, hdr, 32);
+                rc = cftr_recv_frame(s, &h, &p, cft_abi_version(), why,
+                                     sizeof why);
+                free(p);
+                p = NULL;
+                CHECK(rc == 0 && h.status == CFT_OK,
+                      "HELLO before the REDUCE_SEG %s test: rc %d",
+                      bad_seg[k].what, rc);
+                memset(payload, 0, 28);
+                cftr_put32(payload + 0, (uint32_t)CFT_SUM);
+                cftr_put32(payload + 4, 0);            /* fp32 */
+                cftr_put32(payload + 8, 0);            /* roundTiesToEven */
+                cftr_put32(payload + 12, 0);           /* no operands on the wire */
+                cftr_put64(payload + 16, bad_seg[k].n);
+                cftr_put32(payload + 24, bad_seg[k].seg);
+                hello_header(hdr, cft_abi_version(), CFTR_OP_REDUCE_SEG, 28,
+                             payload);
+                cftr_put32(hdr + 12, 2);
+                cftr_put32(hdr + 24, 0);
+                crc = cftr_crc32(0, hdr, 32);
+                cftr_put32(hdr + 24, cftr_crc32(crc, payload, 28));
+                cftr_sock_send_all(s, hdr, 32);
+                cftr_sock_send_all(s, payload, 28);
+                rc = cftr_recv_frame(s, &h, &p, cft_abi_version(), why,
+                                     sizeof why);
+                msg[0] = '\0';
+                if (rc == 0 && p)
+                    snprintf(msg, sizeof msg, "%.*s", (int)h.length,
+                             (const char *)p);
+                CHECK(rc == 0 && h.kind == CFTR_KIND_REFUSAL &&
+                      strstr(msg, "segment") != NULL,
+                      "REDUCE_SEG with %s: rc %d kind %u (%s)",
+                      bad_seg[k].what, rc, (unsigned)h.kind, msg);
+                free(p);
+                p = NULL;
+                /* and it closed: the next read is EOF */
+                {
+                    uint8_t byte;
+                    int eof = cftr_sock_recv_all(s, &byte, 1);
+                    CHECK(eof == 1, "the REDUCE_SEG %s refusal closed the "
+                          "connection (recv %d)", bad_seg[k].what, eof);
+                }
+                cftr_sock_close(s);
+            }
+            printf("  REDUCE_SEG %-11s -> refused and closed (%s)\n",
+                   k ? "seg 0" : "7 in 3s", msg);
+        }
+    }
 }
 
 /* ---- the operations libcft's client never issues ---------------------- */
@@ -624,6 +704,32 @@ static void protocol_tests(cft_device *dev)
     CHECK(!cftr_request(hw, CFTR_OP_PROG_FREE, req, 4, &status, &resp, &len)
           && status == CFT_ERR_INVALID_ARGUMENT, "bad program handle");
     free(resp);
+    /* the segmented reduction's shape rules are the CLIENT's first: an
+     * n that is not a whole number of segments, or a segment of zero,
+     * is refused in the library before any frame exists, so the
+     * server's REDUCE_SEG counter does not move */
+    {
+        stats S0, S1;
+        uint8_t a7[7 * 4], d7[7 * 4];
+        uint32_t fl = 0;
+        memset(a7, 0, sizeof a7);
+        CHECK(!get_stats(dev, hw, &S0), "STATS before the client refusals");
+        CHECK(cft_reduce_seg(dev, CFT_SUM, CFT_FP32, CFT_RNE, a7, NULL, d7,
+                             7, 3, &fl, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "7 elements in segments of 3 is refused by the client");
+        CHECK(cft_reduce_seg(dev, CFT_SUM, CFT_FP32, CFT_RNE, a7, NULL, d7,
+                             6, 0, &fl, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "a segment of zero is refused by the client");
+        CHECK(!get_stats(dev, hw, &S1) &&
+              S1.op[CFTR_OP_REDUCE_SEG] == S0.op[CFTR_OP_REDUCE_SEG] &&
+              S1.requests == S0.requests + 1,
+              "neither client refusal became a frame (REDUCE_SEG %llu -> "
+              "%llu, requests %llu -> %llu)",
+              (unsigned long long)S0.op[CFTR_OP_REDUCE_SEG],
+              (unsigned long long)S1.op[CFTR_OP_REDUCE_SEG],
+              (unsigned long long)S0.requests, (unsigned long long)S1.requests);
+        printf("  REDUCE_SEG shape  refused in the client, no frame sent\n");
+    }
     CHECK(!get_stats(dev, hw, &S) && S.requests > 10 && S.op[CFTR_OP_HELLO] == 1,
           "STATS after the above: %llu requests",
           (unsigned long long)S.requests);
@@ -701,6 +807,76 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
                 }
             }
         }
+        /* the segmented reduction (ABI 0.13): the REDUCE_SEG frame end
+         * to end, every reduction opcode the server serves. Two shapes
+         * - n in four segments (one, when n is not divisible by four)
+         * and the largest multiple of six below n in segments of six,
+         * which is a partial beat at every format - and then seg == n,
+         * which the library folds onto cft_reduce: the same bytes from
+         * both calls on both handles, the four compared. The operands
+         * are the any-bits fill above, so NaN and infinity propagation
+         * through the segment trees is in it. */
+        {
+            static const int sops[5] = { CFT_SUM, CFT_DOT, CFT_SUMSQ,
+                                         CFT_SUMABS, CFT_MAXALL };
+            size_t lens[2], segs[2], li;
+            int r;
+            lens[0] = n;           segs[0] = (n % 4 == 0) ? n / 4 : 1;
+            lens[1] = n - (n % 6); segs[1] = 6;
+            for (r = 0; r < 5; r++) {
+                const cft_op op = (cft_op)sops[r];
+                if (!cft_supports(rm, op, (cft_format)fmt))
+                    continue;
+                for (li = 0; li < 2; li++) {
+                    const size_t nres = lens[li] / segs[li];
+                    uint32_t f1 = 0, f2 = 0;
+                    cft_status s1, s2;
+                    if (lens[li] == 0)
+                        continue;
+                    memset(d1, 0xA5, nres * esz);
+                    memset(d2, 0x5A, nres * esz);
+                    s1 = cft_reduce_seg(sw, op, (cft_format)fmt, CFT_RNE, a, b,
+                                        d1, lens[li], segs[li], &f1, NULL);
+                    s2 = cft_reduce_seg(rm, op, (cft_format)fmt, CFT_RNE, a, b,
+                                        d2, lens[li], segs[li], &f2, NULL);
+                    CHECK(s1 == s2 && s1 == CFT_OK && f1 == f2 &&
+                          memcmp(d1, d2, nres * esz) == 0,
+                          "%s %s n=%lu seg=%lu: status %d/%d flags %02x/%02x %s",
+                          cft_format_name((cft_format)fmt), cft_op_name(op),
+                          (unsigned long)lens[li], (unsigned long)segs[li],
+                          s1, s2, f1, f2,
+                          memcmp(d1, d2, nres * esz) ? "BYTES DIFFER" : "");
+                    if (s1 != s2 || f1 != f2 || memcmp(d1, d2, nres * esz))
+                        bad++;
+                }
+                {
+                    uint8_t r1[32], r2[32], q1[32], q2[32];
+                    uint32_t f1 = 0, f2 = 0, f3 = 0, f4 = 0;
+                    cft_status s1, s2, s3, s4;
+                    s1 = cft_reduce(sw, op, (cft_format)fmt, CFT_RNE, a, b, r1,
+                                    n, &f1, NULL);
+                    s2 = cft_reduce_seg(sw, op, (cft_format)fmt, CFT_RNE, a, b,
+                                        q1, n, n, &f2, NULL);
+                    s3 = cft_reduce(rm, op, (cft_format)fmt, CFT_RNE, a, b, r2,
+                                    n, &f3, NULL);
+                    s4 = cft_reduce_seg(rm, op, (cft_format)fmt, CFT_RNE, a, b,
+                                        q2, n, n, &f4, NULL);
+                    CHECK(s1 == CFT_OK && s2 == s1 && s3 == s1 && s4 == s1 &&
+                          f1 == f2 && f3 == f1 && f4 == f1 &&
+                          memcmp(r1, q1, esz) == 0 && memcmp(r1, r2, esz) == 0 &&
+                          memcmp(r1, q2, esz) == 0,
+                          "%s %s seg == n is cft_reduce: status %d/%d/%d/%d "
+                          "flags %02x/%02x/%02x/%02x",
+                          cft_format_name((cft_format)fmt), cft_op_name(op),
+                          s1, s2, s3, s4, f1, f2, f3, f4);
+                    if (s1 != CFT_OK || s2 != s1 || s3 != s1 || s4 != s1 ||
+                        f2 != f1 || f3 != f1 || f4 != f1 ||
+                        memcmp(r1, q1, esz) || memcmp(r1, r2, esz) ||
+                        memcmp(r1, q2, esz))
+                        bad++;
+                }
+            }
+        }
         /* the composed operations, on whatever route the environment
          * selects: div and sqrt through the program route by default
          * on a remote device, the chunk route under CFT_DIVSQRT_SEQ=0 */
@@ -747,8 +923,8 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
               cft_format_name((cft_format)fmt),
               (unsigned)cft_save_all_flags(sw),
               (unsigned)cft_save_all_flags(rm));
-        printf("  %-6s elementwise x5 attributes, reductions, div, sqrt, "
-               "rint, scaleb, cmp_sig, status word: %s\n",
+        printf("  %-6s elementwise x5 attributes, reductions, per segment, "
+               "div, sqrt, rint, scaleb, cmp_sig, status word: %s\n",
                cft_format_name((cft_format)fmt), bad ? "MISMATCH" : "ok");
         free(a); free(b); free(c); free(d1); free(d2);
     }
@@ -1176,8 +1352,8 @@ static void bench(cft_device *rm)
 
     printf("round trips, from the server's counters (CFT_DIVSQRT_SEQ=%s):\n",
            route ? route : "unset, the program route on a device");
-    printf("  %-14s %6s %8s %9s %8s %9s %10s\n", "operation", "n", "RUN",
-           "PROG_RUN", "REDUCE", "frames", "ms");
+    printf("  %-14s %6s %8s %9s %8s %7s %9s %10s\n", "operation", "n", "RUN",
+           "PROG_RUN", "REDUCE", "REDSEG", "frames", "ms");
 
     a = (uint8_t *)malloc(4096 * 32); b = (uint8_t *)malloc(4096 * 32);
     d = (uint8_t *)malloc(4096 * 32);
@@ -1186,7 +1362,7 @@ static void bench(cft_device *rm)
         int k;
         fill_normal(a, n, CFT_FP64);
         fill_normal(b, n, CFT_FP64);
-        for (k = 0; k < 7; k++) {
+        for (k = 0; k < 8; k++) {
             const char *name = "";
             uint32_t fl = 0;
             cft_status st = CFT_OK;
@@ -1211,6 +1387,11 @@ static void bench(cft_device *rm)
             case 5: name = "cmp_sig";
                 st = cft_cmp_sig(rm, CFT_CMPLT, CFT_FP64, a, b, d, n, &fl, NULL);
                 break;
+            case 7: name = "reduce_seg";
+                /* eight segments, or one: one REDUCE_SEG frame either way */
+                st = cft_reduce_seg(rm, CFT_SUM, CFT_FP64, CFT_RNE, a, NULL, d,
+                                    n, n >= 8 ? n / 8 : 1, &fl, NULL);
+                break;
             default: name = "formatof_add";
                 /* fp32 -> fp64: the widening route, a convert then a pass */
                 st = cft_formatof_add(rm, CFT_FP32, CFT_FP64, CFT_RNE, a, b, d,
@@ -1221,11 +1402,12 @@ static void bench(cft_device *rm)
             get_stats(rm, hw, &s1);
             CHECK(st == CFT_OK, "%s n=%lu: %s", name, (unsigned long)n,
                   cft_strerror(st));
-            printf("  %-14s %6lu %8llu %9llu %8llu %9llu %10.2f\n", name,
+            printf("  %-14s %6lu %8llu %9llu %8llu %7llu %9llu %10.2f\n", name,
                    (unsigned long)n,
                    (unsigned long long)(s1.op[CFTR_OP_RUN] - s0.op[CFTR_OP_RUN]),
                    (unsigned long long)(s1.op[CFTR_OP_PROG_RUN] - s0.op[CFTR_OP_PROG_RUN]),
                    (unsigned long long)(s1.op[CFTR_OP_REDUCE] - s0.op[CFTR_OP_REDUCE]),
+                   (unsigned long long)(s1.op[CFTR_OP_REDUCE_SEG] - s0.op[CFTR_OP_REDUCE_SEG]),
                    (unsigned long long)(s1.requests - s0.requests - 1),
                    (t1 - t0) * 1000.0);
         }

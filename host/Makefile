@@ -790,7 +790,8 @@ serve: cft-serve$(EXE)
 # The protocol-level test: the refusals (a wrong ABI, a corrupted crc,
 # a bad magic, an oversize length, a request before HELLO), the buffer
 # and status-word operations libcft's own client never issues, the
-# server's counters, and a bit-identity smoke test against the
+# server's counters, the segmented reduction's frame with its two shape
+# refusals on the wire, and a bit-identity smoke test against the
 # software backend. --bench reports the composed operations' round
 # trips from the server's counters.
 remote-test$(EXE): tests/remote_test.c libcft.a

@@ -11910,3 +11910,52 @@ that route is half host time; idle, it is 1.01 - so the whole program
 is NOT the faster route at fp128 after all, and the default stays the
 older route. `depcost` within noise of the two entries before (fp128
 0.025 / 0.071 / 0.135 / 0.151 us a lane).
+
+## 2026-09-15 - the segmented reduction's frame, driven end to end for the first time
+
+**DESKTOP-T33SK86, Windows, MINGW64 gcc 16.1 -O2, the loopback remote
+suite (`make -C host remotetest`), the tree over b963663.**
+
+`REDUCE_SEG` was written on both ends on 2026-09-14 and nothing had
+sent one: the card day proved `cft_reduce_seg` with a script beside the
+harness, and the remote backend's frame for it had only ever been
+compiled. Three harnesses gain it, and the numbers are the before and
+after of one run:
+
+    remote-test, both routes     279 -> 352 checks, 0 failures
+    device-test -n 64 (remote)   2,656 -> 4,034 checks, 0 failed
+    remote-test --bench          26 -> 29 checks, 0 failures
+    conformance replay           184,736 cases, local and remote agree
+    cft-collatz 1..2000 fp256    same chain local and remote
+
+What the new checks are. `remote-test`: the frame for every reduction
+opcode (sum, dot, sumsq, sumabs, maxall) in two shapes - n in four
+segments, and the largest multiple of six below n in segments of six,
+a partial beat at every format - over the any-bits fill, so NaN and
+infinity propagation through the segment trees is in it; `seg == n`
+held to `cft_reduce`'s bytes and flags on both handles, four buffers
+compared; the server's two shape refusals sent raw after a HELLO (7 in
+segments of 3, a segment of 0), each a REFUSAL that closes the
+connection with a sentence naming the rule; the client's own refusals
+for the same shapes shown to send no frame, by the server's counters
+before and after; and a `reduce_seg` row in the round-trip table
+(`REDSEG` column). `device-test`: `cft_reduce_seg` over twelve (n,
+seg) shapes - a partial beat at every format (3, 5, 7, 11), a whole
+beat, one element, the whole array, n = 0 - for every reduction opcode
+the device serves, plus one any-bits shape and the five attributes,
+each result compared and the result buffers pre-filled with different
+patterns so an unwritten slot cannot pass as +0; and `CFT_MAXALL`
+through `cft_reduce` over finite and any-bits fills, which neither
+harness had carried since the opcode arrived on 2026-09-12. On a device
+without CAPS2[8] the leg holds the refusal BY NAME instead of a result,
+which is what cft.h promises there; on this run the server's device is
+the software backend and every shape computed.
+
+One thing the bench table now shows that is worth reading correctly:
+`reduce_seg` at n = 1 counts one `REDUCE` frame and no `REDUCE_SEG`,
+because `seg == n` is folded onto `cft_reduce` in the library before
+any backend is reached - the contract's "seg == n is exactly
+cft_reduce", visible on the wire.
+
+The plan for the next round - the gather, the scatter, the lane mask
+and the broadcast - is docs/ROUND2.md.

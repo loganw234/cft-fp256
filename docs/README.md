@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-four files, 40,870 lines. Flat in one directory they look like one
+Thirty-four files, 42,479 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **15,140 lines you consult while working** — the three under *Start here*,
+- **15,618 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **5,317 lines of tool manual**, one per shipped program;
-- **1,499 lines of operations**, read when you are about to do something to
+- **5,383 lines of tool manual**, one per shipped program;
+- **1,539 lines of operations**, read when you are about to do something to
   hardware;
-- **18,914 lines of record and argument** — the ledger, the roadmap and the
+- **19,939 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -54,7 +54,7 @@ product, not the implementation.
 |---|---|---|
 | [HOSTAPI.md](HOSTAPI.md) | 2,371 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
-| [REMOTE.md](REMOTE.md) | 1,355 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
+| [REMOTE.md](REMOTE.md) | 1,371 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 675 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,879 | Every platform the library has been built and run on, with dates and results. |
@@ -91,7 +91,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 11,912 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 11,961 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 2,884 | What is built, what is next, and what was decided against. |
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |

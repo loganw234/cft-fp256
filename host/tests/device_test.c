@@ -560,6 +560,104 @@ static void check_sum_ignores_b(cft_device *hw, cft_format fmt, size_t n,
     free(b);
 }
 
+/* cft_reduce_seg (ABI 0.13): n / seg results, d[s] the same tree over
+ * slice s that cft_reduce gives, the device against the software
+ * backend - which is the definition, slice by slice. Two things the
+ * whole-array compare above does not hold:
+ *
+ *  - every result is written, and none is written by the wrong
+ *    segment: the two result buffers start as different fills, so a
+ *    slot the device left alone shows as the fill and not as a
+ *    plausible +0;
+ *  - a device WITHOUT CFT_FEAT_REDUCE_SEG refuses by name. Its tile
+ *    has no SEG register and would return one result where n / seg are
+ *    due, and the library must not loop the segments over the bus for
+ *    the caller (cft.h). So on such a device the named refusal is the
+ *    pass, and a computed answer is checked only where the backend
+ *    computes it itself (software, or a remote server fronting one). */
+static int seg_refusal_noted;
+
+static void compare_reduce_seg(cft_device *sw, cft_device *hw, cft_format fmt,
+                               cft_op op, cft_round rnd, size_t n, size_t seg,
+                               uint32_t seed, int finite, int has_seg_bit)
+{
+    size_t esz = cft_format_size(fmt);
+    size_t nres = seg ? n / seg : 0;
+    size_t bytes = (n ? n : 1) * esz;
+    size_t rbytes = (nres ? nres : 1) * esz;
+    uint32_t fsw = 0, fhw = 0, bus = 0;
+    uint8_t *a = malloc(bytes), *b = malloc(bytes);
+    uint8_t *dsw = malloc(rbytes), *dhw = malloc(rbytes);
+    cft_status ssw, shw;
+    const char *kind = finite ? "finite" : "any-bits";
+
+    if (!a || !b || !dsw || !dhw) {
+        printf("  FAIL: out of memory\n");
+        failures++;
+        free(a); free(b); free(dsw); free(dhw);
+        return;
+    }
+    rs = seed ? seed : 1;
+    if (finite) {
+        fill_finite(a, fmt, n);
+        fill_finite(b, fmt, n);
+    } else {
+        fill(a, n, esz);
+        fill(b, n, esz);
+    }
+    memset(dsw, 0xA5, rbytes);
+    memset(dhw, 0x5A, rbytes);
+
+    ssw = cft_reduce_seg(sw, op, fmt, rnd, a, op == CFT_DOT ? b : NULL,
+                         dsw, n, seg, &fsw, NULL);
+    shw = cft_reduce_seg(hw, op, fmt, rnd, a, op == CFT_DOT ? b : NULL,
+                         dhw, n, seg, &fhw, &bus);
+
+    CHECK(ssw == CFT_OK, "software %s %s n=%lu seg=%lu: %s",
+          cft_format_name(fmt), cft_op_name(op), (unsigned long)n,
+          (unsigned long)seg, cft_strerror(ssw));
+    if (shw == CFT_ERR_UNSUPPORTED && !has_seg_bit &&
+        strstr(cft_last_error(), "CFT_FEAT_REDUCE_SEG")) {
+        checks++;
+        if (!seg_refusal_noted) {
+            printf("    cft_reduce_seg refused by name on this device, as "
+                   "the contract requires without CAPS2[8]:\n      %s\n",
+                   cft_last_error());
+            seg_refusal_noted = 1;
+        }
+        free(a); free(b); free(dsw); free(dhw);
+        return;
+    }
+    CHECK(shw == CFT_OK, "device %s %s n=%lu seg=%lu: %s (bus 0x%x) %s",
+          cft_format_name(fmt), cft_op_name(op), (unsigned long)n,
+          (unsigned long)seg, cft_strerror(shw), (unsigned)bus,
+          cft_last_error());
+
+    if (ssw == CFT_OK && shw == CFT_OK) {
+        size_t r;
+        checks++;
+        for (r = 0; r < nres; r++) {
+            if (memcmp(dsw + r * esz, dhw + r * esz, esz) != 0) {
+                char h1[2 * MAXE + 1], h2[2 * MAXE + 1];
+                hex(dsw + r * esz, esz, h1);
+                hex(dhw + r * esz, esz, h2);
+                printf("  FAIL: %s %s %s n=%lu seg=%lu rnd=%d, result %lu "
+                       "of %lu\n        software %s\n        device   %s\n",
+                       cft_format_name(fmt), cft_op_name(op), kind,
+                       (unsigned long)n, (unsigned long)seg, (int)rnd,
+                       (unsigned long)r, (unsigned long)nres, h1, h2);
+                failures++;
+                break;
+            }
+        }
+        CHECK(fsw == fhw, "%s %s %s n=%lu seg=%lu flags: software 0x%02x, "
+              "device 0x%02x", cft_format_name(fmt), cft_op_name(op),
+              kind, (unsigned long)n, (unsigned long)seg, (unsigned)fsw,
+              (unsigned)fhw);
+    }
+    free(a); free(b); free(dsw); free(dhw);
+}
+
 /* ---------------------------------------------------------------
  * Sequencer programs, device vs software
  *
@@ -4044,6 +4142,69 @@ int main(int argc, char **argv)
                 }
                 printf("    sumabs: %d checks, %d failed\n",
                        checks, failures);
+                fflush(stdout);
+            }
+
+            /* maxall (ABI 0.12): ceil(log2 n) elementwise maximum
+             * passes on a device without CFT_FEAT_REDUCE_SEG, ONE
+             * streamed pass on a tile with it - the same bits either
+             * way, because 754 maximum is associative and commutative,
+             * flags included. Half the cases over the whole encoding
+             * space, since NaN propagation is what a maximum has to
+             * get right and a finite fill cannot ask it. */
+            if (cft_supports(hw, CFT_MAXALL, fmt)) {
+                for (i = 0; i < (quick ? 4u : 8u) && i < nrn; i++) {
+                    compare_reduce(sw, hw, fmt, CFT_MAXALL, CFT_RNE, rn[i],
+                                   0x3a110000u + (uint32_t)(f * 50 + i), 1);
+                    compare_reduce(sw, hw, fmt, CFT_MAXALL, CFT_RNE, rn[i],
+                                   0x3a150000u + (uint32_t)(f * 50 + i), 0);
+                }
+                printf("    maxall: %d checks, %d failed\n",
+                       checks, failures);
+                fflush(stdout);
+            }
+
+            /* Per segment (ABI 0.13), every reduction opcode the device
+             * serves. The shapes: a segment that is a partial beat at
+             * every format (3, 5, 7, 11), a whole beat (8), one
+             * element (every element its own result), the whole array
+             * (which the library folds onto cft_reduce), and n = 0,
+             * which writes nothing. On a device without CAPS2[8] every
+             * one of these is the named refusal, counted once each. */
+            {
+                static const size_t sn[] = {0, 1, 8, 9, 15, 16, 30, 33,
+                                            35, 37, 64, 64};
+                static const size_t ss[] = {1, 1, 8, 3,  5,  4,  3, 11,
+                                             7, 37,  1, 16};
+                static const int sops[] = { CFT_SUM, CFT_DOT, CFT_SUMSQ,
+                                            CFT_SUMABS, CFT_MAXALL };
+                const int has_bit =
+                    (caps.seq_features & CFT_FEAT_REDUCE_SEG) != 0;
+                size_t k, nsn = quick ? 6 : sizeof sn / sizeof sn[0];
+                for (k = 0; k < sizeof sops / sizeof sops[0]; k++) {
+                    if (!cft_supports(hw, (cft_op)sops[k], fmt))
+                        continue;
+                    for (i = 0; i < nsn; i++)
+                        compare_reduce_seg(sw, hw, fmt, (cft_op)sops[k],
+                                           CFT_RNE, sn[i], ss[i],
+                                           0x5e600000u +
+                                           (uint32_t)(f * 100 + k * 20 + i),
+                                           1, has_bit);
+                    compare_reduce_seg(sw, hw, fmt, (cft_op)sops[k], CFT_RNE,
+                                       35, 7,
+                                       0x5e650000u + (uint32_t)(f * 10 + k),
+                                       0, has_bit);
+                }
+                if (!quick)
+                    for (r = 0; r < (int)(sizeof rnds / sizeof rnds[0]); r++)
+                        compare_reduce_seg(sw, hw, fmt, CFT_SUM, rnds[r],
+                                           36, 9,
+                                           0x5e6a0000u + (uint32_t)(f * 10 + r),
+                                           1, has_bit);
+                printf("    per segment: %d checks, %d failed%s\n",
+                       checks, failures,
+                       has_bit ? " (CAPS2[8] present, computed on the device)"
+                               : "");
                 fflush(stdout);
             }
         } else {
