@@ -438,6 +438,332 @@ async def maxall_on_the_tile(dut):
                       f"bit-exact")
 
 
+# ======================================================================
+# the beat-wide tree (2026-09-15)
+# ======================================================================
+#
+# The tree reduces a whole beat in the lanes a reduction leaves idle
+# and hands the accumulator one partial at level log2(epb), instead of
+# handing it epb elements one at a time. The PAIRING is unchanged and
+# every assertion above is the proof of that - they pass or they do
+# not.
+#
+# What they cannot show is that the tree ran at all. A build that
+# quietly fell back to the serializer at every size returns exactly the
+# same bits, so the tree's own beat counter is read here and held to a
+# number DERIVED from n, seg and the format. It must be nonzero where
+# the sizes allow the tree and zero where they do not, and both halves
+# are cases below.
+
+def wide_beats_expected(fmt, n, seg):
+    """Beats the tree may take, from the shape alone.
+
+    A beat goes through the tree when it is FULL and its elements are
+    one aligned group of the segment - which is exactly "seg is a
+    multiple of epb", the whole array (seg = 0) included. Only the last
+    beat of a run can be short. fp256 is one element a beat and has no
+    tree.
+    """
+    epb = 256 // fmt.width
+    if epb == 1:
+        return 0
+    if seg and (seg % epb) != 0:
+        return 0
+    return n // epb
+
+
+def wide_beats_seen(dut):
+    return int(dut.u_engine.wide_beats.value)
+
+
+@cocotb.test()
+async def the_wide_path_is_taken_exactly_where_the_sizes_allow(dut):
+    """Bits against the model AND the tree's beat count against the
+    shape, at every format, across the seams: a segment boundary inside
+    a beat, a segment one element short of a beat, a whole-array
+    reduction whose n is one more than a multiple of epb."""
+    axil, ram = await _bring_up(dut)
+    total = 0
+    zero_seen = 0
+    wide_seen = 0
+    for fmt in FORMATS:
+        epb = 256 // fmt.width
+        shapes = [
+            # whole array, exactly beats
+            (4 * epb, 0),
+            # whole array, one element PAST a beat: every full beat
+            # goes wide and a one-element tail goes serial, which is
+            # the seam between the two paths
+            (4 * epb + 1, 0),
+            # whole array, one element short: the last beat is partial
+            (4 * epb - 1, 0),
+            # segments that are whole beats
+            (8 * epb, epb),
+            (8 * epb, 2 * epb),
+            (4 * epb, 4 * epb),
+            # a segment boundary INSIDE a beat: the tree must stand
+            # down entirely
+            (5 * 7, 7),
+            (6 * 3, 3),
+            # a segment one element short of a beat
+            (6 * (epb - 1), epb - 1) if epb > 1 else (6, 1),
+            # a segment one element past a beat
+            (5 * (epb + 1), epb + 1),
+        ]
+        for n, seg in shapes:
+            total += await run_reduce(dut, axil, ram, fmt, n, 0,
+                                      seed=1300 + n * 7 + seg, seg=seg)
+            got = wide_beats_seen(dut)
+            want = wide_beats_expected(fmt, n, seg)
+            assert got == want, (
+                f"{fmt.name} n={n} seg={seg}: the tree took {got} beats, "
+                f"the shape allows {want} - a fallback that still gives "
+                f"the right bits is exactly what this counter is for")
+            if want:
+                wide_seen += 1
+            else:
+                zero_seen += 1
+    # Both halves of the control must actually have happened.
+    assert wide_seen > 0 and zero_seen > 0, (
+        f"the sizes above must cover both: {wide_seen} shapes took the "
+        f"tree and {zero_seen} refused it")
+    dut._log.info(f"the wide path: {wide_seen} shapes took it and "
+                  f"{zero_seen} correctly did not, {total} elements exact")
+
+
+@cocotb.test()
+async def the_wide_path_at_every_attribute_and_opcode(dut):
+    """Five rounding attributes x four formats x sum and maxall, on
+    shapes the tree takes, with the count asserted each time. The tree
+    is epb-1 adds in the lanes beside the accumulator's, so every one
+    of them has to round the way the run asks."""
+    axil, ram = await _bring_up(dut)
+    total = 0
+    for rnd in range(5):
+        for fmt in FORMATS:
+            epb = 256 // fmt.width
+            for op in (OP_SUM, OP_MAXALL):
+                for n, seg in ((6 * epb, 0), (6 * epb, 2 * epb),
+                               (6 * epb + 1, 0)):
+                    total += await run_reduce(
+                        dut, axil, ram, fmt, n, rnd,
+                        seed=2100 + rnd * 17 + n + seg, seg=seg, op=op,
+                        specials=(rnd == 0))
+                    got = wide_beats_seen(dut)
+                    want = wide_beats_expected(fmt, n, seg)
+                    assert got == want, (
+                        f"{fmt.name} op {op} n={n} seg={seg} rnd={rnd}: "
+                        f"tree took {got} beats, shape allows {want}")
+    dut._log.info(f"the wide path at five attributes x four formats x "
+                  f"two opcodes: {total} elements, exact")
+
+
+@cocotb.test()
+async def the_wide_path_under_load(dut):
+    """Long enough to saturate the operand FIFOs and the tree's own
+    credit, with ORDINARY operands for the reason run_sum's docstring
+    gives: one NaN would make every wrong answer compare equal. This is
+    the run where the tree is admitting a beat a cycle, the credit
+    counter is the throttle, and the partial queue is never empty."""
+    axil, ram = await _bring_up(dut)
+    for fmt, n, seg in ((FP32, 5600, 0), (FP32, 5600, 32),
+                        (FP64, 2800, 0), (FP128, 1400, 0),
+                        (FP64, 2800, 8)):
+        await run_reduce(dut, axil, ram, fmt, n, 0, seed=8800 + n + seg,
+                         seg=seg)
+        got = wide_beats_seen(dut)
+        want = wide_beats_expected(fmt, n, seg)
+        assert got == want, (
+            f"{fmt.name} n={n} seg={seg}: tree took {got}, want {want}")
+    dut._log.info("the wide path under load: FIFOs saturated, bit-exact")
+
+
+async def run_underflowing_elementwise(dut, axil, ram, fmt, n):
+    """An elementwise FMA whose every lane underflows to zero.
+
+    Operands DERIVED from the format rather than typed: exponent field
+    1 is the smallest normal, and its square is far below the smallest
+    subnormal at every width, so the product flushes to zero with
+    UNDERFLOW and INEXACT. Returns the run's FLAGS.
+    """
+    from cft_golden import OP_FMA  # noqa: E402
+    ebytes = fmt.width // 8
+    tiny = (1 << fmt.man_w).to_bytes(ebytes, "little")
+    ram.write(A_BASE, tiny * n)
+    ram.write(B_BASE, tiny * n)
+    ram.write(C_BASE, b"\x00" * (n * ebytes))
+    ram.write(D_BASE, b"\x00" * (n * ebytes + 32))
+    await axil.write_dword(MODE, (PREC_CODE[fmt.name] << 8) | OP_FMA)
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await write64(axil, SEGREG, 0)
+    await axil.write_dword(CTRL, 1)
+    for _ in range(20000):
+        await ClockCycles(dut.ap_clk, 20)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            break
+    else:
+        raise AssertionError(f"{fmt.name} elementwise n={n}: never finished")
+    assert await axil.read_dword(STATUS) == 0
+    return await axil.read_dword(FLAGS)
+
+
+@cocotb.test()
+async def a_reductions_flags_do_not_depend_on_the_run_before_it(dut):
+    """THE smallest shape that catches a flag path with no delay line.
+
+    Two runs, no sequencer, and the second one EXACT: an elementwise
+    FMA whose every lane underflows, then a sum of 1.0 with itself a
+    thousand times. Every partial of the counter's tree over 1.0s is a
+    whole number well below the format's exact-integer limit, so the
+    model raises nothing and ANY bit in the reduction's FLAGS came from
+    somewhere that is not this run.
+
+    At P4's first tip that bit was the previous run's UNDERFLOW, still
+    coming out of lane 4 of the shared array for the first LATENCY
+    accepted edges of the reduction, with the BITS identical either way
+    (V4's minimal reproduction, 2026-09-15). Only FLAGS holds this, and
+    only against a preceding run that raised something - which is why
+    the first run's flags are asserted too: without them the case tests
+    nothing and would pass for the wrong reason.
+
+    Determinism, not cosmetics: the same reduction over the same
+    operands must not answer differently for having been run second.
+    """
+    axil, ram = await _bring_up(dut)
+    for fmt, en, rn in ((FP32, 4096, 1000), (FP64, 2048, 1000),
+                        (FP128, 1024, 500), (FP256, 512, 250)):
+        ef = await run_underflowing_elementwise(dut, axil, ram, fmt, en)
+        assert ef != 0, (
+            f"{fmt.name}: the elementwise run raised nothing, so the "
+            f"reduction after it cannot inherit anything and this case "
+            f"is testing the wrong thing")
+        one = fmt.bias << fmt.man_w          # 1.0, derived not typed
+        want, want_f = fsum(fmt, [one] * rn, 0)
+        assert want_f == 0, (
+            f"{fmt.name}: {rn} copies of 1.0 must sum exactly; the model "
+            f"says {want_f:#07b}, so pick a smaller count")
+        ebytes = fmt.width // 8
+        ram.write(A_BASE, one.to_bytes(ebytes, "little") * rn)
+        ram.write(B_BASE, b"\x00" * max(rn * ebytes, 32))
+        ram.write(C_BASE, b"\x00" * max(rn * ebytes, 32))
+        ram.write(D_BASE, b"\xAA" * 64)
+        await axil.write_dword(MODE, (PREC_CODE[fmt.name] << 8) | OP_SUM)
+        await write64(axil, NREG, rn)
+        await write64(axil, APTR, A_BASE)
+        await write64(axil, BPTR, B_BASE)
+        await write64(axil, CPTR, C_BASE)
+        await write64(axil, DPTR, D_BASE)
+        await write64(axil, SEGREG, 0)
+        await axil.write_dword(CTRL, 1)
+        for _ in range(20000):
+            await ClockCycles(dut.ap_clk, 20)
+            if (await axil.read_dword(CTRL)) & 0x2:
+                break
+        else:
+            raise AssertionError(f"{fmt.name} sum n={rn}: never finished")
+        got = int.from_bytes(ram.read(D_BASE, ebytes), "little")
+        got_f = await axil.read_dword(FLAGS)
+        assert await axil.read_dword(STATUS) == 0
+        assert got == want, (
+            f"{fmt.name} sum of {rn} ones: got {got:#x} want {want:#x}")
+        assert got_f == want_f, (
+            f"{fmt.name} sum of {rn} ones, straight after an elementwise "
+            f"run whose FLAGS were {ef:#07b}: FLAGS {got_f:#07b} want "
+            f"{want_f:#07b} - an exact reduction inherited the previous "
+            f"run's flags from the shared array")
+        # and the tree really did run, where the shape allows it
+        assert wide_beats_seen(dut) == wide_beats_expected(fmt, rn, 0)
+    dut._log.info("an exact reduction after a flag-raising elementwise run: "
+                  "FLAGS are its own at every format")
+
+
+@cocotb.test()
+async def a_reduction_straight_after_a_sequencer_program(dut):
+    """FLAGS after a run of a DIFFERENT KIND on the shared array.
+
+    Every other case in this file runs reductions back to back, and
+    between two of them the tree's lanes hold +0 - so nothing is left
+    in the array to leak and a flag path that reads those lanes
+    unqualified looks correct. It takes a run of another kind
+    immediately before the reduction to put something there, and on
+    this tile that means a SEQUENCER PROGRAM: cft_seq and the engine
+    share one cft_lanes, and `lane_flags` is not gated on out_valid, so
+    for the first LATENCY accepted edges of a run the per-lane flags
+    are still the program's.
+
+    That is a real defect this bench did not hold: the beat-wide tree's
+    first flag collection ORed lanes 1.. at every accepted edge, and an
+    fp32 sum after an fp128 program reported the PROGRAM's UNDERFLOW -
+    `flags 0b11000 want 0b10000`, bits correct
+    (tb/probe_reduce_then_prog.py, found by V4, 2026-09-15). The probe
+    is a diagnostic and is not in SIM_BENCHES; this is the same shape
+    where `make sim` will see it.
+
+    run_reduce scores FLAGS against the model on every run, so the
+    assertion is already there - what this case adds is the sequence.
+    """
+    from cft_golden import seq, softfloat as sf          # noqa: E402
+    from test_krnl_seq import gen_stream, run_prog       # noqa: E402
+
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    # 2**21, not the 2**20 every other case here uses: the sequencer's
+    # program image lives at 0x180000 (test_krnl_seq's PROG_BASE).
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 21, mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 21, mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                size=2 ** 21, mem=ram_a.mem)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    assert await axil.read_dword(MAGIC) == 0x43465430
+
+    rng = random.Random(9101)
+    # The probe's program: fp128 fma against a constant, one deposit.
+    # fp128 because the leak is loudest across a precision change - the
+    # fp32 ladder that the reduction then selects was idle throughout.
+    konst = (FP128.bias << FP128.man_w) | (1 << (FP128.man_w - 1))
+    prog = seq.Program(FP128, [seq.alu(sf.OP_FMA, 4, 0, 1, 2), seq.deposit(4),
+                               seq.halt()], consts=[konst], max_deposits=1)
+    total = 0
+    for pn in (8, 34):
+        await run_prog(dut, axil, ram_a, prog,
+                       gen_stream(FP128, pn, rng), gen_stream(FP128, pn, rng),
+                       gen_stream(FP128, pn, rng),
+                       f"fp128 fma+deposit n={pn}, before a reduction",
+                       tries=20000)
+        # Every format and both eligibilities, because each has its own
+        # lane map and its own set of levels; fp32 n=1000 whole is the
+        # shape the probe failed on.
+        for fmt, n, seg in ((FP32, 1000, 0), (FP32, 512, 64),
+                            (FP64, 500, 0), (FP64, 480, 16),
+                            (FP128, 250, 0), (FP256, 40, 0)):
+            total += await run_reduce(dut, axil, ram_a, fmt, n, 0,
+                                      seed=9200 + n + seg, seg=seg)
+            got = wide_beats_seen(dut)
+            want = wide_beats_expected(fmt, n, seg)
+            assert got == want, (
+                f"{fmt.name} n={n} seg={seg} after a program: tree took "
+                f"{got} beats, shape allows {want}")
+    dut._log.info(f"a reduction straight after a sequencer program: FLAGS "
+                  f"are the reduction's own at every format, "
+                  f"{total} elements exact")
+
+
 @cocotb.test()
 async def segmented_flags_are_the_or_over_segments(dut):
     """Specials in: a NaN segment beside a clean one, invalid from a

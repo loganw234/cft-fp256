@@ -22,6 +22,16 @@ module tb_reduce_acc #(
     input  logic [31:0] in_data,
     output logic        in_ready,
 
+    // The wide input: a partial covering an aligned group of
+    // 2^win_lvl consecutive elements. The bench computes the group
+    // with the model's own tree and hands it over here, which is how
+    // the pairing claim of the accumulator's header is tested against
+    // the model without any engine in the way.
+    input  logic        win_valid,
+    input  logic [31:0] win_data,
+    input  logic [5:0]  win_lvl,
+    output logic        win_ready,
+
     input  logic        flush,
 
     output logic        out_valid,
@@ -38,6 +48,8 @@ module tb_reduce_acc #(
   cft_reduce_acc #(.W(32), .LEVELS(LEVELS), .ADD_LATENCY(LATENCY)) u_acc (
       .clk(clk), .rst_n(rst_n), .clk_en(1'b1), .clear(clear),
       .in_valid(in_valid), .in_data(in_data), .in_ready(in_ready),
+      .win_valid(win_valid), .win_data(win_data), .win_lvl(win_lvl),
+      .win_ready(win_ready),
       .flush(flush),
       .add_valid(add_valid), .add_a(add_a), .add_b(add_b),
       .add_res(add_res), .add_flags(add_flags),
