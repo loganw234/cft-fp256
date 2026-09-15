@@ -64,3 +64,93 @@ async def reduce_then_program(dut):
                            f"fp128 fma+deposit n={pn} after {efmt.name} sum n={en}",
                            tries=20000)
     dut._log.info("every program after a reduction completed and scored")
+
+
+def prog_fold_scratch(fmt, slots):
+    """cft-rebound's accumulate as a program: r3 starts at +0 and names
+    no stream; every scratch slot is added in order; one deposit. The
+    slots are what the index table fills - a lane's row of gathered
+    contributions - so this is ask 1 in three instructions a slot."""
+    insns = []
+    for slot in range(slots):
+        insns.append(seq.ldl(4, slot))
+        insns.append(seq.alu(sf.OP_ADD, rd=3, ra=3, rc=4))
+    insns.append(seq.deposit(3))
+    insns.append(seq.halt())
+    return seq.Program(fmt, insns, consts=[], max_deposits=1,
+                       flags=seq.FLAG_SCRATCH_IO, n_scratch_in=slots,
+                       n_scratch_out=0)
+
+
+@cocotb.test()
+async def indexed_program_between_reductions(dut):
+    """The seam of round 2's wave 1 (docs/ROUND2.md, "What the lead
+    keeps"): the engine's segmented reduction, then a program whose
+    scratch block is gathered through its table, then the engine
+    again, then a gathered program that crosses a lane block - on the
+    same tile, the shared array handed back and forth. Every result is
+    the model's; a phantom retire, a table read against the wrong
+    base after a reduction, or a segment boundary left in the
+    accumulator would show here and in no single-mechanism bench."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 21, mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 21, mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                size=2 ** 21, mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    assert await axil.read_dword(MAGIC) == 0x43465430
+    rng = random.Random(0x5EA1)
+
+    def gathered_run(fmt, lanes, slots, pool_len, holes):
+        pool = gen_stream(fmt, pool_len, rng, tame=True)
+        table = [rng.randrange(pool_len) for _ in range(lanes * slots)]
+        for k in holes:
+            table[k] = seq.IDX_NONE
+        va = gen_stream(fmt, lanes, rng, tame=True)
+        vb = gen_stream(fmt, lanes, rng, tame=True)
+        vc = gen_stream(fmt, lanes, rng, tame=True)
+        return pool, table, va, vb, vc
+
+    # 1. a segmented reduction on the engine
+    await run_reduce(dut, axil, ram, FP64, 100, 0, seed=7001, op=OP_SUM,
+                     seg=20)
+    # 2. a gathered fold, one partial block at fp64 (64 lanes a block)
+    pg = prog_fold_scratch(FP64, 6)
+    pool, table, va, vb, vc = gathered_run(FP64, 40, 6, 50,
+                                           holes=range(3, 240, 7))
+    await run_prog(dut, axil, ram, pg, va, vb, vc,
+                   "fp64 gathered fold after a segmented reduction",
+                   scratch_in=pool, idx=(None, None, None, table), n=40)
+    # 3. the engine again, a different format and a whole-array sum
+    await run_reduce(dut, axil, ram, FP32, 1000, 0, seed=7002, op=OP_SUM,
+                     seg=8)
+    await run_reduce(dut, axil, ram, FP128, 40, 0, seed=7003, op=OP_SUM)
+    # 4. a gathered fold across a lane block at fp32 (128 lanes a block):
+    #    the table's second block starts at a nonzero scratch offset
+    pg32 = prog_fold_scratch(FP32, 3)
+    pool, table, va, vb, vc = gathered_run(FP32, 150, 3, 31,
+                                           holes=range(5, 450, 11))
+    await run_prog(dut, axil, ram, pg32, va, vb, vc,
+                   "fp32 gathered fold across a lane block, after two "
+                   "reductions", scratch_in=pool,
+                   idx=(None, None, None, table), n=150)
+    # 5. and the engine once more, so a phantom left by the program
+    #    would meet a reduction rather than silence
+    await run_reduce(dut, axil, ram, FP64, 64, 0, seed=7004, op=OP_SUM,
+                     seg=16)
+    dut._log.info("indexed programs between reductions: every result the "
+                  "model's")
