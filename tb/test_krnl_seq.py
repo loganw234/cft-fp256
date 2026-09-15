@@ -394,7 +394,8 @@ async def run_refused(dut, axil, ram, image, prog, va, vb, vc, n,
 
 
 async def run_refused_mode(dut, axil, ram, prog, va, vb, vc, n,
-                           mode_extra, name, want_flags):
+                           mode_extra, name, want_flags,
+                           idx=(None, None, None, None)):
     """A run the CSR throws back for a MODE bit this build does not
     carry: STATUS[3], no write anywhere, and the previous run's FLAGS
     left alone. The refusal is the CSR's, so the image is valid and the
@@ -405,7 +406,8 @@ async def run_refused_mode(dut, axil, ram, prog, va, vb, vc, n,
     ram.write(D_BASE, bytes([POISON]) * (dep_bytes + GUARD))
     ram.write(CNT_BASE, bytes([POISON]) * (cnt_bytes + GUARD))
     await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
-                          PREC_CODE[prog.fmt.name], mode_extra=mode_extra)
+                          PREC_CODE[prog.fmt.name], mode_extra=mode_extra,
+                          idx=idx)
     await poll_done(dut, axil, name)
     got_st = await axil.read_dword(STATUS)
     assert got_st == ST_REFUSED, (
@@ -1186,6 +1188,18 @@ async def krnl_sequencer(dut):
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
                            1 << 31, "MODE[31], reserved on every build",
                            flags_before)
+    # ...and MODE[22] on an image that declares NO SCRATCH INPUT. The
+    # bit is honoured by this build, so the CSR lets it through: what
+    # refuses it is the sequencer's header check, because the table
+    # indexes a block this image does not have and a MODE bit a run
+    # cannot honour is refused rather than ignored. The pointer is a
+    # REAL staged table, so the refusal is about the image and not
+    # about a poisoned address.
+    assert not pg32.scratch_io,         "this case needs a program that declares no scratch I/O"
+    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                           0, "MODE[22] with no scratch block to gather "
+                           "into", flags_before,
+                           idx=(None, None, None, list(range(n_id))))
 
     # ---- and elementwise still works after all of it ------------------
     await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
