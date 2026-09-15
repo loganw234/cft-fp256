@@ -3920,6 +3920,41 @@ int main(void)
         CHECK(st == CFT_OK, "CFT_IDX_NONE is not an out-of-range index: "
               "%s (%s)", cft_strerror(st), cft_last_error());
         ix[3] = 3;
+        /* An `n` the DENSE path refuses without touching a byte must be
+         * refused before a single table entry is read (V2, 2026-09-15).
+         * The table pointer here is a POISONED address that would fault
+         * if anything dereferenced it, and the huge n is one
+         * `n > SIZE_MAX / esz` rejects - so this case passes only if
+         * every dense-path check runs first. Before the fix it walked
+         * the table for n entries and segfaulted. */
+        {
+            const uint32_t *poison = (const uint32_t *)(uintptr_t)0x10;
+            cft_elem_args H;
+            memset(&H, 0, sizeof H);
+            H.struct_size = sizeof H;
+            H.a = a8; H.b = a8; H.c = a8; H.d = d8;
+            H.n = (size_t)-1 / 4u;          /* n * esz cannot be sized */
+            H.idx_a = poison; H.idx_a_src = 8;
+            st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &H);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "an n too large to size, with a table, is refused "
+                  "without reading it: %s", cft_strerror(st));
+            /* ...and the same for the NULL output, the other check the
+             * dense path makes before it touches memory. */
+            H.n = 8;
+            H.d = NULL;
+            st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &H);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "a NULL d, with a table, is refused without reading "
+                  "it: %s", cft_strerror(st));
+            /* ...and a reduction opcode, which this call refuses
+             * whatever its operands are. */
+            H.d = d8;
+            st = cft_run_ex(dev, CFT_SUM, CFT_FP64, CFT_RNE, &H);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "a reduction opcode, with a table, is refused without "
+                  "reading it: %s", cft_strerror(st));
+        }
         E.idx_a_src = 0;
         st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
         CHECK(st == CFT_ERR_INVALID_ARGUMENT,

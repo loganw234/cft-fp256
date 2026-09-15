@@ -2460,8 +2460,14 @@ on every backend, and three more rules are this call's:
   device, and a program's deposit window is a separate buffer role
   with its own write discipline, so `d` overlapping an operand would
   mean something different on each backend. Refused on every backend
-  rather than only where it bites. A caller who wants an in-place
-  update runs into their own buffer and copies.
+  rather than only where it bites, and refused before a single index is
+  read - it is checked behind every argument rule the dense run has,
+  so an `n` the dense path rejects is rejected the same way here. The
+  rule looks at all three operand pointers and not only the ones the
+  opcode reads, so `d` overlapping `b` on an `ADD` is refused as well:
+  over-broad by a pointer the run would never have fetched, which is
+  the direction to be wrong in. A caller who wants an in-place update
+  runs into their own buffer and copies.
 * **A SCALAR operand beside an indexed one is legal and works.**
   `scalar_mask` and a table on the SAME operand remain
   `CFT_ERR_INVALID_ARGUMENT` (a stride of zero and a table are two
@@ -2477,7 +2483,10 @@ mechanism (`op r3, <streams>; DEPOSIT r3; HALT`, `max_deposits` 1, one
 deposit a lane landing dense in `d`), so the TILE gathers and the
 elements the caller did not ask for never cross the bus; a device
 without a sequencer, and then a device without CAPS2[9], is refused by
-name in that order. On the software backend the operands are gathered
+name in that order. A scalar operand on that route needs no
+`CFT_SEQ_FEAT_SCALAR`: it becomes one of the composed program's
+constants rather than `MODE[18:16]`, so CAPS2[7] gates the DENSE
+scalar-mask run and nothing else. On the software backend the operands are gathered
 and the dense path runs over them, which is the definition rather than
 an approximation of it. On the remote backend the client gathers and
 sends a dense `RUN`: the call is portable and the saving is not, which

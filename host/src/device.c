@@ -1258,6 +1258,118 @@ static cft_status run_impl(cft_device *dev,
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
 
+    /* ==== R16's two MEMORY-TOUCHING argument rules ===================
+     *
+     * They live HERE, and not beside the shape rules in cft_run_ex,
+     * because they are the first things in this call that read a
+     * caller's index table or compute a byte count from `n` - and
+     * everything above this line is every check the DENSE path makes
+     * before it touches a byte: the format, the attribute, the opcode
+     * and its group, the early return for n == 0, the NULL output,
+     * the NULL operand an opcode requires, and `n > SIZE_MAX / esz`.
+     *
+     * Putting them before those was a regression of the elementwise
+     * entry point and not only of the new feature (V2, 2026-09-15): an
+     * `n` the dense path refuses as an argument error without touching
+     * a byte walked the caller's table for n entries first, and
+     * n = 2**61 with an 8-entry table segmentation-faulted where the
+     * same n with no table returned CFT_ERR_INVALID_ARGUMENT. The
+     * ordering rule is unchanged and is now true of memory as well as
+     * of messages: argument errors before capability refusals, and no
+     * byte of a caller's buffer read until every dense-path check has
+     * passed.
+     *
+     * Behind run_impl's checks rather than duplicating the two named
+     * ones, so that a check added to the dense path later is inherited
+     * here instead of being forgotten here. */
+    if (tables_present(tab)) {
+        const void *opnd[3];
+        int r;
+        opnd[0] = a; opnd[1] = b; opnd[2] = c;
+    /* ALIASING. `d` may alias a, b or c in a DENSE run and still
+     * may: the element loop loads before it stores and element i
+     * of the output is element i of the input, so the two never
+     * disagree. WITH A TABLE the run is a different machine and
+     * `d` may overlap nothing.
+     *
+     * For the indexed operand itself the reason is immediate: lane
+     * i reads source[idx[i]], which is ANY element of the source
+     * rather than element i, so a source the run is also writing is
+     * read after write and the answer depends on the order the
+     * lanes happen to run in.
+     *
+     * For the DENSE operands beside it the reason is the route. A
+     * table makes this run a program on a device, and a program's
+     * deposit window is a separate buffer ROLE with its own write
+     * discipline - the software executor zeroes the whole window
+     * before its first block, the XRT path binds it as an output
+     * and never syncs it in - so `d` overlapping any operand means
+     * something different on each backend. Refusing all three is
+     * the only rule that gives one answer everywhere, which is
+     * worth more than the in-place update it costs: a caller who
+     * wants one can run into their own buffer and copy, and will
+     * know they did.
+     *
+     * Refused on every backend and not only where it bites - the
+     * software route gathers into temporaries first and would
+     * survive it, and a rule that held on two backends out of three
+     * is not a rule.
+     *
+     * Windows, not pointers: an indexed source is idx_*_src
+     * elements, a dense one is n, the output is n, and none of them
+     * need start at the same place to collide. */
+    if (tables_present(tab)) {
+        const size_t fsz = cft_format_size(fmt);
+        const size_t dbytes = n * fsz;
+        for (r = 0; r < 3; r++) {
+            size_t obytes;
+            if (!opnd[r])
+                continue;
+            obytes = (tab->idx[r] ? tab->src[r]
+                             : ((scalar_mask >> r) & 1u)
+                                 ? 1u : n) * fsz;
+            if (windows_overlap(d, dbytes, opnd[r], obytes)) {
+                cft_set_error(
+                    "cft_run_ex: d overlaps operand %c, and a run with "
+                    "an index table may not write over any of its "
+                    "operands (%lu elements at %c, %lu written at d); "
+                    "a gathered lane reads any element of its source, "
+                    "and the deposit window of the program this "
+                    "composes into is a separate buffer - give the "
+                    "gather its own output",
+                    'a' + r, (unsigned long)(obytes / fsz), 'a' + r,
+                    (unsigned long)n);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    /* The bound, checked BEFORE the run and on every backend, by
+     * name and by value: an index at or past the source's declared
+     * length is refused, because a device must never read past a
+     * buffer for a caller. Word for word the rule seq_check_round2
+     * holds a program run to, so the composed route and the program
+     * it composes into refuse the same table with the same
+     * sentence. CFT_IDX_NONE is not an index and is never out of
+     * range. */
+    for (r = 0; r < 3; r++) {
+        size_t e;
+        if (!tab->idx[r])
+            continue;
+        for (e = 0; e < n; e++) {
+            if (tab->idx[r][e] == CFT_IDX_NONE)
+                continue;
+            if ((size_t)tab->idx[r][e] >= tab->src[r]) {
+                cft_set_error(
+                    "cft_run_ex: idx_%c[%lu] = %lu is at or past the "
+                    "%lu elements idx_%c_src says operand %c holds",
+                    'a' + r, (unsigned long)e,
+                    (unsigned long)tab->idx[r][e], (unsigned long)tab->src[r],
+                    'a' + r, 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    }
     /* ==== R16: an indexed elementwise run (ABI 0.14) =================
      *
      * The fork, and the only one. Everything above is what a dense run
@@ -1298,6 +1410,38 @@ static cft_status run_impl(cft_device *dev,
                             scalar_mask, tab, esz, flags_out, bus_out);
     }
     /* ==== end of R16 ================================================= */
+
+    /* A scalar operand on a device that cannot do it is refused BY NAME,
+     * which is the whole reason CAPS2[7] exists. The alternative - run it
+     * anyway and let the tile ignore MODE[18:16] - reads n elements from
+     * a one-element buffer, and that is an out-of-bounds read rather than
+     * a wrong number. The software and remote backends always carry it:
+     * one indexes 0 and the other expands locally.
+     *
+     * AFTER the R16 fork, deliberately (V2, 2026-09-15). The refusal is
+     * about MODE[18:16], and MODE[18:16] is what the DENSE device route
+     * uses; the composed route does not touch it at all - a scalar
+     * operand becomes one of the program's own CONSTANTS, which is the
+     * whole point of that design. Refusing a composed run for a
+     * capability it does not use would have made a tile publishing the
+     * sequencer and CAPS2[9] but not CAPS2[7] reject exactly the call
+     * this parcel exists to serve.
+     *
+     * The gathered route still reaches this line, because run_gathered
+     * re-enters run_impl with no tables and the dense device path then
+     * really does set MODE[18:16] - so a build with -DCFT_NO_PROGRAM,
+     * where nothing can compose, is refused here as it always was. Which
+     * is the test of whether this is in the right place: it is reached
+     * by exactly the runs that use the bit. */
+    if (scalar_mask && dev->backend == CFT_BACKEND_XRT &&
+        !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
+        cft_set_error(
+            "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
+            "does not publish (CAPS2[7]); ask cft_get_caps before issuing "
+            "one, or pass the value as an array of copies - which is what "
+            "this run would otherwise have read past the end of");
+        return CFT_ERR_UNSUPPORTED;
+    }
 
 #ifdef CFT_ENABLE_XRT
     if (dev->backend == CFT_BACKEND_XRT) {
@@ -1847,105 +1991,12 @@ CFT_API cft_status cft_run_ex(cft_device *dev,
                 }
             }
         }
-        /* ALIASING. `d` may alias a, b or c in a DENSE run and still
-         * may: the element loop loads before it stores and element i
-         * of the output is element i of the input, so the two never
-         * disagree. WITH A TABLE the run is a different machine and
-         * `d` may overlap nothing.
-         *
-         * For the indexed operand itself the reason is immediate: lane
-         * i reads source[idx[i]], which is ANY element of the source
-         * rather than element i, so a source the run is also writing is
-         * read after write and the answer depends on the order the
-         * lanes happen to run in.
-         *
-         * For the DENSE operands beside it the reason is the route. A
-         * table makes this run a program on a device, and a program's
-         * deposit window is a separate buffer ROLE with its own write
-         * discipline - the software executor zeroes the whole window
-         * before its first block, the XRT path binds it as an output
-         * and never syncs it in - so `d` overlapping any operand means
-         * something different on each backend. Refusing all three is
-         * the only rule that gives one answer everywhere, which is
-         * worth more than the in-place update it costs: a caller who
-         * wants one can run into their own buffer and copy, and will
-         * know they did.
-         *
-         * Refused on every backend and not only where it bites - the
-         * software route gathers into temporaries first and would
-         * survive it, and a rule that held on two backends out of three
-         * is not a rule.
-         *
-         * Windows, not pointers: an indexed source is idx_*_src
-         * elements, a dense one is n, the output is n, and none of them
-         * need start at the same place to collide. */
-        if (idx[0] || idx[1] || idx[2]) {
-            const size_t fsz = cft_format_size(fmt);
-            const size_t dbytes = args->n * fsz;
-            for (r = 0; r < 3; r++) {
-                size_t obytes;
-                if (!opnd[r])
-                    continue;
-                obytes = (idx[r] ? src[r]
-                                 : ((args->scalar_mask >> r) & 1u)
-                                     ? 1u : args->n) * fsz;
-                if (windows_overlap(args->d, dbytes, opnd[r], obytes)) {
-                    cft_set_error(
-                        "cft_run_ex: d overlaps operand %c, and a run with "
-                        "an index table may not write over any of its "
-                        "operands (%lu elements at %c, %lu written at d); "
-                        "a gathered lane reads any element of its source, "
-                        "and the deposit window of the program this "
-                        "composes into is a separate buffer - give the "
-                        "gather its own output",
-                        'a' + r, (unsigned long)(obytes / fsz), 'a' + r,
-                        (unsigned long)args->n);
-                    return CFT_ERR_INVALID_ARGUMENT;
-                }
-            }
-        }
-        /* The bound, checked BEFORE the run and on every backend, by
-         * name and by value: an index at or past the source's declared
-         * length is refused, because a device must never read past a
-         * buffer for a caller. Word for word the rule seq_check_round2
-         * holds a program run to, so the composed route and the program
-         * it composes into refuse the same table with the same
-         * sentence. CFT_IDX_NONE is not an index and is never out of
-         * range. */
-        for (r = 0; r < 3; r++) {
-            size_t i;
-            if (!idx[r])
-                continue;
-            for (i = 0; i < args->n; i++) {
-                if (idx[r][i] == CFT_IDX_NONE)
-                    continue;
-                if ((size_t)idx[r][i] >= src[r]) {
-                    cft_set_error(
-                        "cft_run_ex: idx_%c[%lu] = %lu is at or past the "
-                        "%lu elements idx_%c_src says operand %c holds",
-                        'a' + r, (unsigned long)i,
-                        (unsigned long)idx[r][i], (unsigned long)src[r],
-                        'a' + r, 'a' + r);
-                    return CFT_ERR_INVALID_ARGUMENT;
-                }
-            }
-        }
     }
-    /* A scalar operand on a device that cannot do it is refused BY NAME,
-     * which is the whole reason CAPS2[7] exists. The alternative - run it
-     * anyway and let the tile ignore MODE[18:16] - reads n elements from
-     * a one-element buffer, and that is an out-of-bounds read rather than
-     * a wrong number. The software and remote backends always carry it:
-     * one indexes 0 and the other expands locally. */
-    if (args->scalar_mask && dev->backend == CFT_BACKEND_XRT &&
-        !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
-        cft_set_error(
-            "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
-            "does not publish (CAPS2[7]); ask cft_get_caps before issuing "
-            "one, or pass the value as an array of copies - which is what "
-            "this run would otherwise have read past the end of");
-        return CFT_ERR_UNSUPPORTED;
-    }
+    /* The two rules that READ a table's entries, or do arithmetic on
+     * `n`, are NOT here. They are in run_impl, behind every check the
+     * dense path makes before it touches memory - see the block there.
+     * Everything above this line reads a pointer's value and nothing
+     * it points at, which is what lets it run first. */
     {
         run_tables tab;
         tab.idx[0] = args->idx_a; tab.idx[1] = args->idx_b;
