@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-five files, 43,601 lines. Flat in one directory they look like one
+Thirty-five files, 43,681 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **15,754 lines you consult while working** — the three under *Start here*,
+- **15,834 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **5,383 lines of tool manual**, one per shipped program;
 - **1,539 lines of operations**, read when you are about to do something to
@@ -44,7 +44,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,424 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,127 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 1,717 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 1,769 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 701 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
 
@@ -52,7 +52,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,417 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2,445 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,371 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |
