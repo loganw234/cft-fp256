@@ -474,9 +474,17 @@ run and which found a real defect on 2026-09-14):
 
 ```bash
 MOUNT=$(pwd -W); MSYS_NO_PATHCONV=1 docker run --rm -v "$MOUNT:/work" -w /work/tb cft-sim make seq_core SIM=verilator
+MSYS_NO_PATHCONV=1 docker run --rm -v "$MOUNT:/work" -w /work/tb cft-sim python3 check_results.py sim_build/seq_core/results.xml
 MOUNT=$(pwd -W); MSYS_NO_PATHCONV=1 docker run --rm -v "$MOUNT:/work" -w /work cft-sim make yosys-lint
 ```
 
+**A single bench target exits 0 when its tests FAIL** (P4 measured it
+on 2026-09-15 with a broken pairing: `TESTS=3 PASS=0 FAIL=3`, exit 0;
+cocotb cannot set an exit code, and only `make sim` runs
+`tb/check_results.py` over its results). So a bench run is the target
+AND the checker over that target's `SIM_BUILD` directory (the
+multi-pass targets append the pass count: `sim_build/seq_coremc10`),
+and your report carries the checker's line, not the exit code.
 Background anything over a minute and read its log. Build only inside
 your own worktree. The full `make sim` and the image build are the
 lead's, on the build box; you never touch the box or the card.
@@ -701,7 +709,10 @@ report - that is the number the requester's item 4 wants.
 ## P4 - the beat-wide accumulator (optional, wave 1)
 
 Same repository, ledger, rules and build as P1; base is P0. No ABI, no
-contract change, no new register.
+contract change, no new register. Every bench target you run is
+followed by `check_results.py` over its results, as P1's build section
+says - the single-target exit code is not a verdict, which is P4's own
+finding of 2026-09-15.
 
 ### Your job
 
@@ -775,6 +786,11 @@ Two, from `../../ParcelRound/templates/verifier.md`, each after its
 parcel reports and before it merges; both must not fix anything, and
 "found nothing" is an acceptable answer that will not be held against
 them. Each watches only `lead.md` and `urgent/` in the ledger.
+
+Every bench a verifier runs is the target AND `tb/check_results.py`
+over its results.xml - a single target's exit code is not a verdict
+(P4's finding, 2026-09-15) - and a parcel report that quotes exit codes
+where it should quote the checker is itself a finding.
 
 **V1, on P1.** Attack list: (1) the block-offset trap in the section
 above, by building a case the parcel did not; (2) the read count
