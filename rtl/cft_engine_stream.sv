@@ -1358,6 +1358,45 @@ module cft_engine_stream #(
     end
   end
 
+  // ---- when a level's result comes BACK, and why that is a gate ------
+  //
+  // A level's adds return AL accepted edges after it issued them, which
+  // is exactly when the stage ABOVE it issues - so level l, holding
+  // stage k-1-l, returns on stg_go[k-l], and the root's return IS
+  // wpart_go. Same shift register, same beat.
+  //
+  // THIS IS WHAT QUALIFIES THE TREE'S FLAGS, and nothing weaker will
+  // do. cft_lanes does not gate `lane_flags` on `out_valid` (the port
+  // is left unconnected at the instance), so in ANY cycle the array's
+  // per-lane flags are whatever the ladder selected by the current
+  // precision is emitting - including, for the first LATENCY accepted
+  // edges of a run, work that entered the array BEFORE it began. The
+  // array is shared with cft_seq, so "before it" can be a sequencer
+  // program: a reduction straight after one reported that program's
+  // UNDERFLOW as its own, bits correct and FLAGS wrong
+  // (tb/probe_reduce_then_prog.py, found by V4 on 2026-09-15; the
+  // reduction bench now holds the same shape).
+  //
+  // No strobe here can fire before a tree add of THIS run has
+  // returned, and that is the whole argument: `wsr` is held at zero
+  // while `!running`, every tap is at least AL = LATENCY+1 edges
+  // behind an admission, and an admission is itself no earlier than
+  // the run's first edge. The array holds LATENCY results, so
+  // everything stale has left it before the earliest tap can fire.
+  logic [2:0] lvl_ret;
+  always_comb begin
+    lvl_ret = 3'b0;
+    for (int l = 0; l < 3; l = l + 1) begin
+      if (6'(l) < beat_sh_r) begin
+        case (beat_sh_r - 6'(l))
+          6'd1:    lvl_ret[l] = stg_go[1];
+          6'd2:    lvl_ret[l] = stg_go[2];
+          default: lvl_ret[l] = stg_go[3];
+        endcase
+      end
+    end
+  end
+
   // The permutation. Lane p at heap level l, sourcing the beat at the
   // bottom level and the array's own result everywhere else. Written
   // with OR rather than read-modify-write because the lanes are
@@ -1793,9 +1832,16 @@ module cft_engine_stream #(
     for (int i = 0; i < LANES32; i = i + 1)
       beat_f = beat_f | arr_lf[i*5 +: 5];
     lane0_f = arr_lf[4:0];
+    // The tree's lanes, and ONLY the ones a tree add of this run is
+    // returning in THIS cycle - see lvl_ret above for why an
+    // unqualified OR over lanes 1.. is a spurious flag rather than a
+    // conservative one. A level that is not returning contributes
+    // nothing here even though its lanes are emitting something.
     wide_f  = 5'b0;
-    for (int i = 1; i < LANES32; i = i + 1)
-      wide_f = wide_f | arr_lf[i*5 +: 5];
+    for (int l = 0; l < 3; l = l + 1)
+      if (lvl_ret[l])
+        for (int p = (1 << l); p < (2 << l); p = p + 1)
+          if (p < LANES32) wide_f = wide_f | arr_lf[p*5 +: 5];
   end
 
   // A reduction writes exactly one beat, holding the single result in
@@ -2070,8 +2116,15 @@ module cft_engine_stream #(
   // is not returning anything in, and they may belong to a segment
   // other than the one the accumulator is on. FLAGS is the OR over the
   // whole RUN, so where a tree add's flags are collected cannot matter
-  // - only that they are. An idle tree lane holds +0 on both operands
-  // and raises nothing, so this arm is silent whenever the tree is.
+  // - only that they are.
+  //
+  // `wide_f` is already narrowed to the lanes a tree add of this run is
+  // returning in this cycle (lvl_ret, above), which is the correctness
+  // condition; "an idle lane holds +0 and raises nothing" is NOT, and
+  // was the defect - an idle lane holds whatever the array is emitting,
+  // and for the first LATENCY accepted edges of a run that is the
+  // PREVIOUS owner's work. `arr_rdy` stays because the array's outputs
+  // mean the result only in an accepted edge's cycle.
   logic [4:0] wide_f_now;
   assign wide_f_now = (is_reduce && running && arr_rdy) ? wide_f : 5'b0;
   always_ff @(posedge ap_clk) begin
