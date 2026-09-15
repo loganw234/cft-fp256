@@ -23,6 +23,7 @@ issues a MUL then a SUM. That composition is checked in the model and
 in libcft; what the hardware owes is SUM.
 """
 
+import os
 import random
 import sys
 from pathlib import Path
@@ -464,6 +465,11 @@ def wide_beats_expected(fmt, n, seg):
     beat of a run can be short. fp256 is one element a beat and has no
     tree.
     """
+    # A tile built without the tree (EN_WIDE=0, `make reducenowide`)
+    # takes no beat through it anywhere; the environment says which
+    # build this is, the way CFT_RD_LATENCY says the memory's latency.
+    if os.environ.get("CFT_NO_WIDE") == "1":
+        return 0
     epb = 256 // fmt.width
     if epb == 1:
         return 0
@@ -523,10 +529,15 @@ async def the_wide_path_is_taken_exactly_where_the_sizes_allow(dut):
                 wide_seen += 1
             else:
                 zero_seen += 1
-    # Both halves of the control must actually have happened.
-    assert wide_seen > 0 and zero_seen > 0, (
-        f"the sizes above must cover both: {wide_seen} shapes took the "
-        f"tree and {zero_seen} refused it")
+    # Both halves of the control must actually have happened - except
+    # on the tree-less build, where every shape must have read zero.
+    if os.environ.get("CFT_NO_WIDE") == "1":
+        assert wide_seen == 0, (
+            f"EN_WIDE=0 and {wide_seen} shapes still counted a wide beat")
+    else:
+        assert wide_seen > 0 and zero_seen > 0, (
+            f"the sizes above must cover both: {wide_seen} shapes took the "
+            f"tree and {zero_seen} refused it")
     dut._log.info(f"the wide path: {wide_seen} shapes took it and "
                   f"{zero_seen} correctly did not, {total} elements exact")
 

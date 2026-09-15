@@ -55,6 +55,13 @@ module cft_krnl #(
     parameter bit EN_FP64  = 1'b1,
     parameter bit EN_FP128 = 1'b1,
     parameter bit EN_FP256 = 1'b1,
+    // The beat-wide reduction tree (round 2, P4): 1 builds it, 0 leaves
+    // the serial path alone with the same bits. Exposed here so a bench
+    // can build the control from the command line (-Pcft_krnl.EN_WIDE=0
+    // - cocotb.mk lets Verilator override the top module's parameters
+    // only); until 2026-09-15 it lived in cft_engine_stream alone and
+    // the wide-off tile was a source edit no gate ever built (V4).
+    parameter bit EN_WIDE  = 1'b1,
     // The beat is the tile's compute AND memory width; see
     // cft_engine_stream for why they cannot disagree. 256 is
     // correct for Alveo (the HBM pseudo-channel width); narrow it
@@ -753,6 +760,7 @@ module cft_krnl #(
 
   cft_engine_stream #(.LATENCY(16), .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
                       .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
+                      .EN_WIDE(EN_WIDE),
                       .BEAT_BITS(BEAT_BITS),
                       .BURST_LOG2(BURST_LOG2), .FIFO_LOG2(FIFO_LOG2),
                       .AR_DEPTH(AR_DEPTH), .AW_DEPTH(AW_DEPTH),
