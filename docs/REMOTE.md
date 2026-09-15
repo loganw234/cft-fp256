@@ -289,6 +289,22 @@ caps block, and the connection ends. The two scratch FEATURE bits
 needed no new word: they are bits 8 and 9 of `seq_features`, which the
 block has carried since 0.8 - only the capacity had to be appended.
 
+**ABI 0.14's two feature bits (13, INDEXED; 14, LANE_MASK) are the
+server's word, and both routes are the client's.** A remote handle
+publishes `seq_features` as its server's HELLO carried it. But an
+indexed run over remote is gathered on the CLIENT and sent dense (P2,
+2026-09-15), and a masked run is COMPACTED on the client to its kept
+lanes and scattered back (P3, the same day; FLAGS is a whole-run word,
+so a masked lane computed on the server would otherwise report), so
+each call succeeds on a remote handle whatever the server's device
+carries. The word therefore UNDER-promises against a server without
+the bit: it says no to a call that would have worked, which is the
+direction this library accepts and the opposite of a word that says
+yes to a call that says no. No server in this tree is in that state (a
+software server publishes both bits); it becomes reachable the day a
+card-backed `cft-serve` fronts a tile built without the feature, and
+this paragraph is where that day starts.
+
 **`CFTR_PROTO_VERSION` does not move for this**, and that is
 deliberate. The `proto` field is compared for EQUALITY at both ends,
 so bumping it would turn "an older server answers with a shorter

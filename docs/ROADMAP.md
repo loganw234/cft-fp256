@@ -2551,11 +2551,15 @@ The first three are in the order the measurements rank them - which is
 not the order they were guessed in - and the last three carry the
 requester's own ranking.
 
-**1. A device-side scatter. This is the expensive one.** *Planned
-2026-09-15 as one mechanism with ask 4 - docs/ROUND2.md, parcel P1:
-the requester's scatter is a gather by a static table followed by a
-fixed-order fold, so an input block fetched through an index table is
-both asks.*
+**1. A device-side scatter. This is the expensive one.** *BUILT
+2026-09-15 as one mechanism with ask 4 - docs/ROUND2.md, parcel P1,
+on main at 5c0c655 and 6457cee: the requester's scatter is a gather by
+a static table followed by a fixed-order fold, so an input block
+fetched through an index table (R16, ABI 0.14's `idx_*` tables) is
+both asks. The cost is one round trip a gathered element - the read
+side keeps one burst in flight - about four cycles an element on the
+model's memory; `host/tools/gathertime.py` measures it on a card day
+at the gravity shape, and that number goes here when it exists.*
 
 The integrator computes gravity over particle PAIRS and then scatters
 each pair's contribution back onto its two particles. Issued through
@@ -2647,8 +2651,12 @@ renamed its cases where a reduction has none to rename. Docs that RECORD
 a past run still say 1,071,635 and are correct to - that run replayed
 that many.
 
-**4. A device-side gather.** *Planned 2026-09-15 with ask 1, above:
-docs/ROUND2.md, parcel P1; ABI 0.14's `idx_*` tables are its seam.*
+**4. A device-side gather.** *BUILT 2026-09-15 with ask 1, above:
+docs/ROUND2.md, parcel P1; ABI 0.14's `idx_*` tables. For an
+ELEMENTWISE call, parcel P2 (5901932): `cft_elem_args.idx_*` is a
+three-instruction program over the same mechanism on a tile, the
+gather then the dense path on the software backend, a client-side
+gather over remote.*
 Steps 2 and 3 of that integrator's force
 evaluation need a lane to read another lane's result, and the prototype's
 host does it. The asks are a device-side index-table copy, or a

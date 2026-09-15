@@ -45,7 +45,7 @@ product, not the implementation.
 | [DETERMINISM.md](DETERMINISM.md) | 1,424 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,127 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 1,788 | The orbit sequencer and the program model. |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | 701 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | 760 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
 
 ## Reference you call into
@@ -54,7 +54,7 @@ product, not the implementation.
 |---|---|---|
 | [HOSTAPI.md](HOSTAPI.md) | 2,499 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
-| [REMOTE.md](REMOTE.md) | 1,371 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
+| [REMOTE.md](REMOTE.md) | 1,387 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 675 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,879 | Every platform the library has been built and run on, with dates and results. |
@@ -92,7 +92,7 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 12,401 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 2,898 | What is built, what is next, and what was decided against. |
+| [ROADMAP.md](ROADMAP.md) | 2,906 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1059 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |

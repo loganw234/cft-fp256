@@ -636,6 +636,65 @@ size, as an input struct always is.
 What each surface says once P1, P2 and P3 land is in the sections those
 parcels' merges add below this one.
 
+### P1 on main (2026-09-15, 5c0c655 and 6457cee): the input block fetched through an index table
+
+R16 is real: a program run's three streams and its scratch block are
+each read through a table of `n` (or `n * n_scratch_in`) `uint32`
+indices when the caller passes one, `CFT_IDX_NONE` reading as +0 and
+issuing no read, an index at or past the source's declared length
+refused by name on every backend before the run. The cost on a tile is
+the read side's shape, one burst in flight: about four cycles a
+gathered element on the model's memory and one HBM round trip an
+element on the card (docs/SEQUENCER.md R16's table; `host/tools/
+gathertime.py` measures it at the gravity shape on a card day). The
+dense path's cycle table did not move, and `rd_need` is decided by the
+opcode's reads now (`op_reads`), which loads less for every program.
+
+| surface | status after P1 |
+|---|---|
+| C (`cft.h`) | the four tables run; `MODE[22]` with no scratch block to gather into is refused at the header check (the follow-up); a source shorter than `n` is legal and sized from `idx_*_src` |
+| hardware | `S_GTH_GO / S_GTH_TBL / S_GTH_ELEM / S_GTH_WAIT` in `cft_seq.sv`; `cfg_indexed[3:0] = MODE[22:19]` under CAPS2[9], the guard on the reserved half narrowed to `MODE[31:23]`; VERSION 0xA00 unchanged |
+| XRT | the four tables bound into arguments 12..15, an indexed source staged and bound at `idx_*_src * esz`, the resident copy sized the same way; `device-test -b` proves the binding path (its resident-binds assertion is a card-day gate) |
+| remote | refused by name until P2 (the bit masked off a remote handle), then P2's route |
+| Node / Browser | nothing: the program API of the bindings carries no table yet |
+| Arduino | the vendored copy re-synced |
+| the model | `seq.run(idx_a=, idx_b=, idx_c=, idx_scratch_in=)`; `seq_check.py`'s fourth corpus (tables with sentinels, identity and permuted controls, sources of 1, 3, n/2, n and n+37 elements) |
+
+### P4 on main (2026-09-15, 27c424d): the accumulator reduces a whole beat a cycle
+
+No surface changed. `cft_reduce` and `cft_reduce_seg` return the same
+bits; the tile does them faster - fp32 `CFT_SUM` from 11.3147 to
+1.4152 cycles a beat marginal - through a heap of adders in the
+accumulator's idle lanes, eligible only where the segment length is a
+multiple of the elements per beat. `EN_WIDE=0` builds the tile without
+the tree and `make reducenowide` keeps that control in the suite.
+docs/VALIDATION.md's entry carries the defect its verifier found and
+the fix.
+
+### P2 on main (2026-09-15, 5901932): `cft_run_ex`'s three tables, composed over P1
+
+`cft_elem_args.idx_a / idx_b / idx_c` run on every backend. On a
+device with the sequencer and CAPS2[9] the library composes the run as
+a three-instruction program over P1's mechanism, the streams packed by
+what the opcode reads and a scalar operand carried as one of the
+image's own constants (no `CFT_SEQ_FEAT_SCALAR` needed on that route);
+the software backend gathers and calls the dense path; a remote handle
+gathers on the client and sends a dense run. Three rules refused by
+name: a table on an operand the opcode does not read; `d` overlapping
+any operand when a table is present; an index at or past the source.
+Argument errors fire before capability refusals, in
+`cft_program_run_ex`'s order.
+
+| surface | status after P2 |
+|---|---|
+| C (`cft.h`) | the tables run; `d` may alias an operand in a dense run and none once a table is present; the bounding checks of the dense path run before any table is read |
+| hardware | nothing: no RTL |
+| XRT | the composed program through P1's binding path; a scalar never staged at `n` elements |
+| remote | the client gathers for `cft_run_ex` and for `cft_program_run_ex`'s four tables and sends a dense run; a remote handle publishes its server's `seq_features` (a handle to a server WITHOUT CAPS2[9] says no to a call the gather would make succeed - it under-promises, the direction this library accepts); no frame change |
+| Node / Browser | nothing yet: ABI 0.12's elementwise `run_ex` was never bound, so the export and its JavaScript half land together in the integrator's rebuild |
+| Arduino | the vendored copy re-synced |
+| the model | nothing: the definition is the gather followed by the dense run |
+
 
 ## Hosts and boards
 
