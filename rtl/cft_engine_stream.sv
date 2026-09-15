@@ -1301,6 +1301,11 @@ module cft_engine_stream #(
   localparam int WPART_LOG2  = 6;
   localparam int WPART_DEPTH = 1 << WPART_LOG2;
   localparam int WCW         = WPART_LOG2 + 2;   // credit counter width
+  // The credit ceiling at the counter's own width. A sized localparam
+  // rather than a cast on the compare: a cast whose SIZE is an
+  // identifier is not in every front end's grammar, and the lint gate
+  // spans three of them.
+  localparam logic [WCW-1:0] WCRED_MAX = WPART_DEPTH[WCW-1:0];
 
   // Element `idx` of a beat, right-aligned - the same four-arm select
   // the serializer's red_in_elem is, and deliberately the same
@@ -1357,7 +1362,7 @@ module cft_engine_stream #(
   // Admission. `arr_rdy` because a stage-0 issue IS a beat-op, and the
   // credit test is what stops the queue overflowing.
   assign wide_take = beat_avail && wide_en && beat_is_full && arr_rdy &&
-                     (wcred < WCW'(WPART_DEPTH));
+                     (wcred < WCRED_MAX);
   assign st0_go    = wide_take;
   assign wide_pend = (wcred != '0);
 
@@ -1383,10 +1388,10 @@ module cft_engine_stream #(
   always_comb begin
     lvl_go = 3'b0;
     for (int l = 0; l < 3; l = l + 1) begin
-      if (l < int'(beat_sh_r)) begin
-        case (int'(beat_sh_r) - 1 - l)
-          0:       lvl_go[l] = st0_go;
-          1:       lvl_go[l] = stg_go[1];
+      if (6'(l) < beat_sh_r) begin
+        case (beat_sh_r - 6'd1 - 6'(l))
+          6'd0:    lvl_go[l] = st0_go;
+          6'd1:    lvl_go[l] = stg_go[1];
           default: lvl_go[l] = stg_go[2];
         endcase
       end
@@ -1404,7 +1409,7 @@ module cft_engine_stream #(
     for (int l = 0; l < 3; l = l + 1) begin
       for (int p = (1 << l); p < (2 << l); p = p + 1) begin
         if ((p < LANES32) && lvl_go[l]) begin
-          if (l == int'(beat_sh_r) - 1) begin
+          if (6'(l) == beat_sh_r - 6'd1) begin
             wx_n = wx_n | put_el(6'(p), get_el(a_q, 6'(2*p) - epb,        prec_r), prec_r);
             wy_n = wy_n | put_el(6'(p), get_el(a_q, 6'(2*p) - epb + 6'd1, prec_r), prec_r);
           end else begin
@@ -1437,8 +1442,8 @@ module cft_engine_stream #(
       wcred <= '0;
     end else if (arr_rdy) begin
       wsr   <= {wsr[WSR_LEN-2:0], st0_go};
-      wcred <= wcred + (st0_go ? WCW'(1) : WCW'(0))
-                     - (wpart_take ? WCW'(1) : WCW'(0));
+      wcred <= wcred + {{(WCW-1){1'b0}}, st0_go}
+                     - {{(WCW-1){1'b0}}, wpart_take};
     end
   end
 
