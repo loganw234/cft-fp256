@@ -84,6 +84,13 @@ SIM_DIR_mulcycle = mulcycle$(MC)
 SIM_RESULTS = $(foreach b,$(SIM_BENCHES),\
     sim_build/$(if $(SIM_DIR_$(b)),$(SIM_DIR_$(b)),$(b))/results.xml)
 
+# Every single bench target below ALSO runs the checker over its own
+# results.xml, appended to its recipe (2026-09-15). cocotb cannot set an
+# exit code, so until then `make <bench>` exited 0 with its tests
+# failed - found by round 2's P4 with a deliberately broken pairing,
+# while the suite-level line here was the only guard. The path in each
+# `&& $(PYTHON) check_results.py` is the recipe's own COCOTB_RESULTS_FILE
+# expression, so the two cannot name different files.
 sim: $(SIM_BENCHES)
 	@$(PYTHON) check_results.py $(SIM_RESULTS)
 
@@ -102,7 +109,8 @@ simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
 mulpass:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulpass \
 		MODULE=test_mulpass SIM_BUILD=sim_build/mulpass \
-		COCOTB_RESULTS_FILE=sim_build/mulpass/results.xml
+		COCOTB_RESULTS_FILE=sim_build/mulpass/results.xml \
+		&& $(PYTHON) check_results.py sim_build/mulpass/results.xml
 
 # Equivalence, tb_mulshare's shape: the lane array at MUL_PASSES=1
 # beside the same array at MUL_PASSES=MC, fed identical beats at a
@@ -114,13 +122,15 @@ mulcycle:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulcycle \
 		MODULE=test_mulcycle SIM_BUILD=sim_build/mulcycle$(MC) \
 		KRNL_PARAMS="-Ptb_mulcycle.MC=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/mulcycle$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/mulcycle$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/mulcycle$(MC)/results.xml
 
 mulcycle2:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulcycle \
 		MODULE=test_mulcycle SIM_BUILD=sim_build/mulcycle2 \
 		KRNL_PARAMS="-Ptb_mulcycle.MC=2" \
-		COCOTB_RESULTS_FILE=sim_build/mulcycle2/results.xml
+		COCOTB_RESULTS_FILE=sim_build/mulcycle2/results.xml \
+		&& $(PYTHON) check_results.py sim_build/mulcycle2/results.xml
 
 # The pipe benches, paced by their wrappers at the budget: the same
 # vectors, the same model, the pipe held between passes.
@@ -128,25 +138,29 @@ fp32mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
 		MODULE=test_fpfma_fp32 SIM_BUILD=sim_build/fp32mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp32.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/fp32mc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp32mc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp32mc$(MC)/results.xml
 
 fp64mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp64 \
 		MODULE=test_fpfma_fp64 SIM_BUILD=sim_build/fp64mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp64.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/fp64mc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp64mc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp64mc$(MC)/results.xml
 
 fp128mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp128 \
 		MODULE=test_fpfma_fp128 SIM_BUILD=sim_build/fp128mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp128.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/fp128mc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp128mc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp128mc$(MC)/results.xml
 
 fp256mc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 \
 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/fp256mc$(MC) \
 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/fp256mc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp256mc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp256mc$(MC)/results.xml
 
 # The kernel-level benches at the budget: the engine's issue and
 # collection, the reduction accumulator's schedule, the sequencer's
@@ -155,43 +169,50 @@ reducemc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reducemc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/reducemc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/reducemc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/reducemc$(MC)/results.xml
 
 krnlmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/krnlmc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlmc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlmc$(MC)/results.xml
 
 krnlseqmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseqmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/krnlseqmc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlseqmc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlseqmc$(MC)/results.xml
 
 seqbanksmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanksmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/seqbanksmc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seqbanksmc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqbanksmc$(MC)/results.xml
 
 quartermc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quartermc$(MC) \
 		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/quartermc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/quartermc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/quartermc$(MC)/results.xml
 
 faultsmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_faults SIM_BUILD=sim_build/faultsmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/faultsmc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/faultsmc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/faultsmc$(MC)/results.xml
 
 seq_coremc:
 	CFT_MUL_PASSES=$(MC) timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coremc$(MC) \
 		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/seq_coremc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seq_coremc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_coremc$(MC)/results.xml
 
 # Cycles per beat per rung at the budget - the throughput the
 # multi-cycle tile trades, measured on the RTL rather than derived.
@@ -199,7 +220,8 @@ cyclesmc:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_cycles SIM_BUILD=sim_build/cyclesmc$(MC) \
 		KRNL_PARAMS="-Pcft_krnl.MUL_PASSES=$(MC)" \
-		COCOTB_RESULTS_FILE=sim_build/cyclesmc$(MC)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/cyclesmc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/cyclesmc$(MC)/results.xml
 
 # The fractured significand array, scored against exact integer
 # arithmetic rather than against another implementation. No rounding
@@ -208,7 +230,8 @@ cyclesmc:
 mulfrac:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_mulfrac \
 		MODULE=test_mulfrac SIM_BUILD=sim_build/mulfrac \
-		COCOTB_RESULTS_FILE=sim_build/mulfrac/results.xml
+		COCOTB_RESULTS_FILE=sim_build/mulfrac/results.xml \
+		&& $(PYTHON) check_results.py sim_build/mulfrac/results.xml
 
 # Equivalence: the same four banks built twice, once with a private
 # multiplier per lane and once with all lanes fed by one shared array,
@@ -217,7 +240,8 @@ mulfrac:
 mulshare:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_mulshare \
 		MODULE=test_mulshare SIM_BUILD=sim_build/mulshare \
-		COCOTB_RESULTS_FILE=sim_build/mulshare/results.xml
+		COCOTB_RESULTS_FILE=sim_build/mulshare/results.xml \
+		&& $(PYTHON) check_results.py sim_build/mulshare/results.xml
 
 # Equivalence again, for the block that is not arithmetic: the flat
 # case(op) form frozen at 7ab02b3 beside the eight-source form that
@@ -227,7 +251,8 @@ mulshare:
 simpleops:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_simpleops \
 		MODULE=test_simpleops SIM_BUILD=sim_build/simpleops \
-		COCOTB_RESULTS_FILE=sim_build/simpleops/results.xml
+		COCOTB_RESULTS_FILE=sim_build/simpleops/results.xml \
+		&& $(PYTHON) check_results.py sim_build/simpleops/results.xml
 
 # One segmented normalise shifter against the fifteen private ones it
 # would replace. Geometry says 2,706 bits of ladder collapse into 717;
@@ -247,7 +272,8 @@ NORMSEG_SIM ?= verilator
 normseg:
 	$(MAKE) -f cocotb.mk SIM=$(NORMSEG_SIM) TOPLEVEL=tb_normseg \
 		MODULE=test_normseg SIM_BUILD=sim_build/normseg \
-		COCOTB_RESULTS_FILE=sim_build/normseg/results.xml
+		COCOTB_RESULTS_FILE=sim_build/normseg/results.xml \
+		&& $(PYTHON) check_results.py sim_build/normseg/results.xml
 
 # The same claim one level up: not "does the ladder shift correctly"
 # (normseg answers that) but "is a LANE unchanged when its normalised
@@ -259,7 +285,8 @@ normseg:
 normshare:
 	$(MAKE) -f cocotb.mk SIM=$(NORMSEG_SIM) TOPLEVEL=tb_normshare \
 		MODULE=test_normshare SIM_BUILD=sim_build/normshare \
-		COCOTB_RESULTS_FILE=sim_build/normshare/results.xml
+		COCOTB_RESULTS_FILE=sim_build/normshare/results.xml \
+		&& $(PYTHON) check_results.py sim_build/normshare/results.xml
 
 # Diagnostic probe for tb_normseg, not part of `make sim`. Drives one
 # known vector into a quiet pipeline and prints both halves every
@@ -267,7 +294,8 @@ normshare:
 normprobe:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_normseg \
 		MODULE=test_normseg_probe SIM_BUILD=sim_build/normprobe \
-		COCOTB_RESULTS_FILE=sim_build/normprobe/results.xml
+		COCOTB_RESULTS_FILE=sim_build/normprobe/results.xml \
+		&& $(PYTHON) check_results.py sim_build/normprobe/results.xml
 
 # The divide/sqrt seed opcodes against the golden model: every table
 # index at both exponent parities across the exponent range, the recip
@@ -277,7 +305,8 @@ normprobe:
 seedop:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_seedop \
 		MODULE=test_seedop SIM_BUILD=sim_build/seedop \
-		COCOTB_RESULTS_FILE=sim_build/seedop/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seedop/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seedop/results.xml
 
 # The streaming reduction accumulator against the model's tree. Every
 # length from 1 to 40, because the shape varies with n and powers of two
@@ -285,7 +314,8 @@ seedop:
 reduceacc:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_reduce_acc \
 		MODULE=test_reduce_acc SIM_BUILD=sim_build/reduceacc \
-		COCOTB_RESULTS_FILE=sim_build/reduceacc/results.xml
+		COCOTB_RESULTS_FILE=sim_build/reduceacc/results.xml \
+		&& $(PYTHON) check_results.py sim_build/reduceacc/results.xml
 
 # CFT_SUM through the whole kernel: CSR, engine serializer, borrowed
 # adder, single-beat writer. Sizes straddle the beat boundary at every
@@ -294,32 +324,38 @@ reduceacc:
 reduce:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reduce \
-		COCOTB_RESULTS_FILE=sim_build/reduce/results.xml
+		COCOTB_RESULTS_FILE=sim_build/reduce/results.xml \
+		&& $(PYTHON) check_results.py sim_build/reduce/results.xml
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \
 		MODULE=test_fpfma_fp32 SIM_BUILD=sim_build/fp32 \
-		COCOTB_RESULTS_FILE=sim_build/fp32/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp32/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp32/results.xml
 
 fp64:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp64 \
 		MODULE=test_fpfma_fp64 SIM_BUILD=sim_build/fp64 \
-		COCOTB_RESULTS_FILE=sim_build/fp64/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp64/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp64/results.xml
 
 fp128:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp128 \
 		MODULE=test_fpfma_fp128 SIM_BUILD=sim_build/fp128 \
-		COCOTB_RESULTS_FILE=sim_build/fp128/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp128/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp128/results.xml
 
 fp256:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 \
 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/fp256 \
-		COCOTB_RESULTS_FILE=sim_build/fp256/results.xml
+		COCOTB_RESULTS_FILE=sim_build/fp256/results.xml \
+		&& $(PYTHON) check_results.py sim_build/fp256/results.xml
 
 krnl:
 	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnl \
-		COCOTB_RESULTS_FILE=sim_build/krnl/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnl/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnl/results.xml
 
 # The full-beat tile with binary256 left out - the kernel cft-rebound
 # shipped (EN_FP256=0 at BEAT_BITS=256) - which no bench had proved
@@ -337,7 +373,8 @@ krnlf128:
 	CFT_GENERICS="$(KRNLF128_GENERICS)" $(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlf128 \
 		KRNL_PARAMS="$(foreach g,$(KRNLF128_GENERICS),-Pcft_krnl.$(g))" \
-		COCOTB_RESULTS_FILE=sim_build/krnlf128/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlf128/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlf128/results.xml
 
 # The tile cft-rebound actually wants (its docs/BITSTREAM.md, ask 5):
 # binary64 and binary128 with NEITHER end, which fp32's generic made
@@ -350,7 +387,8 @@ krnlf64f128:
 	CFT_GENERICS="$(KRNLF64F128_GENERICS)" $(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlf64f128 \
 		KRNL_PARAMS="$(foreach g,$(KRNLF64F128_GENERICS),-Pcft_krnl.$(g))" \
-		COCOTB_RESULTS_FILE=sim_build/krnlf64f128/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlf64f128/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlf64f128/results.xml
 
 # The orbit sequencer through the same kernel: program image staged in
 # RAM, PROG_PTR and CNT_PTR written, MODE[15] set, deposits and counts
@@ -367,7 +405,8 @@ krnlf64f128:
 krnlseq:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \
-		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlseq/results.xml
 
 # The kernel with BOTH fused ladders on - the configuration the size
 # campaign built, measured and equivalence-proved lane by lane, and
@@ -382,7 +421,8 @@ krnlfused:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlfused \
 		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1" \
-		COCOTB_RESULTS_FILE=sim_build/krnlfused/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlfused/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlfused/results.xml
 
 # The kernel with both fused ladders pinned OFF by explicit parameter.
 # That is also the shipping default as of 2026-09-01 (they cost more
@@ -395,7 +435,8 @@ krnlplain:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl SIM_BUILD=sim_build/krnlplain \
 		KRNL_PARAMS="-Pcft_krnl.FUSE_NORM=0 -Pcft_krnl.FUSE_ALIGN=0" \
-		COCOTB_RESULTS_FILE=sim_build/krnlplain/results.xml
+		COCOTB_RESULTS_FILE=sim_build/krnlplain/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlplain/results.xml
 
 # THE OPEN-CORE BOARD CONFIGURATION, simulated as one thing.
 #
@@ -436,13 +477,16 @@ board: boardkrnl boardseq boardfp256
 # reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
 BOARDKRNL_SIM ?= verilator
 boardkrnl:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/boardkrnl$(MC)/results.xml
 
 boardseq:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/boardseq$(MC)/results.xml
 
 boardfp256:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/boardfp256$(MC) 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" 		COCOTB_RESULTS_FILE=sim_build/boardfp256$(MC)/results.xml
+	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/boardfp256$(MC) 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" 		COCOTB_RESULTS_FILE=sim_build/boardfp256$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/boardfp256$(MC)/results.xml
 
 # Cycle counts on the RTL, which is where they actually live: hw_emu's
 # wall clock measures the simulator, and its XRT timeline trace came
@@ -458,7 +502,8 @@ cycles:
 	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_cycles \
 		SIM_BUILD=sim_build/cycles$(RD_LATENCY)_$(WR_LATENCY) \
-		COCOTB_RESULTS_FILE=sim_build/cycles$(RD_LATENCY)_$(WR_LATENCY)/results.xml
+		COCOTB_RESULTS_FILE=sim_build/cycles$(RD_LATENCY)_$(WR_LATENCY)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/cycles$(RD_LATENCY)_$(WR_LATENCY)/results.xml
 
 # The sequencer against BANKED memory: one private store per master,
 # nothing mirrored. test_krnl_seq.py shares a single store on purpose
@@ -469,12 +514,14 @@ cycles:
 seqbanks:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_seq_banks SIM_BUILD=sim_build/seqbanks \
-		COCOTB_RESULTS_FILE=sim_build/seqbanks/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seqbanks/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqbanks/results.xml
 
 quarter:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \
-		COCOTB_RESULTS_FILE=sim_build/quarter/results.xml
+		COCOTB_RESULTS_FILE=sim_build/quarter/results.xml \
+		&& $(PYTHON) check_results.py sim_build/quarter/results.xml
 
 # What the kernel does when the memory system misbehaves: error
 # responses on every master, and burst-length violations in both
@@ -488,7 +535,8 @@ quarter:
 faults:
 	$(LATENCY_ENV) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=test_krnl_faults SIM_BUILD=sim_build/faults \
-		COCOTB_RESULTS_FILE=sim_build/faults/results.xml
+		COCOTB_RESULTS_FILE=sim_build/faults/results.xml \
+		&& $(PYTHON) check_results.py sim_build/faults/results.xml
 
 # The orbit sequencer against the golden model, bit for bit: deposits
 # including the +0 of the slots no lane reached, per-lane deposit
@@ -515,7 +563,8 @@ SEQ_TIMEOUT ?= 2400
 seq_core:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_core \
-		COCOTB_RESULTS_FILE=sim_build/seq_core/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seq_core/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_core/results.xml
 
 # Diagnostic probe for seq_core, not part of `make sim`. One trivial
 # program into a quiet cft_seq, printing the state register, both bus
@@ -525,7 +574,8 @@ seq_core:
 seqprobe:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=test_seq_probe SIM_BUILD=sim_build/seqprobe \
-		COCOTB_RESULTS_FILE=sim_build/seqprobe/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seqprobe/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqprobe/results.xml
 
 # The other diagnostic, also not part of `make sim`: cycles per block and
 # per lane for the programs the card was measured with on 2026-09-14
@@ -536,7 +586,8 @@ seqprobe:
 seqcycles:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=probe_seq_cycles SIM_BUILD=sim_build/seqcycles \
-		COCOTB_RESULTS_FILE=sim_build/seqcycles/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seqcycles/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqcycles/results.xml
 
 # The other diagnostic: one program, every cycle of the issue pipe and
 # the retire written to sim_build/trace/trace.txt (tb/probe_trace.py).
@@ -544,7 +595,8 @@ seqtrace:
 	mkdir -p sim_build/trace
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=probe_trace SIM_BUILD=sim_build/trace \
-		COCOTB_RESULTS_FILE=sim_build/trace/results.xml
+		COCOTB_RESULTS_FILE=sim_build/trace/results.xml \
+		&& $(PYTHON) check_results.py sim_build/trace/results.xml
 
 # Two more, through the whole kernel (2026-09-14, the evening the first
 # revision-5 image hung a compute unit): every program shape with READY
@@ -554,12 +606,14 @@ seqtrace:
 seqbp:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=probe_seq_bp SIM_BUILD=sim_build/seqbp \
-		COCOTB_RESULTS_FILE=sim_build/seqbp/results.xml
+		COCOTB_RESULTS_FILE=sim_build/seqbp/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqbp/results.xml
 
 redprog:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
 		MODULE=probe_reduce_then_prog SIM_BUILD=sim_build/redprog \
-		COCOTB_RESULTS_FILE=sim_build/redprog/results.xml
+		COCOTB_RESULTS_FILE=sim_build/redprog/results.xml \
+		&& $(PYTHON) check_results.py sim_build/redprog/results.xml
 
 clean:
 	rm -rf sim_build results.xml
