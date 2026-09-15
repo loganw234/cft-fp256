@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Thirty-five files, 43,524 lines. Flat in one directory they look like one
+Thirty-five files, 43,554 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **15,754 lines you consult while working** — the three under *Start here*,
@@ -8,7 +8,7 @@ undifferentiated pile; they are not, and the split is close to even:
 - **5,383 lines of tool manual**, one per shipped program;
 - **1,539 lines of operations**, read when you are about to do something to
   hardware;
-- **20,848 lines of record and argument** — the ledger, the roadmap and the
+- **20,878 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -91,7 +91,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 12,005 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 12,035 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 2,898 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 851 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |

@@ -12003,3 +12003,33 @@ the struct by hand has to move with it, and this is the one that does.
 The before side of the claim is the entries above this one: the sims
 at 122eb69 (no RTL changed between it and this seam) and the loopback
 remote suite at f223d7a this morning.
+
+**The runner's quick budget on the seam** (`verify/run.sh --budget
+quick`, run id 20260915-052104-b917848, the layouts commit over
+fd9ec1e): 22 of 25 stages ok - docs, generated, buildargs, selfcheck
+(4,366 checks), divsqrt, clause5, character, augmented, status96,
+formatof, diff, seq, reduce, bindings, lang-cpp, lang-go, lang-csharp,
+lang-fortran, workloads, soak-quick, remote (414 s) - two skipped for
+tools this shell does not see (julia, Rscript), and two FAILED, neither
+the seam's:
+
+- `demos`: every one of the thirteen configurations reproduced the C
+  tool's chain and matched `demos_chains.json`; what failed was the
+  module identity, `demos.html` embedding the 0.13 module while
+  `bindings/node/cft_node.wasm` is the 0.14 one. The ABI step rebuilds
+  the module and the conformance page; the demos page and its chain
+  record are a second build (`build_demos.sh` after
+  `verify_demos.mjs --record`), and this step had not made it. Made,
+  and the stage re-run green, in the commit after this entry's.
+- `lang-rust`: `rustc` on this desktop is the MSVC host
+  (`x86_64-pc-windows-msvc`, 1.94.1) and links `host/libcft.a`, which
+  MinGW gcc 16.1 builds under `-std=c99` with `__USE_MINGW_ANSI_STDIO`,
+  so the archive references `__mingw_snprintf`, `__mingw_vsnprintf`
+  and `___chkstk_ms`, which MSVC's linker cannot resolve. The leg last
+  passed on this desktop on 2026-09-04 (run d4fe397); `cftr_send_frame`,
+  whose stack frame is the `___chkstk_ms`, arrived on 2026-09-06 with
+  the remote backend, and no Windows run has selected the leg since.
+  Pre-existing, then, by two commits and eleven days; recorded here
+  rather than fixed at the seam, because the fix is a toolchain
+  decision (a gnu-target `rustc`, or the example linking MinGW's
+  runtime) and not P0's.
