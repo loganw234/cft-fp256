@@ -70,7 +70,8 @@ PYTHON ?= python3
 # each run; the `timeout` wrappers handle the rest) - what escaped was
 # the one outcome this project exists to detect.
 SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
-              normshare seedop reduceacc reduce krnl krnlf128 krnlf64f128 \
+              normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
+              krnlf64f128 \
               quarter faults redprog \
               seq_core krnlseq seqbanks mulpass mulcycle mulcycle2
 
@@ -326,6 +327,19 @@ reduce:
 		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reduce \
 		COCOTB_RESULTS_FILE=sim_build/reduce/results.xml \
 		&& $(PYTHON) check_results.py sim_build/reduce/results.xml
+
+# The same reductions with the beat-wide tree left out (round 2, P4):
+# the serial path alone must give the same bits, and the bench's
+# wide-beat counter must read zero at every shape - CFT_NO_WIDE=1 in the
+# environment tells test_krnl_reduce.py to expect that. In the suite so
+# that the control P4's "same bits, old cycle count" rests on is built
+# every time rather than by a source edit (V4, 2026-09-15).
+reducenowide:
+	CFT_NO_WIDE=1 $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_reduce SIM_BUILD=sim_build/reducenowide \
+		KRNL_PARAMS="-Pcft_krnl.EN_WIDE=0" \
+		COCOTB_RESULTS_FILE=sim_build/reducenowide/results.xml \
+		&& $(PYTHON) check_results.py sim_build/reducenowide/results.xml
 
 fp32:
 	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp32 \

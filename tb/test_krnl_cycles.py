@@ -61,6 +61,7 @@ import busfx  # noqa: E402
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
 FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
+SEGREG = 0x80                       # SEG in the low word, NRES in the high
 
 A_BASE, B_BASE, C_BASE, D_BASE = 0x00000, 0x40000, 0x80000, 0xC0000
 
@@ -234,3 +235,145 @@ async def kernel_cycles_per_beat(dut):
             "beat per cycle, which the datapath cannot do"
         assert slope < 2000.0, f"{name} {op}: {slope:.1f} cycles/beat"
         assert fixed > -1.0, f"{name} {op}: negative fixed cost {fixed:.0f}"
+
+
+# ======================================================================
+# reductions, every rung and every segment shape (2026-09-15)
+# ======================================================================
+#
+# The row above times ONE reduction, fp32 and whole-array, which was
+# all there was to say while the accumulator took one element a cycle:
+# every rung cost epb cycles a beat for the same reason and a segment
+# was that plus a flush. The beat-wide tree makes the shape matter -
+# it runs only where a beat is a whole aligned group of the segment,
+# so seg = 8 at fp32 and seg = 3 at fp32 are different machines - and
+# these rows are what says which.
+#
+# ONE size per shape rather than the two-point slope above, and
+# deliberately: the slope needs two runs of a shape whose n must be a
+# multiple of BOTH seg and a useful beat count, and at seg = 192 on
+# fp256 the smaller of the two is already 384 beats. The number here
+# therefore INCLUDES the fixed cost, which is fine for the thing it is
+# for - the same shape before and against after - and the column says
+# so.
+
+async def time_reduce(dut, axil, ram, fmt, op, n, seg, seed):
+    """One reduction run, timed. Returns (cycles, beats, wide_beats)."""
+    ebytes = fmt.width // 8
+    lanes = BEAT_BITS // fmt.width
+    beats = math.ceil(n / lanes)
+    nres = (n // seg) if seg else 1
+    rng = random.Random(seed)
+
+    vals = normal_stream(fmt, n, rng)
+    ram.write(A_BASE, b"".join(v.to_bytes(ebytes, "little") for v in vals))
+    # b and c are unread by a reduction but the FIFOs share a read
+    # enable, so they have to be real memory.
+    ram.write(B_BASE, b"\x00" * max(n * ebytes, 32))
+    ram.write(C_BASE, b"\x00" * max(n * ebytes, 32))
+    ram.write(D_BASE, b"\x00" * (((nres * ebytes + 31) // 32) * 32 + 64))
+
+    await axil.write_dword(MODE, op | (PREC_CODE[fmt.name] << 8)
+                           | (RND_RNE << 12))
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await write64(axil, SEGREG, ((nres << 32) | seg) if seg else 0)
+    await axil.write_dword(CTRL, 1)
+
+    for _ in range(4000):
+        await RisingEdge(dut.ap_clk)
+        if int(dut.run_busy.value):
+            break
+    else:
+        raise AssertionError(f"{fmt.name} n={n} seg={seg}: never went busy")
+
+    cycles = 1
+    while int(dut.run_busy.value):
+        await RisingEdge(dut.ap_clk)
+        cycles += 1
+        assert cycles < 4_000_000, \
+            f"{fmt.name} n={n} seg={seg}: still busy after {cycles} cycles"
+
+    # The tree's own counter, read while it still holds this run's
+    # value - it is cleared at the next start, not at done.
+    wide = int(dut.u_engine.wide_beats.value)
+
+    for _ in range(400):
+        if await axil.read_dword(CTRL) & 0x2:
+            break
+        await ClockCycles(dut.ap_clk, 4)
+    assert await axil.read_dword(STATUS) == 0, \
+        f"{fmt.name} n={n} seg={seg}: bus faults during the timed run"
+    return cycles, beats, wide
+
+
+@cocotb.test()
+async def reduction_cycles_per_beat(dut):
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20)
+    ram_b = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20, mem=ram_a.mem)
+    ram_c = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20, mem=ram_a.mem)
+    ram_d = AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                        dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                        size=2 ** 20, mem=ram_a.mem)
+    ram = ram_a
+    rd_lat, wr_lat = busfx.env_latency()
+    busfx.latency(ram_a, ram_b, ram_c, ram_d, clk=dut.ap_clk,
+                  read=rd_lat, write=wr_lat)
+
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    assert await axil.read_dword(MAGIC) == 0x43465430
+
+    TARGET_BEATS = 128
+    SEGS = (3, 8, 192, 0)             # 0 is the whole array
+    rows = []
+    for fmt in FORMATS:
+        lanes = BEAT_BITS // fmt.width
+        for seg in SEGS:
+            if seg:
+                # n a multiple of seg, near the target beat count and
+                # never fewer than two segments - derived, not typed.
+                k = max(2, round(TARGET_BEATS * lanes / seg))
+                n = k * seg
+            else:
+                n = TARGET_BEATS * lanes
+            cyc, beats, wide = await time_reduce(dut, axil, ram, fmt,
+                                                 OP_SUM, n, seg, 0x5EED)
+            rows.append((fmt.name, seg, n, beats, cyc, cyc / beats, wide))
+
+    dut._log.info(f"reduction cycles on cft_krnl: one run per shape, "
+                  f"about {TARGET_BEATS} beats each; cyc/beat INCLUDES the "
+                  f"fixed cost of the run")
+    dut._log.info(f"memory model: read-data latency {rd_lat} cycles, "
+                  f"write-response latency {wr_lat} cycles")
+    dut._log.info(f"  {'rung':<6} {'seg':>6} {'n':>7} {'beats':>6} "
+                  f"{'cycles':>8} {'cyc/beat':>9} {'wide':>6}")
+    for name, seg, n, beats, cyc, cpb, wide in rows:
+        dut._log.info(f"  {name:<6} {('whole' if not seg else seg):>6} "
+                      f"{n:>7} {beats:>6} {cyc:>8} {cpb:>9.3f} {wide:>6}")
+    for name, seg, n, beats, cyc, cpb, wide in rows:
+        dut._log.info(f"REDCYC rd={rd_lat} wr={wr_lat} rung={name} "
+                      f"seg={seg} n={n} beats={beats} cycles={cyc} "
+                      f"cycpb={cpb:.4f} wide={wide}")
+
+    # The same two things the rows above assert, and nothing tighter:
+    # the run completed and the count is physically possible.
+    for name, seg, n, beats, cyc, cpb, wide in rows:
+        assert cpb >= 0.99, \
+            f"{name} seg={seg}: {cpb:.3f} cycles/beat is below one beat " \
+            "a cycle, which the datapath cannot do"
+        assert cpb < 2000.0, f"{name} seg={seg}: {cpb:.1f} cycles/beat"
