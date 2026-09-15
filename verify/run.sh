@@ -474,7 +474,7 @@ do_lint() { ensure_sim_image && \
             DOCKER run --rm -v "$MOUNT:/work" -w /work cft-sim make yosys-lint; }
 
 need docker
-stage sim "cocotb RTL suite, all 24 targets, SIM_JOBS at a time (docker cft-sim)" -- do_sim
+stage sim "cocotb RTL suite, all 25 targets, SIM_JOBS at a time (docker cft-sim)" -- do_sim
 
 # The same benches with the multiplier iterated and the array paced
 # (tb/Makefile simmc, MC=10 unless MC= says otherwise): the multi-cycle

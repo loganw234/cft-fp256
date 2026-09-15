@@ -78,7 +78,7 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 
 ## Gates, and which ones mean something
 
-**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-four
+**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-five
 benches and then reads the `results.xml` each one wrote, via
 `tb/check_results.py`. A recorded failure, a missing results file or an
 unparseable one all fail the target and name the bench and the message.
