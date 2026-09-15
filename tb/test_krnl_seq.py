@@ -1200,6 +1200,25 @@ async def krnl_sequencer(dut):
                            0, "MODE[22] with no scratch block to gather "
                            "into", flags_before,
                            idx=(None, None, None, list(range(n_id))))
+    # ...and the term's OTHER half (V1, 2026-09-15): SCRATCH_IO set
+    # with NO input slot and one output slot - the image an assembler
+    # emits for a program that only WRITES the block. A different
+    # header state from the case above (flags[1] set, scratch_io[15:0]
+    # zero), refused the same way, because the table would index a
+    # block of zero slots. The tile refused it before this case
+    # existed; the case is here so that half of the OR has a gate.
+    pwo = seq.Program(FP32, [
+        seq.alu(OP_ADD, rd=5, ra=0, rc=1),
+        seq.stl(5, 0),
+        seq.deposit(5),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=0, n_scratch_out=1)
+    assert pwo.scratch_io and pwo.n_scratch_in == 0 and pwo.n_scratch_out, \
+        "this case needs SCRATCH_IO set with no input slot and an output slot"
+    await run_refused_mode(dut, axil, ram, pwo, a_id, b_id, c_id, n_id,
+                           0, "MODE[22] with SCRATCH_IO set and no input "
+                           "slot to gather into", flags_before,
+                           idx=(None, None, None, list(range(n_id))))
 
     # ---- and elementwise still works after all of it ------------------
     await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)

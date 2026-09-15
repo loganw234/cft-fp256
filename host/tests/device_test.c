@@ -3825,22 +3825,40 @@ static void compare_buffers_indexed(cft_device *sw, cft_device *hw,
         }
         memset(&bt, 0, sizeof bt); bt.struct_size = sizeof bt;
         memset(&bs, 0, sizeof bs); bs.struct_size = sizeof bs;
-        if (resident_expected &&
-            cft_buffer_get_info(rta.b, &bt) == CFT_OK &&
-            cft_buffer_get_info(rsrc.b, &bs) == CFT_OK) {
-            t_res = bt.resident_binds;
-            s_res = bs.resident_binds;
+        /* On a device that reports resident buffers this check is
+         * COUNTED whether or not the info calls succeed: a get_info
+         * that failed inside one && chain would have removed the gate
+         * silently (V1, 2026-09-15), and a gate that can vanish is the
+         * shape that hides. On a staging backend it is not counted at
+         * all, which is what keeps the count honest about what the
+         * software backend can prove. */
+        if (resident_expected) {
+            int gt = cft_buffer_get_info(rta.b, &bt);
+            int gs = cft_buffer_get_info(rsrc.b, &bs);
             checks++;
-            if (!t_res || !s_res) {
+            if (gt != CFT_OK || gs != CFT_OK) {
                 printf("  FAIL %s indexed buffers: this device reports "
-                       "resident buffers, and the second run bound the "
-                       "table %lu time(s) and the source %lu time(s) - "
-                       "a table that is staged every call is the round "
-                       "trip this feature exists to remove\n",
-                       cft_format_name(fmt), (unsigned long)t_res,
-                       (unsigned long)s_res);
+                       "resident buffers, and cft_buffer_get_info failed "
+                       "on the table (%d) or the source (%d), so the "
+                       "binding could not be checked at all\n",
+                       cft_format_name(fmt), gt, gs);
                 failures++;
                 ok = 0;
+            } else {
+                t_res = bt.resident_binds;
+                s_res = bs.resident_binds;
+                if (!t_res || !s_res) {
+                    printf("  FAIL %s indexed buffers: this device "
+                           "reports resident buffers, and the second run "
+                           "bound the table %lu time(s) and the source "
+                           "%lu time(s) - a table that is staged every "
+                           "call is the round trip this feature exists "
+                           "to remove\n",
+                           cft_format_name(fmt), (unsigned long)t_res,
+                           (unsigned long)s_res);
+                    failures++;
+                    ok = 0;
+                }
             }
         }
         if (ok)
@@ -3878,7 +3896,6 @@ static void compare_buffers_program(cft_device *sw, cft_device *hw,
     size_t bytes, blk = n * esz;
     uint32_t fl = 0, bus = 0;
     cft_run_args A;
-    cft_buffer_info bi;
     int ok = 1;
 
     ins[0] = seq_ldl(4, 0);                      /* r4 <- scratch[0] */
