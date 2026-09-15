@@ -270,6 +270,15 @@ module cft_krnl #(
    * carries the feature, and CAPS2[7] is published from the same bit
    * rather than from a second opinion. */
   localparam bit FEAT_SCALAR = 1'b1;
+  /* CAPS2[8] (2026-09-14): SEG and NRES exist at 0x80/0x84 (kernel
+   * argument 11) and a reduction restarts every SEG elements; and
+   * opcode 31 (maxall) is a REDUCTION on this tile, folded with the
+   * elementwise maximum, where an older tile decodes it elementwise.
+   * One bit for both because they arrived together and a host that
+   * sees it may send either; a host that does not must send neither.
+   * Published from the localparam the engine is built with. */
+  localparam bit FEAT_REDUCE_SEG = 1'b1;
+  logic [31:0] cfg_seg, cfg_nres;
 
   logic [2:0] cfg_scalar;
   logic mode_bad;
@@ -514,7 +523,11 @@ module cft_krnl #(
       // log2 fields of CAPS are: two copies of a number is how a
       // capability register ends up describing a memory that is no
       // longer that size.
-      .caps2({FEAT_SCALAR, // [7] SCALAR: MODE[18:16] make an operand
+      .caps2({7'b0,        // [15:9] reserved, zero
+              FEAT_REDUCE_SEG, // [8] REDUCE_SEG: SEG/NRES at 0x80/0x84
+                           //     and opcode 31 a streaming maximum
+                           //     (2026-09-14, VERSION 0x900)
+              FEAT_SCALAR, // [7] SCALAR: MODE[18:16] make an operand
                            //     stride-0, so one value broadcasts over
                            //     the run. Published from the same
                            //     localparam the CSR's refusal reads, so
@@ -558,7 +571,8 @@ module cft_krnl #(
       .cfg_prog(cfg_prog), .cfg_bank(cfg_bank),
       .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt),
       .cfg_scalar(cfg_scalar), .cfg_mode_bad(mode_bad),
-      .feat_scalar(FEAT_SCALAR)
+      .feat_scalar(FEAT_SCALAR),
+      .cfg_seg(cfg_seg), .cfg_nres(cfg_nres)
   );
 
   // ---- the shared masters --------------------------------------------
@@ -730,6 +744,7 @@ module cft_krnl #(
       .err_acc(eng_err),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd), .cfg_n(cfg_n),
       .cfg_scalar(cfg_scalar),
+      .cfg_seg(cfg_seg), .cfg_nres(cfg_nres),
       .cfg_a(cfg_a), .cfg_b(cfg_b), .cfg_c(cfg_c), .cfg_d(cfg_d),
       .lane_valid(eng_lv), .lane_op(eng_lop), .lane_rnd(eng_lrnd),
       .lane_prec(eng_lprec), .lane_a(eng_la), .lane_b(eng_lb), .lane_c(eng_lc),

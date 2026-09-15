@@ -43,18 +43,18 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,424 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,118 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,120 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 1,628 | The orbit sequencer and the program model. |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | 646 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | 669 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
 
 ## Reference you call into
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,314 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2,371 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
-| [REMOTE.md](REMOTE.md) | 1,353 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
+| [REMOTE.md](REMOTE.md) | 1,355 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 675 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,879 | Every platform the library has been built and run on, with dates and results. |
@@ -91,8 +91,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 11,614 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 2,868 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 11,719 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 2,882 | What is built, what is next, and what was decided against. |
 | [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |
 | [FUNDING.md](FUNDING.md) | 44 | Funding landscape. |

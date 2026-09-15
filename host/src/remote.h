@@ -58,6 +58,9 @@ extern "C" {
 #define CFTR_OP_STATS            0x0003u
 #define CFTR_OP_RUN              0x0010u
 #define CFTR_OP_REDUCE           0x0011u
+/* REDUCE with a u32 segment length after n (ABI 0.13): the answer is
+ * flags, bus and n / seg elements. docs/REMOTE.md. */
+#define CFTR_OP_REDUCE_SEG       0x0012u
 #define CFTR_OP_PROG_LOAD        0x0020u
 #define CFTR_OP_PROG_RUN         0x0021u
 #define CFTR_OP_PROG_FREE        0x0022u
@@ -269,6 +272,9 @@ int  cftr_run(void *hw, int op, int fmt, int rnd,
 int  cftr_reduce(void *hw, int op, int fmt, int rnd,
                  const void *a, const void *b, void *d, size_t n,
                  uint32_t *flags, uint32_t *bus);
+int  cftr_reduce_seg(void *hw, int op, int fmt, int rnd,
+                     const void *a, const void *b, void *d, size_t n,
+                     size_t seg, uint32_t *flags, uint32_t *bus);
 int  cftr_program_run(void *hw, int fmt, const void *image,
                       size_t image_bytes,
                       const cft_seq_run_io *io,

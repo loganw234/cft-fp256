@@ -1025,7 +1025,14 @@ module cft_seq #(
   } state_e;
   state_e st;
   assign rf_clear = (st == S_BLK_SETUP);
-  assign wb_pop  = al_ov && (wb_bt == 6'({1'b0, nb_blk} - 6'd1));
+  // The array is SHARED with the engine on the shipping tile, so its
+  // result pulses reach this module while the engine runs; only a
+  // program's own results retire (found on the card 2026-09-14: the
+  // engine's fp128 reductions left a phantom instruction queued and the
+  // next program's DEPOSIT waited for it forever).
+  logic          seq_live;
+  assign seq_live = (st != S_IDLE);
+  assign wb_pop  = al_ov && seq_live && (wb_bt == 6'({1'b0, nb_blk} - 6'd1));
   assign q_after = q_n - {1'b0, wb_pop};
   assign q_e0    = wb_pop ? q_rd1 : q_rd0;
   assign q_e1    = wb_pop ? q_rd2 : q_rd1;
@@ -2819,8 +2826,9 @@ module cft_seq #(
                 !(!rd_hold && bt == 6'({1'b0, nb_blk} - 6'd1));
 
       // ---- retire: the array's results, whatever state the machine is
-      // in, to the destination at the head of the queue ------------------
-      if (al_ov) begin
+      // in - while a program runs; the engine's pulses are not ours -
+      // to the destination at the head of the queue --------------------
+      if (al_ov && seq_live) begin
         rf_we <= 1'b1;
         rf_waddr <= {q_rd0, wb_bt[NBSH-1:0]};
         rf_wdata <= al_d;
@@ -2841,7 +2849,11 @@ module cft_seq #(
           default: q_rd2 <= adm_rd;
         endcase
       end
-      q_n <= q_after + {1'b0, q_push};
+      // Only when something moves: a `q_n <= q_n` every cycle would
+      // override the block setup's reset, which is written above the
+      // case and must win in its cycle.
+      if (q_push || wb_pop)
+        q_n <= q_after + {1'b0, q_push};
       // the admitted instruction's producers, positions from the head;
       // a pop moves them down, and the head popping releases the operand
       if (q_push) begin

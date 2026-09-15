@@ -585,9 +585,10 @@ async def krnl_sequencer(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000800, \
+    assert await axil.read_dword(VERSION) == 0x00000900, \
         ("the map grew again at v0.8.0 - CAPS2 at 0x6C and the two "
-         "scratch pointers at 0x70/0x74 and 0x78/0x7C")
+         "scratch pointers at 0x70/0x74 and 0x78/0x7C - and at v0.9.0, "
+         "by SEG/NRES at 0x80/0x84")
     caps = await axil.read_dword(CAPS)
     check_seq_caps(caps)
     # CAPS2 against the localparam cft_krnl elaborates the scratch

@@ -76,6 +76,7 @@ client's own copy of the library, which is bit-identical by contract.
 | `cft_run` | server | one `RUN` request per chunk of the call |
 | `cft_reduce` for `CFT_SUM`, `CFT_DOT` | server | one `REDUCE` request |
 | `cft_reduce` for `CFT_SUMSQ`, `CFT_SUMABS` | the composition on the client, its two passes on the server | `REDUCE` (dot), or `RUN` (abs) then `REDUCE` (sum) |
+| `cft_reduce_seg` (ABI 0.13) | server, its own `cft_reduce_seg` over whatever device it has | one `REDUCE_SEG` request, `n / seg` elements back |
 | `cft_program_load` | validated on the client, then loaded on the server | `PROG_LOAD` once per distinct image |
 | `cft_program_run` | server | one `PROG_RUN` per chunk of lanes |
 | `cft_program_run_bank` | server | one `PROG_RUN_BANK` per chunk of lanes, the bank on each |
@@ -248,6 +249,7 @@ payload (the server passes NULL for it, as the caller did).
 | `0x0003` | `STATS` | - | `u64 requests, u64 bytes_in, u64 bytes_out, u32 entries, u32 0, then entries x (u32 op, u32 0, u64 count)` |
 | `0x0010` | `RUN` | `u32 op, u32 fmt, u32 rnd, u32 present, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[n]` |
 | `0x0011` | `REDUCE` | `u32 op, u32 fmt, u32 rnd, u32 present, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[1]` |
+| `0x0012` | `REDUCE_SEG` | `u32 op, u32 fmt, u32 rnd, u32 present, u64 n, u32 seg, elem[n] per present operand` - `n` a whole number of segments of `seg`, or refused | `u32 flags, u32 bus, elem[n / seg]` |
 | `0x0020` | `PROG_LOAD` | the program image, byte for byte | `u32 handle, u32 fmt, u32 max_deposits, u32 0` |
 | `0x0021` | `PROG_RUN` | `u32 handle, u32 present, u32 want_counts, u32 0, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted` |
 | `0x0022` | `PROG_FREE` | `u32 handle` | - |

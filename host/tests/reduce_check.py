@@ -121,6 +121,11 @@ def bind(lib):
                                ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                ctypes.c_void_p, ctypes.c_size_t, u32p, u32p]
     lib.cft_reduce.restype = ctypes.c_int
+    lib.cft_reduce_seg.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_void_p,
+                                   ctypes.c_void_p, ctypes.c_void_p,
+                                   ctypes.c_size_t, ctypes.c_size_t, u32p, u32p]
+    lib.cft_reduce_seg.restype = ctypes.c_int
     lib.cft_run.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
                             ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                             ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
@@ -482,6 +487,85 @@ def check_refusals(lib, dev, fmt):
     return bad
 
 
+def check_segmented(lib, dev, fmt, rng, trials):
+    """cft_reduce_seg (ABI 0.13) is cft_reduce slice by slice: the same
+    bits in every result, the flags the OR over slices, for every
+    reduction opcode - and the two refusals, a zero segment and a
+    length that is not a whole number of them."""
+    esz = fmt.width // 8
+    prec = PREC_CODE[fmt.name]
+    bad = 0
+    for _ in range(trials):
+        seg = rng.choice((1, 2, 3, 5, 7, 8, 13))
+        nres = rng.randint(1, 12)
+        n = seg * nres
+        rnd = rng.randint(0, 4)
+        xs = [rand_operand(fmt, rng) for _ in range(n)]
+        ys = [rand_operand(fmt, rng) for _ in range(n)]
+        a = b"".join(x.to_bytes(esz, "little") for x in xs)
+        bb = b"".join(y.to_bytes(esz, "little") for y in ys)
+        for op in (OP_SUM, OP_DOT, OP_SUMSQ, OP_SUMABS, OP_MAXALL):
+            d = ctypes.create_string_buffer(esz * nres)
+            fl = ctypes.c_uint32(0)
+            st = lib.cft_reduce_seg(dev, op, prec, rnd, a,
+                                    bb if op == OP_DOT else None,
+                                    ctypes.cast(d, ctypes.c_void_p), n, seg,
+                                    ctypes.byref(fl), None)
+            if st != CFT_OK:
+                print(f"FAIL {fmt.name} reduce_seg op {op} n={n} seg={seg}: "
+                      f"status {st}")
+                bad += 1
+                continue
+            want_f = 0
+            for s in range(nres):
+                ds = ctypes.create_string_buffer(esz)
+                sf = ctypes.c_uint32(0)
+                st = lib.cft_reduce(dev, op, prec, rnd,
+                                    a[s * seg * esz:(s + 1) * seg * esz],
+                                    bb[s * seg * esz:(s + 1) * seg * esz]
+                                    if op == OP_DOT else None,
+                                    ctypes.cast(ds, ctypes.c_void_p), seg,
+                                    ctypes.byref(sf), None)
+                assert st == CFT_OK
+                want_f |= sf.value
+                got = d.raw[s * esz:(s + 1) * esz]
+                if got != ds.raw:
+                    print(f"FAIL {fmt.name} reduce_seg op {op} n={n} "
+                          f"seg={seg} result {s}: {got.hex()} vs "
+                          f"cft_reduce {ds.raw.hex()}")
+                    bad += 1
+            if fl.value != want_f:
+                print(f"FAIL {fmt.name} reduce_seg op {op} n={n} seg={seg}: "
+                      f"flags {fl.value:#07b} vs OR of slices {want_f:#07b}")
+                bad += 1
+    # the refusals
+    a = ctypes.create_string_buffer(esz * 6)
+    d = ctypes.create_string_buffer(esz * 6)
+    st = lib.cft_reduce_seg(dev, OP_SUM, prec, 0, ctypes.cast(a, ctypes.c_void_p),
+                            None, ctypes.cast(d, ctypes.c_void_p), 6, 0,
+                            None, None)
+    if st != CFT_ERR_INVALID_ARGUMENT:
+        print(f"FAIL reduce_seg with seg=0 returned {st}, want INVALID_ARGUMENT")
+        bad += 1
+    st = lib.cft_reduce_seg(dev, OP_SUM, prec, 0, ctypes.cast(a, ctypes.c_void_p),
+                            None, ctypes.cast(d, ctypes.c_void_p), 6, 4,
+                            None, None)
+    if st != CFT_ERR_INVALID_ARGUMENT:
+        print(f"FAIL reduce_seg with n=6 seg=4 returned {st}, want INVALID_ARGUMENT")
+        bad += 1
+    # n == 0 writes nothing and is fine
+    st = lib.cft_reduce_seg(dev, OP_SUM, prec, 0, ctypes.cast(a, ctypes.c_void_p),
+                            None, ctypes.cast(d, ctypes.c_void_p), 0, 4,
+                            None, None)
+    if st != CFT_OK:
+        print(f"FAIL reduce_seg with n=0 returned {st}, want OK")
+        bad += 1
+    if not bad:
+        print(f"  {fmt.name}: reduce_seg is reduce slice by slice over "
+              f"{trials} shapes x 5 opcodes, flags the OR, refusals right")
+    return bad
+
+
 def check_c_partitioner():
     """The C partitioner against the model, range for range.
 
@@ -652,6 +736,7 @@ def main():
                    fmt, rnd, xs, ys)
 
         bad += check_refusals(lib, dev, fmt)
+        bad += check_segmented(lib, dev, fmt, rng, max(40, args.trials // 30))
         bad += check_partition(lib, dev, fmt, rng, 60)
         bad += check_identities(ck, fmt, rng, max(120, args.trials // 8))
         check_scaled(ck, fmt, rng, max(200, args.trials // 4))

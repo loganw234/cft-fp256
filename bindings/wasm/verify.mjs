@@ -372,7 +372,7 @@ console.log(`exports ${exported.length} cftw_* entry points`);
 // no wrapper: they are opcodes 28 and 29 through cftw_reduce, which
 // has been exported since 0.1. Step 5 issues them, which is the check
 // that matters for an opcode.
-const NEEDED = ["cftw_run", "cftw_reduce", "cftw_conformance",
+const NEEDED = ["cftw_run", "cftw_reduce", "cftw_reduce_seg", "cftw_conformance",
                 "cftw_convert", "cftw_rint", "cftw_class", "cftw_rem",
                 ...TRANSCEND_UNARY.map((f) => `cftw_${f}`),
                 ...TRANSCEND_BINARY.map((f) => `cftw_${f}`),

@@ -582,6 +582,29 @@ has.
 | Node / Browser | the module rebuilt at 0.12, and the rebuild was NOT optional: `verify.mjs` replays the sets through the module, and one predating opcode 31 cannot score maxall - it failed 128 of 148 sets, all twenty reduce sets, each at its first maxall case. After the rebuild `verify.mjs` OK, 832,915 cases over 148 sets with the reduction family 10,240 over 20/20, abi 12 both sides; `make -C host wstest` 67 checks, 0 failures. `make_page.py` refused the build twice on its own asserts first - the elementwise opcode census 29 to 28 (DOWN, where IMUL left it unchanged) and the sample stride 60 to 59, to keep landing on exactly 200 lines of 11,800 |
 | RTL | MODE[18:16] and the guard on MODE[31:19]; CAPS2[7] published from the same localparam the refusal reads, so a tile cannot advertise a bit it would turn away. A scalar stream's budget is one beat and its FIFO is never popped, so its `rd_data` holds beat 0 all run - and `ex_valid` already required every FIFO non-empty, which an unpopped one satisfies forever, so nothing had to change for a one-beat stream. `bcast_beat` replicates element 0 per precision, the construction `one_beat` already used: a beat is eight elements at fp32, so handing the base beat to the array unchanged would give lane *i* element *i*. `make krnl` TESTS=2 PASS=2 with the scalar buffer poisoned so a tile that streamed `n` would compute from the poison; `test_seq_core` 18/18, `test_krnl_seq` 1/1, `yosys-lint` rc=0 with zero latches. VERSION stays 0x800: no register grew |
 
+**ABI 0.13 (2026-09-14)** is one addition the same workload asked for
+next (its seventh ask, docs/ROADMAP.md): `cft_reduce_seg`, the reduction
+over every segment of `seg` elements - `n / seg` results, `d[s]` DEFINED
+as `cft_reduce` over slice `s`, the same tree, so the software backend
+is exact by definition and a tile handed a slice computes the same
+tree. On a device it is ONE run behind `CFT_FEAT_REDUCE_SEG` (CAPS2[8]:
+the SEG/NRES pair at 0x80/0x84, VERSION 0x900, and opcode 31 a streaming
+maximum), and on a device without the bit it is REFUSED by name - never
+looped over the segments on the caller's behalf. The same bit lets
+`cft_reduce(CFT_MAXALL)` run as one pass on the tile. ADDITIVE: code
+written against 0.12 gets the same bits from the same calls, and
+`cft_get_caps` reports the feature.
+
+| surface | status at ABI 0.13 |
+|---|---|
+| C (`cft.h`) | complete: `cft_reduce_seg`, `CFT_FEAT_REDUCE_SEG`. `reduce_check.py` gained a segmented leg - `cft_reduce_seg` against `cft_reduce` slice by slice for all five reduction opcodes, the flags the OR, the two refusals - 0 failures at fp32 and fp64 on the software backend; the XRT backend compiles against 2.14 (cft2204) and 2.19 (amd-arc-box) warning-free |
+| hardware | `tb/test_krnl_reduce.py` gained three cases against `freduce_seg`: segmented sums at every format over segment lengths that straddle the beat and result counts that straddle a result beat, the streaming `maxall` whole and segmented, and the flags of a segmented run with specials - 6/6 under Verilator on the first run. No image yet as this is written; the entry that measures it will say |
+| remote | `REDUCE_SEG` (0x0012), `REDUCE`'s frame with a u32 segment length after `n`, answered with `n / seg` elements; the server's own `cft_reduce_seg` does the work |
+| Node / Browser | `reduceSeg(op, a, seg, b)` on the calculator, `cftw_reduce_seg` in the module, the module rebuilt at 0.13 as every step requires; `test.mjs` holds `reduceSeg` to `reduce` per slice for every opcode and its two `RangeError`s |
+| Arduino | the vendored copy re-synced (29 files identical); the entry point is there and refuses on a board as it does on any device without the bit |
+| Python (cftmpfr) | no surface: cftmpfr is an MPFR drop-in and carries no reduction entry point |
+
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is

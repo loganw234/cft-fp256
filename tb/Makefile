@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seqprobe seqcycles seqtrace krnlfused krnlplain cycles seqbanks \
+        seq_core seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -545,6 +545,21 @@ seqtrace:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=probe_trace SIM_BUILD=sim_build/trace \
 		COCOTB_RESULTS_FILE=sim_build/trace/results.xml
+
+# Two more, through the whole kernel (2026-09-14, the evening the first
+# revision-5 image hung a compute unit): every program shape with READY
+# withheld on every AXI channel at three duties (tb/probe_seq_bp.py),
+# and an engine reduction followed by a program - the sequence that
+# hung, because the lane array is shared (tb/probe_reduce_then_prog.py).
+seqbp:
+	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=probe_seq_bp SIM_BUILD=sim_build/seqbp \
+		COCOTB_RESULTS_FILE=sim_build/seqbp/results.xml
+
+redprog:
+	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=probe_reduce_then_prog SIM_BUILD=sim_build/redprog \
+		COCOTB_RESULTS_FILE=sim_build/redprog/results.xml
 
 clean:
 	rm -rf sim_build results.xml

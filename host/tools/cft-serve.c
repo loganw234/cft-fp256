@@ -239,6 +239,92 @@ static int no_device(conn *C, answer *A, const char *what)
     return 1;
 }
 
+/* REDUCE_SEG (ABI 0.13): REDUCE's fixed fields and a u32 segment
+ * length, 28 bytes, then the operands; the answer is flags, bus and
+ * n / seg elements. The library's own cft_reduce_seg does the work. */
+static int h_reduce_seg(conn *C, const uint8_t *p, size_t len, answer *A)
+{
+    uint32_t op, fmt, rnd, present, seg;
+    uint64_t n;
+    size_t esz, opnd, expect, nres, out_bytes;
+    const uint8_t *a = NULL, *b = NULL, *q;
+    uint8_t *d;
+    uint32_t flags = 0, bus = 0;
+    cft_status st;
+
+    if (len < 28) {
+        snprintf(A->why, sizeof A->why, "REDUCE_SEG payload of %lu bytes is "
+                 "shorter than its fixed fields", (unsigned long)len);
+        return -1;
+    }
+    op      = cftr_get32(p + 0);
+    fmt     = cftr_get32(p + 4);
+    rnd     = cftr_get32(p + 8);
+    present = cftr_get32(p + 12);
+    n       = cftr_get64(p + 16);
+    seg     = cftr_get32(p + 24);
+    esz     = elem_bytes(fmt);
+    if (present & ~3u) {
+        snprintf(A->why, sizeof A->why, "operand mask 0x%x names an operand "
+                 "a reduction has not got", (unsigned)present);
+        return -1;
+    }
+    if (seg == 0 || (n % seg) != 0) {
+        snprintf(A->why, sizeof A->why, "n = %llu is not a whole number of "
+                 "segments of %u", (unsigned long long)n, (unsigned)seg);
+        return -1;
+    }
+    if (esz && n > (uint64_t)(CFTR_MAX_PAYLOAD / esz)) {
+        snprintf(A->why, sizeof A->why, "n = %llu elements cannot fit a "
+                 "frame", (unsigned long long)n);
+        return -1;
+    }
+    opnd   = (size_t)n * esz;
+    expect = 28u + (size_t)popcount3(present) * opnd;
+    if (len != expect) {
+        snprintf(A->why, sizeof A->why, "REDUCE_SEG over %llu %s elements "
+                 "with operand mask 0x%x should carry %lu bytes, not %lu",
+                 (unsigned long long)n,
+                 fmt <= 3 ? cft_format_name((cft_format)fmt) : "invalid",
+                 (unsigned)present, (unsigned long)expect,
+                 (unsigned long)len);
+        return -1;
+    }
+    if (no_device(C, A, "cft_reduce_seg"))
+        return 0;
+    q = p + 28;
+    if (present & 1u) { a = q; q += opnd; }
+    if (present & 2u) { b = q; }
+    nres      = (size_t)(n / seg);
+    out_bytes = nres * esz;
+    if (8u + out_bytes > (size_t)CFTR_MAX_PAYLOAD) {
+        snprintf(A->why, sizeof A->why, "REDUCE_SEG over %llu elements in "
+                 "segments of %u would answer with %lu bytes, past the "
+                 "%lu-byte frame cap", (unsigned long long)n, (unsigned)seg,
+                 (unsigned long)(8u + out_bytes),
+                 (unsigned long)CFTR_MAX_PAYLOAD);
+        return -1;
+    }
+    d = (uint8_t *)malloc(8u + (out_bytes ? out_bytes : 1u));
+    if (!d) {
+        fail(A, CFT_ERR_OUT_OF_MEMORY, "allocating the results");
+        return 0;
+    }
+    st = cft_reduce_seg(C->dev, (cft_op)op, (cft_format)fmt, (cft_round)rnd,
+                        a, b, d + 8, (size_t)n, (size_t)seg, &flags, &bus);
+    if (st != CFT_OK) {
+        free(d);
+        fail(A, st, "cft_reduce_seg");
+        return 0;
+    }
+    cftr_put32(d + 0, flags);
+    cftr_put32(d + 4, bus);
+    A->status   = CFT_OK;
+    A->resp     = d;
+    A->resp_len = 8u + out_bytes;
+    return 0;
+}
+
 static int h_run(conn *C, const uint8_t *p, size_t len, answer *A, int reduce)
 {
     uint32_t op, fmt, rnd, present;
@@ -1002,6 +1088,7 @@ static int serve_one(conn *C, uint32_t my_abi)
         case CFTR_OP_STATS:      h_stats(C, &A); break;
         case CFTR_OP_RUN:        h_run(C, p, h.length, &A, 0); break;
         case CFTR_OP_REDUCE:     h_run(C, p, h.length, &A, 1); break;
+        case CFTR_OP_REDUCE_SEG: h_reduce_seg(C, p, h.length, &A); break;
         case CFTR_OP_PROG_LOAD:  h_prog_load(C, p, h.length, &A); break;
         case CFTR_OP_PROG_RUN:   h_prog_run(C, p, h.length, &A, RUN_PLAIN);
                                  break;

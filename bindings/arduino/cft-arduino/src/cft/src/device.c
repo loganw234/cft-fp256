@@ -684,6 +684,83 @@ int cft_seq_cap_refusal(const char *field, unsigned long asked,
     return CFT_ERR_UNSUPPORTED;
 }
 
+/* The CAPS[15:8] opcode groups by name, in op_group_bit's numbering. */
+static const char *const group_names[8] = {
+    "arithmetic", "sign", "min/max", "predicate/select",
+    "integer", "reduction", "divide/sqrt seeds", "sequencer"
+};
+
+/* "fp32 fp64 fp128": the formats a mask names, space-separated, in
+ * the library's own vocabulary. A mask with nothing set is said so,
+ * because an empty list reads as a formatting accident. */
+static const char *render_format_mask(uint32_t mask, char *buf, size_t len)
+{
+    int f;
+    size_t used = 0;
+    buf[0] = '\0';
+    for (f = 0; f < 4; f++) {
+        int k;
+        if (!(mask & (1u << f)))
+            continue;
+        k = snprintf(buf + used, len - used, "%s%s", used ? " " : "",
+                     cft_format_name((cft_format)f));
+        if (k < 0 || (size_t)k >= len - used)
+            break;
+        used += (size_t)k;
+    }
+    if (!buf[0])
+        snprintf(buf, len, "no format at all");
+    return buf;
+}
+
+int cft_absent_format_refusal(int fmt)
+{
+    char have[64];
+    /* The same shape as the device refusal below - what IS carried,
+     * then what was asked for - because a caller reads both the same
+     * way, and device-test holds both to naming every carried format. */
+    cft_set_error("this libcft build carries %s; %s is above its format "
+                  "ceiling (CFT_MAX_FORMAT is %d in cft_config.h), so no "
+                  "backend of this build can carry it - cft_get_caps - "
+                  "cft_caps.format_mask - says so before a run",
+                  render_format_mask(CFT_FORMAT_MASK_BUILD, have, sizeof have),
+                  cft_format_name((cft_format)fmt), (int)CFT_MAX_FORMAT);
+    return CFT_ERR_UNSUPPORTED;
+}
+
+int cft_device_format_refusal(uint32_t mask, int fmt, const char *entry)
+{
+    char have[64];
+    cft_set_error("%s: this device carries %s; %s is not among them. "
+                  "cft_supports(dev, op, fmt), or cft_get_caps - "
+                  "cft_caps.format_mask - says so before a run; a device "
+                  "refuses a precision it lacks itself, with STATUS[3] "
+                  "and no explanation",
+                  entry, render_format_mask(mask, have, sizeof have),
+                  cft_format_name((cft_format)fmt));
+    return CFT_ERR_UNSUPPORTED;
+}
+
+int cft_op_group_refusal(int op, const char *entry)
+{
+    int g = op_group_bit(op);
+    cft_set_error("%s: opcode %d (%s) is in CAPS group %d (%s, CAPS[%d]), "
+                  "which this device does not implement - "
+                  "cft_supports(dev, op, fmt) says so before a run",
+                  entry, op, cft_op_name((cft_op)op), g,
+                  (g >= 0 && g < 8) ? group_names[g] : "unassigned", 8 + g);
+    return CFT_ERR_UNSUPPORTED;
+}
+
+int cft_composed_refusal(const char *entry, const char *needs, int fmt)
+{
+    cft_set_error("%s is composed from %s, which this device does not "
+                  "support at %s - cft_supports(dev, %s, fmt) says so "
+                  "before a call",
+                  entry, needs, cft_format_name((cft_format)fmt), needs);
+    return CFT_ERR_UNSUPPORTED;
+}
+
 void cft_device_seq_caps(const struct cft_device *dev, cft_seq_caps *out)
 {
     if (!out)
@@ -841,7 +918,7 @@ static cft_status run_impl(cft_device *dev,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
@@ -852,7 +929,8 @@ static cft_status run_impl(cft_device *dev,
     if ((int)op < 0 || (int)op > 255)
         return CFT_ERR_INVALID_ARGUMENT;
     if (!(dev->format_mask & (1u << (int)fmt)))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_device_format_refusal(dev->format_mask,
+                                                     (int)fmt, "cft_run");
     /* A reduction cannot be evaluated elementwise, so this is not the
      * call for it. Refused BEFORE the backend dispatch below, so the
      * software and device paths give the same answer - the alternative
@@ -873,7 +951,7 @@ static cft_status run_impl(cft_device *dev,
     {
         int group = op_group_bit((int)op);
         if (group >= 0 && !(dev->op_groups & (1u << group)))
-            return CFT_ERR_UNSUPPORTED;
+            return (cft_status)cft_op_group_refusal((int)op, "cft_run");
         if ((int)op == (int)CFT_IMUL &&
             !(dev->seq.features & CFT_ALU_EXT_IMUL)) {
             cft_set_error("opcode 30 (imul) is not implemented by this "
@@ -1180,7 +1258,7 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)
@@ -1191,18 +1269,26 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     if (!cft_sf_is_reduction((int)op))
         return CFT_ERR_INVALID_ARGUMENT;
     if (!(dev->format_mask & (1u << (int)fmt)))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_device_format_refusal(dev->format_mask,
+                                                     (int)fmt, "cft_reduce");
     {
         int group = op_group_bit((int)op);
         if (group < 0 || !(dev->op_groups & (1u << group)))
-            return CFT_ERR_UNSUPPORTED;
+            return (cft_status)cft_op_group_refusal((int)op, "cft_reduce");
         /* A composed reduction also needs the group its composition
          * runs through - the multiply for sumSquare, the abs for
          * sumAbs - and a device missing one must say so here rather
          * than fail partway through the sequence. */
         group = reduce_helper_group((int)op);
-        if (group >= 0 && !(dev->op_groups & (1u << group)))
+        if (group >= 0 && !(dev->op_groups & (1u << group))) {
+            cft_set_error("cft_reduce: %s is composed, and its %s step "
+                          "needs CAPS group %d (%s, CAPS[%d]), which this "
+                          "device does not implement - cft_supports says "
+                          "so before a run",
+                          cft_op_name(op), group_names[group], group,
+                          group_names[group], 8 + group);
             return CFT_ERR_UNSUPPORTED;
+        }
     }
     if (!d)
         return CFT_ERR_INVALID_ARGUMENT;
@@ -1294,6 +1380,32 @@ CFT_API cft_status cft_reduce(cft_device *dev,
         uint8_t *buf[2] = {NULL, NULL};
         const void *src = a;
         size_t m = n, which = 0;
+
+#ifdef CFT_ENABLE_XRT
+        /* The tile streams it where CAPS2[8] says so (ABI 0.13): one
+         * run, the accumulator folding with the elementwise maximum,
+         * against ceil(log2 n) halvings. The bits are the halving's,
+         * because 754 maximum is exactly associative and commutative,
+         * flags included - the block above the opcode has the whole
+         * argument, and tb/test_krnl_reduce.py holds the tile to the
+         * left fold python/cft_golden/reduce.py defines. A tile without
+         * the bit decodes 31 as ELEMENTWISE and must never see it. */
+        if (dev->backend == CFT_BACKEND_XRT &&
+            (dev->seq.features & CFT_FEAT_REDUCE_SEG)) {
+            cft_bindings bd;
+            uint32_t tf = 0;
+            (void)cft_flags_mute(dev, muted);
+            bind_clear(&bd);
+            bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
+            backend_call();
+            st = (cft_status)cftx_reduce_seg(dev->hw, (int)op, (int)fmt,
+                                             (int)rnd, a, n, n, d, &bd,
+                                             &tf, bus_out);
+            if (st == CFT_OK)
+                cft_flags_emit(dev, tf, flags_out);
+            return st;
+        }
+#endif
 
         /* n == 0 never arrives: the identity is handled at the one
          * n == 0 site above, beside every other reduction's. */
@@ -1498,6 +1610,203 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     cft_bn_store(&bo, (uint8_t *)d, (int)esz);
     cft_flags_emit(dev, fl, flags_out);
     return CFT_OK;
+}
+
+/* The segmented form: d[s] = cft_reduce(op, a + s*seg, b + s*seg, seg).
+ *
+ * The software backend is that line, call by call, because it is the
+ * definition and there is nothing to add: the composed opcodes, 9.4's
+ * infinity rule and maxall's halving all happen inside cft_reduce per
+ * slice, and the flags OR up as they do across one call's tree. The
+ * device backends are where the entry point earns its existence - one
+ * run or one frame for the whole array - and where a device that cannot
+ * do that is told so by name rather than handed a loop. */
+CFT_API cft_status cft_reduce_seg(cft_device *dev,
+                                  cft_op      op,
+                                  cft_format  fmt,
+                                  cft_round   rnd,
+                                  const void *a,
+                                  const void *b,
+                                  void       *d,
+                                  size_t      n,
+                                  size_t      seg,
+                                  uint32_t   *flags_out,
+                                  uint32_t   *bus_out)
+{
+    const cft_fmt_desc *f;
+    size_t esz, nres;
+    unsigned need;
+    uint32_t fl = 0;
+
+    if (bus_out)
+        *bus_out = 0;
+    if (!dev)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (CFT_FMT_ABSENT(fmt))
+        return (cft_status)cft_absent_format_refusal((int)fmt);
+    if (CFT_FMT_OUT_OF_RANGE(fmt))
+        return CFT_ERR_INVALID_ARGUMENT;
+    if ((int)rnd < 0 || (int)rnd > 4)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (!cft_sf_is_reduction((int)op))
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (!(dev->format_mask & (1u << (int)fmt)))
+        return (cft_status)cft_device_format_refusal(dev->format_mask,
+                                                     (int)fmt,
+                                                     "cft_reduce_seg");
+    {
+        int group = op_group_bit((int)op);
+        if (group < 0 || !(dev->op_groups & (1u << group)))
+            return (cft_status)cft_op_group_refusal((int)op,
+                                                    "cft_reduce_seg");
+        group = reduce_helper_group((int)op);
+        if (group >= 0 && !(dev->op_groups & (1u << group))) {
+            cft_set_error("cft_reduce_seg: %s is composed, and its %s step "
+                          "needs CAPS group %d (%s, CAPS[%d]), which this "
+                          "device does not implement",
+                          cft_op_name(op), group_names[group], group,
+                          group_names[group], 8 + group);
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+    if (!d)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (seg == 0) {
+        cft_set_error("cft_reduce_seg: a segment is at least one element");
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (n % seg) {
+        cft_set_error("cft_reduce_seg: n = %lu is not a whole number of "
+                      "segments of %lu - the last %lu elements would "
+                      "belong to no result",
+                      (unsigned long)n, (unsigned long)seg,
+                      (unsigned long)(n % seg));
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    f    = &cft_sf_formats[(int)fmt];
+    esz  = (size_t)f->width / 8;
+    nres = n / seg;
+    if (n == 0) {
+        cft_flags_emit(dev, 0, flags_out);
+        return CFT_OK;
+    }
+    need = cft_sf_op_operands((int)op);
+    if (((need & 1u) && !a) || ((need & 2u) && !b))
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (n > ((size_t)-1) / esz)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (seg == n)
+        return cft_reduce(dev, op, fmt, rnd, a, b, d, n, flags_out, bus_out);
+
+    buf_sync_in(dev, a, n * esz);
+    buf_sync_in(dev, b, n * esz);
+
+#ifdef CFT_ENABLE_XRT
+    if (dev->backend == CFT_BACKEND_XRT) {
+        cft_status st;
+        if (!(dev->seq.features & CFT_FEAT_REDUCE_SEG)) {
+            cft_set_error("cft_reduce_seg: this device does not publish "
+                          "CFT_FEAT_REDUCE_SEG (CAPS2[8]) - its tile has no "
+                          "SEG register and would return one result where "
+                          "%lu are due. Not looped over %lu calls for you: "
+                          "that is %lu round trips, and a caller who wants "
+                          "them can write them",
+                          (unsigned long)nres, (unsigned long)nres,
+                          (unsigned long)nres);
+            return CFT_ERR_UNSUPPORTED;
+        }
+        /* The compositions, taken apart exactly as cft_reduce takes
+         * them apart, then the segmented tree on the tile. */
+        if (op == CFT_DOT || op == CFT_SUMSQ || op == CFT_SUMABS) {
+            void *tmp = malloc(n * esz);
+            uint32_t pf = 0, sf = 0;
+            const int muted = cft_flags_mute(dev, 1);
+            if (!tmp) {
+                (void)cft_flags_mute(dev, muted);
+                return CFT_ERR_OUT_OF_MEMORY;
+            }
+            if (op == CFT_SUMABS)
+                st = cft_run(dev, CFT_ABS, fmt, rnd, a, NULL, NULL, tmp, n,
+                             &pf, bus_out);
+            else
+                st = cft_run(dev, CFT_MUL, fmt, rnd, a,
+                             op == CFT_DOT ? b : a, NULL, tmp, n, &pf,
+                             bus_out);
+            if (st == CFT_OK)
+                st = cft_reduce_seg(dev, CFT_SUM, fmt, rnd, tmp, NULL, d, n,
+                                    seg, &sf, bus_out);
+            free(tmp);
+            (void)cft_flags_mute(dev, muted);
+            if (st != CFT_OK)
+                return st;
+            fl = pf | sf;
+            /* 9.4's infinity rule, per slice as it is per call: a slice
+             * whose sum came out NaN while holding an infinity and no
+             * NaN of its own is the infinity. */
+            if (op == CFT_SUMSQ || op == CFT_SUMABS) {
+                size_t s;
+                for (s = 0; s < nres; s++) {
+                    uint8_t *ds = (uint8_t *)d + s * esz;
+                    if (result_is_nan(f, ds)) {
+                        cft_bn ov;
+                        uint32_t of = 0;
+                        if (sumsq_abs_inf_override(
+                                f, (const uint8_t *)a + s * seg * esz, esz,
+                                seg, &ov, &of)) {
+                            cft_bn_store(&ov, ds, (int)esz);
+                            fl = (fl & ~(uint32_t)0) | of;
+                        }
+                    }
+                }
+            }
+            cft_flags_emit(dev, fl, flags_out);
+            return CFT_OK;
+        }
+        {
+            cft_bindings bd;
+            bind_clear(&bd);
+            bind_role(dev, &bd, CFT_ROLE_A, a, n * esz);
+            backend_call();
+            st = (cft_status)cftx_reduce_seg(dev->hw, (int)op, (int)fmt,
+                                             (int)rnd, a, n, seg, d, &bd,
+                                             &fl, bus_out);
+            if (st == CFT_OK)
+                cft_flags_emit(dev, fl, flags_out);
+            return st;
+        }
+    }
+#endif
+#ifndef CFT_NO_REMOTE
+    if (dev->backend == CFT_BACKEND_REMOTE) {
+        cft_status st;
+        backend_call();
+        st = (cft_status)cftr_reduce_seg(dev->hw, (int)op, (int)fmt,
+                                         (int)rnd, a, b, d, n, seg,
+                                         &fl, bus_out);
+        if (st == CFT_OK)
+            cft_flags_emit(dev, fl, flags_out);
+        return st;
+    }
+#endif
+    /* the software backend: the definition, slice by slice */
+    {
+        const int muted = cft_flags_mute(dev, 1);
+        cft_status st = CFT_OK;
+        size_t s;
+        for (s = 0; s < nres && st == CFT_OK; s++) {
+            uint32_t sf = 0;
+            st = cft_reduce(dev, op, fmt, rnd,
+                            (const uint8_t *)a + s * seg * esz,
+                            b ? (const uint8_t *)b + s * seg * esz : NULL,
+                            (uint8_t *)d + s * esz, seg, &sf, bus_out);
+            fl |= sf;
+        }
+        (void)cft_flags_mute(dev, muted);
+        if (st != CFT_OK)
+            return st;
+        cft_flags_emit(dev, fl, flags_out);
+        return CFT_OK;
+    }
 }
 
 /* ---------------------------------------------------------------

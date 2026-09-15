@@ -416,6 +416,7 @@ async function instantiate() {
 
     run:          M.cwrap("cftw_run", n, [n,n,n,n,n,n,n,n,n,n,n]),
     reduce:       M.cwrap("cftw_reduce", n, [n,n,n,n,n,n,n,n,n,n]),
+    reduceSeg:    M.cwrap("cftw_reduce_seg", n, [n,n,n,n,n,n,n,n,n,n,n]),
     div:          M.cwrap("cftw_div", n, [n,n,n,n,n,n,n,n,n]),
     sqrt:         M.cwrap("cftw_sqrt", n, [n,n,n,n,n,n,n,n]),
 

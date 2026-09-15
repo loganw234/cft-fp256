@@ -208,6 +208,17 @@ int  cftx_reduce(void *hw, int op, int fmt, int rnd, const void *a,
                  void *partials, const cft_bindings *bind,
                  uint32_t *flags, uint32_t *bus);
 
+/* The segmented form (ABI 0.13): n / seg results into `d`, contiguous,
+ * op 24 (sum) or 31 (maxall) - the two the tile streams - over `a`.
+ * The caller has already refused a device without CFT_FEAT_REDUCE_SEG
+ * and a length that is not a whole number of segments. Whole segments
+ * are split across tiles, each tile's results landing in its own slice
+ * of `d`, so there is nothing to combine. seg == n is one segment. */
+int  cftx_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a,
+                     size_t n, size_t seg, void *d,
+                     const cft_bindings *bind,
+                     uint32_t *flags, uint32_t *bus);
+
 /* The per-run DATA a sequencer program carries beside its operands.
  *
  * One struct rather than six more positional arguments, for the reason

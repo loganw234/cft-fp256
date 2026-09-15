@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "a78b8828ed082f6aed041553473b4ad154d22ce5eaab92ee3cce0c0a37230b76"
+      "sha256": "89008e09d30092905b7e1cdb96e1b0d0bafab8d1023ce7e6d2fa1e62aa43eae7"
     },
     {
       "source": "host/include/cft_config.h",
@@ -36,17 +36,17 @@
     {
       "source": "host/src/augmented.c",
       "dest": "src/cft/src/augmented.c",
-      "sha256": "9741fd416255170e70ee046387de5baa018eabac808bcbe183ec343156d4af57"
+      "sha256": "5c777608b4fea62e0a37ecadba9e69564d64018649725804ac44e51997576a61"
     },
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "a7af67224b9ef46415a33f9a83b3bdb9a186baac358e913560d089f33879a08a"
+      "sha256": "46f3a0dca83cd578153eff06916fdadd7d686a47cc8a601d2e804b0203410f4e"
     },
     {
       "source": "host/src/backend_remote.c",
       "dest": "src/cft/src/backend_remote.c",
-      "sha256": "ec78a7b708b119e84eae4320962e3e008afc0a89897caa052d8d5024ab409e85"
+      "sha256": "6ec3549a8bdce7a768ce1b203056c36343ecaf41813a51ce5ec5ba0046e74702"
     },
     {
       "source": "host/src/bigint.c",
@@ -61,12 +61,12 @@
     {
       "source": "host/src/chars.c",
       "dest": "src/cft/src/chars.c",
-      "sha256": "1f4dd362df7672248e1af581b8ac334356175600da415eec09ba37ea7b3ea0b1"
+      "sha256": "329119c9a7c6636f78be3adfcd46f7bdd474d24734ac5a678d1c09657c1fecc6"
     },
     {
       "source": "host/src/clause5.c",
       "dest": "src/cft/src/clause5.c",
-      "sha256": "0939881d7b3251e8ce3da54f494a8569c4dfe085c82b2f4bcd3db01c18913330"
+      "sha256": "3006fc4fb35b05b00d5bc57ed351d334dfba0c57ced131a5292bb995ed72578f"
     },
     {
       "source": "host/src/conformance.c",
@@ -76,17 +76,22 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "5823a53d7f509edd70619768389c5dd41c46f00a7105b46ffa97f712bca88388"
+      "sha256": "33ee62851ff4079b02239bb3d9257b345938b71636039f5ae31982b4d0410817"
+    },
+    {
+      "source": "host/src/divfull_images.h",
+      "dest": "src/cft/src/divfull_images.h",
+      "sha256": "2993230561b03efb0fb78828e4e99c7430023096a5ddd097eed05d55cd71b092"
     },
     {
       "source": "host/src/divsqrt.c",
       "dest": "src/cft/src/divsqrt.c",
-      "sha256": "881ad0241c623f768cdaa37a6bf1a3332652b4a238bf280503919eaf26a5d254"
+      "sha256": "23ff01489ba2eaf18282f0f36ca57be437b4a26fbb97687de8b7c70a84161135"
     },
     {
       "source": "host/src/formatof.c",
       "dest": "src/cft/src/formatof.c",
-      "sha256": "67dd080e6a5b91ffe12eefaf10999d61b1d00bdc071b41c81dfd92b6c1ebc143"
+      "sha256": "b1e340e503c41f0f279246eb63ebdb37ea7fa8c6f3b3b20c6cbc8d9812eed7f4"
     },
     {
       "source": "host/src/mp_2opi.h",
@@ -111,17 +116,17 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "7cfedb0e0ad96e79cef4086b5b0501d948af798835d708d23d057bee445432c4"
+      "sha256": "64c28dbae9d3e97d23e35cb398a84a92afc5aeda5f128d3d37b0fe613838de0d"
     },
     {
       "source": "host/src/reduce.c",
       "dest": "src/cft/src/reduce.c",
-      "sha256": "33d2f799369ff71c402ff5f7c98fdc43eb9242f8c4368266a8b8ea36a8bad96c"
+      "sha256": "4f571635512cdbf424d53ded664b6d884ae6a25565c922d07114e1ce0adfdd9b"
     },
     {
       "source": "host/src/remote.h",
       "dest": "src/cft/src/remote.h",
-      "sha256": "1adcab5c390d0aa0cc191ae761c2d8b40af56f9356123fc961bcb0d5c8717a33"
+      "sha256": "a2318d4ed3694a9955e45c4242509c0942118581bb49421531e072f0a266a4b6"
     },
     {
       "source": "host/src/sha256.c",
@@ -151,7 +156,7 @@
     {
       "source": "host/src/transcend.c",
       "dest": "src/cft/src/transcend.c",
-      "sha256": "3bf4406c532a3a581c942266204556fbdf1bc55abee23c114991f53c58bbc2e3"
+      "sha256": "01ab19d00ab51fe3e9959083b0628a46e3a160b8c8d540d29927ad9ed1bb3bdd"
     },
     {
       "source": "host/src/transcend.h",

@@ -2312,3 +2312,60 @@ program declares none, because the kernel has the arguments either way
 and XRT will not submit a run with one unbound. A 0x700 tile keeps its
 nine-argument call and a 0x600 its eight: the ARGUMENT COUNT is what
 the contract version guards, and XRT throws rather than adapts.
+
+
+## Reductions per segment at ABI 0.13: `cft_reduce_seg` (2026-09-14)
+
+    cft_status cft_reduce_seg(cft_device *dev, cft_op op, cft_format fmt,
+                              cft_round rnd, const void *a, const void *b,
+                              void *d, size_t n, size_t seg,
+                              uint32_t *flags_out, uint32_t *bus_out);
+
+    d[s] == cft_reduce(op, a + s*seg, b + s*seg, seg)   for s in [0, n/seg)
+
+`n / seg` results, contiguous in `d`; `flags_out` the OR over them, which
+is also what one call's flags are over its tree. That one line is the
+contract, and it is why nothing new had to be defined: a segment's tree
+depends only on its length, so the software backend computes each slice
+with the call that already exists, and a tile handed a segment computes
+the same tree the whole-array call would over those elements. Every
+reduction opcode is accepted - the composed ones (`CFT_DOT`, `CFT_SUMSQ`,
+`CFT_SUMABS`) are their pass and their tree per slice, `CFT_MAXALL` its
+maximum per slice, 9.4's infinity rule applied per slice as it is per
+call. `n` must be a whole number of segments and `seg` at least one, or
+`CFT_ERR_INVALID_ARGUMENT` with a sentence saying which; `n == 0`
+writes nothing and raises nothing; `seg == n` is exactly `cft_reduce`.
+
+**Where it runs.** On a device that publishes `CFT_FEAT_REDUCE_SEG`
+(`cft_caps.seq_features`, CAPS2[8]) it is ONE run: the tile has a
+SEG/NRES register pair (0x80/0x84, kernel argument 11, the map's
+VERSION 0x900) and its accumulator restarts every `seg` elements,
+packing the results into beats as the sequencer's drain packs deposits.
+Whole segments are split across tiles, each tile's results landing in
+its own slice of `d`, so there is nothing to combine. On a device WITHOUT
+the bit the call is refused with `CFT_ERR_UNSUPPORTED` and a sentence
+naming the bit and the count of round trips it would have cost: it
+never loops the segments over the bus for you, because a caller who
+wants that can write it in three lines and a caller who does not must
+not be given it silently. The software backend carries it always, and
+the remote backend in one frame (`REDUCE_SEG`, docs/REMOTE.md), the
+server's own library doing the work.
+
+**Why it exists** is cft-rebound's seventh ask (docs/ROADMAP.md): the
+corrector's convergence test is a maximum per SYSTEM over its `L`
+coordinates, every pass, and `CFT_MAXALL` over the whole array expresses
+neither the segments nor the "normal values only" - the second is the
+five-instruction mask that already exists as a program
+(`programs/normalabs-<fmt>.cfta`), and the first is this call. A call
+per segment would have been about 35 ms a pass at a thousand systems
+against the 0.2 ms the host loop costs; one run is the shape that can
+compete, and whether it does is the measurement the next image makes.
+
+**And `maxall` on the tile.** The same bit says opcode 31 is a REDUCTION
+on this tile - the accumulator issuing the elementwise maximum in place
+of the add - so `cft_reduce(CFT_MAXALL)` runs as one pass there instead
+of `ceil(log2 n)` halvings. The bits are the halving's: 754 maximum is
+exactly associative and commutative, flags included, which is the
+argument the opcode's own block in `cft.h` makes and the reason a
+hardware maxall could be added without a tree contract. A tile without
+the bit decodes 31 as elementwise and libcft never sends it there.

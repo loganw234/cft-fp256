@@ -627,6 +627,50 @@ def fmaxall(fmt: FpFormat, xs, rnd: int = RND_RNE):
     return acc, flags
 
 
+# ---- segments (ask 7, 2026-09-14) ------------------------------------
+#
+# A segmented reduction is the reduction, slice by slice: d[s] is the
+# op's own function over xs[s*seg : (s+1)*seg], and the flags are the
+# OR over the slices, exactly as one call's flags are the OR over its
+# tree. That is the whole definition, and it is why the software
+# backend is exact without a line of new arithmetic: the tree over a
+# slice depends only on the slice's length, so a tile handed one slice
+# computes the same tree the whole-array call would over those
+# elements (docs/HOSTAPI.md, cft_reduce_seg). n must be a whole number
+# of segments; the host refuses anything else before it reaches here.
+
+REDUCE_FN = {OP_SUM: lambda fmt, xs, ys, rnd: fsum(fmt, xs, rnd),
+             OP_DOT: lambda fmt, xs, ys, rnd: fdot(fmt, xs, ys, rnd),
+             OP_SUMSQ: lambda fmt, xs, ys, rnd: fsumsq(fmt, xs, rnd),
+             OP_SUMABS: lambda fmt, xs, ys, rnd: fsumabs(fmt, xs, rnd),
+             OP_MAXALL: lambda fmt, xs, ys, rnd: fmaxall(fmt, xs, rnd)}
+
+
+def freduce_seg(op: int, fmt: FpFormat, xs, seg: int, rnd: int = RND_RNE,
+                ys=None):
+    """The reduction `op` over each segment of `seg` elements ->
+    ([bits, ...], flags): len(xs) / seg results, flags the OR over them.
+    `ys` is dot's second vector and ignored by the rest."""
+    if op not in REDUCE_FN:
+        raise ValueError("not a reduction opcode: %r" % (op,))
+    xs = list(xs)
+    if seg < 1:
+        raise ValueError("a segment is at least one element")
+    if len(xs) % seg:
+        raise ValueError("n = %d is not a whole number of segments of %d"
+                         % (len(xs), seg))
+    ys = list(ys) if ys is not None else None
+    fn = REDUCE_FN[op]
+    out = []
+    flags = 0
+    for s in range(len(xs) // seg):
+        lo, hi = s * seg, (s + 1) * seg
+        r, f = fn(fmt, xs[lo:hi], ys[lo:hi] if ys is not None else None, rnd)
+        out.append(r)
+        flags |= f
+    return out, flags
+
+
 # ---- the scaled products --------------------------------------------
 
 class ScaleOverflow(Exception):

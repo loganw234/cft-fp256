@@ -2326,6 +2326,52 @@ export class Context {
     });
   }
 
+  /** The same reduction over every segment of `seg` elements
+   *  (ABI 0.13): an array of a.length / seg results, result s being
+   *  reduce(op, a.slice(s*seg, (s+1)*seg)) exactly - the same tree per
+   *  slice, which is the contract cft.h states and what makes it one
+   *  call on a tile that has the segment register. a.length must be a
+   *  whole number of segments. */
+  reduceSeg(op, a, seg, b = null) {
+    const M = this._M, fi = this._fi;
+    const REDUCE_OPS = { sum: OP_SUM, dot: OP_DOT,
+                         sumsq: OP_SUMSQ, sumabs: OP_SUMABS,
+                         maxall: OP_MAXALL };
+    const code = REDUCE_OPS[op];
+    if (code === undefined)
+      throw new TypeError(`reduceSeg wants ` +
+        Object.keys(REDUCE_OPS).map((k) => `"${k}"`).join(", "));
+    if (b && code !== OP_DOT)
+      throw new TypeError(`${op} reads one operand array; only dot takes b`);
+    if (!Number.isInteger(seg) || seg < 1)
+      throw new RangeError(`a segment is at least one element, not ${seg}`);
+    const n = a.length;
+    if (n % seg !== 0)
+      throw new RangeError(`${n} elements is not a whole number of ` +
+                           `segments of ${seg}`);
+    const nres = n / seg;
+    const pack = (arr) => {
+      if (!arr) return null;
+      const buf = new Uint8Array(fi.size * n);
+      arr.forEach((v, i) => buf.set(this.from(v).bytes, i * fi.size));
+      return buf;
+    };
+    const ab = pack(a), bb = pack(b);
+    return withScratch(M, (s) => {
+      const pa = ab ? s.put(ab) : 0;
+      const pb = bb ? s.put(bb) : 0;
+      const pd = s.alloc(Math.max(fi.size * nres, 1)), fl = s.alloc(4);
+      const st = this._C.reduceSeg(this._dev, code, fi.code, this._rnd,
+                                   pa, pb, pd, n, seg, fl, 0);
+      checkStatus(this._C, st, "cft_reduce_seg");
+      const flags = s.u32(fl);
+      const out = [];
+      for (let r = 0; r < nres; r++)
+        out.push(this._finish(s.get(pd + r * fi.size, fi.size), flags));
+      return out;
+    });
+  }
+
   // -- the orbit sequencer (docs/SEQUENCER.md) ---------------------
 
   /** Load a program IMAGE on this context's device.

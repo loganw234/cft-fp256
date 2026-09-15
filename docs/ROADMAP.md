@@ -2741,7 +2741,21 @@ software semantics are a restatement of what exists, and a mask that
 costs no ABI at all. It is also nine bindings and a MODE field, so it is
 a decision rather than a chore, and the requester's next measurement
 (which of per-call latency, staged bytes and the host's gather
-dominates) is the input it wants. Not started.
+dominates) is the input it wants.
+
+*Built, 2026-09-14, as (B) and a little more* (ABI 0.13, VERSION
+0x900): `cft_reduce_seg` across the C ABI, the software backend (the
+definition, slice by slice), the XRT backend (one run behind CAPS2[8],
+whole segments across tiles, a refusal by name without the bit), the
+remote frame, the Node calculator and the WebAssembly module, the
+Arduino vendor copy; the RTL - a SEG/NRES register pair, the engine's
+accumulator restarting at every boundary and packing its results into
+beats, and opcode 31 as a streaming maximum, so `cft_reduce(CFT_MAXALL)`
+is one pass on such a tile; the model's `freduce_seg`; and the benches
+(docs/HOSTAPI.md, "Reductions per segment"). What the card says about
+the corrector's test - one run of `seg = L` over `E * L` resident
+coordinates against the host loop it replaces - is the measurement the
+image carrying it makes, and the one their doc asked for first.
 
 **8. Correct rounding of divide and square root ON the card
 (2026-09-14).** Their measurement (`cft-rebound/docs/HARDWARE.md:604-612`):

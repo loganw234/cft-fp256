@@ -180,7 +180,9 @@ def caps2_expected():
     # capability bit cannot appear unnoticed - which is what caught
     # CAPS2[6] and then CAPS2[7].
     scalar = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCALAR")
-    return ((scalar << 7) | (1 << 6) | (1 << 5) | (1 << 4) |
+    # [8] likewise: SEG/NRES and the streaming maximum (2026-09-14).
+    seg = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_REDUCE_SEG")
+    return ((seg << 8) | (scalar << 7) | (1 << 6) | (1 << 5) | (1 << 4) |
             (d.bit_length() - 1))
 
 
@@ -471,8 +473,9 @@ async def krnl_end_to_end(dut):
 
     assert await axil.read_dword(MAGIC) == 0x43465430
     # 0x700 -> 0x800 at revision 3: the map GREW again, by CAPS2 at
-    # 0x6C and the two scratch pointers at 0x70 and 0x78.
-    assert await axil.read_dword(VERSION) == 0x00000800
+    # 0x6C and the two scratch pointers at 0x70 and 0x78; 0x800 ->
+    # 0x900 on 2026-09-14, by SEG/NRES at 0x80/0x84 (ask 7).
+    assert await axil.read_dword(VERSION) == 0x00000900
     caps = await axil.read_dword(CAPS)
     # CAPS[3:0] against what this bench was BUILT with, not against 0xF: a
     # trimmed build (make krnlf128) must advertise exactly the rungs it

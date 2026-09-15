@@ -131,6 +131,7 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#include "backend.h"
 
 /* ---- the six operations, internal numbering ----------------------- *
  *
@@ -723,7 +724,8 @@ static cft_status fo_validate(cft_device *dev, int op, cft_format sfmt,
      * carries neither the source nor the destination refuses for the
      * same reason a device without one does (cft_config.h). */
     if (CFT_FMT_ABSENT(sfmt) || CFT_FMT_ABSENT(dfmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal(
+            CFT_FMT_ABSENT(sfmt) ? (int)sfmt : (int)dfmt);
     if (!fo_fmt_ok(sfmt) || !fo_fmt_ok(dfmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if ((int)rnd < 0 || (int)rnd > 4)

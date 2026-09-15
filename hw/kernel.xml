@@ -117,6 +117,14 @@
       <arg name="scratch_out" addressQualifier="1" id="10" port="m_axi_d"
            size="0x8" offset="0x78" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
+      <!-- 11: SEG in the low word, NRES in the high (rtl/cft_csr.sv,
+           0x80/0x84, VERSION 0x900): a reduction's segment length and
+           result count, zero for the whole array. A scalar like mode
+           and n, and like n it is 64 bits so that the pair is one
+           argument and one contract version rather than two. -->
+      <arg name="seg" addressQualifier="0" id="11" port="s_axi_control"
+           size="0x8" offset="0x80" type="unsigned long long"
+           hostOffset="0x0" hostSize="0x8"/>
     </args>
   </kernel>
 </root>

@@ -99,6 +99,14 @@ int cftr_reduce(void *hw, int op, int fmt, int rnd,
     (void)n; (void)flags; (void)bus;
     return CFT_ERR_INTERNAL;
 }
+int cftr_reduce_seg(void *hw, int op, int fmt, int rnd,
+                    const void *a, const void *b, void *d, size_t n,
+                    size_t seg, uint32_t *flags, uint32_t *bus)
+{
+    (void)hw; (void)op; (void)fmt; (void)rnd; (void)a; (void)b; (void)d;
+    (void)n; (void)seg; (void)flags; (void)bus;
+    return CFT_ERR_INTERNAL;
+}
 int cftr_program_run(void *hw, int fmt, const void *image,
                      size_t image_bytes, const cft_seq_run_io *io,
                      uint32_t max_deposits,
@@ -1429,6 +1437,77 @@ int cftr_reduce(void *hw, int op, int fmt, int rnd,
     if (flags) *flags = cftr_get32(resp + 0);
     if (bus)   *bus = cftr_get32(resp + 4);
     memcpy(d, resp + 8, esz);
+    free(resp);
+    return CFT_OK;
+}
+
+/* ---- cft_reduce_seg (ABI 0.13) ----------------------------------------- */
+
+int cftr_reduce_seg(void *hw, int op, int fmt, int rnd,
+                    const void *a, const void *b, void *d, size_t n,
+                    size_t seg, uint32_t *flags, uint32_t *bus)
+{
+    rdev *R = (rdev *)hw;
+    const size_t esz = elem_bytes(fmt);
+    uint32_t present = (a ? 1u : 0u) | (b ? 2u : 0u);
+    unsigned npresent = (a ? 1u : 0u) + (b ? 1u : 0u);
+    size_t req_len, opnd, nres;
+    uint8_t *req, *q, *resp = NULL;
+    size_t resp_len = 0;
+    int status;
+
+    g_err[0] = '\0';
+    if (!R || esz == 0 || !d || !a || seg == 0 || (n % seg) != 0)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (seg > 0xFFFFFFFFu) {
+        set_err("a segment of %lu elements does not fit the frame's u32",
+                (unsigned long)seg);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    nres = n / seg;
+    if (n > (size_t)CFTR_MAX_PAYLOAD / esz / (npresent ? npresent : 1u) ||
+        (opnd = n * esz, 28u + (size_t)npresent * opnd > CFTR_MAX_PAYLOAD) ||
+        8u + nres * esz > (size_t)CFTR_MAX_PAYLOAD) {
+        set_err("a segmented reduction over %lu elements of %lu bytes does "
+                "not fit one frame (docs/REMOTE.md: reductions are not "
+                "chunked)", (unsigned long)n, (unsigned long)esz);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    req_len = 28u + (size_t)npresent * opnd;   /* 4 x u32, u64, u32 first */
+    req = (uint8_t *)malloc(req_len);
+    if (!req)
+        return CFT_ERR_OUT_OF_MEMORY;
+    cftr_put32(req + 0, (uint32_t)op);
+    cftr_put32(req + 4, (uint32_t)fmt);
+    cftr_put32(req + 8, (uint32_t)rnd);
+    cftr_put32(req + 12, present);
+    cftr_put64(req + 16, (uint64_t)n);
+    cftr_put32(req + 24, (uint32_t)seg);
+    q = req + 28;
+    memcpy(q, a, opnd);
+    q += opnd;
+    if (b)
+        memcpy(q, b, opnd);
+    if (do_request(R, CFTR_OP_REDUCE_SEG, req, req_len, &status, &resp,
+                   &resp_len)) {
+        free(req);
+        return R->poison_status;
+    }
+    free(req);
+    if (status != CFT_OK)
+        return status;
+    if (resp_len != 8u + nres * esz) {
+        char why[160];
+        snprintf(why, sizeof why,
+                 "REDUCE_SEG answered with %lu bytes where %lu were due",
+                 (unsigned long)resp_len, (unsigned long)(8u + nres * esz));
+        free(resp);
+        poison(R, CFT_ERR_INTERNAL, why);
+        return CFT_ERR_INTERNAL;
+    }
+    if (flags) *flags = cftr_get32(resp + 0);
+    if (bus)   *bus = cftr_get32(resp + 4);
+    memcpy(d, resp + 8, nres * esz);
     free(resp);
     return CFT_OK;
 }

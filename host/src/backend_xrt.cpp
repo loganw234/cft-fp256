@@ -219,11 +219,22 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  * argument counts. */
 constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u,
                                         0x00000600u, 0x00000700u,
-                                        0x00000800u };
+                                        0x00000800u, 0x00000900u };
 constexpr uint32_t SEQ_VERSION = 0x00000600u;   /* first map with PROG_PTR */
 constexpr uint32_t BANK_VERSION = 0x00000700u;  /* first map with BANK_PTR */
 /* first map with CAPS2 and the two scratch pointers */
 constexpr uint32_t SCRATCH_VERSION = 0x00000800u;
+/* 0x900 (2026-09-14): SEG and NRES at 0x80/0x84, kernel argument 11 - a
+ * reduction's segment length and result count, zero for the whole
+ * array. Written through the exclusive handle rather than passed as an
+ * argument: an argument list is the whole list or XRT throws, and a
+ * reduction has always been launched with six. The pair is written
+ * before EVERY reduction on such a tile, zero included, because the
+ * register keeps its last value and a whole-array reduction after a
+ * segmented one must not inherit a segment. */
+constexpr uint32_t SEG_VERSION = 0x00000900u;
+constexpr uint32_t CSR_SEG  = 0x80;
+constexpr uint32_t CSR_NRES = 0x84;
 
 inline bool version_known(uint32_t v)
 {
@@ -920,6 +931,12 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
          * enumerate, exactly as the first nibble does - the two bits
          * revision 3 assigns and the two it reserves travel together. */
         seq->features |= ((caps2 >> 4) & 0xFu) << 8;
+        /* CAPS2[8] lands on bit 12: CFT_FEAT_REDUCE_SEG (2026-09-14),
+         * the SEG/NRES pair and opcode 31 as a streaming maximum. Only
+         * where the map has the pair - a tile below 0x900 with the bit
+         * set would be a capability register lying about its map. */
+        if (ver >= SEG_VERSION && (caps2 & 0x100u))
+            seq->features |= 0x1000u;
         /* And the depth: CAPS2[3:0] is log2 of it, meaningful only
          * where CAPS2[4] says the memory is there. A tile below 0x800
          * reads a zero word here, which is no scratch and a depth of
@@ -1913,6 +1930,11 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
             const size_t m = hi[k] - lo[k];
             try {
                 Tile &tile = D.tiles[j];
+                if (D.version >= SEG_VERSION) {
+                    /* the whole range, one result: SEG 0 (see SEG_VERSION) */
+                    tile.k.write_register(CSR_SEG, 0u);
+                    tile.k.write_register(CSR_NRES, 0u);
+                }
                 runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
                                       *wa[j], tile.b, tile.c, tile.d));
             } catch (const std::exception &e) {
@@ -2008,6 +2030,165 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         if (bus) *bus = bs;
         set_err("the memory system reported a fault during a reduction; "
                 "the result is not to be trusted");
+        return ST_BUS_FAULT;
+    }
+    if (flags) *flags = fl;
+    return ST_OK;
+}
+
+/* ---- cftx_reduce_seg: segments across tiles (ABI 0.13) --------------
+ *
+ * d[s] over slice s, n / seg results. Tile t takes segments [s0, s1),
+ * a contiguous run of elements, one launch with SEG = seg and NRES =
+ * s1 - s0, and its results are final - there is nothing to combine, so
+ * the partition is by whole segments, as even as the tile count allows,
+ * one wave. op is 24 (sum) or 31 (maxall), the two the tile streams;
+ * the caller took the composed opcodes apart. */
+extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
+                               const void *a, size_t n, size_t seg,
+                               void *d, const cft_bindings *bind,
+                               uint32_t *flags, uint32_t *bus)
+{
+    if (!hw || !a || !d || seg == 0 || n == 0 || (n % seg) != 0)
+        return ST_INVALID_ARGUMENT;
+
+    Dev &D = *static_cast<Dev *>(hw);
+    if (D.poisoned) {
+        set_err("device handle is poisoned by an earlier failure");
+        return ST_INTERNAL;
+    }
+    /* the caller refused a device without CFT_FEAT_REDUCE_SEG; the map
+     * is checked again here because the register write below would
+     * otherwise land in a decode default */
+    if (D.version < SEG_VERSION) {
+        set_err("this bitstream's map (before 0x900) has no SEG register: "
+                "cft_reduce_seg cannot run on it");
+        return ST_UNSUPPORTED;
+    }
+    const size_t esz = static_cast<size_t>(elem_bytes(fmt));
+    if (esz == 0)
+        return ST_INVALID_ARGUMENT;
+    const size_t epb = 32u / esz;
+    const size_t nres = n / seg;
+    const size_t ntiles = D.tiles.size();
+    const size_t use = std::min(ntiles, nres);
+    const uint32_t mode = static_cast<uint32_t>(op & 0xFF) |
+                          (static_cast<uint32_t>(fmt & 0xF) << 8) |
+                          (static_cast<uint32_t>(rnd & 0x7) << 12);
+    const auto *pa = static_cast<const uint8_t *>(a);
+    auto *pd = static_cast<uint8_t *>(d);
+
+    /* segment s0..s1 per tile: nres / use each, the remainder to the
+     * first ones, so the slices are contiguous and every tile has work */
+    std::vector<size_t> s0(use + 1, 0);
+    for (size_t j = 0; j < use; j++)
+        s0[j + 1] = s0[j] + nres / use + (j < nres % use ? 1u : 0u);
+
+    int status = ST_OK;
+    std::string err;
+    uint32_t fl = 0, bs = 0;
+    std::vector<xrt::run> runs;
+    runs.reserve(use);
+    std::vector<xrt::bo *> wa(use, nullptr);
+    try {
+        for (size_t j = 0; j < use; j++) {
+            const size_t lo = s0[j] * seg, m = (s0[j + 1] - s0[j]) * seg;
+            const size_t padded = ((m + epb - 1) / epb) * epb;
+            const size_t rpad = (((s0[j + 1] - s0[j]) + epb - 1) / epb) * epb;
+            Tile &tile = D.tiles[j];
+            if (bind && bind->buf[CFT_ROLE_A])
+                wa[j] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_A]),
+                                 j, CFT_ROLE_A,
+                                 bind->off[CFT_ROLE_A] + lo * esz,
+                                 m * esz, padded * esz, false);
+            ensure_capacity(D, tile, std::max(padded, rpad) * esz);
+            if (!wa[j]) {
+                stage(tile.a, pa + lo * esz, m * esz, padded * esz);
+                wa[j] = &tile.a;
+            }
+            stage(tile.b, nullptr, m * esz, padded * esz);
+            stage(tile.c, nullptr, m * esz, padded * esz);
+        }
+    } catch (const std::bad_alloc &) {
+        set_err("out of memory staging a segmented reduction");
+        return ST_OUT_OF_MEMORY;
+    } catch (const std::exception &e) {
+        set_err(std::string("staging a segmented reduction: ") + e.what());
+        return ST_INTERNAL;
+    }
+    for (size_t j = 0; j < use; j++) {
+        const size_t m = (s0[j + 1] - s0[j]) * seg;
+        try {
+            Tile &tile = D.tiles[j];
+            tile.k.write_register(CSR_SEG, static_cast<uint32_t>(seg));
+            tile.k.write_register(CSR_NRES,
+                                  static_cast<uint32_t>(s0[j + 1] - s0[j]));
+            runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
+                                  *wa[j], tile.b, tile.c, tile.d));
+        } catch (const std::exception &e) {
+            err = std::string("starting tile ") + std::to_string(j) +
+                  " for a segmented reduction: " + e.what();
+            status = ST_INTERNAL;
+            break;
+        }
+    }
+    for (auto &r : runs) {
+        try {
+            ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
+            if (st != ERT_CMD_STATE_COMPLETED && status == ST_OK) {
+                status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
+                                                       : ST_INTERNAL;
+                err = "a compute unit did not complete a segmented "
+                      "reduction (state " +
+                      std::to_string(static_cast<int>(st)) + ")";
+            }
+        } catch (const std::exception &e) {
+            if (status == ST_OK) {
+                status = ST_INTERNAL;
+                err = std::string("waiting on a segmented reduction: ") +
+                      e.what();
+            }
+        }
+    }
+    if (status != ST_OK) {
+        D.poisoned = true;
+        try {
+            for (size_t j = 0; j < use; j++)
+                bs |= D.tiles[j].k.read_register(CSR_STATUS);
+        } catch (const std::exception &) {
+        }
+        err += bs ? " (STATUS 0x" + hex32(bs) + " - a memory fault, "
+                    "not merely a slow run)"
+                  : " (STATUS clean on every unit)";
+        set_err(err);
+        return status;
+    }
+    for (size_t j = 0; j < use; j++) {
+        const size_t r0 = s0[j], rn = s0[j + 1] - s0[j];
+        try {
+            Tile &tile = D.tiles[j];
+            bs |= tile.k.read_register(CSR_STATUS);
+            fl |= tile.k.read_register(CSR_FLAGS);
+            const size_t rbytes = ((rn * esz + 31u) / 32u) * 32u;
+            tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, rbytes, 0);
+            std::memcpy(pd + r0 * esz, tile.d.map<uint8_t *>(), rn * esz);
+        } catch (const std::exception &e) {
+            D.poisoned = true;
+            set_err(std::string("reading a segmented reduction's results: ")
+                    + e.what());
+            return ST_INTERNAL;
+        }
+    }
+    if (bs != 0) {
+        if ((bs & 0x8u) && !(bs & 0x7u)) {
+            set_err("kernel REFUSED the reduction: MODE selected a "
+                    "precision this bitstream does not implement "
+                    "(STATUS 0x" + hex32(bs) + ")");
+            return ST_UNSUPPORTED;
+        }
+        if (bus) *bus = bs;
+        set_err("the memory system reported a fault during a segmented "
+                "reduction; the results are not to be trusted");
         return ST_BUS_FAULT;
     }
     if (flags) *flags = fl;

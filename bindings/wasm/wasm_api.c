@@ -259,6 +259,17 @@ WASM_EXPORT int cftw_reduce(cft_device *dev, int op, int fmt, int rnd,
                            a, b, d, (size_t)n, flags_out, bus_out);
 }
 
+/* ABI 0.13: n / seg results at d, the same tree per slice. */
+WASM_EXPORT int cftw_reduce_seg(cft_device *dev, int op, int fmt, int rnd,
+                                const void *a, const void *b,
+                                void *d, uint32_t n, uint32_t seg,
+                                uint32_t *flags_out, uint32_t *bus_out)
+{
+    return (int)cft_reduce_seg(dev, (cft_op)op, (cft_format)fmt,
+                               (cft_round)rnd, a, b, d, (size_t)n,
+                               (size_t)seg, flags_out, bus_out);
+}
+
 WASM_EXPORT int cftw_div(cft_device *dev, int fmt, int rnd,
                          const void *a, const void *b, void *d, uint32_t n,
                          uint32_t *flags_out, uint32_t *bus_out)

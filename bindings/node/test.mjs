@@ -1223,6 +1223,31 @@ test("cft_reduce returns the tree cft.h documents, not a running sum", () => {
   ok(c64.reduce("sum", [xs[0]]).sameBits(xs[0]), "n == 1 is a[0] verbatim");
 });
 
+test("reduceSeg is reduce slice by slice (ABI 0.13)", () => {
+  const xs = [], ys = [];
+  for (let i = 0; i < 24; i++) {
+    xs.push(c64.from((i * 7919) % 101 - 50).mul(c64.from(1e-3).add(c64.from(i))));
+    ys.push(c64.from((i * 104729) % 37 - 18));
+  }
+  for (const seg of [1, 2, 3, 4, 6, 8, 12, 24]) {
+    for (const op of ["sum", "dot", "sumsq", "sumabs", "maxall"]) {
+      const got = op === "dot" ? c64.reduceSeg(op, xs, seg, ys)
+                               : c64.reduceSeg(op, xs, seg);
+      eq(got.length, 24 / seg, `${op} seg=${seg}: result count`);
+      for (let s = 0; s < 24 / seg; s++) {
+        const a = xs.slice(s * seg, (s + 1) * seg);
+        const b = ys.slice(s * seg, (s + 1) * seg);
+        const want = op === "dot" ? c64.reduce(op, a, b) : c64.reduce(op, a);
+        ok(got[s].sameBits(want),
+           `${op} seg=${seg} slice ${s}: ${got[s]} vs reduce ${want}`);
+      }
+    }
+  }
+  throws(() => c64.reduceSeg("sum", xs, 5), "24 is not 5 segments");
+  throws(() => c64.reduceSeg("sum", xs, 0), "a zero segment");
+  eq(c64.reduceSeg("sum", [], 3).length, 0, "n == 0 is no results");
+});
+
 // ---------------------------------------------------------------------
 // the phase-3 radian trigonometry and the hyperbolics (ABI 0.5)
 // ---------------------------------------------------------------------

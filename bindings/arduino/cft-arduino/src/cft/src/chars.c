@@ -101,6 +101,7 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+#include "backend.h"
 
 /* ------------------------------------------------------------------
  * A growable natural number
@@ -1487,7 +1488,7 @@ static cft_status from_char_batch(cft_device *dev, cft_format fmt,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt) || !rnd_ok(rnd))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0) {
@@ -1551,7 +1552,7 @@ CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     /* The attribute is range-checked even in the exact mode, where it
@@ -1590,7 +1591,7 @@ CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (!a || (cap && !out))
@@ -1625,7 +1626,7 @@ static cft_status payload_validate(cft_device *dev, cft_format fmt,
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;
     if (CFT_FMT_ABSENT(fmt))
-        return CFT_ERR_UNSUPPORTED;
+        return (cft_status)cft_absent_format_refusal((int)fmt);
     if (CFT_FMT_OUT_OF_RANGE(fmt))
         return CFT_ERR_INVALID_ARGUMENT;
     if (n == 0)

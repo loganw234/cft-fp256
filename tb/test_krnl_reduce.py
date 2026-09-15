@@ -41,11 +41,14 @@ from cocotbext.axi import (  # noqa: E402
 from cft_golden import (  # noqa: E402
     FP32, FP64, FP128, FP256, PREC_CODE, RND_NAMES, vectors,
 )
-from cft_golden.reduce import OP_SUM, fsum  # noqa: E402
+from cft_golden.reduce import (  # noqa: E402
+    OP_SUM, OP_MAXALL, fsum, fmaxall, freduce_seg,
+)
 
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
 APTR, BPTR, CPTR, DPTR = 0x20, 0x28, 0x30, 0x38
 FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
+CAPS2, SEGREG = 0x6C, 0x80          # SEG in the low word, NRES in the high
 A_BASE, B_BASE, C_BASE, D_BASE = 0x00000, 0x40000, 0x80000, 0xC0000
 
 FORMATS = [FP32, FP64, FP128, FP256]
@@ -153,10 +156,11 @@ async def sum_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000800, \
+    assert await axil.read_dword(VERSION) == 0x00000900, \
         "reductions arrived at v0.5.0; the map grew again at v0.6.0, " \
-        "once more at v0.7.0 when BANK_PTR was appended, and at v0.8.0 " \
-        "when CAPS2 and the two scratch pointers were"
+        "once more at v0.7.0 when BANK_PTR was appended, at v0.8.0 " \
+        "when CAPS2 and the two scratch pointers were, and at v0.9.0 " \
+        "when SEG/NRES were"
     caps = await axil.read_dword(CAPS)
     assert (caps >> 8) & (1 << 5), \
         "CAPS must advertise the reduction group once SUM is built"
@@ -284,3 +288,166 @@ async def elementwise_still_works_after_a_reduction(dut):
     await run_op(dut, axil, ram_a, FP32, OP_ADD, 16, seed=10)
     await run_sum(dut, axil, ram_a, FP256, 5, 0, seed=11)
     dut._log.info("reduction and elementwise runs interleave cleanly")
+
+
+# ======================================================================
+# segments and the streaming maximum (ask 7, 2026-09-14, CAPS2[8])
+# ======================================================================
+
+async def run_reduce(dut, axil, ram, fmt, n, rnd, seed, op=OP_SUM, seg=0,
+                     specials=False):
+    """One reduction run, opcode 24 or 31, whole (seg=0) or segmented,
+    scored slice by slice against freduce_seg. Ordinary operands by
+    default for the reason run_sum's docstring gives; `specials` is for
+    the flags run, where a NaN segment is the point."""
+    rng = random.Random(seed)
+    pool = vectors.interesting_operands(fmt)
+    ebytes = fmt.width // 8
+    vals = []
+    for _ in range(n):
+        if specials and rng.random() < 0.30:
+            vals.append(pool[rng.randrange(len(pool))])
+        else:
+            sign = rng.getrandbits(1)
+            e = fmt.bias + rng.randint(-20, 20)
+            m = rng.getrandbits(fmt.man_w)
+            vals.append((sign << (fmt.width - 1)) | (e << fmt.man_w) | m)
+    nres = n // seg if seg else 1
+    ram.write(A_BASE, b"".join(v.to_bytes(ebytes, "little") for v in vals))
+    ram.write(B_BASE, b"\x00" * max(n * ebytes, 32))
+    ram.write(C_BASE, b"\x00" * max(n * ebytes, 32))
+    # poison past the results too: a writer that wrote a beat too many
+    # would show there
+    ram.write(D_BASE, b"\xAA" * (((nres * ebytes + 31) // 32) * 32 + 64))
+
+    await axil.write_dword(MODE, (rnd << 12) | (PREC_CODE[fmt.name] << 8) | op)
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await write64(axil, SEGREG, (nres << 32) | seg if seg else 0)
+    await axil.write_dword(CTRL, 1)
+    for _ in range(20000):
+        await ClockCycles(dut.ap_clk, 20)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            break
+    else:
+        raise AssertionError(
+            f"{fmt.name} op {op} n={n} seg={seg}: kernel never finished")
+    st = await axil.read_dword(STATUS)
+    assert st == 0, f"{fmt.name} op {op} n={n} seg={seg}: STATUS {st:#x}"
+    got_f = await axil.read_dword(FLAGS)
+    got = [int.from_bytes(ram.read(D_BASE + s * ebytes, ebytes), "little")
+           for s in range(nres)]
+    # nothing past the last result beat was touched
+    tail = ((nres * ebytes + 31) // 32) * 32
+    assert ram.read(D_BASE + tail, 64) == b"\xAA" * 64, (
+        f"{fmt.name} op {op} n={n} seg={seg}: the writer went past the "
+        f"result beats")
+    want, want_f = freduce_seg(op, fmt, vals, seg if seg else n, rnd)
+    for s, (g, w) in enumerate(zip(got, want)):
+        assert g == w, (
+            f"{fmt.name} op {op} n={n} seg={seg} {RND_NAMES[rnd]}: result "
+            f"{s} got {g:#x} want {w:#x}")
+    assert got_f == want_f, (
+        f"{fmt.name} op {op} n={n} seg={seg}: flags {got_f:#07b} want "
+        f"{want_f:#07b}")
+    return n
+
+
+async def _bring_up(dut):
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 20, mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 20, mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                size=2 ** 20, mem=ram_a.mem)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    caps2 = await axil.read_dword(CAPS2)
+    assert caps2 & (1 << 8), "CAPS2[8] must announce SEG/NRES and maxall"
+    return axil, ram_a
+
+
+@cocotb.test()
+async def sum_segmented(dut):
+    """d[s] is the tree over slice s: segment lengths that straddle the
+    beat at every precision, result counts that straddle a result beat,
+    and a segment that is the whole array, which must equal the single
+    result the unsegmented run writes."""
+    axil, ram = await _bring_up(dut)
+    per_fmt = {
+        FP32:  [(1, 9), (2, 5), (3, 5), (7, 3), (8, 3), (9, 2), (16, 2),
+                (5, 20), (33, 2)],
+        FP64:  [(1, 5), (2, 3), (3, 4), (4, 3), (5, 2), (8, 2), (9, 2), (17, 3)],
+        FP128: [(1, 3), (2, 3), (3, 3), (4, 2), (5, 2), (9, 2)],
+        FP256: [(1, 3), (2, 2), (3, 2), (5, 2), (8, 2)],
+    }
+    total = 0
+    for fmt in FORMATS:
+        for seg, k in per_fmt[fmt]:
+            total += await run_reduce(dut, axil, ram, fmt, seg * k, 0,
+                                      seed=300 + seg * 31 + k, seg=seg)
+        # one segment that is the whole array, beside the unsegmented run
+        n = per_fmt[fmt][-1][0] * per_fmt[fmt][-1][1]
+        await run_reduce(dut, axil, ram, fmt, n, 0, seed=777, seg=n)
+        await run_reduce(dut, axil, ram, fmt, n, 0, seed=777, seg=0)
+        dut._log.info(f"{fmt.name}: segmented sums over "
+                      f"{len(per_fmt[fmt])} shapes, bit-exact")
+    # rounding attributes ride along
+    for rnd in (1, 2, 3, 4):
+        total += await run_reduce(dut, axil, ram, FP32, 24, rnd,
+                                  seed=900 + rnd, seg=6)
+    dut._log.info(f"segmented reductions: {total} elements, exact")
+
+
+@cocotb.test()
+async def maxall_on_the_tile(dut):
+    """Opcode 31 as a reduction: the accumulator folding with the
+    elementwise maximum, whole and segmented, against fmaxall - the
+    same bits as the host's halving, as 754 maximum's associativity
+    says they must be."""
+    axil, ram = await _bring_up(dut)
+    per_fmt = {
+        FP32:  [1, 2, 7, 8, 9, 17, 33, 100],
+        FP64:  [1, 3, 4, 5, 9, 17],
+        FP128: [1, 2, 3, 5, 9],
+        FP256: [1, 2, 3, 5],
+    }
+    for fmt in FORMATS:
+        for n in per_fmt[fmt]:
+            await run_reduce(dut, axil, ram, fmt, n, 0, seed=500 + n,
+                             op=OP_MAXALL)
+        await run_reduce(dut, axil, ram, fmt, 24, 0, seed=600, op=OP_MAXALL,
+                         seg=4)
+        await run_reduce(dut, axil, ram, fmt, 30, 0, seed=601, op=OP_MAXALL,
+                         seg=3)
+        dut._log.info(f"{fmt.name}: streaming maxall, whole and segmented, "
+                      f"bit-exact")
+
+
+@cocotb.test()
+async def segmented_flags_are_the_or_over_segments(dut):
+    """Specials in: a NaN segment beside a clean one, invalid from a
+    signalling NaN in one slice only, overflow in another - the run's
+    FLAGS is the OR, each result its own slice's."""
+    axil, ram = await _bring_up(dut)
+    for fmt in (FP32, FP64):
+        for seed in (41, 42, 43):
+            await run_reduce(dut, axil, ram, fmt, 40, 0, seed=seed, seg=5,
+                             specials=True)
+            await run_reduce(dut, axil, ram, fmt, 40, 0, seed=seed, seg=8,
+                             op=OP_MAXALL, specials=True)
+    dut._log.info("segmented flags: the OR over segments, results per slice")

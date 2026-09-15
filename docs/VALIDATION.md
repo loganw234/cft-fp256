@@ -11612,3 +11612,108 @@ one, two, three, five, nine and sixteen beats and ragged between,
 across a block boundary, fp32/64/128 - `krnlseq` 1/1, `seqbanks` 1/1,
 `faults` 5/5, the full `make sim` under Verilator, `yosys-lint` clean;
 Icarus on the box after the push, recorded below when it has run.
+
+## 2026-09-14 - the first revision-5 image hung a compute unit, and why every bench had passed
+
+**amd-arc-box, the U50, `~/cardday-seq5/cft_hw_seq5_1x.xclbin` (6e1c418,
+`EN_FP256=0`, kernel WNS +0.308 ns at 135 MHz, 13:14-17:06 under
+`nice`). Host tools at 9891cfe, XRT=1.**
+
+`device-test -q -n 8`: 637 checks, 91 failed - every failure in the
+fp128 `sumsq` and `sumabs` sections, every one "this device handle was
+left in an unknown state by an earlier failure". Verbosely, `-f fp128
+-n 8`: the elementwise sections clean, the reductions clean, and then
+`seq fma+deposit: run status disagrees (sw ok, hw timed out)` - the
+first PROGRAM after the fp128 reductions never completed, and everything
+after it inherited the hung unit. On a freshly programmed card
+`progcost.py` ran its four programs (nop x 47, nop x 214, the divide
+core, the whole divide, 64 lanes) without trouble, and a sweep of six
+program shapes at five sizes at fp128 passed every one - so the program
+was not the trigger. The trigger was what ran BEFORE it: `hang2.py`
+(one fresh handle per case, re-programming after a hang) - an fp128
+`cft_reduce(CFT_SUM)` of 8 elements followed by the program hangs it,
+deterministically; the same sum of 40 elements followed by the same
+program does not; no engine call before it, at any format or size, and
+the program runs.
+
+**The mechanism.** The lane array is SHARED between the engine and the
+sequencer on the shipping tile (`OWN_LANES=0`), so the engine's result
+pulses reach the idle sequencer as `al_ov`. Until revision 5 the
+sequencer's writeback lived inside two issue states and ignored them.
+R12 moved the retire path below the state machine to run in every
+state - and it counted the engine's pulses: `wb_bt` advanced, `wb_pop`
+fired whenever the count met the LAST program's block length, and each
+pop took the two-bit queue count `q_n` from 0 to 3, 2, 1, 0 ... The
+block setup's `q_n <= '0` should have cleaned that up, and did not: the
+queue's update after the case was unconditional, so a `q_n <= q_n` every
+cycle overrode the reset in its own cycle. A program then started with
+a phantom instruction in flight and its first DEPOSIT waited for
+`q_n == 0`, forever. Eight elements at fp128 is seven adds against a
+block length of one from the fp64 program before it - a count that
+lands on a non-zero `q_n`; forty is thirty-nine adds and lands on zero.
+No sequencer bench runs the engine, and the engine bench that runs a
+reduction before an elementwise run never runs a program after it,
+which is exactly why every gate was green.
+
+**Reproduced in simulation** by `tb/probe_reduce_then_prog.py`: an
+fp128 sum of 8 elements then `fma+deposit` at 8, 16 and 34 lanes - the
+first three pass, because a fresh reset's block length is zero and no
+pop can land, and the fourth program, after a 40-element sum with a
+block length of four now in the register, polls `CTRL` forever. The
+fix (the commit after 9891cfe): the retire path and the pops see
+`al_ov` only while the sequencer is running a program (`seq_live`, any
+state but `S_IDLE`), and the queue count updates only when something is
+pushed or popped, so a setup's reset is never overridden by a no-op.
+The probe passes every sequence after it; the sequencer benches and the
+back-pressure probe (`tb/probe_seq_bp.py`, every program shape under
+READY withheld on every channel at three duties, written the same
+evening to rule that difference out - it was not the difference) pass
+unchanged.
+
+**What this means for the images.** `cft_hw_seq5_1x` (6e1c418) and the
+R14 image linking as this is written (9891cfe) carry the hang: a
+program run on either, after any engine run whose result count lands
+wrong, does not complete. Programs run on a freshly programmed card do,
+which is how seq5's timing is measured (the next entry). The fixed
+image is the one after.
+
+## 2026-09-14 - ask 7 built: a reduction per segment, and maxall streamed, verified before its image
+
+**The Windows desktop's Docker sim image (Verilator), the Windows host
+build, cft2204 (XRT 2.14, compile) and amd-arc-box (XRT 2.19, the host
+tools built), all at the working tree over 9891cfe.**
+
+`cft_reduce_seg` (ABI 0.13) end to end: the model (`freduce_seg`, the
+per-op function slice by slice; `python/tests/test_reduce.py` 233
+passed), the RTL (a SEG/NRES pair at 0x80/0x84, VERSION 0x900, CAPS2[8];
+the engine's accumulator restarting at the boundary and its results
+packed into beats; opcode 31 a streaming maximum through the elementwise
+`maximum`), the library (the software backend as the definition, the XRT
+backend as one run with whole segments across tiles and a refusal by
+name without the bit, `maxall` as one pass where the bit is set), the
+remote frame, the Node calculator and the WebAssembly module, the
+Arduino copy.
+
+- `tb/test_krnl_reduce.py` 6/6 under Verilator: `sum_segmented` (segment
+  lengths 1..33 straddling the beat at every format, result counts
+  straddling a result beat, a segment that is the whole array beside
+  the unsegmented run, the four other rounding attributes),
+  `maxall_on_the_tile` (whole and segmented, every format, against
+  `fmaxall`), `segmented_flags_are_the_or_over_segments` (specials in).
+  The three cases the file already had pass unchanged.
+- `tb/test_krnl.py`, `test_krnl_quarter.py`, `test_krnl_seq.py`: the
+  version assertion moved to 0x900 and the pinned CAPS2 word reads bit 8
+  from the RTL's own localparam, as it reads bit 7.
+- `host/tests/reduce_check.py --trials 300 --formats fp32 fp64`: the
+  segmented leg 0 failures - 40 shapes x 5 opcodes per format against
+  `cft_reduce` slice by slice, the flags the OR, `seg = 0` and `n % seg
+  != 0` refused, `n == 0` accepted; 3,740 reductions in all.
+- The host builds warning-free on Windows; `backend_xrt.cpp` compiles
+  against XRT 2.14 on cft2204 and 2.19 on the box (the box's tools built
+  from the patched sources for the next image's card day).
+- `yosys-lint` clean; Verilator's lint of the kernel adds nothing beyond
+  the pre-existing notes.
+
+The card has no image with the register yet. The measurement the ask
+was for - one run of `seg = L` over `E * L` resident coordinates against
+the host loop it replaces - is the next image's.

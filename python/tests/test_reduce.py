@@ -252,6 +252,41 @@ def test_empty_reduction_is_positive_zero_no_flags(fmt):
 
 
 @pytest.mark.parametrize("fmt", ALL_FORMATS)
+@pytest.mark.parametrize("seg", [1, 2, 3, 5, 8])
+def test_segmented_is_the_reduction_slice_by_slice(fmt, seg):
+    """freduce_seg restates the per-op functions over each slice: the
+    same bits, and the flags the OR over slices - for every reduction
+    opcode, including the ones composed of a pass and the tree."""
+    from cft_golden.reduce import (freduce_seg, fsum, fdot, fsumsq, fsumabs,
+                                   fmaxall, OP_SUM, OP_DOT, OP_SUMSQ,
+                                   OP_SUMABS, OP_MAXALL)
+    rng = random.Random(400 + seg)
+    n = seg * 7
+    xs = [rng.getrandbits(fmt.width) for _ in range(n)]
+    ys = [rng.getrandbits(fmt.width) for _ in range(n)]
+    for op, fn in ((OP_SUM, lambda a, b: fsum(fmt, a)),
+                   (OP_DOT, lambda a, b: fdot(fmt, a, b)),
+                   (OP_SUMSQ, lambda a, b: fsumsq(fmt, a)),
+                   (OP_SUMABS, lambda a, b: fsumabs(fmt, a)),
+                   (OP_MAXALL, lambda a, b: fmaxall(fmt, a))):
+        got, gf = freduce_seg(op, fmt, xs, seg, ys=ys)
+        want = [fn(xs[s * seg:(s + 1) * seg], ys[s * seg:(s + 1) * seg])
+                for s in range(n // seg)]
+        assert got == [w for w, _ in want], (op, seg)
+        wf = 0
+        for _, f in want:
+            wf |= f
+        assert gf == wf, (op, seg)
+    # a whole-array call is the one-segment case
+    got, gf = freduce_seg(OP_SUM, fmt, xs, n)
+    assert (got, gf) == ([fsum(fmt, xs)[0]], fsum(fmt, xs)[1])
+    with pytest.raises(ValueError):
+        freduce_seg(OP_SUM, fmt, xs, seg + 1 if n % (seg + 1) else seg + 2)
+    with pytest.raises(ValueError):
+        freduce_seg(OP_SUM, fmt, xs, 0)
+
+
+@pytest.mark.parametrize("fmt", ALL_FORMATS)
 def test_single_element_is_verbatim_and_raises_nothing(fmt):
     """One leaf means zero adds, so nothing can be raised - and that
     holds even for a signalling NaN, which two elements would quiet."""

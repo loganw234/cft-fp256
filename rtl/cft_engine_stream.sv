@@ -203,6 +203,13 @@ module cft_engine_stream #(
      * CSR when this build does not carry the feature, so the engine may
      * assume a set bit means it is implemented here. */
     input  logic [2:0]   cfg_scalar,
+    // SEG / NRES (2026-09-14, CAPS2[8]): a reduction restarts every
+    // cfg_seg elements and writes cfg_nres results, contiguous at d;
+    // cfg_seg == 0 is the whole array and one result. Both come from
+    // the host because n / seg is its arithmetic to do and n == nres *
+    // seg its guarantee to keep (docs/HOSTAPI.md, cft_reduce_seg).
+    input  logic [31:0]  cfg_seg,
+    input  logic [31:0]  cfg_nres,
     input  logic [63:0]  cfg_a,
     input  logic [63:0]  cfg_b,
     input  logic [63:0]  cfg_c,
@@ -515,6 +522,7 @@ module cft_engine_stream #(
   logic [2:0]   rnd_r;
   logic [63:0]  beats_total;
   logic [63:0]  n_elems;      // elements, for the reduction serializer
+  logic [31:0]  seg_r, nres_r;   // the segment length and result count
   logic [63:0]  base_a, base_b, base_c, base_d;
 
   // Beats this run will stream.
@@ -535,7 +543,9 @@ module cft_engine_stream #(
   logic [63:0] beats_new;
   logic        cfg_is_reduce;
   assign beat_sh       = 6'(LANE_SH) - {4'b0, cfg_prec[1:0]};
-  assign cfg_is_reduce = (cfg_op == 8'd24);
+  // 24 is sum; 31 is maxall, a reduction on this tile since CAPS2[8]
+  // (the accumulator issues maximum in place of add - see lane_op).
+  assign cfg_is_reduce = (cfg_op == 8'd24) || (cfg_op == 8'd31);
   assign beats_new = cfg_is_reduce
                      ? ((cfg_n + ((64'd1 << beat_sh) - 64'd1)) >> beat_sh)
                      : (cfg_n >> beat_sh);
@@ -580,6 +590,8 @@ module cft_engine_stream #(
         // real elements: the beat padding is zeros, and adding +0.0 is
         // not the identity on this type.
         n_elems <= cfg_n;
+        seg_r   <= cfg_seg;
+        nres_r  <= cfg_nres;
         base_a <= cfg_a; base_b <= cfg_b; base_c <= cfg_c; base_d <= cfg_d;
         // beats_new == 0 finishes immediately WITHOUT writing anything.
         //
@@ -981,7 +993,9 @@ module cft_engine_stream #(
   // them - would buy one saved round trip at the cost of the most
   // schedule-sensitive logic in the engine. The composition property
   // was put in the contract partly so this choice would be available.
-  localparam logic [7:0] OP_SUM = 8'd24;
+  localparam logic [7:0] OP_SUM    = 8'd24;
+  localparam logic [7:0] OP_MAXALL = 8'd31;   // a reduction since CAPS2[8]
+  localparam logic [7:0] OP_MAX    = 8'd8;    // the elementwise maximum it folds with
   localparam logic [7:0] OP_DOT = 8'd25;
 
   // Declared here rather than beside the bank mux that drives them: the
@@ -990,8 +1004,9 @@ module cft_engine_stream #(
   logic [BEAT_BITS-1:0] beat_d;
   logic [4:0]           beat_f;
 
-  logic is_reduce;
-  assign is_reduce = (op_r == OP_SUM);
+  logic is_reduce, is_max;
+  assign is_max    = (op_r == OP_MAXALL);
+  assign is_reduce = (op_r == OP_SUM) || is_max;
 
   // Elements per beat at the active precision, and how many of them are
   // real in the LAST beat. Padding a reduction with +0.0 is not the
@@ -1098,9 +1113,10 @@ module cft_engine_stream #(
         ser_cnt  <= (ser_rem < {58'd0, epb}) ? ser_rem[5:0] : epb;
         ser_beat_idx <= ser_beat_idx + 64'd1;
         ser_busy <= 1'b1;
-      end else if (ser_busy && red_in_valid && red_in_ready && arr_rdy) begin
+      end else if (acc_take) begin
         // The accumulator advances on the array's strobe, so its
-        // acceptance of an element counts once, on that strobe.
+        // acceptance of an element counts once, on that strobe - and
+        // not at all while a segment is full (seg_open, below).
         if ((ser_idx + 6'd1) >= ser_cnt) ser_busy <= 1'b0;
         ser_idx <= ser_idx + 6'd1;
       end
@@ -1113,9 +1129,31 @@ module cft_engine_stream #(
   logic [BEAT_BITS-1:0] red_out_data;
   logic [4:0]           red_out_flags;
 
-  // Flush once every element has been handed over.
-  assign red_flush = is_reduce && running && !ser_busy &&
-                     (ser_beat_idx >= beats_total);
+  // ---- segments (2026-09-14) ------------------------------------------
+  //
+  // seg_cnt counts the elements the accumulator has taken in the current
+  // segment. When it reaches seg_r the segment is FULL: no more elements
+  // go in (acc_take, which is also the serializer's step, holds), the
+  // accumulator is flushed, and when its result has been pushed into
+  // the output beat the accumulator is cleared and the count restarts -
+  // unless that result was the run's last, in which case the writer
+  // finishes the run. seg_r == 0 never fills, so the flush comes only
+  // at the end, as it always did.
+  logic [31:0] seg_cnt;
+  logic        seg_full, seg_open, seg_clear, acc_take, red_last;
+  assign seg_full = (seg_r != 32'd0) && (seg_cnt == seg_r);
+  assign seg_open = !seg_full;
+  assign acc_take = ser_busy && red_in_valid && seg_open &&
+                    red_in_ready && arr_rdy;
+  // every element consumed: the result being produced is the run's last
+  assign red_last = !ser_busy && (ser_beat_idx >= beats_total);
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || start_accept || seg_clear) seg_cnt <= '0;
+    else if (acc_take)                          seg_cnt <= seg_cnt + 32'd1;
+  end
+
+  // Flush once every element has been handed over - or the segment is.
+  assign red_flush = is_reduce && running && (red_last || seg_full);
 
   // The bank result, masked to the active element. Lanes 1..7 are
   // computing nothing meaningful while a reduction runs, so their bits
@@ -1142,8 +1180,9 @@ module cft_engine_stream #(
   // accepted edges, exactly as the pipe counts its depth.
   cft_reduce_acc #(.W(BEAT_BITS), .LEVELS(40), .ADD_LATENCY(LATENCY + 1))
   u_reduce (
-      .clk(ap_clk), .rst_n(ap_rst_n), .clk_en(arr_rdy), .clear(start_accept),
-      .in_valid(red_in_valid && is_reduce), .in_data(red_in_elem),
+      .clk(ap_clk), .rst_n(ap_rst_n), .clk_en(arr_rdy),
+      .clear(start_accept || seg_clear),
+      .in_valid(red_in_valid && is_reduce && seg_open), .in_data(red_in_elem),
       .in_ready(red_in_ready),
       .flush(red_flush),
       .add_valid(red_add_valid), .add_a(red_add_a), .add_b(red_add_b),
@@ -1151,14 +1190,51 @@ module cft_engine_stream #(
       .out_valid(red_out_valid), .out_data(red_out_data),
       .out_flags(red_out_flags));
 
-  // The result is pushed once. out_valid latches high and stays there
-  // until the next clear, so an edge is what the FIFO wants.
+  // A result is pushed once per segment. out_valid latches high and
+  // stays there until the next clear, so an edge is what the assembler
+  // wants; the clear that follows a segment's push is what lets the
+  // next segment's result be an edge again.
   logic red_pushed, red_push;
-  assign red_push = is_reduce && red_out_valid && !red_pushed;
+  assign red_push  = is_reduce && red_out_valid && !red_pushed;
+  assign seg_clear = red_push && seg_full && !red_last;
 
   always_ff @(posedge ap_clk) begin
-    if (!ap_rst_n || start_accept) red_pushed <= 1'b0;
-    else if (red_push)             red_pushed <= 1'b1;
+    if (!ap_rst_n || start_accept || seg_clear) red_pushed <= 1'b0;
+    else if (red_push)                          red_pushed <= 1'b1;
+  end
+
+  // ---- the result assembler ------------------------------------------
+  //
+  // Results are elements, contiguous at D, so they are packed into
+  // beats the way the sequencer's drain packs deposits: ra_data holds
+  // the beat being filled, ra_fill how many elements are in it, and a
+  // push that completes the beat - or is the run's last result - hands
+  // the beat, with this element placed, to the D FIFO in the same
+  // cycle. One result (seg_r == 0) is the first element of an otherwise
+  // zero beat, which is exactly what the single push used to write.
+  logic [BEAT_BITS-1:0] ra_data, ra_next;
+  logic [5:0]           ra_fill;
+  logic                 ra_beat_done;
+  always_comb begin
+    ra_next = ra_data;
+    case (prec_r)
+      PREC_FP64:  ra_next[ra_fill*RED_W64 +: RED_W64]   = red_out_data[RED_W64-1:0];
+      PREC_FP128: ra_next[ra_fill*RED_W128 +: RED_W128] = red_out_data[RED_W128-1:0];
+      PREC_FP256: ra_next                               = red_out_data;
+      default:    ra_next[ra_fill*32 +: 32]             = red_out_data[31:0];
+    endcase
+  end
+  assign ra_beat_done = ((ra_fill + 6'd1) >= epb) || red_last;
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n || start_accept) begin
+      ra_data <= '0; ra_fill <= '0;
+    end else if (red_push) begin
+      if (ra_beat_done) begin
+        ra_data <= '0; ra_fill <= '0;
+      end else begin
+        ra_data <= ra_next; ra_fill <= ra_fill + 6'd1;
+      end
+    end
   end
 
   // ---- compute issue and collection ----------------------------------
@@ -1207,15 +1283,19 @@ module cft_engine_stream #(
     end
   end
 
-  // Elementwise pushes a beat per result; a reduction pushes one beat,
-  // once, when the accumulator has folded everything.
-  assign d_wr = is_reduce ? red_push : collect;
+  // Elementwise pushes a beat per result; a reduction pushes a beat
+  // whenever the assembler completes one - once, at the end, for a
+  // whole-array reduction.
+  assign d_wr = is_reduce ? (red_push && ra_beat_done) : collect;
 
-  // The writer's beat count. One for a reduction, whatever the run
-  // asked for otherwise - and it has to be a separate signal from
+  // The writer's beat count: the result beats for a reduction - one
+  // for the whole array, ceil(nres / elements-per-beat) segmented -
+  // whatever the run asked for otherwise; a separate signal from
   // beats_total, which is still what the READERS stream.
-  logic [63:0] wr_total;
-  assign wr_total = is_reduce ? 64'd1 : beats_total;
+  logic [63:0] wr_total, nres_eff;
+  assign nres_eff = (seg_r == 32'd0) ? 64'd1 : {32'd0, nres_r};
+  assign wr_total = is_reduce ? ((nres_eff + {58'd0, epb} - 64'd1) >> beat_sh_r)
+                              : beats_total;
 
   // ---- the ALU array ---------------------------------------------------
   //
@@ -1345,7 +1425,9 @@ module cft_engine_stream #(
   end
 
   assign lane_valid = is_reduce ? red_add_valid_q : ex_valid;
-  assign lane_op    = is_reduce ? 8'd0 : op_r;           // 0 = CFT_FMA
+  // A sum folds with the FMA (a * 1 + b is one rounding of a + b); a
+  // maximum folds with CFT_MAX itself, which takes a and b.
+  assign lane_op    = is_reduce ? (is_max ? OP_MAX : 8'd0) : op_r;   // 0 = CFT_FMA
   assign lane_rnd   = rnd_r;
   assign lane_prec  = prec_r;
   /* A reduction never takes a scalar operand - its operands are the
@@ -1354,7 +1436,7 @@ module cft_engine_stream #(
    * rather than beside it. */
   assign lane_a     = is_reduce ? red_add_a_q
                     : cfg_scalar[0] ? bcast_beat(a_q, prec_r) : a_q;
-  assign lane_b     = is_reduce ? one_beat
+  assign lane_b     = is_reduce ? (is_max ? red_add_b_q : one_beat)
                     : cfg_scalar[1] ? bcast_beat(b_q, prec_r) : b_q;
   assign lane_c     = is_reduce ? red_add_b_q
                     : cfg_scalar[2] ? bcast_beat(c_q, prec_r) : c_q;
@@ -1399,7 +1481,7 @@ module cft_engine_stream #(
   /* verilator lint_off WIDTHEXPAND */
   cft_fifo #(.WIDTH(256), .DEPTH_LOG2(FIFO_LOG2)) u_fifo_d (
       .clk(ap_clk), .rst_n(ap_rst_n), .clear(fifo_clear),
-      .wr_en(d_wr), .wr_data(is_reduce ? red_out_data : beat_d),
+      .wr_en(d_wr), .wr_data(is_reduce ? ra_next : beat_d),
       .rd_en(d_rd), .rd_data(d_qout), .count(d_cnt));
   /* verilator lint_on WIDTHEXPAND */
 

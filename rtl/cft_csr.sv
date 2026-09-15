@@ -59,7 +59,7 @@
 //                 a refusal is not a run, and scrubbing the previous
 //                 run's flags would be quietly rewriting history
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000800 (v0.8.0). Guards the REGISTER MAP,
+//   0x48  VERSION RO: 0x00000900 (v0.9.0). Guards the REGISTER MAP,
 //                 not the feature set - features are announced in CAPS.
 //                 A host accepts any version whose map it knows.
 //   0x4C  CAPS    RO: what this bitstream actually implements.
@@ -221,6 +221,26 @@
 //                 argument offset - and hw/kernel.xml's argument ids
 //                 are a host ABI. Appending is the only change a
 //                 shipped map can take.
+//   0x80  SEG     A reduction's SEGMENT LENGTH (2026-09-14, CAPS2[8],
+//                 VERSION 0x900). Zero, the decode default, is the whole
+//                 array and one result - every reduction before this
+//                 register. Non-zero, the accumulator restarts every SEG
+//                 elements and the results land contiguously at D_PTR,
+//                 d[s] being the same tree over a[s*SEG .. (s+1)*SEG)
+//                 that a whole-array reduction of those elements would
+//                 give (docs/HOSTAPI.md, cft_reduce_seg). Ignored by an
+//                 elementwise run and by a program.
+//   0x84  NRES    How many results that is, n / SEG, which the host
+//                 computes and guarantees exact (n = NRES * SEG): the
+//                 writer needs its beat count before the first result
+//                 lands, and a divider in the tile would be a second
+//                 opinion on the host's arithmetic. The two are one
+//                 64-bit kernel argument (id 11), SEG in the low word.
+//                 The same register pair also announces, through
+//                 CAPS2[8], that opcode 31 (maxall) is a REDUCTION on
+//                 this tile - the accumulator issuing maximum in place
+//                 of add - where an older tile decodes 31 as an
+//                 elementwise opcode and writes n elements.
 
 `timescale 1ns/1ps
 
@@ -278,7 +298,7 @@ module cft_csr (
     // same localparams cft_seq elaborates its scratch from, so the
     // register cannot drift from the memory it describes without the
     // elaboration changing too.
-    input  logic [7:0]  caps2,
+    input  logic [15:0] caps2,
     // The sequencer's on-chip capacities, as LOG2, from the very
     // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
     // the memories it describes without the elaboration changing too.
@@ -311,7 +331,11 @@ module cft_csr (
      * op_caps are: the tile decides what it carries, the CSR decides
      * what to refuse, and neither hard-codes the other's answer. */
     input  logic        feat_scalar,
-    output logic [63:0] cfg_cnt
+    output logic [63:0] cfg_cnt,
+    // SEG / NRES (0x80 / 0x84): a reduction's segment length and its
+    // result count; zero is the whole array.
+    output logic [31:0] cfg_seg,
+    output logic [31:0] cfg_nres
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
@@ -357,13 +381,21 @@ module cft_csr (
   // existed. The host accepts {0x410, 0x500, 0x600, 0x700, 0x800} -
   // every one of those maps is still correct, just smaller, and the
   // card-day images are 0x410 and 0x600.
-  localparam [31:0] VERSION = 32'h0000_0800;
+  //
+  // 0x800 -> 0x900 (2026-09-14) is the same bump a fourth time: SEG and
+  // NRES exist at 0x80 and 0x84 as kernel argument 11, so a host that
+  // writes a segment length to an 0x800 tile writes into a decode
+  // default and gets one result where it sized NRES. The host accepts
+  // {0x410, 0x500, 0x600, 0x700, 0x800, 0x900}. The feature the
+  // register serves is announced in CAPS2[8] as every feature is.
+  localparam [31:0] VERSION = 32'h0000_0900;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
   logic [31:0] mode_q;
   logic [63:0] n_q, a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
   logic [63:0] sin_q, sout_q;
+  logic [31:0] seg_q, nres_q;              // 0x80 / 0x84
 
   assign ap_idle  = !busy;
   assign cfg_op   = mode_q[7:0];
@@ -378,6 +410,8 @@ module cft_csr (
   assign cfg_prog = prog_q;
   assign cfg_bank = bank_q;
   assign cfg_sin  = sin_q;
+  assign cfg_seg  = seg_q;
+  assign cfg_nres = nres_q;
   assign cfg_sout = sout_q;
 
   assign cfg_scalar   = mode_q[18:16];
@@ -435,6 +469,7 @@ module cft_csr (
       n_q <= '0; a_q <= '0; b_q <= '0; c_q <= '0; d_q <= '0;
       prog_q <= '0; cnt_q <= '0; bank_q <= '0;
       sin_q <= '0; sout_q <= '0;
+      seg_q <= '0; nres_q <= '0;
     end else begin
       start <= 1'b0;
 
@@ -502,6 +537,10 @@ module cft_csr (
           10'h01D: sin_q[63:32]  <= (sin_q[63:32]  & ~wmask) | (wdata_q & wmask);
           10'h01E: sout_q[31:0]  <= (sout_q[31:0]  & ~wmask) | (wdata_q & wmask);
           10'h01F: sout_q[63:32] <= (sout_q[63:32] & ~wmask) | (wdata_q & wmask);
+          // 0x80 / 0x84: SEG and NRES, appended for the reason the seven
+          // words before them were appended.
+          10'h020: seg_q  <= (seg_q  & ~wmask) | (wdata_q & wmask);
+          10'h021: nres_q <= (nres_q & ~wmask) | (wdata_q & wmask);
           default: ;
         endcase
       end
@@ -558,11 +597,13 @@ module cft_csr (
           10'h018: s_axi_control_rdata <= cnt_q[63:32];
           10'h019: s_axi_control_rdata <= bank_q[31:0];
           10'h01A: s_axi_control_rdata <= bank_q[63:32];
-          10'h01B: s_axi_control_rdata <= {24'b0, caps2};
+          10'h01B: s_axi_control_rdata <= {16'b0, caps2};
           10'h01C: s_axi_control_rdata <= sin_q[31:0];
           10'h01D: s_axi_control_rdata <= sin_q[63:32];
           10'h01E: s_axi_control_rdata <= sout_q[31:0];
           10'h01F: s_axi_control_rdata <= sout_q[63:32];
+          10'h020: s_axi_control_rdata <= seg_q;
+          10'h021: s_axi_control_rdata <= nres_q;
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end
