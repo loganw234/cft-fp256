@@ -71,7 +71,7 @@ PYTHON ?= python3
 # the one outcome this project exists to detect.
 SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
               normshare seedop reduceacc reduce krnl krnlf128 krnlf64f128 \
-              quarter faults \
+              quarter faults redprog \
               seq_core krnlseq seqbanks mulpass mulcycle mulcycle2
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
