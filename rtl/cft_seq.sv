@@ -2234,7 +2234,26 @@ module cft_seq #(
               // revision 2's Verilator gate caught in this same file
               // was exactly this shape counted out by hand.
               (hdr_q[193] && (32'(hdr_q[239:224]) > SCRATCH_D ||
-                              32'(hdr_q[255:240]) > SCRATCH_D))) begin
+                              32'(hdr_q[255:240]) > SCRATCH_D)) ||
+              // MODE[22] with no scratch block to gather INTO. R16's
+              // other three bits always have somewhere to go - the
+              // three streams exist on every run - but the block's
+              // table indexes a block this image does not declare, so
+              // the bit selects nothing. A MODE bit this run cannot
+              // honour is REFUSED and never ignored, which is the rule
+              // the whole guard exists for: taking S_ZERO's
+              // h_nsin == 0 path and saying nothing would leave a host
+              // believing its table had been read. The library refuses
+              // it first, by name (program.c's seq_check_round2), and
+              // this is the second line of the same defence for an
+              // image that reached the tile another way.
+              //
+              // From the header's own bits and not from h_nsin, which
+              // is being assigned in this same block: the two would be
+              // one cycle apart and the refusal would read the
+              // PREVIOUS run's count.
+              (idx_en_q[3] &&
+               (!hdr_q[193] || hdr_q[239:224] == 16'b0))) begin
             refuse_q <= 1'b1;
             st <= S_FIN;
           end else if (hdr_q[192])
